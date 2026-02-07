@@ -1,2 +1,2 @@
 # hulkrna
-rna-seq read counting tools
+rna-seq read counting tool
