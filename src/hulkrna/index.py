@@ -202,50 +202,6 @@ def build_genomic_intervals(
 
 
 # ---------------------------------------------------------------------------
-# Set-merging helper (used by query methods and bayes_count)
-# ---------------------------------------------------------------------------
-
-def merge_sets_with_relaxation(t_sets, g_sets):
-    """Merge sets of transcript and gene indices with progressive relaxation.
-
-    Strategy:
-        1. Intersection of all sets (most specific)
-        2. Intersection of non-empty sets (less specific)
-        3. Union of all sets (most sensitive)
-
-    Parameters
-    ----------
-    t_sets : list of frozenset
-        Per-segment transcript index sets.
-    g_sets : list of frozenset
-        Per-segment gene index sets.
-
-    Returns
-    -------
-    tuple[frozenset, frozenset]
-        Merged (transcript_indices, gene_indices).
-    """
-    # 1. cumulative intersection of sets (most specific)
-    t_inds = frozenset.intersection(*t_sets) if t_sets else frozenset()
-    g_inds = frozenset.intersection(*g_sets) if g_sets else frozenset()
-    if t_inds or g_inds:
-        return t_inds, g_inds
-
-    # 2. intersection of non-empty sets (skip empty sets in intersection)
-    t_sets_nonempty = [x for x in t_sets if x]
-    g_sets_nonempty = [x for x in g_sets if x]
-    t_inds = frozenset.intersection(*t_sets_nonempty) if t_sets_nonempty else frozenset()
-    g_inds = frozenset.intersection(*g_sets_nonempty) if g_sets_nonempty else frozenset()
-    if t_inds or g_inds:
-        return t_inds, g_inds
-
-    # 3. union of all sets (most sensitive)
-    t_inds = frozenset.union(*t_sets) if t_sets else frozenset()
-    g_inds = frozenset.union(*g_sets) if g_sets else frozenset()
-    return t_inds, g_inds
-
-
-# ---------------------------------------------------------------------------
 # HulkIndex — unified index class
 # ---------------------------------------------------------------------------
 
@@ -470,12 +426,11 @@ class HulkIndex:
 
     # -- query methods --------------------------------------------------------
 
-    def query_exon(self, exon: GenomicInterval) -> list[tuple[int, int, int, int]]:
+    def query_exon(self, exon: GenomicInterval) -> list[tuple[int, int, int]]:
         """Query the unified interval index with an aligned exon block.
 
         Intersects the single cgranges tree and returns every reference
-        interval (EXON, INTRON, or INTERGENIC) that overlaps the query,
-        together with the number of overlapping bases.
+        interval (EXON, INTRON, or INTERGENIC) that overlaps the query.
 
         Because the index tiles the entire genome, a valid query is
         guaranteed to return at least one hit.
@@ -487,21 +442,17 @@ class HulkIndex:
 
         Returns
         -------
-        list[tuple[int, int, int, int]]
-            List of (t_index, g_index, interval_type, overlap) tuples,
-            sorted by descending overlap. t_index and g_index are -1
-            for intergenic intervals.
+        list[tuple[int, int, int]]
+            List of (t_index, g_index, interval_type) tuples.
+            t_index and g_index are -1 for intergenic intervals.
         """
-        hits: list[tuple[int, int, int, int]] = []
-        for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
-            overlap = min(exon.end, h_end) - max(exon.start, h_start)
+        hits: list[tuple[int, int, int]] = []
+        for _h_start, _h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
             hits.append((
                 int(self._iv_t_index[label]),
                 int(self._iv_g_index[label]),
                 int(self._iv_type[label]),
-                overlap,
             ))
-        hits.sort(key=lambda h: h[3], reverse=True)  # sort by overlap (index 3)
         return hits
 
     def query_gap_sjs(
@@ -540,88 +491,3 @@ class HulkIndex:
                     h_end,
                 ))
         return hits
-
-    # -- legacy query methods (backward compatibility) ------------------------
-
-    def search_intervals(self, ref, intervals, interval_type):
-        """Search for transcript/gene overlaps with fragment intervals.
-
-        Uses progressive relaxation via ``merge_sets_with_relaxation``:
-            1. Intersection of all sets (most specific)
-            2. Intersection of non-empty sets (less specific)
-            3. Union of all sets (most sensitive)
-
-        Parameters
-        ----------
-        ref : str
-            Chromosome / reference name.
-        intervals : iterable of (start, end)
-            Fragment exon intervals to query.
-        interval_type : IntervalType
-            Filter to this interval type (EXON, INTRON, or INTERGENIC).
-
-        Returns
-        -------
-        tuple[frozenset, frozenset]
-            (transcript_indices, gene_indices).
-        """
-        t_sets = []
-        g_sets = []
-        for start, end in intervals:
-            t_set = frozenset(
-                int(self._iv_t_index[label])
-                for _, _, label in self.cr.overlap(ref, start, end)
-                if self._iv_type[label] == interval_type
-            )
-            t_sets.append(t_set)
-            g_set = (
-                frozenset(self.t_to_g_arr[list(t_set)]) if t_set
-                else frozenset()
-            )
-            g_sets.append(g_set)
-        return merge_sets_with_relaxation(t_sets, g_sets)
-
-    def search_splice_junctions(self, ref, sjs):
-        """Search for annotated splice junction matches (exact coordinates).
-
-        Uses progressive relaxation via ``merge_sets_with_relaxation``.
-
-        Parameters
-        ----------
-        ref : str
-            Chromosome / reference name.
-        sjs : iterable of (start, end, strand)
-            Splice junctions from the fragment.
-
-        Returns
-        -------
-        tuple[frozenset, frozenset]
-            (transcript_indices, gene_indices).
-        """
-        tg_set_pairs = [
-            self.sj_map.get(
-                (ref, start, end, strand), (frozenset(), frozenset())
-            )
-            for start, end, strand in sjs
-        ]
-        if tg_set_pairs:
-            t_sets, g_sets = zip(*tg_set_pairs)
-        else:
-            t_sets, g_sets = [frozenset()], [frozenset()]
-        return merge_sets_with_relaxation(t_sets, g_sets)
-
-    def search_intergenic(self, ref, intervals):
-        """Return True if any interval overlaps an intergenic region.
-
-        Parameters
-        ----------
-        ref : str
-            Chromosome / reference name.
-        intervals : iterable of (start, end)
-            Fragment exon intervals to query.
-        """
-        for start, end in intervals:
-            for _, _, label in self.cr.overlap(ref, start, end):
-                if self._iv_type[label] == IntervalType.INTERGENIC:
-                    return True
-        return False

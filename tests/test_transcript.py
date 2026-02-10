@@ -104,6 +104,6 @@ class TestTranscriptToDict:
             "t_id", "g_id", "t_index", "g_index",
             "g_name", "g_type",
             "is_basic", "is_mane", "is_ccds",
-            "seq", "abundance",
+            "abundance",
         }
         assert set(d.keys()) == expected_keys

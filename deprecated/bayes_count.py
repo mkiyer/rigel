@@ -51,8 +51,8 @@ import numpy as np
 import pandas as pd
 
 from .core import Strand, IntervalType
-from .count import CountCategory, CountStrand, CountType
-from .strand_model import StrandModelResult, ProtocolType
+from .core import CountCategory, CountStrand, CountType
+from .strand_model import StrandModel
 from .index import HulkIndex, merge_sets_with_relaxation
 from .fragment import Fragment
 
@@ -98,7 +98,7 @@ class BayesCounter:
     ----------
     txindex : HulkIndex
         The transcript/gene index with interval trees and splice junction map.
-    strand_result : StrandModelResult
+    strand_model : StrandModel
         The learned strand model from Pass 1.
     abundance_prior : np.ndarray or None
         Gene abundance prior (from Pass 1). If None, uses uniform prior.
@@ -109,12 +109,12 @@ class BayesCounter:
     def __init__(
         self,
         txindex: HulkIndex,
-        strand_result: StrandModelResult,
+        strand_model: StrandModel,
         abundance_prior: Optional[np.ndarray] = None,
         abundance_pseudocount: float = 1.0,
     ):
         self.txindex = txindex
-        self.strand_result = strand_result
+        self.strand_model = strand_model
         self.stats = BayesCounterStats()
 
         # Count arrays: float32 for fractional assignment
@@ -182,7 +182,7 @@ class BayesCounter:
             gene_strand = Strand(self.txindex.g_to_strand_arr[g_idx])
 
             # Use the fragment's combined strand vs gene strand
-            p = self.strand_result.p_strand_given_alignment(
+            p = self.strand_model.strand_likelihood(
                 fragment.combined_strand, gene_strand
             )
             log_liks[i] = np.log(p + _EPS)
@@ -314,7 +314,7 @@ class BayesCounter:
             )
             t_strand_ll = np.array([
                 np.log(
-                    self.strand_result.p_strand_given_alignment(
+                    self.strand_model.strand_likelihood(
                         fragment.combined_strand,
                         Strand(self.txindex.t_to_strand_arr[t])
                     ) + _EPS

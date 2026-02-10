@@ -2,9 +2,7 @@ import gzip
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Set, Union
-
-import pandas as pd
+from typing import Dict, Generator, Iterable, List, Optional, Set, Union
 
 
 AttrValue = Union[str, List[str]]
@@ -30,7 +28,6 @@ class GTF:
     # Matches: key "value";  or  key value;
     # Group 1: key, Group 2: quoted value, Group 3: unquoted value
     ATTR_TOKEN_PATTERN = re.compile(r'\s*([^";\s]+)\s+(?:"([^"]*)"|([^;]+))\s*;')
-    PHASES = {0, 1, 2}
 
     @classmethod
     def from_str(cls, s: str) -> 'GTF':
@@ -169,50 +166,3 @@ class GTF:
         open_func = gzip.open if filepath.suffix == '.gz' else open    
         with open_func(filepath, 'rt') as f:
             yield from GTF.parse(f)
-
-
-    @staticmethod
-    def to_dataframe(features: Iterable['GTF']) -> pd.DataFrame:
-        """
-        Convert an iterable of GTF objects to a Pandas DataFrame.
-        Attributes are flattened into columns. Tags become boolean columns.
-        """
-        records = []
-        for f in features:
-            record: Dict[str, Any] = {
-                'seqname': f.seqname,
-                'source': f.source,
-                'feature': f.feature,
-                'start': f.start,
-                'end': f.end,
-                'score': f.score,
-                'strand': f.strand,
-                'phase': f.phase
-            }
-            # flatten attributes into the record
-            for k, v in f.attrs.items():
-                if k in record:
-                    continue
-                record[k] = v if not isinstance(v, list) else list(v)
-            # convert tags to boolean fields
-            record.update({tag: True for tag in f.tags if tag not in record})
-            records.append(record)        
-        df = pd.DataFrame.from_records(records)
-        return df
-
-
-if __name__ == "__main__":
-    # Test with dummy data to ensure everything works
-    dummy_data = [
-        'chr1\tHAVANA\tgene\t100\t200\t.\t+\t.\tgene_id "G1"; gene_name "MyGene"; tag "basic";',
-        'chr1\tHAVANA\texon\t100\t150\t0.5\t+\t.\tgene_id "G1"; transcript_id "T1"; tag "basic"; tag "canonical";'
-    ]
-    
-    print("Parsing dummy data...")
-    gtf_iter = GTF.parse(dummy_data)
-    df = GTF.to_dataframe(gtf_iter)
-    
-    print("\nResulting DataFrame:")
-    print(df)
-    # Note: Missing tags will appear as NaN. Fill with False for boolean logic.
-    # print(df.fillna(False))

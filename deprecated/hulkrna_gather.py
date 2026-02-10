@@ -21,7 +21,7 @@ if HULKRNA_LIB_PATH.exists() and str(HULKRNA_LIB_PATH) not in sys.path:
 
 # import from local modules
 from hulkrna.txref import TxIndex
-from hulkrna.count import CountType
+from hulkrna.core import CountType
 
 
 def _series_find_max_length(series):

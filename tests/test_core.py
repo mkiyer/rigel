@@ -97,6 +97,7 @@ class TestIntervalType:
         assert IntervalType.INTRON == 1
         assert IntervalType.INTERGENIC == 2
         assert IntervalType.SJ == 3
+        assert IntervalType.SJ_UNANNOT == 4
 
 
 # ---------------------------------------------------------------------------

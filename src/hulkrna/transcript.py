@@ -11,8 +11,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Generator, List, Optional
 
-import pysam
-
 from .core import Interval, Strand
 from .gtf import GTF
 
@@ -39,7 +37,6 @@ class Transcript:
     is_basic: bool = False
     is_mane: bool = False
     is_ccds: bool = False
-    seq: Optional[str] = None
     abundance: Optional[float] = None
 
     @classmethod
@@ -64,40 +61,6 @@ class Transcript:
         t.is_ccds = "CCDS" in tags
         return t
 
-    def to_gtf_lines(self, source: str = "transcriptor") -> Generator[str, None, None]:
-        """
-        Yields GTF-formatted string lines for the exons in this transcript.
-        Coordinates are converted to 1-based inclusive.
-        """
-        # format score
-        score_str = '.' if self.abundance is None else str(self.abundance)
-        # collect attributes
-        attrs = []
-        if self.g_id: attrs.append(f'gene_id "{self.g_id}";')
-        if self.t_id: attrs.append(f'transcript_id "{self.t_id}";')
-        if self.g_name: attrs.append(f'gene_name "{self.g_name}";')
-        if self.g_type: attrs.append(f'gene_type "{self.g_type}";')
-        # add tags
-        if self.is_basic: attrs.append('tag "basic";')
-        if self.is_mane: attrs.append('tag "MANE_Select";')
-        if self.is_ccds: attrs.append('tag "CCDS";')
-        # build attributes string
-        attr_str = " ".join(attrs)
-        # yield exon lines
-        for e in self.exons:
-            fields = [
-                str(self.ref) if self.ref else ".",
-                source,
-                "exon",
-                str(e.start + 1),  # Convert 0-based to 1-based
-                str(e.end),
-                score_str, # score
-                self.strand.to_str(), # strand
-                ".", # phase
-                attr_str
-            ]
-            yield "\t".join(fields)
-
     @property
     def start(self) -> int:
         """Start coordinate of the first exon (0 if empty)."""
@@ -119,22 +82,6 @@ class Transcript:
         for i in range(1, len(self.exons)):
             yield self.exons[i-1].end, self.exons[i].start
 
-    def fetch_seq(self, fasta_fh: pysam.FastaFile):
-        """
-        fetch the transcript sequence using a pysam FastaFile object
-        regardless of transcript strand, the returned sequence will be on 
-        the forward strand. this is so that exon intervals correspond 
-        directly to the sequence coordinates
-        """
-        exon_seqs = []
-        # length = 0
-        for e in self.exons:
-            s = fasta_fh.fetch(self.ref, e.start, e.end)
-            exon_seqs.append(s)
-            # length += (e.end - e.start)
-        self.seq = ''.join(exon_seqs)
-        # self.length = length
-
     def to_dict(self):
         return {
             'ref': self.ref,
@@ -151,7 +98,6 @@ class Transcript:
             'is_basic': self.is_basic,
             'is_mane': self.is_mane,
             'is_ccds': self.is_ccds,
-            'seq': self.seq,
             'abundance': self.abundance
         }
     

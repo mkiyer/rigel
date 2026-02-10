@@ -5,7 +5,7 @@ Entry point: ``hulkrna`` (registered in pyproject.toml).
 
 Subcommands:
     hulkrna index   — Build reference index from FASTA + GTF
-    hulkrna count   — (not yet implemented)
+    hulkrna count   — Two-pass Bayesian read counting
     hulkrna gather  — (not yet implemented)
     hulkrna pileup  — (not yet implemented)
 """
@@ -51,19 +51,34 @@ def index_command(args: argparse.Namespace) -> int:
 
 
 def count_command(args: argparse.Namespace) -> int:
-    """Run the ``hulkrna count`` subcommand (Pass 1: BAM scan + index query)."""
+    """Run the ``hulkrna count`` subcommand.
+
+    Pass 1: Scan BAM, resolve fragments, train strand/insert models.
+    Pass 2: Re-scan BAM, assign fractional counts using trained models.
+    """
+    import json
     import pysam
     from .index import HulkIndex
-    from .query_bam import query_bam
+    from .count import pass1_learn, pass2_count
 
     bam_path = Path(args.bam_file)
     index_dir = Path(args.index_dir)
-    output = Path(args.output)
+    output_dir = Path(args.output_dir)
 
     if not bam_path.exists():
         sys.exit(f"Error: BAM file not found: {bam_path}")
     if not index_dir.is_dir():
         sys.exit(f"Error: Index directory not found: {index_dir}")
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Define output file paths
+    strand_json = output_dir / "strand_model.json"
+    insert_json = output_dir / "insert_size_models.json"
+    t_counts_path = output_dir / "transcript_counts.feather"
+    g_counts_path = output_dir / "gene_counts.feather"
+    stats_path = output_dir / "stats.json"
 
     # Load reference index
     logging.info(f"[START] Loading index from {index_dir}")
@@ -71,34 +86,59 @@ def count_command(args: argparse.Namespace) -> int:
     logging.info(f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
                  f"{index.num_genes} genes")
 
-    # Open BAM and optional multimap output
-    multimap_bamfh = None
+    # -- Pass 1: BAM scan + resolution + model training --------------------
+    # Note: Pass 1 always excludes multimappers for model training
     bamfh = pysam.AlignmentFile(str(bam_path), "rb")
     try:
-        if args.multimap_bam:
-            multimap_bamfh = pysam.AlignmentFile(
-                args.multimap_bam, "wb", template=bamfh
-            )
-
-        # Run Pass 1: scan BAM, query index, stream hits to Feather
-        stats = query_bam(
+        pass1_stats, strand_model, insert_models = pass1_learn(
             bamfh.fetch(until_eof=True),
             index,
-            output,
             skip_duplicates=not args.keep_duplicates,
-            multimap_bamfh=multimap_bamfh,
-            compression=args.feather_compression,
-            write_tsv=not args.no_tsv,
         )
-
-        # Log stats
-        for key, val in sorted(stats.items()):
-            logging.info(f"  {key}: {val:,}")
-
     finally:
         bamfh.close()
-        if multimap_bamfh is not None:
-            multimap_bamfh.close()
+
+    # Log pass 1 stats
+    for key, val in sorted(pass1_stats.items()):
+        logging.info(f"  {key}: {val:,}")
+
+    # Write models to JSON
+    strand_model.write_json(strand_json)
+    insert_models.write_json(insert_json)
+
+    # -- Pass 2: BAM scan + count assignment --------------------------------
+    bamfh = pysam.AlignmentFile(str(bam_path), "rb")
+    try:
+        pass2_stats, counter = pass2_count(
+            bamfh.fetch(until_eof=True),
+            index,
+            strand_model,
+            insert_models,
+            skip_duplicates=not args.keep_duplicates,
+            include_multimap=args.include_multimap,
+        )
+    finally:
+        bamfh.close()
+
+    # Write count tables
+    counter.get_t_counts_df().to_feather(str(t_counts_path))
+    counter.get_g_counts_df().to_feather(str(g_counts_path))
+    logging.info(f"[DONE] Wrote {t_counts_path} and {g_counts_path}")
+
+    # Write TSV mirrors if requested
+    if not args.no_tsv:
+        counter.get_t_counts_df().to_csv(
+            t_counts_path.with_suffix(".tsv"), sep="\t", index=False
+        )
+        counter.get_g_counts_df().to_csv(
+            g_counts_path.with_suffix(".tsv"), sep="\t", index=False
+        )
+
+    # Write combined stats
+    all_stats = {"pass1": pass1_stats, "pass2": pass2_stats}
+    with open(stats_path, "w") as f:
+        json.dump(all_stats, f, indent=2)
+    logging.info(f"  Stats written to {stats_path}")
 
     return 0
 
@@ -158,19 +198,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- COUNT ---------------------------------------------------------------
     cnt = subparsers.add_parser(
-        "count", help="Scan BAM and query reference index (Pass 1)",
+        "count", help="Count reads: model training (Pass 1) + count assignment (Pass 2)",
     )
     cnt.add_argument(
         "--bam", dest="bam_file", required=True,
-        help="Coordinate-sorted BAM file (STAR-aligned, with XS/NH tags)",
+        help="Name-sorted or collated BAM file (STAR-aligned, with XS/NH tags)",
     )
     cnt.add_argument(
         "--index", dest="index_dir", required=True,
         help="Directory containing hulkrna index files",
     )
     cnt.add_argument(
-        "-o", "--output", dest="output", required=True,
-        help="Output path for intermediate hit Feather file",
+        "-o", "--output-dir", dest="output_dir", required=True,
+        help="Output directory for counts and models",
     )
     cnt.add_argument(
         "--keep-duplicates", dest="keep_duplicates",
@@ -178,17 +218,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep reads marked as PCR/optical duplicates (default: discard)",
     )
     cnt.add_argument(
-        "--multimap-bam", dest="multimap_bam", default=None,
-        help="Write multimapping reads (NH > 1) to this BAM file",
-    )
-    cnt.add_argument(
-        "--feather-compression", dest="feather_compression", default="lz4",
-        choices=["lz4", "zstd", "uncompressed"],
-        help="Compression for Feather output (default: lz4)",
+        "--include-multimap", dest="include_multimap",
+        action="store_true", default=False,
+        help="Include multimapping reads (NH > 1) in output (default: discard)",
     )
     cnt.add_argument(
         "--no-tsv", dest="no_tsv", action="store_true", default=False,
-        help="Skip writing human-readable TSV mirror file",
+        help="Skip writing human-readable TSV count files",
     )
     cnt.set_defaults(func=count_command)
 

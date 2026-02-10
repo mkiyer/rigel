@@ -22,7 +22,7 @@ if HULKRNA_LIB_PATH.exists() and str(HULKRNA_LIB_PATH) not in sys.path:
 
 # import from local modules
 from hulkrna.txref import IntervalType, Strand, TxIndex, _merge_sets_with_relaxation
-from hulkrna.count import CountCategory, CountStrand, CountType
+from hulkrna.core import CountCategory, CountStrand, CountType
 from hulkrna.bam import parse_bam_file
 
 # setup logging

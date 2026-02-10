@@ -18,7 +18,6 @@ same-strand pairs the flip produces AMBIGUOUS (POS | NEG).
 """
 
 import collections
-from typing import FrozenSet, List
 from dataclasses import dataclass
 
 from .core import GenomicInterval, Strand
@@ -46,78 +45,6 @@ class Fragment:
     exons: tuple[GenomicInterval, ...] = ()
     introns: tuple[GenomicInterval, ...] = ()
     insert_size: int | None = None
-
-    # -- derived properties ---------------------------------------------------
-
-    def merge_exon_strand(self) -> Strand:
-        """Compute the bitwise OR of all exon block strands.
-
-        Returns
-        -------
-        Strand
-            POS or NEG for concordant pairs; AMBIGUOUS if reads on both strands.
-        """
-        strand = Strand.NONE
-        for exon in self.exons:
-            strand = strand | exon.strand
-        return strand
-
-    def merge_intron_strand(self) -> Strand:
-        """Compute the bitwise OR of all intron (splice junction) strands.
-
-        Returns
-        -------
-        Strand
-            Combined strand from XS tags of all splice junctions.
-        """
-        strand = Strand.NONE
-        for intron in self.introns:
-            strand = strand | intron.strand
-        return strand
-
-    @property
-    def combined_strand(self) -> Strand:
-        """Bitwise OR of all exon block strands (after r2 flip).
-
-        POS or NEG for concordant pairs; AMBIGUOUS for chimeric.
-        Computed from exon blocks on-the-fly.
-        """
-        return self.merge_exon_strand()
-
-    @property
-    def refs(self) -> FrozenSet[str]:
-        """Set of reference names the fragment aligns to."""
-        refs: set[str] = set()
-        for gi in self.exons:
-            refs.add(gi.ref)
-        for gi in self.introns:
-            refs.add(gi.ref)
-        return frozenset(refs)
-
-    @property
-    def is_spliced(self) -> bool:
-        """True if the fragment contains any splice junctions."""
-        return len(self.introns) > 0
-
-    @property
-    def is_chimeric(self) -> bool:
-        """Fragment maps to multiple references or has ambiguous strand."""
-        return len(self.refs) > 1 or self.combined_strand == Strand.AMBIGUOUS
-
-    @property
-    def is_ambiguous_strand(self) -> bool:
-        """Fragment has reads on both strands (possible chimera)."""
-        return self.combined_strand == Strand.AMBIGUOUS
-
-    @property
-    def exon_intervals(self) -> List[tuple[int, int]]:
-        """Return (start, end) pairs for interval searching."""
-        return [(gi.start, gi.end) for gi in self.exons]
-
-    @property
-    def sj_tuples(self) -> List[tuple[int, int, Strand]]:
-        """Return (start, end, strand) tuples for SJ searching."""
-        return [(gi.start, gi.end, Strand(gi.strand)) for gi in self.introns]
 
     # -- construction ---------------------------------------------------------
 

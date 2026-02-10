@@ -1,104 +1,171 @@
 """
-hulkrna.strand_model - Bayesian strand protocol inference
+hulkrna.strand_model — Bayesian strand model learned from spliced reads.
 
-Learns the probability that read1/read2 is sense vs antisense from spliced
-reads whose splice-junction XS tag provides ground-truth gene strand.
+Learns the strand distribution of a paired-end RNA-seq library by observing
+how fragment alignment strands relate to annotated splice junction (SJ)
+strands.  The SJ strand (from the STAR ``XS`` tag) provides ground truth
+for the gene strand at each junction.
 
-The model produces a posterior Beta distribution over the strand-specificity
-parameter `p_sense` (probability that a read aligning in the "expected"
-orientation is truly sense).
+After the R2 strand flip in ``Fragment.from_reads()``, the exon alignment
+strand effectively represents read 1's genomic orientation.  Comparing
+this to the SJ strand tells us whether read 1 aligns in the *same*
+direction as the gene (sense/FR) or the *opposite* direction (antisense/RF).
 
-Usage
------
-First pass (learning):
-    model = StrandModel()
-    for r1, r2 in parse_bam_file(bamfh, stats):
-        model.observe(r1, r2)
-    model.finalize()
+The model stores a single Beta posterior over:
 
-Second pass (querying):
-    # P(fragment originated from gene on strand s)
-    p = model.p_sense_given_alignment(read_strand, gene_strand)
+    p_r1_sense = P(exon_strand == gene_strand)
 
-Mathematical background
------------------------
-We define:
-    p_sense = P(read is on the sense strand of the gene it came from)
+and provides:
 
-For a well-prepared strand-specific library (e.g. dUTP/RF), p_sense ≈ 0.95.
-For unstranded data, p_sense ≈ 0.50.
-
-We place a Beta(α, β) prior on p_sense and update it with observations from
-spliced reads where the XS tag tells us the true gene strand:
-
-    observation "concordant": read orientation matches the expected sense
-    orientation for the detected protocol → increment α
-    
-    observation "discordant": read orientation is opposite → increment β
-
-After the first pass:
-    E[p_sense] = α / (α + β)
-
-During counting (second pass), for a fragment overlapping genes on opposite
-strands, the strand likelihood is:
-    P(read | gene_strand=sense)  = p_sense
-    P(read | gene_strand=antisense) = 1 - p_sense
-
-Combined with gene abundance priors, this feeds into the Bayesian assignment.
+* ``strand_likelihood(exon_strand, gene_strand)`` for Bayesian counting
+* ``to_dict()`` / ``write_json()`` for human-readable output including
+  derived protocol flags for downstream tools.
 """
 
 import logging
-import collections
-from enum import Enum
-from typing import Optional, Tuple
-from dataclasses import dataclass, field
-
-import numpy as np
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Tuple
 
 from .core import Strand
-
 
 logger = logging.getLogger(__name__)
 
 
-class ProtocolType(Enum):
-    """Detected strand protocol orientation."""
-    UNSTRANDED = 'unstranded'
-    FR = 'fr'   # read1 sense, read2 antisense (e.g. KAPA Stranded)
-    RF = 'rf'   # read1 antisense, read2 sense (e.g. dUTP, Illumina TruSeq Stranded)
-
-
 @dataclass
-class StrandModelResult:
-    """Result of strand protocol inference with full posterior."""
-    protocol: ProtocolType
-    # Beta posterior parameters
-    alpha: float
-    beta: float
-    # Derived quantities
-    n_concordant: int = 0
-    n_discordant: int = 0
+class StrandModel:
+    """Bayesian strand model learned from high-quality spliced reads.
+
+    Accumulates a 2×2 contingency table of alignment strand
+    (``exon_strand``) × SJ reference strand (``sj_strand``) from
+    qualified spliced fragments.  All probabilities are derived
+    from these raw counts plus a Beta prior.
+
+    Qualification criteria (applied by the caller, not this class)
+    ---------------------------------------------------------------
+    Only fragments meeting *all* of these should be passed to
+    :meth:`observe`:
+
+    1. Has annotated splice junction match(es).
+    2. SJ merge resolves to a unique gene.
+    3. Exon strand is unambiguous (POS or NEG).
+    4. SJ strand is unambiguous (POS or NEG).
+
+    Beta posterior
+    --------------
+    ``alpha = prior_alpha + n_same``
+    ``beta  = prior_beta  + n_opposite``
+
+    where *n_same* counts fragments where exon and SJ strands agree
+    (evidence for read 1 sense / FR) and *n_opposite* counts
+    disagreements (evidence for read 1 antisense / RF).
+    """
+
+    # --- 2×2 raw counts ---
+    pos_pos: int = 0    # exon POS, SJ POS
+    pos_neg: int = 0    # exon POS, SJ NEG
+    neg_pos: int = 0    # exon NEG, SJ POS
+    neg_neg: int = 0    # exon NEG, SJ NEG
+
+    # --- Beta prior (uniform by default) ---
+    prior_alpha: float = 1.0
+    prior_beta: float = 1.0
+
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
+
+    def observe(self, exon_strand: Strand, sj_strand: Strand) -> None:
+        """Record one strand observation.
+
+        Parameters
+        ----------
+        exon_strand : Strand
+            Combined alignment strand of the fragment's exon blocks
+            (POS or NEG after R2 flip; ≈ read 1 alignment strand).
+        sj_strand : Strand
+            Annotated SJ reference strand from the XS tag (POS or NEG).
+        """
+        if exon_strand == Strand.POS:
+            if sj_strand == Strand.POS:
+                self.pos_pos += 1
+            else:
+                self.pos_neg += 1
+        else:
+            if sj_strand == Strand.POS:
+                self.neg_pos += 1
+            else:
+                self.neg_neg += 1
+
+    # ------------------------------------------------------------------
+    # Derived counts
+    # ------------------------------------------------------------------
 
     @property
-    def n_total(self) -> int:
-        return self.n_concordant + self.n_discordant
+    def n_same(self) -> int:
+        """Fragments where exon strand == SJ strand (read 1 sense)."""
+        return self.pos_pos + self.neg_neg
 
     @property
-    def p_sense(self) -> float:
-        """Expected probability that a read in the 'expected' orientation
-        is truly sense (posterior mean of Beta distribution)."""
+    def n_opposite(self) -> int:
+        """Fragments where exon strand != SJ strand (read 1 antisense)."""
+        return self.pos_neg + self.neg_pos
+
+    @property
+    def n_observations(self) -> int:
+        """Total qualified observations."""
+        return self.n_same + self.n_opposite
+
+    # ------------------------------------------------------------------
+    # Posterior
+    # ------------------------------------------------------------------
+
+    @property
+    def alpha(self) -> float:
+        """Posterior alpha (same-direction evidence + prior)."""
+        return self.prior_alpha + self.n_same
+
+    @property
+    def beta(self) -> float:
+        """Posterior beta (opposite-direction evidence + prior)."""
+        return self.prior_beta + self.n_opposite
+
+    @property
+    def p_r1_sense(self) -> float:
+        """Posterior mean P(read 1 aligns in gene-sense direction).
+
+        High (≈ 0.95) for FR libraries (e.g. KAPA Stranded).
+        Low  (≈ 0.05) for RF libraries (e.g. dUTP / Illumina TruSeq).
+        Near 0.50 for unstranded libraries.
+        """
         return self.alpha / (self.alpha + self.beta)
 
     @property
-    def p_antisense(self) -> float:
-        """Complement: probability of strand leakage."""
-        return 1.0 - self.p_sense
+    def p_r1_antisense(self) -> float:
+        """Complement: P(read 1 aligns opposite to gene strand)."""
+        return 1.0 - self.p_r1_sense
 
     @property
     def strand_specificity(self) -> float:
-        """How strand-specific is the library? 
-        1.0 = perfectly strand-specific, 0.5 = unstranded."""
-        return max(self.p_sense, self.p_antisense)
+        """How strand-specific is the library?
+
+        1.0 = perfect, 0.5 = unstranded.
+        Equals ``max(p_r1_sense, p_r1_antisense)``.
+        """
+        return max(self.p_r1_sense, self.p_r1_antisense)
+
+    @property
+    def read1_sense(self) -> bool:
+        """True if read 1 is predominantly sense (FR protocol)."""
+        return self.p_r1_sense >= 0.5
+
+    @property
+    def read2_antisense(self) -> bool:
+        """True if read 2 is predominantly antisense (FR protocol).
+
+        Mirrors ``read1_sense`` since read orientation is complementary.
+        """
+        return self.read1_sense
 
     def posterior_variance(self) -> float:
         """Variance of the Beta posterior."""
@@ -106,252 +173,133 @@ class StrandModelResult:
         return (a * b) / ((a + b) ** 2 * (a + b + 1))
 
     def posterior_95ci(self) -> Tuple[float, float]:
-        """95% credible interval for p_sense using Beta quantiles."""
+        """95% credible interval for p_r1_sense."""
         from scipy.stats import beta as beta_dist
         return (
             beta_dist.ppf(0.025, self.alpha, self.beta),
             beta_dist.ppf(0.975, self.alpha, self.beta),
         )
 
-    def to_dict(self) -> dict:
-        d = {
-            'protocol': self.protocol.value,
-            'p_sense': round(self.p_sense, 6),
-            'p_antisense': round(self.p_antisense, 6),
-            'strand_specificity': round(self.strand_specificity, 6),
-            'alpha': round(self.alpha, 4),
-            'beta': round(self.beta, 4),
-            'n_concordant': self.n_concordant,
-            'n_discordant': self.n_discordant,
-            'n_total': self.n_total,
-            'posterior_variance': round(self.posterior_variance(), 8),
-        }
-        return d
+    # ------------------------------------------------------------------
+    # Strand likelihood for Bayesian counting
+    # ------------------------------------------------------------------
 
-    def p_strand_given_alignment(self, read_genomic_strand: Strand, 
-                                  gene_strand: Strand) -> float:
-        """
-        Probability that a read truly originated from `gene_strand`,
-        given its observed genomic alignment strand and the learned 
-        library protocol.
+    def strand_likelihood(
+        self, exon_strand: Strand, gene_strand: Strand,
+    ) -> float:
+        """Strand likelihood: P(exon_strand | fragment from gene_strand).
 
-        For RF protocol: 
-          - read1 on NEG strand → sense to POS-strand gene → p_sense
-          - read1 on NEG strand → antisense to NEG-strand gene → 1-p_sense
-        
-        This handles the mapping through the protocol orientation.
+        Used during Bayesian counting to weight candidate genes.
+
+        * If ``exon_strand == gene_strand`` → ``p_r1_sense``
+        * If ``exon_strand != gene_strand`` → ``1 - p_r1_sense``
+        * If either is NONE or AMBIGUOUS → 0.5 (uninformative)
 
         Parameters
         ----------
-        read_genomic_strand : Strand
-            The genomic strand the read aligned to (POS or NEG).
+        exon_strand : Strand
+            Combined alignment strand of the fragment.
         gene_strand : Strand
-            The annotated strand of the candidate gene.
+            Annotated strand of the candidate gene.
 
         Returns
         -------
         float
-            P(read came from gene on gene_strand | observed alignment strand)
+            Probability in [0, 1].
         """
-        if gene_strand == Strand.NONE or read_genomic_strand == Strand.NONE:
-            # Unstranded gene or unstranded read → strand uninformative
+        if (
+            exon_strand not in (Strand.POS, Strand.NEG)
+            or gene_strand not in (Strand.POS, Strand.NEG)
+        ):
             return 0.5
+        if exon_strand == gene_strand:
+            return self.p_r1_sense
+        return self.p_r1_antisense
 
-        if self.protocol == ProtocolType.UNSTRANDED:
-            return 0.5
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
 
-        # Determine if the alignment is "concordant" with this gene strand
-        # under the detected protocol
-        concordant = self._is_concordant_with_gene(
-            read_genomic_strand, gene_strand
-        )
-        return self.p_sense if concordant else self.p_antisense
+    def to_dict(self) -> dict:
+        """JSON/YAML-serializable summary of the strand model.
 
-    def _is_concordant_with_gene(self, read_genomic_strand: Strand, 
-                                  gene_strand: Strand) -> bool:
+        Includes raw counts, posterior parameters, derived
+        probabilities, and protocol flags for downstream tools.
+        All values are native Python types (no numpy scalars).
         """
-        Check if the read's genomic alignment strand is concordant
-        (sense) with the given gene strand under the detected protocol.
-
-        For RF: read1 antisense to gene → concordant means 
-                read_genomic_strand != gene_strand for read1.
-        For FR: read1 sense to gene → concordant means 
-                read_genomic_strand == gene_strand for read1.
-
-        Since we collapse read1/read2 into a single genomic strand
-        during fragment merging (using the protocol to determine the
-        inferred transcript strand), concordance simply means the 
-        inferred strand matches the gene strand.
-        """
-        # After protocol-aware strand inference, the fragment's strand
-        # represents the inferred transcript strand. Concordance = match.
-        return read_genomic_strand == gene_strand
-
-
-class StrandModel:
-    """
-    First-pass strand protocol learner.
-
-    Examines spliced reads (those with XS tags from STAR) to learn:
-    1. Which protocol orientation (FR vs RF) is in use
-    2. The strand-specificity probability p_sense as a Beta posterior
-
-    Only spliced reads are used because the XS tag provides ground-truth
-    for the gene strand at splice junctions.
-    """
-
-    # Weakly informative Beta(1,1) = Uniform prior
-    PRIOR_ALPHA = 1.0
-    PRIOR_BETA = 1.0
-
-    def __init__(self):
-        # Raw counts: (r1_matches_sj, r2_matches_sj) → count
-        # r1_matches_sj: True if read1's genomic strand == splice junction strand
-        # r2_matches_sj: True if read2's genomic strand == splice junction strand
-        self._orientation_counts = {
-            (True, True): 0,    # FF: both reads same strand as SJ
-            (True, False): 0,   # FR: read1 same, read2 opposite
-            (False, True): 0,   # RF: read1 opposite, read2 same
-            (False, False): 0,  # RR: both reads opposite strand from SJ
+        return {
+            "observations": {
+                "total": int(self.n_observations),
+                "pos_pos": int(self.pos_pos),
+                "pos_neg": int(self.pos_neg),
+                "neg_pos": int(self.neg_pos),
+                "neg_neg": int(self.neg_neg),
+                "n_same": int(self.n_same),
+                "n_opposite": int(self.n_opposite),
+            },
+            "posterior": {
+                "alpha": float(round(self.alpha, 4)),
+                "beta": float(round(self.beta, 4)),
+                "prior_alpha": float(self.prior_alpha),
+                "prior_beta": float(self.prior_beta),
+                "variance": float(round(self.posterior_variance(), 10)),
+            },
+            "probabilities": {
+                "p_r1_sense": float(round(self.p_r1_sense, 6)),
+                "p_r1_antisense": float(round(self.p_r1_antisense, 6)),
+                "strand_specificity": float(round(self.strand_specificity, 6)),
+            },
+            "protocol": {
+                "read1_sense": bool(self.read1_sense),
+                "read2_antisense": bool(self.read2_antisense),
+            },
         }
-        self._n_fragments = 0
-        self._n_spliced = 0
-        self._finalized = False
-        self._result: Optional[StrandModelResult] = None
 
-    def observe(self, r1, r2):
-        """
-        Observe a paired-end fragment during the first pass.
-        
-        Only fragments where at least one read has the XS tag 
-        (splice junction with unambiguous strand) are informative.
+    def write_json(self, path: Path | str) -> None:
+        """Write the strand model to a JSON file.
 
         Parameters
         ----------
-        r1 : pysam.AlignedSegment or None
-            Read 1 of the pair.
-        r2 : pysam.AlignedSegment or None
-            Read 2 of the pair.
+        path : Path or str
+            Output JSON file path.
         """
-        self._n_fragments += 1
+        import json
 
-        # Determine splice junction strand from XS tag
-        sj_strand = Strand.NONE
-        for read in (r1, r2):
-            if read is not None and read.has_tag('XS'):
-                sj_strand |= Strand.from_str(read.get_tag('XS'))
+        path = Path(path)
+        d = self.to_dict()
 
-        # Only use reads with unambiguous splice junction strand
-        # (NONE < sj_strand < AMBIGUOUS means exactly POS or NEG)
-        if not (Strand.NONE < sj_strand < Strand.AMBIGUOUS):
-            return
+        # Add 95% CI if enough observations (requires scipy)
+        if self.n_observations >= 10:
+            try:
+                lo, hi = self.posterior_95ci()
+                d["posterior"]["ci_95"] = [
+                    float(round(lo, 6)), float(round(hi, 6)),
+                ]
+            except ImportError:
+                pass
 
-        self._n_spliced += 1
-
-        # Compare each read's genomic alignment strand to the SJ strand
-        r1_strand = Strand.from_is_reverse(r1.is_reverse) if r1 else Strand.NONE
-        r2_strand = Strand.from_is_reverse(r2.is_reverse) if r2 else Strand.NONE
-
-        key = (r1_strand == sj_strand, r2_strand == sj_strand)
-        self._orientation_counts[key] += 1
-
-    def finalize(self, min_spliced_reads: int = 100) -> StrandModelResult:
-        """
-        Finalize the model after the first pass.
-
-        Determines the protocol type (FR/RF/unstranded) and computes
-        the Beta posterior for strand specificity.
-
-        Parameters
-        ----------
-        min_spliced_reads : int
-            Minimum number of spliced reads required for inference.
-            Below this threshold, defaults to unstranded.
-
-        Returns
-        -------
-        StrandModelResult
-        """
-        total_spliced = sum(self._orientation_counts.values())
-        logger.info(f'Strand model: {self._n_fragments} total fragments, '
-                     f'{self._n_spliced} spliced, '
-                     f'{total_spliced} with unambiguous SJ strand')
-        logger.info(f'Orientation counts: {self._orientation_counts}')
-
-        if total_spliced < min_spliced_reads:
-            logger.warning(
-                f'Only {total_spliced} spliced reads (< {min_spliced_reads}). '
-                f'Defaulting to unstranded.'
+        with open(path, "w") as fh:
+            json.dump(
+                {"strand_model": d},
+                fh,
+                indent=2,
             )
-            self._result = StrandModelResult(
-                protocol=ProtocolType.UNSTRANDED,
-                alpha=self.PRIOR_ALPHA,
-                beta=self.PRIOR_BETA,
-            )
-            self._finalized = True
-            return self._result
 
-        # Determine dominant protocol by comparing FR vs RF counts
-        # FR: read1 sense (matches SJ), read2 antisense
-        n_fr = self._orientation_counts[(True, False)]
-        # RF: read1 antisense, read2 sense (matches SJ)
-        n_rf = self._orientation_counts[(False, True)]
-        # FF and RR are unusual but tracked
-        n_ff = self._orientation_counts[(True, True)]
-        n_rr = self._orientation_counts[(False, False)]
+        logger.info(f"Wrote strand model to {path}")
 
-        logger.info(f'Protocol counts: FR={n_fr}, RF={n_rf}, FF={n_ff}, RR={n_rr}')
-
-        # The dominant protocol has the most counts
-        if n_fr >= n_rf:
-            protocol = ProtocolType.FR
-            n_concordant = n_fr
-            n_discordant = n_rf
-        else:
-            protocol = ProtocolType.RF
-            n_concordant = n_rf
-            n_discordant = n_fr
-
-        # Check if there's enough evidence for strandedness
-        # If concordant fraction < 0.55, treat as unstranded
-        frac_concordant = n_concordant / (n_concordant + n_discordant) if (n_concordant + n_discordant) > 0 else 0.5
-        if frac_concordant < 0.55:
-            logger.warning(
-                f'Concordant fraction {frac_concordant:.3f} too low. '
-                f'Treating as unstranded.'
-            )
-            protocol = ProtocolType.UNSTRANDED
-
-        # Build Beta posterior
-        # Prior: Beta(1, 1) = Uniform
-        # Likelihood: Binomial with n_concordant successes, n_discordant failures
-        alpha = self.PRIOR_ALPHA + n_concordant
-        beta = self.PRIOR_BETA + n_discordant
-
-        self._result = StrandModelResult(
-            protocol=protocol,
-            alpha=alpha,
-            beta=beta,
-            n_concordant=n_concordant,
-            n_discordant=n_discordant,
-        )
-
+    def log_summary(self) -> None:
+        """Log a human-readable summary of the learned strand model."""
+        total = self.n_observations
         logger.info(
-            f'Strand model result: protocol={protocol.value}, '
-            f'p_sense={self._result.p_sense:.4f}, '
-            f'specificity={self._result.strand_specificity:.4f}, '
-            f'n_concordant={n_concordant}, n_discordant={n_discordant}'
+            f"Strand model: {total:,} observations "
+            f"(n_same={self.n_same:,}, n_opposite={self.n_opposite:,})"
         )
-
-        self._finalized = True
-        return self._result
-
-    @property
-    def result(self) -> StrandModelResult:
-        if not self._finalized:
-            raise RuntimeError('StrandModel not finalized. Call finalize() first.')
-        return self._result
-
-    @property
-    def orientation_counts(self) -> dict:
-        return dict(self._orientation_counts)
+        logger.info(
+            f"  2×2 table: POS→POS={self.pos_pos:,}, POS→NEG={self.pos_neg:,}, "
+            f"NEG→POS={self.neg_pos:,}, NEG→NEG={self.neg_neg:,}"
+        )
+        logger.info(
+            f"  p_r1_sense={self.p_r1_sense:.4f}, "
+            f"strand_specificity={self.strand_specificity:.4f}, "
+            f"read1_sense={self.read1_sense}"
+        )

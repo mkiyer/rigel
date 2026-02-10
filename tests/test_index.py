@@ -297,57 +297,6 @@ class TestHulkIndexLoad:
         assert len(hulk_index._sj_strand) == n
 
 
-class TestHulkIndexQuery:
-    """Test HulkIndex legacy query methods on the mini fixtures."""
-
-    @pytest.fixture
-    def hulk_index(self, mini_gtf_file, mini_fasta_file, tmp_path):
-        out_dir = tmp_path / "idx"
-        HulkIndex.build(mini_fasta_file, mini_gtf_file, out_dir)
-        return HulkIndex.load(out_dir)
-
-    def test_search_exon_overlap(self, hulk_index):
-        """Query an interval overlapping t1's first exon (99,200)."""
-        t_inds, g_inds = hulk_index.search_intervals(
-            "chr1", [(100, 150)], IntervalType.EXON
-        )
-        # Should find transcripts belonging to gene g1
-        assert len(g_inds) > 0
-
-    def test_search_intron_overlap(self, hulk_index):
-        """Query an interval in t1's first intron (200,299)."""
-        t_inds, g_inds = hulk_index.search_intervals(
-            "chr1", [(220, 260)], IntervalType.INTRON
-        )
-        assert len(t_inds) > 0
-
-    def test_search_intergenic(self, hulk_index):
-        """chr2 is entirely intergenic."""
-        result = hulk_index.search_intergenic("chr2", [(100, 200)])
-        assert result is True
-
-    def test_search_not_intergenic(self, hulk_index):
-        """Region overlapping a gene should not be intergenic."""
-        result = hulk_index.search_intergenic("chr1", [(100, 150)])
-        assert result is False
-
-    def test_search_splice_junctions_found(self, hulk_index):
-        """Query t1's first intron as an SJ: (200, 299, Strand.POS)."""
-        t_inds, g_inds = hulk_index.search_splice_junctions(
-            "chr1", [(200, 299, Strand.POS)]
-        )
-        assert len(t_inds) > 0
-        assert len(g_inds) > 0
-
-    def test_search_splice_junctions_not_found(self, hulk_index):
-        """Bogus SJ should return empty sets."""
-        t_inds, g_inds = hulk_index.search_splice_junctions(
-            "chr1", [(9999, 10000, Strand.POS)]
-        )
-        assert len(t_inds) == 0
-        assert len(g_inds) == 0
-
-
 # ---------------------------------------------------------------------------
 # query_exon() — unified interval overlap queries
 # ---------------------------------------------------------------------------
@@ -384,11 +333,11 @@ class TestQueryExon:
         return HulkIndex.load(out_dir)
 
     def test_returns_tuples(self, hulk_index):
-        """Results should be tuples (t_index, g_index, interval_type, overlap)."""
+        """Results should be tuples (t_index, g_index, interval_type)."""
         hits = hulk_index.query_exon(GenomicInterval("chr2", 100, 200))
         assert len(hits) >= 1
         assert isinstance(hits[0], tuple)
-        assert len(hits[0]) == 4
+        assert len(hits[0]) == 3
 
     def test_guaranteed_hit_on_valid_query(self, hulk_index):
         """Any query within a tiled reference must return ≥1 hit."""
@@ -402,26 +351,22 @@ class TestQueryExon:
     def test_pure_intergenic(self, hulk_index):
         """Query in chr2 (no genes) should return only INTERGENIC hits."""
         hits = hulk_index.query_exon(GenomicInterval("chr2", 100, 200))
-        # tuple format: (t_index, g_index, interval_type, overlap)
+        # tuple format: (t_index, g_index, interval_type)
         assert all(h[2] == IntervalType.INTERGENIC for h in hits)
         assert all(h[0] == -1 for h in hits)
         assert all(h[1] == -1 for h in hits)
-        # Should cover the full 100bp query
-        total_overlap = sum(h[3] for h in hits)
-        assert total_overlap == 100
 
     def test_pure_exonic(self, hulk_index):
         """Query fully within t1/t2's shared exon (99,200).
 
         The exon appears once per transcript (t1 and t2 both have it),
-        so we expect 2 EXON hits of 60bp each.
+        so we expect 2 EXON hits.
         """
         hits = hulk_index.query_exon(GenomicInterval("chr1", 120, 180))
-        # tuple format: (t_index, g_index, interval_type, overlap)
+        # tuple format: (t_index, g_index, interval_type)
         exon_hits = [h for h in hits if h[2] == IntervalType.EXON]
-        # t1 and t2 both have exon (99,200) → 2 hits, 60bp each
+        # t1 and t2 both have exon (99,200) → 2 hits
         assert len(exon_hits) == 2
-        assert all(h[3] == 60 for h in exon_hits)
         # No intergenic hits
         ig_hits = [h for h in hits if h[2] == IntervalType.INTERGENIC]
         assert len(ig_hits) == 0
@@ -430,35 +375,32 @@ class TestQueryExon:
         """Query spanning exon (99,200) and intergenic before it (0,99).
 
         A 150bp query from (50, 200) overlaps:
-          49bp intergenic (50..99)
-          101bp exon (99..200) × 2 transcripts (t1 and t2)
+          intergenic (50..99)
+          exon (99..200) × 2 transcripts (t1 and t2)
         """
         hits = hulk_index.query_exon(GenomicInterval("chr1", 50, 200))
         exon_hits = [h for h in hits if h[2] == IntervalType.EXON]
         ig_hits = [h for h in hits if h[2] == IntervalType.INTERGENIC]
-        # 2 transcripts × 101bp each
+        # 2 transcripts
         assert len(exon_hits) == 2
-        assert all(h[3] == 101 for h in exon_hits)
-        # 1 intergenic hit of 49bp
-        assert sum(h[3] for h in ig_hits) == 49
+        # At least 1 intergenic hit
+        assert len(ig_hits) >= 1
 
     def test_exon_intron_boundary(self, hulk_index):
         """Query spanning exon (99,200) and intron (200,299).
 
         Query (150, 250):
-          50bp exon (150..200) × 2 transcripts (t1, t2)
-          50bp intron from t1 (200..250)
-          50bp intron from t2 (200..250) — t2 intron is (200,499)
+          exon (150..200) × 2 transcripts (t1, t2)
+          intron from t1 (200..250)
+          intron from t2 (200..250) — t2 intron is (200,499)
         """
         hits = hulk_index.query_exon(GenomicInterval("chr1", 150, 250))
         exon_hits = [h for h in hits if h[2] == IntervalType.EXON]
         intron_hits = [h for h in hits if h[2] == IntervalType.INTRON]
-        # 2 exon hits (t1 and t2), each 50bp
+        # 2 exon hits (t1 and t2)
         assert len(exon_hits) == 2
-        assert all(h[3] == 50 for h in exon_hits)
-        # 2 intron hits (t1: 200-299, t2: 200-499), each 50bp overlap
+        # 2 intron hits (t1: 200-299, t2: 200-499)
         assert len(intron_hits) == 2
-        assert all(h[3] == 50 for h in intron_hits)
 
     def test_always_has_hits(self, hulk_index):
         """Any query in a tiled reference always returns ≥1 hit."""
@@ -474,39 +416,18 @@ class TestQueryExon:
             assert len(hits) >= 1, (
                 f"Query ({q.ref}, {q.start}, {q.end}): no hits"
             )
-            # Every individual hit overlap must be > 0
-            for h in hits:
-                assert h[3] > 0  # h[3] is overlap
-
-    def test_intergenic_overlap_equals_query_length(self, hulk_index):
-        """For chr2 (no genes), overlap exactly equals query length.
-
-        On intergenic-only regions there are no overlapping intervals
-        so the sum equals the query span.
-        """
-        q = GenomicInterval("chr2", 50, 300)
-        hits = hulk_index.query_exon(q)
-        assert sum(h[3] for h in hits) == 250
-
-    def test_sorted_by_descending_overlap(self, hulk_index):
-        """Hits should be sorted by descending overlap count."""
-        hits = hulk_index.query_exon(GenomicInterval("chr1", 50, 200))
-        overlaps = [h[3] for h in hits]
-        assert overlaps == sorted(overlaps, reverse=True)
 
     def test_mostly_intergenic_read(self, hulk_index):
-        """A read mostly in intergenic space with tiny exon overlap.
+        """A read with overlap in both intergenic and exonic regions.
 
-        Query (10, 110): 89bp intergenic (10..99) + 11bp exon (99..110) × 2.
-        The top hit (most overlap) should be intergenic.
+        Query (10, 110): intergenic (10..99) + exon (99..110) × 2.
         """
         hits = hulk_index.query_exon(GenomicInterval("chr1", 10, 110))
-        assert hits[0][2] == IntervalType.INTERGENIC  # h[2] is interval_type
-        assert hits[0][3] == 89  # h[3] is overlap
+        ig_hits = [h for h in hits if h[2] == IntervalType.INTERGENIC]
         exon_hits = [h for h in hits if h[2] == IntervalType.EXON]
-        # 2 transcripts (t1, t2), each 11bp overlap
+        assert len(ig_hits) >= 1
+        # 2 transcripts (t1, t2)
         assert len(exon_hits) == 2
-        assert all(h[3] == 11 for h in exon_hits)
 
     def test_gene2_exon(self, hulk_index):
         """Query within g2/t3's first exon (999,1100), neg strand."""
