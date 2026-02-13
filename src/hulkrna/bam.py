@@ -7,18 +7,33 @@ name arrive consecutively.  This eliminates the unbounded-memory
 pair buffer required for coordinate-sorted input.
 
 Read-name groups are processed atomically: all alignments for a
-query name are collected, filtered, paired by mate position, and
-yielded as a list of ``(r1, r2)`` tuples.  For unique mappers
-(NH=1) the list has one element; for multimappers (NH>1, when
-``include_multimap=True``) the list may have several.
+query name are collected, categorised, grouped into *hits*, and
+yielded as ``(nh, hits)``.
+
+A **hit** represents one mapping location for the fragment and
+comprises all BAM records (primary + supplementary) for that location.
+Each hit is a ``(r1_reads, r2_reads)`` tuple of lists.
+
+Hit grouping strategy
+---------------------
+* **HI tag present** (STAR, some minimap2 configs): records are
+  grouped by their HI (Hit Index) value.
+* **HI tag absent** (minimap2 default): the primary alignment and
+  its supplementary records form hit 0; secondary alignments are
+  paired by mate position into additional hits.
+
+For unique mappers (NH = 1) there is exactly one hit.  For
+multimappers (NH > 1, when ``include_multimap=True``) there may
+be several.
 """
 
 import logging
 from itertools import groupby
+from pathlib import Path
 
 import pysam
 
-from .core import Strand
+from .types import Strand
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +47,89 @@ CIGAR_OPS_ADVANCE_REF = {
 }
 
 
-def parse_read(read):
+def detect_sj_strand_tag(
+    bam_path: str | Path,
+    candidates: tuple[str, ...] = ("XS", "ts"),
+    max_spliced_reads: int = 1000,
+) -> tuple[str, ...]:
+    """Scan a BAM file to detect which splice-junction strand tags are present.
+
+    Examines reads containing CIGAR reference-skip (``N``) operations
+    and checks whether they carry any of the *candidates* tags.
+
+    Parameters
+    ----------
+    bam_path : str or Path
+        Path to the BAM file.
+    candidates : tuple of str
+        Tag names to look for, in priority order (default
+        ``("XS", "ts")``).
+    max_spliced_reads : int
+        Stop scanning after this many spliced reads (default 1000).
+
+    Returns
+    -------
+    tuple[str, ...]
+        Detected tag names, preserving the order of *candidates*.
+        Empty tuple if none of the candidates were found.
+    """
+    detected: set[str] = set()
+    n_spliced = 0
+
+    with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+        for read in bam.fetch(until_eof=True):
+            if read.is_unmapped or read.cigartuples is None:
+                continue
+
+            # Only inspect spliced reads (those with CIGAR N ops)
+            has_splice = any(
+                op == pysam.CREF_SKIP for op, _ in read.cigartuples
+            )
+            if not has_splice:
+                continue
+
+            n_spliced += 1
+            for tag in candidates:
+                if read.has_tag(tag):
+                    detected.add(tag)
+
+            if n_spliced >= max_spliced_reads:
+                break
+
+    # Preserve candidate priority order
+    result = tuple(t for t in candidates if t in detected)
+
+    if result:
+        logger.info(
+            "Auto-detected SJ strand tag(s): %s (scanned %d spliced reads)",
+            ", ".join(result), n_spliced,
+        )
+    else:
+        # TODO: Implement strand inference from reference annotation when
+        # no splice-junction strand tag is present in the BAM file.
+        # For now all splice junctions will receive Strand.NONE, which
+        # disables strand-aware counting.
+        logger.warning(
+            "No SJ strand tags (%s) found after scanning %d spliced reads. "
+            "All splice junctions will have strand=NONE.",
+            ", ".join(candidates), n_spliced,
+        )
+
+    return result
+
+
+def parse_read(read, sj_strand_tag: str | tuple[str, ...] = "XS"):
     """Parse a single alignment's CIGAR into exon blocks and splice junctions.
+
+    Parameters
+    ----------
+    read : pysam.AlignedSegment
+        A single aligned read.
+    sj_strand_tag : str or tuple of str
+        BAM tag(s) to read splice-junction strand from.  When a
+        tuple is given the tags are checked in order and the first
+        one present on the read is used.  Examples: ``"XS"`` (STAR),
+        ``"ts"`` (minimap2), ``("XS", "ts")`` (check both).
 
     Returns
     -------
@@ -49,15 +145,22 @@ def parse_read(read):
     pos = start
     ref_strand = Strand.from_is_reverse(read.is_reverse)
 
+    # Determine SJ strand from the configured tag(s)
+    _sj_strand = Strand.NONE
+    tags = (sj_strand_tag,) if isinstance(sj_strand_tag, str) else sj_strand_tag
+    for tag in tags:
+        if read.has_tag(tag):
+            _sj_strand = Strand.from_str(read.get_tag(tag))
+            break
+
     for (cig_op, cig_len) in read.cigartuples:
         # handle reference skip (intron)
         if cig_op == pysam.CREF_SKIP:
-            sj_strand = Strand.from_str(read.get_tag('XS'))
             if pos > start:
                 # add the exon from start to pos
                 exons.append((start, pos))
             # add the splice junction from pos to (pos + cig_len)
-            sjs.append((pos, pos + cig_len, sj_strand))
+            sjs.append((pos, pos + cig_len, _sj_strand))
             start = pos + cig_len
             pos = start
         elif cig_op in CIGAR_OPS_ADVANCE_REF:
@@ -71,7 +174,7 @@ def parse_read(read):
 
 
 def _pair_reads(r1_reads, r2_reads):
-    """Pair read-1 and read-2 alignments within a group by mate position.
+    """Pair read-1 and read-2 alignments by mate position.
 
     Matching uses ``(reference_id, reference_start)`` of each read
     against the mate position encoded in ``(next_reference_id,
@@ -83,9 +186,9 @@ def _pair_reads(r1_reads, r2_reads):
     Parameters
     ----------
     r1_reads : list[pysam.AlignedSegment]
-        Read-1 alignments (filtered, primary only).
+        Read-1 alignments.
     r2_reads : list[pysam.AlignedSegment]
-        Read-2 alignments (filtered, primary only).
+        Read-2 alignments.
 
     Returns
     -------
@@ -143,6 +246,87 @@ def _pair_reads(r1_reads, r2_reads):
     return pairs
 
 
+# ---------------------------------------------------------------------------
+# Hit grouping
+# ---------------------------------------------------------------------------
+
+
+def _group_records_by_hit(usable_records):
+    """Group BAM records for one query name into alignment hits.
+
+    Each hit is a ``(r1_reads, r2_reads)`` tuple where both elements
+    are lists of ``pysam.AlignedSegment`` (primary + supplementary
+    records for that mapping location).
+
+    Strategy
+    --------
+    * **HI tag present** — group records by their HI value.
+    * **HI tag absent** — primary + supplementary records form hit 0;
+      secondary records are paired by mate position into additional
+      hits (one per secondary pair).
+
+    Parameters
+    ----------
+    usable_records : list[pysam.AlignedSegment]
+        Filtered records (no QC-fail, no unmapped, no skipped
+        duplicates) for one query name.
+
+    Returns
+    -------
+    list[tuple[list, list]]
+        One ``(r1_reads, r2_reads)`` per hit.
+    """
+    # Detect whether HI tags are available
+    has_hi = any(r.has_tag('HI') for r in usable_records)
+
+    if has_hi:
+        groups: dict[int, tuple[list, list]] = {}
+        for r in usable_records:
+            hi = r.get_tag('HI') if r.has_tag('HI') else 0
+            if hi not in groups:
+                groups[hi] = ([], [])
+            if r.is_read1:
+                groups[hi][0].append(r)
+            elif r.is_read2:
+                groups[hi][1].append(r)
+        return [groups[hi] for hi in sorted(groups)]
+
+    # Fallback: primary+supplementary = hit 0, secondary = extra hits
+    primary_r1: list = []
+    primary_r2: list = []
+    secondary_r1: list = []
+    secondary_r2: list = []
+
+    for r in usable_records:
+        if r.is_secondary:
+            if r.is_read1:
+                secondary_r1.append(r)
+            else:
+                secondary_r2.append(r)
+        else:
+            # Primary or supplementary → same hit
+            if r.is_read1:
+                primary_r1.append(r)
+            else:
+                primary_r2.append(r)
+
+    hits: list[tuple[list, list]] = []
+
+    # Hit 0: primary alignment + supplementary records
+    if primary_r1 or primary_r2:
+        hits.append((primary_r1, primary_r2))
+
+    # Additional hits from secondary alignments (paired by mate pos)
+    if secondary_r1 or secondary_r2:
+        for r1, r2 in _pair_reads(secondary_r1, secondary_r2):
+            hits.append(
+                ([r1] if r1 is not None else [],
+                 [r2] if r2 is not None else [])
+            )
+
+    return hits
+
+
 def parse_bam_file(
     bam_iter,
     stats,
@@ -150,16 +334,18 @@ def parse_bam_file(
     skip_duplicates=True,
     include_multimap=False,
 ):
-    """Parse a name-sorted / collated BAM, yielding read-pair groups.
+    """Parse a name-sorted / collated BAM, yielding hit groups.
 
     All alignments for a read name (query name) must arrive
     consecutively — guaranteed by ``samtools sort -n`` or
     ``samtools collate``.
 
-    Within each read-name group, r1 and r2 alignments are paired
-    by matching ``(next_reference_id, next_reference_start)`` to the
-    mate's ``(reference_id, reference_start)``.  Unpaired reads and
-    reads whose mate is unmapped are yielded as singletons.
+    Records are grouped into **hits** (mapping locations).  Each hit
+    contains all BAM records — primary, secondary, and supplementary —
+    for that location.  Secondary records are retained (not filtered)
+    so that multimappers are correctly represented.  Supplementary
+    records are retained so that chimeric / split alignments can be
+    merged into a single ``Fragment``.
 
     Parameters
     ----------
@@ -176,17 +362,17 @@ def parse_bam_file(
 
     Yields
     ------
-    list[tuple[AlignedSegment | None, AlignedSegment | None]]
-        A list of ``(r1, r2)`` pairs for one read name.  For unique
-        mappers the list has one element; for multimappers it may
-        have several.  Singletons appear as ``(r1, None)`` or
-        ``(None, r2)``.
+    tuple[int, list[tuple[list, list]]]
+        ``(nh, hits)`` where *nh* is the NH tag value and *hits* is a
+        list of ``(r1_reads, r2_reads)`` tuples.  Each element list
+        contains the primary and supplementary ``AlignedSegment``
+        records for that read end at one mapping location.
     """
     stat_keys = [
         'total', 'qc_fail', 'unmapped', 'secondary',
         'supplementary', 'duplicate',
         'n_read_names', 'unique', 'multimapping',
-        'proper_pair', 'improper_pair', 'mate_unmapped', 'unpaired',
+        'proper_pair', 'improper_pair', 'mate_unmapped',
     ]
     for key in stat_keys:
         stats.setdefault(key, 0)
@@ -194,8 +380,7 @@ def parse_bam_file(
     for _qname, group_iter in groupby(
         bam_iter, key=lambda r: r.query_name
     ):
-        r1_reads: list = []
-        r2_reads: list = []
+        usable: list = []
         nh = 1
 
         for read in group_iter:
@@ -204,12 +389,6 @@ def parse_bam_file(
             # Skip unusable alignments
             if read.is_qcfail:
                 stats['qc_fail'] += 1
-                continue
-            if read.is_secondary:
-                stats['secondary'] += 1
-                continue
-            if read.is_supplementary:
-                stats['supplementary'] += 1
                 continue
             if read.is_unmapped:
                 stats['unmapped'] += 1
@@ -222,19 +401,26 @@ def parse_bam_file(
                     continue
 
             # Enforce paired-end
-            assert read.is_paired, "Input BAM must be paired-end"
+            if not read.is_paired:
+                raise ValueError(
+                    f"Input BAM must be paired-end, but read "
+                    f"{read.query_name!r} is unpaired"
+                )
+
+            # Count secondary / supplementary for stats
+            if read.is_secondary:
+                stats['secondary'] += 1
+            if read.is_supplementary:
+                stats['supplementary'] += 1
 
             # Read NH from first usable alignment in the group
             if read.has_tag('NH'):
                 nh = read.get_tag('NH')
 
-            if read.is_read1:
-                r1_reads.append(read)
-            elif read.is_read2:
-                r2_reads.append(read)
+            usable.append(read)
 
         # Skip empty groups (everything filtered)
-        if not r1_reads and not r2_reads:
+        if not usable:
             continue
 
         stats['n_read_names'] += 1
@@ -247,16 +433,22 @@ def parse_bam_file(
         else:
             stats['unique'] += 1
 
-        # Pair r1 and r2 alignments by mate position
-        pairs = _pair_reads(r1_reads, r2_reads)
+        # Group records into hits
+        hits = _group_records_by_hit(usable)
 
-        # Track pair-level stats
-        for r1, r2 in pairs:
-            if r1 is None or r2 is None:
+        # Track hit-level stats
+        for r1_reads, r2_reads in hits:
+            if not r1_reads or not r2_reads:
                 stats['mate_unmapped'] += 1
-            elif r1.is_proper_pair:
-                stats['proper_pair'] += 1
             else:
-                stats['improper_pair'] += 1
+                # Check proper-pair flag on the primary R1
+                r1_primary = [
+                    r for r in r1_reads
+                    if not r.is_supplementary and not r.is_secondary
+                ]
+                if r1_primary and r1_primary[0].is_proper_pair:
+                    stats['proper_pair'] += 1
+                else:
+                    stats['improper_pair'] += 1
 
-        yield pairs
+        yield nh, hits

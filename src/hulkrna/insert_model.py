@@ -24,6 +24,11 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid circular dependency with core.py
+def _get_CountCategory():
+    from .categories import CountCategory
+    return CountCategory
+
 
 @dataclass
 class InsertSizeModel:
@@ -250,7 +255,7 @@ class InsertSizeModels:
     """
 
     def __init__(self, max_size: int = 1000):
-        from .core import CountCategory
+        from .categories import CountCategory
 
         self.max_size = max_size
         self.global_model = InsertSizeModel(max_size=max_size)
@@ -290,7 +295,7 @@ class InsertSizeModels:
 
     def to_dict(self) -> dict:
         """JSON/YAML-serializable summary of all insert size models."""
-        from .core import CountCategory
+        from .categories import CountCategory
 
         d: dict = {"global": self.global_model.to_dict()}
         d["intergenic"] = self.intergenic.to_dict()
@@ -314,7 +319,7 @@ class InsertSizeModels:
 
     def log_summary(self) -> None:
         """Log a human-readable summary of all insert size models."""
-        from .core import CountCategory
+        from .categories import CountCategory
 
         logger.info(
             f"Insert size models: {self.global_model.n_observations:,} "

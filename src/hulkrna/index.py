@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
-from .core import GenomicInterval, Interval, IntervalType, RefInterval, Strand
+from .types import GenomicInterval, Interval, IntervalType, RefInterval, Strand
 from .transcript import Transcript
 
 

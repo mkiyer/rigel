@@ -1,8 +1,11 @@
 import gzip
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Generator, Iterable, List, Optional, Set, Union
+
+logger = logging.getLogger(__name__)
 
 
 AttrValue = Union[str, List[str]]
@@ -120,7 +123,7 @@ class GTF:
             try:
                 yield GTF.from_str(line)
             except ValueError as e:
-                print(f"Warning: Error on line {line_num}: {e}") # Uncomment to debug
+                logger.warning("Skipping malformed GTF line %d: %s", line_num, e)
                 continue
 
 

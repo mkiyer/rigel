@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Generator, List, Optional
 
-from .core import Interval, Strand
+from .types import Interval, Strand
 from .gtf import GTF
 
 

@@ -1,0 +1,343 @@
+"""
+hulkrna.sim.scenario — End-to-end simulation scenario orchestrator.
+
+A ``Scenario`` bundles genome generation, gene annotation, read
+simulation, alignment (minimap2), BAM collation (samtools), and
+index building (HulkIndex) into a single reproducible workflow.
+
+All artifacts are written to a working directory (temp by default)
+and can be cleaned up via ``cleanup()`` or the context-manager
+protocol.
+
+Usage
+-----
+>>> with Scenario("test1", genome_length=5000, seed=42) as sc:
+...     sc.add_gene("g1", "+", [
+...         {"t_id": "t1", "exons": [(100, 300), (500, 700)], "abundance": 100},
+...     ])
+...     result = sc.build(n_fragments=500)
+...     # result.bam_path, result.index, result.transcripts are ready
+"""
+
+import logging
+import shutil
+import subprocess
+import tempfile
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+import pysam
+
+from ..index import HulkIndex
+from ..transcript import Transcript
+from ..types import Strand
+
+from .annotation import GeneBuilder
+from .genome import MutableGenome
+from .reads import ReadSimulator, SimConfig
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["Scenario", "ScenarioResult"]
+
+
+@dataclass
+class ScenarioResult:
+    """Output artifacts from a completed simulation scenario.
+
+    Attributes
+    ----------
+    fasta_path : Path
+        Genome FASTA file (with .fai index).
+    gtf_path : Path
+        Gene annotation GTF file.
+    bam_path : Path
+        Name-sorted BAM file (aligned with minimap2).
+    index_dir : Path
+        HulkIndex output directory (Feather files).
+    index : HulkIndex
+        Loaded HulkIndex ready for counting.
+    transcripts : list[Transcript]
+        Transcript objects with assigned indices.
+    genome : MutableGenome
+        The genome (post splice-motif edits).
+    fastq_r1 : Path
+        R1 FASTQ file.
+    fastq_r2 : Path
+        R2 FASTQ file.
+    n_simulated : int
+        Number of fragments passed to the read simulator.
+    """
+
+    fasta_path: Path
+    gtf_path: Path
+    bam_path: Path
+    index_dir: Path
+    index: HulkIndex
+    transcripts: list[Transcript]
+    genome: MutableGenome
+    fastq_r1: Path
+    fastq_r2: Path
+    n_simulated: int = 0
+
+    def ground_truth_counts(self) -> dict[str, int]:
+        """Parse BAM read names to extract ground-truth fragment counts.
+
+        The read simulator encodes the source transcript in each read
+        name as ``{t_id}:{frag_start}-{frag_end}:{strand}:{idx}/1``.
+        This method tallies unique fragments per transcript ID by
+        parsing the prefix before ``/1`` or ``/2``.
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of ``t_id → count`` for each transcript that
+            contributed at least one simulated fragment.
+        """
+        seen: set[str] = set()
+        with pysam.AlignmentFile(str(self.fastq_r1.parent / self.bam_path.name),
+                                 "rb", check_sq=False) as bam:
+            for read in bam:
+                # Strip /1 or /2 suffix to get fragment identifier
+                qname = read.query_name
+                if qname not in seen:
+                    seen.add(qname)
+
+        counts: Counter[str] = Counter()
+        for frag_id in seen:
+            # Format: t_id:start-end:strand:idx
+            t_id = frag_id.split(":")[0]
+            counts[t_id] += 1
+        return dict(counts)
+
+    def ground_truth_from_fastq(self) -> dict[str, int]:
+        """Parse FASTQ read names to get ground-truth fragment counts.
+
+        Unlike :meth:`ground_truth_counts`, this counts *all* simulated
+        fragments regardless of alignment success, providing the true
+        number of fragments the simulator produced per transcript.
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of ``t_id → count`` for each transcript.
+        """
+        counts: Counter[str] = Counter()
+        with open(self.fastq_r1) as fh:
+            for i, line in enumerate(fh):
+                if i % 4 == 0:  # header line
+                    # Format: @t_id:start-end:strand:idx/1
+                    qname = line[1:].strip()  # drop @
+                    if qname.endswith("/1"):
+                        qname = qname[:-2]
+                    t_id = qname.split(":")[0]
+                    counts[t_id] += 1
+        return dict(counts)
+
+
+class Scenario:
+    """End-to-end simulation scenario orchestrator.
+
+    Parameters
+    ----------
+    name : str
+        Scenario name (used for file naming).
+    genome_length : int
+        Length of the random genome (default 5000).
+    seed : int
+        Random seed for genome and read generation.
+    work_dir : Path or None
+        Working directory for output files.  If None, a temporary
+        directory is created and cleaned up on ``cleanup()``.
+    ref_name : str or None
+        Chromosome name. Defaults to *name*.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        genome_length: int = 5000,
+        seed: int = 42,
+        work_dir: Path | None = None,
+        ref_name: str | None = None,
+    ):
+        self.name = name
+        self.seed = seed
+        self._owns_workdir = work_dir is None
+
+        if work_dir is None:
+            self.work_dir = Path(tempfile.mkdtemp(prefix=f"hulkrna_sim_{name}_"))
+        else:
+            self.work_dir = Path(work_dir)
+            self.work_dir.mkdir(parents=True, exist_ok=True)
+
+        self.ref_name = ref_name or name
+        self.genome = MutableGenome(
+            genome_length, seed=seed, name=self.ref_name
+        )
+        self.annotation = GeneBuilder(self.genome, ref_name=self.ref_name)
+
+    # -- Gene addition (delegates to GeneBuilder) ----------------------------
+
+    def add_gene(
+        self,
+        gene_id: str,
+        strand: str | Strand,
+        transcripts: list[dict],
+        **kwargs,
+    ) -> None:
+        """Add a gene to the scenario. See ``GeneBuilder.add_gene``."""
+        self.annotation.add_gene(gene_id, strand, transcripts, **kwargs)
+
+    # -- Build ----------------------------------------------------------------
+
+    def build(
+        self,
+        n_fragments: int = 1000,
+        sim_config: SimConfig | None = None,
+    ) -> ScenarioResult:
+        """Execute the full simulation pipeline.
+
+        1. Write genome FASTA + index.
+        2. Write gene annotations (GTF).
+        3. Simulate paired-end reads (FASTQ).
+        4. Align with minimap2 (``splice:sr``).
+        5. Collate BAM with samtools.
+        6. Build HulkIndex.
+
+        Parameters
+        ----------
+        n_fragments : int
+            Number of fragments to simulate.
+        sim_config : SimConfig or None
+            Read simulation config. None uses defaults with same seed.
+
+        Returns
+        -------
+        ScenarioResult
+        """
+        wdir = self.work_dir
+
+        # 1. Genome FASTA
+        logger.info(f"[{self.name}] Writing genome FASTA...")
+        fasta_path = self.genome.write_fasta(wdir)
+
+        # 2. GTF annotation
+        logger.info(f"[{self.name}] Writing GTF annotations...")
+        gtf_path = self.annotation.write_gtf(wdir)
+        transcripts = self.annotation.get_transcripts()
+
+        # 3. Simulate reads
+        if sim_config is None:
+            sim_config = SimConfig(seed=self.seed)
+        # Clamp frag_max to genome/transcript length
+        sim = ReadSimulator(self.genome, transcripts, config=sim_config)
+        logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
+        r1_path, r2_path = sim.write_fastq(wdir, n_fragments)
+
+        # 4. Align with minimap2 → SAM → name-sorted BAM
+        logger.info(f"[{self.name}] Aligning with minimap2...")
+        bam_path = self._align(fasta_path, r1_path, r2_path)
+
+        # 5. Build HulkIndex
+        logger.info(f"[{self.name}] Building HulkIndex...")
+        index_dir = wdir / "index"
+        HulkIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
+        index = HulkIndex.load(index_dir)
+
+        logger.info(f"[{self.name}] Scenario build complete.")
+        return ScenarioResult(
+            fasta_path=fasta_path,
+            gtf_path=gtf_path,
+            bam_path=bam_path,
+            index_dir=index_dir,
+            index=index,
+            transcripts=transcripts,
+            genome=self.genome,
+            fastq_r1=r1_path,
+            fastq_r2=r2_path,
+            n_simulated=n_fragments,
+        )
+
+    def _align(self, fasta_path: Path, r1_path: Path, r2_path: Path) -> Path:
+        """Align reads with minimap2 and produce a name-sorted BAM.
+
+        Pipeline::
+
+            minimap2 -ax splice:sr --secondary=yes ref.fa r1.fq r2.fq \\
+              | samtools sort -n -o output.bam -
+
+        The ``splice:sr`` preset handles short RNA-seq reads with
+        splice-aware alignment.  ``--secondary=yes`` retains
+        multimappers so that NH tags are populated.
+        """
+        bam_path = self.work_dir / f"{self.name}.bam"
+
+        # minimap2 → samtools sort -n (name-sorted)
+        minimap2_cmd = [
+            "minimap2",
+            "-ax", "splice:sr",
+            "--secondary=yes",
+            str(fasta_path),
+            str(r1_path),
+            str(r2_path),
+        ]
+
+        sort_cmd = [
+            "samtools", "sort",
+            "-n",  # name-sort for the BAM parser
+            "-o", str(bam_path),
+            "-",   # read from stdin
+        ]
+
+        logger.debug(f"Running: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
+
+        # Pipe minimap2 output to samtools sort
+        p1 = subprocess.Popen(
+            minimap2_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        p2 = subprocess.Popen(
+            sort_cmd,
+            stdin=p1.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        # Allow p1 to receive SIGPIPE if p2 exits early
+        p1.stdout.close()
+
+        _, p2_stderr = p2.communicate()
+
+        # Drain p1 stderr to prevent deadlock (pipe buffer full)
+        p1_stderr = p1.stderr.read()
+        p1.wait()
+
+        if p2.returncode != 0:
+            raise RuntimeError(
+                f"samtools sort failed (rc={p2.returncode}): "
+                f"{p2_stderr.decode()}"
+            )
+        if p1.returncode != 0:
+            logger.warning(
+                "minimap2 exited with rc=%d: %s",
+                p1.returncode, p1_stderr.decode(errors='replace'),
+            )
+
+        logger.info(f"Wrote name-sorted BAM → {bam_path}")
+        return bam_path
+
+    # -- Cleanup --------------------------------------------------------------
+
+    def cleanup(self) -> None:
+        """Remove the working directory if it was auto-created."""
+        if self._owns_workdir and self.work_dir.exists():
+            shutil.rmtree(self.work_dir, ignore_errors=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.cleanup()

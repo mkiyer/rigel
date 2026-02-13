@@ -1,5 +1,5 @@
 """
-hulkrna.strand_model — Bayesian strand model learned from spliced reads.
+hulkrna.strand_model — Bayesian strand models learned from RNA-seq data.
 
 Learns the strand distribution of a paired-end RNA-seq library by observing
 how fragment alignment strands relate to annotated splice junction (SJ)
@@ -22,12 +22,13 @@ and provides:
   derived protocol flags for downstream tools.
 """
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Tuple
 
-from .core import Strand
+from .types import Strand
 
 logger = logging.getLogger(__name__)
 
@@ -263,8 +264,6 @@ class StrandModel:
         path : Path or str
             Output JSON file path.
         """
-        import json
-
         path = Path(path)
         d = self.to_dict()
 
@@ -303,3 +302,115 @@ class StrandModel:
             f"strand_specificity={self.strand_specificity:.4f}, "
             f"read1_sense={self.read1_sense}"
         )
+
+
+# ======================================================================
+# StrandModels — multi-region container
+# ======================================================================
+
+
+@dataclass
+class StrandModels:
+    """Container for region-specific strand models.
+
+    Holds three independently-trained :class:`StrandModel` instances:
+
+    * **exonic** — trained from SPLICED_ANNOT fragments with unique
+      gene assignment and unambiguous exon/SJ strands.  This is the
+      primary model used for transcript scoring.
+    * **intronic** — trained from INTRON fragments (sense vs antisense
+      relative to the overlapping gene).  Captures intronic strand
+      distribution for gDNA evidence estimation.
+    * **intergenic** — trained from intergenic fragments (sense vs
+      antisense relative to nearby genes, if strand information is
+      available).  Used alongside the intronic model for global gDNA
+      rate estimation.
+
+    The ``strand_likelihood`` and ``classify_strand`` convenience
+    methods delegate to the exonic model for backward compatibility.
+    """
+
+    exonic: StrandModel = field(default_factory=StrandModel)
+    intronic: StrandModel = field(default_factory=StrandModel)
+    intergenic: StrandModel = field(default_factory=StrandModel)
+
+    # ------------------------------------------------------------------
+    # Delegation to exonic model (backward compatibility)
+    # ------------------------------------------------------------------
+
+    def strand_likelihood(
+        self, exon_strand: Strand, gene_strand: Strand,
+    ) -> float:
+        """Delegate to the exonic strand model."""
+        return self.exonic.strand_likelihood(exon_strand, gene_strand)
+
+    @property
+    def p_r1_sense(self) -> float:
+        """Exonic model's P(read 1 is sense)."""
+        return self.exonic.p_r1_sense
+
+    @property
+    def strand_specificity(self) -> float:
+        """Exonic model's strand specificity."""
+        return self.exonic.strand_specificity
+
+    @property
+    def read1_sense(self) -> bool:
+        """Exonic model's read1_sense flag."""
+        return self.exonic.read1_sense
+
+    @property
+    def n_observations(self) -> int:
+        """Exonic model's observation count."""
+        return self.exonic.n_observations
+
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> dict:
+        """JSON-serializable summary of all three strand models."""
+        return {
+            "exonic": self.exonic.to_dict(),
+            "intronic": self.intronic.to_dict(),
+            "intergenic": self.intergenic.to_dict(),
+        }
+
+    def write_json(self, path: Path | str) -> None:
+        """Write all strand models to a JSON file.
+
+        Parameters
+        ----------
+        path : Path or str
+            Output JSON file path.
+        """
+        path = Path(path)
+        d = self.to_dict()
+
+        # Add 95% CI for exonic model if enough observations
+        if self.exonic.n_observations >= 10:
+            try:
+                lo, hi = self.exonic.posterior_95ci()
+                d["exonic"]["posterior"]["ci_95"] = [
+                    float(round(lo, 6)), float(round(hi, 6)),
+                ]
+            except ImportError:
+                pass
+
+        with open(path, "w") as fh:
+            json.dump({"strand_models": d}, fh, indent=2)
+
+        logger.info(f"Wrote strand models to {path}")
+
+    def log_summary(self) -> None:
+        """Log a human-readable summary of all strand models."""
+        logger.info("Strand models:")
+        logger.info(f"  [exonic]  {self.exonic.n_observations:,} obs, "
+                     f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
+                     f"specificity={self.exonic.strand_specificity:.4f}")
+        logger.info(f"  [intronic]  {self.intronic.n_observations:,} obs, "
+                     f"p_r1_sense={self.intronic.p_r1_sense:.4f}, "
+                     f"specificity={self.intronic.strand_specificity:.4f}")
+        logger.info(f"  [intergenic]  {self.intergenic.n_observations:,} obs, "
+                     f"p_r1_sense={self.intergenic.p_r1_sense:.4f}, "
+                     f"specificity={self.intergenic.strand_specificity:.4f}")
