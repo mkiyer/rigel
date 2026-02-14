@@ -64,9 +64,17 @@ from .resolution import (
     resolve_fragment,
 )
 from .stats import PipelineStats
-from .strand_model import StrandModel, StrandModels
+from .strand_model import StrandModels
 
 logger = logging.getLogger(__name__)
+
+# Floor value for log-safe clamping to avoid log(0).
+_LOG_SAFE_FLOOR = 1e-10
+
+# Default gDNA splice penalty for SPLICED_UNANNOT fragments.
+# Most unannotated splice junctions are real; a small penalty allows
+# gDNA to compete only weakly for these fragments.
+_DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +89,6 @@ class PipelineResult:
     strand_models: StrandModels
     insert_models: InsertSizeModels
     counter: ReadCounter
-
-    @property
-    def strand_model(self) -> StrandModel:
-        """Backward-compatible alias for the exonic strand model."""
-        return self.strand_models.exonic
 
 
 # ---------------------------------------------------------------------------
@@ -116,14 +119,23 @@ def scan_and_buffer(
        Each fragment receives a ``frag_id`` that groups alignments
        of the same molecule for Phase 4 multimapper handling.
 
-    Three strand models are trained:
+    Four strand models are trained (unique mappers only):
 
-    - **exonic**: from SPLICED_ANNOT fragments with unique gene and
-      unambiguous strands (same as the original single model).
-    - **intronic**: from INTRON fragments with unique gene assignment,
-      using the exon strand vs gene strand relationship.
-    - **intergenic**: from intergenic fragments (trained using alignment
-      strand when splice junction strand is available from nearby context).
+    - **exonic_spliced** *(pure RNA)*: from SPLICED_ANNOT fragments
+      with unique gene and unambiguous strands.  SJ strand is ground
+      truth.  Gold-standard measure of library strand specificity.
+    - **exonic** *(RNA + gDNA mixture)*: from ALL exonic fragments
+      (SPLICED_ANNOT + SPLICED_UNANNOT + UNSPLICED) with unique gene.
+      Gene annotation strand is truth.  Dilution toward 50% relative
+      to ``exonic_spliced`` indicates gDNA contamination in exonic
+      regions.
+    - **intronic** *(nascent RNA + gDNA mixture)*: from INTRON
+      fragments with unique gene assignment.  Gene annotation strand
+      is truth.  Dilution toward 50% relative to ``exonic_spliced``
+      indicates gDNA fraction in intronic regions.
+    - **intergenic** *(~100% gDNA)*: from intergenic fragments.
+      POS reference convention (n_same = POS-aligned, n_opposite =
+      NEG-aligned).  Expected ~50/50 since gDNA is unstranded.
 
     Models are trained exclusively from unique-mapper fragments
     (NH = 1) regardless of the *include_multimap* setting.
@@ -176,7 +188,7 @@ def scan_and_buffer(
 
     logger.info("[START] Scanning BAM → resolve + train models + buffer")
 
-    group_id = 0
+    frag_id = 0
     for nh, hits in parse_bam_file(
         bam_iter,
         bam_stats,
@@ -202,12 +214,22 @@ def scan_and_buffer(
                     stats.n_intergenic_spliced += 1
                 else:
                     stats.n_intergenic_unspliced += 1
-                # Train intergenic insert model (unique mappers only)
+                # Train intergenic models (unique mappers only)
                 if is_unique_mapper:
                     isize = fragment_insert_size(frag)
                     if isize > 0:
                         insert_models.observe(isize, count_cat=None)
                         stats.n_insert_intergenic += 1
+                    # Intergenic strand model: record POS/NEG distribution
+                    # using POS as synthetic reference so that
+                    # n_same = POS-aligned, n_opposite = NEG-aligned.
+                    intergenic_strand = Strand.NONE
+                    for eb in frag.exons:
+                        intergenic_strand |= Strand(eb.strand)
+                    if intergenic_strand in (Strand.POS, Strand.NEG):
+                        strand_models.intergenic.observe(
+                            intergenic_strand, Strand.POS,
+                        )
                 continue
 
             # Set num_hits from pairs list length
@@ -225,7 +247,7 @@ def scan_and_buffer(
                     stats.n_chimeric_strand_diff += 1
                 # Buffer chimeric fragments for reporting, but skip
                 # model training since they are not countable.
-                buffer.append(result, frag_id=group_id)
+                buffer.append(result, frag_id=frag_id)
                 continue
 
             # --- Stats: overlap type ---
@@ -246,9 +268,11 @@ def scan_and_buffer(
 
             if is_unique_mapper:
                 # --- Train models (unique mappers only) ---
-                # Exonic strand model (from SPLICED_ANNOT with known SJ strand)
+                # Exonic spliced model (pure RNA: SPLICED_ANNOT + SJ strand)
                 if result.is_strand_qualified:
-                    strand_models.exonic.observe(result.exon_strand, result.sj_strand)
+                    strand_models.exonic_spliced.observe(
+                        result.exon_strand, result.sj_strand,
+                    )
                     stats.n_strand_trained += 1
                 elif result.count_cat != CountCategory.SPLICED_ANNOT:
                     stats.n_strand_skipped_no_sj += 1
@@ -256,6 +280,21 @@ def scan_and_buffer(
                     stats.n_strand_skipped_multi_gene += 1
                 else:
                     stats.n_strand_skipped_ambiguous += 1
+
+                # Exonic model (all categories, RNA + gDNA mixture):
+                # unique gene + known exon strand → gene strand as truth
+                if (
+                    result.count_cat != CountCategory.INTRON
+                    and result.is_unique_gene
+                    and result.exon_strand in (Strand.POS, Strand.NEG)
+                ):
+                    t_idx_ex = int(next(iter(result.t_inds)))
+                    g_idx_ex = int(index.t_to_g_arr[t_idx_ex])
+                    g_strand_ex = Strand(int(index.g_to_strand_arr[g_idx_ex]))
+                    if g_strand_ex in (Strand.POS, Strand.NEG):
+                        strand_models.exonic.observe(
+                            result.exon_strand, g_strand_ex,
+                        )
 
                 # Intronic strand model: INTRON + unique gene + known strands
                 if (
@@ -280,7 +319,7 @@ def scan_and_buffer(
                     stats.n_insert_ambiguous += 1
 
             # --- Buffer ALL resolved fragments with frag_id ---
-            buffer.append(result, frag_id=group_id)
+            buffer.append(result, frag_id=frag_id)
 
             if not is_unique_mapper:
                 n_buffered_mm += 1
@@ -290,10 +329,10 @@ def scan_and_buffer(
             stats.n_multimapper_groups += 1
             stats.n_multimapper_alignments += n_buffered_mm
 
-        group_id += 1
-        if group_id % log_every == 0:
+        frag_id += 1
+        if frag_id % log_every == 0:
             logger.debug(
-                f"  {group_id:,} read-name groups, "
+                f"  {frag_id:,} read-name groups, "
                 f"{stats.n_fragments:,} fragments, "
                 f"{strand_models.n_observations:,} strand obs, "
                 f"{buffer.total_fragments:,} buffered"
@@ -327,10 +366,14 @@ def _score_candidate(
     t_strand: int,
     count_cat: int,
     insert_size: int,
-    strand_model: StrandModel,
+    strand_models: StrandModels,
     insert_models: InsertSizeModels,
 ) -> tuple[float, int]:
     """Compute data log-likelihood and count type for one candidate.
+
+    Selects the category-appropriate strand model via
+    :meth:`StrandModels.model_for_category` so that strand likelihoods
+    reflect the expected gDNA dilution for each genomic region.
 
     Returns
     -------
@@ -339,23 +382,24 @@ def _score_candidate(
     count_type : int
         Flat ``CountType`` column index (0-11).
     """
-    p_strand = strand_model.strand_likelihood(
+    sm = strand_models.model_for_category(count_cat)
+    p_strand = sm.strand_likelihood(
         exon_strand, Strand(t_strand)
     )
 
-    cat_model = insert_models.category_models.get(
+    isize_model = insert_models.category_models.get(
         count_cat, insert_models.global_model
     )
     log_p_insert = (
-        cat_model.log_likelihood(insert_size)
+        isize_model.log_likelihood(insert_size)
         if insert_size > 0
         else 0.0
     )
 
-    log_lik = np.log(max(p_strand, 1e-10)) + log_p_insert
+    log_lik = np.log(max(p_strand, _LOG_SAFE_FLOOR)) + log_p_insert
 
     count_strand = ReadCounter.classify_strand(
-        exon_strand, t_strand, strand_model
+        exon_strand, t_strand, sm
     )
     count_type = int(count_cat) * 3 + int(count_strand)
 
@@ -370,21 +414,26 @@ def _score_candidate(
 _GDNA_SPLICE_PENALTIES = {
     CountCategory.INTRON: 1.0,
     CountCategory.UNSPLICED: 1.0,
-    CountCategory.SPLICED_UNANNOT: 0.01,
+    CountCategory.SPLICED_UNANNOT: _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     CountCategory.SPLICED_ANNOT: 0.0,  # never used
 }
 
 
 def _score_gdna_candidate(
+    exon_strand: int,
     count_cat: int,
     insert_size: int,
+    strand_models: StrandModels,
     insert_models: InsertSizeModels,
     gdna_splice_penalties: dict | None = None,
 ) -> float:
     """Compute data log-likelihood for the gDNA pseudo-component.
 
     gDNA is modelled as:
-    - **Unstranded**: ``P_strand = 0.5`` (gDNA has no strand bias).
+    - **Strand**: uses the *intergenic* strand model with POS as
+      synthetic reference (data-driven replacement for hard-coded
+      0.5).  For well-behaved libraries this is ~0.5 since gDNA
+      is unstranded, but the model learns from real data.
     - **Insert size**: uses the *intergenic* insert-size model
       (learned from intergenic fragments which are high-confidence gDNA).
     - **Splice penalty**: INTRON/UNSPLICED get 1.0 (fully compatible),
@@ -398,7 +447,13 @@ def _score_gdna_candidate(
     penalties = gdna_splice_penalties or _GDNA_SPLICE_PENALTIES
     splice_pen = penalties.get(CountCategory(count_cat), 1.0)
 
-    log_p_strand = np.log(0.5)
+    # Intergenic strand model: trained with POS as synthetic reference.
+    # strand_likelihood(exon_strand, POS) returns the data-driven
+    # probability (~0.5 for unstranded gDNA).
+    p_strand = strand_models.intergenic.strand_likelihood(
+        exon_strand, Strand.POS,
+    )
+    log_p_strand = np.log(max(p_strand, _LOG_SAFE_FLOOR))
 
     intergenic_model = insert_models.intergenic
     log_p_insert = (
@@ -407,7 +462,7 @@ def _score_gdna_candidate(
         else 0.0
     )
 
-    log_p_splice = np.log(max(splice_pen, 1e-10))
+    log_p_splice = np.log(max(splice_pen, _LOG_SAFE_FLOOR))
 
     return log_p_strand + log_p_insert + log_p_splice
 
@@ -420,7 +475,7 @@ def _score_gdna_candidate(
 def _scan_and_build_em_data(
     buffer: FragmentBuffer,
     index: HulkIndex,
-    strand_model: StrandModel,
+    strand_models: StrandModels,
     insert_models: InsertSizeModels,
     counter: ReadCounter,
     stats: PipelineStats,
@@ -441,9 +496,14 @@ def _scan_and_build_em_data(
     Multimapper alignments sharing a ``frag_id`` are grouped into a
     single EM unit (one molecule = one count).
 
+    Strand likelihoods are category-aware: each fragment uses the
+    strand model matching its genomic context (exonic_spliced for
+    SPLICED_ANNOT, exonic for UNSPLICED/SPLICED_UNANNOT, intronic
+    for INTRON).  gDNA shadows use the intergenic strand model.
+
     Parameters
     ----------
-    buffer, index, strand_model, insert_models, counter, stats, log_every
+    buffer, index, strand_models, insert_models, counter, stats, log_every
         Pipeline components (counter and stats are updated in-place).
     gdna_splice_penalties : dict or None
         Override default gDNA splice penalties per CountCategory.
@@ -486,7 +546,7 @@ def _scan_and_build_em_data(
                 t_strand,
                 bf.count_cat,
                 bf.insert_size,
-                strand_model,
+                strand_models,
                 insert_models,
             )
             t_indices_list.append(t_idx_int)
@@ -506,7 +566,8 @@ def _scan_and_build_em_data(
         if best_t_idx < 0:
             return  # No transcript candidate → no gene to shadow
         gdna_ll = _score_gdna_candidate(
-            bf.count_cat, bf.insert_size, insert_models,
+            bf.exon_strand, bf.count_cat, bf.insert_size,
+            strand_models, insert_models,
             gdna_splice_penalties,
         )
         g_idx = int(t_to_g[best_t_idx])
@@ -564,7 +625,7 @@ def _scan_and_build_em_data(
             if fc == FRAG_UNIQUE and is_spliced_annot:
                 # --- Deterministic: SPLICED_ANNOT + unique ---
                 # Annotated SJs prove RNA origin; no gDNA competition.
-                counter.assign_unique(bf, index, strand_model)
+                counter.assign_unique(bf, index, strand_models)
                 stats.n_counted_truly_unique += 1
 
             elif fc == FRAG_MULTIMAPPER:
@@ -652,7 +713,6 @@ def compute_shadow_init(
     unique_counts: np.ndarray,
     t_to_g_arr: np.ndarray,
     num_genes: int,
-    strand_model: StrandModel,
     n_intergenic: int,
     *,
     kappa: float = 1.0,
@@ -694,8 +754,6 @@ def compute_shadow_init(
         Transcript-to-gene mapping.
     num_genes : int
         Number of genes.
-    strand_model : StrandModel
-        Trained exonic strand model.
     n_intergenic : int
         Number of intergenic fragments (deterministic gDNA).
     kappa : float
@@ -746,12 +804,12 @@ def compute_shadow_init(
 def count_from_buffer(
     buffer: FragmentBuffer,
     index: HulkIndex,
-    strand_model: StrandModel,
+    strand_models: StrandModels,
     insert_models: InsertSizeModels,
     stats: PipelineStats,
     *,
     seed: int | None = None,
-    alpha: float = 1.0,
+    em_pseudocount: float = 1.0,
     em_iterations: int = 10,
     log_every: int = 1_000_000,
     gdna_splice_penalties: dict | None = None,
@@ -770,21 +828,27 @@ def count_from_buffer(
        (``compute_shadow_init``) from unique antisense counts and the
        global gDNA rate ("Iceberg" estimator: intergenic + 2× antisense).
 
+    Strand likelihoods are category-aware: each fragment's strand model
+    is selected by :meth:`StrandModels.model_for_category` (exonic_spliced
+    for SPLICED_ANNOT, exonic for UNSPLICED/SPLICED_UNANNOT, intronic
+    for INTRON).  gDNA shadows use the intergenic strand model.
+
     Parameters
     ----------
     buffer : FragmentBuffer
         Finalized buffer from :func:`scan_and_buffer`.
     index : HulkIndex
         The loaded reference index.
-    strand_model : StrandModel
-        Trained exonic strand model.
+    strand_models : StrandModels
+        Trained strand models (4-tier: exonic_spliced, exonic,
+        intronic, intergenic).
     insert_models : InsertSizeModels
         Trained insert size models.
     stats : PipelineStats
         Stats object (updated in-place with counting stats).
     seed : int or None
         Random seed for reproducibility.
-    alpha : float
+    em_pseudocount : float
         Dirichlet pseudocount for prior smoothing (default 1.0).
     em_iterations : int
         Maximum number of EM iterations (default 10).
@@ -802,7 +866,7 @@ def count_from_buffer(
     # we then use to compute shadow_init via empirical Bayes.
     counter = ReadCounter(
         index.num_transcripts, index.num_genes,
-        seed=seed, alpha=alpha,
+        seed=seed, alpha=em_pseudocount,
     )
 
     logger.info(
@@ -812,7 +876,7 @@ def count_from_buffer(
 
     # Single buffer pass: assign uniques + build EM data
     em_data = _scan_and_build_em_data(
-        buffer, index, strand_model, insert_models,
+        buffer, index, strand_models, insert_models,
         counter, stats, log_every,
         gdna_splice_penalties=gdna_splice_penalties,
     )
@@ -822,7 +886,6 @@ def count_from_buffer(
         counter.unique_counts,
         index.t_to_g_arr,
         index.num_genes,
-        strand_model,
         stats.n_intergenic,
     )
     counter.shadow_init = shadow_init
@@ -882,9 +945,9 @@ def run_pipeline(
     spill_dir: Path | str | None = None,
     sj_strand_tag: str | tuple[str, ...] = "auto",
     seed: int | None = None,
-    alpha: float = 1.0,
+    em_pseudocount: float = 1.0,
     em_iterations: int = 10,
-    gdna_splice_penalty_unannot: float = 0.01,
+    gdna_splice_penalty_unannot: float = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
 ) -> PipelineResult:
     """Run the complete counting pipeline with unified EM and gDNA modeling.
 
@@ -923,7 +986,7 @@ def run_pipeline(
         ``("XS", "ts")`` to check multiple tags in order.
     seed : int or None
         Random seed for reproducibility (default None).
-    alpha : float
+    em_pseudocount : float
         Dirichlet pseudocount for prior smoothing (default 1.0).
     em_iterations : int
         Maximum number of EM iterations (default 10).
@@ -984,11 +1047,11 @@ def run_pipeline(
         counter = count_from_buffer(
             buffer,
             index,
-            strand_models.exonic,
+            strand_models,
             insert_models,
             stats,
             seed=seed,
-            alpha=alpha,
+            em_pseudocount=em_pseudocount,
             em_iterations=em_iterations,
             log_every=log_every,
             gdna_splice_penalties=gdna_splice_penalties,

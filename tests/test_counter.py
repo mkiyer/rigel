@@ -13,7 +13,7 @@ from hulkrna.categories import (
 )
 from hulkrna.resolution import ResolvedFragment
 from hulkrna.counter import ReadCounter, EMData
-from hulkrna.strand_model import StrandModel
+from hulkrna.strand_model import StrandModel, StrandModels
 
 
 # =====================================================================
@@ -55,6 +55,17 @@ def _make_strand_model_fr():
     for _ in range(2):
         sm.observe(Strand.POS, Strand.NEG)
     return sm
+
+
+def _make_strand_models_fr():
+    """StrandModels container with FR-strand model in all slots."""
+    sm = _make_strand_model_fr()
+    return StrandModels(
+        exonic_spliced=sm,
+        exonic=sm,
+        intronic=sm,
+        intergenic=StrandModel(),
+    )
 
 
 def _make_resolved(**kwargs):
@@ -179,7 +190,7 @@ class TestClassifyStrand:
 class TestAssignUnique:
     def test_single_transcript_single_gene(self):
         index = _make_index()
-        sm = _make_strand_model_fr()
+        sms = _make_strand_models_fr()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
 
         resolved = _make_resolved(
@@ -188,7 +199,7 @@ class TestAssignUnique:
             exon_strand=Strand.POS,
             count_cat=CountCategory.UNSPLICED,
         )
-        rc.assign_unique(resolved, index, sm)
+        rc.assign_unique(resolved, index, sms)
 
         col = int(CountType.UNSPLICED_SENSE)
         assert rc.unique_counts[0, col] == 1.0
@@ -196,17 +207,17 @@ class TestAssignUnique:
 
     def test_empty_t_inds_does_nothing(self):
         index = _make_index()
-        sm = _make_strand_model_fr()
+        sms = _make_strand_models_fr()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
 
         resolved = _make_resolved(t_inds=frozenset(), n_genes=0)
-        rc.assign_unique(resolved, index, sm)
+        rc.assign_unique(resolved, index, sms)
 
         assert rc.unique_counts.sum() == 0.0
 
     def test_always_assigns_one_count(self):
         index = _make_index()
-        sm = _make_strand_model_fr()
+        sms = _make_strand_models_fr()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
 
         resolved = _make_resolved(
@@ -215,18 +226,18 @@ class TestAssignUnique:
             exon_strand=Strand.POS,
             num_hits=4,
         )
-        rc.assign_unique(resolved, index, sm)
+        rc.assign_unique(resolved, index, sms)
 
         col = int(CountType.UNSPLICED_SENSE)
         assert rc.unique_counts[0, col] == 1.0
 
     def test_writes_to_unique_not_em(self):
         index = _make_index()
-        sm = _make_strand_model_fr()
+        sms = _make_strand_models_fr()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
 
         resolved = _make_resolved(t_inds=frozenset({0}), n_genes=1)
-        rc.assign_unique(resolved, index, sm)
+        rc.assign_unique(resolved, index, sms)
 
         assert rc.unique_counts.sum() == 1.0
         assert rc.em_counts.sum() == 0.0
@@ -380,14 +391,14 @@ class TestAssignAmbiguous:
     def test_total_counts_equals_unique_plus_em(self):
         """t_counts = unique_counts + em_counts."""
         index = _make_index()
-        sm = _make_strand_model_fr()
+        sms = _make_strand_models_fr()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
 
         # 10 unique
         for _ in range(10):
             rc.assign_unique(
                 _make_resolved(t_inds=frozenset({0})),
-                index, sm,
+                index, sms,
             )
 
         # 5 ambiguous

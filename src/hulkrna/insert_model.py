@@ -18,16 +18,10 @@ Typical RNA-seq insert sizes range from 100–500 bp.  The default
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
-# Lazy import to avoid circular dependency with core.py
-def _get_CountCategory():
-    from .categories import CountCategory
-    return CountCategory
 
 
 @dataclass

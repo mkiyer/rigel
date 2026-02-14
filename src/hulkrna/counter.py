@@ -76,6 +76,9 @@ from .categories import (
 
 logger = logging.getLogger(__name__)
 
+# Epsilon added to theta before taking log to prevent log(0) in EM.
+_EM_LOG_EPSILON = 1e-300
+
 
 # Pre-computed lookup tables for sparse output
 _CT_CATEGORY_NAMES = [
@@ -92,11 +95,6 @@ _SOURCE_ORDER = [s.name.lower() for s in AssignmentSource]
 # ======================================================================
 # EMData — pre-computed CSR arrays for vectorized EM
 # ======================================================================
-
-
-# Sentinel transcript index for the gDNA pseudo-component in EM.
-# Set dynamically by ReadCounter based on num_transcripts.
-GDNA_INDEX: int = -1  # Placeholder; overridden per-counter instance
 
 
 @dataclass(slots=True)
@@ -194,7 +192,7 @@ class ReadCounter:
     shadow_init : np.ndarray or None
         Per-gene shadow initialization values, shape ``(num_genes,)``.
         If None, all shadows start with 0 (equivalent to no gDNA prior
-        beyond the Dirichlet alpha).
+        beyond the Dirichlet pseudocount).
     """
 
     def __init__(
@@ -208,7 +206,7 @@ class ReadCounter:
     ):
         self.num_transcripts = num_transcripts
         self.num_genes = num_genes
-        self.alpha = alpha
+        self.em_pseudocount = alpha
         self.rng = np.random.default_rng(seed)
 
         # Base index for per-gene shadow components in EM theta vector.
@@ -242,21 +240,14 @@ class ReadCounter:
         # Converged transcript abundance from EM (set by run_em)
         self._converged_theta: np.ndarray | None = None
 
-    # --- Backward-compatible scalar properties ---
-
-    @property
-    def gdna_index(self) -> int:
-        """Backward-compatible alias for gdna_base_index."""
-        return self.gdna_base_index
-
     @property
     def gdna_unique_count(self) -> float:
-        """Total shadow_init (backward-compatible scalar)."""
+        """Total shadow_init (empirical Bayes gDNA prior)."""
         return float(self.shadow_init.sum())
 
     @property
     def gdna_em_count(self) -> float:
-        """Total EM-assigned gDNA (backward-compatible scalar)."""
+        """Total EM-assigned gDNA count."""
         return float(self.gdna_em_counts.sum())
 
     @property
@@ -324,11 +315,16 @@ class ReadCounter:
     # Unique assignment
     # ------------------------------------------------------------------
 
-    def assign_unique(self, resolved, index, strand_model) -> None:
+    def assign_unique(self, resolved, index, strand_models) -> None:
         """Deterministic assignment for a truly unique fragment.
 
         One gene, one transcript, NH = 1 → count += 1 to
         ``unique_counts``.
+
+        Strand classification uses the category-appropriate model
+        from ``strand_models`` (selected by ``resolved.count_cat``).
+        For the fast-path (SPLICED_ANNOT), this is always
+        ``exonic_spliced``.
 
         Parameters
         ----------
@@ -336,8 +332,8 @@ class ReadCounter:
             Resolution output — must be single-gene, single-transcript.
         index : HulkIndex
             The loaded reference index.
-        strand_model : StrandModel
-            Trained strand model.
+        strand_models : StrandModels
+            Trained strand models container.
         """
         t_inds = resolved.t_inds
 
@@ -347,8 +343,9 @@ class ReadCounter:
         t_idx = int(next(iter(t_inds)))
         g_idx = int(index.t_to_g_arr[t_idx])
         gene_strand = int(index.g_to_strand_arr[g_idx])
+        sm = strand_models.model_for_category(resolved.count_cat)
         count_strand = self.classify_strand(
-            resolved.exon_strand, gene_strand, strand_model
+            resolved.exon_strand, gene_strand, sm
         )
         count_type = int(resolved.count_cat) * 3 + int(count_strand)
         self.unique_counts[t_idx, count_type] += 1.0
@@ -387,7 +384,7 @@ class ReadCounter:
         unique_totals[:self.num_transcripts] = self.unique_counts.sum(axis=1)
         unique_totals[gdna_base:gdna_base + self.num_genes] = self.shadow_init
 
-        theta = unique_totals + self.alpha
+        theta = unique_totals + self.em_pseudocount
         theta /= theta.sum()
 
         if em_data.n_units == 0 or em_data.n_candidates == 0:
@@ -401,7 +398,7 @@ class ReadCounter:
 
         for it in range(em_iterations):
             # E-step: posterior ∝ likelihood × prior
-            log_posteriors = log_liks + np.log(theta[t_indices] + 1e-300)
+            log_posteriors = log_liks + np.log(theta[t_indices] + _EM_LOG_EPSILON)
 
             # Segment-wise log-sum-exp normalization
             seg_max = np.maximum.reduceat(log_posteriors, offsets[:-1])
@@ -415,7 +412,7 @@ class ReadCounter:
             np.add.at(em_totals, t_indices, posteriors)
 
             # Update theta
-            theta_new = unique_totals + em_totals + self.alpha
+            theta_new = unique_totals + em_totals + self.em_pseudocount
             theta_new /= theta_new.sum()
 
             delta = np.abs(theta_new - theta).sum()
@@ -472,7 +469,7 @@ class ReadCounter:
         n_units = em_data.n_units
 
         # Compute final posteriors using converged theta
-        log_posteriors = log_liks + np.log(theta[t_indices] + 1e-300)
+        log_posteriors = log_liks + np.log(theta[t_indices] + _EM_LOG_EPSILON)
 
         # Segment-wise softmax normalization
         seg_max = np.maximum.reduceat(log_posteriors, offsets[:-1])

@@ -175,10 +175,3 @@ class TestStrandModelProperties:
         assert lo < hi
         assert lo > 0.9  # should be heavily skewed towards 1.0
         assert hi <= 1.0
-
-    def test_read2_antisense_mirrors_read1_sense(self):
-        sm = StrandModel()
-        assert sm.read2_antisense == sm.read1_sense
-        for _ in range(100):
-            sm.observe(Strand.POS, Strand.POS)
-        assert sm.read2_antisense == sm.read1_sense

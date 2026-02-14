@@ -1,14 +1,20 @@
 """
-hulkrna.sim.reads — Paired-end RNA-seq read simulator.
+hulkrna.sim.reads — Paired-end RNA-seq read simulator with gDNA support.
 
 Generates paired-end FASTQ reads from transcript sequences with
 configurable fragment-size distribution, read length, and error rate.
+Optionally simulates genomic DNA (gDNA) contamination from the full
+genome with an independent fragment-size profile.
+
 Read names encode ground-truth origin for post-hoc validation.
 
-Read-name format::
+Read-name format (RNA)::
 
     {t_id}:{frag_start}-{frag_end}:{strand_char}:{index}/1
-    {t_id}:{frag_start}-{frag_end}:{strand_char}:{index}/2
+
+Read-name format (gDNA)::
+
+    gdna:{genomic_start}-{genomic_end}:{strand_char}:{index}/1
 
 Library-prep convention (FR orientation)
 ----------------------------------------
@@ -21,6 +27,9 @@ Reads simulate a standard Illumina stranded (dUTP) library:
 
 - **Negative-strand transcript**: R1 maps to + strand, R2 maps to − strand.
   After R2 flip → both report − → correct.
+
+- **gDNA**: sampled from both strands equally (unstranded).
+  FR library convention still applies for the orientation of reads.
 """
 
 import logging
@@ -35,7 +44,7 @@ from .genome import MutableGenome, reverse_complement
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SimConfig", "ReadSimulator"]
+__all__ = ["SimConfig", "GDNAConfig", "ReadSimulator"]
 
 # DNA bases for error injection
 _DNA_BASES = np.array(list("ACGT"), dtype="<U1")
@@ -72,13 +81,55 @@ class SimConfig:
     seed: int = 42
 
 
+@dataclass
+class GDNAConfig:
+    """Configuration for genomic DNA contamination simulation.
+
+    gDNA fragments are sampled uniformly from the full genome
+    (both strands equally) with an independent fragment-size
+    distribution.  The ``abundance`` parameter uses the same
+    relative scale as transcript abundances — the fraction of
+    total fragments that are gDNA is determined by the ratio
+    of gDNA abundance × effective_length to total weight.
+
+    Attributes
+    ----------
+    abundance : float
+        Relative abundance of gDNA (same scale as transcript
+        abundances).  For example, if a transcript has
+        abundance=100 and gDNA has abundance=10, roughly
+        ``10 × genome_eff_len / (100 × t_eff_len + 10 × genome_eff_len)``
+        of fragments will be gDNA.
+    frag_mean : float
+        Mean gDNA fragment length (typically larger than RNA).
+    frag_std : float
+        Standard deviation of gDNA fragment length.
+    frag_min : int
+        Minimum gDNA fragment length.
+    frag_max : int
+        Maximum gDNA fragment length.
+    """
+
+    abundance: float = 10.0
+    frag_mean: float = 350.0
+    frag_std: float = 100.0
+    frag_min: int = 100
+    frag_max: int = 1000
+
+
 class ReadSimulator:
-    """Paired-end RNA-seq read simulator.
+    """Paired-end RNA-seq read simulator with optional gDNA contamination.
 
     Generates reads from transcript sequences extracted from the genome
     by concatenating exon coordinates. Fragment lengths are drawn from
     a truncated normal distribution. Transcript selection is weighted
     by ``abundance × effective_length``.
+
+    When ``gdna_config`` is provided, gDNA fragments are also simulated.
+    gDNA is sampled uniformly from the full genome (both strands equally)
+    with its own fragment-size distribution. The total ``n_fragments``
+    is split between RNA and gDNA proportionally based on their
+    abundance-weighted effective lengths.
 
     Parameters
     ----------
@@ -88,6 +139,8 @@ class ReadSimulator:
         Transcript annotations with exon coordinates and abundance.
     config : SimConfig or None
         Simulation parameters. ``None`` uses defaults.
+    gdna_config : GDNAConfig or None
+        gDNA contamination config. ``None`` disables gDNA simulation.
     """
 
     # Oversampling ratio to reduce rejection-sampling iterations
@@ -99,9 +152,11 @@ class ReadSimulator:
         genome: MutableGenome,
         transcripts: list[Transcript],
         config: SimConfig | None = None,
+        gdna_config: GDNAConfig | None = None,
     ):
         self.genome = genome
         self.config = config or SimConfig()
+        self.gdna_config = gdna_config
         self._rng = np.random.default_rng(self.config.seed)
 
         # Extract transcript sequences and compute lengths

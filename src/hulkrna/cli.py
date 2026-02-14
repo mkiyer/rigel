@@ -7,8 +7,6 @@ Subcommands:
     hulkrna index   — Build reference index from FASTA + GTF
     hulkrna count   — Single-pass Bayesian read counting
     hulkrna sim     — Generate synthetic test scenarios
-    hulkrna gather  — (not yet implemented)
-    hulkrna pileup  — (not yet implemented)
 """
 
 import logging
@@ -82,8 +80,8 @@ def count_command(args: argparse.Namespace) -> int:
         seed = args.seed
         logging.info(f"Using provided seed: {seed}")
 
-    alpha = args.alpha
-    logging.info(f"Using Dirichlet pseudocount alpha: {alpha}")
+    alpha = args.em_pseudocount
+    logging.info(f"Using Dirichlet pseudocount: {alpha}")
 
     # Define output file paths
     strand_json = output_dir / "strand_model.json"
@@ -117,7 +115,7 @@ def count_command(args: argparse.Namespace) -> int:
             "index_dir": str(index_dir.resolve()),
             "output_dir": str(output_dir.resolve()),
             "seed": seed,
-            "alpha": alpha,
+            "em_pseudocount": alpha,
             "em_iterations": args.em_iterations,
             "skip_duplicates": not args.keep_duplicates,
             "include_multimap": args.include_multimap,
@@ -136,7 +134,7 @@ def count_command(args: argparse.Namespace) -> int:
         include_multimap=args.include_multimap,
         sj_strand_tag=sj_strand_tag,
         seed=seed,
-        alpha=alpha,        em_iterations=args.em_iterations,    )
+        em_pseudocount=alpha,        em_iterations=args.em_iterations,    )
 
     # Log stats
     for key, val in sorted(result.stats.to_dict().items()):
@@ -238,16 +236,6 @@ def sim_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def gather_command(args: argparse.Namespace) -> int:
-    """Placeholder for ``hulkrna gather``."""
-    sys.exit("Error: 'hulkrna gather' is not yet implemented.")
-
-
-def pileup_command(args: argparse.Namespace) -> int:
-    """Placeholder for ``hulkrna pileup``."""
-    sys.exit("Error: 'hulkrna pileup' is not yet implemented.")
-
-
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -333,8 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducibility (default: use current timestamp)",
     )
     cnt.add_argument(
-        "--alpha", dest="alpha", type=float, default=1.0,
-        help="Dirichlet pseudocount for prior smoothing (default: 1.0)",
+        "--em-pseudocount", dest="em_pseudocount", type=float, default=1.0,
+        help="Dirichlet pseudocount for EM prior smoothing (default: 1.0)",
     )
     cnt.add_argument(
         "--em-iterations", dest="em_iterations", type=int, default=10,
@@ -372,18 +360,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of fragments to simulate (default: 1000, overridden by YAML)",
     )
     sim.set_defaults(func=sim_command)
-
-    # --- GATHER (stub) -------------------------------------------------------
-    gth = subparsers.add_parser(
-        "gather", help="Aggregate per-sample counts (not yet implemented)",
-    )
-    gth.set_defaults(func=gather_command)
-
-    # --- PILEUP (stub) -------------------------------------------------------
-    pup = subparsers.add_parser(
-        "pileup", help="Generate coverage tracks (not yet implemented)",
-    )
-    pup.set_defaults(func=pileup_command)
 
     return parser
 

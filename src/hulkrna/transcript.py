@@ -9,7 +9,6 @@ Exon intervals in 0-based half-open coordinates.
 import collections
 import logging
 from dataclasses import dataclass, field
-from typing import Generator, List, Optional
 
 from .types import Interval, Strand
 from .gtf import GTF
@@ -24,20 +23,20 @@ def _first_attr(val):
 
 @dataclass(slots=True)
 class Transcript:
-    ref: Optional[str] = None
+    ref: str | None = None
     strand: Strand = Strand.NONE
-    exons: List[Interval] = field(default_factory=list)
-    length: Optional[int] = None
-    t_id: Optional[str] = None
-    g_id: Optional[str] = None
-    g_name: Optional[str] = None
-    g_type: Optional[str] = None
+    exons: list[Interval] = field(default_factory=list)
+    length: int | None = None
+    t_id: str | None = None
+    g_id: str | None = None
+    g_name: str | None = None
+    g_type: str | None = None
     t_index: int = -1
     g_index: int = -1
     is_basic: bool = False
     is_mane: bool = False
     is_ccds: bool = False
-    abundance: Optional[float] = None
+    abundance: float | None = None
 
     @classmethod
     def from_gtf(cls, feature) -> 'Transcript':
@@ -102,7 +101,7 @@ class Transcript:
         }
     
     @staticmethod
-    def read_gtf(gtf_file: str) -> List['Transcript']:
+    def read_gtf(gtf_file: str) -> list['Transcript']:
         '''
         read GTF and construct list of Transcript objects
         '''

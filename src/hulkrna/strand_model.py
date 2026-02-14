@@ -26,7 +26,6 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Tuple
 
 from .types import Strand
 
@@ -160,20 +159,12 @@ class StrandModel:
         """True if read 1 is predominantly sense (FR protocol)."""
         return self.p_r1_sense >= 0.5
 
-    @property
-    def read2_antisense(self) -> bool:
-        """True if read 2 is predominantly antisense (FR protocol).
-
-        Mirrors ``read1_sense`` since read orientation is complementary.
-        """
-        return self.read1_sense
-
     def posterior_variance(self) -> float:
         """Variance of the Beta posterior."""
         a, b = self.alpha, self.beta
         return (a * b) / ((a + b) ** 2 * (a + b + 1))
 
-    def posterior_95ci(self) -> Tuple[float, float]:
+    def posterior_95ci(self) -> tuple[float, float]:
         """95% credible interval for p_r1_sense."""
         from scipy.stats import beta as beta_dist
         return (
@@ -252,7 +243,6 @@ class StrandModel:
             },
             "protocol": {
                 "read1_sense": bool(self.read1_sense),
-                "read2_antisense": bool(self.read2_antisense),
             },
         }
 
@@ -313,64 +303,112 @@ class StrandModel:
 class StrandModels:
     """Container for region-specific strand models.
 
-    Holds three independently-trained :class:`StrandModel` instances:
+    Holds four independently-trained :class:`StrandModel` instances
+    organized by genomic region and purity:
 
-    * **exonic** — trained from SPLICED_ANNOT fragments with unique
-      gene assignment and unambiguous exon/SJ strands.  This is the
-      primary model used for transcript scoring.
-    * **intronic** — trained from INTRON fragments (sense vs antisense
-      relative to the overlapping gene).  Captures intronic strand
-      distribution for gDNA evidence estimation.
-    * **intergenic** — trained from intergenic fragments (sense vs
-      antisense relative to nearby genes, if strand information is
-      available).  Used alongside the intronic model for global gDNA
-      rate estimation.
+    * **exonic_spliced** *(pure RNA)* — trained from SPLICED_ANNOT
+      fragments with unique gene assignment and unambiguous exon/SJ
+      strands.  Annotated splice junctions prove RNA origin, making
+      this the gold-standard measure of library strand specificity.
+      This is the primary model used for transcript scoring in EM.
+    * **exonic** *(RNA + gDNA mixture)* — trained from ALL exonic
+      fragments (SPLICED_ANNOT + SPLICED_UNANNOT + UNSPLICED) with
+      unique gene assignment.  Gene annotation strand is truth.
+      Dilution toward 50% relative to ``exonic_spliced`` indicates
+      gDNA contamination in exonic regions.
+    * **intronic** *(nascent RNA + gDNA mixture)* — trained from
+      INTRON fragments with unique gene assignment.  Gene annotation
+      strand is truth.  Dilution toward 50% relative to
+      ``exonic_spliced`` indicates gDNA fraction in intronic regions.
+    * **intergenic** *(~100% gDNA)* — trained from intergenic
+      fragments.  Uses POS as a synthetic reference strand so
+      ``n_same`` counts POS-aligned and ``n_opposite`` counts
+      NEG-aligned.  Expected ~50/50 since gDNA is unstranded.
 
-    The ``strand_likelihood`` and ``classify_strand`` convenience
-    methods delegate to the exonic model for backward compatibility.
+    The ``strand_likelihood``, ``p_r1_sense``, etc. convenience
+    methods delegate to ``exonic_spliced`` (the pure RNA model).
     """
 
+    exonic_spliced: StrandModel = field(default_factory=StrandModel)
     exonic: StrandModel = field(default_factory=StrandModel)
     intronic: StrandModel = field(default_factory=StrandModel)
     intergenic: StrandModel = field(default_factory=StrandModel)
 
     # ------------------------------------------------------------------
-    # Delegation to exonic model (backward compatibility)
+    # Category-aware model selection
+    # ------------------------------------------------------------------
+
+    def model_for_category(self, count_cat: int) -> StrandModel:
+        """Select the strand model matching a fragment's category.
+
+        * **SPLICED_ANNOT** → ``exonic_spliced`` (pure RNA, gold standard)
+        * **SPLICED_UNANNOT / UNSPLICED** → ``exonic`` (RNA + gDNA mixture)
+        * **INTRON** → ``intronic`` (nascent RNA + gDNA mixture)
+
+        The category-specific model reflects the expected gDNA dilution
+        in each genomic region: exonic_spliced has the highest strand
+        specificity (annotated SJs prove RNA), exonic is slightly
+        diluted, and intronic is more diluted.  Using the matching
+        model ensures that strand-based likelihoods accurately reflect
+        each region's RNA purity.
+
+        Parameters
+        ----------
+        count_cat : int
+            ``CountCategory`` value (0–3).
+
+        Returns
+        -------
+        StrandModel
+        """
+        from .categories import CountCategory
+
+        cat = CountCategory(count_cat)
+        if cat == CountCategory.SPLICED_ANNOT:
+            return self.exonic_spliced
+        if cat == CountCategory.INTRON:
+            return self.intronic
+        # UNSPLICED and SPLICED_UNANNOT → exonic (all)
+        return self.exonic
+
+    # ------------------------------------------------------------------
+    # Delegation to exonic_spliced model (pure RNA gold standard)
     # ------------------------------------------------------------------
 
     def strand_likelihood(
         self, exon_strand: Strand, gene_strand: Strand,
     ) -> float:
-        """Delegate to the exonic strand model."""
-        return self.exonic.strand_likelihood(exon_strand, gene_strand)
+        """Delegate to the exonic_spliced strand model."""
+        return self.exonic_spliced.strand_likelihood(exon_strand, gene_strand)
 
     @property
     def p_r1_sense(self) -> float:
-        """Exonic model's P(read 1 is sense)."""
-        return self.exonic.p_r1_sense
+        """Exonic spliced model's P(read 1 is sense)."""
+        return self.exonic_spliced.p_r1_sense
 
     @property
     def strand_specificity(self) -> float:
-        """Exonic model's strand specificity."""
-        return self.exonic.strand_specificity
+        """Exonic spliced model's strand specificity."""
+        return self.exonic_spliced.strand_specificity
 
     @property
     def read1_sense(self) -> bool:
-        """Exonic model's read1_sense flag."""
-        return self.exonic.read1_sense
+        """Exonic spliced model's read1_sense flag."""
+        return self.exonic_spliced.read1_sense
 
     @property
     def n_observations(self) -> int:
-        """Exonic model's observation count."""
-        return self.exonic.n_observations
+        """Exonic spliced model's observation count."""
+        return self.exonic_spliced.n_observations
 
     # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
-        """JSON-serializable summary of all three strand models."""
+        """JSON-serializable summary of all four strand models."""
         return {
+            "exonic_spliced": self.exonic_spliced.to_dict(),
             "exonic": self.exonic.to_dict(),
             "intronic": self.intronic.to_dict(),
             "intergenic": self.intergenic.to_dict(),
@@ -387,11 +425,11 @@ class StrandModels:
         path = Path(path)
         d = self.to_dict()
 
-        # Add 95% CI for exonic model if enough observations
-        if self.exonic.n_observations >= 10:
+        # Add 95% CI for exonic_spliced model if enough observations
+        if self.exonic_spliced.n_observations >= 10:
             try:
-                lo, hi = self.exonic.posterior_95ci()
-                d["exonic"]["posterior"]["ci_95"] = [
+                lo, hi = self.exonic_spliced.posterior_95ci()
+                d["exonic_spliced"]["posterior"]["ci_95"] = [
                     float(round(lo, 6)), float(round(hi, 6)),
                 ]
             except ImportError:
@@ -405,6 +443,9 @@ class StrandModels:
     def log_summary(self) -> None:
         """Log a human-readable summary of all strand models."""
         logger.info("Strand models:")
+        logger.info(f"  [exonic_spliced]  {self.exonic_spliced.n_observations:,} obs, "
+                     f"p_r1_sense={self.exonic_spliced.p_r1_sense:.4f}, "
+                     f"specificity={self.exonic_spliced.strand_specificity:.4f}")
         logger.info(f"  [exonic]  {self.exonic.n_observations:,} obs, "
                      f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
                      f"specificity={self.exonic.strand_specificity:.4f}")

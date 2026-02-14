@@ -1,14 +1,14 @@
 import gzip
 import logging
 import re
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Generator, Iterable, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
 
 
-AttrValue = Union[str, List[str]]
+AttrValue = str | list[str]
 
 
 @dataclass(slots=True)
@@ -21,11 +21,11 @@ class GTF:
     feature: str
     start: int
     end: int
-    score: Optional[float]
+    score: float | None
     strand: str
     phase: str
-    attrs: Dict[str, AttrValue] = field(default_factory=dict)
-    tags: Set[str] = field(default_factory=set)
+    attrs: dict[str, AttrValue] = field(default_factory=dict)
+    tags: set[str] = field(default_factory=set)
 
     # Pre-compiled regex for performance
     # Matches: key "value";  or  key value;
@@ -128,13 +128,13 @@ class GTF:
 
 
     @classmethod
-    def _parse_attrs(cls, raw_attr_field: str) -> tuple[Dict[str, AttrValue], Set[str]]:
+    def _parse_attrs(cls, raw_attr_field: str) -> tuple[dict[str, AttrValue], set[str]]:
         """
         Parse the attribute column into attrs and tags.
         Preserves duplicate keys (e.g., multiple ont values in GENCODE) as lists.
         """
-        attrs: Dict[str, AttrValue] = {}
-        tags: Set[str] = set()
+        attrs: dict[str, AttrValue] = {}
+        tags: set[str] = set()
 
         for match in cls.ATTR_TOKEN_PATTERN.finditer(raw_attr_field):
             key = match.group(1)
@@ -157,7 +157,7 @@ class GTF:
 
 
     @staticmethod
-    def parse_file(filepath: Union[str, Path]) -> Generator['GTF', None, None]:
+    def parse_file(filepath: str | Path) -> Generator['GTF', None, None]:
         """
         Parse a GTF file and yield GTF objects.
         Handles both plain text and gzip files (.gz).

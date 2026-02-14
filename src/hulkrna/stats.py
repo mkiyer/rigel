@@ -76,13 +76,9 @@ class PipelineStats:
     # --- gDNA contamination ---
     n_gdna_em: int = 0
 
-    # --- Per-gene gDNA evidence (for hierarchical shadow model) ---
-    n_intronic_antisense: int = 0
-    n_exonic_antisense: int = 0
-
     @property
     def n_intergenic(self) -> int:
-        """Total intergenic fragments (backward-compatible)."""
+        """Total intergenic fragments (unspliced + spliced)."""
         return self.n_intergenic_unspliced + self.n_intergenic_spliced
 
     @property
