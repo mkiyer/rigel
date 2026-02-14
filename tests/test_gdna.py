@@ -22,10 +22,17 @@ from hulkrna.types import Strand
 
 
 def _make_insert_models(n_obs=200, size=250):
-    """InsertSizeModels with observations for intergenic + unspliced."""
+    """InsertSizeModels with observations for all categories + intergenic.
+
+    All category models and intergenic share the same observation count
+    so they produce identical log-likelihoods.
+    """
     im = InsertSizeModels()
     for _ in range(n_obs):
+        im.observe(size, CountCategory.SPLICED_ANNOT)
         im.observe(size, CountCategory.UNSPLICED)
+        im.observe(size, CountCategory.SPLICED_UNANNOT)
+        im.observe(size, CountCategory.INTRON)
         im.observe(size, None)  # intergenic (count_cat=None)
     return im
 
@@ -106,25 +113,31 @@ class TestScoreGDNA:
         """UNSPLICED gets splice_penalty=1.0 → log(1)=0."""
         im = _make_insert_models()
         sms = _make_strand_models_default()
+        cat = int(CountCategory.UNSPLICED)
         score = _score_gdna_candidate(
-            int(Strand.POS), int(CountCategory.UNSPLICED), 250,
+            int(Strand.POS), cat, 250,
             sms, im,
         )
+        # gDNA uses same category insert model as RNA candidates
+        isize_model = im.category_models.get(cat, im.global_model)
         # log(0.5) + log(P_insert) + log(1.0)
         assert score < 0  # log(0.5) is negative
         assert score == pytest.approx(
-            np.log(0.5) + im.intergenic.log_likelihood(250)
+            np.log(0.5) + isize_model.log_likelihood(250)
         )
 
     def test_intron_no_penalty(self):
         """INTRON gets splice_penalty=1.0."""
         im = _make_insert_models()
         sms = _make_strand_models_default()
+        cat = int(CountCategory.INTRON)
         score = _score_gdna_candidate(
-            int(Strand.POS), int(CountCategory.INTRON), 250,
+            int(Strand.POS), cat, 250,
             sms, im,
         )
-        expected = np.log(0.5) + im.intergenic.log_likelihood(250)
+        # gDNA uses same category insert model as RNA candidates
+        isize_model = im.category_models.get(cat, im.global_model)
+        expected = np.log(0.5) + isize_model.log_likelihood(250)
         assert score == pytest.approx(expected)
 
     def test_spliced_unannot_penalty(self):
@@ -148,13 +161,15 @@ class TestScoreGDNA:
         """Custom penalty dict overrides defaults."""
         im = _make_insert_models()
         sms = _make_strand_models_default()
+        cat = int(CountCategory.UNSPLICED)
         custom = {CountCategory.UNSPLICED: 0.5}
         score = _score_gdna_candidate(
-            int(Strand.POS), int(CountCategory.UNSPLICED), 250,
+            int(Strand.POS), cat, 250,
             sms, im,
             gdna_splice_penalties=custom,
         )
-        expected = np.log(0.5) + im.intergenic.log_likelihood(250) + np.log(0.5)
+        isize_model = im.category_models.get(cat, im.global_model)
+        expected = np.log(0.5) + isize_model.log_likelihood(250) + np.log(0.5)
         assert score == pytest.approx(expected)
 
     def test_zero_insert_size(self):
@@ -764,12 +779,40 @@ class TestStrandModelsContainer:
         assert sm.intergenic.n_observations == 1
 
     def test_model_for_category(self):
-        """model_for_category selects the right sub-model."""
-        from hulkrna.strand_model import StrandModels
-        from hulkrna.categories import CountCategory
+        """model_for_category returns the best pure-RNA model for all categories.
 
-        sm = StrandModels()
-        assert sm.model_for_category(int(CountCategory.SPLICED_ANNOT)) is sm.exonic_spliced
-        assert sm.model_for_category(int(CountCategory.SPLICED_UNANNOT)) is sm.exonic
-        assert sm.model_for_category(int(CountCategory.UNSPLICED)) is sm.exonic
-        assert sm.model_for_category(int(CountCategory.INTRON)) is sm.intronic
+        The new design selects a single pure-RNA strand model (either
+        exonic_spliced if it has enough observations, or an estimated
+        RNA model from the exonic/intergenic contrast) and returns
+        it for ALL categories.  The cached result is consistent
+        across calls.
+        """
+        from hulkrna.strand_model import StrandModels, StrandModel
+        from hulkrna.categories import CountCategory
+        from hulkrna.types import Strand
+
+        # --- Case 1: exonic_spliced has enough observations ---
+        sm1 = StrandModels()
+        for _ in range(20):
+            sm1.exonic_spliced.observe(Strand.POS, Strand.POS)
+        # All categories should return the same model (exonic_spliced)
+        m = sm1.model_for_category(int(CountCategory.SPLICED_ANNOT))
+        assert m is sm1.exonic_spliced
+        assert sm1.model_for_category(int(CountCategory.UNSPLICED)) is m
+        assert sm1.model_for_category(int(CountCategory.INTRON)) is m
+
+        # --- Case 2: exonic_spliced insufficient, exonic sufficient ---
+        sm2 = StrandModels()
+        for _ in range(20):
+            sm2.exonic.observe(Strand.POS, Strand.POS)
+            sm2.intergenic.observe(Strand.POS, Strand.POS)
+        # Should return estimated RNA model (not exonic_spliced)
+        m2 = sm2.model_for_category(int(CountCategory.UNSPLICED))
+        assert m2 is not sm2.exonic_spliced
+        # Cached — same object for all categories
+        assert sm2.model_for_category(int(CountCategory.INTRON)) is m2
+
+        # --- Case 3: default (no observations) → falls back to exonic ---
+        sm3 = StrandModels()
+        m3 = sm3.model_for_category(int(CountCategory.UNSPLICED))
+        assert m3 is sm3.exonic  # exonic returned as fallback

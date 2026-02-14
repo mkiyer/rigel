@@ -225,14 +225,19 @@ def run_benchmark(
     t_counts = pipeline_result.counter.t_counts  # (N_t, 12) array
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
 
-    # Pipeline gDNA count
-    n_gdna_pipeline = float(pipeline_result.counter.gdna_total)
-
     # Build t_id → t_index mapping
     t_id_to_index = {t.t_id: t.t_index for t in scenario_result.transcripts}
 
     # Stats
     stats = pipeline_result.stats
+
+    # Pipeline gDNA count: intergenic (deterministic) + EM-assigned genic gDNA.
+    # We use gdna_em_count (actual fragment assignments) rather than
+    # gdna_total (which also includes shadow_init prior, a Bayesian
+    # regularization term that is not a real fragment count).
+    n_gdna_pipeline = float(
+        stats.n_intergenic + pipeline_result.counter.gdna_em_count
+    )
 
     # Per-transcript accuracy
     transcript_results: list[TranscriptAccuracy] = []

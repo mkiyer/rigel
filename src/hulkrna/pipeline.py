@@ -371,9 +371,12 @@ def _score_candidate(
 ) -> tuple[float, int]:
     """Compute data log-likelihood and count type for one candidate.
 
-    Selects the category-appropriate strand model via
-    :meth:`StrandModels.model_for_category` so that strand likelihoods
-    reflect the expected gDNA dilution for each genomic region.
+    Selects the best pure-RNA strand model via
+    :meth:`StrandModels.model_for_category`.  When ``exonic_spliced``
+    has sufficient observations it is used directly; otherwise a
+    decontaminated model estimated from the exonic/intergenic contrast
+    provides strand likelihoods that reflect pure RNA specificity
+    rather than the gDNA-diluted mixture.
 
     Returns
     -------
@@ -434,8 +437,13 @@ def _score_gdna_candidate(
       synthetic reference (data-driven replacement for hard-coded
       0.5).  For well-behaved libraries this is ~0.5 since gDNA
       is unstranded, but the model learns from real data.
-    - **Insert size**: uses the *intergenic* insert-size model
-      (learned from intergenic fragments which are high-confidence gDNA).
+    - **Insert size**: uses the **same** category-specific insert
+      model as the transcript candidates (via ``count_cat``).
+      Since all RNA candidates in the same EM unit share this model,
+      the insert component cancels out in the RNA-vs-gDNA posterior
+      ratio, ensuring separation is driven by the strand signal alone.
+      This prevents contaminated or sparse insert-size histograms
+      from degrading the strand-based gDNA discrimination.
     - **Splice penalty**: INTRON/UNSPLICED get 1.0 (fully compatible),
       SPLICED_UNANNOT gets a configurable penalty (default 0.01).
 
@@ -455,9 +463,13 @@ def _score_gdna_candidate(
     )
     log_p_strand = np.log(max(p_strand, _LOG_SAFE_FLOOR))
 
-    intergenic_model = insert_models.intergenic
+    # Use the same category insert model as transcript candidates
+    # so that insert size cancels in the RNA-vs-gDNA posterior ratio.
+    isize_model = insert_models.category_models.get(
+        count_cat, insert_models.global_model
+    )
     log_p_insert = (
-        intergenic_model.log_likelihood(insert_size)
+        isize_model.log_likelihood(insert_size)
         if insert_size > 0
         else 0.0
     )
@@ -715,7 +727,9 @@ def compute_shadow_init(
     num_genes: int,
     n_intergenic: int,
     *,
+    em_locus_t_indices: np.ndarray | None = None,
     kappa: float = 1.0,
+    kappa_em: float = 0.05,
 ) -> np.ndarray:
     """Compute per-gene gDNA shadow priors via empirical Bayes shrinkage.
 
@@ -742,9 +756,12 @@ def compute_shadow_init(
       and strands)
     - ``κ`` — shrinkage strength toward global estimate
 
-    The depth-scaling ensures the global prior is proportional to
-    each gene's sequencing depth: a deeply-sequenced gene gets a
-    larger absolute gDNA floor than a lowly-sequenced gene.
+    When ``em_locus_t_indices`` is provided, EM-bound fragments are
+    included in ``n_total`` (so θ_global reflects ALL fragments, not
+    just deterministic ones) and contribute a discounted gene depth
+    (scaled by ``kappa_em``) for genes with zero unique counts.  This
+    prevents the shadow prior from collapsing to zero for single-exon
+    genes where ALL fragments enter the EM.
 
     Parameters
     ----------
@@ -756,8 +773,16 @@ def compute_shadow_init(
         Number of genes.
     n_intergenic : int
         Number of intergenic fragments (deterministic gDNA).
+    em_locus_t_indices : np.ndarray or None
+        Best-transcript indices for each EM unit (from EMData).
+        Used to compute per-gene EM fragment counts and include
+        EM fragments in the global denominator.
     kappa : float
-        Shrinkage strength (default 1.0).
+        Shrinkage strength for unique-count depth (default 1.0).
+    kappa_em : float
+        Shrinkage strength for EM-count depth (default 0.05).
+        Much smaller than *kappa* because EM fragments are ambiguous
+        and their gene assignment is uncertain.
 
     Returns
     -------
@@ -766,14 +791,26 @@ def compute_shadow_init(
     """
     from .categories import CountStrand
 
-    n_total = float(unique_counts.sum()) + n_intergenic
-    if n_total == 0:
-        return np.zeros(num_genes, dtype=np.float64)
-
     # Per-transcript total unique counts → per-gene depth
     t_depth = unique_counts.sum(axis=1)  # (N_t,)
     gene_depth = np.zeros(num_genes, dtype=np.float64)
     np.add.at(gene_depth, t_to_g_arr, t_depth)
+
+    # Per-gene EM fragment counts (if available)
+    n_em_total = 0
+    em_gene_depth = np.zeros(num_genes, dtype=np.float64)
+    if em_locus_t_indices is not None and len(em_locus_t_indices) > 0:
+        n_em_total = len(em_locus_t_indices)
+        # Map each EM unit's best transcript → gene (skip -1 sentinel)
+        valid = em_locus_t_indices >= 0
+        if valid.any():
+            em_gene_indices = t_to_g_arr[em_locus_t_indices[valid]]
+            np.add.at(em_gene_depth, em_gene_indices, 1.0)
+
+    # Total fragment count including EM-bound fragments
+    n_total = float(unique_counts.sum()) + n_intergenic + n_em_total
+    if n_total == 0:
+        return np.zeros(num_genes, dtype=np.float64)
 
     # Per-gene antisense counts
     # Antisense columns: indices 2, 5, 8, 11 (stride 3, offset 2)
@@ -791,7 +828,12 @@ def compute_shadow_init(
     theta_global = estimated_gdna / n_total
 
     # Per-gene shadow initialization — depth-scaled shrinkage
-    shadow_init = 2.0 * g_antisense + kappa * gene_depth * theta_global
+    # Two-tier: unique depth uses full kappa, EM depth uses discounted kappa.
+    shadow_init = (
+        2.0 * g_antisense
+        + kappa * gene_depth * theta_global
+        + kappa_em * em_gene_depth * theta_global
+    )
 
     return shadow_init
 
@@ -887,6 +929,7 @@ def count_from_buffer(
         index.t_to_g_arr,
         index.num_genes,
         stats.n_intergenic,
+        em_locus_t_indices=em_data.locus_t_indices,
     )
     counter.shadow_init = shadow_init
 

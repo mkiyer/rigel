@@ -334,23 +334,35 @@ class StrandModels:
     intronic: StrandModel = field(default_factory=StrandModel)
     intergenic: StrandModel = field(default_factory=StrandModel)
 
+    # Cached RNA model (computed lazily in model_for_category)
+    _rna_model_cache: StrandModel | None = field(
+        default=None, repr=False, compare=False,
+    )
+
     # ------------------------------------------------------------------
     # Category-aware model selection
     # ------------------------------------------------------------------
 
+    # Minimum observations for exonic_spliced to be considered reliable
+    _MIN_SPLICED_OBS = 10
+
     def model_for_category(self, count_cat: int) -> StrandModel:
-        """Select the strand model matching a fragment's category.
+        """Select the best pure-RNA strand model for EM transcript scoring.
 
-        * **SPLICED_ANNOT** → ``exonic_spliced`` (pure RNA, gold standard)
-        * **SPLICED_UNANNOT / UNSPLICED** → ``exonic`` (RNA + gDNA mixture)
-        * **INTRON** → ``intronic`` (nascent RNA + gDNA mixture)
+        Returns the most specific pure-RNA strand model available:
 
-        The category-specific model reflects the expected gDNA dilution
-        in each genomic region: exonic_spliced has the highest strand
-        specificity (annotated SJs prove RNA), exonic is slightly
-        diluted, and intronic is more diluted.  Using the matching
-        model ensures that strand-based likelihoods accurately reflect
-        each region's RNA purity.
+        1. **exonic_spliced** if it has ≥ 10 observations (gold standard)
+        2. **estimated RNA model** derived from the exonic/intergenic
+           contrast when exonic_spliced is unavailable (e.g., single-
+           exon genes with no splice junctions)
+
+        The returned model is used for **transcript** candidate scoring
+        in the EM, where it competes against the intergenic model
+        (used for gDNA candidates).  Using diluted mixture models
+        (exonic, intronic) would weaken the strand-based contrast
+        between RNA and gDNA, reducing separation accuracy.
+
+        The result is cached after the first call.
 
         Parameters
         ----------
@@ -361,15 +373,118 @@ class StrandModels:
         -------
         StrandModel
         """
-        from .categories import CountCategory
+        if self._rna_model_cache is not None:
+            return self._rna_model_cache
+        # exonic_spliced is always the best choice when available
+        if self.exonic_spliced.n_observations >= self._MIN_SPLICED_OBS:
+            self._rna_model_cache = self.exonic_spliced
+        else:
+            self._rna_model_cache = self._estimated_rna_model()
+        return self._rna_model_cache
 
-        cat = CountCategory(count_cat)
-        if cat == CountCategory.SPLICED_ANNOT:
-            return self.exonic_spliced
-        if cat == CountCategory.INTRON:
-            return self.intronic
-        # UNSPLICED and SPLICED_UNANNOT → exonic (all)
-        return self.exonic
+    def _estimated_rna_model(self) -> StrandModel:
+        """Estimate pure-RNA strand model from the exonic/intergenic contrast.
+
+        When ``exonic_spliced`` has too few observations (e.g., genes
+        with no splice junctions), we can estimate the RNA strand
+        specificity from the difference between the ``exonic`` model
+        (RNA + gDNA mixture) and the ``intergenic`` model (pure gDNA).
+
+        The ``exonic`` model's deviation from the ``intergenic`` model
+        (≈0.5) reveals the RNA strand signal.  We amplify this signal
+        by computing the maximum-likelihood pure-RNA parameters
+        assuming a mixture model:
+
+            p_exonic = f_rna × p_rna + (1 − f_rna) × p_intergenic
+
+        We don't know ``f_rna`` exactly, but we can extract a robust
+        estimate by treating the exonic model's observations as a
+        mixture and using the intergenic model as the gDNA baseline.
+        The exonic model's raw counts (n_same, n_opposite) contain
+        both RNA and gDNA evidence.  We subtract the expected gDNA
+        contribution (proportional to n_obs × p_intergenic) to get
+        net RNA evidence, then construct a Beta posterior from that.
+
+        If the exonic model also has too few observations, returns
+        the exonic model as-is (its Beta prior provides a reasonable
+        uniform fallback).
+
+        Returns
+        -------
+        StrandModel
+            Synthetic model with estimated pure-RNA strand parameters.
+        """
+        if self.exonic.n_observations < self._MIN_SPLICED_OBS:
+            return self.exonic
+
+        # p_intergenic is the probability a gDNA fragment aligns in the
+        # "same" direction as the gene strand.  For unstranded gDNA,
+        # this should be ≈ 0.5.
+        p_ig = self.intergenic.p_r1_sense
+
+        # Exonic raw counts: n_same (exon==gene), n_opposite (exon!=gene)
+        n_same = self.exonic.n_same
+        n_opp = self.exonic.n_opposite
+        n_total = n_same + n_opp
+
+        # Subtract expected gDNA contribution from exonic observations.
+        # gDNA fragments contribute p_ig to n_same and (1-p_ig) to n_opp.
+        # We don't know how many gDNA fragments are in the exonic pool,
+        # but we can use a conservative estimate: the intergenic model
+        # tells us where gDNA would land.  The key insight is that
+        # ANY deviation of the exonic model from the intergenic model
+        # is RNA signal.
+        #
+        # Net RNA evidence:
+        #   rna_same = n_same - n_total * p_ig  (excess same-direction)
+        #   rna_opp  = n_opp  - n_total * (1 - p_ig)
+        #
+        # Since rna_same + rna_opp = 0, we only need one:
+        rna_excess = n_same - n_total * p_ig  # positive = FR, negative = RF
+
+        # Convert to a Beta posterior.  The magnitude of the excess
+        # indicates the number of effective RNA observations × their
+        # strand specificity.
+        #
+        # Construct a model where:
+        #   n_same_rna = max(0, n_same - n_total * p_ig)
+        #   n_opp_rna  = max(0, n_opp  - n_total * (1 - p_ig))
+        #
+        # This is a conservative decontamination: we subtract the gDNA
+        # baseline and the remainder is attributed to RNA.
+        n_same_rna = max(0.0, n_same - n_total * p_ig)
+        n_opp_rna = max(0.0, n_opp - n_total * (1.0 - p_ig))
+
+        # If no meaningful RNA signal remains, fall back to exonic
+        if n_same_rna + n_opp_rna < 1.0:
+            return self.exonic
+
+        # Build synthetic StrandModel with the decontaminated counts.
+        # We distribute into the 2×2 contingency table.  Since we only
+        # have marginal counts (same vs opposite), we use a symmetric
+        # allocation: half POS genes, half NEG genes.
+        rna_model = StrandModel(
+            prior_alpha=self.exonic.prior_alpha,
+            prior_beta=self.exonic.prior_beta,
+        )
+        # Use floating-point manipulation of alpha/beta directly
+        # to avoid the integer constraint of the 2×2 table.
+        rna_model.prior_alpha = self.exonic.prior_alpha + n_same_rna
+        rna_model.prior_beta = self.exonic.prior_beta + n_opp_rna
+        # Zero out raw counts since we computed alpha/beta directly
+        rna_model.pos_pos = 0
+        rna_model.pos_neg = 0
+        rna_model.neg_pos = 0
+        rna_model.neg_neg = 0
+
+        logger.info(
+            f"Estimated RNA strand model: p_r1_sense={rna_model.p_r1_sense:.4f} "
+            f"(exonic={self.exonic.p_r1_sense:.4f}, "
+            f"intergenic={p_ig:.4f}, "
+            f"rna_excess={rna_excess:.1f})"
+        )
+
+        return rna_model
 
     # ------------------------------------------------------------------
     # Delegation to exonic_spliced model (pure RNA gold standard)
