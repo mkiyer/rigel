@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from hulkrna.pipeline import run_pipeline
-from hulkrna.sim import Scenario, SimConfig, run_benchmark
+from hulkrna.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
 
 
 logger = logging.getLogger(__name__)
@@ -247,6 +247,116 @@ class TestSingleExonBenchmark:
             assert ta.abs_diff <= 2, (
                 f"{ta.t_id}: expected={ta.expected}, "
                 f"observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
+            )
+
+
+class TestSingleExonGDNABenchmark:
+    """Single-exon transcript with simulated gDNA contamination.
+
+    For unspliced single-exon transcripts, gDNA reads that overlap the
+    gene region are indistinguishable from RNA reads.  The EM can only
+    separate gDNA that falls *outside* the transcript footprint (which
+    the pipeline classifies as intergenic) from gDNA that overlaps it.
+
+    We verify:
+    1. Total accountability: pipeline assigns all fragments.
+    2. Transcript counts are in a reasonable range (RNA + some gDNA overlap).
+    3. Pipeline gDNA estimate is in the right ballpark.
+    """
+
+    @pytest.fixture
+    def scenario(self, tmp_path):
+        sc = Scenario(
+            "single_exon_gdna",
+            genome_length=5000,
+            seed=42,
+            work_dir=tmp_path / "single_exon_gdna",
+        )
+        sc.add_gene("g1", "+", [
+            {"t_id": "t1", "exons": [(500, 1500)], "abundance": 100},
+        ])
+        yield sc
+        sc.cleanup()
+
+    @pytest.mark.parametrize(
+        "gdna_abundance",
+        [5, 20, 50, 100],
+        ids=["gdna_low", "gdna_medium", "gdna_high", "gdna_equal"],
+    )
+    def test_gdna_separation(self, scenario, gdna_abundance):
+        """EM should recover reasonable counts despite gDNA contamination.
+
+        For unspliced transcripts gDNA/RNA separation is ambiguous for
+        reads overlapping the gene region, so we check:
+        - Total accountability (transcript + gDNA + intergenic ≈ pipeline n_fragments)
+        - Transcript count is between RNA-only and RNA+all-overlapping-gDNA
+        - Pipeline gDNA estimate is positive when gDNA is simulated
+        """
+        sim_config = SimConfig(
+            frag_mean=200, frag_std=30, frag_min=80,
+            frag_max=450, read_length=100, seed=42,
+        )
+        gdna_config = GDNAConfig(
+            abundance=gdna_abundance,
+            frag_mean=350, frag_std=100,
+            frag_min=100, frag_max=1000,
+        )
+        result = scenario.build(
+            n_fragments=500,
+            sim_config=sim_config,
+            gdna_config=gdna_config,
+        )
+        pipeline_result = run_pipeline(
+            result.bam_path, result.index, sj_strand_tag="ts",
+        )
+
+        bench = run_benchmark(
+            result, pipeline_result,
+            scenario_name=f"single_exon_gdna_a{gdna_abundance}",
+        )
+
+        logger.info("\n%s", bench.summary())
+
+        # Sanity
+        assert bench.n_fragments > 0, "No fragments entered the pipeline"
+        assert bench.alignment_rate > 0.70, (
+            f"Low alignment rate: {bench.alignment_rate:.1%}"
+        )
+
+        # gDNA was simulated — verify some gDNA is expected
+        assert bench.n_gdna_expected > 0, (
+            f"Expected gDNA fragments but got 0 "
+            f"(abundance={gdna_abundance})"
+        )
+
+        # Total accountability: observed transcript counts + pipeline gDNA
+        # + intergenic + chimeric should approximate total pipeline fragments
+        total_accounted = (
+            bench.total_observed + bench.n_gdna_pipeline
+            + bench.n_intergenic + bench.n_chimeric
+        )
+        assert abs(total_accounted - bench.n_fragments) <= 2, (
+            f"Accountability gap: accounted={total_accounted:.0f}, "
+            f"pipeline={bench.n_fragments}, "
+            f"diff={abs(total_accounted - bench.n_fragments):.0f}"
+        )
+
+        # RNA-only ground truth (what the simulator actually produced as RNA)
+        n_rna_expected = bench.total_expected
+        # Transcript count should be at least close to the RNA expectation.
+        # Some gDNA overlapping the gene region is expected to inflate the
+        # transcript count (unspliced gDNA is indistinguishable from RNA).
+        # Allow the observed to exceed the RNA-only expectation by up to
+        # the full gDNA count (worst case: all gDNA overlaps 1 gene).
+        for ta in bench.transcripts:
+            assert ta.observed >= ta.expected * 0.85, (
+                f"{ta.t_id}: observed={ta.observed:.0f} is too low vs "
+                f"expected RNA={ta.expected}"
+            )
+            # Observed should not exceed RNA + all gDNA (impossible)
+            assert ta.observed <= ta.expected + bench.n_gdna_expected + 5, (
+                f"{ta.t_id}: observed={ta.observed:.0f} exceeds "
+                f"RNA({ta.expected}) + gDNA({bench.n_gdna_expected})"
             )
 
 

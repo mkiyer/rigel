@@ -12,6 +12,8 @@ from hulkrna.categories import CountCategory, CountType, NUM_COUNT_TYPES
 from hulkrna.counter import ReadCounter, EMData
 from hulkrna.pipeline import _score_gdna_candidate, _GDNA_SPLICE_PENALTIES
 from hulkrna.insert_model import InsertSizeModels
+from hulkrna.strand_model import StrandModel, StrandModels
+from hulkrna.types import Strand
 
 
 # =====================================================================
@@ -26,6 +28,11 @@ def _make_insert_models(n_obs=200, size=250):
         im.observe(size, CountCategory.UNSPLICED)
         im.observe(size, None)  # intergenic (count_cat=None)
     return im
+
+
+def _make_strand_models_default():
+    """StrandModels with untrained intergenic model (P_strand=0.5)."""
+    return StrandModels()
 
 
 def _make_em_data_with_gdna(
@@ -98,8 +105,10 @@ class TestScoreGDNA:
     def test_unspliced_no_penalty(self):
         """UNSPLICED gets splice_penalty=1.0 → log(1)=0."""
         im = _make_insert_models()
+        sms = _make_strand_models_default()
         score = _score_gdna_candidate(
-            int(CountCategory.UNSPLICED), 250, im,
+            int(Strand.POS), int(CountCategory.UNSPLICED), 250,
+            sms, im,
         )
         # log(0.5) + log(P_insert) + log(1.0)
         assert score < 0  # log(0.5) is negative
@@ -110,8 +119,10 @@ class TestScoreGDNA:
     def test_intron_no_penalty(self):
         """INTRON gets splice_penalty=1.0."""
         im = _make_insert_models()
+        sms = _make_strand_models_default()
         score = _score_gdna_candidate(
-            int(CountCategory.INTRON), 250, im,
+            int(Strand.POS), int(CountCategory.INTRON), 250,
+            sms, im,
         )
         expected = np.log(0.5) + im.intergenic.log_likelihood(250)
         assert score == pytest.approx(expected)
@@ -119,11 +130,14 @@ class TestScoreGDNA:
     def test_spliced_unannot_penalty(self):
         """SPLICED_UNANNOT gets heavy penalty (default 0.01)."""
         im = _make_insert_models()
+        sms = _make_strand_models_default()
         score_unannot = _score_gdna_candidate(
-            int(CountCategory.SPLICED_UNANNOT), 250, im,
+            int(Strand.POS), int(CountCategory.SPLICED_UNANNOT), 250,
+            sms, im,
         )
         score_unspliced = _score_gdna_candidate(
-            int(CountCategory.UNSPLICED), 250, im,
+            int(Strand.POS), int(CountCategory.UNSPLICED), 250,
+            sms, im,
         )
         # SPLICED_UNANNOT should have a much lower score
         assert score_unannot < score_unspliced
@@ -133,9 +147,11 @@ class TestScoreGDNA:
     def test_custom_penalties(self):
         """Custom penalty dict overrides defaults."""
         im = _make_insert_models()
+        sms = _make_strand_models_default()
         custom = {CountCategory.UNSPLICED: 0.5}
         score = _score_gdna_candidate(
-            int(CountCategory.UNSPLICED), 250, im,
+            int(Strand.POS), int(CountCategory.UNSPLICED), 250,
+            sms, im,
             gdna_splice_penalties=custom,
         )
         expected = np.log(0.5) + im.intergenic.log_likelihood(250) + np.log(0.5)
@@ -144,8 +160,10 @@ class TestScoreGDNA:
     def test_zero_insert_size(self):
         """insert_size=0 → P_insert=1.0 (log=0)."""
         im = _make_insert_models()
+        sms = _make_strand_models_default()
         score = _score_gdna_candidate(
-            int(CountCategory.UNSPLICED), 0, im,
+            int(Strand.POS), int(CountCategory.UNSPLICED), 0,
+            sms, im,
         )
         # log(0.5) + 0 + log(1.0) = log(0.5)
         assert score == pytest.approx(np.log(0.5))
@@ -487,38 +505,32 @@ class TestComputeShadowInit:
     def test_zero_counts_returns_zeros(self):
         """No counts at all → all shadow_init = 0."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
 
-        sm = StrandModel()
         unique_counts = np.zeros((3, 12), dtype=np.float64)
         t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        result = compute_shadow_init(unique_counts, t_to_g, 2, sm, 0)
+        result = compute_shadow_init(unique_counts, t_to_g, 2, 0)
         np.testing.assert_array_equal(result, [0.0, 0.0])
 
     def test_no_genic_reads_gives_zeros(self):
         """With only intergenic fragments (no genic reads), shadow = 0."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
 
-        sm = StrandModel()
         unique_counts = np.zeros((2, 12), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
         # 100 intergenic fragments but zero genic reads → depth=0 → shadow=0
-        result = compute_shadow_init(unique_counts, t_to_g, 2, sm, 100)
+        result = compute_shadow_init(unique_counts, t_to_g, 2, 100)
         np.testing.assert_array_equal(result, [0.0, 0.0])
 
     def test_intergenic_with_gene_depth_sets_floor(self):
         """Genes with reads get a depth-scaled floor even without antisense."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
 
-        sm = StrandModel()
         unique_counts = np.zeros((2, 12), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
         # Both genes have 100 sense reads, plus 100 intergenic
         unique_counts[0, 1] = 100.0  # INTRON_SENSE
         unique_counts[1, 1] = 100.0  # INTRON_SENSE
-        result = compute_shadow_init(unique_counts, t_to_g, 2, sm, 100, kappa=1.0)
+        result = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=1.0)
         # n_total = 200 + 100 = 300
         # estimated_gdna = 100 + 0 = 100
         # θ_global = 100 / 300 = 1/3
@@ -530,10 +542,8 @@ class TestComputeShadowInit:
     def test_antisense_boosts_gene_shadow(self):
         """Genes with antisense counts get proportionally higher shadow."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
         from hulkrna.categories import CountStrand
 
-        sm = StrandModel()
         unique_counts = np.zeros((3, 12), dtype=np.float64)
         t_to_g = np.array([0, 0, 1], dtype=np.int64)
         # Gene 0: 50 antisense via t0
@@ -541,7 +551,7 @@ class TestComputeShadowInit:
         unique_counts[0, as_col] = 50.0
         # Gene 1: 50 sense reads via t2 (to give it depth)
         unique_counts[2, 1] = 50.0  # INTRON_SENSE
-        result = compute_shadow_init(unique_counts, t_to_g, 2, sm, 0, kappa=1.0)
+        result = compute_shadow_init(unique_counts, t_to_g, 2, 0, kappa=1.0)
         # n_total = 100, estimated_gdna = 0 + 2*50 = 100
         # θ_global = 100 / 100 = 1.0
         # depth = [50, 50], g_antisense = [50, 0]
@@ -554,31 +564,27 @@ class TestComputeShadowInit:
     def test_kappa_scales_global_shrinkage(self):
         """Higher kappa → more shrinkage toward global rate."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
 
-        sm = StrandModel()
         unique_counts = np.zeros((2, 12), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
         # Give genes depth so the global term is non-zero
         unique_counts[0, 1] = 100.0  # INTRON_SENSE
         unique_counts[1, 1] = 100.0  # INTRON_SENSE
-        r_lo = compute_shadow_init(unique_counts, t_to_g, 2, sm, 100, kappa=0.5)
-        r_hi = compute_shadow_init(unique_counts, t_to_g, 2, sm, 100, kappa=5.0)
+        r_lo = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=0.5)
+        r_hi = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=5.0)
         assert r_hi[0] > r_lo[0]
 
     def test_depth_scaling(self):
         """Deeper gene gets larger absolute shadow floor."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
 
-        sm = StrandModel()
         unique_counts = np.zeros((2, 12), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
         # Gene 0: 1000 sense reads (deeply sequenced)
         # Gene 1: 10 sense reads (lowly sequenced)
         unique_counts[0, 1] = 1000.0
         unique_counts[1, 1] = 10.0
-        result = compute_shadow_init(unique_counts, t_to_g, 2, sm, 100, kappa=1.0)
+        result = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=1.0)
         # Both have 0 antisense, so shadow comes from depth*θ_global
         # θ_global = 100 / 1110 ≈ 0.09
         # gene 0: 0 + 1.0*1000*0.09 ≈ 90
@@ -590,12 +596,10 @@ class TestComputeShadowInit:
     def test_output_shape(self):
         """Returns array of shape (num_genes,)."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.strand_model import StrandModel
 
-        sm = StrandModel()
         unique_counts = np.zeros((5, 12), dtype=np.float64)
         t_to_g = np.array([0, 0, 1, 2, 2], dtype=np.int64)
-        result = compute_shadow_init(unique_counts, t_to_g, 3, sm, 10)
+        result = compute_shadow_init(unique_counts, t_to_g, 3, 10)
         assert result.shape == (3,)
         assert result.dtype == np.float64
 
@@ -692,35 +696,37 @@ class TestStrandModelsContainer:
         from hulkrna.strand_model import StrandModels
 
         sm = StrandModels()
+        assert sm.exonic_spliced.n_observations == 0
         assert sm.exonic.n_observations == 0
         assert sm.intronic.n_observations == 0
         assert sm.intergenic.n_observations == 0
 
-    def test_delegation_to_exonic(self):
+    def test_delegation_to_exonic_spliced(self):
         from hulkrna.strand_model import StrandModels
         from hulkrna.types import Strand
 
         sm = StrandModels()
         for _ in range(100):
-            sm.exonic.observe(Strand.POS, Strand.POS)
+            sm.exonic_spliced.observe(Strand.POS, Strand.POS)
         for _ in range(2):
-            sm.exonic.observe(Strand.POS, Strand.NEG)
+            sm.exonic_spliced.observe(Strand.POS, Strand.NEG)
 
-        assert sm.p_r1_sense == sm.exonic.p_r1_sense
-        assert sm.strand_specificity == sm.exonic.strand_specificity
-        assert sm.read1_sense == sm.exonic.read1_sense
-        assert sm.n_observations == sm.exonic.n_observations
-        assert sm.strand_likelihood(Strand.POS, Strand.POS) == sm.exonic.strand_likelihood(Strand.POS, Strand.POS)
+        assert sm.p_r1_sense == sm.exonic_spliced.p_r1_sense
+        assert sm.strand_specificity == sm.exonic_spliced.strand_specificity
+        assert sm.read1_sense == sm.exonic_spliced.read1_sense
+        assert sm.n_observations == sm.exonic_spliced.n_observations
+        assert sm.strand_likelihood(Strand.POS, Strand.POS) == sm.exonic_spliced.strand_likelihood(Strand.POS, Strand.POS)
 
     def test_to_dict_has_all_regions(self):
         from hulkrna.strand_model import StrandModels
 
         sm = StrandModels()
         d = sm.to_dict()
+        assert "exonic_spliced" in d
         assert "exonic" in d
         assert "intronic" in d
         assert "intergenic" in d
-        assert "observations" in d["exonic"]
+        assert "observations" in d["exonic_spliced"]
 
     def test_write_json(self, tmp_path):
         from hulkrna.strand_model import StrandModels
@@ -729,13 +735,14 @@ class TestStrandModelsContainer:
 
         sm = StrandModels()
         for _ in range(50):
-            sm.exonic.observe(Strand.POS, Strand.POS)
+            sm.exonic_spliced.observe(Strand.POS, Strand.POS)
 
         out = tmp_path / "strand_models.json"
         sm.write_json(out)
         with open(out) as f:
             data = json.load(f)
         assert "strand_models" in data
+        assert "exonic_spliced" in data["strand_models"]
         assert "exonic" in data["strand_models"]
         assert "intronic" in data["strand_models"]
         assert "intergenic" in data["strand_models"]
@@ -746,21 +753,23 @@ class TestStrandModelsContainer:
         from hulkrna.types import Strand
 
         sm = StrandModels()
-        sm.exonic.observe(Strand.POS, Strand.POS)
-        sm.intronic.observe(Strand.POS, Strand.NEG)
+        sm.exonic_spliced.observe(Strand.POS, Strand.POS)
+        sm.exonic.observe(Strand.POS, Strand.NEG)
+        sm.intronic.observe(Strand.NEG, Strand.POS)
         sm.intergenic.observe(Strand.NEG, Strand.NEG)
 
+        assert sm.exonic_spliced.n_observations == 1
         assert sm.exonic.n_observations == 1
         assert sm.intronic.n_observations == 1
         assert sm.intergenic.n_observations == 1
 
-    def test_stats_new_fields(self):
-        """PipelineStats has new antisense evidence fields."""
-        from hulkrna.stats import PipelineStats
+    def test_model_for_category(self):
+        """model_for_category selects the right sub-model."""
+        from hulkrna.strand_model import StrandModels
+        from hulkrna.categories import CountCategory
 
-        stats = PipelineStats()
-        stats.n_intronic_antisense = 42
-        stats.n_exonic_antisense = 7
-        d = stats.to_dict()
-        assert d["n_intronic_antisense"] == 42
-        assert d["n_exonic_antisense"] == 7
+        sm = StrandModels()
+        assert sm.model_for_category(int(CountCategory.SPLICED_ANNOT)) is sm.exonic_spliced
+        assert sm.model_for_category(int(CountCategory.SPLICED_UNANNOT)) is sm.exonic
+        assert sm.model_for_category(int(CountCategory.UNSPLICED)) is sm.exonic
+        assert sm.model_for_category(int(CountCategory.INTRON)) is sm.intronic

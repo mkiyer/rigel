@@ -29,11 +29,12 @@ Quick Start
 from .annotation import GeneBuilder
 from .benchmark import BenchmarkResult, TranscriptAccuracy, run_benchmark
 from .genome import MutableGenome, reverse_complement
-from .reads import ReadSimulator, SimConfig
+from .reads import GDNAConfig, ReadSimulator, SimConfig
 from .scenario import Scenario, ScenarioResult
 
 __all__ = [
     "BenchmarkResult",
+    "GDNAConfig",
     "GeneBuilder",
     "MutableGenome",
     "ReadSimulator",

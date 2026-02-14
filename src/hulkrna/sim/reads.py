@@ -192,6 +192,28 @@ class ReadSimulator:
     def _sample_frag_lengths(self, n: int) -> np.ndarray:
         """Sample *n* fragment lengths from a truncated normal."""
         cfg = self.config
+        return self._sample_frag_lengths_trunc_normal(
+            n, cfg.frag_mean, cfg.frag_std, cfg.frag_min, cfg.frag_max,
+        )
+
+    def _sample_gdna_frag_lengths(self, n: int) -> np.ndarray:
+        """Sample *n* gDNA fragment lengths from a truncated normal."""
+        gc = self.gdna_config
+        assert gc is not None
+        frag_max = min(gc.frag_max, len(self.genome))
+        return self._sample_frag_lengths_trunc_normal(
+            n, gc.frag_mean, gc.frag_std, gc.frag_min, frag_max,
+        )
+
+    def _sample_frag_lengths_trunc_normal(
+        self,
+        n: int,
+        mean: float,
+        std: float,
+        frag_min: int,
+        frag_max: int,
+    ) -> np.ndarray:
+        """Sample *n* fragment lengths from a truncated normal distribution."""
         rng = self._rng
         result = np.empty(n, dtype=int)
         filled = 0
@@ -199,8 +221,8 @@ class ReadSimulator:
         while filled < n:
             needed = n - filled
             sample_size = int(needed * self._OVERSAMPLE_RATIO) + self._OVERSAMPLE_EXTRA
-            raw = rng.normal(cfg.frag_mean, cfg.frag_std, sample_size).astype(int)
-            valid = raw[(raw >= cfg.frag_min) & (raw <= cfg.frag_max)]
+            raw = rng.normal(mean, std, sample_size).astype(int)
+            valid = raw[(raw >= frag_min) & (raw <= frag_max)]
             nkeep = min(len(valid), needed)
             result[filled : filled + nkeep] = valid[:nkeep]
             filled += nkeep
@@ -286,32 +308,128 @@ class ReadSimulator:
                 f"{rname}/2", r2_seq, quals,
             )
 
+    def _gen_reads_from_genome(self, frag_len: int, count: int):
+        """Generate gDNA read pairs from the full genome.
+
+        Fragments are sampled uniformly from the entire genome,
+        with strand chosen uniformly (+/−).  FR library convention
+        is applied as for RNA reads.
+
+        Yields (r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual).
+        """
+        genome_len = len(self.genome)
+        eff_len = genome_len - frag_len + 1
+        if eff_len <= 0:
+            return
+
+        read_len = min(self.config.read_length, frag_len)
+        rng = self._rng
+        quals = "I" * read_len
+
+        frag_starts = rng.integers(0, eff_len, size=count)
+        strands = rng.integers(0, 2, size=count)  # 0 = +, 1 = −
+
+        for i in range(count):
+            start = int(frag_starts[i])
+            end = start + frag_len
+            frag_seq = self.genome[start:end]
+
+            if strands[i] == 1:
+                frag_seq = reverse_complement(frag_seq)
+                strand_char = "r"
+            else:
+                strand_char = "f"
+
+            # FR library: R1 = revcomp of 3' end, R2 = sense from 5' end
+            r1_seq = reverse_complement(frag_seq[-read_len:])
+            r2_seq = frag_seq[:read_len]
+
+            r1_seq = self._introduce_errors(r1_seq)
+            r2_seq = self._introduce_errors(r2_seq)
+
+            rname = f"gdna:{start}-{end}:{strand_char}:{i}"
+
+            yield (
+                f"{rname}/1", r1_seq, quals,
+                f"{rname}/2", r2_seq, quals,
+            )
+
     # -- Public interface -----------------------------------------------------
+
+    def _compute_gdna_split(self, n_fragments: int) -> tuple[int, int]:
+        """Compute the RNA/gDNA fragment split.
+
+        Uses the abundance-weighted effective-length scheme:
+        each transcript's weight is ``abundance × eff_len`` and
+        gDNA weight is ``gdna_abundance × genome_eff_len``.
+
+        Returns ``(n_rna, n_gdna)``.
+        """
+        if self.gdna_config is None:
+            return n_fragments, 0
+
+        gc = self.gdna_config
+        # Use mean fragment length for effective-length calculation
+        mean_frag = int(self.config.frag_mean)
+        gdna_mean_frag = int(gc.frag_mean)
+
+        rna_weight = sum(
+            t.abundance * max(0, tlen - mean_frag + 1)
+            for t, tlen in zip(self.transcripts, self._t_lengths)
+        )
+        genome_eff_len = max(0, len(self.genome) - gdna_mean_frag + 1)
+        gdna_weight = gc.abundance * genome_eff_len
+
+        total_weight = rna_weight + gdna_weight
+        if total_weight <= 0:
+            return n_fragments, 0
+
+        gdna_frac = gdna_weight / total_weight
+        n_gdna = int(round(n_fragments * gdna_frac))
+        n_rna = n_fragments - n_gdna
+        return n_rna, n_gdna
 
     def simulate(self, n_fragments: int):
         """Generate *n_fragments* paired-end read pairs.
 
+        When ``gdna_config`` is set, fragments are split between RNA
+        and gDNA proportionally based on abundance-weighted effective
+        lengths.  RNA reads are emitted first, then gDNA reads.
+
         Yields ``(r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual)``.
         """
-        rng = self._rng
-        ntranscripts = len(self.transcripts)
+        n_rna, n_gdna = self._compute_gdna_split(n_fragments)
 
-        # Sample fragment lengths
-        frag_lengths = self._sample_frag_lengths(n_fragments)
+        # --- RNA reads ---
+        if n_rna > 0:
+            rng = self._rng
+            ntranscripts = len(self.transcripts)
+            frag_lengths = self._sample_frag_lengths(n_rna)
+            unique_lengths, length_counts = np.unique(
+                frag_lengths, return_counts=True,
+            )
 
-        # Group by unique fragment length for batched transcript selection
-        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
+            for frag_len, frag_count in zip(unique_lengths, length_counts):
+                probs = self._compute_probs(int(frag_len))
+                t_indices = rng.choice(
+                    ntranscripts, size=int(frag_count), p=probs,
+                )
+                unique_t, t_counts = np.unique(t_indices, return_counts=True)
 
-        for frag_len, frag_count in zip(unique_lengths, length_counts):
-            probs = self._compute_probs(int(frag_len))
+                for t_idx, t_count in zip(unique_t, t_counts):
+                    yield from self._gen_reads_from_transcript(
+                        int(t_idx), int(frag_len), int(t_count),
+                    )
 
-            # Sample transcripts for this fragment length
-            t_indices = rng.choice(ntranscripts, size=int(frag_count), p=probs)
-            unique_t, t_counts = np.unique(t_indices, return_counts=True)
-
-            for t_idx, t_count in zip(unique_t, t_counts):
-                yield from self._gen_reads_from_transcript(
-                    int(t_idx), int(frag_len), int(t_count)
+        # --- gDNA reads ---
+        if n_gdna > 0:
+            gdna_frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
+            unique_lengths, length_counts = np.unique(
+                gdna_frag_lengths, return_counts=True,
+            )
+            for frag_len, frag_count in zip(unique_lengths, length_counts):
+                yield from self._gen_reads_from_genome(
+                    int(frag_len), int(frag_count),
                 )
 
     def write_fastq(
@@ -353,4 +471,13 @@ class ReadSimulator:
                 n_written += 1
 
         logger.info(f"Wrote {n_written} read pairs → {r1_path}, {r2_path}")
+
+        # Log the RNA/gDNA split
+        n_rna, n_gdna = self._compute_gdna_split(n_fragments)
+        if n_gdna > 0:
+            logger.info(
+                f"  RNA: {n_rna}, gDNA: {n_gdna} "
+                f"({n_gdna / n_fragments:.1%} gDNA)"
+            )
+
         return r1_path, r2_path

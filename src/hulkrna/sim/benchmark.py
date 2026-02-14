@@ -86,6 +86,10 @@ class BenchmarkResult:
         Fragments classified as intergenic.
     n_chimeric : int
         Fragments classified as chimeric.
+    n_gdna_expected : int
+        Ground-truth gDNA fragment count (from simulation read names).
+    n_gdna_pipeline : float
+        gDNA count reported by the pipeline (``counter.gdna_total``).
     transcripts : list[TranscriptAccuracy]
         Per-transcript accuracy breakdown.
     stats_dict : dict
@@ -99,6 +103,8 @@ class BenchmarkResult:
     n_fragments: int
     n_intergenic: int
     n_chimeric: int
+    n_gdna_expected: int = 0
+    n_gdna_pipeline: float = 0.0
     transcripts: list[TranscriptAccuracy] = field(default_factory=list)
     stats_dict: dict = field(default_factory=dict)
 
@@ -150,6 +156,11 @@ class BenchmarkResult:
             return 0.0
         return self.total_observed / self.n_fragments
 
+    @property
+    def gdna_abs_diff(self) -> float:
+        """Absolute difference between expected and pipeline gDNA counts."""
+        return abs(self.n_gdna_pipeline - self.n_gdna_expected)
+
     # -- Display --------------------------------------------------------------
 
     def summary(self) -> str:
@@ -162,11 +173,19 @@ class BenchmarkResult:
             f"  Intergenic: {self.n_intergenic}, Chimeric: {self.n_chimeric}",
             f"  Total expected: {self.total_expected}, "
             f"Total observed: {self.total_observed:.0f}",
+        ]
+        if self.n_gdna_expected > 0 or self.n_gdna_pipeline > 0:
+            lines.append(
+                f"  gDNA: expected={self.n_gdna_expected}, "
+                f"pipeline={self.n_gdna_pipeline:.0f}, "
+                f"diff={self.gdna_abs_diff:.0f}"
+            )
+        lines.extend([
             f"  All exact: {self.all_exact}, "
             f"Total abs error: {self.total_abs_error:.0f}, "
             f"Max rel error: {self.max_rel_error:.1%}",
             "  Per-transcript:",
-        ]
+        ])
         for t in self.transcripts:
             lines.append(f"    {t}")
         return "\n".join(lines)
@@ -199,9 +218,15 @@ def run_benchmark(
     # Ground truth: fragments present in BAM (may be fewer if unmapped)
     aligned_counts = scenario_result.ground_truth_counts()
 
+    # Ground truth: gDNA fragment count
+    n_gdna_expected = scenario_result.ground_truth_gdna_count()
+
     # Observed: per-transcript total counts from the pipeline
     t_counts = pipeline_result.counter.t_counts  # (N_t, 12) array
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
+
+    # Pipeline gDNA count
+    n_gdna_pipeline = float(pipeline_result.counter.gdna_total)
 
     # Build t_id → t_index mapping
     t_id_to_index = {t.t_id: t.t_index for t in scenario_result.transcripts}
@@ -236,6 +261,8 @@ def run_benchmark(
         n_fragments=stats.n_fragments,
         n_intergenic=stats.n_intergenic,
         n_chimeric=stats.n_chimeric,
+        n_gdna_expected=n_gdna_expected,
+        n_gdna_pipeline=n_gdna_pipeline,
         transcripts=transcript_results,
         stats_dict=stats.to_dict(),
     )

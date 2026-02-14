@@ -35,7 +35,7 @@ from ..types import Strand
 
 from .annotation import GeneBuilder
 from .genome import MutableGenome
-from .reads import ReadSimulator, SimConfig
+from .reads import GDNAConfig, ReadSimulator, SimConfig
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ class ScenarioResult:
         R2 FASTQ file.
     n_simulated : int
         Number of fragments passed to the read simulator.
+    gdna_config : GDNAConfig or None
+        gDNA configuration used (None if no gDNA simulated).
     """
 
     fasta_path: Path
@@ -80,14 +82,14 @@ class ScenarioResult:
     fastq_r1: Path
     fastq_r2: Path
     n_simulated: int = 0
+    gdna_config: GDNAConfig | None = None
 
     def ground_truth_counts(self) -> dict[str, int]:
         """Parse BAM read names to extract ground-truth fragment counts.
 
         The read simulator encodes the source transcript in each read
         name as ``{t_id}:{frag_start}-{frag_end}:{strand}:{idx}/1``.
-        This method tallies unique fragments per transcript ID by
-        parsing the prefix before ``/1`` or ``/2``.
+        gDNA reads use ``gdna:...`` prefix and are excluded.
 
         Returns
         -------
@@ -106,10 +108,27 @@ class ScenarioResult:
 
         counts: Counter[str] = Counter()
         for frag_id in seen:
-            # Format: t_id:start-end:strand:idx
+            # Format: t_id:start-end:strand:idx  (or gdna:...)
             t_id = frag_id.split(":")[0]
-            counts[t_id] += 1
+            if t_id != "gdna":
+                counts[t_id] += 1
         return dict(counts)
+
+    def ground_truth_gdna_count(self) -> int:
+        """Count gDNA fragments from FASTQ read names.
+
+        Returns
+        -------
+        int
+            Number of fragments with ``gdna:`` prefix.
+        """
+        count = 0
+        with open(self.fastq_r1) as fh:
+            for i, line in enumerate(fh):
+                if i % 4 == 0:
+                    if line.startswith("@gdna:"):
+                        count += 1
+        return count
 
     def ground_truth_from_fastq(self) -> dict[str, int]:
         """Parse FASTQ read names to get ground-truth fragment counts.
@@ -117,6 +136,7 @@ class ScenarioResult:
         Unlike :meth:`ground_truth_counts`, this counts *all* simulated
         fragments regardless of alignment success, providing the true
         number of fragments the simulator produced per transcript.
+        gDNA reads (``gdna:`` prefix) are excluded.
 
         Returns
         -------
@@ -132,7 +152,8 @@ class ScenarioResult:
                     if qname.endswith("/1"):
                         qname = qname[:-2]
                     t_id = qname.split(":")[0]
-                    counts[t_id] += 1
+                    if t_id != "gdna":
+                        counts[t_id] += 1
         return dict(counts)
 
 
@@ -162,9 +183,11 @@ class Scenario:
         seed: int = 42,
         work_dir: Path | None = None,
         ref_name: str | None = None,
+        gdna_config: GDNAConfig | None = None,
     ):
         self.name = name
         self.seed = seed
+        self.gdna_config = gdna_config
         self._owns_workdir = work_dir is None
 
         if work_dir is None:
@@ -197,6 +220,7 @@ class Scenario:
         self,
         n_fragments: int = 1000,
         sim_config: SimConfig | None = None,
+        gdna_config: GDNAConfig | None = None,
     ) -> ScenarioResult:
         """Execute the full simulation pipeline.
 
@@ -213,12 +237,18 @@ class Scenario:
             Number of fragments to simulate.
         sim_config : SimConfig or None
             Read simulation config. None uses defaults with same seed.
+        gdna_config : GDNAConfig or None
+            gDNA contamination config.  If None, falls back to the
+            ``gdna_config`` set on the ``Scenario`` constructor.
 
         Returns
         -------
         ScenarioResult
         """
         wdir = self.work_dir
+
+        # Resolve gDNA config: build() param overrides constructor
+        effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
 
         # 1. Genome FASTA
         logger.info(f"[{self.name}] Writing genome FASTA...")
@@ -233,7 +263,11 @@ class Scenario:
         if sim_config is None:
             sim_config = SimConfig(seed=self.seed)
         # Clamp frag_max to genome/transcript length
-        sim = ReadSimulator(self.genome, transcripts, config=sim_config)
+        sim = ReadSimulator(
+            self.genome, transcripts,
+            config=sim_config,
+            gdna_config=effective_gdna,
+        )
         logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
         r1_path, r2_path = sim.write_fastq(wdir, n_fragments)
 
@@ -259,6 +293,7 @@ class Scenario:
             fastq_r1=r1_path,
             fastq_r2=r2_path,
             n_simulated=n_fragments,
+            gdna_config=effective_gdna,
         )
 
     def _align(self, fasta_path: Path, r1_path: Path, r2_path: Path) -> Path:
