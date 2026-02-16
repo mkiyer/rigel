@@ -86,10 +86,9 @@ def count_command(args: argparse.Namespace) -> int:
     # Define output file paths
     strand_json = output_dir / "strand_model.json"
     insert_json = output_dir / "insert_size_models.json"
-    t_counts_path = output_dir / "transcript_counts.feather"
-    g_counts_path = output_dir / "gene_counts.feather"
-    t_sparse_path = output_dir / "transcript_counts_sparse.feather"
-    g_sparse_path = output_dir / "gene_counts_sparse.feather"
+    counts_path = output_dir / "counts.feather"
+    gene_counts_path = output_dir / "gene_counts.feather"
+    detail_path = output_dir / "counts_detail.feather"
     stats_path = output_dir / "stats.json"
     config_path = output_dir / "config.json"
 
@@ -117,6 +116,9 @@ def count_command(args: argparse.Namespace) -> int:
             "seed": seed,
             "em_pseudocount": alpha,
             "em_iterations": args.em_iterations,
+            "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
+            "gdna_threshold": args.gdna_threshold,
+            "confidence_threshold": args.confidence_threshold,
             "skip_duplicates": not args.keep_duplicates,
             "include_multimap": args.include_multimap,
             "sj_strand_tag": sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag),
@@ -134,7 +136,12 @@ def count_command(args: argparse.Namespace) -> int:
         include_multimap=args.include_multimap,
         sj_strand_tag=sj_strand_tag,
         seed=seed,
-        em_pseudocount=alpha,        em_iterations=args.em_iterations,    )
+        em_pseudocount=alpha,
+        em_iterations=args.em_iterations,
+        gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
+        gdna_threshold=args.gdna_threshold,
+        confidence_threshold=args.confidence_threshold,
+    )
 
     # Log stats
     for key, val in sorted(result.stats.to_dict().items()):
@@ -146,29 +153,27 @@ def count_command(args: argparse.Namespace) -> int:
     result.insert_models.write_json(insert_json)
 
     # Write count tables
-    # Write count tables (wide format)
-    result.counter.get_t_counts_df().to_feather(str(t_counts_path))
-    result.counter.get_g_counts_df(index.t_to_g_arr).to_feather(str(g_counts_path))
-    logging.info(f"[DONE] Wrote {t_counts_path} and {g_counts_path}")
+    counter = result.counter
+    counts_df = counter.get_counts_df(index)
+    gene_counts_df = counter.get_gene_counts_df(index)
+    detail_df = counter.get_detail_df(index)
 
-    # Write sparse count tables (long format with provenance)
-    result.counter.get_sparse_t_counts_df().to_feather(str(t_sparse_path))
-    result.counter.get_sparse_g_counts_df(index.t_to_g_arr).to_feather(str(g_sparse_path))
-    logging.info(f"[DONE] Wrote {t_sparse_path} and {g_sparse_path}")
+    counts_df.to_feather(str(counts_path))
+    gene_counts_df.to_feather(str(gene_counts_path))
+    detail_df.to_feather(str(detail_path))
+    logging.info(f"[DONE] Wrote {counts_path}, {gene_counts_path}, "
+                 f"{detail_path}")
 
     # Write TSV mirrors if requested
     if not args.no_tsv:
-        result.counter.get_t_counts_df().to_csv(
-            t_counts_path.with_suffix(".tsv"), sep="\t", index=False
+        counts_df.to_csv(
+            counts_path.with_suffix(".tsv"), sep="\t", index=False
         )
-        result.counter.get_g_counts_df(index.t_to_g_arr).to_csv(
-            g_counts_path.with_suffix(".tsv"), sep="\t", index=False
+        gene_counts_df.to_csv(
+            gene_counts_path.with_suffix(".tsv"), sep="\t", index=False
         )
-        result.counter.get_sparse_t_counts_df().to_csv(
-            t_sparse_path.with_suffix(".tsv"), sep="\t", index=False
-        )
-        result.counter.get_sparse_g_counts_df(index.t_to_g_arr).to_csv(
-            g_sparse_path.with_suffix(".tsv"), sep="\t", index=False
+        detail_df.to_csv(
+            detail_path.with_suffix(".tsv"), sep="\t", index=False
         )
 
     # Write stats
@@ -321,13 +326,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducibility (default: use current timestamp)",
     )
     cnt.add_argument(
-        "--em-pseudocount", dest="em_pseudocount", type=float, default=1.0,
-        help="Dirichlet pseudocount for EM prior smoothing (default: 1.0)",
+        "--em-pseudocount", dest="em_pseudocount", type=float, default=0.01,
+        help="Dirichlet prior for VBEM (default: 0.01). Small values "
+             "induce sparsity; values >= 1.0 approach standard EM.",
     )
     cnt.add_argument(
-        "--em-iterations", dest="em_iterations", type=int, default=10,
-        help="Maximum EM iterations for ambiguous fragment resolution "
-             "(default: 10). Set to 0 for unique-only priors.",
+        "--em-iterations", dest="em_iterations", type=int, default=1000,
+        help="Maximum VBEM iterations for ambiguous fragment resolution "
+             "(default: 1000). Set to 0 for unique-only priors.",
+    )
+    cnt.add_argument(
+        "--gdna-threshold", dest="gdna_threshold", type=float, default=0.5,
+        help="Minimum sum of RNA posteriors to classify a unit as RNA "
+             "(default: 0.5). 0.0 = never assign to gDNA via EM; "
+             "1.0 = only shadow-free units are RNA.",
+    )
+    from .pipeline import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
+    cnt.add_argument(
+        "--gdna-splice-penalty-unannot",
+        dest="gdna_splice_penalty_unannot",
+        type=float,
+        default=DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+        help=(
+            "gDNA splice penalty for SPLICED_UNANNOT fragments "
+            f"(default: {DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT:g}). "
+            "Higher values make gDNA more competitive for unannotated "
+            "spliced reads."
+        ),
+    )
+    cnt.add_argument(
+        "--confidence-threshold", dest="confidence_threshold",
+        type=float, default=0.95,
+        help="Minimum RNA-normalized posterior for an EM assignment "
+             "to be counted as high-confidence (default: 0.95). "
+             "Affects the count_high_conf column.",
     )
     cnt.add_argument(
         "--no-tsv", dest="no_tsv", action="store_true", default=False,

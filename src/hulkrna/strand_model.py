@@ -346,23 +346,59 @@ class StrandModels:
     # Minimum observations for exonic_spliced to be considered reliable
     _MIN_SPLICED_OBS = 10
 
-    def model_for_category(self, count_cat: int) -> StrandModel:
-        """Select the best pure-RNA strand model for EM transcript scoring.
+    # Minimum intergenic observations to consider gDNA present
+    _MIN_GDNA_EVIDENCE = 10
 
-        Returns the most specific pure-RNA strand model available:
+    def _best_rna_model(self) -> StrandModel:
+        """Select the best available pure-RNA strand model.
 
-        1. **exonic_spliced** if it has ≥ 10 observations (gold standard)
-        2. **estimated RNA model** derived from the exonic/intergenic
-           contrast when exonic_spliced is unavailable (e.g., single-
-           exon genes with no splice junctions)
+        Priority:
 
-        The returned model is used for **transcript** candidate scoring
-        in the EM, where it competes against the intergenic model
-        (used for gDNA candidates).  Using diluted mixture models
-        (exonic, intronic) would weaken the strand-based contrast
-        between RNA and gDNA, reducing separation accuracy.
+        1. **exonic_spliced** if it has ≥ 10 observations (gold standard).
+        2. **Decontaminated model** when intergenic evidence is present.
+        3. **exonic** model otherwise.
 
         The result is cached after the first call.
+        """
+        if self._rna_model_cache is not None:
+            return self._rna_model_cache
+        if self.exonic_spliced.n_observations >= self._MIN_SPLICED_OBS:
+            self._rna_model_cache = self.exonic_spliced
+        elif self.intergenic.n_observations >= self._MIN_GDNA_EVIDENCE:
+            self._rna_model_cache = self._estimated_rna_model()
+            logger.info(
+                f"Using decontaminated model for EM scoring "
+                f"(intergenic_obs={self.intergenic.n_observations}): "
+                f"p_r1_sense={self._rna_model_cache.p_r1_sense:.4f}, "
+                f"specificity={self._rna_model_cache.strand_specificity:.4f}"
+            )
+        else:
+            if self.exonic.n_observations >= self._MIN_SPLICED_OBS:
+                logger.info(
+                    f"Using exonic model for EM scoring "
+                    f"(no gDNA evidence, no exonic_spliced): "
+                    f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
+                    f"specificity={self.exonic.strand_specificity:.4f}"
+                )
+            self._rna_model_cache = self.exonic
+        return self._rna_model_cache
+
+    def model_for_category(self, count_cat: int) -> StrandModel:
+        """Select the strand model for a given count category.
+
+        Returns the best available pure-RNA strand model for
+        transcript candidates.  All categories use the same RNA
+        model because library-prep strand specificity is an
+        intrinsic property that does not vary by genomic region.
+
+        The empirical per-category models (exonic, intronic) are
+        mixtures of RNA and gDNA.  Using them directly for
+        transcript scoring would weaken RNA/gDNA discrimination.
+        Instead, the EM re-estimation learns the true RNA strand
+        specificity from posterior-weighted observations across
+        ALL categories, including intronic reads. This is how
+        intronic data contributes to the model — not through
+        per-category scoring, but through EM convergence.
 
         Parameters
         ----------
@@ -373,14 +409,7 @@ class StrandModels:
         -------
         StrandModel
         """
-        if self._rna_model_cache is not None:
-            return self._rna_model_cache
-        # exonic_spliced is always the best choice when available
-        if self.exonic_spliced.n_observations >= self._MIN_SPLICED_OBS:
-            self._rna_model_cache = self.exonic_spliced
-        else:
-            self._rna_model_cache = self._estimated_rna_model()
-        return self._rna_model_cache
+        return self._best_rna_model()
 
     def _estimated_rna_model(self) -> StrandModel:
         """Estimate pure-RNA strand model from the exonic/intergenic contrast.
@@ -441,6 +470,26 @@ class StrandModels:
         #
         # Since rna_same + rna_opp = 0, we only need one:
         rna_excess = n_same - n_total * p_ig  # positive = FR, negative = RF
+
+        # ── Significance guard ──────────────────────────────────────
+        # Under the null hypothesis that ALL exonic reads are gDNA
+        # (i.e. p = p_ig), the expected excess is 0 with standard
+        # deviation sqrt(n_total × p_ig × (1 - p_ig)).  If the
+        # observed excess is within 3 SD of zero, there is no
+        # statistically significant evidence for RNA strand signal.
+        # Without a significant excess the decontamination amplifies
+        # sampling noise into a false high-specificity model, causing
+        # the EM to misclassify RNA as gDNA at low strand specificity.
+        import math
+        expected_sd = math.sqrt(max(n_total * p_ig * (1.0 - p_ig), 1.0))
+        if abs(rna_excess) < 3.0 * expected_sd:
+            logger.info(
+                f"Decontamination skipped: |rna_excess|={abs(rna_excess):.1f} "
+                f"< 3×SD={3*expected_sd:.1f} "
+                f"(exonic p_r1_sense={self.exonic.p_r1_sense:.4f}); "
+                f"using exonic model directly"
+            )
+            return self.exonic
 
         # Convert to a Beta posterior.  The magnitude of the excess
         # indicates the number of effective RNA observations × their

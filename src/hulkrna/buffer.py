@@ -85,18 +85,6 @@ class BufferedFragment:
         return self.n_genes == 1
 
     @property
-    def is_ambiguous(self) -> bool:
-        return self.n_genes > 1 or self.num_hits > 1
-
-    @property
-    def is_isoform_ambiguous(self) -> bool:
-        return self.n_genes == 1 and len(self.t_inds) > 1 and self.num_hits == 1
-
-    @property
-    def has_annotated_sj(self) -> bool:
-        return self.count_cat == CountCategory.SPLICED_ANNOT
-
-    @property
     def is_strand_qualified(self) -> bool:
         return (
             self.count_cat == CountCategory.SPLICED_ANNOT

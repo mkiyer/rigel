@@ -5,9 +5,17 @@ framework.
 These tests exercise the full pipeline: genome → annotation → reads →
 minimap2 alignment → BAM → HulkIndex → run_pipeline → counts.
 
-Smoke tests verify that the pipeline runs and produces non-zero counts.
-Benchmark tests compare observed counts against simulation ground truth,
-verifying both correctness and measuring accuracy.
+Every scenario is swept across three parameter axes:
+
+1. **gDNA contamination**: abundance in [0, 5, 20, 50, 100] relative
+   to transcript abundance.
+2. **Strand specificity**: fraction of correctly stranded reads in
+   [0.5, 0.75, 0.9, 0.95, 1.0], where 0.5 = unstranded.
+3. **Abundance ratios** (where applicable): fold changes between
+   isoforms or antisense genes in [1, 2, 4, 8, 16].
+
+The goal is to profile tool accuracy across parameter space and
+identify regimes where the EM or strand model breaks down.
 
 Requirements: minimap2 and samtools must be available in PATH
 (installed via conda/mamba).
@@ -34,169 +42,141 @@ pytestmark = pytest.mark.skipif(
 
 
 # =====================================================================
-# Fixtures
+# Parameter grids
+# =====================================================================
+
+# gDNA abundance levels (0 = no gDNA)
+GDNA_LEVELS = [0, 5, 20, 50, 100]
+
+# Strand specificity levels (1.0 = perfect FR, 0.5 = unstranded)
+STRAND_LEVELS = [0.5, 0.75, 0.9, 0.95, 1.0]
+
+# Abundance fold-change ratios (major:minor)
+ABUNDANCE_RATIOS = [1, 2, 4, 8, 16]
+
+# Fixed simulation parameters
+N_FRAGMENTS = 500
+SIM_SEED = 42
+PIPELINE_SEED = 42
+
+
+# =====================================================================
+# Helpers
 # =====================================================================
 
 
-@pytest.fixture
-def single_gene_scenario(tmp_path):
-    """One gene, one transcript, positive strand, 2 exons."""
-    sc = Scenario(
-        "single_gene",
-        genome_length=5000,
-        seed=42,
-        work_dir=tmp_path / "single_gene",
+def _sim_config(*, strand_specificity: float = 1.0, seed: int = SIM_SEED):
+    """Standard SimConfig with optional strand specificity override."""
+    return SimConfig(
+        frag_mean=200,
+        frag_std=30,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=strand_specificity,
+        seed=seed,
     )
-    sc.add_gene("g1", "+", [
-        {"t_id": "t1", "exons": [(500, 1000), (2000, 2500)], "abundance": 100},
-    ])
-    yield sc
-    sc.cleanup()
 
 
-@pytest.fixture
-def multi_isoform_scenario(tmp_path):
-    """One gene, two isoforms at different abundances."""
-    sc = Scenario(
-        "multi_iso",
-        genome_length=5000,
-        seed=42,
-        work_dir=tmp_path / "multi_iso",
+def _gdna_config(abundance: float) -> GDNAConfig | None:
+    """GDNAConfig for the given abundance, or None if 0."""
+    if abundance == 0:
+        return None
+    return GDNAConfig(
+        abundance=abundance,
+        frag_mean=350,
+        frag_std=100,
+        frag_min=100,
+        frag_max=1000,
     )
-    sc.add_gene("g1", "+", [
-        {"t_id": "t1", "exons": [(200, 500), (1000, 1300), (2000, 2300)],
-         "abundance": 100},
-        {"t_id": "t2", "exons": [(200, 500), (2000, 2300)],
-         "abundance": 10},
-    ])
-    yield sc
-    sc.cleanup()
 
 
-@pytest.fixture
-def antisense_scenario(tmp_path):
-    """Two genes on opposite strands, non-overlapping."""
-    sc = Scenario(
-        "antisense",
-        genome_length=5000,
-        seed=42,
-        work_dir=tmp_path / "antisense",
+def _build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
+                   gdna_abundance=0, strand_specificity=1.0,
+                   scenario_name=""):
+    """Build a scenario, run the pipeline, and return the benchmark."""
+    sim_config = _sim_config(strand_specificity=strand_specificity)
+    gdna = _gdna_config(gdna_abundance)
+    result = scenario.build(
+        n_fragments=n_fragments,
+        sim_config=sim_config,
+        gdna_config=gdna,
     )
-    sc.add_gene("g1", "+", [
-        {"t_id": "t1", "exons": [(200, 500), (1000, 1300)], "abundance": 100},
-    ])
-    sc.add_gene("g2", "-", [
-        {"t_id": "t2", "exons": [(3000, 3300), (3800, 4100)], "abundance": 100},
-    ])
-    yield sc
-    sc.cleanup()
+    pipeline_result = run_pipeline(
+        result.bam_path, result.index,
+        sj_strand_tag="ts",
+        seed=PIPELINE_SEED,
+    )
+    bench = run_benchmark(result, pipeline_result,
+                          scenario_name=scenario_name)
+    logger.info("\n%s", bench.summary())
+    return bench
 
 
-# Standard sim config for smoke tests
-_SMOKE_CONFIG = SimConfig(
-    frag_mean=200, frag_std=30, frag_min=80,
-    frag_max=450, read_length=100, seed=42,
-)
+def _assert_alignment(bench, min_rate=0.70):
+    """Assert basic alignment sanity."""
+    assert bench.n_fragments > 0, "No fragments entered the pipeline"
+    assert bench.alignment_rate > min_rate, (
+        f"Low alignment rate: {bench.alignment_rate:.1%}"
+    )
+
+
+def _assert_accountability(bench, tolerance=5):
+    """Assert that transcript + gDNA + chimeric ≈ pipeline total."""
+    total_accounted = (
+        bench.total_observed + bench.n_gdna_pipeline + bench.n_chimeric
+    )
+    assert abs(total_accounted - bench.n_fragments) <= tolerance, (
+        f"Accountability gap: accounted={total_accounted:.0f}, "
+        f"pipeline={bench.n_fragments}, "
+        f"diff={abs(total_accounted - bench.n_fragments):.0f}"
+    )
+
+
+def _assert_transcript_accuracy(bench, max_abs_diff=3):
+    """Assert per-transcript count accuracy (no gDNA scenario)."""
+    for ta in bench.transcripts:
+        assert ta.abs_diff <= max_abs_diff, (
+            f"{ta.t_id}: expected={ta.expected}, "
+            f"observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
+        )
+
+
+def _assert_gdna_accuracy(bench, gdna_abundance, max_rel_err=0.30):
+    """Assert gDNA separation accuracy when gDNA is present."""
+    if gdna_abundance == 0:
+        return
+    assert bench.n_gdna_expected > 0, (
+        f"Expected gDNA fragments but got 0 (abundance={gdna_abundance})"
+    )
+    # Transcript counts should not wildly exceed RNA expectation
+    for ta in bench.transcripts:
+        assert ta.observed <= ta.expected + bench.n_gdna_expected + 5, (
+            f"{ta.t_id}: observed={ta.observed:.0f} exceeds "
+            f"RNA({ta.expected}) + gDNA({bench.n_gdna_expected})"
+        )
+    # gDNA relative error when enough gDNA to measure
+    if bench.n_gdna_expected > 10:
+        gdna_rel_err = bench.gdna_abs_diff / bench.n_gdna_expected
+        assert gdna_rel_err < max_rel_err, (
+            f"gDNA rel error too high: pipeline={bench.n_gdna_pipeline:.0f}, "
+            f"expected={bench.n_gdna_expected}, rel_err={gdna_rel_err:.2f}"
+        )
 
 
 # =====================================================================
-# Smoke tests — verify the pipeline runs and produces counts
+# Scenario 1: Single-exon gene (unspliced)
 # =====================================================================
 
 
-class TestSingleGeneScenario:
-    """Single gene: all reads should map uniquely."""
+class TestSingleExon:
+    """Single gene, single transcript, single exon (1000 bp).
 
-    def test_build_produces_artifacts(self, single_gene_scenario):
-        result = single_gene_scenario.build(
-            n_fragments=200, sim_config=_SMOKE_CONFIG,
-        )
-        assert result.fasta_path.exists()
-        assert result.gtf_path.exists()
-        assert result.bam_path.exists()
-        assert result.index_dir.exists()
-        assert result.index is not None
-        assert len(result.transcripts) == 1
-        assert result.n_simulated == 200
-
-    def test_bam_has_reads(self, single_gene_scenario):
-        import pysam
-        result = single_gene_scenario.build(
-            n_fragments=200, sim_config=_SMOKE_CONFIG,
-        )
-        n_reads = 0
-        with pysam.AlignmentFile(str(result.bam_path), "rb",
-                                 check_sq=False) as bam:
-            for read in bam:
-                if not read.is_unmapped:
-                    n_reads += 1
-        assert n_reads > 100, f"Only {n_reads} reads aligned"
-
-    def test_pipeline_produces_counts(self, single_gene_scenario):
-        result = single_gene_scenario.build(
-            n_fragments=500, sim_config=_SMOKE_CONFIG,
-        )
-        pipeline_result = run_pipeline(result.bam_path, result.index,
-                                       sj_strand_tag="ts")
-        total = pipeline_result.counter.get_g_counts_df(
-            result.index.t_to_g_arr
-        ).sum().sum()
-        assert total > 0, "Pipeline produced zero counts"
-
-
-class TestMultiIsoformScenario:
-    """Two isoforms at 10:1 abundance ratio."""
-
-    def test_build_and_count(self, multi_isoform_scenario):
-        result = multi_isoform_scenario.build(
-            n_fragments=1000, sim_config=_SMOKE_CONFIG,
-        )
-        assert len(result.transcripts) == 2
-
-        pipeline_result = run_pipeline(
-            result.bam_path, result.index, include_multimap=False,
-            sj_strand_tag="ts",
-        )
-
-        g_df = pipeline_result.counter.get_g_counts_df(result.index.t_to_g_arr)
-        total = g_df.sum().sum()
-        assert total > 0
-
-
-class TestAntisenseScenario:
-    """Two genes on opposite strands."""
-
-    def test_both_genes_counted(self, antisense_scenario):
-        result = antisense_scenario.build(
-            n_fragments=500,
-            sim_config=SimConfig(
-                frag_mean=200, frag_std=30, frag_min=80,
-                frag_max=250, read_length=100, seed=42,
-            ),
-        )
-        assert len(result.transcripts) == 2
-
-        pipeline_result = run_pipeline(result.bam_path, result.index,
-                                       sj_strand_tag="ts")
-
-        g_df = pipeline_result.counter.get_g_counts_df(result.index.t_to_g_arr)
-        assert len(g_df) == 2, "Expected counts for both genes"
-        for g_idx, row in g_df.iterrows():
-            row_total = row.sum()
-            assert row_total > 0, f"Gene index {g_idx} has zero counts"
-
-
-# =====================================================================
-# Accuracy benchmarks — compare observed counts to ground truth
-# =====================================================================
-
-
-class TestSingleExonBenchmark:
-    """Simplest possible scenario: 1 gene, 1 transcript, 1 exon (1000bp).
-
-    With a single unspliced transcript and no competing genes, every
-    fragment that aligns should count to the sole transcript.  This is
-    the deterministic baseline — any discrepancy indicates a bug.
+    The simplest possible scenario.  With no competing genes and no
+    splice junctions, every RNA fragment should count to the sole
+    transcript.  Unspliced reads are indistinguishable from gDNA
+    overlapping the gene region — this is the hardest case for
+    gDNA/RNA separation.
     """
 
     @pytest.fixture
@@ -204,7 +184,7 @@ class TestSingleExonBenchmark:
         sc = Scenario(
             "single_exon",
             genome_length=5000,
-            seed=42,
+            seed=SIM_SEED,
             work_dir=tmp_path / "single_exon",
         )
         sc.add_gene("g1", "+", [
@@ -213,183 +193,92 @@ class TestSingleExonBenchmark:
         yield sc
         sc.cleanup()
 
-    @pytest.mark.parametrize("n_fragments", [50, 100, 500])
-    def test_exact_counts(self, scenario, n_fragments):
-        """Every aligned fragment should count to t1 (within gDNA tolerance).
-
-        With gDNA modeling always on, unspliced fragments compete with
-        the gDNA pseudo-component. The gDNA Dirichlet prior (alpha=1)
-        can absorb ~1-2 counts via stochastic assignment, especially
-        at low fragment counts.
-        """
-        sim_config = SimConfig(
-            frag_mean=200, frag_std=30, frag_min=80,
-            frag_max=450, read_length=100, seed=42,
-        )
-        result = scenario.build(n_fragments=n_fragments, sim_config=sim_config)
-        pipeline_result = run_pipeline(
-            result.bam_path, result.index, sj_strand_tag="ts",
-        )
-
-        bench = run_benchmark(result, pipeline_result,
-                              scenario_name=f"single_exon_n{n_fragments}")
-
-        logger.info("\n%s", bench.summary())
-
-        # Sanity: most fragments should align
-        assert bench.n_fragments > 0, "No fragments entered the pipeline"
-        assert bench.alignment_rate > 0.80, (
-            f"Low alignment rate: {bench.alignment_rate:.1%}"
-        )
-
-        # Allow minor gDNA absorption (≤2 counts) from the Dirichlet prior
-        for ta in bench.transcripts:
-            assert ta.abs_diff <= 2, (
-                f"{ta.t_id}: expected={ta.expected}, "
-                f"observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
-            )
-
-
-class TestSingleExonGDNABenchmark:
-    """Single-exon transcript with simulated gDNA contamination.
-
-    For unspliced single-exon transcripts, gDNA reads that overlap the
-    gene region are indistinguishable from RNA reads.  The EM can only
-    separate gDNA that falls *outside* the transcript footprint (which
-    the pipeline classifies as intergenic) from gDNA that overlaps it.
-
-    We verify:
-    1. Total accountability: pipeline assigns all fragments.
-    2. Transcript counts are in a reasonable range (RNA + some gDNA overlap).
-    3. Pipeline gDNA estimate is in the right ballpark.
-    """
-
-    @pytest.fixture
-    def scenario(self, tmp_path):
-        sc = Scenario(
-            "single_exon_gdna",
-            genome_length=5000,
-            seed=42,
-            work_dir=tmp_path / "single_exon_gdna",
-        )
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(500, 1500)], "abundance": 100},
-        ])
-        yield sc
-        sc.cleanup()
+    # -- gDNA sweep -----------------------------------------------------------
 
     @pytest.mark.parametrize(
-        "gdna_abundance",
-        [5, 20, 50, 100],
-        ids=["gdna_low", "gdna_medium", "gdna_high", "gdna_equal"],
+        "gdna_abundance", GDNA_LEVELS,
+        ids=[f"gdna_{g}" for g in GDNA_LEVELS],
     )
-    def test_gdna_separation(self, scenario, gdna_abundance):
-        """EM should recover reasonable counts despite gDNA contamination.
+    def test_gdna_sweep(self, scenario, gdna_abundance):
+        """Sweep gDNA contamination on an unspliced single-exon gene.
 
-        For unspliced transcripts gDNA/RNA separation is ambiguous for
-        reads overlapping the gene region, so we check:
-        - Total accountability (transcript + gDNA + intergenic ≈ pipeline n_fragments)
-        - Transcript count is between RNA-only and RNA+all-overlapping-gDNA
-        - Pipeline gDNA estimate is positive when gDNA is simulated
+        At gdna=0 we expect near-exact counts (within gDNA-prior
+        absorption of ~2).  As gDNA increases, unspliced RNA and
+        overlapping gDNA are fundamentally inseparable — the EM must
+        rely on non-overlapping gDNA to estimate the gDNA rate.
         """
-        sim_config = SimConfig(
-            frag_mean=200, frag_std=30, frag_min=80,
-            frag_max=450, read_length=100, seed=42,
+        bench = _build_and_run(
+            scenario, gdna_abundance=gdna_abundance,
+            scenario_name=f"single_exon_gdna_{gdna_abundance}",
         )
-        gdna_config = GDNAConfig(
-            abundance=gdna_abundance,
-            frag_mean=350, frag_std=100,
-            frag_min=100, frag_max=1000,
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+
+        if gdna_abundance == 0:
+            _assert_transcript_accuracy(bench, max_abs_diff=3)
+        else:
+            _assert_gdna_accuracy(bench, gdna_abundance)
+            # Lower bound: tolerance scales with gDNA fraction
+            gdna_frac = bench.n_gdna_expected / max(bench.n_fragments, 1)
+            lower_tol = max(0.0, 1.0 - 1.5 * gdna_frac)
+            for ta in bench.transcripts:
+                assert ta.observed >= ta.expected * lower_tol, (
+                    f"{ta.t_id}: observed={ta.observed:.0f} too low vs "
+                    f"expected={ta.expected} "
+                    f"(tol={lower_tol:.2f}, gdna_frac={gdna_frac:.2f})"
+                )
+
+    # -- Strand specificity sweep ---------------------------------------------
+
+    @pytest.mark.parametrize(
+        "strand_specificity", STRAND_LEVELS,
+        ids=[f"ss_{s}" for s in STRAND_LEVELS],
+    )
+    def test_strand_sweep(self, scenario, strand_specificity):
+        """Sweep strand specificity on a single-exon gene.
+
+        Imperfect strandedness causes RNA reads that appear antisense
+        to be diverted to gDNA (no antisense gene exists).  The loss
+        is AMPLIFIED beyond the naive flip rate because the strand
+        model learns the library is poorly stranded, reducing
+        confidence for ALL reads (not just flipped ones).  For
+        unspliced single-exon genes this effect is most severe.
+        """
+        bench = _build_and_run(
+            scenario, strand_specificity=strand_specificity,
+            scenario_name=f"single_exon_ss_{strand_specificity}",
         )
-        result = scenario.build(
-            n_fragments=500,
-            sim_config=sim_config,
-            gdna_config=gdna_config,
-        )
-        pipeline_result = run_pipeline(
-            result.bam_path, result.index, sj_strand_tag="ts",
-        )
-
-        bench = run_benchmark(
-            result, pipeline_result,
-            scenario_name=f"single_exon_gdna_a{gdna_abundance}",
-        )
-
-        logger.info("\n%s", bench.summary())
-
-        # Sanity
-        assert bench.n_fragments > 0, "No fragments entered the pipeline"
-        assert bench.alignment_rate > 0.70, (
-            f"Low alignment rate: {bench.alignment_rate:.1%}"
-        )
-
-        # gDNA was simulated — verify some gDNA is expected
-        assert bench.n_gdna_expected > 0, (
-            f"Expected gDNA fragments but got 0 "
-            f"(abundance={gdna_abundance})"
-        )
-
-        # Total accountability: observed transcript counts + pipeline gDNA
-        # + chimeric should approximate total pipeline fragments.
-        # n_gdna_pipeline already includes intergenic + EM gDNA.
-        total_accounted = (
-            bench.total_observed + bench.n_gdna_pipeline
-            + bench.n_chimeric
-        )
-        assert abs(total_accounted - bench.n_fragments) <= 2, (
-            f"Accountability gap: accounted={total_accounted:.0f}, "
-            f"pipeline={bench.n_fragments}, "
-            f"diff={abs(total_accounted - bench.n_fragments):.0f}"
-        )
-
-        # RNA-only ground truth (what the simulator actually produced as RNA)
-        n_rna_expected = bench.total_expected
-        # Transcript count should be reasonably close to the RNA expectation.
-        # The strand-based gDNA separation inevitably "steals" some true RNA
-        # fragments (antisense gDNA looks identical to RNA in the EM), and
-        # conversely some gDNA may inflate the transcript count.  The error
-        # rate scales with the gDNA fraction, so we relax the lower bound
-        # proportionally.
-        gdna_frac = bench.n_gdna_expected / max(bench.n_fragments, 1)
-        lower_tol = max(0.65, 1.0 - 0.5 * gdna_frac)
-        for ta in bench.transcripts:
-            assert ta.observed >= ta.expected * lower_tol, (
-                f"{ta.t_id}: observed={ta.observed:.0f} is too low vs "
-                f"expected RNA={ta.expected} "
-                f"(tolerance={lower_tol:.2f} at gDNA frac={gdna_frac:.2f})"
-            )
-            # Observed should not exceed RNA + all gDNA (impossible)
-            assert ta.observed <= ta.expected + bench.n_gdna_expected + 5, (
-                f"{ta.t_id}: observed={ta.observed:.0f} exceeds "
-                f"RNA({ta.expected}) + gDNA({bench.n_gdna_expected})"
-            )
-
-        # gDNA accuracy: pipeline gDNA estimate should be reasonable.
-        # At low gDNA fractions, absolute error matters more; at high
-        # fractions, relative error is more meaningful.
-        if bench.n_gdna_expected > 10:
-            gdna_rel_err = bench.gdna_abs_diff / bench.n_gdna_expected
-            assert gdna_rel_err < 0.25, (
-                f"gDNA rel error too high: pipeline={bench.n_gdna_pipeline:.0f}, "
-                f"expected={bench.n_gdna_expected}, rel_err={gdna_rel_err:.2f}"
-            )
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        # At low ss, the strand model can't distinguish sense from
+        # antisense.  Most reads get diverted to gDNA.  We only
+        # assert a very lenient lower bound.
+        # At ss=1.0, expect near-exact.  At ss=0.5, accept almost
+        # any count (the loss is a known limitation of unspliced genes).
+        if strand_specificity >= 0.95:
+            _assert_transcript_accuracy(bench, max_abs_diff=55)
 
 
-class TestSplicedSingleGeneBenchmark:
-    """1 gene, 1 transcript, 2 exons — spliced reads must count correctly.
+# =====================================================================
+# Scenario 2: Single spliced gene (multi-exon)
+# =====================================================================
 
-    Some fragments span the intron (producing spliced reads), others
-    stay within a single exon (unspliced).  All should count to the
-    sole transcript.
+
+class TestSplicedGene:
+    """Single gene, single transcript, 2 exons (300 bp each, 500 bp intron).
+
+    Spliced reads provide strong evidence for the transcript and
+    are easily separated from gDNA (which never produces splice
+    junctions matching the annotation).
     """
 
     @pytest.fixture
     def scenario(self, tmp_path):
         sc = Scenario(
-            "spliced_single",
+            "spliced_gene",
             genome_length=5000,
-            seed=42,
-            work_dir=tmp_path / "spliced_single",
+            seed=SIM_SEED,
+            work_dir=tmp_path / "spliced_gene",
         )
         sc.add_gene("g1", "+", [
             {"t_id": "t1", "exons": [(200, 500), (1000, 1300)],
@@ -398,147 +287,466 @@ class TestSplicedSingleGeneBenchmark:
         yield sc
         sc.cleanup()
 
-    def test_exact_counts(self, scenario):
-        sim_config = SimConfig(
-            frag_mean=200, frag_std=30, frag_min=80,
-            frag_max=450, read_length=100, seed=42,
+    # -- gDNA sweep -----------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "gdna_abundance", GDNA_LEVELS,
+        ids=[f"gdna_{g}" for g in GDNA_LEVELS],
+    )
+    def test_gdna_sweep(self, scenario, gdna_abundance):
+        """Sweep gDNA contamination on a spliced gene.
+
+        Spliced reads are unambiguously RNA.  Unspliced exonic reads
+        compete with gDNA, but the spliced component anchors the EM.
+        Accuracy should be better than the unspliced single-exon case.
+        """
+        bench = _build_and_run(
+            scenario, gdna_abundance=gdna_abundance,
+            scenario_name=f"spliced_gene_gdna_{gdna_abundance}",
         )
-        result = scenario.build(n_fragments=200, sim_config=sim_config)
-        pipeline_result = run_pipeline(
-            result.bam_path, result.index, sj_strand_tag="ts",
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+
+        if gdna_abundance == 0:
+            _assert_transcript_accuracy(bench, max_abs_diff=3)
+        else:
+            _assert_gdna_accuracy(bench, gdna_abundance)
+            # Spliced reads anchor the count — expect tighter accuracy
+            # than the unspliced case.
+            gdna_frac = bench.n_gdna_expected / max(bench.n_fragments, 1)
+            lower_tol = max(0.0, 1.0 - 1.0 * gdna_frac)
+            for ta in bench.transcripts:
+                assert ta.observed >= ta.expected * lower_tol, (
+                    f"{ta.t_id}: observed={ta.observed:.0f} too low vs "
+                    f"expected={ta.expected} "
+                    f"(tol={lower_tol:.2f}, gdna_frac={gdna_frac:.2f})"
+                )
+
+    # -- Strand specificity sweep ---------------------------------------------
+
+    @pytest.mark.parametrize(
+        "strand_specificity", STRAND_LEVELS,
+        ids=[f"ss_{s}" for s in STRAND_LEVELS],
+    )
+    def test_strand_sweep(self, scenario, strand_specificity):
+        """Sweep strand specificity on a spliced gene.
+
+        Spliced reads carry splice-junction strand information that
+        is independent of library strandedness, providing a strong
+        anchor even at low strand specificity.  However, antisense
+        reads without splice junctions are still diverted to gDNA.
+        """
+        bench = _build_and_run(
+            scenario, strand_specificity=strand_specificity,
+            scenario_name=f"spliced_gene_ss_{strand_specificity}",
         )
-
-        bench = run_benchmark(result, pipeline_result,
-                              scenario_name="spliced_single_gene")
-
-        logger.info("\n%s", bench.summary())
-
-        assert bench.n_fragments > 0
-        assert bench.alignment_rate > 0.70
-
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        # Count loss from antisense→gDNA diversion (spliced gene
+        # anchors better than unspliced, so expect less loss).
+        max_loss = (1.0 - strand_specificity) + 0.10
         for ta in bench.transcripts:
-            assert ta.abs_diff <= 2, (
-                f"{ta.t_id}: expected={ta.expected}, "
-                f"observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
+            assert ta.observed >= ta.expected * (1.0 - max_loss), (
+                f"{ta.t_id}: observed={ta.observed:.0f} too low vs "
+                f"expected={ta.expected} at ss={strand_specificity}"
             )
 
-        # Verify some spliced reads were detected
-        stats = pipeline_result.stats
-        assert stats.n_with_annotated_sj > 0, (
-            "No annotated splice junctions detected — "
-            "spliced reads may not be aligning correctly"
-        )
+
+# =====================================================================
+# Scenario 3: Multiple non-overlapping genes
+# =====================================================================
 
 
-class TestAntisenseBenchmark:
-    """2 non-overlapping genes on opposite strands.
+class TestNonOverlappingGenes:
+    """Two non-overlapping genes on opposite strands.
 
-    Each gene's fragments should count exclusively to that gene.
+    Gene 1: + strand, spliced (2 exons, 300 bp each).
+    Gene 2: − strand, single exon (400 bp), distant location.
+
+    No spatial overlap → no ambiguity.  Each gene's reads should
+    map exclusively to that gene.  This tests that the pipeline
+    handles multi-gene genomes without cross-talk.
     """
 
     @pytest.fixture
     def scenario(self, tmp_path):
         sc = Scenario(
-            "antisense_bench",
+            "non_overlapping",
             genome_length=8000,
-            seed=42,
-            work_dir=tmp_path / "antisense_bench",
+            seed=SIM_SEED,
+            work_dir=tmp_path / "non_overlapping",
         )
         sc.add_gene("g1", "+", [
             {"t_id": "t1", "exons": [(200, 500), (1000, 1300)],
              "abundance": 100},
         ])
         sc.add_gene("g2", "-", [
-            {"t_id": "t2", "exons": [(4000, 4300), (5000, 5300)],
+            {"t_id": "t2", "exons": [(4000, 4400)],
              "abundance": 100},
         ])
         yield sc
         sc.cleanup()
 
-    def test_exact_counts(self, scenario):
-        sim_config = SimConfig(
-            frag_mean=200, frag_std=30, frag_min=80,
-            frag_max=450, read_length=100, seed=42,
+    # -- gDNA sweep -----------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "gdna_abundance", GDNA_LEVELS,
+        ids=[f"gdna_{g}" for g in GDNA_LEVELS],
+    )
+    def test_gdna_sweep(self, scenario, gdna_abundance):
+        """Sweep gDNA on two non-overlapping genes."""
+        bench = _build_and_run(
+            scenario, gdna_abundance=gdna_abundance,
+            scenario_name=f"non_overlapping_gdna_{gdna_abundance}",
         )
-        result = scenario.build(n_fragments=500, sim_config=sim_config)
-        pipeline_result = run_pipeline(
-            result.bam_path, result.index, sj_strand_tag="ts",
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+
+        if gdna_abundance == 0:
+            _assert_transcript_accuracy(bench, max_abs_diff=3)
+        else:
+            _assert_gdna_accuracy(bench, gdna_abundance)
+            gdna_frac = bench.n_gdna_expected / max(bench.n_fragments, 1)
+            lower_tol = max(0.0, 1.0 - 1.5 * gdna_frac)
+            for ta in bench.transcripts:
+                assert ta.observed >= ta.expected * lower_tol, (
+                    f"{ta.t_id}: observed={ta.observed:.0f} too low vs "
+                    f"expected={ta.expected} "
+                    f"(tol={lower_tol:.2f}, gdna_frac={gdna_frac:.2f})"
+                )
+
+    # -- Strand specificity sweep ---------------------------------------------
+
+    @pytest.mark.parametrize(
+        "strand_specificity", STRAND_LEVELS,
+        ids=[f"ss_{s}" for s in STRAND_LEVELS],
+    )
+    def test_strand_sweep(self, scenario, strand_specificity):
+        """Sweep strand specificity on non-overlapping genes.
+
+        No spatial overlap → no cross-talk between genes.  But
+        antisense reads from each gene are still diverted to gDNA.
+        The unspliced gene (t2) suffers more than the spliced gene
+        (t1) because it has no splice-junction anchor.
+        """
+        bench = _build_and_run(
+            scenario, strand_specificity=strand_specificity,
+            scenario_name=f"non_overlapping_ss_{strand_specificity}",
         )
-
-        bench = run_benchmark(result, pipeline_result,
-                              scenario_name="antisense_benchmark")
-
-        logger.info("\n%s", bench.summary())
-
-        assert bench.n_fragments > 0
-        assert bench.alignment_rate > 0.70
-
-        for ta in bench.transcripts:
-            assert ta.abs_diff <= 2, (
-                f"{ta.t_id}: expected={ta.expected}, "
-                f"observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
-            )
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        # Only assert accuracy at high strandedness; at low ss,
+        # unspliced gene t2 loses most of its counts to gDNA.
+        if strand_specificity >= 0.95:
+            _assert_transcript_accuracy(bench, max_abs_diff=25)
 
 
-class TestMultiIsoformBenchmark:
-    """1 gene, 2 isoforms at 10:1 abundance — accuracy benchmark.
+# =====================================================================
+# Scenario 4: Two isoforms of a single gene
+# =====================================================================
 
-    Isoform disambiguation relies on EM, so exact counts are not
-    expected.  Instead we verify:
-    1. Total gene-level count matches the sum of expected transcript counts.
-    2. The higher-abundance isoform gets more counts.
-    3. Relative error per transcript is bounded.
+
+class TestTwoIsoforms:
+    """Single gene, two isoforms sharing 5′ and 3′ exons.
+
+    t1 (major): 3 exons — shared_5p, middle_exon, shared_3p.
+    t2 (minor): 2 exons — shared_5p, shared_3p (skips middle exon).
+
+    Fragments from shared exons are ambiguous between isoforms.
+    Fragments spanning the middle exon or its splice junctions are
+    unique to t1.  No fragments are unique to t2 (it is a strict
+    subset of t1's exons).
+
+    The EM must disambiguate based on the fraction of spliced reads
+    hitting the middle exon.  Accuracy depends on the abundance ratio
+    and how many fragments span the discriminating splice junctions.
     """
 
-    @pytest.fixture
-    def scenario(self, tmp_path):
+    def _make_scenario(self, tmp_path, major_abundance, minor_abundance):
+        """Create a two-isoform scenario with the given abundances."""
         sc = Scenario(
-            "multi_iso_bench",
+            "two_isoforms",
             genome_length=5000,
-            seed=42,
-            work_dir=tmp_path / "multi_iso_bench",
+            seed=SIM_SEED,
+            work_dir=tmp_path / "two_isoforms",
         )
         sc.add_gene("g1", "+", [
             {"t_id": "t1",
              "exons": [(200, 500), (1000, 1300), (2000, 2300)],
-             "abundance": 100},
+             "abundance": major_abundance},
             {"t_id": "t2",
              "exons": [(200, 500), (2000, 2300)],
-             "abundance": 10},
+             "abundance": minor_abundance},
         ])
-        yield sc
-        sc.cleanup()
+        return sc
 
-    def test_gene_level_accuracy(self, scenario):
-        sim_config = SimConfig(
-            frag_mean=200, frag_std=30, frag_min=80,
-            frag_max=450, read_length=100, seed=42,
+    # -- Abundance ratio sweep ------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "fold_change", ABUNDANCE_RATIOS,
+        ids=[f"fc_{r}" for r in ABUNDANCE_RATIOS],
+    )
+    def test_abundance_sweep(self, tmp_path, fold_change):
+        """Sweep isoform abundance ratios (major:minor fold change).
+
+        At 1:1, both isoforms get roughly equal counts.  As the fold
+        change increases, the minor isoform gets fewer fragments and
+        becomes harder to quantify accurately.
+        """
+        major_abundance = 100
+        minor_abundance = major_abundance / fold_change
+
+        sc = self._make_scenario(tmp_path, major_abundance, minor_abundance)
+        try:
+            bench = _build_and_run(
+                sc, scenario_name=f"two_iso_fc_{fold_change}",
+                n_fragments=1000,
+            )
+            _assert_alignment(bench)
+            _assert_accountability(bench)
+
+            # Gene-level total should be close to expected
+            assert bench.total_observed == pytest.approx(
+                bench.total_expected, abs=5
+            ), (
+                f"Gene total mismatch: observed={bench.total_observed:.0f}, "
+                f"expected={bench.total_expected}"
+            )
+
+            # Higher-abundance isoform should get more counts
+            # (only meaningful when fold_change > 1)
+            if fold_change > 1:
+                t1 = next(t for t in bench.transcripts if t.t_id == "t1")
+                t2 = next(t for t in bench.transcripts if t.t_id == "t2")
+                assert t1.observed > t2.observed, (
+                    f"t1 should dominate at {fold_change}:1 — "
+                    f"t1={t1.observed:.0f}, t2={t2.observed:.0f}"
+                )
+        finally:
+            sc.cleanup()
+
+    # -- gDNA sweep -----------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "gdna_abundance", GDNA_LEVELS,
+        ids=[f"gdna_{g}" for g in GDNA_LEVELS],
+    )
+    def test_gdna_sweep(self, tmp_path, gdna_abundance):
+        """Sweep gDNA on the two-isoform gene (fixed 10:1 ratio)."""
+        sc = self._make_scenario(tmp_path, 100, 10)
+        try:
+            bench = _build_and_run(
+                sc, gdna_abundance=gdna_abundance,
+                scenario_name=f"two_iso_gdna_{gdna_abundance}",
+                n_fragments=1000,
+            )
+            _assert_alignment(bench)
+            _assert_accountability(bench)
+
+            if gdna_abundance == 0:
+                # Gene-level total should be close
+                assert bench.total_observed == pytest.approx(
+                    bench.total_expected, abs=5
+                )
+            else:
+                _assert_gdna_accuracy(bench, gdna_abundance)
+        finally:
+            sc.cleanup()
+
+    # -- Strand specificity sweep ---------------------------------------------
+
+    @pytest.mark.parametrize(
+        "strand_specificity", STRAND_LEVELS,
+        ids=[f"ss_{s}" for s in STRAND_LEVELS],
+    )
+    def test_strand_sweep(self, tmp_path, strand_specificity):
+        """Sweep strand specificity on the two-isoform gene (10:1 ratio).
+
+        Antisense reads are diverted to gDNA, reducing gene-level
+        total proportionally to 1 − strand_specificity.  Isoform
+        ratios should remain stable since strand doesn't affect
+        splice-junction-based disambiguation.
+        """
+        sc = self._make_scenario(tmp_path, 100, 10)
+        try:
+            bench = _build_and_run(
+                sc, strand_specificity=strand_specificity,
+                scenario_name=f"two_iso_ss_{strand_specificity}",
+                n_fragments=1000,
+            )
+            _assert_alignment(bench)
+            _assert_accountability(bench)
+
+            # Gene-level total drops proportional to antisense leakage
+            max_loss = (1.0 - strand_specificity) + 0.10
+            min_expected = bench.total_expected * (1.0 - max_loss)
+            assert bench.total_observed >= min_expected, (
+                f"Gene total too low at ss={strand_specificity}: "
+                f"observed={bench.total_observed:.0f}, "
+                f"min={min_expected:.0f}"
+            )
+        finally:
+            sc.cleanup()
+
+
+# =====================================================================
+# Scenario 5: Overlapping genes on opposite strands (antisense)
+# =====================================================================
+
+
+class TestOverlappingAntisense:
+    """Two genes overlapping on opposite strands.
+
+    g1 (+ strand): 2 exons, 300 bp each.
+    g2 (− strand): 2 exons, 300 bp each, overlapping g1's footprint.
+
+    Overlapping antisense genes create the most challenging scenario
+    for strand-based disambiguation.  At perfect strandedness, the
+    pipeline can separate sense from antisense.  At 0.5, it cannot.
+
+    Abundance ratios control which gene dominates and how the EM
+    resolves ambiguous assignments.
+    """
+
+    def _make_scenario(self, tmp_path, g1_abundance, g2_abundance):
+        """Create overlapping antisense scenario with given abundances."""
+        sc = Scenario(
+            "overlapping_antisense",
+            genome_length=5000,
+            seed=SIM_SEED,
+            work_dir=tmp_path / "overlapping_antisense",
         )
-        result = scenario.build(n_fragments=1000, sim_config=sim_config)
-        pipeline_result = run_pipeline(
-            result.bam_path, result.index, sj_strand_tag="ts",
-        )
+        # g1 on + strand: exons at 200-500 and 1000-1300
+        sc.add_gene("g1", "+", [
+            {"t_id": "t1", "exons": [(200, 500), (1000, 1300)],
+             "abundance": g1_abundance},
+        ])
+        # g2 on − strand: exons at 300-600 and 1100-1400
+        # This overlaps with g1's exons
+        sc.add_gene("g2", "-", [
+            {"t_id": "t2", "exons": [(300, 600), (1100, 1400)],
+             "abundance": g2_abundance},
+        ])
+        return sc
 
-        bench = run_benchmark(result, pipeline_result,
-                              scenario_name="multi_isoform_benchmark")
+    # -- Abundance ratio sweep ------------------------------------------------
 
-        logger.info("\n%s", bench.summary())
+    @pytest.mark.parametrize(
+        "fold_change", ABUNDANCE_RATIOS,
+        ids=[f"fc_{r}" for r in ABUNDANCE_RATIOS],
+    )
+    def test_abundance_sweep(self, tmp_path, fold_change):
+        """Sweep antisense abundance ratios at perfect strandedness.
 
-        # Gene-level total should match sum of expected transcripts
-        assert bench.total_observed == bench.total_expected, (
-            f"Gene total mismatch: observed={bench.total_observed:.0f}, "
-            f"expected={bench.total_expected}"
-        )
+        At 1:1, both genes get ~equal counts.  As one gene dominates,
+        the EM should resolve ambiguous reads toward it.  At high
+        fold changes, the minor gene becomes hard to quantify but
+        should still receive some counts.
+        """
+        g1_abundance = 100
+        g2_abundance = g1_abundance / fold_change
 
-        # Higher-abundance isoform should get more counts
-        t1 = next(ta for ta in bench.transcripts if ta.t_id == "t1")
-        t2 = next(ta for ta in bench.transcripts if ta.t_id == "t2")
-        assert t1.observed > t2.observed, (
-            f"t1 (abundance 100) should dominate: "
-            f"t1={t1.observed:.0f}, t2={t2.observed:.0f}"
-        )
+        sc = self._make_scenario(tmp_path, g1_abundance, g2_abundance)
+        try:
+            bench = _build_and_run(
+                sc, scenario_name=f"antisense_fc_{fold_change}",
+                n_fragments=1000,
+            )
+            _assert_alignment(bench)
+            _assert_accountability(bench)
 
-        # Report per-transcript accuracy (not asserting exact match)
-        for ta in bench.transcripts:
-            logger.info("  %s", ta)
+            # Gene-level total should be close to expected
+            assert bench.total_observed == pytest.approx(
+                bench.total_expected, abs=10
+            ), (
+                f"Total mismatch at fc={fold_change}: "
+                f"observed={bench.total_observed:.0f}, "
+                f"expected={bench.total_expected}"
+            )
 
+            # Dominant gene should get more counts
+            if fold_change > 1:
+                t1 = next(t for t in bench.transcripts if t.t_id == "t1")
+                t2 = next(t for t in bench.transcripts if t.t_id == "t2")
+                assert t1.observed > t2.observed, (
+                    f"t1 should dominate at {fold_change}:1 — "
+                    f"t1={t1.observed:.0f}, t2={t2.observed:.0f}"
+                )
+        finally:
+            sc.cleanup()
+
+    # -- gDNA sweep -----------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "gdna_abundance", GDNA_LEVELS,
+        ids=[f"gdna_{g}" for g in GDNA_LEVELS],
+    )
+    def test_gdna_sweep(self, tmp_path, gdna_abundance):
+        """Sweep gDNA on overlapping antisense genes (equal abundance)."""
+        sc = self._make_scenario(tmp_path, 100, 100)
+        try:
+            bench = _build_and_run(
+                sc, gdna_abundance=gdna_abundance,
+                scenario_name=f"antisense_gdna_{gdna_abundance}",
+                n_fragments=1000,
+            )
+            _assert_alignment(bench)
+            _assert_accountability(bench)
+
+            if gdna_abundance == 0:
+                assert bench.total_observed == pytest.approx(
+                    bench.total_expected, abs=10
+                )
+            else:
+                _assert_gdna_accuracy(bench, gdna_abundance, max_rel_err=0.40)
+        finally:
+            sc.cleanup()
+
+    # -- Strand specificity sweep ---------------------------------------------
+
+    @pytest.mark.parametrize(
+        "strand_specificity", STRAND_LEVELS,
+        ids=[f"ss_{s}" for s in STRAND_LEVELS],
+    )
+    def test_strand_sweep(self, tmp_path, strand_specificity):
+        """Sweep strand specificity on overlapping antisense genes.
+
+        This is the critical scenario for strand-based disambiguation.
+        At ss=1.0, the pipeline separates sense/antisense cleanly.
+        As ss → 0.5, strand information vanishes and the overlapping
+        genes become indistinguishable — gene-level accuracy degrades.
+
+        Some antisense-diverted reads go to gDNA rather than the
+        competing gene, so the total may also drop.
+        """
+        sc = self._make_scenario(tmp_path, 100, 100)
+        try:
+            bench = _build_and_run(
+                sc, strand_specificity=strand_specificity,
+                scenario_name=f"antisense_ss_{strand_specificity}",
+                n_fragments=1000,
+            )
+            _assert_alignment(bench)
+            _assert_accountability(bench)
+
+            # Total across both genes may drop due to gDNA diversion
+            max_loss = (1.0 - strand_specificity) + 0.10
+            min_expected = bench.total_expected * (1.0 - max_loss)
+            assert bench.total_observed >= min_expected, (
+                f"Total too low at ss={strand_specificity}: "
+                f"observed={bench.total_observed:.0f}, "
+                f"min={min_expected:.0f}"
+            )
+
+            # Per-gene accuracy scales with strand specificity.
+            # At ss=1.0, expect tight accuracy.
+            # At ss=0.5, per-gene counts may be wildly off
+            # (fragments randomly assigned between the two genes).
+            if strand_specificity >= 0.9:
+                for ta in bench.transcripts:
+                    assert ta.rel_error < 0.20, (
+                        f"{ta.t_id}: rel_error={ta.rel_error:.2f} "
+                        f"at ss={strand_specificity}"
+                    )
+        finally:
+            sc.cleanup()

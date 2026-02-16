@@ -23,14 +23,14 @@ memory-efficient columnar buffer (``FragmentBuffer``).
    *all* ambiguous fragments simultaneously to estimate transcript
    *and gDNA* abundances.  The gDNA component competes with
    transcripts for probability mass.
-4. **Stochastic assignment** — use the converged EM posteriors to
-   make a single discrete stochastic choice per fragment (transcript
+4. **Expected-value assignment** — use the converged EM posteriors to
+   distribute fractional counts across candidates (transcript
    or gDNA).
 
-Each fragment contributes exactly **one discrete count** (1.0) to a
-single component (transcript or gDNA).  The EM approach follows the
-standard algorithm used by RSEM, Salmon, and Kallisto, extended
-with a genomic DNA contamination model.
+Each fragment contributes exactly **one count** (1.0) distributed
+across components proportional to posterior probability.  The EM
+approach follows the standard algorithm used by RSEM, Salmon, and
+Kallisto, extended with a genomic DNA contamination model.
 
 The columnar buffer stores fragment data at ~40-50 bytes per fragment
 (vs. ~600 bytes for Python ``ResolvedFragment`` objects).  When
@@ -75,6 +75,7 @@ _LOG_SAFE_FLOOR = 1e-10
 # Most unannotated splice junctions are real; a small penalty allows
 # gDNA to compete only weakly for these fragments.
 _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = 0.01
+DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +370,7 @@ def _score_candidate(
     strand_models: StrandModels,
     insert_models: InsertSizeModels,
 ) -> tuple[float, int]:
-    """Compute data log-likelihood and count type for one candidate.
+    """Compute data log-likelihood and count column for one candidate.
 
     Selects the best pure-RNA strand model via
     :meth:`StrandModels.model_for_category`.  When ``exonic_spliced``
@@ -382,9 +383,11 @@ def _score_candidate(
     -------
     log_lik : float
         ``log(P_strand) + log(P_insert)``.
-    count_type : int
-        Flat ``CountType`` column index (0-11).
+    count_col_idx : int
+        Internal column index (0-7).
     """
+    from .categories import CountCol
+
     sm = strand_models.model_for_category(count_cat)
     p_strand = sm.strand_likelihood(
         exon_strand, Strand(t_strand)
@@ -401,12 +404,10 @@ def _score_candidate(
 
     log_lik = np.log(max(p_strand, _LOG_SAFE_FLOOR)) + log_p_insert
 
-    count_strand = ReadCounter.classify_strand(
-        exon_strand, t_strand, sm
-    )
-    count_type = int(count_cat) * 3 + int(count_strand)
+    anti = ReadCounter.is_antisense(exon_strand, t_strand, sm)
+    count_col_idx = CountCol.from_category(count_cat, anti)
 
-    return log_lik, count_type
+    return log_lik, count_col_idx
 
 
 # Default gDNA splice penalties per CountCategory.
@@ -531,21 +532,39 @@ def _scan_and_build_em_data(
     offsets: list[int] = [0]
     t_indices_list: list[int] = []
     log_liks_list: list[float] = []
-    count_types_list: list[int] = []
+    count_cols_list: list[int] = []
+
+    # Per-candidate metadata for EM model re-estimation
+    cand_strand_dir_list: list[int] = []   # +1=sense, −1=anti, 0=ambig
+    cand_is_shadow_list: list[bool] = []
 
     # Per-unit locus tracking (best transcript per EM unit)
     locus_t_list: list[int] = []
     locus_ct_list: list[int] = []
+
+    # Per-unit metadata for EM model re-estimation
+    unit_exon_strands_list: list[int] = []
+    unit_insert_sizes_list: list[int] = []
+    unit_count_cats_list: list[int] = []
 
     # Multimapper group state -- persists across chunks because a
     # molecule's alignments may span a chunk boundary.
     mm_pending: list = []
     mm_fid: int = -1
 
+    def _strand_dir(exon_strand: int, ref_strand: int) -> int:
+        """Compute strand direction: +1 sense, −1 antisense, 0 ambiguous."""
+        if (
+            exon_strand not in (int(Strand.POS), int(Strand.NEG))
+            or ref_strand not in (int(Strand.POS), int(Strand.NEG))
+        ):
+            return 0
+        return 1 if exon_strand == ref_strand else -1
+
     def _add_transcript_candidates(bf) -> tuple[float, int]:
         """Add all transcript candidates for a fragment.
 
-        Returns (best_log_lik, best_count_type) among transcripts
+        Returns (best_log_lik, best_count_col) among transcripts
         for locus tracking.  Returns (-inf, 0) if no candidates.
         """
         best_ll = -np.inf
@@ -563,32 +582,54 @@ def _scan_and_build_em_data(
             )
             t_indices_list.append(t_idx_int)
             log_liks_list.append(log_lik)
-            count_types_list.append(ct)
+            count_cols_list.append(ct)
+            # Per-candidate metadata for model re-estimation
+            cand_strand_dir_list.append(
+                _strand_dir(bf.exon_strand, t_strand)
+            )
+            cand_is_shadow_list.append(False)
             if log_lik > best_ll:
                 best_ll = log_lik
                 best_ct = ct
         return best_ll, best_ct
 
-    def _add_gdna_candidate(bf, best_t_idx: int) -> None:
-        """Add a per-gene gDNA shadow candidate for a fragment.
+    def _add_gdna_candidates(bf, unit_start: int) -> None:
+        """Add per-gene gDNA shadow candidates for all unique genes.
 
-        The shadow index is ``gdna_base + gene_index`` where
-        ``gene_index`` comes from the best transcript candidate.
+        When a fragment overlaps multiple genes, gDNA contamination
+        could originate from any gene's genomic territory.  Adding
+        one shadow per unique gene lets the EM distribute gDNA
+        probability across the entire locus.
         """
-        if best_t_idx < 0:
-            return  # No transcript candidate → no gene to shadow
+        unit_end = len(t_indices_list)
+        if unit_start >= unit_end:
+            return
+
         gdna_ll = _score_gdna_candidate(
             bf.exon_strand, bf.count_cat, bf.insert_size,
             strand_models, insert_models,
             gdna_splice_penalties,
         )
-        g_idx = int(t_to_g[best_t_idx])
-        shadow_idx = gdna_base + g_idx
-        t_indices_list.append(shadow_idx)
-        log_liks_list.append(gdna_ll)
-        # gDNA candidates use count_type 0 (placeholder; not used for
-        # gDNA since gDNA assignments go to gdna_locus_counts instead)
-        count_types_list.append(0)
+
+        # Collect unique gene indices from transcript candidates
+        seen_genes: set[int] = set()
+        for j in range(unit_start, unit_end):
+            t_idx = t_indices_list[j]
+            if t_idx < gdna_base:
+                seen_genes.add(int(t_to_g[t_idx]))
+
+        # Strand direction for gDNA: relative to POS reference
+        sdir = _strand_dir(bf.exon_strand, int(Strand.POS))
+
+        for g_idx in sorted(seen_genes):
+            shadow_idx = gdna_base + g_idx
+            t_indices_list.append(shadow_idx)
+            log_liks_list.append(gdna_ll)
+            # gDNA candidates use count_col 0 (placeholder; not
+            # used since gDNA goes to gdna_locus_counts instead)
+            count_cols_list.append(0)
+            cand_strand_dir_list.append(sdir)
+            cand_is_shadow_list.append(True)
 
     def _flush_mm_group() -> None:
         """Flush accumulated multimapper alignments as one EM unit."""
@@ -596,6 +637,7 @@ def _scan_and_build_em_data(
         best_ct = 0
         best_t = -1
         any_spliced_annot = False
+        unit_start_pre = offsets[-1]
         for bf in mm_pending:
             if bf.count_cat == int(CountCategory.SPLICED_ANNOT):
                 any_spliced_annot = True
@@ -604,7 +646,6 @@ def _scan_and_build_em_data(
                 best_ll = ll
                 best_ct = ct
         # Find best transcript candidate for this unit (before adding shadow)
-        unit_start_pre = offsets[-1]
         unit_end_pre = len(t_indices_list)
         _best_ll = -np.inf
         _best_t = -1
@@ -613,13 +654,18 @@ def _scan_and_build_em_data(
             if log_liks_list[j] > _best_ll:
                 _best_ll = log_liks_list[j]
                 _best_t = t_indices_list[j]
-                _best_ct = count_types_list[j]
-        # Add per-gene gDNA shadow candidate unless all hits are SPLICED_ANNOT
-        if not any_spliced_annot and mm_pending and _best_t >= 0:
-            _add_gdna_candidate(mm_pending[0], _best_t)
+                _best_ct = count_cols_list[j]
+        # Add per-gene gDNA shadow candidates unless all hits are SPLICED_ANNOT
+        if not any_spliced_annot and mm_pending:
+            _add_gdna_candidates(mm_pending[0], unit_start_pre)
         offsets.append(len(t_indices_list))
         locus_t_list.append(_best_t)
         locus_ct_list.append(_best_ct)
+        # Per-unit metadata (use first alignment's properties)
+        bf0 = mm_pending[0]
+        unit_exon_strands_list.append(bf0.exon_strand)
+        unit_insert_sizes_list.append(bf0.insert_size)
+        unit_count_cats_list.append(bf0.count_cat)
 
     n_processed = 0
     for chunk in buffer.iter_chunks():
@@ -653,15 +699,15 @@ def _scan_and_build_em_data(
                     mm_pending.append(bf)
 
             else:
-                # --- EM unit: transcript candidates + per-gene gDNA shadow ---
+                # --- EM unit: transcript candidates + per-gene gDNA shadow(s) ---
                 # This covers:
                 # - FRAG_UNIQUE + non-SPLICED_ANNOT (competes with gDNA)
                 # - FRAG_ISOFORM_AMBIG (any category)
                 # - FRAG_GENE_AMBIG (any category)
+                unit_start = offsets[-1]
                 best_ll, best_ct = _add_transcript_candidates(bf)
 
-                # Find best transcript candidate for shadow gene assignment
-                unit_start = offsets[-1]
+                # Find best transcript candidate for locus tracking
                 unit_end = len(t_indices_list)
                 _best_ll = -np.inf
                 _best_t = -1
@@ -670,16 +716,21 @@ def _scan_and_build_em_data(
                     if log_liks_list[j] > _best_ll:
                         _best_ll = log_liks_list[j]
                         _best_t = t_indices_list[j]
-                        _best_ct = count_types_list[j]
+                        _best_ct = count_cols_list[j]
 
-                # Add per-gene gDNA shadow for non-SPLICED_ANNOT fragments
-                if not is_spliced_annot and _best_t >= 0:
-                    _add_gdna_candidate(bf, _best_t)
+                # Add per-gene gDNA shadows for non-SPLICED_ANNOT fragments
+                # (one shadow per unique gene in the candidate set)
+                if not is_spliced_annot:
+                    _add_gdna_candidates(bf, unit_start)
 
                 if len(t_indices_list) > offsets[-1]:
                     offsets.append(len(t_indices_list))
                     locus_t_list.append(_best_t)
                     locus_ct_list.append(_best_ct)
+                    # Per-unit metadata
+                    unit_exon_strands_list.append(bf.exon_strand)
+                    unit_insert_sizes_list.append(bf.insert_size)
+                    unit_count_cats_list.append(bf.count_cat)
 
                 if fc == FRAG_UNIQUE:
                     stats.n_counted_truly_unique += 1
@@ -703,16 +754,81 @@ def _scan_and_build_em_data(
     n_units = len(offsets) - 1
     n_candidates = len(t_indices_list)
 
+    offsets_arr = np.array(offsets, dtype=np.int64)
+    t_indices_arr = np.array(t_indices_list, dtype=np.int32)
+    cand_is_shadow_arr = np.array(cand_is_shadow_list, dtype=bool)
+    cand_strand_dir_arr = np.array(cand_strand_dir_list, dtype=np.int8)
+
+    # Expand per-unit metadata to per-candidate
+    unit_insert_arr = np.array(unit_insert_sizes_list, dtype=np.int32)
+    unit_count_cat_arr = np.array(unit_count_cats_list, dtype=np.int8)
+
+    if n_units > 0 and n_candidates > 0:
+        seg_lengths = np.diff(offsets_arr)
+
+        cand_insert_arr = np.repeat(unit_insert_arr, seg_lengths)
+
+        # Splice penalty log-lik per candidate (0 for RNA, penalty for gDNA)
+        penalties = gdna_splice_penalties or _GDNA_SPLICE_PENALTIES
+        cat_to_splice_ll = np.zeros(len(CountCategory), dtype=np.float64)
+        for cc in CountCategory:
+            pen = penalties.get(cc, 1.0)
+            cat_to_splice_ll[int(cc)] = np.log(max(pen, _LOG_SAFE_FLOOR))
+        unit_cats_expanded = np.repeat(unit_count_cat_arr, seg_lengths)
+        cand_splice_ll_arr = np.where(
+            cand_is_shadow_arr,
+            cat_to_splice_ll[unit_cats_expanded],
+            0.0,
+        )
+    else:
+        cand_insert_arr = np.array([], dtype=np.int32)
+        cand_splice_ll_arr = np.array([], dtype=np.float64)
+
+    # Initial model parameters for EM re-estimation
+    rna_model = strand_models._best_rna_model()
+    p_rna_sense = rna_model.p_r1_sense
+    p_gdna_sense = strand_models.intergenic.p_r1_sense
+
+    # Initial insert log-probability arrays (Laplace-smoothed).
+    # RNA init: SPLICED_ANNOT model (purest RNA), fall back to global.
+    # gDNA init: intergenic model, fall back to global.
+    insert_max = insert_models.global_model.max_size
+    rna_imodel = insert_models.category_models.get(
+        CountCategory.SPLICED_ANNOT, insert_models.global_model
+    )
+    gdna_imodel = (
+        insert_models.intergenic
+        if insert_models.intergenic.n_observations > 0
+        else insert_models.global_model
+    )
+    rna_insert_ll = np.array(
+        [rna_imodel.log_likelihood(i) for i in range(insert_max + 1)],
+        dtype=np.float64,
+    )
+    gdna_insert_ll = np.array(
+        [gdna_imodel.log_likelihood(i) for i in range(insert_max + 1)],
+        dtype=np.float64,
+    )
+
     return EMData(
-        offsets=np.array(offsets, dtype=np.int64),
-        t_indices=np.array(t_indices_list, dtype=np.int32),
+        offsets=offsets_arr,
+        t_indices=t_indices_arr,
         log_liks=np.array(log_liks_list, dtype=np.float64),
-        count_types=np.array(count_types_list, dtype=np.uint8),
+        count_cols=np.array(count_cols_list, dtype=np.uint8),
         locus_t_indices=np.array(locus_t_list, dtype=np.int32),
-        locus_count_types=np.array(locus_ct_list, dtype=np.uint8),
+        locus_count_cols=np.array(locus_ct_list, dtype=np.uint8),
         n_units=n_units,
         n_candidates=n_candidates,
         gdna_base_index=gdna_base,
+        cand_strand_dir=cand_strand_dir_arr,
+        cand_is_shadow=cand_is_shadow_arr,
+        cand_insert_sizes=cand_insert_arr,
+        cand_splice_ll=cand_splice_ll_arr,
+        init_p_rna_sense=p_rna_sense,
+        init_p_gdna_sense=p_gdna_sense,
+        init_rna_insert_ll=rna_insert_ll,
+        init_gdna_insert_ll=gdna_insert_ll,
+        insert_size_max=insert_max,
     )
 
 
@@ -789,7 +905,7 @@ def compute_shadow_init(
     np.ndarray
         float64[num_genes] — per-gene shadow initialization values.
     """
-    from .categories import CountStrand
+    from .categories import ANTISENSE_COLS
 
     # Per-transcript total unique counts → per-gene depth
     t_depth = unique_counts.sum(axis=1)  # (N_t,)
@@ -813,9 +929,7 @@ def compute_shadow_init(
         return np.zeros(num_genes, dtype=np.float64)
 
     # Per-gene antisense counts
-    # Antisense columns: indices 2, 5, 8, 11 (stride 3, offset 2)
-    antisense_cols = [int(CountStrand.ANTISENSE) + cat * 3 for cat in range(4)]
-    t_antisense = unique_counts[:, antisense_cols].sum(axis=1)  # (N_t,)
+    t_antisense = unique_counts[:, list(ANTISENSE_COLS)].sum(axis=1)  # (N_t,)
     g_antisense = np.zeros(num_genes, dtype=np.float64)
     np.add.at(g_antisense, t_to_g_arr, t_antisense)
 
@@ -851,12 +965,14 @@ def count_from_buffer(
     stats: PipelineStats,
     *,
     seed: int | None = None,
-    em_pseudocount: float = 1.0,
-    em_iterations: int = 10,
+    em_pseudocount: float = 0.01,
+    em_iterations: int = 1000,
     log_every: int = 1_000_000,
     gdna_splice_penalties: dict | None = None,
+    gdna_threshold: float = 0.5,
+    confidence_threshold: float = 0.95,
 ) -> ReadCounter:
-    """Assign counts from buffered fragments via unified EM with per-gene gDNA.
+    """Assign counts from buffered fragments via VBEM with per-gene gDNA.
 
     Every fragment contributes exactly **one discrete count** to a
     single component (transcript or per-gene gDNA shadow).
@@ -891,13 +1007,22 @@ def count_from_buffer(
     seed : int or None
         Random seed for reproducibility.
     em_pseudocount : float
-        Dirichlet pseudocount for prior smoothing (default 1.0).
+        Dirichlet prior hyperparameter for VBEM (default 0.01).
+        Small values (≪ 1) induce sparsity; larger values (≥ 1)
+        approach standard EM behavior.
     em_iterations : int
-        Maximum number of EM iterations (default 10).
+        Maximum number of VBEM iterations (default 1000).
     log_every : int
         Log progress every *log_every* fragments.
     gdna_splice_penalties : dict or None
         Override default gDNA splice penalties per CountCategory.
+    gdna_threshold : float
+        Minimum sum of RNA posteriors to classify a unit as RNA
+        (default 0.5).  0.0 = never assign to gDNA; 1.0 = only
+        shadow-free units are RNA.
+    confidence_threshold : float
+        Minimum RNA-normalized posterior for an EM assignment
+        to be counted as high-confidence (default 0.95).
 
     Returns
     -------
@@ -906,9 +1031,24 @@ def count_from_buffer(
     # First pass: assign SPLICED_ANNOT uniques + build EM data.
     # We create an initial counter to accumulate unique_counts, which
     # we then use to compute shadow_init via empirical Bayes.
+
+    # Compute per-transcript effective lengths for EM normalization.
+    # effective_length = max(1, exonic_length − mean_fragment_length + 1)
+    # This prevents longer transcripts from monopolizing shared-exon
+    # reads in the EM E-step (analogous to salmon/kallisto).
+    exonic_lengths = index.t_df["length"].values.astype(np.float64)
+    mean_frag = (
+        insert_models.global_model.mean
+        if insert_models.global_model.n_observations > 0
+        else 200.0  # sensible default for PE RNA-seq
+    )
+    effective_lengths = np.maximum(exonic_lengths - mean_frag + 1.0, 1.0)
+
     counter = ReadCounter(
         index.num_transcripts, index.num_genes,
         seed=seed, alpha=em_pseudocount,
+        effective_lengths=effective_lengths,
+        t_to_g=index.t_to_g_arr,
     )
 
     logger.info(
@@ -940,7 +1080,7 @@ def count_from_buffer(
         f"shadow_init sum={shadow_init.sum():.1f}"
     )
 
-    # EM iteration + stochastic assignment
+    # EM iteration + posterior-sampling assignment
     if em_data.n_units > 0:
         logger.info(
             f"[START] EM: up to {em_iterations} iterations over "
@@ -948,8 +1088,12 @@ def count_from_buffer(
         )
         counter.run_em(em_data, em_iterations=em_iterations)
 
-        logger.info("[START] Stochastic assignment of ambiguous fragments")
-        counter.assign_ambiguous(em_data)
+        logger.info("[START] Posterior sampling assignment of ambiguous fragments")
+        counter.assign_ambiguous(
+            em_data,
+            gdna_threshold=gdna_threshold,
+            confidence_threshold=confidence_threshold,
+        )
         logger.info(
             f"[DONE] Assigned {em_data.n_units:,} ambiguous fragments "
             f"(gDNA EM: {counter.gdna_em_count:.0f})"
@@ -988,11 +1132,13 @@ def run_pipeline(
     spill_dir: Path | str | None = None,
     sj_strand_tag: str | tuple[str, ...] = "auto",
     seed: int | None = None,
-    em_pseudocount: float = 1.0,
-    em_iterations: int = 10,
+    em_pseudocount: float = 0.01,
+    em_iterations: int = 1000,
     gdna_splice_penalty_unannot: float = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+    gdna_threshold: float = 0.5,
+    confidence_threshold: float = 0.95,
 ) -> PipelineResult:
-    """Run the complete counting pipeline with unified EM and gDNA modeling.
+    """Run the complete counting pipeline with VBEM and gDNA modeling.
 
     Opens the BAM **once**, scans all fragments, trains models,
     buffers resolved fragments, then counts via EM-based assignment.
@@ -1030,13 +1176,22 @@ def run_pipeline(
     seed : int or None
         Random seed for reproducibility (default None).
     em_pseudocount : float
-        Dirichlet pseudocount for prior smoothing (default 1.0).
+        Dirichlet prior hyperparameter for VBEM (default 0.01).
+        Small values (≪ 1) induce sparsity; larger values (≥ 1)
+        approach standard EM behavior.
     em_iterations : int
-        Maximum number of EM iterations (default 10).
+        Maximum number of VBEM iterations (default 1000).
     gdna_splice_penalty_unannot : float
         gDNA splice penalty for SPLICED_UNANNOT fragments (default 0.01).
         Higher values make gDNA more competitive for unannotated
         spliced fragments (treating them more like alignment artifacts).
+    gdna_threshold : float
+        Minimum sum of RNA posteriors to classify a unit as RNA
+        (default 0.5).  0.0 = never assign to gDNA; 1.0 = only
+        shadow-free units are RNA.
+    confidence_threshold : float
+        Minimum RNA-normalized posterior for an EM assignment
+        to be counted as high-confidence (default 0.95).
 
     Returns
     -------
@@ -1098,6 +1253,8 @@ def run_pipeline(
             em_iterations=em_iterations,
             log_every=log_every,
             gdna_splice_penalties=gdna_splice_penalties,
+            gdna_threshold=gdna_threshold,
+            confidence_threshold=confidence_threshold,
         )
     finally:
         buffer.cleanup()

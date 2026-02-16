@@ -81,7 +81,7 @@ class TestBufferedFragment:
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
         assert bf.is_unique_gene is True
-        assert bf.is_ambiguous is False
+        assert (bf.n_genes > 1 or bf.num_hits > 1) is False
 
     def test_is_ambiguous_multi_gene(self):
         bf = BufferedFragment(
@@ -94,7 +94,7 @@ class TestBufferedFragment:
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.is_ambiguous is True
+        assert (bf.n_genes > 1 or bf.num_hits > 1) is True
 
     def test_is_ambiguous_multimapped(self):
         bf = BufferedFragment(
@@ -107,7 +107,7 @@ class TestBufferedFragment:
             num_hits=3,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.is_ambiguous is True
+        assert (bf.n_genes > 1 or bf.num_hits > 1) is True
 
     def test_has_annotated_sj(self):
         bf = BufferedFragment(
@@ -120,7 +120,7 @@ class TestBufferedFragment:
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.has_annotated_sj is True
+        assert bf.count_cat == int(CountCategory.SPLICED_ANNOT)
 
     def test_is_strand_qualified(self):
         bf = BufferedFragment(
@@ -174,7 +174,7 @@ class TestBufferedFragment:
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.is_isoform_ambiguous is True
+        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is True
 
     def test_is_isoform_ambiguous_false_unique(self):
         """1 gene, 1 transcript, NH=1 → truly unique, not isoform-ambiguous."""
@@ -188,7 +188,7 @@ class TestBufferedFragment:
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.is_isoform_ambiguous is False
+        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is False
 
     def test_is_isoform_ambiguous_false_multi_gene(self):
         """2 genes → gene-ambiguous, not isoform-ambiguous."""
@@ -202,7 +202,7 @@ class TestBufferedFragment:
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.is_isoform_ambiguous is False
+        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is False
 
     def test_is_isoform_ambiguous_false_multimapped(self):
         """1 gene, 2 transcripts, NH=3 → multimapper, not isoform-ambiguous."""
@@ -216,7 +216,7 @@ class TestBufferedFragment:
             num_hits=3,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.is_isoform_ambiguous is False
+        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is False
 
 
 # =====================================================================

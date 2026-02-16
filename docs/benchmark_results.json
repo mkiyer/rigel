@@ -1,0 +1,956 @@
+[
+  {
+    "scenario_name": "single_exon_gdna_0",
+    "param_axis": "gdna",
+    "param_value": 0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.07
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.244
+    }
+  },
+  {
+    "scenario_name": "single_exon_gdna_20",
+    "param_axis": "gdna",
+    "param_value": 20,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 925
+    },
+    "n_gdna_expected": 1075,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1098.0
+      },
+      "total_count": 1098.0,
+      "elapsed_sec": 0.056
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1198.0
+      },
+      "total_count": 1198.0,
+      "elapsed_sec": 0.242
+    }
+  },
+  {
+    "scenario_name": "single_exon_gdna_50",
+    "param_axis": "gdna",
+    "param_value": 50,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 512
+    },
+    "n_gdna_expected": 1488,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 738.0
+      },
+      "total_count": 738.0,
+      "elapsed_sec": 0.051
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 848.0
+      },
+      "total_count": 848.0,
+      "elapsed_sec": 0.246
+    }
+  },
+  {
+    "scenario_name": "single_exon_ss_0.5",
+    "param_axis": "strand_spec",
+    "param_value": 0.5,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1023.0
+      },
+      "total_count": 1023.0,
+      "elapsed_sec": 0.07
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.223
+    }
+  },
+  {
+    "scenario_name": "single_exon_ss_0.9",
+    "param_axis": "strand_spec",
+    "param_value": 0.9,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.217
+    }
+  },
+  {
+    "scenario_name": "single_exon_ss_1.0",
+    "param_axis": "strand_spec",
+    "param_value": 1.0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.241
+    }
+  },
+  {
+    "scenario_name": "spliced_gene_gdna_0",
+    "param_axis": "gdna",
+    "param_value": 0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.25
+    }
+  },
+  {
+    "scenario_name": "spliced_gene_gdna_20",
+    "param_axis": "gdna",
+    "param_value": 20,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 602
+    },
+    "n_gdna_expected": 1398,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 784.0
+      },
+      "total_count": 784.0,
+      "elapsed_sec": 0.051
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 804.0
+      },
+      "total_count": 804.0,
+      "elapsed_sec": 0.241
+    }
+  },
+  {
+    "scenario_name": "spliced_gene_gdna_50",
+    "param_axis": "gdna",
+    "param_value": 50,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 294
+    },
+    "n_gdna_expected": 1706,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 532.0
+      },
+      "total_count": 532.0,
+      "elapsed_sec": 0.048
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 550.0
+      },
+      "total_count": 550.0,
+      "elapsed_sec": 0.266
+    }
+  },
+  {
+    "scenario_name": "spliced_gene_ss_0.5",
+    "param_axis": "strand_spec",
+    "param_value": 0.5,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.211
+    }
+  },
+  {
+    "scenario_name": "spliced_gene_ss_0.9",
+    "param_axis": "strand_spec",
+    "param_value": 0.9,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.07
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.242
+    }
+  },
+  {
+    "scenario_name": "spliced_gene_ss_1.0",
+    "param_axis": "strand_spec",
+    "param_value": 1.0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 2000
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 2000.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.242
+    }
+  },
+  {
+    "scenario_name": "non_overlapping_gdna_0",
+    "param_axis": "gdna",
+    "param_value": 0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1371,
+      "t2": 629
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1371.0,
+        "t2": 629.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1371.0,
+        "t2": 629.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.248
+    }
+  },
+  {
+    "scenario_name": "non_overlapping_gdna_20",
+    "param_axis": "gdna",
+    "param_value": 20,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t2": 191,
+      "t1": 374
+    },
+    "n_gdna_expected": 1435,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 493.0,
+        "t2": 265.0
+      },
+      "total_count": 758.0,
+      "elapsed_sec": 0.051
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t2": 267.0,
+        "t1": 498.0
+      },
+      "total_count": 765.0,
+      "elapsed_sec": 0.239
+    }
+  },
+  {
+    "scenario_name": "non_overlapping_gdna_50",
+    "param_axis": "gdna",
+    "param_value": 50,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 180,
+      "t2": 92
+    },
+    "n_gdna_expected": 1728,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 303.0,
+        "t2": 0.0
+      },
+      "total_count": 303.0,
+      "elapsed_sec": 0.047
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 298.0,
+        "t2": 205.0
+      },
+      "total_count": 503.0,
+      "elapsed_sec": 0.246
+    }
+  },
+  {
+    "scenario_name": "non_overlapping_ss_0.5",
+    "param_axis": "strand_spec",
+    "param_value": 0.5,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1370,
+      "t2": 630
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1370.0,
+        "t2": 0.0
+      },
+      "total_count": 1370.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1370.0,
+        "t2": 630.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.24
+    }
+  },
+  {
+    "scenario_name": "non_overlapping_ss_0.9",
+    "param_axis": "strand_spec",
+    "param_value": 0.9,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1370,
+      "t2": 630
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1370.0,
+        "t2": 630.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1370.0,
+        "t2": 630.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.264
+    }
+  },
+  {
+    "scenario_name": "non_overlapping_ss_1.0",
+    "param_axis": "strand_spec",
+    "param_value": 1.0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1371,
+      "t2": 629
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1371.0,
+        "t2": 629.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.069
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1371.0,
+        "t2": 629.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.224
+    }
+  },
+  {
+    "scenario_name": "two_isoforms_fc_1",
+    "param_axis": "fold_change",
+    "param_value": 1,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1303,
+      "t2": 697
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1516.0,
+        "t2": 484.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.081
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1319.765,
+        "t2": 680.235
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.274
+    }
+  },
+  {
+    "scenario_name": "two_isoforms_fc_4",
+    "param_axis": "fold_change",
+    "param_value": 4,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1787,
+      "t2": 213
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1900.0,
+        "t2": 100.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.079
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1807.923,
+        "t2": 192.077
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.222
+    }
+  },
+  {
+    "scenario_name": "two_isoforms_fc_16",
+    "param_axis": "fold_change",
+    "param_value": 16,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1940,
+      "t2": 60
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1961.0,
+        "t2": 39.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.078
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1936.56,
+        "t2": 63.44
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.219
+    }
+  },
+  {
+    "scenario_name": "two_isoforms_gdna_0",
+    "param_axis": "gdna",
+    "param_value": 0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1911,
+      "t2": 89
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1948.0,
+        "t2": 52.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.078
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1908.404,
+        "t2": 91.596
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.281
+    }
+  },
+  {
+    "scenario_name": "two_isoforms_gdna_20",
+    "param_axis": "gdna",
+    "param_value": 20,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 837,
+      "t2": 50
+    },
+    "n_gdna_expected": 1113,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1144.0,
+        "t2": 27.0
+      },
+      "total_count": 1171.0,
+      "elapsed_sec": 0.067
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1056.483,
+        "t2": 74.517
+      },
+      "total_count": 1131.0,
+      "elapsed_sec": 0.274
+    }
+  },
+  {
+    "scenario_name": "two_isoforms_gdna_50",
+    "param_axis": "gdna",
+    "param_value": 50,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 453,
+      "t2": 30
+    },
+    "n_gdna_expected": 1517,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 798.0,
+        "t2": 71.0
+      },
+      "total_count": 869.0,
+      "elapsed_sec": 0.065
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 750.232,
+        "t2": 95.768
+      },
+      "total_count": 846.0,
+      "elapsed_sec": 0.218
+    }
+  },
+  {
+    "scenario_name": "antisense_fc_1",
+    "param_axis": "fold_change",
+    "param_value": 1,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1031,
+      "t2": 969
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1035.0,
+        "t2": 965.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.083
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1031.46,
+        "t2": 968.54
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.241
+    }
+  },
+  {
+    "scenario_name": "antisense_fc_4",
+    "param_axis": "fold_change",
+    "param_value": 4,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1627,
+      "t2": 373
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1631.0,
+        "t2": 369.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.083
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1628.819,
+        "t2": 371.181
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.217
+    }
+  },
+  {
+    "scenario_name": "antisense_fc_16",
+    "param_axis": "fold_change",
+    "param_value": 16,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1906,
+      "t2": 94
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1911.0,
+        "t2": 89.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.082
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1908.296,
+        "t2": 91.704
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.196
+    }
+  },
+  {
+    "scenario_name": "antisense_gdna_0",
+    "param_axis": "gdna",
+    "param_value": 0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1031,
+      "t2": 969
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1035.0,
+        "t2": 965.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.084
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1031.46,
+        "t2": 968.54
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.222
+    }
+  },
+  {
+    "scenario_name": "antisense_gdna_20",
+    "param_axis": "gdna",
+    "param_value": 20,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t2": 451,
+      "t1": 475
+    },
+    "n_gdna_expected": 1074,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 593.0,
+        "t2": 595.0
+      },
+      "total_count": 1188.0,
+      "elapsed_sec": 0.065
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t2": 566.971,
+        "t1": 587.029
+      },
+      "total_count": 1154.0,
+      "elapsed_sec": 0.249
+    }
+  },
+  {
+    "scenario_name": "antisense_gdna_50",
+    "param_axis": "gdna",
+    "param_value": 50,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t2": 254,
+      "t1": 259
+    },
+    "n_gdna_expected": 1487,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 415.0,
+        "t2": 431.0
+      },
+      "total_count": 846.0,
+      "elapsed_sec": 0.057
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t2": 402.515,
+        "t1": 392.485
+      },
+      "total_count": 795.0,
+      "elapsed_sec": 0.308
+    }
+  },
+  {
+    "scenario_name": "antisense_ss_0.5",
+    "param_axis": "strand_spec",
+    "param_value": 0.5,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1037,
+      "t2": 963
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1093.0,
+        "t2": 907.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.084
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1036.175,
+        "t2": 963.825
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.248
+    }
+  },
+  {
+    "scenario_name": "antisense_ss_0.9",
+    "param_axis": "strand_spec",
+    "param_value": 0.9,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1037,
+      "t2": 963
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1045.0,
+        "t2": 955.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.083
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1036.175,
+        "t2": 963.825
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.242
+    }
+  },
+  {
+    "scenario_name": "antisense_ss_1.0",
+    "param_axis": "strand_spec",
+    "param_value": 1.0,
+    "n_simulated": 2000,
+    "n_fragments": 2000,
+    "ground_truth": {
+      "t1": 1031,
+      "t2": 969
+    },
+    "n_gdna_expected": 0,
+    "hulkrna_result": {
+      "tool": "hulkrna",
+      "per_transcript": {
+        "t1": 1035.0,
+        "t2": 965.0
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.083
+    },
+    "salmon_result": {
+      "tool": "salmon",
+      "per_transcript": {
+        "t1": 1031.46,
+        "t2": 968.54
+      },
+      "total_count": 2000.0,
+      "elapsed_sec": 0.192
+    }
+  }
+]

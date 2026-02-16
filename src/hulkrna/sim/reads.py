@@ -30,6 +30,15 @@ Reads simulate a standard Illumina stranded (dUTP) library:
 
 - **gDNA**: sampled from both strands equally (unstranded).
   FR library convention still applies for the orientation of reads.
+
+Strand specificity
+------------------
+The ``strand_specificity`` parameter in ``SimConfig`` controls the
+fraction of RNA fragments that preserve correct FR orientation.
+At 1.0, all reads are perfectly stranded.  At 0.5, reads are
+effectively unstranded (50/50 chance of correct orientation).
+Imperfect strandedness is implemented by swapping R1↔R2 with
+probability ``1 − strand_specificity`` per fragment.
 """
 
 import logging
@@ -68,6 +77,13 @@ class SimConfig:
         Read length (bases). Both R1 and R2 have the same length.
     error_rate : float
         Per-base substitution error rate (0.0 = no errors).
+    strand_specificity : float
+        Probability that an RNA fragment preserves its correct
+        FR orientation.  1.0 = perfectly stranded (dUTP library),
+        0.5 = completely unstranded (no strand information).
+        Intermediate values simulate imperfect dUTP incorporation.
+        Implemented by swapping R1↔R2 with probability
+        ``1 − strand_specificity`` per fragment.
     seed : int
         Random seed for reproducibility.
     """
@@ -78,6 +94,7 @@ class SimConfig:
     frag_max: int = 1000
     read_length: int = 150
     error_rate: float = 0.0
+    strand_specificity: float = 1.0
     seed: int = 42
 
 
@@ -281,6 +298,15 @@ class ReadSimulator:
         # Sample fragment start positions (on the mRNA/transcript)
         frag_starts = rng.integers(0, eff_len, size=count)
 
+        # Pre-compute strand-flip mask for imperfect strandedness.
+        # When strand_specificity < 1.0, some fragments get R1↔R2
+        # swapped, making them appear antisense to the pipeline.
+        ss = self.config.strand_specificity
+        if ss < 1.0:
+            flip_mask = rng.random(count) >= ss
+        else:
+            flip_mask = None
+
         strand_char = "r" if t.strand == Strand.NEG else "f"
 
         for i in range(count):
@@ -292,6 +318,12 @@ class ReadSimulator:
             # R2 is sense sequence from 5′ end.
             r1_seq = reverse_complement(frag_seq[-read_len:])
             r2_seq = frag_seq[:read_len]
+
+            # Simulate imperfect strandedness: swap R1↔R2 so the
+            # pipeline sees the fragment as coming from the opposite
+            # strand.  This models incomplete dUTP incorporation.
+            if flip_mask is not None and flip_mask[i]:
+                r1_seq, r2_seq = r2_seq, r1_seq
 
             # Apply errors
             r1_seq = self._introduce_errors(r1_seq)

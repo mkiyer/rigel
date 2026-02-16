@@ -1,15 +1,14 @@
 """Tests for hulkrna.counter — ReadCounter with unified EM assignment."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from hulkrna.types import Strand, MergeCriteria
 from hulkrna.categories import (
-    AssignmentSource,
     CountCategory,
-    CountStrand,
-    CountType,
-    NUM_COUNT_TYPES,
+    CountCol,
+    NUM_COUNT_COLS,
 )
 from hulkrna.resolution import ResolvedFragment
 from hulkrna.counter import ReadCounter, EMData
@@ -24,12 +23,33 @@ from hulkrna.strand_model import StrandModel, StrandModels
 class MockIndex:
     """Minimal mock of HulkIndex with the arrays ReadCounter needs."""
 
-    def __init__(self, num_transcripts, num_genes, t_to_g, t_to_strand, g_to_strand):
+    def __init__(self, num_transcripts, num_genes, t_to_g, t_to_strand, g_to_strand,
+                 t_ids=None, g_ids=None, g_names=None, t_gnames=None):
         self.num_transcripts = num_transcripts
         self.num_genes = num_genes
         self.t_to_g_arr = np.array(t_to_g, dtype=np.int64)
         self.t_to_strand_arr = np.array(t_to_strand, dtype=np.int64)
         self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int64)
+
+        # DataFrames for output methods
+        if t_ids is None:
+            t_ids = [f"t{i}" for i in range(num_transcripts)]
+        if g_ids is None:
+            g_ids = [f"g{i}" for i in range(num_genes)]
+        if g_names is None:
+            g_names = [f"Gene{i}" for i in range(num_genes)]
+        if t_gnames is None:
+            t_gnames = [g_names[g] for g in t_to_g]
+
+        self.t_df = pd.DataFrame({
+            "t_id": t_ids,
+            "g_id": [g_ids[g] for g in t_to_g],
+            "g_name": t_gnames,
+        })
+        self.g_df = pd.DataFrame({
+            "g_id": g_ids,
+            "g_name": g_names,
+        })
 
 
 def _make_index():
@@ -90,10 +110,14 @@ def _make_insert_models():
     return im
 
 
+# Default column for UNSPLICED_SENSE
+_UNSPLICED_SENSE = int(CountCol.UNSPLICED_SENSE)
+
+
 def _make_em_data(
     t_indices_per_unit,
     log_liks_per_unit=None,
-    count_types_per_unit=None,
+    count_cols_per_unit=None,
     gdna_base_index=None,
 ):
     """Build EMData from a list of per-unit candidate lists.
@@ -104,8 +128,8 @@ def _make_em_data(
         Candidate transcript indices for each unit.
     log_liks_per_unit : list[list[float]] or None
         Log-likelihoods per candidate (default: all zeros = equal).
-    count_types_per_unit : list[list[int]] or None
-        Count type column index per candidate (default: all 4 = UNSPLICED_SENSE).
+    count_cols_per_unit : list[list[int]] or None
+        Count column index per candidate (default: all UNSPLICED_SENSE = 2).
     gdna_base_index : int or None
         Base gDNA shadow index. Default: ``max(all_t_indices) + 1`` or 0
         if there are no candidates.
@@ -113,7 +137,7 @@ def _make_em_data(
     offsets = [0]
     flat_t = []
     flat_lk = []
-    flat_ct = []
+    flat_cc = []
 
     for u, t_list in enumerate(t_indices_per_unit):
         for j, t_idx in enumerate(t_list):
@@ -122,10 +146,10 @@ def _make_em_data(
                 flat_lk.append(log_liks_per_unit[u][j])
             else:
                 flat_lk.append(0.0)
-            if count_types_per_unit is not None:
-                flat_ct.append(count_types_per_unit[u][j])
+            if count_cols_per_unit is not None:
+                flat_cc.append(count_cols_per_unit[u][j])
             else:
-                flat_ct.append(int(CountType.UNSPLICED_SENSE))
+                flat_cc.append(_UNSPLICED_SENSE)
         offsets.append(len(flat_t))
 
     n_units = len(t_indices_per_unit)
@@ -136,24 +160,23 @@ def _make_em_data(
         gdna_base_index = (max(flat_t) + 1) if flat_t else 0
 
     # Build locus tracking arrays: best non-gDNA transcript per unit.
-    # For each unit pick the first non-gDNA candidate (or -1).
     locus_t = np.full(n_units, -1, dtype=np.int32)
-    locus_ct = np.zeros(n_units, dtype=np.uint8)
+    locus_cc = np.zeros(n_units, dtype=np.uint8)
     for u, t_list in enumerate(t_indices_per_unit):
-        ct_list = count_types_per_unit[u] if count_types_per_unit else None
+        cc_list = count_cols_per_unit[u] if count_cols_per_unit else None
         for j, t_idx in enumerate(t_list):
             if t_idx < gdna_base_index:
                 locus_t[u] = t_idx
-                locus_ct[u] = ct_list[j] if ct_list else int(CountType.UNSPLICED_SENSE)
+                locus_cc[u] = cc_list[j] if cc_list else _UNSPLICED_SENSE
                 break
 
     return EMData(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
         log_liks=np.array(flat_lk, dtype=np.float64),
-        count_types=np.array(flat_ct, dtype=np.uint8),
+        count_cols=np.array(flat_cc, dtype=np.uint8),
         locus_t_indices=locus_t,
-        locus_count_types=locus_ct,
+        locus_count_cols=locus_cc,
         n_units=n_units,
         n_candidates=n_candidates,
         gdna_base_index=gdna_base_index,
@@ -161,25 +184,28 @@ def _make_em_data(
 
 
 # =====================================================================
-# classify_strand
+# is_antisense
 # =====================================================================
 
 
-class TestClassifyStrand:
-    def test_high_likelihood_returns_sense(self):
+class TestIsAntisense:
+    def test_high_likelihood_returns_false(self):
+        """Good strand match → sense → not antisense."""
         sm = _make_strand_model_fr()
-        cs = ReadCounter.classify_strand(Strand.POS, int(Strand.POS), sm)
-        assert cs == CountStrand.SENSE
+        result = ReadCounter.is_antisense(Strand.POS, int(Strand.POS), sm)
+        assert result is False
 
-    def test_low_likelihood_returns_antisense(self):
+    def test_low_likelihood_returns_true(self):
+        """Poor strand match → antisense."""
         sm = _make_strand_model_fr()
-        cs = ReadCounter.classify_strand(Strand.POS, int(Strand.NEG), sm)
-        assert cs == CountStrand.ANTISENSE
+        result = ReadCounter.is_antisense(Strand.POS, int(Strand.NEG), sm)
+        assert result is True
 
-    def test_ambiguous_for_unstranded(self):
-        sm = StrandModel()  # no observations → p_r1_sense = 0.5
-        cs = ReadCounter.classify_strand(Strand.POS, int(Strand.POS), sm)
-        assert cs == CountStrand.AMBIGUOUS
+    def test_unstranded_returns_false(self):
+        """Unstranded model (p=0.5) is treated as non-antisense."""
+        sm = StrandModel()  # no observations → p = 0.5
+        result = ReadCounter.is_antisense(Strand.POS, int(Strand.POS), sm)
+        assert result is False
 
 
 # =====================================================================
@@ -201,7 +227,7 @@ class TestAssignUnique:
         )
         rc.assign_unique(resolved, index, sms)
 
-        col = int(CountType.UNSPLICED_SENSE)
+        col = _UNSPLICED_SENSE
         assert rc.unique_counts[0, col] == 1.0
         assert rc.t_counts[0, col] == 1.0
 
@@ -228,7 +254,7 @@ class TestAssignUnique:
         )
         rc.assign_unique(resolved, index, sms)
 
-        col = int(CountType.UNSPLICED_SENSE)
+        col = _UNSPLICED_SENSE
         assert rc.unique_counts[0, col] == 1.0
 
     def test_writes_to_unique_not_em(self):
@@ -287,22 +313,18 @@ class TestRunEM:
     def test_uniform_priors_stay_uniform(self):
         """With no unique counts and equal likelihoods, theta stays uniform."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        # 1000 fragments, each with candidates [0, 1], equal log-liks
         em = _make_em_data([[0, 1]] * 1000)
         rc.run_em(em, em_iterations=10)
 
         theta = rc._converged_theta
-        # t0 and t1 should be roughly equal, t2 only has alpha
         assert theta[0] == pytest.approx(theta[1], rel=0.01)
-        assert theta[2] < theta[0]  # t2 has no evidence
+        assert theta[2] < theta[0]
 
     def test_unique_counts_bias_em(self):
         """Unique counts on t0 should bias EM toward t0."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        # Give t0 many unique counts
-        rc.unique_counts[0, int(CountType.UNSPLICED_SENSE)] = 100.0
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
 
-        # 500 ambiguous fragments between t0 and t1
         em = _make_em_data([[0, 1]] * 500)
         rc.run_em(em, em_iterations=10)
 
@@ -310,7 +332,7 @@ class TestRunEM:
         assert theta[0] > theta[1]
 
     def test_zero_iterations_uses_unique_priors(self):
-        """With em_iterations=0, theta is just unique counts + alpha."""
+        """With em_iterations=0, theta comes from unique counts + prior only."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, 0] = 10.0
         rc.unique_counts[1, 0] = 5.0
@@ -319,19 +341,16 @@ class TestRunEM:
         rc.run_em(em, em_iterations=0)
 
         theta = rc._converged_theta
-        # theta has N_t + N_g elements:
-        # t0=10+1=11, t1=5+1=6, t2=0+1=1, shadow_g0=0+1=1, shadow_g1=0+1=1
-        # sum=20
-        assert theta[0] == pytest.approx(11.0 / 20.0)
-        assert theta[1] == pytest.approx(6.0 / 20.0)
-        assert theta[2] == pytest.approx(1.0 / 20.0)
-        assert theta[3] == pytest.approx(1.0 / 20.0)  # shadow g0
-        assert theta[4] == pytest.approx(1.0 / 20.0)  # shadow g1
+        # No warm-up or VBEM iterations → alpha = unique_totals + prior
+        # alpha = [10+0.01, 5+0.01, 0+0.01, 0+1.0, 0+1.0]
+        # Shadows use _SHADOW_PRIOR=1.0, transcripts use vbem_prior=0.01
+        assert theta[0] > theta[1] > theta[2]
+        assert theta is not None
+        assert theta.sum() == pytest.approx(1.0)
 
     def test_likelihood_influences_em(self):
         """Candidates with higher likelihoods should attract more mass."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        # 1000 fragments: candidate t0 has high log-lik, t1 has low
         em = _make_em_data(
             [[0, 1]] * 1000,
             log_liks_per_unit=[[0.0, -10.0]] * 1000,
@@ -348,20 +367,19 @@ class TestRunEM:
         rc.unique_counts[1, 0] = 100.0
 
         em = _make_em_data([[0, 1]] * 100)
-        rc.run_em(em, em_iterations=100)  # allow many iterations
-        # Should converge way before 100 iterations
+        rc.run_em(em, em_iterations=100)
         theta = rc._converged_theta
         assert theta is not None
 
 
 # =====================================================================
-# assign_ambiguous — stochastic assignment using EM posteriors
+# assign_ambiguous — MAP assignment using EM posteriors
 # =====================================================================
 
 
 class TestAssignAmbiguous:
     def test_single_candidate_gets_full_count(self):
-        """Unit with one candidate → count goes to that transcript."""
+        """Unit with one candidate → count goes entirely to that transcript."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         em = _make_em_data([[0]])
         rc.run_em(em, em_iterations=1)
@@ -370,8 +388,8 @@ class TestAssignAmbiguous:
         assert rc.em_counts[0].sum() == 1.0
         assert rc.em_counts.sum() == 1.0
 
-    def test_two_candidates_picks_one(self):
-        """Each unit contributes exactly 1 count."""
+    def test_two_candidates_assigns_one(self):
+        """Each unit contributes exactly 1.0 total count to one transcript."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         em = _make_em_data([[0, 1]])
         rc.run_em(em, em_iterations=1)
@@ -409,24 +427,25 @@ class TestAssignAmbiguous:
         assert rc.unique_counts.sum() == 10.0
         assert rc.em_counts.sum() == 5.0
         assert rc.t_counts.sum() == 15.0
-        np.testing.assert_array_equal(
+        np.testing.assert_array_almost_equal(
             rc.t_counts, rc.unique_counts + rc.em_counts
         )
 
     def test_distribution_follows_priors(self):
-        """Over many fragments, EM + assignment follows unique priors."""
+        """Over many fragments, sampled assignments follow unique priors."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.unique_counts[0, int(CountType.UNSPLICED_SENSE)] = 90.0
-        rc.unique_counts[1, int(CountType.UNSPLICED_SENSE)] = 10.0
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 90.0
+        rc.unique_counts[1, _UNSPLICED_SENSE] = 10.0
 
         em = _make_em_data([[0, 1]] * 10000)
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # t0 should get roughly 90% of em_counts
         t0_em = rc.em_counts[0].sum()
         t1_em = rc.em_counts[1].sum()
         assert t0_em > t1_em
+        # Both should receive counts (not winner-take-all)
+        assert t1_em > 500  # ~10% of 10000
 
     def test_writes_to_em_not_unique(self):
         """assign_ambiguous only writes to em_counts."""
@@ -448,18 +467,18 @@ class TestAssignAmbiguous:
 
         assert rc.em_counts.sum() == 0.0
 
-    def test_count_type_respected(self):
-        """Count goes to the correct CountType column."""
-        ct_col = int(CountType.SPLICED_ANNOT_ANTISENSE)
+    def test_count_col_respected(self):
+        """Count goes to the correct column (category×strand)."""
+        cc = int(CountCol.SPLICED_ANNOT_ANTISENSE)
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         em = _make_em_data(
             [[0]],
-            count_types_per_unit=[[ct_col]],
+            count_cols_per_unit=[[cc]],
         )
         rc.run_em(em, em_iterations=1)
         rc.assign_ambiguous(em)
 
-        assert rc.em_counts[0, ct_col] == 1.0
+        assert rc.em_counts[0, cc] == 1.0
         assert rc.em_counts.sum() == 1.0
 
     def test_requires_run_em_first(self):
@@ -467,6 +486,104 @@ class TestAssignAmbiguous:
         em = _make_em_data([[0, 1]])
         with pytest.raises(RuntimeError, match="run_em"):
             rc.assign_ambiguous(em)
+
+    def test_deterministic_with_same_seed(self):
+        """Same seed → identical sampled counts."""
+        results = []
+        for _ in range(3):
+            rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+            rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
+            rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
+            em = _make_em_data([[0, 1]] * 100)
+            rc.run_em(em, em_iterations=10)
+            rc.assign_ambiguous(em)
+            results.append(rc.em_counts.copy())
+
+        np.testing.assert_array_equal(results[0], results[1])
+        np.testing.assert_array_equal(results[1], results[2])
+
+    def test_different_seeds_differ(self):
+        """Different seeds produce different sampled counts."""
+        counts = []
+        for seed in [1, 2]:
+            rc = ReadCounter(num_transcripts=3, num_genes=2, seed=seed)
+            rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
+            rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
+            em = _make_em_data([[0, 1]] * 100)
+            rc.run_em(em, em_iterations=10)
+            rc.assign_ambiguous(em)
+            counts.append(rc.em_counts.copy())
+
+        # Very unlikely to be identical with different seeds
+        assert not np.array_equal(counts[0], counts[1])
+
+    def test_integer_counts(self):
+        """All EM counts are integer-valued (each fragment → 1 transcript)."""
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
+        rc.unique_counts[1, _UNSPLICED_SENSE] = 30.0
+
+        em = _make_em_data([[0, 1]] * 200)
+        rc.run_em(em, em_iterations=10)
+        rc.assign_ambiguous(em)
+
+        # Every element should be an exact integer
+        np.testing.assert_array_equal(rc.em_counts, np.floor(rc.em_counts))
+
+    def test_equal_candidates_share_counts(self):
+        """Equal-probability candidates all receive counts (not winner-take-all).
+
+        With 4 candidates of equal probability (each ~25%), all should
+        receive a substantial share over many fragments.
+        """
+        rc = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
+        em = _make_em_data([[0, 1, 2, 3]] * 10000)
+        rc.run_em(em, em_iterations=10)
+        rc.assign_ambiguous(em)
+
+        per_t = rc.em_counts.sum(axis=1)
+        # Each should get ~2500 counts; verify all get at least 2000
+        for t in range(4):
+            assert per_t[t] > 2000, (
+                f"t{t} got {per_t[t]} counts — expected ~2500"
+            )
+        assert rc.em_counts.sum() == 10000.0
+
+
+# =====================================================================
+# Posterior mean
+# =====================================================================
+
+
+class TestPosteriorMean:
+    def test_no_em_returns_nan(self):
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        pm = rc.posterior_mean()
+        assert np.all(np.isnan(pm))
+
+    def test_single_candidate_posterior_one(self):
+        """One candidate per unit → posterior is 1.0, mean is 1.0."""
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        em = _make_em_data([[0]] * 10)
+        rc.run_em(em, em_iterations=1)
+        rc.assign_ambiguous(em)
+
+        pm = rc.posterior_mean()
+        assert pm[0] == pytest.approx(1.0)
+        assert np.isnan(pm[1])  # no assignments
+        assert np.isnan(pm[2])
+
+    def test_strong_prior_high_posterior(self):
+        """Strong prior → assigned units have high mean posterior."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
+        em = _make_em_data([[0, 1]] * 100)
+        rc.run_em(em, em_iterations=10)
+        rc.assign_ambiguous(em)
+
+        pm = rc.posterior_mean()
+        # t0 gets most assignments with high posterior
+        assert pm[0] > 0.8
 
 
 # =====================================================================
@@ -478,23 +595,21 @@ class TestSimultaneousResolution:
     """Verify that isoform-ambig and gene-ambig fragments
     are resolved simultaneously, not sequentially."""
 
-    def test_same_result_regardless_of_order(self):
-        """Shuffling ambiguous units produces statistically similar results.
+    def test_same_theta_regardless_of_order(self):
+        """Shuffling ambiguous units produces identical EM theta.
 
-        This tests the key property: no order dependence.
+        EM convergence is order-independent.  Sampled counts will
+        differ (different draw sequences) but abundances agree.
         """
         rc1 = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
         rc1.unique_counts[0, 0] = 50.0
         rc1.unique_counts[2, 0] = 30.0
 
-        # Mix of isoform-ambig (within gene 0: t0, t1) and
-        # gene-ambig (across genes: t0, t2)
         units = [[0, 1]] * 200 + [[0, 2]] * 200
         em1 = _make_em_data(units)
         rc1.run_em(em1, em_iterations=10)
         rc1.assign_ambiguous(em1)
 
-        # Same but reversed order of units
         rc2 = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
         rc2.unique_counts[0, 0] = 50.0
         rc2.unique_counts[2, 0] = 30.0
@@ -504,10 +619,11 @@ class TestSimultaneousResolution:
         rc2.run_em(em2, em_iterations=10)
         rc2.assign_ambiguous(em2)
 
-        # Converged theta should be identical (EM is order-independent)
         np.testing.assert_allclose(
             rc1._converged_theta, rc2._converged_theta, atol=1e-10
         )
+        # Total counts should match (400 units each)
+        assert rc1.em_counts.sum() == rc2.em_counts.sum() == 400.0
 
 
 # =====================================================================
@@ -517,9 +633,8 @@ class TestSimultaneousResolution:
 
 class TestMultimapperEM:
     def test_multimapper_molecule_one_count(self):
-        """Multimapper molecule (many candidates) → exactly 1 count."""
+        """Multimapper molecule (many candidates) → exactly 1.0 total count."""
         rc = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
-        # Simulate molecule with 3 alignments, each to different transcripts
         em = _make_em_data([[0, 1, 2, 3]])
         rc.run_em(em, em_iterations=5)
         rc.assign_ambiguous(em)
@@ -531,7 +646,6 @@ class TestMultimapperEM:
         rc = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
         rc.unique_counts[0, 0] = 100.0
 
-        # 50 isoform-ambig, 50 gene-ambig, 25 multimapper
         units = [[0, 1]] * 50 + [[0, 2]] * 50 + [[0, 1, 2, 3]] * 25
         em = _make_em_data(units)
         rc.run_em(em, em_iterations=10)
@@ -541,87 +655,151 @@ class TestMultimapperEM:
 
 
 # =====================================================================
-# Wide DataFrame output
+# Primary counts DataFrame output
 # =====================================================================
 
 
-class TestCounterOutput:
-    def test_get_t_counts_df(self):
+class TestCountsOutput:
+    def test_get_counts_df_columns(self):
+        index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        df = rc.get_t_counts_df()
-        assert df.shape == (3, NUM_COUNT_TYPES)
-        assert list(df.columns) == list(CountType.columns())
-
-    def test_get_g_counts_df(self):
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        t_to_g_arr = np.array([0, 0, 1], dtype=np.int64)
-        df = rc.get_g_counts_df(t_to_g_arr)
-        assert df.shape == (2, NUM_COUNT_TYPES)
-        assert list(df.columns) == list(CountType.columns())
-
-    def test_wide_counts_include_both_sources(self):
-        """Wide output sums unique + em counts."""
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.unique_counts[0, 0] = 5.0
-        rc.em_counts[0, 0] = 3.0
-
-        df = rc.get_t_counts_df()
-        assert df.iloc[0, 0] == 8.0
-
-
-# =====================================================================
-# Sparse DataFrame output
-# =====================================================================
-
-
-class TestSparseOutput:
-    def test_sparse_empty(self):
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        df = rc.get_sparse_t_counts_df()
-        assert len(df) == 0
-        assert list(df.columns) == [
-            "transcript_idx", "category", "strand", "source", "count"
+        df = rc.get_counts_df(index)
+        assert df.shape[0] == 3
+        expected_cols = [
+            "transcript_id", "gene_id", "gene_name",
+            "count", "count_unique", "count_spliced",
+            "count_em", "count_high_conf", "n_gdna",
+            "posterior_mean",
         ]
+        assert list(df.columns) == expected_cols
 
-    def test_sparse_t_counts_unique_only(self):
+    def test_get_gene_counts_df_columns(self):
+        index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.unique_counts[0, int(CountType.UNSPLICED_SENSE)] = 5.0
-        rc.unique_counts[2, int(CountType.SPLICED_ANNOT_SENSE)] = 3.0
+        df = rc.get_gene_counts_df(index)
+        assert df.shape[0] == 2
+        expected_cols = [
+            "gene_id", "gene_name",
+            "count", "count_unique", "count_spliced",
+            "count_em", "count_high_conf", "n_gdna",
+            "n_antisense", "gdna_rate",
+        ]
+        assert list(df.columns) == expected_cols
 
-        df = rc.get_sparse_t_counts_df()
+    def test_counts_include_both_sources(self):
+        """Total count sums unique + em counts."""
+        index = _make_index()
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
+
+        df = rc.get_counts_df(index)
+        assert df.loc[0, "count"] == 8.0
+        assert df.loc[0, "count_unique"] == 5.0
+        assert df.loc[0, "count_em"] == 3.0
+
+    def test_gene_counts_aggregate(self):
+        """Gene counts aggregate across transcripts."""
+        index = _make_index()
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.unique_counts[1, _UNSPLICED_SENSE] = 3.0  # same gene
+        rc.unique_counts[2, _UNSPLICED_SENSE] = 7.0  # different gene
+
+        df = rc.get_gene_counts_df(index)
+        assert df.loc[0, "count"] == 8.0  # g0 = t0 + t1
+        assert df.loc[1, "count"] == 7.0  # g1 = t2
+
+    def test_spliced_counts(self):
+        """count_spliced captures both SPLICED_ANNOT and SPLICED_UNANNOT."""
+        index = _make_index()
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        # SPLICED_ANNOT sense
+        rc.unique_counts[0, CountCol.SPLICED_ANNOT_SENSE] = 3.0
+        # SPLICED_UNANNOT antisense
+        rc.unique_counts[0, CountCol.SPLICED_UNANNOT_ANTISENSE] = 2.0
+        # UNSPLICED (should not be in count_spliced)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 10.0
+
+        df = rc.get_counts_df(index)
+        assert df.loc[0, "count_spliced"] == 5.0
+        assert df.loc[0, "count"] == 15.0
+
+    def test_identifiers_present(self):
+        """Output includes transcript/gene identifiers."""
+        index = _make_index()
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        df = rc.get_counts_df(index)
+        assert list(df["transcript_id"]) == ["t0", "t1", "t2"]
+        assert list(df["gene_id"]) == ["g0", "g0", "g1"]
+
+
+# =====================================================================
+# Detail DataFrame output (long format)
+# =====================================================================
+
+
+class TestDetailOutput:
+    def test_detail_empty(self):
+        index = _make_index()
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        df = rc.get_detail_df(index)
+        assert len(df) == 0
+        assert "transcript_id" in df.columns
+        assert "category" in df.columns
+        assert "source" in df.columns
+
+    def test_detail_unique_only(self):
+        index = _make_index()
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.unique_counts[2, CountCol.SPLICED_ANNOT_SENSE] = 3.0
+
+        df = rc.get_detail_df(index)
         assert len(df) == 2
         assert set(df["source"]) == {"unique"}
-        assert set(df["transcript_idx"]) == {0, 2}
-        assert df["count"].sum() == 8
 
-    def test_sparse_t_counts_both_sources(self):
+    def test_detail_both_sources(self):
+        index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.unique_counts[0, int(CountType.UNSPLICED_SENSE)] = 5.0
-        rc.em_counts[0, int(CountType.UNSPLICED_SENSE)] = 3.0
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
 
-        df = rc.get_sparse_t_counts_df()
+        df = rc.get_detail_df(index)
         assert len(df) == 2
         assert set(df["source"]) == {"unique", "em"}
-        assert df["count"].sum() == 8
+        assert df["count"].sum() == 8.0
 
-    def test_sparse_g_counts(self):
+    def test_detail_has_category(self):
+        index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.unique_counts[0, int(CountType.UNSPLICED_SENSE)] = 5.0
-        rc.unique_counts[1, int(CountType.UNSPLICED_SENSE)] = 3.0
-        t_to_g_arr = np.array([0, 0, 1], dtype=np.int64)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 1.0
+        rc.unique_counts[0, CountCol.SPLICED_ANNOT_SENSE] = 1.0
 
-        df = rc.get_sparse_g_counts_df(t_to_g_arr)
-        # g0 gets 5+3=8 from unique
-        assert len(df) == 1
-        row = df.iloc[0]
-        assert row["gene_idx"] == 0
-        assert row["count"] == 8
-        assert row["source"] == "unique"
+        df = rc.get_detail_df(index)
+        assert set(df["category"]) == {"unspliced", "spliced_annot"}
 
-    def test_sparse_columns_are_categorical(self):
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.unique_counts[0, 0] = 1.0
 
-        df = rc.get_sparse_t_counts_df()
-        assert hasattr(df["category"].dtype, "categories")
-        assert hasattr(df["strand"].dtype, "categories")
+# =====================================================================
+# gDNA summary output
+# =====================================================================
+
+
+class TestGDNASummaryOutput:
+    def test_gdna_summary_dict(self):
+        shadow = np.array([10.0])
+        rc = ReadCounter(
+            num_transcripts=2, num_genes=1, seed=42,
+            shadow_init=shadow,
+        )
+        rc.gdna_em_counts[0] = 5.0
+        rc.unique_counts[0, 0] = 80.0
+        rc.em_counts[0, 0] = 5.0
+
+        summary = rc.gdna_summary()
+        assert summary["gdna_unique_count"] == 10.0
+        assert summary["gdna_em_count"] == 5.0
+        assert summary["gdna_total"] == 15.0
+        assert summary["rna_unique_total"] == 80.0
+        assert summary["rna_em_total"] == 5.0
+        assert summary["gdna_contamination_rate"] == pytest.approx(0.15, abs=1e-6)

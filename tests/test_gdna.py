@@ -8,12 +8,16 @@ in the separate gdna_em_count / gdna_locus_counts arrays.
 import numpy as np
 import pytest
 
-from hulkrna.categories import CountCategory, CountType, NUM_COUNT_TYPES
+from hulkrna.categories import CountCategory, CountCol, NUM_COUNT_COLS
 from hulkrna.counter import ReadCounter, EMData
 from hulkrna.pipeline import _score_gdna_candidate, _GDNA_SPLICE_PENALTIES
 from hulkrna.insert_model import InsertSizeModels
 from hulkrna.strand_model import StrandModel, StrandModels
 from hulkrna.types import Strand
+
+
+# Default column for UNSPLICED_SENSE
+_UNSPLICED_SENSE = int(CountCol.UNSPLICED_SENSE)
 
 
 # =====================================================================
@@ -22,18 +26,14 @@ from hulkrna.types import Strand
 
 
 def _make_insert_models(n_obs=200, size=250):
-    """InsertSizeModels with observations for all categories + intergenic.
-
-    All category models and intergenic share the same observation count
-    so they produce identical log-likelihoods.
-    """
+    """InsertSizeModels with observations for all categories + intergenic."""
     im = InsertSizeModels()
     for _ in range(n_obs):
         im.observe(size, CountCategory.SPLICED_ANNOT)
         im.observe(size, CountCategory.UNSPLICED)
         im.observe(size, CountCategory.SPLICED_UNANNOT)
         im.observe(size, CountCategory.INTRON)
-        im.observe(size, None)  # intergenic (count_cat=None)
+        im.observe(size, None)  # intergenic
     return im
 
 
@@ -45,27 +45,23 @@ def _make_strand_models_default():
 def _make_em_data_with_gdna(
     t_indices_per_unit,
     log_liks_per_unit,
-    count_types_per_unit=None,
+    count_cols_per_unit=None,
     gdna_base_index=None,
 ):
-    """Build EMData where some candidates are gDNA (using gdna_index).
-
-    Like the test_counter helper, but explicitly supports gDNA index
-    in the candidate lists.
-    """
+    """Build EMData where some candidates are gDNA (using gdna_index)."""
     offsets = [0]
     flat_t = []
     flat_lk = []
-    flat_ct = []
+    flat_cc = []
 
     for u, t_list in enumerate(t_indices_per_unit):
         for j, t_idx in enumerate(t_list):
             flat_t.append(t_idx)
             flat_lk.append(log_liks_per_unit[u][j])
-            if count_types_per_unit is not None:
-                flat_ct.append(count_types_per_unit[u][j])
+            if count_cols_per_unit is not None:
+                flat_cc.append(count_cols_per_unit[u][j])
             else:
-                flat_ct.append(int(CountType.UNSPLICED_SENSE))
+                flat_cc.append(_UNSPLICED_SENSE)
         offsets.append(len(flat_t))
 
     n_units = len(t_indices_per_unit)
@@ -76,25 +72,25 @@ def _make_em_data_with_gdna(
 
     # Build locus tracking: best non-gDNA candidate per unit
     locus_t = np.full(n_units, -1, dtype=np.int32)
-    locus_ct = np.zeros(n_units, dtype=np.uint8)
+    locus_cc = np.zeros(n_units, dtype=np.uint8)
     for u, t_list in enumerate(t_indices_per_unit):
-        ct_list = count_types_per_unit[u] if count_types_per_unit else None
+        cc_list = count_cols_per_unit[u] if count_cols_per_unit else None
         best_ll = -np.inf
         for j, t_idx in enumerate(t_list):
             if t_idx < gdna_base_index and log_liks_per_unit[u][j] > best_ll:
                 best_ll = log_liks_per_unit[u][j]
                 locus_t[u] = t_idx
-                locus_ct[u] = (
-                    ct_list[j] if ct_list else int(CountType.UNSPLICED_SENSE)
+                locus_cc[u] = (
+                    cc_list[j] if cc_list else _UNSPLICED_SENSE
                 )
 
     return EMData(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
         log_liks=np.array(flat_lk, dtype=np.float64),
-        count_types=np.array(flat_ct, dtype=np.uint8),
+        count_cols=np.array(flat_cc, dtype=np.uint8),
         locus_t_indices=locus_t,
-        locus_count_types=locus_ct,
+        locus_count_cols=locus_cc,
         n_units=n_units,
         n_candidates=n_candidates,
         gdna_base_index=gdna_base_index,
@@ -118,10 +114,8 @@ class TestScoreGDNA:
             int(Strand.POS), cat, 250,
             sms, im,
         )
-        # gDNA uses same category insert model as RNA candidates
         isize_model = im.category_models.get(cat, im.global_model)
-        # log(0.5) + log(P_insert) + log(1.0)
-        assert score < 0  # log(0.5) is negative
+        assert score < 0
         assert score == pytest.approx(
             np.log(0.5) + isize_model.log_likelihood(250)
         )
@@ -135,7 +129,6 @@ class TestScoreGDNA:
             int(Strand.POS), cat, 250,
             sms, im,
         )
-        # gDNA uses same category insert model as RNA candidates
         isize_model = im.category_models.get(cat, im.global_model)
         expected = np.log(0.5) + isize_model.log_likelihood(250)
         assert score == pytest.approx(expected)
@@ -152,7 +145,6 @@ class TestScoreGDNA:
             int(Strand.POS), int(CountCategory.UNSPLICED), 250,
             sms, im,
         )
-        # SPLICED_UNANNOT should have a much lower score
         assert score_unannot < score_unspliced
         penalty_diff = score_unspliced - score_unannot
         assert penalty_diff == pytest.approx(-np.log(0.01), rel=0.01)
@@ -180,7 +172,6 @@ class TestScoreGDNA:
             int(Strand.POS), int(CountCategory.UNSPLICED), 0,
             sms, im,
         )
-        # log(0.5) + 0 + log(1.0) = log(0.5)
         assert score == pytest.approx(np.log(0.5))
 
 
@@ -197,29 +188,26 @@ class TestGDNAThetaVector:
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         assert rc.gdna_base_index == 3
 
-        # Shadow for gene 0 at index 3, gene 1 at index 4
         em = _make_em_data_with_gdna(
             [[0, 3]], [[0.0, 0.0]], gdna_base_index=3,
         )
         rc.run_em(em, em_iterations=1)
-        assert rc._converged_theta.shape == (5,)  # 3 transcripts + 2 genes
+        assert rc._converged_theta.shape == (5,)
         assert rc._converged_theta.sum() == pytest.approx(1.0)
 
     def test_shadow_init_feeds_prior(self):
         """shadow_init biases the per-gene gDNA prior."""
-        shadow = np.array([100.0])  # 1 gene
+        shadow = np.array([100.0])
         rc = ReadCounter(
             num_transcripts=2, num_genes=1, seed=42,
             shadow_init=shadow,
         )
-        # Shadow index for gene 0 = gdna_base_index + 0 = 2
         em = _make_em_data_with_gdna(
             [[0, 2]] * 100, [[0.0, 0.0]] * 100, gdna_base_index=2,
         )
         rc.run_em(em, em_iterations=10)
 
         theta = rc._converged_theta
-        # gDNA shadow has 100 shadow_init; t0 has alpha=1 only
         assert theta[2] > theta[0], (
             f"gDNA theta ({theta[2]:.4f}) should dominate over t0 ({theta[0]:.4f})"
         )
@@ -237,7 +225,6 @@ class TestGDNAThetaVector:
         rc.run_em(em, em_iterations=10)
 
         theta = rc._converged_theta
-        # t0 has 1000 unique counts; shadow has only alpha=1 and worse likelihood
         assert theta[2] < 0.01, f"gDNA theta too high: {theta[2]:.4f}"
 
 
@@ -251,14 +238,12 @@ class TestGDNAAssignment:
 
     def test_gdna_assignment_not_in_em_counts(self):
         """Fragments assigned to gDNA are NOT in em_counts."""
-        # 2 transcripts, 1 gene → shadow index = 2
         shadow_idx = 2
         shadow = np.array([1000.0])
         rc = ReadCounter(
             num_transcripts=2, num_genes=1, seed=42,
             shadow_init=shadow,
         )
-        # 100 units, each with t0 (bad lik) and shadow (good lik)
         em = _make_em_data_with_gdna(
             [[0, shadow_idx]] * 100,
             [[-10.0, 0.0]] * 100,
@@ -267,20 +252,17 @@ class TestGDNAAssignment:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # Most should go to gDNA
         assert rc.gdna_em_count > 0
         total_assigned = rc.em_counts.sum() + rc.gdna_em_count
         assert total_assigned == 100.0
 
     def test_total_counts_preserved(self):
         """em_counts + gdna_em_count == n_units for all assigned fragments."""
-        # 3 transcripts, 2 genes → shadow indices 3, 4
         shadow = np.array([25.0, 25.0])
         rc = ReadCounter(
             num_transcripts=3, num_genes=2, seed=42,
             shadow_init=shadow,
         )
-        # Use shadow for gene 0 (index 3)
         em = _make_em_data_with_gdna(
             [[0, 1, 3]] * 200,
             [[0.0, 0.0, 0.0]] * 200,
@@ -293,14 +275,12 @@ class TestGDNAAssignment:
 
     def test_strong_transcript_signal_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
-        # 2 transcripts, 1 gene → shadow index = 2
         shadow_idx = 2
         rc = ReadCounter(
             num_transcripts=2, num_genes=1, seed=42,
         )
         rc.unique_counts[0, 0] = 500.0
 
-        # t0 has log_lik=0.0, shadow has log_lik=-20.0 (terrible)
         em = _make_em_data_with_gdna(
             [[0, shadow_idx]] * 500,
             [[0.0, -20.0]] * 500,
@@ -309,20 +289,17 @@ class TestGDNAAssignment:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # Almost all should go to t0
         assert rc.em_counts[0].sum() > 490
         assert rc.gdna_em_count < 10
 
     def test_high_shadow_prior_absorbs_fragments(self):
         """With large shadow_init, gDNA takes larger share."""
-        # 2 transcripts, 1 gene → shadow index = 2
         shadow_idx = 2
         shadow = np.array([500.0])
         rc = ReadCounter(
             num_transcripts=2, num_genes=1, seed=42,
             shadow_init=shadow,
         )
-        # Equal likelihoods — prior drives assignment
         em = _make_em_data_with_gdna(
             [[0, shadow_idx]] * 500,
             [[0.0, 0.0]] * 500,
@@ -331,7 +308,6 @@ class TestGDNAAssignment:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # gDNA should get a meaningful share
         assert rc.gdna_em_count > 100, (
             f"Expected gDNA to absorb many fragments, got {rc.gdna_em_count}"
         )
@@ -347,36 +323,31 @@ class TestGDNALocusAttribution:
 
     def test_locus_counts_populated(self):
         """gDNA assignments populate gdna_locus_counts."""
-        # 2 transcripts, 1 gene → shadow index = 2
         shadow_idx = 2
         shadow = np.array([1000.0])
         rc = ReadCounter(
             num_transcripts=2, num_genes=1, seed=42,
             shadow_init=shadow,
         )
-        ct_col = int(CountType.UNSPLICED_SENSE)
-        # All units: t0 as transcript candidate, shadow with better score
+        cc = _UNSPLICED_SENSE
         em = _make_em_data_with_gdna(
             [[0, shadow_idx]] * 100,
             [[-10.0, 0.0]] * 100,
-            count_types_per_unit=[[ct_col, ct_col]] * 100,
+            count_cols_per_unit=[[cc, cc]] * 100,
             gdna_base_index=2,
         )
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # locus_t_indices point to t0, so gdna_locus_counts[0] should be nonzero
         assert rc.gdna_locus_counts[0].sum() > 0
 
     def test_locus_counts_zero_when_no_gdna(self):
         """No gDNA assignments → locus counts stay zero."""
-        # 2 transcripts, 1 gene → shadow index = 2
         shadow_idx = 2
         rc = ReadCounter(
             num_transcripts=2, num_genes=1, seed=42,
         )
         rc.unique_counts[0, 0] = 1000.0
-        # shadow has terrible likelihood → none assigned
         em = _make_em_data_with_gdna(
             [[0, shadow_idx]] * 50,
             [[0.0, -50.0]] * 50,
@@ -411,7 +382,6 @@ class TestGDNAProperties:
         )
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 10.0
-        # total RNA = 80 + 10 = 90; gDNA_total = 10 + 0 = 10; total = 100
         assert rc.gdna_contamination_rate == pytest.approx(0.1)
 
     def test_contamination_rate_zero_when_empty(self):
@@ -425,24 +395,6 @@ class TestGDNAProperties:
 
 
 class TestGDNAOutput:
-    def test_get_t_gdna_df_shape(self):
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        df = rc.get_t_gdna_df()
-        assert df.shape == (3, NUM_COUNT_TYPES)
-        assert list(df.columns) == list(CountType.columns())
-
-    def test_get_g_gdna_df_aggregates(self):
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        rc.gdna_locus_counts[0, 0] = 5.0
-        rc.gdna_locus_counts[1, 0] = 3.0  # same gene as t0
-        rc.gdna_locus_counts[2, 0] = 7.0  # different gene
-
-        t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        df = rc.get_g_gdna_df(t_to_g)
-        assert df.shape == (2, NUM_COUNT_TYPES)
-        assert df.iloc[0, 0] == 8.0  # g0 = t0 + t1
-        assert df.iloc[1, 0] == 7.0  # g1 = t2
-
     def test_gdna_summary_dict(self):
         shadow = np.array([10.0])
         rc = ReadCounter(
@@ -521,7 +473,7 @@ class TestComputeShadowInit:
         """No counts at all → all shadow_init = 0."""
         from hulkrna.pipeline import compute_shadow_init
 
-        unique_counts = np.zeros((3, 12), dtype=np.float64)
+        unique_counts = np.zeros((3, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 0, 1], dtype=np.int64)
         result = compute_shadow_init(unique_counts, t_to_g, 2, 0)
         np.testing.assert_array_equal(result, [0.0, 0.0])
@@ -530,9 +482,8 @@ class TestComputeShadowInit:
         """With only intergenic fragments (no genic reads), shadow = 0."""
         from hulkrna.pipeline import compute_shadow_init
 
-        unique_counts = np.zeros((2, 12), dtype=np.float64)
+        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
-        # 100 intergenic fragments but zero genic reads → depth=0 → shadow=0
         result = compute_shadow_init(unique_counts, t_to_g, 2, 100)
         np.testing.assert_array_equal(result, [0.0, 0.0])
 
@@ -540,51 +491,49 @@ class TestComputeShadowInit:
         """Genes with reads get a depth-scaled floor even without antisense."""
         from hulkrna.pipeline import compute_shadow_init
 
-        unique_counts = np.zeros((2, 12), dtype=np.float64)
+        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
-        # Both genes have 100 sense reads, plus 100 intergenic
-        unique_counts[0, 1] = 100.0  # INTRON_SENSE
-        unique_counts[1, 1] = 100.0  # INTRON_SENSE
+        # INTRON_SENSE column
+        intron_sense_col = int(CountCol.INTRON_SENSE)
+        unique_counts[0, intron_sense_col] = 100.0
+        unique_counts[1, intron_sense_col] = 100.0
         result = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=1.0)
         # n_total = 200 + 100 = 300
         # estimated_gdna = 100 + 0 = 100
         # θ_global = 100 / 300 = 1/3
-        # depth = [100, 100]
-        # shadow = [0 + 1.0*100*(1/3), 0 + 1.0*100*(1/3)] = [33.33, 33.33]
         assert result[0] == pytest.approx(100.0 / 3)
         assert result[1] == pytest.approx(100.0 / 3)
 
     def test_antisense_boosts_gene_shadow(self):
         """Genes with antisense counts get proportionally higher shadow."""
         from hulkrna.pipeline import compute_shadow_init
-        from hulkrna.categories import CountStrand
 
-        unique_counts = np.zeros((3, 12), dtype=np.float64)
+        unique_counts = np.zeros((3, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        # Gene 0: 50 antisense via t0
-        as_col = int(CountStrand.ANTISENSE)  # col 2
-        unique_counts[0, as_col] = 50.0
-        # Gene 1: 50 sense reads via t2 (to give it depth)
-        unique_counts[2, 1] = 50.0  # INTRON_SENSE
+        # Gene 0: 50 antisense via t0 (e.g. INTRON_ANTISENSE = col 1)
+        intron_anti_col = int(CountCol.INTRON_ANTISENSE)
+        unique_counts[0, intron_anti_col] = 50.0
+        # Gene 1: 50 sense reads via t2
+        intron_sense_col = int(CountCol.INTRON_SENSE)
+        unique_counts[2, intron_sense_col] = 50.0
         result = compute_shadow_init(unique_counts, t_to_g, 2, 0, kappa=1.0)
         # n_total = 100, estimated_gdna = 0 + 2*50 = 100
         # θ_global = 100 / 100 = 1.0
-        # depth = [50, 50], g_antisense = [50, 0]
         # gene 0: 2*50 + 1.0*50*1.0 = 150.0
         # gene 1: 0 + 1.0*50*1.0 = 50.0
         assert result[0] == pytest.approx(150.0)
         assert result[1] == pytest.approx(50.0)
-        assert result[0] > result[1]  # antisense evidence boosts gene 0
+        assert result[0] > result[1]
 
     def test_kappa_scales_global_shrinkage(self):
         """Higher kappa → more shrinkage toward global rate."""
         from hulkrna.pipeline import compute_shadow_init
 
-        unique_counts = np.zeros((2, 12), dtype=np.float64)
+        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
-        # Give genes depth so the global term is non-zero
-        unique_counts[0, 1] = 100.0  # INTRON_SENSE
-        unique_counts[1, 1] = 100.0  # INTRON_SENSE
+        intron_sense = int(CountCol.INTRON_SENSE)
+        unique_counts[0, intron_sense] = 100.0
+        unique_counts[1, intron_sense] = 100.0
         r_lo = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=0.5)
         r_hi = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=5.0)
         assert r_hi[0] > r_lo[0]
@@ -593,18 +542,13 @@ class TestComputeShadowInit:
         """Deeper gene gets larger absolute shadow floor."""
         from hulkrna.pipeline import compute_shadow_init
 
-        unique_counts = np.zeros((2, 12), dtype=np.float64)
+        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 1], dtype=np.int64)
-        # Gene 0: 1000 sense reads (deeply sequenced)
-        # Gene 1: 10 sense reads (lowly sequenced)
-        unique_counts[0, 1] = 1000.0
-        unique_counts[1, 1] = 10.0
+        intron_sense = int(CountCol.INTRON_SENSE)
+        unique_counts[0, intron_sense] = 1000.0
+        unique_counts[1, intron_sense] = 10.0
         result = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=1.0)
-        # Both have 0 antisense, so shadow comes from depth*θ_global
-        # θ_global = 100 / 1110 ≈ 0.09
-        # gene 0: 0 + 1.0*1000*0.09 ≈ 90
-        # gene 1: 0 + 1.0*10*0.09 ≈ 0.9
-        assert result[0] > result[1] * 50  # ~100x ratio
+        assert result[0] > result[1] * 50
         assert result[0] > 0
         assert result[1] > 0
 
@@ -612,7 +556,7 @@ class TestComputeShadowInit:
         """Returns array of shape (num_genes,)."""
         from hulkrna.pipeline import compute_shadow_init
 
-        unique_counts = np.zeros((5, 12), dtype=np.float64)
+        unique_counts = np.zeros((5, NUM_COUNT_COLS), dtype=np.float64)
         t_to_g = np.array([0, 0, 1, 2, 2], dtype=np.int64)
         result = compute_shadow_init(unique_counts, t_to_g, 3, 10)
         assert result.shape == (3,)
@@ -629,14 +573,11 @@ class TestPerGeneShadowEM:
 
     def test_two_genes_independent_shadows(self):
         """Two genes get independent shadow components in theta."""
-        # 3 transcripts (t0, t1 → gene 0; t2 → gene 1), 2 genes
-        # Shadow indices: 3 (gene 0), 4 (gene 1)
-        shadow = np.array([100.0, 0.0])  # gene 0 has gDNA evidence
+        shadow = np.array([100.0, 0.0])
         rc = ReadCounter(
             num_transcripts=3, num_genes=2, seed=42,
             shadow_init=shadow,
         )
-        # Units: each competes t0 vs shadow_gene0 (index 3)
         em = _make_em_data_with_gdna(
             [[0, 3]] * 200,
             [[0.0, 0.0]] * 200,
@@ -646,20 +587,16 @@ class TestPerGeneShadowEM:
 
         theta = rc._converged_theta
         assert theta.shape == (5,)
-        # Shadow for gene 0 (index 3) should have significant mass
         assert theta[3] > 0.1
-        # Shadow for gene 1 (index 4) should have minimal mass (only alpha)
         assert theta[4] < theta[3]
 
     def test_per_gene_em_counts_tracking(self):
         """Verify gdna_em_counts tracks per-gene gDNA assignments."""
-        # 2 transcripts, 2 genes → shadow indices 2, 3
         shadow = np.array([500.0, 500.0])
         rc = ReadCounter(
             num_transcripts=2, num_genes=2, seed=42,
             shadow_init=shadow,
         )
-        # 200 units: t0 vs shadow_gene0, 200 units: t1 vs shadow_gene1
         em = _make_em_data_with_gdna(
             [[0, 2]] * 200 + [[1, 3]] * 200,
             [[0.0, 0.0]] * 200 + [[0.0, 0.0]] * 200,
@@ -668,17 +605,14 @@ class TestPerGeneShadowEM:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # Both genes should have some gDNA assignments
         assert rc.gdna_em_counts[0] > 0
         assert rc.gdna_em_counts[1] > 0
-        # Total should be preserved
         total = rc.em_counts.sum() + rc.gdna_em_counts.sum()
         assert total == 400.0
 
     def test_gene_with_high_antisense_absorbs_more(self):
         """Gene with high shadow_init absorbs more ambiguous fragments."""
-        # 2 transcripts (1 per gene), 2 genes → shadow indices 2, 3
-        shadow = np.array([200.0, 1.0])  # gene 0 has high gDNA evidence
+        shadow = np.array([200.0, 1.0])
         rc = ReadCounter(
             num_transcripts=2, num_genes=2, seed=42,
             shadow_init=shadow,
@@ -686,7 +620,6 @@ class TestPerGeneShadowEM:
         rc.unique_counts[0, 0] = 10.0
         rc.unique_counts[1, 0] = 10.0
 
-        # 500 units each: t0 vs shadow_g0, t1 vs shadow_g1
         em = _make_em_data_with_gdna(
             [[0, 2]] * 500 + [[1, 3]] * 500,
             [[0.0, 0.0]] * 500 + [[0.0, 0.0]] * 500,
@@ -695,7 +628,6 @@ class TestPerGeneShadowEM:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # Gene 0's shadow should absorb more than gene 1's
         assert rc.gdna_em_counts[0] > rc.gdna_em_counts[1]
 
 
@@ -779,14 +711,7 @@ class TestStrandModelsContainer:
         assert sm.intergenic.n_observations == 1
 
     def test_model_for_category(self):
-        """model_for_category returns the best pure-RNA model for all categories.
-
-        The new design selects a single pure-RNA strand model (either
-        exonic_spliced if it has enough observations, or an estimated
-        RNA model from the exonic/intergenic contrast) and returns
-        it for ALL categories.  The cached result is consistent
-        across calls.
-        """
+        """model_for_category returns the best pure-RNA model."""
         from hulkrna.strand_model import StrandModels, StrandModel
         from hulkrna.categories import CountCategory
         from hulkrna.types import Strand
@@ -795,7 +720,6 @@ class TestStrandModelsContainer:
         sm1 = StrandModels()
         for _ in range(20):
             sm1.exonic_spliced.observe(Strand.POS, Strand.POS)
-        # All categories should return the same model (exonic_spliced)
         m = sm1.model_for_category(int(CountCategory.SPLICED_ANNOT))
         assert m is sm1.exonic_spliced
         assert sm1.model_for_category(int(CountCategory.UNSPLICED)) is m
@@ -806,13 +730,11 @@ class TestStrandModelsContainer:
         for _ in range(20):
             sm2.exonic.observe(Strand.POS, Strand.POS)
             sm2.intergenic.observe(Strand.POS, Strand.POS)
-        # Should return estimated RNA model (not exonic_spliced)
         m2 = sm2.model_for_category(int(CountCategory.UNSPLICED))
         assert m2 is not sm2.exonic_spliced
-        # Cached — same object for all categories
         assert sm2.model_for_category(int(CountCategory.INTRON)) is m2
 
         # --- Case 3: default (no observations) → falls back to exonic ---
         sm3 = StrandModels()
         m3 = sm3.model_for_category(int(CountCategory.UNSPLICED))
-        assert m3 is sm3.exonic  # exonic returned as fallback
+        assert m3 is sm3.exonic

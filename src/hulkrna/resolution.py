@@ -357,16 +357,6 @@ class ResolvedFragment:
         return self.n_genes == 1
 
     @property
-    def is_ambiguous(self) -> bool:
-        """True if the fragment maps to multiple genes or is multimapped."""
-        return self.n_genes > 1 or self.num_hits > 1
-
-    @property
-    def has_annotated_sj(self) -> bool:
-        """True if the fragment matched an annotated splice junction."""
-        return self.count_cat == CountCategory.SPLICED_ANNOT
-
-    @property
     def is_strand_qualified(self) -> bool:
         """True if this fragment qualifies for strand model training.
 
