@@ -488,7 +488,7 @@ class TestAssignAmbiguous:
             rc.assign_ambiguous(em)
 
     def test_deterministic_with_same_seed(self):
-        """Same seed → identical sampled counts."""
+        """Expected-count assignment is deterministic."""
         results = []
         for _ in range(3):
             rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
@@ -503,7 +503,7 @@ class TestAssignAmbiguous:
         np.testing.assert_array_equal(results[1], results[2])
 
     def test_different_seeds_differ(self):
-        """Different seeds produce different sampled counts."""
+        """Different seeds do not affect expected-count assignment."""
         counts = []
         for seed in [1, 2]:
             rc = ReadCounter(num_transcripts=3, num_genes=2, seed=seed)
@@ -514,11 +514,10 @@ class TestAssignAmbiguous:
             rc.assign_ambiguous(em)
             counts.append(rc.em_counts.copy())
 
-        # Very unlikely to be identical with different seeds
-        assert not np.array_equal(counts[0], counts[1])
+        np.testing.assert_array_equal(counts[0], counts[1])
 
     def test_integer_counts(self):
-        """All EM counts are integer-valued (each fragment → 1 transcript)."""
+        """EM counts may be fractional under expected-count assignment."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
         rc.unique_counts[1, _UNSPLICED_SENSE] = 30.0
@@ -527,8 +526,8 @@ class TestAssignAmbiguous:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        # Every element should be an exact integer
-        np.testing.assert_array_equal(rc.em_counts, np.floor(rc.em_counts))
+        frac = rc.em_counts - np.floor(rc.em_counts)
+        assert np.any(frac > 0.0)
 
     def test_equal_candidates_share_counts(self):
         """Equal-probability candidates all receive counts (not winner-take-all).
@@ -623,7 +622,8 @@ class TestSimultaneousResolution:
             rc1._converged_theta, rc2._converged_theta, atol=1e-10
         )
         # Total counts should match (400 units each)
-        assert rc1.em_counts.sum() == rc2.em_counts.sum() == 400.0
+        assert rc1.em_counts.sum() == pytest.approx(400.0)
+        assert rc2.em_counts.sum() == pytest.approx(400.0)
 
 
 # =====================================================================
@@ -651,7 +651,7 @@ class TestMultimapperEM:
         rc.run_em(em, em_iterations=10)
         rc.assign_ambiguous(em)
 
-        assert rc.em_counts.sum() == 125.0
+        assert rc.em_counts.sum() == pytest.approx(125.0, abs=1e-6)
 
 
 # =====================================================================

@@ -7,6 +7,7 @@ Also computes insert sizes with gap correction.
 
 This module contains:
 - ``merge_sets_with_criteria()`` — progressive set merging
+- ``compute_exon_overlap()`` — per-candidate exon overlap fractions
 - ``resolve_fragment()`` — core fragment-to-transcript resolution with
   chimera detection (interchromosomal and intrachromosomal)
 - ``compute_insert_size()`` — insert size with gap correction
@@ -15,6 +16,7 @@ This module contains:
 """
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 
 from .types import (
@@ -78,6 +80,117 @@ def merge_sets_with_criteria(
         return MergeResult(t_inds, MergeCriteria.UNION)
 
     return EMPTY_MERGE
+
+
+# ---------------------------------------------------------------------------
+# Exon overlap fraction
+# ---------------------------------------------------------------------------
+
+def compute_exon_overlap(
+    frag: Fragment,
+    index,
+) -> dict[int, float]:
+    """Compute per-candidate exon overlap fraction for a fragment.
+
+    For each fragment exon block, queries the index for overlapping
+    reference EXON intervals and computes the actual base overlap
+    (clipped to the block boundaries).  Overlap is summed per
+    transcript across all blocks and divided by the total fragment
+    exon length.
+
+    Parameters
+    ----------
+    frag : Fragment
+        The consolidated fragment with exon blocks.
+    index
+        The loaded reference index (must have ``query_exon_with_coords``).
+
+    Returns
+    -------
+    dict[int, float]
+        Mapping of transcript index → overlap fraction (0.0 to 1.0).
+        Only transcripts overlapping at least one EXON-type interval
+        are included.
+    """
+    if not frag.exons:
+        return {}
+
+    # Total fragment exon length (sum of exon block sizes)
+    frag_length = sum(e.end - e.start for e in frag.exons)
+    if frag_length <= 0:
+        return {}
+
+    # Accumulate per-transcript overlap in bases
+    t_overlap: dict[int, int] = defaultdict(int)
+
+    for exon_block in frag.exons:
+        block_start = exon_block.start
+        block_end = exon_block.end
+
+        for t_idx, _g_idx, itype, h_start, h_end in index.query_exon_with_coords(exon_block):
+            if itype != IntervalType.EXON:
+                continue
+            # Clipped overlap
+            overlap = min(block_end, h_end) - max(block_start, h_start)
+            if overlap > 0:
+                t_overlap[t_idx] += overlap
+
+    # Convert to fraction (relative to fragment length)
+    return {t_idx: bp / frag_length for t_idx, bp in t_overlap.items()}
+
+
+def filter_by_overlap(
+    t_inds: frozenset[int],
+    overlap_fracs: dict[int, float],
+    *,
+    min_frac_of_best: float = 0.9,
+) -> frozenset[int]:
+    """Filter candidate transcripts by exon overlap fraction.
+
+    Keeps transcripts whose overlap fraction is at least
+    ``min_frac_of_best`` times the best overlap fraction among
+    candidates.  This removes transcript candidates that only have
+    marginal (1-2 bp) overlap with the fragment.
+
+    If no overlap data is available for the candidates, returns
+    the original set unchanged.
+
+    Parameters
+    ----------
+    t_inds : frozenset[int]
+        Candidate transcript indices from resolution.
+    overlap_fracs : dict[int, float]
+        Per-transcript overlap fractions from ``compute_exon_overlap``.
+    min_frac_of_best : float
+        Minimum fraction of the best overlap to retain a candidate
+        (default 0.9 = within 10% of best).
+
+    Returns
+    -------
+    frozenset[int]
+        Filtered candidate set (never empty — falls back to original).
+    """
+    if not overlap_fracs or not t_inds:
+        return t_inds
+
+    # Find the best overlap fraction among current candidates
+    best = 0.0
+    for t_idx in t_inds:
+        frac = overlap_fracs.get(t_idx, 0.0)
+        if frac > best:
+            best = frac
+
+    if best <= 0.0:
+        return t_inds  # No overlap data → keep all
+
+    threshold = best * min_frac_of_best
+    filtered = frozenset(
+        t_idx for t_idx in t_inds
+        if overlap_fracs.get(t_idx, 0.0) >= threshold
+    )
+
+    # Safety: never return empty set
+    return filtered if filtered else t_inds
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +496,8 @@ class ResolvedFragment:
 def resolve_fragment(
     frag: Fragment,
     index,
+    *,
+    overlap_min_frac: float = 0.99,
 ) -> ResolvedFragment | None:
     """Resolve a fragment to its compatible transcript set.
 
@@ -407,6 +522,10 @@ def resolve_fragment(
         The consolidated fragment from paired-end reads.
     index : HulkIndex
         The loaded reference index.
+    overlap_min_frac : float
+        Minimum fraction of the best exon overlap to retain a candidate
+        transcript.  1.0 (default) keeps only candidates tied for the
+        highest overlap; 0.9 keeps candidates within 10% of the best.
 
     Returns
     -------
@@ -463,6 +582,26 @@ def resolve_fragment(
     for intron in frag.introns:
         key = (intron.ref, intron.start, intron.end, intron.strand)
         match = index.sj_map.get(key)
+        if match is None and intron.strand not in (Strand.POS, Strand.NEG):
+            # Some aligners/outputs omit splice-junction strand tags.
+            # Fall back to strand-agnostic coordinate matching so that
+            # annotated SJs still contribute transcript evidence.
+            pos_match = index.sj_map.get(
+                (intron.ref, intron.start, intron.end, Strand.POS)
+            )
+            neg_match = index.sj_map.get(
+                (intron.ref, intron.start, intron.end, Strand.NEG)
+            )
+            if pos_match is not None or neg_match is not None:
+                t_set: set[int] = set()
+                g_set: set[int] = set()
+                if pos_match is not None:
+                    t_set.update(pos_match[0])
+                    g_set.update(pos_match[1])
+                if neg_match is not None:
+                    t_set.update(neg_match[0])
+                    g_set.update(neg_match[1])
+                match = (frozenset(t_set), frozenset(g_set))
         if match is not None:
             t_set, g_set = match
             sj_t_sets.append(t_set)
@@ -475,9 +614,27 @@ def resolve_fragment(
     any_exon = any(s for s in exon_t_sets)
 
     if any_exon:
-        # Merge EXON + SJ sets together for maximum specificity
-        all_t_sets = exon_t_sets + sj_t_sets
-        merge_result = merge_sets_with_criteria(all_t_sets)
+        # Merge EXON + SJ sets together for maximum specificity.
+        # When annotated SJs are present, prioritize SJ-supported
+        # transcripts to avoid broad union fallback that can admit
+        # exon-only isoforms lacking observed splice evidence.
+        if has_annotated_sj:
+            exon_merge = merge_sets_with_criteria(exon_t_sets)
+            sj_merge = merge_sets_with_criteria(sj_t_sets)
+            if not sj_merge.is_empty:
+                if not exon_merge.is_empty:
+                    t_inds = exon_merge.t_inds & sj_merge.t_inds
+                    if not t_inds:
+                        t_inds = sj_merge.t_inds
+                else:
+                    t_inds = sj_merge.t_inds
+                merge_result = MergeResult(t_inds, sj_merge.criteria)
+            else:
+                all_t_sets = exon_t_sets + sj_t_sets
+                merge_result = merge_sets_with_criteria(all_t_sets)
+        else:
+            all_t_sets = exon_t_sets + sj_t_sets
+            merge_result = merge_sets_with_criteria(all_t_sets)
 
         # Determine count category
         if has_annotated_sj:
@@ -500,8 +657,25 @@ def resolve_fragment(
         # Defensive — shouldn't happen with valid input
         return None
 
-    # --- Derive n_genes from transcript indices ---
+    # --- Derive final transcript set ---
     t_inds = merge_result.t_inds
+    if not t_inds:
+        return None
+
+    # --- Overlap-based filtering for all exonic fragments ---
+    # cgranges returns any transcript with >=1bp exon overlap, which
+    # can admit candidates with marginal overlap.  Filter to keep only
+    # candidates whose exon overlap fraction is close to the best.
+    # Applied to all fragment types (spliced and unspliced) since even
+    # spliced fragments have exon blocks that can benefit from overlap
+    # specificity in addition to splice-junction information.
+    if len(t_inds) > 1:
+        overlap_fracs = compute_exon_overlap(frag, index)
+        t_inds = filter_by_overlap(
+            t_inds, overlap_fracs, min_frac_of_best=overlap_min_frac,
+        )
+
+    # --- Derive n_genes from transcript indices ---
     n_genes = len(set(int(index.t_to_g_arr[t]) for t in t_inds))
 
     # --- Compute insert size (skip for chimeras — meaningless) ---
@@ -522,3 +696,166 @@ def resolve_fragment(
         chimera_type=chimera_type,
         chimera_gap=chimera_gap,
     )
+
+
+# ---------------------------------------------------------------------------
+# Multimapper secondary pairing (resolve-then-pair)
+# ---------------------------------------------------------------------------
+
+
+def pair_multimapper_reads(
+    sec_r1_locs: list[list],
+    sec_r2_locs: list[list],
+    index,
+    sj_strand_tag,
+    overlap_min_frac: float = 0.99,
+) -> list[tuple[list, list]]:
+    """Pair secondary R1/R2 alignments using transcript-set intersection.
+
+    Instead of blind cross-product pairing (which creates false chimeric
+    pairs between paralogs on different chromosomes), each secondary R1
+    and R2 location is resolved independently to obtain its compatible
+    transcript set.  Pairs are then formed using a three-tier strategy:
+
+    1. **STRICT** — create all pairs where the R1 and R2 transcript
+       sets have a non-empty intersection.  These are the most likely
+       true pairs since both mates agree on at least one transcript.
+
+    2. **FALLBACK** — for unmatched locations, try same-reference
+       pairing by genomic proximity (closest distance, greedy 1:1).
+       This handles intergenic secondaries that fall near each other.
+
+    3. **CROSS-PAIR** — any remaining unmatched R1 and R2 locations
+       are cross-paired (all remaining R1 × all remaining R2).  This
+       preserves interchromosomal chimera evidence — these pairs
+       enter the EM as ambiguous multimappers and are scored
+       alongside real transcript candidates.
+
+    4. **SINGLETONS** — if only unmatched R1 or only unmatched R2
+       locations remain (no cross-pair partner), they become
+       singletons.
+
+    Parameters
+    ----------
+    sec_r1_locs : list[list]
+        Secondary R1 locations.  Each element is a list containing
+        one ``pysam.AlignedSegment``.
+    sec_r2_locs : list[list]
+        Secondary R2 locations.
+    index : HulkIndex
+        Reference index for resolution.
+    sj_strand_tag : str or tuple[str, ...]
+        Splice-junction strand tag(s).
+    overlap_min_frac : float
+        Minimum exon overlap fraction for resolution filtering.
+
+    Returns
+    -------
+    list[tuple[list, list]]
+        Paired ``(r1_reads, r2_reads)`` tuples for secondary hits.
+    """
+    if not sec_r1_locs and not sec_r2_locs:
+        return []
+
+    # --- Step 1: Resolve each R1 location individually ---
+    r1_resolved: list[tuple[list, frozenset, int, int]] = []
+    for r1_reads in sec_r1_locs:
+        frag = Fragment.from_reads(r1_reads, [], sj_strand_tag=sj_strand_tag)
+        t_inds: frozenset = frozenset()
+        if frag.exons:
+            result = resolve_fragment(
+                frag, index, overlap_min_frac=overlap_min_frac,
+            )
+            if result is not None:
+                t_inds = result.t_inds
+        ref_id = r1_reads[0].reference_id if r1_reads else -1
+        ref_start = r1_reads[0].reference_start if r1_reads else -1
+        r1_resolved.append((r1_reads, t_inds, ref_id, ref_start))
+
+    # --- Step 2: Resolve each R2 location individually ---
+    r2_resolved: list[tuple[list, frozenset, int, int]] = []
+    for r2_reads in sec_r2_locs:
+        frag = Fragment.from_reads([], r2_reads, sj_strand_tag=sj_strand_tag)
+        t_inds = frozenset()
+        if frag.exons:
+            result = resolve_fragment(
+                frag, index, overlap_min_frac=overlap_min_frac,
+            )
+            if result is not None:
+                t_inds = result.t_inds
+        ref_id = r2_reads[0].reference_id if r2_reads else -1
+        ref_start = r2_reads[0].reference_start if r2_reads else -1
+        r2_resolved.append((r2_reads, t_inds, ref_id, ref_start))
+
+    # --- Step 3: STRICT — pair by transcript-set intersection ---
+    paired: list[tuple[list, list]] = []
+    r1_paired: set[int] = set()
+    r2_paired: set[int] = set()
+
+    for i, (r1_reads, r1_t, _, _) in enumerate(r1_resolved):
+        if not r1_t:
+            continue  # intergenic R1, skip strict
+        for j, (r2_reads, r2_t, _, _) in enumerate(r2_resolved):
+            if not r2_t:
+                continue  # intergenic R2, skip strict
+            if r1_t & r2_t:  # non-empty intersection
+                paired.append((list(r1_reads), list(r2_reads)))
+                r1_paired.add(i)
+                r2_paired.add(j)
+
+    # --- Step 4: FALLBACK — same-reference closest distance ---
+    unmatched_r1 = [i for i in range(len(r1_resolved)) if i not in r1_paired]
+    unmatched_r2 = [j for j in range(len(r2_resolved)) if j not in r2_paired]
+
+    if unmatched_r1 and unmatched_r2:
+        # Build all same-reference (i, j, distance) candidates
+        candidates: list[tuple[int, int, int]] = []
+        for i in unmatched_r1:
+            _, _, r1_ref, r1_pos = r1_resolved[i]
+            for j in unmatched_r2:
+                _, _, r2_ref, r2_pos = r2_resolved[j]
+                if r1_ref == r2_ref and r1_ref >= 0:
+                    dist = abs(r1_pos - r2_pos)
+                    candidates.append((dist, i, j))
+
+        # Greedy 1:1 matching by shortest distance
+        candidates.sort()
+        for _dist, i, j in candidates:
+            if i not in r1_paired and j not in r2_paired:
+                paired.append((
+                    list(r1_resolved[i][0]),
+                    list(r2_resolved[j][0]),
+                ))
+                r1_paired.add(i)
+                r2_paired.add(j)
+
+    # --- Step 5: CROSS-PAIR remaining unmatched R1 × R2 ---
+    # This preserves interchromosomal chimera evidence.  These
+    # pairs enter the EM as ambiguous multimappers and are scored
+    # against real transcript candidates, so false chimeras get
+    # low posterior weight.
+    final_unmatched_r1 = [i for i in range(len(r1_resolved))
+                          if i not in r1_paired]
+    final_unmatched_r2 = [j for j in range(len(r2_resolved))
+                          if j not in r2_paired]
+
+    if final_unmatched_r1 and final_unmatched_r2:
+        for i in final_unmatched_r1:
+            for j in final_unmatched_r2:
+                paired.append((
+                    list(r1_resolved[i][0]),
+                    list(r2_resolved[j][0]),
+                ))
+            r1_paired.add(i)
+        for j in final_unmatched_r2:
+            r2_paired.add(j)
+
+    # --- Step 6: Remaining singletons (only R1 or only R2 left) ---
+    for i in range(len(r1_resolved)):
+        if i not in r1_paired:
+            paired.append((list(r1_resolved[i][0]), []))
+    for j in range(len(r2_resolved)):
+        if j not in r2_paired:
+            paired.append(([], list(r2_resolved[j][0])))
+
+    return paired

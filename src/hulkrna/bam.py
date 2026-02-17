@@ -18,9 +18,12 @@ Hit grouping strategy
 ---------------------
 * **HI tag present** (STAR, some minimap2 configs): records are
   grouped by their HI (Hit Index) value.
-* **HI tag absent** (minimap2 default): the primary alignment and
-  its supplementary records form hit 0; secondary alignments are
-  paired by mate position into additional hits.
+* **HI tag absent** (minimap2 default): the primary pair (primary +
+  supplementary records) is returned as a single hit.  Secondary
+  R1 and R2 locations are returned separately so the pipeline can
+  perform transcript-aware pairing (resolve-then-pair) rather than
+  blind cross-product pairing.  This avoids creating false chimeric
+  pairs between paralogs on different chromosomes.
 
 For unique mappers (NH = 1) there is exactly one hit.  For
 multimappers (NH > 1, when ``include_multimap=True``) there may
@@ -151,6 +154,13 @@ def parse_read(read, sj_strand_tag: str | tuple[str, ...] = "XS"):
     for tag in tags:
         if read.has_tag(tag):
             _sj_strand = Strand.from_str(read.get_tag(tag))
+            # minimap2's 'ts' tag is alignment-relative: the sign
+            # indicates whether the donor-acceptor motif is on the
+            # same (+) or opposite (-) strand as the alignment.
+            # Convert to reference-relative by flipping for
+            # reverse-mapped reads.
+            if tag == "ts" and read.is_reverse:
+                _sj_strand = _sj_strand.opposite()
             break
 
     for (cig_op, cig_len) in read.cigartuples:
@@ -260,10 +270,13 @@ def _group_records_by_hit(usable_records):
 
     Strategy
     --------
-    * **HI tag present** — group records by their HI value.
-    * **HI tag absent** — primary + supplementary records form hit 0;
-      secondary records are paired by mate position into additional
-      hits (one per secondary pair).
+    * **HI tag present** — group records by their HI value.  All
+      hits are returned in ``hits``; secondary lists are empty.
+    * **HI tag absent** — the primary pair (primary + supplementary)
+      is the sole entry in ``hits``.  Mate-unmapped singletons are
+      also appended.  Pairable secondary R1/R2 locations are
+      returned separately for transcript-aware pairing by the
+      pipeline.
 
     Parameters
     ----------
@@ -273,8 +286,13 @@ def _group_records_by_hit(usable_records):
 
     Returns
     -------
-    list[tuple[list, list]]
-        One ``(r1_reads, r2_reads)`` per hit.
+    tuple[list[tuple[list, list]], list[list], list[list]]
+        ``(hits, sec_r1_locs, sec_r2_locs)`` where *hits* contains
+        the primary pair (and mate-unmapped singletons for the
+        no-HI path, or all HI-grouped hits for the HI path),
+        and *sec_r1_locs* / *sec_r2_locs* are lists of secondary
+        R1/R2 locations (each a single-element list of BAM records)
+        for transcript-aware pairing.
     """
     # Detect whether HI tags are available
     has_hi = any(r.has_tag('HI') for r in usable_records)
@@ -289,42 +307,63 @@ def _group_records_by_hit(usable_records):
                 groups[hi][0].append(r)
             elif r.is_read2:
                 groups[hi][1].append(r)
-        return [groups[hi] for hi in sorted(groups)]
+        return [groups[hi] for hi in sorted(groups)], [], []
 
-    # Fallback: primary+supplementary = hit 0, secondary = extra hits
-    primary_r1: list = []
-    primary_r2: list = []
-    secondary_r1: list = []
-    secondary_r2: list = []
+    # Fallback: separate primary from secondary locations
+    #
+    # minimap2 secondaries have RNEXT/PNEXT that point back to the
+    # PRIMARY mate, not to a reciprocal secondary.  Instead of blind
+    # cross-product pairing (which creates false chimeric pairs between
+    # paralogs on different chromosomes), we return secondary R1/R2
+    # locations separately so the pipeline can perform transcript-aware
+    # pairing (resolve each half independently, then pair by transcript
+    # set intersection).
+    #
+    # Primary + supplementary records form the primary hit (always
+    # included).  Secondaries whose mate is explicitly unmapped are
+    # emitted as singleton hits.  All other secondaries go into the
+    # sec_r1_locs / sec_r2_locs lists for resolve-then-pair.
+
+    primary_r1: list = []     # primary + supplementary R1
+    primary_r2: list = []     # primary + supplementary R2
+    sec_r1_locs: list[list] = []  # secondary R1 locations for pairing
+    sec_r2_locs: list[list] = []  # secondary R2 locations for pairing
+    singleton_hits: list[tuple[list, list]] = []
 
     for r in usable_records:
-        if r.is_secondary:
+        if r.is_supplementary:
+            # Supplementary stays with primary (hit 0)
             if r.is_read1:
-                secondary_r1.append(r)
+                primary_r1.append(r)
             else:
-                secondary_r2.append(r)
+                primary_r2.append(r)
+        elif r.is_secondary:
+            # Secondaries whose mate is explicitly unmapped cannot
+            # participate in pairing — emit as singleton hits.
+            if r.mate_is_unmapped:
+                if r.is_read1:
+                    singleton_hits.append(([r], []))
+                else:
+                    singleton_hits.append(([], [r]))
+            elif r.is_read1:
+                sec_r1_locs.append([r])
+            else:
+                sec_r2_locs.append([r])
         else:
-            # Primary or supplementary → same hit
             if r.is_read1:
                 primary_r1.append(r)
             else:
                 primary_r2.append(r)
 
+    # Primary hit: always included
     hits: list[tuple[list, list]] = []
-
-    # Hit 0: primary alignment + supplementary records
     if primary_r1 or primary_r2:
         hits.append((primary_r1, primary_r2))
 
-    # Additional hits from secondary alignments (paired by mate pos)
-    if secondary_r1 or secondary_r2:
-        for r1, r2 in _pair_reads(secondary_r1, secondary_r2):
-            hits.append(
-                ([r1] if r1 is not None else [],
-                 [r2] if r2 is not None else [])
-            )
+    # Mate-unmapped singletons
+    hits.extend(singleton_hits)
 
-    return hits
+    return hits, sec_r1_locs, sec_r2_locs
 
 
 def parse_bam_file(
@@ -362,11 +401,12 @@ def parse_bam_file(
 
     Yields
     ------
-    tuple[int, list[tuple[list, list]]]
-        ``(nh, hits)`` where *nh* is the NH tag value and *hits* is a
-        list of ``(r1_reads, r2_reads)`` tuples.  Each element list
-        contains the primary and supplementary ``AlignedSegment``
-        records for that read end at one mapping location.
+    tuple[int, list[tuple[list, list]], list[list], list[list]]
+        ``(nh, hits, sec_r1_locs, sec_r2_locs)`` where *nh* is the NH
+        tag value, *hits* is a list of ``(r1_reads, r2_reads)`` tuples
+        for the primary pair (and mate-unmapped singletons / HI-grouped
+        hits), and *sec_r1_locs* / *sec_r2_locs* are lists of secondary
+        R1/R2 locations for transcript-aware pairing by the pipeline.
     """
     stat_keys = [
         'total', 'qc_fail', 'unmapped', 'secondary',
@@ -425,18 +465,22 @@ def parse_bam_file(
 
         stats['n_read_names'] += 1
 
-        # Multimap handling
-        if nh > 1:
+        # Detect multimapper: NH tag or presence of secondary records
+        has_secondary = any(r.is_secondary for r in usable)
+        is_multimap = nh > 1 or has_secondary
+
+        if is_multimap:
             stats['multimapping'] += 1
             if not include_multimap:
                 continue
         else:
             stats['unique'] += 1
 
-        # Group records into hits
-        hits = _group_records_by_hit(usable)
+        # Group records into hits + separate secondary locations
+        hits, sec_r1, sec_r2 = _group_records_by_hit(usable)
 
-        # Track hit-level stats
+        # Track hit-level stats (primary hits only;
+        # secondary locations are paired later by the pipeline)
         for r1_reads, r2_reads in hits:
             if not r1_reads or not r2_reads:
                 stats['mate_unmapped'] += 1
@@ -451,4 +495,4 @@ def parse_bam_file(
                 else:
                     stats['improper_pair'] += 1
 
-        yield nh, hits
+        yield nh, hits, sec_r1, sec_r2

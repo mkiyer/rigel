@@ -115,6 +115,79 @@ def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=RefInterval._fields)
 
 
+def write_bed12(
+    transcripts: list[Transcript],
+    bed_path: str | Path,
+) -> Path:
+    """Write transcripts as BED12 for minimap2 ``-j`` annotation.
+
+    Each transcript becomes one BED12 line with exon blocks.
+    Coordinates are already 0-based half-open (BED convention).
+
+    Parameters
+    ----------
+    transcripts : list of Transcript
+        Transcripts to write (must have exons populated).
+    bed_path : str or Path
+        Output BED12 file path.
+
+    Returns
+    -------
+    Path
+        The written BED12 file path.
+    """
+    bed_path = Path(bed_path)
+    with open(bed_path, "w") as fh:
+        for t in transcripts:
+            if not t.exons:
+                continue
+            chrom = t.ref
+            chrom_start = t.exons[0].start
+            chrom_end = t.exons[-1].end
+            name = t.t_id or "."
+            score = 0
+            strand = t.strand.to_str()
+            if strand not in ("+", "-"):
+                strand = "+"
+            thick_start = chrom_start
+            thick_end = chrom_end
+            rgb = "0"
+            block_count = len(t.exons)
+            block_sizes = ",".join(
+                str(e.end - e.start) for e in t.exons
+            )
+            block_starts = ",".join(
+                str(e.start - chrom_start) for e in t.exons
+            )
+            fh.write(
+                f"{chrom}\t{chrom_start}\t{chrom_end}\t{name}\t"
+                f"{score}\t{strand}\t{thick_start}\t{thick_end}\t"
+                f"{rgb}\t{block_count}\t{block_sizes}\t{block_starts}\n"
+            )
+    return bed_path
+
+
+def gtf_to_bed12(gtf_path: str | Path, bed_path: str | Path) -> Path:
+    """Convert a GTF file to BED12 for minimap2 ``-j`` annotation.
+
+    Convenience wrapper around ``read_transcripts()`` + ``write_bed12()``.
+
+    Parameters
+    ----------
+    gtf_path : str or Path
+        Input GTF file (may be gzipped).
+    bed_path : str or Path
+        Output BED12 file path.
+
+    Returns
+    -------
+    Path
+        The written BED12 file path.
+    """
+    transcripts = read_transcripts(gtf_path)
+    return write_bed12(transcripts, bed_path)
+
+
 def _gen_transcript_intervals(t: Transcript) -> Iterator[RefInterval]:
     """Yield exon and intron intervals for a single transcript."""
     # Exons
@@ -446,6 +519,36 @@ class HulkIndex:
                 int(self._iv_t_index[label]),
                 int(self._iv_g_index[label]),
                 int(self._iv_type[label]),
+            ))
+        return hits
+
+    def query_exon_with_coords(
+        self, exon: GenomicInterval,
+    ) -> list[tuple[int, int, int, int, int]]:
+        """Query interval index, returning hit coordinates for overlap.
+
+        Like :meth:`query_exon` but also returns the start and end
+        coordinates of each overlapping reference interval.  Used for
+        computing per-candidate exon overlap fractions.
+
+        Parameters
+        ----------
+        exon : GenomicInterval
+            An aligned exon block from a ``Fragment``.
+
+        Returns
+        -------
+        list[tuple[int, int, int, int, int]]
+            List of (t_index, g_index, interval_type, hit_start, hit_end).
+        """
+        hits: list[tuple[int, int, int, int, int]] = []
+        for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
+            hits.append((
+                int(self._iv_t_index[label]),
+                int(self._iv_g_index[label]),
+                int(self._iv_type[label]),
+                h_start,
+                h_end,
             ))
         return hits
 

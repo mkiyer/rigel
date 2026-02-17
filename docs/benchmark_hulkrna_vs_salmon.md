@@ -1,6 +1,6 @@
 # Benchmark: hulkrna vs salmon
 
-**Generated**: 2026-02-15 23:45:04
+**Generated**: 2026-02-16 13:22:51
 **Fragments per scenario**: 2000
 **Seed**: 42
 **salmon version**: 1.10.3
@@ -29,7 +29,7 @@ Key differences in design:
 
 | Strand spec. | Truth (t1) | hulkrna (t1) | salmon (t1) | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- |
-| 0.5 | 2000 | 1023 | 2000.0 | 977.0 | 0.0 |
+| 0.5 | 2000 | 0 | 2000.0 | 2000.0 | 0.0 |
 | 0.9 | 2000 | 2000 | 2000.0 | 0.0 | 0.0 |
 | 1.0 | 2000 | 2000 | 2000.0 | 0.0 | 0.0 |
 
@@ -47,8 +47,8 @@ Key differences in design:
 
 | Strand spec. | Truth (t1) | hulkrna (t1) | salmon (t1) | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- |
-| 0.5 | 2000 | 2000 | 2000.0 | 0.0 | 0.0 |
-| 0.9 | 2000 | 2000 | 2000.0 | 0.0 | 0.0 |
+| 0.5 | 2000 | 890 | 2000.0 | 1110.0 | 0.0 |
+| 0.9 | 2000 | 1883 | 2000.0 | 117.0 | 0.0 |
 | 1.0 | 2000 | 2000 | 2000.0 | 0.0 | 0.0 |
 
 ## Scenario 3: Non-overlapping genes
@@ -65,8 +65,8 @@ Key differences in design:
 
 | Strand spec. | Truth (t1) | hulkrna (t1) | salmon (t1) | Truth (t2) | hulkrna (t2) | salmon (t2) | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.5 | 1370 | 1370 | 1370.0 | 630 | 0 | 630.0 | 315.0 | 0.0 |
-| 0.9 | 1370 | 1370 | 1370.0 | 630 | 630 | 630.0 | 0.0 | 0.0 |
+| 0.5 | 1370 | 614 | 1370.0 | 630 | 0 | 630.0 | 693.0 | 0.0 |
+| 0.9 | 1370 | 1292 | 1370.0 | 630 | 630 | 630.0 | 39.0 | 0.0 |
 | 1.0 | 1371 | 1371 | 1371.0 | 629 | 629 | 629.0 | 0.0 | 0.0 |
 
 ## Scenario 4: Two isoforms (shared exons)
@@ -75,17 +75,17 @@ Key differences in design:
 
 | Fold change | Truth (t1) | hulkrna (t1) | salmon (t1) | Truth (t2) | hulkrna (t2) | salmon (t2) | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 1303 | 1516 | 1319.8 | 697 | 484 | 680.2 | 213.0 | 16.8 |
-| 4 | 1787 | 1900 | 1807.9 | 213 | 100 | 192.1 | 113.0 | 20.9 |
-| 16 | 1940 | 1961 | 1936.6 | 60 | 39 | 63.4 | 21.0 | 3.4 |
+| 1 | 1303 | 1320 | 1319.9 | 697 | 680 | 680.1 | 17.2 | 16.9 |
+| 4 | 1787 | 1808 | 1808.0 | 213 | 192 | 192.0 | 21.1 | 21.0 |
+| 16 | 1940 | 1937 | 1936.6 | 60 | 63 | 63.4 | 2.7 | 3.4 |
 
 ### gDNA Contamination Sweep
 
 | gDNA abundance | Truth (t1) | hulkrna (t1) | salmon (t1) | Truth (t2) | hulkrna (t2) | salmon (t2) | gDNA truth | hulkrna gDNA | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1911 | 1948 | 1908.4 | 89 | 52 | 91.6 | 0 | 0 | 37.0 | 2.6 |
-| 20 | 837 | 1144 | 1056.5 | 50 | 27 | 74.5 | 1113 | 829 | 165.0 | 122.0 |
-| 50 | 453 | 798 | 750.2 | 30 | 71 | 95.8 | 1517 | 1131 | 193.0 | 181.5 |
+| 0 | 1911 | 1910 | 1908.4 | 89 | 90 | 91.6 | 0 | 0 | 0.6 | 2.6 |
+| 20 | 837 | 1086 | 1056.5 | 50 | 85 | 74.5 | 1113 | 829 | 142.0 | 122.0 |
+| 50 | 453 | 772 | 750.5 | 30 | 97 | 95.5 | 1517 | 1131 | 193.0 | 181.5 |
 
 ## Scenario 5: Overlapping antisense genes
 
@@ -93,25 +93,25 @@ Key differences in design:
 
 | Fold change | Truth (t1) | hulkrna (t1) | salmon (t1) | Truth (t2) | hulkrna (t2) | salmon (t2) | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 1031 | 1035 | 1031.5 | 969 | 965 | 968.5 | 4.0 | 0.5 |
-| 4 | 1627 | 1631 | 1628.8 | 373 | 369 | 371.2 | 4.0 | 1.8 |
-| 16 | 1906 | 1911 | 1908.3 | 94 | 89 | 91.7 | 5.0 | 2.3 |
+| 1 | 1031 | 1031 | 1031.5 | 969 | 969 | 968.5 | 0.1 | 0.5 |
+| 4 | 1627 | 1628 | 1628.8 | 373 | 372 | 371.2 | 0.9 | 1.8 |
+| 16 | 1906 | 1907 | 1908.3 | 94 | 93 | 91.7 | 1.1 | 2.3 |
 
 ### gDNA Contamination Sweep
 
 | gDNA abundance | Truth (t1) | hulkrna (t1) | salmon (t1) | Truth (t2) | hulkrna (t2) | salmon (t2) | gDNA truth | hulkrna gDNA | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1031 | 1035 | 1031.5 | 969 | 965 | 968.5 | 0 | 0 | 4.0 | 0.5 |
-| 20 | 475 | 593 | 587.0 | 451 | 595 | 567.0 | 1074 | 812 | 131.0 | 114.0 |
-| 50 | 259 | 415 | 392.5 | 254 | 431 | 402.5 | 1487 | 1154 | 166.5 | 141.0 |
+| 0 | 1031 | 1031 | 1031.5 | 969 | 969 | 968.5 | 0 | -0 | 0.1 | 0.5 |
+| 20 | 475 | 592 | 587.0 | 451 | 596 | 567.0 | 1074 | 812 | 131.0 | 114.0 |
+| 50 | 259 | 414 | 392.5 | 254 | 432 | 402.5 | 1487 | 1154 | 166.5 | 141.0 |
 
 ### Strand Specificity Sweep
 
 | Strand spec. | Truth (t1) | hulkrna (t1) | salmon (t1) | Truth (t2) | hulkrna (t2) | salmon (t2) | hulkrna MAE | salmon MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.5 | 1037 | 1093 | 1036.2 | 963 | 907 | 963.8 | 56.0 | 0.8 |
-| 0.9 | 1037 | 1045 | 1036.2 | 963 | 955 | 963.8 | 8.0 | 0.8 |
-| 1.0 | 1031 | 1035 | 1031.5 | 969 | 965 | 968.5 | 4.0 | 0.5 |
+| 0.5 | 1037 | 464 | 1036.2 | 963 | 414 | 963.8 | 561.0 | 0.8 |
+| 0.9 | 1037 | 1050 | 1036.2 | 963 | 946 | 963.8 | 14.7 | 0.8 |
+| 1.0 | 1031 | 1031 | 1031.5 | 969 | 969 | 968.5 | 0.1 | 0.5 |
 
 ## Overall Comparison
 
@@ -119,22 +119,22 @@ Key differences in design:
 
 | Metric | hulkrna | salmon |
 | --- | --- | --- |
-| Total abs error (sum) | 5083 | 2717 |
-| Mean abs error per scenario | 154.0 | 82.3 |
-| Scenarios won (lower error) | 6 | 17 |
-| Ties (within 0.5) | 10 | — |
+| Total abs error (sum) | 8422 | 2717 |
+| Mean abs error per scenario | 255.2 | 82.3 |
+| Scenarios won (lower error) | 13 | 11 |
+| Ties (within 0.5) | 9 | — |
 
 ### With gDNA contamination (10 scenarios)
 
 | Metric | hulkrna | salmon |
 | --- | --- | --- |
-| Mean total abs error | 253.8 | 261.5 |
+| Mean total abs error | 249.2 | 261.5 |
 
 ### Without gDNA contamination (23 scenarios)
 
 | Metric | hulkrna | salmon |
 | --- | --- | --- |
-| Mean total abs error | 110.7 | 4.4 |
+| Mean total abs error | 257.8 | 4.4 |
 
 ## Key Findings
 

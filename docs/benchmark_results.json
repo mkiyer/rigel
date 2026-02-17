@@ -15,7 +15,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.07
+      "elapsed_sec": 0.088
     },
     "salmon_result": {
       "tool": "salmon",
@@ -23,7 +23,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.244
+      "elapsed_sec": 0.295
     }
   },
   {
@@ -42,7 +42,7 @@
         "t1": 1098.0
       },
       "total_count": 1098.0,
-      "elapsed_sec": 0.056
+      "elapsed_sec": 0.07
     },
     "salmon_result": {
       "tool": "salmon",
@@ -50,7 +50,7 @@
         "t1": 1198.0
       },
       "total_count": 1198.0,
-      "elapsed_sec": 0.242
+      "elapsed_sec": 0.203
     }
   },
   {
@@ -69,7 +69,7 @@
         "t1": 738.0
       },
       "total_count": 738.0,
-      "elapsed_sec": 0.051
+      "elapsed_sec": 0.061
     },
     "salmon_result": {
       "tool": "salmon",
@@ -77,7 +77,7 @@
         "t1": 848.0
       },
       "total_count": 848.0,
-      "elapsed_sec": 0.246
+      "elapsed_sec": 0.226
     }
   },
   {
@@ -93,10 +93,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1023.0
+        "t1": 0.0
       },
-      "total_count": 1023.0,
-      "elapsed_sec": 0.07
+      "total_count": 0.0,
+      "elapsed_sec": 0.148
     },
     "salmon_result": {
       "tool": "salmon",
@@ -104,7 +104,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.223
+      "elapsed_sec": 0.2
     }
   },
   {
@@ -123,7 +123,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "elapsed_sec": 0.106
     },
     "salmon_result": {
       "tool": "salmon",
@@ -131,7 +131,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.217
+      "elapsed_sec": 0.22
     }
   },
   {
@@ -150,7 +150,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "elapsed_sec": 0.088
     },
     "salmon_result": {
       "tool": "salmon",
@@ -158,7 +158,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.241
+      "elapsed_sec": 0.186
     }
   },
   {
@@ -177,7 +177,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "elapsed_sec": 0.076
     },
     "salmon_result": {
       "tool": "salmon",
@@ -185,7 +185,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.25
+      "elapsed_sec": 0.213
     }
   },
   {
@@ -204,7 +204,7 @@
         "t1": 784.0
       },
       "total_count": 784.0,
-      "elapsed_sec": 0.051
+      "elapsed_sec": 0.058
     },
     "salmon_result": {
       "tool": "salmon",
@@ -212,7 +212,7 @@
         "t1": 804.0
       },
       "total_count": 804.0,
-      "elapsed_sec": 0.241
+      "elapsed_sec": 0.184
     }
   },
   {
@@ -231,7 +231,7 @@
         "t1": 532.0
       },
       "total_count": 532.0,
-      "elapsed_sec": 0.048
+      "elapsed_sec": 0.053
     },
     "salmon_result": {
       "tool": "salmon",
@@ -239,7 +239,7 @@
         "t1": 550.0
       },
       "total_count": 550.0,
-      "elapsed_sec": 0.266
+      "elapsed_sec": 0.205
     }
   },
   {
@@ -255,10 +255,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 2000.0
+        "t1": 890.0
       },
-      "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "total_count": 890.0,
+      "elapsed_sec": 0.074
     },
     "salmon_result": {
       "tool": "salmon",
@@ -266,7 +266,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.211
+      "elapsed_sec": 0.215
     }
   },
   {
@@ -282,10 +282,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 2000.0
+        "t1": 1883.0
       },
-      "total_count": 2000.0,
-      "elapsed_sec": 0.07
+      "total_count": 1883.0,
+      "elapsed_sec": 0.077
     },
     "salmon_result": {
       "tool": "salmon",
@@ -293,7 +293,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.242
+      "elapsed_sec": 0.175
     }
   },
   {
@@ -312,7 +312,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "elapsed_sec": 0.076
     },
     "salmon_result": {
       "tool": "salmon",
@@ -320,7 +320,7 @@
         "t1": 2000.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.242
+      "elapsed_sec": 0.205
     }
   },
   {
@@ -341,7 +341,7 @@
         "t2": 629.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "elapsed_sec": 0.08
     },
     "salmon_result": {
       "tool": "salmon",
@@ -350,7 +350,7 @@
         "t2": 629.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.248
+      "elapsed_sec": 0.198
     }
   },
   {
@@ -371,7 +371,7 @@
         "t2": 265.0
       },
       "total_count": 758.0,
-      "elapsed_sec": 0.051
+      "elapsed_sec": 0.06
     },
     "salmon_result": {
       "tool": "salmon",
@@ -380,7 +380,7 @@
         "t1": 498.0
       },
       "total_count": 765.0,
-      "elapsed_sec": 0.239
+      "elapsed_sec": 0.197
     }
   },
   {
@@ -401,7 +401,7 @@
         "t2": 0.0
       },
       "total_count": 303.0,
-      "elapsed_sec": 0.047
+      "elapsed_sec": 0.052
     },
     "salmon_result": {
       "tool": "salmon",
@@ -410,7 +410,7 @@
         "t2": 205.0
       },
       "total_count": 503.0,
-      "elapsed_sec": 0.246
+      "elapsed_sec": 0.177
     }
   },
   {
@@ -427,11 +427,11 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1370.0,
+        "t1": 614.0,
         "t2": 0.0
       },
-      "total_count": 1370.0,
-      "elapsed_sec": 0.069
+      "total_count": 614.0,
+      "elapsed_sec": 0.076
     },
     "salmon_result": {
       "tool": "salmon",
@@ -440,7 +440,7 @@
         "t2": 630.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.24
+      "elapsed_sec": 0.202
     }
   },
   {
@@ -457,11 +457,11 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1370.0,
+        "t1": 1292.0,
         "t2": 630.0
       },
-      "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "total_count": 1922.0,
+      "elapsed_sec": 0.087
     },
     "salmon_result": {
       "tool": "salmon",
@@ -470,7 +470,7 @@
         "t2": 630.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.264
+      "elapsed_sec": 0.204
     }
   },
   {
@@ -491,7 +491,7 @@
         "t2": 629.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.069
+      "elapsed_sec": 0.079
     },
     "salmon_result": {
       "tool": "salmon",
@@ -500,7 +500,7 @@
         "t2": 629.0
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.224
+      "elapsed_sec": 0.178
     }
   },
   {
@@ -517,20 +517,20 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1516.0,
-        "t2": 484.0
+        "t1": 1320.1672026702029,
+        "t2": 679.832797329806
       },
-      "total_count": 2000.0,
+      "total_count": 2000.0000000000089,
       "elapsed_sec": 0.081
     },
     "salmon_result": {
       "tool": "salmon",
       "per_transcript": {
-        "t1": 1319.765,
-        "t2": 680.235
+        "t1": 1319.936,
+        "t2": 680.064
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.274
+      "elapsed_sec": 0.205
     }
   },
   {
@@ -547,20 +547,20 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1900.0,
-        "t2": 100.0
+        "t1": 1808.0550583172644,
+        "t2": 191.94494168271945
       },
-      "total_count": 2000.0,
+      "total_count": 1999.9999999999839,
       "elapsed_sec": 0.079
     },
     "salmon_result": {
       "tool": "salmon",
       "per_transcript": {
-        "t1": 1807.923,
-        "t2": 192.077
+        "t1": 1807.956,
+        "t2": 192.044
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.222
+      "elapsed_sec": 0.198
     }
   },
   {
@@ -577,20 +577,20 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1961.0,
-        "t2": 39.0
+        "t1": 1937.2535329583745,
+        "t2": 62.74646704163143
       },
-      "total_count": 2000.0,
+      "total_count": 2000.000000000006,
       "elapsed_sec": 0.078
     },
     "salmon_result": {
       "tool": "salmon",
       "per_transcript": {
-        "t1": 1936.56,
-        "t2": 63.44
+        "t1": 1936.574,
+        "t2": 63.426
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.219
+      "elapsed_sec": 0.174
     }
   },
   {
@@ -607,20 +607,20 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1948.0,
-        "t2": 52.0
+        "t1": 1910.3971255455158,
+        "t2": 89.60287445446943
       },
-      "total_count": 2000.0,
-      "elapsed_sec": 0.078
+      "total_count": 1999.9999999999852,
+      "elapsed_sec": 0.08
     },
     "salmon_result": {
       "tool": "salmon",
       "per_transcript": {
-        "t1": 1908.404,
-        "t2": 91.596
+        "t1": 1908.408,
+        "t2": 91.592
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.281
+      "elapsed_sec": 0.191
     }
   },
   {
@@ -637,20 +637,20 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1144.0,
-        "t2": 27.0
+        "t1": 1085.6147637787017,
+        "t2": 85.38523622129676
       },
-      "total_count": 1171.0,
-      "elapsed_sec": 0.067
+      "total_count": 1170.9999999999984,
+      "elapsed_sec": 0.072
     },
     "salmon_result": {
       "tool": "salmon",
       "per_transcript": {
-        "t1": 1056.483,
-        "t2": 74.517
+        "t1": 1056.488,
+        "t2": 74.512
       },
       "total_count": 1131.0,
-      "elapsed_sec": 0.274
+      "elapsed_sec": 0.202
     }
   },
   {
@@ -667,20 +667,20 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 798.0,
-        "t2": 71.0
+        "t1": 771.7625904499465,
+        "t2": 97.23740955005064
       },
-      "total_count": 869.0,
-      "elapsed_sec": 0.065
+      "total_count": 868.9999999999972,
+      "elapsed_sec": 0.072
     },
     "salmon_result": {
       "tool": "salmon",
       "per_transcript": {
-        "t1": 750.232,
-        "t2": 95.768
+        "t1": 750.521,
+        "t2": 95.479
       },
       "total_count": 846.0,
-      "elapsed_sec": 0.218
+      "elapsed_sec": 0.179
     }
   },
   {
@@ -697,10 +697,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1035.0,
-        "t2": 965.0
+        "t1": 1031.0847789468187,
+        "t2": 968.9152210531835
       },
-      "total_count": 2000.0,
+      "total_count": 2000.0000000000023,
       "elapsed_sec": 0.083
     },
     "salmon_result": {
@@ -710,7 +710,7 @@
         "t2": 968.54
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.241
+      "elapsed_sec": 0.233
     }
   },
   {
@@ -727,10 +727,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1631.0,
-        "t2": 369.0
+        "t1": 1627.9400083739401,
+        "t2": 372.05999162605923
       },
-      "total_count": 2000.0,
+      "total_count": 1999.9999999999993,
       "elapsed_sec": 0.083
     },
     "salmon_result": {
@@ -740,7 +740,7 @@
         "t2": 371.181
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.217
+      "elapsed_sec": 0.181
     }
   },
   {
@@ -757,11 +757,11 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1911.0,
-        "t2": 89.0
+        "t1": 1907.1224895607156,
+        "t2": 92.87751043928361
       },
-      "total_count": 2000.0,
-      "elapsed_sec": 0.082
+      "total_count": 1999.9999999999993,
+      "elapsed_sec": 0.083
     },
     "salmon_result": {
       "tool": "salmon",
@@ -770,7 +770,7 @@
         "t2": 91.704
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.196
+      "elapsed_sec": 0.199
     }
   },
   {
@@ -787,10 +787,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1035.0,
-        "t2": 965.0
+        "t1": 1031.0847789468187,
+        "t2": 968.9152210531835
       },
-      "total_count": 2000.0,
+      "total_count": 2000.0000000000023,
       "elapsed_sec": 0.084
     },
     "salmon_result": {
@@ -800,7 +800,7 @@
         "t2": 968.54
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.222
+      "elapsed_sec": 0.18
     }
   },
   {
@@ -817,11 +817,11 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 593.0,
-        "t2": 595.0
+        "t1": 592.0148659427975,
+        "t2": 595.9851340571977
       },
-      "total_count": 1188.0,
-      "elapsed_sec": 0.065
+      "total_count": 1187.9999999999952,
+      "elapsed_sec": 0.07
     },
     "salmon_result": {
       "tool": "salmon",
@@ -830,7 +830,7 @@
         "t1": 587.029
       },
       "total_count": 1154.0,
-      "elapsed_sec": 0.249
+      "elapsed_sec": 0.153
     }
   },
   {
@@ -847,11 +847,11 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 415.0,
-        "t2": 431.0
+        "t1": 413.89122648620923,
+        "t2": 432.1087735137913
       },
-      "total_count": 846.0,
-      "elapsed_sec": 0.057
+      "total_count": 846.0000000000005,
+      "elapsed_sec": 0.062
     },
     "salmon_result": {
       "tool": "salmon",
@@ -860,7 +860,7 @@
         "t1": 392.485
       },
       "total_count": 795.0,
-      "elapsed_sec": 0.308
+      "elapsed_sec": 0.177
     }
   },
   {
@@ -877,11 +877,11 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1093.0,
-        "t2": 907.0
+        "t1": 464.0,
+        "t2": 414.0
       },
-      "total_count": 2000.0,
-      "elapsed_sec": 0.084
+      "total_count": 878.0,
+      "elapsed_sec": 0.081
     },
     "salmon_result": {
       "tool": "salmon",
@@ -890,7 +890,7 @@
         "t2": 963.825
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.248
+      "elapsed_sec": 0.171
     }
   },
   {
@@ -907,10 +907,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1045.0,
-        "t2": 955.0
+        "t1": 1049.7090302943102,
+        "t2": 946.2909697056939
       },
-      "total_count": 2000.0,
+      "total_count": 1996.000000000004,
       "elapsed_sec": 0.083
     },
     "salmon_result": {
@@ -920,7 +920,7 @@
         "t2": 963.825
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.242
+      "elapsed_sec": 0.208
     }
   },
   {
@@ -937,10 +937,10 @@
     "hulkrna_result": {
       "tool": "hulkrna",
       "per_transcript": {
-        "t1": 1035.0,
-        "t2": 965.0
+        "t1": 1031.0847789468187,
+        "t2": 968.9152210531835
       },
-      "total_count": 2000.0,
+      "total_count": 2000.0000000000023,
       "elapsed_sec": 0.083
     },
     "salmon_result": {
@@ -950,7 +950,7 @@
         "t2": 968.54
       },
       "total_count": 2000.0,
-      "elapsed_sec": 0.192
+      "elapsed_sec": 0.168
     }
   }
 ]

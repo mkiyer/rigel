@@ -61,6 +61,7 @@ from .index import HulkIndex
 from .insert_model import InsertSizeModels
 from .resolution import (
     fragment_insert_size,
+    pair_multimapper_reads,
     resolve_fragment,
 )
 from .stats import PipelineStats
@@ -108,6 +109,7 @@ def scan_and_buffer(
     max_memory_bytes: int = 2 * 1024**3,
     spill_dir: Path | None = None,
     sj_strand_tag: str | tuple[str, ...] = "XS",
+    overlap_min_frac: float = 0.99,
 ) -> tuple[PipelineStats, StrandModels, InsertSizeModels, FragmentBuffer]:
     """Single-pass BAM scan: resolve fragments, train models, buffer results.
 
@@ -190,24 +192,50 @@ def scan_and_buffer(
     logger.info("[START] Scanning BAM → resolve + train models + buffer")
 
     frag_id = 0
-    for nh, hits in parse_bam_file(
+    for nh, hits, sec_r1, sec_r2 in parse_bam_file(
         bam_iter,
         bam_stats,
         skip_duplicates=skip_duplicates,
         include_multimap=include_multimap,
     ):
-        num_hits = nh
+        # Pair secondary R1/R2 locations using transcript-aware
+        # resolve-then-pair.  Each secondary is resolved individually
+        # and pairs are formed by transcript-set intersection, with
+        # same-reference proximity as fallback.
+        secondary_pairs: list[tuple[list, list]] = []
+        if sec_r1 or sec_r2:
+            secondary_pairs = pair_multimapper_reads(
+                sec_r1, sec_r2, index,
+                sj_strand_tag=sj_strand_tag,
+                overlap_min_frac=overlap_min_frac,
+            )
+
+        all_hits = list(hits) + secondary_pairs
+
+        # Use the actual number of alignment hits rather than relying
+        # solely on the NH tag.  minimap2 often does not set NH when
+        # reporting secondary alignments, so the BAM may have NH=1
+        # even when multiple alignment locations exist.  Using
+        # max(nh, len(all_hits)) ensures that secondary alignments are
+        # correctly classified as multimappers regardless of tag
+        # accuracy.  This prevents each secondary alignment from
+        # being counted as an independent unique fragment, which
+        # would inflate total counts (e.g. 50 k → 76 k for the HBB
+        # paralog cluster).
+        num_hits = max(nh, len(all_hits))
         is_unique_mapper = num_hits == 1
         n_buffered_mm = 0
 
-        for r1_reads, r2_reads in hits:
+        for r1_reads, r2_reads in all_hits:
             frag = Fragment.from_reads(r1_reads, r2_reads, sj_strand_tag=sj_strand_tag)
             stats.n_fragments += 1
 
             if not frag.exons:
                 continue
 
-            result = resolve_fragment(frag, index)
+            result = resolve_fragment(
+                frag, index, overlap_min_frac=overlap_min_frac,
+            )
 
             if result is None:
                 # --- Intergenic: deterministic gDNA assignment ---
@@ -494,6 +522,7 @@ def _scan_and_build_em_data(
     stats: PipelineStats,
     log_every: int,
     gdna_splice_penalties: dict | None = None,
+    enable_gdna_shadows: bool = True,
 ) -> EMData:
     """Single buffer pass: assign uniques + pre-compute EM data with per-gene gDNA.
 
@@ -501,8 +530,9 @@ def _scan_and_build_em_data(
 
     - **SPLICED_ANNOT + FRAG_UNIQUE**: deterministic assignment to the
       sole transcript (annotated SJs prove RNA origin).
-    - **All other non-chimeric fragments**: enter the EM with their
-      transcript candidates *plus* per-gene gDNA shadow candidate(s).
+        - **All other non-chimeric fragments**: enter the EM with their
+            transcript candidates, optionally plus per-gene gDNA shadow
+            candidate(s) when ``enable_gdna_shadows`` is true.
       Each fragment's shadow candidate uses the gene index of the
       highest-scoring transcript candidate.
 
@@ -656,7 +686,7 @@ def _scan_and_build_em_data(
                 _best_t = t_indices_list[j]
                 _best_ct = count_cols_list[j]
         # Add per-gene gDNA shadow candidates unless all hits are SPLICED_ANNOT
-        if not any_spliced_annot and mm_pending:
+        if enable_gdna_shadows and not any_spliced_annot and mm_pending:
             _add_gdna_candidates(mm_pending[0], unit_start_pre)
         offsets.append(len(t_indices_list))
         locus_t_list.append(_best_t)
@@ -720,7 +750,7 @@ def _scan_and_build_em_data(
 
                 # Add per-gene gDNA shadows for non-SPLICED_ANNOT fragments
                 # (one shadow per unique gene in the candidate set)
-                if not is_spliced_annot:
+                if enable_gdna_shadows and not is_spliced_annot:
                     _add_gdna_candidates(bf, unit_start)
 
                 if len(t_indices_list) > offsets[-1]:
@@ -787,7 +817,10 @@ def _scan_and_build_em_data(
     # Initial model parameters for EM re-estimation
     rna_model = strand_models._best_rna_model()
     p_rna_sense = rna_model.p_r1_sense
-    p_gdna_sense = strand_models.intergenic.p_r1_sense
+    # gDNA is modeled as unstranded by definition.  Using intergenic
+    # strand estimates here can leak RNA/library bias into the gDNA
+    # component and inflate false gDNA assignments in clean RNA data.
+    p_gdna_sense = 0.5
 
     # Initial insert log-probability arrays (Laplace-smoothed).
     # RNA init: SPLICED_ANNOT model (purest RNA), fall back to global.
@@ -965,7 +998,7 @@ def count_from_buffer(
     stats: PipelineStats,
     *,
     seed: int | None = None,
-    em_pseudocount: float = 0.01,
+    em_pseudocount: float = 0.5,
     em_iterations: int = 1000,
     log_every: int = 1_000_000,
     gdna_splice_penalties: dict | None = None,
@@ -974,14 +1007,14 @@ def count_from_buffer(
 ) -> ReadCounter:
     """Assign counts from buffered fragments via VBEM with per-gene gDNA.
 
-    Every fragment contributes exactly **one discrete count** to a
-    single component (transcript or per-gene gDNA shadow).
+    Unique fragments contribute discrete counts, while ambiguous RNA
+    fragments contribute posterior-expected counts.
 
     1. **SPLICED_ANNOT + unique** fragments are assigned deterministically
        to their transcript (annotated SJs prove RNA origin).
-    2. **All other** fragments enter the EM with transcript candidates
-       *plus* a per-gene gDNA shadow, then are assigned stochastically
-       using the converged posteriors.
+     2. **All other** fragments enter the EM with transcript candidates
+         *plus* a per-gene gDNA shadow, then are assigned by posterior
+         expected counts using the converged posteriors.
     3. **Shadow initialization** uses empirical Bayes shrinkage
        (``compute_shadow_init``) from unique antisense counts and the
        global gDNA rate ("Iceberg" estimator: intergenic + 2× antisense).
@@ -1056,21 +1089,32 @@ def count_from_buffer(
         f"(per-gene gDNA shadows, {index.num_genes} genes)"
     )
 
+    enable_gdna_shadows = gdna_threshold > 0.0
+    if not enable_gdna_shadows:
+        logger.info(
+            "[MODE] gDNA EM competition disabled (gdna_threshold <= 0); "
+            "counting ambiguous fragments as RNA-only"
+        )
+
     # Single buffer pass: assign uniques + build EM data
     em_data = _scan_and_build_em_data(
         buffer, index, strand_models, insert_models,
         counter, stats, log_every,
         gdna_splice_penalties=gdna_splice_penalties,
+        enable_gdna_shadows=enable_gdna_shadows,
     )
 
     # Compute per-gene shadow initialization via empirical Bayes
-    shadow_init = compute_shadow_init(
-        counter.unique_counts,
-        index.t_to_g_arr,
-        index.num_genes,
-        stats.n_intergenic,
-        em_locus_t_indices=em_data.locus_t_indices,
-    )
+    if enable_gdna_shadows:
+        shadow_init = compute_shadow_init(
+            counter.unique_counts,
+            index.t_to_g_arr,
+            index.num_genes,
+            stats.n_intergenic,
+            em_locus_t_indices=em_data.locus_t_indices,
+        )
+    else:
+        shadow_init = np.zeros(index.num_genes, dtype=np.float64)
     counter.shadow_init = shadow_init
 
     logger.info(
@@ -1080,7 +1124,7 @@ def count_from_buffer(
         f"shadow_init sum={shadow_init.sum():.1f}"
     )
 
-    # EM iteration + posterior-sampling assignment
+    # EM iteration + posterior expected-count assignment
     if em_data.n_units > 0:
         logger.info(
             f"[START] EM: up to {em_iterations} iterations over "
@@ -1088,7 +1132,7 @@ def count_from_buffer(
         )
         counter.run_em(em_data, em_iterations=em_iterations)
 
-        logger.info("[START] Posterior sampling assignment of ambiguous fragments")
+        logger.info("[START] Posterior expected-count assignment of ambiguous fragments")
         counter.assign_ambiguous(
             em_data,
             gdna_threshold=gdna_threshold,
@@ -1132,11 +1176,12 @@ def run_pipeline(
     spill_dir: Path | str | None = None,
     sj_strand_tag: str | tuple[str, ...] = "auto",
     seed: int | None = None,
-    em_pseudocount: float = 0.01,
+    em_pseudocount: float = 0.5,
     em_iterations: int = 1000,
     gdna_splice_penalty_unannot: float = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     gdna_threshold: float = 0.5,
     confidence_threshold: float = 0.95,
+    overlap_min_frac: float = 0.99,
 ) -> PipelineResult:
     """Run the complete counting pipeline with VBEM and gDNA modeling.
 
@@ -1229,6 +1274,7 @@ def run_pipeline(
                 max_memory_bytes=max_memory_bytes,
                 spill_dir=spill_dir,
                 sj_strand_tag=sj_strand_tag,
+                overlap_min_frac=overlap_min_frac,
             )
         )
     finally:

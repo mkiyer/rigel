@@ -273,7 +273,7 @@ class Scenario:
 
         # 4. Align with minimap2 → SAM → name-sorted BAM
         logger.info(f"[{self.name}] Aligning with minimap2...")
-        bam_path = self._align(fasta_path, r1_path, r2_path)
+        bam_path = self._align(fasta_path, r1_path, r2_path, gtf_path=gtf_path)
 
         # 5. Build HulkIndex
         logger.info(f"[{self.name}] Building HulkIndex...")
@@ -296,18 +296,26 @@ class Scenario:
             gdna_config=effective_gdna,
         )
 
-    def _align(self, fasta_path: Path, r1_path: Path, r2_path: Path) -> Path:
+    def _align(self, fasta_path: Path, r1_path: Path, r2_path: Path,
+               gtf_path: Path | None = None) -> Path:
         """Align reads with minimap2 and produce a name-sorted BAM.
 
         Pipeline::
 
-            minimap2 -ax splice:sr --secondary=yes ref.fa r1.fq r2.fq \\
+            minimap2 -ax splice:sr --secondary=yes [-j ann.bed] \\
+              ref.fa r1.fq r2.fq \\
               | samtools sort -n -o output.bam -
 
         The ``splice:sr`` preset handles short RNA-seq reads with
         splice-aware alignment.  ``--secondary=yes`` retains
         multimappers so that NH tags are populated.
+
+        When *gtf_path* is provided, a BED12 annotation file is
+        generated and passed via ``-j`` so that minimap2 can use
+        known splice junctions to improve alignment accuracy.
         """
+        from ..index import write_bed12, read_transcripts
+
         bam_path = self.work_dir / f"{self.name}.bam"
 
         # minimap2 → samtools sort -n (name-sorted)
@@ -315,10 +323,21 @@ class Scenario:
             "minimap2",
             "-ax", "splice:sr",
             "--secondary=yes",
+        ]
+
+        # Add BED12 annotation if GTF is available
+        if gtf_path is not None:
+            bed_path = self.work_dir / f"{self.name}_annotation.bed"
+            transcripts = read_transcripts(gtf_path)
+            write_bed12(transcripts, bed_path)
+            minimap2_cmd.extend(["-j", str(bed_path)])
+            logger.info(f"Using BED12 annotation for minimap2: {bed_path}")
+
+        minimap2_cmd.extend([
             str(fasta_path),
             str(r1_path),
             str(r2_path),
-        ]
+        ])
 
         sort_cmd = [
             "samtools", "sort",

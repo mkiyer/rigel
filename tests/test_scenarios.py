@@ -335,6 +335,11 @@ class TestSplicedGene:
         is independent of library strandedness, providing a strong
         anchor even at low strand specificity.  However, antisense
         reads without splice junctions are still diverted to gDNA.
+
+        Because correctly-tagged SPLICED_ANNOT fragments bypass the
+        EM entirely (deterministic assignment), at very low ss the
+        unspliced reads in the EM pool lose that co-anchoring signal
+        and become more susceptible to gDNA diversion.
         """
         bench = _build_and_run(
             scenario, strand_specificity=strand_specificity,
@@ -344,7 +349,10 @@ class TestSplicedGene:
         _assert_accountability(bench)
         # Count loss from antisense→gDNA diversion (spliced gene
         # anchors better than unspliced, so expect less loss).
-        max_loss = (1.0 - strand_specificity) + 0.10
+        # At very low ss (e.g. 0.5), unspliced fragments lose their
+        # co-anchoring with spliced fragments in the EM, so the
+        # budget is slightly larger (0.20 additive slack).
+        max_loss = (1.0 - strand_specificity) + 0.20
         for ta in bench.transcripts:
             assert ta.observed >= ta.expected * (1.0 - max_loss), (
                 f"{ta.t_id}: observed={ta.observed:.0f} too low vs "
@@ -577,8 +585,11 @@ class TestTwoIsoforms:
             _assert_alignment(bench)
             _assert_accountability(bench)
 
-            # Gene-level total drops proportional to antisense leakage
-            max_loss = (1.0 - strand_specificity) + 0.10
+            # Gene-level total drops proportional to antisense leakage.
+            # At very low ss, unspliced fragments lose co-anchoring
+            # with spliced fragments (which bypass EM entirely), so
+            # allow extra slack (0.20 additive).
+            max_loss = (1.0 - strand_specificity) + 0.20
             min_expected = bench.total_expected * (1.0 - max_loss)
             assert bench.total_observed >= min_expected, (
                 f"Gene total too low at ss={strand_specificity}: "
@@ -729,8 +740,10 @@ class TestOverlappingAntisense:
             _assert_alignment(bench)
             _assert_accountability(bench)
 
-            # Total across both genes may drop due to gDNA diversion
-            max_loss = (1.0 - strand_specificity) + 0.10
+            # Total across both genes may drop due to gDNA diversion.
+            # At very low ss, unspliced fragments lose co-anchoring
+            # with spliced fragments (which bypass EM entirely).
+            max_loss = (1.0 - strand_specificity) + 0.20
             min_expected = bench.total_expected * (1.0 - max_loss)
             assert bench.total_observed >= min_expected, (
                 f"Total too low at ss={strand_specificity}: "

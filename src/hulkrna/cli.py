@@ -141,6 +141,7 @@ def count_command(args: argparse.Namespace) -> int:
         gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
         gdna_threshold=args.gdna_threshold,
         confidence_threshold=args.confidence_threshold,
+        overlap_min_frac=args.overlap_min_frac,
     )
 
     # Log stats
@@ -312,7 +313,8 @@ def build_parser() -> argparse.ArgumentParser:
     cnt.add_argument(
         "--include-multimap", dest="include_multimap",
         action="store_true", default=False,
-        help="Include multimapping reads (NH > 1) in output (default: discard)",
+        help="Include multimapping reads in output (default: discard). "
+             "Detected via NH tag (STAR) or secondary BAM flag (minimap2).",
     )
     cnt.add_argument(
         "--sj-strand-tag", dest="sj_strand_tag",
@@ -326,8 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducibility (default: use current timestamp)",
     )
     cnt.add_argument(
-        "--em-pseudocount", dest="em_pseudocount", type=float, default=0.01,
-        help="Dirichlet prior for VBEM (default: 0.01). Small values "
+        "--em-pseudocount", dest="em_pseudocount", type=float, default=0.5,
+        help="Dirichlet prior for VBEM (default: 0.5). Small values "
              "induce sparsity; values >= 1.0 approach standard EM.",
     )
     cnt.add_argument(
@@ -360,6 +362,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum RNA-normalized posterior for an EM assignment "
              "to be counted as high-confidence (default: 0.95). "
              "Affects the count_high_conf column.",
+    )
+    cnt.add_argument(
+        "--overlap-min-frac", dest="overlap_min_frac",
+        type=float, default=0.99,
+        help="Min fraction of best exon overlap to retain a candidate "
+             "transcript during resolution (default: 0.99 = within 1%% of best). "
+             "Lower values (e.g. 0.9) keep candidates within 10%% of best.",
     )
     cnt.add_argument(
         "--no-tsv", dest="no_tsv", action="store_true", default=False,

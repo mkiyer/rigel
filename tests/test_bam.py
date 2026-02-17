@@ -233,8 +233,10 @@ class TestGroupRecordsByHit:
     def test_unique_mapper_one_hit(self):
         """NH=1 primary pair → one hit with one R1 and one R2."""
         r1, r2 = _make_pair(nh=1)
-        hits = _group_records_by_hit([r1, r2])
+        hits, sec_r1, sec_r2 = _group_records_by_hit([r1, r2])
         assert len(hits) == 1
+        assert sec_r1 == []
+        assert sec_r2 == []
         r1_reads, r2_reads = hits[0]
         assert r1 in r1_reads
         assert r2 in r2_reads
@@ -250,20 +252,19 @@ class TestGroupRecordsByHit:
         r2_primary = _mock_bam_read(
             is_read1=False, is_read2=True, ref_start=300,
         )
-        hits = _group_records_by_hit([r1_primary, r1_supp, r2_primary])
+        hits, sec_r1, sec_r2 = _group_records_by_hit([r1_primary, r1_supp, r2_primary])
         assert len(hits) == 1
-        r1_reads, r2_reads = hits[0]
-        assert len(r1_reads) == 2  # primary + supplementary
-        assert r1_primary in r1_reads
-        assert r1_supp in r1_reads
-        assert len(r2_reads) == 1
+        assert sec_r1 == []
+        assert sec_r2 == []
 
     def test_hi_tag_grouping(self):
         """Records with HI tags are grouped by HI value."""
         r1a, r2a = _make_pair(r1_start=100, r2_start=300, hi=1)
         r1b, r2b = _make_pair(r1_start=500, r2_start=700, hi=2)
-        hits = _group_records_by_hit([r1a, r2a, r1b, r2b])
+        hits, sec_r1, sec_r2 = _group_records_by_hit([r1a, r2a, r1b, r2b])
         assert len(hits) == 2
+        assert sec_r1 == []
+        assert sec_r2 == []
         # Sorted by HI
         assert r1a in hits[0][0]
         assert r1b in hits[1][0]
@@ -279,39 +280,80 @@ class TestGroupRecordsByHit:
         r2 = _mock_bam_read(
             is_read1=False, is_read2=True, ref_start=300, hi=1,
         )
-        hits = _group_records_by_hit([r1_primary, r1_supp, r2])
+        hits, sec_r1, sec_r2 = _group_records_by_hit([r1_primary, r1_supp, r2])
         assert len(hits) == 1
+        assert sec_r1 == []
+        assert sec_r2 == []
         r1_reads, r2_reads = hits[0]
         assert len(r1_reads) == 2
         assert len(r2_reads) == 1
 
-    def test_fallback_secondary_becomes_extra_hit(self):
-        """Without HI tags, secondary records form separate hits."""
+    def test_fallback_secondary_returned_separately(self):
+        """Without HI tags, secondary records are returned in sec lists
+        for transcript-aware pairing by the pipeline."""
         r1_primary = _mock_bam_read(
-            is_read1=True, ref_start=100,
+            is_read1=True, ref_start=100, ref_id=0,
             next_ref_id=0, next_ref_start=300,
         )
         r2_primary = _mock_bam_read(
-            is_read1=False, is_read2=True, ref_start=300,
+            is_read1=False, is_read2=True, ref_start=300, ref_id=0,
+            next_ref_id=0, next_ref_start=100, is_reverse=True,
+        )
+        # Secondaries on a DIFFERENT reference (typical minimap2 multimap)
+        r1_sec = _mock_bam_read(
+            is_read1=True, ref_start=5000, ref_id=1, is_secondary=True,
+            next_ref_id=0, next_ref_start=300,  # points to primary mate
+        )
+        r2_sec = _mock_bam_read(
+            is_read1=False, is_read2=True, ref_start=5300, ref_id=1,
+            is_secondary=True, is_reverse=True,
+            next_ref_id=0, next_ref_start=100,  # points to primary mate
+        )
+        hits, sec_r1, sec_r2 = _group_records_by_hit(
+            [r1_primary, r2_primary, r1_sec, r2_sec],
+        )
+        # Only primary pair in hits
+        assert len(hits) == 1
+        assert r1_primary in hits[0][0]
+        assert r2_primary in hits[0][1]
+        # Secondaries in separate lists for resolve-then-pair
+        assert len(sec_r1) == 1
+        assert r1_sec in sec_r1[0]
+        assert len(sec_r2) == 1
+        assert r2_sec in sec_r2[0]
+
+    def test_fallback_same_ref_secondaries_separated(self):
+        """Without HI tags, secondaries on the same reference as primaries
+        are returned in sec lists (not cross-producted)."""
+        r1_primary = _mock_bam_read(
+            is_read1=True, ref_start=100, ref_id=0,
+            next_ref_id=0, next_ref_start=300,
+        )
+        r2_primary = _mock_bam_read(
+            is_read1=False, is_read2=True, ref_start=300, ref_id=0,
             next_ref_id=0, next_ref_start=100, is_reverse=True,
         )
         r1_sec = _mock_bam_read(
-            is_read1=True, ref_start=5000, is_secondary=True,
-            next_ref_id=0, next_ref_start=5300,
+            is_read1=True, ref_start=5000, ref_id=0, is_secondary=True,
+            next_ref_id=0, next_ref_start=300,
         )
         r2_sec = _mock_bam_read(
-            is_read1=False, is_read2=True, ref_start=5300,
+            is_read1=False, is_read2=True, ref_start=5300, ref_id=0,
             is_secondary=True, is_reverse=True,
-            next_ref_id=0, next_ref_start=5000,
+            next_ref_id=0, next_ref_start=100,
         )
-        hits = _group_records_by_hit([r1_primary, r2_primary, r1_sec, r2_sec])
-        assert len(hits) == 2
-        # Hit 0: primary
+        hits, sec_r1, sec_r2 = _group_records_by_hit(
+            [r1_primary, r2_primary, r1_sec, r2_sec],
+        )
+        # Only primary pair in hits
+        assert len(hits) == 1
         assert r1_primary in hits[0][0]
         assert r2_primary in hits[0][1]
-        # Hit 1: secondary pair
-        assert r1_sec in hits[1][0]
-        assert r2_sec in hits[1][1]
+        # Secondaries returned separately
+        assert len(sec_r1) == 1
+        assert r1_sec in sec_r1[0]
+        assert len(sec_r2) == 1
+        assert r2_sec in sec_r2[0]
 
     def test_fallback_supplementary_grouped_with_primary(self):
         """Without HI, supplementary goes with primary (hit 0)."""
@@ -322,14 +364,18 @@ class TestGroupRecordsByHit:
         r2_primary = _mock_bam_read(
             is_read1=False, is_read2=True, ref_start=300,
         )
-        hits = _group_records_by_hit([r1_primary, r1_supp, r2_primary])
+        hits, sec_r1, sec_r2 = _group_records_by_hit([r1_primary, r1_supp, r2_primary])
         assert len(hits) == 1
+        assert sec_r1 == []
+        assert sec_r2 == []
         assert len(hits[0][0]) == 2  # primary + supplementary R1
         assert r1_supp in hits[0][0]
 
     def test_empty_input(self):
-        hits = _group_records_by_hit([])
+        hits, sec_r1, sec_r2 = _group_records_by_hit([])
         assert hits == []
+        assert sec_r1 == []
+        assert sec_r2 == []
 
 
 # =====================================================================
@@ -351,7 +397,7 @@ class TestParseBamFile:
         r1, r2 = _make_pair("frag1", nh=1)
         results, stats = self._collect([r1, r2])
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, sec_r1, sec_r2 = results[0]
         assert nh == 1
         assert len(hits) == 1
         r1_reads, r2_reads = hits[0]
@@ -381,7 +427,7 @@ class TestParseBamFile:
         r1, r2 = _make_pair("frag1", nh=3)
         results, stats = self._collect([r1, r2], include_multimap=True)
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert nh == 3
 
     def test_multimapper_with_hi_tags(self):
@@ -393,12 +439,13 @@ class TestParseBamFile:
             [r1a, r2a, r1b, r2b], include_multimap=True,
         )
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert nh == 2
         assert len(hits) == 2
 
     def test_multimapper_without_hi_tags_fallback(self):
-        """Multimapper without HI → primary hit + secondary hits via pairing."""
+        """Multimapper without HI → primary hit in hits, secondaries in
+        sec_r1/sec_r2 for transcript-aware pairing."""
         r1_pri = _mock_bam_read(
             "frag1", is_read1=True, ref_start=100, ref_id=0,
             next_ref_id=0, next_ref_start=300, nh=2,
@@ -408,22 +455,31 @@ class TestParseBamFile:
             ref_start=300, ref_id=0, is_reverse=True,
             next_ref_id=0, next_ref_start=100, nh=2,
         )
+        # Secondary pair on a DIFFERENT reference (typical minimap2 multimap)
         r1_sec = _mock_bam_read(
-            "frag1", is_read1=True, ref_start=5000, ref_id=0,
-            next_ref_id=0, next_ref_start=5300, is_secondary=True, nh=2,
+            "frag1", is_read1=True, ref_start=5000, ref_id=1,
+            next_ref_id=0, next_ref_start=300, is_secondary=True, nh=2,
         )
         r2_sec = _mock_bam_read(
             "frag1", is_read1=False, is_read2=True,
-            ref_start=5300, ref_id=0, is_reverse=True,
-            next_ref_id=0, next_ref_start=5000, is_secondary=True, nh=2,
+            ref_start=5300, ref_id=1, is_reverse=True,
+            next_ref_id=0, next_ref_start=100, is_secondary=True, nh=2,
         )
         results, stats = self._collect(
             [r1_pri, r2_pri, r1_sec, r2_sec], include_multimap=True,
         )
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, sec_r1, sec_r2 = results[0]
         assert nh == 2
-        assert len(hits) == 2  # primary hit + secondary hit
+        # Primary hit only in hits
+        assert len(hits) == 1
+        assert r1_pri in hits[0][0]
+        assert r2_pri in hits[0][1]
+        # Secondaries in sec lists for resolve-then-pair
+        assert len(sec_r1) == 1
+        assert r1_sec in sec_r1[0]
+        assert len(sec_r2) == 1
+        assert r2_sec in sec_r2[0]
 
     def test_supplementary_included_in_hit(self):
         """Supplementary records are included with primary in same hit."""
@@ -440,7 +496,7 @@ class TestParseBamFile:
         )
         results, stats = self._collect([r1_pri, r1_supp, r2_pri])
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert len(hits) == 1
         r1_reads, r2_reads = hits[0]
         assert len(r1_reads) == 2  # primary + supplementary
@@ -579,7 +635,7 @@ class TestParseBamFile:
             "frag1", is_read1=False, is_read2=True, nh=5,
         )
         results, _ = self._collect([r1, r2], include_multimap=True)
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert nh == 5
 
     def test_nh_defaults_to_1(self):
@@ -591,7 +647,7 @@ class TestParseBamFile:
             "frag1", is_read1=False, is_read2=True,
         )
         results, stats = self._collect([r1, r2])
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert nh == 1
         assert stats['unique'] == 1
 
@@ -624,7 +680,7 @@ class TestComplexReadGroups:
         results, stats = self._collect([r1_pri, r1_supp, r2_pri])
 
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert nh == 1
         assert len(hits) == 1
         r1_reads, r2_reads = hits[0]
@@ -663,7 +719,7 @@ class TestComplexReadGroups:
             [r1a, r2a, r1a_supp, r1b, r2b], include_multimap=True,
         )
         assert len(results) == 1
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert nh == 2
         assert len(hits) == 2
 
@@ -706,9 +762,9 @@ class TestComplexReadGroups:
         results, stats = self._collect(
             [r1_pri, r2_pri, r1_sec], include_multimap=True,
         )
-        nh, hits = results[0]
+        nh, hits, *_ = results[0]
         assert len(hits) == 2
-        # Hit 1: secondary R1 only
-        sec_r1, sec_r2 = hits[1]
-        assert len(sec_r1) == 1
-        assert len(sec_r2) == 0
+        # Hit 1: secondary R1 only (mate_is_unmapped)
+        sec_hit_r1, sec_hit_r2 = hits[1]
+        assert len(sec_hit_r1) == 1
+        assert len(sec_hit_r2) == 0

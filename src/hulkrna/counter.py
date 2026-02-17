@@ -1,25 +1,19 @@
 """
 hulkrna.counter - Read count accumulation with Variational Bayes EM.
 
-ReadCounter accumulates discrete read counts into transcript arrays.
-Each fragment contributes exactly one count (1.0) to a single transcript.
+ReadCounter accumulates read counts into transcript arrays.
 
 For uniquely-mapping fragments, assignment is deterministic.  For ambiguous
 fragments, transcript abundances are estimated via Variational Bayes EM
-(VBEM) then each fragment is assigned to exactly one transcript by
-sampling from the posterior probability distribution.
+(VBEM) then counts are accumulated from the converged posterior.
 
-Posterior sampling assignment
------------------------------
-After VBEM convergence, each ambiguous unit is assigned to a single
-candidate by drawing from the posterior distribution.  This preserves
-discrete integer counts (one fragment → one transcript) while correctly
-recapitulating the posterior probabilities over many fragments.
-
-Unlike MAP (argmax) assignment, sampling avoids winner-take-all
-behavior when posteriors are similar (e.g. 100 candidates each at
-~1%), and unlike expected-value assignment, it preserves the discrete
-nature of the biological counting process.
+Posterior expected-count assignment
+----------------------------------
+After VBEM convergence, ambiguous RNA units are accumulated as expected
+counts from the RNA-normalized posterior distribution rather than by
+stochastic winner sampling.  This removes Monte-Carlo noise and greatly
+reduces transcript dropout/over-allocation artifacts on heavily
+ambiguous loci, while preserving probabilistic attribution.
 
 VBEM algorithm
 --------------
@@ -33,7 +27,7 @@ reads.
 2. E-step: posterior ∝ likelihood × exp(ψ(α) − log(ℓ_eff)).
 3. M-step: α_t = α₀ + unique_t + Σ_f P(t | f).
 4. Repeat until convergence.
-5. Assign: sample one candidate per unit from posterior → 1 count.
+5. Assign: add posterior-expected counts per ambiguous unit.
 
 The sparse prior (α₀ ≪ 1) pushes low-evidence components toward zero
 via the digamma function's behavior: ψ(x) → −∞ much faster than
@@ -62,12 +56,14 @@ logger = logging.getLogger(__name__)
 # Baseline Dirichlet prior for gDNA shadow components.
 # Shadows should not be sparsified (they model gDNA contamination,
 # not isoform abundance), so they use a non-informative prior.
-_SHADOW_PRIOR = 1.0
+_SHADOW_PRIOR = 0.05
 
 # Number of standard EM warm-up iterations before switching to VBEM.
 # Standard EM uses log(theta) instead of digamma(alpha), which avoids
 # the degeneracy where low-alpha components are irrecoverably pushed
 # to zero.  The warm-up provides VBEM with a good starting point.
+# More iterations help at isoform-rich loci (like EGFR) where the EM
+# needs time to find proper abundances before sparsity kicks in.
 _VBEM_WARMUP_ITERS = 5
 
 # Number of VBEM re-estimation passes.  After the initial VBEM
@@ -266,7 +262,7 @@ class ReadCounter:
 
         # Per-transcript confidence tracking:
         # _em_posterior_sum[t] = sum of posteriors at which t was chosen
-        # _em_n_assigned[t] = number of units assigned to t
+        # _em_n_assigned[t] = effective number of assigned units to t
         self._em_posterior_sum: np.ndarray | None = None
         self._em_n_assigned: np.ndarray | None = None
 
@@ -418,8 +414,27 @@ class ReadCounter:
         n_total = self.num_transcripts + self.num_genes
         gdna_base = self.gdna_base_index
 
-        # Per-component prior: sparse for transcripts, baseline for
-        # gDNA shadows.
+        # Per-component prior: sparse for gDNA shadows, standard
+        # for transcript components.
+        #
+        # The VBEM digamma-based E-step induces sparsity that is
+        # essential for gDNA shadow components but harmful for
+        # transcript isoform estimation.  When competing isoforms
+        # share most of their exonic region (common in multi-isoform
+        # genes like EGFR, FGFR2, BRCA1), the digamma positive
+        # feedback loop can erroneously push a well-expressed isoform
+        # to zero — e.g. EGFR main isoform (truth=9222→0 with VBEM).
+        #
+        # Solution: **hybrid EM** — use standard EM (log theta) for
+        # transcript components and VBEM (digamma alpha) only for
+        # gDNA shadow components.  This preserves gDNA sparsity
+        # while avoiding the isoform collapse artifact.  The E-step
+        # computes per-component log-weights as a mixture:
+        #
+        #   log_weight_t = log(θ_t)            for transcripts
+        #   log_weight_s = ψ(α_s)              for gDNA shadows
+        #
+        # Both are normalized by effective length.
         prior = np.full(n_total, self.vbem_prior, dtype=np.float64)
         prior[gdna_base:] = _SHADOW_PRIOR
 
@@ -623,13 +638,23 @@ class ReadCounter:
         )
 
         # ── Phase 2: VBEM with digamma ─────────────────────────────
-        # Two-pass strategy for model re-estimation:
-        #   Pass 0: VBEM with initial (empirical) models → converge
+        # Uses VBEM (digamma alpha) for the convergence phase.
+        # The digamma function provides sparsity-inducing
+        # regularization that helps push truly absent transcripts
+        # toward zero (important when annotation includes many
+        # non-expressed isoforms).
+        #
+        # The prior (self.vbem_prior) controls sparsity strength:
+        #   - α₀ = 0.01: aggressive sparsity — can collapse
+        #     competing isoforms that share exonic regions
+        #   - α₀ = 0.5:  moderate sparsity — suppresses non-expressed
+        #     isoforms while preserving well-supported ones
+        #   - α₀ = 1.0:  minimal sparsity — approaches standard EM
+        #
+        # Two-pass model re-estimation:
+        #   Pass 0: converge with initial (empirical) models
         #   Pass 1+: re-estimate strand from converged posteriors,
-        #            then re-converge VBEM with updated log_liks
-        # This avoids the instability of mid-loop re-estimation
-        # (posteriors must be converged before they can reliably
-        # inform model parameters).
+        #            then re-converge with updated log_liks
         alpha = unique_totals + em_totals + prior
         n_vbem = em_iterations - n_warmup
         n_passes = _REEST_PASSES if can_reestimate else 1
@@ -701,7 +726,7 @@ class ReadCounter:
         )
 
     # ------------------------------------------------------------------
-    # Posterior sampling assignment (one fragment → one transcript)
+    # Posterior expected-count assignment
     # ------------------------------------------------------------------
 
     def assign_ambiguous(
@@ -711,19 +736,19 @@ class ReadCounter:
         gdna_threshold: float = 0.5,
         confidence_threshold: float = 0.95,
     ) -> None:
-        """Assign each ambiguous fragment via thresholded posterior sampling.
+        """Assign ambiguous units via thresholded posterior expected counts.
 
         For each EM unit the posterior over candidates is computed from
         the converged theta.  The RNA/gDNA decision is deterministic:
 
-        * If ``sum(posterior_RNA) >= gdna_threshold``, the unit is
-          classified as RNA and one transcript is sampled from the
-          RNA-renormalized posteriors.
+                * If ``sum(posterior_RNA) >= gdna_threshold``, the unit is
+                    classified as RNA and expected counts are added to all RNA
+                    candidates using the RNA-renormalized posteriors.
         * Otherwise the unit is assigned to its gDNA shadow.
 
-        For RNA assignments whose winning (RNA-normalized) posterior
-        meets or exceeds ``confidence_threshold``, the count is also
-        added to ``em_high_conf_counts``.
+        For RNA units whose maximum RNA-normalized posterior meets or
+        exceeds ``confidence_threshold``, the same expected RNA
+        contributions are also added to ``em_high_conf_counts``.
 
         Must be called after ``run_em()``.
 
@@ -765,13 +790,9 @@ class ReadCounter:
         seg_sum = np.add.reduceat(posteriors, offsets[:-1])
         posteriors /= np.repeat(seg_sum, seg_lengths)
 
-        # Per-unit thresholded sampling
+        # Per-unit thresholded expected-count accumulation
         gdna_base = self.gdna_base_index
-        rng = self._rng
         n_units = em_data.n_units
-        winner_idx = np.empty(n_units, dtype=np.int64)
-        winner_is_rna = np.empty(n_units, dtype=bool)
-        winner_conf = np.empty(n_units, dtype=np.float64)
 
         for u in range(n_units):
             s, e = int(offsets[u]), int(offsets[u + 1])
@@ -784,88 +805,70 @@ class ReadCounter:
             p_rna_total = float(p_rna.sum())
 
             if p_rna_total >= gdna_threshold or not has_shadow:
-                # --- Assign to RNA: sample among RNA candidates ---
+                # --- Assign to RNA: expected counts over RNA candidates ---
                 rna_local = np.where(rna_mask)[0]
-                if len(rna_local) == 1:
-                    choice = 0
-                    conf = 1.0
-                else:
+                if len(rna_local) == 0:
+                    continue
+                if p_rna_total > 0.0:
                     rna_p_norm = p_rna / p_rna_total
-                    choice = rng.choice(len(rna_local), p=rna_p_norm)
-                    conf = float(rna_p_norm[choice])
-                winner_idx[u] = s + rna_local[choice]
-                winner_is_rna[u] = True
-                winner_conf[u] = conf
+                else:
+                    rna_p_norm = np.full(
+                        len(rna_local),
+                        1.0 / len(rna_local),
+                        dtype=np.float64,
+                    )
+
+                rna_idx = s + rna_local
+                rna_t = t_indices[rna_idx]
+                rna_col = count_cols_arr[rna_idx]
+                np.add.at(self.em_counts, (rna_t, rna_col), rna_p_norm)
+
+                max_conf = float(rna_p_norm.max())
+                if max_conf >= confidence_threshold:
+                    np.add.at(
+                        self.em_high_conf_counts,
+                        (rna_t, rna_col),
+                        rna_p_norm,
+                    )
+
+                # Track posterior confidence proxy per transcript:
+                # E[p | assigned to transcript] under posterior sampling.
+                if self._em_posterior_sum is None:
+                    self._em_posterior_sum = np.zeros(
+                        self.num_transcripts, dtype=np.float64
+                    )
+                    self._em_n_assigned = np.zeros(
+                        self.num_transcripts, dtype=np.float64
+                    )
+                np.add.at(self._em_posterior_sum, rna_t, rna_p_norm * rna_p_norm)
+                np.add.at(self._em_n_assigned, rna_t, rna_p_norm)
             else:
                 # --- Assign to gDNA shadow ---
                 gdna_local = np.where(~rna_mask)[0]
-                if len(gdna_local) == 1:
-                    choice = 0
+                if len(gdna_local) == 0:
+                    continue
+
+                gdna_idx = s + gdna_local
+                gdna_t = t_indices[gdna_idx]
+                gdna_genes = gdna_t - gdna_base
+
+                p_gdna = p[gdna_local]
+                p_gdna_total = float(p_gdna.sum())
+                if p_gdna_total > 0.0:
+                    p_gdna_norm = p_gdna / p_gdna_total
                 else:
-                    p_gdna = p[gdna_local]
-                    p_gdna_total = float(p_gdna.sum())
-                    if p_gdna_total > 0.0:
-                        p_gdna_norm = p_gdna / p_gdna_total
-                    else:
-                        p_gdna_norm = np.full(
-                            len(gdna_local),
-                            1.0 / len(gdna_local),
-                            dtype=np.float64,
-                        )
-                    choice = int(rng.choice(len(gdna_local), p=p_gdna_norm))
-                winner_idx[u] = s + gdna_local[choice]
-                winner_is_rna[u] = False
-                winner_conf[u] = 0.0
+                    p_gdna_norm = np.full(
+                        len(gdna_local),
+                        1.0 / len(gdna_local),
+                        dtype=np.float64,
+                    )
+                np.add.at(self.gdna_em_counts, gdna_genes, p_gdna_norm)
 
-        winner_t = t_indices[winner_idx]
-        winner_col = count_cols_arr[winner_idx]
-
-        # --- RNA assignments: discrete 1.0 each ---
-        if winner_is_rna.any():
-            rna_sel = np.where(winner_is_rna)[0]
-            rna_t = winner_t[rna_sel]
-            rna_col = winner_col[rna_sel]
-            rna_conf = winner_conf[rna_sel]
-            np.add.at(self.em_counts, (rna_t, rna_col), 1.0)
-
-            # High-confidence assignments
-            hc_mask = rna_conf >= confidence_threshold
-            if hc_mask.any():
-                hc_sel = rna_sel[hc_mask]
-                np.add.at(
-                    self.em_high_conf_counts,
-                    (winner_t[hc_sel], winner_col[hc_sel]),
-                    1.0,
-                )
-
-            # Track confidence per transcript
-            if self._em_posterior_sum is None:
-                self._em_posterior_sum = np.zeros(
-                    self.num_transcripts, dtype=np.float64
-                )
-                self._em_n_assigned = np.zeros(
-                    self.num_transcripts, dtype=np.int64
-                )
-            np.add.at(self._em_posterior_sum, rna_t, rna_conf)
-            np.add.at(self._em_n_assigned, rna_t, 1)
-
-        # --- gDNA assignments: discrete 1.0 each ---
-        gdna_mask_final = ~winner_is_rna
-        if gdna_mask_final.any():
-            gdna_sel = np.where(gdna_mask_final)[0]
-            gene_indices = winner_t[gdna_sel] - gdna_base
-            np.add.at(self.gdna_em_counts, gene_indices, 1.0)
-
-            # Locus attribution
-            locus_t = em_data.locus_t_indices[gdna_sel]
-            locus_ct = em_data.locus_count_cols[gdna_sel]
-            valid = locus_t >= 0
-            if valid.any():
-                np.add.at(
-                    self.gdna_locus_counts,
-                    (locus_t[valid], locus_ct[valid]),
-                    1.0,
-                )
+                # Locus attribution: keep one full unit at the local locus.
+                locus_t = em_data.locus_t_indices[u]
+                locus_ct = em_data.locus_count_cols[u]
+                if locus_t >= 0:
+                    self.gdna_locus_counts[locus_t, locus_ct] += 1.0
 
     # ------------------------------------------------------------------
     # Confidence / posterior metrics

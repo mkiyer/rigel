@@ -259,6 +259,49 @@ class TestGeneBuilder:
                 {"t_id": "t1", "exons": [(100, 200), (202, 300)]},
             ])
 
+    def test_gtf_to_bed12(self, tmp_path):
+        """GTF → BED12 conversion produces valid 12-column BED."""
+        from hulkrna.index import gtf_to_bed12
+
+        g = MutableGenome(2000, seed=1, name="chr1")
+        builder = GeneBuilder(g)
+        builder.add_gene("g1", "+", [
+            {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
+        ])
+        builder.add_gene("g2", "-", [
+            {"t_id": "t2", "exons": [(1000, 1200), (1400, 1500), (1700, 1800)]},
+        ])
+        gtf_path = builder.write_gtf(tmp_path)
+        bed_path = tmp_path / "annotation.bed"
+        result_path = gtf_to_bed12(gtf_path, bed_path)
+        assert result_path.exists()
+
+        lines = bed_path.read_text().strip().split("\n")
+        assert len(lines) == 2
+
+        # Parse first transcript (2-exon, + strand)
+        fields = lines[0].split("\t")
+        assert len(fields) == 12
+        assert fields[0] == "chr1"     # chrom
+        assert fields[1] == "100"      # chromStart
+        assert fields[2] == "700"      # chromEnd
+        assert fields[3] == "t1"       # name
+        assert fields[5] == "+"        # strand
+        assert fields[9] == "2"        # blockCount
+        assert fields[10] == "200,200" # blockSizes (300-100, 700-500)
+        assert fields[11] == "0,400"   # blockStarts (100-100, 500-100)
+
+        # Parse second transcript (3-exon, - strand)
+        fields = lines[1].split("\t")
+        assert fields[0] == "chr1"
+        assert fields[1] == "1000"
+        assert fields[2] == "1800"
+        assert fields[3] == "t2"
+        assert fields[5] == "-"
+        assert fields[9] == "3"
+        assert fields[10] == "200,100,100"  # sizes
+        assert fields[11] == "0,400,700"    # starts relative to 1000
+
 
 # =====================================================================
 # ReadSimulator
