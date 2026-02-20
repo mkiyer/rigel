@@ -76,8 +76,6 @@ class BufferedFragment:
     chimera_type: int = ChimeraType.NONE
     frag_id: int = 0
     frag_length: int = 0
-    frag_start: int = 0
-    frag_end: int = 0
     exon_bp: np.ndarray | None = None
     intron_bp: np.ndarray | None = None
 
@@ -116,7 +114,6 @@ class _AccumulatorChunk:
         "t_indices", "t_offsets",
         "exon_bp_flat", "intron_bp_flat",
         "frag_id", "frag_length",
-        "frag_start", "frag_end",
         "size",
     )
 
@@ -134,8 +131,6 @@ class _AccumulatorChunk:
         self.intron_bp_flat: list[int] = []
         self.frag_id: list[int] = []
         self.frag_length: list[int] = []
-        self.frag_start: list[int] = []
-        self.frag_end: list[int] = []
         self.size: int = 0
 
     def append(self, resolved, frag_id: int = 0) -> None:
@@ -167,8 +162,6 @@ class _AccumulatorChunk:
 
         self.frag_id.append(frag_id)
         self.frag_length.append(fl)
-        self.frag_start.append(getattr(resolved, 'frag_start', 0))
-        self.frag_end.append(getattr(resolved, 'frag_end', 0))
         self.size += 1
 
 
@@ -204,8 +197,6 @@ class _FinalizedChunk:
     n_genes: np.ndarray         # uint8[N]
     frag_id: np.ndarray         # int64[N]
     frag_length: np.ndarray     # uint32[N]
-    frag_start: np.ndarray      # int32[N]
-    frag_end: np.ndarray        # int32[N]
     size: int
 
     @property
@@ -219,7 +210,6 @@ class _FinalizedChunk:
                 self.t_offsets, self.t_indices,
                 self.exon_bp, self.intron_bp,
                 self.n_genes, self.frag_id, self.frag_length,
-                self.frag_start, self.frag_end,
             )
         )
 
@@ -276,8 +266,6 @@ class _FinalizedChunk:
             chimera_type=int(self.chimera_type[i]),
             frag_id=int(self.frag_id[i]),
             frag_length=int(self.frag_length[i]),
-            frag_start=int(self.frag_start[i]),
-            frag_end=int(self.frag_end[i]),
         )
 
 
@@ -301,16 +289,57 @@ def _finalize(acc: _AccumulatorChunk, t_to_g_arr: np.ndarray) -> _FinalizedChunk
     exon_bp_arr = np.array(acc.exon_bp_flat, dtype=np.int32)
     intron_bp_arr = np.array(acc.intron_bp_flat, dtype=np.int32)
 
-    # Compute n_genes per fragment from transcript indices
-    n_genes_list = np.empty(acc.size, dtype=np.uint8)
-    for i in range(acc.size):
-        start = t_offsets[i]
-        end = t_offsets[i + 1]
-        if start == end:
-            n_genes_list[i] = 0
-        else:
-            t_slice = t_indices[start:end]
-            n_genes_list[i] = len(np.unique(t_to_g_arr[t_slice]))
+    # Compute n_genes per fragment from transcript indices (vectorized).
+    # Map all transcript indices to gene indices, sort within each
+    # fragment segment, count distinct values per segment using diff.
+    n_total = len(t_indices)
+    n_frags = acc.size
+    n_genes_list = np.zeros(n_frags, dtype=np.uint8)
+
+    if n_total > 0:
+        # Map transcript → gene for all indices at once
+        all_genes = t_to_g_arr[t_indices]
+
+        # Assign each candidate to its fragment
+        seg_lens = np.diff(t_offsets).astype(np.intp)
+
+        # For fragments with 1 candidate: n_genes = 1
+        single = seg_lens == 1
+        n_genes_list[single] = 1
+
+        # For fragments with >1 candidate: sort gene indices within
+        # each segment and count transitions.
+        multi = seg_lens > 1
+        multi_idx = np.where(multi)[0]
+
+        if len(multi_idx) > 0:
+            # Build a sortable key: (fragment_id, gene_index)
+            frag_of_cand = np.repeat(np.arange(n_frags, dtype=np.int32),
+                                     seg_lens)
+            # Sort by (fragment_id, gene_index)
+            order = np.lexsort((all_genes, frag_of_cand))
+            sorted_frag = frag_of_cand[order]
+            sorted_gene = all_genes[order]
+
+            # Count transitions: new gene within same fragment
+            # A new gene starts when gene changes OR fragment changes.
+            # We count (gene changes within same fragment) + 1 per fragment.
+            same_frag = sorted_frag[1:] == sorted_frag[:-1]
+            gene_changed = sorted_gene[1:] != sorted_gene[:-1]
+            new_gene = same_frag & gene_changed
+
+            # Count new_gene transitions per fragment using bincount
+            if new_gene.any():
+                transition_frags = sorted_frag[1:][new_gene]
+                transitions = np.bincount(transition_frags,
+                                          minlength=n_frags)
+            else:
+                transitions = np.zeros(n_frags, dtype=np.intp)
+
+            # n_genes = transitions + 1 for multi-candidate fragments
+            n_genes_list[multi] = (transitions[multi] + 1).astype(np.uint8)
+
+        # Zero-candidate fragments stay at 0
 
     return _FinalizedChunk(
         splice_type=np.array(acc.splice_type, dtype=np.uint8),
@@ -327,8 +356,6 @@ def _finalize(acc: _AccumulatorChunk, t_to_g_arr: np.ndarray) -> _FinalizedChunk
         n_genes=n_genes_list,
         frag_id=np.array(acc.frag_id, dtype=np.int64),
         frag_length=np.array(acc.frag_length, dtype=np.uint32),
-        frag_start=np.array(acc.frag_start, dtype=np.int32),
-        frag_end=np.array(acc.frag_end, dtype=np.int32),
         size=acc.size,
     )
 
@@ -366,8 +393,6 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
         "n_genes": chunk.n_genes,
         "frag_id": chunk.frag_id,
         "frag_length": chunk.frag_length,
-        "frag_start": chunk.frag_start,
-        "frag_end": chunk.frag_end,
     })
 
     pf.write_feather(table, str(path), compression="lz4")
@@ -408,14 +433,6 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
     else:
         frag_length_arr = np.zeros(len(table), dtype=np.uint32)
 
-    # frag_start / frag_end: genomic coordinates for coverage islands
-    if "frag_start" in table.column_names:
-        frag_start_arr = table.column("frag_start").to_numpy().copy()
-        frag_end_arr = table.column("frag_end").to_numpy().copy()
-    else:
-        frag_start_arr = np.zeros(len(table), dtype=np.int32)
-        frag_end_arr = np.zeros(len(table), dtype=np.int32)
-
     return _FinalizedChunk(
         splice_type=table.column("splice_type").to_numpy().copy(),
         exon_strand=table.column("exon_strand").to_numpy().copy(),
@@ -431,8 +448,6 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         n_genes=table.column("n_genes").to_numpy().copy(),
         frag_id=table.column("frag_id").to_numpy().copy(),
         frag_length=frag_length_arr,
-        frag_start=frag_start_arr,
-        frag_end=frag_end_arr,
         size=len(table),
     )
 

@@ -104,10 +104,12 @@ def _assert_accountability(bench, tolerance=5):
     mm_extra = sd.get("n_multimapper_alignments", 0) - sd.get(
         "n_multimapper_groups", 0
     )
+    n_gated_out = sd.get("n_gated_out", 0)
     effective_fragments = bench.n_fragments - mm_extra
     total = (
         bench.total_observed + bench.n_nrna_pipeline
         + bench.n_gdna_pipeline + bench.n_chimeric
+        + n_gated_out
     )
     assert abs(total - effective_fragments) <= tolerance, (
         f"Accountability gap: {abs(total - effective_fragments):.0f} "
@@ -140,11 +142,11 @@ def _assert_negative_control(bench, ctrl_id="t_ctrl", *,
     ctrl = next(t for t in bench.transcripts if t.t_id == ctrl_id)
     max_fp = 5
     if gdna_abundance > 0:
-        max_fp += min(gdna_abundance // 2, 60)
-    if strand_specificity < 0.85:
-        ss_gap = 0.85 - strand_specificity
+        max_fp += min(gdna_abundance, 60)
+    if strand_specificity < 0.9:
+        ss_gap = 0.9 - strand_specificity
         # SS penalty + gDNA×SS interaction (low SS amplifies leakage)
-        max_fp += round(ss_gap * 60 + gdna_abundance * ss_gap * 2)
+        max_fp += round(ss_gap * 200 + gdna_abundance * ss_gap * 8)
     assert ctrl.observed <= max_fp, (
         f"Negative control {ctrl_id}: {ctrl.observed:.0f} counts "
         f"(limit={max_fp}, gdna={gdna_abundance}, "

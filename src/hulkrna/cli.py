@@ -141,6 +141,7 @@ def count_command(args: argparse.Namespace) -> int:
         gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
         confidence_threshold=args.confidence_threshold,
         overlap_min_frac=args.overlap_min_frac,
+        overhang_alpha=args.overhang_alpha,
     )
 
     # Log stats
@@ -372,6 +373,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Min fraction of best exon overlap to retain a candidate "
              "transcript during resolution (default: 0.99 = within 1%% of best). "
              "Lower values (e.g. 0.9) keep candidates within 10%% of best.",
+    )
+    from .pipeline import DEFAULT_OVERHANG_ALPHA
+    cnt.add_argument(
+        "--overhang-alpha", dest="overhang_alpha",
+        type=float, default=DEFAULT_OVERHANG_ALPHA,
+        help=(
+            "Per-base overhang penalty alpha in [0, 1]. "
+            "Each base outside the target boundary multiplies the "
+            "probability by alpha. "
+            f"(default: {DEFAULT_OVERHANG_ALPHA}). "
+            "0 = hard binary gate, 1 = off (no penalty)."
+        ),
     )
     cnt.add_argument(
         "--no-tsv", dest="no_tsv", action="store_true", default=False,

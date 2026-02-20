@@ -28,8 +28,6 @@ class _BF:
     exon_bp: np.ndarray
     intron_bp: np.ndarray
     frag_length: int
-    frag_start: int = 0
-    frag_end: int = 0
 
 
 class _Chunk:

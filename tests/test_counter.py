@@ -170,9 +170,6 @@ def _make_em_data(
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,
         is_spliced=np.zeros(n_units, dtype=bool),
-        frag_starts=np.zeros(n_units, dtype=np.int32),
-        frag_ends=np.zeros(n_units, dtype=np.int32),
-        frag_refs=["chr1"] * n_units,
         gdna_log_liks=np.full(n_units, -np.inf, dtype=np.float64),
         n_units=n_units,
         n_candidates=n_candidates,
@@ -427,9 +424,6 @@ class TestEMData:
         """New locus-EM fields are populated."""
         em = _make_em_data([[0, 1]])
         assert em.is_spliced.shape == (1,)
-        assert em.frag_starts.shape == (1,)
-        assert em.frag_ends.shape == (1,)
-        assert len(em.frag_refs) == 1
         assert em.gdna_log_liks.shape == (1,)
         assert em.gdna_log_liks[0] == -np.inf  # default unspliced
 
@@ -936,30 +930,6 @@ class TestGDNASummaryOutput:
     def test_gdna_contamination_rate_zero(self):
         rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
         assert rc.gdna_contamination_rate == 0.0
-
-    def test_gdna_intervals_df_empty(self):
-        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
-        df = rc.get_gdna_intervals_df()
-        assert len(df) == 0
-        assert "locus_id" in df.columns
-        assert "ref" in df.columns
-
-    def test_gdna_intervals_df_populated(self):
-        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
-        rc.gdna_locus_results = [
-            {
-                "locus_id": 0,
-                "intervals": [("chr1", 100, 500)],
-                "gdna_count": 10.0,
-                "footprint_bp": 400,
-            },
-        ]
-        df = rc.get_gdna_intervals_df()
-        assert len(df) == 1
-        assert df.loc[0, "ref"] == "chr1"
-        assert df.loc[0, "start"] == 100
-        assert df.loc[0, "end"] == 500
-        assert df.loc[0, "gdna_count"] == 10.0
 
 
 # =====================================================================

@@ -238,7 +238,6 @@ def trace_em_internals(ss_value=0.9, n_frags=500):
         _compute_eb_gdna_priors,
         _compute_nrna_init,
         _GDNA_SPLICE_PENALTIES,
-        _DEFAULT_OVERLAP_EXPONENTS,
     )
     from hulkrna.categories import SpliceType
     import pysam
@@ -301,13 +300,11 @@ def trace_em_internals(ss_value=0.9, n_frags=500):
 
         # Build EM data
         gdna_splice_penalties = dict(_GDNA_SPLICE_PENALTIES)
-        overlap_exponents = dict(_DEFAULT_OVERLAP_EXPONENTS)
 
         em_data = _scan_and_build_em_data(
             buffer, index, strand_models, insert_models, counter, stats,
             log_every=1_000_000,
             gdna_splice_penalties=gdna_splice_penalties,
-            overlap_exponents=overlap_exponents,
         )
 
         print(f"EM data: {em_data.n_units} units, {em_data.n_candidates} candidates")

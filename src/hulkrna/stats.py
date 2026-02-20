@@ -66,6 +66,9 @@ class PipelineStats:
     em_routed_gene_ambig_units: int = 0
     em_routed_multimapper_units: int = 0
 
+    # --- Gating ---
+    n_gated_out: int = 0
+
     # --- Multimapper scan stats (NH > 1) ---
     n_multimapper_groups: int = 0
     n_multimapper_alignments: int = 0

@@ -57,6 +57,11 @@ class InsertSizeModel:
     def __post_init__(self):
         if self.counts is None:
             self.counts = np.zeros(self.max_size + 1, dtype=np.float64)
+            self._total_weight: float = 0.0
+        else:
+            self._total_weight: float = float(self.counts.sum())
+        self._log_prob: np.ndarray | None = None
+        self._finalized: bool = False
 
     # ------------------------------------------------------------------
     # Training
@@ -75,6 +80,7 @@ class InsertSizeModel:
         idx = min(max(insert_size, 0), self.max_size)
         self.counts[idx] += weight
         self.n_observations += 1
+        self._total_weight += weight
 
     # ------------------------------------------------------------------
     # Distribution properties
@@ -84,7 +90,7 @@ class InsertSizeModel:
     def total_weight(self) -> float:
         """Sum of all histogram weights (may differ from n_observations
         if non-unit weights are used)."""
-        return float(self.counts.sum())
+        return self._total_weight
 
     @property
     def mean(self) -> float:
@@ -137,6 +143,27 @@ class InsertSizeModel:
         return int(np.argmax(self.counts))
 
     # ------------------------------------------------------------------
+    # Finalization (call after training, before scoring)
+    # ------------------------------------------------------------------
+
+    def finalize(self) -> None:
+        """Pre-compute log-likelihood lookup table for fast scoring.
+
+        Builds ``_log_prob`` array so ``log_likelihood()`` becomes a
+        single array index instead of 2× ``np.log`` per call.
+        """
+        total = self._total_weight
+        if total == 0:
+            n = self.max_size + 1
+            self._log_prob = np.full(n, -np.log(n), dtype=np.float64)
+        else:
+            self._log_prob = (
+                np.log(self.counts + 1.0)
+                - np.log(total + self.max_size + 1)
+            )
+        self._finalized = True
+
+    # ------------------------------------------------------------------
     # Likelihood for Bayesian counting
     # ------------------------------------------------------------------
 
@@ -155,11 +182,13 @@ class InsertSizeModel:
         float
             Log-probability (natural log).
         """
-        total = self.total_weight
+        total = self._total_weight
+        idx = min(max(insert_size, 0), self.max_size)
+        if self._finalized:
+            return float(self._log_prob[idx])
         if total == 0:
             # Uniform prior when no data
             return -np.log(self.max_size + 1)
-        idx = min(max(insert_size, 0), self.max_size)
         # Laplace smoothing
         return float(
             np.log(self.counts[idx] + 1.0)
@@ -320,6 +349,18 @@ class InsertSizeModels:
         # Provides a richer gDNA insert profile than intergenic alone
         # (which can be sparse for small genomes / targeted panels).
         self.gdna_model = InsertSizeModel(max_size=max_size)
+
+    def finalize(self) -> None:
+        """Cache derived values on all sub-models for fast scoring.
+
+        Call after all ``observe()`` calls are complete and before
+        any ``log_likelihood()`` calls during EM scoring.
+        """
+        self.global_model.finalize()
+        self.intergenic.finalize()
+        self.gdna_model.finalize()
+        for m in self.category_models.values():
+            m.finalize()
 
     @property
     def n_observations(self) -> int:

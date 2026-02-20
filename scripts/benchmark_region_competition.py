@@ -539,15 +539,16 @@ def run_hulkrna_tool(
 ) -> tuple[dict[str, float], float]:
     """Run hulkrna pipeline and return (transcript_counts, elapsed_sec)."""
     t0 = time.monotonic()
-    pipe = run_pipeline(
-        bam_path,
-        index,
+    overhang_alpha = getattr(args, "overhang_alpha", None)
+    kwargs = dict(
         seed=args.pipeline_seed,
         sj_strand_tag="auto",
         include_multimap=include_multimap,
-        gdna_threshold=args.gdna_threshold,
         gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
     )
+    if overhang_alpha is not None:
+        kwargs["overhang_alpha"] = overhang_alpha
+    pipe = run_pipeline(bam_path, index, **kwargs)
     elapsed = time.monotonic() - t0
 
     counts_df = pipe.counter.get_counts_df(index)
@@ -1438,7 +1439,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--gdna-frag-std", type=float, default=100.0)
     p.add_argument("--gdna-frag-min", type=int, default=100)
     p.add_argument("--gdna-frag-max", type=int, default=1000)
-    p.add_argument("--gdna-threshold", type=float, default=0.5)
     p.add_argument("--gdna-splice-penalty-unannot", type=float, default=0.01)
 
     # Strand specificity sweep
@@ -1485,6 +1485,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Continue with next region on failure",
     )
     p.add_argument("--verbose", action="store_true")
+
+    # Overhang alpha
+    p.add_argument(
+        "--overhang-alpha",
+        dest="overhang_alpha",
+        type=float,
+        default=None,
+        help="Overhang alpha for hulkrna (default: use pipeline default 0.01). "
+             "0 = hard binary, 1 = off.",
+    )
 
     return p
 

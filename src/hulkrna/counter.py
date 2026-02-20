@@ -93,12 +93,6 @@ class EMData:
     is_spliced : np.ndarray
         bool[n_units] - True if this unit is a spliced fragment.
         Unspliced units get a gDNA candidate in the locus EM.
-    frag_starts : np.ndarray
-        int32[n_units] - leftmost aligned position on reference.
-    frag_ends : np.ndarray
-        int32[n_units] - rightmost aligned position on reference.
-    frag_refs : list[str]
-        Reference name per unit (for coverage island construction).
     gdna_log_liks : np.ndarray
         float64[n_units] - pre-computed gDNA log-likelihood per unit.
         -inf for spliced units (gDNA not applicable).
@@ -117,9 +111,6 @@ class EMData:
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     is_spliced: np.ndarray
-    frag_starts: np.ndarray
-    frag_ends: np.ndarray
-    frag_refs: list
     gdna_log_liks: np.ndarray
     n_units: int
     n_candidates: int
@@ -145,19 +136,12 @@ class Locus:
         int32 - global gene indices in this locus.
     unit_indices : np.ndarray
         int32 - EM unit indices (rows in global CSR) belonging to this locus.
-    gdna_intervals : list[tuple[str, int, int]]
-        Merged genomic intervals (ref, start, end) from unspliced
-        fragment coverage islands.  This IS the gDNA shadow footprint.
-    gdna_footprint_bp : int
-        Sum of interval sizes = gDNA effective length.
     """
 
     locus_id: int
     transcript_indices: np.ndarray
     gene_indices: np.ndarray
     unit_indices: np.ndarray
-    gdna_intervals: list = field(default_factory=list)
-    gdna_footprint_bp: int = 0
 
 
 # ======================================================================
@@ -212,8 +196,6 @@ class LocusEMData:
         float64[n_components] - effective lengths for EM normalization.
     prior : np.ndarray
         float64[n_components] - Dirichlet prior pseudocounts.
-    gdna_intervals : list
-        Genomic intervals (ref, start, end) for gDNA reporting.
     """
 
     locus: Locus
@@ -231,7 +213,6 @@ class LocusEMData:
     gdna_init: float
     effective_lengths: np.ndarray
     prior: np.ndarray
-    gdna_intervals: list = field(default_factory=list)
 
 
 # ======================================================================
@@ -247,7 +228,7 @@ class ReadCounter:
         Per locus:
         [0, n_t)       - mRNA transcript components
         [n_t, 2*n_t)   - nRNA shadow per transcript
-        [2*n_t]        - gDNA: ONE shadow from coverage islands
+        [2*n_t]        - gDNA: ONE shadow per locus
 
     Fragment routing:
 
@@ -429,7 +410,13 @@ class ReadCounter:
         strand_model,
     ) -> bool:
         """Classify whether a fragment is antisense using the trained model."""
-        p = strand_model.strand_likelihood(exon_strand, Strand(gene_strand))
+        if getattr(strand_model, '_finalized', False):
+            p = strand_model.strand_likelihood_int(exon_strand, gene_strand)
+        else:
+            from .types import Strand
+            p = strand_model.strand_likelihood(
+                exon_strand, Strand(gene_strand),
+            )
         return p < 0.5
 
     # ------------------------------------------------------------------
@@ -528,7 +515,16 @@ class ReadCounter:
             log_posteriors -= np.repeat(seg_max, seg_lengths)
             posteriors = np.exp(log_posteriors)
             seg_sum = np.add.reduceat(posteriors, offsets[:-1])
+            # Guard against all-inf segments (e.g. alpha=0 binary mode
+            # where every candidate has -inf log-lik).  Replace NaN/0
+            # denominators with 1 so posteriors become 0.
+            bad_seg = (seg_sum == 0) | ~np.isfinite(seg_sum)
+            seg_sum[bad_seg] = 1.0
             posteriors /= np.repeat(seg_sum, seg_lengths)
+            # Zero out posteriors for bad segments explicitly.
+            if bad_seg.any():
+                bad_mask = np.repeat(bad_seg, seg_lengths)
+                posteriors[bad_mask] = 0.0
 
             # M-step
             em_totals = np.zeros(n_total, dtype=np.float64)
@@ -567,6 +563,8 @@ class ReadCounter:
         eliminates the binary gDNA threshold and prevents cliff-edge
         wipeout behaviour.
 
+        Fully vectorized — no per-unit Python loop.
+
         Returns
         -------
         float
@@ -584,7 +582,7 @@ class ReadCounter:
         n_t = locus_em.n_transcripts
         gdna_idx = 2 * n_t  # the single gDNA component index
         local_to_global_t = locus_em.local_to_global_t
-        seg_lengths = np.diff(offsets)
+        seg_lengths = np.diff(offsets).astype(np.intp)
 
         # Compute posteriors from converged theta
         eff_len = locus_em.effective_lengths
@@ -593,75 +591,101 @@ class ReadCounter:
         )
         log_posteriors = log_liks + log_weights[t_indices]
 
-        seg_max = np.maximum.reduceat(log_posteriors, offsets[:-1])
+        offsets_int = offsets[:-1].astype(np.intp)
+        seg_max = np.maximum.reduceat(log_posteriors, offsets_int)
         log_posteriors -= np.repeat(seg_max, seg_lengths)
         posteriors = np.exp(log_posteriors)
-        seg_sum = np.add.reduceat(posteriors, offsets[:-1])
+        seg_sum = np.add.reduceat(posteriors, offsets_int)
+        # Guard: segments where every candidate is -inf → zero posteriors
+        bad_seg = (seg_sum == 0) | ~np.isfinite(seg_sum)
+        seg_sum[bad_seg] = 1.0
         posteriors /= np.repeat(seg_sum, seg_lengths)
+        if bad_seg.any():
+            bad_mask = np.repeat(bad_seg, seg_lengths)
+            posteriors[bad_mask] = 0.0
 
-        gdna_count = 0.0
+        # --- Classify all candidates at once ---
+        mrna_mask = t_indices < n_t
+        nrna_mask = (t_indices >= n_t) & (t_indices < gdna_idx)
+        gdna_mask = t_indices == gdna_idx
 
-        for u in range(n_units):
-            s, e = int(offsets[u]), int(offsets[u + 1])
-            p = posteriors[s:e]
-            t_seg = t_indices[s:e]
+        # --- Vectorized mRNA assignment ---
+        if mrna_mask.any():
+            mrna_p = posteriors[mrna_mask]
+            mrna_local_t = t_indices[mrna_mask]
+            mrna_global_t = local_to_global_t[mrna_local_t]
+            mrna_cols = count_cols_arr[mrna_mask]
 
-            is_mrna = t_seg < n_t
-            is_nrna = (t_seg >= n_t) & (t_seg < gdna_idx)
-            is_gdna = t_seg == gdna_idx
+            np.add.at(
+                self.em_counts,
+                (mrna_global_t, mrna_cols),
+                mrna_p,
+            )
 
-            # --- Fractional mRNA assignment ---
-            mrna_local = np.where(is_mrna)[0]
-            if len(mrna_local) > 0:
-                p_mrna = p[mrna_local]
-                local_ts = t_seg[mrna_local]
-                global_ts = local_to_global_t[local_ts]
-                mrna_col = count_cols_arr[s + mrna_local]
-                np.add.at(
-                    self.em_counts,
-                    (global_ts, mrna_col),
-                    p_mrna,
-                )
-                max_conf = float(p_mrna.max())
-                if max_conf >= confidence_threshold:
+            # High-confidence: per-unit max of mRNA posteriors
+            # Set non-mRNA posteriors to 0, then reduceat for per-unit max
+            mrna_p_for_max = np.where(mrna_mask, posteriors, 0.0)
+            unit_max_mrna = np.maximum.reduceat(
+                mrna_p_for_max, offsets_int,
+            )
+            conf_units = unit_max_mrna >= confidence_threshold
+            if conf_units.any():
+                conf_expanded = np.repeat(conf_units, seg_lengths)
+                hc_mask = mrna_mask & conf_expanded
+                if hc_mask.any():
+                    hc_p = posteriors[hc_mask]
+                    hc_local_t = t_indices[hc_mask]
+                    hc_global_t = local_to_global_t[hc_local_t]
+                    hc_cols = count_cols_arr[hc_mask]
                     np.add.at(
                         self.em_high_conf_counts,
-                        (global_ts, mrna_col),
-                        p_mrna,
+                        (hc_global_t, hc_cols),
+                        hc_p,
                     )
-                # Confidence tracking
-                if self._em_posterior_sum is None:
-                    self._em_posterior_sum = np.zeros(
-                        self.num_transcripts, dtype=np.float64
-                    )
-                    self._em_n_assigned = np.zeros(
-                        self.num_transcripts, dtype=np.float64
-                    )
-                np.add.at(
-                    self._em_posterior_sum,
-                    global_ts, p_mrna * p_mrna,
+
+            # Confidence tracking
+            if self._em_posterior_sum is None:
+                self._em_posterior_sum = np.zeros(
+                    self.num_transcripts, dtype=np.float64,
                 )
-                np.add.at(self._em_n_assigned, global_ts, p_mrna)
+                self._em_n_assigned = np.zeros(
+                    self.num_transcripts, dtype=np.float64,
+                )
+            np.add.at(
+                self._em_posterior_sum,
+                mrna_global_t, mrna_p * mrna_p,
+            )
+            np.add.at(self._em_n_assigned, mrna_global_t, mrna_p)
 
-            # --- Fractional nRNA assignment ---
-            nrna_local = np.where(is_nrna)[0]
-            if len(nrna_local) > 0:
-                p_nrna = p[nrna_local]
-                local_nrna_ts = t_seg[nrna_local] - n_t
-                global_nrna_ts = local_to_global_t[local_nrna_ts]
-                np.add.at(self.nrna_em_counts, global_nrna_ts, p_nrna)
+        # --- Vectorized nRNA assignment ---
+        if nrna_mask.any():
+            nrna_p = posteriors[nrna_mask]
+            nrna_local_t = t_indices[nrna_mask] - n_t
+            nrna_global_t = local_to_global_t[nrna_local_t]
+            np.add.at(self.nrna_em_counts, nrna_global_t, nrna_p)
 
-            # --- Fractional gDNA assignment ---
-            gdna_local = np.where(is_gdna)[0]
-            if len(gdna_local) > 0:
-                p_gdna = float(p[gdna_local].sum())
-                gdna_count += p_gdna
+        # --- Vectorized gDNA assignment ---
+        gdna_count = 0.0
+        if gdna_mask.any():
+            gdna_p = posteriors[gdna_mask]
+            gdna_count = float(gdna_p.sum())
 
-                # Locus attribution for reporting
-                locus_t = locus_em.locus_t_indices[u]
-                locus_ct = locus_em.locus_count_cols[u]
-                if locus_t >= 0:
-                    self.gdna_locus_counts[locus_t, locus_ct] += p_gdna
+            # Per-unit gDNA sum for locus attribution
+            gdna_p_full = np.where(gdna_mask, posteriors, 0.0)
+            gdna_per_unit = np.add.reduceat(
+                gdna_p_full, offsets_int,
+            )
+            # Scatter to gdna_locus_counts using per-unit locus_t/locus_ct
+            locus_t_arr = locus_em.locus_t_indices
+            locus_ct_arr = locus_em.locus_count_cols
+            valid_gdna_units = (gdna_per_unit > 0) & (locus_t_arr >= 0)
+            if valid_gdna_units.any():
+                np.add.at(
+                    self.gdna_locus_counts,
+                    (locus_t_arr[valid_gdna_units],
+                     locus_ct_arr[valid_gdna_units]),
+                    gdna_per_unit[valid_gdna_units],
+                )
 
         return gdna_count
 
@@ -783,26 +807,6 @@ class ReadCounter:
             "gdna_rate": gdna_rate,
         })
         return df
-
-    def get_gdna_intervals_df(self) -> pd.DataFrame:
-        """Genomic-coordinate gDNA output: per-locus coverage islands."""
-        rows = []
-        for entry in self.gdna_locus_results:
-            for ref, start, end in entry["intervals"]:
-                rows.append({
-                    "locus_id": entry["locus_id"],
-                    "ref": ref,
-                    "start": start,
-                    "end": end,
-                    "gdna_count": entry["gdna_count"],
-                    "footprint_bp": entry["footprint_bp"],
-                })
-        if not rows:
-            return pd.DataFrame(
-                columns=["locus_id", "ref", "start", "end",
-                         "gdna_count", "footprint_bp"]
-            )
-        return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
     # Output - detail (long format QC breakdown)

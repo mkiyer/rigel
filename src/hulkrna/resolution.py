@@ -483,8 +483,6 @@ class ResolvedFragment:
     num_hits: int
     overlap_bp: dict[int, tuple[int, int]] | None = None
     frag_length: int = 0
-    frag_start: int = 0
-    frag_end: int = 0
     chimera_type: ChimeraType = ChimeraType.NONE
     chimera_gap: int = -1
 
@@ -725,28 +723,13 @@ def resolve_fragment(
     # Compute overlap BP counts for ALL candidates so that the scoring
     # pipeline can derive exon_frac (mRNA) and genic_frac (nRNA).
     #
-    # The hard exon-overlap filter is applied ONLY to spliced fragments
-    # (SPLICED_ANNOT / SPLICED_UNANNOT).  For unspliced fragments the
-    # filter is skipped because it uses exon_bp only — in antisense
-    # overlaps, one gene's exon is another gene's intron, so the
-    # exon-only metric systematically removes the correct gene for
-    # nRNA/gDNA fragments whose overlap is predominantly intronic.
-    # The EM's soft overlap penalty (overlap_exponent * log(overlap_frac))
-    # handles unspliced candidate weighting instead.
+    # Hard filtering (filter_by_overlap) has been replaced by loose
+    # binary compatibility gates applied during candidate generation
+    # in _add_transcript_candidates / _add_nrna_candidates.  The gates
+    # use the per-candidate overlap_bp stored in the buffer.  Here we
+    # only compute the overlap profile and pass ALL candidates through.
     overlap_bp, frag_length = compute_overlap_profile(frag, index)
-    if overlap_bp:
-        if len(t_inds) > 1 and splice_type != SpliceType.UNSPLICED:
-            t_inds = filter_by_overlap(
-                t_inds, overlap_bp, frag_length,
-                min_frac_of_best=overlap_min_frac,
-            )
-        # Keep only entries for surviving candidates
-        overlap_bp = {
-            t_idx: overlap_bp[t_idx]
-            for t_idx in t_inds
-            if t_idx in overlap_bp
-        }
-    else:
+    if not overlap_bp:
         # Pure intronic fragments have no exonic overlap; use 0 exon_bp.
         # intron_bp = frag_length to indicate fully genic.
         overlap_bp = {
@@ -764,8 +747,6 @@ def resolve_fragment(
 
     # Compute fragment genomic extent from exon blocks.
     # For non-chimeric fragments, all exons are on the same ref.
-    frag_start = min(e.start for e in frag.exons)
-    frag_end = max(e.end for e in frag.exons)
 
     return ResolvedFragment(
         t_inds=t_inds,
@@ -778,8 +759,6 @@ def resolve_fragment(
         num_hits=1,  # Caller must set this from the pairs list length
         overlap_bp=overlap_bp,
         frag_length=frag_length,
-        frag_start=frag_start,
-        frag_end=frag_end,
         chimera_type=chimera_type,
         chimera_gap=chimera_gap,
     )

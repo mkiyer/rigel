@@ -71,6 +71,11 @@ class StrandModel:
     prior_alpha: float = 1.0
     prior_beta: float = 1.0
 
+    # --- Cached probabilities (set by finalize()) ---
+    _cached_p_sense: float = field(default=0.0, repr=False, compare=False)
+    _cached_p_antisense: float = field(default=0.0, repr=False, compare=False)
+    _finalized: bool = field(default=False, repr=False, compare=False)
+
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
@@ -173,6 +178,46 @@ class StrandModel:
         )
 
     # ------------------------------------------------------------------
+    # Finalization (call after training, before scoring)
+    # ------------------------------------------------------------------
+
+    def finalize(self) -> None:
+        """Cache derived probabilities for fast scoring.
+
+        Must be called after all ``observe()`` calls are complete and
+        before any ``strand_likelihood()`` calls during EM scoring.
+        """
+        a = self.prior_alpha + self.pos_pos + self.neg_neg  # alpha
+        b = self.prior_beta + self.pos_neg + self.neg_pos   # beta
+        self._cached_p_sense = a / (a + b)
+        self._cached_p_antisense = 1.0 - self._cached_p_sense
+        self._finalized = True
+
+    def strand_likelihood_int(self, exon_strand: int, gene_strand: int) -> float:
+        """Fast strand likelihood using raw int strand values.
+
+        Avoids Strand enum construction.  ``exon_strand`` and
+        ``gene_strand`` must be 1 (POS) or 2 (NEG) for an
+        informative result; any other value returns 0.5.
+
+        Uses cached values if ``finalize()`` has been called,
+        otherwise falls back to the property chain.
+        """
+        # 1=POS, 2=NEG are the only informative values
+        if exon_strand != 1 and exon_strand != 2:
+            return 0.5
+        if gene_strand != 1 and gene_strand != 2:
+            return 0.5
+        if self._finalized:
+            if exon_strand == gene_strand:
+                return self._cached_p_sense
+            return self._cached_p_antisense
+        # Fallback: compute from property chain
+        if exon_strand == gene_strand:
+            return self.p_r1_sense
+        return self.p_r1_antisense
+
+    # ------------------------------------------------------------------
     # Strand likelihood for Bayesian counting
     # ------------------------------------------------------------------
 
@@ -204,6 +249,10 @@ class StrandModel:
             or gene_strand not in (Strand.POS, Strand.NEG)
         ):
             return 0.5
+        if self._finalized:
+            if exon_strand == gene_strand:
+                return self._cached_p_sense
+            return self._cached_p_antisense
         if exon_strand == gene_strand:
             return self.p_r1_sense
         return self.p_r1_antisense
@@ -338,6 +387,17 @@ class StrandModels:
     _rna_model_cache: StrandModel | None = field(
         default=None, repr=False, compare=False,
     )
+
+    # ------------------------------------------------------------------
+    # Finalization (call after training, before scoring)
+    # ------------------------------------------------------------------
+
+    def finalize(self) -> None:
+        """Cache derived probabilities on all sub-models for fast scoring."""
+        self.exonic_spliced.finalize()
+        self.exonic.finalize()
+        self.intronic.finalize()
+        self.intergenic.finalize()
 
     # ------------------------------------------------------------------
     # Category-aware model selection
