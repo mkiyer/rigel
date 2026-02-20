@@ -1,89 +1,67 @@
 """
-hulkrna.counter - Read count accumulation with Variational Bayes EM.
+hulkrna.counter - Read count accumulation with locus-level EM.
 
 ReadCounter accumulates read counts into transcript arrays.
 
 For uniquely-mapping fragments, assignment is deterministic.  For ambiguous
-fragments, transcript abundances are estimated via Variational Bayes EM
-(VBEM) then counts are accumulated from the converged posterior.
+fragments, transcript abundances are estimated via per-locus EM with a
+uniform Dirichlet prior, then counts are accumulated from the converged
+posterior.
+
+Locus-level EM architecture
+----------------------------
+The transcriptome is partitioned into **loci** — connected components of
+transcripts linked by shared fragments.  Each locus gets its own
+independent EM instance solving:
+
+    mRNA (per-transcript) + nRNA (per-transcript) + gDNA (one per locus)
+
+The gDNA shadow is a **single genomic component** per locus, built from
+the coverage islands of unspliced fragment alignments.  It represents the
+genome as a competing source, NOT attributed to genes.  gDNA is a property
+of the reference chromosomes; fragments classified as gDNA are reported
+in genomic coordinates.
 
 Posterior expected-count assignment
 ----------------------------------
-After VBEM convergence, ambiguous RNA units are accumulated as expected
+After EM convergence, ambiguous RNA units are accumulated as expected
 counts from the RNA-normalized posterior distribution rather than by
-stochastic winner sampling.  This removes Monte-Carlo noise and greatly
-reduces transcript dropout/over-allocation artifacts on heavily
-ambiguous loci, while preserving probabilistic attribution.
+stochastic winner sampling.
 
-VBEM algorithm
---------------
-Uses Variational Bayes EM with a sparse Dirichlet prior to robustly
-estimate transcript abundances.  The digamma function ψ replaces
-log in the E-step, which prevents "superset collapse" — the failure
-mode where a transcript containing all exons absorbs all shared-region
-reads.
+EM algorithm
+------------
+Standard EM with effective-length normalization and a uniform
+Dirichlet prior.
 
-1. Initialize α from unique counts + Dirichlet prior α₀.
-2. E-step: posterior ∝ likelihood × exp(ψ(α) − log(ℓ_eff)).
-3. M-step: α_t = α₀ + unique_t + Σ_f P(t | f).
-4. Repeat until convergence.
+1. Initialize theta from unique counts + prior.
+2. E-step: posterior proportional to likelihood * theta_t / eff_len_t.
+3. M-step: theta proportional to unique + em_totals + prior.
+4. Repeat until convergence (|delta| < 1e-6).
 5. Assign: add posterior-expected counts per ambiguous unit.
-
-The sparse prior (α₀ ≪ 1) pushes low-evidence components toward zero
-via the digamma function's behavior: ψ(x) → −∞ much faster than
-log(x) as x → 0, creating a natural sparsity-inducing regularizer.
-This is equivalent to the approach used by salmon's VBEM.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from scipy.special import digamma
 
 from .types import Strand
 from .categories import (
     ANTISENSE_COLS,
-    CountCategory,
-    CountCol,
-    NUM_COUNT_COLS,
+    SpliceType,
+    SpliceStrandCol,
+    NUM_SPLICE_STRAND_COLS,
     SPLICED_COLS,
 )
 
 logger = logging.getLogger(__name__)
 
-# Baseline Dirichlet prior for gDNA shadow components.
-# Shadows should not be sparsified (they model gDNA contamination,
-# not isoform abundance), so they use a non-informative prior.
-_SHADOW_PRIOR = 0.05
-
-# Number of standard EM warm-up iterations before switching to VBEM.
-# Standard EM uses log(theta) instead of digamma(alpha), which avoids
-# the degeneracy where low-alpha components are irrecoverably pushed
-# to zero.  The warm-up provides VBEM with a good starting point.
-# More iterations help at isoform-rich loci (like EGFR) where the EM
-# needs time to find proper abundances before sparsity kicks in.
-_VBEM_WARMUP_ITERS = 5
-
-# Number of VBEM re-estimation passes.  After the initial VBEM
-# converges with fixed models, we re-estimate strand models from the
-# converged posteriors and re-converge.  Repeating this allows the
-# abundance estimates and model parameters to co-adapt.
-_REEST_PASSES = 2
-
 # Epsilon added to theta before taking log to prevent log(0) in EM.
 _EM_LOG_EPSILON = 1e-300
 
-# Relative convergence tolerance for VBEM alpha updates.
-_VBEM_CONVERGENCE_DELTA = 1e-6
-
-# Bayesian priors used during EM model re-estimation.
-_STRAND_PRIOR_N = 10.0   # pseudo-observations for strand
-_INSERT_PRIOR_N = 50.0   # pseudo-observations for insert
-
-# Numeric floor used for strand log-probability clamping.
-_REEST_LOG_FLOOR = 1e-10
+# Relative convergence tolerance for EM theta updates.
+_EM_CONVERGENCE_DELTA = 1e-6
 
 
 # ======================================================================
@@ -93,14 +71,17 @@ _REEST_LOG_FLOOR = 1e-10
 
 @dataclass(slots=True)
 class EMData:
-    """Pre-computed CSR arrays for vectorized EM.
+    """Pre-computed CSR arrays for the global scan pass.
+
+    The global EMData contains mRNA + nRNA candidates only (NO gDNA).
+    gDNA candidates are added per-locus during locus EM construction.
 
     Attributes
     ----------
     offsets : np.ndarray
         int64[n_units + 1] - CSR offsets into flat arrays.
     t_indices : np.ndarray
-        int32[n_candidates] - candidate transcript or shadow indices.
+        int32[n_candidates] - candidate transcript or nRNA shadow indices.
     log_liks : np.ndarray
         float64[n_candidates] - log(P_strand x P_insert) per candidate.
     count_cols : np.ndarray
@@ -109,34 +90,24 @@ class EMData:
         int32[n_units] - best transcript index per unit.
     locus_count_cols : np.ndarray
         uint8[n_units] - count column for the locus transcript.
+    is_spliced : np.ndarray
+        bool[n_units] - True if this unit is a spliced fragment.
+        Unspliced units get a gDNA candidate in the locus EM.
+    frag_starts : np.ndarray
+        int32[n_units] - leftmost aligned position on reference.
+    frag_ends : np.ndarray
+        int32[n_units] - rightmost aligned position on reference.
+    frag_refs : list[str]
+        Reference name per unit (for coverage island construction).
+    gdna_log_liks : np.ndarray
+        float64[n_units] - pre-computed gDNA log-likelihood per unit.
+        -inf for spliced units (gDNA not applicable).
     n_units : int
         Number of ambiguous units.
     n_candidates : int
         Total number of (unit, candidate) entries.
-    gdna_base_index : int
-        First shadow index.
-    cand_strand_dir : np.ndarray or None
-        int8[n_candidates] — strand direction per candidate.
-        +1 = sense (exon matches gene/POS), −1 = antisense, 0 = ambiguous.
-        Used for EM model re-estimation.
-    cand_is_shadow : np.ndarray or None
-        bool[n_candidates] — True for gDNA shadow candidates.
-    cand_insert_sizes : np.ndarray or None
-        int32[n_candidates] — insert size per candidate (expanded from
-        per-unit; same for all candidates within a unit).
-    cand_splice_ll : np.ndarray or None
-        float64[n_candidates] — splice penalty log-likelihood per
-        candidate (non-zero only for gDNA shadows; fixed during EM).
-    init_p_rna_sense : float
-        Initial RNA strand specificity (from exonic_spliced model).
-    init_p_gdna_sense : float
-        Initial gDNA strand balance (from intergenic model).
-    init_rna_insert_ll : np.ndarray or None
-        float64[max_insert+1] — initial RNA insert log-probabilities.
-    init_gdna_insert_ll : np.ndarray or None
-        float64[max_insert+1] — initial gDNA insert log-probabilities.
-    insert_size_max : int
-        Maximum insert size for histogram dimensioning.
+    nrna_base_index : int
+        First nRNA shadow index (= num_transcripts).
     """
 
     offsets: np.ndarray
@@ -145,18 +116,122 @@ class EMData:
     count_cols: np.ndarray
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
+    is_spliced: np.ndarray
+    frag_starts: np.ndarray
+    frag_ends: np.ndarray
+    frag_refs: list
+    gdna_log_liks: np.ndarray
     n_units: int
     n_candidates: int
-    gdna_base_index: int
-    cand_strand_dir: np.ndarray | None = None
-    cand_is_shadow: np.ndarray | None = None
-    cand_insert_sizes: np.ndarray | None = None
-    cand_splice_ll: np.ndarray | None = None
-    init_p_rna_sense: float = 0.5
-    init_p_gdna_sense: float = 0.5
-    init_rna_insert_ll: np.ndarray | None = None
-    init_gdna_insert_ll: np.ndarray | None = None
-    insert_size_max: int = 1000
+    nrna_base_index: int
+
+
+# ======================================================================
+# Locus - connected component of transcripts linked by shared fragments
+# ======================================================================
+
+
+@dataclass(slots=True)
+class Locus:
+    """A connected component of transcripts linked by shared fragments.
+
+    Attributes
+    ----------
+    locus_id : int
+        Sequential label (0-based).
+    transcript_indices : np.ndarray
+        int32 - global transcript indices in this locus.
+    gene_indices : np.ndarray
+        int32 - global gene indices in this locus.
+    unit_indices : np.ndarray
+        int32 - EM unit indices (rows in global CSR) belonging to this locus.
+    gdna_intervals : list[tuple[str, int, int]]
+        Merged genomic intervals (ref, start, end) from unspliced
+        fragment coverage islands.  This IS the gDNA shadow footprint.
+    gdna_footprint_bp : int
+        Sum of interval sizes = gDNA effective length.
+    """
+
+    locus_id: int
+    transcript_indices: np.ndarray
+    gene_indices: np.ndarray
+    unit_indices: np.ndarray
+    gdna_intervals: list = field(default_factory=list)
+    gdna_footprint_bp: int = 0
+
+
+# ======================================================================
+# LocusEMData - per-locus EM sub-problem with local component indices
+# ======================================================================
+
+
+@dataclass(slots=True)
+class LocusEMData:
+    """Per-locus EM sub-problem with locally-renumbered component indices.
+
+    Component layout::
+
+        [0, n_t)       - mRNA (one per transcript in the locus)
+        [n_t, 2*n_t)   - nRNA (one per transcript, nascent shadow)
+        [2*n_t]        - gDNA (ONE merged shadow for the entire locus)
+
+    Total components = 2 * n_transcripts + 1.
+
+    Only UNSPLICED units have a gDNA candidate.  Spliced units compete
+    only among mRNA/nRNA components.
+
+    Attributes
+    ----------
+    locus : Locus
+        The parent locus.
+    offsets : np.ndarray
+        int64[n_local_units + 1] - CSR row pointers.
+    t_indices : np.ndarray
+        int32[n_local_candidates] - LOCAL component indices.
+    log_liks : np.ndarray
+        float64[n_local_candidates] - log-likelihoods.
+    count_cols : np.ndarray
+        uint8[n_local_candidates] - column indices for count accumulation.
+    locus_t_indices : np.ndarray
+        int32[n_local_units] - best transcript index per unit (global).
+    locus_count_cols : np.ndarray
+        uint8[n_local_units] - count column for the best transcript.
+    n_transcripts : int
+        Number of transcripts in the locus.
+    n_components : int
+        2 * n_transcripts + 1 (mRNA + nRNA + 1 gDNA).
+    local_to_global_t : np.ndarray
+        int32[n_transcripts] - maps local transcript index to global.
+    unique_totals : np.ndarray
+        float64[n_components] - init counts (unique + shadow inits).
+    nrna_init : np.ndarray
+        float64[n_transcripts] - per-transcript nRNA init.
+    gdna_init : float
+        Scalar gDNA init from empirical Bayes estimation.
+    effective_lengths : np.ndarray
+        float64[n_components] - effective lengths for EM normalization.
+    prior : np.ndarray
+        float64[n_components] - Dirichlet prior pseudocounts.
+    gdna_intervals : list
+        Genomic intervals (ref, start, end) for gDNA reporting.
+    """
+
+    locus: Locus
+    offsets: np.ndarray
+    t_indices: np.ndarray
+    log_liks: np.ndarray
+    count_cols: np.ndarray
+    locus_t_indices: np.ndarray
+    locus_count_cols: np.ndarray
+    n_transcripts: int
+    n_components: int
+    local_to_global_t: np.ndarray
+    unique_totals: np.ndarray
+    nrna_init: np.ndarray
+    gdna_init: float
+    effective_lengths: np.ndarray
+    prior: np.ndarray
+    gdna_intervals: list = field(default_factory=list)
 
 
 # ======================================================================
@@ -167,26 +242,27 @@ class EMData:
 class ReadCounter:
     """Accumulates read counts into transcript arrays.
 
-    Count arrays have shape (N, 8) where columns correspond to
-    4 categories × 2 strands (sense/antisense).
+    Locus-level EM architecture::
 
-    Uses Variational Bayes EM (VBEM) with a sparse Dirichlet prior
-    for robust abundance estimation, matching the approach used by
-    salmon.  The digamma function in the E-step prevents superset
-    collapse and induces sparsity in the transcript abundance vector.
+        Per locus:
+        [0, n_t)       - mRNA transcript components
+        [n_t, 2*n_t)   - nRNA shadow per transcript
+        [2*n_t]        - gDNA: ONE shadow from coverage islands
+
+    Fragment routing:
+
+    - SPLICED_ANNOT + unique -> deterministic mRNA (no EM)
+    - All other -> enter locus EM
+      - Spliced fragments: mRNA + nRNA candidates only
+      - Unspliced fragments: mRNA + nRNA + gDNA candidates
 
     Parameters
     ----------
     num_transcripts : int
     num_genes : int
     seed : int or None
-        Random seed for reproducible posterior sampling assignment.
     alpha : float
-        Dirichlet prior hyperparameter for VBEM (default 0.01).
-        Small values (≪ 1) induce sparsity; larger values (≥ 1)
-        approach the standard EM behavior.
-    shadow_init : np.ndarray or None
-        Per-gene shadow initialization, shape (num_genes,).
+        Dirichlet prior pseudocount (default 0.01).
     """
 
     def __init__(
@@ -196,31 +272,50 @@ class ReadCounter:
         *,
         seed=None,
         alpha: float = 0.01,
-        shadow_init: np.ndarray | None = None,
         effective_lengths: np.ndarray | None = None,
         t_to_g: np.ndarray | None = None,
+        gene_spans: np.ndarray | None = None,
+        mean_frag: float = 200.0,
+        intronic_spans: np.ndarray | None = None,
+        transcript_spans: np.ndarray | None = None,
     ):
         self.num_transcripts = num_transcripts
         self.num_genes = num_genes
-        self.vbem_prior = alpha
+        self.em_prior = alpha
         self._rng = np.random.default_rng(seed)
 
-        # Base index for per-gene shadow components in EM theta vector.
-        self.gdna_base_index = num_transcripts
+        # nRNA shadow base index (for global CSR component numbering).
+        self.nrna_base_index = num_transcripts
 
-        # Transcript → gene index mapping (for per-gene shadow eff_len)
+        # Transcript -> gene index mapping
         self._t_to_g = (
             np.asarray(t_to_g, dtype=np.int32) if t_to_g is not None
             else None
         )
 
+        # Per-gene genomic spans (end - start)
+        self._gene_spans = (
+            np.asarray(gene_spans, dtype=np.float64)
+            if gene_spans is not None
+            else None
+        )
+        self._mean_frag = float(mean_frag)
+
+        # Per-gene intronic spans (gene_span - merged_exonic_length)
+        self._intronic_spans = (
+            np.asarray(intronic_spans, dtype=np.float64)
+            if intronic_spans is not None
+            else None
+        )
+
+        # Per-transcript genomic spans (end - start, unspliced pre-mRNA length)
+        self._transcript_spans = (
+            np.asarray(transcript_spans, dtype=np.float64)
+            if transcript_spans is not None
+            else None
+        )
+
         # --- Effective lengths for EM normalization ---
-        # Per-transcript effective length (exonic length − mean_frag + 1,
-        # floored to 1).  Used in the EM E-step to convert raw counts
-        # (theta) to abundance-per-nucleotide (rho) so that longer
-        # transcripts do not automatically attract more shared-exon
-        # reads.  When None, all transcripts are assumed to have the
-        # same effective length (no normalization).
         if effective_lengths is not None:
             self._t_eff_len = np.maximum(
                 np.asarray(effective_lengths, dtype=np.float64), 1.0
@@ -231,38 +326,51 @@ class ReadCounter:
             )
 
         self.unique_counts = np.zeros(
-            (num_transcripts, NUM_COUNT_COLS), dtype=np.float64
+            (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
         self.em_counts = np.zeros(
-            (num_transcripts, NUM_COUNT_COLS), dtype=np.float64
+            (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
 
         # Per-transcript high-confidence EM counts (posterior >= threshold).
         self.em_high_conf_counts = np.zeros(
-            (num_transcripts, NUM_COUNT_COLS), dtype=np.float64
+            (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
 
-        # Per-gene gDNA shadow tracking
-        if shadow_init is not None:
-            self.shadow_init = np.asarray(shadow_init, dtype=np.float64)
-        else:
-            self.shadow_init = np.zeros(num_genes, dtype=np.float64)
+        # Per-transcript nRNA shadow initialization and EM counts.
+        self.nrna_init = np.zeros(num_transcripts, dtype=np.float64)
+        self.nrna_em_counts = np.zeros(num_transcripts, dtype=np.float64)
 
-        # Per-gene EM-assigned gDNA counts.
-        self.gdna_em_counts = np.zeros(num_genes, dtype=np.float64)
+        # --- gDNA: locus-level, NOT per-gene ---
+        # Total gDNA count as assigned by locus EM (sum across all loci)
+        self._gdna_em_total = 0.0
+        # Per-gene gDNA summary (for gene-level output compatibility).
+        # Accumulated by mapping gDNA back to overlapping genes.
+        self.gdna_gene_summary = np.zeros(num_genes, dtype=np.float64)
 
-        # Per-transcript locus attribution of gDNA assignments.
+        # Per-locus gDNA results stored as list of dicts
+        self.gdna_locus_results: list[dict] = []
+
+        # Per-transcript gDNA locus attribution (for reporting).
         self.gdna_locus_counts = np.zeros(
-            (num_transcripts, NUM_COUNT_COLS), dtype=np.float64
+            (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
 
-        # Converged transcript abundance from EM (set by run_em)
-        self._converged_theta: np.ndarray | None = None
-        self._converged_alpha: np.ndarray | None = None
+        # --- Pre-EM strand accumulators (for gDNA init via EB) ---
+        # Gene-level: all single-gene UNSPLICED fragments.
+        # Accumulated during scan pass for empirical Bayes gDNA prior.
+        self.gene_sense_all = np.zeros(num_genes, dtype=np.float64)
+        self.gene_antisense_all = np.zeros(num_genes, dtype=np.float64)
+
+        # --- Pre-EM intronic accumulators (for nRNA init) ---
+        self.transcript_intronic_sense = np.zeros(
+            num_transcripts, dtype=np.float64
+        )
+        self.transcript_intronic_antisense = np.zeros(
+            num_transcripts, dtype=np.float64
+        )
 
         # Per-transcript confidence tracking:
-        # _em_posterior_sum[t] = sum of posteriors at which t was chosen
-        # _em_n_assigned[t] = effective number of assigned units to t
         self._em_posterior_sum: np.ndarray | None = None
         self._em_n_assigned: np.ndarray | None = None
 
@@ -271,46 +379,25 @@ class ReadCounter:
         """Per-transcript effective lengths (read-only)."""
         return self._t_eff_len
 
-    def _build_eff_len_vector(self) -> np.ndarray:
-        """Build full effective-length vector for EM (transcripts + shadows).
-
-        For transcript components [0 .. N_t), uses _t_eff_len.
-        For shadow components [N_t .. N_t + N_g), uses the maximum
-        effective length among transcripts within each gene, so that
-        the shadow competes fairly with the gene's transcripts.
-        """
-        n_total = self.num_transcripts + self.num_genes
-        eff_len = np.ones(n_total, dtype=np.float64)
-        eff_len[:self.num_transcripts] = self._t_eff_len
-        # Per-gene shadow eff_len: max over transcripts in that gene.
-        # This is conservative: the shadow "covers" at least as much
-        # effective length as the longest transcript.
-        if hasattr(self, '_t_to_g') and self._t_to_g is not None:
-            for g in range(self.num_genes):
-                mask = self._t_to_g == g
-                if mask.any():
-                    eff_len[self.gdna_base_index + g] = self._t_eff_len[mask].max()
-        else:
-            # Fallback: use mean transcript eff_len for all shadows
-            if self.num_transcripts > 0:
-                mean_eff = self._t_eff_len.mean()
-                eff_len[self.gdna_base_index:] = mean_eff
-        return eff_len
+    @property
+    def gdna_em_count(self) -> float:
+        """Total EM-assigned gDNA count across all loci."""
+        return self._gdna_em_total
 
     @property
     def gdna_unique_count(self) -> float:
-        """Total shadow_init (empirical Bayes gDNA prior)."""
-        return float(self.shadow_init.sum())
+        """gDNA from intergenic fragments (set externally by pipeline)."""
+        return 0.0
 
     @property
-    def gdna_em_count(self) -> float:
-        """Total EM-assigned gDNA count."""
-        return float(self.gdna_em_counts.sum())
+    def nrna_em_count(self) -> float:
+        """Total EM-assigned nRNA count."""
+        return float(self.nrna_em_counts.sum())
 
     @property
     def gdna_total(self) -> float:
-        """Total gDNA count (shadow_init + EM-assigned)."""
-        return self.gdna_unique_count + self.gdna_em_count
+        """Total gDNA count (EM-assigned)."""
+        return self._gdna_em_total
 
     @property
     def gdna_contamination_rate(self) -> float:
@@ -328,12 +415,7 @@ class ReadCounter:
 
     @property
     def t_high_conf_counts(self) -> np.ndarray:
-        """High-confidence transcript counts (unique + EM above threshold).
-
-        Unique counts are always high-confidence.  EM counts are
-        included only when the RNA-normalized posterior of the winner
-        met or exceeded ``confidence_threshold`` during assignment.
-        """
+        """High-confidence transcript counts (unique + EM above threshold)."""
         return self.unique_counts + self.em_high_conf_counts
 
     # ------------------------------------------------------------------
@@ -346,15 +428,7 @@ class ReadCounter:
         gene_strand: int,
         strand_model,
     ) -> bool:
-        """Classify whether a fragment is antisense using the trained model.
-
-        Uses the strand model decision boundary (p < 0.5).
-
-        Returns
-        -------
-        bool
-            True if antisense (p < 0.5), False if sense (p >= 0.5).
-        """
+        """Classify whether a fragment is antisense using the trained model."""
         p = strand_model.strand_likelihood(exon_strand, Strand(gene_strand))
         return p < 0.5
 
@@ -372,252 +446,81 @@ class ReadCounter:
         t_idx = int(next(iter(t_inds)))
         g_idx = int(index.t_to_g_arr[t_idx])
         gene_strand = int(index.g_to_strand_arr[g_idx])
-        sm = strand_models.model_for_category(resolved.count_cat)
+        sm = strand_models.model_for_category(resolved.splice_type)
         anti = self.is_antisense(resolved.exon_strand, gene_strand, sm)
-        col = CountCol.from_category(resolved.count_cat, anti)
+        col = SpliceStrandCol.from_category(resolved.splice_type, anti)
         self.unique_counts[t_idx, col] += 1.0
 
     # ------------------------------------------------------------------
-    # EM iteration (vectorized)
+    # Per-locus EM solver
     # ------------------------------------------------------------------
 
-    def run_em(self, em_data: EMData, *, em_iterations: int = 10) -> None:
-        """Run Variational Bayes EM with two-pass model re-estimation.
+    def run_locus_em(
+        self,
+        locus_em: LocusEMData,
+        *,
+        em_iterations: int = 1000,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Run EM for a single locus sub-problem.
 
-        Uses **VBEM** with a sparse Dirichlet prior, effective length
-        normalization, and post-convergence re-estimation of strand
-        models.
+        Component layout per locus::
 
-        The algorithm proceeds in phases:
+            [0, n_t)       - mRNA transcripts
+            [n_t, 2*n_t)   - nRNA shadows
+            [2*n_t]        - gDNA (single locus shadow)
 
-        1. **Warm-up** — standard EM (5 iterations) to seed α.
-        2. **VBEM pass 0** — converge with initial (empirical) models.
-        3. **Re-estimate** strand models from converged posteriors.
-        4. **VBEM pass 1** — re-converge with updated log-likelihoods.
+        Only unspliced units have a gDNA candidate.  Spliced units
+        compete only among mRNA/nRNA.
 
-        This two-pass strategy avoids the instability of mid-loop
-        re-estimation: posteriors must be converged before they can
-        reliably inform model parameters.
-
-        Initial strand and insert models come from empirical per-category
-        observations (trained during the BAM scan).  After the first
-        VBEM convergence, strand models are re-estimated from the
-        converged posterior-weighted fragment observations, improving
-        RNA/gDNA discrimination.
-
-        The digamma function ψ replaces log(θ) in the E-step:
-
-            log q(t|f) = log L(f|t) + ψ(α_t) − log(ℓ_eff_t)
-
-        This prevents "superset collapse" and induces sparsity.
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            (theta, alpha) - converged parameters for this locus.
         """
-        n_total = self.num_transcripts + self.num_genes
-        gdna_base = self.gdna_base_index
+        n_total = locus_em.n_components
+        prior = locus_em.prior.copy()
+        unique_totals = locus_em.unique_totals.copy()
 
-        # Per-component prior: sparse for gDNA shadows, standard
-        # for transcript components.
-        #
-        # The VBEM digamma-based E-step induces sparsity that is
-        # essential for gDNA shadow components but harmful for
-        # transcript isoform estimation.  When competing isoforms
-        # share most of their exonic region (common in multi-isoform
-        # genes like EGFR, FGFR2, BRCA1), the digamma positive
-        # feedback loop can erroneously push a well-expressed isoform
-        # to zero — e.g. EGFR main isoform (truth=9222→0 with VBEM).
-        #
-        # Solution: **hybrid EM** — use standard EM (log theta) for
-        # transcript components and VBEM (digamma alpha) only for
-        # gDNA shadow components.  This preserves gDNA sparsity
-        # while avoiding the isoform collapse artifact.  The E-step
-        # computes per-component log-weights as a mixture:
-        #
-        #   log_weight_t = log(θ_t)            for transcripts
-        #   log_weight_s = ψ(α_s)              for gDNA shadows
-        #
-        # Both are normalized by effective length.
-        prior = np.full(n_total, self.vbem_prior, dtype=np.float64)
-        prior[gdna_base:] = _SHADOW_PRIOR
+        offsets = locus_em.offsets
+        t_indices = locus_em.t_indices
+        log_liks = locus_em.log_liks
 
-        # Initialize alpha from unique counts
-        unique_totals = np.zeros(n_total, dtype=np.float64)
-        unique_totals[:self.num_transcripts] = self.unique_counts.sum(axis=1)
-        unique_totals[gdna_base:gdna_base + self.num_genes] = self.shadow_init
+        n_units = len(offsets) - 1
 
-        if em_data.n_units == 0 or em_data.n_candidates == 0:
+        if n_units == 0 or len(t_indices) == 0:
             alpha = unique_totals + prior
-            self._converged_alpha = alpha
-            self._converged_theta = alpha / alpha.sum()
-            return
+            total = alpha.sum()
+            theta = alpha / total if total > 0 else alpha
+            return theta, alpha
 
-        offsets = em_data.offsets
-        t_indices = em_data.t_indices
-        log_liks = em_data.log_liks  # Modified in-place during re-estimation
         seg_lengths = np.diff(offsets)
-
-        # Pre-compute log effective lengths for the E-step
-        eff_len = self._build_eff_len_vector()
+        eff_len = locus_em.effective_lengths
         log_eff_len = np.log(eff_len)
 
-        # ── Model re-estimation setup ───────────────────────────────
-        # Check if per-candidate metadata is available for model
-        # re-estimation.  If not, fall back to fixed-model EM.
-        can_reestimate = (
-            em_data.cand_strand_dir is not None
-            and em_data.cand_is_shadow is not None
-            and em_data.cand_insert_sizes is not None
-            and em_data.cand_splice_ll is not None
-            and em_data.init_rna_insert_ll is not None
-            and em_data.init_gdna_insert_ll is not None
-        )
+        # Balanced initialization: floor transcript components at
+        # average shadow weight to prevent shadow-heavy local optima.
+        theta_init = unique_totals.copy()
+        n_t = locus_em.n_transcripts
+        gdna_idx = 2 * n_t  # index of the single gDNA component
+        if n_t > 0:
+            shadow_weights = np.concatenate([
+                theta_init[n_t:2 * n_t],               # nRNA
+                theta_init[gdna_idx:gdna_idx + 1],     # gDNA
+            ])
+            avg_shadow = float(shadow_weights.mean())
+            if avg_shadow > 0:
+                low = theta_init[:n_t] < avg_shadow
+                theta_init[:n_t][low] = avg_shadow
 
-        if can_reestimate:
-            cand_strand_dir = em_data.cand_strand_dir
-            cand_is_shadow = em_data.cand_is_shadow
-            cand_insert_sizes = em_data.cand_insert_sizes
-            cand_splice_ll = em_data.cand_splice_ll
-            max_isize = em_data.insert_size_max
-
-            rna_mask = ~cand_is_shadow
-            gdna_mask = cand_is_shadow
-
-            # Pre-compute strand direction masks (invariant across iterations)
-            sense_mask = cand_strand_dir == 1
-            anti_mask = cand_strand_dir == -1
-            ambig_mask = cand_strand_dir == 0
-
-            # Insert size validity mask (insert_size > 0)
-            valid_insert = cand_insert_sizes > 0
-            # Clamp insert sizes into histogram range
-            clamped_isizes = np.clip(cand_insert_sizes, 0, max_isize)
-
-            # Current model parameters (evolve during EM)
-            p_rna_sense = em_data.init_p_rna_sense
-            p_gdna_sense = em_data.init_p_gdna_sense
-            rna_insert_ll = em_data.init_rna_insert_ll.copy()
-            gdna_insert_ll = em_data.init_gdna_insert_ll.copy()
-
-            # Insert histogram priors (scaled copies of initial PMFs)
-            _init_rna_pmf = np.exp(rna_insert_ll)
-            _init_rna_pmf /= _init_rna_pmf.sum()
-            _rna_hist_prior = _init_rna_pmf * _INSERT_PRIOR_N
-
-            _init_gdna_pmf = np.exp(gdna_insert_ll)
-            _init_gdna_pmf /= _init_gdna_pmf.sum()
-            _gdna_hist_prior = _init_gdna_pmf * _INSERT_PRIOR_N
-
-            # Pre-compute the non-strand component of log_liks.
-            # We only re-estimate the strand component during EM;
-            # re-estimating insert separately for RNA/gDNA creates
-            # a self-reinforcing asymmetry where the dominant
-            # component gets a denser histogram → better insert LL
-            # → becomes more dominant.  Instead, we keep the
-            # original insert + splice LL fixed (insert cancels
-            # between RNA and gDNA as in the original design).
-            _init_strand_ll = np.full(len(log_liks), np.log(0.5))
-            _init_strand_ll[rna_mask & sense_mask] = np.log(
-                max(p_rna_sense, _REEST_LOG_FLOOR)
-            )
-            _init_strand_ll[rna_mask & anti_mask] = np.log(
-                max(1.0 - p_rna_sense, _REEST_LOG_FLOOR)
-            )
-            _init_strand_ll[gdna_mask & sense_mask] = np.log(
-                max(p_gdna_sense, _REEST_LOG_FLOOR)
-            )
-            _init_strand_ll[gdna_mask & anti_mask] = np.log(
-                max(1.0 - p_gdna_sense, _REEST_LOG_FLOOR)
-            )
-            # non-strand = initial_log_liks - initial_strand
-            _non_strand_ll = log_liks - _init_strand_ll
-
-        def _reestimate_and_rescore(posteriors):
-            """Re-estimate strand/insert models and recompute log_liks.
-
-            Uses posterior weights to decompose fragments into RNA and
-            gDNA components.  **Strand models** are re-estimated and
-            used to update log_liks.  **Insert models** are
-            re-estimated for monitoring but NOT used for log_lik
-            updates — using separate insert models for RNA and gDNA
-            creates a self-reinforcing asymmetry where the dominant
-            component gets better insert LL, so we keep insert
-            cancellation from the original design.
-
-            Bayesian regularization prevents instability: initial
-            model parameters serve as priors (pseudo-observations).
-            """
-            nonlocal p_rna_sense, p_gdna_sense, rna_insert_ll, gdna_insert_ll
-
-            # ── Strand model re-estimation (Beta prior) ─────────────
-            # Only RNA strand specificity is re-estimated.  gDNA is
-            # definitionally unstranded (~0.5) — re-estimating it
-            # would contaminate the model with RNA signal from
-            # fragments that have high gDNA posteriors in early
-            # iterations, collapsing RNA/gDNA discrimination.
-            rna_sense_wt = (
-                posteriors[rna_mask & sense_mask].sum()
-                + em_data.init_p_rna_sense * _STRAND_PRIOR_N
-            )
-            rna_anti_wt = (
-                posteriors[rna_mask & anti_mask].sum()
-                + (1.0 - em_data.init_p_rna_sense) * _STRAND_PRIOR_N
-            )
-            p_rna_sense = rna_sense_wt / (rna_sense_wt + rna_anti_wt)
-            # p_gdna_sense stays fixed at init value
-
-            # ── Insert model re-estimation (monitoring only) ────────
-            # Estimate separate RNA/gDNA insert histograms but do NOT
-            # use them for scoring (insert cancels by design).
-            rna_hist = _rna_hist_prior.copy()
-            gdna_hist = _gdna_hist_prior.copy()
-
-            rna_valid = rna_mask & valid_insert
-            gdna_valid = gdna_mask & valid_insert
-
-            if rna_valid.any():
-                np.add.at(
-                    rna_hist, clamped_isizes[rna_valid],
-                    posteriors[rna_valid]
-                )
-            if gdna_valid.any():
-                np.add.at(
-                    gdna_hist, clamped_isizes[gdna_valid],
-                    posteriors[gdna_valid]
-                )
-
-            rna_total = rna_hist.sum()
-            rna_insert_ll[:] = (
-                np.log(rna_hist + 1.0)
-                - np.log(rna_total + max_isize + 1)
-            )
-            gdna_total = gdna_hist.sum()
-            gdna_insert_ll[:] = (
-                np.log(gdna_hist + 1.0)
-                - np.log(gdna_total + max_isize + 1)
-            )
-
-            # ── Recompute log_liks (strand only) ────────────────────
-            # Only the strand component is updated; insert + splice
-            # are preserved from the initial scoring.
-            log_p_sense_rna = np.log(max(p_rna_sense, _REEST_LOG_FLOOR))
-            log_p_anti_rna = np.log(max(1.0 - p_rna_sense, _REEST_LOG_FLOOR))
-            log_p_sense_gdna = np.log(max(p_gdna_sense, _REEST_LOG_FLOOR))
-            log_p_anti_gdna = np.log(max(1.0 - p_gdna_sense, _REEST_LOG_FLOOR))
-            log_half = np.log(0.5)
-
-            strand_ll = np.full(len(log_liks), log_half, dtype=np.float64)
-            strand_ll[rna_mask & sense_mask] = log_p_sense_rna
-            strand_ll[rna_mask & anti_mask] = log_p_anti_rna
-            strand_ll[gdna_mask & sense_mask] = log_p_sense_gdna
-            strand_ll[gdna_mask & anti_mask] = log_p_anti_gdna
-
-            log_liks[:] = strand_ll + _non_strand_ll
-
-        # ── Phase 1: Standard EM warm-up ────────────────────────────
-        theta = (unique_totals + prior)
-        theta /= theta.sum()
-        n_warmup = min(_VBEM_WARMUP_ITERS, em_iterations)
+        theta = theta_init + prior
+        total = theta.sum()
+        if total > 0:
+            theta /= total
 
         em_totals = np.zeros(n_total, dtype=np.float64)
-        for it in range(n_warmup):
+        n_iters = 0
+        for _ in range(em_iterations):
+            # E-step
             log_weights = np.log(theta + _EM_LOG_EPSILON) - log_eff_len
             log_posteriors = log_liks + log_weights[t_indices]
 
@@ -627,212 +530,106 @@ class ReadCounter:
             seg_sum = np.add.reduceat(posteriors, offsets[:-1])
             posteriors /= np.repeat(seg_sum, seg_lengths)
 
+            # M-step
             em_totals = np.zeros(n_total, dtype=np.float64)
             np.add.at(em_totals, t_indices, posteriors)
 
-            theta = unique_totals + em_totals + prior
-            theta /= theta.sum()
+            theta_new = unique_totals + em_totals + prior
+            total = theta_new.sum()
+            if total > 0:
+                theta_new /= total
 
-        logger.debug(
-            f"  VBEM warm-up: {n_warmup} standard EM iterations"
-        )
+            delta = np.abs(theta_new - theta).sum()
+            theta = theta_new
+            n_iters += 1
 
-        # ── Phase 2: VBEM with digamma ─────────────────────────────
-        # Uses VBEM (digamma alpha) for the convergence phase.
-        # The digamma function provides sparsity-inducing
-        # regularization that helps push truly absent transcripts
-        # toward zero (important when annotation includes many
-        # non-expressed isoforms).
-        #
-        # The prior (self.vbem_prior) controls sparsity strength:
-        #   - α₀ = 0.01: aggressive sparsity — can collapse
-        #     competing isoforms that share exonic regions
-        #   - α₀ = 0.5:  moderate sparsity — suppresses non-expressed
-        #     isoforms while preserving well-supported ones
-        #   - α₀ = 1.0:  minimal sparsity — approaches standard EM
-        #
-        # Two-pass model re-estimation:
-        #   Pass 0: converge with initial (empirical) models
-        #   Pass 1+: re-estimate strand from converged posteriors,
-        #            then re-converge with updated log_liks
+            if delta < _EM_CONVERGENCE_DELTA:
+                break
+
         alpha = unique_totals + em_totals + prior
-        n_vbem = em_iterations - n_warmup
-        n_passes = _REEST_PASSES if can_reestimate else 1
-        total_vbem_iters = 0
-
-        for reest_pass in range(n_passes):
-            for it in range(n_vbem):
-                # E-step: posterior ∝ L(f|t) × exp(ψ(α_t) − log(ℓ_eff_t))
-                log_weights = digamma(alpha) - log_eff_len
-                log_posteriors = log_liks + log_weights[t_indices]
-
-                # Segment-wise log-sum-exp normalization
-                seg_max = np.maximum.reduceat(log_posteriors, offsets[:-1])
-                log_posteriors -= np.repeat(seg_max, seg_lengths)
-                posteriors = np.exp(log_posteriors)
-                seg_sum = np.add.reduceat(posteriors, offsets[:-1])
-                posteriors /= np.repeat(seg_sum, seg_lengths)
-
-                # M-step: accumulate fractional counts per component
-                em_totals = np.zeros(n_total, dtype=np.float64)
-                np.add.at(em_totals, t_indices, posteriors)
-
-                # Update Dirichlet hyperparameters
-                alpha_new = unique_totals + em_totals + prior
-
-                delta = np.abs(alpha_new - alpha).sum() / max(alpha.sum(), 1.0)
-                alpha = alpha_new
-                total_vbem_iters += 1
-
-                logger.debug(
-                    f"  VBEM pass {reest_pass} iteration {it + 1}: "
-                    f"delta={delta:.6f}"
-                )
-
-                if delta < _VBEM_CONVERGENCE_DELTA:
-                    logger.debug(
-                        f"  VBEM pass {reest_pass} converged after "
-                        f"{it + 1} iterations"
-                    )
-                    break
-
-            # After convergence, re-estimate models for next pass
-            if can_reestimate and reest_pass < n_passes - 1:
-                _reestimate_and_rescore(posteriors)
-                logger.debug(
-                    f"  Re-estimated strand: p_rna_sense={p_rna_sense:.4f}"
-                )
-
-        logger.debug(f"  VBEM total iterations: {total_vbem_iters}")
-
-        self._converged_alpha = alpha
-        self._converged_theta = alpha / alpha.sum()
-
-        # Store re-estimated model parameters for downstream use
-        if can_reestimate:
-            self._em_p_rna_sense = p_rna_sense
-            self._em_p_gdna_sense = p_gdna_sense
-            logger.info(
-                f"  EM re-estimated models: p_rna_sense={p_rna_sense:.4f}, "
-                f"p_gdna_sense={p_gdna_sense:.4f}"
-            )
-
-        gdna_alpha_sum = alpha[gdna_base:gdna_base + self.num_genes].sum()
-        shadow_init_sum = self.shadow_init.sum()
-        logger.info(
-            f"  gDNA alpha (sum) = {gdna_alpha_sum:.1f}, "
-            f"shadow_init (sum) = {shadow_init_sum:.0f} / "
-            f"{unique_totals.sum():.0f}"
-        )
+        return theta, alpha
 
     # ------------------------------------------------------------------
-    # Posterior expected-count assignment
+    # Per-locus posterior assignment
     # ------------------------------------------------------------------
 
-    def assign_ambiguous(
+    def assign_locus_ambiguous(
         self,
-        em_data: EMData,
+        locus_em: LocusEMData,
+        theta: np.ndarray,
         *,
-        gdna_threshold: float = 0.5,
         confidence_threshold: float = 0.95,
-    ) -> None:
-        """Assign ambiguous units via thresholded posterior expected counts.
+    ) -> float:
+        """Assign ambiguous units within one locus, scatter to global arrays.
 
-        For each EM unit the posterior over candidates is computed from
-        the converged theta.  The RNA/gDNA decision is deterministic:
+        Each unit is assigned fractionally across all components (mRNA,
+        nRNA, gDNA) using the converged posterior probabilities.  This
+        eliminates the binary gDNA threshold and prevents cliff-edge
+        wipeout behaviour.
 
-                * If ``sum(posterior_RNA) >= gdna_threshold``, the unit is
-                    classified as RNA and expected counts are added to all RNA
-                    candidates using the RNA-renormalized posteriors.
-        * Otherwise the unit is assigned to its gDNA shadow.
-
-        For RNA units whose maximum RNA-normalized posterior meets or
-        exceeds ``confidence_threshold``, the same expected RNA
-        contributions are also added to ``em_high_conf_counts``.
-
-        Must be called after ``run_em()``.
-
-        Parameters
-        ----------
-        gdna_threshold : float
-            Minimum sum of RNA posteriors to classify a unit as RNA.
-            0.0 → never assign to gDNA; 1.0 → only shadow-free units
-            are RNA.
-        confidence_threshold : float
-            Minimum RNA-normalized posterior for an assignment to be
-            considered high-confidence (default 0.95).
+        Returns
+        -------
+        float
+            Fractional count of fragments assigned to gDNA in this locus.
         """
-        if em_data.n_units == 0 or em_data.n_candidates == 0:
-            return
+        offsets = locus_em.offsets
+        t_indices = locus_em.t_indices
+        log_liks = locus_em.log_liks
+        count_cols_arr = locus_em.count_cols
+        n_units = len(offsets) - 1
 
-        alpha = self._converged_alpha
-        if alpha is None:
-            raise RuntimeError(
-                "run_em() must be called before assign_ambiguous()"
-            )
+        if n_units == 0 or len(t_indices) == 0:
+            return 0.0
 
-        offsets = em_data.offsets
-        t_indices = em_data.t_indices
-        log_liks = em_data.log_liks
-        count_cols_arr = em_data.count_cols
+        n_t = locus_em.n_transcripts
+        gdna_idx = 2 * n_t  # the single gDNA component index
+        local_to_global_t = locus_em.local_to_global_t
         seg_lengths = np.diff(offsets)
 
-        # Compute final posteriors using converged VBEM alpha
-        eff_len = self._build_eff_len_vector()
-        log_weights = digamma(alpha) - np.log(eff_len)
-
+        # Compute posteriors from converged theta
+        eff_len = locus_em.effective_lengths
+        log_weights = (
+            np.log(theta + _EM_LOG_EPSILON) - np.log(eff_len)
+        )
         log_posteriors = log_liks + log_weights[t_indices]
 
-        # Segment-wise softmax normalization
         seg_max = np.maximum.reduceat(log_posteriors, offsets[:-1])
         log_posteriors -= np.repeat(seg_max, seg_lengths)
         posteriors = np.exp(log_posteriors)
         seg_sum = np.add.reduceat(posteriors, offsets[:-1])
         posteriors /= np.repeat(seg_sum, seg_lengths)
 
-        # Per-unit thresholded expected-count accumulation
-        gdna_base = self.gdna_base_index
-        n_units = em_data.n_units
+        gdna_count = 0.0
 
         for u in range(n_units):
             s, e = int(offsets[u]), int(offsets[u + 1])
             p = posteriors[s:e]
             t_seg = t_indices[s:e]
 
-            rna_mask = t_seg < gdna_base
-            has_shadow = (~rna_mask).any()
-            p_rna = p[rna_mask]
-            p_rna_total = float(p_rna.sum())
+            is_mrna = t_seg < n_t
+            is_nrna = (t_seg >= n_t) & (t_seg < gdna_idx)
+            is_gdna = t_seg == gdna_idx
 
-            if p_rna_total >= gdna_threshold or not has_shadow:
-                # --- Assign to RNA: expected counts over RNA candidates ---
-                rna_local = np.where(rna_mask)[0]
-                if len(rna_local) == 0:
-                    continue
-                if p_rna_total > 0.0:
-                    rna_p_norm = p_rna / p_rna_total
-                else:
-                    rna_p_norm = np.full(
-                        len(rna_local),
-                        1.0 / len(rna_local),
-                        dtype=np.float64,
-                    )
-
-                rna_idx = s + rna_local
-                rna_t = t_indices[rna_idx]
-                rna_col = count_cols_arr[rna_idx]
-                np.add.at(self.em_counts, (rna_t, rna_col), rna_p_norm)
-
-                max_conf = float(rna_p_norm.max())
+            # --- Fractional mRNA assignment ---
+            mrna_local = np.where(is_mrna)[0]
+            if len(mrna_local) > 0:
+                p_mrna = p[mrna_local]
+                local_ts = t_seg[mrna_local]
+                global_ts = local_to_global_t[local_ts]
+                mrna_col = count_cols_arr[s + mrna_local]
+                np.add.at(
+                    self.em_counts,
+                    (global_ts, mrna_col),
+                    p_mrna,
+                )
+                max_conf = float(p_mrna.max())
                 if max_conf >= confidence_threshold:
                     np.add.at(
                         self.em_high_conf_counts,
-                        (rna_t, rna_col),
-                        rna_p_norm,
+                        (global_ts, mrna_col),
+                        p_mrna,
                     )
-
-                # Track posterior confidence proxy per transcript:
-                # E[p | assigned to transcript] under posterior sampling.
+                # Confidence tracking
                 if self._em_posterior_sum is None:
                     self._em_posterior_sum = np.zeros(
                         self.num_transcripts, dtype=np.float64
@@ -840,52 +637,40 @@ class ReadCounter:
                     self._em_n_assigned = np.zeros(
                         self.num_transcripts, dtype=np.float64
                     )
-                np.add.at(self._em_posterior_sum, rna_t, rna_p_norm * rna_p_norm)
-                np.add.at(self._em_n_assigned, rna_t, rna_p_norm)
-            else:
-                # --- Assign to gDNA shadow ---
-                gdna_local = np.where(~rna_mask)[0]
-                if len(gdna_local) == 0:
-                    continue
+                np.add.at(
+                    self._em_posterior_sum,
+                    global_ts, p_mrna * p_mrna,
+                )
+                np.add.at(self._em_n_assigned, global_ts, p_mrna)
 
-                gdna_idx = s + gdna_local
-                gdna_t = t_indices[gdna_idx]
-                gdna_genes = gdna_t - gdna_base
+            # --- Fractional nRNA assignment ---
+            nrna_local = np.where(is_nrna)[0]
+            if len(nrna_local) > 0:
+                p_nrna = p[nrna_local]
+                local_nrna_ts = t_seg[nrna_local] - n_t
+                global_nrna_ts = local_to_global_t[local_nrna_ts]
+                np.add.at(self.nrna_em_counts, global_nrna_ts, p_nrna)
 
-                p_gdna = p[gdna_local]
-                p_gdna_total = float(p_gdna.sum())
-                if p_gdna_total > 0.0:
-                    p_gdna_norm = p_gdna / p_gdna_total
-                else:
-                    p_gdna_norm = np.full(
-                        len(gdna_local),
-                        1.0 / len(gdna_local),
-                        dtype=np.float64,
-                    )
-                np.add.at(self.gdna_em_counts, gdna_genes, p_gdna_norm)
+            # --- Fractional gDNA assignment ---
+            gdna_local = np.where(is_gdna)[0]
+            if len(gdna_local) > 0:
+                p_gdna = float(p[gdna_local].sum())
+                gdna_count += p_gdna
 
-                # Locus attribution: keep one full unit at the local locus.
-                locus_t = em_data.locus_t_indices[u]
-                locus_ct = em_data.locus_count_cols[u]
+                # Locus attribution for reporting
+                locus_t = locus_em.locus_t_indices[u]
+                locus_ct = locus_em.locus_count_cols[u]
                 if locus_t >= 0:
-                    self.gdna_locus_counts[locus_t, locus_ct] += 1.0
+                    self.gdna_locus_counts[locus_t, locus_ct] += p_gdna
+
+        return gdna_count
 
     # ------------------------------------------------------------------
     # Confidence / posterior metrics
     # ------------------------------------------------------------------
 
     def posterior_mean(self) -> np.ndarray:
-        """Per-transcript mean posterior at assignment.
-
-        For each transcript, this is the average posterior probability
-        at which a unit was assigned to it.  Returns NaN for
-        transcripts with no EM assignments.
-
-        Returns
-        -------
-        np.ndarray
-            float64[num_transcripts]
-        """
+        """Per-transcript mean posterior at assignment."""
         n_assigned = self._em_n_assigned
         if n_assigned is None:
             return np.full(self.num_transcripts, np.nan)
@@ -903,32 +688,16 @@ class ReadCounter:
     # ------------------------------------------------------------------
 
     def get_counts_df(self, index) -> pd.DataFrame:
-        """Primary transcript-level counts with identifiers.
+        """Primary transcript-level counts with identifiers."""
+        total = self.t_counts
+        unique = self.unique_counts
 
-        Columns: transcript_id, gene_id, gene_name, count,
-        count_unique, count_spliced, count_em, count_high_conf,
-        n_gdna, posterior_mean.
-        """
-        total = self.t_counts  # (N_t, 8)
-        unique = self.unique_counts  # (N_t, 8)
-
-        # Total count = sum across all 8 columns
         count_total = total.sum(axis=1)
         count_unique = unique.sum(axis=1)
-
-        # Spliced = SPLICED_ANNOT + SPLICED_UNANNOT (both strands)
         count_spliced = total[:, list(SPLICED_COLS)].sum(axis=1)
-
-        # EM count
         count_em = self.em_counts.sum(axis=1)
-
-        # High-confidence count (unique + EM above threshold)
         count_high_conf = self.t_high_conf_counts.sum(axis=1)
-
-        # Per-transcript gDNA locus attribution
         n_gdna = self.gdna_locus_counts.sum(axis=1)
-
-        # Posterior mean
         pmean = self.posterior_mean()
 
         df = pd.DataFrame({
@@ -946,42 +715,50 @@ class ReadCounter:
         return df
 
     def get_gene_counts_df(self, index) -> pd.DataFrame:
-        """Primary gene-level counts with identifiers and gDNA summary.
-
-        Columns: gene_id, gene_name, count, count_unique,
-        count_spliced, count_em, count_high_conf, n_gdna,
-        n_antisense, gdna_rate.
-        """
+        """Primary gene-level counts with gDNA summary."""
         t_to_g = index.t_to_g_arr
         total = self.t_counts
         unique = self.unique_counts
 
         n_genes = index.num_genes
-        g_total = np.zeros((n_genes, NUM_COUNT_COLS), dtype=np.float64)
+        g_total = np.zeros((n_genes, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         np.add.at(g_total, t_to_g, total)
 
-        g_unique = np.zeros((n_genes, NUM_COUNT_COLS), dtype=np.float64)
+        g_unique = np.zeros((n_genes, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         np.add.at(g_unique, t_to_g, unique)
 
         count_total = g_total.sum(axis=1)
         count_unique = g_unique.sum(axis=1)
-
         count_spliced = g_total[:, list(SPLICED_COLS)].sum(axis=1)
+
         count_em_arr = np.zeros(n_genes, dtype=np.float64)
         np.add.at(count_em_arr, t_to_g, self.em_counts.sum(axis=1))
 
-        # High-confidence counts aggregated to gene level
         count_hc_arr = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(
-            count_hc_arr, t_to_g, self.t_high_conf_counts.sum(axis=1)
-        )
+        np.add.at(count_hc_arr, t_to_g, self.t_high_conf_counts.sum(axis=1))
 
-        n_gdna = self.gdna_em_counts.copy()
+        # nRNA per gene
+        n_nrna_per_t = self.nrna_init + self.nrna_em_counts
+        n_nrna = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(n_nrna, t_to_g, n_nrna_per_t)
+
+        # gDNA per gene (from genomic-coordinate gDNA mapped to genes)
+        n_gdna = self.gdna_gene_summary.copy()
 
         # Antisense unique counts per gene
         t_antisense = unique[:, list(ANTISENSE_COLS)].sum(axis=1)
         n_antisense = np.zeros(n_genes, dtype=np.float64)
         np.add.at(n_antisense, t_to_g, t_antisense)
+
+        # Pre-EM strand accumulators
+        n_sense_all = self.gene_sense_all
+        n_antisense_all = self.gene_antisense_all
+
+        # Intronic accumulators per gene
+        n_intronic_sense = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(n_intronic_sense, t_to_g, self.transcript_intronic_sense)
+        n_intronic_antisense = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(n_intronic_antisense, t_to_g, self.transcript_intronic_antisense)
 
         # gDNA rate per gene
         denom = count_total + n_gdna
@@ -996,22 +773,43 @@ class ReadCounter:
             "count_spliced": count_spliced,
             "count_em": count_em_arr,
             "count_high_conf": count_hc_arr,
+            "n_nrna": n_nrna,
             "n_gdna": n_gdna,
             "n_antisense": n_antisense,
+            "n_sense_all": n_sense_all,
+            "n_antisense_all": n_antisense_all,
+            "n_intronic_sense": n_intronic_sense,
+            "n_intronic_antisense": n_intronic_antisense,
             "gdna_rate": gdna_rate,
         })
         return df
+
+    def get_gdna_intervals_df(self) -> pd.DataFrame:
+        """Genomic-coordinate gDNA output: per-locus coverage islands."""
+        rows = []
+        for entry in self.gdna_locus_results:
+            for ref, start, end in entry["intervals"]:
+                rows.append({
+                    "locus_id": entry["locus_id"],
+                    "ref": ref,
+                    "start": start,
+                    "end": end,
+                    "gdna_count": entry["gdna_count"],
+                    "footprint_bp": entry["footprint_bp"],
+                })
+        if not rows:
+            return pd.DataFrame(
+                columns=["locus_id", "ref", "start", "end",
+                         "gdna_count", "footprint_bp"]
+            )
+        return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
     # Output - detail (long format QC breakdown)
     # ------------------------------------------------------------------
 
     def get_detail_df(self, index) -> pd.DataFrame:
-        """Detailed counts in long format for QC.
-
-        Each row is a nonzero (transcript, category, source) combination.
-        Columns: transcript_id, gene_id, category, source, count.
-        """
+        """Detailed counts in long format for QC."""
         t_ids = index.t_df["t_id"].values
         g_ids = index.t_df["g_id"].values
 
@@ -1020,14 +818,13 @@ class ReadCounter:
             ("unique", self.unique_counts),
             ("em", self.em_counts),
         ):
-            # Sum sense + antisense per category -> (N_t, 4)
             cat_counts = np.zeros(
-                (self.num_transcripts, len(CountCategory)),
+                (self.num_transcripts, len(SpliceType)),
                 dtype=np.float64,
             )
-            for cat in CountCategory:
-                sense_col = CountCol.from_category(cat, False)
-                anti_col = CountCol.from_category(cat, True)
+            for cat in SpliceType:
+                sense_col = SpliceStrandCol.from_category(cat, False)
+                anti_col = SpliceStrandCol.from_category(cat, True)
                 cat_counts[:, int(cat)] = (
                     counts[:, sense_col] + counts[:, anti_col]
                 )
@@ -1035,13 +832,13 @@ class ReadCounter:
             nz_t, nz_cat = np.nonzero(cat_counts)
             if len(nz_t) == 0:
                 continue
-            cat_order = [c.name.lower() for c in CountCategory]
+            cat_order = [c.name.lower() for c in SpliceType]
             frames.append(
                 pd.DataFrame({
                     "transcript_id": t_ids[nz_t],
                     "gene_id": g_ids[nz_t],
                     "category": pd.Categorical(
-                        [CountCategory(c).name.lower() for c in nz_cat],
+                        [SpliceType(c).name.lower() for c in nz_cat],
                         categories=cat_order,
                     ),
                     "source": source_name,
@@ -1065,12 +862,26 @@ class ReadCounter:
     def gdna_summary(self) -> dict:
         """Summary dict of gDNA contamination estimates."""
         return {
-            "gdna_unique_count": float(self.gdna_unique_count),
-            "gdna_em_count": float(self.gdna_em_count),
+            "nrna_init_total": float(self.nrna_init.sum()),
+            "nrna_em_total": float(self.nrna_em_counts.sum()),
+            "gdna_em_total": float(self._gdna_em_total),
             "gdna_total": float(self.gdna_total),
             "gdna_contamination_rate": float(
                 round(self.gdna_contamination_rate, 6)
             ),
             "rna_unique_total": float(self.unique_counts.sum()),
             "rna_em_total": float(self.em_counts.sum()),
+            "gene_sense_all_total": float(self.gene_sense_all.sum()),
+            "gene_antisense_all_total": float(
+                self.gene_antisense_all.sum()
+            ),
+            "transcript_intronic_sense_total": float(
+                self.transcript_intronic_sense.sum()
+            ),
+            "transcript_intronic_antisense_total": float(
+                self.transcript_intronic_antisense.sum()
+            ),
+            "n_loci_with_gdna": sum(
+                1 for e in self.gdna_locus_results if e["gdna_count"] > 0
+            ),
         }

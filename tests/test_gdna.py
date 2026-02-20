@@ -1,15 +1,20 @@
-"""Tests for gDNA contamination modeling in EM.
+"""Tests for gDNA contamination modeling in locus-level EM.
 
-Verifies that the gDNA pseudo-component correctly competes with
-transcripts in the EM, and that gDNA assignments are tracked
-in the separate gdna_em_count / gdna_locus_counts arrays.
+Verifies that:
+- _score_gdna_candidate computes correct log-likelihoods
+- gDNA shadow component competes with mRNA in locus EM
+- gDNA assignments propagate to correct counters
+- _compute_gdna_rate_from_strand returns correct rates
+- _compute_nrna_init returns correct nRNA priors
+- StrandModels container works correctly
+- PipelineStats gDNA fields are correct
 """
 
 import numpy as np
 import pytest
 
-from hulkrna.categories import CountCategory, CountCol, NUM_COUNT_COLS
-from hulkrna.counter import ReadCounter, EMData
+from hulkrna.categories import SpliceType, SpliceStrandCol, NUM_SPLICE_STRAND_COLS
+from hulkrna.counter import ReadCounter, EMData, Locus, LocusEMData
 from hulkrna.pipeline import _score_gdna_candidate, _GDNA_SPLICE_PENALTIES
 from hulkrna.insert_model import InsertSizeModels
 from hulkrna.strand_model import StrandModel, StrandModels
@@ -17,7 +22,7 @@ from hulkrna.types import Strand
 
 
 # Default column for UNSPLICED_SENSE
-_UNSPLICED_SENSE = int(CountCol.UNSPLICED_SENSE)
+_UNSPLICED_SENSE = int(SpliceStrandCol.UNSPLICED_SENSE)
 
 
 # =====================================================================
@@ -29,10 +34,9 @@ def _make_insert_models(n_obs=200, size=250):
     """InsertSizeModels with observations for all categories + intergenic."""
     im = InsertSizeModels()
     for _ in range(n_obs):
-        im.observe(size, CountCategory.SPLICED_ANNOT)
-        im.observe(size, CountCategory.UNSPLICED)
-        im.observe(size, CountCategory.SPLICED_UNANNOT)
-        im.observe(size, CountCategory.INTRON)
+        im.observe(size, SpliceType.SPLICED_ANNOT)
+        im.observe(size, SpliceType.UNSPLICED)
+        im.observe(size, SpliceType.SPLICED_UNANNOT)
         im.observe(size, None)  # intergenic
     return im
 
@@ -42,59 +46,137 @@ def _make_strand_models_default():
     return StrandModels()
 
 
-def _make_em_data_with_gdna(
+def _make_strand_models_with_ss(ss: float) -> StrandModels:
+    """Create StrandModels with a target strand specificity.
+
+    SS = max(p_r1_sense, 1 - p_r1_sense).  For SS >= 0.5, we
+    observe ``n_sense`` + ``n_anti`` reads that produce the desired SS.
+    """
+    sm = StrandModels()
+    total = 1000
+    n_sense = int(ss * total)
+    n_anti = total - n_sense
+    for _ in range(n_sense):
+        sm.exonic_spliced.observe(Strand.POS, Strand.POS)
+    for _ in range(n_anti):
+        sm.exonic_spliced.observe(Strand.POS, Strand.NEG)
+    return sm
+
+
+def _make_locus_em_data(
     t_indices_per_unit,
-    log_liks_per_unit,
+    log_liks_per_unit=None,
     count_cols_per_unit=None,
-    gdna_base_index=None,
+    num_transcripts=None,
+    rc=None,
+    nrna_init=None,
+    gdna_init=0.0,
+    include_nrna=False,
+    include_gdna=False,
+    nrna_log_lik=-2.0,
+    gdna_log_lik=0.0,
+    alpha=0.01,
 ):
-    """Build EMData where some candidates are gDNA (using gdna_index)."""
+    """Build a LocusEMData for unit tests (single-locus, identity mapping)."""
+    if num_transcripts is None:
+        all_t = [t for unit in t_indices_per_unit for t in unit]
+        num_transcripts = (max(all_t) + 1) if all_t else 1
+
+    n_t = num_transcripts
+    n_components = 2 * n_t + 1
+    gdna_idx = 2 * n_t
+
     offsets = [0]
     flat_t = []
     flat_lk = []
     flat_cc = []
+    locus_t_list = []
+    locus_cc_list = []
 
     for u, t_list in enumerate(t_indices_per_unit):
         for j, t_idx in enumerate(t_list):
             flat_t.append(t_idx)
-            flat_lk.append(log_liks_per_unit[u][j])
-            if count_cols_per_unit is not None:
-                flat_cc.append(count_cols_per_unit[u][j])
-            else:
+            flat_lk.append(
+                log_liks_per_unit[u][j] if log_liks_per_unit else 0.0
+            )
+            flat_cc.append(
+                count_cols_per_unit[u][j]
+                if count_cols_per_unit
+                else _UNSPLICED_SENSE
+            )
+
+        if include_nrna:
+            for t_idx in t_list:
+                flat_t.append(n_t + t_idx)
+                flat_lk.append(nrna_log_lik)
                 flat_cc.append(_UNSPLICED_SENSE)
+
+        if include_gdna:
+            flat_t.append(gdna_idx)
+            flat_lk.append(gdna_log_lik)
+            flat_cc.append(_UNSPLICED_SENSE)
+
         offsets.append(len(flat_t))
 
+        locus_t_list.append(t_list[0] if t_list else -1)
+        cc = (
+            count_cols_per_unit[u][0]
+            if (count_cols_per_unit and t_list)
+            else _UNSPLICED_SENSE
+        )
+        locus_cc_list.append(cc)
+
     n_units = len(t_indices_per_unit)
-    n_candidates = len(flat_t)
 
-    if gdna_base_index is None:
-        gdna_base_index = (max(flat_t) + 1) if flat_t else 0
+    ut = np.zeros(n_components, dtype=np.float64)
+    if rc is not None:
+        for i in range(min(n_t, rc.num_transcripts)):
+            ut[i] = rc.unique_counts[i].sum()
 
-    # Build locus tracking: best non-gDNA candidate per unit
-    locus_t = np.full(n_units, -1, dtype=np.int32)
-    locus_cc = np.zeros(n_units, dtype=np.uint8)
-    for u, t_list in enumerate(t_indices_per_unit):
-        cc_list = count_cols_per_unit[u] if count_cols_per_unit else None
-        best_ll = -np.inf
-        for j, t_idx in enumerate(t_list):
-            if t_idx < gdna_base_index and log_liks_per_unit[u][j] > best_ll:
-                best_ll = log_liks_per_unit[u][j]
-                locus_t[u] = t_idx
-                locus_cc[u] = (
-                    cc_list[j] if cc_list else _UNSPLICED_SENSE
-                )
+    if nrna_init is None:
+        nrna_arr = np.zeros(n_t, dtype=np.float64)
+    else:
+        nrna_arr = np.asarray(nrna_init, dtype=np.float64)
+    for i in range(n_t):
+        ut[n_t + i] = nrna_arr[i]
+    ut[gdna_idx] = gdna_init
 
-    return EMData(
+    eff_len = np.ones(n_components, dtype=np.float64)
+    prior = np.full(n_components, alpha, dtype=np.float64)
+
+    locus = Locus(
+        locus_id=0,
+        transcript_indices=np.arange(n_t, dtype=np.int32),
+        gene_indices=np.array([0], dtype=np.int32),
+        unit_indices=np.arange(n_units, dtype=np.int32),
+    )
+
+    return LocusEMData(
+        locus=locus,
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
-        locus_t_indices=locus_t,
-        locus_count_cols=locus_cc,
-        n_units=n_units,
-        n_candidates=n_candidates,
-        gdna_base_index=gdna_base_index,
+        locus_t_indices=np.array(locus_t_list, dtype=np.int32),
+        locus_count_cols=np.array(locus_cc_list, dtype=np.uint8),
+        n_transcripts=n_t,
+        n_components=n_components,
+        local_to_global_t=np.arange(n_t, dtype=np.int32),
+        unique_totals=ut,
+        nrna_init=nrna_arr,
+        gdna_init=gdna_init,
+        effective_lengths=eff_len,
+        prior=prior,
     )
+
+
+def _run_and_assign(rc, locus_em, *, em_iterations=10):
+    """Convenience: run locus EM then assign. Returns (theta, gdna_count)."""
+    theta, _alpha = rc.run_locus_em(locus_em, em_iterations=em_iterations)
+    gdna_count = rc.assign_locus_ambiguous(
+        locus_em, theta,
+    )
+    return theta, gdna_count
 
 
 # =====================================================================
@@ -109,40 +191,28 @@ class TestScoreGDNA:
         """UNSPLICED gets splice_penalty=1.0 → log(1)=0."""
         im = _make_insert_models()
         sms = _make_strand_models_default()
-        cat = int(CountCategory.UNSPLICED)
+        cat = int(SpliceType.UNSPLICED)
         score = _score_gdna_candidate(
             int(Strand.POS), cat, 250,
             sms, im,
         )
-        isize_model = im.category_models.get(cat, im.global_model)
+        # Uses global insert model
+        global_model = im.global_model
         assert score < 0
         assert score == pytest.approx(
-            np.log(0.5) + isize_model.log_likelihood(250)
+            np.log(0.5) + global_model.log_likelihood(250)
         )
-
-    def test_intron_no_penalty(self):
-        """INTRON gets splice_penalty=1.0."""
-        im = _make_insert_models()
-        sms = _make_strand_models_default()
-        cat = int(CountCategory.INTRON)
-        score = _score_gdna_candidate(
-            int(Strand.POS), cat, 250,
-            sms, im,
-        )
-        isize_model = im.category_models.get(cat, im.global_model)
-        expected = np.log(0.5) + isize_model.log_likelihood(250)
-        assert score == pytest.approx(expected)
 
     def test_spliced_unannot_penalty(self):
         """SPLICED_UNANNOT gets heavy penalty (default 0.01)."""
         im = _make_insert_models()
         sms = _make_strand_models_default()
         score_unannot = _score_gdna_candidate(
-            int(Strand.POS), int(CountCategory.SPLICED_UNANNOT), 250,
+            int(Strand.POS), int(SpliceType.SPLICED_UNANNOT), 250,
             sms, im,
         )
         score_unspliced = _score_gdna_candidate(
-            int(Strand.POS), int(CountCategory.UNSPLICED), 250,
+            int(Strand.POS), int(SpliceType.UNSPLICED), 250,
             sms, im,
         )
         assert score_unannot < score_unspliced
@@ -153,15 +223,15 @@ class TestScoreGDNA:
         """Custom penalty dict overrides defaults."""
         im = _make_insert_models()
         sms = _make_strand_models_default()
-        cat = int(CountCategory.UNSPLICED)
-        custom = {CountCategory.UNSPLICED: 0.5}
+        cat = int(SpliceType.UNSPLICED)
+        custom = {SpliceType.UNSPLICED: 0.5}
         score = _score_gdna_candidate(
             int(Strand.POS), cat, 250,
             sms, im,
             gdna_splice_penalties=custom,
         )
-        isize_model = im.category_models.get(cat, im.global_model)
-        expected = np.log(0.5) + isize_model.log_likelihood(250) + np.log(0.5)
+        global_model = im.global_model
+        expected = np.log(0.5) + global_model.log_likelihood(250) + np.log(0.5)
         assert score == pytest.approx(expected)
 
     def test_zero_insert_size(self):
@@ -169,147 +239,141 @@ class TestScoreGDNA:
         im = _make_insert_models()
         sms = _make_strand_models_default()
         score = _score_gdna_candidate(
-            int(Strand.POS), int(CountCategory.UNSPLICED), 0,
+            int(Strand.POS), int(SpliceType.UNSPLICED), 0,
             sms, im,
         )
         assert score == pytest.approx(np.log(0.5))
 
 
 # =====================================================================
-# gDNA theta vector and EM
+# gDNA component in locus EM
 # =====================================================================
 
 
-class TestGDNAThetaVector:
-    """Verify per-gene gDNA shadows are properly represented in EM theta."""
+class TestLocusGDNATheta:
+    """Verify gDNA competes with mRNA in locus EM theta."""
 
-    def test_theta_has_shadow_elements(self):
-        """Theta has N_t + N_g elements (per-gene shadows)."""
+    def test_theta_has_gdna_component(self):
+        """Theta has 2*n_t + 1 elements (mRNA + nRNA + 1 gDNA)."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        assert rc.gdna_base_index == 3
+        lem = _make_locus_em_data(
+            [[0]] * 10,
+            num_transcripts=3,
+            include_gdna=True,
+            gdna_init=10.0,
+        )
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=1)
+        # 2*3 + 1 = 7
+        assert theta.shape == (7,)
+        assert theta.sum() == pytest.approx(1.0)
 
-        em = _make_em_data_with_gdna(
-            [[0, 3]], [[0.0, 0.0]], gdna_base_index=3,
+    def test_high_gdna_init_biases_theta(self):
+        """Large gdna_init biases gDNA theta upward."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem = _make_locus_em_data(
+            [[0]] * 100,
+            num_transcripts=2,
+            include_gdna=True,
+            gdna_init=500.0,
         )
-        rc.run_em(em, em_iterations=1)
-        assert rc._converged_theta.shape == (5,)
-        assert rc._converged_theta.sum() == pytest.approx(1.0)
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
 
-    def test_shadow_init_feeds_prior(self):
-        """shadow_init biases the per-gene gDNA prior."""
-        shadow = np.array([100.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
-        )
-        em = _make_em_data_with_gdna(
-            [[0, 2]] * 100, [[0.0, 0.0]] * 100, gdna_base_index=2,
-        )
-        rc.run_em(em, em_iterations=10)
-
-        theta = rc._converged_theta
-        assert theta[2] > theta[0], (
-            f"gDNA theta ({theta[2]:.4f}) should dominate over t0 ({theta[0]:.4f})"
+        gdna_idx = 2 * 2  # n_t = 2
+        assert theta[gdna_idx] > theta[0], (
+            f"gDNA theta ({theta[gdna_idx]:.4f}) should dominate "
+            f"over t0 ({theta[0]:.4f})"
         )
 
-    def test_no_shadow_init_minimal_absorption(self):
-        """With zero shadow_init, gDNA absorbs only alpha."""
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-        )
+    def test_no_gdna_init_minimal_absorption(self):
+        """With zero gdna_init and weak gDNA likelihood, gDNA theta is small."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
         rc.unique_counts[0, 0] = 1000.0
-
-        em = _make_em_data_with_gdna(
-            [[0, 2]] * 100, [[0.0, -5.0]] * 100, gdna_base_index=2,
+        lem = _make_locus_em_data(
+            [[0]] * 100,
+            num_transcripts=2,
+            rc=rc,
+            include_gdna=True,
+            gdna_init=0.0,
+            gdna_log_lik=-5.0,
         )
-        rc.run_em(em, em_iterations=10)
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
 
-        theta = rc._converged_theta
-        assert theta[2] < 0.01, f"gDNA theta too high: {theta[2]:.4f}"
+        gdna_idx = 2 * 2
+        assert theta[gdna_idx] < 0.01, f"gDNA theta too high: {theta[gdna_idx]:.4f}"
 
 
 # =====================================================================
-# gDNA assignment routing
+# gDNA assignment routing in locus EM
 # =====================================================================
 
 
-class TestGDNAAssignment:
-    """Verify that gDNA assignments go to gdna_em_counts, not em_counts."""
+class TestLocusGDNAAssignment:
+    """Verify gDNA assignments go to gdna_count, not em_counts."""
 
     def test_gdna_assignment_not_in_em_counts(self):
-        """Fragments assigned to gDNA are NOT in em_counts."""
-        shadow_idx = 2
-        shadow = np.array([1000.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
+        """Fragments assigned to gDNA are counted in gdna_count return."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem = _make_locus_em_data(
+            [[0]] * 100,
+            log_liks_per_unit=[[-10.0]] * 100,
+            num_transcripts=2,
+            include_gdna=True,
+            gdna_init=1000.0,
+            gdna_log_lik=0.0,
         )
-        em = _make_em_data_with_gdna(
-            [[0, shadow_idx]] * 100,
-            [[-10.0, 0.0]] * 100,
-            gdna_base_index=2,
-        )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
 
-        assert rc.gdna_em_count > 0
-        total_assigned = rc.em_counts.sum() + rc.gdna_em_count
-        assert total_assigned == 100.0
+        assert gdna_count > 0
+        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        assert total == pytest.approx(100.0)
 
     def test_total_counts_preserved(self):
-        """em_counts + gdna_em_count == n_units for all assigned fragments."""
-        shadow = np.array([25.0, 25.0])
-        rc = ReadCounter(
-            num_transcripts=3, num_genes=2, seed=42,
-            shadow_init=shadow,
+        """em_counts + nrna_em + gdna == n_units."""
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 200,
+            num_transcripts=3,
+            include_nrna=True,
+            include_gdna=True,
+            gdna_init=25.0,
         )
-        em = _make_em_data_with_gdna(
-            [[0, 1, 3]] * 200,
-            [[0.0, 0.0, 0.0]] * 200,
-            gdna_base_index=3,
-        )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
 
-        assert rc.em_counts.sum() + rc.gdna_em_count == 200.0
+        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        assert total == pytest.approx(200.0)
 
     def test_strong_transcript_signal_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
-        shadow_idx = 2
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-        )
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
         rc.unique_counts[0, 0] = 500.0
-
-        em = _make_em_data_with_gdna(
-            [[0, shadow_idx]] * 500,
-            [[0.0, -20.0]] * 500,
-            gdna_base_index=2,
+        lem = _make_locus_em_data(
+            [[0]] * 500,
+            log_liks_per_unit=[[0.0]] * 500,
+            num_transcripts=2,
+            rc=rc,
+            include_gdna=True,
+            gdna_init=1.0,
+            gdna_log_lik=-20.0,
         )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
 
         assert rc.em_counts[0].sum() > 490
-        assert rc.gdna_em_count < 10
+        assert gdna_count < 10
 
-    def test_high_shadow_prior_absorbs_fragments(self):
-        """With large shadow_init, gDNA takes larger share."""
-        shadow_idx = 2
-        shadow = np.array([500.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
+    def test_high_gdna_init_absorbs_fragments(self):
+        """With large gdna_init, gDNA takes larger share."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem = _make_locus_em_data(
+            [[0]] * 500,
+            num_transcripts=2,
+            include_gdna=True,
+            gdna_init=500.0,
+            gdna_log_lik=0.0,
         )
-        em = _make_em_data_with_gdna(
-            [[0, shadow_idx]] * 500,
-            [[0.0, 0.0]] * 500,
-            gdna_base_index=2,
-        )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
 
-        assert rc.gdna_em_count > 100, (
-            f"Expected gDNA to absorb many fragments, got {rc.gdna_em_count}"
+        assert gdna_count > 100, (
+            f"Expected gDNA to absorb many fragments, got {gdna_count}"
         )
 
 
@@ -319,67 +383,61 @@ class TestGDNAAssignment:
 
 
 class TestGDNALocusAttribution:
-    """When a fragment goes to gDNA shadow, its locus transcript gets credited."""
+    """When a fragment goes to gDNA, locus_counts tracks it."""
 
     def test_locus_counts_populated(self):
         """gDNA assignments populate gdna_locus_counts."""
-        shadow_idx = 2
-        shadow = np.array([1000.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
-        )
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
         cc = _UNSPLICED_SENSE
-        em = _make_em_data_with_gdna(
-            [[0, shadow_idx]] * 100,
-            [[-10.0, 0.0]] * 100,
-            count_cols_per_unit=[[cc, cc]] * 100,
-            gdna_base_index=2,
+        lem = _make_locus_em_data(
+            [[0]] * 100,
+            log_liks_per_unit=[[-10.0]] * 100,
+            count_cols_per_unit=[[cc]] * 100,
+            num_transcripts=2,
+            include_gdna=True,
+            gdna_init=1000.0,
+            gdna_log_lik=0.0,
         )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
 
+        assert gdna_count > 0
         assert rc.gdna_locus_counts[0].sum() > 0
 
     def test_locus_counts_zero_when_no_gdna(self):
         """No gDNA assignments → locus counts stay zero."""
-        shadow_idx = 2
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-        )
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
         rc.unique_counts[0, 0] = 1000.0
-        em = _make_em_data_with_gdna(
-            [[0, shadow_idx]] * 50,
-            [[0.0, -50.0]] * 50,
-            gdna_base_index=2,
+        lem = _make_locus_em_data(
+            [[0]] * 50,
+            log_liks_per_unit=[[0.0]] * 50,
+            num_transcripts=2,
+            rc=rc,
+            include_gdna=True,
+            gdna_init=0.0,
+            gdna_log_lik=-50.0,
         )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
 
-        assert rc.gdna_locus_counts.sum() == 0.0
+        # With fractional assignment, a vanishingly small posterior may
+        # leak to gDNA even when it's extremely unlikely (log_lik=-50).
+        assert gdna_count < 1e-10
+        assert rc.gdna_locus_counts.sum() < 1e-10
 
 
 # =====================================================================
-# gDNA contamination rate and properties
+# gDNA properties on ReadCounter
 # =====================================================================
 
 
 class TestGDNAProperties:
-    def test_gdna_total_includes_unique_and_em(self):
-        shadow = np.array([50.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
-        )
-        rc.gdna_em_counts[0] = 30.0
+    def test_gdna_total_from_em_total(self):
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc._gdna_em_total = 80.0
         assert rc.gdna_total == 80.0
 
     def test_gdna_contamination_rate(self):
-        shadow = np.array([10.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
-        )
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc._gdna_em_total = 10.0
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 10.0
         assert rc.gdna_contamination_rate == pytest.approx(0.1)
@@ -396,22 +454,20 @@ class TestGDNAProperties:
 
 class TestGDNAOutput:
     def test_gdna_summary_dict(self):
-        shadow = np.array([10.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
-        )
-        rc.gdna_em_counts[0] = 5.0
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc._gdna_em_total = 15.0
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 5.0
 
         summary = rc.gdna_summary()
-        assert summary["gdna_unique_count"] == 10.0
-        assert summary["gdna_em_count"] == 5.0
+        assert summary["gdna_em_total"] == 15.0
         assert summary["gdna_total"] == 15.0
         assert summary["rna_unique_total"] == 80.0
         assert summary["rna_em_total"] == 5.0
-        assert summary["gdna_contamination_rate"] == pytest.approx(0.15, abs=1e-6)
+        expected_rate = 15.0 / (80.0 + 5.0 + 15.0)
+        assert summary["gdna_contamination_rate"] == pytest.approx(
+            expected_rate, abs=1e-6
+        )
 
 
 # =====================================================================
@@ -462,173 +518,250 @@ class TestStatsGDNA:
 
 
 # =====================================================================
-# compute_shadow_init (empirical Bayes shrinkage)
+# _compute_gdna_rate_from_strand
 # =====================================================================
 
 
-class TestComputeShadowInit:
-    """Tests for pipeline.compute_shadow_init."""
+class TestComputeGdnaRate:
+    """Tests for pipeline._compute_gdna_rate_from_strand."""
+
+    def test_zero_counts_returns_zero(self):
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        rate = _compute_gdna_rate_from_strand(0.0, 0.0, 1.0)
+        assert rate == 0.0
+
+    def test_no_antisense_gives_zero(self):
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        rate = _compute_gdna_rate_from_strand(100.0, 0.0, 1.0)
+        assert rate == 0.0
+
+    def test_antisense_at_perfect_ss(self):
+        """At SS=1.0, G = 2 × antisense, rate = G / (S + A)."""
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        # S=100, A=50, SS=1.0 → G=2*50=100, rate=100/150
+        rate = _compute_gdna_rate_from_strand(100.0, 50.0, 1.0)
+        expected = (2.0 * 50.0) / (100.0 + 50.0)
+        assert rate == pytest.approx(expected, abs=0.01)
+
+    def test_strand_correction_at_imperfect_ss(self):
+        """At SS < 1.0, exact formula with strand correction."""
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        # S=200, A=50, SS=0.9
+        ss = 0.9
+        denom_ss = 2.0 * ss - 1.0
+        numerator = 50.0 * ss - 200.0 * (1.0 - ss)
+        g = 2.0 * max(0.0, numerator / denom_ss)
+        expected_rate = g / (200.0 + 50.0)
+        rate = _compute_gdna_rate_from_strand(200.0, 50.0, ss)
+        assert rate == pytest.approx(expected_rate, abs=0.01)
+
+    def test_returns_zero_at_low_ss(self):
+        """At SS ≤ 0.6, strand info too weak → returns 0."""
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        # denom_ss = 2*0.5-1 = 0 ≤ 0.2 → returns 0
+        rate = _compute_gdna_rate_from_strand(500.0, 500.0, 0.5)
+        assert rate == 0.0
+        # SS=0.6 → denom_ss=0.2 ≤ 0.2 → returns 0
+        rate2 = _compute_gdna_rate_from_strand(500.0, 500.0, 0.6)
+        assert rate2 == 0.0
+
+    def test_clamps_at_zero(self):
+        """Corrected G is clamped at zero (no negative rate)."""
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        # S=1000, A=10, SS=0.8 → G = 2(10*0.8 - 1000*0.2)/0.6 < 0 → 0
+        rate = _compute_gdna_rate_from_strand(1000.0, 10.0, 0.8)
+        assert rate == 0.0
+
+    def test_rate_clamped_at_one(self):
+        """Rate is clamped to [0, 1]."""
+        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        # Extreme antisense dominance
+        rate = _compute_gdna_rate_from_strand(1.0, 1000.0, 0.99)
+        assert rate <= 1.0
+
+
+# =====================================================================
+# _compute_nrna_init (transcript-level intronic evidence)
+# =====================================================================
+
+
+class TestComputeNrnaInit:
+    """Tests for pipeline._compute_nrna_init."""
 
     def test_zero_counts_returns_zeros(self):
-        """No counts at all → all shadow_init = 0."""
-        from hulkrna.pipeline import compute_shadow_init
+        """No intronic counts → all inits = 0."""
+        from hulkrna.pipeline import _compute_nrna_init
 
-        unique_counts = np.zeros((3, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        result = compute_shadow_init(unique_counts, t_to_g, 2, 0)
-        np.testing.assert_array_equal(result, [0.0, 0.0])
+        sense = np.zeros(3, dtype=np.float64)
+        anti = np.zeros(3, dtype=np.float64)
+        spans = np.array([10000.0, 5000.0, 1000.0])
+        eff_len = np.array([500.0, 300.0, 800.0])
+        sm = _make_strand_models_with_ss(1.0)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        np.testing.assert_array_equal(nrna, [0.0, 0.0, 0.0])
 
-    def test_no_genic_reads_gives_zeros(self):
-        """With only intergenic fragments (no genic reads), shadow = 0."""
-        from hulkrna.pipeline import compute_shadow_init
+    def test_sense_excess_produces_nrna(self):
+        """Intronic sense > antisense → nrna_init > 0."""
+        from hulkrna.pipeline import _compute_nrna_init
 
-        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 1], dtype=np.int64)
-        result = compute_shadow_init(unique_counts, t_to_g, 2, 100)
-        np.testing.assert_array_equal(result, [0.0, 0.0])
+        sense = np.array([100.0, 50.0])
+        anti = np.array([20.0, 10.0])
+        spans = np.array([10000.0, 5000.0])
+        eff_len = np.array([500.0, 300.0])
+        sm = _make_strand_models_with_ss(1.0)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        # At SS≈1.0, formula ≈ (sense - anti) / 1.0 ≈ sense - anti
+        assert nrna[0] == pytest.approx(80.0, abs=2.0)  # 100 - 20
+        assert nrna[1] == pytest.approx(40.0, abs=2.0)  # 50 - 10
 
-    def test_intergenic_with_gene_depth_sets_floor(self):
-        """Genes with reads get a depth-scaled floor even without antisense."""
-        from hulkrna.pipeline import compute_shadow_init
+    def test_antisense_excess_clamped_to_zero(self):
+        """Intronic antisense > sense → nrna_init = 0 (clamped)."""
+        from hulkrna.pipeline import _compute_nrna_init
 
-        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 1], dtype=np.int64)
-        # INTRON_SENSE column
-        intron_sense_col = int(CountCol.INTRON_SENSE)
-        unique_counts[0, intron_sense_col] = 100.0
-        unique_counts[1, intron_sense_col] = 100.0
-        result = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=1.0)
-        # n_total = 200 + 100 = 300
-        # estimated_gdna = 100 + 0 = 100
-        # θ_global = 100 / 300 = 1/3
-        assert result[0] == pytest.approx(100.0 / 3)
-        assert result[1] == pytest.approx(100.0 / 3)
+        sense = np.array([10.0])
+        anti = np.array([50.0])
+        spans = np.array([10000.0])
+        eff_len = np.array([500.0])
+        sm = _make_strand_models_with_ss(1.0)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        assert nrna[0] == 0.0
 
-    def test_antisense_boosts_gene_shadow(self):
-        """Genes with antisense counts get proportionally higher shadow."""
-        from hulkrna.pipeline import compute_shadow_init
+    def test_single_exon_zeroed(self):
+        """Single-exon transcripts (span ≈ exonic length) → nrna = 0."""
+        from hulkrna.pipeline import _compute_nrna_init
 
-        unique_counts = np.zeros((3, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        # Gene 0: 50 antisense via t0 (e.g. INTRON_ANTISENSE = col 1)
-        intron_anti_col = int(CountCol.INTRON_ANTISENSE)
-        unique_counts[0, intron_anti_col] = 50.0
-        # Gene 1: 50 sense reads via t2
-        intron_sense_col = int(CountCol.INTRON_SENSE)
-        unique_counts[2, intron_sense_col] = 50.0
-        result = compute_shadow_init(unique_counts, t_to_g, 2, 0, kappa=1.0)
-        # n_total = 100, estimated_gdna = 0 + 2*50 = 100
-        # θ_global = 100 / 100 = 1.0
-        # gene 0: 2*50 + 1.0*50*1.0 = 150.0
-        # gene 1: 0 + 1.0*50*1.0 = 50.0
-        assert result[0] == pytest.approx(150.0)
-        assert result[1] == pytest.approx(50.0)
-        assert result[0] > result[1]
+        sense = np.array([100.0])
+        anti = np.array([10.0])
+        # transcript_span ≈ eff_len + mean_frag - 1 (no introns)
+        eff_len = np.array([500.0])
+        mean_frag = 200.0
+        exonic_approx = eff_len[0] + mean_frag - 1.0  # 699
+        spans = np.array([exonic_approx])  # no introns
+        sm = _make_strand_models_with_ss(1.0)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, mean_frag, sm)
+        assert nrna[0] == 0.0
 
-    def test_kappa_scales_global_shrinkage(self):
-        """Higher kappa → more shrinkage toward global rate."""
-        from hulkrna.pipeline import compute_shadow_init
+    def test_multi_exon_not_zeroed(self):
+        """Multi-exon transcripts (span >> exonic length) → nrna preserved."""
+        from hulkrna.pipeline import _compute_nrna_init
 
-        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 1], dtype=np.int64)
-        intron_sense = int(CountCol.INTRON_SENSE)
-        unique_counts[0, intron_sense] = 100.0
-        unique_counts[1, intron_sense] = 100.0
-        r_lo = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=0.5)
-        r_hi = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=5.0)
-        assert r_hi[0] > r_lo[0]
-
-    def test_depth_scaling(self):
-        """Deeper gene gets larger absolute shadow floor."""
-        from hulkrna.pipeline import compute_shadow_init
-
-        unique_counts = np.zeros((2, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 1], dtype=np.int64)
-        intron_sense = int(CountCol.INTRON_SENSE)
-        unique_counts[0, intron_sense] = 1000.0
-        unique_counts[1, intron_sense] = 10.0
-        result = compute_shadow_init(unique_counts, t_to_g, 2, 100, kappa=1.0)
-        assert result[0] > result[1] * 50
-        assert result[0] > 0
-        assert result[1] > 0
+        sense = np.array([100.0])
+        anti = np.array([10.0])
+        eff_len = np.array([500.0])
+        mean_frag = 200.0
+        spans = np.array([5000.0])  # large introns
+        sm = _make_strand_models_with_ss(1.0)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, mean_frag, sm)
+        assert nrna[0] == pytest.approx(90.0, abs=2.0)
 
     def test_output_shape(self):
-        """Returns array of shape (num_genes,)."""
-        from hulkrna.pipeline import compute_shadow_init
+        """Returns array of shape (num_transcripts,)."""
+        from hulkrna.pipeline import _compute_nrna_init
 
-        unique_counts = np.zeros((5, NUM_COUNT_COLS), dtype=np.float64)
-        t_to_g = np.array([0, 0, 1, 2, 2], dtype=np.int64)
-        result = compute_shadow_init(unique_counts, t_to_g, 3, 10)
-        assert result.shape == (3,)
-        assert result.dtype == np.float64
+        sense = np.zeros(5, dtype=np.float64)
+        anti = np.zeros(5, dtype=np.float64)
+        spans = np.full(5, 10000.0)
+        eff_len = np.full(5, 500.0)
+        sm = _make_strand_models_with_ss(1.0)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        assert nrna.shape == (5,)
+        assert nrna.dtype == np.float64
+
+    def test_ss_correction_moderate(self):
+        """At SS=0.9, nRNA init is corrected upward by 1/(2SS-1)."""
+        from hulkrna.pipeline import _compute_nrna_init
+
+        sense = np.array([100.0])
+        anti = np.array([20.0])
+        spans = np.array([10000.0])
+        eff_len = np.array([500.0])
+        sm = _make_strand_models_with_ss(0.9)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        ss = sm.exonic_spliced.strand_specificity
+        denom = 2.0 * ss - 1.0
+        expected = (100.0 - 20.0) / denom
+        assert nrna[0] == pytest.approx(expected, abs=1.0)
+
+    def test_ss_at_or_below_threshold_returns_zeros(self):
+        """At SS ≤ 0.6, strand info too weak → returns zeros."""
+        from hulkrna.pipeline import _compute_nrna_init
+
+        sense = np.array([100.0])
+        anti = np.array([50.0])
+        spans = np.array([10000.0])
+        eff_len = np.array([500.0])
+        # SS=0.5
+        sm = _make_strand_models_with_ss(0.5)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        assert nrna[0] == 0.0
+        # SS=0.6 (boundary)
+        sm = _make_strand_models_with_ss(0.6)
+        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        assert nrna[0] == 0.0
 
 
 # =====================================================================
-# Per-gene shadow EM integration
+# Locus gDNA behavior — integration tests
 # =====================================================================
 
 
-class TestPerGeneShadowEM:
-    """Integration tests for per-gene shadow behavior in EM."""
+class TestLocusGDNABehavior:
+    """Integration tests for gDNA behavior in locus EM."""
 
-    def test_two_genes_independent_shadows(self):
-        """Two genes get independent shadow components in theta."""
-        shadow = np.array([100.0, 0.0])
-        rc = ReadCounter(
-            num_transcripts=3, num_genes=2, seed=42,
-            shadow_init=shadow,
+    def test_two_transcripts_share_one_gdna_shadow(self):
+        """Two transcripts in one locus share a single gDNA component."""
+        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 200,
+            num_transcripts=3,
+            include_gdna=True,
+            gdna_init=100.0,
         )
-        em = _make_em_data_with_gdna(
-            [[0, 3]] * 200,
-            [[0.0, 0.0]] * 200,
-            gdna_base_index=3,
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+
+        # n_components = 2*3 + 1 = 7, gDNA at index 6
+        assert theta.shape == (7,)
+        assert theta[6] > 0  # gDNA has non-zero theta
+        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        assert total == pytest.approx(200.0)
+
+    def test_gdna_init_determines_absorption(self):
+        """Higher gdna_init → more fragments absorbed by gDNA."""
+        # Low gdna_init + strong RNA prior → no gDNA absorption
+        rc_low = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc_low.unique_counts[0, _UNSPLICED_SENSE] = 500.0
+        lem_low = _make_locus_em_data(
+            [[0]] * 200,
+            num_transcripts=2,
+            rc=rc_low,
+            include_gdna=True,
+            gdna_init=1.0,
+            gdna_log_lik=-5.0,
         )
-        rc.run_em(em, em_iterations=10)
+        _, gc_low = _run_and_assign(rc_low, lem_low, em_iterations=10)
 
-        theta = rc._converged_theta
-        assert theta.shape == (5,)
-        assert theta[3] > 0.1
-        assert theta[4] < theta[3]
-
-    def test_per_gene_em_counts_tracking(self):
-        """Verify gdna_em_counts tracks per-gene gDNA assignments."""
-        shadow = np.array([500.0, 500.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=2, seed=42,
-            shadow_init=shadow,
+        # High gdna_init → gDNA absorbs fragments
+        rc_high = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem_high = _make_locus_em_data(
+            [[0]] * 200,
+            num_transcripts=2,
+            include_gdna=True,
+            gdna_init=1000.0,
+            gdna_log_lik=0.0,
         )
-        em = _make_em_data_with_gdna(
-            [[0, 2]] * 200 + [[1, 3]] * 200,
-            [[0.0, 0.0]] * 200 + [[0.0, 0.0]] * 200,
-            gdna_base_index=2,
-        )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        _, gc_high = _run_and_assign(rc_high, lem_high, em_iterations=10)
 
-        assert rc.gdna_em_counts[0] > 0
-        assert rc.gdna_em_counts[1] > 0
-        total = rc.em_counts.sum() + rc.gdna_em_counts.sum()
-        assert total == 400.0
+        assert gc_high > gc_low
+        assert gc_high > 100  # most fragments go to gDNA
+        assert gc_low < 0.1   # RNA dominates (tiny fractional leak ok)
 
-    def test_gene_with_high_antisense_absorbs_more(self):
-        """Gene with high shadow_init absorbs more ambiguous fragments."""
-        shadow = np.array([200.0, 1.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=2, seed=42,
-            shadow_init=shadow,
-        )
-        rc.unique_counts[0, 0] = 10.0
-        rc.unique_counts[1, 0] = 10.0
+    def test_gdna_em_count_property(self):
+        """ReadCounter.gdna_em_count accumulates across loci."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        assert rc.gdna_em_count == 0.0
 
-        em = _make_em_data_with_gdna(
-            [[0, 2]] * 500 + [[1, 3]] * 500,
-            [[0.0, 0.0]] * 500 + [[0.0, 0.0]] * 500,
-            gdna_base_index=2,
-        )
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
-
-        assert rc.gdna_em_counts[0] > rc.gdna_em_counts[1]
+        rc._gdna_em_total = 42.0
+        assert rc.gdna_em_count == 42.0
 
 
 # =====================================================================
@@ -711,30 +844,30 @@ class TestStrandModelsContainer:
         assert sm.intergenic.n_observations == 1
 
     def test_model_for_category(self):
-        """model_for_category returns the best pure-RNA model."""
+        """model_for_category cascades: exonic_spliced → exonic → error."""
         from hulkrna.strand_model import StrandModels, StrandModel
-        from hulkrna.categories import CountCategory
+        from hulkrna.categories import SpliceType
         from hulkrna.types import Strand
+        import pytest
 
         # --- Case 1: exonic_spliced has enough observations ---
         sm1 = StrandModels()
         for _ in range(20):
             sm1.exonic_spliced.observe(Strand.POS, Strand.POS)
-        m = sm1.model_for_category(int(CountCategory.SPLICED_ANNOT))
+        m = sm1.model_for_category(int(SpliceType.SPLICED_ANNOT))
         assert m is sm1.exonic_spliced
-        assert sm1.model_for_category(int(CountCategory.UNSPLICED)) is m
-        assert sm1.model_for_category(int(CountCategory.INTRON)) is m
+        assert sm1.model_for_category(int(SpliceType.UNSPLICED)) is m
 
-        # --- Case 2: exonic_spliced insufficient, exonic sufficient ---
+        # --- Case 2: exonic_spliced insufficient, exonic sufficient → fallback ---
         sm2 = StrandModels()
+        for _ in range(3):
+            sm2.exonic_spliced.observe(Strand.POS, Strand.POS)
         for _ in range(20):
             sm2.exonic.observe(Strand.POS, Strand.POS)
-            sm2.intergenic.observe(Strand.POS, Strand.POS)
-        m2 = sm2.model_for_category(int(CountCategory.UNSPLICED))
-        assert m2 is not sm2.exonic_spliced
-        assert sm2.model_for_category(int(CountCategory.INTRON)) is m2
+        m2 = sm2.model_for_category(int(SpliceType.UNSPLICED))
+        assert m2 is sm2.exonic
 
-        # --- Case 3: default (no observations) → falls back to exonic ---
+        # --- Case 3: both insufficient → RuntimeError ---
         sm3 = StrandModels()
-        m3 = sm3.model_for_category(int(CountCategory.UNSPLICED))
-        assert m3 is sm3.exonic
+        with pytest.raises(RuntimeError, match="Insufficient strand"):
+            sm3.model_for_category(int(SpliceType.UNSPLICED))

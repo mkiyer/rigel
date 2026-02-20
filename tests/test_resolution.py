@@ -3,14 +3,14 @@
 import pytest
 
 from hulkrna.types import ChimeraType, MergeCriteria, MergeResult, Strand, GenomicInterval, IntervalType
-from hulkrna.categories import CountCategory
+from hulkrna.categories import SpliceType
 from hulkrna.resolution import (
     merge_sets_with_criteria,
     fragment_insert_size,
     ResolvedFragment,
     _detect_intrachromosomal_chimera,
     resolve_fragment,
-    compute_exon_overlap,
+    compute_overlap_profile,
     filter_by_overlap,
 )
 from hulkrna.fragment import Fragment
@@ -143,7 +143,7 @@ class TestResolvedFragment:
         defaults = dict(
             t_inds=frozenset({0}),
             n_genes=1,
-            count_cat=CountCategory.UNSPLICED,
+            splice_type=SpliceType.UNSPLICED,
             exon_strand=Strand.POS,
             sj_strand=Strand.NONE,
             insert_size=250,
@@ -174,17 +174,17 @@ class TestResolvedFragment:
         assert (rf.n_genes > 1 or rf.num_hits > 1) is False
 
     def test_has_annotated_sj(self):
-        rf = self._make(count_cat=CountCategory.SPLICED_ANNOT)
-        assert rf.count_cat == CountCategory.SPLICED_ANNOT
+        rf = self._make(splice_type=SpliceType.SPLICED_ANNOT)
+        assert rf.splice_type == SpliceType.SPLICED_ANNOT
 
     def test_no_annotated_sj(self):
-        for cat in (CountCategory.INTRON, CountCategory.UNSPLICED, CountCategory.SPLICED_UNANNOT):
-            rf = self._make(count_cat=cat)
-            assert rf.count_cat != CountCategory.SPLICED_ANNOT
+        for cat in (SpliceType.UNSPLICED, SpliceType.SPLICED_UNANNOT):
+            rf = self._make(splice_type=cat)
+            assert rf.splice_type != SpliceType.SPLICED_ANNOT
 
     def test_is_strand_qualified_all_criteria(self):
         rf = self._make(
-            count_cat=CountCategory.SPLICED_ANNOT,
+            splice_type=SpliceType.SPLICED_ANNOT,
             n_genes=1,
             exon_strand=Strand.POS,
             sj_strand=Strand.NEG,
@@ -193,7 +193,7 @@ class TestResolvedFragment:
 
     def test_not_strand_qualified_wrong_category(self):
         rf = self._make(
-            count_cat=CountCategory.UNSPLICED,
+            splice_type=SpliceType.UNSPLICED,
             n_genes=1,
             exon_strand=Strand.POS,
             sj_strand=Strand.NEG,
@@ -202,7 +202,7 @@ class TestResolvedFragment:
 
     def test_not_strand_qualified_multi_gene(self):
         rf = self._make(
-            count_cat=CountCategory.SPLICED_ANNOT,
+            splice_type=SpliceType.SPLICED_ANNOT,
             n_genes=2,
             exon_strand=Strand.POS,
             sj_strand=Strand.NEG,
@@ -211,7 +211,7 @@ class TestResolvedFragment:
 
     def test_not_strand_qualified_ambiguous_exon(self):
         rf = self._make(
-            count_cat=CountCategory.SPLICED_ANNOT,
+            splice_type=SpliceType.SPLICED_ANNOT,
             n_genes=1,
             exon_strand=Strand.AMBIGUOUS,
             sj_strand=Strand.NEG,
@@ -220,7 +220,7 @@ class TestResolvedFragment:
 
     def test_not_strand_qualified_none_sj(self):
         rf = self._make(
-            count_cat=CountCategory.SPLICED_ANNOT,
+            splice_type=SpliceType.SPLICED_ANNOT,
             n_genes=1,
             exon_strand=Strand.POS,
             sj_strand=Strand.NONE,
@@ -229,28 +229,28 @@ class TestResolvedFragment:
 
     def test_not_strand_qualified_chimeric(self):
         rf = self._make(
-            count_cat=CountCategory.SPLICED_ANNOT,
+            splice_type=SpliceType.SPLICED_ANNOT,
             n_genes=1,
             exon_strand=Strand.POS,
             sj_strand=Strand.NEG,
-            chimera_type=ChimeraType.STRAND_SAME,
+            chimera_type=ChimeraType.CIS_STRAND_SAME,
         )
         assert rf.is_strand_qualified is False
 
-    def test_is_chimeric_not_chimeric(self):
+    def test_is_chimeric_none(self):
         rf = self._make()
         assert rf.is_chimeric is False
 
-    def test_is_chimeric_interchromosomal(self):
-        rf = self._make(chimera_type=ChimeraType.INTERCHROMOSOMAL)
+    def test_is_chimeric_trans(self):
+        rf = self._make(chimera_type=ChimeraType.TRANS)
         assert rf.is_chimeric is True
 
-    def test_is_chimeric_strand_same(self):
-        rf = self._make(chimera_type=ChimeraType.STRAND_SAME)
+    def test_is_chimeric_cis_strand_same(self):
+        rf = self._make(chimera_type=ChimeraType.CIS_STRAND_SAME)
         assert rf.is_chimeric is True
 
-    def test_is_chimeric_strand_diff(self):
-        rf = self._make(chimera_type=ChimeraType.STRAND_DIFF)
+    def test_is_chimeric_cis_strand_diff(self):
+        rf = self._make(chimera_type=ChimeraType.CIS_STRAND_DIFF)
         assert rf.is_chimeric is True
 
 
@@ -262,13 +262,13 @@ class TestResolvedFragment:
 class TestDetectIntrachromosomalChimera:
     """Transcript-set disjointness detection for intrachromosomal chimeras."""
 
-    def test_single_block_not_chimeric(self):
+    def test_single_block_none(self):
         """One annotated block cannot be chimeric."""
         blocks = (GenomicInterval("chr1", 100, 200, Strand.POS),)
         t_sets = [frozenset({0, 1})]
         assert _detect_intrachromosomal_chimera(blocks, t_sets) is None
 
-    def test_empty_t_sets_not_chimeric(self):
+    def test_empty_t_sets_none(self):
         """All empty transcript sets → not chimeric."""
         blocks = (
             GenomicInterval("chr1", 100, 200, Strand.POS),
@@ -286,7 +286,7 @@ class TestDetectIntrachromosomalChimera:
         t_sets = [frozenset({0}), frozenset()]
         assert _detect_intrachromosomal_chimera(blocks, t_sets) is None
 
-    def test_shared_transcript_not_chimeric(self):
+    def test_shared_transcript_none(self):
         """Two blocks sharing a transcript → connected → not chimeric."""
         blocks = (
             GenomicInterval("chr1", 100, 200, Strand.POS),
@@ -296,7 +296,7 @@ class TestDetectIntrachromosomalChimera:
         assert _detect_intrachromosomal_chimera(blocks, t_sets) is None
 
     def test_disjoint_same_strand_chimera(self):
-        """Two blocks with disjoint transcript sets, same strand → STRAND_SAME."""
+        """Two blocks with disjoint transcript sets, same strand → CIS_STRAND_SAME."""
         blocks = (
             GenomicInterval("chr1", 100, 200, Strand.POS),
             GenomicInterval("chr1", 1000, 1100, Strand.POS),
@@ -305,11 +305,11 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_SAME
+        assert chimera_type == ChimeraType.CIS_STRAND_SAME
         assert chimera_gap == 800  # 1000 - 200
 
     def test_disjoint_diff_strand_chimera(self):
-        """Two blocks with disjoint sets, different strands → STRAND_DIFF."""
+        """Two blocks with disjoint sets, different strands → CIS_STRAND_DIFF."""
         blocks = (
             GenomicInterval("chr1", 100, 200, Strand.POS),
             GenomicInterval("chr1", 500, 600, Strand.NEG),
@@ -318,7 +318,7 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_DIFF
+        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
         assert chimera_gap == 300  # 500 - 200
 
     def test_overlapping_disjoint_blocks(self):
@@ -331,7 +331,7 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_DIFF
+        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
         assert chimera_gap == 0  # overlapping
 
     def test_three_blocks_two_components(self):
@@ -347,7 +347,7 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_DIFF
+        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
         # Gap: min(2000-200, 2000-400) = 1600
         assert chimera_gap == 1600
 
@@ -362,7 +362,7 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_SAME
+        assert chimera_type == ChimeraType.CIS_STRAND_SAME
         # Gap: min(500-200, 1000-200, 1000-600) = 300
         assert chimera_gap == 300
 
@@ -387,7 +387,7 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_SAME
+        assert chimera_type == ChimeraType.CIS_STRAND_SAME
         assert chimera_gap == 0  # adjacent, no gap
 
     def test_mixed_annotated_intergenic_blocks(self):
@@ -402,7 +402,7 @@ class TestDetectIntrachromosomalChimera:
         result = _detect_intrachromosomal_chimera(blocks, t_sets)
         assert result is not None
         chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.STRAND_DIFF
+        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
         assert chimera_gap == 800  # 1000 - 200
 
 
@@ -464,7 +464,7 @@ class TestResolveFragment:
         result = resolve_fragment(frag, idx)
 
         assert result is not None
-        assert result.count_cat == CountCategory.SPLICED_ANNOT
+        assert result.splice_type == SpliceType.SPLICED_ANNOT
         assert result.t_inds == frozenset({0})
 
     def test_annotated_sj_matches_when_intron_strand_unknown(self):
@@ -480,20 +480,20 @@ class TestResolveFragment:
         result = resolve_fragment(frag, idx)
 
         assert result is not None
-        assert result.count_cat == CountCategory.SPLICED_ANNOT
+        assert result.splice_type == SpliceType.SPLICED_ANNOT
         assert result.t_inds == frozenset({0})
 
 
 # =====================================================================
-# compute_exon_overlap
+# compute_overlap_profile
 # =====================================================================
 
 
 class _OverlapMockIndex:
-    """Mock index with configurable exon intervals for overlap tests.
+    """Mock index with configurable exon and intron intervals for overlap tests.
 
     Models a scenario with 3 transcripts:
-      t0: exon 100-400 (one big exon)
+      t0: exon 100-200, intron 200-350, exon 350-400
       t1: exon 100-200   (partial overlap with short fragments)
       t2: exon 350-500   (partial overlap with fragments near right end)
 
@@ -505,7 +505,9 @@ class _OverlapMockIndex:
         self.t_to_g_arr = [0, 0, 0]
         # Reference intervals: list of (t_idx, g_idx, itype, start, end)
         self._intervals = [
-            (0, 0, IntervalType.EXON, 100, 400),
+            (0, 0, IntervalType.EXON, 100, 200),
+            (0, 0, IntervalType.INTRON, 200, 350),
+            (0, 0, IntervalType.EXON, 350, 400),
             (1, 0, IntervalType.EXON, 100, 200),
             (2, 0, IntervalType.EXON, 350, 500),
         ]
@@ -529,42 +531,60 @@ class _OverlapMockIndex:
         return []
 
 
-class TestComputeExonOverlap:
-    """Test per-candidate exon overlap fraction computation."""
+class TestComputeOverlapProfile:
+    """Test per-candidate overlap profile computation."""
 
-    def test_full_overlap_single_block(self):
-        """Fragment fully inside a reference exon → overlap = 1.0."""
+    def test_full_exon_overlap_single_block(self):
+        """Fragment fully inside a reference exon → exon_bp=frag_length, intron_bp=0."""
         idx = _OverlapMockIndex()
         frag = Fragment(
-            exons=(GenomicInterval("chr1", 150, 250, Strand.POS),),
+            exons=(GenomicInterval("chr1", 150, 200, Strand.POS),),
             introns=(),
         )
-        fracs = compute_exon_overlap(frag, idx)
-        # t0 (100-400) fully covers 150-250 → 100/100 = 1.0
-        assert fracs[0] == pytest.approx(1.0)
-        # t1 (100-200) covers 150-200 → 50/100 = 0.5
-        assert fracs[1] == pytest.approx(0.5)
-        # t2 (350-500) no overlap with 150-250
-        assert 2 not in fracs
+        profiles, frag_length = compute_overlap_profile(frag, idx)
+        assert frag_length == 50
+        # t0 exon 100-200: covers 150-200 → 50bp exon
+        assert profiles[0] == (50, 0)
+        # t1 exon 100-200: covers 150-200 → 50bp exon
+        assert profiles[1] == (50, 0)
+        # t2 (350-500) no overlap with 150-200
+        assert 2 not in profiles
 
-    def test_partial_overlap_at_edge(self):
-        """Fragment overlapping an exon edge → fractional overlap."""
+    def test_intronic_overlap(self):
+        """Fragment in intronic region → exon_bp=0, intron_bp=frag_length."""
         idx = _OverlapMockIndex()
         frag = Fragment(
-            exons=(GenomicInterval("chr1", 190, 210, Strand.POS),),
+            exons=(GenomicInterval("chr1", 220, 320, Strand.POS),),
             introns=(),
         )
-        fracs = compute_exon_overlap(frag, idx)
-        # t0 (100-400) fully covers 190-210 → 20/20 = 1.0
-        assert fracs[0] == pytest.approx(1.0)
-        # t1 (100-200) covers 190-200 → 10/20 = 0.5
-        assert fracs[1] == pytest.approx(0.5)
+        profiles, frag_length = compute_overlap_profile(frag, idx)
+        assert frag_length == 100
+        # Only t0 has intron 200-350 covering 220-320 → 100bp intron
+        assert profiles[0] == (0, 100)
+        # t1 and t2 shouldn't be present (t1 exon 100-200, t2 exon 350-500)
+        assert 1 not in profiles
+        assert 2 not in profiles
+
+    def test_mixed_exon_intron_overlap(self):
+        """Fragment spanning exon-intron boundary → partial exon + intron bp."""
+        idx = _OverlapMockIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 180, 220, Strand.POS),),
+            introns=(),
+        )
+        profiles, frag_length = compute_overlap_profile(frag, idx)
+        assert frag_length == 40
+        # t0: exon 100-200 → 180-200 = 20bp; intron 200-350 → 200-220 = 20bp
+        assert profiles[0] == (20, 20)
+        # t1: exon 100-200 → 180-200 = 20bp; no intron overlap
+        assert profiles[1] == (20, 0)
 
     def test_empty_fragment(self):
         idx = _OverlapMockIndex()
         frag = Fragment(exons=(), introns=())
-        fracs = compute_exon_overlap(frag, idx)
-        assert fracs == {}
+        profiles, frag_length = compute_overlap_profile(frag, idx)
+        assert profiles == {}
+        assert frag_length == 0
 
     def test_no_overlapping_intervals(self):
         idx = _OverlapMockIndex()
@@ -572,8 +592,9 @@ class TestComputeExonOverlap:
             exons=(GenomicInterval("chr1", 700, 800, Strand.POS),),
             introns=(),
         )
-        fracs = compute_exon_overlap(frag, idx)
-        assert fracs == {}
+        profiles, frag_length = compute_overlap_profile(frag, idx)
+        assert profiles == {}
+        assert frag_length == 100  # fragment exists but no genic overlap
 
     def test_multi_block_overlap_sums(self):
         """Two exon blocks accumulate overlap per-transcript."""
@@ -585,13 +606,14 @@ class TestComputeExonOverlap:
             ),
             introns=(GenomicInterval("chr1", 200, 350, Strand.POS),),
         )
-        fracs = compute_exon_overlap(frag, idx)
-        # t0 (100-400): block1 150-200 → 50bp, block2 350-400 → 50bp → 100/100 = 1.0
-        assert fracs[0] == pytest.approx(1.0)
-        # t1 (100-200): block1 150-200 → 50bp, block2 no overlap → 50/100 = 0.5
-        assert fracs[1] == pytest.approx(0.5)
-        # t2 (350-500): block1 no overlap, block2 350-400 → 50bp → 50/100 = 0.5
-        assert fracs[2] == pytest.approx(0.5)
+        profiles, frag_length = compute_overlap_profile(frag, idx)
+        assert frag_length == 100
+        # t0: exon(150-200)=50bp + exon(350-400)=50bp = 100bp exon
+        assert profiles[0] == (100, 0)
+        # t1 (exon 100-200): block1 150-200 → 50bp exon; block2 no overlap
+        assert profiles[1] == (50, 0)
+        # t2 (exon 350-500): block2 350-400 → 50bp exon; block1 no overlap
+        assert profiles[2] == (50, 0)
 
 
 # =====================================================================
@@ -602,43 +624,44 @@ class TestComputeExonOverlap:
 class TestFilterByOverlap:
     def test_filters_low_overlap_candidates(self):
         t_inds = frozenset({0, 1, 2})
-        fracs = {0: 1.0, 1: 0.5, 2: 0.3}
-        # With min_frac_of_best=0.9 → threshold = 0.9
+        # BP counts with frag_length=100: exon fracs are 100/100, 50/100, 30/100
+        profiles = {0: (100, 0), 1: (50, 30), 2: (30, 60)}
+        # With min_frac_of_best=0.9 → threshold = 0.9 on exon_frac
         # Only t0 survives (1.0 >= 0.9)
-        result = filter_by_overlap(t_inds, fracs)
+        result = filter_by_overlap(t_inds, profiles, 100)
         assert result == frozenset({0})
 
     def test_keeps_close_candidates(self):
         t_inds = frozenset({0, 1, 2})
-        fracs = {0: 1.0, 1: 0.95, 2: 0.3}
-        result = filter_by_overlap(t_inds, fracs)
+        profiles = {0: (100, 0), 1: (95, 0), 2: (30, 0)}
+        result = filter_by_overlap(t_inds, profiles, 100)
         assert result == frozenset({0, 1})
 
     def test_custom_threshold(self):
         t_inds = frozenset({0, 1, 2})
-        fracs = {0: 1.0, 1: 0.6, 2: 0.3}
-        result = filter_by_overlap(t_inds, fracs, min_frac_of_best=0.5)
+        profiles = {0: (100, 0), 1: (60, 20), 2: (30, 20)}
+        result = filter_by_overlap(t_inds, profiles, 100, min_frac_of_best=0.5)
         assert result == frozenset({0, 1})
 
     def test_no_fracs_returns_original(self):
         t_inds = frozenset({0, 1})
-        result = filter_by_overlap(t_inds, {})
+        result = filter_by_overlap(t_inds, {}, 100)
         assert result == t_inds
 
     def test_never_returns_empty(self):
         """Even with extreme threshold, should return original rather than empty."""
         t_inds = frozenset({0, 1})
-        fracs = {0: 0.01, 1: 0.01}
+        profiles = {0: (1, 50), 1: (1, 50)}
         # All candidates are equal and above zero → they should all survive
-        result = filter_by_overlap(t_inds, fracs, min_frac_of_best=2.0)
+        result = filter_by_overlap(t_inds, profiles, 100, min_frac_of_best=2.0)
         # threshold = 0.01 * 2.0 = 0.02, both are below → would be empty
         # safety: returns original
         assert result == t_inds
 
     def test_single_candidate_unchanged(self):
         t_inds = frozenset({5})
-        fracs = {5: 0.3}
-        result = filter_by_overlap(t_inds, fracs)
+        profiles = {5: (30, 50)}
+        result = filter_by_overlap(t_inds, profiles, 100)
         assert result == frozenset({5})
 
 
@@ -648,23 +671,31 @@ class TestFilterByOverlap:
 
 
 class TestOverlapFiltering:
-    """Verify overlap filtering is applied for UNSPLICED fragments only."""
+    """Verify overlap filtering is skipped for UNSPLICED fragments."""
 
-    def test_unspliced_fragment_filtered_by_overlap(self):
-        """An unspliced fragment with unequal overlap should be filtered."""
+    def test_unspliced_fragment_skips_filter(self):
+        """An unspliced fragment spanning an exon-intron boundary.
+
+        Fragment 150-250 overlaps:
+          - t0: exon(100-200)=50bp + intron(200-350)=50bp
+          - t1: exon(100-200)=50bp
+
+        filter_by_overlap is skipped for UNSPLICED fragments, so both
+        candidates are retained regardless of exon overlap differences.
+        The EM's soft overlap penalty handles weighting instead.
+        """
         idx = _OverlapMockIndex()
-        # Single-exon frag 150-250: t0 covers fully, t1 only half
+        # Single-exon frag 150-250: t0 covers fully, t1 only exon portion
         frag = Fragment(
             exons=(GenomicInterval("chr1", 150, 250, Strand.POS),),
             introns=(),
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.UNSPLICED
-        # t1 has only 50% overlap, well below 90% of best (t0 at 100%)
-        # → t1 should be filtered out
+        assert result.splice_type == SpliceType.UNSPLICED
+        # Both t0 and t1 have 50bp exon overlap → equal exon_frac → both kept
         assert 0 in result.t_inds
-        assert 1 not in result.t_inds
+        assert 1 in result.t_inds
 
     def test_spliced_fragment_sj_plus_overlap(self):
         """Spliced fragments with annotated SJs: SJ narrows first, overlap applies too."""
@@ -679,7 +710,7 @@ class TestOverlapFiltering:
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.SPLICED_ANNOT
+        assert result.splice_type == SpliceType.SPLICED_ANNOT
         # SJ resolution gives {0} — single candidate, no overlap filtering needed
         assert result.t_inds == frozenset({0})
 
@@ -693,7 +724,7 @@ class TestOverlapFiltering:
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.UNSPLICED
+        assert result.splice_type == SpliceType.UNSPLICED
         # Both t0 and t1 have equal overlap fractions → both kept
         assert 0 in result.t_inds
         assert 1 in result.t_inds
@@ -782,7 +813,7 @@ class TestInsertSizeDiscrimination:
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.SPLICED_ANNOT
+        assert result.splice_type == SpliceType.SPLICED_ANNOT
         assert result.t_inds == frozenset({0})
 
     def test_spliced_read_t1_specific_sj(self):
@@ -797,7 +828,7 @@ class TestInsertSizeDiscrimination:
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.SPLICED_ANNOT
+        assert result.splice_type == SpliceType.SPLICED_ANNOT
         assert result.t_inds == frozenset({1})
 
     def test_unspliced_read_in_shared_exon(self):
@@ -809,7 +840,7 @@ class TestInsertSizeDiscrimination:
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.UNSPLICED
+        assert result.splice_type == SpliceType.UNSPLICED
         # Both transcripts share exon1 fully → equal overlap → both kept
         assert result.t_inds == frozenset({0, 1})
 
@@ -822,7 +853,7 @@ class TestInsertSizeDiscrimination:
         )
         result = resolve_fragment(frag, idx)
         assert result is not None
-        assert result.count_cat == CountCategory.UNSPLICED
+        assert result.splice_type == SpliceType.UNSPLICED
         assert result.t_inds == frozenset({0})
 
     def test_insert_size_differs_between_isoforms(self):

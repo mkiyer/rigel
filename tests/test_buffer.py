@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from hulkrna.types import Strand, MergeCriteria
-from hulkrna.categories import CountCategory
+from hulkrna.categories import SpliceType
 from hulkrna.resolution import ResolvedFragment
 from hulkrna.buffer import FragmentBuffer, BufferedFragment, FRAG_UNIQUE, FRAG_ISOFORM_AMBIG, FRAG_GENE_AMBIG, FRAG_MULTIMAPPER, FRAG_CHIMERIC
 from hulkrna.types import ChimeraType
@@ -22,7 +22,7 @@ def _make_resolved(**kwargs):
     defaults = dict(
         t_inds=frozenset({0, 1}),
         n_genes=1,
-        count_cat=CountCategory.UNSPLICED,
+        splice_type=SpliceType.UNSPLICED,
         exon_strand=Strand.POS,
         sj_strand=Strand.NONE,
         insert_size=250,
@@ -51,7 +51,7 @@ def _fill_buffer(n, *, chunk_size=100, **buffer_kwargs):
         r = _make_resolved(
             t_inds=t_set,
             n_genes=n_genes,
-            count_cat=CountCategory(i % 4),
+            splice_type=SpliceType(i % len(SpliceType)),
             exon_strand=Strand(1 + i % 2),  # POS or NEG
             sj_strand=Strand(1 + (i + 1) % 2),
             insert_size=200 + i,
@@ -73,7 +73,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0, 1], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -87,7 +87,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0], dtype=np.int32),
             n_genes=2,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -100,7 +100,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -113,20 +113,20 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.SPLICED_ANNOT),
+            splice_type=int(SpliceType.SPLICED_ANNOT),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
             insert_size=250,
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert bf.count_cat == int(CountCategory.SPLICED_ANNOT)
+        assert bf.splice_type == int(SpliceType.SPLICED_ANNOT)
 
     def test_is_strand_qualified(self):
         bf = BufferedFragment(
             t_inds=np.array([0], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.SPLICED_ANNOT),
+            splice_type=int(SpliceType.SPLICED_ANNOT),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
             insert_size=250,
@@ -139,7 +139,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
             insert_size=250,
@@ -152,7 +152,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([10, 20, 30], dtype=np.int32),
             n_genes=1,
-            count_cat=0,
+            splice_type=0,
             exon_strand=1,
             sj_strand=0,
             insert_size=100,
@@ -167,7 +167,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0, 1], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -181,7 +181,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -195,7 +195,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0, 1], dtype=np.int32),
             n_genes=2,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -209,7 +209,7 @@ class TestBufferedFragment:
         bf = BufferedFragment(
             t_inds=np.array([0, 1], dtype=np.int32),
             n_genes=1,
-            count_cat=int(CountCategory.UNSPLICED),
+            splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             insert_size=250,
@@ -301,14 +301,14 @@ class TestFragmentBufferBasic:
         frags = list(buf)
         assert len(frags) == 1
         assert frags[0].insert_size == 250
-        assert frags[0].count_cat == int(CountCategory.UNSPLICED)
+        assert frags[0].splice_type == int(SpliceType.UNSPLICED)
 
     def test_roundtrip_preserves_data(self):
         """All fields should survive append → finalize → iterate."""
         r = _make_resolved(
             t_inds=frozenset({3, 7, 11}),
             n_genes=2,
-            count_cat=CountCategory.SPLICED_ANNOT,
+            splice_type=SpliceType.SPLICED_ANNOT,
             exon_strand=Strand.NEG,
             sj_strand=Strand.POS,
             insert_size=350,
@@ -328,7 +328,7 @@ class TestFragmentBufferBasic:
         bf = list(buf)[0]
         assert sorted(bf.t_inds) == [3, 7, 11]
         assert bf.n_genes == 2
-        assert bf.count_cat == int(CountCategory.SPLICED_ANNOT)
+        assert bf.splice_type == int(SpliceType.SPLICED_ANNOT)
         assert bf.exon_strand == int(Strand.NEG)
         assert bf.sj_strand == int(Strand.POS)
         assert bf.insert_size == 350
@@ -355,6 +355,36 @@ class TestFragmentBufferBasic:
         assert chunks[0].size == 100
         assert chunks[1].size == 100
         assert chunks[2].size == 50
+
+    def test_large_overlap_and_frag_length_preserved(self):
+        """Large per-candidate overlap bp and fragment length do not overflow."""
+        t_to_g = np.array([0, 0, 1], dtype=np.int64)
+        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=10)
+
+        big_exon_bp = 120_000
+        big_intron_bp = 80_000
+        big_frag_len = 200_000
+
+        r = _make_resolved(
+            t_inds=frozenset({0, 2}),
+            n_genes=2,
+            overlap_bp={
+                0: (big_exon_bp, big_intron_bp),
+                2: (big_exon_bp - 1, big_intron_bp - 1),
+            },
+            frag_length=big_frag_len,
+        )
+        buf.append(r, frag_id=7)
+        buf.finalize()
+
+        chunk = list(buf.iter_chunks())[0]
+        bf = chunk[0]
+
+        assert bf.frag_length == big_frag_len
+        assert int(bf.exon_bp[0]) == big_exon_bp
+        assert int(bf.intron_bp[0]) == big_intron_bp
+        assert int(bf.exon_bp[1]) == big_exon_bp - 1
+        assert int(bf.intron_bp[1]) == big_intron_bp - 1
 
 
 # =====================================================================
@@ -469,12 +499,12 @@ class TestFragmentClasses:
         # Chimeric + gene-ambig: chimeric should win
         buf.append(_make_resolved(
             t_inds=frozenset({0, 2}), n_genes=2, num_hits=1,
-            chimera_type=ChimeraType.STRAND_SAME,
+            chimera_type=ChimeraType.CIS_STRAND_SAME,
         ))
         # Chimeric + multimapper: chimeric should win
         buf.append(_make_resolved(
             t_inds=frozenset({0}), n_genes=1, num_hits=3,
-            chimera_type=ChimeraType.INTERCHROMOSOMAL,
+            chimera_type=ChimeraType.TRANS,
         ))
         # Non-chimeric gene-ambig: should remain FRAG_GENE_AMBIG
         buf.append(_make_resolved(
@@ -491,17 +521,17 @@ class TestFragmentClasses:
     def test_chimera_type_round_trip(self):
         """chimera_type should survive append → finalize → iterate."""
         buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(chimera_type=ChimeraType.NOT_CHIMERIC))
-        buf.append(_make_resolved(chimera_type=ChimeraType.INTERCHROMOSOMAL))
-        buf.append(_make_resolved(chimera_type=ChimeraType.STRAND_SAME))
-        buf.append(_make_resolved(chimera_type=ChimeraType.STRAND_DIFF))
+        buf.append(_make_resolved(chimera_type=ChimeraType.NONE))
+        buf.append(_make_resolved(chimera_type=ChimeraType.TRANS))
+        buf.append(_make_resolved(chimera_type=ChimeraType.CIS_STRAND_SAME))
+        buf.append(_make_resolved(chimera_type=ChimeraType.CIS_STRAND_DIFF))
         buf.finalize()
 
         frags = list(buf)
-        assert frags[0].chimera_type == ChimeraType.NOT_CHIMERIC
-        assert frags[1].chimera_type == ChimeraType.INTERCHROMOSOMAL
-        assert frags[2].chimera_type == ChimeraType.STRAND_SAME
-        assert frags[3].chimera_type == ChimeraType.STRAND_DIFF
+        assert frags[0].chimera_type == ChimeraType.NONE
+        assert frags[1].chimera_type == ChimeraType.TRANS
+        assert frags[2].chimera_type == ChimeraType.CIS_STRAND_SAME
+        assert frags[3].chimera_type == ChimeraType.CIS_STRAND_DIFF
 
 
 # =====================================================================
@@ -598,7 +628,7 @@ class TestDiskSpill:
         assert len(result) == 200
         for i, bf in enumerate(result):
             assert bf.insert_size == 200 + i
-            assert bf.count_cat == int(CountCategory(i % 4))
+            assert bf.splice_type == int(SpliceType(i % len(SpliceType)))
 
     def test_cleanup_removes_files(self, tmp_path):
         buf, _ = _fill_buffer(

@@ -5,7 +5,7 @@ Replaces ad-hoc counter variables with a structured dataclass,
 reducing boilerplate and enabling consistent serialization.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 
 @dataclass
@@ -36,9 +36,9 @@ class PipelineStats:
     # --- Resolution-level ---
     n_fragments: int = 0
     n_chimeric: int = 0
-    n_chimeric_interchrom: int = 0
-    n_chimeric_strand_same: int = 0
-    n_chimeric_strand_diff: int = 0
+    n_chimeric_trans: int = 0
+    n_chimeric_cis_strand_same: int = 0
+    n_chimeric_cis_strand_diff: int = 0
     n_intergenic_unspliced: int = 0
     n_intergenic_spliced: int = 0
     n_with_exon: int = 0
@@ -59,19 +59,16 @@ class PipelineStats:
     n_insert_ambiguous: int = 0
     n_insert_intergenic: int = 0
 
-    # --- Unique counting (1 gene, 1 transcript, NH=1) ---
-    n_counted_truly_unique: int = 0
+    # --- Routing counters (authoritative) ---
+    deterministic_unique_units: int = 0
+    em_routed_unique_units: int = 0
+    em_routed_isoform_ambig_units: int = 0
+    em_routed_gene_ambig_units: int = 0
+    em_routed_multimapper_units: int = 0
 
-    # --- Isoform-ambiguous (1 gene, N transcripts, NH=1) ---
-    n_counted_isoform_ambig: int = 0
-
-    # --- Gene-ambiguous (N genes, NH=1) ---
-    n_counted_gene_ambig: int = 0
-
-    # --- Multimapper (NH > 1) ---
+    # --- Multimapper scan stats (NH > 1) ---
     n_multimapper_groups: int = 0
     n_multimapper_alignments: int = 0
-    n_counted_multimapper: int = 0
 
     # --- gDNA contamination ---
     n_gdna_em: int = 0
@@ -91,6 +88,26 @@ class PipelineStats:
         """Total fragments assigned to gDNA (intergenic + EM)."""
         return self.n_gdna_unique + self.n_gdna_em
 
+    @property
+    def n_counted_truly_unique(self) -> int:
+        """Back-compat alias: deterministic unique assignment count."""
+        return self.deterministic_unique_units
+
+    @property
+    def n_counted_isoform_ambig(self) -> int:
+        """Back-compat alias: EM-routed isoform-ambiguous units."""
+        return self.em_routed_isoform_ambig_units
+
+    @property
+    def n_counted_gene_ambig(self) -> int:
+        """Back-compat alias: EM-routed gene-ambiguous units."""
+        return self.em_routed_gene_ambig_units
+
+    @property
+    def n_counted_multimapper(self) -> int:
+        """Back-compat alias: EM-routed multimapper units."""
+        return self.em_routed_multimapper_units
+
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary.
 
@@ -102,6 +119,11 @@ class PipelineStats:
         d["n_intergenic"] = self.n_intergenic
         d["n_gdna_unique"] = self.n_gdna_unique
         d["n_gdna_total"] = self.n_gdna_total
+        # Back-compat aliases
+        d["n_counted_truly_unique"] = self.n_counted_truly_unique
+        d["n_counted_isoform_ambig"] = self.n_counted_isoform_ambig
+        d["n_counted_gene_ambig"] = self.n_counted_gene_ambig
+        d["n_counted_multimapper"] = self.n_counted_multimapper
         return d
 
     def as_bam_stats_dict(self) -> dict:

@@ -319,10 +319,18 @@ def _group_records_by_hit(usable_records):
     # pairing (resolve each half independently, then pair by transcript
     # set intersection).
     #
-    # Primary + supplementary records form the primary hit (always
-    # included).  Secondaries whose mate is explicitly unmapped are
-    # emitted as singleton hits.  All other secondaries go into the
-    # sec_r1_locs / sec_r2_locs lists for resolve-then-pair.
+    # When secondary records exist (multimapper), the primary R1/R2
+    # are also returned as additional secondary locations rather than
+    # forming a pre-paired hit.  This is necessary because minimap2
+    # often cross-pairs primary R1 and R2 at *different* gene copies
+    # for identical paralogs, producing chimeric primary pairs.
+    # Re-pairing all records through transcript-aware pairing
+    # resolves this by correctly matching R1/R2 at the same gene.
+    #
+    # Supplementary records stay with their primary (they represent
+    # split mapping of the same read, not different alignment
+    # positions).  Secondaries whose mate is explicitly unmapped are
+    # emitted as singleton hits.
 
     primary_r1: list = []     # primary + supplementary R1
     primary_r2: list = []     # primary + supplementary R2
@@ -355,7 +363,18 @@ def _group_records_by_hit(usable_records):
             else:
                 primary_r2.append(r)
 
-    # Primary hit: always included
+    has_secondary = bool(sec_r1_locs or sec_r2_locs)
+
+    if has_secondary:
+        # Multimapper without HI tags: include the primary R1/R2
+        # as additional locations for transcript-aware re-pairing.
+        if primary_r1:
+            sec_r1_locs.insert(0, primary_r1)
+        if primary_r2:
+            sec_r2_locs.insert(0, primary_r2)
+        return list(singleton_hits), sec_r1_locs, sec_r2_locs
+
+    # Unique mapper: primary pair as the sole hit
     hits: list[tuple[list, list]] = []
     if primary_r1 or primary_r2:
         hits.append((primary_r1, primary_r2))

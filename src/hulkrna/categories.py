@@ -1,42 +1,47 @@
 """
-hulkrna.categories — Count classification enums for the counting pipeline.
+hulkrna.categories — Splice classification enums for the counting pipeline.
 
-Internal count arrays use 8 columns: 4 categories × 2 strands
+Internal count arrays use 6 columns: 3 splice types × 2 strands
 (sense/antisense).  Strand is an internal signal used for gDNA
-estimation (Iceberg model) and is not exposed in user-facing output.
+estimation and is not exposed in user-facing output.
+
+Fragment splice types are based on splice junction status only:
+- UNSPLICED: no splice junctions detected
+- SPLICED_UNANNOT: splice junctions present but not in the reference
+- SPLICED_ANNOT: splice junctions exactly matching the reference
+
+Intronic vs exonic overlap is captured separately in the per-candidate
+overlap profile (n_exon_bp, n_intron_bp), not in the splice type.
 """
 
 from enum import IntEnum
 
 
-class CountCategory(IntEnum):
-    """Category of a fragment's overlap with gene annotations."""
-    INTRON = 0
-    UNSPLICED = 1
-    SPLICED_UNANNOT = 2
-    SPLICED_ANNOT = 3
+class SpliceType(IntEnum):
+    """Category of a fragment based on splice junction status."""
+    UNSPLICED = 0
+    SPLICED_UNANNOT = 1
+    SPLICED_ANNOT = 2
 
 
-NUM_CATEGORIES = len(CountCategory)
+NUM_SPLICE_TYPES = len(SpliceType)
 
 
-class CountCol(IntEnum):
+class SpliceStrandCol(IntEnum):
     """Internal column index for count arrays.
 
-    Layout: 4 categories × 2 strands (sense/antisense) = 8 columns.
+    Layout: 3 categories × 2 strands (sense/antisense) = 6 columns.
     Even indices are sense, odd indices are antisense.
     """
-    INTRON_SENSE = 0
-    INTRON_ANTISENSE = 1
-    UNSPLICED_SENSE = 2
-    UNSPLICED_ANTISENSE = 3
-    SPLICED_UNANNOT_SENSE = 4
-    SPLICED_UNANNOT_ANTISENSE = 5
-    SPLICED_ANNOT_SENSE = 6
-    SPLICED_ANNOT_ANTISENSE = 7
+    UNSPLICED_SENSE = 0
+    UNSPLICED_ANTISENSE = 1
+    SPLICED_UNANNOT_SENSE = 2
+    SPLICED_UNANNOT_ANTISENSE = 3
+    SPLICED_ANNOT_SENSE = 4
+    SPLICED_ANNOT_ANTISENSE = 5
 
     @classmethod
-    def from_category(cls, category: int, is_antisense: bool) -> "CountCol":
+    def from_category(cls, category: int, is_antisense: bool) -> "SpliceStrandCol":
         """Look up column from category and strand."""
         return cls(int(category) * 2 + int(is_antisense))
 
@@ -45,15 +50,15 @@ class CountCol(IntEnum):
         return bool(self.value % 2)
 
     @property
-    def category(self) -> CountCategory:
-        return CountCategory(self.value // 2)
+    def category(self) -> SpliceType:
+        return SpliceType(self.value // 2)
 
 
-NUM_COUNT_COLS = len(CountCol)
+NUM_SPLICE_STRAND_COLS = len(SpliceStrandCol)
 
 # Pre-computed column subsets (tuples for immutability and indexing).
-ANTISENSE_COLS = tuple(c.value for c in CountCol if c.is_antisense)
+ANTISENSE_COLS = tuple(c.value for c in SpliceStrandCol if c.is_antisense)
 SPLICED_COLS = tuple(
-    c.value for c in CountCol
-    if c.category in (CountCategory.SPLICED_ANNOT, CountCategory.SPLICED_UNANNOT)
+    c.value for c in SpliceStrandCol
+    if c.category in (SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT)
 )

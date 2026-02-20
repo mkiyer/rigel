@@ -289,8 +289,8 @@ class TestGroupRecordsByHit:
         assert len(r2_reads) == 1
 
     def test_fallback_secondary_returned_separately(self):
-        """Without HI tags, secondary records are returned in sec lists
-        for transcript-aware pairing by the pipeline."""
+        """Without HI tags, all R1/R2 locations (including primary)
+        go into sec lists for transcript-aware re-pairing."""
         r1_primary = _mock_bam_read(
             is_read1=True, ref_start=100, ref_id=0,
             next_ref_id=0, next_ref_start=300,
@@ -312,19 +312,19 @@ class TestGroupRecordsByHit:
         hits, sec_r1, sec_r2 = _group_records_by_hit(
             [r1_primary, r2_primary, r1_sec, r2_sec],
         )
-        # Only primary pair in hits
-        assert len(hits) == 1
-        assert r1_primary in hits[0][0]
-        assert r2_primary in hits[0][1]
-        # Secondaries in separate lists for resolve-then-pair
-        assert len(sec_r1) == 1
-        assert r1_sec in sec_r1[0]
-        assert len(sec_r2) == 1
-        assert r2_sec in sec_r2[0]
+        # No pre-formed hits — all locations in sec lists for re-pairing
+        assert len(hits) == 0
+        # Primary and secondary R1/R2 in sec lists
+        assert len(sec_r1) == 2
+        assert r1_primary in sec_r1[0]  # primary first
+        assert r1_sec in sec_r1[1]
+        assert len(sec_r2) == 2
+        assert r2_primary in sec_r2[0]  # primary first
+        assert r2_sec in sec_r2[1]
 
     def test_fallback_same_ref_secondaries_separated(self):
         """Without HI tags, secondaries on the same reference as primaries
-        are returned in sec lists (not cross-producted)."""
+        are returned in sec lists along with primaries for re-pairing."""
         r1_primary = _mock_bam_read(
             is_read1=True, ref_start=100, ref_id=0,
             next_ref_id=0, next_ref_start=300,
@@ -345,15 +345,14 @@ class TestGroupRecordsByHit:
         hits, sec_r1, sec_r2 = _group_records_by_hit(
             [r1_primary, r2_primary, r1_sec, r2_sec],
         )
-        # Only primary pair in hits
-        assert len(hits) == 1
-        assert r1_primary in hits[0][0]
-        assert r2_primary in hits[0][1]
-        # Secondaries returned separately
-        assert len(sec_r1) == 1
-        assert r1_sec in sec_r1[0]
-        assert len(sec_r2) == 1
-        assert r2_sec in sec_r2[0]
+        # No pre-formed hits — all in sec lists for re-pairing
+        assert len(hits) == 0
+        assert len(sec_r1) == 2
+        assert r1_primary in sec_r1[0]
+        assert r1_sec in sec_r1[1]
+        assert len(sec_r2) == 2
+        assert r2_primary in sec_r2[0]
+        assert r2_sec in sec_r2[1]
 
     def test_fallback_supplementary_grouped_with_primary(self):
         """Without HI, supplementary goes with primary (hit 0)."""
@@ -444,8 +443,8 @@ class TestParseBamFile:
         assert len(hits) == 2
 
     def test_multimapper_without_hi_tags_fallback(self):
-        """Multimapper without HI → primary hit in hits, secondaries in
-        sec_r1/sec_r2 for transcript-aware pairing."""
+        """Multimapper without HI → all R1/R2 locations in sec lists
+        for transcript-aware re-pairing (no pre-formed primary hit)."""
         r1_pri = _mock_bam_read(
             "frag1", is_read1=True, ref_start=100, ref_id=0,
             next_ref_id=0, next_ref_start=300, nh=2,
@@ -471,15 +470,15 @@ class TestParseBamFile:
         assert len(results) == 1
         nh, hits, sec_r1, sec_r2 = results[0]
         assert nh == 2
-        # Primary hit only in hits
-        assert len(hits) == 1
-        assert r1_pri in hits[0][0]
-        assert r2_pri in hits[0][1]
-        # Secondaries in sec lists for resolve-then-pair
-        assert len(sec_r1) == 1
-        assert r1_sec in sec_r1[0]
-        assert len(sec_r2) == 1
-        assert r2_sec in sec_r2[0]
+        # No pre-formed hits — all locations in sec lists for re-pairing
+        assert len(hits) == 0
+        # Primary + secondary R1/R2 in sec lists
+        assert len(sec_r1) == 2
+        assert r1_pri in sec_r1[0]  # primary first
+        assert r1_sec in sec_r1[1]
+        assert len(sec_r2) == 2
+        assert r2_pri in sec_r2[0]  # primary first
+        assert r2_sec in sec_r2[1]
 
     def test_supplementary_included_in_hit(self):
         """Supplementary records are included with primary in same hit."""

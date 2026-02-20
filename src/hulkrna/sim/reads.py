@@ -188,6 +188,14 @@ class ReadSimulator:
             self._t_lengths.append(len(seq))
             max_len = max(max_len, len(seq))
 
+        # Extract pre-mRNA sequences (unspliced, full genomic span)
+        self._premrna_seqs: list[str] = []
+        self._premrna_lengths: list[int] = []
+        for t in transcripts:
+            premrna_seq = self._extract_premrna_seq(t)
+            self._premrna_seqs.append(premrna_seq)
+            self._premrna_lengths.append(len(premrna_seq))
+
         # Clamp frag_max to longest transcript
         self.config.frag_max = min(self.config.frag_max, max_len)
 
@@ -200,6 +208,19 @@ class ReadSimulator:
         """
         exon_seqs = [self.genome[e.start:e.end] for e in t.exons]
         seq = "".join(exon_seqs)
+        if t.strand == Strand.NEG:
+            seq = reverse_complement(seq)
+        return seq
+
+    def _extract_premrna_seq(self, t: Transcript) -> str:
+        """Extract the unspliced pre-mRNA sequence (full genomic span).
+
+        For multi-exon transcripts, this includes introns.  For
+        single-exon transcripts, the pre-mRNA is identical to the
+        spliced mRNA.  Negative-strand sequences are reverse-
+        complemented.
+        """
+        seq = self.genome[t.start:t.end]
         if t.strand == Strand.NEG:
             seq = reverse_complement(seq)
         return seq
@@ -249,19 +270,48 @@ class ReadSimulator:
     # -- Transcript probability -----------------------------------------------
 
     def _compute_probs(self, frag_length: int) -> np.ndarray:
-        """Compute transcript selection probabilities for a given fragment length.
+        """Compute mature RNA transcript selection probabilities.
 
-        Weight = max(0, transcript_length - frag_length + 1) × abundance
+        Weight = max(0, spliced_length - frag_length + 1) × abundance
+
+        ``abundance`` is the mature mRNA molecular abundance and is
+        independent of ``nrna_abundance``.  These are separate pools:
+        the probability of drawing a mature RNA fragment is proportional
+        to ``abundance × spliced_effective_length``, regardless of how
+        much nascent RNA is present.
         """
         weights = np.array(
             [
-                max(0, tlen - frag_length + 1) * t.abundance
+                max(0, tlen - frag_length + 1) * (t.abundance or 0)
                 for tlen, t in zip(self._t_lengths, self.transcripts)
             ]
         )
         total = weights.sum()
         if total == 0:
             # All transcripts shorter than frag_length — uniform fallback
+            return np.ones(len(self.transcripts)) / len(self.transcripts)
+        return weights / total
+
+    def _compute_nrna_probs(self, frag_length: int) -> np.ndarray:
+        """Compute nascent RNA transcript selection probabilities.
+
+        Weight = max(0, premrna_length - frag_length + 1) × nrna_abundance
+
+        ``nrna_abundance`` is the nascent RNA molecular abundance and is
+        independent of ``abundance`` (the mature mRNA molecular abundance).
+        The pre-mRNA effective length (full genomic span including introns)
+        is typically much larger than the spliced effective length, so a
+        small ``nrna_abundance`` can still produce a substantial fraction
+        of reads.
+        """
+        weights = np.array(
+            [
+                max(0, plen - frag_length + 1) * t.nrna_abundance
+                for plen, t in zip(self._premrna_lengths, self.transcripts)
+            ]
+        )
+        total = weights.sum()
+        if total == 0:
             return np.ones(len(self.transcripts)) / len(self.transcripts)
         return weights / total
 
@@ -340,6 +390,59 @@ class ReadSimulator:
                 f"{rname}/2", r2_seq, quals,
             )
 
+    def _gen_reads_from_premrna(
+        self, t_idx: int, frag_len: int, count: int
+    ):
+        """Generate nascent RNA read pairs from unspliced pre-mRNA.
+
+        Reads are sampled from the full genomic span of the transcript
+        (including introns).  FR library convention and strandedness
+        behaviour are identical to mature RNA reads.
+
+        Yields (r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual).
+        """
+        t = self.transcripts[t_idx]
+        premrna_seq = self._premrna_seqs[t_idx]
+        premrna_len = self._premrna_lengths[t_idx]
+        read_len = min(self.config.read_length, frag_len)
+        rng = self._rng
+
+        eff_len = premrna_len - frag_len + 1
+        if eff_len <= 0:
+            return
+
+        frag_starts = rng.integers(0, eff_len, size=count)
+
+        ss = self.config.strand_specificity
+        if ss < 1.0:
+            flip_mask = rng.random(count) >= ss
+        else:
+            flip_mask = None
+
+        strand_char = "r" if t.strand == Strand.NEG else "f"
+
+        for i in range(count):
+            frag_start = frag_starts[i]
+            frag_end = frag_start + frag_len
+            frag_seq = premrna_seq[frag_start:frag_end]
+
+            r1_seq = reverse_complement(frag_seq[-read_len:])
+            r2_seq = frag_seq[:read_len]
+
+            if flip_mask is not None and flip_mask[i]:
+                r1_seq, r2_seq = r2_seq, r1_seq
+
+            r1_seq = self._introduce_errors(r1_seq)
+            r2_seq = self._introduce_errors(r2_seq)
+
+            quals = "I" * read_len
+            rname = f"nrna_{t.t_id}:{frag_start}-{frag_end}:{strand_char}:{i}"
+
+            yield (
+                f"{rname}/1", r1_seq, quals,
+                f"{rname}/2", r2_seq, quals,
+            )
+
     def _gen_reads_from_genome(self, frag_len: int, count: int):
         """Generate gDNA read pairs from the full genome.
 
@@ -388,55 +491,77 @@ class ReadSimulator:
 
     # -- Public interface -----------------------------------------------------
 
-    def _compute_gdna_split(self, n_fragments: int) -> tuple[int, int]:
-        """Compute the RNA/gDNA fragment split.
+    def _compute_pool_split(
+        self, n_fragments: int,
+    ) -> tuple[int, int, int]:
+        """Compute the 3-way mature RNA / nascent RNA / gDNA split.
 
-        Uses the abundance-weighted effective-length scheme:
-        each transcript's weight is ``abundance × eff_len`` and
-        gDNA weight is ``gdna_abundance × genome_eff_len``.
+        Each pool's weight is its molecular abundance multiplied by its
+        effective length — the number of fragment-start positions that
+        yield a fragment of the mean length:
 
-        Returns ``(n_rna, n_gdna)``.
+        - **Mature RNA**: ``abundance × max(spliced_len − mean_frag + 1, 0)``
+        - **Nascent RNA**: ``nrna_abundance × max(premrna_span − mean_frag + 1, 0)``
+        - **gDNA**: ``gdna_abundance × max(genome_len − gdna_mean_frag + 1, 0)``
+
+        ``abundance`` and ``nrna_abundance`` are independent molecular
+        abundances — they are **not** derived from one another by
+        subtraction.  Setting ``nrna_abundance = k × abundance`` means
+        there are *k* times as many nascent RNA molecules as mature mRNA
+        molecules; the actual read fractions additionally depend on the
+        ratio of effective lengths.
+
+        Returns ``(n_mrna, n_nrna, n_gdna)``.
         """
-        if self.gdna_config is None:
-            return n_fragments, 0
-
-        gc = self.gdna_config
-        # Use mean fragment length for effective-length calculation
         mean_frag = int(self.config.frag_mean)
-        gdna_mean_frag = int(gc.frag_mean)
 
-        rna_weight = sum(
-            t.abundance * max(0, tlen - mean_frag + 1)
+        # Mature RNA weight: abundance × spliced effective length
+        mrna_weight = sum(
+            (t.abundance or 0) * max(0, tlen - mean_frag + 1)
             for t, tlen in zip(self.transcripts, self._t_lengths)
         )
-        genome_eff_len = max(0, len(self.genome) - gdna_mean_frag + 1)
-        gdna_weight = gc.abundance * genome_eff_len
 
-        total_weight = rna_weight + gdna_weight
+        # Nascent RNA weight: nrna_abundance × pre-mRNA effective length
+        nrna_weight = sum(
+            t.nrna_abundance * max(0, plen - mean_frag + 1)
+            for t, plen in zip(self.transcripts, self._premrna_lengths)
+        )
+
+        # gDNA weight: gdna_abundance × genome effective length
+        if self.gdna_config is not None:
+            gc = self.gdna_config
+            gdna_mean_frag = int(gc.frag_mean)
+            genome_eff_len = max(0, len(self.genome) - gdna_mean_frag + 1)
+            gdna_weight = gc.abundance * genome_eff_len
+        else:
+            gdna_weight = 0.0
+
+        total_weight = mrna_weight + nrna_weight + gdna_weight
         if total_weight <= 0:
-            return n_fragments, 0
+            return n_fragments, 0, 0
 
-        gdna_frac = gdna_weight / total_weight
-        n_gdna = int(round(n_fragments * gdna_frac))
-        n_rna = n_fragments - n_gdna
-        return n_rna, n_gdna
+        n_nrna = int(round(n_fragments * nrna_weight / total_weight))
+        n_gdna = int(round(n_fragments * gdna_weight / total_weight))
+        n_mrna = max(0, n_fragments - n_nrna - n_gdna)
+        return n_mrna, n_nrna, n_gdna
 
     def simulate(self, n_fragments: int):
         """Generate *n_fragments* paired-end read pairs.
 
-        When ``gdna_config`` is set, fragments are split between RNA
-        and gDNA proportionally based on abundance-weighted effective
-        lengths.  RNA reads are emitted first, then gDNA reads.
+        Fragments are split three ways — mature RNA, nascent RNA,
+        and gDNA — based on abundance-weighted effective lengths.
+        Mature RNA reads are emitted first, then nascent RNA, then gDNA.
 
         Yields ``(r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual)``.
         """
-        n_rna, n_gdna = self._compute_gdna_split(n_fragments)
+        n_mrna, n_nrna, n_gdna = self._compute_pool_split(n_fragments)
 
-        # --- RNA reads ---
-        if n_rna > 0:
-            rng = self._rng
-            ntranscripts = len(self.transcripts)
-            frag_lengths = self._sample_frag_lengths(n_rna)
+        rng = self._rng
+        ntranscripts = len(self.transcripts)
+
+        # --- Mature RNA reads ---
+        if n_mrna > 0:
+            frag_lengths = self._sample_frag_lengths(n_mrna)
             unique_lengths, length_counts = np.unique(
                 frag_lengths, return_counts=True,
             )
@@ -450,6 +575,25 @@ class ReadSimulator:
 
                 for t_idx, t_count in zip(unique_t, t_counts):
                     yield from self._gen_reads_from_transcript(
+                        int(t_idx), int(frag_len), int(t_count),
+                    )
+
+        # --- Nascent RNA reads ---
+        if n_nrna > 0:
+            frag_lengths = self._sample_frag_lengths(n_nrna)
+            unique_lengths, length_counts = np.unique(
+                frag_lengths, return_counts=True,
+            )
+
+            for frag_len, frag_count in zip(unique_lengths, length_counts):
+                probs = self._compute_nrna_probs(int(frag_len))
+                t_indices = rng.choice(
+                    ntranscripts, size=int(frag_count), p=probs,
+                )
+                unique_t, t_counts = np.unique(t_indices, return_counts=True)
+
+                for t_idx, t_count in zip(unique_t, t_counts):
+                    yield from self._gen_reads_from_premrna(
                         int(t_idx), int(frag_len), int(t_count),
                     )
 
@@ -504,12 +648,14 @@ class ReadSimulator:
 
         logger.info(f"Wrote {n_written} read pairs → {r1_path}, {r2_path}")
 
-        # Log the RNA/gDNA split
-        n_rna, n_gdna = self._compute_gdna_split(n_fragments)
+        # Log the pool split
+        n_mrna, n_nrna, n_gdna = self._compute_pool_split(n_fragments)
+        parts = [f"mRNA: {n_mrna}"]
+        if n_nrna > 0:
+            parts.append(f"nRNA: {n_nrna} ({n_nrna / n_fragments:.1%})")
         if n_gdna > 0:
-            logger.info(
-                f"  RNA: {n_rna}, gDNA: {n_gdna} "
-                f"({n_gdna / n_fragments:.1%} gDNA)"
-            )
+            parts.append(f"gDNA: {n_gdna} ({n_gdna / n_fragments:.1%})")
+        if n_nrna > 0 or n_gdna > 0:
+            logger.info(f"  {', '.join(parts)}")
 
         return r1_path, r2_path

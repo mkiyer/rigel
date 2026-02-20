@@ -4,6 +4,7 @@ import re
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +113,28 @@ class GTF:
         return '\t'.join(fields)
 
     @staticmethod
-    def parse(line_iter: Iterable[str]) -> Generator['GTF', None, None]:
+    def parse(
+        line_iter: Iterable[str],
+        *,
+        parse_mode: Literal["strict", "warn-skip"] = "strict",
+    ) -> Generator['GTF', None, None]:
         """
         Generator to parse lines from an iterator (file object or list).
+
+        Parameters
+        ----------
+        line_iter : Iterable[str]
+            Input GTF lines.
+        parse_mode : {"strict", "warn-skip"}
+            - ``"strict"``: raise ``ValueError`` on malformed lines.
+            - ``"warn-skip"``: log warning and skip malformed lines.
         """
+        if parse_mode not in {"strict", "warn-skip"}:
+            raise ValueError(
+                f"Invalid parse_mode {parse_mode!r}; expected "
+                f"'strict' or 'warn-skip'"
+            )
+
         for line_num, line in enumerate(line_iter, 1):
             line = line.strip()
             if not line or line.startswith('#'):
@@ -123,6 +142,10 @@ class GTF:
             try:
                 yield GTF.from_str(line)
             except ValueError as e:
+                if parse_mode == "strict":
+                    raise ValueError(
+                        f"Malformed GTF at line {line_num}: {e}"
+                    ) from e
                 logger.warning("Skipping malformed GTF line %d: %s", line_num, e)
                 continue
 
@@ -157,7 +180,11 @@ class GTF:
 
 
     @staticmethod
-    def parse_file(filepath: str | Path) -> Generator['GTF', None, None]:
+    def parse_file(
+        filepath: str | Path,
+        *,
+        parse_mode: Literal["strict", "warn-skip"] = "strict",
+    ) -> Generator['GTF', None, None]:
         """
         Parse a GTF file and yield GTF objects.
         Handles both plain text and gzip files (.gz).
@@ -168,4 +195,4 @@ class GTF:
         
         open_func = gzip.open if filepath.suffix == '.gz' else open    
         with open_func(filepath, 'rt') as f:
-            yield from GTF.parse(f)
+            yield from GTF.parse(f, parse_mode=parse_mode)

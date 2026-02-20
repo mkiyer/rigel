@@ -167,6 +167,63 @@ class InsertSizeModel:
         )
 
     # ------------------------------------------------------------------
+    # eCDF-based effective length computation
+    # ------------------------------------------------------------------
+
+    def _normalized_probs(self) -> np.ndarray:
+        """Return Laplace-smoothed probability vector, shape (max_size+1,)."""
+        total = self.total_weight
+        if total == 0:
+            n = self.max_size + 1
+            return np.full(n, 1.0 / n, dtype=np.float64)
+        return (self.counts + 1.0) / (total + self.max_size + 1)
+
+    def compute_exonic_eff_len(self, exon_lengths: list[int] | np.ndarray) -> float:
+        """eCDF-weighted effective length for gDNA fragments on exons.
+
+        For each exon of length *E*, the expected number of gDNA
+        fragment start positions that produce a fragment fully
+        contained within the exon is::
+
+            Σ_{l=1}^{E}  P(l) × (E − l + 1)
+
+        where *P(l)* is the Laplace-smoothed gDNA insert-size
+        probability.  Summing across all exons gives the total
+        exonic effective length for the gene.
+
+        This is exact under the assumption that gDNA fragments
+        are uniformly distributed across the genome.
+
+        Parameters
+        ----------
+        exon_lengths : list[int] or np.ndarray
+            Lengths of the (merged) exons for one gene.
+
+        Returns
+        -------
+        float
+            Total exonic effective length (≥ 1.0).
+        """
+        probs = self._normalized_probs()  # P(l) for l=0..max_size
+        total = 0.0
+        for E in exon_lengths:
+            E = int(E)
+            if E <= 0:
+                continue
+            # l ranges from 1..min(E, max_size)
+            L_max = min(E, self.max_size)
+            # positions[l] = E - l + 1  for l = 1..L_max
+            l_vals = np.arange(1, L_max + 1)
+            positions = E - l_vals + 1  # (E, E-1, ..., E-L_max+1)
+            total += float(np.dot(probs[l_vals], positions))
+            # Overflow bin: fragments of length > max_size can only
+            # fit if E > max_size.  They get 1 position each
+            # (the exon must fully contain them).
+            if E > self.max_size:
+                total += float(probs[self.max_size]) * (E - self.max_size)
+        return max(total, 1.0)
+
+    # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------
 
@@ -240,7 +297,7 @@ class InsertSizeModel:
 class InsertSizeModels:
     """Container for per-category, global, and intergenic insert size models.
 
-    Wraps one ``InsertSizeModel`` per ``CountCategory`` plus a global
+    Wraps one ``InsertSizeModel`` per ``SpliceType`` plus a global
     model (all categories) and an intergenic model (fragments with no
     gene overlap).
 
@@ -249,15 +306,20 @@ class InsertSizeModels:
     """
 
     def __init__(self, max_size: int = 1000):
-        from .categories import CountCategory
+        from .categories import SpliceType
 
         self.max_size = max_size
         self.global_model = InsertSizeModel(max_size=max_size)
         self.intergenic = InsertSizeModel(max_size=max_size)
         self.category_models: dict = {
             cat: InsertSizeModel(max_size=max_size)
-            for cat in CountCategory
+            for cat in SpliceType
         }
+        # Combined gDNA insert size model:
+        # Trained from intergenic + antisense-genic fragments.
+        # Provides a richer gDNA insert profile than intergenic alone
+        # (which can be sparse for small genomes / targeted panels).
+        self.gdna_model = InsertSizeModel(max_size=max_size)
 
     @property
     def n_observations(self) -> int:
@@ -267,7 +329,7 @@ class InsertSizeModels:
     def observe(
         self,
         insert_size: int,
-        count_cat=None,
+        splice_type=None,
         weight: float = 1.0,
     ) -> None:
         """Record one insert size observation.
@@ -276,24 +338,36 @@ class InsertSizeModels:
         ----------
         insert_size : int
             Fragment insert size (must be >= 0).
-        count_cat : CountCategory or None
+        splice_type : SpliceType or None
             The fragment's count category, or ``None`` for intergenic.
         weight : float
             Observation weight (default 1.0).
         """
         self.global_model.observe(insert_size, weight)
-        if count_cat is None:
+        if splice_type is None:
             self.intergenic.observe(insert_size, weight)
+            # Intergenic fragments are ~100% gDNA → train gDNA model
+            self.gdna_model.observe(insert_size, weight)
         else:
-            self.category_models[count_cat].observe(insert_size, weight)
+            self.category_models[splice_type].observe(insert_size, weight)
+
+    def observe_gdna(self, insert_size: int, weight: float = 1.0) -> None:
+        """Record an insert size observation for the gDNA model only.
+
+        Used for antisense genic fragments (exonic + intronic) which
+        are enriched for gDNA but already routed to their category
+        model via :meth:`observe`.
+        """
+        self.gdna_model.observe(insert_size, weight)
 
     def to_dict(self) -> dict:
         """JSON/YAML-serializable summary of all insert size models."""
-        from .categories import CountCategory
+        from .categories import SpliceType
 
         d: dict = {"global": self.global_model.to_dict()}
         d["intergenic"] = self.intergenic.to_dict()
-        for cat in CountCategory:
+        d["gdna"] = self.gdna_model.to_dict()
+        for cat in SpliceType:
             d[cat.name.lower()] = self.category_models[cat].to_dict()
         return d
 
@@ -313,7 +387,7 @@ class InsertSizeModels:
 
     def log_summary(self) -> None:
         """Log a human-readable summary of all insert size models."""
-        from .categories import CountCategory
+        from .categories import SpliceType
 
         logger.info(
             f"Insert size models: {self.global_model.n_observations:,} "
@@ -326,7 +400,7 @@ class InsertSizeModels:
                 f"median={self.global_model.median:.1f}, "
                 f"mode={self.global_model.mode}"
             )
-        for cat in CountCategory:
+        for cat in SpliceType:
             m = self.category_models[cat]
             if m.n_observations > 0:
                 logger.info(
@@ -337,4 +411,9 @@ class InsertSizeModels:
             logger.info(
                 f"  INTERGENIC: {self.intergenic.n_observations:,} obs, "
                 f"mean={self.intergenic.mean:.1f}, mode={self.intergenic.mode}"
+            )
+        if self.gdna_model.n_observations > 0:
+            logger.info(
+                f"  gDNA (combined): {self.gdna_model.n_observations:,} obs, "
+                f"mean={self.gdna_model.mean:.1f}, mode={self.gdna_model.mode}"
             )

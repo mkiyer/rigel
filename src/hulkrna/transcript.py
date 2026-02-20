@@ -9,6 +9,7 @@ Exon intervals in 0-based half-open coordinates.
 import collections
 import logging
 from dataclasses import dataclass, field
+from typing import Literal
 
 from .types import Interval, Strand
 from .gtf import GTF
@@ -37,6 +38,18 @@ class Transcript:
     is_mane: bool = False
     is_ccds: bool = False
     abundance: float | None = None
+    nrna_abundance: float = 0.0
+    """Nascent RNA (pre-mRNA) molecular abundance.
+
+    Independent of ``abundance`` (mature mRNA molecular abundance).
+    Read fractions are proportional to::
+
+        mRNA  : abundance      × spliced_effective_length
+        nRNA  : nrna_abundance × genomic_span_effective_length
+
+    Setting ``nrna_abundance = k × abundance`` means there are *k* times
+    as many nascent RNA molecules as mature mRNA molecules.
+    """
 
     @classmethod
     def from_gtf(cls, feature) -> 'Transcript':
@@ -97,11 +110,16 @@ class Transcript:
             'is_basic': self.is_basic,
             'is_mane': self.is_mane,
             'is_ccds': self.is_ccds,
-            'abundance': self.abundance
+            'abundance': self.abundance,
+            'nrna_abundance': self.nrna_abundance,
         }
     
     @staticmethod
-    def read_gtf(gtf_file: str) -> list['Transcript']:
+    def read_gtf(
+        gtf_file: str,
+        *,
+        parse_mode: Literal["strict", "warn-skip"] = "strict",
+    ) -> list['Transcript']:
         '''
         read GTF and construct list of Transcript objects
         '''
@@ -109,7 +127,7 @@ class Transcript:
         # read gtf exons into a transcript dictionary
         logging.debug(f'[Transcript] Reading GTF file: {gtf_file}')
         num_lines = 0
-        for f in GTF.parse_file(gtf_file):
+        for f in GTF.parse_file(gtf_file, parse_mode=parse_mode):
             if f.feature != 'exon':
                 continue
             t_id = f.attrs['transcript_id']

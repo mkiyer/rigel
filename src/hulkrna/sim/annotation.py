@@ -35,6 +35,7 @@ class _TranscriptSpec:
     ref: str
     exons: list[Interval]
     abundance: float = 100.0
+    nrna_abundance: float = 0.0
 
 
 class GeneBuilder:
@@ -88,7 +89,14 @@ class GeneBuilder:
 
             - ``"t_id"`` (str): transcript ID
             - ``"exons"`` (list[tuple[int,int]]): 0-based half-open exon coords
-            - ``"abundance"`` (float, optional): relative abundance (default 100)
+            - ``"abundance"`` (float, optional): mature mRNA molecular
+              abundance, default 100.  Proportional to molecule count
+              after length normalisation (TPM-like).
+            - ``"nrna_abundance"`` (float, optional): nascent RNA molecular
+              abundance, default 0.  **Independent** of ``"abundance"``;
+              the two values are NOT coupled by subtraction.  Read
+              fractions depend on ``abundance × spliced_eff_len`` vs.
+              ``nrna_abundance × genomic_span_eff_len``.
         gene_name : str or None
             Gene symbol. Defaults to *gene_id*.
         gene_type : str
@@ -103,6 +111,7 @@ class GeneBuilder:
             t_id = tdef["t_id"]
             raw_exons = tdef["exons"]
             abundance = tdef.get("abundance", 100.0)
+            nrna_abundance = tdef.get("nrna_abundance", 0.0)
 
             # Build sorted Interval list
             exons = sorted(Interval(s, e) for s, e in raw_exons)
@@ -124,6 +133,7 @@ class GeneBuilder:
                     ref=self.ref_name,
                     exons=exons,
                     abundance=abundance,
+                    nrna_abundance=nrna_abundance,
                 )
             )
 
@@ -207,6 +217,7 @@ class GeneBuilder:
                 g_index=g_id_to_index[spec.g_id],
                 is_basic=True,
                 abundance=spec.abundance,
+                nrna_abundance=spec.nrna_abundance,
             )
             t.compute_length()
             transcripts.append(t)

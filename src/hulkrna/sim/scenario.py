@@ -108,9 +108,9 @@ class ScenarioResult:
 
         counts: Counter[str] = Counter()
         for frag_id in seen:
-            # Format: t_id:start-end:strand:idx  (or gdna:...)
+            # Format: t_id:start-end:strand:idx  (or gdna:..., nrna_*:...)
             t_id = frag_id.split(":")[0]
-            if t_id != "gdna":
+            if t_id != "gdna" and not t_id.startswith("nrna_"):
                 counts[t_id] += 1
         return dict(counts)
 
@@ -127,6 +127,22 @@ class ScenarioResult:
             for i, line in enumerate(fh):
                 if i % 4 == 0:
                     if line.startswith("@gdna:"):
+                        count += 1
+        return count
+
+    def ground_truth_nrna_count(self) -> int:
+        """Count nascent RNA fragments from FASTQ read names.
+
+        Returns
+        -------
+        int
+            Number of fragments with ``nrna_`` prefix.
+        """
+        count = 0
+        with open(self.fastq_r1) as fh:
+            for i, line in enumerate(fh):
+                if i % 4 == 0:
+                    if line.startswith("@nrna_"):
                         count += 1
         return count
 
@@ -152,7 +168,7 @@ class ScenarioResult:
                     if qname.endswith("/1"):
                         qname = qname[:-2]
                     t_id = qname.split(":")[0]
-                    if t_id != "gdna":
+                    if t_id != "gdna" and not t_id.startswith("nrna_"):
                         counts[t_id] += 1
         return dict(counts)
 
@@ -221,6 +237,7 @@ class Scenario:
         n_fragments: int = 1000,
         sim_config: SimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
+        nrna_fraction: float = 0.0,
     ) -> ScenarioResult:
         """Execute the full simulation pipeline.
 
@@ -240,6 +257,18 @@ class Scenario:
         gdna_config : GDNAConfig or None
             gDNA contamination config.  If None, falls back to the
             ``gdna_config`` set on the ``Scenario`` constructor.
+        nrna_fraction : float
+            Sets nascent RNA molecular abundance as a fraction of mature
+            mRNA molecular abundance: ``nrna_abundance = abundance ×
+            nrna_fraction``.  The two abundances are **independent** —
+            ``abundance`` is NOT reduced by this value.  The read pool
+            split is proportional to abundance × effective_length for
+            each pool.
+
+            Example: ``nrna_fraction=0.3`` with ``abundance=100`` gives
+            ``nrna_abundance=30``.  Reads are drawn proportionally to
+            ``100 × spliced_eff_len`` (mature) vs.
+            ``30 × genomic_span_eff_len`` (nascent RNA).
 
         Returns
         -------
@@ -258,6 +287,15 @@ class Scenario:
         logger.info(f"[{self.name}] Writing GTF annotations...")
         gtf_path = self.annotation.write_gtf(wdir)
         transcripts = self.annotation.get_transcripts()
+
+        # Apply nascent RNA fraction to all expressed transcripts.
+        # nrna_abundance is set independently of abundance:
+        # nrna_abundance = abundance × nrna_fraction.
+        # abundance (mature mRNA) is NOT modified.
+        if nrna_fraction > 0:
+            for t in transcripts:
+                if t.abundance and t.abundance > 0:
+                    t.nrna_abundance = t.abundance * nrna_fraction
 
         # 3. Simulate reads
         if sim_config is None:

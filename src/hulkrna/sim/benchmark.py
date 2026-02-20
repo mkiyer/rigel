@@ -105,6 +105,8 @@ class BenchmarkResult:
     n_chimeric: int
     n_gdna_expected: int = 0
     n_gdna_pipeline: float = 0.0
+    n_nrna_expected: int = 0
+    n_nrna_pipeline: float = 0.0
     transcripts: list[TranscriptAccuracy] = field(default_factory=list)
     stats_dict: dict = field(default_factory=dict)
 
@@ -122,8 +124,13 @@ class BenchmarkResult:
 
     @property
     def total_observed(self) -> float:
-        """Sum of observed counts across all transcripts."""
+        """Sum of observed counts across all transcripts (mRNA only)."""
         return sum(t.observed for t in self.transcripts)
+
+    @property
+    def total_rna_observed(self) -> float:
+        """Sum of mRNA + nRNA counts (total RNA attribution)."""
+        return self.total_observed + self.n_nrna_pipeline
 
     @property
     def total_abs_error(self) -> float:
@@ -161,6 +168,11 @@ class BenchmarkResult:
         """Absolute difference between expected and pipeline gDNA counts."""
         return abs(self.n_gdna_pipeline - self.n_gdna_expected)
 
+    @property
+    def nrna_abs_diff(self) -> float:
+        """Absolute difference between expected and pipeline nRNA counts."""
+        return abs(self.n_nrna_pipeline - self.n_nrna_expected)
+
     # -- Display --------------------------------------------------------------
 
     def summary(self) -> str:
@@ -179,6 +191,12 @@ class BenchmarkResult:
                 f"  gDNA: expected={self.n_gdna_expected}, "
                 f"pipeline={self.n_gdna_pipeline:.0f}, "
                 f"diff={self.gdna_abs_diff:.0f}"
+            )
+        if self.n_nrna_expected > 0 or self.n_nrna_pipeline > 0:
+            lines.append(
+                f"  nRNA: expected={self.n_nrna_expected}, "
+                f"pipeline={self.n_nrna_pipeline:.0f}, "
+                f"diff={self.nrna_abs_diff:.0f}"
             )
         lines.extend([
             f"  All exact: {self.all_exact}, "
@@ -221,6 +239,9 @@ def run_benchmark(
     # Ground truth: gDNA fragment count
     n_gdna_expected = scenario_result.ground_truth_gdna_count()
 
+    # Ground truth: nascent RNA fragment count
+    n_nrna_expected = scenario_result.ground_truth_nrna_count()
+
     # Observed: per-transcript total counts from the pipeline
     t_counts = pipeline_result.counter.t_counts  # (N_t, 12) array
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
@@ -238,6 +259,9 @@ def run_benchmark(
     n_gdna_pipeline = float(
         stats.n_intergenic + pipeline_result.counter.gdna_em_count
     )
+
+    # Pipeline nRNA count: EM-assigned nascent RNA fragments.
+    n_nrna_pipeline = float(pipeline_result.counter.nrna_em_count)
 
     # Per-transcript accuracy
     transcript_results: list[TranscriptAccuracy] = []
@@ -268,6 +292,8 @@ def run_benchmark(
         n_chimeric=stats.n_chimeric,
         n_gdna_expected=n_gdna_expected,
         n_gdna_pipeline=n_gdna_pipeline,
+        n_nrna_expected=n_nrna_expected,
+        n_nrna_pipeline=n_nrna_pipeline,
         transcripts=transcript_results,
         stats_dict=stats.to_dict(),
     )

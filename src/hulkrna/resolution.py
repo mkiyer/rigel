@@ -7,7 +7,8 @@ Also computes insert sizes with gap correction.
 
 This module contains:
 - ``merge_sets_with_criteria()`` — progressive set merging
-- ``compute_exon_overlap()`` — per-candidate exon overlap fractions
+- ``compute_overlap_profile()`` — per-candidate overlap profiles
+  (exon_frac, genic_frac) for 3-pool scoring
 - ``resolve_fragment()`` — core fragment-to-transcript resolution with
   chimera detection (interchromosomal and intrachromosomal)
 - ``compute_insert_size()`` — insert size with gap correction
@@ -27,7 +28,7 @@ from .types import (
     MergeResult,
     Strand,
 )
-from .categories import CountCategory
+from .categories import SpliceType
 from .fragment import Fragment
 
 logger = logging.getLogger(__name__)
@@ -83,20 +84,27 @@ def merge_sets_with_criteria(
 
 
 # ---------------------------------------------------------------------------
-# Exon overlap fraction
+# Overlap profile computation
 # ---------------------------------------------------------------------------
 
-def compute_exon_overlap(
+def compute_overlap_profile(
     frag: Fragment,
     index,
-) -> dict[int, float]:
-    """Compute per-candidate exon overlap fraction for a fragment.
+) -> tuple[dict[int, tuple[int, int]], int]:
+    """Compute per-candidate overlap in base pairs for a fragment.
 
     For each fragment exon block, queries the index for overlapping
-    reference EXON intervals and computes the actual base overlap
-    (clipped to the block boundaries).  Overlap is summed per
-    transcript across all blocks and divided by the total fragment
-    exon length.
+    reference intervals (EXON, INTRON, INTERGENIC) and computes the
+    actual base overlap (clipped to block boundaries).  Overlap is
+    accumulated per transcript as integer base-pair counts.
+
+    Returns two BP counts per transcript:
+
+    - **n_exon_bp**: bases overlapping reference exons.
+      Used by the mRNA pool — high exon overlap indicates mature RNA.
+    - **n_intron_bp**: bases overlapping reference introns.
+      Used together with exon_bp by the nRNA pool — nascent RNA
+      fragments overlap the transcript body (exon + intron).
 
     Parameters
     ----------
@@ -107,48 +115,60 @@ def compute_exon_overlap(
 
     Returns
     -------
-    dict[int, float]
-        Mapping of transcript index → overlap fraction (0.0 to 1.0).
-        Only transcripts overlapping at least one EXON-type interval
-        are included.
+    tuple[dict[int, tuple[int, int]], int]
+        ``(overlap_bp, frag_length)`` where overlap_bp maps
+        transcript index → ``(n_exon_bp, n_intron_bp)``.
+        Only transcripts with any genic overlap (EXON or INTRON)
+        are included.  ``frag_length`` is the total fragment exon
+        length in bp.
     """
     if not frag.exons:
-        return {}
+        return {}, 0
 
     # Total fragment exon length (sum of exon block sizes)
     frag_length = sum(e.end - e.start for e in frag.exons)
     if frag_length <= 0:
-        return {}
+        return {}, 0
 
     # Accumulate per-transcript overlap in bases
-    t_overlap: dict[int, int] = defaultdict(int)
+    t_exon_bp: dict[int, int] = defaultdict(int)
+    t_intron_bp: dict[int, int] = defaultdict(int)
 
     for exon_block in frag.exons:
         block_start = exon_block.start
         block_end = exon_block.end
 
         for t_idx, _g_idx, itype, h_start, h_end in index.query_exon_with_coords(exon_block):
-            if itype != IntervalType.EXON:
+            if itype == IntervalType.INTERGENIC:
                 continue
             # Clipped overlap
             overlap = min(block_end, h_end) - max(block_start, h_start)
             if overlap > 0:
-                t_overlap[t_idx] += overlap
+                if itype == IntervalType.EXON:
+                    t_exon_bp[t_idx] += overlap
+                else:
+                    # INTRON
+                    t_intron_bp[t_idx] += overlap
 
-    # Convert to fraction (relative to fragment length)
-    return {t_idx: bp / frag_length for t_idx, bp in t_overlap.items()}
+    # Merge: include all transcripts with any genic overlap
+    all_t = set(t_exon_bp) | set(t_intron_bp)
+    return {
+        t_idx: (t_exon_bp.get(t_idx, 0), t_intron_bp.get(t_idx, 0))
+        for t_idx in all_t
+    }, frag_length
 
 
 def filter_by_overlap(
     t_inds: frozenset[int],
-    overlap_fracs: dict[int, float],
+    overlap_bp: dict[int, tuple[int, int]],
+    frag_length: int,
     *,
     min_frac_of_best: float = 0.9,
 ) -> frozenset[int]:
     """Filter candidate transcripts by exon overlap fraction.
 
-    Keeps transcripts whose overlap fraction is at least
-    ``min_frac_of_best`` times the best overlap fraction among
+    Keeps transcripts whose exon overlap fraction is at least
+    ``min_frac_of_best`` times the best exon overlap fraction among
     candidates.  This removes transcript candidates that only have
     marginal (1-2 bp) overlap with the fragment.
 
@@ -159,8 +179,12 @@ def filter_by_overlap(
     ----------
     t_inds : frozenset[int]
         Candidate transcript indices from resolution.
-    overlap_fracs : dict[int, float]
-        Per-transcript overlap fractions from ``compute_exon_overlap``.
+    overlap_bp : dict[int, tuple[int, int]]
+        Per-transcript overlap BP from ``compute_overlap_profile``.
+        Each value is ``(n_exon_bp, n_intron_bp)``.  Filtering uses
+        the exon_frac derived from ``n_exon_bp / frag_length``.
+    frag_length : int
+        Total fragment exon length in bp, used as denominator.
     min_frac_of_best : float
         Minimum fraction of the best overlap to retain a candidate
         (default 0.9 = within 10% of best).
@@ -170,13 +194,14 @@ def filter_by_overlap(
     frozenset[int]
         Filtered candidate set (never empty — falls back to original).
     """
-    if not overlap_fracs or not t_inds:
+    if not overlap_bp or not t_inds or frag_length <= 0:
         return t_inds
 
-    # Find the best overlap fraction among current candidates
+    # Find the best exon overlap fraction among current candidates
     best = 0.0
     for t_idx in t_inds:
-        frac = overlap_fracs.get(t_idx, 0.0)
+        profile = overlap_bp.get(t_idx)
+        frac = profile[0] / frag_length if profile else 0.0
         if frac > best:
             best = frac
 
@@ -186,7 +211,7 @@ def filter_by_overlap(
     threshold = best * min_frac_of_best
     filtered = frozenset(
         t_idx for t_idx in t_inds
-        if overlap_fracs.get(t_idx, 0.0) >= threshold
+        if (overlap_bp.get(t_idx, (0, 0))[0] / frag_length) >= threshold
     )
 
     # Safety: never return empty set
@@ -381,9 +406,9 @@ def _detect_intrachromosomal_chimera(
     # Compare strands across components
     unique_strands = set(comp_strands)
     if len(unique_strands) == 1:
-        chimera_type = ChimeraType.STRAND_SAME
+        chimera_type = ChimeraType.CIS_STRAND_SAME
     else:
-        chimera_type = ChimeraType.STRAND_DIFF
+        chimera_type = ChimeraType.CIS_STRAND_DIFF
 
     # --- Compute minimum gap between components ---
     comp_list = list(components.values())
@@ -427,8 +452,8 @@ class ResolvedFragment:
     n_genes : int
         Number of distinct genes derived from ``t_inds`` via
         ``t_to_g_arr``.
-    count_cat : CountCategory
-        INTRON / UNSPLICED / SPLICED_UNANNOT / SPLICED_ANNOT.
+    splice_type : SpliceType
+        UNSPLICED / SPLICED_UNANNOT / SPLICED_ANNOT.
     exon_strand : Strand
         Combined alignment strand of the fragment's exon blocks
         (after R2 flip).
@@ -441,8 +466,8 @@ class ResolvedFragment:
     num_hits : int
         Number of alignment pairs for this read name (NH tag).
     chimera_type : ChimeraType
-        Chimera classification (NOT_CHIMERIC / INTERCHROMOSOMAL /
-        STRAND_SAME / STRAND_DIFF).
+        Chimera classification (NONE / TRANS /
+        CIS_STRAND_SAME / CIS_STRAND_DIFF).
     chimera_gap : int
         Minimum genomic distance between disjoint exon-block clusters
         for intrachromosomal chimeras, -1 for interchromosomal or
@@ -450,19 +475,23 @@ class ResolvedFragment:
     """
     t_inds: frozenset[int]
     n_genes: int
-    count_cat: CountCategory
+    splice_type: SpliceType
     exon_strand: Strand
     sj_strand: Strand
     insert_size: int
     merge_criteria: MergeCriteria
     num_hits: int
-    chimera_type: ChimeraType = ChimeraType.NOT_CHIMERIC
+    overlap_bp: dict[int, tuple[int, int]] | None = None
+    frag_length: int = 0
+    frag_start: int = 0
+    frag_end: int = 0
+    chimera_type: ChimeraType = ChimeraType.NONE
     chimera_gap: int = -1
 
     @property
     def is_chimeric(self) -> bool:
         """True if this fragment is classified as chimeric."""
-        return self.chimera_type != ChimeraType.NOT_CHIMERIC
+        return self.chimera_type != ChimeraType.NONE
 
     @property
     def is_unique_gene(self) -> bool:
@@ -481,7 +510,7 @@ class ResolvedFragment:
         5. Not chimeric.
         """
         return (
-            self.count_cat == CountCategory.SPLICED_ANNOT
+            self.splice_type == SpliceType.SPLICED_ANNOT
             and self.is_unique_gene
             and self.exon_strand in (Strand.POS, Strand.NEG)
             and self.sj_strand in (Strand.POS, Strand.NEG)
@@ -513,7 +542,7 @@ def resolve_fragment(
       (no shared transcript between clusters).
 
     Intrachromosomal chimeras are further classified as
-    ``STRAND_SAME`` or ``STRAND_DIFF`` based on the alignment strand
+    ``CIS_STRAND_SAME`` or ``CIS_STRAND_DIFF`` based on the alignment strand
     of the disjoint exon-block clusters.
 
     Parameters
@@ -536,13 +565,13 @@ def resolve_fragment(
         return None
 
     # --- Interchromosomal chimera detection ---
-    chimera_type = ChimeraType.NOT_CHIMERIC
+    chimera_type = ChimeraType.NONE
     chimera_gap = -1
 
     refs = set(e.ref for e in frag.exons)
     is_interchromosomal = len(refs) > 1
     if is_interchromosomal:
-        chimera_type = ChimeraType.INTERCHROMOSOMAL
+        chimera_type = ChimeraType.TRANS
 
     # --- Query each exon block against the unified cgranges index ---
     exon_t_sets: list[frozenset[int]] = []
@@ -610,48 +639,78 @@ def resolve_fragment(
         else:
             has_unannotated_sj = True
 
-    # --- Resolution ---
-    any_exon = any(s for s in exon_t_sets)
+    # --- Resolution: Three-state categorization ---
+    # Priority order:
+    # 1. Annotated SJs → SPLICED_ANNOT (definitively mature RNA)
+    # 2. Unannotated SJs → SPLICED_UNANNOT
+    # 3. No SJs → UNSPLICED (overlap profile captures exonic/intronic)
+    #
+    # Intronic vs exonic overlap is NOT used for category assignment.
+    # The per-candidate overlap profile (n_exon_bp, n_intron_bp) handles
+    # the distinction between mature RNA, nascent RNA, and gDNA in the
+    # 3-pool likelihood scoring.
 
-    if any_exon:
-        # Merge EXON + SJ sets together for maximum specificity.
-        # When annotated SJs are present, prioritize SJ-supported
-        # transcripts to avoid broad union fallback that can admit
-        # exon-only isoforms lacking observed splice evidence.
-        if has_annotated_sj:
-            exon_merge = merge_sets_with_criteria(exon_t_sets)
-            sj_merge = merge_sets_with_criteria(sj_t_sets)
-            if not sj_merge.is_empty:
-                if not exon_merge.is_empty:
-                    t_inds = exon_merge.t_inds & sj_merge.t_inds
-                    if not t_inds:
-                        t_inds = sj_merge.t_inds
-                else:
+    any_exon = any(s for s in exon_t_sets)
+    any_intron = any(s for s in intron_t_sets)
+
+    if has_annotated_sj and any_exon:
+        # --- SPLICED_ANNOT: annotated SJs prove mature RNA origin ---
+        exon_merge = merge_sets_with_criteria(exon_t_sets)
+        sj_merge = merge_sets_with_criteria(sj_t_sets)
+        if not sj_merge.is_empty:
+            if not exon_merge.is_empty:
+                t_inds = exon_merge.t_inds & sj_merge.t_inds
+                if not t_inds:
                     t_inds = sj_merge.t_inds
-                merge_result = MergeResult(t_inds, sj_merge.criteria)
             else:
-                all_t_sets = exon_t_sets + sj_t_sets
-                merge_result = merge_sets_with_criteria(all_t_sets)
+                t_inds = sj_merge.t_inds
+            merge_result = MergeResult(t_inds, sj_merge.criteria)
         else:
             all_t_sets = exon_t_sets + sj_t_sets
             merge_result = merge_sets_with_criteria(all_t_sets)
+        splice_type = SpliceType.SPLICED_ANNOT
 
-        # Determine count category
-        if has_annotated_sj:
-            count_cat = CountCategory.SPLICED_ANNOT
-        elif has_unannotated_sj:
-            count_cat = CountCategory.SPLICED_UNANNOT
-        else:
-            count_cat = CountCategory.UNSPLICED
-    else:
-        # No EXON overlap → try INTRON fallback
-        any_intron = any(s for s in intron_t_sets)
+    elif any_exon or any_intron:
+        # --- Genic fragment (exon and/or intron overlap) ---
+        # Merge exon and intron transcript sets INDEPENDENTLY, then
+        # union the results.  This prevents intron overlap from
+        # *narrowing* the exon-based candidate set — critical for
+        # overlapping antisense genes where gene A's intron spatially
+        # overlaps gene B's exon.  The per-candidate overlap profile
+        # (exon_bp, intron_bp) still carries the intronic information
+        # downstream for probabilistic scoring.
+        parts: list[frozenset[int]] = []
+        best_criteria = MergeCriteria.UNION
+
+        if any_exon:
+            exon_merge = merge_sets_with_criteria(exon_t_sets)
+            if not exon_merge.is_empty:
+                parts.append(exon_merge.t_inds)
+                best_criteria = exon_merge.criteria
+
         if any_intron:
-            merge_result = merge_sets_with_criteria(intron_t_sets)
-            count_cat = CountCategory.INTRON
+            intron_merge = merge_sets_with_criteria(intron_t_sets)
+            if not intron_merge.is_empty:
+                parts.append(intron_merge.t_inds)
+
+        if parts:
+            t_inds = frozenset.union(*parts)
+            merge_result = MergeResult(
+                t_inds,
+                best_criteria if len(parts) == 1
+                else MergeCriteria.UNION,
+            )
         else:
-            # Pure intergenic — no compatible hits
-            return None
+            merge_result = EMPTY_MERGE
+
+        if has_unannotated_sj:
+            splice_type = SpliceType.SPLICED_UNANNOT
+        else:
+            splice_type = SpliceType.UNSPLICED
+
+    else:
+        # Pure intergenic — no compatible hits
+        return None
 
     if merge_result.is_empty:
         # Defensive — shouldn't happen with valid input
@@ -662,37 +721,65 @@ def resolve_fragment(
     if not t_inds:
         return None
 
-    # --- Overlap-based filtering for all exonic fragments ---
-    # cgranges returns any transcript with >=1bp exon overlap, which
-    # can admit candidates with marginal overlap.  Filter to keep only
-    # candidates whose exon overlap fraction is close to the best.
-    # Applied to all fragment types (spliced and unspliced) since even
-    # spliced fragments have exon blocks that can benefit from overlap
-    # specificity in addition to splice-junction information.
-    if len(t_inds) > 1:
-        overlap_fracs = compute_exon_overlap(frag, index)
-        t_inds = filter_by_overlap(
-            t_inds, overlap_fracs, min_frac_of_best=overlap_min_frac,
-        )
+    # --- Overlap profiles for all genic fragments ---
+    # Compute overlap BP counts for ALL candidates so that the scoring
+    # pipeline can derive exon_frac (mRNA) and genic_frac (nRNA).
+    #
+    # The hard exon-overlap filter is applied ONLY to spliced fragments
+    # (SPLICED_ANNOT / SPLICED_UNANNOT).  For unspliced fragments the
+    # filter is skipped because it uses exon_bp only — in antisense
+    # overlaps, one gene's exon is another gene's intron, so the
+    # exon-only metric systematically removes the correct gene for
+    # nRNA/gDNA fragments whose overlap is predominantly intronic.
+    # The EM's soft overlap penalty (overlap_exponent * log(overlap_frac))
+    # handles unspliced candidate weighting instead.
+    overlap_bp, frag_length = compute_overlap_profile(frag, index)
+    if overlap_bp:
+        if len(t_inds) > 1 and splice_type != SpliceType.UNSPLICED:
+            t_inds = filter_by_overlap(
+                t_inds, overlap_bp, frag_length,
+                min_frac_of_best=overlap_min_frac,
+            )
+        # Keep only entries for surviving candidates
+        overlap_bp = {
+            t_idx: overlap_bp[t_idx]
+            for t_idx in t_inds
+            if t_idx in overlap_bp
+        }
+    else:
+        # Pure intronic fragments have no exonic overlap; use 0 exon_bp.
+        # intron_bp = frag_length to indicate fully genic.
+        overlap_bp = {
+            t_idx: (0, frag_length) for t_idx in t_inds
+        }
 
     # --- Derive n_genes from transcript indices ---
     n_genes = len(set(int(index.t_to_g_arr[t]) for t in t_inds))
 
     # --- Compute insert size (skip for chimeras — meaningless) ---
-    if chimera_type == ChimeraType.NOT_CHIMERIC:
+    if chimera_type == ChimeraType.NONE:
         insert_size = compute_insert_size(frag, t_inds, index)
     else:
         insert_size = -1
 
+    # Compute fragment genomic extent from exon blocks.
+    # For non-chimeric fragments, all exons are on the same ref.
+    frag_start = min(e.start for e in frag.exons)
+    frag_end = max(e.end for e in frag.exons)
+
     return ResolvedFragment(
         t_inds=t_inds,
         n_genes=n_genes,
-        count_cat=count_cat,
+        splice_type=splice_type,
         exon_strand=exon_strand,
         sj_strand=sj_strand,
         insert_size=insert_size,
         merge_criteria=merge_result.criteria,
         num_hits=1,  # Caller must set this from the pairs list length
+        overlap_bp=overlap_bp,
+        frag_length=frag_length,
+        frag_start=frag_start,
+        frag_end=frag_end,
         chimera_type=chimera_type,
         chimera_gap=chimera_gap,
     )

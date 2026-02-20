@@ -197,20 +197,21 @@ class ChimeraType(IntEnum):
 
     Values
     ------
-    NOT_CHIMERIC : int
+    NONE : int
         All exon blocks map to a connected set of transcripts.
-    INTERCHROMOSOMAL : int
-        Exon blocks span multiple reference sequences.
-    STRAND_SAME : int
+    TRANS : int
+        Exon blocks span multiple reference sequences (interchromosomal).
+        Suggestive of trans-splicing or gene fusions.
+    CIS_STRAND_SAME : int
         Intrachromosomal chimera where both disjoint exon-block
         clusters align to the same strand.  Suggestive of
         transcriptional read-through between adjacent genes.
-    STRAND_DIFF : int
+    CIS_STRAND_DIFF : int
         Intrachromosomal chimera where the disjoint exon-block
         clusters align to different strands.  Suggestive of genomic
         rearrangement or trans-splicing.
     """
-    NOT_CHIMERIC = 0
-    INTERCHROMOSOMAL = 1
-    STRAND_SAME = 2
-    STRAND_DIFF = 3
+    NONE = 0
+    TRANS = 1
+    CIS_STRAND_SAME = 2
+    CIS_STRAND_DIFF = 3

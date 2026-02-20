@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 
-from hulkrna.categories import CountCategory
+from hulkrna.categories import SpliceType
 from hulkrna.insert_model import InsertSizeModel, InsertSizeModels
 
 
@@ -159,42 +159,42 @@ class TestInsertSizeModels:
         models = InsertSizeModels(max_size=200)
         assert models.global_model.max_size == 200
         assert models.intergenic.max_size == 200
-        assert len(models.category_models) == len(CountCategory)
+        assert len(models.category_models) == len(SpliceType)
 
     def test_observe_routes_to_global_and_category(self):
         models = InsertSizeModels()
-        models.observe(250, count_cat=CountCategory.SPLICED_ANNOT)
+        models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
         assert models.global_model.n_observations == 1
-        assert models.category_models[CountCategory.SPLICED_ANNOT].n_observations == 1
-        assert models.category_models[CountCategory.INTRON].n_observations == 0
+        assert models.category_models[SpliceType.SPLICED_ANNOT].n_observations == 1
+        assert models.category_models[SpliceType.UNSPLICED].n_observations == 0
         assert models.intergenic.n_observations == 0
 
     def test_observe_intergenic(self):
         models = InsertSizeModels()
-        models.observe(300, count_cat=None)
+        models.observe(300, splice_type=None)
         assert models.global_model.n_observations == 1
         assert models.intergenic.n_observations == 1
-        for cat in CountCategory:
+        for cat in SpliceType:
             assert models.category_models[cat].n_observations == 0
 
     def test_n_observations_delegates_to_global(self):
         models = InsertSizeModels()
-        models.observe(100, count_cat=CountCategory.INTRON)
-        models.observe(200, count_cat=None)
+        models.observe(100, splice_type=SpliceType.UNSPLICED)
+        models.observe(200, splice_type=None)
         assert models.n_observations == 2
 
     def test_to_dict(self):
         models = InsertSizeModels()
-        models.observe(250, count_cat=CountCategory.SPLICED_ANNOT)
+        models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
         d = models.to_dict()
         assert "global" in d
         assert "intergenic" in d
         assert "spliced_annot" in d
-        assert "intron" in d
+        assert "unspliced" in d
 
     def test_write_json(self, tmp_path):
         models = InsertSizeModels()
-        models.observe(250, count_cat=CountCategory.SPLICED_ANNOT)
+        models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
         path = tmp_path / "insert_models.json"
         models.write_json(path)
         assert path.exists()

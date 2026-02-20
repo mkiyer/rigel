@@ -1,4 +1,4 @@
-"""Tests for hulkrna.counter — ReadCounter with unified EM assignment."""
+"""Tests for hulkrna.counter — ReadCounter with locus-level EM assignment."""
 
 import numpy as np
 import pandas as pd
@@ -6,12 +6,13 @@ import pytest
 
 from hulkrna.types import Strand, MergeCriteria
 from hulkrna.categories import (
-    CountCategory,
-    CountCol,
-    NUM_COUNT_COLS,
+    SpliceType,
+    SpliceStrandCol,
+    NUM_SPLICE_STRAND_COLS,
+    SPLICED_COLS,
 )
 from hulkrna.resolution import ResolvedFragment
-from hulkrna.counter import ReadCounter, EMData
+from hulkrna.counter import ReadCounter, EMData, Locus, LocusEMData
 from hulkrna.strand_model import StrandModel, StrandModels
 
 
@@ -92,7 +93,7 @@ def _make_resolved(**kwargs):
     defaults = dict(
         t_inds=frozenset({0}),
         n_genes=1,
-        count_cat=CountCategory.UNSPLICED,
+        splice_type=SpliceType.UNSPLICED,
         exon_strand=Strand.POS,
         sj_strand=Strand.NONE,
         insert_size=250,
@@ -106,33 +107,24 @@ def _make_resolved(**kwargs):
 def _make_insert_models():
     from hulkrna.insert_model import InsertSizeModels
     im = InsertSizeModels()
-    im.observe(250, CountCategory.UNSPLICED)
+    im.observe(250, SpliceType.UNSPLICED)
     return im
 
 
 # Default column for UNSPLICED_SENSE
-_UNSPLICED_SENSE = int(CountCol.UNSPLICED_SENSE)
+_UNSPLICED_SENSE = int(SpliceStrandCol.UNSPLICED_SENSE)
 
 
 def _make_em_data(
     t_indices_per_unit,
     log_liks_per_unit=None,
     count_cols_per_unit=None,
-    gdna_base_index=None,
+    num_transcripts=None,
+    num_genes=None,
 ):
     """Build EMData from a list of per-unit candidate lists.
 
-    Parameters
-    ----------
-    t_indices_per_unit : list[list[int]]
-        Candidate transcript indices for each unit.
-    log_liks_per_unit : list[list[float]] or None
-        Log-likelihoods per candidate (default: all zeros = equal).
-    count_cols_per_unit : list[list[int]] or None
-        Count column index per candidate (default: all UNSPLICED_SENSE = 2).
-    gdna_base_index : int or None
-        Base gDNA shadow index. Default: ``max(all_t_indices) + 1`` or 0
-        if there are no candidates.
+    The global EMData contains mRNA + nRNA candidates only (no gDNA).
     """
     offsets = [0]
     flat_t = []
@@ -155,17 +147,17 @@ def _make_em_data(
     n_units = len(t_indices_per_unit)
     n_candidates = len(flat_t)
 
-    # Derive gdna_base_index sentinel (one past max transcript index)
-    if gdna_base_index is None:
-        gdna_base_index = (max(flat_t) + 1) if flat_t else 0
+    if num_transcripts is None:
+        num_transcripts = (max(flat_t) + 1) if flat_t else 0
+    nrna_base = num_transcripts
 
-    # Build locus tracking arrays: best non-gDNA transcript per unit.
+    # Build locus tracking arrays
     locus_t = np.full(n_units, -1, dtype=np.int32)
     locus_cc = np.zeros(n_units, dtype=np.uint8)
     for u, t_list in enumerate(t_indices_per_unit):
         cc_list = count_cols_per_unit[u] if count_cols_per_unit else None
         for j, t_idx in enumerate(t_list):
-            if t_idx < gdna_base_index:
+            if t_idx < nrna_base:
                 locus_t[u] = t_idx
                 locus_cc[u] = cc_list[j] if cc_list else _UNSPLICED_SENSE
                 break
@@ -177,10 +169,146 @@ def _make_em_data(
         count_cols=np.array(flat_cc, dtype=np.uint8),
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,
+        is_spliced=np.zeros(n_units, dtype=bool),
+        frag_starts=np.zeros(n_units, dtype=np.int32),
+        frag_ends=np.zeros(n_units, dtype=np.int32),
+        frag_refs=["chr1"] * n_units,
+        gdna_log_liks=np.full(n_units, -np.inf, dtype=np.float64),
         n_units=n_units,
         n_candidates=n_candidates,
-        gdna_base_index=gdna_base_index,
+        nrna_base_index=nrna_base,
     )
+
+
+def _make_locus_em_data(
+    t_indices_per_unit,
+    log_liks_per_unit=None,
+    count_cols_per_unit=None,
+    num_transcripts=None,
+    rc=None,
+    nrna_init=None,
+    gdna_init=0.0,
+    include_nrna=False,
+    include_gdna=False,
+    nrna_log_lik=-2.0,
+    gdna_log_lik=0.0,
+    alpha=0.01,
+):
+    """Build a LocusEMData for unit tests (single-locus, identity mapping).
+
+    Parameters
+    ----------
+    t_indices_per_unit : list[list[int]]
+        LOCAL mRNA transcript indices per unit.
+    rc : ReadCounter or None
+        If provided, unique_totals for mRNA are extracted from
+        rc.unique_counts[i].sum().
+    include_nrna : bool
+        Add nRNA candidates for each mRNA candidate.
+    include_gdna : bool
+        Add a gDNA candidate for each unit.
+    """
+    if num_transcripts is None:
+        all_t = [t for unit in t_indices_per_unit for t in unit]
+        num_transcripts = (max(all_t) + 1) if all_t else 1
+
+    n_t = num_transcripts
+    n_components = 2 * n_t + 1
+    gdna_idx = 2 * n_t
+
+    offsets = [0]
+    flat_t = []
+    flat_lk = []
+    flat_cc = []
+    locus_t_list = []
+    locus_cc_list = []
+
+    for u, t_list in enumerate(t_indices_per_unit):
+        for j, t_idx in enumerate(t_list):
+            flat_t.append(t_idx)
+            flat_lk.append(
+                log_liks_per_unit[u][j] if log_liks_per_unit else 0.0
+            )
+            flat_cc.append(
+                count_cols_per_unit[u][j]
+                if count_cols_per_unit
+                else _UNSPLICED_SENSE
+            )
+
+        if include_nrna:
+            for t_idx in t_list:
+                flat_t.append(n_t + t_idx)
+                flat_lk.append(nrna_log_lik)
+                flat_cc.append(_UNSPLICED_SENSE)
+
+        if include_gdna:
+            flat_t.append(gdna_idx)
+            flat_lk.append(gdna_log_lik)
+            flat_cc.append(_UNSPLICED_SENSE)
+
+        offsets.append(len(flat_t))
+
+        locus_t_list.append(t_list[0] if t_list else -1)
+        cc = (
+            count_cols_per_unit[u][0]
+            if (count_cols_per_unit and t_list)
+            else _UNSPLICED_SENSE
+        )
+        locus_cc_list.append(cc)
+
+    n_units = len(t_indices_per_unit)
+
+    # unique_totals from ReadCounter
+    ut = np.zeros(n_components, dtype=np.float64)
+    if rc is not None:
+        for i in range(min(n_t, rc.num_transcripts)):
+            ut[i] = rc.unique_counts[i].sum()
+
+    # nRNA init
+    if nrna_init is None:
+        nrna_arr = np.zeros(n_t, dtype=np.float64)
+    else:
+        nrna_arr = np.asarray(nrna_init, dtype=np.float64)
+    for i in range(n_t):
+        ut[n_t + i] = nrna_arr[i]
+    ut[gdna_idx] = gdna_init
+
+    eff_len = np.ones(n_components, dtype=np.float64)
+    prior = np.full(n_components, alpha, dtype=np.float64)
+
+    locus = Locus(
+        locus_id=0,
+        transcript_indices=np.arange(n_t, dtype=np.int32),
+        gene_indices=np.array([0], dtype=np.int32),
+        unit_indices=np.arange(n_units, dtype=np.int32),
+    )
+
+    return LocusEMData(
+        locus=locus,
+        offsets=np.array(offsets, dtype=np.int64),
+        t_indices=np.array(flat_t, dtype=np.int32),
+        log_liks=np.array(flat_lk, dtype=np.float64),
+        count_cols=np.array(flat_cc, dtype=np.uint8),
+        locus_t_indices=np.array(locus_t_list, dtype=np.int32),
+        locus_count_cols=np.array(locus_cc_list, dtype=np.uint8),
+        n_transcripts=n_t,
+        n_components=n_components,
+        local_to_global_t=np.arange(n_t, dtype=np.int32),
+        unique_totals=ut,
+        nrna_init=nrna_arr,
+        gdna_init=gdna_init,
+        effective_lengths=eff_len,
+        prior=prior,
+    )
+
+
+def _run_and_assign(rc, locus_em, *, em_iterations=10):
+    """Convenience: run locus EM then assign. Returns (theta, gdna_count)."""
+    theta, _alpha = rc.run_locus_em(locus_em, em_iterations=em_iterations)
+    gdna_count = rc.assign_locus_ambiguous(
+        locus_em, theta,
+    )
+    return theta, gdna_count
 
 
 # =====================================================================
@@ -223,7 +351,7 @@ class TestAssignUnique:
             t_inds=frozenset({0}),
             n_genes=1,
             exon_strand=Strand.POS,
-            count_cat=CountCategory.UNSPLICED,
+            splice_type=SpliceType.UNSPLICED,
         )
         rc.assign_unique(resolved, index, sms)
 
@@ -295,29 +423,41 @@ class TestEMData:
         assert em.n_candidates == 6
         assert list(em.offsets) == [0, 2, 3, 6]
 
+    def test_new_fields_present(self):
+        """New locus-EM fields are populated."""
+        em = _make_em_data([[0, 1]])
+        assert em.is_spliced.shape == (1,)
+        assert em.frag_starts.shape == (1,)
+        assert em.frag_ends.shape == (1,)
+        assert len(em.frag_refs) == 1
+        assert em.gdna_log_liks.shape == (1,)
+        assert em.gdna_log_liks[0] == -np.inf  # default unspliced
+
 
 # =====================================================================
-# run_em — EM convergence tests
+# Locus EM — convergence tests
 # =====================================================================
 
 
-class TestRunEM:
-    def test_empty_em_data_sets_theta(self):
+class TestLocusEM:
+    def test_empty_locus_em(self):
+        """Empty LocusEMData produces valid theta."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([])
-        rc.run_em(em, em_iterations=5)
-        assert rc._converged_theta is not None
-        assert rc._converged_theta.shape == (5,)  # N_t + N_g (3 + 2)
-        assert rc._converged_theta.sum() == pytest.approx(1.0)
+        lem = _make_locus_em_data([], num_transcripts=3)
+        theta, alpha = rc.run_locus_em(lem, em_iterations=5)
+        assert theta is not None
+        assert theta.shape == (lem.n_components,)
+        assert theta.sum() == pytest.approx(1.0)
 
     def test_uniform_priors_stay_uniform(self):
-        """With no unique counts and equal likelihoods, theta stays uniform."""
+        """With no unique counts and equal likelihoods, mRNA theta stays uniform."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1]] * 1000)
-        rc.run_em(em, em_iterations=10)
+        lem = _make_locus_em_data([[0, 1]] * 1000, num_transcripts=3)
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
 
-        theta = rc._converged_theta
+        # mRNA components 0 and 1 should be approximately equal
         assert theta[0] == pytest.approx(theta[1], rel=0.01)
+        # t2 not in any unit → smaller
         assert theta[2] < theta[0]
 
     def test_unique_counts_bias_em(self):
@@ -325,10 +465,11 @@ class TestRunEM:
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
 
-        em = _make_em_data([[0, 1]] * 500)
-        rc.run_em(em, em_iterations=10)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 500, num_transcripts=3, rc=rc,
+        )
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
 
-        theta = rc._converged_theta
         assert theta[0] > theta[1]
 
     def test_zero_iterations_uses_unique_priors(self):
@@ -337,27 +478,26 @@ class TestRunEM:
         rc.unique_counts[0, 0] = 10.0
         rc.unique_counts[1, 0] = 5.0
 
-        em = _make_em_data([[0, 1]] * 100)
-        rc.run_em(em, em_iterations=0)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 100, num_transcripts=3, rc=rc,
+        )
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=0)
 
-        theta = rc._converged_theta
-        # No warm-up or VBEM iterations → alpha = unique_totals + prior
-        # alpha = [10+0.01, 5+0.01, 0+0.01, 0+1.0, 0+1.0]
-        # Shadows use _SHADOW_PRIOR=1.0, transcripts use vbem_prior=0.01
-        assert theta[0] > theta[1] > theta[2]
+        # t0 gets more prior weight than t1
+        assert theta[0] > theta[1]
         assert theta is not None
         assert theta.sum() == pytest.approx(1.0)
 
     def test_likelihood_influences_em(self):
         """Candidates with higher likelihoods should attract more mass."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data(
+        lem = _make_locus_em_data(
             [[0, 1]] * 1000,
             log_liks_per_unit=[[0.0, -10.0]] * 1000,
+            num_transcripts=3,
         )
-        rc.run_em(em, em_iterations=10)
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
 
-        theta = rc._converged_theta
         assert theta[0] > theta[1]
 
     def test_convergence_detected(self):
@@ -366,45 +506,43 @@ class TestRunEM:
         rc.unique_counts[0, 0] = 100.0
         rc.unique_counts[1, 0] = 100.0
 
-        em = _make_em_data([[0, 1]] * 100)
-        rc.run_em(em, em_iterations=100)
-        theta = rc._converged_theta
+        lem = _make_locus_em_data(
+            [[0, 1]] * 100, num_transcripts=2, rc=rc,
+        )
+        theta, _alpha = rc.run_locus_em(lem, em_iterations=100)
         assert theta is not None
 
 
 # =====================================================================
-# assign_ambiguous — MAP assignment using EM posteriors
+# Locus assignment — posterior expected-count assignment
 # =====================================================================
 
 
-class TestAssignAmbiguous:
+class TestLocusAssignment:
     def test_single_candidate_gets_full_count(self):
         """Unit with one candidate → count goes entirely to that transcript."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0]])
-        rc.run_em(em, em_iterations=1)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([[0]], num_transcripts=3)
+        _run_and_assign(rc, lem, em_iterations=1)
 
-        assert rc.em_counts[0].sum() == 1.0
-        assert rc.em_counts.sum() == 1.0
+        assert rc.em_counts[0].sum() == pytest.approx(1.0)
+        assert rc.em_counts.sum() == pytest.approx(1.0)
 
     def test_two_candidates_assigns_one(self):
-        """Each unit contributes exactly 1.0 total count to one transcript."""
+        """Each unit contributes exactly 1.0 total count."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1]])
-        rc.run_em(em, em_iterations=1)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([[0, 1]], num_transcripts=3)
+        _run_and_assign(rc, lem, em_iterations=1)
 
-        assert rc.em_counts.sum() == 1.0
+        assert rc.em_counts.sum() == pytest.approx(1.0)
 
     def test_n_units_equals_n_counts(self):
         """N ambiguous units → N total em_counts."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1]] * 100)
-        rc.run_em(em, em_iterations=5)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([[0, 1]] * 100, num_transcripts=3)
+        _run_and_assign(rc, lem, em_iterations=5)
 
-        assert rc.em_counts.sum() == 100.0
+        assert rc.em_counts.sum() == pytest.approx(100.0)
 
     def test_total_counts_equals_unique_plus_em(self):
         """t_counts = unique_counts + em_counts."""
@@ -420,26 +558,26 @@ class TestAssignAmbiguous:
             )
 
         # 5 ambiguous
-        em = _make_em_data([[0, 1]] * 5)
-        rc.run_em(em, em_iterations=5)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([[0, 1]] * 5, num_transcripts=3, rc=rc)
+        _run_and_assign(rc, lem, em_iterations=5)
 
         assert rc.unique_counts.sum() == 10.0
-        assert rc.em_counts.sum() == 5.0
-        assert rc.t_counts.sum() == 15.0
+        assert rc.em_counts.sum() == pytest.approx(5.0)
+        assert rc.t_counts.sum() == pytest.approx(15.0)
         np.testing.assert_array_almost_equal(
             rc.t_counts, rc.unique_counts + rc.em_counts
         )
 
     def test_distribution_follows_priors(self):
-        """Over many fragments, sampled assignments follow unique priors."""
+        """Over many fragments, expected-count assignments follow unique priors."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 90.0
         rc.unique_counts[1, _UNSPLICED_SENSE] = 10.0
 
-        em = _make_em_data([[0, 1]] * 10000)
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 10000, num_transcripts=3, rc=rc,
+        )
+        _run_and_assign(rc, lem, em_iterations=10)
 
         t0_em = rc.em_counts[0].sum()
         t1_em = rc.em_counts[1].sum()
@@ -448,44 +586,36 @@ class TestAssignAmbiguous:
         assert t1_em > 500  # ~10% of 10000
 
     def test_writes_to_em_not_unique(self):
-        """assign_ambiguous only writes to em_counts."""
+        """assign_locus_ambiguous only writes to em_counts."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1]] * 50)
-        rc.run_em(em, em_iterations=5)
+        lem = _make_locus_em_data([[0, 1]] * 50, num_transcripts=3)
 
         unique_before = rc.unique_counts.copy()
-        rc.assign_ambiguous(em)
+        _run_and_assign(rc, lem, em_iterations=5)
 
         np.testing.assert_array_equal(rc.unique_counts, unique_before)
-        assert rc.em_counts.sum() == 50.0
+        assert rc.em_counts.sum() == pytest.approx(50.0)
 
     def test_empty_em_data_does_nothing(self):
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([])
-        rc.run_em(em, em_iterations=5)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([], num_transcripts=3)
+        _run_and_assign(rc, lem, em_iterations=5)
 
         assert rc.em_counts.sum() == 0.0
 
-    def test_count_col_respected(self):
+    def test_splice_strand_col_respected(self):
         """Count goes to the correct column (category×strand)."""
-        cc = int(CountCol.SPLICED_ANNOT_ANTISENSE)
+        cc = int(SpliceStrandCol.SPLICED_ANNOT_ANTISENSE)
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data(
+        lem = _make_locus_em_data(
             [[0]],
             count_cols_per_unit=[[cc]],
+            num_transcripts=3,
         )
-        rc.run_em(em, em_iterations=1)
-        rc.assign_ambiguous(em)
+        _run_and_assign(rc, lem, em_iterations=1)
 
-        assert rc.em_counts[0, cc] == 1.0
-        assert rc.em_counts.sum() == 1.0
-
-    def test_requires_run_em_first(self):
-        rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1]])
-        with pytest.raises(RuntimeError, match="run_em"):
-            rc.assign_ambiguous(em)
+        assert rc.em_counts[0, cc] == pytest.approx(1.0)
+        assert rc.em_counts.sum() == pytest.approx(1.0)
 
     def test_deterministic_with_same_seed(self):
         """Expected-count assignment is deterministic."""
@@ -494,51 +624,55 @@ class TestAssignAmbiguous:
             rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
             rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
-            em = _make_em_data([[0, 1]] * 100)
-            rc.run_em(em, em_iterations=10)
-            rc.assign_ambiguous(em)
+            lem = _make_locus_em_data(
+                [[0, 1]] * 100, num_transcripts=3, rc=rc,
+            )
+            _run_and_assign(rc, lem, em_iterations=10)
             results.append(rc.em_counts.copy())
 
         np.testing.assert_array_equal(results[0], results[1])
         np.testing.assert_array_equal(results[1], results[2])
 
-    def test_different_seeds_differ(self):
+    def test_different_seeds_same_expected_counts(self):
         """Different seeds do not affect expected-count assignment."""
         counts = []
         for seed in [1, 2]:
             rc = ReadCounter(num_transcripts=3, num_genes=2, seed=seed)
             rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
-            em = _make_em_data([[0, 1]] * 100)
-            rc.run_em(em, em_iterations=10)
-            rc.assign_ambiguous(em)
+            lem = _make_locus_em_data(
+                [[0, 1]] * 100, num_transcripts=3, rc=rc,
+            )
+            _run_and_assign(rc, lem, em_iterations=10)
             counts.append(rc.em_counts.copy())
 
         np.testing.assert_array_equal(counts[0], counts[1])
 
-    def test_integer_counts(self):
+    def test_fractional_counts(self):
         """EM counts may be fractional under expected-count assignment."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
         rc.unique_counts[1, _UNSPLICED_SENSE] = 30.0
 
-        em = _make_em_data([[0, 1]] * 200)
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 200, num_transcripts=3, rc=rc,
+        )
+        _run_and_assign(rc, lem, em_iterations=10)
 
         frac = rc.em_counts - np.floor(rc.em_counts)
         assert np.any(frac > 0.0)
 
     def test_equal_candidates_share_counts(self):
-        """Equal-probability candidates all receive counts (not winner-take-all).
+        """Equal-probability candidates all receive counts.
 
-        With 4 candidates of equal probability (each ~25%), all should
+        With 4 candidates of equal probability (~25%), all should
         receive a substantial share over many fragments.
         """
         rc = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1, 2, 3]] * 10000)
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data(
+            [[0, 1, 2, 3]] * 10000, num_transcripts=4,
+        )
+        _run_and_assign(rc, lem, em_iterations=10)
 
         per_t = rc.em_counts.sum(axis=1)
         # Each should get ~2500 counts; verify all get at least 2000
@@ -546,7 +680,7 @@ class TestAssignAmbiguous:
             assert per_t[t] > 2000, (
                 f"t{t} got {per_t[t]} counts — expected ~2500"
             )
-        assert rc.em_counts.sum() == 10000.0
+        assert rc.em_counts.sum() == pytest.approx(10000.0)
 
 
 # =====================================================================
@@ -563,9 +697,8 @@ class TestPosteriorMean:
     def test_single_candidate_posterior_one(self):
         """One candidate per unit → posterior is 1.0, mean is 1.0."""
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
-        em = _make_em_data([[0]] * 10)
-        rc.run_em(em, em_iterations=1)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([[0]] * 10, num_transcripts=3)
+        _run_and_assign(rc, lem, em_iterations=1)
 
         pm = rc.posterior_mean()
         assert pm[0] == pytest.approx(1.0)
@@ -576,9 +709,10 @@ class TestPosteriorMean:
         """Strong prior → assigned units have high mean posterior."""
         rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
-        em = _make_em_data([[0, 1]] * 100)
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 100, num_transcripts=2, rc=rc,
+        )
+        _run_and_assign(rc, lem, em_iterations=10)
 
         pm = rc.posterior_mean()
         # t0 gets most assignments with high posterior
@@ -597,30 +731,25 @@ class TestSimultaneousResolution:
     def test_same_theta_regardless_of_order(self):
         """Shuffling ambiguous units produces identical EM theta.
 
-        EM convergence is order-independent.  Sampled counts will
-        differ (different draw sequences) but abundances agree.
+        EM convergence is order-independent.  Expected counts agree.
         """
         rc1 = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
         rc1.unique_counts[0, 0] = 50.0
         rc1.unique_counts[2, 0] = 30.0
 
         units = [[0, 1]] * 200 + [[0, 2]] * 200
-        em1 = _make_em_data(units)
-        rc1.run_em(em1, em_iterations=10)
-        rc1.assign_ambiguous(em1)
+        lem1 = _make_locus_em_data(units, num_transcripts=4, rc=rc1)
+        theta1, _ = _run_and_assign(rc1, lem1, em_iterations=10)
 
         rc2 = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
         rc2.unique_counts[0, 0] = 50.0
         rc2.unique_counts[2, 0] = 30.0
 
         units_rev = [[0, 2]] * 200 + [[0, 1]] * 200
-        em2 = _make_em_data(units_rev)
-        rc2.run_em(em2, em_iterations=10)
-        rc2.assign_ambiguous(em2)
+        lem2 = _make_locus_em_data(units_rev, num_transcripts=4, rc=rc2)
+        theta2, _ = _run_and_assign(rc2, lem2, em_iterations=10)
 
-        np.testing.assert_allclose(
-            rc1._converged_theta, rc2._converged_theta, atol=1e-10
-        )
+        np.testing.assert_allclose(theta1, theta2, atol=1e-10)
         # Total counts should match (400 units each)
         assert rc1.em_counts.sum() == pytest.approx(400.0)
         assert rc2.em_counts.sum() == pytest.approx(400.0)
@@ -635,11 +764,10 @@ class TestMultimapperEM:
     def test_multimapper_molecule_one_count(self):
         """Multimapper molecule (many candidates) → exactly 1.0 total count."""
         rc = ReadCounter(num_transcripts=4, num_genes=2, seed=42)
-        em = _make_em_data([[0, 1, 2, 3]])
-        rc.run_em(em, em_iterations=5)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data([[0, 1, 2, 3]], num_transcripts=4)
+        _run_and_assign(rc, lem, em_iterations=5)
 
-        assert rc.em_counts.sum() == 1.0
+        assert rc.em_counts.sum() == pytest.approx(1.0)
 
     def test_multimapper_and_ambig_together(self):
         """Mixed ambiguous + multimapper units in same EM."""
@@ -647,9 +775,8 @@ class TestMultimapperEM:
         rc.unique_counts[0, 0] = 100.0
 
         units = [[0, 1]] * 50 + [[0, 2]] * 50 + [[0, 1, 2, 3]] * 25
-        em = _make_em_data(units)
-        rc.run_em(em, em_iterations=10)
-        rc.assign_ambiguous(em)
+        lem = _make_locus_em_data(units, num_transcripts=4, rc=rc)
+        _run_and_assign(rc, lem, em_iterations=10)
 
         assert rc.em_counts.sum() == pytest.approx(125.0, abs=1e-6)
 
@@ -681,8 +808,12 @@ class TestCountsOutput:
         expected_cols = [
             "gene_id", "gene_name",
             "count", "count_unique", "count_spliced",
-            "count_em", "count_high_conf", "n_gdna",
-            "n_antisense", "gdna_rate",
+            "count_em", "count_high_conf",
+            "n_nrna", "n_gdna",
+            "n_antisense",
+            "n_sense_all", "n_antisense_all",
+            "n_intronic_sense", "n_intronic_antisense",
+            "gdna_rate",
         ]
         assert list(df.columns) == expected_cols
 
@@ -715,9 +846,9 @@ class TestCountsOutput:
         index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         # SPLICED_ANNOT sense
-        rc.unique_counts[0, CountCol.SPLICED_ANNOT_SENSE] = 3.0
+        rc.unique_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
         # SPLICED_UNANNOT antisense
-        rc.unique_counts[0, CountCol.SPLICED_UNANNOT_ANTISENSE] = 2.0
+        rc.unique_counts[0, SpliceStrandCol.SPLICED_UNANNOT_ANTISENSE] = 2.0
         # UNSPLICED (should not be in count_spliced)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 10.0
 
@@ -753,7 +884,7 @@ class TestDetailOutput:
         index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
-        rc.unique_counts[2, CountCol.SPLICED_ANNOT_SENSE] = 3.0
+        rc.unique_counts[2, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
 
         df = rc.get_detail_df(index)
         assert len(df) == 2
@@ -774,32 +905,128 @@ class TestDetailOutput:
         index = _make_index()
         rc = ReadCounter(num_transcripts=3, num_genes=2, seed=42)
         rc.unique_counts[0, _UNSPLICED_SENSE] = 1.0
-        rc.unique_counts[0, CountCol.SPLICED_ANNOT_SENSE] = 1.0
+        rc.unique_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 1.0
 
         df = rc.get_detail_df(index)
         assert set(df["category"]) == {"unspliced", "spliced_annot"}
 
 
 # =====================================================================
-# gDNA summary output
+# gDNA summary output (locus-level)
 # =====================================================================
 
 
 class TestGDNASummaryOutput:
     def test_gdna_summary_dict(self):
-        shadow = np.array([10.0])
-        rc = ReadCounter(
-            num_transcripts=2, num_genes=1, seed=42,
-            shadow_init=shadow,
-        )
-        rc.gdna_em_counts[0] = 5.0
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc._gdna_em_total = 15.0
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 5.0
 
         summary = rc.gdna_summary()
-        assert summary["gdna_unique_count"] == 10.0
-        assert summary["gdna_em_count"] == 5.0
+        assert summary["gdna_em_total"] == 15.0
         assert summary["gdna_total"] == 15.0
         assert summary["rna_unique_total"] == 80.0
         assert summary["rna_em_total"] == 5.0
-        assert summary["gdna_contamination_rate"] == pytest.approx(0.15, abs=1e-6)
+        expected_rate = 15.0 / (80.0 + 5.0 + 15.0)
+        assert summary["gdna_contamination_rate"] == pytest.approx(
+            expected_rate, abs=1e-6
+        )
+
+    def test_gdna_contamination_rate_zero(self):
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        assert rc.gdna_contamination_rate == 0.0
+
+    def test_gdna_intervals_df_empty(self):
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        df = rc.get_gdna_intervals_df()
+        assert len(df) == 0
+        assert "locus_id" in df.columns
+        assert "ref" in df.columns
+
+    def test_gdna_intervals_df_populated(self):
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc.gdna_locus_results = [
+            {
+                "locus_id": 0,
+                "intervals": [("chr1", 100, 500)],
+                "gdna_count": 10.0,
+                "footprint_bp": 400,
+            },
+        ]
+        df = rc.get_gdna_intervals_df()
+        assert len(df) == 1
+        assert df.loc[0, "ref"] == "chr1"
+        assert df.loc[0, "start"] == 100
+        assert df.loc[0, "end"] == 500
+        assert df.loc[0, "gdna_count"] == 10.0
+
+
+# =====================================================================
+# gDNA in locus EM — unspliced compete with gDNA shadow
+# =====================================================================
+
+
+class TestGDNAInLocusEM:
+    """Verify gDNA shadow competes with mRNA in locus EM."""
+
+    def test_gdna_absorbs_when_init_high(self):
+        """With large gdna_init and equal likelihoods, gDNA takes share."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem = _make_locus_em_data(
+            [[0]] * 100,
+            num_transcripts=2,
+            include_gdna=True,
+            gdna_init=500.0,
+            gdna_log_lik=0.0,
+        )
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+
+        # gDNA should absorb some fragments
+        assert gdna_count > 0
+
+    def test_strong_rna_beats_gdna(self):
+        """When transcript likelihood >> gDNA, most go to transcript."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 500.0
+        lem = _make_locus_em_data(
+            [[0]] * 100,
+            log_liks_per_unit=[[0.0]] * 100,
+            num_transcripts=2,
+            rc=rc,
+            include_gdna=True,
+            gdna_init=1.0,
+            gdna_log_lik=-20.0,
+        )
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+
+        assert rc.em_counts[0].sum() > 95
+        assert gdna_count < 5
+
+    def test_total_counts_preserved_with_gdna(self):
+        """em_counts + nrna_em + gdna == n_units."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 200,
+            num_transcripts=2,
+            include_nrna=True,
+            include_gdna=True,
+            gdna_init=50.0,
+        )
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+
+        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        assert total == pytest.approx(200.0)
+
+    def test_no_gdna_candidate_means_no_gdna_assignment(self):
+        """Without gDNA candidate, all counts go to RNA."""
+        rc = ReadCounter(num_transcripts=2, num_genes=1, seed=42)
+        lem = _make_locus_em_data(
+            [[0, 1]] * 100,
+            num_transcripts=2,
+            include_gdna=False,
+        )
+        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=5)
+
+        assert gdna_count == 0.0
+        assert rc.em_counts.sum() == pytest.approx(100.0)

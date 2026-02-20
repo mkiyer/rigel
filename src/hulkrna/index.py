@@ -18,7 +18,7 @@ import collections
 import logging
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 
 import cgranges
 import numpy as np
@@ -73,7 +73,11 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     return ref_lengths
 
 
-def read_transcripts(gtf_file: str | Path) -> list[Transcript]:
+def read_transcripts(
+    gtf_file: str | Path,
+    *,
+    gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
+) -> list[Transcript]:
     """Parse a GTF file and return a sorted list of Transcript objects.
 
     Each transcript is assigned a sequential ``t_index`` and a ``g_index``
@@ -81,7 +85,9 @@ def read_transcripts(gtf_file: str | Path) -> list[Transcript]:
     ``(ref, start, end, strand)`` so that downstream interval generation
     can process them in genomic order.
     """
-    transcripts = Transcript.read_gtf(str(gtf_file))
+    transcripts = Transcript.read_gtf(
+        str(gtf_file), parse_mode=gtf_parse_mode,
+    )
 
     # Assign integer indices
     g_id_to_index: dict[str, int] = {}
@@ -328,6 +334,7 @@ class HulkIndex:
         *,
         feather_compression: str = "lz4",
         write_tsv: bool = True,
+        gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
     ) -> None:
         """Build the hulkrna reference index and write to disk.
 
@@ -344,6 +351,9 @@ class HulkIndex:
             ``'uncompressed'``).
         write_tsv : bool
             If True, write human-readable TSV mirrors alongside Feather files.
+        gtf_parse_mode : {"strict", "warn-skip"}
+            GTF parsing behavior. ``"strict"`` (default) fails fast on
+            malformed lines; ``"warn-skip"`` logs warnings and skips.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -363,7 +373,9 @@ class HulkIndex:
 
         # -- Transcripts ------------------------------------------------------
         logger.info(f"[START] Reading transcripts from {gtf_file}")
-        transcripts = read_transcripts(gtf_file)
+        transcripts = read_transcripts(
+            gtf_file, gtf_parse_mode=gtf_parse_mode,
+        )
         logger.info(f"[DONE] Read {len(transcripts)} transcripts")
 
         t_df = transcripts_to_dataframe(transcripts)
@@ -428,11 +440,29 @@ class HulkIndex:
         self.t_df = pd.read_feather(
             os.path.join(index_dir, TRANSCRIPTS_FEATHER)
         )
-        assert (self.t_df.index == self.t_df["t_index"]).all()
+        if "t_index" not in self.t_df.columns:
+            raise ValueError(
+                f"Invalid index in {index_dir}: missing 't_index' column "
+                f"in {TRANSCRIPTS_FEATHER}"
+            )
+        if not (self.t_df.index == self.t_df["t_index"]).all():
+            raise ValueError(
+                f"Invalid index in {index_dir}: row index does not match "
+                f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
+            )
 
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)
-        assert (self.g_df.index == self.g_df["g_index"]).all()
+        if "g_index" not in self.g_df.columns:
+            raise ValueError(
+                f"Invalid derived gene table in {index_dir}: missing "
+                f"'g_index' column"
+            )
+        if not (self.g_df.index == self.g_df["g_index"]).all():
+            raise ValueError(
+                f"Invalid index in {index_dir}: derived gene table row index "
+                f"does not match 'g_index'; rebuild index"
+            )
 
         # -- fast numpy lookup arrays -----------------------------------------
         self.t_to_g_arr = self.t_df["g_index"].values
@@ -588,3 +618,92 @@ class HulkIndex:
                     h_end,
                 ))
         return hits
+
+    # -- gene-level exon/intron geometry ------------------------------------
+
+    def exon_lengths_per_gene(self) -> list[list[int]]:
+        """Merged exon lengths per gene for eCDF effective length.
+
+        For each gene, merges overlapping exonic intervals across all
+        transcripts to produce the true exonic footprint, then returns
+        the list of individual (non-overlapping) exon lengths.
+
+        Returns
+        -------
+        list[list[int]]
+            ``result[g_index]`` is a list of merged exon lengths for
+            gene *g_index*.
+        """
+        from .transcript import Transcript
+
+        n_genes = self.num_genes
+        # Collect per-gene exon intervals from interval table
+        gene_exon_ivs: list[list[tuple[int, int]]] = [[] for _ in range(n_genes)]
+
+        # Use the interval arrays directly — EXON type intervals
+        exon_mask = self._iv_type == int(IntervalType.EXON)
+        # We need coords: need to re-read the interval DataFrame
+        # Instead, collect from transcript exons which are available via t_df
+        # and the Transcript data.  But we don't store raw exon coords in t_df.
+        # Use the cgranges index: iterate EXON intervals from _iv_* arrays.
+        # However, _iv arrays don't store coords.  Must use the intervals DataFrame.
+
+        # More efficient: collect exons per gene from t_df + exon data.
+        # The interval feather has (ref, start, end, strand, interval_type, t_index, g_index).
+        # Read it if available, or reconstruct from cgranges.
+
+        # Reconstruct from the interval file if index_dir is set
+        if self.index_dir is not None:
+            import os
+            iv_df = pd.read_feather(
+                os.path.join(self.index_dir, INTERVALS_FEATHER)
+            )
+            exon_rows = iv_df[iv_df["interval_type"] == int(IntervalType.EXON)]
+            for _, row in exon_rows.iterrows():
+                g_idx = int(row["g_index"])
+                if 0 <= g_idx < n_genes:
+                    gene_exon_ivs[g_idx].append((int(row["start"]), int(row["end"])))
+        else:
+            # Fallback: use transcript table with uniform exon length
+            for g_idx in range(n_genes):
+                mask = self.t_to_g_arr == g_idx
+                if mask.any():
+                    lengths = self.t_df.loc[mask, "length"].values
+                    max_len = int(lengths.max())
+                    gene_exon_ivs[g_idx].append((0, max_len))
+
+        # Merge overlapping intervals per gene
+        result: list[list[int]] = []
+        for g_idx in range(n_genes):
+            ivs = gene_exon_ivs[g_idx]
+            if not ivs:
+                result.append([])
+                continue
+            # Sort by start
+            ivs.sort()
+            merged: list[tuple[int, int]] = [ivs[0]]
+            for s, e in ivs[1:]:
+                if s <= merged[-1][1]:
+                    merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+                else:
+                    merged.append((s, e))
+            result.append([e - s for s, e in merged])
+        return result
+
+    def intron_span_per_gene(self) -> np.ndarray:
+        """Intronic span per gene (gene_span minus merged exon length).
+
+        Returns
+        -------
+        np.ndarray
+            float64[num_genes] — intronic span for each gene.
+        """
+        gene_spans = (
+            self.g_df["end"].values - self.g_df["start"].values
+        ).astype(np.float64)
+        exon_lens = self.exon_lengths_per_gene()
+        total_exonic = np.array(
+            [float(sum(lens)) for lens in exon_lens],
+            dtype=np.float64,
+        )
+        return np.maximum(gene_spans - total_exonic, 0.0)

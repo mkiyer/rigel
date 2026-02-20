@@ -46,6 +46,7 @@ def index_command(args: argparse.Namespace) -> int:
         output_dir=args.output_dir,
         feather_compression=args.feather_compression,
         write_tsv=not args.no_tsv,
+        gtf_parse_mode=args.gtf_parse_mode,
     )
     return 0
 
@@ -117,7 +118,6 @@ def count_command(args: argparse.Namespace) -> int:
             "em_pseudocount": alpha,
             "em_iterations": args.em_iterations,
             "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
-            "gdna_threshold": args.gdna_threshold,
             "confidence_threshold": args.confidence_threshold,
             "skip_duplicates": not args.keep_duplicates,
             "include_multimap": args.include_multimap,
@@ -139,7 +139,6 @@ def count_command(args: argparse.Namespace) -> int:
         em_pseudocount=alpha,
         em_iterations=args.em_iterations,
         gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
-        gdna_threshold=args.gdna_threshold,
         confidence_threshold=args.confidence_threshold,
         overlap_min_frac=args.overlap_min_frac,
     )
@@ -287,6 +286,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-tsv", dest="no_tsv", action="store_true", default=False,
         help="Skip writing human-readable TSV mirror files",
     )
+    idx.add_argument(
+        "--gtf-parse-mode",
+        dest="gtf_parse_mode",
+        default="strict",
+        choices=["strict", "warn-skip"],
+        help=(
+            "GTF parse mode: 'strict' (default) fails on malformed lines; "
+            "'warn-skip' logs warnings and skips malformed lines"
+        ),
+    )
     idx.set_defaults(func=index_command)
 
     # --- COUNT ---------------------------------------------------------------
@@ -329,19 +338,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cnt.add_argument(
         "--em-pseudocount", dest="em_pseudocount", type=float, default=0.5,
-        help="Dirichlet prior for VBEM (default: 0.5). Small values "
-             "induce sparsity; values >= 1.0 approach standard EM.",
+        help="Dirichlet prior pseudocount for EM (default: 0.5). "
+             "Applied uniformly to all components.",
     )
     cnt.add_argument(
         "--em-iterations", dest="em_iterations", type=int, default=1000,
-        help="Maximum VBEM iterations for ambiguous fragment resolution "
-             "(default: 1000). Set to 0 for unique-only priors.",
-    )
-    cnt.add_argument(
-        "--gdna-threshold", dest="gdna_threshold", type=float, default=0.5,
-        help="Minimum sum of RNA posteriors to classify a unit as RNA "
-             "(default: 0.5). 0.0 = never assign to gDNA via EM; "
-             "1.0 = only shadow-free units are RNA.",
+        help="Maximum EM iterations for ambiguous fragment resolution "
+             "(default: 1000). Set to 0 for unique-only counting.",
     )
     from .pipeline import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
     cnt.add_argument(
