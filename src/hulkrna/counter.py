@@ -254,6 +254,7 @@ class ReadCounter:
         seed=None,
         alpha: float = 0.01,
         effective_lengths: np.ndarray | None = None,
+        exonic_lengths: np.ndarray | None = None,
         t_to_g: np.ndarray | None = None,
         gene_spans: np.ndarray | None = None,
         mean_frag: float = 200.0,
@@ -295,6 +296,14 @@ class ReadCounter:
             if transcript_spans is not None
             else None
         )
+
+        # --- Exonic lengths (raw transcript spliced lengths) ---
+        if exonic_lengths is not None:
+            self._exonic_lengths = np.asarray(
+                exonic_lengths, dtype=np.float64,
+            )
+        else:
+            self._exonic_lengths = None
 
         # --- Effective lengths for EM normalization ---
         if effective_lengths is not None:
@@ -484,20 +493,48 @@ class ReadCounter:
         eff_len = locus_em.effective_lengths
         log_eff_len = np.log(eff_len)
 
-        # Balanced initialization: floor transcript components at
-        # average shadow weight to prevent shadow-heavy local optima.
+        # Warm-start initialization: unique counts PLUS marginal
+        # compatibility from ambiguous units.
+        #
+        # Pure unique-count initialization is fragile when the
+        # "uniquely resolvable" region of a transcript is small
+        # (e.g., a short terminal exon).  Terminal exons have
+        # reduced fragment-sampling "runway" — fewer valid start
+        # positions can generate fragments crossing the unique
+        # splice junction — so unique counts under-represent the
+        # transcript's true abundance.  This geometric bias can
+        # cause the EM to converge to a wrong local optimum.
+        #
+        # The warm start adds a geometry-independent baseline by
+        # distributing each ambiguous unit equally (1/k) across
+        # its k candidate components.  This "marginal compatibility
+        # count" is proportional to effective_length × abundance,
+        # unaffected by the size or position of the unique region.
+        # The unique counts become a small perturbation on this
+        # stable baseline rather than the dominant initialization
+        # signal.
         theta_init = unique_totals.copy()
         n_t = locus_em.n_transcripts
-        gdna_idx = 2 * n_t  # index of the single gDNA component
-        if n_t > 0:
-            shadow_weights = np.concatenate([
-                theta_init[n_t:2 * n_t],               # nRNA
-                theta_init[gdna_idx:gdna_idx + 1],     # gDNA
-            ])
-            avg_shadow = float(shadow_weights.mean())
-            if avg_shadow > 0:
-                low = theta_init[:n_t] < avg_shadow
-                theta_init[:n_t][low] = avg_shadow
+
+        # Add marginal compatibility: each ambiguous unit distributes
+        # 1/k weight across its k candidates (vectorized).
+        #
+        # Only seed components with non-zero prior.  Components
+        # whose prior was zeroed (nRNA without intronic evidence,
+        # gDNA without antisense evidence) must not receive warm-
+        # start weight — the EM cannot drive self-seeded phantom
+        # counts back to zero because the M-step for those
+        # components reduces to ``em_totals`` alone (no unique
+        # counts, no prior), creating a self-sustaining cycle.
+        if len(seg_lengths) > 0 and len(t_indices) > 0:
+            # Weight for each candidate entry = 1 / (candidates in its unit)
+            cand_weights = 1.0 / np.repeat(
+                seg_lengths.astype(np.float64), seg_lengths,
+            )
+            # Mask out candidates whose component has zero prior
+            has_prior = prior[t_indices] > 0.0
+            cand_weights *= has_prior
+            np.add.at(theta_init, t_indices, cand_weights)
 
         theta = theta_init + prior
         total = theta.sum()

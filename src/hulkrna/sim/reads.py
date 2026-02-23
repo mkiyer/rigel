@@ -196,6 +196,23 @@ class ReadSimulator:
             self._premrna_seqs.append(premrna_seq)
             self._premrna_lengths.append(len(premrna_seq))
 
+        # Zero nrna_abundance for single-exon transcripts.
+        # For single-exon transcripts the pre-mRNA is identical to the
+        # spliced mRNA — there are no introns, so nascent RNA reads are
+        # physically indistinguishable from mature RNA reads.  Including
+        # them in the nRNA pool would create unfair truth labels.
+        n_zeroed = 0
+        for t in transcripts:
+            if len(t.exons) <= 1 and t.nrna_abundance > 0:
+                t.nrna_abundance = 0.0
+                n_zeroed += 1
+        if n_zeroed > 0:
+            logger.info(
+                "Zeroed nrna_abundance for %d single-exon transcript(s) "
+                "(nRNA indistinguishable from mRNA without introns)",
+                n_zeroed,
+            )
+
         # Clamp frag_max to longest transcript
         self.config.frag_max = min(self.config.frag_max, max_len)
 

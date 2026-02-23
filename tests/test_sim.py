@@ -458,6 +458,55 @@ class TestReadSimulator:
         reads = list(sim.simulate(20))
         assert len(reads) == 20
 
+    def test_single_exon_nrna_zeroed(self):
+        """Single-exon transcripts should have nrna_abundance zeroed."""
+        g = MutableGenome(3000, seed=42, name="chr1")
+        builder = GeneBuilder(g)
+        builder.add_gene("g1", "+", [
+            {"t_id": "t_single", "exons": [(200, 1200)], "abundance": 100},
+            {"t_id": "t_multi", "exons": [(200, 600), (1000, 1400)], "abundance": 100},
+        ])
+        transcripts = builder.get_transcripts()
+        # Set nRNA abundance for all transcripts
+        for t in transcripts:
+            t.nrna_abundance = 50.0
+
+        config = SimConfig(
+            frag_mean=250, frag_std=50, frag_min=100,
+            frag_max=700, read_length=100, seed=42,
+        )
+        sim = ReadSimulator(g, transcripts, config=config)
+
+        # Single-exon transcript should have nrna_abundance zeroed
+        t_single = [t for t in transcripts if t.t_id == "t_single"][0]
+        t_multi = [t for t in transcripts if t.t_id == "t_multi"][0]
+        assert t_single.nrna_abundance == 0.0
+        assert t_multi.nrna_abundance == 50.0
+
+    def test_single_exon_no_nrna_reads(self):
+        """No nRNA reads should be generated for single-exon transcripts."""
+        g = MutableGenome(3000, seed=42, name="chr1")
+        builder = GeneBuilder(g)
+        builder.add_gene("g1", "+", [
+            {"t_id": "t_single", "exons": [(200, 1200)], "abundance": 100},
+        ])
+        transcripts = builder.get_transcripts()
+        for t in transcripts:
+            t.nrna_abundance = 100.0
+
+        config = SimConfig(
+            frag_mean=250, frag_std=50, frag_min=100,
+            frag_max=700, read_length=100, seed=42,
+        )
+        sim = ReadSimulator(g, transcripts, config=config)
+        reads = list(sim.simulate(200))
+        # All reads should be mature (no nrna_ prefix)
+        for r1_name, *_ in reads:
+            t_id = r1_name.split(":")[0]
+            assert not t_id.startswith("nrna_"), (
+                f"nRNA read generated for single-exon transcript: {r1_name}"
+            )
+
 
 # =====================================================================
 # GeneBuilder + HulkIndex integration

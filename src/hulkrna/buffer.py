@@ -70,14 +70,17 @@ class BufferedFragment:
     splice_type: int
     exon_strand: int
     sj_strand: int
-    insert_size: int
+    frag_lengths: np.ndarray
     num_hits: int
     merge_criteria: int
     chimera_type: int = ChimeraType.NONE
     frag_id: int = 0
-    frag_length: int = 0
+    read_length: int = 0
+    genomic_footprint: int = -1
+    nm: int = 0
     exon_bp: np.ndarray | None = None
     intron_bp: np.ndarray | None = None
+    unambig_intron_bp: np.ndarray | None = None
 
     @property
     def is_chimeric(self) -> bool:
@@ -109,11 +112,12 @@ class _AccumulatorChunk:
     """
 
     __slots__ = (
-        "splice_type", "exon_strand", "sj_strand", "insert_size",
+        "splice_type", "exon_strand", "sj_strand",
         "num_hits", "merge_criteria", "chimera_type",
         "t_indices", "t_offsets",
-        "exon_bp_flat", "intron_bp_flat",
-        "frag_id", "frag_length",
+        "frag_lengths_flat",
+        "exon_bp_flat", "intron_bp_flat", "unambig_intron_bp_flat",
+        "frag_id", "read_length", "genomic_footprint", "nm",
         "size",
     )
 
@@ -121,16 +125,19 @@ class _AccumulatorChunk:
         self.splice_type: list[int] = []
         self.exon_strand: list[int] = []
         self.sj_strand: list[int] = []
-        self.insert_size: list[int] = []
         self.num_hits: list[int] = []
         self.merge_criteria: list[int] = []
         self.chimera_type: list[int] = []
         self.t_indices: list[int] = []
         self.t_offsets: list[int] = [0]
+        self.frag_lengths_flat: list[int] = []
         self.exon_bp_flat: list[int] = []
         self.intron_bp_flat: list[int] = []
+        self.unambig_intron_bp_flat: list[int] = []
         self.frag_id: list[int] = []
-        self.frag_length: list[int] = []
+        self.read_length: list[int] = []
+        self.genomic_footprint: list[int] = []
+        self.nm: list[int] = []
         self.size: int = 0
 
     def append(self, resolved, frag_id: int = 0) -> None:
@@ -138,30 +145,39 @@ class _AccumulatorChunk:
         self.splice_type.append(int(resolved.splice_type))
         self.exon_strand.append(int(resolved.exon_strand))
         self.sj_strand.append(int(resolved.sj_strand))
-        self.insert_size.append(resolved.insert_size)
         self.num_hits.append(resolved.num_hits)
         self.merge_criteria.append(int(resolved.merge_criteria))
         self.chimera_type.append(int(getattr(resolved, 'chimera_type', 0)))
 
-        # Overlap profiles: stored parallel to t_indices in CSR layout.
-        # Lookup each t_idx in the resolved overlap_bp dict;
-        # default (frag_length, 0) for exon_bp and intron_bp.
+        # Per-candidate data stored in CSR layout (parallel to t_indices).
+        # frag_lengths: per-transcript mRNA fragment lengths from dict.
+        # exon_bp, intron_bp, unambig_intron_bp: from overlap_bp dict.
+        frag_lengths_map = getattr(resolved, 'frag_lengths', None) or {}
         overlap_bp = getattr(resolved, 'overlap_bp', None) or {}
-        fl = getattr(resolved, 'frag_length', 0)
+        fl = getattr(resolved, 'read_length', 0)
         for t_idx in resolved.t_inds:
             self.t_indices.append(t_idx)
             t_key = int(t_idx) if not isinstance(t_idx, int) else t_idx
+            self.frag_lengths_flat.append(frag_lengths_map.get(t_key, -1))
             profile = overlap_bp.get(t_key)
             if profile is not None:
                 self.exon_bp_flat.append(profile[0])
                 self.intron_bp_flat.append(profile[1])
+                self.unambig_intron_bp_flat.append(
+                    profile[2] if len(profile) > 2 else 0
+                )
             else:
                 self.exon_bp_flat.append(fl)
                 self.intron_bp_flat.append(0)
+                self.unambig_intron_bp_flat.append(0)
         self.t_offsets.append(len(self.t_indices))
 
         self.frag_id.append(frag_id)
-        self.frag_length.append(fl)
+        self.read_length.append(fl)
+        self.genomic_footprint.append(
+            getattr(resolved, 'genomic_footprint', -1)
+        )
+        self.nm.append(getattr(resolved, 'nm', 0))
         self.size += 1
 
 
@@ -186,17 +202,20 @@ class _FinalizedChunk:
     splice_type: np.ndarray       # uint8[N]
     exon_strand: np.ndarray     # uint8[N]
     sj_strand: np.ndarray       # uint8[N]
-    insert_size: np.ndarray     # int32[N]
     num_hits: np.ndarray        # uint16[N]
     merge_criteria: np.ndarray  # uint8[N]
     chimera_type: np.ndarray    # uint8[N]
     t_offsets: np.ndarray       # int64[N+1]
     t_indices: np.ndarray       # int32[M_t]
+    frag_lengths: np.ndarray    # int32[M_t]  (parallel to t_indices)
     exon_bp: np.ndarray         # int32[M_t]  (parallel to t_indices)
     intron_bp: np.ndarray       # int32[M_t]  (parallel to t_indices)
+    unambig_intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     n_genes: np.ndarray         # uint8[N]
     frag_id: np.ndarray         # int64[N]
-    frag_length: np.ndarray     # uint32[N]
+    read_length: np.ndarray     # uint32[N]
+    genomic_footprint: np.ndarray  # int32[N]
+    nm: np.ndarray              # uint16[N]
     size: int
 
     @property
@@ -205,11 +224,14 @@ class _FinalizedChunk:
         return sum(
             a.nbytes for a in (
                 self.splice_type, self.exon_strand, self.sj_strand,
-                self.insert_size, self.num_hits, self.merge_criteria,
+                self.num_hits, self.merge_criteria,
                 self.chimera_type,
                 self.t_offsets, self.t_indices,
+                self.frag_lengths,
                 self.exon_bp, self.intron_bp,
-                self.n_genes, self.frag_id, self.frag_length,
+                self.unambig_intron_bp,
+                self.n_genes, self.frag_id, self.read_length,
+                self.genomic_footprint, self.nm,
             )
         )
 
@@ -254,18 +276,21 @@ class _FinalizedChunk:
         end = self.t_offsets[i + 1]
         return BufferedFragment(
             t_inds=self.t_indices[start:end],
+            frag_lengths=self.frag_lengths[start:end],
             exon_bp=self.exon_bp[start:end],
             intron_bp=self.intron_bp[start:end],
+            unambig_intron_bp=self.unambig_intron_bp[start:end],
             n_genes=int(self.n_genes[i]),
             splice_type=int(self.splice_type[i]),
             exon_strand=int(self.exon_strand[i]),
             sj_strand=int(self.sj_strand[i]),
-            insert_size=int(self.insert_size[i]),
             num_hits=int(self.num_hits[i]),
             merge_criteria=int(self.merge_criteria[i]),
             chimera_type=int(self.chimera_type[i]),
             frag_id=int(self.frag_id[i]),
-            frag_length=int(self.frag_length[i]),
+            read_length=int(self.read_length[i]),
+            genomic_footprint=int(self.genomic_footprint[i]),
+            nm=int(self.nm[i]),
         )
 
 
@@ -288,6 +313,7 @@ def _finalize(acc: _AccumulatorChunk, t_to_g_arr: np.ndarray) -> _FinalizedChunk
     t_indices = np.array(acc.t_indices, dtype=np.int32)
     exon_bp_arr = np.array(acc.exon_bp_flat, dtype=np.int32)
     intron_bp_arr = np.array(acc.intron_bp_flat, dtype=np.int32)
+    unambig_intron_bp_arr = np.array(acc.unambig_intron_bp_flat, dtype=np.int32)
 
     # Compute n_genes per fragment from transcript indices (vectorized).
     # Map all transcript indices to gene indices, sort within each
@@ -345,17 +371,20 @@ def _finalize(acc: _AccumulatorChunk, t_to_g_arr: np.ndarray) -> _FinalizedChunk
         splice_type=np.array(acc.splice_type, dtype=np.uint8),
         exon_strand=np.array(acc.exon_strand, dtype=np.uint8),
         sj_strand=np.array(acc.sj_strand, dtype=np.uint8),
-        insert_size=np.array(acc.insert_size, dtype=np.int32),
         num_hits=np.array(acc.num_hits, dtype=np.uint16),
         merge_criteria=np.array(acc.merge_criteria, dtype=np.uint8),
         chimera_type=np.array(acc.chimera_type, dtype=np.uint8),
         t_offsets=t_offsets,
         t_indices=t_indices,
+        frag_lengths=np.array(acc.frag_lengths_flat, dtype=np.int32),
         exon_bp=exon_bp_arr,
         intron_bp=intron_bp_arr,
+        unambig_intron_bp=unambig_intron_bp_arr,
         n_genes=n_genes_list,
         frag_id=np.array(acc.frag_id, dtype=np.int64),
-        frag_length=np.array(acc.frag_length, dtype=np.uint32),
+        read_length=np.array(acc.read_length, dtype=np.uint32),
+        genomic_footprint=np.array(acc.genomic_footprint, dtype=np.int32),
+        nm=np.array(acc.nm, dtype=np.uint16),
         size=acc.size,
     )
 
@@ -372,27 +401,36 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
     t_list = pa.ListArray.from_arrays(
         chunk.t_offsets.astype(np.int32), chunk.t_indices,
     )
+    frag_lengths_list = pa.ListArray.from_arrays(
+        chunk.t_offsets.astype(np.int32), chunk.frag_lengths,
+    )
     exon_bp_list = pa.ListArray.from_arrays(
         chunk.t_offsets.astype(np.int32), chunk.exon_bp,
     )
     intron_bp_list = pa.ListArray.from_arrays(
         chunk.t_offsets.astype(np.int32), chunk.intron_bp,
     )
+    unambig_intron_bp_list = pa.ListArray.from_arrays(
+        chunk.t_offsets.astype(np.int32), chunk.unambig_intron_bp,
+    )
 
     table = pa.table({
         "splice_type": chunk.splice_type,
         "exon_strand": chunk.exon_strand,
         "sj_strand": chunk.sj_strand,
-        "insert_size": chunk.insert_size,
         "num_hits": chunk.num_hits,
         "merge_criteria": chunk.merge_criteria,
         "chimera_type": chunk.chimera_type,
         "t_inds": t_list,
+        "frag_lengths": frag_lengths_list,
         "exon_bp": exon_bp_list,
         "intron_bp": intron_bp_list,
+        "unambig_intron_bp": unambig_intron_bp_list,
         "n_genes": chunk.n_genes,
         "frag_id": chunk.frag_id,
-        "frag_length": chunk.frag_length,
+        "read_length": chunk.read_length,
+        "genomic_footprint": chunk.genomic_footprint,
+        "nm": chunk.nm,
     })
 
     pf.write_feather(table, str(path), compression="lz4")
@@ -405,49 +443,40 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
     table = pf.read_table(str(path))
 
     t_col = table.column("t_inds").combine_chunks()
+    t_offsets = t_col.offsets.to_numpy().astype(np.int64)
+    t_indices = t_col.values.to_numpy().copy()
 
-    # Overlap profiles: parallel CSR arrays of BP counts.
-    # Legacy files without these columns default to fill values.
-    n_vals = len(t_col.values)
-    if "exon_bp" in table.column_names:
-        exon_col = table.column("exon_bp").combine_chunks()
-        exon_bp_arr = exon_col.values.to_numpy().astype(np.int32)
-    elif "exon_fracs" in table.column_names:
-        # Legacy format: exon_fracs float32 → approximate exon_bp
-        # Can't recover exact BP without frag_length; use 0 as safe default
-        exon_bp_arr = np.zeros(n_vals, dtype=np.int32)
-    else:
-        exon_bp_arr = np.zeros(n_vals, dtype=np.int32)
+    # Per-candidate CSR arrays (parallel to t_indices)
+    frag_lengths_col = table.column("frag_lengths").combine_chunks()
+    frag_lengths_arr = frag_lengths_col.values.to_numpy().astype(np.int32)
 
-    if "intron_bp" in table.column_names:
-        intron_col = table.column("intron_bp").combine_chunks()
-        intron_bp_arr = intron_col.values.to_numpy().astype(np.int32)
-    elif "genic_fracs" in table.column_names:
-        intron_bp_arr = np.zeros(n_vals, dtype=np.int32)
-    else:
-        intron_bp_arr = np.zeros(n_vals, dtype=np.int32)
+    exon_bp_col = table.column("exon_bp").combine_chunks()
+    exon_bp_arr = exon_bp_col.values.to_numpy().astype(np.int32)
 
-    # frag_length: per-fragment field (not per-candidate)
-    if "frag_length" in table.column_names:
-        frag_length_arr = table.column("frag_length").to_numpy().copy()
-    else:
-        frag_length_arr = np.zeros(len(table), dtype=np.uint32)
+    intron_bp_col = table.column("intron_bp").combine_chunks()
+    intron_bp_arr = intron_bp_col.values.to_numpy().astype(np.int32)
+
+    uib_col = table.column("unambig_intron_bp").combine_chunks()
+    unambig_intron_bp_arr = uib_col.values.to_numpy().astype(np.int32)
 
     return _FinalizedChunk(
         splice_type=table.column("splice_type").to_numpy().copy(),
         exon_strand=table.column("exon_strand").to_numpy().copy(),
         sj_strand=table.column("sj_strand").to_numpy().copy(),
-        insert_size=table.column("insert_size").to_numpy().copy(),
         num_hits=table.column("num_hits").to_numpy().copy(),
         merge_criteria=table.column("merge_criteria").to_numpy().copy(),
         chimera_type=table.column("chimera_type").to_numpy().copy(),
-        t_offsets=t_col.offsets.to_numpy().astype(np.int64),
-        t_indices=t_col.values.to_numpy().copy(),
+        t_offsets=t_offsets,
+        t_indices=t_indices,
+        frag_lengths=frag_lengths_arr,
         exon_bp=exon_bp_arr,
         intron_bp=intron_bp_arr,
+        unambig_intron_bp=unambig_intron_bp_arr,
         n_genes=table.column("n_genes").to_numpy().copy(),
         frag_id=table.column("frag_id").to_numpy().copy(),
-        frag_length=frag_length_arr,
+        read_length=table.column("read_length").to_numpy().copy(),
+        genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
+        nm=table.column("nm").to_numpy().copy().astype(np.uint16),
         size=len(table),
     )
 

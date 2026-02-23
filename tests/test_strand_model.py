@@ -6,7 +6,7 @@ import math
 import pytest
 
 from hulkrna.types import Strand
-from hulkrna.strand_model import StrandModel
+from hulkrna.strand_model import StrandModel, StrandModels
 
 
 class TestStrandModelObserve:
@@ -175,3 +175,48 @@ class TestStrandModelProperties:
         assert lo < hi
         assert lo > 0.9  # should be heavily skewed towards 1.0
         assert hi <= 1.0
+
+
+class TestStrandModelsFallback:
+    def test_min_spliced_observations_threshold_controls_primary_model(self):
+        models = StrandModels()
+        models.min_spliced_observations = 5
+
+        for _ in range(5):
+            models.exonic_spliced.observe(Strand.POS, Strand.POS)
+        for _ in range(40):
+            models.exonic.observe(Strand.POS, Strand.NEG)
+
+        best = models.model_for_category(0)
+        assert best is models.exonic_spliced
+
+    def test_pooled_fallback_includes_spliced_and_warns(self, caplog):
+        models = StrandModels()
+        models.min_spliced_observations = 10
+
+        for _ in range(3):
+            models.exonic_spliced.observe(Strand.POS, Strand.POS)
+        for _ in range(20):
+            models.exonic.observe(Strand.POS, Strand.POS)
+
+        with caplog.at_level("WARNING"):
+            best = models.model_for_category(0)
+
+        assert best is not models.exonic
+        assert best is not models.exonic_spliced
+        assert best.n_observations == (
+            models.exonic.n_observations + models.exonic_spliced.n_observations
+        )
+        assert "using pooled fallback model" in caplog.text
+
+    def test_raises_when_pooled_observations_below_threshold(self):
+        models = StrandModels()
+        models.min_spliced_observations = 10
+
+        for _ in range(2):
+            models.exonic_spliced.observe(Strand.POS, Strand.POS)
+        for _ in range(3):
+            models.exonic.observe(Strand.POS, Strand.POS)
+
+        with pytest.raises(RuntimeError, match="Insufficient strand"):
+            models.model_for_category(0)

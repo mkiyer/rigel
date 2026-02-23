@@ -1,56 +1,71 @@
 """
-hulkrna.insert_model — Insert size distribution model.
+hulkrna.frag_length_model — Fragment length distribution model.
 
-Learns the insert size distribution from fragment-to-transcript
+Learns the fragment length distribution from fragment-to-transcript
 mappings produced by Pass 1.  Fragments where all candidate
-transcripts yield the *same* insert size contribute to training;
+transcripts yield the *same* fragment length contribute to training;
 ambiguous fragments are deferred to Bayesian counting where the
 learned distribution provides a likelihood term.
 
 The distribution is stored as a histogram (float vector) indexed
-by insert size in bases.  Sizes >= ``max_size`` are clamped into
+by fragment length in bases.  Sizes >= ``max_size`` are clamped into
 a single overflow bin.
 
-Typical RNA-seq insert sizes range from 100–500 bp.  The default
-``max_size=1000`` accommodates the vast majority of libraries.
+Typical RNA-seq fragment lengths range from 100–500 bp.  The default
+``max_size=2000`` accommodates the vast majority of libraries.
+
+Fragments whose length exceeds ``max_size`` receive exponential tail
+decay: each additional base-pair beyond the boundary incurs a fixed
+log-probability penalty (``_TAIL_DECAY_LP ≈ log(0.99) ≈ −0.01``
+per bp), so very long fragments are penalised heavily rather than
+assigned the same probability as the overflow bin.
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
+# Per-bp log-probability penalty applied to fragment lengths that exceed
+# max_size.  log(0.99) ≈ −0.01005 per bp, giving:
+#   100 bp over → −1.0 extra log penalty  (≈ 2.7× less likely)
+#   500 bp over → −5.0                    (≈ 150× less likely)
+#  1000 bp over → −10.0                   (≈ 22 000× less likely)
+_TAIL_DECAY_LP: float = math.log(0.99)
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InsertSizeModel:
-    """Insert size distribution model.
+class FragmentLengthModel:
+    """Fragment length distribution model.
 
     The histogram has ``max_size + 1`` bins:
       - ``counts[k]`` for ``0 <= k < max_size``: fragments with
-        insert size exactly *k*.
-      - ``counts[max_size]``: overflow bin for insert sizes >= max_size.
+        fragment length exactly *k*.
+      - ``counts[max_size]``: overflow bin for fragment lengths >= max_size.
 
     Training
     --------
-    Call :meth:`observe` with each unambiguous insert size.  After
+    Call :meth:`observe` with each unambiguous fragment length.  After
     training, :meth:`log_likelihood` returns the log-probability
-    of a given insert size under the learned distribution.
+    of a given fragment length under the learned distribution.
 
     Attributes
     ----------
     max_size : int
-        Maximum insert size tracked individually (sizes >= this
-        go into the overflow bin).
+        Maximum fragment length tracked individually (sizes >= this
+        go into the overflow bin).  Queries above this receive
+        exponential tail decay (see ``_TAIL_DECAY_LP``).
     counts : np.ndarray
         Float64 histogram of shape ``(max_size + 1,)``.
     n_observations : int
         Total number of observations added.
     """
 
-    max_size: int = 1000
+    max_size: int = 2000
     counts: np.ndarray = field(default=None, repr=False)
     n_observations: int = 0
 
@@ -67,17 +82,17 @@ class InsertSizeModel:
     # Training
     # ------------------------------------------------------------------
 
-    def observe(self, insert_size: int, weight: float = 1.0) -> None:
-        """Record one insert size observation.
+    def observe(self, frag_length: int, weight: float = 1.0) -> None:
+        """Record one fragment length observation.
 
         Parameters
         ----------
-        insert_size : int
-            Fragment insert size (must be >= 0).
+        frag_length : int
+            Fragment fragment length (must be >= 0).
         weight : float
             Observation weight (default 1.0).
         """
-        idx = min(max(insert_size, 0), self.max_size)
+        idx = min(max(frag_length, 0), self.max_size)
         self.counts[idx] += weight
         self.n_observations += 1
         self._total_weight += weight
@@ -94,9 +109,9 @@ class InsertSizeModel:
 
     @property
     def mean(self) -> float:
-        """Weighted mean insert size.
+        """Weighted mean fragment length.
 
-        The overflow bin is treated as having insert size = max_size.
+        The overflow bin is treated as having fragment length = max_size.
         Returns 0.0 if no observations.
         """
         total = self.total_weight
@@ -121,7 +136,7 @@ class InsertSizeModel:
 
     @property
     def median(self) -> float:
-        """Weighted median insert size.
+        """Weighted median fragment length.
 
         Returns 0.0 if no observations.
         """
@@ -134,7 +149,7 @@ class InsertSizeModel:
 
     @property
     def mode(self) -> int:
-        """Insert size with the highest count.
+        """Fragment length with the highest count.
 
         Returns 0 if no observations.
         """
@@ -151,6 +166,9 @@ class InsertSizeModel:
 
         Builds ``_log_prob`` array so ``log_likelihood()`` becomes a
         single array index instead of 2× ``np.log`` per call.
+
+        Also caches the tail-decay base value so that queries beyond
+        ``max_size`` can be answered with a single multiply-add.
         """
         total = self._total_weight
         if total == 0:
@@ -161,34 +179,51 @@ class InsertSizeModel:
                 np.log(self.counts + 1.0)
                 - np.log(total + self.max_size + 1)
             )
+        self._tail_base: float = float(self._log_prob[self.max_size])
         self._finalized = True
 
     # ------------------------------------------------------------------
     # Likelihood for Bayesian counting
     # ------------------------------------------------------------------
 
-    def log_likelihood(self, insert_size: int) -> float:
-        """Log-probability of an insert size under the learned distribution.
+    def log_likelihood(self, frag_length: int) -> float:
+        """Log-probability of a fragment length under the learned distribution.
 
         Uses add-one (Laplace) smoothing to avoid -inf for unseen sizes.
+        Fragment lengths beyond ``max_size`` receive exponential tail
+        decay: ``log_prob[max_size] + (frag_length − max_size) × _TAIL_DECAY_LP``.
 
         Parameters
         ----------
-        insert_size : int
-            Query insert size.
+        frag_length : int
+            Query fragment length.
 
         Returns
         -------
         float
             Log-probability (natural log).
         """
-        total = self._total_weight
-        idx = min(max(insert_size, 0), self.max_size)
+        if frag_length > self.max_size:
+            # Exponential tail decay beyond the histogram
+            if self._finalized:
+                base = self._tail_base
+            else:
+                total = self._total_weight
+                if total == 0:
+                    base = -math.log(self.max_size + 1)
+                else:
+                    base = float(
+                        np.log(self.counts[self.max_size] + 1.0)
+                        - np.log(total + self.max_size + 1)
+                    )
+            return base + (frag_length - self.max_size) * _TAIL_DECAY_LP
+
+        idx = max(frag_length, 0)
         if self._finalized:
             return float(self._log_prob[idx])
+        total = self._total_weight
         if total == 0:
-            # Uniform prior when no data
-            return -np.log(self.max_size + 1)
+            return -math.log(self.max_size + 1)
         # Laplace smoothing
         return float(
             np.log(self.counts[idx] + 1.0)
@@ -216,7 +251,7 @@ class InsertSizeModel:
 
             Σ_{l=1}^{E}  P(l) × (E − l + 1)
 
-        where *P(l)* is the Laplace-smoothed gDNA insert-size
+        where *P(l)* is the Laplace-smoothed gDNA fragment-length
         probability.  Summing across all exons gives the total
         exonic effective length for the gene.
 
@@ -253,11 +288,128 @@ class InsertSizeModel:
         return max(total, 1.0)
 
     # ------------------------------------------------------------------
+    # Analytical transcript effective length (salmon-style eCDF)
+    # ------------------------------------------------------------------
+
+    def _build_eff_len_cache(self) -> tuple[np.ndarray, np.ndarray]:
+        """Precompute cumulative CDF and moment arrays for vectorized
+        effective length computation.
+
+        Returns (cdf, cmom) each of shape (max_size+1,) where:
+            cdf[k] = sum_{l=0}^{k} P(l)
+            cmom[k] = sum_{l=0}^{k} l * P(l)
+        """
+        probs = self._normalized_probs()  # shape (max_size+1,)
+        cdf = np.cumsum(probs)
+        l_vals = np.arange(len(probs), dtype=np.float64)
+        cmom = np.cumsum(probs * l_vals)
+        return cdf, cmom
+
+    def compute_transcript_eff_len(self, transcript_length: int) -> float:
+        """Analytical effective length for one transcript using the
+        full fragment length distribution (eCDF approach).
+
+        Computes::
+
+            eff_len = Σ_{l=1}^{min(L, max_size)} P(l) × (L − l + 1)
+
+        where *L* is the transcript exonic length and *P(l)* is the
+        Laplace-smoothed probability of fragment length *l*.
+
+        This is exact and equivalent to salmon's effective length
+        computation.  It correctly penalizes short transcripts
+        without the division-by-one explosion of the naive
+        ``max(L - mean + 1, 1)`` formula.
+
+        Fallback: if the result is < 1.0 (transcript shorter than
+        virtually all fragments), returns 1.0 as a safe floor.
+
+        Parameters
+        ----------
+        transcript_length : int
+            Total exonic (spliced) length of the transcript in bases.
+
+        Returns
+        -------
+        float
+            Analytical effective length (≥ 1.0).
+        """
+        L = int(transcript_length)
+        if L <= 0:
+            return 1.0
+        probs = self._normalized_probs()
+        L_max = min(L, self.max_size)
+        l_vals = np.arange(1, L_max + 1)
+        positions = L - l_vals + 1  # (L, L-1, ..., L-L_max+1)
+        eff = float(np.dot(probs[l_vals], positions))
+        # Overflow bin: fragments with length > max_size that still
+        # fit within the transcript.  Same treatment as exonic variant.
+        if L > self.max_size:
+            eff += float(probs[self.max_size]) * (L - self.max_size)
+        return max(eff, 1.0)
+
+    def compute_all_transcript_eff_lens(
+        self, lengths: np.ndarray,
+    ) -> np.ndarray:
+        """Vectorized analytical effective length for an array of
+        transcript exonic lengths.
+
+        Uses precomputed cumulative CDF and moment arrays so
+        each transcript requires only two table lookups and a
+        multiply-subtract::
+
+            eff_len = (L + 1) × (CDF[k] − P(0)) − CMOM[k]
+
+        where ``k = min(L, max_size)`` and ``CDF / CMOM`` are
+        precomputed cumulative sums of the fragment length
+        distribution.
+
+        This is the recommended entry point for computing effective
+        lengths for all transcripts in a single call.
+
+        Parameters
+        ----------
+        lengths : np.ndarray
+            1-D array of transcript exonic (spliced) lengths.
+
+        Returns
+        -------
+        np.ndarray
+            float64 array of effective lengths, each ≥ 1.0.
+        """
+        lengths = np.asarray(lengths, dtype=np.int64)
+        probs = self._normalized_probs()
+        p0 = float(probs[0])
+        cdf, cmom = self._build_eff_len_cache()
+
+        # Clamp to valid range for the histogram
+        k = np.clip(lengths, 0, self.max_size)
+
+        # eff = (L + 1) * sum_{l=1}^{k} P(l) - sum_{l=1}^{k} l*P(l)
+        #     = (L + 1) * (CDF[k] - P(0)) - CMOM[k]
+        eff = (lengths + 1).astype(np.float64) * (cdf[k] - p0) - cmom[k]
+
+        # Overflow bin: for transcripts longer than max_size, fragments
+        # in the overflow bin can still map.  Same treatment as the
+        # existing compute_exonic_eff_len method.
+        overflow_mask = lengths > self.max_size
+        if overflow_mask.any():
+            p_overflow = float(probs[self.max_size])
+            eff[overflow_mask] += (
+                p_overflow * (lengths[overflow_mask] - self.max_size)
+            )
+
+        # Floor at 1.0 (same as salmon: prevents log(0) for very short
+        # transcripts that are shorter than virtually all fragments)
+        np.maximum(eff, 1.0, out=eff)
+        return eff
+
+    # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
-        """JSON/YAML-serializable summary of the insert size model.
+        """JSON/YAML-serializable summary of the fragment length model.
 
         Includes summary statistics and a trimmed histogram (bins with
         zero counts at the tails are omitted).
@@ -289,7 +441,7 @@ class InsertSizeModel:
         }
 
     def write_json(self, path: Path | str) -> None:
-        """Write the insert size model to a JSON file.
+        """Write the fragment length model to a JSON file.
 
         Parameters
         ----------
@@ -303,30 +455,30 @@ class InsertSizeModel:
 
         with open(path, "w") as fh:
             json.dump(
-                {"insert_size_model": d},
+                {"frag_length_model": d},
                 fh,
                 indent=2,
             )
 
-        logger.info(f"Wrote insert size model to {path}")
+        logger.info(f"Wrote fragment length model to {path}")
 
     def log_summary(self) -> None:
-        """Log a human-readable summary of the learned insert size model."""
+        """Log a human-readable summary of the learned fragment length model."""
         logger.info(
-            f"Insert size model: {self.n_observations:,} observations, "
+            f"Fragment length model: {self.n_observations:,} observations, "
             f"mean={self.mean:.1f}, std={self.std:.1f}, "
             f"median={self.median:.1f}, mode={self.mode}"
         )
 
 
 # ---------------------------------------------------------------------------
-# InsertSizeModels — per-category container
+# FragmentLengthModels — per-category container
 # ---------------------------------------------------------------------------
 
-class InsertSizeModels:
-    """Container for per-category, global, and intergenic insert size models.
+class FragmentLengthModels:
+    """Container for per-category, global, and intergenic fragment length models.
 
-    Wraps one ``InsertSizeModel`` per ``SpliceType`` plus a global
+    Wraps one ``FragmentLengthModel`` per ``SpliceType`` plus a global
     model (all categories) and an intergenic model (fragments with no
     gene overlap).
 
@@ -334,21 +486,21 @@ class InsertSizeModels:
     model plus the appropriate category or intergenic model.
     """
 
-    def __init__(self, max_size: int = 1000):
+    def __init__(self, max_size: int = 2000):
         from .categories import SpliceType
 
         self.max_size = max_size
-        self.global_model = InsertSizeModel(max_size=max_size)
-        self.intergenic = InsertSizeModel(max_size=max_size)
+        self.global_model = FragmentLengthModel(max_size=max_size)
+        self.intergenic = FragmentLengthModel(max_size=max_size)
         self.category_models: dict = {
-            cat: InsertSizeModel(max_size=max_size)
+            cat: FragmentLengthModel(max_size=max_size)
             for cat in SpliceType
         }
-        # Combined gDNA insert size model:
+        # Combined gDNA fragment length model:
         # Trained from intergenic + antisense-genic fragments.
         # Provides a richer gDNA insert profile than intergenic alone
         # (which can be sparse for small genomes / targeted panels).
-        self.gdna_model = InsertSizeModel(max_size=max_size)
+        self.gdna_model = FragmentLengthModel(max_size=max_size)
 
     def finalize(self) -> None:
         """Cache derived values on all sub-models for fast scoring.
@@ -369,40 +521,40 @@ class InsertSizeModels:
 
     def observe(
         self,
-        insert_size: int,
+        frag_length: int,
         splice_type=None,
         weight: float = 1.0,
     ) -> None:
-        """Record one insert size observation.
+        """Record one fragment length observation.
 
         Parameters
         ----------
-        insert_size : int
-            Fragment insert size (must be >= 0).
+        frag_length : int
+            Fragment fragment length (must be >= 0).
         splice_type : SpliceType or None
             The fragment's count category, or ``None`` for intergenic.
         weight : float
             Observation weight (default 1.0).
         """
-        self.global_model.observe(insert_size, weight)
+        self.global_model.observe(frag_length, weight)
         if splice_type is None:
-            self.intergenic.observe(insert_size, weight)
+            self.intergenic.observe(frag_length, weight)
             # Intergenic fragments are ~100% gDNA → train gDNA model
-            self.gdna_model.observe(insert_size, weight)
+            self.gdna_model.observe(frag_length, weight)
         else:
-            self.category_models[splice_type].observe(insert_size, weight)
+            self.category_models[splice_type].observe(frag_length, weight)
 
-    def observe_gdna(self, insert_size: int, weight: float = 1.0) -> None:
-        """Record an insert size observation for the gDNA model only.
+    def observe_gdna(self, frag_length: int, weight: float = 1.0) -> None:
+        """Record an fragment length observation for the gDNA model only.
 
         Used for antisense genic fragments (exonic + intronic) which
         are enriched for gDNA but already routed to their category
         model via :meth:`observe`.
         """
-        self.gdna_model.observe(insert_size, weight)
+        self.gdna_model.observe(frag_length, weight)
 
     def to_dict(self) -> dict:
-        """JSON/YAML-serializable summary of all insert size models."""
+        """JSON/YAML-serializable summary of all fragment length models."""
         from .categories import SpliceType
 
         d: dict = {"global": self.global_model.to_dict()}
@@ -413,25 +565,25 @@ class InsertSizeModels:
         return d
 
     def write_json(self, path) -> None:
-        """Write all insert size models to a single JSON file."""
+        """Write all fragment length models to a single JSON file."""
         import json
         from pathlib import Path
 
         path = Path(path)
         with open(path, "w") as fh:
             json.dump(
-                {"insert_size_models": self.to_dict()},
+                {"frag_length_models": self.to_dict()},
                 fh,
                 indent=2,
             )
-        logger.info(f"Wrote insert size models to {path}")
+        logger.info(f"Wrote fragment length models to {path}")
 
     def log_summary(self) -> None:
-        """Log a human-readable summary of all insert size models."""
+        """Log a human-readable summary of all fragment length models."""
         from .categories import SpliceType
 
         logger.info(
-            f"Insert size models: {self.global_model.n_observations:,} "
+            f"Fragment length models: {self.global_model.n_observations:,} "
             f"total observations"
         )
         if self.global_model.n_observations > 0:

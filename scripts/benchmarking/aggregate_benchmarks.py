@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -33,9 +34,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TRANSCRIPT_TOOLS = ("hulkrna", "hulkrna_mm", "salmon", "kallisto")
-GENE_TOOLS = ("hulkrna", "hulkrna_mm", "salmon", "kallisto", "htseq")
+TRANSCRIPT_TOOLS = ("hulkrna_mm", "salmon", "kallisto")
+GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
 METRICS = ("mae", "rmse", "pearson", "spearman")
+
+
+def parse_condition_name(condition: str) -> dict[str, object]:
+    """Parse condition directory names: gdna_<label>_nrna_<label>_ss_<float>."""
+    m_new = re.match(r"^gdna_(.+?)_nrna_(.+?)_ss_([0-9.]+)$", condition)
+    if m_new:
+        return {
+            "gdna_label": m_new.group(1),
+            "nrna_label": m_new.group(2),
+            "strand_specificity": float(m_new.group(3)),
+        }
+    return {}
 
 
 # ── Loading ──────────────────────────────────────────────────────────
@@ -54,6 +67,15 @@ def load_seed_results(input_dir: Path) -> list[tuple[int, list[dict]]]:
         if data:
             results.append((seed, data))
             logger.info("Loaded seed %d: %d condition results", seed, len(data))
+
+    # Fallback: allow aggregating a single run directory directly.
+    if not results:
+        sj = input_dir / "summary.json"
+        if sj.exists():
+            data = json.loads(sj.read_text())
+            if data:
+                results.append((0, data))
+                logger.info("Loaded single-run summary.json: %d condition results", len(data))
     return results
 
 
@@ -70,15 +92,34 @@ def load_per_tx_results(input_dir: Path) -> pd.DataFrame:
             df["seed"] = seed
             df["region"] = region
             df["condition"] = condition
-            # Parse condition dir name: gdna_<label>_ss_<value>
-            cond_parts = condition.split("_ss_")
-            if len(cond_parts) == 2:
-                df["gdna_label"] = cond_parts[0].replace("gdna_", "")
-                df["strand_specificity"] = float(cond_parts[1])
+            parsed = parse_condition_name(condition)
+            if parsed:
+                df["gdna_label"] = parsed["gdna_label"]
+                df["nrna_label"] = parsed["nrna_label"]
+                df["strand_specificity"] = parsed["strand_specificity"]
+            parts.append(df)
+    if not parts:
+        for ptx in input_dir.rglob("per_transcript_counts.csv"):
+            condition = ptx.parent.name
+            region = ptx.parent.parent.name
+            df = pd.read_csv(ptx)
+            df["seed"] = 0
+            df["region"] = region
+            df["condition"] = condition
+            parsed = parse_condition_name(condition)
+            if parsed:
+                df["gdna_label"] = parsed["gdna_label"]
+                df["nrna_label"] = parsed["nrna_label"]
+                df["strand_specificity"] = parsed["strand_specificity"]
             parts.append(df)
     if not parts:
         return pd.DataFrame()
-    return pd.concat(parts, ignore_index=True)
+    result = pd.concat(parts, ignore_index=True)
+    # Exclude nRNA truth entries from per-transcript analysis.
+    # nRNA evaluation belongs in pool-level metrics, not per-transcript.
+    if "transcript_id" in result.columns:
+        result = result[~result["transcript_id"].str.startswith("nrna_", na=False)]
+    return result
 
 
 def load_per_gene_results(input_dir: Path) -> pd.DataFrame:
@@ -93,10 +134,25 @@ def load_per_gene_results(input_dir: Path) -> pd.DataFrame:
             df["seed"] = seed
             df["region"] = region
             df["condition"] = condition
-            cond_parts = condition.split("_ss_")
-            if len(cond_parts) == 2:
-                df["gdna_label"] = cond_parts[0].replace("gdna_", "")
-                df["strand_specificity"] = float(cond_parts[1])
+            parsed = parse_condition_name(condition)
+            if parsed:
+                df["gdna_label"] = parsed["gdna_label"]
+                df["nrna_label"] = parsed["nrna_label"]
+                df["strand_specificity"] = parsed["strand_specificity"]
+            parts.append(df)
+    if not parts:
+        for pgene in input_dir.rglob("per_gene_counts.csv"):
+            condition = pgene.parent.name
+            region = pgene.parent.parent.name
+            df = pd.read_csv(pgene)
+            df["seed"] = 0
+            df["region"] = region
+            df["condition"] = condition
+            parsed = parse_condition_name(condition)
+            if parsed:
+                df["gdna_label"] = parsed["gdna_label"]
+                df["nrna_label"] = parsed["nrna_label"]
+                df["strand_specificity"] = parsed["strand_specificity"]
             parts.append(df)
     if not parts:
         return pd.DataFrame()
@@ -108,27 +164,37 @@ def load_per_gene_results(input_dir: Path) -> pd.DataFrame:
 
 def aggregate(
     seed_results: list[tuple[int, list[dict]]],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build tidy DataFrames for transcript-level and gene-level metrics.
 
-    Returns (tx_metrics_df, gene_metrics_df), each with columns:
+    Returns (tx_metrics_df, gene_metrics_df, pool_metrics_df), with columns:
         seed, region, gdna_label, gdna_abundance, strand_specificity,
         tool, mae, rmse, pearson, spearman, elapsed_sec
     """
     tx_rows: list[dict] = []
     gene_rows: list[dict] = []
+    pool_rows: list[dict] = []
 
     for seed, conditions in seed_results:
         for r in conditions:
             base = {
                 "seed": seed,
                 "region": r["region"],
+                "condition": (
+                    f"gdna_{r['gdna_label']}_nrna_{r.get('nrna_label', 'none')}_"
+                    f"ss_{r['strand_specificity']:.2f}"
+                ),
+                "aligner": r.get("aligner", "minimap2"),
                 "n_transcripts": r["n_transcripts"],
                 "n_genes": r["n_genes"],
                 "n_fragments": r["n_fragments"],
                 "n_gdna_actual": r["n_gdna_actual"],
                 "gdna_label": r["gdna_label"],
+                "gdna_rate": r.get("gdna_rate", np.nan),
                 "gdna_abundance": r["gdna_abundance"],
+                "nrna_label": r.get("nrna_label", "none"),
+                "nrna_rate": r.get("nrna_rate", 0.0),
+                "nrna_abundance": r.get("nrna_abundance", 0.0),
                 "strand_specificity": r["strand_specificity"],
             }
             for tool, tm in r.get("transcript_metrics", {}).items():
@@ -153,10 +219,21 @@ def aggregate(
                     "elapsed_sec": tm["elapsed_sec"],
                     "total_abs_error": tm["total_abs_error"],
                 })
+            for pm in r.get("pool_metrics", []):
+                pool_rows.append({
+                    **base,
+                    "tool": pm["tool"],
+                    "pool": pm["pool"],
+                    "truth": float(pm["truth"]),
+                    "observed": float(pm["observed"]),
+                    "signed_error": float(pm["signed_error"]),
+                    "abs_error": float(pm["abs_error"]),
+                })
 
     tx_df = pd.DataFrame(tx_rows) if tx_rows else pd.DataFrame()
     gene_df = pd.DataFrame(gene_rows) if gene_rows else pd.DataFrame()
-    return tx_df, gene_df
+    pool_df = pd.DataFrame(pool_rows) if pool_rows else pd.DataFrame()
+    return tx_df, gene_df, pool_df
 
 
 # ── Report writing ───────────────────────────────────────────────────
@@ -212,6 +289,7 @@ def _agg_table(
 def write_aggregate_report(
     tx_df: pd.DataFrame,
     gene_df: pd.DataFrame,
+    pool_df: pd.DataFrame,
     per_tx: pd.DataFrame,
     output_dir: Path,
     n_seeds: int,
@@ -258,6 +336,19 @@ def write_aggregate_report(
             if tool in gene_df["tool"].values
         }
 
+    if not pool_df.empty:
+        agg_json["pool_level_overall"] = {}
+        for pool_name, pool_part in pool_df.groupby("pool"):
+            agg_json["pool_level_overall"][str(pool_name)] = {}
+            for tool_name, tool_part in pool_part.groupby("tool"):
+                agg_json["pool_level_overall"][str(pool_name)][str(tool_name)] = {
+                    "mean_abs_error": float(tool_part["abs_error"].mean()),
+                    "std_abs_error": float(tool_part["abs_error"].std()),
+                    "mean_signed_error": float(tool_part["signed_error"].mean()),
+                    "mean_truth": float(tool_part["truth"].mean()),
+                    "mean_observed": float(tool_part["observed"].mean()),
+                }
+
     with open(output_dir / "aggregate_summary.json", "w") as f:
         json.dump(agg_json, f, indent=2)
 
@@ -267,6 +358,8 @@ def write_aggregate_report(
         tx_df.to_csv(output_dir / "aggregate_transcript_metrics.csv", index=False)
     if not gene_df.empty:
         gene_df.to_csv(output_dir / "aggregate_gene_metrics.csv", index=False)
+    if not pool_df.empty:
+        pool_df.to_csv(output_dir / "aggregate_pool_metrics.csv", index=False)
     if not per_tx.empty:
         per_tx.to_csv(output_dir / "aggregate_per_tx.csv", index=False)
 
@@ -333,6 +426,15 @@ def write_aggregate_report(
         lines.extend(_agg_table(tx_df, ["strand_specificity"], tx_tools, "mae"))
     lines.append("")
 
+    # Transcript-level MAE by nRNA level
+    lines.extend([
+        "## Transcript-Level MAE by nRNA Level",
+        "",
+    ])
+    if not tx_df.empty and "nrna_label" in tx_df.columns:
+        lines.extend(_agg_table(tx_df, ["nrna_label"], tx_tools, "mae"))
+    lines.append("")
+
     # Transcript-level MAE by condition (gDNA × strand)
     lines.extend([
         "## Transcript-Level MAE by Condition (gDNA × Strand Specificity)",
@@ -371,6 +473,48 @@ def write_aggregate_report(
     ])
     if not gene_df.empty:
         lines.extend(_agg_table(gene_df, ["gdna_label"], gene_tools, "mae"))
+    lines.append("")
+
+    # Pool-level by pool and by RNA-vs-DNA
+    lines.extend([
+        "## Pool-Level Absolute Error by Pool",
+        "",
+    ])
+    if not pool_df.empty:
+        pool_order = ["mature_rna", "nascent_rna", "genomic_dna", "rna", "dna"]
+        lines.extend([
+            "| Pool | " + " | ".join(tx_tools) + " |",
+            "| --- | " + " | ".join(["---:"] * len(tx_tools)) + " |",
+        ])
+        for pool_name in pool_order:
+            sub = pool_df[pool_df["pool"] == pool_name]
+            if len(sub) == 0:
+                continue
+            vals = []
+            for tool in tx_tools:
+                tsub = sub[sub["tool"] == tool]
+                vals.append(_fmt(float(tsub["abs_error"].mean())) if len(tsub) else "—")
+            lines.append(f"| {pool_name} | " + " | ".join(vals) + " |")
+    lines.append("")
+
+    lines.extend([
+        "## RNA vs DNA Absolute Error",
+        "",
+    ])
+    if not pool_df.empty:
+        rna_dna = pool_df[pool_df["pool"].isin(["rna", "dna"])].copy()
+        if len(rna_dna):
+            lines.extend([
+                "| Group | " + " | ".join(tx_tools) + " |",
+                "| --- | " + " | ".join(["---:"] * len(tx_tools)) + " |",
+            ])
+            for grp in ["rna", "dna"]:
+                sub = rna_dna[rna_dna["pool"] == grp]
+                vals = []
+                for tool in tx_tools:
+                    tsub = sub[sub["tool"] == tool]
+                    vals.append(_fmt(float(tsub["abs_error"].mean())) if len(tsub) else "—")
+                lines.append(f"| {grp} | " + " | ".join(vals) + " |")
     lines.append("")
 
     # ── Per-transcript diagnostics ──────────────────────────────────
@@ -420,18 +564,18 @@ def write_aggregate_report(
 
         # Worst transcripts (highest mean AE across all conditions/seeds)
         lines.extend([
-            "## Top 20 Worst Transcripts (highest mean abs error, hulkrna)",
+            "## Top 20 Worst Transcripts (highest mean abs error, hulkrna_mm)",
             "",
         ])
-        if "ae_hulkrna" in per_tx.columns:
+        if "ae_hulkrna_mm" in per_tx.columns:
             worst = (
-                per_tx.groupby("transcript_id")["ae_hulkrna"]
+                per_tx.groupby("transcript_id")["ae_hulkrna_mm"]
                 .mean()
                 .sort_values(ascending=False)
                 .head(20)
             )
             lines.extend([
-                "| Transcript | Mean AE (hulkrna) | Mean Truth | Mean Abundance |",
+                "| Transcript | Mean AE (hulkrna_mm) | Mean Truth | Mean Abundance |",
                 "| --- | ---: | ---: | ---: |",
             ])
             for tid, ae in worst.items():
@@ -480,23 +624,27 @@ def main() -> int:
     logger.info("Loaded %d seeds", n_seeds)
 
     # Build tidy DataFrames
-    tx_df, gene_df = aggregate(seed_results)
+    tx_df, gene_df, pool_df = aggregate(seed_results)
     logger.info(
-        "Aggregated: %d transcript-level rows, %d gene-level rows",
+        "Aggregated: %d transcript-level rows, %d gene-level rows, %d pool-level rows",
         len(tx_df),
         len(gene_df),
+        len(pool_df),
     )
 
     # Detect whether htseq was included
     include_htseq = "htseq" in gene_df["tool"].values if not gene_df.empty else False
 
     # Load per-transcript data
-    per_tx = load_per_tx_results(args.input_dir)
-    logger.info("Loaded %d per-transcript rows", len(per_tx))
+    per_tx_all = load_per_tx_results(args.input_dir)
+    logger.info("Loaded %d per-transcript rows", len(per_tx_all))
+
+    per_tx = per_tx_all
 
     write_aggregate_report(
         tx_df,
         gene_df,
+        pool_df,
         per_tx,
         args.output_dir,
         n_seeds=n_seeds,

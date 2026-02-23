@@ -54,10 +54,10 @@ class PipelineStats:
     n_strand_skipped_multi_gene: int = 0
     n_strand_skipped_ambiguous: int = 0
 
-    # --- Insert size model training ---
-    n_insert_unambiguous: int = 0
-    n_insert_ambiguous: int = 0
-    n_insert_intergenic: int = 0
+    # --- Fragment length model training ---
+    n_frag_length_unambiguous: int = 0
+    n_frag_length_ambiguous: int = 0
+    n_frag_length_intergenic: int = 0
 
     # --- Routing counters (authoritative) ---
     deterministic_unique_units: int = 0

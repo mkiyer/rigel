@@ -43,15 +43,30 @@ class Fragment:
     introns : tuple[GenomicInterval, ...]
         Observed splice junctions from CIGAR N operations.
         Strand is from the SJ strand tag (not the read alignment strand).
-    insert_size : int | None
-        Insert size (outer distance on the reference). None until
+    frag_length : int | None
+        Fragment length (outer distance on the reference). None until
         computed from the reference index (requires knowing the
         reference coordinates of both reads).
     """
 
     exons: tuple[GenomicInterval, ...] = ()
     introns: tuple[GenomicInterval, ...] = ()
-    insert_size: int | None = None
+    frag_length: int | None = None
+    nm: int = 0
+
+    @property
+    def genomic_footprint(self) -> int:
+        """Genomic span from first exon start to last exon end.
+
+        This is the full footprint on the reference, with no intron
+        subtraction.  Represents the fragment length on an unspliced
+        molecule (nRNA or gDNA).  Returns -1 if no exon blocks.
+        """
+        if not self.exons:
+            return -1
+        starts = [e.start for e in self.exons]
+        ends = [e.end for e in self.exons]
+        return max(ends) - min(starts)
 
     # -- construction ---------------------------------------------------------
 
@@ -126,7 +141,21 @@ class Fragment:
                 GenomicInterval(eref, cur_start, cur_end, estrand)
             )
 
+        # Sum NM (edit distance) tags across all records for this hit.
+        nm_total = 0
+        for read in r1_reads:
+            try:
+                nm_total += read.get_tag('NM')
+            except KeyError:
+                pass
+        for read in r2_reads:
+            try:
+                nm_total += read.get_tag('NM')
+            except KeyError:
+                pass
+
         return cls(
             exons=tuple(merged_exons),
             introns=tuple(introns),
+            nm=nm_total,
         )

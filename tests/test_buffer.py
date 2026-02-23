@@ -25,9 +25,10 @@ def _make_resolved(**kwargs):
         splice_type=SpliceType.UNSPLICED,
         exon_strand=Strand.POS,
         sj_strand=Strand.NONE,
-        insert_size=250,
+        frag_lengths={0: 250, 1: 250},
         merge_criteria=MergeCriteria.INTERSECTION,
         num_hits=1,
+        genomic_footprint=250,
     )
     defaults.update(kwargs)
     return ResolvedFragment(**defaults)
@@ -48,13 +49,14 @@ def _fill_buffer(n, *, chunk_size=100, **buffer_kwargs):
         t_set = frozenset({i % 5, (i + 1) % 5})
         # Derive n_genes from t_set using t_to_g
         n_genes = len(set(int(t_to_g[t]) for t in t_set))
+        flen = 200 + i
         r = _make_resolved(
             t_inds=t_set,
             n_genes=n_genes,
             splice_type=SpliceType(i % len(SpliceType)),
             exon_strand=Strand(1 + i % 2),  # POS or NEG
             sj_strand=Strand(1 + (i + 1) % 2),
-            insert_size=200 + i,
+            frag_lengths={t: flen for t in t_set},
             num_hits=1 + i % 2,
         )
         fragments.append(r)
@@ -76,7 +78,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250, 250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -90,7 +92,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -103,7 +105,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250], dtype=np.int32),
             num_hits=3,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -116,7 +118,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.SPLICED_ANNOT),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
-            insert_size=250,
+            frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -129,7 +131,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.SPLICED_ANNOT),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
-            insert_size=250,
+            frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -142,7 +144,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
-            insert_size=250,
+            frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -155,7 +157,7 @@ class TestBufferedFragment:
             splice_type=0,
             exon_strand=1,
             sj_strand=0,
-            insert_size=100,
+            frag_lengths=np.array([100, 100, 100], dtype=np.int32),
             num_hits=1,
             merge_criteria=0,
         )
@@ -170,7 +172,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250, 250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -184,7 +186,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -198,7 +200,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250, 250], dtype=np.int32),
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -212,7 +214,7 @@ class TestBufferedFragment:
             splice_type=int(SpliceType.UNSPLICED),
             exon_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
-            insert_size=250,
+            frag_lengths=np.array([250, 250], dtype=np.int32),
             num_hits=3,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
@@ -300,7 +302,7 @@ class TestFragmentBufferBasic:
         assert buf.n_chunks == 1
         frags = list(buf)
         assert len(frags) == 1
-        assert frags[0].insert_size == 250
+        assert frags[0].frag_lengths[0] == 250
         assert frags[0].splice_type == int(SpliceType.UNSPLICED)
 
     def test_roundtrip_preserves_data(self):
@@ -311,7 +313,7 @@ class TestFragmentBufferBasic:
             splice_type=SpliceType.SPLICED_ANNOT,
             exon_strand=Strand.NEG,
             sj_strand=Strand.POS,
-            insert_size=350,
+            frag_lengths={3: 350, 7: 350, 11: 350},
             merge_criteria=MergeCriteria.UNION,
             num_hits=4,
         )
@@ -331,7 +333,7 @@ class TestFragmentBufferBasic:
         assert bf.splice_type == int(SpliceType.SPLICED_ANNOT)
         assert bf.exon_strand == int(Strand.NEG)
         assert bf.sj_strand == int(Strand.POS)
-        assert bf.insert_size == 350
+        assert bf.frag_lengths[0] == 350
         assert bf.merge_criteria == int(MergeCriteria.UNION)
         assert bf.num_hits == 4
 
@@ -343,7 +345,7 @@ class TestFragmentBufferBasic:
         result = list(buf)
         assert len(result) == 50
         for i, bf in enumerate(result):
-            assert bf.insert_size == 200 + i
+            assert bf.frag_lengths[0] == 200 + i
 
     def test_chunking(self):
         buf, fragments = _fill_buffer(250, chunk_size=100)
@@ -369,10 +371,10 @@ class TestFragmentBufferBasic:
             t_inds=frozenset({0, 2}),
             n_genes=2,
             overlap_bp={
-                0: (big_exon_bp, big_intron_bp),
-                2: (big_exon_bp - 1, big_intron_bp - 1),
+                0: (big_exon_bp, big_intron_bp, big_intron_bp),
+                2: (big_exon_bp - 1, big_intron_bp - 1, big_intron_bp - 1),
             },
-            frag_length=big_frag_len,
+            read_length=big_frag_len,
         )
         buf.append(r, frag_id=7)
         buf.finalize()
@@ -380,11 +382,44 @@ class TestFragmentBufferBasic:
         chunk = list(buf.iter_chunks())[0]
         bf = chunk[0]
 
-        assert bf.frag_length == big_frag_len
+        assert bf.read_length == big_frag_len
         assert int(bf.exon_bp[0]) == big_exon_bp
         assert int(bf.intron_bp[0]) == big_intron_bp
         assert int(bf.exon_bp[1]) == big_exon_bp - 1
         assert int(bf.intron_bp[1]) == big_intron_bp - 1
+        assert int(bf.unambig_intron_bp[0]) == big_intron_bp
+        assert int(bf.unambig_intron_bp[1]) == big_intron_bp - 1
+
+    def test_nm_field_roundtrip(self):
+        """NM edit distance is preserved through buffer append → read cycle."""
+        t_to_g = np.array([0, 0, 1], dtype=np.int64)
+        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=10)
+
+        r = _make_resolved(
+            t_inds=frozenset({0, 2}), n_genes=2,
+            overlap_bp={0: (100, 0, 0), 2: (100, 0, 0)},
+            read_length=100, nm=7,
+        )
+        buf.append(r)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.nm == 7
+
+    def test_nm_default_zero(self):
+        """When nm not set on ResolvedFragment, buffered value is 0."""
+        t_to_g = np.array([0, 0], dtype=np.int64)
+        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=10)
+
+        r = _make_resolved(
+            t_inds=frozenset({0}), n_genes=1,
+            overlap_bp={0: (50, 0, 0)}, read_length=50,
+        )
+        buf.append(r)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.nm == 0
 
 
 # =====================================================================
@@ -627,7 +662,7 @@ class TestDiskSpill:
         result = list(buf)
         assert len(result) == 200
         for i, bf in enumerate(result):
-            assert bf.insert_size == 200 + i
+            assert bf.frag_lengths[0] == 200 + i
             assert bf.splice_type == int(SpliceType(i % len(SpliceType)))
 
     def test_cleanup_removes_files(self, tmp_path):
@@ -657,7 +692,7 @@ class TestDiskSpill:
             spill_dir=tmp_path,
         ) as buf:
             for i in range(200):
-                buf.append(_make_resolved(insert_size=i))
+                buf.append(_make_resolved(frag_lengths={0: i, 1: i}))
             buf.finalize()
             assert buf.n_spilled > 0
 
@@ -732,7 +767,7 @@ class TestIterChunks:
         assert chunk.size == 5
         for i in range(5):
             bf = chunk[i]
-            assert bf.insert_size == 200 + i
+            assert bf.frag_lengths[0] == 200 + i
 
     def test_memory_bytes_positive(self):
         buf, _ = _fill_buffer(100, chunk_size=100)

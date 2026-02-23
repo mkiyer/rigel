@@ -86,7 +86,7 @@ def count_command(args: argparse.Namespace) -> int:
 
     # Define output file paths
     strand_json = output_dir / "strand_model.json"
-    insert_json = output_dir / "insert_size_models.json"
+    fl_json = output_dir / "frag_length_models.json"
     counts_path = output_dir / "counts.feather"
     gene_counts_path = output_dir / "gene_counts.feather"
     detail_path = output_dir / "counts_detail.feather"
@@ -142,6 +142,7 @@ def count_command(args: argparse.Namespace) -> int:
         confidence_threshold=args.confidence_threshold,
         overlap_min_frac=args.overlap_min_frac,
         overhang_alpha=args.overhang_alpha,
+        mismatch_alpha=args.mismatch_alpha,
     )
 
     # Log stats
@@ -151,7 +152,7 @@ def count_command(args: argparse.Namespace) -> int:
 
     # Write models to JSON
     result.strand_models.write_json(strand_json)
-    result.insert_models.write_json(insert_json)
+    result.frag_length_models.write_json(fl_json)
 
     # Write count tables
     counter = result.counter
@@ -374,7 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
              "transcript during resolution (default: 0.99 = within 1%% of best). "
              "Lower values (e.g. 0.9) keep candidates within 10%% of best.",
     )
-    from .pipeline import DEFAULT_OVERHANG_ALPHA
+    from .pipeline import DEFAULT_OVERHANG_ALPHA, DEFAULT_MISMATCH_ALPHA
     cnt.add_argument(
         "--overhang-alpha", dest="overhang_alpha",
         type=float, default=DEFAULT_OVERHANG_ALPHA,
@@ -383,6 +384,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Each base outside the target boundary multiplies the "
             "probability by alpha. "
             f"(default: {DEFAULT_OVERHANG_ALPHA}). "
+            "0 = hard binary gate, 1 = off (no penalty)."
+        ),
+    )
+    cnt.add_argument(
+        "--mismatch-alpha", dest="mismatch_alpha",
+        type=float, default=DEFAULT_MISMATCH_ALPHA,
+        help=(
+            "Per-mismatch (NM tag) penalty alpha in [0, 1]. "
+            "Each edit-distance mismatch multiplies the "
+            "probability by alpha. "
+            f"(default: {DEFAULT_MISMATCH_ALPHA}). "
             "0 = hard binary gate, 1 = off (no penalty)."
         ),
     )

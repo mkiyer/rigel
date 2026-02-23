@@ -96,17 +96,18 @@ def _make_resolved(**kwargs):
         splice_type=SpliceType.UNSPLICED,
         exon_strand=Strand.POS,
         sj_strand=Strand.NONE,
-        insert_size=250,
+        frag_lengths={0: 250},
         merge_criteria=MergeCriteria.INTERSECTION,
         num_hits=1,
+        genomic_footprint=250,
     )
     defaults.update(kwargs)
     return ResolvedFragment(**defaults)
 
 
-def _make_insert_models():
-    from hulkrna.insert_model import InsertSizeModels
-    im = InsertSizeModels()
+def _make_frag_length_models():
+    from hulkrna.frag_length_model import FragmentLengthModels
+    im = FragmentLengthModels()
     im.observe(250, SpliceType.UNSPLICED)
     return im
 

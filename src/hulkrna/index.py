@@ -307,7 +307,7 @@ class HulkIndex:
         # Splice-junction exact-match map  (ref, start, end, strand) → (t_set, g_set)
         self.sj_map: dict | None = None
 
-        # Splice-junction cgranges index (for gap containment queries / insert size)
+        # Splice-junction cgranges index (for gap containment queries / fragment length)
         # Label = row index into the _sj_* lookup arrays.
         self.sj_cr: cgranges.cgranges | None = None
         self._sj_t_index: np.ndarray | None = None
@@ -507,7 +507,7 @@ class HulkIndex:
             for key, val in sj_map.items()
         }
 
-        # cgranges tree for containment / gap queries (insert size)
+        # cgranges tree for containment / gap queries (fragment length)
         logger.debug("Building splice junction cgranges index")
         sj_cr = cgranges.cgranges()
         for label, row in enumerate(sj_df.itertuples(index=False)):
@@ -587,7 +587,7 @@ class HulkIndex:
     ) -> list[tuple[int, int, int, int, int]]:
         """Find annotated splice junctions fully contained in a gap region.
 
-        Used for insert-size computation: given the gap between paired-end
+        Used for fragment-length computation: given the gap between paired-end
         reads, find all annotated introns (splice junctions) that are
         fully contained within that gap so their lengths can be subtracted
         from the genomic distance.

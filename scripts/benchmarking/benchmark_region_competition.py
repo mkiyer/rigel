@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
-"""Regional benchmark: hulkrna (two modes) vs salmon vs kallisto vs htseq.
+"""Regional benchmark: hulkrna multimap vs salmon vs kallisto vs htseq.
 
-Supports a combinatorial grid of gDNA contamination levels and strand
-specificity values.  Per-region setup (extract, abundance assignment, index
+Supports a combinatorial grid of gDNA contamination rates and strand
+specificity values. Per-region setup (extract, abundance assignment, index
 build) is done once; the condition sweep re-simulates reads and re-runs all
-tools for each (gDNA level, strand specificity) pair.
+tools for each (gDNA rate, strand specificity) pair.
 
 Tools
 -----
-- hulkrna       : include_multimap=False (default mode)
-- hulkrna_mm    : include_multimap=True  (multimapping mode)
+- hulkrna_mm    : include_multimap=True  (required multimapping mode)
 - salmon        : salmon quant --validateMappings
 - kallisto      : kallisto quant (--rf-stranded when strand_spec >= 0.9)
-- htseq         : htseq-count (gene-level only, optional, via --include-htseq)
+- htseq         : htseq-count (gene-level only)
 
-gDNA levels (computed from assigned transcript abundance distribution)
----------------------------------------------------------------------
-- none     : 0
-- low      : 10th percentile
-- moderate : 20th percentile
-- high     : 50th percentile (median)
+Genome aligners for hulkrna/htseq inputs
+----------------------------------------
+- minimap2      : splice:sr with secondary alignments + annotation BED12
+- hisat2        : hisat2/hisat2-build with secondary alignments
+
+gDNA model
+----------
+gDNA abundance is computed from total transcript abundance:
+    gDNA_abundance = sum(transcript_abundances) * gDNA_rate
+where gDNA_rate is in [0, 1].
 
 Output per seed directory
 ─────────────────────────
@@ -31,7 +34,7 @@ Output per seed directory
         region/         – extracted FASTA & GTF
         transcripts.fa
         hulkrna_index/
-        <condition>/          e.g. gdna_none_ss_1.00
+        <condition>/          e.g. gdna_r0.25_ss_1.00
             reads/
             align/
             salmon/
@@ -39,6 +42,7 @@ Output per seed directory
             htseq/
             per_transcript_counts.csv
             per_gene_counts.csv
+            per_pool_counts.csv
 """
 from __future__ import annotations
 
@@ -52,6 +56,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
@@ -59,6 +64,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+try:
+    import yaml
+except ImportError:  # pragma: no cover - handled at runtime when config is used
+    yaml = None
 
 from hulkrna.gtf import GTF
 from hulkrna.index import HulkIndex, write_bed12
@@ -71,20 +80,14 @@ logger = logging.getLogger(__name__)
 
 # ── Tool identifiers ────────────────────────────────────────────────
 
-TRANSCRIPT_TOOLS = ("hulkrna", "hulkrna_mm", "salmon", "kallisto")
-GENE_TOOLS = ("hulkrna", "hulkrna_mm", "salmon", "kallisto", "htseq")
+TRANSCRIPT_TOOLS = ("hulkrna_mm", "salmon", "kallisto")
+GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
 
 # ── Default gDNA levels and strand specificities ────────────────────
 
-DEFAULT_GDNA_LEVELS = ("none", "low", "moderate", "high")
 DEFAULT_STRAND_SPECIFICITIES = (0.95, 0.99, 1.0)
-
-GDNA_PERCENTILES = {
-    "none": 0.0,
-    "low": 10.0,
-    "moderate": 20.0,
-    "high": 50.0,
-}
+DEFAULT_GDNA_RATES = (0.0, 0.1, 0.25, 0.5)
+DEFAULT_NRNA_RATES = (0.0,)
 
 
 # ── Dataclasses ─────────────────────────────────────────────────────
@@ -121,10 +124,16 @@ class ConditionResult:
     n_fragments: int
     n_gdna_actual: int
     gdna_label: str
+    gdna_rate: float
     gdna_abundance: float
+    nrna_label: str
+    nrna_rate: float
+    nrna_abundance: float
     strand_specificity: float
+    aligner: str
     transcript_metrics: dict  # tool name → ToolMetrics (as dict)
     gene_metrics: dict  # tool name → ToolMetrics (as dict)
+    pool_metrics: list[dict]  # rows with pool-level truth/observed/error per tool
 
 
 @dataclass
@@ -492,6 +501,133 @@ def align_minimap2(
         )
 
 
+def write_hisat2_splice_sites(
+    transcripts: list[Transcript],
+    out_path: Path,
+) -> Path:
+    """Write a HISAT2 splice-site file from transcript exon coordinates.
+
+    Format (tab-separated, 0-based)::
+
+        chrom  left_flanking_base  right_flanking_base  strand
+
+    where *left_flanking_base* is the last base of the upstream exon and
+    *right_flanking_base* is the first base of the downstream exon.
+    Coordinates use the 0-based convention expected by ``hisat2-build --ss``
+    and ``hisat2 --known-splicesite-infile``.
+    """
+    seen: set[tuple[str, int, int, str]] = set()
+    with open(out_path, "w") as fh:
+        for t in transcripts:
+            ref = t.ref or ""
+            strand_str = "+" if t.strand == Strand.POS else "-"
+            for i in range(1, len(t.exons)):
+                left = t.exons[i - 1].end - 1   # last base of left exon (0-based)
+                right = t.exons[i].start         # first base of right exon (0-based)
+                key = (ref, left, right, strand_str)
+                if key not in seen:
+                    seen.add(key)
+                    fh.write(f"{ref}\t{left}\t{right}\t{strand_str}\n")
+    logger.info("Wrote %d unique splice sites to %s", len(seen), out_path)
+    return out_path
+
+
+def write_hisat2_exons(
+    transcripts: list[Transcript],
+    out_path: Path,
+) -> Path:
+    """Write a HISAT2 exon file from transcript exon coordinates.
+
+    Format (tab-separated, 0-based inclusive)::
+
+        chrom  left_position  right_position
+
+    Coordinates are 0-based, inclusive on both ends, matching the format
+    expected by ``hisat2-build --exon``.
+    """
+    seen: set[tuple[str, int, int]] = set()
+    with open(out_path, "w") as fh:
+        for t in transcripts:
+            ref = t.ref or ""
+            for e in t.exons:
+                key = (ref, e.start, e.end - 1)
+                if key not in seen:
+                    seen.add(key)
+                    fh.write(f"{ref}\t{e.start}\t{e.end - 1}\n")
+    logger.info("Wrote %d unique exons to %s", len(seen), out_path)
+    return out_path
+
+
+def align_hisat2(
+    region_fa: Path,
+    fastq_r1: Path,
+    fastq_r2: Path,
+    out_bam: Path,
+    *,
+    threads: int,
+    hisat2_exe: str,
+    hisat2_build_exe: str,
+    hisat2_index_dir: Path,
+    splice_sites_file: Path | None = None,
+    exons_file: Path | None = None,
+) -> None:
+    """Align PE reads with HISAT2 and produce a name-sorted BAM.
+
+    When *splice_sites_file* and *exons_file* are provided, the HISAT2
+    index is built with ``--ss`` / ``--exon`` for transcript-aware (HGFM)
+    indexing, and alignment uses ``--known-splicesite-infile`` for
+    optimal RNA-Seq splice-junction sensitivity.
+    """
+    hisat2_index_dir.mkdir(parents=True, exist_ok=True)
+    index_prefix = hisat2_index_dir / "idx"
+    if not (hisat2_index_dir / "idx.1.ht2").exists():
+        build_cmd = [
+            hisat2_build_exe,
+            "-p", str(max(1, threads)),
+        ]
+        if splice_sites_file is not None:
+            build_cmd.extend(["--ss", str(splice_sites_file)])
+        if exons_file is not None:
+            build_cmd.extend(["--exon", str(exons_file)])
+        build_cmd.extend([str(region_fa), str(index_prefix)])
+        logger.info("Building HISAT2 index: %s", " ".join(build_cmd))
+        subprocess.run(build_cmd, check=True, capture_output=True, text=True)
+
+    hisat2_cmd = [
+        hisat2_exe,
+        "-x",
+        str(index_prefix),
+        "-1",
+        str(fastq_r1),
+        "-2",
+        str(fastq_r2),
+        "-p",
+        str(max(1, threads)),
+        "-k",
+        "50",
+        "--secondary",
+        "--no-unal",
+    ]
+    # Provide known splice sites at alignment time for maximum sensitivity
+    if splice_sites_file is not None:
+        hisat2_cmd.extend(["--known-splicesite-infile", str(splice_sites_file)])
+    sort_cmd = ["samtools", "sort", "-n", "-o", str(out_bam), "-"]
+
+    p1 = subprocess.Popen(hisat2_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p2 = subprocess.Popen(
+        sort_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    p1.stdout.close()
+    _, p2_stderr = p2.communicate()
+    p1_stderr = p1.stderr.read()
+    p1.wait()
+
+    if p2.returncode != 0:
+        raise RuntimeError(f"samtools sort failed: {p2_stderr.decode()}")
+    if p1.returncode != 0:
+        logger.warning("hisat2 returned rc=%d: %s", p1.returncode, p1_stderr.decode())
+
+
 def coord_sort_bam(input_bam: Path, output_bam: Path) -> None:
     """Re-sort a BAM file to coordinate order and index it."""
     output_bam.parent.mkdir(parents=True, exist_ok=True)
@@ -528,22 +664,62 @@ def parse_truth_from_fastq(r1_fastq: Path) -> tuple[dict[str, int], int]:
     return dict(counts), n_gdna
 
 
+def compute_truth_pool_counts(
+    truth_counts: dict[str, int],
+    n_gdna_actual: int,
+) -> dict[str, float]:
+    mature_truth = float(
+        sum(count for tid, count in truth_counts.items() if not str(tid).startswith("nrna_"))
+    )
+    nascent_truth = float(
+        sum(count for tid, count in truth_counts.items() if str(tid).startswith("nrna_"))
+    )
+    genomic_truth = float(n_gdna_actual)
+    return {
+        "mature_rna": mature_truth,
+        "nascent_rna": nascent_truth,
+        "genomic_dna": genomic_truth,
+        "rna": mature_truth + nascent_truth,
+        "dna": genomic_truth,
+    }
+
+
+def compute_pool_metric_rows(
+    tool: str,
+    pool_truth: dict[str, float],
+    pool_observed: dict[str, float],
+) -> list[dict]:
+    rows: list[dict] = []
+    for pool in ("mature_rna", "nascent_rna", "genomic_dna", "rna", "dna"):
+        truth = float(pool_truth.get(pool, 0.0))
+        observed = float(pool_observed.get(pool, 0.0))
+        signed_error = observed - truth
+        rows.append({
+            "tool": tool,
+            "pool": pool,
+            "truth": round(truth, 6),
+            "observed": round(observed, 6),
+            "signed_error": round(signed_error, 6),
+            "abs_error": round(abs(signed_error), 6),
+        })
+    return rows
+
+
 # ── Tool runners ────────────────────────────────────────────────────
 
 
 def run_hulkrna_tool(
     bam_path: Path,
     index: HulkIndex,
-    include_multimap: bool,
     args: argparse.Namespace,
-) -> tuple[dict[str, float], float]:
-    """Run hulkrna pipeline and return (transcript_counts, elapsed_sec)."""
+) -> tuple[dict[str, float], float, dict[str, float]]:
+    """Run hulkrna pipeline and return (transcript_counts, elapsed_sec, pool_counts)."""
     t0 = time.monotonic()
     overhang_alpha = getattr(args, "overhang_alpha", None)
     kwargs = dict(
         seed=args.pipeline_seed,
         sj_strand_tag="auto",
-        include_multimap=include_multimap,
+        include_multimap=True,
         gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
     )
     if overhang_alpha is not None:
@@ -556,7 +732,17 @@ def run_hulkrna_tool(
         row.transcript_id: float(row.count)
         for row in counts_df.itertuples(index=False)
     }
-    return counts, elapsed
+    mature_pred = float(sum(counts.values()))
+    nascent_pred = float(pipe.counter.nrna_init.sum() + pipe.counter.nrna_em_counts.sum())
+    genomic_pred = float(pipe.stats.n_gdna_total)
+    pool_counts = {
+        "mature_rna": mature_pred,
+        "nascent_rna": nascent_pred,
+        "genomic_dna": genomic_pred,
+        "rna": mature_pred + nascent_pred,
+        "dna": genomic_pred,
+    }
+    return counts, elapsed, pool_counts
 
 
 def run_salmon(
@@ -785,33 +971,64 @@ def aggregate_to_genes(
 
 def compute_gdna_levels(
     transcripts: list[Transcript],
-    requested_levels: tuple[str, ...] = DEFAULT_GDNA_LEVELS,
-) -> dict[str, float]:
-    """Compute gDNA abundance values from transcript abundance percentiles.
+    requested_rates: tuple[float, ...],
+    requested_labels: tuple[str, ...] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Compute gDNA abundance from total transcript abundance and gDNA rates.
 
-    Returns a dict mapping level label to actual abundance value.
+    gDNA abundance is defined as:
+      sum(transcript abundances) * gdna_rate
+
+    Returns dict[label] = (rate, abundance).
     """
-    abundances = np.array([t.abundance for t in transcripts])
-    levels: dict[str, float] = {}
-    for label in requested_levels:
-        pctl = GDNA_PERCENTILES.get(label)
-        if pctl is None:
-            raise ValueError(
-                f"Unknown gDNA level '{label}'. "
-                f"Valid levels: {', '.join(GDNA_PERCENTILES)}"
-            )
-        if pctl == 0.0:
-            levels[label] = 0.0
+    total_tx_abundance = float(sum(float(t.abundance) for t in transcripts))
+    levels: dict[str, tuple[float, float]] = {}
+    for idx, rate in enumerate(requested_rates):
+        if rate < 0.0 or rate > 1.0:
+            raise ValueError(f"Invalid gDNA rate {rate}; expected in [0.0, 1.0]")
+        if requested_labels is not None and idx < len(requested_labels):
+            label = requested_labels[idx].strip()
         else:
-            levels[label] = float(np.percentile(abundances, pctl))
+            label = f"r{rate:g}"
+        abundance = total_tx_abundance * float(rate)
+        levels[label] = (float(rate), float(abundance))
+    return levels
+
+
+def compute_nrna_levels(
+    transcripts: list[Transcript],
+    requested_rates: tuple[float, ...],
+    requested_labels: tuple[str, ...] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Compute nRNA abundance from total transcript abundance and nRNA rates.
+
+    nRNA abundance is defined as:
+      nRNA_abundance_total = sum(transcript abundances) * nrna_rate
+
+    Individual transcript nRNA abundance is set per condition as:
+      t.nrna_abundance = t.abundance * nrna_rate
+
+    Returns dict[label] = (rate, total_nrna_abundance).
+    """
+    total_tx_abundance = float(sum(float(t.abundance) for t in transcripts))
+    levels: dict[str, tuple[float, float]] = {}
+    for idx, rate in enumerate(requested_rates):
+        if rate < 0.0 or rate > 1.0:
+            raise ValueError(f"Invalid nRNA rate {rate}; expected in [0.0, 1.0]")
+        if requested_labels is not None and idx < len(requested_labels):
+            label = requested_labels[idx].strip()
+        else:
+            label = f"r{rate:g}"
+        total_abundance = total_tx_abundance * float(rate)
+        levels[label] = (float(rate), float(total_abundance))
     return levels
 
 
 # ── Condition directory naming ───────────────────────────────────────
 
 
-def condition_dir_name(gdna_label: str, strand_specificity: float) -> str:
-    return f"gdna_{gdna_label}_ss_{strand_specificity:.2f}"
+def condition_dir_name(gdna_label: str, nrna_label: str, strand_specificity: float) -> str:
+    return f"gdna_{gdna_label}_nrna_{nrna_label}_ss_{strand_specificity:.2f}"
 
 
 # ── Main benchmark orchestration ─────────────────────────────────────
@@ -821,7 +1038,8 @@ def run_region_benchmark(
     region: RegionSpec,
     args: argparse.Namespace,
     out_root: Path,
-    gdna_levels: dict[str, float],
+    gdna_levels: dict[str, tuple[float, float]],
+    nrna_levels: dict[str, tuple[float, float]],
     strand_specificities: tuple[float, ...],
     include_htseq: bool,
     htseq_conda_env: str,
@@ -897,6 +1115,15 @@ def run_region_benchmark(
     HulkIndex.build(region_fa, region_gtf, index_dir, write_tsv=False)
     index = HulkIndex.load(index_dir)
 
+    hisat2_index_dir = reg_dir / "hisat2_index"
+
+    # HISAT2 splice-site and exon annotation files for RNA-Seq-aware indexing
+    hisat2_ss_file = reg_dir / "hisat2_splice_sites.txt"
+    hisat2_exon_file = reg_dir / "hisat2_exons.txt"
+    if args.aligner == "hisat2":
+        write_hisat2_splice_sites(transcripts, hisat2_ss_file)
+        write_hisat2_exons(transcripts, hisat2_exon_file)
+
     # Gene mapping for gene-level aggregation
     gene_map = {t.t_id: t.g_id for t in transcripts}
     abundance_map = {t.t_id: t.abundance for t in transcripts}
@@ -911,211 +1138,306 @@ def run_region_benchmark(
 
     results: list[ConditionResult] = []
 
-    for gdna_label, gdna_abundance in gdna_levels.items():
-        for strand_spec in strand_specificities:
-            cond_name = condition_dir_name(gdna_label, strand_spec)
-            cond_dir = reg_dir / cond_name
-            cond_dir.mkdir(parents=True, exist_ok=True)
+    for gdna_label, (gdna_rate, gdna_abundance) in gdna_levels.items():
+        for nrna_label, (nrna_rate, nrna_total_abundance) in nrna_levels.items():
+            for strand_spec in strand_specificities:
+                cond_name = condition_dir_name(gdna_label, nrna_label, strand_spec)
+                cond_dir = reg_dir / cond_name
+                cond_dir.mkdir(parents=True, exist_ok=True)
 
-            logger.info(
-                "  [COND] %s | gDNA=%s (%.2f) | strand_spec=%.2f",
-                region.label,
-                gdna_label,
-                gdna_abundance,
-                strand_spec,
-            )
-
-            # Simulate reads
-            sim_cfg = SimConfig(
-                frag_mean=args.frag_mean,
-                frag_std=args.frag_std,
-                frag_min=args.frag_min,
-                frag_max=args.frag_max,
-                read_length=args.read_length,
-                error_rate=args.error_rate,
-                strand_specificity=strand_spec,
-                seed=args.sim_seed,
-            )
-            gdna_cfg = None
-            if gdna_abundance > 0:
-                gdna_cfg = GDNAConfig(
-                    abundance=gdna_abundance,
-                    frag_mean=args.gdna_frag_mean,
-                    frag_std=args.gdna_frag_std,
-                    frag_min=args.gdna_frag_min,
-                    frag_max=args.gdna_frag_max,
+                logger.info(
+                    "  [COND] %s | gDNA=%s (rate=%.3f, abundance=%.2f) | "
+                    "nRNA=%s (rate=%.3f, abundance=%.2f) | strand_spec=%.2f",
+                    region.label,
+                    gdna_label,
+                    gdna_rate,
+                    gdna_abundance,
+                    nrna_label,
+                    nrna_rate,
+                    nrna_total_abundance,
+                    strand_spec,
                 )
 
-            sim_genome = StringGenome(region_seq, region.label)
-            simulator = ReadSimulator(
-                sim_genome, transcripts, config=sim_cfg, gdna_config=gdna_cfg
-            )
-            fastq_dir = cond_dir / "reads"
-            fastq_r1, fastq_r2 = simulator.write_fastq(
-                fastq_dir, args.n_fragments, prefix="sim"
-            )
-            truth_counts, n_gdna_actual = parse_truth_from_fastq(fastq_r1)
+                # Set per-transcript nRNA abundances for this condition.
+                # Mature mRNA abundance is not reduced.
+                for t in transcripts:
+                    t.nrna_abundance = float(t.abundance) * float(nrna_rate)
 
-            # Align (name-sorted for hulkrna)
-            bam_ns = cond_dir / "align" / "reads_namesort.bam"
-            bam_ns.parent.mkdir(parents=True, exist_ok=True)
-            align_minimap2(region_fa, fastq_r1, fastq_r2, bam_ns, bed_path=bed_path)
+                # Simulate reads
+                sim_cfg = SimConfig(
+                    frag_mean=args.frag_mean,
+                    frag_std=args.frag_std,
+                    frag_min=args.frag_min,
+                    frag_max=args.frag_max,
+                    read_length=args.read_length,
+                    error_rate=args.error_rate,
+                    strand_specificity=strand_spec,
+                    seed=args.sim_seed,
+                )
+                gdna_cfg = None
+                if gdna_abundance > 0:
+                    gdna_cfg = GDNAConfig(
+                        abundance=gdna_abundance,
+                        frag_mean=args.gdna_frag_mean,
+                        frag_std=args.gdna_frag_std,
+                        frag_min=args.gdna_frag_min,
+                        frag_max=args.gdna_frag_max,
+                    )
+
+                sim_genome = StringGenome(region_seq, region.label)
+                simulator = ReadSimulator(
+                    sim_genome, transcripts, config=sim_cfg, gdna_config=gdna_cfg
+                )
+                fastq_dir = cond_dir / "reads"
+                fastq_r1, fastq_r2 = simulator.write_fastq(
+                    fastq_dir, args.n_fragments, prefix="sim"
+                )
+                truth_counts, n_gdna_actual = parse_truth_from_fastq(fastq_r1)
+
+                # Align (name-sorted for hulkrna)
+                bam_ns = cond_dir / "align" / "reads_namesort.bam"
+                bam_ns.parent.mkdir(parents=True, exist_ok=True)
+                if args.aligner == "minimap2":
+                    align_minimap2(region_fa, fastq_r1, fastq_r2, bam_ns, bed_path=bed_path)
+                elif args.aligner == "hisat2":
+                    align_hisat2(
+                        region_fa,
+                        fastq_r1,
+                        fastq_r2,
+                        bam_ns,
+                        threads=args.threads,
+                        hisat2_exe=args.hisat2_exe,
+                        hisat2_build_exe=args.hisat2_build_exe,
+                        hisat2_index_dir=hisat2_index_dir,
+                        splice_sites_file=hisat2_ss_file,
+                        exons_file=hisat2_exon_file,
+                    )
+                else:
+                    raise RuntimeError(f"Unsupported aligner: {args.aligner}")
 
             # ── Run transcript-level tools ──────────────────────────
 
-            hulkrna_counts, hulkrna_elapsed = run_hulkrna_tool(
-                bam_ns, index, include_multimap=False, args=args
-            )
-            hulkrna_mm_counts, hulkrna_mm_elapsed = run_hulkrna_tool(
-                bam_ns, index, include_multimap=True, args=args
-            )
-            salmon_counts, salmon_elapsed = run_salmon(
-                transcript_fa,
-                fastq_r1,
-                fastq_r2,
-                cond_dir / "salmon",
-                threads=args.threads,
-            )
-            kallisto_counts, kallisto_elapsed = run_kallisto(
-                transcript_fa,
-                fastq_r1,
-                fastq_r2,
-                cond_dir / "kallisto",
-                threads=args.threads,
-                strand_specificity=strand_spec,
-            )
+                hulkrna_mm_counts, hulkrna_mm_elapsed, hulkrna_mm_pool_counts = run_hulkrna_tool(
+                    bam_ns, index, args=args
+                )
+                salmon_counts, salmon_elapsed = run_salmon(
+                    transcript_fa,
+                    fastq_r1,
+                    fastq_r2,
+                    cond_dir / "salmon",
+                    threads=args.threads,
+                )
+                kallisto_counts, kallisto_elapsed = run_kallisto(
+                    transcript_fa,
+                    fastq_r1,
+                    fastq_r2,
+                    cond_dir / "kallisto",
+                    threads=args.threads,
+                    strand_specificity=strand_spec,
+                )
 
-            tx_tool_counts = {
-                "hulkrna": (hulkrna_counts, hulkrna_elapsed),
-                "hulkrna_mm": (hulkrna_mm_counts, hulkrna_mm_elapsed),
-                "salmon": (salmon_counts, salmon_elapsed),
-                "kallisto": (kallisto_counts, kallisto_elapsed),
-            }
+                tx_tool_counts = {
+                    "hulkrna_mm": (hulkrna_mm_counts, hulkrna_mm_elapsed),
+                    "salmon": (salmon_counts, salmon_elapsed),
+                    "kallisto": (kallisto_counts, kallisto_elapsed),
+                }
+
+                pool_truth = compute_truth_pool_counts(truth_counts, n_gdna_actual)
+                tool_pool_counts = {
+                    "hulkrna_mm": hulkrna_mm_pool_counts,
+                    "salmon": {
+                        "mature_rna": float(sum(salmon_counts.values())),
+                        "nascent_rna": 0.0,
+                        "genomic_dna": 0.0,
+                        "rna": float(sum(salmon_counts.values())),
+                        "dna": 0.0,
+                    },
+                    "kallisto": {
+                        "mature_rna": float(sum(kallisto_counts.values())),
+                        "nascent_rna": 0.0,
+                        "genomic_dna": 0.0,
+                        "rna": float(sum(kallisto_counts.values())),
+                        "dna": 0.0,
+                    },
+                }
+                pool_metrics: list[dict] = []
+                for tool_name, observed_pools in tool_pool_counts.items():
+                    pool_metrics.extend(
+                        compute_pool_metric_rows(tool_name, pool_truth, observed_pools)
+                    )
 
             # ── Run htseq (gene-level only) ─────────────────────────
 
-            htseq_gene_counts: dict[str, int] = {}
-            htseq_elapsed = 0.0
-            if include_htseq:
-                bam_cs = cond_dir / "align" / "reads_coordsort.bam"
-                coord_sort_bam(bam_ns, bam_cs)
-                htseq_gene_counts, htseq_elapsed = run_htseq(
-                    bam_cs,
-                    region_gtf,
-                    cond_dir / "htseq",
-                    strand_specificity=strand_spec,
-                    conda_env=htseq_conda_env,
-                )
+                htseq_gene_counts: dict[str, int] = {}
+                htseq_elapsed = 0.0
+                if include_htseq:
+                    bam_cs = cond_dir / "align" / "reads_coordsort.bam"
+                    coord_sort_bam(bam_ns, bam_cs)
+                    htseq_gene_counts, htseq_elapsed = run_htseq(
+                        bam_cs,
+                        region_gtf,
+                        cond_dir / "htseq",
+                        strand_specificity=strand_spec,
+                        conda_env=htseq_conda_env,
+                    )
 
             # ── Score transcript-level ──────────────────────────────
 
-            transcript_metrics = {}
-            for tool, (counts, elapsed) in tx_tool_counts.items():
-                transcript_metrics[tool] = asdict(
-                    score_tool(tool, truth_counts, counts, elapsed)
-                )
+                # Use mature-only truth for per-transcript metrics.
+                # nRNA truth entries (nrna_ENST...) are evaluated
+                # exclusively via pool-level metrics.
+                # Include ALL annotated transcripts so that false
+                # positives on truth=0 transcripts are captured.
+                mature_truth_counts = {
+                    tid: 0 for tid in gene_map
+                }
+                mature_truth_counts.update({
+                    tid: count
+                    for tid, count in truth_counts.items()
+                    if not str(tid).startswith("nrna_")
+                })
+
+                transcript_metrics = {}
+                for tool, (counts, elapsed) in tx_tool_counts.items():
+                    transcript_metrics[tool] = asdict(
+                        score_tool(tool, mature_truth_counts, counts, elapsed)
+                    )
 
             # ── Score gene-level ────────────────────────────────────
 
-            truth_gene = aggregate_to_genes(truth_counts, gene_map)
-            gene_metrics = {}
-            for tool, (counts, elapsed) in tx_tool_counts.items():
-                gene_counts = aggregate_to_genes(counts, gene_map)
-                gene_metrics[tool] = asdict(
-                    score_tool(tool, truth_gene, gene_counts, elapsed)
-                )
-            if include_htseq:
-                gene_metrics["htseq"] = asdict(
-                    score_tool("htseq", truth_gene, htseq_gene_counts, htseq_elapsed)
-                )
+                truth_gene = aggregate_to_genes(mature_truth_counts, gene_map)
+                # Ensure all annotated genes appear in truth_gene
+                for gid in gene_abundance:
+                    truth_gene.setdefault(gid, 0)
+                gene_metrics = {}
+                for tool, (counts, elapsed) in tx_tool_counts.items():
+                    gene_counts = aggregate_to_genes(counts, gene_map)
+                    gene_metrics[tool] = asdict(
+                        score_tool(tool, truth_gene, gene_counts, elapsed)
+                    )
+                if include_htseq:
+                    gene_metrics["htseq"] = asdict(
+                        score_tool("htseq", truth_gene, htseq_gene_counts, htseq_elapsed)
+                    )
 
             # ── Write per-transcript CSV ────────────────────────────
 
-            per_tx_csv = cond_dir / "per_transcript_counts.csv"
-            tids = sorted(truth_counts)
-            with open(per_tx_csv, "w", newline="") as f:
-                writer = csv.writer(f)
-                header = [
-                    "transcript_id",
-                    "gene_id",
-                    "truth",
-                    "hulkrna",
-                    "hulkrna_mm",
-                    "salmon",
-                    "kallisto",
-                    "abundance",
-                ]
-                writer.writerow(header)
-                for tid in tids:
-                    writer.writerow([
-                        tid,
-                        gene_map.get(tid, ""),
-                        int(truth_counts.get(tid, 0)),
-                        float(hulkrna_counts.get(tid, 0.0)),
-                        float(hulkrna_mm_counts.get(tid, 0.0)),
-                        float(salmon_counts.get(tid, 0.0)),
-                        float(kallisto_counts.get(tid, 0.0)),
-                        float(abundance_map.get(tid, 0.0)),
-                    ])
+                per_tx_csv = cond_dir / "per_transcript_counts.csv"
+                tids = sorted(mature_truth_counts)
+                with open(per_tx_csv, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    header = [
+                        "transcript_id",
+                        "gene_id",
+                        "truth",
+                        "hulkrna_mm",
+                        "salmon",
+                        "kallisto",
+                        "abundance",
+                        "nrna_abundance",
+                    ]
+                    writer.writerow(header)
+                    for tid in tids:
+                        writer.writerow([
+                            tid,
+                            gene_map.get(tid, ""),
+                            int(truth_counts.get(tid, 0)),
+                            float(hulkrna_mm_counts.get(tid, 0.0)),
+                            float(salmon_counts.get(tid, 0.0)),
+                            float(kallisto_counts.get(tid, 0.0)),
+                            float(abundance_map.get(tid, 0.0)),
+                            float(abundance_map.get(tid, 0.0) * nrna_rate),
+                        ])
 
             # ── Write per-gene CSV ──────────────────────────────────
 
-            per_gene_csv = cond_dir / "per_gene_counts.csv"
-            gene_ids = sorted(truth_gene)
-            with open(per_gene_csv, "w", newline="") as f:
-                writer = csv.writer(f)
-                header = [
-                    "gene_id",
-                    "truth",
-                    "hulkrna",
-                    "hulkrna_mm",
-                    "salmon",
-                    "kallisto",
-                ]
-                if include_htseq:
-                    header.append("htseq")
-                header.append("abundance")
-                writer.writerow(header)
-                for gid in gene_ids:
-                    row = [
-                        gid,
-                        int(truth_gene.get(gid, 0)),
-                        float(aggregate_to_genes(hulkrna_counts, gene_map).get(gid, 0.0)),
-                        float(aggregate_to_genes(hulkrna_mm_counts, gene_map).get(gid, 0.0)),
-                        float(aggregate_to_genes(salmon_counts, gene_map).get(gid, 0.0)),
-                        float(aggregate_to_genes(kallisto_counts, gene_map).get(gid, 0.0)),
+                per_gene_csv = cond_dir / "per_gene_counts.csv"
+                gene_ids = sorted(truth_gene)
+                hulkrna_mm_gene_counts = aggregate_to_genes(hulkrna_mm_counts, gene_map)
+                salmon_gene_counts = aggregate_to_genes(salmon_counts, gene_map)
+                kallisto_gene_counts = aggregate_to_genes(kallisto_counts, gene_map)
+                with open(per_gene_csv, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    header = [
+                        "gene_id",
+                        "truth",
+                        "hulkrna_mm",
+                        "salmon",
+                        "kallisto",
                     ]
                     if include_htseq:
-                        row.append(int(htseq_gene_counts.get(gid, 0)))
-                    row.append(float(gene_abundance.get(gid, 0.0)))
-                    writer.writerow(row)
+                        header.append("htseq")
+                    header.extend(["abundance", "nrna_abundance"])
+                    writer.writerow(header)
+                    for gid in gene_ids:
+                        row = [
+                            gid,
+                            int(truth_gene.get(gid, 0)),
+                            float(hulkrna_mm_gene_counts.get(gid, 0.0)),
+                            float(salmon_gene_counts.get(gid, 0.0)),
+                            float(kallisto_gene_counts.get(gid, 0.0)),
+                        ]
+                        if include_htseq:
+                            row.append(int(htseq_gene_counts.get(gid, 0)))
+                        row.extend([
+                            float(gene_abundance.get(gid, 0.0)),
+                            float(gene_abundance.get(gid, 0.0) * nrna_rate),
+                        ])
+                        writer.writerow(row)
 
-            results.append(
-                ConditionResult(
-                    region=region.label,
-                    n_transcripts=n_transcripts,
-                    n_genes=n_genes,
-                    n_fragments=args.n_fragments,
-                    n_gdna_actual=n_gdna_actual,
-                    gdna_label=gdna_label,
-                    gdna_abundance=round(gdna_abundance, 4),
-                    strand_specificity=strand_spec,
-                    transcript_metrics=transcript_metrics,
-                    gene_metrics=gene_metrics,
+                per_pool_csv = cond_dir / "per_pool_counts.csv"
+                with open(per_pool_csv, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        "tool",
+                        "pool",
+                        "truth",
+                        "observed",
+                        "signed_error",
+                        "abs_error",
+                    ])
+                    for row in pool_metrics:
+                        writer.writerow([
+                            row["tool"],
+                            row["pool"],
+                            row["truth"],
+                            row["observed"],
+                            row["signed_error"],
+                            row["abs_error"],
+                        ])
+
+                results.append(
+                    ConditionResult(
+                        region=region.label,
+                        n_transcripts=n_transcripts,
+                        n_genes=n_genes,
+                        n_fragments=args.n_fragments,
+                        n_gdna_actual=n_gdna_actual,
+                        gdna_label=gdna_label,
+                        gdna_rate=round(gdna_rate, 6),
+                        gdna_abundance=round(gdna_abundance, 4),
+                        nrna_label=nrna_label,
+                        nrna_rate=round(nrna_rate, 6),
+                        nrna_abundance=round(nrna_total_abundance, 4),
+                        strand_specificity=strand_spec,
+                        aligner=args.aligner,
+                        transcript_metrics=transcript_metrics,
+                        gene_metrics=gene_metrics,
+                        pool_metrics=pool_metrics,
+                    )
                 )
-            )
 
-            logger.info(
-                "    hulkrna MAE=%.2f | hulkrna_mm MAE=%.2f | "
-                "salmon MAE=%.2f | kallisto MAE=%.2f%s",
-                transcript_metrics["hulkrna"]["mean_abs_error"],
-                transcript_metrics["hulkrna_mm"]["mean_abs_error"],
-                transcript_metrics["salmon"]["mean_abs_error"],
-                transcript_metrics["kallisto"]["mean_abs_error"],
-                f" | htseq gene-MAE={gene_metrics['htseq']['mean_abs_error']:.2f}"
-                if include_htseq
-                else "",
-            )
+                logger.info(
+                    "    aligner=%s | hulkrna_mm MAE=%.2f | "
+                    "salmon MAE=%.2f | kallisto MAE=%.2f%s",
+                    args.aligner,
+                    transcript_metrics["hulkrna_mm"]["mean_abs_error"],
+                    transcript_metrics["salmon"]["mean_abs_error"],
+                    transcript_metrics["kallisto"]["mean_abs_error"],
+                    f" | htseq gene-MAE={gene_metrics['htseq']['mean_abs_error']:.2f}"
+                    if include_htseq
+                    else "",
+                )
 
     return results
 
@@ -1140,12 +1462,17 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
         writer = csv.writer(f)
         writer.writerow([
             "region",
+            "aligner",
             "n_transcripts",
             "n_genes",
             "n_fragments",
             "n_gdna_actual",
             "gdna_label",
+            "gdna_rate",
             "gdna_abundance",
+            "nrna_label",
+            "nrna_rate",
+            "nrna_abundance",
             "strand_specificity",
             "level",
             "tool",
@@ -1155,16 +1482,25 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
             "rmse",
             "pearson",
             "spearman",
+            "pool",
+            "truth",
+            "observed",
+            "signed_error",
         ])
         for r in results:
             base = [
                 r.region,
+                r.aligner,
                 r.n_transcripts,
                 r.n_genes,
                 r.n_fragments,
                 r.n_gdna_actual,
                 r.gdna_label,
+                r.gdna_rate,
                 r.gdna_abundance,
+                r.nrna_label,
+                r.nrna_rate,
+                r.nrna_abundance,
                 r.strand_specificity,
             ]
             for tool, tm in r.transcript_metrics.items():
@@ -1179,6 +1515,10 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
                         tm["rmse"],
                         tm["pearson"],
                         tm["spearman"],
+                        "",
+                        "",
+                        "",
+                        "",
                     ]
                 )
             for tool, tm in r.gene_metrics.items():
@@ -1193,6 +1533,28 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
                         tm["rmse"],
                         tm["pearson"],
                         tm["spearman"],
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+            for pm in r.pool_metrics:
+                writer.writerow(
+                    base
+                    + [
+                        "pool",
+                        pm["tool"],
+                        "",
+                        pm["abs_error"],
+                        pm["abs_error"],
+                        "",
+                        "",
+                        "",
+                        pm["pool"],
+                        pm["truth"],
+                        pm["observed"],
+                        pm["signed_error"],
                     ]
                 )
 
@@ -1206,8 +1568,8 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
         "",
         "## Transcript-Level Metrics",
         "",
-        "| Region | gDNA | SS | Tool | MAE | RMSE | Pearson | Spearman | Time (s) |",
-        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Region | Aligner | gDNA | SS | Tool | MAE | RMSE | Pearson | Spearman | Time (s) |",
+        "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in results:
         for tool in tx_tools:
@@ -1215,7 +1577,7 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
             if tm is None:
                 continue
             lines.append(
-                f"| {r.region} | {r.gdna_label} | {r.strand_specificity:.2f} | "
+                f"| {r.region} | {r.aligner} | {r.gdna_label} | {r.strand_specificity:.2f} | "
                 f"{tm['tool']} | {tm['mean_abs_error']:.2f} | {tm['rmse']:.2f} | "
                 f"{tm['pearson']:.4f} | {tm['spearman']:.4f} | {tm['elapsed_sec']:.2f} |"
             )
@@ -1224,8 +1586,8 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
         "",
         "## Gene-Level Metrics",
         "",
-        "| Region | gDNA | SS | Tool | MAE | RMSE | Pearson | Spearman | Time (s) |",
-        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Region | Aligner | gDNA | SS | Tool | MAE | RMSE | Pearson | Spearman | Time (s) |",
+        "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
     ])
     for r in results:
         for tool in gene_tools:
@@ -1233,7 +1595,7 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
             if tm is None:
                 continue
             lines.append(
-                f"| {r.region} | {r.gdna_label} | {r.strand_specificity:.2f} | "
+                f"| {r.region} | {r.aligner} | {r.gdna_label} | {r.strand_specificity:.2f} | "
                 f"{tm['tool']} | {tm['mean_abs_error']:.2f} | {tm['rmse']:.2f} | "
                 f"{tm['pearson']:.4f} | {tm['spearman']:.4f} | {tm['elapsed_sec']:.2f} |"
             )
@@ -1299,7 +1661,7 @@ def write_diagnostics(
         header = "| gDNA Level | " + " | ".join(tx_tools) + " |"
         sep = "| --- | " + " | ".join(["---:"] * len(tx_tools)) + " |"
         lines.extend([header, sep])
-        for gdna_label in DEFAULT_GDNA_LEVELS:
+        for gdna_label in sorted(df["gdna_label"].unique()):
             sub = df[df["gdna_label"] == gdna_label]
             if len(sub) == 0:
                 continue
@@ -1332,7 +1694,7 @@ def write_diagnostics(
 
     per_tx_parts: list[pd.DataFrame] = []
     for r in results:
-        cond_name = condition_dir_name(r.gdna_label, r.strand_specificity)
+        cond_name = condition_dir_name(r.gdna_label, r.nrna_label, r.strand_specificity)
         f = out_root / r.region / cond_name / "per_transcript_counts.csv"
         if f.exists():
             part = pd.read_csv(f)
@@ -1383,6 +1745,36 @@ def write_diagnostics(
                 )
                 lines.append(f"| {tool} | {rate:.4f} |")
 
+    pool_rows = []
+    for r in results:
+        for pm in r.pool_metrics:
+            pool_rows.append({
+                "region": r.region,
+                "gdna_label": r.gdna_label,
+                "nrna_label": r.nrna_label,
+                "strand_specificity": r.strand_specificity,
+                "tool": pm["tool"],
+                "pool": pm["pool"],
+                "abs_error": pm["abs_error"],
+                "signed_error": pm["signed_error"],
+            })
+    pool_df = pd.DataFrame(pool_rows)
+    if len(pool_df):
+        lines.extend([
+            "",
+            "## Pool-level absolute error (mature_rna, nascent_rna, genomic_dna, rna, dna)",
+            "",
+            "| Pool | hulkrna_mm | salmon | kallisto |",
+            "| --- | ---: | ---: | ---: |",
+        ])
+        for pool in ["mature_rna", "nascent_rna", "genomic_dna", "rna", "dna"]:
+            sub = pool_df[pool_df["pool"] == pool]
+            vals = []
+            for tool in tx_tools:
+                tsub = sub[sub["tool"] == tool]
+                vals.append(f"{tsub['abs_error'].mean():.3f}" if len(tsub) else "—")
+            lines.append(f"| {pool} | " + " | ".join(vals) + " |")
+
     out = out_root / "diagnostics.md"
     with open(out, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -1396,9 +1788,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Regional benchmark: hulkrna vs salmon vs kallisto vs htseq",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--genome", type=Path, required=True, help="Genome FASTA path")
+    p.add_argument("--genome", type=Path, required=False, default=None, help="Genome FASTA path")
     p.add_argument(
-        "--gtf", type=Path, required=True, help="Gene annotation GTF/GTF.GZ path"
+        "--gtf", type=Path, required=False, default=None, help="Gene annotation GTF/GTF.GZ path"
     )
     p.add_argument(
         "--region",
@@ -1412,10 +1804,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="TSV: chrom<TAB>start1<TAB>end1<TAB>optional_label",
     )
-    p.add_argument("--outdir", type=Path, required=True, help="Output directory")
+    p.add_argument("--outdir", type=Path, required=False, default=None, help="Output directory")
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="YAML configuration file (CLI flags override config values)",
+    )
 
     p.add_argument("--n-fragments", type=int, default=20000)
     p.add_argument("--threads", type=int, default=1)
+
+    p.add_argument(
+        "--aligner",
+        type=str,
+        choices=["minimap2", "hisat2"],
+        default="minimap2",
+        help="Genome aligner for hulkrna/htseq inputs",
+    )
+    p.add_argument(
+        "--hisat2-exe",
+        type=str,
+        default="hisat2",
+        help="HISAT2 executable name/path (used with --aligner hisat2)",
+    )
+    p.add_argument(
+        "--hisat2-build-exe",
+        type=str,
+        default="hisat2-build",
+        help="hisat2-build executable name/path (used with --aligner hisat2)",
+    )
 
     p.add_argument("--sim-seed", type=int, default=42)
     p.add_argument("--pipeline-seed", type=int, default=42)
@@ -1430,10 +1848,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # gDNA contamination parameters
     p.add_argument(
+        "--gdna-rates",
+        type=str,
+        default=",".join(str(x) for x in DEFAULT_GDNA_RATES),
+        help="Comma-separated total gDNA rates in [0,1]; abundance is sum(tx_abundance)*rate",
+    )
+    p.add_argument(
+        "--gdna-rate-labels",
+        type=str,
+        default="",
+        help="Optional comma-separated labels matching --gdna-rates (same length)",
+    )
+    p.add_argument(
+        "--nrna-rates",
+        type=str,
+        default=",".join(str(x) for x in DEFAULT_NRNA_RATES),
+        help="Comma-separated total nRNA rates in [0,1]; per transcript nRNA = abundance*rate",
+    )
+    p.add_argument(
+        "--nrna-rate-labels",
+        type=str,
+        default="",
+        help="Optional comma-separated labels matching --nrna-rates (same length)",
+    )
+    p.add_argument(
         "--gdna-levels",
         type=str,
-        default="none,low,moderate,high",
-        help="Comma-separated gDNA levels: none,low,moderate,high (default: all four)",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     p.add_argument("--gdna-frag-mean", type=float, default=350.0)
     p.add_argument("--gdna-frag-std", type=float, default=100.0)
@@ -1467,9 +1909,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # HTSeq
     p.add_argument(
-        "--include-htseq",
+        "--no-htseq",
         action="store_true",
-        help="Include htseq-count (gene-level) in the benchmark",
+        help="Disable htseq-count (enabled by default)",
     )
     p.add_argument(
         "--htseq-conda-env",
@@ -1499,8 +1941,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def ensure_tools(include_htseq: bool = False, htseq_conda_env: str = "htseq") -> None:
-    required = ["minimap2", "samtools", "salmon", "kallisto"]
+def ensure_tools(
+    *,
+    aligner: str,
+    hisat2_exe: str,
+    hisat2_build_exe: str,
+    include_htseq: bool = True,
+    htseq_conda_env: str = "htseq",
+) -> None:
+    required = ["samtools", "salmon", "kallisto"]
+    if aligner == "minimap2":
+        required.append("minimap2")
+    elif aligner == "hisat2":
+        required.extend([hisat2_exe, hisat2_build_exe])
     missing = [tool for tool in required if shutil.which(tool) is None]
     if missing:
         raise RuntimeError(f"Missing required tools in PATH: {', '.join(missing)}")
@@ -1521,35 +1974,202 @@ def ensure_tools(include_htseq: bool = False, htseq_conda_env: str = "htseq") ->
             ) from e
 
 
+def _flatten_config_dict(d: dict, prefix: str = "") -> dict:
+    out: dict = {}
+    for key, value in d.items():
+        joined = f"{prefix}_{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            out.update(_flatten_config_dict(value, joined))
+        else:
+            out[joined] = value
+    return out
+
+
+def _cli_dest_overrides(argv: list[str]) -> set[str]:
+    dests: set[str] = set()
+    for tok in argv:
+        if not tok.startswith("--"):
+            continue
+        flag = tok[2:].split("=", 1)[0]
+        dests.add(flag.replace("-", "_"))
+    return dests
+
+
+def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Namespace:
+    if args.config is None:
+        return args
+    if yaml is None:
+        raise RuntimeError(
+            "YAML config requested but PyYAML is not installed. Install with `pip install pyyaml`."
+        )
+    with open(args.config) as fh:
+        cfg_raw = yaml.safe_load(fh) or {}
+    if not isinstance(cfg_raw, dict):
+        raise ValueError("YAML config root must be a mapping/object")
+
+    cfg = _flatten_config_dict(cfg_raw)
+    cli_overrides = _cli_dest_overrides(argv)
+
+    # aliases for nested config sections
+    alias_map = {
+        "simulation_n_fragments": "n_fragments",
+        "simulation_sim_seed": "sim_seed",
+        "simulation_pipeline_seed": "pipeline_seed",
+        "simulation_frag_mean": "frag_mean",
+        "simulation_frag_std": "frag_std",
+        "simulation_frag_min": "frag_min",
+        "simulation_frag_max": "frag_max",
+        "simulation_read_length": "read_length",
+        "simulation_error_rate": "error_rate",
+        "gdna_rates": "gdna_rates",
+        "gdna_rate_labels": "gdna_rate_labels",
+        "nrna_rates": "nrna_rates",
+        "nrna_rate_labels": "nrna_rate_labels",
+        "gdna_frag_mean": "gdna_frag_mean",
+        "gdna_frag_std": "gdna_frag_std",
+        "gdna_frag_min": "gdna_frag_min",
+        "gdna_frag_max": "gdna_frag_max",
+        "abundance_mode": "abundance_mode",
+        "abundance_seed": "abundance_seed",
+        "abundance_min": "abundance_min",
+        "abundance_max": "abundance_max",
+        "htseq_enabled": "no_htseq",
+        "htseq_conda_env": "htseq_conda_env",
+        "runtime_keep_going": "keep_going",
+    }
+
+    for raw_key, value in cfg.items():
+        dest = raw_key.replace("-", "_")
+        dest = alias_map.get(dest, dest)
+        if not hasattr(args, dest):
+            continue
+        if dest in cli_overrides:
+            continue
+        if dest in {"genome", "gtf", "outdir", "region_file", "abundance_file", "config"} and isinstance(value, str):
+            setattr(args, dest, Path(value))
+            continue
+        if dest == "region" and isinstance(value, str):
+            setattr(args, dest, [value])
+            continue
+        if dest == "region" and isinstance(value, list):
+            setattr(args, dest, [str(x) for x in value])
+            continue
+        if dest in {"gdna_rates", "gdna_rate_labels", "nrna_rates", "nrna_rate_labels", "strand_specificities"} and isinstance(value, list):
+            setattr(args, dest, ",".join(str(x) for x in value))
+            continue
+        if dest == "no_htseq" and raw_key.replace("-", "_") == "htseq_enabled":
+            setattr(args, dest, not bool(value))
+            continue
+        setattr(args, dest, value)
+    return args
+
+
 def main() -> int:
     parser = build_arg_parser()
-    args = parser.parse_args()
+    parser.add_argument(
+        "--include-htseq",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    argv = sys.argv[1:]
+    args = parser.parse_args(argv)
+    args = apply_yaml_config(args, argv)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    include_htseq = args.include_htseq
+    if args.genome is None:
+        raise ValueError("--genome is required (or set genome in --config)")
+    if args.gtf is None:
+        raise ValueError("--gtf is required (or set gtf in --config)")
+    if args.outdir is None:
+        raise ValueError("--outdir is required (or set outdir in --config)")
+
+    include_htseq = not args.no_htseq
+    if getattr(args, "include_htseq", False):
+        include_htseq = True
     htseq_conda_env = args.htseq_conda_env
 
-    ensure_tools(include_htseq=include_htseq, htseq_conda_env=htseq_conda_env)
+    ensure_tools(
+        aligner=args.aligner,
+        hisat2_exe=args.hisat2_exe,
+        hisat2_build_exe=args.hisat2_build_exe,
+        include_htseq=include_htseq,
+        htseq_conda_env=htseq_conda_env,
+    )
 
     if args.abundance_mode == "file" and args.abundance_file is None:
         raise ValueError("--abundance-file is required when --abundance-mode=file")
 
+    if args.gdna_levels:
+        legacy_rate_map = {
+            "none": 0.0,
+            "low": 0.1,
+            "moderate": 0.25,
+            "high": 0.5,
+        }
+        tokens = [t.strip() for t in str(args.gdna_levels).split(",") if t.strip()]
+        if tokens:
+            mapped: list[float] = []
+            for token in tokens:
+                if token not in legacy_rate_map:
+                    raise ValueError(
+                        f"Unsupported --gdna-levels token '{token}'. Use --gdna-rates instead."
+                    )
+                mapped.append(legacy_rate_map[token])
+            args.gdna_rates = ",".join(str(x) for x in mapped)
+            if not args.gdna_rate_labels:
+                args.gdna_rate_labels = ",".join(tokens)
+            logger.warning("--gdna-levels is deprecated; use --gdna-rates")
+
     regions = parse_regions(args)
 
-    # Parse gDNA levels and strand specificities from CLI
-    gdna_level_names = tuple(args.gdna_levels.split(","))
-    strand_specificities = tuple(float(s) for s in args.strand_specificities.split(","))
+    # Parse gDNA rates and strand specificities from CLI/config
+    gdna_rates = tuple(
+        float(x.strip())
+        for x in str(args.gdna_rates).split(",")
+        if x.strip()
+    )
+    if not gdna_rates:
+        raise ValueError("At least one gDNA rate is required")
+    gdna_rate_labels = tuple(
+        x.strip()
+        for x in str(args.gdna_rate_labels).split(",")
+        if x.strip()
+    )
+    if gdna_rate_labels and len(gdna_rate_labels) != len(gdna_rates):
+        raise ValueError("--gdna-rate-labels must have the same number of entries as --gdna-rates")
+
+    nrna_rates = tuple(
+        float(x.strip())
+        for x in str(args.nrna_rates).split(",")
+        if x.strip()
+    )
+    if not nrna_rates:
+        raise ValueError("At least one nRNA rate is required")
+    nrna_rate_labels = tuple(
+        x.strip()
+        for x in str(args.nrna_rate_labels).split(",")
+        if x.strip()
+    )
+    if nrna_rate_labels and len(nrna_rate_labels) != len(nrna_rates):
+        raise ValueError("--nrna-rate-labels must have the same number of entries as --nrna-rates")
+
+    strand_specificities = tuple(
+        float(s.strip())
+        for s in str(args.strand_specificities).split(",")
+        if s.strip()
+    )
 
     logger.info(
-        "Benchmark grid: %d gDNA levels × %d strand specs × %d regions = %d conditions",
-        len(gdna_level_names),
+        "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs × %d regions = %d conditions",
+        len(gdna_rates),
+        len(nrna_rates),
         len(strand_specificities),
         len(regions),
-        len(gdna_level_names) * len(strand_specificities) * len(regions),
+        len(gdna_rates) * len(nrna_rates) * len(strand_specificities) * len(regions),
     )
 
     args.outdir.mkdir(parents=True, exist_ok=True)
@@ -1592,11 +2212,25 @@ def main() -> int:
                 max_abund=args.abundance_max,
                 abundance_file=args.abundance_file,
             )
-            gdna_levels = compute_gdna_levels(transcripts_pre, gdna_level_names)
+            gdna_levels = compute_gdna_levels(
+                transcripts_pre,
+                gdna_rates,
+                gdna_rate_labels if gdna_rate_labels else None,
+            )
+            nrna_levels = compute_nrna_levels(
+                transcripts_pre,
+                nrna_rates,
+                nrna_rate_labels if nrna_rate_labels else None,
+            )
             logger.info(
                 "  gDNA levels for %s: %s",
                 region.label,
-                {k: f"{v:.2f}" for k, v in gdna_levels.items()},
+                {k: f"rate={v[0]:.3f}, abundance={v[1]:.2f}" for k, v in gdna_levels.items()},
+            )
+            logger.info(
+                "  nRNA levels for %s: %s",
+                region.label,
+                {k: f"rate={v[0]:.3f}, abundance={v[1]:.2f}" for k, v in nrna_levels.items()},
             )
 
             region_results = run_region_benchmark(
@@ -1604,6 +2238,7 @@ def main() -> int:
                 args,
                 args.outdir,
                 gdna_levels=gdna_levels,
+                nrna_levels=nrna_levels,
                 strand_specificities=strand_specificities,
                 include_htseq=include_htseq,
                 htseq_conda_env=htseq_conda_env,

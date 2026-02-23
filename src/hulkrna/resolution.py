@@ -1,9 +1,9 @@
 """
-hulkrna.resolution — Fragment resolution and insert-size computation.
+hulkrna.resolution — Fragment resolution and fragment-length computation.
 
 Resolves aligned fragments to their compatible transcript/gene sets
 by querying the reference index and applying progressive set merging.
-Also computes insert sizes with gap correction.
+Also computes fragment lengths with gap correction.
 
 This module contains:
 - ``merge_sets_with_criteria()`` — progressive set merging
@@ -11,8 +11,8 @@ This module contains:
   (exon_frac, genic_frac) for 3-pool scoring
 - ``resolve_fragment()`` — core fragment-to-transcript resolution with
   chimera detection (interchromosomal and intrachromosomal)
-- ``compute_insert_size()`` — insert size with gap correction
-- ``fragment_insert_size()`` — simple insert size (no transcript context)
+- ``compute_frag_lengths()`` — per-transcript fragment lengths with gap correction
+- ``compute_genomic_frag_length()`` — simple fragment length (no transcript context)
 - ``ResolvedFragment`` — compact cached resolution result
 """
 
@@ -87,10 +87,54 @@ def merge_sets_with_criteria(
 # Overlap profile computation
 # ---------------------------------------------------------------------------
 
+def _subtract_intervals(
+    interval: tuple[int, int],
+    subtract: list[tuple[int, int]],
+) -> int:
+    """Return the length of *interval* after removing *subtract* regions.
+
+    *subtract* must be sorted by start and non-overlapping (merged).
+    Returns the number of bases in *interval* not covered by any
+    interval in *subtract*.
+    """
+    lo, hi = interval
+    if lo >= hi:
+        return 0
+    remaining = 0
+    cursor = lo
+    for s_lo, s_hi in subtract:
+        if s_lo >= hi:
+            break
+        if s_hi <= cursor:
+            continue
+        # Gap before this subtract region
+        if s_lo > cursor:
+            remaining += min(s_lo, hi) - cursor
+        cursor = max(cursor, s_hi)
+    # Remaining tail after last subtract region
+    if cursor < hi:
+        remaining += hi - cursor
+    return remaining
+
+
+def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Merge a list of (start, end) intervals into non-overlapping sorted list."""
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = [intervals[0]]
+    for lo, hi in intervals[1:]:
+        if lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
 def compute_overlap_profile(
     frag: Fragment,
     index,
-) -> tuple[dict[int, tuple[int, int]], int]:
+) -> tuple[dict[int, tuple[int, int, int]], int]:
     """Compute per-candidate overlap in base pairs for a fragment.
 
     For each fragment exon block, queries the index for overlapping
@@ -98,13 +142,17 @@ def compute_overlap_profile(
     actual base overlap (clipped to block boundaries).  Overlap is
     accumulated per transcript as integer base-pair counts.
 
-    Returns two BP counts per transcript:
+    Returns three BP counts per transcript:
 
     - **n_exon_bp**: bases overlapping reference exons.
       Used by the mRNA pool — high exon overlap indicates mature RNA.
     - **n_intron_bp**: bases overlapping reference introns.
       Used together with exon_bp by the nRNA pool — nascent RNA
       fragments overlap the transcript body (exon + intron).
+    - **n_unambig_intron_bp**: bases overlapping this transcript's
+      introns that do NOT overlap ANY transcript's exons.  Used to
+      seed the nRNA prior — only truly intronic bases (not explainable
+      by any mature transcript) should drive nRNA initialization.
 
     Parameters
     ----------
@@ -115,53 +163,84 @@ def compute_overlap_profile(
 
     Returns
     -------
-    tuple[dict[int, tuple[int, int]], int]
-        ``(overlap_bp, frag_length)`` where overlap_bp maps
-        transcript index → ``(n_exon_bp, n_intron_bp)``.
+    tuple[dict[int, tuple[int, int, int]], int]
+        ``(overlap_bp, read_length)`` where overlap_bp maps
+        transcript index → ``(n_exon_bp, n_intron_bp, n_unambig_intron_bp)``.
         Only transcripts with any genic overlap (EXON or INTRON)
-        are included.  ``frag_length`` is the total fragment exon
+        are included.  ``read_length`` is the total fragment exon
         length in bp.
     """
     if not frag.exons:
         return {}, 0
 
     # Total fragment exon length (sum of exon block sizes)
-    frag_length = sum(e.end - e.start for e in frag.exons)
-    if frag_length <= 0:
+    read_length = sum(e.end - e.start for e in frag.exons)
+    if read_length <= 0:
         return {}, 0
 
     # Accumulate per-transcript overlap in bases
     t_exon_bp: dict[int, int] = defaultdict(int)
     t_intron_bp: dict[int, int] = defaultdict(int)
 
+    # Per-block: collect ALL exon hits (across all transcripts) clipped
+    # to block boundaries, and per-transcript intron hit intervals.
+    # After processing each block we compute unambig_intron_bp by
+    # subtracting the global exon union from each transcript's intron hits.
+    t_unambig_intron_bp: dict[int, int] = defaultdict(int)
+
     for exon_block in frag.exons:
         block_start = exon_block.start
         block_end = exon_block.end
+
+        # Collect all EXON intervals (any transcript) clipped to block
+        global_exon_intervals: list[tuple[int, int]] = []
+        # Per-transcript INTRON intervals clipped to block
+        per_t_intron_intervals: dict[int, list[tuple[int, int]]] = defaultdict(list)
 
         for t_idx, _g_idx, itype, h_start, h_end in index.query_exon_with_coords(exon_block):
             if itype == IntervalType.INTERGENIC:
                 continue
             # Clipped overlap
-            overlap = min(block_end, h_end) - max(block_start, h_start)
-            if overlap > 0:
-                if itype == IntervalType.EXON:
-                    t_exon_bp[t_idx] += overlap
-                else:
-                    # INTRON
-                    t_intron_bp[t_idx] += overlap
+            clipped_lo = max(block_start, h_start)
+            clipped_hi = min(block_end, h_end)
+            if clipped_hi <= clipped_lo:
+                continue
+
+            if itype == IntervalType.EXON:
+                t_exon_bp[t_idx] += clipped_hi - clipped_lo
+                global_exon_intervals.append((clipped_lo, clipped_hi))
+            else:
+                # INTRON
+                t_intron_bp[t_idx] += clipped_hi - clipped_lo
+                per_t_intron_intervals[t_idx].append((clipped_lo, clipped_hi))
+
+        # Compute unambig intron bp for this block:
+        # merge global exon intervals, then subtract from each
+        # transcript's intron intervals.
+        if per_t_intron_intervals:
+            merged_exon = _merge_intervals(global_exon_intervals)
+            for t_idx, intron_ivs in per_t_intron_intervals.items():
+                for iv in intron_ivs:
+                    t_unambig_intron_bp[t_idx] += _subtract_intervals(
+                        iv, merged_exon,
+                    )
 
     # Merge: include all transcripts with any genic overlap
     all_t = set(t_exon_bp) | set(t_intron_bp)
     return {
-        t_idx: (t_exon_bp.get(t_idx, 0), t_intron_bp.get(t_idx, 0))
+        t_idx: (
+            t_exon_bp.get(t_idx, 0),
+            t_intron_bp.get(t_idx, 0),
+            t_unambig_intron_bp.get(t_idx, 0),
+        )
         for t_idx in all_t
-    }, frag_length
+    }, read_length
 
 
 def filter_by_overlap(
     t_inds: frozenset[int],
-    overlap_bp: dict[int, tuple[int, int]],
-    frag_length: int,
+    overlap_bp: dict[int, tuple[int, int, int]],
+    read_length: int,
     *,
     min_frac_of_best: float = 0.9,
 ) -> frozenset[int]:
@@ -179,11 +258,11 @@ def filter_by_overlap(
     ----------
     t_inds : frozenset[int]
         Candidate transcript indices from resolution.
-    overlap_bp : dict[int, tuple[int, int]]
+    overlap_bp : dict[int, tuple[int, int, int]]
         Per-transcript overlap BP from ``compute_overlap_profile``.
-        Each value is ``(n_exon_bp, n_intron_bp)``.  Filtering uses
-        the exon_frac derived from ``n_exon_bp / frag_length``.
-    frag_length : int
+        Each value is ``(n_exon_bp, n_intron_bp, n_unambig_intron_bp)``.
+        Filtering uses the exon_frac derived from ``n_exon_bp / read_length``.
+    read_length : int
         Total fragment exon length in bp, used as denominator.
     min_frac_of_best : float
         Minimum fraction of the best overlap to retain a candidate
@@ -194,14 +273,14 @@ def filter_by_overlap(
     frozenset[int]
         Filtered candidate set (never empty — falls back to original).
     """
-    if not overlap_bp or not t_inds or frag_length <= 0:
+    if not overlap_bp or not t_inds or read_length <= 0:
         return t_inds
 
     # Find the best exon overlap fraction among current candidates
     best = 0.0
     for t_idx in t_inds:
         profile = overlap_bp.get(t_idx)
-        frac = profile[0] / frag_length if profile else 0.0
+        frac = profile[0] / read_length if profile else 0.0
         if frac > best:
             best = frac
 
@@ -211,7 +290,7 @@ def filter_by_overlap(
     threshold = best * min_frac_of_best
     filtered = frozenset(
         t_idx for t_idx in t_inds
-        if (overlap_bp.get(t_idx, (0, 0))[0] / frag_length) >= threshold
+        if (overlap_bp.get(t_idx, (0, 0, 0))[0] / read_length) >= threshold
     )
 
     # Safety: never return empty set
@@ -219,11 +298,11 @@ def filter_by_overlap(
 
 
 # ---------------------------------------------------------------------------
-# Insert size computation
+# Fragment length computation
 # ---------------------------------------------------------------------------
 
-def fragment_insert_size(frag: Fragment) -> int:
-    """Compute insert size as footprint minus observed introns.
+def compute_genomic_frag_length(frag: Fragment) -> int:
+    """Compute fragment length as footprint minus observed introns.
 
     No gap correction (no transcript context).  Used for intergenic
     fragments where there are no compatible transcripts.
@@ -231,7 +310,7 @@ def fragment_insert_size(frag: Fragment) -> int:
     Returns
     -------
     int
-        Insert size in bp, or -1 if the fragment has no exon blocks.
+        Fragment length in bp, or -1 if the fragment has no exon blocks.
     """
     if not frag.exons:
         return -1
@@ -243,26 +322,30 @@ def fragment_insert_size(frag: Fragment) -> int:
     return footprint - observed_intron_total
 
 
-def compute_insert_size(
+def compute_frag_lengths(
     frag: Fragment,
     compatible_t_inds: frozenset[int],
     index,
-) -> int:
-    """Compute insert size with gap correction for compatible transcripts.
+) -> dict[int, int]:
+    """Compute per-transcript SJ-corrected fragment lengths.
 
-    Returns the unambiguous insert size if all compatible transcripts
-    agree, or -1 if they disagree or the fragment is empty.
+    Each compatible transcript may have different annotated introns in
+    the gaps between the fragment's exon blocks, yielding a different
+    fragment length.  Returning a per-transcript dict (rather than a single
+    consensus value) allows the EM to score each mRNA candidate with
+    its own fragment-length probability.
 
     **Algorithm**:
 
     1. Footprint = max(end) - min(start) of fragment exon blocks.
-    2. Subtract observed intron sizes (CIGAR N-ops) -> upper bound.
+    2. Subtract observed intron sizes (CIGAR N-ops) → upper bound.
     3. Identify gaps between consecutive exon blocks that are *not*
        observed introns.
     4. For each compatible transcript, find reference introns fully
-       contained in those gaps -> subtract from upper bound.
-    5. If all transcripts yield the same positive size, return it;
-       otherwise return -1.
+       contained in those gaps → subtract from upper bound.
+    5. Return ``{t_idx: corrected_size}`` for each transcript with
+       a positive corrected size; omit transcripts whose corrected
+       size is ≤ 0 (geometrically impossible).
 
     Parameters
     ----------
@@ -275,11 +358,13 @@ def compute_insert_size(
 
     Returns
     -------
-    int
-        Unambiguous insert size, or -1.
+    dict[int, int]
+        Mapping ``t_idx → SJ-corrected fragment length`` for each
+        transcript with a positive size.  Empty if no exon blocks
+        or no compatible transcripts.
     """
     if not frag.exons or not compatible_t_inds:
-        return -1
+        return {}
 
     ref = frag.exons[0].ref
     sorted_exons = sorted((e.start, e.end) for e in frag.exons)
@@ -303,7 +388,10 @@ def compute_insert_size(
             gaps.append((gap_start, gap_end))
 
     if not gaps:
-        return upper_bound
+        # No unaccounted gaps → all transcripts share the same size
+        if upper_bound > 0:
+            return {t_idx: upper_bound for t_idx in compatible_t_inds}
+        return {}
 
     # Per-transcript gap correction
     t_gap_intron_size: dict[int, int] = {}
@@ -316,16 +404,13 @@ def compute_insert_size(
                     t_gap_intron_size.get(t_idx, 0) + (sj_end - sj_start)
                 )
 
-    # Check if all compatible transcripts agree
-    insert_values: set[int] = set()
+    # Build per-transcript fragment lengths (omit non-positive)
+    result: dict[int, int] = {}
     for t_idx in compatible_t_inds:
         size = upper_bound - t_gap_intron_size.get(t_idx, 0)
         if size > 0:
-            insert_values.add(size)
-
-    if len(insert_values) == 1:
-        return insert_values.pop()
-    return -1
+            result[t_idx] = size
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +544,17 @@ class ResolvedFragment:
         (after R2 flip).
     sj_strand : Strand
         Combined splice-junction strand from XS tags.
-    insert_size : int
-        Computed insert size (-1 if ambiguous or unavailable).
+    frag_lengths : dict[int, int]
+        Per-transcript SJ-corrected fragment lengths.  Maps
+        ``t_idx → corrected_frag_length`` for each compatible
+        transcript with a positive computed size.  Different
+        transcripts may yield different sizes because they have
+        different introns in the gap between exon blocks.  Empty
+        dict when unavailable (e.g. chimeric fragments).
+    genomic_footprint : int
+        Full genomic span from first exon start to last exon end.
+        No intron subtraction — represents the fragment length on
+        an unspliced molecule (nRNA or gDNA).  -1 if unavailable.
     merge_criteria : MergeCriteria
         Which relaxation level produced the transcript sets.
     num_hits : int
@@ -478,11 +572,13 @@ class ResolvedFragment:
     splice_type: SpliceType
     exon_strand: Strand
     sj_strand: Strand
-    insert_size: int
+    frag_lengths: dict[int, int]
+    genomic_footprint: int
     merge_criteria: MergeCriteria
     num_hits: int
-    overlap_bp: dict[int, tuple[int, int]] | None = None
-    frag_length: int = 0
+    overlap_bp: dict[int, tuple[int, int, int]] | None = None
+    read_length: int = 0
+    nm: int = 0
     chimera_type: ChimeraType = ChimeraType.NONE
     chimera_gap: int = -1
 
@@ -728,25 +824,24 @@ def resolve_fragment(
     # in _add_transcript_candidates / _add_nrna_candidates.  The gates
     # use the per-candidate overlap_bp stored in the buffer.  Here we
     # only compute the overlap profile and pass ALL candidates through.
-    overlap_bp, frag_length = compute_overlap_profile(frag, index)
+    overlap_bp, read_length = compute_overlap_profile(frag, index)
     if not overlap_bp:
         # Pure intronic fragments have no exonic overlap; use 0 exon_bp.
-        # intron_bp = frag_length to indicate fully genic.
+        # intron_bp = read_length to indicate fully genic.
+        # unambig_intron_bp = read_length (all intronic, no exonic overlap).
         overlap_bp = {
-            t_idx: (0, frag_length) for t_idx in t_inds
+            t_idx: (0, read_length, read_length) for t_idx in t_inds
         }
 
     # --- Derive n_genes from transcript indices ---
     n_genes = len(set(int(index.t_to_g_arr[t]) for t in t_inds))
 
-    # --- Compute insert size (skip for chimeras — meaningless) ---
+    # --- Compute fragment lengths (skip for chimeras — meaningless) ---
+    # frag_lengths: per-transcript SJ-corrected
     if chimera_type == ChimeraType.NONE:
-        insert_size = compute_insert_size(frag, t_inds, index)
+        frag_lengths = compute_frag_lengths(frag, t_inds, index)
     else:
-        insert_size = -1
-
-    # Compute fragment genomic extent from exon blocks.
-    # For non-chimeric fragments, all exons are on the same ref.
+        frag_lengths = {}
 
     return ResolvedFragment(
         t_inds=t_inds,
@@ -754,11 +849,12 @@ def resolve_fragment(
         splice_type=splice_type,
         exon_strand=exon_strand,
         sj_strand=sj_strand,
-        insert_size=insert_size,
+        frag_lengths=frag_lengths,
+        genomic_footprint=frag.genomic_footprint,
         merge_criteria=merge_result.criteria,
         num_hits=1,  # Caller must set this from the pairs list length
         overlap_bp=overlap_bp,
-        frag_length=frag_length,
+        read_length=read_length,
         chimera_type=chimera_type,
         chimera_gap=chimera_gap,
     )
@@ -781,7 +877,7 @@ def pair_multimapper_reads(
     Instead of blind cross-product pairing (which creates false chimeric
     pairs between paralogs on different chromosomes), each secondary R1
     and R2 location is resolved independently to obtain its compatible
-    transcript set.  Pairs are then formed using a three-tier strategy:
+    transcript set.  Pairs are then formed using a multi-tier strategy:
 
     1. **STRICT** — create all pairs where the R1 and R2 transcript
        sets have a non-empty intersection.  These are the most likely
@@ -800,6 +896,11 @@ def pair_multimapper_reads(
     4. **SINGLETONS** — if only unmatched R1 or only unmatched R2
        locations remain (no cross-pair partner), they become
        singletons.
+
+    No hard distance filter is applied.  Implausible pairs (e.g.
+    artificial "Frankenstein fragments" spanning distant paralogs)
+    receive per-candidate fragment-length penalties in the EM, which
+    naturally drives their posterior weight toward zero.
 
     Parameters
     ----------
@@ -824,6 +925,7 @@ def pair_multimapper_reads(
         return []
 
     # --- Step 1: Resolve each R1 location individually ---
+    # Store (reads, t_inds, ref_id, ref_start)
     r1_resolved: list[tuple[list, frozenset, int, int]] = []
     for r1_reads in sec_r1_locs:
         frag = Fragment.from_reads(r1_reads, [], sj_strand_tag=sj_strand_tag)
@@ -896,10 +998,9 @@ def pair_multimapper_reads(
                 r2_paired.add(j)
 
     # --- Step 5: CROSS-PAIR remaining unmatched R1 × R2 ---
-    # This preserves interchromosomal chimera evidence.  These
-    # pairs enter the EM as ambiguous multimappers and are scored
-    # against real transcript candidates, so false chimeras get
-    # low posterior weight.
+    # Preserves interchromosomal chimera evidence.  These pairs
+    # enter the EM as ambiguous multimappers; implausible ones
+    # receive heavy fragment-length penalties and get near-zero weight.
     final_unmatched_r1 = [i for i in range(len(r1_resolved))
                           if i not in r1_paired]
     final_unmatched_r2 = [j for j in range(len(r2_resolved))
@@ -912,9 +1013,8 @@ def pair_multimapper_reads(
                     list(r1_resolved[i][0]),
                     list(r2_resolved[j][0]),
                 ))
-            r1_paired.add(i)
-        for j in final_unmatched_r2:
-            r2_paired.add(j)
+                r1_paired.add(i)
+                r2_paired.add(j)
 
     # --- Step 6: Remaining singletons (only R1 or only R2 left) ---
     for i in range(len(r1_resolved)):

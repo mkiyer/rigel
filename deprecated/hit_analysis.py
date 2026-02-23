@@ -13,9 +13,9 @@ fragment-to-reference hits, this module streams through those hits to:
    fragments with annotated splice junction matches to infer
    FR/RF/unstranded protocol and strand specificity.
 
-3. **Learn the insert size distribution** — Train an
-   ``InsertSizeModel`` histogram from fragments where all
-   candidate transcripts agree on the same insert size.
+3. **Learn the fragment length distribution** — Train an
+   ``FragmentLengthModel`` histogram from fragments where all
+   candidate transcripts agree on the same fragment length.
 
 Performance opportunities
 -------------------------
@@ -44,7 +44,7 @@ from .core import (
     Strand,
     merge_sets_with_criteria,
 )
-from .insert_model import InsertSizeModel
+from .frag_length_model import FragmentLengthModel
 from .strand_model import StrandModel
 
 logger = logging.getLogger(__name__)
@@ -340,7 +340,7 @@ class HitAnalysisStats:
     n_strand_skipped_multi_gene: int = 0
     n_strand_skipped_ambiguous: int = 0
 
-    # Insert size learning
+    # Fragment length learning
     n_insert_computed: int = 0
     n_insert_unambiguous: int = 0
     n_insert_ambiguous: int = 0
@@ -358,22 +358,22 @@ class HitAnalysisStats:
 def analyze_hits(
     hit_path: Path | str,
     *,
-    insert_size_max: int = 1000,
+    max_frag_length: int = 1000,
     log_every: int = 1_000_000,
-) -> tuple[HitAnalysisStats, StrandModel, InsertSizeModel]:
+) -> tuple[HitAnalysisStats, StrandModel, FragmentLengthModel]:
     """Run Pass 2 hit analysis: resolve fragments and learn models.
 
     Streams through the intermediate Feather file produced by Pass 1,
     resolves each fragment's hits via progressive set merging, and
     feeds qualified observations into a :class:`StrandModel` and an
-    :class:`InsertSizeModel`.
+    :class:`FragmentLengthModel`.
 
-    Insert size training
+    Fragment length training
     --------------------
-    For each fragment, the unique set of ``insert_size`` values (from
-    rows with ``t_index >= 0`` and ``insert_size >= 0``) is examined:
+    For each fragment, the unique set of ``frag_length`` values (from
+    rows with ``t_index >= 0`` and ``frag_length >= 0``) is examined:
 
-    - If all transcripts agree on a single insert size, the
+    - If all transcripts agree on a single fragment length, the
       fragment is *unambiguous* and that size is observed.
     - If transcripts disagree, the fragment is *ambiguous* and
       skipped for training (deferred to Bayesian counting).
@@ -382,8 +382,8 @@ def analyze_hits(
     ----------
     hit_path : Path or str
         Path to the intermediate Feather file from ``query_bam()``.
-    insert_size_max : int
-        Maximum insert size for the histogram model.
+    max_frag_length : int
+        Maximum fragment length for the histogram model.
     log_every : int
         Log progress every *log_every* fragments at DEBUG level.
 
@@ -393,13 +393,13 @@ def analyze_hits(
         Fragment-level statistics including ambiguity and merge criteria.
     strand_model : StrandModel
         Learned strand model (Beta posterior from qualified observations).
-    insert_model : InsertSizeModel
-        Learned insert size distribution.
+    frag_length_model : FragmentLengthModel
+        Learned fragment length distribution.
     """
     hit_path = Path(hit_path)
     stats = HitAnalysisStats()
     strand_model = StrandModel()
-    insert_model = InsertSizeModel(max_size=insert_size_max)
+    frag_length_model = FragmentLengthModel(max_size=max_frag_length)
 
     logger.info(f"[START] Analyzing hits from {hit_path}")
 
@@ -458,10 +458,10 @@ def analyze_hits(
         else:
             strand_model.observe(resolved.exon_strand, resolved.sj_strand)
 
-        # --- Insert size learning ---
-        if "insert_size" in hits.columns:
-            valid_mask = (hits["t_index"] >= 0) & (hits["insert_size"] >= 0)
-            valid_sizes = hits.loc[valid_mask, "insert_size"]
+        # --- Fragment length learning ---
+        if "frag_length" in hits.columns:
+            valid_mask = (hits["t_index"] >= 0) & (hits["frag_length"] >= 0)
+            valid_sizes = hits.loc[valid_mask, "frag_length"]
             if valid_sizes.empty:
                 stats.n_insert_skipped += 1
             else:
@@ -469,7 +469,7 @@ def analyze_hits(
                 stats.n_insert_computed += 1
                 if len(unique_sizes) == 1:
                     stats.n_insert_unambiguous += 1
-                    insert_model.observe(unique_sizes.pop())
+                    frag_length_model.observe(unique_sizes.pop())
                 else:
                     stats.n_insert_ambiguous += 1
 
@@ -478,7 +478,7 @@ def analyze_hits(
             logger.debug(
                 f"  analyzed {stats.n_fragments:,} fragments, "
                 f"{strand_model.n_observations:,} strand observations, "
-                f"{insert_model.n_observations:,} insert size observations"
+                f"{frag_length_model.n_observations:,} fragment length observations"
             )
 
     logger.info(
@@ -488,6 +488,6 @@ def analyze_hits(
         f"{stats.n_no_gene:,} no-gene"
     )
     strand_model.log_summary()
-    insert_model.log_summary()
+    frag_length_model.log_summary()
 
-    return stats, strand_model, insert_model
+    return stats, strand_model, frag_length_model

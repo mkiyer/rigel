@@ -1,0 +1,58 @@
+genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_full_10_regions
+
+aligner: minimap2
+threads: 4
+
+region:
+  - chr10:121476640-121601584
+  - chr7:55019017-55211628
+  - chr11:35138870-35232402
+  - chr17:43044295-43170245
+  - chr11:5225000-5310000
+  - chr7:27090070-27254935
+  - chr12:6444955-6573691
+  - chr19:751112-898218
+  - chr22:20917407-21069168
+  - chr1:923923-1061118
+
+simulation:
+  n_fragments: 50000
+  sim_seed: 101
+  pipeline_seed: 101
+  frag_mean: 250.0
+  frag_std: 50.0
+  frag_min: 50
+  frag_max: 1000
+  read_length: 150
+  error_rate: 0.0
+
+gdna:
+  rates: [0.0, 0.1, 0.25, 0.5]
+  rate_labels: [none, low, moderate, high]
+  frag_mean: 350.0
+  frag_std: 100.0
+  frag_min: 100
+  frag_max: 1000
+
+nrna:
+  rates: [0.0, 0.25]
+  rate_labels: [none, quarter]
+
+strand_specificities: [0.95, 0.99, 1.0]
+
+abundance:
+  mode: random
+  seed: 101
+  min: 0.01
+  max: 100000.0
+
+htseq:
+  enabled: true
+  conda_env: htseq
+
+runtime:
+  keep_going: true
+
+verbose: true

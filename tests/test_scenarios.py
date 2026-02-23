@@ -7,7 +7,7 @@ nascent RNA fraction, and strand specificity (SS > 0.6 required).
 
 Tests sweep three independent axes:
   1. gDNA contamination: [0, 5, 20, 50, 100]
-  2. Nascent RNA fraction: [0.0, 0.1, 0.3, 0.5, 0.7]
+  2. Nascent RNA abundance: [0, 10, 30, 50, 70]
   3. Strand specificity: [0.65, 0.8, 0.9, 0.95, 1.0]
 
 Requirements: minimap2 and samtools must be available in PATH.
@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(
 
 GDNA_LEVELS = [0, 5, 20, 50, 100]
 STRAND_LEVELS = [0.65, 0.8, 0.9, 0.95, 1.0]
-NRNA_FRACTIONS = [0.0, 0.1, 0.3, 0.5, 0.7]
+NRNA_LEVELS = [0, 10, 30, 50, 70]
 ABUNDANCE_RATIOS = [1, 2, 4, 8, 16]
 
 N_FRAGMENTS = 500
@@ -68,13 +68,13 @@ def _gdna_config(abundance: float) -> GDNAConfig | None:
 
 def _build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
                    gdna_abundance=0, strand_specificity=1.0,
-                   nrna_fraction=0.0, include_multimap=False,
+                   nrna_abundance=0, include_multimap=False,
                    scenario_name=""):
     sim_config = _sim_config(strand_specificity=strand_specificity)
     gdna = _gdna_config(gdna_abundance)
     result = scenario.build(
         n_fragments=n_fragments, sim_config=sim_config,
-        gdna_config=gdna, nrna_fraction=nrna_fraction,
+        gdna_config=gdna, nrna_abundance=nrna_abundance,
     )
     pr = run_pipeline(
         result.bam_path, result.index,
@@ -172,14 +172,14 @@ def _assert_gdna_accuracy(bench, gdna_abundance, max_rel_err=0.55):
         )
 
 
-def _assert_nrna_detected(bench, nrna_fraction, max_rel_err=0.80):
+def _assert_nrna_detected(bench, nrna_abundance, max_rel_err=0.80):
     """When nRNA is present, pipeline should detect some.
 
     Skips assertion when nRNA signal is negligible or when gDNA
     contamination overwhelms the nRNA signal (making intronic nRNA
     indistinguishable from intronic gDNA).
     """
-    if nrna_fraction == 0 or bench.n_nrna_expected <= 5:
+    if nrna_abundance == 0 or bench.n_nrna_expected <= 5:
         return
     # When gDNA >> nRNA, the intronic nRNA signal is buried
     if bench.n_gdna_expected > 3 * bench.n_nrna_expected:
@@ -243,13 +243,13 @@ class TestSingleExon:
         else:
             _assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, scenario, nrna):
         """Nascent RNA on a single-exon gene is identical to mRNA."""
-        bench = _build_and_run(scenario, nrna_fraction=nrna,
-                               scenario_name=f"single_exon_nrna_{int(nrna*100)}")
+        bench = _build_and_run(scenario, nrna_abundance=nrna,
+                               scenario_name=f"single_exon_nrna_{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench)
@@ -266,26 +266,26 @@ class TestSingleExon:
             _assert_transcript_accuracy(bench, max_abs_diff=55)
 
     @pytest.mark.parametrize("gdna,nrna", [
-        (20, 0.3), (50, 0.5), (100, 0.3),
+        (20, 30), (50, 50), (100, 30),
     ], ids=["gdna20_nrna30", "gdna50_nrna50", "gdna100_nrna30"])
     def test_gdna_nrna(self, scenario, gdna, nrna):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna,
-                               scenario_name=f"single_exon_g{gdna}_n{int(nrna*100)}")
+                               nrna_abundance=nrna,
+                               scenario_name=f"single_exon_g{gdna}_n{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna)
         _assert_gdna_accuracy(bench, gdna)
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_stress(self, scenario, gdna, nrna, ss):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna, strand_specificity=ss,
-                               scenario_name=f"single_exon_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                               nrna_abundance=nrna, strand_specificity=ss,
+                               scenario_name=f"single_exon_g{gdna}_n{nrna}_s{int(ss*100)}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna,
@@ -338,13 +338,13 @@ class TestSplicedGene:
         else:
             _assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, scenario, nrna):
         """Spliced gene: nRNA produces intronic reads detectable by pipeline."""
-        bench = _build_and_run(scenario, nrna_fraction=nrna,
-                               scenario_name=f"spliced_nrna_{int(nrna*100)}")
+        bench = _build_and_run(scenario, nrna_abundance=nrna,
+                               scenario_name=f"spliced_nrna_{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench)
@@ -365,12 +365,12 @@ class TestSplicedGene:
         )
 
     @pytest.mark.parametrize("gdna,nrna", [
-        (20, 0.3), (50, 0.5), (100, 0.3),
+        (20, 30), (50, 50), (100, 30),
     ], ids=["gdna20_nrna30", "gdna50_nrna50", "gdna100_nrna30"])
     def test_gdna_nrna(self, scenario, gdna, nrna):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna,
-                               scenario_name=f"spliced_g{gdna}_n{int(nrna*100)}")
+                               nrna_abundance=nrna,
+                               scenario_name=f"spliced_g{gdna}_n{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna)
@@ -378,14 +378,14 @@ class TestSplicedGene:
         _assert_nrna_detected(bench, nrna)
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_stress(self, scenario, gdna, nrna, ss):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna, strand_specificity=ss,
-                               scenario_name=f"spliced_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                               nrna_abundance=nrna, strand_specificity=ss,
+                               scenario_name=f"spliced_g{gdna}_n{nrna}_s{int(ss*100)}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna,
@@ -442,12 +442,12 @@ class TestNonOverlappingGenes:
         else:
             _assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, scenario, nrna):
-        bench = _build_and_run(scenario, nrna_fraction=nrna,
-                               scenario_name=f"nonoverlap_nrna_{int(nrna*100)}")
+        bench = _build_and_run(scenario, nrna_abundance=nrna,
+                               scenario_name=f"nonoverlap_nrna_{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench)
@@ -465,14 +465,14 @@ class TestNonOverlappingGenes:
             _assert_transcript_accuracy(bench, max_abs_diff=40)
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_stress(self, scenario, gdna, nrna, ss):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna, strand_specificity=ss,
-                               scenario_name=f"nonoverlap_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                               nrna_abundance=nrna, strand_specificity=ss,
+                               scenario_name=f"nonoverlap_g{gdna}_n{nrna}_s{int(ss*100)}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna,
@@ -548,14 +548,14 @@ class TestTwoIsoforms:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, tmp_path, nrna):
-        sc = self._make_scenario(tmp_path, 100, 10, f"_nrna_{int(nrna*100)}")
+        sc = self._make_scenario(tmp_path, 100, 10, f"_nrna_{nrna}")
         try:
-            bench = _build_and_run(sc, nrna_fraction=nrna, n_fragments=1000,
-                                   scenario_name=f"iso_nrna_{int(nrna*100)}")
+            bench = _build_and_run(sc, nrna_abundance=nrna, n_fragments=1000,
+                                   scenario_name=f"iso_nrna_{nrna}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench)
@@ -580,18 +580,18 @@ class TestTwoIsoforms:
             sc.cleanup()
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_stress(self, tmp_path, gdna, nrna, ss):
         sc = self._make_scenario(tmp_path, 100, 10,
-                                  f"_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                                  f"_g{gdna}_n{nrna}_s{int(ss*100)}")
         try:
             bench = _build_and_run(sc, gdna_abundance=gdna,
-                                   nrna_fraction=nrna,
+                                   nrna_abundance=nrna,
                                    strand_specificity=ss, n_fragments=1000,
-                                   scenario_name=f"iso_stress_{gdna}_{int(nrna*100)}_{int(ss*100)}")
+                                   scenario_name=f"iso_stress_{gdna}_{nrna}_{int(ss*100)}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench, gdna_abundance=gdna,
@@ -672,15 +672,15 @@ class TestOverlappingAntisense:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, tmp_path, nrna):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_nrna_{int(nrna*100)}")
+                                  f"_nrna_{nrna}")
         try:
-            bench = _build_and_run(sc, nrna_fraction=nrna, n_fragments=1000,
-                                   scenario_name=f"anti_nrna_{int(nrna*100)}")
+            bench = _build_and_run(sc, nrna_abundance=nrna, n_fragments=1000,
+                                   scenario_name=f"anti_nrna_{nrna}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench)
@@ -709,18 +709,18 @@ class TestOverlappingAntisense:
             sc.cleanup()
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_stress(self, tmp_path, gdna, nrna, ss):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                                  f"_g{gdna}_n{nrna}_s{int(ss*100)}")
         try:
             bench = _build_and_run(sc, gdna_abundance=gdna,
-                                   nrna_fraction=nrna, strand_specificity=ss,
+                                   nrna_abundance=nrna, strand_specificity=ss,
                                    n_fragments=1000,
-                                   scenario_name=f"anti_stress_{gdna}_{int(nrna*100)}_{int(ss*100)}")
+                                   scenario_name=f"anti_stress_{gdna}_{nrna}_{int(ss*100)}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench, gdna_abundance=gdna,
@@ -818,14 +818,14 @@ class TestContainedAntisense:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("nrna", NRNA_FRACTIONS,
-                             ids=[f"nrna_{int(f*100)}" for f in NRNA_FRACTIONS])
+    @pytest.mark.parametrize("nrna", NRNA_LEVELS,
+                             ids=[f"nrna_{n}" for n in NRNA_LEVELS])
     def test_nrna_sweep(self, tmp_path, nrna):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_nrna_{int(nrna*100)}")
+                                  f"_nrna_{nrna}")
         try:
-            bench = _build_and_run(sc, nrna_fraction=nrna, n_fragments=1000,
-                                   scenario_name=f"contained_anti_nrna_{int(nrna*100)}")
+            bench = _build_and_run(sc, nrna_abundance=nrna, n_fragments=1000,
+                                   scenario_name=f"contained_anti_nrna_{nrna}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench)
@@ -849,18 +849,18 @@ class TestContainedAntisense:
             sc.cleanup()
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_stress(self, tmp_path, gdna, nrna, ss):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                                  f"_g{gdna}_n{nrna}_s{int(ss*100)}")
         try:
             bench = _build_and_run(sc, gdna_abundance=gdna,
-                                   nrna_fraction=nrna, strand_specificity=ss,
+                                   nrna_abundance=nrna, strand_specificity=ss,
                                    n_fragments=1000,
-                                   scenario_name=f"contained_anti_stress_{gdna}_{int(nrna*100)}_{int(ss*100)}")
+                                   scenario_name=f"contained_anti_stress_{gdna}_{nrna}_{int(ss*100)}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench, gdna_abundance=gdna,
@@ -972,16 +972,16 @@ class TestParalogMultimapping:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, tmp_path, nrna):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  name_suffix=f"_nrna_{int(nrna*100)}")
+                                  name_suffix=f"_nrna_{nrna}")
         try:
-            bench = _build_and_run(sc, nrna_fraction=nrna,
+            bench = _build_and_run(sc, nrna_abundance=nrna,
                                    include_multimap=True,
-                                   scenario_name=f"paralogs_nrna_{int(nrna*100)}")
+                                   scenario_name=f"paralogs_nrna_{nrna}")
             _assert_alignment(bench)
             _assert_negative_control(bench)
         finally:
@@ -1010,16 +1010,16 @@ class TestParalogMultimapping:
             sc.cleanup()
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (50, 0.5, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (50, 50, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g50n50s65"])
     def test_stress(self, tmp_path, gdna, nrna, ss):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  name_suffix=f"_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                                  name_suffix=f"_g{gdna}_n{nrna}_s{int(ss*100)}")
         try:
             bench = _build_and_run(sc, gdna_abundance=gdna,
-                                   nrna_fraction=nrna, strand_specificity=ss,
+                                   nrna_abundance=nrna, strand_specificity=ss,
                                    include_multimap=True,
-                                   scenario_name=f"paralogs_stress_{gdna}_{int(nrna*100)}_{int(ss*100)}")
+                                   scenario_name=f"paralogs_stress_{gdna}_{nrna}_{int(ss*100)}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench, gdna_abundance=gdna,
@@ -1099,16 +1099,16 @@ class TestDistinguishableParalogs:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, tmp_path, nrna):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_nrna_{int(nrna*100)}")
+                                  f"_nrna_{nrna}")
         try:
-            bench = _build_and_run(sc, nrna_fraction=nrna, n_fragments=1000,
+            bench = _build_and_run(sc, nrna_abundance=nrna, n_fragments=1000,
                                    include_multimap=True,
-                                   scenario_name=f"dist_nrna_{int(nrna*100)}")
+                                   scenario_name=f"dist_nrna_{nrna}")
             _assert_alignment(bench)
             _assert_negative_control(bench)
             _assert_nrna_detected(bench, nrna)
@@ -1129,16 +1129,16 @@ class TestDistinguishableParalogs:
             sc.cleanup()
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (50, 0.5, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (50, 50, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g50n50s65"])
     def test_stress(self, tmp_path, gdna, nrna, ss):
         sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                                  f"_g{gdna}_n{nrna}_s{int(ss*100)}")
         try:
             bench = _build_and_run(sc, gdna_abundance=gdna,
-                                   nrna_fraction=nrna, strand_specificity=ss,
+                                   nrna_abundance=nrna, strand_specificity=ss,
                                    n_fragments=1000, include_multimap=True,
-                                   scenario_name=f"dist_stress_{gdna}_{int(nrna*100)}_{int(ss*100)}")
+                                   scenario_name=f"dist_stress_{gdna}_{nrna}_{int(ss*100)}")
             _assert_alignment(bench)
             _assert_accountability(bench)
             _assert_negative_control(bench, gdna_abundance=gdna,
@@ -1200,12 +1200,12 @@ class TestTwoExonWithControl:
         if gdna > 0:
             _assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [0.1, 0.3, 0.5, 0.7],
-                             ids=[f"nrna_{int(f*100)}" for f in
-                                  [0.1, 0.3, 0.5, 0.7]])
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in
+                                  [10, 30, 50, 70]])
     def test_nrna_sweep(self, scenario, nrna):
-        bench = _build_and_run(scenario, nrna_fraction=nrna,
-                               scenario_name=f"ctrl_nrna_{int(nrna*100)}")
+        bench = _build_and_run(scenario, nrna_abundance=nrna,
+                               scenario_name=f"ctrl_nrna_{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench)
@@ -1226,13 +1226,13 @@ class TestTwoExonWithControl:
         )
 
     @pytest.mark.parametrize("gdna,nrna", [
-        (20, 0.3), (50, 0.3), (100, 0.3), (20, 0.5), (50, 0.5),
+        (20, 30), (50, 30), (100, 30), (20, 50), (50, 50),
     ], ids=["gdna20_nrna30", "gdna50_nrna30", "gdna100_nrna30",
             "gdna20_nrna50", "gdna50_nrna50"])
     def test_gdna_nrna_interaction(self, scenario, gdna, nrna):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna,
-                               scenario_name=f"ctrl_gdna{gdna}_nrna{int(nrna*100)}")
+                               nrna_abundance=nrna,
+                               scenario_name=f"ctrl_gdna{gdna}_nrna{nrna}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna)
@@ -1250,26 +1250,111 @@ class TestTwoExonWithControl:
                                   strand_specificity=ss)
 
     @pytest.mark.parametrize("nrna,ss", [
-        (0.3, 0.9), (0.5, 0.8), (0.3, 0.65), (0.7, 0.65),
+        (30, 0.9), (50, 0.8), (30, 0.65), (70, 0.65),
     ], ids=["nrna30_ss90", "nrna50_ss80", "nrna30_ss65", "nrna70_ss65"])
     def test_nrna_strand_interaction(self, scenario, nrna, ss):
-        bench = _build_and_run(scenario, nrna_fraction=nrna,
+        bench = _build_and_run(scenario, nrna_abundance=nrna,
                                strand_specificity=ss,
-                               scenario_name=f"ctrl_nrna{int(nrna*100)}_ss{ss}")
+                               scenario_name=f"ctrl_nrna{nrna}_ss{ss}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, strand_specificity=ss)
 
     @pytest.mark.parametrize("gdna,nrna,ss", [
-        (20, 0.3, 0.95), (50, 0.3, 0.9), (20, 0.5, 0.8),
-        (50, 0.5, 0.65), (100, 0.3, 0.65),
+        (20, 30, 0.95), (50, 30, 0.9), (20, 50, 0.8),
+        (50, 50, 0.65), (100, 30, 0.65),
     ], ids=["g20n30s95", "g50n30s90", "g20n50s80",
             "g50n50s65", "g100n30s65"])
     def test_combined_stress(self, scenario, gdna, nrna, ss):
         bench = _build_and_run(scenario, gdna_abundance=gdna,
-                               nrna_fraction=nrna, strand_specificity=ss,
-                               scenario_name=f"ctrl_g{gdna}_n{int(nrna*100)}_s{int(ss*100)}")
+                               nrna_abundance=nrna, strand_specificity=ss,
+                               scenario_name=f"ctrl_g{gdna}_n{nrna}_s{int(ss*100)}")
         _assert_alignment(bench)
         _assert_accountability(bench)
         _assert_negative_control(bench, gdna_abundance=gdna,
                                   strand_specificity=ss)
+
+
+# =====================================================================
+# Scenario 10: Wide-intron fragment-length discrimination
+# =====================================================================
+
+
+class TestWideIntronInsertPenalty:
+    """Spliced gene with a wide intron: fragment-length discrimination.
+
+    Exons (1000,2000) and (3000,4000) create a 1000 bp intron gap.
+    Paired-end fragments that span the exon-exon junction have:
+
+    - SJ-corrected fragment length ≈ frag_mean (fits insert model → mRNA)
+    - Genomic fragment length ≈ frag_mean + 1000 (penalised → NOT nRNA)
+
+    This validates that per-candidate fragment lengths correctly
+    penalise nRNA candidates for junction-spanning fragments,
+    preventing false nRNA allocation from spliced mRNA reads.
+    """
+
+    @pytest.fixture
+    def scenario(self, tmp_path):
+        sc = Scenario("wide_intron", genome_length=6000, seed=SIM_SEED,
+                       work_dir=tmp_path / "wide_intron")
+        sc.add_gene("g1", "+", [
+            {"t_id": "t1", "exons": [(1000, 2000), (3000, 4000)],
+             "abundance": 100},
+        ])
+        sc.add_gene("g_ctrl", "-", [
+            {"t_id": "t_ctrl", "exons": [(5000, 5300)], "abundance": 0},
+        ])
+        yield sc
+        sc.cleanup()
+
+    def test_baseline_no_false_nrna(self, scenario):
+        """Pure mRNA: wide intron must not produce false nRNA counts."""
+        bench = _build_and_run(scenario,
+                               scenario_name="wide_intron_base")
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        _assert_transcript_accuracy(bench, max_abs_diff=5)
+        _assert_negative_control(bench)
+        # Key assertion: no false nRNA from junction-spanning fragments
+        assert bench.n_nrna_pipeline <= 3, (
+            f"False nRNA detected: {bench.n_nrna_pipeline:.0f} "
+            f"(expected ≤ 3 for pure mRNA scenario)"
+        )
+
+    @pytest.mark.parametrize("nrna", [10, 30, 50, 70],
+                             ids=[f"nrna_{n}" for n in [10, 30, 50, 70]])
+    def test_nrna_sweep(self, scenario, nrna):
+        """With real nRNA present, pipeline detects it without siphoning mRNA."""
+        bench = _build_and_run(scenario, nrna_abundance=nrna,
+                               scenario_name=f"wide_intron_nrna_{nrna}")
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        _assert_negative_control(bench)
+        _assert_nrna_detected(bench, nrna)
+
+    @pytest.mark.parametrize("gdna", GDNA_LEVELS,
+                             ids=[f"gdna_{g}" for g in GDNA_LEVELS])
+    def test_gdna_sweep(self, scenario, gdna):
+        bench = _build_and_run(scenario, gdna_abundance=gdna,
+                               scenario_name=f"wide_intron_gdna_{gdna}")
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        _assert_negative_control(bench, gdna_abundance=gdna)
+        if gdna == 0:
+            _assert_transcript_accuracy(bench, max_abs_diff=5)
+        else:
+            _assert_gdna_accuracy(bench, gdna)
+
+    @pytest.mark.parametrize("gdna,nrna", [
+        (20, 30), (50, 50), (100, 30),
+    ], ids=["gdna20_nrna30", "gdna50_nrna50", "gdna100_nrna30"])
+    def test_gdna_nrna_interaction(self, scenario, gdna, nrna):
+        """Wide intron under combined gDNA + nRNA contamination."""
+        bench = _build_and_run(scenario, gdna_abundance=gdna,
+                               nrna_abundance=nrna,
+                               scenario_name=f"wide_intron_g{gdna}_n{nrna}")
+        _assert_alignment(bench)
+        _assert_accountability(bench)
+        _assert_negative_control(bench, gdna_abundance=gdna)
+        _assert_gdna_accuracy(bench, gdna)

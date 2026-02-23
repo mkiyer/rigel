@@ -1,4 +1,4 @@
-"""Tests for hulkrna.resolution — set merging, insert size, ResolvedFragment, chimera."""
+"""Tests for hulkrna.resolution — set merging, fragment length, ResolvedFragment, chimera."""
 
 import pytest
 
@@ -6,7 +6,7 @@ from hulkrna.types import ChimeraType, MergeCriteria, MergeResult, Strand, Genom
 from hulkrna.categories import SpliceType
 from hulkrna.resolution import (
     merge_sets_with_criteria,
-    fragment_insert_size,
+    compute_genomic_frag_length,
     ResolvedFragment,
     _detect_intrachromosomal_chimera,
     resolve_fragment,
@@ -80,21 +80,21 @@ class TestMergeSetsWithCriteria:
 
 
 # =====================================================================
-# fragment_insert_size
+# compute_genomic_frag_length
 # =====================================================================
 
 
-class TestFragmentInsertSize:
+class TestFragmentLength:
     def test_empty_fragment(self):
         frag = Fragment(exons=(), introns=())
-        assert fragment_insert_size(frag) == -1
+        assert compute_genomic_frag_length(frag) == -1
 
     def test_single_exon(self):
         frag = Fragment(
             exons=(GenomicInterval("chr1", 100, 300, Strand.POS),),
             introns=(),
         )
-        assert fragment_insert_size(frag) == 200
+        assert compute_genomic_frag_length(frag) == 200
 
     def test_two_exons_no_intron(self):
         """Gap between exons without annotated intron → footprint includes gap."""
@@ -106,7 +106,7 @@ class TestFragmentInsertSize:
             introns=(),
         )
         # footprint = 400 - 100 = 300, no introns
-        assert fragment_insert_size(frag) == 300
+        assert compute_genomic_frag_length(frag) == 300
 
     def test_two_exons_with_intron(self):
         """Observed intron subtracted from footprint."""
@@ -118,7 +118,7 @@ class TestFragmentInsertSize:
             introns=(GenomicInterval("chr1", 200, 300, Strand.POS),),
         )
         # footprint = 400 - 100 = 300, intron = 100
-        assert fragment_insert_size(frag) == 200
+        assert compute_genomic_frag_length(frag) == 200
 
     def test_overlapping_exons(self):
         """Overlapping exon blocks are treated naively (footprint only)."""
@@ -130,7 +130,7 @@ class TestFragmentInsertSize:
             introns=(),
         )
         # footprint = 400 - 100 = 300
-        assert fragment_insert_size(frag) == 300
+        assert compute_genomic_frag_length(frag) == 300
 
 
 # =====================================================================
@@ -146,9 +146,10 @@ class TestResolvedFragment:
             splice_type=SpliceType.UNSPLICED,
             exon_strand=Strand.POS,
             sj_strand=Strand.NONE,
-            insert_size=250,
+            frag_lengths={0: 250},
             merge_criteria=MergeCriteria.INTERSECTION,
             num_hits=1,
+            genomic_footprint=250,
         )
         defaults.update(kwargs)
         return ResolvedFragment(**defaults)
@@ -535,32 +536,32 @@ class TestComputeOverlapProfile:
     """Test per-candidate overlap profile computation."""
 
     def test_full_exon_overlap_single_block(self):
-        """Fragment fully inside a reference exon → exon_bp=frag_length, intron_bp=0."""
+        """Fragment fully inside a reference exon → exon_bp=read_length, intron_bp=0."""
         idx = _OverlapMockIndex()
         frag = Fragment(
             exons=(GenomicInterval("chr1", 150, 200, Strand.POS),),
             introns=(),
         )
-        profiles, frag_length = compute_overlap_profile(frag, idx)
-        assert frag_length == 50
+        profiles, read_length = compute_overlap_profile(frag, idx)
+        assert read_length == 50
         # t0 exon 100-200: covers 150-200 → 50bp exon
-        assert profiles[0] == (50, 0)
+        assert profiles[0] == (50, 0, 0)
         # t1 exon 100-200: covers 150-200 → 50bp exon
-        assert profiles[1] == (50, 0)
+        assert profiles[1] == (50, 0, 0)
         # t2 (350-500) no overlap with 150-200
         assert 2 not in profiles
 
     def test_intronic_overlap(self):
-        """Fragment in intronic region → exon_bp=0, intron_bp=frag_length."""
+        """Fragment in intronic region → exon_bp=0, intron_bp=read_length."""
         idx = _OverlapMockIndex()
         frag = Fragment(
             exons=(GenomicInterval("chr1", 220, 320, Strand.POS),),
             introns=(),
         )
-        profiles, frag_length = compute_overlap_profile(frag, idx)
-        assert frag_length == 100
+        profiles, read_length = compute_overlap_profile(frag, idx)
+        assert read_length == 100
         # Only t0 has intron 200-350 covering 220-320 → 100bp intron
-        assert profiles[0] == (0, 100)
+        assert profiles[0] == (0, 100, 100)
         # t1 and t2 shouldn't be present (t1 exon 100-200, t2 exon 350-500)
         assert 1 not in profiles
         assert 2 not in profiles
@@ -572,19 +573,19 @@ class TestComputeOverlapProfile:
             exons=(GenomicInterval("chr1", 180, 220, Strand.POS),),
             introns=(),
         )
-        profiles, frag_length = compute_overlap_profile(frag, idx)
-        assert frag_length == 40
+        profiles, read_length = compute_overlap_profile(frag, idx)
+        assert read_length == 40
         # t0: exon 100-200 → 180-200 = 20bp; intron 200-350 → 200-220 = 20bp
-        assert profiles[0] == (20, 20)
+        assert profiles[0] == (20, 20, 20)
         # t1: exon 100-200 → 180-200 = 20bp; no intron overlap
-        assert profiles[1] == (20, 0)
+        assert profiles[1] == (20, 0, 0)
 
     def test_empty_fragment(self):
         idx = _OverlapMockIndex()
         frag = Fragment(exons=(), introns=())
-        profiles, frag_length = compute_overlap_profile(frag, idx)
+        profiles, read_length = compute_overlap_profile(frag, idx)
         assert profiles == {}
-        assert frag_length == 0
+        assert read_length == 0
 
     def test_no_overlapping_intervals(self):
         idx = _OverlapMockIndex()
@@ -592,9 +593,9 @@ class TestComputeOverlapProfile:
             exons=(GenomicInterval("chr1", 700, 800, Strand.POS),),
             introns=(),
         )
-        profiles, frag_length = compute_overlap_profile(frag, idx)
+        profiles, read_length = compute_overlap_profile(frag, idx)
         assert profiles == {}
-        assert frag_length == 100  # fragment exists but no genic overlap
+        assert read_length == 100  # fragment exists but no genic overlap
 
     def test_multi_block_overlap_sums(self):
         """Two exon blocks accumulate overlap per-transcript."""
@@ -606,14 +607,95 @@ class TestComputeOverlapProfile:
             ),
             introns=(GenomicInterval("chr1", 200, 350, Strand.POS),),
         )
-        profiles, frag_length = compute_overlap_profile(frag, idx)
-        assert frag_length == 100
+        profiles, read_length = compute_overlap_profile(frag, idx)
+        assert read_length == 100
         # t0: exon(150-200)=50bp + exon(350-400)=50bp = 100bp exon
-        assert profiles[0] == (100, 0)
+        assert profiles[0] == (100, 0, 0)
         # t1 (exon 100-200): block1 150-200 → 50bp exon; block2 no overlap
-        assert profiles[1] == (50, 0)
+        assert profiles[1] == (50, 0, 0)
         # t2 (exon 350-500): block2 350-400 → 50bp exon; block1 no overlap
-        assert profiles[2] == (50, 0)
+        assert profiles[2] == (50, 0, 0)
+
+    def test_unambig_intron_subtracts_cross_transcript_exons(self):
+        """Fragment in t0's intron that overlaps t1's exon → unambig_intron_bp=0.
+
+        Models the core nRNA phantom scenario:
+        - t0: exon 100-200, intron 200-400, exon 400-500  (2-exon)
+        - t1: exon 100-500  (single-exon, same locus)
+        Fragment: 250-350 (block in t0's intron, but also in t1's exon)
+        → t0 should have intron_bp=100, unambig_intron_bp=0
+        → t1 should have exon_bp=100, unambig_intron_bp=0
+        """
+        class _CrossTxIndex:
+            sj_map = {}
+            t_to_g_arr = [0, 0]
+            _intervals = [
+                (0, 0, IntervalType.EXON, 100, 200),
+                (0, 0, IntervalType.INTRON, 200, 400),
+                (0, 0, IntervalType.EXON, 400, 500),
+                (1, 0, IntervalType.EXON, 100, 500),
+            ]
+
+            def query_exon_with_coords(self, exon_block):
+                results = []
+                for t_idx, g_idx, itype, h_start, h_end in self._intervals:
+                    if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
+                        results.append((t_idx, g_idx, itype, h_start, h_end))
+                return results
+
+        idx = _CrossTxIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
+            introns=(),
+        )
+        profiles, read_length = compute_overlap_profile(frag, idx)
+        assert read_length == 100
+        # t0: intron 200-400 covers 250-350 → 100bp intron
+        # But t1's exon 100-500 covers 250-350 → global exon union = [(250,350)]
+        # Subtracting global exons from t0's intron (250,350) → 0 unambig
+        assert profiles[0] == (0, 100, 0)
+        # t1: exon 100-500 covers 250-350 → 100bp exon, no intron
+        assert profiles[1] == (100, 0, 0)
+
+    def test_unambig_intron_partial_exon_overlap(self):
+        """Partial overlap: some intronic bp are exonic for another transcript.
+
+        - t0: exon 100-200, intron 200-400, exon 400-500
+        - t1: exon 280-350  (only partially covers t0's intron)
+        Fragment: 250-350
+        → t0 intron_bp=100, but only 250-280 (30bp) is unambiguous
+          (280-350 is exonic for t1)
+        """
+        class _PartialOverlapIndex:
+            sj_map = {}
+            t_to_g_arr = [0, 0]
+            _intervals = [
+                (0, 0, IntervalType.EXON, 100, 200),
+                (0, 0, IntervalType.INTRON, 200, 400),
+                (0, 0, IntervalType.EXON, 400, 500),
+                (1, 0, IntervalType.EXON, 280, 350),
+            ]
+
+            def query_exon_with_coords(self, exon_block):
+                results = []
+                for t_idx, g_idx, itype, h_start, h_end in self._intervals:
+                    if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
+                        results.append((t_idx, g_idx, itype, h_start, h_end))
+                return results
+
+        idx = _PartialOverlapIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
+            introns=(),
+        )
+        profiles, read_length = compute_overlap_profile(frag, idx)
+        assert read_length == 100
+        # t0: intron 200-400 clipped to 250-350 → 100bp intron
+        # global exon union: t1 exon 280-350 clipped to 280-350 → [(280,350)]
+        # unambig: (250,350) - [(280,350)] → 250-280 = 30bp
+        assert profiles[0] == (0, 100, 30)
+        # t1: exon 280-350 clipped to 280-350 → 70bp exon
+        assert profiles[1] == (70, 0, 0)
 
 
 # =====================================================================
@@ -624,8 +706,8 @@ class TestComputeOverlapProfile:
 class TestFilterByOverlap:
     def test_filters_low_overlap_candidates(self):
         t_inds = frozenset({0, 1, 2})
-        # BP counts with frag_length=100: exon fracs are 100/100, 50/100, 30/100
-        profiles = {0: (100, 0), 1: (50, 30), 2: (30, 60)}
+        # BP counts with read_length=100: exon fracs are 100/100, 50/100, 30/100
+        profiles = {0: (100, 0, 0), 1: (50, 30, 0), 2: (30, 60, 0)}
         # With min_frac_of_best=0.9 → threshold = 0.9 on exon_frac
         # Only t0 survives (1.0 >= 0.9)
         result = filter_by_overlap(t_inds, profiles, 100)
@@ -633,13 +715,13 @@ class TestFilterByOverlap:
 
     def test_keeps_close_candidates(self):
         t_inds = frozenset({0, 1, 2})
-        profiles = {0: (100, 0), 1: (95, 0), 2: (30, 0)}
+        profiles = {0: (100, 0, 0), 1: (95, 0, 0), 2: (30, 0, 0)}
         result = filter_by_overlap(t_inds, profiles, 100)
         assert result == frozenset({0, 1})
 
     def test_custom_threshold(self):
         t_inds = frozenset({0, 1, 2})
-        profiles = {0: (100, 0), 1: (60, 20), 2: (30, 20)}
+        profiles = {0: (100, 0, 0), 1: (60, 20, 0), 2: (30, 20, 0)}
         result = filter_by_overlap(t_inds, profiles, 100, min_frac_of_best=0.5)
         assert result == frozenset({0, 1})
 
@@ -651,7 +733,7 @@ class TestFilterByOverlap:
     def test_never_returns_empty(self):
         """Even with extreme threshold, should return original rather than empty."""
         t_inds = frozenset({0, 1})
-        profiles = {0: (1, 50), 1: (1, 50)}
+        profiles = {0: (1, 50, 0), 1: (1, 50, 0)}
         # All candidates are equal and above zero → they should all survive
         result = filter_by_overlap(t_inds, profiles, 100, min_frac_of_best=2.0)
         # threshold = 0.01 * 2.0 = 0.02, both are below → would be empty
@@ -660,7 +742,7 @@ class TestFilterByOverlap:
 
     def test_single_candidate_unchanged(self):
         t_inds = frozenset({5})
-        profiles = {5: (30, 50)}
+        profiles = {5: (30, 50, 0)}
         result = filter_by_overlap(t_inds, profiles, 100)
         assert result == frozenset({5})
 
@@ -731,12 +813,12 @@ class TestOverlapFiltering:
 
 
 # =====================================================================
-# Insert-size discrimination (3-exon gene, 2 isoforms)
+# Fragment-length discrimination (3-exon gene, 2 isoforms)
 # =====================================================================
 
 
 class _ThreeExonMockIndex:
-    """Mock index for insert-size discrimination test.
+    """Mock index for fragment-length discrimination test.
 
     Models the MINI_GTF 3-exon/2-isoform gene:
       t0: exons at 99-200, 299-400, 499-600  (3 exons)
@@ -793,8 +875,8 @@ class _ThreeExonMockIndex:
         return results
 
 
-class TestInsertSizeDiscrimination:
-    """Verify insert size helps distinguish isoforms with different splicing.
+class TestFragLengthDiscrimination:
+    """Verify fragment length helps distinguish isoforms with different splicing.
 
     Scenario: 3-exon gene with t0 (all 3) and t1 (exons 1+3, skipping #2).
     A fragment from t1 that spans exon1→exon3 will have a different
@@ -856,8 +938,8 @@ class TestInsertSizeDiscrimination:
         assert result.splice_type == SpliceType.UNSPLICED
         assert result.t_inds == frozenset({0})
 
-    def test_insert_size_differs_between_isoforms(self):
-        """Fragment spanning exon1→exon3 has different insert size per isoform.
+    def test_frag_length_differs_between_isoforms(self):
+        """Fragment spanning exon1→exon3 has different fragment length per isoform.
 
         For t0 (3 exons): reads at 150-200, 499-550 with gap 200-499
           → gap = 299bp, gap contains introns 200-299 (99bp) and 400-499 (99bp)
@@ -867,7 +949,7 @@ class TestInsertSizeDiscrimination:
         For t1 (2 exons):  gap contains intron 200-499 (299bp)
           → insert = 400 - 299 = 101
 
-        These differ → compute_insert_size returns -1 when they disagree.
+        These differ → compute_frag_lengths returns differing values when they disagree.
         """
         idx = _ThreeExonMockIndex()
         frag = Fragment(

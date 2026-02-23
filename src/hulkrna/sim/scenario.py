@@ -237,7 +237,7 @@ class Scenario:
         n_fragments: int = 1000,
         sim_config: SimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
-        nrna_fraction: float = 0.0,
+        nrna_abundance: float = 0.0,
     ) -> ScenarioResult:
         """Execute the full simulation pipeline.
 
@@ -257,18 +257,21 @@ class Scenario:
         gdna_config : GDNAConfig or None
             gDNA contamination config.  If None, falls back to the
             ``gdna_config`` set on the ``Scenario`` constructor.
-        nrna_fraction : float
-            Sets nascent RNA molecular abundance as a fraction of mature
-            mRNA molecular abundance: ``nrna_abundance = abundance ×
-            nrna_fraction``.  The two abundances are **independent** —
-            ``abundance`` is NOT reduced by this value.  The read pool
+        nrna_abundance : float
+            Nascent RNA molecular abundance applied to all expressed
+            transcripts.  This is an **independent** abundance value —
+            ``abundance`` (mature mRNA) is NOT modified.  The read pool
             split is proportional to abundance × effective_length for
             each pool.
 
-            Example: ``nrna_fraction=0.3`` with ``abundance=100`` gives
-            ``nrna_abundance=30``.  Reads are drawn proportionally to
-            ``100 × spliced_eff_len`` (mature) vs.
-            ``30 × genomic_span_eff_len`` (nascent RNA).
+            When set to 0.0 (default), per-transcript ``nrna_abundance``
+            values from the transcript dict (set at ``add_gene`` time)
+            are preserved unchanged.  When > 0, overrides all expressed
+            transcripts' ``nrna_abundance`` with this value.
+
+            Example: ``nrna_abundance=30`` with ``abundance=100`` gives
+            reads drawn proportionally to ``100 × spliced_eff_len``
+            (mature) vs. ``30 × genomic_span_eff_len`` (nascent RNA).
 
         Returns
         -------
@@ -288,14 +291,15 @@ class Scenario:
         gtf_path = self.annotation.write_gtf(wdir)
         transcripts = self.annotation.get_transcripts()
 
-        # Apply nascent RNA fraction to all expressed transcripts.
-        # nrna_abundance is set independently of abundance:
-        # nrna_abundance = abundance × nrna_fraction.
-        # abundance (mature mRNA) is NOT modified.
-        if nrna_fraction > 0:
+        # Apply nascent RNA abundance to all expressed transcripts.
+        # nrna_abundance is set independently of abundance (mature mRNA).
+        # When nrna_abundance > 0, it overrides per-transcript values.
+        # When nrna_abundance == 0 (default), per-transcript values from
+        # add_gene() dicts are preserved.
+        if nrna_abundance > 0:
             for t in transcripts:
                 if t.abundance and t.abundance > 0:
-                    t.nrna_abundance = t.abundance * nrna_fraction
+                    t.nrna_abundance = nrna_abundance
 
         # 3. Simulate reads
         if sim_config is None:

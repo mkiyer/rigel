@@ -188,7 +188,7 @@ class TestFragmentBasics:
         f = Fragment()
         assert f.exons == ()
         assert f.introns == ()
-        assert f.insert_size is None
+        assert f.frag_length is None
 
 
 # =====================================================================
@@ -339,3 +339,62 @@ class TestSupplementaryMerging:
         # 3 exon blocks total (1 from primary, 2 from spliced supplementary)
         assert len(frag.exons) == 3
         assert len(frag.introns) == 1
+
+
+# =====================================================================
+# Fragment.nm — edit distance extraction from NM tags
+# =====================================================================
+
+class TestFragmentNM:
+    """Tests for the NM (edit distance) extraction in Fragment.from_reads."""
+
+    def test_no_nm_tag_defaults_to_zero(self):
+        """When reads lack the NM tag, nm should default to 0."""
+        r1 = _mock_read(ref_start=100, cigartuples=[(pysam.CMATCH, 100)])
+        r2 = _mock_read(ref_start=200, cigartuples=[(pysam.CMATCH, 100)],
+                        is_reverse=True)
+        frag = Fragment.from_reads([r1], [r2])
+        assert frag.nm == 0
+
+    def test_r1_nm_only(self):
+        """NM present on R1 only."""
+        r1 = _mock_read(ref_start=100, cigartuples=[(pysam.CMATCH, 100)],
+                        extra_tags={"NM": 3})
+        frag = Fragment.from_reads([r1], [])
+        assert frag.nm == 3
+
+    def test_r2_nm_only(self):
+        """NM present on R2 only."""
+        r2 = _mock_read(ref_start=200, cigartuples=[(pysam.CMATCH, 100)],
+                        is_reverse=True, extra_tags={"NM": 2})
+        frag = Fragment.from_reads([], [r2])
+        assert frag.nm == 2
+
+    def test_nm_summed_across_pair(self):
+        """NM values from R1 and R2 are summed."""
+        r1 = _mock_read(ref_start=100, cigartuples=[(pysam.CMATCH, 100)],
+                        extra_tags={"NM": 1})
+        r2 = _mock_read(ref_start=200, cigartuples=[(pysam.CMATCH, 100)],
+                        is_reverse=True, extra_tags={"NM": 4})
+        frag = Fragment.from_reads([r1], [r2])
+        assert frag.nm == 5
+
+    def test_nm_summed_with_supplementary(self):
+        """NM values are summed across primary + supplementary records."""
+        r1_pri = _mock_read(ref_start=100, cigartuples=[(pysam.CMATCH, 100)],
+                            extra_tags={"NM": 2})
+        r1_supp = _mock_read(ref_start=5000, cigartuples=[(pysam.CMATCH, 50)],
+                             extra_tags={"NM": 1})
+        r2 = _mock_read(ref_start=200, cigartuples=[(pysam.CMATCH, 100)],
+                        is_reverse=True, extra_tags={"NM": 0})
+        frag = Fragment.from_reads([r1_pri, r1_supp], [r2])
+        assert frag.nm == 3  # 2 + 1 + 0
+
+    def test_nm_zero_explicit(self):
+        """Explicit NM=0 tags → nm=0."""
+        r1 = _mock_read(ref_start=100, cigartuples=[(pysam.CMATCH, 100)],
+                        extra_tags={"NM": 0})
+        r2 = _mock_read(ref_start=200, cigartuples=[(pysam.CMATCH, 100)],
+                        is_reverse=True, extra_tags={"NM": 0})
+        frag = Fragment.from_reads([r1], [r2])
+        assert frag.nm == 0

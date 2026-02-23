@@ -268,7 +268,7 @@ def parse_fastp_metrics(lib_dir):
         d['fastp_total_reads_after_filtering'] = int(data['summary']['after_filtering']['total_reads'])
         d['fastp_total_megabases_after_filtering'] = float(data['summary']['after_filtering']['total_bases']) / 1e6
         d['fastp_passed_filter_reads'] = int(data['filtering_result']['passed_filter_reads'])
-        d['fastp_insert_size_peak'] = int(data['insert_size']['peak'])
+        d['fastp_insert_size_peak'] = int(data['frag_length']['peak'])
         d['fastp_adapter_trimmed_reads'] = int(data['adapter_cutting']['adapter_trimmed_reads'])
         d['fastp_adapter_trimmed_megabases'] = float(data['adapter_cutting']['adapter_trimmed_bases']) / 1e6
     return d

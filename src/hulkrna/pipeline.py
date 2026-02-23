@@ -7,7 +7,7 @@ The pipeline reads the BAM file **once** and processes counts in
 two logical stages:
 
 **BAM Scan**: Parse all fragments, resolve each against the
-reference index, train strand and insert-size models from
+reference index, train strand and fragment-length models from
 unique-mapper fragments, and buffer all resolved fragments into a
 memory-efficient columnar buffer (``FragmentBuffer``).
 
@@ -61,9 +61,8 @@ from .counter import ReadCounter, EMData, Locus, LocusEMData
 from .fragment import Fragment
 from .types import ChimeraType, Strand
 from .index import HulkIndex
-from .insert_model import InsertSizeModels
+from .frag_length_model import FragmentLengthModels, _TAIL_DECAY_LP
 from .resolution import (
-    fragment_insert_size,
     pair_multimapper_reads,
     resolve_fragment,
 )
@@ -84,6 +83,13 @@ DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
 # Default overhang alpha: each base of overhang reduces probability by 100×.
 DEFAULT_OVERHANG_ALPHA = 0.01
 
+# Default mismatch alpha: each edit-distance mismatch (NM tag) reduces
+# probability by 10×.  This is a softer penalty than the overhang alpha
+# because sequencing errors can produce small NM values even for correct
+# alignments.  The primary effect is on multimappers where different hits
+# map to paralogous loci with distinct NM values.
+DEFAULT_MISMATCH_ALPHA = 0.1
+
 # ---------------------------------------------------------------------------
 # Int constants for hot-path scoring (avoid enum construction overhead)
 # ---------------------------------------------------------------------------
@@ -101,13 +107,13 @@ _SPLICE_ANNOT = int(SpliceType.SPLICED_ANNOT)          # 2
 #
 # **mRNA pool** (all fragments, spliced and unspliced): every
 #   transcript with exon_bp > 0, ranked by mRNA overhang =
-#   max(frag_length − exon_bp, 0).  Only the *winner(s)* (minimum
+#   max(read_length − exon_bp, 0).  Only the *winner(s)* (minimum
 #   overhang, ties included) enter the EM.  Spliced fragments are
 #   mRNA-only by definition (no nRNA / gDNA).
 #
 # **nRNA pool** (unspliced fragments only): every transcript with
 #   span_bp > 0 (span_bp = exon_bp + intron_bp), ranked by nRNA
-#   overhang = max(frag_length − span_bp, 0).  Only the winner(s)
+#   overhang = max(read_length − span_bp, 0).  Only the winner(s)
 #   enter the EM.  Independent of the mRNA pool.
 #
 # **gDNA** is always a candidate for unspliced fragments (no gating).
@@ -146,7 +152,7 @@ class PipelineResult:
 
     stats: PipelineStats
     strand_models: StrandModels
-    insert_models: InsertSizeModels
+    frag_length_models: FragmentLengthModels
     counter: ReadCounter
 
 
@@ -161,20 +167,21 @@ def scan_and_buffer(
     skip_duplicates: bool = True,
     include_multimap: bool = False,
     log_every: int = 1_000_000,
-    insert_size_max: int = 1000,
+    max_frag_length: int = 1000,
     chunk_size: int = 1_000_000,
     max_memory_bytes: int = 2 * 1024**3,
     spill_dir: Path | None = None,
     sj_strand_tag: str | tuple[str, ...] = "XS",
     overlap_min_frac: float = 0.99,
-) -> tuple[PipelineStats, StrandModels, InsertSizeModels, FragmentBuffer]:
+    min_spliced_observations: int = 10,
+) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
     """Single-pass BAM scan: resolve fragments, train models, buffer results.
 
     Reads the BAM once.  For each fragment:
 
     1. Build a ``Fragment`` from the read pair.
     2. Resolve against the reference index.
-    3. Train strand and insert-size models (unique mappers only).
+    3. Train strand and fragment-length models (unique mappers only).
     4. Buffer all resolved fragments into the columnar buffer.
 
     Two strand models are trained (unique mappers only):
@@ -197,8 +204,8 @@ def scan_and_buffer(
         (default False).
     log_every : int
         Log progress every *log_every* read-name groups.
-    insert_size_max : int
-        Maximum insert size for the histogram model.
+    max_frag_length : int
+        Maximum fragment length for the histogram model.
     chunk_size : int
         Fragments per buffer chunk (default 1M).
     max_memory_bytes : int
@@ -211,13 +218,14 @@ def scan_and_buffer(
 
     Returns
     -------
-    tuple[PipelineStats, StrandModels, InsertSizeModels, FragmentBuffer]
+    tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]
     """
     stats = PipelineStats()
     bam_stats = stats.as_bam_stats_dict()
 
     strand_models = StrandModels()
-    insert_models = InsertSizeModels(max_size=insert_size_max)
+    strand_models.min_spliced_observations = max(1, int(min_spliced_observations))
+    frag_length_models = FragmentLengthModels(max_size=max_frag_length)
     buffer = FragmentBuffer(
         t_to_g_arr=index.t_to_g_arr,
         chunk_size=chunk_size,
@@ -266,11 +274,15 @@ def scan_and_buffer(
                     stats.n_intergenic_spliced += 1
                 else:
                     stats.n_intergenic_unspliced += 1
+                if is_unique_mapper and not frag.introns:
+                    # Only unspliced intergenic fragments are reliable
+                    # for training.  Spliced intergenic fragments may be
+                    # novel unannotated transcripts or alignment artifacts.
+                    flen = frag.genomic_footprint
+                    if flen > 0:
+                        frag_length_models.observe(flen, splice_type=None)
+                        stats.n_frag_length_intergenic += 1
                 if is_unique_mapper:
-                    isize = fragment_insert_size(frag)
-                    if isize > 0:
-                        insert_models.observe(isize, splice_type=None)
-                        stats.n_insert_intergenic += 1
                     intergenic_strand = Strand.NONE
                     for eb in frag.exons:
                         intergenic_strand |= Strand(eb.strand)
@@ -281,6 +293,7 @@ def scan_and_buffer(
                 continue
 
             result.num_hits = num_hits
+            result.nm = frag.nm
 
             # --- Handle chimeric fragments ---
             if result.is_chimeric:
@@ -336,13 +349,19 @@ def scan_and_buffer(
                             result.exon_strand, gene_strand,
                         )
 
-                if result.insert_size > 0:
-                    insert_models.observe(
-                        result.insert_size, result.splice_type
-                    )
-                    stats.n_insert_unambiguous += 1
+                # Train fragment-length model.  Only use reads where
+                # ALL candidate transcripts agree on a single fragment
+                # length (i.e. no ambiguity from different SJ corrections).
+                fl_vals = result.frag_lengths
+                if fl_vals and len(set(fl_vals.values())) == 1:
+                    fl = next(iter(fl_vals.values()))
+                    if fl > 0:
+                        frag_length_models.observe(fl, result.splice_type)
+                        stats.n_frag_length_unambiguous += 1
+                    else:
+                        stats.n_frag_length_ambiguous += 1
                 else:
-                    stats.n_insert_ambiguous += 1
+                    stats.n_frag_length_ambiguous += 1
 
             # --- Buffer ALL resolved fragments with frag_id ---
             buffer.append(result, frag_id=frag_id)
@@ -376,9 +395,9 @@ def scan_and_buffer(
         f"{stats.n_multimapper_groups:,} multimapper molecules"
     )
     strand_models.log_summary()
-    insert_models.log_summary()
+    frag_length_models.log_summary()
 
-    return stats, strand_models, insert_models, buffer
+    return stats, strand_models, frag_length_models, buffer
 
 
 # ---------------------------------------------------------------------------
@@ -399,14 +418,17 @@ def scan_and_buffer(
 # isoforms (e.g. 150/151 vs 151/151 → log diff of only -0.007).
 _DEFAULT_OVERHANG_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_OVERHANG_ALPHA)
 
+# Mismatch (edit distance) penalty: log(mismatch_alpha) per NM mismatch.
+_DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_MISMATCH_ALPHA)
+
 
 def _score_candidate(
     exon_strand: int,
     t_strand: int,
     splice_type: int,
-    insert_size: int,
+    frag_length: int,
     strand_models: StrandModels,
-    insert_models: InsertSizeModels,
+    frag_length_models: FragmentLengthModels,
     overhang_bp: int = 0,
     overhang_log_penalty: float = _DEFAULT_OVERHANG_LOG_PENALTY,
 ) -> tuple[float, int]:
@@ -424,8 +446,8 @@ def _score_candidate(
     )
 
     log_p_insert = (
-        insert_models.global_model.log_likelihood(insert_size)
-        if insert_size > 0
+        frag_length_models.global_model.log_likelihood(frag_length)
+        if frag_length > 0
         else 0.0
     )
 
@@ -453,9 +475,9 @@ _GDNA_SPLICE_PENALTIES = {
 def _score_gdna_candidate(
     exon_strand: int,
     splice_type: int,
-    insert_size: int,
+    frag_length: int,
     strand_models: StrandModels,
-    insert_models: InsertSizeModels,
+    frag_length_models: FragmentLengthModels,
     gdna_splice_penalties: dict | None = None,
 ) -> float:
     """Compute data log-likelihood for the gDNA pseudo-component.
@@ -470,8 +492,8 @@ def _score_gdna_candidate(
     )
 
     log_p_insert = (
-        insert_models.global_model.log_likelihood(insert_size)
-        if insert_size > 0
+        frag_length_models.global_model.log_likelihood(frag_length)
+        if frag_length > 0
         else 0.0
     )
 
@@ -485,9 +507,9 @@ def _score_gdna_candidate(
 def _score_nrna_candidate(
     exon_strand: int,
     gene_strand: int,
-    insert_size: int,
+    frag_length: int,
     strand_models: StrandModels,
-    insert_models: InsertSizeModels,
+    frag_length_models: FragmentLengthModels,
     overhang_bp: int = 0,
     overhang_log_penalty: float = _DEFAULT_OVERHANG_LOG_PENALTY,
 ) -> float:
@@ -504,8 +526,8 @@ def _score_nrna_candidate(
     )
 
     log_p_insert = (
-        insert_models.global_model.log_likelihood(insert_size)
-        if insert_size > 0
+        frag_length_models.global_model.log_likelihood(frag_length)
+        if frag_length > 0
         else 0.0
     )
 
@@ -525,12 +547,13 @@ def _scan_and_build_em_data(
     buffer: FragmentBuffer,
     index: HulkIndex,
     strand_models: StrandModels,
-    insert_models: InsertSizeModels,
+    frag_length_models: FragmentLengthModels,
     counter: ReadCounter,
     stats: PipelineStats,
     log_every: int,
     gdna_splice_penalties: dict | None = None,
     overhang_log_penalty: float | None = None,
+    mismatch_log_penalty: float | None = None,
 ) -> EMData:
     """Single buffer pass: assign uniques + build mRNA/nRNA EM data.
 
@@ -549,6 +572,11 @@ def _scan_and_build_em_data(
         if overhang_log_penalty is not None
         else _DEFAULT_OVERHANG_LOG_PENALTY
     )
+    _mismatch_lp = (
+        mismatch_log_penalty
+        if mismatch_log_penalty is not None
+        else _DEFAULT_MISMATCH_LOG_PENALTY
+    )
 
     # Pre-compute scoring constants to avoid per-call overhead.
     # Strand: use the best RNA model's cached probabilities.
@@ -565,9 +593,21 @@ def _scan_and_build_em_data(
     _log_ig_p = math.log(max(_ig_p, _LOG_SAFE_FLOOR))
 
     # Insert model: pre-finalized LUT accessed via array index.
-    _ins_model = insert_models.global_model
-    _ins_log_prob = _ins_model._log_prob  # numpy array, may be None
-    _ins_max_size = _ins_model.max_size
+    _fl_model = frag_length_models.global_model
+    _fl_log_prob = _fl_model._log_prob  # numpy array, may be None
+    _fl_max_size = _fl_model.max_size
+    _fl_tail_base: float = getattr(_fl_model, "_tail_base", 0.0)
+
+    def _frag_len_ll(flen: int) -> float:
+        """Fragment-length log-likelihood (0.0 when unavailable)."""
+        if flen <= 0:
+            return 0.0
+        if _fl_log_prob is not None:
+            if flen <= _fl_max_size:
+                return float(_fl_log_prob[flen])
+            # Exponential tail decay beyond max_size
+            return _fl_tail_base + (flen - _fl_max_size) * _TAIL_DECAY_LP
+        return _fl_model.log_likelihood(flen)
 
     # Transcript strand array for fast lookup.
     _t_strand_arr = index.t_to_strand_arr
@@ -596,25 +636,22 @@ def _scan_and_build_em_data(
         only the winner(s) — minimum overhang (ties included) — enter
         the EM.  The exponential overhang penalty then scores them.
 
+        Each candidate gets its own per-transcript fragment-length
+        log-probability (different transcripts may correct different
+        introns in the gap between mate pairs).
+
         Applied uniformly to spliced and unspliced fragments alike.
         """
         best_ll = -np.inf
         best_ct = 0
-        fl = bf.frag_length if bf.frag_length > 0 else 1
+        fl = bf.read_length if bf.read_length > 0 else 1
         _es = bf.exon_strand
-        _isize = bf.insert_size
+        _frag_lengths = bf.frag_lengths
         _spl = bf.splice_type
+        _nm = bf.nm
 
-        # Pre-compute insert log-probability (same for all candidates)
-        if _isize > 0 and _ins_log_prob is not None:
-            _idx = _isize if _isize <= _ins_max_size else _ins_max_size
-            if _idx < 0:
-                _idx = 0
-            _log_ins = float(_ins_log_prob[_idx])
-        elif _isize > 0:
-            _log_ins = _ins_model.log_likelihood(_isize)
-        else:
-            _log_ins = 0.0
+        # Pre-compute mismatch penalty (same for all candidates in this hit)
+        _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
 
         # Determine strand log-probabilities for this fragment
         # (depends on whether exon_strand is informative)
@@ -651,6 +688,10 @@ def _scan_and_build_em_data(
                     oh = 0
                 if oh != min_oh:
                     continue
+                # Per-candidate fragment-length log-probability
+                _log_fl = _frag_len_ll(
+                    int(_frag_lengths[k]) if _frag_lengths is not None else -1
+                )
                 # Inlined _score_candidate:
                 t_strand = int(_t_strand_arr[t_idx_int])
                 if _es == t_strand:
@@ -659,7 +700,7 @@ def _scan_and_build_em_data(
                 else:
                     log_strand = _log_diff
                     anti = not _anti_flag
-                log_lik = log_strand + _log_ins + oh * _overhang_lp
+                log_lik = log_strand + _log_fl + oh * _overhang_lp + _log_nm
                 ct = _spl * 2 + int(anti)
                 t_indices_list.append(t_idx_int)
                 log_liks_list.append(log_lik)
@@ -676,20 +717,15 @@ def _scan_and_build_em_data(
         (span_bp = exon_bp + intron_bp) are eligible.  Among those,
         only the winner(s) — minimum nRNA overhang — enter the EM.
         """
-        fl = bf.frag_length if bf.frag_length > 0 else 1
+        fl = bf.read_length if bf.read_length > 0 else 1
         _es = bf.exon_strand
-        _isize = bf.insert_size
+        _nm = bf.nm
 
-        # Pre-compute insert log-probability (same for all candidates)
-        if _isize > 0 and _ins_log_prob is not None:
-            _idx = _isize if _isize <= _ins_max_size else _ins_max_size
-            if _idx < 0:
-                _idx = 0
-            _log_ins = float(_ins_log_prob[_idx])
-        elif _isize > 0:
-            _log_ins = _ins_model.log_likelihood(_isize)
-        else:
-            _log_ins = 0.0
+        # nRNA/gDNA use genomic footprint (full span, no intron subtraction)
+        _log_fl = _frag_len_ll(bf.genomic_footprint)
+
+        # Pre-compute mismatch penalty (same for all candidates in this hit)
+        _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
 
         # Strand log-probabilities for nRNA (uses same RNA model)
         if _es == 1 or _es == 2:
@@ -736,7 +772,7 @@ def _scan_and_build_em_data(
                     log_strand = _log_same
                 else:
                     log_strand = _log_diff
-                nrna_ll = log_strand + _log_ins + oh * _overhang_lp
+                nrna_ll = log_strand + _log_fl + oh * _overhang_lp + _log_nm
                 nrna_idx = nrna_base + t_idx_int
                 t_indices_list.append(nrna_idx)
                 log_liks_list.append(nrna_ll)
@@ -753,7 +789,6 @@ def _scan_and_build_em_data(
         # Inlined gDNA log-likelihood (only for unspliced)
         if not is_spl:
             _es = bf.exon_strand
-            _isize = bf.insert_size
             # Splice penalty
             _sp = _gdna_pens.get(st, 1.0)
             # Strand (intergenic model, vs POS reference)
@@ -762,16 +797,7 @@ def _scan_and_build_em_data(
             else:
                 _p_ig = 0.5
             _log_s = math.log(max(_p_ig, _LOG_SAFE_FLOOR))
-            # Insert
-            if _isize > 0 and _ins_log_prob is not None:
-                _idx = _isize if _isize <= _ins_max_size else _ins_max_size
-                if _idx < 0:
-                    _idx = 0
-                _log_i = float(_ins_log_prob[_idx])
-            elif _isize > 0:
-                _log_i = _ins_model.log_likelihood(_isize)
-            else:
-                _log_i = 0.0
+            _log_i = _frag_len_ll(bf.genomic_footprint)
             gdna_ll_list.append(
                 _log_s + _log_i + math.log(max(_sp, _LOG_SAFE_FLOOR))
             )
@@ -797,20 +823,13 @@ def _scan_and_build_em_data(
         # overhang is primary key (lower better), log_lik is tiebreaker.
         best_per_t: dict[int, tuple[int, float, int]] = {}
         for bf in mm_pending:
-            fl = bf.frag_length if bf.frag_length > 0 else 1
+            fl = bf.read_length if bf.read_length > 0 else 1
             _es = bf.exon_strand
-            _isize = bf.insert_size
             _spl = bf.splice_type
-            # Pre-compute insert log-prob for this alignment
-            if _isize > 0 and _ins_log_prob is not None:
-                _idx = _isize if _isize <= _ins_max_size else _ins_max_size
-                if _idx < 0:
-                    _idx = 0
-                _log_ins = float(_ins_log_prob[_idx])
-            elif _isize > 0:
-                _log_ins = _ins_model.log_likelihood(_isize)
-            else:
-                _log_ins = 0.0
+            _nm = bf.nm
+            _frag_lengths = bf.frag_lengths
+            # Pre-compute mismatch penalty for this hit
+            _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
             # Strand log-probs
             if _es == 1 or _es == 2:
                 _log_same = _log_p_sense
@@ -826,6 +845,10 @@ def _scan_and_build_em_data(
                 oh = fl - ebp
                 if oh < 0:
                     oh = 0
+                # Per-candidate fragment-length log-probability
+                _log_fl = _frag_len_ll(
+                    int(_frag_lengths[k]) if _frag_lengths is not None else -1
+                )
                 # Inlined scoring
                 t_strand = int(_t_strand_arr[t_idx_int])
                 if _es == t_strand:
@@ -834,7 +857,7 @@ def _scan_and_build_em_data(
                 else:
                     log_strand = _log_diff
                     anti = not _anti_flag
-                log_lik = log_strand + _log_ins + oh * _overhang_lp
+                log_lik = log_strand + _log_fl + oh * _overhang_lp + _log_nm
                 ct = _spl * 2 + int(anti)
                 prev = best_per_t.get(t_idx_int)
                 if prev is None or oh < prev[0] or (
@@ -866,19 +889,13 @@ def _scan_and_build_em_data(
             for bf in mm_pending:
                 if bf.splice_type == _SPLICE_ANNOT:
                     continue
-                fl = bf.frag_length if bf.frag_length > 0 else 1
+                fl = bf.read_length if bf.read_length > 0 else 1
                 _es = bf.exon_strand
-                _isize = bf.insert_size
-                # Pre-compute insert log-prob
-                if _isize > 0 and _ins_log_prob is not None:
-                    _idx = _isize if _isize <= _ins_max_size else _ins_max_size
-                    if _idx < 0:
-                        _idx = 0
-                    _log_ins = float(_ins_log_prob[_idx])
-                elif _isize > 0:
-                    _log_ins = _ins_model.log_likelihood(_isize)
-                else:
-                    _log_ins = 0.0
+                _nm = bf.nm
+                # nRNA/gDNA use genomic footprint
+                _log_fl = _frag_len_ll(bf.genomic_footprint)
+                # Pre-compute mismatch penalty for this hit
+                _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
                 # Strand log-probs
                 if _es == 1 or _es == 2:
                     _log_same = _log_p_sense
@@ -910,7 +927,7 @@ def _scan_and_build_em_data(
                         log_strand = _log_same
                     else:
                         log_strand = _log_diff
-                    nrna_ll = log_strand + _log_ins + oh * _overhang_lp
+                    nrna_ll = log_strand + _log_fl + oh * _overhang_lp + _log_nm
                     prev = best_nrna.get(t_idx_int)
                     if prev is None or oh < prev[0] or (
                         oh == prev[0] and nrna_ll > prev[1]
@@ -945,22 +962,13 @@ def _scan_and_build_em_data(
                         continue
                     # Inlined gDNA scoring
                     _es = bf.exon_strand
-                    _isize = bf.insert_size
                     _sp = _gdna_pens.get(st, 1.0)
                     if _es == 1 or _es == 2:
                         _p_ig = _ig_p if _es == 1 else (1.0 - _ig_p)
                     else:
                         _p_ig = 0.5
                     _log_s = math.log(max(_p_ig, _LOG_SAFE_FLOOR))
-                    if _isize > 0 and _ins_log_prob is not None:
-                        _idx = _isize if _isize <= _ins_max_size else _ins_max_size
-                        if _idx < 0:
-                            _idx = 0
-                        _log_i = float(_ins_log_prob[_idx])
-                    elif _isize > 0:
-                        _log_i = _ins_model.log_likelihood(_isize)
-                    else:
-                        _log_i = 0.0
+                    _log_i = _frag_len_ll(bf.genomic_footprint)
                     gdna_ll = (
                         _log_s + _log_i
                         + math.log(max(_sp, _LOG_SAFE_FLOOR))
@@ -1011,8 +1019,8 @@ def _scan_and_build_em_data(
                 for _k, _t_idx in enumerate(bf.t_inds):
                     _t_idx_int = int(_t_idx)
                     _has_intron = (
-                        bf.intron_bp is not None
-                        and bf.intron_bp[_k] > 0
+                        bf.unambig_intron_bp is not None
+                        and bf.unambig_intron_bp[_k] > 0
                     )
                     if _has_intron:
                         if _is_anti:
@@ -1455,9 +1463,20 @@ def _build_locus_em_data(
 
     # Zero nRNA prior for single-exon transcripts (vectorized)
     if counter._transcript_spans is not None:
-        t_exon_approx = counter._t_eff_len[t_arr] + mean_frag - 1.0
-        single_exon = counter._transcript_spans[t_arr] <= t_exon_approx
+        # Use raw exonic lengths when available; fall back to
+        # mean-based approximation only if exonic_lengths not stored.
+        if counter._exonic_lengths is not None:
+            t_exon = counter._exonic_lengths[t_arr]
+        else:
+            t_exon = counter._t_eff_len[t_arr] + mean_frag - 1.0
+        single_exon = counter._transcript_spans[t_arr] <= t_exon
         prior[n_t:2*n_t][single_exon] = 0.0
+
+    # Zero nRNA prior when nrna_init is zero for that transcript
+    # (mirrors the gDNA zero-forcing: if there is no intronic evidence
+    #  for nascent RNA, don't let the prior seed phantom nRNA counts)
+    nrna_init_local = unique_totals[n_t:2*n_t]
+    prior[n_t:2*n_t][nrna_init_local == 0.0] = 0.0
 
     return LocusEMData(
         locus=locus,
@@ -1487,7 +1506,7 @@ def _compute_nrna_init(
     transcript_intronic_sense: np.ndarray,
     transcript_intronic_antisense: np.ndarray,
     transcript_spans: np.ndarray,
-    effective_lengths: np.ndarray,
+    exonic_lengths: np.ndarray,
     mean_frag: float,
     strand_models: StrandModels,
 ) -> np.ndarray:
@@ -1516,8 +1535,7 @@ def _compute_nrna_init(
         ) / denom
         nrna_init = np.maximum(0.0, raw)
 
-    exonic_approx = effective_lengths + mean_frag - 1.0
-    intronic_span = np.maximum(transcript_spans - exonic_approx, 0.0)
+    intronic_span = np.maximum(transcript_spans - exonic_lengths, 0.0)
     nrna_init[intronic_span <= 0] = 0.0
 
     return nrna_init
@@ -1686,7 +1704,7 @@ def count_from_buffer(
     buffer: FragmentBuffer,
     index: HulkIndex,
     strand_models: StrandModels,
-    insert_models: InsertSizeModels,
+    frag_length_models: FragmentLengthModels,
     stats: PipelineStats,
     *,
     seed: int | None = None,
@@ -1696,6 +1714,7 @@ def count_from_buffer(
     gdna_splice_penalties: dict | None = None,
     confidence_threshold: float = 0.95,
     overhang_log_penalty: float | None = None,
+    mismatch_log_penalty: float | None = None,
 ) -> ReadCounter:
     """Assign counts from buffered fragments via locus-level EM.
 
@@ -1713,7 +1732,7 @@ def count_from_buffer(
     buffer : FragmentBuffer
     index : HulkIndex
     strand_models : StrandModels
-    insert_models : InsertSizeModels
+    frag_length_models : FragmentLengthModels
     stats : PipelineStats
     seed : int or None
     em_pseudocount : float
@@ -1723,6 +1742,9 @@ def count_from_buffer(
     confidence_threshold : float
     overhang_log_penalty : float or None
         Per-base overhang log-penalty (default log(0.01)).
+    mismatch_log_penalty : float or None
+        Per-mismatch (NM) log-penalty (default log(0.1)).
+
     Returns
     -------
     ReadCounter
@@ -1730,11 +1752,24 @@ def count_from_buffer(
     # --- Compute geometry ---
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
     mean_frag = (
-        insert_models.global_model.mean
-        if insert_models.global_model.n_observations > 0
+        frag_length_models.global_model.mean
+        if frag_length_models.global_model.n_observations > 0
         else 200.0
     )
-    effective_lengths = np.maximum(exonic_lengths - mean_frag + 1.0, 1.0)
+    # Analytical effective lengths via the full fragment length eCDF
+    # (equivalent to salmon's computeLogEffectiveLength).  Falls back
+    # to the simple max(L - mean + 1, 1) formula only when the insert
+    # model has no observations.
+    if frag_length_models.global_model.n_observations > 0:
+        effective_lengths = (
+            frag_length_models.global_model.compute_all_transcript_eff_lens(
+                exonic_lengths.astype(np.int64),
+            )
+        )
+    else:
+        effective_lengths = np.maximum(
+            exonic_lengths - mean_frag + 1.0, 1.0,
+        )
 
     gene_spans = (
         index.g_df["end"].values - index.g_df["start"].values
@@ -1750,6 +1785,7 @@ def count_from_buffer(
         index.num_transcripts, index.num_genes,
         seed=seed, alpha=em_pseudocount,
         effective_lengths=effective_lengths,
+        exonic_lengths=exonic_lengths,
         t_to_g=index.t_to_g_arr,
         gene_spans=gene_spans,
         mean_frag=mean_frag,
@@ -1764,10 +1800,11 @@ def count_from_buffer(
 
     # Single buffer pass: assign uniques + build EM data (RNA only)
     em_data = _scan_and_build_em_data(
-        buffer, index, strand_models, insert_models,
+        buffer, index, strand_models, frag_length_models,
         counter, stats, log_every,
         gdna_splice_penalties=gdna_splice_penalties,
         overhang_log_penalty=overhang_log_penalty,
+        mismatch_log_penalty=mismatch_log_penalty,
     )
 
     # Per-transcript nRNA init from intronic sense excess
@@ -1775,7 +1812,7 @@ def count_from_buffer(
         counter.transcript_intronic_sense,
         counter.transcript_intronic_antisense,
         transcript_spans,
-        effective_lengths,
+        exonic_lengths,
         mean_frag,
         strand_models,
     )
@@ -1886,7 +1923,7 @@ def run_pipeline(
     *,
     skip_duplicates: bool = True,
     include_multimap: bool = False,
-    insert_size_max: int = 1000,
+    max_frag_length: int = 1000,
     log_every: int = 1_000_000,
     chunk_size: int = 1_000_000,
     max_memory_bytes: int = 2 * 1024**3,
@@ -1900,6 +1937,9 @@ def run_pipeline(
     overlap_min_frac: float = 0.99,
     overhang_alpha: float | None = None,
     overhang_log_penalty: float | None = None,
+    mismatch_alpha: float | None = None,
+    mismatch_log_penalty: float | None = None,
+    min_spliced_observations: int = 10,
 ) -> PipelineResult:
     """Run the complete counting pipeline with locus-level EM.
 
@@ -1916,8 +1956,8 @@ def run_pipeline(
         Discard reads marked as duplicates (default True).
     include_multimap : bool
         Include multimapping reads (default False).
-    insert_size_max : int
-        Maximum insert size for histogram models.
+    max_frag_length : int
+        Maximum fragment length for histogram models.
     log_every : int
         Log progress every *log_every* read-name groups.
     chunk_size : int
@@ -1938,6 +1978,10 @@ def run_pipeline(
         gDNA splice penalty for SPLICED_UNANNOT fragments.
     confidence_threshold : float
         Posterior threshold for high-confidence assignment.
+    min_spliced_observations : int
+        Minimum number of exonic_spliced observations required before
+        treating the pure spliced strand model as reliable. If fewer
+        observations are available, a pooled fallback model is used.
 
     Returns
     -------
@@ -1962,19 +2006,20 @@ def run_pipeline(
     # -- Single BAM pass --
     bamfh = pysam.AlignmentFile(bam_path, "rb")
     try:
-        stats, strand_models, insert_models, buffer = (
+        stats, strand_models, frag_length_models, buffer = (
             scan_and_buffer(
                 bamfh.fetch(until_eof=True),
                 index,
                 skip_duplicates=skip_duplicates,
                 include_multimap=include_multimap,
                 log_every=log_every,
-                insert_size_max=insert_size_max,
+                max_frag_length=max_frag_length,
                 chunk_size=chunk_size,
                 max_memory_bytes=max_memory_bytes,
                 spill_dir=spill_dir,
                 sj_strand_tag=sj_strand_tag,
                 overlap_min_frac=overlap_min_frac,
+                min_spliced_observations=min_spliced_observations,
             )
         )
     finally:
@@ -1982,7 +2027,7 @@ def run_pipeline(
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
-    insert_models.finalize()
+    frag_length_models.finalize()
 
     # -- Count assignment via locus-level EM --
     gdna_splice_penalties = dict(_GDNA_SPLICE_PENALTIES)
@@ -1994,12 +2039,16 @@ def run_pipeline(
     if overhang_log_penalty is None and overhang_alpha is not None:
         overhang_log_penalty = overhang_alpha_to_log_penalty(overhang_alpha)
 
+    # Resolve mismatch penalty: explicit log_penalty wins, then alpha, then default
+    if mismatch_log_penalty is None and mismatch_alpha is not None:
+        mismatch_log_penalty = overhang_alpha_to_log_penalty(mismatch_alpha)
+
     try:
         counter = count_from_buffer(
             buffer,
             index,
             strand_models,
-            insert_models,
+            frag_length_models,
             stats,
             seed=seed,
             em_pseudocount=em_pseudocount,
@@ -2008,6 +2057,7 @@ def run_pipeline(
             gdna_splice_penalties=gdna_splice_penalties,
             confidence_threshold=confidence_threshold,
             overhang_log_penalty=overhang_log_penalty,
+            mismatch_log_penalty=mismatch_log_penalty,
         )
     finally:
         buffer.cleanup()
@@ -2015,6 +2065,6 @@ def run_pipeline(
     return PipelineResult(
         stats=stats,
         strand_models=strand_models,
-        insert_models=insert_models,
+        frag_length_models=frag_length_models,
         counter=counter,
     )

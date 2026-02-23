@@ -387,6 +387,13 @@ class StrandModels:
     _rna_model_cache: StrandModel | None = field(
         default=None, repr=False, compare=False,
     )
+    _fallback_model_cache: StrandModel | None = field(
+        default=None, repr=False, compare=False,
+    )
+
+    # Minimum observations for exonic_spliced to be considered reliable.
+    # This threshold is heuristic and can be tuned by callers.
+    min_spliced_observations: int = 10
 
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
@@ -403,8 +410,26 @@ class StrandModels:
     # Category-aware model selection
     # ------------------------------------------------------------------
 
-    # Minimum observations for exonic_spliced to be considered reliable
-    _MIN_SPLICED_OBS = 10
+    def _pooled_fallback_model(self) -> StrandModel:
+        """Build exonic fallback model pooled with available spliced evidence.
+
+        This ensures sparse but high-quality ``exonic_spliced`` observations
+        still contribute when we fall back away from the pure spliced model.
+        """
+        if self._fallback_model_cache is not None:
+            return self._fallback_model_cache
+
+        pooled = StrandModel(
+            prior_alpha=self.exonic.prior_alpha,
+            prior_beta=self.exonic.prior_beta,
+            pos_pos=self.exonic.pos_pos + self.exonic_spliced.pos_pos,
+            pos_neg=self.exonic.pos_neg + self.exonic_spliced.pos_neg,
+            neg_pos=self.exonic.neg_pos + self.exonic_spliced.neg_pos,
+            neg_neg=self.exonic.neg_neg + self.exonic_spliced.neg_neg,
+        )
+        pooled.finalize()
+        self._fallback_model_cache = pooled
+        return pooled
 
     def _best_rna_model(self) -> StrandModel:
         """Return the best available strand model for transcript scoring.
@@ -423,24 +448,38 @@ class StrandModels:
         if self._rna_model_cache is not None:
             return self._rna_model_cache
 
-        if self.exonic_spliced.n_observations >= self._MIN_SPLICED_OBS:
+        min_obs = max(1, int(self.min_spliced_observations))
+        if self.exonic_spliced.n_observations >= min_obs:
+            if self.exonic_spliced.n_observations < (2 * min_obs):
+                logger.warning(
+                    "exonic_spliced has low support (%d observations, threshold=%d); "
+                    "strand estimates may be noisy",
+                    self.exonic_spliced.n_observations,
+                    min_obs,
+                )
             self._rna_model_cache = self.exonic_spliced
-        elif self.exonic.n_observations >= self._MIN_SPLICED_OBS:
+        elif self.exonic.n_observations + self.exonic_spliced.n_observations >= min_obs:
+            pooled = self._pooled_fallback_model()
             logger.warning(
-                f"exonic_spliced has only "
-                f"{self.exonic_spliced.n_observations} observations "
-                f"(< {self._MIN_SPLICED_OBS}); falling back to exonic "
-                f"model ({self.exonic.n_observations} observations, "
-                f"SS={self.exonic.strand_specificity:.4f})"
+                "exonic_spliced has only %d observations (< %d); using pooled "
+                "fallback model with exonic (%d) + exonic_spliced (%d) obs "
+                "[pooled=%d, SS=%.4f]. Threshold is heuristic; review if this "
+                "warning is frequent.",
+                self.exonic_spliced.n_observations,
+                min_obs,
+                self.exonic.n_observations,
+                self.exonic_spliced.n_observations,
+                pooled.n_observations,
+                pooled.strand_specificity,
             )
-            self._rna_model_cache = self.exonic
+            self._rna_model_cache = pooled
         else:
             raise RuntimeError(
                 f"Insufficient strand observations for reliable "
                 f"estimation. exonic_spliced: "
                 f"{self.exonic_spliced.n_observations}, exonic: "
                 f"{self.exonic.n_observations} "
-                f"(need >= {self._MIN_SPLICED_OBS}). "
+                f"(need >= {min_obs} pooled observations). "
                 f"Is this stranded RNA-seq data?"
             )
         return self._rna_model_cache

@@ -16,7 +16,7 @@ import pytest
 from hulkrna.categories import SpliceType, SpliceStrandCol, NUM_SPLICE_STRAND_COLS
 from hulkrna.counter import ReadCounter, EMData, Locus, LocusEMData
 from hulkrna.pipeline import _score_gdna_candidate, _GDNA_SPLICE_PENALTIES
-from hulkrna.insert_model import InsertSizeModels
+from hulkrna.frag_length_model import FragmentLengthModels
 from hulkrna.strand_model import StrandModel, StrandModels
 from hulkrna.types import Strand
 
@@ -30,9 +30,9 @@ _UNSPLICED_SENSE = int(SpliceStrandCol.UNSPLICED_SENSE)
 # =====================================================================
 
 
-def _make_insert_models(n_obs=200, size=250):
-    """InsertSizeModels with observations for all categories + intergenic."""
-    im = InsertSizeModels()
+def _make_frag_length_models(n_obs=200, size=250):
+    """FragmentLengthModels with observations for all categories + intergenic."""
+    im = FragmentLengthModels()
     for _ in range(n_obs):
         im.observe(size, SpliceType.SPLICED_ANNOT)
         im.observe(size, SpliceType.UNSPLICED)
@@ -189,7 +189,7 @@ class TestScoreGDNA:
 
     def test_unspliced_no_penalty(self):
         """UNSPLICED gets splice_penalty=1.0 → log(1)=0."""
-        im = _make_insert_models()
+        im = _make_frag_length_models()
         sms = _make_strand_models_default()
         cat = int(SpliceType.UNSPLICED)
         score = _score_gdna_candidate(
@@ -205,7 +205,7 @@ class TestScoreGDNA:
 
     def test_spliced_unannot_penalty(self):
         """SPLICED_UNANNOT gets heavy penalty (default 0.01)."""
-        im = _make_insert_models()
+        im = _make_frag_length_models()
         sms = _make_strand_models_default()
         score_unannot = _score_gdna_candidate(
             int(Strand.POS), int(SpliceType.SPLICED_UNANNOT), 250,
@@ -221,7 +221,7 @@ class TestScoreGDNA:
 
     def test_custom_penalties(self):
         """Custom penalty dict overrides defaults."""
-        im = _make_insert_models()
+        im = _make_frag_length_models()
         sms = _make_strand_models_default()
         cat = int(SpliceType.UNSPLICED)
         custom = {SpliceType.UNSPLICED: 0.5}
@@ -234,9 +234,9 @@ class TestScoreGDNA:
         expected = np.log(0.5) + global_model.log_likelihood(250) + np.log(0.5)
         assert score == pytest.approx(expected)
 
-    def test_zero_insert_size(self):
-        """insert_size=0 → P_insert=1.0 (log=0)."""
-        im = _make_insert_models()
+    def test_zero_frag_length(self):
+        """frag_length=0 → P_insert=1.0 (log=0)."""
+        im = _make_frag_length_models()
         sms = _make_strand_models_default()
         score = _score_gdna_candidate(
             int(Strand.POS), int(SpliceType.UNSPLICED), 0,
@@ -595,9 +595,9 @@ class TestComputeNrnaInit:
         sense = np.zeros(3, dtype=np.float64)
         anti = np.zeros(3, dtype=np.float64)
         spans = np.array([10000.0, 5000.0, 1000.0])
-        eff_len = np.array([500.0, 300.0, 800.0])
+        exonic_len = np.array([699.0, 499.0, 800.0])
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         np.testing.assert_array_equal(nrna, [0.0, 0.0, 0.0])
 
     def test_sense_excess_produces_nrna(self):
@@ -607,9 +607,9 @@ class TestComputeNrnaInit:
         sense = np.array([100.0, 50.0])
         anti = np.array([20.0, 10.0])
         spans = np.array([10000.0, 5000.0])
-        eff_len = np.array([500.0, 300.0])
+        exonic_len = np.array([699.0, 499.0])
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         # At SS≈1.0, formula ≈ (sense - anti) / 1.0 ≈ sense - anti
         assert nrna[0] == pytest.approx(80.0, abs=2.0)  # 100 - 20
         assert nrna[1] == pytest.approx(40.0, abs=2.0)  # 50 - 10
@@ -621,9 +621,9 @@ class TestComputeNrnaInit:
         sense = np.array([10.0])
         anti = np.array([50.0])
         spans = np.array([10000.0])
-        eff_len = np.array([500.0])
+        exonic_len = np.array([699.0])
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         assert nrna[0] == 0.0
 
     def test_single_exon_zeroed(self):
@@ -632,13 +632,12 @@ class TestComputeNrnaInit:
 
         sense = np.array([100.0])
         anti = np.array([10.0])
-        # transcript_span ≈ eff_len + mean_frag - 1 (no introns)
-        eff_len = np.array([500.0])
+        # transcript_span = exonic length (single exon, no introns)
+        exonic_len = np.array([699.0])
         mean_frag = 200.0
-        exonic_approx = eff_len[0] + mean_frag - 1.0  # 699
-        spans = np.array([exonic_approx])  # no introns
+        spans = np.array([699.0])  # no introns
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, mean_frag, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, mean_frag, sm)
         assert nrna[0] == 0.0
 
     def test_multi_exon_not_zeroed(self):
@@ -647,11 +646,11 @@ class TestComputeNrnaInit:
 
         sense = np.array([100.0])
         anti = np.array([10.0])
-        eff_len = np.array([500.0])
+        exonic_len = np.array([699.0])
         mean_frag = 200.0
         spans = np.array([5000.0])  # large introns
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, mean_frag, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, mean_frag, sm)
         assert nrna[0] == pytest.approx(90.0, abs=2.0)
 
     def test_output_shape(self):
@@ -661,9 +660,9 @@ class TestComputeNrnaInit:
         sense = np.zeros(5, dtype=np.float64)
         anti = np.zeros(5, dtype=np.float64)
         spans = np.full(5, 10000.0)
-        eff_len = np.full(5, 500.0)
+        exonic_len = np.full(5, 699.0)
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         assert nrna.shape == (5,)
         assert nrna.dtype == np.float64
 
@@ -674,9 +673,9 @@ class TestComputeNrnaInit:
         sense = np.array([100.0])
         anti = np.array([20.0])
         spans = np.array([10000.0])
-        eff_len = np.array([500.0])
+        exonic_len = np.array([699.0])
         sm = _make_strand_models_with_ss(0.9)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         ss = sm.exonic_spliced.strand_specificity
         denom = 2.0 * ss - 1.0
         expected = (100.0 - 20.0) / denom
@@ -689,14 +688,14 @@ class TestComputeNrnaInit:
         sense = np.array([100.0])
         anti = np.array([50.0])
         spans = np.array([10000.0])
-        eff_len = np.array([500.0])
+        exonic_len = np.array([699.0])
         # SS=0.5
         sm = _make_strand_models_with_ss(0.5)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         assert nrna[0] == 0.0
         # SS=0.6 (boundary)
         sm = _make_strand_models_with_ss(0.6)
-        nrna = _compute_nrna_init(sense, anti, spans, eff_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
         assert nrna[0] == 0.0
 
 
@@ -844,7 +843,7 @@ class TestStrandModelsContainer:
         assert sm.intergenic.n_observations == 1
 
     def test_model_for_category(self):
-        """model_for_category cascades: exonic_spliced → exonic → error."""
+        """model_for_category cascades: exonic_spliced → pooled-fallback → error."""
         from hulkrna.strand_model import StrandModels, StrandModel
         from hulkrna.categories import SpliceType
         from hulkrna.types import Strand
@@ -858,14 +857,19 @@ class TestStrandModelsContainer:
         assert m is sm1.exonic_spliced
         assert sm1.model_for_category(int(SpliceType.UNSPLICED)) is m
 
-        # --- Case 2: exonic_spliced insufficient, exonic sufficient → fallback ---
+        # --- Case 2: exonic_spliced insufficient, exonic sufficient → pooled fallback ---
         sm2 = StrandModels()
         for _ in range(3):
             sm2.exonic_spliced.observe(Strand.POS, Strand.POS)
         for _ in range(20):
             sm2.exonic.observe(Strand.POS, Strand.POS)
         m2 = sm2.model_for_category(int(SpliceType.UNSPLICED))
-        assert m2 is sm2.exonic
+        assert isinstance(m2, StrandModel)
+        assert m2 is not sm2.exonic
+        assert m2 is not sm2.exonic_spliced
+        assert m2.n_observations == (
+            sm2.exonic.n_observations + sm2.exonic_spliced.n_observations
+        )
 
         # --- Case 3: both insufficient → RuntimeError ---
         sm3 = StrandModels()
