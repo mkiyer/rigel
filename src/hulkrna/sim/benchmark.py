@@ -16,8 +16,6 @@ Usage
 
 from dataclasses import dataclass, field
 
-import numpy as np
-
 from ..pipeline import PipelineResult
 
 __all__ = [
@@ -89,7 +87,7 @@ class BenchmarkResult:
     n_gdna_expected : int
         Ground-truth gDNA fragment count (from simulation read names).
     n_gdna_pipeline : float
-        gDNA count reported by the pipeline (``counter.gdna_total``).
+        gDNA count reported by the pipeline (``estimator.gdna_total``).
     transcripts : list[TranscriptAccuracy]
         Per-transcript accuracy breakdown.
     stats_dict : dict
@@ -243,7 +241,7 @@ def run_benchmark(
     n_nrna_expected = scenario_result.ground_truth_nrna_count()
 
     # Observed: per-transcript total counts from the pipeline
-    t_counts = pipeline_result.counter.t_counts  # (N_t, 12) array
+    t_counts = pipeline_result.estimator.t_counts  # (N_t, 12) array
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
 
     # Build t_id → t_index mapping
@@ -257,11 +255,11 @@ def run_benchmark(
     # gdna_total (which also includes shadow_init prior, a Bayesian
     # regularization term that is not a real fragment count).
     n_gdna_pipeline = float(
-        stats.n_intergenic + pipeline_result.counter.gdna_em_count
+        stats.n_intergenic + pipeline_result.estimator.gdna_em_count
     )
 
     # Pipeline nRNA count: EM-assigned nascent RNA fragments.
-    n_nrna_pipeline = float(pipeline_result.counter.nrna_em_count)
+    n_nrna_pipeline = float(pipeline_result.estimator.nrna_em_count)
 
     # Per-transcript accuracy
     transcript_results: list[TranscriptAccuracy] = []

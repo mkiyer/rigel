@@ -5,7 +5,7 @@ Entry point: ``hulkrna`` (registered in pyproject.toml).
 
 Subcommands:
     hulkrna index   — Build reference index from FASTA + GTF
-    hulkrna count   — Single-pass Bayesian read counting
+    hulkrna count   — Single-pass Bayesian fragment abundance estimation
     hulkrna sim     — Generate synthetic test scenarios
 """
 
@@ -155,7 +155,7 @@ def count_command(args: argparse.Namespace) -> int:
     result.frag_length_models.write_json(fl_json)
 
     # Write count tables
-    counter = result.counter
+    counter = result.estimator
     counts_df = counter.get_counts_df(index)
     gene_counts_df = counter.get_gene_counts_df(index)
     detail_df = counter.get_detail_df(index)
@@ -251,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="hulkrna",
-        description="hulkrna: Bayesian RNA-seq read counting tool",
+        description="hulkrna: Bayesian RNA-seq fragment abundance estimation",
     )
     parser.add_argument(
         "--version", action="version", version=get_version(),

@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
-from .types import GenomicInterval, Interval, IntervalType, RefInterval, Strand
+from .types import GenomicInterval, IntervalType, RefInterval
 from .transcript import Transcript
 
 
@@ -267,7 +267,7 @@ def build_genomic_intervals(
     """Build the complete interval table covering the genome.
 
     Returns a DataFrame sorted by (ref, start, end, strand) with columns
-    matching the ``Interval`` NamedTuple fields.
+    matching the ``RefInterval`` NamedTuple fields.
     """
     intervals = list(_gen_genomic_intervals(transcripts, ref_lengths))
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
@@ -634,35 +634,24 @@ class HulkIndex:
             ``result[g_index]`` is a list of merged exon lengths for
             gene *g_index*.
         """
-        from .transcript import Transcript
-
         n_genes = self.num_genes
         # Collect per-gene exon intervals from interval table
         gene_exon_ivs: list[list[tuple[int, int]]] = [[] for _ in range(n_genes)]
 
-        # Use the interval arrays directly — EXON type intervals
-        exon_mask = self._iv_type == int(IntervalType.EXON)
-        # We need coords: need to re-read the interval DataFrame
-        # Instead, collect from transcript exons which are available via t_df
-        # and the Transcript data.  But we don't store raw exon coords in t_df.
-        # Use the cgranges index: iterate EXON intervals from _iv_* arrays.
-        # However, _iv arrays don't store coords.  Must use the intervals DataFrame.
-
-        # More efficient: collect exons per gene from t_df + exon data.
-        # The interval feather has (ref, start, end, strand, interval_type, t_index, g_index).
-        # Read it if available, or reconstruct from cgranges.
-
-        # Reconstruct from the interval file if index_dir is set
+        # Read exon intervals from the persisted interval file
         if self.index_dir is not None:
-            import os
             iv_df = pd.read_feather(
                 os.path.join(self.index_dir, INTERVALS_FEATHER)
             )
-            exon_rows = iv_df[iv_df["interval_type"] == int(IntervalType.EXON)]
-            for _, row in exon_rows.iterrows():
-                g_idx = int(row["g_index"])
-                if 0 <= g_idx < n_genes:
-                    gene_exon_ivs[g_idx].append((int(row["start"]), int(row["end"])))
+            exon_mask = iv_df["interval_type"].values == int(IntervalType.EXON)
+            g_indices = iv_df["g_index"].values[exon_mask]
+            starts = iv_df["start"].values[exon_mask]
+            ends = iv_df["end"].values[exon_mask]
+            valid = (g_indices >= 0) & (g_indices < n_genes)
+            for g_idx, s, e in zip(
+                g_indices[valid], starts[valid], ends[valid]
+            ):
+                gene_exon_ivs[g_idx].append((int(s), int(e)))
         else:
             # Fallback: use transcript table with uniform exon length
             for g_idx in range(n_genes):

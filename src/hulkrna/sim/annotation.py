@@ -8,9 +8,8 @@ GENCODE-style GTF annotation files.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 from ..gtf import GTF
 from ..transcript import Transcript

@@ -52,12 +52,11 @@ from .buffer import (
     FragmentBuffer,
     FRAG_UNIQUE,
     FRAG_ISOFORM_AMBIG,
-    FRAG_GENE_AMBIG,
     FRAG_MULTIMAPPER,
     FRAG_CHIMERIC,
 )
 from .categories import SpliceType
-from .counter import ReadCounter, EMData, Locus, LocusEMData
+from .estimator import AbundanceEstimator, ScanData, Locus, LocusEMInput
 from .fragment import Fragment
 from .types import ChimeraType, Strand
 from .index import HulkIndex
@@ -73,6 +72,9 @@ logger = logging.getLogger(__name__)
 
 # Floor value for log-safe clamping to avoid log(0).
 _LOG_SAFE_FLOOR = 1e-10
+
+# Pre-computed log(0.5) — used for uninformative strand log-probabilities.
+_LOG_HALF = math.log(0.5)
 
 # Default gDNA splice penalty for SPLICED_UNANNOT fragments.
 # Most unannotated splice junctions are real; a small penalty allows
@@ -153,7 +155,7 @@ class PipelineResult:
     stats: PipelineStats
     strand_models: StrandModels
     frag_length_models: FragmentLengthModels
-    counter: ReadCounter
+    estimator: AbundanceEstimator
 
 
 # ---------------------------------------------------------------------------
@@ -548,13 +550,13 @@ def _scan_and_build_em_data(
     index: HulkIndex,
     strand_models: StrandModels,
     frag_length_models: FragmentLengthModels,
-    counter: ReadCounter,
+    counter: AbundanceEstimator,
     stats: PipelineStats,
     log_every: int,
     gdna_splice_penalties: dict | None = None,
     overhang_log_penalty: float | None = None,
     mismatch_log_penalty: float | None = None,
-) -> EMData:
+) -> ScanData:
     """Single buffer pass: assign uniques + build mRNA/nRNA EM data.
 
     The global CSR contains ONLY mRNA + nRNA candidates.  gDNA candidates
@@ -661,7 +663,7 @@ def _scan_and_build_em_data(
             _log_diff = _log_p_antisense
         else:
             # Uninformative strand → 0.5 for all
-            _log_same = _log_diff = math.log(0.5)
+            _log_same = _log_diff = _LOG_HALF
 
         # Pass 1 — find minimum overhang among exon-overlapping candidates
         min_oh = fl + 1  # sentinel
@@ -732,7 +734,7 @@ def _scan_and_build_em_data(
             _log_same = _log_p_sense
             _log_diff = _log_p_antisense
         else:
-            _log_same = _log_diff = math.log(0.5)
+            _log_same = _log_diff = _LOG_HALF
 
         _exon_bp = bf.exon_bp
         _intron_bp = bf.intron_bp
@@ -835,7 +837,7 @@ def _scan_and_build_em_data(
                 _log_same = _log_p_sense
                 _log_diff = _log_p_antisense
             else:
-                _log_same = _log_diff = math.log(0.5)
+                _log_same = _log_diff = _LOG_HALF
             _exon_bp = bf.exon_bp
             for k in range(len(bf.t_inds)):
                 t_idx_int = int(bf.t_inds[k])
@@ -901,7 +903,7 @@ def _scan_and_build_em_data(
                     _log_same = _log_p_sense
                     _log_diff = _log_p_antisense
                 else:
-                    _log_same = _log_diff = math.log(0.5)
+                    _log_same = _log_diff = _LOG_HALF
                 _exon_bp = bf.exon_bp
                 _intron_bp = bf.intron_bp
                 for k in range(len(bf.t_inds)):
@@ -1098,7 +1100,7 @@ def _scan_and_build_em_data(
     n_units = len(offsets) - 1
     n_candidates = len(t_indices_list)
 
-    return EMData(
+    return ScanData(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(t_indices_list, dtype=np.int32),
         log_liks=np.array(log_liks_list, dtype=np.float64),
@@ -1155,7 +1157,7 @@ from scipy.sparse.csgraph import connected_components as _scipy_cc
 
 
 def _build_loci(
-    em_data: EMData,
+    em_data: ScanData,
     index: HulkIndex,
 ) -> list[Locus]:
     """Build loci as connected components of transcripts linked by fragments.
@@ -1165,7 +1167,7 @@ def _build_loci(
 
     Parameters
     ----------
-    em_data : EMData
+    em_data : ScanData
         Global EM data (mRNA + nRNA candidates + per-unit metadata).
     index : HulkIndex
         Reference index.
@@ -1268,13 +1270,13 @@ def _build_loci(
 
 def _build_locus_em_data(
     locus: Locus,
-    em_data: EMData,
-    counter: ReadCounter,
+    em_data: ScanData,
+    counter: AbundanceEstimator,
     index: HulkIndex,
     mean_frag: float,
     gdna_init: float,
-) -> LocusEMData:
-    """Extract and renumber global EMData into a per-locus sub-problem.
+) -> LocusEMInput:
+    """Extract and renumber global ScanData into a per-locus sub-problem.
 
     Component layout per locus::
 
@@ -1291,8 +1293,8 @@ def _build_locus_em_data(
     Parameters
     ----------
     locus : Locus
-    em_data : EMData
-    counter : ReadCounter
+    em_data : ScanData
+    counter : AbundanceEstimator
     index : HulkIndex
     mean_frag : float
     gdna_init : float
@@ -1330,14 +1332,11 @@ def _build_locus_em_data(
         cum_lens[0] = 0
         np.cumsum(seg_lens, out=cum_lens[1:])
 
-        global_flat_idx = np.empty(total_cands, dtype=np.intp)
-        for k in range(n_local_units):
-            s = int(cum_lens[k])
-            e = int(cum_lens[k + 1])
-            if s < e:
-                global_flat_idx[s:e] = np.arange(
-                    unit_starts[k], unit_ends[k], dtype=np.intp,
-                )
+        global_flat_idx = (
+            np.repeat(unit_starts, seg_lens)
+            + np.arange(total_cands, dtype=np.intp)
+            - np.repeat(cum_lens[:-1], seg_lens)
+        )
 
         # Extract all candidate data at once
         all_gidx = em_data.t_indices[global_flat_idx]
@@ -1478,7 +1477,7 @@ def _build_locus_em_data(
     nrna_init_local = unique_totals[n_t:2*n_t]
     prior[n_t:2*n_t][nrna_init_local == 0.0] = 0.0
 
-    return LocusEMData(
+    return LocusEMInput(
         locus=locus,
         offsets=local_offsets,
         t_indices=final_lidx.astype(np.int32),
@@ -1578,8 +1577,8 @@ def _compute_gdna_rate_from_strand(
 
 def _compute_eb_gdna_priors(
     loci: list[Locus],
-    em_data: EMData,
-    counter: ReadCounter,
+    em_data: ScanData,
+    counter: AbundanceEstimator,
     index: HulkIndex,
     strand_models: StrandModels,
     *,
@@ -1597,7 +1596,7 @@ def _compute_eb_gdna_priors(
     Parameters
     ----------
     loci : list[Locus]
-    counter : ReadCounter
+    counter : AbundanceEstimator
     index : HulkIndex
     strand_models : StrandModels
     k_locus : float
@@ -1715,7 +1714,7 @@ def count_from_buffer(
     confidence_threshold: float = 0.95,
     overhang_log_penalty: float | None = None,
     mismatch_log_penalty: float | None = None,
-) -> ReadCounter:
+) -> AbundanceEstimator:
     """Assign counts from buffered fragments via locus-level EM.
 
     All ambiguous fragments are resolved through per-locus EM.
@@ -1747,7 +1746,7 @@ def count_from_buffer(
 
     Returns
     -------
-    ReadCounter
+    AbundanceEstimator
     """
     # --- Compute geometry ---
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
@@ -1781,7 +1780,7 @@ def count_from_buffer(
 
     intronic_spans = index.intron_span_per_gene()
 
-    counter = ReadCounter(
+    counter = AbundanceEstimator(
         index.num_transcripts, index.num_genes,
         seed=seed, alpha=em_pseudocount,
         effective_lengths=effective_lengths,
@@ -2066,5 +2065,5 @@ def run_pipeline(
         stats=stats,
         strand_models=strand_models,
         frag_length_models=frag_length_models,
-        counter=counter,
+        estimator=counter,
     )

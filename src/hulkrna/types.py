@@ -16,6 +16,11 @@ from typing import NamedTuple
 # Strand
 # ---------------------------------------------------------------------------
 
+# Pre-computed mapping for Strand.from_str() — lives at module level
+# because IntEnum's metaclass interprets class-level dicts as members.
+_STRAND_STR_MAP: dict[str, int] = {".": 0, "+": 1, "-": 2, "?": 3}
+
+
 class Strand(IntEnum):
     """Genomic strand with bitwise OR semantics.
 
@@ -39,9 +44,8 @@ class Strand(IntEnum):
 
         Accepted values: ``'.'``, ``'+'``, ``'-'``, ``'?'``.
         """
-        _map = {".": 0, "+": 1, "-": 2, "?": 3}
         try:
-            return cls(_map[s])
+            return cls(_STRAND_STR_MAP[s])
         except KeyError:
             raise ValueError(f"Invalid strand string: {s!r}") from None
 

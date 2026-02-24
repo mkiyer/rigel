@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from hulkrna.categories import SpliceStrandCol
-from hulkrna.counter import ReadCounter
+from hulkrna.estimator import AbundanceEstimator
 from hulkrna.pipeline import run_pipeline
 from hulkrna.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
 from hulkrna.types import Strand
@@ -100,12 +100,12 @@ class TestIsoformCollapse:
 
             logger.info(f"\n  Ground truth:  t1={gt.get('t1',0)}, t2={gt.get('t2',0)}")
             logger.info(f"  hulkrna:       t1={t1.observed:.0f}, t2={t2.observed:.0f}")
-            logger.info(f"  unique_counts: t1={pr.counter.unique_counts[0].sum():.0f}, "
-                        f"t2={pr.counter.unique_counts[1].sum():.0f}")
-            logger.info(f"  em_counts:     t1={pr.counter.em_counts[0].sum():.0f}, "
-                        f"t2={pr.counter.em_counts[1].sum():.0f}")
-            logger.info(f"  gdna_em_count:  {pr.counter.gdna_em_count:.1f}")
-            logger.info(f"  nrna_init:      {pr.counter.nrna_init}")
+            logger.info(f"  unique_counts: t1={pr.estimator.unique_counts[0].sum():.0f}, "
+                        f"t2={pr.estimator.unique_counts[1].sum():.0f}")
+            logger.info(f"  em_counts:     t1={pr.estimator.em_counts[0].sum():.0f}, "
+                        f"t2={pr.estimator.em_counts[1].sum():.0f}")
+            logger.info(f"  gdna_em_count:  {pr.estimator.gdna_em_count:.1f}")
+            logger.info(f"  nrna_init:      {pr.estimator.nrna_init}")
 
             # Quantify the bias
             t2_ratio_truth = gt.get("t2", 0) / max(gt.get("t1", 0), 1)
@@ -150,9 +150,9 @@ class TestIsoformCollapse:
             logger.info(f"  Ground truth: t1={gt.get('t1',0)}, t2={gt.get('t2',0)}")
 
             # Log per-transcript counts
-            for i in range(pr.counter.num_transcripts):
+            for i in range(pr.estimator.num_transcripts):
                 label = result.index.t_df["t_id"].values[i]
-                t_total = pr.counter.t_counts[i].sum()
+                t_total = pr.estimator.t_counts[i].sum()
                 logger.info(f"  t_counts[{label}] = {t_total:.0f}")
         finally:
             sc.cleanup()
@@ -160,10 +160,10 @@ class TestIsoformCollapse:
     def test_hypothesis_em_convergence_bias(self, tmp_path):
         """Test: Does the locus EM bias toward t1 even without gDNA?
 
-        Use synthetic LocusEMData with equal likelihoods for t1 and t2 on
+        Use synthetic LocusEMInput with equal likelihoods for t1 and t2 on
         shared-exon reads, plus unique reads for t1 (middle exon).
         """
-        from hulkrna.counter import LocusEMData, Locus
+        from hulkrna.estimator import LocusEMInput, Locus
 
         # Simulate the isoform EM directly without the full pipeline.
         # Layout: 2 transcripts, locus components = [mRNA_t1, mRNA_t2,
@@ -173,11 +173,11 @@ class TestIsoformCollapse:
         n_comp = 2 * n_t + 1  # = 5
         gdna_idx = 2 * n_t     # = 4
 
-        rc = ReadCounter(n_t, n_g, seed=PIPELINE_SEED, alpha=1.0)
+        rc = AbundanceEstimator(n_t, n_g, seed=PIPELINE_SEED, alpha=1.0)
         # t1 gets 200 unique reads from middle exon (spliced).
         rc.unique_counts[0, int(SpliceStrandCol.SPLICED_ANNOT_SENSE)] = 200.0
 
-        # Build LocusEMData: 500 ambiguous units, each mapping to both
+        # Build LocusEMInput: 500 ambiguous units, each mapping to both
         # t1 and t2 mRNA with equal likelihoods + gDNA with lower lik.
         n_units = 500
         # 3 candidates per unit: mRNA_t1, mRNA_t2, gDNA
@@ -205,7 +205,7 @@ class TestIsoformCollapse:
         unique_totals = np.zeros(n_comp, dtype=np.float64)
         unique_totals[0] = 200.0  # t1 unique reads
 
-        locus_em = LocusEMData(
+        locus_em = LocusEMInput(
             locus=locus,
             offsets=offsets,
             t_indices=t_indices,
@@ -328,11 +328,11 @@ class TestUnsplicedAnnihilation:
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             logger.info(f"  Truth: {gt.get('t1', 0)}")
             logger.info(f"  hulkrna: {t1.observed:.0f}")
-            logger.info(f"  unique_counts: {pr.counter.unique_counts[0].sum():.0f}")
-            logger.info(f"  em_counts: {pr.counter.em_counts[0].sum():.0f}")
-            logger.info(f"  nrna_init: {pr.counter.nrna_init}")
-            logger.info(f"  gdna_em_count: {pr.counter.gdna_em_count:.1f}")
-            logger.info(f"  gdna_locus_results: {pr.counter.gdna_locus_results}")
+            logger.info(f"  unique_counts: {pr.estimator.unique_counts[0].sum():.0f}")
+            logger.info(f"  em_counts: {pr.estimator.em_counts[0].sum():.0f}")
+            logger.info(f"  nrna_init: {pr.estimator.nrna_init}")
+            logger.info(f"  gdna_em_count: {pr.estimator.gdna_em_count:.1f}")
+            logger.info(f"  gdna_locus_results: {pr.estimator.gdna_locus_results}")
 
             # Strand model diagnostics
             sm = pr.strand_models
@@ -420,7 +420,7 @@ class TestUnsplicedAnnihilation:
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             logger.info(
                 f"  {ss:6.2f}  {gt.get('t1',0):6d}  {t1.observed:8.0f}  "
-                f"{pr.counter.gdna_em_count:12.1f}  "
+                f"{pr.estimator.gdna_em_count:12.1f}  "
             )
 
         sc.cleanup()
@@ -473,9 +473,9 @@ class TestGDNAOverAbsorption:
             logger.info(f"  Ground truth gDNA: {n_gdna}")
             logger.info(f"  Pipeline fragments: {stats.n_fragments}")
             logger.info(f"  Intergenic: {stats.n_intergenic}")
-            logger.info(f"  gdna_em_count: {pr.counter.gdna_em_count:.1f}")
+            logger.info(f"  gdna_em_count: {pr.estimator.gdna_em_count:.1f}")
             logger.info(f"  hulkrna RNA total: "
-                        f"{pr.counter.t_counts.sum():.0f}")
+                        f"{pr.estimator.t_counts.sum():.0f}")
 
             # Calculate how much gDNA is "invisible" (overlaps gene fully)
             # Gene spans 500-1500 (1000bp). Genome is 5000bp.
@@ -535,7 +535,7 @@ class TestAntisenseStrandDrift:
 
             logger.info(f"  Truth: t1={gt.get('t1',0)}, t2={gt.get('t2',0)}")
             logger.info(f"  hulkrna: t1={t1.observed:.0f}, t2={t2.observed:.0f}")
-            logger.info(f"  gdna_em_count: {pr.counter.gdna_em_count:.1f}")
+            logger.info(f"  gdna_em_count: {pr.estimator.gdna_em_count:.1f}")
 
             # Three-pool model: overlapping antisense genes inflate each
             # other's gDNA_exonic shadow (antisense reads = other gene's real

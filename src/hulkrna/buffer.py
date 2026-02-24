@@ -56,7 +56,7 @@ class BufferedFragment:
     """Lightweight view into a columnar buffer chunk.
 
     Provides the same duck-typed interface as ``ResolvedFragment`` so
-    that ``ReadCounter.assign_unique / assign_isoform_bayesian / assign_gene_bayesian``
+    that ``AbundanceEstimator.assign_unique`` and the EM scoring functions
     work without modification.
 
     ``t_inds`` is a NumPy array slice (supports iteration, ``len()``,

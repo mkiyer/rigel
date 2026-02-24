@@ -1,7 +1,8 @@
 """
-hulkrna.counter - Read count accumulation with locus-level EM.
+hulkrna.estimator — Fragment abundance estimation with locus-level EM.
 
-ReadCounter accumulates read counts into transcript arrays.
+AbundanceEstimator manages per-transcript and per-gene fragment count
+accumulation combined with Bayesian abundance estimation via EM.
 
 For uniquely-mapping fragments, assignment is deterministic.  For ambiguous
 fragments, transcript abundances are estimated via per-locus EM with a
@@ -41,7 +42,7 @@ Dirichlet prior.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -65,15 +66,20 @@ _EM_CONVERGENCE_DELTA = 1e-6
 
 
 # ======================================================================
-# EMData - pre-computed CSR arrays for vectorized EM
+# ScanData - pre-computed CSR arrays for vectorized EM
 # ======================================================================
 
 
 @dataclass(slots=True)
-class EMData:
-    """Pre-computed CSR arrays for the global scan pass.
+class ScanData:
+    """Fragment-level candidate data from the BAM scan pass.
 
-    The global EMData contains mRNA + nRNA candidates only (NO gDNA).
+    Contains pre-computed CSR (compressed sparse row) arrays linking
+    each ambiguous fragment unit to its candidate transcripts and
+    their log-likelihoods.  Produced by ``_scan_and_build_em_data()``
+    and consumed during locus EM construction.
+
+    The global ScanData contains mRNA + nRNA candidates only (NO gDNA).
     gDNA candidates are added per-locus during locus EM construction.
 
     Attributes
@@ -145,13 +151,16 @@ class Locus:
 
 
 # ======================================================================
-# LocusEMData - per-locus EM sub-problem with local component indices
+# LocusEMInput - per-locus EM sub-problem with local component indices
 # ======================================================================
 
 
 @dataclass(slots=True)
-class LocusEMData:
-    """Per-locus EM sub-problem with locally-renumbered component indices.
+class LocusEMInput:
+    """Per-locus EM input: locally-renumbered components and likelihoods.
+
+    Contains the data needed to run one independent EM instance for a
+    single locus (connected component of transcripts).
 
     Component layout::
 
@@ -216,12 +225,16 @@ class LocusEMData:
 
 
 # ======================================================================
-# ReadCounter
+# AbundanceEstimator
 # ======================================================================
 
 
-class ReadCounter:
-    """Accumulates read counts into transcript arrays.
+class AbundanceEstimator:
+    """Bayesian fragment abundance estimator with locus-level EM.
+
+    Accumulates per-transcript and per-gene fragment counts from both
+    deterministic (unique) and probabilistic (EM) assignment paths.
+    Estimates transcript-level mRNA, nRNA, and gDNA abundances.
 
     Locus-level EM architecture::
 
@@ -453,7 +466,7 @@ class ReadCounter:
 
     def run_locus_em(
         self,
-        locus_em: LocusEMData,
+        locus_em: LocusEMInput,
         *,
         em_iterations: int = 1000,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -588,7 +601,7 @@ class ReadCounter:
 
     def assign_locus_ambiguous(
         self,
-        locus_em: LocusEMData,
+        locus_em: LocusEMInput,
         theta: np.ndarray,
         *,
         confidence_threshold: float = 0.95,

@@ -16,7 +16,6 @@ This module contains:
 - ``ResolvedFragment`` — compact cached resolution result
 """
 
-import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -30,8 +29,6 @@ from .types import (
 )
 from .categories import SpliceType
 from .fragment import Fragment
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

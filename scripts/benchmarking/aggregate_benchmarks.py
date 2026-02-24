@@ -38,6 +38,39 @@ TRANSCRIPT_TOOLS = ("hulkrna_mm", "salmon", "kallisto")
 GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
 METRICS = ("mae", "rmse", "pearson", "spearman")
 
+# Fixed columns in per-transcript / per-gene CSVs that are NOT tool columns
+_NON_TOOL_TX_COLS = frozenset({
+    "transcript_id", "gene_id", "truth", "abundance", "nrna_abundance",
+    "seed", "region", "condition", "gdna_label", "nrna_label",
+    "strand_specificity", "ab_q",
+})
+_NON_TOOL_GENE_COLS = frozenset({
+    "gene_id", "truth", "abundance", "nrna_abundance",
+    "seed", "region", "condition", "gdna_label", "nrna_label",
+    "strand_specificity",
+})
+
+
+def _detect_tools_from_df(
+    df: pd.DataFrame,
+    non_tool_cols: frozenset[str],
+) -> tuple[str, ...]:
+    """Detect tool columns from a per-transcript or per-gene DataFrame."""
+    if df.empty:
+        return ()
+    return tuple(c for c in df.columns if c not in non_tool_cols and not c.startswith("ae_"))
+
+
+def _detect_tools_from_metrics(df: pd.DataFrame) -> tuple[str, ...]:
+    """Detect tool names from a tidy metrics DataFrame with a 'tool' column."""
+    if df.empty or "tool" not in df.columns:
+        return ()
+    # Preserve insertion order (first seen in data)
+    seen: dict[str, None] = {}
+    for t in df["tool"]:
+        seen.setdefault(t, None)
+    return tuple(seen)
+
 
 def parse_condition_name(condition: str) -> dict[str, object]:
     """Parse condition directory names: gdna_<label>_nrna_<label>_ss_<float>."""
@@ -298,8 +331,11 @@ def write_aggregate_report(
     """Write aggregate JSON, CSV, and Markdown reports."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    tx_tools = TRANSCRIPT_TOOLS
-    gene_tools = GENE_TOOLS if include_htseq else TRANSCRIPT_TOOLS
+    # Auto-detect tool lists from data; fall back to legacy constants
+    tx_tools = _detect_tools_from_metrics(tx_df) or TRANSCRIPT_TOOLS
+    gene_tools = _detect_tools_from_metrics(gene_df) or (
+        GENE_TOOLS if include_htseq else TRANSCRIPT_TOOLS
+    )
 
     # ── Aggregate JSON ──────────────────────────────────────────────
 
@@ -446,6 +482,66 @@ def write_aggregate_report(
         )
     lines.append("")
 
+    # Transcript-level MAE by condition (gDNA × nRNA)
+    lines.extend([
+        "## Transcript-Level MAE by Condition (gDNA × nRNA)",
+        "",
+    ])
+    if not tx_df.empty and "nrna_label" in tx_df.columns:
+        lines.extend(
+            _agg_table(tx_df, ["gdna_label", "nrna_label"], tx_tools, "mae")
+        )
+    lines.append("")
+
+    # FULL cross: gDNA × nRNA × strand specificity
+    lines.extend([
+        "## Transcript-Level MAE by Full Condition (gDNA × nRNA × Strand Specificity)",
+        "",
+    ])
+    if not tx_df.empty and "nrna_label" in tx_df.columns:
+        lines.extend(
+            _agg_table(
+                tx_df,
+                ["gdna_label", "nrna_label", "strand_specificity"],
+                tx_tools,
+                "mae",
+            )
+        )
+    lines.append("")
+
+    # FULL cross: Pearson
+    lines.extend([
+        "## Transcript-Level Pearson by Full Condition (gDNA × nRNA × Strand Specificity)",
+        "",
+    ])
+    if not tx_df.empty and "nrna_label" in tx_df.columns:
+        lines.extend(
+            _agg_table(
+                tx_df,
+                ["gdna_label", "nrna_label", "strand_specificity"],
+                tx_tools,
+                "pearson",
+                decimals=4,
+            )
+        )
+    lines.append("")
+
+    # Gene-level MAE full cross
+    lines.extend([
+        "## Gene-Level MAE by Full Condition (gDNA × nRNA × Strand Specificity)",
+        "",
+    ])
+    if not gene_df.empty and "nrna_label" in gene_df.columns:
+        lines.extend(
+            _agg_table(
+                gene_df,
+                ["gdna_label", "nrna_label", "strand_specificity"],
+                gene_tools,
+                "mae",
+            )
+        )
+    lines.append("")
+
     # Per-region breakdown (mean across seeds)
     lines.extend([
         "## Per-Region Transcript-Level MAE (mean across seeds & conditions)",
@@ -482,16 +578,17 @@ def write_aggregate_report(
     ])
     if not pool_df.empty:
         pool_order = ["mature_rna", "nascent_rna", "genomic_dna", "rna", "dna"]
+        pool_tools = tx_tools  # Pool metrics use transcript-level tools
         lines.extend([
-            "| Pool | " + " | ".join(tx_tools) + " |",
-            "| --- | " + " | ".join(["---:"] * len(tx_tools)) + " |",
+            "| Pool | " + " | ".join(pool_tools) + " |",
+            "| --- | " + " | ".join(["---:"] * len(pool_tools)) + " |",
         ])
         for pool_name in pool_order:
             sub = pool_df[pool_df["pool"] == pool_name]
             if len(sub) == 0:
                 continue
             vals = []
-            for tool in tx_tools:
+            for tool in pool_tools:
                 tsub = sub[sub["tool"] == tool]
                 vals.append(_fmt(float(tsub["abs_error"].mean())) if len(tsub) else "—")
             lines.append(f"| {pool_name} | " + " | ".join(vals) + " |")
@@ -505,13 +602,13 @@ def write_aggregate_report(
         rna_dna = pool_df[pool_df["pool"].isin(["rna", "dna"])].copy()
         if len(rna_dna):
             lines.extend([
-                "| Group | " + " | ".join(tx_tools) + " |",
-                "| --- | " + " | ".join(["---:"] * len(tx_tools)) + " |",
+                "| Group | " + " | ".join(pool_tools) + " |",
+                "| --- | " + " | ".join(["---:"] * len(pool_tools)) + " |",
             ])
             for grp in ["rna", "dna"]:
                 sub = rna_dna[rna_dna["pool"] == grp]
                 vals = []
-                for tool in tx_tools:
+                for tool in pool_tools:
                     tsub = sub[sub["tool"] == tool]
                     vals.append(_fmt(float(tsub["abs_error"].mean())) if len(tsub) else "—")
                 lines.append(f"| {grp} | " + " | ".join(vals) + " |")
@@ -520,7 +617,9 @@ def write_aggregate_report(
     # ── Per-transcript diagnostics ──────────────────────────────────
 
     if not per_tx.empty:
-        for tool in tx_tools:
+        # Auto-detect tool columns in per-transcript CSV
+        per_tx_tools = _detect_tools_from_df(per_tx, _NON_TOOL_TX_COLS) or tx_tools
+        for tool in per_tx_tools:
             if tool in per_tx.columns:
                 per_tx[f"ae_{tool}"] = (per_tx[tool] - per_tx["truth"]).abs()
 
@@ -535,7 +634,7 @@ def write_aggregate_report(
                 "## Mean Absolute Error by Abundance Quartile",
                 "",
             ])
-            ae_cols = {tool: f"ae_{tool}" for tool in tx_tools if f"ae_{tool}" in per_tx.columns}
+            ae_cols = {tool: f"ae_{tool}" for tool in per_tx_tools if f"ae_{tool}" in per_tx.columns}
             header = "| Quartile | " + " | ".join(ae_cols.keys()) + " |"
             sep = "| --- | " + " | ".join(["---:"] * len(ae_cols)) + " |"
             lines.extend([header, sep])
@@ -554,7 +653,7 @@ def write_aggregate_report(
             "| Tool | Dropout Rate |",
             "| --- | ---: |",
         ])
-        for tool in tx_tools:
+        for tool in per_tx_tools:
             if tool in per_tx.columns:
                 rate = float(
                     ((per_tx["truth"] > 0) & (per_tx[tool] <= 0)).mean()
@@ -563,19 +662,24 @@ def write_aggregate_report(
         lines.append("")
 
         # Worst transcripts (highest mean AE across all conditions/seeds)
-        lines.extend([
-            "## Top 20 Worst Transcripts (highest mean abs error, hulkrna_mm)",
-            "",
-        ])
-        if "ae_hulkrna_mm" in per_tx.columns:
+        # Auto-detect the primary hulkrna tool for ranking
+        hulkrna_tools = [t for t in per_tx_tools if t.startswith("hulkrna_")]
+        primary_hk = hulkrna_tools[0] if hulkrna_tools else None
+        primary_ae = f"ae_{primary_hk}" if primary_hk else None
+
+        if primary_hk and primary_ae and primary_ae in per_tx.columns:
+            lines.extend([
+                f"## Top 20 Worst Transcripts Overall (highest mean abs error, {primary_hk})",
+                "",
+            ])
             worst = (
-                per_tx.groupby("transcript_id")["ae_hulkrna_mm"]
+                per_tx.groupby("transcript_id")[primary_ae]
                 .mean()
                 .sort_values(ascending=False)
                 .head(20)
             )
             lines.extend([
-                "| Transcript | Mean AE (hulkrna_mm) | Mean Truth | Mean Abundance |",
+                f"| Transcript | Mean AE ({primary_hk}) | Mean Truth | Mean Abundance |",
                 "| --- | ---: | ---: | ---: |",
             ])
             for tid, ae in worst.items():
@@ -586,6 +690,80 @@ def write_aggregate_report(
                     f"| {tid} | {_fmt(ae)} | {_fmt(mean_truth)} | {_fmt(mean_ab)} |"
                 )
             lines.append("")
+
+        # ── Per-condition worst transcripts ──────────────────────
+        # Group by (gdna_label, nrna_label, strand_specificity)
+        cond_cols_present = [
+            c for c in ("gdna_label", "nrna_label", "strand_specificity")
+            if c in per_tx.columns
+        ]
+        if primary_ae and primary_ae in per_tx.columns and len(cond_cols_present) == 3:
+            conditions = (
+                per_tx[cond_cols_present]
+                .drop_duplicates()
+                .sort_values(cond_cols_present)
+            )
+            for _, cond_row in conditions.iterrows():
+                gdna_l = cond_row["gdna_label"]
+                nrna_l = cond_row["nrna_label"]
+                ss_val = cond_row["strand_specificity"]
+                cond_label = f"gDNA={gdna_l}, nRNA={nrna_l}, SS={ss_val}"
+
+                mask = (
+                    (per_tx["gdna_label"] == gdna_l)
+                    & (per_tx["nrna_label"] == nrna_l)
+                    & (per_tx["strand_specificity"] == ss_val)
+                )
+                cond_sub = per_tx[mask]
+                if len(cond_sub) == 0:
+                    continue
+
+                # Build per-transcript summary for this condition
+                # Include all detected tool ae_ columns
+                agg_dict: dict[str, tuple[str, str]] = {
+                    "ae_primary": (primary_ae, "mean"),
+                    "mean_truth": ("truth", "mean"),
+                }
+                other_ae_tools: list[str] = []
+                for t in per_tx_tools:
+                    ae_col = f"ae_{t}"
+                    if ae_col in cond_sub.columns and ae_col != primary_ae:
+                        agg_dict[ae_col] = (ae_col, "mean")
+                        other_ae_tools.append(t)
+                if "abundance" in cond_sub.columns:
+                    agg_dict["mean_abundance"] = ("abundance", "mean")
+
+                worst_cond = (
+                    cond_sub.groupby("transcript_id")
+                    .agg(**agg_dict)
+                    .sort_values("ae_primary", ascending=False)
+                    .head(10)
+                )
+
+                lines.extend([
+                    f"### Top 10 Worst Transcripts — {cond_label}",
+                    "",
+                ])
+                hdr_parts = ["Transcript", f"AE {primary_hk}"]
+                for t in other_ae_tools:
+                    hdr_parts.append(f"AE {t}")
+                hdr_parts.extend(["Mean Truth", "Abundance"])
+                lines.append("| " + " | ".join(hdr_parts) + " |")
+                sep_parts = ["---"] + ["---:"] * (len(hdr_parts) - 1)
+                lines.append("| " + " | ".join(sep_parts) + " |")
+
+                for tid, row in worst_cond.iterrows():
+                    row_parts = [str(tid), _fmt(row["ae_primary"])]
+                    for t in other_ae_tools:
+                        ae_col = f"ae_{t}"
+                        row_parts.append(_fmt(row.get(ae_col, 0.0)))
+                    row_parts.append(_fmt(row["mean_truth"]))
+                    ab_val = row.get("mean_abundance", 0.0)
+                    if isinstance(ab_val, float) and math.isnan(ab_val):
+                        ab_val = 0.0
+                    row_parts.append(_fmt(ab_val))
+                    lines.append("| " + " | ".join(row_parts) + " |")
+                lines.append("")
 
     # Write
     with open(output_dir / "aggregate_summary.md", "w") as f:
@@ -632,8 +810,11 @@ def main() -> int:
         len(pool_df),
     )
 
-    # Detect whether htseq was included
-    include_htseq = "htseq" in gene_df["tool"].values if not gene_df.empty else False
+    # Detect whether htseq was included (any tool starting with "htseq")
+    include_htseq = (
+        any(str(t).startswith("htseq") for t in gene_df["tool"].values)
+        if not gene_df.empty else False
+    )
 
     # Load per-transcript data
     per_tx_all = load_per_tx_results(args.input_dir)

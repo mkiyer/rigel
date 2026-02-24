@@ -6,17 +6,24 @@ specificity values. Per-region setup (extract, abundance assignment, index
 build) is done once; the condition sweep re-simulates reads and re-runs all
 tools for each (gDNA rate, strand specificity) pair.
 
+Multiple aligners can be evaluated simultaneously (e.g. ``--aligner minimap2
+oracle``).  Each aligner produces a separate hulkrna result tagged as
+``hulkrna_<aligner>`` (e.g. ``hulkrna_minimap2``, ``hulkrna_oracle``).
+FASTQ-based tools (salmon, kallisto) are run once per condition and shared
+across aligners.
+
 Tools
 -----
-- hulkrna_mm    : include_multimap=True  (required multimapping mode)
-- salmon        : salmon quant --validateMappings
-- kallisto      : kallisto quant (--rf-stranded when strand_spec >= 0.9)
-- htseq         : htseq-count (gene-level only)
+- hulkrna_<aligner> : include_multimap=True, one result per aligner
+- salmon            : salmon quant --validateMappings
+- kallisto          : kallisto quant (--rf-stranded when strand_spec >= 0.9)
+- htseq_<aligner>   : htseq-count (gene-level only), one result per aligner
 
 Genome aligners for hulkrna/htseq inputs
 ----------------------------------------
 - minimap2      : splice:sr with secondary alignments + annotation BED12
 - hisat2        : hisat2/hisat2-build with secondary alignments
+- oracle        : perfect BAM bypassing alignment entirely
 
 gDNA model
 ----------
@@ -72,7 +79,7 @@ except ImportError:  # pragma: no cover - handled at runtime when config is used
 from hulkrna.gtf import GTF
 from hulkrna.index import HulkIndex, write_bed12
 from hulkrna.pipeline import run_pipeline
-from hulkrna.sim import GDNAConfig, ReadSimulator, SimConfig, reverse_complement
+from hulkrna.sim import OracleBamSimulator, GDNAConfig, ReadSimulator, SimConfig, reverse_complement
 from hulkrna.transcript import Transcript
 from hulkrna.types import Interval, Strand
 
@@ -80,8 +87,29 @@ logger = logging.getLogger(__name__)
 
 # ── Tool identifiers ────────────────────────────────────────────────
 
+# Legacy constants kept for aggregate_benchmarks backward-compatibility
 TRANSCRIPT_TOOLS = ("hulkrna_mm", "salmon", "kallisto")
 GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
+
+ALIGNER_CHOICES = ("minimap2", "hisat2", "oracle")
+
+
+def _hulkrna_tool_name(aligner: str) -> str:
+    """Return hulkrna tool identifier for a given aligner."""
+    return f"hulkrna_{aligner}"
+
+
+def _get_transcript_tools(aligners: list[str]) -> tuple[str, ...]:
+    """Build transcript-level tool list from active aligners."""
+    return tuple(_hulkrna_tool_name(a) for a in aligners) + ("salmon", "kallisto")
+
+
+def _get_gene_tools(aligners: list[str], include_htseq: bool = False) -> tuple[str, ...]:
+    """Build gene-level tool list from active aligners."""
+    tools = list(_hulkrna_tool_name(a) for a in aligners) + ["salmon", "kallisto"]
+    if include_htseq:
+        tools.extend(f"htseq_{a}" for a in aligners)
+    return tuple(tools)
 
 # ── Default gDNA levels and strand specificities ────────────────────
 
@@ -573,10 +601,14 @@ def align_hisat2(
 ) -> None:
     """Align PE reads with HISAT2 and produce a name-sorted BAM.
 
-    When *splice_sites_file* and *exons_file* are provided, the HISAT2
-    index is built with ``--ss`` / ``--exon`` for transcript-aware (HGFM)
-    indexing, and alignment uses ``--known-splicesite-infile`` for
-    optimal RNA-Seq splice-junction sensitivity.
+    The HISAT2 index is built as a **plain BWT index** (no ``--ss`` /
+    ``--exon``).  Using the HGFM graph index causes severe alignment
+    bias in regions with paralogous genes that share exonic sequence
+    (see ``docs/hisat2_index_recommendations.md``).
+
+    When *splice_sites_file* is provided it is passed to HISAT2 at
+    **alignment time** via ``--known-splicesite-infile`` so that splice
+    junctions are still utilised without baking them into the graph.
     """
     hisat2_index_dir.mkdir(parents=True, exist_ok=True)
     index_prefix = hisat2_index_dir / "idx"
@@ -585,12 +617,13 @@ def align_hisat2(
             hisat2_build_exe,
             "-p", str(max(1, threads)),
         ]
-        if splice_sites_file is not None:
-            build_cmd.extend(["--ss", str(splice_sites_file)])
-        if exons_file is not None:
-            build_cmd.extend(["--exon", str(exons_file)])
+        # NOTE: intentionally NOT passing --ss / --exon here.
+        # The plain BWT index avoids graph-bias that suppresses long-
+        # intron junctions in paralogous-gene regions (66× improvement
+        # for ENST642908 in the HBB locus).  Splice sites are still
+        # provided at alignment time via --known-splicesite-infile.
         build_cmd.extend([str(region_fa), str(index_prefix)])
-        logger.info("Building HISAT2 index: %s", " ".join(build_cmd))
+        logger.info("Building HISAT2 index (plain): %s", " ".join(build_cmd))
         subprocess.run(build_cmd, check=True, capture_output=True, text=True)
 
     hisat2_cmd = [
@@ -664,6 +697,32 @@ def parse_truth_from_fastq(r1_fastq: Path) -> tuple[dict[str, int], int]:
     return dict(counts), n_gdna
 
 
+def parse_truth_from_bam(bam_path: Path) -> tuple[dict[str, int], int]:
+    """Parse ground-truth counts from read names in a BAM file.
+
+    Read-name format is identical to the FASTQ simulator:
+    ``{tid}:{start}-{end}:{strand}:{idx}`` for RNA, ``gdna:...`` for gDNA,
+    ``nrna_{tid}:...`` for nascent RNA.
+
+    Only counts R1 reads (flag 0x40) to avoid double-counting.
+    """
+    import pysam
+
+    counts: Counter[str] = Counter()
+    n_gdna = 0
+    with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+        for read in bam.fetch(until_eof=True):
+            if not (read.flag & 0x40):  # only count R1 (first in pair)
+                continue
+            qname = read.query_name
+            tid = qname.split(":", 1)[0]
+            if tid == "gdna":
+                n_gdna += 1
+            else:
+                counts[tid] += 1
+    return dict(counts), n_gdna
+
+
 def compute_truth_pool_counts(
     truth_counts: dict[str, int],
     n_gdna_actual: int,
@@ -727,13 +786,13 @@ def run_hulkrna_tool(
     pipe = run_pipeline(bam_path, index, **kwargs)
     elapsed = time.monotonic() - t0
 
-    counts_df = pipe.counter.get_counts_df(index)
+    counts_df = pipe.estimator.get_counts_df(index)
     counts = {
         row.transcript_id: float(row.count)
         for row in counts_df.itertuples(index=False)
     }
     mature_pred = float(sum(counts.values()))
-    nascent_pred = float(pipe.counter.nrna_init.sum() + pipe.counter.nrna_em_counts.sum())
+    nascent_pred = float(pipe.estimator.nrna_init.sum() + pipe.estimator.nrna_em_counts.sum())
     genomic_pred = float(pipe.stats.n_gdna_total)
     pool_counts = {
         "mature_rna": mature_pred,
@@ -1120,7 +1179,7 @@ def run_region_benchmark(
     # HISAT2 splice-site and exon annotation files for RNA-Seq-aware indexing
     hisat2_ss_file = reg_dir / "hisat2_splice_sites.txt"
     hisat2_exon_file = reg_dir / "hisat2_exons.txt"
-    if args.aligner == "hisat2":
+    if "hisat2" in args.aligner:
         write_hisat2_splice_sites(transcripts, hisat2_ss_file)
         write_hisat2_exons(transcripts, hisat2_exon_file)
 
@@ -1185,8 +1244,12 @@ def run_region_benchmark(
                     )
 
                 sim_genome = StringGenome(region_seq, region.label)
+
+                # Always write FASTQ (needed for salmon/kallisto and
+                # for real aligners; oracle also uses it for truth)
                 simulator = ReadSimulator(
-                    sim_genome, transcripts, config=sim_cfg, gdna_config=gdna_cfg
+                    sim_genome, transcripts,
+                    config=sim_cfg, gdna_config=gdna_cfg,
                 )
                 fastq_dir = cond_dir / "reads"
                 fastq_r1, fastq_r2 = simulator.write_fastq(
@@ -1194,32 +1257,67 @@ def run_region_benchmark(
                 )
                 truth_counts, n_gdna_actual = parse_truth_from_fastq(fastq_r1)
 
-                # Align (name-sorted for hulkrna)
-                bam_ns = cond_dir / "align" / "reads_namesort.bam"
-                bam_ns.parent.mkdir(parents=True, exist_ok=True)
-                if args.aligner == "minimap2":
-                    align_minimap2(region_fa, fastq_r1, fastq_r2, bam_ns, bed_path=bed_path)
-                elif args.aligner == "hisat2":
-                    align_hisat2(
-                        region_fa,
-                        fastq_r1,
-                        fastq_r2,
-                        bam_ns,
-                        threads=args.threads,
-                        hisat2_exe=args.hisat2_exe,
-                        hisat2_build_exe=args.hisat2_build_exe,
-                        hisat2_index_dir=hisat2_index_dir,
-                        splice_sites_file=hisat2_ss_file,
-                        exons_file=hisat2_exon_file,
+                # ── Per-aligner: BAM + hulkrna + htseq ──────────────
+
+                tx_tool_counts: dict[str, tuple[dict[str, float], float]] = {}
+                tool_pool_counts: dict[str, dict[str, float]] = {}
+                htseq_gene_by_aligner: dict[str, tuple[dict[str, int], float]] = {}
+
+                for aligner in args.aligner:
+                    hn = _hulkrna_tool_name(aligner)
+                    align_dir = cond_dir / f"align_{aligner}"
+                    align_dir.mkdir(parents=True, exist_ok=True)
+                    bam_ns = align_dir / "reads_namesort.bam"
+
+                    if aligner == "oracle":
+                        oracle_sim = OracleBamSimulator(
+                            sim_genome, transcripts,
+                            config=sim_cfg, gdna_config=gdna_cfg,
+                            ref_name=region.label,
+                        )
+                        oracle_sim.write_bam(bam_ns, args.n_fragments)
+                    elif aligner == "minimap2":
+                        align_minimap2(
+                            region_fa, fastq_r1, fastq_r2, bam_ns,
+                            bed_path=bed_path,
+                        )
+                    elif aligner == "hisat2":
+                        align_hisat2(
+                            region_fa, fastq_r1, fastq_r2, bam_ns,
+                            threads=args.threads,
+                            hisat2_exe=args.hisat2_exe,
+                            hisat2_build_exe=args.hisat2_build_exe,
+                            hisat2_index_dir=hisat2_index_dir,
+                            splice_sites_file=hisat2_ss_file,
+                            exons_file=hisat2_exon_file,
+                        )
+                    else:
+                        raise RuntimeError(f"Unsupported aligner: {aligner}")
+
+                    # Run hulkrna on this aligner's BAM
+                    hk_counts, hk_elapsed, hk_pools = run_hulkrna_tool(
+                        bam_ns, index, args=args,
                     )
-                else:
-                    raise RuntimeError(f"Unsupported aligner: {args.aligner}")
+                    tx_tool_counts[hn] = (hk_counts, hk_elapsed)
+                    tool_pool_counts[hn] = hk_pools
 
-            # ── Run transcript-level tools ──────────────────────────
+                    # htseq (gene-level, needs coord-sorted BAM)
+                    if include_htseq:
+                        bam_cs = align_dir / "reads_coordsort.bam"
+                        coord_sort_bam(bam_ns, bam_cs)
+                        htseq_counts, htseq_elapsed = run_htseq(
+                            bam_cs,
+                            region_gtf,
+                            cond_dir / f"htseq_{aligner}",
+                            strand_specificity=strand_spec,
+                            conda_env=htseq_conda_env,
+                        )
+                        htseq_gene_by_aligner[f"htseq_{aligner}"] = (
+                            htseq_counts, htseq_elapsed,
+                        )
 
-                hulkrna_mm_counts, hulkrna_mm_elapsed, hulkrna_mm_pool_counts = run_hulkrna_tool(
-                    bam_ns, index, args=args
-                )
+            # ── Run transcript-level tools (FASTQ-based, once) ──────
+
                 salmon_counts, salmon_elapsed = run_salmon(
                     transcript_fa,
                     fastq_r1,
@@ -1236,49 +1334,29 @@ def run_region_benchmark(
                     strand_specificity=strand_spec,
                 )
 
-                tx_tool_counts = {
-                    "hulkrna_mm": (hulkrna_mm_counts, hulkrna_mm_elapsed),
-                    "salmon": (salmon_counts, salmon_elapsed),
-                    "kallisto": (kallisto_counts, kallisto_elapsed),
+                tx_tool_counts["salmon"] = (salmon_counts, salmon_elapsed)
+                tx_tool_counts["kallisto"] = (kallisto_counts, kallisto_elapsed)
+
+                tool_pool_counts["salmon"] = {
+                    "mature_rna": float(sum(salmon_counts.values())),
+                    "nascent_rna": 0.0,
+                    "genomic_dna": 0.0,
+                    "rna": float(sum(salmon_counts.values())),
+                    "dna": 0.0,
+                }
+                tool_pool_counts["kallisto"] = {
+                    "mature_rna": float(sum(kallisto_counts.values())),
+                    "nascent_rna": 0.0,
+                    "genomic_dna": 0.0,
+                    "rna": float(sum(kallisto_counts.values())),
+                    "dna": 0.0,
                 }
 
                 pool_truth = compute_truth_pool_counts(truth_counts, n_gdna_actual)
-                tool_pool_counts = {
-                    "hulkrna_mm": hulkrna_mm_pool_counts,
-                    "salmon": {
-                        "mature_rna": float(sum(salmon_counts.values())),
-                        "nascent_rna": 0.0,
-                        "genomic_dna": 0.0,
-                        "rna": float(sum(salmon_counts.values())),
-                        "dna": 0.0,
-                    },
-                    "kallisto": {
-                        "mature_rna": float(sum(kallisto_counts.values())),
-                        "nascent_rna": 0.0,
-                        "genomic_dna": 0.0,
-                        "rna": float(sum(kallisto_counts.values())),
-                        "dna": 0.0,
-                    },
-                }
                 pool_metrics: list[dict] = []
                 for tool_name, observed_pools in tool_pool_counts.items():
                     pool_metrics.extend(
                         compute_pool_metric_rows(tool_name, pool_truth, observed_pools)
-                    )
-
-            # ── Run htseq (gene-level only) ─────────────────────────
-
-                htseq_gene_counts: dict[str, int] = {}
-                htseq_elapsed = 0.0
-                if include_htseq:
-                    bam_cs = cond_dir / "align" / "reads_coordsort.bam"
-                    coord_sort_bam(bam_ns, bam_cs)
-                    htseq_gene_counts, htseq_elapsed = run_htseq(
-                        bam_cs,
-                        region_gtf,
-                        cond_dir / "htseq",
-                        strand_specificity=strand_spec,
-                        conda_env=htseq_conda_env,
                     )
 
             # ── Score transcript-level ──────────────────────────────
@@ -1315,70 +1393,64 @@ def run_region_benchmark(
                     gene_metrics[tool] = asdict(
                         score_tool(tool, truth_gene, gene_counts, elapsed)
                     )
-                if include_htseq:
-                    gene_metrics["htseq"] = asdict(
-                        score_tool("htseq", truth_gene, htseq_gene_counts, htseq_elapsed)
+                for htseq_tool, (htseq_counts, htseq_elapsed) in htseq_gene_by_aligner.items():
+                    gene_metrics[htseq_tool] = asdict(
+                        score_tool(htseq_tool, truth_gene, htseq_counts, htseq_elapsed)
                     )
 
             # ── Write per-transcript CSV ────────────────────────────
 
+                tx_tools = _get_transcript_tools(args.aligner)
                 per_tx_csv = cond_dir / "per_transcript_counts.csv"
                 tids = sorted(mature_truth_counts)
                 with open(per_tx_csv, "w", newline="") as f:
                     writer = csv.writer(f)
-                    header = [
-                        "transcript_id",
-                        "gene_id",
-                        "truth",
-                        "hulkrna_mm",
-                        "salmon",
-                        "kallisto",
-                        "abundance",
-                        "nrna_abundance",
-                    ]
+                    header = ["transcript_id", "gene_id", "truth"]
+                    header.extend(tx_tools)
+                    header.extend(["abundance", "nrna_abundance"])
                     writer.writerow(header)
                     for tid in tids:
-                        writer.writerow([
+                        row: list = [
                             tid,
                             gene_map.get(tid, ""),
                             int(truth_counts.get(tid, 0)),
-                            float(hulkrna_mm_counts.get(tid, 0.0)),
-                            float(salmon_counts.get(tid, 0.0)),
-                            float(kallisto_counts.get(tid, 0.0)),
+                        ]
+                        for tool in tx_tools:
+                            row.append(float(tx_tool_counts[tool][0].get(tid, 0.0)))
+                        row.extend([
                             float(abundance_map.get(tid, 0.0)),
                             float(abundance_map.get(tid, 0.0) * nrna_rate),
                         ])
+                        writer.writerow(row)
 
             # ── Write per-gene CSV ──────────────────────────────────
 
+                gene_tools = _get_gene_tools(args.aligner, include_htseq=include_htseq)
                 per_gene_csv = cond_dir / "per_gene_counts.csv"
                 gene_ids = sorted(truth_gene)
-                hulkrna_mm_gene_counts = aggregate_to_genes(hulkrna_mm_counts, gene_map)
-                salmon_gene_counts = aggregate_to_genes(salmon_counts, gene_map)
-                kallisto_gene_counts = aggregate_to_genes(kallisto_counts, gene_map)
+                # Aggregate each tool's counts to gene-level
+                gene_level_counts: dict[str, dict[str, float]] = {}
+                for tool in tx_tools:
+                    gene_level_counts[tool] = aggregate_to_genes(
+                        tx_tool_counts[tool][0], gene_map,
+                    )
+                for htseq_tool, (htseq_counts, _) in htseq_gene_by_aligner.items():
+                    gene_level_counts[htseq_tool] = {
+                        gid: float(c) for gid, c in htseq_counts.items()
+                    }
                 with open(per_gene_csv, "w", newline="") as f:
                     writer = csv.writer(f)
-                    header = [
-                        "gene_id",
-                        "truth",
-                        "hulkrna_mm",
-                        "salmon",
-                        "kallisto",
-                    ]
-                    if include_htseq:
-                        header.append("htseq")
+                    header = ["gene_id", "truth"]
+                    header.extend(gene_tools)
                     header.extend(["abundance", "nrna_abundance"])
                     writer.writerow(header)
                     for gid in gene_ids:
                         row = [
                             gid,
                             int(truth_gene.get(gid, 0)),
-                            float(hulkrna_mm_gene_counts.get(gid, 0.0)),
-                            float(salmon_gene_counts.get(gid, 0.0)),
-                            float(kallisto_gene_counts.get(gid, 0.0)),
                         ]
-                        if include_htseq:
-                            row.append(int(htseq_gene_counts.get(gid, 0)))
+                        for tool in gene_tools:
+                            row.append(float(gene_level_counts.get(tool, {}).get(gid, 0.0)))
                         row.extend([
                             float(gene_abundance.get(gid, 0.0)),
                             float(gene_abundance.get(gid, 0.0) * nrna_rate),
@@ -1396,16 +1468,17 @@ def run_region_benchmark(
                         "signed_error",
                         "abs_error",
                     ])
-                    for row in pool_metrics:
+                    for pm_row in pool_metrics:
                         writer.writerow([
-                            row["tool"],
-                            row["pool"],
-                            row["truth"],
-                            row["observed"],
-                            row["signed_error"],
-                            row["abs_error"],
+                            pm_row["tool"],
+                            pm_row["pool"],
+                            pm_row["truth"],
+                            pm_row["observed"],
+                            pm_row["signed_error"],
+                            pm_row["abs_error"],
                         ])
 
+                aligner_str = ",".join(args.aligner)
                 results.append(
                     ConditionResult(
                         region=region.label,
@@ -1420,23 +1493,32 @@ def run_region_benchmark(
                         nrna_rate=round(nrna_rate, 6),
                         nrna_abundance=round(nrna_total_abundance, 4),
                         strand_specificity=strand_spec,
-                        aligner=args.aligner,
+                        aligner=aligner_str,
                         transcript_metrics=transcript_metrics,
                         gene_metrics=gene_metrics,
                         pool_metrics=pool_metrics,
                     )
                 )
 
+                hulkrna_parts = " | ".join(
+                    f"{_hulkrna_tool_name(a)} MAE="
+                    f"{transcript_metrics[_hulkrna_tool_name(a)]['mean_abs_error']:.2f}"
+                    for a in args.aligner
+                )
+                htseq_parts = ""
+                if include_htseq:
+                    htseq_parts = " | " + " | ".join(
+                        f"{ht} gene-MAE={gene_metrics[ht]['mean_abs_error']:.2f}"
+                        for ht in htseq_gene_by_aligner
+                    )
                 logger.info(
-                    "    aligner=%s | hulkrna_mm MAE=%.2f | "
+                    "    aligners=%s | %s | "
                     "salmon MAE=%.2f | kallisto MAE=%.2f%s",
-                    args.aligner,
-                    transcript_metrics["hulkrna_mm"]["mean_abs_error"],
+                    aligner_str,
+                    hulkrna_parts,
                     transcript_metrics["salmon"]["mean_abs_error"],
                     transcript_metrics["kallisto"]["mean_abs_error"],
-                    f" | htseq gene-MAE={gene_metrics['htseq']['mean_abs_error']:.2f}"
-                    if include_htseq
-                    else "",
+                    htseq_parts,
                 )
 
     return results
@@ -1560,8 +1642,13 @@ def write_summary(results: list[ConditionResult], out_root: Path, include_htseq:
 
     # ── Markdown ────────────────────────────────────────────────────
 
-    tx_tools = list(TRANSCRIPT_TOOLS)
-    gene_tools = list(GENE_TOOLS) if include_htseq else list(TRANSCRIPT_TOOLS)
+    # Derive tool lists dynamically from the first result
+    if results:
+        tx_tools = list(results[0].transcript_metrics.keys())
+        gene_tools = list(results[0].gene_metrics.keys())
+    else:
+        tx_tools = list(TRANSCRIPT_TOOLS)
+        gene_tools = list(GENE_TOOLS) if include_htseq else list(TRANSCRIPT_TOOLS)
 
     lines = [
         "# Regional Benchmark Summary",
@@ -1608,7 +1695,11 @@ def write_diagnostics(
     results: list[ConditionResult], out_root: Path, include_htseq: bool
 ) -> None:
     """Write aggregate diagnostic report."""
-    tx_tools = list(TRANSCRIPT_TOOLS)
+    # Derive tool lists dynamically from results
+    if results:
+        tx_tools = list(results[0].transcript_metrics.keys())
+    else:
+        tx_tools = list(TRANSCRIPT_TOOLS)
 
     # ── Aggregate transcript-level metrics by tool ──────────────────
 
@@ -1760,12 +1851,14 @@ def write_diagnostics(
             })
     pool_df = pd.DataFrame(pool_rows)
     if len(pool_df):
+        pool_tool_header = "| Pool | " + " | ".join(tx_tools) + " |"
+        pool_tool_sep = "| --- | " + " | ".join(["---:"] * len(tx_tools)) + " |"
         lines.extend([
             "",
             "## Pool-level absolute error (mature_rna, nascent_rna, genomic_dna, rna, dna)",
             "",
-            "| Pool | hulkrna_mm | salmon | kallisto |",
-            "| --- | ---: | ---: | ---: |",
+            pool_tool_header,
+            pool_tool_sep,
         ])
         for pool in ["mature_rna", "nascent_rna", "genomic_dna", "rna", "dna"]:
             sub = pool_df[pool_df["pool"] == pool]
@@ -1817,10 +1910,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     p.add_argument(
         "--aligner",
-        type=str,
-        choices=["minimap2", "hisat2"],
-        default="minimap2",
-        help="Genome aligner for hulkrna/htseq inputs",
+        nargs="+",
+        choices=list(ALIGNER_CHOICES),
+        default=["minimap2"],
+        help="Genome aligner(s) for hulkrna/htseq inputs; specify one or more "
+             "(e.g. --aligner minimap2 oracle). oracle: bypass alignment with perfect BAM",
     )
     p.add_argument(
         "--hisat2-exe",
@@ -1943,17 +2037,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def ensure_tools(
     *,
-    aligner: str,
+    aligners: list[str],
     hisat2_exe: str,
     hisat2_build_exe: str,
     include_htseq: bool = True,
     htseq_conda_env: str = "htseq",
 ) -> None:
     required = ["samtools", "salmon", "kallisto"]
-    if aligner == "minimap2":
-        required.append("minimap2")
-    elif aligner == "hisat2":
-        required.extend([hisat2_exe, hisat2_build_exe])
+    for aligner in aligners:
+        if aligner == "minimap2":
+            required.append("minimap2")
+        elif aligner == "hisat2":
+            required.extend([hisat2_exe, hisat2_build_exe])
+    # Deduplicate while preserving order
+    required = list(dict.fromkeys(required))
     missing = [tool for tool in required if shutil.which(tool) is None]
     if missing:
         raise RuntimeError(f"Missing required tools in PATH: {', '.join(missing)}")
@@ -2054,6 +2151,12 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
         if dest == "region" and isinstance(value, list):
             setattr(args, dest, [str(x) for x in value])
             continue
+        if dest == "aligner" and isinstance(value, str):
+            setattr(args, dest, [value])
+            continue
+        if dest == "aligner" and isinstance(value, list):
+            setattr(args, dest, [str(x) for x in value])
+            continue
         if dest in {"gdna_rates", "gdna_rate_labels", "nrna_rates", "nrna_rate_labels", "strand_specificities"} and isinstance(value, list):
             setattr(args, dest, ",".join(str(x) for x in value))
             continue
@@ -2092,8 +2195,12 @@ def main() -> int:
         include_htseq = True
     htseq_conda_env = args.htseq_conda_env
 
+    # Normalise aligner to a list (YAML may set a bare string)
+    if isinstance(args.aligner, str):
+        args.aligner = [args.aligner]
+
     ensure_tools(
-        aligner=args.aligner,
+        aligners=args.aligner,
         hisat2_exe=args.hisat2_exe,
         hisat2_build_exe=args.hisat2_build_exe,
         include_htseq=include_htseq,
@@ -2164,13 +2271,15 @@ def main() -> int:
     )
 
     logger.info(
-        "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs × %d regions = %d conditions",
+        "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs × %d regions × %d aligners = %d conditions",
         len(gdna_rates),
         len(nrna_rates),
         len(strand_specificities),
         len(regions),
+        len(args.aligner),
         len(gdna_rates) * len(nrna_rates) * len(strand_specificities) * len(regions),
     )
+    logger.info("Aligners: %s", ", ".join(args.aligner))
 
     args.outdir.mkdir(parents=True, exist_ok=True)
 

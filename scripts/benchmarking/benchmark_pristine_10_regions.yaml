@@ -2,7 +2,7 @@ genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bg
 gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
 outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_pristine_10_regions
 
-aligner: hisat2
+aligner: ["oracle"]
 threads: 4
 
 region:

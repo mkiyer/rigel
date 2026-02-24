@@ -12,7 +12,7 @@ from hulkrna.buffer import (
     FRAG_UNIQUE,
 )
 from hulkrna.categories import SpliceType
-from hulkrna.counter import ReadCounter
+from hulkrna.estimator import AbundanceEstimator
 from hulkrna.frag_length_model import FragmentLengthModels
 from hulkrna.pipeline import _scan_and_build_em_data
 from hulkrna.stats import PipelineStats
@@ -79,7 +79,7 @@ def _make_env(index):
         strand_models.exonic_spliced.observe(Strand.POS, Strand.POS)
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
-    counter = ReadCounter(index.num_transcripts, index.num_genes, seed=1)
+    counter = AbundanceEstimator(index.num_transcripts, index.num_genes, seed=1)
     stats = PipelineStats()
     return strand_models, frag_length_models, counter, stats
 

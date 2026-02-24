@@ -28,12 +28,14 @@ Quick Start
 
 from .annotation import GeneBuilder
 from .benchmark import BenchmarkResult, TranscriptAccuracy, run_benchmark
+from .oracle_bam import OracleBamSimulator
 from .genome import MutableGenome, reverse_complement
 from .reads import GDNAConfig, ReadSimulator, SimConfig
 from .scenario import Scenario, ScenarioResult
 
 __all__ = [
     "BenchmarkResult",
+    "OracleBamSimulator",
     "GDNAConfig",
     "GeneBuilder",
     "MutableGenome",
