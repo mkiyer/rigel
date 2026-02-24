@@ -6,142 +6,85 @@ Architecture
 The pipeline reads the BAM file **once** and processes counts in
 two logical stages:
 
-**BAM Scan**: Parse all fragments, resolve each against the
-reference index, train strand and fragment-length models from
-unique-mapper fragments, and buffer all resolved fragments into a
-memory-efficient columnar buffer (``FragmentBuffer``).
+**BAM Scan** (``scan_and_buffer``): Parse all fragments, resolve each
+against the reference index, train strand and fragment-length models
+from unique-mapper fragments, and buffer all resolved fragments into
+a memory-efficient columnar buffer (``FragmentBuffer``).
 
-**Count Assignment**: Iterate the buffer once to:
+**Count Assignment** (``count_from_buffer``): Iterate the buffer once
+to assign unique counts, build CSR EM data (via ``scan.EmDataBuilder``),
+construct loci (via ``locus.build_loci``), compute Empirical Bayes gDNA
+priors, and run per-locus EM with ``2*n_t + 1`` components.
 
-1. **Unique assignment** — deterministic count += 1 for unambiguous
-   SPLICED_ANNOT fragments (annotated splice junctions definitively
-   prove RNA origin).
-2. **Pre-compute EM data** — for every other fragment, compute the
-   data likelihood for each candidate transcript, then store in CSR
-   arrays.  The global CSR contains mRNA + nRNA candidates ONLY.
-   gDNA candidates are added per-locus during locus EM construction.
-3. **Build loci** — partition transcripts into connected components
-   via union-find on fragment→transcript connectivity.
-4. **Empirical Bayes gDNA prior** — hierarchical shrinkage
-   (locus → chromosome → global) for gDNA initialization.
-5. **Per-locus EM** — run independent EM per locus with
-   ``2*n_t + 1`` components (mRNA + nRNA + ONE gDNA shadow).
-   Spliced fragments NEVER see the gDNA candidate.
-6. **Expected-value assignment** — use the converged EM posteriors to
-   distribute fractional counts across candidates.
-
-Each fragment contributes exactly **one count** (1.0) distributed
-across components proportional to posterior probability.
-
-The columnar buffer stores fragment data at ~40-50 bytes per fragment
-(vs. ~600 bytes for Python ``ResolvedFragment`` objects).  When
-memory exceeds a configurable threshold, chunks are spilled to disk
-as Arrow IPC (Feather v2) files with LZ4 compression.
+Scoring functions live in ``scoring.py``.  Locus construction and EM
+initialization live in ``locus.py``.  The CSR builder lives in
+``scan.py``.  This module is a thin orchestrator.
 """
 
 import logging
 import math
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from .bam import parse_bam_file, detect_sj_strand_tag
-from .buffer import (
-    FragmentBuffer,
-    FRAG_UNIQUE,
-    FRAG_ISOFORM_AMBIG,
-    FRAG_MULTIMAPPER,
-    FRAG_CHIMERIC,
-)
+from .buffer import FragmentBuffer
 from .categories import SpliceType
-from .estimator import AbundanceEstimator, ScanData, Locus, LocusEMInput
+from .estimator import AbundanceEstimator
 from .fragment import Fragment
 from .types import ChimeraType, Strand
 from .index import HulkIndex
-from .frag_length_model import FragmentLengthModels, _TAIL_DECAY_LP
-from .resolution import (
-    pair_multimapper_reads,
-    resolve_fragment,
-)
+from .frag_length_model import FragmentLengthModels
+from .resolution import pair_multimapper_reads, resolve_fragment
 from .stats import PipelineStats
 from .strand_model import StrandModels
 
+# --- New modular imports ---
+from .scoring import (
+    ScoringContext,
+    overhang_alpha_to_log_penalty,
+    DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+    DEFAULT_OVERHANG_ALPHA,
+    DEFAULT_MISMATCH_ALPHA,
+    GDNA_SPLICE_PENALTIES,
+    SPLICE_UNSPLICED,
+    SPLICE_UNANNOT,
+    SPLICE_ANNOT,
+    score_gdna_standalone,
+)
+from .locus import (
+    build_loci,
+    build_locus_em_data,
+    compute_nrna_init,
+    compute_gdna_rate_from_strand,
+    compute_eb_gdna_priors,
+    EB_K_LOCUS,
+    EB_K_CHROM,
+)
+from .scan import EmDataBuilder
+
 logger = logging.getLogger(__name__)
 
-# Floor value for log-safe clamping to avoid log(0).
-_LOG_SAFE_FLOOR = 1e-10
-
-# Pre-computed log(0.5) — used for uninformative strand log-probabilities.
-_LOG_HALF = math.log(0.5)
-
-# Default gDNA splice penalty for SPLICED_UNANNOT fragments.
-# Most unannotated splice junctions are real; a small penalty allows
-# gDNA to compete only weakly for these fragments.
-_DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = 0.01
-DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
-
-# Default overhang alpha: each base of overhang reduces probability by 100×.
-DEFAULT_OVERHANG_ALPHA = 0.01
-
-# Default mismatch alpha: each edit-distance mismatch (NM tag) reduces
-# probability by 10×.  This is a softer penalty than the overhang alpha
-# because sequencing errors can produce small NM values even for correct
-# alignments.  The primary effect is on multimappers where different hits
-# map to paralogous loci with distinct NM values.
-DEFAULT_MISMATCH_ALPHA = 0.1
 
 # ---------------------------------------------------------------------------
-# Int constants for hot-path scoring (avoid enum construction overhead)
+# Backward-compatible re-exports
+# (tests, scripts, and external tools import these names from pipeline)
 # ---------------------------------------------------------------------------
-_STRAND_POS = int(Strand.POS)        # 1
-_STRAND_NEG = int(Strand.NEG)        # 2
-_SPLICE_UNSPLICED = int(SpliceType.UNSPLICED)          # 0
-_SPLICE_UNANNOT = int(SpliceType.SPLICED_UNANNOT)      # 1
-_SPLICE_ANNOT = int(SpliceType.SPLICED_ANNOT)          # 2
+_GDNA_SPLICE_PENALTIES = GDNA_SPLICE_PENALTIES
+_SPLICE_UNSPLICED = SPLICE_UNSPLICED
+_SPLICE_UNANNOT = SPLICE_UNANNOT
+_SPLICE_ANNOT = SPLICE_ANNOT
+_DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
 
-# ---------------------------------------------------------------------------
-# Winner-take-all gating
-# ---------------------------------------------------------------------------
-#
-# Candidate-set definition for the EM uses "winner-take-all" pools:
-#
-# **mRNA pool** (all fragments, spliced and unspliced): every
-#   transcript with exon_bp > 0, ranked by mRNA overhang =
-#   max(read_length − exon_bp, 0).  Only the *winner(s)* (minimum
-#   overhang, ties included) enter the EM.  Spliced fragments are
-#   mRNA-only by definition (no nRNA / gDNA).
-#
-# **nRNA pool** (unspliced fragments only): every transcript with
-#   span_bp > 0 (span_bp = exon_bp + intron_bp), ranked by nRNA
-#   overhang = max(read_length − span_bp, 0).  Only the winner(s)
-#   enter the EM.  Independent of the mRNA pool.
-#
-# **gDNA** is always a candidate for unspliced fragments (no gating).
-#
-# The exponential overhang penalty scores winners inside the EM.
-
-
-def overhang_alpha_to_log_penalty(alpha: float) -> float:
-    """Convert user-facing alpha to internal log-penalty.
-
-    Parameters
-    ----------
-    alpha : float
-        Per-base overhang penalty in [0, 1].
-        - 0.0 → hard binary gate (any overhang → −∞)
-        - 0.01 → aggressive (−4.605 per base)
-        - 1.0 → no penalty (off)
-
-    Returns
-    -------
-    float
-        ``log(alpha)`` or ``−inf`` when alpha ≤ 0.
-    """
-    if alpha <= 0.0:
-        return -np.inf
-    return np.log(alpha)
+_score_gdna_candidate = score_gdna_standalone
+_build_loci = build_loci
+_build_locus_em_data = build_locus_em_data
+_compute_nrna_init = compute_nrna_init
+_compute_gdna_rate_from_strand = compute_gdna_rate_from_strand
+_compute_eb_gdna_priors = compute_eb_gdna_priors
+_EB_K_LOCUS = EB_K_LOCUS
+_EB_K_CHROM = EB_K_CHROM
 
 
 # ---------------------------------------------------------------------------
@@ -403,1301 +346,8 @@ def scan_and_buffer(
 
 
 # ---------------------------------------------------------------------------
-# EM scoring helpers
-# ---------------------------------------------------------------------------
-
-# Exponential overhang penalty.
-#
-# For each base of a fragment that falls outside the target boundary
-# (exons for mRNA, gene body for nRNA), the log-likelihood is penalised
-# by this amount.  With alpha = 0.01 each base of overhang reduces the
-# probability by a factor of 100:
-#
-#   log_penalty = b_out * log(alpha)         (in log-space)
-#
-# This replaces the previous overlap_exponent * log(overlap_frac) model
-# which produced near-zero discrimination for closely-overlapping
-# isoforms (e.g. 150/151 vs 151/151 → log diff of only -0.007).
-_DEFAULT_OVERHANG_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_OVERHANG_ALPHA)
-
-# Mismatch (edit distance) penalty: log(mismatch_alpha) per NM mismatch.
-_DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_MISMATCH_ALPHA)
-
-
-def _score_candidate(
-    exon_strand: int,
-    t_strand: int,
-    splice_type: int,
-    frag_length: int,
-    strand_models: StrandModels,
-    frag_length_models: FragmentLengthModels,
-    overhang_bp: int = 0,
-    overhang_log_penalty: float = _DEFAULT_OVERHANG_LOG_PENALTY,
-) -> tuple[float, int]:
-    """Compute data log-likelihood and count column for one mRNA candidate.
-
-    The geometry term uses an exponential overhang penalty: each base
-    of the fragment that falls outside the transcript's exon boundaries
-    incurs a multiplicative penalty of ``alpha`` (default 0.01) in
-    probability, i.e. ``overhang_bp * log(alpha)`` in log-space.
-
-    Returns (log_lik, count_col_idx).
-    """
-    p_strand = strand_models._best_rna_model().strand_likelihood_int(
-        exon_strand, t_strand,
-    )
-
-    log_p_insert = (
-        frag_length_models.global_model.log_likelihood(frag_length)
-        if frag_length > 0
-        else 0.0
-    )
-
-    log_lik = (
-        math.log(max(p_strand, _LOG_SAFE_FLOOR))
-        + log_p_insert
-        + overhang_bp * overhang_log_penalty
-    )
-
-    anti = p_strand < 0.5
-    # Inline SpliceStrandCol.from_category: category * 2 + int(antisense)
-    count_col_idx = splice_type * 2 + int(anti)
-
-    return log_lik, count_col_idx
-
-
-# Default gDNA splice penalties per SpliceType (int keys for fast lookup).
-_GDNA_SPLICE_PENALTIES = {
-    _SPLICE_UNSPLICED: 1.0,
-    _SPLICE_UNANNOT: _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-    _SPLICE_ANNOT: 0.0,  # never used
-}
-
-
-def _score_gdna_candidate(
-    exon_strand: int,
-    splice_type: int,
-    frag_length: int,
-    strand_models: StrandModels,
-    frag_length_models: FragmentLengthModels,
-    gdna_splice_penalties: dict | None = None,
-) -> float:
-    """Compute data log-likelihood for the gDNA pseudo-component.
-
-    Returns log_lik (float).
-    """
-    penalties = gdna_splice_penalties or _GDNA_SPLICE_PENALTIES
-    splice_pen = penalties.get(splice_type, 1.0)
-
-    p_strand = strand_models.intergenic.strand_likelihood_int(
-        exon_strand, _STRAND_POS,
-    )
-
-    log_p_insert = (
-        frag_length_models.global_model.log_likelihood(frag_length)
-        if frag_length > 0
-        else 0.0
-    )
-
-    return (
-        math.log(max(p_strand, _LOG_SAFE_FLOOR))
-        + log_p_insert
-        + math.log(max(splice_pen, _LOG_SAFE_FLOOR))
-    )
-
-
-def _score_nrna_candidate(
-    exon_strand: int,
-    gene_strand: int,
-    frag_length: int,
-    strand_models: StrandModels,
-    frag_length_models: FragmentLengthModels,
-    overhang_bp: int = 0,
-    overhang_log_penalty: float = _DEFAULT_OVERHANG_LOG_PENALTY,
-) -> float:
-    """Compute data log-likelihood for a nascent RNA (nRNA) candidate.
-
-    The geometry term uses an exponential overhang penalty: each base
-    of the fragment that falls outside the gene body (exons + introns)
-    incurs a multiplicative penalty of ``alpha`` in probability.
-
-    Returns log_lik (float).
-    """
-    p_strand = strand_models.exonic_spliced.strand_likelihood_int(
-        exon_strand, gene_strand,
-    )
-
-    log_p_insert = (
-        frag_length_models.global_model.log_likelihood(frag_length)
-        if frag_length > 0
-        else 0.0
-    )
-
-    return (
-        math.log(max(p_strand, _LOG_SAFE_FLOOR))
-        + log_p_insert
-        + overhang_bp * overhang_log_penalty
-    )
-
-
-# ---------------------------------------------------------------------------
-# Buffer scan + EM data construction (mRNA + nRNA only; NO gDNA in CSR)
-# ---------------------------------------------------------------------------
-
-
-def _scan_and_build_em_data(
-    buffer: FragmentBuffer,
-    index: HulkIndex,
-    strand_models: StrandModels,
-    frag_length_models: FragmentLengthModels,
-    counter: AbundanceEstimator,
-    stats: PipelineStats,
-    log_every: int,
-    gdna_splice_penalties: dict | None = None,
-    overhang_log_penalty: float | None = None,
-    mismatch_log_penalty: float | None = None,
-) -> ScanData:
-    """Single buffer pass: assign uniques + build mRNA/nRNA EM data.
-
-    The global CSR contains ONLY mRNA + nRNA candidates.  gDNA candidates
-    are added per-locus during ``_build_locus_em_data`` for unspliced units.
-
-    Per-unit metadata tracked:
-    - ``is_spliced``: True if fragment has annotated or unannotated SJs.
-    - ``gdna_log_lik``: pre-computed gDNA likelihood for unspliced units
-      (-inf for spliced units).
-    """
-    nrna_base = counter.nrna_base_index
-    t_to_g = index.t_to_g_arr
-    _overhang_lp = (
-        overhang_log_penalty
-        if overhang_log_penalty is not None
-        else _DEFAULT_OVERHANG_LOG_PENALTY
-    )
-    _mismatch_lp = (
-        mismatch_log_penalty
-        if mismatch_log_penalty is not None
-        else _DEFAULT_MISMATCH_LOG_PENALTY
-    )
-
-    # Pre-compute scoring constants to avoid per-call overhead.
-    # Strand: use the best RNA model's cached probabilities.
-    _rna_sm = strand_models._best_rna_model()
-    _p_sense = _rna_sm._cached_p_sense if _rna_sm._finalized else _rna_sm.p_r1_sense
-    _p_antisense = 1.0 - _p_sense
-    _log_p_sense = math.log(max(_p_sense, _LOG_SAFE_FLOOR))
-    _log_p_antisense = math.log(max(_p_antisense, _LOG_SAFE_FLOOR))
-    _anti_flag = _p_sense < 0.5  # True if protocol is RF
-
-    # Intergenic strand model for gDNA scoring.
-    _ig_sm = strand_models.intergenic
-    _ig_p = _ig_sm._cached_p_sense if _ig_sm._finalized else _ig_sm.p_r1_sense
-    _log_ig_p = math.log(max(_ig_p, _LOG_SAFE_FLOOR))
-
-    # Insert model: pre-finalized LUT accessed via array index.
-    _fl_model = frag_length_models.global_model
-    _fl_log_prob = _fl_model._log_prob  # numpy array, may be None
-    _fl_max_size = _fl_model.max_size
-    _fl_tail_base: float = getattr(_fl_model, "_tail_base", 0.0)
-
-    def _frag_len_ll(flen: int) -> float:
-        """Fragment-length log-likelihood (0.0 when unavailable)."""
-        if flen <= 0:
-            return 0.0
-        if _fl_log_prob is not None:
-            if flen <= _fl_max_size:
-                return float(_fl_log_prob[flen])
-            # Exponential tail decay beyond max_size
-            return _fl_tail_base + (flen - _fl_max_size) * _TAIL_DECAY_LP
-        return _fl_model.log_likelihood(flen)
-
-    # Transcript strand array for fast lookup.
-    _t_strand_arr = index.t_to_strand_arr
-    _g_strand_arr = index.g_to_strand_arr
-
-    # Accumulation lists for CSR
-    offsets: list[int] = [0]
-    t_indices_list: list[int] = []
-    log_liks_list: list[float] = []
-    count_cols_list: list[int] = []
-
-    # Per-unit metadata
-    locus_t_list: list[int] = []
-    locus_ct_list: list[int] = []
-    is_spliced_list: list[bool] = []
-    gdna_ll_list: list[float] = []
-
-    # Multimapper group state
-    mm_pending: list = []
-    mm_fid: int = -1
-
-    def _add_transcript_candidates(bf) -> tuple[float, int]:
-        """Add mRNA candidates for a fragment (winner-take-all).
-
-        Only transcripts with exon_bp > 0 are eligible.  Among those,
-        only the winner(s) — minimum overhang (ties included) — enter
-        the EM.  The exponential overhang penalty then scores them.
-
-        Each candidate gets its own per-transcript fragment-length
-        log-probability (different transcripts may correct different
-        introns in the gap between mate pairs).
-
-        Applied uniformly to spliced and unspliced fragments alike.
-        """
-        best_ll = -np.inf
-        best_ct = 0
-        fl = bf.read_length if bf.read_length > 0 else 1
-        _es = bf.exon_strand
-        _frag_lengths = bf.frag_lengths
-        _spl = bf.splice_type
-        _nm = bf.nm
-
-        # Pre-compute mismatch penalty (same for all candidates in this hit)
-        _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
-
-        # Determine strand log-probabilities for this fragment
-        # (depends on whether exon_strand is informative)
-        if _es == 1 or _es == 2:
-            # Informative strand → sense/antisense depends on transcript
-            _log_same = _log_p_sense
-            _log_diff = _log_p_antisense
-        else:
-            # Uninformative strand → 0.5 for all
-            _log_same = _log_diff = _LOG_HALF
-
-        # Pass 1 — find minimum overhang among exon-overlapping candidates
-        min_oh = fl + 1  # sentinel
-        _exon_bp = bf.exon_bp
-        _t_inds = bf.t_inds
-        for k in range(len(_t_inds)):
-            ebp = int(_exon_bp[k]) if _exon_bp is not None else fl
-            if ebp > 0:
-                oh = fl - ebp
-                if oh < 0:
-                    oh = 0
-                if oh < min_oh:
-                    min_oh = oh
-
-        # Pass 2 — admit only winners, with inlined scoring
-        if min_oh <= fl:
-            for k in range(len(_t_inds)):
-                t_idx_int = int(_t_inds[k])
-                ebp = int(_exon_bp[k]) if _exon_bp is not None else fl
-                if ebp <= 0:
-                    continue
-                oh = fl - ebp
-                if oh < 0:
-                    oh = 0
-                if oh != min_oh:
-                    continue
-                # Per-candidate fragment-length log-probability
-                _log_fl = _frag_len_ll(
-                    int(_frag_lengths[k]) if _frag_lengths is not None else -1
-                )
-                # Inlined _score_candidate:
-                t_strand = int(_t_strand_arr[t_idx_int])
-                if _es == t_strand:
-                    log_strand = _log_same
-                    anti = _anti_flag
-                else:
-                    log_strand = _log_diff
-                    anti = not _anti_flag
-                log_lik = log_strand + _log_fl + oh * _overhang_lp + _log_nm
-                ct = _spl * 2 + int(anti)
-                t_indices_list.append(t_idx_int)
-                log_liks_list.append(log_lik)
-                count_cols_list.append(ct)
-                if log_lik > best_ll:
-                    best_ll = log_lik
-                    best_ct = ct
-        return best_ll, best_ct
-
-    def _add_nrna_candidates(bf) -> None:
-        """Add per-transcript nRNA shadow candidates (winner-take-all).
-
-        Independent of mRNA pool.  Only transcripts with span_bp > 0
-        (span_bp = exon_bp + intron_bp) are eligible.  Among those,
-        only the winner(s) — minimum nRNA overhang — enter the EM.
-        """
-        fl = bf.read_length if bf.read_length > 0 else 1
-        _es = bf.exon_strand
-        _nm = bf.nm
-
-        # nRNA/gDNA use genomic footprint (full span, no intron subtraction)
-        _log_fl = _frag_len_ll(bf.genomic_footprint)
-
-        # Pre-compute mismatch penalty (same for all candidates in this hit)
-        _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
-
-        # Strand log-probabilities for nRNA (uses same RNA model)
-        if _es == 1 or _es == 2:
-            _log_same = _log_p_sense
-            _log_diff = _log_p_antisense
-        else:
-            _log_same = _log_diff = _LOG_HALF
-
-        _exon_bp = bf.exon_bp
-        _intron_bp = bf.intron_bp
-        _t_inds = bf.t_inds
-
-        # Pass 1 — find minimum overhang among span-overlapping candidates
-        min_oh = fl + 1  # sentinel
-        for k in range(len(_t_inds)):
-            ebp = int(_exon_bp[k]) if _exon_bp is not None else fl
-            ibp = int(_intron_bp[k]) if _intron_bp is not None else 0
-            span_bp = ebp + ibp
-            if span_bp > 0:
-                oh = fl - span_bp
-                if oh < 0:
-                    oh = 0
-                if oh < min_oh:
-                    min_oh = oh
-
-        # Pass 2 — admit only winners, with inlined scoring
-        if min_oh <= fl:
-            for k in range(len(_t_inds)):
-                t_idx_int = int(_t_inds[k])
-                ebp = int(_exon_bp[k]) if _exon_bp is not None else fl
-                ibp = int(_intron_bp[k]) if _intron_bp is not None else 0
-                span_bp = ebp + ibp
-                if span_bp <= 0:
-                    continue
-                oh = fl - span_bp
-                if oh < 0:
-                    oh = 0
-                if oh != min_oh:
-                    continue
-                # Inlined _score_nrna_candidate:
-                g_idx = int(t_to_g[t_idx_int])
-                gene_strand = int(_g_strand_arr[g_idx])
-                if _es == gene_strand:
-                    log_strand = _log_same
-                else:
-                    log_strand = _log_diff
-                nrna_ll = log_strand + _log_fl + oh * _overhang_lp + _log_nm
-                nrna_idx = nrna_base + t_idx_int
-                t_indices_list.append(nrna_idx)
-                log_liks_list.append(nrna_ll)
-                count_cols_list.append(0)
-
-    # Pre-compute gDNA splice penalty lookup (int-keyed).
-    _gdna_pens = gdna_splice_penalties or _GDNA_SPLICE_PENALTIES
-
-    def _finalize_unit(bf, best_t: int, best_ct: int) -> None:
-        """Record per-unit metadata after adding candidates."""
-        st = bf.splice_type
-        is_spl = (st == _SPLICE_ANNOT or st == _SPLICE_UNANNOT)
-        is_spliced_list.append(is_spl)
-        # Inlined gDNA log-likelihood (only for unspliced)
-        if not is_spl:
-            _es = bf.exon_strand
-            # Splice penalty
-            _sp = _gdna_pens.get(st, 1.0)
-            # Strand (intergenic model, vs POS reference)
-            if _es == 1 or _es == 2:
-                _p_ig = _ig_p if _es == 1 else (1.0 - _ig_p)
-            else:
-                _p_ig = 0.5
-            _log_s = math.log(max(_p_ig, _LOG_SAFE_FLOOR))
-            _log_i = _frag_len_ll(bf.genomic_footprint)
-            gdna_ll_list.append(
-                _log_s + _log_i + math.log(max(_sp, _LOG_SAFE_FLOOR))
-            )
-        else:
-            gdna_ll_list.append(-np.inf)
-
-    def _flush_mm_group() -> None:
-        """Flush accumulated multimapper alignments as one EM unit.
-
-        Uses winner-take-all gating with independent mRNA and nRNA
-        pools.  Winner-take-all applies uniformly to both spliced and
-        unspliced groups.
-        """
-        # --- Determine if any alignment is spliced ---
-        any_spliced = False
-        for bf in mm_pending:
-            st = bf.splice_type
-            if st == _SPLICE_ANNOT or st == _SPLICE_UNANNOT:
-                any_spliced = True
-
-        # ----- mRNA pool (winner-take-all) -----
-        # Collect best (min overhang, log_lik, ct) per transcript.
-        # overhang is primary key (lower better), log_lik is tiebreaker.
-        best_per_t: dict[int, tuple[int, float, int]] = {}
-        for bf in mm_pending:
-            fl = bf.read_length if bf.read_length > 0 else 1
-            _es = bf.exon_strand
-            _spl = bf.splice_type
-            _nm = bf.nm
-            _frag_lengths = bf.frag_lengths
-            # Pre-compute mismatch penalty for this hit
-            _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
-            # Strand log-probs
-            if _es == 1 or _es == 2:
-                _log_same = _log_p_sense
-                _log_diff = _log_p_antisense
-            else:
-                _log_same = _log_diff = _LOG_HALF
-            _exon_bp = bf.exon_bp
-            for k in range(len(bf.t_inds)):
-                t_idx_int = int(bf.t_inds[k])
-                ebp = int(_exon_bp[k]) if _exon_bp is not None else fl
-                if ebp <= 0:
-                    continue
-                oh = fl - ebp
-                if oh < 0:
-                    oh = 0
-                # Per-candidate fragment-length log-probability
-                _log_fl = _frag_len_ll(
-                    int(_frag_lengths[k]) if _frag_lengths is not None else -1
-                )
-                # Inlined scoring
-                t_strand = int(_t_strand_arr[t_idx_int])
-                if _es == t_strand:
-                    log_strand = _log_same
-                    anti = _anti_flag
-                else:
-                    log_strand = _log_diff
-                    anti = not _anti_flag
-                log_lik = log_strand + _log_fl + oh * _overhang_lp + _log_nm
-                ct = _spl * 2 + int(anti)
-                prev = best_per_t.get(t_idx_int)
-                if prev is None or oh < prev[0] or (
-                    oh == prev[0] and log_lik > prev[1]
-                ):
-                    best_per_t[t_idx_int] = (oh, log_lik, ct)
-
-        # Winner-take-all: admit only minimum-overhang winners
-        _best_ll = -np.inf
-        _best_t = -1
-        _best_ct = 0
-        if best_per_t:
-            min_oh = min(v[0] for v in best_per_t.values())
-            for t_idx_int, (oh, log_lik, ct) in best_per_t.items():
-                if oh != min_oh:
-                    continue
-                t_indices_list.append(t_idx_int)
-                log_liks_list.append(log_lik)
-                count_cols_list.append(ct)
-                if log_lik > _best_ll:
-                    _best_ll = log_lik
-                    _best_t = t_idx_int
-                    _best_ct = ct
-
-        # ----- nRNA pool (independent, unspliced only) -----
-        if not any_spliced:
-            # Collect best (min overhang, nrna_ll) per transcript.
-            best_nrna: dict[int, tuple[int, float]] = {}
-            for bf in mm_pending:
-                if bf.splice_type == _SPLICE_ANNOT:
-                    continue
-                fl = bf.read_length if bf.read_length > 0 else 1
-                _es = bf.exon_strand
-                _nm = bf.nm
-                # nRNA/gDNA use genomic footprint
-                _log_fl = _frag_len_ll(bf.genomic_footprint)
-                # Pre-compute mismatch penalty for this hit
-                _log_nm = _nm * _mismatch_lp if _nm > 0 else 0.0
-                # Strand log-probs
-                if _es == 1 or _es == 2:
-                    _log_same = _log_p_sense
-                    _log_diff = _log_p_antisense
-                else:
-                    _log_same = _log_diff = _LOG_HALF
-                _exon_bp = bf.exon_bp
-                _intron_bp = bf.intron_bp
-                for k in range(len(bf.t_inds)):
-                    t_idx_int = int(bf.t_inds[k])
-                    ebp = (
-                        int(_exon_bp[k])
-                        if _exon_bp is not None else fl
-                    )
-                    ibp = (
-                        int(_intron_bp[k])
-                        if _intron_bp is not None else 0
-                    )
-                    span_bp = ebp + ibp
-                    if span_bp <= 0:
-                        continue
-                    oh = fl - span_bp
-                    if oh < 0:
-                        oh = 0
-                    # Inlined nRNA scoring
-                    g_idx = int(t_to_g[t_idx_int])
-                    gene_strand = int(_g_strand_arr[g_idx])
-                    if _es == gene_strand:
-                        log_strand = _log_same
-                    else:
-                        log_strand = _log_diff
-                    nrna_ll = log_strand + _log_fl + oh * _overhang_lp + _log_nm
-                    prev = best_nrna.get(t_idx_int)
-                    if prev is None or oh < prev[0] or (
-                        oh == prev[0] and nrna_ll > prev[1]
-                    ):
-                        best_nrna[t_idx_int] = (oh, nrna_ll)
-
-            # Winner-take-all for nRNA pool
-            if best_nrna:
-                min_nrna_oh = min(v[0] for v in best_nrna.values())
-                for t_idx_int, (oh, nrna_ll) in best_nrna.items():
-                    if oh != min_nrna_oh:
-                        continue
-                    nrna_idx = nrna_base + t_idx_int
-                    t_indices_list.append(nrna_idx)
-                    log_liks_list.append(nrna_ll)
-                    count_cols_list.append(0)
-
-        if len(t_indices_list) > offsets[-1]:
-            offsets.append(len(t_indices_list))
-            locus_t_list.append(_best_t)
-            locus_ct_list.append(_best_ct)
-
-            # Per-unit metadata from best hit
-            is_spl = any_spliced
-            is_spliced_list.append(is_spl)
-            # gDNA log-lik for unspliced MM groups
-            if not is_spl:
-                best_gdna_ll = -np.inf
-                for bf in mm_pending:
-                    st = bf.splice_type
-                    if st == _SPLICE_ANNOT or st == _SPLICE_UNANNOT:
-                        continue
-                    # Inlined gDNA scoring
-                    _es = bf.exon_strand
-                    _sp = _gdna_pens.get(st, 1.0)
-                    if _es == 1 or _es == 2:
-                        _p_ig = _ig_p if _es == 1 else (1.0 - _ig_p)
-                    else:
-                        _p_ig = 0.5
-                    _log_s = math.log(max(_p_ig, _LOG_SAFE_FLOOR))
-                    _log_i = _frag_len_ll(bf.genomic_footprint)
-                    gdna_ll = (
-                        _log_s + _log_i
-                        + math.log(max(_sp, _LOG_SAFE_FLOOR))
-                    )
-                    if gdna_ll > best_gdna_ll:
-                        best_gdna_ll = gdna_ll
-                gdna_ll_list.append(best_gdna_ll)
-            else:
-                gdna_ll_list.append(-np.inf)
-        else:
-            # All MM candidates gated out (should be rare)
-            stats.n_gated_out += 1
-
-    n_processed = 0
-    for chunk in buffer.iter_chunks():
-        frag_classes = chunk.fragment_classes
-
-        for i in range(chunk.size):
-            fc = frag_classes[i]
-
-            if fc == FRAG_CHIMERIC:
-                continue
-
-            bf = chunk[i]
-            is_spliced_annot = bf.splice_type == _SPLICE_ANNOT
-
-            # --- Pre-EM strand/intronic accumulation ---
-            if fc == FRAG_UNIQUE or fc == FRAG_ISOFORM_AMBIG:
-                _g_idx = int(t_to_g[int(bf.t_inds[0])])
-                _gene_strand = int(index.g_to_strand_arr[_g_idx])
-                _is_anti = counter.is_antisense(
-                    bf.exon_strand, _gene_strand,
-                    strand_models.exonic_spliced,
-                )
-
-                _is_unspliced = (
-                    bf.splice_type == _SPLICE_UNSPLICED
-                )
-                if _is_unspliced:
-                    if _is_anti:
-                        counter.gene_antisense_all[_g_idx] += 1.0
-                    else:
-                        counter.gene_sense_all[_g_idx] += 1.0
-
-                # Transcript-level intronic (for nRNA init)
-                _n_cand = len(bf.t_inds)
-                _weight = 1.0 / _n_cand
-                for _k, _t_idx in enumerate(bf.t_inds):
-                    _t_idx_int = int(_t_idx)
-                    _has_intron = (
-                        bf.unambig_intron_bp is not None
-                        and bf.unambig_intron_bp[_k] > 0
-                    )
-                    if _has_intron:
-                        if _is_anti:
-                            counter.transcript_intronic_antisense[
-                                _t_idx_int
-                            ] += _weight
-                        else:
-                            counter.transcript_intronic_sense[
-                                _t_idx_int
-                            ] += _weight
-
-            if fc == FRAG_UNIQUE and is_spliced_annot:
-                # --- Deterministic: SPLICED_ANNOT + unique ---
-                counter.assign_unique(bf, index, strand_models)
-                stats.deterministic_unique_units += 1
-
-            elif fc == FRAG_MULTIMAPPER:
-                fid = int(chunk.frag_id[i])
-                if fid != mm_fid:
-                    if mm_pending:
-                        _flush_mm_group()
-                        stats.em_routed_multimapper_units += 1
-                    mm_fid = fid
-                    mm_pending.clear()
-                    mm_pending.append(bf)
-                else:
-                    mm_pending.append(bf)
-
-            else:
-                # --- mRNA + nRNA candidates (NO gDNA in global CSR) ---
-                unit_start = offsets[-1]
-                best_ll, best_ct = _add_transcript_candidates(bf)
-
-                unit_end = len(t_indices_list)
-                _best_ll = -np.inf
-                _best_t = -1
-                _best_ct = 0
-                for j in range(unit_start, unit_end):
-                    if log_liks_list[j] > _best_ll:
-                        _best_ll = log_liks_list[j]
-                        _best_t = t_indices_list[j]
-                        _best_ct = count_cols_list[j]
-
-                if not is_spliced_annot:
-                    _add_nrna_candidates(bf)
-
-                if len(t_indices_list) > offsets[-1]:
-                    offsets.append(len(t_indices_list))
-                    locus_t_list.append(_best_t)
-                    locus_ct_list.append(_best_ct)
-                    _finalize_unit(bf, _best_t, _best_ct)
-                else:
-                    # All candidates gated out — fragment unassigned
-                    stats.n_gated_out += 1
-
-                if fc == FRAG_UNIQUE:
-                    stats.em_routed_unique_units += 1
-                elif fc == FRAG_ISOFORM_AMBIG:
-                    stats.em_routed_isoform_ambig_units += 1
-                else:
-                    stats.em_routed_gene_ambig_units += 1
-
-            n_processed += 1
-            if n_processed % log_every == 0:
-                logger.debug(
-                    f"  Scan: {n_processed:,} / "
-                    f"{buffer.total_fragments:,}"
-                )
-
-    # Flush last multimapper group
-    if mm_pending:
-        _flush_mm_group()
-        stats.em_routed_multimapper_units += 1
-
-    n_units = len(offsets) - 1
-    n_candidates = len(t_indices_list)
-
-    return ScanData(
-        offsets=np.array(offsets, dtype=np.int64),
-        t_indices=np.array(t_indices_list, dtype=np.int32),
-        log_liks=np.array(log_liks_list, dtype=np.float64),
-        count_cols=np.array(count_cols_list, dtype=np.uint8),
-        locus_t_indices=np.array(locus_t_list, dtype=np.int32),
-        locus_count_cols=np.array(locus_ct_list, dtype=np.uint8),
-        is_spliced=np.array(is_spliced_list, dtype=bool),
-        gdna_log_liks=np.array(gdna_ll_list, dtype=np.float64),
-        n_units=n_units,
-        n_candidates=n_candidates,
-        nrna_base_index=nrna_base,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Union-find helper
-# ---------------------------------------------------------------------------
-
-
-class _UnionFind:
-    """Weighted quick-union with path compression."""
-
-    __slots__ = ("parent", "rank")
-
-    def __init__(self, n: int):
-        self.parent = np.arange(n, dtype=np.int32)
-        self.rank = np.zeros(n, dtype=np.int32)
-
-    def find(self, x: int) -> int:
-        root = x
-        while self.parent[root] != root:
-            root = self.parent[root]
-        while self.parent[x] != root:
-            self.parent[x], x = root, self.parent[x]
-        return root
-
-    def union(self, a: int, b: int) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra == rb:
-            return
-        if self.rank[ra] < self.rank[rb]:
-            ra, rb = rb, ra
-        self.parent[rb] = ra
-        if self.rank[ra] == self.rank[rb]:
-            self.rank[ra] += 1
-
-
-# ---------------------------------------------------------------------------
-# Locus builder: scipy connected_components on fragment→transcript graph
-# ---------------------------------------------------------------------------
-
-from scipy.sparse import coo_matrix
-from scipy.sparse.csgraph import connected_components as _scipy_cc
-
-
-def _build_loci(
-    em_data: ScanData,
-    index: HulkIndex,
-) -> list[Locus]:
-    """Build loci as connected components of transcripts linked by fragments.
-
-    Uses scipy sparse graph connected_components for vectorized
-    component detection, replacing the per-unit Python union-find loop.
-
-    Parameters
-    ----------
-    em_data : ScanData
-        Global EM data (mRNA + nRNA candidates + per-unit metadata).
-    index : HulkIndex
-        Reference index.
-
-    Returns
-    -------
-    list[Locus]
-    """
-    nt = index.num_transcripts
-    nrna_base = em_data.nrna_base_index
-    offsets = em_data.offsets
-    t_indices = em_data.t_indices
-    t_to_g = index.t_to_g_arr
-    n_units = em_data.n_units
-
-    if n_units == 0 or len(t_indices) == 0:
-        return []
-
-    # Map all candidate indices to transcript space [0, nt).
-    all_t = t_indices.copy()
-    nrna_mask = all_t >= nrna_base
-    all_t[nrna_mask] -= nrna_base
-
-    seg_lengths = np.diff(offsets).astype(np.intp)
-
-    # Build sparse adjacency graph by connecting each candidate's
-    # transcript to the first candidate's transcript within each unit.
-    # This establishes the same connectivity as full pairwise union.
-    nonempty = seg_lengths > 0
-    first_idx = offsets[:-1].astype(np.intp)
-
-    # First transcript per unit
-    first_t = np.empty(n_units, dtype=np.int32)
-    first_t[nonempty] = all_t[first_idx[nonempty]]
-    first_t[~nonempty] = -1
-
-    # Expand first_t to candidate level
-    first_t_expanded = np.repeat(first_t, seg_lengths)
-
-    # Build edges: (first_t_expanded[i], all_t[i]) for every candidate
-    row = first_t_expanded
-    col = all_t
-    valid = (row != col) & (row >= 0) & (col >= 0) & (row < nt) & (col < nt)
-    row = row[valid]
-    col = col[valid]
-
-    if len(row) > 0:
-        data = np.ones(len(row), dtype=np.int8)
-        adj = coo_matrix((data, (row, col)), shape=(nt, nt))
-        n_comp, labels = _scipy_cc(adj, directed=False)
-    else:
-        labels = np.arange(nt, dtype=np.int32)
-
-    # Find active transcripts (those that appear in at least one unit)
-    active = np.unique(all_t[all_t >= 0])
-
-    # Group active transcripts by component label
-    active_labels = labels[active]
-    unique_labels, inverse = np.unique(active_labels, return_inverse=True)
-
-    # Build component_map: label → sorted transcript list
-    component_map: dict[int, list[int]] = {}
-    for i, t in enumerate(active):
-        lbl = int(unique_labels[inverse[i]])
-        component_map.setdefault(lbl, []).append(int(t))
-
-    # Assign EM units to components (using first transcript's label)
-    unit_labels = np.full(n_units, -1, dtype=np.int32)
-    unit_labels[nonempty] = labels[first_t[nonempty]]
-
-    # Build per-component unit lists
-    root_to_units: dict[int, list[int]] = {lbl: [] for lbl in component_map}
-    for u in range(n_units):
-        lbl = int(unit_labels[u])
-        if lbl >= 0 and lbl in root_to_units:
-            root_to_units[lbl].append(u)
-
-    # Build Locus objects
-    loci = []
-    for lid, (lbl, t_list) in enumerate(sorted(component_map.items())):
-        t_arr = np.array(sorted(t_list), dtype=np.int32)
-        g_set = sorted(set(int(t_to_g[t]) for t in t_arr))
-        g_arr = np.array(g_set, dtype=np.int32)
-        u_arr = np.array(sorted(root_to_units.get(lbl, [])), dtype=np.int32)
-
-        loci.append(Locus(
-            locus_id=lid,
-            transcript_indices=t_arr,
-            gene_indices=g_arr,
-            unit_indices=u_arr,
-        ))
-
-    return loci
-
-
-# ---------------------------------------------------------------------------
-# Locus EM data builder
-# ---------------------------------------------------------------------------
-
-
-def _build_locus_em_data(
-    locus: Locus,
-    em_data: ScanData,
-    counter: AbundanceEstimator,
-    index: HulkIndex,
-    mean_frag: float,
-    gdna_init: float,
-) -> LocusEMInput:
-    """Extract and renumber global ScanData into a per-locus sub-problem.
-
-    Component layout per locus::
-
-        [0, n_t)           - mRNA (one per local transcript)
-        [n_t, 2*n_t)       - nRNA (one per local transcript)
-        [2*n_t]            - gDNA (ONE shadow for entire locus)
-
-    Only UNSPLICED units get a gDNA candidate.  Spliced units see
-    only mRNA/nRNA components.
-
-    Vectorized implementation — eliminates per-unit Python loop for
-    CSR renumbering and deduplication.
-
-    Parameters
-    ----------
-    locus : Locus
-    em_data : ScanData
-    counter : AbundanceEstimator
-    index : HulkIndex
-    mean_frag : float
-    gdna_init : float
-        Empirical Bayes estimated gDNA count for this locus.
-    """
-    t_arr = locus.transcript_indices
-    n_t = len(t_arr)
-    gdna_idx = 2 * n_t  # single gDNA component index
-    n_components = 2 * n_t + 1
-
-    nrna_base = em_data.nrna_base_index
-    n_local_units = len(locus.unit_indices)
-
-    # Build global → local mapping array (fast lookup, no dict)
-    # Size: nrna_base + max(t_arr) + 1 for both mRNA and nRNA slots
-    max_global = max(int(nrna_base) + int(t_arr.max()) + 1,
-                     int(t_arr.max()) + 1) if n_t > 0 else 0
-    local_map = np.full(max_global, -1, dtype=np.int32)
-    for local_i in range(n_t):
-        gt = int(t_arr[local_i])
-        local_map[gt] = local_i                     # mRNA
-        local_map[nrna_base + gt] = n_t + local_i   # nRNA
-
-    # Gather all candidate ranges for this locus's units at once
-    global_offsets = em_data.offsets
-    unit_starts = global_offsets[locus.unit_indices].astype(np.intp)
-    unit_ends = global_offsets[locus.unit_indices + 1].astype(np.intp)
-    seg_lens = unit_ends - unit_starts
-    total_cands = int(seg_lens.sum())
-
-    if total_cands > 0:
-        # Build flat index array for all candidates in this locus.
-        # Each candidate position maps to its location in the global arrays.
-        cum_lens = np.empty(n_local_units + 1, dtype=np.intp)
-        cum_lens[0] = 0
-        np.cumsum(seg_lens, out=cum_lens[1:])
-
-        global_flat_idx = (
-            np.repeat(unit_starts, seg_lens)
-            + np.arange(total_cands, dtype=np.intp)
-            - np.repeat(cum_lens[:-1], seg_lens)
-        )
-
-        # Extract all candidate data at once
-        all_gidx = em_data.t_indices[global_flat_idx]
-        all_ll = em_data.log_liks[global_flat_idx]
-        all_cc = em_data.count_cols[global_flat_idx]
-
-        # Map global indices to local component indices
-        # Clip for safety (indices outside local_map range → -1)
-        safe_gidx = np.clip(all_gidx, 0, max_global - 1)
-        all_lidx = local_map[safe_gidx]
-        # Also mark out-of-range as invalid
-        all_lidx[all_gidx < 0] = -1
-        all_lidx[all_gidx >= max_global] = -1
-
-        # Which local unit each candidate belongs to
-        unit_of_cand = np.repeat(np.arange(n_local_units, dtype=np.int32),
-                                 seg_lens)
-
-        # Filter valid candidates (those that map to a local component)
-        valid = all_lidx >= 0
-        v_lidx = all_lidx[valid]
-        v_ll = all_ll[valid]
-        v_cc = all_cc[valid]
-        v_unit = unit_of_cand[valid]
-
-        # Deduplicate: keep best log_lik per (unit, local_idx).
-        # Use compound key = unit * n_components + lidx, sort by
-        # compound_key ASC then -log_lik ASC, take first per key.
-        compound_key = v_unit.astype(np.int64) * n_components + v_lidx
-
-        # lexsort: primary = compound_key (ascending), secondary = -ll (ascending)
-        # This puts highest ll first for each compound_key
-        order = np.lexsort((-v_ll, compound_key))
-        sorted_keys = compound_key[order]
-
-        # First occurrence mask
-        first_mask = np.empty(len(sorted_keys), dtype=bool)
-        first_mask[0] = True
-        first_mask[1:] = sorted_keys[1:] != sorted_keys[:-1]
-
-        dedup_lidx = v_lidx[order][first_mask]
-        dedup_ll = v_ll[order][first_mask]
-        dedup_cc = v_cc[order][first_mask]
-        dedup_unit = v_unit[order][first_mask]
-    else:
-        dedup_lidx = np.empty(0, dtype=np.int32)
-        dedup_ll = np.empty(0, dtype=np.float64)
-        dedup_cc = np.empty(0, dtype=np.uint8)
-        dedup_unit = np.empty(0, dtype=np.int32)
-
-    # Add gDNA candidates for unspliced units
-    is_spl = em_data.is_spliced[locus.unit_indices]
-    gdna_lls = em_data.gdna_log_liks[locus.unit_indices]
-    valid_gdna = (~is_spl) & np.isfinite(gdna_lls)
-    n_gdna = int(valid_gdna.sum())
-
-    if n_gdna > 0:
-        gdna_units = np.arange(n_local_units, dtype=np.int32)[valid_gdna]
-        gdna_lidx_arr = np.full(n_gdna, gdna_idx, dtype=np.int32)
-        gdna_ll_arr = gdna_lls[valid_gdna]
-        gdna_cc_arr = np.zeros(n_gdna, dtype=np.uint8)
-
-        final_lidx = np.concatenate([dedup_lidx, gdna_lidx_arr])
-        final_ll = np.concatenate([dedup_ll, gdna_ll_arr])
-        final_cc = np.concatenate([dedup_cc, gdna_cc_arr])
-        final_unit = np.concatenate([dedup_unit, gdna_units])
-    else:
-        final_lidx = dedup_lidx
-        final_ll = dedup_ll
-        final_cc = dedup_cc
-        final_unit = dedup_unit
-
-    # Sort by unit to reconstruct CSR
-    if len(final_unit) > 0:
-        sort_order = np.argsort(final_unit, kind='stable')
-        final_lidx = final_lidx[sort_order]
-        final_ll = final_ll[sort_order]
-        final_cc = final_cc[sort_order]
-        final_unit = final_unit[sort_order]
-
-        # Build offsets from bincount
-        bin_counts = np.bincount(final_unit, minlength=n_local_units)
-        local_offsets = np.empty(n_local_units + 1, dtype=np.int64)
-        local_offsets[0] = 0
-        np.cumsum(bin_counts, out=local_offsets[1:])
-    else:
-        local_offsets = np.zeros(n_local_units + 1, dtype=np.int64)
-
-    # Per-unit locus_t and locus_ct (trivial gather)
-    local_locus_t = em_data.locus_t_indices[locus.unit_indices]
-    local_locus_ct = em_data.locus_count_cols[locus.unit_indices]
-
-    # Build local init vectors
-    unique_totals = np.zeros(n_components, dtype=np.float64)
-    unique_totals[:n_t] = counter.unique_counts[t_arr].sum(axis=1)
-    unique_totals[n_t:2*n_t] = counter.nrna_init[t_arr]
-    unique_totals[gdna_idx] = gdna_init
-
-    # Build effective lengths
-    eff_len = np.ones(n_components, dtype=np.float64)
-    eff_len[:n_t] = counter.effective_lengths[t_arr]
-
-    # nRNA: per-transcript unspliced span
-    if counter._transcript_spans is not None:
-        nrna_eff = np.maximum(
-            counter._transcript_spans[t_arr] - mean_frag + 1.0, 1.0
-        )
-        eff_len[n_t:2*n_t] = nrna_eff
-
-    # gDNA: annotated locus span (first exon start → last exon end)
-    g_starts = index.g_df["start"].values[locus.gene_indices]
-    g_ends = index.g_df["end"].values[locus.gene_indices]
-    locus_span = float(g_ends.max() - g_starts.min())
-    gdna_eff = max(locus_span - mean_frag + 1.0, 1.0)
-    eff_len[gdna_idx] = gdna_eff
-
-    # Build prior
-    prior = np.full(n_components, counter.em_prior, dtype=np.float64)
-
-    # Zero gDNA prior when there are no unspliced fragments
-    if gdna_init == 0.0:
-        prior[gdna_idx] = 0.0
-
-    # Zero nRNA prior for single-exon transcripts (vectorized)
-    if counter._transcript_spans is not None:
-        # Use raw exonic lengths when available; fall back to
-        # mean-based approximation only if exonic_lengths not stored.
-        if counter._exonic_lengths is not None:
-            t_exon = counter._exonic_lengths[t_arr]
-        else:
-            t_exon = counter._t_eff_len[t_arr] + mean_frag - 1.0
-        single_exon = counter._transcript_spans[t_arr] <= t_exon
-        prior[n_t:2*n_t][single_exon] = 0.0
-
-    # Zero nRNA prior when nrna_init is zero for that transcript
-    # (mirrors the gDNA zero-forcing: if there is no intronic evidence
-    #  for nascent RNA, don't let the prior seed phantom nRNA counts)
-    nrna_init_local = unique_totals[n_t:2*n_t]
-    prior[n_t:2*n_t][nrna_init_local == 0.0] = 0.0
-
-    return LocusEMInput(
-        locus=locus,
-        offsets=local_offsets,
-        t_indices=final_lidx.astype(np.int32),
-        log_liks=final_ll.astype(np.float64),
-        count_cols=final_cc.astype(np.uint8),
-        locus_t_indices=local_locus_t.astype(np.int32),
-        locus_count_cols=local_locus_ct.astype(np.uint8),
-        n_transcripts=n_t,
-        n_components=n_components,
-        local_to_global_t=t_arr.copy(),
-        unique_totals=unique_totals,
-        nrna_init=counter.nrna_init[t_arr].copy(),
-        gdna_init=gdna_init,
-        effective_lengths=eff_len,
-        prior=prior,
-    )
-
-
-# ---------------------------------------------------------------------------
-# nRNA initialization (strand-corrected intronic evidence)
-# ---------------------------------------------------------------------------
-
-
-def _compute_nrna_init(
-    transcript_intronic_sense: np.ndarray,
-    transcript_intronic_antisense: np.ndarray,
-    transcript_spans: np.ndarray,
-    exonic_lengths: np.ndarray,
-    mean_frag: float,
-    strand_models: StrandModels,
-) -> np.ndarray:
-    """Compute per-transcript nRNA initialization from intronic evidence.
-
-    Model::
-
-        sense_int   = gDNA_int/2 + nRNA_int × SS
-        anti_int    = gDNA_int/2 + nRNA_int × (1-SS)
-
-    Exact solution::
-
-        nRNA_int = (sense_int - anti_int) / (2SS - 1)
-
-    When 2SS − 1 ≤ 0.2, returns zeros.
-    Single-exon transcripts get nrna_init = 0.
-    """
-    ss = strand_models.exonic_spliced.strand_specificity
-    denom = 2.0 * ss - 1.0
-
-    if denom <= 0.2:
-        nrna_init = np.zeros_like(transcript_intronic_sense)
-    else:
-        raw = (
-            transcript_intronic_sense - transcript_intronic_antisense
-        ) / denom
-        nrna_init = np.maximum(0.0, raw)
-
-    intronic_span = np.maximum(transcript_spans - exonic_lengths, 0.0)
-    nrna_init[intronic_span <= 0] = 0.0
-
-    return nrna_init
-
-
-# ---------------------------------------------------------------------------
-# Empirical Bayes gDNA prior (locus → chromosome → global)
-# ---------------------------------------------------------------------------
-
-# Hyperparameters for EB shrinkage.  k controls how quickly the local
-# estimate overtakes the parent level.  Larger k = more shrinkage
-# toward the parent (more conservative).
-_EB_K_LOCUS = 20.0   # fragments needed for locus-level to dominate
-_EB_K_CHROM = 50.0    # fragments needed for chrom-level to dominate
-
-
-def _compute_gdna_rate_from_strand(
-    sense: float,
-    antisense: float,
-    ss: float,
-) -> float:
-    """Strand-corrected gDNA rate from sense/antisense counts.
-
-    G = 2(A·SS - S·(1-SS)) / (2SS-1)
-    rate = G / (S + A)  clamped to [0, 1]
-
-    Returns 0.0 when evidence is insufficient.
-    """
-    denom_ss = 2.0 * ss - 1.0
-    if denom_ss <= 0.2:
-        return 0.0
-    total = sense + antisense
-    if total == 0:
-        return 0.0
-    g = 2.0 * (antisense * ss - sense * (1.0 - ss)) / denom_ss
-    g = max(g, 0.0)
-    rate = g / total
-    return min(rate, 1.0)
-
-
-def _compute_eb_gdna_priors(
-    loci: list[Locus],
-    em_data: ScanData,
-    counter: AbundanceEstimator,
-    index: HulkIndex,
-    strand_models: StrandModels,
-    *,
-    k_locus: float = _EB_K_LOCUS,
-    k_chrom: float = _EB_K_CHROM,
-) -> list[float]:
-    """Compute empirical Bayes gDNA initialization per locus.
-
-    Hierarchical weighted shrinkage: locus → chromosome → global.
-
-    At each level, the gDNA contamination rate is estimated from the
-    strand correction formula.  The final gDNA init count for each
-    locus is: ``shrunk_rate × N_unspliced_in_locus``.
-
-    Parameters
-    ----------
-    loci : list[Locus]
-    counter : AbundanceEstimator
-    index : HulkIndex
-    strand_models : StrandModels
-    k_locus : float
-        Shrinkage strength for locus → chrom (default 20).
-    k_chrom : float
-        Shrinkage strength for chrom → global (default 50).
-
-    Returns
-    -------
-    list[float]
-        gDNA init count per locus (same order as ``loci``).
-    """
-    ss = strand_models.exonic_spliced.strand_specificity
-    g_sense = counter.gene_sense_all
-    g_anti = counter.gene_antisense_all
-    g_refs = index.g_df["ref"].values
-
-    # --- Global level ---
-    total_sense = float(g_sense.sum())
-    total_anti = float(g_anti.sum())
-    global_rate = _compute_gdna_rate_from_strand(
-        total_sense, total_anti, ss,
-    )
-    global_n = total_sense + total_anti
-
-    # --- Chromosome level ---
-    chrom_sense: dict[str, float] = defaultdict(float)
-    chrom_anti: dict[str, float] = defaultdict(float)
-    for g_idx in range(len(g_sense)):
-        ref = str(g_refs[g_idx])
-        chrom_sense[ref] += g_sense[g_idx]
-        chrom_anti[ref] += g_anti[g_idx]
-
-    chrom_rate: dict[str, float] = {}
-    chrom_n: dict[str, float] = {}
-    for ref in chrom_sense:
-        cs = chrom_sense[ref]
-        ca = chrom_anti[ref]
-        chrom_rate[ref] = _compute_gdna_rate_from_strand(cs, ca, ss)
-        chrom_n[ref] = cs + ca
-
-    # Shrink chrom toward global
-    chrom_shrunk: dict[str, float] = {}
-    for ref in chrom_rate:
-        n = chrom_n[ref]
-        w = n / (n + k_chrom) if (n + k_chrom) > 0 else 0.0
-        chrom_shrunk[ref] = w * chrom_rate[ref] + (1.0 - w) * global_rate
-
-    # --- Per-locus level ---
-    gdna_inits: list[float] = []
-    for locus in loci:
-        g_arr = locus.gene_indices
-        locus_sense = float(g_sense[g_arr].sum())
-        locus_anti = float(g_anti[g_arr].sum())
-        locus_n = locus_sense + locus_anti
-
-        locus_rate = _compute_gdna_rate_from_strand(
-            locus_sense, locus_anti, ss,
-        )
-
-        # Determine primary chromosome for this locus
-        ref_counts: dict[str, float] = defaultdict(float)
-        for g_idx in g_arr:
-            ref = str(g_refs[int(g_idx)])
-            ref_counts[ref] += g_sense[int(g_idx)] + g_anti[int(g_idx)]
-        if ref_counts:
-            primary_ref = max(ref_counts, key=ref_counts.get)
-        else:
-            # Fallback: use first transcript's ref
-            if len(locus.transcript_indices) > 0:
-                primary_ref = str(
-                    index.t_df["ref"].values[
-                        int(locus.transcript_indices[0])
-                    ]
-                )
-            else:
-                primary_ref = ""
-
-        parent_rate = chrom_shrunk.get(primary_ref, global_rate)
-
-        # Shrink locus toward parent (chromosome)
-        w = locus_n / (locus_n + k_locus) if (locus_n + k_locus) > 0 else 0.0
-        shrunk_rate = w * locus_rate + (1.0 - w) * parent_rate
-
-        # gDNA init = shrunk_rate × unspliced fragment count in locus
-        # Count unspliced units in this locus
-        n_unspliced = 0
-        for u in locus.unit_indices:
-            if not em_data.is_spliced[u]:
-                n_unspliced += 1
-
-        gdna_init = shrunk_rate * n_unspliced
-        gdna_inits.append(max(gdna_init, 0.0))
-
-    return gdna_inits
-
-
-# ---------------------------------------------------------------------------
 # Count from buffer (locus-level EM, no global EM)
 # ---------------------------------------------------------------------------
-
 
 def count_from_buffer(
     buffer: FragmentBuffer,
@@ -1709,19 +359,18 @@ def count_from_buffer(
     seed: int | None = None,
     em_pseudocount: float = 0.5,
     em_iterations: int = 1000,
+    em_convergence_delta: float = 1e-6,
     log_every: int = 1_000_000,
     gdna_splice_penalties: dict | None = None,
     confidence_threshold: float = 0.95,
     overhang_log_penalty: float | None = None,
     mismatch_log_penalty: float | None = None,
+    annotations: "AnnotationTable | None" = None,
 ) -> AbundanceEstimator:
     """Assign counts from buffered fragments via locus-level EM.
 
-    All ambiguous fragments are resolved through per-locus EM.
-    There is NO global EM fallback.
-
     Architecture per locus: 2*n_t + 1 components
-    (mRNA + nRNA + ONE gDNA shadow from coverage islands).
+    (mRNA + nRNA + ONE gDNA shadow).
 
     Spliced fragments NEVER compete for gDNA.
     Only unspliced fragments have a gDNA candidate.
@@ -1736,13 +385,13 @@ def count_from_buffer(
     seed : int or None
     em_pseudocount : float
     em_iterations : int
+    em_convergence_delta : float
     log_every : int
     gdna_splice_penalties : dict or None
     confidence_threshold : float
     overhang_log_penalty : float or None
-        Per-base overhang log-penalty (default log(0.01)).
     mismatch_log_penalty : float or None
-        Per-mismatch (NM) log-penalty (default log(0.1)).
+    annotations : AnnotationTable or None
 
     Returns
     -------
@@ -1755,10 +404,7 @@ def count_from_buffer(
         if frag_length_models.global_model.n_observations > 0
         else 200.0
     )
-    # Analytical effective lengths via the full fragment length eCDF
-    # (equivalent to salmon's computeLogEffectiveLength).  Falls back
-    # to the simple max(L - mean + 1, 1) formula only when the insert
-    # model has no observations.
+
     if frag_length_models.global_model.n_observations > 0:
         effective_lengths = (
             frag_length_models.global_model.compute_all_transcript_eff_lens(
@@ -1797,17 +443,21 @@ def count_from_buffer(
         f"(locus-level EM: mRNA/nRNA/gDNA)"
     )
 
-    # Single buffer pass: assign uniques + build EM data (RNA only)
-    em_data = _scan_and_build_em_data(
-        buffer, index, strand_models, frag_length_models,
-        counter, stats, log_every,
-        gdna_splice_penalties=gdna_splice_penalties,
+    # --- Build ScoringContext and scan buffer ---
+    ctx = ScoringContext.from_models(
+        strand_models, frag_length_models, index, counter,
         overhang_log_penalty=overhang_log_penalty,
         mismatch_log_penalty=mismatch_log_penalty,
+        gdna_splice_penalties=gdna_splice_penalties,
     )
+    builder = EmDataBuilder(
+        ctx, counter, stats, index, strand_models,
+        annotations=annotations,
+    )
+    em_data = builder.scan(buffer, log_every)
 
-    # Per-transcript nRNA init from intronic sense excess
-    nrna_init = _compute_nrna_init(
+    # --- Per-transcript nRNA init from intronic sense excess ---
+    nrna_init = compute_nrna_init(
         counter.transcript_intronic_sense,
         counter.transcript_intronic_antisense,
         transcript_spans,
@@ -1832,8 +482,7 @@ def count_from_buffer(
 
     # --- Locus-based EM ---
     if em_data.n_units > 0:
-        # Build loci via fragment connectivity
-        loci = _build_loci(em_data, index)
+        loci = build_loci(em_data, index)
 
         if loci:
             max_locus_t = max(len(l.transcript_indices) for l in loci)
@@ -1846,36 +495,37 @@ def count_from_buffer(
             f"(largest: {max_locus_t} transcripts, {max_locus_u} units)"
         )
 
-        # Empirical Bayes gDNA prior (locus → chrom → global)
-        gdna_inits = _compute_eb_gdna_priors(
+        gdna_inits = compute_eb_gdna_priors(
             loci, em_data, counter, index, strand_models,
         )
 
         # Per-locus EM + posterior assignment
         total_gdna_em = 0.0
+        _unit_ann_list: list | None = [] if annotations is not None else None
         for i, locus in enumerate(loci):
             if len(locus.unit_indices) == 0:
                 continue
-            locus_em = _build_locus_em_data(
+            locus_em = build_locus_em_data(
                 locus, em_data, counter, index, mean_frag,
                 gdna_init=gdna_inits[i],
             )
             theta, alpha = counter.run_locus_em(
-                locus_em, em_iterations=em_iterations,
+                locus_em,
+                em_iterations=em_iterations,
+                em_convergence_delta=em_convergence_delta,
             )
             gdna_assigned = counter.assign_locus_ambiguous(
                 locus_em, theta,
                 confidence_threshold=confidence_threshold,
+                unit_annotations=_unit_ann_list,
             )
             total_gdna_em += gdna_assigned
 
-            # Record locus gDNA results
             counter.gdna_locus_results.append({
                 "locus_id": locus.locus_id,
                 "gdna_count": gdna_assigned,
             })
 
-            # Map gDNA to overlapping genes for gene-level summary
             if gdna_assigned > 0 and len(locus.gene_indices) > 0:
                 per_gene = gdna_assigned / len(locus.gene_indices)
                 for g_idx in locus.gene_indices:
@@ -1890,6 +540,26 @@ def count_from_buffer(
                 )
 
         counter._gdna_em_total = total_gdna_em
+
+        # --- Map EM unit annotations to frag_ids ---
+        if annotations is not None and _unit_ann_list:
+            for (
+                global_unit_idx, g_tid, g_gid,
+                pool_code, posterior, n_cand,
+            ) in _unit_ann_list:
+                fid = int(em_data.frag_ids[global_unit_idx])
+                fc = int(em_data.frag_class[global_unit_idx])
+                st = int(em_data.splice_type[global_unit_idx])
+                annotations.add(
+                    frag_id=fid,
+                    best_tid=g_tid,
+                    best_gid=g_gid,
+                    pool=pool_code,
+                    posterior=posterior,
+                    frag_class=fc,
+                    n_candidates=n_cand,
+                    splice_type=st,
+                )
 
         logger.info(
             f"[DONE] Per-locus EM: {len(loci)} loci, "
@@ -1913,6 +583,43 @@ def count_from_buffer(
 
 
 # ---------------------------------------------------------------------------
+# Backward-compatible wrapper for _scan_and_build_em_data
+# ---------------------------------------------------------------------------
+
+def _scan_and_build_em_data(
+    buffer,
+    index,
+    strand_models,
+    frag_length_models,
+    counter,
+    stats,
+    log_every,
+    gdna_splice_penalties=None,
+    overhang_log_penalty=None,
+    mismatch_log_penalty=None,
+    annotations=None,
+):
+    """Backward-compatible wrapper around EmDataBuilder.scan().
+
+    New code should use ``ScoringContext`` + ``EmDataBuilder`` directly.
+    This wrapper exists so that ``test_pipeline_routing.py`` and
+    profiling scripts can continue importing ``_scan_and_build_em_data``
+    from ``pipeline`` without changes.
+    """
+    ctx = ScoringContext.from_models(
+        strand_models, frag_length_models, index, counter,
+        overhang_log_penalty=overhang_log_penalty,
+        mismatch_log_penalty=mismatch_log_penalty,
+        gdna_splice_penalties=gdna_splice_penalties,
+    )
+    builder = EmDataBuilder(
+        ctx, counter, stats, index, strand_models,
+        annotations=annotations,
+    )
+    return builder.scan(buffer, log_every)
+
+
+# ---------------------------------------------------------------------------
 # Full pipeline orchestration
 # ---------------------------------------------------------------------------
 
@@ -1931,7 +638,8 @@ def run_pipeline(
     seed: int | None = None,
     em_pseudocount: float = 0.5,
     em_iterations: int = 1000,
-    gdna_splice_penalty_unannot: float = _DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+    em_convergence_delta: float = 1e-6,
+    gdna_splice_penalty_unannot: float = DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     confidence_threshold: float = 0.95,
     overlap_min_frac: float = 0.99,
     overhang_alpha: float | None = None,
@@ -1939,6 +647,7 @@ def run_pipeline(
     mismatch_alpha: float | None = None,
     mismatch_log_penalty: float | None = None,
     min_spliced_observations: int = 10,
+    annotated_bam_path: str | Path | None = None,
 ) -> PipelineResult:
     """Run the complete counting pipeline with locus-level EM.
 
@@ -1973,14 +682,17 @@ def run_pipeline(
         Dirichlet prior pseudocount (default 0.5).
     em_iterations : int
         Maximum number of EM iterations (default 1000).
+    em_convergence_delta : float
+        Convergence threshold for EM theta updates (default 1e-6).
     gdna_splice_penalty_unannot : float
         gDNA splice penalty for SPLICED_UNANNOT fragments.
     confidence_threshold : float
         Posterior threshold for high-confidence assignment.
     min_spliced_observations : int
-        Minimum number of exonic_spliced observations required before
-        treating the pure spliced strand model as reliable. If fewer
-        observations are available, a pooled fallback model is used.
+        Minimum spliced observations before trusting pure model.
+    annotated_bam_path : str, Path, or None
+        If provided, write an annotated BAM with per-fragment assignment
+        tags to this path (second BAM pass).
 
     Returns
     -------
@@ -2029,18 +741,21 @@ def run_pipeline(
     frag_length_models.finalize()
 
     # -- Count assignment via locus-level EM --
-    gdna_splice_penalties = dict(_GDNA_SPLICE_PENALTIES)
-    gdna_splice_penalties[_SPLICE_UNANNOT] = (
-        gdna_splice_penalty_unannot
-    )
+    gdna_splice_penalties = dict(GDNA_SPLICE_PENALTIES)
+    gdna_splice_penalties[SPLICE_UNANNOT] = gdna_splice_penalty_unannot
 
-    # Resolve overhang penalty: explicit log_penalty wins, then alpha, then default
     if overhang_log_penalty is None and overhang_alpha is not None:
         overhang_log_penalty = overhang_alpha_to_log_penalty(overhang_alpha)
-
-    # Resolve mismatch penalty: explicit log_penalty wins, then alpha, then default
     if mismatch_log_penalty is None and mismatch_alpha is not None:
         mismatch_log_penalty = overhang_alpha_to_log_penalty(mismatch_alpha)
+
+    # -- Annotation table for second BAM pass (opt-in) --
+    annotations = None
+    if annotated_bam_path is not None:
+        from .annotate import AnnotationTable
+        annotations = AnnotationTable.create(
+            capacity=max(buffer.total_fragments + 1024, 4096)
+        )
 
     try:
         counter = count_from_buffer(
@@ -2052,14 +767,30 @@ def run_pipeline(
             seed=seed,
             em_pseudocount=em_pseudocount,
             em_iterations=em_iterations,
+            em_convergence_delta=em_convergence_delta,
             log_every=log_every,
             gdna_splice_penalties=gdna_splice_penalties,
             confidence_threshold=confidence_threshold,
             overhang_log_penalty=overhang_log_penalty,
             mismatch_log_penalty=mismatch_log_penalty,
+            annotations=annotations,
         )
     finally:
         buffer.cleanup()
+
+    # -- Second BAM pass: write annotated BAM (opt-in) --
+    if annotated_bam_path is not None and annotations is not None:
+        from .annotate import write_annotated_bam
+        write_annotated_bam(
+            bam_path,
+            str(annotated_bam_path),
+            annotations,
+            index,
+            skip_duplicates=skip_duplicates,
+            include_multimap=include_multimap,
+            sj_strand_tag=sj_strand_tag,
+            overlap_min_frac=overlap_min_frac,
+        )
 
     return PipelineResult(
         stats=stats,

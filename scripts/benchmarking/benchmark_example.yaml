@@ -2,20 +2,75 @@ genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bg
 gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
 outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_example_yaml
 
-aligner: hisat2
 threads: 8
 
+# ── Named regions ────────────────────────────────────────────────────
+# Each entry is   Name: chr:start-end   (1-based coordinates).
+# Plain coordinate strings (e.g. "chr11:5225000-5310000") also work.
+
 region:
-  - chr10:121476640-121601584
-  - chr7:55019017-55211628
-  - chr11:35138870-35232402
-  - chr17:43044295-43170245
-  - chr11:5225000-5310000
-  - chr7:27090070-27254935
-  - chr12:6444955-6573691
-  - chr19:751112-898218
-  - chr22:20917407-21069168
-  - chr1:923923-1061118
+  - FGFR2: chr10:121476640-121601584
+  - EGFR: chr7:55019017-55211628
+  - FHB: chr11:35138870-35232402
+  - BRCA1: chr17:43044295-43170245
+  - HBB: chr11:5225000-5310000
+  - HOXA: chr7:27090070-27254935
+  - GAPDH: chr12:6444955-6573691
+  - ELANE: chr19:751112-898218
+  - BCR: chr22:20917407-21069168
+  - HES4: chr1:923923-1061118
+
+# ── Aligner parameterizations ────────────────────────────────────────
+# When present, this replaces the top-level `aligner:` list.
+# Each key is a user-chosen name; `type` selects the aligner engine.
+# Omit `type` to use the key itself as the type (e.g. oracle: {}).
+#
+# Supported types and parameters:
+#   oracle   – no parameters
+#   minimap2 – preset, secondary, bed_guided
+#   hisat2   – k, secondary, no_unal, index_type (plain|graph),
+#              splice_sites_at_align, splice_sites_at_build, exons_at_build
+
+aligners:
+  oracle: {}
+  hisat2_plain:
+    type: hisat2
+    k: 50
+    index_type: plain
+    splice_sites_at_align: true
+  hisat2_graph:
+    type: hisat2
+    k: 50
+    index_type: graph
+    splice_sites_at_build: true
+    exons_at_build: true
+
+# ── HulkRNA parameterizations ───────────────────────────────────────
+# Each key is a user-chosen name; the value is a dict of keyword
+# arguments forwarded to run_pipeline().  An empty dict ({}) uses
+# pipeline defaults.
+#
+# Useful parameters: em_convergence_delta, em_iterations, em_pseudocount,
+#   overhang_alpha, mismatch_alpha, gdna_splice_penalty_unannot
+
+hulkrna_configs:
+  default: {}
+  strict_em:
+    em_convergence_delta: 1.0e-5
+  loose_em:
+    em_convergence_delta: 1.0e-3
+
+region:
+  - FGFR2: chr10:121476640-121601584
+  - EGFR: chr7:55019017-55211628
+  - FHB: chr11:35138870-35232402
+  - BRCA1: chr17:43044295-43170245
+  - HBB: chr11:5225000-5310000
+  - HOXA: chr7:27090070-27254935
+  - GAPDH: chr12:6444955-6573691
+  - ELANE: chr19:751112-898218
+  - BCR: chr22:20917407-21069168
+  - HES4: chr1:923923-1061118
 
 
 simulation:

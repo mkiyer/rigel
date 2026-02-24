@@ -6,7 +6,7 @@ aligner: hisat2
 threads: 2
 
 region:
-  - chr11:5225000-5310000
+  - HBB: chr11:5225000-5310000
 
 simulation:
   n_fragments: 3000

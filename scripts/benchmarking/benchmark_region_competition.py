@@ -12,12 +12,49 @@ oracle``).  Each aligner produces a separate hulkrna result tagged as
 FASTQ-based tools (salmon, kallisto) are run once per condition and shared
 across aligners.
 
+YAML configuration
+------------------
+All settings can be specified in a YAML config file (``--config``).
+
+**Named regions** – region entries can be plain coordinate strings or
+single-key dicts that supply a human-readable label::
+
+    region:
+      - HBB: chr11:5225000-5310000
+      - chr7:55019017-55211628        # auto-labelled from coordinates
+
+**hulkrna parameterizations** – define multiple configurations to benchmark
+hulkrna against itself (e.g. different EM thresholds)::
+
+    hulkrna_configs:
+      default: {}
+      strict_em:
+        em_convergence_delta: 1.0e-5
+
+When there are multiple configs, tool names become
+``hulkrna_<config>_<aligner>`` (e.g. ``hulkrna_strict_em_oracle``).
+
+**Aligner parameterizations** – define named aligner configurations with
+explicit parameters (replaces the ``aligner:`` list)::
+
+    aligners:
+      oracle: {}
+      hisat2_plain:
+        type: hisat2
+        index_type: plain
+      hisat2_graph:
+        type: hisat2
+        index_type: graph
+        splice_sites_at_build: true
+        exons_at_build: true
+
 Tools
 -----
-- hulkrna_<aligner> : include_multimap=True, one result per aligner
-- salmon            : salmon quant --validateMappings
-- kallisto          : kallisto quant (--rf-stranded when strand_spec >= 0.9)
-- htseq_<aligner>   : htseq-count (gene-level only), one result per aligner
+- hulkrna_<aligner>        : one result per aligner (single hulkrna config)
+- hulkrna_<cfg>_<aligner>  : one result per config × aligner (multiple configs)
+- salmon                   : salmon quant --validateMappings
+- kallisto                 : kallisto quant (--rf-stranded when strand_spec >= 0.9)
+- htseq_<aligner>          : htseq-count (gene-level only), one result per aligner
 
 Genome aligners for hulkrna/htseq inputs
 ----------------------------------------
@@ -94,21 +131,111 @@ GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
 ALIGNER_CHOICES = ("minimap2", "hisat2", "oracle")
 
 
-def _hulkrna_tool_name(aligner: str) -> str:
-    """Return hulkrna tool identifier for a given aligner."""
-    return f"hulkrna_{aligner}"
+# ── Configuration dataclasses ───────────────────────────────────────
 
 
-def _get_transcript_tools(aligners: list[str]) -> tuple[str, ...]:
-    """Build transcript-level tool list from active aligners."""
-    return tuple(_hulkrna_tool_name(a) for a in aligners) + ("salmon", "kallisto")
+@dataclass
+class HulkrnaConfig:
+    """Named hulkrna parameterization for benchmarking.
+
+    Parameters in *params* are forwarded as keyword arguments to
+    ``run_pipeline()``.  Anything not listed is left at its
+    pipeline default.
+    """
+
+    name: str
+    params: dict = field(default_factory=dict)
 
 
-def _get_gene_tools(aligners: list[str], include_htseq: bool = False) -> tuple[str, ...]:
-    """Build gene-level tool list from active aligners."""
-    tools = list(_hulkrna_tool_name(a) for a in aligners) + ["salmon", "kallisto"]
+# Default minimap2 / hisat2 parameter dicts used when the YAML does
+# not provide an explicit ``aligners:`` section.
+
+MINIMAP2_DEFAULTS: dict = {
+    "preset": "splice:sr",
+    "secondary": True,
+    "bed_guided": True,
+}
+
+HISAT2_DEFAULTS: dict = {
+    "k": 50,
+    "secondary": True,
+    "no_unal": True,
+    "index_type": "plain",
+    "splice_sites_at_align": True,
+    "splice_sites_at_build": False,
+    "exons_at_build": False,
+}
+
+
+@dataclass
+class AlignerConfig:
+    """Named aligner configuration.
+
+    *type* must be one of ``ALIGNER_CHOICES``.  *params* holds
+    aligner-specific knobs (preset, k, index_type, …).
+    """
+
+    name: str
+    type: str  # "oracle", "minimap2", "hisat2"
+    params: dict = field(default_factory=dict)
+
+
+# ── Tool-naming helpers ─────────────────────────────────────────────
+
+
+def _hulkrna_tool_name(
+    aligner: str | AlignerConfig,
+    hulkrna_config: HulkrnaConfig | None = None,
+    *,
+    multi_hulk: bool = False,
+) -> str:
+    """Return hulkrna tool identifier.
+
+    When there is only one hulkrna config (``multi_hulk=False``), the
+    name is ``hulkrna_<aligner>``.  With multiple configs it becomes
+    ``hulkrna_<config>_<aligner>`` so results are distinguishable.
+    """
+    aname = aligner.name if isinstance(aligner, AlignerConfig) else aligner
+    if multi_hulk and hulkrna_config is not None:
+        return f"hulkrna_{hulkrna_config.name}_{aname}"
+    return f"hulkrna_{aname}"
+
+
+def _htseq_tool_name(aligner: str | AlignerConfig) -> str:
+    """Return htseq tool identifier for a given aligner."""
+    aname = aligner.name if isinstance(aligner, AlignerConfig) else aligner
+    return f"htseq_{aname}"
+
+
+def _get_transcript_tools(
+    aligner_configs: list[AlignerConfig],
+    hulkrna_configs: list[HulkrnaConfig],
+) -> tuple[str, ...]:
+    """Build transcript-level tool list from active configs."""
+    multi = len(hulkrna_configs) > 1
+    tools: list[str] = []
+    for ac in aligner_configs:
+        for hc in hulkrna_configs:
+            tools.append(_hulkrna_tool_name(ac, hc, multi_hulk=multi))
+    tools.extend(["salmon", "kallisto"])
+    return tuple(tools)
+
+
+def _get_gene_tools(
+    aligner_configs: list[AlignerConfig],
+    hulkrna_configs: list[HulkrnaConfig],
+    include_htseq: bool = False,
+) -> tuple[str, ...]:
+    """Build gene-level tool list from active configs."""
+    multi = len(hulkrna_configs) > 1
+    tools: list[str] = []
+    for ac in aligner_configs:
+        for hc in hulkrna_configs:
+            tools.append(_hulkrna_tool_name(ac, hc, multi_hulk=multi))
+    tools.extend(["salmon", "kallisto"])
     if include_htseq:
-        tools.extend(f"htseq_{a}" for a in aligners)
+        for ac in aligner_configs:
+            tools.append(_htseq_tool_name(ac))
     return tuple(tools)
 
 # ── Default gDNA levels and strand specificities ────────────────────
@@ -197,21 +324,40 @@ class StringGenome:
 # ── Region parsing ──────────────────────────────────────────────────
 
 
-def parse_region(region_str: str) -> RegionSpec:
+def parse_region(region_str: str, name: str | None = None) -> RegionSpec:
+    """Parse a ``chr:start-end`` string into a :class:`RegionSpec`.
+
+    *name*, when given, is used as the human-friendly label; otherwise
+    a label is auto-generated from the coordinates.
+    """
     m = re.match(r"(.+):(\d+)-(\d+)$", region_str)
     if not m:
         raise ValueError(f"Invalid region format: {region_str}")
     chrom = m.group(1)
     start1 = int(m.group(2))
     end1 = int(m.group(3))
-    label = f"{chrom}_{start1}_{end1}"
+    label = name if name else f"{chrom}_{start1}_{end1}"
     return RegionSpec(label=label, chrom=chrom, start0=start1 - 1, end0=end1)
+
+
+def _parse_region_entry(entry) -> RegionSpec:
+    """Parse a single region entry (string or ``{name: coord}`` dict)."""
+    if isinstance(entry, str):
+        return parse_region(entry)
+    if isinstance(entry, dict):
+        if len(entry) != 1:
+            raise ValueError(
+                f"Named region dict must have exactly one key: value pair, got {entry}"
+            )
+        name, coord = next(iter(entry.items()))
+        return parse_region(str(coord), name=str(name))
+    raise TypeError(f"Unsupported region entry type: {type(entry).__name__}")
 
 
 def parse_regions(args: argparse.Namespace) -> list[RegionSpec]:
     regions: list[RegionSpec] = []
     for r in args.region:
-        regions.append(parse_region(r))
+        regions.append(_parse_region_entry(r))
     if args.region_file is not None:
         with open(args.region_file) as fh:
             for line in fh:
@@ -494,15 +640,34 @@ def align_minimap2(
     fastq_r2: Path,
     out_bam: Path,
     bed_path: Path | None = None,
+    *,
+    aligner_config: AlignerConfig | None = None,
 ) -> None:
-    """Align PE reads with minimap2 and produce a name-sorted BAM."""
+    """Align PE reads with minimap2 and produce a name-sorted BAM.
+
+    When *aligner_config* is provided its ``params`` dict may contain:
+
+    - **preset** (str) – minimap2 preset, e.g. ``splice:sr`` (default).
+    - **secondary** (bool) – emit secondary alignments (default True).
+    - **bed_guided** (bool) – use BED12 annotation for splice guidance
+      (default True).  When False, *bed_path* is ignored.
+    """
+    params = dict(MINIMAP2_DEFAULTS)
+    if aligner_config is not None:
+        params.update(aligner_config.params)
+
+    preset = params.get("preset", "splice:sr")
+    secondary = params.get("secondary", True)
+    bed_guided = params.get("bed_guided", True)
+
     minimap2_cmd = [
         "minimap2",
         "-ax",
-        "splice:sr",
-        "--secondary=yes",
+        str(preset),
     ]
-    if bed_path is not None:
+    if secondary:
+        minimap2_cmd.append("--secondary=yes")
+    if bed_guided and bed_path is not None:
         minimap2_cmd.extend(["-j", str(bed_path)])
     minimap2_cmd.extend([
         str(region_fa),
@@ -598,32 +763,68 @@ def align_hisat2(
     hisat2_index_dir: Path,
     splice_sites_file: Path | None = None,
     exons_file: Path | None = None,
+    aligner_config: AlignerConfig | None = None,
 ) -> None:
     """Align PE reads with HISAT2 and produce a name-sorted BAM.
 
-    The HISAT2 index is built as a **plain BWT index** (no ``--ss`` /
-    ``--exon``).  Using the HGFM graph index causes severe alignment
-    bias in regions with paralogous genes that share exonic sequence
-    (see ``docs/hisat2_index_recommendations.md``).
+    When *aligner_config* is provided its ``params`` dict may contain:
 
-    When *splice_sites_file* is provided it is passed to HISAT2 at
-    **alignment time** via ``--known-splicesite-infile`` so that splice
-    junctions are still utilised without baking them into the graph.
+    - **k** (int) – max alignments per read (default 50).
+    - **secondary** (bool) – emit secondary alignments (default True).
+    - **no_unal** (bool) – suppress unaligned reads (default True).
+    - **index_type** (``"plain"`` | ``"graph"``) – build a plain BWT
+      index (default, avoids graph-bias) or an HGFM graph index with
+      ``--ss`` / ``--exon`` annotations baked in.
+    - **splice_sites_at_align** (bool) – pass known splice-sites at
+      alignment time via ``--known-splicesite-infile`` (default True).
+    - **splice_sites_at_build** (bool) – pass ``--ss`` to
+      ``hisat2-build`` when building a graph index (default False;
+      only used when index_type=graph).
+    - **exons_at_build** (bool) – pass ``--exon`` to ``hisat2-build``
+      when building a graph index (default False; only used when
+      index_type=graph).
     """
-    hisat2_index_dir.mkdir(parents=True, exist_ok=True)
-    index_prefix = hisat2_index_dir / "idx"
-    if not (hisat2_index_dir / "idx.1.ht2").exists():
+    params = dict(HISAT2_DEFAULTS)
+    if aligner_config is not None:
+        params.update(aligner_config.params)
+
+    k = int(params.get("k", 50))
+    secondary = params.get("secondary", True)
+    no_unal = params.get("no_unal", True)
+    index_type = str(params.get("index_type", "plain"))
+    ss_at_align = params.get("splice_sites_at_align", True)
+    ss_at_build = params.get("splice_sites_at_build", False)
+    exons_at_build = params.get("exons_at_build", False)
+
+    # Use a sub-directory per index_type so plain and graph indexes can
+    # coexist when running multiple hisat2 configs on the same region.
+    idx_subdir = hisat2_index_dir / index_type
+    idx_subdir.mkdir(parents=True, exist_ok=True)
+    index_prefix = idx_subdir / "idx"
+
+    if not (idx_subdir / "idx.1.ht2").exists():
         build_cmd = [
             hisat2_build_exe,
             "-p", str(max(1, threads)),
         ]
-        # NOTE: intentionally NOT passing --ss / --exon here.
-        # The plain BWT index avoids graph-bias that suppresses long-
-        # intron junctions in paralogous-gene regions (66× improvement
-        # for ENST642908 in the HBB locus).  Splice sites are still
-        # provided at alignment time via --known-splicesite-infile.
+        if index_type == "graph":
+            if ss_at_build and splice_sites_file is not None:
+                build_cmd.extend(["--ss", str(splice_sites_file)])
+            if exons_at_build and exons_file is not None:
+                build_cmd.extend(["--exon", str(exons_file)])
+            logger.info(
+                "Building HISAT2 index (graph): %s",
+                " ".join(build_cmd + [str(region_fa), str(index_prefix)]),
+            )
+        else:
+            # Plain BWT index — avoids graph-bias that suppresses long-
+            # intron junctions in paralogous-gene regions (66× improvement
+            # for ENST642908 in the HBB locus).
+            logger.info(
+                "Building HISAT2 index (plain): %s",
+                " ".join(build_cmd + [str(region_fa), str(index_prefix)]),
+            )
         build_cmd.extend([str(region_fa), str(index_prefix)])
-        logger.info("Building HISAT2 index (plain): %s", " ".join(build_cmd))
         subprocess.run(build_cmd, check=True, capture_output=True, text=True)
 
     hisat2_cmd = [
@@ -637,12 +838,15 @@ def align_hisat2(
         "-p",
         str(max(1, threads)),
         "-k",
-        "50",
-        "--secondary",
-        "--no-unal",
+        str(k),
     ]
+    if secondary:
+        hisat2_cmd.append("--secondary")
+    if no_unal:
+        hisat2_cmd.append("--no-unal")
+
     # Provide known splice sites at alignment time for maximum sensitivity
-    if splice_sites_file is not None:
+    if ss_at_align and splice_sites_file is not None:
         hisat2_cmd.extend(["--known-splicesite-infile", str(splice_sites_file)])
     sort_cmd = ["samtools", "sort", "-n", "-o", str(out_bam), "-"]
 
@@ -764,6 +968,315 @@ def compute_pool_metric_rows(
     return rows
 
 
+# ── Annotated BAM truth comparison ──────────────────────────────────
+
+# Verdict codes for per-read accuracy.
+VERDICT_CORRECT_TRANSCRIPT = "correct_transcript"
+VERDICT_CORRECT_GENE = "correct_gene"
+VERDICT_CORRECT_POOL = "correct_pool"
+VERDICT_WRONG_POOL = "wrong_pool"
+VERDICT_INTERGENIC = "intergenic"
+
+# Mapping from ZP tag values to canonical truth pool names.
+_POOL_NORM = {
+    "mRNA": "mRNA",
+    "nRNA": "nRNA",
+    "gDNA": "gDNA",
+    "intergenic": "intergenic",
+    "chimeric": "chimeric",
+}
+
+
+def _parse_truth_from_qname(qname: str) -> tuple[str, str]:
+    """Extract ground-truth transcript ID and pool from a read name.
+
+    Read-name format (from the simulator):
+      ``{tid}:{start}-{end}:{strand}:{idx}``
+
+    Returns ``(truth_tid, truth_pool)`` where:
+    - For gDNA reads: ``("gdna", "gDNA")``
+    - For nRNA reads: ``("nrna_ENST...", "nRNA")``
+    - For mRNA reads: ``("ENST...", "mRNA")``
+    """
+    tid = qname.split(":", 1)[0]
+    if tid == "gdna":
+        return "gdna", "gDNA"
+    if tid.startswith("nrna_"):
+        return tid, "nRNA"
+    return tid, "mRNA"
+
+
+@dataclass
+class ReadAccuracyRow:
+    """Per-read accuracy record for a single fragment."""
+
+    qname: str
+    truth_tid: str
+    truth_pool: str
+    assigned_tid: str
+    assigned_gid: str
+    assigned_pool: str
+    posterior: float
+    n_candidates: int
+    frag_class: str
+    splice_type: str
+    verdict: str
+
+
+@dataclass
+class ReadAccuracySummary:
+    """Aggregate read-level accuracy statistics."""
+
+    total: int = 0
+    correct_transcript: int = 0
+    correct_gene: int = 0
+    correct_pool: int = 0
+    wrong_pool: int = 0
+    intergenic: int = 0
+
+    # Per truth-pool breakdown.
+    by_truth_pool: dict = field(default_factory=lambda: defaultdict(Counter))
+
+    def add(self, truth_pool: str, verdict: str) -> None:
+        self.total += 1
+        if verdict == VERDICT_CORRECT_TRANSCRIPT:
+            self.correct_transcript += 1
+        elif verdict == VERDICT_CORRECT_GENE:
+            self.correct_gene += 1
+        elif verdict == VERDICT_CORRECT_POOL:
+            self.correct_pool += 1
+        elif verdict == VERDICT_WRONG_POOL:
+            self.wrong_pool += 1
+        elif verdict == VERDICT_INTERGENIC:
+            self.intergenic += 1
+        self.by_truth_pool[truth_pool][verdict] += 1
+
+    def pct(self, n: int) -> float:
+        return 100.0 * n / self.total if self.total > 0 else 0.0
+
+    def summary_rows(self) -> list[dict]:
+        """Return tidy rows for CSV output."""
+        rows: list[dict] = []
+        for pool in ("mRNA", "nRNA", "gDNA"):
+            cts = self.by_truth_pool.get(pool, Counter())
+            pool_total = sum(cts.values())
+            for v in (
+                VERDICT_CORRECT_TRANSCRIPT,
+                VERDICT_CORRECT_GENE,
+                VERDICT_CORRECT_POOL,
+                VERDICT_WRONG_POOL,
+                VERDICT_INTERGENIC,
+            ):
+                count = cts.get(v, 0)
+                rows.append({
+                    "truth_pool": pool,
+                    "verdict": v,
+                    "count": count,
+                    "pct": 100.0 * count / pool_total if pool_total > 0 else 0.0,
+                    "pool_total": pool_total,
+                })
+        # Overall row.
+        for v in (
+            VERDICT_CORRECT_TRANSCRIPT,
+            VERDICT_CORRECT_GENE,
+            VERDICT_CORRECT_POOL,
+            VERDICT_WRONG_POOL,
+            VERDICT_INTERGENIC,
+        ):
+            n = getattr(self, v, 0)
+            rows.append({
+                "truth_pool": "ALL",
+                "verdict": v,
+                "count": n,
+                "pct": self.pct(n),
+                "pool_total": self.total,
+            })
+        return rows
+
+
+def compare_annotated_bam_to_truth(
+    annotated_bam_path: Path,
+    gene_map: dict[str, str],
+) -> tuple[list[ReadAccuracyRow], ReadAccuracySummary]:
+    """Compare annotated BAM assignments against simulated read-name truth.
+
+    Parameters
+    ----------
+    annotated_bam_path
+        Path to the annotated BAM produced by ``run_pipeline`` with
+        ``annotated_bam_path`` set.
+    gene_map
+        Mapping ``{transcript_id: gene_id}`` from the reference index.
+
+    Returns
+    -------
+    tuple[list[ReadAccuracyRow], ReadAccuracySummary]
+        Per-read rows and aggregate summary.
+    """
+    import pysam
+
+    rows: list[ReadAccuracyRow] = []
+    summary = ReadAccuracySummary()
+
+    seen_qnames: set[str] = set()
+
+    with pysam.AlignmentFile(str(annotated_bam_path), "rb") as bam:
+        for rec in bam.fetch(until_eof=True):
+            # Only count R1 (first in pair) to avoid double-counting.
+            if not (rec.flag & 0x40):
+                continue
+            # Only count the primary hit (ZH=1).
+            try:
+                zh = rec.get_tag("ZH")
+            except KeyError:
+                continue
+            if zh != 1:
+                continue
+            # De-duplicate by qname (in case of supplementary records).
+            qname = rec.query_name
+            if qname in seen_qnames:
+                continue
+            seen_qnames.add(qname)
+
+            truth_tid, truth_pool = _parse_truth_from_qname(qname)
+
+            # Read assignment tags.
+            assigned_tid = str(rec.get_tag("ZT"))
+            assigned_gid = str(rec.get_tag("ZG"))
+            assigned_pool = str(rec.get_tag("ZP"))
+            posterior = float(rec.get_tag("ZW"))
+            n_candidates = int(rec.get_tag("ZN"))
+            frag_class = str(rec.get_tag("ZC"))
+            splice_type = str(rec.get_tag("ZS"))
+
+            # Classify the assignment.
+            verdict = _classify_verdict(
+                truth_tid, truth_pool, assigned_tid, assigned_gid,
+                assigned_pool, gene_map,
+            )
+
+            summary.add(truth_pool, verdict)
+
+            rows.append(ReadAccuracyRow(
+                qname=qname,
+                truth_tid=truth_tid,
+                truth_pool=truth_pool,
+                assigned_tid=assigned_tid,
+                assigned_gid=assigned_gid,
+                assigned_pool=assigned_pool,
+                posterior=posterior,
+                n_candidates=n_candidates,
+                frag_class=frag_class,
+                splice_type=splice_type,
+                verdict=verdict,
+            ))
+
+    return rows, summary
+
+
+def _classify_verdict(
+    truth_tid: str,
+    truth_pool: str,
+    assigned_tid: str,
+    assigned_gid: str,
+    assigned_pool: str,
+    gene_map: dict[str, str],
+) -> str:
+    """Classify a single read as correct/error.
+
+    Verdict hierarchy (best → worst):
+    1. ``correct_transcript`` — pool matches AND transcript matches
+    2. ``correct_gene`` — pool mRNA/nRNA AND gene matches but
+       transcript differs (isoform confusion)
+    3. ``correct_pool`` — pool matches but gene/transcript wrong
+    4. ``intergenic`` — assigned to intergenic when truth was RNA/gDNA
+    5. ``wrong_pool`` — assigned to a different active pool
+    """
+    norm_pool = _POOL_NORM.get(assigned_pool, assigned_pool)
+
+    # Intergenic assignment is its own category.
+    if norm_pool == "intergenic":
+        return VERDICT_INTERGENIC
+
+    # --- gDNA reads ---
+    if truth_pool == "gDNA":
+        if norm_pool == "gDNA":
+            # gDNA has no specific transcript; pool match is the best
+            # we can do.
+            return VERDICT_CORRECT_TRANSCRIPT
+        return VERDICT_WRONG_POOL
+
+    # --- nRNA reads ---
+    if truth_pool == "nRNA":
+        if norm_pool == "nRNA":
+            # nRNA truth_tid is "nrna_ENST…"; assigned_tid is
+            # the bare transcript ID ("ENST…").
+            bare_tid = truth_tid[5:] if truth_tid.startswith("nrna_") else truth_tid
+            if assigned_tid == bare_tid:
+                return VERDICT_CORRECT_TRANSCRIPT
+            truth_gid = gene_map.get(bare_tid, "")
+            assigned_gene = gene_map.get(assigned_tid, assigned_gid)
+            if truth_gid and truth_gid == assigned_gene:
+                return VERDICT_CORRECT_GENE
+            return VERDICT_CORRECT_POOL
+        return VERDICT_WRONG_POOL
+
+    # --- mRNA reads ---
+    if truth_pool == "mRNA":
+        if norm_pool == "mRNA":
+            if assigned_tid == truth_tid:
+                return VERDICT_CORRECT_TRANSCRIPT
+            truth_gid = gene_map.get(truth_tid, "")
+            assigned_gene = gene_map.get(assigned_tid, assigned_gid)
+            if truth_gid and truth_gid == assigned_gene:
+                return VERDICT_CORRECT_GENE
+            return VERDICT_CORRECT_POOL
+        return VERDICT_WRONG_POOL
+
+    # Fallback for unexpected pools.
+    return VERDICT_WRONG_POOL
+
+
+def write_read_accuracy_csv(
+    rows: list[ReadAccuracyRow],
+    out_path: Path,
+) -> None:
+    """Write per-read accuracy detail CSV."""
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "qname", "truth_tid", "truth_pool",
+            "assigned_tid", "assigned_gid", "assigned_pool",
+            "posterior", "n_candidates", "frag_class", "splice_type",
+            "verdict",
+        ])
+        for r in rows:
+            writer.writerow([
+                r.qname, r.truth_tid, r.truth_pool,
+                r.assigned_tid, r.assigned_gid, r.assigned_pool,
+                f"{r.posterior:.6f}", r.n_candidates, r.frag_class,
+                r.splice_type, r.verdict,
+            ])
+
+
+def write_read_accuracy_summary_csv(
+    summary: ReadAccuracySummary,
+    out_path: Path,
+) -> None:
+    """Write aggregate read accuracy summary CSV."""
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["truth_pool", "verdict", "count", "pct", "pool_total"])
+        for row in summary.summary_rows():
+            writer.writerow([
+                row["truth_pool"],
+                row["verdict"],
+                row["count"],
+                f"{row['pct']:.2f}",
+                row["pool_total"],
+            ])
+
+
 # ── Tool runners ────────────────────────────────────────────────────
 
 
@@ -771,11 +1284,25 @@ def run_hulkrna_tool(
     bam_path: Path,
     index: HulkIndex,
     args: argparse.Namespace,
+    hulkrna_config: HulkrnaConfig | None = None,
+    annotated_bam_path: Path | None = None,
 ) -> tuple[dict[str, float], float, dict[str, float]]:
-    """Run hulkrna pipeline and return (transcript_counts, elapsed_sec, pool_counts)."""
+    """Run hulkrna pipeline and return (transcript_counts, elapsed_sec, pool_counts).
+
+    When *hulkrna_config* is provided, its ``params`` are merged on
+    top of the base arguments drawn from *args*.  Supported params
+    match keyword arguments to :func:`run_pipeline`:
+    ``em_convergence_delta``, ``em_iterations``, ``em_pseudocount``,
+    ``overhang_alpha``, ``mismatch_alpha``,
+    ``gdna_splice_penalty_unannot``, etc.
+
+    When *annotated_bam_path* is provided, an annotated BAM with
+    per-fragment assignment tags (ZT, ZG, ZP, ZW, …) is written to
+    that path.
+    """
     t0 = time.monotonic()
     overhang_alpha = getattr(args, "overhang_alpha", None)
-    kwargs = dict(
+    kwargs: dict = dict(
         seed=args.pipeline_seed,
         sj_strand_tag="auto",
         include_multimap=True,
@@ -783,6 +1310,14 @@ def run_hulkrna_tool(
     )
     if overhang_alpha is not None:
         kwargs["overhang_alpha"] = overhang_alpha
+
+    # Overlay per-config overrides
+    if hulkrna_config is not None:
+        kwargs.update(hulkrna_config.params)
+
+    if annotated_bam_path is not None:
+        kwargs["annotated_bam_path"] = annotated_bam_path
+
     pipe = run_pipeline(bam_path, index, **kwargs)
     elapsed = time.monotonic() - t0
 
@@ -1102,11 +1637,34 @@ def run_region_benchmark(
     strand_specificities: tuple[float, ...],
     include_htseq: bool,
     htseq_conda_env: str,
+    aligner_configs: list[AlignerConfig] | None = None,
+    hulkrna_configs: list[HulkrnaConfig] | None = None,
 ) -> list[ConditionResult]:
     """Run benchmark for one region across all conditions.
 
+    Parameters
+    ----------
+    aligner_configs : list of AlignerConfig, optional
+        Named aligner configurations.  When *None*, falls back to
+        building default configs from ``args.aligner``.
+    hulkrna_configs : list of HulkrnaConfig, optional
+        Named hulkrna parameterizations.  When *None* a single
+        ``HulkrnaConfig(name="default")`` is used.
+
     Returns a list of ConditionResult (one per condition combination).
     """
+    # ── Resolve configs ─────────────────────────────────────────────
+
+    if aligner_configs is None:
+        aligner_configs = [
+            AlignerConfig(name=a, type=a) for a in args.aligner
+        ]
+    if hulkrna_configs is None:
+        hulkrna_configs = [HulkrnaConfig(name="default")]
+
+    multi_hulk = len(hulkrna_configs) > 1
+    has_hisat2 = any(ac.type == "hisat2" for ac in aligner_configs)
+
     reg_dir = out_root / region.label
     reg_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1179,7 +1737,7 @@ def run_region_benchmark(
     # HISAT2 splice-site and exon annotation files for RNA-Seq-aware indexing
     hisat2_ss_file = reg_dir / "hisat2_splice_sites.txt"
     hisat2_exon_file = reg_dir / "hisat2_exons.txt"
-    if "hisat2" in args.aligner:
+    if has_hisat2:
         write_hisat2_splice_sites(transcripts, hisat2_ss_file)
         write_hisat2_exons(transcripts, hisat2_exon_file)
 
@@ -1192,6 +1750,9 @@ def run_region_benchmark(
 
     n_transcripts = len(transcripts)
     n_genes = len({t.g_id for t in transcripts})
+
+    tx_tools = _get_transcript_tools(aligner_configs, hulkrna_configs)
+    gene_tools = _get_gene_tools(aligner_configs, hulkrna_configs, include_htseq=include_htseq)
 
     # ── Condition sweep ─────────────────────────────────────────────
 
@@ -1263,25 +1824,25 @@ def run_region_benchmark(
                 tool_pool_counts: dict[str, dict[str, float]] = {}
                 htseq_gene_by_aligner: dict[str, tuple[dict[str, int], float]] = {}
 
-                for aligner in args.aligner:
-                    hn = _hulkrna_tool_name(aligner)
-                    align_dir = cond_dir / f"align_{aligner}"
+                for ac in aligner_configs:
+                    align_dir = cond_dir / f"align_{ac.name}"
                     align_dir.mkdir(parents=True, exist_ok=True)
                     bam_ns = align_dir / "reads_namesort.bam"
 
-                    if aligner == "oracle":
+                    if ac.type == "oracle":
                         oracle_sim = OracleBamSimulator(
                             sim_genome, transcripts,
                             config=sim_cfg, gdna_config=gdna_cfg,
                             ref_name=region.label,
                         )
                         oracle_sim.write_bam(bam_ns, args.n_fragments)
-                    elif aligner == "minimap2":
+                    elif ac.type == "minimap2":
                         align_minimap2(
                             region_fa, fastq_r1, fastq_r2, bam_ns,
                             bed_path=bed_path,
+                            aligner_config=ac,
                         )
-                    elif aligner == "hisat2":
+                    elif ac.type == "hisat2":
                         align_hisat2(
                             region_fa, fastq_r1, fastq_r2, bam_ns,
                             threads=args.threads,
@@ -1290,29 +1851,67 @@ def run_region_benchmark(
                             hisat2_index_dir=hisat2_index_dir,
                             splice_sites_file=hisat2_ss_file,
                             exons_file=hisat2_exon_file,
+                            aligner_config=ac,
                         )
                     else:
-                        raise RuntimeError(f"Unsupported aligner: {aligner}")
+                        raise RuntimeError(f"Unsupported aligner type: {ac.type}")
 
-                    # Run hulkrna on this aligner's BAM
-                    hk_counts, hk_elapsed, hk_pools = run_hulkrna_tool(
-                        bam_ns, index, args=args,
-                    )
-                    tx_tool_counts[hn] = (hk_counts, hk_elapsed)
-                    tool_pool_counts[hn] = hk_pools
+                    # Run hulkrna on this aligner's BAM — once per config
+                    for hc in hulkrna_configs:
+                        hn = _hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)
+                        ann_bam = align_dir / f"annotated_{hc.name}.bam"
+                        hk_counts, hk_elapsed, hk_pools = run_hulkrna_tool(
+                            bam_ns, index, args=args, hulkrna_config=hc,
+                            annotated_bam_path=ann_bam,
+                        )
+                        tx_tool_counts[hn] = (hk_counts, hk_elapsed)
+                        tool_pool_counts[hn] = hk_pools
+
+                        # ── Coord-sort and index annotated BAM for genome browsers ──
+                        if ann_bam.exists():
+                            ann_bam_sorted = align_dir / f"annotated_{hc.name}.sorted.bam"
+                            coord_sort_bam(ann_bam, ann_bam_sorted)
+
+                        # ── Per-read accuracy from annotated BAM ────
+                        if ann_bam.exists():
+                            acc_rows, acc_summary = compare_annotated_bam_to_truth(
+                                ann_bam, gene_map,
+                            )
+                            acc_dir = align_dir / f"accuracy_{hc.name}"
+                            acc_dir.mkdir(parents=True, exist_ok=True)
+                            write_read_accuracy_csv(
+                                acc_rows, acc_dir / "per_read_accuracy.csv",
+                            )
+                            write_read_accuracy_summary_csv(
+                                acc_summary, acc_dir / "read_accuracy_summary.csv",
+                            )
+                            n_total = acc_summary.total
+                            n_correct = acc_summary.correct_transcript
+                            pct = acc_summary.pct(n_correct)
+                            logger.info(
+                                "    [ACCURACY] %s: %d/%d (%.1f%%) correct transcript, "
+                                "%d correct gene, %d correct pool, "
+                                "%d wrong pool, %d intergenic",
+                                hn, n_correct, n_total, pct,
+                                acc_summary.correct_gene,
+                                acc_summary.correct_pool,
+                                acc_summary.wrong_pool,
+                                acc_summary.intergenic,
+                            )
 
                     # htseq (gene-level, needs coord-sorted BAM)
                     if include_htseq:
+                        ht_name = _htseq_tool_name(ac)
                         bam_cs = align_dir / "reads_coordsort.bam"
                         coord_sort_bam(bam_ns, bam_cs)
                         htseq_counts, htseq_elapsed = run_htseq(
                             bam_cs,
                             region_gtf,
-                            cond_dir / f"htseq_{aligner}",
+                            cond_dir / ht_name,
                             strand_specificity=strand_spec,
                             conda_env=htseq_conda_env,
                         )
-                        htseq_gene_by_aligner[f"htseq_{aligner}"] = (
+                        htseq_gene_by_aligner[ht_name] = (
                             htseq_counts, htseq_elapsed,
                         )
 
@@ -1400,7 +1999,6 @@ def run_region_benchmark(
 
             # ── Write per-transcript CSV ────────────────────────────
 
-                tx_tools = _get_transcript_tools(args.aligner)
                 per_tx_csv = cond_dir / "per_transcript_counts.csv"
                 tids = sorted(mature_truth_counts)
                 with open(per_tx_csv, "w", newline="") as f:
@@ -1425,7 +2023,6 @@ def run_region_benchmark(
 
             # ── Write per-gene CSV ──────────────────────────────────
 
-                gene_tools = _get_gene_tools(args.aligner, include_htseq=include_htseq)
                 per_gene_csv = cond_dir / "per_gene_counts.csv"
                 gene_ids = sorted(truth_gene)
                 # Aggregate each tool's counts to gene-level
@@ -1478,7 +2075,7 @@ def run_region_benchmark(
                             pm_row["abs_error"],
                         ])
 
-                aligner_str = ",".join(args.aligner)
+                aligner_str = ",".join(ac.name for ac in aligner_configs)
                 results.append(
                     ConditionResult(
                         region=region.label,
@@ -1501,9 +2098,10 @@ def run_region_benchmark(
                 )
 
                 hulkrna_parts = " | ".join(
-                    f"{_hulkrna_tool_name(a)} MAE="
-                    f"{transcript_metrics[_hulkrna_tool_name(a)]['mean_abs_error']:.2f}"
-                    for a in args.aligner
+                    f"{_hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)} MAE="
+                    f"{transcript_metrics[_hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)]['mean_abs_error']:.2f}"
+                    for ac in aligner_configs
+                    for hc in hulkrna_configs
                 )
                 htseq_parts = ""
                 if include_htseq:
@@ -2037,17 +2635,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def ensure_tools(
     *,
-    aligners: list[str],
+    aligner_configs: list[AlignerConfig],
     hisat2_exe: str,
     hisat2_build_exe: str,
     include_htseq: bool = True,
     htseq_conda_env: str = "htseq",
 ) -> None:
     required = ["samtools", "salmon", "kallisto"]
-    for aligner in aligners:
-        if aligner == "minimap2":
+    for ac in aligner_configs:
+        if ac.type == "minimap2":
             required.append("minimap2")
-        elif aligner == "hisat2":
+        elif ac.type == "hisat2":
             required.extend([hisat2_exe, hisat2_build_exe])
     # Deduplicate while preserving order
     required = list(dict.fromkeys(required))
@@ -2072,9 +2670,21 @@ def ensure_tools(
 
 
 def _flatten_config_dict(d: dict, prefix: str = "") -> dict:
+    """Flatten nested YAML dicts for scalar option mapping.
+
+    Structured sections (``hulkrna_configs``, ``aligners``) are
+    preserved as-is and NOT flattened — they are handled separately
+    by :func:`apply_yaml_config`.
+    """
+    # Sections that should be kept as structured dicts
+    _STRUCTURED_SECTIONS = {"hulkrna_configs", "aligners"}
+
     out: dict = {}
     for key, value in d.items():
         joined = f"{prefix}_{key}" if prefix else str(key)
+        if not prefix and key in _STRUCTURED_SECTIONS:
+            out[key] = value
+            continue
         if isinstance(value, dict):
             out.update(_flatten_config_dict(value, joined))
         else:
@@ -2093,6 +2703,15 @@ def _cli_dest_overrides(argv: list[str]) -> set[str]:
 
 
 def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Namespace:
+    """Apply YAML configuration to ``args``, respecting CLI overrides.
+
+    Handles three YAML‑only sections that have no CLI equivalent:
+
+    - **region** entries can be plain strings (``chr:start-end``) or
+      single-key dicts (``{Name: "chr:start-end"}``) for named regions.
+    - **hulkrna_configs** – mapping of ``name → {param: value, …}``.
+    - **aligners** – mapping of ``name → {type: …, param: value, …}``.
+    """
     if args.config is None:
         return args
     if yaml is None:
@@ -2107,7 +2726,45 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
     cfg = _flatten_config_dict(cfg_raw)
     cli_overrides = _cli_dest_overrides(argv)
 
-    # aliases for nested config sections
+    # ── Structured sections (not in argparse) ───────────────────────
+
+    # hulkrna_configs
+    if "hulkrna_configs" in cfg and "hulkrna_configs" not in cli_overrides:
+        raw_hc = cfg.pop("hulkrna_configs")
+        if isinstance(raw_hc, dict):
+            args.hulkrna_configs = [
+                HulkrnaConfig(name=str(name), params=dict(params) if isinstance(params, dict) else {})
+                for name, params in raw_hc.items()
+            ]
+        else:
+            raise ValueError("hulkrna_configs must be a mapping of name → {params}")
+
+    # aligners
+    if "aligners" in cfg and "aligner" not in cli_overrides:
+        raw_al = cfg.pop("aligners")
+        if isinstance(raw_al, dict):
+            aligner_cfgs: list[AlignerConfig] = []
+            for aname, aval in raw_al.items():
+                aname = str(aname)
+                if aval is None:
+                    aval = {}
+                if not isinstance(aval, dict):
+                    raise ValueError(
+                        f"aligners.{aname} must be a mapping (or empty), got {type(aval).__name__}"
+                    )
+                atype = str(aval.pop("type", aname))
+                if atype not in ALIGNER_CHOICES:
+                    raise ValueError(
+                        f"aligners.{aname}: unsupported type '{atype}'; "
+                        f"choose from {ALIGNER_CHOICES}"
+                    )
+                aligner_cfgs.append(AlignerConfig(name=aname, type=atype, params=dict(aval)))
+            args.aligner_configs = aligner_cfgs
+        else:
+            raise ValueError("aligners must be a mapping of name → {type, params…}")
+
+    # ── aliases for nested config sections ──────────────────────────
+
     alias_map = {
         "simulation_n_fragments": "n_fragments",
         "simulation_sim_seed": "sim_seed",
@@ -2136,6 +2793,9 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
     }
 
     for raw_key, value in cfg.items():
+        # Skip already-handled structured sections
+        if raw_key in {"hulkrna_configs", "aligners"}:
+            continue
         dest = raw_key.replace("-", "_")
         dest = alias_map.get(dest, dest)
         if not hasattr(args, dest):
@@ -2145,11 +2805,19 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
         if dest in {"genome", "gtf", "outdir", "region_file", "abundance_file", "config"} and isinstance(value, str):
             setattr(args, dest, Path(value))
             continue
+        # Region: support list of strings, dicts, or a bare string
         if dest == "region" and isinstance(value, str):
             setattr(args, dest, [value])
             continue
         if dest == "region" and isinstance(value, list):
-            setattr(args, dest, [str(x) for x in value])
+            # Preserve dicts for named regions; stringify bare values
+            entries: list = []
+            for item in value:
+                if isinstance(item, dict):
+                    entries.append(item)
+                else:
+                    entries.append(str(item))
+            setattr(args, dest, entries)
             continue
         if dest == "aligner" and isinstance(value, str):
             setattr(args, dest, [value])
@@ -2195,12 +2863,29 @@ def main() -> int:
         include_htseq = True
     htseq_conda_env = args.htseq_conda_env
 
-    # Normalise aligner to a list (YAML may set a bare string)
-    if isinstance(args.aligner, str):
-        args.aligner = [args.aligner]
+    # ── Build AlignerConfig list ────────────────────────────────────
+    # Priority:  YAML ``aligners:`` section  >  CLI/YAML ``aligner:``
+
+    aligner_configs: list[AlignerConfig] = getattr(args, "aligner_configs", None) or []
+    if not aligner_configs:
+        # Normalise aligner to a list (YAML may set a bare string)
+        if isinstance(args.aligner, str):
+            args.aligner = [args.aligner]
+        aligner_configs = [
+            AlignerConfig(name=a, type=a) for a in args.aligner
+        ]
+
+    # ── Build HulkrnaConfig list ────────────────────────────────────
+
+    hulkrna_configs: list[HulkrnaConfig] = getattr(args, "hulkrna_configs", None) or []
+    if not hulkrna_configs:
+        hulkrna_configs = [HulkrnaConfig(name="default")]
+
+    # Keep args.aligner in sync for any code that still reads it
+    args.aligner = [ac.name for ac in aligner_configs]
 
     ensure_tools(
-        aligners=args.aligner,
+        aligner_configs=aligner_configs,
         hisat2_exe=args.hisat2_exe,
         hisat2_build_exe=args.hisat2_build_exe,
         include_htseq=include_htseq,
@@ -2270,16 +2955,31 @@ def main() -> int:
         if s.strip()
     )
 
+    n_aligner = len(aligner_configs)
+    n_hulk = len(hulkrna_configs)
     logger.info(
-        "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs × %d regions × %d aligners = %d conditions",
+        "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs "
+        "× %d regions × %d aligners × %d hulkrna configs = %d conditions",
         len(gdna_rates),
         len(nrna_rates),
         len(strand_specificities),
         len(regions),
-        len(args.aligner),
+        n_aligner,
+        n_hulk,
         len(gdna_rates) * len(nrna_rates) * len(strand_specificities) * len(regions),
     )
-    logger.info("Aligners: %s", ", ".join(args.aligner))
+    logger.info(
+        "Aligners: %s",
+        ", ".join(f"{ac.name} ({ac.type})" for ac in aligner_configs),
+    )
+    if n_hulk > 1:
+        logger.info(
+            "HulkRNA configs: %s",
+            ", ".join(
+                f"{hc.name}" + (f" ({hc.params})" if hc.params else "")
+                for hc in hulkrna_configs
+            ),
+        )
 
     args.outdir.mkdir(parents=True, exist_ok=True)
 
@@ -2287,12 +2987,6 @@ def main() -> int:
 
     for region in regions:
         try:
-            # Extract & assign abundances to compute gDNA percentiles.
-            # We do a lightweight pre-pass for gDNA level computation,
-            # then the full benchmark reuses those abundances.
-            # Actually, run_region_benchmark does everything internally,
-            # but we need gDNA levels before calling it.
-
             # Pre-compute gDNA levels for this region
             reg_dir = args.outdir / region.label
             reg_dir.mkdir(parents=True, exist_ok=True)
@@ -2351,6 +3045,8 @@ def main() -> int:
                 strand_specificities=strand_specificities,
                 include_htseq=include_htseq,
                 htseq_conda_env=htseq_conda_env,
+                aligner_configs=aligner_configs,
+                hulkrna_configs=hulkrna_configs,
             )
             all_results.extend(region_results)
 

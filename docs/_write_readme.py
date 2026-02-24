@@ -1,4 +1,7 @@
-# hulkrna Benchmarking Runbook
+"""Temporary script to overwrite BENCHMARKING_README.md."""
+from pathlib import Path
+
+content = r'''# hulkrna Benchmarking Runbook
 
 This runbook documents setup and usage for the regional benchmarking workflow built around `benchmark_region_competition.py` and `aggregate_benchmarks.py` in `scripts/benchmarking/`.
 
@@ -475,3 +478,7 @@ Options:
 | `benchmark_pristine_10_regions.yaml` | Pristine (no error/contamination) 10-region benchmark. |
 | `benchmark_full_10_regions.yaml` | Full 10-region with gDNA/nRNA sweeps. |
 | `benchmark_small.yaml` | Quick smoke test config. |
+'''
+
+Path(__file__).parent.joinpath("BENCHMARKING_README.md").write_text(content.lstrip())
+print("OK")

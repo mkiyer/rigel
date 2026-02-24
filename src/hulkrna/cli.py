@@ -117,11 +117,13 @@ def count_command(args: argparse.Namespace) -> int:
             "seed": seed,
             "em_pseudocount": alpha,
             "em_iterations": args.em_iterations,
+            "em_convergence_delta": args.em_convergence_delta,
             "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
             "confidence_threshold": args.confidence_threshold,
             "skip_duplicates": not args.keep_duplicates,
             "include_multimap": args.include_multimap,
             "sj_strand_tag": sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag),
+            "annotated_bam": args.annotated_bam,
         },
     }
     with open(config_path, "w") as f:
@@ -138,11 +140,13 @@ def count_command(args: argparse.Namespace) -> int:
         seed=seed,
         em_pseudocount=alpha,
         em_iterations=args.em_iterations,
+        em_convergence_delta=args.em_convergence_delta,
         gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
         confidence_threshold=args.confidence_threshold,
         overlap_min_frac=args.overlap_min_frac,
         overhang_alpha=args.overhang_alpha,
         mismatch_alpha=args.mismatch_alpha,
+        annotated_bam_path=getattr(args, 'annotated_bam', None),
     )
 
     # Log stats
@@ -348,6 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum EM iterations for ambiguous fragment resolution "
              "(default: 1000). Set to 0 for unique-only counting.",
     )
+    cnt.add_argument(
+        "--em-convergence-delta", dest="em_convergence_delta",
+        type=float, default=1e-6,
+        help="(Advanced) Convergence threshold for EM parameter updates "
+             "(default: 1e-6). Raising to 1e-5 provides a very modest "
+             "speedup with negligible accuracy impact.",
+    )
     from .pipeline import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
     cnt.add_argument(
         "--gdna-splice-penalty-unannot",
@@ -401,6 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
     cnt.add_argument(
         "--no-tsv", dest="no_tsv", action="store_true", default=False,
         help="Skip writing human-readable TSV count files",
+    )
+    cnt.add_argument(
+        "--annotated-bam", dest="annotated_bam", default=None,
+        help="Write an annotated BAM with per-fragment assignment tags "
+             "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path. "
+             "Enables read-level introspection of pipeline decisions. "
+             "Requires a second BAM pass (modest runtime overhead).",
     )
     cnt.set_defaults(func=count_command)
 
