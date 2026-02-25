@@ -13,16 +13,14 @@ Verifies that:
 import numpy as np
 import pytest
 
-from hulkrna.categories import SpliceType, SpliceStrandCol, NUM_SPLICE_STRAND_COLS
-from hulkrna.estimator import AbundanceEstimator, ScanData, Locus, LocusEMInput
+from hulkrna.categories import SpliceType, SpliceStrandCol
+from hulkrna.estimator import AbundanceEstimator
 from hulkrna.pipeline import _score_gdna_candidate, _GDNA_SPLICE_PENALTIES
 from hulkrna.frag_length_model import FragmentLengthModels
 from hulkrna.strand_model import StrandModel, StrandModels
 from hulkrna.types import Strand
 
-
-# Default column for UNSPLICED_SENSE
-_UNSPLICED_SENSE = int(SpliceStrandCol.UNSPLICED_SENSE)
+from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
 
 # =====================================================================
@@ -61,122 +59,6 @@ def _make_strand_models_with_ss(ss: float) -> StrandModels:
     for _ in range(n_anti):
         sm.exonic_spliced.observe(Strand.POS, Strand.NEG)
     return sm
-
-
-def _make_locus_em_data(
-    t_indices_per_unit,
-    log_liks_per_unit=None,
-    count_cols_per_unit=None,
-    num_transcripts=None,
-    rc=None,
-    nrna_init=None,
-    gdna_init=0.0,
-    include_nrna=False,
-    include_gdna=False,
-    nrna_log_lik=-2.0,
-    gdna_log_lik=0.0,
-    alpha=0.01,
-):
-    """Build a LocusEMInput for unit tests (single-locus, identity mapping)."""
-    if num_transcripts is None:
-        all_t = [t for unit in t_indices_per_unit for t in unit]
-        num_transcripts = (max(all_t) + 1) if all_t else 1
-
-    n_t = num_transcripts
-    n_components = 2 * n_t + 1
-    gdna_idx = 2 * n_t
-
-    offsets = [0]
-    flat_t = []
-    flat_lk = []
-    flat_cc = []
-    locus_t_list = []
-    locus_cc_list = []
-
-    for u, t_list in enumerate(t_indices_per_unit):
-        for j, t_idx in enumerate(t_list):
-            flat_t.append(t_idx)
-            flat_lk.append(
-                log_liks_per_unit[u][j] if log_liks_per_unit else 0.0
-            )
-            flat_cc.append(
-                count_cols_per_unit[u][j]
-                if count_cols_per_unit
-                else _UNSPLICED_SENSE
-            )
-
-        if include_nrna:
-            for t_idx in t_list:
-                flat_t.append(n_t + t_idx)
-                flat_lk.append(nrna_log_lik)
-                flat_cc.append(_UNSPLICED_SENSE)
-
-        if include_gdna:
-            flat_t.append(gdna_idx)
-            flat_lk.append(gdna_log_lik)
-            flat_cc.append(_UNSPLICED_SENSE)
-
-        offsets.append(len(flat_t))
-
-        locus_t_list.append(t_list[0] if t_list else -1)
-        cc = (
-            count_cols_per_unit[u][0]
-            if (count_cols_per_unit and t_list)
-            else _UNSPLICED_SENSE
-        )
-        locus_cc_list.append(cc)
-
-    n_units = len(t_indices_per_unit)
-
-    ut = np.zeros(n_components, dtype=np.float64)
-    if rc is not None:
-        for i in range(min(n_t, rc.num_transcripts)):
-            ut[i] = rc.unique_counts[i].sum()
-
-    if nrna_init is None:
-        nrna_arr = np.zeros(n_t, dtype=np.float64)
-    else:
-        nrna_arr = np.asarray(nrna_init, dtype=np.float64)
-    for i in range(n_t):
-        ut[n_t + i] = nrna_arr[i]
-    ut[gdna_idx] = gdna_init
-
-    eff_len = np.ones(n_components, dtype=np.float64)
-    prior = np.full(n_components, alpha, dtype=np.float64)
-
-    locus = Locus(
-        locus_id=0,
-        transcript_indices=np.arange(n_t, dtype=np.int32),
-        gene_indices=np.array([0], dtype=np.int32),
-        unit_indices=np.arange(n_units, dtype=np.int32),
-    )
-
-    return LocusEMInput(
-        locus=locus,
-        offsets=np.array(offsets, dtype=np.int64),
-        t_indices=np.array(flat_t, dtype=np.int32),
-        log_liks=np.array(flat_lk, dtype=np.float64),
-        count_cols=np.array(flat_cc, dtype=np.uint8),
-        locus_t_indices=np.array(locus_t_list, dtype=np.int32),
-        locus_count_cols=np.array(locus_cc_list, dtype=np.uint8),
-        n_transcripts=n_t,
-        n_components=n_components,
-        local_to_global_t=np.arange(n_t, dtype=np.int32),
-        unique_totals=ut,
-        nrna_init=nrna_arr,
-        gdna_init=gdna_init,
-        effective_lengths=eff_len,
-        prior=prior,
-    )
-
-
-def _run_and_assign(rc, locus_em, *, em_iterations=10):
-    """Convenience: run locus EM then assign. Returns (theta, gdna_count)."""
-    theta, _alpha = rc.run_locus_em(locus_em, em_iterations=em_iterations)
-    gdna_count = rc.assign_locus_ambiguous(
-        locus_em, theta,
-    )
-    return theta, gdna_count
 
 
 # =====================================================================
@@ -445,29 +327,6 @@ class TestGDNAProperties:
     def test_contamination_rate_zero_when_empty(self):
         rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
         assert rc.gdna_contamination_rate == 0.0
-
-
-# =====================================================================
-# gDNA output methods
-# =====================================================================
-
-
-class TestGDNAOutput:
-    def test_gdna_summary_dict(self):
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
-        rc._gdna_em_total = 15.0
-        rc.unique_counts[0, 0] = 80.0
-        rc.em_counts[0, 0] = 5.0
-
-        summary = rc.gdna_summary()
-        assert summary["gdna_em_total"] == 15.0
-        assert summary["gdna_total"] == 15.0
-        assert summary["rna_unique_total"] == 80.0
-        assert summary["rna_em_total"] == 5.0
-        expected_rate = 15.0 / (80.0 + 5.0 + 15.0)
-        assert summary["gdna_contamination_rate"] == pytest.approx(
-            expected_rate, abs=1e-6
-        )
 
 
 # =====================================================================

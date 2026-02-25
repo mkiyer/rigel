@@ -35,6 +35,7 @@ from ..types import Strand
 
 from .annotation import GeneBuilder
 from .genome import MutableGenome
+from .oracle_bam import OracleBamSimulator
 from .reads import GDNAConfig, ReadSimulator, SimConfig
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class ScenarioResult:
     gtf_path : Path
         Gene annotation GTF file.
     bam_path : Path
-        Name-sorted BAM file (aligned with minimap2).
+        Name-sorted BAM file (aligned or oracle).
     index_dir : Path
         HulkIndex output directory (Feather files).
     index : HulkIndex
@@ -62,14 +63,17 @@ class ScenarioResult:
         Transcript objects with assigned indices.
     genome : MutableGenome
         The genome (post splice-motif edits).
-    fastq_r1 : Path
-        R1 FASTQ file.
-    fastq_r2 : Path
-        R2 FASTQ file.
+    fastq_r1 : Path or None
+        R1 FASTQ file (None in oracle mode).
+    fastq_r2 : Path or None
+        R2 FASTQ file (None in oracle mode).
     n_simulated : int
         Number of fragments passed to the read simulator.
     gdna_config : GDNAConfig or None
         gDNA configuration used (None if no gDNA simulated).
+    is_oracle : bool
+        True when BAM was produced by the oracle simulator
+        (no FASTQ/alignment step).
     """
 
     fasta_path: Path
@@ -79,10 +83,11 @@ class ScenarioResult:
     index: HulkIndex
     transcripts: list[Transcript]
     genome: MutableGenome
-    fastq_r1: Path
-    fastq_r2: Path
+    fastq_r1: Path | None = None
+    fastq_r2: Path | None = None
     n_simulated: int = 0
     gdna_config: GDNAConfig | None = None
+    is_oracle: bool = False
 
     def ground_truth_counts(self) -> dict[str, int]:
         """Parse BAM read names to extract ground-truth fragment counts.
@@ -98,7 +103,7 @@ class ScenarioResult:
             contributed at least one simulated fragment.
         """
         seen: set[str] = set()
-        with pysam.AlignmentFile(str(self.fastq_r1.parent / self.bam_path.name),
+        with pysam.AlignmentFile(str(self.bam_path),
                                  "rb", check_sq=False) as bam:
             for read in bam:
                 # Strip /1 or /2 suffix to get fragment identifier
@@ -171,6 +176,69 @@ class ScenarioResult:
                     if t_id != "gdna" and not t_id.startswith("nrna_"):
                         counts[t_id] += 1
         return dict(counts)
+
+    # -- BAM-based ground truth (oracle mode) ---------------------------------
+
+    def _parse_bam_qnames(self) -> list[str]:
+        """Return deduplicated query names from the BAM (one per fragment)."""
+        seen: set[str] = set()
+        with pysam.AlignmentFile(str(self.bam_path), "rb",
+                                 check_sq=False) as bam:
+            for read in bam:
+                seen.add(read.query_name)
+        return list(seen)
+
+    def ground_truth_from_bam(self) -> dict[str, int]:
+        """Parse BAM read names for ground-truth mRNA fragment counts.
+
+        Read-name format: ``{t_id}:{start}-{end}:{strand}:{idx}``
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of ``t_id → count`` for each transcript.
+        """
+        counts: Counter[str] = Counter()
+        for qname in self._parse_bam_qnames():
+            t_id = qname.split(":")[0]
+            if t_id != "gdna" and not t_id.startswith("nrna_"):
+                counts[t_id] += 1
+        return dict(counts)
+
+    def ground_truth_gdna_count_from_bam(self) -> int:
+        """Count gDNA fragments from BAM read names."""
+        return sum(
+            1 for qn in self._parse_bam_qnames() if qn.startswith("gdna:")
+        )
+
+    def ground_truth_nrna_count_from_bam(self) -> int:
+        """Count nascent RNA fragments from BAM read names."""
+        return sum(
+            1 for qn in self._parse_bam_qnames()
+            if qn.split(":")[0].startswith("nrna_")
+        )
+
+    def ground_truth_auto(self) -> dict[str, int]:
+        """Return ground-truth mRNA counts from FASTQ or BAM.
+
+        Uses FASTQ-based ground truth if FASTQ files exist,
+        otherwise falls back to BAM read names (oracle mode).
+        """
+        if self.fastq_r1 is not None and self.fastq_r1.exists():
+            return self.ground_truth_from_fastq()
+        return self.ground_truth_from_bam()
+
+    def ground_truth_gdna_auto(self) -> int:
+        """Return ground-truth gDNA count from FASTQ or BAM."""
+        if self.fastq_r1 is not None and self.fastq_r1.exists():
+            return self.ground_truth_gdna_count()
+        return self.ground_truth_gdna_count_from_bam()
+
+    def ground_truth_nrna_auto(self) -> int:
+        """Return ground-truth nRNA count from FASTQ or BAM."""
+        if self.fastq_r1 is not None and self.fastq_r1.exists():
+            return self.ground_truth_nrna_count()
+        return self.ground_truth_nrna_count_from_bam()
 
 
 class Scenario:
@@ -336,6 +404,91 @@ class Scenario:
             fastq_r2=r2_path,
             n_simulated=n_fragments,
             gdna_config=effective_gdna,
+        )
+
+    def build_oracle(
+        self,
+        n_fragments: int = 1000,
+        sim_config: SimConfig | None = None,
+        gdna_config: GDNAConfig | None = None,
+        nrna_abundance: float = 0.0,
+    ) -> ScenarioResult:
+        """Execute the simulation pipeline using oracle (perfect) alignments.
+
+        Bypasses FASTQ generation and external alignment (minimap2/samtools).
+        Instead uses :class:`OracleBamSimulator` to produce a name-sorted
+        BAM with CIGAR strings derived from known transcript structure.
+
+        Pipeline:
+        1. Write genome FASTA + index.
+        2. Write gene annotations (GTF).
+        3. Generate oracle BAM (perfect alignments).
+        4. Build HulkIndex.
+
+        Parameters
+        ----------
+        n_fragments : int
+            Number of fragments to simulate.
+        sim_config : SimConfig or None
+            Read simulation config. None uses defaults with same seed.
+        gdna_config : GDNAConfig or None
+            gDNA contamination config.  If None, falls back to the
+            ``gdna_config`` set on the ``Scenario`` constructor.
+        nrna_abundance : float
+            Nascent RNA molecular abundance applied to all expressed
+            transcripts (same semantics as ``build()``).
+
+        Returns
+        -------
+        ScenarioResult
+            Result with ``is_oracle=True`` and ``fastq_r1/r2=None``.
+        """
+        wdir = self.work_dir
+        effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
+
+        # 1. Genome FASTA
+        fasta_path = self.genome.write_fasta(wdir)
+
+        # 2. GTF annotation
+        gtf_path = self.annotation.write_gtf(wdir)
+        transcripts = self.annotation.get_transcripts()
+
+        # Apply nascent RNA abundance
+        if nrna_abundance > 0:
+            for t in transcripts:
+                if t.abundance and t.abundance > 0:
+                    t.nrna_abundance = nrna_abundance
+
+        # 3. Oracle BAM (perfect alignments, no FASTQ or alignment step)
+        if sim_config is None:
+            sim_config = SimConfig(seed=self.seed)
+        oracle = OracleBamSimulator(
+            self.genome, transcripts,
+            config=sim_config,
+            gdna_config=effective_gdna,
+            ref_name=self.ref_name,
+        )
+        bam_path = wdir / f"{self.name}_oracle.bam"
+        oracle.write_bam(bam_path, n_fragments, name_sorted=True)
+
+        # 4. Build HulkIndex
+        index_dir = wdir / "index"
+        HulkIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
+        index = HulkIndex.load(index_dir)
+
+        return ScenarioResult(
+            fasta_path=fasta_path,
+            gtf_path=gtf_path,
+            bam_path=bam_path,
+            index_dir=index_dir,
+            index=index,
+            transcripts=transcripts,
+            genome=self.genome,
+            fastq_r1=None,
+            fastq_r2=None,
+            n_simulated=n_fragments,
+            gdna_config=effective_gdna,
+            is_oracle=True,
         )
 
     def _align(self, fasta_path: Path, r1_path: Path, r2_path: Path,

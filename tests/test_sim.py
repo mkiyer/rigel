@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-from pathlib import Path
 
 from hulkrna.sim.genome import MutableGenome, reverse_complement
 from hulkrna.sim.annotation import GeneBuilder

@@ -126,6 +126,10 @@ class ScoringContext:
     t_to_g: np.ndarray           # int32[n_transcripts]
     nrna_base: int               # offset for nRNA indices in CSR
 
+    # Per-transcript lengths for per-fragment effective length correction
+    t_length_arr: np.ndarray     # int32[n_transcripts] — spliced exonic length
+    t_span_arr: np.ndarray       # int32[n_transcripts] — genomic span (incl introns)
+
     @staticmethod
     def from_models(
         strand_models,
@@ -169,6 +173,12 @@ class ScoringContext:
         fl_max_size = fl_model.max_size
         fl_tail_base: float = getattr(fl_model, "_tail_base", 0.0)
 
+        # Per-transcript length arrays for per-fragment effective length
+        t_length_arr = index.t_df["length"].values.astype(np.int32)
+        t_span_arr = (
+            index.t_df["end"].values - index.t_df["start"].values
+        ).astype(np.int32)
+
         return ScoringContext(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
             log_p_antisense=math.log(max(p_antisense, LOG_SAFE_FLOOR)),
@@ -195,6 +205,8 @@ class ScoringContext:
             g_strand_arr=index.g_to_strand_arr,
             t_to_g=index.t_to_g_arr,
             nrna_base=counter.nrna_base_index,
+            t_length_arr=t_length_arr,
+            t_span_arr=t_span_arr,
         )
 
 

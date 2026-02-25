@@ -1,7 +1,5 @@
 """Tests for hulkrna.buffer — FragmentBuffer with columnar storage and disk spill."""
 
-import json
-
 import numpy as np
 import pytest
 

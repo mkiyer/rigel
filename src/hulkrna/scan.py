@@ -95,6 +95,7 @@ class EmDataBuilder:
         self.locus_ct_list: list[int] = []
         self.is_spliced_list: list[bool] = []
         self.gdna_ll_list: list[float] = []
+        self.genomic_footprints_list: list[int] = []
         self.frag_id_list: list[int] = []
         self.frag_class_list: list[int] = []
         self.splice_type_list: list[int] = []
@@ -157,6 +158,14 @@ class EmDataBuilder:
                 anti = not ctx.anti_flag
 
             log_lik = log_strand + log_fl + oh * ctx.overhang_log_penalty + log_nm
+
+            # Per-fragment effective length correction (Bayesian-correct).
+            # Replaces the global eff_len_t in the E-step denominator.
+            flen_k = int(frag_lengths[k]) if frag_lengths is not None else -1
+            if flen_k > 0:
+                t_len = int(ctx.t_length_arr[t_idx_int])
+                log_lik -= math.log(max(t_len - flen_k + 1, 1))
+
             ct = splice_type * 2 + int(anti)
 
             prev = best_per_t.get(t_idx_int)
@@ -223,6 +232,12 @@ class EmDataBuilder:
 
             nrna_ll = log_strand + log_fl + oh * ctx.overhang_log_penalty + log_nm
 
+            # Per-fragment effective length correction for nRNA.
+            # Uses genomic span (incl introns) as the nRNA "transcript length".
+            if genomic_footprint > 0:
+                t_span = int(ctx.t_span_arr[t_idx_int])
+                nrna_ll -= math.log(max(t_span - genomic_footprint + 1, 1))
+
             prev = best_per_t.get(t_idx_int)
             if prev is None or oh < prev[0] or (
                 oh == prev[0] and nrna_ll > prev[1]
@@ -279,6 +294,7 @@ class EmDataBuilder:
         st = bf.splice_type
         is_spl = (st == SPLICE_ANNOT or st == SPLICE_UNANNOT)
         self.is_spliced_list.append(is_spl)
+        self.genomic_footprints_list.append(int(bf.genomic_footprint))
 
         if not is_spl:
             es = bf.exon_strand
@@ -454,6 +470,7 @@ class EmDataBuilder:
             if not is_any_spliced:
                 # gDNA log-lik: best across unspliced MM hits
                 best_gdna_ll = -np.inf
+                best_footprint = 0
                 for bf in mm_pending:
                     st = bf.splice_type
                     if st == SPLICE_ANNOT or st == SPLICE_UNANNOT:
@@ -472,9 +489,15 @@ class EmDataBuilder:
                     )
                     if gdna_ll > best_gdna_ll:
                         best_gdna_ll = gdna_ll
+                        best_footprint = int(bf.genomic_footprint)
                 self.gdna_ll_list.append(best_gdna_ll)
+                self.genomic_footprints_list.append(best_footprint)
             else:
                 self.gdna_ll_list.append(-np.inf)
+                # Use first hit's footprint as representative
+                self.genomic_footprints_list.append(
+                    int(mm_pending[0].genomic_footprint)
+                )
         else:
             self.stats.n_gated_out += 1
 
@@ -625,6 +648,9 @@ class EmDataBuilder:
             locus_count_cols=np.array(self.locus_ct_list, dtype=np.uint8),
             is_spliced=np.array(self.is_spliced_list, dtype=bool),
             gdna_log_liks=np.array(self.gdna_ll_list, dtype=np.float64),
+            genomic_footprints=np.array(
+                self.genomic_footprints_list, dtype=np.int32,
+            ),
             frag_ids=np.array(self.frag_id_list, dtype=np.int64),
             frag_class=np.array(self.frag_class_list, dtype=np.int8),
             splice_type=np.array(self.splice_type_list, dtype=np.uint8),

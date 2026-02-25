@@ -228,17 +228,17 @@ def run_benchmark(
     -------
     BenchmarkResult
     """
-    # Ground truth: actual simulated fragments per transcript (from FASTQ)
-    simulated_counts = scenario_result.ground_truth_from_fastq()
+    # Ground truth: actual simulated fragments per transcript
+    simulated_counts = scenario_result.ground_truth_auto()
 
-    # Ground truth: fragments present in BAM (may be fewer if unmapped)
+    # Ground truth: fragments present in BAM
     aligned_counts = scenario_result.ground_truth_counts()
 
     # Ground truth: gDNA fragment count
-    n_gdna_expected = scenario_result.ground_truth_gdna_count()
+    n_gdna_expected = scenario_result.ground_truth_gdna_auto()
 
     # Ground truth: nascent RNA fragment count
-    n_nrna_expected = scenario_result.ground_truth_nrna_count()
+    n_nrna_expected = scenario_result.ground_truth_nrna_auto()
 
     # Observed: per-transcript total counts from the pipeline
     t_counts = pipeline_result.estimator.t_counts  # (N_t, 12) array

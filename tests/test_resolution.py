@@ -2,7 +2,7 @@
 
 import pytest
 
-from hulkrna.types import ChimeraType, MergeCriteria, MergeResult, Strand, GenomicInterval, IntervalType
+from hulkrna.types import ChimeraType, MergeCriteria, Strand, GenomicInterval, IntervalType
 from hulkrna.categories import SpliceType
 from hulkrna.resolution import (
     merge_sets_with_criteria,

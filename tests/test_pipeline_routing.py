@@ -69,6 +69,9 @@ class _Index:
         self.t_df = pd.DataFrame({
             "t_id": [f"t{i}" for i in range(self.num_transcripts)],
             "ref": ["chr1"] * self.num_transcripts,
+            "start": [0] * self.num_transcripts,
+            "end": [10000] * self.num_transcripts,
+            "length": [1000] * self.num_transcripts,
         })
 
 

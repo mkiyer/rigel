@@ -1,7 +1,6 @@
 """Tests for hulkrna.strand_model — Bayesian strand model."""
 
 import json
-import math
 
 import pytest
 

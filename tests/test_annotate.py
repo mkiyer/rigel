@@ -7,7 +7,6 @@ Verifies that:
 3. The annotation pipeline integrates end-to-end with run_pipeline.
 """
 
-import logging
 import shutil
 
 import numpy as np
@@ -25,8 +24,6 @@ from hulkrna.annotate import (
     _FRAG_CLASS_LABELS,
     _splice_type_label,
 )
-
-logger = logging.getLogger(__name__)
 
 
 # =====================================================================

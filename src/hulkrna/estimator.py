@@ -196,6 +196,10 @@ class ScanData:
     gdna_log_liks : np.ndarray
         float64[n_units] - pre-computed gDNA log-likelihood per unit.
         -inf for spliced units (gDNA not applicable).
+    genomic_footprints : np.ndarray
+        int32[n_units] - genomic footprint (aligned extent on genome)
+        per unit.  Used for per-fragment effective length correction
+        of gDNA candidates in ``build_locus_em_data``.
     frag_ids : np.ndarray
         int64[n_units] - buffer frag_id for each EM unit.
         Used to map EM assignment results back to BAM read-name groups
@@ -220,6 +224,7 @@ class ScanData:
     locus_count_cols: np.ndarray
     is_spliced: np.ndarray
     gdna_log_liks: np.ndarray
+    genomic_footprints: np.ndarray
     frag_ids: np.ndarray
     frag_class: np.ndarray
     splice_type: np.ndarray
@@ -942,6 +947,7 @@ class AbundanceEstimator:
             "transcript_id": index.t_df["t_id"].values,
             "gene_id": index.t_df["g_id"].values,
             "gene_name": index.t_df["g_name"].values,
+            "effective_length": self._t_eff_len,
             "count": count_total,
             "count_unique": count_unique,
             "count_spliced": count_spliced,
@@ -1003,9 +1009,29 @@ class AbundanceEstimator:
         with np.errstate(divide="ignore", invalid="ignore"):
             gdna_rate = np.where(denom > 0, n_gdna / denom, 0.0)
 
+        # Gene effective length: count-weighted mean of transcript
+        # effective lengths.  For genes with zero counts, use the
+        # maximum transcript effective length.
+        t_eff = self._t_eff_len
+        t_counts_flat = (self.unique_counts + self.em_counts).sum(axis=1)
+        g_eff_num = np.zeros(n_genes, dtype=np.float64)
+        g_eff_den = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(g_eff_num, t_to_g, t_counts_flat * t_eff)
+        np.add.at(g_eff_den, t_to_g, t_counts_flat)
+        g_eff_max = np.zeros(n_genes, dtype=np.float64)
+        np.maximum.at(g_eff_max, t_to_g, t_eff)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            g_eff_len = np.where(
+                g_eff_den > 0,
+                g_eff_num / g_eff_den,
+                g_eff_max,
+            )
+        g_eff_len = np.maximum(g_eff_len, 1.0)
+
         df = pd.DataFrame({
             "gene_id": index.g_df["g_id"].values,
             "gene_name": index.g_df["g_name"].values,
+            "effective_length": g_eff_len,
             "count": count_total,
             "count_unique": count_unique,
             "count_spliced": count_spliced,

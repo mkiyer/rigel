@@ -13,7 +13,7 @@ from hulkrna.sim.oracle_bam import (
     _take_from_right,
     _transcript_to_genomic_blocks,
 )
-from hulkrna.sim.genome import MutableGenome, reverse_complement
+from hulkrna.sim.genome import MutableGenome
 from hulkrna.sim.reads import GDNAConfig, ReadSimulator, SimConfig
 from hulkrna.transcript import Transcript
 from hulkrna.types import Interval, Strand

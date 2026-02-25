@@ -256,11 +256,30 @@ def build_locus_em_data(
     valid_gdna = (~is_spl) & np.isfinite(gdna_lls)
     n_gdna = int(valid_gdna.sum())
 
+    # Compute true locus span for gDNA per-fragment effective length.
+    # Span extends from leftmost transcript/fragment start to rightmost
+    # transcript/fragment end, capturing any overhanging fragments.
+    t_starts = index.t_df["start"].values[t_arr]
+    t_ends = index.t_df["end"].values[t_arr]
+    locus_start = int(t_starts.min())
+    locus_end = int(t_ends.max())
+    footprints = em_data.genomic_footprints[locus.unit_indices]
+    locus_span = float(locus_end - locus_start)
+
     if n_gdna > 0:
         gdna_units = np.arange(n_local_units, dtype=np.int32)[valid_gdna]
         gdna_lidx_arr = np.full(n_gdna, gdna_idx, dtype=np.int32)
-        gdna_ll_arr = gdna_lls[valid_gdna]
+        gdna_ll_arr = gdna_lls[valid_gdna].copy()
         gdna_cc_arr = np.zeros(n_gdna, dtype=np.uint8)
+
+        # Per-fragment effective length correction for gDNA.
+        # Subtract log(max(locus_span - footprint + 1, 1)) from each
+        # gDNA candidate's log-likelihood.
+        gdna_footprints = footprints[valid_gdna].astype(np.float64)
+        gdna_per_frag_eff = np.maximum(
+            locus_span - gdna_footprints + 1.0, 1.0
+        )
+        gdna_ll_arr -= np.log(gdna_per_frag_eff)
 
         final_lidx = np.concatenate([dedup_lidx, gdna_lidx_arr])
         final_ll = np.concatenate([dedup_ll, gdna_ll_arr])
@@ -297,23 +316,10 @@ def build_locus_em_data(
     unique_totals[n_t:2*n_t] = counter.nrna_init[t_arr]
     unique_totals[gdna_idx] = gdna_init
 
-    # Build effective lengths
+    # Build effective lengths — all set to 1.0 because per-fragment
+    # effective length correction is now baked into each candidate's
+    # log-likelihood (mRNA/nRNA during scan, gDNA above).
     eff_len = np.ones(n_components, dtype=np.float64)
-    eff_len[:n_t] = counter.effective_lengths[t_arr]
-
-    # nRNA: per-transcript unspliced span
-    if counter._transcript_spans is not None:
-        nrna_eff = np.maximum(
-            counter._transcript_spans[t_arr] - mean_frag + 1.0, 1.0
-        )
-        eff_len[n_t:2*n_t] = nrna_eff
-
-    # gDNA: annotated locus span (first exon start → last exon end)
-    g_starts = index.g_df["start"].values[locus.gene_indices]
-    g_ends = index.g_df["end"].values[locus.gene_indices]
-    locus_span = float(g_ends.max() - g_starts.min())
-    gdna_eff = max(locus_span - mean_frag + 1.0, 1.0)
-    eff_len[gdna_idx] = gdna_eff
 
     # Build prior
     prior = np.full(n_components, counter.em_prior, dtype=np.float64)
