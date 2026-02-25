@@ -27,6 +27,7 @@ def _make_resolved(**kwargs):
         merge_criteria=MergeCriteria.INTERSECTION,
         num_hits=1,
         genomic_footprint=250,
+        genomic_start=1000,
     )
     defaults.update(kwargs)
     return ResolvedFragment(**defaults)

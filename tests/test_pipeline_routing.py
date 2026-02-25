@@ -32,6 +32,7 @@ class _BF:
     nm: int = 0
     unambig_intron_bp: np.ndarray = None
     genomic_footprint: int = 200
+    genomic_start: int = -1
 
     def __post_init__(self):
         if self.unambig_intron_bp is None:

@@ -314,6 +314,11 @@ class HulkIndex:
         self._sj_g_index: np.ndarray | None = None
         self._sj_strand: np.ndarray | None = None
 
+        # Per-transcript exon intervals for coverage-weight model.
+        # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
+        # sorted by genomic start position.
+        self._t_exon_intervals: dict[int, np.ndarray] | None = None
+
     # -- properties -----------------------------------------------------------
 
     @property
@@ -485,6 +490,19 @@ class HulkIndex:
         self._iv_type = iv_df["interval_type"].values
         logger.debug(f"Interval index size: {len(iv_df)}")
 
+        # -- per-transcript exon intervals for coverage-weight model ----------
+        exon_mask = iv_df["interval_type"].values == int(IntervalType.EXON)
+        exon_rows = iv_df.loc[exon_mask, ["t_index", "start", "end"]]
+        t_exon_intervals: dict[int, np.ndarray] = {}
+        for t_idx, grp in exon_rows.groupby("t_index"):
+            if int(t_idx) < 0:
+                continue
+            coords = grp[["start", "end"]].values
+            coords = coords[coords[:, 0].argsort()]
+            t_exon_intervals[int(t_idx)] = coords.astype(np.int32)
+        self._t_exon_intervals = t_exon_intervals
+        logger.debug(f"Cached exon intervals for {len(t_exon_intervals)} transcripts")
+
         # -- splice junction indexes ------------------------------------------
         logger.debug("Reading splice junctions")
         sj_df = pd.read_feather(
@@ -581,6 +599,24 @@ class HulkIndex:
                 h_end,
             ))
         return hits
+
+    def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
+        """Return sorted exon ``[start, end)`` intervals for a transcript.
+
+        Parameters
+        ----------
+        t_idx : int
+            Global transcript index.
+
+        Returns
+        -------
+        np.ndarray or None
+            ``(n_exons, 2)`` int32 array sorted by genomic start, or
+            ``None`` if the transcript has no cached exon intervals.
+        """
+        if self._t_exon_intervals is None:
+            return None
+        return self._t_exon_intervals.get(t_idx)
 
     def query_gap_sjs(
         self, ref: str, start: int, end: int

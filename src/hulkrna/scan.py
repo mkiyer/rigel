@@ -42,6 +42,8 @@ from .scoring import (
     SPLICE_UNANNOT,
     SPLICE_ANNOT,
     frag_len_log_lik,
+    genomic_to_transcript_pos,
+    compute_coverage_weight,
 )
 from .stats import PipelineStats
 
@@ -89,6 +91,7 @@ class EmDataBuilder:
         self.t_indices_list: list[int] = []
         self.log_liks_list: list[float] = []
         self.count_cols_list: list[int] = []
+        self.coverage_weights_list: list[float] = []
 
         # Per-unit metadata
         self.locus_t_list: list[int] = []
@@ -117,10 +120,11 @@ class EmDataBuilder:
         splice_type: int,
         nm: int,
         read_length: int,
-    ) -> dict[int, tuple[int, float, int]]:
+        genomic_start: int = -1,
+    ) -> dict[int, tuple[int, float, int, float]]:
         """Score mRNA candidates with winner-take-all gating.
 
-        Returns dict mapping t_idx → (overhang, log_lik, count_col).
+        Returns dict mapping t_idx → (overhang, log_lik, count_col, coverage_weight).
         Only WTA winners (minimum overhang) are included.
         """
         ctx = self.ctx
@@ -135,7 +139,7 @@ class EmDataBuilder:
             log_same = log_diff = LOG_HALF
 
         # Pass 1 — find minimum overhang and collect per-transcript best
-        best_per_t: dict[int, tuple[int, float, int]] = {}
+        best_per_t: dict[int, tuple[int, float, int, float]] = {}
         for k in range(len(t_inds)):
             t_idx_int = int(t_inds[k])
             ebp = int(exon_bp[k]) if exon_bp is not None else fl
@@ -166,13 +170,25 @@ class EmDataBuilder:
                 t_len = int(ctx.t_length_arr[t_idx_int])
                 log_lik -= math.log(max(t_len - flen_k + 1, 1))
 
+            # Coverage weight: trapezoid model position-based weight.
+            cov_wt = 1.0
+            if genomic_start >= 0 and flen_k > 0:
+                t_len = int(ctx.t_length_arr[t_idx_int])
+                exon_ivs = self.index.get_exon_intervals(t_idx_int)
+                if exon_ivs is not None and t_len > 0:
+                    tx_start = genomic_to_transcript_pos(
+                        genomic_start, exon_ivs, t_strand, t_len,
+                    )
+                    tx_end = min(tx_start + flen_k, t_len)
+                    cov_wt = compute_coverage_weight(tx_start, tx_end, t_len)
+
             ct = splice_type * 2 + int(anti)
 
             prev = best_per_t.get(t_idx_int)
             if prev is None or oh < prev[0] or (
                 oh == prev[0] and log_lik > prev[1]
             ):
-                best_per_t[t_idx_int] = (oh, log_lik, ct)
+                best_per_t[t_idx_int] = (oh, log_lik, ct, cov_wt)
 
         if not best_per_t:
             return {}
@@ -196,10 +212,11 @@ class EmDataBuilder:
         nm: int,
         read_length: int,
         genomic_footprint: int,
-    ) -> dict[int, tuple[int, float]]:
+        genomic_start: int = -1,
+    ) -> dict[int, tuple[int, float, float]]:
         """Score nRNA candidates with winner-take-all gating.
 
-        Returns dict mapping t_idx → (overhang, nrna_log_lik).
+        Returns dict mapping t_idx → (overhang, nrna_log_lik, cov_wt).
         Only WTA winners (minimum overhang) are included.
         """
         ctx = self.ctx
@@ -213,7 +230,7 @@ class EmDataBuilder:
         else:
             log_same = log_diff = LOG_HALF
 
-        best_per_t: dict[int, tuple[int, float]] = {}
+        best_per_t: dict[int, tuple[int, float, float]] = {}
         for k in range(len(t_inds)):
             t_idx_int = int(t_inds[k])
             ebp = int(exon_bp[k]) if exon_bp is not None else fl
@@ -234,15 +251,31 @@ class EmDataBuilder:
 
             # Per-fragment effective length correction for nRNA.
             # Uses genomic span (incl introns) as the nRNA "transcript length".
+            t_span = int(ctx.t_span_arr[t_idx_int])
             if genomic_footprint > 0:
-                t_span = int(ctx.t_span_arr[t_idx_int])
                 nrna_ll -= math.log(max(t_span - genomic_footprint + 1, 1))
+
+            # Coverage weight: trapezoid model using genomic coordinates.
+            # For nRNA the "transcript" is the full genomic span, so
+            # fragment position is simply (genomic_start - tx_genomic_start).
+            cov_wt = 1.0
+            if genomic_start >= 0 and genomic_footprint > 0 and t_span > 0:
+                tx_start_g = int(ctx.t_start_arr[t_idx_int])
+                frag_pos = genomic_start - tx_start_g
+                frag_end_pos = frag_pos + genomic_footprint
+                # Clamp to [0, t_span]
+                frag_pos = max(0, min(frag_pos, t_span))
+                frag_end_pos = max(0, min(frag_end_pos, t_span))
+                if frag_end_pos > frag_pos:
+                    cov_wt = compute_coverage_weight(
+                        frag_pos, frag_end_pos, t_span,
+                    )
 
             prev = best_per_t.get(t_idx_int)
             if prev is None or oh < prev[0] or (
                 oh == prev[0] and nrna_ll > prev[1]
             ):
-                best_per_t[t_idx_int] = (oh, nrna_ll)
+                best_per_t[t_idx_int] = (oh, nrna_ll, cov_wt)
 
         if not best_per_t:
             return {}
@@ -257,7 +290,7 @@ class EmDataBuilder:
     # ------------------------------------------------------------------
 
     def _emit_mrna(
-        self, winners: dict[int, tuple[int, float, int]],
+        self, winners: dict[int, tuple[int, float, int, float]],
     ) -> tuple[float, int, int]:
         """Append mRNA winner candidates to CSR lists.
 
@@ -266,23 +299,25 @@ class EmDataBuilder:
         best_ll = -np.inf
         best_t = -1
         best_ct = 0
-        for t_idx, (oh, log_lik, ct) in winners.items():
+        for t_idx, (oh, log_lik, ct, cov_wt) in winners.items():
             self.t_indices_list.append(t_idx)
             self.log_liks_list.append(log_lik)
             self.count_cols_list.append(ct)
+            self.coverage_weights_list.append(cov_wt)
             if log_lik > best_ll:
                 best_ll = log_lik
                 best_t = t_idx
                 best_ct = ct
         return best_ll, best_t, best_ct
 
-    def _emit_nrna(self, winners: dict[int, tuple[int, float]]) -> None:
+    def _emit_nrna(self, winners: dict[int, tuple[int, float, float]]) -> None:
         """Append nRNA winner candidates to CSR lists."""
         nrna_base = self.ctx.nrna_base
-        for t_idx, (oh, nrna_ll) in winners.items():
+        for t_idx, (oh, nrna_ll, cov_wt) in winners.items():
             self.t_indices_list.append(nrna_base + t_idx)
             self.log_liks_list.append(nrna_ll)
             self.count_cols_list.append(0)
+            self.coverage_weights_list.append(cov_wt)
 
     # ------------------------------------------------------------------
     # Per-unit metadata
@@ -323,6 +358,7 @@ class EmDataBuilder:
         mrna_winners = self._score_wta_mrna(
             bf.t_inds, bf.exon_bp, bf.frag_lengths,
             bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
+            bf.genomic_start,
         )
         best_ll, best_t, best_ct = self._emit_mrna(mrna_winners)
 
@@ -331,7 +367,7 @@ class EmDataBuilder:
             nrna_winners = self._score_wta_nrna(
                 bf.t_inds, bf.exon_bp, bf.intron_bp,
                 bf.exon_strand, bf.nm, bf.read_length,
-                bf.genomic_footprint,
+                bf.genomic_footprint, bf.genomic_start,
             )
             self._emit_nrna(nrna_winners)
 
@@ -389,19 +425,20 @@ class EmDataBuilder:
                 is_any_spliced = True
 
         # ----- mRNA pool (WTA across all hits) -----
-        merged_mrna: dict[int, tuple[int, float, int]] = {}
+        merged_mrna: dict[int, tuple[int, float, int, float]] = {}
         for bf in mm_pending:
             winners = self._score_wta_mrna(
                 bf.t_inds, bf.exon_bp, bf.frag_lengths,
                 bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
+                bf.genomic_start,
             )
             # Merge: keep best per transcript (lower oh wins, then higher ll)
-            for t_idx, (oh, ll, ct) in winners.items():
+            for t_idx, (oh, ll, ct, cov_wt) in winners.items():
                 prev = merged_mrna.get(t_idx)
                 if prev is None or oh < prev[0] or (
                     oh == prev[0] and ll > prev[1]
                 ):
-                    merged_mrna[t_idx] = (oh, ll, ct)
+                    merged_mrna[t_idx] = (oh, ll, ct, cov_wt)
 
         # Global WTA across all transcripts
         if merged_mrna:
@@ -417,21 +454,21 @@ class EmDataBuilder:
         # ----- nRNA pool (independent, skip only SPLICED_ANNOT) -----
         # BUG FIX #1: gate on is_annot_spliced, not is_any_spliced
         if not is_annot_spliced:
-            merged_nrna: dict[int, tuple[int, float]] = {}
+            merged_nrna: dict[int, tuple[int, float, float]] = {}
             for bf in mm_pending:
                 if bf.splice_type == SPLICE_ANNOT:
                     continue
                 winners = self._score_wta_nrna(
                     bf.t_inds, bf.exon_bp, bf.intron_bp,
                     bf.exon_strand, bf.nm, bf.read_length,
-                    bf.genomic_footprint,
+                    bf.genomic_footprint, bf.genomic_start,
                 )
-                for t_idx, (oh, nrna_ll) in winners.items():
+                for t_idx, (oh, nrna_ll, cov_wt) in winners.items():
                     prev = merged_nrna.get(t_idx)
                     if prev is None or oh < prev[0] or (
                         oh == prev[0] and nrna_ll > prev[1]
                     ):
-                        merged_nrna[t_idx] = (oh, nrna_ll)
+                        merged_nrna[t_idx] = (oh, nrna_ll, cov_wt)
 
             if merged_nrna:
                 min_oh = min(v[0] for v in merged_nrna.values())
@@ -644,6 +681,9 @@ class EmDataBuilder:
             t_indices=np.array(self.t_indices_list, dtype=np.int32),
             log_liks=np.array(self.log_liks_list, dtype=np.float64),
             count_cols=np.array(self.count_cols_list, dtype=np.uint8),
+            coverage_weights=np.array(
+                self.coverage_weights_list, dtype=np.float64,
+            ),
             locus_t_indices=np.array(self.locus_t_list, dtype=np.int32),
             locus_count_cols=np.array(self.locus_ct_list, dtype=np.uint8),
             is_spliced=np.array(self.is_spliced_list, dtype=bool),

@@ -77,6 +77,7 @@ class BufferedFragment:
     frag_id: int = 0
     read_length: int = 0
     genomic_footprint: int = -1
+    genomic_start: int = -1
     nm: int = 0
     exon_bp: np.ndarray | None = None
     intron_bp: np.ndarray | None = None
@@ -117,7 +118,8 @@ class _AccumulatorChunk:
         "t_indices", "t_offsets",
         "frag_lengths_flat",
         "exon_bp_flat", "intron_bp_flat", "unambig_intron_bp_flat",
-        "frag_id", "read_length", "genomic_footprint", "nm",
+        "frag_id", "read_length", "genomic_footprint", "genomic_start",
+        "nm",
         "size",
     )
 
@@ -137,6 +139,7 @@ class _AccumulatorChunk:
         self.frag_id: list[int] = []
         self.read_length: list[int] = []
         self.genomic_footprint: list[int] = []
+        self.genomic_start: list[int] = []
         self.nm: list[int] = []
         self.size: int = 0
 
@@ -177,6 +180,9 @@ class _AccumulatorChunk:
         self.genomic_footprint.append(
             getattr(resolved, 'genomic_footprint', -1)
         )
+        self.genomic_start.append(
+            getattr(resolved, 'genomic_start', -1)
+        )
         self.nm.append(getattr(resolved, 'nm', 0))
         self.size += 1
 
@@ -215,6 +221,7 @@ class _FinalizedChunk:
     frag_id: np.ndarray         # int64[N]
     read_length: np.ndarray     # uint32[N]
     genomic_footprint: np.ndarray  # int32[N]
+    genomic_start: np.ndarray   # int32[N]
     nm: np.ndarray              # uint16[N]
     size: int
 
@@ -231,7 +238,7 @@ class _FinalizedChunk:
                 self.exon_bp, self.intron_bp,
                 self.unambig_intron_bp,
                 self.n_genes, self.frag_id, self.read_length,
-                self.genomic_footprint, self.nm,
+                self.genomic_footprint, self.genomic_start, self.nm,
             )
         )
 
@@ -290,6 +297,7 @@ class _FinalizedChunk:
             frag_id=int(self.frag_id[i]),
             read_length=int(self.read_length[i]),
             genomic_footprint=int(self.genomic_footprint[i]),
+            genomic_start=int(self.genomic_start[i]),
             nm=int(self.nm[i]),
         )
 
@@ -384,6 +392,7 @@ def _finalize(acc: _AccumulatorChunk, t_to_g_arr: np.ndarray) -> _FinalizedChunk
         frag_id=np.array(acc.frag_id, dtype=np.int64),
         read_length=np.array(acc.read_length, dtype=np.uint32),
         genomic_footprint=np.array(acc.genomic_footprint, dtype=np.int32),
+        genomic_start=np.array(acc.genomic_start, dtype=np.int32),
         nm=np.array(acc.nm, dtype=np.uint16),
         size=acc.size,
     )
@@ -430,6 +439,7 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
         "frag_id": chunk.frag_id,
         "read_length": chunk.read_length,
         "genomic_footprint": chunk.genomic_footprint,
+        "genomic_start": chunk.genomic_start,
         "nm": chunk.nm,
     })
 
@@ -476,6 +486,11 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         frag_id=table.column("frag_id").to_numpy().copy(),
         read_length=table.column("read_length").to_numpy().copy(),
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
+        genomic_start=(
+            table.column("genomic_start").to_numpy().copy()
+            if "genomic_start" in table.column_names
+            else np.full(len(table), -1, dtype=np.int32)
+        ),
         nm=table.column("nm").to_numpy().copy().astype(np.uint16),
         size=len(table),
     )

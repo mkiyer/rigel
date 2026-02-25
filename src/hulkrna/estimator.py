@@ -65,22 +65,12 @@ _EM_LOG_EPSILON = 1e-300
 _EM_CONVERGENCE_DELTA = 1e-6
 
 
-def _build_equiv_classes(offsets, t_indices, log_liks):
+def _build_equiv_classes(offsets, t_indices, log_liks, coverage_weights):
     """Group EM units by candidate component set into equivalence classes.
 
     Units sharing the exact same ordered set of candidate component
-    indices are merged.  Each class stores component indices and a dense
-    log-likelihood matrix ``(n_units_in_class, k_candidates)``.
-
-    This dramatically reduces per-iteration EM cost for loci where many
-    fragments overlap the same set of transcripts.  For example,
-    chr17:43044295-43170245 compresses 48,006 units into 169 classes
-    (284\u00d7 compression).
-
-    Within each unit's CSR segment, candidates are sorted by local
-    component index (invariant from ``_build_locus_em_data``'s
-    compound-key sort), so units with the same candidate set produce
-    identical tuples in the same order.
+    indices are merged.  Each class stores component indices, a dense
+    log-likelihood matrix, and a dense coverage-weight matrix.
 
     Parameters
     ----------
@@ -90,14 +80,13 @@ def _build_equiv_classes(offsets, t_indices, log_liks):
         int32[n_candidates] candidate component indices.
     log_liks : np.ndarray
         float64[n_candidates] per-candidate log-likelihoods.
+    coverage_weights : np.ndarray
+        float64[n_candidates] per-candidate coverage weights.
 
     Returns
     -------
-    list[tuple[np.ndarray, np.ndarray]]
-        Each element is ``(comp_indices, log_lik_matrix)`` where:
-
-        - *comp_indices*: int32 array of shape ``(k,)``
-        - *log_lik_matrix*: float64 array of shape ``(n, k)``
+    list[tuple[np.ndarray, np.ndarray, np.ndarray]]
+        Each element is ``(comp_indices, log_lik_matrix, wt_matrix)``.
     """
     n_units = len(offsets) - 1
     if n_units == 0 or len(t_indices) == 0:
@@ -112,15 +101,17 @@ def _build_equiv_classes(offsets, t_indices, log_liks):
         key = tuple(t_indices[start:end].tolist())
         class_map.setdefault(key, []).append(start)
 
-    result: list[tuple[np.ndarray, np.ndarray]] = []
+    result: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
     for key, start_list in class_map.items():
         comp_idx = np.array(key, dtype=np.int32)
         k = len(comp_idx)
         n = len(start_list)
         ll_matrix = np.empty((n, k), dtype=np.float64)
+        wt_matrix = np.empty((n, k), dtype=np.float64)
         for i, s in enumerate(start_list):
             ll_matrix[i, :] = log_liks[s:s + k]
-        result.append((comp_idx, ll_matrix))
+            wt_matrix[i, :] = coverage_weights[s:s + k]
+        result.append((comp_idx, ll_matrix, wt_matrix))
 
     return result
 
@@ -186,6 +177,11 @@ class ScanData:
         float64[n_candidates] - log(P_strand x P_insert) per candidate.
     count_cols : np.ndarray
         uint8[n_candidates] - internal column index per candidate (0-7).
+    coverage_weights : np.ndarray
+        float64[n_candidates] - coverage weight per candidate from the
+        trapezoid coverage model.  mRNA candidates get position-based
+        weight >= 1.0 (plateau = 1.0, edge > 1.0).  nRNA and gDNA
+        candidates get weight 1.0.
     locus_t_indices : np.ndarray
         int32[n_units] - best transcript index per unit.
     locus_count_cols : np.ndarray
@@ -220,6 +216,7 @@ class ScanData:
     t_indices: np.ndarray
     log_liks: np.ndarray
     count_cols: np.ndarray
+    coverage_weights: np.ndarray
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     is_spliced: np.ndarray
@@ -295,6 +292,10 @@ class LocusEMInput:
         float64[n_local_candidates] - log-likelihoods.
     count_cols : np.ndarray
         uint8[n_local_candidates] - column indices for count accumulation.
+    coverage_weights : np.ndarray
+        float64[n_local_candidates] - coverage weights from the trapezoid
+        model.  Used for the coverage-weighted warm start and the One
+        Virtual Read prior.
     locus_t_indices : np.ndarray
         int32[n_local_units] - best transcript index per unit (global).
     locus_count_cols : np.ndarray
@@ -322,6 +323,7 @@ class LocusEMInput:
     t_indices: np.ndarray
     log_liks: np.ndarray
     count_cols: np.ndarray
+    coverage_weights: np.ndarray
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     n_transcripts: int
@@ -625,19 +627,25 @@ class AbundanceEstimator:
         # Build equivalence classes: group units by candidate set.
         # Pre-allocate scratch arrays per class to avoid per-iteration
         # memory allocation (measured 1.78× speedup on chr17 mega-locus).
-        ec_list = _build_equiv_classes(offsets, t_indices, log_liks)
+        ec_list = _build_equiv_classes(
+            offsets, t_indices, log_liks, locus_em.coverage_weights,
+        )
         ec_data: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
-        for comp_idx, ll_matrix in ec_list:
+        ec_wt: list[np.ndarray] = []
+        for comp_idx, ll_matrix, wt_matrix in ec_list:
             scratch = np.empty_like(ll_matrix)
             ec_data.append((comp_idx, ll_matrix, scratch))
+            ec_wt.append(wt_matrix)
 
-        # Warm-start initialization: unique counts PLUS marginal
-        # compatibility from ambiguous units.
+        # Coverage-weighted warm start + One Virtual Read prior.
         #
-        # Each unit distributes 1/k weight across its k candidate
-        # components with non-zero prior.  For an equivalence class
-        # with n units and k candidates, total contribution per
-        # candidate = n / k (masked by prior > 0).
+        # Instead of distributing a uniform 1/k share per ambiguous
+        # unit, we distribute shares proportional to coverage weights,
+        # reflecting the geometric plausibility of each candidate.
+        #
+        # The same coverage totals, scaled to sum to 1.0, are added
+        # to the Dirichlet prior as a persistent "One Virtual Read"
+        # that prevents SQUAREM drift in flat-likelihood regions.
         #
         # Only seed components with non-zero prior.  Components
         # whose prior was zeroed (nRNA without intronic evidence,
@@ -647,11 +655,28 @@ class AbundanceEstimator:
         # components reduces to ``em_totals`` alone (no unique
         # counts, no prior), creating a self-sustaining cycle.
         theta_init = unique_totals.copy()
-        for comp_idx, ll_matrix, _scratch in ec_data:
-            k = len(comp_idx)
+        coverage_totals = np.zeros(n_total, dtype=np.float64)
+        n_ambiguous = 0
+
+        for i, (comp_idx, ll_matrix, _scratch) in enumerate(ec_data):
+            wt_matrix = ec_wt[i]
             n = ll_matrix.shape[0]
+            n_ambiguous += n
             has_p = prior[comp_idx] > 0.0
-            theta_init[comp_idx] += n * has_p.astype(np.float64) / k
+            # Mask weights by prior eligibility
+            masked_wt = wt_matrix * has_p[np.newaxis, :]
+            row_sums = masked_wt.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1.0
+            shares = masked_wt / row_sums       # (n, k) normalized
+            per_comp = shares.sum(axis=0)        # (k,)
+            theta_init[comp_idx] += per_comp
+            coverage_totals[comp_idx] += per_comp
+
+        # One Virtual Read prior: add exactly 1.0 total virtual read
+        # to the Dirichlet prior, distributed by coverage weights.
+        # This is parameter-free: gamma = 1/N_ambiguous.
+        if n_ambiguous > 0:
+            prior = prior + coverage_totals / n_ambiguous
 
         theta = theta_init + prior
         total = theta.sum()

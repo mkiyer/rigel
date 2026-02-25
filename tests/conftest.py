@@ -185,12 +185,14 @@ def _make_locus_em_data(
         unit_indices=np.arange(n_units, dtype=np.int32),
     )
 
+    n_local_candidates = len(flat_t)
     return LocusEMInput(
         locus=locus,
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
+        coverage_weights=np.ones(n_local_candidates, dtype=np.float64),
         locus_t_indices=np.array(locus_t_list, dtype=np.int32),
         locus_count_cols=np.array(locus_cc_list, dtype=np.uint8),
         n_transcripts=n_t,

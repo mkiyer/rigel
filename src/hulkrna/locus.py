@@ -213,6 +213,7 @@ def build_locus_em_data(
         all_gidx = em_data.t_indices[global_flat_idx]
         all_ll = em_data.log_liks[global_flat_idx]
         all_cc = em_data.count_cols[global_flat_idx]
+        all_cw = em_data.coverage_weights[global_flat_idx]
 
         # Map global indices to local component indices
         safe_gidx = np.clip(all_gidx, 0, max_global - 1)
@@ -229,6 +230,7 @@ def build_locus_em_data(
         v_lidx = all_lidx[valid]
         v_ll = all_ll[valid]
         v_cc = all_cc[valid]
+        v_cw = all_cw[valid]
         v_unit = unit_of_cand[valid]
 
         # Deduplicate: keep best log_lik per (unit, local_idx).
@@ -243,11 +245,13 @@ def build_locus_em_data(
         dedup_lidx = v_lidx[order][first_mask]
         dedup_ll = v_ll[order][first_mask]
         dedup_cc = v_cc[order][first_mask]
+        dedup_cw = v_cw[order][first_mask]
         dedup_unit = v_unit[order][first_mask]
     else:
         dedup_lidx = np.empty(0, dtype=np.int32)
         dedup_ll = np.empty(0, dtype=np.float64)
         dedup_cc = np.empty(0, dtype=np.uint8)
+        dedup_cw = np.empty(0, dtype=np.float64)
         dedup_unit = np.empty(0, dtype=np.int32)
 
     # Add gDNA candidates for unspliced units
@@ -284,11 +288,13 @@ def build_locus_em_data(
         final_lidx = np.concatenate([dedup_lidx, gdna_lidx_arr])
         final_ll = np.concatenate([dedup_ll, gdna_ll_arr])
         final_cc = np.concatenate([dedup_cc, gdna_cc_arr])
+        final_cw = np.concatenate([dedup_cw, np.ones(n_gdna, dtype=np.float64)])
         final_unit = np.concatenate([dedup_unit, gdna_units])
     else:
         final_lidx = dedup_lidx
         final_ll = dedup_ll
         final_cc = dedup_cc
+        final_cw = dedup_cw
         final_unit = dedup_unit
 
     # Sort by unit to reconstruct CSR
@@ -297,6 +303,7 @@ def build_locus_em_data(
         final_lidx = final_lidx[sort_order]
         final_ll = final_ll[sort_order]
         final_cc = final_cc[sort_order]
+        final_cw = final_cw[sort_order]
         final_unit = final_unit[sort_order]
 
         bin_counts = np.bincount(final_unit, minlength=n_local_units)
@@ -347,6 +354,7 @@ def build_locus_em_data(
         t_indices=final_lidx.astype(np.int32),
         log_liks=final_ll.astype(np.float64),
         count_cols=final_cc.astype(np.uint8),
+        coverage_weights=final_cw.astype(np.float64),
         locus_t_indices=local_locus_t.astype(np.int32),
         locus_count_cols=local_locus_ct.astype(np.uint8),
         n_transcripts=n_t,

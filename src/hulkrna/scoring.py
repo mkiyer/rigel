@@ -129,6 +129,7 @@ class ScoringContext:
     # Per-transcript lengths for per-fragment effective length correction
     t_length_arr: np.ndarray     # int32[n_transcripts] — spliced exonic length
     t_span_arr: np.ndarray       # int32[n_transcripts] — genomic span (incl introns)
+    t_start_arr: np.ndarray      # int32[n_transcripts] — genomic start coordinate
 
     @staticmethod
     def from_models(
@@ -178,6 +179,7 @@ class ScoringContext:
         t_span_arr = (
             index.t_df["end"].values - index.t_df["start"].values
         ).astype(np.int32)
+        t_start_arr = index.t_df["start"].values.astype(np.int32)
 
         return ScoringContext(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
@@ -207,6 +209,7 @@ class ScoringContext:
             nrna_base=counter.nrna_base_index,
             t_length_arr=t_length_arr,
             t_span_arr=t_span_arr,
+            t_start_arr=t_start_arr,
         )
 
 
@@ -334,6 +337,124 @@ def score_gdna_candidate(
 # ---------------------------------------------------------------------------
 # These match the old _score_gdna_candidate / _score_candidate signatures
 # so that tests can call them without a ScoringContext.
+
+
+def genomic_to_transcript_pos(
+    genomic_pos: int,
+    exon_intervals: np.ndarray,
+    strand: int,
+    transcript_length: int,
+) -> int:
+    """Map a genomic position to a transcript-relative 5'→3' coordinate.
+
+    Walks through sorted exon intervals ``(start, end)`` accumulating
+    spliced offset until the exon containing *genomic_pos* is found.
+    Positions falling in introns are mapped to the preceding exon
+    boundary.  Negative-strand transcripts are flipped so that
+    offset 0 is the 5' end.
+
+    Parameters
+    ----------
+    genomic_pos : int
+        Genomic coordinate to map.
+    exon_intervals : np.ndarray
+        ``(n_exons, 2)`` int32 array of ``[start, end)`` intervals,
+        sorted by genomic start position.
+    strand : int
+        Transcript strand (``Strand.POS`` or ``Strand.NEG``).
+    transcript_length : int
+        Total spliced exonic length of the transcript.
+
+    Returns
+    -------
+    int
+        Transcript-relative position in ``[0, transcript_length]``.
+    """
+    offset = 0
+    n = len(exon_intervals)
+    for i in range(n):
+        ex_start = int(exon_intervals[i, 0])
+        ex_end = int(exon_intervals[i, 1])
+        if genomic_pos < ex_start:
+            # Position is upstream of (or in an intron before) this exon
+            break
+        if genomic_pos < ex_end:
+            # Position is inside this exon
+            offset += genomic_pos - ex_start
+            break
+        offset += ex_end - ex_start
+    else:
+        # Position is past the last exon
+        offset = transcript_length
+
+    offset = max(0, min(offset, transcript_length))
+    if strand == STRAND_NEG:
+        offset = transcript_length - offset
+    return offset
+
+
+def compute_coverage_weight(
+    frag_start: int,
+    frag_end: int,
+    transcript_length: int,
+) -> float:
+    """Inverse coverage-capacity weight for a fragment on a transcript.
+
+    Uses the trapezoid coverage model: under uniform random sampling,
+    the expected coverage at transcript-relative position *x* on a
+    transcript of spliced length *L* for a fragment of length *f* is
+    ``min(x, w, L-x)`` where ``w = min(f, L/2)``.
+
+    A fragment in the plateau region gets weight 1.0.  A fragment near
+    a transcript edge gets weight > 1.0, reflecting that it is less
+    likely to be generated yet was still observed — stronger evidence
+    for that transcript.
+
+    Parameters
+    ----------
+    frag_start : int
+        Fragment 5' position in transcript-relative coordinates ``[0, L)``.
+    frag_end : int
+        Fragment 3' position in transcript-relative coordinates ``(0, L]``.
+    transcript_length : int
+        Spliced exonic length of the transcript.
+
+    Returns
+    -------
+    float
+        Weight >= 1.0.  Plateau → 1.0; edge → > 1.0.
+    """
+    f_len = frag_end - frag_start
+    if f_len <= 0 or transcript_length <= 0:
+        return 1.0
+
+    L = float(transcript_length)
+    w = min(f_len, L / 2.0)
+
+    total_area = 0.0
+
+    # Left ramp: c(x) = x for x in [0, w)
+    s = max(0.0, min(float(frag_start), w))
+    e = max(0.0, min(float(frag_end), w))
+    if s < e:
+        total_area += (e - s) * (s + e) / 2.0
+
+    # Plateau: c(x) = w for x in [w, L - w)
+    s = max(w, min(float(frag_start), L - w))
+    e = max(w, min(float(frag_end), L - w))
+    if s < e:
+        total_area += (e - s) * w
+
+    # Right ramp: c(x) = L - x for x in [L - w, L]
+    s = max(L - w, min(float(frag_start), L))
+    e = max(L - w, min(float(frag_end), L))
+    if s < e:
+        total_area += (e - s) * ((L - s) + (L - e)) / 2.0
+
+    area_per_base = total_area / f_len
+    area_per_base = max(area_per_base, 1.0)
+
+    return w / area_per_base
 
 
 def score_gdna_standalone(

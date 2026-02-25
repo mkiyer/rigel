@@ -552,6 +552,10 @@ class ResolvedFragment:
         Full genomic span from first exon start to last exon end.
         No intron subtraction — represents the fragment length on
         an unspliced molecule (nRNA or gDNA).  -1 if unavailable.
+    genomic_start : int
+        Leftmost genomic coordinate of the fragment (first exon start).
+        Used to map fragments to transcript-relative coordinates for
+        the coverage-weight model.  -1 if unavailable.
     merge_criteria : MergeCriteria
         Which relaxation level produced the transcript sets.
     num_hits : int
@@ -571,6 +575,7 @@ class ResolvedFragment:
     sj_strand: Strand
     frag_lengths: dict[int, int]
     genomic_footprint: int
+    genomic_start: int
     merge_criteria: MergeCriteria
     num_hits: int
     overlap_bp: dict[int, tuple[int, int, int]] | None = None
@@ -848,6 +853,7 @@ def resolve_fragment(
         sj_strand=sj_strand,
         frag_lengths=frag_lengths,
         genomic_footprint=frag.genomic_footprint,
+        genomic_start=min(e.start for e in frag.exons) if frag.exons else -1,
         merge_criteria=merge_result.criteria,
         num_hits=1,  # Caller must set this from the pairs list length
         overlap_bp=overlap_bp,

@@ -100,6 +100,7 @@ def _make_resolved(**kwargs):
         merge_criteria=MergeCriteria.INTERSECTION,
         num_hits=1,
         genomic_footprint=250,
+        genomic_start=1000,
     )
     defaults.update(kwargs)
     return ResolvedFragment(**defaults)
@@ -164,6 +165,7 @@ def _make_em_data(
         t_indices=np.array(flat_t, dtype=np.int32),
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
+        coverage_weights=np.ones(n_candidates, dtype=np.float64),
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,
         is_spliced=np.zeros(n_units, dtype=bool),
