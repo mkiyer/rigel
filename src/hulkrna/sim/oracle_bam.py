@@ -612,13 +612,13 @@ class OracleBamSimulator:
         )
 
         # Build sequences
+        # BAM SEQ is stored in forward-reference orientation: it must match
+        # the reference at the aligned position (left-to-right along the
+        # reference).  The 0x10 flag tells downstream tools that the
+        # original sequencer read was reverse-complemented to produce this
+        # stored SEQ.  Since oracle reads have zero errors, SEQ == reference.
         r1_seq = "".join(self.genome[bs:be] for bs, be in r1_blocks)
         r2_seq = "".join(self.genome[bs:be] for bs, be in r2_blocks)
-
-        if r1_is_reverse:
-            r1_seq = reverse_complement(r1_seq)
-        if r2_is_reverse:
-            r2_seq = reverse_complement(r2_seq)
 
         # CIGAR
         r1_cigar = _blocks_to_cigar(r1_blocks)
@@ -728,13 +728,9 @@ class OracleBamSimulator:
             r1_is_reverse = False
             r2_is_reverse = True
 
+        # BAM SEQ = reference sequence for perfect oracle alignments.
         r1_seq = self.genome[r1_start:r1_end]
         r2_seq = self.genome[r2_start:r2_end]
-
-        if r1_is_reverse:
-            r1_seq = reverse_complement(r1_seq)
-        if r2_is_reverse:
-            r2_seq = reverse_complement(r2_seq)
 
         r1_cigar = [(0, r1_end - r1_start)]  # simple M
         r2_cigar = [(0, r2_end - r2_start)]

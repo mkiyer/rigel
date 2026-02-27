@@ -6,6 +6,7 @@ rather than full sweep-based scenarios.
 
 import pytest
 
+from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
 from hulkrna.pipeline import run_pipeline
 from hulkrna.sim import Scenario, run_benchmark
 
@@ -39,8 +40,13 @@ class TestIsoformCollapse:
             result = sc.build_oracle(n_fragments=2000,
                                      sim_config=sim_config())
             gt = result.ground_truth_auto()
-            pr = run_pipeline(result.bam_path, result.index,
-                              sj_strand_tag="ts", seed=PIPELINE_SEED)
+            pr = run_pipeline(
+                result.bam_path, result.index,
+                config=PipelineConfig(
+                    em=EMConfig(seed=PIPELINE_SEED),
+                    scan=ScanConfig(sj_strand_tag="ts"),
+                ),
+            )
             bench = run_benchmark(result, pr, scenario_name="iso_1_1")
 
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
@@ -68,8 +74,13 @@ class TestIsoformCollapse:
             result = sc.build_oracle(n_fragments=2000,
                                      sim_config=sim_config())
             gt = result.ground_truth_auto()
-            pr = run_pipeline(result.bam_path, result.index,
-                              sj_strand_tag="ts", seed=PIPELINE_SEED)
+            pr = run_pipeline(
+                result.bam_path, result.index,
+                config=PipelineConfig(
+                    em=EMConfig(seed=PIPELINE_SEED),
+                    scan=ScanConfig(sj_strand_tag="ts"),
+                ),
+            )
             bench = run_benchmark(result, pr,
                                   scenario_name="iso_unique_t2")
 
@@ -104,8 +115,13 @@ class TestUnsplicedLowStrand:
                 sim_config=sim_config(strand_specificity=ss),
             )
             gt = result.ground_truth_auto()
-            pr = run_pipeline(result.bam_path, result.index,
-                              sj_strand_tag="ts", seed=PIPELINE_SEED)
+            pr = run_pipeline(
+                result.bam_path, result.index,
+                config=PipelineConfig(
+                    em=EMConfig(seed=PIPELINE_SEED),
+                    scan=ScanConfig(sj_strand_tag="ts"),
+                ),
+            )
             bench = run_benchmark(result, pr, scenario_name=f"ss_{ss}")
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             if ss >= 0.9:
@@ -130,8 +146,13 @@ class TestUnsplicedLowStrand:
                 sim_config=sim_config(strand_specificity=0.65),
             )
             gt = result.ground_truth_auto()
-            pr = run_pipeline(result.bam_path, result.index,
-                              sj_strand_tag="ts", seed=PIPELINE_SEED)
+            pr = run_pipeline(
+                result.bam_path, result.index,
+                config=PipelineConfig(
+                    em=EMConfig(seed=PIPELINE_SEED),
+                    scan=ScanConfig(sj_strand_tag="ts"),
+                ),
+            )
             bench = run_benchmark(result, pr,
                                   scenario_name="ss_0.65_spliced")
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")

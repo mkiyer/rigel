@@ -140,6 +140,7 @@ class TestAnnotatedBamIntegration:
     def test_annotated_bam_produced(self, scenario, tmp_path):
         """run_pipeline with annotated_bam_path writes a valid BAM."""
         import pysam
+        from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
         from hulkrna.sim import SimConfig, run_benchmark
         from hulkrna.pipeline import run_pipeline
 
@@ -155,9 +156,11 @@ class TestAnnotatedBamIntegration:
         pr = run_pipeline(
             result.bam_path,
             result.index,
-            sj_strand_tag="ts",
-            seed=42,
-            annotated_bam_path=annotated_bam,
+            config=PipelineConfig(
+                em=EMConfig(seed=42),
+                scan=ScanConfig(sj_strand_tag="ts"),
+                annotated_bam_path=annotated_bam,
+            ),
         )
 
         # Verify the annotated BAM exists and has records
@@ -211,6 +214,7 @@ class TestAnnotatedBamIntegration:
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
         """Pipeline counts are identical with and without annotation."""
         from hulkrna.sim import SimConfig
+        from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
         from hulkrna.pipeline import run_pipeline
 
         sim_config = SimConfig(
@@ -221,19 +225,21 @@ class TestAnnotatedBamIntegration:
             n_fragments=200, sim_config=sim_config,
         )
 
-        # Run without annotation
-        pr1 = run_pipeline(
-            result.bam_path, result.index,
-            sj_strand_tag="ts", seed=42,
+        base_config = PipelineConfig(
+            em=EMConfig(seed=42),
+            scan=ScanConfig(sj_strand_tag="ts"),
         )
+
+        # Run without annotation
+        pr1 = run_pipeline(result.bam_path, result.index, config=base_config)
         counts1 = pr1.estimator.get_counts_df(result.index)
 
         # Run with annotation
         annotated_bam = tmp_path / "annotated.bam"
+        from dataclasses import replace as _replace
+        annot_config = _replace(base_config, annotated_bam_path=annotated_bam)
         pr2 = run_pipeline(
-            result.bam_path, result.index,
-            sj_strand_tag="ts", seed=42,
-            annotated_bam_path=annotated_bam,
+            result.bam_path, result.index, config=annot_config,
         )
         counts2 = pr2.estimator.get_counts_df(result.index)
 

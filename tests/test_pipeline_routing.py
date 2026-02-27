@@ -12,9 +12,11 @@ from hulkrna.buffer import (
     FRAG_UNIQUE,
 )
 from hulkrna.categories import SpliceType
+from hulkrna.config import EMConfig
 from hulkrna.estimator import AbundanceEstimator
 from hulkrna.frag_length_model import FragmentLengthModels
-from hulkrna.pipeline import _scan_and_build_em_data
+from hulkrna.scoring import ScoringContext
+from hulkrna.scan import EmDataBuilder
 from hulkrna.stats import PipelineStats
 from hulkrna.strand_model import StrandModels
 from hulkrna.types import Strand
@@ -83,9 +85,29 @@ def _make_env(index):
         strand_models.exonic_spliced.observe(Strand.POS, Strand.POS)
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
-    counter = AbundanceEstimator(index.num_transcripts, index.num_genes, seed=1)
+    counter = AbundanceEstimator(index.num_transcripts, index.num_genes,
+                                  em_config=EMConfig(seed=1))
     stats = PipelineStats()
     return strand_models, frag_length_models, counter, stats
+
+
+def _scan_em_data(
+    buffer, index, strand_models, frag_length_models, counter, stats,
+    log_every=1_000_000, *, gdna_splice_penalties=None,
+    overhang_log_penalty=None, mismatch_log_penalty=None, annotations=None,
+):
+    """Build EM data from a buffer using ScoringContext + EmDataBuilder."""
+    ctx = ScoringContext.from_models(
+        strand_models, frag_length_models, index, counter,
+        overhang_log_penalty=overhang_log_penalty,
+        mismatch_log_penalty=mismatch_log_penalty,
+        gdna_splice_penalties=gdna_splice_penalties,
+    )
+    builder = EmDataBuilder(
+        ctx, counter, stats, index, strand_models,
+        annotations=annotations,
+    )
+    return builder.scan(buffer, log_every)
 
 
 def test_multimapper_spliced_annot_skips_shadows():
@@ -123,7 +145,7 @@ def test_multimapper_spliced_annot_skips_shadows():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_and_build_em_data(
+    em = _scan_em_data(
         buffer,
         index,
         strand_models,
@@ -179,7 +201,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_and_build_em_data(
+    em = _scan_em_data(
         buffer,
         index,
         strand_models,
@@ -240,7 +262,7 @@ def test_route_counters_are_exclusive_per_unit():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_and_build_em_data(
+    em = _scan_em_data(
         buffer,
         index,
         strand_models,
@@ -319,7 +341,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_and_build_em_data(
+    em = _scan_em_data(
         buffer, index, strand_models, frag_length_models,
         counter, stats, log_every=1_000_000,
     )
@@ -382,12 +404,12 @@ def test_nm_penalty_zero_when_disabled():
     chunk_a = _Chunk(bfs=[bf_nm0], fragment_classes=[FRAG_UNIQUE], frag_ids=[1])
     chunk_b = _Chunk(bfs=[bf_nm5], fragment_classes=[FRAG_UNIQUE], frag_ids=[1])
 
-    em_a = _scan_and_build_em_data(
+    em_a = _scan_em_data(
         _Buffer([chunk_a]), index, strand_models, frag_length_models,
         counter_a, stats_a, log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,
     )
-    em_b = _scan_and_build_em_data(
+    em_b = _scan_em_data(
         _Buffer([chunk_b]), index, strand_models, frag_length_models,
         counter_b, stats_b, log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,

@@ -14,8 +14,9 @@ import numpy as np
 import pytest
 
 from hulkrna.categories import SpliceType, SpliceStrandCol
+from hulkrna.config import EMConfig
 from hulkrna.estimator import AbundanceEstimator
-from hulkrna.pipeline import _score_gdna_candidate, _GDNA_SPLICE_PENALTIES
+from hulkrna.scoring import score_gdna_standalone as _score_gdna_candidate, GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
 from hulkrna.frag_length_model import FragmentLengthModels
 from hulkrna.strand_model import StrandModel, StrandModels
 from hulkrna.types import Strand
@@ -137,7 +138,7 @@ class TestLocusGDNATheta:
 
     def test_theta_has_gdna_component(self):
         """Theta has 2*n_t + 1 elements (mRNA + nRNA + 1 gDNA)."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 10,
             num_transcripts=3,
@@ -151,7 +152,7 @@ class TestLocusGDNATheta:
 
     def test_high_gdna_init_biases_theta(self):
         """Large gdna_init biases gDNA theta upward."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
@@ -168,7 +169,7 @@ class TestLocusGDNATheta:
 
     def test_no_gdna_init_minimal_absorption(self):
         """With zero gdna_init and weak gDNA likelihood, gDNA theta is small."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 1000.0
         lem = _make_locus_em_data(
             [[0]] * 100,
@@ -194,7 +195,7 @@ class TestLocusGDNAAssignment:
 
     def test_gdna_assignment_not_in_em_counts(self):
         """Fragments assigned to gDNA are counted in gdna_count return."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 100,
             log_liks_per_unit=[[-10.0]] * 100,
@@ -211,7 +212,7 @@ class TestLocusGDNAAssignment:
 
     def test_total_counts_preserved(self):
         """em_counts + nrna_em + gdna == n_units."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,
@@ -226,7 +227,7 @@ class TestLocusGDNAAssignment:
 
     def test_strong_transcript_signal_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 500.0
         lem = _make_locus_em_data(
             [[0]] * 500,
@@ -244,7 +245,7 @@ class TestLocusGDNAAssignment:
 
     def test_high_gdna_init_absorbs_fragments(self):
         """With large gdna_init, gDNA takes larger share."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 500,
             num_transcripts=2,
@@ -269,7 +270,7 @@ class TestGDNALocusAttribution:
 
     def test_locus_counts_populated(self):
         """gDNA assignments populate gdna_locus_counts."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         cc = _UNSPLICED_SENSE
         lem = _make_locus_em_data(
             [[0]] * 100,
@@ -287,7 +288,7 @@ class TestGDNALocusAttribution:
 
     def test_locus_counts_zero_when_no_gdna(self):
         """No gDNA assignments → locus counts stay zero."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 1000.0
         lem = _make_locus_em_data(
             [[0]] * 50,
@@ -313,19 +314,19 @@ class TestGDNALocusAttribution:
 
 class TestGDNAProperties:
     def test_gdna_total_from_em_total(self):
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 80.0
         assert rc.gdna_total == 80.0
 
     def test_gdna_contamination_rate(self):
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 10.0
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 10.0
         assert rc.gdna_contamination_rate == pytest.approx(0.1)
 
     def test_contamination_rate_zero_when_empty(self):
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         assert rc.gdna_contamination_rate == 0.0
 
 
@@ -385,18 +386,18 @@ class TestComputeGdnaRate:
     """Tests for pipeline._compute_gdna_rate_from_strand."""
 
     def test_zero_counts_returns_zero(self):
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         rate = _compute_gdna_rate_from_strand(0.0, 0.0, 1.0)
         assert rate == 0.0
 
     def test_no_antisense_gives_zero(self):
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         rate = _compute_gdna_rate_from_strand(100.0, 0.0, 1.0)
         assert rate == 0.0
 
     def test_antisense_at_perfect_ss(self):
         """At SS=1.0, G = 2 × antisense, rate = G / (S + A)."""
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # S=100, A=50, SS=1.0 → G=2*50=100, rate=100/150
         rate = _compute_gdna_rate_from_strand(100.0, 50.0, 1.0)
         expected = (2.0 * 50.0) / (100.0 + 50.0)
@@ -404,7 +405,7 @@ class TestComputeGdnaRate:
 
     def test_strand_correction_at_imperfect_ss(self):
         """At SS < 1.0, exact formula with strand correction."""
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # S=200, A=50, SS=0.9
         ss = 0.9
         denom_ss = 2.0 * ss - 1.0
@@ -416,7 +417,7 @@ class TestComputeGdnaRate:
 
     def test_returns_zero_at_low_ss(self):
         """At SS ≤ 0.6, strand info too weak → returns 0."""
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # denom_ss = 2*0.5-1 = 0 ≤ 0.2 → returns 0
         rate = _compute_gdna_rate_from_strand(500.0, 500.0, 0.5)
         assert rate == 0.0
@@ -426,14 +427,14 @@ class TestComputeGdnaRate:
 
     def test_clamps_at_zero(self):
         """Corrected G is clamped at zero (no negative rate)."""
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # S=1000, A=10, SS=0.8 → G = 2(10*0.8 - 1000*0.2)/0.6 < 0 → 0
         rate = _compute_gdna_rate_from_strand(1000.0, 10.0, 0.8)
         assert rate == 0.0
 
     def test_rate_clamped_at_one(self):
         """Rate is clamped to [0, 1]."""
-        from hulkrna.pipeline import _compute_gdna_rate_from_strand
+        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # Extreme antisense dominance
         rate = _compute_gdna_rate_from_strand(1.0, 1000.0, 0.99)
         assert rate <= 1.0
@@ -449,7 +450,7 @@ class TestComputeNrnaInit:
 
     def test_zero_counts_returns_zeros(self):
         """No intronic counts → all inits = 0."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.zeros(3, dtype=np.float64)
         anti = np.zeros(3, dtype=np.float64)
@@ -461,7 +462,7 @@ class TestComputeNrnaInit:
 
     def test_sense_excess_produces_nrna(self):
         """Intronic sense > antisense → nrna_init > 0."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0, 50.0])
         anti = np.array([20.0, 10.0])
@@ -475,7 +476,7 @@ class TestComputeNrnaInit:
 
     def test_antisense_excess_clamped_to_zero(self):
         """Intronic antisense > sense → nrna_init = 0 (clamped)."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([10.0])
         anti = np.array([50.0])
@@ -487,7 +488,7 @@ class TestComputeNrnaInit:
 
     def test_single_exon_zeroed(self):
         """Single-exon transcripts (span ≈ exonic length) → nrna = 0."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([10.0])
@@ -501,7 +502,7 @@ class TestComputeNrnaInit:
 
     def test_multi_exon_not_zeroed(self):
         """Multi-exon transcripts (span >> exonic length) → nrna preserved."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([10.0])
@@ -514,7 +515,7 @@ class TestComputeNrnaInit:
 
     def test_output_shape(self):
         """Returns array of shape (num_transcripts,)."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.zeros(5, dtype=np.float64)
         anti = np.zeros(5, dtype=np.float64)
@@ -527,7 +528,7 @@ class TestComputeNrnaInit:
 
     def test_ss_correction_moderate(self):
         """At SS=0.9, nRNA init is corrected upward by 1/(2SS-1)."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([20.0])
@@ -542,7 +543,7 @@ class TestComputeNrnaInit:
 
     def test_ss_at_or_below_threshold_returns_zeros(self):
         """At SS ≤ 0.6, strand info too weak → returns zeros."""
-        from hulkrna.pipeline import _compute_nrna_init
+        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([50.0])
@@ -568,7 +569,7 @@ class TestLocusGDNABehavior:
 
     def test_two_transcripts_share_one_gdna_shadow(self):
         """Two transcripts in one locus share a single gDNA component."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,
@@ -586,7 +587,7 @@ class TestLocusGDNABehavior:
     def test_gdna_init_determines_absorption(self):
         """Higher gdna_init → more fragments absorbed by gDNA."""
         # Low gdna_init + strong RNA prior → no gDNA absorption
-        rc_low = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc_low = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc_low.unique_counts[0, _UNSPLICED_SENSE] = 500.0
         lem_low = _make_locus_em_data(
             [[0]] * 200,
@@ -599,7 +600,7 @@ class TestLocusGDNABehavior:
         _, gc_low = _run_and_assign(rc_low, lem_low, em_iterations=10)
 
         # High gdna_init → gDNA absorbs fragments
-        rc_high = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc_high = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem_high = _make_locus_em_data(
             [[0]] * 200,
             num_transcripts=2,
@@ -615,7 +616,7 @@ class TestLocusGDNABehavior:
 
     def test_gdna_em_count_property(self):
         """AbundanceEstimator.gdna_em_count accumulates across loci."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         assert rc.gdna_em_count == 0.0
 
         rc._gdna_em_total = 42.0

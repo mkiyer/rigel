@@ -285,7 +285,7 @@ def write_annotated_bam(
     }
 
     t_ids = index.t_df["t_id"].values
-    g_ids = index.t_df["g_id"].values
+    g_ids = index.g_df["g_id"].values
 
     bam_stats: dict = {}
 

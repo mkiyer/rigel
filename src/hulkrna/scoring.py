@@ -280,19 +280,22 @@ def score_mrna_candidate(
 def score_nrna_candidate(
     ctx: ScoringContext,
     exon_strand: int,
-    gene_strand: int,
+    t_strand: int,
     frag_len_ll: float,
     overhang_bp: int,
     nm: int,
 ) -> float:
     """Compute data log-likelihood for a nascent RNA (nRNA) candidate.
 
+    nRNA is a transcript-level phenomenon: the strand comparison uses
+    the transcript strand (not gene strand).
+
     Returns log_lik (float).
     """
     log_same, log_diff = strand_log_probs(ctx, exon_strand)
     log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
 
-    if exon_strand == gene_strand:
+    if exon_strand == t_strand:
         log_strand = log_same
     else:
         log_strand = log_diff
