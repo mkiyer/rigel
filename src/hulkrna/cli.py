@@ -60,6 +60,12 @@ def count_command(args: argparse.Namespace) -> int:
     import json
     from .index import HulkIndex
     from .pipeline import run_pipeline
+    from .config import EMConfig, PipelineConfig, ScanConfig, ScoringConfig
+    from .scoring import (
+        overhang_alpha_to_log_penalty,
+        GDNA_SPLICE_PENALTIES,
+        SPLICE_UNANNOT,
+    )
 
     bam_path = Path(args.bam_file)
     index_dir = Path(args.index_dir)
@@ -81,8 +87,11 @@ def count_command(args: argparse.Namespace) -> int:
         seed = args.seed
         logging.info(f"Using provided seed: {seed}")
 
-    alpha = args.em_pseudocount
-    logging.info(f"Using Dirichlet pseudocount: {alpha}")
+    alpha = args.em_prior_alpha
+    gamma = args.em_prior_gamma
+    logging.info(
+        f"Using EM prior: alpha={alpha}, gamma={gamma}"
+    )
 
     # Define output file paths
     strand_json = output_dir / "strand_model.json"
@@ -115,7 +124,8 @@ def count_command(args: argparse.Namespace) -> int:
             "index_dir": str(index_dir.resolve()),
             "output_dir": str(output_dir.resolve()),
             "seed": seed,
-            "em_pseudocount": alpha,
+            "em_prior_alpha": alpha,
+            "em_prior_gamma": gamma,
             "em_iterations": args.em_iterations,
             "em_convergence_delta": args.em_convergence_delta,
             "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
@@ -130,24 +140,38 @@ def count_command(args: argparse.Namespace) -> int:
         json.dump(config, f, indent=2)
     logging.info(f"[CONFIG] Written to {config_path}")
 
-    # -- Run pipeline --
-    result = run_pipeline(
-        bam_path,
-        index,
-        skip_duplicates=not args.keep_duplicates,
-        include_multimap=args.include_multimap,
-        sj_strand_tag=sj_strand_tag,
-        seed=seed,
-        em_pseudocount=alpha,
-        em_iterations=args.em_iterations,
-        em_convergence_delta=args.em_convergence_delta,
-        gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
-        confidence_threshold=args.confidence_threshold,
-        overlap_min_frac=args.overlap_min_frac,
-        overhang_alpha=args.overhang_alpha,
-        mismatch_alpha=args.mismatch_alpha,
+    # -- Build pipeline config --
+    overhang_log_penalty = overhang_alpha_to_log_penalty(args.overhang_alpha)
+    mismatch_log_penalty = overhang_alpha_to_log_penalty(args.mismatch_alpha)
+
+    gdna_splice_penalties = dict(GDNA_SPLICE_PENALTIES)
+    gdna_splice_penalties[SPLICE_UNANNOT] = args.gdna_splice_penalty_unannot
+
+    pipeline_config = PipelineConfig(
+        em=EMConfig(
+            seed=seed,
+            prior_alpha=alpha,
+            prior_gamma=gamma,
+            iterations=args.em_iterations,
+            convergence_delta=args.em_convergence_delta,
+            confidence_threshold=args.confidence_threshold,
+        ),
+        scan=ScanConfig(
+            skip_duplicates=not args.keep_duplicates,
+            include_multimap=args.include_multimap,
+            sj_strand_tag=sj_strand_tag,
+            overlap_min_frac=args.overlap_min_frac,
+        ),
+        scoring=ScoringConfig(
+            overhang_log_penalty=overhang_log_penalty,
+            mismatch_log_penalty=mismatch_log_penalty,
+            gdna_splice_penalties=gdna_splice_penalties,
+        ),
         annotated_bam_path=getattr(args, 'annotated_bam', None),
     )
+
+    # -- Run pipeline --
+    result = run_pipeline(bam_path, index, config=pipeline_config)
 
     # Log stats
     for key, val in sorted(result.stats.to_dict().items()):
@@ -343,9 +367,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducibility (default: use current timestamp)",
     )
     cnt.add_argument(
-        "--em-pseudocount", dest="em_pseudocount", type=float, default=0.5,
-        help="Dirichlet prior pseudocount for EM (default: 0.5). "
-             "Applied uniformly to all components.",
+        "--em-prior-alpha", dest="em_prior_alpha", type=float, default=0.01,
+        help="Flat Dirichlet pseudocount per eligible EM component "
+             "(default: 0.01).  Provides baseline regularisation "
+             "independent of coverage geometry.",
+    )
+    cnt.add_argument(
+        "--em-prior-gamma", dest="em_prior_gamma", type=float, default=1.0,
+        help="OVR prior scale factor (gamma).  Default 1.0.  "
+             "Controls how strongly coverage-weighted One Virtual Read "
+             "priors influence the EM.",
     )
     cnt.add_argument(
         "--em-iterations", dest="em_iterations", type=int, default=1000,
@@ -359,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: 1e-6). Raising to 1e-5 provides a very modest "
              "speedup with negligible accuracy impact.",
     )
-    from .pipeline import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
+    from .scoring import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
     cnt.add_argument(
         "--gdna-splice-penalty-unannot",
         dest="gdna_splice_penalty_unannot",
@@ -386,7 +417,7 @@ def build_parser() -> argparse.ArgumentParser:
              "transcript during resolution (default: 0.99 = within 1%% of best). "
              "Lower values (e.g. 0.9) keep candidates within 10%% of best.",
     )
-    from .pipeline import DEFAULT_OVERHANG_ALPHA, DEFAULT_MISMATCH_ALPHA
+    from .scoring import DEFAULT_OVERHANG_ALPHA, DEFAULT_MISMATCH_ALPHA
     cnt.add_argument(
         "--overhang-alpha", dest="overhang_alpha",
         type=float, default=DEFAULT_OVERHANG_ALPHA,

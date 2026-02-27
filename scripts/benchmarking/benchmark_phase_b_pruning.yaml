@@ -1,0 +1,75 @@
+genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_phase_b_pruning
+threads: 8
+
+# Two high-FP regions with 41 isoforms each.
+region:
+  - FGFR2: chr10:121476640-121601584
+  - BRCA1: chr17:43044295-43170245
+
+aligners:
+  oracle: {}
+
+# Phase B: MAP pc=0.01 with pruning thresholds + VBEM references
+# 7 configs: MAP baseline + 4 prune thresholds + VBEM baseline + VBEM+prune
+hulkrna_configs:
+  # MAP-EM pc=0.01 baseline (no pruning)
+  map_noprune:
+    em_mode: map
+    em_pseudocount: 0.01
+  # MAP-EM pc=0.01 with pruning thresholds
+  map_prune010:
+    em_mode: map
+    em_pseudocount: 0.01
+    em_prune_threshold: 0.1
+  map_prune020:
+    em_mode: map
+    em_pseudocount: 0.01
+    em_prune_threshold: 0.2
+  map_prune030:
+    em_mode: map
+    em_pseudocount: 0.01
+    em_prune_threshold: 0.3
+  map_prune050:
+    em_mode: map
+    em_pseudocount: 0.01
+    em_prune_threshold: 0.5
+  # VBEM pc=0.25 baseline (Phase A Pareto-optimal)
+  vbem_noprune:
+    em_mode: vbem
+    em_pseudocount: 0.25
+  # VBEM pc=0.25 with moderate pruning
+  vbem_prune030:
+    em_mode: vbem
+    em_pseudocount: 0.25
+    em_prune_threshold: 0.3
+
+simulation:
+  n_fragments: 50000
+  sim_seed: 101
+  pipeline_seed: 101
+  frag_mean: 250.0
+  frag_std: 50.0
+  frag_min: 50
+  frag_max: 1000
+  read_length: 150
+  error_rate: 0.0
+
+# 4 conditions: pristine, gDNA=r20, nRNA=r30, both
+gdna:
+  rates: [0.0, 0.2]
+  rate_labels: [none, r20]
+  frag_mean: 350.0
+  frag_std: 100.0
+  frag_min: 100
+  frag_max: 1000
+
+nrna:
+  rates: [0.0, 0.3]
+  rate_labels: [none, r30]
+
+strand_specificities: [1.0]
+
+abundance:
+  mode: random

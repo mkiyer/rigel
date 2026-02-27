@@ -13,7 +13,14 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components as _scipy_cc
 
-from .estimator import AbundanceEstimator, ScanData, Locus, LocusEMInput
+from .estimator import (
+    AbundanceEstimator,
+    EM_PRIOR_EPSILON,
+    Locus,
+    LocusEMInput,
+    ScanData,
+)
+from .bias import BiasProfile
 from .index import HulkIndex
 from .strand_model import StrandModels
 
@@ -214,6 +221,8 @@ def build_locus_em_data(
         all_ll = em_data.log_liks[global_flat_idx]
         all_cc = em_data.count_cols[global_flat_idx]
         all_cw = em_data.coverage_weights[global_flat_idx]
+        all_txs = em_data.tx_starts[global_flat_idx]
+        all_txe = em_data.tx_ends[global_flat_idx]
 
         # Map global indices to local component indices
         safe_gidx = np.clip(all_gidx, 0, max_global - 1)
@@ -231,6 +240,8 @@ def build_locus_em_data(
         v_ll = all_ll[valid]
         v_cc = all_cc[valid]
         v_cw = all_cw[valid]
+        v_txs = all_txs[valid]
+        v_txe = all_txe[valid]
         v_unit = unit_of_cand[valid]
 
         # Deduplicate: keep best log_lik per (unit, local_idx).
@@ -246,12 +257,16 @@ def build_locus_em_data(
         dedup_ll = v_ll[order][first_mask]
         dedup_cc = v_cc[order][first_mask]
         dedup_cw = v_cw[order][first_mask]
+        dedup_txs = v_txs[order][first_mask]
+        dedup_txe = v_txe[order][first_mask]
         dedup_unit = v_unit[order][first_mask]
     else:
         dedup_lidx = np.empty(0, dtype=np.int32)
         dedup_ll = np.empty(0, dtype=np.float64)
         dedup_cc = np.empty(0, dtype=np.uint8)
         dedup_cw = np.empty(0, dtype=np.float64)
+        dedup_txs = np.empty(0, dtype=np.int32)
+        dedup_txe = np.empty(0, dtype=np.int32)
         dedup_unit = np.empty(0, dtype=np.int32)
 
     # Add gDNA candidates for unspliced units
@@ -276,25 +291,28 @@ def build_locus_em_data(
         gdna_ll_arr = gdna_lls[valid_gdna].copy()
         gdna_cc_arr = np.zeros(n_gdna, dtype=np.uint8)
 
-        # Per-fragment effective length correction for gDNA.
-        # Subtract log(max(locus_span - footprint + 1, 1)) from each
-        # gDNA candidate's log-likelihood.
-        gdna_footprints = footprints[valid_gdna].astype(np.float64)
-        gdna_per_frag_eff = np.maximum(
-            locus_span - gdna_footprints + 1.0, 1.0
-        )
-        gdna_ll_arr -= np.log(gdna_per_frag_eff)
+        # Per-fragment effective length correction for gDNA is now
+        # handled at EM time via BiasProfile.  Store tx_start=0 and
+        # tx_end=footprint so the bias model sees frag_len=footprint
+        # on a profile of length=locus_span, yielding
+        # eff_len = max(locus_span - footprint + 1, 1).
+        gdna_footprints_arr = footprints[valid_gdna].astype(np.int32)
 
         final_lidx = np.concatenate([dedup_lidx, gdna_lidx_arr])
         final_ll = np.concatenate([dedup_ll, gdna_ll_arr])
         final_cc = np.concatenate([dedup_cc, gdna_cc_arr])
         final_cw = np.concatenate([dedup_cw, np.ones(n_gdna, dtype=np.float64)])
+        # gDNA: tx_start=0, tx_end=footprint (bias model uses frag_len)
+        final_txs = np.concatenate([dedup_txs, np.zeros(n_gdna, dtype=np.int32)])
+        final_txe = np.concatenate([dedup_txe, gdna_footprints_arr])
         final_unit = np.concatenate([dedup_unit, gdna_units])
     else:
         final_lidx = dedup_lidx
         final_ll = dedup_ll
         final_cc = dedup_cc
         final_cw = dedup_cw
+        final_txs = dedup_txs
+        final_txe = dedup_txe
         final_unit = dedup_unit
 
     # Sort by unit to reconstruct CSR
@@ -304,6 +322,8 @@ def build_locus_em_data(
         final_ll = final_ll[sort_order]
         final_cc = final_cc[sort_order]
         final_cw = final_cw[sort_order]
+        final_txs = final_txs[sort_order]
+        final_txe = final_txe[sort_order]
         final_unit = final_unit[sort_order]
 
         bin_counts = np.bincount(final_unit, minlength=n_local_units)
@@ -324,12 +344,32 @@ def build_locus_em_data(
     unique_totals[gdna_idx] = gdna_init
 
     # Build effective lengths — all set to 1.0 because per-fragment
-    # effective length correction is now baked into each candidate's
-    # log-likelihood (mRNA/nRNA during scan, gDNA above).
+    # effective length correction is now applied at EM time via
+    # BiasProfile (see _apply_bias_correction in estimator.py).
     eff_len = np.ones(n_components, dtype=np.float64)
 
-    # Build prior
-    prior = np.full(n_components, counter.em_prior, dtype=np.float64)
+    # Build per-component bias profiles.
+    #
+    # Component layout:
+    #   [0, n_t)       → mRNA: profile length = exonic transcript length
+    #   [n_t, 2*n_t)   → nRNA: profile length = genomic span (incl introns)
+    #   [2*n_t]        → gDNA: profile length = locus span
+    mrna_lengths = index.t_df["length"].values[t_arr]
+    nrna_lengths = (
+        index.t_df["end"].values[t_arr]
+        - index.t_df["start"].values[t_arr]
+    )
+    bias_profiles: list[BiasProfile] = []
+    for i in range(n_t):
+        bias_profiles.append(BiasProfile.uniform(int(mrna_lengths[i])))
+    for i in range(n_t):
+        bias_profiles.append(BiasProfile.uniform(int(nrna_lengths[i])))
+    bias_profiles.append(BiasProfile.uniform(int(locus_span)))
+
+    # Build prior — start at epsilon (numerical floor) for every
+    # component; the real prior mass comes from the OVR coverage
+    # weighting applied later in run_locus_em().
+    prior = np.full(n_components, EM_PRIOR_EPSILON, dtype=np.float64)
 
     # Zero gDNA prior when there are no unspliced fragments
     if gdna_init == 0.0:
@@ -348,6 +388,11 @@ def build_locus_em_data(
     nrna_init_local = unique_totals[n_t:2*n_t]
     prior[n_t:2*n_t][nrna_init_local == 0.0] = 0.0
 
+    # Zero unique_totals for dead components—prevents the EM M-step
+    # (theta_new = unique_totals + em_totals + prior) from seeding
+    # non-zero theta for components whose prior has been zeroed.
+    unique_totals[prior == 0.0] = 0.0
+
     return LocusEMInput(
         locus=locus,
         offsets=local_offsets,
@@ -355,6 +400,8 @@ def build_locus_em_data(
         log_liks=final_ll.astype(np.float64),
         count_cols=final_cc.astype(np.uint8),
         coverage_weights=final_cw.astype(np.float64),
+        tx_starts=final_txs.astype(np.int32),
+        tx_ends=final_txe.astype(np.int32),
         locus_t_indices=local_locus_t.astype(np.int32),
         locus_count_cols=local_locus_ct.astype(np.uint8),
         n_transcripts=n_t,
@@ -365,6 +412,7 @@ def build_locus_em_data(
         gdna_init=gdna_init,
         effective_lengths=eff_len,
         prior=prior,
+        bias_profiles=bias_profiles,
     )
 
 

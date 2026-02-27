@@ -1,0 +1,65 @@
+genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_phase_d_ovr_only
+threads: 8
+
+# ── 10 diverse genomic regions (same as Phase C) ────────────────
+region:
+  - FGFR2: chr10:121476640-121601584
+  - EGFR: chr7:55019017-55211628
+  - FHB: chr11:35138870-35232402
+  - BRCA1: chr17:43044295-43170245
+  - HBB: chr11:5225000-5310000
+  - HOXA: chr7:27090070-27254935
+  - GAPDH: chr12:6444955-6573691
+  - ELANE: chr19:751112-898218
+  - BCR: chr22:20917407-21069168
+  - HES4: chr1:923923-1061118
+
+aligners:
+  oracle: {}
+
+# ── Phase D: OVR-only prior (ε + γ × OVR) ──────────────────────
+# Compare MAP vs VBEM, both with the new pure-OVR prior.
+# Historical Phase C baselines for reference:
+#   MAP  α=0.01 : MAE 17.72, Spearman 0.8077, FP 110, Dropout 178
+#   VBEM α=0.25 : MAE 18.26, Spearman 0.8111, FP  51, Dropout 237
+hulkrna_configs:
+  map_ovr:
+    em_mode: map
+    em_prior_gamma: 1.0
+  vbem_ovr:
+    em_mode: vbem
+    em_prior_gamma: 1.0
+
+simulation:
+  n_fragments: 50000
+  sim_seed: 101
+  pipeline_seed: 101
+  frag_mean: 250.0
+  frag_std: 50.0
+  frag_min: 50
+  frag_max: 1000
+  read_length: 150
+  error_rate: 0.0
+
+# 4 conditions: pristine, gDNA=r20, nRNA=r30, both
+gdna:
+  rates: [0.0, 0.2]
+  rate_labels: [none, r20]
+  frag_mean: 350.0
+  frag_std: 100.0
+  frag_min: 100
+  frag_max: 1000
+
+nrna:
+  rates: [0.0, 0.3]
+  rate_labels: [none, r30]
+
+strand_specificities: [1.0]
+
+abundance:
+  mode: random
+  seed: 101
+  min: 0.01
+  max: 100000.0

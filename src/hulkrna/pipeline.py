@@ -23,7 +23,7 @@ initialization live in ``locus.py``.  The CSR builder lives in
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _replace
 from pathlib import Path
 
 import numpy as np
@@ -43,14 +43,6 @@ from .strand_model import StrandModels
 # --- New modular imports ---
 from .scoring import (
     ScoringContext,
-    overhang_alpha_to_log_penalty,
-    DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-    DEFAULT_OVERHANG_ALPHA,
-    DEFAULT_MISMATCH_ALPHA,
-    GDNA_SPLICE_PENALTIES,
-    SPLICE_UNSPLICED,
-    SPLICE_UNANNOT,
-    SPLICE_ANNOT,
     score_gdna_standalone,
 )
 from .locus import (
@@ -63,28 +55,15 @@ from .locus import (
     EB_K_CHROM,
 )
 from .scan import EmDataBuilder
+from .config import (
+    EMConfig,
+    PipelineConfig,
+    ScanConfig,
+    ScoringConfig,
+    TranscriptGeometry,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible re-exports
-# (tests, scripts, and external tools import these names from pipeline)
-# ---------------------------------------------------------------------------
-_GDNA_SPLICE_PENALTIES = GDNA_SPLICE_PENALTIES
-_SPLICE_UNSPLICED = SPLICE_UNSPLICED
-_SPLICE_UNANNOT = SPLICE_UNANNOT
-_SPLICE_ANNOT = SPLICE_ANNOT
-_DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
-
-_score_gdna_candidate = score_gdna_standalone
-_build_loci = build_loci
-_build_locus_em_data = build_locus_em_data
-_compute_nrna_init = compute_nrna_init
-_compute_gdna_rate_from_strand = compute_gdna_rate_from_strand
-_compute_eb_gdna_priors = compute_eb_gdna_priors
-_EB_K_LOCUS = EB_K_LOCUS
-_EB_K_CHROM = EB_K_CHROM
 
 
 # ---------------------------------------------------------------------------
@@ -108,33 +87,9 @@ class PipelineResult:
 def scan_and_buffer(
     bam_iter,
     index: HulkIndex,
-    *,
-    skip_duplicates: bool = True,
-    include_multimap: bool = False,
-    log_every: int = 1_000_000,
-    max_frag_length: int = 1000,
-    chunk_size: int = 1_000_000,
-    max_memory_bytes: int = 2 * 1024**3,
-    spill_dir: Path | None = None,
-    sj_strand_tag: str | tuple[str, ...] = "XS",
-    overlap_min_frac: float = 0.99,
-    min_spliced_observations: int = 10,
+    scan: ScanConfig,
 ) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
     """Single-pass BAM scan: resolve fragments, train models, buffer results.
-
-    Reads the BAM once.  For each fragment:
-
-    1. Build a ``Fragment`` from the read pair.
-    2. Resolve against the reference index.
-    3. Train strand and fragment-length models (unique mappers only).
-    4. Buffer all resolved fragments into the columnar buffer.
-
-    Two strand models are trained (unique mappers only):
-
-    - **exonic_spliced** *(pure RNA)*: from SPLICED_ANNOT fragments
-      with unique gene and unambiguous strands.
-    - **intergenic** *(~100% gDNA)*: from intergenic fragments,
-      POS reference convention.
 
     Parameters
     ----------
@@ -142,24 +97,8 @@ def scan_and_buffer(
         Iterator over ``pysam.AlignedSegment`` objects.
     index : HulkIndex
         The loaded reference index.
-    skip_duplicates : bool
-        Discard reads marked as duplicates (default True).
-    include_multimap : bool
-        Include multimapping reads (NH > 1) for counting
-        (default False).
-    log_every : int
-        Log progress every *log_every* read-name groups.
-    max_frag_length : int
-        Maximum fragment length for the histogram model.
-    chunk_size : int
-        Fragments per buffer chunk (default 1M).
-    max_memory_bytes : int
-        Max memory for in-memory buffer chunks before disk spill
-        (default 2 GiB).
-    spill_dir : Path or None
-        Directory for spilled chunk files.
-    sj_strand_tag : str or tuple of str
-        BAM tag(s) for splice-junction strand.
+    scan : ScanConfig
+        BAM scanning and buffering configuration.
 
     Returns
     -------
@@ -169,13 +108,15 @@ def scan_and_buffer(
     bam_stats = stats.as_bam_stats_dict()
 
     strand_models = StrandModels()
-    strand_models.min_spliced_observations = max(1, int(min_spliced_observations))
-    frag_length_models = FragmentLengthModels(max_size=max_frag_length)
+    strand_models.min_spliced_observations = max(
+        1, int(scan.min_spliced_observations)
+    )
+    frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
     buffer = FragmentBuffer(
         t_to_g_arr=index.t_to_g_arr,
-        chunk_size=chunk_size,
-        max_memory_bytes=max_memory_bytes,
-        spill_dir=spill_dir,
+        chunk_size=scan.chunk_size,
+        max_memory_bytes=scan.max_memory_bytes,
+        spill_dir=scan.spill_dir,
     )
 
     logger.info("[START] Scanning BAM → resolve + train models + buffer")
@@ -184,15 +125,15 @@ def scan_and_buffer(
     for nh, hits, sec_r1, sec_r2 in parse_bam_file(
         bam_iter,
         bam_stats,
-        skip_duplicates=skip_duplicates,
-        include_multimap=include_multimap,
+        skip_duplicates=scan.skip_duplicates,
+        include_multimap=scan.include_multimap,
     ):
         secondary_pairs: list[tuple[list, list]] = []
         if sec_r1 or sec_r2:
             secondary_pairs = pair_multimapper_reads(
                 sec_r1, sec_r2, index,
-                sj_strand_tag=sj_strand_tag,
-                overlap_min_frac=overlap_min_frac,
+                sj_strand_tag=scan.sj_strand_tag,
+                overlap_min_frac=scan.overlap_min_frac,
             )
 
         all_hits = list(hits) + secondary_pairs
@@ -202,7 +143,7 @@ def scan_and_buffer(
 
         for r1_reads, r2_reads in all_hits:
             frag = Fragment.from_reads(
-                r1_reads, r2_reads, sj_strand_tag=sj_strand_tag,
+                r1_reads, r2_reads, sj_strand_tag=scan.sj_strand_tag,
             )
             stats.n_fragments += 1
 
@@ -210,7 +151,7 @@ def scan_and_buffer(
                 continue
 
             result = resolve_fragment(
-                frag, index, overlap_min_frac=overlap_min_frac,
+                frag, index, overlap_min_frac=scan.overlap_min_frac,
             )
 
             if result is None:
@@ -319,7 +260,7 @@ def scan_and_buffer(
             stats.n_multimapper_alignments += n_buffered_mm
 
         frag_id += 1
-        if frag_id % log_every == 0:
+        if frag_id % scan.log_every == 0:
             logger.debug(
                 f"  {frag_id:,} read-name groups, "
                 f"{stats.n_fragments:,} fragments, "
@@ -356,24 +297,12 @@ def count_from_buffer(
     frag_length_models: FragmentLengthModels,
     stats: PipelineStats,
     *,
-    seed: int | None = None,
-    em_pseudocount: float = 0.5,
-    em_iterations: int = 1000,
-    em_convergence_delta: float = 1e-6,
+    em_config: EMConfig | None = None,
+    scoring: ScoringConfig | None = None,
     log_every: int = 1_000_000,
-    gdna_splice_penalties: dict | None = None,
-    confidence_threshold: float = 0.95,
-    overhang_log_penalty: float | None = None,
-    mismatch_log_penalty: float | None = None,
     annotations: "AnnotationTable | None" = None,
 ) -> AbundanceEstimator:
     """Assign counts from buffered fragments via locus-level EM.
-
-    Architecture per locus: 2*n_t + 1 components
-    (mRNA + nRNA + ONE gDNA shadow).
-
-    Spliced fragments NEVER compete for gDNA.
-    Only unspliced fragments have a gDNA candidate.
 
     Parameters
     ----------
@@ -382,21 +311,24 @@ def count_from_buffer(
     strand_models : StrandModels
     frag_length_models : FragmentLengthModels
     stats : PipelineStats
-    seed : int or None
-    em_pseudocount : float
-    em_iterations : int
-    em_convergence_delta : float
+    em_config : EMConfig or None
+        EM algorithm configuration.  Defaults to ``EMConfig()``.
+    scoring : ScoringConfig or None
+        Scoring penalty configuration.  Defaults to ``ScoringConfig()``.
     log_every : int
-    gdna_splice_penalties : dict or None
-    confidence_threshold : float
-    overhang_log_penalty : float or None
-    mismatch_log_penalty : float or None
+        Log progress every N fragments (default 1M).
     annotations : AnnotationTable or None
+        If provided, record per-fragment assignment annotations.
 
     Returns
     -------
     AbundanceEstimator
     """
+    if em_config is None:
+        em_config = EMConfig()
+    if scoring is None:
+        scoring = ScoringConfig()
+
     # --- Compute geometry ---
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
     mean_frag = (
@@ -426,9 +358,7 @@ def count_from_buffer(
 
     intronic_spans = index.intron_span_per_gene()
 
-    counter = AbundanceEstimator(
-        index.num_transcripts, index.num_genes,
-        seed=seed, alpha=em_pseudocount,
+    geometry = TranscriptGeometry(
         effective_lengths=effective_lengths,
         exonic_lengths=exonic_lengths,
         t_to_g=index.t_to_g_arr,
@@ -436,6 +366,12 @@ def count_from_buffer(
         mean_frag=mean_frag,
         intronic_spans=intronic_spans,
         transcript_spans=transcript_spans,
+    )
+
+    counter = AbundanceEstimator(
+        index.num_transcripts, index.num_genes,
+        em_config=em_config,
+        geometry=geometry,
     )
 
     logger.info(
@@ -446,9 +382,9 @@ def count_from_buffer(
     # --- Build ScoringContext and scan buffer ---
     ctx = ScoringContext.from_models(
         strand_models, frag_length_models, index, counter,
-        overhang_log_penalty=overhang_log_penalty,
-        mismatch_log_penalty=mismatch_log_penalty,
-        gdna_splice_penalties=gdna_splice_penalties,
+        overhang_log_penalty=scoring.overhang_log_penalty,
+        mismatch_log_penalty=scoring.mismatch_log_penalty,
+        gdna_splice_penalties=scoring.gdna_splice_penalties,
     )
     builder = EmDataBuilder(
         ctx, counter, stats, index, strand_models,
@@ -460,9 +396,9 @@ def count_from_buffer(
     nrna_init = compute_nrna_init(
         counter.transcript_intronic_sense,
         counter.transcript_intronic_antisense,
-        transcript_spans,
-        exonic_lengths,
-        mean_frag,
+        geometry.transcript_spans,
+        geometry.exonic_lengths,
+        geometry.mean_frag,
         strand_models,
     )
     counter.nrna_init = nrna_init
@@ -506,17 +442,17 @@ def count_from_buffer(
             if len(locus.unit_indices) == 0:
                 continue
             locus_em = build_locus_em_data(
-                locus, em_data, counter, index, mean_frag,
+                locus, em_data, counter, index, geometry.mean_frag,
                 gdna_init=gdna_inits[i],
             )
             theta, alpha = counter.run_locus_em(
                 locus_em,
-                em_iterations=em_iterations,
-                em_convergence_delta=em_convergence_delta,
+                em_iterations=em_config.iterations,
+                em_convergence_delta=em_config.convergence_delta,
             )
             gdna_assigned = counter.assign_locus_ambiguous(
                 locus_em, theta,
-                confidence_threshold=confidence_threshold,
+                confidence_threshold=em_config.confidence_threshold,
                 unit_annotations=_unit_ann_list,
             )
             total_gdna_em += gdna_assigned
@@ -583,71 +519,13 @@ def count_from_buffer(
 
 
 # ---------------------------------------------------------------------------
-# Backward-compatible wrapper for _scan_and_build_em_data
-# ---------------------------------------------------------------------------
-
-def _scan_and_build_em_data(
-    buffer,
-    index,
-    strand_models,
-    frag_length_models,
-    counter,
-    stats,
-    log_every,
-    gdna_splice_penalties=None,
-    overhang_log_penalty=None,
-    mismatch_log_penalty=None,
-    annotations=None,
-):
-    """Backward-compatible wrapper around EmDataBuilder.scan().
-
-    New code should use ``ScoringContext`` + ``EmDataBuilder`` directly.
-    This wrapper exists so that ``test_pipeline_routing.py`` and
-    profiling scripts can continue importing ``_scan_and_build_em_data``
-    from ``pipeline`` without changes.
-    """
-    ctx = ScoringContext.from_models(
-        strand_models, frag_length_models, index, counter,
-        overhang_log_penalty=overhang_log_penalty,
-        mismatch_log_penalty=mismatch_log_penalty,
-        gdna_splice_penalties=gdna_splice_penalties,
-    )
-    builder = EmDataBuilder(
-        ctx, counter, stats, index, strand_models,
-        annotations=annotations,
-    )
-    return builder.scan(buffer, log_every)
-
-
-# ---------------------------------------------------------------------------
 # Full pipeline orchestration
 # ---------------------------------------------------------------------------
 
 def run_pipeline(
     bam_path,
     index: HulkIndex,
-    *,
-    skip_duplicates: bool = True,
-    include_multimap: bool = False,
-    max_frag_length: int = 1000,
-    log_every: int = 1_000_000,
-    chunk_size: int = 1_000_000,
-    max_memory_bytes: int = 2 * 1024**3,
-    spill_dir: Path | str | None = None,
-    sj_strand_tag: str | tuple[str, ...] = "auto",
-    seed: int | None = None,
-    em_pseudocount: float = 0.5,
-    em_iterations: int = 1000,
-    em_convergence_delta: float = 1e-6,
-    gdna_splice_penalty_unannot: float = DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-    confidence_threshold: float = 0.95,
-    overlap_min_frac: float = 0.99,
-    overhang_alpha: float | None = None,
-    overhang_log_penalty: float | None = None,
-    mismatch_alpha: float | None = None,
-    mismatch_log_penalty: float | None = None,
-    min_spliced_observations: int = 10,
-    annotated_bam_path: str | Path | None = None,
+    config: PipelineConfig | None = None,
 ) -> PipelineResult:
     """Run the complete counting pipeline with locus-level EM.
 
@@ -660,39 +538,8 @@ def run_pipeline(
         Path to the name-sorted / collated BAM file.
     index : HulkIndex
         The loaded reference index.
-    skip_duplicates : bool
-        Discard reads marked as duplicates (default True).
-    include_multimap : bool
-        Include multimapping reads (default False).
-    max_frag_length : int
-        Maximum fragment length for histogram models.
-    log_every : int
-        Log progress every *log_every* read-name groups.
-    chunk_size : int
-        Fragments per buffer chunk (default 1M).
-    max_memory_bytes : int
-        Max memory before disk spill (default 2 GiB).
-    spill_dir : Path, str, or None
-        Directory for disk-spilled buffer chunks.
-    sj_strand_tag : str, tuple of str, or ``"auto"``
-        BAM tag(s) for splice-junction strand.
-    seed : int or None
-        Random seed for reproducibility.
-    em_pseudocount : float
-        Dirichlet prior pseudocount (default 0.5).
-    em_iterations : int
-        Maximum number of EM iterations (default 1000).
-    em_convergence_delta : float
-        Convergence threshold for EM theta updates (default 1e-6).
-    gdna_splice_penalty_unannot : float
-        gDNA splice penalty for SPLICED_UNANNOT fragments.
-    confidence_threshold : float
-        Posterior threshold for high-confidence assignment.
-    min_spliced_observations : int
-        Minimum spliced observations before trusting pure model.
-    annotated_bam_path : str, Path, or None
-        If provided, write an annotated BAM with per-fragment assignment
-        tags to this path (second BAM pass).
+    config : PipelineConfig or None
+        Complete pipeline configuration.  If ``None``, uses defaults.
 
     Returns
     -------
@@ -700,38 +547,28 @@ def run_pipeline(
     """
     import pysam
 
-    bam_path = str(bam_path)
-    if spill_dir is not None:
-        spill_dir = Path(spill_dir)
+    if config is None:
+        config = PipelineConfig()
 
-    # -- Resolve sj_strand_tag --
-    if sj_strand_tag == "auto":
+    bam_path = str(bam_path)
+
+    # -- Resolve sj_strand_tag "auto" → concrete tag(s) --
+    scan = config.scan
+    if scan.sj_strand_tag == "auto":
         detected = detect_sj_strand_tag(bam_path)
         if len(detected) == 1:
-            sj_strand_tag = detected[0]
+            resolved_tag = detected[0]
         elif len(detected) > 1:
-            sj_strand_tag = detected
+            resolved_tag = detected
         else:
-            sj_strand_tag = ()
+            resolved_tag = ()
+        scan = _replace(scan, sj_strand_tag=resolved_tag)
 
     # -- Single BAM pass --
     bamfh = pysam.AlignmentFile(bam_path, "rb")
     try:
         stats, strand_models, frag_length_models, buffer = (
-            scan_and_buffer(
-                bamfh.fetch(until_eof=True),
-                index,
-                skip_duplicates=skip_duplicates,
-                include_multimap=include_multimap,
-                log_every=log_every,
-                max_frag_length=max_frag_length,
-                chunk_size=chunk_size,
-                max_memory_bytes=max_memory_bytes,
-                spill_dir=spill_dir,
-                sj_strand_tag=sj_strand_tag,
-                overlap_min_frac=overlap_min_frac,
-                min_spliced_observations=min_spliced_observations,
-            )
+            scan_and_buffer(bamfh.fetch(until_eof=True), index, scan)
         )
     finally:
         bamfh.close()
@@ -740,18 +577,9 @@ def run_pipeline(
     strand_models.finalize()
     frag_length_models.finalize()
 
-    # -- Count assignment via locus-level EM --
-    gdna_splice_penalties = dict(GDNA_SPLICE_PENALTIES)
-    gdna_splice_penalties[SPLICE_UNANNOT] = gdna_splice_penalty_unannot
-
-    if overhang_log_penalty is None and overhang_alpha is not None:
-        overhang_log_penalty = overhang_alpha_to_log_penalty(overhang_alpha)
-    if mismatch_log_penalty is None and mismatch_alpha is not None:
-        mismatch_log_penalty = overhang_alpha_to_log_penalty(mismatch_alpha)
-
     # -- Annotation table for second BAM pass (opt-in) --
     annotations = None
-    if annotated_bam_path is not None:
+    if config.annotated_bam_path is not None:
         from .annotate import AnnotationTable
         annotations = AnnotationTable.create(
             capacity=max(buffer.total_fragments + 1024, 4096)
@@ -764,32 +592,26 @@ def run_pipeline(
             strand_models,
             frag_length_models,
             stats,
-            seed=seed,
-            em_pseudocount=em_pseudocount,
-            em_iterations=em_iterations,
-            em_convergence_delta=em_convergence_delta,
-            log_every=log_every,
-            gdna_splice_penalties=gdna_splice_penalties,
-            confidence_threshold=confidence_threshold,
-            overhang_log_penalty=overhang_log_penalty,
-            mismatch_log_penalty=mismatch_log_penalty,
+            em_config=config.em,
+            scoring=config.scoring,
+            log_every=scan.log_every,
             annotations=annotations,
         )
     finally:
         buffer.cleanup()
 
     # -- Second BAM pass: write annotated BAM (opt-in) --
-    if annotated_bam_path is not None and annotations is not None:
+    if config.annotated_bam_path is not None and annotations is not None:
         from .annotate import write_annotated_bam
         write_annotated_bam(
             bam_path,
-            str(annotated_bam_path),
+            str(config.annotated_bam_path),
             annotations,
             index,
-            skip_duplicates=skip_duplicates,
-            include_multimap=include_multimap,
-            sj_strand_tag=sj_strand_tag,
-            overlap_min_frac=overlap_min_frac,
+            skip_duplicates=scan.skip_duplicates,
+            include_multimap=scan.include_multimap,
+            sj_strand_tag=scan.sj_strand_tag,
+            overlap_min_frac=scan.overlap_min_frac,
         )
 
     return PipelineResult(

@@ -10,6 +10,7 @@ from hulkrna.categories import (
     SpliceStrandCol,
 )
 from hulkrna.resolution import ResolvedFragment
+from hulkrna.config import EMConfig
 from hulkrna.estimator import AbundanceEstimator, ScanData, Locus, LocusEMInput
 from hulkrna.strand_model import StrandModel, StrandModels
 
@@ -166,6 +167,8 @@ def _make_em_data(
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
         coverage_weights=np.ones(n_candidates, dtype=np.float64),
+        tx_starts=np.zeros(n_candidates, dtype=np.int32),
+        tx_ends=np.ones(n_candidates, dtype=np.int32),
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,
         is_spliced=np.zeros(n_units, dtype=bool),
@@ -214,7 +217,7 @@ class TestAssignUnique:
     def test_single_transcript_single_gene(self):
         index = _make_index()
         sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
 
         resolved = _make_resolved(
             t_inds=frozenset({0}),
@@ -231,7 +234,7 @@ class TestAssignUnique:
     def test_empty_t_inds_does_nothing(self):
         index = _make_index()
         sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
 
         resolved = _make_resolved(t_inds=frozenset(), n_genes=0)
         rc.assign_unique(resolved, index, sms)
@@ -241,7 +244,7 @@ class TestAssignUnique:
     def test_always_assigns_one_count(self):
         index = _make_index()
         sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
 
         resolved = _make_resolved(
             t_inds=frozenset({0}),
@@ -257,7 +260,7 @@ class TestAssignUnique:
     def test_writes_to_unique_not_em(self):
         index = _make_index()
         sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
 
         resolved = _make_resolved(t_inds=frozenset({0}), n_genes=1)
         rc.assign_unique(resolved, index, sms)
@@ -308,7 +311,7 @@ class TestScanData:
 class TestLocusEM:
     def test_empty_locus_em(self):
         """Empty LocusEMInput produces valid theta."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([], num_transcripts=3)
         theta, alpha = rc.run_locus_em(lem, em_iterations=5)
         assert theta is not None
@@ -317,7 +320,7 @@ class TestLocusEM:
 
     def test_uniform_priors_stay_uniform(self):
         """With no unique counts and equal likelihoods, mRNA theta stays uniform."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1]] * 1000, num_transcripts=3)
         theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
 
@@ -328,7 +331,7 @@ class TestLocusEM:
 
     def test_unique_counts_bias_em(self):
         """Unique counts on t0 should bias EM toward t0."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
 
         lem = _make_locus_em_data(
@@ -340,7 +343,7 @@ class TestLocusEM:
 
     def test_zero_iterations_uses_unique_priors(self):
         """With em_iterations=0, theta comes from unique counts + prior only."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 10.0
         rc.unique_counts[1, 0] = 5.0
 
@@ -356,7 +359,7 @@ class TestLocusEM:
 
     def test_likelihood_influences_em(self):
         """Candidates with higher likelihoods should attract more mass."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 1000,
             log_liks_per_unit=[[0.0, -10.0]] * 1000,
@@ -368,7 +371,7 @@ class TestLocusEM:
 
     def test_convergence_detected(self):
         """EM should converge early for simple problems."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 100.0
         rc.unique_counts[1, 0] = 100.0
 
@@ -387,7 +390,7 @@ class TestLocusEM:
 class TestLocusAssignment:
     def test_single_candidate_gets_full_count(self):
         """Unit with one candidate → count goes entirely to that transcript."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0]], num_transcripts=3)
         _run_and_assign(rc, lem, em_iterations=1)
 
@@ -396,7 +399,7 @@ class TestLocusAssignment:
 
     def test_two_candidates_assigns_one(self):
         """Each unit contributes exactly 1.0 total count."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1]], num_transcripts=3)
         _run_and_assign(rc, lem, em_iterations=1)
 
@@ -404,7 +407,7 @@ class TestLocusAssignment:
 
     def test_n_units_equals_n_counts(self):
         """N ambiguous units → N total em_counts."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1]] * 100, num_transcripts=3)
         _run_and_assign(rc, lem, em_iterations=5)
 
@@ -414,7 +417,7 @@ class TestLocusAssignment:
         """t_counts = unique_counts + em_counts."""
         index = _make_index()
         sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
 
         # 10 unique
         for _ in range(10):
@@ -436,7 +439,7 @@ class TestLocusAssignment:
 
     def test_distribution_follows_priors(self):
         """Over many fragments, expected-count assignments follow unique priors."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 90.0
         rc.unique_counts[1, _UNSPLICED_SENSE] = 10.0
 
@@ -453,7 +456,7 @@ class TestLocusAssignment:
 
     def test_writes_to_em_not_unique(self):
         """assign_locus_ambiguous only writes to em_counts."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1]] * 50, num_transcripts=3)
 
         unique_before = rc.unique_counts.copy()
@@ -463,7 +466,7 @@ class TestLocusAssignment:
         assert rc.em_counts.sum() == pytest.approx(50.0)
 
     def test_empty_em_data_does_nothing(self):
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([], num_transcripts=3)
         _run_and_assign(rc, lem, em_iterations=5)
 
@@ -472,7 +475,7 @@ class TestLocusAssignment:
     def test_splice_strand_col_respected(self):
         """Count goes to the correct column (category×strand)."""
         cc = int(SpliceStrandCol.SPLICED_ANNOT_ANTISENSE)
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]],
             count_cols_per_unit=[[cc]],
@@ -487,7 +490,7 @@ class TestLocusAssignment:
         """Expected-count assignment is deterministic."""
         results = []
         for _ in range(3):
-            rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+            rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
             rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
             lem = _make_locus_em_data(
@@ -503,7 +506,7 @@ class TestLocusAssignment:
         """Different seeds do not affect expected-count assignment."""
         counts = []
         for seed in [1, 2]:
-            rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=seed)
+            rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=seed))
             rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
             lem = _make_locus_em_data(
@@ -516,7 +519,7 @@ class TestLocusAssignment:
 
     def test_fractional_counts(self):
         """EM counts may be fractional under expected-count assignment."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
         rc.unique_counts[1, _UNSPLICED_SENSE] = 30.0
 
@@ -534,7 +537,7 @@ class TestLocusAssignment:
         With 4 candidates of equal probability (~25%), all should
         receive a substantial share over many fragments.
         """
-        rc = AbundanceEstimator(num_transcripts=4, num_genes=2, seed=42)
+        rc = AbundanceEstimator(4, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1, 2, 3]] * 10000, num_transcripts=4,
         )
@@ -556,13 +559,13 @@ class TestLocusAssignment:
 
 class TestPosteriorMean:
     def test_no_em_returns_nan(self):
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         pm = rc.posterior_mean()
         assert np.all(np.isnan(pm))
 
     def test_single_candidate_posterior_one(self):
         """One candidate per unit → posterior is 1.0, mean is 1.0."""
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0]] * 10, num_transcripts=3)
         _run_and_assign(rc, lem, em_iterations=1)
 
@@ -573,7 +576,7 @@ class TestPosteriorMean:
 
     def test_strong_prior_high_posterior(self):
         """Strong prior → assigned units have high mean posterior."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
         lem = _make_locus_em_data(
             [[0, 1]] * 100, num_transcripts=2, rc=rc,
@@ -599,7 +602,7 @@ class TestSimultaneousResolution:
 
         EM convergence is order-independent.  Expected counts agree.
         """
-        rc1 = AbundanceEstimator(num_transcripts=4, num_genes=2, seed=42)
+        rc1 = AbundanceEstimator(4, 2, em_config=EMConfig(seed=42))
         rc1.unique_counts[0, 0] = 50.0
         rc1.unique_counts[2, 0] = 30.0
 
@@ -607,7 +610,7 @@ class TestSimultaneousResolution:
         lem1 = _make_locus_em_data(units, num_transcripts=4, rc=rc1)
         theta1, _ = _run_and_assign(rc1, lem1, em_iterations=10)
 
-        rc2 = AbundanceEstimator(num_transcripts=4, num_genes=2, seed=42)
+        rc2 = AbundanceEstimator(4, 2, em_config=EMConfig(seed=42))
         rc2.unique_counts[0, 0] = 50.0
         rc2.unique_counts[2, 0] = 30.0
 
@@ -629,7 +632,7 @@ class TestSimultaneousResolution:
 class TestMultimapperEM:
     def test_multimapper_molecule_one_count(self):
         """Multimapper molecule (many candidates) → exactly 1.0 total count."""
-        rc = AbundanceEstimator(num_transcripts=4, num_genes=2, seed=42)
+        rc = AbundanceEstimator(4, 2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1, 2, 3]], num_transcripts=4)
         _run_and_assign(rc, lem, em_iterations=5)
 
@@ -637,7 +640,7 @@ class TestMultimapperEM:
 
     def test_multimapper_and_ambig_together(self):
         """Mixed ambiguous + multimapper units in same EM."""
-        rc = AbundanceEstimator(num_transcripts=4, num_genes=2, seed=42)
+        rc = AbundanceEstimator(4, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 100.0
 
         units = [[0, 1]] * 50 + [[0, 2]] * 50 + [[0, 1, 2, 3]] * 25
@@ -655,7 +658,7 @@ class TestMultimapperEM:
 class TestCountsOutput:
     def test_get_counts_df_columns(self):
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         df = rc.get_counts_df(index)
         assert df.shape[0] == 3
         expected_cols = [
@@ -669,7 +672,7 @@ class TestCountsOutput:
 
     def test_get_gene_counts_df_columns(self):
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         df = rc.get_gene_counts_df(index)
         assert df.shape[0] == 2
         expected_cols = [
@@ -688,7 +691,7 @@ class TestCountsOutput:
     def test_counts_include_both_sources(self):
         """Total count sums unique + em counts."""
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
         rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
 
@@ -700,7 +703,7 @@ class TestCountsOutput:
     def test_gene_counts_aggregate(self):
         """Gene counts aggregate across transcripts."""
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
         rc.unique_counts[1, _UNSPLICED_SENSE] = 3.0  # same gene
         rc.unique_counts[2, _UNSPLICED_SENSE] = 7.0  # different gene
@@ -712,7 +715,7 @@ class TestCountsOutput:
     def test_spliced_counts(self):
         """count_spliced captures both SPLICED_ANNOT and SPLICED_UNANNOT."""
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         # SPLICED_ANNOT sense
         rc.unique_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
         # SPLICED_UNANNOT antisense
@@ -727,7 +730,7 @@ class TestCountsOutput:
     def test_identifiers_present(self):
         """Output includes transcript/gene identifiers."""
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         df = rc.get_counts_df(index)
         assert list(df["transcript_id"]) == ["t0", "t1", "t2"]
         assert list(df["gene_id"]) == ["g0", "g0", "g1"]
@@ -741,7 +744,7 @@ class TestCountsOutput:
 class TestDetailOutput:
     def test_detail_empty(self):
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         df = rc.get_detail_df(index)
         assert len(df) == 0
         assert "transcript_id" in df.columns
@@ -750,7 +753,7 @@ class TestDetailOutput:
 
     def test_detail_unique_only(self):
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
         rc.unique_counts[2, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
 
@@ -760,7 +763,7 @@ class TestDetailOutput:
 
     def test_detail_both_sources(self):
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
         rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
 
@@ -771,7 +774,7 @@ class TestDetailOutput:
 
     def test_detail_has_category(self):
         index = _make_index()
-        rc = AbundanceEstimator(num_transcripts=3, num_genes=2, seed=42)
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 1.0
         rc.unique_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 1.0
 
@@ -786,7 +789,7 @@ class TestDetailOutput:
 
 class TestGDNASummaryOutput:
     def test_gdna_summary_dict(self):
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 15.0
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 5.0
@@ -802,7 +805,7 @@ class TestGDNASummaryOutput:
         )
 
     def test_gdna_contamination_rate_zero(self):
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         assert rc.gdna_contamination_rate == 0.0
 
 
@@ -816,7 +819,7 @@ class TestGDNAInLocusEM:
 
     def test_gdna_absorbs_when_init_high(self):
         """With large gdna_init and equal likelihoods, gDNA takes share."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
@@ -831,7 +834,7 @@ class TestGDNAInLocusEM:
 
     def test_strong_rna_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         rc.unique_counts[0, _UNSPLICED_SENSE] = 500.0
         lem = _make_locus_em_data(
             [[0]] * 100,
@@ -849,7 +852,7 @@ class TestGDNAInLocusEM:
 
     def test_total_counts_preserved_with_gdna(self):
         """em_counts + nrna_em + gdna == n_units."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=2,
@@ -864,7 +867,7 @@ class TestGDNAInLocusEM:
 
     def test_no_gdna_candidate_means_no_gdna_assignment(self):
         """Without gDNA candidate, all counts go to RNA."""
-        rc = AbundanceEstimator(num_transcripts=2, num_genes=1, seed=42)
+        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 100,
             num_transcripts=2,

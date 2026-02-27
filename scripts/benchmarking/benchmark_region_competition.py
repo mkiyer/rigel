@@ -113,9 +113,15 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime when config is used
     yaml = None
 
+from hulkrna.config import EMConfig, PipelineConfig, ScanConfig, ScoringConfig
 from hulkrna.gtf import GTF
 from hulkrna.index import HulkIndex, write_bed12
 from hulkrna.pipeline import run_pipeline
+from hulkrna.scoring import (
+    GDNA_SPLICE_PENALTIES,
+    SPLICE_UNANNOT,
+    overhang_alpha_to_log_penalty,
+)
 from hulkrna.sim import OracleBamSimulator, GDNAConfig, ReadSimulator, SimConfig, reverse_complement
 from hulkrna.transcript import Transcript
 from hulkrna.types import Interval, Strand
@@ -1280,6 +1286,64 @@ def write_read_accuracy_summary_csv(
 # ── Tool runners ────────────────────────────────────────────────────
 
 
+def _build_pipeline_config(
+    args: argparse.Namespace,
+    hulkrna_config: HulkrnaConfig | None = None,
+    annotated_bam_path: Path | None = None,
+) -> PipelineConfig:
+    """Build a :class:`PipelineConfig` from benchmark args + overrides."""
+    # ── Collect raw param dict (base from args, then overlay) ────
+    raw: dict = {}
+    if hulkrna_config is not None:
+        raw.update(hulkrna_config.params)
+
+    # ── EM config ────────────────────────────────────────────────
+    em_kw: dict = {"seed": args.pipeline_seed}
+    _EM_ALIASES = {
+        "em_convergence_delta": "convergence_delta",
+        "em_iterations": "iterations",
+        "em_prior_alpha": "prior_alpha",
+        "em_pseudocount": "prior_alpha",
+        "em_prior_gamma": "prior_gamma",
+        "confidence_threshold": "confidence_threshold",
+    }
+    for raw_key, cfg_key in _EM_ALIASES.items():
+        if raw_key in raw:
+            em_kw[cfg_key] = raw.pop(raw_key)
+
+    # ── Scoring config ───────────────────────────────────────────
+    scoring_kw: dict = {}
+    # overhang_alpha — from override or from top-level args
+    ov_alpha = raw.pop("overhang_alpha", None) or getattr(args, "overhang_alpha", None)
+    if ov_alpha is not None:
+        scoring_kw["overhang_log_penalty"] = overhang_alpha_to_log_penalty(ov_alpha)
+
+    mm_alpha = raw.pop("mismatch_alpha", None)
+    if mm_alpha is not None:
+        scoring_kw["mismatch_log_penalty"] = overhang_alpha_to_log_penalty(mm_alpha)
+
+    gdna_pen = raw.pop("gdna_splice_penalty_unannot", None)
+    if gdna_pen is None:
+        gdna_pen = getattr(args, "gdna_splice_penalty_unannot", None)
+    if gdna_pen is not None:
+        penalties = dict(GDNA_SPLICE_PENALTIES)
+        penalties[SPLICE_UNANNOT] = gdna_pen
+        scoring_kw["gdna_splice_penalties"] = penalties
+
+    # ── Scan config ──────────────────────────────────────────────
+    scan_kw: dict = {
+        "sj_strand_tag": "auto",
+        "include_multimap": True,
+    }
+
+    return PipelineConfig(
+        em=EMConfig(**em_kw),
+        scan=ScanConfig(**scan_kw),
+        scoring=ScoringConfig(**scoring_kw),
+        annotated_bam_path=annotated_bam_path,
+    )
+
+
 def run_hulkrna_tool(
     bam_path: Path,
     index: HulkIndex,
@@ -1290,9 +1354,9 @@ def run_hulkrna_tool(
     """Run hulkrna pipeline and return (transcript_counts, elapsed_sec, pool_counts).
 
     When *hulkrna_config* is provided, its ``params`` are merged on
-    top of the base arguments drawn from *args*.  Supported params
-    match keyword arguments to :func:`run_pipeline`:
-    ``em_convergence_delta``, ``em_iterations``, ``em_pseudocount``,
+    top of the base arguments drawn from *args*.  Supported params:
+    ``em_convergence_delta``, ``em_iterations``, ``em_prior_alpha``,
+    ``em_prior_gamma``,
     ``overhang_alpha``, ``mismatch_alpha``,
     ``gdna_splice_penalty_unannot``, etc.
 
@@ -1301,24 +1365,8 @@ def run_hulkrna_tool(
     that path.
     """
     t0 = time.monotonic()
-    overhang_alpha = getattr(args, "overhang_alpha", None)
-    kwargs: dict = dict(
-        seed=args.pipeline_seed,
-        sj_strand_tag="auto",
-        include_multimap=True,
-        gdna_splice_penalty_unannot=args.gdna_splice_penalty_unannot,
-    )
-    if overhang_alpha is not None:
-        kwargs["overhang_alpha"] = overhang_alpha
-
-    # Overlay per-config overrides
-    if hulkrna_config is not None:
-        kwargs.update(hulkrna_config.params)
-
-    if annotated_bam_path is not None:
-        kwargs["annotated_bam_path"] = annotated_bam_path
-
-    pipe = run_pipeline(bam_path, index, **kwargs)
+    cfg = _build_pipeline_config(args, hulkrna_config, annotated_bam_path)
+    pipe = run_pipeline(bam_path, index, config=cfg)
     elapsed = time.monotonic() - t0
 
     counts_df = pipe.estimator.get_counts_df(index)
@@ -1669,6 +1717,7 @@ def run_region_benchmark(
     reg_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("[REGION] %s:%d-%d", region.chrom, region.start0 + 1, region.end0)
+    print(f"\n>>> REGION: {region.label} ({region.chrom}:{region.start0+1}-{region.end0})", flush=True)
 
     # ── Per-region setup (done once) ────────────────────────────────
 
@@ -1777,6 +1826,10 @@ def run_region_benchmark(
                     nrna_total_abundance,
                     strand_spec,
                 )
+                print(
+                    f"  CONDITION: gDNA={gdna_label} nRNA={nrna_label} SS={strand_spec:.2f}",
+                    flush=True,
+                )
 
                 # Set per-transcript nRNA abundances for this condition.
                 # Mature mRNA abundance is not reduced.
@@ -1830,6 +1883,7 @@ def run_region_benchmark(
                     bam_ns = align_dir / "reads_namesort.bam"
 
                     if ac.type == "oracle":
+                        print(f"    Aligner: {ac.name} — generating oracle BAM...", flush=True)
                         oracle_sim = OracleBamSimulator(
                             sim_genome, transcripts,
                             config=sim_cfg, gdna_config=gdna_cfg,
@@ -1837,6 +1891,7 @@ def run_region_benchmark(
                         )
                         oracle_sim.write_bam(bam_ns, args.n_fragments)
                     elif ac.type == "minimap2":
+                        print(f"    Aligner: {ac.name} — running minimap2...", flush=True)
                         align_minimap2(
                             region_fa, fastq_r1, fastq_r2, bam_ns,
                             bed_path=bed_path,
@@ -1859,6 +1914,7 @@ def run_region_benchmark(
                     # Run hulkrna on this aligner's BAM — once per config
                     for hc in hulkrna_configs:
                         hn = _hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)
+                        print(f"    Running hulkrna ({hn})...", end="", flush=True)
                         ann_bam = align_dir / f"annotated_{hc.name}.bam"
                         hk_counts, hk_elapsed, hk_pools = run_hulkrna_tool(
                             bam_ns, index, args=args, hulkrna_config=hc,
@@ -1866,6 +1922,7 @@ def run_region_benchmark(
                         )
                         tx_tool_counts[hn] = (hk_counts, hk_elapsed)
                         tool_pool_counts[hn] = hk_pools
+                        print(f" done ({hk_elapsed:.1f}s)", flush=True)
 
                         # ── Coord-sort and index annotated BAM for genome browsers ──
                         if ann_bam.exists():
@@ -1917,6 +1974,7 @@ def run_region_benchmark(
 
             # ── Run transcript-level tools (FASTQ-based, once) ──────
 
+                print(f"    Running salmon...", end="", flush=True)
                 salmon_counts, salmon_elapsed = run_salmon(
                     transcript_fa,
                     fastq_r1,
@@ -1924,6 +1982,8 @@ def run_region_benchmark(
                     cond_dir / "salmon",
                     threads=args.threads,
                 )
+                print(f" done ({salmon_elapsed:.1f}s)", flush=True)
+                print(f"    Running kallisto...", end="", flush=True)
                 kallisto_counts, kallisto_elapsed = run_kallisto(
                     transcript_fa,
                     fastq_r1,
@@ -1932,6 +1992,7 @@ def run_region_benchmark(
                     threads=args.threads,
                     strand_specificity=strand_spec,
                 )
+                print(f" done ({kallisto_elapsed:.1f}s)", flush=True)
 
                 tx_tool_counts["salmon"] = (salmon_counts, salmon_elapsed)
                 tx_tool_counts["kallisto"] = (kallisto_counts, kallisto_elapsed)
@@ -2846,9 +2907,13 @@ def main() -> int:
     args = parser.parse_args(argv)
     args = apply_yaml_config(args, argv)
 
+    # Force unbuffered logging to stderr so progress is visible
+    # even when running under 'conda run' (which may buffer stdout).
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[handler],
     )
 
     if args.genome is None:
@@ -2957,6 +3022,7 @@ def main() -> int:
 
     n_aligner = len(aligner_configs)
     n_hulk = len(hulkrna_configs)
+    n_conditions = len(gdna_rates) * len(nrna_rates) * len(strand_specificities) * len(regions)
     logger.info(
         "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs "
         "× %d regions × %d aligners × %d hulkrna configs = %d conditions",
@@ -2966,7 +3032,14 @@ def main() -> int:
         len(regions),
         n_aligner,
         n_hulk,
-        len(gdna_rates) * len(nrna_rates) * len(strand_specificities) * len(regions),
+        n_conditions,
+    )
+    print(
+        f"\n{'='*60}\n"
+        f"BENCHMARK: {n_conditions} conditions, "
+        f"{len(regions)} regions, {n_aligner} aligners\n"
+        f"{'='*60}",
+        flush=True,
     )
     logger.info(
         "Aligners: %s",
@@ -3065,6 +3138,7 @@ def main() -> int:
     write_summary(all_results, args.outdir, include_htseq=include_htseq)
     write_diagnostics(all_results, args.outdir, include_htseq=include_htseq)
     logger.info("Wrote summaries to %s", args.outdir)
+    print(f"\n{'='*60}\nBENCHMARK COMPLETE — results in {args.outdir}\n{'='*60}", flush=True)
     return 0
 
 

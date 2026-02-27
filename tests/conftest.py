@@ -12,7 +12,13 @@ import numpy as np
 import pytest
 
 from hulkrna.categories import SpliceStrandCol
-from hulkrna.estimator import AbundanceEstimator, Locus, LocusEMInput
+from hulkrna.estimator import (
+    AbundanceEstimator,
+    EM_PRIOR_EPSILON,
+    Locus,
+    LocusEMInput,
+)
+from hulkrna.bias import BiasProfile
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +102,6 @@ def _make_locus_em_data(
     include_gdna=False,
     nrna_log_lik=-2.0,
     gdna_log_lik=0.0,
-    alpha=0.01,
 ):
     """Build a LocusEMInput for unit tests (single-locus, identity mapping).
 
@@ -176,7 +181,7 @@ def _make_locus_em_data(
     ut[gdna_idx] = gdna_init
 
     eff_len = np.ones(n_components, dtype=np.float64)
-    prior = np.full(n_components, alpha, dtype=np.float64)
+    prior = np.full(n_components, EM_PRIOR_EPSILON, dtype=np.float64)
 
     locus = Locus(
         locus_id=0,
@@ -186,6 +191,9 @@ def _make_locus_em_data(
     )
 
     n_local_candidates = len(flat_t)
+    # Build bias profiles of length 1 so that with tx_starts=0 and
+    # tx_ends=1, frag_len=1 and eff_len = max(1-1+1,1) = 1 → no correction.
+    bias_profiles = [BiasProfile.uniform(1) for _ in range(n_components)]
     return LocusEMInput(
         locus=locus,
         offsets=np.array(offsets, dtype=np.int64),
@@ -193,6 +201,8 @@ def _make_locus_em_data(
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
         coverage_weights=np.ones(n_local_candidates, dtype=np.float64),
+        tx_starts=np.zeros(n_local_candidates, dtype=np.int32),
+        tx_ends=np.ones(n_local_candidates, dtype=np.int32),
         locus_t_indices=np.array(locus_t_list, dtype=np.int32),
         locus_count_cols=np.array(locus_cc_list, dtype=np.uint8),
         n_transcripts=n_t,
@@ -203,6 +213,7 @@ def _make_locus_em_data(
         gdna_init=gdna_init,
         effective_lengths=eff_len,
         prior=prior,
+        bias_profiles=bias_profiles,
     )
 
 

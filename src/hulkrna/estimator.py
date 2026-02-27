@@ -6,8 +6,8 @@ accumulation combined with Bayesian abundance estimation via EM.
 
 For uniquely-mapping fragments, assignment is deterministic.  For ambiguous
 fragments, transcript abundances are estimated via per-locus EM with a
-uniform Dirichlet prior, then counts are accumulated from the converged
-posterior.
+coverage-weighted One Virtual Read (OVR) prior, then counts are accumulated
+from the converged posterior.
 
 Locus-level EM architecture
 ----------------------------
@@ -31,10 +31,10 @@ stochastic winner sampling.
 
 EM algorithm
 ------------
-Standard EM with effective-length normalization and a uniform
-Dirichlet prior.
+MAP-EM with effective-length normalization and a coverage-weighted
+One Virtual Read (OVR) Dirichlet prior.
 
-1. Initialize theta from unique counts + prior.
+1. Initialize theta from unique counts + OVR prior.
 2. E-step: posterior proportional to likelihood * theta_t / eff_len_t.
 3. M-step: theta proportional to unique + em_totals + prior.
 4. Repeat until convergence (|delta| < 1e-6).
@@ -42,12 +42,15 @@ Dirichlet prior.
 """
 
 import logging
+import math as _math
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.special import digamma as _digamma
 
 from .types import Strand
+from .config import EMConfig, TranscriptGeometry
 from .categories import (
     ANTISENSE_COLS,
     SpliceType,
@@ -61,8 +64,70 @@ logger = logging.getLogger(__name__)
 # Epsilon added to theta before taking log to prevent log(0) in EM.
 _EM_LOG_EPSILON = 1e-300
 
+# Numerical-stability floor used inside locus.py to mark
+# eligible prior components.  The actual prior values are
+# computed in run_locus_em() from alpha + gamma * OVR.
+EM_PRIOR_EPSILON = 1e-10
+
 # Relative convergence tolerance for EM theta updates.
 _EM_CONVERGENCE_DELTA = 1e-6
+
+
+def _apply_bias_correction(log_liks, t_indices, tx_starts, tx_ends,
+                           bias_profiles):
+    """Apply per-candidate positional bias correction **in-place**.
+
+    For each candidate *i* with component ``t_indices[i]`` and
+    transcript coordinates ``[tx_starts[i], tx_ends[i])``, computes::
+
+        log W(f|t) − log L̃_t(l_f)
+
+    and adds it to ``log_liks[i]``.
+
+    Under uniform bias this equals ``−log(max(L − l_f + 1, 1))``,
+    exactly reproducing the former baked-in effective-length
+    correction.
+
+    Uses a lookup table keyed by ``(component_index, frag_len)``
+    so that ``BiasProfile.effective_length`` is called at most once
+    per unique pair — many candidates share the same pair via
+    equivalence classes.
+    """
+    n = len(t_indices)
+    if n == 0 or not bias_profiles:
+        return
+
+    frag_lens = (tx_ends - tx_starts).astype(np.int64)
+
+    # --- Effective-length LUT ----------------------------------------
+    # Compound key: comp_idx * MAX_FLEN + frag_len.  Using np.unique
+    # to identify distinct pairs keeps the Python loop to the small
+    # number of unique (component, frag_len) combinations.
+    _MAX_FLEN = 1_000_000
+    compound = t_indices.astype(np.int64) * _MAX_FLEN + frag_lens
+    unique_compound, inverse = np.unique(compound, return_inverse=True)
+
+    log_eff = np.empty(len(unique_compound), dtype=np.float64)
+    for j in range(len(unique_compound)):
+        uc = int(unique_compound[j])
+        cidx, fl = divmod(uc, _MAX_FLEN)
+        log_eff[j] = _math.log(
+            max(bias_profiles[int(cidx)].effective_length(int(fl)), 1e-300)
+        )
+
+    # Subtract log L̃ for every candidate (vectorised via inverse)
+    log_liks -= log_eff[inverse]
+
+    # --- Fragment weight ---------------------------------------------
+    # Compute log W(f|t) for each candidate.  Under uniform bias
+    # W = 1.0 → log W = 0, so the loop body is a no-op.  For
+    # non-uniform profiles (Phase 2+) this contributes.
+    for i in range(n):
+        w = bias_profiles[int(t_indices[i])].fragment_weight(
+            int(tx_starts[i]), int(tx_ends[i]),
+        )
+        if w != 1.0:
+            log_liks[i] += _math.log(max(w, 1e-300))
 
 
 def _build_equiv_classes(offsets, t_indices, log_liks, coverage_weights):
@@ -150,6 +215,46 @@ def _em_step(theta, ec_data, log_eff_len, unique_totals, prior, em_totals):
     return theta_new
 
 
+def _vbem_step(alpha, ec_data, log_eff_len, unique_totals, prior, em_totals):
+    """One VBEM iteration: alpha -> alpha_new, updating *em_totals* in place.
+
+    Uses ``digamma(alpha_k) - digamma(sum(alpha))`` instead of
+    ``log(theta)`` for the E-step weights.  The digamma function maps
+    small alpha values to large negative numbers (e.g. digamma(0.01) ≈
+    −100.6), which exponentially suppresses low-evidence components —
+    much more aggressively than ``log(theta)`` in MAP-EM.
+
+    Returns the updated alpha_new (un-normalised Dirichlet parameters).
+    """
+    alpha_sum = alpha.sum()
+    log_weights = (
+        _digamma(np.maximum(alpha, 1e-300))
+        - _digamma(max(alpha_sum, 1e-300))
+        - log_eff_len
+    )
+    em_totals[:] = 0.0
+
+    for comp_idx, ll_matrix, scratch in ec_data:
+        np.add(ll_matrix, log_weights[comp_idx], out=scratch)
+        max_r = scratch.max(axis=1, keepdims=True)
+        scratch -= max_r
+        np.exp(scratch, out=scratch)
+        row_sum = scratch.sum(axis=1, keepdims=True)
+
+        bad = (row_sum == 0) | ~np.isfinite(row_sum)
+        if bad.any():
+            row_sum[bad] = 1.0
+            scratch /= row_sum
+            scratch[bad.ravel()] = 0.0
+        else:
+            scratch /= row_sum
+
+        em_totals[comp_idx] += scratch.sum(axis=0)
+
+    alpha_new = unique_totals + em_totals + prior
+    return alpha_new
+
+
 # ======================================================================
 # ScanData - pre-computed CSR arrays for vectorized EM
 # ======================================================================
@@ -178,10 +283,18 @@ class ScanData:
     count_cols : np.ndarray
         uint8[n_candidates] - internal column index per candidate (0-7).
     coverage_weights : np.ndarray
-        float64[n_candidates] - coverage weight per candidate from the
-        trapezoid coverage model.  mRNA candidates get position-based
-        weight >= 1.0 (plateau = 1.0, edge > 1.0).  nRNA and gDNA
-        candidates get weight 1.0.
+        float64[n_candidates] - coverage weight per candidate.  mRNA
+        candidates get position-based weight >= 1.0 (plateau = 1.0,
+        edge > 1.0).  nRNA and gDNA candidates get weight 1.0.
+    tx_starts : np.ndarray
+        int32[n_candidates] - 0-based transcript-space start position
+        of the fragment for each candidate.  For mRNA these are spliced
+        transcript coordinates; for nRNA these are genomic-relative
+        positions.  Used by the positional bias model.
+    tx_ends : np.ndarray
+        int32[n_candidates] - 0-based transcript-space end position
+        (exclusive) for each candidate.  ``tx_ends - tx_starts`` gives
+        the fragment footprint in transcript space.
     locus_t_indices : np.ndarray
         int32[n_units] - best transcript index per unit.
     locus_count_cols : np.ndarray
@@ -217,6 +330,8 @@ class ScanData:
     log_liks: np.ndarray
     count_cols: np.ndarray
     coverage_weights: np.ndarray
+    tx_starts: np.ndarray
+    tx_ends: np.ndarray
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     is_spliced: np.ndarray
@@ -293,9 +408,13 @@ class LocusEMInput:
     count_cols : np.ndarray
         uint8[n_local_candidates] - column indices for count accumulation.
     coverage_weights : np.ndarray
-        float64[n_local_candidates] - coverage weights from the trapezoid
-        model.  Used for the coverage-weighted warm start and the One
-        Virtual Read prior.
+        float64[n_candidates] - coverage weight per candidate.  mRNA
+        candidates get position-based weight >= 1.0 (plateau = 1.0,
+        edge > 1.0).  nRNA and gDNA candidates get weight 1.0.
+    tx_starts : np.ndarray
+        int32[n_local_candidates] - transcript-space start positions.
+    tx_ends : np.ndarray
+        int32[n_local_candidates] - transcript-space end positions.
     locus_t_indices : np.ndarray
         int32[n_local_units] - best transcript index per unit (global).
     locus_count_cols : np.ndarray
@@ -315,7 +434,10 @@ class LocusEMInput:
     effective_lengths : np.ndarray
         float64[n_components] - effective lengths for EM normalization.
     prior : np.ndarray
-        float64[n_components] - Dirichlet prior pseudocounts.
+        float64[n_components] - Prior eligibility mask.  Eligible
+        components carry ``EM_PRIOR_EPSILON``; ineligible ones are 0.0.
+        The OVR prior (``gamma * coverage_weights``) is added to eligible
+        components during ``run_locus_em``.
     """
 
     locus: Locus
@@ -324,6 +446,8 @@ class LocusEMInput:
     log_liks: np.ndarray
     count_cols: np.ndarray
     coverage_weights: np.ndarray
+    tx_starts: np.ndarray
+    tx_ends: np.ndarray
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     n_transcripts: int
@@ -334,6 +458,7 @@ class LocusEMInput:
     gdna_init: float
     effective_lengths: np.ndarray
     prior: np.ndarray
+    bias_profiles: list | None
 
 
 # ======================================================================
@@ -366,9 +491,11 @@ class AbundanceEstimator:
     ----------
     num_transcripts : int
     num_genes : int
-    seed : int or None
-    alpha : float
-        Dirichlet prior pseudocount (default 0.01).
+    em_config : EMConfig or None
+        EM algorithm configuration.  Defaults to ``EMConfig()``.
+    geometry : TranscriptGeometry or None
+        Pre-computed transcript/gene geometry.  None for minimal
+        construction (e.g. in tests).
     """
 
     def __init__(
@@ -376,66 +503,46 @@ class AbundanceEstimator:
         num_transcripts: int,
         num_genes: int,
         *,
-        seed=None,
-        alpha: float = 0.01,
-        effective_lengths: np.ndarray | None = None,
-        exonic_lengths: np.ndarray | None = None,
-        t_to_g: np.ndarray | None = None,
-        gene_spans: np.ndarray | None = None,
-        mean_frag: float = 200.0,
-        intronic_spans: np.ndarray | None = None,
-        transcript_spans: np.ndarray | None = None,
+        em_config: EMConfig | None = None,
+        geometry: TranscriptGeometry | None = None,
     ):
+        if em_config is None:
+            em_config = EMConfig()
+        self.em_config = em_config
         self.num_transcripts = num_transcripts
         self.num_genes = num_genes
-        self.em_prior = alpha
-        self._rng = np.random.default_rng(seed)
+        self._rng = np.random.default_rng(em_config.seed)
 
         # nRNA shadow base index (for global CSR component numbering).
         self.nrna_base_index = num_transcripts
 
-        # Transcript -> gene index mapping
-        self._t_to_g = (
-            np.asarray(t_to_g, dtype=np.int32) if t_to_g is not None
-            else None
-        )
-
-        # Per-gene genomic spans (end - start)
-        self._gene_spans = (
-            np.asarray(gene_spans, dtype=np.float64)
-            if gene_spans is not None
-            else None
-        )
-        self._mean_frag = float(mean_frag)
-
-        # Per-gene intronic spans (gene_span - merged_exonic_length)
-        self._intronic_spans = (
-            np.asarray(intronic_spans, dtype=np.float64)
-            if intronic_spans is not None
-            else None
-        )
-
-        # Per-transcript genomic spans (end - start, unspliced pre-mRNA length)
-        self._transcript_spans = (
-            np.asarray(transcript_spans, dtype=np.float64)
-            if transcript_spans is not None
-            else None
-        )
-
-        # --- Exonic lengths (raw transcript spliced lengths) ---
-        if exonic_lengths is not None:
+        # --- Geometry: from TranscriptGeometry or defaults ---
+        if geometry is not None:
+            self._t_to_g = np.asarray(geometry.t_to_g, dtype=np.int32)
+            self._gene_spans = np.asarray(
+                geometry.gene_spans, dtype=np.float64
+            )
+            self._mean_frag = geometry.mean_frag
+            self._intronic_spans = np.asarray(
+                geometry.intronic_spans, dtype=np.float64
+            )
+            self._transcript_spans = np.asarray(
+                geometry.transcript_spans, dtype=np.float64
+            )
             self._exonic_lengths = np.asarray(
-                exonic_lengths, dtype=np.float64,
+                geometry.exonic_lengths, dtype=np.float64
             )
-        else:
-            self._exonic_lengths = None
-
-        # --- Effective lengths for EM normalization ---
-        if effective_lengths is not None:
             self._t_eff_len = np.maximum(
-                np.asarray(effective_lengths, dtype=np.float64), 1.0
+                np.asarray(geometry.effective_lengths, dtype=np.float64),
+                1.0,
             )
         else:
+            self._t_to_g = None
+            self._gene_spans = None
+            self._mean_frag = 200.0
+            self._intronic_spans = None
+            self._transcript_spans = None
+            self._exonic_lengths = None
             self._t_eff_len = np.ones(
                 num_transcripts, dtype=np.float64
             )
@@ -615,6 +722,17 @@ class AbundanceEstimator:
 
         n_units = len(offsets) - 1
 
+        # Apply per-candidate positional bias correction.  For uniform
+        # profiles this is identical to the former baked-in
+        # -log(max(t_len - frag_len + 1, 1)) correction.  Mutating
+        # log_liks in-place is safe because each LocusEMInput is
+        # consumed exactly once.
+        _apply_bias_correction(
+            log_liks, t_indices,
+            locus_em.tx_starts, locus_em.tx_ends,
+            locus_em.bias_profiles,
+        )
+
         if n_units == 0 or len(t_indices) == 0:
             alpha = unique_totals + prior
             total = alpha.sum()
@@ -637,23 +755,28 @@ class AbundanceEstimator:
             ec_data.append((comp_idx, ll_matrix, scratch))
             ec_wt.append(wt_matrix)
 
-        # Coverage-weighted warm start + One Virtual Read prior.
+        # Coverage-weighted warm start + One Virtual Read (OVR) prior.
         #
-        # Instead of distributing a uniform 1/k share per ambiguous
-        # unit, we distribute shares proportional to coverage weights,
-        # reflecting the geometric plausibility of each candidate.
+        # Warm start: distribute each ambiguous fragment's initial
+        # share proportional to coverage weights (the "trapezoid"
+        # geometric plausibility), restricted to prior-eligible
+        # components.
         #
-        # The same coverage totals, scaled to sum to 1.0, are added
-        # to the Dirichlet prior as a persistent "One Virtual Read"
-        # that prevents SQUAREM drift in flat-likelihood regions.
+        # OVR prior: the same coverage distribution, scaled to sum
+        # to ``em_prior_gamma`` total virtual reads, becomes the
+        # Dirichlet prior.  This replaces the old flat pseudocount.
+        # The prior for component k is:
         #
-        # Only seed components with non-zero prior.  Components
-        # whose prior was zeroed (nRNA without intronic evidence,
-        # gDNA without antisense evidence) must not receive warm-
-        # start weight — the EM cannot drive self-seeded phantom
-        # counts back to zero because the M-step for those
-        # components reduces to ``em_totals`` alone (no unique
-        # counts, no prior), creating a self-sustaining cycle.
+        #     prior_k = alpha + gamma * (coverage_totals_k / N_ambiguous)
+        #
+        # where alpha = em_prior_alpha (flat Dirichlet pseudocount)
+        # and gamma = em_prior_gamma (OVR scale factor).
+        #
+        # Ineligible components (nRNA without intronic evidence,
+        # gDNA without unspliced fragments) keep prior = 0.0 and
+        # must not receive warm-start weight — the EM cannot drive
+        # self-seeded phantom counts back to zero.
+        eligible = prior > 0.0
         theta_init = unique_totals.copy()
         coverage_totals = np.zeros(n_total, dtype=np.float64)
         n_ambiguous = 0
@@ -662,7 +785,7 @@ class AbundanceEstimator:
             wt_matrix = ec_wt[i]
             n = ll_matrix.shape[0]
             n_ambiguous += n
-            has_p = prior[comp_idx] > 0.0
+            has_p = eligible[comp_idx]
             # Mask weights by prior eligibility
             masked_wt = wt_matrix * has_p[np.newaxis, :]
             row_sums = masked_wt.sum(axis=1, keepdims=True)
@@ -672,72 +795,175 @@ class AbundanceEstimator:
             theta_init[comp_idx] += per_comp
             coverage_totals[comp_idx] += per_comp
 
-        # One Virtual Read prior: add exactly 1.0 total virtual read
-        # to the Dirichlet prior, distributed by coverage weights.
-        # This is parameter-free: gamma = 1/N_ambiguous.
-        if n_ambiguous > 0:
-            prior = prior + coverage_totals / n_ambiguous
+        # Build prior: alpha (flat) + gamma-scaled OVR coverage weights.
+        alpha = self.em_config.prior_alpha
+        gamma = self.em_config.prior_gamma
+        if n_ambiguous > 0 and gamma > 0.0:
+            ovr = gamma * coverage_totals / n_ambiguous
+        else:
+            ovr = np.zeros(n_total, dtype=np.float64)
+        # prior_k = alpha + OVR_k for eligible, 0 for ineligible.
+        prior = np.where(eligible, alpha + ovr, 0.0)
 
-        theta = theta_init + prior
-        total = theta.sum()
-        if total > 0:
-            theta /= total
-
-        # ---- SQUAREM acceleration (Varadhan & Roland 2008) ----------
-        # Each SQUAREM iteration performs 3 EM evaluations:
-        #   1. theta_1 = M(theta_0)
-        #   2. theta_2 = M(theta_1)
-        #   3. theta_s = M(extrapolated)  — stabilisation step
-        # With SqS3 step length: alpha = -(r'v) / (v'v), clamped >= 1.
-        # When alpha == 1 the update equals plain 2-step EM.
         em_totals = np.zeros(n_total, dtype=np.float64)
         max_sq_iters = max(em_iterations // 3, 1)
 
-        for _ in range(max_sq_iters):
-            # --- two plain EM steps ---
-            theta_1 = _em_step(
-                theta, ec_data, log_eff_len, unique_totals, prior, em_totals
-            )
-            theta_2 = _em_step(
-                theta_1, ec_data, log_eff_len, unique_totals, prior, em_totals
-            )
+        if self.em_config.mode == "vbem":
+            # ---- VBEM with SQUAREM acceleration -----------------
+            # Fixed-point iteration on Dirichlet parameters alpha.
+            # E-step weights: digamma(alpha_k) - digamma(sum(alpha))
+            # M-step: alpha_new = prior + unique_totals + em_totals
+            alpha_dir = theta_init + prior  # initial Dirichlet params
 
-            # --- SQUAREM extrapolation ---
-            r = theta_1 - theta
-            v = (theta_2 - theta_1) - r  # second-order term
+            for _ in range(max_sq_iters):
+                # --- two plain VBEM steps ---
+                a1 = _vbem_step(
+                    alpha_dir, ec_data, log_eff_len,
+                    unique_totals, prior, em_totals,
+                )
+                a2 = _vbem_step(
+                    a1, ec_data, log_eff_len,
+                    unique_totals, prior, em_totals,
+                )
 
-            sv2 = np.dot(v, v)
-            if sv2 == 0.0:
-                # Exact fixed point reached or perfect linear step.
-                theta_extrap = theta_2
-            else:
-                srv = np.dot(r, v)
-                alpha = max(-srv / sv2, 1.0)  # at least 2-step EM
+                # --- SQUAREM extrapolation on alpha ---
+                r = a1 - alpha_dir
+                v = (a2 - a1) - r
 
-                theta_extrap = theta + 2.0 * alpha * r + alpha * alpha * v
-
-                # Project onto valid simplex.
-                np.maximum(theta_extrap, 0.0, out=theta_extrap)
-                total = theta_extrap.sum()
-                if total > 0.0:
-                    theta_extrap /= total
+                sv2 = np.dot(v, v)
+                if sv2 == 0.0:
+                    a_extrap = a2
                 else:
-                    theta_extrap = theta_2  # fallback
+                    srv = np.dot(r, v)
+                    step = max(-srv / sv2, 1.0)
+                    a_extrap = (
+                        alpha_dir + 2.0 * step * r + step * step * v
+                    )
+                    # Alpha must stay positive.
+                    np.maximum(a_extrap, 1e-300, out=a_extrap)
 
-            # --- stabilisation EM step ---
-            theta_new = _em_step(
-                theta_extrap, ec_data, log_eff_len,
-                unique_totals, prior, em_totals,
+                # --- stabilisation VBEM step ---
+                a_new = _vbem_step(
+                    a_extrap, ec_data, log_eff_len,
+                    unique_totals, prior, em_totals,
+                )
+
+                # Convergence on normalised theta.
+                a_sum_old = alpha_dir.sum()
+                a_sum_new = a_new.sum()
+                delta = np.abs(
+                    a_new / a_sum_new - alpha_dir / a_sum_old
+                ).sum()
+                alpha_dir = a_new
+
+                if delta < em_convergence_delta:
+                    break
+
+            total = alpha_dir.sum()
+            theta = alpha_dir / total if total > 0 else alpha_dir
+            alpha_out = alpha_dir  # Dirichlet params ARE the alpha
+
+        else:
+            # ---- MAP-EM with SQUAREM acceleration ---------------
+            # (Varadhan & Roland 2008)
+            #
+            # Each SQUAREM iteration performs 3 EM evaluations:
+            #   1. theta_1 = M(theta_0)
+            #   2. theta_2 = M(theta_1)
+            #   3. theta_s = M(extrapolated) — stabilisation step
+            # With SqS3 step length: alpha = -(r'v) / (v'v), >= 1.
+            theta = theta_init + prior
+            total = theta.sum()
+            if total > 0:
+                theta /= total
+
+            for _ in range(max_sq_iters):
+                # --- two plain EM steps ---
+                theta_1 = _em_step(
+                    theta, ec_data, log_eff_len,
+                    unique_totals, prior, em_totals,
+                )
+                theta_2 = _em_step(
+                    theta_1, ec_data, log_eff_len,
+                    unique_totals, prior, em_totals,
+                )
+
+                # --- SQUAREM extrapolation ---
+                r = theta_1 - theta
+                v = (theta_2 - theta_1) - r
+
+                sv2 = np.dot(v, v)
+                if sv2 == 0.0:
+                    theta_extrap = theta_2
+                else:
+                    srv = np.dot(r, v)
+                    alpha_step = max(-srv / sv2, 1.0)
+
+                    theta_extrap = (
+                        theta
+                        + 2.0 * alpha_step * r
+                        + alpha_step * alpha_step * v
+                    )
+                    np.maximum(theta_extrap, 0.0, out=theta_extrap)
+                    total = theta_extrap.sum()
+                    if total > 0.0:
+                        theta_extrap /= total
+                    else:
+                        theta_extrap = theta_2
+
+                # --- stabilisation EM step ---
+                theta_new = _em_step(
+                    theta_extrap, ec_data, log_eff_len,
+                    unique_totals, prior, em_totals,
+                )
+
+                delta = np.abs(theta_new - theta).sum()
+                theta = theta_new
+
+                if delta < em_convergence_delta:
+                    break
+
+            alpha_out = unique_totals + em_totals + prior
+
+        # ----------------------------------------------------------
+        # Post-EM pruning: zero components with no unique evidence
+        # and low evidence ratio, then re-run EM to redistribute.
+        # ----------------------------------------------------------
+        if self.em_config.prune_threshold is not None:
+            data_count = unique_totals + em_totals
+            evidence_ratio = data_count / np.maximum(alpha_out, 1e-300)
+            prune_mask = (
+                (unique_totals == 0)
+                & (evidence_ratio < self.em_config.prune_threshold)
             )
+            # Never prune gDNA (last component).
+            prune_mask[-1] = False
 
-            delta = np.abs(theta_new - theta).sum()
-            theta = theta_new
+            if prune_mask.any():
+                prior[prune_mask] = 0.0
 
-            if delta < em_convergence_delta:
-                break
+                if self.em_config.mode == "vbem":
+                    alpha_out[prune_mask] = 1e-300
+                    for _ in range(10):
+                        alpha_out = _vbem_step(
+                            alpha_out, ec_data, log_eff_len,
+                            unique_totals, prior, em_totals,
+                        )
+                    total = alpha_out.sum()
+                    theta = alpha_out / total if total > 0 else alpha_out
+                else:
+                    theta[prune_mask] = 0.0
+                    total = theta.sum()
+                    if total > 0:
+                        theta /= total
+                    for _ in range(10):
+                        theta = _em_step(
+                            theta, ec_data, log_eff_len,
+                            unique_totals, prior, em_totals,
+                        )
+                    alpha_out = unique_totals + em_totals + prior
 
-        alpha = unique_totals + em_totals + prior
-        return theta, alpha
+        return theta, alpha_out
 
     # ------------------------------------------------------------------
     # Per-locus posterior assignment
