@@ -77,6 +77,9 @@ class _Index:
             "length": [1000] * self.num_transcripts,
         })
 
+    def get_exon_intervals(self, t_idx):
+        return None
+
 
 def _make_env(index):
     strand_models = StrandModels()

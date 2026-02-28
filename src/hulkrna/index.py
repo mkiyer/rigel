@@ -113,7 +113,7 @@ def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
     """
     rows = [
         RefInterval(t.ref, start, end, t.strand,
-                    IntervalType.SJ, t.t_index, t.g_index)
+                    IntervalType.SJ, t.t_index)
         for t in transcripts
         for start, end in t.introns()
     ]
@@ -195,15 +195,19 @@ def gtf_to_bed12(gtf_path: str | Path, bed_path: str | Path) -> Path:
 
 
 def _gen_transcript_intervals(t: Transcript) -> Iterator[RefInterval]:
-    """Yield exon and intron intervals for a single transcript."""
+    """Yield exon and transcript-span intervals for a single transcript.
+
+    Each exon produces an EXON interval.  One TRANSCRIPT interval spans
+    the full transcript ``[first_exon.start, last_exon.end)``.
+    """
     # Exons
     for e in t.exons:
         yield RefInterval(t.ref, e.start, e.end, t.strand,
-                          IntervalType.EXON, t.t_index, t.g_index)
-    # Introns (gaps between consecutive exons)
-    for e1, e2 in zip(t.exons[:-1], t.exons[1:]):
-        yield RefInterval(t.ref, e1.end, e2.start, t.strand,
-                          IntervalType.INTRON, t.t_index, t.g_index)
+                          IntervalType.EXON, t.t_index)
+    # One transcript span (replaces per-gap INTRON intervals)
+    if t.exons:
+        yield RefInterval(t.ref, t.exons[0].start, t.exons[-1].end,
+                          t.strand, IntervalType.TRANSCRIPT, t.t_index)
 
 
 def _gen_genomic_intervals(
@@ -297,21 +301,19 @@ class HulkIndex:
         self.t_to_strand_arr: np.ndarray | None = None
         self.g_to_strand_arr: np.ndarray | None = None
 
-        # Unified cgranges index (EXON + INTRON + INTERGENIC intervals)
-        # Label = row index into the _iv_* lookup arrays.
+        # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
+        # Label = index into _iv_type and _iv_t_set lookup lists.
         self.cr: cgranges.cgranges | None = None
-        self._iv_t_index: np.ndarray | None = None
-        self._iv_g_index: np.ndarray | None = None
-        self._iv_type: np.ndarray | None = None
+        self._iv_type: list[int] | None = None
+        self._iv_t_set: list[frozenset[int]] | None = None
 
-        # Splice-junction exact-match map  (ref, start, end, strand) → (t_set, g_set)
+        # Splice-junction exact-match map  (ref, start, end, strand) → frozenset[int]
         self.sj_map: dict | None = None
 
         # Splice-junction cgranges index (for gap containment queries / fragment length)
         # Label = row index into the _sj_* lookup arrays.
         self.sj_cr: cgranges.cgranges | None = None
         self._sj_t_index: np.ndarray | None = None
-        self._sj_g_index: np.ndarray | None = None
         self._sj_strand: np.ndarray | None = None
 
         # Per-transcript exon intervals for coverage-weight model.
@@ -479,16 +481,36 @@ class HulkIndex:
         iv_df = pd.read_feather(
             os.path.join(index_dir, INTERVALS_FEATHER)
         )
-        logger.debug("Building unified interval index")
+
+        # -- collapsed interval index -----------------------------------------
+        # Group rows by (ref, start, end, interval_type) and merge
+        # transcript indices into frozensets.  Each unique boundary is
+        # stored once in cgranges, with a label indexing into _iv_type
+        # and _iv_t_set lookup lists.
+        logger.debug("Building collapsed interval index")
+        _collapse: dict[tuple, tuple[int, set[int]]] = {}
+        for row in iv_df.itertuples(index=False):
+            key = (row.ref, row.start, row.end, int(row.interval_type))
+            if key not in _collapse:
+                _collapse[key] = (int(row.interval_type), set())
+            t_idx = int(row.t_index)
+            if t_idx >= 0:
+                _collapse[key][1].add(t_idx)
+
         cr = cgranges.cgranges()
-        for label, row in enumerate(iv_df.itertuples(index=False)):
-            cr.add(row.ref, row.start, row.end, label)
+        iv_type: list[int] = []
+        iv_t_set: list[frozenset[int]] = []
+        for label, ((ref, start, end, _itype), (itype_val, tset)) in enumerate(
+            _collapse.items()
+        ):
+            cr.add(ref, start, end, label)
+            iv_type.append(itype_val)
+            iv_t_set.append(frozenset(tset))
         cr.index()
         self.cr = cr
-        self._iv_t_index = iv_df["t_index"].values
-        self._iv_g_index = iv_df["g_index"].values
-        self._iv_type = iv_df["interval_type"].values
-        logger.debug(f"Interval index size: {len(iv_df)}")
+        self._iv_type = iv_type
+        self._iv_t_set = iv_t_set
+        logger.debug(f"Interval index: {len(iv_df)} rows → {len(iv_type)} collapsed")
 
         # -- per-transcript exon intervals for coverage-weight model ----------
         exon_mask = iv_df["interval_type"].values == int(IntervalType.EXON)
@@ -509,20 +531,16 @@ class HulkIndex:
             os.path.join(index_dir, SJ_FEATHER)
         )
 
-        # Exact-match map for counting (ref, start, end, strand) → sets
+        # Exact-match map for counting (ref, start, end, strand) → frozenset[int]
         logger.debug("Building splice junction exact-match map")
-        sj_map: dict[tuple, tuple[set, set]] = {}
-        for ref, start, end, strand, _ivtype, t_index, g_index in sj_df[
-            list(RefInterval._fields)
-        ].itertuples(index=False):
-            key = (ref, start, end, strand)
+        sj_map: dict[tuple, set[int]] = {}
+        for row in sj_df.itertuples(index=False):
+            key = (row.ref, row.start, row.end, row.strand)
             if key not in sj_map:
-                sj_map[key] = (set(), set())
-            sj_map[key][0].add(t_index)
-            sj_map[key][1].add(g_index)
+                sj_map[key] = set()
+            sj_map[key].add(int(row.t_index))
         self.sj_map = {
-            key: (frozenset(val[0]), frozenset(val[1]))
-            for key, val in sj_map.items()
+            key: frozenset(val) for key, val in sj_map.items()
         }
 
         # cgranges tree for containment / gap queries (fragment length)
@@ -533,7 +551,6 @@ class HulkIndex:
         sj_cr.index()
         self.sj_cr = sj_cr
         self._sj_t_index = sj_df["t_index"].values
-        self._sj_g_index = sj_df["g_index"].values
         self._sj_strand = sj_df["strand"].values
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
@@ -541,43 +558,14 @@ class HulkIndex:
 
     # -- query methods --------------------------------------------------------
 
-    def query_exon(self, exon: GenomicInterval) -> list[tuple[int, int, int]]:
-        """Query the unified interval index with an aligned exon block.
-
-        Intersects the single cgranges tree and returns every reference
-        interval (EXON, INTRON, or INTERGENIC) that overlaps the query.
-
-        Because the index tiles the entire genome, a valid query is
-        guaranteed to return at least one hit.
-
-        Parameters
-        ----------
-        exon : GenomicInterval
-            An aligned exon block from a ``Fragment``.
-
-        Returns
-        -------
-        list[tuple[int, int, int]]
-            List of (t_index, g_index, interval_type) tuples.
-            t_index and g_index are -1 for intergenic intervals.
-        """
-        hits: list[tuple[int, int, int]] = []
-        for _h_start, _h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
-            hits.append((
-                int(self._iv_t_index[label]),
-                int(self._iv_g_index[label]),
-                int(self._iv_type[label]),
-            ))
-        return hits
-
-    def query_exon_with_coords(
+    def query(
         self, exon: GenomicInterval,
-    ) -> list[tuple[int, int, int, int, int]]:
-        """Query interval index, returning hit coordinates for overlap.
+    ) -> list[tuple[int, int, int, frozenset[int]]]:
+        """Query the collapsed interval index with an aligned exon block.
 
-        Like :meth:`query_exon` but also returns the start and end
-        coordinates of each overlapping reference interval.  Used for
-        computing per-candidate exon overlap fractions.
+        Returns one entry per unique ``(ref, start, end, type)`` boundary
+        that overlaps the query.  The transcript set is already
+        pre-collapsed into a ``frozenset[int]``.
 
         Parameters
         ----------
@@ -586,17 +574,17 @@ class HulkIndex:
 
         Returns
         -------
-        list[tuple[int, int, int, int, int]]
-            List of (t_index, g_index, interval_type, hit_start, hit_end).
+        list[tuple[int, int, int, frozenset[int]]]
+            List of ``(hit_start, hit_end, interval_type, t_set)``
+            tuples.  ``t_set`` is empty for INTERGENIC intervals.
         """
-        hits: list[tuple[int, int, int, int, int]] = []
+        hits: list[tuple[int, int, int, frozenset[int]]] = []
         for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
             hits.append((
-                int(self._iv_t_index[label]),
-                int(self._iv_g_index[label]),
-                int(self._iv_type[label]),
                 h_start,
                 h_end,
+                self._iv_type[label],
+                self._iv_t_set[label],
             ))
         return hits
 
@@ -620,7 +608,7 @@ class HulkIndex:
 
     def query_gap_sjs(
         self, ref: str, start: int, end: int
-    ) -> list[tuple[int, int, int, int, int]]:
+    ) -> list[tuple[int, int, int, int]]:
         """Find annotated splice junctions fully contained in a gap region.
 
         Used for fragment-length computation: given the gap between paired-end
@@ -639,16 +627,15 @@ class HulkIndex:
 
         Returns
         -------
-        list[tuple[int, int, int, int, int]]
-            List of (t_index, g_index, strand, sj_start, sj_end) tuples
+        list[tuple[int, int, int, int]]
+            List of (t_index, strand, sj_start, sj_end) tuples
             where sj_start >= start and sj_end <= end.
         """
-        hits: list[tuple[int, int, int, int, int]] = []
+        hits: list[tuple[int, int, int, int]] = []
         for h_start, h_end, label in self.sj_cr.overlap(ref, start, end):
             if h_start >= start and h_end <= end:
                 hits.append((
                     int(self._sj_t_index[label]),
-                    int(self._sj_g_index[label]),
                     int(self._sj_strand[label]),
                     h_start,
                     h_end,
@@ -680,14 +667,16 @@ class HulkIndex:
                 os.path.join(self.index_dir, INTERVALS_FEATHER)
             )
             exon_mask = iv_df["interval_type"].values == int(IntervalType.EXON)
-            g_indices = iv_df["g_index"].values[exon_mask]
+            t_indices = iv_df["t_index"].values[exon_mask]
             starts = iv_df["start"].values[exon_mask]
             ends = iv_df["end"].values[exon_mask]
-            valid = (g_indices >= 0) & (g_indices < n_genes)
-            for g_idx, s, e in zip(
-                g_indices[valid], starts[valid], ends[valid]
+            valid = t_indices >= 0
+            for t_idx, s, e in zip(
+                t_indices[valid], starts[valid], ends[valid]
             ):
-                gene_exon_ivs[g_idx].append((int(s), int(e)))
+                g_idx = int(self.t_to_g_arr[int(t_idx)])
+                if 0 <= g_idx < n_genes:
+                    gene_exon_ivs[g_idx].append((int(s), int(e)))
         else:
             # Fallback: use transcript table with uniform exon length
             for g_idx in range(n_genes):

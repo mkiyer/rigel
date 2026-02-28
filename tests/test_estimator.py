@@ -712,6 +712,37 @@ class TestCountsOutput:
         assert df.loc[0, "count"] == 8.0  # g0 = t0 + t1
         assert df.loc[1, "count"] == 7.0  # g1 = t2
 
+    def test_gene_effective_length_abundance_weighted(self):
+        """Gene effective length is abundance-weighted mean of transcript eff lens."""
+        index = _make_index()  # t0,t1 → g0; t2 → g1
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
+        # Set different effective lengths per transcript
+        rc._t_eff_len = np.array([500.0, 1000.0, 300.0])
+        # t0 gets 90% of counts, t1 gets 10% → weighted toward t0
+        rc.unique_counts[0, _UNSPLICED_SENSE] = 90.0
+        rc.unique_counts[1, _UNSPLICED_SENSE] = 10.0
+        # t2 has counts too
+        rc.unique_counts[2, _UNSPLICED_SENSE] = 50.0
+
+        df = rc.get_gene_counts_df(index)
+        # g0: (90*500 + 10*1000) / (90+10) = 55000/100 = 550
+        assert df.loc[0, "effective_length"] == pytest.approx(550.0)
+        # g1: single transcript → 300
+        assert df.loc[1, "effective_length"] == pytest.approx(300.0)
+
+    def test_gene_effective_length_zero_counts_uses_mean(self):
+        """Zero-count genes use unweighted mean of transcript effective lengths."""
+        index = _make_index()  # t0,t1 → g0; t2 → g1
+        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
+        rc._t_eff_len = np.array([500.0, 1000.0, 300.0])
+        # No counts at all → both genes are zero-count
+
+        df = rc.get_gene_counts_df(index)
+        # g0: mean(500, 1000) = 750
+        assert df.loc[0, "effective_length"] == pytest.approx(750.0)
+        # g1: mean(300) = 300
+        assert df.loc[1, "effective_length"] == pytest.approx(300.0)
+
     def test_spliced_counts(self):
         """count_spliced captures both SPLICED_ANNOT and SPLICED_UNANNOT."""
         index = _make_index()

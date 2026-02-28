@@ -1,284 +1,320 @@
 # hulkrna Performance Optimization Plan
 
-## Executive Summary
+**Date:** 2026-02-28
+**Benchmark:** PVT1 locus, 100k reads, oracle BAM, 379 transcripts, 35 genes
+**Conditions:** gDNA 10% + nRNA 10% (realistic mixed-pool scenario)
 
-hulkrna is **14× slower** than salmon/kallisto (mean 7.2s vs 0.5s per 50k-fragment
-region).  Detailed profiling reveals two dominant bottlenecks that account for
-**85%** of wall time:
+---
 
-| Bottleneck | Time (chr17) | % of Total | Root Cause |
+## Current Profiling Summary (after P1 + P2 + collapsed index + P3)
+
+**Total pipeline time: 16.1s** (profiler stage timings)
+**cProfile total: 31.3s** (includes profiler overhead from double scan_and_buffer)
+
+| Stage | Time | % | Description |
 |---|---|---|---|
-| Per-locus EM | 14.1s | 63% | 48K units processed individually instead of 169 equivalence classes |
-| `resolve_fragment` | 5.1s | 22% | Pure-Python per-exon-block overlap loop |
-| `_scan_and_build_em_data` | 1.9s | 8% | Python list.append CSR building (22.8M appends) |
-| `buffer.append` | 1.9s | 8% | Per-fragment attribute copying |
+| `scan_and_buffer` | 7.0s | **43.4%** | BAM parse → resolve → buffer |
+| `EmDataBuilder.scan` | 7.7s | **48.1%** | Buffer → scored CSR candidates |
+| Per-locus EM | 1.0s | **6.5%** | SQUAREM iterations + posterior assignment |
+| Everything else | 0.3s | 2.0% | Index load, geometry, loci, priors |
 
-The EM bottleneck alone contributes **63%** of total time on the slowest region
-(chr17).  The fix in Priority 1 below is expected to deliver a **~20–50×** EM
-speedup, cutting chr17 from 22.6s to **~5–7s** with just algorithmic changes
-in pure Python + numpy.
+### scan_and_buffer internals (7.0s)
 
----
-
-## Profiling Data
-
-### Baseline Timing (50k fragments/region, oracle aligner, pristine)
-
-| Region | hulkrna | salmon | kallisto | hulkrna/salmon |
-|---|---|---|---|---|
-| chr17_43044295_43170245 | 22.55s | 1.17s | 0.55s | 19.3× |
-| chr10_121476640_121601584 | 15.02s | 1.23s | 0.52s | 12.2× |
-| chr11_35138870_35232402 | 7.06s | 0.40s | 0.67s | 17.7× |
-| chr7_55019017_55211628 | 4.89s | 0.34s | 0.40s | 14.4× |
-| **Mean** | **7.22s** | **0.52s** | **0.49s** | **13.9×** |
-
-### chr17 Stage Breakdown (worst case: 22.6s)
-
-```
-  scan_and_buffer                6.381s   28.3%
-    parse_bam_file:                0.408s   6.7%
-    Fragment.from_reads:           0.425s   6.9%
-    resolve_fragment:              5.051s  82.5%   ← Bottleneck #2
-    buffer.append:                 0.242s   3.9%
-  scan_and_build_em_data         1.862s    8.2%
-  Per-locus EM                  14.253s   63.2%   ← Bottleneck #1
-    Build locus EM data:           0.128s
-    Run locus EM:                 14.087s          ← 93% of EM stage
-    Assign posteriors:             0.038s
-```
-
-### chr11_5225000 (fast region: 2.4s, 24 transcripts, 7 loci)
-
-```
-  scan_and_buffer                1.808s   76.3%
-    resolve_fragment:              0.878s  55.2%
-  scan_and_build_em_data         0.440s   18.6%
-  Per-locus EM                   0.065s    2.8%
-```
-
-### cProfile Hot Functions (chr17, sorted by tottime)
-
-| Function | tottime | cumtime | Calls | Notes |
-|---|---|---|---|---|
-| `run_locus_em` | 6.51s | 10.86s | 1 | EM inner loop |
-| `compute_overlap_profile` | 2.18s | 5.85s | 50K | Per-fragment overlap |
-| `np.ufunc.at` (add.at) | 1.92s | 1.92s | 1007 | EM M-step scatter |
-| `list.append` | 1.56s | 1.56s | 22.8M | CSR building |
-| `index.query_exon` | 1.49s | 1.72s | 112K | cgranges query |
-| `index.query_exon_with_coords` | 1.45s | 1.67s | 112K | With coords |
-| `ndarray.repeat` | 1.35s | 1.35s | 2009 | EM E-step expand |
-| `_add_transcript_candidates` | 1.24s | 1.55s | 48K | mRNA scoring |
-| `buffer._AccumulatorChunk.append` | 1.11s | 1.94s | 50K | Columnar append |
-| `ufunc.reduceat` | 1.08s | 1.08s | 2004 | EM E-step reduce |
-| `_add_nrna_candidates` | 0.91s | 1.05s | 26K | nRNA scoring |
-
----
-
-## Key Findings
-
-### Finding 1: EM Processes Individual Units Instead of Equivalence Classes
-
-The chr17 mega-locus has:
-- **48,006 units** with 1,679,800 candidate entries (35 cand/unit)
-- But only **169 unique candidate-set patterns** — a **284× compression ratio**
-- Top pattern: 15,205 units all share the same 48 candidate set
-
-The current EM iterates over all 1.68M entries per iteration using CSR
-`reduceat`/`repeat`/`add.at` operations.  With equivalence-class grouping,
-each class becomes a single dense matrix operation, reducing overhead from
-48K individual units to 169 batched operations.
-
-### Finding 2: EM Fails to Converge
-
-The EM hits the 1000-iteration cap with delta=1.98e-5 (threshold=1e-6).
-Convergence profile:
-- iter 50: delta = 4.0e-3
-- iter 100: delta = 2.1e-3
-- iter 200: delta = 3.7e-4
-- iter 500: delta = 3.9e-5
-- iter 1000: delta = 2.0e-5 (still above threshold)
-
-The linear convergence rate is slow.  At the current rate, convergence to 1e-6
-would require ~3000+ iterations.
-
-### Finding 3: resolve_fragment is a Pure-Python Per-Overlap Loop
-
-`compute_overlap_profile` iterates over each fragment exon block (typically 2
-for paired-end), queries cgranges for overlapping intervals, and accumulates
-per-transcript overlap in Python dicts via `defaultdict(int)`.  For chr17 with
-52 transcripts, each query returns many hits, producing millions of Python dict
-operations.
-
-### Finding 4: CSR Building Uses 22.8M list.append Calls
-
-`_scan_and_build_em_data` builds CSR arrays via Python `list.append()` for
-`t_indices_list`, `log_liks_list`, and `count_cols_list`.  The 22.8M calls
-consume 1.56s.
-
----
-
-## Optimization Plan
-
-### Priority 1: Equivalence-Class EM (Expected: 20–50× EM speedup)
-
-**Impact:** Reduce EM from 14.1s → ~0.3–0.7s on chr17  
-**Effort:** Medium (pure Python/numpy, ~200 lines)  
-**Risk:** Low (mathematically equivalent)
-
-**Strategy:**  After building per-locus EM data, group units by their
-candidate index set.  For each equivalence class:
-
-```python
-# For class c with n_c units and candidates S_c = {c1, ..., ck}:
-# log_lik_matrix: (n_c, k_c) — each row is one unit's log-likelihoods
-# log_weights: (k_c,) = log(theta[S_c]) - log(eff_len[S_c])
-
-log_post = log_lik_matrix + log_weights  # broadcast (n_c, k_c)
-max_per_row = log_post.max(axis=1, keepdims=True)
-post = np.exp(log_post - max_per_row)
-post /= post.sum(axis=1, keepdims=True)
-em_totals[S_c] += post.sum(axis=0)  # column sums
-```
-
-**Concrete steps:**
-1. Add `_build_equiv_classes()` helper that groups local EM units by sorted
-   candidate tuple → returns list of `(candidate_indices, log_lik_matrix)`.
-2. Modify `run_locus_em()` to accept equiv-class data structure and iterate
-   over classes instead of the flat CSR.
-3. Each class processes a dense `(n_units_in_class × n_candidates)` matrix — 
-   numpy can vectorize this efficiently.
-
-**Estimated compression:** 169 classes from 48K units (chr17).  Each iteration
-touches the same 1.68M candidate entries but in 169 cache-friendly blocks
-instead of 48K tiny segments.  The `repeat`/`reduceat`/`add.at` overhead is
-eliminated.
-
-### Priority 2: EM Convergence Acceleration (Expected: 2–5× fewer iterations)
-
-**Impact:** Reduce iterations from 1000 → 200–500  
-**Effort:** Low (~30 lines)  
-**Risk:** Low
-
-**Strategy A — Relax tolerance:**  Raise `_EM_CONVERGENCE_DELTA` from 1e-6 to
-1e-4.  For count estimation, the difference between theta at delta=1e-4 vs 1e-6
-is negligible.  Would converge at ~200 iterations for chr17.
-
-**Strategy B — SQUAREM acceleration:**  Replace vanilla EM with SQUAREM
-(Varadhan & Roland 2008), a 3-step accelerator that achieves superlinear
-convergence with minimal code changes.  Salmon uses a similar acceleration.
-Expected: 50–100 iterations to converge to 1e-6.
-
-**Strategy C — Combined:**  Relax tolerance to 1e-5 + SQUAREM = ~30–50 iterations.
-
-### Priority 3: Vectorize resolve_fragment (Expected: 3–5× scan speedup)
-
-**Impact:** Reduce scan_and_buffer from 6.4s → ~1.5–2.5s on chr17  
-**Effort:** High (~300 lines, careful correctness)  
-**Risk:** Medium
-
-**Strategy A — Batch overlap computation:**  Instead of calling
-`query_exon_with_coords` per fragment-exon-block (Python loop), collect all
-fragment blocks first, batch-query cgranges, and compute overlaps in numpy:
-
-1. Collect all exon blocks: `(chrom, start, end, frag_id, block_idx)`.
-2. Batch cgranges query → array of `(frag_id, t_idx, interval_type, overlap_bp)`.
-3. `groupby(frag_id, t_idx)` to aggregate exon/intron overlap via numpy.
-4. Compute `read_length`, `exon_bp`, `intron_bp`, `unambig_intron_bp` vectorized.
-
-**Strategy B — Cython extension for compute_overlap_profile:**  The inner loop
-is simple arithmetic (clamp, subtract, accumulate).  A Cython version accessing
-cgranges data directly could achieve 10–20× speedup.
-
-**Strategy C — Pre-compute interval tree in array form:**  Replace cgranges
-Python callback with a sorted-array binary-search approach that returns raw
-numpy arrays.
-
-### Priority 4: Pre-allocate CSR Arrays (Expected: 1.5s savings)
-
-**Impact:** Reduce `_scan_and_build_em_data` by ~1.5s  
-**Effort:** Low (~50 lines)  
-**Risk:** Low
-
-**Strategy:**  Replace `list.append()` CSR building with pre-allocated numpy
-arrays.  Estimate total candidates from buffer metadata (n_buffered ×
-avg_candidates), allocate, and fill with an index pointer:
-
-```python
-# Pre-allocate with generous estimate
-max_candidates = buffer.total_fragments * avg_cand_estimate
-t_indices_arr = np.empty(max_candidates, dtype=np.int32)
-log_liks_arr = np.empty(max_candidates, dtype=np.float64)
-pos = 0
-# In inner loop:
-t_indices_arr[pos] = t_idx
-log_liks_arr[pos] = log_lik
-pos += 1
-# After:
-t_indices_arr = t_indices_arr[:pos]
-```
-
-Eliminates 22.8M `list.append` calls and the final `np.array()` conversion.
-
-### Priority 5: Buffer Append Optimization (Expected: 1s savings)
-
-**Impact:** Reduce buffer.append from 1.9s → ~0.5s  
-**Effort:** Medium (~100 lines)  
-**Risk:** Low
-
-**Strategy:**  Batch-append resolved fragments in groups of ~100–1000 instead
-of one-at-a-time.  Accumulate a list of `ResolvedFragment` objects, then
-copy all fields into columnar arrays in one bulk operation per field.
-
-### Priority 6: Cython/C Extension for Hot Loops (Expected: 5–10× overall)
-
-**Impact:** Approach salmon/kallisto speed  
-**Effort:** Very high  
-**Risk:** Medium (build complexity, platform portability)
-
-**Long-term strategy:**  Port the following to Cython or C:
-- `compute_overlap_profile` inner loop
-- `_add_transcript_candidates` / `_add_nrna_candidates` scoring
-- Fragment.from_reads + parse_read (pysam interaction)
-- EM inner loop (if equiv-class approach isn't sufficient)
-
----
-
-## Expected Impact Summary
-
-| Optimization | Est. chr17 Savings | Cumulative Time |
+| Function | Time | % of stage |
 |---|---|---|
-| Baseline | — | 22.6s |
-| P1: Equiv-class EM | −13.5s | **9.1s** |
-| P2: EM convergence accel | −0.3s | **8.8s** |
-| P3: Vectorize resolve | −3.5s | **5.3s** |
-| P4: Pre-alloc CSR | −1.5s | **3.8s** |
-| P5: Buffer batch append | −1.0s | **2.8s** |
+| `resolve_fragment` | 4.6s | **73.0%** |
+| `parse_bam_file` | 0.7s | 11.3% |
+| `Fragment.from_reads` | 0.6s | 9.7% |
+| `buffer.append` | 0.4s | 6.0% |
 
-With Priorities 1–5 (all pure Python/numpy), chr17 would drop from 22.6s →
-~2.8s.  The **mean** across 10 regions would drop from 7.2s → ~1.5–2.0s,
-putting hulkrna within **3–4×** of salmon/kallisto.
+### EmDataBuilder.scan internals (7.7s)
 
-Priority 6 (Cython) could close the remaining gap to **1–2×** of salmon/kallisto.
+| Function | Self time | Calls | Notes |
+|---|---|---|---|
+| `_score_wta_nrna` | 3.36s | 80,167 | Dominant due to nRNA 10%; absent in nRNA=0 runs |
+| `compute_coverage_weight_batch` | 1.60s | 89,763 | Called by both mRNA + nRNA |
+| `_emit_nrna` | 0.93s | 80,167 | CSR list appends for nRNA candidates |
+| `_score_wta_mrna` | 0.40s | 80,323 | Already vectorized |
+| `_finalize_unit_metadata` | 0.10s | 80,323 | |
+
+### Per-locus EM internals (1.0s)
+
+| Locus | Transcripts | Units | Components | Build | EM | Assign | Total |
+|---|---|---|---|---|---|---|---|
+| Locus 8 | 195 | 20,740 | 391 | 0.166s | 0.499s | 0.024s | **0.689s** |
+| Locus 4 | 141 | 42,199 | 283 | 0.046s | 0.224s | 0.007s | **0.278s** |
+| Other 10 | ≤20 | ≤7,173 | ≤41 | ~0.01s | ~0.06s | ~0.001s | 0.07s |
+
+### cProfile Top-12 by self time (31.3s total)
+
+| # | Function | Self time | Calls | Description |
+|---|---|---|---|---|
+| 1 | `resolve_fragment` | 5.63s | 100k | Single-pass query + overlap |
+| 2 | `_score_wta_nrna` | 3.36s | 80k | Vectorized nRNA scoring |
+| 3 | `buffer.append` | 1.87s | 80k | Per-fragment list accumulation |
+| 4 | `compute_coverage_weight_batch` | 1.60s | 90k | Trapezoid model, already vectorized |
+| 5 | `list.append` | 1.31s | 19M | CSR list accumulation |
+| 6 | `array.array.append` | 1.19s | 13M | CSR array accumulation |
+| 7 | `dict.get` | 0.99s | 13.7M | From resolve_fragment inner loops |
+| 8 | `_emit_nrna` | 0.93s | 80k | nRNA CSR list accumulation |
+| 9 | `builtins.max` | 0.67s | 6.1M | Scalar max in inner loops |
+| 10 | `numpy.ufunc.reduce` | 0.59s | 651k | NumPy internal reductions |
+| 11 | `dict.setdefault` | 0.59s | 6.4M | resolve_fragment inner loops |
+| 12 | `_em_step` | 0.51s | 216 | Per-EC dense matrix operations |
+
+### Total function calls: 100M (down from 113M pre-P3, 323M baseline)
+### Total pipeline (profiler): 16.1s (down from 23.6s pre-P3, 52.7s baseline)
+
+---
+
+## Profiling History
+
+| Stage | Baseline | After P1 | After P1+P2 | +Collapsed idx | **+P3** |
+|---|---|---|---|---|---|
+| `scan_and_buffer` | 22.5s | 17.7s | 16.9s | 6.7s | **7.0s** |
+| `EmDataBuilder.scan` | 15.8s | 15.6s | 12.8s | 7.3s | **7.7s** |
+| Per-locus EM | 14.1s | 13.0s | 13.5s | 9.3s | **1.0s** |
+| **Total** | **52.7s** | **46.8s** | **43.4s** | **23.6s** | **16.1s** |
+
+| Metric | Baseline | Current | Reduction |
+|---|---|---|---|
+| Pipeline time | 52.7s | **16.1s** | **69.4%** |
+| Function calls | 323M | **100M** | **69.0%** |
+| Speedup | 1.0× | **3.3×** | — |
+
+> **P3 impact:** Per-locus EM collapsed from 9.3s → 1.0s (89% reduction).
+> `BiasProfile.effective_length` (4.84s, 183k calls) and
+> `fragment_weight` (0.99s, 2.14M calls) were completely eliminated
+> from the hot path by the vectorized uniform fast-path. The
+> `_apply_bias_correction_uniform` function does not even appear in
+> the top-60 cProfile entries — it executes in ~1ms total.
+
+---
+
+## Completed Optimizations
+
+### P1: Eliminate double cgranges query ✅
+
+**Merged** two cgranges queries per exon block (transcript set + overlap)
+into a single `query_exon_with_coords` call.
+
+- `resolve_fragment`: 19.4s → 14.7s
+- Pipeline total: 52.7s → **46.8s** (5.9s saved, 11.2% speedup)
+- All 654 tests pass, MAE unchanged
+
+### P2: Vectorize per-candidate scoring ✅
+
+**Replaced** Python per-candidate loops with batch NumPy operations in
+`_score_wta_mrna`, `_score_wta_nrna`, `compute_coverage_weight_batch`,
+and `genomic_to_transcript_pos_bisect`.
+
+- `EmDataBuilder.scan`: 15.6s → 12.8s
+- Function calls: 309M → **227M** (82M fewer)
+- Pipeline total: 46.8s → **43.4s** (3.4s saved)
+- All 654 tests pass, MAE unchanged
+
+### Collapsed interval index ✅
+
+**Merged** EXON+INTRON cgranges into a single collapsed index with one
+`query()` call per exon block returning `(start, end, itype, t_set)`.
+
+- `resolve_fragment`: 14.4s → 4.4s
+- Function calls: 227M → **113M** (50% reduction)
+- Pipeline total: 43.4s → **23.6s** (19.8s saved)
+- All 654 tests pass, MAE unchanged
+
+### P3: Uniform bias fast-path ✅
+
+**Added** `is_uniform` flag to `BiasProfile` and a vectorized
+`_apply_bias_correction_uniform` that computes
+`−log(max(L − frag_len + 1, 1))` in 3 lines of NumPy, completely
+bypassing the per-pair LUT loop, `effective_length`, and
+`fragment_weight` calls.
+
+- Per-locus EM: 9.3s → **1.0s** (89% reduction)
+  - Locus 8: 6.74s → 0.69s
+  - Locus 4: 2.32s → 0.28s
+- `BiasProfile.effective_length`: 4.84s → **0s** (eliminated)
+- `BiasProfile.fragment_weight`: 0.99s → **0s** (eliminated)
+- `numpy.ufunc.reduce`: 3.39s → 0.59s (83% reduction)
+- Function calls: 113M → **100M** (13M fewer)
+- Pipeline total: 23.6s → **16.1s** (7.5s saved, 32% reduction)
+- All 663 tests pass (9 new tests added), MAE unchanged
+
+---
+
+## Remaining Optimization Opportunities
+
+### P4: Reduce nRNA scoring overhead ★★★ HIGH IMPACT (now #1)
+
+**Problem:** `_score_wta_nrna` is now the **#2 self-time function** at
+**3.36s** (7.31s cumulative including `_emit_nrna` + coverage weight).
+With per-locus EM collapsed to 1.0s, nRNA scoring is the dominant
+remaining bottleneck in the EM-builder path.
+
+It's called for every buffered fragment (80k), scoring nRNA candidates
+even when:
+- The transcript is single-exon (always filtered out → wasted computation)
+- The locus has zero intronic evidence (nRNA prior will be zeroed)
+
+**Fix A — Short-circuit single-exon transcripts before vectorization:**
+
+Currently the single-exon filter happens inside `_score_wta_nrna` after
+building arrays. Check it before allocation:
+```python
+multi_exon_mask = self.ctx.multi_exon_mask[t_inds]
+if not np.any(multi_exon_mask):
+    return {}
+```
+
+**Fix B — Skip nRNA scoring for genes with zero intronic evidence:**
+
+Pre-compute a per-gene "has intronic evidence" flag during the scan pass.
+Skip `_score_wta_nrna` for fragments in genes where intronic evidence is
+zero. Many genes in the PVT1 benchmark have zero nRNA evidence.
+
+**Fix C — Stop emitting nRNA candidates for zero-prior components:**
+
+nRNA components with zero prior are zeroed in the EM anyway. Don't emit
+them in `_emit_nrna`. This reduces CSR size and EM candidate count.
+
+**Expected savings:** ~2-4s (15-25% of total)
+
+---
+
+### P5: Reduce resolve_fragment inner-loop overhead ★★ MEDIUM-HIGH IMPACT
+
+**Problem:** `resolve_fragment` is the **#1 self-time function** at
+**5.63s**. The inner loop processes each cgranges hit, clipping intervals
+and accumulating overlap BP per transcript. Key overhead sources:
+
+- `dict.get`: 13.7M calls, 0.99s (overlap_bp lookups)
+- `builtins.max`: 6.1M calls, 0.67s (interval clipping)
+- `dict.setdefault`: 6.4M calls, 0.59s
+- `_subtract_intervals`: 3.3M calls, 0.41s
+- `set.update`: 3.0M calls, 0.33s
+
+**Fix A — Use arrays instead of dicts for overlap accumulation:**
+
+Transcript indices are small integers (0-378). Use fixed-size NumPy
+arrays indexed by `t_idx` instead of `defaultdict(int)`, eliminating
+`dict.setdefault`, `dict.get` overhead (~1.6s).
+
+**Fix B — Vectorize interval clipping:**
+
+Batch `max()`/`min()` calls into NumPy operations when `index.query()`
+returns multiple hits (~0.7s).
+
+**Fix C — Defer unambig_intron_bp computation:**
+
+`_subtract_intervals` (3.3M calls, 0.41s) is only needed for nRNA init
+on unique-gene fragments. Skip for multi-gene fragments.
+
+**Expected savings:** ~2-3s (12-19% of total)
+
+---
+
+### P6: Reduce buffer/CSR append overhead ★★ MEDIUM IMPACT
+
+**Problem:** Buffer and CSR list appends consume substantial time:
+
+- `buffer.append` (AccumulatorChunk): 1.87s, 80k calls
+- `list.append`: 19M calls, 1.31s
+- `array.array.append`: 13M calls, 1.19s
+- `_emit_nrna`: 0.93s, 80k calls (Python loop over winners)
+
+**Fix A — Pre-allocate NumPy arrays for buffer accumulation:**
+
+Replace Python lists with pre-allocated NumPy arrays and a cursor index.
+
+**Fix B — Use `extend()` for batch CSR emission:**
+
+Collect winners into temporary lists and `extend()` once per fragment.
+
+**Expected savings:** ~1-2s
+
+---
+
+### P7: Coverage weight optimization ★ LOW-MEDIUM IMPACT
+
+**Problem:** `compute_coverage_weight_batch` takes 1.60s across 90k calls.
+Small-batch NumPy overhead dominates (mean ~25 candidates per call).
+
+**Fix — Fuse operations and scalar fallback for small batches:**
+
+For batches < 32, use a scalar loop to avoid 6× array allocation overhead.
+
+**Expected savings:** ~0.5-1s
+
+---
+
+### P8: EM inner loop ★ LOW IMPACT (collapsed by P3)
+
+With P3 implemented, EM itself takes only 1.0s total. The remaining cost
+is dominated by `_build_equiv_classes` (0.14s) and `_em_step` (0.71s).
+Further optimization here has diminishing returns.
+
+**Fix — Vectorize equivalence class construction:**
+
+Replace Python dict grouping with `np.unique` on compound keys.
+
+**Expected savings:** ~0.1-0.3s
+
+---
+
+### P9: Memory optimizations ★ LOW IMPACT (aids scalability)
+
+**9a — BiasProfile uniform case:**
+Don't allocate `np.arange(L+1, float64)` prefix-sum arrays for uniform.
+Store only integer length. Saves ~16 MB per locus (PVT1), ~100+ MB (chr22).
+
+**9b — ScanData CSR float32 for coverage_weights.**
+
+**9c — Buffer field consolidation.**
 
 ---
 
 ## Recommended Execution Order
 
-1. **P1 + P2** (EM optimizations) — biggest impact, medium effort, low risk.
-   Implement equiv-class EM and relax convergence tolerance together.
-   **Expected outcome: 22.6s → ~9s.**
+| Phase | Optimizations | Status | Savings |
+|---|---|---|---|
+| **Phase 1a** | P1 (merge cgranges query) | ✅ Done | **5.9s (52.7→46.8s)** |
+| **Phase 1b** | P2 (vectorize scoring) | ✅ Done | **3.4s (46.8→43.4s)** |
+| **Phase 1c** | Collapsed interval index | ✅ Done | **19.8s (43.4→23.6s)** |
+| **Phase 2** | P3 (uniform bias fast-path) | ✅ Done | **7.5s (23.6→16.1s)** |
+| **Phase 3** | P4 (nRNA gating) + P5 (resolve inner loops) | 🔲 Pending | **~4-7s (16→~10s)** |
+| **Phase 4** | P6 (buffer/CSR) + P7 (cov weight) | 🔲 Pending | **~2-3s (10→~7s)** |
+| **Phase 5** | P8 (EM) + P9 (memory) | 🔲 Pending | ~0.5s + memory |
 
-2. **P4** (Pre-alloc CSR) — quick win, low effort.
-   **Expected outcome: 9s → ~7.5s.**
+### Projected timeline
 
-3. **P3** (Vectorize resolve) — biggest remaining bottleneck.
-   **Expected outcome: 7.5s → ~4s.**
+| Milestone | Total time | Speedup vs original |
+|---|---|---|
+| Baseline | 52.7s | 1.0× |
+| After P1+P2 | 43.4s | 1.2× |
+| After collapsed index | 23.6s | 2.2× |
+| **After P3 (current)** | **16.1s** | **3.3×** |
+| After P4+P5 | ~**10s** | **5.3×** |
+| After all (P4-P7) | ~**7s** | **7.5×** |
 
-4. **P5** (Buffer batch) — diminishing returns, do if time permits.
-   **Expected outcome: 4s → ~3s.**
+**Next target: P4 (nRNA scoring gating) + P5 (resolve_fragment inner loops).**
 
-5. **P6** (Cython) — only if ≤2× of salmon/kallisto is required.
+After P3, the pipeline is dominated by two stages of roughly equal cost:
+`scan_and_buffer` (7.0s) and `EmDataBuilder.scan` (7.7s). P4 targets the
+scan stage (3.36s in nRNA scoring), P5 targets the resolve stage (5.63s).
+Together they could bring the total under 10s.
 
-All optimizations preserve mathematical equivalence and should not affect
-accuracy.  Each should be validated by confirming the existing 723 tests pass
-and benchmark MAE values remain unchanged.
+---
+
+## cProfile comparison: Before vs After P3
+
+| Function | Before P3 | After P3 | Change |
+|---|---|---|---|
+| `BiasProfile.effective_length` | 4.84s (183k calls) | **0s** | **eliminated** |
+| `numpy.ufunc.reduce` | 3.39s (834k calls) | 0.59s (651k calls) | **-83%** |
+| `BiasProfile.fragment_weight` | 0.99s (2.14M calls) | **0s** | **eliminated** |
+| `_apply_bias_correction` (self) | 1.06s | **~0s** | **eliminated** |
+| `_em_step` | 0.50s | 0.51s | unchanged |
+| `_build_equiv_classes` | 0.10s | 0.10s | unchanged |
+| Per-locus EM (wall time) | 9.30s | **1.04s** | **-89%** |
+| **Pipeline total** | **23.6s** | **16.1s** | **-32%** |

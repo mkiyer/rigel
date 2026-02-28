@@ -27,7 +27,6 @@ def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
             "strand": [0],
             "interval_type": [2],
             "t_index": [-1],
-            "g_index": [-1],
         }
     )
     iv_df.to_feather(idx_dir / INTERVALS_FEATHER)
@@ -40,7 +39,6 @@ def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
             "strand",
             "interval_type",
             "t_index",
-            "g_index",
         ]
     )
     sj_df.to_feather(idx_dir / SJ_FEATHER)

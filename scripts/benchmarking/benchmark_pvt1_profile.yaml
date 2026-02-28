@@ -1,0 +1,64 @@
+# Benchmark: chr8 PVT1 / MYC locus — profiling config
+# 35 genes, 379 transcripts, 100k reads
+# gDNA 10%, nRNA 10%
+
+genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_pvt1_profile
+
+threads: 8
+
+# ── Region ───────────────────────────────────────────────────────────
+region:
+  - PVT1_MYC: chr8:126445441-128594175
+
+# ── Aligners ─────────────────────────────────────────────────────────
+aligners:
+  oracle: {}
+
+# ── HulkRNA configs ─────────────────────────────────────────────────
+hulkrna_configs:
+  default: {}
+
+# ── Simulation ───────────────────────────────────────────────────────
+simulation:
+  n_fragments: 100000
+  sim_seed: 42
+  pipeline_seed: 42
+  frag_mean: 250.0
+  frag_std: 50.0
+  frag_min: 50
+  frag_max: 1000
+  read_length: 150
+  error_rate: 0.0
+
+# ── Abundance ────────────────────────────────────────────────────────
+abundance:
+  mode: file
+  file: /Users/mkiyer/proj/hulkrna/scripts/benchmarking/chr8_pvt1_myc_abundance.tsv
+
+# ── gDNA contamination ──────────────────────────────────────────────
+gdna:
+  rates: [0.1]
+  rate_labels: [moderate]
+  frag_mean: 350.0
+  frag_std: 100.0
+  frag_min: 100
+  frag_max: 1000
+
+# ── Nascent RNA ──────────────────────────────────────────────────────
+nrna:
+  rates: [0.1]
+  rate_labels: [moderate]
+
+# ── Strand specificity ──────────────────────────────────────────────
+strand_specificities: [1.0]
+
+# ── HTSeq ────────────────────────────────────────────────────────────
+htseq:
+  enabled: false
+
+runtime:
+  keep_going: false
+
+verbose: true

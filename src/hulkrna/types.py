@@ -107,14 +107,17 @@ class GenomicInterval(NamedTuple):
 class IntervalType(IntEnum):
     """Classification of a genomic interval relative to gene annotations.
 
+    ``EXON`` marks an individual exon boundary.  ``TRANSCRIPT`` marks the
+    full transcript span ``[start, end)`` — intron overlap is derived as
+    ``transcript_bp - exon_bp``.  ``INTERGENIC`` fills gaps between genes.
+
     ``SJ`` is an annotated splice junction that exactly matches a known
     intron in the transcript reference.  ``SJ_UNANNOT`` is a splice
     junction observed in the CIGAR (N-operation) but not matching any
-    annotated intron — these are recorded with ``t_index = -1`` and
-    ``g_index = -1``.
+    annotated intron — these are recorded with ``t_index = -1``.
     """
     EXON = 0
-    INTRON = 1
+    TRANSCRIPT = 1
     INTERGENIC = 2
     SJ = 3
     SJ_UNANNOT = 4
@@ -127,9 +130,10 @@ class IntervalType(IntEnum):
 class RefInterval(NamedTuple):
     """A reference-annotated genomic interval with index metadata.
 
-    Used for both tiling intervals (EXON/INTRON/INTERGENIC in the cgranges
-    overlap index) and splice junctions (SJ in the exact-match lookup).
-    Replaces the former separate ``Interval`` and ``SpliceJunction`` types.
+    Used for both tiling intervals (EXON/TRANSCRIPT/INTERGENIC in the
+    cgranges overlap index) and splice junctions (SJ in the exact-match
+    lookup).  Gene index is derived from the transcript table at load
+    time — not stored per-interval.
     """
     ref: str
     start: int
@@ -137,7 +141,6 @@ class RefInterval(NamedTuple):
     strand: int = Strand.NONE
     interval_type: int = IntervalType.INTERGENIC
     t_index: int = -1
-    g_index: int = -1
 
 
 # ---------------------------------------------------------------------------

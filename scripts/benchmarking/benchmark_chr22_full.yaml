@@ -1,0 +1,92 @@
+# Benchmark: Full chromosome 22
+# ~1,454 genes, ~5,341 transcripts — stress-test at scale
+# 1M reads, oracle + minimap2 aligners
+# Compares MAP vs VBEM vs VBEM-strong vs MAP-pruned
+
+genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_chr22_full
+
+threads: 8
+
+# ── Region ───────────────────────────────────────────────────────────
+region:
+  - CHR22: chr22:1-50818468
+
+# ── Aligners ─────────────────────────────────────────────────────────
+aligners:
+  oracle: {}
+  minimap2:
+    type: minimap2
+    preset: "splice:sr"
+    secondary: true
+    bed_guided: true
+
+# ── HulkRNA configs (parameter sweep) ───────────────────────────────
+hulkrna_configs:
+  # Default MAP-EM (baseline)
+  map_default:
+    em_mode: map
+    em_prior_alpha: 0.01
+
+  # VBEM — variational Bayes EM (tends toward sparser solutions)
+  vbem:
+    em_mode: vbem
+    em_prior_alpha: 0.01
+
+  # VBEM with stronger Dirichlet prior (more aggressive sparsity)
+  vbem_strong:
+    em_mode: vbem
+    em_prior_alpha: 0.1
+
+  # MAP-EM with post-EM pruning (evidence-ratio filter)
+  map_pruned:
+    em_mode: map
+    em_prior_alpha: 0.01
+    prune_threshold: 0.01
+
+# ── Simulation ───────────────────────────────────────────────────────
+simulation:
+  n_fragments: 1000000
+  sim_seed: 42
+  pipeline_seed: 42
+  frag_mean: 250.0
+  frag_std: 50.0
+  frag_min: 50
+  frag_max: 1000
+  read_length: 150
+  error_rate: 0.001
+
+# ── Abundance ────────────────────────────────────────────────────────
+abundance:
+  mode: random
+  seed: 42
+  min: 0.01
+  max: 100000.0
+
+# ── gDNA contamination ──────────────────────────────────────────────
+gdna:
+  rates: [0.0, 0.1]
+  rate_labels: [none, moderate]
+  frag_mean: 350.0
+  frag_std: 100.0
+  frag_min: 100
+  frag_max: 1000
+
+# ── Nascent RNA ──────────────────────────────────────────────────────
+nrna:
+  rates: [0.0]
+  rate_labels: [none]
+
+# ── Strand specificity ──────────────────────────────────────────────
+strand_specificities: [1.0]
+
+# ── HTSeq ────────────────────────────────────────────────────────────
+htseq:
+  enabled: true
+  conda_env: htseq
+
+runtime:
+  keep_going: true
+
+verbose: true

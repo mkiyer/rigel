@@ -73,6 +73,37 @@ EM_PRIOR_EPSILON = 1e-10
 _EM_CONVERGENCE_DELTA = 1e-6
 
 
+def _apply_bias_correction_uniform(log_liks, t_indices, tx_starts, tx_ends,
+                                    profile_lengths):
+    """Uniform bias fast-path: pure vectorized NumPy, no Python loops.
+
+    Under uniform bias:
+    - effective_length(frag_len) = max(L - frag_len + 1, 1)
+    - fragment_weight(start, end) = 1.0 (for valid spans)
+
+    So the correction is simply ``-log(max(L - frag_len + 1, 1))``.
+
+    Parameters
+    ----------
+    log_liks : np.ndarray
+        float64[n_candidates] — modified in-place.
+    t_indices : np.ndarray
+        int32[n_candidates] — component indices into *profile_lengths*.
+    tx_starts, tx_ends : np.ndarray
+        int32[n_candidates] — transcript-relative coordinates.
+    profile_lengths : np.ndarray
+        int64[n_components] — transcript/component lengths.
+    """
+    _MAX_FLEN = 1_000_000
+    frag_lens = np.clip(
+        (tx_ends - tx_starts).astype(np.int64), 0, _MAX_FLEN - 1,
+    )
+    eff_lens = np.maximum(
+        profile_lengths[t_indices] - frag_lens + 1, 1,
+    ).astype(np.float64)
+    log_liks -= np.log(eff_lens)
+
+
 def _apply_bias_correction(log_liks, t_indices, tx_starts, tx_ends,
                            bias_profiles):
     """Apply per-candidate positional bias correction **in-place**.
@@ -88,22 +119,33 @@ def _apply_bias_correction(log_liks, t_indices, tx_starts, tx_ends,
     exactly reproducing the former baked-in effective-length
     correction.
 
-    Uses a lookup table keyed by ``(component_index, frag_len)``
-    so that ``BiasProfile.effective_length`` is called at most once
-    per unique pair — many candidates share the same pair via
-    equivalence classes.
+    When all profiles are uniform, dispatches to a vectorized NumPy
+    fast-path that avoids all Python loops and per-candidate method
+    calls.  For non-uniform profiles, falls back to a lookup-table
+    approach calling ``BiasProfile.effective_length`` per unique pair.
     """
     n = len(t_indices)
     if n == 0 or not bias_profiles:
         return
 
-    frag_lens = (tx_ends - tx_starts).astype(np.int64)
+    # --- Fast path: all uniform → vectorized NumPy -------------------
+    if all(p.is_uniform for p in bias_profiles):
+        profile_lengths = np.array(
+            [p.length for p in bias_profiles], dtype=np.int64,
+        )
+        _apply_bias_correction_uniform(
+            log_liks, t_indices, tx_starts, tx_ends, profile_lengths,
+        )
+        return
 
-    # --- Effective-length LUT ----------------------------------------
-    # Compound key: comp_idx * MAX_FLEN + frag_len.  Using np.unique
-    # to identify distinct pairs keeps the Python loop to the small
-    # number of unique (component, frag_len) combinations.
+    # --- General path: LUT + per-candidate fragment weight -----------
+    frag_lens = (tx_ends - tx_starts).astype(np.int64)
+    # Clamp to [0, MAX_FLEN) so the compound key arithmetic is safe.
+    # Discordant minimap2 pairs can produce genomic footprints > 1 Mb;
+    # any footprint ≥ profile length already yields effective_length=1,
+    # so clamping is functionally neutral.
     _MAX_FLEN = 1_000_000
+    frag_lens = np.clip(frag_lens, 0, _MAX_FLEN - 1)
     compound = t_indices.astype(np.int64) * _MAX_FLEN + frag_lens
     unique_compound, inverse = np.unique(compound, return_inverse=True)
 
@@ -1260,22 +1302,31 @@ class AbundanceEstimator:
         with np.errstate(divide="ignore", invalid="ignore"):
             gdna_rate = np.where(denom > 0, n_gdna / denom, 0.0)
 
-        # Gene effective length: count-weighted mean of transcript
+        # Gene effective length: abundance-weighted mean of transcript
         # effective lengths.  For genes with zero counts, use the
-        # maximum transcript effective length.
+        # unweighted mean of transcript effective lengths (since there
+        # are no fragments to weight, the effective lengths already
+        # incorporate the fragment length model).
         t_eff = self._t_eff_len
         t_counts_flat = (self.unique_counts + self.em_counts).sum(axis=1)
         g_eff_num = np.zeros(n_genes, dtype=np.float64)
         g_eff_den = np.zeros(n_genes, dtype=np.float64)
         np.add.at(g_eff_num, t_to_g, t_counts_flat * t_eff)
         np.add.at(g_eff_den, t_to_g, t_counts_flat)
-        g_eff_max = np.zeros(n_genes, dtype=np.float64)
-        np.maximum.at(g_eff_max, t_to_g, t_eff)
+        # Fallback for zero-count genes: unweighted mean of transcript eff lens
+        g_eff_sum = np.zeros(n_genes, dtype=np.float64)
+        g_eff_cnt = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(g_eff_sum, t_to_g, t_eff)
+        np.add.at(g_eff_cnt, t_to_g, 1.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            g_eff_mean = np.where(
+                g_eff_cnt > 0, g_eff_sum / g_eff_cnt, 1.0,
+            )
         with np.errstate(divide="ignore", invalid="ignore"):
             g_eff_len = np.where(
                 g_eff_den > 0,
                 g_eff_num / g_eff_den,
-                g_eff_max,
+                g_eff_mean,
             )
         g_eff_len = np.maximum(g_eff_len, 1.0)
 

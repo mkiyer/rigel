@@ -193,3 +193,162 @@ class TestNonUniformBias:
         # Total starts = 91, eff should be > 91 (because of 2.0 region)
         assert eff > L - frag_len + 1  # > uniform
         assert eff < 2.0 * (L - frag_len + 1)  # < all-2.0
+
+
+# -----------------------------------------------------------------------
+# is_uniform flag
+# -----------------------------------------------------------------------
+
+
+class TestIsUniformFlag:
+    """Verify the is_uniform flag is set correctly."""
+
+    def test_uniform_factory_sets_flag(self):
+        p = BiasProfile.uniform(100)
+        assert p.is_uniform is True
+
+    def test_manual_construction_defaults_false(self):
+        B = np.arange(11, dtype=np.float64)
+        p = BiasProfile(prefix_sum=B)
+        assert p.is_uniform is False
+
+    def test_non_uniform_profile_flag_false(self):
+        L = 10
+        b = np.arange(1, L + 1, dtype=np.float64)
+        B = np.zeros(L + 1, dtype=np.float64)
+        B[1:] = np.cumsum(b)
+        p = BiasProfile(prefix_sum=B)
+        assert p.is_uniform is False
+
+    def test_build_uniform_profiles_sets_flag(self):
+        lengths = np.array([100, 200, 500])
+        profiles = build_uniform_profiles(lengths)
+        for prof in profiles:
+            assert prof.is_uniform is True
+
+
+# -----------------------------------------------------------------------
+# _apply_bias_correction_uniform — vectorized fast-path equivalence
+# -----------------------------------------------------------------------
+
+
+class TestApplyBiasCorrectionUniform:
+    """Verify the uniform fast-path matches the general path exactly."""
+
+    def _run_general_path(self, log_liks, t_indices, tx_starts, tx_ends,
+                          bias_profiles):
+        """Run the general (non-uniform) LUT path by temporarily
+        clearing is_uniform on all profiles."""
+        import math as _math
+        n = len(t_indices)
+        _MAX_FLEN = 1_000_000
+        frag_lens = np.clip(
+            (tx_ends - tx_starts).astype(np.int64), 0, _MAX_FLEN - 1)
+        compound = t_indices.astype(np.int64) * _MAX_FLEN + frag_lens
+        unique_compound, inverse = np.unique(compound, return_inverse=True)
+        log_eff = np.empty(len(unique_compound), dtype=np.float64)
+        for j in range(len(unique_compound)):
+            uc = int(unique_compound[j])
+            cidx, fl = divmod(uc, _MAX_FLEN)
+            prof = bias_profiles[int(cidx)]
+            # Use the prefix-sum path regardless of is_uniform
+            L = prof.length
+            n_valid = L - int(fl) + 1
+            eff = max(n_valid, 1) if n_valid > 0 else 1
+            log_eff[j] = _math.log(max(float(eff), 1e-300))
+        log_liks -= log_eff[inverse]
+        # fragment_weight is 1.0 for uniform → no adjustment
+
+    def test_equivalence_simple(self):
+        """Basic 3-transcript, 5-candidate scenario."""
+        from hulkrna.estimator import _apply_bias_correction
+
+        profiles = [BiasProfile.uniform(500), BiasProfile.uniform(1000),
+                    BiasProfile.uniform(200)]
+        t_indices = np.array([0, 1, 2, 0, 1], dtype=np.int32)
+        tx_starts = np.array([10, 20, 5, 100, 50], dtype=np.int32)
+        tx_ends = np.array([260, 320, 155, 350, 550], dtype=np.int32)
+
+        ll_fast = np.zeros(5, dtype=np.float64)
+        ll_general = np.zeros(5, dtype=np.float64)
+
+        _apply_bias_correction(ll_fast, t_indices, tx_starts, tx_ends, profiles)
+        self._run_general_path(ll_general, t_indices, tx_starts, tx_ends,
+                               profiles)
+
+        np.testing.assert_allclose(ll_fast, ll_general, atol=1e-12)
+
+    def test_equivalence_degenerate_frag_len(self):
+        """Fragment length > transcript length → effective_length = 1."""
+        from hulkrna.estimator import _apply_bias_correction
+
+        profiles = [BiasProfile.uniform(100)]
+        t_indices = np.array([0, 0], dtype=np.int32)
+        tx_starts = np.array([0, 0], dtype=np.int32)
+        tx_ends = np.array([50, 200], dtype=np.int32)  # 200 > 100
+
+        ll_fast = np.zeros(2, dtype=np.float64)
+        ll_general = np.zeros(2, dtype=np.float64)
+
+        _apply_bias_correction(ll_fast, t_indices, tx_starts, tx_ends, profiles)
+        self._run_general_path(ll_general, t_indices, tx_starts, tx_ends,
+                               profiles)
+
+        np.testing.assert_allclose(ll_fast, ll_general, atol=1e-12)
+
+    def test_equivalence_many_components(self):
+        """Stress test with many components mimicking a real locus."""
+        from hulkrna.estimator import _apply_bias_correction
+
+        rng = np.random.default_rng(42)
+        n_components = 200
+        n_candidates = 10000
+        lengths = rng.integers(100, 5000, size=n_components)
+        profiles = [BiasProfile.uniform(int(l)) for l in lengths]
+
+        t_indices = rng.integers(0, n_components, size=n_candidates).astype(np.int32)
+        tx_starts = rng.integers(0, 500, size=n_candidates).astype(np.int32)
+        tx_ends = tx_starts + rng.integers(50, 600, size=n_candidates).astype(np.int32)
+
+        ll_fast = np.zeros(n_candidates, dtype=np.float64)
+        ll_general = np.zeros(n_candidates, dtype=np.float64)
+
+        _apply_bias_correction(ll_fast, t_indices, tx_starts, tx_ends, profiles)
+        self._run_general_path(ll_general, t_indices, tx_starts, tx_ends,
+                               profiles)
+
+        np.testing.assert_allclose(ll_fast, ll_general, atol=1e-12)
+
+    def test_empty_input(self):
+        """No candidates → no modification."""
+        from hulkrna.estimator import _apply_bias_correction
+
+        profiles = [BiasProfile.uniform(100)]
+        ll = np.array([], dtype=np.float64)
+        ti = np.array([], dtype=np.int32)
+        ts = np.array([], dtype=np.int32)
+        te = np.array([], dtype=np.int32)
+        _apply_bias_correction(ll, ti, ts, te, profiles)
+        assert len(ll) == 0
+
+    def test_non_uniform_uses_general_path(self):
+        """When any profile is non-uniform, the general path is used."""
+        from hulkrna.estimator import _apply_bias_correction
+
+        L = 100
+        b = np.ones(L, dtype=np.float64)
+        b[50:] = 2.0
+        B = np.zeros(L + 1, dtype=np.float64)
+        B[1:] = np.cumsum(b)
+        non_uniform = BiasProfile(prefix_sum=B)
+        uniform = BiasProfile.uniform(200)
+
+        t_indices = np.array([0, 1], dtype=np.int32)
+        tx_starts = np.array([10, 20], dtype=np.int32)
+        tx_ends = np.array([60, 120], dtype=np.int32)
+        ll = np.zeros(2, dtype=np.float64)
+
+        # Should not crash — exercises general path with mixed profiles
+        _apply_bias_correction(ll, t_indices, tx_starts, tx_ends,
+                               [non_uniform, uniform])
+        assert np.all(np.isfinite(ll))

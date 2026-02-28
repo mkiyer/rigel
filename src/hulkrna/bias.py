@@ -33,9 +33,14 @@ class BiasProfile:
     ----------
     prefix_sum : np.ndarray
         float64[L+1] — cumulative sum with leading zero.
+    is_uniform : bool
+        True when the profile is a uniform (flat) bias.  Enables
+        closed-form fast-paths in ``effective_length`` and
+        ``fragment_weight`` that avoid prefix-sum computation.
     """
 
     prefix_sum: np.ndarray
+    is_uniform: bool = False
 
     # ---- factories ---------------------------------------------------
 
@@ -47,6 +52,7 @@ class BiasProfile:
         """
         return BiasProfile(
             prefix_sum=np.arange(length + 1, dtype=np.float64),
+            is_uniform=True,
         )
 
     # ---- queries -----------------------------------------------------
@@ -73,6 +79,8 @@ class BiasProfile:
         span = e - s
         if span <= 0:
             return 0.0
+        if self.is_uniform:
+            return 1.0
         return float(
             (self.prefix_sum[e] - self.prefix_sum[s]) / span
         )
@@ -94,6 +102,8 @@ class BiasProfile:
         n_valid = L - frag_len + 1
         if n_valid <= 0:
             return 1.0
+        if self.is_uniform:
+            return float(n_valid)
         B = self.prefix_sum
         # Vectorised difference of shifted prefix sums
         eff = float(

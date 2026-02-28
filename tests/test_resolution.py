@@ -10,7 +10,6 @@ from hulkrna.resolution import (
     ResolvedFragment,
     _detect_intrachromosomal_chimera,
     resolve_fragment,
-    compute_overlap_profile,
     filter_by_overlap,
 )
 from hulkrna.fragment import Fragment
@@ -416,35 +415,21 @@ class TestDetectIntrachromosomalChimera:
 class _MockResolveIndex:
     def __init__(self):
         self.sj_map = {
-            ("chr1", 200, 300, Strand.POS): (frozenset({0}), frozenset({0}))
+            ("chr1", 200, 300, Strand.POS): frozenset({0})
         }
         self.t_to_g_arr = [0, 0, 0]
 
-    def query_exon(self, exon_block):
+    def query(self, exon_block):
         key = (exon_block.ref, exon_block.start, exon_block.end)
         if key == ("chr1", 100, 200):
             return [
-                (0, 0, IntervalType.EXON),
-                (1, 0, IntervalType.EXON),
+                (100, 200, IntervalType.EXON, frozenset({0, 1})),
+                (100, 200, IntervalType.TRANSCRIPT, frozenset({0, 1})),
             ]
         if key == ("chr1", 300, 400):
             return [
-                (1, 0, IntervalType.EXON),
-                (2, 0, IntervalType.EXON),
-            ]
-        return []
-
-    def query_exon_with_coords(self, exon_block):
-        key = (exon_block.ref, exon_block.start, exon_block.end)
-        if key == ("chr1", 100, 200):
-            return [
-                (0, 0, IntervalType.EXON, 100, 200),
-                (1, 0, IntervalType.EXON, 100, 200),
-            ]
-        if key == ("chr1", 300, 400):
-            return [
-                (1, 0, IntervalType.EXON, 300, 400),
-                (2, 0, IntervalType.EXON, 300, 400),
+                (300, 400, IntervalType.EXON, frozenset({1, 2})),
+                (300, 400, IntervalType.TRANSCRIPT, frozenset({1, 2})),
             ]
         return []
 
@@ -492,10 +477,10 @@ class TestResolveFragment:
 
 
 class _OverlapMockIndex:
-    """Mock index with configurable exon and intron intervals for overlap tests.
+    """Mock index with configurable exon and transcript-span intervals.
 
     Models a scenario with 3 transcripts:
-      t0: exon 100-200, intron 200-350, exon 350-400
+      t0: exon 100-200, transcript 100-400 (span), exon 350-400
       t1: exon 100-200   (partial overlap with short fragments)
       t2: exon 350-500   (partial overlap with fragments near right end)
 
@@ -505,36 +490,29 @@ class _OverlapMockIndex:
     def __init__(self):
         self.sj_map = {}
         self.t_to_g_arr = [0, 0, 0]
-        # Reference intervals: list of (t_idx, g_idx, itype, start, end)
+        # Collapsed intervals: (start, end, itype, t_set)
         self._intervals = [
-            (0, 0, IntervalType.EXON, 100, 200),
-            (0, 0, IntervalType.INTRON, 200, 350),
-            (0, 0, IntervalType.EXON, 350, 400),
-            (1, 0, IntervalType.EXON, 100, 200),
-            (2, 0, IntervalType.EXON, 350, 500),
+            (100, 200, IntervalType.EXON, frozenset({0, 1})),
+            (100, 400, IntervalType.TRANSCRIPT, frozenset({0})),
+            (100, 200, IntervalType.TRANSCRIPT, frozenset({1})),
+            (350, 400, IntervalType.EXON, frozenset({0})),
+            (350, 500, IntervalType.EXON, frozenset({2})),
+            (350, 500, IntervalType.TRANSCRIPT, frozenset({2})),
         ]
 
-    def query_exon(self, exon_block):
+    def query(self, exon_block):
         results = []
-        for t_idx, g_idx, itype, h_start, h_end in self._intervals:
-            # Check overlap
+        for h_start, h_end, itype, t_set in self._intervals:
             if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                results.append((t_idx, g_idx, itype))
-        return results
-
-    def query_exon_with_coords(self, exon_block):
-        results = []
-        for t_idx, g_idx, itype, h_start, h_end in self._intervals:
-            if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                results.append((t_idx, g_idx, itype, h_start, h_end))
+                results.append((h_start, h_end, itype, t_set))
         return results
 
     def query_gap_sjs(self, _ref, _start, _end):
         return []
 
 
-class TestComputeOverlapProfile:
-    """Test per-candidate overlap profile computation."""
+class TestOverlapProfileViaResolve:
+    """Test per-candidate overlap profiles produced by resolve_fragment."""
 
     def test_full_exon_overlap_single_block(self):
         """Fragment fully inside a reference exon → exon_bp=read_length, intron_bp=0."""
@@ -543,14 +521,13 @@ class TestComputeOverlapProfile:
             exons=(GenomicInterval("chr1", 150, 200, Strand.POS),),
             introns=(),
         )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert read_length == 50
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 50
         # t0 exon 100-200: covers 150-200 → 50bp exon
-        assert profiles[0] == (50, 0, 0)
+        assert result.overlap_bp[0] == (50, 0, 0)
         # t1 exon 100-200: covers 150-200 → 50bp exon
-        assert profiles[1] == (50, 0, 0)
-        # t2 (350-500) no overlap with 150-200
-        assert 2 not in profiles
+        assert result.overlap_bp[1] == (50, 0, 0)
 
     def test_intronic_overlap(self):
         """Fragment in intronic region → exon_bp=0, intron_bp=read_length."""
@@ -559,44 +536,29 @@ class TestComputeOverlapProfile:
             exons=(GenomicInterval("chr1", 220, 320, Strand.POS),),
             introns=(),
         )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert read_length == 100
-        # Only t0 has intron 200-350 covering 220-320 → 100bp intron
-        assert profiles[0] == (0, 100, 100)
-        # t1 and t2 shouldn't be present (t1 exon 100-200, t2 exon 350-500)
-        assert 1 not in profiles
-        assert 2 not in profiles
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # Only t0 has transcript span 100-400 covering 220-320 → intron_bp
+        # transcript_bp = 100, exon_bp = 0 → intron_bp = 100
+        assert result.overlap_bp[0] == (0, 100, 100)
 
     def test_mixed_exon_intron_overlap(self):
-        """Fragment spanning exon-intron boundary → partial exon + intron bp."""
+        """Fragment spanning exon-transcript boundary → partial exon + intron bp."""
         idx = _OverlapMockIndex()
         frag = Fragment(
             exons=(GenomicInterval("chr1", 180, 220, Strand.POS),),
             introns=(),
         )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert read_length == 40
-        # t0: exon 100-200 → 180-200 = 20bp; intron 200-350 → 200-220 = 20bp
-        assert profiles[0] == (20, 20, 20)
-        # t1: exon 100-200 → 180-200 = 20bp; no intron overlap
-        assert profiles[1] == (20, 0, 0)
-
-    def test_empty_fragment(self):
-        idx = _OverlapMockIndex()
-        frag = Fragment(exons=(), introns=())
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert profiles == {}
-        assert read_length == 0
-
-    def test_no_overlapping_intervals(self):
-        idx = _OverlapMockIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 700, 800, Strand.POS),),
-            introns=(),
-        )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert profiles == {}
-        assert read_length == 100  # fragment exists but no genic overlap
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 40
+        # t0: exon 100-200 → 180-200 = 20bp; transcript 100-400 → 180-220 = 40bp
+        # intron_bp = 40 - 20 = 20
+        assert result.overlap_bp[0] == (20, 20, 20)
+        # t1: exon 100-200 → 180-200 = 20bp; transcript 100-200 → 180-200 = 20bp
+        # intron_bp = 20 - 20 = 0
+        assert result.overlap_bp[1] == (20, 0, 0)
 
     def test_multi_block_overlap_sums(self):
         """Two exon blocks accumulate overlap per-transcript."""
@@ -608,95 +570,108 @@ class TestComputeOverlapProfile:
             ),
             introns=(GenomicInterval("chr1", 200, 350, Strand.POS),),
         )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert read_length == 100
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
         # t0: exon(150-200)=50bp + exon(350-400)=50bp = 100bp exon
-        assert profiles[0] == (100, 0, 0)
-        # t1 (exon 100-200): block1 150-200 → 50bp exon; block2 no overlap
-        assert profiles[1] == (50, 0, 0)
-        # t2 (exon 350-500): block2 350-400 → 50bp exon; block1 no overlap
-        assert profiles[2] == (50, 0, 0)
+        # transcript(150-200)=50bp + transcript(350-400)=50bp = 100bp tx
+        # intron_bp = 100 - 100 = 0
+        assert result.overlap_bp[0] == (100, 0, 0)
 
     def test_unambig_intron_subtracts_cross_transcript_exons(self):
-        """Fragment in t0's intron that overlaps t1's exon → unambig_intron_bp=0.
+        """Fragment in t0's intronic region that overlaps t1's exon → unambig_intron_bp=0.
 
         Models the core nRNA phantom scenario:
-        - t0: exon 100-200, intron 200-400, exon 400-500  (2-exon)
+        - t0: exon 100-200, transcript 100-500, exon 400-500  (2-exon)
         - t1: exon 100-500  (single-exon, same locus)
-        Fragment: 250-350 (block in t0's intron, but also in t1's exon)
+        Fragment: 250-350 (block in t0's intronic region, but also in t1's exon)
         → t0 should have intron_bp=100, unambig_intron_bp=0
         → t1 should have exon_bp=100, unambig_intron_bp=0
         """
         class _CrossTxIndex:
             sj_map = {}
             t_to_g_arr = [0, 0]
-            _intervals = [
-                (0, 0, IntervalType.EXON, 100, 200),
-                (0, 0, IntervalType.INTRON, 200, 400),
-                (0, 0, IntervalType.EXON, 400, 500),
-                (1, 0, IntervalType.EXON, 100, 500),
-            ]
 
-            def query_exon_with_coords(self, exon_block):
+            def query(self, exon_block):
+                _intervals = [
+                    (100, 200, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
+                    (400, 500, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.EXON, frozenset({1})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({1})),
+                ]
                 results = []
-                for t_idx, g_idx, itype, h_start, h_end in self._intervals:
+                for h_start, h_end, itype, t_set in _intervals:
                     if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                        results.append((t_idx, g_idx, itype, h_start, h_end))
+                        results.append((h_start, h_end, itype, t_set))
                 return results
+
+            def query_gap_sjs(self, _ref, _start, _end):
+                return []
 
         idx = _CrossTxIndex()
         frag = Fragment(
             exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
             introns=(),
         )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert read_length == 100
-        # t0: intron 200-400 covers 250-350 → 100bp intron
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # t0: transcript 100-500 covers 250-350 → tx_bp=100, exon_bp=0
+        # intron_bp = 100 - 0 = 100
         # But t1's exon 100-500 covers 250-350 → global exon union = [(250,350)]
-        # Subtracting global exons from t0's intron (250,350) → 0 unambig
-        assert profiles[0] == (0, 100, 0)
-        # t1: exon 100-500 covers 250-350 → 100bp exon, no intron
-        assert profiles[1] == (100, 0, 0)
+        # Subtracting global exons from t0's tx (250,350) → 0 unambig
+        assert result.overlap_bp[0] == (0, 100, 0)
+        # t1: exon 100-500 covers 250-350 → 100bp exon, tx_bp=100
+        # intron_bp = 100 - 100 = 0
+        assert result.overlap_bp[1] == (100, 0, 0)
 
     def test_unambig_intron_partial_exon_overlap(self):
         """Partial overlap: some intronic bp are exonic for another transcript.
 
-        - t0: exon 100-200, intron 200-400, exon 400-500
-        - t1: exon 280-350  (only partially covers t0's intron)
+        - t0: exon 100-200, transcript 100-500, exon 400-500
+        - t1: exon 280-350, transcript 280-350
         Fragment: 250-350
-        → t0 intron_bp=100, but only 250-280 (30bp) is unambiguous
+        → t0 intron_bp=100 (tx 100 - exon 0), but only 250-280 (30bp) is unambiguous
           (280-350 is exonic for t1)
         """
         class _PartialOverlapIndex:
             sj_map = {}
             t_to_g_arr = [0, 0]
-            _intervals = [
-                (0, 0, IntervalType.EXON, 100, 200),
-                (0, 0, IntervalType.INTRON, 200, 400),
-                (0, 0, IntervalType.EXON, 400, 500),
-                (1, 0, IntervalType.EXON, 280, 350),
-            ]
 
-            def query_exon_with_coords(self, exon_block):
+            def query(self, exon_block):
+                _intervals = [
+                    (100, 200, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
+                    (400, 500, IntervalType.EXON, frozenset({0})),
+                    (280, 350, IntervalType.EXON, frozenset({1})),
+                    (280, 350, IntervalType.TRANSCRIPT, frozenset({1})),
+                ]
                 results = []
-                for t_idx, g_idx, itype, h_start, h_end in self._intervals:
+                for h_start, h_end, itype, t_set in _intervals:
                     if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                        results.append((t_idx, g_idx, itype, h_start, h_end))
+                        results.append((h_start, h_end, itype, t_set))
                 return results
+
+            def query_gap_sjs(self, _ref, _start, _end):
+                return []
 
         idx = _PartialOverlapIndex()
         frag = Fragment(
             exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
             introns=(),
         )
-        profiles, read_length = compute_overlap_profile(frag, idx)
-        assert read_length == 100
-        # t0: intron 200-400 clipped to 250-350 → 100bp intron
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # t0: transcript 100-500 clipped to 250-350 → 100bp tx, exon_bp=0
+        # intron_bp = 100 - 0 = 100
         # global exon union: t1 exon 280-350 clipped to 280-350 → [(280,350)]
         # unambig: (250,350) - [(280,350)] → 250-280 = 30bp
-        assert profiles[0] == (0, 100, 30)
-        # t1: exon 280-350 clipped to 280-350 → 70bp exon
-        assert profiles[1] == (70, 0, 0)
+        assert result.overlap_bp[0] == (0, 100, 30)
+        # t1: exon 280-350 clipped to 280-350 → 70bp exon, tx_bp=70
+        # intron_bp = 70 - 70 = 0
+        assert result.overlap_bp[1] == (70, 0, 0)
 
 
 # =====================================================================
@@ -832,47 +807,43 @@ class _ThreeExonMockIndex:
     """
 
     def __init__(self):
-        # SJ map: key=(ref, start, end, strand) → (t_set, g_set)
+        # SJ map: key=(ref, start, end, strand) → frozenset of t_indices
         self.sj_map = {
-            ("chr1", 200, 299, Strand.POS): (frozenset({0}), frozenset({0})),
-            ("chr1", 400, 499, Strand.POS): (frozenset({0}), frozenset({0})),
-            ("chr1", 200, 499, Strand.POS): (frozenset({1}), frozenset({0})),
+            ("chr1", 200, 299, Strand.POS): frozenset({0}),
+            ("chr1", 400, 499, Strand.POS): frozenset({0}),
+            ("chr1", 200, 499, Strand.POS): frozenset({1}),
         }
         self.t_to_g_arr = [0, 0]
-        self._exons = [
-            (0, 0, IntervalType.EXON, 99, 200),
-            (0, 0, IntervalType.EXON, 299, 400),
-            (0, 0, IntervalType.EXON, 499, 600),
-            (1, 0, IntervalType.EXON, 99, 200),
-            (1, 0, IntervalType.EXON, 499, 600),
+        # Collapsed intervals: (h_start, h_end, itype, t_set)
+        self._intervals = [
+            # Exon intervals
+            (99, 200, IntervalType.EXON, frozenset({0, 1})),
+            (299, 400, IntervalType.EXON, frozenset({0})),
+            (499, 600, IntervalType.EXON, frozenset({0, 1})),
+            # Transcript spans
+            (99, 600, IntervalType.TRANSCRIPT, frozenset({0})),
+            (99, 600, IntervalType.TRANSCRIPT, frozenset({1})),
         ]
-        # Introns for gap SJ queries
-        self._introns = [
-            (0, 0, IntervalType.INTRON, 200, 299),
-            (0, 0, IntervalType.INTRON, 400, 499),
-            (1, 0, IntervalType.INTRON, 200, 499),
+        # SJ annotations for gap queries: (t_idx, strand, sj_start, sj_end)
+        self._sj_entries = [
+            (0, Strand.POS, 200, 299),
+            (0, Strand.POS, 400, 499),
+            (1, Strand.POS, 200, 499),
         ]
 
-    def query_exon(self, exon_block):
+    def query(self, exon_block):
         results = []
-        for t_idx, g_idx, itype, h_start, h_end in self._exons:
+        for h_start, h_end, itype, t_set in self._intervals:
             if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                results.append((t_idx, g_idx, itype))
-        return results
-
-    def query_exon_with_coords(self, exon_block):
-        results = []
-        for t_idx, g_idx, itype, h_start, h_end in self._exons:
-            if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                results.append((t_idx, g_idx, itype, h_start, h_end))
+                results.append((h_start, h_end, itype, t_set))
         return results
 
     def query_gap_sjs(self, ref, start, end):
-        """Return introns fully contained in the gap."""
+        """Return SJ entries fully contained in the gap."""
         results = []
-        for t_idx, g_idx, itype, h_start, h_end in self._introns:
-            if ref == "chr1" and h_start >= start and h_end <= end:
-                results.append((t_idx, g_idx, itype, h_start, h_end))
+        for t_idx, strand, sj_start, sj_end in self._sj_entries:
+            if ref == "chr1" and sj_start >= start and sj_end <= end:
+                results.append((t_idx, strand, sj_start, sj_end))
         return results
 
 
@@ -928,7 +899,12 @@ class TestFragLengthDiscrimination:
         assert result.t_inds == frozenset({0, 1})
 
     def test_unspliced_read_in_t0_only_exon(self):
-        """Unspliced read in exon2 (t0-only at 299-400) → t0 only."""
+        """Unspliced read in exon2 (t0-only at 299-400).
+
+        With collapsed index, t1's TRANSCRIPT span (99-600) also covers
+        this region, giving t1 an intronic overlap.  Both transcripts are
+        candidates; downstream scoring discriminates via overlap profiles.
+        """
         idx = _ThreeExonMockIndex()
         frag = Fragment(
             exons=(GenomicInterval("chr1", 320, 380, Strand.POS),),
@@ -937,7 +913,8 @@ class TestFragLengthDiscrimination:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.splice_type == SpliceType.UNSPLICED
-        assert result.t_inds == frozenset({0})
+        # t0: exon overlap, t1: intronic overlap via TRANSCRIPT span
+        assert result.t_inds == frozenset({0, 1})
 
     def test_frag_length_differs_between_isoforms(self):
         """Fragment spanning exon1→exon3 has different fragment length per isoform.

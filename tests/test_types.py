@@ -148,7 +148,7 @@ class TestGenomicInterval:
 class TestIntervalType:
     def test_values(self):
         assert int(IntervalType.EXON) == 0
-        assert int(IntervalType.INTRON) == 1
+        assert int(IntervalType.TRANSCRIPT) == 1
         assert int(IntervalType.INTERGENIC) == 2
         assert int(IntervalType.SJ) == 3
         assert int(IntervalType.SJ_UNANNOT) == 4
@@ -165,7 +165,6 @@ class TestRefInterval:
         assert ri.strand == Strand.NONE
         assert ri.interval_type == IntervalType.INTERGENIC
         assert ri.t_index == -1
-        assert ri.g_index == -1
 
     def test_with_all_fields(self):
         ri = RefInterval(
@@ -173,7 +172,6 @@ class TestRefInterval:
             strand=Strand.POS,
             interval_type=IntervalType.EXON,
             t_index=3,
-            g_index=1,
         )
         assert ri.ref == "chr1"
         assert ri.start == 100
@@ -181,7 +179,6 @@ class TestRefInterval:
         assert ri.strand == Strand.POS
         assert ri.interval_type == IntervalType.EXON
         assert ri.t_index == 3
-        assert ri.g_index == 1
 
 
 # =====================================================================
