@@ -7,7 +7,6 @@ import pytest
 
 from hulkrna.bias import (
     BiasProfile,
-    build_uniform_profiles,
 )
 
 
@@ -129,26 +128,6 @@ class TestLogLikelihoodUniformEquivalence:
             )
 
 
-# -----------------------------------------------------------------------
-# build_uniform_profiles
-# -----------------------------------------------------------------------
-
-
-class TestBuildUniformProfiles:
-    def test_correct_count(self):
-        lengths = np.array([100, 200, 500])
-        profiles = build_uniform_profiles(lengths)
-        assert len(profiles) == 3
-
-    def test_each_is_uniform(self):
-        lengths = np.array([100, 200, 500])
-        profiles = build_uniform_profiles(lengths)
-        for prof, tl in zip(profiles, lengths):
-            assert prof.length == tl
-            np.testing.assert_array_equal(
-                prof.prefix_sum, np.arange(tl + 1, dtype=np.float64)
-            )
-
 
 # -----------------------------------------------------------------------
 # Non-uniform bias (smoke test for future phases)
@@ -219,12 +198,6 @@ class TestIsUniformFlag:
         B[1:] = np.cumsum(b)
         p = BiasProfile(prefix_sum=B)
         assert p.is_uniform is False
-
-    def test_build_uniform_profiles_sets_flag(self):
-        lengths = np.array([100, 200, 500])
-        profiles = build_uniform_profiles(lengths)
-        for prof in profiles:
-            assert prof.is_uniform is True
 
 
 # -----------------------------------------------------------------------

@@ -108,10 +108,6 @@ def detect_sj_strand_tag(
             ", ".join(result), n_spliced,
         )
     else:
-        # TODO: Implement strand inference from reference annotation when
-        # no splice-junction strand tag is present in the BAM file.
-        # For now all splice junctions will receive Strand.NONE, which
-        # disables strand-aware counting.
         logger.warning(
             "No SJ strand tags (%s) found after scanning %d spliced reads. "
             "All splice junctions will have strand=NONE.",
@@ -181,79 +177,6 @@ def parse_read(read, sj_strand_tag: str | tuple[str, ...] = "XS"):
     if pos > start:
         exons.append((start, pos))
     return ref, ref_strand, exons, sjs
-
-
-def _pair_reads(r1_reads, r2_reads):
-    """Pair read-1 and read-2 alignments by mate position.
-
-    Matching uses ``(reference_id, reference_start)`` of each read
-    against the mate position encoded in ``(next_reference_id,
-    next_reference_start)`` of its partner.
-
-    Reads whose mate is unmapped (``mate_is_unmapped``) are yielded
-    as singletons: ``(read, None)`` or ``(None, read)``.
-
-    Parameters
-    ----------
-    r1_reads : list[pysam.AlignedSegment]
-        Read-1 alignments.
-    r2_reads : list[pysam.AlignedSegment]
-        Read-2 alignments.
-
-    Returns
-    -------
-    list[tuple]
-        Each element is ``(r1, r2)``, ``(r1, None)``, or ``(None, r2)``.
-    """
-    pairs = []
-
-    # Separate mate-unmapped singletons from pairable reads
-    paired_r1 = []
-    for r1 in r1_reads:
-        if r1.mate_is_unmapped:
-            pairs.append((r1, None))
-        else:
-            paired_r1.append(r1)
-
-    paired_r2 = []
-    for r2 in r2_reads:
-        if r2.mate_is_unmapped:
-            pairs.append((None, r2))
-        else:
-            paired_r2.append(r2)
-
-    # Index r2 reads by their genomic position for O(n) matching
-    r2_by_pos: dict[tuple[int, int], list[int]] = {}
-    for i, r2 in enumerate(paired_r2):
-        key = (r2.reference_id, r2.reference_start)
-        r2_by_pos.setdefault(key, []).append(i)
-
-    used_r2: set[int] = set()
-    for r1 in paired_r1:
-        mate_key = (r1.next_reference_id, r1.next_reference_start)
-        candidates = r2_by_pos.get(mate_key, [])
-        matched = False
-        for idx in candidates:
-            if idx in used_r2:
-                continue
-            r2 = paired_r2[idx]
-            # Verify reciprocal mate pointers
-            if (r2.next_reference_id == r1.reference_id
-                    and r2.next_reference_start == r1.reference_start):
-                pairs.append((r1, r2))
-                used_r2.add(idx)
-                matched = True
-                break
-        if not matched:
-            # r1 with no matching r2 → singleton
-            pairs.append((r1, None))
-
-    # Remaining unmatched r2 → singletons
-    for i, r2 in enumerate(paired_r2):
-        if i not in used_r2:
-            pairs.append((None, r2))
-
-    return pairs
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +359,22 @@ def parse_bam_file(
     for key in stat_keys:
         stats.setdefault(key, 0)
 
+    # --- Local counters for the hot inner loop ---
+    # Avoids 44M+ dict __getitem__/__setitem__ calls (measured ~20s
+    # overhead via _BamStatsProxy on 21.6M BAM records).
+    _total = 0
+    _qc_fail = 0
+    _unmapped = 0
+    _secondary = 0
+    _supplementary = 0
+    _duplicate = 0
+    _n_read_names = 0
+    _unique = 0
+    _multimapping = 0
+    _proper_pair = 0
+    _improper_pair = 0
+    _mate_unmapped = 0
+
     for _qname, group_iter in groupby(
         bam_iter, key=lambda r: r.query_name
     ):
@@ -443,19 +382,19 @@ def parse_bam_file(
         nh = 1
 
         for read in group_iter:
-            stats['total'] += 1
+            _total += 1
 
             # Skip unusable alignments
             if read.is_qcfail:
-                stats['qc_fail'] += 1
+                _qc_fail += 1
                 continue
             if read.is_unmapped:
-                stats['unmapped'] += 1
+                _unmapped += 1
                 continue
 
             # Duplicate handling
             if read.is_duplicate:
-                stats['duplicate'] += 1
+                _duplicate += 1
                 if skip_duplicates:
                     continue
 
@@ -468,9 +407,9 @@ def parse_bam_file(
 
             # Count secondary / supplementary for stats
             if read.is_secondary:
-                stats['secondary'] += 1
+                _secondary += 1
             if read.is_supplementary:
-                stats['supplementary'] += 1
+                _supplementary += 1
 
             # Read NH from first usable alignment in the group
             if read.has_tag('NH'):
@@ -482,18 +421,18 @@ def parse_bam_file(
         if not usable:
             continue
 
-        stats['n_read_names'] += 1
+        _n_read_names += 1
 
         # Detect multimapper: NH tag or presence of secondary records
         has_secondary = any(r.is_secondary for r in usable)
         is_multimap = nh > 1 or has_secondary
 
         if is_multimap:
-            stats['multimapping'] += 1
+            _multimapping += 1
             if not include_multimap:
                 continue
         else:
-            stats['unique'] += 1
+            _unique += 1
 
         # Group records into hits + separate secondary locations
         hits, sec_r1, sec_r2 = _group_records_by_hit(usable)
@@ -502,7 +441,7 @@ def parse_bam_file(
         # secondary locations are paired later by the pipeline)
         for r1_reads, r2_reads in hits:
             if not r1_reads or not r2_reads:
-                stats['mate_unmapped'] += 1
+                _mate_unmapped += 1
             else:
                 # Check proper-pair flag on the primary R1
                 r1_primary = [
@@ -510,8 +449,22 @@ def parse_bam_file(
                     if not r.is_supplementary and not r.is_secondary
                 ]
                 if r1_primary and r1_primary[0].is_proper_pair:
-                    stats['proper_pair'] += 1
+                    _proper_pair += 1
                 else:
-                    stats['improper_pair'] += 1
+                    _improper_pair += 1
 
         yield nh, hits, sec_r1, sec_r2
+
+    # --- Flush local counters to stats dict ---
+    stats['total'] += _total
+    stats['qc_fail'] += _qc_fail
+    stats['unmapped'] += _unmapped
+    stats['secondary'] += _secondary
+    stats['supplementary'] += _supplementary
+    stats['duplicate'] += _duplicate
+    stats['n_read_names'] += _n_read_names
+    stats['unique'] += _unique
+    stats['multimapping'] += _multimapping
+    stats['proper_pair'] += _proper_pair
+    stats['improper_pair'] += _improper_pair
+    stats['mate_unmapped'] += _mate_unmapped

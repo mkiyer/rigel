@@ -340,6 +340,46 @@ class TestSupplementaryMerging:
         assert len(frag.exons) == 3
         assert len(frag.introns) == 1
 
+    def test_exons_are_deterministically_sorted(self):
+        """Merged exon blocks are globally sorted by ref/start/end/strand."""
+        r1_chr2 = _mock_read(ref_name="chr2", ref_start=500,
+                             cigartuples=[(pysam.CMATCH, 50)])
+        r1_chr1 = _mock_read(ref_name="chr1", ref_start=200,
+                             cigartuples=[(pysam.CMATCH, 50)])
+
+        frag = Fragment.from_reads([r1_chr2, r1_chr1], [])
+
+        assert [e.ref for e in frag.exons] == ["chr1", "chr2"]
+        assert [e.start for e in frag.exons] == [200, 500]
+
+    def test_introns_are_deterministically_sorted(self):
+        """Intron tuples are deterministic even though they are deduplicated via a set."""
+        r1_chr2 = _mock_read(
+            ref_name="chr2",
+            ref_start=100,
+            cigartuples=[
+                (pysam.CMATCH, 30),
+                (pysam.CREF_SKIP, 40),
+                (pysam.CMATCH, 30),
+            ],
+            xs_tag="+",
+        )
+        r1_chr1 = _mock_read(
+            ref_name="chr1",
+            ref_start=300,
+            cigartuples=[
+                (pysam.CMATCH, 20),
+                (pysam.CREF_SKIP, 60),
+                (pysam.CMATCH, 20),
+            ],
+            xs_tag="+",
+        )
+
+        frag = Fragment.from_reads([r1_chr2, r1_chr1], [])
+
+        assert [i.ref for i in frag.introns] == ["chr1", "chr2"]
+        assert [(i.start, i.end) for i in frag.introns] == [(320, 380), (130, 170)]
+
 
 # =====================================================================
 # Fragment.nm — edit distance extraction from NM tags

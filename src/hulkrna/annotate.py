@@ -73,6 +73,13 @@ POOL_GDNA = "gDNA"
 POOL_INTERGENIC = "intergenic"
 POOL_CHIMERIC = "chimeric"
 
+# Integer pool codes used in AnnotationTable and EM output.
+POOL_CODE_MRNA: int = 0
+POOL_CODE_NRNA: int = 1
+POOL_CODE_GDNA: int = 2
+POOL_CODE_INTERGENIC: int = 3
+POOL_CODE_CHIMERIC: int = 4
+
 # Fragment-class labels for the ZC tag.
 _FRAG_CLASS_LABELS = {
     0: "unique",
@@ -149,7 +156,7 @@ class AnnotationTable:
         frag_id: int,
         best_tid: int = -1,
         best_gid: int = -1,
-        pool: int = 3,  # intergenic
+        pool: int = POOL_CODE_INTERGENIC,
         posterior: float = 0.0,
         frag_class: int = -1,
         n_candidates: int = 0,
@@ -207,13 +214,13 @@ class AnnotationTable:
         return self._size
 
 
-# Pool code mapping.
+# Pool code mapping: string label -> integer code.
 POOL_CODE = {
-    POOL_MRNA: 0,
-    POOL_NRNA: 1,
-    POOL_GDNA: 2,
-    POOL_INTERGENIC: 3,
-    POOL_CHIMERIC: 4,
+    POOL_MRNA: POOL_CODE_MRNA,
+    POOL_NRNA: POOL_CODE_NRNA,
+    POOL_GDNA: POOL_CODE_GDNA,
+    POOL_INTERGENIC: POOL_CODE_INTERGENIC,
+    POOL_CHIMERIC: POOL_CODE_CHIMERIC,
 }
 POOL_LABEL = {v: k for k, v in POOL_CODE.items()}
 
@@ -236,7 +243,6 @@ def write_annotated_bam(
     skip_duplicates: bool = True,
     include_multimap: bool = False,
     sj_strand_tag: str | tuple[str, ...] = "auto",
-    overlap_min_frac: float = 0.99,
 ) -> dict:
     """Second BAM pass: stamp every record with assignment tags.
 
@@ -259,8 +265,6 @@ def write_annotated_bam(
     include_multimap : bool
         Must match the value used in Pass 1.
     sj_strand_tag : str or tuple
-        Must match the value used in Pass 1.
-    overlap_min_frac : float
         Must match the value used in Pass 1.
 
     Returns
@@ -299,13 +303,12 @@ def write_annotated_bam(
         summary["n_read_groups"] += 1
 
         # Reconstruct hit list in same order as pass 1
-        from .pipeline import pair_multimapper_reads
+        from .resolution import pair_multimapper_reads
         secondary_pairs: list[tuple[list, list]] = []
         if sec_r1 or sec_r2:
             secondary_pairs = pair_multimapper_reads(
                 sec_r1, sec_r2, index,
                 sj_strand_tag=sj_strand_tag,
-                overlap_min_frac=overlap_min_frac,
             )
 
         all_hits = list(hits) + secondary_pairs
@@ -354,10 +357,7 @@ def write_annotated_bam(
                         sj_strand_tag=sj_strand_tag,
                     )
                     if frag.exons:
-                        result = resolve_fragment(
-                            frag, index,
-                            overlap_min_frac=overlap_min_frac,
-                        )
+                        result = resolve_fragment(frag, index)
                         if result is not None and best_tid in result.t_inds:
                             is_primary_hit = True
 

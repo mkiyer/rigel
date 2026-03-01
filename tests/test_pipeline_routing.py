@@ -281,12 +281,6 @@ def test_route_counters_are_exclusive_per_unit():
     assert stats.em_routed_gene_ambig_units == 1
     assert stats.em_routed_multimapper_units == 1
 
-    # Back-compat aliases map to authoritative route counters
-    assert stats.n_counted_truly_unique == 1
-    assert stats.n_counted_isoform_ambig == 1
-    assert stats.n_counted_gene_ambig == 1
-    assert stats.n_counted_multimapper == 1
-
     total_units = (
         stats.deterministic_unique_units
         + stats.em_routed_unique_units

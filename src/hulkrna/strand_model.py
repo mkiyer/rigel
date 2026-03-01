@@ -31,6 +31,14 @@ from .types import Strand
 
 logger = logging.getLogger(__name__)
 
+# Quantiles for the 95% credible interval on p_r1_sense.
+_CI_LOWER_QUANTILE: float = 0.025
+_CI_UPPER_QUANTILE: float = 0.975
+
+#: Minimum observations needed to report a 95% credible interval.
+#: Below this threshold, the posterior is too diffuse to be useful.
+_MIN_CI_OBSERVATIONS: int = 10
+
 
 @dataclass
 class StrandModel:
@@ -173,8 +181,8 @@ class StrandModel:
         """95% credible interval for p_r1_sense."""
         from scipy.stats import beta as beta_dist
         return (
-            beta_dist.ppf(0.025, self.alpha, self.beta),
-            beta_dist.ppf(0.975, self.alpha, self.beta),
+            beta_dist.ppf(_CI_LOWER_QUANTILE, self.alpha, self.beta),
+            beta_dist.ppf(_CI_UPPER_QUANTILE, self.alpha, self.beta),
         )
 
     # ------------------------------------------------------------------
@@ -307,7 +315,7 @@ class StrandModel:
         d = self.to_dict()
 
         # Add 95% CI if enough observations (requires scipy)
-        if self.n_observations >= 10:
+        if self.n_observations >= _MIN_CI_OBSERVATIONS:
             try:
                 lo, hi = self.posterior_95ci()
                 d["posterior"]["ci_95"] = [
@@ -561,7 +569,7 @@ class StrandModels:
         d = self.to_dict()
 
         # Add 95% CI for exonic_spliced model if enough observations
-        if self.exonic_spliced.n_observations >= 10:
+        if self.exonic_spliced.n_observations >= _MIN_CI_OBSERVATIONS:
             try:
                 lo, hi = self.exonic_spliced.posterior_95ci()
                 d["exonic_spliced"]["posterior"]["ci_95"] = [

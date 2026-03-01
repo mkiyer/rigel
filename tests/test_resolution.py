@@ -6,11 +6,9 @@ from hulkrna.types import ChimeraType, MergeCriteria, Strand, GenomicInterval, I
 from hulkrna.categories import SpliceType
 from hulkrna.resolution import (
     merge_sets_with_criteria,
-    compute_genomic_frag_length,
     ResolvedFragment,
     _detect_intrachromosomal_chimera,
     resolve_fragment,
-    filter_by_overlap,
 )
 from hulkrna.fragment import Fragment
 
@@ -76,60 +74,6 @@ class TestMergeSetsWithCriteria:
         )
         assert result.t_inds == frozenset({2})
         assert result.criteria == MergeCriteria.INTERSECTION
-
-
-# =====================================================================
-# compute_genomic_frag_length
-# =====================================================================
-
-
-class TestFragmentLength:
-    def test_empty_fragment(self):
-        frag = Fragment(exons=(), introns=())
-        assert compute_genomic_frag_length(frag) == -1
-
-    def test_single_exon(self):
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 100, 300, Strand.POS),),
-            introns=(),
-        )
-        assert compute_genomic_frag_length(frag) == 200
-
-    def test_two_exons_no_intron(self):
-        """Gap between exons without annotated intron → footprint includes gap."""
-        frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 100, 200, Strand.POS),
-                GenomicInterval("chr1", 300, 400, Strand.POS),
-            ),
-            introns=(),
-        )
-        # footprint = 400 - 100 = 300, no introns
-        assert compute_genomic_frag_length(frag) == 300
-
-    def test_two_exons_with_intron(self):
-        """Observed intron subtracted from footprint."""
-        frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 100, 200, Strand.POS),
-                GenomicInterval("chr1", 300, 400, Strand.POS),
-            ),
-            introns=(GenomicInterval("chr1", 200, 300, Strand.POS),),
-        )
-        # footprint = 400 - 100 = 300, intron = 100
-        assert compute_genomic_frag_length(frag) == 200
-
-    def test_overlapping_exons(self):
-        """Overlapping exon blocks are treated naively (footprint only)."""
-        frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 100, 250, Strand.POS),
-                GenomicInterval("chr1", 200, 400, Strand.POS),
-            ),
-            introns=(),
-        )
-        # footprint = 400 - 100 = 300
-        assert compute_genomic_frag_length(frag) == 300
 
 
 # =====================================================================
@@ -541,7 +485,8 @@ class TestOverlapProfileViaResolve:
         assert result.read_length == 100
         # Only t0 has transcript span 100-400 covering 220-320 → intron_bp
         # transcript_bp = 100, exon_bp = 0 → intron_bp = 100
-        assert result.overlap_bp[0] == (0, 100, 100)
+        # No UNAMBIG_INTRON in mock → unambig_intron_bp = 0
+        assert result.overlap_bp[0] == (0, 100, 0)
 
     def test_mixed_exon_intron_overlap(self):
         """Fragment spanning exon-transcript boundary → partial exon + intron bp."""
@@ -554,8 +499,8 @@ class TestOverlapProfileViaResolve:
         assert result is not None
         assert result.read_length == 40
         # t0: exon 100-200 → 180-200 = 20bp; transcript 100-400 → 180-220 = 40bp
-        # intron_bp = 40 - 20 = 20
-        assert result.overlap_bp[0] == (20, 20, 20)
+        # intron_bp = 40 - 20 = 20; no UNAMBIG_INTRON in mock → 0
+        assert result.overlap_bp[0] == (20, 20, 0)
         # t1: exon 100-200 → 180-200 = 20bp; transcript 100-200 → 180-200 = 20bp
         # intron_bp = 20 - 20 = 0
         assert result.overlap_bp[1] == (20, 0, 0)
@@ -667,8 +612,8 @@ class TestOverlapProfileViaResolve:
         # t0: transcript 100-500 clipped to 250-350 → 100bp tx, exon_bp=0
         # intron_bp = 100 - 0 = 100
         # global exon union: t1 exon 280-350 clipped to 280-350 → [(280,350)]
-        # unambig: (250,350) - [(280,350)] → 250-280 = 30bp
-        assert result.overlap_bp[0] == (0, 100, 30)
+        # No UNAMBIG_INTRON in mock → unambig_intron_bp = 0
+        assert result.overlap_bp[0] == (0, 100, 0)
         # t1: exon 280-350 clipped to 280-350 → 70bp exon, tx_bp=70
         # intron_bp = 70 - 70 = 0
         assert result.overlap_bp[1] == (70, 0, 0)
@@ -678,49 +623,6 @@ class TestOverlapProfileViaResolve:
 # filter_by_overlap
 # =====================================================================
 
-
-class TestFilterByOverlap:
-    def test_filters_low_overlap_candidates(self):
-        t_inds = frozenset({0, 1, 2})
-        # BP counts with read_length=100: exon fracs are 100/100, 50/100, 30/100
-        profiles = {0: (100, 0, 0), 1: (50, 30, 0), 2: (30, 60, 0)}
-        # With min_frac_of_best=0.9 → threshold = 0.9 on exon_frac
-        # Only t0 survives (1.0 >= 0.9)
-        result = filter_by_overlap(t_inds, profiles, 100)
-        assert result == frozenset({0})
-
-    def test_keeps_close_candidates(self):
-        t_inds = frozenset({0, 1, 2})
-        profiles = {0: (100, 0, 0), 1: (95, 0, 0), 2: (30, 0, 0)}
-        result = filter_by_overlap(t_inds, profiles, 100)
-        assert result == frozenset({0, 1})
-
-    def test_custom_threshold(self):
-        t_inds = frozenset({0, 1, 2})
-        profiles = {0: (100, 0, 0), 1: (60, 20, 0), 2: (30, 20, 0)}
-        result = filter_by_overlap(t_inds, profiles, 100, min_frac_of_best=0.5)
-        assert result == frozenset({0, 1})
-
-    def test_no_fracs_returns_original(self):
-        t_inds = frozenset({0, 1})
-        result = filter_by_overlap(t_inds, {}, 100)
-        assert result == t_inds
-
-    def test_never_returns_empty(self):
-        """Even with extreme threshold, should return original rather than empty."""
-        t_inds = frozenset({0, 1})
-        profiles = {0: (1, 50, 0), 1: (1, 50, 0)}
-        # All candidates are equal and above zero → they should all survive
-        result = filter_by_overlap(t_inds, profiles, 100, min_frac_of_best=2.0)
-        # threshold = 0.01 * 2.0 = 0.02, both are below → would be empty
-        # safety: returns original
-        assert result == t_inds
-
-    def test_single_candidate_unchanged(self):
-        t_inds = frozenset({5})
-        profiles = {5: (30, 50, 0)}
-        result = filter_by_overlap(t_inds, profiles, 100)
-        assert result == frozenset({5})
 
 
 # =====================================================================
@@ -942,3 +844,187 @@ class TestFragLengthDiscrimination:
         assert result is not None
         # SJ 200-499 matches t1 specifically
         assert result.t_inds == frozenset({1})
+
+
+# =====================================================================
+# UNAMBIG_INTRON regression tests
+# =====================================================================
+
+
+class TestUnambigIntronAccumulation:
+    """Verify resolve_fragment correctly accumulates unambig_intron_bp
+    from UNAMBIG_INTRON intervals returned by the index.
+
+    These tests guard against the nRNA phantom-count bug where using
+    ``intron_bp > 0`` instead of ``unambig_intron_bp > 0`` caused
+    massive false nRNA assignment in pristine conditions.
+    """
+
+    def test_unambig_intron_accumulated_for_lone_intron(self):
+        """Fragment in a transcript's unambiguous intron (no cross-transcript exon).
+
+        t0: exon 100-200, transcript 100-500, exon 400-500
+        UNAMBIG_INTRON for t0: 200-400 (no other transcript's exon here)
+        Fragment: 250-350 → unambig_intron_bp should be 100.
+        """
+        class _LoneIntronIndex:
+            sj_map = {}
+            t_to_g_arr = [0]
+
+            def query(self, exon_block):
+                _intervals = [
+                    (100, 200, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
+                    (400, 500, IntervalType.EXON, frozenset({0})),
+                    # UNAMBIG_INTRON: intron of t0 not overlapped by any exon
+                    (200, 400, IntervalType.UNAMBIG_INTRON, frozenset({0})),
+                ]
+                results = []
+                for h_start, h_end, itype, t_set in _intervals:
+                    if (exon_block.ref == "chr1"
+                            and exon_block.start < h_end
+                            and exon_block.end > h_start):
+                        results.append((h_start, h_end, itype, t_set))
+                return results
+
+            def query_gap_sjs(self, _ref, _start, _end):
+                return []
+
+        idx = _LoneIntronIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
+            introns=(),
+        )
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # t0: tx_bp=100, exon_bp=0 → intron_bp=100
+        # UNAMBIG_INTRON 200-400 clipped to 250-350 = 100bp
+        assert result.overlap_bp[0] == (0, 100, 100)
+
+    def test_unambig_intron_zero_when_cross_exon_covers(self):
+        """Fragment in t0's intron that is entirely covered by t1's exon.
+
+        t0: exon 100-200, transcript 100-500, exon 400-500
+        t1: exon 200-400 (covers t0's entire intron)
+        No UNAMBIG_INTRON for t0 in 200-400 region.
+        Fragment: 250-350 → unambig_intron_bp should be 0.
+        """
+        class _CrossExonIndex:
+            sj_map = {}
+            t_to_g_arr = [0, 0]
+
+            def query(self, exon_block):
+                _intervals = [
+                    (100, 200, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
+                    (400, 500, IntervalType.EXON, frozenset({0})),
+                    (200, 400, IntervalType.EXON, frozenset({1})),
+                    (200, 400, IntervalType.TRANSCRIPT, frozenset({1})),
+                    # NO UNAMBIG_INTRON — t1's exon covers t0's intron
+                ]
+                results = []
+                for h_start, h_end, itype, t_set in _intervals:
+                    if (exon_block.ref == "chr1"
+                            and exon_block.start < h_end
+                            and exon_block.end > h_start):
+                        results.append((h_start, h_end, itype, t_set))
+                return results
+
+            def query_gap_sjs(self, _ref, _start, _end):
+                return []
+
+        idx = _CrossExonIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
+            introns=(),
+        )
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # t0: tx_bp=100, exon_bp=0 → intron_bp=100, unambig_intron_bp=0
+        assert result.overlap_bp[0] == (0, 100, 0)
+        # t1: exon_bp=100, tx_bp=100 → intron_bp=0
+        assert result.overlap_bp[1] == (100, 0, 0)
+
+    def test_unambig_intron_partial(self):
+        """Fragment partially in unambiguous intron, partially in cross-exon.
+
+        t0: exon 100-200, transcript 100-500, exon 400-500
+        t1: exon 300-400 (covers only part of t0's intron)
+        → UNAMBIG_INTRON for t0: 200-300 (30bp of fragment 250-350)
+        Fragment: 250-350 → unambig_intron_bp should be 50 (250-300).
+        """
+        class _PartialUnambigIndex:
+            sj_map = {}
+            t_to_g_arr = [0, 0]
+
+            def query(self, exon_block):
+                _intervals = [
+                    (100, 200, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
+                    (400, 500, IntervalType.EXON, frozenset({0})),
+                    (300, 400, IntervalType.EXON, frozenset({1})),
+                    (300, 400, IntervalType.TRANSCRIPT, frozenset({1})),
+                    # UNAMBIG_INTRON: only the part NOT covered by t1's exon
+                    (200, 300, IntervalType.UNAMBIG_INTRON, frozenset({0})),
+                ]
+                results = []
+                for h_start, h_end, itype, t_set in _intervals:
+                    if (exon_block.ref == "chr1"
+                            and exon_block.start < h_end
+                            and exon_block.end > h_start):
+                        results.append((h_start, h_end, itype, t_set))
+                return results
+
+            def query_gap_sjs(self, _ref, _start, _end):
+                return []
+
+        idx = _PartialUnambigIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
+            introns=(),
+        )
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # t0: tx_bp=100, exon_bp=0 → intron_bp=100
+        # UNAMBIG_INTRON 200-300 clipped to 250-300 = 50bp
+        assert result.overlap_bp[0] == (0, 100, 50)
+        # t1: exon 300-400 clipped to 300-350 = 50bp, tx_bp also 50
+        assert result.overlap_bp[1] == (50, 0, 0)
+
+    def test_exon_only_fragment_has_zero_unambig_intron(self):
+        """Fragment fully within an exon should have unambig_intron_bp=0."""
+        class _ExonOnlyIndex:
+            sj_map = {}
+            t_to_g_arr = [0]
+
+            def query(self, exon_block):
+                _intervals = [
+                    (100, 300, IntervalType.EXON, frozenset({0})),
+                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
+                    (400, 500, IntervalType.EXON, frozenset({0})),
+                    (300, 400, IntervalType.UNAMBIG_INTRON, frozenset({0})),
+                ]
+                results = []
+                for h_start, h_end, itype, t_set in _intervals:
+                    if (exon_block.ref == "chr1"
+                            and exon_block.start < h_end
+                            and exon_block.end > h_start):
+                        results.append((h_start, h_end, itype, t_set))
+                return results
+
+            def query_gap_sjs(self, _ref, _start, _end):
+                return []
+
+        idx = _ExonOnlyIndex()
+        frag = Fragment(
+            exons=(GenomicInterval("chr1", 150, 250, Strand.POS),),
+            introns=(),
+        )
+        result = resolve_fragment(frag, idx)
+        assert result is not None
+        assert result.read_length == 100
+        # Fully exonic, unambig_intron_bp=0
+        assert result.overlap_bp[0] == (100, 0, 0)

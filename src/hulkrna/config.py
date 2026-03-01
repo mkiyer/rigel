@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import numpy as np
+if TYPE_CHECKING:
+    import numpy as np
 
 
 # ======================================================================
@@ -102,9 +104,6 @@ class ScanConfig:
         Maximum fragment length for histogram models (default 1000).
     sj_strand_tag : str or tuple of str
         BAM tag(s) for splice-junction strand (default ``"auto"``).
-    overlap_min_frac : float
-        Minimum exonic overlap fraction for transcript assignment
-        (default 0.99).
     min_spliced_observations : int
         Minimum spliced observations for strand model (default 10).
     log_every : int
@@ -121,7 +120,6 @@ class ScanConfig:
     include_multimap: bool = False
     max_frag_length: int = 1000
     sj_strand_tag: str | tuple[str, ...] = "auto"
-    overlap_min_frac: float = 0.99
     min_spliced_observations: int = 10
     log_every: int = 1_000_000
     chunk_size: int = 1_000_000

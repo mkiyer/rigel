@@ -814,33 +814,6 @@ class TestDetailOutput:
 
 
 # =====================================================================
-# gDNA summary output (locus-level)
-# =====================================================================
-
-
-class TestGDNASummaryOutput:
-    def test_gdna_summary_dict(self):
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
-        rc._gdna_em_total = 15.0
-        rc.unique_counts[0, 0] = 80.0
-        rc.em_counts[0, 0] = 5.0
-
-        summary = rc.gdna_summary()
-        assert summary["gdna_em_total"] == 15.0
-        assert summary["gdna_total"] == 15.0
-        assert summary["rna_unique_total"] == 80.0
-        assert summary["rna_em_total"] == 5.0
-        expected_rate = 15.0 / (80.0 + 5.0 + 15.0)
-        assert summary["gdna_contamination_rate"] == pytest.approx(
-            expected_rate, abs=1e-6
-        )
-
-    def test_gdna_contamination_rate_zero(self):
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
-        assert rc.gdna_contamination_rate == 0.0
-
-
-# =====================================================================
 # gDNA in locus EM — unspliced compete with gDNA shadow
 # =====================================================================
 

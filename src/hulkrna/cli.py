@@ -160,7 +160,6 @@ def count_command(args: argparse.Namespace) -> int:
             skip_duplicates=not args.keep_duplicates,
             include_multimap=args.include_multimap,
             sj_strand_tag=sj_strand_tag,
-            overlap_min_frac=args.overlap_min_frac,
         ),
         scoring=ScoringConfig(
             overhang_log_penalty=overhang_log_penalty,
@@ -231,12 +230,10 @@ def sim_command(args: argparse.Namespace) -> int:
     ref_name = cfg.get("ref_name", "chr1")
 
     sim_config = SimConfig(
-        frag_mean=cfg.get("frag_mean", 250),
-        frag_std=cfg.get("frag_std", 50),
-        frag_min=cfg.get("frag_min", 50),
-        frag_max=cfg.get("frag_max", 1000),
-        read_length=cfg.get("read_length", 150),
-        error_rate=cfg.get("error_rate", 0.0),
+        **{k: cfg[k] for k in (
+            "frag_mean", "frag_std", "frag_min", "frag_max",
+            "read_length", "error_rate",
+        ) if k in cfg},
         seed=seed,
     )
 
@@ -409,13 +406,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum RNA-normalized posterior for an EM assignment "
              "to be counted as high-confidence (default: 0.95). "
              "Affects the count_high_conf column.",
-    )
-    cnt.add_argument(
-        "--overlap-min-frac", dest="overlap_min_frac",
-        type=float, default=0.99,
-        help="Min fraction of best exon overlap to retain a candidate "
-             "transcript during resolution (default: 0.99 = within 1%% of best). "
-             "Lower values (e.g. 0.9) keep candidates within 10%% of best.",
     )
     from .scoring import DEFAULT_OVERHANG_ALPHA, DEFAULT_MISMATCH_ALPHA
     cnt.add_argument(

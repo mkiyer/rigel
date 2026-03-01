@@ -20,7 +20,6 @@ from .estimator import (
     LocusEMInput,
     ScanData,
 )
-from .bias import BiasProfile
 from .index import HulkIndex
 from .strand_model import StrandModels
 
@@ -33,6 +32,11 @@ logger = logging.getLogger(__name__)
 EB_K_LOCUS = 20.0
 #: Fragments needed for chrom-level to dominate.
 EB_K_CHROM = 50.0
+
+#: Minimum strand specificity denominator (2*SS − 1).
+#: When the denominator is below this threshold, the strand signal is too
+#: weak to reliably estimate nRNA or gDNA fractions — we return 0.0.
+STRAND_DENOM_MIN: float = 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -348,23 +352,25 @@ def build_locus_em_data(
     # BiasProfile (see _apply_bias_correction in estimator.py).
     eff_len = np.ones(n_components, dtype=np.float64)
 
-    # Build per-component bias profiles.
+    # Build per-component lengths for uniform bias correction.
     #
     # Component layout:
-    #   [0, n_t)       → mRNA: profile length = exonic transcript length
-    #   [n_t, 2*n_t)   → nRNA: profile length = genomic span (incl introns)
-    #   [2*n_t]        → gDNA: profile length = locus span
+    #   [0, n_t)       → mRNA: length = exonic transcript length
+    #   [n_t, 2*n_t)   → nRNA: length = genomic span (incl introns)
+    #   [2*n_t]        → gDNA: length = locus span
+    #
+    # Phase H optimisation: pass a flat int64 array of component
+    # lengths to _apply_bias_correction_uniform directly, avoiding
+    # 2*n_t+1 BiasProfile object + np.arange allocations per locus.
     mrna_lengths = index.t_df["length"].values[t_arr]
     nrna_lengths = (
         index.t_df["end"].values[t_arr]
         - index.t_df["start"].values[t_arr]
     )
-    bias_profiles: list[BiasProfile] = []
-    for i in range(n_t):
-        bias_profiles.append(BiasProfile.uniform(int(mrna_lengths[i])))
-    for i in range(n_t):
-        bias_profiles.append(BiasProfile.uniform(int(nrna_lengths[i])))
-    bias_profiles.append(BiasProfile.uniform(int(locus_span)))
+    bias_profiles = np.empty(n_components, dtype=np.int64)
+    bias_profiles[:n_t] = mrna_lengths
+    bias_profiles[n_t:2*n_t] = nrna_lengths
+    bias_profiles[2*n_t] = int(locus_span)
 
     # Build prior — start at epsilon (numerical floor) for every
     # component; the real prior mass comes from the OVR coverage
@@ -446,7 +452,7 @@ def compute_nrna_init(
     ss = strand_models.exonic_spliced.strand_specificity
     denom = 2.0 * ss - 1.0
 
-    if denom <= 0.2:
+    if denom <= STRAND_DENOM_MIN:
         nrna_init = np.zeros_like(transcript_intronic_sense)
     else:
         raw = (
@@ -478,7 +484,7 @@ def compute_gdna_rate_from_strand(
     Returns 0.0 when evidence is insufficient.
     """
     denom_ss = 2.0 * ss - 1.0
-    if denom_ss <= 0.2:
+    if denom_ss <= STRAND_DENOM_MIN:
         return 0.0
     total = sense + antisense
     if total == 0:

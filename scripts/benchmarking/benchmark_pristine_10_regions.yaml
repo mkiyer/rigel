@@ -85,7 +85,7 @@ abundance:
   max: 100000.0
 
 htseq:
-  enabled: true
+  enabled: false
   conda_env: htseq
 
 runtime:

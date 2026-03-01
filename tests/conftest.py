@@ -18,8 +18,6 @@ from hulkrna.estimator import (
     Locus,
     LocusEMInput,
 )
-from hulkrna.bias import BiasProfile
-
 
 # ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)
@@ -191,9 +189,10 @@ def _make_locus_em_data(
     )
 
     n_local_candidates = len(flat_t)
-    # Build bias profiles of length 1 so that with tx_starts=0 and
-    # tx_ends=1, frag_len=1 and eff_len = max(1-1+1,1) = 1 → no correction.
-    bias_profiles = [BiasProfile.uniform(1) for _ in range(n_components)]
+    # Build component-length array of length 1 so that with tx_starts=0
+    # and tx_ends=1, frag_len=1 and eff_len = max(1-1+1,1) = 1 → no
+    # correction.  Phase H: pass int64 array instead of BiasProfile list.
+    bias_profiles = np.ones(n_components, dtype=np.int64)
     return LocusEMInput(
         locus=locus,
         offsets=np.array(offsets, dtype=np.int64),

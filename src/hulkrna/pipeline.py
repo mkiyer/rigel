@@ -28,6 +28,12 @@ from pathlib import Path
 
 import numpy as np
 
+# Transcript count above which a locus triggers debug logging.
+_LARGE_LOCUS_LOG_THRESHOLD = 100
+# Padding and minimum capacity for the annotation table.
+_ANNOTATION_TABLE_PADDING = 1024
+_ANNOTATION_TABLE_MIN_CAPACITY = 4096
+
 from .bam import parse_bam_file, detect_sj_strand_tag
 from .buffer import FragmentBuffer
 from .categories import SpliceType
@@ -41,18 +47,13 @@ from .stats import PipelineStats
 from .strand_model import StrandModels
 
 # --- New modular imports ---
-from .scoring import (
-    ScoringContext,
-    score_gdna_standalone,
-)
+from .scoring import ScoringContext
 from .locus import (
     build_loci,
     build_locus_em_data,
     compute_nrna_init,
     compute_gdna_rate_from_strand,
     compute_eb_gdna_priors,
-    EB_K_LOCUS,
-    EB_K_CHROM,
 )
 from .scan import EmDataBuilder
 from .config import (
@@ -133,7 +134,6 @@ def scan_and_buffer(
             secondary_pairs = pair_multimapper_reads(
                 sec_r1, sec_r2, index,
                 sj_strand_tag=scan.sj_strand_tag,
-                overlap_min_frac=scan.overlap_min_frac,
             )
 
         all_hits = list(hits) + secondary_pairs
@@ -150,9 +150,7 @@ def scan_and_buffer(
             if not frag.exons:
                 continue
 
-            result = resolve_fragment(
-                frag, index, overlap_min_frac=scan.overlap_min_frac,
-            )
+            result = resolve_fragment(frag, index)
 
             if result is None:
                 # --- Intergenic: deterministic gDNA assignment ---
@@ -227,7 +225,11 @@ def scan_and_buffer(
                     result.is_unique_gene
                     and result.exon_strand in (Strand.POS, Strand.NEG)
                 ):
-                    t_idx = next(iter(result.t_inds))
+                    t_idx = (
+                        result.first_t_ind
+                        if hasattr(result, 'first_t_ind')
+                        else next(iter(result.t_inds))
+                    )
                     gene_idx = index.t_to_g_arr[t_idx]
                     gene_strand = Strand(index.g_to_strand_arr[gene_idx])
                     if gene_strand in (Strand.POS, Strand.NEG):
@@ -238,16 +240,26 @@ def scan_and_buffer(
                 # Train fragment-length model.  Only use reads where
                 # ALL candidate transcripts agree on a single fragment
                 # length (i.e. no ambiguity from different SJ corrections).
-                fl_vals = result.frag_lengths
-                if fl_vals and len(set(fl_vals.values())) == 1:
-                    fl = next(iter(fl_vals.values()))
-                    if fl > 0:
-                        frag_length_models.observe(fl, result.splice_type)
+                _ufl = getattr(result, 'unique_frag_length', None)
+                if _ufl is not None:
+                    # Native C++ ResolvedResult path
+                    if _ufl > 0:
+                        frag_length_models.observe(_ufl, result.splice_type)
                         stats.n_frag_length_unambiguous += 1
                     else:
                         stats.n_frag_length_ambiguous += 1
                 else:
-                    stats.n_frag_length_ambiguous += 1
+                    # Python ResolvedFragment fallback
+                    fl_vals = result.frag_lengths
+                    if fl_vals and len(set(fl_vals.values())) == 1:
+                        fl = next(iter(fl_vals.values()))
+                        if fl > 0:
+                            frag_length_models.observe(fl, result.splice_type)
+                            stats.n_frag_length_unambiguous += 1
+                        else:
+                            stats.n_frag_length_ambiguous += 1
+                    else:
+                        stats.n_frag_length_ambiguous += 1
 
             # --- Buffer ALL resolved fragments with frag_id ---
             buffer.append(result, frag_id=frag_id)
@@ -331,11 +343,11 @@ def count_from_buffer(
 
     # --- Compute geometry ---
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
-    mean_frag = (
-        frag_length_models.global_model.mean
-        if frag_length_models.global_model.n_observations > 0
-        else 200.0
-    )
+    if frag_length_models.global_model.n_observations > 0:
+        mean_frag = frag_length_models.global_model.mean
+    else:
+        from .estimator import _DEFAULT_MEAN_FRAG
+        mean_frag = _DEFAULT_MEAN_FRAG
 
     if frag_length_models.global_model.n_observations > 0:
         effective_lengths = (
@@ -411,7 +423,7 @@ def count_from_buffer(
         )
 
     logger.info(
-        f"[DONE] Scan: {stats.n_counted_truly_unique:,} unique, "
+        f"[DONE] Scan: {stats.deterministic_unique_units:,} unique, "
         f"{em_data.n_units:,} ambiguous units "
         f"({em_data.n_candidates:,} RNA candidates)"
     )
@@ -467,7 +479,7 @@ def count_from_buffer(
                 for g_idx in locus.gene_indices:
                     counter.gdna_gene_summary[int(g_idx)] += per_gene
 
-            if len(locus.transcript_indices) > 100:
+            if len(locus.transcript_indices) > _LARGE_LOCUS_LOG_THRESHOLD:
                 logger.debug(
                     f"  Locus {locus.locus_id}: "
                     f"{len(locus.transcript_indices)} transcripts, "
@@ -582,7 +594,10 @@ def run_pipeline(
     if config.annotated_bam_path is not None:
         from .annotate import AnnotationTable
         annotations = AnnotationTable.create(
-            capacity=max(buffer.total_fragments + 1024, 4096)
+            capacity=max(
+                buffer.total_fragments + _ANNOTATION_TABLE_PADDING,
+                _ANNOTATION_TABLE_MIN_CAPACITY,
+            )
         )
 
     try:
@@ -611,7 +626,6 @@ def run_pipeline(
             skip_duplicates=scan.skip_duplicates,
             include_multimap=scan.include_multimap,
             sj_strand_tag=scan.sj_strand_tag,
-            overlap_min_frac=scan.overlap_min_frac,
         )
 
     return PipelineResult(

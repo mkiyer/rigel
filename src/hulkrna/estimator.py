@@ -37,7 +37,7 @@ One Virtual Read (OVR) Dirichlet prior.
 1. Initialize theta from unique counts + OVR prior.
 2. E-step: posterior proportional to likelihood * theta_t / eff_len_t.
 3. M-step: theta proportional to unique + em_totals + prior.
-4. Repeat until convergence (|delta| < 1e-6).
+4. Repeat until convergence (|delta| < ``_EM_CONVERGENCE_DELTA``).
 5. Assign: add posterior-expected counts per ambiguous unit.
 """
 
@@ -51,6 +51,7 @@ from scipy.special import digamma as _digamma
 
 from .types import Strand
 from .config import EMConfig, TranscriptGeometry
+from .annotate import POOL_CODE_MRNA, POOL_CODE_NRNA, POOL_CODE_GDNA
 from .categories import (
     ANTISENSE_COLS,
     SpliceType,
@@ -71,6 +72,22 @@ EM_PRIOR_EPSILON = 1e-10
 
 # Relative convergence tolerance for EM theta updates.
 _EM_CONVERGENCE_DELTA = 1e-6
+
+# Upper bound on fragment length for compound-key arithmetic in
+# bias correction.  Fragments longer than this are clamped — any
+# footprint >= transcript length already yields effective_length=1,
+# so clamping is functionally neutral.
+_MAX_FRAG_LEN = 1_000_000
+
+# Default mean fragment length used when no observations are available
+# (e.g. purely intergenic loci with no measured insert sizes).
+_DEFAULT_MEAN_FRAG = 200.0
+
+# Fraction of EM iteration budget allocated to SQUAREM acceleration.
+_SQUAREM_BUDGET_DIVISOR = 3
+
+# Number of VBEM/MAP-EM iterations after pruning zero-weight components.
+_POST_PRUNE_ITERS = 10
 
 
 def _apply_bias_correction_uniform(log_liks, t_indices, tx_starts, tx_ends,
@@ -94,9 +111,8 @@ def _apply_bias_correction_uniform(log_liks, t_indices, tx_starts, tx_ends,
     profile_lengths : np.ndarray
         int64[n_components] — transcript/component lengths.
     """
-    _MAX_FLEN = 1_000_000
     frag_lens = np.clip(
-        (tx_ends - tx_starts).astype(np.int64), 0, _MAX_FLEN - 1,
+        (tx_ends - tx_starts).astype(np.int64), 0, _MAX_FRAG_LEN - 1,
     )
     eff_lens = np.maximum(
         profile_lengths[t_indices] - frag_lens + 1, 1,
@@ -119,16 +135,30 @@ def _apply_bias_correction(log_liks, t_indices, tx_starts, tx_ends,
     exactly reproducing the former baked-in effective-length
     correction.
 
-    When all profiles are uniform, dispatches to a vectorized NumPy
-    fast-path that avoids all Python loops and per-candidate method
-    calls.  For non-uniform profiles, falls back to a lookup-table
-    approach calling ``BiasProfile.effective_length`` per unique pair.
+    Parameters
+    ----------
+    bias_profiles : np.ndarray or list
+        If ``np.ndarray`` of int64 component lengths, dispatches
+        directly to the vectorized uniform fast-path (no BiasProfile
+        objects needed).  If a list of ``BiasProfile`` objects, checks
+        for uniform profiles and falls back to per-candidate lookup.
     """
     n = len(t_indices)
-    if n == 0 or not bias_profiles:
+    if n == 0:
         return
 
-    # --- Fast path: all uniform → vectorized NumPy -------------------
+    # --- Fast path: numpy array of component lengths -----------------
+    # This avoids creating BiasProfile objects entirely (Phase H).
+    if isinstance(bias_profiles, np.ndarray):
+        _apply_bias_correction_uniform(
+            log_liks, t_indices, tx_starts, tx_ends, bias_profiles,
+        )
+        return
+
+    if not bias_profiles:
+        return
+
+    # --- Fast path: all uniform BiasProfile objects -------------------
     if all(p.is_uniform for p in bias_profiles):
         profile_lengths = np.array(
             [p.length for p in bias_profiles], dtype=np.int64,
@@ -144,17 +174,16 @@ def _apply_bias_correction(log_liks, t_indices, tx_starts, tx_ends,
     # Discordant minimap2 pairs can produce genomic footprints > 1 Mb;
     # any footprint ≥ profile length already yields effective_length=1,
     # so clamping is functionally neutral.
-    _MAX_FLEN = 1_000_000
-    frag_lens = np.clip(frag_lens, 0, _MAX_FLEN - 1)
-    compound = t_indices.astype(np.int64) * _MAX_FLEN + frag_lens
+    frag_lens = np.clip(frag_lens, 0, _MAX_FRAG_LEN - 1)
+    compound = t_indices.astype(np.int64) * _MAX_FRAG_LEN + frag_lens
     unique_compound, inverse = np.unique(compound, return_inverse=True)
 
     log_eff = np.empty(len(unique_compound), dtype=np.float64)
     for j in range(len(unique_compound)):
         uc = int(unique_compound[j])
-        cidx, fl = divmod(uc, _MAX_FLEN)
+        cidx, fl = divmod(uc, _MAX_FRAG_LEN)
         log_eff[j] = _math.log(
-            max(bias_profiles[int(cidx)].effective_length(int(fl)), 1e-300)
+            max(bias_profiles[int(cidx)].effective_length(int(fl)), _EM_LOG_EPSILON)
         )
 
     # Subtract log L̃ for every candidate (vectorised via inverse)
@@ -169,7 +198,7 @@ def _apply_bias_correction(log_liks, t_indices, tx_starts, tx_ends,
             int(tx_starts[i]), int(tx_ends[i]),
         )
         if w != 1.0:
-            log_liks[i] += _math.log(max(w, 1e-300))
+            log_liks[i] += _math.log(max(w, _EM_LOG_EPSILON))
 
 
 def _build_equiv_classes(offsets, t_indices, log_liks, coverage_weights):
@@ -270,8 +299,8 @@ def _vbem_step(alpha, ec_data, log_eff_len, unique_totals, prior, em_totals):
     """
     alpha_sum = alpha.sum()
     log_weights = (
-        _digamma(np.maximum(alpha, 1e-300))
-        - _digamma(max(alpha_sum, 1e-300))
+        _digamma(np.maximum(alpha, _EM_LOG_EPSILON))
+        - _digamma(max(alpha_sum, _EM_LOG_EPSILON))
         - log_eff_len
     )
     em_totals[:] = 0.0
@@ -500,7 +529,7 @@ class LocusEMInput:
     gdna_init: float
     effective_lengths: np.ndarray
     prior: np.ndarray
-    bias_profiles: list | None
+    bias_profiles: np.ndarray | list | None
 
 
 # ======================================================================
@@ -581,7 +610,7 @@ class AbundanceEstimator:
         else:
             self._t_to_g = None
             self._gene_spans = None
-            self._mean_frag = 200.0
+            self._mean_frag = _DEFAULT_MEAN_FRAG
             self._intronic_spans = None
             self._transcript_spans = None
             self._exonic_lengths = None
@@ -649,11 +678,6 @@ class AbundanceEstimator:
         return self._gdna_em_total
 
     @property
-    def gdna_unique_count(self) -> float:
-        """gDNA from intergenic fragments (set externally by pipeline)."""
-        return 0.0
-
-    @property
     def nrna_em_count(self) -> float:
         """Total EM-assigned nRNA count."""
         return float(self.nrna_em_counts.sum())
@@ -696,7 +720,6 @@ class AbundanceEstimator:
         if getattr(strand_model, '_finalized', False):
             p = strand_model.strand_likelihood_int(exon_strand, gene_strand)
         else:
-            from .types import Strand
             p = strand_model.strand_likelihood(
                 exon_strand, Strand(gene_strand),
             )
@@ -848,7 +871,7 @@ class AbundanceEstimator:
         prior = np.where(eligible, alpha + ovr, 0.0)
 
         em_totals = np.zeros(n_total, dtype=np.float64)
-        max_sq_iters = max(em_iterations // 3, 1)
+        max_sq_iters = max(em_iterations // _SQUAREM_BUDGET_DIVISOR, 1)
 
         if self.em_config.mode == "vbem":
             # ---- VBEM with SQUAREM acceleration -----------------
@@ -882,7 +905,7 @@ class AbundanceEstimator:
                         alpha_dir + 2.0 * step * r + step * step * v
                     )
                     # Alpha must stay positive.
-                    np.maximum(a_extrap, 1e-300, out=a_extrap)
+                    np.maximum(a_extrap, _EM_LOG_EPSILON, out=a_extrap)
 
                 # --- stabilisation VBEM step ---
                 a_new = _vbem_step(
@@ -973,7 +996,7 @@ class AbundanceEstimator:
         # ----------------------------------------------------------
         if self.em_config.prune_threshold is not None:
             data_count = unique_totals + em_totals
-            evidence_ratio = data_count / np.maximum(alpha_out, 1e-300)
+            evidence_ratio = data_count / np.maximum(alpha_out, _EM_LOG_EPSILON)
             prune_mask = (
                 (unique_totals == 0)
                 & (evidence_ratio < self.em_config.prune_threshold)
@@ -985,8 +1008,8 @@ class AbundanceEstimator:
                 prior[prune_mask] = 0.0
 
                 if self.em_config.mode == "vbem":
-                    alpha_out[prune_mask] = 1e-300
-                    for _ in range(10):
+                    alpha_out[prune_mask] = _EM_LOG_EPSILON
+                    for _ in range(_POST_PRUNE_ITERS):
                         alpha_out = _vbem_step(
                             alpha_out, ec_data, log_eff_len,
                             unique_totals, prior, em_totals,
@@ -998,7 +1021,7 @@ class AbundanceEstimator:
                     total = theta.sum()
                     if total > 0:
                         theta /= total
-                    for _ in range(10):
+                    for _ in range(_POST_PRUNE_ITERS):
                         theta = _em_step(
                             theta, ec_data, log_eff_len,
                             unique_totals, prior, em_totals,
@@ -1179,17 +1202,17 @@ class AbundanceEstimator:
                     # mRNA
                     g_tid = int(local_to_global_t[best_comp])
                     g_gid = int(t_to_g[g_tid])
-                    pool_code = 0  # mRNA
+                    pool_code = POOL_CODE_MRNA
                 elif best_comp < gdna_idx:
                     # nRNA
                     g_tid = int(local_to_global_t[best_comp - n_t])
                     g_gid = int(t_to_g[g_tid])
-                    pool_code = 1  # nRNA
+                    pool_code = POOL_CODE_NRNA
                 else:
                     # gDNA
                     g_tid = -1
                     g_gid = -1
-                    pool_code = 2  # gDNA
+                    pool_code = POOL_CODE_GDNA
                 unit_annotations.append((
                     int(global_unit_indices[u]),
                     g_tid,
@@ -1400,34 +1423,3 @@ class AbundanceEstimator:
                 ]
             )
         return pd.concat(frames, ignore_index=True)
-
-    # ------------------------------------------------------------------
-    # Output - gDNA summary dict
-    # ------------------------------------------------------------------
-
-    def gdna_summary(self) -> dict:
-        """Summary dict of gDNA contamination estimates."""
-        return {
-            "nrna_init_total": float(self.nrna_init.sum()),
-            "nrna_em_total": float(self.nrna_em_counts.sum()),
-            "gdna_em_total": float(self._gdna_em_total),
-            "gdna_total": float(self.gdna_total),
-            "gdna_contamination_rate": float(
-                round(self.gdna_contamination_rate, 6)
-            ),
-            "rna_unique_total": float(self.unique_counts.sum()),
-            "rna_em_total": float(self.em_counts.sum()),
-            "gene_sense_all_total": float(self.gene_sense_all.sum()),
-            "gene_antisense_all_total": float(
-                self.gene_antisense_all.sum()
-            ),
-            "transcript_intronic_sense_total": float(
-                self.transcript_intronic_sense.sum()
-            ),
-            "transcript_intronic_antisense_total": float(
-                self.transcript_intronic_antisense.sum()
-            ),
-            "n_loci_with_gdna": sum(
-                1 for e in self.gdna_locus_results if e["gdna_count"] > 0
-            ),
-        }

@@ -10,9 +10,9 @@ class TestPipelineStats:
         ps = PipelineStats()
         assert ps.total == 0
         assert ps.n_fragments == 0
-        assert ps.n_counted_truly_unique == 0
-        assert ps.n_counted_isoform_ambig == 0
-        assert ps.n_counted_gene_ambig == 0
+        assert ps.deterministic_unique_units == 0
+        assert ps.em_routed_isoform_ambig_units == 0
+        assert ps.em_routed_gene_ambig_units == 0
 
     def test_mutability(self):
         ps = PipelineStats()
@@ -28,9 +28,9 @@ class TestPipelineStats:
         # Spot-check a few keys
         assert "total" in d
         assert "n_fragments" in d
-        assert "n_counted_truly_unique" in d
-        assert "n_counted_isoform_ambig" in d
-        assert "n_counted_gene_ambig" in d
+        assert "deterministic_unique_units" in d
+        assert "em_routed_isoform_ambig_units" in d
+        assert "em_routed_gene_ambig_units" in d
         # All values should be zero by default
         assert all(v == 0 for v in d.values())
 

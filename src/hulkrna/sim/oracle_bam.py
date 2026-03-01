@@ -44,13 +44,25 @@ import numpy as np
 import pysam
 
 from ..transcript import Transcript
-from ..types import Interval, Strand
+from ..types import Strand
 from .genome import MutableGenome, reverse_complement
 from .reads import GDNAConfig, ReadSimulator, SimConfig
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["OracleBamSimulator"]
+
+# SAM flag bits (SAM spec §1.4.2).
+_FLAG_PAIRED = 0x1
+_FLAG_PROPER_PAIR = 0x2
+_FLAG_REVERSE = 0x10
+_FLAG_MATE_REVERSE = 0x20
+_FLAG_READ1 = 0x40
+_FLAG_READ2 = 0x80
+
+# Base flags shared by all proper paired-end reads.
+_BASE_R1_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ1
+_BASE_R2_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ2
 
 
 # ---------------------------------------------------------------------------
@@ -159,10 +171,10 @@ def _blocks_to_cigar(
             prev_end = blocks[i - 1][1]
             intron_len = bstart - prev_end
             if intron_len > 0:
-                cigar.append((3, intron_len))  # BAM_CREF_SKIP
+                cigar.append((pysam.CREF_SKIP, intron_len))
         match_len = bend - bstart
         if match_len > 0:
-            cigar.append((0, match_len))  # BAM_CMATCH
+            cigar.append((pysam.CMATCH, match_len))
     return cigar
 
 
@@ -640,18 +652,18 @@ class OracleBamSimulator:
             tags.append(("XS", xs_strand))
 
         # Build R1 flags
-        r1_flag = 0x1 | 0x2 | 0x40  # paired, proper pair, first in pair
+        r1_flag = _BASE_R1_FLAG
         if r1_is_reverse:
-            r1_flag |= 0x10
+            r1_flag |= _FLAG_REVERSE
         if r2_is_reverse:
-            r1_flag |= 0x20  # mate reverse
+            r1_flag |= _FLAG_MATE_REVERSE
 
         # Build R2 flags
-        r2_flag = 0x1 | 0x2 | 0x80  # paired, proper pair, second in pair
+        r2_flag = _BASE_R2_FLAG
         if r2_is_reverse:
-            r2_flag |= 0x10
+            r2_flag |= _FLAG_REVERSE
         if r1_is_reverse:
-            r2_flag |= 0x20  # mate reverse
+            r2_flag |= _FLAG_MATE_REVERSE
 
         r1_rec = _make_aligned_segment(
             header=header,
@@ -732,24 +744,24 @@ class OracleBamSimulator:
         r1_seq = self.genome[r1_start:r1_end]
         r2_seq = self.genome[r2_start:r2_end]
 
-        r1_cigar = [(0, r1_end - r1_start)]  # simple M
-        r2_cigar = [(0, r2_end - r2_start)]
+        r1_cigar = [(pysam.CMATCH, r1_end - r1_start)]
+        r2_cigar = [(pysam.CMATCH, r2_end - r2_start)]
 
         tlen = gend - gstart
 
         # R1 flags
-        r1_flag = 0x1 | 0x2 | 0x40
+        r1_flag = _BASE_R1_FLAG
         if r1_is_reverse:
-            r1_flag |= 0x10
+            r1_flag |= _FLAG_REVERSE
         if r2_is_reverse:
-            r1_flag |= 0x20
+            r1_flag |= _FLAG_MATE_REVERSE
 
         # R2 flags
-        r2_flag = 0x1 | 0x2 | 0x80
+        r2_flag = _BASE_R2_FLAG
         if r2_is_reverse:
-            r2_flag |= 0x10
+            r2_flag |= _FLAG_REVERSE
         if r1_is_reverse:
-            r2_flag |= 0x20
+            r2_flag |= _FLAG_MATE_REVERSE
 
         tags: list[tuple] = [("NH", 1)]
 

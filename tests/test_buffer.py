@@ -498,34 +498,6 @@ class TestFragmentClasses:
         assert fc[2] == FRAG_GENE_AMBIG
         assert fc[3] == FRAG_MULTIMAPPER
 
-    def test_consistent_with_ambiguous_mask(self):
-        """fragment_classes and ambiguous_mask should agree."""
-        t_to_g = np.array([0, 0, 1, 1, 2], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0}), n_genes=1, num_hits=1
-        ))
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 1}), n_genes=1, num_hits=1
-        ))
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 2}), n_genes=2, num_hits=1
-        ))
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        fc = chunk.fragment_classes
-        mask = chunk.ambiguous_mask
-        # FRAG_UNIQUE → not ambiguous
-        assert not mask[0]
-        assert fc[0] == FRAG_UNIQUE
-        # FRAG_ISOFORM_AMBIG → not ambiguous (1 gene, model considers unique)
-        assert not mask[1]
-        assert fc[1] == FRAG_ISOFORM_AMBIG
-        # FRAG_GENE_AMBIG → ambiguous
-        assert mask[2]
-        assert fc[2] == FRAG_GENE_AMBIG
-
     def test_chimeric_overrides_other_classes(self):
         """Chimeric fragments should be classified as FRAG_CHIMERIC regardless of gene/hit count."""
         t_to_g = np.array([0, 0, 1, 1, 2], dtype=np.int64)
@@ -566,68 +538,6 @@ class TestFragmentClasses:
         assert frags[1].chimera_type == ChimeraType.TRANS
         assert frags[2].chimera_type == ChimeraType.CIS_STRAND_SAME
         assert frags[3].chimera_type == ChimeraType.CIS_STRAND_DIFF
-
-
-# =====================================================================
-# FragmentBuffer — ambiguous mask
-# =====================================================================
-
-
-class TestAmbiguousMask:
-    def test_unique_fragments(self):
-        """Fragments with single gene and num_hits=1 are not ambiguous."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        for _ in range(5):
-            buf.append(_make_resolved(
-                t_inds=frozenset({0, 3}),  # both → g0
-                n_genes=1, num_hits=1
-            ))
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        mask = chunk.ambiguous_mask
-        assert mask.sum() == 0
-
-    def test_multi_gene_is_ambiguous(self):
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 1}),  # g0, g1
-            n_genes=2, num_hits=1,
-        ))
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        assert chunk.ambiguous_mask[0] is np.True_
-
-    def test_multimapped_is_ambiguous(self):
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 3}),  # both → g0
-            n_genes=1, num_hits=3,
-        ))
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        assert chunk.ambiguous_mask[0] is np.True_
-
-    def test_mixed(self):
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 3}), n_genes=1, num_hits=1,   # unique
-        ))
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 1}), n_genes=2, num_hits=1,   # multi-gene
-        ))
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 3}), n_genes=1, num_hits=2,   # multimapped
-        ))
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        mask = chunk.ambiguous_mask
-        assert not mask[0]
-        assert mask[1]
-        assert mask[2]
 
 
 # =====================================================================

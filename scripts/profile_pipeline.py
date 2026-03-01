@@ -193,9 +193,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
                 continue
 
             _ta = time.perf_counter()
-            result = resolve_fragment(
-                frag, index, overlap_min_frac=scan.overlap_min_frac,
-            )
+            result = resolve_fragment(frag, index)
             _tb = time.perf_counter()
             t_resolve += _tb - _ta
 

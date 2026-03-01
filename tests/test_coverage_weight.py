@@ -1,13 +1,16 @@
-"""Unit tests for coverage-weight scoring functions.
+"""Unit tests for fragment-weight and transcript-position scoring functions.
 
-Tests ``genomic_to_transcript_pos`` and ``compute_coverage_weight``
+Tests ``genomic_to_transcript_pos`` and ``compute_fragment_weight``
 from ``hulkrna.scoring``.
 """
 
 import numpy as np
 import pytest
 
-from hulkrna.scoring import compute_coverage_weight, genomic_to_transcript_pos
+from hulkrna.scoring import (
+    compute_fragment_weight,
+    genomic_to_transcript_pos,
+)
 from hulkrna.types import Strand
 
 POS = int(Strand.POS)
@@ -92,72 +95,100 @@ class TestGenomicToTranscriptPos:
 
 
 # =====================================================================
-# compute_coverage_weight
+# compute_fragment_weight
 # =====================================================================
 
 
-class TestComputeCoverageWeight:
-    """Tests for compute_coverage_weight."""
+class TestComputeFragmentWeight:
+    """Tests for compute_fragment_weight (C++ kernel)."""
 
     def test_plateau_returns_one(self):
         """Fragment entirely in plateau region → weight 1.0."""
         # L=1000, f=100, w=100. Plateau is [100, 900).
         # Fragment at [200, 300) is entirely in plateau.
-        assert compute_coverage_weight(200, 300, 1000) == pytest.approx(1.0)
+        assert compute_fragment_weight(200, 300, 1000) == pytest.approx(1.0)
 
     def test_edge_returns_gt_one(self):
         """Fragment near 5' edge → weight > 1.0."""
         # L=1000, f=50, w=50. Left ramp is [0, 50).
         # Fragment at [0, 50) is entirely in left ramp.
-        w = compute_coverage_weight(0, 50, 1000)
+        w = compute_fragment_weight(0, 50, 1000)
         assert w > 1.0
 
     def test_right_edge_returns_gt_one(self):
         """Fragment near 3' edge → weight > 1.0."""
         # L=1000, f=50, w=50. Right ramp is [950, 1000].
-        w = compute_coverage_weight(950, 1000, 1000)
+        w = compute_fragment_weight(950, 1000, 1000)
         assert w > 1.0
 
     def test_symmetry(self):
         """Left and right edges should give same weight for same distance."""
         L = 1000
-        w_left = compute_coverage_weight(0, 100, L)
-        w_right = compute_coverage_weight(900, 1000, L)
+        w_left = compute_fragment_weight(0, 100, L)
+        w_right = compute_fragment_weight(900, 1000, L)
         assert w_left == pytest.approx(w_right, rel=1e-10)
 
     def test_full_span_fragment(self):
         """Fragment spans entire transcript."""
         # f = L = 500, w = min(500, 250) = 250
-        w = compute_coverage_weight(0, 500, 500)
+        w = compute_fragment_weight(0, 500, 500)
         assert w >= 1.0
 
     def test_short_transcript(self):
         """Fragment equals short transcript → weight >= 1.0."""
-        w = compute_coverage_weight(0, 100, 100)
+        w = compute_fragment_weight(0, 100, 100)
         assert w >= 1.0
 
     def test_zero_length_fragment(self):
         """Zero-length fragment → fallback 1.0."""
-        assert compute_coverage_weight(50, 50, 1000) == 1.0
+        assert compute_fragment_weight(50, 50, 1000) == 1.0
 
     def test_zero_transcript_length(self):
         """Zero transcript length → fallback 1.0."""
-        assert compute_coverage_weight(0, 100, 0) == 1.0
+        assert compute_fragment_weight(0, 100, 0) == 1.0
 
     def test_negative_fragment(self):
         """Inverted coordinates → fallback 1.0."""
-        assert compute_coverage_weight(100, 50, 1000) == 1.0
+        assert compute_fragment_weight(100, 50, 1000) == 1.0
 
     def test_weight_increases_toward_edge(self):
         """Weight should increase as fragment moves from plateau to edge."""
         L = 2000
-        w_center = compute_coverage_weight(500, 600, L)
-        w_near_edge = compute_coverage_weight(10, 110, L)
+        w_center = compute_fragment_weight(500, 600, L)
+        w_near_edge = compute_fragment_weight(10, 110, L)
         assert w_center < w_near_edge
 
     def test_half_span_fragment(self):
         """Fragment spanning exactly half the transcript."""
         # f = L/2 = 500, w = 500. Plateau is [500, 500) — empty.
         # Entire [0, 500) is in the left ramp.
-        w = compute_coverage_weight(0, 500, 1000)
+        w = compute_fragment_weight(0, 500, 1000)
         assert w >= 1.0
+
+
+class TestNativeScoringImport:
+    """Verify the native C++ scoring module loads and matches Python."""
+
+    def test_native_module_available(self):
+        """_scoring_impl should be importable after build."""
+        from hulkrna._scoring_impl import compute_fragment_weight as native_fw
+        assert callable(native_fw)
+
+    @pytest.mark.parametrize("fs,fe,tl", [
+        (200, 300, 1000),   # plateau
+        (0, 50, 1000),      # left edge
+        (950, 1000, 1000),  # right edge
+        (0, 500, 500),      # full span
+        (0, 100, 100),      # short transcript
+        (50, 50, 1000),     # zero-length
+        (0, 100, 0),        # zero transcript
+        (100, 50, 1000),    # inverted
+        (0, 500, 1000),     # half span
+        (10, 110, 2000),    # near edge
+    ])
+    def test_native_matches_python(self, fs, fe, tl):
+        """C++ kernel must match Python fallback for all cases."""
+        from hulkrna._scoring_impl import compute_fragment_weight as native_fw
+        py_result = compute_fragment_weight(fs, fe, tl)
+        native_result = native_fw(fs, fe, tl)
+        assert native_result == pytest.approx(py_result, rel=1e-12)

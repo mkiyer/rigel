@@ -42,7 +42,6 @@ class PipelineStats:
     n_intergenic_unspliced: int = 0
     n_intergenic_spliced: int = 0
     n_with_exon: int = 0
-    n_with_intron_fallback: int = 0
     n_with_annotated_sj: int = 0
     n_with_unannotated_sj: int = 0
     n_unique_gene: int = 0
@@ -91,26 +90,6 @@ class PipelineStats:
         """Total fragments assigned to gDNA (intergenic + EM)."""
         return self.n_gdna_unique + self.n_gdna_em
 
-    @property
-    def n_counted_truly_unique(self) -> int:
-        """Back-compat alias: deterministic unique assignment count."""
-        return self.deterministic_unique_units
-
-    @property
-    def n_counted_isoform_ambig(self) -> int:
-        """Back-compat alias: EM-routed isoform-ambiguous units."""
-        return self.em_routed_isoform_ambig_units
-
-    @property
-    def n_counted_gene_ambig(self) -> int:
-        """Back-compat alias: EM-routed gene-ambiguous units."""
-        return self.em_routed_gene_ambig_units
-
-    @property
-    def n_counted_multimapper(self) -> int:
-        """Back-compat alias: EM-routed multimapper units."""
-        return self.em_routed_multimapper_units
-
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary.
 
@@ -122,11 +101,6 @@ class PipelineStats:
         d["n_intergenic"] = self.n_intergenic
         d["n_gdna_unique"] = self.n_gdna_unique
         d["n_gdna_total"] = self.n_gdna_total
-        # Back-compat aliases
-        d["n_counted_truly_unique"] = self.n_counted_truly_unique
-        d["n_counted_isoform_ambig"] = self.n_counted_isoform_ambig
-        d["n_counted_gene_ambig"] = self.n_counted_gene_ambig
-        d["n_counted_multimapper"] = self.n_counted_multimapper
         return d
 
     def as_bam_stats_dict(self) -> dict:
@@ -163,6 +137,17 @@ class _BamStatsProxy(dict):
         super().__setitem__(key, value)
         if key in self._BAM_KEYS:
             setattr(self._stats, key, value)
+
+    def update(self, other=(), /, **kwargs):
+        """Override to sync each key through ``__setitem__``."""
+        if isinstance(other, dict):
+            for key, value in other.items():
+                self[key] = value
+        else:
+            for key, value in other:
+                self[key] = value
+        for key, value in kwargs.items():
+            self[key] = value
 
     def setdefault(self, key, default=None):
         if key not in self:

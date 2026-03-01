@@ -10,11 +10,15 @@ This module contains:
 - ``resolve_fragment()`` — core fragment-to-transcript resolution with
   chimera detection (interchromosomal and intrachromosomal)
 - ``compute_frag_lengths()`` — per-transcript fragment lengths with gap correction
-- ``compute_genomic_frag_length()`` — simple fragment length (no transcript context)
 - ``ResolvedFragment`` — compact cached resolution result
+- ``pair_multimapper_reads()`` — secondary alignment pairing
 """
 
-from collections import defaultdict
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+
 from dataclasses import dataclass
 
 from .types import (
@@ -79,136 +83,8 @@ def merge_sets_with_criteria(
 
 
 # ---------------------------------------------------------------------------
-# Overlap profile computation
-# ---------------------------------------------------------------------------
-
-def _subtract_intervals(
-    interval: tuple[int, int],
-    subtract: list[tuple[int, int]],
-) -> int:
-    """Return the length of *interval* after removing *subtract* regions.
-
-    *subtract* must be sorted by start and non-overlapping (merged).
-    Returns the number of bases in *interval* not covered by any
-    interval in *subtract*.
-    """
-    lo, hi = interval
-    if lo >= hi:
-        return 0
-    remaining = 0
-    cursor = lo
-    for s_lo, s_hi in subtract:
-        if s_lo >= hi:
-            break
-        if s_hi <= cursor:
-            continue
-        # Gap before this subtract region
-        if s_lo > cursor:
-            remaining += min(s_lo, hi) - cursor
-        cursor = max(cursor, s_hi)
-    # Remaining tail after last subtract region
-    if cursor < hi:
-        remaining += hi - cursor
-    return remaining
-
-
-def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Merge a list of (start, end) intervals into non-overlapping sorted list."""
-    if not intervals:
-        return []
-    intervals.sort()
-    merged = [intervals[0]]
-    for lo, hi in intervals[1:]:
-        if lo <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
-        else:
-            merged.append((lo, hi))
-    return merged
-
-
-def filter_by_overlap(
-    t_inds: frozenset[int],
-    overlap_bp: dict[int, tuple[int, int, int]],
-    read_length: int,
-    *,
-    min_frac_of_best: float = 0.9,
-) -> frozenset[int]:
-    """Filter candidate transcripts by exon overlap fraction.
-
-    Keeps transcripts whose exon overlap fraction is at least
-    ``min_frac_of_best`` times the best exon overlap fraction among
-    candidates.  This removes transcript candidates that only have
-    marginal (1-2 bp) overlap with the fragment.
-
-    If no overlap data is available for the candidates, returns
-    the original set unchanged.
-
-    Parameters
-    ----------
-    t_inds : frozenset[int]
-        Candidate transcript indices from resolution.
-    overlap_bp : dict[int, tuple[int, int, int]]
-        Per-transcript overlap BP from ``resolve_fragment``.
-        Each value is ``(n_exon_bp, n_intron_bp, n_unambig_intron_bp)``.
-        Filtering uses the exon_frac derived from ``n_exon_bp / read_length``.
-    read_length : int
-        Total fragment exon length in bp, used as denominator.
-    min_frac_of_best : float
-        Minimum fraction of the best overlap to retain a candidate
-        (default 0.9 = within 10% of best).
-
-    Returns
-    -------
-    frozenset[int]
-        Filtered candidate set (never empty — falls back to original).
-    """
-    if not overlap_bp or not t_inds or read_length <= 0:
-        return t_inds
-
-    # Find the best exon overlap fraction among current candidates
-    best = 0.0
-    for t_idx in t_inds:
-        profile = overlap_bp.get(t_idx)
-        frac = profile[0] / read_length if profile else 0.0
-        if frac > best:
-            best = frac
-
-    if best <= 0.0:
-        return t_inds  # No overlap data → keep all
-
-    threshold = best * min_frac_of_best
-    filtered = frozenset(
-        t_idx for t_idx in t_inds
-        if (overlap_bp.get(t_idx, (0, 0, 0))[0] / read_length) >= threshold
-    )
-
-    # Safety: never return empty set
-    return filtered if filtered else t_inds
-
-
-# ---------------------------------------------------------------------------
 # Fragment length computation
 # ---------------------------------------------------------------------------
-
-def compute_genomic_frag_length(frag: Fragment) -> int:
-    """Compute fragment length as footprint minus observed introns.
-
-    No gap correction (no transcript context).  Used for intergenic
-    fragments where there are no compatible transcripts.
-
-    Returns
-    -------
-    int
-        Fragment length in bp, or -1 if the fragment has no exon blocks.
-    """
-    if not frag.exons:
-        return -1
-    sorted_exons = sorted((e.start, e.end) for e in frag.exons)
-    footprint = sorted_exons[-1][1] - sorted_exons[0][0]
-    observed_intron_total = sum(
-        intron.end - intron.start for intron in frag.introns
-    )
-    return footprint - observed_intron_total
 
 
 def compute_frag_lengths(
@@ -253,6 +129,13 @@ def compute_frag_lengths(
         or no compatible transcripts.
     """
     if not frag.exons or not compatible_t_inds:
+        return {}
+
+    # A7: Fast path for single exon block (no gaps, shared length)
+    if len(frag.exons) == 1:
+        fl = frag.exons[0].end - frag.exons[0].start
+        if fl > 0:
+            return {t_idx: fl for t_idx in compatible_t_inds}
         return {}
 
     ref = frag.exons[0].ref
@@ -507,14 +390,82 @@ class ResolvedFragment:
 
 
 # ---------------------------------------------------------------------------
-# Fragment resolution
+# Fragment resolution — dispatch (C++ native or Python fallback)
 # ---------------------------------------------------------------------------
 
 def resolve_fragment(
     frag: Fragment,
     index,
-    *,
-    overlap_min_frac: float = 0.99,
+) -> "ResolvedFragment | None":
+    """Resolve a fragment to its compatible transcript set.
+
+    Dispatches to the C++ native kernel (``hulkrna._resolve_impl``)
+    when available, otherwise falls back to the pure-Python
+    implementation.  Both paths produce identical results.
+
+    When the native kernel is available, returns a C++
+    ``ResolvedResult`` object (duck-typed to ``ResolvedFragment``)
+    that exposes the same attributes for model training and buffering.
+    """
+    if not frag.exons:
+        return None
+
+    ctx = getattr(index, '_resolve_ctx', None)
+    if ctx is not None:
+        return ctx.resolve_fragment(frag)
+    return _resolve_python(frag, index)
+
+
+def _resolve_native(
+    frag: Fragment,
+    index,
+    ctx,
+) -> ResolvedFragment | None:
+    """Resolve via C++ kernel — called from ``resolve_fragment``."""
+    rtid = index._resolve_ref_to_id
+    exon_ref_ids = [rtid.get(e.ref, -1) for e in frag.exons]
+    exon_starts = [e.start for e in frag.exons]
+    exon_ends = [e.end for e in frag.exons]
+    exon_strands = [int(e.strand) for e in frag.exons]
+
+    intron_ref_ids = [rtid.get(i.ref, -1) for i in frag.introns]
+    intron_starts = [i.start for i in frag.introns]
+    intron_ends = [i.end for i in frag.introns]
+    intron_strands = [int(i.strand) for i in frag.introns]
+
+    result = ctx.resolve(
+        exon_ref_ids, exon_starts, exon_ends, exon_strands,
+        intron_ref_ids, intron_starts, intron_ends, intron_strands,
+        frag.genomic_footprint,
+    )
+    if result is None:
+        return None
+
+    return ResolvedFragment(
+        t_inds=frozenset(result[0]),
+        n_genes=result[1],
+        splice_type=SpliceType(result[2]),
+        exon_strand=Strand(result[3]),
+        sj_strand=Strand(result[4]),
+        frag_lengths=result[5],
+        genomic_footprint=result[6],
+        genomic_start=result[7],
+        merge_criteria=MergeCriteria(result[8]),
+        num_hits=1,
+        overlap_bp=result[9],
+        read_length=result[10],
+        chimera_type=ChimeraType(result[11]),
+        chimera_gap=result[12],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fragment resolution — Python reference implementation
+# ---------------------------------------------------------------------------
+
+def _resolve_python(
+    frag: Fragment,
+    index,
 ) -> ResolvedFragment | None:
     """Resolve a fragment to its compatible transcript set.
 
@@ -539,10 +490,6 @@ def resolve_fragment(
         The consolidated fragment from paired-end reads.
     index : HulkIndex
         The loaded reference index.
-    overlap_min_frac : float
-        Minimum fraction of the best exon overlap to retain a candidate
-        transcript.  1.0 (default) keeps only candidates tied for the
-        highest overlap; 0.9 keeps candidates within 10% of the best.
 
     Returns
     -------
@@ -569,10 +516,11 @@ def resolve_fragment(
 
     exon_strand = Strand.NONE
 
-    # Overlap profile accumulators
-    _t_exon_bp: dict[int, int] = defaultdict(int)
-    _t_transcript_bp: dict[int, int] = defaultdict(int)
-    _t_unambig_intron_bp: dict[int, int] = defaultdict(int)
+    # Overlap profile accumulators (A2: array-based, indexed by t_idx)
+    n_tx = len(index.t_to_g_arr)
+    _t_exon_bp = [0] * n_tx
+    _t_transcript_bp = [0] * n_tx
+    _t_unambig_intron_bp = [0] * n_tx
     read_length = 0
 
     for exon_block in frag.exons:
@@ -584,10 +532,6 @@ def resolve_fragment(
         block_exon_t: set[int] = set()
         block_transcript_t: set[int] = set()
 
-        # Per-block overlap intervals for unambig intron BP computation
-        global_exon_intervals: list[tuple[int, int]] = []
-        per_t_transcript_intervals: dict[int, list[tuple[int, int]]] = defaultdict(list)
-
         # Single cgranges query per block (collapsed)
         for h_start, h_end, itype, t_set in index.query(exon_block):
             if itype == IntervalType.EXON:
@@ -598,7 +542,6 @@ def resolve_fragment(
                     bp = clipped_hi - clipped_lo
                     for t_idx in t_set:
                         _t_exon_bp[t_idx] += bp
-                    global_exon_intervals.append((clipped_lo, clipped_hi))
             elif itype == IntervalType.TRANSCRIPT:
                 block_transcript_t.update(t_set)
                 clipped_lo = max(block_start, h_start)
@@ -607,29 +550,16 @@ def resolve_fragment(
                     bp = clipped_hi - clipped_lo
                     for t_idx in t_set:
                         _t_transcript_bp[t_idx] += bp
-                    per_t_transcript_intervals.setdefault(None, [])
-                    # Store per-transcript intervals for unambig computation
+            elif itype == IntervalType.UNAMBIG_INTRON:
+                clipped_lo = max(block_start, h_start)
+                clipped_hi = min(block_end, h_end)
+                if clipped_hi > clipped_lo:
+                    bp = clipped_hi - clipped_lo
                     for t_idx in t_set:
-                        per_t_transcript_intervals.setdefault(t_idx, []).append(
-                            (clipped_lo, clipped_hi)
-                        )
-                    # Remove the None sentinel if created
-                    per_t_transcript_intervals.pop(None, None)
+                        _t_unambig_intron_bp[t_idx] += bp
 
         exon_t_sets.append(frozenset(block_exon_t))
         transcript_t_sets.append(frozenset(block_transcript_t))
-
-        # Compute unambig intron BP for this block:
-        # For each transcript, intron regions are within the TRANSCRIPT
-        # span but outside EXON intervals.  Subtract global exon union
-        # from each transcript's TRANSCRIPT hit intervals.
-        if per_t_transcript_intervals:
-            merged_exon = _merge_intervals(global_exon_intervals)
-            for t_idx, tx_ivs in per_t_transcript_intervals.items():
-                for iv in tx_ivs:
-                    _t_unambig_intron_bp[t_idx] += _subtract_intervals(
-                        iv, merged_exon,
-                    )
 
     # --- Intrachromosomal chimera detection (single-ref only) ---
     if not is_interchromosomal:
@@ -757,13 +687,18 @@ def resolve_fragment(
     # --- Overlap profiles for all genic fragments ---
     # Overlap BP counts were computed in the single-pass query above.
     # intron_bp is derived as transcript_bp - exon_bp (not stored directly).
-    all_overlap_t = set(_t_exon_bp) | set(_t_transcript_bp)
+    # unambig_intron_bp comes from UNAMBIG_INTRON cgranges hits.
+    all_overlap_t: set[int] = set()
+    for _ts in exon_t_sets:
+        all_overlap_t.update(_ts)
+    for _ts in transcript_t_sets:
+        all_overlap_t.update(_ts)
     if all_overlap_t and read_length > 0:
         overlap_bp = {
             t_idx: (
-                _t_exon_bp.get(t_idx, 0),
-                max(_t_transcript_bp.get(t_idx, 0) - _t_exon_bp.get(t_idx, 0), 0),
-                _t_unambig_intron_bp.get(t_idx, 0),
+                _t_exon_bp[t_idx],
+                max(_t_transcript_bp[t_idx] - _t_exon_bp[t_idx], 0),
+                _t_unambig_intron_bp[t_idx],
             )
             for t_idx in all_overlap_t
         }
@@ -815,7 +750,6 @@ def pair_multimapper_reads(
     sec_r2_locs: list[list],
     index,
     sj_strand_tag,
-    overlap_min_frac: float = 0.99,
 ) -> list[tuple[list, list]]:
     """Pair secondary R1/R2 alignments using transcript-set intersection.
 
@@ -858,8 +792,6 @@ def pair_multimapper_reads(
         Reference index for resolution.
     sj_strand_tag : str or tuple[str, ...]
         Splice-junction strand tag(s).
-    overlap_min_frac : float
-        Minimum exon overlap fraction for resolution filtering.
 
     Returns
     -------
@@ -876,9 +808,7 @@ def pair_multimapper_reads(
         frag = Fragment.from_reads(r1_reads, [], sj_strand_tag=sj_strand_tag)
         t_inds: frozenset = frozenset()
         if frag.exons:
-            result = resolve_fragment(
-                frag, index, overlap_min_frac=overlap_min_frac,
-            )
+            result = resolve_fragment(frag, index)
             if result is not None:
                 t_inds = result.t_inds
         ref_id = r1_reads[0].reference_id if r1_reads else -1
@@ -891,9 +821,7 @@ def pair_multimapper_reads(
         frag = Fragment.from_reads([], r2_reads, sj_strand_tag=sj_strand_tag)
         t_inds = frozenset()
         if frag.exons:
-            result = resolve_fragment(
-                frag, index, overlap_min_frac=overlap_min_frac,
-            )
+            result = resolve_fragment(frag, index)
             if result is not None:
                 t_inds = result.t_inds
         ref_id = r2_reads[0].reference_id if r2_reads else -1

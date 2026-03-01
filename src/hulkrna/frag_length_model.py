@@ -35,6 +35,12 @@ import numpy as np
 #  1000 bp over → −10.0                   (≈ 22 000× less likely)
 _TAIL_DECAY_LP: float = math.log(0.99)
 
+#: Default maximum fragment length tracked individually.
+#: Sizes >= this go into a single overflow bin.  Typical RNA-seq
+#: libraries have fragments in the 100–500 bp range; 2000 accommodates
+#: the vast majority.
+DEFAULT_MAX_FRAG_SIZE: int = 2000
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +71,7 @@ class FragmentLengthModel:
         Total number of observations added.
     """
 
-    max_size: int = 2000
+    max_size: int = DEFAULT_MAX_FRAG_SIZE
     counts: np.ndarray = field(default=None, repr=False)
     n_observations: int = 0
 
@@ -242,51 +248,6 @@ class FragmentLengthModel:
             return np.full(n, 1.0 / n, dtype=np.float64)
         return (self.counts + 1.0) / (total + self.max_size + 1)
 
-    def compute_exonic_eff_len(self, exon_lengths: list[int] | np.ndarray) -> float:
-        """eCDF-weighted effective length for gDNA fragments on exons.
-
-        For each exon of length *E*, the expected number of gDNA
-        fragment start positions that produce a fragment fully
-        contained within the exon is::
-
-            Σ_{l=1}^{E}  P(l) × (E − l + 1)
-
-        where *P(l)* is the Laplace-smoothed gDNA fragment-length
-        probability.  Summing across all exons gives the total
-        exonic effective length for the gene.
-
-        This is exact under the assumption that gDNA fragments
-        are uniformly distributed across the genome.
-
-        Parameters
-        ----------
-        exon_lengths : list[int] or np.ndarray
-            Lengths of the (merged) exons for one gene.
-
-        Returns
-        -------
-        float
-            Total exonic effective length (≥ 1.0).
-        """
-        probs = self._normalized_probs()  # P(l) for l=0..max_size
-        total = 0.0
-        for E in exon_lengths:
-            E = int(E)
-            if E <= 0:
-                continue
-            # l ranges from 1..min(E, max_size)
-            L_max = min(E, self.max_size)
-            # positions[l] = E - l + 1  for l = 1..L_max
-            l_vals = np.arange(1, L_max + 1)
-            positions = E - l_vals + 1  # (E, E-1, ..., E-L_max+1)
-            total += float(np.dot(probs[l_vals], positions))
-            # Overflow bin: fragments of length > max_size can only
-            # fit if E > max_size.  They get 1 position each
-            # (the exon must fully contain them).
-            if E > self.max_size:
-                total += float(probs[self.max_size]) * (E - self.max_size)
-        return max(total, 1.0)
-
     # ------------------------------------------------------------------
     # Analytical transcript effective length (salmon-style eCDF)
     # ------------------------------------------------------------------
@@ -304,49 +265,6 @@ class FragmentLengthModel:
         l_vals = np.arange(len(probs), dtype=np.float64)
         cmom = np.cumsum(probs * l_vals)
         return cdf, cmom
-
-    def compute_transcript_eff_len(self, transcript_length: int) -> float:
-        """Analytical effective length for one transcript using the
-        full fragment length distribution (eCDF approach).
-
-        Computes::
-
-            eff_len = Σ_{l=1}^{min(L, max_size)} P(l) × (L − l + 1)
-
-        where *L* is the transcript exonic length and *P(l)* is the
-        Laplace-smoothed probability of fragment length *l*.
-
-        This is exact and equivalent to salmon's effective length
-        computation.  It correctly penalizes short transcripts
-        without the division-by-one explosion of the naive
-        ``max(L - mean + 1, 1)`` formula.
-
-        Fallback: if the result is < 1.0 (transcript shorter than
-        virtually all fragments), returns 1.0 as a safe floor.
-
-        Parameters
-        ----------
-        transcript_length : int
-            Total exonic (spliced) length of the transcript in bases.
-
-        Returns
-        -------
-        float
-            Analytical effective length (≥ 1.0).
-        """
-        L = int(transcript_length)
-        if L <= 0:
-            return 1.0
-        probs = self._normalized_probs()
-        L_max = min(L, self.max_size)
-        l_vals = np.arange(1, L_max + 1)
-        positions = L - l_vals + 1  # (L, L-1, ..., L-L_max+1)
-        eff = float(np.dot(probs[l_vals], positions))
-        # Overflow bin: fragments with length > max_size that still
-        # fit within the transcript.  Same treatment as exonic variant.
-        if L > self.max_size:
-            eff += float(probs[self.max_size]) * (L - self.max_size)
-        return max(eff, 1.0)
 
     def compute_all_transcript_eff_lens(
         self, lengths: np.ndarray,
@@ -440,35 +358,6 @@ class FragmentLengthModel:
             },
         }
 
-    def write_json(self, path: Path | str) -> None:
-        """Write the fragment length model to a JSON file.
-
-        Parameters
-        ----------
-        path : Path or str
-            Output JSON file path.
-        """
-        import json
-
-        path = Path(path)
-        d = self.to_dict()
-
-        with open(path, "w") as fh:
-            json.dump(
-                {"frag_length_model": d},
-                fh,
-                indent=2,
-            )
-
-        logger.info(f"Wrote fragment length model to {path}")
-
-    def log_summary(self) -> None:
-        """Log a human-readable summary of the learned fragment length model."""
-        logger.info(
-            f"Fragment length model: {self.n_observations:,} observations, "
-            f"mean={self.mean:.1f}, std={self.std:.1f}, "
-            f"median={self.median:.1f}, mode={self.mode}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +375,7 @@ class FragmentLengthModels:
     model plus the appropriate category or intergenic model.
     """
 
-    def __init__(self, max_size: int = 2000):
+    def __init__(self, max_size: int = DEFAULT_MAX_FRAG_SIZE):
         from .categories import SpliceType
 
         self.max_size = max_size
@@ -544,15 +433,6 @@ class FragmentLengthModels:
         else:
             self.category_models[splice_type].observe(frag_length, weight)
 
-    def observe_gdna(self, frag_length: int, weight: float = 1.0) -> None:
-        """Record an fragment length observation for the gDNA model only.
-
-        Used for antisense genic fragments (exonic + intronic) which
-        are enriched for gDNA but already routed to their category
-        model via :meth:`observe`.
-        """
-        self.gdna_model.observe(frag_length, weight)
-
     def to_dict(self) -> dict:
         """JSON/YAML-serializable summary of all fragment length models."""
         from .categories import SpliceType
@@ -567,7 +447,6 @@ class FragmentLengthModels:
     def write_json(self, path) -> None:
         """Write all fragment length models to a single JSON file."""
         import json
-        from pathlib import Path
 
         path = Path(path)
         with open(path, "w") as fh:

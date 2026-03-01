@@ -113,22 +113,4 @@ class BiasProfile:
         return max(eff, 1.0)
 
 
-# ------------------------------------------------------------------
-# Convenience builders
-# ------------------------------------------------------------------
 
-
-def build_uniform_profiles(t_lengths: np.ndarray) -> list[BiasProfile]:
-    """Build a uniform (null) ``BiasProfile`` for each transcript.
-
-    Parameters
-    ----------
-    t_lengths : np.ndarray
-        int or float array of transcript lengths.
-
-    Returns
-    -------
-    list[BiasProfile]
-        One uniform profile per transcript.
-    """
-    return [BiasProfile.uniform(int(tl)) for tl in t_lengths]

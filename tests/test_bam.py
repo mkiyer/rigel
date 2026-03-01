@@ -8,7 +8,6 @@ import pytest
 from hulkrna.bam import (
     parse_bam_file,
     parse_read,
-    _pair_reads,
     _group_records_by_hit,
 )
 from hulkrna.types import Strand
@@ -176,51 +175,6 @@ class TestParseRead:
         # One contiguous exon block spanning 30 + 5 + 30 = 65 bases
         assert exons == [(100, 165)]
         assert sjs == []
-
-
-# =====================================================================
-# _pair_reads  (used as fallback for secondary pairing)
-# =====================================================================
-
-
-class TestPairReads:
-    def test_simple_pair(self):
-        r1, r2 = _make_pair()
-        pairs = _pair_reads([r1], [r2])
-        assert len(pairs) == 1
-        assert pairs[0] == (r1, r2)
-
-    def test_mate_unmapped_r2(self):
-        r1 = _mock_bam_read(
-            is_read1=True, mate_is_unmapped=True,
-        )
-        pairs = _pair_reads([r1], [])
-        assert len(pairs) == 1
-        assert pairs[0] == (r1, None)
-
-    def test_mate_unmapped_r1(self):
-        r2 = _mock_bam_read(
-            is_read1=False, is_read2=True, mate_is_unmapped=True,
-        )
-        pairs = _pair_reads([], [r2])
-        assert len(pairs) == 1
-        assert pairs[0] == (None, r2)
-
-    def test_multiple_pairs(self):
-        """Two R1/R2 pairs with different positions → two matched pairs."""
-        r1a, r2a = _make_pair(r1_start=100, r2_start=300)
-        r1b, r2b = _make_pair(r1_start=500, r2_start=700)
-        pairs = _pair_reads([r1a, r1b], [r2a, r2b])
-        assert len(pairs) == 2
-
-    def test_unmatched_r1_becomes_singleton(self):
-        r1 = _mock_bam_read(
-            is_read1=True,
-            next_ref_id=0, next_ref_start=9999,  # no matching R2
-        )
-        pairs = _pair_reads([r1], [])
-        assert len(pairs) == 1
-        assert pairs[0] == (r1, None)
 
 
 # =====================================================================

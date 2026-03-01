@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Literal
 
-import cgranges
+from hulkrna._cgranges_impl import cgranges as _cgranges_cls
 import numpy as np
 import pandas as pd
 import pysam
@@ -210,6 +210,87 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[RefInterval]:
                           t.strand, IntervalType.TRANSCRIPT, t.t_index)
 
 
+def _merge_exon_intervals(
+    intervals: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Merge a sorted list of (start, end) intervals into non-overlapping form."""
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = [list(intervals[0])]
+    for lo, hi in intervals[1:]:
+        if lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    return [(s, e) for s, e in merged]
+
+
+def _subtract_from_interval(
+    lo: int, hi: int,
+    subtract: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Subtract merged intervals from [lo, hi) and return remaining pieces."""
+    if lo >= hi:
+        return []
+    result: list[tuple[int, int]] = []
+    cursor = lo
+    for s_lo, s_hi in subtract:
+        if s_lo >= hi:
+            break
+        if s_hi <= cursor:
+            continue
+        if s_lo > cursor:
+            result.append((cursor, min(s_lo, hi)))
+        cursor = max(cursor, s_hi)
+    if cursor < hi:
+        result.append((cursor, hi))
+    return result
+
+
+def _gen_cluster_unambig_intron_intervals(
+    cluster: list[Transcript],
+) -> Iterator[RefInterval]:
+    """Yield UNAMBIG_INTRON intervals for a cluster of overlapping transcripts.
+
+    For each multi-exon transcript, subtract the global exon union of the
+    entire cluster from the transcript's intronic gaps.  The remaining
+    regions are unambiguously intronic — they don't overlap any exon from
+    any transcript in the locus.
+
+    These intervals are the unique evidence for nascent RNA: a read
+    landing in an unambiguously intronic region can only originate from
+    pre-mRNA (or genomic DNA), never from a mature mRNA of a different
+    overlapping transcript.
+    """
+    if not cluster:
+        return
+
+    ref = cluster[0].ref
+
+    # Build global exon union across all transcripts in the cluster
+    all_exons: list[tuple[int, int]] = []
+    for t in cluster:
+        for e in t.exons:
+            all_exons.append((e.start, e.end))
+    global_exon_union = _merge_exon_intervals(all_exons)
+
+    # For each multi-exon transcript, subtract global exon union from
+    # each intronic gap to find unambiguously intronic regions.
+    for t in cluster:
+        if len(t.exons) < 2:
+            continue  # single-exon transcripts have no introns
+        for intron_start, intron_end in t.introns():
+            pieces = _subtract_from_interval(
+                intron_start, intron_end, global_exon_union,
+            )
+            for piece_start, piece_end in pieces:
+                yield RefInterval(
+                    ref, piece_start, piece_end, t.strand,
+                    IntervalType.UNAMBIG_INTRON, t.t_index,
+                )
+
+
 def _gen_genomic_intervals(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
@@ -219,6 +300,9 @@ def _gen_genomic_intervals(
     Transcripts must be sorted by ``(ref, start, end)``. Intergenic
     intervals fill the gaps between transcript clusters and extend to
     chromosome boundaries.
+
+    Also emits ``UNAMBIG_INTRON`` intervals for each multi-exon transcript
+    by subtracting the global exon union of the cluster from intronic gaps.
     """
     # Group transcripts by reference
     ref_transcripts: dict[str, list[Transcript]] = collections.defaultdict(list)
@@ -250,6 +334,7 @@ def _gen_genomic_intervals(
                 # Emit intervals for the previous cluster
                 for tc in cluster:
                     yield from _gen_transcript_intervals(tc)
+                yield from _gen_cluster_unambig_intron_intervals(cluster)
                 cluster = []
 
             end = max(end, t.end)
@@ -258,6 +343,7 @@ def _gen_genomic_intervals(
         # Emit final cluster
         for tc in cluster:
             yield from _gen_transcript_intervals(tc)
+        yield from _gen_cluster_unambig_intron_intervals(cluster)
 
         # Intergenic gap to end of chromosome
         if end < ref_length:
@@ -303,7 +389,7 @@ class HulkIndex:
 
         # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
         # Label = index into _iv_type and _iv_t_set lookup lists.
-        self.cr: cgranges.cgranges | None = None
+        self.cr: _cgranges_cls | None = None
         self._iv_type: list[int] | None = None
         self._iv_t_set: list[frozenset[int]] | None = None
 
@@ -312,7 +398,7 @@ class HulkIndex:
 
         # Splice-junction cgranges index (for gap containment queries / fragment length)
         # Label = row index into the _sj_* lookup arrays.
-        self.sj_cr: cgranges.cgranges | None = None
+        self.sj_cr: _cgranges_cls | None = None
         self._sj_t_index: np.ndarray | None = None
         self._sj_strand: np.ndarray | None = None
 
@@ -497,7 +583,7 @@ class HulkIndex:
             if t_idx >= 0:
                 _collapse[key][1].add(t_idx)
 
-        cr = cgranges.cgranges()
+        cr = _cgranges_cls()
         iv_type: list[int] = []
         iv_t_set: list[frozenset[int]] = []
         for label, ((ref, start, end, _itype), (itype_val, tset)) in enumerate(
@@ -545,7 +631,7 @@ class HulkIndex:
 
         # cgranges tree for containment / gap queries (fragment length)
         logger.debug("Building splice junction cgranges index")
-        sj_cr = cgranges.cgranges()
+        sj_cr = _cgranges_cls()
         for label, row in enumerate(sj_df.itertuples(index=False)):
             sj_cr.add(row.ref, row.start, row.end, label)
         sj_cr.index()
@@ -554,6 +640,82 @@ class HulkIndex:
         self._sj_strand = sj_df["strand"].values
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
+
+        # -- C++ ResolveContext (native fragment resolution) ------------------
+        self._resolve_ctx = None
+        self._resolve_ref_to_id = None
+        try:
+            from hulkrna._resolve_impl import ResolveContext
+            ctx = ResolveContext()
+
+            # 1. Overlap index from collapsed data
+            cr_refs: list[str] = []
+            cr_starts: list[int] = []
+            cr_ends: list[int] = []
+            for (ref, start, end, _itype) in _collapse.keys():
+                cr_refs.append(ref)
+                cr_starts.append(start)
+                cr_ends.append(end)
+            # CSR for transcript sets
+            tset_flat: list[int] = []
+            tset_offsets: list[int] = [0]
+            for ts in iv_t_set:
+                tset_flat.extend(sorted(ts))
+                tset_offsets.append(len(tset_flat))
+            ctx.build_overlap_index(
+                cr_refs,
+                cr_starts,
+                cr_ends,
+                iv_type,
+                tset_flat,
+                tset_offsets,
+            )
+
+            # 2. SJ exact-match map
+            sj_refs_l: list[str] = []
+            sj_starts_l: list[int] = []
+            sj_ends_l: list[int] = []
+            sj_strands_l: list[int] = []
+            sj_t_flat: list[int] = []
+            sj_t_offsets: list[int] = [0]
+            for (ref, start, end, strand), tset in self.sj_map.items():
+                sj_refs_l.append(ref)
+                sj_starts_l.append(start)
+                sj_ends_l.append(end)
+                sj_strands_l.append(strand)
+                sj_t_flat.extend(sorted(tset))
+                sj_t_offsets.append(len(sj_t_flat))
+            ctx.build_sj_map(
+                sj_refs_l,
+                sj_starts_l,
+                sj_ends_l,
+                sj_strands_l,
+                sj_t_flat,
+                sj_t_offsets,
+            )
+
+            # 3. SJ gap index (raw sj_df rows)
+            ctx.build_sj_gap_index(
+                sj_df["ref"].tolist(),
+                sj_df["start"].values.astype(np.int32).tolist(),
+                sj_df["end"].values.astype(np.int32).tolist(),
+                sj_df["t_index"].values.astype(np.int32).tolist(),
+                sj_df["strand"].values.astype(np.int32).tolist(),
+            )
+
+            # 4. Metadata
+            ctx.set_metadata(
+                self.t_to_g_arr.astype(np.int32).tolist(),
+                len(self.t_to_g_arr),
+            )
+
+            self._resolve_ctx = ctx
+            self._resolve_ref_to_id = ctx.get_ref_to_id()
+            logger.debug("Built native ResolveContext for C++ resolution")
+        except ImportError:
+            logger.debug("Native _resolve_impl not available, "
+                         "using Python resolution")
+
         return self
 
     # -- query methods --------------------------------------------------------

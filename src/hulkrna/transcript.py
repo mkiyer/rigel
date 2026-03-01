@@ -6,13 +6,15 @@ to a gene (identified by g_id / g_index) and contains an ordered list of
 Exon intervals in 0-based half-open coordinates.
 """
 
-import collections
 import logging
 from dataclasses import dataclass, field
 from typing import Literal
 
 from .types import Interval, Strand
 from .gtf import GTF
+
+#: Interval for progress logging during GTF parsing.
+_GTF_LOG_INTERVAL: int = 100_000
 
 
 def _first_attr(val):
@@ -120,37 +122,32 @@ class Transcript:
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
     ) -> list['Transcript']:
-        '''
-        read GTF and construct list of Transcript objects
-        '''
-        transcripts = collections.OrderedDict()
-        # read gtf exons into a transcript dictionary
-        logging.debug(f'[Transcript] Reading GTF file: {gtf_file}')
+        """Read GTF and construct list of Transcript objects."""
+        transcripts: dict[str, Transcript] = {}
+        logging.debug('[Transcript] Reading GTF file: %s', gtf_file)
         num_lines = 0
         for f in GTF.parse_file(gtf_file, parse_mode=parse_mode):
             if f.feature != 'exon':
                 continue
             t_id = f.attrs['transcript_id']
-            # lookup transcript, create if new
             if t_id not in transcripts:
                 t = Transcript.from_gtf(f)
                 transcripts[t_id] = t
             else:
-                # get existing transcript
                 t = transcripts[t_id]
-            # update transcript exons
             t.exons.append(Interval(f.start, f.end))
             num_lines += 1
-            if num_lines % 100000 == 0:
-                logging.debug(f'[Transcript] Read {num_lines} GTF features')
-        logging.debug(f'[Transcript] Done reading GTF and found {num_lines} features')
+            if num_lines % _GTF_LOG_INTERVAL == 0:
+                logging.debug('[Transcript] Read %d GTF features', num_lines)
+        logging.debug('[Transcript] Done reading GTF: %d features', num_lines)
 
-        # sort transcript exons
-        logging.debug(f'[Transcript] Processing transcripts')
+        logging.debug('[Transcript] Processing transcripts')
         for t in transcripts.values():
             t.exons.sort()
             t.compute_length()
-        # sort transcripts by ref, start, end, strand
-        transcripts = sorted(transcripts.values(), key=lambda t: (t.ref, t.start, t.end, t.strand))
-        logging.debug(f'[Transcript] Read {len(transcripts)} transcripts')
-        return transcripts
+        sorted_transcripts = sorted(
+            transcripts.values(),
+            key=lambda t: (t.ref, t.start, t.end, t.strand),
+        )
+        logging.debug('[Transcript] Read %d transcripts', len(sorted_transcripts))
+        return sorted_transcripts

@@ -203,7 +203,7 @@ class ScoringContext:
                     cs += e - s
                 t_exon_data[t_idx] = (starts, ends, tuple(cb))
 
-        return ScoringContext(
+        ctx = ScoringContext(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
             log_p_antisense=math.log(max(p_antisense, LOG_SAFE_FLOOR)),
             anti_flag=p_sense < 0.5,
@@ -235,6 +235,31 @@ class ScoringContext:
             _t_exon_data=t_exon_data,
         )
 
+        # Build native C++ scoring context for hot-path acceleration
+        try:
+            from hulkrna._scoring_impl import NativeScoringContext
+            native_ctx = NativeScoringContext(
+                log_p_sense=ctx.log_p_sense,
+                log_p_antisense=ctx.log_p_antisense,
+                anti_flag=ctx.anti_flag,
+                overhang_log_penalty=ctx.overhang_log_penalty,
+                mismatch_log_penalty=ctx.mismatch_log_penalty,
+                fl_log_prob=ctx.fl_log_prob,
+                fl_max_size=ctx.fl_max_size,
+                fl_tail_base=ctx.fl_tail_base,
+                t_strand_arr=ctx.t_strand_arr,
+                t_length_arr=ctx.t_length_arr,
+                t_span_arr=ctx.t_span_arr,
+                t_start_arr=ctx.t_start_arr,
+                nrna_base=ctx.nrna_base,
+                t_exon_data=ctx._t_exon_data,
+            )
+            object.__setattr__(ctx, '_native_ctx', native_ctx)
+        except (ImportError, AttributeError, TypeError, ValueError):
+            object.__setattr__(ctx, '_native_ctx', None)
+
+        return ctx
+
 
 # ---------------------------------------------------------------------------
 # Pure scoring functions (C-translatable)
@@ -253,116 +278,9 @@ def frag_len_log_lik(ctx: ScoringContext, flen: int) -> float:
     return 0.0
 
 
-def strand_log_probs(
-    ctx: ScoringContext, exon_strand: int,
-) -> tuple[float, float]:
-    """Return (log_same, log_diff) strand log-probabilities.
-
-    When exon_strand is informative (POS or NEG), returns the
-    sense/antisense log-probs from the RNA strand model.
-    Otherwise, returns LOG_HALF for both.
-    """
-    if exon_strand == 1 or exon_strand == 2:
-        return ctx.log_p_sense, ctx.log_p_antisense
-    return LOG_HALF, LOG_HALF
-
-
-def score_mrna_candidate(
-    ctx: ScoringContext,
-    exon_strand: int,
-    t_strand: int,
-    splice_type: int,
-    frag_len_ll: float,
-    overhang_bp: int,
-    nm: int,
-) -> tuple[float, int]:
-    """Compute data log-likelihood and count column for one mRNA candidate.
-
-    Returns (log_lik, count_col_idx).
-    """
-    log_same, log_diff = strand_log_probs(ctx, exon_strand)
-    log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
-
-    if exon_strand == t_strand:
-        log_strand = log_same
-        anti = ctx.anti_flag
-    else:
-        log_strand = log_diff
-        anti = not ctx.anti_flag
-
-    log_lik = (
-        log_strand
-        + frag_len_ll
-        + overhang_bp * ctx.overhang_log_penalty
-        + log_nm
-    )
-    count_col_idx = splice_type * 2 + int(anti)
-    return log_lik, count_col_idx
-
-
-def score_nrna_candidate(
-    ctx: ScoringContext,
-    exon_strand: int,
-    t_strand: int,
-    frag_len_ll: float,
-    overhang_bp: int,
-    nm: int,
-) -> float:
-    """Compute data log-likelihood for a nascent RNA (nRNA) candidate.
-
-    nRNA is a transcript-level phenomenon: the strand comparison uses
-    the transcript strand (not gene strand).
-
-    Returns log_lik (float).
-    """
-    log_same, log_diff = strand_log_probs(ctx, exon_strand)
-    log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
-
-    if exon_strand == t_strand:
-        log_strand = log_same
-    else:
-        log_strand = log_diff
-
-    return (
-        log_strand
-        + frag_len_ll
-        + overhang_bp * ctx.overhang_log_penalty
-        + log_nm
-    )
-
-
-def score_gdna_candidate(
-    ctx: ScoringContext,
-    exon_strand: int,
-    splice_type: int,
-    genomic_footprint: int,
-) -> float:
-    """Compute data log-likelihood for the gDNA pseudo-component.
-
-    Returns log_lik (float).
-    """
-    splice_pen = ctx.gdna_splice_penalties.get(splice_type, 1.0)
-
-    if exon_strand == 1 or exon_strand == 2:
-        p_ig = ctx.ig_p if exon_strand == 1 else (1.0 - ctx.ig_p)
-    else:
-        p_ig = 0.5
-
-    log_strand = math.log(max(p_ig, LOG_SAFE_FLOOR))
-    log_insert = frag_len_log_lik(ctx, genomic_footprint)
-
-    return (
-        log_strand
-        + log_insert
-        + math.log(max(splice_pen, LOG_SAFE_FLOOR))
-    )
-
-
 # ---------------------------------------------------------------------------
 # Standalone scoring (for unit tests / external callers)
 # ---------------------------------------------------------------------------
-# These match the old _score_gdna_candidate / _score_candidate signatures
-# so that tests can call them without a ScoringContext.
 
 
 def genomic_to_transcript_pos(
@@ -419,68 +337,11 @@ def genomic_to_transcript_pos(
     return offset
 
 
-def compute_coverage_weight(
-    frag_start: int,
-    frag_end: int,
-    transcript_length: int,
-) -> float:
-    """Inverse coverage-capacity weight for a fragment on a transcript.
+# ---------------------------------------------------------------------------
+# compute_fragment_weight: C++ kernel
+# ---------------------------------------------------------------------------
 
-    Uses the trapezoid coverage model: under uniform random sampling,
-    the expected coverage at transcript-relative position *x* on a
-    transcript of spliced length *L* for a fragment of length *f* is
-    ``min(x, w, L-x)`` where ``w = min(f, L/2)``.
-
-    A fragment in the plateau region gets weight 1.0.  A fragment near
-    a transcript edge gets weight > 1.0, reflecting that it is less
-    likely to be generated yet was still observed — stronger evidence
-    for that transcript.
-
-    Parameters
-    ----------
-    frag_start : int
-        Fragment 5' position in transcript-relative coordinates ``[0, L)``.
-    frag_end : int
-        Fragment 3' position in transcript-relative coordinates ``(0, L]``.
-    transcript_length : int
-        Spliced exonic length of the transcript.
-
-    Returns
-    -------
-    float
-        Weight >= 1.0.  Plateau → 1.0; edge → > 1.0.
-    """
-    f_len = frag_end - frag_start
-    if f_len <= 0 or transcript_length <= 0:
-        return 1.0
-
-    L = float(transcript_length)
-    w = min(f_len, L / 2.0)
-
-    total_area = 0.0
-
-    # Left ramp: c(x) = x for x in [0, w)
-    s = max(0.0, min(float(frag_start), w))
-    e = max(0.0, min(float(frag_end), w))
-    if s < e:
-        total_area += (e - s) * (s + e) / 2.0
-
-    # Plateau: c(x) = w for x in [w, L - w)
-    s = max(w, min(float(frag_start), L - w))
-    e = max(w, min(float(frag_end), L - w))
-    if s < e:
-        total_area += (e - s) * w
-
-    # Right ramp: c(x) = L - x for x in [L - w, L]
-    s = max(L - w, min(float(frag_start), L))
-    e = max(L - w, min(float(frag_end), L))
-    if s < e:
-        total_area += (e - s) * ((L - s) + (L - e)) / 2.0
-
-    area_per_base = total_area / f_len
-    area_per_base = max(area_per_base, 1.0)
-
-    return w / area_per_base
+from hulkrna._scoring_impl import compute_fragment_weight
 
 
 def score_gdna_standalone(
@@ -493,7 +354,8 @@ def score_gdna_standalone(
 ) -> float:
     """Compute gDNA log-likelihood using model objects directly.
 
-    Drop-in replacement for the old ``_score_gdna_candidate`` function.
+    Intended for unit tests and external callers that do not construct
+    a ``ScoringContext``.
     """
     penalties = gdna_splice_penalties or GDNA_SPLICE_PENALTIES
     splice_pen = penalties.get(splice_type, 1.0)
@@ -513,117 +375,6 @@ def score_gdna_standalone(
         + log_p_insert
         + math.log(max(splice_pen, LOG_SAFE_FLOOR))
     )
-
-
-# ---------------------------------------------------------------------------
-# Vectorized batch functions (Fix A, B of P2 optimization)
-# ---------------------------------------------------------------------------
-
-
-def compute_coverage_weight_batch(
-    frag_starts: np.ndarray,
-    frag_ends: np.ndarray,
-    transcript_lengths: np.ndarray,
-) -> np.ndarray:
-    """Vectorized coverage weight for arrays of candidates.
-
-    Equivalent to calling ``compute_coverage_weight`` per element,
-    but 10-50× faster by eliminating per-call Python overhead and
-    using NumPy vectorized arithmetic.
-
-    Parameters
-    ----------
-    frag_starts, frag_ends : np.ndarray
-        Fragment positions in transcript-relative coordinates.
-    transcript_lengths : np.ndarray
-        Spliced exonic lengths of the transcripts.
-
-    Returns
-    -------
-    np.ndarray
-        Float64 array of weights (>= 1.0).
-    """
-    fs = np.asarray(frag_starts, dtype=np.float64)
-    fe = np.asarray(frag_ends, dtype=np.float64)
-    L = np.asarray(transcript_lengths, dtype=np.float64)
-
-    f_len = fe - fs
-    n = len(fs)
-    result = np.ones(n, dtype=np.float64)
-    valid = (f_len > 0) & (L > 0)
-    if not np.any(valid):
-        return result
-
-    # Work on valid subset only
-    fsv = fs[valid]
-    fev = fe[valid]
-    flv = f_len[valid]
-    Lv = L[valid]
-    w = np.minimum(flv, Lv / 2.0)
-
-    total_area = np.zeros(int(np.sum(valid)), dtype=np.float64)
-
-    # Left ramp: c(x) = x for x in [0, w)
-    s = np.clip(fsv, 0.0, w)
-    e = np.clip(fev, 0.0, w)
-    mask = s < e
-    total_area += np.where(mask, (e - s) * (s + e) / 2.0, 0.0)
-
-    # Plateau: c(x) = w for x in [w, L-w)
-    Lmw = Lv - w
-    s = np.clip(fsv, w, Lmw)
-    e = np.clip(fev, w, Lmw)
-    mask = s < e
-    total_area += np.where(mask, (e - s) * w, 0.0)
-
-    # Right ramp: c(x) = L-x for x in [L-w, L]
-    s = np.clip(fsv, Lmw, Lv)
-    e = np.clip(fev, Lmw, Lv)
-    mask = s < e
-    total_area += np.where(mask, (e - s) * ((Lv - s) + (Lv - e)) / 2.0, 0.0)
-
-    area_per_base = total_area / flv
-    area_per_base = np.maximum(area_per_base, 1.0)
-    result[valid] = w / area_per_base
-
-    return result
-
-
-def frag_len_log_lik_batch(
-    ctx: "ScoringContext",
-    frag_lengths: np.ndarray,
-) -> np.ndarray:
-    """Vectorized fragment-length log-likelihood via LUT lookup.
-
-    Equivalent to calling ``frag_len_log_lik`` per element.
-
-    Parameters
-    ----------
-    ctx : ScoringContext
-        Pre-computed context with fragment-length LUT.
-    frag_lengths : np.ndarray
-        Int32 array of fragment lengths (negative values → 0.0).
-
-    Returns
-    -------
-    np.ndarray
-        Float64 array of log-likelihoods.
-    """
-    result = np.zeros(len(frag_lengths), dtype=np.float64)
-    if ctx.fl_log_prob is None:
-        return result
-    pos = frag_lengths > 0
-    in_range = pos & (frag_lengths <= ctx.fl_max_size)
-    if np.any(in_range):
-        result[in_range] = ctx.fl_log_prob[frag_lengths[in_range]]
-    tail = pos & (frag_lengths > ctx.fl_max_size)
-    if np.any(tail):
-        result[tail] = (
-            ctx.fl_tail_base
-            + (frag_lengths[tail].astype(np.float64) - ctx.fl_max_size)
-            * _TAIL_DECAY_LP
-        )
-    return result
 
 
 def genomic_to_transcript_pos_bisect(

@@ -1,24 +1,10 @@
 """hulkrna.scan — CSR builder / buffer scanner.
 
 Converts a ``FragmentBuffer`` into ``ScanData`` for the EM solver.
-The ``EmDataBuilder`` class replaces the old 620-line
-``_scan_and_build_em_data`` closure-based function.
-
-**Bug fixes vs. the old triplicated code:**
-
-1. **MM nRNA gate was too strict** — the old ``_flush_mm_group`` used
-   ``any_spliced`` (ANNOT or UNANNOT) to gate the entire nRNA pool.
-   The single-fragment path only skipped nRNA for ``SPLICED_ANNOT``.
-   Now both paths use ``is_annot_spliced`` (ANNOT only), so
-   ``SPLICED_UNANNOT`` multimapper groups correctly get nRNA candidates.
-
-2. **MM splice_type preferred first-found over most-informative** —
-   the old code took the splice_type of the first spliced hit it found,
-   potentially choosing UNANNOT when an ANNOT hit existed later.  Now
-   we always prefer ``SPLICED_ANNOT > SPLICED_UNANNOT > UNSPLICED``.
-
-3. **Dead parameters removed** — ``_finalize_unit`` had unused ``best_t``
-   / ``best_ct`` parameters.  Eliminated.
+The ``EmDataBuilder`` class builds per-fragment scoring data, routes
+unique fragments to deterministic assignment, and accumulates
+ambiguous fragments into CSR-formatted equivalence-class data for
+the locus-level EM.
 """
 
 import math
@@ -38,18 +24,24 @@ from .scoring import (
     ScoringContext,
     LOG_SAFE_FLOOR,
     LOG_HALF,
+    STRAND_POS,
+    STRAND_NEG,
     SPLICE_UNSPLICED,
     SPLICE_UNANNOT,
     SPLICE_ANNOT,
-    STRAND_NEG,
     frag_len_log_lik,
-    frag_len_log_lik_batch,
-    genomic_to_transcript_pos,
     genomic_to_transcript_pos_bisect,
-    compute_coverage_weight,
-    compute_coverage_weight_batch,
+    compute_fragment_weight,
 )
+from .frag_length_model import _TAIL_DECAY_LP
 from .stats import PipelineStats
+from .annotate import POOL_CODE_MRNA, POOL_CODE_CHIMERIC
+
+# Default splice penalty for splice types not found in the penalty map.
+_DEFAULT_SPLICE_PENALTY = 1.0
+
+# Pre-computed negative infinity (avoids repeated np.inf attribute lookup).
+_NEG_INF = float('-inf')
 
 
 class EmDataBuilder:
@@ -114,6 +106,9 @@ class EmDataBuilder:
         self.mm_pending: list = []
         self.mm_fid: int = -1
 
+        # Native scoring context (set by ScoringContext.from_models)
+        self._native_ctx = getattr(ctx, '_native_ctx', None)
+
     # ------------------------------------------------------------------
     # Winner-take-all mRNA scoring (shared by single-fragment and MM)
     # ------------------------------------------------------------------
@@ -135,132 +130,110 @@ class EmDataBuilder:
         coverage_weight, tx_start, tx_end).  Only WTA winners (minimum
         overhang) are included.
 
-        Vectorized implementation: replaces per-candidate Python loops
-        with NumPy array operations for overhangs, strand log-probs,
-        fragment-length log-liks, and coverage weights.
+        Dispatches to C++ NativeScoringContext when available.
         """
+        nc = self._native_ctx
+        if nc is not None:
+            return nc.score_wta_mrna(
+                t_inds, exon_bp, frag_lengths,
+                exon_strand, splice_type, nm, read_length, genomic_start,
+            )
         ctx = self.ctx
         n_cand = len(t_inds)
         if n_cand == 0:
             return {}
 
-        fl = read_length if read_length > 0 else 1
+        rl = read_length if read_length > 0 else 1
         log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
+        oh_log_pen = ctx.overhang_log_penalty
 
-        # --- Vectorized arrays ---
-        t_inds_arr = np.asarray(t_inds, dtype=np.int32)
+        # Pre-fetch context arrays for tight loop
+        t_strand_arr = ctx.t_strand_arr
+        t_length_arr = ctx.t_length_arr
+        log_p_sense = ctx.log_p_sense
+        log_p_antisense = ctx.log_p_antisense
+        anti_flag = ctx.anti_flag
+        fl_log_prob = ctx.fl_log_prob
+        fl_max_size = ctx.fl_max_size
+        fl_tail_base = ctx.fl_tail_base
+        _tail_decay = _TAIL_DECAY_LP
+        t_exon_data = ctx._t_exon_data
+        has_strand = (exon_strand == 1 or exon_strand == 2)
+        has_genomic = genomic_start >= 0
 
-        # Exon BP and validity
-        if exon_bp is not None:
-            ebp_arr = np.asarray(exon_bp, dtype=np.int32)
-        else:
-            ebp_arr = np.full(n_cand, fl, dtype=np.int32)
-        valid = ebp_arr > 0
-        if not np.any(valid):
+        # --- Single pass: score + find min overhang ---
+        min_oh = 0x7FFFFFFF  # sentinel
+        scored: list[tuple[int, int, float, int, float, int, int]] = []
+
+        for k in range(n_cand):
+            t_idx = int(t_inds[k])
+            ebp = int(exon_bp[k]) if exon_bp is not None else rl
+            if ebp <= 0:
+                continue
+
+            oh = rl - ebp
+            if oh < 0:
+                oh = 0
+
+            # Fragment length
+            flen = int(frag_lengths[k]) if frag_lengths is not None else -1
+
+            # Fragment-length log-likelihood (scalar LUT)
+            if flen <= 0 or fl_log_prob is None:
+                log_fl = 0.0
+            elif flen <= fl_max_size:
+                log_fl = float(fl_log_prob[flen])
+            else:
+                log_fl = fl_tail_base + (flen - fl_max_size) * _tail_decay
+
+            # Strand log-likelihood
+            if has_strand:
+                t_strand = int(t_strand_arr[t_idx])
+                same = (exon_strand == t_strand)
+                log_strand = log_p_sense if same else log_p_antisense
+                is_anti = anti_flag if same else (not anti_flag)
+            else:
+                log_strand = LOG_HALF
+                is_anti = False
+
+            log_lik = log_strand + log_fl + oh * oh_log_pen + log_nm
+            ct = splice_type * 2 + int(is_anti)
+
+            # Coverage weight + transcript position
+            t_len = int(t_length_arr[t_idx])
+            tx_s = 0
+            tx_e = flen if flen > 0 else t_len
+            cov_wt = 1.0
+
+            if has_genomic and flen > 0:
+                exon_data = t_exon_data.get(t_idx) if t_exon_data else None
+                if exon_data is not None and t_len > 0:
+                    starts, ends, cumsum_before = exon_data
+                    t_strand_v = int(t_strand_arr[t_idx])
+                    tx_s = genomic_to_transcript_pos_bisect(
+                        genomic_start, starts, ends,
+                        cumsum_before, t_strand_v, t_len,
+                    )
+                    tx_e = tx_s + flen
+                    # Clipped end for coverage weight
+                    cov_end = tx_e if tx_e < t_len else t_len
+                    cov_wt = compute_fragment_weight(tx_s, cov_end, t_len)
+                else:
+                    tx_s = 0
+                    tx_e = flen
+
+            scored.append((t_idx, oh, log_lik, ct, cov_wt, tx_s, tx_e))
+            if oh < min_oh:
+                min_oh = oh
+
+        if not scored:
             return {}
 
-        # Overhangs (vectorized)
-        oh_arr = np.maximum(fl - ebp_arr, 0)
-
-        # Fragment lengths
-        if frag_lengths is not None:
-            fl_arr = np.asarray(frag_lengths, dtype=np.int32)
-        else:
-            fl_arr = np.full(n_cand, -1, dtype=np.int32)
-
-        # Fragment-length log-likelihoods (vectorized LUT)
-        log_fl_arr = frag_len_log_lik_batch(ctx, fl_arr)
-
-        # Strand log-likelihoods (vectorized)
-        t_strands = ctx.t_strand_arr[t_inds_arr]
-        if exon_strand == 1 or exon_strand == 2:
-            same_mask = (exon_strand == t_strands)
-            log_strand = np.where(
-                same_mask, ctx.log_p_sense, ctx.log_p_antisense,
-            )
-            anti_arr = np.where(same_mask, ctx.anti_flag, not ctx.anti_flag)
-        else:
-            log_strand = np.full(n_cand, LOG_HALF)
-            anti_arr = np.zeros(n_cand, dtype=bool)
-
-        # Combined log-likelihood (vectorized)
-        log_lik_arr = (
-            log_strand + log_fl_arr
-            + oh_arr * ctx.overhang_log_penalty + log_nm
-        )
-
-        # Count columns (vectorized)
-        ct_arr = splice_type * 2 + anti_arr.astype(np.int32)
-
-        # --- Coverage weights and transcript positions ---
-        cov_wt_arr = np.ones(n_cand, dtype=np.float64)
-        tx_s_arr = np.zeros(n_cand, dtype=np.int32)
-        t_lens = ctx.t_length_arr[t_inds_arr]
-        tx_e_arr = np.where(fl_arr > 0, fl_arr, t_lens).astype(np.int32)
-
-        if genomic_start >= 0:
-            need_pos = valid & (fl_arr > 0)
-            need_idx = np.where(need_pos)[0]
-            if len(need_idx) > 0:
-                t_exon_data = ctx._t_exon_data
-                # Compute transcript positions using bisect on pre-computed data
-                n_need = len(need_idx)
-                gs_starts = np.empty(n_need, dtype=np.int32)
-                gs_ends = np.empty(n_need, dtype=np.int32)
-                gs_t_lens = np.empty(n_need, dtype=np.int32)
-                cov_valid_mask = np.ones(n_need, dtype=bool)
-
-                for j in range(n_need):
-                    k = need_idx[j]
-                    t_idx_int = int(t_inds_arr[k])
-                    t_len = int(t_lens[k])
-                    flen_k = int(fl_arr[k])
-                    exon_data = t_exon_data.get(t_idx_int) if t_exon_data else None
-                    if exon_data is not None and t_len > 0:
-                        starts, ends, cumsum_before = exon_data
-                        t_strand = int(t_strands[k])
-                        tx_s = genomic_to_transcript_pos_bisect(
-                            genomic_start, starts, ends,
-                            cumsum_before, t_strand, t_len,
-                        )
-                        gs_starts[j] = tx_s
-                        gs_ends[j] = tx_s + flen_k
-                        gs_t_lens[j] = t_len
-                    else:
-                        gs_starts[j] = 0
-                        gs_ends[j] = flen_k
-                        gs_t_lens[j] = max(flen_k, 1)
-                        cov_valid_mask[j] = False
-
-                # Batch coverage weight (vectorized)
-                cov_ends_clipped = np.minimum(gs_ends, gs_t_lens)
-                cov_wts = compute_coverage_weight_batch(
-                    gs_starts, cov_ends_clipped, gs_t_lens,
-                )
-                # Only apply for candidates with valid exon data
-                cov_wts[~cov_valid_mask] = 1.0
-
-                tx_s_arr[need_idx] = gs_starts
-                tx_e_arr[need_idx] = gs_ends  # unclipped for bias model
-                cov_wt_arr[need_idx] = cov_wts
-
-        # --- WTA gating: keep candidates with minimum overhang ---
-        # Exclude invalid candidates from the min computation
-        oh_for_wta = oh_arr.copy()
-        oh_for_wta[~valid] = np.iinfo(np.int32).max
-        min_oh = int(oh_for_wta.min())
-        winners_mask = valid & (oh_arr == min_oh)
-
+        # --- WTA gating: keep only winners with minimum overhang ---
         result: dict[int, tuple[int, float, int, float, int, int]] = {}
-        for k in np.where(winners_mask)[0]:
-            result[int(t_inds_arr[k])] = (
-                int(oh_arr[k]),
-                float(log_lik_arr[k]),
-                int(ct_arr[k]),
-                float(cov_wt_arr[k]),
-                int(tx_s_arr[k]),
-                int(tx_e_arr[k]),
-            )
+        for t_idx, oh, log_lik, ct, cov_wt, tx_s, tx_e in scored:
+            if oh == min_oh:
+                result[t_idx] = (oh, log_lik, ct, cov_wt, tx_s, tx_e)
         return result
 
     # ------------------------------------------------------------------
@@ -284,111 +257,107 @@ class EmDataBuilder:
         tx_start, tx_end).  Only WTA winners (minimum overhang) are
         included.
 
-        Vectorized implementation: replaces per-candidate Python loops
-        with NumPy array operations.
+        Dispatches to C++ NativeScoringContext when available.
         """
+        nc = self._native_ctx
+        if nc is not None:
+            return nc.score_wta_nrna(
+                t_inds, exon_bp, intron_bp,
+                exon_strand, nm, read_length,
+                genomic_footprint, genomic_start,
+            )
         ctx = self.ctx
         n_cand = len(t_inds)
         if n_cand == 0:
             return {}
 
-        fl = read_length if read_length > 0 else 1
+        rl = read_length if read_length > 0 else 1
         log_fl = frag_len_log_lik(ctx, genomic_footprint)
         log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
+        oh_log_pen = ctx.overhang_log_penalty
 
-        # --- Vectorized arrays ---
-        t_inds_arr = np.asarray(t_inds, dtype=np.int32)
-
-        # Single-exon transcript filter (vectorized)
-        t_spans = ctx.t_span_arr[t_inds_arr]
-        t_exonics = ctx.t_length_arr[t_inds_arr]
-        multi_exon = t_spans > t_exonics
-
-        # Genic overlap
-        if exon_bp is not None:
-            ebp_arr = np.asarray(exon_bp, dtype=np.int32)
-        else:
-            ebp_arr = np.full(n_cand, fl, dtype=np.int32)
-        if intron_bp is not None:
-            ibp_arr = np.asarray(intron_bp, dtype=np.int32)
-        else:
-            ibp_arr = np.zeros(n_cand, dtype=np.int32)
-
-        span_bp = ebp_arr + ibp_arr
-        valid = multi_exon & (span_bp > 0)
-        if not np.any(valid):
-            return {}
-
-        # Overhangs (vectorized)
-        oh_arr = np.maximum(fl - span_bp, 0)
-
-        # Strand log-likelihoods (vectorized)
-        t_strands = ctx.t_strand_arr[t_inds_arr]
-        if exon_strand == 1 or exon_strand == 2:
-            same_mask = (exon_strand == t_strands)
-            log_strand = np.where(
-                same_mask, ctx.log_p_sense, ctx.log_p_antisense,
-            )
-        else:
-            log_strand = np.full(n_cand, LOG_HALF)
-
-        # Combined nRNA log-likelihood (vectorized)
-        nrna_ll_arr = (
-            log_strand + log_fl + oh_arr * ctx.overhang_log_penalty + log_nm
-        )
-
-        # --- Coverage weights (nRNA uses genomic span) ---
-        cov_wt_arr = np.ones(n_cand, dtype=np.float64)
-        nrna_tx_s_arr = np.zeros(n_cand, dtype=np.int32)
+        # Pre-fetch context arrays
+        t_strand_arr = ctx.t_strand_arr
+        t_span_arr = ctx.t_span_arr
+        t_length_arr = ctx.t_length_arr
+        t_start_arr = ctx.t_start_arr
+        log_p_sense = ctx.log_p_sense
+        log_p_antisense = ctx.log_p_antisense
+        has_strand = (exon_strand == 1 or exon_strand == 2)
+        has_genomic = genomic_start >= 0 and genomic_footprint > 0
         nrna_gfp = genomic_footprint if genomic_footprint > 0 else 0
-        nrna_tx_e_arr = np.where(
-            nrna_gfp > 0,
-            np.int32(nrna_gfp),
-            t_spans,
-        ).astype(np.int32)
 
-        if genomic_start >= 0 and genomic_footprint > 0:
-            need_idx = np.where(valid)[0]
-            if len(need_idx) > 0:
-                t_span_vals = t_spans[need_idx]
-                tx_starts_g = ctx.t_start_arr[t_inds_arr[need_idx]]
-                frag_pos = genomic_start - tx_starts_g
+        min_oh = 0x7FFFFFFF
+        scored: list[tuple[int, int, float, float, int, int]] = []
+        # scored[j] = (t_idx, oh, nrna_ll, cov_wt, tx_s, tx_e)
+
+        for k in range(n_cand):
+            t_idx = int(t_inds[k])
+
+            # Single-exon transcript filter
+            t_span = int(t_span_arr[t_idx])
+            t_exonic = int(t_length_arr[t_idx])
+            if t_span <= t_exonic:
+                continue  # single-exon → skip
+
+            # Genic overlap
+            ebp = int(exon_bp[k]) if exon_bp is not None else rl
+            ibp = int(intron_bp[k]) if intron_bp is not None else 0
+            span_bp = ebp + ibp
+            if span_bp <= 0:
+                continue
+
+            oh = rl - span_bp
+            if oh < 0:
+                oh = 0
+
+            # Strand log-likelihood
+            if has_strand:
+                t_strand = int(t_strand_arr[t_idx])
+                log_strand = log_p_sense if (exon_strand == t_strand) else log_p_antisense
+            else:
+                log_strand = LOG_HALF
+
+            nrna_ll = log_strand + log_fl + oh * oh_log_pen + log_nm
+
+            # Coverage weight (nRNA uses genomic span)
+            tx_s = 0
+            tx_e = nrna_gfp if nrna_gfp > 0 else t_span
+            cov_wt = 1.0
+
+            if has_genomic:
+                tx_start_g = int(t_start_arr[t_idx])
+                frag_pos = genomic_start - tx_start_g
                 frag_end_pos = frag_pos + genomic_footprint
 
-                # Clamped for coverage weight (vectorized)
-                frag_pos_c = np.clip(frag_pos, 0, t_span_vals)
-                frag_end_c = np.clip(frag_end_pos, 0, t_span_vals)
-                cov_valid = frag_end_c > frag_pos_c
-
-                if np.any(cov_valid):
-                    cov_sub = need_idx[cov_valid]
-                    cov_wt_arr[cov_sub] = compute_coverage_weight_batch(
-                        frag_pos_c[cov_valid],
-                        frag_end_c[cov_valid],
-                        t_span_vals[cov_valid],
+                # Clamped for fragment weight (ternary instead of min/max)
+                frag_pos_c = frag_pos if frag_pos < t_span else t_span
+                if frag_pos_c < 0:
+                    frag_pos_c = 0
+                frag_end_c = frag_end_pos if frag_end_pos < t_span else t_span
+                if frag_end_c < 0:
+                    frag_end_c = 0
+                if frag_end_c > frag_pos_c and t_span > 0:
+                    cov_wt = compute_fragment_weight(
+                        frag_pos_c, frag_end_c, t_span,
                     )
 
-                # Unclipped for bias model
-                nrna_tx_s_arr[need_idx] = np.maximum(0, frag_pos)
-                nrna_tx_e_arr[need_idx] = (
-                    np.maximum(0, frag_pos) + genomic_footprint
-                )
+                # Unclipped for bias model (ternary instead of max)
+                tx_s = frag_pos if frag_pos > 0 else 0
+                tx_e = tx_s + genomic_footprint
+
+            scored.append((t_idx, oh, nrna_ll, cov_wt, tx_s, tx_e))
+            if oh < min_oh:
+                min_oh = oh
+
+        if not scored:
+            return {}
 
         # --- WTA gating ---
-        oh_for_wta = oh_arr.copy()
-        oh_for_wta[~valid] = np.iinfo(np.int32).max
-        min_oh = int(oh_for_wta.min())
-        winners_mask = valid & (oh_arr == min_oh)
-
         result: dict[int, tuple[int, float, float, int, int]] = {}
-        for k in np.where(winners_mask)[0]:
-            result[int(t_inds_arr[k])] = (
-                int(oh_arr[k]),
-                float(nrna_ll_arr[k]),
-                float(cov_wt_arr[k]),
-                int(nrna_tx_s_arr[k]),
-                int(nrna_tx_e_arr[k]),
-            )
+        for t_idx, oh, nrna_ll, cov_wt, tx_s, tx_e in scored:
+            if oh == min_oh:
+                result[t_idx] = (oh, nrna_ll, cov_wt, tx_s, tx_e)
         return result
 
     # ------------------------------------------------------------------
@@ -402,16 +371,25 @@ class EmDataBuilder:
 
         Returns (best_log_lik, best_t_idx, best_count_col).
         """
-        best_ll = -np.inf
+        if not winners:
+            return _NEG_INF, -1, 0
+        # Direct extend — avoids intermediate list allocation
+        _ti = self.t_indices_list
+        _ll_l = self.log_liks_list
+        _ct_l = self.count_cols_list
+        _cw_l = self.coverage_weights_list
+        _ts_l = self.tx_starts_list
+        _te_l = self.tx_ends_list
+        best_ll = _NEG_INF
         best_t = -1
         best_ct = 0
         for t_idx, (oh, log_lik, ct, cov_wt, tx_s, tx_e) in winners.items():
-            self.t_indices_list.append(t_idx)
-            self.log_liks_list.append(log_lik)
-            self.count_cols_list.append(ct)
-            self.coverage_weights_list.append(cov_wt)
-            self.tx_starts_list.append(tx_s)
-            self.tx_ends_list.append(tx_e)
+            _ti.append(t_idx)
+            _ll_l.append(log_lik)
+            _ct_l.append(ct)
+            _cw_l.append(cov_wt)
+            _ts_l.append(tx_s)
+            _te_l.append(tx_e)
             if log_lik > best_ll:
                 best_ll = log_lik
                 best_t = t_idx
@@ -420,41 +398,53 @@ class EmDataBuilder:
 
     def _emit_nrna(self, winners: dict[int, tuple[int, float, float, int, int]]) -> None:
         """Append nRNA winner candidates to CSR lists."""
+        if not winners:
+            return
         nrna_base = self.ctx.nrna_base
+        _ti = self.t_indices_list
+        _ll_l = self.log_liks_list
+        _ct_l = self.count_cols_list
+        _cw_l = self.coverage_weights_list
+        _ts_l = self.tx_starts_list
+        _te_l = self.tx_ends_list
         for t_idx, (oh, nrna_ll, cov_wt, tx_s, tx_e) in winners.items():
-            self.t_indices_list.append(nrna_base + t_idx)
-            self.log_liks_list.append(nrna_ll)
-            self.count_cols_list.append(0)
-            self.coverage_weights_list.append(cov_wt)
-            self.tx_starts_list.append(tx_s)
-            self.tx_ends_list.append(tx_e)
+            _ti.append(nrna_base + t_idx)
+            _ll_l.append(nrna_ll)
+            _ct_l.append(0)
+            _cw_l.append(cov_wt)
+            _ts_l.append(tx_s)
+            _te_l.append(tx_e)
 
     # ------------------------------------------------------------------
     # Per-unit metadata
     # ------------------------------------------------------------------
 
+    def _gdna_log_lik(self, bf) -> float:
+        """Compute gDNA log-likelihood for a single unspliced fragment."""
+        ctx = self.ctx
+        sp = ctx.gdna_splice_penalties.get(
+            bf.splice_type, _DEFAULT_SPLICE_PENALTY,
+        )
+        es = bf.exon_strand
+        if es == STRAND_POS or es == STRAND_NEG:
+            p_ig = ctx.ig_p if es == STRAND_POS else (1.0 - ctx.ig_p)
+        else:
+            p_ig = 0.5
+        log_s = math.log(max(p_ig, LOG_SAFE_FLOOR))
+        log_i = frag_len_log_lik(ctx, bf.genomic_footprint)
+        return log_s + log_i + math.log(max(sp, LOG_SAFE_FLOOR))
+
     def _finalize_unit_metadata(self, bf) -> None:
         """Record is_spliced and gDNA log-likelihood for this EM unit."""
-        ctx = self.ctx
         st = bf.splice_type
         is_spl = (st == SPLICE_ANNOT or st == SPLICE_UNANNOT)
         self.is_spliced_list.append(is_spl)
         self.genomic_footprints_list.append(int(bf.genomic_footprint))
 
         if not is_spl:
-            es = bf.exon_strand
-            sp = ctx.gdna_splice_penalties.get(st, 1.0)
-            if es == 1 or es == 2:
-                p_ig = ctx.ig_p if es == 1 else (1.0 - ctx.ig_p)
-            else:
-                p_ig = 0.5
-            log_s = math.log(max(p_ig, LOG_SAFE_FLOOR))
-            log_i = frag_len_log_lik(ctx, bf.genomic_footprint)
-            self.gdna_ll_list.append(
-                log_s + log_i + math.log(max(sp, LOG_SAFE_FLOOR))
-            )
+            self.gdna_ll_list.append(self._gdna_log_lik(bf))
         else:
-            self.gdna_ll_list.append(-np.inf)
+            self.gdna_ll_list.append(_NEG_INF)
 
     # ------------------------------------------------------------------
     # Single-fragment EM unit
@@ -462,24 +452,40 @@ class EmDataBuilder:
 
     def _add_single_fragment(self, bf, chunk, i, fc) -> None:
         """Process a non-chimeric, non-multimapper EM unit."""
-        is_spliced_annot = bf.splice_type == SPLICE_ANNOT
-
-        # --- mRNA candidates (WTA) ---
-        mrna_winners = self._score_wta_mrna(
-            bf.t_inds, bf.exon_bp, bf.frag_lengths,
-            bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
-            bf.genomic_start,
-        )
-        best_ll, best_t, best_ct = self._emit_mrna(mrna_winners)
-
-        # --- nRNA candidates (independent pool, skip only SPLICED_ANNOT) ---
-        if not is_spliced_annot:
-            nrna_winners = self._score_wta_nrna(
-                bf.t_inds, bf.exon_bp, bf.intron_bp,
-                bf.exon_strand, bf.nm, bf.read_length,
+        nc = self._native_ctx
+        if nc is not None:
+            # Fused score+emit: single C++ call, bytes output
+            r = nc.score_emit_fragment(
+                bf.t_inds, bf.exon_bp, bf.frag_lengths, bf.intron_bp,
+                bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
                 bf.genomic_footprint, bf.genomic_start,
             )
-            self._emit_nrna(nrna_winners)
+            best_ll, best_t, best_ct = r[0], r[1], r[2]
+            self.t_indices_list.frombytes(r[3])
+            self.log_liks_list.frombytes(r[4])
+            self.count_cols_list.frombytes(r[5])
+            self.coverage_weights_list.frombytes(r[6])
+            self.tx_starts_list.frombytes(r[7])
+            self.tx_ends_list.frombytes(r[8])
+        else:
+            is_spliced_annot = bf.splice_type == SPLICE_ANNOT
+
+            # --- mRNA candidates (WTA) ---
+            mrna_winners = self._score_wta_mrna(
+                bf.t_inds, bf.exon_bp, bf.frag_lengths,
+                bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
+                bf.genomic_start,
+            )
+            best_ll, best_t, best_ct = self._emit_mrna(mrna_winners)
+
+            # --- nRNA candidates (independent pool, skip only SPLICED_ANNOT) ---
+            if not is_spliced_annot:
+                nrna_winners = self._score_wta_nrna(
+                    bf.t_inds, bf.exon_bp, bf.intron_bp,
+                    bf.exon_strand, bf.nm, bf.read_length,
+                    bf.genomic_footprint, bf.genomic_start,
+                )
+                self._emit_nrna(nrna_winners)
 
         if len(self.t_indices_list) > self.offsets[-1]:
             self.offsets.append(len(self.t_indices_list))
@@ -616,31 +622,20 @@ class EmDataBuilder:
 
             if not is_any_spliced:
                 # gDNA log-lik: best across unspliced MM hits
-                best_gdna_ll = -np.inf
+                best_gdna_ll = _NEG_INF
                 best_footprint = 0
                 for bf in mm_pending:
                     st = bf.splice_type
                     if st == SPLICE_ANNOT or st == SPLICE_UNANNOT:
                         continue
-                    es = bf.exon_strand
-                    sp = ctx.gdna_splice_penalties.get(st, 1.0)
-                    if es == 1 or es == 2:
-                        p_ig = ctx.ig_p if es == 1 else (1.0 - ctx.ig_p)
-                    else:
-                        p_ig = 0.5
-                    log_s = math.log(max(p_ig, LOG_SAFE_FLOOR))
-                    log_i = frag_len_log_lik(ctx, bf.genomic_footprint)
-                    gdna_ll = (
-                        log_s + log_i
-                        + math.log(max(sp, LOG_SAFE_FLOOR))
-                    )
+                    gdna_ll = self._gdna_log_lik(bf)
                     if gdna_ll > best_gdna_ll:
                         best_gdna_ll = gdna_ll
                         best_footprint = int(bf.genomic_footprint)
                 self.gdna_ll_list.append(best_gdna_ll)
                 self.genomic_footprints_list.append(best_footprint)
             else:
-                self.gdna_ll_list.append(-np.inf)
+                self.gdna_ll_list.append(_NEG_INF)
                 # Use first hit's footprint as representative
                 self.genomic_footprints_list.append(
                     int(mm_pending[0].genomic_footprint)
@@ -684,7 +679,7 @@ class EmDataBuilder:
                             frag_id=chimeric_fid,
                             best_tid=-1,
                             best_gid=-1,
-                            pool=4,  # chimeric
+                            pool=POOL_CODE_CHIMERIC,
                             posterior=0.0,
                             frag_class=FRAG_CHIMERIC,
                             n_candidates=0,
@@ -723,11 +718,11 @@ class EmDataBuilder:
                     weight = 1.0 / n_cand
                     for k, t_idx in enumerate(bf.t_inds):
                         t_idx_int = int(t_idx)
-                        has_intron = (
+                        has_unambig_intron = (
                             bf.unambig_intron_bp is not None
                             and bf.unambig_intron_bp[k] > 0
                         )
-                        if has_intron:
+                        if has_unambig_intron:
                             if is_anti:
                                 counter.transcript_intronic_antisense[
                                     t_idx_int
@@ -749,7 +744,7 @@ class EmDataBuilder:
                             frag_id=int(chunk.frag_id[i]),
                             best_tid=det_tid,
                             best_gid=det_gid,
-                            pool=0,  # mRNA
+                            pool=POOL_CODE_MRNA,
                             posterior=1.0,
                             frag_class=FRAG_UNIQUE,
                             n_candidates=1,

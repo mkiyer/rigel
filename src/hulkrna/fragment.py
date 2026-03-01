@@ -61,12 +61,13 @@ class Fragment:
         This is the full footprint on the reference, with no intron
         subtraction.  Represents the fragment length on an unspliced
         molecule (nRNA or gDNA).  Returns -1 if no exon blocks.
+
+        Exon blocks are sorted ascending after construction, so the
+        first start and last end define the span.
         """
         if not self.exons:
             return -1
-        starts = [e.start for e in self.exons]
-        ends = [e.end for e in self.exons]
-        return max(ends) - min(starts)
+        return self.exons[-1].end - self.exons[0].start
 
     # -- construction ---------------------------------------------------------
 
@@ -100,7 +101,6 @@ class Fragment:
         -------
         Fragment
         """
-        refs = set()
         exon_dict: dict[tuple[str, Strand], list[tuple[int, int]]] = (
             collections.defaultdict(list)
         )
@@ -108,7 +108,6 @@ class Fragment:
 
         for read in r1_reads:
             rref, rstrand, rexons, rsjs = parse_read(read, sj_strand_tag=sj_strand_tag)
-            refs.add(rref)
             exon_dict[(rref, rstrand)].extend(rexons)
             for start, end, sj_strand in rsjs:
                 introns.add(GenomicInterval(rref, start, end, sj_strand))
@@ -117,7 +116,6 @@ class Fragment:
             rref, rstrand, rexons, rsjs = parse_read(read, sj_strand_tag=sj_strand_tag)
             # R2 strand flip: always flip read 2's genomic strand
             rstrand = rstrand.opposite()
-            refs.add(rref)
             exon_dict[(rref, rstrand)].extend(rexons)
             for start, end, sj_strand in rsjs:
                 introns.add(GenomicInterval(rref, start, end, sj_strand))
@@ -141,6 +139,13 @@ class Fragment:
                 GenomicInterval(eref, cur_start, cur_end, estrand)
             )
 
+        # Keep deterministic global ordering for reproducibility and to
+        # guarantee `genomic_footprint` uses true first/last blocks.
+        merged_exons.sort(key=lambda iv: (iv.ref, iv.start, iv.end, int(iv.strand)))
+        sorted_introns = tuple(
+            sorted(introns, key=lambda iv: (iv.ref, iv.start, iv.end, int(iv.strand)))
+        )
+
         # Sum NM (edit distance) tags across all records for this hit.
         nm_total = 0
         for read in r1_reads:
@@ -156,6 +161,6 @@ class Fragment:
 
         return cls(
             exons=tuple(merged_exons),
-            introns=tuple(introns),
+            introns=sorted_introns,
             nm=nm_total,
         )

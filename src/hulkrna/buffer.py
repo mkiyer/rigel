@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["FragmentBuffer", "BufferedFragment"]
 
+# Try to import the native accumulator from the C++ resolve module.
+try:
+    from ._resolve_impl import NativeAccumulator, ResolvedResult
+    _HAS_NATIVE_ACCUMULATOR = True
+except ImportError:
+    _HAS_NATIVE_ACCUMULATOR = False
+
 # Fragment classification constants used by fragment_classes property
 FRAG_UNIQUE: int = 0          # 1 gene, 1 transcript, NH=1
 FRAG_ISOFORM_AMBIG: int = 1   # 1 gene, >1 transcript, NH=1
@@ -153,26 +160,31 @@ class _AccumulatorChunk:
         self.chimera_type.append(int(getattr(resolved, 'chimera_type', 0)))
 
         # Per-candidate data stored in CSR layout (parallel to t_indices).
-        # frag_lengths: per-transcript mRNA fragment lengths from dict.
-        # exon_bp, intron_bp, unambig_intron_bp: from overlap_bp dict.
+        # A5: batch extend instead of per-element append.
         frag_lengths_map = getattr(resolved, 'frag_lengths', None) or {}
         overlap_bp = getattr(resolved, 'overlap_bp', None) or {}
         fl = getattr(resolved, 'read_length', 0)
+        _t = []; _fl = []; _eb = []; _ib = []; _uib = []
         for t_idx in resolved.t_inds:
-            self.t_indices.append(t_idx)
             t_key = int(t_idx) if not isinstance(t_idx, int) else t_idx
-            self.frag_lengths_flat.append(frag_lengths_map.get(t_key, -1))
+            _t.append(t_key)
+            _fl.append(frag_lengths_map.get(t_key, -1))
             profile = overlap_bp.get(t_key)
             if profile is not None:
-                self.exon_bp_flat.append(profile[0])
-                self.intron_bp_flat.append(profile[1])
-                self.unambig_intron_bp_flat.append(
+                _eb.append(profile[0])
+                _ib.append(profile[1])
+                _uib.append(
                     profile[2] if len(profile) > 2 else 0
                 )
             else:
-                self.exon_bp_flat.append(fl)
-                self.intron_bp_flat.append(0)
-                self.unambig_intron_bp_flat.append(0)
+                _eb.append(fl)
+                _ib.append(0)
+                _uib.append(0)
+        self.t_indices.extend(_t)
+        self.frag_lengths_flat.extend(_fl)
+        self.exon_bp_flat.extend(_eb)
+        self.intron_bp_flat.extend(_ib)
+        self.unambig_intron_bp_flat.extend(_uib)
         self.t_offsets.append(len(self.t_indices))
 
         self.frag_id.append(frag_id)
@@ -241,11 +253,6 @@ class _FinalizedChunk:
                 self.genomic_footprint, self.genomic_start, self.nm,
             )
         )
-
-    @property
-    def ambiguous_mask(self) -> np.ndarray:
-        """Vectorized bool[N] mask: True where fragment is ambiguous."""
-        return (self.n_genes > 1) | (self.num_hits > 1)
 
     @property
     def fragment_classes(self) -> np.ndarray:
@@ -553,6 +560,10 @@ class FragmentBuffer:
         self._spill_dir = spill_dir
         self._temp_dir: str | None = None
 
+        # Use C++ NativeAccumulator when available for the hot path
+        self._use_native = _HAS_NATIVE_ACCUMULATOR
+        if self._use_native:
+            self._native_acc = NativeAccumulator()
         self._current = _AccumulatorChunk()
         self._chunks: list[_FinalizedChunk | Path] = []
         self._total_size = 0
@@ -564,7 +575,8 @@ class FragmentBuffer:
     @property
     def total_fragments(self) -> int:
         """Total buffered fragments (finalized + pending)."""
-        return self._total_size + self._current.size
+        pending = self._native_acc.size if self._use_native else 0
+        return self._total_size + self._current.size + pending
 
     @property
     def memory_bytes(self) -> int:
@@ -588,15 +600,20 @@ class FragmentBuffer:
 
         Parameters
         ----------
-        resolved : ResolvedFragment
+        resolved : ResolvedFragment or ResolvedResult
             The resolved fragment to buffer.
         frag_id : int
             Fragment identifier for grouping multimapper alignments.
             All alignments of the same molecule should share a frag_id.
         """
-        self._current.append(resolved, frag_id=frag_id)
-        if self._current.size >= self.chunk_size:
-            self._finalize_current()
+        if self._use_native and isinstance(resolved, ResolvedResult):
+            self._native_acc.append(resolved, frag_id)
+            if self._native_acc.size >= self.chunk_size:
+                self._finalize_native()
+        else:
+            self._current.append(resolved, frag_id=frag_id)
+            if self._current.size >= self.chunk_size:
+                self._finalize_current()
 
     # -- Finalization ---------------------------------------------------------
 
@@ -606,7 +623,51 @@ class FragmentBuffer:
         Must be called after all fragments have been appended and
         before iterating.
         """
+        if self._use_native:
+            self._finalize_native()
         self._finalize_current()
+
+    def _finalize_native(self) -> None:
+        """Finalize the C++ native accumulator into a chunk."""
+        if not self._use_native or self._native_acc.size == 0:
+            return
+
+        t_to_g_list = self._t_to_g_arr.tolist()
+        raw = self._native_acc.finalize(t_to_g_list)
+        size = raw["size"]
+
+        chunk = _FinalizedChunk(
+            splice_type=np.frombuffer(raw["splice_type"], dtype=np.uint8).copy(),
+            exon_strand=np.frombuffer(raw["exon_strand"], dtype=np.uint8).copy(),
+            sj_strand=np.frombuffer(raw["sj_strand"], dtype=np.uint8).copy(),
+            num_hits=np.frombuffer(raw["num_hits"], dtype=np.uint16).copy(),
+            merge_criteria=np.frombuffer(raw["merge_criteria"], dtype=np.uint8).copy(),
+            chimera_type=np.frombuffer(raw["chimera_type"], dtype=np.uint8).copy(),
+            t_offsets=np.frombuffer(raw["t_offsets"], dtype=np.int64).copy(),
+            t_indices=np.frombuffer(raw["t_indices"], dtype=np.int32).copy(),
+            frag_lengths=np.frombuffer(raw["frag_lengths"], dtype=np.int32).copy(),
+            exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
+            intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
+            unambig_intron_bp=np.frombuffer(raw["unambig_intron_bp"], dtype=np.int32).copy(),
+            n_genes=np.frombuffer(raw["n_genes"], dtype=np.uint8).copy(),
+            frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).copy(),
+            read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
+            genomic_footprint=np.frombuffer(raw["genomic_footprint"], dtype=np.int32).copy(),
+            genomic_start=np.frombuffer(raw["genomic_start"], dtype=np.int32).copy(),
+            nm=np.frombuffer(raw["nm"], dtype=np.uint16).copy(),
+            size=size,
+        )
+
+        self._total_size += chunk.size
+        self._memory_bytes += chunk.memory_bytes
+        self._chunks.append(chunk)
+        self._native_acc = NativeAccumulator()
+
+        # Spill if over memory budget
+        if self.max_memory_bytes > 0:
+            while self._memory_bytes > self.max_memory_bytes:
+                if not self._spill_oldest():
+                    break
 
     def _finalize_current(self) -> None:
         """Finalize the current accumulator into a chunk."""
