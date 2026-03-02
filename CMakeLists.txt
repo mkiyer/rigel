@@ -94,11 +94,73 @@ nanobind_add_module(
   src/hulkrna/cgranges/cgranges.c
 )
 
-# Needs cgranges.h and khash.h for direct C cgranges calls
+# Needs cgranges.h, khash.h, and shared native headers
 target_include_directories(_resolve_impl PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/cgranges
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/native
 )
 
 # Install into the hulkrna package directory so it's importable as
 # hulkrna._resolve_impl
 install(TARGETS _resolve_impl LIBRARY DESTINATION hulkrna)
+
+# --- Build the _bam_impl extension --------------------------------------------
+
+# C++ BAM scanner using htslib — replaces the Python BAM parsing hot path.
+# Reads BAM → resolves fragments → buffers results in one C++ call.
+
+# Find htslib (pkg-config or cmake find)
+find_package(PkgConfig)
+if(PkgConfig_FOUND)
+  pkg_check_modules(HTSLIB IMPORTED_TARGET htslib)
+endif()
+
+# Fallback: look for htslib in conda prefix or CONDA_PREFIX
+if(NOT HTSLIB_FOUND AND DEFINED ENV{CONDA_PREFIX})
+  set(_conda "$ENV{CONDA_PREFIX}")
+  if(EXISTS "${_conda}/include/htslib/hts.h" AND EXISTS "${_conda}/lib/libhts.dylib")
+    set(HTSLIB_FOUND TRUE)
+    set(HTSLIB_INCLUDE_DIRS "${_conda}/include")
+    set(HTSLIB_LIBRARY_DIRS "${_conda}/lib")
+    set(HTSLIB_LIBRARIES "hts")
+    message(STATUS "htslib found via CONDA_PREFIX: ${_conda}")
+  elseif(EXISTS "${_conda}/include/htslib/hts.h" AND EXISTS "${_conda}/lib/libhts.so")
+    set(HTSLIB_FOUND TRUE)
+    set(HTSLIB_INCLUDE_DIRS "${_conda}/include")
+    set(HTSLIB_LIBRARY_DIRS "${_conda}/lib")
+    set(HTSLIB_LIBRARIES "hts")
+    message(STATUS "htslib found via CONDA_PREFIX: ${_conda}")
+  endif()
+endif()
+
+if(HTSLIB_FOUND)
+  nanobind_add_module(
+    _bam_impl
+    NOMINSIZE
+    STABLE_ABI
+    src/hulkrna/native/bam_scanner.cpp
+    src/hulkrna/cgranges/cgranges.c
+  )
+
+  target_include_directories(_bam_impl PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/cgranges
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/native
+  )
+
+  # Link htslib: prefer PkgConfig target, fall back to manual link
+  if(TARGET PkgConfig::HTSLIB)
+    target_link_libraries(_bam_impl PRIVATE PkgConfig::HTSLIB)
+  else()
+    target_include_directories(_bam_impl PRIVATE ${HTSLIB_INCLUDE_DIRS})
+    target_link_directories(_bam_impl PRIVATE ${HTSLIB_LIBRARY_DIRS})
+    target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
+  endif()
+
+  install(TARGETS _bam_impl LIBRARY DESTINATION hulkrna)
+
+  message(STATUS "htslib found — building _bam_impl C++ BAM scanner")
+else()
+  message(STATUS "htslib NOT found — _bam_impl will not be built. "
+                 "Install htslib (conda install -c conda-forge htslib) "
+                 "for native BAM scanning.")
+endif()

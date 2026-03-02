@@ -34,8 +34,10 @@ _LARGE_LOCUS_LOG_THRESHOLD = 100
 _ANNOTATION_TABLE_PADDING = 1024
 _ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
+import os
+
 from .bam import parse_bam_file, detect_sj_strand_tag
-from .buffer import FragmentBuffer
+from .buffer import FragmentBuffer, _FinalizedChunk
 from .categories import SpliceType
 from .estimator import AbundanceEstimator
 from .fragment import Fragment
@@ -79,6 +81,263 @@ class PipelineResult:
     strand_models: StrandModels
     frag_length_models: FragmentLengthModels
     estimator: AbundanceEstimator
+
+
+# ---------------------------------------------------------------------------
+# Native BAM scanner availability
+# ---------------------------------------------------------------------------
+
+_HAS_NATIVE_BAM_SCANNER = False
+try:
+    from ._bam_impl import BamScanner as _NativeBamScanner  # type: ignore[import-not-found]
+    from ._bam_impl import detect_sj_strand_tag as _native_detect_sj_tag  # type: ignore[import-not-found]
+    _HAS_NATIVE_BAM_SCANNER = True
+except ImportError:
+    pass
+
+# Force Python fallback via env var (useful for testing / debugging).
+if os.environ.get("HULKRNA_FORCE_PYTHON_BAM", "").strip().lower() in (
+    "1", "true", "yes",
+):
+    _HAS_NATIVE_BAM_SCANNER = False
+
+
+def _sj_tag_to_spec(sj_strand_tag) -> str:
+    """Convert ScanConfig.sj_strand_tag to the string spec for BamScanner."""
+    if isinstance(sj_strand_tag, str):
+        return sj_strand_tag if sj_strand_tag else "none"
+    if isinstance(sj_strand_tag, (list, tuple)):
+        return ",".join(sj_strand_tag) if sj_strand_tag else "none"
+    return "none"
+
+
+def _replay_strand_observations(
+    strand_dict: dict,
+    strand_models: StrandModels,
+) -> None:
+    """Replay C++ strand observation arrays into Python StrandModels."""
+    # Exonic-spliced model
+    obs = strand_dict.get("exonic_spliced_obs", [])
+    truth = strand_dict.get("exonic_spliced_truth", [])
+    for o, t in zip(obs, truth):
+        strand_models.exonic_spliced.observe(Strand(int(o)), Strand(int(t)))
+
+    # Exonic fallback model
+    obs = strand_dict.get("exonic_obs", [])
+    truth = strand_dict.get("exonic_truth", [])
+    for o, t in zip(obs, truth):
+        strand_models.exonic.observe(Strand(int(o)), Strand(int(t)))
+
+    # Intergenic model
+    obs = strand_dict.get("intergenic_obs", [])
+    truth = strand_dict.get("intergenic_truth", [])
+    for o, t in zip(obs, truth):
+        strand_models.intergenic.observe(Strand(int(o)), Strand(int(t)))
+
+
+def _replay_fraglen_observations(
+    fraglen_dict: dict,
+    frag_length_models: FragmentLengthModels,
+) -> None:
+    """Replay C++ fragment-length observation arrays into Python models."""
+    lengths = fraglen_dict.get("lengths", [])
+    splice_types = fraglen_dict.get("splice_types", [])
+    for fl, st in zip(lengths, splice_types):
+        frag_length_models.observe(int(fl), SpliceType(int(st)))
+
+    intergenic_lengths = fraglen_dict.get("intergenic_lengths", [])
+    for fl in intergenic_lengths:
+        frag_length_models.observe(int(fl), splice_type=None)
+
+
+def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
+    """Apply C++ scan statistics to PipelineStats."""
+    # BAM-level stats (stored as bam_stats sub-dict fields)
+    stats.total = stats_dict.get("total", 0)
+    stats.qc_fail = stats_dict.get("qc_fail", 0)
+    stats.unmapped = stats_dict.get("unmapped", 0)
+    stats.secondary = stats_dict.get("secondary", 0)
+    stats.supplementary = stats_dict.get("supplementary", 0)
+    stats.duplicate = stats_dict.get("duplicate", 0)
+    stats.n_read_names = stats_dict.get("n_read_names", 0)
+    stats.unique = stats_dict.get("unique", 0)
+    stats.multimapping = stats_dict.get("multimapping", 0)
+    stats.proper_pair = stats_dict.get("proper_pair", 0)
+    stats.improper_pair = stats_dict.get("improper_pair", 0)
+    stats.mate_unmapped = stats_dict.get("mate_unmapped", 0)
+
+    # Fragment-level stats
+    stats.n_fragments = stats_dict.get("n_fragments", 0)
+    stats.n_chimeric = stats_dict.get("n_chimeric", 0)
+    stats.n_chimeric_trans = stats_dict.get("n_chimeric_trans", 0)
+    stats.n_chimeric_cis_strand_same = stats_dict.get(
+        "n_chimeric_cis_strand_same", 0)
+    stats.n_chimeric_cis_strand_diff = stats_dict.get(
+        "n_chimeric_cis_strand_diff", 0)
+    stats.n_intergenic_unspliced = stats_dict.get(
+        "n_intergenic_unspliced", 0)
+    stats.n_intergenic_spliced = stats_dict.get("n_intergenic_spliced", 0)
+    stats.n_with_exon = stats_dict.get("n_with_exon", 0)
+    stats.n_with_annotated_sj = stats_dict.get("n_with_annotated_sj", 0)
+    stats.n_with_unannotated_sj = stats_dict.get(
+        "n_with_unannotated_sj", 0)
+    stats.n_unique_gene = stats_dict.get("n_unique_gene", 0)
+    stats.n_multi_gene = stats_dict.get("n_multi_gene", 0)
+    stats.n_strand_trained = stats_dict.get("n_strand_trained", 0)
+    stats.n_strand_skipped_no_sj = stats_dict.get(
+        "n_strand_skipped_no_sj", 0)
+    stats.n_strand_skipped_multi_gene = stats_dict.get(
+        "n_strand_skipped_multi_gene", 0)
+    stats.n_strand_skipped_ambiguous = stats_dict.get(
+        "n_strand_skipped_ambiguous", 0)
+    stats.n_frag_length_unambiguous = stats_dict.get(
+        "n_frag_length_unambiguous", 0)
+    stats.n_frag_length_ambiguous = stats_dict.get(
+        "n_frag_length_ambiguous", 0)
+    stats.n_frag_length_intergenic = stats_dict.get(
+        "n_frag_length_intergenic", 0)
+    stats.n_multimapper_groups = stats_dict.get("n_multimapper_groups", 0)
+    stats.n_multimapper_alignments = stats_dict.get(
+        "n_multimapper_alignments", 0)
+
+
+def scan_and_buffer_native(
+    bam_path: str,
+    index: HulkIndex,
+    scan: "ScanConfig",
+) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
+    """Native C++ BAM scan: resolve, train models, buffer — all in one pass.
+
+    This is the fast path that replaces ``scan_and_buffer`` when the
+    ``_bam_impl`` C++ extension is available.  The entire BAM parsing,
+    fragment construction, overlap resolution, model training and
+    columnar buffering happens in C++ via htslib.
+
+    Parameters
+    ----------
+    bam_path : str
+        Path to the name-sorted / collated BAM file.
+    index : HulkIndex
+        The loaded reference index.
+    scan : ScanConfig
+        BAM scanning and buffering configuration.
+
+    Returns
+    -------
+    tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]
+    """
+    stats = PipelineStats()
+    strand_models = StrandModels()
+    strand_models.min_spliced_observations = max(
+        1, int(scan.min_spliced_observations),
+    )
+    frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
+    buffer = FragmentBuffer(
+        t_to_g_arr=index.t_to_g_arr,
+        chunk_size=scan.chunk_size,
+        max_memory_bytes=scan.max_memory_bytes,
+        spill_dir=scan.spill_dir,
+    )
+
+    logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
+
+    # Provide gene strand info for exonic fallback strand model training
+    resolve_ctx = index._resolve_ctx
+    resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
+
+    # Create the native scanner
+    sj_spec = _sj_tag_to_spec(scan.sj_strand_tag)
+    scanner = _NativeBamScanner(
+        resolve_ctx,
+        sj_spec,
+        skip_duplicates=scan.skip_duplicates,
+        include_multimap=scan.include_multimap,
+    )
+
+    # Execute the full BAM scan in C++
+    result = scanner.scan(bam_path)
+
+    # Replay stats
+    _apply_scan_stats(stats, result["stats"])
+
+    # Replay strand observations into Python models
+    _replay_strand_observations(result["strand_observations"], strand_models)
+
+    # Replay fragment-length observations into Python models
+    _replay_fraglen_observations(
+        result["frag_length_observations"], frag_length_models,
+    )
+
+    # Finalize the C++ accumulator to raw bytes, then build buffer chunk
+    acc_size = result["accumulator_size"]
+    if acc_size > 0:
+        raw = scanner.finalize_accumulator(index.t_to_g_arr.tolist())
+        size = raw["size"]
+
+        chunk = _FinalizedChunk(
+            splice_type=np.frombuffer(
+                raw["splice_type"], dtype=np.uint8).copy(),
+            exon_strand=np.frombuffer(
+                raw["exon_strand"], dtype=np.uint8).copy(),
+            sj_strand=np.frombuffer(
+                raw["sj_strand"], dtype=np.uint8).copy(),
+            num_hits=np.frombuffer(
+                raw["num_hits"], dtype=np.uint16).copy(),
+            merge_criteria=np.frombuffer(
+                raw["merge_criteria"], dtype=np.uint8).copy(),
+            chimera_type=np.frombuffer(
+                raw["chimera_type"], dtype=np.uint8).copy(),
+            t_offsets=np.frombuffer(
+                raw["t_offsets"], dtype=np.int64).copy(),
+            t_indices=np.frombuffer(
+                raw["t_indices"], dtype=np.int32).copy(),
+            frag_lengths=np.frombuffer(
+                raw["frag_lengths"], dtype=np.int32).copy(),
+            exon_bp=np.frombuffer(
+                raw["exon_bp"], dtype=np.int32).copy(),
+            intron_bp=np.frombuffer(
+                raw["intron_bp"], dtype=np.int32).copy(),
+            unambig_intron_bp=np.frombuffer(
+                raw["unambig_intron_bp"], dtype=np.int32).copy(),
+            n_genes=np.frombuffer(
+                raw["n_genes"], dtype=np.uint8).copy(),
+            frag_id=np.frombuffer(
+                raw["frag_id"], dtype=np.int64).copy(),
+            read_length=np.frombuffer(
+                raw["read_length"], dtype=np.uint32).copy(),
+            genomic_footprint=np.frombuffer(
+                raw["genomic_footprint"], dtype=np.int32).copy(),
+            genomic_start=np.frombuffer(
+                raw["genomic_start"], dtype=np.int32).copy(),
+            nm=np.frombuffer(
+                raw["nm"], dtype=np.uint16).copy(),
+            size=size,
+        )
+
+        buffer._chunks.append(chunk)
+        buffer._total_size += size
+        buffer._memory_bytes += chunk.memory_bytes
+
+        # Spill if over memory budget
+        if buffer.max_memory_bytes > 0:
+            while buffer._memory_bytes > buffer.max_memory_bytes:
+                if not buffer._spill_oldest():
+                    break
+
+    logger.info(
+        f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
+        f"{stats.n_unique_gene:,} unique-gene, "
+        f"{stats.n_multi_gene:,} multi-gene, "
+        f"{stats.n_intergenic:,} intergenic, "
+        f"{buffer.total_fragments:,} buffered "
+        f"({buffer.memory_bytes / 1024**2:.1f} MB in memory, "
+        f"{buffer.n_spilled} chunks spilled), "
+        f"{stats.n_multimapper_groups:,} multimapper molecules"
+    )
+    strand_models.log_summary()
+    frag_length_models.log_summary()
+
+    return stats, strand_models, frag_length_models, buffer
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +793,21 @@ def count_from_buffer(
 # Full pipeline orchestration
 # ---------------------------------------------------------------------------
 
+def _scan_with_pysam(
+    bam_path: str,
+    index: HulkIndex,
+    scan: "ScanConfig",
+) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
+    """Python/pysam BAM scan fallback."""
+    import pysam
+
+    bamfh = pysam.AlignmentFile(bam_path, "rb")
+    try:
+        return scan_and_buffer(bamfh.fetch(until_eof=True), index, scan)
+    finally:
+        bamfh.close()
+
+
 def run_pipeline(
     bam_path,
     index: HulkIndex,
@@ -543,6 +817,12 @@ def run_pipeline(
 
     Opens the BAM **once**, scans all fragments, trains models,
     buffers resolved fragments, then counts via per-locus EM.
+
+    When the native C++ BAM scanner (``_bam_impl``) is available, the
+    entire BAM scan runs in C++ via htslib for dramatically better
+    performance.  If the native scanner is not available or fails, the
+    function falls back to the Python/pysam path automatically.  Set
+    ``HULKRNA_FORCE_PYTHON_BAM=1`` to force the fallback.
 
     Parameters
     ----------
@@ -557,8 +837,6 @@ def run_pipeline(
     -------
     PipelineResult
     """
-    import pysam
-
     if config is None:
         config = PipelineConfig()
 
@@ -576,14 +854,24 @@ def run_pipeline(
             resolved_tag = ()
         scan = _replace(scan, sj_strand_tag=resolved_tag)
 
-    # -- Single BAM pass --
-    bamfh = pysam.AlignmentFile(bam_path, "rb")
-    try:
+    # -- Single BAM pass (native C++ or Python fallback) --
+    if _HAS_NATIVE_BAM_SCANNER:
+        try:
+            stats, strand_models, frag_length_models, buffer = (
+                scan_and_buffer_native(bam_path, index, scan)
+            )
+        except Exception:
+            logger.warning(
+                "Native BAM scanner failed; falling back to Python/pysam",
+                exc_info=True,
+            )
+            stats, strand_models, frag_length_models, buffer = (
+                _scan_with_pysam(bam_path, index, scan)
+            )
+    else:
         stats, strand_models, frag_length_models, buffer = (
-            scan_and_buffer(bamfh.fetch(until_eof=True), index, scan)
+            _scan_with_pysam(bam_path, index, scan)
         )
-    finally:
-        bamfh.close()
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
