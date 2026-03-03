@@ -1,7 +1,7 @@
 """hulkrna.scan — CSR builder / buffer scanner.
 
-Converts a ``FragmentBuffer`` into ``ScanData`` for the EM solver.
-The ``EmDataBuilder`` class builds per-fragment scoring data, routes
+Converts a ``FragmentBuffer`` into ``ScoredFragments`` for the EM solver.
+The ``FragmentRouter`` class builds per-fragment scoring data, routes
 unique fragments to deterministic assignment, and accumulates
 ambiguous fragments into CSR-formatted equivalence-class data for
 the locus-level EM.
@@ -18,10 +18,10 @@ from .buffer import (
     FRAG_MULTIMAPPER,
     FRAG_CHIMERIC,
 )
-from .estimator import AbundanceEstimator, ScanData
-from .index import HulkIndex
+from .estimator import AbundanceEstimator, ScoredFragments
+from .index import TranscriptIndex
 from .scoring import (
-    ScoringContext,
+    FragmentScorer,
     LOG_SAFE_FLOOR,
     LOG_HALF,
     frag_len_log_lik,
@@ -41,8 +41,8 @@ _DEFAULT_SPLICE_PENALTY = 1.0
 _NEG_INF = float('-inf')
 
 
-class EmDataBuilder:
-    """Builds the global CSR (ScanData) from a FragmentBuffer.
+class FragmentRouter:
+    """Builds the global CSR (ScoredFragments) from a FragmentBuffer.
 
     State that was previously captured via closures is now explicit
     instance attributes.  Every method is a candidate for Cython / C
@@ -50,13 +50,13 @@ class EmDataBuilder:
 
     Parameters
     ----------
-    ctx : ScoringContext
+    ctx : FragmentScorer
         Pre-computed scoring parameters.
-    counter : AbundanceEstimator
+    estimator : AbundanceEstimator
         Accumulates unique counts during scan.
     stats : PipelineStats
         Pipeline statistics accumulator.
-    index : HulkIndex
+    index : TranscriptIndex
         Reference index.
     annotations : AnnotationTable or None
         If provided, deterministic-unique and chimeric fragments are
@@ -65,15 +65,15 @@ class EmDataBuilder:
 
     def __init__(
         self,
-        ctx: ScoringContext,
-        counter: AbundanceEstimator,
+        ctx: FragmentScorer,
+        estimator: AbundanceEstimator,
         stats: PipelineStats,
-        index: HulkIndex,
+        index: TranscriptIndex,
         strand_models,
         annotations=None,
     ):
         self.ctx = ctx
-        self.counter = counter
+        self.estimator = estimator
         self.stats = stats
         self.index = index
         self.strand_models = strand_models
@@ -103,7 +103,7 @@ class EmDataBuilder:
         self.mm_pending: list = []
         self.mm_fid: int = -1
 
-        # Native scoring context (set by ScoringContext.from_models)
+        # Native scoring context (set by FragmentScorer.from_models)
         self._native_ctx = getattr(ctx, '_native_ctx', None)
 
     # ------------------------------------------------------------------
@@ -127,7 +127,7 @@ class EmDataBuilder:
         coverage_weight, tx_start, tx_end).  Only WTA winners (minimum
         overhang) are included.
 
-        Dispatches to C++ NativeScoringContext when available.
+        Dispatches to C++ NativeFragmentScorer when available.
         """
         nc = self._native_ctx
         if nc is not None:
@@ -254,7 +254,7 @@ class EmDataBuilder:
         tx_start, tx_end).  Only WTA winners (minimum overhang) are
         included.
 
-        Dispatches to C++ NativeScoringContext when available.
+        Dispatches to C++ NativeFragmentScorer when available.
         """
         nc = self._native_ctx
         if nc is not None:
@@ -644,18 +644,18 @@ class EmDataBuilder:
     # Main scan driver
     # ------------------------------------------------------------------
 
-    def scan(self, buffer: FragmentBuffer, log_every: int) -> ScanData:
-        """Single pass over buffer.  Returns packed ScanData.
+    def scan(self, buffer: FragmentBuffer, log_every: int) -> ScoredFragments:
+        """Single pass over buffer.  Returns packed ScoredFragments.
 
         Deterministic-unique (SPLICED_ANNOT + FRAG_UNIQUE) fragments
-        are counted directly via ``counter.assign_unique``.  All other
+        are assigned directly via ``estimator.assign_unique``.  All other
         exonic fragments build EM units.  Chimeric fragments are
         recorded in the annotation table (if active) and skipped.
         """
         import logging
         logger = logging.getLogger(__name__)
 
-        counter = self.counter
+        estimator = self.estimator
         stats = self.stats
         index = self.index
         t_to_g = self.ctx.t_to_g
@@ -698,7 +698,7 @@ class EmDataBuilder:
                     first_t = int(bf.t_inds[0])
                     t_strand = int(index.t_to_strand_arr[first_t])
 
-                    is_anti = counter.is_antisense(
+                    is_anti = estimator.is_antisense(
                         bf.exon_strand, t_strand,
                         self.strand_models.exonic_spliced,
                     )
@@ -714,11 +714,11 @@ class EmDataBuilder:
 
                         if is_unspliced:
                             if is_anti:
-                                counter.transcript_unspliced_antisense[
+                                estimator.transcript_unspliced_antisense[
                                     t_idx_int
                                 ] += weight
                             else:
-                                counter.transcript_unspliced_sense[
+                                estimator.transcript_unspliced_sense[
                                     t_idx_int
                                 ] += weight
 
@@ -728,17 +728,17 @@ class EmDataBuilder:
                         )
                         if has_unambig_intron:
                             if is_anti:
-                                counter.transcript_intronic_antisense[
+                                estimator.transcript_intronic_antisense[
                                     t_idx_int
                                 ] += weight
                             else:
-                                counter.transcript_intronic_sense[
+                                estimator.transcript_intronic_sense[
                                     t_idx_int
                                 ] += weight
 
                 # --- Deterministic unique: SPLICED_ANNOT + FRAG_UNIQUE ---
                 if fc == FRAG_UNIQUE and is_spliced_annot:
-                    counter.assign_unique(bf, index, self.strand_models)
+                    estimator.assign_unique(bf, index, self.strand_models)
                     stats.deterministic_unique_units += 1
 
                     if annotations is not None:
@@ -791,7 +791,7 @@ class EmDataBuilder:
                 return np.empty(0, dtype=dtype)
             return np.frombuffer(arr, dtype=dtype).copy()
 
-        return ScanData(
+        return ScoredFragments(
             offsets=_to_np(self.offsets, np.int64),
             t_indices=_to_np(self.t_indices_list, np.int32),
             log_liks=_to_np(self.log_liks_list, np.float64),

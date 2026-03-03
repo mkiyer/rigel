@@ -24,7 +24,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
+from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
 from hulkrna.pipeline import run_pipeline
 from hulkrna.sim import Scenario, SimConfig, run_benchmark
 
@@ -50,7 +50,7 @@ def run_scenario(name, sc, *, n_fragments=N_FRAG, ss=1.0,
 
     config = PipelineConfig(
         em=EMConfig(seed=SEED),
-        scan=ScanConfig(sj_strand_tag="ts"),
+        scan=BamScanConfig(sj_strand_tag="ts"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=config)
     bench = run_benchmark(result, pr, scenario_name=name)

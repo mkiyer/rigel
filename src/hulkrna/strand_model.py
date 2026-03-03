@@ -17,7 +17,7 @@ The model stores a single Beta posterior over:
 
 and provides:
 
-* ``strand_likelihood(exon_strand, gene_strand)`` for Bayesian counting
+* ``strand_likelihood(exon_strand, gene_strand)`` for Bayesian quantification
 * ``to_dict()`` / ``write_json()`` for human-readable output including
   derived protocol flags for downstream tools.
 """
@@ -226,7 +226,7 @@ class StrandModel:
         return self.p_r1_antisense
 
     # ------------------------------------------------------------------
-    # Strand likelihood for Bayesian counting
+    # Strand likelihood for Bayesian quantification
     # ------------------------------------------------------------------
 
     def strand_likelihood(
@@ -234,7 +234,7 @@ class StrandModel:
     ) -> float:
         """Strand likelihood: P(exon_strand | fragment from gene_strand).
 
-        Used during Bayesian counting to weight candidate genes.
+        Used during Bayesian quantification to weight candidate genes.
 
         * If ``exon_strand == gene_strand`` → ``p_r1_sense``
         * If ``exon_strand != gene_strand`` → ``1 - p_r1_sense``

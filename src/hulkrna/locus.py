@@ -18,9 +18,9 @@ from .estimator import (
     EM_PRIOR_EPSILON,
     Locus,
     LocusEMInput,
-    ScanData,
+    ScoredFragments,
 )
-from .index import HulkIndex
+from .index import TranscriptIndex
 from .strand_model import StrandModels
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,8 @@ STRAND_DENOM_MIN: float = 0.2
 
 
 def build_loci(
-    em_data: ScanData,
-    index: HulkIndex,
+    em_data: ScoredFragments,
+    index: TranscriptIndex,
 ) -> list[Locus]:
     """Build loci as connected components of transcripts linked by fragments.
 
@@ -55,9 +55,9 @@ def build_loci(
 
     Parameters
     ----------
-    em_data : ScanData
+    em_data : ScoredFragments
         Global EM data (mRNA + nRNA candidates + per-unit metadata).
-    index : HulkIndex
+    index : TranscriptIndex
         Reference index.
 
     Returns
@@ -153,13 +153,13 @@ def build_loci(
 
 def build_locus_em_data(
     locus: Locus,
-    em_data: ScanData,
-    counter: AbundanceEstimator,
-    index: HulkIndex,
+    em_data: ScoredFragments,
+    estimator: AbundanceEstimator,
+    index: TranscriptIndex,
     mean_frag: float,
     gdna_init: float,
 ) -> LocusEMInput:
-    """Extract and renumber global ScanData into a per-locus sub-problem.
+    """Extract and renumber global ScoredFragments into a per-locus sub-problem.
 
     Component layout per locus::
 
@@ -173,9 +173,9 @@ def build_locus_em_data(
     Parameters
     ----------
     locus : Locus
-    em_data : ScanData
-    counter : AbundanceEstimator
-    index : HulkIndex
+    em_data : ScoredFragments
+    estimator : AbundanceEstimator
+    index : TranscriptIndex
     mean_frag : float
     gdna_init : float
         Empirical Bayes estimated gDNA count for this locus.
@@ -339,8 +339,8 @@ def build_locus_em_data(
 
     # Build local init vectors
     unique_totals = np.zeros(n_components, dtype=np.float64)
-    unique_totals[:n_t] = counter.unique_counts[t_arr].sum(axis=1)
-    unique_totals[n_t:2*n_t] = counter.nrna_init[t_arr]
+    unique_totals[:n_t] = estimator.unique_counts[t_arr].sum(axis=1)
+    unique_totals[n_t:2*n_t] = estimator.nrna_init[t_arr]
     unique_totals[gdna_idx] = gdna_init
 
     # Build effective lengths — all set to 1.0 because per-fragment
@@ -378,12 +378,12 @@ def build_locus_em_data(
         prior[gdna_idx] = 0.0
 
     # Zero nRNA prior for single-exon transcripts
-    if counter._transcript_spans is not None:
-        if counter._exonic_lengths is not None:
-            t_exon = counter._exonic_lengths[t_arr]
+    if estimator._transcript_spans is not None:
+        if estimator._exonic_lengths is not None:
+            t_exon = estimator._exonic_lengths[t_arr]
         else:
-            t_exon = counter._t_eff_len[t_arr] + mean_frag - 1.0
-        single_exon = counter._transcript_spans[t_arr] <= t_exon
+            t_exon = estimator._t_eff_len[t_arr] + mean_frag - 1.0
+        single_exon = estimator._transcript_spans[t_arr] <= t_exon
         prior[n_t:2*n_t][single_exon] = 0.0
 
     # Zero nRNA prior when nrna_init is zero for that transcript
@@ -410,7 +410,7 @@ def build_locus_em_data(
         n_components=n_components,
         local_to_global_t=t_arr.copy(),
         unique_totals=unique_totals,
-        nrna_init=counter.nrna_init[t_arr].copy(),
+        nrna_init=estimator.nrna_init[t_arr].copy(),
         gdna_init=gdna_init,
         effective_lengths=eff_len,
         prior=prior,
@@ -493,9 +493,9 @@ def compute_gdna_rate_from_strand(
 
 def compute_eb_gdna_priors(
     loci: list[Locus],
-    em_data: ScanData,
-    counter: AbundanceEstimator,
-    index: HulkIndex,
+    em_data: ScoredFragments,
+    estimator: AbundanceEstimator,
+    index: TranscriptIndex,
     strand_models: StrandModels,
     *,
     k_locus: float = EB_K_LOCUS,
@@ -508,9 +508,9 @@ def compute_eb_gdna_priors(
     Parameters
     ----------
     loci : list[Locus]
-    em_data : ScanData
-    counter : AbundanceEstimator
-    index : HulkIndex
+    em_data : ScoredFragments
+    estimator : AbundanceEstimator
+    index : TranscriptIndex
     strand_models : StrandModels
     k_locus : float
         Shrinkage strength for locus → chrom (default 20).
@@ -523,8 +523,8 @@ def compute_eb_gdna_priors(
         gDNA init count per locus (same order as ``loci``).
     """
     ss = strand_models.exonic_spliced.strand_specificity
-    t_sense = counter.transcript_unspliced_sense
-    t_anti = counter.transcript_unspliced_antisense
+    t_sense = estimator.transcript_unspliced_sense
+    t_anti = estimator.transcript_unspliced_antisense
     t_refs = index.t_df["ref"].values
 
     # --- Global level ---

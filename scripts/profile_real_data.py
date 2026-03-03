@@ -25,7 +25,7 @@ PROF_OUT = Path("/tmp/hulkrna_real_profile.prof")
 
 
 def main():
-    from hulkrna.index import HulkIndex
+    from hulkrna.index import TranscriptIndex
     from hulkrna.pipeline import run_pipeline
 
     # --- Validate paths ---
@@ -37,7 +37,7 @@ def main():
     # --- Load index ---
     print(f"Loading index from {INDEX_DIR} ...")
     t0 = time.perf_counter()
-    index = HulkIndex.load(str(INDEX_DIR))
+    index = TranscriptIndex.load(str(INDEX_DIR))
     t_index = time.perf_counter() - t0
     print(f"  {index.num_transcripts:,} transcripts, "
           f"{index.num_genes:,} genes  ({t_index:.1f}s)")

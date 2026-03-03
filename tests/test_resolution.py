@@ -164,15 +164,15 @@ class TestDetectIntrachromosomalChimera:
 
 
 # =====================================================================
-# resolve_fragment — real C++ ResolveContext tests
+# resolve_fragment — real C++ FragmentResolver tests
 # =====================================================================
 #
-# All tests below use real HulkIndex instances built from GTF strings.
-# The C++ ResolveContext handles interval queries, SJ matching, and
+# All tests below use real TranscriptIndex instances built from GTF strings.
+# The C++ FragmentResolver handles interval queries, SJ matching, and
 # overlap computation.  Mock indexes have been removed.
 #
 # Each test class defines a session-scoped fixture that builds the
-# specific HulkIndex it needs.  A shared mini_index fixture (from
+# specific TranscriptIndex it needs.  A shared mini_index fixture (from
 # conftest.py) is reused when the MINI_GTF layout suffices.
 # =====================================================================
 
@@ -209,7 +209,7 @@ def overlap_index(tmp_path_factory):
 
 
 class TestResolveFragment:
-    """Annotated SJ narrows transcript candidates via C++ ResolveContext.
+    """Annotated SJ narrows transcript candidates via C++ FragmentResolver.
 
     Uses MINI_GTF:
       t1(idx=0): exons (99,200),(299,400),(499,600) → SJs (200,299), (400,499)

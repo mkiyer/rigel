@@ -19,10 +19,10 @@ from hulkrna.index import (
     _subtract_from_interval,
     _gen_genomic_intervals,
     build_genomic_intervals,
-    HulkIndex,
+    TranscriptIndex,
 )
 from hulkrna.sim import Scenario, SimConfig, run_benchmark
-from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
+from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
 from hulkrna.pipeline import run_pipeline
 from hulkrna.transcript import Transcript
 from hulkrna.types import IntervalType, Strand, Interval
@@ -234,7 +234,7 @@ class TestNRNAPhantomRegression:
 
     These are the critical regression tests for the phantom nRNA bug.
     A scenario with overlapping genes (the most problematic case for
-    ambiguous intron counting) should not produce phantom nRNA counts
+    ambiguous intron quantification) should not produce phantom nRNA counts
     when no nascent RNA is simulated.
     """
 
@@ -269,7 +269,7 @@ class TestNRNAPhantomRegression:
             )
             config = PipelineConfig(
                 em=EMConfig(seed=42),
-                scan=ScanConfig(sj_strand_tag="ts"),
+                scan=BamScanConfig(sj_strand_tag="ts"),
             )
             pr = run_pipeline(result.bam_path, result.index, config=config)
             bench = run_benchmark(result, pr,
@@ -323,7 +323,7 @@ class TestNRNAPhantomRegression:
             )
             config = PipelineConfig(
                 em=EMConfig(seed=42),
-                scan=ScanConfig(sj_strand_tag="ts"),
+                scan=BamScanConfig(sj_strand_tag="ts"),
             )
             pr = run_pipeline(result.bam_path, result.index, config=config)
             bench = run_benchmark(result, pr,
@@ -369,7 +369,7 @@ class TestNRNAPhantomRegression:
             )
             config = PipelineConfig(
                 em=EMConfig(seed=42),
-                scan=ScanConfig(sj_strand_tag="ts"),
+                scan=BamScanConfig(sj_strand_tag="ts"),
             )
             pr = run_pipeline(result.bam_path, result.index, config=config)
             bench = run_benchmark(result, pr,

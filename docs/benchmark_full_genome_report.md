@@ -57,7 +57,7 @@ sample: **59.3% mRNA, 6.6% nRNA, 34.1% gDNA**.
 
 - **salmon 1.10.3**: `salmon index -k 23`, `salmon quant --validateMappings -l A`
 - **kallisto 0.51.1**: `kallisto index`, `kallisto quant --rf-stranded` (when SS ≥ 0.9)
-- **hulkrna**: `hulkrna count --bam oracle.bam --index hulkrna_index -o output/`
+- **hulkrna**: `hulkrna quant --bam oracle.bam --index hulkrna_index -o output/`
 
 salmon and kallisto receive paired FASTQ files and build their own indexes from
 the transcript FASTA. hulkrna receives the oracle BAM (genome-aligned) and uses
@@ -214,7 +214,7 @@ nRNA contamination.
 # Pristine
 python scripts/benchmarking/benchmark_full_genome.py \
   --hulkrna-index /path/to/hulkrna_index \
-  --counts /path/to/counts.feather \
+  --counts /path/to/quant.feather \
   --genome /path/to/genome.fasta.bgz \
   --output-dir output/pristine \
   --condition pristine --n-fragments 10000000 --seed 42
@@ -222,7 +222,7 @@ python scripts/benchmarking/benchmark_full_genome.py \
 # Realistic
 python scripts/benchmarking/benchmark_full_genome.py \
   --hulkrna-index /path/to/hulkrna_index \
-  --counts /path/to/counts.feather \
+  --counts /path/to/quant.feather \
   --genome /path/to/genome.fasta.bgz \
   --output-dir output/realistic \
   --condition realistic --n-fragments 10000000 --seed 42

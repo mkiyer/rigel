@@ -40,7 +40,7 @@ The codebase has three categories of incorrect gene-level logic:
 
 **Goal:** Every place that looks up strand via `t_to_g → g_to_strand` switches
 to using `t_strand_arr` (which equals `index.t_to_strand_arr`, already
-available on `HulkIndex` and `ScoringContext`).
+available on `TranscriptIndex` and `FragmentScorer`).
 
 ### Python changes
 
@@ -50,15 +50,15 @@ available on `HulkIndex` and `ScoringContext`).
 | `estimator.py` `is_antisense()` | Takes `gene_strand: int` | Rename param to `ref_strand` (strand of the reference transcript). No logic change — callers change. |
 | `scan.py` lines 700-714 | `g_idx = t_to_g[t_inds[0]]` → `gene_strand = g_to_strand[g_idx]` | Use `t_strand = t_strand_arr[t_inds[0]]` directly. |
 | `scan.py` lines 700-714 | `counter.gene_sense_all[g_idx]` / `gene_antisense_all[g_idx]` accumulation | Keep for Phase 4 (will convert to transcript-level). For now, use g_idx derivation only for these accumulators. |
-| `scoring.py` `ScoringContext` | Has `g_strand_arr` and `t_to_g` fields | Keep for now (still needed by scan accumulators until Phase 4). |
+| `scoring.py` `FragmentScorer` | Has `g_strand_arr` and `t_to_g` fields | Keep for now (still needed by scan accumulators until Phase 4). |
 
 ### C++ changes
 
 | File | What | Change |
 |------|------|--------|
-| `resolve_context.h` `ResolveContext` | `set_gene_strands()` stores `g_to_strand_arr_` | Add `set_transcript_strands()` storing `t_strand_arr_`. |
+| `resolve_context.h` `FragmentResolver` | `set_gene_strands()` stores `g_to_strand_arr_` | Add `set_transcript_strands()` storing `t_strand_arr_`. |
 | `resolve_context.h` `_resolve_core()` | Computes `n_genes` from `t_to_g_arr_` | Keep for now — Phase 2 replaces with strand classification. |
-| `resolve_context.h` `ResolvedResult` | `get_is_unique_gene()` uses `n_genes == 1` | Keep for now — Phase 2 changes. |
+| `resolve_context.h` `ResolvedFragment` | `get_is_unique_gene()` uses `n_genes == 1` | Keep for now — Phase 2 changes. |
 | `resolve_context.h` `get_is_strand_qualified()` | Uses `n_genes == 1` | Keep for now — Phase 2 changes to use `is_unique_transcript()` or `is_same_strand()`. |
 | `bam_scanner.cpp` exonic model training | `gene_idx = t_to_g[t_idx]` → `gene_strand = g_to_strand[gene_idx]` | Use `t_strand_arr_[t_idx]` directly. |
 | `pipeline.py` | `resolve_ctx.set_gene_strands(...)` | Add `resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())`. |
@@ -89,12 +89,12 @@ FRAG_CHIMERIC: int = 4           # chimeric
 
 | Location | Old | New |
 |----------|-----|-----|
-| `CoreResult` (constants.h) | `n_genes` | `mixed_strand` (bool: true if transcripts span both strands) |
-| `ResolvedResult` (resolve_context.h) | `n_genes` | `mixed_strand` |
+| `RawResolveResult` (constants.h) | `n_genes` | `mixed_strand` (bool: true if transcripts span both strands) |
+| `ResolvedFragment` (resolve_context.h) | `n_genes` | `mixed_strand` |
 | `_FinalizedChunk` (buffer.py) | `n_genes: np.ndarray (uint8)` | `mixed_strand: np.ndarray (uint8, 0/1)` |
 | `BufferedFragment` (buffer.py) | `n_genes: int` | `mixed_strand: int` |
 | `ResolvedFragment` (resolution.py) | `n_genes: int` | `mixed_strand: int` |
-| `NativeAccumulator.finalize()` | Computes `n_genes` per fragment from `t_to_g` | Computes `mixed_strand` per fragment from `t_strand_arr` |
+| `FragmentAccumulator.finalize()` | Computes `n_genes` per fragment from `t_to_g` | Computes `mixed_strand` per fragment from `t_strand_arr` |
 
 ### Classification logic (buffer.py `fragment_classes`)
 
@@ -119,10 +119,10 @@ classes[self.chimera_type > 0] = FRAG_CHIMERIC
 
 - `_resolve_core()`: replace `n_genes` computation with `mixed_strand`
   computation using `t_strand_arr_` (set via `set_transcript_strands()`).
-- `NativeAccumulator::finalize()`: replace `n_genes` with `mixed_strand`
+- `FragmentAccumulator::finalize()`: replace `n_genes` with `mixed_strand`
   computed by checking whether all transcripts share the same strand
   (`t_strand_arr`).
-- `ResolvedResult`: `get_is_unique_gene()` → `is_same_strand()` (returns
+- `ResolvedFragment`: `get_is_unique_gene()` → `is_same_strand()` (returns
   `!mixed_strand`). `get_is_strand_qualified()` check also updated.
 
 ### Property renames
@@ -204,12 +204,12 @@ After Phase 3, `gene_indices` can be removed from the `Locus` dataclass.
 
 **Goal:** Remove all vestigial gene-level plumbing that is no longer needed.
 
-- Remove `g_strand_arr` from `ScoringContext` (if no remaining consumers).
-- Remove `set_gene_strands()` from C++ `ResolveContext`.
-- Remove `g_to_strand_arr_` from C++ `ResolveContext`.
-- Remove `t_to_g_arr` from `NativeAccumulator.finalize()` signature
+- Remove `g_strand_arr` from `FragmentScorer` (if no remaining consumers).
+- Remove `set_gene_strands()` from C++ `FragmentResolver`.
+- Remove `g_to_strand_arr_` from C++ `FragmentResolver`.
+- Remove `t_to_g_arr` from `FragmentAccumulator.finalize()` signature
   (replace with `t_strand_arr`).
-- Consider removing `t_to_g` from `ScoringContext` if no remaining consumers
+- Consider removing `t_to_g` from `FragmentScorer` if no remaining consumers
   in scoring path.
 - Remove `t_to_g_arr` parameter from `FragmentBuffer.__init__()` if no longer
   needed.

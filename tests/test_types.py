@@ -6,8 +6,8 @@ from hulkrna.types import (
     GenomicInterval,
     Interval,
     IntervalType,
-    MergeCriteria,
-    RefInterval,
+    MergeOutcome,
+    AnnotatedInterval,
     Strand,
 )
 
@@ -153,19 +153,19 @@ class TestIntervalType:
 
 
 # =====================================================================
-# RefInterval
+# AnnotatedInterval
 # =====================================================================
 
 
-class TestRefInterval:
+class TestAnnotatedInterval:
     def test_defaults(self):
-        ri = RefInterval("chr1", 100, 200)
+        ri = AnnotatedInterval("chr1", 100, 200)
         assert ri.strand == Strand.NONE
         assert ri.interval_type == IntervalType.INTERGENIC
         assert ri.t_index == -1
 
     def test_with_all_fields(self):
-        ri = RefInterval(
+        ri = AnnotatedInterval(
             "chr1", 100, 200,
             strand=Strand.POS,
             interval_type=IntervalType.EXON,
@@ -180,15 +180,15 @@ class TestRefInterval:
 
 
 # =====================================================================
-# MergeCriteria
+# MergeOutcome
 # =====================================================================
 
 
-class TestMergeCriteria:
+class TestMergeOutcome:
     def test_values(self):
-        assert int(MergeCriteria.INTERSECTION) == 0
-        assert int(MergeCriteria.INTERSECTION_NONEMPTY) == 1
-        assert int(MergeCriteria.UNION) == 2
-        assert int(MergeCriteria.EMPTY) == 3
+        assert int(MergeOutcome.INTERSECTION) == 0
+        assert int(MergeOutcome.INTERSECTION_NONEMPTY) == 1
+        assert int(MergeOutcome.UNION) == 2
+        assert int(MergeOutcome.EMPTY) == 3
 
 

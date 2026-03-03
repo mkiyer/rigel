@@ -81,7 +81,7 @@ almost entirely by the Python EM solver.
 | `scan` (Python glue) | 0.55s | 3.5% | 1 | Post-scan Python processing |
 | `_add_single_fragment` | 0.38s | 2.4% | 89K | Per-fragment scan handler |
 | `build_locus_em_data` | 0.31s | 2.0% | 11 | Locus EM data construction |
-| `buffer.__getitem__` | 0.23s | 1.5% | 100K | Buffer retrieval in counting |
+| `buffer.__getitem__` | 0.23s | 1.5% | 100K | Buffer retrieval in quantification |
 | `_build_equiv_classes` | 0.11s | 0.7% | 11 | Equivalence class grouping |
 | Other | 1.41s | 9.0% | — | fraglen model, strand model, etc. |
 
@@ -160,7 +160,7 @@ iteration count would multiply with any per-step speedup.
    while retaining its massive accuracy advantage.
 
 2. **Short-term:** Port equivalence class construction and locus EM data building
-   to C++ as well, creating a fully native counting path.
+   to C++ as well, creating a fully native quantification path.
 
 3. **Medium-term:** Investigate convergence behavior — are 73 SQUAREM cycles per
    locus optimal? Profile the largest loci (Locus 8: 195 transcripts, 18K units)

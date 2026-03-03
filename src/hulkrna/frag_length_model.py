@@ -4,7 +4,7 @@ hulkrna.frag_length_model — Fragment length distribution model.
 Learns the fragment length distribution from fragment-to-transcript
 mappings produced by Pass 1.  Fragments where all candidate
 transcripts yield the *same* fragment length contribute to training;
-ambiguous fragments are deferred to Bayesian counting where the
+ambiguous fragments are deferred to Bayesian quantification where the
 learned distribution provides a likelihood term.
 
 The distribution is stored as a histogram (float vector) indexed
@@ -189,7 +189,7 @@ class FragmentLengthModel:
         self._finalized = True
 
     # ------------------------------------------------------------------
-    # Likelihood for Bayesian counting
+    # Likelihood for Bayesian quantification
     # ------------------------------------------------------------------
 
     def log_likelihood(self, frag_length: int) -> float:

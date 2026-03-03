@@ -5,7 +5,7 @@ import itertools
 import bisect
 
 # local imports
-from hulkrna.gtf import GTF
+from hulkrna.gtf import GTFRecord
     
 # exon as namedtuple
 Exon = collections.namedtuple('Exon', ['start', 'end'])
@@ -116,7 +116,7 @@ def _gtf_parse_features(filename, feature_types=None):
     if feature_types is None:
         feature_types = {'exon', 'CDS'}
     with _gtf_open(filename) as f:
-        for feature in GTF.parse(f):
+        for feature in GTFRecord.parse(f):
             if feature.feature in feature_types:
                 yield feature
 

@@ -6,7 +6,7 @@
  *
  * Contents:
  *   - compute_fragment_weight(frag_start, frag_end, transcript_length)
- *   - NativeScoringContext class:
+ *   - NativeFragmentScorer class:
  *       .score_wta_mrna(...)         — mRNA WTA scoring kernel
  *       .score_wta_nrna(...)         — nRNA WTA scoring kernel
  *       .score_emit_fragment(...)    — fused score+emit (bytes output)
@@ -105,15 +105,15 @@ static double compute_fragment_weight(int32_t frag_start,
 }
 
 // ================================================================
-// NativeScoringContext
+// NativeFragmentScorer
 // ================================================================
 //
 // Holds all pre-computed scoring parameters and index arrays so that
 // score_wta_mrna / score_wta_nrna can execute entirely in C++ with
 // zero Python round-trips.  Constructed once per pipeline run from
-// the Python ScoringContext.
+// the Python FragmentScorer.
 
-class NativeScoringContext {
+class NativeFragmentScorer {
 
     // --- Scalar scoring parameters ---
     double log_p_sense_;
@@ -194,7 +194,7 @@ public:
     // Constructor — copies all data from Python into C++ owned storage
     // ---------------------------------------------------------------
 
-    NativeScoringContext(
+    NativeFragmentScorer(
         double log_p_sense,
         double log_p_antisense,
         bool   anti_flag,
@@ -771,7 +771,7 @@ NB_MODULE(_scoring_impl, m) {
           "Inverse coverage-capacity weight for a fragment on a transcript.\n\n"
           "Uses the trapezoid coverage model.  Plateau → 1.0; edge → > 1.0.");
 
-    nb::class_<NativeScoringContext>(m, "NativeScoringContext")
+    nb::class_<NativeFragmentScorer>(m, "NativeFragmentScorer")
         .def(nb::init<
                  double, double, bool, double, double,
                  nb::object, int32_t, double,
@@ -792,21 +792,21 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("nrna_base"),
              nb::arg("t_exon_data").none())
         .def("score_wta_mrna",
-             &NativeScoringContext::score_wta_mrna,
+             &NativeFragmentScorer::score_wta_mrna,
              nb::arg("t_inds"), nb::arg("exon_bp"),
              nb::arg("frag_lengths"),
              nb::arg("exon_strand"), nb::arg("splice_type"),
              nb::arg("nm"), nb::arg("read_length"),
              nb::arg("genomic_start"))
         .def("score_wta_nrna",
-             &NativeScoringContext::score_wta_nrna,
+             &NativeFragmentScorer::score_wta_nrna,
              nb::arg("t_inds"), nb::arg("exon_bp"),
              nb::arg("intron_bp"),
              nb::arg("exon_strand"), nb::arg("nm"),
              nb::arg("read_length"), nb::arg("genomic_footprint"),
              nb::arg("genomic_start"))
         .def("score_emit_fragment",
-             &NativeScoringContext::score_emit_fragment,
+             &NativeFragmentScorer::score_emit_fragment,
              nb::arg("t_inds"), nb::arg("exon_bp"),
              nb::arg("frag_lengths"), nb::arg("intron_bp"),
              nb::arg("exon_strand"), nb::arg("splice_type"),

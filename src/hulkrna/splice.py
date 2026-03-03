@@ -1,5 +1,5 @@
 """
-hulkrna.splice — Splice classification enums for the counting pipeline.
+hulkrna.splice — Splice classification enums for the quantification pipeline.
 
 Internal count arrays use 6 columns: 3 splice types × 2 strands
 (sense/antisense).  Strand is an internal signal used for gDNA

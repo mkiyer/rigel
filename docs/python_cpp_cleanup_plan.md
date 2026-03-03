@@ -42,7 +42,7 @@ vague name, it is purely splice-junction classification.
 
 | Symbol | C++ equivalent | Still needed? |
 |---|---|---|
-| `Fragment` dataclass | `NativeFragment` (`bam_scanner.cpp`) | **Only by** `annotate.py` |
+| `Fragment` dataclass | `AssembledFragment` (`bam_scanner.cpp`) | **Only by** `annotate.py` |
 | `Fragment.from_reads()` | `build_fragment()` (`bam_scanner.cpp`) | **Only by** `annotate.py` |
 
 ### 4. `types.py` — Core types and enums
@@ -52,12 +52,12 @@ vague name, it is purely splice-junction classification.
 | `Strand` (IntEnum) | `STRAND_*` in `constants.h` | **Keep** — has methods (`from_str`, `opposite`, etc.) |
 | `IntervalType` (IntEnum) | `ITYPE_*` in `constants.h` | **Keep** — index build |
 | `GenomicInterval` (NamedTuple) | `ExonBlock`/`IntronBlock` structs | **Keep** — annotation/index |
-| `MergeCriteria` (IntEnum) | `MC_*` in `constants.h` | **Keep** — buffer output logic |
+| `MergeOutcome` (IntEnum) | `MC_*` in `constants.h` | **Keep** — buffer output logic |
 | `MergeResult` (dataclass) | `MergeResult` struct in `constants.h` | **Redundant** — never instantiated in production |
 | `EMPTY_MERGE` | — | **Dead** with `MergeResult` |
 | `ChimeraType` (IntEnum) | `CHIMERA_*` in `constants.h` | **Keep** — buffer/output |
 | `Interval` (NamedTuple) | — | **Keep** — index build |
-| `RefInterval` (NamedTuple) | — | **Keep** — index build |
+| `AnnotatedInterval` (NamedTuple) | — | **Keep** — index build |
 
 ### 5. `resolution.py` — Redundant Python implementations
 
@@ -65,8 +65,8 @@ vague name, it is purely splice-junction classification.
 |---|---|---|---|
 | `merge_sets_with_criteria()` | `constants.h` impl | **None** (tests only) | **Redundant** |
 | `compute_frag_lengths()` | `resolve_context.h` impl | **None** (tests only) | **Redundant** |
-| `resolve_fragment()` | Via `ResolveContext` C++ | `annotate.py` | **Keep** (thin wrapper) |
-| `ResolvedFragment` dataclass | `ResolvedResult` (C++ nanobind) | **None** in production | **Redundant** |
+| `resolve_fragment()` | Via `FragmentResolver` C++ | `annotate.py` | **Keep** (thin wrapper) |
+| `ResolvedFragment` dataclass | `ResolvedFragment` (C++ nanobind) | **None** in production | **Redundant** |
 | `pair_multimapper_reads()` | Not in C++ | `annotate.py` | **Keep** |
 
 ### 6. `scoring.py` re-exports
@@ -84,7 +84,7 @@ Python                           C++ (constants.h / resolve_context.h / bam_scan
 ─────────────────────────────    ──────────────────────────────────────────────────
 types.py::Strand                 constants.h::STRAND_*                    REDUNDANT values
 types.py::IntervalType           constants.h::ITYPE_*                    REDUNDANT values
-types.py::MergeCriteria          constants.h::MC_*                       REDUNDANT values
+types.py::MergeOutcome          constants.h::MC_*                       REDUNDANT values
 types.py::MergeResult            constants.h::MergeResult struct         REDUNDANT type
 types.py::ChimeraType            constants.h::CHIMERA_*                  REDUNDANT values
 categories.py::SpliceType        constants.h::SPLICE_*                   REDUNDANT values
@@ -92,8 +92,8 @@ scoring.py::STRAND_POS/NEG       constants.h::STRAND_POS/NEG            TRIPLE r
 scoring.py::SPLICE_*/ANNOT       constants.h::SPLICE_*                   TRIPLE redundancy
 resolution.py::merge_sets_*      constants.h::merge_sets_with_criteria   REDUNDANT impl
 resolution.py::compute_frag_*    resolve_context.h::compute_frag_lengths REDUNDANT impl
-resolution.py::ResolvedFragment  resolve.cpp::ResolvedResult             REDUNDANT type
-fragment.py::Fragment            bam_scanner.cpp::NativeFragment          REDUNDANT type
+resolution.py::ResolvedFragment  resolve.cpp::ResolvedFragment             REDUNDANT type
+fragment.py::Fragment            bam_scanner.cpp::AssembledFragment          REDUNDANT type
 bam.py::parse_read               bam_scanner.cpp::parse_cigar+build_frag REDUNDANT impl
 bam.py::detect_sj_strand_tag     bam_scanner.cpp::detect_sj_strand_tag  REDUNDANT impl
 bam.py::_group_records_by_hit    bam_scanner.cpp::process_read_group    REDUNDANT impl
@@ -110,9 +110,9 @@ bam.py::_group_records_by_hit    bam_scanner.cpp::process_read_group    REDUNDAN
    in production; only imported by `resolution.py`.
 4. **Remove `merge_sets_with_criteria()` and `compute_frag_lengths()` from
    `resolution.py`** — redundant Python implementations.  Rewrite tests to
-   exercise C++ via `ResolveContext`.
+   exercise C++ via `FragmentResolver`.
 5. **Remove `ResolvedFragment` from `resolution.py`** — redundant with C++
-   `ResolvedResult`.  Rewrite test mocks.
+   `ResolvedFragment`.  Rewrite test mocks.
 6. **Remove `scoring.py` re-exports** (`STRAND_POS`, `SPLICE_ANNOT`, etc.) —
    have consumers import directly from `types.py` / `splice.py`.
 
@@ -139,6 +139,6 @@ bam.py::_group_records_by_hit    bam_scanner.cpp::process_read_group    REDUNDAN
    `hulkrna._resolve_impl`: `STRAND_*`, `SPLICE_*`, `MC_*`, `CHIMERA_*`,
    `ITYPE_*`.
 
-9. Move `SpliceStrandCol` column indexing to C++ if the EM/counting path moves
+9. Move `SpliceStrandCol` column indexing to C++ if the EM/quantification path moves
    there. **Deferred** — EM remains in Python; `SpliceStrandCol` stays in
    `splice.py`.

@@ -1,4 +1,4 @@
-"""Tests for hulkrna.splice — count classification enums."""
+"""Tests for hulkrna.splice — splice classification enums."""
 
 import pytest
 

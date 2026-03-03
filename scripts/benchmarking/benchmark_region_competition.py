@@ -113,9 +113,9 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime when config is used
     yaml = None
 
-from hulkrna.config import EMConfig, PipelineConfig, ScanConfig, ScoringConfig
-from hulkrna.gtf import GTF
-from hulkrna.index import HulkIndex, write_bed12
+from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
+from hulkrna.gtf import GTFRecord
+from hulkrna.index import TranscriptIndex, write_bed12
 from hulkrna.pipeline import run_pipeline
 from hulkrna.scoring import (
     GDNA_SPLICE_PENALTIES,
@@ -525,7 +525,7 @@ def extract_region(
     with open(out_gtf, "w") as out:
         for t in transcripts:
             for exon in t.exons:
-                gtf_obj = GTF(
+                gtf_obj = GTFRecord(
                     seqname=region.label,
                     source="hulkrna_region_bench",
                     feature="exon",
@@ -1340,15 +1340,15 @@ def _build_pipeline_config(
 
     return PipelineConfig(
         em=EMConfig(**em_kw),
-        scan=ScanConfig(**scan_kw),
-        scoring=ScoringConfig(**scoring_kw),
+        scan=BamScanConfig(**scan_kw),
+        scoring=FragmentScoringConfig(**scoring_kw),
         annotated_bam_path=annotated_bam_path,
     )
 
 
 def run_hulkrna_tool(
     bam_path: Path,
-    index: HulkIndex,
+    index: TranscriptIndex,
     args: argparse.Namespace,
     hulkrna_config: HulkrnaConfig | None = None,
     annotated_bam_path: Path | None = None,
@@ -1752,7 +1752,7 @@ def run_region_benchmark(
     with open(region_gtf, "w") as out:
         for t in transcripts:
             for exon in t.exons:
-                gtf_obj = GTF(
+                gtf_obj = GTFRecord(
                     seqname=region.label,
                     source="hulkrna_region_bench",
                     feature="exon",
@@ -1780,8 +1780,8 @@ def run_region_benchmark(
 
     # hulkrna index (reused across conditions)
     index_dir = reg_dir / "hulkrna_index"
-    HulkIndex.build(region_fa, region_gtf, index_dir, write_tsv=False)
-    index = HulkIndex.load(index_dir)
+    TranscriptIndex.build(region_fa, region_gtf, index_dir, write_tsv=False)
+    index = TranscriptIndex.load(index_dir)
 
     hisat2_index_dir = reg_dir / "hisat2_index"
 

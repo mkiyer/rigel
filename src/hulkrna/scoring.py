@@ -1,13 +1,13 @@
 """hulkrna.scoring — Pure scoring functions and pre-computed scoring context.
 
 Every function in this module takes explicit arguments (no closures,
-no captured state).  The ``ScoringContext`` dataclass holds all
+no captured state).  The ``FragmentScorer`` dataclass holds all
 pre-computed parameters that were previously captured as locals inside
 ``_scan_and_build_em_data``'s nested closures.
 
 Design contract:
     - All functions are stateless pure functions.
-    - ``ScoringContext`` maps directly to a C struct.
+    - ``FragmentScorer`` maps directly to a C struct.
     - Every function is a candidate for Cython / C acceleration.
 """
 
@@ -83,12 +83,12 @@ DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(
 
 
 # ---------------------------------------------------------------------------
-# ScoringContext — replaces 15+ closure-captured locals
+# FragmentScorer — replaces 15+ closure-captured locals
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class ScoringContext:
+class FragmentScorer:
     """Pre-computed scoring parameters, built once per pipeline run.
 
     Replaces the 15+ captured locals in the old closure-based design.
@@ -137,20 +137,20 @@ class ScoringContext:
         strand_models,
         frag_length_models,
         index,
-        counter,
+        estimator,
         *,
         overhang_log_penalty: float | None = None,
         mismatch_log_penalty: float | None = None,
         gdna_splice_penalties: dict | None = None,
-    ) -> "ScoringContext":
-        """Build a ScoringContext from trained models and index.
+    ) -> "FragmentScorer":
+        """Build a FragmentScorer from trained models and index.
 
         Parameters
         ----------
         strand_models : StrandModels
         frag_length_models : FragmentLengthModels
-        index : HulkIndex
-        counter : AbundanceEstimator
+        index : TranscriptIndex
+        estimator : AbundanceEstimator
         overhang_log_penalty : float or None
         mismatch_log_penalty : float or None
         gdna_splice_penalties : dict or None
@@ -197,7 +197,7 @@ class ScoringContext:
                     cs += e - s
                 t_exon_data[t_idx] = (starts, ends, tuple(cb))
 
-        ctx = ScoringContext(
+        ctx = FragmentScorer(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
             log_p_antisense=math.log(max(p_antisense, LOG_SAFE_FLOOR)),
             anti_flag=p_sense < 0.5,
@@ -222,7 +222,7 @@ class ScoringContext:
             t_strand_arr=index.t_to_strand_arr,
             g_strand_arr=index.g_to_strand_arr,
             t_to_g=index.t_to_g_arr,
-            nrna_base=counter.nrna_base_index,
+            nrna_base=estimator.nrna_base_index,
             t_length_arr=t_length_arr,
             t_span_arr=t_span_arr,
             t_start_arr=t_start_arr,
@@ -232,8 +232,8 @@ class ScoringContext:
         # Build native C++ scoring context for hot-path acceleration.
         # Cast arrays to exact dtypes expected by the C++ nanobind binding
         # to tolerate callers (including test mocks) that provide int64 etc.
-        from hulkrna._scoring_impl import NativeScoringContext
-        native_ctx = NativeScoringContext(
+        from hulkrna._scoring_impl import NativeFragmentScorer
+        native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
             log_p_antisense=float(ctx.log_p_antisense),
             anti_flag=bool(ctx.anti_flag),
@@ -263,7 +263,7 @@ class ScoringContext:
 # ---------------------------------------------------------------------------
 
 
-def frag_len_log_lik(ctx: ScoringContext, flen: int) -> float:
+def frag_len_log_lik(ctx: FragmentScorer, flen: int) -> float:
     """Fragment-length log-likelihood (0.0 when unavailable)."""
     if flen <= 0:
         return 0.0
@@ -352,7 +352,7 @@ def score_gdna_standalone(
     """Compute gDNA log-likelihood using model objects directly.
 
     Intended for unit tests and external callers that do not construct
-    a ``ScoringContext``.
+    a ``FragmentScorer``.
     """
     penalties = gdna_splice_penalties or GDNA_SPLICE_PENALTIES
     splice_pen = penalties.get(splice_type, 1.0)

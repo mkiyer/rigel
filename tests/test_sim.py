@@ -209,8 +209,8 @@ class TestGeneBuilder:
         assert gtf_path.exists()
 
         # Read it back with the GTF parser
-        from hulkrna.gtf import GTF
-        features = list(GTF.parse_file(gtf_path))
+        from hulkrna.gtf import GTFRecord
+        features = list(GTFRecord.parse_file(gtf_path))
         assert len(features) == 2  # 2 exon lines
         assert all(f.feature == "exon" for f in features)
         assert all(f.attrs["gene_id"] == "g1" for f in features)
@@ -246,8 +246,8 @@ class TestGeneBuilder:
         ])
         gtf_path = builder.write_gtf(tmp_path)
 
-        from hulkrna.gtf import GTF
-        features = list(GTF.parse_file(gtf_path))
+        from hulkrna.gtf import GTFRecord
+        features = list(GTFRecord.parse_file(gtf_path))
         assert features[0].score == 42.5
 
     def test_intron_too_short_raises(self):
@@ -508,14 +508,14 @@ class TestReadSimulator:
 
 
 # =====================================================================
-# GeneBuilder + HulkIndex integration
+# GeneBuilder + TranscriptIndex integration
 # =====================================================================
 
 
 class TestGeneBuilderIndexIntegration:
     def test_build_hulk_index(self, tmp_path):
-        """GeneBuilder output should be compatible with HulkIndex.build."""
-        from hulkrna.index import HulkIndex
+        """GeneBuilder output should be compatible with TranscriptIndex.build."""
+        from hulkrna.index import TranscriptIndex
 
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
@@ -530,8 +530,8 @@ class TestGeneBuilderIndexIntegration:
         gtf = builder.write_gtf(tmp_path)
 
         index_dir = tmp_path / "index"
-        HulkIndex.build(fasta, gtf, index_dir, write_tsv=False)
+        TranscriptIndex.build(fasta, gtf, index_dir, write_tsv=False)
 
-        index = HulkIndex.load(index_dir)
+        index = TranscriptIndex.load(index_dir)
         assert index.num_transcripts == 2
         assert index.num_genes == 2

@@ -79,7 +79,7 @@ static inline double digamma(double x) {
 // Equivalence class — groups units with identical candidate sets
 // ================================================================
 
-struct EquivClass {
+struct EmEquivClass {
     std::vector<int32_t> comp_idx;  // k component indices
     std::vector<double>  ll_flat;   // n*k log-likelihoods (row-major)
     std::vector<double>  wt_flat;   // n*k coverage weights (row-major)
@@ -109,7 +109,7 @@ struct VecHash {
     }
 };
 
-static std::vector<EquivClass> build_equiv_classes(
+static std::vector<EmEquivClass> build_equiv_classes(
     const int64_t* offsets,
     const int32_t* t_indices,
     const double*  log_liks,
@@ -132,14 +132,14 @@ static std::vector<EquivClass> build_equiv_classes(
     }
 
     // Build dense matrices per class
-    std::vector<EquivClass> result;
+    std::vector<EmEquivClass> result;
     result.reserve(class_map.size());
 
     for (auto& [key, start_list] : class_map) {
         int k = static_cast<int>(key.size());
         int n = static_cast<int>(start_list.size());
 
-        EquivClass ec;
+        EmEquivClass ec;
         ec.comp_idx = std::move(key);
         ec.n = n;
         ec.k = k;
@@ -201,7 +201,7 @@ static void apply_bias_correction_uniform(
 // em_totals.
 
 static inline void em_step_kernel(
-    const EquivClass& ec,
+    const EmEquivClass& ec,
     const double*     log_weights,   // [n_components]
     double*           em_totals)     // [n_components], accumulated
 {
@@ -265,7 +265,7 @@ static inline void em_step_kernel(
 
 static void map_em_step(
     const double* theta,
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unique_totals,
     const double* prior,
@@ -307,7 +307,7 @@ static void map_em_step(
 
 static void vbem_step(
     const double* alpha,
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unique_totals,
     const double* prior,
@@ -348,7 +348,7 @@ static void vbem_step(
 // ================================================================
 
 static void compute_ovr_prior_and_warm_start(
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* unique_totals,
     const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
     double        alpha_flat,
@@ -414,7 +414,7 @@ struct EMResult {
 };
 
 static EMResult run_squarem(
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unique_totals,
     double*       prior,

@@ -9,8 +9,8 @@
  *   2. Groups records by query name (name-sorted BAM)
  *   3. Parses CIGAR → exon blocks + splice junctions
  *   4. Builds Fragment-equivalent structures in C++
- *   5. Calls ResolveContext::_resolve_core() directly
- *   6. Appends results to NativeAccumulator
+ *   5. Calls FragmentResolver::_resolve_core() directly
+ *   6. Appends results to FragmentAccumulator
  *   7. Collects model training observations as arrays
  *   8. Returns everything to Python in one call
  *
@@ -143,7 +143,7 @@ static void build_tid_mapping(
 // Lightweight record for one BAM alignment in a qname group
 // ================================================================
 
-struct LightRecord {
+struct ParsedAlignment {
     int32_t ref_id;         // tid
     int32_t ref_start;      // pos
     int32_t mate_ref_id;    // mtid
@@ -198,7 +198,7 @@ struct FragLenObservations {
 // Stats counters
 // ================================================================
 
-struct ScanStats {
+struct BamScanStats {
     // BAM-level
     int64_t total = 0;
     int64_t qc_fail = 0;
@@ -247,7 +247,7 @@ struct ScanStats {
 // Fragment-equivalent structure (built in C++, no Python object)
 // ================================================================
 
-struct NativeFragment {
+struct AssembledFragment {
     std::vector<ExonBlock> exons;
     std::vector<IntronBlock> introns;
     int32_t nm = 0;
@@ -359,12 +359,12 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
 }
 
 // ================================================================
-// Build NativeFragment from a hit (r1_records, r2_records)
+// Build AssembledFragment from a hit (r1_records, r2_records)
 // ================================================================
 
-static NativeFragment build_fragment(
-    const std::vector<LightRecord*>& r1_reads,
-    const std::vector<LightRecord*>& r2_reads)
+static AssembledFragment build_fragment(
+    const std::vector<ParsedAlignment*>& r1_reads,
+    const std::vector<ParsedAlignment*>& r2_reads)
 {
     // Key: (ref_id, strand) → list of exon intervals
     // We use a simple map with int64_t key = (ref_id << 32) | strand
@@ -447,7 +447,7 @@ static NativeFragment build_fragment(
     }
     // Already sorted since std::set is ordered
 
-    NativeFragment frag;
+    AssembledFragment frag;
     frag.exons = std::move(merged_exons);
     frag.introns = std::move(sorted_introns);
     frag.nm = nm_total;
@@ -458,19 +458,19 @@ static NativeFragment build_fragment(
 // Hit grouping — ports _group_records_by_hit from bam.py
 // ================================================================
 
-struct HitGroupResult {
+struct AlignmentGroup {
     // Hits: each is (r1_reads, r2_reads)
-    std::vector<std::pair<std::vector<LightRecord*>,
-                          std::vector<LightRecord*>>> hits;
+    std::vector<std::pair<std::vector<ParsedAlignment*>,
+                          std::vector<ParsedAlignment*>>> hits;
     // Secondary locations for transcript-aware pairing
-    std::vector<std::vector<LightRecord*>> sec_r1_locs;
-    std::vector<std::vector<LightRecord*>> sec_r2_locs;
+    std::vector<std::vector<ParsedAlignment*>> sec_r1_locs;
+    std::vector<std::vector<ParsedAlignment*>> sec_r2_locs;
 };
 
-static HitGroupResult group_records_by_hit(
-    std::vector<LightRecord>& usable)
+static AlignmentGroup group_records_by_hit(
+    std::vector<ParsedAlignment>& usable)
 {
-    HitGroupResult result;
+    AlignmentGroup result;
 
     // Detect HI tags
     bool has_hi = false;
@@ -481,8 +481,8 @@ static HitGroupResult group_records_by_hit(
     if (has_hi) {
         // Group by HI value
         std::unordered_map<int32_t,
-            std::pair<std::vector<LightRecord*>,
-                      std::vector<LightRecord*>>> groups;
+            std::pair<std::vector<ParsedAlignment*>,
+                      std::vector<ParsedAlignment*>>> groups;
 
         for (auto& r : usable) {
             int32_t hi = (r.hi >= 0) ? r.hi : 0;
@@ -506,9 +506,9 @@ static HitGroupResult group_records_by_hit(
     }
 
     // No HI tags — separate primary from secondary
-    std::vector<LightRecord*> primary_r1, primary_r2;
-    std::vector<std::pair<std::vector<LightRecord*>,
-                          std::vector<LightRecord*>>> singleton_hits;
+    std::vector<ParsedAlignment*> primary_r1, primary_r2;
+    std::vector<std::pair<std::vector<ParsedAlignment*>,
+                          std::vector<ParsedAlignment*>>> singleton_hits;
 
     for (auto& r : usable) {
         if (r.is_supplementary()) {
@@ -564,21 +564,21 @@ static HitGroupResult group_records_by_hit(
 // ================================================================
 
 struct ResolvedLocation {
-    std::vector<LightRecord*> reads;
+    std::vector<ParsedAlignment*> reads;
     std::vector<int32_t> t_inds;  // sorted transcript indices
     int32_t ref_id;
     int32_t ref_start;
 };
 
-static std::vector<std::pair<std::vector<LightRecord*>,
-                              std::vector<LightRecord*>>>
+static std::vector<std::pair<std::vector<ParsedAlignment*>,
+                              std::vector<ParsedAlignment*>>>
 pair_multimapper_reads_native(
-    std::vector<std::vector<LightRecord*>>& sec_r1_locs,
-    std::vector<std::vector<LightRecord*>>& sec_r2_locs,
-    ResolveContext& ctx)
+    std::vector<std::vector<ParsedAlignment*>>& sec_r1_locs,
+    std::vector<std::vector<ParsedAlignment*>>& sec_r2_locs,
+    FragmentResolver& ctx)
 {
-    using Hit = std::pair<std::vector<LightRecord*>,
-                          std::vector<LightRecord*>>;
+    using Hit = std::pair<std::vector<ParsedAlignment*>,
+                          std::vector<ParsedAlignment*>>;
     std::vector<Hit> paired;
 
     if (sec_r1_locs.empty() && sec_r2_locs.empty())
@@ -588,11 +588,11 @@ pair_multimapper_reads_native(
     std::vector<ResolvedLocation> r1_resolved;
     r1_resolved.reserve(sec_r1_locs.size());
     for (auto& r1_reads : sec_r1_locs) {
-        NativeFragment frag = build_fragment(r1_reads, {});
+        AssembledFragment frag = build_fragment(r1_reads, {});
         std::vector<int32_t> t_inds;
 
         if (!frag.exons.empty()) {
-            CoreResult cr;
+            RawResolveResult cr;
             if (ctx._resolve_core(frag.exons, frag.introns,
                                    frag.genomic_footprint(), cr)) {
                 t_inds = std::move(cr.t_inds);
@@ -608,11 +608,11 @@ pair_multimapper_reads_native(
     std::vector<ResolvedLocation> r2_resolved;
     r2_resolved.reserve(sec_r2_locs.size());
     for (auto& r2_reads : sec_r2_locs) {
-        NativeFragment frag = build_fragment({}, r2_reads);
+        AssembledFragment frag = build_fragment({}, r2_reads);
         std::vector<int32_t> t_inds;
 
         if (!frag.exons.empty()) {
-            CoreResult cr;
+            RawResolveResult cr;
             if (ctx._resolve_core(frag.exons, frag.introns,
                                    frag.genomic_footprint(), cr)) {
                 t_inds = std::move(cr.t_inds);
@@ -706,21 +706,21 @@ pair_multimapper_reads_native(
 
 class BamScanner {
 public:
-    ResolveContext* ctx_;
+    FragmentResolver* ctx_;
     SJTagMode sj_tag_mode_ = SJTagMode::XS_ONLY;
     bool skip_duplicates_ = true;
     bool include_multimap_ = false;
 
-    // Mapping from htslib tid → internal ref_id (ResolveContext's numbering)
+    // Mapping from htslib tid → internal ref_id (FragmentResolver's numbering)
     std::vector<int32_t> tid_to_ref_id_;
 
     // Results
-    ScanStats stats_;
-    NativeAccumulator accumulator_;
+    BamScanStats stats_;
+    FragmentAccumulator accumulator_;
     StrandObservations strand_obs_;
     FragLenObservations fraglen_obs_;
 
-    BamScanner(ResolveContext& ctx,
+    BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
                bool skip_duplicates,
                bool include_multimap)
@@ -759,7 +759,7 @@ public:
         }
 
         // Query-name grouping: collect records for same qname
-        std::vector<LightRecord> current_group;
+        std::vector<ParsedAlignment> current_group;
         std::string current_qname;
         int64_t frag_id = 0;
 
@@ -807,8 +807,8 @@ public:
 
             current_qname = qname;
 
-            // Build LightRecord from htslib bam1_t
-            LightRecord rec;
+            // Build ParsedAlignment from htslib bam1_t
+            ParsedAlignment rec;
             rec.ref_id = b->core.tid;
             rec.ref_start = b->core.pos;
             rec.mate_ref_id = b->core.mtid;
@@ -864,7 +864,7 @@ private:
     // ----------------------------------------------------------------
 
     void process_qname_group(
-        std::vector<LightRecord>& records,
+        std::vector<ParsedAlignment>& records,
         int64_t frag_id)
     {
         if (records.empty()) return;
@@ -913,8 +913,8 @@ private:
         }
 
         // Handle multimapper secondary pairing
-        std::vector<std::pair<std::vector<LightRecord*>,
-                              std::vector<LightRecord*>>> secondary_pairs;
+        std::vector<std::pair<std::vector<ParsedAlignment*>,
+                              std::vector<ParsedAlignment*>>> secondary_pairs;
         if (!hit_result.sec_r1_locs.empty() ||
             !hit_result.sec_r2_locs.empty()) {
             secondary_pairs = pair_multimapper_reads_native(
@@ -933,13 +933,13 @@ private:
         int32_t n_buffered_mm = 0;
 
         for (const auto& [r1_reads, r2_reads] : all_hits) {
-            NativeFragment frag = build_fragment(r1_reads, r2_reads);
+            AssembledFragment frag = build_fragment(r1_reads, r2_reads);
             stats_.n_fragments++;
 
             if (frag.exons.empty()) continue;
 
             // Resolve fragment
-            CoreResult cr;
+            RawResolveResult cr;
             bool resolved = ctx_->_resolve_core(
                 frag.exons, frag.introns,
                 frag.genomic_footprint(), cr);
@@ -975,8 +975,8 @@ private:
                 continue;
             }
 
-            // Build ResolvedResult for accumulator
-            ResolvedResult result = ResolvedResult::from_core(cr);
+            // Build ResolvedFragment for accumulator
+            ResolvedFragment result = ResolvedFragment::from_core(cr);
             result.num_hits = num_hits;
             result.nm = frag.nm;
 
@@ -1132,7 +1132,7 @@ private:
 
 public:
     // Expose accumulator for finalize
-    NativeAccumulator& get_accumulator() { return accumulator_; }
+    FragmentAccumulator& get_accumulator() { return accumulator_; }
 
     nb::dict finalize_accumulator(const std::vector<int32_t>& t_strand_arr) {
         return accumulator_.finalize(t_strand_arr);
@@ -1164,13 +1164,13 @@ using ci16_1d = nb::ndarray<const int16_t,  nb::ndim<1>, nb::c_contig>;
 
 class BamAnnotationWriter {
 public:
-    ResolveContext* ctx_;
+    FragmentResolver* ctx_;
     SJTagMode sj_tag_mode_ = SJTagMode::XS_ONLY;
     bool skip_duplicates_ = true;
     bool include_multimap_ = false;
     std::vector<int32_t> tid_to_ref_id_;
 
-    BamAnnotationWriter(ResolveContext& ctx,
+    BamAnnotationWriter(FragmentResolver& ctx,
                         const std::string& sj_tag_spec,
                         bool skip_duplicates,
                         bool include_multimap)
@@ -1249,9 +1249,9 @@ public:
 
         bam1_t* b = bam_init1();
 
-        // Qname grouping — collect raw records + LightRecords
+        // Qname grouping — collect raw records + ParsedAlignments
         std::vector<bam1_t*> raw_group;       // cloned bam1_t*
-        std::vector<LightRecord> light_group;  // parsed lightweight records
+        std::vector<ParsedAlignment> light_group;  // parsed lightweight records
         std::string current_qname;
         int64_t frag_id = 0;
 
@@ -1300,8 +1300,8 @@ public:
             auto hit_result = group_records_by_hit(light_group);
 
             // Multimapper secondary pairing
-            std::vector<std::pair<std::vector<LightRecord*>,
-                                  std::vector<LightRecord*>>> secondary_pairs;
+            std::vector<std::pair<std::vector<ParsedAlignment*>,
+                                  std::vector<ParsedAlignment*>>> secondary_pairs;
             if (!hit_result.sec_r1_locs.empty() ||
                 !hit_result.sec_r2_locs.empty()) {
                 secondary_pairs = pair_multimapper_reads_native(
@@ -1364,10 +1364,10 @@ public:
                     } else if (best_tid_val >= 0) {
                         // Resolve this hit to see if assigned transcript
                         // is among its candidates
-                        NativeFragment frag = build_fragment(
+                        AssembledFragment frag = build_fragment(
                             r1_reads, r2_reads);
                         if (!frag.exons.empty()) {
-                            CoreResult cr;
+                            RawResolveResult cr;
                             if (ctx_->_resolve_core(
                                     frag.exons, frag.introns,
                                     frag.genomic_footprint(), cr)) {
@@ -1434,8 +1434,8 @@ public:
             // Clone raw record for output
             raw_group.push_back(bam_dup1(b));
 
-            // Build LightRecord (same as BamScanner)
-            LightRecord rec;
+            // Build ParsedAlignment (same as BamScanner)
+            ParsedAlignment rec;
             rec.ref_id = b->core.tid;
             rec.ref_start = b->core.pos;
             rec.mate_ref_id = b->core.mtid;
@@ -1590,7 +1590,7 @@ NB_MODULE(_bam_impl, m) {
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
     nb::class_<BamScanner>(m, "BamScanner")
-        .def(nb::init<ResolveContext&, const std::string&, bool, bool>(),
+        .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
              nb::arg("ctx"),
              nb::arg("sj_tag_spec"),
              nb::arg("skip_duplicates") = true,
@@ -1598,7 +1598,7 @@ NB_MODULE(_bam_impl, m) {
              "Create a BAM scanner.\n\n"
              "Parameters\n"
              "----------\n"
-             "ctx : ResolveContext\n"
+             "ctx : FragmentResolver\n"
              "    The resolve context from index building.\n"
              "sj_tag_spec : str\n"
              "    SJ strand tag specification: 'XS', 'ts', 'XS,ts', 'ts,XS', or 'none'.\n"
@@ -1606,7 +1606,7 @@ NB_MODULE(_bam_impl, m) {
              "    Skip duplicate-flagged reads (default True).\n"
              "include_multimap : bool\n"
              "    Include multimapping reads (default False).\n",
-             nb::keep_alive<1, 2>()  // BamScanner must keep ResolveContext alive
+             nb::keep_alive<1, 2>()  // BamScanner must keep FragmentResolver alive
         )
         .def("scan", &BamScanner::scan,
              nb::arg("bam_path"),
@@ -1626,7 +1626,7 @@ NB_MODULE(_bam_impl, m) {
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")
-        .def(nb::init<ResolveContext&, const std::string&, bool, bool>(),
+        .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
              nb::arg("ctx"),
              nb::arg("sj_tag_spec"),
              nb::arg("skip_duplicates") = true,
@@ -1634,7 +1634,7 @@ NB_MODULE(_bam_impl, m) {
              "Create a BAM annotation writer.\n\n"
              "Parameters\n"
              "----------\n"
-             "ctx : ResolveContext\n"
+             "ctx : FragmentResolver\n"
              "    The resolve context from index building.\n"
              "sj_tag_spec : str\n"
              "    SJ strand tag specification (must match pass 1).\n"

@@ -39,7 +39,7 @@ import pyarrow.ipc
 from .core import (
     EMPTY_MERGE,
     IntervalType,
-    MergeCriteria,
+    MergeOutcome,
     MergeResult,
     Strand,
     merge_sets_with_criteria,
@@ -117,7 +117,7 @@ class ResolvedFragment:
         """True if resolved via full intersection to a single gene."""
         return (
             self.exon_merge.is_unique_gene
-            and self.exon_merge.criteria == MergeCriteria.INTERSECTION
+            and self.exon_merge.criteria == MergeOutcome.INTERSECTION
         )
 
 
@@ -429,20 +429,20 @@ def analyze_hits(
 
         # --- Exon merge criteria ---
         if not resolved.exon_merge.is_empty:
-            if resolved.exon_merge.criteria == MergeCriteria.INTERSECTION:
+            if resolved.exon_merge.criteria == MergeOutcome.INTERSECTION:
                 stats.n_exon_intersection += 1
-            elif resolved.exon_merge.criteria == MergeCriteria.INTERSECTION_NONEMPTY:
+            elif resolved.exon_merge.criteria == MergeOutcome.INTERSECTION_NONEMPTY:
                 stats.n_exon_intersection_nonempty += 1
-            elif resolved.exon_merge.criteria == MergeCriteria.UNION:
+            elif resolved.exon_merge.criteria == MergeOutcome.UNION:
                 stats.n_exon_union += 1
 
         # --- SJ merge criteria ---
         if not resolved.sj_merge.is_empty:
-            if resolved.sj_merge.criteria == MergeCriteria.INTERSECTION:
+            if resolved.sj_merge.criteria == MergeOutcome.INTERSECTION:
                 stats.n_sj_intersection += 1
-            elif resolved.sj_merge.criteria == MergeCriteria.INTERSECTION_NONEMPTY:
+            elif resolved.sj_merge.criteria == MergeOutcome.INTERSECTION_NONEMPTY:
                 stats.n_sj_intersection_nonempty += 1
-            elif resolved.sj_merge.criteria == MergeCriteria.UNION:
+            elif resolved.sj_merge.criteria == MergeOutcome.UNION:
                 stats.n_sj_union += 1
 
         # --- Strand learning (qualification + observation) ---

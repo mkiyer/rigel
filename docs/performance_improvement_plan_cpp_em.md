@@ -131,11 +131,11 @@ into C++ for scoring but does Python bookkeeping between calls.
 
 #### B1. Fused C++ Scan Loop (Priority: HIGH, Impact: 2–3×)
 
-Move the entire `EmDataBuilder.scan()` loop into C++:
+Move the entire `FragmentRouter.scan()` loop into C++:
 - Currently: Python iterates chunks → Python `__getitem__` per fragment →
   Python calls `score_emit_fragment` → Python appends to `array.array`
 - Target: Single C++ function takes the entire buffer and produces the
-  final ScanData arrays in one pass
+  final ScoredFragments arrays in one pass
 
 This eliminates:
 - 200k `BufferedFragment.__getitem__` calls (0.5s)

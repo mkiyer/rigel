@@ -2,12 +2,12 @@
 """Quick script to inspect data formats for full-genome benchmark."""
 import pandas as pd
 
-# Check counts.feather
+# Check quant.feather
 counts = pd.read_feather(
     "/Users/mkiyer/Downloads/hulkrna_runs/mctp_LBX0069_SI_42153_HFFFMDRX7/"
-    "hulkrna_output/counts.feather"
+    "hulkrna_output/quant.feather"
 )
-print("=== counts.feather ===")
+print("=== quant.feather ===")
 print("Shape:", counts.shape)
 print("Columns:", list(counts.columns))
 print(counts.head(3).to_string())

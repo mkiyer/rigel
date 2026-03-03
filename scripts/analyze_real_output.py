@@ -7,7 +7,7 @@ import numpy as np
 outdir = '/Users/mkiyer/Downloads/hulkrna_runs/mctp_LBX0069_SI_42153_HFFFMDRX7/hulkrna_output'
 
 # 1. Transcript-level counts
-counts = pd.read_feather(f'{outdir}/counts.feather')
+counts = pd.read_feather(f'{outdir}/quant.feather')
 print('=== TRANSCRIPT COUNTS ===')
 print(f'Shape: {counts.shape}')
 print(f'Columns: {list(counts.columns)}')
@@ -46,7 +46,7 @@ if gdna_cols:
 
 print()
 print('=== GENE COUNTS ===')
-gene_counts = pd.read_feather(f'{outdir}/gene_counts.feather')
+gene_counts = pd.read_feather(f'{outdir}/gene_quant.feather')
 print(f'Shape: {gene_counts.shape}')
 print(f'Columns: {list(gene_counts.columns)}')
 expressed_genes = gene_counts[gene_counts['count'] > 0]
@@ -112,7 +112,7 @@ for key in fl:
 
 print()
 print('=== DETAIL COUNTS ===')
-detail = pd.read_feather(f'{outdir}/counts_detail.feather')
+detail = pd.read_feather(f'{outdir}/quant_detail.feather')
 print(f'Shape: {detail.shape}')
 print(f'Columns: {list(detail.columns)}')
 

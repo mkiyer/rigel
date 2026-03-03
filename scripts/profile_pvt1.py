@@ -23,7 +23,7 @@ def main():
     cond = "gdna_none_nrna_none_ss_1.00"
     bam_path = f"{base}/{cond}/align_oracle/reads_namesort.bam"
 
-    from hulkrna.index import HulkIndex
+    from hulkrna.index import TranscriptIndex
     from hulkrna.pipeline import run_pipeline
 
     print(f"BAM: {bam_path}")
@@ -31,7 +31,7 @@ def main():
     print()
 
     # Load index (not profiled — one-time cost)
-    index = HulkIndex.load(index_dir)
+    index = TranscriptIndex.load(index_dir)
     print(f"Index loaded: {index.num_transcripts} transcripts, {index.num_genes} genes")
     print()
 

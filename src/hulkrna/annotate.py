@@ -2,7 +2,7 @@
 hulkrna.annotate — Per-fragment annotated BAM output.
 
 Produces a BAM file where every original record is stamped with EM-derived
-assignment tags, enabling read-level introspection of the counting pipeline.
+assignment tags, enabling read-level introspection of the quantification pipeline.
 
 Two-pass architecture
 ---------------------
@@ -262,8 +262,8 @@ def write_annotated_bam(
     output_path : str
         Path to output annotated BAM.
     annotations : AnnotationTable
-        The annotation table built during counting.
-    index : HulkIndex
+        The annotation table built during quantification.
+    index : TranscriptIndex
         Reference index (for transcript / gene ID lookup).
     skip_duplicates : bool
         Must match the value used in Pass 1.
@@ -285,9 +285,9 @@ def write_annotated_bam(
     else:
         sj_spec = sj_strand_tag if sj_strand_tag else "none"
 
-    # Build writer using the same ResolveContext as pass 1
+    # Build writer using the same FragmentResolver as pass 1
     writer = BamAnnotationWriter(
-        index._resolve_ctx,
+        index._resolver,
         sj_spec,
         skip_duplicates,
         include_multimap,

@@ -1,7 +1,7 @@
 """
 hulkrna.stats — Structured pipeline statistics tracking.
 
-Replaces ad-hoc counter variables with a structured dataclass,
+Replaces ad-hoc tally variables with a structured dataclass,
 reducing boilerplate and enabling consistent serialization.
 """
 

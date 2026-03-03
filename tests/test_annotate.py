@@ -140,7 +140,7 @@ class TestAnnotatedBamIntegration:
     def test_annotated_bam_produced(self, scenario, tmp_path):
         """run_pipeline with annotated_bam_path writes a valid BAM."""
         import pysam
-        from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
+        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
         from hulkrna.sim import SimConfig, run_benchmark
         from hulkrna.pipeline import run_pipeline
 
@@ -158,7 +158,7 @@ class TestAnnotatedBamIntegration:
             result.index,
             config=PipelineConfig(
                 em=EMConfig(seed=42),
-                scan=ScanConfig(sj_strand_tag="ts"),
+                scan=BamScanConfig(sj_strand_tag="ts"),
                 annotated_bam_path=annotated_bam,
             ),
         )
@@ -214,7 +214,7 @@ class TestAnnotatedBamIntegration:
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
         """Pipeline counts are identical with and without annotation."""
         from hulkrna.sim import SimConfig
-        from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
+        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
         from hulkrna.pipeline import run_pipeline
 
         sim_config = SimConfig(
@@ -227,7 +227,7 @@ class TestAnnotatedBamIntegration:
 
         base_config = PipelineConfig(
             em=EMConfig(seed=42),
-            scan=ScanConfig(sj_strand_tag="ts"),
+            scan=BamScanConfig(sj_strand_tag="ts"),
         )
 
         # Run without annotation
@@ -243,7 +243,7 @@ class TestAnnotatedBamIntegration:
         )
         counts2 = pr2.estimator.get_counts_df(result.index)
 
-        # Counts should be identical (annotation doesn't change counting)
+        # Counts should be identical (annotation doesn't change quantification)
         np.testing.assert_array_almost_equal(
             counts1["count"].values,
             counts2["count"].values,

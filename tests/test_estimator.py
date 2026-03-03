@@ -4,13 +4,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hulkrna.types import Strand, MergeCriteria
+from hulkrna.types import Strand, MergeOutcome
 from hulkrna.splice import (
     SpliceType,
     SpliceStrandCol,
 )
 from hulkrna.config import EMConfig
-from hulkrna.estimator import AbundanceEstimator, ScanData, Locus, LocusEMInput
+from hulkrna.estimator import AbundanceEstimator, ScoredFragments, Locus, LocusEMInput
 from hulkrna.strand_model import StrandModel, StrandModels
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
@@ -22,7 +22,7 @@ from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
 
 class MockIndex:
-    """Minimal mock of HulkIndex with the arrays AbundanceEstimator needs."""
+    """Minimal mock of TranscriptIndex with the arrays AbundanceEstimator needs."""
 
     def __init__(self, num_transcripts, num_genes, t_to_g, t_to_strand, g_to_strand,
                  t_ids=None, g_ids=None, g_names=None, t_gnames=None):
@@ -98,7 +98,7 @@ def _make_resolved(**kwargs):
         exon_strand=Strand.POS,
         sj_strand=Strand.NONE,
         frag_lengths={0: 250},
-        merge_criteria=MergeCriteria.INTERSECTION,
+        merge_criteria=MergeOutcome.INTERSECTION,
         num_hits=1,
         genomic_footprint=250,
         genomic_start=1000,
@@ -123,9 +123,9 @@ def _make_em_data(
     count_cols_per_unit=None,
     num_transcripts=None,
 ):
-    """Build ScanData from a list of per-unit candidate lists.
+    """Build ScoredFragments from a list of per-unit candidate lists.
 
-    The global ScanData contains mRNA + nRNA candidates only (no gDNA).
+    The global ScoredFragments contains mRNA + nRNA candidates only (no gDNA).
     """
     offsets = [0]
     flat_t = []
@@ -163,7 +163,7 @@ def _make_em_data(
                 locus_cc[u] = cc_list[j] if cc_list else _UNSPLICED_SENSE
                 break
 
-    return ScanData(
+    return ScoredFragments(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
         log_liks=np.array(flat_lk, dtype=np.float64),
@@ -272,11 +272,11 @@ class TestAssignUnique:
 
 
 # =====================================================================
-# ScanData construction
+# ScoredFragments construction
 # =====================================================================
 
 
-class TestScanData:
+class TestScoredFragments:
     def test_empty_em_data(self):
         em = _make_em_data([])
         assert em.n_units == 0

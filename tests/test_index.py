@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from hulkrna.index import (
-    HulkIndex,
+    TranscriptIndex,
     INTERVALS_FEATHER,
     SJ_FEATHER,
     TRANSCRIPTS_FEATHER,
@@ -68,7 +68,7 @@ def test_load_raises_on_t_index_mismatch(tmp_path: Path):
     idx_dir = _write_minimal_index(tmp_path, t_df)
 
     with pytest.raises(ValueError, match="t_index"):
-        HulkIndex.load(idx_dir)
+        TranscriptIndex.load(idx_dir)
 
 
 def test_load_raises_when_t_index_missing(tmp_path: Path):
@@ -93,4 +93,4 @@ def test_load_raises_when_t_index_missing(tmp_path: Path):
     idx_dir = _write_minimal_index(tmp_path, t_df)
 
     with pytest.raises(ValueError, match="missing 't_index'"):
-        HulkIndex.load(idx_dir)
+        TranscriptIndex.load(idx_dir)

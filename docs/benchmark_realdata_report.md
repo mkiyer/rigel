@@ -223,7 +223,7 @@ htseq-count performs worst in all conditions because it:
 
 1. **Oracle BAM vs. real alignment**: These results use perfect alignment. Real aligners (STAR, HISAT2, minimap2) introduce false splice junctions, misalignments in repetitive regions, and multi-mapping artifacts. A follow-up benchmark with real aligners will give a truer picture.
 
-2. **Per-region random abundances**: The current benchmark assigns random log-uniform abundances per region. Using real abundance profiles (from the hulkrna count output) would create an even more realistic simulation with the characteristic heavy-tailed expression distribution.
+2. **Per-region random abundances**: The current benchmark assigns random log-uniform abundances per region. Using real abundance profiles (from the hulkrna quant output) would create an even more realistic simulation with the characteristic heavy-tailed expression distribution.
 
 3. **Single sample**: Results are from one sample. Multi-sample benchmarking across different tissue types and contamination levels would validate generalizability.
 

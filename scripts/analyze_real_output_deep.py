@@ -6,8 +6,8 @@ import numpy as np
 
 outdir = '/Users/mkiyer/Downloads/hulkrna_runs/mctp_LBX0069_SI_42153_HFFFMDRX7/hulkrna_output'
 
-gene_counts = pd.read_feather(f'{outdir}/gene_counts.feather')
-counts = pd.read_feather(f'{outdir}/counts.feather')
+gene_counts = pd.read_feather(f'{outdir}/gene_quant.feather')
+counts = pd.read_feather(f'{outdir}/quant.feather')
 
 # Key summary metrics
 total_mrna = gene_counts['count'].sum()

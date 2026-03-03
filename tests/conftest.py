@@ -18,7 +18,7 @@ from hulkrna.estimator import (
     Locus,
     LocusEMInput,
 )
-from hulkrna.index import HulkIndex
+from hulkrna.index import TranscriptIndex
 
 # ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)
@@ -87,7 +87,7 @@ def mini_fasta_file(tmp_path: Path) -> Path:
 
 
 def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
-    """Build a HulkIndex from a GTF string (session/module-scoped helper).
+    """Build a TranscriptIndex from a GTF string (session/module-scoped helper).
 
     Parameters
     ----------
@@ -102,8 +102,8 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
 
     Returns
     -------
-    HulkIndex
-        Loaded index with C++ ResolveContext ready.
+    TranscriptIndex
+        Loaded index with C++ FragmentResolver ready.
     """
     import pysam
 
@@ -120,13 +120,13 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
     pysam.faidx(str(fasta_path))
 
     idx_dir = base / "index"
-    HulkIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-    return HulkIndex.load(idx_dir)
+    TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
+    return TranscriptIndex.load(idx_dir)
 
 
 @pytest.fixture(scope="session")
 def mini_index(tmp_path_factory):
-    """Standard MINI_GTF HulkIndex: t0(3-exon), t1(2-exon), t2(neg strand).
+    """Standard MINI_GTF TranscriptIndex: t0(3-exon), t1(2-exon), t2(neg strand).
 
     GTF layout (0-based half-open after parse):
       g1 (+): t0 exons (99,200),(299,400),(499,600)

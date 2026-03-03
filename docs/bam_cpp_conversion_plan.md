@@ -102,7 +102,7 @@ Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/stats.py#65-65), lines 65 
 
 Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/types.py#1-1), lines 1 to 50
 
-Now let me look at the config module to understand ScanConfig and how the conda environment/htslib is set up:  
+Now let me look at the config module to understand BamScanConfig and how the conda environment/htslib is set up:  
 
 Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/config.py#1-1), lines 1 to 120
 
@@ -146,7 +146,7 @@ Searched for text `class FragmentLengthModels` (`**/src/hulkrna/frag_length_mode
 
 Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/frag_length_model.py#367-367), lines 367 to 492
 
-Searched for regex `class ResolvedFragment|class ResolvedResult` (`**/src/hulkrna/resolution.py`), 1 result
+Searched for regex `class ResolvedFragment|class ResolvedFragment` (`**/src/hulkrna/resolution.py`), 1 result
 
 Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#295-295), lines 295 to 395
 
@@ -172,7 +172,7 @@ Now I have a complete picture. Let me write the plan document.I don't have file 
 
 ## Plan: C++ htslib BAM Parsing — Phase F
 
-**TL;DR**: Replace the entire Python/pysam BAM reading → Fragment construction → hit grouping pipeline with a single C++ extension (`_bam_impl`) using htslib directly. This eliminates 21.6M Python-level pysam attribute accesses, the `groupby` lambda, and Python-side Fragment construction. The C++ scanner will stream BAM records, filter/group by query name, parse CIGAR, build `ExonBlock`/`IntronBlock` vectors, group into hits, and route directly into the existing C++ `ResolveContext._resolve_core()` and `NativeAccumulator`. Model training observations will be batched and returned to Python. Projected savings: ~35s from a 133s baseline (profiled on 1.7 GB BAM, 21.6M records, 88.8% duplicates).
+**TL;DR**: Replace the entire Python/pysam BAM reading → Fragment construction → hit grouping pipeline with a single C++ extension (`_bam_impl`) using htslib directly. This eliminates 21.6M Python-level pysam attribute accesses, the `groupby` lambda, and Python-side Fragment construction. The C++ scanner will stream BAM records, filter/group by query name, parse CIGAR, build `ExonBlock`/`IntronBlock` vectors, group into hits, and route directly into the existing C++ `FragmentResolver._resolve_core()` and `FragmentAccumulator`. Model training observations will be batched and returned to Python. Projected savings: ~35s from a 133s baseline (profiled on 1.7 GB BAM, 21.6M records, 88.8% duplicates).
 
 The key architectural decision is where to draw the C++/Python boundary. The most performant design keeps the entire inner loop (BAM read → resolve → buffer) in C++ and returns only aggregated model-training observations and statistics to Python, avoiding per-fragment Python round-trips.
 
@@ -186,23 +186,23 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
 2. **Create the new C++ extension source file `src/hulkrna/native/bam_scanner.cpp`**
    - New nanobind module: `_bam_impl`
    - Include `<htslib/sam.h>`, `<htslib/hts.h>`, nanobind headers, and the existing cgranges headers
-   - Mirror the constants already defined in native/resolve.cpp (Strand, SpliceType, ChimeraType, MergeCriteria values). Extract these into a shared header `src/hulkrna/native/constants.h` to avoid duplication.
+   - Mirror the constants already defined in native/resolve.cpp (Strand, SpliceType, ChimeraType, MergeOutcome values). Extract these into a shared header `src/hulkrna/native/constants.h` to avoid duplication.
 
 3. **Create shared header `src/hulkrna/native/constants.h`**
    - Extract all `static constexpr` enum-mirror constants from resolve.cpp into this header
-   - Also extract the `ExonBlock`, `IntronBlock`, `SJKey`, `SJKeyHash`, `CoreResult`, `MergeResult`, and `ChimeraResult` structs from resolve.cpp
+   - Also extract the `ExonBlock`, `IntronBlock`, `SJKey`, `SJKeyHash`, `RawResolveResult`, `MergeResult`, and `ChimeraResult` structs from resolve.cpp
    - Update resolve.cpp to `#include "constants.h"` instead of inline definitions
-   - This shared header enables `bam_scanner.cpp` to call `ResolveContext::_resolve_core()` directly
+   - This shared header enables `bam_scanner.cpp` to call `FragmentResolver::_resolve_core()` directly
 
-4. **Extract `ResolveContext` into a shared header `src/hulkrna/native/resolve_context.h`**
-   - Move the `ResolveContext` class declaration (with `_resolve_core()`, overlap index, SJ map, metadata) from resolve.cpp into a header
+4. **Extract `FragmentResolver` into a shared header `src/hulkrna/native/resolve_context.h`**
+   - Move the `FragmentResolver` class declaration (with `_resolve_core()`, overlap index, SJ map, metadata) from resolve.cpp into a header
    - Keep resolve.cpp as the nanobind binding file that `#include`s the header
    - `bam_scanner.cpp` will `#include "resolve_context.h"` to call `_resolve_core()` directly in C++ without crossing the Python boundary
-   - Similarly, move `ResolvedResult`, `NativeAccumulator` declarations into headers so `bam_scanner.cpp` can produce and accumulate resolved results directly
+   - Similarly, move `ResolvedFragment`, `FragmentAccumulator` declarations into headers so `bam_scanner.cpp` can produce and accumulate resolved results directly
 
 5. **Implement `BamScanner` C++ class in `bam_scanner.cpp`**
-   - **Constructor**: accepts BAM file path (string), `ResolveContext*` (pointer to the existing C++ resolve context from `index._resolve_ctx`), and config flags (`skip_duplicates`, `include_multimap`, SJ strand tag names)
-   - **`open()`**: open BAM via `hts_open()`, read header via `sam_hdr_read()`, build `ref_name → ref_id` mapping consistent with the `ResolveContext`'s `ref_to_id_` map
+   - **Constructor**: accepts BAM file path (string), `FragmentResolver*` (pointer to the existing C++ resolve context from `index._resolver`), and config flags (`skip_duplicates`, `include_multimap`, SJ strand tag names)
+   - **`open()`**: open BAM via `hts_open()`, read header via `sam_hdr_read()`, build `ref_name → ref_id` mapping consistent with the `FragmentResolver`'s `ref_to_id_` map
    - **`scan()`**: the core C++ scanning loop (replaces `parse_bam_file` + `Fragment.from_reads` + `resolve_fragment` + `buffer.append`):
 
      ```
@@ -214,8 +214,8 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
        // Merge overlapping exon blocks
        // Group into hits (HI-tag or primary/secondary logic)
        // For each hit:
-       //   Call ResolveContext::_resolve_core() directly
-       //   Accumulate into NativeAccumulator
+       //   Call FragmentResolver::_resolve_core() directly
+       //   Accumulate into FragmentAccumulator
        //   Collect model-training observations
      ```
 
@@ -263,7 +263,7 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
       - `strand_intergenic`: pairs of `(exon_strand, Strand::POS)` for intergenic unique-mappers
       - `frag_length_obs`: tuples of `(frag_length, splice_type_or_sentinel)` for unambiguous unique-mapper fragments
       - `frag_length_intergenic`: intergenic fragment lengths
-    - The C++ scanner populates these vectors during the scan loop, accessing `t_to_g_arr` and `g_to_strand_arr` from the `ResolveContext` metadata
+    - The C++ scanner populates these vectors during the scan loop, accessing `t_to_g_arr` and `g_to_strand_arr` from the `FragmentResolver` metadata
     - After `scan()` completes, return these as numpy arrays to Python, where `scan_and_buffer` feeds them into `StrandModels.observe()` and `FragmentLengthModels.observe()` in a batch loop
 
 13. **Implement statistics collection in C++**
@@ -286,7 +286,7 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
 
 16. **Update Python `scan_and_buffer()` to use the C++ scanner**
     - In pipeline.py: try to import `_bam_impl`; if available, use `BamScanner` instead of the Python path
-    - Pass `index._resolve_ctx` to the scanner constructor
+    - Pass `index._resolver` to the scanner constructor
     - Call `scanner.scan()` → returns `(native_accumulator, training_obs, stats_dict)`
     - Feed `training_obs` into `StrandModels` / `FragmentLengthModels` via batch loops
     - Merge `stats_dict` into `PipelineStats`
@@ -304,9 +304,9 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
     - Keep the pysam open for the annotated BAM second pass (if enabled) — this is not performance-critical
 
 19. **Handle reference name mapping consistency**
-    - The `ResolveContext` builds a `ref_to_id_` map from the index at construction time ([resolve.cpp `build_overlap_index`](src/hulkrna/native/resolve.cpp))
+    - The `FragmentResolver` builds a `ref_to_id_` map from the index at construction time ([resolve.cpp `build_overlap_index`](src/hulkrna/native/resolve.cpp))
     - The BAM header has its own `tid` mapping (integer reference IDs from htslib)
-    - `BamScanner::open()` must build a `bam_tid → resolve_ref_id` translation table by matching `sam_hdr_tid2name(hdr, tid)` against `ResolveContext::ref_to_id_`
+    - `BamScanner::open()` must build a `bam_tid → resolve_ref_id` translation table by matching `sam_hdr_tid2name(hdr, tid)` against `FragmentResolver::ref_to_id_`
     - Contigs in the BAM but not in the index get `resolve_ref_id = -1` (fragments on these contigs are intergenic)
 
 20. **Testing strategy**
@@ -324,11 +324,11 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
 
 **Decisions**
 - **Single C++ scan loop (not separate phases)**: The entire BAM→resolve→buffer pipeline runs in one C++ `scan()` call, avoiding per-fragment Python round-trips. Model training observations are batched and returned, not streamed.
-- **Shared headers for resolve types**: Extract `ResolveContext`, `ResolvedResult`, `NativeAccumulator`, and constants into headers so `bam_scanner.cpp` links directly without code duplication.
+- **Shared headers for resolve types**: Extract `FragmentResolver`, `ResolvedFragment`, `FragmentAccumulator`, and constants into headers so `bam_scanner.cpp` links directly without code duplication.
 - **Keep pysam as runtime dependency**: The annotated BAM second pass, index building, and simulation modules still use pysam. Removing pysam entirely is a separate future effort.
 - **htslib from conda**: Use the conda-forge `htslib` package rather than vendoring. The conda environment already provides samtools (which depends on htslib).
 - **Model training stays in Python**: Strand and fragment-length models have complex Python logic (Laplace smoothing, exponential tail decay, per-category routing). Moving them to C++ has low ROI since they're called O(unique_fragments) not O(BAM_records). Batch the observations instead.
-- **Annotation table support**: The C++ scanner must track `frag_id` for each buffered fragment (already done by `NativeAccumulator`). The `AnnotationTable` is populated later during `count_from_buffer`, so no changes needed in the scanner.
+- **Annotation table support**: The C++ scanner must track `frag_id` for each buffered fragment (already done by `FragmentAccumulator`). The `AnnotationTable` is populated later during `quant_from_buffer`, so no changes needed in the scanner.
 
 ---
 

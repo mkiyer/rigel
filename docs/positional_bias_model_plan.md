@@ -97,9 +97,9 @@ and create the `bias.py` module with uniform profiles. Verify that the new code
 path produces identical results to the current hard-coded effective-length
 correction.
 
-#### 0a. ScanData CSR Extension
+#### 0a. ScoredFragments CSR Extension
 
-- Add `tx_starts: list[int]` and `tx_ends: list[int]` to `ScanData` (estimator.py)
+- Add `tx_starts: list[int]` and `tx_ends: list[int]` to `ScoredFragments` (estimator.py)
 - These store the 0-based transcript-space `[start, end)` for each candidate
 - Populated during scan in `_score_wta_mrna` and `_score_wta_nrna` (scan.py)
   - `tx_start` and `tx_end` are already computed for coverage weight — just store them

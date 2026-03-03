@@ -38,7 +38,7 @@ static constexpr int32_t SPLICE_UNSPLICED       = 0;
 static constexpr int32_t SPLICE_SPLICED_UNANNOT = 1;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
 
-// MergeCriteria (hulkrna.types.MergeCriteria)
+// MergeOutcome (hulkrna.types.MergeOutcome)
 static constexpr int32_t MC_INTERSECTION          = 0;
 static constexpr int32_t MC_INTERSECTION_NONEMPTY = 1;
 static constexpr int32_t MC_UNION                 = 2;
@@ -111,10 +111,10 @@ struct SJKeyHash {
 };
 
 // ================================================================
-// CoreResult — internal result from _resolve_core()
+// RawResolveResult — internal result from _resolve_core()
 // ================================================================
 
-struct CoreResult {
+struct RawResolveResult {
     std::vector<int32_t> t_inds;
     int32_t ambig_strand = 0;
     int32_t splice_type = 0;

@@ -168,11 +168,11 @@ def resolve_fragment(frag, index):
     """Resolve a fragment to its compatible transcript set.
 
     Uses the C++ native kernel (``hulkrna._resolve_impl``) via
-    ``ResolveContext.resolve_fragment()``.  Returns a C++
-    ``ResolvedResult`` object that exposes attributes for model
+    ``FragmentResolver.resolve_fragment()``.  Returns a C++
+    ``ResolvedFragment`` object that exposes attributes for model
     training and buffering.
     """
     if not frag.exons:
         return None
-    return index._resolve_ctx.resolve_fragment(frag)
+    return index._resolver.resolve_fragment(frag)
 

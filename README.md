@@ -1,5 +1,5 @@
 # hulkrna
-rna-seq read counting tool
+rna-seq transcript quantification tool
 
 
 

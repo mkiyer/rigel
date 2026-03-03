@@ -10,7 +10,7 @@ import shutil
 
 import pytest
 
-from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
+from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
 from hulkrna.pipeline import run_pipeline
 from hulkrna.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
 
@@ -75,7 +75,7 @@ def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
     )
     config = PipelineConfig(
         em=EMConfig(seed=PIPELINE_SEED),
-        scan=ScanConfig(sj_strand_tag="ts", include_multimap=include_multimap),
+        scan=BamScanConfig(sj_strand_tag="ts", include_multimap=include_multimap),
     )
     pr = run_pipeline(result.bam_path, result.index, config=config)
     bench = run_benchmark(result, pr, scenario_name=scenario_name)

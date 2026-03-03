@@ -53,7 +53,7 @@ advantage).
 |---|---|
 | `AbundanceEstimator` class (state management) | Accumulator arrays, config, output DataFrames — not hot |
 | `assign_locus_ambiguous()` | Post-EM posterior scatter; runs once per locus, vectorized numpy, ~0% of runtime |
-| `ScanData` / `LocusEMInput` dataclasses | Data containers; only constructed once per locus |
+| `ScoredFragments` / `LocusEMInput` dataclasses | Data containers; only constructed once per locus |
 | `build_locus_em_data()` (locus.py) | Locus graph construction; measured at 0.31 s (2%) |
 | `build_loci()` (locus.py) | scipy connected_components; not hot |
 | `compute_nrna_init()`, `compute_eb_gdna_priors()` | Pre-EM initialization; negligible time |
@@ -165,7 +165,7 @@ void apply_bias_correction_uniform(
 );
 
 // --- Equivalence class builder ---
-struct EquivClass {
+struct EmEquivClass {
     std::vector<int32_t> comp_idx;   // k component indices
     std::vector<double>  ll_flat;    // n*k log-likelihoods (row-major)
     std::vector<double>  wt_flat;    // n*k coverage weights (row-major)
@@ -173,7 +173,7 @@ struct EquivClass {
     int n;  // number of units in this class
     int k;  // number of components
 };
-std::vector<EquivClass> build_equiv_classes(
+std::vector<EmEquivClass> build_equiv_classes(
     const int64_t* offsets,
     const int32_t* t_indices,
     const double*  log_liks,
@@ -185,7 +185,7 @@ std::vector<EquivClass> build_equiv_classes(
 // Writes em_totals in-place, returns theta_new as vector.
 void em_step(
     const double* theta,
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unique_totals,
     const double* prior,
@@ -197,7 +197,7 @@ void em_step(
 // --- Single VBEM step ---
 void vbem_step(
     const double* alpha,
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unique_totals,
     const double* prior,
@@ -246,7 +246,7 @@ with `n` units and `k` candidates:
 
 ```cpp
 void em_step_kernel(
-    const EquivClass& ec,
+    const EmEquivClass& ec,
     const double* log_weights,   // log(theta) - log(eff_len), [n_components]
     double* em_totals            // accumulated posterior sums [n_components]
 ) {
@@ -342,7 +342,7 @@ struct EMResult {
 };
 
 EMResult run_squarem(
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unique_totals,
     double* prior,          // may be modified by pruning
@@ -363,7 +363,7 @@ parameter:
 ```cpp
 using StepFn = void(*)(
     const double* state,
-    const std::vector<EquivClass>& ec,
+    const std::vector<EmEquivClass>& ec,
     const double* log_eff_len,
     const double* unique, const double* prior,
     double* em_totals, double* state_new,
@@ -378,7 +378,7 @@ iterates over the same equivalence classes:
 
 ```cpp
 void compute_ovr_prior(
-    const std::vector<EquivClass>& ec_data,
+    const std::vector<EmEquivClass>& ec_data,
     const bool* eligible,        // [n_components]
     const double* unique_totals, // [n_components]
     double alpha,                // flat Dirichlet pseudocount

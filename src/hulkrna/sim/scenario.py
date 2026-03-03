@@ -3,7 +3,7 @@ hulkrna.sim.scenario — End-to-end simulation scenario orchestrator.
 
 A ``Scenario`` bundles genome generation, gene annotation, read
 simulation, alignment (minimap2), BAM collation (samtools), and
-index building (HulkIndex) into a single reproducible workflow.
+index building (TranscriptIndex) into a single reproducible workflow.
 
 All artifacts are written to a working directory (temp by default)
 and can be cleaned up via ``cleanup()`` or the context-manager
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pysam
 
-from ..index import HulkIndex
+from ..index import TranscriptIndex
 from ..transcript import Transcript
 from ..types import Strand
 
@@ -56,9 +56,9 @@ class ScenarioResult:
     bam_path : Path
         Name-sorted BAM file (aligned or oracle).
     index_dir : Path
-        HulkIndex output directory (Feather files).
-    index : HulkIndex
-        Loaded HulkIndex ready for counting.
+        TranscriptIndex output directory (Feather files).
+    index : TranscriptIndex
+        Loaded TranscriptIndex ready for quantification.
     transcripts : list[Transcript]
         Transcript objects with assigned indices.
     genome : MutableGenome
@@ -80,7 +80,7 @@ class ScenarioResult:
     gtf_path: Path
     bam_path: Path
     index_dir: Path
-    index: HulkIndex
+    index: TranscriptIndex
     transcripts: list[Transcript]
     genome: MutableGenome
     fastq_r1: Path | None = None
@@ -314,7 +314,7 @@ class Scenario:
         3. Simulate paired-end reads (FASTQ).
         4. Align with minimap2 (``splice:sr``).
         5. Collate BAM with samtools.
-        6. Build HulkIndex.
+        6. Build TranscriptIndex.
 
         Parameters
         ----------
@@ -385,11 +385,11 @@ class Scenario:
         logger.info(f"[{self.name}] Aligning with minimap2...")
         bam_path = self._align(fasta_path, r1_path, r2_path, gtf_path=gtf_path)
 
-        # 5. Build HulkIndex
-        logger.info(f"[{self.name}] Building HulkIndex...")
+        # 5. Build TranscriptIndex
+        logger.info(f"[{self.name}] Building TranscriptIndex...")
         index_dir = wdir / "index"
-        HulkIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
-        index = HulkIndex.load(index_dir)
+        TranscriptIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
+        index = TranscriptIndex.load(index_dir)
 
         logger.info(f"[{self.name}] Scenario build complete.")
         return ScenarioResult(
@@ -423,7 +423,7 @@ class Scenario:
         1. Write genome FASTA + index.
         2. Write gene annotations (GTF).
         3. Generate oracle BAM (perfect alignments).
-        4. Build HulkIndex.
+        4. Build TranscriptIndex.
 
         Parameters
         ----------
@@ -471,10 +471,10 @@ class Scenario:
         bam_path = wdir / f"{self.name}_oracle.bam"
         oracle.write_bam(bam_path, n_fragments, name_sorted=True)
 
-        # 4. Build HulkIndex
+        # 4. Build TranscriptIndex
         index_dir = wdir / "index"
-        HulkIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
-        index = HulkIndex.load(index_dir)
+        TranscriptIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
+        index = TranscriptIndex.load(index_dir)
 
         return ScenarioResult(
             fasta_path=fasta_path,

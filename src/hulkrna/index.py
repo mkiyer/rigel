@@ -10,8 +10,8 @@ TSV mirrors) in an output directory:
     intervals.feather     — exon/intron/intergenic tiling of the genome
     sj.feather            — annotated splice junctions from transcript introns
 
-The ``HulkIndex`` class provides both the ``build()`` method for creating
-the index and ``load()`` / query methods for using it during counting.
+The ``TranscriptIndex`` class provides both the ``build()`` method for creating
+the index and ``load()`` / query methods for using it during quantification.
 """
 
 import collections
@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
-from .types import GenomicInterval, IntervalType, RefInterval
+from .types import GenomicInterval, IntervalType, AnnotatedInterval
 from .transcript import Transcript
 
 
@@ -112,13 +112,13 @@ def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
     record. The resulting DataFrame is sorted by (ref, start, end, strand).
     """
     rows = [
-        RefInterval(t.ref, start, end, t.strand,
+        AnnotatedInterval(t.ref, start, end, t.strand,
                     IntervalType.SJ, t.t_index)
         for t in transcripts
         for start, end in t.introns()
     ]
     rows.sort(key=lambda sj: (sj.ref, sj.start, sj.end, sj.strand))
-    return pd.DataFrame(rows, columns=RefInterval._fields)
+    return pd.DataFrame(rows, columns=AnnotatedInterval._fields)
 
 
 def write_bed12(
@@ -194,7 +194,7 @@ def gtf_to_bed12(gtf_path: str | Path, bed_path: str | Path) -> Path:
     return write_bed12(transcripts, bed_path)
 
 
-def _gen_transcript_intervals(t: Transcript) -> Iterator[RefInterval]:
+def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
     """Yield exon and transcript-span intervals for a single transcript.
 
     Each exon produces an EXON interval.  One TRANSCRIPT interval spans
@@ -202,11 +202,11 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[RefInterval]:
     """
     # Exons
     for e in t.exons:
-        yield RefInterval(t.ref, e.start, e.end, t.strand,
+        yield AnnotatedInterval(t.ref, e.start, e.end, t.strand,
                           IntervalType.EXON, t.t_index)
     # One transcript span (replaces per-gap INTRON intervals)
     if t.exons:
-        yield RefInterval(t.ref, t.exons[0].start, t.exons[-1].end,
+        yield AnnotatedInterval(t.ref, t.exons[0].start, t.exons[-1].end,
                           t.strand, IntervalType.TRANSCRIPT, t.t_index)
 
 
@@ -250,7 +250,7 @@ def _subtract_from_interval(
 
 def _gen_cluster_unambig_intron_intervals(
     cluster: list[Transcript],
-) -> Iterator[RefInterval]:
+) -> Iterator[AnnotatedInterval]:
     """Yield UNAMBIG_INTRON intervals for a cluster of overlapping transcripts.
 
     For each multi-exon transcript, subtract the global exon union of the
@@ -285,7 +285,7 @@ def _gen_cluster_unambig_intron_intervals(
                 intron_start, intron_end, global_exon_union,
             )
             for piece_start, piece_end in pieces:
-                yield RefInterval(
+                yield AnnotatedInterval(
                     ref, piece_start, piece_end, t.strand,
                     IntervalType.UNAMBIG_INTRON, t.t_index,
                 )
@@ -294,7 +294,7 @@ def _gen_cluster_unambig_intron_intervals(
 def _gen_genomic_intervals(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
-) -> Iterator[RefInterval]:
+) -> Iterator[AnnotatedInterval]:
     """Tile the genome into exon, intron, and intergenic intervals.
 
     Transcripts must be sorted by ``(ref, start, end)``. Intergenic
@@ -320,7 +320,7 @@ def _gen_genomic_intervals(
 
         if not t_list:
             # Entire chromosome is intergenic
-            yield RefInterval(ref, 0, ref_length)
+            yield AnnotatedInterval(ref, 0, ref_length)
             continue
 
         end = 0  # tracks the rightmost coordinate reached
@@ -330,7 +330,7 @@ def _gen_genomic_intervals(
             if t.start > end:
                 # Intergenic gap before this transcript cluster
                 if end < t.start:
-                    yield RefInterval(ref, end, t.start)
+                    yield AnnotatedInterval(ref, end, t.start)
                 # Emit intervals for the previous cluster
                 for tc in cluster:
                     yield from _gen_transcript_intervals(tc)
@@ -347,7 +347,7 @@ def _gen_genomic_intervals(
 
         # Intergenic gap to end of chromosome
         if end < ref_length:
-            yield RefInterval(ref, end, ref_length)
+            yield AnnotatedInterval(ref, end, ref_length)
 
 
 def build_genomic_intervals(
@@ -357,22 +357,22 @@ def build_genomic_intervals(
     """Build the complete interval table covering the genome.
 
     Returns a DataFrame sorted by (ref, start, end, strand) with columns
-    matching the ``RefInterval`` NamedTuple fields.
+    matching the ``AnnotatedInterval`` NamedTuple fields.
     """
     intervals = list(_gen_genomic_intervals(transcripts, ref_lengths))
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
-    return pd.DataFrame(intervals, columns=RefInterval._fields)
+    return pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
 
 
 # ---------------------------------------------------------------------------
-# HulkIndex — unified index class
+# TranscriptIndex — unified index class
 # ---------------------------------------------------------------------------
 
-class HulkIndex:
+class TranscriptIndex:
     """In-memory reference index for fast transcript/gene overlap queries.
 
-    Use ``HulkIndex.build()`` to create the on-disk index from a FASTA +
-    GTF, then ``HulkIndex.load()`` to read it back for counting.
+    Use ``TranscriptIndex.build()`` to create the on-disk index from a FASTA +
+    GTF, then ``TranscriptIndex.load()`` to read it back for quantification.
 
     The gene table is derived on-the-fly from the transcript table so
     that only transcripts, intervals, and splice junctions are stored
@@ -519,11 +519,11 @@ class HulkIndex:
         return g_df
 
     @classmethod
-    def load(cls, index_dir: str | Path) -> "HulkIndex":
+    def load(cls, index_dir: str | Path) -> "TranscriptIndex":
         """Load an index from the Feather files in *index_dir*.
 
         Builds cgranges interval trees and splice-junction lookup maps
-        for fast overlap queries during counting.
+        for fast overlap queries during quantification.
         """
         index_dir = str(index_dir)
         self = cls()
@@ -617,7 +617,7 @@ class HulkIndex:
             os.path.join(index_dir, SJ_FEATHER)
         )
 
-        # Exact-match map for counting (ref, start, end, strand) → frozenset[int]
+        # Exact-match map for quantification (ref, start, end, strand) → frozenset[int]
         logger.debug("Building splice junction exact-match map")
         sj_map: dict[tuple, set[int]] = {}
         for row in sj_df.itertuples(index=False):
@@ -641,9 +641,9 @@ class HulkIndex:
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
 
-        # -- C++ ResolveContext (native fragment resolution) ------------------
-        from hulkrna._resolve_impl import ResolveContext
-        ctx = ResolveContext()
+        # -- C++ FragmentResolver (native fragment resolution) ------------------
+        from hulkrna._resolve_impl import FragmentResolver
+        ctx = FragmentResolver()
 
         # 1. Overlap index from collapsed data
         cr_refs: list[str] = []
@@ -706,8 +706,8 @@ class HulkIndex:
             len(self.t_to_g_arr),
         )
 
-        self._resolve_ctx = ctx
-        logger.debug("Built native ResolveContext for C++ resolution")
+        self._resolver = ctx
+        logger.debug("Built native FragmentResolver for C++ resolution")
 
         return self
 

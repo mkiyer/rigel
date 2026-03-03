@@ -1,13 +1,13 @@
 """Tests for hulkrna.buffer -- FragmentBuffer with native C++ accumulator.
 
-All buffer append tests use C++ ResolvedResult objects produced by
-ResolveContext.resolve_fragment(), exercising the real native code path.
+All buffer append tests use C++ ResolvedFragment objects produced by
+FragmentResolver.resolve_fragment(), exercising the real native code path.
 """
 
 import numpy as np
 import pytest
 
-from hulkrna.types import Strand, MergeCriteria, GenomicInterval, ChimeraType
+from hulkrna.types import Strand, MergeOutcome, GenomicInterval, ChimeraType
 from hulkrna.splice import SpliceType
 from hulkrna.resolution import make_fragment, resolve_fragment
 from hulkrna.buffer import (
@@ -19,7 +19,7 @@ from hulkrna.buffer import (
     FRAG_MULTIMAPPER,
     FRAG_CHIMERIC,
 )
-from hulkrna.index import HulkIndex
+from hulkrna.index import TranscriptIndex
 
 
 # =====================================================================
@@ -28,9 +28,9 @@ from hulkrna.index import HulkIndex
 
 
 def _resolve(index, exons, introns=()):
-    """Create a Fragment and resolve it via C++ ResolveContext.
+    """Create a Fragment and resolve it via C++ FragmentResolver.
 
-    Returns the C++ ResolvedResult (or None for intergenic).
+    Returns the C++ ResolvedFragment (or None for intergenic).
     """
     frag = make_fragment(exons=tuple(exons), introns=tuple(introns))
     return resolve_fragment(frag, index)
@@ -56,7 +56,7 @@ class TestBufferedFragment:
             sj_strand=int(Strand.NONE),
             frag_lengths=np.array([250, 250], dtype=np.int32),
             num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
+            merge_criteria=int(MergeOutcome.INTERSECTION),
         )
         assert bf.is_same_strand is True
 
@@ -69,7 +69,7 @@ class TestBufferedFragment:
             sj_strand=int(Strand.NONE),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
+            merge_criteria=int(MergeOutcome.INTERSECTION),
         )
         assert bf.ambig_strand > 0
 
@@ -82,7 +82,7 @@ class TestBufferedFragment:
             sj_strand=int(Strand.NONE),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=3,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
+            merge_criteria=int(MergeOutcome.INTERSECTION),
         )
         assert bf.num_hits > 1
 
@@ -95,7 +95,7 @@ class TestBufferedFragment:
             sj_strand=int(Strand.NEG),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
+            merge_criteria=int(MergeOutcome.INTERSECTION),
         )
         assert bf.splice_type == int(SpliceType.SPLICED_ANNOT)
 
@@ -108,7 +108,7 @@ class TestBufferedFragment:
             sj_strand=int(Strand.NEG),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
+            merge_criteria=int(MergeOutcome.INTERSECTION),
         )
         assert bf.is_strand_qualified is True
 
@@ -121,7 +121,7 @@ class TestBufferedFragment:
             sj_strand=int(Strand.NEG),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
+            merge_criteria=int(MergeOutcome.INTERSECTION),
         )
         assert bf.is_strand_qualified is False
 
@@ -141,17 +141,17 @@ class TestBufferedFragment:
 
 
 # =====================================================================
-# NativeAccumulator -- direct C++ tests
+# FragmentAccumulator -- direct C++ tests
 # =====================================================================
 
 
-class TestNativeAccumulator:
-    """Test NativeAccumulator directly (no FragmentBuffer)."""
+class TestFragmentAccumulator:
+    """Test FragmentAccumulator directly (no FragmentBuffer)."""
 
     def test_append_and_size(self, mini_index):
-        from hulkrna._resolve_impl import NativeAccumulator
+        from hulkrna._resolve_impl import FragmentAccumulator
 
-        acc = NativeAccumulator()
+        acc = FragmentAccumulator()
         assert acc.size == 0
 
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
@@ -160,9 +160,9 @@ class TestNativeAccumulator:
         assert acc.size == 1
 
     def test_finalize_returns_dict(self, mini_index):
-        from hulkrna._resolve_impl import NativeAccumulator
+        from hulkrna._resolve_impl import FragmentAccumulator
 
-        acc = NativeAccumulator()
+        acc = FragmentAccumulator()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
 
@@ -174,9 +174,9 @@ class TestNativeAccumulator:
         assert "t_indices" in raw
 
     def test_finalize_multiple(self, mini_index):
-        from hulkrna._resolve_impl import NativeAccumulator
+        from hulkrna._resolve_impl import FragmentAccumulator
 
-        acc = NativeAccumulator()
+        acc = FragmentAccumulator()
 
         # Exon in g1 region -> hits t1, t2
         r1 = _resolve(mini_index, [_exon("chr1", 120, 180)])
@@ -272,7 +272,7 @@ class TestFragmentBufferBasic:
         assert chunks[2].size == 5
 
     def test_num_hits_preserved(self, mini_index):
-        """num_hits set on ResolvedResult should survive buffer round-trip."""
+        """num_hits set on ResolvedFragment should survive buffer round-trip."""
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         r.num_hits = 3
 
@@ -637,12 +637,12 @@ class TestIterChunks:
 
 
 # =====================================================================
-# ResolvedResult -- C++ object properties
+# ResolvedFragment -- C++ object properties
 # =====================================================================
 
 
-class TestResolvedResult:
-    """Test the C++ ResolvedResult object returned by resolve_fragment."""
+class TestResolvedFragment:
+    """Test the C++ ResolvedFragment object returned by resolve_fragment."""
 
     def test_t_inds_type(self, mini_index):
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hulkrna.gtf import GTF
+from hulkrna.gtf import GTFRecord
 from hulkrna.transcript import Transcript
 
 
@@ -18,11 +18,11 @@ def _lines_with_malformed_middle() -> list[str]:
 
 def test_gtf_parse_strict_raises_with_line_number():
     with pytest.raises(ValueError, match="line 2"):
-        list(GTF.parse(_lines_with_malformed_middle(), parse_mode="strict"))
+        list(GTFRecord.parse(_lines_with_malformed_middle(), parse_mode="strict"))
 
 
 def test_gtf_parse_warn_skip_continues():
-    rows = list(GTF.parse(_lines_with_malformed_middle(), parse_mode="warn-skip"))
+    rows = list(GTFRecord.parse(_lines_with_malformed_middle(), parse_mode="warn-skip"))
     assert len(rows) == 2
     assert all(r.feature == "exon" for r in rows)
 
@@ -32,9 +32,9 @@ def test_gtf_parse_file_strict_and_warn_skip(tmp_path: Path):
     gtf_path.write_text("".join(_lines_with_malformed_middle()))
 
     with pytest.raises(ValueError, match="line 2"):
-        list(GTF.parse_file(gtf_path, parse_mode="strict"))
+        list(GTFRecord.parse_file(gtf_path, parse_mode="strict"))
 
-    rows = list(GTF.parse_file(gtf_path, parse_mode="warn-skip"))
+    rows = list(GTFRecord.parse_file(gtf_path, parse_mode="warn-skip"))
     assert len(rows) == 2
 
 

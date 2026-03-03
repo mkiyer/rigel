@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..gtf import GTF
+from ..gtf import GTFRecord
 from ..transcript import Transcript
 from ..types import Interval, Strand
 
@@ -253,7 +253,7 @@ class GeneBuilder:
             for t in transcripts:
                 strand_str = Strand.to_str(t.strand)
                 for exon in t.exons:
-                    gtf_obj = GTF(
+                    gtf_obj = GTFRecord(
                         seqname=t.ref,
                         source="hulkrna_sim",
                         feature="exon",

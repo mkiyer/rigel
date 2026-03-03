@@ -143,7 +143,7 @@ class BenchmarkResult:
         return max(t.rel_error for t in self.transcripts)
 
     @property
-    def n_counted(self) -> float:
+    def n_quantified(self) -> float:
         """Total counts assigned by the pipeline."""
         return self.total_observed
 
@@ -155,8 +155,8 @@ class BenchmarkResult:
         return self.n_fragments / self.n_simulated
 
     @property
-    def counting_rate(self) -> float:
-        """Fraction of pipeline fragments that received a count."""
+    def quantification_rate(self) -> float:
+        """Fraction of pipeline fragments that received a quantification."""
         if self.n_fragments == 0:
             return 0.0
         return self.total_observed / self.n_fragments

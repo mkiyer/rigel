@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "hulkrna"
 version = "0.1.0"
-description = "Bayesian RNA-seq read counting tool"
+description = "Bayesian RNA-seq transcript quantification tool"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

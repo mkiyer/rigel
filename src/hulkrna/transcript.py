@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from .types import Interval, Strand
-from .gtf import GTF
+from .gtf import GTFRecord
 
 #: Interval for progress logging during GTF parsing.
 _GTF_LOG_INTERVAL: int = 100_000
@@ -126,7 +126,7 @@ class Transcript:
         transcripts: dict[str, Transcript] = {}
         logging.debug('[Transcript] Reading GTF file: %s', gtf_file)
         num_lines = 0
-        for f in GTF.parse_file(gtf_file, parse_mode=parse_mode):
+        for f in GTFRecord.parse_file(gtf_file, parse_mode=parse_mode):
             if f.feature != 'exon':
                 continue
             t_id = f.attrs['transcript_id']

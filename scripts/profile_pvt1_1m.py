@@ -141,7 +141,7 @@ def assign_abundances_from_file(transcripts, abundance_file: Path):
 
 
 def main():
-    from hulkrna.index import HulkIndex
+    from hulkrna.index import TranscriptIndex
     from hulkrna.pipeline import run_pipeline
     from hulkrna.sim import OracleBamSimulator, SimConfig
 
@@ -188,7 +188,7 @@ def main():
         print(f"BAM generated in {t1 - t0:.1f}s: {BAM_OUT}")
 
     # --- Load index ---
-    index = HulkIndex.load(str(INDEX_DIR))
+    index = TranscriptIndex.load(str(INDEX_DIR))
     print(f"\nIndex: {index.num_transcripts} transcripts, {index.num_genes} genes")
 
     # --- Profile pipeline ---

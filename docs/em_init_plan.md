@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-hulkrna is a three-pool EM-based RNA-seq counting pipeline that
+hulkrna is a three-pool EM-based RNA-seq quantification pipeline that
 separates mature RNA (mRNA), nascent RNA (nRNA), and genomic DNA
 (gDNA) contamination. The EM vector layout:
 

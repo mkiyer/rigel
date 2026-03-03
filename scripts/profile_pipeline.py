@@ -27,24 +27,24 @@ from hulkrna.buffer import FragmentBuffer
 from hulkrna.config import (
     EMConfig,
     PipelineConfig,
-    ScanConfig,
-    ScoringConfig,
+    BamScanConfig,
+    FragmentScoringConfig,
     TranscriptGeometry,
 )
 from hulkrna.estimator import AbundanceEstimator
 from hulkrna.frag_length_model import FragmentLengthModels
 from hulkrna.fragment import Fragment
-from hulkrna.index import HulkIndex
+from hulkrna.index import TranscriptIndex
 from hulkrna.locus import (
     build_loci,
     build_locus_em_data,
     compute_eb_gdna_priors,
     compute_nrna_init,
 )
-from hulkrna.pipeline import count_from_buffer, scan_and_buffer
+from hulkrna.pipeline import quant_from_buffer, scan_and_buffer
 from hulkrna.resolution import pair_multimapper_reads, resolve_fragment
-from hulkrna.scan import EmDataBuilder
-from hulkrna.scoring import ScoringContext
+from hulkrna.scan import FragmentRouter
+from hulkrna.scoring import FragmentScorer
 from hulkrna.stats import PipelineStats
 from hulkrna.strand_model import StrandModels
 
@@ -83,15 +83,15 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
     print(f"Index: {index_dir}")
     print()
 
-    scan = ScanConfig()
+    scan = BamScanConfig()
     em_config = EMConfig()
-    scoring_config = ScoringConfig()
+    scoring_config = FragmentScoringConfig()
 
     # ---------------------------------------------------------------
     # Stage 0: Load index
     # ---------------------------------------------------------------
     with Timer("Load index") as t0:
-        index = HulkIndex.load(index_dir)
+        index = TranscriptIndex.load(index_dir)
     print(f"[Stage 0] Load index: {t0.elapsed:.3f}s")
     print(f"  Transcripts: {index.num_transcripts:,}")
     print(f"  Genes:       {index.num_genes:,}")
@@ -108,7 +108,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
             sj_strand_tag = detected
         else:
             sj_strand_tag = ()
-    scan = ScanConfig(sj_strand_tag=sj_strand_tag)
+    scan = BamScanConfig(sj_strand_tag=sj_strand_tag)
     print(f"[Stage 1] Detect SJ strand tag: {t1.elapsed:.3f}s")
     print(f"  Tag(s): {sj_strand_tag}")
     print()
@@ -235,7 +235,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
     print()
 
     # ---------------------------------------------------------------
-    # Stage 4: count_from_buffer (EM + assignment) — decomposed
+    # Stage 4: quant_from_buffer (EM + assignment) — decomposed
     # ---------------------------------------------------------------
 
     # --- 4a: Compute geometry ---
@@ -278,7 +278,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
 
     # --- 4b: Create AbundanceEstimator ---
     with Timer("Create estimator") as t4b:
-        counter = AbundanceEstimator(
+        estimator = AbundanceEstimator(
             index.num_transcripts,
             index.num_genes,
             em_config=em_config,
@@ -286,39 +286,39 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
         )
     print(f"[Stage 4b] Create estimator: {t4b.elapsed:.3f}s")
 
-    # --- 4c: Build ScoringContext + scan buffer ---
-    with Timer("ScoringContext.from_models") as t4c_ctx:
-        ctx = ScoringContext.from_models(
+    # --- 4c: Build FragmentScorer + scan buffer ---
+    with Timer("FragmentScorer.from_models") as t4c_ctx:
+        ctx = FragmentScorer.from_models(
             strand_models,
             frag_length_models,
             index,
-            counter,
+            estimator,
             overhang_log_penalty=scoring_config.overhang_log_penalty,
             mismatch_log_penalty=scoring_config.mismatch_log_penalty,
             gdna_splice_penalties=scoring_config.gdna_splice_penalties,
         )
-    print(f"[Stage 4c-1] ScoringContext.from_models: {t4c_ctx.elapsed:.3f}s")
+    print(f"[Stage 4c-1] FragmentScorer.from_models: {t4c_ctx.elapsed:.3f}s")
 
-    with Timer("EmDataBuilder.scan") as t4c_scan:
-        builder = EmDataBuilder(
-            ctx, counter, stats, index, strand_models,
+    with Timer("FragmentRouter.scan") as t4c_scan:
+        builder = FragmentRouter(
+            ctx, estimator, stats, index, strand_models,
         )
         em_data = builder.scan(buffer, log_every=10_000)
-    print(f"[Stage 4c-2] EmDataBuilder.scan: {t4c_scan.elapsed:.3f}s")
+    print(f"[Stage 4c-2] FragmentRouter.scan: {t4c_scan.elapsed:.3f}s")
     print(f"  EM units:      {em_data.n_units:,}")
     print(f"  EM candidates: {em_data.n_candidates:,}")
 
     # --- 4d: Compute nRNA init ---
     with Timer("compute_nrna_init") as t4d:
         nrna_init = compute_nrna_init(
-            counter.transcript_intronic_sense,
-            counter.transcript_intronic_antisense,
+            estimator.transcript_intronic_sense,
+            estimator.transcript_intronic_antisense,
             geometry.transcript_spans,
             geometry.exonic_lengths,
             geometry.mean_frag,
             strand_models,
         )
-        counter.nrna_init = nrna_init
+        estimator.nrna_init = nrna_init
     print(f"[Stage 4d] compute_nrna_init: {t4d.elapsed:.3f}s")
 
     # --- 4e: Build loci ---
@@ -333,7 +333,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
     # --- 4f: Compute EB gDNA priors ---
     with Timer("compute_eb_gdna_priors") as t4f:
         gdna_inits = compute_eb_gdna_priors(
-            loci, em_data, counter, index, strand_models,
+            loci, em_data, estimator, index, strand_models,
         ) if loci else []
     print(f"[Stage 4f] compute_eb_gdna_priors: {t4f.elapsed:.3f}s")
 
@@ -352,7 +352,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
             # build_locus_em_data
             _ta = time.perf_counter()
             locus_em = build_locus_em_data(
-                locus, em_data, counter, index, geometry.mean_frag,
+                locus, em_data, estimator, index, geometry.mean_frag,
                 gdna_init=gdna_inits[i],
             )
             _tb = time.perf_counter()
@@ -361,7 +361,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
 
             # run_locus_em
             _ta = time.perf_counter()
-            theta, alpha = counter.run_locus_em(
+            theta, alpha = estimator.run_locus_em(
                 locus_em,
                 em_iterations=em_config.iterations,
                 em_convergence_delta=em_config.convergence_delta,
@@ -372,7 +372,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
 
             # assign_locus_ambiguous
             _ta = time.perf_counter()
-            gdna_assigned = counter.assign_locus_ambiguous(
+            gdna_assigned = estimator.assign_locus_ambiguous(
                 locus_em, theta,
                 confidence_threshold=em_config.confidence_threshold,
             )
@@ -419,8 +419,8 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
         ("Finalize models", t3.elapsed),
         ("Compute geometry", t4a.elapsed),
         ("Create estimator", t4b.elapsed),
-        ("ScoringContext", t4c_ctx.elapsed),
-        ("EmDataBuilder.scan", t4c_scan.elapsed),
+        ("FragmentScorer", t4c_ctx.elapsed),
+        ("FragmentRouter.scan", t4c_scan.elapsed),
         ("compute_nrna_init", t4d.elapsed),
         ("build_loci", t4e.elapsed),
         ("EB gDNA priors", t4f.elapsed),
@@ -451,7 +451,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
     # ---------------------------------------------------------------
     if enable_cprofile:
         print("=" * 72)
-        print("cProfile: Full pipeline run (scan_and_buffer + count_from_buffer)")
+        print("cProfile: Full pipeline run (scan_and_buffer + quant_from_buffer)")
         print("=" * 72)
         pr = cProfile.Profile()
 
@@ -468,7 +468,7 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
         sm3.finalize()
         flm3.finalize()
 
-        counter3 = count_from_buffer(
+        estimator3 = quant_from_buffer(
             buf3, index, sm3, flm3, stats3,
             em_config=em_config,
             scoring=scoring_config,

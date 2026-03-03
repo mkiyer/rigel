@@ -1,18 +1,18 @@
 """
-hulkrna.pipeline — Single-pass BAM counting pipeline with locus-level EM.
+hulkrna.pipeline — Single-pass BAM quantification pipeline with locus-level EM.
 
 Architecture
 ------------
 The pipeline reads the BAM file **once** via the C++ native BAM scanner
-(``_bam_impl``) and processes counts in two logical stages:
+(``_bam_impl``) and processes fragments in two logical stages:
 
 **BAM Scan** (``scan_and_buffer``): Parse all fragments in C++ via htslib,
 resolve each against the reference index, train strand and fragment-length
 models from unique-mapper fragments, and buffer all resolved fragments into
 a memory-efficient columnar buffer (``FragmentBuffer``).
 
-**Count Assignment** (``count_from_buffer``): Iterate the buffer once
-to assign unique counts, build CSR EM data (via ``scan.EmDataBuilder``),
+**Quantification** (``quant_from_buffer``): Iterate the buffer once
+to assign unique counts, build CSR EM data (via ``scan.FragmentRouter``),
 construct loci (via ``locus.build_loci``), compute Empirical Bayes gDNA
 priors, and run per-locus EM with ``2*n_t + 1`` components.
 
@@ -38,7 +38,7 @@ from .buffer import FragmentBuffer, _FinalizedChunk
 from .splice import SpliceType
 from .estimator import AbundanceEstimator
 from .types import ChimeraType, Strand
-from .index import HulkIndex
+from .index import TranscriptIndex
 from .frag_length_model import FragmentLengthModels
 from .stats import PipelineStats
 from .strand_model import StrandModels
@@ -46,7 +46,7 @@ from ._bam_impl import BamScanner as _NativeBamScanner
 from ._bam_impl import detect_sj_strand_tag as _native_detect_sj_tag
 
 # --- New modular imports ---
-from .scoring import ScoringContext
+from .scoring import FragmentScorer
 from .locus import (
     build_loci,
     build_locus_em_data,
@@ -54,12 +54,12 @@ from .locus import (
     compute_gdna_rate_from_strand,
     compute_eb_gdna_priors,
 )
-from .scan import EmDataBuilder
+from .scan import FragmentRouter
 from .config import (
     EMConfig,
     PipelineConfig,
-    ScanConfig,
-    ScoringConfig,
+    BamScanConfig,
+    FragmentScoringConfig,
     TranscriptGeometry,
 )
 
@@ -80,7 +80,7 @@ class PipelineResult:
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
-    """Convert ScanConfig.sj_strand_tag to the string spec for BamScanner."""
+    """Convert BamScanConfig.sj_strand_tag to the string spec for BamScanner."""
     if isinstance(sj_strand_tag, str):
         return sj_strand_tag if sj_strand_tag else "none"
     if isinstance(sj_strand_tag, (list, tuple)):
@@ -180,8 +180,8 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
 
 def scan_and_buffer(
     bam_path: str,
-    index: HulkIndex,
-    scan: "ScanConfig",
+    index: TranscriptIndex,
+    scan: "BamScanConfig",
 ) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
     """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
 
@@ -192,9 +192,9 @@ def scan_and_buffer(
     ----------
     bam_path : str
         Path to the name-sorted / collated BAM file.
-    index : HulkIndex
+    index : TranscriptIndex
         The loaded reference index.
-    scan : ScanConfig
+    scan : BamScanConfig
         BAM scanning and buffering configuration.
 
     Returns
@@ -217,7 +217,7 @@ def scan_and_buffer(
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 
     # Provide gene strand info for exonic fallback strand model training
-    resolve_ctx = index._resolve_ctx
+    resolve_ctx = index._resolver
     resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
@@ -317,34 +317,34 @@ def scan_and_buffer(
 
 
 # ---------------------------------------------------------------------------
-# Count from buffer (locus-level EM, no global EM)
+# Quantify from buffer (locus-level EM, no global EM)
 # ---------------------------------------------------------------------------
 
-def count_from_buffer(
+def quant_from_buffer(
     buffer: FragmentBuffer,
-    index: HulkIndex,
+    index: TranscriptIndex,
     strand_models: StrandModels,
     frag_length_models: FragmentLengthModels,
     stats: PipelineStats,
     *,
     em_config: EMConfig | None = None,
-    scoring: ScoringConfig | None = None,
+    scoring: FragmentScoringConfig | None = None,
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
 ) -> AbundanceEstimator:
-    """Assign counts from buffered fragments via locus-level EM.
+    """Quantify transcripts from buffered fragments via locus-level EM.
 
     Parameters
     ----------
     buffer : FragmentBuffer
-    index : HulkIndex
+    index : TranscriptIndex
     strand_models : StrandModels
     frag_length_models : FragmentLengthModels
     stats : PipelineStats
     em_config : EMConfig or None
         EM algorithm configuration.  Defaults to ``EMConfig()``.
-    scoring : ScoringConfig or None
-        Scoring penalty configuration.  Defaults to ``ScoringConfig()``.
+    scoring : FragmentScoringConfig or None
+        Scoring penalty configuration.  Defaults to ``FragmentScoringConfig()``.
     log_every : int
         Log progress every N fragments (default 1M).
     annotations : AnnotationTable or None
@@ -357,7 +357,7 @@ def count_from_buffer(
     if em_config is None:
         em_config = EMConfig()
     if scoring is None:
-        scoring = ScoringConfig()
+        scoring = FragmentScoringConfig()
 
     # --- Compute geometry ---
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
@@ -390,40 +390,40 @@ def count_from_buffer(
         transcript_spans=transcript_spans,
     )
 
-    counter = AbundanceEstimator(
+    estimator = AbundanceEstimator(
         index.num_transcripts,
         em_config=em_config,
         geometry=geometry,
     )
 
     logger.info(
-        f"[START] Counting {buffer.total_fragments:,} buffered fragments "
+        f"[START] Quantifying {buffer.total_fragments:,} buffered fragments "
         f"(locus-level EM: mRNA/nRNA/gDNA)"
     )
 
-    # --- Build ScoringContext and scan buffer ---
-    ctx = ScoringContext.from_models(
-        strand_models, frag_length_models, index, counter,
+    # --- Build FragmentScorer and scan buffer ---
+    ctx = FragmentScorer.from_models(
+        strand_models, frag_length_models, index, estimator,
         overhang_log_penalty=scoring.overhang_log_penalty,
         mismatch_log_penalty=scoring.mismatch_log_penalty,
         gdna_splice_penalties=scoring.gdna_splice_penalties,
     )
-    builder = EmDataBuilder(
-        ctx, counter, stats, index, strand_models,
+    builder = FragmentRouter(
+        ctx, estimator, stats, index, strand_models,
         annotations=annotations,
     )
     em_data = builder.scan(buffer, log_every)
 
     # --- Per-transcript nRNA init from intronic sense excess ---
     nrna_init = compute_nrna_init(
-        counter.transcript_intronic_sense,
-        counter.transcript_intronic_antisense,
+        estimator.transcript_intronic_sense,
+        estimator.transcript_intronic_antisense,
         geometry.transcript_spans,
         geometry.exonic_lengths,
         geometry.mean_frag,
         strand_models,
     )
-    counter.nrna_init = nrna_init
+    estimator.nrna_init = nrna_init
 
     ss = strand_models.strand_specificity
     if ss <= 0.6:
@@ -454,7 +454,7 @@ def count_from_buffer(
         )
 
         gdna_inits = compute_eb_gdna_priors(
-            loci, em_data, counter, index, strand_models,
+            loci, em_data, estimator, index, strand_models,
         )
 
         # Per-locus EM + posterior assignment
@@ -464,22 +464,22 @@ def count_from_buffer(
             if len(locus.unit_indices) == 0:
                 continue
             locus_em = build_locus_em_data(
-                locus, em_data, counter, index, geometry.mean_frag,
+                locus, em_data, estimator, index, geometry.mean_frag,
                 gdna_init=gdna_inits[i],
             )
-            theta, alpha = counter.run_locus_em(
+            theta, alpha = estimator.run_locus_em(
                 locus_em,
                 em_iterations=em_config.iterations,
                 em_convergence_delta=em_config.convergence_delta,
             )
-            gdna_assigned = counter.assign_locus_ambiguous(
+            gdna_assigned = estimator.assign_locus_ambiguous(
                 locus_em, theta,
                 confidence_threshold=em_config.confidence_threshold,
                 unit_annotations=_unit_ann_list,
             )
             total_gdna_em += gdna_assigned
 
-            counter.gdna_locus_results.append({
+            estimator.gdna_locus_results.append({
                 "locus_id": locus.locus_id,
                 "gdna_count": gdna_assigned,
             })
@@ -492,7 +492,7 @@ def count_from_buffer(
                     f"gDNA={gdna_assigned:.0f}"
                 )
 
-        counter._gdna_em_total = total_gdna_em
+        estimator._gdna_em_total = total_gdna_em
 
         # --- Map EM unit annotations to frag_ids ---
         if annotations is not None and _unit_ann_list:
@@ -523,16 +523,16 @@ def count_from_buffer(
         logger.info("[SKIP] No ambiguous fragments for EM")
 
     # --- Update stats ---
-    _gdna_em = counter.gdna_em_count
+    _gdna_em = estimator.gdna_em_count
     stats.n_gdna_em = 0 if (math.isnan(_gdna_em) or math.isinf(_gdna_em)) else int(_gdna_em)
 
     logger.info(
-        f"[gDNA] total={counter.gdna_total:.0f} "
+        f"[gDNA] total={estimator.gdna_total:.0f} "
         f"(EM={_gdna_em:.0f}), "
-        f"contamination rate={counter.gdna_contamination_rate:.2%}"
+        f"contamination rate={estimator.gdna_contamination_rate:.2%}"
     )
 
-    return counter
+    return estimator
 
 
 # ---------------------------------------------------------------------------
@@ -541,19 +541,19 @@ def count_from_buffer(
 
 def run_pipeline(
     bam_path,
-    index: HulkIndex,
+    index: TranscriptIndex,
     config: PipelineConfig | None = None,
 ) -> PipelineResult:
-    """Run the complete counting pipeline with locus-level EM.
+    """Run the complete quantification pipeline with locus-level EM.
 
     Opens the BAM **once** via the C++ BAM scanner, scans all fragments,
-    trains models, buffers resolved fragments, then counts via per-locus EM.
+    trains models, buffers resolved fragments, then quantifies via per-locus EM.
 
     Parameters
     ----------
     bam_path : str or Path
         Path to the name-sorted / collated BAM file.
-    index : HulkIndex
+    index : TranscriptIndex
         The loaded reference index.
     config : PipelineConfig or None
         Complete pipeline configuration.  If ``None``, uses defaults.
@@ -600,7 +600,7 @@ def run_pipeline(
         )
 
     try:
-        counter = count_from_buffer(
+        estimator = quant_from_buffer(
             buffer,
             index,
             strand_models,
@@ -631,5 +631,5 @@ def run_pipeline(
         stats=stats,
         strand_models=strand_models,
         frag_length_models=frag_length_models,
-        estimator=counter,
+        estimator=estimator,
     )

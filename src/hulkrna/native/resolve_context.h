@@ -1,9 +1,9 @@
 /**
- * resolve_context.h — ResolveContext, ResolvedResult, NativeAccumulator.
+ * resolve_context.h — FragmentResolver, ResolvedFragment, FragmentAccumulator.
  *
  * Extracted from resolve.cpp so that bam_scanner.cpp can call
  * _resolve_core() directly in C++ and accumulate results into
- * NativeAccumulator without crossing the Python boundary.
+ * FragmentAccumulator without crossing the Python boundary.
  *
  * Depends on constants.h and cgranges.h.
  */
@@ -37,10 +37,10 @@ namespace nb = nanobind;
 namespace hulk {
 
 // ================================================================
-// ResolvedResult — C++ result object exposed to Python
+// ResolvedFragment — C++ result object exposed to Python
 // ================================================================
 
-class ResolvedResult {
+class ResolvedFragment {
 public:
     std::vector<int32_t> t_inds;
     int32_t ambig_strand = 0;
@@ -128,9 +128,9 @@ public:
         return d;
     }
 
-    // Build from CoreResult (used by resolve_fragment and bam_scanner)
-    static ResolvedResult from_core(CoreResult& cr) {
-        ResolvedResult r;
+    // Build from RawResolveResult (used by resolve_fragment and bam_scanner)
+    static ResolvedFragment from_core(RawResolveResult& cr) {
+        ResolvedFragment r;
         r.t_inds = std::move(cr.t_inds);
         r.ambig_strand = cr.ambig_strand;
         r.splice_type = cr.splice_type;
@@ -157,10 +157,10 @@ public:
 };
 
 // ================================================================
-// NativeAccumulator — C++ columnar buffer replacing _AccumulatorChunk
+// FragmentAccumulator — C++ columnar buffer replacing _AccumulatorChunk
 // ================================================================
 
-class NativeAccumulator {
+class FragmentAccumulator {
 public:
     std::vector<uint8_t>  splice_type_;
     std::vector<uint8_t>  exon_strand_;
@@ -181,11 +181,11 @@ public:
     std::vector<uint16_t> nm_;
     int32_t size_ = 0;
 
-    NativeAccumulator() {
+    FragmentAccumulator() {
         t_offsets_.push_back(0);
     }
 
-    void append(const ResolvedResult& r, int64_t frag_id) {
+    void append(const ResolvedFragment& r, int64_t frag_id) {
         splice_type_.push_back(static_cast<uint8_t>(r.splice_type));
         exon_strand_.push_back(static_cast<uint8_t>(r.exon_strand));
         sj_strand_.push_back(static_cast<uint8_t>(r.sj_strand));
@@ -296,10 +296,10 @@ public:
 };
 
 // ================================================================
-// ResolveContext — holds all index data for C++ resolution
+// FragmentResolver — holds all index data for C++ resolution
 // ================================================================
 
-class ResolveContext {
+class FragmentResolver {
 public:
     // --- Overlap index (main cgranges) ---
     cgranges_t* cr_ = nullptr;
@@ -345,9 +345,9 @@ public:
     std::vector<int32_t> dirty_indices_;
 
     // ----------------------------------------------------------------
-    ResolveContext() = default;
+    FragmentResolver() = default;
 
-    ~ResolveContext() {
+    ~FragmentResolver() {
         if (cr_) cr_destroy(cr_);
         if (sj_cr_) cr_destroy(sj_cr_);
         free(buf_);
@@ -355,8 +355,8 @@ public:
     }
 
     // Non-copyable
-    ResolveContext(const ResolveContext&) = delete;
-    ResolveContext& operator=(const ResolveContext&) = delete;
+    FragmentResolver(const FragmentResolver&) = delete;
+    FragmentResolver& operator=(const FragmentResolver&) = delete;
 
     // ----------------------------------------------------------------
     // Ref-ID helpers
@@ -532,7 +532,7 @@ public:
 
         if (ref_id >= 0 && ref_id < static_cast<int32_t>(id_to_ref_.size())) {
             const char* ref_str = id_to_ref_[ref_id].c_str();
-            auto* self = const_cast<ResolveContext*>(this);
+            auto* self = const_cast<FragmentResolver*>(this);
             for (const auto& [gs, ge] : gaps) {
                 int64_t n = cr_overlap(sj_cr_, ref_str, gs, ge,
                                        &self->sj_buf_, &self->sj_buf_cap_);
@@ -629,7 +629,7 @@ public:
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
         int32_t genomic_footprint,
-        CoreResult& cr)
+        RawResolveResult& cr)
     {
         int n_exons = static_cast<int>(exons.size());
         if (n_exons == 0) return false;
@@ -916,7 +916,7 @@ public:
                           intron_ends[i], intron_strands[i]};
         }
 
-        CoreResult cr;
+        RawResolveResult cr;
         if (!_resolve_core(exons, introns, genomic_footprint, cr))
             return nb::none();
 
@@ -953,7 +953,7 @@ public:
     }
 
     // ================================================================
-    // resolve_fragment — accepts Python Fragment, returns ResolvedResult
+    // resolve_fragment — accepts Python Fragment, returns ResolvedFragment
     // ================================================================
 
     nb::object resolve_fragment(nb::object frag) {
@@ -992,11 +992,11 @@ public:
         int32_t genomic_footprint = nb::cast<int32_t>(
             frag.attr("genomic_footprint"));
 
-        CoreResult cr;
+        RawResolveResult cr;
         if (!_resolve_core(exons, introns, genomic_footprint, cr))
             return nb::none();
 
-        return nb::cast(ResolvedResult::from_core(cr));
+        return nb::cast(ResolvedFragment::from_core(cr));
     }
 };
 

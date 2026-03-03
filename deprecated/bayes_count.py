@@ -53,7 +53,7 @@ import pandas as pd
 from .core import Strand, IntervalType
 from .core import CountCategory, CountStrand, CountType
 from .strand_model import StrandModel
-from .index import HulkIndex, merge_sets_with_relaxation
+from .index import TranscriptIndex, merge_sets_with_relaxation
 from .fragment import Fragment
 
 
@@ -96,7 +96,7 @@ class BayesCounter:
 
     Parameters
     ----------
-    txindex : HulkIndex
+    txindex : TranscriptIndex
         The transcript/gene index with interval trees and splice junction map.
     strand_model : StrandModel
         The learned strand model from Pass 1.
@@ -108,7 +108,7 @@ class BayesCounter:
 
     def __init__(
         self,
-        txindex: HulkIndex,
+        txindex: TranscriptIndex,
         strand_model: StrandModel,
         abundance_prior: Optional[np.ndarray] = None,
         abundance_pseudocount: float = 1.0,

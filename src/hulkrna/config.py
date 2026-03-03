@@ -64,7 +64,7 @@ class EMConfig:
 
 
 @dataclass(frozen=True)
-class ScoringConfig:
+class FragmentScoringConfig:
     """Configuration for fragment scoring penalties.
 
     All penalties are in log-space.  ``None`` means use the module
@@ -91,7 +91,7 @@ class ScoringConfig:
 
 
 @dataclass(frozen=True)
-class ScanConfig:
+class BamScanConfig:
     """Configuration for the BAM scanning and buffering stage.
 
     Parameters
@@ -141,8 +141,8 @@ class PipelineConfig:
     """
 
     em: EMConfig = field(default_factory=EMConfig)
-    scan: ScanConfig = field(default_factory=ScanConfig)
-    scoring: ScoringConfig = field(default_factory=ScoringConfig)
+    scan: BamScanConfig = field(default_factory=BamScanConfig)
+    scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     annotated_bam_path: str | Path | None = None
 
 
@@ -155,8 +155,8 @@ class PipelineConfig:
 class TranscriptGeometry:
     """Pre-computed transcript/gene geometry for the EM solver.
 
-    Computed once from ``HulkIndex`` + ``FragmentLengthModels`` at the
-    start of ``count_from_buffer``.  Not user-configurable — these are
+    Computed once from ``TranscriptIndex`` + ``FragmentLengthModels`` at the
+    start of ``quant_from_buffer``.  Not user-configurable — these are
     derived from the reference and trained models.
 
     Parameters

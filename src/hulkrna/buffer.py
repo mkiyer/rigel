@@ -9,7 +9,7 @@ with LZ4 compression.
 
 Memory efficiency vs. Python objects::
 
-    ResolvedResult objects:   ~580-640 bytes per fragment
+    ResolvedFragment objects:   ~580-640 bytes per fragment
     Columnar buffer:           ~40-50 bytes per fragment  (15× reduction)
 
 Architecture
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["FragmentBuffer", "BufferedFragment"]
 
-from ._resolve_impl import NativeAccumulator, ResolvedResult
+from ._resolve_impl import FragmentAccumulator, ResolvedFragment
 
 # Fragment classification constants used by fragment_classes property
 FRAG_UNIQUE: int = 0          # same-strand, 1 transcript, NH=1
@@ -57,7 +57,7 @@ FRAG_CHIMERIC: int = 4        # chimeric fragment (disjoint transcript sets)
 class BufferedFragment:
     """Lightweight view into a columnar buffer chunk.
 
-    Provides the same duck-typed interface as ``ResolvedResult`` so
+    Provides the same duck-typed interface as ``ResolvedFragment`` so
     that ``AbundanceEstimator.assign_unique`` and the EM scoring functions
     work without modification.
 
@@ -316,7 +316,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
 class FragmentBuffer:
     """Columnar buffer for resolved fragments with disk-spill support.
 
-    Accumulates ``ResolvedResult`` data during the BAM scan into
+    Accumulates ``ResolvedFragment`` data during the BAM scan into
     compact NumPy chunks.  When total in-memory size exceeds
     *max_memory_bytes*, the oldest chunk is spilled to disk as an
     Arrow IPC (Feather v2) file with LZ4 compression.
@@ -326,7 +326,7 @@ class FragmentBuffer:
     ``BufferedFragment``) or :meth:`iter_chunks` (yields
     ``_FinalizedChunk``).
 
-    After counting is complete, call :meth:`cleanup` (or use the
+    After quantification is complete, call :meth:`cleanup` (or use the
     context-manager protocol) to remove spilled files.
 
     Parameters
@@ -366,7 +366,7 @@ class FragmentBuffer:
         self._spill_dir = spill_dir
         self._temp_dir: str | None = None
 
-        self._native_acc = NativeAccumulator()
+        self._native_acc = FragmentAccumulator()
         self._chunks: list[_FinalizedChunk | Path] = []
         self._total_size = 0
         self._memory_bytes = 0
@@ -401,7 +401,7 @@ class FragmentBuffer:
 
         Parameters
         ----------
-        resolved : ResolvedResult
+        resolved : ResolvedFragment
             The resolved fragment to buffer (C++ native result).
         frag_id : int
             Fragment identifier for grouping multimapper alignments.
@@ -455,7 +455,7 @@ class FragmentBuffer:
         self._total_size += chunk.size
         self._memory_bytes += chunk.memory_bytes
         self._chunks.append(chunk)
-        self._native_acc = NativeAccumulator()
+        self._native_acc = FragmentAccumulator()
 
         # Spill if over memory budget
         if self.max_memory_bytes > 0:

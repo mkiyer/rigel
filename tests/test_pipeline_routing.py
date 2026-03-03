@@ -15,8 +15,8 @@ from hulkrna.splice import SpliceType
 from hulkrna.config import EMConfig
 from hulkrna.estimator import AbundanceEstimator
 from hulkrna.frag_length_model import FragmentLengthModels
-from hulkrna.scoring import ScoringContext
-from hulkrna.scan import EmDataBuilder
+from hulkrna.scoring import FragmentScorer
+from hulkrna.scan import FragmentRouter
 from hulkrna.stats import PipelineStats
 from hulkrna.strand_model import StrandModels
 from hulkrna.types import Strand
@@ -88,26 +88,26 @@ def _make_env(index):
         strand_models.exonic_spliced.observe(Strand.POS, Strand.POS)
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
-    counter = AbundanceEstimator(index.num_transcripts,
+    estimator = AbundanceEstimator(index.num_transcripts,
                                   em_config=EMConfig(seed=1))
     stats = PipelineStats()
-    return strand_models, frag_length_models, counter, stats
+    return strand_models, frag_length_models, estimator, stats
 
 
 def _scan_em_data(
-    buffer, index, strand_models, frag_length_models, counter, stats,
+    buffer, index, strand_models, frag_length_models, estimator, stats,
     log_every=1_000_000, *, gdna_splice_penalties=None,
     overhang_log_penalty=None, mismatch_log_penalty=None, annotations=None,
 ):
-    """Build EM data from a buffer using ScoringContext + EmDataBuilder."""
-    ctx = ScoringContext.from_models(
-        strand_models, frag_length_models, index, counter,
+    """Build EM data from a buffer using FragmentScorer + FragmentRouter."""
+    ctx = FragmentScorer.from_models(
+        strand_models, frag_length_models, index, estimator,
         overhang_log_penalty=overhang_log_penalty,
         mismatch_log_penalty=mismatch_log_penalty,
         gdna_splice_penalties=gdna_splice_penalties,
     )
-    builder = EmDataBuilder(
-        ctx, counter, stats, index, strand_models,
+    builder = FragmentRouter(
+        ctx, estimator, stats, index, strand_models,
         annotations=annotations,
     )
     return builder.scan(buffer, log_every)
@@ -119,7 +119,7 @@ def test_multimapper_spliced_annot_skips_shadows():
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, frag_length_models, counter, stats = _make_env(index)
+    strand_models, frag_length_models, estimator, stats = _make_env(index)
 
     bfs = [
         _BF(
@@ -153,7 +153,7 @@ def test_multimapper_spliced_annot_skips_shadows():
         index,
         strand_models,
         frag_length_models,
-        counter,
+        estimator,
         stats,
         log_every=1_000_000,
     )
@@ -175,7 +175,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, frag_length_models, counter, stats = _make_env(index)
+    strand_models, frag_length_models, estimator, stats = _make_env(index)
 
     bfs = [
         _BF(
@@ -209,7 +209,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
         index,
         strand_models,
         frag_length_models,
-        counter,
+        estimator,
         stats,
         log_every=1_000_000,
     )
@@ -229,7 +229,7 @@ def test_route_counters_are_exclusive_per_unit():
         t_to_strand=[int(Strand.POS), int(Strand.POS), int(Strand.NEG)],
         g_to_strand=[int(Strand.POS), int(Strand.NEG)],
     )
-    strand_models, frag_length_models, counter, stats = _make_env(index)
+    strand_models, frag_length_models, estimator, stats = _make_env(index)
 
     bfs = [
         # Deterministic unique: FRAG_UNIQUE + SPLICED_ANNOT
@@ -270,7 +270,7 @@ def test_route_counters_are_exclusive_per_unit():
         index,
         strand_models,
         frag_length_models,
-        counter,
+        estimator,
         stats,
         log_every=1_000_000,
     )
@@ -306,7 +306,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
         g_to_strand=[int(Strand.POS), int(Strand.POS)],
     )
-    strand_models, frag_length_models, counter, stats = _make_env(index)
+    strand_models, frag_length_models, estimator, stats = _make_env(index)
 
     # Hit A: maps to t0 with NM=0
     bf_a = _BF(
@@ -340,12 +340,12 @@ def test_nm_penalty_discriminates_multimapper_hits():
 
     em = _scan_em_data(
         buffer, index, strand_models, frag_length_models,
-        counter, stats, log_every=1_000_000,
+        estimator, stats, log_every=1_000_000,
     )
 
     assert em.n_units == 1
     # Both transcripts should be candidates
-    mRNA_mask = em.t_indices < counter.nrna_base_index
+    mRNA_mask = em.t_indices < estimator.nrna_base_index
     mRNA_t = em.t_indices[mRNA_mask]
     mRNA_ll = em.log_liks[mRNA_mask]
     assert len(mRNA_t) == 2
@@ -370,8 +370,8 @@ def test_nm_penalty_zero_when_disabled():
         t_to_strand=[int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, frag_length_models, counter_a, stats_a = _make_env(index)
-    _, _, counter_b, stats_b = _make_env(index)
+    strand_models, frag_length_models, estimator_a, stats_a = _make_env(index)
+    _, _, estimator_b, stats_b = _make_env(index)
 
     bf_nm0 = _BF(
         t_inds=np.array([0], dtype=np.int32),
@@ -403,12 +403,12 @@ def test_nm_penalty_zero_when_disabled():
 
     em_a = _scan_em_data(
         _Buffer([chunk_a]), index, strand_models, frag_length_models,
-        counter_a, stats_a, log_every=1_000_000,
+        estimator_a, stats_a, log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,
     )
     em_b = _scan_em_data(
         _Buffer([chunk_b]), index, strand_models, frag_length_models,
-        counter_b, stats_b, log_every=1_000_000,
+        estimator_b, stats_b, log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,
     )
 

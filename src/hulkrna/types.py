@@ -138,10 +138,10 @@ class IntervalType(IntEnum):
 
 
 # ---------------------------------------------------------------------------
-# RefInterval
+# AnnotatedInterval
 # ---------------------------------------------------------------------------
 
-class RefInterval(NamedTuple):
+class AnnotatedInterval(NamedTuple):
     """A reference-annotated genomic interval with index metadata.
 
     Used for both tiling intervals (EXON/TRANSCRIPT/INTERGENIC in the
@@ -161,7 +161,7 @@ class RefInterval(NamedTuple):
 # Merge criteria and result types
 # ---------------------------------------------------------------------------
 
-class MergeCriteria(IntEnum):
+class MergeOutcome(IntEnum):
     """Which relaxation level succeeded in progressive set merging.
 
     During fragment resolution, transcript/gene index sets from

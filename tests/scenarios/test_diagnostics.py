@@ -6,7 +6,7 @@ rather than full sweep-based scenarios.
 
 import pytest
 
-from hulkrna.config import EMConfig, PipelineConfig, ScanConfig
+from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
 from hulkrna.pipeline import run_pipeline
 from hulkrna.sim import Scenario, run_benchmark
 
@@ -44,7 +44,7 @@ class TestIsoformCollapse:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=ScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="ts"),
                 ),
             )
             bench = run_benchmark(result, pr, scenario_name="iso_1_1")
@@ -78,7 +78,7 @@ class TestIsoformCollapse:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=ScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="ts"),
                 ),
             )
             bench = run_benchmark(result, pr,
@@ -119,7 +119,7 @@ class TestUnsplicedLowStrand:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=ScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="ts"),
                 ),
             )
             bench = run_benchmark(result, pr, scenario_name=f"ss_{ss}")
@@ -150,7 +150,7 @@ class TestUnsplicedLowStrand:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=ScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="ts"),
                 ),
             )
             bench = run_benchmark(result, pr,

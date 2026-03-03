@@ -96,12 +96,12 @@ _POST_PRUNE_ITERS = 10
 
 
 # ======================================================================
-# ScanData - pre-computed CSR arrays for vectorized EM
+# ScoredFragments - pre-computed CSR arrays for vectorized EM
 # ======================================================================
 
 
 @dataclass(slots=True)
-class ScanData:
+class ScoredFragments:
     """Fragment-level candidate data from the BAM scan pass.
 
     Contains pre-computed CSR (compressed sparse row) arrays linking
@@ -109,7 +109,7 @@ class ScanData:
     their log-likelihoods.  Produced by ``_scan_and_build_em_data()``
     and consumed during locus EM construction.
 
-    The global ScanData contains mRNA + nRNA candidates only (NO gDNA).
+    The global ScoredFragments contains mRNA + nRNA candidates only (NO gDNA).
     gDNA candidates are added per-locus during locus EM construction.
 
     Attributes

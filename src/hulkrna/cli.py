@@ -5,7 +5,7 @@ Entry point: ``hulkrna`` (registered in pyproject.toml).
 
 Subcommands:
     hulkrna index   — Build reference index from FASTA + GTF
-    hulkrna count   — Single-pass Bayesian fragment abundance estimation
+    hulkrna quant   — Single-pass Bayesian fragment abundance estimation
     hulkrna sim     — Generate synthetic test scenarios
 """
 
@@ -30,7 +30,7 @@ def get_version() -> str:
 
 def index_command(args: argparse.Namespace) -> int:
     """Run the ``hulkrna index`` subcommand."""
-    from .index import HulkIndex
+    from .index import TranscriptIndex
 
     fasta = Path(args.fasta_file)
     gtf = Path(args.gtf_file)
@@ -40,7 +40,7 @@ def index_command(args: argparse.Namespace) -> int:
     if not gtf.exists():
         sys.exit(f"Error: GTF file not found: {gtf}")
 
-    HulkIndex.build(
+    TranscriptIndex.build(
         fasta_file=fasta,
         gtf_file=gtf,
         output_dir=args.output_dir,
@@ -51,16 +51,16 @@ def index_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def count_command(args: argparse.Namespace) -> int:
-    """Run the ``hulkrna count`` subcommand.
+def quant_command(args: argparse.Namespace) -> int:
+    """Run the ``hulkrna quant`` subcommand.
 
     Single-pass pipeline: scan BAM, resolve fragments, train
-    strand/insert models, then assign counts via unified EM.
+    strand/insert models, then quantify via unified EM.
     """
     import json
-    from .index import HulkIndex
+    from .index import TranscriptIndex
     from .pipeline import run_pipeline
-    from .config import EMConfig, PipelineConfig, ScanConfig, ScoringConfig
+    from .config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
     from .scoring import (
         overhang_alpha_to_log_penalty,
         GDNA_SPLICE_PENALTIES,
@@ -96,15 +96,15 @@ def count_command(args: argparse.Namespace) -> int:
     # Define output file paths
     strand_json = output_dir / "strand_model.json"
     fl_json = output_dir / "frag_length_models.json"
-    counts_path = output_dir / "counts.feather"
-    gene_counts_path = output_dir / "gene_counts.feather"
-    detail_path = output_dir / "counts_detail.feather"
+    quant_path = output_dir / "quant.feather"
+    gene_quant_path = output_dir / "gene_quant.feather"
+    detail_path = output_dir / "quant_detail.feather"
     stats_path = output_dir / "stats.json"
     config_path = output_dir / "config.json"
 
     # Load reference index
     logging.info(f"[START] Loading index from {index_dir}")
-    index = HulkIndex.load(index_dir)
+    index = TranscriptIndex.load(index_dir)
     logging.info(f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
                  f"{index.num_genes} genes")
 
@@ -117,7 +117,7 @@ def count_command(args: argparse.Namespace) -> int:
 
     # Write config file with all parameters
     config = {
-        "command": "hulkrna count",
+        "command": "hulkrna quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "parameters": {
             "bam_file": str(bam_path.resolve()),
@@ -156,12 +156,12 @@ def count_command(args: argparse.Namespace) -> int:
             convergence_delta=args.em_convergence_delta,
             confidence_threshold=args.confidence_threshold,
         ),
-        scan=ScanConfig(
+        scan=BamScanConfig(
             skip_duplicates=not args.keep_duplicates,
             include_multimap=args.include_multimap,
             sj_strand_tag=sj_strand_tag,
         ),
-        scoring=ScoringConfig(
+        scoring=FragmentScoringConfig(
             overhang_log_penalty=overhang_log_penalty,
             mismatch_log_penalty=mismatch_log_penalty,
             gdna_splice_penalties=gdna_splice_penalties,
@@ -181,25 +181,25 @@ def count_command(args: argparse.Namespace) -> int:
     result.strand_models.write_json(strand_json)
     result.frag_length_models.write_json(fl_json)
 
-    # Write count tables
-    counter = result.estimator
-    counts_df = counter.get_counts_df(index)
-    gene_counts_df = counter.get_gene_counts_df(index)
-    detail_df = counter.get_detail_df(index)
+    # Write quant tables
+    estimator = result.estimator
+    quant_df = estimator.get_counts_df(index)
+    gene_quant_df = estimator.get_gene_counts_df(index)
+    detail_df = estimator.get_detail_df(index)
 
-    counts_df.to_feather(str(counts_path))
-    gene_counts_df.to_feather(str(gene_counts_path))
+    quant_df.to_feather(str(quant_path))
+    gene_quant_df.to_feather(str(gene_quant_path))
     detail_df.to_feather(str(detail_path))
-    logging.info(f"[DONE] Wrote {counts_path}, {gene_counts_path}, "
+    logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, "
                  f"{detail_path}")
 
     # Write TSV mirrors if requested
     if not args.no_tsv:
-        counts_df.to_csv(
-            counts_path.with_suffix(".tsv"), sep="\t", index=False
+        quant_df.to_csv(
+            quant_path.with_suffix(".tsv"), sep="\t", index=False
         )
-        gene_counts_df.to_csv(
-            gene_counts_path.with_suffix(".tsv"), sep="\t", index=False
+        gene_quant_df.to_csv(
+            gene_quant_path.with_suffix(".tsv"), sep="\t", index=False
         )
         detail_df.to_csv(
             detail_path.with_suffix(".tsv"), sep="\t", index=False
@@ -325,62 +325,62 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.set_defaults(func=index_command)
 
-    # --- COUNT ---------------------------------------------------------------
-    cnt = subparsers.add_parser(
-        "count", help="Count reads: model training (Pass 1) + count assignment (Pass 2)",
+    # --- QUANT ---------------------------------------------------------------
+    quant_parser = subparsers.add_parser(
+        "quant", help="Quantify transcripts: model training (Pass 1) + abundance estimation (Pass 2)",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--bam", dest="bam_file", required=True,
         help="Name-sorted or collated BAM file (with NH tag)",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--index", dest="index_dir", required=True,
         help="Directory containing hulkrna index files",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "-o", "--output-dir", dest="output_dir", required=True,
-        help="Output directory for counts and models",
+        help="Output directory for quantification results and models",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--keep-duplicates", dest="keep_duplicates",
         action="store_true", default=False,
         help="Keep reads marked as PCR/optical duplicates (default: discard)",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--include-multimap", dest="include_multimap",
         action="store_true", default=False,
         help="Include multimapping reads in output (default: discard). "
              "Detected via NH tag (STAR) or secondary BAM flag (minimap2).",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--sj-strand-tag", dest="sj_strand_tag",
         nargs="+", default=["auto"],
         help="BAM tag(s) for splice-junction strand. 'auto' (default) "
              "detects the tag from the BAM. Use 'XS' for STAR, 'ts' for "
              "minimap2, or list multiple to check in order (e.g. XS ts).",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--seed", dest="seed", type=int, default=None,
         help="Random seed for reproducibility (default: use current timestamp)",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--em-prior-alpha", dest="em_prior_alpha", type=float, default=0.01,
         help="Flat Dirichlet pseudocount per eligible EM component "
              "(default: 0.01).  Provides baseline regularisation "
              "independent of coverage geometry.",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--em-prior-gamma", dest="em_prior_gamma", type=float, default=1.0,
         help="OVR prior scale factor (gamma).  Default 1.0.  "
              "Controls how strongly coverage-weighted One Virtual Read "
              "priors influence the EM.",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--em-iterations", dest="em_iterations", type=int, default=1000,
         help="Maximum EM iterations for ambiguous fragment resolution "
-             "(default: 1000). Set to 0 for unique-only counting.",
+             "(default: 1000). Set to 0 for unique-only quantification.",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--em-convergence-delta", dest="em_convergence_delta",
         type=float, default=1e-6,
         help="(Advanced) Convergence threshold for EM parameter updates "
@@ -388,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
              "speedup with negligible accuracy impact.",
     )
     from .scoring import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--gdna-splice-penalty-unannot",
         dest="gdna_splice_penalty_unannot",
         type=float,
@@ -400,15 +400,15 @@ def build_parser() -> argparse.ArgumentParser:
             "spliced reads."
         ),
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--confidence-threshold", dest="confidence_threshold",
         type=float, default=0.95,
         help="Minimum RNA-normalized posterior for an EM assignment "
-             "to be counted as high-confidence (default: 0.95). "
+             "to be considered high-confidence (default: 0.95). "
              "Affects the count_high_conf column.",
     )
     from .scoring import DEFAULT_OVERHANG_ALPHA, DEFAULT_MISMATCH_ALPHA
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--overhang-alpha", dest="overhang_alpha",
         type=float, default=DEFAULT_OVERHANG_ALPHA,
         help=(
@@ -419,7 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
             "0 = hard binary gate, 1 = off (no penalty)."
         ),
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--mismatch-alpha", dest="mismatch_alpha",
         type=float, default=DEFAULT_MISMATCH_ALPHA,
         help=(
@@ -430,18 +430,18 @@ def build_parser() -> argparse.ArgumentParser:
             "0 = hard binary gate, 1 = off (no penalty)."
         ),
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--no-tsv", dest="no_tsv", action="store_true", default=False,
-        help="Skip writing human-readable TSV count files",
+        help="Skip writing human-readable TSV quant files",
     )
-    cnt.add_argument(
+    quant_parser.add_argument(
         "--annotated-bam", dest="annotated_bam", default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
              "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path. "
              "Enables read-level introspection of pipeline decisions. "
              "Requires a second BAM pass (modest runtime overhead).",
     )
-    cnt.set_defaults(func=count_command)
+    quant_parser.set_defaults(func=quant_command)
 
     # --- SIM -----------------------------------------------------------------
     sim = subparsers.add_parser(

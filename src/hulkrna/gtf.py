@@ -13,7 +13,7 @@ AttrValue = str | list[str]
 
 
 @dataclass(slots=True)
-class GTF:
+class GTFRecord:
     """
     Represents a single line in a GTF file
     """
@@ -140,7 +140,7 @@ class GTF:
             if not line or line.startswith('#'):
                 continue
             try:
-                yield GTF.from_str(line)
+                yield GTFRecord.from_str(line)
             except ValueError as e:
                 if parse_mode == "strict":
                     raise ValueError(
@@ -195,4 +195,4 @@ class GTF:
         
         open_func = gzip.open if filepath.suffix == '.gz' else open    
         with open_func(filepath, 'rt') as f:
-            yield from GTF.parse(f, parse_mode=parse_mode)
+            yield from GTFRecord.parse(f, parse_mode=parse_mode)
