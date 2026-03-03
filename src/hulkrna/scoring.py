@@ -235,28 +235,31 @@ class ScoringContext:
             _t_exon_data=t_exon_data,
         )
 
-        # Build native C++ scoring context for hot-path acceleration
-        try:
-            from hulkrna._scoring_impl import NativeScoringContext
-            native_ctx = NativeScoringContext(
-                log_p_sense=ctx.log_p_sense,
-                log_p_antisense=ctx.log_p_antisense,
-                anti_flag=ctx.anti_flag,
-                overhang_log_penalty=ctx.overhang_log_penalty,
-                mismatch_log_penalty=ctx.mismatch_log_penalty,
-                fl_log_prob=ctx.fl_log_prob,
-                fl_max_size=ctx.fl_max_size,
-                fl_tail_base=ctx.fl_tail_base,
-                t_strand_arr=ctx.t_strand_arr,
-                t_length_arr=ctx.t_length_arr,
-                t_span_arr=ctx.t_span_arr,
-                t_start_arr=ctx.t_start_arr,
-                nrna_base=ctx.nrna_base,
-                t_exon_data=ctx._t_exon_data,
-            )
-            object.__setattr__(ctx, '_native_ctx', native_ctx)
-        except (ImportError, AttributeError, TypeError, ValueError):
-            object.__setattr__(ctx, '_native_ctx', None)
+        # Build native C++ scoring context for hot-path acceleration.
+        # Cast arrays to exact dtypes expected by the C++ nanobind binding
+        # to tolerate callers (including test mocks) that provide int64 etc.
+        from hulkrna._scoring_impl import NativeScoringContext
+        native_ctx = NativeScoringContext(
+            log_p_sense=float(ctx.log_p_sense),
+            log_p_antisense=float(ctx.log_p_antisense),
+            anti_flag=bool(ctx.anti_flag),
+            overhang_log_penalty=float(ctx.overhang_log_penalty),
+            mismatch_log_penalty=float(ctx.mismatch_log_penalty),
+            fl_log_prob=ctx.fl_log_prob,
+            fl_max_size=int(ctx.fl_max_size),
+            fl_tail_base=float(ctx.fl_tail_base),
+            t_strand_arr=np.ascontiguousarray(
+                ctx.t_strand_arr, dtype=np.int8),
+            t_length_arr=np.ascontiguousarray(
+                ctx.t_length_arr, dtype=np.int32),
+            t_span_arr=np.ascontiguousarray(
+                ctx.t_span_arr, dtype=np.int32),
+            t_start_arr=np.ascontiguousarray(
+                ctx.t_start_arr, dtype=np.int32),
+            nrna_base=int(ctx.nrna_base),
+            t_exon_data=ctx._t_exon_data,
+        )
+        object.__setattr__(ctx, '_native_ctx', native_ctx)
 
         return ctx
 

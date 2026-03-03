@@ -65,16 +65,16 @@ class _Index:
     def __init__(self, t_to_g, t_to_strand, g_to_strand):
         import pandas as pd
         self.t_to_g_arr = np.array(t_to_g, dtype=np.int64)
-        self.t_to_strand_arr = np.array(t_to_strand, dtype=np.int64)
-        self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int64)
+        self.t_to_strand_arr = np.array(t_to_strand, dtype=np.int8)
+        self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int8)
         self.num_transcripts = len(t_to_g)
         self.num_genes = len(g_to_strand)
         self.t_df = pd.DataFrame({
             "t_id": [f"t{i}" for i in range(self.num_transcripts)],
             "ref": ["chr1"] * self.num_transcripts,
-            "start": [0] * self.num_transcripts,
-            "end": [10000] * self.num_transcripts,
-            "length": [1000] * self.num_transcripts,
+            "start": np.zeros(self.num_transcripts, dtype=np.int32),
+            "end": np.full(self.num_transcripts, 10000, dtype=np.int32),
+            "length": np.full(self.num_transcripts, 1000, dtype=np.int32),
         })
 
     def get_exon_intervals(self, t_idx):

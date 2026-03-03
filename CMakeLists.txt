@@ -164,3 +164,17 @@ else()
                  "Install htslib (conda install -c conda-forge htslib) "
                  "for native BAM scanning.")
 endif()
+
+# --- Build the _em_impl extension ---------------------------------------------
+
+# C++ EM solver — replaces the Python EM hot path (_em_step, _vbem_step,
+# _build_equiv_classes, SQUAREM loop) with a single native call.
+# Pure C++17 + nanobind + numpy, no external dependencies.
+nanobind_add_module(
+  _em_impl
+  NOMINSIZE
+  STABLE_ABI
+  src/hulkrna/native/em_solver.cpp
+)
+
+install(TARGETS _em_impl LIBRARY DESTINATION hulkrna)

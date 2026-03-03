@@ -18,6 +18,7 @@ from hulkrna.estimator import (
     Locus,
     LocusEMInput,
 )
+from hulkrna.index import HulkIndex
 
 # ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)
@@ -78,6 +79,64 @@ def mini_fasta_file(tmp_path: Path) -> Path:
     pysam.faidx(str(fasta_path))
 
     return fasta_path
+
+
+# ---------------------------------------------------------------------------
+# Shared index builder (used by test_buffer, test_resolution, etc.)
+# ---------------------------------------------------------------------------
+
+
+def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
+    """Build a HulkIndex from a GTF string (session/module-scoped helper).
+
+    Parameters
+    ----------
+    tmp_path_factory : pytest.TempPathFactory
+        Pytest factory for session/module-scoped temp dirs.
+    gtf_text : str
+        GTF content string (GENCODE-style, 1-based inclusive).
+    genome_size : int
+        Length of chr1 in the synthetic FASTA (default: 2000).
+    name : str
+        Sub-directory name for this index (keeps separate indexes apart).
+
+    Returns
+    -------
+    HulkIndex
+        Loaded index with C++ ResolveContext ready.
+    """
+    import pysam
+
+    base = tmp_path_factory.mktemp(name)
+    gtf_path = base / "test.gtf"
+    gtf_path.write_text(gtf_text)
+
+    fasta_path = base / "genome.fa"
+    with open(fasta_path, "w") as f:
+        f.write(">chr1\n")
+        seq = "N" * genome_size
+        for i in range(0, len(seq), 80):
+            f.write(seq[i : i + 80] + "\n")
+    pysam.faidx(str(fasta_path))
+
+    idx_dir = base / "index"
+    HulkIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
+    return HulkIndex.load(idx_dir)
+
+
+@pytest.fixture(scope="session")
+def mini_index(tmp_path_factory):
+    """Standard MINI_GTF HulkIndex: t0(3-exon), t1(2-exon), t2(neg strand).
+
+    GTF layout (0-based half-open after parse):
+      g1 (+): t0 exons (99,200),(299,400),(499,600)
+              t1 exons (99,200),(499,600)
+      g2 (-): t2 exons (999,1100),(1199,1300)
+
+    Transcript indices: t0=0, t1=1, t2=2
+    Gene indices:       g1=0, g2=1
+    """
+    return build_test_index(tmp_path_factory, MINI_GTF, name="mini_idx")
 
 
 # ---------------------------------------------------------------------------

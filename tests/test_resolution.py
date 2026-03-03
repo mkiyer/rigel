@@ -2,7 +2,7 @@
 
 import pytest
 
-from hulkrna.types import ChimeraType, MergeCriteria, Strand, GenomicInterval, IntervalType
+from hulkrna.types import ChimeraType, MergeCriteria, Strand, GenomicInterval
 from hulkrna.categories import SpliceType
 from hulkrna.resolution import (
     merge_sets_with_criteria,
@@ -352,277 +352,201 @@ class TestDetectIntrachromosomalChimera:
 
 
 # =====================================================================
-# resolve_fragment
+# resolve_fragment — real C++ ResolveContext tests
+# =====================================================================
+#
+# All tests below use real HulkIndex instances built from GTF strings.
+# The C++ ResolveContext handles interval queries, SJ matching, and
+# overlap computation.  Mock indexes have been removed.
+#
+# Each test class defines a session-scoped fixture that builds the
+# specific HulkIndex it needs.  A shared mini_index fixture (from
+# conftest.py) is reused when the MINI_GTF layout suffices.
 # =====================================================================
 
+import textwrap
+from conftest import build_test_index
 
-class _MockResolveIndex:
-    def __init__(self):
-        self.sj_map = {
-            ("chr1", 200, 300, Strand.POS): frozenset({0})
-        }
-        self.t_to_g_arr = [0, 0, 0]
 
-    def query(self, exon_block):
-        key = (exon_block.ref, exon_block.start, exon_block.end)
-        if key == ("chr1", 100, 200):
-            return [
-                (100, 200, IntervalType.EXON, frozenset({0, 1})),
-                (100, 200, IntervalType.TRANSCRIPT, frozenset({0, 1})),
-            ]
-        if key == ("chr1", 300, 400):
-            return [
-                (300, 400, IntervalType.EXON, frozenset({1, 2})),
-                (300, 400, IntervalType.TRANSCRIPT, frozenset({1, 2})),
-            ]
-        return []
+def _t_map(index):
+    """Return dict mapping transcript ID string to integer index."""
+    return dict(zip(index.t_df["t_id"], index.t_df["t_index"]))
 
-    def query_gap_sjs(self, _ref, _start, _end):
-        return []
+
+def _exon(ref, start, end, strand=Strand.POS):
+    return GenomicInterval(ref, start, end, strand)
+
+
+# GTF for overlap tests: 3 transcripts in one gene
+# 0-based half-open after parse:
+#   t_two_exon: exons (100,200), (350,400)   transcript span (100,400)
+#   t_one_left: exon  (100,200)              transcript span (100,200)
+#   t_one_right: exon (350,500)              transcript span (350,500)
+OVERLAP_GTF = textwrap.dedent("""\
+    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_two_exon"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t351\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_two_exon"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_one_left"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t351\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t_one_right"; gene_name "G1"; gene_type "protein_coding";
+""")
+
+
+@pytest.fixture(scope="session")
+def overlap_index(tmp_path_factory):
+    """3-transcript overlap-test index."""
+    return build_test_index(tmp_path_factory, OVERLAP_GTF, name="overlap_idx")
 
 
 class TestResolveFragment:
-    def test_annotated_sj_prioritizes_sj_supported_transcripts(self):
-        idx = _MockResolveIndex()
-        frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 100, 200, Strand.POS),
-                GenomicInterval("chr1", 300, 400, Strand.POS),
-            ),
-            introns=(GenomicInterval("chr1", 200, 300, Strand.POS),),
-        )
+    """Annotated SJ narrows transcript candidates via C++ ResolveContext.
 
-        result = resolve_fragment(frag, idx)
-
-        assert result is not None
-        assert result.splice_type == SpliceType.SPLICED_ANNOT
-        assert result.t_inds == frozenset({0})
-
-    def test_annotated_sj_matches_when_intron_strand_unknown(self):
-        idx = _MockResolveIndex()
-        frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 100, 200, Strand.POS),
-                GenomicInterval("chr1", 300, 400, Strand.POS),
-            ),
-            introns=(GenomicInterval("chr1", 200, 300, Strand.NONE),),
-        )
-
-        result = resolve_fragment(frag, idx)
-
-        assert result is not None
-        assert result.splice_type == SpliceType.SPLICED_ANNOT
-        assert result.t_inds == frozenset({0})
-
-
-# =====================================================================
-# compute_overlap_profile
-# =====================================================================
-
-
-class _OverlapMockIndex:
-    """Mock index with configurable exon and transcript-span intervals.
-
-    Models a scenario with 3 transcripts:
-      t0: exon 100-200, transcript 100-400 (span), exon 350-400
-      t1: exon 100-200   (partial overlap with short fragments)
-      t2: exon 350-500   (partial overlap with fragments near right end)
-
-    All belong to gene 0.
+    Uses MINI_GTF:
+      t1(idx=0): exons (99,200),(299,400),(499,600) → SJs (200,299), (400,499)
+      t2(idx=1): exons (99,200),(499,600)           → SJ  (200,499)
     """
 
-    def __init__(self):
-        self.sj_map = {}
-        self.t_to_g_arr = [0, 0, 0]
-        # Collapsed intervals: (start, end, itype, t_set)
-        self._intervals = [
-            (100, 200, IntervalType.EXON, frozenset({0, 1})),
-            (100, 400, IntervalType.TRANSCRIPT, frozenset({0})),
-            (100, 200, IntervalType.TRANSCRIPT, frozenset({1})),
-            (350, 400, IntervalType.EXON, frozenset({0})),
-            (350, 500, IntervalType.EXON, frozenset({2})),
-            (350, 500, IntervalType.TRANSCRIPT, frozenset({2})),
-        ]
+    def test_annotated_sj_prioritizes_sj_supported_transcripts(self, mini_index):
+        """Fragment spanning SJ (200,299) resolves to t1 only."""
+        tm = _t_map(mini_index)
+        frag = Fragment(
+            exons=(
+                _exon("chr1", 150, 200),
+                _exon("chr1", 299, 350),
+            ),
+            introns=(GenomicInterval("chr1", 200, 299, Strand.POS),),
+        )
+        result = resolve_fragment(frag, mini_index)
+        assert result is not None
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
+        assert result.t_inds == frozenset({tm["t1"]})
 
-    def query(self, exon_block):
-        results = []
-        for h_start, h_end, itype, t_set in self._intervals:
-            if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                results.append((h_start, h_end, itype, t_set))
-        return results
-
-    def query_gap_sjs(self, _ref, _start, _end):
-        return []
+    def test_annotated_sj_matches_when_intron_strand_unknown(self, mini_index):
+        """SJ match still works when fragment's intron strand is NONE."""
+        tm = _t_map(mini_index)
+        frag = Fragment(
+            exons=(
+                _exon("chr1", 150, 200),
+                _exon("chr1", 299, 350),
+            ),
+            introns=(GenomicInterval("chr1", 200, 299, Strand.NONE),),
+        )
+        result = resolve_fragment(frag, mini_index)
+        assert result is not None
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
+        assert result.t_inds == frozenset({tm["t1"]})
 
 
 class TestOverlapProfileViaResolve:
-    """Test per-candidate overlap profiles produced by resolve_fragment."""
+    """Test per-candidate overlap profiles produced by resolve_fragment.
 
-    def test_full_exon_overlap_single_block(self):
-        """Fragment fully inside a reference exon → exon_bp=read_length, intron_bp=0."""
-        idx = _OverlapMockIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 150, 200, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+    Uses overlap_index (OVERLAP_GTF):
+      t_two_exon:  exons (100,200),(350,400)  — 2-exon, intron (200,350)
+      t_one_left:  exon  (100,200)
+      t_one_right: exon  (350,500)
+
+    The 2-exon transcript's intron (200,350) is unambiguous: no other
+    transcript's exon covers that region.
+    """
+
+    def test_full_exon_overlap_single_block(self, overlap_index):
+        """Fragment fully inside shared exon → exon_bp=read_length."""
+        tm = _t_map(overlap_index)
+        frag = Fragment(exons=(_exon("chr1", 150, 200),), introns=())
+        result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 50
-        # t0 exon 100-200: covers 150-200 → 50bp exon
-        assert result.overlap_bp[0] == (50, 0, 0)
-        # t1 exon 100-200: covers 150-200 → 50bp exon
-        assert result.overlap_bp[1] == (50, 0, 0)
+        assert result.overlap_bp[tm["t_two_exon"]] == (50, 0, 0)
+        assert result.overlap_bp[tm["t_one_left"]] == (50, 0, 0)
 
-    def test_intronic_overlap(self):
+    def test_intronic_overlap(self, overlap_index):
         """Fragment in intronic region → exon_bp=0, intron_bp=read_length."""
-        idx = _OverlapMockIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 220, 320, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+        tm = _t_map(overlap_index)
+        frag = Fragment(exons=(_exon("chr1", 220, 320),), introns=())
+        result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 100
-        # Only t0 has transcript span 100-400 covering 220-320 → intron_bp
-        # transcript_bp = 100, exon_bp = 0 → intron_bp = 100
-        # No UNAMBIG_INTRON in mock → unambig_intron_bp = 0
-        assert result.overlap_bp[0] == (0, 100, 0)
+        # Only t_two_exon's transcript span covers 220-320
+        # intron (200,350) is unambiguous → unambig_intron_bp = 100
+        t2e = tm["t_two_exon"]
+        assert t2e in result.t_inds
+        assert result.overlap_bp[t2e] == (0, 100, 100)
 
-    def test_mixed_exon_intron_overlap(self):
-        """Fragment spanning exon-transcript boundary → partial exon + intron bp."""
-        idx = _OverlapMockIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 180, 220, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+    def test_mixed_exon_intron_overlap(self, overlap_index):
+        """Fragment spanning exon-intron boundary → partial exon + intron bp."""
+        tm = _t_map(overlap_index)
+        frag = Fragment(exons=(_exon("chr1", 180, 220),), introns=())
+        result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 40
-        # t0: exon 100-200 → 180-200 = 20bp; transcript 100-400 → 180-220 = 40bp
-        # intron_bp = 40 - 20 = 20; no UNAMBIG_INTRON in mock → 0
-        assert result.overlap_bp[0] == (20, 20, 0)
-        # t1: exon 100-200 → 180-200 = 20bp; transcript 100-200 → 180-200 = 20bp
-        # intron_bp = 20 - 20 = 0
-        assert result.overlap_bp[1] == (20, 0, 0)
+        # t_two_exon: exon(100-200) covers 180-200=20bp; tx span covers all 40bp
+        #   intron_bp=40-20=20; unambig_intron(200-350) covers 200-220=20bp
+        assert result.overlap_bp[tm["t_two_exon"]] == (20, 20, 20)
+        # t_one_left: exon(100-200) covers 180-200=20bp; tx ends at 200 → 20bp tx
+        #   intron_bp=0
+        assert result.overlap_bp[tm["t_one_left"]] == (20, 0, 0)
 
-    def test_multi_block_overlap_sums(self):
-        """Two exon blocks accumulate overlap per-transcript."""
-        idx = _OverlapMockIndex()
+    def test_multi_block_overlap_sums(self, overlap_index):
+        """Two exon blocks accumulate exon overlap: 50+50=100bp for t_two_exon."""
+        tm = _t_map(overlap_index)
         frag = Fragment(
             exons=(
-                GenomicInterval("chr1", 150, 200, Strand.POS),
-                GenomicInterval("chr1", 350, 400, Strand.POS),
+                _exon("chr1", 150, 200),
+                _exon("chr1", 350, 400),
             ),
             introns=(GenomicInterval("chr1", 200, 350, Strand.POS),),
         )
-        result = resolve_fragment(frag, idx)
+        result = resolve_fragment(frag, overlap_index)
         assert result is not None
-        assert result.read_length == 100
-        # t0: exon(150-200)=50bp + exon(350-400)=50bp = 100bp exon
-        # transcript(150-200)=50bp + transcript(350-400)=50bp = 100bp tx
-        # intron_bp = 100 - 100 = 0
-        assert result.overlap_bp[0] == (100, 0, 0)
+        # SJ (200,350) matches t_two_exon → SPLICED_ANNOT, narrowed to {t_two_exon}
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
+        t2e = tm["t_two_exon"]
+        assert result.t_inds == frozenset({t2e})
+        # exon(150-200)=50 + exon(350-400)=50 = 100bp exon
+        assert result.overlap_bp[t2e] == (100, 0, 0)
 
-    def test_unambig_intron_subtracts_cross_transcript_exons(self):
-        """Fragment in t0's intronic region that overlaps t1's exon → unambig_intron_bp=0.
+    def test_unambig_intron_subtracts_cross_transcript_exons(self, tmp_path_factory):
+        """Fragment in t0's intronic region covered by t1's exon → unambig=0.
 
-        Models the core nRNA phantom scenario:
-        - t0: exon 100-200, transcript 100-500, exon 400-500  (2-exon)
-        - t1: exon 100-500  (single-exon, same locus)
-        Fragment: 250-350 (block in t0's intronic region, but also in t1's exon)
-        → t0 should have intron_bp=100, unambig_intron_bp=0
-        → t1 should have exon_bp=100, unambig_intron_bp=0
+        t0: exons (100,200),(400,500) — intron (200,400)
+        t1: exon  (100,500)           — covers t0's entire intron
+        Fragment (250,350): t0 intron_bp=100, unambig_intron_bp=0
         """
-        class _CrossTxIndex:
-            sj_map = {}
-            t_to_g_arr = [0, 0]
-
-            def query(self, exon_block):
-                _intervals = [
-                    (100, 200, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
-                    (400, 500, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.EXON, frozenset({1})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({1})),
-                ]
-                results = []
-                for h_start, h_end, itype, t_set in _intervals:
-                    if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                        results.append((h_start, h_end, itype, t_set))
-                return results
-
-            def query_gap_sjs(self, _ref, _start, _end):
-                return []
-
-        idx = _CrossTxIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
-            introns=(),
-        )
+        gtf = textwrap.dedent("""\
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t101\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+        """)
+        idx = build_test_index(tmp_path_factory, gtf, name="cross_tx")
+        tm = _t_map(idx)
+        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: transcript 100-500 covers 250-350 → tx_bp=100, exon_bp=0
-        # intron_bp = 100 - 0 = 100
-        # But t1's exon 100-500 covers 250-350 → global exon union = [(250,350)]
-        # Subtracting global exons from t0's tx (250,350) → 0 unambig
-        assert result.overlap_bp[0] == (0, 100, 0)
-        # t1: exon 100-500 covers 250-350 → 100bp exon, tx_bp=100
-        # intron_bp = 100 - 100 = 0
-        assert result.overlap_bp[1] == (100, 0, 0)
+        assert result.overlap_bp[tm["t0"]] == (0, 100, 0)
+        assert result.overlap_bp[tm["t1"]] == (100, 0, 0)
 
-    def test_unambig_intron_partial_exon_overlap(self):
+    def test_unambig_intron_partial_exon_overlap(self, tmp_path_factory):
         """Partial overlap: some intronic bp are exonic for another transcript.
 
-        - t0: exon 100-200, transcript 100-500, exon 400-500
-        - t1: exon 280-350, transcript 280-350
-        Fragment: 250-350
-        → t0 intron_bp=100 (tx 100 - exon 0), but only 250-280 (30bp) is unambiguous
-          (280-350 is exonic for t1)
+        t0: exons (100,200),(400,500) — intron (200,400)
+        t1: exon  (300,400) — covers only part of t0's intron
+        UNAMBIG_INTRON for t0: (200,300) (part not covered by t1)
+        Fragment (250,350): unambig clipped to (250,300)=50bp
         """
-        class _PartialOverlapIndex:
-            sj_map = {}
-            t_to_g_arr = [0, 0]
-
-            def query(self, exon_block):
-                _intervals = [
-                    (100, 200, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
-                    (400, 500, IntervalType.EXON, frozenset({0})),
-                    (280, 350, IntervalType.EXON, frozenset({1})),
-                    (280, 350, IntervalType.TRANSCRIPT, frozenset({1})),
-                ]
-                results = []
-                for h_start, h_end, itype, t_set in _intervals:
-                    if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                        results.append((h_start, h_end, itype, t_set))
-                return results
-
-            def query_gap_sjs(self, _ref, _start, _end):
-                return []
-
-        idx = _PartialOverlapIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
-            introns=(),
-        )
+        gtf = textwrap.dedent("""\
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t301\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+        """)
+        idx = build_test_index(tmp_path_factory, gtf, name="partial_ovl")
+        tm = _t_map(idx)
+        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: transcript 100-500 clipped to 250-350 → 100bp tx, exon_bp=0
-        # intron_bp = 100 - 0 = 100
-        # global exon union: t1 exon 280-350 clipped to 280-350 → [(280,350)]
-        # No UNAMBIG_INTRON in mock → unambig_intron_bp = 0
-        assert result.overlap_bp[0] == (0, 100, 0)
-        # t1: exon 280-350 clipped to 280-350 → 70bp exon, tx_bp=70
-        # intron_bp = 70 - 70 = 0
-        assert result.overlap_bp[1] == (70, 0, 0)
-
-
-# =====================================================================
-# filter_by_overlap
-# =====================================================================
-
+        # t0: intron_bp=100, unambig_intron_bp=50 (region 250-300)
+        assert result.overlap_bp[tm["t0"]] == (0, 100, 50)
+        # t1: exon(300-400) clipped to (300,350)=50bp
+        assert result.overlap_bp[tm["t1"]] == (50, 0, 0)
 
 
 # =====================================================================
@@ -631,63 +555,49 @@ class TestOverlapProfileViaResolve:
 
 
 class TestOverlapFiltering:
-    """Verify overlap filtering is skipped for UNSPLICED fragments."""
+    """Verify overlap filtering behavior for spliced vs unspliced fragments."""
 
-    def test_unspliced_fragment_skips_filter(self):
-        """An unspliced fragment spanning an exon-intron boundary.
+    def test_unspliced_fragment_retains_all_candidates(self, overlap_index):
+        """An unspliced fragment spanning exon + intron retains all candidates.
 
-        Fragment 150-250 overlaps:
-          - t0: exon(100-200)=50bp + intron(200-350)=50bp
-          - t1: exon(100-200)=50bp
-
-        filter_by_overlap is skipped for UNSPLICED fragments, so both
-        candidates are retained regardless of exon overlap differences.
-        The EM's soft overlap penalty handles weighting instead.
+        Fragment (150,250) overlaps t_two_exon and t_one_left via their
+        shared exon (100,200).  Both are kept even though t_one_left has
+        less overlap — the EM handles weighting.
         """
-        idx = _OverlapMockIndex()
-        # Single-exon frag 150-250: t0 covers fully, t1 only exon portion
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 150, 250, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+        tm = _t_map(overlap_index)
+        frag = Fragment(exons=(_exon("chr1", 150, 250),), introns=())
+        result = resolve_fragment(frag, overlap_index)
         assert result is not None
-        assert result.splice_type == SpliceType.UNSPLICED
-        # Both t0 and t1 have 50bp exon overlap → equal exon_frac → both kept
-        assert 0 in result.t_inds
-        assert 1 in result.t_inds
+        assert result.splice_type == int(SpliceType.UNSPLICED)
+        assert tm["t_two_exon"] in result.t_inds
+        assert tm["t_one_left"] in result.t_inds
 
-    def test_spliced_fragment_sj_plus_overlap(self):
-        """Spliced fragments with annotated SJs: SJ narrows first, overlap applies too."""
-        idx = _MockResolveIndex()
-        # Standard spliced fragment — splice junction resolves to t0 only
+    def test_spliced_fragment_sj_narrows_candidates(self, mini_index):
+        """Spliced fragments with annotated SJs: SJ match narrows first."""
+        tm = _t_map(mini_index)
         frag = Fragment(
             exons=(
-                GenomicInterval("chr1", 100, 200, Strand.POS),
-                GenomicInterval("chr1", 300, 400, Strand.POS),
+                _exon("chr1", 150, 200),
+                _exon("chr1", 299, 350),
             ),
-            introns=(GenomicInterval("chr1", 200, 300, Strand.POS),),
+            introns=(GenomicInterval("chr1", 200, 299, Strand.POS),),
         )
-        result = resolve_fragment(frag, idx)
+        result = resolve_fragment(frag, mini_index)
         assert result is not None
-        assert result.splice_type == SpliceType.SPLICED_ANNOT
-        # SJ resolution gives {0} — single candidate, no overlap filtering needed
-        assert result.t_inds == frozenset({0})
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
+        # SJ (200,299) → t1 only
+        assert result.t_inds == frozenset({tm["t1"]})
 
-    def test_equal_overlap_keeps_all(self):
-        """When all candidates have equal overlap, all are retained."""
-        idx = _OverlapMockIndex()
-        # Fragment 100-200 overlaps t0 (100/100) and t1 (100/100)
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 100, 200, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+    def test_equal_overlap_keeps_all(self, overlap_index):
+        """When all candidates have equal exon overlap, all are retained."""
+        tm = _t_map(overlap_index)
+        frag = Fragment(exons=(_exon("chr1", 100, 200),), introns=())
+        result = resolve_fragment(frag, overlap_index)
         assert result is not None
-        assert result.splice_type == SpliceType.UNSPLICED
-        # Both t0 and t1 have equal overlap fractions → both kept
-        assert 0 in result.t_inds
-        assert 1 in result.t_inds
+        assert result.splice_type == int(SpliceType.UNSPLICED)
+        # Both t_two_exon and t_one_left share exon (100,200) fully
+        assert tm["t_two_exon"] in result.t_inds
+        assert tm["t_one_left"] in result.t_inds
 
 
 # =====================================================================
@@ -695,155 +605,74 @@ class TestOverlapFiltering:
 # =====================================================================
 
 
-class _ThreeExonMockIndex:
-    """Mock index for fragment-length discrimination test.
-
-    Models the MINI_GTF 3-exon/2-isoform gene:
-      t0: exons at 99-200, 299-400, 499-600  (3 exons)
-      t1: exons at 99-200, 499-600           (2 exons, skips middle)
-    Both belong to gene 0.
-
-    Splice junctions:
-      t0: (chr1, 200, 299, POS) and (chr1, 400, 499, POS)
-      t1: (chr1, 200, 499, POS)
-    """
-
-    def __init__(self):
-        # SJ map: key=(ref, start, end, strand) → frozenset of t_indices
-        self.sj_map = {
-            ("chr1", 200, 299, Strand.POS): frozenset({0}),
-            ("chr1", 400, 499, Strand.POS): frozenset({0}),
-            ("chr1", 200, 499, Strand.POS): frozenset({1}),
-        }
-        self.t_to_g_arr = [0, 0]
-        # Collapsed intervals: (h_start, h_end, itype, t_set)
-        self._intervals = [
-            # Exon intervals
-            (99, 200, IntervalType.EXON, frozenset({0, 1})),
-            (299, 400, IntervalType.EXON, frozenset({0})),
-            (499, 600, IntervalType.EXON, frozenset({0, 1})),
-            # Transcript spans
-            (99, 600, IntervalType.TRANSCRIPT, frozenset({0})),
-            (99, 600, IntervalType.TRANSCRIPT, frozenset({1})),
-        ]
-        # SJ annotations for gap queries: (t_idx, strand, sj_start, sj_end)
-        self._sj_entries = [
-            (0, Strand.POS, 200, 299),
-            (0, Strand.POS, 400, 499),
-            (1, Strand.POS, 200, 499),
-        ]
-
-    def query(self, exon_block):
-        results = []
-        for h_start, h_end, itype, t_set in self._intervals:
-            if exon_block.ref == "chr1" and exon_block.start < h_end and exon_block.end > h_start:
-                results.append((h_start, h_end, itype, t_set))
-        return results
-
-    def query_gap_sjs(self, ref, start, end):
-        """Return SJ entries fully contained in the gap."""
-        results = []
-        for t_idx, strand, sj_start, sj_end in self._sj_entries:
-            if ref == "chr1" and sj_start >= start and sj_end <= end:
-                results.append((t_idx, strand, sj_start, sj_end))
-        return results
-
-
 class TestFragLengthDiscrimination:
-    """Verify fragment length helps distinguish isoforms with different splicing.
+    """Verify SJ-based isoform discrimination with the MINI_GTF 3-exon gene.
 
-    Scenario: 3-exon gene with t0 (all 3) and t1 (exons 1+3, skipping #2).
-    A fragment from t1 that spans exon1→exon3 will have a different
-    genomic distance than the same position on t0.
+    MINI_GTF layout:
+      t1(idx=0): exons (99,200),(299,400),(499,600) → SJs (200,299),(400,499)
+      t2(idx=1): exons (99,200),(499,600)           → SJ  (200,499)
+
+    A fragment's splice junction uniquely identifies which isoform
+    produced it when the SJs differ.
     """
 
-    def test_spliced_read_t0_specific_sj(self):
-        """A read with t0-specific SJ (200-299) resolves to t0 only."""
-        idx = _ThreeExonMockIndex()
+    def test_spliced_read_t1_specific_sj(self, mini_index):
+        """Read with SJ (200,299) — specific to t1 (3-exon)."""
+        tm = _t_map(mini_index)
         frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 150, 200, Strand.POS),
-                GenomicInterval("chr1", 299, 350, Strand.POS),
-            ),
+            exons=(_exon("chr1", 150, 200), _exon("chr1", 299, 350)),
             introns=(GenomicInterval("chr1", 200, 299, Strand.POS),),
         )
-        result = resolve_fragment(frag, idx)
+        result = resolve_fragment(frag, mini_index)
         assert result is not None
-        assert result.splice_type == SpliceType.SPLICED_ANNOT
-        assert result.t_inds == frozenset({0})
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
+        assert result.t_inds == frozenset({tm["t1"]})
 
-    def test_spliced_read_t1_specific_sj(self):
-        """A read with t1-specific SJ (200-499 skip) resolves to t1 only."""
-        idx = _ThreeExonMockIndex()
+    def test_spliced_read_t2_specific_sj(self, mini_index):
+        """Read with SJ (200,499) — specific to t2 (2-exon, skips middle)."""
+        tm = _t_map(mini_index)
         frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 150, 200, Strand.POS),
-                GenomicInterval("chr1", 499, 550, Strand.POS),
-            ),
+            exons=(_exon("chr1", 150, 200), _exon("chr1", 499, 550)),
             introns=(GenomicInterval("chr1", 200, 499, Strand.POS),),
         )
-        result = resolve_fragment(frag, idx)
+        result = resolve_fragment(frag, mini_index)
         assert result is not None
-        assert result.splice_type == SpliceType.SPLICED_ANNOT
-        assert result.t_inds == frozenset({1})
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
+        assert result.t_inds == frozenset({tm["t2"]})
 
-    def test_unspliced_read_in_shared_exon(self):
-        """Unspliced read fully in exon1 (shared) → both t0 and t1."""
-        idx = _ThreeExonMockIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 120, 180, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+    def test_unspliced_read_in_shared_exon(self, mini_index):
+        """Unspliced read fully in shared exon1 → both t1 and t2."""
+        tm = _t_map(mini_index)
+        frag = Fragment(exons=(_exon("chr1", 120, 180),), introns=())
+        result = resolve_fragment(frag, mini_index)
         assert result is not None
-        assert result.splice_type == SpliceType.UNSPLICED
-        # Both transcripts share exon1 fully → equal overlap → both kept
-        assert result.t_inds == frozenset({0, 1})
+        assert result.splice_type == int(SpliceType.UNSPLICED)
+        assert result.t_inds == frozenset({tm["t1"], tm["t2"]})
 
-    def test_unspliced_read_in_t0_only_exon(self):
-        """Unspliced read in exon2 (t0-only at 299-400).
+    def test_unspliced_read_in_t1_only_exon(self, mini_index):
+        """Unspliced read in exon2 (299,400) — exonic for t1 only.
 
-        With collapsed index, t1's TRANSCRIPT span (99-600) also covers
-        this region, giving t1 an intronic overlap.  Both transcripts are
-        candidates; downstream scoring discriminates via overlap profiles.
+        t2's transcript span (99,600) also covers this region via
+        intronic overlap, so both are candidates; scoring differentiates.
         """
-        idx = _ThreeExonMockIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 320, 380, Strand.POS),),
-            introns=(),
-        )
-        result = resolve_fragment(frag, idx)
+        tm = _t_map(mini_index)
+        frag = Fragment(exons=(_exon("chr1", 320, 380),), introns=())
+        result = resolve_fragment(frag, mini_index)
         assert result is not None
-        assert result.splice_type == SpliceType.UNSPLICED
-        # t0: exon overlap, t1: intronic overlap via TRANSCRIPT span
-        assert result.t_inds == frozenset({0, 1})
+        assert result.splice_type == int(SpliceType.UNSPLICED)
+        assert result.t_inds == frozenset({tm["t1"], tm["t2"]})
 
-    def test_frag_length_differs_between_isoforms(self):
-        """Fragment spanning exon1→exon3 has different fragment length per isoform.
-
-        For t0 (3 exons): reads at 150-200, 499-550 with gap 200-499
-          → gap = 299bp, gap contains introns 200-299 (99bp) and 400-499 (99bp)
-          → insert = (200-150) + (550-499) + (299 - 99 - 99) = 50 + 51 + 101 = 202
-          Actually, insert = genomic_span - sum(gap_introns) = 400 - 198 = 202
-
-        For t1 (2 exons):  gap contains intron 200-499 (299bp)
-          → insert = 400 - 299 = 101
-
-        These differ → compute_frag_lengths returns differing values when they disagree.
-        """
-        idx = _ThreeExonMockIndex()
+    def test_frag_length_differs_between_isoforms(self, mini_index):
+        """Fragment spanning exon1→exon3 via SJ (200,499) → t2 only."""
+        tm = _t_map(mini_index)
         frag = Fragment(
-            exons=(
-                GenomicInterval("chr1", 150, 200, Strand.POS),
-                GenomicInterval("chr1", 499, 550, Strand.POS),
-            ),
+            exons=(_exon("chr1", 150, 200), _exon("chr1", 499, 550)),
             introns=(GenomicInterval("chr1", 200, 499, Strand.POS),),
         )
-        # This has annotated SJ 200-499 → resolves to t1 specifically
-        result = resolve_fragment(frag, idx)
+        result = resolve_fragment(frag, mini_index)
         assert result is not None
-        # SJ 200-499 matches t1 specifically
-        assert result.t_inds == frozenset({1})
+        # SJ (200,499) → t2 specifically
+        assert result.t_inds == frozenset({tm["t2"]})
 
 
 # =====================================================================
@@ -852,179 +681,88 @@ class TestFragLengthDiscrimination:
 
 
 class TestUnambigIntronAccumulation:
-    """Verify resolve_fragment correctly accumulates unambig_intron_bp
-    from UNAMBIG_INTRON intervals returned by the index.
+    """Verify resolve_fragment correctly computes unambig_intron_bp.
 
     These tests guard against the nRNA phantom-count bug where using
     ``intron_bp > 0`` instead of ``unambig_intron_bp > 0`` caused
     massive false nRNA assignment in pristine conditions.
     """
 
-    def test_unambig_intron_accumulated_for_lone_intron(self):
-        """Fragment in a transcript's unambiguous intron (no cross-transcript exon).
+    def test_unambig_intron_accumulated_for_lone_intron(self, tmp_path_factory):
+        """Fragment in a transcript's unambiguous intron (single transcript).
 
-        t0: exon 100-200, transcript 100-500, exon 400-500
-        UNAMBIG_INTRON for t0: 200-400 (no other transcript's exon here)
-        Fragment: 250-350 → unambig_intron_bp should be 100.
+        t0: exons (100,200),(400,500) → intron (200,400) is fully unambiguous
+        Fragment (250,350) → unambig_intron_bp = 100.
         """
-        class _LoneIntronIndex:
-            sj_map = {}
-            t_to_g_arr = [0]
-
-            def query(self, exon_block):
-                _intervals = [
-                    (100, 200, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
-                    (400, 500, IntervalType.EXON, frozenset({0})),
-                    # UNAMBIG_INTRON: intron of t0 not overlapped by any exon
-                    (200, 400, IntervalType.UNAMBIG_INTRON, frozenset({0})),
-                ]
-                results = []
-                for h_start, h_end, itype, t_set in _intervals:
-                    if (exon_block.ref == "chr1"
-                            and exon_block.start < h_end
-                            and exon_block.end > h_start):
-                        results.append((h_start, h_end, itype, t_set))
-                return results
-
-            def query_gap_sjs(self, _ref, _start, _end):
-                return []
-
-        idx = _LoneIntronIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
-            introns=(),
-        )
+        gtf = textwrap.dedent("""\
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+        """)
+        idx = build_test_index(tmp_path_factory, gtf, name="lone_intron")
+        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: tx_bp=100, exon_bp=0 → intron_bp=100
-        # UNAMBIG_INTRON 200-400 clipped to 250-350 = 100bp
         assert result.overlap_bp[0] == (0, 100, 100)
 
-    def test_unambig_intron_zero_when_cross_exon_covers(self):
-        """Fragment in t0's intron that is entirely covered by t1's exon.
+    def test_unambig_intron_zero_when_cross_exon_covers(self, tmp_path_factory):
+        """Fragment in t0's intron entirely covered by t1's exon → unambig=0.
 
-        t0: exon 100-200, transcript 100-500, exon 400-500
-        t1: exon 200-400 (covers t0's entire intron)
-        No UNAMBIG_INTRON for t0 in 200-400 region.
-        Fragment: 250-350 → unambig_intron_bp should be 0.
+        t0: exons (100,200),(400,500) — intron (200,400)
+        t1: exon  (200,400) — covers t0's entire intron
+        Fragment (250,350) → unambig_intron_bp = 0.
         """
-        class _CrossExonIndex:
-            sj_map = {}
-            t_to_g_arr = [0, 0]
-
-            def query(self, exon_block):
-                _intervals = [
-                    (100, 200, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
-                    (400, 500, IntervalType.EXON, frozenset({0})),
-                    (200, 400, IntervalType.EXON, frozenset({1})),
-                    (200, 400, IntervalType.TRANSCRIPT, frozenset({1})),
-                    # NO UNAMBIG_INTRON — t1's exon covers t0's intron
-                ]
-                results = []
-                for h_start, h_end, itype, t_set in _intervals:
-                    if (exon_block.ref == "chr1"
-                            and exon_block.start < h_end
-                            and exon_block.end > h_start):
-                        results.append((h_start, h_end, itype, t_set))
-                return results
-
-            def query_gap_sjs(self, _ref, _start, _end):
-                return []
-
-        idx = _CrossExonIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
-            introns=(),
-        )
+        gtf = textwrap.dedent("""\
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+        """)
+        idx = build_test_index(tmp_path_factory, gtf, name="cross_exon")
+        tm = _t_map(idx)
+        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: tx_bp=100, exon_bp=0 → intron_bp=100, unambig_intron_bp=0
-        assert result.overlap_bp[0] == (0, 100, 0)
-        # t1: exon_bp=100, tx_bp=100 → intron_bp=0
-        assert result.overlap_bp[1] == (100, 0, 0)
+        # t0: intron_bp=100, unambig_intron_bp=0 (t1's exon covers it)
+        assert result.overlap_bp[tm["t0"]] == (0, 100, 0)
+        # t1: exon_bp=100
+        assert result.overlap_bp[tm["t1"]] == (100, 0, 0)
 
-    def test_unambig_intron_partial(self):
+    def test_unambig_intron_partial(self, tmp_path_factory):
         """Fragment partially in unambiguous intron, partially in cross-exon.
 
-        t0: exon 100-200, transcript 100-500, exon 400-500
-        t1: exon 300-400 (covers only part of t0's intron)
-        → UNAMBIG_INTRON for t0: 200-300 (30bp of fragment 250-350)
-        Fragment: 250-350 → unambig_intron_bp should be 50 (250-300).
+        t0: exons (100,200),(400,500) — intron (200,400)
+        t1: exon  (300,400) — covers only part of t0's intron
+        UNAMBIG for t0: (200,300)
+        Fragment (250,350) → unambig clipped to (250,300) = 50bp.
         """
-        class _PartialUnambigIndex:
-            sj_map = {}
-            t_to_g_arr = [0, 0]
-
-            def query(self, exon_block):
-                _intervals = [
-                    (100, 200, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
-                    (400, 500, IntervalType.EXON, frozenset({0})),
-                    (300, 400, IntervalType.EXON, frozenset({1})),
-                    (300, 400, IntervalType.TRANSCRIPT, frozenset({1})),
-                    # UNAMBIG_INTRON: only the part NOT covered by t1's exon
-                    (200, 300, IntervalType.UNAMBIG_INTRON, frozenset({0})),
-                ]
-                results = []
-                for h_start, h_end, itype, t_set in _intervals:
-                    if (exon_block.ref == "chr1"
-                            and exon_block.start < h_end
-                            and exon_block.end > h_start):
-                        results.append((h_start, h_end, itype, t_set))
-                return results
-
-            def query_gap_sjs(self, _ref, _start, _end):
-                return []
-
-        idx = _PartialUnambigIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 250, 350, Strand.POS),),
-            introns=(),
-        )
+        gtf = textwrap.dedent("""\
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t301\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+        """)
+        idx = build_test_index(tmp_path_factory, gtf, name="partial_unambig")
+        tm = _t_map(idx)
+        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: tx_bp=100, exon_bp=0 → intron_bp=100
-        # UNAMBIG_INTRON 200-300 clipped to 250-300 = 50bp
-        assert result.overlap_bp[0] == (0, 100, 50)
-        # t1: exon 300-400 clipped to 300-350 = 50bp, tx_bp also 50
-        assert result.overlap_bp[1] == (50, 0, 0)
+        assert result.overlap_bp[tm["t0"]] == (0, 100, 50)
+        assert result.overlap_bp[tm["t1"]] == (50, 0, 0)
 
-    def test_exon_only_fragment_has_zero_unambig_intron(self):
-        """Fragment fully within an exon should have unambig_intron_bp=0."""
-        class _ExonOnlyIndex:
-            sj_map = {}
-            t_to_g_arr = [0]
+    def test_exon_only_fragment_has_zero_unambig_intron(self, tmp_path_factory):
+        """Fragment fully within an exon → unambig_intron_bp=0.
 
-            def query(self, exon_block):
-                _intervals = [
-                    (100, 300, IntervalType.EXON, frozenset({0})),
-                    (100, 500, IntervalType.TRANSCRIPT, frozenset({0})),
-                    (400, 500, IntervalType.EXON, frozenset({0})),
-                    (300, 400, IntervalType.UNAMBIG_INTRON, frozenset({0})),
-                ]
-                results = []
-                for h_start, h_end, itype, t_set in _intervals:
-                    if (exon_block.ref == "chr1"
-                            and exon_block.start < h_end
-                            and exon_block.end > h_start):
-                        results.append((h_start, h_end, itype, t_set))
-                return results
-
-            def query_gap_sjs(self, _ref, _start, _end):
-                return []
-
-        idx = _ExonOnlyIndex()
-        frag = Fragment(
-            exons=(GenomicInterval("chr1", 150, 250, Strand.POS),),
-            introns=(),
-        )
+        t0: exons (100,300),(400,500) — intron (300,400)
+        Fragment (150,250) → fully in first exon.
+        """
+        gtf = textwrap.dedent("""\
+            chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+        """)
+        idx = build_test_index(tmp_path_factory, gtf, name="exon_only")
+        frag = Fragment(exons=(_exon("chr1", 150, 250),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # Fully exonic, unambig_intron_bp=0
         assert result.overlap_bp[0] == (100, 0, 0)

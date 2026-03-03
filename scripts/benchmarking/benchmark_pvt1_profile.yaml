@@ -22,7 +22,7 @@ hulkrna_configs:
 
 # ── Simulation ───────────────────────────────────────────────────────
 simulation:
-  n_fragments: 100000
+  n_fragments: 300000
   sim_seed: 42
   pipeline_seed: 42
   frag_mean: 250.0
@@ -34,13 +34,13 @@ simulation:
 
 # ── Abundance ────────────────────────────────────────────────────────
 abundance:
-  mode: file
-  file: /Users/mkiyer/proj/hulkrna/scripts/benchmarking/chr8_pvt1_myc_abundance.tsv
+  mode: random
+  seed: 42
 
 # ── gDNA contamination ──────────────────────────────────────────────
 gdna:
-  rates: [0.1]
-  rate_labels: [moderate]
+  rates: [0.0, 0.2]
+  rate_labels: [none, moderate]
   frag_mean: 350.0
   frag_std: 100.0
   frag_min: 100
@@ -48,8 +48,8 @@ gdna:
 
 # ── Nascent RNA ──────────────────────────────────────────────────────
 nrna:
-  rates: [0.1]
-  rate_labels: [moderate]
+  rates: [0.0, 0.2]
+  rate_labels: [none, moderate]
 
 # ── Strand specificity ──────────────────────────────────────────────
 strand_specificities: [1.0]
@@ -59,6 +59,6 @@ htseq:
   enabled: false
 
 runtime:
-  keep_going: false
+  keep_going: true
 
 verbose: true

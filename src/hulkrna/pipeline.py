@@ -3,12 +3,12 @@ hulkrna.pipeline — Single-pass BAM counting pipeline with locus-level EM.
 
 Architecture
 ------------
-The pipeline reads the BAM file **once** and processes counts in
-two logical stages:
+The pipeline reads the BAM file **once** via the C++ native BAM scanner
+(``_bam_impl``) and processes counts in two logical stages:
 
-**BAM Scan** (``scan_and_buffer``): Parse all fragments, resolve each
-against the reference index, train strand and fragment-length models
-from unique-mapper fragments, and buffer all resolved fragments into
+**BAM Scan** (``scan_and_buffer``): Parse all fragments in C++ via htslib,
+resolve each against the reference index, train strand and fragment-length
+models from unique-mapper fragments, and buffer all resolved fragments into
 a memory-efficient columnar buffer (``FragmentBuffer``).
 
 **Count Assignment** (``count_from_buffer``): Iterate the buffer once
@@ -34,19 +34,16 @@ _LARGE_LOCUS_LOG_THRESHOLD = 100
 _ANNOTATION_TABLE_PADDING = 1024
 _ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
-import os
-
-from .bam import parse_bam_file, detect_sj_strand_tag
 from .buffer import FragmentBuffer, _FinalizedChunk
 from .categories import SpliceType
 from .estimator import AbundanceEstimator
-from .fragment import Fragment
 from .types import ChimeraType, Strand
 from .index import HulkIndex
 from .frag_length_model import FragmentLengthModels
-from .resolution import pair_multimapper_reads, resolve_fragment
 from .stats import PipelineStats
 from .strand_model import StrandModels
+from ._bam_impl import BamScanner as _NativeBamScanner
+from ._bam_impl import detect_sj_strand_tag as _native_detect_sj_tag
 
 # --- New modular imports ---
 from .scoring import ScoringContext
@@ -68,7 +65,6 @@ from .config import (
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Pipeline result
 # ---------------------------------------------------------------------------
@@ -81,25 +77,6 @@ class PipelineResult:
     strand_models: StrandModels
     frag_length_models: FragmentLengthModels
     estimator: AbundanceEstimator
-
-
-# ---------------------------------------------------------------------------
-# Native BAM scanner availability
-# ---------------------------------------------------------------------------
-
-_HAS_NATIVE_BAM_SCANNER = False
-try:
-    from ._bam_impl import BamScanner as _NativeBamScanner  # type: ignore[import-not-found]
-    from ._bam_impl import detect_sj_strand_tag as _native_detect_sj_tag  # type: ignore[import-not-found]
-    _HAS_NATIVE_BAM_SCANNER = True
-except ImportError:
-    pass
-
-# Force Python fallback via env var (useful for testing / debugging).
-if os.environ.get("HULKRNA_FORCE_PYTHON_BAM", "").strip().lower() in (
-    "1", "true", "yes",
-):
-    _HAS_NATIVE_BAM_SCANNER = False
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -201,17 +178,15 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_multimapper_alignments", 0)
 
 
-def scan_and_buffer_native(
+def scan_and_buffer(
     bam_path: str,
     index: HulkIndex,
     scan: "ScanConfig",
 ) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
-    """Native C++ BAM scan: resolve, train models, buffer — all in one pass.
+    """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
 
-    This is the fast path that replaces ``scan_and_buffer`` when the
-    ``_bam_impl`` C++ extension is available.  The entire BAM parsing,
-    fragment construction, overlap resolution, model training and
-    columnar buffering happens in C++ via htslib.
+    The entire BAM parsing, fragment construction, overlap resolution,
+    model training and columnar buffering happens in C++ via htslib.
 
     Parameters
     ----------
@@ -326,223 +301,6 @@ def scan_and_buffer_native(
 
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
-        f"{stats.n_unique_gene:,} unique-gene, "
-        f"{stats.n_multi_gene:,} multi-gene, "
-        f"{stats.n_intergenic:,} intergenic, "
-        f"{buffer.total_fragments:,} buffered "
-        f"({buffer.memory_bytes / 1024**2:.1f} MB in memory, "
-        f"{buffer.n_spilled} chunks spilled), "
-        f"{stats.n_multimapper_groups:,} multimapper molecules"
-    )
-    strand_models.log_summary()
-    frag_length_models.log_summary()
-
-    return stats, strand_models, frag_length_models, buffer
-
-
-# ---------------------------------------------------------------------------
-# BAM Scan: resolve, train models, buffer
-# ---------------------------------------------------------------------------
-
-def scan_and_buffer(
-    bam_iter,
-    index: HulkIndex,
-    scan: ScanConfig,
-) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
-    """Single-pass BAM scan: resolve fragments, train models, buffer results.
-
-    Parameters
-    ----------
-    bam_iter
-        Iterator over ``pysam.AlignedSegment`` objects.
-    index : HulkIndex
-        The loaded reference index.
-    scan : ScanConfig
-        BAM scanning and buffering configuration.
-
-    Returns
-    -------
-    tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]
-    """
-    stats = PipelineStats()
-    bam_stats = stats.as_bam_stats_dict()
-
-    strand_models = StrandModels()
-    strand_models.min_spliced_observations = max(
-        1, int(scan.min_spliced_observations)
-    )
-    frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
-    buffer = FragmentBuffer(
-        t_to_g_arr=index.t_to_g_arr,
-        chunk_size=scan.chunk_size,
-        max_memory_bytes=scan.max_memory_bytes,
-        spill_dir=scan.spill_dir,
-    )
-
-    logger.info("[START] Scanning BAM → resolve + train models + buffer")
-
-    frag_id = 0
-    for nh, hits, sec_r1, sec_r2 in parse_bam_file(
-        bam_iter,
-        bam_stats,
-        skip_duplicates=scan.skip_duplicates,
-        include_multimap=scan.include_multimap,
-    ):
-        secondary_pairs: list[tuple[list, list]] = []
-        if sec_r1 or sec_r2:
-            secondary_pairs = pair_multimapper_reads(
-                sec_r1, sec_r2, index,
-                sj_strand_tag=scan.sj_strand_tag,
-            )
-
-        all_hits = list(hits) + secondary_pairs
-        num_hits = max(nh, len(all_hits))
-        is_unique_mapper = num_hits == 1
-        n_buffered_mm = 0
-
-        for r1_reads, r2_reads in all_hits:
-            frag = Fragment.from_reads(
-                r1_reads, r2_reads, sj_strand_tag=scan.sj_strand_tag,
-            )
-            stats.n_fragments += 1
-
-            if not frag.exons:
-                continue
-
-            result = resolve_fragment(frag, index)
-
-            if result is None:
-                # --- Intergenic: deterministic gDNA assignment ---
-                if frag.introns:
-                    stats.n_intergenic_spliced += 1
-                else:
-                    stats.n_intergenic_unspliced += 1
-                if is_unique_mapper and not frag.introns:
-                    # Only unspliced intergenic fragments are reliable
-                    # for training.  Spliced intergenic fragments may be
-                    # novel unannotated transcripts or alignment artifacts.
-                    flen = frag.genomic_footprint
-                    if flen > 0:
-                        frag_length_models.observe(flen, splice_type=None)
-                        stats.n_frag_length_intergenic += 1
-                if is_unique_mapper:
-                    intergenic_strand = Strand.NONE
-                    for eb in frag.exons:
-                        intergenic_strand |= Strand(eb.strand)
-                    if intergenic_strand in (Strand.POS, Strand.NEG):
-                        strand_models.intergenic.observe(
-                            intergenic_strand, Strand.POS,
-                        )
-                continue
-
-            result.num_hits = num_hits
-            result.nm = frag.nm
-
-            # --- Handle chimeric fragments ---
-            if result.is_chimeric:
-                ct = result.chimera_type
-                stats.n_chimeric += 1
-                if ct == ChimeraType.TRANS:
-                    stats.n_chimeric_trans += 1
-                elif ct == ChimeraType.CIS_STRAND_SAME:
-                    stats.n_chimeric_cis_strand_same += 1
-                elif ct == ChimeraType.CIS_STRAND_DIFF:
-                    stats.n_chimeric_cis_strand_diff += 1
-                buffer.append(result, frag_id=frag_id)
-                continue
-
-            # --- Stats: overlap type ---
-            stats.n_with_exon += 1
-            if result.splice_type == SpliceType.SPLICED_ANNOT:
-                stats.n_with_annotated_sj += 1
-            elif result.splice_type == SpliceType.SPLICED_UNANNOT:
-                stats.n_with_unannotated_sj += 1
-
-            if result.is_unique_gene:
-                stats.n_unique_gene += 1
-            else:
-                stats.n_multi_gene += 1
-
-            if is_unique_mapper:
-                # --- Train models (unique mappers only) ---
-                if result.is_strand_qualified:
-                    strand_models.exonic_spliced.observe(
-                        result.exon_strand, result.sj_strand,
-                    )
-                    stats.n_strand_trained += 1
-                elif result.splice_type != SpliceType.SPLICED_ANNOT:
-                    stats.n_strand_skipped_no_sj += 1
-                elif not result.is_unique_gene:
-                    stats.n_strand_skipped_multi_gene += 1
-                else:
-                    stats.n_strand_skipped_ambiguous += 1
-
-                # Train exonic fallback model from ALL exonic fragments
-                # with unique gene assignment and unambiguous strand.
-                # Uses annotated gene strand as truth (not SJ strand).
-                if (
-                    result.is_unique_gene
-                    and result.exon_strand in (Strand.POS, Strand.NEG)
-                ):
-                    t_idx = (
-                        result.first_t_ind
-                        if hasattr(result, 'first_t_ind')
-                        else next(iter(result.t_inds))
-                    )
-                    gene_idx = index.t_to_g_arr[t_idx]
-                    gene_strand = Strand(index.g_to_strand_arr[gene_idx])
-                    if gene_strand in (Strand.POS, Strand.NEG):
-                        strand_models.exonic.observe(
-                            result.exon_strand, gene_strand,
-                        )
-
-                # Train fragment-length model.  Only use reads where
-                # ALL candidate transcripts agree on a single fragment
-                # length (i.e. no ambiguity from different SJ corrections).
-                _ufl = getattr(result, 'unique_frag_length', None)
-                if _ufl is not None:
-                    # Native C++ ResolvedResult path
-                    if _ufl > 0:
-                        frag_length_models.observe(_ufl, result.splice_type)
-                        stats.n_frag_length_unambiguous += 1
-                    else:
-                        stats.n_frag_length_ambiguous += 1
-                else:
-                    # Python ResolvedFragment fallback
-                    fl_vals = result.frag_lengths
-                    if fl_vals and len(set(fl_vals.values())) == 1:
-                        fl = next(iter(fl_vals.values()))
-                        if fl > 0:
-                            frag_length_models.observe(fl, result.splice_type)
-                            stats.n_frag_length_unambiguous += 1
-                        else:
-                            stats.n_frag_length_ambiguous += 1
-                    else:
-                        stats.n_frag_length_ambiguous += 1
-
-            # --- Buffer ALL resolved fragments with frag_id ---
-            buffer.append(result, frag_id=frag_id)
-
-            if not is_unique_mapper:
-                n_buffered_mm += 1
-
-        if n_buffered_mm > 0:
-            stats.n_multimapper_groups += 1
-            stats.n_multimapper_alignments += n_buffered_mm
-
-        frag_id += 1
-        if frag_id % scan.log_every == 0:
-            logger.debug(
-                f"  {frag_id:,} read-name groups, "
-                f"{stats.n_fragments:,} fragments, "
-                f"{strand_models.n_observations:,} strand obs, "
-                f"{buffer.total_fragments:,} buffered"
-            )
-
-    buffer.finalize()
-
-    logger.info(
-        f"[DONE] Scan: {stats.n_fragments:,} fragments → "
         f"{stats.n_unique_gene:,} unique-gene, "
         f"{stats.n_multi_gene:,} multi-gene, "
         f"{stats.n_intergenic:,} intergenic, "
@@ -793,21 +551,6 @@ def count_from_buffer(
 # Full pipeline orchestration
 # ---------------------------------------------------------------------------
 
-def _scan_with_pysam(
-    bam_path: str,
-    index: HulkIndex,
-    scan: "ScanConfig",
-) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
-    """Python/pysam BAM scan fallback."""
-    import pysam
-
-    bamfh = pysam.AlignmentFile(bam_path, "rb")
-    try:
-        return scan_and_buffer(bamfh.fetch(until_eof=True), index, scan)
-    finally:
-        bamfh.close()
-
-
 def run_pipeline(
     bam_path,
     index: HulkIndex,
@@ -815,14 +558,8 @@ def run_pipeline(
 ) -> PipelineResult:
     """Run the complete counting pipeline with locus-level EM.
 
-    Opens the BAM **once**, scans all fragments, trains models,
-    buffers resolved fragments, then counts via per-locus EM.
-
-    When the native C++ BAM scanner (``_bam_impl``) is available, the
-    entire BAM scan runs in C++ via htslib for dramatically better
-    performance.  If the native scanner is not available or fails, the
-    function falls back to the Python/pysam path automatically.  Set
-    ``HULKRNA_FORCE_PYTHON_BAM=1`` to force the fallback.
+    Opens the BAM **once** via the C++ BAM scanner, scans all fragments,
+    trains models, buffers resolved fragments, then counts via per-locus EM.
 
     Parameters
     ----------
@@ -843,35 +580,21 @@ def run_pipeline(
     bam_path = str(bam_path)
 
     # -- Resolve sj_strand_tag "auto" → concrete tag(s) --
+    # Use the C++ implementation (htslib) instead of the pysam-based
+    # ``detect_sj_strand_tag`` because pysam's Cython tracing hooks
+    # are corrupted when a cProfile profiler has been active during
+    # a prior nanobind C++ extension call in the same process.
+    # The native function returns a spec string ("XS", "ts", "XS,ts",
+    # or "none") which ``_sj_tag_to_spec`` already handles.
     scan = config.scan
     if scan.sj_strand_tag == "auto":
-        detected = detect_sj_strand_tag(bam_path)
-        if len(detected) == 1:
-            resolved_tag = detected[0]
-        elif len(detected) > 1:
-            resolved_tag = detected
-        else:
-            resolved_tag = ()
-        scan = _replace(scan, sj_strand_tag=resolved_tag)
+        detected_spec = _native_detect_sj_tag(bam_path)
+        scan = _replace(scan, sj_strand_tag=detected_spec)
 
-    # -- Single BAM pass (native C++ or Python fallback) --
-    if _HAS_NATIVE_BAM_SCANNER:
-        try:
-            stats, strand_models, frag_length_models, buffer = (
-                scan_and_buffer_native(bam_path, index, scan)
-            )
-        except Exception:
-            logger.warning(
-                "Native BAM scanner failed; falling back to Python/pysam",
-                exc_info=True,
-            )
-            stats, strand_models, frag_length_models, buffer = (
-                _scan_with_pysam(bam_path, index, scan)
-            )
-    else:
-        stats, strand_models, frag_length_models, buffer = (
-            _scan_with_pysam(bam_path, index, scan)
-        )
+    # -- Single BAM pass (C++ native scanner) --
+    stats, strand_models, frag_length_models, buffer = (
+        scan_and_buffer(bam_path, index, scan)
+    )
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()

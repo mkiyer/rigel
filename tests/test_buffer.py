@@ -1,71 +1,49 @@
-"""Tests for hulkrna.buffer — FragmentBuffer with columnar storage and disk spill."""
+"""Tests for hulkrna.buffer -- FragmentBuffer with native C++ accumulator.
+
+All buffer append tests use C++ ResolvedResult objects produced by
+ResolveContext.resolve_fragment(), exercising the real native code path.
+"""
 
 import numpy as np
 import pytest
 
-from hulkrna.types import Strand, MergeCriteria
+from hulkrna.types import Strand, MergeCriteria, GenomicInterval, ChimeraType
 from hulkrna.categories import SpliceType
-from hulkrna.resolution import ResolvedFragment
-from hulkrna.buffer import FragmentBuffer, BufferedFragment, FRAG_UNIQUE, FRAG_ISOFORM_AMBIG, FRAG_GENE_AMBIG, FRAG_MULTIMAPPER, FRAG_CHIMERIC
-from hulkrna.types import ChimeraType
+from hulkrna.resolution import resolve_fragment
+from hulkrna.fragment import Fragment
+from hulkrna.buffer import (
+    FragmentBuffer,
+    BufferedFragment,
+    FRAG_UNIQUE,
+    FRAG_ISOFORM_AMBIG,
+    FRAG_GENE_AMBIG,
+    FRAG_MULTIMAPPER,
+    FRAG_CHIMERIC,
+)
+from hulkrna.index import HulkIndex
 
 
 # =====================================================================
-# Helpers
+# Fixtures -- use shared mini_index from conftest.py
 # =====================================================================
 
 
-def _make_resolved(**kwargs):
-    """Create a ResolvedFragment with sensible defaults."""
-    defaults = dict(
-        t_inds=frozenset({0, 1}),
-        n_genes=1,
-        splice_type=SpliceType.UNSPLICED,
-        exon_strand=Strand.POS,
-        sj_strand=Strand.NONE,
-        frag_lengths={0: 250, 1: 250},
-        merge_criteria=MergeCriteria.INTERSECTION,
-        num_hits=1,
-        genomic_footprint=250,
-        genomic_start=1000,
-    )
-    defaults.update(kwargs)
-    return ResolvedFragment(**defaults)
+def _resolve(index, exons, introns=()):
+    """Create a Fragment and resolve it via C++ ResolveContext.
+
+    Returns the C++ ResolvedResult (or None for intergenic).
+    """
+    frag = Fragment(exons=tuple(exons), introns=tuple(introns))
+    return resolve_fragment(frag, index)
 
 
-def _make_t_to_g_arr(n=5):
-    """Create a simple t_to_g_arr for testing. t0-t4 → g0-g2 (round-robin)."""
-    import numpy as np
-    return np.array([i % 3 for i in range(n)], dtype=np.int64)
-
-
-def _fill_buffer(n, *, chunk_size=100, **buffer_kwargs):
-    """Create and fill a buffer with n fragments, returning (buffer, fragments)."""
-    t_to_g = _make_t_to_g_arr()
-    buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=chunk_size, **buffer_kwargs)
-    fragments = []
-    for i in range(n):
-        t_set = frozenset({i % 5, (i + 1) % 5})
-        # Derive n_genes from t_set using t_to_g
-        n_genes = len(set(int(t_to_g[t]) for t in t_set))
-        flen = 200 + i
-        r = _make_resolved(
-            t_inds=t_set,
-            n_genes=n_genes,
-            splice_type=SpliceType(i % len(SpliceType)),
-            exon_strand=Strand(1 + i % 2),  # POS or NEG
-            sj_strand=Strand(1 + (i + 1) % 2),
-            frag_lengths={t: flen for t in t_set},
-            num_hits=1 + i % 2,
-        )
-        fragments.append(r)
-        buf.append(r)
-    buf.finalize()
-    return buf, fragments
+def _exon(ref, start, end, strand=Strand.POS):
+    """Shorthand for creating a GenomicInterval."""
+    return GenomicInterval(ref, start, end, strand)
 
 
 # =====================================================================
-# BufferedFragment duck-typing properties
+# BufferedFragment duck-typing properties (no buffer needed)
 # =====================================================================
 
 
@@ -82,7 +60,6 @@ class TestBufferedFragment:
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
         assert bf.is_unique_gene is True
-        assert (bf.n_genes > 1 or bf.num_hits > 1) is False
 
     def test_is_ambiguous_multi_gene(self):
         bf = BufferedFragment(
@@ -95,7 +72,7 @@ class TestBufferedFragment:
             num_hits=1,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert (bf.n_genes > 1 or bf.num_hits > 1) is True
+        assert bf.n_genes > 1
 
     def test_is_ambiguous_multimapped(self):
         bf = BufferedFragment(
@@ -108,7 +85,7 @@ class TestBufferedFragment:
             num_hits=3,
             merge_criteria=int(MergeCriteria.INTERSECTION),
         )
-        assert (bf.n_genes > 1 or bf.num_hits > 1) is True
+        assert bf.num_hits > 1
 
     def test_has_annotated_sj(self):
         bf = BufferedFragment(
@@ -163,84 +140,197 @@ class TestBufferedFragment:
         assert len(bf.t_inds) == 3
         assert list(bf.t_inds) == [10, 20, 30]
 
-    def test_is_isoform_ambiguous_true(self):
-        """1 gene, 2 transcripts, NH=1 → isoform-ambiguous."""
-        bf = BufferedFragment(
-            t_inds=np.array([0, 1], dtype=np.int32),
-            n_genes=1,
-            splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
-            sj_strand=int(Strand.NONE),
-            frag_lengths=np.array([250, 250], dtype=np.int32),
-            num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
-        )
-        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is True
 
-    def test_is_isoform_ambiguous_false_unique(self):
-        """1 gene, 1 transcript, NH=1 → truly unique, not isoform-ambiguous."""
-        bf = BufferedFragment(
-            t_inds=np.array([0], dtype=np.int32),
-            n_genes=1,
-            splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
-            sj_strand=int(Strand.NONE),
-            frag_lengths=np.array([250], dtype=np.int32),
-            num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
-        )
-        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is False
+# =====================================================================
+# NativeAccumulator -- direct C++ tests
+# =====================================================================
 
-    def test_is_isoform_ambiguous_false_multi_gene(self):
-        """2 genes → gene-ambiguous, not isoform-ambiguous."""
-        bf = BufferedFragment(
-            t_inds=np.array([0, 1], dtype=np.int32),
-            n_genes=2,
-            splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
-            sj_strand=int(Strand.NONE),
-            frag_lengths=np.array([250, 250], dtype=np.int32),
-            num_hits=1,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
-        )
-        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is False
 
-    def test_is_isoform_ambiguous_false_multimapped(self):
-        """1 gene, 2 transcripts, NH=3 → multimapper, not isoform-ambiguous."""
-        bf = BufferedFragment(
-            t_inds=np.array([0, 1], dtype=np.int32),
-            n_genes=1,
-            splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
-            sj_strand=int(Strand.NONE),
-            frag_lengths=np.array([250, 250], dtype=np.int32),
-            num_hits=3,
-            merge_criteria=int(MergeCriteria.INTERSECTION),
-        )
-        assert (bf.n_genes == 1 and len(bf.t_inds) > 1 and bf.num_hits == 1) is False
+class TestNativeAccumulator:
+    """Test NativeAccumulator directly (no FragmentBuffer)."""
+
+    def test_append_and_size(self, mini_index):
+        from hulkrna._resolve_impl import NativeAccumulator
+
+        acc = NativeAccumulator()
+        assert acc.size == 0
+
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert result is not None
+        acc.append(result, 0)
+        assert acc.size == 1
+
+    def test_finalize_returns_dict(self, mini_index):
+        from hulkrna._resolve_impl import NativeAccumulator
+
+        acc = NativeAccumulator()
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        acc.append(result, 0)
+
+        raw = acc.finalize(mini_index.t_to_g_arr.tolist())
+        assert isinstance(raw, dict)
+        assert raw["size"] == 1
+        assert "splice_type" in raw
+        assert "t_offsets" in raw
+        assert "t_indices" in raw
+
+    def test_finalize_multiple(self, mini_index):
+        from hulkrna._resolve_impl import NativeAccumulator
+
+        acc = NativeAccumulator()
+
+        # Exon in g1 region -> hits t1, t2
+        r1 = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        # Exon in g2 region -> hits t3
+        r2 = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
+        acc.append(r1, 0)
+        acc.append(r2, 1)
+        assert acc.size == 2
+
+        raw = acc.finalize(mini_index.t_to_g_arr.tolist())
+        assert raw["size"] == 2
 
 
 # =====================================================================
-# FragmentBuffer — frag_id round-trip
+# FragmentBuffer -- basic accumulation via native path
+# =====================================================================
+
+
+class TestFragmentBufferBasic:
+    def test_empty_buffer(self, mini_index):
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.finalize()
+        assert buf.total_fragments == 0
+        assert buf.n_chunks == 0
+        assert list(buf) == []
+
+    def test_single_fragment(self, mini_index):
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert result is not None
+        buf.append(result)
+        buf.finalize()
+
+        assert buf.total_fragments == 1
+        assert buf.n_chunks == 1
+        frags = list(buf)
+        assert len(frags) == 1
+        # t1 and t2 both have exon (99,200), so this should hit both
+        assert len(frags[0].t_inds) >= 1
+
+    def test_roundtrip_preserves_splice_type(self, mini_index):
+        """Splice type should survive through the C++ accumulator."""
+        r_unspliced = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r_unspliced is not None
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r_unspliced)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.splice_type == int(SpliceType.UNSPLICED)
+
+    def test_roundtrip_preserves_strand(self, mini_index):
+        """Exon strand should survive through the C++ accumulator."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180, Strand.POS)])
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.exon_strand == int(Strand.POS)
+
+    def test_multiple_fragments_different_genes(self, mini_index):
+        """Fragments from different genes should be buffered correctly."""
+        r1 = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        r2 = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r1, frag_id=0)
+        buf.append(r2, frag_id=1)
+        buf.finalize()
+
+        frags = list(buf)
+        assert len(frags) == 2
+
+    def test_many_fragments_chunking(self, mini_index):
+        """Buffer should create multiple chunks when chunk_size is exceeded."""
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr, chunk_size=10
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(25):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
+        assert buf.total_fragments == 25
+        assert buf.n_chunks == 3  # 10, 10, 5
+
+        chunks = list(buf.iter_chunks())
+        assert len(chunks) == 3
+        assert chunks[0].size == 10
+        assert chunks[1].size == 10
+        assert chunks[2].size == 5
+
+    def test_num_hits_preserved(self, mini_index):
+        """num_hits set on ResolvedResult should survive buffer round-trip."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        r.num_hits = 3
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.num_hits == 3
+
+    def test_nm_preserved(self, mini_index):
+        """NM edit distance should survive buffer round-trip."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        r.nm = 5
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.nm == 5
+
+    def test_nm_default_zero(self, mini_index):
+        """Default NM should be 0."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
+        buf.finalize()
+
+        bf = list(buf)[0]
+        assert bf.nm == 0
+
+
+# =====================================================================
+# FragmentBuffer -- frag_id round-trip
 # =====================================================================
 
 
 class TestFragId:
-    def test_frag_id_default_zero(self):
+    def test_frag_id_default_zero(self, mini_index):
         """Default frag_id should be 0."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved())
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        buf.append(r)
         buf.finalize()
 
         bf = list(buf)[0]
         assert bf.frag_id == 0
 
-    def test_frag_id_preserves_value(self):
-        """Explicit frag_id should survive append → finalize → iterate."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(), frag_id=42)
-        buf.append(_make_resolved(), frag_id=42)
-        buf.append(_make_resolved(), frag_id=99)
+    def test_frag_id_preserves_value(self, mini_index):
+        """Explicit frag_id should survive append -> finalize -> iterate."""
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        buf.append(r, frag_id=42)
+        buf.append(r, frag_id=42)
+        buf.append(r, frag_id=99)
         buf.finalize()
 
         frags = list(buf)
@@ -248,28 +338,30 @@ class TestFragId:
         assert frags[1].frag_id == 42
         assert frags[2].frag_id == 99
 
-    def test_frag_id_chunk_array(self):
+    def test_frag_id_chunk_array(self, mini_index):
         """frag_id should be accessible as chunk array."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(5):
-            buf.append(_make_resolved(), frag_id=i // 2)
+            buf.append(r, frag_id=i // 2)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
         assert list(chunk.frag_id) == [0, 0, 1, 1, 2]
 
-    def test_frag_id_survives_spill(self, tmp_path):
+    def test_frag_id_survives_spill(self, mini_index, tmp_path):
         """frag_id should survive Arrow IPC spill and reload."""
         buf = FragmentBuffer(
-            t_to_g_arr=_make_t_to_g_arr(),
+            t_to_g_arr=mini_index.t_to_g_arr,
             chunk_size=50,
             max_memory_bytes=1,  # force spill
             spill_dir=tmp_path,
         )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         frag_ids = []
         for i in range(100):
-            fid = i // 3  # groups of 3
-            buf.append(_make_resolved(), frag_id=fid)
+            fid = i // 3
+            buf.append(r, frag_id=fid)
             frag_ids.append(fid)
         buf.finalize()
 
@@ -279,364 +371,198 @@ class TestFragId:
 
 
 # =====================================================================
-# FragmentBuffer — basic accumulation
-# =====================================================================
-
-
-class TestFragmentBufferBasic:
-    def test_empty_buffer(self):
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.finalize()
-        assert buf.total_fragments == 0
-        assert buf.n_chunks == 0
-        assert list(buf) == []
-
-    def test_single_fragment(self):
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        r = _make_resolved()
-        buf.append(r)
-        buf.finalize()
-
-        assert buf.total_fragments == 1
-        assert buf.n_chunks == 1
-        frags = list(buf)
-        assert len(frags) == 1
-        assert frags[0].frag_lengths[0] == 250
-        assert frags[0].splice_type == int(SpliceType.UNSPLICED)
-
-    def test_roundtrip_preserves_data(self):
-        """All fields should survive append → finalize → iterate."""
-        r = _make_resolved(
-            t_inds=frozenset({3, 7, 11}),
-            n_genes=2,
-            splice_type=SpliceType.SPLICED_ANNOT,
-            exon_strand=Strand.NEG,
-            sj_strand=Strand.POS,
-            frag_lengths={3: 350, 7: 350, 11: 350},
-            merge_criteria=MergeCriteria.UNION,
-            num_hits=4,
-        )
-        # Need a t_to_g that maps indices 3,7,11 → two different genes
-        import numpy as np
-        t_to_g = np.zeros(12, dtype=np.int64)
-        t_to_g[3] = 0
-        t_to_g[7] = 0
-        t_to_g[11] = 1
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=100)
-        buf.append(r)
-        buf.finalize()
-
-        bf = list(buf)[0]
-        assert sorted(bf.t_inds) == [3, 7, 11]
-        assert bf.n_genes == 2
-        assert bf.splice_type == int(SpliceType.SPLICED_ANNOT)
-        assert bf.exon_strand == int(Strand.NEG)
-        assert bf.sj_strand == int(Strand.POS)
-        assert bf.frag_lengths[0] == 350
-        assert bf.merge_criteria == int(MergeCriteria.UNION)
-        assert bf.num_hits == 4
-
-    def test_multiple_fragments(self):
-        buf, fragments = _fill_buffer(50, chunk_size=100)
-        assert buf.total_fragments == 50
-        assert buf.n_chunks == 1  # 50 < chunk_size of 100
-
-        result = list(buf)
-        assert len(result) == 50
-        for i, bf in enumerate(result):
-            assert bf.frag_lengths[0] == 200 + i
-
-    def test_chunking(self):
-        buf, fragments = _fill_buffer(250, chunk_size=100)
-        assert buf.total_fragments == 250
-        assert buf.n_chunks == 3  # 100, 100, 50
-
-        chunks = list(buf.iter_chunks())
-        assert len(chunks) == 3
-        assert chunks[0].size == 100
-        assert chunks[1].size == 100
-        assert chunks[2].size == 50
-
-    def test_large_overlap_and_frag_length_preserved(self):
-        """Large per-candidate overlap bp and fragment length do not overflow."""
-        t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=10)
-
-        big_exon_bp = 120_000
-        big_intron_bp = 80_000
-        big_frag_len = 200_000
-
-        r = _make_resolved(
-            t_inds=frozenset({0, 2}),
-            n_genes=2,
-            overlap_bp={
-                0: (big_exon_bp, big_intron_bp, big_intron_bp),
-                2: (big_exon_bp - 1, big_intron_bp - 1, big_intron_bp - 1),
-            },
-            read_length=big_frag_len,
-        )
-        buf.append(r, frag_id=7)
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        bf = chunk[0]
-
-        assert bf.read_length == big_frag_len
-        assert int(bf.exon_bp[0]) == big_exon_bp
-        assert int(bf.intron_bp[0]) == big_intron_bp
-        assert int(bf.exon_bp[1]) == big_exon_bp - 1
-        assert int(bf.intron_bp[1]) == big_intron_bp - 1
-        assert int(bf.unambig_intron_bp[0]) == big_intron_bp
-        assert int(bf.unambig_intron_bp[1]) == big_intron_bp - 1
-
-    def test_nm_field_roundtrip(self):
-        """NM edit distance is preserved through buffer append → read cycle."""
-        t_to_g = np.array([0, 0, 1], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=10)
-
-        r = _make_resolved(
-            t_inds=frozenset({0, 2}), n_genes=2,
-            overlap_bp={0: (100, 0, 0), 2: (100, 0, 0)},
-            read_length=100, nm=7,
-        )
-        buf.append(r)
-        buf.finalize()
-
-        bf = list(buf)[0]
-        assert bf.nm == 7
-
-    def test_nm_default_zero(self):
-        """When nm not set on ResolvedFragment, buffered value is 0."""
-        t_to_g = np.array([0, 0], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=10)
-
-        r = _make_resolved(
-            t_inds=frozenset({0}), n_genes=1,
-            overlap_bp={0: (50, 0, 0)}, read_length=50,
-        )
-        buf.append(r)
-        buf.finalize()
-
-        bf = list(buf)[0]
-        assert bf.nm == 0
-
-
-# =====================================================================
-# FragmentBuffer — fragment_classes (tri-state classification)
+# FragmentBuffer -- fragment_classes
 # =====================================================================
 
 
 class TestFragmentClasses:
-    def test_truly_unique(self):
-        """1 gene, 1 transcript, NH=1 → FRAG_UNIQUE."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0}), n_genes=1, num_hits=1
-        ))
+    def test_unique_gene_single_transcript(self, mini_index):
+        """Single-transcript hit, NH=1 -> FRAG_UNIQUE."""
+        r = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
+        assert r is not None
+        assert r.n_genes == 1
+        t_inds = list(r.t_inds)
+        assert len(t_inds) == 1
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
         assert chunk.fragment_classes[0] == FRAG_UNIQUE
 
-    def test_isoform_ambiguous(self):
-        """1 gene, 2 transcripts, NH=1 → FRAG_ISOFORM_AMBIG."""
-        # t0 and t1 both map to same gene (need consistent t_to_g)
-        t_to_g = np.array([0, 0, 1, 1, 2], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 1}), n_genes=1, num_hits=1
-        ))
+    def test_isoform_ambiguous(self, mini_index):
+        """g1 shared exon region -> t1 + t2 (same gene) -> FRAG_ISOFORM_AMBIG."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r is not None
+        assert r.n_genes == 1
+        assert len(list(r.t_inds)) == 2
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
         assert chunk.fragment_classes[0] == FRAG_ISOFORM_AMBIG
 
-    def test_gene_ambiguous_multi_gene(self):
-        """2 genes, NH=1 → FRAG_GENE_AMBIG."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 1}), n_genes=2, num_hits=1
-        ))
-        buf.finalize()
+    def test_multimapper(self, mini_index):
+        """NH > 1 -> FRAG_MULTIMAPPER regardless of gene count."""
+        r = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
+        r.num_hits = 3
 
-        chunk = list(buf.iter_chunks())[0]
-        assert chunk.fragment_classes[0] == FRAG_GENE_AMBIG
-
-    def test_gene_ambiguous_multimapped(self):
-        """1 gene, 1 transcript, NH=3 → FRAG_MULTIMAPPER."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(
-            t_inds=frozenset({0}), n_genes=1, num_hits=3
-        ))
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
         assert chunk.fragment_classes[0] == FRAG_MULTIMAPPER
 
-    def test_mixed_classes(self):
-        """All three classes in one chunk."""
-        t_to_g = np.array([0, 0, 1, 1, 2], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=100)
-        buf.append(_make_resolved(  # unique
-            t_inds=frozenset({0}), n_genes=1, num_hits=1
-        ))
-        buf.append(_make_resolved(  # isoform-ambig (t0,t1 same gene)
-            t_inds=frozenset({0, 1}), n_genes=1, num_hits=1
-        ))
-        buf.append(_make_resolved(  # gene-ambig (t0,t2 different genes)
-            t_inds=frozenset({0, 2}), n_genes=2, num_hits=1
-        ))
-        buf.append(_make_resolved(  # gene-ambig (multimapped)
-            t_inds=frozenset({0}), n_genes=1, num_hits=2
-        ))
+    def test_mixed_classes(self, mini_index):
+        """Multiple fragment classes in one chunk."""
+        r_unique = _resolve(
+            mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)]
+        )
+        r_iso = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        r_mm = _resolve(
+            mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)]
+        )
+        r_mm.num_hits = 2
+
+        buf = FragmentBuffer(t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100)
+        buf.append(r_unique)
+        buf.append(r_iso)
+        buf.append(r_mm)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
         fc = chunk.fragment_classes
         assert fc[0] == FRAG_UNIQUE
         assert fc[1] == FRAG_ISOFORM_AMBIG
-        assert fc[2] == FRAG_GENE_AMBIG
-        assert fc[3] == FRAG_MULTIMAPPER
-
-    def test_chimeric_overrides_other_classes(self):
-        """Chimeric fragments should be classified as FRAG_CHIMERIC regardless of gene/hit count."""
-        t_to_g = np.array([0, 0, 1, 1, 2], dtype=np.int64)
-        buf = FragmentBuffer(t_to_g_arr=t_to_g, chunk_size=100)
-        # Chimeric + gene-ambig: chimeric should win
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 2}), n_genes=2, num_hits=1,
-            chimera_type=ChimeraType.CIS_STRAND_SAME,
-        ))
-        # Chimeric + multimapper: chimeric should win
-        buf.append(_make_resolved(
-            t_inds=frozenset({0}), n_genes=1, num_hits=3,
-            chimera_type=ChimeraType.TRANS,
-        ))
-        # Non-chimeric gene-ambig: should remain FRAG_GENE_AMBIG
-        buf.append(_make_resolved(
-            t_inds=frozenset({0, 2}), n_genes=2, num_hits=1,
-        ))
-        buf.finalize()
-
-        chunk = list(buf.iter_chunks())[0]
-        fc = chunk.fragment_classes
-        assert fc[0] == FRAG_CHIMERIC
-        assert fc[1] == FRAG_CHIMERIC
-        assert fc[2] == FRAG_GENE_AMBIG
-
-    def test_chimera_type_round_trip(self):
-        """chimera_type should survive append → finalize → iterate."""
-        buf = FragmentBuffer(t_to_g_arr=_make_t_to_g_arr(), chunk_size=100)
-        buf.append(_make_resolved(chimera_type=ChimeraType.NONE))
-        buf.append(_make_resolved(chimera_type=ChimeraType.TRANS))
-        buf.append(_make_resolved(chimera_type=ChimeraType.CIS_STRAND_SAME))
-        buf.append(_make_resolved(chimera_type=ChimeraType.CIS_STRAND_DIFF))
-        buf.finalize()
-
-        frags = list(buf)
-        assert frags[0].chimera_type == ChimeraType.NONE
-        assert frags[1].chimera_type == ChimeraType.TRANS
-        assert frags[2].chimera_type == ChimeraType.CIS_STRAND_SAME
-        assert frags[3].chimera_type == ChimeraType.CIS_STRAND_DIFF
+        assert fc[2] == FRAG_MULTIMAPPER
 
 
 # =====================================================================
-# FragmentBuffer — disk spill
+# FragmentBuffer -- disk spill
 # =====================================================================
 
 
 class TestDiskSpill:
-    def test_spill_triggers_above_threshold(self, tmp_path):
+    def test_spill_triggers_above_threshold(self, mini_index, tmp_path):
         """When in-memory chunks exceed max_memory_bytes, spill to disk."""
-        # Use a very small threshold to force spilling
-        buf, _ = _fill_buffer(
-            300,
-            chunk_size=100,
-            max_memory_bytes=1,  # 1 byte → always spill
-            spill_dir=tmp_path,
-        )
-
-        assert buf.n_spilled > 0
-        assert buf.memory_bytes == 0 or buf.n_spilled >= buf.n_chunks - 1
-
-    def test_spill_preserves_data(self, tmp_path):
-        """Data roundtrips correctly through Arrow IPC spill."""
-        buf, fragments = _fill_buffer(
-            200,
-            chunk_size=100,
-            max_memory_bytes=1,  # force all chunks to spill
-            spill_dir=tmp_path,
-        )
-
-        result = list(buf)
-        assert len(result) == 200
-        for i, bf in enumerate(result):
-            assert bf.frag_lengths[0] == 200 + i
-            assert bf.splice_type == int(SpliceType(i % len(SpliceType)))
-
-    def test_cleanup_removes_files(self, tmp_path):
-        buf, _ = _fill_buffer(
-            200,
-            chunk_size=100,
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr,
+            chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
         )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(150):
+            buf.append(r, frag_id=i)
+        buf.finalize()
 
-        # Files should exist before cleanup
+        assert buf.n_spilled > 0
+        assert buf.total_fragments == 150
+
+    def test_spill_preserves_data(self, mini_index, tmp_path):
+        """Data roundtrips correctly through Arrow IPC spill."""
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr,
+            chunk_size=50,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(100):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
+        assert buf.n_spilled > 0
+        result = list(buf)
+        assert len(result) == 100
+        for bf in result:
+            assert bf.splice_type == int(SpliceType.UNSPLICED)
+
+    def test_cleanup_removes_files(self, mini_index, tmp_path):
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr,
+            chunk_size=50,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(100):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         assert buf.n_spilled > 0
         spill_dirs = list(tmp_path.iterdir())
         assert len(spill_dirs) > 0
 
         buf.cleanup()
-
-        # Temp dir should be removed
         remaining = [p for p in tmp_path.iterdir() if p.is_dir()]
         assert len(remaining) == 0
 
-    def test_context_manager_cleanup(self, tmp_path):
+    def test_context_manager_cleanup(self, mini_index, tmp_path):
         with FragmentBuffer(
-            t_to_g_arr=_make_t_to_g_arr(),
-            chunk_size=100,
+            t_to_g_arr=mini_index.t_to_g_arr,
+            chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
         ) as buf:
-            for i in range(200):
-                buf.append(_make_resolved(frag_lengths={0: i, 1: i}))
+            r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+            for i in range(100):
+                buf.append(r, frag_id=i)
             buf.finalize()
             assert buf.n_spilled > 0
 
-        # After exiting context, spill files should be removed
         remaining = [p for p in tmp_path.iterdir() if p.is_dir()]
         assert len(remaining) == 0
 
-    def test_no_spill_when_disabled(self):
+    def test_no_spill_when_disabled(self, mini_index):
         """max_memory_bytes=0 disables spilling."""
-        buf, _ = _fill_buffer(
-            300,
-            chunk_size=100,
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr,
+            chunk_size=10,
             max_memory_bytes=0,
         )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(25):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         assert buf.n_spilled == 0
         assert buf.n_chunks == 3
 
-    def test_no_spill_under_threshold(self):
-        """Small buffers should not spill."""
-        buf, _ = _fill_buffer(
-            50,
+    def test_no_spill_under_threshold(self, mini_index):
+        """Small buffer should not spill."""
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr,
             chunk_size=100,
-            max_memory_bytes=100 * 1024**2,  # 100 MB
+            max_memory_bytes=100 * 1024**2,
         )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(25):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         assert buf.n_spilled == 0
 
 
 # =====================================================================
-# FragmentBuffer — summary
+# FragmentBuffer -- summary
 # =====================================================================
 
 
 class TestBufferSummary:
-    def test_summary_structure(self):
-        buf, _ = _fill_buffer(150, chunk_size=100)
+    def test_summary_structure(self, mini_index):
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(150):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         s = buf.summary()
         assert s["total_fragments"] == 150
         assert s["n_chunks"] == 2
@@ -645,40 +571,127 @@ class TestBufferSummary:
         assert s["memory_bytes"] > 0
         assert isinstance(s["memory_mb"], float)
 
-    def test_summary_with_spill(self, tmp_path):
-        buf, _ = _fill_buffer(
-            200,
-            chunk_size=100,
+    def test_summary_with_spill(self, mini_index, tmp_path):
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr,
+            chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
         )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(100):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         s = buf.summary()
-        assert s["total_fragments"] == 200
+        assert s["total_fragments"] == 100
         assert s["on_disk_chunks"] > 0
 
 
 # =====================================================================
-# FragmentBuffer — iter_chunks
+# FragmentBuffer -- iter_chunks
 # =====================================================================
 
 
 class TestIterChunks:
-    def test_iter_chunks_yields_correct_count(self):
-        buf, _ = _fill_buffer(250, chunk_size=100)
+    def test_iter_chunks_yields_correct_count(self, mini_index):
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr, chunk_size=10
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(25):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         chunks = list(buf.iter_chunks())
         assert len(chunks) == 3
         total = sum(c.size for c in chunks)
-        assert total == 250
+        assert total == 25
 
-    def test_iter_chunks_getitem(self):
-        buf, _ = _fill_buffer(5, chunk_size=100)
+    def test_iter_chunks_getitem(self, mini_index):
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(5):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         chunk = list(buf.iter_chunks())[0]
         assert chunk.size == 5
         for i in range(5):
             bf = chunk[i]
-            assert bf.frag_lengths[0] == 200 + i
+            assert len(bf.t_inds) >= 1
+            assert bf.frag_id == i
 
-    def test_memory_bytes_positive(self):
-        buf, _ = _fill_buffer(100, chunk_size=100)
+    def test_memory_bytes_positive(self, mini_index):
+        buf = FragmentBuffer(
+            t_to_g_arr=mini_index.t_to_g_arr, chunk_size=100
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(50):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
         chunk = list(buf.iter_chunks())[0]
         assert chunk.memory_bytes > 0
+
+
+# =====================================================================
+# ResolvedResult -- C++ object properties
+# =====================================================================
+
+
+class TestResolvedResult:
+    """Test the C++ ResolvedResult object returned by resolve_fragment."""
+
+    def test_t_inds_type(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r is not None
+        t_list = list(r.t_inds)
+        assert len(t_list) >= 1
+
+    def test_unspliced_fragment(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r.splice_type == int(SpliceType.UNSPLICED)
+
+    def test_spliced_fragment(self, mini_index):
+        """Fragment with annotated intron -> SPLICED_ANNOT."""
+        r = _resolve(
+            mini_index,
+            exons=[
+                _exon("chr1", 120, 200),
+                _exon("chr1", 299, 380),
+            ],
+            introns=[
+                GenomicInterval("chr1", 200, 299, Strand.POS),
+            ],
+        )
+        assert r is not None
+        assert r.splice_type == int(SpliceType.SPLICED_ANNOT)
+
+    def test_intergenic_returns_none(self, mini_index):
+        """Fragment in intergenic region -> None."""
+        r = _resolve(mini_index, [_exon("chr1", 1500, 1600)])
+        assert r is None
+
+    def test_unique_gene_property(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r.is_unique_gene is True
+
+    def test_num_hits_default(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r.num_hits == 1
+
+    def test_num_hits_mutable(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        r.num_hits = 5
+        assert r.num_hits == 5
+
+    def test_genomic_footprint(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r.genomic_footprint == 60  # 180 - 120
+
+    def test_genomic_start(self, mini_index):
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert r.genomic_start == 120

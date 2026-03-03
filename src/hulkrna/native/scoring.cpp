@@ -782,7 +782,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("anti_flag"),
              nb::arg("overhang_log_penalty"),
              nb::arg("mismatch_log_penalty"),
-             nb::arg("fl_log_prob"),
+             nb::arg("fl_log_prob").none(),
              nb::arg("fl_max_size"),
              nb::arg("fl_tail_base"),
              nb::arg("t_strand_arr"),
@@ -790,7 +790,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("t_span_arr"),
              nb::arg("t_start_arr"),
              nb::arg("nrna_base"),
-             nb::arg("t_exon_data"))
+             nb::arg("t_exon_data").none())
         .def("score_wta_mrna",
              &NativeScoringContext::score_wta_mrna,
              nb::arg("t_inds"), nb::arg("exon_bp"),

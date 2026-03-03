@@ -642,79 +642,72 @@ class HulkIndex:
                      f"{len(sj_df)} total")
 
         # -- C++ ResolveContext (native fragment resolution) ------------------
-        self._resolve_ctx = None
-        self._resolve_ref_to_id = None
-        try:
-            from hulkrna._resolve_impl import ResolveContext
-            ctx = ResolveContext()
+        from hulkrna._resolve_impl import ResolveContext
+        ctx = ResolveContext()
 
-            # 1. Overlap index from collapsed data
-            cr_refs: list[str] = []
-            cr_starts: list[int] = []
-            cr_ends: list[int] = []
-            for (ref, start, end, _itype) in _collapse.keys():
-                cr_refs.append(ref)
-                cr_starts.append(start)
-                cr_ends.append(end)
-            # CSR for transcript sets
-            tset_flat: list[int] = []
-            tset_offsets: list[int] = [0]
-            for ts in iv_t_set:
-                tset_flat.extend(sorted(ts))
-                tset_offsets.append(len(tset_flat))
-            ctx.build_overlap_index(
-                cr_refs,
-                cr_starts,
-                cr_ends,
-                iv_type,
-                tset_flat,
-                tset_offsets,
-            )
+        # 1. Overlap index from collapsed data
+        cr_refs: list[str] = []
+        cr_starts: list[int] = []
+        cr_ends: list[int] = []
+        for (ref, start, end, _itype) in _collapse.keys():
+            cr_refs.append(ref)
+            cr_starts.append(start)
+            cr_ends.append(end)
+        # CSR for transcript sets
+        tset_flat: list[int] = []
+        tset_offsets: list[int] = [0]
+        for ts in iv_t_set:
+            tset_flat.extend(sorted(ts))
+            tset_offsets.append(len(tset_flat))
+        ctx.build_overlap_index(
+            cr_refs,
+            cr_starts,
+            cr_ends,
+            iv_type,
+            tset_flat,
+            tset_offsets,
+        )
 
-            # 2. SJ exact-match map
-            sj_refs_l: list[str] = []
-            sj_starts_l: list[int] = []
-            sj_ends_l: list[int] = []
-            sj_strands_l: list[int] = []
-            sj_t_flat: list[int] = []
-            sj_t_offsets: list[int] = [0]
-            for (ref, start, end, strand), tset in self.sj_map.items():
-                sj_refs_l.append(ref)
-                sj_starts_l.append(start)
-                sj_ends_l.append(end)
-                sj_strands_l.append(strand)
-                sj_t_flat.extend(sorted(tset))
-                sj_t_offsets.append(len(sj_t_flat))
-            ctx.build_sj_map(
-                sj_refs_l,
-                sj_starts_l,
-                sj_ends_l,
-                sj_strands_l,
-                sj_t_flat,
-                sj_t_offsets,
-            )
+        # 2. SJ exact-match map
+        sj_refs_l: list[str] = []
+        sj_starts_l: list[int] = []
+        sj_ends_l: list[int] = []
+        sj_strands_l: list[int] = []
+        sj_t_flat: list[int] = []
+        sj_t_offsets: list[int] = [0]
+        for (ref, start, end, strand), tset in self.sj_map.items():
+            sj_refs_l.append(ref)
+            sj_starts_l.append(start)
+            sj_ends_l.append(end)
+            sj_strands_l.append(strand)
+            sj_t_flat.extend(sorted(tset))
+            sj_t_offsets.append(len(sj_t_flat))
+        ctx.build_sj_map(
+            sj_refs_l,
+            sj_starts_l,
+            sj_ends_l,
+            sj_strands_l,
+            sj_t_flat,
+            sj_t_offsets,
+        )
 
-            # 3. SJ gap index (raw sj_df rows)
-            ctx.build_sj_gap_index(
-                sj_df["ref"].tolist(),
-                sj_df["start"].values.astype(np.int32).tolist(),
-                sj_df["end"].values.astype(np.int32).tolist(),
-                sj_df["t_index"].values.astype(np.int32).tolist(),
-                sj_df["strand"].values.astype(np.int32).tolist(),
-            )
+        # 3. SJ gap index (raw sj_df rows)
+        ctx.build_sj_gap_index(
+            sj_df["ref"].tolist(),
+            sj_df["start"].values.astype(np.int32).tolist(),
+            sj_df["end"].values.astype(np.int32).tolist(),
+            sj_df["t_index"].values.astype(np.int32).tolist(),
+            sj_df["strand"].values.astype(np.int32).tolist(),
+        )
 
-            # 4. Metadata
-            ctx.set_metadata(
-                self.t_to_g_arr.astype(np.int32).tolist(),
-                len(self.t_to_g_arr),
-            )
+        # 4. Metadata
+        ctx.set_metadata(
+            self.t_to_g_arr.astype(np.int32).tolist(),
+            len(self.t_to_g_arr),
+        )
 
-            self._resolve_ctx = ctx
-            self._resolve_ref_to_id = ctx.get_ref_to_id()
-            logger.debug("Built native ResolveContext for C++ resolution")
-        except ImportError:
-            logger.debug("Native _resolve_impl not available, "
-                         "using Python resolution")
+        self._resolve_ctx = ctx
+        logger.debug("Built native ResolveContext for C++ resolution")
 
         return self
 
