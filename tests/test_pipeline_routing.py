@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 from hulkrna.buffer import (
-    FRAG_GENE_AMBIG,
-    FRAG_ISOFORM_AMBIG,
+    FRAG_AMBIG_OPP_STRAND,
+    FRAG_AMBIG_SAME_STRAND,
     FRAG_MULTIMAPPER,
     FRAG_UNIQUE,
 )
-from hulkrna.categories import SpliceType
+from hulkrna.splice import SpliceType
 from hulkrna.config import EMConfig
 from hulkrna.estimator import AbundanceEstimator
 from hulkrna.frag_length_model import FragmentLengthModels
@@ -88,7 +88,7 @@ def _make_env(index):
         strand_models.exonic_spliced.observe(Strand.POS, Strand.POS)
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
-    counter = AbundanceEstimator(index.num_transcripts, index.num_genes,
+    counter = AbundanceEstimator(index.num_transcripts,
                                   em_config=EMConfig(seed=1))
     stats = PipelineStats()
     return strand_models, frag_length_models, counter, stats
@@ -256,8 +256,8 @@ def test_route_counters_are_exclusive_per_unit():
         fragment_classes=[
             FRAG_UNIQUE,
             FRAG_UNIQUE,
-            FRAG_ISOFORM_AMBIG,
-            FRAG_GENE_AMBIG,
+            FRAG_AMBIG_SAME_STRAND,
+            FRAG_AMBIG_OPP_STRAND,
             FRAG_MULTIMAPPER,
             FRAG_MULTIMAPPER,
         ],
@@ -277,15 +277,15 @@ def test_route_counters_are_exclusive_per_unit():
 
     assert stats.deterministic_unique_units == 1
     assert stats.em_routed_unique_units == 1
-    assert stats.em_routed_isoform_ambig_units == 1
-    assert stats.em_routed_gene_ambig_units == 1
+    assert stats.em_routed_ambig_same_strand_units == 1
+    assert stats.em_routed_ambig_opp_strand_units == 1
     assert stats.em_routed_multimapper_units == 1
 
     total_units = (
         stats.deterministic_unique_units
         + stats.em_routed_unique_units
-        + stats.em_routed_isoform_ambig_units
-        + stats.em_routed_gene_ambig_units
+        + stats.em_routed_ambig_same_strand_units
+        + stats.em_routed_ambig_opp_strand_units
         + stats.em_routed_multimapper_units
     )
     assert total_units == 5

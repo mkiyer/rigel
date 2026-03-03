@@ -14,7 +14,7 @@ import numpy as np
 from .buffer import (
     FragmentBuffer,
     FRAG_UNIQUE,
-    FRAG_ISOFORM_AMBIG,
+    FRAG_AMBIG_SAME_STRAND,
     FRAG_MULTIMAPPER,
     FRAG_CHIMERIC,
 )
@@ -24,15 +24,12 @@ from .scoring import (
     ScoringContext,
     LOG_SAFE_FLOOR,
     LOG_HALF,
-    STRAND_POS,
-    STRAND_NEG,
-    SPLICE_UNSPLICED,
-    SPLICE_UNANNOT,
-    SPLICE_ANNOT,
     frag_len_log_lik,
     genomic_to_transcript_pos_bisect,
     compute_fragment_weight,
 )
+from .types import STRAND_POS, STRAND_NEG
+from .splice import SPLICE_UNSPLICED, SPLICE_UNANNOT, SPLICE_ANNOT
 from .frag_length_model import _TAIL_DECAY_LP
 from .stats import PipelineStats
 from .annotate import POOL_CODE_MRNA, POOL_CODE_CHIMERIC
@@ -500,10 +497,10 @@ class EmDataBuilder:
 
         if fc == FRAG_UNIQUE:
             self.stats.em_routed_unique_units += 1
-        elif fc == FRAG_ISOFORM_AMBIG:
-            self.stats.em_routed_isoform_ambig_units += 1
+        elif fc == FRAG_AMBIG_SAME_STRAND:
+            self.stats.em_routed_ambig_same_strand_units += 1
         else:
-            self.stats.em_routed_gene_ambig_units += 1
+            self.stats.em_routed_ambig_opp_strand_units += 1
 
     # ------------------------------------------------------------------
     # Multimapper group flush
@@ -697,27 +694,34 @@ class EmDataBuilder:
                 is_spliced_annot = bf.splice_type == SPLICE_ANNOT
 
                 # --- Pre-EM strand/intronic accumulation ---
-                if fc == FRAG_UNIQUE or fc == FRAG_ISOFORM_AMBIG:
-                    g_idx = int(t_to_g[int(bf.t_inds[0])])
-                    gene_strand = int(index.g_to_strand_arr[g_idx])
+                if fc == FRAG_UNIQUE or fc == FRAG_AMBIG_SAME_STRAND:
+                    first_t = int(bf.t_inds[0])
+                    t_strand = int(index.t_to_strand_arr[first_t])
 
                     is_anti = counter.is_antisense(
-                        bf.exon_strand, gene_strand,
+                        bf.exon_strand, t_strand,
                         self.strand_models.exonic_spliced,
                     )
 
                     is_unspliced = (bf.splice_type == SPLICE_UNSPLICED)
-                    if is_unspliced:
-                        if is_anti:
-                            counter.gene_antisense_all[g_idx] += 1.0
-                        else:
-                            counter.gene_sense_all[g_idx] += 1.0
 
-                    # Transcript-level intronic (for nRNA init)
+                    # Transcript-level unspliced sense/antisense (for gDNA init)
+                    # and intronic sense/antisense (for nRNA init).
                     n_cand = len(bf.t_inds)
                     weight = 1.0 / n_cand
                     for k, t_idx in enumerate(bf.t_inds):
                         t_idx_int = int(t_idx)
+
+                        if is_unspliced:
+                            if is_anti:
+                                counter.transcript_unspliced_antisense[
+                                    t_idx_int
+                                ] += weight
+                            else:
+                                counter.transcript_unspliced_sense[
+                                    t_idx_int
+                                ] += weight
+
                         has_unambig_intron = (
                             bf.unambig_intron_bp is not None
                             and bf.unambig_intron_bp[k] > 0

@@ -172,7 +172,7 @@ correct and unchanged.
 
 ### 2.6 Isoform Structural Ambiguity
 
-For FRAG_ISOFORM_AMBIG fragments (single gene, multiple
+For FRAG_AMBIG_SAME_STRAND fragments (single gene, multiple
 transcripts): a fragment may be EXONIC relative to isoform A but
 INTRONIC relative to isoform B. This means an unspliced sense
 fragment overlapping exon(A) and intron(B) could be:
@@ -289,12 +289,12 @@ self.transcript_intronic_antisense = np.zeros(num_transcripts, dtype=np.float64)
 
 Inside the `for i in range(chunk.size)` loop at
 [pipeline.py L759](src/hulkrna/pipeline.py#L759), for fragments
-with `fc == FRAG_UNIQUE` or `fc == FRAG_ISOFORM_AMBIG`:
+with `fc == FRAG_UNIQUE` or `fc == FRAG_AMBIG_SAME_STRAND`:
 
 ```python
 # --- Pre-EM strand/intronic accumulation ---
 # Independent of EM routing; runs alongside existing logic.
-if fc == FRAG_UNIQUE or fc == FRAG_ISOFORM_AMBIG:
+if fc == FRAG_UNIQUE or fc == FRAG_AMBIG_SAME_STRAND:
     g_idx = int(t_to_g[int(bf.t_inds[0])])
     gene_strand = int(index.g_to_strand_arr[g_idx])
     sm = strand_models.exonic_spliced
@@ -309,7 +309,7 @@ if fc == FRAG_UNIQUE or fc == FRAG_ISOFORM_AMBIG:
     # Transcript-level intronic (for nRNA init)
     # Each candidate transcript k has its own intron_bp[k].
     # FRAG_UNIQUE: 1 candidate, full weight.
-    # FRAG_ISOFORM_AMBIG: n candidates, fractional weight.
+    # FRAG_AMBIG_SAME_STRAND: n candidates, fractional weight.
     n_cand = len(bf.t_inds)
     weight = 1.0 / n_cand
     for k, t_idx in enumerate(bf.t_inds):
@@ -328,8 +328,8 @@ if fc == FRAG_UNIQUE or fc == FRAG_ISOFORM_AMBIG:
 | Class | Included | Rationale |
 |-------|----------|-----------|
 | `FRAG_UNIQUE` | Yes | Single gene, single transcript — unambiguous |
-| `FRAG_ISOFORM_AMBIG` | Yes | Single gene, strand unambiguous; fractional per-transcript intronic |
-| `FRAG_GENE_AMBIG` | No | Cannot attribute to one gene |
+| `FRAG_AMBIG_SAME_STRAND` | Yes | Single gene, strand unambiguous; fractional per-transcript intronic |
+| `FRAG_AMBIG_OPP_STRAND` | No | Cannot attribute to one gene |
 | `FRAG_MULTIMAPPER` | No | Alignment uncertain |
 | `FRAG_CHIMERIC` | No | Already filtered |
 
@@ -610,7 +610,7 @@ Re-tune after Steps 1–4 are merged.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D1 | Include FRAG_ISOFORM_AMBIG in pre-EM counting | Single gene, shared strand; antisense is unambiguous; excluding them discards significant signal at multi-isoform genes |
+| D1 | Include FRAG_AMBIG_SAME_STRAND in pre-EM counting | Single gene, shared strand; antisense is unambiguous; excluding them discards significant signal at multi-isoform genes |
 | D2 | **Transcript-level nRNA init** (not gene-level) | nRNA is pre-mRNA from a specific transcript. Each isoform has its own intron structure. Intronic reads are transcript-level evidence: `intron_bp[k] > 0` means intronic for transcript k specifically. Per-transcript counting is the only correct model. |
 | D3 | **Gene-level gDNA init** (locus approximation) | gDNA is a locus/chromosomal/global phenomenon. Per-gene shadows are a practical approximation matching the current EM architecture. Future: locus-level shadows for overlapping genes (§7.1) |
 | D4 | Remove gDNA prior zeroing; keep nRNA zeroing for single-exon | Prior zeroing was a workaround for unreliable init. With corrected init, the Dirichlet pseudocount provides adequate safety. Single-exon nRNA zeroing is physically correct (no introns → nRNA ≡ mRNA) |

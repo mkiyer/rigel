@@ -167,12 +167,8 @@ class TranscriptGeometry:
         float64[n_transcripts] — spliced exonic lengths.
     t_to_g : np.ndarray
         int32[n_transcripts] — transcript-to-gene mapping.
-    gene_spans : np.ndarray
-        float64[n_genes] — genomic gene spans.
     mean_frag : float
         Mean fragment length from the trained model.
-    intronic_spans : np.ndarray
-        float64[n_genes] — per-gene intronic spans.
     transcript_spans : np.ndarray
         float64[n_transcripts] — genomic transcript spans.
     """
@@ -180,7 +176,5 @@ class TranscriptGeometry:
     effective_lengths: np.ndarray
     exonic_lengths: np.ndarray
     t_to_g: np.ndarray
-    gene_spans: np.ndarray
     mean_frag: float
-    intronic_spans: np.ndarray
     transcript_spans: np.ndarray

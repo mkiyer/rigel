@@ -9,7 +9,7 @@ with LZ4 compression.
 
 Memory efficiency vs. Python objects::
 
-    ResolvedFragment objects:  ~580-640 bytes per fragment
+    ResolvedResult objects:   ~580-640 bytes per fragment
     Columnar buffer:           ~40-50 bytes per fragment  (15× reduction)
 
 Architecture
@@ -32,7 +32,7 @@ from typing import Iterator
 
 import numpy as np
 
-from .categories import SpliceType
+from .splice import SpliceType
 from .types import ChimeraType, Strand
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,9 @@ __all__ = ["FragmentBuffer", "BufferedFragment"]
 from ._resolve_impl import NativeAccumulator, ResolvedResult
 
 # Fragment classification constants used by fragment_classes property
-FRAG_UNIQUE: int = 0          # 1 gene, 1 transcript, NH=1
-FRAG_ISOFORM_AMBIG: int = 1   # 1 gene, >1 transcript, NH=1
-FRAG_GENE_AMBIG: int = 2      # >1 gene, NH=1
+FRAG_UNIQUE: int = 0          # same-strand, 1 transcript, NH=1
+FRAG_AMBIG_SAME_STRAND: int = 1  # same-strand, >1 transcript, NH=1
+FRAG_AMBIG_OPP_STRAND: int = 2   # ambig-strand transcripts, NH=1
 FRAG_MULTIMAPPER: int = 3     # NH > 1 (multimapped molecule)
 FRAG_CHIMERIC: int = 4        # chimeric fragment (disjoint transcript sets)
 
@@ -57,18 +57,18 @@ FRAG_CHIMERIC: int = 4        # chimeric fragment (disjoint transcript sets)
 class BufferedFragment:
     """Lightweight view into a columnar buffer chunk.
 
-    Provides the same duck-typed interface as ``ResolvedFragment`` so
+    Provides the same duck-typed interface as ``ResolvedResult`` so
     that ``AbundanceEstimator.assign_unique`` and the EM scoring functions
     work without modification.
 
     ``t_inds`` is a NumPy array slice (supports iteration, ``len()``,
-    indexing) rather than a frozenset.  Gene information is represented
-    by ``n_genes`` (derived from transcript indices via ``t_to_g_arr``
+    indexing) rather than a frozenset.  Strand mixing is represented
+    by ``ambig_strand`` (derived from transcript strand array
     at buffer finalization time).
     """
 
     t_inds: np.ndarray
-    n_genes: int
+    ambig_strand: int
     splice_type: int
     exon_strand: int
     sj_strand: int
@@ -90,14 +90,14 @@ class BufferedFragment:
         return self.chimera_type != ChimeraType.NONE
 
     @property
-    def is_unique_gene(self) -> bool:
-        return self.n_genes == 1
+    def is_same_strand(self) -> bool:
+        return not self.ambig_strand
 
     @property
     def is_strand_qualified(self) -> bool:
         return (
             self.splice_type == SpliceType.SPLICED_ANNOT
-            and self.is_unique_gene
+            and self.is_same_strand
             and self.exon_strand in (Strand.POS, Strand.NEG)
             and self.sj_strand in (Strand.POS, Strand.NEG)
         )
@@ -115,10 +115,8 @@ class _FinalizedChunk:
     Variable-width transcript index sets use CSR (Compressed Sparse Row)
     layout: ``offsets[i]:offsets[i+1]`` indexes the flat ``indices`` array.
 
-    Gene count per fragment (``n_genes``) is cached as a uint8 array,
-    derived from transcript indices via ``t_to_g_arr`` at finalization
-    time.  This replaces the former gene CSR storage (~12 bytes/fragment
-    savings, ~30% reduction).
+    Per-fragment strand mixing (``ambig_strand``) is cached as a uint8
+    array, derived from transcript strand array at finalization time.
     """
 
     splice_type: np.ndarray       # uint8[N]
@@ -133,7 +131,7 @@ class _FinalizedChunk:
     exon_bp: np.ndarray         # int32[M_t]  (parallel to t_indices)
     intron_bp: np.ndarray       # int32[M_t]  (parallel to t_indices)
     unambig_intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
-    n_genes: np.ndarray         # uint8[N]
+    ambig_strand: np.ndarray    # uint8[N]
     frag_id: np.ndarray         # int64[N]
     read_length: np.ndarray     # uint32[N]
     genomic_footprint: np.ndarray  # int32[N]
@@ -153,7 +151,7 @@ class _FinalizedChunk:
                 self.frag_lengths,
                 self.exon_bp, self.intron_bp,
                 self.unambig_intron_bp,
-                self.n_genes, self.frag_id, self.read_length,
+                self.ambig_strand, self.frag_id, self.read_length,
                 self.genomic_footprint, self.genomic_start, self.nm,
             )
         )
@@ -165,20 +163,20 @@ class _FinalizedChunk:
         Returns
         -------
         np.ndarray
-            ``FRAG_UNIQUE`` (0): 1 gene, 1 transcript, NH=1.
-            ``FRAG_ISOFORM_AMBIG`` (1): 1 gene, >1 transcript, NH=1.
-            ``FRAG_GENE_AMBIG`` (2): >1 gene, NH=1.
+            ``FRAG_UNIQUE`` (0): same-strand, 1 transcript, NH=1.
+            ``FRAG_AMBIG_SAME_STRAND`` (1): same-strand, >1 transcript, NH=1.
+            ``FRAG_AMBIG_OPP_STRAND`` (2): ambig-strand transcripts, NH=1.
             ``FRAG_MULTIMAPPER`` (3): NH > 1.
             ``FRAG_CHIMERIC`` (4): chimeric fragment.
         """
         n_transcripts = np.diff(self.t_offsets).astype(np.intp)
         classes = np.full(self.size, FRAG_UNIQUE, dtype=np.uint8)
-        # Single gene, multiple transcripts, single mapper → isoform-ambiguous
+        # Same strand, multiple transcripts, single mapper → ambig same-strand
         classes[
-            (self.n_genes == 1) & (n_transcripts > 1) & (self.num_hits == 1)
-        ] = FRAG_ISOFORM_AMBIG
-        # Inter-gene, single mapper → gene-ambiguous
-        classes[(self.n_genes > 1) & (self.num_hits == 1)] = FRAG_GENE_AMBIG
+            (self.ambig_strand == 0) & (n_transcripts > 1) & (self.num_hits == 1)
+        ] = FRAG_AMBIG_SAME_STRAND
+        # Mixed strand, single mapper → ambig opposite-strand
+        classes[(self.ambig_strand > 0) & (self.num_hits == 1)] = FRAG_AMBIG_OPP_STRAND
         # Multimapper → always FRAG_MULTIMAPPER (highest priority)
         classes[self.num_hits > 1] = FRAG_MULTIMAPPER
         # Chimeric → highest priority (overrides all others)
@@ -198,7 +196,7 @@ class _FinalizedChunk:
             exon_bp=self.exon_bp[start:end],
             intron_bp=self.intron_bp[start:end],
             unambig_intron_bp=self.unambig_intron_bp[start:end],
-            n_genes=int(self.n_genes[i]),
+            ambig_strand=int(self.ambig_strand[i]),
             splice_type=int(self.splice_type[i]),
             exon_strand=int(self.exon_strand[i]),
             sj_strand=int(self.sj_strand[i]),
@@ -250,7 +248,7 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
         "exon_bp": exon_bp_list,
         "intron_bp": intron_bp_list,
         "unambig_intron_bp": unambig_intron_bp_list,
-        "n_genes": chunk.n_genes,
+        "ambig_strand": chunk.ambig_strand,
         "frag_id": chunk.frag_id,
         "read_length": chunk.read_length,
         "genomic_footprint": chunk.genomic_footprint,
@@ -297,7 +295,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         exon_bp=exon_bp_arr,
         intron_bp=intron_bp_arr,
         unambig_intron_bp=unambig_intron_bp_arr,
-        n_genes=table.column("n_genes").to_numpy().copy(),
+        ambig_strand=table.column("ambig_strand").to_numpy().copy(),
         frag_id=table.column("frag_id").to_numpy().copy(),
         read_length=table.column("read_length").to_numpy().copy(),
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
@@ -318,7 +316,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
 class FragmentBuffer:
     """Columnar buffer for resolved fragments with disk-spill support.
 
-    Accumulates ``ResolvedFragment`` data during the BAM scan into
+    Accumulates ``ResolvedResult`` data during the BAM scan into
     compact NumPy chunks.  When total in-memory size exceeds
     *max_memory_bytes*, the oldest chunk is spilled to disk as an
     Arrow IPC (Feather v2) file with LZ4 compression.
@@ -333,9 +331,9 @@ class FragmentBuffer:
 
     Parameters
     ----------
-    t_to_g_arr : np.ndarray
-        Mapping array ``t_index → g_index``, used to compute
-        per-fragment gene counts when finalizing chunks.
+    t_strand_arr : np.ndarray
+        Per-transcript strand array ``int8[n_transcripts]``, used to
+        compute per-fragment ``ambig_strand`` when finalizing chunks.
     chunk_size : int
         Number of fragments per chunk (default 1,000,000).
     max_memory_bytes : int
@@ -346,7 +344,7 @@ class FragmentBuffer:
 
     Examples
     --------
-    >>> buf = FragmentBuffer(t_to_g_arr, chunk_size=500_000)
+    >>> buf = FragmentBuffer(t_strand_arr, chunk_size=500_000)
     >>> for resolved in resolved_fragments:
     ...     buf.append(resolved)
     >>> buf.finalize()
@@ -357,12 +355,12 @@ class FragmentBuffer:
 
     def __init__(
         self,
-        t_to_g_arr: np.ndarray,
+        t_strand_arr: np.ndarray,
         chunk_size: int = 1_000_000,
         max_memory_bytes: int = 2 * 1024**3,
         spill_dir: Path | None = None,
     ):
-        self._t_to_g_arr = t_to_g_arr
+        self._t_strand_arr = t_strand_arr
         self.chunk_size = chunk_size
         self.max_memory_bytes = max_memory_bytes
         self._spill_dir = spill_dir
@@ -428,8 +426,8 @@ class FragmentBuffer:
         if self._native_acc.size == 0:
             return
 
-        t_to_g_list = self._t_to_g_arr.tolist()
-        raw = self._native_acc.finalize(t_to_g_list)
+        t_strand_list = self._t_strand_arr.tolist()
+        raw = self._native_acc.finalize(t_strand_list)
         size = raw["size"]
 
         chunk = _FinalizedChunk(
@@ -445,7 +443,7 @@ class FragmentBuffer:
             exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
             intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
             unambig_intron_bp=np.frombuffer(raw["unambig_intron_bp"], dtype=np.int32).copy(),
-            n_genes=np.frombuffer(raw["n_genes"], dtype=np.uint8).copy(),
+            ambig_strand=np.frombuffer(raw["ambig_strand"], dtype=np.uint8).copy(),
             frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).copy(),
             read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
             genomic_footprint=np.frombuffer(raw["genomic_footprint"], dtype=np.int32).copy(),

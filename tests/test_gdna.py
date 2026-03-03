@@ -13,7 +13,7 @@ Verifies that:
 import numpy as np
 import pytest
 
-from hulkrna.categories import SpliceType, SpliceStrandCol
+from hulkrna.splice import SpliceType, SpliceStrandCol
 from hulkrna.config import EMConfig
 from hulkrna.estimator import AbundanceEstimator
 from hulkrna.scoring import score_gdna_standalone as _score_gdna_candidate, GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
@@ -138,7 +138,7 @@ class TestLocusGDNATheta:
 
     def test_theta_has_gdna_component(self):
         """Theta has 2*n_t + 1 elements (mRNA + nRNA + 1 gDNA)."""
-        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 10,
             num_transcripts=3,
@@ -152,7 +152,7 @@ class TestLocusGDNATheta:
 
     def test_high_gdna_init_biases_theta(self):
         """Large gdna_init biases gDNA theta upward."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
@@ -169,7 +169,7 @@ class TestLocusGDNATheta:
 
     def test_no_gdna_init_minimal_absorption(self):
         """With zero gdna_init and weak gDNA likelihood, gDNA theta is small."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 1000.0
         lem = _make_locus_em_data(
             [[0]] * 100,
@@ -195,7 +195,7 @@ class TestLocusGDNAAssignment:
 
     def test_gdna_assignment_not_in_em_counts(self):
         """Fragments assigned to gDNA are counted in gdna_count return."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 100,
             log_liks_per_unit=[[-10.0]] * 100,
@@ -212,7 +212,7 @@ class TestLocusGDNAAssignment:
 
     def test_total_counts_preserved(self):
         """em_counts + nrna_em + gdna == n_units."""
-        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,
@@ -227,7 +227,7 @@ class TestLocusGDNAAssignment:
 
     def test_strong_transcript_signal_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 500.0
         lem = _make_locus_em_data(
             [[0]] * 500,
@@ -245,7 +245,7 @@ class TestLocusGDNAAssignment:
 
     def test_high_gdna_init_absorbs_fragments(self):
         """With large gdna_init, gDNA takes larger share."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 500,
             num_transcripts=2,
@@ -270,7 +270,7 @@ class TestGDNALocusAttribution:
 
     def test_locus_counts_populated(self):
         """gDNA assignments populate gdna_locus_counts."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         cc = _UNSPLICED_SENSE
         lem = _make_locus_em_data(
             [[0]] * 100,
@@ -288,7 +288,7 @@ class TestGDNALocusAttribution:
 
     def test_locus_counts_zero_when_no_gdna(self):
         """No gDNA assignments → locus counts stay zero."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unique_counts[0, 0] = 1000.0
         lem = _make_locus_em_data(
             [[0]] * 50,
@@ -314,19 +314,19 @@ class TestGDNALocusAttribution:
 
 class TestGDNAProperties:
     def test_gdna_total_from_em_total(self):
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 80.0
         assert rc.gdna_total == 80.0
 
     def test_gdna_contamination_rate(self):
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 10.0
         rc.unique_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 10.0
         assert rc.gdna_contamination_rate == pytest.approx(0.1)
 
     def test_contamination_rate_zero_when_empty(self):
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         assert rc.gdna_contamination_rate == 0.0
 
 
@@ -569,7 +569,7 @@ class TestLocusGDNABehavior:
 
     def test_two_transcripts_share_one_gdna_shadow(self):
         """Two transcripts in one locus share a single gDNA component."""
-        rc = AbundanceEstimator(3, 2, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,
@@ -587,7 +587,7 @@ class TestLocusGDNABehavior:
     def test_gdna_init_determines_absorption(self):
         """Higher gdna_init → more fragments absorbed by gDNA."""
         # Low gdna_init + strong RNA prior → no gDNA absorption
-        rc_low = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc_low = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc_low.unique_counts[0, _UNSPLICED_SENSE] = 500.0
         lem_low = _make_locus_em_data(
             [[0]] * 200,
@@ -600,7 +600,7 @@ class TestLocusGDNABehavior:
         _, gc_low = _run_and_assign(rc_low, lem_low, em_iterations=10)
 
         # High gdna_init → gDNA absorbs fragments
-        rc_high = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc_high = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         lem_high = _make_locus_em_data(
             [[0]] * 200,
             num_transcripts=2,
@@ -616,7 +616,7 @@ class TestLocusGDNABehavior:
 
     def test_gdna_em_count_property(self):
         """AbundanceEstimator.gdna_em_count accumulates across loci."""
-        rc = AbundanceEstimator(2, 1, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         assert rc.gdna_em_count == 0.0
 
         rc._gdna_em_total = 42.0
@@ -705,7 +705,7 @@ class TestStrandModelsContainer:
     def test_model_for_category(self):
         """model_for_category cascades: exonic_spliced → pooled-fallback → error."""
         from hulkrna.strand_model import StrandModels, StrandModel
-        from hulkrna.categories import SpliceType
+        from hulkrna.splice import SpliceType
         from hulkrna.types import Strand
         import pytest
 

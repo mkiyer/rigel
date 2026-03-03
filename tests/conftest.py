@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hulkrna.categories import SpliceStrandCol
+from hulkrna.splice import SpliceStrandCol
 from hulkrna.estimator import (
     AbundanceEstimator,
     EM_PRIOR_EPSILON,
@@ -243,7 +243,6 @@ def _make_locus_em_data(
     locus = Locus(
         locus_id=0,
         transcript_indices=np.arange(n_t, dtype=np.int32),
-        gene_indices=np.array([0], dtype=np.int32),
         unit_indices=np.arange(n_units, dtype=np.int32),
     )
 

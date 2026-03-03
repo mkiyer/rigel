@@ -1,202 +1,14 @@
-"""Tests for hulkrna.resolution — set merging, fragment length, ResolvedFragment, chimera."""
+"""Tests for hulkrna.resolution — chimera detection and fragment resolution."""
 
 import pytest
 
-from hulkrna.types import ChimeraType, MergeCriteria, Strand, GenomicInterval
-from hulkrna.categories import SpliceType
+from hulkrna.types import ChimeraType, Strand, GenomicInterval
+from hulkrna.splice import SpliceType
 from hulkrna.resolution import (
-    merge_sets_with_criteria,
-    ResolvedFragment,
     _detect_intrachromosomal_chimera,
+    make_fragment,
     resolve_fragment,
 )
-from hulkrna.fragment import Fragment
-
-
-# =====================================================================
-# merge_sets_with_criteria
-# =====================================================================
-
-
-class TestMergeSetsWithCriteria:
-    """Progressive relaxation: intersection → nonempty intersection → union."""
-
-    def test_empty_input(self):
-        result = merge_sets_with_criteria([])
-        assert result.is_empty
-        assert result.criteria == MergeCriteria.EMPTY
-
-    def test_single_set(self):
-        result = merge_sets_with_criteria(
-            [frozenset({1, 2})]
-        )
-        assert result.t_inds == frozenset({1, 2})
-        assert result.criteria == MergeCriteria.INTERSECTION
-
-    def test_intersection_succeeds(self):
-        """When all sets share a common element, intersection wins."""
-        result = merge_sets_with_criteria(
-            [frozenset({1, 2, 3}), frozenset({2, 3, 4})],
-        )
-        assert result.t_inds == frozenset({2, 3})
-        assert result.criteria == MergeCriteria.INTERSECTION
-
-    def test_intersection_nonempty_when_empty_sets_cause_full_intersection_to_fail(self):
-        """An empty set in the list collapses intersection to empty.
-        Filtering to non-empty sets should recover the result."""
-        result = merge_sets_with_criteria(
-            [frozenset({1, 2}), frozenset()],
-        )
-        assert result.t_inds == frozenset({1, 2})
-        assert result.criteria == MergeCriteria.INTERSECTION_NONEMPTY
-
-    def test_union_fallback(self):
-        """When non-empty sets are disjoint, fall through to union."""
-        result = merge_sets_with_criteria(
-            [frozenset({1}), frozenset({2})],
-        )
-        assert result.t_inds == frozenset({1, 2})
-        assert result.criteria == MergeCriteria.UNION
-
-    def test_all_empty_sets(self):
-        """All empty sets → intersection is empty, nonempty filter finds nothing → union empty."""
-        result = merge_sets_with_criteria(
-            [frozenset(), frozenset()],
-        )
-        # All empty: intersection empty, nonempty list empty, union empty
-        assert result.t_inds == frozenset()
-        assert result.is_empty
-
-    def test_t_only_intersection(self):
-        """Result uses INTERSECTION when sets have overlap."""
-        result = merge_sets_with_criteria(
-            [frozenset({1, 2}), frozenset({2, 3})],
-        )
-        assert result.t_inds == frozenset({2})
-        assert result.criteria == MergeCriteria.INTERSECTION
-
-
-# =====================================================================
-# ResolvedFragment properties
-# =====================================================================
-
-
-class TestResolvedFragment:
-    def _make(self, **kwargs):
-        defaults = dict(
-            t_inds=frozenset({0}),
-            n_genes=1,
-            splice_type=SpliceType.UNSPLICED,
-            exon_strand=Strand.POS,
-            sj_strand=Strand.NONE,
-            frag_lengths={0: 250},
-            merge_criteria=MergeCriteria.INTERSECTION,
-            num_hits=1,
-            genomic_footprint=250,
-            genomic_start=1000,
-        )
-        defaults.update(kwargs)
-        return ResolvedFragment(**defaults)
-
-    def test_is_unique_gene_single(self):
-        rf = self._make(n_genes=1)
-        assert rf.is_unique_gene is True
-
-    def test_is_unique_gene_multi(self):
-        rf = self._make(n_genes=2)
-        assert rf.is_unique_gene is False
-
-    def test_is_ambiguous_multi_gene(self):
-        rf = self._make(n_genes=2, num_hits=1)
-        assert (rf.n_genes > 1 or rf.num_hits > 1) is True
-
-    def test_is_ambiguous_multimapped(self):
-        rf = self._make(n_genes=1, num_hits=3)
-        assert (rf.n_genes > 1 or rf.num_hits > 1) is True
-
-    def test_not_ambiguous(self):
-        rf = self._make(n_genes=1, num_hits=1)
-        assert (rf.n_genes > 1 or rf.num_hits > 1) is False
-
-    def test_has_annotated_sj(self):
-        rf = self._make(splice_type=SpliceType.SPLICED_ANNOT)
-        assert rf.splice_type == SpliceType.SPLICED_ANNOT
-
-    def test_no_annotated_sj(self):
-        for cat in (SpliceType.UNSPLICED, SpliceType.SPLICED_UNANNOT):
-            rf = self._make(splice_type=cat)
-            assert rf.splice_type != SpliceType.SPLICED_ANNOT
-
-    def test_is_strand_qualified_all_criteria(self):
-        rf = self._make(
-            splice_type=SpliceType.SPLICED_ANNOT,
-            n_genes=1,
-            exon_strand=Strand.POS,
-            sj_strand=Strand.NEG,
-        )
-        assert rf.is_strand_qualified is True
-
-    def test_not_strand_qualified_wrong_category(self):
-        rf = self._make(
-            splice_type=SpliceType.UNSPLICED,
-            n_genes=1,
-            exon_strand=Strand.POS,
-            sj_strand=Strand.NEG,
-        )
-        assert rf.is_strand_qualified is False
-
-    def test_not_strand_qualified_multi_gene(self):
-        rf = self._make(
-            splice_type=SpliceType.SPLICED_ANNOT,
-            n_genes=2,
-            exon_strand=Strand.POS,
-            sj_strand=Strand.NEG,
-        )
-        assert rf.is_strand_qualified is False
-
-    def test_not_strand_qualified_ambiguous_exon(self):
-        rf = self._make(
-            splice_type=SpliceType.SPLICED_ANNOT,
-            n_genes=1,
-            exon_strand=Strand.AMBIGUOUS,
-            sj_strand=Strand.NEG,
-        )
-        assert rf.is_strand_qualified is False
-
-    def test_not_strand_qualified_none_sj(self):
-        rf = self._make(
-            splice_type=SpliceType.SPLICED_ANNOT,
-            n_genes=1,
-            exon_strand=Strand.POS,
-            sj_strand=Strand.NONE,
-        )
-        assert rf.is_strand_qualified is False
-
-    def test_not_strand_qualified_chimeric(self):
-        rf = self._make(
-            splice_type=SpliceType.SPLICED_ANNOT,
-            n_genes=1,
-            exon_strand=Strand.POS,
-            sj_strand=Strand.NEG,
-            chimera_type=ChimeraType.CIS_STRAND_SAME,
-        )
-        assert rf.is_strand_qualified is False
-
-    def test_is_chimeric_none(self):
-        rf = self._make()
-        assert rf.is_chimeric is False
-
-    def test_is_chimeric_trans(self):
-        rf = self._make(chimera_type=ChimeraType.TRANS)
-        assert rf.is_chimeric is True
-
-    def test_is_chimeric_cis_strand_same(self):
-        rf = self._make(chimera_type=ChimeraType.CIS_STRAND_SAME)
-        assert rf.is_chimeric is True
-
-    def test_is_chimeric_cis_strand_diff(self):
-        rf = self._make(chimera_type=ChimeraType.CIS_STRAND_DIFF)
-        assert rf.is_chimeric is True
 
 
 # =====================================================================
@@ -407,7 +219,7 @@ class TestResolveFragment:
     def test_annotated_sj_prioritizes_sj_supported_transcripts(self, mini_index):
         """Fragment spanning SJ (200,299) resolves to t1 only."""
         tm = _t_map(mini_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(
                 _exon("chr1", 150, 200),
                 _exon("chr1", 299, 350),
@@ -422,7 +234,7 @@ class TestResolveFragment:
     def test_annotated_sj_matches_when_intron_strand_unknown(self, mini_index):
         """SJ match still works when fragment's intron strand is NONE."""
         tm = _t_map(mini_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(
                 _exon("chr1", 150, 200),
                 _exon("chr1", 299, 350),
@@ -450,7 +262,7 @@ class TestOverlapProfileViaResolve:
     def test_full_exon_overlap_single_block(self, overlap_index):
         """Fragment fully inside shared exon → exon_bp=read_length."""
         tm = _t_map(overlap_index)
-        frag = Fragment(exons=(_exon("chr1", 150, 200),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 150, 200),), introns=())
         result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 50
@@ -460,7 +272,7 @@ class TestOverlapProfileViaResolve:
     def test_intronic_overlap(self, overlap_index):
         """Fragment in intronic region → exon_bp=0, intron_bp=read_length."""
         tm = _t_map(overlap_index)
-        frag = Fragment(exons=(_exon("chr1", 220, 320),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 220, 320),), introns=())
         result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 100
@@ -473,7 +285,7 @@ class TestOverlapProfileViaResolve:
     def test_mixed_exon_intron_overlap(self, overlap_index):
         """Fragment spanning exon-intron boundary → partial exon + intron bp."""
         tm = _t_map(overlap_index)
-        frag = Fragment(exons=(_exon("chr1", 180, 220),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 180, 220),), introns=())
         result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 40
@@ -487,7 +299,7 @@ class TestOverlapProfileViaResolve:
     def test_multi_block_overlap_sums(self, overlap_index):
         """Two exon blocks accumulate exon overlap: 50+50=100bp for t_two_exon."""
         tm = _t_map(overlap_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(
                 _exon("chr1", 150, 200),
                 _exon("chr1", 350, 400),
@@ -517,7 +329,7 @@ class TestOverlapProfileViaResolve:
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="cross_tx")
         tm = _t_map(idx)
-        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
@@ -539,7 +351,7 @@ class TestOverlapProfileViaResolve:
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="partial_ovl")
         tm = _t_map(idx)
-        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
@@ -565,7 +377,7 @@ class TestOverlapFiltering:
         less overlap — the EM handles weighting.
         """
         tm = _t_map(overlap_index)
-        frag = Fragment(exons=(_exon("chr1", 150, 250),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 150, 250),), introns=())
         result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
@@ -575,7 +387,7 @@ class TestOverlapFiltering:
     def test_spliced_fragment_sj_narrows_candidates(self, mini_index):
         """Spliced fragments with annotated SJs: SJ match narrows first."""
         tm = _t_map(mini_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(
                 _exon("chr1", 150, 200),
                 _exon("chr1", 299, 350),
@@ -591,7 +403,7 @@ class TestOverlapFiltering:
     def test_equal_overlap_keeps_all(self, overlap_index):
         """When all candidates have equal exon overlap, all are retained."""
         tm = _t_map(overlap_index)
-        frag = Fragment(exons=(_exon("chr1", 100, 200),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 100, 200),), introns=())
         result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
@@ -619,7 +431,7 @@ class TestFragLengthDiscrimination:
     def test_spliced_read_t1_specific_sj(self, mini_index):
         """Read with SJ (200,299) — specific to t1 (3-exon)."""
         tm = _t_map(mini_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(_exon("chr1", 150, 200), _exon("chr1", 299, 350)),
             introns=(GenomicInterval("chr1", 200, 299, Strand.POS),),
         )
@@ -631,7 +443,7 @@ class TestFragLengthDiscrimination:
     def test_spliced_read_t2_specific_sj(self, mini_index):
         """Read with SJ (200,499) — specific to t2 (2-exon, skips middle)."""
         tm = _t_map(mini_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(_exon("chr1", 150, 200), _exon("chr1", 499, 550)),
             introns=(GenomicInterval("chr1", 200, 499, Strand.POS),),
         )
@@ -643,7 +455,7 @@ class TestFragLengthDiscrimination:
     def test_unspliced_read_in_shared_exon(self, mini_index):
         """Unspliced read fully in shared exon1 → both t1 and t2."""
         tm = _t_map(mini_index)
-        frag = Fragment(exons=(_exon("chr1", 120, 180),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 120, 180),), introns=())
         result = resolve_fragment(frag, mini_index)
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
@@ -656,7 +468,7 @@ class TestFragLengthDiscrimination:
         intronic overlap, so both are candidates; scoring differentiates.
         """
         tm = _t_map(mini_index)
-        frag = Fragment(exons=(_exon("chr1", 320, 380),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 320, 380),), introns=())
         result = resolve_fragment(frag, mini_index)
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
@@ -665,7 +477,7 @@ class TestFragLengthDiscrimination:
     def test_frag_length_differs_between_isoforms(self, mini_index):
         """Fragment spanning exon1→exon3 via SJ (200,499) → t2 only."""
         tm = _t_map(mini_index)
-        frag = Fragment(
+        frag = make_fragment(
             exons=(_exon("chr1", 150, 200), _exon("chr1", 499, 550)),
             introns=(GenomicInterval("chr1", 200, 499, Strand.POS),),
         )
@@ -699,7 +511,7 @@ class TestUnambigIntronAccumulation:
             chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="lone_intron")
-        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
@@ -719,7 +531,7 @@ class TestUnambigIntronAccumulation:
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="cross_exon")
         tm = _t_map(idx)
-        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
@@ -743,7 +555,7 @@ class TestUnambigIntronAccumulation:
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="partial_unambig")
         tm = _t_map(idx)
-        frag = Fragment(exons=(_exon("chr1", 250, 350),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 250, 350),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
@@ -761,7 +573,7 @@ class TestUnambigIntronAccumulation:
             chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="exon_only")
-        frag = Fragment(exons=(_exon("chr1", 150, 250),), introns=())
+        frag = make_fragment(exons=(_exon("chr1", 150, 250),), introns=())
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100

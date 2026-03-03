@@ -17,9 +17,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .categories import SpliceType
+from .splice import SpliceType, SPLICE_UNSPLICED, SPLICE_UNANNOT, SPLICE_ANNOT
 from .frag_length_model import _TAIL_DECAY_LP
-from .types import Strand
+from .types import Strand, STRAND_POS, STRAND_NEG
 
 # ---------------------------------------------------------------------------
 # Constants (single source of truth for all scoring/penalty values)
@@ -41,12 +41,6 @@ DEFAULT_OVERHANG_ALPHA = 0.01
 #: probability by 10×.
 DEFAULT_MISMATCH_ALPHA = 0.1
 
-# Int constants for hot-path scoring (avoid enum construction overhead).
-STRAND_POS = int(Strand.POS)         # 1
-STRAND_NEG = int(Strand.NEG)         # 2
-SPLICE_UNSPLICED = int(SpliceType.UNSPLICED)           # 0
-SPLICE_UNANNOT = int(SpliceType.SPLICED_UNANNOT)       # 1
-SPLICE_ANNOT = int(SpliceType.SPLICED_ANNOT)           # 2
 
 #: Default gDNA splice penalties per SpliceType (int keys for fast lookup).
 GDNA_SPLICE_PENALTIES = {

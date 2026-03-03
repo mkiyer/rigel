@@ -74,6 +74,71 @@ enum class SJTagMode : uint8_t {
     TS_XS = 4,    // Check ts first, then XS
 };
 
+// Parse SJ tag configuration string → SJTagMode enum.
+static SJTagMode parse_sj_tag_spec(const std::string& spec) {
+    if (spec == "XS")    return SJTagMode::XS_ONLY;
+    if (spec == "ts")    return SJTagMode::TS_ONLY;
+    if (spec == "XS,ts") return SJTagMode::XS_TS;
+    if (spec == "ts,XS") return SJTagMode::TS_XS;
+    if (spec == "none" || spec.empty()) return SJTagMode::NONE;
+    return SJTagMode::XS_TS;  // default
+}
+
+// ================================================================
+// Fragment class / pool / splice-type label helpers
+// ================================================================
+
+static const char* frag_class_label(int code) {
+    switch (code) {
+        case 0:  return "unique";
+        case 1:  return "ambig_same_strand";
+        case 2:  return "ambig_opp_strand";
+        case 3:  return "multimapper";
+        case 4:  return "chimeric";
+        case -1: return "intergenic";
+        default: return "unknown";
+    }
+}
+
+static const char* pool_label(int code) {
+    switch (code) {
+        case 0:  return "mRNA";
+        case 1:  return "nRNA";
+        case 2:  return "gDNA";
+        case 3:  return "intergenic";
+        case 4:  return "chimeric";
+        default: return "unknown";
+    }
+}
+
+static const char* splice_type_label(int code) {
+    switch (code) {
+        case SPLICE_UNSPLICED:       return "unspliced";
+        case SPLICE_SPLICED_UNANNOT: return "spliced_unannot";
+        case SPLICE_SPLICED_ANNOT:   return "spliced_annot";
+        default:                     return "unknown";
+    }
+}
+
+// ================================================================
+// Build htslib tid → internal ref_id mapping
+// ================================================================
+
+static void build_tid_mapping(
+    const bam_hdr_t* hdr,
+    const std::unordered_map<std::string, int32_t>& ref_to_id,
+    std::vector<int32_t>& tid_to_ref_id)
+{
+    int32_t n_targets = hdr->n_targets;
+    tid_to_ref_id.resize(n_targets, -1);
+    for (int32_t i = 0; i < n_targets; i++) {
+        auto it = ref_to_id.find(hdr->target_name[i]);
+        if (it != ref_to_id.end()) {
+            tid_to_ref_id[i] = it->second;
+        }
+    }
+}
+
 // ================================================================
 // Lightweight record for one BAM alignment in a qname group
 // ================================================================
@@ -159,13 +224,13 @@ struct ScanStats {
     int64_t n_with_exon = 0;
     int64_t n_with_annotated_sj = 0;
     int64_t n_with_unannotated_sj = 0;
-    int64_t n_unique_gene = 0;
-    int64_t n_multi_gene = 0;
+    int64_t n_same_strand = 0;
+    int64_t n_ambig_strand = 0;
 
     // Strand model training
     int64_t n_strand_trained = 0;
     int64_t n_strand_skipped_no_sj = 0;
-    int64_t n_strand_skipped_multi_gene = 0;
+    int64_t n_strand_skipped_ambig_strand = 0;
     int64_t n_strand_skipped_ambiguous = 0;
 
     // Fragment length model training
@@ -663,19 +728,7 @@ public:
           skip_duplicates_(skip_duplicates),
           include_multimap_(include_multimap)
     {
-        // Parse SJ tag spec
-        if (sj_tag_spec == "XS")
-            sj_tag_mode_ = SJTagMode::XS_ONLY;
-        else if (sj_tag_spec == "ts")
-            sj_tag_mode_ = SJTagMode::TS_ONLY;
-        else if (sj_tag_spec == "XS,ts")
-            sj_tag_mode_ = SJTagMode::XS_TS;
-        else if (sj_tag_spec == "ts,XS")
-            sj_tag_mode_ = SJTagMode::TS_XS;
-        else if (sj_tag_spec == "none" || sj_tag_spec.empty())
-            sj_tag_mode_ = SJTagMode::NONE;
-        else
-            sj_tag_mode_ = SJTagMode::XS_TS;  // default
+        sj_tag_mode_ = parse_sj_tag_spec(sj_tag_spec);
     }
 
     // ----------------------------------------------------------------
@@ -696,7 +749,7 @@ public:
         }
 
         // Build tid → ref_id mapping
-        build_tid_mapping(hdr);
+        build_tid_mapping(hdr, ctx_->ref_to_id_, tid_to_ref_id_);
 
         bam1_t* b = bam_init1();
         if (!b) {
@@ -806,24 +859,6 @@ public:
     }
 
 private:
-    // ----------------------------------------------------------------
-    // Build tid → internal ref_id mapping
-    // ----------------------------------------------------------------
-
-    void build_tid_mapping(const bam_hdr_t* hdr) {
-        int32_t n_targets = hdr->n_targets;
-        tid_to_ref_id_.resize(n_targets, -1);
-
-        for (int32_t i = 0; i < n_targets; i++) {
-            const char* name = hdr->target_name[i];
-            auto it = ctx_->ref_to_id_.find(name);
-            if (it != ctx_->ref_to_id_.end()) {
-                tid_to_ref_id_[i] = it->second;
-            }
-            // Refs not in the index get -1 (intergenic)
-        }
-    }
-
     // ----------------------------------------------------------------
     // Process one query-name group
     // ----------------------------------------------------------------
@@ -966,10 +1001,10 @@ private:
                 stats_.n_with_unannotated_sj++;
             }
 
-            if (result.get_is_unique_gene()) {
-                stats_.n_unique_gene++;
+            if (result.get_is_same_strand()) {
+                stats_.n_same_strand++;
             } else {
-                stats_.n_multi_gene++;
+                stats_.n_ambig_strand++;
             }
 
             if (is_unique_mapper) {
@@ -980,28 +1015,25 @@ private:
                     stats_.n_strand_trained++;
                 } else if (result.splice_type != SPLICE_SPLICED_ANNOT) {
                     stats_.n_strand_skipped_no_sj++;
-                } else if (!result.get_is_unique_gene()) {
-                    stats_.n_strand_skipped_multi_gene++;
+                } else if (!result.get_is_same_strand()) {
+                    stats_.n_strand_skipped_ambig_strand++;
                 } else {
                     stats_.n_strand_skipped_ambiguous++;
                 }
 
                 // Train exonic fallback model
-                if (result.get_is_unique_gene() &&
+                // Use transcript strand directly (no gene indirection).
+                if (result.get_is_same_strand() &&
                     (result.exon_strand == STRAND_POS ||
                      result.exon_strand == STRAND_NEG)) {
                     int32_t t_idx = result.get_first_t_ind();
                     if (t_idx >= 0 &&
-                        t_idx < ctx_->n_transcripts_) {
-                        int32_t gene_idx = ctx_->t_to_g_arr_[t_idx];
-                        if (gene_idx >= 0 && gene_idx <
-                            static_cast<int32_t>(ctx_->g_to_strand_arr_.size())) {
-                            int32_t gene_strand = ctx_->g_to_strand_arr_[gene_idx];
-                            if (gene_strand == STRAND_POS ||
-                                gene_strand == STRAND_NEG) {
-                                strand_obs_.exonic_obs.push_back(result.exon_strand);
-                                strand_obs_.exonic_truth.push_back(gene_strand);
-                            }
+                        t_idx < static_cast<int32_t>(ctx_->t_strand_arr_.size())) {
+                        int32_t t_strand = ctx_->t_strand_arr_[t_idx];
+                        if (t_strand == STRAND_POS ||
+                            t_strand == STRAND_NEG) {
+                            strand_obs_.exonic_obs.push_back(result.exon_strand);
+                            strand_obs_.exonic_truth.push_back(t_strand);
                         }
                     }
                 }
@@ -1062,11 +1094,11 @@ private:
         stats_dict["n_with_exon"] = stats_.n_with_exon;
         stats_dict["n_with_annotated_sj"] = stats_.n_with_annotated_sj;
         stats_dict["n_with_unannotated_sj"] = stats_.n_with_unannotated_sj;
-        stats_dict["n_unique_gene"] = stats_.n_unique_gene;
-        stats_dict["n_multi_gene"] = stats_.n_multi_gene;
+        stats_dict["n_same_strand"] = stats_.n_same_strand;
+        stats_dict["n_ambig_strand"] = stats_.n_ambig_strand;
         stats_dict["n_strand_trained"] = stats_.n_strand_trained;
         stats_dict["n_strand_skipped_no_sj"] = stats_.n_strand_skipped_no_sj;
-        stats_dict["n_strand_skipped_multi_gene"] = stats_.n_strand_skipped_multi_gene;
+        stats_dict["n_strand_skipped_ambig_strand"] = stats_.n_strand_skipped_ambig_strand;
         stats_dict["n_strand_skipped_ambiguous"] = stats_.n_strand_skipped_ambiguous;
         stats_dict["n_frag_length_unambiguous"] = stats_.n_frag_length_unambiguous;
         stats_dict["n_frag_length_ambiguous"] = stats_.n_frag_length_ambiguous;
@@ -1102,8 +1134,394 @@ public:
     // Expose accumulator for finalize
     NativeAccumulator& get_accumulator() { return accumulator_; }
 
-    nb::dict finalize_accumulator(const std::vector<int64_t>& t_to_g_arr) {
-        return accumulator_.finalize(t_to_g_arr);
+    nb::dict finalize_accumulator(const std::vector<int32_t>& t_strand_arr) {
+        return accumulator_.finalize(t_strand_arr);
+    }
+};
+
+// ================================================================
+// BamAnnotationWriter — second-pass BAM tag stamping
+// ================================================================
+//
+// Reuses the same BAM reading, hit grouping, fragment building, and
+// multimapper pairing infrastructure as BamScanner, but instead of
+// resolving + buffering, it:
+//   1. Looks up per-fragment annotation by frag_id
+//   2. Stamps Z* BAM tags on every record
+//   3. Writes tagged records to an output BAM
+//
+// The annotation table is passed as sliced NumPy arrays (one entry
+// per annotated fragment).  Unannotated frag_ids (intergenic) are
+// stamped with intergenic defaults.
+
+// ndarray aliases (const, 1-D, C-contiguous)
+using ci64_1d = nb::ndarray<const int64_t,  nb::ndim<1>, nb::c_contig>;
+using ci32_1d = nb::ndarray<const int32_t,  nb::ndim<1>, nb::c_contig>;
+using cu8_1d  = nb::ndarray<const uint8_t,  nb::ndim<1>, nb::c_contig>;
+using cf32_1d = nb::ndarray<const float,    nb::ndim<1>, nb::c_contig>;
+using ci8_1d  = nb::ndarray<const int8_t,   nb::ndim<1>, nb::c_contig>;
+using ci16_1d = nb::ndarray<const int16_t,  nb::ndim<1>, nb::c_contig>;
+
+class BamAnnotationWriter {
+public:
+    ResolveContext* ctx_;
+    SJTagMode sj_tag_mode_ = SJTagMode::XS_ONLY;
+    bool skip_duplicates_ = true;
+    bool include_multimap_ = false;
+    std::vector<int32_t> tid_to_ref_id_;
+
+    BamAnnotationWriter(ResolveContext& ctx,
+                        const std::string& sj_tag_spec,
+                        bool skip_duplicates,
+                        bool include_multimap)
+        : ctx_(&ctx),
+          skip_duplicates_(skip_duplicates),
+          include_multimap_(include_multimap)
+    {
+        sj_tag_mode_ = parse_sj_tag_spec(sj_tag_spec);
+    }
+
+    // ----------------------------------------------------------------
+    // Main write entry point
+    // ----------------------------------------------------------------
+
+    nb::dict write(
+        const std::string& bam_path,
+        const std::string& output_path,
+        // Annotation arrays (sliced to n_annotations, indexed by row)
+        ci64_1d ann_frag_ids,
+        ci32_1d ann_best_tid,
+        ci32_1d ann_best_gid,
+        cu8_1d  ann_pool,
+        cf32_1d ann_posterior,
+        ci8_1d  ann_frag_class,
+        ci16_1d ann_n_candidates,
+        cu8_1d  ann_splice_type,
+        int64_t ann_size,
+        // String ID lookup
+        const std::vector<std::string>& t_ids,
+        const std::vector<std::string>& g_ids)
+    {
+        // Build frag_id → row lookup
+        std::unordered_map<int64_t, int64_t> frag_to_row;
+        frag_to_row.reserve(static_cast<size_t>(ann_size));
+        const int64_t* fid_ptr = ann_frag_ids.data();
+        for (int64_t i = 0; i < ann_size; i++) {
+            frag_to_row[fid_ptr[i]] = i;
+        }
+
+        // Raw data pointers
+        const int32_t* tid_ptr  = ann_best_tid.data();
+        const int32_t* gid_ptr  = ann_best_gid.data();
+        const uint8_t* pool_ptr = ann_pool.data();
+        const float*   post_ptr = ann_posterior.data();
+        const int8_t*  fc_ptr   = ann_frag_class.data();
+        const int16_t* nc_ptr   = ann_n_candidates.data();
+        const uint8_t* st_ptr   = ann_splice_type.data();
+
+        // Open input BAM
+        htsFile* fp = hts_open(bam_path.c_str(), "rb");
+        if (!fp)
+            throw std::runtime_error("Failed to open BAM: " + bam_path);
+
+        bam_hdr_t* hdr = sam_hdr_read(fp);
+        if (!hdr) {
+            hts_close(fp);
+            throw std::runtime_error("Failed to read header: " + bam_path);
+        }
+
+        // Build tid mapping
+        build_tid_mapping(hdr, ctx_->ref_to_id_, tid_to_ref_id_);
+
+        // Open output BAM
+        htsFile* out = hts_open(output_path.c_str(), "wb");
+        if (!out) {
+            bam_hdr_destroy(hdr);
+            hts_close(fp);
+            throw std::runtime_error("Failed to open output: " + output_path);
+        }
+        if (sam_hdr_write(out, hdr) < 0) {
+            hts_close(out);
+            bam_hdr_destroy(hdr);
+            hts_close(fp);
+            throw std::runtime_error("Failed to write header: " + output_path);
+        }
+
+        bam1_t* b = bam_init1();
+
+        // Qname grouping — collect raw records + LightRecords
+        std::vector<bam1_t*> raw_group;       // cloned bam1_t*
+        std::vector<LightRecord> light_group;  // parsed lightweight records
+        std::string current_qname;
+        int64_t frag_id = 0;
+
+        // Summary counters
+        int64_t n_read_groups = 0;
+        int64_t n_annotated = 0;
+        int64_t n_intergenic = 0;
+        int64_t n_chimeric = 0;
+        int64_t n_records_written = 0;
+
+        auto process_and_write = [&]() {
+            if (light_group.empty()) return;
+
+            n_read_groups++;
+
+            // Determine NH
+            int32_t nh = 1;
+            for (const auto& r : light_group) {
+                if (r.nh > 1) { nh = r.nh; break; }
+            }
+
+            // Detect multimap
+            bool has_secondary = false;
+            for (const auto& r : light_group) {
+                if (r.is_secondary()) { has_secondary = true; break; }
+            }
+            bool is_multimap = (nh > 1) || has_secondary;
+
+            if (is_multimap && !include_multimap_) {
+                // Write records without annotation (match pass 1 skip)
+                // Actually, pass 1 skipped these entirely, so frag_id
+                // was NOT incremented — do NOT increment here either.
+                // But we still need to write the records through.
+                // Since pass 1 doesn't assign frag_ids to skipped groups,
+                // these records get intergenic-default tags.
+                stamp_and_write_hit(raw_group, out, hdr, ".", ".",
+                                    "intergenic", 0.0f,
+                                    "intergenic", 1, 0, "unknown");
+                n_intergenic++;
+                n_records_written += static_cast<int64_t>(raw_group.size());
+                // Do NOT increment frag_id (pass 1 skipped this group)
+                return;
+            }
+
+            // Group into hits + secondary locations
+            auto hit_result = group_records_by_hit(light_group);
+
+            // Multimapper secondary pairing
+            std::vector<std::pair<std::vector<LightRecord*>,
+                                  std::vector<LightRecord*>>> secondary_pairs;
+            if (!hit_result.sec_r1_locs.empty() ||
+                !hit_result.sec_r2_locs.empty()) {
+                secondary_pairs = pair_multimapper_reads_native(
+                    hit_result.sec_r1_locs,
+                    hit_result.sec_r2_locs,
+                    *ctx_);
+            }
+
+            // Combine all hits
+            auto& all_hits = hit_result.hits;
+            all_hits.insert(all_hits.end(),
+                            secondary_pairs.begin(),
+                            secondary_pairs.end());
+
+            int32_t num_hits = std::max(nh,
+                static_cast<int32_t>(all_hits.size()));
+
+            // Look up annotation for this frag_id
+            auto ann_it = frag_to_row.find(frag_id);
+            bool has_ann = (ann_it != frag_to_row.end());
+
+            for (int hit_idx = 0;
+                 hit_idx < static_cast<int>(all_hits.size());
+                 hit_idx++)
+            {
+                const auto& [r1_reads, r2_reads] = all_hits[hit_idx];
+
+                // Gather bam1_t* for all records in this hit
+                std::vector<bam1_t*> hit_raws;
+                for (const auto* lr : r1_reads) {
+                    ptrdiff_t idx = lr - &light_group[0];
+                    hit_raws.push_back(raw_group[idx]);
+                }
+                for (const auto* lr : r2_reads) {
+                    ptrdiff_t idx = lr - &light_group[0];
+                    hit_raws.push_back(raw_group[idx]);
+                }
+
+                if (has_ann) {
+                    int64_t row = ann_it->second;
+                    int32_t best_tid_val = tid_ptr[row];
+                    int32_t best_gid_val = gid_ptr[row];
+                    uint8_t pool_val     = pool_ptr[row];
+                    float   post_val     = post_ptr[row];
+                    int8_t  fc_val       = fc_ptr[row];
+                    int16_t nc_val       = nc_ptr[row];
+                    uint8_t st_val       = st_ptr[row];
+
+                    const char* t_id_str = (best_tid_val >= 0 &&
+                        best_tid_val < static_cast<int32_t>(t_ids.size()))
+                        ? t_ids[best_tid_val].c_str() : ".";
+                    const char* g_id_str = (best_gid_val >= 0 &&
+                        best_gid_val < static_cast<int32_t>(g_ids.size()))
+                        ? g_ids[best_gid_val].c_str() : ".";
+
+                    // Determine primary hit
+                    bool is_primary = false;
+                    if (num_hits == 1) {
+                        is_primary = true;
+                    } else if (best_tid_val >= 0) {
+                        // Resolve this hit to see if assigned transcript
+                        // is among its candidates
+                        NativeFragment frag = build_fragment(
+                            r1_reads, r2_reads);
+                        if (!frag.exons.empty()) {
+                            CoreResult cr;
+                            if (ctx_->_resolve_core(
+                                    frag.exons, frag.introns,
+                                    frag.genomic_footprint(), cr)) {
+                                for (int32_t ti : cr.t_inds) {
+                                    if (ti == best_tid_val) {
+                                        is_primary = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    stamp_and_write_hit(
+                        hit_raws, out, hdr,
+                        t_id_str, g_id_str,
+                        pool_label(pool_val), post_val,
+                        frag_class_label(fc_val),
+                        is_primary ? 1 : 0,
+                        static_cast<int>(nc_val),
+                        splice_type_label(st_val));
+
+                    n_annotated++;
+                } else {
+                    // Intergenic / no annotation
+                    stamp_and_write_hit(
+                        hit_raws, out, hdr,
+                        ".", ".",
+                        "intergenic", 0.0f,
+                        "intergenic",
+                        (hit_idx == 0) ? 1 : 0,
+                        0, "unknown");
+                    n_intergenic++;
+                }
+
+                n_records_written +=
+                    static_cast<int64_t>(hit_raws.size());
+            }
+
+            frag_id++;
+        };
+
+        // ---- Main BAM read loop ----
+        while (sam_read1(fp, hdr, b) >= 0) {
+            uint16_t flag = b->core.flag;
+
+            if (flag & BAM_FQCFAIL) continue;
+            if (flag & BAM_FUNMAP) continue;
+            if ((flag & BAM_FDUP) && skip_duplicates_) continue;
+            if (!(flag & BAM_FPAIRED)) continue;
+
+            const char* qname = bam_get_qname(b);
+
+            if (!light_group.empty() && current_qname != qname) {
+                process_and_write();
+                // Free cloned records
+                for (auto* r : raw_group) bam_destroy1(r);
+                raw_group.clear();
+                light_group.clear();
+            }
+
+            current_qname = qname;
+
+            // Clone raw record for output
+            raw_group.push_back(bam_dup1(b));
+
+            // Build LightRecord (same as BamScanner)
+            LightRecord rec;
+            rec.ref_id = b->core.tid;
+            rec.ref_start = b->core.pos;
+            rec.mate_ref_id = b->core.mtid;
+            rec.mate_ref_start = b->core.mpos;
+            rec.flag = flag;
+
+            rec.nm = 0;
+            uint8_t* nm_aux = bam_aux_get(b, "NM");
+            if (nm_aux) rec.nm = bam_aux2i(nm_aux);
+
+            rec.nh = 1;
+            uint8_t* nh_aux = bam_aux_get(b, "NH");
+            if (nh_aux) rec.nh = bam_aux2i(nh_aux);
+
+            rec.hi = -1;
+            uint8_t* hi_aux = bam_aux_get(b, "HI");
+            if (hi_aux) rec.hi = bam_aux2i(hi_aux);
+
+            rec.sj_strand = read_sj_strand(b, sj_tag_mode_);
+
+            int32_t mapped_ref_id = (rec.ref_id >= 0 &&
+                rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
+                ? tid_to_ref_id_[rec.ref_id] : -1;
+            parse_cigar(b, mapped_ref_id, rec.sj_strand,
+                        rec.exons, rec.sjs);
+            rec.ref_id = mapped_ref_id;
+
+            light_group.push_back(std::move(rec));
+        }
+
+        // Process last group
+        if (!light_group.empty()) {
+            process_and_write();
+            for (auto* r : raw_group) bam_destroy1(r);
+        }
+
+        // Cleanup
+        bam_destroy1(b);
+        bam_hdr_destroy(hdr);
+        hts_close(fp);
+        hts_close(out);
+
+        // Build summary dict
+        nb::dict summary;
+        summary["n_read_groups"] = n_read_groups;
+        summary["n_annotated"] = n_annotated;
+        summary["n_intergenic"] = n_intergenic;
+        summary["n_chimeric"] = n_chimeric;
+        summary["n_records_written"] = n_records_written;
+        return summary;
+    }
+
+private:
+    // Stamp BAM tags on all records in a hit and write to output.
+    static void stamp_and_write_hit(
+        const std::vector<bam1_t*>& records,
+        htsFile* out,
+        const bam_hdr_t* hdr,
+        const char* zt,    // transcript ID
+        const char* zg,    // gene ID
+        const char* zp,    // pool label
+        float zw,          // posterior
+        const char* zc,    // fragment class label
+        int zh,            // primary hit flag
+        int zn,            // n_candidates
+        const char* zs)    // splice type label
+    {
+        for (bam1_t* r : records) {
+            bam_aux_update_str(r, "ZT",
+                static_cast<int>(strlen(zt) + 1), zt);
+            bam_aux_update_str(r, "ZG",
+                static_cast<int>(strlen(zg) + 1), zg);
+            bam_aux_update_str(r, "ZP",
+                static_cast<int>(strlen(zp) + 1), zp);
+            bam_aux_update_float(r, "ZW", zw);
+            bam_aux_update_str(r, "ZC",
+                static_cast<int>(strlen(zc) + 1), zc);
+            bam_aux_update_int(r, "ZH", zh);
+            bam_aux_update_int(r, "ZN", zn);
+            bam_aux_update_str(r, "ZS",
+                static_cast<int>(strlen(zs) + 1), zs);
+
+            if (sam_write1(out, hdr, r) < 0) {
+                throw std::runtime_error("Failed to write BAM record");
+            }
+        }
     }
 };
 
@@ -1167,9 +1585,9 @@ static std::string detect_sj_strand_tag_native(
 // ================================================================
 
 NB_MODULE(_bam_impl, m) {
-    m.doc() = "C++ BAM scanner for hulkrna using htslib (nanobind).\n\n"
-              "Replaces the Python BAM parsing hot path with a single\n"
-              "C++ scan: BAM → resolve → buffer in one call.";
+    m.doc() = "C++ BAM scanner and annotation writer for hulkrna using htslib.\n\n"
+              "Provides BamScanner (pass 1: BAM → resolve → buffer) and\n"
+              "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
     nb::class_<BamScanner>(m, "BamScanner")
         .def(nb::init<ResolveContext&, const std::string&, bool, bool>(),
@@ -1199,12 +1617,64 @@ NB_MODULE(_bam_impl, m) {
              "  'frag_length_observations' — dict of frag length arrays\n"
              "  'accumulator_size' — number of resolved fragments\n")
         .def("finalize_accumulator", &BamScanner::finalize_accumulator,
-             nb::arg("t_to_g_arr"),
+             nb::arg("t_strand_arr"),
              "Finalize the internal accumulator to raw bytes dict.\n\n"
              "Parameters\n"
              "----------\n"
-             "t_to_g_arr : list[int]\n"
-             "    Transcript-to-gene mapping array (int64).\n")
+             "t_strand_arr : list[int]\n"
+             "    Per-transcript strand array (int32).\n")
+        ;
+
+    nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")
+        .def(nb::init<ResolveContext&, const std::string&, bool, bool>(),
+             nb::arg("ctx"),
+             nb::arg("sj_tag_spec"),
+             nb::arg("skip_duplicates") = true,
+             nb::arg("include_multimap") = false,
+             "Create a BAM annotation writer.\n\n"
+             "Parameters\n"
+             "----------\n"
+             "ctx : ResolveContext\n"
+             "    The resolve context from index building.\n"
+             "sj_tag_spec : str\n"
+             "    SJ strand tag specification (must match pass 1).\n"
+             "skip_duplicates : bool\n"
+             "    Skip duplicate-flagged reads (must match pass 1).\n"
+             "include_multimap : bool\n"
+             "    Include multimapping reads (must match pass 1).\n",
+             nb::keep_alive<1, 2>()
+        )
+        .def("write", &BamAnnotationWriter::write,
+             nb::arg("bam_path"),
+             nb::arg("output_path"),
+             nb::arg("ann_frag_ids"),
+             nb::arg("ann_best_tid"),
+             nb::arg("ann_best_gid"),
+             nb::arg("ann_pool"),
+             nb::arg("ann_posterior"),
+             nb::arg("ann_frag_class"),
+             nb::arg("ann_n_candidates"),
+             nb::arg("ann_splice_type"),
+             nb::arg("ann_size"),
+             nb::arg("t_ids"),
+             nb::arg("g_ids"),
+             "Stamp annotation tags and write BAM.\n\n"
+             "Parameters\n"
+             "----------\n"
+             "bam_path : str\n"
+             "    Path to name-sorted input BAM.\n"
+             "output_path : str\n"
+             "    Path for output annotated BAM.\n"
+             "ann_frag_ids .. ann_splice_type : ndarray\n"
+             "    Annotation arrays (sliced to ann_size).\n"
+             "ann_size : int\n"
+             "    Number of annotation entries.\n"
+             "t_ids, g_ids : list[str]\n"
+             "    Transcript / gene ID lookup arrays.\n\n"
+             "Returns\n"
+             "-------\n"
+             "dict\n"
+             "    Summary: n_read_groups, n_annotated, n_intergenic, etc.\n")
         ;
 
     m.def("detect_sj_strand_tag", &detect_sj_strand_tag_native,

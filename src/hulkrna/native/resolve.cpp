@@ -37,7 +37,7 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("splice_type", &ResolvedResult::splice_type)
         .def_ro("exon_strand", &ResolvedResult::exon_strand)
         .def_ro("sj_strand", &ResolvedResult::sj_strand)
-        .def_ro("n_genes", &ResolvedResult::n_genes)
+        .def_ro("ambig_strand", &ResolvedResult::ambig_strand)
         .def_ro("chimera_type", &ResolvedResult::chimera_type)
         .def_ro("chimera_gap", &ResolvedResult::chimera_gap)
         .def_ro("merge_criteria", &ResolvedResult::merge_criteria)
@@ -45,7 +45,7 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("genomic_footprint", &ResolvedResult::genomic_footprint)
         .def_ro("genomic_start", &ResolvedResult::genomic_start)
         .def_prop_ro("is_chimeric", &ResolvedResult::get_is_chimeric)
-        .def_prop_ro("is_unique_gene", &ResolvedResult::get_is_unique_gene)
+        .def_prop_ro("is_same_strand", &ResolvedResult::get_is_same_strand)
         .def_prop_ro("is_strand_qualified",
                      &ResolvedResult::get_is_strand_qualified)
         .def_prop_ro("first_t_ind", &ResolvedResult::get_first_t_ind)
@@ -67,7 +67,7 @@ NB_MODULE(_resolve_impl, m) {
         .def_prop_ro("size", &NativeAccumulator::get_size,
                      "Number of fragments in the accumulator.")
         .def("finalize", &NativeAccumulator::finalize,
-             nb::arg("t_to_g_arr"),
+             nb::arg("t_strand_arr"),
              "Finalize to a dict of raw bytes for numpy conversion.")
         ;
 
@@ -109,5 +109,40 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_gene_strands", &ResolveContext::set_gene_strands,
              nb::arg("g_to_strand"),
              "Set gene strand mapping for BAM scanner model training.")
+        .def("set_transcript_strands", &ResolveContext::set_transcript_strands,
+             nb::arg("t_strand"),
+             "Set per-transcript strand array (direct lookup, no gene indirection).")
         ;
+
+    // --- Expose C++ enum constants as module-level attributes ---
+    // These mirror the Python IntEnum values in hulkrna.types / hulkrna.splice.
+    // Single authoritative source: constants.h
+
+    // Strand
+    m.attr("STRAND_NONE")      = hulk::STRAND_NONE;
+    m.attr("STRAND_POS")       = hulk::STRAND_POS;
+    m.attr("STRAND_NEG")       = hulk::STRAND_NEG;
+    m.attr("STRAND_AMBIGUOUS") = hulk::STRAND_AMBIGUOUS;
+
+    // SpliceType
+    m.attr("SPLICE_UNSPLICED")       = hulk::SPLICE_UNSPLICED;
+    m.attr("SPLICE_SPLICED_UNANNOT") = hulk::SPLICE_SPLICED_UNANNOT;
+    m.attr("SPLICE_SPLICED_ANNOT")   = hulk::SPLICE_SPLICED_ANNOT;
+
+    // MergeCriteria
+    m.attr("MC_INTERSECTION")          = hulk::MC_INTERSECTION;
+    m.attr("MC_INTERSECTION_NONEMPTY") = hulk::MC_INTERSECTION_NONEMPTY;
+    m.attr("MC_UNION")                 = hulk::MC_UNION;
+    m.attr("MC_EMPTY")                 = hulk::MC_EMPTY;
+
+    // ChimeraType
+    m.attr("CHIMERA_NONE")           = hulk::CHIMERA_NONE;
+    m.attr("CHIMERA_TRANS")          = hulk::CHIMERA_TRANS;
+    m.attr("CHIMERA_CIS_STRAND_SAME") = hulk::CHIMERA_CIS_STRAND_SAME;
+    m.attr("CHIMERA_CIS_STRAND_DIFF") = hulk::CHIMERA_CIS_STRAND_DIFF;
+
+    // IntervalType
+    m.attr("ITYPE_EXON")           = hulk::ITYPE_EXON;
+    m.attr("ITYPE_INTRON")         = static_cast<int8_t>(1);  // TRANSCRIPT slot
+    m.attr("ITYPE_UNAMBIG_INTRON") = hulk::ITYPE_UNAMBIG_INTRON;
 }

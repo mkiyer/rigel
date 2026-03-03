@@ -3,12 +3,10 @@
 import pytest
 
 from hulkrna.types import (
-    EMPTY_MERGE,
     GenomicInterval,
     Interval,
     IntervalType,
     MergeCriteria,
-    MergeResult,
     RefInterval,
     Strand,
 )
@@ -194,48 +192,3 @@ class TestMergeCriteria:
         assert int(MergeCriteria.EMPTY) == 3
 
 
-# =====================================================================
-# MergeResult
-# =====================================================================
-
-
-class TestMergeResult:
-    def test_unique_gene(self):
-        mr = MergeResult(frozenset({0, 1}), MergeCriteria.INTERSECTION)
-        assert mr.is_unique_transcript is False
-        assert mr.is_empty is False
-
-    def test_unique_transcript(self):
-        mr = MergeResult(frozenset({7}), MergeCriteria.UNION)
-        assert mr.is_unique_transcript is True
-
-    def test_empty(self):
-        mr = MergeResult(frozenset(), MergeCriteria.EMPTY)
-        assert mr.is_empty is True
-        assert mr.is_unique_transcript is False
-
-    def test_multi_transcript(self):
-        mr = MergeResult(frozenset({0, 1}), MergeCriteria.UNION)
-        assert mr.is_unique_transcript is False
-
-    def test_frozen(self):
-        mr = MergeResult(frozenset({0}), MergeCriteria.INTERSECTION)
-        with pytest.raises(AttributeError):
-            mr.t_inds = frozenset({9})
-
-
-# =====================================================================
-# EMPTY_MERGE sentinel
-# =====================================================================
-
-
-class TestEmptyMerge:
-    def test_is_empty(self):
-        assert EMPTY_MERGE.is_empty is True
-
-    def test_criteria(self):
-        assert EMPTY_MERGE.criteria == MergeCriteria.EMPTY
-
-    def test_identity(self):
-        """EMPTY_MERGE should be a singleton-like sentinel."""
-        assert EMPTY_MERGE is EMPTY_MERGE

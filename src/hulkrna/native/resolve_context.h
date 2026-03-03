@@ -43,7 +43,7 @@ namespace hulk {
 class ResolvedResult {
 public:
     std::vector<int32_t> t_inds;
-    int32_t n_genes = 0;
+    int32_t ambig_strand = 0;
     int32_t splice_type = 0;
     int32_t exon_strand = 0;
     int32_t sj_strand = 0;
@@ -68,13 +68,13 @@ public:
         return chimera_type != CHIMERA_NONE;
     }
 
-    bool get_is_unique_gene() const {
-        return n_genes == 1;
+    bool get_is_same_strand() const {
+        return !ambig_strand;
     }
 
     bool get_is_strand_qualified() const {
         return splice_type == SPLICE_SPLICED_ANNOT
-            && n_genes == 1
+            && !ambig_strand
             && (exon_strand == STRAND_POS || exon_strand == STRAND_NEG)
             && (sj_strand == STRAND_POS || sj_strand == STRAND_NEG)
             && chimera_type == CHIMERA_NONE;
@@ -132,7 +132,7 @@ public:
     static ResolvedResult from_core(CoreResult& cr) {
         ResolvedResult r;
         r.t_inds = std::move(cr.t_inds);
-        r.n_genes = cr.n_genes;
+        r.ambig_strand = cr.ambig_strand;
         r.splice_type = cr.splice_type;
         r.exon_strand = cr.exon_strand;
         r.sj_strand = cr.sj_strand;
@@ -218,28 +218,29 @@ public:
     int32_t get_size() const { return size_; }
 
     /// Finalize accumulator → dict of raw bytes (for numpy frombuffer).
-    /// Also computes n_genes from t_to_g mapping.
-    nb::dict finalize(const std::vector<int64_t>& t_to_g_arr) {
+    /// Also computes ambig_strand from transcript strand mapping.
+    nb::dict finalize(const std::vector<int32_t>& t_strand_arr) {
         int32_t n = size_;
 
-        // Compute n_genes per fragment from transcript indices
-        std::vector<uint8_t> n_genes(n, 0);
+        // Compute ambig_strand per fragment from transcript strand array
+        std::vector<uint8_t> ambig_strand(n, 0);
         for (int32_t i = 0; i < n; i++) {
             int64_t start = t_offsets_[i];
             int64_t end = t_offsets_[i + 1];
-            if (start == end) continue;
-            if (end - start == 1) {
-                n_genes[i] = 1;
-                continue;
-            }
-            std::unordered_set<int64_t> genes;
+            if (end - start <= 1) continue;  // 0 or 1 transcript: not mixed
+            int32_t first_strand = -999;
             for (int64_t j = start; j < end; j++) {
                 int32_t t = t_indices_[j];
-                if (t >= 0 && t < static_cast<int32_t>(t_to_g_arr.size()))
-                    genes.insert(t_to_g_arr[t]);
+                if (t >= 0 && t < static_cast<int32_t>(t_strand_arr.size())) {
+                    int32_t s = t_strand_arr[t];
+                    if (first_strand == -999) {
+                        first_strand = s;
+                    } else if (s != first_strand) {
+                        ambig_strand[i] = 1;
+                        break;
+                    }
+                }
             }
-            n_genes[i] = static_cast<uint8_t>(
-                std::min<size_t>(genes.size(), 255));
         }
 
         auto to_bytes = [](const void* data, size_t nbytes) -> nb::bytes {
@@ -275,7 +276,7 @@ public:
         result["unambig_intron_bp"] = to_bytes(
             unambig_intron_bp_.data(),
             unambig_intron_bp_.size() * sizeof(int32_t));
-        result["n_genes"] = to_bytes(n_genes.data(), n_genes.size());
+        result["ambig_strand"] = to_bytes(ambig_strand.data(), ambig_strand.size());
         result["frag_id"] = to_bytes(
             frag_id_.data(), frag_id_.size() * sizeof(int64_t));
         result["read_length"] = to_bytes(
@@ -322,6 +323,9 @@ public:
 
     // --- Gene strand metadata (for BAM scanner model training) ---
     std::vector<int32_t> g_to_strand_arr_;
+
+    // --- Transcript strand metadata (direct lookup, no gene indirection) ---
+    std::vector<int32_t> t_strand_arr_;
 
     // --- Reference name <-> ID ---
     std::unordered_map<std::string, int32_t> ref_to_id_;
@@ -450,6 +454,11 @@ public:
     /// Set gene strand mapping (for BAM scanner model training)
     void set_gene_strands(const std::vector<int32_t>& g_to_strand) {
         g_to_strand_arr_ = g_to_strand;
+    }
+
+    /// Set per-transcript strand array (direct lookup, no gene indirection).
+    void set_transcript_strands(const std::vector<int32_t>& t_strand) {
+        t_strand_arr_ = t_strand;
     }
 
     nb::dict get_ref_to_id() const {
@@ -847,13 +856,21 @@ public:
             }
         }
 
-        // --- n_genes ---
-        std::unordered_set<int32_t> gene_set;
+        // --- ambig_strand ---
+        int32_t first_strand = -999;
+        bool mixed = false;
         for (int32_t t : cr.t_inds) {
-            if (t >= 0 && t < n_transcripts_)
-                gene_set.insert(t_to_g_arr_[t]);
+            if (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size())) {
+                int32_t s = t_strand_arr_[t];
+                if (first_strand == -999) {
+                    first_strand = s;
+                } else if (s != first_strand) {
+                    mixed = true;
+                    break;
+                }
+            }
         }
-        cr.n_genes = static_cast<int32_t>(gene_set.size());
+        cr.ambig_strand = mixed ? 1 : 0;
 
         // --- Fragment lengths ---
         if (cr.chimera_type == CHIMERA_NONE) {
@@ -920,7 +937,7 @@ public:
 
         return nb::make_tuple(
             t_inds_list,
-            cr.n_genes,
+            cr.ambig_strand,
             cr.splice_type,
             cr.exon_strand,
             cr.sj_strand,

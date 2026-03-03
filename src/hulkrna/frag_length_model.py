@@ -376,7 +376,7 @@ class FragmentLengthModels:
     """
 
     def __init__(self, max_size: int = DEFAULT_MAX_FRAG_SIZE):
-        from .categories import SpliceType
+        from .splice import SpliceType
 
         self.max_size = max_size
         self.global_model = FragmentLengthModel(max_size=max_size)
@@ -435,7 +435,7 @@ class FragmentLengthModels:
 
     def to_dict(self) -> dict:
         """JSON/YAML-serializable summary of all fragment length models."""
-        from .categories import SpliceType
+        from .splice import SpliceType
 
         d: dict = {"global": self.global_model.to_dict()}
         d["intergenic"] = self.intergenic.to_dict()
@@ -459,7 +459,7 @@ class FragmentLengthModels:
 
     def log_summary(self) -> None:
         """Log a human-readable summary of all fragment length models."""
-        from .categories import SpliceType
+        from .splice import SpliceType
 
         logger.info(
             f"Fragment length models: {self.global_model.n_observations:,} "

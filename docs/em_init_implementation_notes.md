@@ -94,7 +94,7 @@ marginally but does not eliminate it (see Known Limitation below).
 
 Despite D2's UNSPLICED-only filter, the arrays retain the `_all`
 suffix from the plan. The "all" refers to "all included fragment
-classes" (FRAG_UNIQUE + FRAG_ISOFORM_AMBIG), not "all splice
+classes" (FRAG_UNIQUE + FRAG_AMBIG_SAME_STRAND), not "all splice
 types." A future rename to `gene_sense_unspliced` could improve
 clarity but would require changes across counter, pipeline, tests,
 and diagnostics.
@@ -178,11 +178,11 @@ Four new arrays on `ReadCounter.__init__`:
 | `transcript_intronic_antisense` | `(num_transcripts,)` | Intronic antisense per transcript |
 
 Accumulation runs in `_scan_and_build_em_data` for FRAG_UNIQUE and
-FRAG_ISOFORM_AMBIG fragments, before the routing decision. This is
+FRAG_AMBIG_SAME_STRAND fragments, before the routing decision. This is
 independent of EM routing — a fragment counted here still goes to
 deterministic assignment or EM as before.
 
-For FRAG_ISOFORM_AMBIG intronic counting, each candidate transcript
+For FRAG_AMBIG_SAME_STRAND intronic counting, each candidate transcript
 k with `intron_bp[k] > 0` receives fractional weight `1/n_candidates`.
 
 ### Step 2: `_compute_gdna_init`
@@ -258,7 +258,7 @@ it by correctly attributing cross-gene fragments. This requires:
 Short of full locus-level gDNA, a heuristic could improve the
 overlapping antisense case:
 
-- During the scan, detect FRAG_GENE_AMBIG fragments involving
+- During the scan, detect FRAG_AMBIG_OPP_STRAND fragments involving
   opposite-strand genes
 - Flag those genes as "has antisense overlap"
 - Zero or reduce `gdna_init` for flagged genes

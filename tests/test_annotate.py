@@ -86,13 +86,13 @@ class TestAnnotationTable:
     def test_frag_class_labels(self):
         """Known fragment class codes have labels."""
         assert _FRAG_CLASS_LABELS[0] == "unique"
-        assert _FRAG_CLASS_LABELS[1] == "isoform_ambig"
+        assert _FRAG_CLASS_LABELS[1] == "ambig_same_strand"
         assert _FRAG_CLASS_LABELS[3] == "multimapper"
         assert _FRAG_CLASS_LABELS[-1] == "intergenic"
 
     def test_splice_type_label(self):
         """SpliceType codes convert to lowercase labels."""
-        from hulkrna.categories import SpliceType
+        from hulkrna.splice import SpliceType
         for st in SpliceType:
             label = _splice_type_label(int(st))
             assert label == st.name.lower()

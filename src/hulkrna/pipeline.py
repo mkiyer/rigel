@@ -35,7 +35,7 @@ _ANNOTATION_TABLE_PADDING = 1024
 _ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
 from .buffer import FragmentBuffer, _FinalizedChunk
-from .categories import SpliceType
+from .splice import SpliceType
 from .estimator import AbundanceEstimator
 from .types import ChimeraType, Strand
 from .index import HulkIndex
@@ -158,13 +158,13 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
     stats.n_with_annotated_sj = stats_dict.get("n_with_annotated_sj", 0)
     stats.n_with_unannotated_sj = stats_dict.get(
         "n_with_unannotated_sj", 0)
-    stats.n_unique_gene = stats_dict.get("n_unique_gene", 0)
-    stats.n_multi_gene = stats_dict.get("n_multi_gene", 0)
+    stats.n_same_strand = stats_dict.get("n_same_strand", 0)
+    stats.n_ambig_strand = stats_dict.get("n_ambig_strand", 0)
     stats.n_strand_trained = stats_dict.get("n_strand_trained", 0)
     stats.n_strand_skipped_no_sj = stats_dict.get(
         "n_strand_skipped_no_sj", 0)
-    stats.n_strand_skipped_multi_gene = stats_dict.get(
-        "n_strand_skipped_multi_gene", 0)
+    stats.n_strand_skipped_ambig_strand = stats_dict.get(
+        "n_strand_skipped_ambig_strand", 0)
     stats.n_strand_skipped_ambiguous = stats_dict.get(
         "n_strand_skipped_ambiguous", 0)
     stats.n_frag_length_unambiguous = stats_dict.get(
@@ -208,7 +208,7 @@ def scan_and_buffer(
     )
     frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
     buffer = FragmentBuffer(
-        t_to_g_arr=index.t_to_g_arr,
+        t_strand_arr=index.t_to_strand_arr,
         chunk_size=scan.chunk_size,
         max_memory_bytes=scan.max_memory_bytes,
         spill_dir=scan.spill_dir,
@@ -219,6 +219,7 @@ def scan_and_buffer(
     # Provide gene strand info for exonic fallback strand model training
     resolve_ctx = index._resolve_ctx
     resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
+    resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
     # Create the native scanner
     sj_spec = _sj_tag_to_spec(scan.sj_strand_tag)
@@ -246,7 +247,7 @@ def scan_and_buffer(
     # Finalize the C++ accumulator to raw bytes, then build buffer chunk
     acc_size = result["accumulator_size"]
     if acc_size > 0:
-        raw = scanner.finalize_accumulator(index.t_to_g_arr.tolist())
+        raw = scanner.finalize_accumulator(index.t_to_strand_arr.tolist())
         size = raw["size"]
 
         chunk = _FinalizedChunk(
@@ -274,8 +275,8 @@ def scan_and_buffer(
                 raw["intron_bp"], dtype=np.int32).copy(),
             unambig_intron_bp=np.frombuffer(
                 raw["unambig_intron_bp"], dtype=np.int32).copy(),
-            n_genes=np.frombuffer(
-                raw["n_genes"], dtype=np.uint8).copy(),
+            ambig_strand=np.frombuffer(
+                raw["ambig_strand"], dtype=np.uint8).copy(),
             frag_id=np.frombuffer(
                 raw["frag_id"], dtype=np.int64).copy(),
             read_length=np.frombuffer(
@@ -301,8 +302,8 @@ def scan_and_buffer(
 
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
-        f"{stats.n_unique_gene:,} unique-gene, "
-        f"{stats.n_multi_gene:,} multi-gene, "
+        f"{stats.n_same_strand:,} same-strand, "
+        f"{stats.n_ambig_strand:,} ambig-strand, "
         f"{stats.n_intergenic:,} intergenic, "
         f"{buffer.total_fragments:,} buffered "
         f"({buffer.memory_bytes / 1024**2:.1f} MB in memory, "
@@ -377,28 +378,20 @@ def count_from_buffer(
             exonic_lengths - mean_frag + 1.0, 1.0,
         )
 
-    gene_spans = (
-        index.g_df["end"].values - index.g_df["start"].values
-    ).astype(np.float64)
-
     transcript_spans = (
         index.t_df["end"].values - index.t_df["start"].values
     ).astype(np.float64)
-
-    intronic_spans = index.intron_span_per_gene()
 
     geometry = TranscriptGeometry(
         effective_lengths=effective_lengths,
         exonic_lengths=exonic_lengths,
         t_to_g=index.t_to_g_arr,
-        gene_spans=gene_spans,
         mean_frag=mean_frag,
-        intronic_spans=intronic_spans,
         transcript_spans=transcript_spans,
     )
 
     counter = AbundanceEstimator(
-        index.num_transcripts, index.num_genes,
+        index.num_transcripts,
         em_config=em_config,
         geometry=geometry,
     )
@@ -490,11 +483,6 @@ def count_from_buffer(
                 "locus_id": locus.locus_id,
                 "gdna_count": gdna_assigned,
             })
-
-            if gdna_assigned > 0 and len(locus.gene_indices) > 0:
-                per_gene = gdna_assigned / len(locus.gene_indices)
-                for g_idx in locus.gene_indices:
-                    counter.gdna_gene_summary[int(g_idx)] += per_gene
 
             if len(locus.transcript_indices) > _LARGE_LOCUS_LOG_THRESHOLD:
                 logger.debug(

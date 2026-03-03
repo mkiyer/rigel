@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 
-from hulkrna.categories import SpliceType
+from hulkrna.splice import SpliceType
 from hulkrna.frag_length_model import FragmentLengthModel, FragmentLengthModels
 
 

@@ -51,7 +51,7 @@ from .types import Strand
 from .config import EMConfig, TranscriptGeometry
 from ._em_impl import run_locus_em_native as _run_locus_em_native
 from .annotate import POOL_CODE_MRNA, POOL_CODE_NRNA, POOL_CODE_GDNA
-from .categories import (
+from .splice import (
     ANTISENSE_COLS,
     SpliceType,
     SpliceStrandCol,
@@ -200,15 +200,12 @@ class Locus:
         Sequential label (0-based).
     transcript_indices : np.ndarray
         int32 - global transcript indices in this locus.
-    gene_indices : np.ndarray
-        int32 - global gene indices in this locus.
     unit_indices : np.ndarray
         int32 - EM unit indices (rows in global CSR) belonging to this locus.
     """
 
     locus_id: int
     transcript_indices: np.ndarray
-    gene_indices: np.ndarray
     unit_indices: np.ndarray
 
 
@@ -330,7 +327,6 @@ class AbundanceEstimator:
     Parameters
     ----------
     num_transcripts : int
-    num_genes : int
     em_config : EMConfig or None
         EM algorithm configuration.  Defaults to ``EMConfig()``.
     geometry : TranscriptGeometry or None
@@ -341,7 +337,6 @@ class AbundanceEstimator:
     def __init__(
         self,
         num_transcripts: int,
-        num_genes: int,
         *,
         em_config: EMConfig | None = None,
         geometry: TranscriptGeometry | None = None,
@@ -350,7 +345,6 @@ class AbundanceEstimator:
             em_config = EMConfig()
         self.em_config = em_config
         self.num_transcripts = num_transcripts
-        self.num_genes = num_genes
         self._rng = np.random.default_rng(em_config.seed)
 
         # nRNA shadow base index (for global CSR component numbering).
@@ -359,13 +353,7 @@ class AbundanceEstimator:
         # --- Geometry: from TranscriptGeometry or defaults ---
         if geometry is not None:
             self._t_to_g = np.asarray(geometry.t_to_g, dtype=np.int32)
-            self._gene_spans = np.asarray(
-                geometry.gene_spans, dtype=np.float64
-            )
             self._mean_frag = geometry.mean_frag
-            self._intronic_spans = np.asarray(
-                geometry.intronic_spans, dtype=np.float64
-            )
             self._transcript_spans = np.asarray(
                 geometry.transcript_spans, dtype=np.float64
             )
@@ -378,9 +366,7 @@ class AbundanceEstimator:
             )
         else:
             self._t_to_g = None
-            self._gene_spans = None
             self._mean_frag = _DEFAULT_MEAN_FRAG
-            self._intronic_spans = None
             self._transcript_spans = None
             self._exonic_lengths = None
             self._t_eff_len = np.ones(
@@ -406,9 +392,6 @@ class AbundanceEstimator:
         # --- gDNA: locus-level, NOT per-gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
-        # Per-gene gDNA summary (for gene-level output compatibility).
-        # Accumulated by mapping gDNA back to overlapping genes.
-        self.gdna_gene_summary = np.zeros(num_genes, dtype=np.float64)
 
         # Per-locus gDNA results stored as list of dicts
         self.gdna_locus_results: list[dict] = []
@@ -419,10 +402,15 @@ class AbundanceEstimator:
         )
 
         # --- Pre-EM strand accumulators (for gDNA init via EB) ---
-        # Gene-level: all single-gene UNSPLICED fragments.
+        # Transcript-level: all same-strand UNSPLICED fragments.
         # Accumulated during scan pass for empirical Bayes gDNA prior.
-        self.gene_sense_all = np.zeros(num_genes, dtype=np.float64)
-        self.gene_antisense_all = np.zeros(num_genes, dtype=np.float64)
+        # Gene-level totals are derived via np.add.at(g_arr, t_to_g, t_arr).
+        self.transcript_unspliced_sense = np.zeros(
+            num_transcripts, dtype=np.float64
+        )
+        self.transcript_unspliced_antisense = np.zeros(
+            num_transcripts, dtype=np.float64
+        )
 
         # --- Pre-EM intronic accumulators (for nRNA init) ---
         self.transcript_intronic_sense = np.zeros(
@@ -482,15 +470,26 @@ class AbundanceEstimator:
     @staticmethod
     def is_antisense(
         exon_strand,
-        gene_strand: int,
+        ref_strand: int,
         strand_model,
     ) -> bool:
-        """Classify whether a fragment is antisense using the trained model."""
+        """Classify whether a fragment is antisense using the trained model.
+
+        Parameters
+        ----------
+        exon_strand : int
+            Observed exon-block strand of the fragment.
+        ref_strand : int
+            Strand of the reference transcript (or gene — they are
+            identical by definition).
+        strand_model
+            Trained strand model with ``strand_likelihood*`` methods.
+        """
         if getattr(strand_model, '_finalized', False):
-            p = strand_model.strand_likelihood_int(exon_strand, gene_strand)
+            p = strand_model.strand_likelihood_int(exon_strand, ref_strand)
         else:
             p = strand_model.strand_likelihood(
-                exon_strand, Strand(gene_strand),
+                exon_strand, Strand(ref_strand),
             )
         return p < 0.5
 
@@ -506,10 +505,9 @@ class AbundanceEstimator:
             return
 
         t_idx = int(next(iter(t_inds)))
-        g_idx = int(index.t_to_g_arr[t_idx])
-        gene_strand = int(index.g_to_strand_arr[g_idx])
+        t_strand = int(index.t_to_strand_arr[t_idx])
         sm = strand_models.model_for_category(resolved.splice_type)
-        anti = self.is_antisense(resolved.exon_strand, gene_strand, sm)
+        anti = self.is_antisense(resolved.exon_strand, t_strand, sm)
         col = SpliceStrandCol.from_category(resolved.splice_type, anti)
         self.unique_counts[t_idx, col] += 1.0
 
@@ -848,17 +846,20 @@ class AbundanceEstimator:
         n_nrna = np.zeros(n_genes, dtype=np.float64)
         np.add.at(n_nrna, t_to_g, n_nrna_per_t)
 
-        # gDNA per gene (from genomic-coordinate gDNA mapped to genes)
-        n_gdna = self.gdna_gene_summary.copy()
+        # gDNA per gene (derived from per-transcript gdna_locus_counts)
+        n_gdna = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(n_gdna, t_to_g, self.gdna_locus_counts.sum(axis=1))
 
         # Antisense unique counts per gene
         t_antisense = unique[:, list(ANTISENSE_COLS)].sum(axis=1)
         n_antisense = np.zeros(n_genes, dtype=np.float64)
         np.add.at(n_antisense, t_to_g, t_antisense)
 
-        # Pre-EM strand accumulators
-        n_sense_all = self.gene_sense_all
-        n_antisense_all = self.gene_antisense_all
+        # Pre-EM strand accumulators (aggregate from transcript-level)
+        n_sense_all = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(n_sense_all, t_to_g, self.transcript_unspliced_sense)
+        n_antisense_all = np.zeros(n_genes, dtype=np.float64)
+        np.add.at(n_antisense_all, t_to_g, self.transcript_unspliced_antisense)
 
         # Intronic accumulators per gene
         n_intronic_sense = np.zeros(n_genes, dtype=np.float64)

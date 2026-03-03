@@ -44,13 +44,13 @@ class PipelineStats:
     n_with_exon: int = 0
     n_with_annotated_sj: int = 0
     n_with_unannotated_sj: int = 0
-    n_unique_gene: int = 0
-    n_multi_gene: int = 0
+    n_same_strand: int = 0
+    n_ambig_strand: int = 0
 
     # --- Strand model training ---
     n_strand_trained: int = 0
     n_strand_skipped_no_sj: int = 0
-    n_strand_skipped_multi_gene: int = 0
+    n_strand_skipped_ambig_strand: int = 0
     n_strand_skipped_ambiguous: int = 0
 
     # --- Fragment length model training ---
@@ -61,8 +61,8 @@ class PipelineStats:
     # --- Routing counters (authoritative) ---
     deterministic_unique_units: int = 0
     em_routed_unique_units: int = 0
-    em_routed_isoform_ambig_units: int = 0
-    em_routed_gene_ambig_units: int = 0
+    em_routed_ambig_same_strand_units: int = 0
+    em_routed_ambig_opp_strand_units: int = 0
     em_routed_multimapper_units: int = 0
 
     # --- Gating ---

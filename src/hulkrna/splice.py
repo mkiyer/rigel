@@ -1,5 +1,5 @@
 """
-hulkrna.categories — Splice classification enums for the counting pipeline.
+hulkrna.splice — Splice classification enums for the counting pipeline.
 
 Internal count arrays use 6 columns: 3 splice types × 2 strands
 (sense/antisense).  Strand is an internal signal used for gDNA
@@ -25,6 +25,11 @@ class SpliceType(IntEnum):
 
 
 NUM_SPLICE_TYPES = len(SpliceType)
+
+#: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
+SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)         # 0
+SPLICE_UNANNOT: int = int(SpliceType.SPLICED_UNANNOT)     # 1
+SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)         # 2
 
 
 class SpliceStrandCol(IntEnum):

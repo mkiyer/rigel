@@ -1,8 +1,8 @@
-"""Tests for hulkrna.categories — count classification enums."""
+"""Tests for hulkrna.splice — count classification enums."""
 
 import pytest
 
-from hulkrna.categories import (
+from hulkrna.splice import (
     ANTISENSE_COLS,
     SpliceType,
     SpliceStrandCol,

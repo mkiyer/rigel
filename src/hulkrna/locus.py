@@ -68,7 +68,6 @@ def build_loci(
     nrna_base = em_data.nrna_base_index
     offsets = em_data.offsets
     t_indices = em_data.t_indices
-    t_to_g = index.t_to_g_arr
     n_units = em_data.n_units
 
     if n_units == 0 or len(t_indices) == 0:
@@ -136,14 +135,11 @@ def build_loci(
     loci = []
     for lid, (lbl, t_list) in enumerate(sorted(component_map.items())):
         t_arr = np.array(sorted(t_list), dtype=np.int32)
-        g_set = sorted(set(int(t_to_g[t]) for t in t_arr))
-        g_arr = np.array(g_set, dtype=np.int32)
         u_arr = np.array(sorted(root_to_units.get(lbl, [])), dtype=np.int32)
 
         loci.append(Locus(
             locus_id=lid,
             transcript_indices=t_arr,
-            gene_indices=g_arr,
             unit_indices=u_arr,
         ))
 
@@ -527,13 +523,13 @@ def compute_eb_gdna_priors(
         gDNA init count per locus (same order as ``loci``).
     """
     ss = strand_models.exonic_spliced.strand_specificity
-    g_sense = counter.gene_sense_all
-    g_anti = counter.gene_antisense_all
-    g_refs = index.g_df["ref"].values
+    t_sense = counter.transcript_unspliced_sense
+    t_anti = counter.transcript_unspliced_antisense
+    t_refs = index.t_df["ref"].values
 
     # --- Global level ---
-    total_sense = float(g_sense.sum())
-    total_anti = float(g_anti.sum())
+    total_sense = float(t_sense.sum())
+    total_anti = float(t_anti.sum())
     global_rate = compute_gdna_rate_from_strand(
         total_sense, total_anti, ss,
     )
@@ -542,10 +538,10 @@ def compute_eb_gdna_priors(
     # --- Chromosome level ---
     chrom_sense: dict[str, float] = defaultdict(float)
     chrom_anti: dict[str, float] = defaultdict(float)
-    for g_idx in range(len(g_sense)):
-        ref = str(g_refs[g_idx])
-        chrom_sense[ref] += g_sense[g_idx]
-        chrom_anti[ref] += g_anti[g_idx]
+    for t_idx in range(len(t_sense)):
+        ref = str(t_refs[t_idx])
+        chrom_sense[ref] += t_sense[t_idx]
+        chrom_anti[ref] += t_anti[t_idx]
 
     chrom_rate: dict[str, float] = {}
     chrom_n: dict[str, float] = {}
@@ -565,9 +561,9 @@ def compute_eb_gdna_priors(
     # --- Per-locus level ---
     gdna_inits: list[float] = []
     for locus in loci:
-        g_arr = locus.gene_indices
-        locus_sense = float(g_sense[g_arr].sum())
-        locus_anti = float(g_anti[g_arr].sum())
+        t_arr = locus.transcript_indices
+        locus_sense = float(t_sense[t_arr].sum())
+        locus_anti = float(t_anti[t_arr].sum())
         locus_n = locus_sense + locus_anti
 
         locus_rate = compute_gdna_rate_from_strand(
@@ -576,20 +572,15 @@ def compute_eb_gdna_priors(
 
         # Determine primary chromosome for this locus
         ref_counts: dict[str, float] = defaultdict(float)
-        for g_idx in g_arr:
-            ref = str(g_refs[int(g_idx)])
-            ref_counts[ref] += g_sense[int(g_idx)] + g_anti[int(g_idx)]
+        for t_idx in t_arr:
+            ref = str(t_refs[int(t_idx)])
+            ref_counts[ref] += t_sense[int(t_idx)] + t_anti[int(t_idx)]
         if ref_counts:
             primary_ref = max(ref_counts, key=ref_counts.get)
+        elif len(t_arr) > 0:
+            primary_ref = str(t_refs[int(t_arr[0])])
         else:
-            if len(locus.transcript_indices) > 0:
-                primary_ref = str(
-                    index.t_df["ref"].values[
-                        int(locus.transcript_indices[0])
-                    ]
-                )
-            else:
-                primary_ref = ""
+            primary_ref = ""
 
         parent_rate = chrom_shrunk.get(primary_ref, global_rate)
 

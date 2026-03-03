@@ -411,7 +411,7 @@ Every read in the annotated BAM carries these tags:
 | `ZG` | Z (string) | Assigned gene ID (`"."` for intergenic). |
 | `ZP` | Z (string) | Pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, `chimeric`. |
 | `ZW` | f (float) | Posterior probability of assignment. |
-| `ZC` | Z (string) | Fragment class: `unique`, `isoform_ambig`, `gene_ambig`, `multimapper`, `chimeric`, `intergenic`. |
+| `ZC` | Z (string) | Fragment class: `unique`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, `intergenic`. |
 | `ZH` | i (int) | Primary hit flag: 1 = winning alignment, 0 = secondary. |
 | `ZN` | i (int) | Number of EM candidate components. |
 | `ZS` | Z (string) | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, `ambiguous`. |

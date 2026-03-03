@@ -70,6 +70,11 @@ class Strand(IntEnum):
         return Strand(((self & 1) << 1) | (self >> 1))
 
 
+#: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
+STRAND_POS: int = int(Strand.POS)  # 1
+STRAND_NEG: int = int(Strand.NEG)  # 2
+
+
 # ---------------------------------------------------------------------------
 # Interval
 # ---------------------------------------------------------------------------
@@ -174,31 +179,6 @@ class MergeCriteria(IntEnum):
     EMPTY = 3
 
 
-@dataclass(frozen=True, slots=True)
-class MergeResult:
-    """Result of progressive set merging with criteria tracking.
-
-    Wraps the merged transcript index frozenset together with
-    which relaxation level produced the result.  Gene indices
-    are derived from transcript indices via ``t_to_g_arr`` when
-    needed, rather than being stored redundantly.
-    """
-    t_inds: frozenset[int]
-    criteria: MergeCriteria
-
-    @property
-    def is_unique_transcript(self) -> bool:
-        """True if exactly one transcript index in the merged result."""
-        return len(self.t_inds) == 1
-
-    @property
-    def is_empty(self) -> bool:
-        """True if the merge produced no transcript indices."""
-        return not self.t_inds
-
-
-#: Sentinel for "no hits at all" — avoids creating new objects.
-EMPTY_MERGE = MergeResult(frozenset(), MergeCriteria.EMPTY)
 
 
 # ---------------------------------------------------------------------------

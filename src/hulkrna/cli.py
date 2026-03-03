@@ -64,8 +64,8 @@ def count_command(args: argparse.Namespace) -> int:
     from .scoring import (
         overhang_alpha_to_log_penalty,
         GDNA_SPLICE_PENALTIES,
-        SPLICE_UNANNOT,
     )
+    from .splice import SPLICE_UNANNOT
 
     bam_path = Path(args.bam_file)
     index_dir = Path(args.index_dir)
