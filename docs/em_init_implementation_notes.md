@@ -13,7 +13,7 @@ All 540 tests pass. The core improvements fix three critical bugs:
 
 1. **Bug 1 (UNSPLICED antisense invisible):** Replaced
    `_compute_simple_gdna_init` (which read only SPLICED_ANNOT
-   entries in `unique_counts`) with `_compute_gdna_init` using
+   entries in `unambig_counts`) with `_compute_gdna_init` using
    new pre-EM strand accumulators that capture all single-gene
    fragments.
 
@@ -118,12 +118,12 @@ of RNA into the gDNA pool.
 
 ### Why It Wasn't Visible Before
 
-The old code had Bug 1 (`unique_counts` only contained
+The old code had Bug 1 (`unambig_counts` only contained
 SPLICED_ANNOT entries) and Bug 3 (prior zeroing when init=0).
 Together, these masked the overlapping antisense issue:
 
 - Old: `gdna_init = 0` (UNSPLICED antisense invisible in
-  `unique_counts`) → prior zeroed → no gDNA hallucination
+  `unambig_counts`) → prior zeroed → no gDNA hallucination
 - New: `gdna_init > 0` (UNSPLICED antisense now counted) →
   prior active → gDNA hallucination for overlapping genes
 

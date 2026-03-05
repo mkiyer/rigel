@@ -71,7 +71,7 @@ def run_scenario(name, sc, *, n_fragments=N_FRAG, ss=1.0,
             print(f"    {tid} (idx={i}): mRNA={mrna:.1f}, "
                   f"nRNA_em={nrna_em:.2f}, nRNA_init={nrna_init:.2f}")
 
-        total_nrna = float(est.nrna_em_counts.sum() + est.nrna_init.sum())
+        total_nrna = float(est.nrna_em_counts.sum())
         print(f"\n  Pool totals:")
         print(f"    mRNA: {bench.total_observed:.1f}")
         print(f"    nRNA: {bench.n_nrna_pipeline:.1f} "
@@ -319,8 +319,8 @@ def main():
             bench, est, t_ids = fn()
             t2_idx = next(i for i, t in enumerate(t_ids) if t == "t2")
             t2_mrna = est.t_counts.sum(axis=1)[t2_idx]
-            t2_nrna = est.nrna_em_counts[t2_idx] + est.nrna_init[t2_idx]
-            total_nrna = float(est.nrna_em_counts.sum() + est.nrna_init.sum())
+            t2_nrna = est.nrna_em_counts[t2_idx]
+            total_nrna = float(est.nrna_em_counts.sum())
             results[label] = {
                 "t2_mrna": float(t2_mrna),
                 "t2_nrna": float(t2_nrna),

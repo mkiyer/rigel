@@ -101,10 +101,6 @@ class FragmentScorer:
     log_p_antisense: float
     anti_flag: bool              # True when protocol is RF (p_sense < 0.5)
 
-    # Strand model: intergenic (gDNA)
-    ig_p: float                  # intergenic strand raw probability
-    log_ig_p: float              # log(ig_p)
-
     # Penalty parameters
     overhang_log_penalty: float
     mismatch_log_penalty: float
@@ -155,20 +151,13 @@ class FragmentScorer:
         mismatch_log_penalty : float or None
         gdna_splice_penalties : dict or None
         """
-        rna_sm = strand_models._best_rna_model()
+        rna_sm = strand_models.exonic_spliced
         p_sense = (
             rna_sm._cached_p_sense
             if rna_sm._finalized
             else rna_sm.p_r1_sense
         )
         p_antisense = 1.0 - p_sense
-
-        ig_sm = strand_models.intergenic
-        ig_p = (
-            ig_sm._cached_p_sense
-            if ig_sm._finalized
-            else ig_sm.p_r1_sense
-        )
 
         fl_model = frag_length_models.global_model
         fl_log_prob = fl_model._log_prob  # numpy array or None
@@ -201,8 +190,6 @@ class FragmentScorer:
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
             log_p_antisense=math.log(max(p_antisense, LOG_SAFE_FLOOR)),
             anti_flag=p_sense < 0.5,
-            ig_p=ig_p,
-            log_ig_p=math.log(max(ig_p, LOG_SAFE_FLOOR)),
             overhang_log_penalty=(
                 overhang_log_penalty
                 if overhang_log_penalty is not None
@@ -345,21 +332,18 @@ def score_gdna_standalone(
     exon_strand: int,
     splice_type: int,
     frag_length: int,
-    strand_models,
     frag_length_models,
     gdna_splice_penalties: dict | None = None,
 ) -> float:
-    """Compute gDNA log-likelihood using model objects directly.
+    """Compute gDNA log-likelihood for a fragment.
+
+    gDNA is unstranded: strand probability is always 0.5.
 
     Intended for unit tests and external callers that do not construct
     a ``FragmentScorer``.
     """
     penalties = gdna_splice_penalties or GDNA_SPLICE_PENALTIES
     splice_pen = penalties.get(splice_type, 1.0)
-
-    p_strand = strand_models.intergenic.strand_likelihood_int(
-        exon_strand, STRAND_POS,
-    )
 
     log_p_insert = (
         frag_length_models.global_model.log_likelihood(frag_length)
@@ -368,7 +352,7 @@ def score_gdna_standalone(
     )
 
     return (
-        math.log(max(p_strand, LOG_SAFE_FLOOR))
+        LOG_HALF
         + log_p_insert
         + math.log(max(splice_pen, LOG_SAFE_FLOOR))
     )

@@ -14,7 +14,7 @@ assignment decision for each fragment:
 - ``best_gid`` — gene index (-1 = intergenic / unassigned)
 - ``pool``     — assignment pool (mRNA / nRNA / gDNA / intergenic / chimeric)
 - ``posterior``— posterior probability of the winning assignment
-- ``frag_class`` — fragment class (unique / ambig_same_strand / …)
+- ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
 - ``n_candidates`` — number of competing EM candidates
 - ``splice_type`` — splice classification
 
@@ -46,7 +46,7 @@ BAM Tag Schema
      - Posterior probability of assignment
    * - ZC
      - Z
-     - Fragment class: ``unique``, ``ambig_same_strand``,
+     - Fragment class: ``unambig``, ``ambig_same_strand``,
        ``ambig_opp_strand``, ``multimapper``, ``chimeric``, ``intergenic``
    * - ZH
      - i
@@ -84,7 +84,7 @@ POOL_CODE_CHIMERIC: int = 4
 
 # Fragment-class labels for the ZC tag.
 _FRAG_CLASS_LABELS = {
-    0: "unique",
+    0: "unambig",
     1: "ambig_same_strand",
     2: "ambig_opp_strand",
     3: "multimapper",

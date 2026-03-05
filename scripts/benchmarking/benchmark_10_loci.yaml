@@ -1,20 +1,37 @@
-# Benchmark: chr8 PVT1 / MYC locus — competition config
+# Benchmark: 20 Major Loci — competition config
 # hulkrna vs salmon vs kallisto
-# Tests accuracy under pristine, gDNA, and nRNA conditions
+# Tests accuracy across diverse genomic contexts with new linked RNA model
+# and MoM empirical Bayes shrinkage parameterization
+#
+# Regions span: oncogenes, tumor suppressors, lncRNAs, HOX clusters,
+# imprinted loci, antisense pairs, giant genes, and housekeeping genes
+#
+# Conditions: 2 gDNA × 2 nRNA × 3 strand-spec × 2 aligners = 12 per region
+#             12 × 10 regions = 120 conditions total
 
 genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
 gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_pvt1_competition
+outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_10_loci
 
 threads: 8
 
-# ── Region ───────────────────────────────────────────────────────────
+# ── Regions (10 major loci) ───────────────────────────────────────────
 region:
-  - PVT1_MYC: chr8:126445441-128594175
+  - PVT1_MYC: chr8:127568473-128230803
+  - EGFR: chr7:54923699-55270256
+  - MALAT1_NEAT1: chr11:65251928-65625382
+  - TP53: chr17:7551919-7843742
+  - CDKN2A_2B: chr9:21792636-22138103
+  - HOXA_cluster: chr7:26657068-27279678
+  - XIST_TSIX: chrX:73759248-74303574
+  - H19_IGF2: chr11:1937278-2183138
+  - TTN: chr2:178453664-179060137
+  - GAPDH: chr12:6428498-6657433
 
 # ── Aligners ─────────────────────────────────────────────────────────
 aligners:
   oracle: {}
+  minimap2: {}
 
 # ── HulkRNA configs ─────────────────────────────────────────────────
 hulkrna_configs:
@@ -22,7 +39,7 @@ hulkrna_configs:
 
 # ── Simulation ───────────────────────────────────────────────────────
 simulation:
-  n_fragments: 200000
+  n_fragments: 100000
   sim_seed: 42
   pipeline_seed: 42
   frag_mean: 250.0
@@ -41,8 +58,8 @@ abundance:
 
 # ── gDNA contamination ──────────────────────────────────────────────
 gdna:
-  rates: [0.0, 0.1, 0.25, 0.5]
-  rate_labels: [none, low, moderate, high]
+  rates: [0.0, 0.2]
+  rate_labels: [none, high]
   frag_mean: 350.0
   frag_std: 100.0
   frag_min: 100
@@ -50,11 +67,11 @@ gdna:
 
 # ── Nascent RNA ──────────────────────────────────────────────────────
 nrna:
-  rates: [0.0, 0.1, 0.5]
-  rate_labels: [none, low, high]
+  rates: [0.0, 0.1]
+  rate_labels: [none, moderate]
 
 # ── Strand specificity ──────────────────────────────────────────────
-strand_specificities: [1.0, 0.95, 0.75, 0.50]
+strand_specificities: [1.0, 0.95, 0.5]
 
 # ── HTSeq ────────────────────────────────────────────────────────────
 htseq:

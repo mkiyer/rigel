@@ -268,7 +268,7 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
 
 13. **Implement statistics collection in C++**
     - All BAM-level stats (`total`, `qc_fail`, `unmapped`, `duplicate`, `secondary`, `supplementary`, `n_read_names`, `unique`, `multimapping`, `proper_pair`, `improper_pair`, `mate_unmapped`) as C++ `int64_t` counters
-    - Resolution-level stats (`n_fragments`, `n_chimeric*`, `n_intergenic*`, `n_with_exon`, `n_with_annotated_sj`, `n_with_unannotated_sj`, `n_unique_gene`, `n_multi_gene`, `n_multimapper_groups`, `n_multimapper_alignments`) as C++ counters
+    - Resolution-level stats (`n_fragments`, `n_chimeric*`, `n_intergenic*`, `n_with_exon`, `n_with_annotated_sj`, `n_with_unannotated_sj`, `n_unambig_gene`, `n_multi_gene`, `n_multimapper_groups`, `n_multimapper_alignments`) as C++ counters
     - Model training stats (`n_strand_trained`, `n_strand_skipped_*`, `n_frag_length_unambiguous`, `n_frag_length_ambiguous`, `n_frag_length_intergenic`) as C++ counters
     - Return all as a Python dict at scan completion; `scan_and_buffer` merges into `PipelineStats`
 

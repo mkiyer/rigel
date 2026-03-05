@@ -3,16 +3,21 @@
 import pandas as pd
 import json
 import numpy as np
+import os
 
 outdir = '/Users/mkiyer/Downloads/hulkrna_runs/mctp_LBX0069_SI_42153_HFFFMDRX7/hulkrna_output'
 
 gene_counts = pd.read_feather(f'{outdir}/gene_quant.feather')
 counts = pd.read_feather(f'{outdir}/quant.feather')
 
-# Key summary metrics
-total_mrna = gene_counts['count'].sum()
-total_nrna = gene_counts['n_nrna'].sum()
-total_gdna = gene_counts['n_gdna'].sum()
+# Key summary metrics from summary.json
+with open(f'{outdir}/summary.json') as f:
+    summary = json.load(f)
+quant = summary.get('quantification', {})
+
+total_mrna = quant.get('mrna_total', gene_counts['mrna'].sum())
+total_nrna = quant.get('nrna_total', gene_counts['nrna'].sum())
+total_gdna = quant.get('gdna_total', 0)
 total_counted = total_mrna + total_nrna + total_gdna
 
 print('=== GLOBAL COMPOSITION ===')
@@ -23,60 +28,61 @@ print(f'Grand total: {total_counted:>12,.1f}')
 print()
 
 # nRNA rate as fraction of transcriptomic signal
-nrna_rate = total_nrna / (total_mrna + total_nrna)
+nrna_rate = total_nrna / (total_mrna + total_nrna) if (total_mrna + total_nrna) > 0 else 0
 print(f'nRNA rate (nRNA / RNA): {nrna_rate:.4f} ({nrna_rate*100:.2f}%)')
-gdna_rate = total_gdna / total_counted
+gdna_rate = total_gdna / total_counted if total_counted > 0 else 0
 print(f'gDNA rate (gDNA / total): {gdna_rate:.4f} ({gdna_rate*100:.2f}%)')
 print()
 
-# Strand specificity from strand model
+# Strand specificity from summary
 print('=== STRAND SPECIFICITY ===')
-with open(f'{outdir}/strand_model.json') as f:
-    strand = json.load(f)
+strand = summary.get('strand_models', {})
+strand_models = strand.get('strand_models', strand)
 
-for model_name, model in strand['strand_models'].items():
-    ss = model['probabilities']['strand_specificity']
-    n_obs = model['observations']['total']
-    print(f'  {model_name:25s}  strand_spec={ss:.6f}  n_obs={n_obs:>12,}')
-
-# The relevant strand specificity is the spliced one (most reliable)
-spliced_ss = strand['strand_models']['exonic_spliced']['probabilities']['strand_specificity']
-print(f'\nUsing exonic_spliced strand_specificity: {spliced_ss:.6f}')
+for model_name, model in strand_models.items():
+    if isinstance(model, dict) and 'probabilities' in model:
+        ss = model['probabilities'].get('strand_specificity', 0)
+        n_obs = model.get('observations', {}).get('total', 0)
+        print(f'  {model_name:25s}  strand_spec={ss:.6f}  n_obs={n_obs:>12,}')
 
 # Top nRNA genes
-print('\n=== TOP 30 GENES BY nRNA COUNT ===')
-top_nrna = gene_counts.nlargest(30, 'n_nrna')
-print(f'{"gene_name":20s} {"count":>10s} {"n_nrna":>10s} {"n_gdna":>10s} {"nrna_frac":>10s}')
+print('\n=== TOP 30 GENES BY nRNA ===')
+top_nrna = gene_counts.nlargest(30, 'nrna')
+print(f'{"gene_name":20s} {"mrna":>10s} {"nrna":>10s} {"rna_total":>10s} {"nrna_frac":>10s}')
 for _, row in top_nrna.iterrows():
     gname = row.get('gene_name', '')
-    total = row['count'] + row['n_nrna']
-    frac = row['n_nrna'] / total if total > 0 else 0
-    print(f'{gname:20s} {row["count"]:>10.1f} {row["n_nrna"]:>10.1f} {row["n_gdna"]:>10.1f} {frac:>10.3f}')
+    total = row['mrna'] + row['nrna']
+    frac = row['nrna'] / total if total > 0 else 0
+    print(f'{gname:20s} {row["mrna"]:>10.1f} {row["nrna"]:>10.1f} {row["rna_total"]:>10.1f} {frac:>10.3f}')
 
 # nRNA rate distribution
 print('\n=== nRNA RATE DISTRIBUTION (per gene, expressed genes only) ===')
-expressed = gene_counts[(gene_counts['count'] > 0) | (gene_counts['n_nrna'] > 0)].copy()
-expressed['total_rna'] = expressed['count'] + expressed['n_nrna']
-expressed['nrna_frac'] = expressed['n_nrna'] / expressed['total_rna']
+expressed = gene_counts[(gene_counts['mrna'] > 0) | (gene_counts['nrna'] > 0)].copy()
+expressed['total_rna'] = expressed['mrna'] + expressed['nrna']
+expressed['nrna_frac'] = expressed['nrna'] / expressed['total_rna']
 expressed = expressed[expressed['total_rna'] > 1]  # filter noise
 
-print(f'Genes with nRNA > 0: {(expressed["n_nrna"] > 0).sum():,} / {len(expressed):,}')
+print(f'Genes with nRNA > 0: {(expressed["nrna"] > 0).sum():,} / {len(expressed):,}')
 print(f'Median nRNA fraction: {expressed["nrna_frac"].median():.4f}')
 print(f'Mean nRNA fraction: {expressed["nrna_frac"].mean():.4f}')
 print(f'75th percentile: {expressed["nrna_frac"].quantile(0.75):.4f}')
 print(f'90th percentile: {expressed["nrna_frac"].quantile(0.90):.4f}')
 print(f'95th percentile: {expressed["nrna_frac"].quantile(0.95):.4f}')
 
-# gDNA rate distribution
-print('\n=== gDNA RATE PER GENE ===')
-print(f'Genes with gDNA > 0: {(gene_counts["n_gdna"] > 0).sum():,}')
-avg_gdna_rate = gene_counts.loc[gene_counts['n_gdna'] > 0, 'gdna_rate'].mean()
-print(f'Mean per-gene gDNA rate: {avg_gdna_rate:.4f}')
+# gDNA from loci
+print('\n=== gDNA RATE PER LOCUS ===')
+loci_path = f'{outdir}/loci.feather'
+if os.path.exists(loci_path):
+    loci = pd.read_feather(loci_path)
+    gdna_loci = loci[loci['gdna'] > 0]
+    print(f'Loci with gDNA > 0: {len(gdna_loci):,}')
+    if len(gdna_loci) > 0:
+        avg_gdna_rate = gdna_loci['gdna_rate'].mean()
+        print(f'Mean per-locus gDNA rate: {avg_gdna_rate:.4f}')
 
 # Fragment length model
 print('\n=== FRAGMENT LENGTH MODEL ===')
-with open(f'{outdir}/frag_length_models.json') as f:
-    fl = json.load(f)
+fl = summary.get('frag_length_models', {})
 for key, val in fl.items():
     if isinstance(val, dict) and 'observations' in val:
         obs = val['observations']
@@ -91,16 +97,6 @@ for key, val in fl.items():
             elif isinstance(v2, list) and len(v2) < 5:
                 print(f'  {key}.{k2}: {v2}')
 
-# Intronic vs exonic counts for sense/antisense
-print('\n=== SENSE/ANTISENSE BREAKDOWN (gene level) ===')
-cols = ['n_antisense', 'n_sense_all', 'n_antisense_all', 'n_intronic_sense', 'n_intronic_antisense']
-for col in cols:
-    if col in gene_counts.columns:
-        total = gene_counts[col].sum()
-        nonzero = (gene_counts[col] > 0).sum()
-        print(f'  {col:25s}  total={total:>12,.1f}  nonzero={nonzero:>8,}')
-
 print('\n=== SUMMARY FOR SIMULATION CONFIG ===')
 print(f'gDNA rate:           {gdna_rate:.4f}')
 print(f'nRNA rate:           {nrna_rate:.4f}')
-print(f'Strand specificity:  {spliced_ss:.6f}')

@@ -35,7 +35,7 @@ a replacement — it was always additive.**
 ### Step 3: MAP-EM M-step (`estimator.py`, `_em_step`)
 
 ```python
-theta_new = unique_totals + em_totals + prior
+theta_new = unambig_totals + em_totals + prior
 theta_new /= theta_new.sum()
 ```
 
@@ -50,7 +50,7 @@ Consider FGFR2 with 41 transcripts: that's 2 × 41 + 1 = 83 components.
 With α_base = 0.50:
 - **Total flat prior mass** = 83 × 0.50 = **41.5** virtual fragments
 - **OVR mass** = 1.0 total (negligible by comparison)
-- For a zero-truth transcript with no unique counts, its prior alone is
+- For a zero-truth transcript with no unambig counts, its prior alone is
   0.50 + tiny_OVR, which is enough to attract EM mass in the E-step
   and create a self-sustaining false positive
 
@@ -96,7 +96,7 @@ Currently, there is an asymmetry in how geometric information is used:
 
 | Component       | Coverage-weighted? |
 |-----------------|--------------------|
-| unique_totals   | No — raw fragment counts (1.0 per fragment) |
+| unambig_totals   | No — raw fragment counts (1.0 per fragment) |
 | em_totals       | No — posterior sums (each fragment contributes exactly 1.0 total) |
 | OVR prior       | **Yes** — distributed by coverage weights |
 | E-step routing  | **Partially** — log-likelihoods include per-fragment effective length |

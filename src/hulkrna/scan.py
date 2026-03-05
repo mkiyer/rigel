@@ -2,7 +2,7 @@
 
 Converts a ``FragmentBuffer`` into ``ScoredFragments`` for the EM solver.
 The ``FragmentRouter`` class builds per-fragment scoring data, routes
-unique fragments to deterministic assignment, and accumulates
+unambiguous fragments to deterministic assignment, and accumulates
 ambiguous fragments into CSR-formatted equivalence-class data for
 the locus-level EM.
 """
@@ -13,7 +13,7 @@ import numpy as np
 
 from .buffer import (
     FragmentBuffer,
-    FRAG_UNIQUE,
+    FRAG_UNAMBIG,
     FRAG_AMBIG_SAME_STRAND,
     FRAG_MULTIMAPPER,
     FRAG_CHIMERIC,
@@ -53,13 +53,13 @@ class FragmentRouter:
     ctx : FragmentScorer
         Pre-computed scoring parameters.
     estimator : AbundanceEstimator
-        Accumulates unique counts during scan.
+        Accumulates unambig counts during scan.
     stats : PipelineStats
         Pipeline statistics accumulator.
     index : TranscriptIndex
         Reference index.
     annotations : AnnotationTable or None
-        If provided, deterministic-unique and chimeric fragments are
+        If provided, deterministic-unambig and chimeric fragments are
         annotated immediately during the scan.
     """
 
@@ -417,17 +417,15 @@ class FragmentRouter:
     # ------------------------------------------------------------------
 
     def _gdna_log_lik(self, bf) -> float:
-        """Compute gDNA log-likelihood for a single unspliced fragment."""
+        """Compute gDNA log-likelihood for a single unspliced fragment.
+
+        gDNA is unstranded: strand probability is always 0.5.
+        """
         ctx = self.ctx
         sp = ctx.gdna_splice_penalties.get(
             bf.splice_type, _DEFAULT_SPLICE_PENALTY,
         )
-        es = bf.exon_strand
-        if es == STRAND_POS or es == STRAND_NEG:
-            p_ig = ctx.ig_p if es == STRAND_POS else (1.0 - ctx.ig_p)
-        else:
-            p_ig = 0.5
-        log_s = math.log(max(p_ig, LOG_SAFE_FLOOR))
+        log_s = LOG_HALF
         log_i = frag_len_log_lik(ctx, bf.genomic_footprint)
         return log_s + log_i + math.log(max(sp, LOG_SAFE_FLOOR))
 
@@ -495,8 +493,8 @@ class FragmentRouter:
         else:
             self.stats.n_gated_out += 1
 
-        if fc == FRAG_UNIQUE:
-            self.stats.em_routed_unique_units += 1
+        if fc == FRAG_UNAMBIG:
+            self.stats.em_routed_unambig_units += 1
         elif fc == FRAG_AMBIG_SAME_STRAND:
             self.stats.em_routed_ambig_same_strand_units += 1
         else:
@@ -647,8 +645,8 @@ class FragmentRouter:
     def scan(self, buffer: FragmentBuffer, log_every: int) -> ScoredFragments:
         """Single pass over buffer.  Returns packed ScoredFragments.
 
-        Deterministic-unique (SPLICED_ANNOT + FRAG_UNIQUE) fragments
-        are assigned directly via ``estimator.assign_unique``.  All other
+        Deterministic-unique (SPLICED_ANNOT + FRAG_UNAMBIG) fragments
+        are assigned directly via ``estimator.assign_unambig``.  All other
         exonic fragments build EM units.  Chimeric fragments are
         recorded in the annotation table (if active) and skipped.
         """
@@ -694,7 +692,7 @@ class FragmentRouter:
                 is_spliced_annot = bf.splice_type == SPLICE_ANNOT
 
                 # --- Pre-EM strand/intronic accumulation ---
-                if fc == FRAG_UNIQUE or fc == FRAG_AMBIG_SAME_STRAND:
+                if fc == FRAG_UNAMBIG or fc == FRAG_AMBIG_SAME_STRAND:
                     first_t = int(bf.t_inds[0])
                     t_strand = int(index.t_to_strand_arr[first_t])
 
@@ -705,12 +703,34 @@ class FragmentRouter:
 
                     is_unspliced = (bf.splice_type == SPLICE_UNSPLICED)
 
-                    # Transcript-level unspliced sense/antisense (for gDNA init)
-                    # and intronic sense/antisense (for nRNA init).
+                    # Transcript-level counts for pre-EM initialization:
+                    # - unspliced sense/antisense → gDNA EB prior
+                    # - intronic sense/antisense → nRNA init
+                    # - exonic sense/antisense → nrna_frac (nascent fraction) prior
                     n_cand = len(bf.t_inds)
                     weight = 1.0 / n_cand
                     for k, t_idx in enumerate(bf.t_inds):
                         t_idx_int = int(t_idx)
+
+                        has_unambig_intron = (
+                            bf.unambig_intron_bp is not None
+                            and bf.unambig_intron_bp[k] > 0
+                        )
+
+                        # Exonic accumulation (exonic-only fragments,
+                        # for nrna_frac prior).  Exclude fragments with
+                        # intronic overlap: those are nRNA/gDNA, not
+                        # mRNA, and including them inflates D_exon
+                        # which deflates the nrna_frac estimate.
+                        if not has_unambig_intron:
+                            if is_anti:
+                                estimator.transcript_exonic_antisense[
+                                    t_idx_int
+                                ] += weight
+                            else:
+                                estimator.transcript_exonic_sense[
+                                    t_idx_int
+                                ] += weight
 
                         if is_unspliced:
                             if is_anti:
@@ -722,10 +742,6 @@ class FragmentRouter:
                                     t_idx_int
                                 ] += weight
 
-                        has_unambig_intron = (
-                            bf.unambig_intron_bp is not None
-                            and bf.unambig_intron_bp[k] > 0
-                        )
                         if has_unambig_intron:
                             if is_anti:
                                 estimator.transcript_intronic_antisense[
@@ -736,10 +752,10 @@ class FragmentRouter:
                                     t_idx_int
                                 ] += weight
 
-                # --- Deterministic unique: SPLICED_ANNOT + FRAG_UNIQUE ---
-                if fc == FRAG_UNIQUE and is_spliced_annot:
-                    estimator.assign_unique(bf, index, self.strand_models)
-                    stats.deterministic_unique_units += 1
+                # --- Deterministic unique: SPLICED_ANNOT + FRAG_UNAMBIG ---
+                if fc == FRAG_UNAMBIG and is_spliced_annot:
+                    estimator.assign_unambig(bf, index, self.strand_models)
+                    stats.deterministic_unambig_units += 1
 
                     if annotations is not None:
                         det_tid = int(next(iter(bf.t_inds)))
@@ -750,7 +766,7 @@ class FragmentRouter:
                             best_gid=det_gid,
                             pool=POOL_CODE_MRNA,
                             posterior=1.0,
-                            frag_class=FRAG_UNIQUE,
+                            frag_class=FRAG_UNAMBIG,
                             n_candidates=1,
                             splice_type=int(bf.splice_type),
                         )

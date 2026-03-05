@@ -13,7 +13,7 @@ from hulkrna.resolution import make_fragment, resolve_fragment
 from hulkrna.buffer import (
     FragmentBuffer,
     BufferedFragment,
-    FRAG_UNIQUE,
+    FRAG_UNAMBIG,
     FRAG_AMBIG_SAME_STRAND,
     FRAG_AMBIG_OPP_STRAND,
     FRAG_MULTIMAPPER,
@@ -376,7 +376,7 @@ class TestFragId:
 
 class TestFragmentClasses:
     def test_unique_gene_single_transcript(self, mini_index):
-        """Single-transcript hit, NH=1 -> FRAG_UNIQUE."""
+        """Single-transcript hit, NH=1 -> FRAG_UNAMBIG."""
         r = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         assert r is not None
         assert r.ambig_strand == 0
@@ -388,7 +388,7 @@ class TestFragmentClasses:
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
-        assert chunk.fragment_classes[0] == FRAG_UNIQUE
+        assert chunk.fragment_classes[0] == FRAG_UNAMBIG
 
     def test_isoform_ambiguous(self, mini_index):
         """g1 shared exon region -> t1 + t2 (same strand) -> FRAG_AMBIG_SAME_STRAND."""
@@ -418,7 +418,7 @@ class TestFragmentClasses:
 
     def test_mixed_classes(self, mini_index):
         """Multiple fragment classes in one chunk."""
-        r_unique = _resolve(
+        r_unambig = _resolve(
             mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)]
         )
         r_iso = _resolve(mini_index, [_exon("chr1", 120, 180)])
@@ -428,14 +428,14 @@ class TestFragmentClasses:
         r_mm.num_hits = 2
 
         buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
-        buf.append(r_unique)
+        buf.append(r_unambig)
         buf.append(r_iso)
         buf.append(r_mm)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
         fc = chunk.fragment_classes
-        assert fc[0] == FRAG_UNIQUE
+        assert fc[0] == FRAG_UNAMBIG
         assert fc[1] == FRAG_AMBIG_SAME_STRAND
         assert fc[2] == FRAG_MULTIMAPPER
 

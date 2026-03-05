@@ -47,7 +47,7 @@ The OVR part sums to exactly 1.0 across all components. **It was never a replace
 ### Step 3: MAP-EM M-step ([estimator.py, line ~148](src/hulkrna/estimator.py#L148))
 
 ```python
-theta_new = unique_totals + em_totals + prior
+theta_new = unambig_totals + em_totals + prior
 theta_new /= theta_new.sum()
 ```
 
@@ -61,7 +61,7 @@ Consider a locus with 41 transcripts (like FGFR2): that's $2 \times 41 + 1 = 83$
 
 - **Total flat prior mass** = $83 \times 0.50 = 41.5$ virtual fragments spread across all components
 - **OVR mass** = 1.0 total (negligible by comparison)
-- For a zero-truth transcript with no unique counts, its prior alone is $0.50 + \text{tiny OVR}$, which is enough to attract EM counts in the E-step and create a self-sustaining false positive
+- For a zero-truth transcript with no unambig counts, its prior alone is $0.50 + \text{tiny OVR}$, which is enough to attract EM counts in the E-step and create a self-sustaining false positive
 
 With $\alpha_{\text{base}} = 0.01$:
 

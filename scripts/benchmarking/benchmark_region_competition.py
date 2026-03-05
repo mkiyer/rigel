@@ -1373,11 +1373,11 @@ def run_hulkrna_tool(
 
     counts_df = pipe.estimator.get_counts_df(index)
     counts = {
-        row.transcript_id: float(row.count)
+        row.transcript_id: float(row.mrna)
         for row in counts_df.itertuples(index=False)
     }
     mature_pred = float(sum(counts.values()))
-    nascent_pred = float(pipe.estimator.nrna_init.sum() + pipe.estimator.nrna_em_counts.sum())
+    nascent_pred = float(pipe.estimator.nrna_em_counts.sum())
     genomic_pred = float(pipe.stats.n_gdna_total)
     pool_counts = {
         "mature_rna": mature_pred,

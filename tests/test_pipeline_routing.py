@@ -9,7 +9,7 @@ from hulkrna.buffer import (
     FRAG_AMBIG_OPP_STRAND,
     FRAG_AMBIG_SAME_STRAND,
     FRAG_MULTIMAPPER,
-    FRAG_UNIQUE,
+    FRAG_UNAMBIG,
 )
 from hulkrna.splice import SpliceType
 from hulkrna.config import EMConfig
@@ -83,9 +83,9 @@ class _Index:
 
 def _make_env(index):
     strand_models = StrandModels()
-    # Provide enough observations so _best_rna_model() doesn't error.
     for _ in range(20):
         strand_models.exonic_spliced.observe(Strand.POS, Strand.POS)
+    strand_models.finalize()
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
     estimator = AbundanceEstimator(index.num_transcripts,
@@ -232,10 +232,10 @@ def test_route_counters_are_exclusive_per_unit():
     strand_models, frag_length_models, estimator, stats = _make_env(index)
 
     bfs = [
-        # Deterministic unique: FRAG_UNIQUE + SPLICED_ANNOT
+        # Deterministic unique: FRAG_UNAMBIG + SPLICED_ANNOT
         _BF(np.array([0], dtype=np.int32), int(SpliceType.SPLICED_ANNOT), int(Strand.POS), np.array([200], dtype=np.int32),
             np.array([100], dtype=np.int16), np.array([0], dtype=np.int16), 100),
-        # Unique routed to EM: FRAG_UNIQUE + UNSPLICED
+        # Unique routed to EM: FRAG_UNAMBIG + UNSPLICED
         _BF(np.array([0], dtype=np.int32), int(SpliceType.UNSPLICED), int(Strand.POS), np.array([200], dtype=np.int32),
             np.array([100], dtype=np.int16), np.array([0], dtype=np.int16), 100),
         # Isoform ambiguous
@@ -254,8 +254,8 @@ def test_route_counters_are_exclusive_per_unit():
     chunk = _Chunk(
         bfs=bfs,
         fragment_classes=[
-            FRAG_UNIQUE,
-            FRAG_UNIQUE,
+            FRAG_UNAMBIG,
+            FRAG_UNAMBIG,
             FRAG_AMBIG_SAME_STRAND,
             FRAG_AMBIG_OPP_STRAND,
             FRAG_MULTIMAPPER,
@@ -275,15 +275,15 @@ def test_route_counters_are_exclusive_per_unit():
         log_every=1_000_000,
     )
 
-    assert stats.deterministic_unique_units == 1
-    assert stats.em_routed_unique_units == 1
+    assert stats.deterministic_unambig_units == 1
+    assert stats.em_routed_unambig_units == 1
     assert stats.em_routed_ambig_same_strand_units == 1
     assert stats.em_routed_ambig_opp_strand_units == 1
     assert stats.em_routed_multimapper_units == 1
 
     total_units = (
-        stats.deterministic_unique_units
-        + stats.em_routed_unique_units
+        stats.deterministic_unambig_units
+        + stats.em_routed_unambig_units
         + stats.em_routed_ambig_same_strand_units
         + stats.em_routed_ambig_opp_strand_units
         + stats.em_routed_multimapper_units
@@ -398,8 +398,8 @@ def test_nm_penalty_zero_when_disabled():
     import math
     mismatch_lp = math.log(1.0)  # = 0.0
 
-    chunk_a = _Chunk(bfs=[bf_nm0], fragment_classes=[FRAG_UNIQUE], frag_ids=[1])
-    chunk_b = _Chunk(bfs=[bf_nm5], fragment_classes=[FRAG_UNIQUE], frag_ids=[1])
+    chunk_a = _Chunk(bfs=[bf_nm0], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
+    chunk_b = _Chunk(bfs=[bf_nm5], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
 
     em_a = _scan_em_data(
         _Buffer([chunk_a]), index, strand_models, frag_length_models,

@@ -372,10 +372,11 @@ def profile_stages(bam_path: str, index_dir: str, enable_cprofile: bool = False)
 
             # assign_locus_ambiguous
             _ta = time.perf_counter()
-            gdna_assigned = estimator.assign_locus_ambiguous(
+            pool_counts = estimator.assign_locus_ambiguous(
                 locus_em, theta,
                 confidence_threshold=em_config.confidence_threshold,
             )
+            gdna_assigned = pool_counts["gdna"]
             _tb = time.perf_counter()
             dt_assign = _tb - _ta
             t_assign += dt_assign

@@ -118,7 +118,7 @@ pattern is:
 - numpy call overhead dominates actual computation for small arrays
 
 **Approach:** Write a single nanobind C++ function `native_em_step(theta, ec_data,
-log_eff_len, unique_totals, prior, em_totals)` that:
+log_eff_len, unambig_totals, prior, em_totals)` that:
 - Takes pre-built equivalence class data as contiguous arrays
 - Processes all classes in a tight C++ loop (log-sum-exp + normalize + accumulate)
 - Returns `theta_new` directly

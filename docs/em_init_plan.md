@@ -197,26 +197,26 @@ transcript produced the fragment. Transcript k with
 
 ## 3. Root Cause Analysis
 
-### 3.1 Bug 1: `unique_counts` Only Contains SPLICED_ANNOT Entries
+### 3.1 Bug 1: `unambig_counts` Only Contains SPLICED_ANNOT Entries
 
 **Location:** `_compute_simple_gdna_init` at
 [pipeline.py](src/hulkrna/pipeline.py#L862-L893);
-`assign_unique` at [counter.py](src/hulkrna/counter.py#L360-L373);
+`assign_unambig` at [counter.py](src/hulkrna/counter.py#L360-L373);
 routing at [pipeline.py](src/hulkrna/pipeline.py#L768-L770)
 
 **The bug:** `_compute_simple_gdna_init` reads antisense counts from
-`counter.unique_counts`. But `assign_unique()` is only called on
+`counter.unambig_counts`. But `assign_unambig()` is only called on
 the deterministic path: `FRAG_UNIQUE and is_spliced_annot`
 (line 768). Non-SPLICED_ANNOT unique fragments (UNSPLICED,
 SPLICED_UNANNOT) are routed to the EM and never appear in
-`unique_counts`.
+`unambig_counts`.
 
 gDNA fragments are almost always UNSPLICED → they never reach
-`unique_counts` → `gdna_init` is blind to actual gDNA.
+`unambig_counts` → `gdna_init` is blind to actual gDNA.
 
 **Evidence from diagnostic sweep:**
 - SS=1.0, gDNA=50: `gdna_init = 0` (invisible despite ~212
-  antisense gDNA reads — all UNSPLICED, never reach unique_counts)
+  antisense gDNA reads — all UNSPLICED, never reach unambig_counts)
 - SS=0.5, no gDNA: `gdna_init = 394` (flip-stranded SPLICED_ANNOT
   RNA falsely counted as antisense)
 
@@ -227,7 +227,7 @@ gDNA fragments are almost always UNSPLICED → they never reach
 **The bug:** `nrna_init = np.zeros(num_transcripts)` unconditionally.
 The EM must discover nRNA from likelihood alone, starting at massive
 disadvantage vs gDNA (which gets `2 × antisense` init) and mRNA
-(which gets `unique_counts` from SPLICED_ANNOT).
+(which gets `unambig_counts` from SPLICED_ANNOT).
 
 **Evidence:** At SS ≤ 0.75, up to 96% of nRNA misclassified as gDNA.
 
@@ -250,7 +250,7 @@ gDNA once the prior is zeroed.
 
 | Scenario | Bug 1 | Bug 2 | Bug 3 | Net result |
 |----------|-------|-------|-------|------------|
-| SS=1.0 + gDNA | UNSPLICED antisense → not in `unique_counts` → init=0 | nRNA init=0 | prior=0 → dead zone | gDNA **invisible** |
+| SS=1.0 + gDNA | UNSPLICED antisense → not in `unambig_counts` → init=0 | nRNA init=0 | prior=0 → dead zone | gDNA **invisible** |
 | SS=0.5, no gDNA | flip-stranded SPLICED_ANNOT → init=394 | — | prior active | False gDNA hallucination |
 | SS=0.9 + nRNA | — | nRNA init=0 | — | nRNA → gDNA mislabeling ≈ 96% |
 
@@ -596,7 +596,7 @@ unambiguous.
 
 ### 7.4 Post-EM Expression Filter
 
-Flag genes with zero spliced/unique counts as likely gDNA false
+Flag genes with zero spliced/unambig counts as likely gDNA false
 positives. Reclassify after EM convergence.
 
 ### 7.5 Overlap Exponent Re-Tuning

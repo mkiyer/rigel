@@ -352,213 +352,148 @@ class StrandModel:
 
 
 # ======================================================================
-# StrandModels — multi-region container
+# StrandModels — single-model container with diagnostic sub-models
 # ======================================================================
+
+#: Default strand prior pseudocount (κ).  The Beta prior is
+#: ``Beta(κ/2, κ/2)`` which shrinks toward 0.5 (maximum entropy).
+#: With κ=2 this gives the uniform ``Beta(1, 1)`` prior.
+DEFAULT_STRAND_PRIOR_KAPPA: float = 2.0
+
+#: Minimum spliced observations to consider the strand model
+#: well-supported.  Below this threshold a warning is emitted.
+_MIN_STRAND_OBS_WARNING: int = 20
 
 
 @dataclass
 class StrandModels:
-    """Container for region-specific strand models.
+    """Container for the single RNA strand model plus diagnostic sub-models.
 
-    Holds four independently-trained :class:`StrandModel` instances
-    organized by genomic region and purity:
+    The primary strand model (``exonic_spliced``) is trained from
+    SPLICED_ANNOT fragments with unique gene assignment and unambiguous
+    exon/SJ strands.  Annotated splice junctions prove RNA origin,
+    making this an uncontaminated measure of library strand specificity.
+    A ``Beta(κ/2, κ/2)`` prior shrinks toward 0.5 (max entropy);
+    the default κ=2 gives the uniform ``Beta(1, 1)`` prior.
 
-    * **exonic_spliced** *(pure RNA)* — trained from SPLICED_ANNOT
-      fragments with unique gene assignment and unambiguous exon/SJ
-      strands.  Annotated splice junctions prove RNA origin, making
-      this the gold-standard measure of library strand specificity.
-      This is the primary model used for transcript scoring in EM.
-    * **exonic** *(RNA + gDNA mixture)* — trained from ALL exonic
-      fragments (SPLICED_ANNOT + SPLICED_UNANNOT + UNSPLICED) with
-      unique gene assignment.  Gene annotation strand is truth.
-      Dilution toward 50% relative to ``exonic_spliced`` indicates
-      gDNA contamination in exonic regions.
-    * **intronic** *(nascent RNA + gDNA mixture)* — trained from
-      INTRON fragments with unique gene assignment.  Gene annotation
-      strand is truth.  Dilution toward 50% relative to
-      ``exonic_spliced`` indicates gDNA fraction in intronic regions.
-    * **intergenic** *(~100% gDNA)* — trained from intergenic
-      fragments.  Uses POS as a synthetic reference strand so
-      ``n_same`` counts POS-aligned and ``n_opposite`` counts
-      NEG-aligned.  Expected ~50/50 since gDNA is unstranded.
+    Two additional sub-models are retained **for diagnostics only** and
+    are never used for scoring:
 
-    The ``strand_likelihood``, ``p_r1_sense``, etc. convenience
-    methods delegate to ``exonic_spliced`` (the pure RNA model).
+    * **exonic** — trained from ALL exonic fragments (RNA + gDNA
+      mixture).  Comparing its specificity to ``exonic_spliced``
+      reveals gDNA contamination in exonic regions.
+    * **intergenic** — trained from intergenic fragments (~100% gDNA).
+      Expected ~50/50 since gDNA is unstranded.
+
+    gDNA is scored with a fixed strand probability of **0.5**
+    (unstranded), not learned from intergenic data.
     """
 
     exonic_spliced: StrandModel = field(default_factory=StrandModel)
+
+    # Diagnostic sub-models (not used for scoring)
     exonic: StrandModel = field(default_factory=StrandModel)
-    intronic: StrandModel = field(default_factory=StrandModel)
     intergenic: StrandModel = field(default_factory=StrandModel)
 
-    # Cached RNA model (computed lazily in model_for_category)
-    _rna_model_cache: StrandModel | None = field(
-        default=None, repr=False, compare=False,
-    )
-    _fallback_model_cache: StrandModel | None = field(
-        default=None, repr=False, compare=False,
-    )
-
-    # Minimum observations for exonic_spliced to be considered reliable.
-    # This threshold is heuristic and can be tuned by callers.
-    min_spliced_observations: int = 10
+    #: Strand prior pseudocount κ.  Beta prior is ``Beta(κ/2, κ/2)``.
+    strand_prior_kappa: float = DEFAULT_STRAND_PRIOR_KAPPA
 
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
     # ------------------------------------------------------------------
 
     def finalize(self) -> None:
-        """Cache derived probabilities on all sub-models for fast scoring."""
+        """Apply κ prior and cache derived probabilities for fast scoring.
+
+        Sets ``exonic_spliced.prior_alpha = κ/2`` and ``prior_beta = κ/2``
+        before caching.  Diagnostic sub-models are finalized as-is.
+        """
+        kappa = self.strand_prior_kappa
+        self.exonic_spliced.prior_alpha = kappa / 2.0
+        self.exonic_spliced.prior_beta = kappa / 2.0
         self.exonic_spliced.finalize()
+
+        n_obs = self.exonic_spliced.n_observations
+        if n_obs == 0:
+            logger.warning(
+                "No spliced strand observations — strand model is "
+                "prior-only (p_r1_sense=0.5, unstranded). Is this "
+                "stranded RNA-seq data?"
+            )
+        elif n_obs < _MIN_STRAND_OBS_WARNING:
+            logger.warning(
+                "Only %d spliced strand observations (< %d); "
+                "strand estimates may be noisy (SS=%.4f)",
+                n_obs,
+                _MIN_STRAND_OBS_WARNING,
+                self.exonic_spliced.strand_specificity,
+            )
+
+        # Diagnostic sub-models (finalize for reporting, never for scoring)
         self.exonic.finalize()
-        self.intronic.finalize()
         self.intergenic.finalize()
 
     # ------------------------------------------------------------------
-    # Category-aware model selection
+    # Strand model access
     # ------------------------------------------------------------------
 
-    def _pooled_fallback_model(self) -> StrandModel:
-        """Build exonic fallback model pooled with available spliced evidence.
-
-        This ensures sparse but high-quality ``exonic_spliced`` observations
-        still contribute when we fall back away from the pure spliced model.
-        """
-        if self._fallback_model_cache is not None:
-            return self._fallback_model_cache
-
-        pooled = StrandModel(
-            prior_alpha=self.exonic.prior_alpha,
-            prior_beta=self.exonic.prior_beta,
-            pos_pos=self.exonic.pos_pos + self.exonic_spliced.pos_pos,
-            pos_neg=self.exonic.pos_neg + self.exonic_spliced.pos_neg,
-            neg_pos=self.exonic.neg_pos + self.exonic_spliced.neg_pos,
-            neg_neg=self.exonic.neg_neg + self.exonic_spliced.neg_neg,
-        )
-        pooled.finalize()
-        self._fallback_model_cache = pooled
-        return pooled
-
-    def _best_rna_model(self) -> StrandModel:
-        """Return the best available strand model for transcript scoring.
-
-        Cascade
-        -------
-        1. ``exonic_spliced`` (gold standard, SJ strand as truth)
-           if it has ≥ ``_MIN_SPLICED_OBS`` observations.
-        2. ``exonic`` (all exonic fragments, gene annotation strand
-           as truth) if it has ≥ ``_MIN_SPLICED_OBS`` observations.
-        3. ``RuntimeError`` — insufficient data, likely not stranded
-           RNA-seq.
-
-        The result is cached after the first call.
-        """
-        if self._rna_model_cache is not None:
-            return self._rna_model_cache
-
-        min_obs = max(1, int(self.min_spliced_observations))
-        if self.exonic_spliced.n_observations >= min_obs:
-            if self.exonic_spliced.n_observations < (2 * min_obs):
-                logger.warning(
-                    "exonic_spliced has low support (%d observations, threshold=%d); "
-                    "strand estimates may be noisy",
-                    self.exonic_spliced.n_observations,
-                    min_obs,
-                )
-            self._rna_model_cache = self.exonic_spliced
-        elif self.exonic.n_observations + self.exonic_spliced.n_observations >= min_obs:
-            pooled = self._pooled_fallback_model()
-            logger.warning(
-                "exonic_spliced has only %d observations (< %d); using pooled "
-                "fallback model with exonic (%d) + exonic_spliced (%d) obs "
-                "[pooled=%d, SS=%.4f]. Threshold is heuristic; review if this "
-                "warning is frequent.",
-                self.exonic_spliced.n_observations,
-                min_obs,
-                self.exonic.n_observations,
-                self.exonic_spliced.n_observations,
-                pooled.n_observations,
-                pooled.strand_specificity,
-            )
-            self._rna_model_cache = pooled
-        else:
-            raise RuntimeError(
-                f"Insufficient strand observations for reliable "
-                f"estimation. exonic_spliced: "
-                f"{self.exonic_spliced.n_observations}, exonic: "
-                f"{self.exonic.n_observations} "
-                f"(need >= {min_obs} pooled observations). "
-                f"Is this stranded RNA-seq data?"
-            )
-        return self._rna_model_cache
-
-    def model_for_category(self, splice_type: int) -> StrandModel:
-        """Return the strand model for transcript scoring.
-
-        All categories use the same model (``exonic_spliced``)
-        because library-prep strand specificity is an intrinsic
-        property that does not vary by genomic region or splice
-        status.
-
-        Parameters
-        ----------
-        splice_type : int
-            ``SpliceType`` value (unused — all categories use the
-            same model).
-
-        Returns
-        -------
-        StrandModel
-        """
-        return self._best_rna_model()
+    @property
+    def model(self) -> StrandModel:
+        """The single RNA strand model (exonic_spliced)."""
+        return self.exonic_spliced
 
     # ------------------------------------------------------------------
-    # Delegation to exonic_spliced model (pure RNA gold standard)
+    # Delegation to the RNA strand model
     # ------------------------------------------------------------------
 
     def strand_likelihood(
         self, exon_strand: Strand, gene_strand: Strand,
     ) -> float:
-        """Delegate to the best available RNA strand model."""
-        return self._best_rna_model().strand_likelihood(
+        """Strand likelihood from the RNA strand model."""
+        return self.exonic_spliced.strand_likelihood(
             exon_strand, gene_strand,
         )
 
     @property
     def p_r1_sense(self) -> float:
-        """Best RNA model's P(read 1 is sense)."""
-        return self._best_rna_model().p_r1_sense
+        """RNA model's P(read 1 is sense)."""
+        return self.exonic_spliced.p_r1_sense
 
     @property
     def strand_specificity(self) -> float:
-        """Best RNA model's strand specificity."""
-        return self._best_rna_model().strand_specificity
+        """RNA model's strand specificity."""
+        return self.exonic_spliced.strand_specificity
 
     @property
     def read1_sense(self) -> bool:
-        """Best RNA model's read1_sense flag."""
-        return self._best_rna_model().read1_sense
+        """RNA model's read1_sense flag."""
+        return self.exonic_spliced.read1_sense
 
     @property
     def n_observations(self) -> int:
-        """Best RNA model's observation count."""
-        return self._best_rna_model().n_observations
+        """RNA model's observation count."""
+        return self.exonic_spliced.n_observations
 
     # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
-        """JSON-serializable summary of all four strand models."""
+        """JSON-serializable summary of strand models.
+
+        The primary ``exonic_spliced`` model is used for scoring.
+        ``exonic`` and ``intergenic`` are diagnostic only.
+        """
         return {
             "exonic_spliced": self.exonic_spliced.to_dict(),
-            "exonic": self.exonic.to_dict(),
-            "intronic": self.intronic.to_dict(),
-            "intergenic": self.intergenic.to_dict(),
+            "diagnostics": {
+                "exonic": self.exonic.to_dict(),
+                "intergenic": self.intergenic.to_dict(),
+            },
         }
 
     def write_json(self, path: Path | str) -> None:
-        """Write all strand models to a JSON file.
+        """Write strand models to a JSON file.
 
         Parameters
         ----------
@@ -585,16 +520,16 @@ class StrandModels:
 
     def log_summary(self) -> None:
         """Log a human-readable summary of the trained strand models."""
-        logger.info("Strand models:")
-        logger.info(f"  [exonic_spliced] (RNA gold std)  "
+        logger.info("Strand models (κ=%.1f):", self.strand_prior_kappa)
+        logger.info(f"  [exonic_spliced] (RNA — used for scoring)  "
                      f"{self.exonic_spliced.n_observations:,} obs, "
                      f"p_r1_sense={self.exonic_spliced.p_r1_sense:.4f}, "
                      f"specificity={self.exonic_spliced.strand_specificity:.4f}")
-        logger.info(f"  [exonic] (all exonic fallback)  "
+        logger.info(f"  [exonic] (diagnostic)  "
                      f"{self.exonic.n_observations:,} obs, "
                      f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
                      f"specificity={self.exonic.strand_specificity:.4f}")
-        logger.info(f"  [intergenic] (gDNA scoring)  "
+        logger.info(f"  [intergenic] (diagnostic)  "
                      f"{self.intergenic.n_observations:,} obs, "
                      f"p_r1_sense={self.intergenic.p_r1_sense:.4f}, "
                      f"specificity={self.intergenic.strand_specificity:.4f}")

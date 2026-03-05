@@ -176,46 +176,66 @@ class TestStrandModelProperties:
         assert hi <= 1.0
 
 
-class TestStrandModelsFallback:
-    def test_min_spliced_observations_threshold_controls_primary_model(self):
-        models = StrandModels()
-        models.min_spliced_observations = 5
+class TestStrandModelsContainer:
+    """Test the simplified StrandModels container."""
 
+    def test_delegation_to_exonic_spliced(self):
+        models = StrandModels()
+        for _ in range(50):
+            models.exonic_spliced.observe(Strand.POS, Strand.POS)
+        models.finalize()
+        assert models.strand_specificity == models.exonic_spliced.strand_specificity
+        assert models.p_r1_sense == models.exonic_spliced.p_r1_sense
+        assert models.read1_sense == models.exonic_spliced.read1_sense
+        assert models.n_observations == models.exonic_spliced.n_observations
+
+    def test_kappa_prior_applied_on_finalize(self):
+        models = StrandModels()
+        models.strand_prior_kappa = 10.0
+        for _ in range(10):
+            models.exonic_spliced.observe(Strand.POS, Strand.POS)
+        models.finalize()
+        # κ=10: alpha_prior=5, beta_prior=5
+        # n_same=10, n_opp=0
+        # p_r1_sense = (5 + 10) / (5 + 10 + 5 + 0) = 15/20 = 0.75
+        assert models.p_r1_sense == pytest.approx(0.75)
+
+    def test_zero_observations_warns(self, caplog):
+        models = StrandModels()
+        with caplog.at_level("WARNING"):
+            models.finalize()
+        assert "No spliced strand observations" in caplog.text
+        assert models.p_r1_sense == 0.5
+
+    def test_low_observations_warns(self, caplog):
+        models = StrandModels()
         for _ in range(5):
             models.exonic_spliced.observe(Strand.POS, Strand.POS)
-        for _ in range(40):
-            models.exonic.observe(Strand.POS, Strand.NEG)
-
-        best = models.model_for_category(0)
-        assert best is models.exonic_spliced
-
-    def test_pooled_fallback_includes_spliced_and_warns(self, caplog):
-        models = StrandModels()
-        models.min_spliced_observations = 10
-
-        for _ in range(3):
-            models.exonic_spliced.observe(Strand.POS, Strand.POS)
-        for _ in range(20):
-            models.exonic.observe(Strand.POS, Strand.POS)
-
         with caplog.at_level("WARNING"):
-            best = models.model_for_category(0)
+            models.finalize()
+        assert "Only 5 spliced strand observations" in caplog.text
 
-        assert best is not models.exonic
-        assert best is not models.exonic_spliced
-        assert best.n_observations == (
-            models.exonic.n_observations + models.exonic_spliced.n_observations
-        )
-        assert "using pooled fallback model" in caplog.text
-
-    def test_raises_when_pooled_observations_below_threshold(self):
+    def test_model_property(self):
         models = StrandModels()
-        models.min_spliced_observations = 10
+        assert models.model is models.exonic_spliced
 
-        for _ in range(2):
-            models.exonic_spliced.observe(Strand.POS, Strand.POS)
-        for _ in range(3):
+    def test_diagnostic_models_finalized(self):
+        models = StrandModels()
+        for _ in range(10):
             models.exonic.observe(Strand.POS, Strand.POS)
+        for _ in range(10):
+            models.intergenic.observe(Strand.POS, Strand.POS)
+        models.finalize()
+        assert models.exonic._finalized
+        assert models.intergenic._finalized
 
-        with pytest.raises(RuntimeError, match="Insufficient strand"):
-            models.model_for_category(0)
+    def test_to_dict_structure(self):
+        models = StrandModels()
+        for _ in range(20):
+            models.exonic_spliced.observe(Strand.POS, Strand.POS)
+        models.finalize()
+        d = models.to_dict()
+        assert "exonic_spliced" in d
+        assert "diagnostics" in d
+        assert "exonic" in d["diagnostics"]
+        assert "intergenic" in d["diagnostics"]

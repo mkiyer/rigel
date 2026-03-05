@@ -46,7 +46,7 @@ available on `TranscriptIndex` and `FragmentScorer`).
 
 | File | What | Change |
 |------|------|--------|
-| `estimator.py` `assign_unique()` | `g_idx = t_to_g[t_idx]` → `g_to_strand[g_idx]` | Use `index.t_to_strand_arr[t_idx]` directly. Remove `g_idx` intermediate. |
+| `estimator.py` `assign_unambig()` | `g_idx = t_to_g[t_idx]` → `g_to_strand[g_idx]` | Use `index.t_to_strand_arr[t_idx]` directly. Remove `g_idx` intermediate. |
 | `estimator.py` `is_antisense()` | Takes `gene_strand: int` | Rename param to `ref_strand` (strand of the reference transcript). No logic change — callers change. |
 | `scan.py` lines 700-714 | `g_idx = t_to_g[t_inds[0]]` → `gene_strand = g_to_strand[g_idx]` | Use `t_strand = t_strand_arr[t_inds[0]]` directly. |
 | `scan.py` lines 700-714 | `counter.gene_sense_all[g_idx]` / `gene_antisense_all[g_idx]` accumulation | Keep for Phase 4 (will convert to transcript-level). For now, use g_idx derivation only for these accumulators. |
@@ -140,10 +140,10 @@ or `bf.n_genes` must be updated:
 
 - `scan.py`: `fc == FRAG_UNIQUE or fc == FRAG_AMBIG_SAME_STRAND` →
   `fc == FRAG_UNIQUE or fc == FRAG_AMBIG_SAME_STRAND`
-- `scan.py`: strand accumulation condition (unique OR isoform_ambig = all
-  single-gene unique fragments) — review whether AMBIG_OPP_STRAND should be
+- `scan.py`: strand accumulation condition (unambig OR isoform_ambig = all
+  single-gene unambig fragments) — review whether AMBIG_OPP_STRAND should be
   included.
-- `bam_scanner.cpp`: stat counters `n_unique_gene`, `n_multi_gene` → rename
+- `bam_scanner.cpp`: stat counters `n_unambig_gene`, `n_multi_gene` → rename
   to `n_same_strand`, `n_mixed_strand`.
 - `buffer.py` `FragmentBuffer.__init__`: `t_to_g_arr` parameter — still needed
   until Phase 4 for gDNA prior accumulators, but `finalize()` switches to
@@ -160,7 +160,7 @@ or `bf.n_genes` must be updated:
 
 - **New arrays:** `transcript_unspliced_sense[n_transcripts]`,
   `transcript_unspliced_antisense[n_transcripts]`.
-- **Accumulation (scan.py):** For each unique/isoform-ambig unspliced
+- **Accumulation (scan.py):** For each unambig/isoform-ambig unspliced
   fragment, distribute `1/n_cand` to each compatible transcript's sense or
   antisense accumulator (matching how `transcript_intronic_sense/antisense` is
   already done).

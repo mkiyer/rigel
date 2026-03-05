@@ -73,11 +73,10 @@ class TestScoreGDNA:
     def test_unspliced_no_penalty(self):
         """UNSPLICED gets splice_penalty=1.0 → log(1)=0."""
         im = _make_frag_length_models()
-        sms = _make_strand_models_default()
         cat = int(SpliceType.UNSPLICED)
         score = _score_gdna_candidate(
             int(Strand.POS), cat, 250,
-            sms, im,
+            im,
         )
         # Uses global insert model
         global_model = im.global_model
@@ -89,14 +88,13 @@ class TestScoreGDNA:
     def test_spliced_unannot_penalty(self):
         """SPLICED_UNANNOT gets heavy penalty (default 0.01)."""
         im = _make_frag_length_models()
-        sms = _make_strand_models_default()
         score_unannot = _score_gdna_candidate(
             int(Strand.POS), int(SpliceType.SPLICED_UNANNOT), 250,
-            sms, im,
+            im,
         )
         score_unspliced = _score_gdna_candidate(
             int(Strand.POS), int(SpliceType.UNSPLICED), 250,
-            sms, im,
+            im,
         )
         assert score_unannot < score_unspliced
         penalty_diff = score_unspliced - score_unannot
@@ -105,12 +103,11 @@ class TestScoreGDNA:
     def test_custom_penalties(self):
         """Custom penalty dict overrides defaults."""
         im = _make_frag_length_models()
-        sms = _make_strand_models_default()
         cat = int(SpliceType.UNSPLICED)
         custom = {SpliceType.UNSPLICED: 0.5}
         score = _score_gdna_candidate(
             int(Strand.POS), cat, 250,
-            sms, im,
+            im,
             gdna_splice_penalties=custom,
         )
         global_model = im.global_model
@@ -120,10 +117,9 @@ class TestScoreGDNA:
     def test_zero_frag_length(self):
         """frag_length=0 → P_insert=1.0 (log=0)."""
         im = _make_frag_length_models()
-        sms = _make_strand_models_default()
         score = _score_gdna_candidate(
             int(Strand.POS), int(SpliceType.UNSPLICED), 0,
-            sms, im,
+            im,
         )
         assert score == pytest.approx(np.log(0.5))
 
@@ -170,7 +166,7 @@ class TestLocusGDNATheta:
     def test_no_gdna_init_minimal_absorption(self):
         """With zero gdna_init and weak gDNA likelihood, gDNA theta is small."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, 0] = 1000.0
+        rc.unambig_counts[0, 0] = 1000.0
         lem = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
@@ -191,10 +187,10 @@ class TestLocusGDNATheta:
 
 
 class TestLocusGDNAAssignment:
-    """Verify gDNA assignments go to gdna_count, not em_counts."""
+    """Verify gDNA assignments go to pool_counts, not em_counts."""
 
     def test_gdna_assignment_not_in_em_counts(self):
-        """Fragments assigned to gDNA are counted in gdna_count return."""
+        """Fragments assigned to gDNA are counted in pool_counts return."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data(
             [[0]] * 100,
@@ -204,7 +200,8 @@ class TestLocusGDNAAssignment:
             gdna_init=1000.0,
             gdna_log_lik=0.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 0
         total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
@@ -220,7 +217,8 @@ class TestLocusGDNAAssignment:
             include_gdna=True,
             gdna_init=25.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
         assert total == pytest.approx(200.0)
@@ -228,7 +226,7 @@ class TestLocusGDNAAssignment:
     def test_strong_transcript_signal_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, 0] = 500.0
+        rc.unambig_counts[0, 0] = 500.0
         lem = _make_locus_em_data(
             [[0]] * 500,
             log_liks_per_unit=[[0.0]] * 500,
@@ -238,7 +236,8 @@ class TestLocusGDNAAssignment:
             gdna_init=1.0,
             gdna_log_lik=-20.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         assert rc.em_counts[0].sum() > 490
         assert gdna_count < 10
@@ -253,7 +252,8 @@ class TestLocusGDNAAssignment:
             gdna_init=500.0,
             gdna_log_lik=0.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 100, (
             f"Expected gDNA to absorb many fragments, got {gdna_count}"
@@ -281,7 +281,8 @@ class TestGDNALocusAttribution:
             gdna_init=1000.0,
             gdna_log_lik=0.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 0
         assert rc.gdna_locus_counts[0].sum() > 0
@@ -289,7 +290,7 @@ class TestGDNALocusAttribution:
     def test_locus_counts_zero_when_no_gdna(self):
         """No gDNA assignments → locus counts stay zero."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, 0] = 1000.0
+        rc.unambig_counts[0, 0] = 1000.0
         lem = _make_locus_em_data(
             [[0]] * 50,
             log_liks_per_unit=[[0.0]] * 50,
@@ -299,7 +300,8 @@ class TestGDNALocusAttribution:
             gdna_init=0.0,
             gdna_log_lik=-50.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         # With fractional assignment, a vanishingly small posterior may
         # leak to gDNA even when it's extremely unlikely (log_lik=-50).
@@ -321,7 +323,7 @@ class TestGDNAProperties:
     def test_gdna_contamination_rate(self):
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 10.0
-        rc.unique_counts[0, 0] = 80.0
+        rc.unambig_counts[0, 0] = 80.0
         rc.em_counts[0, 0] = 10.0
         assert rc.gdna_contamination_rate == pytest.approx(0.1)
 
@@ -346,13 +348,13 @@ class TestStatsGDNA:
         stats.n_intergenic_spliced = 10
         assert stats.n_intergenic == 110
 
-    def test_gdna_unique_property(self):
+    def test_gdna_unambig_property(self):
         from hulkrna.stats import PipelineStats
 
         stats = PipelineStats()
         stats.n_intergenic_unspliced = 80
         stats.n_intergenic_spliced = 20
-        assert stats.n_gdna_unique == 100
+        assert stats.n_gdna_unambig == 100
 
     def test_gdna_total_property(self):
         from hulkrna.stats import PipelineStats
@@ -373,7 +375,7 @@ class TestStatsGDNA:
 
         d = stats.to_dict()
         assert d["n_intergenic"] == 15
-        assert d["n_gdna_unique"] == 15
+        assert d["n_gdna_unambig"] == 15
         assert d["n_gdna_total"] == 18
 
 
@@ -576,7 +578,8 @@ class TestLocusGDNABehavior:
             include_gdna=True,
             gdna_init=100.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         # n_components = 2*3 + 1 = 7, gDNA at index 6
         assert theta.shape == (7,)
@@ -588,7 +591,7 @@ class TestLocusGDNABehavior:
         """Higher gdna_init → more fragments absorbed by gDNA."""
         # Low gdna_init + strong RNA prior → no gDNA absorption
         rc_low = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc_low.unique_counts[0, _UNSPLICED_SENSE] = 500.0
+        rc_low.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
         lem_low = _make_locus_em_data(
             [[0]] * 200,
             num_transcripts=2,
@@ -597,7 +600,8 @@ class TestLocusGDNABehavior:
             gdna_init=1.0,
             gdna_log_lik=-5.0,
         )
-        _, gc_low = _run_and_assign(rc_low, lem_low, em_iterations=10)
+        _, pc_low = _run_and_assign(rc_low, lem_low, em_iterations=10)
+        gc_low = pc_low["gdna"]
 
         # High gdna_init → gDNA absorbs fragments
         rc_high = AbundanceEstimator(2, em_config=EMConfig(seed=42))
@@ -608,7 +612,8 @@ class TestLocusGDNABehavior:
             gdna_init=1000.0,
             gdna_log_lik=0.0,
         )
-        _, gc_high = _run_and_assign(rc_high, lem_high, em_iterations=10)
+        _, pc_high = _run_and_assign(rc_high, lem_high, em_iterations=10)
+        gc_high = pc_high["gdna"]
 
         assert gc_high > gc_low
         assert gc_high > 100  # most fragments go to gDNA
@@ -629,7 +634,7 @@ class TestLocusGDNABehavior:
 
 
 class TestStrandModelsContainer:
-    """Tests for the StrandModels multi-region container."""
+    """Tests for the simplified StrandModels container."""
 
     def test_default_construction(self):
         from hulkrna.strand_model import StrandModels
@@ -637,7 +642,6 @@ class TestStrandModelsContainer:
         sm = StrandModels()
         assert sm.exonic_spliced.n_observations == 0
         assert sm.exonic.n_observations == 0
-        assert sm.intronic.n_observations == 0
         assert sm.intergenic.n_observations == 0
 
     def test_delegation_to_exonic_spliced(self):
@@ -656,15 +660,15 @@ class TestStrandModelsContainer:
         assert sm.n_observations == sm.exonic_spliced.n_observations
         assert sm.strand_likelihood(Strand.POS, Strand.POS) == sm.exonic_spliced.strand_likelihood(Strand.POS, Strand.POS)
 
-    def test_to_dict_has_all_regions(self):
+    def test_to_dict_structure(self):
         from hulkrna.strand_model import StrandModels
 
         sm = StrandModels()
         d = sm.to_dict()
         assert "exonic_spliced" in d
-        assert "exonic" in d
-        assert "intronic" in d
-        assert "intergenic" in d
+        assert "diagnostics" in d
+        assert "exonic" in d["diagnostics"]
+        assert "intergenic" in d["diagnostics"]
         assert "observations" in d["exonic_spliced"]
 
     def test_write_json(self, tmp_path):
@@ -682,9 +686,7 @@ class TestStrandModelsContainer:
             data = json.load(f)
         assert "strand_models" in data
         assert "exonic_spliced" in data["strand_models"]
-        assert "exonic" in data["strand_models"]
-        assert "intronic" in data["strand_models"]
-        assert "intergenic" in data["strand_models"]
+        assert "diagnostics" in data["strand_models"]
 
     def test_independent_models(self):
         """Each region's model is independent."""
@@ -694,44 +696,244 @@ class TestStrandModelsContainer:
         sm = StrandModels()
         sm.exonic_spliced.observe(Strand.POS, Strand.POS)
         sm.exonic.observe(Strand.POS, Strand.NEG)
-        sm.intronic.observe(Strand.NEG, Strand.POS)
         sm.intergenic.observe(Strand.NEG, Strand.NEG)
 
         assert sm.exonic_spliced.n_observations == 1
         assert sm.exonic.n_observations == 1
-        assert sm.intronic.n_observations == 1
         assert sm.intergenic.n_observations == 1
 
-    def test_model_for_category(self):
-        """model_for_category cascades: exonic_spliced → pooled-fallback → error."""
-        from hulkrna.strand_model import StrandModels, StrandModel
-        from hulkrna.splice import SpliceType
+    def test_kappa_prior_on_finalize(self):
+        """finalize() applies κ prior to exonic_spliced."""
+        from hulkrna.strand_model import StrandModels
         from hulkrna.types import Strand
-        import pytest
 
-        # --- Case 1: exonic_spliced has enough observations ---
-        sm1 = StrandModels()
-        for _ in range(20):
-            sm1.exonic_spliced.observe(Strand.POS, Strand.POS)
-        m = sm1.model_for_category(int(SpliceType.SPLICED_ANNOT))
-        assert m is sm1.exonic_spliced
-        assert sm1.model_for_category(int(SpliceType.UNSPLICED)) is m
+        sm = StrandModels()
+        sm.strand_prior_kappa = 10.0
+        for _ in range(10):
+            sm.exonic_spliced.observe(Strand.POS, Strand.POS)
+        sm.finalize()
+        # κ=10 → alpha_prior=5, beta_prior=5
+        # p_r1_sense = (5 + 10) / (5 + 10 + 5) = 15/20 = 0.75
+        assert sm.p_r1_sense == pytest.approx(0.75)
 
-        # --- Case 2: exonic_spliced insufficient, exonic sufficient → pooled fallback ---
-        sm2 = StrandModels()
-        for _ in range(3):
-            sm2.exonic_spliced.observe(Strand.POS, Strand.POS)
-        for _ in range(20):
-            sm2.exonic.observe(Strand.POS, Strand.POS)
-        m2 = sm2.model_for_category(int(SpliceType.UNSPLICED))
-        assert isinstance(m2, StrandModel)
-        assert m2 is not sm2.exonic
-        assert m2 is not sm2.exonic_spliced
-        assert m2.n_observations == (
-            sm2.exonic.n_observations + sm2.exonic_spliced.n_observations
+
+# =====================================================================
+# compute_gdna_rate_hybrid
+# =====================================================================
+
+
+class TestComputeGdnaRateHybrid:
+    """Tests for the hybrid density+strand gDNA rate estimator."""
+
+    def test_zero_counts_returns_zero(self):
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        rate, ev = compute_gdna_rate_hybrid(0.0, 0.0, 1000.0, 1.0, 0.001)
+        assert rate == 0.0
+        assert ev == 0.0
+
+    def test_strand_dominated_at_high_ss(self):
+        """At SS=1.0, W=1 → pure strand estimate."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        rate, ev = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 1.0, 0.001)
+        # Strand rate: G = 2*50 = 100, rate = 100/150
+        expected_strand = (2.0 * 50.0) / 150.0
+        assert rate == pytest.approx(expected_strand, abs=0.01)
+        assert ev == 150.0
+
+    def test_density_dominated_at_low_ss(self):
+        """At SS=0.5, W≈0 → pure density estimate."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        # SS=0.5 → denom_ss=0 → W=0
+        # density: intergenic_density * exonic_bp / total = 0.001 * 1000 / 200
+        rate, ev = compute_gdna_rate_hybrid(100.0, 100.0, 1000.0, 0.5, 0.001)
+        expected = 0.001 * 1000.0 / 200.0
+        assert rate == pytest.approx(expected, abs=0.01)
+        assert ev == 200.0
+
+    def test_density_zero_falls_back_to_strand(self):
+        """With intergenic_density=0, only strand contributes."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        rate, ev = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 0.9, 0.0)
+        # Should match strand-only
+        from hulkrna.locus import compute_gdna_rate_from_strand
+        strand_rate = compute_gdna_rate_from_strand(100.0, 50.0, 0.9)
+        # W = (2*0.9-1)^2 = 0.64 → rate = 0.64*strand + 0.36*0
+        W = (2.0 * 0.9 - 1.0) ** 2
+        expected = W * strand_rate
+        assert rate == pytest.approx(expected, abs=0.01)
+
+    def test_unstranded_with_density_nonzero(self):
+        """Unstranded (SS=0.5) with intergenic density gives nonzero rate."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        rate, ev = compute_gdna_rate_hybrid(500.0, 500.0, 10000.0, 0.5, 0.01)
+        # density component: 0.01 * 10000 / 1000 = 0.1
+        expected = 0.01 * 10000.0 / 1000.0
+        assert rate == pytest.approx(expected, abs=0.01)
+        assert rate > 0.0  # Critical: nonzero for unstranded
+
+    def test_unstranded_no_density_returns_zero(self):
+        """Unstranded with no density → both components zero."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        rate, _ = compute_gdna_rate_hybrid(500.0, 500.0, 10000.0, 0.5, 0.0)
+        assert rate == 0.0
+
+    def test_rate_clamped_to_unit_interval(self):
+        """Rate is always in [0, 1]."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        # Huge density → would exceed 1.0 without clamping
+        rate, _ = compute_gdna_rate_hybrid(1.0, 1.0, 100000.0, 0.5, 1.0)
+        assert 0.0 <= rate <= 1.0
+
+    def test_hybrid_blend_at_moderate_ss(self):
+        """At intermediate SS, both components contribute."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        ss = 0.8  # W = (2*0.8-1)^2 = 0.36
+        rate, _ = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, ss, 0.01)
+        # Both strand and density components should be nonzero
+        assert rate > 0.0
+
+    def test_returns_tuple(self):
+        """Returns (rate, evidence) tuple."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+        result = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 1.0, 0.0)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+
+# =====================================================================
+# MoM κ auto-estimation in gDNA EB system
+# =====================================================================
+
+
+class TestGdnaMoMKappa:
+    """Tests for MoM κ auto-estimation in compute_eb_gdna_priors."""
+
+    def test_auto_kappa_matches_estimate_kappa(self):
+        """Auto-estimated κ should match estimate_kappa on same data."""
+        from hulkrna.estimator import estimate_kappa
+
+        # Create synthetic gDNA rates and evidence
+        rates = np.array([0.1, 0.15, 0.12, 0.08, 0.2, 0.11] * 5)
+        evidence = np.full(30, 100.0)
+        kappa = estimate_kappa(rates, evidence, 30.0)
+        assert 2.0 <= kappa <= 200.0
+
+    def test_fallback_when_few_loci(self):
+        """With few loci, MoM returns fallback κ."""
+        from hulkrna.estimator import estimate_kappa
+
+        rates = np.array([0.1, 0.2])
+        evidence = np.array([100.0, 100.0])
+        kappa = estimate_kappa(
+            rates, evidence, 30.0,
+            kappa_fallback=5.0, kappa_min_obs=20,
         )
+        assert kappa == 5.0  # Fallback: only 2 loci < 20
 
-        # --- Case 3: both insufficient → RuntimeError ---
-        sm3 = StrandModels()
-        with pytest.raises(RuntimeError, match="Insufficient strand"):
-            sm3.model_for_category(int(SpliceType.UNSPLICED))
+
+# =====================================================================
+# Unstranded gDNA behavior
+# =====================================================================
+
+
+class TestUnstrandedGdna:
+    """Verify gDNA rate estimation works for unstranded libraries."""
+
+    def test_hybrid_nonzero_for_unstranded_with_density(self):
+        """With intergenic density, unstranded gives nonzero gDNA rate."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+
+        # SS=0.5 (unstranded), with intergenic density
+        rate, _ = compute_gdna_rate_hybrid(
+            1000.0, 1000.0, 50000.0, 0.5, 0.005,
+        )
+        assert rate > 0.0
+        # Expected: density_rate = 0.005 * 50000 / 2000 = 0.125
+        expected = 0.005 * 50000.0 / 2000.0
+        assert rate == pytest.approx(expected, abs=0.01)
+
+    def test_strand_only_zero_for_unstranded(self):
+        """Without density, unstranded gives zero gDNA rate."""
+        from hulkrna.locus import compute_gdna_rate_from_strand
+
+        rate = compute_gdna_rate_from_strand(1000.0, 1000.0, 0.5)
+        assert rate == 0.0
+
+    def test_hybrid_zero_for_unstranded_no_density(self):
+        """Unstranded with no density falls back to zero (backward compat)."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+
+        rate, _ = compute_gdna_rate_hybrid(
+            1000.0, 1000.0, 50000.0, 0.5, 0.0,
+        )
+        assert rate == 0.0
+
+    def test_moderate_ss_blends_components(self):
+        """At SS=0.7 (moderate), both strand and density contribute."""
+        from hulkrna.locus import compute_gdna_rate_hybrid
+
+        ss = 0.7
+        rate, _ = compute_gdna_rate_hybrid(
+            100.0, 40.0, 5000.0, ss, 0.001,
+        )
+        # Should be between pure-strand and pure-density
+        assert rate > 0.0
+
+
+# =====================================================================
+# gDNA CLI/Config integration
+# =====================================================================
+
+
+class TestGdnaConfig:
+    """Verify gDNA config fields and CLI args."""
+
+    def test_emconfig_defaults(self):
+        cfg = EMConfig()
+        assert cfg.gdna_kappa_chrom is None
+        assert cfg.gdna_kappa_locus is None
+        assert cfg.gdna_mom_min_evidence_chrom == 50.0
+        assert cfg.gdna_mom_min_evidence_locus == 30.0
+
+    def test_emconfig_explicit(self):
+        cfg = EMConfig(
+            gdna_kappa_chrom=25.0,
+            gdna_kappa_locus=10.0,
+            gdna_mom_min_evidence_chrom=40.0,
+            gdna_mom_min_evidence_locus=20.0,
+        )
+        assert cfg.gdna_kappa_chrom == 25.0
+        assert cfg.gdna_kappa_locus == 10.0
+        assert cfg.gdna_mom_min_evidence_chrom == 40.0
+        assert cfg.gdna_mom_min_evidence_locus == 20.0
+
+    def test_cli_parser_has_gdna_args(self):
+        from hulkrna.cli import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "quant",
+            "--bam", "test.bam",
+            "--index", "test_idx",
+            "-o", "out",
+            "--gdna-kappa-chrom", "30.0",
+            "--gdna-kappa-locus", "15.0",
+            "--gdna-mom-min-evidence-chrom", "60.0",
+            "--gdna-mom-min-evidence-locus", "25.0",
+        ])
+        assert args.gdna_kappa_chrom == 30.0
+        assert args.gdna_kappa_locus == 15.0
+        assert args.gdna_mom_min_evidence_chrom == 60.0
+        assert args.gdna_mom_min_evidence_locus == 25.0
+
+    def test_cli_defaults_none(self):
+        from hulkrna.cli import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "quant",
+            "--bam", "test.bam",
+            "--index", "test_idx",
+            "-o", "out",
+        ])
+        # Before _resolve_quant_args, CLI defaults are None
+        assert args.gdna_kappa_chrom is None
+        assert args.gdna_kappa_locus is None

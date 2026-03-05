@@ -42,7 +42,7 @@ __all__ = ["FragmentBuffer", "BufferedFragment"]
 from ._resolve_impl import FragmentAccumulator, ResolvedFragment
 
 # Fragment classification constants used by fragment_classes property
-FRAG_UNIQUE: int = 0          # same-strand, 1 transcript, NH=1
+FRAG_UNAMBIG: int = 0          # same-strand, 1 transcript, NH=1
 FRAG_AMBIG_SAME_STRAND: int = 1  # same-strand, >1 transcript, NH=1
 FRAG_AMBIG_OPP_STRAND: int = 2   # ambig-strand transcripts, NH=1
 FRAG_MULTIMAPPER: int = 3     # NH > 1 (multimapped molecule)
@@ -58,7 +58,7 @@ class BufferedFragment:
     """Lightweight view into a columnar buffer chunk.
 
     Provides the same duck-typed interface as ``ResolvedFragment`` so
-    that ``AbundanceEstimator.assign_unique`` and the EM scoring functions
+    that ``AbundanceEstimator.assign_unambig`` and the EM scoring functions
     work without modification.
 
     ``t_inds`` is a NumPy array slice (supports iteration, ``len()``,
@@ -163,14 +163,14 @@ class _FinalizedChunk:
         Returns
         -------
         np.ndarray
-            ``FRAG_UNIQUE`` (0): same-strand, 1 transcript, NH=1.
+            ``FRAG_UNAMBIG`` (0): same-strand, 1 transcript, NH=1.
             ``FRAG_AMBIG_SAME_STRAND`` (1): same-strand, >1 transcript, NH=1.
             ``FRAG_AMBIG_OPP_STRAND`` (2): ambig-strand transcripts, NH=1.
             ``FRAG_MULTIMAPPER`` (3): NH > 1.
             ``FRAG_CHIMERIC`` (4): chimeric fragment.
         """
         n_transcripts = np.diff(self.t_offsets).astype(np.intp)
-        classes = np.full(self.size, FRAG_UNIQUE, dtype=np.uint8)
+        classes = np.full(self.size, FRAG_UNAMBIG, dtype=np.uint8)
         # Same strand, multiple transcripts, single mapper → ambig same-strand
         classes[
             (self.ambig_strand == 0) & (n_transcripts > 1) & (self.num_hits == 1)

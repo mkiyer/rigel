@@ -85,7 +85,7 @@ class TestAnnotationTable:
 
     def test_frag_class_labels(self):
         """Known fragment class codes have labels."""
-        assert _FRAG_CLASS_LABELS[0] == "unique"
+        assert _FRAG_CLASS_LABELS[0] == "unambig"
         assert _FRAG_CLASS_LABELS[1] == "ambig_same_strand"
         assert _FRAG_CLASS_LABELS[3] == "multimapper"
         assert _FRAG_CLASS_LABELS[-1] == "intergenic"
@@ -119,7 +119,7 @@ class TestAnnotatedBamIntegration:
             "annot_bam_test", genome_length=8000, seed=42,
             work_dir=tmp_path / "annot_bam",
         )
-        # Spliced gene for strand training + deterministic unique
+        # Spliced gene for strand training + deterministic unambig
         sc.add_gene("g1", "+", [
             {"t_id": "t1",
              "exons": [(500, 1000), (1500, 2000)],
@@ -245,8 +245,8 @@ class TestAnnotatedBamIntegration:
 
         # Counts should be identical (annotation doesn't change quantification)
         np.testing.assert_array_almost_equal(
-            counts1["count"].values,
-            counts2["count"].values,
+            counts1["mrna"].values,
+            counts2["mrna"].values,
             decimal=6,
-            err_msg="Annotation mode changed count totals",
+            err_msg="Annotation mode changed mrna totals",
         )

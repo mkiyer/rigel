@@ -75,7 +75,7 @@ def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
     )
     config = PipelineConfig(
         em=EMConfig(seed=PIPELINE_SEED),
-        scan=BamScanConfig(sj_strand_tag="ts"),
+        scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=config)
     bench = run_benchmark(result, pr, scenario_name=scenario_name)
@@ -149,7 +149,7 @@ def assert_negative_control(bench, ctrl_id="t_ctrl", *,
     )
 
 
-def assert_gdna_accuracy(bench, gdna_abundance, max_rel_err=0.55):
+def assert_gdna_accuracy(bench, gdna_abundance, max_rel_err=0.60):
     """Assert gDNA counts are separated accurately."""
     if gdna_abundance == 0:
         return

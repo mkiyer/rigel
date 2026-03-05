@@ -59,8 +59,8 @@ class PipelineStats:
     n_frag_length_intergenic: int = 0
 
     # --- Routing counters (authoritative) ---
-    deterministic_unique_units: int = 0
-    em_routed_unique_units: int = 0
+    deterministic_unambig_units: int = 0
+    em_routed_unambig_units: int = 0
     em_routed_ambig_same_strand_units: int = 0
     em_routed_ambig_opp_strand_units: int = 0
     em_routed_multimapper_units: int = 0
@@ -81,14 +81,14 @@ class PipelineStats:
         return self.n_intergenic_unspliced + self.n_intergenic_spliced
 
     @property
-    def n_gdna_unique(self) -> int:
+    def n_gdna_unambig(self) -> int:
         """Intergenic fragments assigned deterministically to gDNA."""
         return self.n_intergenic
 
     @property
     def n_gdna_total(self) -> int:
         """Total fragments assigned to gDNA (intergenic + EM)."""
-        return self.n_gdna_unique + self.n_gdna_em
+        return self.n_gdna_unambig + self.n_gdna_em
 
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary.
@@ -99,7 +99,7 @@ class PipelineStats:
         d = asdict(self)
         # Add computed properties
         d["n_intergenic"] = self.n_intergenic
-        d["n_gdna_unique"] = self.n_gdna_unique
+        d["n_gdna_unambig"] = self.n_gdna_unambig
         d["n_gdna_total"] = self.n_gdna_total
         return d
 

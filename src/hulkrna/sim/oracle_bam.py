@@ -649,7 +649,7 @@ class OracleBamSimulator:
         tags: list[tuple] = [("NH", 1)]
         if is_spliced:
             xs_strand = "+" if transcript.strand == Strand.POS else "-"
-            tags.append(("XS", xs_strand))
+            tags.append(("XS", xs_strand, "A"))
 
         # Build R1 flags
         r1_flag = _BASE_R1_FLAG
@@ -683,7 +683,7 @@ class OracleBamSimulator:
         r2_tags: list[tuple] = [("NH", 1)]
         if is_spliced and len(r2_blocks) > 1:
             xs_strand = "+" if transcript.strand == Strand.POS else "-"
-            r2_tags.append(("XS", xs_strand))
+            r2_tags.append(("XS", xs_strand, "A"))
 
         r2_rec = _make_aligned_segment(
             header=header,

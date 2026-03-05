@@ -39,7 +39,11 @@ class EMConfig:
     convergence_delta : float
         Convergence threshold for theta updates (default 1e-6).
     prune_threshold : float or None
-        Post-EM pruning evidence-ratio threshold (None = disabled).
+        Post-EM pruning evidence-ratio threshold.  Components with
+        zero unambig evidence and an evidence ratio (data / alpha)
+        below this value are zeroed out and a single EM iteration
+        redistributes the freed mass.
+        Default 0.1.  Set to ``None`` or a negative value to disable.
     confidence_threshold : float
         Posterior threshold for high-confidence assignment (default 0.95).
     """
@@ -50,8 +54,64 @@ class EMConfig:
     mode: str = "map"
     iterations: int = 1000
     convergence_delta: float = 1e-6
-    prune_threshold: float | None = None
+    prune_threshold: float | None = 0.1
     confidence_threshold: float = 0.95
+    tss_window: int = 200
+    """Fuzzy TSS grouping window (bp).
+
+    Transcripts whose 5' ends lie within this distance are grouped
+    together for the nRNA fraction prior hierarchy.  Set to 0
+    for exact-coordinate matching.  Default 200 bp.
+    """
+    nrna_frac_kappa_global: float | None = None
+    """Shrinkage pseudo-count pulling locus-strand nRNA fraction toward the global
+    prior (nrna_frac = 0.5).  ``None`` (default) → auto-estimate from the data
+    via Method of Moments.  Set a positive value to override.
+    """
+    nrna_frac_kappa_locus: float | None = None
+    """Shrinkage pseudo-count pulling TSS-group nRNA fraction toward the (shrunk)
+    locus-strand estimate.  ``None`` → auto-estimate.
+    """
+    nrna_frac_kappa_tss: float | None = None
+    """Shrinkage pseudo-count pulling transcript nRNA fraction toward the (shrunk)
+    TSS-group estimate.  Also sets the effective sample size (κ) of the
+    final Beta prior passed to the EM.
+    ``None`` → auto-estimate.
+    """
+
+    # -- MoM estimation advanced knobs --
+    nrna_frac_mom_min_evidence_global: float = 50.0
+    """Minimum fragment evidence for a locus-strand group to be
+    included in the global Method-of-Moments κ estimate."""
+    nrna_frac_mom_min_evidence_locus: float = 30.0
+    """Minimum fragment evidence for a TSS group to be included
+    in the locus-level MoM κ estimate."""
+    nrna_frac_mom_min_evidence_tss: float = 20.0
+    """Minimum fragment evidence for a transcript to be included
+    in the TSS-level MoM κ estimate."""
+    nrna_frac_kappa_min: float = 2.0
+    """Lower clamp for MoM-estimated κ values."""
+    nrna_frac_kappa_max: float = 200.0
+    """Upper clamp for MoM-estimated κ values."""
+    nrna_frac_kappa_fallback: float = 5.0
+    """Fallback κ when too few features pass the evidence filter."""
+    nrna_frac_kappa_min_obs: int = 20
+    """Minimum number of features required for MoM κ estimation;
+    fewer triggers the fallback."""
+
+    # -- gDNA EB shrinkage knobs --
+    gdna_kappa_chrom: float | None = None
+    """Shrinkage pseudo-count pulling chromosome gDNA rate toward the
+    global estimate.  ``None`` (default) → auto-estimate via MoM."""
+    gdna_kappa_locus: float | None = None
+    """Shrinkage pseudo-count pulling locus gDNA rate toward the
+    (shrunk) chromosome estimate.  ``None`` → auto-estimate."""
+    gdna_mom_min_evidence_chrom: float = 50.0
+    """Minimum fragment evidence for a chromosome to contribute to
+    the gDNA MoM κ_chrom estimate."""
+    gdna_mom_min_evidence_locus: float = 30.0
+    """Minimum fragment evidence for a locus to contribute to
+    the gDNA MoM κ_locus estimate."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
@@ -104,8 +164,10 @@ class BamScanConfig:
         Maximum fragment length for histogram models (default 1000).
     sj_strand_tag : str or tuple of str
         BAM tag(s) for splice-junction strand (default ``"auto"``).
-    min_spliced_observations : int
-        Minimum spliced observations for strand model (default 10).
+    strand_prior_kappa : float
+        Strand model prior pseudocount κ.  Beta prior is ``Beta(κ/2, κ/2)``
+        which shrinks toward 0.5 (max entropy).  Default 2.0 → uniform
+        ``Beta(1, 1)``.
     log_every : int
         Log progress every N read-name groups (default 1M).
     chunk_size : int
@@ -117,10 +179,10 @@ class BamScanConfig:
     """
 
     skip_duplicates: bool = True
-    include_multimap: bool = False
+    include_multimap: bool = True
     max_frag_length: int = 1000
     sj_strand_tag: str | tuple[str, ...] = "auto"
-    min_spliced_observations: int = 10
+    strand_prior_kappa: float = 2.0
     log_every: int = 1_000_000
     chunk_size: int = 1_000_000
     max_memory_bytes: int = 2 * 1024**3

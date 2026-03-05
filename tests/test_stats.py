@@ -10,7 +10,7 @@ class TestPipelineStats:
         ps = PipelineStats()
         assert ps.total == 0
         assert ps.n_fragments == 0
-        assert ps.deterministic_unique_units == 0
+        assert ps.deterministic_unambig_units == 0
         assert ps.em_routed_ambig_same_strand_units == 0
         assert ps.em_routed_ambig_opp_strand_units == 0
 
@@ -28,7 +28,7 @@ class TestPipelineStats:
         # Spot-check a few keys
         assert "total" in d
         assert "n_fragments" in d
-        assert "deterministic_unique_units" in d
+        assert "deterministic_unambig_units" in d
         assert "em_routed_ambig_same_strand_units" in d
         assert "em_routed_ambig_opp_strand_units" in d
         # All values should be zero by default

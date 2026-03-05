@@ -12,8 +12,8 @@ print("Shape:", counts.shape)
 print("Columns:", list(counts.columns))
 print(counts.head(3).to_string())
 print()
-print("Sum of count_em for expressed:", counts[counts["count_em"] > 0]["count_em"].sum())
-print("Expressed transcripts:", (counts["count_em"] > 0).sum())
+print("Sum of mrna_em for expressed:", counts[counts["mrna_em"] > 0]["mrna_em"].sum())
+print("Expressed transcripts:", (counts["mrna_em"] > 0).sum())
 print()
 
 # Check hulkrna index transcripts

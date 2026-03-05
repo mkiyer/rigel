@@ -10,7 +10,7 @@ from hulkrna.splice import (
     SpliceStrandCol,
 )
 from hulkrna.config import EMConfig
-from hulkrna.estimator import AbundanceEstimator, ScoredFragments, Locus, LocusEMInput
+from hulkrna.estimator import AbundanceEstimator, ScoredFragments, Locus, LocusEMInput, compute_hybrid_nrna_frac_priors, estimate_kappa
 from hulkrna.strand_model import StrandModel, StrandModels
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
@@ -79,13 +79,10 @@ def _make_strand_model_fr():
 
 
 def _make_strand_models_fr():
-    """StrandModels container with FR-strand model in all slots."""
+    """StrandModels container with FR-strand model."""
     sm = _make_strand_model_fr()
     return StrandModels(
         exonic_spliced=sm,
-        exonic=sm,
-        intronic=sm,
-        intergenic=StrandModel(),
     )
 
 
@@ -211,7 +208,7 @@ class TestIsAntisense:
 
 
 # =====================================================================
-# assign_unique
+# assign_unambig
 # =====================================================================
 
 
@@ -227,10 +224,10 @@ class TestAssignUnique:
             exon_strand=Strand.POS,
             splice_type=SpliceType.UNSPLICED,
         )
-        rc.assign_unique(resolved, index, sms)
+        rc.assign_unambig(resolved, index, sms)
 
         col = _UNSPLICED_SENSE
-        assert rc.unique_counts[0, col] == 1.0
+        assert rc.unambig_counts[0, col] == 1.0
         assert rc.t_counts[0, col] == 1.0
 
     def test_empty_t_inds_does_nothing(self):
@@ -239,9 +236,9 @@ class TestAssignUnique:
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
 
         resolved = _make_resolved(t_inds=frozenset(), ambig_strand=0)
-        rc.assign_unique(resolved, index, sms)
+        rc.assign_unambig(resolved, index, sms)
 
-        assert rc.unique_counts.sum() == 0.0
+        assert rc.unambig_counts.sum() == 0.0
 
     def test_always_assigns_one_count(self):
         index = _make_index()
@@ -254,20 +251,20 @@ class TestAssignUnique:
             exon_strand=Strand.POS,
             num_hits=4,
         )
-        rc.assign_unique(resolved, index, sms)
+        rc.assign_unambig(resolved, index, sms)
 
         col = _UNSPLICED_SENSE
-        assert rc.unique_counts[0, col] == 1.0
+        assert rc.unambig_counts[0, col] == 1.0
 
-    def test_writes_to_unique_not_em(self):
+    def test_writes_to_unambig_not_em(self):
         index = _make_index()
         sms = _make_strand_models_fr()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
 
         resolved = _make_resolved(t_inds=frozenset({0}), ambig_strand=0)
-        rc.assign_unique(resolved, index, sms)
+        rc.assign_unambig(resolved, index, sms)
 
-        assert rc.unique_counts.sum() == 1.0
+        assert rc.unambig_counts.sum() == 1.0
         assert rc.em_counts.sum() == 0.0
 
 
@@ -321,7 +318,7 @@ class TestLocusEM:
         assert theta.sum() == pytest.approx(1.0)
 
     def test_uniform_priors_stay_uniform(self):
-        """With no unique counts and equal likelihoods, mRNA theta stays uniform."""
+        """With no unambig counts and equal likelihoods, mRNA theta stays uniform."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1]] * 1000, num_transcripts=3)
         theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
@@ -331,10 +328,10 @@ class TestLocusEM:
         # t2 not in any unit → smaller
         assert theta[2] < theta[0]
 
-    def test_unique_counts_bias_em(self):
+    def test_unambig_counts_bias_em(self):
         """Unique counts on t0 should bias EM toward t0."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 100.0
 
         lem = _make_locus_em_data(
             [[0, 1]] * 500, num_transcripts=3, rc=rc,
@@ -343,11 +340,11 @@ class TestLocusEM:
 
         assert theta[0] > theta[1]
 
-    def test_zero_iterations_uses_unique_priors(self):
-        """With em_iterations=0, theta comes from unique counts + prior only."""
+    def test_zero_iterations_uses_unambig_priors(self):
+        """With em_iterations=0, theta comes from unambig counts + prior only."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, 0] = 10.0
-        rc.unique_counts[1, 0] = 5.0
+        rc.unambig_counts[0, 0] = 10.0
+        rc.unambig_counts[1, 0] = 5.0
 
         lem = _make_locus_em_data(
             [[0, 1]] * 100, num_transcripts=3, rc=rc,
@@ -374,8 +371,8 @@ class TestLocusEM:
     def test_convergence_detected(self):
         """EM should converge early for simple problems."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, 0] = 100.0
-        rc.unique_counts[1, 0] = 100.0
+        rc.unambig_counts[0, 0] = 100.0
+        rc.unambig_counts[1, 0] = 100.0
 
         lem = _make_locus_em_data(
             [[0, 1]] * 100, num_transcripts=2, rc=rc,
@@ -415,15 +412,15 @@ class TestLocusAssignment:
 
         assert rc.em_counts.sum() == pytest.approx(100.0)
 
-    def test_total_counts_equals_unique_plus_em(self):
-        """t_counts = unique_counts + em_counts."""
+    def test_total_counts_equals_unambig_plus_em(self):
+        """t_counts = unambig_counts + em_counts."""
         index = _make_index()
         sms = _make_strand_models_fr()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
 
-        # 10 unique
+        # 10 unambig
         for _ in range(10):
-            rc.assign_unique(
+            rc.assign_unambig(
                 _make_resolved(t_inds=frozenset({0})),
                 index, sms,
             )
@@ -432,18 +429,18 @@ class TestLocusAssignment:
         lem = _make_locus_em_data([[0, 1]] * 5, num_transcripts=3, rc=rc)
         _run_and_assign(rc, lem, em_iterations=5)
 
-        assert rc.unique_counts.sum() == 10.0
+        assert rc.unambig_counts.sum() == 10.0
         assert rc.em_counts.sum() == pytest.approx(5.0)
         assert rc.t_counts.sum() == pytest.approx(15.0)
         np.testing.assert_array_almost_equal(
-            rc.t_counts, rc.unique_counts + rc.em_counts
+            rc.t_counts, rc.unambig_counts + rc.em_counts
         )
 
     def test_distribution_follows_priors(self):
-        """Over many fragments, expected-count assignments follow unique priors."""
+        """Over many fragments, expected-count assignments follow unambig priors."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 90.0
-        rc.unique_counts[1, _UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 90.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
 
         lem = _make_locus_em_data(
             [[0, 1]] * 10000, num_transcripts=3, rc=rc,
@@ -456,15 +453,15 @@ class TestLocusAssignment:
         # Both should receive counts (not winner-take-all)
         assert t1_em > 500  # ~10% of 10000
 
-    def test_writes_to_em_not_unique(self):
+    def test_writes_to_em_not_unambig(self):
         """assign_locus_ambiguous only writes to em_counts."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         lem = _make_locus_em_data([[0, 1]] * 50, num_transcripts=3)
 
-        unique_before = rc.unique_counts.copy()
+        unique_before = rc.unambig_counts.copy()
         _run_and_assign(rc, lem, em_iterations=5)
 
-        np.testing.assert_array_equal(rc.unique_counts, unique_before)
+        np.testing.assert_array_equal(rc.unambig_counts, unique_before)
         assert rc.em_counts.sum() == pytest.approx(50.0)
 
     def test_empty_em_data_does_nothing(self):
@@ -493,8 +490,8 @@ class TestLocusAssignment:
         results = []
         for _ in range(3):
             rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-            rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
-            rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
+            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+            rc.unambig_counts[1, _UNSPLICED_SENSE] = 50.0
             lem = _make_locus_em_data(
                 [[0, 1]] * 100, num_transcripts=3, rc=rc,
             )
@@ -509,8 +506,8 @@ class TestLocusAssignment:
         counts = []
         for seed in [1, 2]:
             rc = AbundanceEstimator(3, em_config=EMConfig(seed=seed))
-            rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
-            rc.unique_counts[1, _UNSPLICED_SENSE] = 50.0
+            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+            rc.unambig_counts[1, _UNSPLICED_SENSE] = 50.0
             lem = _make_locus_em_data(
                 [[0, 1]] * 100, num_transcripts=3, rc=rc,
             )
@@ -522,8 +519,8 @@ class TestLocusAssignment:
     def test_fractional_counts(self):
         """EM counts may be fractional under expected-count assignment."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 50.0
-        rc.unique_counts[1, _UNSPLICED_SENSE] = 30.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
 
         lem = _make_locus_em_data(
             [[0, 1]] * 200, num_transcripts=3, rc=rc,
@@ -579,7 +576,7 @@ class TestPosteriorMean:
     def test_strong_prior_high_posterior(self):
         """Strong prior → assigned units have high mean posterior."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 100.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 100.0
         lem = _make_locus_em_data(
             [[0, 1]] * 100, num_transcripts=2, rc=rc,
         )
@@ -605,16 +602,16 @@ class TestSimultaneousResolution:
         EM convergence is order-independent.  Expected counts agree.
         """
         rc1 = AbundanceEstimator(4, em_config=EMConfig(seed=42))
-        rc1.unique_counts[0, 0] = 50.0
-        rc1.unique_counts[2, 0] = 30.0
+        rc1.unambig_counts[0, 0] = 50.0
+        rc1.unambig_counts[2, 0] = 30.0
 
         units = [[0, 1]] * 200 + [[0, 2]] * 200
         lem1 = _make_locus_em_data(units, num_transcripts=4, rc=rc1)
         theta1, _ = _run_and_assign(rc1, lem1, em_iterations=10)
 
         rc2 = AbundanceEstimator(4, em_config=EMConfig(seed=42))
-        rc2.unique_counts[0, 0] = 50.0
-        rc2.unique_counts[2, 0] = 30.0
+        rc2.unambig_counts[0, 0] = 50.0
+        rc2.unambig_counts[2, 0] = 30.0
 
         units_rev = [[0, 2]] * 200 + [[0, 1]] * 200
         lem2 = _make_locus_em_data(units_rev, num_transcripts=4, rc=rc2)
@@ -643,7 +640,7 @@ class TestMultimapperEM:
     def test_multimapper_and_ambig_together(self):
         """Mixed ambiguous + multimapper units in same EM."""
         rc = AbundanceEstimator(4, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, 0] = 100.0
+        rc.unambig_counts[0, 0] = 100.0
 
         units = [[0, 1]] * 50 + [[0, 2]] * 50 + [[0, 1, 2, 3]] * 25
         lem = _make_locus_em_data(units, num_transcripts=4, rc=rc)
@@ -665,9 +662,11 @@ class TestCountsOutput:
         assert df.shape[0] == 3
         expected_cols = [
             "transcript_id", "gene_id", "gene_name",
+            "locus_id",
             "effective_length",
-            "count", "count_unique", "count_spliced",
-            "count_em", "count_high_conf", "n_gdna",
+            "mrna", "mrna_unambig", "mrna_em",
+            "mrna_high_conf", "mrna_spliced",
+            "nrna", "rna_total", "tpm",
             "posterior_mean",
         ]
         assert list(df.columns) == expected_cols
@@ -679,40 +678,37 @@ class TestCountsOutput:
         assert df.shape[0] == 2
         expected_cols = [
             "gene_id", "gene_name",
+            "locus_id",
             "effective_length",
-            "count", "count_unique", "count_spliced",
-            "count_em", "count_high_conf",
-            "n_nrna", "n_gdna",
-            "n_antisense",
-            "n_sense_all", "n_antisense_all",
-            "n_intronic_sense", "n_intronic_antisense",
-            "gdna_rate",
+            "mrna", "mrna_unambig", "mrna_em",
+            "mrna_high_conf", "mrna_spliced",
+            "nrna", "rna_total", "tpm",
         ]
         assert list(df.columns) == expected_cols
 
     def test_counts_include_both_sources(self):
-        """Total count sums unique + em counts."""
+        """Total count sums unambig + em counts."""
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 5.0
         rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
 
         df = rc.get_counts_df(index)
-        assert df.loc[0, "count"] == 8.0
-        assert df.loc[0, "count_unique"] == 5.0
-        assert df.loc[0, "count_em"] == 3.0
+        assert df.loc[0, "mrna"] == 8.0
+        assert df.loc[0, "mrna_unambig"] == 5.0
+        assert df.loc[0, "mrna_em"] == 3.0
 
     def test_gene_counts_aggregate(self):
         """Gene counts aggregate across transcripts."""
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
-        rc.unique_counts[1, _UNSPLICED_SENSE] = 3.0  # same gene
-        rc.unique_counts[2, _UNSPLICED_SENSE] = 7.0  # different gene
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 3.0  # same gene
+        rc.unambig_counts[2, _UNSPLICED_SENSE] = 7.0  # different gene
 
         df = rc.get_gene_counts_df(index)
-        assert df.loc[0, "count"] == 8.0  # g0 = t0 + t1
-        assert df.loc[1, "count"] == 7.0  # g1 = t2
+        assert df.loc[0, "mrna"] == 8.0  # g0 = t0 + t1
+        assert df.loc[1, "mrna"] == 7.0  # g1 = t2
 
     def test_gene_effective_length_abundance_weighted(self):
         """Gene effective length is abundance-weighted mean of transcript eff lens."""
@@ -721,10 +717,10 @@ class TestCountsOutput:
         # Set different effective lengths per transcript
         rc._t_eff_len = np.array([500.0, 1000.0, 300.0])
         # t0 gets 90% of counts, t1 gets 10% → weighted toward t0
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 90.0
-        rc.unique_counts[1, _UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 90.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
         # t2 has counts too
-        rc.unique_counts[2, _UNSPLICED_SENSE] = 50.0
+        rc.unambig_counts[2, _UNSPLICED_SENSE] = 50.0
 
         df = rc.get_gene_counts_df(index)
         # g0: (90*500 + 10*1000) / (90+10) = 55000/100 = 550
@@ -746,19 +742,19 @@ class TestCountsOutput:
         assert df.loc[1, "effective_length"] == pytest.approx(300.0)
 
     def test_spliced_counts(self):
-        """count_spliced captures both SPLICED_ANNOT and SPLICED_UNANNOT."""
+        """mrna_spliced captures both SPLICED_ANNOT and SPLICED_UNANNOT."""
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         # SPLICED_ANNOT sense
-        rc.unique_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
+        rc.unambig_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
         # SPLICED_UNANNOT antisense
-        rc.unique_counts[0, SpliceStrandCol.SPLICED_UNANNOT_ANTISENSE] = 2.0
-        # UNSPLICED (should not be in count_spliced)
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, SpliceStrandCol.SPLICED_UNANNOT_ANTISENSE] = 2.0
+        # UNSPLICED (should not be in mrna_spliced)
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 10.0
 
         df = rc.get_counts_df(index)
-        assert df.loc[0, "count_spliced"] == 5.0
-        assert df.loc[0, "count"] == 15.0
+        assert df.loc[0, "mrna_spliced"] == 5.0
+        assert df.loc[0, "mrna"] == 15.0
 
     def test_identifiers_present(self):
         """Output includes transcript/gene identifiers."""
@@ -784,32 +780,32 @@ class TestDetailOutput:
         assert "category" in df.columns
         assert "source" in df.columns
 
-    def test_detail_unique_only(self):
+    def test_detail_unambig_only(self):
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
-        rc.unique_counts[2, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.unambig_counts[2, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
 
         df = rc.get_detail_df(index)
         assert len(df) == 2
-        assert set(df["source"]) == {"unique"}
+        assert set(df["source"]) == {"unambig"}
 
     def test_detail_both_sources(self):
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 5.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 5.0
         rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
 
         df = rc.get_detail_df(index)
         assert len(df) == 2
-        assert set(df["source"]) == {"unique", "em"}
+        assert set(df["source"]) == {"unambig", "em"}
         assert df["count"].sum() == 8.0
 
     def test_detail_has_category(self):
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 1.0
-        rc.unique_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 1.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 1.0
+        rc.unambig_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 1.0
 
         df = rc.get_detail_df(index)
         assert set(df["category"]) == {"unspliced", "spliced_annot"}
@@ -833,7 +829,8 @@ class TestGDNAInLocusEM:
             gdna_init=500.0,
             gdna_log_lik=0.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         # gDNA should absorb some fragments
         assert gdna_count > 0
@@ -841,7 +838,7 @@ class TestGDNAInLocusEM:
     def test_strong_rna_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unique_counts[0, _UNSPLICED_SENSE] = 500.0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
         lem = _make_locus_em_data(
             [[0]] * 100,
             log_liks_per_unit=[[0.0]] * 100,
@@ -851,7 +848,8 @@ class TestGDNAInLocusEM:
             gdna_init=1.0,
             gdna_log_lik=-20.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         assert rc.em_counts[0].sum() > 95
         assert gdna_count < 5
@@ -866,7 +864,8 @@ class TestGDNAInLocusEM:
             include_gdna=True,
             gdna_init=50.0,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=10)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
 
         total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
         assert total == pytest.approx(200.0)
@@ -879,7 +878,413 @@ class TestGDNAInLocusEM:
             num_transcripts=2,
             include_gdna=False,
         )
-        theta, gdna_count = _run_and_assign(rc, lem, em_iterations=5)
+        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=5)
+        gdna_count = pool_counts["gdna"]
 
         assert gdna_count == 0.0
         assert rc.em_counts.sum() == pytest.approx(100.0)
+
+
+# =====================================================================
+# nrna_frac (nascent fraction) prior cascade tests
+# =====================================================================
+
+
+class TestEstimateKappa:
+    """Tests for estimate_kappa() Method-of-Moments helper."""
+
+    def test_zero_variance_returns_max(self):
+        """All nrna_frac identical → σ²=0 → returns maximum κ."""
+        nrna_frac = np.full(30, 0.3)
+        ev = np.full(30, 50.0)
+        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
+        assert k == 200.0  # _KAPPA_MAX
+
+    def test_too_few_observations_returns_fallback(self):
+        """Fewer than 20 valid features → returns fallback."""
+        rng = np.random.default_rng(0)
+        nrna_frac = rng.uniform(0.1, 0.9, size=5)
+        ev = np.full(5, 100.0)
+        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
+        assert k == 5.0  # _KAPPA_FALLBACK
+
+    def test_known_beta_distribution(self):
+        """Samples from Beta(2, 8) → μ=0.2, σ²≈0.0145 → κ≈10."""
+        rng = np.random.default_rng(42)
+        nrna_frac = rng.beta(2.0, 8.0, size=1000)
+        ev = np.full(1000, 100.0)
+        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
+        # True κ = α + β = 10
+        assert k == pytest.approx(10.0, abs=1.5)
+
+    def test_high_variance_gives_low_kappa(self):
+        """Uniform(0,1) → σ²≈0.083 → κ close to 2 (our floor)."""
+        rng = np.random.default_rng(7)
+        nrna_frac = rng.uniform(0.0, 1.0, size=500)
+        ev = np.full(500, 100.0)
+        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
+        assert k == pytest.approx(2.0, abs=0.5)
+
+    def test_evidence_filter_excludes_noisy(self):
+        """Only features above min_evidence are used."""
+        rng = np.random.default_rng(99)
+        # 30 confident features with tight distribution → high κ
+        nrna_frac_conf = np.full(30, 0.15)
+        ev_conf = np.full(30, 100.0)
+        # 200 noisy features with random nrna_frac but low evidence
+        nrna_frac_noisy = rng.uniform(0.0, 1.0, size=200)
+        ev_noisy = np.full(200, 5.0)
+        nrna_frac = np.concatenate([nrna_frac_conf, nrna_frac_noisy])
+        ev = np.concatenate([ev_conf, ev_noisy])
+        k = estimate_kappa(nrna_frac, ev, min_evidence=50.0)
+        # Should only see the 30 tight features → high κ
+        assert k >= 100.0
+
+    def test_clamp_lower_bound(self):
+        """κ is clamped to at least 2.0."""
+        nrna_frac = np.array([0.0, 1.0] * 20, dtype=np.float64)
+        ev = np.full(40, 100.0)
+        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
+        assert k >= 2.0
+
+
+class TestEtaPriorShrinkage:
+    """Tests for compute_hybrid_nrna_frac_priors() smooth EB shrinkage.
+
+    The global prior nrna_frac_global is now *empirical* — the evidence-weighted
+    mean of all locus-strand nrna_frac values.  When there is no evidence,
+    nrna_frac_global = 0 (conservative: assume no nRNA).  Tests that check
+    exact values pass explicit κ values.
+    """
+
+    KG, KL, KT = 2.0, 10.0, 5.0  # standard explicit kappas
+
+    def _make_estimator(self, n_t, L_exonic=None, L_intronic=None):
+        """Create a minimal AbundanceEstimator with geometry arrays."""
+        rc = AbundanceEstimator(n_t)
+        if L_exonic is not None:
+            rc._exonic_lengths = np.array(L_exonic, dtype=np.float64)
+        if L_intronic is not None:
+            spans = rc._exonic_lengths + np.array(L_intronic, dtype=np.float64)
+            rc._transcript_spans = spans
+        return rc
+
+    def _kw(self):
+        return dict(kappa_global=self.KG, kappa_locus=self.KL, kappa_tss=self.KT)
+
+    # -- Zero evidence → empirical global prior (nrna_frac=0) --
+
+    def test_no_evidence_shrinks_to_global(self):
+        """No data → nrna_frac_global=0 (empirical), κ=5 → α≈0, β≈5."""
+        rc = self._make_estimator(3, [1000]*3, [4000]*3)
+        locus_ids = np.full(3, -1, dtype=np.int32)
+        strands = np.array([1, 1, 2], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.95, gdna_density=0.0, **self._kw(),
+        )
+        # nrna_frac_global=0 (no evidence), all nrna_frac→0, κ=5 → α≈0, β≈5
+        np.testing.assert_allclose(rc.nrna_frac_alpha, 0.0, atol=0.01)
+        np.testing.assert_allclose(rc.nrna_frac_beta, 5.0, atol=0.01)
+
+    # -- Transcript level with shrinkage --
+
+    def test_density_mode_transcript_level(self):
+        """Unstranded (s=0.5): density nrna_frac shrunk toward empirical global."""
+        rc = self._make_estimator(1, [1000], [4000])
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[0] = 10.0
+        rc.transcript_exonic_antisense[0] = 10.0
+        rc.transcript_intronic_sense[0] = 8.0
+        rc.transcript_intronic_antisense[0] = 8.0
+
+        locus_ids = np.full(1, -1, dtype=np.int32)
+        strands = np.array([1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+        )
+        # Single transcript: kappa = kappa_tss = 5.0 (constant, weak prior)
+        # nrna_frac ≈ 0.176 → α = 5 * 0.176 ≈ 0.878
+        assert rc.nrna_frac_alpha[0] == pytest.approx(0.878, abs=0.05)
+        kappa = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
+        assert kappa == pytest.approx(5.0, abs=0.01)
+
+    def test_strand_mode_transcript_level(self):
+        """Perfectly stranded (s=1.0): strand nrna_frac shrunk toward empirical global."""
+        rc = self._make_estimator(1, [1000], [4000])
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 20.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 0.0
+        rc.transcript_exonic_sense[0] = 20.0
+        rc.transcript_exonic_antisense[0] = 0.0
+        rc.transcript_intronic_sense[0] = 8.0
+        rc.transcript_intronic_antisense[0] = 0.0
+
+        locus_ids = np.full(1, -1, dtype=np.int32)
+        strands = np.array([1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=1.0, gdna_density=0.0, **self._kw(),
+        )
+        # Single transcript: kappa = kappa_tss = 5.0 (constant, weak prior)
+        # nrna_frac ≈ 0.085 → α = 5 * 0.085 ≈ 0.424
+        assert rc.nrna_frac_alpha[0] == pytest.approx(0.424, abs=0.05)
+        kappa = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
+        assert kappa == pytest.approx(5.0, abs=0.01)
+
+    def test_gdna_subtraction_reduces_nrna(self):
+        """Positive gDNA density reduces the nRNA estimate (directional)."""
+        rc = self._make_estimator(1, [1000], [4000])
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[0] = 10.0
+        rc.transcript_exonic_antisense[0] = 10.0
+        rc.transcript_intronic_sense[0] = 8.0
+        rc.transcript_intronic_antisense[0] = 8.0
+
+        locus_ids = np.full(1, -1, dtype=np.int32)
+        strands = np.array([1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+        )
+        alpha_no_gdna = rc.nrna_frac_alpha[0]
+
+        # Fresh estimator for gDNA run (nrna_frac_global is re-derived each call)
+        rc2 = self._make_estimator(1, [1000], [4000])
+        rc2.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc2.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc2.transcript_exonic_sense[0] = 10.0
+        rc2.transcript_exonic_antisense[0] = 10.0
+        rc2.transcript_intronic_sense[0] = 8.0
+        rc2.transcript_intronic_antisense[0] = 8.0
+        compute_hybrid_nrna_frac_priors(
+            rc2, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.002, **self._kw(),
+        )
+        alpha_with_gdna = rc2.nrna_frac_alpha[0]
+
+        # gDNA subtraction should lower nrna_frac and thus α
+        assert alpha_with_gdna < alpha_no_gdna
+        assert alpha_with_gdna == pytest.approx(0.488, abs=0.05)
+
+    def test_single_exon_nrna_suppressed(self):
+        """Single-exon transcript (L_intronic=0): nrna_frac pulled toward 0."""
+        rc = self._make_estimator(1, [1000], [0])
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[0] = 10.0
+        rc.transcript_exonic_antisense[0] = 10.0
+
+        locus_ids = np.full(1, -1, dtype=np.int32)
+        strands = np.array([1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.001, **self._kw(),
+        )
+        nrna_frac = rc.nrna_frac_alpha[0] / (rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0])
+        # Raw nrna_frac=0, nrna_frac_global=0; single-exon → nRNA strongly suppressed
+        assert nrna_frac < 0.01
+
+    # -- Hierarchical shrinkage --
+
+    def test_tss_group_shrinkage(self):
+        """Low-evidence transcript borrows strength from TSS group."""
+        rc = self._make_estimator(3, [1000]*3, [4000]*3)
+        # t0: low evidence (6 frags)
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 2.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 2.0
+        rc.transcript_exonic_sense[0] = 2.0
+        rc.transcript_exonic_antisense[0] = 2.0
+        rc.transcript_intronic_sense[0] = 1.0
+        rc.transcript_intronic_antisense[0] = 1.0
+        # t1: strong evidence (36 frags)
+        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[1] = 10.0
+        rc.transcript_exonic_antisense[1] = 10.0
+        rc.transcript_intronic_sense[1] = 8.0
+        rc.transcript_intronic_antisense[1] = 8.0
+        # t2: no evidence
+
+        tss_groups = np.array([0, 0, 1], dtype=np.int32)
+        locus_ids = np.full(3, -1, dtype=np.int32)
+        strands = np.array([1, 1, 1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, tss_groups, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+        )
+        # t0: low evidence, borrows from TSS group; α≈0.685, κ=5
+        assert rc.nrna_frac_alpha[0] == pytest.approx(0.685, abs=0.05)
+        kappa0 = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
+        assert kappa0 == pytest.approx(5.0, abs=0.01)
+
+        # t1: strong evidence, own data dominates; α≈0.970
+        assert rc.nrna_frac_alpha[1] == pytest.approx(0.970, abs=0.05)
+
+        # t2: zero evidence, TSS group 1 also zero → falls to global (nrna_frac≈0)
+        assert rc.nrna_frac_alpha[2] < 0.01
+
+    def test_locus_strand_shrinkage(self):
+        """No TSS groups: locus-strand provides parent information."""
+        rc = self._make_estimator(3, [1000]*3, [4000]*3)
+        # t0: low evidence (6 frags)
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 2.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 2.0
+        rc.transcript_exonic_sense[0] = 2.0
+        rc.transcript_exonic_antisense[0] = 2.0
+        rc.transcript_intronic_sense[0] = 1.0
+        rc.transcript_intronic_antisense[0] = 1.0
+        # t1: no evidence
+        # t2: strong evidence
+        rc.unambig_counts[2, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[2, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[2] = 10.0
+        rc.transcript_exonic_antisense[2] = 10.0
+        rc.transcript_intronic_sense[2] = 8.0
+        rc.transcript_intronic_antisense[2] = 8.0
+
+        locus_ids = np.array([0, 0, 0], dtype=np.int32)
+        strands = np.array([1, 1, 1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+        )
+        # t0: low evidence, inherits from locus-strand; α≈0.767
+        assert rc.nrna_frac_alpha[0] == pytest.approx(0.767, abs=0.05)
+
+        # t1: zero own data → inherits parent (locus-strand nrna_frac); α≈0.938
+        assert rc.nrna_frac_alpha[1] == pytest.approx(0.938, abs=0.05)
+
+        # t2: strong evidence, own data dominates; α≈0.992
+        assert rc.nrna_frac_alpha[2] == pytest.approx(0.992, abs=0.05)
+
+    # -- Strand separation --
+
+    def test_different_strands_separate_locus_pools(self):
+        """Locus-strand groups transcripts by strand."""
+        rc = self._make_estimator(2, [1000]*2, [4000]*2)
+        # t0: +strand
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[0] = 10.0
+        rc.transcript_exonic_antisense[0] = 10.0
+        rc.transcript_intronic_sense[0] = 6.0
+        rc.transcript_intronic_antisense[0] = 6.0
+        # t1: -strand
+        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_SENSE] = 15.0
+        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_ANTISENSE] = 15.0
+        rc.transcript_exonic_sense[1] = 15.0
+        rc.transcript_exonic_antisense[1] = 15.0
+        rc.transcript_intronic_sense[1] = 10.0
+        rc.transcript_intronic_antisense[1] = 10.0
+
+        locus_ids = np.array([0, 0], dtype=np.int32)
+        strands = np.array([1, 2], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+        )
+        nrna_frac0 = rc.nrna_frac_alpha[0] / (rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0])
+        nrna_frac1 = rc.nrna_frac_alpha[1] / (rc.nrna_frac_alpha[1] + rc.nrna_frac_beta[1])
+        # Raw nrna_frac0≈0.150, nrna_frac1≈0.167; both shrink slightly
+        assert nrna_frac0 == pytest.approx(0.150, abs=0.01)
+        assert nrna_frac1 == pytest.approx(0.167, abs=0.01)
+        # κ = kappa_tss (constant, weak prior)
+        kappa0 = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
+        kappa1 = rc.nrna_frac_alpha[1] + rc.nrna_frac_beta[1]
+        assert kappa0 == pytest.approx(5.0, abs=0.01)
+        assert kappa1 == pytest.approx(5.0, abs=0.01)
+
+    # -- Shrinkage properties --
+
+    def test_constant_kappa_regardless_of_evidence(self):
+        """Kappa is constant (kappa_tss) regardless of evidence level."""
+        # With the weakly informative prior, kappa = kappa_tss always.
+        # The EM itself sees all data, so kappa need not scale with evidence.
+        for ne in [5, 30, 100]:
+            rc = self._make_estimator(1, [1000], [4000])
+            rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = float(ne)
+            rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = float(ne)
+            rc.transcript_exonic_sense[0] = float(ne)
+            rc.transcript_exonic_antisense[0] = float(ne)
+            rc.transcript_intronic_sense[0] = float(ne // 2)
+            rc.transcript_intronic_antisense[0] = float(ne // 2)
+            locus_ids = np.array([0], dtype=np.int32)
+            strands = np.array([1], dtype=np.int32)
+            compute_hybrid_nrna_frac_priors(
+                rc, None, strands, locus_ids,
+                strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+            )
+            kappa = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
+            # κ is always kappa_tss, independent of fragment count
+            assert kappa == pytest.approx(5.0, abs=0.01)
+            # nrna_frac mean is valid
+            nf = rc.nrna_frac_alpha[0] / kappa
+            assert 0 < nf < 1
+
+    # -- Auto MoM estimation (None defaults) --
+
+    def test_auto_kappa_sparse_uses_fallback(self):
+        """With < 20 features, MoM falls back to κ=5; no evidence → nrna_frac≈0."""
+        rc = self._make_estimator(3, [1000]*3, [4000]*3)
+        locus_ids = np.full(3, -1, dtype=np.int32)
+        strands = np.array([1, 1, 2], dtype=np.int32)
+        # No kappas → auto-estimate → sparse → all fallback to 5.0
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0,
+        )
+        # With no evidence: nrna_frac_global=0, all κ=5 → α≈0, β≈5
+        np.testing.assert_allclose(rc.nrna_frac_alpha, 0.0, atol=0.01)
+        np.testing.assert_allclose(rc.nrna_frac_beta, 5.0, atol=0.01)
+
+    def test_auto_kappa_produces_finite_output(self):
+        """Auto-estimation produces valid finite priors regardless."""
+        rc = self._make_estimator(1, [1000], [4000])
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        rc.transcript_exonic_sense[0] = 10.0
+        rc.transcript_exonic_antisense[0] = 10.0
+        rc.transcript_intronic_sense[0] = 8.0
+        rc.transcript_intronic_antisense[0] = 8.0
+        locus_ids = np.full(1, -1, dtype=np.int32)
+        strands = np.array([1], dtype=np.int32)
+        # Leave κ as None → MoM auto
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0,
+        )
+        assert np.all(np.isfinite(rc.nrna_frac_alpha))
+        assert np.all(np.isfinite(rc.nrna_frac_beta))
+        assert np.all(rc.nrna_frac_alpha > 0)
+        assert np.all(rc.nrna_frac_beta > 0)
+
+    # -- Output types --
+
+    def test_nrna_frac_alpha_beta_are_float64(self):
+        """Output arrays should be float64."""
+        rc = self._make_estimator(2, [1000]*2, [4000]*2)
+        locus_ids = np.full(2, -1, dtype=np.int32)
+        strands = np.array([1, 2], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.95, gdna_density=0.0,
+        )
+        assert rc.nrna_frac_alpha.dtype == np.float64
+        assert rc.nrna_frac_beta.dtype == np.float64
+
+    def test_no_geometry_falls_back_gracefully(self):
+        """Estimator without geometry arrays still produces valid priors."""
+        rc = AbundanceEstimator(2)
+        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 20.0
+        rc.transcript_exonic_sense[0] = 20.0
+        locus_ids = np.full(2, -1, dtype=np.int32)
+        strands = np.array([1, 1], dtype=np.int32)
+        compute_hybrid_nrna_frac_priors(
+            rc, None, strands, locus_ids,
+            strand_specificity=0.5, gdna_density=0.0,
+        )
+        assert np.all(np.isfinite(rc.nrna_frac_alpha))
+        assert np.all(np.isfinite(rc.nrna_frac_beta))

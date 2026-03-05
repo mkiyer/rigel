@@ -90,7 +90,7 @@ static SJTagMode parse_sj_tag_spec(const std::string& spec) {
 
 static const char* frag_class_label(int code) {
     switch (code) {
-        case 0:  return "unique";
+        case 0:  return "unambig";
         case 1:  return "ambig_same_strand";
         case 2:  return "ambig_opp_strand";
         case 3:  return "multimapper";
@@ -321,7 +321,16 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
     auto try_tag = [&](const char* tag, bool is_ts) -> int32_t {
         uint8_t* aux = bam_aux_get(b, tag);
         if (!aux) return -1;  // tag not present
-        char val = bam_aux2A(aux);
+        // Dispatch on the htslib type code (*aux) to call the correct
+        // accessor.  Type 'A' = single char, type 'Z'/'H' = string
+        // (take first character).  Any other type → val 0 → STRAND_NONE.
+        char val = 0;
+        if (*aux == 'A') {
+            val = bam_aux2A(aux);
+        } else if (*aux == 'Z' || *aux == 'H') {
+            const char* s = bam_aux2Z(aux);
+            if (s && s[0]) val = s[0];
+        }
         int32_t strand;
         if (val == '+') strand = STRAND_POS;
         else if (val == '-') strand = STRAND_NEG;

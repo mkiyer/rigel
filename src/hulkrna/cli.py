@@ -9,10 +9,10 @@ Subcommands:
     hulkrna sim     — Generate synthetic test scenarios
 """
 
+import argparse
 import logging
 import sys
 import time
-import argparse
 from pathlib import Path
 
 
@@ -58,14 +58,54 @@ def quant_command(args: argparse.Namespace) -> int:
     strand/insert models, then quantify via unified EM.
     """
     import json
+    import yaml
     from .index import TranscriptIndex
     from .pipeline import run_pipeline
     from .config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
     from .scoring import (
         overhang_alpha_to_log_penalty,
         GDNA_SPLICE_PENALTIES,
+        DEFAULT_OVERHANG_ALPHA,
+        DEFAULT_MISMATCH_ALPHA,
+        DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     )
     from .splice import SPLICE_UNANNOT
+
+    # -- Resolve parameters: CLI > YAML > hardcoded defaults --
+    _DEFAULTS = {
+        "seed": None,
+        "em_prior_alpha": 0.01,
+        "em_prior_gamma": 1.0,
+        "em_iterations": 1000,
+        "em_convergence_delta": 1e-6,
+        "prune_threshold": 0.1,
+        "confidence_threshold": 0.95,
+        "include_multimap": True,
+        "keep_duplicates": False,
+        "no_tsv": False,
+        "sj_strand_tag": ["auto"],
+        "annotated_bam": None,
+        "overhang_alpha": DEFAULT_OVERHANG_ALPHA,
+        "mismatch_alpha": DEFAULT_MISMATCH_ALPHA,
+        "gdna_splice_penalty_unannot": DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+        "tss_window": 200,
+        "nrna_frac_kappa_global": None,
+        "nrna_frac_kappa_locus": None,
+        "nrna_frac_kappa_tss": None,
+        "nrna_frac_mom_min_evidence_global": 50.0,
+        "nrna_frac_mom_min_evidence_locus": 30.0,
+        "nrna_frac_mom_min_evidence_tss": 20.0,
+        "nrna_frac_kappa_min": 2.0,
+        "nrna_frac_kappa_max": 200.0,
+        "nrna_frac_kappa_fallback": 5.0,
+        "nrna_frac_kappa_min_obs": 20,
+        "gdna_kappa_chrom": None,
+        "gdna_kappa_locus": None,
+        "gdna_mom_min_evidence_chrom": 50.0,
+        "gdna_mom_min_evidence_locus": 30.0,
+        "strand_prior_kappa": 2.0,
+    }
+    _resolve_quant_args(args, _DEFAULTS)
 
     bam_path = Path(args.bam_file)
     index_dir = Path(args.index_dir)
@@ -93,13 +133,16 @@ def quant_command(args: argparse.Namespace) -> int:
         f"Using EM prior: alpha={alpha}, gamma={gamma}"
     )
 
+    # Normalise sj_strand_tag from YAML (may be str)
+    if isinstance(args.sj_strand_tag, str):
+        args.sj_strand_tag = [args.sj_strand_tag]
+
     # Define output file paths
-    strand_json = output_dir / "strand_model.json"
-    fl_json = output_dir / "frag_length_models.json"
     quant_path = output_dir / "quant.feather"
     gene_quant_path = output_dir / "gene_quant.feather"
+    loci_path = output_dir / "loci.feather"
     detail_path = output_dir / "quant_detail.feather"
-    stats_path = output_dir / "stats.json"
+    summary_path = output_dir / "summary.json"
     config_path = output_dir / "config.json"
 
     # Load reference index
@@ -108,7 +151,7 @@ def quant_command(args: argparse.Namespace) -> int:
     logging.info(f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
                  f"{index.num_genes} genes")
 
-    # Resolve sj_strand_tag from CLI list to str | tuple
+    # Resolve sj_strand_tag from list to str | tuple
     sj_tag_list = args.sj_strand_tag
     if len(sj_tag_list) == 1:
         sj_strand_tag = sj_tag_list[0]              # "auto", "XS", or "ts"
@@ -119,6 +162,7 @@ def quant_command(args: argparse.Namespace) -> int:
     config = {
         "command": "hulkrna quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "source_config": str(Path(args.config).resolve()) if args.config else None,
         "parameters": {
             "bam_file": str(bam_path.resolve()),
             "index_dir": str(index_dir.resolve()),
@@ -128,12 +172,29 @@ def quant_command(args: argparse.Namespace) -> int:
             "em_prior_gamma": gamma,
             "em_iterations": args.em_iterations,
             "em_convergence_delta": args.em_convergence_delta,
+            "prune_threshold": args.prune_threshold,
             "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
             "confidence_threshold": args.confidence_threshold,
             "skip_duplicates": not args.keep_duplicates,
             "include_multimap": args.include_multimap,
             "sj_strand_tag": sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag),
             "annotated_bam": args.annotated_bam,
+            "tss_window": args.tss_window,
+            "nrna_frac_kappa_global": args.nrna_frac_kappa_global,
+            "nrna_frac_kappa_locus": args.nrna_frac_kappa_locus,
+            "nrna_frac_kappa_tss": args.nrna_frac_kappa_tss,
+            "nrna_frac_mom_min_evidence_global": args.nrna_frac_mom_min_evidence_global,
+            "nrna_frac_mom_min_evidence_locus": args.nrna_frac_mom_min_evidence_locus,
+            "nrna_frac_mom_min_evidence_tss": args.nrna_frac_mom_min_evidence_tss,
+            "nrna_frac_kappa_min": args.nrna_frac_kappa_min,
+            "nrna_frac_kappa_max": args.nrna_frac_kappa_max,
+            "nrna_frac_kappa_fallback": args.nrna_frac_kappa_fallback,
+            "nrna_frac_kappa_min_obs": args.nrna_frac_kappa_min_obs,
+            "gdna_kappa_chrom": args.gdna_kappa_chrom,
+            "gdna_kappa_locus": args.gdna_kappa_locus,
+            "gdna_mom_min_evidence_chrom": args.gdna_mom_min_evidence_chrom,
+            "gdna_mom_min_evidence_locus": args.gdna_mom_min_evidence_locus,
+            "strand_prior_kappa": args.strand_prior_kappa,
         },
     }
     with open(config_path, "w") as f:
@@ -154,12 +215,29 @@ def quant_command(args: argparse.Namespace) -> int:
             prior_gamma=gamma,
             iterations=args.em_iterations,
             convergence_delta=args.em_convergence_delta,
+            prune_threshold=args.prune_threshold,
             confidence_threshold=args.confidence_threshold,
+            tss_window=args.tss_window,
+            nrna_frac_kappa_global=args.nrna_frac_kappa_global,
+            nrna_frac_kappa_locus=args.nrna_frac_kappa_locus,
+            nrna_frac_kappa_tss=args.nrna_frac_kappa_tss,
+            nrna_frac_mom_min_evidence_global=args.nrna_frac_mom_min_evidence_global,
+            nrna_frac_mom_min_evidence_locus=args.nrna_frac_mom_min_evidence_locus,
+            nrna_frac_mom_min_evidence_tss=args.nrna_frac_mom_min_evidence_tss,
+            nrna_frac_kappa_min=args.nrna_frac_kappa_min,
+            nrna_frac_kappa_max=args.nrna_frac_kappa_max,
+            nrna_frac_kappa_fallback=args.nrna_frac_kappa_fallback,
+            nrna_frac_kappa_min_obs=args.nrna_frac_kappa_min_obs,
+            gdna_kappa_chrom=args.gdna_kappa_chrom,
+            gdna_kappa_locus=args.gdna_kappa_locus,
+            gdna_mom_min_evidence_chrom=args.gdna_mom_min_evidence_chrom,
+            gdna_mom_min_evidence_locus=args.gdna_mom_min_evidence_locus,
         ),
         scan=BamScanConfig(
             skip_duplicates=not args.keep_duplicates,
             include_multimap=args.include_multimap,
             sj_strand_tag=sj_strand_tag,
+            strand_prior_kappa=args.strand_prior_kappa,
         ),
         scoring=FragmentScoringConfig(
             overhang_log_penalty=overhang_log_penalty,
@@ -177,21 +255,19 @@ def quant_command(args: argparse.Namespace) -> int:
         if isinstance(val, (int, float)):
             logging.info(f"  {key}: {val:,}")
 
-    # Write models to JSON
-    result.strand_models.write_json(strand_json)
-    result.frag_length_models.write_json(fl_json)
-
     # Write quant tables
     estimator = result.estimator
     quant_df = estimator.get_counts_df(index)
     gene_quant_df = estimator.get_gene_counts_df(index)
+    loci_df = estimator.get_loci_df()
     detail_df = estimator.get_detail_df(index)
 
     quant_df.to_feather(str(quant_path))
     gene_quant_df.to_feather(str(gene_quant_path))
+    loci_df.to_feather(str(loci_path))
     detail_df.to_feather(str(detail_path))
     logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, "
-                 f"{detail_path}")
+                 f"{loci_path}, {detail_path}")
 
     # Write TSV mirrors if requested
     if not args.no_tsv:
@@ -201,14 +277,83 @@ def quant_command(args: argparse.Namespace) -> int:
         gene_quant_df.to_csv(
             gene_quant_path.with_suffix(".tsv"), sep="\t", index=False
         )
+        loci_df.to_csv(
+            loci_path.with_suffix(".tsv"), sep="\t", index=False
+        )
         detail_df.to_csv(
             detail_path.with_suffix(".tsv"), sep="\t", index=False
         )
 
-    # Write stats
-    with open(stats_path, "w") as f:
-        json.dump(result.stats.to_dict(), f, indent=2)
-    logging.info(f"  Stats written to {stats_path}")
+    # Build and write summary.json
+    stats = result.stats
+    sm = result.strand_models
+    flm = result.frag_length_models
+    total_mrna = float(quant_df["mrna"].sum())
+    total_nrna = float(quant_df["nrna"].sum())
+    total_gdna = float(estimator.gdna_total)
+    total_rna = total_mrna + total_nrna
+    total_all = total_rna + total_gdna + stats.n_intergenic
+
+    summary = {
+        "hulkrna_version": "0.1.0",
+        "command": "hulkrna quant",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "input": {
+            "bam_file": str(bam_path.resolve()),
+            "index_dir": str(index_dir.resolve()),
+        },
+        "library": {
+            "protocol": "FR-stranded" if sm.read1_sense else "RF-stranded"
+                if sm.strand_specificity > 0.7 else "unstranded",
+            "strand_specificity": round(sm.strand_specificity, 6),
+            "p_r1_sense": round(sm.p_r1_sense, 6),
+            "read1_sense": bool(sm.read1_sense),
+            "frag_length_mean": round(flm.global_model.mean, 1),
+            "frag_length_median": round(flm.global_model.median, 1),
+            "frag_length_std": round(flm.global_model.std, 1),
+            "frag_length_mode": int(flm.global_model.mode),
+        },
+        "alignment": {
+            "total_reads": stats.total,
+            "mapped_reads": stats.total - stats.unmapped,
+            "unique_reads": stats.unique,
+            "multimapping_reads": stats.multimapping,
+            "proper_pairs": stats.proper_pair,
+            "duplicate_reads": stats.duplicate,
+            "qc_fail_reads": stats.qc_fail,
+        },
+        "fragments": {
+            "total": stats.n_fragments,
+            "genic": stats.n_fragments - stats.n_intergenic - stats.n_chimeric,
+            "intergenic": stats.n_intergenic,
+            "chimeric": stats.n_chimeric,
+        },
+        "quantification": {
+            "n_transcripts": index.num_transcripts,
+            "n_genes": index.num_genes,
+            "n_loci": len(estimator.locus_results),
+            "n_unambig_assigned": stats.deterministic_unambig_units,
+            "n_em_assigned": (
+                stats.em_routed_unambig_units
+                + stats.em_routed_ambig_same_strand_units
+                + stats.em_routed_ambig_opp_strand_units
+                + stats.em_routed_multimapper_units
+            ),
+            "mrna_total": round(total_mrna, 2),
+            "nrna_total": round(total_nrna, 2),
+            "gdna_total": round(total_gdna, 2),
+            "intergenic_total": stats.n_intergenic,
+            "mrna_fraction": round(total_mrna / total_all, 6) if total_all > 0 else 0.0,
+            "nrna_fraction": round(total_nrna / total_all, 6) if total_all > 0 else 0.0,
+            "gdna_fraction": round(total_gdna / total_all, 6) if total_all > 0 else 0.0,
+        },
+        "strand_models": sm.to_dict(),
+        "frag_length_models": flm.to_dict(),
+        "pipeline_stats": stats.to_dict(),
+    }
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    logging.info(f"[DONE] Summary written to {summary_path}")
 
     return 0
 
@@ -266,6 +411,53 @@ def sim_command(args: argparse.Namespace) -> int:
     logging.info(f"  BAM:   {result.bam_path}")
     logging.info(f"  Index: {result.index_dir}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# YAML config / CLI merge helper
+# ---------------------------------------------------------------------------
+
+def _resolve_quant_args(
+    args: argparse.Namespace,
+    defaults: dict,
+) -> None:
+    """Merge CLI arguments, YAML config file, and hardcoded defaults.
+
+    Priority (highest → lowest):
+        1. Explicit CLI flags
+        2. Values from the ``--config`` YAML file
+        3. Hardcoded *defaults*
+
+    Detection of "explicitly set on CLI" relies on all overridable
+    argparse defaults being ``None``.  A non-None ``getattr(args, key)``
+    means the user provided it on the command line.
+
+    The *args* namespace is modified **in place**.
+    """
+    import yaml
+
+    yaml_config: dict = {}
+    config_path = getattr(args, "config", None)
+    if config_path:
+        with open(config_path) as fh:
+            raw = yaml.safe_load(fh) or {}
+        # Normalise: allow hyphens, convert to underscores
+        yaml_config = {k.replace("-", "_"): v for k, v in raw.items()}
+        unknown = set(yaml_config) - set(defaults)
+        if unknown:
+            logging.warning(
+                "Unknown config keys ignored: %s", sorted(unknown),
+            )
+
+    for key, default_val in defaults.items():
+        cli_val = getattr(args, key, None)
+        if cli_val is not None:
+            continue  # CLI wins
+        yaml_val = yaml_config.get(key)
+        if yaml_val is not None:
+            setattr(args, key, yaml_val)
+        else:
+            setattr(args, key, default_val)
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- QUANT ---------------------------------------------------------------
     quant_parser = subparsers.add_parser(
-        "quant", help="Quantify transcripts: model training (Pass 1) + abundance estimation (Pass 2)",
+        "quant",
+        help="Quantify transcripts: model training (Pass 1) + abundance estimation (Pass 2)",
     )
+
+    # Required I/O
     quant_parser.add_argument(
         "--bam", dest="bam_file", required=True,
         help="Name-sorted or collated BAM file (with NH tag)",
@@ -341,105 +536,212 @@ def build_parser() -> argparse.ArgumentParser:
         "-o", "--output-dir", dest="output_dir", required=True,
         help="Output directory for quantification results and models",
     )
+
+    # Optional config file
     quant_parser.add_argument(
-        "--keep-duplicates", dest="keep_duplicates",
-        action="store_true", default=False,
-        help="Keep reads marked as PCR/optical duplicates (default: discard)",
+        "--config", dest="config", default=None,
+        help="YAML configuration file.  Any key matching a CLI option "
+             "(using underscores) may be set here; explicit CLI flags "
+             "override the file.",
     )
+
+    # Boolean flags — use BooleanOptionalAction so both --flag and
+    # --no-flag forms exist, and default=None lets us detect "not set
+    # on CLI" for proper YAML override.
     quant_parser.add_argument(
-        "--include-multimap", dest="include_multimap",
-        action="store_true", default=False,
-        help="Include multimapping reads in output (default: discard). "
+        "--include-multimap", "--no-include-multimap",
+        dest="include_multimap",
+        action=argparse.BooleanOptionalAction, default=None,
+        help="Include multimapping reads (default: yes).  "
              "Detected via NH tag (STAR) or secondary BAM flag (minimap2).",
     )
     quant_parser.add_argument(
+        "--keep-duplicates", "--no-keep-duplicates",
+        dest="keep_duplicates",
+        action=argparse.BooleanOptionalAction, default=None,
+        help="Keep reads marked as PCR/optical duplicates (default: no).",
+    )
+    quant_parser.add_argument(
+        "--no-tsv", dest="no_tsv", action="store_true", default=None,
+        help="Skip writing human-readable TSV quant files.",
+    )
+
+    # Common options (all default=None for YAML override)
+    quant_parser.add_argument(
         "--sj-strand-tag", dest="sj_strand_tag",
-        nargs="+", default=["auto"],
+        nargs="+", default=None,
         help="BAM tag(s) for splice-junction strand. 'auto' (default) "
              "detects the tag from the BAM. Use 'XS' for STAR, 'ts' for "
              "minimap2, or list multiple to check in order (e.g. XS ts).",
     )
     quant_parser.add_argument(
         "--seed", dest="seed", type=int, default=None,
-        help="Random seed for reproducibility (default: use current timestamp)",
+        help="Random seed for reproducibility (default: use current timestamp).",
     )
     quant_parser.add_argument(
-        "--em-prior-alpha", dest="em_prior_alpha", type=float, default=0.01,
+        "--em-prior-alpha", dest="em_prior_alpha", type=float, default=None,
         help="Flat Dirichlet pseudocount per eligible EM component "
-             "(default: 0.01).  Provides baseline regularisation "
-             "independent of coverage geometry.",
+             "(default: 0.01).",
     )
     quant_parser.add_argument(
-        "--em-prior-gamma", dest="em_prior_gamma", type=float, default=1.0,
+        "--em-prior-gamma", dest="em_prior_gamma", type=float, default=None,
         help="OVR prior scale factor (gamma).  Default 1.0.  "
              "Controls how strongly coverage-weighted One Virtual Read "
              "priors influence the EM.",
     )
     quant_parser.add_argument(
-        "--em-iterations", dest="em_iterations", type=int, default=1000,
+        "--em-iterations", dest="em_iterations", type=int, default=None,
         help="Maximum EM iterations for ambiguous fragment resolution "
-             "(default: 1000). Set to 0 for unique-only quantification.",
-    )
-    quant_parser.add_argument(
-        "--em-convergence-delta", dest="em_convergence_delta",
-        type=float, default=1e-6,
-        help="(Advanced) Convergence threshold for EM parameter updates "
-             "(default: 1e-6). Raising to 1e-5 provides a very modest "
-             "speedup with negligible accuracy impact.",
-    )
-    from .scoring import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
-    quant_parser.add_argument(
-        "--gdna-splice-penalty-unannot",
-        dest="gdna_splice_penalty_unannot",
-        type=float,
-        default=DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-        help=(
-            "gDNA splice penalty for SPLICED_UNANNOT fragments "
-            f"(default: {DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT:g}). "
-            "Higher values make gDNA more competitive for unannotated "
-            "spliced reads."
-        ),
+             "(default: 1000). Set to 0 for unambig-only quantification.",
     )
     quant_parser.add_argument(
         "--confidence-threshold", dest="confidence_threshold",
-        type=float, default=0.95,
-        help="Minimum RNA-normalized posterior for an EM assignment "
-             "to be considered high-confidence (default: 0.95). "
-             "Affects the count_high_conf column.",
-    )
-    from .scoring import DEFAULT_OVERHANG_ALPHA, DEFAULT_MISMATCH_ALPHA
-    quant_parser.add_argument(
-        "--overhang-alpha", dest="overhang_alpha",
-        type=float, default=DEFAULT_OVERHANG_ALPHA,
-        help=(
-            "Per-base overhang penalty alpha in [0, 1]. "
-            "Each base outside the target boundary multiplies the "
-            "probability by alpha. "
-            f"(default: {DEFAULT_OVERHANG_ALPHA}). "
-            "0 = hard binary gate, 1 = off (no penalty)."
-        ),
-    )
-    quant_parser.add_argument(
-        "--mismatch-alpha", dest="mismatch_alpha",
-        type=float, default=DEFAULT_MISMATCH_ALPHA,
-        help=(
-            "Per-mismatch (NM tag) penalty alpha in [0, 1]. "
-            "Each edit-distance mismatch multiplies the "
-            "probability by alpha. "
-            f"(default: {DEFAULT_MISMATCH_ALPHA}). "
-            "0 = hard binary gate, 1 = off (no penalty)."
-        ),
-    )
-    quant_parser.add_argument(
-        "--no-tsv", dest="no_tsv", action="store_true", default=False,
-        help="Skip writing human-readable TSV quant files",
+        type=float, default=None,
+        help="Minimum RNA-normalized posterior for high-confidence "
+             "assignment (default: 0.95).",
     )
     quant_parser.add_argument(
         "--annotated-bam", dest="annotated_bam", default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
-             "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path. "
-             "Enables read-level introspection of pipeline decisions. "
+             "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path.  "
              "Requires a second BAM pass (modest runtime overhead).",
+    )
+
+    # -- Advanced parameters --------------------------------------------------
+    adv = quant_parser.add_argument_group("advanced options")
+    adv.add_argument(
+        "--prune-threshold", dest="prune_threshold",
+        type=float, default=None,
+        help="Post-EM pruning evidence-ratio threshold (default: 0.1). "
+             "Components with zero unambig evidence and evidence ratio "
+             "(data_count / alpha) below this value are zeroed out and "
+             "the EM is re-run to redistribute mass.  Set to -1 to "
+             "disable pruning entirely.",
+    )
+    adv.add_argument(
+        "--em-convergence-delta", dest="em_convergence_delta",
+        type=float, default=None,
+        help="Convergence threshold for EM parameter updates "
+             "(default: 1e-6).",
+    )
+    adv.add_argument(
+        "--gdna-splice-penalty-unannot",
+        dest="gdna_splice_penalty_unannot",
+        type=float, default=None,
+        help="gDNA splice penalty for SPLICED_UNANNOT fragments "
+             "(default: 0.01).",
+    )
+    adv.add_argument(
+        "--overhang-alpha", dest="overhang_alpha",
+        type=float, default=None,
+        help="Per-base overhang penalty alpha in [0,1] (default: 0.01). "
+             "0 = hard gate, 1 = no penalty.",
+    )
+    adv.add_argument(
+        "--mismatch-alpha", dest="mismatch_alpha",
+        type=float, default=None,
+        help="Per-mismatch (NM tag) penalty alpha in [0,1] (default: 0.1). "
+             "0 = hard gate, 1 = no penalty.",
+    )
+    adv.add_argument(
+        "--tss-window", dest="tss_window",
+        type=int, default=None,
+        help="Fuzzy TSS grouping window in bp (default: 200). "
+             "Transcripts whose 5' ends lie within this distance are "
+             "grouped for the nrna_frac prior hierarchy.",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-global", dest="nrna_frac_kappa_global",
+        type=float, default=None,
+        help="Shrinkage κ pulling locus-strand nrna_frac toward the global "
+             "prior.  Default: auto-estimate via Method of Moments.",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-locus", dest="nrna_frac_kappa_locus",
+        type=float, default=None,
+        help="Shrinkage κ pulling TSS-group nrna_frac toward the "
+             "locus-strand estimate.  Default: auto-estimate.",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-tss", dest="nrna_frac_kappa_tss",
+        type=float, default=None,
+        help="Shrinkage κ pulling transcript nrna_frac toward the "
+             "TSS-group estimate.  Default: auto-estimate.",
+    )
+    adv.add_argument(
+        "--nrna-frac-mom-min-evidence-global",
+        dest="nrna_frac_mom_min_evidence_global",
+        type=float, default=None,
+        help="Min fragment evidence for global MoM κ estimation "
+             "(default: 50).",
+    )
+    adv.add_argument(
+        "--nrna-frac-mom-min-evidence-locus",
+        dest="nrna_frac_mom_min_evidence_locus",
+        type=float, default=None,
+        help="Min fragment evidence for locus MoM κ estimation "
+             "(default: 30).",
+    )
+    adv.add_argument(
+        "--nrna-frac-mom-min-evidence-tss",
+        dest="nrna_frac_mom_min_evidence_tss",
+        type=float, default=None,
+        help="Min fragment evidence for TSS-level MoM κ estimation "
+             "(default: 20).",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-min", dest="nrna_frac_kappa_min",
+        type=float, default=None,
+        help="Lower clamp for MoM-estimated κ (default: 2.0).",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-max", dest="nrna_frac_kappa_max",
+        type=float, default=None,
+        help="Upper clamp for MoM-estimated κ (default: 200.0).",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-fallback", dest="nrna_frac_kappa_fallback",
+        type=float, default=None,
+        help="Fallback κ when too few features for MoM (default: 5.0).",
+    )
+    adv.add_argument(
+        "--nrna-frac-kappa-min-obs", dest="nrna_frac_kappa_min_obs",
+        type=int, default=None,
+        help="Minimum features required for MoM κ estimation; "
+             "fewer triggers fallback (default: 20).",
+    )
+    adv.add_argument(
+        "--gdna-kappa-chrom", dest="gdna_kappa_chrom",
+        type=float, default=None,
+        help="Shrinkage κ pulling chromosome gDNA rate toward the "
+             "global estimate.  Default: auto-estimate via MoM.",
+    )
+    adv.add_argument(
+        "--gdna-kappa-locus", dest="gdna_kappa_locus",
+        type=float, default=None,
+        help="Shrinkage κ pulling locus gDNA rate toward the "
+             "chromosome estimate.  Default: auto-estimate via MoM.",
+    )
+    adv.add_argument(
+        "--gdna-mom-min-evidence-chrom",
+        dest="gdna_mom_min_evidence_chrom",
+        type=float, default=None,
+        help="Min fragment evidence for chromosome gDNA MoM κ "
+             "estimation (default: 50).",
+    )
+    adv.add_argument(
+        "--gdna-mom-min-evidence-locus",
+        dest="gdna_mom_min_evidence_locus",
+        type=float, default=None,
+        help="Min fragment evidence for locus gDNA MoM κ "
+             "estimation (default: 30).",
+    )
+    adv.add_argument(
+        "--strand-prior-kappa", dest="strand_prior_kappa",
+        type=float, default=None,
+        help="Strand model prior pseudocount κ. Beta prior is "
+             "Beta(κ/2, κ/2), shrinking toward 0.5 (max entropy). "
+             "Default: 2.0 (uniform Beta(1,1) prior).",
     )
     quant_parser.set_defaults(func=quant_command)
 

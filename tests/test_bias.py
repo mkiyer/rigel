@@ -248,16 +248,17 @@ class TestBiasCorrectionCpp:
         tx_starts = np.array([0, 0], dtype=np.int32)
         tx_ends = np.array([200, 200], dtype=np.int32)
         bias_profiles = np.array([1000, 500, 2000], dtype=np.int64)
-        unique_totals = np.array([10.0, 0.0, 0.0], dtype=np.float64)
+        unambig_totals = np.array([10.0, 0.0, 0.0], dtype=np.float64)
         eff_lens = np.ones(n_comp, dtype=np.float64)
         eligible = np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
-        theta, alpha, em_totals = run_locus_em_native(
+        theta, alpha, em_totals, _eta = run_locus_em_native(
             offsets, t_indices, log_liks, cov_wts,
             tx_starts, tx_ends, bias_profiles,
-            unique_totals, eff_lens, eligible,
+            unambig_totals, eff_lens, eligible,
             n_comp, 0.01, 1.0, 1000, 1e-6,
-            False, -1.0, 10,
+            False, -1.0,
+            0, np.array([], dtype=np.float64), np.array([], dtype=np.float64),
         )
         # All evidence points to component 0; theta[0] should dominate
         assert np.asarray(theta)[0] > 0.9
@@ -275,16 +276,17 @@ class TestBiasCorrectionCpp:
         tx_starts = np.array([0], dtype=np.int32)
         tx_ends = np.array([500], dtype=np.int32)  # frag > transcript
         bias_profiles = np.array([100, 100, 100], dtype=np.int64)
-        unique_totals = np.array([5.0, 0.0, 0.0], dtype=np.float64)
+        unambig_totals = np.array([5.0, 0.0, 0.0], dtype=np.float64)
         eff_lens = np.ones(n_comp, dtype=np.float64)
         eligible = np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
-        theta, alpha, em_totals = run_locus_em_native(
+        theta, alpha, em_totals, _eta = run_locus_em_native(
             offsets, t_indices, log_liks, cov_wts,
             tx_starts, tx_ends, bias_profiles,
-            unique_totals, eff_lens, eligible,
+            unambig_totals, eff_lens, eligible,
             n_comp, 0.01, 1.0, 1000, 1e-6,
-            False, -1.0, 10,
+            False, -1.0,
+            0, np.array([], dtype=np.float64), np.array([], dtype=np.float64),
         )
         # Should converge without issues
         assert np.all(np.isfinite(np.asarray(theta)))

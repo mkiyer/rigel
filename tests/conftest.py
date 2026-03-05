@@ -167,8 +167,8 @@ def _make_locus_em_data(
     t_indices_per_unit : list[list[int]]
         LOCAL mRNA transcript indices per unit.
     rc : AbundanceEstimator or None
-        If provided, unique_totals for mRNA are extracted from
-        rc.unique_counts[i].sum().
+        If provided, unambig_totals for mRNA are extracted from
+        rc.unambig_counts[i].sum().
     include_nrna : bool
         Add nRNA candidates for each mRNA candidate.
     include_gdna : bool
@@ -227,7 +227,7 @@ def _make_locus_em_data(
     ut = np.zeros(n_components, dtype=np.float64)
     if rc is not None:
         for i in range(min(n_t, rc.num_transcripts)):
-            ut[i] = rc.unique_counts[i].sum()
+            ut[i] = rc.unambig_counts[i].sum()
 
     if nrna_init is None:
         nrna_arr = np.zeros(n_t, dtype=np.float64)
@@ -265,19 +265,21 @@ def _make_locus_em_data(
         n_transcripts=n_t,
         n_components=n_components,
         local_to_global_t=np.arange(n_t, dtype=np.int32),
-        unique_totals=ut,
+        unambig_totals=ut,
         nrna_init=nrna_arr,
         gdna_init=gdna_init,
         effective_lengths=eff_len,
         prior=prior,
         bias_profiles=bias_profiles,
+        nrna_frac_alpha=np.ones(n_t, dtype=np.float64),
+        nrna_frac_beta=np.ones(n_t, dtype=np.float64),
     )
 
 
 def _run_and_assign(rc, locus_em, *, em_iterations=10):
-    """Convenience: run locus EM then assign. Returns (theta, gdna_count)."""
+    """Convenience: run locus EM then assign. Returns (theta, pool_counts)."""
     theta, _alpha = rc.run_locus_em(locus_em, em_iterations=em_iterations)
-    gdna_count = rc.assign_locus_ambiguous(
+    pool_counts = rc.assign_locus_ambiguous(
         locus_em, theta,
     )
-    return theta, gdna_count
+    return theta, pool_counts

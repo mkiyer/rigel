@@ -105,6 +105,71 @@ def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     return pd.DataFrame(t.to_dict() for t in transcripts)
 
 
+def compute_tss_groups(
+    t_df: pd.DataFrame,
+    tss_window: int = 200,
+) -> np.ndarray:
+    """Assign transcripts to fuzzy TSS (transcription start site) groups.
+
+    Groups transcripts that share an approximate 5' position using
+    single-linkage clustering within *tss_window* bp on the same
+    chromosome and strand.
+
+    Parameters
+    ----------
+    t_df : pd.DataFrame
+        Transcript table with columns ``ref``, ``start``, ``end``,
+        ``strand``.  Row index must equal ``t_index``.
+    tss_window : int
+        Maximum 5' distance (bp) for merging transcripts into the
+        same TSS group.  0 means exact coordinate matching.
+
+    Returns
+    -------
+    np.ndarray
+        int32 array of length ``len(t_df)``, giving the TSS group ID
+        for each transcript.  Group IDs are sequential starting from 0.
+    """
+    n = len(t_df)
+    if n == 0:
+        return np.empty(0, dtype=np.int32)
+
+    # Compute 5' position: start for + strand, end for − strand.
+    # Strand enum: POS=1, NEG=2.  For NONE/AMBIGUOUS, use start.
+    starts = t_df["start"].values
+    ends = t_df["end"].values
+    strands = t_df["strand"].values
+    tss_pos = np.where(strands == 2, ends, starts)
+
+    refs = t_df["ref"].values
+    group_ids = np.empty(n, dtype=np.int32)
+    next_group = 0
+
+    # Group by (ref, strand), sort by 5' position, single-linkage cluster.
+    # Use pandas groupby for clarity; this runs once at index load time.
+    for (_ref, _strand), idx in t_df.groupby(
+        ["ref", "strand"], sort=False,
+    ).groups.items():
+        idx_arr = np.asarray(idx, dtype=np.intp)
+        if len(idx_arr) == 0:
+            continue
+        positions = tss_pos[idx_arr]
+        order = np.argsort(positions)
+        sorted_idx = idx_arr[order]
+        sorted_pos = positions[order]
+
+        # Single-linkage: start a new group whenever the gap exceeds
+        # tss_window.
+        group_ids[sorted_idx[0]] = next_group
+        for i in range(1, len(sorted_idx)):
+            if sorted_pos[i] - sorted_pos[i - 1] > tss_window:
+                next_group += 1
+            group_ids[sorted_idx[i]] = next_group
+        next_group += 1
+
+    return group_ids
+
+
 def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
     """Extract splice junctions (introns) from all transcripts.
 
@@ -385,6 +450,7 @@ class TranscriptIndex:
         self.g_df: pd.DataFrame | None = None
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
+        self.t_to_tss_group: np.ndarray | None = None
         self.g_to_strand_arr: np.ndarray | None = None
 
         # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
@@ -416,6 +482,22 @@ class TranscriptIndex:
     @property
     def num_genes(self) -> int:
         return len(self.g_df)
+
+    def compute_and_set_tss_groups(self, tss_window: int = 200) -> None:
+        """Compute fuzzy TSS groups and store on this index.
+
+        Parameters
+        ----------
+        tss_window : int
+            Maximum 5' distance (bp) for merging transcripts into the
+            same TSS group.  Default 200 bp.
+        """
+        self.t_to_tss_group = compute_tss_groups(self.t_df, tss_window)
+        n_groups = int(self.t_to_tss_group.max()) + 1 if len(self.t_to_tss_group) else 0
+        logger.debug(
+            f"TSS groups: {n_groups} groups from "
+            f"{self.num_transcripts} transcripts (window={tss_window}bp)"
+        )
 
     # -- build (static) -------------------------------------------------------
 
@@ -561,6 +643,10 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
         self.g_to_strand_arr = self.g_df["strand"].values
+
+        # -- TSS groups (fuzzy 5' clustering, computed lazily on first use) ---
+        # Populated by compute_and_set_tss_groups() when tss_window is known.
+        self.t_to_tss_group = None
 
         # -- interval index (unified cgranges) ---------------------------------
         logger.debug("Reading intervals")

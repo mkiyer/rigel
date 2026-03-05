@@ -21,7 +21,7 @@ def _make_locus(
     *,
     units: list[list[tuple[int, float, float, int, int]]],
     n_components: int,
-    unique_totals: np.ndarray | None = None,
+    unambig_totals: np.ndarray | None = None,
     bias_profiles: np.ndarray | None = None,
     prior_eligible: np.ndarray | None = None,
     prior_alpha: float = 0.01,
@@ -30,7 +30,6 @@ def _make_locus(
     convergence_delta: float = 1e-6,
     use_vbem: bool = False,
     prune_threshold: float = -1.0,
-    post_prune_iters: int = 10,
 ):
     """Build CSR arrays from a list of units and call the C++ solver.
 
@@ -65,20 +64,23 @@ def _make_locus(
     if bias_profiles is None:
         # Default: large profiles so bias correction is ~0
         bias_profiles = np.full(n_components, 100_000, dtype=np.int64)
-    if unique_totals is None:
-        unique_totals = np.zeros(n_components, dtype=np.float64)
+    if unambig_totals is None:
+        unambig_totals = np.zeros(n_components, dtype=np.float64)
     if prior_eligible is None:
         prior_eligible = np.ones(n_components, dtype=np.float64)
 
     eff_lens = np.ones(n_components, dtype=np.float64)
 
-    theta, alpha, em_totals = run_locus_em_native(
+    theta, alpha, em_totals, _eta = run_locus_em_native(
         offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
         tx_starts_arr, tx_ends_arr, bias_profiles,
-        unique_totals, eff_lens, prior_eligible,
+        unambig_totals, eff_lens, prior_eligible,
         n_components, prior_alpha, prior_gamma,
         max_iterations, convergence_delta,
-        use_vbem, prune_threshold, post_prune_iters,
+        use_vbem, prune_threshold,
+        0,  # n_transcripts=0 → classic (unlinked) mode
+        np.array([], dtype=np.float64),  # nrna_frac_alpha
+        np.array([], dtype=np.float64),  # nrna_frac_beta
     )
     return np.asarray(theta), np.asarray(alpha), np.asarray(em_totals)
 
@@ -96,7 +98,7 @@ class TestEmptyLocus:
         theta, alpha, em = _make_locus(
             units=[],
             n_components=3,
-            unique_totals=np.array([5.0, 3.0, 0.0]),
+            unambig_totals=np.array([5.0, 3.0, 0.0]),
         )
         assert theta.shape == (3,)
         assert np.all(np.isfinite(theta))
@@ -109,7 +111,7 @@ class TestEmptyLocus:
         theta, alpha, em = _make_locus(
             units=[[(0, 0.0, 1.0, 0, 200)]],
             n_components=3,
-            unique_totals=np.array([10.0, 0.0, 0.0]),
+            unambig_totals=np.array([10.0, 0.0, 0.0]),
         )
         assert theta[0] > 0.9
 
@@ -128,14 +130,14 @@ class TestTwoTranscriptLocus:
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)],
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)],
         ]
-        # A has 20 unique, B has 10 unique
-        unique = np.array([20.0, 10.0, 0.0, 0.0, 0.0])
+        # A has 20 unambig, B has 10 unambig
+        unambig = np.array([20.0, 10.0, 0.0, 0.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
         )
         # A should get roughly 2× the share of B
@@ -150,13 +152,13 @@ class TestTwoTranscriptLocus:
             [(0, -0.1, 1.0, 0, 200), (1, -5.0, 1.0, 0, 200)]
             for _ in range(5)
         ]
-        unique = np.array([1.0, 1.0, 0.0])
+        unambig = np.array([1.0, 1.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
         )
         # Component 0 has much better log-lik → should dominate
@@ -173,13 +175,13 @@ class TestConvergence:
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
             for _ in range(20)
         ]
-        unique = np.array([50.0, 50.0, 0.0])
+        unambig = np.array([50.0, 50.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
             max_iterations=1000,
         )
@@ -194,13 +196,13 @@ class TestConvergence:
             [(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)]
             for _ in range(5)
         ]
-        unique = np.array([10.0, 10.0, 0.0])
+        unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
             max_iterations=3,
         )
@@ -218,14 +220,14 @@ class TestPriorEligibility:
              (2, -1.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
-        unique = np.array([5.0, 5.0, 0.0, 0.0, 0.0])
+        unambig = np.array([5.0, 5.0, 0.0, 0.0, 0.0])
         # Only mRNA_A and mRNA_B are eligible; comp 2 is not
         eligible = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
         )
         # Ineligible components should be ~0
@@ -244,19 +246,19 @@ class TestVBEM:
             [(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200)]
             for _ in range(15)
         ]
-        unique = np.array([10.0, 5.0, 0.0])
+        unambig = np.array([10.0, 5.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
             use_vbem=True,
         )
         assert abs(theta.sum() - 1.0) < 1e-10
         assert np.all(theta >= 0)
-        # Component 0 should get more weight (better log-lik + more unique)
+        # Component 0 should get more weight (better log-lik + more unambig)
         assert theta[0] > theta[1]
 
     def test_vbem_suppresses_low_evidence(self):
@@ -267,18 +269,18 @@ class TestVBEM:
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
             for _ in range(5)
         ]
-        # Component 0 has strong unique evidence, comp 1 has none
-        unique = np.array([50.0, 0.0, 0.0])
+        # Component 0 has strong unambig evidence, comp 1 has none
+        unambig = np.array([50.0, 0.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta_map, _, _ = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique.copy(), prior_eligible=eligible.copy(),
+            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
             use_vbem=False,
         )
         theta_vb, _, _ = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique.copy(), prior_eligible=eligible.copy(),
+            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
             use_vbem=True,
         )
         # VBEM should give less weight to comp 1 than MAP-EM
@@ -289,7 +291,7 @@ class TestPruning:
     """Post-EM pruning."""
 
     def test_pruning_removes_weak_components(self):
-        """Components with no unique evidence and low evidence ratio
+        """Components with no unambig evidence and low evidence ratio
         should be pruned to near-zero."""
         n_comp = 3
         # 10 ambiguous units, all map to comp 0 and comp 1
@@ -297,18 +299,18 @@ class TestPruning:
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
-        # Only comp 0 has unique evidence
-        unique = np.array([50.0, 0.0, 0.0])
+        # Only comp 0 has unambig evidence
+        unambig = np.array([50.0, 0.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
             prune_threshold=0.1,
         )
-        # Comp 1 should be pruned (no unique, low evidence ratio)
+        # Comp 1 should be pruned (no unambig, low evidence ratio)
         assert theta[0] > 0.9
 
     def test_gdna_never_pruned(self):
@@ -318,14 +320,14 @@ class TestPruning:
             [(0, -1.0, 1.0, 0, 200), (2, -1.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
-        # gDNA (comp 2) has no unique evidence
-        unique = np.array([50.0, 0.0, 0.0])
+        # gDNA (comp 2) has no unambig evidence
+        unambig = np.array([50.0, 0.0, 0.0])
         eligible = np.array([1.0, 0.0, 1.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
             prune_threshold=0.1,
         )
@@ -344,13 +346,13 @@ class TestNumericalStability:
             [(0, -500.0, 1.0, 0, 200), (1, -500.0, 1.0, 0, 200)]
             for _ in range(5)
         ]
-        unique = np.array([5.0, 5.0, 0.0])
+        unambig = np.array([5.0, 5.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
@@ -363,33 +365,33 @@ class TestNumericalStability:
             [(0, -1.0, 1.0, 0, 200), (1, -900.0, 1.0, 0, 200)]
             for _ in range(5)
         ]
-        unique = np.array([1.0, 1.0, 0.0])
+        unambig = np.array([1.0, 1.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
         # Comp 0 should dominate (prior dilutes somewhat)
         assert theta[0] > 0.7
 
-    def test_all_zero_unique(self):
-        """No unique evidence, only ambiguous → should still converge."""
+    def test_all_zero_unambig(self):
+        """No unambig evidence, only ambiguous → should still converge."""
         n_comp = 3
         units = [
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
-        unique = np.zeros(n_comp)
+        unambig = np.zeros(n_comp)
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units,
             n_components=n_comp,
-            unique_totals=unique,
+            unambig_totals=unambig,
             prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
@@ -408,12 +410,12 @@ class TestEquivalenceClasses:
             [(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
-        unique = np.array([5.0, 5.0, 0.0])
+        unambig = np.array([5.0, 5.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique, prior_eligible=eligible,
+            unambig_totals=unambig, prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
         assert theta[0] > theta[1]  # comp 0 has better log-lik
@@ -430,12 +432,12 @@ class TestEquivalenceClasses:
             # Class 3: maps to {1}
             [(1, -1.0, 1.0, 0, 200)],
         ]
-        unique = np.array([5.0, 5.0, 5.0, 0.0, 0.0])
+        unambig = np.array([5.0, 5.0, 5.0, 0.0, 0.0])
         eligible = np.array([1.0, 1.0, 1.0, 0.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique, prior_eligible=eligible,
+            unambig_totals=unambig, prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
         assert abs(theta.sum() - 1.0) < 1e-10
@@ -458,7 +460,7 @@ class TestBiasCorrection:
             [(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)]
             for _ in range(20)
         ]
-        unique = np.array([10.0, 10.0, 0.0])
+        unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         # Comp 0 is short (500bp), comp 1 is very long (10000bp).
@@ -470,7 +472,7 @@ class TestBiasCorrection:
 
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique, prior_eligible=eligible,
+            unambig_totals=unambig, prior_eligible=eligible,
             bias_profiles=profiles,
         )
         # Shorter transcript (comp 0) should get MORE weight
@@ -487,12 +489,12 @@ class TestOVRPrior:
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
-        unique = np.array([10.0, 10.0, 0.0])
+        unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique, prior_eligible=eligible,
+            unambig_totals=unambig, prior_eligible=eligible,
             prior_gamma=0.0,
         )
         assert np.all(np.isfinite(theta))
@@ -507,12 +509,12 @@ class TestOVRPrior:
             [(0, -1.0, 10.0, 0, 200), (1, -1.0, 0.1, 0, 200)]
             for _ in range(10)
         ]
-        unique = np.array([1.0, 1.0, 0.0])
+        unambig = np.array([1.0, 1.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique, prior_eligible=eligible,
+            unambig_totals=unambig, prior_eligible=eligible,
             prior_gamma=10.0,
         )
         # Comp 0 should get more weight due to high coverage weight
@@ -530,17 +532,17 @@ class TestMAPvsVBEMConsistency:
              (4, -3.0, 1.0, 0, 200)]
             for _ in range(20)
         ]
-        unique = np.array([10.0, 5.0, 0.0, 0.0, 1.0])
+        unambig = np.array([10.0, 5.0, 0.0, 0.0, 1.0])
         eligible = np.array([1.0, 1.0, 0.0, 0.0, 1.0])
 
         theta_map, _, _ = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique.copy(), prior_eligible=eligible.copy(),
+            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
             use_vbem=False,
         )
         theta_vb, _, _ = _make_locus(
             units=units, n_components=n_comp,
-            unique_totals=unique.copy(), prior_eligible=eligible.copy(),
+            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
             use_vbem=True,
         )
         assert np.all(np.isfinite(theta_map))
@@ -549,3 +551,412 @@ class TestMAPvsVBEMConsistency:
         assert abs(theta_vb.sum() - 1.0) < 1e-10
         # Both should agree on which component is dominant
         assert np.argmax(theta_map) == np.argmax(theta_vb)
+
+
+# ======================================================================
+# Linked EM model tests (n_transcripts > 0)
+# ======================================================================
+
+
+def _make_linked_locus(
+    *,
+    units: list[list[tuple[int, float, float, int, int]]],
+    n_transcripts: int,
+    unambig_totals: np.ndarray | None = None,
+    nrna_frac_alpha: np.ndarray | None = None,
+    nrna_frac_beta: np.ndarray | None = None,
+    bias_profiles: np.ndarray | None = None,
+    prior_eligible: np.ndarray | None = None,
+    effective_lengths: np.ndarray | None = None,
+    prior_alpha: float = 0.01,
+    prior_gamma: float = 1.0,
+    max_iterations: int = 1000,
+    convergence_delta: float = 1e-6,
+    prune_threshold: float = -1.0,
+):
+    """Build CSR arrays for a linked-model locus and call the C++ solver.
+
+    Component layout: [0..n_t) mRNA, [n_t..2*n_t) nRNA, [2*n_t] gDNA.
+    Total components = 2*n_transcripts + 1.
+
+    Returns (theta, alpha, em_totals, nrna_frac) as numpy arrays.
+    """
+    n_t = n_transcripts
+    n_components = 2 * n_t + 1
+
+    all_t_indices = []
+    all_log_liks = []
+    all_cov_wts = []
+    all_tx_starts = []
+    all_tx_ends = []
+    offsets = [0]
+    for unit in units:
+        for comp_idx, ll, cw, txs, txe in unit:
+            all_t_indices.append(comp_idx)
+            all_log_liks.append(ll)
+            all_cov_wts.append(cw)
+            all_tx_starts.append(txs)
+            all_tx_ends.append(txe)
+        offsets.append(len(all_t_indices))
+
+    offsets_arr = np.array(offsets, dtype=np.int64)
+    t_indices_arr = np.array(all_t_indices, dtype=np.int32)
+    log_liks_arr = np.array(all_log_liks, dtype=np.float64)
+    cov_wts_arr = np.array(all_cov_wts, dtype=np.float64)
+    tx_starts_arr = np.array(all_tx_starts, dtype=np.int32)
+    tx_ends_arr = np.array(all_tx_ends, dtype=np.int32)
+
+    if bias_profiles is None:
+        bias_profiles = np.full(n_components, 100_000, dtype=np.int64)
+    if unambig_totals is None:
+        unambig_totals = np.zeros(n_components, dtype=np.float64)
+    if prior_eligible is None:
+        prior_eligible = np.ones(n_components, dtype=np.float64)
+    if effective_lengths is None:
+        effective_lengths = np.ones(n_components, dtype=np.float64)
+    if nrna_frac_alpha is None:
+        nrna_frac_alpha = np.ones(n_t, dtype=np.float64)  # Beta(1,1) = uniform
+    if nrna_frac_beta is None:
+        nrna_frac_beta = np.ones(n_t, dtype=np.float64)
+
+    theta, alpha, em_totals, nrna_frac = run_locus_em_native(
+        offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
+        tx_starts_arr, tx_ends_arr, bias_profiles,
+        unambig_totals, effective_lengths, prior_eligible,
+        n_components, prior_alpha, prior_gamma,
+        max_iterations, convergence_delta,
+        False,  # use_vbem (not supported for linked)
+        prune_threshold,
+        n_transcripts, nrna_frac_alpha, nrna_frac_beta,
+    )
+    return (
+        np.asarray(theta),
+        np.asarray(alpha),
+        np.asarray(em_totals),
+        np.asarray(nrna_frac),
+    )
+
+
+class TestLinkedEmBasic:
+    """Basic linked-model EM tests."""
+
+    def test_empty_locus_returns_nrna_frac(self):
+        """Empty linked locus returns prior-mean nrna_frac."""
+        n_t = 2
+        ea = np.array([3.0, 7.0])
+        eb = np.array([7.0, 3.0])
+        theta, alpha, em, nrna_frac = _make_linked_locus(
+            units=[], n_transcripts=n_t,
+            unambig_totals=np.array([5.0, 3.0, 0.0, 0.0, 0.0]),
+            nrna_frac_alpha=ea, nrna_frac_beta=eb,
+        )
+        assert nrna_frac.shape == (n_t,)
+        np.testing.assert_allclose(nrna_frac[0], 0.3, atol=1e-10)
+        np.testing.assert_allclose(nrna_frac[1], 0.7, atol=1e-10)
+
+    def test_theta_is_simplex(self):
+        """Linked EM produces a valid simplex θ[2*n_t+1]."""
+        n_t = 2
+        units = [
+            [(0, 0.0, 1.0, 0, 0), (2, -0.5, 1.0, 0, 0)],  # mRNA_0 vs nRNA_0
+            [(1, 0.0, 1.0, 0, 0), (3, -0.5, 1.0, 0, 0)],  # mRNA_1 vs nRNA_1
+            [(0, 0.0, 1.0, 0, 0), (4, -1.0, 1.0, 0, 0)],  # mRNA_0 vs gDNA
+        ]
+        theta, alpha, em, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=np.array([10.0, 5.0, 1.0, 1.0, 0.5]),
+        )
+        assert theta.shape == (2 * n_t + 1,)
+        assert abs(theta.sum() - 1.0) < 1e-10
+        assert np.all(theta >= 0)
+        assert np.all(np.isfinite(theta))
+
+    def test_nrna_frac_in_bounds(self):
+        """Converged nrna_frac is in [ε, 1-ε]."""
+        n_t = 2
+        units = [
+            [(0, 0.0, 1.0, 0, 0), (2, -0.5, 1.0, 0, 0)],
+            [(1, 0.0, 1.0, 0, 0), (3, -0.5, 1.0, 0, 0)],
+        ]
+        theta, alpha, em, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=np.array([10.0, 5.0, 1.0, 1.0, 0.5]),
+        )
+        NRNA_FRAC_EPS = 1e-8
+        assert np.all(nrna_frac >= NRNA_FRAC_EPS)
+        assert np.all(nrna_frac <= 1.0 - NRNA_FRAC_EPS)
+
+    def test_theta_decomposition(self):
+        """θ[i] + θ[n_t+i] should approximately equal θ_t[i].
+
+        The decomposition is θ_mRNA = θ_t*(1−nrna_frac), θ_nRNA = θ_t*nrna_frac.
+        """
+        n_t = 2
+        units = [
+            [(0, 0.0, 1.0, 0, 0), (2, -0.3, 1.0, 0, 0)],
+            [(1, 0.0, 1.0, 0, 0), (3, -0.3, 1.0, 0, 0)],
+        ]
+        theta, alpha, em, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=np.array([10.0, 5.0, 2.0, 1.0, 0.5]),
+        )
+        for i in range(n_t):
+            theta_t = theta[i] + theta[n_t + i]
+            if theta_t > 1e-12:
+                nrna_frac_from_decomp = theta[n_t + i] / theta_t
+                np.testing.assert_allclose(nrna_frac[i], nrna_frac_from_decomp, atol=1e-8)
+
+
+class TestLinkedEmPriorInfluence:
+    """Test that nrna_frac prior affects convergence."""
+
+    def test_strong_mrna_prior_favours_low_nrna_frac(self):
+        """Strong Beta prior favouring mRNA (low nrna_frac) pulls nrna_frac down."""
+        n_t = 1
+        # Ambiguous data equally between mRNA_0 and nRNA_0
+        units = [
+            [(0, 0.0, 1.0, 0, 0), (1, 0.0, 1.0, 0, 0)],
+        ] * 20
+        unambig = np.array([0.0, 0.0, 0.0])
+
+        # Strong prior: nrna_frac ~ 0.1 with κ=100
+        _, _, _, nrna_frac_low = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig.copy(),
+            nrna_frac_alpha=np.array([10.0]),  # α=10
+            nrna_frac_beta=np.array([90.0]),   # β=90 → prior mean 0.1
+        )
+        # Weak prior: nrna_frac ~ 0.5
+        _, _, _, nrna_frac_weak = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig.copy(),
+            nrna_frac_alpha=np.array([1.0]),
+            nrna_frac_beta=np.array([1.0]),
+        )
+        assert nrna_frac_low[0] < nrna_frac_weak[0]
+
+    def test_strong_nrna_prior_favours_high_nrna_frac(self):
+        """Strong Beta prior favouring nRNA (high nrna_frac) pulls nrna_frac up."""
+        n_t = 1
+        units = [
+            [(0, 0.0, 1.0, 0, 0), (1, 0.0, 1.0, 0, 0)],
+        ] * 20
+        unambig = np.array([0.0, 0.0, 0.0])
+
+        _, _, _, nrna_frac_high = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig.copy(),
+            nrna_frac_alpha=np.array([90.0]),  # prior mean 0.9
+            nrna_frac_beta=np.array([10.0]),
+        )
+        _, _, _, nrna_frac_weak = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig.copy(),
+            nrna_frac_alpha=np.array([1.0]),
+            nrna_frac_beta=np.array([1.0]),
+        )
+        assert nrna_frac_high[0] > nrna_frac_weak[0]
+
+
+class TestLinkedEmDataDriven:
+    """Test that data overwhelms weak priors correctly."""
+
+    def test_all_mrna_data_gives_low_nrna_frac(self):
+        """When all data is mRNA, nrna_frac should be very low."""
+        n_t = 1
+        # 50 units all assigned to mRNA_0 only
+        units = [[(0, 0.0, 1.0, 0, 0)]] * 50
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=np.array([50.0, 0.0, 0.0]),
+            nrna_frac_alpha=np.array([1.0]),
+            nrna_frac_beta=np.array([1.0]),
+        )
+        assert nrna_frac[0] < 0.1
+
+    def test_all_nrna_data_gives_high_nrna_frac(self):
+        """When all data is nRNA, nrna_frac should be very high."""
+        n_t = 1
+        # 50 units all assigned to nRNA_0 only (component 1)
+        units = [[(1, 0.0, 1.0, 0, 0)]] * 50
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=np.array([0.0, 50.0, 0.0]),
+            nrna_frac_alpha=np.array([1.0]),
+            nrna_frac_beta=np.array([1.0]),
+        )
+        assert nrna_frac[0] > 0.9
+
+    def test_two_transcripts_different_nrna_frac(self):
+        """Two transcripts with different mRNA/nRNA data converge to
+        different nrna_frac values."""
+        n_t = 2
+        # Transcript 0: mostly mRNA (comp 0), some nRNA (comp 2)
+        # Transcript 1: mostly nRNA (comp 3), some mRNA (comp 1)
+        units = (
+            [[(0, 0.0, 1.0, 0, 0)]] * 40          # 40 mRNA_0
+            + [[(2, 0.0, 1.0, 0, 0)]] * 10         # 10 nRNA_0
+            + [[(1, 0.0, 1.0, 0, 0)]] * 10         # 10 mRNA_1
+            + [[(3, 0.0, 1.0, 0, 0)]] * 40         # 40 nRNA_1
+        )
+        unambig = np.array([20.0, 5.0, 5.0, 20.0, 0.0])
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+        )
+        # Transcript 0 should have lower nrna_frac (more mRNA)
+        # Transcript 1 should have higher nrna_frac (more nRNA)
+        assert nrna_frac[0] < 0.4
+        assert nrna_frac[1] > 0.6
+        assert nrna_frac[0] < nrna_frac[1]
+
+
+class TestLinkedEmUnstranded:
+    """Unstranded library (strand_specificity ≈ 0.5).
+
+    When stranding is uninformative, the nrna_frac prior comes from density
+    estimation alone.  The linked EM should converge correctly using
+    these weaker priors.
+    """
+
+    def test_unstranded_prior_converges(self):
+        """Weak Beta(1,1) prior (unstranded) still converges to data-driven nrna_frac."""
+        n_t = 1
+        # 30 mRNA units + 10 nRNA units → expect nrna_frac ≈ 0.25
+        units = [[(0, 0.0, 1.0, 0, 0)]] * 30 + [[(1, 0.0, 1.0, 0, 0)]] * 10
+        unambig = np.array([15.0, 5.0, 0.0])
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+            nrna_frac_alpha=np.array([1.0]),  # Beta(1,1) = uninformative
+            nrna_frac_beta=np.array([1.0]),
+        )
+        # nrna_frac should be near the data ratio ≈ (10+5)/(30+15+10+5) = 15/60 = 0.25
+        assert 0.15 < nrna_frac[0] < 0.40
+
+    def test_unstranded_ambiguous_units_resolved(self):
+        """Ambiguous mRNA/nRNA units are resolved even with weak priors."""
+        n_t = 1
+        # All 40 units are ambiguous between mRNA_0 and nRNA_0
+        units = [[(0, 0.0, 1.0, 0, 0), (1, 0.0, 1.0, 0, 0)]] * 40
+        # Unique data strongly favours mRNA
+        unambig = np.array([50.0, 5.0, 0.0])
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+            nrna_frac_alpha=np.array([1.0]),
+            nrna_frac_beta=np.array([1.0]),
+        )
+        # nrna_frac should be pulled low by the mRNA-heavy unambig data
+        assert nrna_frac[0] < 0.3
+        assert theta[0] > theta[1]  # mRNA > nRNA
+
+    def test_unstranded_two_tx_symmetric(self):
+        """Two symmetric transcripts with uninformative prior stay balanced."""
+        n_t = 2
+        # Equal data for both transcripts, each with 50/50 mRNA/nRNA
+        units = (
+            [[(0, 0.0, 1.0, 0, 0), (2, 0.0, 1.0, 0, 0)]] * 20
+            + [[(1, 0.0, 1.0, 0, 0), (3, 0.0, 1.0, 0, 0)]] * 20
+        )
+        unambig = np.array([10.0, 10.0, 10.0, 10.0, 0.0])
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+            nrna_frac_alpha=np.array([1.0, 1.0]),
+            nrna_frac_beta=np.array([1.0, 1.0]),
+        )
+        # Both nrna_frac should be similar (near 0.5)
+        np.testing.assert_allclose(nrna_frac[0], nrna_frac[1], atol=0.05)
+        # Total transcript abundances should be similar
+        theta_t0 = theta[0] + theta[2]
+        theta_t1 = theta[1] + theta[3]
+        np.testing.assert_allclose(theta_t0, theta_t1, atol=0.05)
+
+
+class TestLinkedEmHighGDNA:
+    """Capture-enriched / high gDNA background scenarios.
+
+    Capture libraries can have significant gDNA contamination.
+    The linked model should correctly attribute background to gDNA
+    and maintain accurate nrna_frac estimates.
+    """
+
+    def test_high_gdna_background(self):
+        """Strong gDNA signal doesn't corrupt transcript nrna_frac estimates."""
+        n_t = 1
+        # 20 mRNA, 5 nRNA, 30 gDNA fragments → nrna_frac should still reflect mRNA/nRNA ratio
+        units = (
+            [[(0, 0.0, 1.0, 0, 0)]] * 20
+            + [[(1, 0.0, 1.0, 0, 0)]] * 5
+            + [[(2, 0.0, 1.0, 0, 0)]] * 30  # gDNA-only units
+        )
+        unambig = np.array([10.0, 2.0, 20.0])
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+            nrna_frac_alpha=np.array([1.0]),
+            nrna_frac_beta=np.array([1.0]),
+        )
+        # gDNA component should get substantial fraction
+        assert theta[2] > 0.3  # gDNA
+        # Transcript nrna_frac should still be reasonable (~0.2 from nRNA/(mRNA+nRNA))
+        assert 0.05 < nrna_frac[0] < 0.4
+
+    def test_gdna_competing_with_nrna(self):
+        """Ambiguous units tested between nRNA and gDNA.
+
+        Units that could be either nRNA (unspliced exonic) or gDNA should
+        be split according to the converged θ and nrna_frac.
+        """
+        n_t = 1
+        # Ambiguous units: candidates are nRNA_0 (comp 1) and gDNA (comp 2)
+        ambig_units = [[(1, 0.0, 1.0, 0, 0), (2, 0.0, 1.0, 0, 0)]] * 30
+        # Clear mRNA signal
+        mrna_units = [[(0, 0.0, 1.0, 0, 0)]] * 20
+        units = mrna_units + ambig_units
+        unambig = np.array([15.0, 0.0, 10.0])
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+        )
+        # Should converge with reasonable estimates
+        assert np.all(np.isfinite(theta))
+        assert theta.sum() == pytest.approx(1.0, abs=1e-10)
+        # The nRNA/gDNA ambiguity should be resolved:
+        # mRNA component should dominate the transcript
+        assert theta[0] > theta[1]  # mRNA > nRNA
+
+    def test_capture_like_sparse_transcript(self):
+        """Sparse transcript data with heavy background.
+
+        A capture library might have very few on-target fragments but
+        significant off-target gDNA.  The nrna_frac prior should anchor the
+        estimate when data is sparse.
+        """
+        n_t = 2
+        # Tx 0: 5 mRNA + 2 nRNA (sparse)
+        # Tx 1: 3 mRNA + 1 nRNA (even sparser)
+        # gDNA: 50 fragments (heavy background)
+        units = (
+            [[(0, 0.0, 1.0, 0, 0)]] * 5
+            + [[(2, 0.0, 1.0, 0, 0)]] * 2
+            + [[(1, 0.0, 1.0, 0, 0)]] * 3
+            + [[(3, 0.0, 1.0, 0, 0)]] * 1
+            + [[(4, 0.0, 1.0, 0, 0)]] * 50  # gDNA
+        )
+        unambig = np.array([3.0, 2.0, 1.0, 0.5, 30.0])
+        # Strong priors: nrna_frac ≈ 0.2 for both transcripts
+        theta, _, _, nrna_frac = _make_linked_locus(
+            units=units, n_transcripts=n_t,
+            unambig_totals=unambig,
+            nrna_frac_alpha=np.array([4.0, 4.0]),  # α=4, β=16 → prior mean 0.2
+            nrna_frac_beta=np.array([16.0, 16.0]),
+        )
+        # gDNA should get the lion's share
+        assert theta[4] > 0.5
+        # nrna_frac should be pulled towards prior mean since data is sparse
+        assert 0.05 < nrna_frac[0] < 0.5
+        assert 0.05 < nrna_frac[1] < 0.5
+        # Both nrna_frac should be finite and in bounds
+        assert np.all(np.isfinite(nrna_frac))

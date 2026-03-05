@@ -83,7 +83,7 @@ run_locus_em_native(
     nb::ndarray<const int64_t,  nb::ndim<1>, nb::c_contig> bias_profiles, // [n_components]
 
     // --- Per-component vectors ---
-    nb::ndarray<const double, nb::ndim<1>, nb::c_contig> unique_totals,   // [n_components]
+    nb::ndarray<const double, nb::ndim<1>, nb::c_contig> unambig_totals,   // [n_components]
     nb::ndarray<const double, nb::ndim<1>, nb::c_contig> effective_lens,  // [n_components]
     nb::ndarray<const double, nb::ndim<1>, nb::c_contig> prior_eligible,  // [n_components] bool-ish
 
@@ -113,7 +113,7 @@ theta, alpha, em_totals = run_locus_em_native(
     locus_em.tx_starts,
     locus_em.tx_ends,
     locus_em.bias_profiles,
-    locus_em.unique_totals,
+    locus_em.unambig_totals,
     locus_em.effective_lengths,
     (locus_em.prior > 0).astype(np.float64),  # prior eligibility mask
     locus_em.n_components,
@@ -187,7 +187,7 @@ void em_step(
     const double* theta,
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
-    const double* unique_totals,
+    const double* unambig_totals,
     const double* prior,
     double* em_totals,    // output: zeroed then accumulated
     double* theta_new,    // output: normalized
@@ -199,7 +199,7 @@ void vbem_step(
     const double* alpha,
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
-    const double* unique_totals,
+    const double* unambig_totals,
     const double* prior,
     double* em_totals,
     double* alpha_new,
@@ -344,7 +344,7 @@ struct EMResult {
 EMResult run_squarem(
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
-    const double* unique_totals,
+    const double* unambig_totals,
     double* prior,          // may be modified by pruning
     int n_components,
     int max_sq_iters,
@@ -380,7 +380,7 @@ iterates over the same equivalence classes:
 void compute_ovr_prior(
     const std::vector<EmEquivClass>& ec_data,
     const bool* eligible,        // [n_components]
-    const double* unique_totals, // [n_components]
+    const double* unambig_totals, // [n_components]
     double alpha,                // flat Dirichlet pseudocount
     double gamma,                // OVR scale factor
     double* prior_out,           // [n_components] written
@@ -483,7 +483,7 @@ Write a new `test_em_impl.py` that tests the C++ module directly:
 
 5. **Prior eligibility** — zero-prior components should get theta → 0.
 
-6. **Pruning** — components with no unique evidence and low evidence
+6. **Pruning** — components with no unambig evidence and low evidence
    ratio should be pruned to zero.
 
 7. **Empty locus** — zero units → returns uniform theta.

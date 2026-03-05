@@ -31,6 +31,7 @@ namespace nb = nanobind;
 static constexpr double EM_LOG_EPSILON = 1e-300;
 static constexpr int    MAX_FRAG_LEN  = 1000000;
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
+static constexpr double NRNA_FRAC_CLAMP_EPS = 1e-8;
 
 // ================================================================
 // Array type aliases
@@ -267,7 +268,7 @@ static void map_em_step(
     const double* theta,
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
-    const double* unique_totals,
+    const double* unambig_totals,
     const double* prior,
     double*       em_totals,    // zeroed then accumulated
     double*       theta_new,    // output: normalized
@@ -287,10 +288,10 @@ static void map_em_step(
         em_step_kernel(ec, log_weights.data(), em_totals);
     }
 
-    // M-step: theta_new = (unique_totals + em_totals + prior), normalized
+    // M-step: theta_new = (unambig_totals + em_totals + prior), normalized
     double total = 0.0;
     for (int i = 0; i < n_components; ++i) {
-        theta_new[i] = unique_totals[i] + em_totals[i] + prior[i];
+        theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
         total += theta_new[i];
     }
     if (total > 0.0) {
@@ -309,7 +310,7 @@ static void vbem_step(
     const double* alpha,
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
-    const double* unique_totals,
+    const double* unambig_totals,
     const double* prior,
     double*       em_totals,
     double*       alpha_new,
@@ -337,9 +338,102 @@ static void vbem_step(
         em_step_kernel(ec, log_weights.data(), em_totals);
     }
 
-    // M-step: alpha_new = unique_totals + em_totals + prior (unnormalized)
+    // M-step: alpha_new = unambig_totals + em_totals + prior (unnormalized)
     for (int i = 0; i < n_components; ++i) {
-        alpha_new[i] = unique_totals[i] + em_totals[i] + prior[i];
+        alpha_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
+    }
+}
+
+// ================================================================
+// Linked MAP-EM step: (theta_t, nrna_frac) → (theta_t_new, nrna_frac_new)
+// ================================================================
+//
+// Uses the linked mRNA-nRNA model where:
+//   log_weight[mRNA i]  = log(θ_t[i]) + log(1-nrna_frac[i]) - log_eff_len[i]
+//   log_weight[nRNA i]  = log(θ_t[i]) + log(nrna_frac[i])   - log_eff_len[n_t+i]
+//   log_weight[gDNA]    = log(γ)                     - log_eff_len[2*n_t]
+//
+// M-step: θ_t normalised jointly with γ; nrna_frac from MAP Beta.
+
+static void linked_map_em_step(
+    const double* theta_t,       // [n_t + 1]: θ_1..θ_T, γ
+    const double* nrna_frac,           // [n_t]: nrna_frac_1..nrna_frac_T
+    const std::vector<EmEquivClass>& ec_data,
+    const double* log_eff_len,   // [2*n_t + 1]
+    const double* unambig_totals, // [2*n_t + 1]
+    const double* prior,         // [2*n_t + 1]
+    const double* nrna_frac_alpha,     // [n_t]
+    const double* nrna_frac_beta,      // [n_t]
+    double*       em_totals,     // [2*n_t + 1]: zeroed then accumulated
+    double*       theta_t_new,   // [n_t + 1]: output (normalised)
+    double*       nrna_frac_new,       // [n_t]: output
+    int           n_transcripts,
+    int           n_components)
+{
+    int n_t = n_transcripts;
+    int gdna_idx = 2 * n_t;
+
+    // Build log_weights from linked parameterisation
+    std::vector<double> log_weights(static_cast<size_t>(n_components));
+    for (int i = 0; i < n_t; ++i) {
+        double log_theta = std::log(theta_t[i] + EM_LOG_EPSILON);
+        // mRNA component i
+        log_weights[i] = log_theta
+            + std::log(1.0 - nrna_frac[i] + EM_LOG_EPSILON)
+            - log_eff_len[i];
+        // nRNA component n_t + i
+        log_weights[n_t + i] = log_theta
+            + std::log(nrna_frac[i] + EM_LOG_EPSILON)
+            - log_eff_len[n_t + i];
+    }
+    // gDNA component
+    log_weights[gdna_idx] = std::log(theta_t[n_t] + EM_LOG_EPSILON)
+                           - log_eff_len[gdna_idx];
+
+    // Zero em_totals
+    std::fill(em_totals, em_totals + n_components, 0.0);
+
+    // E-step: accumulate posteriors (kernel unchanged)
+    for (const auto& ec : ec_data) {
+        em_step_kernel(ec, log_weights.data(), em_totals);
+    }
+
+    // M-step: aggregate into theta_t and update nrna_frac
+    double total = 0.0;
+    for (int i = 0; i < n_t; ++i) {
+        double mrna_count = unambig_totals[i] + em_totals[i];
+        double nrna_count = unambig_totals[n_t + i] + em_totals[n_t + i];
+        double total_count = mrna_count + nrna_count;
+
+        // θ_t ∝ total_data + sum of mRNA & nRNA priors
+        theta_t_new[i] = total_count + prior[i] + prior[n_t + i];
+        total += theta_t_new[i];
+
+        // nrna_frac MAP Beta: (nrna + α - 1) / (total + α + β - 2)
+        double a = nrna_frac_alpha[i];
+        double b = nrna_frac_beta[i];
+        double nrna_frac_den = total_count + a + b - 2.0;
+        if (nrna_frac_den > 0.0) {
+            double nrna_frac_val = (nrna_count + a - 1.0) / nrna_frac_den;
+            if (nrna_frac_val < NRNA_FRAC_CLAMP_EPS) nrna_frac_val = NRNA_FRAC_CLAMP_EPS;
+            else if (nrna_frac_val > 1.0 - NRNA_FRAC_CLAMP_EPS) nrna_frac_val = 1.0 - NRNA_FRAC_CLAMP_EPS;
+            nrna_frac_new[i] = nrna_frac_val;
+        } else {
+            nrna_frac_new[i] = nrna_frac[i];  // keep previous
+        }
+    }
+
+    // gDNA
+    theta_t_new[n_t] = unambig_totals[gdna_idx]
+                     + em_totals[gdna_idx] + prior[gdna_idx];
+    total += theta_t_new[n_t];
+
+    // Normalise θ_t so Σ θ_t + γ = 1
+    if (total > 0.0) {
+        double inv = 1.0 / total;
+        for (int i = 0; i <= n_t; ++i) {
+            theta_t_new[i] *= inv;
+        }
     }
 }
 
@@ -349,7 +443,7 @@ static void vbem_step(
 
 static void compute_ovr_prior_and_warm_start(
     const std::vector<EmEquivClass>& ec_data,
-    const double* unique_totals,
+    const double* unambig_totals,
     const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
     double        alpha_flat,
     double        gamma,
@@ -357,8 +451,8 @@ static void compute_ovr_prior_and_warm_start(
     double*       theta_init_out,  // [n_components] output
     int           n_components)
 {
-    // Initialize theta_init from unique_totals
-    std::copy(unique_totals, unique_totals + n_components, theta_init_out);
+    // Initialize theta_init from unambig_totals
+    std::copy(unambig_totals, unambig_totals + n_components, theta_init_out);
 
     // Accumulate coverage totals from all equivalence classes
     std::vector<double> coverage_totals(static_cast<size_t>(n_components), 0.0);
@@ -411,20 +505,20 @@ struct EMResult {
     std::vector<double> theta;
     std::vector<double> alpha;
     std::vector<double> em_totals;
+    std::vector<double> nrna_frac;       // [n_transcripts], empty for classic mode
 };
 
 static EMResult run_squarem(
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
-    const double* unique_totals,
+    const double* unambig_totals,
     double*       prior,
     const double* theta_init,
     int           n_components,
     int           max_iterations,
     double        convergence_delta,
     bool          use_vbem,
-    double        prune_threshold,
-    int           post_prune_iters)
+    double        prune_threshold)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -453,11 +547,11 @@ static EMResult run_squarem(
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two plain VBEM steps
             vbem_step(state0.data(), ec_data, log_eff_len,
-                      unique_totals, prior, em_totals.data(),
+                      unambig_totals, prior, em_totals.data(),
                       state1.data(), n_components);
 
             vbem_step(state1.data(), ec_data, log_eff_len,
-                      unique_totals, prior, em_totals.data(),
+                      unambig_totals, prior, em_totals.data(),
                       state2.data(), n_components);
 
             // SQUAREM extrapolation
@@ -484,7 +578,7 @@ static EMResult run_squarem(
 
             // Stabilisation step
             vbem_step(state_extrap.data(), ec_data, log_eff_len,
-                      unique_totals, prior, em_totals.data(),
+                      unambig_totals, prior, em_totals.data(),
                       state_new.data(), n_components);
 
             // Convergence check on normalized theta
@@ -537,11 +631,11 @@ static EMResult run_squarem(
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two plain EM steps
             map_em_step(state0.data(), ec_data, log_eff_len,
-                        unique_totals, prior, em_totals.data(),
+                        unambig_totals, prior, em_totals.data(),
                         state1.data(), n_components);
 
             map_em_step(state1.data(), ec_data, log_eff_len,
-                        unique_totals, prior, em_totals.data(),
+                        unambig_totals, prior, em_totals.data(),
                         state2.data(), n_components);
 
             // SQUAREM extrapolation
@@ -576,7 +670,7 @@ static EMResult run_squarem(
 
             // Stabilisation step
             map_em_step(state_extrap.data(), ec_data, log_eff_len,
-                        unique_totals, prior, em_totals.data(),
+                        unambig_totals, prior, em_totals.data(),
                         state_new.data(), n_components);
 
             // Convergence
@@ -593,9 +687,9 @@ static EMResult run_squarem(
         // theta = state0 (converged normalized theta)
         std::copy(state0.begin(), state0.end(), theta.begin());
 
-        // alpha_out = unique_totals + em_totals + prior
+        // alpha_out = unambig_totals + em_totals + prior
         for (size_t i = 0; i < nc; ++i) {
-            alpha_out[i] = unique_totals[i] + em_totals[i] + prior[i];
+            alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
         }
     }
 
@@ -607,10 +701,10 @@ static EMResult run_squarem(
         std::vector<bool> prune_mask(nc, false);
 
         for (size_t i = 0; i < nc; ++i) {
-            double data_count = unique_totals[i] + em_totals[i];
+            double data_count = unambig_totals[i] + em_totals[i];
             double denom = std::max(alpha_out[i], EM_LOG_EPSILON);
             double evidence_ratio = data_count / denom;
-            if (unique_totals[i] == 0.0
+            if (unambig_totals[i] == 0.0
                 && evidence_ratio < prune_threshold) {
                 prune_mask[i] = true;
                 any_pruned = true;
@@ -628,10 +722,10 @@ static EMResult run_squarem(
                 for (size_t i = 0; i < nc; ++i) {
                     if (prune_mask[i]) alpha_out[i] = EM_LOG_EPSILON;
                 }
-                for (int p = 0; p < post_prune_iters; ++p) {
+                {
                     std::vector<double> a_new(nc);
                     vbem_step(alpha_out.data(), ec_data, log_eff_len,
-                              unique_totals, prior, em_totals.data(),
+                              unambig_totals, prior, em_totals.data(),
                               a_new.data(), n_components);
                     std::swap(alpha_out, a_new);
                 }
@@ -653,21 +747,224 @@ static EMResult run_squarem(
                     double inv = 1.0 / total;
                     for (size_t i = 0; i < nc; ++i) theta[i] *= inv;
                 }
-                for (int p = 0; p < post_prune_iters; ++p) {
+                // Single post-prune EM step to redistribute mass
+                {
                     std::vector<double> t_new(nc);
                     map_em_step(theta.data(), ec_data, log_eff_len,
-                                unique_totals, prior, em_totals.data(),
+                                unambig_totals, prior, em_totals.data(),
                                 t_new.data(), n_components);
                     std::swap(theta, t_new);
                 }
                 for (size_t i = 0; i < nc; ++i) {
-                    alpha_out[i] = unique_totals[i] + em_totals[i] + prior[i];
+                    alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
                 }
             }
         }
     }
 
-    return { std::move(theta), std::move(alpha_out), std::move(em_totals) };
+    return { std::move(theta), std::move(alpha_out), std::move(em_totals), {} };
+}
+
+// ================================================================
+// Linked SQUAREM acceleration
+// ================================================================
+//
+// SQUAREM on theta_t (n_t+1 elements).  nrna_frac is derived from the
+// M-step after each EM iteration — NOT extrapolated.
+
+static EMResult linked_run_squarem(
+    const std::vector<EmEquivClass>& ec_data,
+    const double* log_eff_len,     // [2*n_t + 1]
+    const double* unambig_totals,   // [2*n_t + 1]
+    double*       prior,           // [2*n_t + 1], mutable for pruning
+    const double* theta_t_init,    // [n_t + 1]
+    const double* nrna_frac_init,        // [n_t]
+    const double* nrna_frac_alpha,       // [n_t]
+    const double* nrna_frac_beta,        // [n_t]
+    int           n_transcripts,
+    int           n_components,    // 2*n_t + 1
+    int           max_iterations,
+    double        convergence_delta,
+    double        prune_threshold)
+{
+    int n_t = n_transcripts;
+    int nc  = n_components;
+    int ns  = n_t + 1;  // SQUAREM state size (theta_t + gamma)
+    int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
+
+    std::vector<double> em_totals(static_cast<size_t>(nc), 0.0);
+    std::vector<double> nrna_frac(nrna_frac_init, nrna_frac_init + n_t);
+    std::vector<double> nrna_frac_tmp(static_cast<size_t>(n_t));
+
+    // SQUAREM state vectors (theta_t space)
+    std::vector<double> state0(static_cast<size_t>(ns));
+    std::vector<double> state1(static_cast<size_t>(ns));
+    std::vector<double> state2(static_cast<size_t>(ns));
+    std::vector<double> state_extrap(static_cast<size_t>(ns));
+    std::vector<double> state_new(static_cast<size_t>(ns));
+    std::vector<double> r_vec(static_cast<size_t>(ns));
+    std::vector<double> v_vec(static_cast<size_t>(ns));
+
+    // Initialize state0 = theta_t_init + collapsed prior, normalised
+    for (int i = 0; i < n_t; ++i) {
+        state0[i] = theta_t_init[i] + prior[i] + prior[n_t + i];
+    }
+    state0[n_t] = theta_t_init[n_t] + prior[2 * n_t];
+    {
+        double s = 0.0;
+        for (int i = 0; i < ns; ++i) s += state0[i];
+        if (s > 0.0) {
+            double inv = 1.0 / s;
+            for (int i = 0; i < ns; ++i) state0[i] *= inv;
+        }
+    }
+
+    for (int iter = 0; iter < max_sq_iters; ++iter) {
+        // Two linked EM steps
+        linked_map_em_step(
+            state0.data(), nrna_frac.data(), ec_data,
+            log_eff_len, unambig_totals, prior,
+            nrna_frac_alpha, nrna_frac_beta,
+            em_totals.data(), state1.data(), nrna_frac_tmp.data(),
+            n_transcripts, n_components);
+        std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
+
+        linked_map_em_step(
+            state1.data(), nrna_frac.data(), ec_data,
+            log_eff_len, unambig_totals, prior,
+            nrna_frac_alpha, nrna_frac_beta,
+            em_totals.data(), state2.data(), nrna_frac_tmp.data(),
+            n_transcripts, n_components);
+        std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
+
+        // SQUAREM extrapolation on theta_t
+        double sv2 = 0.0, srv = 0.0;
+        for (int i = 0; i < ns; ++i) {
+            r_vec[i] = state1[i] - state0[i];
+            v_vec[i] = (state2[i] - state1[i]) - r_vec[i];
+            sv2 += v_vec[i] * v_vec[i];
+            srv += r_vec[i] * v_vec[i];
+        }
+
+        if (sv2 == 0.0) {
+            std::copy(state2.begin(), state2.end(), state_extrap.begin());
+        } else {
+            double alpha_step = std::max(-srv / sv2, 1.0);
+            for (int i = 0; i < ns; ++i) {
+                state_extrap[i] = state0[i]
+                    + 2.0 * alpha_step * r_vec[i]
+                    + alpha_step * alpha_step * v_vec[i];
+                if (state_extrap[i] < 0.0) state_extrap[i] = 0.0;
+            }
+            double s = 0.0;
+            for (int i = 0; i < ns; ++i) s += state_extrap[i];
+            if (s > 0.0) {
+                double inv = 1.0 / s;
+                for (int i = 0; i < ns; ++i) state_extrap[i] *= inv;
+            } else {
+                std::copy(state2.begin(), state2.end(),
+                          state_extrap.begin());
+            }
+        }
+
+        // Stabilisation step
+        linked_map_em_step(
+            state_extrap.data(), nrna_frac.data(), ec_data,
+            log_eff_len, unambig_totals, prior,
+            nrna_frac_alpha, nrna_frac_beta,
+            em_totals.data(), state_new.data(), nrna_frac_tmp.data(),
+            n_transcripts, n_components);
+        std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
+
+        // Convergence check
+        double delta = 0.0;
+        for (int i = 0; i < ns; ++i) {
+            delta += std::abs(state_new[i] - state0[i]);
+        }
+        std::swap(state0, state_new);
+        if (delta < convergence_delta) break;
+    }
+
+    // Decompose theta_t + nrna_frac → full theta[2*n_t+1]
+    std::vector<double> theta(static_cast<size_t>(nc));
+    for (int i = 0; i < n_t; ++i) {
+        theta[i]       = state0[i] * (1.0 - nrna_frac[i]);
+        theta[n_t + i] = state0[i] * nrna_frac[i];
+    }
+    theta[2 * n_t] = state0[n_t];
+
+    // alpha_out = unambig_totals + em_totals + prior
+    std::vector<double> alpha_out(static_cast<size_t>(nc));
+    for (int i = 0; i < nc; ++i) {
+        alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
+    }
+
+    // ----------------------------------------------------------
+    // Post-EM pruning at transcript level
+    // ----------------------------------------------------------
+    if (prune_threshold >= 0.0) {
+        bool any_pruned = false;
+        std::vector<bool> prune_mask(static_cast<size_t>(n_t), false);
+
+        for (int i = 0; i < n_t; ++i) {
+            double mrna_data = unambig_totals[i] + em_totals[i];
+            double nrna_data = unambig_totals[n_t + i] + em_totals[n_t + i];
+            double total_data = mrna_data + nrna_data;
+            double total_alpha = alpha_out[i] + alpha_out[n_t + i];
+            double evidence = total_data
+                / std::max(total_alpha, EM_LOG_EPSILON);
+            if (unambig_totals[i] == 0.0
+                && evidence < prune_threshold) {
+                prune_mask[i] = true;
+                any_pruned = true;
+            }
+        }
+
+        if (any_pruned) {
+            // Zero prior and state for pruned transcripts
+            for (int i = 0; i < n_t; ++i) {
+                if (prune_mask[i]) {
+                    prior[i] = 0.0;
+                    prior[n_t + i] = 0.0;
+                    state0[i] = 0.0;
+                }
+            }
+            // Re-normalise state
+            double s = 0.0;
+            for (int i = 0; i < ns; ++i) s += state0[i];
+            if (s > 0.0) {
+                double inv = 1.0 / s;
+                for (int i = 0; i < ns; ++i) state0[i] *= inv;
+            }
+
+            // Post-prune EM iteration (single step)
+            {
+                std::vector<double> t_new(static_cast<size_t>(ns));
+                linked_map_em_step(
+                    state0.data(), nrna_frac.data(), ec_data,
+                    log_eff_len, unambig_totals, prior,
+                    nrna_frac_alpha, nrna_frac_beta,
+                    em_totals.data(), t_new.data(), nrna_frac_tmp.data(),
+                    n_transcripts, n_components);
+                std::swap(state0, t_new);
+                std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
+            }
+
+            // Rebuild full theta + alpha
+            for (int i = 0; i < n_t; ++i) {
+                theta[i]       = state0[i] * (1.0 - nrna_frac[i]);
+                theta[n_t + i] = state0[i] * nrna_frac[i];
+            }
+            theta[2 * n_t] = state0[n_t];
+
+            for (int i = 0; i < nc; ++i) {
+                alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
+            }
+        }
+    }
+
+    return { std::move(theta), std::move(alpha_out),
+             std::move(em_totals), std::move(nrna_frac) };
 }
 
 // ================================================================
@@ -680,6 +977,7 @@ static EMResult run_squarem(
 
 static std::tuple<nb::ndarray<nb::numpy, double, nb::ndim<1>>,
                   nb::ndarray<nb::numpy, double, nb::ndim<1>>,
+                  nb::ndarray<nb::numpy, double, nb::ndim<1>>,
                   nb::ndarray<nb::numpy, double, nb::ndim<1>>>
 run_locus_em_native(
     // CSR data
@@ -691,7 +989,7 @@ run_locus_em_native(
     i32_1d tx_ends,
     i64_1d bias_profiles,
     // Per-component vectors
-    f64_1d unique_totals_arr,
+    f64_1d unambig_totals_arr,
     f64_1d effective_lens,
     f64_1d prior_eligible,
     // Scalar config
@@ -702,7 +1000,10 @@ run_locus_em_native(
     double convergence_delta,
     bool   use_vbem,
     double prune_threshold,
-    int    post_prune_iters)
+    // Linked model parameters
+    int    n_transcripts,
+    f64_1d nrna_frac_alpha_arr,
+    f64_1d nrna_frac_beta_arr)
 {
     size_t nc = static_cast<size_t>(n_components);
     size_t n_candidates = t_indices.shape(0);
@@ -716,12 +1017,17 @@ run_locus_em_native(
     const int32_t*  txs_ptr  = tx_starts.data();
     const int32_t*  txe_ptr  = tx_ends.data();
     const int64_t*  bp_ptr   = bias_profiles.data();
-    const double*   ut_ptr   = unique_totals_arr.data();
+    const double*   ut_ptr   = unambig_totals_arr.data();
     const double*   el_ptr   = effective_lens.data();
     const double*   pe_ptr   = prior_eligible.data();
 
-    // Copy unique_totals (we need a mutable copy)
-    std::vector<double> unique_totals(ut_ptr, ut_ptr + nc);
+    bool linked = (n_transcripts > 0);
+    size_t n_t = linked ? static_cast<size_t>(n_transcripts) : 0;
+    const double* ea_ptr = linked ? nrna_frac_alpha_arr.data() : nullptr;
+    const double* eb_ptr = linked ? nrna_frac_beta_arr.data() : nullptr;
+
+    // Copy unambig_totals (we need a mutable copy)
+    std::vector<double> unambig_totals(ut_ptr, ut_ptr + nc);
 
     // 1. Apply bias correction (uniform fast-path)
     if (n_candidates > 0) {
@@ -731,12 +1037,12 @@ run_locus_em_native(
 
     // 2. Handle empty locus
     if (n_units == 0 || n_candidates == 0) {
-        // theta = (unique_totals + prior) / sum, alpha = unique_totals + prior
+        // theta = (unambig_totals + prior) / sum, alpha = unambig_totals + prior
         std::vector<double> alpha(nc);
         double total = 0.0;
         for (size_t i = 0; i < nc; ++i) {
             double p = (pe_ptr[i] > 0.0) ? prior_alpha : 0.0;
-            alpha[i] = unique_totals[i] + p;
+            alpha[i] = unambig_totals[i] + p;
             total += alpha[i];
         }
         std::vector<double> theta(nc);
@@ -748,6 +1054,16 @@ run_locus_em_native(
         }
         std::vector<double> em_totals(nc, 0.0);
 
+        // Compute nrna_frac (prior mean) for linked model
+        size_t nrna_frac_alloc = (n_t > 0) ? n_t : 1;
+        auto* nrna_frac_data = new double[nrna_frac_alloc];
+        if (linked) {
+            for (size_t i = 0; i < n_t; ++i) {
+                double sum_ab = ea_ptr[i] + eb_ptr[i];
+                nrna_frac_data[i] = (sum_ab > 0.0) ? ea_ptr[i] / sum_ab : 0.5;
+            }
+        }
+
         // Return as numpy arrays
         auto* theta_data = new double[nc];
         auto* alpha_data = new double[nc];
@@ -756,15 +1072,18 @@ run_locus_em_native(
         std::copy(alpha.begin(), alpha.end(), alpha_data);
         std::copy(em_totals.begin(), em_totals.end(), em_data);
 
-        size_t shape[1] = { nc };
+        size_t shape[1]     = { nc };
+        size_t shape_nrna_frac[1] = { n_t };
         nb::capsule theta_owner(theta_data, [](void* p) noexcept { delete[] static_cast<double*>(p); });
         nb::capsule alpha_owner(alpha_data, [](void* p) noexcept { delete[] static_cast<double*>(p); });
         nb::capsule em_owner(em_data,       [](void* p) noexcept { delete[] static_cast<double*>(p); });
+        nb::capsule nrna_frac_owner(nrna_frac_data,     [](void* p) noexcept { delete[] static_cast<double*>(p); });
 
         return std::make_tuple(
             nb::ndarray<nb::numpy, double, nb::ndim<1>>(theta_data, 1, shape, std::move(theta_owner)),
             nb::ndarray<nb::numpy, double, nb::ndim<1>>(alpha_data, 1, shape, std::move(alpha_owner)),
-            nb::ndarray<nb::numpy, double, nb::ndim<1>>(em_data,    1, shape, std::move(em_owner))
+            nb::ndarray<nb::numpy, double, nb::ndim<1>>(em_data,    1, shape, std::move(em_owner)),
+            nb::ndarray<nb::numpy, double, nb::ndim<1>>(nrna_frac_data,   1, shape_nrna_frac, std::move(nrna_frac_owner))
         );
     }
 
@@ -782,34 +1101,70 @@ run_locus_em_native(
     std::vector<double> prior(nc);
     std::vector<double> theta_init(nc);
     compute_ovr_prior_and_warm_start(
-        ec_data, unique_totals.data(), pe_ptr,
+        ec_data, unambig_totals.data(), pe_ptr,
         prior_alpha, prior_gamma,
         prior.data(), theta_init.data(), n_components);
 
-    // 6. Run SQUAREM
-    auto result = run_squarem(
-        ec_data, log_eff_len.data(), unique_totals.data(),
-        prior.data(), theta_init.data(),
-        n_components, max_iterations, convergence_delta,
-        use_vbem, prune_threshold, post_prune_iters);
+    // 6. Run SQUAREM (linked or classic)
+    EMResult result;
+    if (linked) {
+        // Collapse warm start to theta_t space
+        int nt_i = n_transcripts;
+        std::vector<double> theta_t_init(static_cast<size_t>(nt_i + 1));
+        for (int i = 0; i < nt_i; ++i) {
+            theta_t_init[i] = theta_init[i] + theta_init[nt_i + i];
+        }
+        theta_t_init[nt_i] = theta_init[2 * nt_i];
+
+        // nrna_frac_init = prior mean, clamped
+        std::vector<double> nrna_frac_init(n_t);
+        for (size_t i = 0; i < n_t; ++i) {
+            double sum_ab = ea_ptr[i] + eb_ptr[i];
+            nrna_frac_init[i] = (sum_ab > 0.0) ? ea_ptr[i] / sum_ab : 0.5;
+            if (nrna_frac_init[i] < NRNA_FRAC_CLAMP_EPS) nrna_frac_init[i] = NRNA_FRAC_CLAMP_EPS;
+            else if (nrna_frac_init[i] > 1.0 - NRNA_FRAC_CLAMP_EPS) nrna_frac_init[i] = 1.0 - NRNA_FRAC_CLAMP_EPS;
+        }
+
+        result = linked_run_squarem(
+            ec_data, log_eff_len.data(), unambig_totals.data(),
+            prior.data(), theta_t_init.data(), nrna_frac_init.data(),
+            ea_ptr, eb_ptr,
+            n_transcripts, n_components,
+            max_iterations, convergence_delta,
+            prune_threshold);
+    } else {
+        result = run_squarem(
+            ec_data, log_eff_len.data(), unambig_totals.data(),
+            prior.data(), theta_init.data(),
+            n_components, max_iterations, convergence_delta,
+            use_vbem, prune_threshold);
+    }
 
     // 7. Return as numpy arrays
+    size_t nrna_frac_alloc = (n_t > 0) ? n_t : 1;
     auto* theta_out = new double[nc];
     auto* alpha_out = new double[nc];
     auto* em_out    = new double[nc];
+    auto* nrna_frac_out   = new double[nrna_frac_alloc];
     std::copy(result.theta.begin(), result.theta.end(), theta_out);
     std::copy(result.alpha.begin(), result.alpha.end(), alpha_out);
     std::copy(result.em_totals.begin(), result.em_totals.end(), em_out);
+    if (n_t > 0) {
+        std::copy(result.nrna_frac.begin(), result.nrna_frac.end(), nrna_frac_out);
+    }
 
-    size_t shape[1] = { nc };
+    size_t shape[1]     = { nc };
+    size_t shape_nrna_frac[1] = { n_t };
     nb::capsule theta_owner(theta_out, [](void* p) noexcept { delete[] static_cast<double*>(p); });
     nb::capsule alpha_owner(alpha_out, [](void* p) noexcept { delete[] static_cast<double*>(p); });
     nb::capsule em_owner(em_out,       [](void* p) noexcept { delete[] static_cast<double*>(p); });
+    nb::capsule nrna_frac_owner(nrna_frac_out,     [](void* p) noexcept { delete[] static_cast<double*>(p); });
 
     return std::make_tuple(
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(theta_out, 1, shape, std::move(theta_owner)),
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(alpha_out, 1, shape, std::move(alpha_owner)),
-        nb::ndarray<nb::numpy, double, nb::ndim<1>>(em_out,    1, shape, std::move(em_owner))
+        nb::ndarray<nb::numpy, double, nb::ndim<1>>(em_out,    1, shape, std::move(em_owner)),
+        nb::ndarray<nb::numpy, double, nb::ndim<1>>(nrna_frac_out,   1, shape_nrna_frac, std::move(nrna_frac_owner))
     );
 }
 
@@ -830,7 +1185,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("tx_starts"),
           nb::arg("tx_ends"),
           nb::arg("bias_profiles"),
-          nb::arg("unique_totals"),
+          nb::arg("unambig_totals"),
           nb::arg("effective_lens"),
           nb::arg("prior_eligible"),
           nb::arg("n_components"),
@@ -840,8 +1195,11 @@ NB_MODULE(_em_impl, m) {
           nb::arg("convergence_delta"),
           nb::arg("use_vbem"),
           nb::arg("prune_threshold"),
-          nb::arg("post_prune_iters"),
+          nb::arg("n_transcripts"),
+          nb::arg("nrna_frac_alpha"),
+          nb::arg("nrna_frac_beta"),
           "Run EM for a single locus sub-problem.\n\n"
-          "Takes CSR per-locus data + config, returns (theta, alpha, em_totals).\n"
+          "Takes CSR per-locus data + config, returns (theta, alpha, em_totals, nrna_frac).\n"
+          "When n_transcripts > 0, uses the linked mRNA-nRNA model.\n"
           "Replaces the Python EM hot path with a single C++ call.");
 }
