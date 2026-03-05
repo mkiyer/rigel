@@ -67,8 +67,8 @@ gdna:
 
 # ── Nascent RNA ──────────────────────────────────────────────────────
 nrna:
-  rates: [0.0, 0.1]
-  rate_labels: [none, moderate]
+  rates: [0.0, 0.2]
+  rate_labels: [none, high]
 
 # ── Strand specificity ──────────────────────────────────────────────
 strand_specificities: [1.0, 0.95, 0.5]

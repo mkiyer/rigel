@@ -163,6 +163,8 @@ def build_locus_em_data(
     index: TranscriptIndex,
     mean_frag: float,
     gdna_init: float,
+    *,
+    _cache: dict | None = None,
 ) -> LocusEMInput:
     """Extract and renumber global ScoredFragments into a per-locus sub-problem.
 
@@ -184,6 +186,10 @@ def build_locus_em_data(
     mean_frag : float
     gdna_init : float
         Empirical Bayes estimated gDNA count for this locus.
+    _cache : dict or None
+        Optional pre-extracted arrays to avoid repeated DataFrame
+        access.  Expected keys: ``"t_starts"``, ``"t_ends"``,
+        ``"t_lengths"``, ``"local_map"`` (reusable scratch buffer).
     """
     t_arr = locus.transcript_indices
     n_t = len(t_arr)
@@ -196,7 +202,18 @@ def build_locus_em_data(
     # Build global → local mapping array (fast lookup, no dict)
     max_global = max(int(nrna_base) + int(t_arr.max()) + 1,
                      int(t_arr.max()) + 1) if n_t > 0 else 0
-    local_map = np.full(max_global, -1, dtype=np.int32)
+
+    # Reuse pre-allocated local_map buffer if provided
+    if _cache is not None and "local_map" in _cache:
+        local_map = _cache["local_map"]
+        if len(local_map) < max_global:
+            # Grow if needed (rare — only when locus has very large indices)
+            local_map = np.full(max_global, -1, dtype=np.int32)
+            _cache["local_map"] = local_map
+        else:
+            local_map[:max_global] = -1
+    else:
+        local_map = np.full(max_global, -1, dtype=np.int32)
     for local_i in range(n_t):
         gt = int(t_arr[local_i])
         local_map[gt] = local_i                     # mRNA
@@ -283,8 +300,10 @@ def build_locus_em_data(
     # Compute true locus span for gDNA per-fragment effective length.
     # Span extends from leftmost transcript/fragment start to rightmost
     # transcript/fragment end, capturing any overhanging fragments.
-    t_starts = index.t_df["start"].values[t_arr]
-    t_ends = index.t_df["end"].values[t_arr]
+    _t_starts_all = _cache["t_starts"] if _cache is not None else index.t_df["start"].values
+    _t_ends_all = _cache["t_ends"] if _cache is not None else index.t_df["end"].values
+    t_starts = _t_starts_all[t_arr]
+    t_ends = _t_ends_all[t_arr]
     locus_start = int(t_starts.min())
     locus_end = int(t_ends.max())
     footprints = em_data.genomic_footprints[locus.unit_indices]
@@ -373,10 +392,11 @@ def build_locus_em_data(
     # Phase H optimisation: pass a flat int64 array of component
     # lengths to _apply_bias_correction_uniform directly, avoiding
     # 2*n_t+1 BiasProfile object + np.arange allocations per locus.
-    mrna_lengths = index.t_df["length"].values[t_arr]
+    _t_lengths_all = _cache["t_lengths"] if _cache is not None else index.t_df["length"].values
+    mrna_lengths = _t_lengths_all[t_arr]
     nrna_lengths = (
-        index.t_df["end"].values[t_arr]
-        - index.t_df["start"].values[t_arr]
+        _t_ends_all[t_arr]
+        - _t_starts_all[t_arr]
     )
     bias_profiles = np.empty(n_components, dtype=np.int64)
     bias_profiles[:n_t] = mrna_lengths
@@ -528,7 +548,7 @@ def compute_gdna_rate_hybrid(
       density scaled by the region's exonic territory.
 
     For stranded libraries (W ≈ 1), the strand signal dominates.
-    For unstranded libraries (W ≈ 0), the density signal provides
+    For weakly-stranded libraries (W ≈ 0), the density signal provides
     a fallback that is strictly better than the strand-only 0.0.
 
     Parameters

@@ -63,7 +63,7 @@ class TestStrandModelPosterior:
         assert sm.p_r1_sense == 0.5
 
     def test_strong_fr_library(self):
-        """Simulate a strongly FR-stranded library (most same-direction)."""
+        """Simulate a strongly R1-sense library (most same-direction)."""
         sm = StrandModel()
         for _ in range(95):
             sm.observe(Strand.POS, Strand.POS)
@@ -75,7 +75,7 @@ class TestStrandModelPosterior:
         assert sm.read1_sense is True
 
     def test_strong_rf_library(self):
-        """Simulate a strongly RF-stranded library (most opposite-direction)."""
+        """Simulate a strongly R1-antisense library (most opposite-direction)."""
         sm = StrandModel()
         for _ in range(5):
             sm.observe(Strand.POS, Strand.POS)

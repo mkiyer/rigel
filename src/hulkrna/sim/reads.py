@@ -16,27 +16,28 @@ Read-name format (gDNA)::
 
     gdna:{genomic_start}-{genomic_end}:{strand_char}:{index}/1
 
-Library-prep convention (FR orientation)
+Library-prep convention (R1-antisense orientation)
 ----------------------------------------
-Reads simulate a standard Illumina stranded (dUTP) library:
+Reads simulate a standard Illumina stranded library (e.g. dUTP /
+TruSeq Stranded) using the R1-antisense convention:
 
 - **Positive-strand transcript**: R1 is reverse-complement of 3′ end
   of the fragment, R2 is the sense sequence from the 5′ end.
   When aligned, R1 maps to − strand and R2 maps to + strand.
-  ``Fragment.from_reads`` flips R2's strand → both report + → correct.
+  The BAM scanner flips R2’s strand → both report + → correct.
 
 - **Negative-strand transcript**: R1 maps to + strand, R2 maps to − strand.
   After R2 flip → both report − → correct.
 
-- **gDNA**: sampled from both strands equally (unstranded).
-  FR library convention still applies for the orientation of reads.
+- **gDNA**: sampled from both strands equally (no strand bias).
+  Same read orientation convention applies.
 
 Strand specificity
 ------------------
 The ``strand_specificity`` parameter in ``SimConfig`` controls the
-fraction of RNA fragments that preserve correct FR orientation.
-At 1.0, all reads are perfectly stranded.  At 0.5, reads are
-effectively unstranded (50/50 chance of correct orientation).
+fraction of RNA fragments that preserve correct read orientation.
+At 1.0, all reads are perfectly stranded.  At 0.5, reads have
+no strand information (50/50 chance of correct orientation).
 Imperfect strandedness is implemented by swapping R1↔R2 with
 probability ``1 − strand_specificity`` per fragment.
 """
@@ -79,9 +80,9 @@ class SimConfig:
         Per-base substitution error rate (0.0 = no errors).
     strand_specificity : float
         Probability that an RNA fragment preserves its correct
-        FR orientation.  1.0 = perfectly stranded (dUTP library),
-        0.5 = completely unstranded (no strand information).
-        Intermediate values simulate imperfect dUTP incorporation.
+        read orientation.  1.0 = perfectly stranded,
+        0.5 = no strand information.
+        Intermediate values simulate imperfect strand preservation.
         Implemented by swapping R1↔R2 with probability
         ``1 − strand_specificity`` per fragment.
     seed : int
@@ -381,14 +382,14 @@ class ReadSimulator:
             frag_end = frag_start + frag_len
             frag_seq = t_seq[frag_start:frag_end]
 
-            # FR library: R1 is reverse-complement of 3′ end,
+            # R1-antisense convention: R1 is reverse-complement of 3′ end,
             # R2 is sense sequence from 5′ end.
             r1_seq = reverse_complement(frag_seq[-read_len:])
             r2_seq = frag_seq[:read_len]
 
             # Simulate imperfect strandedness: swap R1↔R2 so the
             # pipeline sees the fragment as coming from the opposite
-            # strand.  This models incomplete dUTP incorporation.
+            # strand.  This models imperfect strand preservation.
             if flip_mask is not None and flip_mask[i]:
                 r1_seq, r2_seq = r2_seq, r1_seq
 
@@ -413,7 +414,7 @@ class ReadSimulator:
         """Generate nascent RNA read pairs from unspliced pre-mRNA.
 
         Reads are sampled from the full genomic span of the transcript
-        (including introns).  FR library convention and strandedness
+        (including introns).  Read orientation convention and strandedness
         behaviour are identical to mature RNA reads.
 
         Yields (r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual).
@@ -464,8 +465,8 @@ class ReadSimulator:
         """Generate gDNA read pairs from the full genome.
 
         Fragments are sampled uniformly from the entire genome,
-        with strand chosen uniformly (+/−).  FR library convention
-        is applied as for RNA reads.
+        with strand chosen uniformly (+/−).  The same read orientation
+        convention is applied as for RNA reads.
 
         Yields (r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual).
         """
@@ -492,7 +493,7 @@ class ReadSimulator:
             else:
                 strand_char = "f"
 
-            # FR library: R1 = revcomp of 3' end, R2 = sense from 5' end
+            # R1 = revcomp of 3' end, R2 = sense from 5' end
             r1_seq = reverse_complement(frag_seq[-read_len:])
             r2_seq = frag_seq[:read_len]
 

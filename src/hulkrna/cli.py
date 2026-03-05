@@ -303,8 +303,9 @@ def quant_command(args: argparse.Namespace) -> int:
             "index_dir": str(index_dir.resolve()),
         },
         "library": {
-            "protocol": "FR-stranded" if sm.read1_sense else "RF-stranded"
-                if sm.strand_specificity > 0.7 else "unstranded",
+            "protocol": (
+                "R1-sense" if sm.read1_sense else "R1-antisense"
+            ),
             "strand_specificity": round(sm.strand_specificity, 6),
             "p_r1_sense": round(sm.p_r1_sense, 6),
             "read1_sense": bool(sm.read1_sense),

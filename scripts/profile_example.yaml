@@ -1,0 +1,47 @@
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  Profile Configuration                                     ║
+# ╚═════════════════════════════════════════════════════════════╝
+#
+# Profile hulkrna on a real or simulated BAM file.
+# Produces detailed timing, memory, and throughput reports.
+#
+# Usage:
+#   python scripts/profiler.py --config scripts/profile_example.yaml
+#   python scripts/profiler.py --config scripts/profile_example.yaml --stages --cprofile
+#
+# CLI flags (--bam, --index, --outdir, --stages, --cprofile) override YAML.
+
+# ── Inputs ────────────────────────────────────────────────────
+bam: /path/to/reads_namesort.bam
+index: /path/to/hulkrna_index
+outdir: profile_output
+
+# ── Profiling options ─────────────────────────────────────────
+# Stage decomposition: time scan_and_buffer, finalize_models,
+# and quant_from_buffer sub-stages individually.
+stages: true
+
+# cProfile: enable Python function-level profiling.
+# Writes .prof files viewable with snakeviz or py-spy.
+enable_cprofile: false
+cprofile_top_n: 60
+
+# RSS memory sampling interval (milliseconds).
+# A background thread records process RSS at this interval.
+# Set to 0 to disable memory timeline.
+memory_sample_interval_ms: 100
+
+# ── HulkRNA configurations ───────────────────────────────────
+# Multiple named configs for side-by-side comparison.
+# Keys match benchmark.py hulkrna_configs format.
+hulkrna_configs:
+  default: {}
+  # fast_em:
+  #   em_iterations: 500
+  #   em_convergence_delta: 1.0e-4
+  #   prune_threshold: 0.05
+  # full_em:
+  #   em_iterations: 5000
+  #   em_convergence_delta: 1.0e-7
+
+verbose: true

@@ -157,20 +157,29 @@ def _replay_strand_observations(
     # Exonic-spliced model
     obs = strand_dict.get("exonic_spliced_obs", [])
     truth = strand_dict.get("exonic_spliced_truth", [])
-    for o, t in zip(obs, truth):
-        strand_models.exonic_spliced.observe(Strand(int(o)), Strand(int(t)))
+    if len(obs) > 0:
+        strand_models.exonic_spliced.observe_batch(
+            np.asarray(obs, dtype=np.int8),
+            np.asarray(truth, dtype=np.int8),
+        )
 
     # Exonic fallback model
     obs = strand_dict.get("exonic_obs", [])
     truth = strand_dict.get("exonic_truth", [])
-    for o, t in zip(obs, truth):
-        strand_models.exonic.observe(Strand(int(o)), Strand(int(t)))
+    if len(obs) > 0:
+        strand_models.exonic.observe_batch(
+            np.asarray(obs, dtype=np.int8),
+            np.asarray(truth, dtype=np.int8),
+        )
 
     # Intergenic model
     obs = strand_dict.get("intergenic_obs", [])
     truth = strand_dict.get("intergenic_truth", [])
-    for o, t in zip(obs, truth):
-        strand_models.intergenic.observe(Strand(int(o)), Strand(int(t)))
+    if len(obs) > 0:
+        strand_models.intergenic.observe_batch(
+            np.asarray(obs, dtype=np.int8),
+            np.asarray(truth, dtype=np.int8),
+        )
 
 
 def _replay_fraglen_observations(
@@ -180,12 +189,17 @@ def _replay_fraglen_observations(
     """Replay C++ fragment-length observation arrays into Python models."""
     lengths = fraglen_dict.get("lengths", [])
     splice_types = fraglen_dict.get("splice_types", [])
-    for fl, st in zip(lengths, splice_types):
-        frag_length_models.observe(int(fl), SpliceType(int(st)))
+    if len(lengths) > 0:
+        frag_length_models.observe_batch(
+            np.asarray(lengths, dtype=np.intp),
+            np.asarray(splice_types, dtype=np.intp),
+        )
 
     intergenic_lengths = fraglen_dict.get("intergenic_lengths", [])
-    for fl in intergenic_lengths:
-        frag_length_models.observe(int(fl), splice_type=None)
+    if len(intergenic_lengths) > 0:
+        frag_length_models.observe_intergenic_batch(
+            np.asarray(intergenic_lengths, dtype=np.intp),
+        )
 
 
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
@@ -489,12 +503,11 @@ def quant_from_buffer(
     estimator.nrna_init = nrna_init
 
     ss = strand_models.strand_specificity
-    if ss < 0.7:
-        logger.warning(
-            f"[WARN] Low strand specificity ({ss:.3f}). gDNA/nRNA "
-            "estimates will rely primarily on coverage density. "
-            "Results may be less accurate for capture-enriched libraries."
-        )
+    w_strand = (2.0 * ss - 1.0) ** 2
+    logger.info(
+        f"[INFO] Strand specificity: {ss:.3f} "
+        f"(strand weight={w_strand:.3f}, density weight={1.0 - w_strand:.3f})"
+    )
 
     logger.info(
         f"[DONE] Scan: {stats.deterministic_unambig_units:,} unique, "
@@ -570,6 +583,20 @@ def quant_from_buffer(
         _unit_ann_list: list | None = [] if annotations is not None else None
         t_refs = index.t_df["ref"].values
         t_to_g = index.t_to_g_arr
+
+        # Pre-extract DataFrame columns to avoid repeated Pandas overhead
+        # inside build_locus_em_data (called once per locus).
+        _locus_cache: dict = {
+            "t_starts": index.t_df["start"].values,
+            "t_ends": index.t_df["end"].values,
+            "t_lengths": index.t_df["length"].values,
+            # Reusable scratch buffer for global→local index mapping.
+            # Sized to max possible index; reset to -1 each locus.
+            "local_map": np.full(
+                index.num_transcripts * 2 + 1, -1, dtype=np.int32,
+            ),
+        }
+
         for i, locus in enumerate(loci):
             if len(locus.unit_indices) == 0:
                 continue
@@ -577,6 +604,7 @@ def quant_from_buffer(
             locus_em = build_locus_em_data(
                 locus, em_data, estimator, index, geometry.mean_frag,
                 gdna_init=gdna_inits[i],
+                _cache=_locus_cache,
             )
             theta, alpha = estimator.run_locus_em(
                 locus_em,

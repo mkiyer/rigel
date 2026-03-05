@@ -659,25 +659,69 @@ class TranscriptIndex:
         # transcript indices into frozensets.  Each unique boundary is
         # stored once in cgranges, with a label indexing into _iv_type
         # and _iv_t_set lookup lists.
+        #
+        # Vectorised: encode refs as integers, sort, detect boundaries via
+        # diff, then build frozensets in a single pass.
         logger.debug("Building collapsed interval index")
-        _collapse: dict[tuple, tuple[int, set[int]]] = {}
-        for row in iv_df.itertuples(index=False):
-            key = (row.ref, row.start, row.end, int(row.interval_type))
-            if key not in _collapse:
-                _collapse[key] = (int(row.interval_type), set())
-            t_idx = int(row.t_index)
-            if t_idx >= 0:
-                _collapse[key][1].add(t_idx)
+        _iv_refs = iv_df["ref"].values
+        _iv_starts = iv_df["start"].values
+        _iv_ends = iv_df["end"].values
+        _iv_itypes = iv_df["interval_type"].values
+        _iv_tidxs = iv_df["t_index"].values
+
+        # Map string refs → integer codes for fast comparison
+        _unique_refs, _ref_codes = np.unique(_iv_refs, return_inverse=True)
+
+        # Sort by (ref_code, start, end, itype) to group identical keys
+        _sort_order = np.lexsort((_iv_itypes, _iv_ends, _iv_starts, _ref_codes))
+        _rc = _ref_codes[_sort_order]
+        _ss = _iv_starts[_sort_order]
+        _ee = _iv_ends[_sort_order]
+        _it = _iv_itypes[_sort_order]
+        _ti = _iv_tidxs[_sort_order]
+        _rr = _iv_refs[_sort_order]
+
+        # Detect group boundaries where any key column changes
+        n = len(_sort_order)
+        _changed = np.empty(n, dtype=bool)
+        if n > 0:
+            _changed[0] = True
+        if n > 1:
+            _changed[1:] = (
+                (np.diff(_rc) != 0)
+                | (np.diff(_ss) != 0)
+                | (np.diff(_ee) != 0)
+                | (np.diff(_it) != 0)
+            )
+        _group_starts = np.where(_changed)[0]
+        _group_ends = np.append(_group_starts[1:], n)
+
+        # Pre-convert numpy arrays to Python lists once (avoids per-element
+        # int()/str() overhead in the 1.2 M-iteration loop below).
+        _rr_list = _rr.tolist()
+        _ss_list = _ss.tolist()
+        _ee_list = _ee.tolist()
+        _it_list = _it.tolist()
+        _ti_list = _ti.tolist()
+        _gs_list = _group_starts.tolist()
+        _ge_list = _group_ends.tolist()
 
         cr = _cgranges_cls()
         iv_type: list[int] = []
         iv_t_set: list[frozenset[int]] = []
-        for label, ((ref, start, end, _itype), (itype_val, tset)) in enumerate(
-            _collapse.items()
-        ):
+        _collapse_keys: list[tuple] = []  # keep for FragmentResolver later
+        for label in range(len(_gs_list)):
+            s = _gs_list[label]
+            e = _ge_list[label]
+            ref = _rr_list[s]
+            start = _ss_list[s]
+            end = _ee_list[s]
+            itype = _it_list[s]
+            tset = frozenset(t for t in _ti_list[s:e] if t >= 0)
             cr.add(ref, start, end, label)
-            iv_type.append(itype_val)
-            iv_t_set.append(frozenset(tset))
+            iv_type.append(itype)
+            iv_t_set.append(tset)
+            _collapse_keys.append((ref, start, end, itype))
         cr.index()
         self.cr = cr
         self._iv_type = iv_type
@@ -685,15 +729,41 @@ class TranscriptIndex:
         logger.debug(f"Interval index: {len(iv_df)} rows → {len(iv_type)} collapsed")
 
         # -- per-transcript exon intervals for coverage-weight model ----------
-        exon_mask = iv_df["interval_type"].values == int(IntervalType.EXON)
-        exon_rows = iv_df.loc[exon_mask, ["t_index", "start", "end"]]
+        # Vectorised: extract raw arrays, sort by (t_index, start), then
+        # split at group boundaries — avoids pandas groupby overhead.
+        _iv_itype_arr = iv_df["interval_type"].values
+        _iv_tidx_arr = iv_df["t_index"].values
+        _iv_start_arr = iv_df["start"].values
+        _iv_end_arr = iv_df["end"].values
+
+        exon_mask = _iv_itype_arr == int(IntervalType.EXON)
+        _ex_tidx = _iv_tidx_arr[exon_mask]
+        _ex_start = _iv_start_arr[exon_mask]
+        _ex_end = _iv_end_arr[exon_mask]
+
+        # Drop negative t_index (intergenic sentinel)
+        valid = _ex_tidx >= 0
+        _ex_tidx = _ex_tidx[valid]
+        _ex_start = _ex_start[valid]
+        _ex_end = _ex_end[valid]
+
+        # Sort by (t_index, start) so exons within each transcript are ordered
+        order = np.lexsort((_ex_start, _ex_tidx))
+        _ex_tidx = _ex_tidx[order]
+        _ex_start = _ex_start[order]
+        _ex_end = _ex_end[order]
+
+        # Find group boundaries via np.unique
+        unique_tidx, group_starts, group_counts = np.unique(
+            _ex_tidx, return_index=True, return_counts=True
+        )
+        # Pre-stack start/end into a single int32 array for fast slicing
+        _ex_coords = np.column_stack((_ex_start, _ex_end)).astype(np.int32)
+
         t_exon_intervals: dict[int, np.ndarray] = {}
-        for t_idx, grp in exon_rows.groupby("t_index"):
-            if int(t_idx) < 0:
-                continue
-            coords = grp[["start", "end"]].values
-            coords = coords[coords[:, 0].argsort()]
-            t_exon_intervals[int(t_idx)] = coords.astype(np.int32)
+        for i in range(len(unique_tidx)):
+            s = group_starts[i]
+            t_exon_intervals[int(unique_tidx[i])] = _ex_coords[s : s + group_counts[i]]
         self._t_exon_intervals = t_exon_intervals
         logger.debug(f"Cached exon intervals for {len(t_exon_intervals)} transcripts")
 
@@ -703,27 +773,70 @@ class TranscriptIndex:
             os.path.join(index_dir, SJ_FEATHER)
         )
 
-        # Exact-match map for quantification (ref, start, end, strand) → frozenset[int]
+        # Extract raw numpy arrays once
+        _sj_refs = sj_df["ref"].values
+        _sj_starts = sj_df["start"].values
+        _sj_ends = sj_df["end"].values
+        _sj_strands = sj_df["strand"].values
+        _sj_tidxs = sj_df["t_index"].values
+
+        # Exact-match map: vectorised sort + boundary detection
         logger.debug("Building splice junction exact-match map")
-        sj_map: dict[tuple, set[int]] = {}
-        for row in sj_df.itertuples(index=False):
-            key = (row.ref, row.start, row.end, row.strand)
-            if key not in sj_map:
-                sj_map[key] = set()
-            sj_map[key].add(int(row.t_index))
-        self.sj_map = {
-            key: frozenset(val) for key, val in sj_map.items()
-        }
+        _sj_uref, _sj_rc = np.unique(_sj_refs, return_inverse=True)
+        _sj_order = np.lexsort((_sj_strands, _sj_ends, _sj_starts, _sj_rc))
+        _sj_rc_s = _sj_rc[_sj_order]
+        _sj_st_s = _sj_starts[_sj_order]
+        _sj_en_s = _sj_ends[_sj_order]
+        _sj_sd_s = _sj_strands[_sj_order]
+        _sj_ti_s = _sj_tidxs[_sj_order]
+        _sj_rf_s = _sj_refs[_sj_order]
+
+        _sj_n = len(_sj_order)
+        _sj_changed = np.empty(_sj_n, dtype=bool)
+        if _sj_n > 0:
+            _sj_changed[0] = True
+        if _sj_n > 1:
+            _sj_changed[1:] = (
+                (np.diff(_sj_rc_s) != 0)
+                | (np.diff(_sj_st_s) != 0)
+                | (np.diff(_sj_en_s) != 0)
+                | (np.diff(_sj_sd_s) != 0)
+            )
+        _sj_gstarts = np.where(_sj_changed)[0]
+        _sj_gends = np.append(_sj_gstarts[1:], _sj_n)
+
+        # Pre-convert to Python lists for fast iteration
+        _sj_rf_list = _sj_rf_s.tolist()
+        _sj_st_list = _sj_st_s.tolist()
+        _sj_en_list = _sj_en_s.tolist()
+        _sj_sd_list = _sj_sd_s.tolist()
+        _sj_ti_list = _sj_ti_s.tolist()
+        _sj_gs_list = _sj_gstarts.tolist()
+        _sj_ge_list = _sj_gends.tolist()
+
+        sj_map: dict[tuple, frozenset[int]] = {}
+        for i in range(len(_sj_gs_list)):
+            s = _sj_gs_list[i]
+            e = _sj_ge_list[i]
+            key = (_sj_rf_list[s], _sj_st_list[s],
+                   _sj_en_list[s], _sj_sd_list[s])
+            sj_map[key] = frozenset(_sj_ti_list[s:e])
+        self.sj_map = sj_map
 
         # cgranges tree for containment / gap queries (fragment length)
+        # Use raw arrays directly instead of itertuples
         logger.debug("Building splice junction cgranges index")
         sj_cr = _cgranges_cls()
-        for label, row in enumerate(sj_df.itertuples(index=False)):
-            sj_cr.add(row.ref, row.start, row.end, label)
+        _sj_refs_list = _sj_refs.tolist()
+        _sj_starts_list = _sj_starts.tolist()
+        _sj_ends_list = _sj_ends.tolist()
+        for label in range(len(_sj_refs_list)):
+            sj_cr.add(_sj_refs_list[label], _sj_starts_list[label],
+                       _sj_ends_list[label], label)
         sj_cr.index()
         self.sj_cr = sj_cr
-        self._sj_t_index = sj_df["t_index"].values
-        self._sj_strand = sj_df["strand"].values
+        self._sj_t_index = _sj_tidxs
+        self._sj_strand = _sj_strands
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
 
@@ -732,13 +845,10 @@ class TranscriptIndex:
         ctx = FragmentResolver()
 
         # 1. Overlap index from collapsed data
-        cr_refs: list[str] = []
-        cr_starts: list[int] = []
-        cr_ends: list[int] = []
-        for (ref, start, end, _itype) in _collapse.keys():
-            cr_refs.append(ref)
-            cr_starts.append(start)
-            cr_ends.append(end)
+        n_collapsed = len(_collapse_keys)
+        cr_refs = [k[0] for k in _collapse_keys]
+        cr_starts = [k[1] for k in _collapse_keys]
+        cr_ends = [k[2] for k in _collapse_keys]
         # CSR for transcript sets
         tset_flat: list[int] = []
         tset_offsets: list[int] = [0]
@@ -777,13 +887,13 @@ class TranscriptIndex:
             sj_t_offsets,
         )
 
-        # 3. SJ gap index (raw sj_df rows)
+        # 3. SJ gap index (raw sj_df rows — use pre-extracted arrays)
         ctx.build_sj_gap_index(
-            sj_df["ref"].tolist(),
-            sj_df["start"].values.astype(np.int32).tolist(),
-            sj_df["end"].values.astype(np.int32).tolist(),
-            sj_df["t_index"].values.astype(np.int32).tolist(),
-            sj_df["strand"].values.astype(np.int32).tolist(),
+            _sj_refs_list,
+            _sj_starts.astype(np.int32).tolist(),
+            _sj_ends.astype(np.int32).tolist(),
+            _sj_tidxs.astype(np.int32).tolist(),
+            _sj_strands.astype(np.int32).tolist(),
         )
 
         # 4. Metadata

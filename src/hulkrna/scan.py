@@ -149,7 +149,7 @@ class FragmentRouter:
         t_length_arr = ctx.t_length_arr
         log_p_sense = ctx.log_p_sense
         log_p_antisense = ctx.log_p_antisense
-        anti_flag = ctx.anti_flag
+        r1_antisense = ctx.r1_antisense
         fl_log_prob = ctx.fl_log_prob
         fl_max_size = ctx.fl_max_size
         fl_tail_base = ctx.fl_tail_base
@@ -188,7 +188,7 @@ class FragmentRouter:
                 t_strand = int(t_strand_arr[t_idx])
                 same = (exon_strand == t_strand)
                 log_strand = log_p_sense if same else log_p_antisense
-                is_anti = anti_flag if same else (not anti_flag)
+                is_anti = r1_antisense if same else (not r1_antisense)
             else:
                 log_strand = LOG_HALF
                 is_anti = False
@@ -419,7 +419,7 @@ class FragmentRouter:
     def _gdna_log_lik(self, bf) -> float:
         """Compute gDNA log-likelihood for a single unspliced fragment.
 
-        gDNA is unstranded: strand probability is always 0.5.
+        gDNA has no strand bias: strand probability is always 0.5.
         """
         ctx = self.ctx
         sp = ctx.gdna_splice_penalties.get(

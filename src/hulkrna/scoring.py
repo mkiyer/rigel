@@ -99,7 +99,7 @@ class FragmentScorer:
     # Strand model: RNA
     log_p_sense: float
     log_p_antisense: float
-    anti_flag: bool              # True when protocol is RF (p_sense < 0.5)
+    r1_antisense: bool           # True when R1-antisense protocol (p_sense < 0.5)
 
     # Penalty parameters
     overhang_log_penalty: float
@@ -189,7 +189,7 @@ class FragmentScorer:
         ctx = FragmentScorer(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
             log_p_antisense=math.log(max(p_antisense, LOG_SAFE_FLOOR)),
-            anti_flag=p_sense < 0.5,
+            r1_antisense=p_sense < 0.5,
             overhang_log_penalty=(
                 overhang_log_penalty
                 if overhang_log_penalty is not None
@@ -223,7 +223,7 @@ class FragmentScorer:
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
             log_p_antisense=float(ctx.log_p_antisense),
-            anti_flag=bool(ctx.anti_flag),
+            r1_antisense=bool(ctx.r1_antisense),
             overhang_log_penalty=float(ctx.overhang_log_penalty),
             mismatch_log_penalty=float(ctx.mismatch_log_penalty),
             fl_log_prob=ctx.fl_log_prob,
@@ -337,7 +337,7 @@ def score_gdna_standalone(
 ) -> float:
     """Compute gDNA log-likelihood for a fragment.
 
-    gDNA is unstranded: strand probability is always 0.5.
+    gDNA has no strand bias: strand probability is always 0.5.
 
     Intended for unit tests and external callers that do not construct
     a ``FragmentScorer``.

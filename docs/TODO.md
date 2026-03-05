@@ -5,78 +5,6 @@
 
 Previous versions of the code had hard cutoffs for strand specificity. Do those still exist? These should be removed because our new initialization scheme uses both coverage and strand specificity together. We should not longer require cutoffs for strand specificity anywhere in the code. Do a deep dive thorough search for any remaining strand specificity conditional statements based on some cutoff. 
 
-## gDNA siphoning at imperfect strand specificity
-
-When ss < 1.0, gDNA begins to siphon away fragments. gDNA siphoned ~150/10000 fragments in one case. Why does this happen? With imperfect strand specificity (ss=0.90), mRNA and nRNA may be either sense (90%) or antisense (10%). Both sense and antisense fragments compete for gDNA.
-
-When gDNA contamination is present, the EM **over-assigns** unspliced exonic fragments to gDNA, stealing them from nRNA (and to a lesser extent mRNA). The effect scales with gDNA abundance:
-
-| gDNA level | nRNA rel error | mRNA rel error | gDNA excess |
-|-----------|---------------|---------------|-------------|
-| 0 | -0.6% | near 0% | 0 |
-| 20 | -1.1% | -0.1% | -3.7% |
-| 100 | -5.6% | -6.7% | -0.6% |
-| 200 | -15.9% | -8.7% | +0.6% |
-| 500 | -39.7% | -18.0% | +1.3% |
-
-nRNA is hit harder than mRNA because their fragments overlap more with gDNA (both are unspliced and span intronic regions).
-
-### Root cause: effective length asymmetry
-
-This is **expected behavior**, not a bug. Here's the mechanism:
-
-In the EM, each fragment's posterior probability for component $c$ is:
-
-$$P(c \mid \text{frag}) \propto \frac{\theta_c \cdot P(\text{frag} \mid c)}{\text{eff\_len}_c}$$
-
-For an unspliced exonic fragment (footprint ~200bp) in the diagnostic case (g=500, n=100, m=100):
-
-| Component | profile\_len | eff\_len | $-\log(\text{eff\_len})$ |
-|-----------|------------|---------|-------------------------|
-| mRNA (exonic) | 4,000 | 3,801 | -8.24 |
-| nRNA (genomic span) | 8,000 | 7,801 | -8.96 |
-| **gDNA (locus span)** | **17,000** | **16,801** | **-9.73** |
-
-The effective length correction $-\log(\text{eff\_len})$ penalizes components proportionally to their size — a fragment could land anywhere in the component's footprint, so longer components have lower per-position density. **This is correct**: gDNA really does span the whole locus, so a fragment at any position is equally likely.
-
-The siphon happens because:
-
-1. **gDNA has a huge $\theta$**: When g=500, ~89% of fragments are gDNA, so $\theta_{\text{gDNA}} \gg \theta_{\text{nRNA}}$
-2. **The eff\_len penalty is sublinear** (logarithmic): gDNA's locus span is only 2× the nRNA span, but its $\theta$ is 10-50× larger. The $\log(\theta)$ advantage overwhelms the $\log(\text{eff\_len})$ disadvantage.
-3. **Unspliced exonic fragments are ambiguous**: They're consistent with all three hypotheses (mRNA, nRNA, gDNA). The EM splits them proportional to $\theta / \text{eff\_len}$, which favors gDNA when gDNA dominates.
-
-### Why nRNA is hit harder than mRNA
-
-- **Spliced fragments are safe**: Fragments with annotated splice junctions get $-\infty$ gDNA log-likelihood (gDNA can't produce splice junctions). These are unambiguously mRNA.
-- **Intronic fragments are safe**: Fragments overlapping introns are consistent with nRNA and gDNA but NOT mRNA. However, intronic fragments are also ambiguous with gDNA.
-- **Exonic unspliced fragments**: Ambiguous across all three. The EM's $\theta$-weighted split siphons some to gDNA. Since nRNA's "claim" on these fragments is weaker (larger eff\_len than mRNA), it loses more.
-
-### Can we minimize it?
-
-This is fundamentally a **model identifiability problem**. When gDNA is very high, the exonic unspliced fragments are genuinely ambiguous — you can't tell from the fragment alone whether it came from nRNA or gDNA. Some approaches to consider:
-
-1. **Already handled well at SS ≥ 0.9**: Strand information resolves most ambiguity. At SS=1.0 and g=100, errors are only ~5-7%. The siphon is really only problematic at very high gDNA (g ≥ 200) relative to RNA.
-
-2. **The nrna\_frac prior helps**: The hierarchical Beta prior anchors the nRNA fraction estimate from density ratios (intronic vs exonic). This already works — the nrna\_frac prior for t0 was 0.633 (close to truth). The issue is that the EM's fragment-level competition overrides this because gDNA fragments vastly outnumber RNA fragments.
-
-3. **Potential improvements** (diminishing returns territory):
-   - **Fragment position information**: gDNA fragments should be uniformly distributed across the locus, while nRNA fragments should cluster around gene bodies. Using positional bias models could help disambiguate.
-   - **Stronger nrna\_frac prior**: Increasing `kappa_tss` would keep nrna\_frac closer to the density-inferred value, reducing the EM's ability to siphon. But this risks overfitting the prior when it's wrong.
-   - **gDNA rate cap**: Bounding gDNA's $\theta$ based on intergenic fragment density could prevent it from absorbing too many genic fragments. This is somewhat already done via the EB gDNA prior.
-
-4. **The practical question**: At g=500 with m=100 and n=100, gDNA is 89% of all fragments. Accurate deconvolution at this contamination level is inherently difficult for any method. The errors at g ≤ 100 (the more realistic range) are modest (< 7%).
-
-**Bottom line**: The gDNA siphon is expected behavior from a well-specified generative model, not a bug. It reflects genuine statistical ambiguity when gDNA dominates. The fix is upstream: reduce gDNA contamination in the wet lab, or use higher strand specificity protocols.
-
-
-
- ## Incorrect nRNA and gDNA initialization
-
- I agree that there is a bug where the compute_nrna_init() and compute_eb_gdna_priors() are not correctly accessing the strand model. The goal of maintaining multiple strand models (spliced, exon, intron, intergenic) is to facilitate the initialization estimates for seeding the EM. If the spliced strand-specificity (gold standard) is 0.99 and the exonic strand specificity is 0.95 and intronic ss = 0.6, it implies something important about our gDNA contamination rates. We might need to revisit how we estimate gDNA contamination rates (locally, chromosome, globally) at a later time.
-
-## Nascent RNA versus Genomic DNA
-
-In the latest version of the code, nascent RNA appears to outcompete with genomic DNA for fragments. When genomic DNA is high, nascent RNA appears to be siphon off fragments that should be categorized as gDNA.
 
 
 
@@ -253,3 +181,8 @@ Smoothing towards 0.5 with pseudocount parameter
 kappa = 2 default
 
 2026-03-03: only use spliced reads to train. other reads are contaminated.
+
+
+## (RESOLVED) Incorrect nRNA and gDNA initialization
+
+Change to a 'linked' total RNA = nRNA + mRNA model led to the creation of a subtle initialization bug where gDNA and nRNA reads were being double counted. This has been resolved.

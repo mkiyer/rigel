@@ -118,7 +118,7 @@ class NativeFragmentScorer {
     // --- Scalar scoring parameters ---
     double log_p_sense_;
     double log_p_antisense_;
-    bool   anti_flag_;
+    bool   r1_antisense_;
     double oh_log_pen_;
     double mm_log_pen_;
     int32_t fl_max_size_;
@@ -197,7 +197,7 @@ public:
     NativeFragmentScorer(
         double log_p_sense,
         double log_p_antisense,
-        bool   anti_flag,
+        bool   r1_antisense,
         double oh_log_pen,
         double mm_log_pen,
         nb::object fl_log_prob_obj,
@@ -211,7 +211,7 @@ public:
         nb::object t_exon_data_obj)
       : log_p_sense_(log_p_sense),
         log_p_antisense_(log_p_antisense),
-        anti_flag_(anti_flag),
+        r1_antisense_(r1_antisense),
         oh_log_pen_(oh_log_pen),
         mm_log_pen_(mm_log_pen),
         fl_max_size_(fl_max_size),
@@ -349,7 +349,7 @@ public:
                 bool same = (exon_strand ==
                              static_cast<int>(t_strand_[t_idx]));
                 log_strand = same ? log_p_sense_ : log_p_antisense_;
-                is_anti    = same ? anti_flag_ : !anti_flag_;
+                is_anti    = same ? r1_antisense_ : !r1_antisense_;
             } else {
                 log_strand = LOG_HALF;
                 is_anti = false;
@@ -595,7 +595,7 @@ public:
                     bool same = (exon_strand ==
                                  static_cast<int>(t_strand_[t_idx]));
                     log_strand = same ? log_p_sense_ : log_p_antisense_;
-                    is_anti    = same ? anti_flag_ : !anti_flag_;
+                    is_anti    = same ? r1_antisense_ : !r1_antisense_;
                 } else {
                     log_strand = LOG_HALF;
                     is_anti = false;
@@ -779,7 +779,7 @@ NB_MODULE(_scoring_impl, m) {
                  int32_t, nb::object>(),
              nb::arg("log_p_sense"),
              nb::arg("log_p_antisense"),
-             nb::arg("anti_flag"),
+             nb::arg("r1_antisense"),
              nb::arg("overhang_log_penalty"),
              nb::arg("mismatch_log_penalty"),
              nb::arg("fl_log_prob").none(),

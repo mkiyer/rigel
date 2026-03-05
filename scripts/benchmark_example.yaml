@@ -1,0 +1,76 @@
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  Benchmark Configuration                                   ║
+# ╚═════════════════════════════════════════════════════════════╝
+#
+# Benchmarks hulkrna (and optionally salmon, kallisto, htseq)
+# on simulated data (from sim.py) or real/custom datasets.
+#
+# Usage:
+#   python scripts/benchmark.py --config scripts/benchmark_example.yaml
+#
+# CLI flags (--sim-dir, --genome, --gtf, --outdir, --threads) override YAML.
+
+# ── Inputs ────────────────────────────────────────────────────
+genome: /path/to/genome.fa
+gtf: /path/to/gencode.v46.annotation.gtf
+outdir: benchmark_output
+
+threads: 8
+transcript_filter: basic
+
+# ── Data source: sim.py output ────────────────────────────────
+# Point to a sim.py output directory to auto-discover conditions,
+# FASTQ, oracle BAM, and truth.  Genome/GTF/filter are inherited
+# from the manifest unless overridden above.
+sim_dir: /path/to/sim_output
+
+# ── Data source: explicit datasets ────────────────────────────
+# Use instead of (or in addition to) sim_dir for real data or
+# custom inputs.  Each dataset can have FASTQ, BAM, and/or truth.
+#
+# datasets:
+#   - name: my_sample
+#     fastq_r1: /path/to/R1.fq
+#     fastq_r2: /path/to/R2.fq
+#     strand_specificity: 1.0
+#     # truth: /path/to/truth.tsv  # optional, for scoring
+#   - name: my_bam
+#     oracle_bam: /path/to/aligned.bam  # pre-aligned name-sorted BAM
+#     strand_specificity: 0.9
+
+# ── Aligners ──────────────────────────────────────────────────
+# Each aligner produces a name-sorted BAM used by hulkrna.
+# For sim data with oracle BAMs, "oracle" uses the pre-built BAM.
+# "minimap2" aligns FASTQ from scratch.
+aligners:
+  oracle:
+    type: oracle
+  minimap2:
+    type: minimap2
+
+# ── HulkRNA configurations ───────────────────────────────────
+# Multiple named configs for head-to-head comparison.
+hulkrna_configs:
+  default: {}
+  # tuned:
+  #   em_iterations: 2000
+  #   em_convergence_delta: 1.0e-6
+  #   em_prior_alpha: 0.01
+  #   prune_threshold: 0.01
+  #   overhang_alpha: 5.0e-3
+
+# ── Optional tools ────────────────────────────────────────────
+salmon:
+  enabled: false
+
+kallisto:
+  enabled: false
+
+htseq:
+  enabled: false
+
+# ── Runtime ───────────────────────────────────────────────────
+runtime:
+  keep_going: true      # Continue on tool failure
+
+verbose: true

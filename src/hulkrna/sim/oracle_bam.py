@@ -584,7 +584,7 @@ class OracleBamSimulator:
     ) -> list[pysam.AlignedSegment]:
         """Build R1 + R2 BAM records for an RNA fragment.
 
-        FR library convention (dUTP):
+        R1-antisense library convention:
         - POS-strand transcript: R1 maps to − (reverse), R2 maps to + (forward)
         - NEG-strand transcript: R1 maps to + (forward), R2 maps to − (reverse)
 
@@ -715,7 +715,7 @@ class OracleBamSimulator:
     ) -> list[pysam.AlignedSegment]:
         """Build R1 + R2 BAM records for a gDNA fragment.
 
-        gDNA fragments are unspliced. FR library convention still applies:
+        gDNA fragments are unspliced. The same read orientation convention applies:
         if the fragment is on the + strand, R1 is reverse-complement of the
         3' end, R2 is sense from the 5' end (and vice versa for − strand).
         """
@@ -803,7 +803,7 @@ class OracleBamSimulator:
     ) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
         """Split fragment genomic blocks into R1 and R2 sub-blocks.
 
-        For a POS-strand transcript (FR library):
+        For a POS-strand transcript (R1-antisense convention):
         - R2 covers the leftmost `read_len` bases (5' end)
         - R1 covers the rightmost `read_len` bases (3' end)
 

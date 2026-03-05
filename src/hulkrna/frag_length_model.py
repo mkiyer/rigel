@@ -103,6 +103,22 @@ class FragmentLengthModel:
         self.n_observations += 1
         self._total_weight += weight
 
+    def observe_batch(self, frag_lengths: "np.ndarray") -> None:
+        """Record a batch of fragment length observations (vectorized).
+
+        Parameters
+        ----------
+        frag_lengths : np.ndarray
+            Integer array of fragment lengths.  All weights are 1.0.
+        """
+        lengths = np.asarray(frag_lengths, dtype=np.intp)
+        clamped = np.clip(lengths, 0, self.max_size)
+        counts = np.bincount(clamped, minlength=self.max_size + 1)
+        self.counts += counts[:self.max_size + 1].astype(np.float64)
+        n = len(lengths)
+        self.n_observations += n
+        self._total_weight += float(n)
+
     # ------------------------------------------------------------------
     # Distribution properties
     # ------------------------------------------------------------------
@@ -432,6 +448,48 @@ class FragmentLengthModels:
             self.gdna_model.observe(frag_length, weight)
         else:
             self.category_models[splice_type].observe(frag_length, weight)
+
+    def observe_batch(
+        self,
+        frag_lengths: "np.ndarray",
+        splice_types: "np.ndarray",
+    ) -> None:
+        """Record a batch of fragment length observations (vectorized).
+
+        Parameters
+        ----------
+        frag_lengths : np.ndarray
+            Integer array of fragment lengths.
+        splice_types : np.ndarray
+            Integer array of splice type values.  Dispatches to
+            category sub-models based on value.
+        """
+        from .splice import SpliceType
+        lengths = np.asarray(frag_lengths, dtype=np.intp)
+        stypes = np.asarray(splice_types, dtype=np.intp)
+        # Global model gets all observations
+        self.global_model.observe_batch(lengths)
+        # Per-category sub-models
+        for cat in SpliceType:
+            mask = stypes == int(cat)
+            if mask.any():
+                self.category_models[cat].observe_batch(lengths[mask])
+
+    def observe_intergenic_batch(
+        self,
+        frag_lengths: "np.ndarray",
+    ) -> None:
+        """Record a batch of intergenic fragment lengths (vectorized).
+
+        Parameters
+        ----------
+        frag_lengths : np.ndarray
+            Integer array of intergenic fragment lengths.
+        """
+        lengths = np.asarray(frag_lengths, dtype=np.intp)
+        self.global_model.observe_batch(lengths)
+        self.intergenic.observe_batch(lengths)
+        self.gdna_model.observe_batch(lengths)
 
     def to_dict(self) -> dict:
         """JSON/YAML-serializable summary of all fragment length models."""

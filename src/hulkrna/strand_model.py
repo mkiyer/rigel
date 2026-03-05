@@ -6,10 +6,10 @@ how fragment alignment strands relate to annotated splice junction (SJ)
 strands.  The SJ strand (from the STAR ``XS`` tag) provides ground truth
 for the gene strand at each junction.
 
-After the R2 strand flip in ``Fragment.from_reads()``, the exon alignment
+After the R2 strand flip in the BAM scanner, the exon alignment
 strand effectively represents read 1's genomic orientation.  Comparing
 this to the SJ strand tells us whether read 1 aligns in the *same*
-direction as the gene (sense/FR) or the *opposite* direction (antisense/RF).
+direction as the gene (R1-sense) or the *opposite* direction (R1-antisense).
 
 The model stores a single Beta posterior over:
 
@@ -65,8 +65,8 @@ class StrandModel:
     ``beta  = prior_beta  + n_opposite``
 
     where *n_same* counts fragments where exon and SJ strands agree
-    (evidence for read 1 sense / FR) and *n_opposite* counts
-    disagreements (evidence for read 1 antisense / RF).
+    (evidence for R1-sense protocol) and *n_opposite* counts
+    disagreements (evidence for R1-antisense protocol).
     """
 
     # --- 2×2 raw counts ---
@@ -110,6 +110,32 @@ class StrandModel:
             else:
                 self.neg_neg += 1
 
+    def observe_batch(
+        self,
+        exon_strands: "np.ndarray",
+        sj_strands: "np.ndarray",
+    ) -> None:
+        """Record a batch of strand observations (vectorized).
+
+        Parameters
+        ----------
+        exon_strands : np.ndarray
+            Integer array of exon strand values (1=POS, 2=NEG).
+        sj_strands : np.ndarray
+            Integer array of SJ strand values (1=POS, 2=NEG).
+        """
+        import numpy as _np
+        exon = _np.asarray(exon_strands)
+        sj = _np.asarray(sj_strands)
+        e_pos = exon == 1  # Strand.POS
+        e_neg = ~e_pos
+        s_pos = sj == 1    # Strand.POS
+        s_neg = ~s_pos
+        self.pos_pos += int(_np.count_nonzero(e_pos & s_pos))
+        self.pos_neg += int(_np.count_nonzero(e_pos & s_neg))
+        self.neg_pos += int(_np.count_nonzero(e_neg & s_pos))
+        self.neg_neg += int(_np.count_nonzero(e_neg & s_neg))
+
     # ------------------------------------------------------------------
     # Derived counts
     # ------------------------------------------------------------------
@@ -147,9 +173,9 @@ class StrandModel:
     def p_r1_sense(self) -> float:
         """Posterior mean P(read 1 aligns in gene-sense direction).
 
-        High (≈ 0.95) for FR libraries (e.g. KAPA Stranded).
-        Low  (≈ 0.05) for RF libraries (e.g. dUTP / Illumina TruSeq).
-        Near 0.50 for unstranded libraries.
+        High (≈ 0.95) for R1-sense libraries (e.g. KAPA Stranded).
+        Low  (≈ 0.05) for R1-antisense libraries (e.g. Illumina TruSeq dUTP).
+        Near 0.50 for weakly-stranded libraries.
         """
         return self.alpha / (self.alpha + self.beta)
 
@@ -162,14 +188,14 @@ class StrandModel:
     def strand_specificity(self) -> float:
         """How strand-specific is the library?
 
-        1.0 = perfect, 0.5 = unstranded.
+        1.0 = perfect, 0.5 = no strand information.
         Equals ``max(p_r1_sense, p_r1_antisense)``.
         """
         return max(self.p_r1_sense, self.p_r1_antisense)
 
     @property
     def read1_sense(self) -> bool:
-        """True if read 1 is predominantly sense (FR protocol)."""
+        """True if read 1 is predominantly sense (R1-sense protocol)."""
         return self.p_r1_sense >= 0.5
 
     def posterior_variance(self) -> float:
@@ -383,10 +409,10 @@ class StrandModels:
       mixture).  Comparing its specificity to ``exonic_spliced``
       reveals gDNA contamination in exonic regions.
     * **intergenic** — trained from intergenic fragments (~100% gDNA).
-      Expected ~50/50 since gDNA is unstranded.
+      Expected ~50/50 since gDNA has no strand bias.
 
     gDNA is scored with a fixed strand probability of **0.5**
-    (unstranded), not learned from intergenic data.
+    (no strand bias), not learned from intergenic data.
     """
 
     exonic_spliced: StrandModel = field(default_factory=StrandModel)
@@ -417,7 +443,7 @@ class StrandModels:
         if n_obs == 0:
             logger.warning(
                 "No spliced strand observations — strand model is "
-                "prior-only (p_r1_sense=0.5, unstranded). Is this "
+                "prior-only (p_r1_sense=0.5, no strand information). Is this "
                 "stranded RNA-seq data?"
             )
         elif n_obs < _MIN_STRAND_OBS_WARNING:
@@ -466,7 +492,7 @@ class StrandModels:
 
     @property
     def read1_sense(self) -> bool:
-        """RNA model's read1_sense flag."""
+        """True if R1-sense protocol (p_r1_sense ≥ 0.5)."""
         return self.exonic_spliced.read1_sense
 
     @property
