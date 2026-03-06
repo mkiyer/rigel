@@ -14,9 +14,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <numeric>
 #include <unordered_map>
 #include <vector>
+
+// OpenMP support (Phase 2B — thread-parallel locus EM).
+// When HULK_NO_OPENMP is defined (CMake fallback), stubs are provided
+// and #pragma omp directives are silently ignored by the compiler.
+#ifndef HULK_NO_OPENMP
+#include <omp.h>
+#else
+static inline int omp_get_max_threads() { return 1; }
+#endif
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -40,6 +50,7 @@ static constexpr double NRNA_FRAC_CLAMP_EPS = 1e-8;
 
 using i32_1d = nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>;
 using i64_1d = nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>;
+using f32_1d = nb::ndarray<const float,   nb::ndim<1>, nb::c_contig>;
 using f64_1d = nb::ndarray<const double,  nb::ndim<1>, nb::c_contig>;
 using u8_1d  = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>;
 
@@ -1240,13 +1251,13 @@ static void extract_locus_sub_problem(
     // Global CSR
     const int64_t* g_offsets,
     const int32_t* g_t_indices,
-    const double*  g_log_liks,
-    const double*  g_coverage_wts,
+    const float*   g_log_liks,
+    const float*   g_coverage_wts,
     const int32_t* g_tx_starts,
     const int32_t* g_tx_ends,
     const uint8_t* g_count_cols,
     const uint8_t* g_is_spliced,
-    const double*  g_gdna_log_liks,
+    const float*   g_gdna_log_liks,
     const int32_t* g_genomic_footprints,
     const int32_t* g_locus_t_indices,
     const uint8_t* g_locus_count_cols,
@@ -1629,13 +1640,13 @@ batch_locus_em(
     // --- Global CSR (ScoredFragments) ---
     i64_1d g_offsets,
     i32_1d g_t_indices,
-    f64_1d g_log_liks,
-    f64_1d g_coverage_wts,
+    f32_1d g_log_liks,
+    f32_1d g_coverage_wts,
     i32_1d g_tx_starts,
     i32_1d g_tx_ends,
     u8_1d  g_count_cols,
     u8_1d  g_is_spliced,
-    f64_1d g_gdna_log_liks,
+    f32_1d g_gdna_log_liks,
     i32_1d g_genomic_footprints,
     i32_1d g_locus_t_indices,
     u8_1d  g_locus_count_cols,
@@ -1673,7 +1684,8 @@ batch_locus_em(
     double prune_threshold,
     double confidence_threshold,
     int    n_transcripts_total,
-    int    n_splice_strand_cols)
+    int    n_splice_strand_cols,
+    int    n_threads)
 {
     int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
     int N_T = n_transcripts_total;
@@ -1682,13 +1694,13 @@ batch_locus_em(
     // Get raw pointers to all input arrays
     const int64_t*  goff  = g_offsets.data();
     const int32_t*  gti   = g_t_indices.data();
-    const double*   gll   = g_log_liks.data();
-    const double*   gcw   = g_coverage_wts.data();
+    const float*    gll   = g_log_liks.data();
+    const float*    gcw   = g_coverage_wts.data();
     const int32_t*  gtxs  = g_tx_starts.data();
     const int32_t*  gtxe  = g_tx_ends.data();
     const uint8_t*  gcc   = g_count_cols.data();
     const uint8_t*  gis   = g_is_spliced.data();
-    const double*   ggll  = g_gdna_log_liks.data();
+    const float*    ggll  = g_gdna_log_liks.data();
     const int32_t*  ggfp  = g_genomic_footprints.data();
     const int32_t*  glti  = g_locus_t_indices.data();
     const uint8_t*  glcc  = g_locus_count_cols.data();
@@ -1727,7 +1739,6 @@ batch_locus_em(
 
     // Allocate scratch buffer for global-to-local mapping
     int local_map_size = nrna_base_index + N_T + 1;
-    std::vector<int32_t> local_map(local_map_size, -1);
 
     // Allocate per-locus result arrays
     std::vector<double> locus_mrna_vec(n_loci, 0.0);
@@ -1739,145 +1750,186 @@ batch_locus_em(
 
     double total_gdna_em = 0.0;
 
-    // Reusable sub-problem struct
-    LocusSubProblem sub;
+    // Determine actual thread count for OpenMP (Phase 2B)
+    int actual_threads = n_threads;
+    if (actual_threads <= 0) actual_threads = omp_get_max_threads();
+    if (actual_threads < 1) actual_threads = 1;
 
-    // --- Main locus loop ---
-    for (int li = 0; li < n_loci; ++li) {
-        // Get locus transcript and unit index ranges
-        auto t_start = lt_off[li];
-        auto t_end   = lt_off[li + 1];
-        auto u_start = lu_off[li];
-        auto u_end   = lu_off[li + 1];
-        int n_t = static_cast<int>(t_end - t_start);
-        int n_u = static_cast<int>(u_end - u_start);
+    // Release the GIL for the compute-intensive parallel section.
+    // All numpy data pointers have been extracted above; pure C++ from here
+    // until the scoped block ends and GIL is re-acquired for numpy return
+    // array creation.
+    {
+        nb::gil_scoped_release release;
 
-        if (n_u == 0) {
-            locus_mrna_data[li] = 0.0;
-            locus_nrna_data[li] = 0.0;
-            locus_gdna_data[li] = 0.0;
-            continue;
-        }
+        // --- Main locus loop (thread-parallel when OpenMP available) ---
+        //
+        // Key safety property: loci are connected components of the
+        // transcript-unit bipartite graph, so each transcript and each unit
+        // belongs to exactly one locus.  This means different loci write to
+        // DISJOINT indices in the output arrays (em_out, hc_out, nrna_out,
+        // gdna_out, psum_out, nass_out).  No data races on those arrays.
+        //
+        // The only shared scalar accumulator is total_gdna_em, handled via
+        // #pragma omp atomic.
+        //
+        // Each thread gets its own LocusSubProblem and local_map scratch
+        // (declared inside the parallel region → thread-private).
+#ifndef HULK_NO_OPENMP
+        #pragma omp parallel num_threads(actual_threads)
+#endif
+        {
+            // Thread-private scratch state (allocated once per thread, reused
+            // across all loci assigned to this thread by dynamic scheduling).
+            LocusSubProblem sub;
+            std::vector<int32_t> local_map(local_map_size, -1);
 
-        const int32_t* t_arr = lt_fl + t_start;
-        const int32_t* u_arr = lu_fl + u_start;
-        double gdna_init = gi_ptr[li];
+#ifndef HULK_NO_OPENMP
+            #pragma omp for schedule(dynamic, 16)
+#endif
+        for (int li = 0; li < n_loci; ++li) {
+            // Get locus transcript and unit index ranges
+            auto t_start = lt_off[li];
+            auto t_end   = lt_off[li + 1];
+            auto u_start = lu_off[li];
+            auto u_end   = lu_off[li + 1];
+            int n_t = static_cast<int>(t_end - t_start);
+            int n_u = static_cast<int>(u_end - u_start);
 
-        // 1. Extract sub-problem
-        extract_locus_sub_problem(
-            sub, t_arr, n_t, u_arr, n_u, gdna_init,
-            goff, gti, gll, gcw, gtxs, gtxe, gcc,
-            gis, ggll, ggfp, glti, glcc,
-            nrna_base_index,
-            unambig_row_sums.data(), nri, nfa, nfb,
-            ts_ptr, te_ptr, tl_ptr, sp_ptr, el_ptr,
-            mean_frag,
-            local_map.data(), local_map_size);
+            if (n_u == 0) {
+                locus_mrna_data[li] = 0.0;
+                locus_nrna_data[li] = 0.0;
+                locus_gdna_data[li] = 0.0;
+                continue;
+            }
 
-        int nc = sub.n_components;
-        int sub_n_t = sub.n_t;
-        size_t n_candidates = sub.t_indices.size();
-        int n_local_units = sub.n_local_units;
+            const int32_t* t_arr = lt_fl + t_start;
+            const int32_t* u_arr = lu_fl + u_start;
+            double gdna_init = gi_ptr[li];
 
-        // 2. Apply bias correction (mutates log_liks in-place)
-        if (n_candidates > 0) {
-            apply_bias_correction_uniform(
-                sub.log_liks.data(),
+            // 1. Extract sub-problem
+            extract_locus_sub_problem(
+                sub, t_arr, n_t, u_arr, n_u, gdna_init,
+                goff, gti, gll, gcw, gtxs, gtxe, gcc,
+                gis, ggll, ggfp, glti, glcc,
+                nrna_base_index,
+                unambig_row_sums.data(), nri, nfa, nfb,
+                ts_ptr, te_ptr, tl_ptr, sp_ptr, el_ptr,
+                mean_frag,
+                local_map.data(), local_map_size);
+
+            int nc = sub.n_components;
+            int sub_n_t = sub.n_t;
+            size_t n_candidates = sub.t_indices.size();
+            int n_local_units = sub.n_local_units;
+
+            // 2. Apply bias correction (mutates log_liks in-place)
+            if (n_candidates > 0) {
+                apply_bias_correction_uniform(
+                    sub.log_liks.data(),
+                    sub.t_indices.data(),
+                    sub.tx_starts.data(),
+                    sub.tx_ends.data(),
+                    sub.bias_profiles.data(),
+                    n_candidates);
+            }
+
+            // 3. Handle empty sub-problem
+            if (n_local_units == 0 || n_candidates == 0) {
+                locus_mrna_data[li] = 0.0;
+                locus_nrna_data[li] = 0.0;
+                locus_gdna_data[li] = 0.0;
+                continue;
+            }
+
+            // 4. Compute log(effective_lengths) — all 1.0, so log = 0.0
+            std::vector<double> log_eff_len(nc, 0.0);
+
+            // 5. Build equivalence classes
+            auto ec_data = build_equiv_classes(
+                sub.offsets.data(),
                 sub.t_indices.data(),
-                sub.tx_starts.data(),
-                sub.tx_ends.data(),
-                sub.bias_profiles.data(),
-                n_candidates);
-        }
+                sub.log_liks.data(),
+                sub.coverage_wts.data(),
+                n_local_units);
 
-        // 3. Handle empty sub-problem
-        if (n_local_units == 0 || n_candidates == 0) {
-            locus_mrna_data[li] = 0.0;
-            locus_nrna_data[li] = 0.0;
-            locus_gdna_data[li] = 0.0;
-            continue;
-        }
-
-        // 4. Compute log(effective_lengths) — all 1.0, so log = 0.0
-        std::vector<double> log_eff_len(nc, 0.0);
-
-        // 5. Build equivalence classes
-        auto ec_data = build_equiv_classes(
-            sub.offsets.data(),
-            sub.t_indices.data(),
-            sub.log_liks.data(),
-            sub.coverage_wts.data(),
-            n_local_units);
-
-        // 6. Coverage-weighted warm start + OVR prior
-        std::vector<double> prior(nc);
-        std::vector<double> theta_init(nc);
-        compute_ovr_prior_and_warm_start(
-            ec_data,
-            sub.unambig_totals.data(),
-            sub.eligible.data(),
-            prior_alpha, prior_gamma,
-            prior.data(), theta_init.data(), nc);
-
-        // 7. Run SQUAREM (linked or classic)
-        bool linked = (sub_n_t > 0);
-        EMResult result;
-        if (linked) {
-            // Collapse warm start to theta_t space
-            int ns = sub_n_t + 1;
-            std::vector<double> theta_t_init(ns);
-            for (int i = 0; i < sub_n_t; ++i) {
-                theta_t_init[i] = theta_init[i] + theta_init[sub_n_t + i];
-            }
-            theta_t_init[sub_n_t] = theta_init[2 * sub_n_t];
-
-            // nrna_frac_init = prior mean, clamped
-            std::vector<double> nrna_frac_init(sub_n_t);
-            for (int i = 0; i < sub_n_t; ++i) {
-                double sa = sub.nrna_frac_alpha[i] + sub.nrna_frac_beta[i];
-                nrna_frac_init[i] = (sa > 0.0)
-                    ? sub.nrna_frac_alpha[i] / sa : 0.5;
-                if (nrna_frac_init[i] < NRNA_FRAC_CLAMP_EPS)
-                    nrna_frac_init[i] = NRNA_FRAC_CLAMP_EPS;
-                else if (nrna_frac_init[i] > 1.0 - NRNA_FRAC_CLAMP_EPS)
-                    nrna_frac_init[i] = 1.0 - NRNA_FRAC_CLAMP_EPS;
-            }
-
-            result = linked_run_squarem(
-                ec_data, log_eff_len.data(),
+            // 6. Coverage-weighted warm start + OVR prior
+            std::vector<double> prior(nc);
+            std::vector<double> theta_init(nc);
+            compute_ovr_prior_and_warm_start(
+                ec_data,
                 sub.unambig_totals.data(),
-                prior.data(),
-                theta_t_init.data(),
-                nrna_frac_init.data(),
-                sub.nrna_frac_alpha.data(),
-                sub.nrna_frac_beta.data(),
-                sub_n_t, nc,
-                max_iterations, convergence_delta,
-                prune_threshold);
-        } else {
-            result = run_squarem(
-                ec_data, log_eff_len.data(),
-                sub.unambig_totals.data(),
-                prior.data(),
-                theta_init.data(),
-                nc, max_iterations, convergence_delta,
-                use_vbem, prune_threshold);
+                sub.eligible.data(),
+                prior_alpha, prior_gamma,
+                prior.data(), theta_init.data(), nc);
+
+            // 7. Run SQUAREM (linked or classic)
+            bool linked = (sub_n_t > 0);
+            EMResult result;
+            if (linked) {
+                // Collapse warm start to theta_t space
+                int ns = sub_n_t + 1;
+                std::vector<double> theta_t_init(ns);
+                for (int i = 0; i < sub_n_t; ++i) {
+                    theta_t_init[i] = theta_init[i] + theta_init[sub_n_t + i];
+                }
+                theta_t_init[sub_n_t] = theta_init[2 * sub_n_t];
+
+                // nrna_frac_init = prior mean, clamped
+                std::vector<double> nrna_frac_init(sub_n_t);
+                for (int i = 0; i < sub_n_t; ++i) {
+                    double sa = sub.nrna_frac_alpha[i] + sub.nrna_frac_beta[i];
+                    nrna_frac_init[i] = (sa > 0.0)
+                        ? sub.nrna_frac_alpha[i] / sa : 0.5;
+                    if (nrna_frac_init[i] < NRNA_FRAC_CLAMP_EPS)
+                        nrna_frac_init[i] = NRNA_FRAC_CLAMP_EPS;
+                    else if (nrna_frac_init[i] > 1.0 - NRNA_FRAC_CLAMP_EPS)
+                        nrna_frac_init[i] = 1.0 - NRNA_FRAC_CLAMP_EPS;
+                }
+
+                result = linked_run_squarem(
+                    ec_data, log_eff_len.data(),
+                    sub.unambig_totals.data(),
+                    prior.data(),
+                    theta_t_init.data(),
+                    nrna_frac_init.data(),
+                    sub.nrna_frac_alpha.data(),
+                    sub.nrna_frac_beta.data(),
+                    sub_n_t, nc,
+                    max_iterations, convergence_delta,
+                    prune_threshold);
+            } else {
+                result = run_squarem(
+                    ec_data, log_eff_len.data(),
+                    sub.unambig_totals.data(),
+                    prior.data(),
+                    theta_init.data(),
+                    nc, max_iterations, convergence_delta,
+                    use_vbem, prune_threshold);
+            }
+
+            // 8. Assign posteriors (writes to disjoint transcript
+            //    indices — safe across threads, no atomics needed)
+            double locus_mrna = 0.0, locus_nrna = 0.0, locus_gdna = 0.0;
+            assign_posteriors(
+                sub, result.theta.data(), confidence_threshold,
+                em_out, hc_out, nrna_out, gdna_out,
+                psum_out, nass_out,
+                locus_mrna, locus_nrna, locus_gdna,
+                N_T, N_COLS);
+
+            locus_mrna_data[li] = locus_mrna;
+            locus_nrna_data[li] = locus_nrna;
+            locus_gdna_data[li] = locus_gdna;
+
+            // total_gdna_em is the only shared scalar — use atomic
+#ifndef HULK_NO_OPENMP
+            #pragma omp atomic
+#endif
+            total_gdna_em += locus_gdna;
         }
-
-        // 8. Assign posteriors
-        double locus_mrna = 0.0, locus_nrna = 0.0, locus_gdna = 0.0;
-        assign_posteriors(
-            sub, result.theta.data(), confidence_threshold,
-            em_out, hc_out, nrna_out, gdna_out,
-            psum_out, nass_out,
-            locus_mrna, locus_nrna, locus_gdna,
-            N_T, N_COLS);
-
-        locus_mrna_data[li] = locus_mrna;
-        locus_nrna_data[li] = locus_nrna;
-        locus_gdna_data[li] = locus_gdna;
-        total_gdna_em += locus_gdna;
-    }
+        } // end omp parallel
+    } // end gil_scoped_release — GIL re-acquired here
 
     // Package per-locus results as numpy arrays (copy from vector)
     size_t shape[1] = { static_cast<size_t>(n_loci) };
@@ -1904,6 +1956,151 @@ batch_locus_em(
             gdna_copy, 1, shape, std::move(gdna_owner))
     );
 }
+
+
+// ================================================================
+// Phase 3 — C++ Union-Find Connected Components
+// ================================================================
+//
+// Replaces scipy.sparse.csgraph.connected_components for locus building.
+// Uses disjoint-set (union-find) with path compression and union by rank.
+// Time: O(N_candidates * α(N_transcripts)) ≈ O(N_candidates).
+//
+// For each EM unit, all candidate transcripts in that unit are connected.
+// We union the first transcript in each unit with every other transcript
+// in that unit.  After processing all units, find() on each transcript
+// gives its component root, which we relabel to sequential 0-based IDs.
+
+namespace {
+
+/// Disjoint-set forest with path compression and union by rank.
+struct UnionFind {
+    std::vector<int32_t> parent;
+    std::vector<int32_t> rank;
+
+    explicit UnionFind(int32_t n) : parent(n), rank(n, 0) {
+        std::iota(parent.begin(), parent.end(), 0);
+    }
+
+    int32_t find(int32_t x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];  // path halving
+            x = parent[x];
+        }
+        return x;
+    }
+
+    void unite(int32_t a, int32_t b) {
+        a = find(a);
+        b = find(b);
+        if (a == b) return;
+        if (rank[a] < rank[b]) std::swap(a, b);
+        parent[b] = a;
+        if (rank[a] == rank[b]) ++rank[a];
+    }
+};
+
+}  // anonymous namespace
+
+
+/// Build loci (connected components) from the global CSR fragment data.
+///
+/// Arguments:
+///   offsets      — int64[n_units + 1]: CSR row pointers
+///   t_indices    — int32[n_candidates]: candidate transcript/nRNA indices
+///   nrna_base    — int32: first nRNA shadow index (= num_transcripts)
+///   n_transcripts — int32: number of real transcripts
+///
+/// Returns a tuple of:
+///   labels       — int32[n_transcripts]: component label per transcript
+///                  (sequential 0-based, only active transcripts get real
+///                  labels; inactive transcripts get -1)
+///   n_components — int32: number of connected components
+static nb::tuple connected_components_native(
+    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>  offsets_arr,
+    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>  t_indices_arr,
+    int32_t nrna_base,
+    int32_t n_transcripts)
+{
+    const int64_t* offsets = offsets_arr.data();
+    const int32_t* t_idx   = t_indices_arr.data();
+    const int64_t  n_units = static_cast<int64_t>(offsets_arr.shape(0)) - 1;
+
+    if (n_units <= 0 || n_transcripts <= 0) {
+        // Return all -1 labels, 0 components
+        auto* labels = new int32_t[n_transcripts];
+        std::fill(labels, labels + n_transcripts, -1);
+        size_t shape[1] = {static_cast<size_t>(n_transcripts)};
+        nb::capsule owner(labels, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
+        return nb::make_tuple(
+            nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(labels, 1, shape, std::move(owner)),
+            nb::int_(0)
+        );
+    }
+
+    UnionFind uf(n_transcripts);
+
+    // Track which transcripts are actually referenced
+    std::vector<bool> active(n_transcripts, false);
+
+    for (int64_t u = 0; u < n_units; ++u) {
+        int64_t start = offsets[u];
+        int64_t end   = offsets[u + 1];
+        if (start >= end) continue;
+
+        // Find first valid transcript in this unit
+        int32_t first_t = -1;
+        for (int64_t j = start; j < end; ++j) {
+            int32_t t = t_idx[j];
+            if (t >= nrna_base) t -= nrna_base;  // map nRNA → base transcript
+            if (t >= 0 && t < n_transcripts) {
+                first_t = t;
+                active[t] = true;
+                break;
+            }
+        }
+        if (first_t < 0) continue;
+
+        // Union all other transcripts in this unit with the first
+        for (int64_t j = start + 1; j < end; ++j) {
+            int32_t t = t_idx[j];
+            if (t >= nrna_base) t -= nrna_base;
+            if (t >= 0 && t < n_transcripts && t != first_t) {
+                active[t] = true;
+                uf.unite(first_t, t);
+            }
+        }
+    }
+
+    // Assign sequential component labels to active transcripts
+    auto* labels = new int32_t[n_transcripts];
+    std::fill(labels, labels + n_transcripts, -1);
+
+    std::unordered_map<int32_t, int32_t> root_to_label;
+    int32_t next_label = 0;
+
+    for (int32_t t = 0; t < n_transcripts; ++t) {
+        if (!active[t]) continue;
+        int32_t root = uf.find(t);
+        auto it = root_to_label.find(root);
+        if (it == root_to_label.end()) {
+            root_to_label[root] = next_label;
+            labels[t] = next_label;
+            ++next_label;
+        } else {
+            labels[t] = it->second;
+        }
+    }
+
+    size_t shape[1] = {static_cast<size_t>(n_transcripts)};
+    nb::capsule owner(labels, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
+
+    return nb::make_tuple(
+        nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(labels, 1, shape, std::move(owner)),
+        nb::int_(next_label)
+    );
+}
+
 
 // ================================================================
 // nanobind module definition
@@ -1986,10 +2183,23 @@ NB_MODULE(_em_impl, m) {
           nb::arg("confidence_threshold"),
           nb::arg("n_transcripts_total"),
           nb::arg("n_splice_strand_cols"),
+          nb::arg("n_threads") = 0,
           "Run locus EM for ALL loci in a single C++ call.\n\n"
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"
-          "Returns (total_gdna_em, locus_mrna, locus_nrna, locus_gdna).");
+          "Returns (total_gdna_em, locus_mrna, locus_nrna, locus_gdna).\n\n"
+          "n_threads: 0 = all cores, 1 = sequential, N = cap at N threads.");
+
+    m.def("connected_components", &connected_components_native,
+          nb::arg("offsets"),
+          nb::arg("t_indices"),
+          nb::arg("nrna_base"),
+          nb::arg("n_transcripts"),
+          "Find connected components of the fragment→transcript overlap graph.\n\n"
+          "Uses union-find with path compression and union by rank.\n"
+          "Returns (labels, n_components) where labels is int32[n_transcripts]\n"
+          "with -1 for inactive transcripts and sequential 0-based labels\n"
+          "for active transcripts.");
 
     // ----------------------------------------------------------------
     // Export constants so Python imports from this single source of truth.

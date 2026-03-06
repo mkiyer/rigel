@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import cProfile
 import csv
+import gc
 import io
 import json
 import logging
@@ -77,7 +78,8 @@ from hulkrna.config import (
 from hulkrna.estimator import AbundanceEstimator
 from hulkrna.index import TranscriptIndex
 from hulkrna.locus import build_loci, build_locus_em_data, compute_eb_gdna_priors, compute_nrna_init
-from hulkrna.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer
+from hulkrna.estimator import compute_global_gdna_density, compute_hybrid_nrna_frac_priors
+from hulkrna.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer, _compute_intergenic_density
 from hulkrna.scan import FragmentRouter
 from hulkrna.scoring import (
     GDNA_SPLICE_PENALTIES,
@@ -229,6 +231,7 @@ class ProfileConfig:
     cprofile_top_n: int = 60
     memory_sample_interval_ms: int = 100
     verbose: bool = True
+    tmpdir: str | None = None
 
 
 def parse_yaml_config(path: str | Path) -> ProfileConfig:
@@ -264,6 +267,7 @@ def parse_yaml_config(path: str | Path) -> ProfileConfig:
 
 def _build_pipeline_config(
     hulkrna_params: HulkrnaParams | None = None,
+    tmpdir: str | None = None,
 ) -> PipelineConfig:
     """Build PipelineConfig from profile config."""
     raw: dict = {}
@@ -279,6 +283,7 @@ def _build_pipeline_config(
         "em_mode": "mode",
         "prune_threshold": "prune_threshold",
         "confidence_threshold": "confidence_threshold",
+        "n_threads": "n_threads",
     }
     for raw_key, cfg_key in _EM_ALIASES.items():
         if raw_key in raw:
@@ -298,6 +303,9 @@ def _build_pipeline_config(
         scoring_kw["gdna_splice_penalties"] = penalties
 
     scan_kw: dict = {"sj_strand_tag": "auto", "include_multimap": True}
+    if tmpdir is not None:
+        from pathlib import Path as _Path
+        scan_kw["spill_dir"] = _Path(tmpdir)
 
     return PipelineConfig(
         em=EMConfig(**em_kw),
@@ -399,10 +407,11 @@ def profile_simple(
     config_name: str,
     hulkrna_params: HulkrnaParams | None = None,
     enable_cprofile: bool = False,
+    tmpdir: str | None = None,
 ) -> tuple[ProfileResult, cProfile.Profile | None]:
     """Profile run_pipeline() as a single timed call."""
 
-    pcfg = _build_pipeline_config(hulkrna_params)
+    pcfg = _build_pipeline_config(hulkrna_params, tmpdir=tmpdir)
     profiler = cProfile.Profile() if enable_cprofile else None
 
     rss_before = _get_rss_mb()
@@ -453,10 +462,11 @@ def profile_stages(
     config_name: str,
     hulkrna_params: HulkrnaParams | None = None,
     enable_cprofile: bool = False,
+    tmpdir: str | None = None,
 ) -> tuple[ProfileResult, cProfile.Profile | None]:
     """Profile pipeline with per-stage timing decomposition."""
 
-    pcfg = _build_pipeline_config(hulkrna_params)
+    pcfg = _build_pipeline_config(hulkrna_params, tmpdir=tmpdir)
     profiler = cProfile.Profile() if enable_cprofile else None
     timings = StageTimings()
 
@@ -539,6 +549,13 @@ def profile_stages(
         em_data = builder.scan(buffer, log_every=1_000_000)
     timings.fragment_router_scan = t_route.elapsed
 
+    # -- Free scanner accumulators + buffer after scan --
+    del builder, ctx          # release ~1.3 GB of array.array accumulators
+    buffer.cleanup()
+    buffer._chunks.clear()
+    buffer._memory_bytes = 0
+    gc.collect()
+
     # 3e: nRNA init
     with Timer("compute_nrna_init") as t_nrna:
         nrna_init = compute_nrna_init(
@@ -567,55 +584,77 @@ def profile_stages(
             max_locus_t = max(len(l.transcript_indices) for l in loci)
             max_locus_u = max(len(l.unit_indices) for l in loci)
 
+            # Assign locus_id to every transcript
+            for locus in loci:
+                for t_idx in locus.transcript_indices:
+                    estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
+
             with Timer("compute_eb_gdna_priors") as t_gdna:
+                intergenic_density = _compute_intergenic_density(stats, index)
                 gdna_inits = compute_eb_gdna_priors(
                     loci, em_data, estimator, index, strand_models,
+                    intergenic_density=intergenic_density,
+                    kappa_chrom=em_config.gdna_kappa_chrom,
+                    kappa_locus=em_config.gdna_kappa_locus,
+                    mom_min_evidence_chrom=em_config.gdna_mom_min_evidence_chrom,
+                    mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
+                    kappa_min=em_config.nrna_frac_kappa_min,
+                    kappa_max=em_config.nrna_frac_kappa_max,
+                    kappa_fallback=em_config.nrna_frac_kappa_fallback,
+                    kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
+                )
+
+                # gDNA density + nrna_frac priors (needed before EM)
+                gdna_density = compute_global_gdna_density(
+                    estimator, strand_models.strand_specificity,
+                )
+                compute_hybrid_nrna_frac_priors(
+                    estimator,
+                    t_to_tss_group=index.t_to_tss_group,
+                    t_to_strand=index.t_to_strand_arr,
+                    locus_id_per_transcript=estimator.locus_id_per_transcript,
+                    strand_specificity=strand_models.strand_specificity,
+                    gdna_density=gdna_density,
+                    kappa_global=em_config.nrna_frac_kappa_global,
+                    kappa_locus=em_config.nrna_frac_kappa_locus,
+                    kappa_tss=em_config.nrna_frac_kappa_tss,
+                    mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
+                    mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
+                    mom_min_evidence_tss=em_config.nrna_frac_mom_min_evidence_tss,
+                    kappa_min=em_config.nrna_frac_kappa_min,
+                    kappa_max=em_config.nrna_frac_kappa_max,
+                    kappa_fallback=em_config.nrna_frac_kappa_fallback,
+                    kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
                 )
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
-            t_build = 0.0
-            t_run = 0.0
-            t_assign = 0.0
-
             with Timer("locus_em") as t_em:
-                for i, locus in enumerate(loci):
-                    if len(locus.unit_indices) == 0:
-                        continue
-
-                    _ta = time.perf_counter()
-                    locus_em = build_locus_em_data(
-                        locus, em_data, estimator, index, geometry.mean_frag,
-                        gdna_init=gdna_inits[i],
-                    )
-                    _tb = time.perf_counter()
-                    t_build += _tb - _ta
-
-                    _ta = time.perf_counter()
-                    theta, alpha = estimator.run_locus_em(
-                        locus_em,
-                        em_iterations=em_config.iterations,
-                        em_convergence_delta=em_config.convergence_delta,
-                    )
-                    _tb = time.perf_counter()
-                    t_run += _tb - _ta
-
-                    _ta = time.perf_counter()
-                    estimator.assign_locus_ambiguous(
-                        locus_em, theta,
-                        confidence_threshold=em_config.confidence_threshold,
-                    )
-                    _tb = time.perf_counter()
-                    t_assign += _tb - _ta
-
+                # Use batch C++ path (same as quant_from_buffer default)
+                (
+                    total_gdna_em,
+                    locus_mrna_arr,
+                    locus_nrna_arr,
+                    locus_gdna_arr,
+                ) = estimator.run_batch_locus_em(
+                    loci,
+                    em_data,
+                    index,
+                    np.asarray(gdna_inits, dtype=np.float64),
+                    em_iterations=em_config.iterations,
+                    em_convergence_delta=em_config.convergence_delta,
+                    confidence_threshold=em_config.confidence_threshold,
+                )
             timings.locus_em = t_em.elapsed
-            timings.locus_em_build = t_build
-            timings.locus_em_run = t_run
-            timings.locus_em_assign = t_assign
+            timings.locus_em_build = 0.0
+            timings.locus_em_run = timings.locus_em
+            timings.locus_em_assign = 0.0
 
     if profiler:
         profiler.disable()
 
-    buffer.cleanup()
+    # -- Phase 5B: Free ScoredFragments CSR arrays --
+    del em_data
+    gc.collect()
 
     timings.quant_from_buffer = (
         t_geom.elapsed + t_est.elapsed + t_scorer.elapsed + t_route.elapsed
@@ -833,10 +872,12 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
             if cfg.stages:
                 result, profiler = profile_stages(
                     bam_path, index, hc.name, hc, cfg.enable_cprofile,
+                    tmpdir=cfg.tmpdir,
                 )
             else:
                 result, profiler = profile_simple(
                     bam_path, index, hc.name, hc, cfg.enable_cprofile,
+                    tmpdir=cfg.tmpdir,
                 )
         finally:
             mem_timeline.stop()
@@ -950,6 +991,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="RSS sampling interval in ms (default: 100)")
     p.add_argument("--verbose", action="store_true", default=None,
                     help="Verbose logging")
+    p.add_argument("--threads", type=int, default=None,
+                    help="Number of threads for parallel locus EM "
+                         "(0=all cores, 1=sequential)")
+    p.add_argument("--tmpdir", default=None,
+                    help="Directory for temporary buffer spill files "
+                         "(default: system temp directory)")
     return p
 
 
@@ -980,6 +1027,11 @@ def main() -> int:
         cfg.memory_sample_interval_ms = args.memory_interval
     if args.verbose is not None:
         cfg.verbose = args.verbose
+    if args.threads is not None:
+        for hc in cfg.hulkrna_configs:
+            hc.params["n_threads"] = args.threads
+    if args.tmpdir is not None:
+        cfg.tmpdir = args.tmpdir
 
     # Validate
     if not cfg.bam:

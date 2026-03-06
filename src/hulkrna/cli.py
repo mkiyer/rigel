@@ -104,6 +104,7 @@ def quant_command(args: argparse.Namespace) -> int:
         "gdna_mom_min_evidence_chrom": 50.0,
         "gdna_mom_min_evidence_locus": 30.0,
         "strand_prior_kappa": 2.0,
+        "threads": 0,
     }
     _resolve_quant_args(args, _DEFAULTS)
 
@@ -195,6 +196,8 @@ def quant_command(args: argparse.Namespace) -> int:
             "gdna_mom_min_evidence_chrom": args.gdna_mom_min_evidence_chrom,
             "gdna_mom_min_evidence_locus": args.gdna_mom_min_evidence_locus,
             "strand_prior_kappa": args.strand_prior_kappa,
+            "threads": args.threads,
+            "tmpdir": args.tmpdir,
         },
     }
     with open(config_path, "w") as f:
@@ -232,12 +235,14 @@ def quant_command(args: argparse.Namespace) -> int:
             gdna_kappa_locus=args.gdna_kappa_locus,
             gdna_mom_min_evidence_chrom=args.gdna_mom_min_evidence_chrom,
             gdna_mom_min_evidence_locus=args.gdna_mom_min_evidence_locus,
+            n_threads=args.threads,
         ),
         scan=BamScanConfig(
             skip_duplicates=not args.keep_duplicates,
             include_multimap=args.include_multimap,
             sj_strand_tag=sj_strand_tag,
             strand_prior_kappa=args.strand_prior_kappa,
+            spill_dir=Path(args.tmpdir) if args.tmpdir else None,
         ),
         scoring=FragmentScoringConfig(
             overhang_log_penalty=overhang_log_penalty,
@@ -607,6 +612,12 @@ def build_parser() -> argparse.ArgumentParser:
              "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path.  "
              "Requires a second BAM pass (modest runtime overhead).",
     )
+    quant_parser.add_argument(
+        "--tmpdir", default=None,
+        help="Directory for temporary buffer spill files when memory "
+             "limits are exceeded (default: system temp directory).  "
+             "Use a fast SSD mount in production environments.",
+    )
 
     # -- Advanced parameters --------------------------------------------------
     adv = quant_parser.add_argument_group("advanced options")
@@ -743,6 +754,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Strand model prior pseudocount κ. Beta prior is "
              "Beta(κ/2, κ/2), shrinking toward 0.5 (max entropy). "
              "Default: 2.0 (uniform Beta(1,1) prior).",
+    )
+    quant_parser.add_argument(
+        "--threads", dest="threads", type=int, default=None,
+        help="Number of threads for parallel locus EM. "
+             "0 = use all available cores (default), 1 = sequential, "
+             "N = cap at N threads.",
     )
     quant_parser.set_defaults(func=quant_command)
 

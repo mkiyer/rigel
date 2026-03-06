@@ -56,6 +56,14 @@ class EMConfig:
     convergence_delta: float = 1e-6
     prune_threshold: float | None = 0.1
     confidence_threshold: float = 0.95
+    n_threads: int = 0
+    """Number of threads for parallel locus EM (Phase 2B).
+
+    ``0`` (default) → use all available cores (``omp_get_max_threads()``).
+    ``1`` → sequential (no OpenMP overhead).
+    Any positive value → cap at that many threads.
+    Ignored when the C++ extension was built without OpenMP.
+    """
     tss_window: int = 200
     """Fuzzy TSS grouping window (bp).
 

@@ -10,8 +10,7 @@ import math
 from collections import defaultdict
 
 import numpy as np
-from scipy.sparse import coo_matrix
-from scipy.sparse.csgraph import connected_components as _scipy_cc
+from ._em_impl import connected_components as _cc_native
 
 from .estimator import (
     AbundanceEstimator,
@@ -45,7 +44,7 @@ _STRAND_DENOM_EPS: float = 0.01
 
 
 # ---------------------------------------------------------------------------
-# Locus builder: scipy connected_components on fragment→transcript graph
+# Locus builder: C++ union-find connected components
 # ---------------------------------------------------------------------------
 
 
@@ -55,8 +54,8 @@ def build_loci(
 ) -> list[Locus]:
     """Build loci as connected components of transcripts linked by fragments.
 
-    Uses scipy sparse graph connected_components for vectorized
-    component detection.
+    Uses C++ union-find (disjoint-set with path compression and union
+    by rank) for fast component detection.
 
     Parameters
     ----------
@@ -78,42 +77,26 @@ def build_loci(
     if n_units == 0 or len(t_indices) == 0:
         return []
 
-    # Map all candidate indices to transcript space [0, nt).
+    # C++ union-find connected components (replaces scipy sparse graph).
+    # Returns labels[n_transcripts] with -1 for inactive, 0-based for active.
+    labels, n_comp = _cc_native(
+        offsets, t_indices,
+        np.int32(nrna_base), np.int32(nt),
+    )
+
+    # Compute first transcript per unit for unit→component assignment.
     all_t = t_indices.copy()
     nrna_mask = all_t >= nrna_base
     all_t[nrna_mask] -= nrna_base
-
     seg_lengths = np.diff(offsets).astype(np.intp)
-
-    # Build sparse adjacency graph by connecting each candidate's
-    # transcript to the first candidate's transcript within each unit.
     nonempty = seg_lengths > 0
     first_idx = offsets[:-1].astype(np.intp)
-
-    # First transcript per unit
     first_t = np.empty(n_units, dtype=np.int32)
     first_t[nonempty] = all_t[first_idx[nonempty]]
     first_t[~nonempty] = -1
 
-    # Expand first_t to candidate level
-    first_t_expanded = np.repeat(first_t, seg_lengths)
-
-    # Build edges: (first_t_expanded[i], all_t[i]) for every candidate
-    row = first_t_expanded
-    col = all_t
-    valid = (row != col) & (row >= 0) & (col >= 0) & (row < nt) & (col < nt)
-    row = row[valid]
-    col = col[valid]
-
-    if len(row) > 0:
-        data = np.ones(len(row), dtype=np.int8)
-        adj = coo_matrix((data, (row, col)), shape=(nt, nt))
-        n_comp, labels = _scipy_cc(adj, directed=False)
-    else:
-        labels = np.arange(nt, dtype=np.int32)
-
-    # Find active transcripts (those appearing in at least one unit)
-    active = np.unique(all_t[all_t >= 0])
+    # Active transcripts are those with a valid component label.
+    active = np.where(labels >= 0)[0].astype(np.int32)
 
     # Group active transcripts by component label
     active_labels = labels[active]

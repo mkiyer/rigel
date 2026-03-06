@@ -230,10 +230,10 @@ def scan_python(
     return ScoredFragments(
         offsets=_to_np(router.offsets, np.int64),
         t_indices=_to_np(router.t_indices_list, np.int32),
-        log_liks=_to_np(router.log_liks_list, np.float64),
+        log_liks=_to_np(router.log_liks_list, np.float32),
         count_cols=_to_np(router.count_cols_list, np.uint8),
         coverage_weights=_to_np(
-            router.coverage_weights_list, np.float64,
+            router.coverage_weights_list, np.float32,
         ),
         tx_starts=_to_np(router.tx_starts_list, np.int32),
         tx_ends=_to_np(router.tx_ends_list, np.int32),
@@ -242,11 +242,11 @@ def scan_python(
         is_spliced=_to_np(
             router.is_spliced_list, np.int8,
         ).astype(bool),
-        gdna_log_liks=_to_np(router.gdna_ll_list, np.float64),
+        gdna_log_liks=_to_np(router.gdna_ll_list, np.float32),
         genomic_footprints=_to_np(
             router.genomic_footprints_list, np.int32,
         ),
-        frag_ids=_to_np(router.frag_id_list, np.int64),
+        frag_ids=_to_np(router.frag_id_list, np.int32),
         frag_class=_to_np(router.frag_class_list, np.int8),
         splice_type=_to_np(router.splice_type_list, np.uint8),
         n_units=n_units,

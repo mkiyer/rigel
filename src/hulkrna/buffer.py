@@ -125,14 +125,14 @@ class _FinalizedChunk:
     num_hits: np.ndarray        # uint16[N]
     merge_criteria: np.ndarray  # uint8[N]
     chimera_type: np.ndarray    # uint8[N]
-    t_offsets: np.ndarray       # int64[N+1]
+    t_offsets: np.ndarray       # int32[N+1]
     t_indices: np.ndarray       # int32[M_t]
     frag_lengths: np.ndarray    # int32[M_t]  (parallel to t_indices)
     exon_bp: np.ndarray         # int32[M_t]  (parallel to t_indices)
     intron_bp: np.ndarray       # int32[M_t]  (parallel to t_indices)
     unambig_intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     ambig_strand: np.ndarray    # uint8[N]
-    frag_id: np.ndarray         # int64[N]
+    frag_id: np.ndarray         # int32[N]
     read_length: np.ndarray     # uint32[N]
     genomic_footprint: np.ndarray  # int32[N]
     genomic_start: np.ndarray   # int32[N]
@@ -266,7 +266,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
     table = pf.read_table(str(path))
 
     t_col = table.column("t_inds").combine_chunks()
-    t_offsets = t_col.offsets.to_numpy().astype(np.int64)
+    t_offsets = t_col.offsets.to_numpy().astype(np.int32)
     t_indices = t_col.values.to_numpy().copy()
 
     # Per-candidate CSR arrays (parallel to t_indices)
@@ -296,7 +296,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         intron_bp=intron_bp_arr,
         unambig_intron_bp=unambig_intron_bp_arr,
         ambig_strand=table.column("ambig_strand").to_numpy().copy(),
-        frag_id=table.column("frag_id").to_numpy().copy(),
+        frag_id=table.column("frag_id").to_numpy().astype(np.int32),
         read_length=table.column("read_length").to_numpy().copy(),
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
         genomic_start=(
@@ -437,14 +437,14 @@ class FragmentBuffer:
             num_hits=np.frombuffer(raw["num_hits"], dtype=np.uint16).copy(),
             merge_criteria=np.frombuffer(raw["merge_criteria"], dtype=np.uint8).copy(),
             chimera_type=np.frombuffer(raw["chimera_type"], dtype=np.uint8).copy(),
-            t_offsets=np.frombuffer(raw["t_offsets"], dtype=np.int64).copy(),
+            t_offsets=np.frombuffer(raw["t_offsets"], dtype=np.int64).astype(np.int32),
             t_indices=np.frombuffer(raw["t_indices"], dtype=np.int32).copy(),
             frag_lengths=np.frombuffer(raw["frag_lengths"], dtype=np.int32).copy(),
             exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
             intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
             unambig_intron_bp=np.frombuffer(raw["unambig_intron_bp"], dtype=np.int32).copy(),
             ambig_strand=np.frombuffer(raw["ambig_strand"], dtype=np.uint8).copy(),
-            frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).copy(),
+            frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).astype(np.int32),
             read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
             genomic_footprint=np.frombuffer(raw["genomic_footprint"], dtype=np.int32).copy(),
             genomic_start=np.frombuffer(raw["genomic_start"], dtype=np.int32).copy(),
@@ -473,7 +473,7 @@ class FragmentBuffer:
                 self._chunks[i] = path
                 self._memory_bytes -= freed
                 self._n_spilled += 1
-                logger.debug(
+                logger.info(
                     f"Spilled chunk {i} ({chunk.size:,} fragments, "
                     f"{freed / 1024**2:.1f} MB) → {path}"
                 )

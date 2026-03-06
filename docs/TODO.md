@@ -1,6 +1,22 @@
 # TODO
 
 
+## Edit distance
+
+- when reads overlap, edit distance can get double counted in the overlap portion of the reads
+- STAR avoids this with the 'nM' tag
+
+- I think for most tools, we need to parse the MD tag of the BAM file, find the exact positions of the mismatches/edits, and then merge them between reads. It would require MD tag parsing and merging code. Sort of complicated.
+
+- Prefer to just use STAR for now
+
+
+
+## Overhang based gating
+
+1) We should review our overhang-based GATING (winner take all) -- what information is needed there? Do we need our strand and fragment length likelihood for overhang gating? It seems like we do.. because if there are fragment-transcript matches on both strands (overlapping antisense transcripts) the fragment could overhang by different amounts but the strand likelihood REALLY matters for gating.. we wouldn't want to gate solely based on overhang alone because we would potentially throw out the more likely matches.. this only happens in when there are overlapping opposite direction transcripts though.. if same strand transcripts we can probably gate more easily... that leads me to an idea -- For a SUBSET of fragments (they need to be unambiguous with respect to strand.. e.g. isoforms on same strand) we might be able to do overhang gating earlier.. at time of fragment resolution.. but again.. i am starting to worry about our gating strategy because we DO want strand, fragment lenght, and overhang to all play into this. it's possible that transcripts with some overhang could score better if you factor in all of the likelihoods (strand, frag len, overhang, etc) and so gating on overhang may be dangerous. 
+
+
 ## Fragment length model
 
 - gDNA and RNA should have different models
@@ -50,11 +66,7 @@ We can "blacklist" splice junction artifacts by doing genome-wide mapping. Align
 - for tsv files, truncate floating point for readability
 
 
-## Edit distance
 
-- when reads overlap, edit distance can get double counted in the overlap portion of the reads
-- STAR avoids this with the 'nM' tag
-- Otherwise, need to add this solution
 
 
 

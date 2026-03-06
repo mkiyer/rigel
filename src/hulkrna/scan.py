@@ -83,9 +83,9 @@ class FragmentRouter:
         from array import array as _array
         self.offsets = _array('q', [0])          # int64
         self.t_indices_list = _array('i')         # int32
-        self.log_liks_list = _array('d')          # float64
+        self.log_liks_list = _array('f')          # float32
         self.count_cols_list = _array('B')        # uint8
-        self.coverage_weights_list = _array('d')  # float64
+        self.coverage_weights_list = _array('f')  # float32
         self.tx_starts_list = _array('i')         # int32
         self.tx_ends_list = _array('i')           # int32
 
@@ -93,9 +93,9 @@ class FragmentRouter:
         self.locus_t_list = _array('i')           # int32
         self.locus_ct_list = _array('B')          # uint8
         self.is_spliced_list = _array('b')        # int8 (→ bool at finalize)
-        self.gdna_ll_list = _array('d')           # float64
+        self.gdna_ll_list = _array('f')           # float32
         self.genomic_footprints_list = _array('i')  # int32
-        self.frag_id_list = _array('q')           # int64
+        self.frag_id_list = _array('i')           # int32
         self.frag_class_list = _array('b')        # int8
         self.splice_type_list = _array('B')       # uint8
 
@@ -667,7 +667,14 @@ class FragmentRouter:
     def _scan_native(
         self, chunks, buffer: FragmentBuffer, log_every: int,
     ) -> ScoredFragments:
-        """Chunk-level C++ scan path (fast)."""
+        """Chunk-level C++ scan path (fast).
+
+        Uses the fused two-pass C++ scorer: pass 1 counts EM units
+        and candidates (accumulating unambig counts), pass 2 fills
+        pre-allocated numpy arrays at exact sizes.  Multimapper
+        fragments remain on the Python path and are concatenated
+        after the C++ pass.
+        """
         import logging
         logger = logging.getLogger(__name__)
 
@@ -678,103 +685,84 @@ class FragmentRouter:
         t_to_g = self.ctx.t_to_g
         annotations = self.annotations
 
-        # Pre-compute gDNA log splice penalty for unspliced fragments.
-        # Only SPLICE_UNSPLICED reaches the gDNA log-lik computation
-        # (SPLICE_ANNOT and SPLICE_UNANNOT are marked -inf).
         from .scoring import LOG_SAFE_FLOOR
         _gdna_sp = self.ctx.gdna_splice_penalties.get(
             SPLICE_UNSPLICED, _DEFAULT_SPLICE_PENALTY,
         )
         gdna_log_sp = math.log(max(_gdna_sp, LOG_SAFE_FLOOR))
 
-        # Ensure accumulator arrays are contiguous float64
         t_strand_arr = np.ascontiguousarray(
             index.t_to_strand_arr, dtype=np.int8)
 
-        n_processed = 0
+        # ---- Prepare chunk arrays as tuples for C++ ----
+        chunk_arrays = []
         for chunk in chunks:
-            frag_classes = chunk.fragment_classes
-
-            # --- C++ processes all non-MM, non-chimeric ---
-            result = nc.scan_chunk(
-                np.ascontiguousarray(chunk.t_offsets, dtype=np.int64),
-                np.ascontiguousarray(chunk.t_indices, dtype=np.int32),
-                np.ascontiguousarray(chunk.frag_lengths, dtype=np.int32),
-                np.ascontiguousarray(chunk.exon_bp, dtype=np.int32),
-                np.ascontiguousarray(chunk.intron_bp, dtype=np.int32),
+            chunk_arrays.append((
+                np.ascontiguousarray(
+                    chunk.t_offsets, dtype=np.int64),
+                np.ascontiguousarray(
+                    chunk.t_indices, dtype=np.int32),
+                np.ascontiguousarray(
+                    chunk.frag_lengths, dtype=np.int32),
+                np.ascontiguousarray(
+                    chunk.exon_bp, dtype=np.int32),
+                np.ascontiguousarray(
+                    chunk.intron_bp, dtype=np.int32),
                 np.ascontiguousarray(
                     chunk.unambig_intron_bp, dtype=np.int32),
-                np.ascontiguousarray(chunk.splice_type, dtype=np.uint8),
-                np.ascontiguousarray(chunk.exon_strand, dtype=np.uint8),
-                np.ascontiguousarray(frag_classes, dtype=np.uint8),
-                np.ascontiguousarray(chunk.frag_id, dtype=np.int64),
-                np.ascontiguousarray(chunk.read_length, dtype=np.uint32),
+                np.ascontiguousarray(
+                    chunk.splice_type, dtype=np.uint8),
+                np.ascontiguousarray(
+                    chunk.exon_strand, dtype=np.uint8),
+                np.ascontiguousarray(
+                    chunk.fragment_classes, dtype=np.uint8),
+                np.ascontiguousarray(
+                    chunk.frag_id, dtype=np.int64),
+                np.ascontiguousarray(
+                    chunk.read_length, dtype=np.uint32),
                 np.ascontiguousarray(
                     chunk.genomic_footprint, dtype=np.int32),
-                np.ascontiguousarray(chunk.genomic_start, dtype=np.int32),
-                np.ascontiguousarray(chunk.nm, dtype=np.uint16),
-                t_strand_arr,
-                estimator.transcript_exonic_sense,
-                estimator.transcript_exonic_antisense,
-                estimator.transcript_unspliced_sense,
-                estimator.transcript_unspliced_antisense,
-                estimator.transcript_intronic_sense,
-                estimator.transcript_intronic_antisense,
-                estimator.unambig_counts,
-                gdna_log_sp,
-            )
+                np.ascontiguousarray(
+                    chunk.genomic_start, dtype=np.int32),
+                np.ascontiguousarray(
+                    chunk.nm, dtype=np.uint16),
+            ))
 
-            # Unpack result tuple
-            (
-                c_offsets, c_ti, c_ll, c_ct, c_cw, c_ts, c_te,
-                c_locus_t, c_locus_ct, c_is_spliced, c_gdna_ll,
-                c_gfp, c_fid, c_fclass, c_stype,
-                det_tids, det_fids,
-                n_det, n_em_u, n_em_as, n_em_ao, n_gated, n_chim,
-            ) = result
+        # ---- Fused two-pass C++ scoring ----
+        result = nc.fused_score_buffer(
+            chunk_arrays,
+            t_strand_arr,
+            estimator.transcript_exonic_sense,
+            estimator.transcript_exonic_antisense,
+            estimator.transcript_unspliced_sense,
+            estimator.transcript_unspliced_antisense,
+            estimator.transcript_intronic_sense,
+            estimator.transcript_intronic_antisense,
+            estimator.unambig_counts,
+            gdna_log_sp,
+        )
 
-            # Accumulate C++ CSR data into array.array accumulators
-            if len(c_ti) > 0:
-                base = self.offsets[-1]
-                for off in c_offsets:
-                    self.offsets.append(base + int(off))
-                self.t_indices_list.frombytes(
-                    c_ti.astype(np.int32).tobytes())
-                self.log_liks_list.frombytes(
-                    c_ll.astype(np.float64).tobytes())
-                self.count_cols_list.frombytes(
-                    c_ct.astype(np.uint8).tobytes())
-                self.coverage_weights_list.frombytes(
-                    c_cw.astype(np.float64).tobytes())
-                self.tx_starts_list.frombytes(
-                    c_ts.astype(np.int32).tobytes())
-                self.tx_ends_list.frombytes(
-                    c_te.astype(np.int32).tobytes())
-                self.locus_t_list.frombytes(
-                    c_locus_t.astype(np.int32).tobytes())
-                self.locus_ct_list.frombytes(
-                    c_locus_ct.astype(np.uint8).tobytes())
-                self.is_spliced_list.frombytes(
-                    c_is_spliced.astype(np.int8).tobytes())
-                self.gdna_ll_list.frombytes(
-                    c_gdna_ll.astype(np.float64).tobytes())
-                self.genomic_footprints_list.frombytes(
-                    c_gfp.astype(np.int32).tobytes())
-                self.frag_id_list.frombytes(
-                    c_fid.astype(np.int64).tobytes())
-                self.frag_class_list.frombytes(
-                    c_fclass.astype(np.int8).tobytes())
-                self.splice_type_list.frombytes(
-                    c_stype.astype(np.uint8).tobytes())
+        (
+            cpp_offsets, cpp_ti, cpp_ll, cpp_ct, cpp_cw,
+            cpp_ts, cpp_te,
+            cpp_locus_t, cpp_locus_ct, cpp_is_spliced,
+            cpp_gdna_ll, cpp_gfp, cpp_fid, cpp_fclass,
+            cpp_stype,
+            det_tids, det_fids,
+            n_det, n_em_u, n_em_as, n_em_ao, n_gated, n_chim,
+        ) = result
 
-            # Accumulate stats
-            stats.deterministic_unambig_units += int(n_det)
-            stats.em_routed_unambig_units += int(n_em_u)
-            stats.em_routed_ambig_same_strand_units += int(n_em_as)
-            stats.em_routed_ambig_opp_strand_units += int(n_em_ao)
-            stats.n_gated_out += int(n_gated)
+        stats.deterministic_unambig_units += int(n_det)
+        stats.em_routed_unambig_units += int(n_em_u)
+        stats.em_routed_ambig_same_strand_units += int(n_em_as)
+        stats.em_routed_ambig_opp_strand_units += int(n_em_ao)
+        stats.n_gated_out += int(n_gated)
 
-            # --- Chimeric annotations ---
+        # ---- Annotations (lightweight per-chunk pass) ----
+        n_processed = 0
+        for ci, chunk in enumerate(chunks):
+            frag_classes = chunk_arrays[ci][8]  # pre-computed
+
             if annotations is not None:
                 chimeric_indices = np.where(
                     frag_classes == FRAG_CHIMERIC)[0]
@@ -790,24 +778,9 @@ class FragmentRouter:
                         splice_type=int(chunk.splice_type[idx]),
                     )
 
-            # --- Deterministic-unambig annotations ---
-            if annotations is not None and len(det_tids) > 0:
-                for j in range(len(det_tids)):
-                    tid = int(det_tids[j])
-                    gid = int(t_to_g[tid])
-                    annotations.add(
-                        frag_id=int(det_fids[j]),
-                        best_tid=tid,
-                        best_gid=gid,
-                        pool=POOL_CODE_MRNA,
-                        posterior=1.0,
-                        frag_class=FRAG_UNAMBIG,
-                        n_candidates=1,
-                        splice_type=int(SPLICE_ANNOT),
-                    )
-
-            # --- Multimapper handling (Python path, unchanged) ---
-            mm_indices = np.where(frag_classes == FRAG_MULTIMAPPER)[0]
+            # Multimapper handling (Python path)
+            mm_indices = np.where(
+                frag_classes == FRAG_MULTIMAPPER)[0]
             for idx in mm_indices:
                 bf = chunk[int(idx)]
                 fid = int(chunk.frag_id[idx])
@@ -828,40 +801,141 @@ class FragmentRouter:
                     f"{buffer.total_fragments:,}"
                 )
 
+        # Det-unambig annotations
+        if annotations is not None and len(det_tids) > 0:
+            for j in range(len(det_tids)):
+                tid = int(det_tids[j])
+                gid = int(t_to_g[tid])
+                annotations.add(
+                    frag_id=int(det_fids[j]),
+                    best_tid=tid,
+                    best_gid=gid,
+                    pool=POOL_CODE_MRNA,
+                    posterior=1.0,
+                    frag_class=FRAG_UNAMBIG,
+                    n_candidates=1,
+                    splice_type=int(SPLICE_ANNOT),
+                )
+
         # Flush last multimapper group
         if self.mm_pending:
             self._flush_mm_group()
             stats.em_routed_multimapper_units += 1
 
-        n_units = len(self.offsets) - 1
-        n_candidates = len(self.t_indices_list)
+        # Free chunk_arrays — no longer needed
+        del chunk_arrays
 
-        # Zero-copy conversion: array.array → numpy via buffer protocol
+        # ---- Merge C++ and MM results ----
+        mm_n_units = len(self.offsets) - 1
+        mm_n_cands = len(self.t_indices_list)
+
         def _to_np(arr, dtype):
             if len(arr) == 0:
                 return np.empty(0, dtype=dtype)
             return np.frombuffer(arr, dtype=dtype).copy()
 
+        if mm_n_units > 0:
+            # Merge: concatenate C++ arrays with MM arrays
+            mm_off = _to_np(self.offsets, np.int64)
+            offsets = np.concatenate([
+                cpp_offsets,
+                mm_off[1:] + cpp_offsets[-1],
+            ])
+            t_indices = np.concatenate([
+                cpp_ti,
+                _to_np(self.t_indices_list, np.int32),
+            ])
+            log_liks = np.concatenate([
+                cpp_ll,
+                _to_np(self.log_liks_list, np.float32),
+            ])
+            count_cols = np.concatenate([
+                cpp_ct,
+                _to_np(self.count_cols_list, np.uint8),
+            ])
+            coverage_weights = np.concatenate([
+                cpp_cw,
+                _to_np(self.coverage_weights_list, np.float32),
+            ])
+            tx_starts = np.concatenate([
+                cpp_ts,
+                _to_np(self.tx_starts_list, np.int32),
+            ])
+            tx_ends = np.concatenate([
+                cpp_te,
+                _to_np(self.tx_ends_list, np.int32),
+            ])
+            locus_t_indices = np.concatenate([
+                cpp_locus_t,
+                _to_np(self.locus_t_list, np.int32),
+            ])
+            locus_count_cols = np.concatenate([
+                cpp_locus_ct,
+                _to_np(self.locus_ct_list, np.uint8),
+            ])
+            is_spliced = np.concatenate([
+                cpp_is_spliced,
+                _to_np(self.is_spliced_list, np.int8),
+            ]).astype(bool)
+            gdna_log_liks = np.concatenate([
+                cpp_gdna_ll,
+                _to_np(self.gdna_ll_list, np.float32),
+            ])
+            genomic_footprints = np.concatenate([
+                cpp_gfp,
+                _to_np(self.genomic_footprints_list, np.int32),
+            ])
+            frag_ids = np.concatenate([
+                cpp_fid,
+                _to_np(self.frag_id_list, np.int32),
+            ])
+            frag_class = np.concatenate([
+                cpp_fclass,
+                _to_np(self.frag_class_list, np.int8),
+            ])
+            splice_type = np.concatenate([
+                cpp_stype,
+                _to_np(self.splice_type_list, np.uint8),
+            ])
+            n_units = int(len(cpp_offsets) - 1) + mm_n_units
+            n_candidates = int(len(cpp_ti)) + mm_n_cands
+        else:
+            # No multimappers — use C++ arrays directly
+            offsets = cpp_offsets
+            t_indices = cpp_ti
+            log_liks = cpp_ll
+            count_cols = cpp_ct
+            coverage_weights = cpp_cw
+            tx_starts = cpp_ts
+            tx_ends = cpp_te
+            locus_t_indices = cpp_locus_t
+            locus_count_cols = cpp_locus_ct
+            is_spliced = np.asarray(
+                cpp_is_spliced, dtype=np.int8).astype(bool)
+            gdna_log_liks = cpp_gdna_ll
+            genomic_footprints = cpp_gfp
+            frag_ids = cpp_fid
+            frag_class = cpp_fclass
+            splice_type = cpp_stype
+            n_units = int(len(cpp_offsets) - 1)
+            n_candidates = int(len(cpp_ti))
+
         return ScoredFragments(
-            offsets=_to_np(self.offsets, np.int64),
-            t_indices=_to_np(self.t_indices_list, np.int32),
-            log_liks=_to_np(self.log_liks_list, np.float64),
-            count_cols=_to_np(self.count_cols_list, np.uint8),
-            coverage_weights=_to_np(
-                self.coverage_weights_list, np.float64,
-            ),
-            tx_starts=_to_np(self.tx_starts_list, np.int32),
-            tx_ends=_to_np(self.tx_ends_list, np.int32),
-            locus_t_indices=_to_np(self.locus_t_list, np.int32),
-            locus_count_cols=_to_np(self.locus_ct_list, np.uint8),
-            is_spliced=_to_np(self.is_spliced_list, np.int8).astype(bool),
-            gdna_log_liks=_to_np(self.gdna_ll_list, np.float64),
-            genomic_footprints=_to_np(
-                self.genomic_footprints_list, np.int32,
-            ),
-            frag_ids=_to_np(self.frag_id_list, np.int64),
-            frag_class=_to_np(self.frag_class_list, np.int8),
-            splice_type=_to_np(self.splice_type_list, np.uint8),
+            offsets=offsets,
+            t_indices=t_indices,
+            log_liks=log_liks,
+            count_cols=count_cols,
+            coverage_weights=coverage_weights,
+            tx_starts=tx_starts,
+            tx_ends=tx_ends,
+            locus_t_indices=locus_t_indices,
+            locus_count_cols=locus_count_cols,
+            is_spliced=is_spliced,
+            gdna_log_liks=gdna_log_liks,
+            genomic_footprints=genomic_footprints,
+            frag_ids=frag_ids,
+            frag_class=frag_class,
+            splice_type=splice_type,
             n_units=n_units,
             n_candidates=n_candidates,
             nrna_base_index=self.ctx.nrna_base,

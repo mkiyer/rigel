@@ -19,7 +19,11 @@ outdir: profile_output
 # ── Profiling options ─────────────────────────────────────────
 # Stage decomposition: time scan_and_buffer, finalize_models,
 # and quant_from_buffer sub-stages individually.
-stages: true
+# WARNING: --stages uses the Python per-locus EM fallback path
+# for sub-stage instrumentation.  It does NOT exercise the batch
+# C++ path (batch_locus_em) or OpenMP threading.  Use stages: false
+# (the default) to profile the production C++ path.
+stages: false
 
 # cProfile: enable Python function-level profiling.
 # Writes .prof files viewable with snakeviz or py-spy.

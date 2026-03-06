@@ -11,6 +11,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# ---------------------------------------------------------------------------
+# Global pytest options
+# ---------------------------------------------------------------------------
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-golden", action="store_true", default=False,
+        help="Regenerate golden output files instead of comparing.",
+    )
 from hulkrna.splice import SpliceStrandCol
 from hulkrna.estimator import (
     AbundanceEstimator,

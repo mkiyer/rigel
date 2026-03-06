@@ -1225,6 +1225,7 @@ class AbundanceEstimator:
             confidence_threshold,
             N_T,
             NUM_SPLICE_STRAND_COLS,
+            self.em_config.n_threads,
         )
 
         return (

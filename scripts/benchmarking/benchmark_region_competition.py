@@ -1308,6 +1308,7 @@ def _build_pipeline_config(
         "em_mode": "mode",
         "prune_threshold": "prune_threshold",
         "confidence_threshold": "confidence_threshold",
+        "n_threads": "n_threads",
     }
     for raw_key, cfg_key in _EM_ALIASES.items():
         if raw_key in raw:

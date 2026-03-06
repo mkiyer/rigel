@@ -21,6 +21,7 @@ initialization live in ``locus.py``.  The CSR builder lives in
 ``scan.py``.  This module is a thin orchestrator.
 """
 
+import gc
 import logging
 import math
 import os
@@ -488,6 +489,13 @@ def quant_from_buffer(
     )
     em_data = builder.scan(buffer, log_every)
 
+    # -- Free scanner accumulators + buffer: scan is done --
+    del builder, ctx          # release ~1.3 GB of array.array accumulators
+    buffer.cleanup()          # remove spilled files
+    buffer._chunks.clear()    # release in-memory chunks
+    buffer._memory_bytes = 0
+    gc.collect()
+
     # --- Per-transcript nRNA init from intronic sense excess ---
     nrna_init = compute_nrna_init(
         estimator.transcript_intronic_sense,
@@ -658,6 +666,10 @@ def quant_from_buffer(
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")
+
+    # -- Free ScoredFragments CSR arrays (no longer needed) --
+    del em_data
+    gc.collect()
 
     # --- Update stats ---
     _gdna_em = estimator.gdna_em_count
