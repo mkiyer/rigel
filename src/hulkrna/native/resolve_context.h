@@ -296,6 +296,95 @@ public:
 };
 
 // ================================================================
+// ResolverScratch — per-thread mutable scratch buffers
+// ================================================================
+// Extracted from FragmentResolver so that multiple threads can call
+// _resolve_core() and compute_frag_lengths() concurrently, each with
+// its own scratch. The single-threaded path uses FragmentResolver's
+// internal scratch_ member.
+
+struct ResolverScratch {
+    // Per-transcript bp counters (sparse-cleaned)
+    std::vector<int32_t> t_exon_bp;
+    std::vector<int32_t> t_transcript_bp;
+    std::vector<int32_t> t_unambig_intron_bp;
+    std::vector<uint8_t> t_dirty;
+    std::vector<int32_t> dirty_indices;
+
+    // cgranges query buffers (reusable per-call)
+    int64_t* buf = nullptr;
+    int64_t  buf_cap = 0;
+    int64_t* sj_buf = nullptr;
+    int64_t  sj_buf_cap = 0;
+
+    ResolverScratch() = default;
+
+    explicit ResolverScratch(int32_t n_transcripts)
+        : t_exon_bp(n_transcripts, 0),
+          t_transcript_bp(n_transcripts, 0),
+          t_unambig_intron_bp(n_transcripts, 0),
+          t_dirty(n_transcripts, 0)
+    {
+        dirty_indices.reserve(512);
+    }
+
+    ~ResolverScratch() {
+        free(buf);
+        free(sj_buf);
+    }
+
+    // Non-copyable, movable
+    ResolverScratch(const ResolverScratch&) = delete;
+    ResolverScratch& operator=(const ResolverScratch&) = delete;
+
+    ResolverScratch(ResolverScratch&& o) noexcept
+        : t_exon_bp(std::move(o.t_exon_bp)),
+          t_transcript_bp(std::move(o.t_transcript_bp)),
+          t_unambig_intron_bp(std::move(o.t_unambig_intron_bp)),
+          t_dirty(std::move(o.t_dirty)),
+          dirty_indices(std::move(o.dirty_indices)),
+          buf(o.buf), buf_cap(o.buf_cap),
+          sj_buf(o.sj_buf), sj_buf_cap(o.sj_buf_cap)
+    {
+        o.buf = nullptr; o.buf_cap = 0;
+        o.sj_buf = nullptr; o.sj_buf_cap = 0;
+    }
+
+    ResolverScratch& operator=(ResolverScratch&& o) noexcept {
+        if (this != &o) {
+            free(buf); free(sj_buf);
+            t_exon_bp = std::move(o.t_exon_bp);
+            t_transcript_bp = std::move(o.t_transcript_bp);
+            t_unambig_intron_bp = std::move(o.t_unambig_intron_bp);
+            t_dirty = std::move(o.t_dirty);
+            dirty_indices = std::move(o.dirty_indices);
+            buf = o.buf; buf_cap = o.buf_cap;
+            sj_buf = o.sj_buf; sj_buf_cap = o.sj_buf_cap;
+            o.buf = nullptr; o.buf_cap = 0;
+            o.sj_buf = nullptr; o.sj_buf_cap = 0;
+        }
+        return *this;
+    }
+
+    void mark_dirty(int32_t t_idx) {
+        if (!t_dirty[t_idx]) {
+            t_dirty[t_idx] = 1;
+            dirty_indices.push_back(t_idx);
+        }
+    }
+
+    void clean() {
+        for (int32_t t : dirty_indices) {
+            t_exon_bp[t] = 0;
+            t_transcript_bp[t] = 0;
+            t_unambig_intron_bp[t] = 0;
+            t_dirty[t] = 0;
+        }
+        dirty_indices.clear();
+    }
+};
+
+// ================================================================
 // FragmentResolver — holds all index data for C++ resolution
 // ================================================================
 
@@ -331,18 +420,10 @@ public:
     std::unordered_map<std::string, int32_t> ref_to_id_;
     std::vector<std::string> id_to_ref_;
 
-    // --- Reusable query buffers ---
-    int64_t* buf_ = nullptr;
-    int64_t buf_cap_ = 0;
-    int64_t* sj_buf_ = nullptr;
-    int64_t sj_buf_cap_ = 0;
-
-    // --- Per-call scratch buffers (sparse-cleaned) ---
-    std::vector<int32_t> t_exon_bp_;
-    std::vector<int32_t> t_transcript_bp_;
-    std::vector<int32_t> t_unambig_intron_bp_;
-    std::vector<uint8_t> t_dirty_;
-    std::vector<int32_t> dirty_indices_;
+    // --- Per-call scratch (mutable, NOT thread-safe) ---
+    // Single-threaded callers use this. Multi-threaded callers pass
+    // their own ResolverScratch to the overloaded methods.
+    ResolverScratch scratch_;
 
     // ----------------------------------------------------------------
     FragmentResolver() = default;
@@ -350,8 +431,6 @@ public:
     ~FragmentResolver() {
         if (cr_) cr_destroy(cr_);
         if (sj_cr_) cr_destroy(sj_cr_);
-        free(buf_);
-        free(sj_buf_);
     }
 
     // Non-copyable
@@ -443,12 +522,8 @@ public:
         t_to_g_arr_ = t_to_g;
         n_transcripts_ = n_transcripts;
 
-        // Allocate sparse-cleaned scratch buffers
-        t_exon_bp_.assign(n_transcripts_, 0);
-        t_transcript_bp_.assign(n_transcripts_, 0);
-        t_unambig_intron_bp_.assign(n_transcripts_, 0);
-        t_dirty_.assign(n_transcripts_, 0);
-        dirty_indices_.reserve(512);
+        // Initialize internal scratch buffers
+        scratch_ = ResolverScratch(n_transcripts_);
     }
 
     /// Set gene strand mapping (for BAM scanner model training)
@@ -472,10 +547,12 @@ public:
     // Fragment-length computation (ports compute_frag_lengths)
     // ----------------------------------------------------------------
 
+    /// Thread-safe overload: uses caller-supplied scratch for sj_buf.
     std::unordered_map<int32_t, int32_t> compute_frag_lengths(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
-        const std::vector<int32_t>& t_inds) const
+        const std::vector<int32_t>& t_inds,
+        ResolverScratch& scratch) const
     {
         std::unordered_map<int32_t, int32_t> result;
         if (exons.empty() || t_inds.empty()) return result;
@@ -532,12 +609,11 @@ public:
 
         if (ref_id >= 0 && ref_id < static_cast<int32_t>(id_to_ref_.size())) {
             const char* ref_str = id_to_ref_[ref_id].c_str();
-            auto* self = const_cast<FragmentResolver*>(this);
             for (const auto& [gs, ge] : gaps) {
                 int64_t n = cr_overlap(sj_cr_, ref_str, gs, ge,
-                                       &self->sj_buf_, &self->sj_buf_cap_);
+                                       &scratch.sj_buf, &scratch.sj_buf_cap);
                 for (int64_t i = 0; i < n; i++) {
-                    int64_t idx = self->sj_buf_[i];
+                    int64_t idx = scratch.sj_buf[i];
                     int32_t hs = cr_start(sj_cr_, idx);
                     int32_t he = cr_end(sj_cr_, idx);
                     int32_t label = cr_label(sj_cr_, idx);
@@ -557,6 +633,15 @@ public:
             if (sz > 0) result[t] = sz;
         }
         return result;
+    }
+
+    /// Backward-compatible wrapper using internal scratch.
+    std::unordered_map<int32_t, int32_t> compute_frag_lengths(
+        const std::vector<ExonBlock>& exons,
+        const std::vector<IntronBlock>& introns,
+        const std::vector<int32_t>& t_inds)
+    {
+        return compute_frag_lengths(exons, introns, t_inds, scratch_);
     }
 
     // ----------------------------------------------------------------
@@ -601,35 +686,28 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // Scratch buffer management
+    // Scratch buffer management (delegates to scratch_)
     // ----------------------------------------------------------------
 
     void mark_dirty(int32_t t_idx) {
-        if (!t_dirty_[t_idx]) {
-            t_dirty_[t_idx] = 1;
-            dirty_indices_.push_back(t_idx);
-        }
+        scratch_.mark_dirty(t_idx);
     }
 
     void clean_scratch() {
-        for (int32_t t : dirty_indices_) {
-            t_exon_bp_[t] = 0;
-            t_transcript_bp_[t] = 0;
-            t_unambig_intron_bp_[t] = 0;
-            t_dirty_[t] = 0;
-        }
-        dirty_indices_.clear();
+        scratch_.clean();
     }
 
     // ================================================================
     // _resolve_core — shared logic for resolve() and resolve_fragment()
     // ================================================================
 
+    /// Thread-safe overload: uses caller-supplied scratch buffers.
     bool _resolve_core(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
         int32_t genomic_footprint,
-        RawResolveResult& cr)
+        RawResolveResult& cr,
+        ResolverScratch& scratch)
     {
         int n_exons = static_cast<int>(exons.size());
         if (n_exons == 0) return false;
@@ -668,10 +746,10 @@ public:
 
             const char* ref_str = id_to_ref_[eb.ref_id].c_str();
             int64_t n = cr_overlap(cr_, ref_str, bstart, bend,
-                                   &buf_, &buf_cap_);
+                                   &scratch.buf, &scratch.buf_cap);
 
             for (int64_t hi = 0; hi < n; hi++) {
-                int64_t idx = buf_[hi];
+                int64_t idx = scratch.buf[hi];
                 int32_t h_start = cr_start(cr_, idx);
                 int32_t h_end   = cr_end(cr_, idx);
                 int32_t label   = cr_label(cr_, idx);
@@ -689,8 +767,8 @@ public:
                         int32_t bp = chi - clo;
                         for (int32_t k = 0; k < cnt; k++) {
                             int32_t ti = t_set_data_[off + k];
-                            mark_dirty(ti);
-                            t_exon_bp_[ti] += bp;
+                            scratch.mark_dirty(ti);
+                            scratch.t_exon_bp[ti] += bp;
                         }
                     }
                 } else if (itype == ITYPE_TRANSCRIPT) {
@@ -702,8 +780,8 @@ public:
                         int32_t bp = chi - clo;
                         for (int32_t k = 0; k < cnt; k++) {
                             int32_t ti = t_set_data_[off + k];
-                            mark_dirty(ti);
-                            t_transcript_bp_[ti] += bp;
+                            scratch.mark_dirty(ti);
+                            scratch.t_transcript_bp[ti] += bp;
                         }
                     }
                 } else if (itype == ITYPE_UNAMBIG_INTRON) {
@@ -713,8 +791,8 @@ public:
                         int32_t bp = chi - clo;
                         for (int32_t k = 0; k < cnt; k++) {
                             int32_t ti = t_set_data_[off + k];
-                            mark_dirty(ti);
-                            t_unambig_intron_bp_[ti] += bp;
+                            scratch.mark_dirty(ti);
+                            scratch.t_unambig_intron_bp[ti] += bp;
                         }
                     }
                 }
@@ -819,12 +897,12 @@ public:
                                                 : SPLICE_UNSPLICED;
 
         } else {
-            clean_scratch();
+            scratch.clean();
             return false;
         }
 
         if (cr.t_inds.empty()) {
-            clean_scratch();
+            scratch.clean();
             return false;
         }
 
@@ -841,10 +919,10 @@ public:
         cr.t_unambig_intron_bp.reserve(cr.t_inds.size());
         for (int32_t t : cr.t_inds) {
             if (any_overlap && all_overlap_t.count(t)) {
-                cr.t_exon_bp.push_back(t_exon_bp_[t]);
+                cr.t_exon_bp.push_back(scratch.t_exon_bp[t]);
                 cr.t_intron_bp.push_back(
-                    std::max(t_transcript_bp_[t] - t_exon_bp_[t], 0));
-                cr.t_unambig_intron_bp.push_back(t_unambig_intron_bp_[t]);
+                    std::max(scratch.t_transcript_bp[t] - scratch.t_exon_bp[t], 0));
+                cr.t_unambig_intron_bp.push_back(scratch.t_unambig_intron_bp[t]);
             } else if (!any_overlap) {
                 cr.t_exon_bp.push_back(0);
                 cr.t_intron_bp.push_back(cr.read_length);
@@ -874,7 +952,7 @@ public:
 
         // --- Fragment lengths ---
         if (cr.chimera_type == CHIMERA_NONE) {
-            cr.frag_length_map = compute_frag_lengths(exons, introns, cr.t_inds);
+            cr.frag_length_map = compute_frag_lengths(exons, introns, cr.t_inds, scratch);
         }
 
         // --- Genomic start ---
@@ -882,8 +960,18 @@ public:
         for (const auto& e : exons)
             cr.genomic_start = std::min(cr.genomic_start, e.start);
 
-        clean_scratch();
+        scratch.clean();
         return true;
+    }
+
+    /// Backward-compatible wrapper using internal scratch.
+    bool _resolve_core(
+        const std::vector<ExonBlock>& exons,
+        const std::vector<IntronBlock>& introns,
+        int32_t genomic_footprint,
+        RawResolveResult& cr)
+    {
+        return _resolve_core(exons, introns, genomic_footprint, cr, scratch_);
     }
 
     // ================================================================

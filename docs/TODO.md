@@ -1,6 +1,8 @@
 # TODO
 
 
+
+
 ## Edit distance
 
 - when reads overlap, edit distance can get double counted in the overlap portion of the reads
@@ -207,3 +209,9 @@ Change to a 'linked' total RNA = nRNA + mRNA model led to the creation of a subt
 ## (RESOLVED) Any vestigial / stale hard cutoffs for strand specificity?
 
 Previous versions of the code had hard cutoffs for strand specificity. Do those still exist? These should be removed because our new initialization scheme uses both coverage and strand specificity together. We should not longer require cutoffs for strand specificity anywhere in the code. Do a deep dive thorough search for any remaining strand specificity conditional statements based on some cutoff. 
+
+## (RESOLVED) pthread vs openmp
+
+can we simplify by using pthread for our parallel locus EM? what is the benefit to openmp?
+
+2026-03-06: Replaced OpenMP with std::thread. The locus EM now uses a simple atomic-counter work-stealing loop (chunks of 16 loci) with std::thread workers and std::atomic<double> for the single shared accumulator. Removed libomp dependency from CMakeLists.txt and mamba_env.yaml. All 766 tests pass.

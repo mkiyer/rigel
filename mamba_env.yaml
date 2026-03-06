@@ -16,4 +16,3 @@ dependencies:
   # - cmake>=3.15
   - scikit-build-core
   - nanobind>=2.1
-  - llvm-openmp  # libomp for thread-parallel EM (Phase 2B)

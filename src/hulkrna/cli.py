@@ -243,6 +243,7 @@ def quant_command(args: argparse.Namespace) -> int:
             sj_strand_tag=sj_strand_tag,
             strand_prior_kappa=args.strand_prior_kappa,
             spill_dir=Path(args.tmpdir) if args.tmpdir else None,
+            n_scan_threads=args.threads,
         ),
         scoring=FragmentScoringConfig(
             overhang_log_penalty=overhang_log_penalty,
@@ -757,9 +758,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     quant_parser.add_argument(
         "--threads", dest="threads", type=int, default=None,
-        help="Number of threads for parallel locus EM. "
+        help="Number of threads. Used for both parallel BAM scanning "
+             "and parallel locus EM (these stages run serially). "
              "0 = use all available cores (default), 1 = sequential, "
-             "N = cap at N threads.",
+             "N = use N threads.",
     )
     quant_parser.set_defaults(func=quant_command)
 

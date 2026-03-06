@@ -28,6 +28,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -41,6 +42,7 @@
 #include <htslib/sam.h>
 
 #include "resolve_context.h"
+#include "thread_queue.h"
 
 namespace nb = nanobind;
 using namespace hulk;
@@ -241,6 +243,43 @@ struct BamScanStats {
     // Multimapper
     int64_t n_multimapper_groups = 0;
     int64_t n_multimapper_alignments = 0;
+
+    /// Add all counters from another stats struct (for merge).
+    void merge_from(const BamScanStats& o) {
+        total += o.total;
+        qc_fail += o.qc_fail;
+        unmapped += o.unmapped;
+        secondary += o.secondary;
+        supplementary += o.supplementary;
+        duplicate += o.duplicate;
+        n_read_names += o.n_read_names;
+        unique += o.unique;
+        multimapping += o.multimapping;
+        proper_pair += o.proper_pair;
+        improper_pair += o.improper_pair;
+        mate_unmapped += o.mate_unmapped;
+        n_fragments += o.n_fragments;
+        n_chimeric += o.n_chimeric;
+        n_chimeric_trans += o.n_chimeric_trans;
+        n_chimeric_cis_strand_same += o.n_chimeric_cis_strand_same;
+        n_chimeric_cis_strand_diff += o.n_chimeric_cis_strand_diff;
+        n_intergenic_unspliced += o.n_intergenic_unspliced;
+        n_intergenic_spliced += o.n_intergenic_spliced;
+        n_with_exon += o.n_with_exon;
+        n_with_annotated_sj += o.n_with_annotated_sj;
+        n_with_unannotated_sj += o.n_with_unannotated_sj;
+        n_same_strand += o.n_same_strand;
+        n_ambig_strand += o.n_ambig_strand;
+        n_strand_trained += o.n_strand_trained;
+        n_strand_skipped_no_sj += o.n_strand_skipped_no_sj;
+        n_strand_skipped_ambig_strand += o.n_strand_skipped_ambig_strand;
+        n_strand_skipped_ambiguous += o.n_strand_skipped_ambiguous;
+        n_frag_length_unambiguous += o.n_frag_length_unambiguous;
+        n_frag_length_ambiguous += o.n_frag_length_ambiguous;
+        n_frag_length_intergenic += o.n_frag_length_intergenic;
+        n_multimapper_groups += o.n_multimapper_groups;
+        n_multimapper_alignments += o.n_multimapper_alignments;
+    }
 };
 
 // ================================================================
@@ -265,6 +304,107 @@ struct AssembledFragment {
 
     bool has_introns() const { return !introns.empty(); }
 };
+
+// ================================================================
+// WorkerState — per-thread mutable state for parallel scan
+// ================================================================
+
+struct WorkerState {
+    ResolverScratch scratch;
+    FragmentAccumulator accumulator;
+    BamScanStats stats;
+    StrandObservations strand_obs;
+    FragLenObservations fraglen_obs;
+
+    explicit WorkerState(int32_t n_transcripts)
+        : scratch(n_transcripts) {}
+};
+
+// ================================================================
+// Accumulator merge helper
+// ================================================================
+
+static void merge_accumulator_into(FragmentAccumulator& dst,
+                                   FragmentAccumulator& src)
+{
+    if (src.size_ == 0) return;
+
+    int64_t t_base = static_cast<int64_t>(dst.t_indices_.size());
+
+    // Append per-fragment columns
+    dst.splice_type_.insert(dst.splice_type_.end(),
+                            src.splice_type_.begin(), src.splice_type_.end());
+    dst.exon_strand_.insert(dst.exon_strand_.end(),
+                            src.exon_strand_.begin(), src.exon_strand_.end());
+    dst.sj_strand_.insert(dst.sj_strand_.end(),
+                          src.sj_strand_.begin(), src.sj_strand_.end());
+    dst.num_hits_.insert(dst.num_hits_.end(),
+                         src.num_hits_.begin(), src.num_hits_.end());
+    dst.merge_criteria_.insert(dst.merge_criteria_.end(),
+                               src.merge_criteria_.begin(), src.merge_criteria_.end());
+    dst.chimera_type_.insert(dst.chimera_type_.end(),
+                             src.chimera_type_.begin(), src.chimera_type_.end());
+    dst.frag_id_.insert(dst.frag_id_.end(),
+                        src.frag_id_.begin(), src.frag_id_.end());
+    dst.read_length_.insert(dst.read_length_.end(),
+                            src.read_length_.begin(), src.read_length_.end());
+    dst.genomic_footprint_.insert(dst.genomic_footprint_.end(),
+                                  src.genomic_footprint_.begin(),
+                                  src.genomic_footprint_.end());
+    dst.genomic_start_.insert(dst.genomic_start_.end(),
+                              src.genomic_start_.begin(), src.genomic_start_.end());
+    dst.nm_.insert(dst.nm_.end(), src.nm_.begin(), src.nm_.end());
+
+    // Append CSR data
+    dst.t_indices_.insert(dst.t_indices_.end(),
+                          src.t_indices_.begin(), src.t_indices_.end());
+    dst.frag_lengths_.insert(dst.frag_lengths_.end(),
+                             src.frag_lengths_.begin(), src.frag_lengths_.end());
+    dst.exon_bp_.insert(dst.exon_bp_.end(),
+                        src.exon_bp_.begin(), src.exon_bp_.end());
+    dst.intron_bp_.insert(dst.intron_bp_.end(),
+                          src.intron_bp_.begin(), src.intron_bp_.end());
+    dst.unambig_intron_bp_.insert(dst.unambig_intron_bp_.end(),
+                                  src.unambig_intron_bp_.begin(),
+                                  src.unambig_intron_bp_.end());
+
+    // Shift and append t_offsets (skip src's leading 0)
+    for (int32_t i = 1; i <= src.size_; i++) {
+        dst.t_offsets_.push_back(src.t_offsets_[i] + t_base);
+    }
+
+    dst.size_ += src.size_;
+}
+
+// Merge observations
+static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
+    dst.exonic_spliced_obs.insert(dst.exonic_spliced_obs.end(),
+                                  src.exonic_spliced_obs.begin(),
+                                  src.exonic_spliced_obs.end());
+    dst.exonic_spliced_truth.insert(dst.exonic_spliced_truth.end(),
+                                    src.exonic_spliced_truth.begin(),
+                                    src.exonic_spliced_truth.end());
+    dst.exonic_obs.insert(dst.exonic_obs.end(),
+                          src.exonic_obs.begin(), src.exonic_obs.end());
+    dst.exonic_truth.insert(dst.exonic_truth.end(),
+                            src.exonic_truth.begin(), src.exonic_truth.end());
+    dst.intergenic_obs.insert(dst.intergenic_obs.end(),
+                              src.intergenic_obs.begin(),
+                              src.intergenic_obs.end());
+    dst.intergenic_truth.insert(dst.intergenic_truth.end(),
+                                src.intergenic_truth.begin(),
+                                src.intergenic_truth.end());
+}
+
+static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src) {
+    dst.lengths.insert(dst.lengths.end(),
+                       src.lengths.begin(), src.lengths.end());
+    dst.splice_types.insert(dst.splice_types.end(),
+                            src.splice_types.begin(), src.splice_types.end());
+    dst.intergenic_lengths.insert(dst.intergenic_lengths.end(),
+                                  src.intergenic_lengths.begin(),
+                                  src.intergenic_lengths.end());
+}
 
 // ================================================================
 // CIGAR parsing — ports parse_read() from bam.py
@@ -865,6 +1005,545 @@ public:
 
         // Build result dict
         return build_result();
+    }
+
+    // ----------------------------------------------------------------
+    // Threaded scan entry point
+    // ----------------------------------------------------------------
+
+    nb::dict scan_threaded(const std::string& bam_path,
+                           int n_workers = 4,
+                           int n_decomp_threads = 2)
+    {
+        if (n_workers < 1) n_workers = 1;
+
+        // Open BAM file
+        htsFile* fp = hts_open(bam_path.c_str(), "rb");
+        if (!fp) {
+            throw std::runtime_error("Failed to open BAM file: " + bam_path);
+        }
+
+        // Enable htslib BGZF decompression thread pool
+        if (n_decomp_threads > 0) {
+            hts_set_threads(fp, n_decomp_threads);
+        }
+
+        bam_hdr_t* hdr = sam_hdr_read(fp);
+        if (!hdr) {
+            hts_close(fp);
+            throw std::runtime_error("Failed to read BAM header: " + bam_path);
+        }
+
+        // Build tid → ref_id mapping
+        build_tid_mapping(hdr, ctx_->ref_to_id_, tid_to_ref_id_);
+
+        int32_t n_transcripts = ctx_->n_transcripts_;
+
+        // Create bounded queue (capacity: 2 * n_workers groups)
+        BoundedQueue<QnameGroup> queue(
+            static_cast<size_t>(n_workers * 2));
+
+        // Create per-worker state
+        std::vector<std::unique_ptr<WorkerState>> worker_states;
+        worker_states.reserve(n_workers);
+        for (int i = 0; i < n_workers; i++) {
+            worker_states.push_back(
+                std::make_unique<WorkerState>(n_transcripts));
+        }
+
+        // Capture read-only config for workers
+        SJTagMode sj_tag_mode = sj_tag_mode_;
+        bool include_multimap = include_multimap_;
+        FragmentResolver* ctx = ctx_;
+
+        // Launch worker threads
+        std::vector<std::thread> workers;
+        workers.reserve(n_workers);
+        for (int i = 0; i < n_workers; i++) {
+            workers.emplace_back([&queue, ctx, &worker_states, i,
+                                  sj_tag_mode, include_multimap,
+                                  this]()
+            {
+                WorkerState& ws = *worker_states[i];
+                QnameGroup group;
+                while (queue.pop(group)) {
+                    process_qname_group_from_bam1(
+                        group, *ctx, ws, tid_to_ref_id_,
+                        sj_tag_mode, include_multimap);
+                    // group destructor frees bam1_t* records
+                }
+            });
+        }
+
+        // ---- Reader loop (runs on main thread) ----
+        bam1_t* b = bam_init1();
+        if (!b) {
+            queue.close();
+            for (auto& w : workers) w.join();
+            bam_hdr_destroy(hdr);
+            hts_close(fp);
+            throw std::runtime_error("Failed to allocate bam1_t");
+        }
+
+        QnameGroup current_group;
+        std::string current_qname;
+        int64_t frag_id = 0;
+
+        while (sam_read1(fp, hdr, b) >= 0) {
+            stats_.total++;
+
+            uint16_t flag = b->core.flag;
+
+            if (flag & BAM_FQCFAIL) {
+                stats_.qc_fail++;
+                continue;
+            }
+            if (flag & BAM_FUNMAP) {
+                stats_.unmapped++;
+                continue;
+            }
+            if (flag & BAM_FDUP) {
+                stats_.duplicate++;
+                if (skip_duplicates_) continue;
+            }
+
+            // Enforce paired-end
+            if (!(flag & BAM_FPAIRED)) {
+                queue.close();
+                for (auto& w : workers) w.join();
+                bam_destroy1(b);
+                bam_hdr_destroy(hdr);
+                hts_close(fp);
+                throw std::runtime_error(
+                    "Input BAM must be paired-end, but found unpaired read");
+            }
+
+            // Count secondary/supplementary
+            if (flag & BAM_FSECONDARY) stats_.secondary++;
+            if (flag & BAM_FSUPPLEMENTARY) stats_.supplementary++;
+
+            const char* qname = bam_get_qname(b);
+
+            // On qname boundary: dispatch group to queue
+            if (!current_group.records.empty() && current_qname != qname) {
+                current_group.frag_id = frag_id++;
+                queue.push(std::move(current_group));
+                current_group = QnameGroup{};
+            }
+
+            current_qname = qname;
+
+            // Deep-copy the bam1_t record for the worker
+            current_group.records.push_back(bam_dup1(b));
+        }
+
+        // Flush last group
+        if (!current_group.records.empty()) {
+            current_group.frag_id = frag_id++;
+            queue.push(std::move(current_group));
+        }
+
+        // Signal workers to drain and exit
+        queue.close();
+        for (auto& w : workers) w.join();
+
+        // Clean up htslib
+        bam_destroy1(b);
+        bam_hdr_destroy(hdr);
+        hts_close(fp);
+
+        // ---- Merge worker results ----
+        for (auto& ws_ptr : worker_states) {
+            WorkerState& ws = *ws_ptr;
+            stats_.merge_from(ws.stats);
+            merge_accumulator_into(accumulator_, ws.accumulator);
+            merge_strand_obs(strand_obs_, ws.strand_obs);
+            merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
+        }
+
+        return build_result();
+    }
+
+private:
+
+    // ----------------------------------------------------------------
+    // Process one qname group from raw bam1_t records (worker thread)
+    // ----------------------------------------------------------------
+    // Static so it doesn't capture 'this' (shares no mutable BamScanner
+    // state — all mutable state is in WorkerState).
+
+    static void process_qname_group_from_bam1(
+        QnameGroup& group,
+        FragmentResolver& ctx,
+        WorkerState& ws,
+        const std::vector<int32_t>& tid_to_ref_id,
+        SJTagMode sj_tag_mode,
+        bool include_multimap)
+    {
+        if (group.records.empty()) return;
+
+        // 1. Parse raw bam1_t* → ParsedAlignment
+        std::vector<ParsedAlignment> records;
+        records.reserve(group.records.size());
+        for (bam1_t* b : group.records) {
+            ParsedAlignment rec;
+            rec.flag = b->core.flag;
+            rec.ref_id = b->core.tid;
+            rec.ref_start = b->core.pos;
+            rec.mate_ref_id = b->core.mtid;
+            rec.mate_ref_start = b->core.mpos;
+
+            // Tags
+            rec.nm = 0;
+            uint8_t* nm_aux = bam_aux_get(b, "NM");
+            if (nm_aux) rec.nm = bam_aux2i(nm_aux);
+
+            rec.nh = 1;
+            uint8_t* nh_aux = bam_aux_get(b, "NH");
+            if (nh_aux) rec.nh = bam_aux2i(nh_aux);
+
+            rec.hi = -1;
+            uint8_t* hi_aux = bam_aux_get(b, "HI");
+            if (hi_aux) rec.hi = bam_aux2i(hi_aux);
+
+            rec.sj_strand = read_sj_strand(b, sj_tag_mode);
+
+            // CIGAR parse
+            int32_t mapped_ref_id = (rec.ref_id >= 0 &&
+                rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
+                ? tid_to_ref_id[rec.ref_id] : -1;
+            parse_cigar(b, mapped_ref_id, rec.sj_strand,
+                        rec.exons, rec.sjs);
+            rec.ref_id = mapped_ref_id;
+
+            records.push_back(std::move(rec));
+        }
+
+        int64_t frag_id = group.frag_id;
+        BamScanStats& stats = ws.stats;
+        FragmentAccumulator& accumulator = ws.accumulator;
+        StrandObservations& strand_obs = ws.strand_obs;
+        FragLenObservations& fraglen_obs = ws.fraglen_obs;
+        ResolverScratch& scratch = ws.scratch;
+
+        // 2. Same logic as process_qname_group, using per-worker state
+        stats.n_read_names++;
+
+        int32_t nh = 1;
+        for (const auto& r : records) {
+            if (r.nh > 1) { nh = r.nh; break; }
+        }
+
+        bool has_secondary = false;
+        for (const auto& r : records) {
+            if (r.is_secondary()) { has_secondary = true; break; }
+        }
+        bool is_multimap = (nh > 1) || has_secondary;
+
+        if (is_multimap) {
+            stats.multimapping++;
+            if (!include_multimap) return;
+        } else {
+            stats.unique++;
+        }
+
+        auto hit_result = group_records_by_hit(records);
+
+        // Track hit-level mate stats
+        for (const auto& [r1s, r2s] : hit_result.hits) {
+            if (r1s.empty() || r2s.empty()) {
+                stats.mate_unmapped++;
+            } else {
+                bool found_proper = false;
+                for (const auto* r : r1s) {
+                    if (!r->is_supplementary() && !r->is_secondary()) {
+                        found_proper = r->is_proper_pair();
+                        break;
+                    }
+                }
+                if (found_proper) stats.proper_pair++;
+                else stats.improper_pair++;
+            }
+        }
+
+        // Multimapper secondary pairing (uses scratch via ctx)
+        // NOTE: pair_multimapper_reads_native calls ctx._resolve_core
+        // which uses ctx's internal scratch_ — this is NOT thread-safe.
+        // We need to pass scratch. For now, multimapper pairing resolves
+        // each location independently, so we use the scratch overload.
+        std::vector<std::pair<std::vector<ParsedAlignment*>,
+                              std::vector<ParsedAlignment*>>> secondary_pairs;
+        if (!hit_result.sec_r1_locs.empty() ||
+            !hit_result.sec_r2_locs.empty()) {
+            // Thread-safe multimapper pairing using per-worker scratch
+            secondary_pairs = pair_multimapper_reads_with_scratch(
+                hit_result.sec_r1_locs,
+                hit_result.sec_r2_locs,
+                ctx, scratch);
+        }
+
+        auto& all_hits = hit_result.hits;
+        all_hits.insert(all_hits.end(),
+                        secondary_pairs.begin(), secondary_pairs.end());
+
+        int32_t num_hits = std::max(nh, static_cast<int32_t>(all_hits.size()));
+        bool is_unique_mapper = (num_hits == 1);
+        int32_t n_buffered_mm = 0;
+
+        for (const auto& [r1_reads, r2_reads] : all_hits) {
+            AssembledFragment frag = build_fragment(r1_reads, r2_reads);
+            stats.n_fragments++;
+
+            if (frag.exons.empty()) continue;
+
+            RawResolveResult cr;
+            bool resolved = ctx._resolve_core(
+                frag.exons, frag.introns,
+                frag.genomic_footprint(), cr, scratch);
+
+            if (!resolved) {
+                if (frag.has_introns()) {
+                    stats.n_intergenic_spliced++;
+                } else {
+                    stats.n_intergenic_unspliced++;
+                }
+
+                if (is_unique_mapper && !frag.has_introns()) {
+                    int32_t flen = frag.genomic_footprint();
+                    if (flen > 0) {
+                        fraglen_obs.intergenic_lengths.push_back(flen);
+                        stats.n_frag_length_intergenic++;
+                    }
+                }
+
+                if (is_unique_mapper) {
+                    int32_t ig_strand = STRAND_NONE;
+                    for (const auto& eb : frag.exons) {
+                        ig_strand |= eb.strand;
+                    }
+                    if (ig_strand == STRAND_POS || ig_strand == STRAND_NEG) {
+                        strand_obs.intergenic_obs.push_back(ig_strand);
+                        strand_obs.intergenic_truth.push_back(STRAND_POS);
+                    }
+                }
+                continue;
+            }
+
+            ResolvedFragment result = ResolvedFragment::from_core(cr);
+            result.num_hits = num_hits;
+            result.nm = frag.nm;
+
+            if (result.get_is_chimeric()) {
+                stats.n_chimeric++;
+                if (result.chimera_type == CHIMERA_TRANS)
+                    stats.n_chimeric_trans++;
+                else if (result.chimera_type == CHIMERA_CIS_STRAND_SAME)
+                    stats.n_chimeric_cis_strand_same++;
+                else if (result.chimera_type == CHIMERA_CIS_STRAND_DIFF)
+                    stats.n_chimeric_cis_strand_diff++;
+                accumulator.append(result, frag_id);
+                continue;
+            }
+
+            stats.n_with_exon++;
+            if (result.splice_type == SPLICE_SPLICED_ANNOT) {
+                stats.n_with_annotated_sj++;
+            } else if (result.splice_type == SPLICE_SPLICED_UNANNOT) {
+                stats.n_with_unannotated_sj++;
+            }
+
+            if (result.get_is_same_strand()) {
+                stats.n_same_strand++;
+            } else {
+                stats.n_ambig_strand++;
+            }
+
+            if (is_unique_mapper) {
+                if (result.get_is_strand_qualified()) {
+                    strand_obs.exonic_spliced_obs.push_back(result.exon_strand);
+                    strand_obs.exonic_spliced_truth.push_back(result.sj_strand);
+                    stats.n_strand_trained++;
+                } else if (result.splice_type != SPLICE_SPLICED_ANNOT) {
+                    stats.n_strand_skipped_no_sj++;
+                } else if (!result.get_is_same_strand()) {
+                    stats.n_strand_skipped_ambig_strand++;
+                } else {
+                    stats.n_strand_skipped_ambiguous++;
+                }
+
+                if (result.get_is_same_strand() &&
+                    (result.exon_strand == STRAND_POS ||
+                     result.exon_strand == STRAND_NEG)) {
+                    int32_t t_idx = result.get_first_t_ind();
+                    if (t_idx >= 0 &&
+                        t_idx < static_cast<int32_t>(ctx.t_strand_arr_.size())) {
+                        int32_t t_strand = ctx.t_strand_arr_[t_idx];
+                        if (t_strand == STRAND_POS ||
+                            t_strand == STRAND_NEG) {
+                            strand_obs.exonic_obs.push_back(result.exon_strand);
+                            strand_obs.exonic_truth.push_back(t_strand);
+                        }
+                    }
+                }
+
+                int32_t ufl = result.get_unique_frag_length();
+                if (ufl > 0) {
+                    fraglen_obs.lengths.push_back(ufl);
+                    fraglen_obs.splice_types.push_back(result.splice_type);
+                    stats.n_frag_length_unambiguous++;
+                } else {
+                    stats.n_frag_length_ambiguous++;
+                }
+            }
+
+            accumulator.append(result, frag_id);
+
+            if (!is_unique_mapper) {
+                n_buffered_mm++;
+            }
+        }
+
+        if (n_buffered_mm > 0) {
+            stats.n_multimapper_groups++;
+            stats.n_multimapper_alignments += n_buffered_mm;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Thread-safe multimapper pairing (uses external scratch)
+    // ----------------------------------------------------------------
+
+    static std::vector<std::pair<std::vector<ParsedAlignment*>,
+                                  std::vector<ParsedAlignment*>>>
+    pair_multimapper_reads_with_scratch(
+        std::vector<std::vector<ParsedAlignment*>>& sec_r1_locs,
+        std::vector<std::vector<ParsedAlignment*>>& sec_r2_locs,
+        FragmentResolver& ctx,
+        ResolverScratch& scratch)
+    {
+        using Hit = std::pair<std::vector<ParsedAlignment*>,
+                              std::vector<ParsedAlignment*>>;
+        std::vector<Hit> paired;
+
+        if (sec_r1_locs.empty() && sec_r2_locs.empty())
+            return paired;
+
+        auto resolve_location = [&](std::vector<ParsedAlignment*>& reads,
+                                    bool is_r2) -> std::vector<int32_t>
+        {
+            AssembledFragment frag = is_r2
+                ? build_fragment({}, reads)
+                : build_fragment(reads, {});
+            std::vector<int32_t> t_inds;
+            if (!frag.exons.empty()) {
+                RawResolveResult cr;
+                if (ctx._resolve_core(frag.exons, frag.introns,
+                                       frag.genomic_footprint(), cr, scratch)) {
+                    t_inds = std::move(cr.t_inds);
+                }
+            }
+            return t_inds;
+        };
+
+        struct ResolvedLoc {
+            std::vector<ParsedAlignment*>* reads;
+            std::vector<int32_t> t_inds;
+            int32_t ref_id;
+            int32_t ref_start;
+        };
+
+        std::vector<ResolvedLoc> r1_resolved;
+        r1_resolved.reserve(sec_r1_locs.size());
+        for (auto& r1_reads : sec_r1_locs) {
+            auto t_inds = resolve_location(r1_reads, false);
+            int32_t ref_id = r1_reads.empty() ? -1 : r1_reads[0]->ref_id;
+            int32_t ref_start = r1_reads.empty() ? -1 : r1_reads[0]->ref_start;
+            r1_resolved.push_back({&r1_reads, std::move(t_inds), ref_id, ref_start});
+        }
+
+        std::vector<ResolvedLoc> r2_resolved;
+        r2_resolved.reserve(sec_r2_locs.size());
+        for (auto& r2_reads : sec_r2_locs) {
+            auto t_inds = resolve_location(r2_reads, true);
+            int32_t ref_id = r2_reads.empty() ? -1 : r2_reads[0]->ref_id;
+            int32_t ref_start = r2_reads.empty() ? -1 : r2_reads[0]->ref_start;
+            r2_resolved.push_back({&r2_reads, std::move(t_inds), ref_id, ref_start});
+        }
+
+        // STRICT — pair by transcript-set intersection
+        std::unordered_set<int> r1_paired, r2_paired;
+
+        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++) {
+            if (r1_resolved[i].t_inds.empty()) continue;
+            for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++) {
+                if (r2_resolved[j].t_inds.empty()) continue;
+                if (has_intersection(r1_resolved[i].t_inds,
+                                     r2_resolved[j].t_inds)) {
+                    paired.push_back({*r1_resolved[i].reads,
+                                      *r2_resolved[j].reads});
+                    r1_paired.insert(i);
+                    r2_paired.insert(j);
+                }
+            }
+        }
+
+        // FALLBACK — same-reference closest distance
+        std::vector<int> unmatched_r1, unmatched_r2;
+        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
+            if (!r1_paired.count(i)) unmatched_r1.push_back(i);
+        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
+            if (!r2_paired.count(j)) unmatched_r2.push_back(j);
+
+        if (!unmatched_r1.empty() && !unmatched_r2.empty()) {
+            std::vector<std::tuple<int32_t, int, int>> candidates;
+            for (int i : unmatched_r1) {
+                for (int j : unmatched_r2) {
+                    if (r1_resolved[i].ref_id == r2_resolved[j].ref_id &&
+                        r1_resolved[i].ref_id >= 0) {
+                        int32_t dist = std::abs(r1_resolved[i].ref_start -
+                                                r2_resolved[j].ref_start);
+                        candidates.push_back({dist, i, j});
+                    }
+                }
+            }
+            std::sort(candidates.begin(), candidates.end());
+            for (const auto& [dist, i, j] : candidates) {
+                if (!r1_paired.count(i) && !r2_paired.count(j)) {
+                    paired.push_back({*r1_resolved[i].reads,
+                                      *r2_resolved[j].reads});
+                    r1_paired.insert(i);
+                    r2_paired.insert(j);
+                }
+            }
+        }
+
+        // CROSS-PAIR remaining
+        std::vector<int> final_r1, final_r2;
+        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
+            if (!r1_paired.count(i)) final_r1.push_back(i);
+        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
+            if (!r2_paired.count(j)) final_r2.push_back(j);
+
+        if (!final_r1.empty() && !final_r2.empty()) {
+            for (int i : final_r1) {
+                for (int j : final_r2) {
+                    paired.push_back({*r1_resolved[i].reads,
+                                      *r2_resolved[j].reads});
+                    r1_paired.insert(i);
+                    r2_paired.insert(j);
+                }
+            }
+        }
+
+        // SINGLETONS
+        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
+            if (!r1_paired.count(i))
+                paired.push_back({*r1_resolved[i].reads, {}});
+        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
+            if (!r2_paired.count(j))
+                paired.push_back({{}, *r2_resolved[j].reads});
+
+        return paired;
     }
 
 private:
@@ -1625,6 +2304,23 @@ NB_MODULE(_bam_impl, m) {
              "  'strand_observations' — dict of strand training arrays\n"
              "  'frag_length_observations' — dict of frag length arrays\n"
              "  'accumulator_size' — number of resolved fragments\n")
+        .def("scan_threaded", &BamScanner::scan_threaded,
+             nb::arg("bam_path"),
+             nb::arg("n_workers") = 4,
+             nb::arg("n_decomp_threads") = 2,
+             "Scan BAM file using multiple threads.\n\n"
+             "Parameters\n"
+             "----------\n"
+             "bam_path : str\n"
+             "    Path to name-sorted BAM file.\n"
+             "n_workers : int\n"
+             "    Number of worker threads for parsing/resolution (default 4).\n"
+             "n_decomp_threads : int\n"
+             "    Number of htslib BGZF decompression threads (default 2).\n\n"
+             "Returns\n"
+             "-------\n"
+             "dict\n"
+             "    Same format as scan().\n")
         .def("finalize_accumulator", &BamScanner::finalize_accumulator,
              nb::arg("t_strand_arr"),
              "Finalize the internal accumulator to raw bytes dict.\n\n"

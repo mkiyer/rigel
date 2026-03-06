@@ -177,40 +177,4 @@ nanobind_add_module(
   src/hulkrna/native/em_solver.cpp
 )
 
-# --- OpenMP support for thread-parallel locus EM (Phase 2B) ---
-# Apple Clang doesn't ship OpenMP, but libomp from conda-forge works.
-# CMake's find_package(OpenMP) may fail on macOS; fall back to manual flags.
-find_package(OpenMP QUIET)
-
-if(OpenMP_CXX_FOUND)
-  message(STATUS "OpenMP found via find_package — linking to _em_impl")
-  target_link_libraries(_em_impl PRIVATE OpenMP::OpenMP_CXX)
-else()
-  # Manual detection: look for libomp in CONDA_PREFIX
-  if(DEFINED ENV{CONDA_PREFIX})
-    set(_omp_conda "$ENV{CONDA_PREFIX}")
-    if(EXISTS "${_omp_conda}/include/omp.h" AND
-       (EXISTS "${_omp_conda}/lib/libomp.dylib" OR EXISTS "${_omp_conda}/lib/libomp.so"))
-      message(STATUS "OpenMP: using libomp from CONDA_PREFIX (${_omp_conda})")
-      target_compile_options(_em_impl PRIVATE "-Xclang" "-fopenmp")
-      target_include_directories(_em_impl PRIVATE "${_omp_conda}/include")
-      target_link_directories(_em_impl PRIVATE "${_omp_conda}/lib")
-      target_link_libraries(_em_impl PRIVATE omp)
-      # Set rpath so the shared library finds libomp.dylib at runtime
-      set_target_properties(_em_impl PROPERTIES
-        BUILD_RPATH "${_omp_conda}/lib"
-        INSTALL_RPATH "${_omp_conda}/lib"
-      )
-      set(OpenMP_CXX_FOUND TRUE)
-    endif()
-  endif()
-
-  if(NOT OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP NOT found — _em_impl will use sequential locus EM. "
-                   "Install libomp (conda install -c conda-forge libomp) for "
-                   "thread-parallel EM.")
-    target_compile_definitions(_em_impl PRIVATE HULK_NO_OPENMP=1)
-  endif()
-endif()
-
 install(TARGETS _em_impl LIBRARY DESTINATION hulkrna)

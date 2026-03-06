@@ -195,6 +195,7 @@ class BamScanConfig:
     chunk_size: int = 1_000_000
     max_memory_bytes: int = 2 * 1024**3
     spill_dir: Path | str | None = None
+    n_scan_threads: int = 0
 
 
 # ======================================================================

@@ -302,7 +302,14 @@ def scan_and_buffer(
     )
 
     # Execute the full BAM scan in C++
-    result = scanner.scan(bam_path)
+    n_scan = scan.n_scan_threads
+    if n_scan == 0:
+        import os
+        n_scan = os.cpu_count() or 1
+    if n_scan > 1:
+        result = scanner.scan_threaded(bam_path, n_workers=n_scan)
+    else:
+        result = scanner.scan(bam_path)
 
     # Replay stats
     _apply_scan_stats(stats, result["stats"])

@@ -19,14 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
-// OpenMP support (Phase 2B — thread-parallel locus EM).
-// When HULK_NO_OPENMP is defined (CMake fallback), stubs are provided
-// and #pragma omp directives are silently ignored by the compiler.
-#ifndef HULK_NO_OPENMP
-#include <omp.h>
-#else
-static inline int omp_get_max_threads() { return 1; }
-#endif
+#include <atomic>
+#include <thread>
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -1748,11 +1742,14 @@ batch_locus_em(
     double* locus_nrna_data = locus_nrna_vec.data();
     double* locus_gdna_data = locus_gdna_vec.data();
 
-    double total_gdna_em = 0.0;
+    std::atomic<double> total_gdna_em{0.0};
 
-    // Determine actual thread count for OpenMP (Phase 2B)
+    // Determine actual thread count
     int actual_threads = n_threads;
-    if (actual_threads <= 0) actual_threads = omp_get_max_threads();
+    if (actual_threads <= 0) {
+        int hw = static_cast<int>(std::thread::hardware_concurrency());
+        actual_threads = (hw > 0) ? hw : 1;
+    }
     if (actual_threads < 1) actual_threads = 1;
 
     // Release the GIL for the compute-intensive parallel section.
@@ -1762,7 +1759,7 @@ batch_locus_em(
     {
         nb::gil_scoped_release release;
 
-        // --- Main locus loop (thread-parallel when OpenMP available) ---
+        // --- Main locus loop (thread-parallel via std::thread) ---
         //
         // Key safety property: loci are connected components of the
         // transcript-unit bipartite graph, so each transcript and each unit
@@ -1771,23 +1768,26 @@ batch_locus_em(
         // gdna_out, psum_out, nass_out).  No data races on those arrays.
         //
         // The only shared scalar accumulator is total_gdna_em, handled via
-        // #pragma omp atomic.
+        // std::atomic<double>.
         //
-        // Each thread gets its own LocusSubProblem and local_map scratch
-        // (declared inside the parallel region → thread-private).
-#ifndef HULK_NO_OPENMP
-        #pragma omp parallel num_threads(actual_threads)
-#endif
-        {
+        // Each thread gets its own LocusSubProblem and local_map scratch.
+        // Work is distributed dynamically via an atomic counter (chunks of 16).
+        constexpr int CHUNK_SIZE = 16;
+        std::atomic<int> next_locus{0};
+
+        auto worker_fn = [&]() {
             // Thread-private scratch state (allocated once per thread, reused
             // across all loci assigned to this thread by dynamic scheduling).
             LocusSubProblem sub;
             std::vector<int32_t> local_map(local_map_size, -1);
+            double local_gdna = 0.0;
 
-#ifndef HULK_NO_OPENMP
-            #pragma omp for schedule(dynamic, 16)
-#endif
-        for (int li = 0; li < n_loci; ++li) {
+            for (;;) {
+                int chunk_start = next_locus.fetch_add(CHUNK_SIZE,
+                    std::memory_order_relaxed);
+                if (chunk_start >= n_loci) break;
+                int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_loci);
+                for (int li = chunk_start; li < chunk_end; ++li) {
             // Get locus transcript and unit index ranges
             auto t_start = lt_off[li];
             auto t_end   = lt_off[li + 1];
@@ -1922,14 +1922,31 @@ batch_locus_em(
             locus_nrna_data[li] = locus_nrna;
             locus_gdna_data[li] = locus_gdna;
 
-            // total_gdna_em is the only shared scalar — use atomic
-#ifndef HULK_NO_OPENMP
-            #pragma omp atomic
-#endif
-            total_gdna_em += locus_gdna;
+            local_gdna += locus_gdna;
+                } // end chunk loop
+            } // end work-stealing loop
+
+            // Flush thread-local gdna to shared atomic
+            double prev = total_gdna_em.load(std::memory_order_relaxed);
+            while (!total_gdna_em.compare_exchange_weak(
+                prev, prev + local_gdna,
+                std::memory_order_relaxed, std::memory_order_relaxed)) {}
+        }; // end worker_fn
+
+        if (actual_threads <= 1) {
+            // Single-threaded: run directly, no thread overhead
+            worker_fn();
+        } else {
+            std::vector<std::thread> threads;
+            threads.reserve(actual_threads);
+            for (int t = 0; t < actual_threads; ++t)
+                threads.emplace_back(worker_fn);
+            for (auto& th : threads)
+                th.join();
         }
-        } // end omp parallel
     } // end gil_scoped_release — GIL re-acquired here
+
+    double total_gdna_em_val = total_gdna_em.load(std::memory_order_relaxed);
 
     // Package per-locus results as numpy arrays (copy from vector)
     size_t shape[1] = { static_cast<size_t>(n_loci) };
@@ -1947,7 +1964,7 @@ batch_locus_em(
     nb::capsule gdna_owner(gdna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
 
     return std::make_tuple(
-        total_gdna_em,
+        total_gdna_em_val,
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(
             mrna_copy, 1, shape, std::move(mrna_owner)),
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(

@@ -306,6 +306,8 @@ def _build_pipeline_config(
     if tmpdir is not None:
         from pathlib import Path as _Path
         scan_kw["spill_dir"] = _Path(tmpdir)
+    if "n_threads" in em_kw:
+        scan_kw["n_scan_threads"] = em_kw["n_threads"]
 
     return PipelineConfig(
         em=EMConfig(**em_kw),

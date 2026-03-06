@@ -1,0 +1,3 @@
+gene_id	gene_name	locus_id	effective_length	mrna	mrna_unambig	mrna_em	mrna_high_conf	mrna_spliced	nrna	rna_total	tpm
+g1	g1	0	373.6731634182887	837.0	0.0	837.0	837.0	0.0	0.0	837.0	745978.9498168288
+g_h	g_h	1	213.70314842578617	163.0	0.0	163.0	163.0	0.0	0.0	163.0	254021.05018317123
