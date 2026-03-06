@@ -1,11 +1,21 @@
 # TODO
 
 
-## Any vestigial / stale hard cutoffs for strand specificity?
+## Fragment length model
 
-Previous versions of the code had hard cutoffs for strand specificity. Do those still exist? These should be removed because our new initialization scheme uses both coverage and strand specificity together. We should not longer require cutoffs for strand specificity anywhere in the code. Do a deep dive thorough search for any remaining strand specificity conditional statements based on some cutoff. 
+- gDNA and RNA should have different models
+- different models should be used to help predict
+- output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
 
 
+## Unannotated splice junctions
+
+A fraction of splice junctions are "unannotated" in that they don't have exact matches to the reference. These can be either artifacts (aligner errors) or 'novel' isoforms/transcripts. There is a lot of information that we are not taking advantage of yet:
+
+- (easy) is the 5' splice site annotated
+- (easy) is the 3' splice site annotated
+- (medium) how much 'anchor' on either side of the intron?
+- (hard) does this junction match any of the 'blacklist' splice junctions -- requires building a splice junction blacklist.
 
 
 ## Mappability
@@ -31,12 +41,6 @@ Solutions:
 
 We can "blacklist" splice junction artifacts by doing genome-wide mapping. Align to the genome and detect cases where gDNA sequence -> spliced alignment (artifact). Compile a "blacklist" from these cases.
 
-
-## Fragment length model
-
-- gDNA and RNA should have different models
-- different models should be used to help predict
-- output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
 
 
 
@@ -186,3 +190,8 @@ kappa = 2 default
 ## (RESOLVED) Incorrect nRNA and gDNA initialization
 
 Change to a 'linked' total RNA = nRNA + mRNA model led to the creation of a subtle initialization bug where gDNA and nRNA reads were being double counted. This has been resolved.
+
+
+## (RESOLVED) Any vestigial / stale hard cutoffs for strand specificity?
+
+Previous versions of the code had hard cutoffs for strand specificity. Do those still exist? These should be removed because our new initialization scheme uses both coverage and strand specificity together. We should not longer require cutoffs for strand specificity anywhere in the code. Do a deep dive thorough search for any remaining strand specificity conditional statements based on some cutoff. 

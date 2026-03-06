@@ -30,8 +30,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Transcript count above which a locus triggers debug logging.
-_LARGE_LOCUS_LOG_THRESHOLD = 100
 # Padding and minimum capacity for the annotation table.
 _ANNOTATION_TABLE_PADDING = 1024
 _ANNOTATION_TABLE_MIN_CAPACITY = 4096
@@ -55,7 +53,6 @@ from ._bam_impl import detect_sj_strand_tag as _native_detect_sj_tag
 from .scoring import FragmentScorer
 from .locus import (
     build_loci,
-    build_locus_em_data,
     compute_nrna_init,
     compute_gdna_rate_from_strand,
     compute_gdna_rate_hybrid,
@@ -580,98 +577,79 @@ def quant_from_buffer(
 
         # Per-locus EM + posterior assignment
         total_gdna_em = 0.0
-        _unit_ann_list: list | None = [] if annotations is not None else None
         t_refs = index.t_df["ref"].values
         t_to_g = index.t_to_g_arr
 
-        # Pre-extract DataFrame columns to avoid repeated Pandas overhead
-        # inside build_locus_em_data (called once per locus).
-        _locus_cache: dict = {
-            "t_starts": index.t_df["start"].values,
-            "t_ends": index.t_df["end"].values,
-            "t_lengths": index.t_df["length"].values,
-            # Reusable scratch buffer for global→local index mapping.
-            # Sized to max possible index; reset to -1 each locus.
-            "local_map": np.full(
-                index.num_transcripts * 2 + 1, -1, dtype=np.int32,
-            ),
-        }
-
-        for i, locus in enumerate(loci):
-            if len(locus.unit_indices) == 0:
-                continue
-
-            locus_em = build_locus_em_data(
-                locus, em_data, estimator, index, geometry.mean_frag,
-                gdna_init=gdna_inits[i],
-                _cache=_locus_cache,
-            )
-            theta, alpha = estimator.run_locus_em(
-                locus_em,
-                em_iterations=em_config.iterations,
-                em_convergence_delta=em_config.convergence_delta,
-            )
-            pool_counts = estimator.assign_locus_ambiguous(
-                locus_em, theta,
-                confidence_threshold=em_config.confidence_threshold,
-                unit_annotations=_unit_ann_list,
-            )
-            gdna_assigned = pool_counts["gdna"]
-            total_gdna_em += gdna_assigned
-
-            # Determine primary chromosome for this locus
+        def _build_locus_meta(locus, *, mrna, nrna, gdna, gdna_init):
+            """Build one locus_results record (shared by C++ and Python paths)."""
             ref_counts: dict[str, int] = {}
             for t_idx in locus.transcript_indices:
                 ref = str(t_refs[int(t_idx)])
                 ref_counts[ref] = ref_counts.get(ref, 0) + 1
-            primary_chrom = max(ref_counts, key=ref_counts.get) if ref_counts else ""
-
-            # Unique genes in this locus
-            gene_set = set()
-            for t_idx in locus.transcript_indices:
-                gene_set.add(int(t_to_g[int(t_idx)]))
-
-            estimator.locus_results.append({
+            primary_chrom = (
+                max(ref_counts, key=ref_counts.get) if ref_counts else ""
+            )
+            gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
+            return {
                 "locus_id": locus.locus_id,
                 "chrom": primary_chrom,
                 "n_transcripts": len(locus.transcript_indices),
                 "n_genes": len(gene_set),
                 "n_em_fragments": len(locus.unit_indices),
-                "mrna": pool_counts["mrna"],
-                "nrna": pool_counts["nrna"],
-                "gdna": gdna_assigned,
-                "gdna_init": gdna_inits[i],
-            })
+                "mrna": float(mrna),
+                "nrna": float(nrna),
+                "gdna": float(gdna),
+                "gdna_init": float(gdna_init),
+            }
 
-            if len(locus.transcript_indices) > _LARGE_LOCUS_LOG_THRESHOLD:
-                logger.debug(
-                    f"  Locus {locus.locus_id}: "
-                    f"{len(locus.transcript_indices)} transcripts, "
-                    f"{len(locus.unit_indices)} units, "
-                    f"gDNA={gdna_assigned:.0f}"
-                )
+        # ============================================================
+        # Use batch C++ path when annotations are NOT requested
+        # (the batch path skips per-unit annotation tracking).
+        # Fall back to Python per-locus loop when annotations are on.
+        # ============================================================
+        if annotations is None and not os.environ.get("HULK_FORCE_PYTHON"):
+            # --- Batch C++ path: single call for all loci ---
+            (
+                total_gdna_em,
+                locus_mrna_arr,
+                locus_nrna_arr,
+                locus_gdna_arr,
+            ) = estimator.run_batch_locus_em(
+                loci,
+                em_data,
+                index,
+                np.asarray(gdna_inits, dtype=np.float64),
+                em_iterations=em_config.iterations,
+                em_convergence_delta=em_config.convergence_delta,
+                confidence_threshold=em_config.confidence_threshold,
+            )
+
+            for i, locus in enumerate(loci):
+                estimator.locus_results.append(_build_locus_meta(
+                    locus,
+                    mrna=locus_mrna_arr[i],
+                    nrna=locus_nrna_arr[i],
+                    gdna=locus_gdna_arr[i],
+                    gdna_init=gdna_inits[i],
+                ))
+        else:
+            # --- Python per-locus loop (with annotation support) ---
+            # Implementation lives in pyfallback; will be removed once
+            # the batch C++ path supports annotations.
+            from .pyfallback import run_per_locus_em_loop as _py_locus_loop
+            total_gdna_em = _py_locus_loop(
+                estimator=estimator,
+                loci=loci,
+                em_data=em_data,
+                index=index,
+                geometry=geometry,
+                gdna_inits=gdna_inits,
+                em_config=em_config,
+                annotations=annotations,
+                build_locus_meta=_build_locus_meta,
+            )
 
         estimator._gdna_em_total = total_gdna_em
-
-        # --- Map EM unit annotations to frag_ids ---
-        if annotations is not None and _unit_ann_list:
-            for (
-                global_unit_idx, g_tid, g_gid,
-                pool_code, posterior, n_cand,
-            ) in _unit_ann_list:
-                fid = int(em_data.frag_ids[global_unit_idx])
-                fc = int(em_data.frag_class[global_unit_idx])
-                st = int(em_data.splice_type[global_unit_idx])
-                annotations.add(
-                    frag_id=fid,
-                    best_tid=g_tid,
-                    best_gid=g_gid,
-                    pool=pool_code,
-                    posterior=posterior,
-                    frag_class=fc,
-                    n_candidates=n_cand,
-                    splice_type=st,
-                )
 
         logger.info(
             f"[DONE] Per-locus EM: {len(loci)} loci, "

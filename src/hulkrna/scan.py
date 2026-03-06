@@ -649,149 +649,184 @@ class FragmentRouter:
         are assigned directly via ``estimator.assign_unambig``.  All other
         exonic fragments build EM units.  Chimeric fragments are
         recorded in the annotation table (if active) and skipped.
+
+        Uses the C++ chunk-level fast path when a NativeFragmentScorer is
+        available and the buffer yields proper ``_FinalizedChunk`` objects
+        (with columnar NumPy arrays).  Falls back to the per-fragment
+        Python path otherwise.
         """
+        nc = self._native_ctx
+        if nc is not None:
+            # Peek at the first chunk to see if it has columnar arrays.
+            # Test mocks may use a simple _Chunk that only supports __getitem__.
+            chunks = list(buffer.iter_chunks())
+            if chunks and hasattr(chunks[0], 't_offsets'):
+                return self._scan_native(chunks, buffer, log_every)
+        return self._scan_python(buffer, log_every)
+
+    def _scan_native(
+        self, chunks, buffer: FragmentBuffer, log_every: int,
+    ) -> ScoredFragments:
+        """Chunk-level C++ scan path (fast)."""
         import logging
         logger = logging.getLogger(__name__)
 
+        nc = self._native_ctx
         estimator = self.estimator
         stats = self.stats
         index = self.index
         t_to_g = self.ctx.t_to_g
         annotations = self.annotations
 
+        # Pre-compute gDNA log splice penalty for unspliced fragments.
+        # Only SPLICE_UNSPLICED reaches the gDNA log-lik computation
+        # (SPLICE_ANNOT and SPLICE_UNANNOT are marked -inf).
+        from .scoring import LOG_SAFE_FLOOR
+        _gdna_sp = self.ctx.gdna_splice_penalties.get(
+            SPLICE_UNSPLICED, _DEFAULT_SPLICE_PENALTY,
+        )
+        gdna_log_sp = math.log(max(_gdna_sp, LOG_SAFE_FLOOR))
+
+        # Ensure accumulator arrays are contiguous float64
+        t_strand_arr = np.ascontiguousarray(
+            index.t_to_strand_arr, dtype=np.int8)
+
         n_processed = 0
-        for chunk in buffer.iter_chunks():
+        for chunk in chunks:
             frag_classes = chunk.fragment_classes
 
-            for i in range(chunk.size):
-                fc = frag_classes[i]
+            # --- C++ processes all non-MM, non-chimeric ---
+            result = nc.scan_chunk(
+                np.ascontiguousarray(chunk.t_offsets, dtype=np.int64),
+                np.ascontiguousarray(chunk.t_indices, dtype=np.int32),
+                np.ascontiguousarray(chunk.frag_lengths, dtype=np.int32),
+                np.ascontiguousarray(chunk.exon_bp, dtype=np.int32),
+                np.ascontiguousarray(chunk.intron_bp, dtype=np.int32),
+                np.ascontiguousarray(
+                    chunk.unambig_intron_bp, dtype=np.int32),
+                np.ascontiguousarray(chunk.splice_type, dtype=np.uint8),
+                np.ascontiguousarray(chunk.exon_strand, dtype=np.uint8),
+                np.ascontiguousarray(frag_classes, dtype=np.uint8),
+                np.ascontiguousarray(chunk.frag_id, dtype=np.int64),
+                np.ascontiguousarray(chunk.read_length, dtype=np.uint32),
+                np.ascontiguousarray(
+                    chunk.genomic_footprint, dtype=np.int32),
+                np.ascontiguousarray(chunk.genomic_start, dtype=np.int32),
+                np.ascontiguousarray(chunk.nm, dtype=np.uint16),
+                t_strand_arr,
+                estimator.transcript_exonic_sense,
+                estimator.transcript_exonic_antisense,
+                estimator.transcript_unspliced_sense,
+                estimator.transcript_unspliced_antisense,
+                estimator.transcript_intronic_sense,
+                estimator.transcript_intronic_antisense,
+                estimator.unambig_counts,
+                gdna_log_sp,
+            )
 
-                # --- Chimeric ---
-                if fc == FRAG_CHIMERIC:
-                    if annotations is not None:
-                        chimeric_fid = int(chunk.frag_id[i])
-                        annotations.add(
-                            frag_id=chimeric_fid,
-                            best_tid=-1,
-                            best_gid=-1,
-                            pool=POOL_CODE_CHIMERIC,
-                            posterior=0.0,
-                            frag_class=FRAG_CHIMERIC,
-                            n_candidates=0,
-                            splice_type=int(chunk[i].splice_type),
-                        )
-                    n_processed += 1
-                    if n_processed % log_every == 0:
-                        logger.debug(
-                            f"  Scan: {n_processed:,} / "
-                            f"{buffer.total_fragments:,}"
-                        )
-                    continue
+            # Unpack result tuple
+            (
+                c_offsets, c_ti, c_ll, c_ct, c_cw, c_ts, c_te,
+                c_locus_t, c_locus_ct, c_is_spliced, c_gdna_ll,
+                c_gfp, c_fid, c_fclass, c_stype,
+                det_tids, det_fids,
+                n_det, n_em_u, n_em_as, n_em_ao, n_gated, n_chim,
+            ) = result
 
-                bf = chunk[i]
-                is_spliced_annot = bf.splice_type == SPLICE_ANNOT
+            # Accumulate C++ CSR data into array.array accumulators
+            if len(c_ti) > 0:
+                base = self.offsets[-1]
+                for off in c_offsets:
+                    self.offsets.append(base + int(off))
+                self.t_indices_list.frombytes(
+                    c_ti.astype(np.int32).tobytes())
+                self.log_liks_list.frombytes(
+                    c_ll.astype(np.float64).tobytes())
+                self.count_cols_list.frombytes(
+                    c_ct.astype(np.uint8).tobytes())
+                self.coverage_weights_list.frombytes(
+                    c_cw.astype(np.float64).tobytes())
+                self.tx_starts_list.frombytes(
+                    c_ts.astype(np.int32).tobytes())
+                self.tx_ends_list.frombytes(
+                    c_te.astype(np.int32).tobytes())
+                self.locus_t_list.frombytes(
+                    c_locus_t.astype(np.int32).tobytes())
+                self.locus_ct_list.frombytes(
+                    c_locus_ct.astype(np.uint8).tobytes())
+                self.is_spliced_list.frombytes(
+                    c_is_spliced.astype(np.int8).tobytes())
+                self.gdna_ll_list.frombytes(
+                    c_gdna_ll.astype(np.float64).tobytes())
+                self.genomic_footprints_list.frombytes(
+                    c_gfp.astype(np.int32).tobytes())
+                self.frag_id_list.frombytes(
+                    c_fid.astype(np.int64).tobytes())
+                self.frag_class_list.frombytes(
+                    c_fclass.astype(np.int8).tobytes())
+                self.splice_type_list.frombytes(
+                    c_stype.astype(np.uint8).tobytes())
 
-                # --- Pre-EM strand/intronic accumulation ---
-                if fc == FRAG_UNAMBIG or fc == FRAG_AMBIG_SAME_STRAND:
-                    first_t = int(bf.t_inds[0])
-                    t_strand = int(index.t_to_strand_arr[first_t])
+            # Accumulate stats
+            stats.deterministic_unambig_units += int(n_det)
+            stats.em_routed_unambig_units += int(n_em_u)
+            stats.em_routed_ambig_same_strand_units += int(n_em_as)
+            stats.em_routed_ambig_opp_strand_units += int(n_em_ao)
+            stats.n_gated_out += int(n_gated)
 
-                    is_anti = estimator.is_antisense(
-                        bf.exon_strand, t_strand,
-                        self.strand_models.exonic_spliced,
+            # --- Chimeric annotations ---
+            if annotations is not None:
+                chimeric_indices = np.where(
+                    frag_classes == FRAG_CHIMERIC)[0]
+                for idx in chimeric_indices:
+                    annotations.add(
+                        frag_id=int(chunk.frag_id[idx]),
+                        best_tid=-1,
+                        best_gid=-1,
+                        pool=POOL_CODE_CHIMERIC,
+                        posterior=0.0,
+                        frag_class=FRAG_CHIMERIC,
+                        n_candidates=0,
+                        splice_type=int(chunk.splice_type[idx]),
                     )
 
-                    is_unspliced = (bf.splice_type == SPLICE_UNSPLICED)
+            # --- Deterministic-unambig annotations ---
+            if annotations is not None and len(det_tids) > 0:
+                for j in range(len(det_tids)):
+                    tid = int(det_tids[j])
+                    gid = int(t_to_g[tid])
+                    annotations.add(
+                        frag_id=int(det_fids[j]),
+                        best_tid=tid,
+                        best_gid=gid,
+                        pool=POOL_CODE_MRNA,
+                        posterior=1.0,
+                        frag_class=FRAG_UNAMBIG,
+                        n_candidates=1,
+                        splice_type=int(SPLICE_ANNOT),
+                    )
 
-                    # Transcript-level counts for pre-EM initialization:
-                    # - unspliced sense/antisense → gDNA EB prior
-                    # - intronic sense/antisense → nRNA init
-                    # - exonic sense/antisense → nrna_frac (nascent fraction) prior
-                    n_cand = len(bf.t_inds)
-                    weight = 1.0 / n_cand
-                    for k, t_idx in enumerate(bf.t_inds):
-                        t_idx_int = int(t_idx)
-
-                        has_unambig_intron = (
-                            bf.unambig_intron_bp is not None
-                            and bf.unambig_intron_bp[k] > 0
-                        )
-
-                        # Exonic accumulation (exonic-only fragments,
-                        # for nrna_frac prior).  Exclude fragments with
-                        # intronic overlap: those are nRNA/gDNA, not
-                        # mRNA, and including them inflates D_exon
-                        # which deflates the nrna_frac estimate.
-                        if not has_unambig_intron:
-                            if is_anti:
-                                estimator.transcript_exonic_antisense[
-                                    t_idx_int
-                                ] += weight
-                            else:
-                                estimator.transcript_exonic_sense[
-                                    t_idx_int
-                                ] += weight
-
-                        if is_unspliced:
-                            if is_anti:
-                                estimator.transcript_unspliced_antisense[
-                                    t_idx_int
-                                ] += weight
-                            else:
-                                estimator.transcript_unspliced_sense[
-                                    t_idx_int
-                                ] += weight
-
-                        if has_unambig_intron:
-                            if is_anti:
-                                estimator.transcript_intronic_antisense[
-                                    t_idx_int
-                                ] += weight
-                            else:
-                                estimator.transcript_intronic_sense[
-                                    t_idx_int
-                                ] += weight
-
-                # --- Deterministic unique: SPLICED_ANNOT + FRAG_UNAMBIG ---
-                if fc == FRAG_UNAMBIG and is_spliced_annot:
-                    estimator.assign_unambig(bf, index, self.strand_models)
-                    stats.deterministic_unambig_units += 1
-
-                    if annotations is not None:
-                        det_tid = int(next(iter(bf.t_inds)))
-                        det_gid = int(t_to_g[det_tid])
-                        annotations.add(
-                            frag_id=int(chunk.frag_id[i]),
-                            best_tid=det_tid,
-                            best_gid=det_gid,
-                            pool=POOL_CODE_MRNA,
-                            posterior=1.0,
-                            frag_class=FRAG_UNAMBIG,
-                            n_candidates=1,
-                            splice_type=int(bf.splice_type),
-                        )
-
-                elif fc == FRAG_MULTIMAPPER:
-                    fid = int(chunk.frag_id[i])
-                    if fid != self.mm_fid:
-                        if self.mm_pending:
-                            self._flush_mm_group()
-                            stats.em_routed_multimapper_units += 1
-                        self.mm_fid = fid
-                        self.mm_pending.clear()
-                        self.mm_pending.append(bf)
-                    else:
-                        self.mm_pending.append(bf)
-
+            # --- Multimapper handling (Python path, unchanged) ---
+            mm_indices = np.where(frag_classes == FRAG_MULTIMAPPER)[0]
+            for idx in mm_indices:
+                bf = chunk[int(idx)]
+                fid = int(chunk.frag_id[idx])
+                if fid != self.mm_fid:
+                    if self.mm_pending:
+                        self._flush_mm_group()
+                        stats.em_routed_multimapper_units += 1
+                    self.mm_fid = fid
+                    self.mm_pending.clear()
+                    self.mm_pending.append(bf)
                 else:
-                    self._add_single_fragment(bf, chunk, i, fc)
+                    self.mm_pending.append(bf)
 
-                n_processed += 1
-                if n_processed % log_every == 0:
-                    logger.debug(
-                        f"  Scan: {n_processed:,} / "
-                        f"{buffer.total_fragments:,}"
-                    )
+            n_processed += chunk.size
+            if n_processed % log_every < chunk.size:
+                logger.debug(
+                    f"  Scan: {n_processed:,} / "
+                    f"{buffer.total_fragments:,}"
+                )
 
         # Flush last multimapper group
         if self.mm_pending:
@@ -831,3 +866,14 @@ class FragmentRouter:
             n_candidates=n_candidates,
             nrna_base_index=self.ctx.nrna_base,
         )
+
+    def _scan_python(
+        self, buffer: FragmentBuffer, log_every: int,
+    ) -> ScoredFragments:
+        """Per-fragment Python scan path (fallback when native unavailable).
+
+        Implementation lives in :mod:`hulkrna.pyfallback` to keep the
+        main module lean.  Will be removed once C++ is the sole path.
+        """
+        from .pyfallback import scan_python as _scan_python_fb
+        return _scan_python_fb(self, buffer, log_every)

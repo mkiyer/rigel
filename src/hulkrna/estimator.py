@@ -49,8 +49,10 @@ import pandas as pd
 
 from .types import Strand
 from .config import EMConfig, TranscriptGeometry
-from ._em_impl import run_locus_em_native as _run_locus_em_native
-from .annotate import POOL_CODE_MRNA, POOL_CODE_NRNA, POOL_CODE_GDNA
+from ._em_impl import batch_locus_em as _batch_locus_em
+from ._em_impl import (                       # --- single source of truth ---
+    EM_PRIOR_EPSILON,                          # 1e-10 (re-exported to locus.py)
+)
 from .splice import (
     ANTISENSE_COLS,
     SpliceType,
@@ -61,29 +63,18 @@ from .splice import (
 
 logger = logging.getLogger(__name__)
 
-# Epsilon added to theta before taking log to prevent log(0) in EM.
-_EM_LOG_EPSILON = 1e-300
-
-# Numerical-stability floor used inside locus.py to mark
-# eligible prior components.  The actual prior values are
-# computed in run_locus_em() from alpha + gamma * OVR.
-EM_PRIOR_EPSILON = 1e-10
+# Numerical constants shared between Python and C++ are defined once
+# in em_solver.cpp and imported from hulkrna._em_impl.
+# EM_PRIOR_EPSILON is re-exported here for locus.py.
+# Other constants (_EM_LOG_EPSILON, _MAX_FRAG_LEN, etc.) are imported
+# directly by pyfallback.py where they are used.
 
 # Relative convergence tolerance for EM theta updates.
 _EM_CONVERGENCE_DELTA = 1e-6
 
-# Upper bound on fragment length for compound-key arithmetic in
-# bias correction.  Fragments longer than this are clamped — any
-# footprint >= transcript length already yields effective_length=1,
-# so clamping is functionally neutral.
-_MAX_FRAG_LEN = 1_000_000
-
 # Default mean fragment length used when no observations are available
 # (e.g. purely intergenic loci with no measured insert sizes).
 _DEFAULT_MEAN_FRAG = 200.0
-
-# Fraction of EM iteration budget allocated to SQUAREM acceleration.
-_SQUAREM_BUDGET_DIVISOR = 3
 
 
 # NOTE: _apply_bias_correction_uniform, _apply_bias_correction,
@@ -1063,57 +1054,22 @@ class AbundanceEstimator:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Run EM for a single locus sub-problem.
 
-        Uses equivalence-class grouping: units sharing the same set of
-        candidate components are merged into dense matrices, replacing
-        the flat CSR ``reduceat``/``repeat``/``add.at`` inner loop with
-        contiguous matrix operations per class.  The computation is
-        mathematically identical (same posteriors, same M-step sums).
-
-        Component layout per locus::
-
-            [0, n_t)       - mRNA transcripts
-            [n_t, 2*n_t)   - nRNA shadows
-            [2*n_t]        - gDNA (single locus shadow)
-
-        Only unspliced units have a gDNA candidate.  Spliced units
-        compete only among mRNA/nRNA.
+        Delegates to the per-locus C++ solver.  This method is part of
+        the Python fallback path (the batch C++ path replaces the entire
+        per-locus loop).  Implementation lives in ``pyfallback.py``.
 
         Returns
         -------
         tuple[np.ndarray, np.ndarray]
             (theta, alpha) - converged parameters for this locus.
         """
-        # Bias correction expects an np.ndarray of int64 component
-        # lengths (uniform fast path).  The C++ solver handles this
-        # internally, so we just need to pass the raw arrays.
-        #
-        # The entire EM pipeline — bias correction, equivalence-class
-        # building, coverage-weighted warm start, OVR prior, SQUAREM
-        # loop, and post-prune redistribution — is executed in a single
-        # C++ call via run_locus_em_native().
-        theta, alpha_out, _em_totals, nrna_frac_out = _run_locus_em_native(
-            locus_em.offsets,
-            locus_em.t_indices,
-            locus_em.log_liks,
-            locus_em.coverage_weights,
-            locus_em.tx_starts,
-            locus_em.tx_ends,
-            locus_em.bias_profiles,
-            locus_em.unambig_totals,
-            locus_em.effective_lengths,
-            (locus_em.prior > 0).astype(np.float64),
-            locus_em.n_components,
-            self.em_config.prior_alpha,
-            self.em_config.prior_gamma,
-            em_iterations,
-            em_convergence_delta,
-            self.em_config.mode == "vbem",
-            self.em_config.prune_threshold if self.em_config.prune_threshold is not None else -1.0,
-            locus_em.n_transcripts,
-            locus_em.nrna_frac_alpha,
-            locus_em.nrna_frac_beta,
+        from .pyfallback import run_locus_em as _run_locus_em_fb
+
+        return _run_locus_em_fb(
+            self, locus_em,
+            em_iterations=em_iterations,
+            em_convergence_delta=em_convergence_delta,
         )
-        return np.asarray(theta), np.asarray(alpha_out)
 
     # ------------------------------------------------------------------
     # Per-locus posterior assignment
@@ -1129,189 +1085,154 @@ class AbundanceEstimator:
     ) -> dict[str, float]:
         """Assign ambiguous units within one locus, scatter to global arrays.
 
-        Each unit is assigned fractionally across all components (mRNA,
-        nRNA, gDNA) using the converged posterior probabilities.  This
-        eliminates the binary gDNA threshold and prevents cliff-edge
-        wipeout behaviour.
-
-        Fully vectorized — no per-unit Python loop.
-
-        Parameters
-        ----------
-        locus_em : LocusEMInput
-        theta : np.ndarray
-        confidence_threshold : float
-        unit_annotations : list or None
-            If provided, a list to which ``(global_unit_idx, best_tid,
-            best_gid, pool_code, posterior)`` tuples are appended for
-            each unit.  Used by the annotated BAM feature.
+        Implementation lives in ``pyfallback.py``.  This method is part
+        of the Python fallback path (the batch C++ path does assignment
+        internally).
 
         Returns
         -------
         dict[str, float]
             Per-pool fragment counts: ``{"mrna": ..., "nrna": ..., "gdna": ...}``.
         """
-        offsets = locus_em.offsets
-        t_indices = locus_em.t_indices
-        log_liks = locus_em.log_liks
-        count_cols_arr = locus_em.count_cols
-        n_units = len(offsets) - 1
+        from .pyfallback import assign_locus_ambiguous as _assign_fb
 
-        if n_units == 0 or len(t_indices) == 0:
-            return {"mrna": 0.0, "nrna": 0.0, "gdna": 0.0}
-
-        n_t = locus_em.n_transcripts
-        gdna_idx = 2 * n_t  # the single gDNA component index
-        local_to_global_t = locus_em.local_to_global_t
-        seg_lengths = np.diff(offsets).astype(np.intp)
-
-        # Compute posteriors from converged theta
-        eff_len = locus_em.effective_lengths
-        log_weights = (
-            np.log(theta + _EM_LOG_EPSILON) - np.log(eff_len)
+        return _assign_fb(
+            self, locus_em, theta,
+            confidence_threshold=confidence_threshold,
+            unit_annotations=unit_annotations,
         )
-        log_posteriors = log_liks + log_weights[t_indices]
 
-        offsets_int = offsets[:-1].astype(np.intp)
-        seg_max = np.maximum.reduceat(log_posteriors, offsets_int)
-        log_posteriors -= np.repeat(seg_max, seg_lengths)
-        posteriors = np.exp(log_posteriors)
-        seg_sum = np.add.reduceat(posteriors, offsets_int)
-        # Guard: segments where every candidate is -inf → zero posteriors
-        bad_seg = (seg_sum == 0) | ~np.isfinite(seg_sum)
-        seg_sum[bad_seg] = 1.0
-        posteriors /= np.repeat(seg_sum, seg_lengths)
-        if bad_seg.any():
-            bad_mask = np.repeat(bad_seg, seg_lengths)
-            posteriors[bad_mask] = 0.0
+    # ------------------------------------------------------------------
+    # Batch locus EM — Phase 2A: single C++ call for all loci
+    # ------------------------------------------------------------------
 
-        # --- Classify all candidates at once ---
-        mrna_mask = t_indices < n_t
-        nrna_mask = (t_indices >= n_t) & (t_indices < gdna_idx)
-        gdna_mask = t_indices == gdna_idx
+    def run_batch_locus_em(
+        self,
+        loci: list,
+        em_data: ScoredFragments,
+        index,
+        gdna_inits: np.ndarray,
+        *,
+        em_iterations: int = 1000,
+        em_convergence_delta: float = _EM_CONVERGENCE_DELTA,
+        confidence_threshold: float = 0.95,
+    ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
+        """Run locus-level EM for ALL loci in a single C++ call.
 
-        # --- Vectorized mRNA assignment ---
-        mrna_count = 0.0
-        if mrna_mask.any():
-            mrna_p = posteriors[mrna_mask]
-            mrna_count = float(mrna_p.sum())
-            mrna_local_t = t_indices[mrna_mask]
-            mrna_global_t = local_to_global_t[mrna_local_t]
-            mrna_cols = count_cols_arr[mrna_mask]
+        Replaces the Python per-locus for-loop
+        (build_locus_em_data → run_locus_em → assign_locus_ambiguous)
+        with one batched C++ call to ``batch_locus_em()``.
 
-            np.add.at(
-                self.em_counts,
-                (mrna_global_t, mrna_cols),
-                mrna_p,
-            )
+        Parameters
+        ----------
+        loci : list[Locus]
+            All loci to process.
+        em_data : ScoredFragments
+            Global CSR data.
+        index : TranscriptIndex
+            Reference index.
+        gdna_inits : np.ndarray
+            float64[n_loci] — EB gDNA prior for each locus.
+        em_iterations, em_convergence_delta, confidence_threshold
+            EM algorithm parameters.
 
-            # High-confidence: per-unit max of mRNA posteriors
-            # Set non-mRNA posteriors to 0, then reduceat for per-unit max
-            mrna_p_for_max = np.where(mrna_mask, posteriors, 0.0)
-            unit_max_mrna = np.maximum.reduceat(
-                mrna_p_for_max, offsets_int,
-            )
-            conf_units = unit_max_mrna >= confidence_threshold
-            if conf_units.any():
-                conf_expanded = np.repeat(conf_units, seg_lengths)
-                hc_mask = mrna_mask & conf_expanded
-                if hc_mask.any():
-                    hc_p = posteriors[hc_mask]
-                    hc_local_t = t_indices[hc_mask]
-                    hc_global_t = local_to_global_t[hc_local_t]
-                    hc_cols = count_cols_arr[hc_mask]
-                    np.add.at(
-                        self.em_high_conf_counts,
-                        (hc_global_t, hc_cols),
-                        hc_p,
-                    )
+        Returns
+        -------
+        tuple[float, np.ndarray, np.ndarray, np.ndarray]
+            (total_gdna_em, locus_mrna, locus_nrna, locus_gdna)
+        """
+        n_loci = len(loci)
+        N_T = self.num_transcripts
 
-            # Confidence tracking
-            if self._em_posterior_sum is None:
-                self._em_posterior_sum = np.zeros(
-                    self.num_transcripts, dtype=np.float64,
-                )
-                self._em_n_assigned = np.zeros(
-                    self.num_transcripts, dtype=np.float64,
-                )
-            np.add.at(
-                self._em_posterior_sum,
-                mrna_global_t, mrna_p * mrna_p,
-            )
-            np.add.at(self._em_n_assigned, mrna_global_t, mrna_p)
+        # Flatten locus definitions into contiguous CSR arrays.
+        locus_t_offsets = np.empty(n_loci + 1, dtype=np.int64)
+        locus_u_offsets = np.empty(n_loci + 1, dtype=np.int64)
+        locus_t_offsets[0] = 0
+        locus_u_offsets[0] = 0
+        for i, locus in enumerate(loci):
+            locus_t_offsets[i + 1] = locus_t_offsets[i] + len(locus.transcript_indices)
+            locus_u_offsets[i + 1] = locus_u_offsets[i] + len(locus.unit_indices)
 
-        # --- Vectorized nRNA assignment ---
-        nrna_count = 0.0
-        if nrna_mask.any():
-            nrna_p = posteriors[nrna_mask]
-            nrna_count = float(nrna_p.sum())
-            nrna_local_t = t_indices[nrna_mask] - n_t
-            nrna_global_t = local_to_global_t[nrna_local_t]
-            np.add.at(self.nrna_em_counts, nrna_global_t, nrna_p)
+        total_t = int(locus_t_offsets[-1])
+        total_u = int(locus_u_offsets[-1])
+        locus_t_flat = np.empty(total_t, dtype=np.int32)
+        locus_u_flat = np.empty(total_u, dtype=np.int32)
+        for i, locus in enumerate(loci):
+            ts = int(locus_t_offsets[i])
+            te = int(locus_t_offsets[i + 1])
+            us = int(locus_u_offsets[i])
+            ue = int(locus_u_offsets[i + 1])
+            locus_t_flat[ts:te] = locus.transcript_indices
+            locus_u_flat[us:ue] = locus.unit_indices
 
-        # --- Vectorized gDNA assignment ---
-        gdna_count = 0.0
-        if gdna_mask.any():
-            gdna_p = posteriors[gdna_mask]
-            gdna_count = float(gdna_p.sum())
+        # Per-transcript geometry arrays
+        t_starts = index.t_df["start"].values.astype(np.int64)
+        t_ends = index.t_df["end"].values.astype(np.int64)
+        t_lengths = index.t_df["length"].values.astype(np.int64)
 
-            # Per-unit gDNA sum for locus attribution
-            gdna_p_full = np.where(gdna_mask, posteriors, 0.0)
-            gdna_per_unit = np.add.reduceat(
-                gdna_p_full, offsets_int,
-            )
-            # Scatter to gdna_locus_counts using per-unit locus_t/locus_ct
-            locus_t_arr = locus_em.locus_t_indices
-            locus_ct_arr = locus_em.locus_count_cols
-            valid_gdna_units = (gdna_per_unit > 0) & (locus_t_arr >= 0)
-            if valid_gdna_units.any():
-                np.add.at(
-                    self.gdna_locus_counts,
-                    (locus_t_arr[valid_gdna_units],
-                     locus_ct_arr[valid_gdna_units]),
-                    gdna_per_unit[valid_gdna_units],
-                )
+        # Prepare mutable output accumulators
+        # (em_counts, em_high_conf_counts already on self)
+        if self._em_posterior_sum is None:
+            self._em_posterior_sum = np.zeros(N_T, dtype=np.float64)
+            self._em_n_assigned = np.zeros(N_T, dtype=np.float64)
 
-        # --- Per-unit annotation extraction (opt-in) ---
-        if unit_annotations is not None:
-            global_unit_indices = locus_em.locus.unit_indices
-            t_to_g = self._t_to_g
-            for u in range(n_units):
-                s = int(offsets[u])
-                e = int(offsets[u + 1])
-                if e <= s:
-                    continue
-                seg_posteriors = posteriors[s:e]
-                seg_t_indices = t_indices[s:e]
-                best_local = int(np.argmax(seg_posteriors))
-                best_posterior = float(seg_posteriors[best_local])
-                best_comp = int(seg_t_indices[best_local])
+        total_gdna_em, locus_mrna, locus_nrna, locus_gdna = _batch_locus_em(
+            # Global CSR
+            em_data.offsets,
+            em_data.t_indices,
+            em_data.log_liks,
+            em_data.coverage_weights,
+            em_data.tx_starts,
+            em_data.tx_ends,
+            em_data.count_cols,
+            em_data.is_spliced.view(np.uint8),
+            em_data.gdna_log_liks,
+            em_data.genomic_footprints,
+            em_data.locus_t_indices,
+            em_data.locus_count_cols,
+            np.int32(em_data.nrna_base_index),
+            # Locus definitions
+            locus_t_offsets,
+            locus_t_flat,
+            locus_u_offsets,
+            locus_u_flat,
+            np.ascontiguousarray(gdna_inits, dtype=np.float64),
+            # Per-transcript data
+            self.unambig_counts,
+            self.nrna_init,
+            self.nrna_frac_alpha,
+            self.nrna_frac_beta,
+            t_starts,
+            t_ends,
+            t_lengths,
+            self._transcript_spans,
+            self._exonic_lengths,
+            # Mutable output accumulators
+            self.em_counts,
+            self.em_high_conf_counts,
+            self.nrna_em_counts,
+            self.gdna_locus_counts,
+            self._em_posterior_sum,
+            self._em_n_assigned,
+            # EM config
+            self._mean_frag,
+            em_iterations,
+            em_convergence_delta,
+            self.em_config.prior_alpha,
+            self.em_config.prior_gamma,
+            self.em_config.mode == "vbem",
+            self.em_config.prune_threshold if self.em_config.prune_threshold is not None else -1.0,
+            confidence_threshold,
+            N_T,
+            NUM_SPLICE_STRAND_COLS,
+        )
 
-                if best_comp < n_t:
-                    # mRNA
-                    g_tid = int(local_to_global_t[best_comp])
-                    g_gid = int(t_to_g[g_tid])
-                    pool_code = POOL_CODE_MRNA
-                elif best_comp < gdna_idx:
-                    # nRNA
-                    g_tid = int(local_to_global_t[best_comp - n_t])
-                    g_gid = int(t_to_g[g_tid])
-                    pool_code = POOL_CODE_NRNA
-                else:
-                    # gDNA
-                    g_tid = -1
-                    g_gid = -1
-                    pool_code = POOL_CODE_GDNA
-                unit_annotations.append((
-                    int(global_unit_indices[u]),
-                    g_tid,
-                    g_gid,
-                    pool_code,
-                    best_posterior,
-                    e - s,  # n_candidates
-                ))
-
-        return {"mrna": mrna_count, "nrna": nrna_count, "gdna": gdna_count}
+        return (
+            total_gdna_em,
+            np.asarray(locus_mrna),
+            np.asarray(locus_nrna),
+            np.asarray(locus_gdna),
+        )
 
     # ------------------------------------------------------------------
     # Confidence / posterior metrics
