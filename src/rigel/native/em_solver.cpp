@@ -1379,7 +1379,13 @@ static void extract_locus_sub_problem(
         uint8_t count_col;
     };
     std::vector<BestCandidate> best_buf(nc);
-    std::vector<bool> seen(nc, false);
+    // Epoch-based dedup: avoids O(nc) clearing per unit.
+    // seen_epoch[c] == current_epoch means component c is "seen".
+    std::vector<int32_t> seen_epoch(nc, 0);
+    int32_t current_epoch = 0;
+    // Sparse list of touched components for collection (avoids O(nc) scan).
+    std::vector<int32_t> dirty_comps;
+    dirty_comps.reserve(256);
 
     // Pre-size output vectors (estimate: total global candidates for these units)
     size_t total_est = 0;
@@ -1429,8 +1435,9 @@ static void extract_locus_sub_problem(
         sub.locus_t_arr[ui] = g_locus_t_indices[u];
         sub.locus_ct_arr[ui] = g_locus_count_cols[u];
 
-        // Reset seen flags for this unit
-        for (int c = 0; c < nc; ++c) seen[c] = false;
+        // Advance epoch (O(1) instead of O(nc) clearing)
+        ++current_epoch;
+        dirty_comps.clear();
 
         // Gather and dedup RNA candidates
         for (auto j = g_start; j < g_end; ++j) {
@@ -1440,11 +1447,15 @@ static void extract_locus_sub_problem(
             if (local < 0 || local >= nc) continue;
 
             double ll = g_log_liks[j];
-            if (!seen[local] || ll > best_buf[local].log_lik) {
+            if (seen_epoch[local] != current_epoch ||
+                ll > best_buf[local].log_lik) {
                 best_buf[local] = {ll, g_coverage_wts[j],
                                    g_tx_starts[j], g_tx_ends[j],
                                    g_count_cols[j]};
-                seen[local] = true;
+                if (seen_epoch[local] != current_epoch) {
+                    seen_epoch[local] = current_epoch;
+                    dirty_comps.push_back(local);
+                }
             }
         }
 
@@ -1454,23 +1465,26 @@ static void extract_locus_sub_problem(
         if (!is_spliced && std::isfinite(gdna_ll)) {
             int32_t gdna_comp = sub.gdna_idx;
             int32_t footprint = g_genomic_footprints[u];
-            if (!seen[gdna_comp] || gdna_ll > best_buf[gdna_comp].log_lik) {
+            if (seen_epoch[gdna_comp] != current_epoch ||
+                gdna_ll > best_buf[gdna_comp].log_lik) {
                 best_buf[gdna_comp] = {gdna_ll, 1.0, 0, footprint, 0};
-                seen[gdna_comp] = true;
+                if (seen_epoch[gdna_comp] != current_epoch) {
+                    seen_epoch[gdna_comp] = current_epoch;
+                    dirty_comps.push_back(gdna_comp);
+                }
             }
         }
 
         // Collect deduped candidates for this unit (sorted by local_comp
         // for stable equivalence class keys)
-        for (int c = 0; c < nc; ++c) {
-            if (seen[c]) {
-                sub.t_indices.push_back(c);
-                sub.log_liks.push_back(best_buf[c].log_lik);
-                sub.coverage_wts.push_back(best_buf[c].cov_wt);
-                sub.tx_starts.push_back(best_buf[c].tx_start);
-                sub.tx_ends.push_back(best_buf[c].tx_end);
-                sub.count_cols.push_back(best_buf[c].count_col);
-            }
+        std::sort(dirty_comps.begin(), dirty_comps.end());
+        for (int32_t c : dirty_comps) {
+            sub.t_indices.push_back(c);
+            sub.log_liks.push_back(best_buf[c].log_lik);
+            sub.coverage_wts.push_back(best_buf[c].cov_wt);
+            sub.tx_starts.push_back(best_buf[c].tx_start);
+            sub.tx_ends.push_back(best_buf[c].tx_end);
+            sub.count_cols.push_back(best_buf[c].count_col);
         }
 
         sub.offsets[ui + 1] = static_cast<int64_t>(sub.t_indices.size());

@@ -176,5 +176,7 @@ nanobind_add_module(
   STABLE_ABI
   src/rigel/native/em_solver.cpp
 )
+# Keep debug symbols for profiling (dsym/DWARF) even in Release builds
+target_compile_options(_em_impl PRIVATE -g)
 
 install(TARGETS _em_impl LIBRARY DESTINATION rigel)

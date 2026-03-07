@@ -48,6 +48,13 @@ aligners:
   minimap2:
     type: minimap2
 
+# ── Minimap2 pre-built assets ────────────────────────────────
+# Optional: point to a pre-built minimap2 .mmi index and/or
+# splice-junction BED.  If omitted, both are built automatically.
+# minimap2:
+#   index: /path/to/genome.mmi
+#   bed: /path/to/annotation.bed
+
 # ── HulkRNA configurations ───────────────────────────────────
 # Multiple named configs for head-to-head comparison.
 rigel_configs:
@@ -62,9 +69,11 @@ rigel_configs:
 # ── Optional tools ────────────────────────────────────────────
 salmon:
   enabled: false
+  # index: /path/to/salmon_index      # pre-built; skip salmon index step
 
 kallisto:
   enabled: false
+  # index: /path/to/kallisto_index     # pre-built; skip kallisto index step
 
 htseq:
   enabled: false

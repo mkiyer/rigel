@@ -45,6 +45,7 @@ import json
 import logging
 import os
 import resource
+import shutil
 import subprocess
 import sys
 import time
@@ -83,6 +84,19 @@ logger = logging.getLogger(__name__)
 # ── Utilities ───────────────────────────────────────────────────────
 
 _DNA_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+
+
+def _find_tool(name: str) -> str:
+    """Resolve *name* to an absolute path, checking the active env first."""
+    env_bin = Path(sys.executable).resolve().parent / name
+    if env_bin.is_file():
+        return str(env_bin)
+    found = shutil.which(name)
+    if found:
+        return found
+    raise FileNotFoundError(
+        f"Tool '{name}' not found in PATH or {env_bin.parent}"
+    )
 
 
 def reverse_complement(seq: str) -> str:
@@ -157,8 +171,14 @@ class BenchmarkConfig:
     rigel_configs: list[HulkrnaConfig] = field(default_factory=list)
 
     salmon_enabled: bool = False
+    salmon_index: str | None = None
     kallisto_enabled: bool = False
+    kallisto_index: str | None = None
     htseq_enabled: bool = False
+
+    # Minimap2 pre-built index (.mmi) and splice junction BED
+    minimap2_index: str | None = None
+    minimap2_bed: str | None = None
 
     keep_going: bool = True
     verbose: bool = True
@@ -218,10 +238,20 @@ def parse_yaml_config(path: str | Path) -> BenchmarkConfig:
     # Optional tools
     salmon_raw = raw.get("salmon", {})
     cfg.salmon_enabled = bool(salmon_raw.get("enabled", False)) if salmon_raw else False
+    if salmon_raw:
+        cfg.salmon_index = salmon_raw.get("index", None)
     kallisto_raw = raw.get("kallisto", {})
     cfg.kallisto_enabled = bool(kallisto_raw.get("enabled", False)) if kallisto_raw else False
+    if kallisto_raw:
+        cfg.kallisto_index = kallisto_raw.get("index", None)
     htseq_raw = raw.get("htseq", {})
     cfg.htseq_enabled = bool(htseq_raw.get("enabled", False)) if htseq_raw else False
+
+    # Minimap2 pre-built index and BED
+    mm2_raw = raw.get("minimap2", {})
+    if mm2_raw:
+        cfg.minimap2_index = mm2_raw.get("index", None)
+        cfg.minimap2_bed = mm2_raw.get("bed", None)
 
     # Runtime
     rt_raw = raw.get("runtime", {})
@@ -322,7 +352,8 @@ def build_rigel_index(
     index_dir: Path,
 ) -> TranscriptIndex:
     """Build rigel index from full genome + GTF."""
-    if (index_dir / "transcripts.feather").exists():
+    required = ["transcripts.feather", "intervals.feather", "ref_lengths.feather"]
+    if all((index_dir / f).exists() for f in required):
         logger.info("rigel index already exists at %s, loading...", index_dir)
     else:
         logger.info("Building rigel index → %s", index_dir)
@@ -369,15 +400,25 @@ def write_transcript_fasta(
 
 
 def build_salmon_index(
-    transcript_fa: Path, out_dir: Path, threads: int = 8,
+    transcript_fa: Path,
+    out_dir: Path,
+    threads: int = 8,
+    prebuilt: str | None = None,
 ) -> Path:
+    """Return a salmon index directory, using *prebuilt* if provided."""
+    if prebuilt:
+        p = Path(prebuilt)
+        if p.is_dir():
+            logger.info("Using pre-built salmon index: %s", p)
+            return p
+        raise FileNotFoundError(f"Pre-built salmon index not found: {p}")
     idx_dir = out_dir / "salmon_index"
     if idx_dir.exists():
         logger.info("Salmon index already exists at %s", idx_dir)
         return idx_dir
     logger.info("Building salmon index → %s", idx_dir)
     subprocess.run(
-        ["salmon", "index", "-t", str(transcript_fa), "-i", str(idx_dir),
+        [_find_tool("salmon"), "index", "-t", str(transcript_fa), "-i", str(idx_dir),
          "-k", "23", "-p", str(threads)],
         check=True, capture_output=True, text=True,
     )
@@ -385,18 +426,83 @@ def build_salmon_index(
 
 
 def build_kallisto_index(
-    transcript_fa: Path, out_dir: Path,
+    transcript_fa: Path,
+    out_dir: Path,
+    prebuilt: str | None = None,
 ) -> Path:
+    """Return a kallisto index file, using *prebuilt* if provided."""
+    if prebuilt:
+        p = Path(prebuilt)
+        if p.is_file() or p.is_dir():
+            logger.info("Using pre-built kallisto index: %s", p)
+            return p
+        raise FileNotFoundError(f"Pre-built kallisto index not found: {p}")
     idx_path = out_dir / "kallisto_index.idx"
     if idx_path.exists():
         logger.info("Kallisto index already exists at %s", idx_path)
         return idx_path
     logger.info("Building kallisto index → %s", idx_path)
     subprocess.run(
-        ["kallisto", "index", "-i", str(idx_path), str(transcript_fa)],
+        [_find_tool("kallisto"), "index", "-i", str(idx_path), str(transcript_fa)],
         check=True, capture_output=True, text=True,
     )
     return idx_path
+
+
+def build_minimap2_index(
+    genome_fa: Path,
+    out_dir: Path,
+    threads: int = 8,
+    prebuilt: str | None = None,
+) -> Path:
+    """Return a minimap2 .mmi index, using *prebuilt* if provided."""
+    if prebuilt:
+        p = Path(prebuilt)
+        if p.is_file():
+            logger.info("Using pre-built minimap2 index: %s", p)
+            return p
+        raise FileNotFoundError(f"Pre-built minimap2 index not found: {p}")
+    idx_path = out_dir / "genome.mmi"
+    if idx_path.exists():
+        logger.info("minimap2 index already exists at %s", idx_path)
+        return idx_path
+    logger.info("Building minimap2 index → %s (this may take a while)", idx_path)
+    subprocess.run(
+        [_find_tool("minimap2"), "-x", "splice:sr", "-d", str(idx_path),
+         "-t", str(threads), str(genome_fa)],
+        check=True, capture_output=True, text=True,
+    )
+    return idx_path
+
+
+def build_minimap2_bed(
+    gtf_path: Path,
+    out_dir: Path,
+    prebuilt: str | None = None,
+) -> Path:
+    """Return a splice-junction BED for minimap2 ``--junc-bed``.
+
+    Uses minimap2's bundled ``paftools.js gff2bed`` which produces the
+    12-column BED that minimap2's ``--junc-bed`` expects.  Falls back
+    to rigel's ``write_bed12`` if paftools.js is not available.
+    """
+    if prebuilt:
+        p = Path(prebuilt)
+        if p.is_file():
+            logger.info("Using pre-built minimap2 BED: %s", p)
+            return p
+        raise FileNotFoundError(f"Pre-built minimap2 BED not found: {p}")
+    bed_path = out_dir / "minimap2_annotation.bed"
+    if bed_path.exists():
+        logger.info("minimap2 BED already exists at %s", bed_path)
+        return bed_path
+    logger.info("Building minimap2 splice BED via paftools.js → %s", bed_path)
+    with open(bed_path, "w") as fh:
+        subprocess.run(
+            [_find_tool("k8"), _find_tool("paftools.js"), "gff2bed", str(gtf_path)],
+            check=True, stdout=fh, stderr=subprocess.PIPE,
+        )
+    return bed_path
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -405,7 +511,7 @@ def build_kallisto_index(
 
 
 def align_minimap2(
-    genome_fa: Path,
+    genome_or_index: Path,
     fastq_r1: Path,
     fastq_r2: Path,
     out_bam: Path,
@@ -413,19 +519,22 @@ def align_minimap2(
     bed_path: Path | None = None,
     threads: int = 8,
 ) -> None:
-    """Align paired-end reads with minimap2 → name-sorted BAM."""
+    """Align paired-end reads with minimap2 → name-sorted BAM.
+
+    *genome_or_index* may be a raw FASTA or a pre-built ``.mmi`` index.
+    """
     out_bam.parent.mkdir(parents=True, exist_ok=True)
 
     mm2_cmd = [
-        "minimap2", "-a", "-x", "splice:sr",
+        _find_tool("minimap2"), "-a", "-x", "splice:sr",
         "--secondary=yes", "-N", "10", "-t", str(threads),
     ]
     if bed_path is not None:
         mm2_cmd.extend(["--junc-bed", str(bed_path)])
-    mm2_cmd.extend([str(genome_fa), str(fastq_r1), str(fastq_r2)])
+    mm2_cmd.extend([str(genome_or_index), str(fastq_r1), str(fastq_r2)])
 
     sort_cmd = [
-        "samtools", "sort", "-n",
+        _find_tool("samtools"), "sort", "-n",
         "-@", str(max(1, threads // 2)),
         "-o", str(out_bam),
     ]
@@ -445,10 +554,10 @@ def coord_sort_bam(
 ) -> Path:
     """Re-sort a BAM to coordinate order and index."""
     subprocess.run(
-        ["samtools", "sort", "-@", str(threads), "-o", str(output_bam), str(input_bam)],
+        [_find_tool("samtools"), "sort", "-@", str(threads), "-o", str(output_bam), str(input_bam)],
         check=True, capture_output=True,
     )
-    subprocess.run(["samtools", "index", str(output_bam)], check=True, capture_output=True)
+    subprocess.run([_find_tool("samtools"), "index", str(output_bam)], check=True, capture_output=True)
     return output_bam
 
 
@@ -546,7 +655,7 @@ def run_salmon(
     quant_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     subprocess.run(
-        ["salmon", "quant", "-i", str(salmon_index), "-l", "A",
+        [_find_tool("salmon"), "quant", "-i", str(salmon_index), "-l", "A",
          "-1", str(fastq_r1), "-2", str(fastq_r2),
          "-o", str(quant_dir), "-p", str(threads), "--validateMappings"],
         check=True, capture_output=True, text=True,
@@ -566,7 +675,7 @@ def run_kallisto(
 ) -> tuple[dict[str, float], float]:
     quant_dir = out_dir / "quant"
     quant_dir.mkdir(parents=True, exist_ok=True)
-    cmd = ["kallisto", "quant", "-i", str(kallisto_index),
+    cmd = [_find_tool("kallisto"), "quant", "-i", str(kallisto_index),
            "-o", str(quant_dir), "-t", str(threads)]
     if strand_specificity >= 0.9:
         cmd.append("--rf-stranded")
@@ -575,7 +684,9 @@ def run_kallisto(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     elapsed = time.monotonic() - t0
     df = pd.read_csv(quant_dir / "abundance.tsv", sep="\t")
-    return dict(zip(df["target_id"], df["est_counts"])), elapsed
+    # Kallisto preserves full FASTA headers (pipe-delimited); extract transcript ID
+    ids = df["target_id"].str.split("|").str[0]
+    return dict(zip(ids, df["est_counts"])), elapsed
 
 
 def run_htseq(
@@ -667,6 +778,31 @@ class ToolMetrics:
     spearman: float
 
 
+def _spearman_r(x: np.ndarray, y: np.ndarray) -> float:
+    """Spearman rank correlation using numpy (no scipy)."""
+    n = len(x)
+    if n < 2:
+        return 0.0
+    rx = np.empty(n, dtype=np.float64)
+    ry = np.empty(n, dtype=np.float64)
+    for src, dst in ((x, rx), (y, ry)):
+        order = np.argsort(src)
+        # Average ranks for ties
+        i = 0
+        while i < n:
+            j = i + 1
+            while j < n and src[order[j]] == src[order[i]]:
+                j += 1
+            avg_rank = (i + j - 1) / 2.0  # 0-based average
+            for k in range(i, j):
+                dst[order[k]] = avg_rank
+            i = j
+    # Pearson on ranks
+    if rx.std() == 0 or ry.std() == 0:
+        return 0.0
+    return float(np.corrcoef(rx, ry)[0, 1])
+
+
 def score_tool(
     tool: str,
     truth: dict[str, float],
@@ -676,8 +812,6 @@ def score_tool(
     throughput: float = 0.0,
 ) -> ToolMetrics:
     """Compare observed counts against truth → ToolMetrics."""
-    from scipy import stats as sp_stats
-
     all_tids = sorted(set(truth) | set(observed))
     n = len(all_tids)
     if n == 0:
@@ -697,7 +831,7 @@ def score_tool(
 
     if truth_arr.std() > 0 and obs_arr.std() > 0:
         pearson = float(np.corrcoef(truth_arr, obs_arr)[0, 1])
-        spearman = float(sp_stats.spearmanr(truth_arr, obs_arr).statistic)
+        spearman = _spearman_r(truth_arr, obs_arr)
     else:
         pearson = 0.0
         spearman = 0.0
@@ -962,7 +1096,19 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
         genome_path, gtf_path, outdir / "rigel_index",
     )
 
-    # BED12 for minimap2
+    # Minimap2 index + splice BED (build-if-absent)
+    has_minimap2 = any(a.type == "minimap2" for a in cfg.aligners)
+    mm2_index_path: Path | None = None
+    mm2_bed_path: Path | None = None
+    if has_minimap2:
+        mm2_index_path = build_minimap2_index(
+            genome_path, outdir, cfg.threads, prebuilt=cfg.minimap2_index,
+        )
+        mm2_bed_path = build_minimap2_bed(
+            gtf_path, outdir, prebuilt=cfg.minimap2_bed,
+        )
+
+    # BED12 for rigel (always needed)
     bed_path = outdir / "annotation.bed12"
     if not bed_path.exists():
         write_bed12(transcripts, bed_path)
@@ -972,14 +1118,21 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
     salmon_idx = None
     kallisto_idx = None
 
-    if cfg.salmon_enabled or cfg.kallisto_enabled:
-        if not transcript_fa.exists():
-            write_transcript_fasta(cfg.genome, transcripts, transcript_fa)
+    needs_transcript_fa = (
+        (cfg.salmon_enabled and not cfg.salmon_index)
+        or (cfg.kallisto_enabled and not cfg.kallisto_index)
+    )
+    if needs_transcript_fa and not transcript_fa.exists():
+        write_transcript_fasta(cfg.genome, transcripts, transcript_fa)
 
     if cfg.salmon_enabled:
-        salmon_idx = build_salmon_index(transcript_fa, outdir, cfg.threads)
+        salmon_idx = build_salmon_index(
+            transcript_fa, outdir, cfg.threads, prebuilt=cfg.salmon_index,
+        )
     if cfg.kallisto_enabled:
-        kallisto_idx = build_kallisto_index(transcript_fa, outdir)
+        kallisto_idx = build_kallisto_index(
+            transcript_fa, outdir, prebuilt=cfg.kallisto_index,
+        )
 
     # ── 4. Benchmark loop ────────────────────────────────────────
     multi_rigel = len(cfg.rigel_configs) > 1
@@ -1031,8 +1184,9 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
                     print(f"  minimap2...", end="", flush=True)
                     t0 = time.monotonic()
                     align_minimap2(
-                        genome_path, ds.fastq_r1, ds.fastq_r2, bam_ns,
-                        bed_path=bed_path, threads=cfg.threads,
+                        mm2_index_path or genome_path,
+                        ds.fastq_r1, ds.fastq_r2, bam_ns,
+                        bed_path=mm2_bed_path, threads=cfg.threads,
                     )
                     alignment_elapsed = time.monotonic() - t0
                     print(f" done ({alignment_elapsed:.1f}s)", flush=True)
@@ -1246,9 +1400,17 @@ def main() -> int:
         print(f"  Sim dir:         {cfg.sim_dir}", flush=True)
     print(f"  Aligners:        {[a.name for a in cfg.aligners]}", flush=True)
     print(f"  HulkRNA configs: {[h.name for h in cfg.rigel_configs]}", flush=True)
-    print(f"  Salmon:          {cfg.salmon_enabled}", flush=True)
-    print(f"  Kallisto:        {cfg.kallisto_enabled}", flush=True)
+    print(f"  Salmon:          {cfg.salmon_enabled}"
+          f"{' (index: ' + cfg.salmon_index + ')' if cfg.salmon_index else ''}",
+          flush=True)
+    print(f"  Kallisto:        {cfg.kallisto_enabled}"
+          f"{' (index: ' + cfg.kallisto_index + ')' if cfg.kallisto_index else ''}",
+          flush=True)
     print(f"  HTSeq:           {cfg.htseq_enabled}", flush=True)
+    if cfg.minimap2_index:
+        print(f"  minimap2 index:  {cfg.minimap2_index}", flush=True)
+    if cfg.minimap2_bed:
+        print(f"  minimap2 BED:    {cfg.minimap2_bed}", flush=True)
 
     t0 = time.monotonic()
     results = run_benchmark(cfg)
