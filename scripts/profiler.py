@@ -153,46 +153,59 @@ class MemoryTimeline:
         logger.info("Wrote memory timeline: %s (%d samples)", path, len(self.samples))
 
 
+# Pre-initialize macOS mach task_info for fast RSS snapshots
+_MACH_TASK_INFO_READY = False
+_mach_libc = None
+_MachTaskBasicInfo = None
+_MACH_TASK_BASIC_INFO = 20
+
+if sys.platform == "darwin":
+    try:
+        import ctypes
+        import ctypes.util
+
+        class _MachTaskBasicInfoStruct(ctypes.Structure):
+            _fields_ = [
+                ("suspend_count", ctypes.c_int32),
+                ("virtual_size", ctypes.c_uint64),
+                ("resident_size", ctypes.c_uint64),
+                ("user_time", ctypes.c_uint64),
+                ("system_time", ctypes.c_uint64),
+                ("policy", ctypes.c_int32),
+            ]
+
+        _mach_libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        _mach_libc.mach_task_self.restype = ctypes.c_uint32
+        _MachTaskBasicInfo = _MachTaskBasicInfoStruct
+        _MACH_TASK_INFO_READY = True
+    except Exception:
+        pass
+
+
 def _snap_rss_current() -> float:
     """Snapshot current RSS in MB.
 
     Uses /proc/self/status on Linux (VmRSS) or task_info on macOS via
-    resource module.  Falls back to peak RSS if current is unavailable.
+    ctypes mach API.  Falls back to peak RSS if current is unavailable.
     """
     # Linux: read VmRSS from proc
-    try:
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("VmRSS:"):
-                    return int(line.split()[1]) / 1024  # KB → MB
-    except FileNotFoundError:
-        pass
-
-    # macOS: try mach task_info via ctypes
-    if sys.platform == "darwin":
+    if sys.platform == "linux":
         try:
-            import ctypes
-            import ctypes.util
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1]) / 1024  # KB → MB
+        except FileNotFoundError:
+            pass
 
-            libc = ctypes.CDLL(ctypes.util.find_library("c"))
-
-            class MachTaskBasicInfo(ctypes.Structure):
-                _fields_ = [
-                    ("suspend_count", ctypes.c_int32),
-                    ("virtual_size", ctypes.c_uint64),
-                    ("resident_size", ctypes.c_uint64),
-                    ("user_time", ctypes.c_uint64),
-                    ("system_time", ctypes.c_uint64),
-                    ("policy", ctypes.c_int32),
-                ]
-
-            MACH_TASK_BASIC_INFO = 20
-            info = MachTaskBasicInfo()
+    # macOS: use pre-initialized mach task_info
+    if _MACH_TASK_INFO_READY:
+        try:
+            info = _MachTaskBasicInfo()
             count = ctypes.c_uint32(ctypes.sizeof(info) // 4)
-            libc.mach_task_self.restype = ctypes.c_uint32
-            task = libc.mach_task_self()
-            ret = libc.task_info(
-                task, MACH_TASK_BASIC_INFO, ctypes.byref(info), ctypes.byref(count),
+            task = _mach_libc.mach_task_self()
+            ret = _mach_libc.task_info(
+                task, _MACH_TASK_BASIC_INFO, ctypes.byref(info), ctypes.byref(count),
             )
             if ret == 0:
                 return info.resident_size / (1024 * 1024)
@@ -553,9 +566,7 @@ def profile_stages(
 
     # -- Free scanner accumulators + buffer after scan --
     del builder, ctx          # release ~1.3 GB of array.array accumulators
-    buffer.cleanup()
-    buffer._chunks.clear()
-    buffer._memory_bytes = 0
+    buffer.release()
     gc.collect()
 
     # 3e: nRNA init

@@ -368,15 +368,7 @@ def scan_and_buffer(
             size=size,
         )
 
-        buffer._chunks.append(chunk)
-        buffer._total_size += size
-        buffer._memory_bytes += chunk.memory_bytes
-
-        # Spill if over memory budget
-        if buffer.max_memory_bytes > 0:
-            while buffer._memory_bytes > buffer.max_memory_bytes:
-                if not buffer._spill_oldest():
-                    break
+        buffer.inject_chunk(chunk)
 
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
@@ -498,9 +490,7 @@ def quant_from_buffer(
 
     # -- Free scanner accumulators + buffer: scan is done --
     del builder, ctx          # release ~1.3 GB of array.array accumulators
-    buffer.cleanup()          # remove spilled files
-    buffer._chunks.clear()    # release in-memory chunks
-    buffer._memory_bytes = 0
+    buffer.release()
     gc.collect()
 
     # --- Per-transcript nRNA init from intronic sense excess ---

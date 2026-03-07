@@ -23,15 +23,14 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 
+#include "constants.h"
+
 namespace nb = nanobind;
 
-// ----------------------------------------------------------------
-// Constants
-// ----------------------------------------------------------------
-
-static constexpr double LOG_HALF = -0.6931471805599453;        // log(0.5)
-static constexpr double TAIL_DECAY_LP = -0.01005033585350145;  // log(0.99)
-static constexpr int STRAND_NEG = 2;
+// Use constants from constants.h via the hulk namespace.
+using hulk::LOG_HALF;
+using hulk::TAIL_DECAY_LP;
+using hulk::STRAND_NEG;
 
 // ----------------------------------------------------------------
 // Array type aliases
@@ -2109,4 +2108,8 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("intronic_antisense"),
              nb::arg("unambig_counts"),
              nb::arg("gdna_log_splice_pen_unspliced"));
+
+    // Export scoring constants for Python-side parity tests
+    m.attr("LOG_HALF")      = hulk::LOG_HALF;
+    m.attr("TAIL_DECAY_LP") = hulk::TAIL_DECAY_LP;
 }

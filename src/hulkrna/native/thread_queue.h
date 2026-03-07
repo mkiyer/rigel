@@ -1,10 +1,9 @@
 /**
- * thread_queue.h — Threading infrastructure for parallel BAM scanning.
+ * thread_queue.h — Bounded SPMC work queue for parallel BAM scanning.
  *
- * Provides:
- *   - BoundedQueue<T>: bounded SPMC queue (single producer, multiple consumers)
- *   - QnameGroup: work unit containing deep-copied bam1_t* records
- *   - WorkerState: per-thread mutable state for fragment resolution
+ * Provides BoundedQueue<T>: a single-producer multiple-consumer queue
+ * with backpressure.  The work-unit type (QnameGroup) is defined in
+ * bam_scanner.cpp alongside the other BAM-specific structures.
  */
 
 #pragma once
@@ -13,12 +12,6 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
-#include <string>
-#include <vector>
-
-#include <htslib/sam.h>
-
-#include "resolve_context.h"
 
 namespace hulk {
 
@@ -68,48 +61,5 @@ public:
         return true;
     }
 };
-
-// ================================================================
-// QnameGroup — work unit for one query-name group
-// ================================================================
-
-struct QnameGroup {
-    std::vector<bam1_t*> records;  // deep-copied via bam_dup1
-    int64_t frag_id = 0;
-
-    QnameGroup() = default;
-
-    ~QnameGroup() {
-        for (auto* b : records) {
-            if (b) bam_destroy1(b);
-        }
-    }
-
-    // Move-only (owns bam1_t pointers)
-    QnameGroup(const QnameGroup&) = delete;
-    QnameGroup& operator=(const QnameGroup&) = delete;
-
-    QnameGroup(QnameGroup&& o) noexcept
-        : records(std::move(o.records)), frag_id(o.frag_id)
-    {
-        o.records.clear();
-    }
-
-    QnameGroup& operator=(QnameGroup&& o) noexcept {
-        if (this != &o) {
-            for (auto* b : records)
-                if (b) bam_destroy1(b);
-            records = std::move(o.records);
-            frag_id = o.frag_id;
-            o.records.clear();
-        }
-        return *this;
-    }
-};
-
-// ================================================================
-// WorkerState — defined in bam_scanner.cpp where stat structs
-// are available. This header only provides the queue + QnameGroup.
-// ================================================================
 
 }  // namespace hulk

@@ -170,6 +170,20 @@ struct ParsedAlignment {
 };
 
 // ================================================================
+// QnameGroup — all BAM alignments for one query name, pre-parsed
+// ================================================================
+//
+// The producer thread reads raw htslib bam1_t records, immediately
+// parses each into a ParsedAlignment, and packages them here.
+// Workers receive fully parsed value types — no raw bam1_t* pointers
+// cross the thread boundary.
+
+struct QnameGroup {
+    std::vector<ParsedAlignment> records;
+    int64_t frag_id = 0;
+};
+
+// ================================================================
 // Model training observation collectors
 // ================================================================
 
@@ -505,6 +519,52 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
     }
 
     return (result >= 0) ? result : STRAND_NONE;
+}
+
+// ================================================================
+// Parse a raw htslib bam1_t into a ParsedAlignment value type
+// ================================================================
+// Extracts all fields the pipeline needs (scalars, tags, CIGAR-derived
+// exon blocks and splice junctions) so that downstream code never
+// touches bam1_t directly.  Used by both single-threaded scan() and
+// the producer thread in scan_threaded().
+
+static ParsedAlignment parse_bam_record(
+    const bam1_t* b,
+    const std::vector<int32_t>& tid_to_ref_id,
+    SJTagMode sj_tag_mode)
+{
+    ParsedAlignment rec;
+    rec.flag = b->core.flag;
+    rec.ref_id = b->core.tid;
+    rec.ref_start = b->core.pos;
+    rec.mate_ref_id = b->core.mtid;
+    rec.mate_ref_start = b->core.mpos;
+
+    // BAM aux tags
+    rec.nm = 0;
+    uint8_t* nm_aux = bam_aux_get(b, "NM");
+    if (nm_aux) rec.nm = bam_aux2i(nm_aux);
+
+    rec.nh = 1;
+    uint8_t* nh_aux = bam_aux_get(b, "NH");
+    if (nh_aux) rec.nh = bam_aux2i(nh_aux);
+
+    rec.hi = -1;
+    uint8_t* hi_aux = bam_aux_get(b, "HI");
+    if (hi_aux) rec.hi = bam_aux2i(hi_aux);
+
+    rec.sj_strand = read_sj_strand(b, sj_tag_mode);
+
+    // CIGAR → exon blocks + splice junctions
+    int32_t mapped_ref_id = (rec.ref_id >= 0 &&
+        rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
+        ? tid_to_ref_id[rec.ref_id] : -1;
+    parse_cigar(b, mapped_ref_id, rec.sj_strand,
+                rec.exons, rec.sjs);
+    rec.ref_id = mapped_ref_id;
+
+    return rec;
 }
 
 // ================================================================
@@ -956,41 +1016,8 @@ public:
 
             current_qname = qname;
 
-            // Build ParsedAlignment from htslib bam1_t
-            ParsedAlignment rec;
-            rec.ref_id = b->core.tid;
-            rec.ref_start = b->core.pos;
-            rec.mate_ref_id = b->core.mtid;
-            rec.mate_ref_start = b->core.mpos;
-            rec.flag = flag;
-
-            // Read tags
-            rec.nm = 0;
-            uint8_t* nm_aux = bam_aux_get(b, "NM");
-            if (nm_aux) rec.nm = bam_aux2i(nm_aux);
-
-            rec.nh = 1;
-            uint8_t* nh_aux = bam_aux_get(b, "NH");
-            if (nh_aux) rec.nh = bam_aux2i(nh_aux);
-
-            rec.hi = -1;
-            uint8_t* hi_aux = bam_aux_get(b, "HI");
-            if (hi_aux) rec.hi = bam_aux2i(hi_aux);
-
-            // Read SJ strand tag
-            rec.sj_strand = read_sj_strand(b, sj_tag_mode_);
-
-            // Parse CIGAR
-            int32_t mapped_ref_id = (rec.ref_id >= 0 &&
-                rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
-                ? tid_to_ref_id_[rec.ref_id] : -1;
-            parse_cigar(b, mapped_ref_id, rec.sj_strand,
-                        rec.exons, rec.sjs);
-
-            // Map htslib ref_id to internal ref_id for the record
-            rec.ref_id = mapped_ref_id;
-
-            current_group.push_back(std::move(rec));
+            current_group.push_back(
+                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_));
         }
 
         // Process last group
@@ -1051,8 +1078,7 @@ public:
                 std::make_unique<WorkerState>(n_transcripts));
         }
 
-        // Capture read-only config for workers
-        SJTagMode sj_tag_mode = sj_tag_mode_;
+        // Capture read-only config
         bool include_multimap = include_multimap_;
         FragmentResolver* ctx = ctx_;
 
@@ -1061,16 +1087,13 @@ public:
         workers.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
             workers.emplace_back([&queue, ctx, &worker_states, i,
-                                  sj_tag_mode, include_multimap,
-                                  this]()
+                                  include_multimap]()
             {
                 WorkerState& ws = *worker_states[i];
                 QnameGroup group;
                 while (queue.pop(group)) {
-                    process_qname_group_from_bam1(
-                        group, *ctx, ws, tid_to_ref_id_,
-                        sj_tag_mode, include_multimap);
-                    // group destructor frees bam1_t* records
+                    process_qname_group_threaded(
+                        group, *ctx, ws, include_multimap);
                 }
             });
         }
@@ -1133,8 +1156,9 @@ public:
 
             current_qname = qname;
 
-            // Deep-copy the bam1_t record for the worker
-            current_group.records.push_back(bam_dup1(b));
+            // Parse bam1_t in-place; only value types enter the queue
+            current_group.records.push_back(
+                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_));
         }
 
         // Flush last group
@@ -1167,58 +1191,20 @@ public:
 private:
 
     // ----------------------------------------------------------------
-    // Process one qname group from raw bam1_t records (worker thread)
+    // Process one qname group (worker thread, pre-parsed records)
     // ----------------------------------------------------------------
     // Static so it doesn't capture 'this' (shares no mutable BamScanner
     // state — all mutable state is in WorkerState).
 
-    static void process_qname_group_from_bam1(
+    static void process_qname_group_threaded(
         QnameGroup& group,
         FragmentResolver& ctx,
         WorkerState& ws,
-        const std::vector<int32_t>& tid_to_ref_id,
-        SJTagMode sj_tag_mode,
         bool include_multimap)
     {
         if (group.records.empty()) return;
 
-        // 1. Parse raw bam1_t* → ParsedAlignment
-        std::vector<ParsedAlignment> records;
-        records.reserve(group.records.size());
-        for (bam1_t* b : group.records) {
-            ParsedAlignment rec;
-            rec.flag = b->core.flag;
-            rec.ref_id = b->core.tid;
-            rec.ref_start = b->core.pos;
-            rec.mate_ref_id = b->core.mtid;
-            rec.mate_ref_start = b->core.mpos;
-
-            // Tags
-            rec.nm = 0;
-            uint8_t* nm_aux = bam_aux_get(b, "NM");
-            if (nm_aux) rec.nm = bam_aux2i(nm_aux);
-
-            rec.nh = 1;
-            uint8_t* nh_aux = bam_aux_get(b, "NH");
-            if (nh_aux) rec.nh = bam_aux2i(nh_aux);
-
-            rec.hi = -1;
-            uint8_t* hi_aux = bam_aux_get(b, "HI");
-            if (hi_aux) rec.hi = bam_aux2i(hi_aux);
-
-            rec.sj_strand = read_sj_strand(b, sj_tag_mode);
-
-            // CIGAR parse
-            int32_t mapped_ref_id = (rec.ref_id >= 0 &&
-                rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
-                ? tid_to_ref_id[rec.ref_id] : -1;
-            parse_cigar(b, mapped_ref_id, rec.sj_strand,
-                        rec.exons, rec.sjs);
-            rec.ref_id = mapped_ref_id;
-
-            records.push_back(std::move(rec));
-        }
-
+        auto& records = group.records;
         int64_t frag_id = group.frag_id;
         BamScanStats& stats = ws.stats;
         FragmentAccumulator& accumulator = ws.accumulator;
@@ -1226,7 +1212,7 @@ private:
         FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
 
-        // 2. Same logic as process_qname_group, using per-worker state
+        // Same logic as process_qname_group, using per-worker state
         stats.n_read_names++;
 
         int32_t nh = 1;

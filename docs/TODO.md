@@ -3,6 +3,22 @@
 
 
 
+## Benchmark
+
+- benchmark.py
+- salmon needs a salmon index (full transcriptome)
+- kallisto needs a kallisto index (full transcriptome)
+- build or point to it
+
+
+## Fragment length distribution integration
+
+- this is planned
+- strategy to weight observations by uncertainty
+- build RNA and gDNA fragment length distributions
+- use distributions to improve deconvolution
+
+
 ## Edit distance
 
 - when reads overlap, edit distance can get double counted in the overlap portion of the reads

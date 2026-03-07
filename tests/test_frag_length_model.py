@@ -18,9 +18,9 @@ from hulkrna.frag_length_model import FragmentLengthModel, FragmentLengthModels
 class TestFragmentLengthModelBasic:
     def test_default_construction(self):
         m = FragmentLengthModel()
-        assert m.max_size == 2000
+        assert m.max_size == 1000
         assert m.n_observations == 0
-        assert m.counts.shape == (2001,)
+        assert m.counts.shape == (1001,)
         assert m.total_weight == 0.0
 
     def test_custom_max_size(self):

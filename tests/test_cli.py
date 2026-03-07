@@ -212,3 +212,56 @@ class TestResolveQuant:
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.sj_strand_tag == ["XS", "ts"]
+
+
+# ---------------------------------------------------------------------------
+# Config round-trip: defaults → resolve → build should match PipelineConfig()
+# ---------------------------------------------------------------------------
+
+
+class TestConfigRoundTrip:
+    """Registry-driven CLI ↔ config round-trip."""
+
+    def test_default_config_round_trip(self):
+        """No CLI/YAML overrides → config matches PipelineConfig() defaults."""
+        import dataclasses
+        from hulkrna.config import PipelineConfig
+        from hulkrna.cli import _build_pipeline_config
+
+        args = _parse_quant()
+        _resolve_quant_args(args, _build_quant_defaults())
+
+        result = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        ref = PipelineConfig()
+
+        # EM fields (except overridden seed)
+        for f in dataclasses.fields(ref.em):
+            if f.name == "seed":
+                assert result.em.seed == 42
+                continue
+            assert getattr(result.em, f.name) == getattr(ref.em, f.name), f.name
+
+        # Scan fields (except overridden sj_strand_tag)
+        for f in dataclasses.fields(ref.scan):
+            if f.name == "sj_strand_tag":
+                assert result.scan.sj_strand_tag == "auto"
+                continue
+            assert getattr(result.scan, f.name) == getattr(ref.scan, f.name), f.name
+
+        # Scoring: log penalties match exactly
+        assert result.scoring.overhang_log_penalty == ref.scoring.overhang_log_penalty
+        assert result.scoring.mismatch_log_penalty == ref.scoring.mismatch_log_penalty
+        # gdna_splice_penalties: result has explicit dict, ref has None
+        assert result.scoring.gdna_splice_penalties is not None
+
+    def test_param_specs_cover_all_defaults(self):
+        """Every key in _build_quant_defaults matches a _ParamSpec or is CLI-only."""
+        from hulkrna.cli import _PARAM_SPECS
+
+        spec_dests = {s.cli_dest for s in _PARAM_SPECS}
+        cli_only = {"no_tsv"}
+        defaults = _build_quant_defaults()
+        for key in defaults:
+            assert key in spec_dests or key in cli_only, (
+                f"Default key {key!r} not in _PARAM_SPECS or cli_only"
+            )

@@ -2089,32 +2089,102 @@ static nb::tuple connected_components_native(
         }
     }
 
-    // Assign sequential component labels to active transcripts
-    auto* labels = new int32_t[n_transcripts];
-    std::fill(labels, labels + n_transcripts, -1);
-
+    // Assign sequential component labels to active transcripts.
+    // labels[t] = component index (0-based) for active transcripts, -1 otherwise.
+    std::vector<int32_t> labels(n_transcripts, -1);
     std::unordered_map<int32_t, int32_t> root_to_label;
-    int32_t next_label = 0;
+    int32_t n_comp = 0;
 
     for (int32_t t = 0; t < n_transcripts; ++t) {
         if (!active[t]) continue;
         int32_t root = uf.find(t);
         auto it = root_to_label.find(root);
         if (it == root_to_label.end()) {
-            root_to_label[root] = next_label;
-            labels[t] = next_label;
-            ++next_label;
+            root_to_label[root] = n_comp;
+            labels[t] = n_comp;
+            ++n_comp;
         } else {
             labels[t] = it->second;
         }
     }
 
-    size_t shape[1] = {static_cast<size_t>(n_transcripts)};
-    nb::capsule owner(labels, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
+    // --- Build per-component transcript and unit lists (CSR form) ---
+
+    // 1. Count transcripts per component
+    std::vector<int64_t> comp_t_counts(n_comp, 0);
+    for (int32_t t = 0; t < n_transcripts; ++t) {
+        if (labels[t] >= 0) comp_t_counts[labels[t]]++;
+    }
+
+    // 2. Assign each unit to a component via its first transcript
+    std::vector<int32_t> unit_label(n_units, -1);
+    for (int64_t u = 0; u < n_units; ++u) {
+        int64_t start = offsets[u];
+        int64_t end   = offsets[u + 1];
+        for (int64_t j = start; j < end; ++j) {
+            int32_t t = t_idx[j];
+            if (t >= nrna_base) t -= nrna_base;
+            if (t >= 0 && t < n_transcripts && labels[t] >= 0) {
+                unit_label[u] = labels[t];
+                break;
+            }
+        }
+    }
+
+    // 3. Count units per component
+    std::vector<int64_t> comp_u_counts(n_comp, 0);
+    for (int64_t u = 0; u < n_units; ++u) {
+        if (unit_label[u] >= 0) comp_u_counts[unit_label[u]]++;
+    }
+
+    // 4. Build CSR offsets via prefix sum
+    auto* ct_off = new int64_t[n_comp + 1];
+    auto* cu_off = new int64_t[n_comp + 1];
+    ct_off[0] = 0;
+    cu_off[0] = 0;
+    for (int32_t c = 0; c < n_comp; ++c) {
+        ct_off[c + 1] = ct_off[c] + comp_t_counts[c];
+        cu_off[c + 1] = cu_off[c] + comp_u_counts[c];
+    }
+    int64_t total_t = ct_off[n_comp];
+    int64_t total_u = cu_off[n_comp];
+
+    // 5. Fill flat arrays (iterate ascending → output is sorted)
+    auto* ct_flat = new int32_t[std::max(total_t, int64_t(1))];
+    auto* cu_flat = new int32_t[std::max(total_u, int64_t(1))];
+
+    // Reuse counts as write cursors
+    std::fill(comp_t_counts.begin(), comp_t_counts.end(), 0);
+    std::fill(comp_u_counts.begin(), comp_u_counts.end(), 0);
+
+    for (int32_t t = 0; t < n_transcripts; ++t) {
+        int32_t c = labels[t];
+        if (c < 0) continue;
+        ct_flat[ct_off[c] + comp_t_counts[c]++] = t;
+    }
+    for (int64_t u = 0; u < n_units; ++u) {
+        int32_t c = unit_label[u];
+        if (c < 0) continue;
+        cu_flat[cu_off[c] + comp_u_counts[c]++] = static_cast<int32_t>(u);
+    }
+
+    // Wrap in numpy arrays with capsule ownership
+    size_t ct_off_shape[1] = {static_cast<size_t>(n_comp + 1)};
+    size_t ct_flat_shape[1] = {static_cast<size_t>(total_t)};
+    size_t cu_off_shape[1] = {static_cast<size_t>(n_comp + 1)};
+    size_t cu_flat_shape[1] = {static_cast<size_t>(total_u)};
+
+    nb::capsule own_ct_off(ct_off, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+    nb::capsule own_ct_flat(ct_flat, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
+    nb::capsule own_cu_off(cu_off, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+    nb::capsule own_cu_flat(cu_flat, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
 
     return nb::make_tuple(
-        nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(labels, 1, shape, std::move(owner)),
-        nb::int_(next_label)
+        nb::int_(n_comp),
+        nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(ct_off, 1, ct_off_shape, std::move(own_ct_off)),
+        nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(ct_flat, 1, ct_flat_shape, std::move(own_ct_flat)),
+        nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(cu_off, 1, cu_off_shape, std::move(own_cu_off)),
+        nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(cu_flat, 1, cu_flat_shape, std::move(own_cu_flat))
     );
 }
 
@@ -2214,9 +2284,9 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_transcripts"),
           "Find connected components of the fragment→transcript overlap graph.\n\n"
           "Uses union-find with path compression and union by rank.\n"
-          "Returns (labels, n_components) where labels is int32[n_transcripts]\n"
-          "with -1 for inactive transcripts and sequential 0-based labels\n"
-          "for active transcripts.");
+          "Returns (n_comp, comp_t_offsets, comp_t_flat, comp_u_offsets,\n"
+          "comp_u_flat) where the CSR pairs (offsets, flat) give sorted\n"
+          "transcript indices and unit indices for each component.");
 
     // ----------------------------------------------------------------
     // Export constants so Python imports from this single source of truth.

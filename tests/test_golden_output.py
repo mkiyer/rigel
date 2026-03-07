@@ -52,8 +52,15 @@ SEED = 42
 PIPELINE_SEED = 42
 N_FRAGS = 1000  # enough to exercise EM meaningfully
 
-# Tolerance for golden comparison: 0.0 = bit-exact
-ATOL = 0.0
+# Tolerance for golden comparison.
+# The C++ EM solver has inherent ULP-level (~1e-16) non-determinism in
+# floating-point accumulation order, and near-zero quantities (e.g. gdna
+# when there is no contamination, ~1e-296) can wander by several percent
+# in relative terms while remaining scientifically meaningless.
+# rtol=1e-12 catches real regressions on meaningful values; atol=1e-10
+# absorbs noise on effectively-zero quantities.
+RTOL = 1e-12
+ATOL = 1e-10
 
 # Standard simulation configs
 _SIM_SS100 = SimConfig(
@@ -208,7 +215,7 @@ def _compare_df(actual, expected, numeric_cols, label):
             a = a[~nan_mask]
             e = e[~nan_mask]
         np.testing.assert_allclose(
-            a, e, atol=ATOL, rtol=0,
+            a, e, atol=ATOL, rtol=RTOL,
             err_msg=f"{label}: column '{col}' differs",
         )
 
@@ -237,7 +244,7 @@ def _compare_output(actual, expected, scenario_name):
     for key in ("gdna_em_count", "nrna_em_count", "n_fragments"):
         np.testing.assert_allclose(
             actual["scalars"][key], expected["scalars"][key],
-            atol=ATOL, rtol=0,
+            atol=ATOL, rtol=RTOL,
             err_msg=f"{scenario_name}: scalar '{key}' differs",
         )
 

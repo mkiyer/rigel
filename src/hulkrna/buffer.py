@@ -452,16 +452,30 @@ class FragmentBuffer:
             size=size,
         )
 
+        self._accept_chunk(chunk)
+        self._native_acc = FragmentAccumulator()
+
+    def _accept_chunk(self, chunk: _FinalizedChunk) -> None:
+        """Append a finalized chunk and spill if over memory budget."""
         self._total_size += chunk.size
         self._memory_bytes += chunk.memory_bytes
         self._chunks.append(chunk)
-        self._native_acc = FragmentAccumulator()
 
         # Spill if over memory budget
         if self.max_memory_bytes > 0:
             while self._memory_bytes > self.max_memory_bytes:
                 if not self._spill_oldest():
                     break
+
+    def inject_chunk(self, chunk: _FinalizedChunk) -> None:
+        """Inject an externally-built chunk into the buffer."""
+        self._accept_chunk(chunk)
+
+    def release(self) -> None:
+        """Release all in-memory chunks and spilled files."""
+        self.cleanup()
+        self._chunks.clear()
+        self._memory_bytes = 0
 
     def _spill_oldest(self) -> bool:
         """Spill the oldest in-memory chunk to disk.  Return True if spilled."""

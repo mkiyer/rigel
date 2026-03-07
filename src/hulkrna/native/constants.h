@@ -57,6 +57,12 @@ static constexpr int32_t STRAND_NEG       = 2;
 static constexpr int32_t STRAND_AMBIGUOUS = 3;  // POS | NEG
 
 // ================================================================
+// Scoring constants (shared by scoring.cpp and Python side)
+// ================================================================
+static constexpr double LOG_HALF       = -0.6931471805599453;       // log(0.5)
+static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;      // log(0.99)
+
+// ================================================================
 // Geometric helper types shared across modules
 // ================================================================
 

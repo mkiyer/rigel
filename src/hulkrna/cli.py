@@ -122,61 +122,43 @@ def _build_pipeline_config(
     seed: int,
     sj_strand_tag: str | tuple[str, ...],
 ) -> "PipelineConfig":
-    """Translate resolved CLI args into a ``PipelineConfig``."""
+    """Translate resolved CLI args into a ``PipelineConfig``.
+
+    Field mapping is driven by ``_PARAM_SPECS`` — see the declarative
+    registry below ``sim_command``.
+    """
     from .config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
-    from .scoring import overhang_alpha_to_log_penalty, GDNA_SPLICE_PENALTIES
-    from .splice import SPLICE_UNANNOT
 
-    alpha = args.em_prior_alpha
-    gamma = args.em_prior_gamma
-    logging.info(f"Using EM prior: alpha={alpha}, gamma={gamma}")
+    em_kw: dict = {}
+    scan_kw: dict = {}
+    scoring_kw: dict = {}
+    top_kw: dict = {}
+    _section = {"em": em_kw, "scan": scan_kw, "scoring": scoring_kw}
 
-    overhang_log_penalty = overhang_alpha_to_log_penalty(args.overhang_alpha)
-    mismatch_log_penalty = overhang_alpha_to_log_penalty(args.mismatch_alpha)
+    for spec in _PARAM_SPECS:
+        cli_val = getattr(args, spec.cli_dest)
+        config_val = _cli_to_config(cli_val, spec.transform)
+        if "." in spec.config_path:
+            section, field_name = spec.config_path.split(".", 1)
+            _section[section][field_name] = config_val
+        else:
+            top_kw[spec.config_path] = config_val
 
-    gdna_splice_penalties = dict(GDNA_SPLICE_PENALTIES)
-    gdna_splice_penalties[SPLICE_UNANNOT] = args.gdna_splice_penalty_unannot
+    # Override with pre-resolved values (seed and sj_strand_tag are
+    # normalised in quant_command before reaching here).
+    em_kw["seed"] = seed
+    scan_kw["sj_strand_tag"] = sj_strand_tag
+
+    logging.info(
+        f"Using EM prior: alpha={em_kw['prior_alpha']}, "
+        f"gamma={em_kw['prior_gamma']}"
+    )
 
     return PipelineConfig(
-        em=EMConfig(
-            seed=seed,
-            prior_alpha=alpha,
-            prior_gamma=gamma,
-            iterations=args.em_iterations,
-            convergence_delta=args.em_convergence_delta,
-            prune_threshold=args.prune_threshold,
-            confidence_threshold=args.confidence_threshold,
-            tss_window=args.tss_window,
-            nrna_frac_kappa_global=args.nrna_frac_kappa_global,
-            nrna_frac_kappa_locus=args.nrna_frac_kappa_locus,
-            nrna_frac_kappa_tss=args.nrna_frac_kappa_tss,
-            nrna_frac_mom_min_evidence_global=args.nrna_frac_mom_min_evidence_global,
-            nrna_frac_mom_min_evidence_locus=args.nrna_frac_mom_min_evidence_locus,
-            nrna_frac_mom_min_evidence_tss=args.nrna_frac_mom_min_evidence_tss,
-            nrna_frac_kappa_min=args.nrna_frac_kappa_min,
-            nrna_frac_kappa_max=args.nrna_frac_kappa_max,
-            nrna_frac_kappa_fallback=args.nrna_frac_kappa_fallback,
-            nrna_frac_kappa_min_obs=args.nrna_frac_kappa_min_obs,
-            gdna_kappa_chrom=args.gdna_kappa_chrom,
-            gdna_kappa_locus=args.gdna_kappa_locus,
-            gdna_mom_min_evidence_chrom=args.gdna_mom_min_evidence_chrom,
-            gdna_mom_min_evidence_locus=args.gdna_mom_min_evidence_locus,
-            n_threads=args.threads,
-        ),
-        scan=BamScanConfig(
-            skip_duplicates=not args.keep_duplicates,
-            include_multimap=args.include_multimap,
-            sj_strand_tag=sj_strand_tag,
-            strand_prior_kappa=args.strand_prior_kappa,
-            spill_dir=Path(args.tmpdir) if args.tmpdir else None,
-            n_scan_threads=args.threads,
-        ),
-        scoring=FragmentScoringConfig(
-            overhang_log_penalty=overhang_log_penalty,
-            mismatch_log_penalty=mismatch_log_penalty,
-            gdna_splice_penalties=gdna_splice_penalties,
-        ),
-        annotated_bam_path=getattr(args, 'annotated_bam', None),
+        em=EMConfig(**em_kw),
+        scan=BamScanConfig(**scan_kw),
+        scoring=FragmentScoringConfig(**scoring_kw),
+        **top_kw,
     )
 
 
@@ -186,49 +168,38 @@ def _write_run_config(
     seed: int,
     sj_strand_tag: str | tuple[str, ...],
 ) -> None:
-    """Serialize the resolved run parameters to ``config.json``."""
+    """Serialize the resolved run parameters to ``config.json``.
+
+    Parameter keys are derived from ``_PARAM_SPECS`` so that adding a
+    new parameter automatically includes it in config.json.
+    """
     import json
-    config_path = output_dir / "config.json"
+
+    params: dict = {
+        "bam_file": str(Path(args.bam_file).resolve()),
+        "index_dir": str(Path(args.index_dir).resolve()),
+        "output_dir": str(output_dir.resolve()),
+        "seed": seed,
+    }
+    seen = {"seed"}
+    for spec in _PARAM_SPECS:
+        dest = spec.cli_dest
+        if dest in seen:
+            continue
+        seen.add(dest)
+        val = getattr(args, dest)
+        if dest == "sj_strand_tag":
+            val = sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag)
+        params[dest] = val
+    params["no_tsv"] = args.no_tsv
+
     config = {
         "command": "hulkrna quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source_config": str(Path(args.config).resolve()) if args.config else None,
-        "parameters": {
-            "bam_file": str(Path(args.bam_file).resolve()),
-            "index_dir": str(Path(args.index_dir).resolve()),
-            "output_dir": str(output_dir.resolve()),
-            "seed": seed,
-            "em_prior_alpha": args.em_prior_alpha,
-            "em_prior_gamma": args.em_prior_gamma,
-            "em_iterations": args.em_iterations,
-            "em_convergence_delta": args.em_convergence_delta,
-            "prune_threshold": args.prune_threshold,
-            "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
-            "confidence_threshold": args.confidence_threshold,
-            "skip_duplicates": not args.keep_duplicates,
-            "include_multimap": args.include_multimap,
-            "sj_strand_tag": sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag),
-            "annotated_bam": args.annotated_bam,
-            "tss_window": args.tss_window,
-            "nrna_frac_kappa_global": args.nrna_frac_kappa_global,
-            "nrna_frac_kappa_locus": args.nrna_frac_kappa_locus,
-            "nrna_frac_kappa_tss": args.nrna_frac_kappa_tss,
-            "nrna_frac_mom_min_evidence_global": args.nrna_frac_mom_min_evidence_global,
-            "nrna_frac_mom_min_evidence_locus": args.nrna_frac_mom_min_evidence_locus,
-            "nrna_frac_mom_min_evidence_tss": args.nrna_frac_mom_min_evidence_tss,
-            "nrna_frac_kappa_min": args.nrna_frac_kappa_min,
-            "nrna_frac_kappa_max": args.nrna_frac_kappa_max,
-            "nrna_frac_kappa_fallback": args.nrna_frac_kappa_fallback,
-            "nrna_frac_kappa_min_obs": args.nrna_frac_kappa_min_obs,
-            "gdna_kappa_chrom": args.gdna_kappa_chrom,
-            "gdna_kappa_locus": args.gdna_kappa_locus,
-            "gdna_mom_min_evidence_chrom": args.gdna_mom_min_evidence_chrom,
-            "gdna_mom_min_evidence_locus": args.gdna_mom_min_evidence_locus,
-            "strand_prior_kappa": args.strand_prior_kappa,
-            "threads": args.threads,
-            "tmpdir": args.tmpdir,
-        },
+        "parameters": params,
     }
+    config_path = output_dir / "config.json"
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
     logging.info(f"[CONFIG] Written to {config_path}")
@@ -288,8 +259,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     total_rna = total_mrna + total_nrna
     total_all = total_rna + total_gdna + stats.n_intergenic
 
+    from . import __version__
     summary = {
-        "hulkrna_version": "0.1.0",
+        "hulkrna_version": __version__,
         "command": "hulkrna quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "input": {
@@ -407,65 +379,171 @@ def sim_command(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# YAML config / CLI merge helper
+# Declarative CLI ↔ config registry
+# ---------------------------------------------------------------------------
+#
+# _PARAM_SPECS is the single mapping from argparse dest names to config
+# dataclass fields.  Adding a new tuneable parameter requires:
+#   1. Add the dataclass field in config.py
+#   2. Add the argparse argument below in build_parser()
+#   3. Add a _ParamSpec entry here
+# Everything else (_build_quant_defaults, _build_pipeline_config,
+# _write_run_config, _resolve_quant_args) is driven by this registry.
+
+from dataclasses import dataclass as _dataclass
+import math as _math
+
+
+@_dataclass(frozen=True)
+class _ParamSpec:
+    """Maps a CLI argparse dest to a config dataclass field."""
+    cli_dest: str               # argparse dest, e.g. "em_prior_alpha"
+    config_path: str            # dotted config path, e.g. "em.prior_alpha"
+    transform: str = "direct"   # "direct" | "invert_bool" | "log_penalty"
+    #                             | "gdna_splice" | "path_or_none" | "sj_tag"
+
+
+_PARAM_SPECS: tuple[_ParamSpec, ...] = (
+    # -- EMConfig: direct mappings --
+    _ParamSpec("seed", "em.seed"),
+    _ParamSpec("em_prior_alpha", "em.prior_alpha"),
+    _ParamSpec("em_prior_gamma", "em.prior_gamma"),
+    _ParamSpec("em_iterations", "em.iterations"),
+    _ParamSpec("em_convergence_delta", "em.convergence_delta"),
+    _ParamSpec("prune_threshold", "em.prune_threshold"),
+    _ParamSpec("confidence_threshold", "em.confidence_threshold"),
+    _ParamSpec("tss_window", "em.tss_window"),
+    _ParamSpec("nrna_frac_kappa_global", "em.nrna_frac_kappa_global"),
+    _ParamSpec("nrna_frac_kappa_locus", "em.nrna_frac_kappa_locus"),
+    _ParamSpec("nrna_frac_kappa_tss", "em.nrna_frac_kappa_tss"),
+    _ParamSpec("nrna_frac_mom_min_evidence_global", "em.nrna_frac_mom_min_evidence_global"),
+    _ParamSpec("nrna_frac_mom_min_evidence_locus", "em.nrna_frac_mom_min_evidence_locus"),
+    _ParamSpec("nrna_frac_mom_min_evidence_tss", "em.nrna_frac_mom_min_evidence_tss"),
+    _ParamSpec("nrna_frac_kappa_min", "em.nrna_frac_kappa_min"),
+    _ParamSpec("nrna_frac_kappa_max", "em.nrna_frac_kappa_max"),
+    _ParamSpec("nrna_frac_kappa_fallback", "em.nrna_frac_kappa_fallback"),
+    _ParamSpec("nrna_frac_kappa_min_obs", "em.nrna_frac_kappa_min_obs"),
+    _ParamSpec("gdna_kappa_chrom", "em.gdna_kappa_chrom"),
+    _ParamSpec("gdna_kappa_locus", "em.gdna_kappa_locus"),
+    _ParamSpec("gdna_mom_min_evidence_chrom", "em.gdna_mom_min_evidence_chrom"),
+    _ParamSpec("gdna_mom_min_evidence_locus", "em.gdna_mom_min_evidence_locus"),
+    # -- BamScanConfig: direct --
+    _ParamSpec("include_multimap", "scan.include_multimap"),
+    _ParamSpec("strand_prior_kappa", "scan.strand_prior_kappa"),
+    # -- BamScanConfig: transformed --
+    _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
+    _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
+    _ParamSpec("tmpdir", "scan.spill_dir", "path_or_none"),
+    # -- FragmentScoringConfig: transformed --
+    _ParamSpec("overhang_alpha", "scoring.overhang_log_penalty", "log_penalty"),
+    _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
+    _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
+    # -- Fan-out: threads → both EM and scan --
+    _ParamSpec("threads", "em.n_threads"),
+    _ParamSpec("threads", "scan.n_scan_threads"),
+    # -- Top-level PipelineConfig --
+    _ParamSpec("annotated_bam", "annotated_bam_path"),
+)
+
+
+def _resolve_config_path(cfg: object, path: str) -> object:
+    """Follow a dotted path like ``'em.prior_alpha'`` on a config object."""
+    obj = cfg
+    for attr in path.split("."):
+        obj = getattr(obj, attr)
+    return obj
+
+
+def _config_to_cli(val: object, transform: str) -> object:
+    """Transform a config-space default to CLI-space."""
+    if transform == "direct":
+        return val
+    if transform == "invert_bool":
+        return not val
+    if transform == "sj_tag":
+        return [val] if isinstance(val, str) else list(val)
+    if transform == "log_penalty":
+        return _math.exp(val) if val > float("-inf") else 0.0
+    if transform == "gdna_splice":
+        from .scoring import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
+        if val is None:
+            return DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
+        from .splice import SPLICE_UNANNOT
+        return val.get(SPLICE_UNANNOT, DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT)
+    if transform == "path_or_none":
+        return str(val) if val else None
+    raise ValueError(f"Unknown transform: {transform!r}")
+
+
+def _cli_to_config(val: object, transform: str) -> object:
+    """Transform a CLI-space value to config-space."""
+    if transform == "direct":
+        return val
+    if transform == "invert_bool":
+        return not val
+    if transform == "sj_tag":
+        # Normalised by quant_command before _build_pipeline_config;
+        # the overwritten value is used, but keep this for completeness.
+        if isinstance(val, str):
+            return val
+        return val[0] if len(val) == 1 else tuple(val)
+    if transform == "log_penalty":
+        from .scoring import overhang_alpha_to_log_penalty
+        return overhang_alpha_to_log_penalty(val)
+    if transform == "gdna_splice":
+        from .scoring import GDNA_SPLICE_PENALTIES
+        from .splice import SPLICE_UNANNOT
+        penalties = dict(GDNA_SPLICE_PENALTIES)
+        penalties[SPLICE_UNANNOT] = val
+        return penalties
+    if transform == "path_or_none":
+        return Path(val) if val else None
+    raise ValueError(f"Unknown transform: {transform!r}")
+
+
+# ---------------------------------------------------------------------------
+# YAML config / CLI merge helpers
 # ---------------------------------------------------------------------------
 
 
 def _build_quant_defaults() -> dict:
     """Build quant subcommand defaults from config dataclasses.
 
-    Single source of truth: all default values come from the frozen
-    dataclasses in ``config.py`` or from ``scoring.py`` module constants.
-    CLI-only flags (no_tsv, annotated_bam) are defined here.
+    Single source of truth: all default values derived from the frozen
+    dataclasses in ``config.py`` via the ``_PARAM_SPECS`` registry.
+
+    Scoring fields (overhang_alpha, mismatch_alpha, gdna_splice_penalty)
+    use exact CLI-space constants from ``scoring.py`` to avoid float
+    noise from log/exp round-tripping.
     """
-    from .config import EMConfig, BamScanConfig
+    from .config import PipelineConfig
     from .scoring import (
         DEFAULT_OVERHANG_ALPHA,
         DEFAULT_MISMATCH_ALPHA,
         DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     )
-    em = EMConfig()
-    scan = BamScanConfig()
-    return {
-        # -- EMConfig fields (renamed: em_ prefix for CLI clarity) --
-        "seed": em.seed,
-        "em_prior_alpha": em.prior_alpha,
-        "em_prior_gamma": em.prior_gamma,
-        "em_iterations": em.iterations,
-        "em_convergence_delta": em.convergence_delta,
-        "prune_threshold": em.prune_threshold,
-        "confidence_threshold": em.confidence_threshold,
-        "tss_window": em.tss_window,
-        # -- EMConfig: nrna_frac hierarchy --
-        "nrna_frac_kappa_global": em.nrna_frac_kappa_global,
-        "nrna_frac_kappa_locus": em.nrna_frac_kappa_locus,
-        "nrna_frac_kappa_tss": em.nrna_frac_kappa_tss,
-        "nrna_frac_mom_min_evidence_global": em.nrna_frac_mom_min_evidence_global,
-        "nrna_frac_mom_min_evidence_locus": em.nrna_frac_mom_min_evidence_locus,
-        "nrna_frac_mom_min_evidence_tss": em.nrna_frac_mom_min_evidence_tss,
-        "nrna_frac_kappa_min": em.nrna_frac_kappa_min,
-        "nrna_frac_kappa_max": em.nrna_frac_kappa_max,
-        "nrna_frac_kappa_fallback": em.nrna_frac_kappa_fallback,
-        "nrna_frac_kappa_min_obs": em.nrna_frac_kappa_min_obs,
-        # -- EMConfig: gDNA hierarchy --
-        "gdna_kappa_chrom": em.gdna_kappa_chrom,
-        "gdna_kappa_locus": em.gdna_kappa_locus,
-        "gdna_mom_min_evidence_chrom": em.gdna_mom_min_evidence_chrom,
-        "gdna_mom_min_evidence_locus": em.gdna_mom_min_evidence_locus,
-        # -- BamScanConfig fields --
-        "include_multimap": scan.include_multimap,
-        "keep_duplicates": not scan.skip_duplicates,   # inverted
-        "sj_strand_tag": ["auto"],                     # CLI uses list form
-        "strand_prior_kappa": scan.strand_prior_kappa,
-        # -- Scoring defaults (alpha space, converted later) --
+    cfg = PipelineConfig()
+
+    # Scoring fields have different representations in CLI (alpha) vs
+    # config (log-penalty / dict).  Use exact constants to avoid float
+    # noise from math.exp(math.log(alpha)).
+    _scoring_defaults = {
         "overhang_alpha": DEFAULT_OVERHANG_ALPHA,
         "mismatch_alpha": DEFAULT_MISMATCH_ALPHA,
         "gdna_splice_penalty_unannot": DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-        # -- CLI-only flags --
-        "no_tsv": False,
-        "annotated_bam": None,
-        "threads": 0,
     }
+
+    defaults: dict = {}
+    for spec in _PARAM_SPECS:
+        if spec.cli_dest in defaults:
+            continue  # skip fan-out duplicates (e.g. threads)
+        if spec.cli_dest in _scoring_defaults:
+            defaults[spec.cli_dest] = _scoring_defaults[spec.cli_dest]
+        else:
+            val = _resolve_config_path(cfg, spec.config_path)
+            defaults[spec.cli_dest] = _config_to_cli(val, spec.transform)
+    defaults["no_tsv"] = False  # CLI-only, no config mapping
+    return defaults
 
 
 def _resolve_quant_args(

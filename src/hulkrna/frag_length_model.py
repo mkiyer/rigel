@@ -36,10 +36,10 @@ import numpy as np
 _TAIL_DECAY_LP: float = math.log(0.99)
 
 #: Default maximum fragment length tracked individually.
-#: Sizes >= this go into a single overflow bin.  Typical RNA-seq
-#: libraries have fragments in the 100–500 bp range; 2000 accommodates
-#: the vast majority.
-DEFAULT_MAX_FRAG_SIZE: int = 2000
+#: Sizes >= this go into a single overflow bin.  Must match
+#: ``BamScanConfig.max_frag_length`` (config.py) for consistency
+#: between standalone and production usage.
+DEFAULT_MAX_FRAG_SIZE: int = 1000
 
 logger = logging.getLogger(__name__)
 

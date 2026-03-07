@@ -192,3 +192,17 @@ class TestMergeOutcome:
         assert int(MergeOutcome.EMPTY) == 3
 
 
+class TestCppConstantParity:
+    """Verify C++ scoring constants match Python-computed values."""
+
+    def test_log_half(self):
+        import math
+        from hulkrna._scoring_impl import LOG_HALF
+        assert LOG_HALF == math.log(0.5)
+
+    def test_tail_decay_lp(self):
+        import math
+        from hulkrna._scoring_impl import TAIL_DECAY_LP
+        assert TAIL_DECAY_LP == math.log(0.99)
+
+

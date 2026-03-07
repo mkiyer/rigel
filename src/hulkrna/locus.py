@@ -6,7 +6,6 @@ nRNA initialization, and Empirical Bayes gDNA priors.
 """
 
 import logging
-import math
 from collections import defaultdict
 
 import numpy as np
@@ -71,58 +70,19 @@ def build_loci(
     if n_units == 0 or len(t_indices) == 0:
         return []
 
-    # C++ union-find connected components (replaces scipy sparse graph).
-    # Returns labels[n_transcripts] with -1 for inactive, 0-based for active.
-    labels, n_comp = _cc_native(
+    # C++ union-find returns per-component transcript and unit lists
+    # in CSR form, already sorted ascending.
+    n_comp, ct_off, ct_flat, cu_off, cu_flat = _cc_native(
         offsets, t_indices,
         np.int32(nrna_base), np.int32(nt),
     )
 
-    # Compute first transcript per unit for unit→component assignment.
-    all_t = t_indices.copy()
-    nrna_mask = all_t >= nrna_base
-    all_t[nrna_mask] -= nrna_base
-    seg_lengths = np.diff(offsets).astype(np.intp)
-    nonempty = seg_lengths > 0
-    first_idx = offsets[:-1].astype(np.intp)
-    first_t = np.empty(n_units, dtype=np.int32)
-    first_t[nonempty] = all_t[first_idx[nonempty]]
-    first_t[~nonempty] = -1
-
-    # Active transcripts are those with a valid component label.
-    active = np.where(labels >= 0)[0].astype(np.int32)
-
-    # Group active transcripts by component label
-    active_labels = labels[active]
-    unique_labels, inverse = np.unique(active_labels, return_inverse=True)
-
-    # Build component_map: label → sorted transcript list
-    component_map: dict[int, list[int]] = {}
-    for i, t in enumerate(active):
-        lbl = int(unique_labels[inverse[i]])
-        component_map.setdefault(lbl, []).append(int(t))
-
-    # Assign EM units to components (using first transcript's label)
-    unit_labels = np.full(n_units, -1, dtype=np.int32)
-    unit_labels[nonempty] = labels[first_t[nonempty]]
-
-    # Build per-component unit lists
-    root_to_units: dict[int, list[int]] = {lbl: [] for lbl in component_map}
-    for u in range(n_units):
-        lbl = int(unit_labels[u])
-        if lbl >= 0 and lbl in root_to_units:
-            root_to_units[lbl].append(u)
-
-    # Build Locus objects
     loci = []
-    for lid, (lbl, t_list) in enumerate(sorted(component_map.items())):
-        t_arr = np.array(sorted(t_list), dtype=np.int32)
-        u_arr = np.array(sorted(root_to_units.get(lbl, [])), dtype=np.int32)
-
+    for lid in range(n_comp):
         loci.append(Locus(
             locus_id=lid,
-            transcript_indices=t_arr,
-            unit_indices=u_arr,
+            transcript_indices=ct_flat[ct_off[lid]:ct_off[lid + 1]].copy(),
+            unit_indices=cu_flat[cu_off[lid]:cu_off[lid + 1]].copy(),
         ))
 
     return loci
