@@ -19,6 +19,12 @@
 - use distributions to improve deconvolution
 
 
+## empirical bayes
+
+- review gdna empirical bayes setup which requires a bunch of constants
+
+- review nascent RNA 'eta' empirical bayes setup
+
 ## Edit distance
 
 - when reads overlap, edit distance can get double counted in the overlap portion of the reads
