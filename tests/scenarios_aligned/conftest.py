@@ -10,9 +10,9 @@ import shutil
 
 import pytest
 
-from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-from hulkrna.pipeline import run_pipeline
-from hulkrna.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+from rigel.pipeline import run_pipeline
+from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
 
 logger = logging.getLogger(__name__)
 

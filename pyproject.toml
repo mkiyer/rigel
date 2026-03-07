@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.4.3", "nanobind>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "hulkrna"
+name = "rigel"
 version = "0.1.0"
 description = "Bayesian RNA-seq transcript quantification tool"
 readme = "README.md"
@@ -39,11 +39,11 @@ pileup = [
 ]
 
 [project.scripts]
-hulkrna = "hulkrna.cli:main"
+rigel = "rigel.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/mkiyer/hulkrna"
-Repository = "https://github.com/mkiyer/hulkrna"
+Homepage = "https://github.com/mkiyer/rigel"
+Repository = "https://github.com/mkiyer/rigel"
 
 [tool.scikit-build]
 # Protect the configuration against future changes in scikit-build-core
@@ -56,7 +56,7 @@ build-dir = "build/{wheel_tag}"
 wheel.py-api = "cp312"
 
 # Tell scikit-build-core where to find the Python package
-wheel.packages = ["src/hulkrna"]
+wheel.packages = ["src/rigel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

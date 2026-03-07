@@ -1,4 +1,4 @@
-"""hulkrna.scan — CSR builder / buffer scanner.
+"""rigel.scan — CSR builder / buffer scanner.
 
 Converts a ``FragmentBuffer`` into ``ScoredFragments`` for the EM solver.
 The ``FragmentRouter`` class builds per-fragment scoring data, routes

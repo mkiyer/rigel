@@ -1,8 +1,8 @@
-"""Tests for hulkrna.types — foundational data types."""
+"""Tests for rigel.types — foundational data types."""
 
 import pytest
 
-from hulkrna.types import (
+from rigel.types import (
     GenomicInterval,
     Interval,
     IntervalType,
@@ -197,12 +197,12 @@ class TestCppConstantParity:
 
     def test_log_half(self):
         import math
-        from hulkrna._scoring_impl import LOG_HALF
+        from rigel._scoring_impl import LOG_HALF
         assert LOG_HALF == math.log(0.5)
 
     def test_tail_decay_lp(self):
         import math
-        from hulkrna._scoring_impl import TAIL_DECAY_LP
+        from rigel._scoring_impl import TAIL_DECAY_LP
         assert TAIL_DECAY_LP == math.log(0.99)
 
 

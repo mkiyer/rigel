@@ -14,7 +14,7 @@ import shutil
 
 import pytest
 
-from hulkrna.sim import Scenario
+from rigel.sim import Scenario
 
 from .conftest import (
     GDNA_LEVELS, STRAND_LEVELS, STRESS_COMBOS, STRESS_IDS,

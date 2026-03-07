@@ -1,4 +1,4 @@
-# hulkrna Cleanup Plan
+# rigel Cleanup Plan
 
 Date: 2026-03-06
 

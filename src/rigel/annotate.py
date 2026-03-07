@@ -1,5 +1,5 @@
 """
-hulkrna.annotate — Per-fragment annotated BAM output.
+rigel.annotate — Per-fragment annotated BAM output.
 
 Produces a BAM file where every original record is stamped with EM-derived
 assignment tags, enabling read-level introspection of the quantification pipeline.

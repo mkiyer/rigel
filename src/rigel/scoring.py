@@ -1,4 +1,4 @@
-"""hulkrna.scoring — Pure scoring functions and pre-computed scoring context.
+"""rigel.scoring — Pure scoring functions and pre-computed scoring context.
 
 Every function in this module takes explicit arguments (no closures,
 no captured state).  The ``FragmentScorer`` dataclass holds all
@@ -219,7 +219,7 @@ class FragmentScorer:
         # Build native C++ scoring context for hot-path acceleration.
         # Cast arrays to exact dtypes expected by the C++ nanobind binding
         # to tolerate callers (including test mocks) that provide int64 etc.
-        from hulkrna._scoring_impl import NativeFragmentScorer
+        from rigel._scoring_impl import NativeFragmentScorer
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
             log_p_antisense=float(ctx.log_p_antisense),
@@ -325,7 +325,7 @@ def genomic_to_transcript_pos(
 # compute_fragment_weight: C++ kernel
 # ---------------------------------------------------------------------------
 
-from hulkrna._scoring_impl import compute_fragment_weight
+from rigel._scoring_impl import compute_fragment_weight
 
 
 def score_gdna_standalone(

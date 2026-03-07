@@ -1,5 +1,5 @@
 # Benchmark: 20 Major Loci — competition config
-# hulkrna vs salmon vs kallisto
+# rigel vs salmon vs kallisto
 # Tests accuracy across diverse genomic contexts with new linked RNA model
 # and MoM empirical Bayes shrinkage parameterization
 #
@@ -9,9 +9,9 @@
 # Conditions: 2 gDNA × 2 nRNA × 3 strand-spec × 2 aligners = 12 per region
 #             12 × 10 regions = 120 conditions total
 
-genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
-gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_10_loci
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/bench_10_loci
 
 threads: 8
 
@@ -34,7 +34,7 @@ aligners:
   minimap2: {}
 
 # ── HulkRNA configs ─────────────────────────────────────────────────
-hulkrna_configs:
+rigel_configs:
   default: {}
 
 # ── Simulation ───────────────────────────────────────────────────────

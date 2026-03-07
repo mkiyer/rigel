@@ -4,7 +4,7 @@
 
 ## 1. Problem Statement
 
-The hulkrna EM solver must initialize three pools per locus: **mRNA**
+The rigel EM solver must initialize three pools per locus: **mRNA**
 (mature RNA), **nRNA** (nascent/pre-mRNA), and **gDNA** (genomic DNA).
 The current initialization has three critical flaws:
 
@@ -22,7 +22,7 @@ The current initialization has three critical flaws:
 
 This document specifies a **unified hybrid initialization model** that
 combines strand-based and density-based evidence through inverse-variance
-weighting, enabling hulkrna to handle the full spectrum from perfectly
+weighting, enabling rigel to handle the full spectrum from perfectly
 stranded to completely unstranded libraries.
 
 ## 2. Theoretical Foundation

@@ -1,4 +1,4 @@
-"""hulkrna.bias — Positional bias model with prefix-sum acceleration.
+"""rigel.bias — Positional bias model with prefix-sum acceleration.
 
 Provides ``BiasProfile`` for per-transcript positional bias with O(1)
 fragment weight queries and O(L) effective-length computation via

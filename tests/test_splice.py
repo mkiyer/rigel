@@ -1,8 +1,8 @@
-"""Tests for hulkrna.splice — splice classification enums."""
+"""Tests for rigel.splice — splice classification enums."""
 
 import pytest
 
-from hulkrna.splice import (
+from rigel.splice import (
     ANTISENSE_COLS,
     SpliceType,
     SpliceStrandCol,

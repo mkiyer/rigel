@@ -198,7 +198,7 @@ return estimator         —           —        WASTE†     RETURN
    large datasets, this doubles ScoredFragments memory at peak.
 
 4. **Temp directory**: Buffer spill files default to the system temp
-   dir (e.g. `/var/folders/.../hulkrna_buf_XXXXX/chunk_NNNN.arrow`),
+   dir (e.g. `/var/folders/.../rigel_buf_XXXXX/chunk_NNNN.arrow`),
    which may be on a slow filesystem or have limited space.  Production
    environments need control over this location (fast SSD mount).
 
@@ -266,7 +266,7 @@ but is not exposed to the CLI.  The default is `None` → Python
 `tempfile.mkdtemp()` → system temp (often `/var/folders/...` on macOS
 or `/tmp` on Linux).
 
-**Add `--temp-dir` to`hulkrna quant`:**
+**Add `--temp-dir` to`rigel quant`:**
 
 ```
 --temp-dir PATH   Directory for temporary buffer files (default: system temp).
@@ -487,8 +487,8 @@ infrastructure.
 ### Current State
 
 ```
-spill_dir: None  →  tempfile.mkdtemp(prefix="hulkrna_buf_")
-                →  /var/folders/ph/_lsypp750wj0q9_44ksdh3_00000gq/T/hulkrna_buf_6ysdvofr/
+spill_dir: None  →  tempfile.mkdtemp(prefix="rigel_buf_")
+                →  /var/folders/ph/_lsypp750wj0q9_44ksdh3_00000gq/T/rigel_buf_6ysdvofr/
 ```
 
 - Not user-controllable from CLI
@@ -499,8 +499,8 @@ spill_dir: None  →  tempfile.mkdtemp(prefix="hulkrna_buf_")
 ### Proposed Architecture
 
 ```
---temp-dir /fast_ssd/hulkrna_tmp
-    └── hulkrna_buf_<random>/
+--temp-dir /fast_ssd/rigel_tmp
+    └── rigel_buf_<random>/
         ├── chunk_0000.arrow   (LZ4 compressed, ~100 MB each)
         ├── chunk_0001.arrow
         └── ...

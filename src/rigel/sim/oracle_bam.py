@@ -1,5 +1,5 @@
 """
-hulkrna.sim.oracle_bam — Oracle BAM fragment simulator.
+rigel.sim.oracle_bam — Oracle BAM fragment simulator.
 
 Generates a name-sorted BAM file with perfectly aligned paired-end
 reads, bypassing the FASTQ → alignment → BAM pipeline.  This isolates
@@ -28,7 +28,7 @@ BAM conventions
   ``0x10``/``0x20`` (reverse strand).
 - CIGAR: ``M`` for contiguous alignment, ``N`` for intron skips.
 - ``XS`` tag set to the donor–acceptor strand for spliced reads
-  (minimap2/STAR convention) so hulkrna's splice-strand logic works.
+  (minimap2/STAR convention) so rigel's splice-strand logic works.
 - ``NH`` tag = 1 (unique mapping, since we know the true origin).
 
 Read-name format
@@ -300,7 +300,7 @@ class OracleBamSimulator:
         header = pysam.AlignmentHeader.from_dict({
             "HD": {"VN": "1.6", "SO": "queryname" if name_sorted else "coordinate"},
             "SQ": [{"SN": self.ref_name, "LN": genome_len}],
-            "PG": [{"ID": "hulkrna_oracle_bam", "PN": "hulkrna_oracle_bam",
+            "PG": [{"ID": "rigel_oracle_bam", "PN": "rigel_oracle_bam",
                      "VN": "1.0", "CL": "simulated"}],
         })
 

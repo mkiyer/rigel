@@ -4,11 +4,11 @@
 
 ---
 
-## 1. Competition Results: hulkrna vs salmon vs kallisto
+## 1. Competition Results: rigel vs salmon vs kallisto
 
 ### 1.1 Transcript-Level MAE (Mean Absolute Error, lower = better)
 
-| Condition | hulkrna | salmon | kallisto | hulkrna advantage |
+| Condition | rigel | salmon | kallisto | rigel advantage |
 |---|---:|---:|---:|---|
 | Pristine (no contaminants) | 20.20 | 27.40 | 24.11 | **1.2–1.4×** better |
 | nRNA 10% | 5.12 | 24.54 | 42.95 | **4.8–8.4×** better |
@@ -19,7 +19,7 @@
 
 ### 1.2 Transcript-Level Correlation (Pearson, higher = better)
 
-| Condition | hulkrna | salmon | kallisto |
+| Condition | rigel | salmon | kallisto |
 |---|---:|---:|---:|
 | Pristine | **0.996** | 0.988 | 0.994 |
 | nRNA 10% | **0.958** | 0.671 | 0.461 |
@@ -28,7 +28,7 @@
 
 ### 1.3 Gene-Level MAE
 
-| Condition | hulkrna | salmon | kallisto |
+| Condition | rigel | salmon | kallisto |
 |---|---:|---:|---:|
 | Pristine | **0.00** | 0.03 | 0.00 |
 | nRNA 10% | **3.39** | 164.46 | 334.00 |
@@ -40,7 +40,7 @@
 
 | Tool | Dropout Rate |
 |---|---:|
-| hulkrna | **0.00%** |
+| rigel | **0.00%** |
 | salmon | 11.08% |
 | kallisto | 8.62% |
 
@@ -48,21 +48,21 @@
 
 | Tool | Time per condition | Relative |
 |---|---:|---:|
-| hulkrna | 18–48s | 1× |
+| rigel | 18–48s | 1× |
 | salmon | 1–5s | **10–15×** faster |
 | kallisto | 0.9–1.3s | **15–40×** faster |
 
 ### 1.6 Competition Summary
 
-**hulkrna dominates accuracy across all conditions.** The advantage grows dramatically
+**rigel dominates accuracy across all conditions.** The advantage grows dramatically
 with contamination:
 - Pristine RNA: **1.2× better** MAE — salmon/kallisto are competitive
 - With gDNA/nRNA contamination: **17–36× better** MAE — salmon/kallisto
   cannot distinguish contaminants from real signal
-- **Zero dropout**: hulkrna detects all expressed transcripts; salmon/kallisto miss 9–11%
-- Gene-level: hulkrna is **50–170× better** under contamination
+- **Zero dropout**: rigel detects all expressed transcripts; salmon/kallisto miss 9–11%
+- Gene-level: rigel is **50–170× better** under contamination
 
-**Speed is the primary weakness.** hulkrna is 10–40× slower than salmon/kallisto, driven
+**Speed is the primary weakness.** rigel is 10–40× slower than salmon/kallisto, driven
 almost entirely by the Python EM solver.
 
 ---
@@ -156,7 +156,7 @@ iteration count would multiply with any per-step speedup.
 ## 4. Recommended Next Steps
 
 1. **Immediate (highest ROI):** Port `_em_step` and `_vbem_step` to C++ via nanobind.
-   This single change would likely bring hulkrna within 3–5× of salmon/kallisto speed
+   This single change would likely bring rigel within 3–5× of salmon/kallisto speed
    while retaining its massive accuracy advantage.
 
 2. **Short-term:** Port equivalence class construction and locus EM data building
@@ -173,7 +173,7 @@ iteration count would multiply with any per-step speedup.
 
 ## 5. Key Takeaway
 
-**hulkrna is already the clear accuracy winner** — 1.2× better at pristine, 17–36× better
+**rigel is already the clear accuracy winner** — 1.2× better at pristine, 17–36× better
 with contamination, zero dropout. The speed gap (10–40×) is entirely attributable to the
 Python EM solver, which is a well-scoped, high-confidence optimization target. Porting
 `_em_step` to C++ alone would likely close the speed gap to 3–5×.

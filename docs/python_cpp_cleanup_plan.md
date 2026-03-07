@@ -136,7 +136,7 @@ bam.py::_group_records_by_hit    bam_scanner.cpp::process_read_group    REDUNDAN
    and `constants.h`.
 
    **Completed:** All constants from `constants.h` are now importable from
-   `hulkrna._resolve_impl`: `STRAND_*`, `SPLICE_*`, `MC_*`, `CHIMERA_*`,
+   `rigel._resolve_impl`: `STRAND_*`, `SPLICE_*`, `MC_*`, `CHIMERA_*`,
    `ITYPE_*`.
 
 9. Move `SpliceStrandCol` column indexing to C++ if the EM/quantification path moves

@@ -109,7 +109,7 @@ correction.
 #### 0b. bias.py Module
 
 ```python
-# src/hulkrna/bias.py
+# src/rigel/bias.py
 
 @dataclass
 class BiasProfile:

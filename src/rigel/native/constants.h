@@ -1,8 +1,8 @@
 /**
- * constants.h — Shared constants and helper types for hulkrna C++ extensions.
+ * constants.h — Shared constants and helper types for rigel C++ extensions.
  *
- * Must match the Python IntEnum values exactly (hulkrna.types,
- * hulkrna.categories).  Included by resolve.cpp, bam_scanner.cpp, and
+ * Must match the Python IntEnum values exactly (rigel.types,
+ * rigel.categories).  Included by resolve.cpp, bam_scanner.cpp, and
  * any future native modules.
  */
 
@@ -19,13 +19,13 @@
 #include <utility>
 #include <vector>
 
-namespace hulk {
+namespace rigel {
 
 // ================================================================
 // Enum-mirror constants
 // ================================================================
 
-// IntervalType (hulkrna.types.IntervalType)
+// IntervalType (rigel.types.IntervalType)
 static constexpr int8_t ITYPE_EXON           = 0;
 static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 // INTERGENIC = 2 — not used in resolve
@@ -33,24 +33,24 @@ static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 // SJ_UNANNOT = 4 — not used in resolve
 static constexpr int8_t ITYPE_UNAMBIG_INTRON  = 5;
 
-// SpliceType (hulkrna.categories.SpliceType)
+// SpliceType (rigel.categories.SpliceType)
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
 static constexpr int32_t SPLICE_SPLICED_UNANNOT = 1;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
 
-// MergeOutcome (hulkrna.types.MergeOutcome)
+// MergeOutcome (rigel.types.MergeOutcome)
 static constexpr int32_t MC_INTERSECTION          = 0;
 static constexpr int32_t MC_INTERSECTION_NONEMPTY = 1;
 static constexpr int32_t MC_UNION                 = 2;
 static constexpr int32_t MC_EMPTY                 = 3;
 
-// ChimeraType (hulkrna.types.ChimeraType)
+// ChimeraType (rigel.types.ChimeraType)
 static constexpr int32_t CHIMERA_NONE           = 0;
 static constexpr int32_t CHIMERA_TRANS           = 1;
 static constexpr int32_t CHIMERA_CIS_STRAND_SAME = 2;
 static constexpr int32_t CHIMERA_CIS_STRAND_DIFF = 3;
 
-// Strand (hulkrna.types.Strand)
+// Strand (rigel.types.Strand)
 static constexpr int32_t STRAND_NONE      = 0;
 static constexpr int32_t STRAND_POS       = 1;
 static constexpr int32_t STRAND_NEG       = 2;
@@ -283,4 +283,4 @@ inline ChimeraResult detect_chimera(
     return {chimera_type, min_gap};
 }
 
-}  // namespace hulk
+}  // namespace rigel

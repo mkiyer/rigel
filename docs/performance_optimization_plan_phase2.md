@@ -3,7 +3,7 @@
 ## 1. Current Profile Summary (2026-03-06, Post Phase-2B)
 
 **Dataset:** 12M buffered fragments, 254,461 transcripts, 63,472 genes, 29,266 loci
-**Platform:** macOS ARM64 (Apple Silicon), Python 3.13, conda `hulkrna`
+**Platform:** macOS ARM64 (Apple Silicon), Python 3.13, conda `rigel`
 
 ### Phase History
 
@@ -230,7 +230,7 @@ vs the per-locus Python/numpy overhead in the fallback path.
 ## 3. Phase 2B — Thread-Parallel EM: COMPLETED ✓
 
 **Status:** Implemented with OpenMP in em_solver.cpp, all 823 tests passing.
-`--threads` CLI parameter wired through `hulkrna quant`, profiler, and
+`--threads` CLI parameter wired through `rigel quant`, profiler, and
 benchmark scripts.
 
 ### What Was Done
@@ -240,7 +240,7 @@ benchmark scripts.
 - OpenMP detection in CMakeLists.txt with conda `libomp` fallback for
   Apple Clang (`-Xclang -fopenmp` + `-lomp -Wl,-rpath`)
 - `EMConfig.n_threads` parameter (0 = all cores, 1 = sequential, N = cap)
-- `--threads` CLI flag for `hulkrna quant`, `scripts/profiler.py`, and
+- `--threads` CLI flag for `rigel quant`, `scripts/profiler.py`, and
   `scripts/benchmarking/benchmark_region_competition.py`
 - `llvm-openmp` added to `mamba_env.yaml`
 

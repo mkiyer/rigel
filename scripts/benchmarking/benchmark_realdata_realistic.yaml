@@ -1,5 +1,5 @@
 # Realistic benchmark — gDNA/nRNA/strand-specificity from real data.
-# Parameters estimated by hulkrna on:
+# Parameters estimated by rigel on:
 #   mctp_LBX0069_SI_42153_HFFFMDRX7/bam/star.collate.markdup.bam
 #
 # Estimated parameters:
@@ -9,9 +9,9 @@
 #
 # Uses oracle BAM to isolate tool accuracy from aligner effects.
 
-genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
-gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_realdata_realistic
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/bench_realdata_realistic
 
 threads: 8
 
@@ -33,7 +33,7 @@ aligners:
   oracle: {}
 
 # ── HulkRNA configs ─────────────────────────────────────────────────
-hulkrna_configs:
+rigel_configs:
   default: {}
 
 # ── Simulation ───────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ simulation:
   error_rate: 0.0
 
 # ── Realistic conditions from real data ──────────────────────────────
-# gDNA rate 0.34 measured from hulkrna (34.15% of total counted fragments)
+# gDNA rate 0.34 measured from rigel (34.15% of total counted fragments)
 gdna:
   rates: [0.34]
   rate_labels: [realistic]
@@ -58,7 +58,7 @@ gdna:
   frag_min: 100
   frag_max: 1000
 
-# nRNA rate 0.10 measured from hulkrna (9.99% of RNA signal)
+# nRNA rate 0.10 measured from rigel (9.99% of RNA signal)
 nrna:
   rates: [0.10]
   rate_labels: [realistic]

@@ -1,4 +1,4 @@
-"""Tests for the C++ EM solver (hulkrna._em_impl).
+"""Tests for the C++ EM solver (rigel._em_impl).
 
 Tests run_locus_em_native() directly with synthetic CSR data,
 verifying correctness of bias correction, equivalence-class grouping,
@@ -10,7 +10,7 @@ import math
 import numpy as np
 import pytest
 
-from hulkrna._em_impl import run_locus_em_native
+from rigel._em_impl import run_locus_em_native
 
 
 # ---------------------------------------------------------------------------

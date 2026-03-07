@@ -11,7 +11,7 @@ statistics (mean, median, std across seeds), and writes:
 - aggregate_per_tx.csv   — per-transcript detail across seeds & conditions
 
 Usage:
-    PYTHONPATH=src conda run -n hulkrna python scripts/aggregate_benchmarks.py \\
+    PYTHONPATH=src conda run -n rigel python scripts/aggregate_benchmarks.py \\
         --input-dir /path/to/bench_output \\
         --output-dir /path/to/bench_output
 """
@@ -34,8 +34,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TRANSCRIPT_TOOLS = ("hulkrna_mm", "salmon", "kallisto")
-GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
+TRANSCRIPT_TOOLS = ("rigel_mm", "salmon", "kallisto")
+GENE_TOOLS = ("rigel_mm", "salmon", "kallisto", "htseq")
 METRICS = ("mae", "rmse", "pearson", "spearman")
 
 # Fixed columns in per-transcript / per-gene CSVs that are NOT tool columns
@@ -662,9 +662,9 @@ def write_aggregate_report(
         lines.append("")
 
         # Worst transcripts (highest mean AE across all conditions/seeds)
-        # Auto-detect the primary hulkrna tool for ranking
-        hulkrna_tools = [t for t in per_tx_tools if t.startswith("hulkrna_")]
-        primary_hk = hulkrna_tools[0] if hulkrna_tools else None
+        # Auto-detect the primary rigel tool for ranking
+        rigel_tools = [t for t in per_tx_tools if t.startswith("rigel_")]
+        primary_hk = rigel_tools[0] if rigel_tools else None
         primary_ae = f"ae_{primary_hk}" if primary_hk else None
 
         if primary_hk and primary_ae and primary_ae in per_tx.columns:

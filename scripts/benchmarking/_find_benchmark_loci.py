@@ -9,7 +9,7 @@ import gzip
 import sys
 from collections import defaultdict
 
-GTF_PATH = "/Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz"
+GTF_PATH = "/Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz"
 
 # Target anchor genes for benchmark regions
 ANCHOR_GENES = [

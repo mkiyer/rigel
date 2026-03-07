@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hulkrna.cli import build_parser, _resolve_quant_args, _build_quant_defaults
+from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +225,8 @@ class TestConfigRoundTrip:
     def test_default_config_round_trip(self):
         """No CLI/YAML overrides → config matches PipelineConfig() defaults."""
         import dataclasses
-        from hulkrna.config import PipelineConfig
-        from hulkrna.cli import _build_pipeline_config
+        from rigel.config import PipelineConfig
+        from rigel.cli import _build_pipeline_config
 
         args = _parse_quant()
         _resolve_quant_args(args, _build_quant_defaults())
@@ -256,7 +256,7 @@ class TestConfigRoundTrip:
 
     def test_param_specs_cover_all_defaults(self):
         """Every key in _build_quant_defaults matches a _ParamSpec or is CLI-only."""
-        from hulkrna.cli import _PARAM_SPECS
+        from rigel.cli import _PARAM_SPECS
 
         spec_dests = {s.cli_dest for s in _PARAM_SPECS}
         cli_only = {"no_tsv"}

@@ -1,8 +1,8 @@
-"""Tests for hulkrna.stats — PipelineStats and _BamStatsProxy."""
+"""Tests for rigel.stats — PipelineStats and _BamStatsProxy."""
 
 import pytest
 
-from hulkrna.stats import PipelineStats, _BamStatsProxy
+from rigel.stats import PipelineStats, _BamStatsProxy
 
 
 class TestPipelineStats:

@@ -1,4 +1,4 @@
-"""hulkrna.locus — Locus graph construction and EM initialization.
+"""rigel.locus — Locus graph construction and EM initialization.
 
 Handles everything between "buffer scan complete" and "per-locus EM
 loop": connected-component partitioning, per-locus EM data extraction,
@@ -641,7 +641,7 @@ def compute_eb_gdna_priors(
     at each hierarchical level (see :func:`compute_gdna_rate_hybrid`).
     When ``kappa_chrom`` or ``kappa_locus`` is ``None``, the shrinkage
     concentration is auto-estimated via Method of Moments using
-    :func:`~hulkrna.estimator.estimate_kappa`.
+    :func:`~rigel.estimator.estimate_kappa`.
 
     Parameters
     ----------

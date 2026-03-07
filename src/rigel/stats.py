@@ -1,5 +1,5 @@
 """
-hulkrna.stats — Structured pipeline statistics tracking.
+rigel.stats — Structured pipeline statistics tracking.
 
 Replaces ad-hoc tally variables with a structured dataclass,
 reducing boilerplate and enabling consistent serialization.
@@ -10,7 +10,7 @@ from dataclasses import dataclass, asdict
 
 @dataclass
 class PipelineStats:
-    """Structured counters for the hulkrna pipeline.
+    """Structured counters for the rigel pipeline.
 
     BAM-level stats are populated by ``parse_bam_file()``.
     Resolution and model-training stats are populated by the pipeline

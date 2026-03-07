@@ -2,7 +2,7 @@
 # ║  Benchmark Configuration                                   ║
 # ╚═════════════════════════════════════════════════════════════╝
 #
-# Benchmarks hulkrna (and optionally salmon, kallisto, htseq)
+# Benchmarks rigel (and optionally salmon, kallisto, htseq)
 # on simulated data (from sim.py) or real/custom datasets.
 #
 # Usage:
@@ -39,7 +39,7 @@ sim_dir: /path/to/sim_output
 #     strand_specificity: 0.9
 
 # ── Aligners ──────────────────────────────────────────────────
-# Each aligner produces a name-sorted BAM used by hulkrna.
+# Each aligner produces a name-sorted BAM used by rigel.
 # For sim data with oracle BAMs, "oracle" uses the pre-built BAM.
 # "minimap2" aligns FASTQ from scratch.
 aligners:
@@ -50,7 +50,7 @@ aligners:
 
 # ── HulkRNA configurations ───────────────────────────────────
 # Multiple named configs for head-to-head comparison.
-hulkrna_configs:
+rigel_configs:
   default: {}
   # tuned:
   #   em_iterations: 2000

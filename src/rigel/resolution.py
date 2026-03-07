@@ -1,10 +1,10 @@
 """
-hulkrna.resolution — Fragment resolution and chimera detection.
+rigel.resolution — Fragment resolution and chimera detection.
 
 Resolves aligned fragments to their compatible transcript/gene sets
 by querying the reference index and applying progressive set merging.
 
-Uses the C++ native kernel (``hulkrna._resolve_impl``) exclusively.
+Uses the C++ native kernel (``rigel._resolve_impl``) exclusively.
 
 This module contains:
 - ``make_fragment()`` — lightweight fragment constructor for ``resolve_fragment``
@@ -167,7 +167,7 @@ def make_fragment(exons=(), introns=()):
 def resolve_fragment(frag, index):
     """Resolve a fragment to its compatible transcript set.
 
-    Uses the C++ native kernel (``hulkrna._resolve_impl``) via
+    Uses the C++ native kernel (``rigel._resolve_impl``) via
     ``FragmentResolver.resolve_fragment()``.  Returns a C++
     ``ResolvedFragment`` object that exposes attributes for model
     training and buffering.

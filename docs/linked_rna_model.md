@@ -4,7 +4,7 @@
 
 This document describes the **linked RNA model** for jointly estimating
 mRNA (mature) and nRNA (nascent/pre-mRNA) transcript abundances within
-hulkrna's locus-level EM framework.  The model couples mRNA and nRNA
+rigel's locus-level EM framework.  The model couples mRNA and nRNA
 through a shared per-transcript abundance parameter θ\_t with a
 per-transcript nascent fraction nrna_frac\_t, grounded in a kinetic model of
 transcription, splicing, and degradation.
@@ -13,7 +13,7 @@ transcription, splicing, and degradation.
 
 In eukaryotic cells, most genes produce overlapping mRNA and nRNA
 (pre-mRNA) molecules.  A total RNA-seq library captures both species.
-The current hulkrna architecture already models mRNA and nRNA as
+The current rigel architecture already models mRNA and nRNA as
 separate EM components per transcript, plus a single gDNA component per
 locus.  However, the mRNA and nRNA components are treated as fully
 independent, which:

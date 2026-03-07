@@ -14,7 +14,7 @@ Key properties exercised:
 """
 
 import pytest
-from hulkrna.sim import Scenario
+from rigel.sim import Scenario
 
 from .conftest import (
     GDNA_LEVELS, STRAND_LEVELS, NRNA_LEVELS,

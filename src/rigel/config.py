@@ -1,4 +1,4 @@
-"""hulkrna.config — Pipeline configuration dataclasses.
+"""rigel.config — Pipeline configuration dataclasses.
 
 Single source of truth for all tunable parameters.  Frozen dataclasses
 ensure immutability after construction.  Compose the sub-configs into

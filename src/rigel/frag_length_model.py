@@ -1,5 +1,5 @@
 """
-hulkrna.frag_length_model — Fragment length distribution model.
+rigel.frag_length_model — Fragment length distribution model.
 
 Learns the fragment length distribution from fragment-to-transcript
 mappings produced by Pass 1.  Fragments where all candidate

@@ -1,5 +1,5 @@
 """
-hulkrna.index — Build, load, and query the hulkrna reference index.
+rigel.index — Build, load, and query the rigel reference index.
 
 The index is constructed from a genome FASTA (with samtools .fai) and a
 GENCODE GTF annotation file. It produces four Feather files (with optional
@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Literal
 
-from hulkrna._cgranges_impl import cgranges as _cgranges_cls
+from rigel._cgranges_impl import cgranges as _cgranges_cls
 import numpy as np
 import pandas as pd
 import pysam
@@ -511,7 +511,7 @@ class TranscriptIndex:
         write_tsv: bool = True,
         gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
     ) -> None:
-        """Build the hulkrna reference index and write to disk.
+        """Build the rigel reference index and write to disk.
 
         Parameters
         ----------
@@ -841,7 +841,7 @@ class TranscriptIndex:
                      f"{len(sj_df)} total")
 
         # -- C++ FragmentResolver (native fragment resolution) ------------------
-        from hulkrna._resolve_impl import FragmentResolver
+        from rigel._resolve_impl import FragmentResolver
         ctx = FragmentResolver()
 
         # 1. Overlap index from collapsed data

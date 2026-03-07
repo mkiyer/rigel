@@ -1,11 +1,11 @@
-"""Tests for hulkrna.bias — BiasProfile and uniform equivalence."""
+"""Tests for rigel.bias — BiasProfile and uniform equivalence."""
 
 import math
 
 import numpy as np
 import pytest
 
-from hulkrna.bias import (
+from rigel.bias import (
     BiasProfile,
 )
 
@@ -236,7 +236,7 @@ class TestBiasCorrectionCpp:
         A single-transcript locus with uniform fragment length should
         converge with the bias correction folded in.
         """
-        from hulkrna._em_impl import run_locus_em_native
+        from rigel._em_impl import run_locus_em_native
 
         # 1 mRNA + 1 nRNA + 1 gDNA = 3 components
         n_comp = 3
@@ -266,7 +266,7 @@ class TestBiasCorrectionCpp:
     def test_degenerate_frag_len(self):
         """Fragment length > transcript length → effective_length = 1,
         so bias correction is 0 (no penalty)."""
-        from hulkrna._em_impl import run_locus_em_native
+        from rigel._em_impl import run_locus_em_native
 
         n_comp = 3
         offsets = np.array([0, 1], dtype=np.int64)

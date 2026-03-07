@@ -1,13 +1,13 @@
 /**
- * em_solver.cpp — C++ EM solver for hulkrna locus-level abundance estimation.
+ * em_solver.cpp — C++ EM solver for rigel locus-level abundance estimation.
  *
  * Replaces the Python hot path: _em_step, _vbem_step, _build_equiv_classes,
  * _apply_bias_correction_uniform, and the SQUAREM acceleration loop.
  *
- * Module: hulkrna._em_impl
+ * Module: rigel._em_impl
  *
  * Build:
- *   Part of the hulkrna scikit-build-core build — see CMakeLists.txt.
+ *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
  *   Pure C++17 + nanobind + numpy.  No external dependencies.
  */
 
@@ -30,7 +30,7 @@ namespace nb = nanobind;
 
 // ================================================================
 // Constants — single source of truth, exported to Python via module attrs.
-// Python imports these from hulkrna._em_impl instead of redefining.
+// Python imports these from rigel._em_impl instead of redefining.
 // ================================================================
 
 static constexpr double EM_LOG_EPSILON = 1e-300;
@@ -2194,7 +2194,7 @@ static nb::tuple connected_components_native(
 // ================================================================
 
 NB_MODULE(_em_impl, m) {
-    m.doc() = "C++ EM solver for hulkrna locus-level abundance estimation.\n\n"
+    m.doc() = "C++ EM solver for rigel locus-level abundance estimation.\n\n"
               "Provides run_locus_em_native() which replaces the Python EM hot path:\n"
               "_em_step, _vbem_step, _build_equiv_classes, SQUAREM loop.\n\n"
               "Also provides batch_locus_em() which replaces the entire per-locus\n"

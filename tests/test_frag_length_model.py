@@ -1,4 +1,4 @@
-"""Tests for hulkrna.frag_length_model — fragment length distribution model."""
+"""Tests for rigel.frag_length_model — fragment length distribution model."""
 
 import json
 import math
@@ -6,8 +6,8 @@ import math
 import numpy as np
 import pytest
 
-from hulkrna.splice import SpliceType
-from hulkrna.frag_length_model import FragmentLengthModel, FragmentLengthModels
+from rigel.splice import SpliceType
+from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
 
 
 # =====================================================================

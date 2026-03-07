@@ -13,13 +13,13 @@ Verifies that:
 import numpy as np
 import pytest
 
-from hulkrna.splice import SpliceType, SpliceStrandCol
-from hulkrna.config import EMConfig
-from hulkrna.estimator import AbundanceEstimator
-from hulkrna.scoring import score_gdna_standalone as _score_gdna_candidate, GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
-from hulkrna.frag_length_model import FragmentLengthModels
-from hulkrna.strand_model import StrandModel, StrandModels
-from hulkrna.types import Strand
+from rigel.splice import SpliceType, SpliceStrandCol
+from rigel.config import EMConfig
+from rigel.estimator import AbundanceEstimator
+from rigel.scoring import score_gdna_standalone as _score_gdna_candidate, GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
+from rigel.frag_length_model import FragmentLengthModels
+from rigel.strand_model import StrandModel, StrandModels
+from rigel.types import Strand
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
@@ -343,7 +343,7 @@ class TestStatsGDNA:
     """Verify PipelineStats gDNA field changes."""
 
     def test_intergenic_split(self):
-        from hulkrna.stats import PipelineStats
+        from rigel.stats import PipelineStats
 
         stats = PipelineStats()
         stats.n_intergenic_unspliced = 100
@@ -351,7 +351,7 @@ class TestStatsGDNA:
         assert stats.n_intergenic == 110
 
     def test_gdna_unambig_property(self):
-        from hulkrna.stats import PipelineStats
+        from rigel.stats import PipelineStats
 
         stats = PipelineStats()
         stats.n_intergenic_unspliced = 80
@@ -359,7 +359,7 @@ class TestStatsGDNA:
         assert stats.n_gdna_unambig == 100
 
     def test_gdna_total_property(self):
-        from hulkrna.stats import PipelineStats
+        from rigel.stats import PipelineStats
 
         stats = PipelineStats()
         stats.n_intergenic_unspliced = 80
@@ -368,7 +368,7 @@ class TestStatsGDNA:
         assert stats.n_gdna_total == 150
 
     def test_to_dict_includes_gdna(self):
-        from hulkrna.stats import PipelineStats
+        from rigel.stats import PipelineStats
 
         stats = PipelineStats()
         stats.n_intergenic_unspliced = 10
@@ -390,18 +390,18 @@ class TestComputeGdnaRate:
     """Tests for pipeline._compute_gdna_rate_from_strand."""
 
     def test_zero_counts_returns_zero(self):
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         rate = _compute_gdna_rate_from_strand(0.0, 0.0, 1.0)
         assert rate == 0.0
 
     def test_no_antisense_gives_zero(self):
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         rate = _compute_gdna_rate_from_strand(100.0, 0.0, 1.0)
         assert rate == 0.0
 
     def test_antisense_at_perfect_ss(self):
         """At SS=1.0, G = 2 × antisense, rate = G / (S + A)."""
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # S=100, A=50, SS=1.0 → G=2*50=100, rate=100/150
         rate = _compute_gdna_rate_from_strand(100.0, 50.0, 1.0)
         expected = (2.0 * 50.0) / (100.0 + 50.0)
@@ -409,7 +409,7 @@ class TestComputeGdnaRate:
 
     def test_strand_correction_at_imperfect_ss(self):
         """At SS < 1.0, exact formula with strand correction."""
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # S=200, A=50, SS=0.9
         ss = 0.9
         denom_ss = 2.0 * ss - 1.0
@@ -421,7 +421,7 @@ class TestComputeGdnaRate:
 
     def test_returns_zero_at_low_ss(self):
         """At SS ≤ 0.6, strand info too weak → returns 0."""
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # denom_ss = 2*0.5-1 = 0 ≤ 0.2 → returns 0
         rate = _compute_gdna_rate_from_strand(500.0, 500.0, 0.5)
         assert rate == 0.0
@@ -431,14 +431,14 @@ class TestComputeGdnaRate:
 
     def test_clamps_at_zero(self):
         """Corrected G is clamped at zero (no negative rate)."""
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # S=1000, A=10, SS=0.8 → G = 2(10*0.8 - 1000*0.2)/0.6 < 0 → 0
         rate = _compute_gdna_rate_from_strand(1000.0, 10.0, 0.8)
         assert rate == 0.0
 
     def test_rate_clamped_at_one(self):
         """Rate is clamped to [0, 1]."""
-        from hulkrna.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
         # Extreme antisense dominance
         rate = _compute_gdna_rate_from_strand(1.0, 1000.0, 0.99)
         assert rate <= 1.0
@@ -454,7 +454,7 @@ class TestComputeNrnaInit:
 
     def test_zero_counts_returns_zeros(self):
         """No intronic counts → all inits = 0."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.zeros(3, dtype=np.float64)
         anti = np.zeros(3, dtype=np.float64)
@@ -466,7 +466,7 @@ class TestComputeNrnaInit:
 
     def test_sense_excess_produces_nrna(self):
         """Intronic sense > antisense → nrna_init > 0."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0, 50.0])
         anti = np.array([20.0, 10.0])
@@ -480,7 +480,7 @@ class TestComputeNrnaInit:
 
     def test_antisense_excess_clamped_to_zero(self):
         """Intronic antisense > sense → nrna_init = 0 (clamped)."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([10.0])
         anti = np.array([50.0])
@@ -492,7 +492,7 @@ class TestComputeNrnaInit:
 
     def test_single_exon_zeroed(self):
         """Single-exon transcripts (span ≈ exonic length) → nrna = 0."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([10.0])
@@ -506,7 +506,7 @@ class TestComputeNrnaInit:
 
     def test_multi_exon_not_zeroed(self):
         """Multi-exon transcripts (span >> exonic length) → nrna preserved."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([10.0])
@@ -519,7 +519,7 @@ class TestComputeNrnaInit:
 
     def test_output_shape(self):
         """Returns array of shape (num_transcripts,)."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.zeros(5, dtype=np.float64)
         anti = np.zeros(5, dtype=np.float64)
@@ -532,7 +532,7 @@ class TestComputeNrnaInit:
 
     def test_ss_correction_moderate(self):
         """At SS=0.9, nRNA init is corrected upward by 1/(2SS-1)."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([20.0])
@@ -547,7 +547,7 @@ class TestComputeNrnaInit:
 
     def test_ss_at_or_below_threshold_returns_zeros(self):
         """At SS ≤ 0.6, strand info too weak → returns zeros."""
-        from hulkrna.locus import compute_nrna_init as _compute_nrna_init
+        from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
         anti = np.array([50.0])
@@ -638,7 +638,7 @@ class TestStrandModelsContainer:
     """Tests for the simplified StrandModels container."""
 
     def test_default_construction(self):
-        from hulkrna.strand_model import StrandModels
+        from rigel.strand_model import StrandModels
 
         sm = StrandModels()
         assert sm.exonic_spliced.n_observations == 0
@@ -646,8 +646,8 @@ class TestStrandModelsContainer:
         assert sm.intergenic.n_observations == 0
 
     def test_delegation_to_exonic_spliced(self):
-        from hulkrna.strand_model import StrandModels
-        from hulkrna.types import Strand
+        from rigel.strand_model import StrandModels
+        from rigel.types import Strand
 
         sm = StrandModels()
         for _ in range(100):
@@ -662,7 +662,7 @@ class TestStrandModelsContainer:
         assert sm.strand_likelihood(Strand.POS, Strand.POS) == sm.exonic_spliced.strand_likelihood(Strand.POS, Strand.POS)
 
     def test_to_dict_structure(self):
-        from hulkrna.strand_model import StrandModels
+        from rigel.strand_model import StrandModels
 
         sm = StrandModels()
         d = sm.to_dict()
@@ -673,8 +673,8 @@ class TestStrandModelsContainer:
         assert "observations" in d["exonic_spliced"]
 
     def test_write_json(self, tmp_path):
-        from hulkrna.strand_model import StrandModels
-        from hulkrna.types import Strand
+        from rigel.strand_model import StrandModels
+        from rigel.types import Strand
         import json
 
         sm = StrandModels()
@@ -691,8 +691,8 @@ class TestStrandModelsContainer:
 
     def test_independent_models(self):
         """Each region's model is independent."""
-        from hulkrna.strand_model import StrandModels
-        from hulkrna.types import Strand
+        from rigel.strand_model import StrandModels
+        from rigel.types import Strand
 
         sm = StrandModels()
         sm.exonic_spliced.observe(Strand.POS, Strand.POS)
@@ -705,8 +705,8 @@ class TestStrandModelsContainer:
 
     def test_kappa_prior_on_finalize(self):
         """finalize() applies κ prior to exonic_spliced."""
-        from hulkrna.strand_model import StrandModels
-        from hulkrna.types import Strand
+        from rigel.strand_model import StrandModels
+        from rigel.types import Strand
 
         sm = StrandModels()
         sm.strand_prior_kappa = 10.0
@@ -727,14 +727,14 @@ class TestComputeGdnaRateHybrid:
     """Tests for the hybrid density+strand gDNA rate estimator."""
 
     def test_zero_counts_returns_zero(self):
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         rate, ev = compute_gdna_rate_hybrid(0.0, 0.0, 1000.0, 1.0, 0.001)
         assert rate == 0.0
         assert ev == 0.0
 
     def test_strand_dominated_at_high_ss(self):
         """At SS=1.0, W=1 → pure strand estimate."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         rate, ev = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 1.0, 0.001)
         # Strand rate: G = 2*50 = 100, rate = 100/150
         expected_strand = (2.0 * 50.0) / 150.0
@@ -743,7 +743,7 @@ class TestComputeGdnaRateHybrid:
 
     def test_density_dominated_at_low_ss(self):
         """At SS=0.5, W≈0 → pure density estimate."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         # SS=0.5 → denom_ss=0 → W=0
         # density: intergenic_density * exonic_bp / total = 0.001 * 1000 / 200
         rate, ev = compute_gdna_rate_hybrid(100.0, 100.0, 1000.0, 0.5, 0.001)
@@ -753,10 +753,10 @@ class TestComputeGdnaRateHybrid:
 
     def test_density_zero_falls_back_to_strand(self):
         """With intergenic_density=0, only strand contributes."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         rate, ev = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 0.9, 0.0)
         # Should match strand-only
-        from hulkrna.locus import compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand
         strand_rate = compute_gdna_rate_from_strand(100.0, 50.0, 0.9)
         # W = (2*0.9-1)^2 = 0.64 → rate = 0.64*strand + 0.36*0
         W = (2.0 * 0.9 - 1.0) ** 2
@@ -765,7 +765,7 @@ class TestComputeGdnaRateHybrid:
 
     def test_unstranded_with_density_nonzero(self):
         """Unstranded (SS=0.5) with intergenic density gives nonzero rate."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         rate, ev = compute_gdna_rate_hybrid(500.0, 500.0, 10000.0, 0.5, 0.01)
         # density component: 0.01 * 10000 / 1000 = 0.1
         expected = 0.01 * 10000.0 / 1000.0
@@ -774,20 +774,20 @@ class TestComputeGdnaRateHybrid:
 
     def test_unstranded_no_density_returns_zero(self):
         """Unstranded with no density → both components zero."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         rate, _ = compute_gdna_rate_hybrid(500.0, 500.0, 10000.0, 0.5, 0.0)
         assert rate == 0.0
 
     def test_rate_clamped_to_unit_interval(self):
         """Rate is always in [0, 1]."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         # Huge density → would exceed 1.0 without clamping
         rate, _ = compute_gdna_rate_hybrid(1.0, 1.0, 100000.0, 0.5, 1.0)
         assert 0.0 <= rate <= 1.0
 
     def test_hybrid_blend_at_moderate_ss(self):
         """At intermediate SS, both components contribute."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         ss = 0.8  # W = (2*0.8-1)^2 = 0.36
         rate, _ = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, ss, 0.01)
         # Both strand and density components should be nonzero
@@ -795,7 +795,7 @@ class TestComputeGdnaRateHybrid:
 
     def test_returns_tuple(self):
         """Returns (rate, evidence) tuple."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
         result = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 1.0, 0.0)
         assert isinstance(result, tuple)
         assert len(result) == 2
@@ -811,7 +811,7 @@ class TestGdnaMoMKappa:
 
     def test_auto_kappa_matches_estimate_kappa(self):
         """Auto-estimated κ should match estimate_kappa on same data."""
-        from hulkrna.estimator import estimate_kappa
+        from rigel.estimator import estimate_kappa
 
         # Create synthetic gDNA rates and evidence
         rates = np.array([0.1, 0.15, 0.12, 0.08, 0.2, 0.11] * 5)
@@ -821,7 +821,7 @@ class TestGdnaMoMKappa:
 
     def test_fallback_when_few_loci(self):
         """With few loci, MoM returns fallback κ."""
-        from hulkrna.estimator import estimate_kappa
+        from rigel.estimator import estimate_kappa
 
         rates = np.array([0.1, 0.2])
         evidence = np.array([100.0, 100.0])
@@ -842,7 +842,7 @@ class TestUnstrandedGdna:
 
     def test_hybrid_nonzero_for_unstranded_with_density(self):
         """With intergenic density, unstranded gives nonzero gDNA rate."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
 
         # SS=0.5 (unstranded), with intergenic density
         rate, _ = compute_gdna_rate_hybrid(
@@ -855,14 +855,14 @@ class TestUnstrandedGdna:
 
     def test_strand_only_zero_for_unstranded(self):
         """Without density, unstranded gives zero gDNA rate."""
-        from hulkrna.locus import compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_rate_from_strand
 
         rate = compute_gdna_rate_from_strand(1000.0, 1000.0, 0.5)
         assert rate == 0.0
 
     def test_hybrid_zero_for_unstranded_no_density(self):
         """Unstranded with no density falls back to zero (backward compat)."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
 
         rate, _ = compute_gdna_rate_hybrid(
             1000.0, 1000.0, 50000.0, 0.5, 0.0,
@@ -871,7 +871,7 @@ class TestUnstrandedGdna:
 
     def test_moderate_ss_blends_components(self):
         """At SS=0.7 (moderate), both strand and density contribute."""
-        from hulkrna.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_rate_hybrid
 
         ss = 0.7
         rate, _ = compute_gdna_rate_hybrid(
@@ -909,7 +909,7 @@ class TestGdnaConfig:
         assert cfg.gdna_mom_min_evidence_locus == 20.0
 
     def test_cli_parser_has_gdna_args(self):
-        from hulkrna.cli import build_parser
+        from rigel.cli import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "quant",
@@ -927,7 +927,7 @@ class TestGdnaConfig:
         assert args.gdna_mom_min_evidence_locus == 25.0
 
     def test_cli_defaults_none(self):
-        from hulkrna.cli import build_parser
+        from rigel.cli import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "quant",

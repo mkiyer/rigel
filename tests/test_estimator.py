@@ -1,17 +1,17 @@
-"""Tests for hulkrna.estimator — AbundanceEstimator with locus-level EM assignment."""
+"""Tests for rigel.estimator — AbundanceEstimator with locus-level EM assignment."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from hulkrna.types import Strand, MergeOutcome
-from hulkrna.splice import (
+from rigel.types import Strand, MergeOutcome
+from rigel.splice import (
     SpliceType,
     SpliceStrandCol,
 )
-from hulkrna.config import EMConfig
-from hulkrna.estimator import AbundanceEstimator, ScoredFragments, Locus, compute_hybrid_nrna_frac_priors, estimate_kappa
-from hulkrna.strand_model import StrandModel, StrandModels
+from rigel.config import EMConfig
+from rigel.estimator import AbundanceEstimator, ScoredFragments, Locus, compute_hybrid_nrna_frac_priors, estimate_kappa
+from rigel.strand_model import StrandModel, StrandModels
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
@@ -108,7 +108,7 @@ def _make_resolved(**kwargs):
 
 
 def _make_frag_length_models():
-    from hulkrna.frag_length_model import FragmentLengthModels
+    from rigel.frag_length_model import FragmentLengthModels
     im = FragmentLengthModels()
     im.observe(250, SpliceType.UNSPLICED)
     return im

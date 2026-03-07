@@ -13,7 +13,7 @@ Runs benchmark_region_competition.py and then aggregate_benchmarks.py
 against the benchmark outdir (from config, or overridden with --outdir).
 
 Options:
-  -e, --env <name>       Conda environment to run in (default: hulkrna)
+  -e, --env <name>       Conda environment to run in (default: rigel)
   -o, --outdir <path>    Override output directory for this run
       --skip-aggregate   Run benchmark only (do not aggregate)
   -h, --help             Show this help message
@@ -26,7 +26,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 CONFIG=""
-CONDA_ENV="hulkrna"
+CONDA_ENV="rigel"
 OUTDIR_OVERRIDE=""
 SKIP_AGGREGATE=0
 
@@ -82,7 +82,7 @@ if [[ -z "$OUTDIR" ]]; then
 fi
 
 echo "======================================================"
-echo "hulkrna benchmark launcher"
+echo "rigel benchmark launcher"
 echo "======================================================"
 echo "Config:      $CONFIG"
 echo "Conda env:   $CONDA_ENV"

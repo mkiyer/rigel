@@ -1,5 +1,5 @@
 """
-hulkrna.buffer — Columnar fragment buffer with Arrow IPC disk spill.
+rigel.buffer — Columnar fragment buffer with Arrow IPC disk spill.
 
 Stores resolved fragment data in memory-efficient columnar NumPy arrays
 using CSR (Compressed Sparse Row) layout for variable-length transcript
@@ -500,10 +500,10 @@ class FragmentBuffer:
             if self._spill_dir is not None:
                 self._spill_dir.mkdir(parents=True, exist_ok=True)
                 self._temp_dir = tempfile.mkdtemp(
-                    dir=self._spill_dir, prefix="hulkrna_buf_"
+                    dir=self._spill_dir, prefix="rigel_buf_"
                 )
             else:
-                self._temp_dir = tempfile.mkdtemp(prefix="hulkrna_buf_")
+                self._temp_dir = tempfile.mkdtemp(prefix="rigel_buf_")
         idx = self._n_spilled
         return Path(self._temp_dir) / f"chunk_{idx:04d}.arrow"
 

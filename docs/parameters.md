@@ -1,6 +1,6 @@
-# hulkrna Parameters Reference
+# rigel Parameters Reference
 
-All parameters below apply to the `hulkrna quant` subcommand.
+All parameters below apply to the `rigel quant` subcommand.
 Defaults shown in parentheses are the effective defaults from the config
 dataclasses in `config.py`.  Every CLI flag defaults to `None` internally;
 the final value is resolved as: **explicit CLI flag → YAML config file → dataclass default**.
@@ -12,7 +12,7 @@ the final value is resolved as: **explicit CLI flag → YAML config file → dat
 | Flag | Description |
 |------|-------------|
 | `--bam` | Name-sorted or collated BAM file (must have NH tag). |
-| `--index` | Directory containing hulkrna index files. |
+| `--index` | Directory containing rigel index files. |
 | `-o`, `--output-dir` | Output directory for quantification results and models. |
 
 ## Configuration File
@@ -127,7 +127,7 @@ The gDNA rate prior uses a two-level hierarchy:
 
 ## Config Dataclass Reference
 
-All defaults are defined in `src/hulkrna/config.py` as frozen dataclasses.
+All defaults are defined in `src/rigel/config.py` as frozen dataclasses.
 The CLI-to-config mapping in `cli.py` translates flag names to config fields
 (e.g. `--em-iterations` → `EMConfig.iterations`).
 

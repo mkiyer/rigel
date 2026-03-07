@@ -1,5 +1,5 @@
 """
-hulkrna.transcript — Transcript dataclass and GTF-to-Transcript parsing.
+rigel.transcript — Transcript dataclass and GTF-to-Transcript parsing.
 
 The Transcript is the atomic unit of transcription. Each transcript belongs
 to a gene (identified by g_id / g_index) and contains an ordered list of

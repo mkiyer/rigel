@@ -1,10 +1,10 @@
-# hulkrna Benchmarking Runbook
+# rigel Benchmarking Runbook
 
 This runbook documents setup and usage for the regional benchmarking workflow built around `benchmark_region_competition.py` and `aggregate_benchmarks.py` in `scripts/benchmarking/`.
 
 ## What this benchmark runs
 
-- **Transcript-level tools**: `hulkrna` (one or more parameterizations x aligners), `salmon`, `kallisto`
+- **Transcript-level tools**: `rigel` (one or more parameterizations x aligners), `salmon`, `kallisto`
 - **Gene-level tools**: same as above plus optional `htseq-count` (per aligner)
 - **Aligners**: `oracle` (perfect truth alignment), `minimap2`, `hisat2` — each can be parameterized independently
 - **Condition grid**: regions × gDNA rates × nRNA rates × strand specificities
@@ -19,13 +19,13 @@ gDNA and nRNA abundance models:
 
 ## Requirements
 
-### 1) Python + hulkrna package
+### 1) Python + rigel package
 
 From repo root:
 
 ```bash
 mamba env create -f mamba_env.yaml
-conda activate hulkrna
+conda activate rigel
 pip install -e .
 ```
 
@@ -45,7 +45,7 @@ Optional:
 Example install for missing tools:
 
 ```bash
-conda install -n hulkrna -c bioconda -c conda-forge salmon kallisto hisat2
+conda install -n rigel -c bioconda -c conda-forge salmon kallisto hisat2
 conda create -n htseq -c bioconda -c conda-forge htseq
 ```
 
@@ -70,14 +70,14 @@ The benchmark script supports `--config` YAML with CLI overrides.
 Run:
 
 ```bash
-PYTHONPATH=src conda run -n hulkrna python scripts/benchmarking/benchmark_region_competition.py \
+PYTHONPATH=src conda run -n rigel python scripts/benchmarking/benchmark_region_competition.py \
   --config scripts/benchmarking/benchmark_example.yaml
 ```
 
 Aggregate:
 
 ```bash
-PYTHONPATH=src conda run -n hulkrna python scripts/benchmarking/aggregate_benchmarks.py \
+PYTHONPATH=src conda run -n rigel python scripts/benchmarking/aggregate_benchmarks.py \
   --input-dir <benchmark_outdir> \
   --output-dir <benchmark_outdir>
 ```
@@ -174,12 +174,12 @@ If `type` is omitted, the key name itself is used as the type (so `oracle: {}` w
 aligner: minimap2          # or: aligner: [minimap2, hisat2]
 ```
 
-### `hulkrna_configs` — HulkRNA parameterizations
+### `rigel_configs` — HulkRNA parameterizations
 
 A mapping of named configurations, each specifying keyword arguments forwarded to `run_pipeline()`. An empty dict `{}` uses pipeline defaults. Multiple configs are compared against each other in the output.
 
 ```yaml
-hulkrna_configs:
+rigel_configs:
   default: {}
   strict_em:
     em_convergence_delta: 1.0e-5
@@ -206,8 +206,8 @@ hulkrna_configs:
 
 Tool names in CSV/JSON output follow these patterns:
 
-- **Single hulkrna config**: `hulkrna_<aligner>` (e.g., `hulkrna_oracle`, `hulkrna_minimap2`)
-- **Multiple hulkrna configs**: `hulkrna_<config>_<aligner>` (e.g., `hulkrna_default_oracle`, `hulkrna_strict_em_hisat2_plain`)
+- **Single rigel config**: `rigel_<aligner>` (e.g., `rigel_oracle`, `rigel_minimap2`)
+- **Multiple rigel configs**: `rigel_<config>_<aligner>` (e.g., `rigel_default_oracle`, `rigel_strict_em_hisat2_plain`)
 - **htseq**: `htseq_<aligner>` (e.g., `htseq_oracle`, `htseq_hisat2_plain`)
 - **Pseudo-aligners**: `salmon`, `kallisto`
 
@@ -217,7 +217,7 @@ Tool names in CSV/JSON output follow these patterns:
 simulation:
   n_fragments: 50000          # Number of fragments to simulate (default: 5000)
   sim_seed: 101               # RNG seed for simulation
-  pipeline_seed: 101          # RNG seed for hulkrna pipeline
+  pipeline_seed: 101          # RNG seed for rigel pipeline
   frag_mean: 250.0            # Mean fragment length
   frag_std: 50.0              # Fragment length std dev
   frag_min: 50                # Minimum fragment length
@@ -296,7 +296,7 @@ aligners:
     index_type: plain
     splice_sites_at_align: true
 
-hulkrna_configs:
+rigel_configs:
   default: {}
 
 simulation:
@@ -347,7 +347,7 @@ verbose: true
 Minimal example:
 
 ```bash
-PYTHONPATH=src conda run -n hulkrna python scripts/benchmarking/benchmark_region_competition.py \
+PYTHONPATH=src conda run -n rigel python scripts/benchmarking/benchmark_region_competition.py \
   --genome /path/genome.fa \
   --gtf /path/genes.gtf.gz \
   --region chr11:5225000-5310000 \
@@ -432,9 +432,9 @@ Each simulated read is compared to truth and assigned a verdict:
 
 | Pool | Truth source | Prediction source |
 |------|-------------|-------------------|
-| `mature_rna` | Non-`nrna_` transcript reads | hulkrna mRNA counts |
-| `nascent_rna` | `nrna_` prefixed reads | hulkrna nascent estimate |
-| `genomic_dna` | `gdna:` prefixed reads | hulkrna gDNA count |
+| `mature_rna` | Non-`nrna_` transcript reads | rigel mRNA counts |
+| `nascent_rna` | `nrna_` prefixed reads | rigel nascent estimate |
+| `genomic_dna` | `gdna:` prefixed reads | rigel gDNA count |
 | `rna` | mature_rna + nascent_rna | combined RNA |
 | `dna` | genomic_dna | gDNA total |
 
@@ -463,7 +463,7 @@ bash scripts/benchmarking/launch_benchmark.sh scripts/benchmarking/benchmark_exa
 
 Options:
 
-- `-e|--env <conda_env>` (default: `hulkrna`)
+- `-e|--env <conda_env>` (default: `rigel`)
 - `--skip-aggregate` (run benchmark only)
 - `-o|--outdir <path>` (override config outdir for this run)
 
@@ -471,7 +471,7 @@ Options:
 
 | File | Description |
 |------|-------------|
-| `benchmark_example.yaml` | Full example with multiple aligners and hulkrna configs. |
+| `benchmark_example.yaml` | Full example with multiple aligners and rigel configs. |
 | `benchmark_pristine_10_regions.yaml` | Pristine (no error/contamination) 10-region benchmark. |
 | `benchmark_full_10_regions.yaml` | Full 10-region with gDNA/nRNA sweeps. |
 | `benchmark_small.yaml` | Quick smoke test config. |

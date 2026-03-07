@@ -1,11 +1,11 @@
-"""Tests for hulkrna.sim.oracle_bam — Oracle BAM fragment simulator."""
+"""Tests for rigel.sim.oracle_bam — Oracle BAM fragment simulator."""
 
 import numpy as np
 import pysam
 import pytest
 from pathlib import Path
 
-from hulkrna.sim.oracle_bam import (
+from rigel.sim.oracle_bam import (
     OracleBamSimulator,
     _blocks_to_cigar,
     _premrna_to_genomic_interval,
@@ -13,10 +13,10 @@ from hulkrna.sim.oracle_bam import (
     _take_from_right,
     _transcript_to_genomic_blocks,
 )
-from hulkrna.sim.genome import MutableGenome
-from hulkrna.sim.reads import GDNAConfig, ReadSimulator, SimConfig
-from hulkrna.transcript import Transcript
-from hulkrna.types import Interval, Strand
+from rigel.sim.genome import MutableGenome
+from rigel.sim.reads import GDNAConfig, ReadSimulator, SimConfig
+from rigel.transcript import Transcript
+from rigel.types import Interval, Strand
 
 
 # =====================================================================

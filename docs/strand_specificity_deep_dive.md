@@ -228,7 +228,7 @@ updated in `scoring.cpp` as well.
 
 **Priority**: Medium — enables R1-sense testing but no production impact.
 
-**Files**: `src/hulkrna/sim/reads.py`, `src/hulkrna/sim/oracle_bam.py`
+**Files**: `src/rigel/sim/reads.py`, `src/rigel/sim/oracle_bam.py`
 
 **Changes**:
 1. Add `read1_sense: bool = False` field to `SimConfig`.
@@ -280,7 +280,7 @@ nanobind binding argument).
 
 **Priority**: Low — documentation only.
 
-**Files**: `src/hulkrna/locus.py`, `src/hulkrna/estimator.py`
+**Files**: `src/rigel/locus.py`, `src/rigel/estimator.py`
 
 **Change**: Add inline documentation explaining why `STRAND_DENOM_MIN = 0.2`
 (non-hybrid gate) differs from `_STRAND_DENOM_EPS = 0.01` (hybrid W threshold),
@@ -310,7 +310,7 @@ coverage. Step 5 renamed `anti_flag` → `r1_antisense` across Python and C++.
 
 ## 5. Conclusion
 
-The hulkrna pipeline correctly handles **R1-sense, R1-antisense, and
+The rigel pipeline correctly handles **R1-sense, R1-antisense, and
 weakly-stranded** libraries through a principled three-layer design:
 
 1. **R2 strand flip** normalizes all alignments to R1's perspective.

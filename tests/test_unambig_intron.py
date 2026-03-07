@@ -13,7 +13,7 @@ Tests cover three levels:
 
 import pytest
 
-from hulkrna.index import (
+from rigel.index import (
     _gen_cluster_unambig_intron_intervals,
     _merge_exon_intervals,
     _subtract_from_interval,
@@ -21,11 +21,11 @@ from hulkrna.index import (
     build_genomic_intervals,
     TranscriptIndex,
 )
-from hulkrna.sim import Scenario, SimConfig, run_benchmark
-from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-from hulkrna.pipeline import run_pipeline
-from hulkrna.transcript import Transcript
-from hulkrna.types import IntervalType, Strand, Interval
+from rigel.sim import Scenario, SimConfig, run_benchmark
+from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+from rigel.pipeline import run_pipeline
+from rigel.transcript import Transcript
+from rigel.types import IntervalType, Strand, Interval
 
 
 # =====================================================================

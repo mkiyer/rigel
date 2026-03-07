@@ -1,5 +1,5 @@
 """
-hulkrna.sim.reads — Paired-end RNA-seq read simulator with gDNA support.
+rigel.sim.reads — Paired-end RNA-seq read simulator with gDNA support.
 
 Generates paired-end FASTQ reads from transcript sequences with
 configurable fragment-size distribution, read length, and error rate.

@@ -39,7 +39,7 @@ We therefore check:
 import logging
 
 import pytest
-from hulkrna.sim import Scenario
+from rigel.sim import Scenario
 
 from .conftest import (
     SIM_SEED,

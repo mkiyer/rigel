@@ -1,4 +1,4 @@
-"""Tests for hulkrna.index validation behavior."""
+"""Tests for rigel.index validation behavior."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hulkrna.index import (
+from rigel.index import (
     TranscriptIndex,
     INTERVALS_FEATHER,
     SJ_FEATHER,

@@ -1,17 +1,17 @@
 """Unit tests for fragment-weight and transcript-position scoring functions.
 
 Tests ``genomic_to_transcript_pos`` and ``compute_fragment_weight``
-from ``hulkrna.scoring``.
+from ``rigel.scoring``.
 """
 
 import numpy as np
 import pytest
 
-from hulkrna.scoring import (
+from rigel.scoring import (
     compute_fragment_weight,
     genomic_to_transcript_pos,
 )
-from hulkrna.types import Strand
+from rigel.types import Strand
 
 POS = int(Strand.POS)
 NEG = int(Strand.NEG)
@@ -171,7 +171,7 @@ class TestNativeScoringImport:
 
     def test_native_module_available(self):
         """_scoring_impl should be importable after build."""
-        from hulkrna._scoring_impl import compute_fragment_weight as native_fw
+        from rigel._scoring_impl import compute_fragment_weight as native_fw
         assert callable(native_fw)
 
     @pytest.mark.parametrize("fs,fe,tl", [
@@ -188,7 +188,7 @@ class TestNativeScoringImport:
     ])
     def test_native_matches_python(self, fs, fe, tl):
         """C++ kernel must match Python fallback for all cases."""
-        from hulkrna._scoring_impl import compute_fragment_weight as native_fw
+        from rigel._scoring_impl import compute_fragment_weight as native_fw
         py_result = compute_fragment_weight(fs, fe, tl)
         native_result = native_fw(fs, fe, tl)
         assert native_result == pytest.approx(py_result, rel=1e-12)

@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.15...3.30)
 
 # Set up the project and ensure there is a working C++ compiler
-project(hulkrna_ext LANGUAGES C CXX)
+project(rigel_ext LANGUAGES C CXX)
 
 # Warn if the user invokes CMake directly
 if (NOT SKBUILD)
@@ -56,18 +56,18 @@ nanobind_add_module(
   _cgranges_impl
   NOMINSIZE
   STABLE_ABI
-  src/hulkrna/cgranges/cgranges_bind.cpp
-  src/hulkrna/cgranges/cgranges.c
+  src/rigel/cgranges/cgranges_bind.cpp
+  src/rigel/cgranges/cgranges.c
 )
 
 # The C wrapper needs to find cgranges.h and khash.h
 target_include_directories(_cgranges_impl PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/cgranges
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
 )
 
-# Install into the hulkrna package directory so it's importable as
-# hulkrna._cgranges_impl
-install(TARGETS _cgranges_impl LIBRARY DESTINATION hulkrna)
+# Install into the rigel package directory so it's importable as
+# rigel._cgranges_impl
+install(TARGETS _cgranges_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _scoring_impl extension ----------------------------------------
 
@@ -76,12 +76,12 @@ nanobind_add_module(
   _scoring_impl
   NOMINSIZE
   STABLE_ABI
-  src/hulkrna/native/scoring.cpp
+  src/rigel/native/scoring.cpp
 )
 
-# Install into the hulkrna package directory so it's importable as
-# hulkrna._scoring_impl
-install(TARGETS _scoring_impl LIBRARY DESTINATION hulkrna)
+# Install into the rigel package directory so it's importable as
+# rigel._scoring_impl
+install(TARGETS _scoring_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _resolve_impl extension ----------------------------------------
 
@@ -90,19 +90,19 @@ nanobind_add_module(
   _resolve_impl
   NOMINSIZE
   STABLE_ABI
-  src/hulkrna/native/resolve.cpp
-  src/hulkrna/cgranges/cgranges.c
+  src/rigel/native/resolve.cpp
+  src/rigel/cgranges/cgranges.c
 )
 
 # Needs cgranges.h, khash.h, and shared native headers
 target_include_directories(_resolve_impl PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/cgranges
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/native
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
 )
 
-# Install into the hulkrna package directory so it's importable as
-# hulkrna._resolve_impl
-install(TARGETS _resolve_impl LIBRARY DESTINATION hulkrna)
+# Install into the rigel package directory so it's importable as
+# rigel._resolve_impl
+install(TARGETS _resolve_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _bam_impl extension --------------------------------------------
 
@@ -138,13 +138,13 @@ if(HTSLIB_FOUND)
     _bam_impl
     NOMINSIZE
     STABLE_ABI
-    src/hulkrna/native/bam_scanner.cpp
-    src/hulkrna/cgranges/cgranges.c
+    src/rigel/native/bam_scanner.cpp
+    src/rigel/cgranges/cgranges.c
   )
 
   target_include_directories(_bam_impl PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/cgranges
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hulkrna/native
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
   )
 
   # Link htslib: prefer PkgConfig target, fall back to manual link
@@ -156,7 +156,7 @@ if(HTSLIB_FOUND)
     target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
   endif()
 
-  install(TARGETS _bam_impl LIBRARY DESTINATION hulkrna)
+  install(TARGETS _bam_impl LIBRARY DESTINATION rigel)
 
   message(STATUS "htslib found — building _bam_impl C++ BAM scanner")
 else()
@@ -174,7 +174,7 @@ nanobind_add_module(
   _em_impl
   NOMINSIZE
   STABLE_ABI
-  src/hulkrna/native/em_solver.cpp
+  src/rigel/native/em_solver.cpp
 )
 
-install(TARGETS _em_impl LIBRARY DESTINATION hulkrna)
+install(TARGETS _em_impl LIBRARY DESTINATION rigel)

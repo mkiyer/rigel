@@ -23,8 +23,8 @@ import numpy as np
 import pysam
 import pytest
 
-from hulkrna._bam_impl import BamScanner, detect_sj_strand_tag
-from hulkrna.index import TranscriptIndex
+from rigel._bam_impl import BamScanner, detect_sj_strand_tag
+from rigel.index import TranscriptIndex
 
 
 # =====================================================================
@@ -277,7 +277,7 @@ class TestXSTagTypeVariants:
 
         Returns (bam_path, index) ready for pipeline run.
         """
-        from hulkrna.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, SimConfig
 
         scenario = Scenario(
             "xs_tag_test",
@@ -326,8 +326,8 @@ class TestXSTagTypeVariants:
 
     def test_xs_type_a_produces_strand_observations(self, tmp_path):
         """XS as type 'A' → exonic_spliced strand observations populated."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         bam_path, index = self._build_simple_scenario(tmp_path, "A")
         config = PipelineConfig(
@@ -346,8 +346,8 @@ class TestXSTagTypeVariants:
     def test_xs_type_z_produces_strand_observations(self, tmp_path):
         """XS as type 'Z' → exonic_spliced strand observations populated
         (tests the Z-type fallback in try_tag)."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         bam_path, index = self._build_simple_scenario(tmp_path, "Z")
         config = PipelineConfig(
@@ -364,8 +364,8 @@ class TestXSTagTypeVariants:
 
     def test_type_a_and_z_produce_same_strand_model(self, tmp_path):
         """Type 'A' and 'Z' should yield identical strand observations."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         # Type A
         dir_a = tmp_path / "type_a"
@@ -404,7 +404,7 @@ class TestTsTagFlipping:
     @staticmethod
     def _build_scenario_with_ts(tmp_path, type_code: str = "A"):
         """Build scenario, then rewrite XS→ts tags."""
-        from hulkrna.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, SimConfig
 
         scenario = Scenario(
             "ts_tag_test",
@@ -461,8 +461,8 @@ class TestTsTagFlipping:
 
     def test_ts_type_a_with_flipping(self, tmp_path):
         """ts as type 'A' with reverse-read flipping → correct SS."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         bam_path, index = self._build_scenario_with_ts(tmp_path, "A")
         config = PipelineConfig(
@@ -477,8 +477,8 @@ class TestTsTagFlipping:
 
     def test_ts_type_z_with_flipping(self, tmp_path):
         """ts as type 'Z' with reverse-read flipping → correct SS."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         bam_path, index = self._build_scenario_with_ts(tmp_path, "Z")
         config = PipelineConfig(
@@ -505,7 +505,7 @@ class TestMissingAndInvalidTags:
     @staticmethod
     def _build_scenario_without_xs(tmp_path):
         """Build scenario, then strip all XS/ts tags."""
-        from hulkrna.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, SimConfig
 
         scenario = Scenario(
             "no_tags_test",
@@ -550,8 +550,8 @@ class TestMissingAndInvalidTags:
 
     def test_no_strand_tags_zero_spliced_observations(self, tmp_path):
         """No XS/ts tags → zero exonic_spliced observations."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         bam_path, index = self._build_scenario_without_xs(tmp_path)
         config = PipelineConfig(
@@ -567,9 +567,9 @@ class TestMissingAndInvalidTags:
 
     def test_sj_mode_none_ignores_tags(self, tmp_path):
         """sj_strand_tag='none' → ignore all strand tags."""
-        from hulkrna.sim import Scenario, SimConfig
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.sim import Scenario, SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         scenario = Scenario(
             "mode_none_test",
@@ -607,9 +607,9 @@ class TestMissingAndInvalidTags:
 
     def test_invalid_xs_value_treated_as_none(self, tmp_path):
         """XS tag with value '.' or '*' → STRAND_NONE (not crash)."""
-        from hulkrna.sim import Scenario, SimConfig
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.sim import Scenario, SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         scenario = Scenario(
             "invalid_xs_test",
@@ -669,7 +669,7 @@ class TestOracleBamXSType:
 
     def test_oracle_bam_writes_xs_type_a(self, tmp_path):
         """Oracle BAM should write XS as type 'A', not 'Z'."""
-        from hulkrna.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, SimConfig
 
         scenario = Scenario(
             "oracle_xs_type",
@@ -728,9 +728,9 @@ class TestIntegerTags:
     @staticmethod
     def _build_and_check_nh(tmp_path, nh_value: int, nh_type: str):
         """Build BAM with specific NH type code, verify scanner reads it."""
-        from hulkrna.sim import Scenario, SimConfig
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.sim import Scenario, SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         scenario = Scenario(
             "nh_type_test",
@@ -800,7 +800,7 @@ class TestSJTagPriority:
     @staticmethod
     def _build_with_both_tags(tmp_path, xs_strand: str, ts_strand: str):
         """Build BAM with both XS and ts tags set to different values."""
-        from hulkrna.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, SimConfig
 
         scenario = Scenario(
             "both_tags_test",
@@ -851,8 +851,8 @@ class TestSJTagPriority:
     def test_xs_ts_uses_xs_when_present(self, tmp_path):
         """With sj_strand_tag='XS,ts', both tags present with correct strand
         → scanner reads XS first, produces strand observations."""
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         # Both tags carry '+' (correct for the '+' strand gene).
         dir1 = tmp_path / "d1"
@@ -872,9 +872,9 @@ class TestSJTagPriority:
     def test_fallback_to_second_tag(self, tmp_path):
         """With sj_strand_tag='XS,ts' and XS removed, scanner
         falls back to ts (second priority) and still gets observations."""
-        from hulkrna.sim import Scenario, SimConfig
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.sim import Scenario, SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         # Build scenario with ts tags only (XS removed)
         scenario = Scenario(

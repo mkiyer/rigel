@@ -39,9 +39,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hulkrna.config import BamScanConfig, EMConfig, PipelineConfig
-from hulkrna.pipeline import run_pipeline
-from hulkrna.sim import GDNAConfig, Scenario, SimConfig
+from rigel.config import BamScanConfig, EMConfig, PipelineConfig
+from rigel.pipeline import run_pipeline
+from rigel.sim import GDNAConfig, Scenario, SimConfig
 
 # ---------------------------------------------------------------------------
 # Configuration

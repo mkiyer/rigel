@@ -1,5 +1,5 @@
 /**
- * bam_scanner.cpp — C++ BAM scanner using htslib for hulkrna.
+ * bam_scanner.cpp — C++ BAM scanner using htslib for rigel.
  *
  * Replaces the Python BAM parsing hot path (bam.py parse_bam_file +
  * fragment.py Fragment.from_reads + resolution.py resolve_fragment +
@@ -14,10 +14,10 @@
  *   7. Collects model training observations as arrays
  *   8. Returns everything to Python in one call
  *
- * Module: hulkrna._bam_impl
+ * Module: rigel._bam_impl
  *
  * Build:
- *   Part of the hulkrna scikit-build-core build — see CMakeLists.txt.
+ *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
  *   Requires htslib (linked via -lhts).
  */
 
@@ -45,7 +45,7 @@
 #include "thread_queue.h"
 
 namespace nb = nanobind;
-using namespace hulk;
+using namespace rigel;
 
 // ================================================================
 // CIGAR op codes (BAM_C* from htslib/sam.h)
@@ -2259,7 +2259,7 @@ static std::string detect_sj_strand_tag_native(
 // ================================================================
 
 NB_MODULE(_bam_impl, m) {
-    m.doc() = "C++ BAM scanner and annotation writer for hulkrna using htslib.\n\n"
+    m.doc() = "C++ BAM scanner and annotation writer for rigel using htslib.\n\n"
               "Provides BamScanner (pass 1: BAM → resolve → buffer) and\n"
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 

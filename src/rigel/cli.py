@@ -1,12 +1,12 @@
 """
-hulkrna.cli — Unified command-line interface.
+rigel.cli — Unified command-line interface.
 
-Entry point: ``hulkrna`` (registered in pyproject.toml).
+Entry point: ``rigel`` (registered in pyproject.toml).
 
 Subcommands:
-    hulkrna index   — Build reference index from FASTA + GTF
-    hulkrna quant   — Single-pass Bayesian fragment abundance estimation
-    hulkrna sim     — Generate synthetic test scenarios
+    rigel index   — Build reference index from FASTA + GTF
+    rigel quant   — Single-pass Bayesian fragment abundance estimation
+    rigel sim     — Generate synthetic test scenarios
 """
 
 import argparse
@@ -19,9 +19,9 @@ from pathlib import Path
 def get_version() -> str:
     try:
         from . import __version__
-        return f"hulkrna {__version__}"
+        return f"rigel {__version__}"
     except ImportError:
-        return "hulkrna (unknown version)"
+        return "rigel (unknown version)"
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ def get_version() -> str:
 # ---------------------------------------------------------------------------
 
 def index_command(args: argparse.Namespace) -> int:
-    """Run the ``hulkrna index`` subcommand."""
+    """Run the ``rigel index`` subcommand."""
     from .index import TranscriptIndex
 
     fasta = Path(args.fasta_file)
@@ -52,7 +52,7 @@ def index_command(args: argparse.Namespace) -> int:
 
 
 def quant_command(args: argparse.Namespace) -> int:
-    """Run the ``hulkrna quant`` subcommand.
+    """Run the ``rigel quant`` subcommand.
 
     Single-pass pipeline: scan BAM, resolve fragments, train
     strand/insert models, then quantify via unified EM.
@@ -194,7 +194,7 @@ def _write_run_config(
     params["no_tsv"] = args.no_tsv
 
     config = {
-        "command": "hulkrna quant",
+        "command": "rigel quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source_config": str(Path(args.config).resolve()) if args.config else None,
         "parameters": params,
@@ -261,8 +261,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
 
     from . import __version__
     summary = {
-        "hulkrna_version": __version__,
-        "command": "hulkrna quant",
+        "rigel_version": __version__,
+        "command": "rigel quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "input": {
             "bam_file": str(Path(args.bam_file).resolve()),
@@ -324,7 +324,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
 
 
 def sim_command(args: argparse.Namespace) -> int:
-    """Run the ``hulkrna sim`` subcommand."""
+    """Run the ``rigel sim`` subcommand."""
     import yaml
     from .sim import Scenario, SimConfig
 
@@ -596,8 +596,8 @@ def _resolve_quant_args(
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
-        prog="hulkrna",
-        description="hulkrna: Bayesian RNA-seq fragment abundance estimation",
+        prog="rigel",
+        description="rigel: Bayesian RNA-seq fragment abundance estimation",
     )
     parser.add_argument(
         "--version", action="version", version=get_version(),
@@ -659,7 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     quant_parser.add_argument(
         "--index", dest="index_dir", required=True,
-        help="Directory containing hulkrna index files",
+        help="Directory containing rigel index files",
     )
     quant_parser.add_argument(
         "-o", "--output-dir", dest="output_dir", required=True,
@@ -921,7 +921,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """CLI entry point registered as ``hulkrna`` in pyproject.toml."""
+    """CLI entry point registered as ``rigel`` in pyproject.toml."""
     parser = build_parser()
     args = parser.parse_args()
 

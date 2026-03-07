@@ -2,9 +2,9 @@
 # 35 genes, 379 transcripts, 100k reads
 # gDNA 10%, nRNA 10%
 
-genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
-gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_pvt1_profile
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/bench_pvt1_profile
 
 threads: 8
 
@@ -17,7 +17,7 @@ aligners:
   oracle: {}
 
 # ── HulkRNA configs ─────────────────────────────────────────────────
-hulkrna_configs:
+rigel_configs:
   default: {}
 
 # ── Simulation ───────────────────────────────────────────────────────

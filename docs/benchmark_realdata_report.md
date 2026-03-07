@@ -1,4 +1,4 @@
-# Real-Data Benchmark Report: hulkrna vs salmon vs kallisto vs htseq
+# Real-Data Benchmark Report: rigel vs salmon vs kallisto vs htseq
 
 **Date:** 2026-03-01  
 **Sample:** mctp_LBX0069_SI_42153_HFFFMDRX7 (STAR-aligned, collated, markdup)  
@@ -8,7 +8,7 @@
 
 ## 1. Real-Data Characterization
 
-hulkrna was run on a real 1.7 GB STAR-aligned BAM file (21.6M BAM records, 462K unique fragments after dedup) to estimate parameters for realistic simulation.
+rigel was run on a real 1.7 GB STAR-aligned BAM file (21.6M BAM records, 462K unique fragments after dedup) to estimate parameters for realistic simulation.
 
 ### 1.1 Sample Composition
 
@@ -67,13 +67,13 @@ hulkrna was run on a real 1.7 GB STAR-aligned BAM file (21.6M BAM records, 462K 
 | **Pristine** | 0% | 0% | 1.000 |
 | **Realistic** | 34% | 10% | 0.997 |
 
-The "realistic" condition uses parameters directly estimated by hulkrna from the real BAM.
+The "realistic" condition uses parameters directly estimated by rigel from the real BAM.
 
 ### 2.3 Tools Compared
 
 | Tool | Level | Method |
 |---|---|---|
-| hulkrna | Transcript + Gene | Genome-aligned EM with mRNA/nRNA/gDNA components |
+| rigel | Transcript + Gene | Genome-aligned EM with mRNA/nRNA/gDNA components |
 | salmon | Transcript + Gene | Quasi-mapping EM |
 | kallisto | Transcript + Gene | Pseudoalignment EM |
 | htseq-count | Gene only | Genome-aligned intersection counting |
@@ -88,7 +88,7 @@ The "realistic" condition uses parameters directly estimated by hulkrna from the
 
 | Tool | MAE | RMSE | Pearson | Spearman |
 |---|---:|---:|---:|---:|
-| **hulkrna** | **18.7** | **46.0** | **0.9998** | 0.9131 |
+| **rigel** | **18.7** | **46.0** | **0.9998** | 0.9131 |
 | salmon | 25.5 | 81.6 | 0.9992 | **0.9376** |
 | kallisto | 28.1 | 74.7 | 0.9992 | 0.9321 |
 
@@ -96,16 +96,16 @@ The "realistic" condition uses parameters directly estimated by hulkrna from the
 
 | Tool | MAE | RMSE | Pearson | Spearman |
 |---|---:|---:|---:|---:|
-| **hulkrna** | **0.99** | **2.89** | 0.90 | 0.89 |
+| **rigel** | **0.99** | **2.89** | 0.90 | 0.89 |
 | salmon | 0.56 | 1.43 | 0.90 | 0.90 |
 | kallisto | 0.75 | 2.18 | 0.90 | 0.90 |
 | htseq | 452.44 | 896.78 | 0.88 | 0.86 |
 
 **Pristine observations:**
-- All EM tools (hulkrna, salmon, kallisto) perform similarly and excellently
-- hulkrna has the lowest transcript-level MAE (18.7 vs 25.5/28.1) and RMSE (46.0 vs 81.6/74.7)
+- All EM tools (rigel, salmon, kallisto) perform similarly and excellently
+- rigel has the lowest transcript-level MAE (18.7 vs 25.5/28.1) and RMSE (46.0 vs 81.6/74.7)
 - Gene-level: all three EM tools converge to near-zero MAE; htseq-count's gene-level errors come from its inability to resolve isoform ambiguity
-- Dropout rate: hulkrna=0%, salmon=7.5%, kallisto=5.2% — hulkrna never misses a transcript
+- Dropout rate: rigel=0%, salmon=7.5%, kallisto=5.2% — rigel never misses a transcript
 - salmon and kallisto have slightly higher Spearman correlation, suggesting marginally better rank order in pristine conditions
 
 ### 3.2 Realistic Condition (gDNA=0.34, nRNA=0.10, SS=0.997)
@@ -114,7 +114,7 @@ The "realistic" condition uses parameters directly estimated by hulkrna from the
 
 | Tool | MAE | RMSE | Pearson | Spearman |
 |---|---:|---:|---:|---:|
-| **hulkrna** | **17.6** | **59.1** | **0.9384** | **0.7460** |
+| **rigel** | **17.6** | **59.1** | **0.9384** | **0.7460** |
 | salmon | 173.8 | 320.9 | 0.4121 | 0.2006 |
 | kallisto | 188.9 | 321.2 | 0.3731 | 0.1590 |
 
@@ -122,14 +122,14 @@ The "realistic" condition uses parameters directly estimated by hulkrna from the
 
 | Tool | MAE | RMSE | Pearson | Spearman |
 |---|---:|---:|---:|---:|
-| **hulkrna** | **132.4** | **193.0** | **0.8879** | **0.8151** |
+| **rigel** | **132.4** | **193.0** | **0.8879** | **0.8151** |
 | salmon | 1,342.7 | 1,641.8 | 0.7169 | 0.6473 |
 | kallisto | 1,346.4 | 1,718.5 | 0.7139 | 0.6729 |
 | htseq | 1,382.5 | 1,759.3 | 0.6450 | 0.6669 |
 
-#### hulkrna Advantage Ratios (transcript-level MAE, realistic)
+#### rigel Advantage Ratios (transcript-level MAE, realistic)
 
-| Region | hulkrna MAE | vs salmon | vs kallisto |
+| Region | rigel MAE | vs salmon | vs kallisto |
 |---|---:|---:|---:|
 | FGFR2 | 25.4 | 7.0× | 6.0× |
 | EGFR | 65.1 | 6.4× | 7.6× |
@@ -145,51 +145,51 @@ The "realistic" condition uses parameters directly estimated by hulkrna from the
 
 #### Pool-Level Accuracy (total fragment classification)
 
-| Pool | hulkrna | salmon | kallisto |
+| Pool | rigel | salmon | kallisto |
 |---|---:|---:|---:|
 | Mature RNA error | 447 | 7,547 | 7,736 |
 | Nascent RNA error | 2,322 | 2,947 | 2,947 |
 | Genomic DNA error | 552 | 45,267 | 45,267 |
 
 **Realistic observations:**
-- **hulkrna maintains accuracy** while salmon/kallisto collapse: hulkrna Pearson stays at 0.94 while salmon/kallisto drop to 0.37–0.41
-- At the transcript level, hulkrna is **9.9× more accurate** than salmon and **10.8× more accurate** than kallisto (MAE)
-- At the gene level, hulkrna is **10.1× more accurate** (MAE 132 vs 1,343–1,346)
-- hulkrna correctly classifies gDNA: error of 552 fragments vs salmon/kallisto's 45,267 (neither can detect gDNA at all)
+- **rigel maintains accuracy** while salmon/kallisto collapse: rigel Pearson stays at 0.94 while salmon/kallisto drop to 0.37–0.41
+- At the transcript level, rigel is **9.9× more accurate** than salmon and **10.8× more accurate** than kallisto (MAE)
+- At the gene level, rigel is **10.1× more accurate** (MAE 132 vs 1,343–1,346)
+- rigel correctly classifies gDNA: error of 552 fragments vs salmon/kallisto's 45,267 (neither can detect gDNA at all)
 - The gDNA contamination is the dominant confounder — salmon and kallisto interpret gDNA reads as mRNA, inflating expression estimates
-- Dropout rate: hulkrna=0%, salmon=6.3%, kallisto=3.8%
+- Dropout rate: rigel=0%, salmon=6.3%, kallisto=3.8%
 
 ### 3.3 Accuracy by Abundance Quartile (Realistic)
 
-| Quartile | hulkrna | salmon | kallisto |
+| Quartile | rigel | salmon | kallisto |
 |---|---:|---:|---:|
 | Q1 (low) | **1.8** | 171.1 | 167.1 |
 | Q2 | **0.5** | 145.3 | 165.3 |
 | Q3 | **2.7** | 140.6 | 151.6 |
 | Q4 (high) | **40.7** | 133.5 | 130.3 |
 
-- hulkrna's errors are concentrated in high-abundance transcripts (Q4) — these have the most absolute counts, so any percentage error accumulates
+- rigel's errors are concentrated in high-abundance transcripts (Q4) — these have the most absolute counts, so any percentage error accumulates
 - salmon/kallisto errors are roughly **uniform across abundance levels** — characteristic of additive gDNA contamination inflating all estimates by a similar amount
 
 ---
 
 ## 4. Discussion
 
-### 4.1 Why hulkrna Dominates Under Realistic Conditions
+### 4.1 Why rigel Dominates Under Realistic Conditions
 
-1. **gDNA-awareness**: hulkrna's 3-component EM model (mRNA + nRNA + gDNA) explicitly accounts for genomic DNA contamination. Salmon and kallisto have no gDNA model; they interpret all mapped fragments as RNA, which in this sample adds ~34% spurious counts uniformly across the transcriptome.
+1. **gDNA-awareness**: rigel's 3-component EM model (mRNA + nRNA + gDNA) explicitly accounts for genomic DNA contamination. Salmon and kallisto have no gDNA model; they interpret all mapped fragments as RNA, which in this sample adds ~34% spurious counts uniformly across the transcriptome.
 
-2. **nRNA-awareness**: hulkrna distinguishes nascent (intronic) reads from mature mRNA. While the nRNA rate is lower (10%), it affects transcript-level accuracy for genes with large introns.
+2. **nRNA-awareness**: rigel distinguishes nascent (intronic) reads from mature mRNA. While the nRNA rate is lower (10%), it affects transcript-level accuracy for genes with large introns.
 
-3. **Strand information**: hulkrna uses strand-specificity models to separate sense from antisense signal. With SS=0.997, this is only a minor factor here, but it becomes important at lower strand specificities.
+3. **Strand information**: rigel uses strand-specificity models to separate sense from antisense signal. With SS=0.997, this is only a minor factor here, but it becomes important at lower strand specificities.
 
 ### 4.2 Pristine Performance Gap
 
-Under pristine conditions (no gDNA, no nRNA), all EM tools perform similarly. hulkrna has a slight edge in MAE and Pearson but salmon/kallisto have slightly better Spearman rank correlation. This is expected: salmon and kallisto are highly optimized for the pristine transcript quantification problem. hulkrna's additional model complexity (gDNA/nRNA components) could introduce very minor estimation noise in the absence of contamination. The differences are small and all tools perform well.
+Under pristine conditions (no gDNA, no nRNA), all EM tools perform similarly. rigel has a slight edge in MAE and Pearson but salmon/kallisto have slightly better Spearman rank correlation. This is expected: salmon and kallisto are highly optimized for the pristine transcript quantification problem. rigel's additional model complexity (gDNA/nRNA components) could introduce very minor estimation noise in the absence of contamination. The differences are small and all tools perform well.
 
 ### 4.3 FGFR2 Region Anomaly
 
-FGFR2 shows relatively high MAE for hulkrna under both conditions (71.9 pristine, 25.4 realistic). This region has 41 transcripts from a single gene — a particularly challenging isoform disambiguation scenario. However, hulkrna improves significantly in the realistic condition (MAE drops from 71.9 to 25.4) because the gDNA model correctly absorbs contamination reads that would otherwise inflate the gene's count.
+FGFR2 shows relatively high MAE for rigel under both conditions (71.9 pristine, 25.4 realistic). This region has 41 transcripts from a single gene — a particularly challenging isoform disambiguation scenario. However, rigel improves significantly in the realistic condition (MAE drops from 71.9 to 25.4) because the gDNA model correctly absorbs contamination reads that would otherwise inflate the gene's count.
 
 ### 4.4 htseq-count Limitations
 
@@ -202,28 +202,28 @@ htseq-count performs worst in all conditions because it:
 
 ## 5. Areas for Improvement
 
-### 5.1 Potential hulkrna Accuracy Improvements
+### 5.1 Potential rigel Accuracy Improvements
 
-1. **Nascent RNA pool estimation (P0)**: The nRNA pool error (2,322) is hulkrna's largest source of inaccuracy. The current nRNA model initializes uniformly and relies on EM convergence, which may underestimate nRNA for some genes. Better initialization from intronic read ratios or gene-level prior models could improve this.
+1. **Nascent RNA pool estimation (P0)**: The nRNA pool error (2,322) is rigel's largest source of inaccuracy. The current nRNA model initializes uniformly and relies on EM convergence, which may underestimate nRNA for some genes. Better initialization from intronic read ratios or gene-level prior models could improve this.
 
-2. **High-abundance transcript accuracy (P1)**: hulkrna's Q4 (high-abundance) MAE of 40.7 is the main contributor to overall error. This could be addressed by:
+2. **High-abundance transcript accuracy (P1)**: rigel's Q4 (high-abundance) MAE of 40.7 is the main contributor to overall error. This could be addressed by:
    - Improved effective-length estimation for long transcripts
    - Better fragment-length model integration in the EM
    - Bias correction (positional and GC-content) which is currently uniform
 
-3. **Spearman correlation gap in pristine conditions (P2)**: hulkrna's Spearman (0.9131) is lower than salmon (0.9376) and kallisto (0.9321) under pristine conditions. This suggests the rank ordering of low-abundance transcripts could be improved. Potential causes:
+3. **Spearman correlation gap in pristine conditions (P2)**: rigel's Spearman (0.9131) is lower than salmon (0.9376) and kallisto (0.9321) under pristine conditions. This suggests the rank ordering of low-abundance transcripts could be improved. Potential causes:
    - The EM prior (Dirichlet) may slightly over-regularize low-abundance transcripts
    - Fragment-length model could be shared across a gene's isoforms more aggressively
 
-4. **Fragment-length model contamination in realistic conditions (P2)**: With 34% gDNA (longer fragments, mean=350 vs. 250), the global fragment-length model may be biased. hulkrna already separates intergenic fragment lengths, but the model training could weight spliced fragments more heavily since they are guaranteed RNA.
+4. **Fragment-length model contamination in realistic conditions (P2)**: With 34% gDNA (longer fragments, mean=350 vs. 250), the global fragment-length model may be biased. rigel already separates intergenic fragment lengths, but the model training could weight spliced fragments more heavily since they are guaranteed RNA.
 
-5. **Per-gene gDNA estimation (P3)**: hulkrna estimates gDNA per-locus via EM, but the current Empirical Bayes prior uses intergenic read density as a guide. For regions with few intergenic reads, the prior could be refined using GC-content or mappability as auxiliary features.
+5. **Per-gene gDNA estimation (P3)**: rigel estimates gDNA per-locus via EM, but the current Empirical Bayes prior uses intergenic read density as a guide. For regions with few intergenic reads, the prior could be refined using GC-content or mappability as auxiliary features.
 
 ### 5.2 Simulation Limitations to Address
 
 1. **Oracle BAM vs. real alignment**: These results use perfect alignment. Real aligners (STAR, HISAT2, minimap2) introduce false splice junctions, misalignments in repetitive regions, and multi-mapping artifacts. A follow-up benchmark with real aligners will give a truer picture.
 
-2. **Per-region random abundances**: The current benchmark assigns random log-uniform abundances per region. Using real abundance profiles (from the hulkrna quant output) would create an even more realistic simulation with the characteristic heavy-tailed expression distribution.
+2. **Per-region random abundances**: The current benchmark assigns random log-uniform abundances per region. Using real abundance profiles (from the rigel quant output) would create an even more realistic simulation with the characteristic heavy-tailed expression distribution.
 
 3. **Single sample**: Results are from one sample. Multi-sample benchmarking across different tissue types and contamination levels would validate generalizability.
 
@@ -231,7 +231,7 @@ htseq-count performs worst in all conditions because it:
 
 ## 6. Summary
 
-| Metric | Pristine (hulk/sal/kal) | Realistic (hulk/sal/kal) |
+| Metric | Pristine (rigel/sal/kal) | Realistic (rigel/sal/kal) |
 |---|---|---|
 | Tx MAE | 18.7 / 25.5 / 28.1 | **17.6** / 173.8 / 188.9 |
 | Tx Pearson | 1.00 / 1.00 / 1.00 | **0.94** / 0.41 / 0.37 |
@@ -239,4 +239,4 @@ htseq-count performs worst in all conditions because it:
 | Gene MAE | 1.0 / 0.6 / 0.8 | **132** / 1,343 / 1,346 |
 | Dropout rate | 0% / 7.5% / 5.2% | 0% / 6.3% / 3.8% |
 
-**Key takeaway**: Under pristine conditions, all EM tools perform comparably. Under realistic conditions that mirror actual sequencing data (34% gDNA, 10% nRNA), hulkrna is **~10× more accurate** than salmon and kallisto at the transcript level, and the gap is even larger at the gene level. hulkrna's explicit gDNA/nRNA modeling provides a fundamental advantage that cannot be replicated by tools that assume all reads originate from mature mRNA.
+**Key takeaway**: Under pristine conditions, all EM tools perform comparably. Under realistic conditions that mirror actual sequencing data (34% gDNA, 10% nRNA), rigel is **~10× more accurate** than salmon and kallisto at the transcript level, and the gap is even larger at the gene level. rigel's explicit gDNA/nRNA modeling provides a fundamental advantage that cannot be replicated by tools that assume all reads originate from mature mRNA.

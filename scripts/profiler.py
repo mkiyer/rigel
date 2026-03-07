@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Profiling tool for hulkrna performance analysis.
+"""Profiling tool for rigel performance analysis.
 
-Runs the hulkrna pipeline with detailed timing, memory tracking,
+Runs the rigel pipeline with detailed timing, memory tracking,
 and optional cProfile instrumentation.  Outputs machine-readable
 JSON alongside a human-readable text report.
 
@@ -20,16 +20,16 @@ memory sampling in a background thread.
 profiling for the pipeline run.  Writes a ``.prof`` file that can
 be visualized with ``snakeviz`` or ``py-spy``.
 
-**Comparison** — Supply multiple ``hulkrna_configs`` in the YAML to
+**Comparison** — Supply multiple ``rigel_configs`` in the YAML to
 profile the same BAM with different parameter sets side by side.
 
 Usage
 -----
 ::
 
-    python scripts/profiler.py --bam reads.bam --index hulkrna_index/
+    python scripts/profiler.py --bam reads.bam --index rigel_index/
     python scripts/profiler.py --config scripts/profile_example.yaml
-    python scripts/profiler.py --bam reads.bam --index hulkrna_index/ \\
+    python scripts/profiler.py --bam reads.bam --index rigel_index/ \\
         --cprofile --stages --outdir profile_results/
 
 Output
@@ -68,27 +68,27 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from hulkrna.config import (
+from rigel.config import (
     BamScanConfig,
     EMConfig,
     FragmentScoringConfig,
     PipelineConfig,
     TranscriptGeometry,
 )
-from hulkrna.estimator import AbundanceEstimator
-from hulkrna.index import TranscriptIndex
-from hulkrna.locus import build_loci, build_locus_em_data, compute_eb_gdna_priors, compute_nrna_init
-from hulkrna.estimator import compute_global_gdna_density, compute_hybrid_nrna_frac_priors
-from hulkrna.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer, _compute_intergenic_density
-from hulkrna.scan import FragmentRouter
-from hulkrna.scoring import (
+from rigel.estimator import AbundanceEstimator
+from rigel.index import TranscriptIndex
+from rigel.locus import build_loci, build_locus_em_data, compute_eb_gdna_priors, compute_nrna_init
+from rigel.estimator import compute_global_gdna_density, compute_hybrid_nrna_frac_priors
+from rigel.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer, _compute_intergenic_density
+from rigel.scan import FragmentRouter
+from rigel.scoring import (
     GDNA_SPLICE_PENALTIES,
     SPLICE_UNANNOT,
     FragmentScorer,
     overhang_alpha_to_log_penalty,
 )
-from hulkrna.stats import PipelineStats
-from hulkrna.strand_model import StrandModels
+from rigel.stats import PipelineStats
+from rigel.strand_model import StrandModels
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +223,7 @@ def _snap_rss_current() -> float:
 
 @dataclass
 class HulkrnaParams:
-    """hulkrna parameter set (same keys as benchmark.py HulkrnaConfig)."""
+    """rigel parameter set (same keys as benchmark.py HulkrnaConfig)."""
 
     name: str = "default"
     params: dict = field(default_factory=dict)
@@ -237,7 +237,7 @@ class ProfileConfig:
     index: str = ""
     outdir: str = "profile_output"
 
-    hulkrna_configs: list[HulkrnaParams] = field(default_factory=list)
+    rigel_configs: list[HulkrnaParams] = field(default_factory=list)
 
     stages: bool = False
     enable_cprofile: bool = False
@@ -264,11 +264,11 @@ def parse_yaml_config(path: str | Path) -> ProfileConfig:
     cfg.memory_sample_interval_ms = int(raw.get("memory_sample_interval_ms", 100))
     cfg.verbose = bool(raw.get("verbose", True))
 
-    for name, params in raw.get("hulkrna_configs", {"default": {}}).items():
-        cfg.hulkrna_configs.append(HulkrnaParams(name=name, params=params or {}))
+    for name, params in raw.get("rigel_configs", {"default": {}}).items():
+        cfg.rigel_configs.append(HulkrnaParams(name=name, params=params or {}))
 
-    if not cfg.hulkrna_configs:
-        cfg.hulkrna_configs.append(HulkrnaParams())
+    if not cfg.rigel_configs:
+        cfg.rigel_configs.append(HulkrnaParams())
 
     return cfg
 
@@ -279,13 +279,13 @@ def parse_yaml_config(path: str | Path) -> ProfileConfig:
 
 
 def _build_pipeline_config(
-    hulkrna_params: HulkrnaParams | None = None,
+    rigel_params: HulkrnaParams | None = None,
     tmpdir: str | None = None,
 ) -> PipelineConfig:
     """Build PipelineConfig from profile config."""
     raw: dict = {}
-    if hulkrna_params is not None:
-        raw.update(hulkrna_params.params)
+    if rigel_params is not None:
+        raw.update(rigel_params.params)
 
     em_kw: dict = {}
     _EM_ALIASES = {
@@ -420,13 +420,13 @@ def profile_simple(
     bam_path: str,
     index: TranscriptIndex,
     config_name: str,
-    hulkrna_params: HulkrnaParams | None = None,
+    rigel_params: HulkrnaParams | None = None,
     enable_cprofile: bool = False,
     tmpdir: str | None = None,
 ) -> tuple[ProfileResult, cProfile.Profile | None]:
     """Profile run_pipeline() as a single timed call."""
 
-    pcfg = _build_pipeline_config(hulkrna_params, tmpdir=tmpdir)
+    pcfg = _build_pipeline_config(rigel_params, tmpdir=tmpdir)
     profiler = cProfile.Profile() if enable_cprofile else None
 
     rss_before = _get_rss_mb()
@@ -475,13 +475,13 @@ def profile_stages(
     bam_path: str,
     index: TranscriptIndex,
     config_name: str,
-    hulkrna_params: HulkrnaParams | None = None,
+    rigel_params: HulkrnaParams | None = None,
     enable_cprofile: bool = False,
     tmpdir: str | None = None,
 ) -> tuple[ProfileResult, cProfile.Profile | None]:
     """Profile pipeline with per-stage timing decomposition."""
 
-    pcfg = _build_pipeline_config(hulkrna_params, tmpdir=tmpdir)
+    pcfg = _build_pipeline_config(rigel_params, tmpdir=tmpdir)
     profiler = cProfile.Profile() if enable_cprofile else None
     timings = StageTimings()
 
@@ -868,7 +868,7 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
     results: list[ProfileResult] = []
     all_profilers: dict[str, cProfile.Profile] = {}
 
-    for hc in cfg.hulkrna_configs:
+    for hc in cfg.rigel_configs:
         print(f"\n{'='*72}", flush=True)
         print(f"Profiling: {hc.name}", flush=True)
         print(f"  BAM: {Path(bam_path).name}", flush=True)
@@ -982,19 +982,19 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Profile hulkrna pipeline performance",
+        description="Profile rigel pipeline performance",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python scripts/profiler.py --bam reads.bam --index hulkrna_index/\n"
+            "  python scripts/profiler.py --bam reads.bam --index rigel_index/\n"
             "  python scripts/profiler.py --config scripts/profile_example.yaml --stages\n"
-            "  python scripts/profiler.py --bam reads.bam --index hulkrna_index/ "
+            "  python scripts/profiler.py --bam reads.bam --index rigel_index/ "
             "--cprofile --stages\n"
         ),
     )
     p.add_argument("--config", help="YAML configuration file")
     p.add_argument("--bam", help="Name-sorted BAM file (overrides YAML)")
-    p.add_argument("--index", help="hulkrna index directory (overrides YAML)")
+    p.add_argument("--index", help="rigel index directory (overrides YAML)")
     p.add_argument("--outdir", help="Output directory (overrides YAML)")
     p.add_argument("--stages", action="store_true", default=None,
                     help="Enable per-stage timing decomposition")
@@ -1022,8 +1022,8 @@ def main() -> int:
         cfg = parse_yaml_config(args.config)
     else:
         cfg = ProfileConfig()
-        if not cfg.hulkrna_configs:
-            cfg.hulkrna_configs.append(HulkrnaParams())
+        if not cfg.rigel_configs:
+            cfg.rigel_configs.append(HulkrnaParams())
 
     # CLI overrides
     if args.bam:
@@ -1041,7 +1041,7 @@ def main() -> int:
     if args.verbose is not None:
         cfg.verbose = args.verbose
     if args.threads is not None:
-        for hc in cfg.hulkrna_configs:
+        for hc in cfg.rigel_configs:
             hc.params["n_threads"] = args.threads
     if args.tmpdir is not None:
         cfg.tmpdir = args.tmpdir
@@ -1061,14 +1061,14 @@ def main() -> int:
         datefmt="%H:%M:%S",
     )
 
-    print("hulkrna profiler", flush=True)
+    print("rigel profiler", flush=True)
     print(f"  BAM:             {cfg.bam}", flush=True)
     print(f"  Index:           {cfg.index}", flush=True)
     print(f"  Output:          {cfg.outdir}", flush=True)
     print(f"  Stages:          {cfg.stages}", flush=True)
     print(f"  cProfile:        {cfg.enable_cprofile}", flush=True)
     print(f"  Memory interval: {cfg.memory_sample_interval_ms}ms", flush=True)
-    print(f"  Configs:         {[h.name for h in cfg.hulkrna_configs]}", flush=True)
+    print(f"  Configs:         {[h.name for h in cfg.rigel_configs]}", flush=True)
 
     results = run_profile(cfg)
 

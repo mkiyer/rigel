@@ -1,13 +1,13 @@
-"""Tests for hulkrna.sim — simulation framework components."""
+"""Tests for rigel.sim — simulation framework components."""
 
 import numpy as np
 import pytest
 
-from hulkrna.sim.genome import MutableGenome, reverse_complement
-from hulkrna.sim.annotation import GeneBuilder
-from hulkrna.sim.reads import ReadSimulator, SimConfig
-from hulkrna.transcript import Transcript
-from hulkrna.types import Strand, Interval
+from rigel.sim.genome import MutableGenome, reverse_complement
+from rigel.sim.annotation import GeneBuilder
+from rigel.sim.reads import ReadSimulator, SimConfig
+from rigel.transcript import Transcript
+from rigel.types import Strand, Interval
 
 
 # =====================================================================
@@ -209,7 +209,7 @@ class TestGeneBuilder:
         assert gtf_path.exists()
 
         # Read it back with the GTF parser
-        from hulkrna.gtf import GTFRecord
+        from rigel.gtf import GTFRecord
         features = list(GTFRecord.parse_file(gtf_path))
         assert len(features) == 2  # 2 exon lines
         assert all(f.feature == "exon" for f in features)
@@ -246,7 +246,7 @@ class TestGeneBuilder:
         ])
         gtf_path = builder.write_gtf(tmp_path)
 
-        from hulkrna.gtf import GTFRecord
+        from rigel.gtf import GTFRecord
         features = list(GTFRecord.parse_file(gtf_path))
         assert features[0].score == 42.5
 
@@ -260,7 +260,7 @@ class TestGeneBuilder:
 
     def test_gtf_to_bed12(self, tmp_path):
         """GTF → BED12 conversion produces valid 12-column BED."""
-        from hulkrna.index import gtf_to_bed12
+        from rigel.index import gtf_to_bed12
 
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
@@ -513,9 +513,9 @@ class TestReadSimulator:
 
 
 class TestGeneBuilderIndexIntegration:
-    def test_build_hulk_index(self, tmp_path):
+    def test_build_rigel_index(self, tmp_path):
         """GeneBuilder output should be compatible with TranscriptIndex.build."""
-        from hulkrna.index import TranscriptIndex
+        from rigel.index import TranscriptIndex
 
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)

@@ -5,21 +5,21 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from hulkrna.buffer import (
+from rigel.buffer import (
     FRAG_AMBIG_OPP_STRAND,
     FRAG_AMBIG_SAME_STRAND,
     FRAG_MULTIMAPPER,
     FRAG_UNAMBIG,
 )
-from hulkrna.splice import SpliceType
-from hulkrna.config import EMConfig
-from hulkrna.estimator import AbundanceEstimator
-from hulkrna.frag_length_model import FragmentLengthModels
-from hulkrna.scoring import FragmentScorer
-from hulkrna.scan import FragmentRouter
-from hulkrna.stats import PipelineStats
-from hulkrna.strand_model import StrandModels
-from hulkrna.types import Strand
+from rigel.splice import SpliceType
+from rigel.config import EMConfig
+from rigel.estimator import AbundanceEstimator
+from rigel.frag_length_model import FragmentLengthModels
+from rigel.scoring import FragmentScorer
+from rigel.scan import FragmentRouter
+from rigel.stats import PipelineStats
+from rigel.strand_model import StrandModels
+from rigel.types import Strand
 
 
 @dataclass

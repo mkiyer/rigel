@@ -14,8 +14,8 @@ Uses the shared mini_index fixture from conftest.py:
 import numpy as np
 import pytest
 
-from hulkrna.index import TranscriptIndex
-from hulkrna.types import GenomicInterval, IntervalType
+from rigel.index import TranscriptIndex
+from rigel.types import GenomicInterval, IntervalType
 
 
 # ═════════════════════════════════════════════════════════════════════

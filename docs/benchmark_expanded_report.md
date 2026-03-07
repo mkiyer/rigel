@@ -15,28 +15,28 @@
 
 ### Mean Transcript Spearman by Condition Class
 
-| Condition | hulkrna_oracle | hulkrna_mm2 | salmon | kallisto |
+| Condition | rigel_oracle | rigel_mm2 | salmon | kallisto |
 |-----------|---------------|-------------|--------|----------|
 | **Pristine** (gDNA=0, nRNA=0) | **0.9444** | 0.9270 | 0.9211 | 0.9371 |
 | **nRNA only** (gDNA=0, nRNA=0.1) | **0.8123** | 0.7738 | 0.7120 | 0.6332 |
 | **gDNA only** (gDNA=0.2, nRNA=0) | **0.5804** | 0.5740 | 0.3231 | 0.2741 |
 | **gDNA + nRNA** (gDNA=0.2, nRNA=0.1) | **0.5830** | 0.5459 | 0.3142 | 0.2577 |
 
-**hulkrna leads in every condition class.** The advantage grows with contamination:
+**rigel leads in every condition class.** The advantage grows with contamination:
 pristine +0.007 → nRNA +0.10 → gDNA +0.26 → both +0.27 (vs best competitor).
 
 ### Mean Gene Spearman
 
-| Condition | hulkrna_oracle | hulkrna_mm2 | salmon | kallisto |
+| Condition | rigel_oracle | rigel_mm2 | salmon | kallisto |
 |-----------|---------------|-------------|--------|----------|
 | **Pristine** | 0.9840 | 0.9824 | **0.9900** | **0.9900** |
 | **nRNA only** | **0.9594** | 0.9447 | 0.9320 | 0.9090 |
 | **gDNA only** | 0.8072 | **0.8280** | 0.7884 | 0.7638 |
 | **gDNA + nRNA** | **0.7869** | 0.7841 | 0.7615 | 0.7343 |
 
-Gene-level: hulkrna **trails by 0.006** in pristine (the gene aggregation smooths out errors); leads everywhere else.
+Gene-level: rigel **trails by 0.006** in pristine (the gene aggregation smooths out errors); leads everywhere else.
 
-### Win/Loss Record (hulkrna_oracle vs best{salmon,kallisto})
+### Win/Loss Record (rigel_oracle vs best{salmon,kallisto})
 
 | Condition | Wins | Losses | Ties | Mean Δ |
 |-----------|------|--------|------|--------|
@@ -58,7 +58,7 @@ evidence-weighted nrna_frac prior fix completely eliminates phantom nRNA attribu
 
 ### Per-Region Transcript Spearman (SS=1.0)
 
-| Region | hulkrna_oracle | salmon | kallisto | Result |
+| Region | rigel_oracle | salmon | kallisto | Result |
 |--------|---------------|--------|----------|--------|
 | CDKN2A_2B | 0.9922 | 0.9927 | 0.9926 | TIE |
 | EGFR | **0.9995** | 0.9897 | 0.9995 | WIN |
@@ -72,13 +72,13 @@ evidence-weighted nrna_frac prior fix completely eliminates phantom nRNA attribu
 | XIST_TSIX | **0.9217** | 0.9115 | 0.9062 | WIN |
 
 **Pristine verdict**: 8 wins, 0 losses, 2 marginal ties (within 0.003).
-hulkrna is clearly competitive in clean conditions.
+rigel is clearly competitive in clean conditions.
 
 ---
 
 ## 3. nRNA Contamination (gDNA=0, nRNA=0.1)
 
-### nRNA Pool Accuracy (hulkrna_oracle, SS=1.0)
+### nRNA Pool Accuracy (rigel_oracle, SS=1.0)
 
 | Region | nRNA truth | nRNA observed | Error % |
 |--------|-----------|--------------|---------|
@@ -115,7 +115,7 @@ regions where nascent RNA reads overlap heavily with exonic regions.
 
 ### Losses in nRNA-only
 
-| Region | SS | hulkrna | competitor | Δ |
+| Region | SS | rigel | competitor | Δ |
 |--------|-----|---------|-----------|------|
 | TP53 | 1.0 | 0.7114 | 0.7679 | -0.057 |
 | TP53 | 0.50 | 0.7251 | 0.7727 | -0.048 |
@@ -170,9 +170,9 @@ empirical nrna_frac system incorrectly attributes to nRNA.
 the gDNA model. The gDNA model's flat coverage profile competes with and "steals" reads
 from transcripts, especially reads in single-exon or low-complexity transcript regions.
 
-### Spearman Degradation (SS=1.0) — hulkrna still beats salmon despite mRNA absorption
+### Spearman Degradation (SS=1.0) — rigel still beats salmon despite mRNA absorption
 
-| Region | hulk pristine→gDNA drop | sal drop | hulk still wins? |
+| Region | rigel pristine→gDNA drop | sal drop | rigel still wins? |
 |--------|------------------------|----------|-----------------|
 | EGFR | -0.369 | -0.250 | **NO** (0.63 vs 0.74) |
 | PVT1_MYC | -0.449 | -0.747 | YES (0.45 vs 0.09) |
@@ -180,7 +180,7 @@ from transcripts, especially reads in single-exon or low-complexity transcript r
 | CDKN2A_2B | -0.202 | -0.636 | YES (0.79 vs 0.36) |
 | GAPDH | -0.277 | -0.584 | YES (0.62 vs 0.29) |
 
-Despite massive mRNA absorption, hulkrna still BEATS salmon/kallisto in 7/10 regions
+Despite massive mRNA absorption, rigel still BEATS salmon/kallisto in 7/10 regions
 because salmon/kallisto can't model gDNA at all and just hallucinate counts everywhere.
 **The only loss is EGFR.**
 
@@ -214,9 +214,9 @@ ambiguous reads.
 
 ### Why EGFR is Unique
 
-EGFR is the **only region where hulkrna consistently loses** to salmon/kallisto in gDNA conditions.
+EGFR is the **only region where rigel consistently loses** to salmon/kallisto in gDNA conditions.
 
-| Condition | hulkrna | salmon | kallisto |
+| Condition | rigel | salmon | kallisto |
 |-----------|---------|--------|----------|
 | Pristine SS=1.0 | **0.9995** | 0.9897 | 0.9995 |
 | gDNA SS=1.0 | 0.6305 | **0.7400** | 0.7422 |
@@ -226,34 +226,34 @@ EGFR is the **only region where hulkrna consistently loses** to salmon/kallisto 
 
 EGFR transcript ENST00000275493.7 (the canonical EGFR mRNA, abundance=6879 TPM):
 
-| Condition | Truth | hulkrna | salmon | kallisto |
+| Condition | Truth | rigel | salmon | kallisto |
 |-----------|-------|---------|--------|----------|
 | Pristine | 42,173 | 41,615 | 39,563 | 41,495 |
 | gDNA only | 1,991 | **0** | 2,183 | 1,693 |
 | gDNA+nRNA | 1,722 | **0** | 1,923 | 1,277 |
 | nRNA only | 10,085 | **9,420** | 8,195 | 5,048 |
 
-The #1 EGFR transcript goes to **exactly zero** in hulkrna when gDNA is present!
+The #1 EGFR transcript goes to **exactly zero** in rigel when gDNA is present!
 The gDNA model completely absorbs it. Salmon doesn't have this failure mode because
 it has no gDNA concept.
 
 ### Gene-Level Collapse
 
-EGFR gene-level Spearman with gDNA: hulk 0.55 vs salmon 0.96.
+EGFR gene-level Spearman with gDNA: rigel 0.55 vs salmon 0.96.
 The gDNA model not only misattributes transcript-level reads but also destroys gene-level structure.
 
 ---
 
 ## 7. Strand Specificity Impact
 
-| SS | hulkrna_oracle | salmon | kallisto |
+| SS | rigel_oracle | salmon | kallisto |
 |----|---------------|--------|----------|
 | 1.00 | **0.7318** | 0.5795 | 0.5458 |
 | 0.95 | **0.7292** | 0.5666 | 0.5293 |
 | 0.50 | **0.7290** | 0.5567 | 0.5014 |
 
-SS has **minimal effect** on hulkrna (0.003 drop from 1.0→0.5), while
-kallisto drops 0.04. This suggests hulkrna's strand model is not heavily leveraged yet —
+SS has **minimal effect** on rigel (0.003 drop from 1.0→0.5), while
+kallisto drops 0.04. This suggests rigel's strand model is not heavily leveraged yet —
 potential for improvement.
 
 ## 8. Minimap2 Alignment Penalty
@@ -297,7 +297,7 @@ residual assignment leaks through, particularly for EGFR (4,602 reads).
 
 ### Issue #4: EGFR-Specific gDNA Failure (MEDIUM IMPACT)
 
-**Magnitude**: Only region where hulkrna loses to competitors with gDNA present.
+**Magnitude**: Only region where rigel loses to competitors with gDNA present.
 **Root cause**: EGFR's dominant transcript (ENST00000275493.7) has long exons
 producing reads that look uniform, identical to the gDNA profile. The gDNA model
 absorbs it completely, driving the count to 0.
@@ -333,7 +333,7 @@ Both produce uniform coverage, but they differ in:
 
 ### C. Improve Strand Model Utilization
 
-The benchmark shows SS has minimal impact on hulkrna performance (0.003 drop from SS=1.0
+The benchmark shows SS has minimal impact on rigel performance (0.003 drop from SS=1.0
 to SS=0.5), suggesting strand information isn't being maximally leveraged. Better strand
 modeling could help distinguish mRNA (stranded) from gDNA (unstranded).
 

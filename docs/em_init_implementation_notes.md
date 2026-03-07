@@ -30,8 +30,8 @@ All 540 tests pass. The core improvements fix three critical bugs:
 
 | File | Changes |
 |------|---------|
-| `src/hulkrna/counter.py` | 4 new accumulator arrays in `__init__`; 4 new columns in `get_gene_counts_df`; 4 new entries in `gdna_summary`; updated prior zeroing comment |
-| `src/hulkrna/pipeline.py` | Pre-EM accumulation block in scan loop; `_compute_gdna_init` (replaces `_compute_simple_gdna_init`); `_compute_nrna_init` (new); updated call sites |
+| `src/rigel/counter.py` | 4 new accumulator arrays in `__init__`; 4 new columns in `get_gene_counts_df`; 4 new entries in `gdna_summary`; updated prior zeroing comment |
+| `src/rigel/pipeline.py` | Pre-EM accumulation block in scan loop; `_compute_gdna_init` (replaces `_compute_simple_gdna_init`); `_compute_nrna_init` (new); updated call sites |
 | `tests/test_gdna.py` | `TestComputeGdnaInit` (8 tests, replaces old 4); `TestComputeNrnaInit` (6 tests, new); `_make_strand_models_with_ss` helper |
 | `tests/test_counter.py` | Updated expected column list |
 | `tests/test_scenarios.py` | Loosened `TestOverlappingAntisense` tolerances with documented rationale |

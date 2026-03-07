@@ -1,10 +1,10 @@
-"""Tests for hulkrna.resolution — chimera detection and fragment resolution."""
+"""Tests for rigel.resolution — chimera detection and fragment resolution."""
 
 import pytest
 
-from hulkrna.types import ChimeraType, Strand, GenomicInterval
-from hulkrna.splice import SpliceType
-from hulkrna.resolution import (
+from rigel.types import ChimeraType, Strand, GenomicInterval
+from rigel.splice import SpliceType
+from rigel.resolution import (
     _detect_intrachromosomal_chimera,
     make_fragment,
     resolve_fragment,

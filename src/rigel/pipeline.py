@@ -1,5 +1,5 @@
 """
-hulkrna.pipeline — Single-pass BAM quantification pipeline with locus-level EM.
+rigel.pipeline — Single-pass BAM quantification pipeline with locus-level EM.
 
 Architecture
 ------------

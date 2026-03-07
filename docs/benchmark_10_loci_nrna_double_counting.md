@@ -10,7 +10,7 @@
 ## Executive Summary
 
 A 10-region × 12-condition benchmark (120 total conditions) reveals that
-**hulkrna dominates salmon and kallisto at both gene and transcript level**
+**rigel dominates salmon and kallisto at both gene and transcript level**
 in clean conditions, but **loses systematically in conditions with nascent RNA**
 due to a **double-counting bug in nRNA initialization and reporting**.
 
@@ -35,7 +35,7 @@ it is derived from the **same fragments** the EM processes.
 | Conditions per region | 2 × 2 × 3 = 12 |
 | Total conditions | 120 |
 | Fragment count | 100,000 per region |
-| Tools | hulkrna_oracle, hulkrna_minimap2, salmon, kallisto |
+| Tools | rigel_oracle, rigel_minimap2, salmon, kallisto |
 
 ---
 
@@ -47,8 +47,8 @@ it is derived from the **same fragments** the EM processes.
 
 | Tool | Pearson | Spearman | RMSE |
 |------|---------|----------|------|
-| hulkrna_oracle | **0.8142** | **0.7040** | **209.4** |
-| hulkrna_minimap2 | 0.8114 | 0.6836 | 202.6 |
+| rigel_oracle | **0.8142** | **0.7040** | **209.4** |
+| rigel_minimap2 | 0.8114 | 0.6836 | 202.6 |
 | salmon | 0.6061 | 0.5418 | 396.4 |
 | kallisto | 0.6053 | 0.5156 | 396.4 |
 
@@ -56,14 +56,14 @@ it is derived from the **same fragments** the EM processes.
 
 | Tool | Pearson | Spearman | RMSE |
 |------|---------|----------|------|
-| hulkrna_oracle | **0.9686** | **0.8898** | **152.9** |
-| hulkrna_minimap2 | 0.9671 | 0.8848 | 153.8 |
+| rigel_oracle | **0.9686** | **0.8898** | **152.9** |
+| rigel_minimap2 | 0.9671 | 0.8848 | 153.8 |
 | salmon | 0.9039 | 0.8600 | 950.7 |
 | kallisto | 0.8841 | 0.8449 | 1420.3 |
 
-hulkrna dominates overall, but the nRNA conditions drag down the averages.
+rigel dominates overall, but the nRNA conditions drag down the averages.
 
-### 2.2 Win/Loss Record (transcript-level Spearman, hulkrna_oracle)
+### 2.2 Win/Loss Record (transcript-level Spearman, rigel_oracle)
 
 | Competitor | nRNA=none | nRNA=moderate |
 |------------|-----------|---------------|
@@ -72,7 +72,7 @@ hulkrna dominates overall, but the nRNA conditions drag down the averages.
 
 **ALL losses to salmon/kallisto occur in nRNA=moderate conditions.**
 
-In nRNA=none conditions hulkrna is nearly unbeatable (59/60 vs salmon, 53/60 vs
+In nRNA=none conditions rigel is nearly unbeatable (59/60 vs salmon, 53/60 vs
 kallisto). The 16-17 losses in nRNA=moderate conditions are entirely caused by
 the double-counting bug.
 
@@ -200,9 +200,9 @@ incorporates nrna_init through `unambig_totals`. The result is approximately
 
 | File | Line | Issue |
 |------|------|-------|
-| `src/hulkrna/locus.py` | ~349 | `unambig_totals[n_t:2*n_t] = estimator.nrna_init[t_arr]` — treats nrna_init as disjoint observed data |
-| `src/hulkrna/native/em_solver.cpp` | ~405 | `nrna_count = unambig_totals[n_t + i] + em_totals[n_t + i]` — sums overlapping sets in M-step |
-| `src/hulkrna/estimator.py` | ~1360 | `nrna = self.nrna_init + self.nrna_em_counts` — double-counts in reporting |
+| `src/rigel/locus.py` | ~349 | `unambig_totals[n_t:2*n_t] = estimator.nrna_init[t_arr]` — treats nrna_init as disjoint observed data |
+| `src/rigel/native/em_solver.cpp` | ~405 | `nrna_count = unambig_totals[n_t + i] + em_totals[n_t + i]` — sums overlapping sets in M-step |
+| `src/rigel/estimator.py` | ~1360 | `nrna = self.nrna_init + self.nrna_em_counts` — double-counts in reporting |
 | `scripts/benchmarking/benchmark_region_competition.py` | ~1383 | `nascent_pred = nrna_init.sum() + nrna_em_counts.sum()` — benchmark pool also double-counts |
 
 ---
@@ -271,9 +271,9 @@ theta away from their true proportions.
 
 ## 6. Competitive Analysis in nRNA Conditions
 
-### 6.1 hulkrna vs salmon (transcript Spearman, nRNA=moderate, gDNA=none)
+### 6.1 rigel vs salmon (transcript Spearman, nRNA=moderate, gDNA=none)
 
-| Region | SS=0.50 hulkrna | SS=0.50 salmon | SS=0.95 hulkrna | SS=0.95 salmon |
+| Region | SS=0.50 rigel | SS=0.50 salmon | SS=0.95 rigel | SS=0.95 salmon |
 |--------|-----------------|----------------|-----------------|----------------|
 | EGFR | 0.640 | 0.857 | **0.431** | **0.876** |
 | PVT1_MYC | **0.725** | 0.383 | **0.465** | 0.385 |
@@ -286,10 +286,10 @@ theta away from their true proportions.
 | XIST_TSIX | **0.759** | 0.564 | **0.643** | 0.596 |
 | CDKN2A_2B | **0.877** | 0.671 | 0.630 | **0.704** |
 
-At SS=0.50 hulkrna wins 9/10 regions. At SS=0.95 hulkrna wins only 4/10 and
+At SS=0.50 rigel wins 9/10 regions. At SS=0.95 rigel wins only 4/10 and
 loses the 6 regions where the double-counting is most severe.
 
-**Conclusion**: Fixing the double-counting bug would likely make hulkrna dominant
+**Conclusion**: Fixing the double-counting bug would likely make rigel dominant
 in all nRNA conditions, not just unstranded ones.
 
 ---
@@ -297,7 +297,7 @@ in all nRNA conditions, not just unstranded ones.
 ## 7. Strengths (Not Affected by This Bug)
 
 - **Gene-level accuracy**: Pearson 0.97, Spearman 0.89 — best of all tools
-- **Zero dropout rate**: hulkrna expresses all transcripts; salmon has 12%
+- **Zero dropout rate**: rigel expresses all transcripts; salmon has 12%
   dropout, kallisto has 9%
 - **gDNA handling**: excellent, slight 0.3% over-estimate (no double-counting
   because gDNA reporting uses only `em_counts`, not `gdna_init + em_counts`)
@@ -361,7 +361,7 @@ correctly with this change.
 After fixing, we predict:
 - Pool-level nRNA at SS=0.95 should go from ~2× → ~1× (correct)
 - Transcript-level Spearman in nRNA+stranded conditions should improve by 0.15-0.25
-- hulkrna should win 55-60/60 conditions vs salmon (up from 44/60)
+- rigel should win 55-60/60 conditions vs salmon (up from 44/60)
 - The paradoxical strand inversion should disappear or reverse
 
 ---

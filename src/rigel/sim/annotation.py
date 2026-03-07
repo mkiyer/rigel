@@ -1,5 +1,5 @@
 """
-hulkrna.sim.annotation — Gene/transcript builder with splice-motif injection.
+rigel.sim.annotation — Gene/transcript builder with splice-motif injection.
 
 Provides a ``GeneBuilder`` that accumulates gene and transcript
 definitions, injects canonical splice-site motifs (GT-AG for +strand,
@@ -255,7 +255,7 @@ class GeneBuilder:
                 for exon in t.exons:
                     gtf_obj = GTFRecord(
                         seqname=t.ref,
-                        source="hulkrna_sim",
+                        source="rigel_sim",
                         feature="exon",
                         start=exon.start,  # GTF.__str__ adds +1
                         end=exon.end,

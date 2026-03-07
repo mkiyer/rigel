@@ -1,5 +1,5 @@
 """
-hulkrna.sim.genome — Mutable genome sequence for simulation.
+rigel.sim.genome — Mutable genome sequence for simulation.
 
 Generates a random DNA sequence of configurable length using a seeded
 RNG, stores it as a mutable list for O(1) edits (e.g., injecting

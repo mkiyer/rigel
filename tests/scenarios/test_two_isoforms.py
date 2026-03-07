@@ -5,7 +5,7 @@ t2 (minor): 2 exons — shared_5p, shared_3p (skips middle exon).
 """
 
 import pytest
-from hulkrna.sim import Scenario
+from rigel.sim import Scenario
 
 from .conftest import (
     GDNA_LEVELS, STRESS_COMBOS, STRESS_IDS,

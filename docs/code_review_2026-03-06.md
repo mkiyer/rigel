@@ -1,10 +1,10 @@
-# hulkrna Code Review and Cleanup Plan
+# rigel Code Review and Cleanup Plan
 
 Date: 2026-03-06
 
 ## Executive Summary
 
-`hulkrna` already contains strong scientific ideas:
+`rigel` already contains strong scientific ideas:
 
 - transcript abundance estimation from RNA-seq,
 - explicit deconvolution of genomic DNA contamination,
@@ -30,28 +30,28 @@ The main theme is:
 
 This plan is grounded in the current structure of the repository, especially these files:
 
-- `src/hulkrna/cli.py`
-- `src/hulkrna/config.py`
-- `src/hulkrna/pipeline.py`
-- `src/hulkrna/estimator.py`
-- `src/hulkrna/locus.py`
-- `src/hulkrna/scan.py`
-- `src/hulkrna/scoring.py`
-- `src/hulkrna/strand_model.py`
-- `src/hulkrna/buffer.py`
-- `src/hulkrna/annotate.py`
+- `src/rigel/cli.py`
+- `src/rigel/config.py`
+- `src/rigel/pipeline.py`
+- `src/rigel/estimator.py`
+- `src/rigel/locus.py`
+- `src/rigel/scan.py`
+- `src/rigel/scoring.py`
+- `src/rigel/strand_model.py`
+- `src/rigel/buffer.py`
+- `src/rigel/annotate.py`
 - `tests/test_cli.py`
 - `docs/TODO.md`
 
 ### 1. Configuration is only partially centralized
 
-`src/hulkrna/config.py` says it is the “single source of truth”, but in practice defaults and semantics are still split across multiple places:
+`src/rigel/config.py` says it is the “single source of truth”, but in practice defaults and semantics are still split across multiple places:
 
-- `src/hulkrna/config.py` dataclass defaults
-- `src/hulkrna/cli.py` `_DEFAULTS` in `quant_command()`
-- `src/hulkrna/cli.py` argparse help text
-- `src/hulkrna/tests/test_cli.py` `_SMALL_DEFAULTS`
-- duplicated fallback defaults in `src/hulkrna/estimator.py`, `src/hulkrna/locus.py`, `src/hulkrna/index.py`, and `src/hulkrna/pyfallback.py`
+- `src/rigel/config.py` dataclass defaults
+- `src/rigel/cli.py` `_DEFAULTS` in `quant_command()`
+- `src/rigel/cli.py` argparse help text
+- `src/rigel/tests/test_cli.py` `_SMALL_DEFAULTS`
+- duplicated fallback defaults in `src/rigel/estimator.py`, `src/rigel/locus.py`, `src/rigel/index.py`, and `src/rigel/pyfallback.py`
 
 This is the single biggest maintainability problem because it guarantees drift.
 
@@ -91,7 +91,7 @@ Examples:
 #### Internal numerical safeguards
 Examples:
 
-- `LOG_SAFE_FLOOR = 1e-10` in `src/hulkrna/scoring.py`
+- `LOG_SAFE_FLOOR = 1e-10` in `src/rigel/scoring.py`
 - `EM_PRIOR_EPSILON` from the native EM layer
 - `_NEG_INF`
 - low-level clamp and fallback values
@@ -99,9 +99,9 @@ Examples:
 #### Operational/performance constants
 Examples:
 
-- `_ANNOTATION_TABLE_PADDING = 1024` in `src/hulkrna/pipeline.py`
-- `_ANNOTATION_TABLE_MIN_CAPACITY = 4096` in `src/hulkrna/pipeline.py`
-- annotation table growth floor `1024` in `src/hulkrna/annotate.py`
+- `_ANNOTATION_TABLE_PADDING = 1024` in `src/rigel/pipeline.py`
+- `_ANNOTATION_TABLE_MIN_CAPACITY = 4096` in `src/rigel/pipeline.py`
+- annotation table growth floor `1024` in `src/rigel/annotate.py`
 - `chunk_size = 1_000_000`
 - `max_memory_bytes = 2 * 1024**3`
 
@@ -111,9 +111,9 @@ These categories should not live in the same conceptual bucket.
 
 Good examples already exist:
 
-- `src/hulkrna/config.py` uses typed dataclasses.
-- `src/hulkrna/scoring.py` explicitly moves closure state into `FragmentScorer`.
-- `src/hulkrna/pipeline.py` is trying to act as an orchestrator.
+- `src/rigel/config.py` uses typed dataclasses.
+- `src/rigel/scoring.py` explicitly moves closure state into `FragmentScorer`.
+- `src/rigel/pipeline.py` is trying to act as an orchestrator.
 
 But other parts still retain legacy shape:
 
@@ -155,7 +155,7 @@ A power user can infer a lot from docstrings and CLI help, but there is not yet 
 - when a user should touch it,
 - whether it is safe/common vs advanced/expert-only.
 
-That is critical for a tool with as much modeling depth as `hulkrna`.
+That is critical for a tool with as much modeling depth as `rigel`.
 
 ---
 
@@ -272,7 +272,7 @@ Right now the same settings live in multiple places. That makes drift inevitable
 ### Proposed design
 Introduce a parameter schema module, for example:
 
-- `src/hulkrna/parameter_registry.py`
+- `src/rigel/parameter_registry.py`
 
 Each parameter record should include:
 
@@ -302,16 +302,16 @@ Example categories:
 
 ### Concrete refactor steps
 
-1. Move all user-facing defaults out of `src/hulkrna/cli.py` `_DEFAULTS`.
-2. Make `src/hulkrna/config.py` consume the registry rather than hardcoding duplicated values.
+1. Move all user-facing defaults out of `src/rigel/cli.py` `_DEFAULTS`.
+2. Make `src/rigel/config.py` consume the registry rather than hardcoding duplicated values.
 3. Make CLI argument construction derive help/default metadata from the registry.
 4. Make YAML resolution and saved `config.json` derive key names from the same registry.
 5. Replace `tests/test_cli.py` `_SMALL_DEFAULTS` with tests that assert against the registry.
 6. Identify duplicated default values still living in:
-   - `src/hulkrna/estimator.py`
-   - `src/hulkrna/locus.py`
-   - `src/hulkrna/index.py`
-   - `src/hulkrna/pyfallback.py`
+   - `src/rigel/estimator.py`
+   - `src/rigel/locus.py`
+   - `src/rigel/index.py`
+   - `src/rigel/pyfallback.py`
    and either remove them or explicitly mark them as internal-only.
 
 ### Important distinction
@@ -319,9 +319,9 @@ Not every dataclass field in `PipelineConfig` needs to be a user-facing registry
 
 ### Likely files
 
-- `src/hulkrna/cli.py`
-- `src/hulkrna/config.py`
-- new `src/hulkrna/parameter_registry.py`
+- `src/rigel/cli.py`
+- `src/rigel/config.py`
+- new `src/rigel/parameter_registry.py`
 - `tests/test_cli.py`
 - possibly `README.md` and generated docs
 
@@ -339,7 +339,7 @@ Not every dataclass field in `PipelineConfig` needs to be a user-facing registry
 Turn `quant_command()` into a thin entrypoint.
 
 ### Current issue
-`quant_command()` in `src/hulkrna/cli.py` is functioning as parser, config merger, validator, serializer, and orchestrator.
+`quant_command()` in `src/rigel/cli.py` is functioning as parser, config merger, validator, serializer, and orchestrator.
 
 ### Proposed target structure
 
@@ -353,9 +353,9 @@ Create dedicated helpers/modules such as:
 
 or equivalent modules like:
 
-- `src/hulkrna/cli_quant.py`
-- `src/hulkrna/output_writer.py`
-- `src/hulkrna/run_manifest.py`
+- `src/rigel/cli_quant.py`
+- `src/rigel/output_writer.py`
+- `src/rigel/run_manifest.py`
 
 ### Concrete refactor steps
 
@@ -379,8 +379,8 @@ or equivalent modules like:
 
 ### Likely files
 
-- `src/hulkrna/cli.py`
-- new helper modules in `src/hulkrna/`
+- `src/rigel/cli.py`
+- new helper modules in `src/rigel/`
 - `tests/test_cli.py`
 - `tests/test_pipeline_routing.py`
 
@@ -415,8 +415,8 @@ Keep in the parameter registry and config dataclasses.
 #### B. Internal numerical constants
 Move into explicit constants modules, for example:
 
-- `src/hulkrna/constants_numeric.py`
-- `src/hulkrna/constants_performance.py`
+- `src/rigel/constants_numeric.py`
+- `src/rigel/constants_performance.py`
 
 #### C. Backend implementation constants
 If shared with C++/nanobind code, keep a documented backend contract describing which values must stay mirrored.
@@ -464,14 +464,14 @@ These are operational knobs, not biological ones. They may belong in advanced co
 
 ### Likely files
 
-- `src/hulkrna/config.py`
-- `src/hulkrna/scoring.py`
-- `src/hulkrna/locus.py`
-- `src/hulkrna/estimator.py`
-- `src/hulkrna/pipeline.py`
-- `src/hulkrna/annotate.py`
-- `src/hulkrna/frag_length_model.py`
-- `src/hulkrna/pyfallback.py`
+- `src/rigel/config.py`
+- `src/rigel/scoring.py`
+- `src/rigel/locus.py`
+- `src/rigel/estimator.py`
+- `src/rigel/pipeline.py`
+- `src/rigel/annotate.py`
+- `src/rigel/frag_length_model.py`
+- `src/rigel/pyfallback.py`
 
 ### Acceptance criteria
 
@@ -519,12 +519,12 @@ Sizing and growth heuristics are currently spread across `pipeline.py` and `anno
 
 ### Likely files
 
-- `src/hulkrna/pipeline.py`
-- `src/hulkrna/scan.py`
-- `src/hulkrna/annotate.py`
-- `src/hulkrna/estimator.py`
-- `src/hulkrna/pyfallback.py`
-- native bindings under `src/hulkrna/native/` or related extension code
+- `src/rigel/pipeline.py`
+- `src/rigel/scan.py`
+- `src/rigel/annotate.py`
+- `src/rigel/estimator.py`
+- `src/rigel/pyfallback.py`
+- native bindings under `src/rigel/native/` or related extension code
 
 ### Acceptance criteria
 
@@ -585,11 +585,11 @@ Create and enforce a naming glossary for recurring concepts:
 
 ### Likely files
 
-- `src/hulkrna/scan.py`
-- `src/hulkrna/locus.py`
-- `src/hulkrna/estimator.py`
-- `src/hulkrna/pipeline.py`
-- `src/hulkrna/scoring.py`
+- `src/rigel/scan.py`
+- `src/rigel/locus.py`
+- `src/rigel/estimator.py`
+- `src/rigel/pipeline.py`
+- `src/rigel/scoring.py`
 
 ### Acceptance criteria
 
@@ -742,7 +742,7 @@ Scope:
 - docs pages,
 - example YAML,
 - README upgrades,
-- perhaps `hulkrna quant --write-example-config` in the future.
+- perhaps `rigel quant --write-example-config` in the future.
 
 ---
 

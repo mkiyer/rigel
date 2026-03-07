@@ -4,167 +4,167 @@
 
 Research codebase for BAM parsing C++ conversion
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src)
+Read [](file:///Users/mkiyer/proj/rigel/src)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/CMakeLists.txt)
+Read [](file:///Users/mkiyer/proj/rigel/CMakeLists.txt)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/pyproject.toml)
+Read [](file:///Users/mkiyer/proj/rigel/pyproject.toml)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/cgranges)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/cgranges)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/fragment.py)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/fragment.py)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/types.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/types.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/types.py#200-200), lines 200 to 234
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/types.py#200-200), lines 200 to 234
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/bam.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/bam.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/categories.py)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/categories.py)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/bam.py#200-200), lines 200 to 471
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/bam.py#200-200), lines 200 to 471
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#200-200), lines 200 to 500
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#200-200), lines 200 to 500
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/buffer.py#1-1), lines 1 to 300
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/buffer.py#1-1), lines 1 to 300
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/stats.py)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/stats.py)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#500-500), lines 500 to 901
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#500-500), lines 500 to 901
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/scan.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/scan.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/index.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/index.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/config.py)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/config.py)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/index.py#200-200), lines 200 to 500
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/index.py#200-200), lines 200 to 500
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/pipeline.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/pipeline.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/scoring.cpp#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/scoring.cpp#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#200-200), lines 200 to 400
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#200-200), lines 200 to 400
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/pipeline.py#200-200), lines 200 to 637
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/pipeline.py#200-200), lines 200 to 637
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/index.py#500-500), lines 500 to 886
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/index.py#500-500), lines 500 to 886
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/strand_model.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/strand_model.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/strand_model.py#200-200), lines 200 to 601
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/strand_model.py#200-200), lines 200 to 601
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/frag_length_model.py#1-1), lines 1 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py#1-1), lines 1 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#400-400), lines 400 to 700
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#400-400), lines 400 to 700
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/cgranges/cgranges_bind.cpp)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/cgranges/cgranges_bind.cpp)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#700-700), lines 700 to 1000
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#700-700), lines 700 to 1000
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/buffer.py#300-300), lines 300 to 778
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/buffer.py#300-300), lines 300 to 778
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/frag_length_model.py#200-200), lines 200 to 492
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py#200-200), lines 200 to 492
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#1000-1000), lines 1000 to 1340
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#1000-1000), lines 1000 to 1340
 
 Read [](file:///Users/mkiyer/Library/Application%20Support/Code/User/workspaceStorage/b0333c28ca532cc65598cf64915f0588/GitHub.copilot-chat/chat-session-resources/c3a97ad7-dcb8-4947-ab51-920e8db0698c/toolu_bdrk_01KUVHTS4T8KkhuZ1xoa8n3E__vscode-1772478769228/content.txt)
 
 Now let me gather additional detail on the build system and the existing C++ patterns:  
 
-Read [](file:///Users/mkiyer/proj/hulkrna/CMakeLists.txt)
+Read [](file:///Users/mkiyer/proj/rigel/CMakeLists.txt)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/fragment.py#1-1), lines 1 to 160
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/fragment.py#1-1), lines 1 to 160
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/fragment.py#160-160), lines 160 to 167
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/fragment.py#160-160), lines 160 to 167
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#1-1), lines 1 to 100
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#1-1), lines 1 to 100
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#100-100), lines 100 to 200
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#100-100), lines 100 to 200
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native/resolve.cpp#1050-1050), lines 1050 to 1340
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native/resolve.cpp#1050-1050), lines 1050 to 1340
 
 Now let me look at the resolution module's multimapper pairing and the buffer module:  
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#715-715), lines 715 to 901
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#715-715), lines 715 to 901
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/stats.py#1-1), lines 1 to 65
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/stats.py#1-1), lines 1 to 65
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/stats.py#65-65), lines 65 to 161
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/stats.py#65-65), lines 65 to 161
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/types.py#1-1), lines 1 to 50
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/types.py#1-1), lines 1 to 50
 
 Now let me look at the config module to understand BamScanConfig and how the conda environment/htslib is set up:  
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/config.py#1-1), lines 1 to 120
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/config.py#1-1), lines 1 to 120
 
-Read [](file:///Users/mkiyer/proj/hulkrna/mamba_env.yaml)
+Read [](file:///Users/mkiyer/proj/rigel/mamba_env.yaml)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/config.py#120-120), lines 120 to 187
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/config.py#120-120), lines 120 to 187
 
-Read [](file:///Users/mkiyer/proj/hulkrna/pyproject.toml#1-1), lines 1 to 50
+Read [](file:///Users/mkiyer/proj/rigel/pyproject.toml#1-1), lines 1 to 50
 
 Now let me check the existing strand/frag-length model training interfaces and understand what data flows back to Python: 
 
 Research model training and buffer interfaces
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/strand_model.py#1-1), lines 1 to 150
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/strand_model.py#1-1), lines 1 to 150
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/frag_length_model.py#1-1), lines 1 to 150
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py#1-1), lines 1 to 150
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/buffer.py#580-580), lines 580 to 680
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/buffer.py#580-580), lines 580 to 680
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#1-1), lines 1 to 100
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#1-1), lines 1 to 100
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/pipeline.py#140-140), lines 140 to 250
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/pipeline.py#140-140), lines 140 to 250
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/pipeline.py#250-250), lines 250 to 300
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/pipeline.py#250-250), lines 250 to 300
 
-Searched for text `pair_multimapper_reads` (`**/src/hulkrna/resolution.py`), 2 results
+Searched for text `pair_multimapper_reads` (`**/src/rigel/resolution.py`), 2 results
 
-Searched for text `def resolve_fragment` (`**/src/hulkrna/resolution.py`), 1 result
+Searched for text `def resolve_fragment` (`**/src/rigel/resolution.py`), 1 result
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#748-748), lines 748 to 901
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#748-748), lines 748 to 901
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#396-396), lines 396 to 500
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#396-396), lines 396 to 500
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/strand_model.py#150-150), lines 150 to 601
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/strand_model.py#150-150), lines 150 to 601
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/pipeline.py#1-1), lines 1 to 140
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/pipeline.py#1-1), lines 1 to 140
 
-Searched for text `intronic` (`**/src/hulkrna/pipeline.py`), 6 results
+Searched for text `intronic` (`**/src/rigel/pipeline.py`), 6 results
 
-Searched for text `class FragmentLengthModels` (`**/src/hulkrna/frag_length_model.py`), 1 result
+Searched for text `class FragmentLengthModels` (`**/src/rigel/frag_length_model.py`), 1 result
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/frag_length_model.py#367-367), lines 367 to 492
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py#367-367), lines 367 to 492
 
-Searched for regex `class ResolvedFragment|class ResolvedFragment` (`**/src/hulkrna/resolution.py`), 1 result
+Searched for regex `class ResolvedFragment|class ResolvedFragment` (`**/src/rigel/resolution.py`), 1 result
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/resolution.py#295-295), lines 295 to 395
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/resolution.py#295-295), lines 295 to 395
 
 Let me check one more important area — the `detect_sj_strand_tag` and the annotate second-pass dependency on pysam:  
 
-Searched for text `pysam` (`**/src/hulkrna/annotate.py`), 4 results
+Searched for text `pysam` (`**/src/rigel/annotate.py`), 4 results
 
-Searched for regex `import pysam|from pysam` (`**/src/hulkrna/**/*.py`), 7 results
+Searched for regex `import pysam|from pysam` (`**/src/rigel/**/*.py`), 7 results
 
-Searched for text `pysam` (`**/src/hulkrna/index.py`), 2 results
+Searched for text `pysam` (`**/src/rigel/index.py`), 2 results
 
 Good — pysam in index.py is only for FASTA reading during index building, not the hot path. Now I have everything needed to write the plan. Let me also quickly verify the native directory structure:  
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/native)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/native)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/cgranges)
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/cgranges)
 
-Read [](file:///Users/mkiyer/proj/hulkrna/pyproject.toml#50-50), lines 50 to 69
+Read [](file:///Users/mkiyer/proj/rigel/pyproject.toml#50-50), lines 50 to 69
 
 Now I have a complete picture. Let me write the plan document.I don't have file editing tools available. I'll present the complete plan as a document for you to save. Here's the comprehensive plan:
 
@@ -183,18 +183,18 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
    - Update CMakeLists.txt to `find_library(hts)` and `find_path(htslib/hts.h)` from the conda prefix (`$ENV{CONDA_PREFIX}/lib`, `$ENV{CONDA_PREFIX}/include`)
    - Update pyproject.toml cmake args if needed to pass the conda prefix include/lib paths
 
-2. **Create the new C++ extension source file `src/hulkrna/native/bam_scanner.cpp`**
+2. **Create the new C++ extension source file `src/rigel/native/bam_scanner.cpp`**
    - New nanobind module: `_bam_impl`
    - Include `<htslib/sam.h>`, `<htslib/hts.h>`, nanobind headers, and the existing cgranges headers
-   - Mirror the constants already defined in native/resolve.cpp (Strand, SpliceType, ChimeraType, MergeOutcome values). Extract these into a shared header `src/hulkrna/native/constants.h` to avoid duplication.
+   - Mirror the constants already defined in native/resolve.cpp (Strand, SpliceType, ChimeraType, MergeOutcome values). Extract these into a shared header `src/rigel/native/constants.h` to avoid duplication.
 
-3. **Create shared header `src/hulkrna/native/constants.h`**
+3. **Create shared header `src/rigel/native/constants.h`**
    - Extract all `static constexpr` enum-mirror constants from resolve.cpp into this header
    - Also extract the `ExonBlock`, `IntronBlock`, `SJKey`, `SJKeyHash`, `RawResolveResult`, `MergeResult`, and `ChimeraResult` structs from resolve.cpp
    - Update resolve.cpp to `#include "constants.h"` instead of inline definitions
    - This shared header enables `bam_scanner.cpp` to call `FragmentResolver::_resolve_core()` directly
 
-4. **Extract `FragmentResolver` into a shared header `src/hulkrna/native/resolve_context.h`**
+4. **Extract `FragmentResolver` into a shared header `src/rigel/native/resolve_context.h`**
    - Move the `FragmentResolver` class declaration (with `_resolve_core()`, overlap index, SJ map, metadata) from resolve.cpp into a header
    - Keep resolve.cpp as the nanobind binding file that `#include`s the header
    - `bam_scanner.cpp` will `#include "resolve_context.h"` to call `_resolve_core()` directly in C++ without crossing the Python boundary
@@ -255,7 +255,7 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
     - Uses `ref_id` and `ref_start` from the parsed records (already available in C++ structs)
 
 12. **Implement model training observation collection**
-    - Model training (strand + fragment length) currently happens in Python during the scan loop ([pipeline.py lines 207-258](src/hulkrna/pipeline.py#L207-L258))
+    - Model training (strand + fragment length) currently happens in Python during the scan loop ([pipeline.py lines 207-258](src/rigel/pipeline.py#L207-L258))
     - **Design choice**: Collect training observations in C++ as batched arrays, return to Python for model updates
     - Define a `TrainingObservations` struct:
       - `strand_exonic_spliced`: pairs of `(exon_strand, sj_strand)` for qualified fragments
@@ -279,10 +279,10 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
 
 15. **Add `_bam_impl` to the CMake build**
     - New `nanobind_add_module(_bam_impl NOMINSIZE STABLE_ABI ...)` target in CMakeLists.txt
-    - Sources: `src/hulkrna/native/bam_scanner.cpp`, cgranges.c
+    - Sources: `src/rigel/native/bam_scanner.cpp`, cgranges.c
     - Link against: `hts` (htslib shared library)
     - Include dirs: cgranges, native, conda prefix `include`
-    - Install destination: `hulkrna`
+    - Install destination: `rigel`
 
 16. **Update Python `scan_and_buffer()` to use the C++ scanner**
     - In pipeline.py: try to import `_bam_impl`; if available, use `BamScanner` instead of the Python path
@@ -304,7 +304,7 @@ The key architectural decision is where to draw the C++/Python boundary. The mos
     - Keep the pysam open for the annotated BAM second pass (if enabled) — this is not performance-critical
 
 19. **Handle reference name mapping consistency**
-    - The `FragmentResolver` builds a `ref_to_id_` map from the index at construction time ([resolve.cpp `build_overlap_index`](src/hulkrna/native/resolve.cpp))
+    - The `FragmentResolver` builds a `ref_to_id_` map from the index at construction time ([resolve.cpp `build_overlap_index`](src/rigel/native/resolve.cpp))
     - The BAM header has its own `tid` mapping (integer reference IDs from htslib)
     - `BamScanner::open()` must build a `bam_tid → resolve_ref_id` translation table by matching `sam_hdr_tid2name(hdr, tid)` against `FragmentResolver::ref_to_id_`
     - Contigs in the BAM but not in the index get `resolve_ref_id = -1` (fragments on these contigs are intergenic)

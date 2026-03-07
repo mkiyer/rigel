@@ -1,5 +1,5 @@
 """
-hulkrna.types — Foundational data types used across the hulkrna pipeline.
+rigel.types — Foundational data types used across the rigel pipeline.
 
 This module defines the core types for genomic coordinates, strand
 orientation, interval representation, and set-merging primitives.

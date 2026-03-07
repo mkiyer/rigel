@@ -1,5 +1,5 @@
 """
-Tests for the annotated BAM output feature (hulkrna.annotate).
+Tests for the annotated BAM output feature (rigel.annotate).
 
 Verifies that:
 1. The AnnotationTable collects correct per-fragment metadata.
@@ -12,7 +12,7 @@ import shutil
 import numpy as np
 import pytest
 
-from hulkrna.annotate import (
+from rigel.annotate import (
     AnnotationTable,
     POOL_CODE,
     POOL_LABEL,
@@ -92,7 +92,7 @@ class TestAnnotationTable:
 
     def test_splice_type_label(self):
         """SpliceType codes convert to lowercase labels."""
-        from hulkrna.splice import SpliceType
+        from rigel.splice import SpliceType
         for st in SpliceType:
             label = _splice_type_label(int(st))
             assert label == st.name.lower()
@@ -114,7 +114,7 @@ class TestAnnotatedBamIntegration:
 
     @pytest.fixture
     def scenario(self, tmp_path):
-        from hulkrna.sim import Scenario
+        from rigel.sim import Scenario
         sc = Scenario(
             "annot_bam_test", genome_length=8000, seed=42,
             work_dir=tmp_path / "annot_bam",
@@ -140,9 +140,9 @@ class TestAnnotatedBamIntegration:
     def test_annotated_bam_produced(self, scenario, tmp_path):
         """run_pipeline with annotated_bam_path writes a valid BAM."""
         import pysam
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.sim import SimConfig, run_benchmark
-        from hulkrna.pipeline import run_pipeline
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.sim import SimConfig, run_benchmark
+        from rigel.pipeline import run_pipeline
 
         sim_config = SimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
@@ -213,9 +213,9 @@ class TestAnnotatedBamIntegration:
 
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
         """Pipeline counts are identical with and without annotation."""
-        from hulkrna.sim import SimConfig
-        from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-        from hulkrna.pipeline import run_pipeline
+        from rigel.sim import SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
 
         sim_config = SimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,

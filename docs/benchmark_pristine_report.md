@@ -1,17 +1,17 @@
-# Pristine Benchmark Report — hulkrna vs salmon vs kallisto
+# Pristine Benchmark Report — rigel vs salmon vs kallisto
 
 **Date:** 2025-07-01
 **Benchmark:** `benchmark_20_loci.yaml` — 10 genomic loci, 100k fragments each
 **Conditions:** strand_specificity=1.0, gDNA=0%, nRNA=0%, oracle aligner
-**Tools:** hulkrna (MAP-EM), salmon (v1.10.3), kallisto (v0.51.1)
+**Tools:** rigel (MAP-EM), salmon (v1.10.3), kallisto (v0.51.1)
 
 ---
 
 ## 1. Executive Summary
 
 Under pristine conditions (perfect strand specificity, no contamination, oracle
-alignment), hulkrna achieves the **best transcript-level accuracy** across the
-10-region panel, winning 7/10 regions on Spearman correlation. However, hulkrna
+alignment), rigel achieves the **best transcript-level accuracy** across the
+10-region panel, winning 7/10 regions on Spearman correlation. However, rigel
 **loses 8/10 regions at the gene level** due to a systematic artifact: the EM
 distributes phantom fractional counts to zero-truth genes, degrading rank-based
 metrics.
@@ -33,11 +33,11 @@ Four issues were identified, ordered by impact:
 
 | Tool | Spearman | Pearson | MAE | RMSE |
 |------|----------|---------|-----|------|
-| **hulkrna** | **0.9423** | **0.9889** | **41.36** | **157.24** |
+| **rigel** | **0.9423** | **0.9889** | **41.36** | **157.24** |
 | kallisto | 0.9349 | 0.9641 | 97.97 | 385.03 |
 | salmon | 0.9102 | 0.9446 | 116.76 | 473.48 |
 
-hulkrna leads by +0.0074 Spearman over kallisto and +0.0321 over salmon.
+rigel leads by +0.0074 Spearman over kallisto and +0.0321 over salmon.
 MAE is 2.4× better than kallisto and 2.8× better than salmon.
 
 ### Gene Level (averaged over 10 regions)
@@ -46,14 +46,14 @@ MAE is 2.4× better than kallisto and 2.8× better than salmon.
 |------|----------|---------|-----|------|
 | **kallisto** | **0.9973** | 1.0000 | **2.98** | **8.67** |
 | salmon | 0.9936 | 1.0000 | 3.27 | 9.67 |
-| hulkrna | 0.9848 | 1.0000 | 2.95 | 8.49 |
+| rigel | 0.9848 | 1.0000 | 2.95 | 8.49 |
 
-hulkrna's gene-level MAE (2.95) is actually the lowest, but its Spearman
+rigel's gene-level MAE (2.95) is actually the lowest, but its Spearman
 (0.9848) is worst due to rank perturbations among zero-count genes.
 
 ### Win/Loss Tally
 
-| Level | hulkrna Wins | hulkrna Losses |
+| Level | rigel Wins | rigel Losses |
 |-------|-------------|---------------|
 | Transcript Spearman | **7** | 3 |
 | Gene Spearman | 2 | **8** |
@@ -64,7 +64,7 @@ hulkrna's gene-level MAE (2.95) is actually the lowest, but its Spearman
 
 ### Transcript-Level Spearman
 
-| Region | hulkrna | salmon | kallisto | Advantage | Result |
+| Region | rigel | salmon | kallisto | Advantage | Result |
 |--------|---------|--------|----------|-----------|--------|
 | EGFR | 0.9948 | 0.9874 | **0.9995** | −0.0047 | LOSS |
 | CDKN2A_2B | **0.9929** | 0.9882 | 0.9850 | +0.0048 | WIN |
@@ -79,7 +79,7 @@ hulkrna's gene-level MAE (2.95) is actually the lowest, but its Spearman
 
 ### Gene-Level Spearman
 
-| Region | hulkrna | salmon | kallisto | Advantage | Result |
+| Region | rigel | salmon | kallisto | Advantage | Result |
 |--------|---------|--------|----------|-----------|--------|
 | XIST_TSIX | 0.9381 | **1.0000** | **1.0000** | −0.0619 | LOSS |
 | PVT1_MYC | 0.9613 | **1.0000** | **1.0000** | −0.0387 | LOSS |
@@ -105,7 +105,7 @@ transcript-level error.
 
 ### Scope
 
-9 out of 10 regions contain transcripts with duplicated hulkrna estimates:
+9 out of 10 regions contain transcripts with duplicated rigel estimates:
 
 | Region | Collapsed / Total | Groups | Worst |
 |--------|------------------|--------|-------|
@@ -124,19 +124,19 @@ transcript-level error.
 
 ### Example — TP53
 
-| Transcript | Truth | hulkrna | salmon | kallisto |
+| Transcript | Truth | rigel | salmon | kallisto |
 |------------|-------|---------|--------|----------|
 | ENST00000420246.6 | 7974 | 3843.7 | 7280.1 | 3805.1 |
 | ENST00000622645.4 | 6 | 3843.7 | 0.1 | 3805.1 |
 
-Both transcripts receive identical hulkrna estimates (~3844). The EM sees them
+Both transcripts receive identical rigel estimates (~3844). The EM sees them
 as a single equivalence class and splits evenly. Salmon resolves this pair
 (7280 vs 0.1), likely using its positional bias or sequence-specific bias models
 to break the symmetry.
 
 ### Root Cause
 
-hulkrna's fragment-to-transcript compatibility is based solely on genomic
+rigel's fragment-to-transcript compatibility is based solely on genomic
 overlap — if two transcripts share all exons and differ only in UTR length or
 minor terminal variants shorter than the fragment length, every fragment is
 compatible with both. The EM has no information to break the tie.
@@ -164,7 +164,7 @@ compatible with both. The EM has no information to break the tie.
 
 ### Description
 
-hulkrna assigns tiny fractional counts (0.001–0.20) to genes whose true count
+rigel assigns tiny fractional counts (0.001–0.20) to genes whose true count
 is zero. These phantom values perturb the rank ordering of zero-count genes,
 degrading Spearman correlation even though absolute errors are negligible.
 
@@ -178,22 +178,22 @@ its rank by 10+ positions.
 
 ### Evidence
 
-**XIST_TSIX (worst region, hulk=0.9381 vs kal=1.0000):**
+**XIST_TSIX (worst region, rigel=0.9381 vs kal=1.0000):**
 - 36 genes total; 20 have truth=0
-- hulkrna: only 14 of those 20 are exactly zero (6 get phantom counts)
+- rigel: only 14 of those 20 are exactly zero (6 get phantom counts)
 - kallisto: all 20 are exactly zero
-- Largest rank shift: 10 positions (gene ENSG00000234969.1, truth=0, hulk=0.01)
-- Max absolute error: hulk=0.55 counts (vs sal=21.6, kal=0.19)
+- Largest rank shift: 10 positions (gene ENSG00000234969.1, truth=0, rigel=0.01)
+- Max absolute error: rigel=0.55 counts (vs sal=21.6, kal=0.19)
 
-**PVT1_MYC (hulk=0.9613 vs kal=1.0000):**
+**PVT1_MYC (rigel=0.9613 vs kal=1.0000):**
 - 16 genes total; 8 have truth=0
-- hulkrna: only 6 of those 8 are exactly zero
+- rigel: only 6 of those 8 are exactly zero
 - kallisto: all 8 are exactly zero
-- Max absolute error: hulk=0.31 counts
+- Max absolute error: rigel=0.31 counts
 
 ### Key Insight
 
-Gene-level MAE is actually best for hulkrna (2.95 vs 2.98 for kallisto), proving
+Gene-level MAE is actually best for rigel (2.95 vs 2.98 for kallisto), proving
 the errors are negligible in magnitude. The Spearman penalty comes entirely from
 rank perturbations among near-zero genes.
 
@@ -216,7 +216,7 @@ rank perturbations among near-zero genes.
 
 ### Description
 
-In a pristine simulation with 0% nascent RNA, hulkrna incorrectly classifies a
+In a pristine simulation with 0% nascent RNA, rigel incorrectly classifies a
 small number of reads as nascent RNA (unspliced). This subtracts those reads from
 the mature RNA pool.
 
@@ -262,20 +262,20 @@ many genes and causes < 1 count error per gene on average.
 
 ## 7. Issue #4 — Transcript-Level Losses at 3 Loci
 
-### MALAT1_NEAT1 (hulk=0.9000 vs kal=0.9101, Δ=−0.0101)
+### MALAT1_NEAT1 (rigel=0.9000 vs kal=0.9101, Δ=−0.0101)
 
-This is the only region where hulkrna loses meaningfully on transcript Spearman.
+This is the only region where rigel loses meaningfully on transcript Spearman.
 MALAT1_NEAT1 is a dense locus with 252 transcripts, 73 of which are in 17
 equivalence class collapse groups. The high collapse rate (29%) combined with the
 19.4-read nRNA leak both contribute.
 
-### TTN (hulk=0.9214 vs kal=0.9242, Δ=−0.0028)
+### TTN (rigel=0.9214 vs kal=0.9242, Δ=−0.0028)
 
 Marginal loss. TTN has the highest collapse rate (42% of transcripts) among all
 regions, with 57/136 transcripts in 8 collapse groups. The large TTN gene
 produces many similar isoforms that are difficult for any tool.
 
-### EGFR (hulk=0.9948 vs kal=0.9995, Δ=−0.0047)
+### EGFR (rigel=0.9948 vs kal=0.9995, Δ=−0.0047)
 
 EGFR has only 18 transcripts but 3 are in 1 collapse group. kallisto achieves
 near-perfect Spearman (0.9995) here, likely because its k-mer-based model can
@@ -326,7 +326,7 @@ reads to the nascent RNA pool, particularly at short introns. This fixes Issue #
 
 ## 9. Summary
 
-hulkrna already achieves the best transcript-level accuracy on this pristine
+rigel already achieves the best transcript-level accuracy on this pristine
 benchmark (0.9423 Spearman, 41.4 MAE), substantially outperforming both salmon
 and kallisto. The two main areas for improvement are:
 

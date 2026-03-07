@@ -1,8 +1,8 @@
-# Full-Genome Benchmark: hulkrna vs salmon vs kallisto
+# Full-Genome Benchmark: rigel vs salmon vs kallisto
 
 ## Overview
 
-This report presents a full-genome benchmark comparing **hulkrna**, **salmon**,
+This report presents a full-genome benchmark comparing **rigel**, **salmon**,
 and **kallisto** on simulated RNA-seq data derived from real abundance estimates.
 Unlike the prior 10-region benchmark, this evaluation covers **all 254,461
 annotated transcripts** across the entire human genome, using 10 million
@@ -12,7 +12,7 @@ simulated fragments per condition.
 
 ### Ground Truth Construction
 
-Abundance estimates from a real hulkrna run on a STAR-aligned BAM
+Abundance estimates from a real rigel run on a STAR-aligned BAM
 (`mctp_LBX0069_SI_42153_HFFFMDRX7`) were used as ground truth:
 
 - **Source data**: 462,410 real fragments, 90,598 expressed transcripts
@@ -57,17 +57,17 @@ sample: **59.3% mRNA, 6.6% nRNA, 34.1% gDNA**.
 
 - **salmon 1.10.3**: `salmon index -k 23`, `salmon quant --validateMappings -l A`
 - **kallisto 0.51.1**: `kallisto index`, `kallisto quant --rf-stranded` (when SS ≥ 0.9)
-- **hulkrna**: `hulkrna quant --bam oracle.bam --index hulkrna_index -o output/`
+- **rigel**: `rigel quant --bam oracle.bam --index rigel_index -o output/`
 
 salmon and kallisto receive paired FASTQ files and build their own indexes from
-the transcript FASTA. hulkrna receives the oracle BAM (genome-aligned) and uses
-the pre-built hulkrna index.
+the transcript FASTA. rigel receives the oracle BAM (genome-aligned) and uses
+the pre-built rigel index.
 
 ## Results
 
 ### Pristine Condition (Pure mRNA)
 
-| Metric | salmon | kallisto | hulkrna |
+| Metric | salmon | kallisto | rigel |
 |--------|-------:|--------:|--------:|
 | Total truth | 10,000,000 | 10,000,000 | 10,000,000 |
 | Total estimated | 10,000,000 | 10,000,000 | 9,091,645 |
@@ -80,7 +80,7 @@ the pre-built hulkrna index.
 
 ### Realistic Condition (10% nRNA + 34% gDNA)
 
-| Metric | salmon | kallisto | hulkrna |
+| Metric | salmon | kallisto | rigel |
 |--------|-------:|--------:|--------:|
 | Total truth (mRNA only) | 5,940,000 | 5,940,000 | 5,940,000 |
 | Total estimated | 6,211,884 | 6,245,563 | 5,366,930 |
@@ -93,7 +93,7 @@ the pre-built hulkrna index.
 
 ### Condition Comparison (Δ Pristine → Realistic)
 
-| Metric | salmon | kallisto | hulkrna |
+| Metric | salmon | kallisto | rigel |
 |--------|-------:|--------:|--------:|
 | Δ Spearman ρ | −0.052 | −0.059 | **−0.028** |
 | Δ MAPE | +23.8 pp | +28.4 pp | **+6.0 pp** |
@@ -104,15 +104,15 @@ the pre-built hulkrna index.
 
 ### 1. Ranking Accuracy (Spearman ρ)
 
-hulkrna achieves the **highest Spearman rank correlation in both conditions**,
+rigel achieves the **highest Spearman rank correlation in both conditions**,
 indicating it best preserves the relative ordering of transcript expression
 levels. This is the most important metric for downstream differential expression
 analysis.
 
-- **Pristine**: hulkrna 0.899 > kallisto 0.867 > salmon 0.837
-- **Realistic**: hulkrna 0.871 > kallisto 0.808 > salmon 0.785
+- **Pristine**: rigel 0.899 > kallisto 0.867 > salmon 0.837
+- **Realistic**: rigel 0.871 > kallisto 0.808 > salmon 0.785
 
-Critically, hulkrna's degradation under contamination is **half that of
+Critically, rigel's degradation under contamination is **half that of
 salmon/kallisto** (−0.028 vs −0.052/−0.059), demonstrating robust performance
 even with heavy gDNA and nRNA contamination.
 
@@ -121,12 +121,12 @@ even with heavy gDNA and nRNA contamination.
 MAPE measures percent error for each transcript with truth > 1 fragment —
 a direct measure of how well each tool recovers per-transcript proportions.
 
-- **Pristine**: hulkrna 48.0% < kallisto 52.9% < salmon 57.1%
-- **Realistic**: hulkrna **54.0%** vs salmon 81.0% / kallisto 81.3%
+- **Pristine**: rigel 48.0% < kallisto 52.9% < salmon 57.1%
+- **Realistic**: rigel **54.0%** vs salmon 81.0% / kallisto 81.3%
 
-Under realistic contamination, hulkrna's MAPE increases by only **6 percentage
+Under realistic contamination, rigel's MAPE increases by only **6 percentage
 points** while salmon and kallisto each increase by **24–28 pp**. This is
-because hulkrna can identify and exclude gDNA and nRNA fragments, while
+because rigel can identify and exclude gDNA and nRNA fragments, while
 salmon and kallisto absorb all fragments into transcript estimates.
 
 ### 3. Absolute Accuracy (MAE)
@@ -135,13 +135,13 @@ salmon achieves the lowest MAE in both conditions. This is expected because:
 
 - salmon and kallisto account for **all input fragments** (total estimated ≈
   total truth in pristine; inflated in realistic)
-- hulkrna **correctly filters ~10% of fragments** as gDNA/nRNA-like, resulting
+- rigel **correctly filters ~10% of fragments** as gDNA/nRNA-like, resulting
   in systematic under-estimation of absolute counts
 
 Under realistic conditions, salmon and kallisto over-estimate total counts by
-**272K–306K fragments** (absorbing contamination), while hulkrna under-estimates
+**272K–306K fragments** (absorbing contamination), while rigel under-estimates
 by 573K. However, this absolute gap does not affect relative proportions — the
-rank ordering and per-transcript ratios are more accurate for hulkrna.
+rank ordering and per-transcript ratios are more accurate for rigel.
 
 ### 4. Contamination Handling
 
@@ -152,28 +152,28 @@ fundamental challenge:
 |------|----------|--------|
 | salmon | Maps all reads to transcriptome | Absorbs contamination → inflated counts |
 | kallisto | Pseudoaligns all reads | Same inflation pattern |
-| hulkrna | Classifies fragments as mRNA/nRNA/gDNA | Excludes contamination → preserved proportions |
+| rigel | Classifies fragments as mRNA/nRNA/gDNA | Excludes contamination → preserved proportions |
 
 salmon and kallisto have no mechanism to distinguish mRNA from contaminants.
 Every gDNA or nRNA read that maps to a transcript (even spuriously) gets
-assigned as expression signal. hulkrna uses splice-junction evidence, strand
+assigned as expression signal. rigel uses splice-junction evidence, strand
 specificity, and fragment geometry to classify reads, enabling it to filter
 contamination.
 
-### 5. Why hulkrna Under-estimates by ~10%
+### 5. Why rigel Under-estimates by ~10%
 
-Even in the pristine condition, hulkrna reports 9.09M vs 10M truth (−9.1%).
+Even in the pristine condition, rigel reports 9.09M vs 10M truth (−9.1%).
 This occurs because:
 
 1. **Single-exon transcripts**: Fragments from single-exon genes produce
-   unspliced alignments indistinguishable from gDNA — hulkrna conservatively
+   unspliced alignments indistinguishable from gDNA — rigel conservatively
    classifies some as gDNA
 2. **Fragment geometry filtering**: Some mRNA fragments that don't span splice
    junctions are treated as ambiguous
 3. **EM convergence**: The EM algorithm redistributes probability mass, and
    some fragments receive low posterior probability
 
-This under-estimation is a deliberate design trade-off: hulkrna sacrifices
+This under-estimation is a deliberate design trade-off: rigel sacrifices
 ~10% of absolute count recovery in exchange for dramatically better
 contamination robustness.
 
@@ -183,11 +183,11 @@ contamination robustness.
 |------|--------:|--------:|
 | salmon | 128s | 257s |
 | kallisto | 247s | 304s |
-| hulkrna | 505s | 520s |
+| rigel | 505s | 520s |
 
-salmon is fastest (index + quant from FASTQ). hulkrna is slower because it
+salmon is fastest (index + quant from FASTQ). rigel is slower because it
 performs fragment classification, locus-level EM, and gDNA/nRNA filtering
-on genome-aligned BAM input. Note that hulkrna's input is a genome-aligned
+on genome-aligned BAM input. Note that rigel's input is a genome-aligned
 BAM which requires a prior alignment step (STAR/HISAT2), while salmon and
 kallisto perform their own lightweight pseudo-alignment from FASTQ.
 
@@ -195,16 +195,16 @@ kallisto perform their own lightweight pseudo-alignment from FASTQ.
 
 | Strength | Winner |
 |----------|--------|
-| Best ranking accuracy (Spearman) | **hulkrna** (both conditions) |
-| Best relative accuracy (MAPE) | **hulkrna** (both conditions) |
-| Most robust to contamination | **hulkrna** (smallest degradation) |
+| Best ranking accuracy (Spearman) | **rigel** (both conditions) |
+| Best relative accuracy (MAPE) | **rigel** (both conditions) |
+| Most robust to contamination | **rigel** (smallest degradation) |
 | Lowest absolute error (MAE) | **salmon** (both conditions) |
 | Fastest runtime | **salmon** |
 
-hulkrna's key advantage is its ability to maintain accurate transcript rankings
+rigel's key advantage is its ability to maintain accurate transcript rankings
 and relative proportions even under heavy contamination. For the typical use
 case of differential expression analysis — where relative transcript levels
-matter far more than absolute counts — hulkrna provides the most reliable
+matter far more than absolute counts — rigel provides the most reliable
 estimates, especially for real-world samples that inevitably contain gDNA and
 nRNA contamination.
 
@@ -213,7 +213,7 @@ nRNA contamination.
 ```bash
 # Pristine
 python scripts/benchmarking/benchmark_full_genome.py \
-  --hulkrna-index /path/to/hulkrna_index \
+  --rigel-index /path/to/rigel_index \
   --counts /path/to/quant.feather \
   --genome /path/to/genome.fasta.bgz \
   --output-dir output/pristine \
@@ -221,7 +221,7 @@ python scripts/benchmarking/benchmark_full_genome.py \
 
 # Realistic
 python scripts/benchmarking/benchmark_full_genome.py \
-  --hulkrna-index /path/to/hulkrna_index \
+  --rigel-index /path/to/rigel_index \
   --counts /path/to/quant.feather \
   --genome /path/to/genome.fasta.bgz \
   --output-dir output/realistic \

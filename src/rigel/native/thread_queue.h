@@ -13,7 +13,7 @@
 #include <deque>
 #include <mutex>
 
-namespace hulk {
+namespace rigel {
 
 // ================================================================
 // BoundedQueue — bounded SPMC queue with backpressure
@@ -62,4 +62,4 @@ public:
     }
 };
 
-}  // namespace hulk
+}  // namespace rigel

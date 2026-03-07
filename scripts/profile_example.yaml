@@ -2,7 +2,7 @@
 # ║  Profile Configuration                                     ║
 # ╚═════════════════════════════════════════════════════════════╝
 #
-# Profile hulkrna on a real or simulated BAM file.
+# Profile rigel on a real or simulated BAM file.
 # Produces detailed timing, memory, and throughput reports.
 #
 # Usage:
@@ -13,7 +13,7 @@
 
 # ── Inputs ────────────────────────────────────────────────────
 bam: /path/to/reads_namesort.bam
-index: /path/to/hulkrna_index
+index: /path/to/rigel_index
 outdir: profile_output
 
 # ── Profiling options ─────────────────────────────────────────
@@ -37,8 +37,8 @@ memory_sample_interval_ms: 100
 
 # ── HulkRNA configurations ───────────────────────────────────
 # Multiple named configs for side-by-side comparison.
-# Keys match benchmark.py hulkrna_configs format.
-hulkrna_configs:
+# Keys match benchmark.py rigel_configs format.
+rigel_configs:
   default: {}
   # fast_em:
   #   em_iterations: 500

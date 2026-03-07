@@ -1,4 +1,4 @@
-"""Tests for hulkrna.buffer -- FragmentBuffer with native C++ accumulator.
+"""Tests for rigel.buffer -- FragmentBuffer with native C++ accumulator.
 
 All buffer append tests use C++ ResolvedFragment objects produced by
 FragmentResolver.resolve_fragment(), exercising the real native code path.
@@ -7,10 +7,10 @@ FragmentResolver.resolve_fragment(), exercising the real native code path.
 import numpy as np
 import pytest
 
-from hulkrna.types import Strand, MergeOutcome, GenomicInterval, ChimeraType
-from hulkrna.splice import SpliceType
-from hulkrna.resolution import make_fragment, resolve_fragment
-from hulkrna.buffer import (
+from rigel.types import Strand, MergeOutcome, GenomicInterval, ChimeraType
+from rigel.splice import SpliceType
+from rigel.resolution import make_fragment, resolve_fragment
+from rigel.buffer import (
     FragmentBuffer,
     BufferedFragment,
     FRAG_UNAMBIG,
@@ -19,7 +19,7 @@ from hulkrna.buffer import (
     FRAG_MULTIMAPPER,
     FRAG_CHIMERIC,
 )
-from hulkrna.index import TranscriptIndex
+from rigel.index import TranscriptIndex
 
 
 # =====================================================================
@@ -149,7 +149,7 @@ class TestFragmentAccumulator:
     """Test FragmentAccumulator directly (no FragmentBuffer)."""
 
     def test_append_and_size(self, mini_index):
-        from hulkrna._resolve_impl import FragmentAccumulator
+        from rigel._resolve_impl import FragmentAccumulator
 
         acc = FragmentAccumulator()
         assert acc.size == 0
@@ -160,7 +160,7 @@ class TestFragmentAccumulator:
         assert acc.size == 1
 
     def test_finalize_returns_dict(self, mini_index):
-        from hulkrna._resolve_impl import FragmentAccumulator
+        from rigel._resolve_impl import FragmentAccumulator
 
         acc = FragmentAccumulator()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
@@ -174,7 +174,7 @@ class TestFragmentAccumulator:
         assert "t_indices" in raw
 
     def test_finalize_multiple(self, mini_index):
-        from hulkrna._resolve_impl import FragmentAccumulator
+        from rigel._resolve_impl import FragmentAccumulator
 
         acc = FragmentAccumulator()
 

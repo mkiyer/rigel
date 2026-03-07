@@ -1,5 +1,5 @@
 """
-hulkrna.sim.benchmark — Accuracy benchmarking for simulation scenarios.
+rigel.sim.benchmark — Accuracy benchmarking for simulation scenarios.
 
 Compares observed counts from ``run_pipeline`` against ground-truth
 fragment assignments from the read simulator.  Produces per-transcript

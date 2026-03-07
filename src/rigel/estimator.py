@@ -1,5 +1,5 @@
 """
-hulkrna.estimator — Fragment abundance estimation with locus-level EM.
+rigel.estimator — Fragment abundance estimation with locus-level EM.
 
 AbundanceEstimator manages per-transcript and per-gene fragment count
 accumulation combined with Bayesian abundance estimation via EM.
@@ -64,7 +64,7 @@ from .splice import (
 logger = logging.getLogger(__name__)
 
 # Numerical constants shared between Python and C++ are defined once
-# in em_solver.cpp and imported from hulkrna._em_impl.
+# in em_solver.cpp and imported from rigel._em_impl.
 # EM_PRIOR_EPSILON is re-exported here for locus.py.
 
 # Default mean fragment length used when no observations are available
@@ -74,7 +74,7 @@ _DEFAULT_MEAN_FRAG = 200.0
 
 # NOTE: _apply_bias_correction_uniform, _apply_bias_correction,
 # _build_equiv_classes, _em_step, _vbem_step have been moved to C++
-# in hulkrna._em_impl (em_solver.cpp).  The entire SQUAREM loop now
+# in rigel._em_impl (em_solver.cpp).  The entire SQUAREM loop now
 # executes as a single native call via run_locus_em_native().
 
 

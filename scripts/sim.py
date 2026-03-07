@@ -82,8 +82,8 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from hulkrna.transcript import Transcript
-from hulkrna.types import Strand
+from rigel.transcript import Transcript
+from rigel.types import Strand
 
 logger = logging.getLogger(__name__)
 
@@ -653,8 +653,8 @@ class WholeGenomeSimulator:
                 for name, length in zip(self._ref_names, self._ref_lengths)
             ],
             "PG": [{
-                "ID": "hulkrna_sim",
-                "PN": "hulkrna_sim",
+                "ID": "rigel_sim",
+                "PN": "rigel_sim",
                 "VN": "1.0",
                 "CL": "simulated",
             }],

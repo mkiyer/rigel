@@ -2,7 +2,7 @@
  * cgranges_bind.cpp — nanobind wrapper for the vendored cgranges C library.
  *
  * Exposes a Python class ``cgranges`` with the same API surface used by
- * hulkrna's index module:
+ * rigel's index module:
  *
  *   g = cgranges()
  *   g.add(ctg, start, end, label)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark hulkrna (and optionally salmon, kallisto, htseq).
+"""Benchmark rigel (and optionally salmon, kallisto, htseq).
 
 .. note:: Supports gzipped FASTQ files (.fq.gz) transparently.
 
@@ -27,7 +27,7 @@ Output
 ::
 
     <outdir>/
-        hulkrna_index/
+        rigel_index/
         annotation.bed12
         <condition>/
             align_<aligner>/
@@ -62,21 +62,21 @@ except ImportError:
 
 import pysam
 
-from hulkrna.config import (
+from rigel.config import (
     BamScanConfig,
     EMConfig,
     FragmentScoringConfig,
     PipelineConfig,
 )
-from hulkrna.index import TranscriptIndex, write_bed12
-from hulkrna.pipeline import run_pipeline
-from hulkrna.scoring import (
+from rigel.index import TranscriptIndex, write_bed12
+from rigel.pipeline import run_pipeline
+from rigel.scoring import (
     GDNA_SPLICE_PENALTIES,
     SPLICE_UNANNOT,
     overhang_alpha_to_log_penalty,
 )
-from hulkrna.transcript import Transcript
-from hulkrna.types import Strand
+from rigel.transcript import Transcript
+from rigel.types import Strand
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def _get_peak_rss_mb() -> float:
 
 @dataclass
 class HulkrnaConfig:
-    """Named hulkrna parameterization for benchmarking."""
+    """Named rigel parameterization for benchmarking."""
 
     name: str
     params: dict = field(default_factory=dict)
@@ -154,7 +154,7 @@ class BenchmarkConfig:
     datasets: list[Dataset] = field(default_factory=list)
 
     aligners: list[AlignerConfig] = field(default_factory=list)
-    hulkrna_configs: list[HulkrnaConfig] = field(default_factory=list)
+    rigel_configs: list[HulkrnaConfig] = field(default_factory=list)
 
     salmon_enabled: bool = False
     kallisto_enabled: bool = False
@@ -211,9 +211,9 @@ def parse_yaml_config(path: str | Path) -> BenchmarkConfig:
         cfg.aligners.append(AlignerConfig(name=name, type=atype, params=params))
 
     # HulkRNA configs
-    hulk_raw = raw.get("hulkrna_configs", {"default": {}})
-    for name, params in hulk_raw.items():
-        cfg.hulkrna_configs.append(HulkrnaConfig(name=name, params=params or {}))
+    rigel_raw = raw.get("rigel_configs", {"default": {}})
+    for name, params in rigel_raw.items():
+        cfg.rigel_configs.append(HulkrnaConfig(name=name, params=params or {}))
 
     # Optional tools
     salmon_raw = raw.get("salmon", {})
@@ -316,16 +316,16 @@ def load_transcripts(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def build_hulkrna_index(
+def build_rigel_index(
     genome_path: str | Path,
     gtf_path: str | Path,
     index_dir: Path,
 ) -> TranscriptIndex:
-    """Build hulkrna index from full genome + GTF."""
+    """Build rigel index from full genome + GTF."""
     if (index_dir / "transcripts.feather").exists():
-        logger.info("hulkrna index already exists at %s, loading...", index_dir)
+        logger.info("rigel index already exists at %s, loading...", index_dir)
     else:
-        logger.info("Building hulkrna index → %s", index_dir)
+        logger.info("Building rigel index → %s", index_dir)
         TranscriptIndex.build(
             fasta_file=genome_path,
             gtf_file=gtf_path,
@@ -334,7 +334,7 @@ def build_hulkrna_index(
             gtf_parse_mode="warn-skip",
         )
     idx = TranscriptIndex.load(str(index_dir))
-    logger.info("Loaded hulkrna index: %d transcripts, %d genes",
+    logger.info("Loaded rigel index: %d transcripts, %d genes",
                 idx.num_transcripts, idx.num_genes)
     return idx
 
@@ -459,13 +459,13 @@ def coord_sort_bam(
 
 def _build_pipeline_config(
     pipeline_seed: int = 42,
-    hulkrna_config: HulkrnaConfig | None = None,
+    rigel_config: HulkrnaConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> PipelineConfig:
     """Build PipelineConfig from benchmark config + overrides."""
     raw: dict = {}
-    if hulkrna_config is not None:
-        raw.update(hulkrna_config.params)
+    if rigel_config is not None:
+        raw.update(rigel_config.params)
 
     em_kw: dict = {"seed": pipeline_seed}
     _EM_ALIASES = {
@@ -504,16 +504,16 @@ def _build_pipeline_config(
     )
 
 
-def run_hulkrna_tool(
+def run_rigel_tool(
     bam_path: Path,
     index: TranscriptIndex,
     pipeline_seed: int = 42,
-    hulkrna_config: HulkrnaConfig | None = None,
+    rigel_config: HulkrnaConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> tuple[dict[str, float], float, dict[str, float], int]:
-    """Run hulkrna pipeline → (transcript_counts, elapsed, pool_counts, n_fragments)."""
+    """Run rigel pipeline → (transcript_counts, elapsed, pool_counts, n_fragments)."""
     t0 = time.monotonic()
-    cfg = _build_pipeline_config(pipeline_seed, hulkrna_config, annotated_bam_path)
+    cfg = _build_pipeline_config(pipeline_seed, rigel_config, annotated_bam_path)
     pipe = run_pipeline(bam_path, index, config=cfg)
     elapsed = time.monotonic() - t0
 
@@ -900,14 +900,14 @@ def write_per_transcript_csv(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _hulkrna_tool_name(
+def _rigel_tool_name(
     aligner: AlignerConfig,
-    hulkrna_config: HulkrnaConfig,
-    multi_hulk: bool = False,
+    rigel_config: HulkrnaConfig,
+    multi_rigel: bool = False,
 ) -> str:
-    if multi_hulk:
-        return f"hulkrna_{hulkrna_config.name}_{aligner.name}"
-    return f"hulkrna_{aligner.name}"
+    if multi_rigel:
+        return f"rigel_{rigel_config.name}_{aligner.name}"
+    return f"rigel_{aligner.name}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -958,8 +958,8 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
     )
 
     # ── 3. Build indexes ─────────────────────────────────────────
-    hulkrna_index = build_hulkrna_index(
-        genome_path, gtf_path, outdir / "hulkrna_index",
+    rigel_index = build_rigel_index(
+        genome_path, gtf_path, outdir / "rigel_index",
     )
 
     # BED12 for minimap2
@@ -982,7 +982,7 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
         kallisto_idx = build_kallisto_index(transcript_fa, outdir)
 
     # ── 4. Benchmark loop ────────────────────────────────────────
-    multi_hulk = len(cfg.hulkrna_configs) > 1
+    multi_rigel = len(cfg.rigel_configs) > 1
     results: list[ConditionResult] = []
 
     for ds_idx, ds in enumerate(datasets):
@@ -1051,12 +1051,12 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
             tool_throughput: dict[str, float] = {}
             alignment_elapsed = 0.0
 
-            for hc in cfg.hulkrna_configs:
-                hn = _hulkrna_tool_name(ac, hc, multi_hulk)
-                print(f"    hulkrna ({hn})...", end="", flush=True)
+            for hc in cfg.rigel_configs:
+                hn = _rigel_tool_name(ac, hc, multi_rigel)
+                print(f"    rigel ({hn})...", end="", flush=True)
                 try:
-                    counts, elapsed, pools, n_frags = run_hulkrna_tool(
-                        bam_ns, hulkrna_index, ds.pipeline_seed, hc,
+                    counts, elapsed, pools, n_frags = run_rigel_tool(
+                        bam_ns, rigel_index, ds.pipeline_seed, hc,
                     )
                     tool_tx_counts[hn] = counts
                     tool_pool[hn] = pools
@@ -1190,7 +1190,7 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Benchmark hulkrna (and optional tools) on simulated or real data",
+        description="Benchmark rigel (and optional tools) on simulated or real data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--config", required=True, help="YAML configuration file")
@@ -1245,7 +1245,7 @@ def main() -> int:
     if cfg.sim_dir:
         print(f"  Sim dir:         {cfg.sim_dir}", flush=True)
     print(f"  Aligners:        {[a.name for a in cfg.aligners]}", flush=True)
-    print(f"  HulkRNA configs: {[h.name for h in cfg.hulkrna_configs]}", flush=True)
+    print(f"  HulkRNA configs: {[h.name for h in cfg.rigel_configs]}", flush=True)
     print(f"  Salmon:          {cfg.salmon_enabled}", flush=True)
     print(f"  Kallisto:        {cfg.kallisto_enabled}", flush=True)
     print(f"  HTSeq:           {cfg.htseq_enabled}", flush=True)

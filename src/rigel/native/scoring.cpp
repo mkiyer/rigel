@@ -2,7 +2,7 @@
  * scoring.cpp — nanobind C++ extension for hot-path scoring functions.
  *
  * This module provides performance-critical kernels called from the
- * Python scoring loop.  Functions are exposed as ``hulkrna._scoring_impl``.
+ * Python scoring loop.  Functions are exposed as ``rigel._scoring_impl``.
  *
  * Contents:
  *   - compute_fragment_weight(frag_start, frag_end, transcript_length)
@@ -12,7 +12,7 @@
  *       .score_emit_fragment(...)    — fused score+emit (bytes output)
  *
  * Build:
- *   Part of the hulkrna scikit-build-core build — see CMakeLists.txt.
+ *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
  */
 
 #include <algorithm>
@@ -27,10 +27,10 @@
 
 namespace nb = nanobind;
 
-// Use constants from constants.h via the hulk namespace.
-using hulk::LOG_HALF;
-using hulk::TAIL_DECAY_LP;
-using hulk::STRAND_NEG;
+// Use constants from constants.h via the rigel namespace.
+using rigel::LOG_HALF;
+using rigel::TAIL_DECAY_LP;
+using rigel::STRAND_NEG;
 
 // ----------------------------------------------------------------
 // Array type aliases
@@ -2022,7 +2022,7 @@ public:
 // ----------------------------------------------------------------
 
 NB_MODULE(_scoring_impl, m) {
-    m.doc() = "C++ hot-path scoring kernels for hulkrna (nanobind)";
+    m.doc() = "C++ hot-path scoring kernels for rigel (nanobind)";
 
     m.def("compute_fragment_weight", &compute_fragment_weight,
           nb::arg("frag_start"), nb::arg("frag_end"),
@@ -2110,6 +2110,6 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("gdna_log_splice_pen_unspliced"));
 
     // Export scoring constants for Python-side parity tests
-    m.attr("LOG_HALF")      = hulk::LOG_HALF;
-    m.attr("TAIL_DECAY_LP") = hulk::TAIL_DECAY_LP;
+    m.attr("LOG_HALF")      = rigel::LOG_HALF;
+    m.attr("TAIL_DECAY_LP") = rigel::TAIL_DECAY_LP;
 }

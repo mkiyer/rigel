@@ -1,4 +1,4 @@
-# hulkrna
+# rigel
 
 Bayesian RNA-seq transcript quantification with built-in gDNA and nascent
 RNA deconvolution.  Runs a single-pass BAM scan followed by an EM
@@ -10,7 +10,7 @@ tables.
 ```bash
 # From source (requires a C++17 compiler and conda/mamba)
 mamba env create -f mamba_env.yaml
-conda activate hulkrna
+conda activate rigel
 pip install --no-build-isolation -e .
 ```
 
@@ -18,10 +18,10 @@ pip install --no-build-isolation -e .
 
 ```bash
 # Build a transcript index from a GTF
-hulkrna index -g annotation.gtf -o my_index
+rigel index -g annotation.gtf -o my_index
 
 # Quantify a BAM file
-hulkrna quant -i my_index -b aligned.bam -o results/
+rigel quant -i my_index -b aligned.bam -o results/
 ```
 
 Output is written to `results/` as TSV files (`transcript.tsv`,

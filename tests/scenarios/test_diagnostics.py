@@ -6,9 +6,9 @@ rather than full sweep-based scenarios.
 
 import pytest
 
-from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig
-from hulkrna.pipeline import run_pipeline
-from hulkrna.sim import Scenario, run_benchmark
+from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+from rigel.pipeline import run_pipeline
+from rigel.sim import Scenario, run_benchmark
 
 from .conftest import sim_config, build_and_run, SIM_SEED, PIPELINE_SEED
 

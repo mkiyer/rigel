@@ -27,7 +27,7 @@ A single C++ function replacing the entire per-locus SQUAREM loop
 - Per-iteration `ndarray` allocation
 
 Target: **5–15× speedup** on the EM solver, bringing total pipeline time
-from ~16 s to ~4–6 s for the benchmark workload (putting hulkrna in the
+from ~16 s to ~4–6 s for the benchmark workload (putting rigel in the
 same performance ballpark as salmon/kallisto while retaining its accuracy
 advantage).
 
@@ -69,7 +69,7 @@ A single function that takes CSR data + config and returns converged
 `(theta, alpha, em_totals)`:
 
 ```cpp
-// hulkrna._em_impl
+// rigel._em_impl
 
 std::tuple<nb::ndarray<double>, nb::ndarray<double>, nb::ndarray<double>>
 run_locus_em_native(
@@ -103,7 +103,7 @@ run_locus_em_native(
 ### 3.2 Python call site (in `run_locus_em`)
 
 ```python
-from hulkrna._em_impl import run_locus_em_native
+from rigel._em_impl import run_locus_em_native
 
 theta, alpha, em_totals = run_locus_em_native(
     locus_em.offsets,
@@ -139,7 +139,7 @@ return statement.
 ### 4.1 File layout
 
 ```
-src/hulkrna/native/
+src/rigel/native/
     em_solver.cpp          # All EM logic + nanobind module definition
     em_solver.h            # (optional) shared declarations if needed
 ```
@@ -150,7 +150,7 @@ C++. Can split later if headers are needed by other modules.
 ### 4.2 Key internal functions
 
 ```cpp
-namespace hulk {
+namespace rigel {
 namespace em {
 
 // --- Bias correction (uniform fast-path) ---
@@ -210,7 +210,7 @@ void vbem_step(
 double digamma(double x);
 
 } // namespace em
-} // namespace hulk
+} // namespace rigel
 ```
 
 ### 4.3 Equivalence class hashing
@@ -401,10 +401,10 @@ nanobind_add_module(
   _em_impl
   NOMINSIZE
   STABLE_ABI
-  src/hulkrna/native/em_solver.cpp
+  src/rigel/native/em_solver.cpp
 )
 
-install(TARGETS _em_impl LIBRARY DESTINATION hulkrna)
+install(TARGETS _em_impl LIBRARY DESTINATION rigel)
 ```
 
 No external dependencies (no htslib, no cgranges). Pure C++17 + nanobind + numpy.
@@ -431,7 +431,7 @@ No external dependencies (no htslib, no cgranges). Pure C++17 + nanobind + numpy
 
 1. **Add import** at top:
    ```python
-   from hulkrna._em_impl import run_locus_em_native
+   from rigel._em_impl import run_locus_em_native
    ```
 
 2. **Replace `run_locus_em()` body** — the section from `_apply_bias_correction()` call through post-prune

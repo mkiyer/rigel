@@ -1,5 +1,5 @@
 """
-Shared test fixtures and helpers for hulkrna.
+Shared test fixtures and helpers for rigel.
 
 Provides small synthetic GTF data, minimal FASTA files, and helper
 functions so that tests can run without real genomic data.
@@ -23,14 +23,14 @@ def pytest_addoption(parser):
     )
 import pandas as pd
 
-from hulkrna.splice import SpliceStrandCol
-from hulkrna.estimator import (
+from rigel.splice import SpliceStrandCol
+from rigel.estimator import (
     AbundanceEstimator,
     EM_PRIOR_EPSILON,
     Locus,
     ScoredFragments,
 )
-from hulkrna.index import TranscriptIndex
+from rigel.index import TranscriptIndex
 
 # ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)

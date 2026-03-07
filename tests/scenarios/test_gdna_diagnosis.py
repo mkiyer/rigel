@@ -20,14 +20,14 @@ import textwrap
 import numpy as np
 import pytest
 
-from hulkrna.config import (
+from rigel.config import (
     BamScanConfig,
     EMConfig,
     PipelineConfig,
 )
-from hulkrna.pipeline import run_pipeline
-from hulkrna.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
-from hulkrna.locus import (
+from rigel.pipeline import run_pipeline
+from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.locus import (
     build_loci,
     build_locus_em_data,
     compute_nrna_init,
@@ -35,7 +35,7 @@ from hulkrna.locus import (
     compute_gdna_rate_hybrid,
     compute_eb_gdna_priors,
 )
-from hulkrna.estimator import (
+from rigel.estimator import (
     compute_hybrid_nrna_frac_priors,
     compute_global_gdna_density,
     estimate_kappa,

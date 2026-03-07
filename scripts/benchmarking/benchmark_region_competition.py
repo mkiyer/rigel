@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regional benchmark: hulkrna multimap vs salmon vs kallisto vs htseq.
+"""Regional benchmark: rigel multimap vs salmon vs kallisto vs htseq.
 
 Supports a combinatorial grid of gDNA contamination rates and strand
 specificity values. Per-region setup (extract, abundance assignment, index
@@ -7,8 +7,8 @@ build) is done once; the condition sweep re-simulates reads and re-runs all
 tools for each (gDNA rate, strand specificity) pair.
 
 Multiple aligners can be evaluated simultaneously (e.g. ``--aligner minimap2
-oracle``).  Each aligner produces a separate hulkrna result tagged as
-``hulkrna_<aligner>`` (e.g. ``hulkrna_minimap2``, ``hulkrna_oracle``).
+oracle``).  Each aligner produces a separate rigel result tagged as
+``rigel_<aligner>`` (e.g. ``rigel_minimap2``, ``rigel_oracle``).
 FASTQ-based tools (salmon, kallisto) are run once per condition and shared
 across aligners.
 
@@ -23,16 +23,16 @@ single-key dicts that supply a human-readable label::
       - HBB: chr11:5225000-5310000
       - chr7:55019017-55211628        # auto-labelled from coordinates
 
-**hulkrna parameterizations** – define multiple configurations to benchmark
-hulkrna against itself (e.g. different EM thresholds)::
+**rigel parameterizations** – define multiple configurations to benchmark
+rigel against itself (e.g. different EM thresholds)::
 
-    hulkrna_configs:
+    rigel_configs:
       default: {}
       strict_em:
         em_convergence_delta: 1.0e-5
 
 When there are multiple configs, tool names become
-``hulkrna_<config>_<aligner>`` (e.g. ``hulkrna_strict_em_oracle``).
+``rigel_<config>_<aligner>`` (e.g. ``rigel_strict_em_oracle``).
 
 **Aligner parameterizations** – define named aligner configurations with
 explicit parameters (replaces the ``aligner:`` list)::
@@ -50,13 +50,13 @@ explicit parameters (replaces the ``aligner:`` list)::
 
 Tools
 -----
-- hulkrna_<aligner>        : one result per aligner (single hulkrna config)
-- hulkrna_<cfg>_<aligner>  : one result per config × aligner (multiple configs)
+- rigel_<aligner>        : one result per aligner (single rigel config)
+- rigel_<cfg>_<aligner>  : one result per config × aligner (multiple configs)
 - salmon                   : salmon quant --validateMappings
 - kallisto                 : kallisto quant (--rf-stranded when strand_spec >= 0.9)
 - htseq_<aligner>          : htseq-count (gene-level only), one result per aligner
 
-Genome aligners for hulkrna/htseq inputs
+Genome aligners for rigel/htseq inputs
 ----------------------------------------
 - minimap2      : splice:sr with secondary alignments + annotation BED12
 - hisat2        : hisat2/hisat2-build with secondary alignments
@@ -77,7 +77,7 @@ Output per seed directory
     <region>/
         region/         – extracted FASTA & GTF
         transcripts.fa
-        hulkrna_index/
+        rigel_index/
         <condition>/          e.g. gdna_r0.25_ss_1.00
             reads/
             align/
@@ -113,26 +113,26 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime when config is used
     yaml = None
 
-from hulkrna.config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
-from hulkrna.gtf import GTFRecord
-from hulkrna.index import TranscriptIndex, write_bed12
-from hulkrna.pipeline import run_pipeline
-from hulkrna.scoring import (
+from rigel.config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
+from rigel.gtf import GTFRecord
+from rigel.index import TranscriptIndex, write_bed12
+from rigel.pipeline import run_pipeline
+from rigel.scoring import (
     GDNA_SPLICE_PENALTIES,
     SPLICE_UNANNOT,
     overhang_alpha_to_log_penalty,
 )
-from hulkrna.sim import OracleBamSimulator, GDNAConfig, ReadSimulator, SimConfig, reverse_complement
-from hulkrna.transcript import Transcript
-from hulkrna.types import Interval, Strand
+from rigel.sim import OracleBamSimulator, GDNAConfig, ReadSimulator, SimConfig, reverse_complement
+from rigel.transcript import Transcript
+from rigel.types import Interval, Strand
 
 logger = logging.getLogger(__name__)
 
 # ── Tool identifiers ────────────────────────────────────────────────
 
 # Legacy constants kept for aggregate_benchmarks backward-compatibility
-TRANSCRIPT_TOOLS = ("hulkrna_mm", "salmon", "kallisto")
-GENE_TOOLS = ("hulkrna_mm", "salmon", "kallisto", "htseq")
+TRANSCRIPT_TOOLS = ("rigel_mm", "salmon", "kallisto")
+GENE_TOOLS = ("rigel_mm", "salmon", "kallisto", "htseq")
 
 ALIGNER_CHOICES = ("minimap2", "hisat2", "oracle")
 
@@ -142,7 +142,7 @@ ALIGNER_CHOICES = ("minimap2", "hisat2", "oracle")
 
 @dataclass
 class HulkrnaConfig:
-    """Named hulkrna parameterization for benchmarking.
+    """Named rigel parameterization for benchmarking.
 
     Parameters in *params* are forwarded as keyword arguments to
     ``run_pipeline()``.  Anything not listed is left at its
@@ -189,22 +189,22 @@ class AlignerConfig:
 # ── Tool-naming helpers ─────────────────────────────────────────────
 
 
-def _hulkrna_tool_name(
+def _rigel_tool_name(
     aligner: str | AlignerConfig,
-    hulkrna_config: HulkrnaConfig | None = None,
+    rigel_config: HulkrnaConfig | None = None,
     *,
-    multi_hulk: bool = False,
+    multi_rigel: bool = False,
 ) -> str:
-    """Return hulkrna tool identifier.
+    """Return rigel tool identifier.
 
-    When there is only one hulkrna config (``multi_hulk=False``), the
-    name is ``hulkrna_<aligner>``.  With multiple configs it becomes
-    ``hulkrna_<config>_<aligner>`` so results are distinguishable.
+    When there is only one rigel config (``multi_rigel=False``), the
+    name is ``rigel_<aligner>``.  With multiple configs it becomes
+    ``rigel_<config>_<aligner>`` so results are distinguishable.
     """
     aname = aligner.name if isinstance(aligner, AlignerConfig) else aligner
-    if multi_hulk and hulkrna_config is not None:
-        return f"hulkrna_{hulkrna_config.name}_{aname}"
-    return f"hulkrna_{aname}"
+    if multi_rigel and rigel_config is not None:
+        return f"rigel_{rigel_config.name}_{aname}"
+    return f"rigel_{aname}"
 
 
 def _htseq_tool_name(aligner: str | AlignerConfig) -> str:
@@ -215,29 +215,29 @@ def _htseq_tool_name(aligner: str | AlignerConfig) -> str:
 
 def _get_transcript_tools(
     aligner_configs: list[AlignerConfig],
-    hulkrna_configs: list[HulkrnaConfig],
+    rigel_configs: list[HulkrnaConfig],
 ) -> tuple[str, ...]:
     """Build transcript-level tool list from active configs."""
-    multi = len(hulkrna_configs) > 1
+    multi = len(rigel_configs) > 1
     tools: list[str] = []
     for ac in aligner_configs:
-        for hc in hulkrna_configs:
-            tools.append(_hulkrna_tool_name(ac, hc, multi_hulk=multi))
+        for hc in rigel_configs:
+            tools.append(_rigel_tool_name(ac, hc, multi_rigel=multi))
     tools.extend(["salmon", "kallisto"])
     return tuple(tools)
 
 
 def _get_gene_tools(
     aligner_configs: list[AlignerConfig],
-    hulkrna_configs: list[HulkrnaConfig],
+    rigel_configs: list[HulkrnaConfig],
     include_htseq: bool = False,
 ) -> tuple[str, ...]:
     """Build gene-level tool list from active configs."""
-    multi = len(hulkrna_configs) > 1
+    multi = len(rigel_configs) > 1
     tools: list[str] = []
     for ac in aligner_configs:
-        for hc in hulkrna_configs:
-            tools.append(_hulkrna_tool_name(ac, hc, multi_hulk=multi))
+        for hc in rigel_configs:
+            tools.append(_rigel_tool_name(ac, hc, multi_rigel=multi))
     tools.extend(["salmon", "kallisto"])
     if include_htseq:
         for ac in aligner_configs:
@@ -527,7 +527,7 @@ def extract_region(
             for exon in t.exons:
                 gtf_obj = GTFRecord(
                     seqname=region.label,
-                    source="hulkrna_region_bench",
+                    source="rigel_region_bench",
                     feature="exon",
                     start=exon.start,
                     end=exon.end,
@@ -1288,14 +1288,14 @@ def write_read_accuracy_summary_csv(
 
 def _build_pipeline_config(
     args: argparse.Namespace,
-    hulkrna_config: HulkrnaConfig | None = None,
+    rigel_config: HulkrnaConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> PipelineConfig:
     """Build a :class:`PipelineConfig` from benchmark args + overrides."""
     # ── Collect raw param dict (base from args, then overlay) ────
     raw: dict = {}
-    if hulkrna_config is not None:
-        raw.update(hulkrna_config.params)
+    if rigel_config is not None:
+        raw.update(rigel_config.params)
 
     # ── EM config ────────────────────────────────────────────────
     em_kw: dict = {"seed": args.pipeline_seed}
@@ -1347,16 +1347,16 @@ def _build_pipeline_config(
     )
 
 
-def run_hulkrna_tool(
+def run_rigel_tool(
     bam_path: Path,
     index: TranscriptIndex,
     args: argparse.Namespace,
-    hulkrna_config: HulkrnaConfig | None = None,
+    rigel_config: HulkrnaConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> tuple[dict[str, float], float, dict[str, float]]:
-    """Run hulkrna pipeline and return (transcript_counts, elapsed_sec, pool_counts).
+    """Run rigel pipeline and return (transcript_counts, elapsed_sec, pool_counts).
 
-    When *hulkrna_config* is provided, its ``params`` are merged on
+    When *rigel_config* is provided, its ``params`` are merged on
     top of the base arguments drawn from *args*.  Supported params:
     ``em_convergence_delta``, ``em_iterations``, ``em_prior_alpha``,
     ``em_prior_gamma``,
@@ -1368,7 +1368,7 @@ def run_hulkrna_tool(
     that path.
     """
     t0 = time.monotonic()
-    cfg = _build_pipeline_config(args, hulkrna_config, annotated_bam_path)
+    cfg = _build_pipeline_config(args, rigel_config, annotated_bam_path)
     pipe = run_pipeline(bam_path, index, config=cfg)
     elapsed = time.monotonic() - t0
 
@@ -1689,7 +1689,7 @@ def run_region_benchmark(
     include_htseq: bool,
     htseq_conda_env: str,
     aligner_configs: list[AlignerConfig] | None = None,
-    hulkrna_configs: list[HulkrnaConfig] | None = None,
+    rigel_configs: list[HulkrnaConfig] | None = None,
 ) -> list[ConditionResult]:
     """Run benchmark for one region across all conditions.
 
@@ -1698,8 +1698,8 @@ def run_region_benchmark(
     aligner_configs : list of AlignerConfig, optional
         Named aligner configurations.  When *None*, falls back to
         building default configs from ``args.aligner``.
-    hulkrna_configs : list of HulkrnaConfig, optional
-        Named hulkrna parameterizations.  When *None* a single
+    rigel_configs : list of HulkrnaConfig, optional
+        Named rigel parameterizations.  When *None* a single
         ``HulkrnaConfig(name="default")`` is used.
 
     Returns a list of ConditionResult (one per condition combination).
@@ -1710,10 +1710,10 @@ def run_region_benchmark(
         aligner_configs = [
             AlignerConfig(name=a, type=a) for a in args.aligner
         ]
-    if hulkrna_configs is None:
-        hulkrna_configs = [HulkrnaConfig(name="default")]
+    if rigel_configs is None:
+        rigel_configs = [HulkrnaConfig(name="default")]
 
-    multi_hulk = len(hulkrna_configs) > 1
+    multi_rigel = len(rigel_configs) > 1
     has_hisat2 = any(ac.type == "hisat2" for ac in aligner_configs)
 
     reg_dir = out_root / region.label
@@ -1755,7 +1755,7 @@ def run_region_benchmark(
             for exon in t.exons:
                 gtf_obj = GTFRecord(
                     seqname=region.label,
-                    source="hulkrna_region_bench",
+                    source="rigel_region_bench",
                     feature="exon",
                     start=exon.start,
                     end=exon.end,
@@ -1779,8 +1779,8 @@ def run_region_benchmark(
     bed_path = reg_dir / "annotation.bed"
     write_bed12(transcripts, bed_path)
 
-    # hulkrna index (reused across conditions)
-    index_dir = reg_dir / "hulkrna_index"
+    # rigel index (reused across conditions)
+    index_dir = reg_dir / "rigel_index"
     TranscriptIndex.build(region_fa, region_gtf, index_dir, write_tsv=False)
     index = TranscriptIndex.load(index_dir)
 
@@ -1803,8 +1803,8 @@ def run_region_benchmark(
     n_transcripts = len(transcripts)
     n_genes = len({t.g_id for t in transcripts})
 
-    tx_tools = _get_transcript_tools(aligner_configs, hulkrna_configs)
-    gene_tools = _get_gene_tools(aligner_configs, hulkrna_configs, include_htseq=include_htseq)
+    tx_tools = _get_transcript_tools(aligner_configs, rigel_configs)
+    gene_tools = _get_gene_tools(aligner_configs, rigel_configs, include_htseq=include_htseq)
 
     # ── Condition sweep ─────────────────────────────────────────────
 
@@ -1874,7 +1874,7 @@ def run_region_benchmark(
                 )
                 truth_counts, n_gdna_actual = parse_truth_from_fastq(fastq_r1)
 
-                # ── Per-aligner: BAM + hulkrna + htseq ──────────────
+                # ── Per-aligner: BAM + rigel + htseq ──────────────
 
                 tx_tool_counts: dict[str, tuple[dict[str, float], float]] = {}
                 tool_pool_counts: dict[str, dict[str, float]] = {}
@@ -1914,13 +1914,13 @@ def run_region_benchmark(
                     else:
                         raise RuntimeError(f"Unsupported aligner type: {ac.type}")
 
-                    # Run hulkrna on this aligner's BAM — once per config
-                    for hc in hulkrna_configs:
-                        hn = _hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)
-                        print(f"    Running hulkrna ({hn})...", end="", flush=True)
+                    # Run rigel on this aligner's BAM — once per config
+                    for hc in rigel_configs:
+                        hn = _rigel_tool_name(ac, hc, multi_rigel=multi_rigel)
+                        print(f"    Running rigel ({hn})...", end="", flush=True)
                         ann_bam = align_dir / f"annotated_{hc.name}.bam"
-                        hk_counts, hk_elapsed, hk_pools = run_hulkrna_tool(
-                            bam_ns, index, args=args, hulkrna_config=hc,
+                        hk_counts, hk_elapsed, hk_pools = run_rigel_tool(
+                            bam_ns, index, args=args, rigel_config=hc,
                             annotated_bam_path=ann_bam,
                         )
                         tx_tool_counts[hn] = (hk_counts, hk_elapsed)
@@ -2161,11 +2161,11 @@ def run_region_benchmark(
                     )
                 )
 
-                hulkrna_parts = " | ".join(
-                    f"{_hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)} MAE="
-                    f"{transcript_metrics[_hulkrna_tool_name(ac, hc, multi_hulk=multi_hulk)]['mean_abs_error']:.2f}"
+                rigel_parts = " | ".join(
+                    f"{_rigel_tool_name(ac, hc, multi_rigel=multi_rigel)} MAE="
+                    f"{transcript_metrics[_rigel_tool_name(ac, hc, multi_rigel=multi_rigel)]['mean_abs_error']:.2f}"
                     for ac in aligner_configs
-                    for hc in hulkrna_configs
+                    for hc in rigel_configs
                 )
                 htseq_parts = ""
                 if include_htseq:
@@ -2177,7 +2177,7 @@ def run_region_benchmark(
                     "    aligners=%s | %s | "
                     "salmon MAE=%.2f | kallisto MAE=%.2f%s",
                     aligner_str,
-                    hulkrna_parts,
+                    rigel_parts,
                     transcript_metrics["salmon"]["mean_abs_error"],
                     transcript_metrics["kallisto"]["mean_abs_error"],
                     htseq_parts,
@@ -2540,7 +2540,7 @@ def write_diagnostics(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Regional benchmark: hulkrna vs salmon vs kallisto vs htseq",
+        description="Regional benchmark: rigel vs salmon vs kallisto vs htseq",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--genome", type=Path, required=False, default=None, help="Genome FASTA path")
@@ -2575,7 +2575,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         nargs="+",
         choices=list(ALIGNER_CHOICES),
         default=["minimap2"],
-        help="Genome aligner(s) for hulkrna/htseq inputs; specify one or more "
+        help="Genome aligner(s) for rigel/htseq inputs; specify one or more "
              "(e.g. --aligner minimap2 oracle). oracle: bypass alignment with perfect BAM",
     )
     p.add_argument(
@@ -2690,7 +2690,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         dest="overhang_alpha",
         type=float,
         default=None,
-        help="Overhang alpha for hulkrna (default: use pipeline default 0.01). "
+        help="Overhang alpha for rigel (default: use pipeline default 0.01). "
              "0 = hard binary, 1 = off.",
     )
 
@@ -2736,12 +2736,12 @@ def ensure_tools(
 def _flatten_config_dict(d: dict, prefix: str = "") -> dict:
     """Flatten nested YAML dicts for scalar option mapping.
 
-    Structured sections (``hulkrna_configs``, ``aligners``) are
+    Structured sections (``rigel_configs``, ``aligners``) are
     preserved as-is and NOT flattened — they are handled separately
     by :func:`apply_yaml_config`.
     """
     # Sections that should be kept as structured dicts
-    _STRUCTURED_SECTIONS = {"hulkrna_configs", "aligners"}
+    _STRUCTURED_SECTIONS = {"rigel_configs", "aligners"}
 
     out: dict = {}
     for key, value in d.items():
@@ -2773,7 +2773,7 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
 
     - **region** entries can be plain strings (``chr:start-end``) or
       single-key dicts (``{Name: "chr:start-end"}``) for named regions.
-    - **hulkrna_configs** – mapping of ``name → {param: value, …}``.
+    - **rigel_configs** – mapping of ``name → {param: value, …}``.
     - **aligners** – mapping of ``name → {type: …, param: value, …}``.
     """
     if args.config is None:
@@ -2792,16 +2792,16 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
 
     # ── Structured sections (not in argparse) ───────────────────────
 
-    # hulkrna_configs
-    if "hulkrna_configs" in cfg and "hulkrna_configs" not in cli_overrides:
-        raw_hc = cfg.pop("hulkrna_configs")
+    # rigel_configs
+    if "rigel_configs" in cfg and "rigel_configs" not in cli_overrides:
+        raw_hc = cfg.pop("rigel_configs")
         if isinstance(raw_hc, dict):
-            args.hulkrna_configs = [
+            args.rigel_configs = [
                 HulkrnaConfig(name=str(name), params=dict(params) if isinstance(params, dict) else {})
                 for name, params in raw_hc.items()
             ]
         else:
-            raise ValueError("hulkrna_configs must be a mapping of name → {params}")
+            raise ValueError("rigel_configs must be a mapping of name → {params}")
 
     # aligners
     if "aligners" in cfg and "aligner" not in cli_overrides:
@@ -2858,7 +2858,7 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
 
     for raw_key, value in cfg.items():
         # Skip already-handled structured sections
-        if raw_key in {"hulkrna_configs", "aligners"}:
+        if raw_key in {"rigel_configs", "aligners"}:
             continue
         dest = raw_key.replace("-", "_")
         dest = alias_map.get(dest, dest)
@@ -2945,9 +2945,9 @@ def main() -> int:
 
     # ── Build HulkrnaConfig list ────────────────────────────────────
 
-    hulkrna_configs: list[HulkrnaConfig] = getattr(args, "hulkrna_configs", None) or []
-    if not hulkrna_configs:
-        hulkrna_configs = [HulkrnaConfig(name="default")]
+    rigel_configs: list[HulkrnaConfig] = getattr(args, "rigel_configs", None) or []
+    if not rigel_configs:
+        rigel_configs = [HulkrnaConfig(name="default")]
 
     # Keep args.aligner in sync for any code that still reads it
     args.aligner = [ac.name for ac in aligner_configs]
@@ -3024,17 +3024,17 @@ def main() -> int:
     )
 
     n_aligner = len(aligner_configs)
-    n_hulk = len(hulkrna_configs)
+    n_rigel = len(rigel_configs)
     n_conditions = len(gdna_rates) * len(nrna_rates) * len(strand_specificities) * len(regions)
     logger.info(
         "Benchmark grid: %d gDNA rates × %d nRNA rates × %d strand specs "
-        "× %d regions × %d aligners × %d hulkrna configs = %d conditions",
+        "× %d regions × %d aligners × %d rigel configs = %d conditions",
         len(gdna_rates),
         len(nrna_rates),
         len(strand_specificities),
         len(regions),
         n_aligner,
-        n_hulk,
+        n_rigel,
         n_conditions,
     )
     print(
@@ -3048,12 +3048,12 @@ def main() -> int:
         "Aligners: %s",
         ", ".join(f"{ac.name} ({ac.type})" for ac in aligner_configs),
     )
-    if n_hulk > 1:
+    if n_rigel > 1:
         logger.info(
             "HulkRNA configs: %s",
             ", ".join(
                 f"{hc.name}" + (f" ({hc.params})" if hc.params else "")
-                for hc in hulkrna_configs
+                for hc in rigel_configs
             ),
         )
 
@@ -3122,7 +3122,7 @@ def main() -> int:
                 include_htseq=include_htseq,
                 htseq_conda_env=htseq_conda_env,
                 aligner_configs=aligner_configs,
-                hulkrna_configs=hulkrna_configs,
+                rigel_configs=rigel_configs,
             )
             all_results.extend(region_results)
 

@@ -1,10 +1,10 @@
 # Benchmark: chr8 PVT1 / MYC locus — competition config
-# hulkrna vs salmon vs kallisto
+# rigel vs salmon vs kallisto
 # Tests accuracy under pristine, gDNA, and nRNA conditions
 
-genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
-gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_pvt1_competition
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/bench_pvt1_competition
 
 threads: 8
 
@@ -17,7 +17,7 @@ aligners:
   oracle: {}
 
 # ── HulkRNA configs ─────────────────────────────────────────────────
-hulkrna_configs:
+rigel_configs:
   default: {}
 
 # ── Simulation ───────────────────────────────────────────────────────

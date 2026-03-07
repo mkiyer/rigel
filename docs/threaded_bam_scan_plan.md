@@ -284,7 +284,7 @@ For 4 workers = ~13 MB total. Negligible.
 
 ### Phase 2: Threading infrastructure
 
-**File**: New header `src/hulkrna/native/thread_queue.h`
+**File**: New header `src/rigel/native/thread_queue.h`
 
 #### 2a. Bounded SPMC queue
 

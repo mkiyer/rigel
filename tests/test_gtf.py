@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from hulkrna.gtf import GTFRecord
-from hulkrna.transcript import Transcript
+from rigel.gtf import GTFRecord
+from rigel.transcript import Transcript
 
 
 def _lines_with_malformed_middle() -> list[str]:

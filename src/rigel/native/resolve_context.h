@@ -34,7 +34,7 @@ extern "C" {
 
 namespace nb = nanobind;
 
-namespace hulk {
+namespace rigel {
 
 // ================================================================
 // ResolvedFragment — C++ result object exposed to Python
@@ -1088,4 +1088,4 @@ public:
     }
 };
 
-}  // namespace hulk
+}  // namespace rigel

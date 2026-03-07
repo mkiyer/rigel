@@ -2,13 +2,13 @@
 
 **Date:** 2026-02-18
 **Status:** Draft — Revised
-**Scope:** hulkrna three-pool EM initialization pipeline
+**Scope:** rigel three-pool EM initialization pipeline
 
 ---
 
 ## 1. Overview
 
-hulkrna is a three-pool EM-based RNA-seq quantification pipeline that
+rigel is a three-pool EM-based RNA-seq quantification pipeline that
 separates mature RNA (mRNA), nascent RNA (nRNA), and genomic DNA
 (gDNA) contamination. The EM vector layout:
 
@@ -200,9 +200,9 @@ transcript produced the fragment. Transcript k with
 ### 3.1 Bug 1: `unambig_counts` Only Contains SPLICED_ANNOT Entries
 
 **Location:** `_compute_simple_gdna_init` at
-[pipeline.py](src/hulkrna/pipeline.py#L862-L893);
-`assign_unambig` at [counter.py](src/hulkrna/counter.py#L360-L373);
-routing at [pipeline.py](src/hulkrna/pipeline.py#L768-L770)
+[pipeline.py](src/rigel/pipeline.py#L862-L893);
+`assign_unambig` at [counter.py](src/rigel/counter.py#L360-L373);
+routing at [pipeline.py](src/rigel/pipeline.py#L768-L770)
 
 **The bug:** `_compute_simple_gdna_init` reads antisense counts from
 `counter.unambig_counts`. But `assign_unambig()` is only called on
@@ -222,7 +222,7 @@ gDNA fragments are almost always UNSPLICED → they never reach
 
 ### 3.2 Bug 2: nRNA Initialized to Zero
 
-**Location:** [pipeline.py](src/hulkrna/pipeline.py#L1046-L1047)
+**Location:** [pipeline.py](src/rigel/pipeline.py#L1046-L1047)
 
 **The bug:** `nrna_init = np.zeros(num_transcripts)` unconditionally.
 The EM must discover nRNA from likelihood alone, starting at massive
@@ -233,7 +233,7 @@ disadvantage vs gDNA (which gets `2 × antisense` init) and mRNA
 
 ### 3.3 Bug 3: Prior Zeroing Creates Dead Zones
 
-**Location:** [counter.py](src/hulkrna/counter.py#L399-L402)
+**Location:** [counter.py](src/rigel/counter.py#L399-L402)
 
 ```python
 for i in range(ng):
@@ -265,8 +265,8 @@ init and (b) transcript-level intronic sense/antisense counts for
 nRNA init, from ALL single-gene fragments during the scan.
 
 **Files to modify:**
-- [counter.py](src/hulkrna/counter.py#L155-L220) `ReadCounter.__init__`: add arrays
-- [pipeline.py](src/hulkrna/pipeline.py#L544-L850) `_scan_and_build_em_data`: add accumulation
+- [counter.py](src/rigel/counter.py#L155-L220) `ReadCounter.__init__`: add arrays
+- [pipeline.py](src/rigel/pipeline.py#L544-L850) `_scan_and_build_em_data`: add accumulation
 
 **New arrays on `ReadCounter`:**
 
@@ -288,7 +288,7 @@ self.transcript_intronic_antisense = np.zeros(num_transcripts, dtype=np.float64)
 **Accumulation logic in `_scan_and_build_em_data`:**
 
 Inside the `for i in range(chunk.size)` loop at
-[pipeline.py L759](src/hulkrna/pipeline.py#L759), for fragments
+[pipeline.py L759](src/rigel/pipeline.py#L759), for fragments
 with `fc == FRAG_UNIQUE` or `fc == FRAG_AMBIG_SAME_STRAND`:
 
 ```python
@@ -341,7 +341,7 @@ The accumulation runs BEFORE the routing decision in the loop body.
 
 **Goal:** Strand-corrected gDNA init using all-category antisense.
 
-**File:** [pipeline.py L862-893](src/hulkrna/pipeline.py#L862-L893):
+**File:** [pipeline.py L862-893](src/rigel/pipeline.py#L862-L893):
 replace entire function.
 
 **New function:**
@@ -379,7 +379,7 @@ def _compute_gdna_init(
 ```
 
 **Call site update at
-[pipeline.py L1036-1043](src/hulkrna/pipeline.py#L1036-L1043):**
+[pipeline.py L1036-1043](src/rigel/pipeline.py#L1036-L1043):**
 
 ```python
 if enable_gdna_shadows:
@@ -397,7 +397,7 @@ else:
 **Goal:** Initialize nRNA per-transcript from transcript-level
 intronic sense excess.
 
-**File:** [pipeline.py L1046-1047](src/hulkrna/pipeline.py#L1046-L1047):
+**File:** [pipeline.py L1046-1047](src/rigel/pipeline.py#L1046-L1047):
 replace `nrna_init = np.zeros(...)`
 
 **New function:**
@@ -453,7 +453,7 @@ nrna_init = _compute_nrna_init(
 
 **Goal:** Remove dead-zone creation when gDNA init = 0.
 
-**File:** [counter.py L399-402](src/hulkrna/counter.py#L399-L402):
+**File:** [counter.py L399-402](src/rigel/counter.py#L399-L402):
 remove the gDNA prior zeroing loop.
 
 **Current code (remove):**
@@ -472,7 +472,7 @@ a small floor so the EM can discover gDNA from likelihood even when
 init is zero (e.g., gene-ambiguous antisense not counted in Step 1).
 
 **Keep:** nRNA prior zeroing for single-exon transcripts
-([counter.py L406-419](src/hulkrna/counter.py#L406-L419)) — still
+([counter.py L406-419](src/rigel/counter.py#L406-L419)) — still
 correct and necessary. Single-exon nRNA is physically identical
 to mRNA; allowing nRNA mass would create identifiability problems.
 
@@ -482,9 +482,9 @@ to mRNA; allowing nRNA mass would create identifiability problems.
 accessible in pipeline output.
 
 **Files:**
-- [counter.py](src/hulkrna/counter.py#L762-L825) `get_gene_counts_df`:
+- [counter.py](src/rigel/counter.py#L762-L825) `get_gene_counts_df`:
   add gene-level columns `n_sense_all`, `n_antisense_all`
-- [counter.py](src/hulkrna/counter.py#L876-L894) `gdna_summary`:
+- [counter.py](src/rigel/counter.py#L876-L894) `gdna_summary`:
   add totals for all new accumulators
 - Per-transcript output (if applicable): add
   `intronic_sense`, `intronic_antisense` from the transcript-level
@@ -495,7 +495,7 @@ accessible in pipeline output.
 **6a. Re-run diagnostic sweep:**
 
 ```bash
-conda run -n hulkrna python scripts/diagnostic_two_exon_ctrl.py
+conda run -n rigel python scripts/diagnostic_two_exon_ctrl.py
 ```
 
 Compare against baseline
@@ -536,10 +536,10 @@ Compare against baseline
 
 ```bash
 # Run full test suite
-conda run -n hulkrna python -m pytest tests/ -v
+conda run -n rigel python -m pytest tests/ -v
 
 # Run 125-parameter diagnostic sweep
-conda run -n hulkrna python scripts/diagnostic_two_exon_ctrl.py
+conda run -n rigel python scripts/diagnostic_two_exon_ctrl.py
 ```
 
 **Key metrics per grid point:**

@@ -538,9 +538,9 @@ Total additional memory: ~50 MB peak (one chunk's output arrays at a time).
 
 | File | Change |
 |-|-|
-| `src/hulkrna/native/scoring.cpp` | Add `scan_chunk` method + helpers (~200 lines) |
-| `src/hulkrna/scan.py` | Refactor `scan()` to call `scan_chunk` per chunk (~50 lines changed) |
-| `src/hulkrna/scoring.py` | Pass gDNA penalties to NativeFragmentScorer constructor (~5 lines) |
+| `src/rigel/native/scoring.cpp` | Add `scan_chunk` method + helpers (~200 lines) |
+| `src/rigel/scan.py` | Refactor `scan()` to call `scan_chunk` per chunk (~50 lines changed) |
+| `src/rigel/scoring.py` | Pass gDNA penalties to NativeFragmentScorer constructor (~5 lines) |
 | `CMakeLists.txt` | No change (scoring.cpp already built) |
 | `tests/test_*.py` | Add numerical equivalence test |
 

@@ -1,5 +1,5 @@
 """
-hulkrna.sim — Simulation framework for synthetic RNA-seq test scenarios.
+rigel.sim — Simulation framework for synthetic RNA-seq test scenarios.
 
 Modules
 -------
@@ -18,7 +18,7 @@ benchmark
 
 Quick Start
 -----------
->>> from hulkrna.sim import Scenario
+>>> from rigel.sim import Scenario
 >>> with Scenario("test1", genome_length=5000, seed=42) as sc:
 ...     sc.add_gene("g1", "+", [
 ...         {"t_id": "t1", "exons": [(100, 300), (500, 700)], "abundance": 100},

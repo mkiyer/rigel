@@ -1,4 +1,4 @@
-# hulkrna Second-Order Cleanup Plan
+# rigel Second-Order Cleanup Plan
 
 Date: 2026-03-06
 
@@ -102,7 +102,7 @@ a config equal to `PipelineConfig()` when no CLI or YAML overrides are given.
 | Location | Purpose |
 |----------|---------|
 | `pyproject.toml:7` | Build system / PyPI |
-| `src/hulkrna/__init__.py:1` | `__version__` at runtime |
+| `src/rigel/__init__.py:1` | `__version__` at runtime |
 | `cli.py:292` (inside `_write_quant_outputs`) | Hardcoded in `summary.json` |
 
 A version bump requires updating all three.  The summary.json copy is
@@ -118,7 +118,7 @@ particularly dangerous because it produces incorrect provenance silently.
    ```python
    from importlib.metadata import version, PackageNotFoundError
    try:
-       __version__ = version("hulkrna")
+       __version__ = version("rigel")
    except PackageNotFoundError:
        __version__ = "0.0.0+unknown"
    ```
@@ -129,15 +129,15 @@ particularly dangerous because it produces incorrect provenance silently.
    ```python
    from . import __version__
    summary = {
-       "hulkrna_version": __version__,
+       "rigel_version": __version__,
        ...
    }
    ```
 
 **Files:** `__init__.py`, `cli.py`
 **Risk:** Low.  `importlib.metadata` is stdlib since Python 3.8.
-**Tests:** Add a test that `summary.json["hulkrna_version"]` matches
-`hulkrna.__version__`.
+**Tests:** Add a test that `summary.json["rigel_version"]` matches
+`rigel.__version__`.
 
 ---
 

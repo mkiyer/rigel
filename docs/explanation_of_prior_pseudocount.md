@@ -2,19 +2,19 @@
 
  Let me trace the exact code path to give you a precise answer.  
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/locus.py#1-1), lines 1 to 50
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/locus.py#1-1), lines 1 to 50
 
-Searched for text `def build_locus_em_data` (`**/src/hulkrna/locus.py`), 1 result
+Searched for text `def build_locus_em_data` (`**/src/rigel/locus.py`), 1 result
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/locus.py#147-147), lines 147 to 350
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/locus.py#147-147), lines 147 to 350
 
 Now let me read the EM initialization in `run_locus_em` where the OVR is constructed: 
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/estimator.py#660-660), lines 660 to 780
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/estimator.py#660-660), lines 660 to 780
 
 Now let me also read the `_em_step` to show the full M-step formula:  
 
-Read [](file:///Users/mkiyer/proj/hulkrna/src/hulkrna/estimator.py#120-120), lines 120 to 155
+Read [](file:///Users/mkiyer/proj/rigel/src/rigel/estimator.py#120-120), lines 120 to 155
 
 Now I have the full picture. Here's the precise walkthrough:
 
@@ -24,7 +24,7 @@ Now I have the full picture. Here's the precise walkthrough:
 
 You're right that there's an accumulation problem. Let me walk through the exact data flow:
 
-### Step 1: Base prior construction ([locus.py, line ~340](src/hulkrna/locus.py#L340))
+### Step 1: Base prior construction ([locus.py, line ~340](src/rigel/locus.py#L340))
 
 ```python
 prior = np.full(n_components, counter.em_prior, dtype=np.float64)
@@ -32,7 +32,7 @@ prior = np.full(n_components, counter.em_prior, dtype=np.float64)
 
 Every component (mRNA, nRNA, gDNA) starts with `prior[k] = em_pseudocount` (was 0.50, now 0.01). Then certain components get zeroed: gDNA if no unspliced fragments, nRNA if single-exon or zero nrna_init. This is the **flat Dirichlet pseudocount** — call it $\alpha_{\text{base}}$.
 
-### Step 2: OVR is ADDED on top ([estimator.py, line ~726](src/hulkrna/estimator.py#L726))
+### Step 2: OVR is ADDED on top ([estimator.py, line ~726](src/rigel/estimator.py#L726))
 
 ```python
 prior = prior + coverage_totals / n_ambiguous
@@ -44,7 +44,7 @@ $$\alpha_k = \alpha_{\text{base}} + \frac{\text{coverage\_totals}_k}{N_{\text{am
 
 The OVR part sums to exactly 1.0 across all components. **It was never a replacement — it was always additive.**
 
-### Step 3: MAP-EM M-step ([estimator.py, line ~148](src/hulkrna/estimator.py#L148))
+### Step 3: MAP-EM M-step ([estimator.py, line ~148](src/rigel/estimator.py#L148))
 
 ```python
 theta_new = unambig_totals + em_totals + prior

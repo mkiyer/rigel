@@ -1,11 +1,11 @@
-"""Tests for hulkrna.strand_model — Bayesian strand model."""
+"""Tests for rigel.strand_model — Bayesian strand model."""
 
 import json
 
 import pytest
 
-from hulkrna.types import Strand
-from hulkrna.strand_model import StrandModel, StrandModels
+from rigel.types import Strand
+from rigel.strand_model import StrandModel, StrandModels
 
 
 class TestStrandModelObserve:

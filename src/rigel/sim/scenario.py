@@ -1,5 +1,5 @@
 """
-hulkrna.sim.scenario — End-to-end simulation scenario orchestrator.
+rigel.sim.scenario — End-to-end simulation scenario orchestrator.
 
 A ``Scenario`` bundles genome generation, gene annotation, read
 simulation, alignment (minimap2), BAM collation (samtools), and
@@ -275,7 +275,7 @@ class Scenario:
         self._owns_workdir = work_dir is None
 
         if work_dir is None:
-            self.work_dir = Path(tempfile.mkdtemp(prefix=f"hulkrna_sim_{name}_"))
+            self.work_dir = Path(tempfile.mkdtemp(prefix=f"rigel_sim_{name}_"))
         else:
             self.work_dir = Path(work_dir)
             self.work_dir.mkdir(parents=True, exist_ok=True)

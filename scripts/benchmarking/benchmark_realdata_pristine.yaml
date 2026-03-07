@@ -2,12 +2,12 @@
 # Uses oracle BAM (no aligner noise) to establish tool accuracy baselines.
 # Abundances are random (log-uniform) to match the existing benchmark configs.
 #
-# Derived from real-data hulkrna run on:
+# Derived from real-data rigel run on:
 #   mctp_LBX0069_SI_42153_HFFFMDRX7/bam/star.collate.markdup.bam
 
-genome: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genome_controls.fasta.bgz
-gtf: /Users/mkiyer/Downloads/hulkrna_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/hulkrna_runs/bench_realdata_pristine
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/bench_realdata_pristine
 
 threads: 8
 
@@ -29,7 +29,7 @@ aligners:
   oracle: {}
 
 # ── HulkRNA configs ─────────────────────────────────────────────────
-hulkrna_configs:
+rigel_configs:
   default: {}
 
 # ── Simulation ───────────────────────────────────────────────────────

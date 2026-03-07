@@ -12,22 +12,22 @@
  *   - native/constants.h
  *   - native/resolve_context.h
  *
- * Module: hulkrna._resolve_impl
+ * Module: rigel._resolve_impl
  *
  * Build:
- *   Part of the hulkrna scikit-build-core build — see CMakeLists.txt.
+ *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
  */
 
 #include "resolve_context.h"
 
-using namespace hulk;
+using namespace rigel;
 
 // ================================================================
 // nanobind module definition
 // ================================================================
 
 NB_MODULE(_resolve_impl, m) {
-    m.doc() = "C++ fragment resolution kernel for hulkrna (nanobind).\n\n"
+    m.doc() = "C++ fragment resolution kernel for rigel (nanobind).\n\n"
               "Ports resolve_fragment() to C++ with direct cgranges queries.";
 
     // --- ResolvedFragment ---
@@ -115,34 +115,34 @@ NB_MODULE(_resolve_impl, m) {
         ;
 
     // --- Expose C++ enum constants as module-level attributes ---
-    // These mirror the Python IntEnum values in hulkrna.types / hulkrna.splice.
+    // These mirror the Python IntEnum values in rigel.types / rigel.splice.
     // Single authoritative source: constants.h
 
     // Strand
-    m.attr("STRAND_NONE")      = hulk::STRAND_NONE;
-    m.attr("STRAND_POS")       = hulk::STRAND_POS;
-    m.attr("STRAND_NEG")       = hulk::STRAND_NEG;
-    m.attr("STRAND_AMBIGUOUS") = hulk::STRAND_AMBIGUOUS;
+    m.attr("STRAND_NONE")      = rigel::STRAND_NONE;
+    m.attr("STRAND_POS")       = rigel::STRAND_POS;
+    m.attr("STRAND_NEG")       = rigel::STRAND_NEG;
+    m.attr("STRAND_AMBIGUOUS") = rigel::STRAND_AMBIGUOUS;
 
     // SpliceType
-    m.attr("SPLICE_UNSPLICED")       = hulk::SPLICE_UNSPLICED;
-    m.attr("SPLICE_SPLICED_UNANNOT") = hulk::SPLICE_SPLICED_UNANNOT;
-    m.attr("SPLICE_SPLICED_ANNOT")   = hulk::SPLICE_SPLICED_ANNOT;
+    m.attr("SPLICE_UNSPLICED")       = rigel::SPLICE_UNSPLICED;
+    m.attr("SPLICE_SPLICED_UNANNOT") = rigel::SPLICE_SPLICED_UNANNOT;
+    m.attr("SPLICE_SPLICED_ANNOT")   = rigel::SPLICE_SPLICED_ANNOT;
 
     // MergeOutcome
-    m.attr("MC_INTERSECTION")          = hulk::MC_INTERSECTION;
-    m.attr("MC_INTERSECTION_NONEMPTY") = hulk::MC_INTERSECTION_NONEMPTY;
-    m.attr("MC_UNION")                 = hulk::MC_UNION;
-    m.attr("MC_EMPTY")                 = hulk::MC_EMPTY;
+    m.attr("MC_INTERSECTION")          = rigel::MC_INTERSECTION;
+    m.attr("MC_INTERSECTION_NONEMPTY") = rigel::MC_INTERSECTION_NONEMPTY;
+    m.attr("MC_UNION")                 = rigel::MC_UNION;
+    m.attr("MC_EMPTY")                 = rigel::MC_EMPTY;
 
     // ChimeraType
-    m.attr("CHIMERA_NONE")           = hulk::CHIMERA_NONE;
-    m.attr("CHIMERA_TRANS")          = hulk::CHIMERA_TRANS;
-    m.attr("CHIMERA_CIS_STRAND_SAME") = hulk::CHIMERA_CIS_STRAND_SAME;
-    m.attr("CHIMERA_CIS_STRAND_DIFF") = hulk::CHIMERA_CIS_STRAND_DIFF;
+    m.attr("CHIMERA_NONE")           = rigel::CHIMERA_NONE;
+    m.attr("CHIMERA_TRANS")          = rigel::CHIMERA_TRANS;
+    m.attr("CHIMERA_CIS_STRAND_SAME") = rigel::CHIMERA_CIS_STRAND_SAME;
+    m.attr("CHIMERA_CIS_STRAND_DIFF") = rigel::CHIMERA_CIS_STRAND_DIFF;
 
     // IntervalType
-    m.attr("ITYPE_EXON")           = hulk::ITYPE_EXON;
+    m.attr("ITYPE_EXON")           = rigel::ITYPE_EXON;
     m.attr("ITYPE_INTRON")         = static_cast<int8_t>(1);  // TRANSCRIPT slot
-    m.attr("ITYPE_UNAMBIG_INTRON") = hulk::ITYPE_UNAMBIG_INTRON;
+    m.attr("ITYPE_UNAMBIG_INTRON") = rigel::ITYPE_UNAMBIG_INTRON;
 }

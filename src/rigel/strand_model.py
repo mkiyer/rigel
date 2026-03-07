@@ -1,5 +1,5 @@
 """
-hulkrna.strand_model — Bayesian strand models learned from RNA-seq data.
+rigel.strand_model — Bayesian strand models learned from RNA-seq data.
 
 Learns the strand distribution of a paired-end RNA-seq library by observing
 how fragment alignment strands relate to annotated splice junction (SJ)
