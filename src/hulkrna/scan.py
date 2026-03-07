@@ -40,6 +40,9 @@ _DEFAULT_SPLICE_PENALTY = 1.0
 # Pre-computed negative infinity (avoids repeated np.inf attribute lookup).
 _NEG_INF = float('-inf')
 
+#: Sentinel for "no overhang found" in min-overhang search (INT32_MAX).
+_OH_SENTINEL = 0x7FFFFFFF
+
 
 class FragmentRouter:
     """Builds the global CSR (ScoredFragments) from a FragmentBuffer.
@@ -140,7 +143,7 @@ class FragmentRouter:
         if n_cand == 0:
             return {}
 
-        rl = read_length if read_length > 0 else 1
+        read_len = read_length if read_length > 0 else 1
         log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
         oh_log_pen = ctx.overhang_log_penalty
 
@@ -159,18 +162,18 @@ class FragmentRouter:
         has_genomic = genomic_start >= 0
 
         # --- Single pass: score + find min overhang ---
-        min_oh = 0x7FFFFFFF  # sentinel
+        min_overhang = _OH_SENTINEL
         scored: list[tuple[int, int, float, int, float, int, int]] = []
 
         for k in range(n_cand):
             t_idx = int(t_inds[k])
-            ebp = int(exon_bp[k]) if exon_bp is not None else rl
-            if ebp <= 0:
+            exon_bp_val = int(exon_bp[k]) if exon_bp is not None else read_len
+            if exon_bp_val <= 0:
                 continue
 
-            oh = rl - ebp
-            if oh < 0:
-                oh = 0
+            overhang = read_len - exon_bp_val
+            if overhang < 0:
+                overhang = 0
 
             # Fragment length
             flen = int(frag_lengths[k]) if frag_lengths is not None else -1
@@ -193,44 +196,44 @@ class FragmentRouter:
                 log_strand = LOG_HALF
                 is_anti = False
 
-            log_lik = log_strand + log_fl + oh * oh_log_pen + log_nm
-            ct = splice_type * 2 + int(is_anti)
+            log_lik = log_strand + log_fl + overhang * oh_log_pen + log_nm
+            count_col = splice_type * 2 + int(is_anti)
 
             # Coverage weight + transcript position
             t_len = int(t_length_arr[t_idx])
-            tx_s = 0
-            tx_e = flen if flen > 0 else t_len
-            cov_wt = 1.0
+            tx_start = 0
+            tx_end = flen if flen > 0 else t_len
+            coverage_wt = 1.0
 
             if has_genomic and flen > 0:
                 exon_data = t_exon_data.get(t_idx) if t_exon_data else None
                 if exon_data is not None and t_len > 0:
                     starts, ends, cumsum_before = exon_data
                     t_strand_v = int(t_strand_arr[t_idx])
-                    tx_s = genomic_to_transcript_pos_bisect(
+                    tx_start = genomic_to_transcript_pos_bisect(
                         genomic_start, starts, ends,
                         cumsum_before, t_strand_v, t_len,
                     )
-                    tx_e = tx_s + flen
+                    tx_end = tx_start + flen
                     # Clipped end for coverage weight
-                    cov_end = tx_e if tx_e < t_len else t_len
-                    cov_wt = compute_fragment_weight(tx_s, cov_end, t_len)
+                    cov_end = tx_end if tx_end < t_len else t_len
+                    coverage_wt = compute_fragment_weight(tx_start, cov_end, t_len)
                 else:
-                    tx_s = 0
-                    tx_e = flen
+                    tx_start = 0
+                    tx_end = flen
 
-            scored.append((t_idx, oh, log_lik, ct, cov_wt, tx_s, tx_e))
-            if oh < min_oh:
-                min_oh = oh
+            scored.append((t_idx, overhang, log_lik, count_col, coverage_wt, tx_start, tx_end))
+            if overhang < min_overhang:
+                min_overhang = overhang
 
         if not scored:
             return {}
 
         # --- WTA gating: keep only winners with minimum overhang ---
         result: dict[int, tuple[int, float, int, float, int, int]] = {}
-        for t_idx, oh, log_lik, ct, cov_wt, tx_s, tx_e in scored:
-            if oh == min_oh:
-                result[t_idx] = (oh, log_lik, ct, cov_wt, tx_s, tx_e)
+        for t_idx, overhang, log_lik, count_col, coverage_wt, tx_start, tx_end in scored:
+            if overhang == min_overhang:
+                result[t_idx] = (overhang, log_lik, count_col, coverage_wt, tx_start, tx_end)
         return result
 
     # ------------------------------------------------------------------
@@ -250,7 +253,7 @@ class FragmentRouter:
     ) -> dict[int, tuple[int, float, float, int, int]]:
         """Score nRNA candidates with winner-take-all gating.
 
-        Returns dict mapping t_idx → (overhang, nrna_log_lik, cov_wt,
+        Returns dict mapping t_idx → (overhang, nrna_log_lik, coverage_wt,
         tx_start, tx_end).  Only WTA winners (minimum overhang) are
         included.
 
@@ -268,7 +271,7 @@ class FragmentRouter:
         if n_cand == 0:
             return {}
 
-        rl = read_length if read_length > 0 else 1
+        read_len = read_length if read_length > 0 else 1
         log_fl = frag_len_log_lik(ctx, genomic_footprint)
         log_nm = nm * ctx.mismatch_log_penalty if nm > 0 else 0.0
         oh_log_pen = ctx.overhang_log_penalty
@@ -284,9 +287,9 @@ class FragmentRouter:
         has_genomic = genomic_start >= 0 and genomic_footprint > 0
         nrna_gfp = genomic_footprint if genomic_footprint > 0 else 0
 
-        min_oh = 0x7FFFFFFF
+        min_overhang = _OH_SENTINEL
         scored: list[tuple[int, int, float, float, int, int]] = []
-        # scored[j] = (t_idx, oh, nrna_ll, cov_wt, tx_s, tx_e)
+        # scored[j] = (t_idx, overhang, nrna_ll, coverage_wt, tx_start, tx_end)
 
         for k in range(n_cand):
             t_idx = int(t_inds[k])
@@ -298,15 +301,15 @@ class FragmentRouter:
                 continue  # single-exon → skip
 
             # Genic overlap
-            ebp = int(exon_bp[k]) if exon_bp is not None else rl
+            exon_bp_val = int(exon_bp[k]) if exon_bp is not None else read_len
             ibp = int(intron_bp[k]) if intron_bp is not None else 0
-            span_bp = ebp + ibp
+            span_bp = exon_bp_val + ibp
             if span_bp <= 0:
                 continue
 
-            oh = rl - span_bp
-            if oh < 0:
-                oh = 0
+            overhang = read_len - span_bp
+            if overhang < 0:
+                overhang = 0
 
             # Strand log-likelihood
             if has_strand:
@@ -315,12 +318,12 @@ class FragmentRouter:
             else:
                 log_strand = LOG_HALF
 
-            nrna_ll = log_strand + log_fl + oh * oh_log_pen + log_nm
+            nrna_ll = log_strand + log_fl + overhang * oh_log_pen + log_nm
 
             # Coverage weight (nRNA uses genomic span)
-            tx_s = 0
-            tx_e = nrna_gfp if nrna_gfp > 0 else t_span
-            cov_wt = 1.0
+            tx_start = 0
+            tx_end = nrna_gfp if nrna_gfp > 0 else t_span
+            coverage_wt = 1.0
 
             if has_genomic:
                 tx_start_g = int(t_start_arr[t_idx])
@@ -335,26 +338,26 @@ class FragmentRouter:
                 if frag_end_c < 0:
                     frag_end_c = 0
                 if frag_end_c > frag_pos_c and t_span > 0:
-                    cov_wt = compute_fragment_weight(
+                    coverage_wt = compute_fragment_weight(
                         frag_pos_c, frag_end_c, t_span,
                     )
 
                 # Unclipped for bias model (ternary instead of max)
-                tx_s = frag_pos if frag_pos > 0 else 0
-                tx_e = tx_s + genomic_footprint
+                tx_start = frag_pos if frag_pos > 0 else 0
+                tx_end = tx_start + genomic_footprint
 
-            scored.append((t_idx, oh, nrna_ll, cov_wt, tx_s, tx_e))
-            if oh < min_oh:
-                min_oh = oh
+            scored.append((t_idx, overhang, nrna_ll, coverage_wt, tx_start, tx_end))
+            if overhang < min_overhang:
+                min_overhang = overhang
 
         if not scored:
             return {}
 
         # --- WTA gating ---
         result: dict[int, tuple[int, float, float, int, int]] = {}
-        for t_idx, oh, nrna_ll, cov_wt, tx_s, tx_e in scored:
-            if oh == min_oh:
-                result[t_idx] = (oh, nrna_ll, cov_wt, tx_s, tx_e)
+        for t_idx, overhang, nrna_ll, coverage_wt, tx_start, tx_end in scored:
+            if overhang == min_overhang:
+                result[t_idx] = (overhang, nrna_ll, coverage_wt, tx_start, tx_end)
         return result
 
     # ------------------------------------------------------------------
@@ -379,19 +382,19 @@ class FragmentRouter:
         _te_l = self.tx_ends_list
         best_ll = _NEG_INF
         best_t = -1
-        best_ct = 0
-        for t_idx, (oh, log_lik, ct, cov_wt, tx_s, tx_e) in winners.items():
+        best_count_col = 0
+        for t_idx, (overhang, log_lik, count_col, coverage_wt, tx_start, tx_end) in winners.items():
             _ti.append(t_idx)
             _ll_l.append(log_lik)
-            _ct_l.append(ct)
-            _cw_l.append(cov_wt)
-            _ts_l.append(tx_s)
-            _te_l.append(tx_e)
+            _ct_l.append(count_col)
+            _cw_l.append(coverage_wt)
+            _ts_l.append(tx_start)
+            _te_l.append(tx_end)
             if log_lik > best_ll:
                 best_ll = log_lik
                 best_t = t_idx
-                best_ct = ct
-        return best_ll, best_t, best_ct
+                best_count_col = count_col
+        return best_ll, best_t, best_count_col
 
     def _emit_nrna(self, winners: dict[int, tuple[int, float, float, int, int]]) -> None:
         """Append nRNA winner candidates to CSR lists."""
@@ -404,13 +407,13 @@ class FragmentRouter:
         _cw_l = self.coverage_weights_list
         _ts_l = self.tx_starts_list
         _te_l = self.tx_ends_list
-        for t_idx, (oh, nrna_ll, cov_wt, tx_s, tx_e) in winners.items():
+        for t_idx, (overhang, nrna_ll, coverage_wt, tx_start, tx_end) in winners.items():
             _ti.append(nrna_base + t_idx)
             _ll_l.append(nrna_ll)
             _ct_l.append(0)
-            _cw_l.append(cov_wt)
-            _ts_l.append(tx_s)
-            _te_l.append(tx_e)
+            _cw_l.append(coverage_wt)
+            _ts_l.append(tx_start)
+            _te_l.append(tx_end)
 
     # ------------------------------------------------------------------
     # Per-unit metadata
@@ -455,7 +458,7 @@ class FragmentRouter:
                 bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
                 bf.genomic_footprint, bf.genomic_start,
             )
-            best_ll, best_t, best_ct = r[0], r[1], r[2]
+            best_ll, best_t, best_count_col = r[0], r[1], r[2]
             self.t_indices_list.frombytes(r[3])
             self.log_liks_list.frombytes(r[4])
             self.count_cols_list.frombytes(r[5])
@@ -471,7 +474,7 @@ class FragmentRouter:
                 bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
                 bf.genomic_start,
             )
-            best_ll, best_t, best_ct = self._emit_mrna(mrna_winners)
+            best_ll, best_t, best_count_col = self._emit_mrna(mrna_winners)
 
             # --- nRNA candidates (independent pool, skip only SPLICED_ANNOT) ---
             if not is_spliced_annot:
@@ -485,7 +488,7 @@ class FragmentRouter:
         if len(self.t_indices_list) > self.offsets[-1]:
             self.offsets.append(len(self.t_indices_list))
             self.locus_t_list.append(best_t)
-            self.locus_ct_list.append(best_ct)
+            self.locus_ct_list.append(best_count_col)
             self._finalize_unit_metadata(bf)
             self.frag_id_list.append(int(chunk.frag_id[i]))
             self.frag_class_list.append(fc)
@@ -543,24 +546,24 @@ class FragmentRouter:
                 bf.exon_strand, bf.splice_type, bf.nm, bf.read_length,
                 bf.genomic_start,
             )
-            # Merge: keep best per transcript (lower oh wins, then higher ll)
-            for t_idx, (oh, ll, ct, cov_wt, tx_s, tx_e) in winners.items():
+            # Merge: keep best per transcript (lower overhang wins, then higher ll)
+            for t_idx, (overhang, ll, count_col, coverage_wt, tx_start, tx_end) in winners.items():
                 prev = merged_mrna.get(t_idx)
-                if prev is None or oh < prev[0] or (
-                    oh == prev[0] and ll > prev[1]
+                if prev is None or overhang < prev[0] or (
+                    overhang == prev[0] and ll > prev[1]
                 ):
-                    merged_mrna[t_idx] = (oh, ll, ct, cov_wt, tx_s, tx_e)
+                    merged_mrna[t_idx] = (overhang, ll, count_col, coverage_wt, tx_start, tx_end)
 
         # Global WTA across all transcripts
         if merged_mrna:
-            min_oh = min(v[0] for v in merged_mrna.values())
+            min_overhang = min(v[0] for v in merged_mrna.values())
             final_mrna = {
-                t: v for t, v in merged_mrna.items() if v[0] == min_oh
+                t: v for t, v in merged_mrna.items() if v[0] == min_overhang
             }
         else:
             final_mrna = {}
 
-        best_ll, best_t, best_ct = self._emit_mrna(final_mrna)
+        best_ll, best_t, best_count_col = self._emit_mrna(final_mrna)
 
         # ----- nRNA pool (independent, skip only SPLICED_ANNOT) -----
         # BUG FIX #1: gate on is_annot_spliced, not is_any_spliced
@@ -574,18 +577,18 @@ class FragmentRouter:
                     bf.exon_strand, bf.nm, bf.read_length,
                     bf.genomic_footprint, bf.genomic_start,
                 )
-                for t_idx, (oh, nrna_ll, cov_wt, tx_s, tx_e) in winners.items():
+                for t_idx, (overhang, nrna_ll, coverage_wt, tx_start, tx_end) in winners.items():
                     prev = merged_nrna.get(t_idx)
-                    if prev is None or oh < prev[0] or (
-                        oh == prev[0] and nrna_ll > prev[1]
+                    if prev is None or overhang < prev[0] or (
+                        overhang == prev[0] and nrna_ll > prev[1]
                     ):
-                        merged_nrna[t_idx] = (oh, nrna_ll, cov_wt, tx_s, tx_e)
+                        merged_nrna[t_idx] = (overhang, nrna_ll, coverage_wt, tx_start, tx_end)
 
             if merged_nrna:
-                min_oh = min(v[0] for v in merged_nrna.values())
+                min_overhang = min(v[0] for v in merged_nrna.values())
                 final_nrna = {
                     t: v for t, v in merged_nrna.items()
-                    if v[0] == min_oh
+                    if v[0] == min_overhang
                 }
             else:
                 final_nrna = {}
@@ -596,7 +599,7 @@ class FragmentRouter:
         if len(self.t_indices_list) > self.offsets[-1]:
             self.offsets.append(len(self.t_indices_list))
             self.locus_t_list.append(best_t)
-            self.locus_ct_list.append(best_ct)
+            self.locus_ct_list.append(best_count_col)
             self.frag_id_list.append(self.mm_fid)
             self.frag_class_list.append(FRAG_MULTIMAPPER)
 
@@ -652,17 +655,20 @@ class FragmentRouter:
 
         Uses the C++ chunk-level fast path when a NativeFragmentScorer is
         available and the buffer yields proper ``_FinalizedChunk`` objects
-        (with columnar NumPy arrays).  Falls back to the per-fragment
-        Python path otherwise.
+        (with columnar NumPy arrays).
         """
         nc = self._native_ctx
-        if nc is not None:
-            # Peek at the first chunk to see if it has columnar arrays.
-            # Test mocks may use a simple _Chunk that only supports __getitem__.
-            chunks = list(buffer.iter_chunks())
-            if chunks and hasattr(chunks[0], 't_offsets'):
-                return self._scan_native(chunks, buffer, log_every)
-        return self._scan_python(buffer, log_every)
+        if nc is None:
+            raise RuntimeError(
+                "NativeFragmentScorer not available; cannot scan"
+            )
+        chunks = list(buffer.iter_chunks())
+        if chunks and not hasattr(chunks[0], 't_offsets'):
+            raise TypeError(
+                "Chunks must have columnar arrays (t_offsets); "
+                "raw per-fragment chunks are no longer supported"
+            )
+        return self._scan_native(chunks, buffer, log_every)
 
     def _scan_native(
         self, chunks, buffer: FragmentBuffer, log_every: int,
@@ -940,14 +946,3 @@ class FragmentRouter:
             n_candidates=n_candidates,
             nrna_base_index=self.ctx.nrna_base,
         )
-
-    def _scan_python(
-        self, buffer: FragmentBuffer, log_every: int,
-    ) -> ScoredFragments:
-        """Per-fragment Python scan path (fallback when native unavailable).
-
-        Implementation lives in :mod:`hulkrna.pyfallback` to keep the
-        main module lean.  Will be removed once C++ is the sole path.
-        """
-        from .pyfallback import scan_python as _scan_python_fb
-        return _scan_python_fb(self, buffer, log_every)

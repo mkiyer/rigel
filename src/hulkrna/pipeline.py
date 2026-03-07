@@ -514,10 +514,10 @@ def quant_from_buffer(
     )
     estimator.nrna_init = nrna_init
 
-    ss = strand_models.strand_specificity
-    w_strand = (2.0 * ss - 1.0) ** 2
+    strand_spec = strand_models.strand_specificity
+    w_strand = (2.0 * strand_spec - 1.0) ** 2
     logger.info(
-        f"[INFO] Strand specificity: {ss:.3f} "
+        f"[INFO] Strand specificity: {strand_spec:.3f} "
         f"(strand weight={w_strand:.3f}, density weight={1.0 - w_strand:.3f})"
     )
 
@@ -618,51 +618,31 @@ def quant_from_buffer(
             }
 
         # ============================================================
-        # Use batch C++ path when annotations are NOT requested
-        # (the batch path skips per-unit annotation tracking).
-        # Fall back to Python per-locus loop when annotations are on.
+        # Batch C++ path: single call for all loci
         # ============================================================
-        if annotations is None and not os.environ.get("HULK_FORCE_PYTHON"):
-            # --- Batch C++ path: single call for all loci ---
-            (
-                total_gdna_em,
-                locus_mrna_arr,
-                locus_nrna_arr,
-                locus_gdna_arr,
-            ) = estimator.run_batch_locus_em(
-                loci,
-                em_data,
-                index,
-                np.asarray(gdna_inits, dtype=np.float64),
-                em_iterations=em_config.iterations,
-                em_convergence_delta=em_config.convergence_delta,
-                confidence_threshold=em_config.confidence_threshold,
-            )
+        (
+            total_gdna_em,
+            locus_mrna_arr,
+            locus_nrna_arr,
+            locus_gdna_arr,
+        ) = estimator.run_batch_locus_em(
+            loci,
+            em_data,
+            index,
+            np.asarray(gdna_inits, dtype=np.float64),
+            em_iterations=em_config.iterations,
+            em_convergence_delta=em_config.convergence_delta,
+            confidence_threshold=em_config.confidence_threshold,
+        )
 
-            for i, locus in enumerate(loci):
-                estimator.locus_results.append(_build_locus_meta(
-                    locus,
-                    mrna=locus_mrna_arr[i],
-                    nrna=locus_nrna_arr[i],
-                    gdna=locus_gdna_arr[i],
-                    gdna_init=gdna_inits[i],
-                ))
-        else:
-            # --- Python per-locus loop (with annotation support) ---
-            # Implementation lives in pyfallback; will be removed once
-            # the batch C++ path supports annotations.
-            from .pyfallback import run_per_locus_em_loop as _py_locus_loop
-            total_gdna_em = _py_locus_loop(
-                estimator=estimator,
-                loci=loci,
-                em_data=em_data,
-                index=index,
-                geometry=geometry,
-                gdna_inits=gdna_inits,
-                em_config=em_config,
-                annotations=annotations,
-                build_locus_meta=_build_locus_meta,
-            )
+        for i, locus in enumerate(loci):
+            estimator.locus_results.append(_build_locus_meta(
+                locus,
+                mrna=locus_mrna_arr[i],
+                nrna=locus_nrna_arr[i],
+                gdna=locus_gdna_arr[i],
+                gdna_init=gdna_inits[i],
+            ))
 
         estimator._gdna_em_total = total_gdna_em
 

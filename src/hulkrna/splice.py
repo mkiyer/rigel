@@ -35,8 +35,15 @@ SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)         # 2
 class SpliceStrandCol(IntEnum):
     """Internal column index for count arrays.
 
-    Layout: 3 categories × 2 strands (sense/antisense) = 6 columns.
-    Even indices are sense, odd indices are antisense.
+    Layout: 3 splice categories × 2 strands (sense/antisense) = 6 columns.
+
+    Column formula::
+
+        col = splice_type * 2 + int(is_antisense)
+
+    where ``splice_type`` is a :class:`SpliceType` value (0, 1, 2).
+
+    Even indices (0, 2, 4) are sense; odd indices (1, 3, 5) are antisense.
     """
     UNSPLICED_SENSE = 0
     UNSPLICED_ANTISENSE = 1

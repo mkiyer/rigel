@@ -21,12 +21,14 @@ def pytest_addoption(parser):
         "--update-golden", action="store_true", default=False,
         help="Regenerate golden output files instead of comparing.",
     )
+import pandas as pd
+
 from hulkrna.splice import SpliceStrandCol
 from hulkrna.estimator import (
     AbundanceEstimator,
     EM_PRIOR_EPSILON,
     Locus,
-    LocusEMInput,
+    ScoredFragments,
 )
 from hulkrna.index import TranscriptIndex
 
@@ -170,34 +172,38 @@ def _make_locus_em_data(
     nrna_log_lik=-2.0,
     gdna_log_lik=0.0,
 ):
-    """Build a LocusEMInput for unit tests (single-locus, identity mapping).
+    """Build (ScoredFragments, [Locus], gdna_inits, index) for batch EM tests.
+
+    Returns a tuple (em_data, loci, gdna_inits, index) suitable for
+    ``run_batch_locus_em()``.
 
     Parameters
     ----------
     t_indices_per_unit : list[list[int]]
-        LOCAL mRNA transcript indices per unit.
+        GLOBAL mRNA transcript indices per unit.
     rc : AbundanceEstimator or None
-        If provided, unambig_totals for mRNA are extracted from
-        rc.unambig_counts[i].sum().
+        If provided, used for unambig_counts.  The helper also sets
+        ``_transcript_spans`` and ``_exonic_lengths`` if they are None.
     include_nrna : bool
-        Add nRNA candidates for each mRNA candidate.
+        If True, units are marked as unspliced (``is_spliced=False``)
+        so the batch C++ adds nRNA shadow candidates, and
+        ``nrna_init`` on the estimator is populated.
     include_gdna : bool
-        Add a gDNA candidate for each unit.
+        If True, ``gdna_inits > 0`` and ``gdna_log_liks`` are finite
+        so the batch C++ adds a gDNA component.
     """
     if num_transcripts is None:
         all_t = [t for unit in t_indices_per_unit for t in unit]
         num_transcripts = (max(all_t) + 1) if all_t else 1
 
     n_t = num_transcripts
-    n_components = 2 * n_t + 1
-    gdna_idx = 2 * n_t
+    n_units = len(t_indices_per_unit)
 
+    # Build mRNA-only CSR (no nRNA/gDNA — batch C++ adds those)
     offsets = [0]
     flat_t = []
     flat_lk = []
     flat_cc = []
-    locus_t_list = []
-    locus_cc_list = []
 
     for u, t_list in enumerate(t_indices_per_unit):
         for j, t_idx in enumerate(t_list):
@@ -210,86 +216,122 @@ def _make_locus_em_data(
                 if count_cols_per_unit
                 else _UNSPLICED_SENSE
             )
-
-        if include_nrna:
-            for t_idx in t_list:
-                flat_t.append(n_t + t_idx)
-                flat_lk.append(nrna_log_lik)
-                flat_cc.append(_UNSPLICED_SENSE)
-
-        if include_gdna:
-            flat_t.append(gdna_idx)
-            flat_lk.append(gdna_log_lik)
-            flat_cc.append(_UNSPLICED_SENSE)
-
         offsets.append(len(flat_t))
 
-        locus_t_list.append(t_list[0] if t_list else -1)
-        cc = (
-            count_cols_per_unit[u][0]
-            if (count_cols_per_unit and t_list)
-            else _UNSPLICED_SENSE
-        )
-        locus_cc_list.append(cc)
+    n_candidates = len(flat_t)
+    nrna_base = n_t
 
-    n_units = len(t_indices_per_unit)
+    # Per-unit locus tracking
+    locus_t = np.full(n_units, -1, dtype=np.int32)
+    locus_cc = np.zeros(n_units, dtype=np.uint8)
+    for u, t_list in enumerate(t_indices_per_unit):
+        if t_list:
+            locus_t[u] = t_list[0]
+            locus_cc[u] = (
+                count_cols_per_unit[u][0]
+                if count_cols_per_unit
+                else _UNSPLICED_SENSE
+            )
 
-    ut = np.zeros(n_components, dtype=np.float64)
-    if rc is not None:
-        for i in range(min(n_t, rc.num_transcripts)):
-            ut[i] = rc.unambig_counts[i].sum()
-
-    if nrna_init is None:
-        nrna_arr = np.zeros(n_t, dtype=np.float64)
+    # is_spliced: True (spliced) → no nRNA/gDNA shadows.
+    # For include_nrna or include_gdna, set False (unspliced).
+    if include_nrna or include_gdna:
+        is_spliced = np.zeros(n_units, dtype=bool)
     else:
-        nrna_arr = np.asarray(nrna_init, dtype=np.float64)
-    for i in range(n_t):
-        ut[n_t + i] = nrna_arr[i]
-    ut[gdna_idx] = gdna_init
+        is_spliced = np.ones(n_units, dtype=bool)
 
-    eff_len = np.ones(n_components, dtype=np.float64)
-    prior = np.full(n_components, EM_PRIOR_EPSILON, dtype=np.float64)
+    # gDNA log-likelihoods per unit
+    if include_gdna:
+        gdna_log_liks = np.full(n_units, gdna_log_lik, dtype=np.float64)
+    else:
+        gdna_log_liks = np.full(n_units, -np.inf, dtype=np.float64)
+
+    em_data = ScoredFragments(
+        offsets=np.array(offsets, dtype=np.int64),
+        t_indices=np.array(flat_t, dtype=np.int32),
+        log_liks=np.array(flat_lk, dtype=np.float64),
+        count_cols=np.array(flat_cc, dtype=np.uint8),
+        coverage_weights=np.ones(n_candidates, dtype=np.float64),
+        tx_starts=np.zeros(n_candidates, dtype=np.int32),
+        tx_ends=np.ones(n_candidates, dtype=np.int32),
+        locus_t_indices=locus_t,
+        locus_count_cols=locus_cc,
+        is_spliced=is_spliced,
+        gdna_log_liks=gdna_log_liks,
+        frag_ids=np.arange(n_units, dtype=np.int64),
+        frag_class=np.zeros(n_units, dtype=np.int8),
+        splice_type=np.zeros(n_units, dtype=np.uint8),
+        n_units=n_units,
+        n_candidates=n_candidates,
+        nrna_base_index=nrna_base,
+        genomic_footprints=np.full(n_units, 200, dtype=np.int32),
+    )
 
     locus = Locus(
         locus_id=0,
         transcript_indices=np.arange(n_t, dtype=np.int32),
         unit_indices=np.arange(n_units, dtype=np.int32),
     )
+    loci = [locus]
 
-    n_local_candidates = len(flat_t)
-    # Build component-length array of length 1 so that with tx_starts=0
-    # and tx_ends=1, frag_len=1 and eff_len = max(1-1+1,1) = 1 → no
-    # correction.  Phase H: pass int64 array instead of BiasProfile list.
-    bias_profiles = np.ones(n_components, dtype=np.int64)
-    return LocusEMInput(
-        locus=locus,
-        offsets=np.array(offsets, dtype=np.int64),
-        t_indices=np.array(flat_t, dtype=np.int32),
-        log_liks=np.array(flat_lk, dtype=np.float64),
-        count_cols=np.array(flat_cc, dtype=np.uint8),
-        coverage_weights=np.ones(n_local_candidates, dtype=np.float64),
-        tx_starts=np.zeros(n_local_candidates, dtype=np.int32),
-        tx_ends=np.ones(n_local_candidates, dtype=np.int32),
-        locus_t_indices=np.array(locus_t_list, dtype=np.int32),
-        locus_count_cols=np.array(locus_cc_list, dtype=np.uint8),
-        n_transcripts=n_t,
-        n_components=n_components,
-        local_to_global_t=np.arange(n_t, dtype=np.int32),
-        unambig_totals=ut,
-        nrna_init=nrna_arr,
-        gdna_init=gdna_init,
-        effective_lengths=eff_len,
-        prior=prior,
-        bias_profiles=bias_profiles,
-        nrna_frac_alpha=np.ones(n_t, dtype=np.float64),
-        nrna_frac_beta=np.ones(n_t, dtype=np.float64),
+    gdna_inits = np.array([gdna_init if include_gdna else 0.0],
+                          dtype=np.float64)
+
+    index = _MockBatchIndex(n_t)
+
+    # Ensure estimator geometry arrays are set if rc is provided
+    if rc is not None:
+        _ensure_estimator_geometry(rc, nrna_init, include_nrna)
+
+    return em_data, loci, gdna_inits, index
+
+
+class _MockBatchIndex:
+    """Minimal index mock for batch locus EM tests."""
+
+    def __init__(self, num_transcripts):
+        self.num_transcripts = num_transcripts
+        self.t_df = pd.DataFrame({
+            "t_id": [f"t{i}" for i in range(num_transcripts)],
+            "ref": ["chr1"] * num_transcripts,
+            "start": np.zeros(num_transcripts, dtype=np.int64),
+            "end": np.full(num_transcripts, 10000, dtype=np.int64),
+            "length": np.full(num_transcripts, 1000, dtype=np.int64),
+        })
+
+
+def _ensure_estimator_geometry(rc, nrna_init=None, include_nrna=False):
+    """Set required geometry arrays on estimator if not already set."""
+    n_t = rc.num_transcripts
+    if rc._transcript_spans is None:
+        rc._transcript_spans = np.full(n_t, 10000.0, dtype=np.float64)
+    if rc._exonic_lengths is None:
+        rc._exonic_lengths = np.full(n_t, 1000.0, dtype=np.float64)
+    if include_nrna and nrna_init is not None:
+        rc.nrna_init[:len(nrna_init)] = nrna_init
+
+
+def _run_and_assign(rc, em_data, loci=None, index=None, gdna_inits=None,
+                    *, em_iterations=10):
+    """Run batch locus EM. Returns pool_counts dict.
+
+    Accepts either the new tuple form (em_data, loci, gdna_inits, index)
+    separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
+    """
+    # Unpack tuple form from _make_locus_em_data
+    if isinstance(em_data, tuple):
+        em_data, loci, gdna_inits, index = em_data
+
+    _ensure_estimator_geometry(rc)
+
+    total_gdna, _locus_mrna, _locus_nrna, _locus_gdna = rc.run_batch_locus_em(
+        loci, em_data, index, gdna_inits,
+        em_iterations=em_iterations,
     )
+    rc._gdna_em_total += total_gdna
 
-
-def _run_and_assign(rc, locus_em, *, em_iterations=10):
-    """Convenience: run locus EM then assign. Returns (theta, pool_counts)."""
-    theta, _alpha = rc.run_locus_em(locus_em, em_iterations=em_iterations)
-    pool_counts = rc.assign_locus_ambiguous(
-        locus_em, theta,
-    )
-    return theta, pool_counts
+    return {
+        "mrna": float(rc.em_counts.sum()),
+        "nrna": float(rc.nrna_em_counts.sum()),
+        "gdna": float(total_gdna),
+    }

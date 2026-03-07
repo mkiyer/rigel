@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hulkrna.cli import build_parser, _resolve_quant_args
+from hulkrna.cli import build_parser, _resolve_quant_args, _build_quant_defaults
 
 
 # ---------------------------------------------------------------------------
@@ -133,41 +133,12 @@ class TestAdvancedParams:
 # ---------------------------------------------------------------------------
 
 
-_SMALL_DEFAULTS = {
-    "seed": None,
-    "em_prior_alpha": 0.01,
-    "em_prior_gamma": 1.0,
-    "include_multimap": True,
-    "keep_duplicates": False,
-    "no_tsv": False,
-    "tss_window": 200,
-    "em_iterations": 1000,
-    "em_convergence_delta": 1e-6,
-    "confidence_threshold": 0.95,
-    "sj_strand_tag": ["auto"],
-    "annotated_bam": None,
-    "overhang_alpha": 0.01,
-    "mismatch_alpha": 0.1,
-    "gdna_splice_penalty_unannot": 0.01,
-    "nrna_frac_kappa_global": None,
-    "nrna_frac_kappa_locus": None,
-    "nrna_frac_kappa_tss": None,
-    "nrna_frac_mom_min_evidence_global": 50.0,
-    "nrna_frac_mom_min_evidence_locus": 30.0,
-    "nrna_frac_mom_min_evidence_tss": 20.0,
-    "nrna_frac_kappa_min": 2.0,
-    "nrna_frac_kappa_max": 200.0,
-    "nrna_frac_kappa_fallback": 5.0,
-    "nrna_frac_kappa_min_obs": 20,
-}
-
-
 class TestResolveQuant:
     """_resolve_quant_args merges CLI > YAML > defaults."""
 
     def test_hardcoded_defaults_applied(self):
         args = _parse_quant()
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is True
         assert args.em_prior_alpha == 0.01
         assert args.tss_window == 200
@@ -176,7 +147,7 @@ class TestResolveQuant:
 
     def test_cli_overrides_default(self):
         args = _parse_quant("--no-include-multimap", "--tss-window", "500")
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is False
         assert args.tss_window == 500
 
@@ -188,7 +159,7 @@ class TestResolveQuant:
             include_multimap: false
         """))
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         assert args.em_prior_alpha == 0.05
         assert args.tss_window == 300
         assert args.include_multimap is False
@@ -203,7 +174,7 @@ class TestResolveQuant:
             "--config", str(cfg),
             "--em-prior-alpha", "0.1",
         )
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         # CLI wins
         assert args.em_prior_alpha == 0.1
         # YAML wins over default
@@ -213,7 +184,7 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("nrna-frac-kappa-min: 4.0\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         assert args.nrna_frac_kappa_min == 4.0
 
     def test_yaml_unknown_keys_logged(self, tmp_path, caplog):
@@ -223,7 +194,7 @@ class TestResolveQuant:
         args = _parse_quant("--config", str(cfg))
         import logging
         with caplog.at_level(logging.WARNING):
-            _resolve_quant_args(args, _SMALL_DEFAULTS)
+            _resolve_quant_args(args, _build_quant_defaults())
         assert "bogus_key" in caplog.text
 
     def test_yaml_sj_strand_tag_string(self, tmp_path):
@@ -231,7 +202,7 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("sj_strand_tag: XS\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         assert args.sj_strand_tag == "XS"
 
     def test_yaml_sj_strand_tag_list(self, tmp_path):
@@ -239,5 +210,5 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("sj_strand_tag: [XS, ts]\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _SMALL_DEFAULTS)
+        _resolve_quant_args(args, _build_quant_defaults())
         assert args.sj_strand_tag == ["XS", "ts"]

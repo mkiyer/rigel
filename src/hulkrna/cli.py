@@ -57,56 +57,11 @@ def quant_command(args: argparse.Namespace) -> int:
     Single-pass pipeline: scan BAM, resolve fragments, train
     strand/insert models, then quantify via unified EM.
     """
-    import json
-    import yaml
     from .index import TranscriptIndex
     from .pipeline import run_pipeline
-    from .config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
-    from .scoring import (
-        overhang_alpha_to_log_penalty,
-        GDNA_SPLICE_PENALTIES,
-        DEFAULT_OVERHANG_ALPHA,
-        DEFAULT_MISMATCH_ALPHA,
-        DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-    )
-    from .splice import SPLICE_UNANNOT
 
     # -- Resolve parameters: CLI > YAML > hardcoded defaults --
-    _DEFAULTS = {
-        "seed": None,
-        "em_prior_alpha": 0.01,
-        "em_prior_gamma": 1.0,
-        "em_iterations": 1000,
-        "em_convergence_delta": 1e-6,
-        "prune_threshold": 0.1,
-        "confidence_threshold": 0.95,
-        "include_multimap": True,
-        "keep_duplicates": False,
-        "no_tsv": False,
-        "sj_strand_tag": ["auto"],
-        "annotated_bam": None,
-        "overhang_alpha": DEFAULT_OVERHANG_ALPHA,
-        "mismatch_alpha": DEFAULT_MISMATCH_ALPHA,
-        "gdna_splice_penalty_unannot": DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-        "tss_window": 200,
-        "nrna_frac_kappa_global": None,
-        "nrna_frac_kappa_locus": None,
-        "nrna_frac_kappa_tss": None,
-        "nrna_frac_mom_min_evidence_global": 50.0,
-        "nrna_frac_mom_min_evidence_locus": 30.0,
-        "nrna_frac_mom_min_evidence_tss": 20.0,
-        "nrna_frac_kappa_min": 2.0,
-        "nrna_frac_kappa_max": 200.0,
-        "nrna_frac_kappa_fallback": 5.0,
-        "nrna_frac_kappa_min_obs": 20,
-        "gdna_kappa_chrom": None,
-        "gdna_kappa_locus": None,
-        "gdna_mom_min_evidence_chrom": 50.0,
-        "gdna_mom_min_evidence_locus": 30.0,
-        "strand_prior_kappa": 2.0,
-        "threads": 0,
-    }
-    _resolve_quant_args(args, _DEFAULTS)
+    _resolve_quant_args(args, _build_quant_defaults())
 
     bam_path = Path(args.bam_file)
     index_dir = Path(args.index_dir)
@@ -117,101 +72,72 @@ def quant_command(args: argparse.Namespace) -> int:
     if not index_dir.is_dir():
         sys.exit(f"Error: Index directory not found: {index_dir}")
 
-    # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate seed from time if not provided
+    # -- Resolve seed --
+    seed = _resolve_seed(args)
+
+    # -- Normalise sj_strand_tag (YAML may deliver a bare string) --
+    if isinstance(args.sj_strand_tag, str):
+        args.sj_strand_tag = [args.sj_strand_tag]
+    sj_tag_list = args.sj_strand_tag
+    sj_strand_tag = sj_tag_list[0] if len(sj_tag_list) == 1 else tuple(sj_tag_list)
+
+    # -- Persist run config --
+    _write_run_config(args, output_dir, seed, sj_strand_tag)
+
+    # -- Load reference index --
+    logging.info(f"[START] Loading index from {index_dir}")
+    index = TranscriptIndex.load(index_dir)
+    logging.info(f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
+                 f"{index.num_genes} genes")
+
+    # -- Build pipeline config + run --
+    pipeline_config = _build_pipeline_config(args, seed, sj_strand_tag)
+    result = run_pipeline(bam_path, index, config=pipeline_config)
+
+    # -- Write outputs --
+    _write_quant_outputs(result, index, output_dir, args)
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# quant_command helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_seed(args: argparse.Namespace) -> int:
+    """Return an explicit seed or generate one from the current timestamp."""
     if args.seed is None:
         seed = int(time.time())
         logging.info(f"No seed provided, using timestamp: {seed}")
     else:
         seed = args.seed
         logging.info(f"Using provided seed: {seed}")
+    return seed
+
+
+def _build_pipeline_config(
+    args: argparse.Namespace,
+    seed: int,
+    sj_strand_tag: str | tuple[str, ...],
+) -> "PipelineConfig":
+    """Translate resolved CLI args into a ``PipelineConfig``."""
+    from .config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
+    from .scoring import overhang_alpha_to_log_penalty, GDNA_SPLICE_PENALTIES
+    from .splice import SPLICE_UNANNOT
 
     alpha = args.em_prior_alpha
     gamma = args.em_prior_gamma
-    logging.info(
-        f"Using EM prior: alpha={alpha}, gamma={gamma}"
-    )
+    logging.info(f"Using EM prior: alpha={alpha}, gamma={gamma}")
 
-    # Normalise sj_strand_tag from YAML (may be str)
-    if isinstance(args.sj_strand_tag, str):
-        args.sj_strand_tag = [args.sj_strand_tag]
-
-    # Define output file paths
-    quant_path = output_dir / "quant.feather"
-    gene_quant_path = output_dir / "gene_quant.feather"
-    loci_path = output_dir / "loci.feather"
-    detail_path = output_dir / "quant_detail.feather"
-    summary_path = output_dir / "summary.json"
-    config_path = output_dir / "config.json"
-
-    # Load reference index
-    logging.info(f"[START] Loading index from {index_dir}")
-    index = TranscriptIndex.load(index_dir)
-    logging.info(f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
-                 f"{index.num_genes} genes")
-
-    # Resolve sj_strand_tag from list to str | tuple
-    sj_tag_list = args.sj_strand_tag
-    if len(sj_tag_list) == 1:
-        sj_strand_tag = sj_tag_list[0]              # "auto", "XS", or "ts"
-    else:
-        sj_strand_tag = tuple(sj_tag_list)           # ("XS", "ts")
-
-    # Write config file with all parameters
-    config = {
-        "command": "hulkrna quant",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "source_config": str(Path(args.config).resolve()) if args.config else None,
-        "parameters": {
-            "bam_file": str(bam_path.resolve()),
-            "index_dir": str(index_dir.resolve()),
-            "output_dir": str(output_dir.resolve()),
-            "seed": seed,
-            "em_prior_alpha": alpha,
-            "em_prior_gamma": gamma,
-            "em_iterations": args.em_iterations,
-            "em_convergence_delta": args.em_convergence_delta,
-            "prune_threshold": args.prune_threshold,
-            "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
-            "confidence_threshold": args.confidence_threshold,
-            "skip_duplicates": not args.keep_duplicates,
-            "include_multimap": args.include_multimap,
-            "sj_strand_tag": sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag),
-            "annotated_bam": args.annotated_bam,
-            "tss_window": args.tss_window,
-            "nrna_frac_kappa_global": args.nrna_frac_kappa_global,
-            "nrna_frac_kappa_locus": args.nrna_frac_kappa_locus,
-            "nrna_frac_kappa_tss": args.nrna_frac_kappa_tss,
-            "nrna_frac_mom_min_evidence_global": args.nrna_frac_mom_min_evidence_global,
-            "nrna_frac_mom_min_evidence_locus": args.nrna_frac_mom_min_evidence_locus,
-            "nrna_frac_mom_min_evidence_tss": args.nrna_frac_mom_min_evidence_tss,
-            "nrna_frac_kappa_min": args.nrna_frac_kappa_min,
-            "nrna_frac_kappa_max": args.nrna_frac_kappa_max,
-            "nrna_frac_kappa_fallback": args.nrna_frac_kappa_fallback,
-            "nrna_frac_kappa_min_obs": args.nrna_frac_kappa_min_obs,
-            "gdna_kappa_chrom": args.gdna_kappa_chrom,
-            "gdna_kappa_locus": args.gdna_kappa_locus,
-            "gdna_mom_min_evidence_chrom": args.gdna_mom_min_evidence_chrom,
-            "gdna_mom_min_evidence_locus": args.gdna_mom_min_evidence_locus,
-            "strand_prior_kappa": args.strand_prior_kappa,
-            "threads": args.threads,
-            "tmpdir": args.tmpdir,
-        },
-    }
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
-    logging.info(f"[CONFIG] Written to {config_path}")
-
-    # -- Build pipeline config --
     overhang_log_penalty = overhang_alpha_to_log_penalty(args.overhang_alpha)
     mismatch_log_penalty = overhang_alpha_to_log_penalty(args.mismatch_alpha)
 
     gdna_splice_penalties = dict(GDNA_SPLICE_PENALTIES)
     gdna_splice_penalties[SPLICE_UNANNOT] = args.gdna_splice_penalty_unannot
 
-    pipeline_config = PipelineConfig(
+    return PipelineConfig(
         em=EMConfig(
             seed=seed,
             prior_alpha=alpha,
@@ -253,8 +179,70 @@ def quant_command(args: argparse.Namespace) -> int:
         annotated_bam_path=getattr(args, 'annotated_bam', None),
     )
 
-    # -- Run pipeline --
-    result = run_pipeline(bam_path, index, config=pipeline_config)
+
+def _write_run_config(
+    args: argparse.Namespace,
+    output_dir: Path,
+    seed: int,
+    sj_strand_tag: str | tuple[str, ...],
+) -> None:
+    """Serialize the resolved run parameters to ``config.json``."""
+    import json
+    config_path = output_dir / "config.json"
+    config = {
+        "command": "hulkrna quant",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "source_config": str(Path(args.config).resolve()) if args.config else None,
+        "parameters": {
+            "bam_file": str(Path(args.bam_file).resolve()),
+            "index_dir": str(Path(args.index_dir).resolve()),
+            "output_dir": str(output_dir.resolve()),
+            "seed": seed,
+            "em_prior_alpha": args.em_prior_alpha,
+            "em_prior_gamma": args.em_prior_gamma,
+            "em_iterations": args.em_iterations,
+            "em_convergence_delta": args.em_convergence_delta,
+            "prune_threshold": args.prune_threshold,
+            "gdna_splice_penalty_unannot": args.gdna_splice_penalty_unannot,
+            "confidence_threshold": args.confidence_threshold,
+            "skip_duplicates": not args.keep_duplicates,
+            "include_multimap": args.include_multimap,
+            "sj_strand_tag": sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag),
+            "annotated_bam": args.annotated_bam,
+            "tss_window": args.tss_window,
+            "nrna_frac_kappa_global": args.nrna_frac_kappa_global,
+            "nrna_frac_kappa_locus": args.nrna_frac_kappa_locus,
+            "nrna_frac_kappa_tss": args.nrna_frac_kappa_tss,
+            "nrna_frac_mom_min_evidence_global": args.nrna_frac_mom_min_evidence_global,
+            "nrna_frac_mom_min_evidence_locus": args.nrna_frac_mom_min_evidence_locus,
+            "nrna_frac_mom_min_evidence_tss": args.nrna_frac_mom_min_evidence_tss,
+            "nrna_frac_kappa_min": args.nrna_frac_kappa_min,
+            "nrna_frac_kappa_max": args.nrna_frac_kappa_max,
+            "nrna_frac_kappa_fallback": args.nrna_frac_kappa_fallback,
+            "nrna_frac_kappa_min_obs": args.nrna_frac_kappa_min_obs,
+            "gdna_kappa_chrom": args.gdna_kappa_chrom,
+            "gdna_kappa_locus": args.gdna_kappa_locus,
+            "gdna_mom_min_evidence_chrom": args.gdna_mom_min_evidence_chrom,
+            "gdna_mom_min_evidence_locus": args.gdna_mom_min_evidence_locus,
+            "strand_prior_kappa": args.strand_prior_kappa,
+            "threads": args.threads,
+            "tmpdir": args.tmpdir,
+        },
+    }
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    logging.info(f"[CONFIG] Written to {config_path}")
+
+
+def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
+    """Write quantification tables, optional TSVs, and summary.json."""
+    import json
+
+    quant_path = output_dir / "quant.feather"
+    gene_quant_path = output_dir / "gene_quant.feather"
+    loci_path = output_dir / "loci.feather"
+    detail_path = output_dir / "quant_detail.feather"
+    summary_path = output_dir / "summary.json"
 
     # Log stats
     for key, val in sorted(result.stats.to_dict().items()):
@@ -305,8 +293,8 @@ def quant_command(args: argparse.Namespace) -> int:
         "command": "hulkrna quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "input": {
-            "bam_file": str(bam_path.resolve()),
-            "index_dir": str(index_dir.resolve()),
+            "bam_file": str(Path(args.bam_file).resolve()),
+            "index_dir": str(Path(args.index_dir).resolve()),
         },
         "library": {
             "protocol": (
@@ -361,8 +349,6 @@ def quant_command(args: argparse.Namespace) -> int:
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
     logging.info(f"[DONE] Summary written to {summary_path}")
-
-    return 0
 
 
 def sim_command(args: argparse.Namespace) -> int:
@@ -423,6 +409,64 @@ def sim_command(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # YAML config / CLI merge helper
 # ---------------------------------------------------------------------------
+
+
+def _build_quant_defaults() -> dict:
+    """Build quant subcommand defaults from config dataclasses.
+
+    Single source of truth: all default values come from the frozen
+    dataclasses in ``config.py`` or from ``scoring.py`` module constants.
+    CLI-only flags (no_tsv, annotated_bam) are defined here.
+    """
+    from .config import EMConfig, BamScanConfig
+    from .scoring import (
+        DEFAULT_OVERHANG_ALPHA,
+        DEFAULT_MISMATCH_ALPHA,
+        DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+    )
+    em = EMConfig()
+    scan = BamScanConfig()
+    return {
+        # -- EMConfig fields (renamed: em_ prefix for CLI clarity) --
+        "seed": em.seed,
+        "em_prior_alpha": em.prior_alpha,
+        "em_prior_gamma": em.prior_gamma,
+        "em_iterations": em.iterations,
+        "em_convergence_delta": em.convergence_delta,
+        "prune_threshold": em.prune_threshold,
+        "confidence_threshold": em.confidence_threshold,
+        "tss_window": em.tss_window,
+        # -- EMConfig: nrna_frac hierarchy --
+        "nrna_frac_kappa_global": em.nrna_frac_kappa_global,
+        "nrna_frac_kappa_locus": em.nrna_frac_kappa_locus,
+        "nrna_frac_kappa_tss": em.nrna_frac_kappa_tss,
+        "nrna_frac_mom_min_evidence_global": em.nrna_frac_mom_min_evidence_global,
+        "nrna_frac_mom_min_evidence_locus": em.nrna_frac_mom_min_evidence_locus,
+        "nrna_frac_mom_min_evidence_tss": em.nrna_frac_mom_min_evidence_tss,
+        "nrna_frac_kappa_min": em.nrna_frac_kappa_min,
+        "nrna_frac_kappa_max": em.nrna_frac_kappa_max,
+        "nrna_frac_kappa_fallback": em.nrna_frac_kappa_fallback,
+        "nrna_frac_kappa_min_obs": em.nrna_frac_kappa_min_obs,
+        # -- EMConfig: gDNA hierarchy --
+        "gdna_kappa_chrom": em.gdna_kappa_chrom,
+        "gdna_kappa_locus": em.gdna_kappa_locus,
+        "gdna_mom_min_evidence_chrom": em.gdna_mom_min_evidence_chrom,
+        "gdna_mom_min_evidence_locus": em.gdna_mom_min_evidence_locus,
+        # -- BamScanConfig fields --
+        "include_multimap": scan.include_multimap,
+        "keep_duplicates": not scan.skip_duplicates,   # inverted
+        "sj_strand_tag": ["auto"],                     # CLI uses list form
+        "strand_prior_kappa": scan.strand_prior_kappa,
+        # -- Scoring defaults (alpha space, converted later) --
+        "overhang_alpha": DEFAULT_OVERHANG_ALPHA,
+        "mismatch_alpha": DEFAULT_MISMATCH_ALPHA,
+        "gdna_splice_penalty_unannot": DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
+        # -- CLI-only flags --
+        "no_tsv": False,
+        "annotated_bam": None,
+        "threads": 0,
+    }
+
 
 def _resolve_quant_args(
     args: argparse.Namespace,

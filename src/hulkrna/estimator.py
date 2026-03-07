@@ -66,11 +66,6 @@ logger = logging.getLogger(__name__)
 # Numerical constants shared between Python and C++ are defined once
 # in em_solver.cpp and imported from hulkrna._em_impl.
 # EM_PRIOR_EPSILON is re-exported here for locus.py.
-# Other constants (_EM_LOG_EPSILON, _MAX_FRAG_LEN, etc.) are imported
-# directly by pyfallback.py where they are used.
-
-# Relative convergence tolerance for EM theta updates.
-_EM_CONVERGENCE_DELTA = 1e-6
 
 # Default mean fragment length used when no observations are available
 # (e.g. purely intergenic loci with no measured insert sizes).
@@ -296,8 +291,9 @@ class LocusEMInput:
 # nrna_frac (nascent fraction) prior computation — density + strand hybrid
 # ======================================================================
 
-#: Minimum denominator for the strand weight (2s − 1) below which
-#: we consider strand information unusable.
+#: Minimum denominator for the strand weight ``2s - 1`` below which
+#: the strand component of the hybrid estimator is zeroed out.
+#: Used by both estimator.py and locus.py (imported from here).
 _STRAND_DENOM_EPS: float = 0.01
 
 
@@ -308,7 +304,7 @@ def _compute_hybrid_nrna_frac_vec(
     intron_anti: np.ndarray,
     L_exonic: np.ndarray,
     L_intronic: np.ndarray,
-    s: float,
+    strand_spec: float,
     gdna_density: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute nrna_frac estimates and evidence from per-unit count arrays.
@@ -330,7 +326,7 @@ def _compute_hybrid_nrna_frac_vec(
         Unambiguously intronic fragment counts per unit.
     L_exonic, L_intronic : ndarray
         Exonic and intronic lengths (bp) per unit.
-    s : float
+    strand_spec : float
         Library strand specificity ∈ [0.5, 1.0].
     gdna_density : float
         Global intergenic gDNA density (frags / bp).
@@ -358,10 +354,10 @@ def _compute_hybrid_nrna_frac_vec(
     den_mrna = np.maximum(0.0, D_exon - D_intron)
 
     # --- Strand estimator ---
-    denom = 2.0 * s - 1.0
-    W = denom ** 2 if denom > _STRAND_DENOM_EPS else 0.0
+    denom = 2.0 * strand_spec - 1.0
+    inv_var_weight = denom ** 2 if denom > _STRAND_DENOM_EPS else 0.0
 
-    if W > 0:
+    if inv_var_weight > 0:
         exon_rna = np.maximum(0.0, (exon_sense - exon_anti) / denom)
         str_exon_density = exon_rna / np.maximum(1.0, L_exonic)
         intron_rna = np.maximum(0.0, (intron_sense - intron_anti) / denom)
@@ -376,8 +372,8 @@ def _compute_hybrid_nrna_frac_vec(
         str_mrna = den_mrna
 
     # --- Weighted combination ---
-    final_nrna = W * str_nrna + (1.0 - W) * den_nrna
-    final_mrna = W * str_mrna + (1.0 - W) * den_mrna
+    final_nrna = inv_var_weight * str_nrna + (1.0 - inv_var_weight) * den_nrna
+    final_mrna = inv_var_weight * str_mrna + (1.0 - inv_var_weight) * den_mrna
 
     # --- nrna_frac = nRNA / (mRNA + nRNA) ---
     # When total_rate = 0 (no evidence), default to nrna_frac = 0 (no nRNA
@@ -441,10 +437,8 @@ def compute_global_gdna_density(
 # Method-of-Moments κ estimation
 # ======================================================================
 
-_KAPPA_MIN = 2.0
-_KAPPA_MAX = 200.0
-_KAPPA_FALLBACK = 5.0
-_KAPPA_MIN_OBS = 20
+# Default kappa bounds come from EMConfig (single source of truth).
+_EM_DEFAULTS = EMConfig()
 
 
 def estimate_kappa(
@@ -452,10 +446,10 @@ def estimate_kappa(
     evidence_array: np.ndarray,
     min_evidence: float = 30.0,
     *,
-    kappa_min: float = _KAPPA_MIN,
-    kappa_max: float = _KAPPA_MAX,
-    kappa_fallback: float = _KAPPA_FALLBACK,
-    kappa_min_obs: int = _KAPPA_MIN_OBS,
+    kappa_min: float = _EM_DEFAULTS.nrna_frac_kappa_min,
+    kappa_max: float = _EM_DEFAULTS.nrna_frac_kappa_max,
+    kappa_fallback: float = _EM_DEFAULTS.nrna_frac_kappa_fallback,
+    kappa_min_obs: int = _EM_DEFAULTS.nrna_frac_kappa_min_obs,
 ) -> float:
     """Estimate Beta concentration κ via Method of Moments.
 
@@ -508,6 +502,66 @@ def estimate_kappa(
     return float(np.clip(kappa, kappa_min, kappa_max))
 
 
+def _aggregate_nrna_frac_by_group(
+    group_ids: np.ndarray,
+    n_groups: int,
+    exon_sense: np.ndarray,
+    exon_anti: np.ndarray,
+    intron_sense: np.ndarray,
+    intron_anti: np.ndarray,
+    L_exonic: np.ndarray,
+    L_intronic: np.ndarray,
+    strand_spec: float,
+    gdna_density: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Aggregate counts by group ID, compute nrna_frac, map back to per-transcript.
+
+    Parameters
+    ----------
+    group_ids : ndarray[int]
+        Group assignment per transcript.  Entries < 0 are unassigned.
+    n_groups : int
+        Number of groups (group IDs expected in ``[0, n_groups)``).
+
+    Returns
+    -------
+    (group_nrna_frac, group_evidence, per_t_nrna_frac, per_t_evidence)
+        Group-level arrays of shape ``(n_groups,)`` and per-transcript
+        arrays mapped back from the group results.
+    """
+    g_exon_s = np.zeros(n_groups, dtype=np.float64)
+    g_exon_a = np.zeros(n_groups, dtype=np.float64)
+    g_int_s = np.zeros(n_groups, dtype=np.float64)
+    g_int_a = np.zeros(n_groups, dtype=np.float64)
+    g_L_ex = np.zeros(n_groups, dtype=np.float64)
+    g_L_in = np.zeros(n_groups, dtype=np.float64)
+
+    valid = group_ids >= 0
+    if valid.any():
+        ids = group_ids[valid]
+        np.add.at(g_exon_s, ids, exon_sense[valid])
+        np.add.at(g_exon_a, ids, exon_anti[valid])
+        np.add.at(g_int_s, ids, intron_sense[valid])
+        np.add.at(g_int_a, ids, intron_anti[valid])
+        np.add.at(g_L_ex, ids, L_exonic[valid])
+        np.add.at(g_L_in, ids, L_intronic[valid])
+
+    g_nrna_frac, g_evidence = _compute_hybrid_nrna_frac_vec(
+        g_exon_s, g_exon_a, g_int_s, g_int_a,
+        g_L_ex, g_L_in, strand_spec, gdna_density,
+    )
+
+    # Map back to per-transcript
+    n_t = len(group_ids)
+    per_t_nrna_frac = np.zeros(n_t, dtype=np.float64)
+    per_t_evidence = np.zeros(n_t, dtype=np.float64)
+    if valid.any():
+        per_t_nrna_frac[valid] = g_nrna_frac[ids]
+        per_t_evidence[valid] = g_evidence[ids]
+
+    return g_nrna_frac, g_evidence, per_t_nrna_frac, per_t_evidence
+
+
 def compute_hybrid_nrna_frac_priors(
     estimator: "AbundanceEstimator",
     t_to_tss_group: np.ndarray | None,
@@ -521,10 +575,10 @@ def compute_hybrid_nrna_frac_priors(
     mom_min_evidence_global: float = 50.0,
     mom_min_evidence_locus: float = 30.0,
     mom_min_evidence_tss: float = 20.0,
-    kappa_min: float = _KAPPA_MIN,
-    kappa_max: float = _KAPPA_MAX,
-    kappa_fallback: float = _KAPPA_FALLBACK,
-    kappa_min_obs: int = _KAPPA_MIN_OBS,
+    kappa_min: float = _EM_DEFAULTS.nrna_frac_kappa_min,
+    kappa_max: float = _EM_DEFAULTS.nrna_frac_kappa_max,
+    kappa_fallback: float = _EM_DEFAULTS.nrna_frac_kappa_fallback,
+    kappa_min_obs: int = _EM_DEFAULTS.nrna_frac_kappa_min_obs,
 ) -> None:
     """Compute per-transcript nrna_frac (nascent fraction) Beta priors.
 
@@ -631,38 +685,24 @@ def compute_hybrid_nrna_frac_priors(
     else:
         L_intronic = np.zeros(n_t, dtype=np.float64)
 
-    s = strand_specificity
+    strand_spec = strand_specificity
 
     # === Level 1: per-transcript ===
     t_nrna_frac, t_evidence = _compute_hybrid_nrna_frac_vec(
         exon_sense, exon_anti, intron_sense, intron_anti,
-        L_exonic, L_intronic, s, gdna_density,
+        L_exonic, L_intronic, strand_spec, gdna_density,
     )
 
     # === Level 2: TSS group (aggregate counts then compute nrna_frac) ===
     if t_to_tss_group is not None and n_t > 0:
         n_groups = int(t_to_tss_group.max()) + 1
-        _z = np.zeros  # shorthand
-        g_exon_s = _z(n_groups, dtype=np.float64)
-        g_exon_a = _z(n_groups, dtype=np.float64)
-        g_int_s = _z(n_groups, dtype=np.float64)
-        g_int_a = _z(n_groups, dtype=np.float64)
-        g_L_ex = _z(n_groups, dtype=np.float64)
-        g_L_in = _z(n_groups, dtype=np.float64)
-        np.add.at(g_exon_s, t_to_tss_group, exon_sense)
-        np.add.at(g_exon_a, t_to_tss_group, exon_anti)
-        np.add.at(g_int_s, t_to_tss_group, intron_sense)
-        np.add.at(g_int_a, t_to_tss_group, intron_anti)
-        np.add.at(g_L_ex, t_to_tss_group, L_exonic)
-        np.add.at(g_L_in, t_to_tss_group, L_intronic)
-
-        g_nrna_frac, g_evidence = _compute_hybrid_nrna_frac_vec(
-            g_exon_s, g_exon_a, g_int_s, g_int_a,
-            g_L_ex, g_L_in, s, gdna_density,
+        g_nrna_frac, g_evidence, tss_nrna_frac, tss_evidence = (
+            _aggregate_nrna_frac_by_group(
+                t_to_tss_group, n_groups,
+                exon_sense, exon_anti, intron_sense, intron_anti,
+                L_exonic, L_intronic, strand_spec, gdna_density,
+            )
         )
-        # Map back to transcript dimension
-        tss_nrna_frac = g_nrna_frac[t_to_tss_group]
-        tss_evidence = g_evidence[t_to_tss_group]
     else:
         tss_nrna_frac = np.zeros(n_t, dtype=np.float64)
         tss_evidence = np.zeros(n_t, dtype=np.float64)
@@ -679,32 +719,13 @@ def compute_hybrid_nrna_frac_priors(
             + t_to_strand[has_locus].astype(np.int64)
         )
     n_ls = max(max_locus * 4, 1)
-    _z = np.zeros
-    ls_exon_s = _z(n_ls, dtype=np.float64)
-    ls_exon_a = _z(n_ls, dtype=np.float64)
-    ls_int_s = _z(n_ls, dtype=np.float64)
-    ls_int_a = _z(n_ls, dtype=np.float64)
-    ls_L_ex = _z(n_ls, dtype=np.float64)
-    ls_L_in = _z(n_ls, dtype=np.float64)
-    valid_ls = ls_key >= 0
-    if valid_ls.any():
-        np.add.at(ls_exon_s, ls_key[valid_ls], exon_sense[valid_ls])
-        np.add.at(ls_exon_a, ls_key[valid_ls], exon_anti[valid_ls])
-        np.add.at(ls_int_s, ls_key[valid_ls], intron_sense[valid_ls])
-        np.add.at(ls_int_a, ls_key[valid_ls], intron_anti[valid_ls])
-        np.add.at(ls_L_ex, ls_key[valid_ls], L_exonic[valid_ls])
-        np.add.at(ls_L_in, ls_key[valid_ls], L_intronic[valid_ls])
-
-    ls_nrna_frac_flat, ls_ev_flat = _compute_hybrid_nrna_frac_vec(
-        ls_exon_s, ls_exon_a, ls_int_s, ls_int_a,
-        ls_L_ex, ls_L_in, s, gdna_density,
+    ls_nrna_frac_flat, ls_ev_flat, ls_nrna_frac, ls_evidence = (
+        _aggregate_nrna_frac_by_group(
+            ls_key, n_ls,
+            exon_sense, exon_anti, intron_sense, intron_anti,
+            L_exonic, L_intronic, strand_spec, gdna_density,
+        )
     )
-    # Map back to transcript dimension
-    ls_nrna_frac = np.zeros(n_t, dtype=np.float64)
-    ls_evidence = np.zeros(n_t, dtype=np.float64)
-    if valid_ls.any():
-        ls_nrna_frac[valid_ls] = ls_nrna_frac_flat[ls_key[valid_ls]]
-        ls_evidence[valid_ls] = ls_ev_flat[ls_key[valid_ls]]
 
     # === Estimate κ hyperparameters via Method of Moments ===
     _mom_kw = dict(
@@ -1042,67 +1063,6 @@ class AbundanceEstimator:
         self.unambig_counts[t_idx, col] += 1.0
 
     # ------------------------------------------------------------------
-    # Per-locus EM solver
-    # ------------------------------------------------------------------
-
-    def run_locus_em(
-        self,
-        locus_em: LocusEMInput,
-        *,
-        em_iterations: int = 1000,
-        em_convergence_delta: float = _EM_CONVERGENCE_DELTA,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Run EM for a single locus sub-problem.
-
-        Delegates to the per-locus C++ solver.  This method is part of
-        the Python fallback path (the batch C++ path replaces the entire
-        per-locus loop).  Implementation lives in ``pyfallback.py``.
-
-        Returns
-        -------
-        tuple[np.ndarray, np.ndarray]
-            (theta, alpha) - converged parameters for this locus.
-        """
-        from .pyfallback import run_locus_em as _run_locus_em_fb
-
-        return _run_locus_em_fb(
-            self, locus_em,
-            em_iterations=em_iterations,
-            em_convergence_delta=em_convergence_delta,
-        )
-
-    # ------------------------------------------------------------------
-    # Per-locus posterior assignment
-    # ------------------------------------------------------------------
-
-    def assign_locus_ambiguous(
-        self,
-        locus_em: LocusEMInput,
-        theta: np.ndarray,
-        *,
-        confidence_threshold: float = 0.95,
-        unit_annotations: list | None = None,
-    ) -> dict[str, float]:
-        """Assign ambiguous units within one locus, scatter to global arrays.
-
-        Implementation lives in ``pyfallback.py``.  This method is part
-        of the Python fallback path (the batch C++ path does assignment
-        internally).
-
-        Returns
-        -------
-        dict[str, float]
-            Per-pool fragment counts: ``{"mrna": ..., "nrna": ..., "gdna": ...}``.
-        """
-        from .pyfallback import assign_locus_ambiguous as _assign_fb
-
-        return _assign_fb(
-            self, locus_em, theta,
-            confidence_threshold=confidence_threshold,
-            unit_annotations=unit_annotations,
-        )
-
-    # ------------------------------------------------------------------
     # Batch locus EM — Phase 2A: single C++ call for all loci
     # ------------------------------------------------------------------
 
@@ -1113,9 +1073,9 @@ class AbundanceEstimator:
         index,
         gdna_inits: np.ndarray,
         *,
-        em_iterations: int = 1000,
-        em_convergence_delta: float = _EM_CONVERGENCE_DELTA,
-        confidence_threshold: float = 0.95,
+        em_iterations: int = _EM_DEFAULTS.iterations,
+        em_convergence_delta: float = _EM_DEFAULTS.convergence_delta,
+        confidence_threshold: float = _EM_DEFAULTS.confidence_threshold,
     ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
         """Run locus-level EM for ALL loci in a single C++ call.
 

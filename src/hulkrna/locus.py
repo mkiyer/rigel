@@ -12,12 +12,14 @@ from collections import defaultdict
 import numpy as np
 from ._em_impl import connected_components as _cc_native
 
+from .config import EMConfig
 from .estimator import (
     AbundanceEstimator,
     EM_PRIOR_EPSILON,
     Locus,
     LocusEMInput,
     ScoredFragments,
+    _STRAND_DENOM_EPS,
     estimate_kappa,
 )
 from .index import TranscriptIndex
@@ -28,19 +30,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Empirical Bayes hyperparameters
 # ---------------------------------------------------------------------------
-#: Fragments needed for locus-level to dominate.
-EB_K_LOCUS = 20.0
-#: Fragments needed for chrom-level to dominate.
-EB_K_CHROM = 50.0
 
 #: Minimum strand specificity denominator (2*SS − 1).
 #: When the denominator is below this threshold, the strand signal is too
 #: weak to reliably estimate nRNA or gDNA fractions — we return 0.0.
 STRAND_DENOM_MIN: float = 0.2
-
-#: Minimum denominator for the strand weight ``2s − 1`` below which
-#: the strand component of the hybrid estimator is zeroed out.
-_STRAND_DENOM_EPS: float = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -467,8 +461,8 @@ def compute_nrna_init(
     When 2SS − 1 ≤ 0.2, returns zeros.
     Single-exon transcripts get nrna_init = 0.
     """
-    ss = strand_models.strand_specificity
-    denom = 2.0 * ss - 1.0
+    strand_spec = strand_models.strand_specificity
+    denom = 2.0 * strand_spec - 1.0
 
     if denom <= STRAND_DENOM_MIN:
         nrna_init = np.zeros_like(transcript_intronic_sense)
@@ -492,7 +486,7 @@ def compute_nrna_init(
 def compute_gdna_rate_from_strand(
     sense: float,
     antisense: float,
-    ss: float,
+    strand_spec: float,
 ) -> float:
     """Strand-corrected gDNA rate from sense/antisense counts.
 
@@ -501,13 +495,13 @@ def compute_gdna_rate_from_strand(
 
     Returns 0.0 when evidence is insufficient.
     """
-    denom_ss = 2.0 * ss - 1.0
+    denom_ss = 2.0 * strand_spec - 1.0
     if denom_ss <= STRAND_DENOM_MIN:
         return 0.0
     total = sense + antisense
     if total == 0:
         return 0.0
-    g = 2.0 * (antisense * ss - sense * (1.0 - ss)) / denom_ss
+    g = 2.0 * (antisense * strand_spec - sense * (1.0 - strand_spec)) / denom_ss
     g = max(g, 0.0)
     rate = g / total
     return min(rate, 1.0)
@@ -517,7 +511,7 @@ def compute_gdna_rate_hybrid(
     sense: float,
     antisense: float,
     exonic_bp: float,
-    ss: float,
+    strand_spec: float,
     intergenic_density: float,
 ) -> tuple[float, float]:
     """Hybrid density + strand gDNA rate estimate.
@@ -540,7 +534,7 @@ def compute_gdna_rate_hybrid(
         Unspliced sense/antisense fragment counts.
     exonic_bp : float
         Total exonic base pairs in this region.
-    ss : float
+    strand_spec : float
         Library strand specificity ∈ [0.5, 1.0].
     intergenic_density : float
         Background gDNA density (frags / bp) from intergenic regions.
@@ -558,11 +552,11 @@ def compute_gdna_rate_hybrid(
         return 0.0, 0.0
 
     # --- Strand component ---
-    denom_ss = 2.0 * ss - 1.0
-    W = denom_ss ** 2 if denom_ss > _STRAND_DENOM_EPS else 0.0
+    denom_ss = 2.0 * strand_spec - 1.0
+    inv_var_weight = denom_ss ** 2 if denom_ss > _STRAND_DENOM_EPS else 0.0
 
-    if W > 0:
-        g = 2.0 * (antisense * ss - sense * (1.0 - ss)) / denom_ss
+    if inv_var_weight > 0:
+        g = 2.0 * (antisense * strand_spec - sense * (1.0 - strand_spec)) / denom_ss
         g = max(g, 0.0)
         strand_rate = min(g / total, 1.0)
     else:
@@ -576,8 +570,90 @@ def compute_gdna_rate_hybrid(
         density_rate = 0.0
 
     # --- Weighted combination ---
-    rate = W * strand_rate + (1.0 - W) * density_rate
+    rate = inv_var_weight * strand_rate + (1.0 - inv_var_weight) * density_rate
     return min(max(rate, 0.0), 1.0), total
+
+
+def _compute_chrom_gdna_rates(
+    t_sense: np.ndarray,
+    t_anti: np.ndarray,
+    t_exonic: np.ndarray,
+    t_refs: np.ndarray,
+    strand_spec: float,
+    intergenic_density: float,
+    global_rate: float,
+    k_chrom: float,
+) -> dict[str, float]:
+    """Compute per-chromosome gDNA rates shrunk toward global.
+
+    Returns a dict mapping chromosome name to the shrunk gDNA rate.
+    """
+    chrom_sense: dict[str, float] = defaultdict(float)
+    chrom_anti: dict[str, float] = defaultdict(float)
+    chrom_exonic: dict[str, float] = defaultdict(float)
+    for t_idx in range(len(t_sense)):
+        ref = str(t_refs[t_idx])
+        chrom_sense[ref] += t_sense[t_idx]
+        chrom_anti[ref] += t_anti[t_idx]
+        chrom_exonic[ref] += t_exonic[t_idx]
+
+    chrom_shrunk: dict[str, float] = {}
+    for ref in chrom_sense:
+        rate, evidence = compute_gdna_rate_hybrid(
+            chrom_sense[ref], chrom_anti[ref], chrom_exonic[ref],
+            strand_spec, intergenic_density,
+        )
+        shrink_weight = evidence / (evidence + k_chrom) if (evidence + k_chrom) > 0 else 0.0
+        chrom_shrunk[ref] = shrink_weight * rate + (1.0 - shrink_weight) * global_rate
+
+    return chrom_shrunk
+
+
+def _compute_per_locus_gdna_rates(
+    loci: list,
+    t_sense: np.ndarray,
+    t_anti: np.ndarray,
+    t_exonic: np.ndarray,
+    t_refs: np.ndarray,
+    strand_spec: float,
+    intergenic_density: float,
+    chrom_shrunk: dict[str, float],
+    global_rate: float,
+) -> tuple[list[float], list[float], list[float]]:
+    """Compute per-locus gDNA rates and their parent (chromosome) rates.
+
+    Returns (locus_rates, locus_evidence, locus_parents).
+    """
+    locus_rates: list[float] = []
+    locus_evidence: list[float] = []
+    locus_parents: list[float] = []
+
+    for locus in loci:
+        t_arr = locus.transcript_indices
+        locus_sense = float(t_sense[t_arr].sum())
+        locus_anti = float(t_anti[t_arr].sum())
+        locus_exonic_bp = float(t_exonic[t_arr].sum())
+
+        locus_rate, locus_n = compute_gdna_rate_hybrid(
+            locus_sense, locus_anti, locus_exonic_bp, strand_spec, intergenic_density,
+        )
+
+        ref_counts: dict[str, float] = defaultdict(float)
+        for t_idx in t_arr:
+            ref = str(t_refs[int(t_idx)])
+            ref_counts[ref] += t_sense[int(t_idx)] + t_anti[int(t_idx)]
+        if ref_counts:
+            primary_ref = max(ref_counts, key=ref_counts.get)
+        elif len(t_arr) > 0:
+            primary_ref = str(t_refs[int(t_arr[0])])
+        else:
+            primary_ref = ""
+
+        locus_rates.append(locus_rate)
+        locus_evidence.append(locus_n)
+        locus_parents.append(chrom_shrunk.get(primary_ref, global_rate))
+
+    return locus_rates, locus_evidence, locus_parents
 
 
 def compute_eb_gdna_priors(
@@ -592,10 +668,10 @@ def compute_eb_gdna_priors(
     kappa_locus: float | None = None,
     mom_min_evidence_chrom: float = 50.0,
     mom_min_evidence_locus: float = 30.0,
-    kappa_min: float = 2.0,
-    kappa_max: float = 200.0,
-    kappa_fallback: float = 5.0,
-    kappa_min_obs: int = 20,
+    kappa_min: float = EMConfig().nrna_frac_kappa_min,
+    kappa_max: float = EMConfig().nrna_frac_kappa_max,
+    kappa_fallback: float = EMConfig().nrna_frac_kappa_fallback,
+    kappa_min_obs: int = EMConfig().nrna_frac_kappa_min_obs,
 ) -> list[float]:
     """Compute empirical Bayes gDNA initialization per locus.
 
@@ -639,7 +715,7 @@ def compute_eb_gdna_priors(
     list[float]
         gDNA init count per locus (same order as ``loci``).
     """
-    ss = strand_models.strand_specificity
+    strand_spec = strand_models.strand_specificity
     t_sense = estimator.transcript_unspliced_sense
     t_anti = estimator.transcript_unspliced_antisense
     t_refs = index.t_df["ref"].values
@@ -650,87 +726,59 @@ def compute_eb_gdna_priors(
     total_anti = float(t_anti.sum())
     total_exonic_bp = float(t_exonic.sum())
     global_rate, global_n = compute_gdna_rate_hybrid(
-        total_sense, total_anti, total_exonic_bp, ss, intergenic_density,
+        total_sense, total_anti, total_exonic_bp, strand_spec, intergenic_density,
     )
 
-    # --- Chromosome level (hybrid density+strand) ---
-    chrom_sense: dict[str, float] = defaultdict(float)
-    chrom_anti: dict[str, float] = defaultdict(float)
-    chrom_exonic: dict[str, float] = defaultdict(float)
-    for t_idx in range(len(t_sense)):
-        ref = str(t_refs[t_idx])
-        chrom_sense[ref] += t_sense[t_idx]
-        chrom_anti[ref] += t_anti[t_idx]
-        chrom_exonic[ref] += t_exonic[t_idx]
-
-    chrom_rate: dict[str, float] = {}
-    chrom_n: dict[str, float] = {}
-    for ref in chrom_sense:
-        r, n = compute_gdna_rate_hybrid(
-            chrom_sense[ref], chrom_anti[ref], chrom_exonic[ref],
-            ss, intergenic_density,
-        )
-        chrom_rate[ref] = r
-        chrom_n[ref] = n
-
-    # MoM κ for chrom → global shrinkage
+    # --- Chromosome level: κ estimation ---
+    _mom_kw = dict(
+        kappa_min=kappa_min, kappa_max=kappa_max,
+        kappa_fallback=kappa_fallback, kappa_min_obs=kappa_min_obs,
+    )
     if kappa_chrom is None:
-        chrom_rate_arr = np.array(list(chrom_rate.values()), dtype=np.float64)
-        chrom_n_arr = np.array(list(chrom_n.values()), dtype=np.float64)
+        # Need raw chrom rates for MoM estimation before shrinking
+        chrom_sense: dict[str, float] = defaultdict(float)
+        chrom_anti: dict[str, float] = defaultdict(float)
+        chrom_exonic: dict[str, float] = defaultdict(float)
+        for t_idx in range(len(t_sense)):
+            ref = str(t_refs[t_idx])
+            chrom_sense[ref] += t_sense[t_idx]
+            chrom_anti[ref] += t_anti[t_idx]
+            chrom_exonic[ref] += t_exonic[t_idx]
+        chrom_rate_arr = np.empty(len(chrom_sense), dtype=np.float64)
+        chrom_n_arr = np.empty(len(chrom_sense), dtype=np.float64)
+        for i, ref in enumerate(chrom_sense):
+            rate, evidence = compute_gdna_rate_hybrid(
+                chrom_sense[ref], chrom_anti[ref], chrom_exonic[ref],
+                strand_spec, intergenic_density,
+            )
+            chrom_rate_arr[i] = rate
+            chrom_n_arr[i] = evidence
         k_chrom = estimate_kappa(
             chrom_rate_arr, chrom_n_arr, mom_min_evidence_chrom,
-            kappa_min=kappa_min, kappa_max=kappa_max,
-            kappa_fallback=kappa_fallback, kappa_min_obs=kappa_min_obs,
+            **_mom_kw,
         )
         logger.debug(f"gDNA κ_chrom (MoM auto): {k_chrom:.1f}")
+        n_chroms = len(chrom_sense)
     else:
         k_chrom = kappa_chrom
+        n_chroms = 0  # not computed
 
     logger.info(
         f"gDNA EB: global_rate={global_rate:.4f} "
-        f"(N={global_n:.0f}), κ_chrom={k_chrom:.1f}, "
-        f"n_chroms={len(chrom_rate)}"
+        f"(N={global_n:.0f}), κ_chrom={k_chrom:.1f}"
     )
 
-    # Shrink chrom toward global
-    chrom_shrunk: dict[str, float] = {}
-    for ref in chrom_rate:
-        n = chrom_n[ref]
-        w = n / (n + k_chrom) if (n + k_chrom) > 0 else 0.0
-        chrom_shrunk[ref] = w * chrom_rate[ref] + (1.0 - w) * global_rate
+    # --- Chromosome level: shrink toward global ---
+    chrom_shrunk = _compute_chrom_gdna_rates(
+        t_sense, t_anti, t_exonic, t_refs,
+        strand_spec, intergenic_density, global_rate, k_chrom,
+    )
 
-    # --- Per-locus level (hybrid density+strand) ---
-    locus_rates: list[float] = []
-    locus_evidence: list[float] = []
-    locus_parents: list[float] = []
-
-    for locus in loci:
-        t_arr = locus.transcript_indices
-        locus_sense = float(t_sense[t_arr].sum())
-        locus_anti = float(t_anti[t_arr].sum())
-        locus_exonic_bp = float(t_exonic[t_arr].sum())
-
-        locus_rate, locus_n = compute_gdna_rate_hybrid(
-            locus_sense, locus_anti, locus_exonic_bp, ss, intergenic_density,
-        )
-
-        # Determine primary chromosome for this locus
-        ref_counts: dict[str, float] = defaultdict(float)
-        for t_idx in t_arr:
-            ref = str(t_refs[int(t_idx)])
-            ref_counts[ref] += t_sense[int(t_idx)] + t_anti[int(t_idx)]
-        if ref_counts:
-            primary_ref = max(ref_counts, key=ref_counts.get)
-        elif len(t_arr) > 0:
-            primary_ref = str(t_refs[int(t_arr[0])])
-        else:
-            primary_ref = ""
-
-        parent_rate = chrom_shrunk.get(primary_ref, global_rate)
-
-        locus_rates.append(locus_rate)
-        locus_evidence.append(locus_n)
-        locus_parents.append(parent_rate)
+    # --- Per-locus level ---
+    locus_rates, locus_evidence, locus_parents = _compute_per_locus_gdna_rates(
+        loci, t_sense, t_anti, t_exonic, t_refs,
+        strand_spec, intergenic_density, chrom_shrunk, global_rate,
+    )
 
     # MoM κ for locus → chrom shrinkage
     if kappa_locus is None:
@@ -738,8 +786,7 @@ def compute_eb_gdna_priors(
         locus_n_arr = np.array(locus_evidence, dtype=np.float64)
         k_locus = estimate_kappa(
             locus_rate_arr, locus_n_arr, mom_min_evidence_locus,
-            kappa_min=kappa_min, kappa_max=kappa_max,
-            kappa_fallback=kappa_fallback, kappa_min_obs=kappa_min_obs,
+            **_mom_kw,
         )
         logger.debug(f"gDNA κ_locus (MoM auto): {k_locus:.1f}")
     else:
@@ -764,8 +811,8 @@ def compute_eb_gdna_priors(
         locus_rate = locus_rates[i]
         parent_rate = locus_parents[i]
 
-        w = locus_n / (locus_n + k_locus) if (locus_n + k_locus) > 0 else 0.0
-        shrunk_rate = w * locus_rate + (1.0 - w) * parent_rate
+        shrink_weight = locus_n / (locus_n + k_locus) if (locus_n + k_locus) > 0 else 0.0
+        shrunk_rate = shrink_weight * locus_rate + (1.0 - shrink_weight) * parent_rate
 
         # gDNA init = shrunk_rate × unspliced fragment count in locus
         n_unspliced = 0

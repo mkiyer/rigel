@@ -42,11 +42,57 @@ class _BF:
 
 
 class _Chunk:
+    """Columnar mock chunk compatible with the C++ native scan path.
+
+    Has ``t_offsets`` and other columnar arrays so ``_scan_native``
+    fires.  Also supports ``__getitem__`` for multimapper handling.
+    """
+
     def __init__(self, bfs, fragment_classes, frag_ids):
         self._bfs = bfs
+        n = len(bfs)
+
+        # Per-fragment columnar arrays
+        self.splice_type = np.array(
+            [bf.splice_type for bf in bfs], dtype=np.uint8)
+        self.exon_strand = np.array(
+            [bf.exon_strand for bf in bfs], dtype=np.uint8)
         self.fragment_classes = np.array(fragment_classes, dtype=np.uint8)
         self.frag_id = np.array(frag_ids, dtype=np.int64)
-        self.size = len(bfs)
+        self.read_length = np.array(
+            [bf.read_length for bf in bfs], dtype=np.uint32)
+        self.genomic_footprint = np.array(
+            [bf.genomic_footprint for bf in bfs], dtype=np.int32)
+        self.genomic_start = np.array(
+            [bf.genomic_start for bf in bfs], dtype=np.int32)
+        self.nm = np.array([bf.nm for bf in bfs], dtype=np.uint16)
+        self.size = n
+
+        # CSR transcript indices (variable-length per fragment)
+        offsets = [0]
+        flat_t = []
+        flat_fl = []
+        flat_exon = []
+        flat_intron = []
+        flat_uintron = []
+        for bf in bfs:
+            n_cand = len(bf.t_inds)
+            flat_t.extend(bf.t_inds)
+            if bf.frag_lengths is not None:
+                flat_fl.extend(bf.frag_lengths)
+            else:
+                flat_fl.extend([200] * n_cand)
+            flat_exon.extend(bf.exon_bp)
+            flat_intron.extend(bf.intron_bp)
+            flat_uintron.extend(bf.unambig_intron_bp)
+            offsets.append(len(flat_t))
+
+        self.t_offsets = np.array(offsets, dtype=np.int64)
+        self.t_indices = np.array(flat_t, dtype=np.int32)
+        self.frag_lengths = np.array(flat_fl, dtype=np.int32)
+        self.exon_bp = np.array(flat_exon, dtype=np.int32)
+        self.intron_bp = np.array(flat_intron, dtype=np.int32)
+        self.unambig_intron_bp = np.array(flat_uintron, dtype=np.int32)
 
     def __getitem__(self, idx):
         return self._bfs[idx]

@@ -7,6 +7,7 @@ ensure immutability after construction.  Compose the sub-configs into
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -135,21 +136,23 @@ class EMConfig:
 class FragmentScoringConfig:
     """Configuration for fragment scoring penalties.
 
-    All penalties are in log-space.  ``None`` means use the module
-    defaults from ``scoring.py``.
+    All penalties are in log-space.  ``None`` for ``gdna_splice_penalties``
+    means use the module defaults from ``scoring.py``.
 
     Parameters
     ----------
-    overhang_log_penalty : float or None
-        Log-penalty per base of overhang.
-    mismatch_log_penalty : float or None
-        Log-penalty per NM mismatch.
+    overhang_log_penalty : float
+        Log-penalty per base of overhang.  Default ``log(0.01) ≈ −4.605``
+        (i.e. each overhang base cuts probability by 100×).
+    mismatch_log_penalty : float
+        Log-penalty per NM mismatch.  Default ``log(0.1) ≈ −2.303``
+        (i.e. each mismatch cuts probability by 10×).
     gdna_splice_penalties : dict or None
         Per-SpliceType gDNA penalties (int keys → float values).
     """
 
-    overhang_log_penalty: float | None = None
-    mismatch_log_penalty: float | None = None
+    overhang_log_penalty: float = math.log(0.01)
+    mismatch_log_penalty: float = math.log(0.1)
     gdna_splice_penalties: dict[int, float] | None = None
 
 

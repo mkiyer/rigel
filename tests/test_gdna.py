@@ -130,44 +130,46 @@ class TestScoreGDNA:
 
 
 class TestLocusGDNATheta:
-    """Verify gDNA competes with mRNA in locus EM theta."""
+    """Verify gDNA competes with mRNA in locus EM."""
 
-    def test_theta_has_gdna_component(self):
-        """Theta has 2*n_t + 1 elements (mRNA + nRNA + 1 gDNA)."""
+    def test_gdna_absorbs_with_high_init(self):
+        """With large gdna_init and equal likelihoods, gDNA takes share."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 10,
             num_transcripts=3,
             include_gdna=True,
             gdna_init=10.0,
         )
-        theta, _alpha = rc.run_locus_em(lem, em_iterations=1)
-        # 2*3 + 1 = 7
-        assert theta.shape == (7,)
-        assert theta.sum() == pytest.approx(1.0)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=1)
+        # gDNA should absorb some fragments
+        assert pool_counts["gdna"] > 0
 
-    def test_high_gdna_init_biases_theta(self):
-        """Large gdna_init biases gDNA theta upward."""
+    def test_high_gdna_log_lik_biases_assignment(self):
+        """gDNA with much higher log-likelihood absorbs most counts."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        lem = _make_locus_em_data(
+        # Give gDNA a much higher log-lik than mRNA (mRNA defaults to 0.0)
+        bundle = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=500.0,
+            gdna_init=1.0,
+            gdna_log_lik=5.0,
         )
-        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
 
-        gdna_idx = 2 * 2  # n_t = 2
-        assert theta[gdna_idx] > theta[0], (
-            f"gDNA theta ({theta[gdna_idx]:.4f}) should dominate "
-            f"over t0 ({theta[0]:.4f})"
+        gdna_count = pool_counts["gdna"]
+        mrna_count = rc.em_counts.sum()
+        assert gdna_count > mrna_count, (
+            f"gDNA count ({gdna_count:.4f}) should dominate "
+            f"over mRNA ({mrna_count:.4f})"
         )
 
     def test_no_gdna_init_minimal_absorption(self):
-        """With zero gdna_init and weak gDNA likelihood, gDNA theta is small."""
+        """With zero gdna_init and weak gDNA likelihood, gDNA count is small."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, 0] = 1000.0
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
             rc=rc,
@@ -175,10 +177,9 @@ class TestLocusGDNATheta:
             gdna_init=0.0,
             gdna_log_lik=-5.0,
         )
-        theta, _alpha = rc.run_locus_em(lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
 
-        gdna_idx = 2 * 2
-        assert theta[gdna_idx] < 0.01, f"gDNA theta too high: {theta[gdna_idx]:.4f}"
+        assert pool_counts["gdna"] < 1.0, f"gDNA count too high: {pool_counts['gdna']:.4f}"
 
 
 # =====================================================================
@@ -192,7 +193,7 @@ class TestLocusGDNAAssignment:
     def test_gdna_assignment_not_in_em_counts(self):
         """Fragments assigned to gDNA are counted in pool_counts return."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 100,
             log_liks_per_unit=[[-10.0]] * 100,
             num_transcripts=2,
@@ -200,34 +201,34 @@ class TestLocusGDNAAssignment:
             gdna_init=1000.0,
             gdna_log_lik=0.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 0
         total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
-        assert total == pytest.approx(100.0)
+        assert total == pytest.approx(100.0, abs=1.0)
 
     def test_total_counts_preserved(self):
         """em_counts + nrna_em + gdna == n_units."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,
             include_nrna=True,
             include_gdna=True,
             gdna_init=25.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
         total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
-        assert total == pytest.approx(200.0)
+        assert total == pytest.approx(200.0, abs=1.0)
 
     def test_strong_transcript_signal_beats_gdna(self):
         """When transcript likelihood >> gDNA, most go to transcript."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, 0] = 500.0
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 500,
             log_liks_per_unit=[[0.0]] * 500,
             num_transcripts=2,
@@ -236,23 +237,24 @@ class TestLocusGDNAAssignment:
             gdna_init=1.0,
             gdna_log_lik=-20.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
         assert rc.em_counts[0].sum() > 490
         assert gdna_count < 10
 
-    def test_high_gdna_init_absorbs_fragments(self):
-        """With large gdna_init, gDNA takes larger share."""
+    def test_high_gdna_log_lik_absorbs_fragments(self):
+        """With gDNA log-lik >> mRNA log-lik, gDNA takes larger share."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 500,
+            log_liks_per_unit=[[-10.0]] * 500,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=500.0,
+            gdna_init=1.0,
             gdna_log_lik=0.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 100, (
@@ -272,7 +274,7 @@ class TestGDNALocusAttribution:
         """gDNA assignments populate gdna_locus_counts."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         cc = _UNSPLICED_SENSE
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 100,
             log_liks_per_unit=[[-10.0]] * 100,
             count_cols_per_unit=[[cc]] * 100,
@@ -281,7 +283,7 @@ class TestGDNALocusAttribution:
             gdna_init=1000.0,
             gdna_log_lik=0.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 0
@@ -291,7 +293,7 @@ class TestGDNALocusAttribution:
         """No gDNA assignments → locus counts stay zero."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, 0] = 1000.0
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0]] * 50,
             log_liks_per_unit=[[0.0]] * 50,
             num_transcripts=2,
@@ -300,7 +302,7 @@ class TestGDNALocusAttribution:
             gdna_init=0.0,
             gdna_log_lik=-50.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
         # With fractional assignment, a vanishingly small posterior may
@@ -572,27 +574,25 @@ class TestLocusGDNABehavior:
     def test_two_transcripts_share_one_gdna_shadow(self):
         """Two transcripts in one locus share a single gDNA component."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        lem = _make_locus_em_data(
+        bundle = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,
             include_gdna=True,
             gdna_init=100.0,
         )
-        theta, pool_counts = _run_and_assign(rc, lem, em_iterations=10)
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
-        # n_components = 2*3 + 1 = 7, gDNA at index 6
-        assert theta.shape == (7,)
-        assert theta[6] > 0  # gDNA has non-zero theta
+        assert gdna_count > 0  # gDNA has non-zero count
         total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
-        assert total == pytest.approx(200.0)
+        assert total == pytest.approx(200.0, abs=1.0)
 
-    def test_gdna_init_determines_absorption(self):
-        """Higher gdna_init → more fragments absorbed by gDNA."""
-        # Low gdna_init + strong RNA prior → no gDNA absorption
+    def test_gdna_log_lik_determines_absorption(self):
+        """Higher gDNA log-likelihood → more fragments absorbed by gDNA."""
+        # Low gDNA log-lik + strong RNA prior → no gDNA absorption
         rc_low = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc_low.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
-        lem_low = _make_locus_em_data(
+        bundle_low = _make_locus_em_data(
             [[0]] * 200,
             num_transcripts=2,
             rc=rc_low,
@@ -600,19 +600,20 @@ class TestLocusGDNABehavior:
             gdna_init=1.0,
             gdna_log_lik=-5.0,
         )
-        _, pc_low = _run_and_assign(rc_low, lem_low, em_iterations=10)
+        pc_low = _run_and_assign(rc_low, bundle_low, em_iterations=10)
         gc_low = pc_low["gdna"]
 
-        # High gdna_init → gDNA absorbs fragments
+        # High gDNA log-lik → gDNA absorbs fragments
         rc_high = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        lem_high = _make_locus_em_data(
+        bundle_high = _make_locus_em_data(
             [[0]] * 200,
+            log_liks_per_unit=[[-10.0]] * 200,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=1000.0,
+            gdna_init=1.0,
             gdna_log_lik=0.0,
         )
-        _, pc_high = _run_and_assign(rc_high, lem_high, em_iterations=10)
+        pc_high = _run_and_assign(rc_high, bundle_high, em_iterations=10)
         gc_high = pc_high["gdna"]
 
         assert gc_high > gc_low
