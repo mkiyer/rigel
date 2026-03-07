@@ -170,6 +170,72 @@ static std::vector<EmEquivClass> build_equiv_classes(
         result.push_back(std::move(ec));
     }
 
+    // ---- Deterministic ordering ----
+    // Multi-threaded BAM scanning produces fragments in non-deterministic
+    // order.  The unordered_map above inherits that non-determinism in both
+    // (a) the iteration order of equiv classes, and (b) the row order of
+    // units within each class.  Since the EM E-step accumulates column sums
+    // over rows, and FP addition is non-associative, different row orders
+    // produce ULP-level differences that SQUAREM amplifies across iterations
+    // until post-EM pruning flips borderline decisions, causing large
+    // cascading output differences.
+    //
+    // Fix: sort equiv classes by comp_idx, and sort rows within each class
+    // by their log-likelihood fingerprint.  This makes the EM iteration
+    // fully deterministic regardless of input fragment order.
+
+    // Sort equiv classes by comp_idx (lexicographic)
+    std::sort(result.begin(), result.end(),
+              [](const EmEquivClass& a, const EmEquivClass& b) {
+                  return a.comp_idx < b.comp_idx;
+              });
+
+    // Sort rows within each equiv class by log-lik (lexicographic)
+    for (auto& ec : result) {
+        if (ec.n <= 1) continue;
+        int k = ec.k;
+        int n = ec.n;
+
+        // Build sort index
+        std::vector<int> idx(static_cast<size_t>(n));
+        std::iota(idx.begin(), idx.end(), 0);
+
+        std::sort(idx.begin(), idx.end(), [&](int a, int b) {
+            for (int j = 0; j < k; ++j) {
+                double va = ec.ll_flat[static_cast<size_t>(a) * k + j];
+                double vb = ec.ll_flat[static_cast<size_t>(b) * k + j];
+                if (va != vb) return va < vb;
+            }
+            for (int j = 0; j < k; ++j) {
+                double va = ec.wt_flat[static_cast<size_t>(a) * k + j];
+                double vb = ec.wt_flat[static_cast<size_t>(b) * k + j];
+                if (va != vb) return va < vb;
+            }
+            return false;
+        });
+
+        // Check if already sorted (common case for single-unit classes)
+        bool already_sorted = true;
+        for (int i = 0; i < n; ++i) {
+            if (idx[i] != i) { already_sorted = false; break; }
+        }
+        if (already_sorted) continue;
+
+        // Reorder ll_flat and wt_flat
+        std::vector<double> new_ll(static_cast<size_t>(n) * k);
+        std::vector<double> new_wt(static_cast<size_t>(n) * k);
+        for (int i = 0; i < n; ++i) {
+            auto src = static_cast<size_t>(idx[i]) * k;
+            auto dst = static_cast<size_t>(i) * k;
+            std::copy(ec.ll_flat.data() + src, ec.ll_flat.data() + src + k,
+                      new_ll.data() + dst);
+            std::copy(ec.wt_flat.data() + src, ec.wt_flat.data() + src + k,
+                      new_wt.data() + dst);
+        }
+        ec.ll_flat = std::move(new_ll);
+        ec.wt_flat = std::move(new_wt);
+    }
+
     return result;
 }
 
@@ -1245,13 +1311,13 @@ static void extract_locus_sub_problem(
     // Global CSR
     const int64_t* g_offsets,
     const int32_t* g_t_indices,
-    const float*   g_log_liks,
-    const float*   g_coverage_wts,
+    const double*  g_log_liks,
+    const double*  g_coverage_wts,
     const int32_t* g_tx_starts,
     const int32_t* g_tx_ends,
     const uint8_t* g_count_cols,
     const uint8_t* g_is_spliced,
-    const float*   g_gdna_log_liks,
+    const double*  g_gdna_log_liks,
     const int32_t* g_genomic_footprints,
     const int32_t* g_locus_t_indices,
     const uint8_t* g_locus_count_cols,
@@ -1634,13 +1700,13 @@ batch_locus_em(
     // --- Global CSR (ScoredFragments) ---
     i64_1d g_offsets,
     i32_1d g_t_indices,
-    f32_1d g_log_liks,
-    f32_1d g_coverage_wts,
+    f64_1d g_log_liks,
+    f64_1d g_coverage_wts,
     i32_1d g_tx_starts,
     i32_1d g_tx_ends,
     u8_1d  g_count_cols,
     u8_1d  g_is_spliced,
-    f32_1d g_gdna_log_liks,
+    f64_1d g_gdna_log_liks,
     i32_1d g_genomic_footprints,
     i32_1d g_locus_t_indices,
     u8_1d  g_locus_count_cols,
@@ -1688,13 +1754,13 @@ batch_locus_em(
     // Get raw pointers to all input arrays
     const int64_t*  goff  = g_offsets.data();
     const int32_t*  gti   = g_t_indices.data();
-    const float*    gll   = g_log_liks.data();
-    const float*    gcw   = g_coverage_wts.data();
+    const double*   gll   = g_log_liks.data();
+    const double*   gcw   = g_coverage_wts.data();
     const int32_t*  gtxs  = g_tx_starts.data();
     const int32_t*  gtxe  = g_tx_ends.data();
     const uint8_t*  gcc   = g_count_cols.data();
     const uint8_t*  gis   = g_is_spliced.data();
-    const float*    ggll  = g_gdna_log_liks.data();
+    const double*   ggll  = g_gdna_log_liks.data();
     const int32_t*  ggfp  = g_genomic_footprints.data();
     const int32_t*  glti  = g_locus_t_indices.data();
     const uint8_t*  glcc  = g_locus_count_cols.data();

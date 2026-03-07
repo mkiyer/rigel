@@ -1,6 +1,18 @@
 # TODO
 
+## Equivalence class sorting?
 
+This seems to affect non-deterministic behavior of the EM. Is this necessary?
+
+## Conversion from float to double for EM?
+
+Is this necessary? There was non-determinism attributed to floating point rounding precision.
+
+## Bug in BAM scanning (might not be a bug)
+
+Previous test runs noted different row counts in quant_detai (280690 vs 280693) indicating a structural difference (different row counts) with an additional root cause upstream — possibly in multi-threaded BAM scanning itself producing different fragment sets (not just different orders), which would be a separate bug.
+
+It seems like we have a bug in BAM scanning / grouping by query name / multi-threaded processing / outputting to buffer leading to different row counts. This is a huge problem and something that needs to be fixed.
 
 
 ## Benchmark
@@ -17,6 +29,11 @@
 - strategy to weight observations by uncertainty
 - build RNA and gDNA fragment length distributions
 - use distributions to improve deconvolution
+
+- gDNA and RNA should have different models
+- different models should be used to help predict
+- output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
+
 
 
 ## empirical bayes
@@ -40,12 +57,6 @@
 
 1) We should review our overhang-based GATING (winner take all) -- what information is needed there? Do we need our strand and fragment length likelihood for overhang gating? It seems like we do.. because if there are fragment-transcript matches on both strands (overlapping antisense transcripts) the fragment could overhang by different amounts but the strand likelihood REALLY matters for gating.. we wouldn't want to gate solely based on overhang alone because we would potentially throw out the more likely matches.. this only happens in when there are overlapping opposite direction transcripts though.. if same strand transcripts we can probably gate more easily... that leads me to an idea -- For a SUBSET of fragments (they need to be unambiguous with respect to strand.. e.g. isoforms on same strand) we might be able to do overhang gating earlier.. at time of fragment resolution.. but again.. i am starting to worry about our gating strategy because we DO want strand, fragment lenght, and overhang to all play into this. it's possible that transcripts with some overhang could score better if you factor in all of the likelihoods (strand, frag len, overhang, etc) and so gating on overhang may be dangerous. 
 
-
-## Fragment length model
-
-- gDNA and RNA should have different models
-- different models should be used to help predict
-- output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
 
 
 ## Unannotated splice junctions
@@ -83,13 +94,10 @@ We can "blacklist" splice junction artifacts by doing genome-wide mapping. Align
 
 
 
-
 ## Output 
 
 - rename 'tpm' -> 'mrna_tpm' and move next to mrna columns
 - for tsv files, truncate floating point for readability
-
-
 
 
 

@@ -527,7 +527,7 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
 // Extracts all fields the pipeline needs (scalars, tags, CIGAR-derived
 // exon blocks and splice junctions) so that downstream code never
 // touches bam1_t directly.  Used by both single-threaded scan() and
-// the producer thread in scan_threaded().
+// the producer thread in scan().
 
 static ParsedAlignment parse_bam_record(
     const bam1_t* b,
@@ -771,20 +771,15 @@ static AlignmentGroup group_records_by_hit(
 // ================================================================
 // Multimapper pairing — ports pair_multimapper_reads from resolution.py
 // ================================================================
-
-struct ResolvedLocation {
-    std::vector<ParsedAlignment*> reads;
-    std::vector<int32_t> t_inds;  // sorted transcript indices
-    int32_t ref_id;
-    int32_t ref_start;
-};
+// Thread-safe: uses caller-supplied ResolverScratch for all resolve calls.
 
 static std::vector<std::pair<std::vector<ParsedAlignment*>,
                               std::vector<ParsedAlignment*>>>
-pair_multimapper_reads_native(
+pair_multimapper_reads(
     std::vector<std::vector<ParsedAlignment*>>& sec_r1_locs,
     std::vector<std::vector<ParsedAlignment*>>& sec_r2_locs,
-    FragmentResolver& ctx)
+    FragmentResolver& ctx,
+    ResolverScratch& scratch)
 {
     using Hit = std::pair<std::vector<ParsedAlignment*>,
                           std::vector<ParsedAlignment*>>;
@@ -793,44 +788,46 @@ pair_multimapper_reads_native(
     if (sec_r1_locs.empty() && sec_r2_locs.empty())
         return paired;
 
-    // Resolve each R1 location
-    std::vector<ResolvedLocation> r1_resolved;
+    struct ResolvedLoc {
+        std::vector<ParsedAlignment*>* reads;
+        std::vector<int32_t> t_inds;
+        int32_t ref_id;
+        int32_t ref_start;
+    };
+
+    auto resolve_location = [&](std::vector<ParsedAlignment*>& reads,
+                                bool is_r2) -> std::vector<int32_t>
+    {
+        AssembledFragment frag = is_r2
+            ? build_fragment({}, reads)
+            : build_fragment(reads, {});
+        std::vector<int32_t> t_inds;
+        if (!frag.exons.empty()) {
+            RawResolveResult cr;
+            if (ctx._resolve_core(frag.exons, frag.introns,
+                                   frag.genomic_footprint(), cr, scratch)) {
+                t_inds = std::move(cr.t_inds);
+            }
+        }
+        return t_inds;
+    };
+
+    std::vector<ResolvedLoc> r1_resolved;
     r1_resolved.reserve(sec_r1_locs.size());
     for (auto& r1_reads : sec_r1_locs) {
-        AssembledFragment frag = build_fragment(r1_reads, {});
-        std::vector<int32_t> t_inds;
-
-        if (!frag.exons.empty()) {
-            RawResolveResult cr;
-            if (ctx._resolve_core(frag.exons, frag.introns,
-                                   frag.genomic_footprint(), cr)) {
-                t_inds = std::move(cr.t_inds);
-            }
-        }
-
+        auto t_inds = resolve_location(r1_reads, false);
         int32_t ref_id = r1_reads.empty() ? -1 : r1_reads[0]->ref_id;
         int32_t ref_start = r1_reads.empty() ? -1 : r1_reads[0]->ref_start;
-        r1_resolved.push_back({r1_reads, std::move(t_inds), ref_id, ref_start});
+        r1_resolved.push_back({&r1_reads, std::move(t_inds), ref_id, ref_start});
     }
 
-    // Resolve each R2 location
-    std::vector<ResolvedLocation> r2_resolved;
+    std::vector<ResolvedLoc> r2_resolved;
     r2_resolved.reserve(sec_r2_locs.size());
     for (auto& r2_reads : sec_r2_locs) {
-        AssembledFragment frag = build_fragment({}, r2_reads);
-        std::vector<int32_t> t_inds;
-
-        if (!frag.exons.empty()) {
-            RawResolveResult cr;
-            if (ctx._resolve_core(frag.exons, frag.introns,
-                                   frag.genomic_footprint(), cr)) {
-                t_inds = std::move(cr.t_inds);
-            }
-        }
-
+        auto t_inds = resolve_location(r2_reads, true);
         int32_t ref_id = r2_reads.empty() ? -1 : r2_reads[0]->ref_id;
         int32_t ref_start = r2_reads.empty() ? -1 : r2_reads[0]->ref_start;
-        r2_resolved.push_back({r2_reads, std::move(t_inds), ref_id, ref_start});
+        r2_resolved.push_back({&r2_reads, std::move(t_inds), ref_id, ref_start});
     }
 
     // STRICT — pair by transcript-set intersection
@@ -842,8 +839,8 @@ pair_multimapper_reads_native(
             if (r2_resolved[j].t_inds.empty()) continue;
             if (has_intersection(r1_resolved[i].t_inds,
                                  r2_resolved[j].t_inds)) {
-                paired.push_back({r1_resolved[i].reads,
-                                  r2_resolved[j].reads});
+                paired.push_back({*r1_resolved[i].reads,
+                                  *r2_resolved[j].reads});
                 r1_paired.insert(i);
                 r2_paired.insert(j);
             }
@@ -872,8 +869,8 @@ pair_multimapper_reads_native(
         std::sort(candidates.begin(), candidates.end());
         for (const auto& [dist, i, j] : candidates) {
             if (!r1_paired.count(i) && !r2_paired.count(j)) {
-                paired.push_back({r1_resolved[i].reads,
-                                  r2_resolved[j].reads});
+                paired.push_back({*r1_resolved[i].reads,
+                                  *r2_resolved[j].reads});
                 r1_paired.insert(i);
                 r2_paired.insert(j);
             }
@@ -890,8 +887,8 @@ pair_multimapper_reads_native(
     if (!final_r1.empty() && !final_r2.empty()) {
         for (int i : final_r1) {
             for (int j : final_r2) {
-                paired.push_back({r1_resolved[i].reads,
-                                  r2_resolved[j].reads});
+                paired.push_back({*r1_resolved[i].reads,
+                                  *r2_resolved[j].reads});
                 r1_paired.insert(i);
                 r2_paired.insert(j);
             }
@@ -901,10 +898,10 @@ pair_multimapper_reads_native(
     // SINGLETONS
     for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
         if (!r1_paired.count(i))
-            paired.push_back({r1_resolved[i].reads, {}});
+            paired.push_back({*r1_resolved[i].reads, {}});
     for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
         if (!r2_paired.count(j))
-            paired.push_back({{}, r2_resolved[j].reads});
+            paired.push_back({{}, *r2_resolved[j].reads});
 
     return paired;
 }
@@ -941,106 +938,12 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // Main scan entry point
+    // Main scan entry point (threaded; n_workers=1 for single-threaded)
     // ----------------------------------------------------------------
 
-    nb::dict scan(const std::string& bam_path) {
-        // Open BAM file
-        htsFile* fp = hts_open(bam_path.c_str(), "rb");
-        if (!fp) {
-            throw std::runtime_error("Failed to open BAM file: " + bam_path);
-        }
-
-        bam_hdr_t* hdr = sam_hdr_read(fp);
-        if (!hdr) {
-            hts_close(fp);
-            throw std::runtime_error("Failed to read BAM header: " + bam_path);
-        }
-
-        // Build tid → ref_id mapping
-        build_tid_mapping(hdr, ctx_->ref_to_id_, tid_to_ref_id_);
-
-        bam1_t* b = bam_init1();
-        if (!b) {
-            bam_hdr_destroy(hdr);
-            hts_close(fp);
-            throw std::runtime_error("Failed to allocate bam1_t");
-        }
-
-        // Query-name grouping: collect records for same qname
-        std::vector<ParsedAlignment> current_group;
-        std::string current_qname;
-        int64_t frag_id = 0;
-
-        while (sam_read1(fp, hdr, b) >= 0) {
-            stats_.total++;
-
-            // Apply early filters
-            uint16_t flag = b->core.flag;
-
-            if (flag & BAM_FQCFAIL) {
-                stats_.qc_fail++;
-                continue;
-            }
-            if (flag & BAM_FUNMAP) {
-                stats_.unmapped++;
-                continue;
-            }
-            if (flag & BAM_FDUP) {
-                stats_.duplicate++;
-                if (skip_duplicates_) continue;
-            }
-
-            // Enforce paired-end
-            if (!(flag & BAM_FPAIRED)) {
-                bam_destroy1(b);
-                bam_hdr_destroy(hdr);
-                hts_close(fp);
-                throw std::runtime_error(
-                    "Input BAM must be paired-end, but found unpaired read");
-            }
-
-            // Count secondary/supplementary
-            if (flag & BAM_FSECONDARY) stats_.secondary++;
-            if (flag & BAM_FSUPPLEMENTARY) stats_.supplementary++;
-
-            // Get query name
-            const char* qname = bam_get_qname(b);
-
-            // Check if we've moved to a new query name group
-            if (!current_group.empty() && current_qname != qname) {
-                process_qname_group(current_group, frag_id);
-                current_group.clear();
-                frag_id++;
-            }
-
-            current_qname = qname;
-
-            current_group.push_back(
-                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_));
-        }
-
-        // Process last group
-        if (!current_group.empty()) {
-            process_qname_group(current_group, frag_id);
-        }
-
-        // Clean up htslib
-        bam_destroy1(b);
-        bam_hdr_destroy(hdr);
-        hts_close(fp);
-
-        // Build result dict
-        return build_result();
-    }
-
-    // ----------------------------------------------------------------
-    // Threaded scan entry point
-    // ----------------------------------------------------------------
-
-    nb::dict scan_threaded(const std::string& bam_path,
-                           int n_workers = 4,
-                           int n_decomp_threads = 2)
+    nb::dict scan(const std::string& bam_path,
+                  int n_workers = 1,
+                  int n_decomp_threads = 2)
     {
         if (n_workers < 1) n_workers = 1;
 
@@ -1212,7 +1115,7 @@ private:
         FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
 
-        // Same logic as process_qname_group, using per-worker state
+        // Per-worker state refs
         stats.n_read_names++;
 
         int32_t nh = 1;
@@ -1252,17 +1155,13 @@ private:
             }
         }
 
-        // Multimapper secondary pairing (uses scratch via ctx)
-        // NOTE: pair_multimapper_reads_native calls ctx._resolve_core
-        // which uses ctx's internal scratch_ — this is NOT thread-safe.
-        // We need to pass scratch. For now, multimapper pairing resolves
-        // each location independently, so we use the scratch overload.
+        // Multimapper secondary pairing using per-worker scratch
         std::vector<std::pair<std::vector<ParsedAlignment*>,
                               std::vector<ParsedAlignment*>>> secondary_pairs;
         if (!hit_result.sec_r1_locs.empty() ||
             !hit_result.sec_r2_locs.empty()) {
             // Thread-safe multimapper pairing using per-worker scratch
-            secondary_pairs = pair_multimapper_reads_with_scratch(
+            secondary_pairs = pair_multimapper_reads(
                 hit_result.sec_r1_locs,
                 hit_result.sec_r2_locs,
                 ctx, scratch);
@@ -1392,348 +1291,6 @@ private:
         if (n_buffered_mm > 0) {
             stats.n_multimapper_groups++;
             stats.n_multimapper_alignments += n_buffered_mm;
-        }
-    }
-
-    // ----------------------------------------------------------------
-    // Thread-safe multimapper pairing (uses external scratch)
-    // ----------------------------------------------------------------
-
-    static std::vector<std::pair<std::vector<ParsedAlignment*>,
-                                  std::vector<ParsedAlignment*>>>
-    pair_multimapper_reads_with_scratch(
-        std::vector<std::vector<ParsedAlignment*>>& sec_r1_locs,
-        std::vector<std::vector<ParsedAlignment*>>& sec_r2_locs,
-        FragmentResolver& ctx,
-        ResolverScratch& scratch)
-    {
-        using Hit = std::pair<std::vector<ParsedAlignment*>,
-                              std::vector<ParsedAlignment*>>;
-        std::vector<Hit> paired;
-
-        if (sec_r1_locs.empty() && sec_r2_locs.empty())
-            return paired;
-
-        auto resolve_location = [&](std::vector<ParsedAlignment*>& reads,
-                                    bool is_r2) -> std::vector<int32_t>
-        {
-            AssembledFragment frag = is_r2
-                ? build_fragment({}, reads)
-                : build_fragment(reads, {});
-            std::vector<int32_t> t_inds;
-            if (!frag.exons.empty()) {
-                RawResolveResult cr;
-                if (ctx._resolve_core(frag.exons, frag.introns,
-                                       frag.genomic_footprint(), cr, scratch)) {
-                    t_inds = std::move(cr.t_inds);
-                }
-            }
-            return t_inds;
-        };
-
-        struct ResolvedLoc {
-            std::vector<ParsedAlignment*>* reads;
-            std::vector<int32_t> t_inds;
-            int32_t ref_id;
-            int32_t ref_start;
-        };
-
-        std::vector<ResolvedLoc> r1_resolved;
-        r1_resolved.reserve(sec_r1_locs.size());
-        for (auto& r1_reads : sec_r1_locs) {
-            auto t_inds = resolve_location(r1_reads, false);
-            int32_t ref_id = r1_reads.empty() ? -1 : r1_reads[0]->ref_id;
-            int32_t ref_start = r1_reads.empty() ? -1 : r1_reads[0]->ref_start;
-            r1_resolved.push_back({&r1_reads, std::move(t_inds), ref_id, ref_start});
-        }
-
-        std::vector<ResolvedLoc> r2_resolved;
-        r2_resolved.reserve(sec_r2_locs.size());
-        for (auto& r2_reads : sec_r2_locs) {
-            auto t_inds = resolve_location(r2_reads, true);
-            int32_t ref_id = r2_reads.empty() ? -1 : r2_reads[0]->ref_id;
-            int32_t ref_start = r2_reads.empty() ? -1 : r2_reads[0]->ref_start;
-            r2_resolved.push_back({&r2_reads, std::move(t_inds), ref_id, ref_start});
-        }
-
-        // STRICT — pair by transcript-set intersection
-        std::unordered_set<int> r1_paired, r2_paired;
-
-        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++) {
-            if (r1_resolved[i].t_inds.empty()) continue;
-            for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++) {
-                if (r2_resolved[j].t_inds.empty()) continue;
-                if (has_intersection(r1_resolved[i].t_inds,
-                                     r2_resolved[j].t_inds)) {
-                    paired.push_back({*r1_resolved[i].reads,
-                                      *r2_resolved[j].reads});
-                    r1_paired.insert(i);
-                    r2_paired.insert(j);
-                }
-            }
-        }
-
-        // FALLBACK — same-reference closest distance
-        std::vector<int> unmatched_r1, unmatched_r2;
-        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
-            if (!r1_paired.count(i)) unmatched_r1.push_back(i);
-        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
-            if (!r2_paired.count(j)) unmatched_r2.push_back(j);
-
-        if (!unmatched_r1.empty() && !unmatched_r2.empty()) {
-            std::vector<std::tuple<int32_t, int, int>> candidates;
-            for (int i : unmatched_r1) {
-                for (int j : unmatched_r2) {
-                    if (r1_resolved[i].ref_id == r2_resolved[j].ref_id &&
-                        r1_resolved[i].ref_id >= 0) {
-                        int32_t dist = std::abs(r1_resolved[i].ref_start -
-                                                r2_resolved[j].ref_start);
-                        candidates.push_back({dist, i, j});
-                    }
-                }
-            }
-            std::sort(candidates.begin(), candidates.end());
-            for (const auto& [dist, i, j] : candidates) {
-                if (!r1_paired.count(i) && !r2_paired.count(j)) {
-                    paired.push_back({*r1_resolved[i].reads,
-                                      *r2_resolved[j].reads});
-                    r1_paired.insert(i);
-                    r2_paired.insert(j);
-                }
-            }
-        }
-
-        // CROSS-PAIR remaining
-        std::vector<int> final_r1, final_r2;
-        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
-            if (!r1_paired.count(i)) final_r1.push_back(i);
-        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
-            if (!r2_paired.count(j)) final_r2.push_back(j);
-
-        if (!final_r1.empty() && !final_r2.empty()) {
-            for (int i : final_r1) {
-                for (int j : final_r2) {
-                    paired.push_back({*r1_resolved[i].reads,
-                                      *r2_resolved[j].reads});
-                    r1_paired.insert(i);
-                    r2_paired.insert(j);
-                }
-            }
-        }
-
-        // SINGLETONS
-        for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
-            if (!r1_paired.count(i))
-                paired.push_back({*r1_resolved[i].reads, {}});
-        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
-            if (!r2_paired.count(j))
-                paired.push_back({{}, *r2_resolved[j].reads});
-
-        return paired;
-    }
-
-private:
-    // ----------------------------------------------------------------
-    // Process one query-name group
-    // ----------------------------------------------------------------
-
-    void process_qname_group(
-        std::vector<ParsedAlignment>& records,
-        int64_t frag_id)
-    {
-        if (records.empty()) return;
-
-        stats_.n_read_names++;
-
-        // Determine NH from first record (they should all agree)
-        int32_t nh = 1;
-        for (const auto& r : records) {
-            if (r.nh > 1) { nh = r.nh; break; }
-        }
-
-        // Detect multimap
-        bool has_secondary = false;
-        for (const auto& r : records) {
-            if (r.is_secondary()) { has_secondary = true; break; }
-        }
-        bool is_multimap = (nh > 1) || has_secondary;
-
-        if (is_multimap) {
-            stats_.multimapping++;
-            if (!include_multimap_) return;
-        } else {
-            stats_.unique++;
-        }
-
-        // Group into hits + secondary locations
-        auto hit_result = group_records_by_hit(records);
-
-        // Track hit-level mate stats (primary hits only)
-        for (const auto& [r1s, r2s] : hit_result.hits) {
-            if (r1s.empty() || r2s.empty()) {
-                stats_.mate_unmapped++;
-            } else {
-                // Check proper-pair on primary R1
-                bool found_proper = false;
-                for (const auto* r : r1s) {
-                    if (!r->is_supplementary() && !r->is_secondary()) {
-                        found_proper = r->is_proper_pair();
-                        break;
-                    }
-                }
-                if (found_proper) stats_.proper_pair++;
-                else stats_.improper_pair++;
-            }
-        }
-
-        // Handle multimapper secondary pairing
-        std::vector<std::pair<std::vector<ParsedAlignment*>,
-                              std::vector<ParsedAlignment*>>> secondary_pairs;
-        if (!hit_result.sec_r1_locs.empty() ||
-            !hit_result.sec_r2_locs.empty()) {
-            secondary_pairs = pair_multimapper_reads_native(
-                hit_result.sec_r1_locs,
-                hit_result.sec_r2_locs,
-                *ctx_);
-        }
-
-        // Combine all hits
-        auto& all_hits = hit_result.hits;
-        all_hits.insert(all_hits.end(),
-                        secondary_pairs.begin(), secondary_pairs.end());
-
-        int32_t num_hits = std::max(nh, static_cast<int32_t>(all_hits.size()));
-        bool is_unique_mapper = (num_hits == 1);
-        int32_t n_buffered_mm = 0;
-
-        for (const auto& [r1_reads, r2_reads] : all_hits) {
-            AssembledFragment frag = build_fragment(r1_reads, r2_reads);
-            stats_.n_fragments++;
-
-            if (frag.exons.empty()) continue;
-
-            // Resolve fragment
-            RawResolveResult cr;
-            bool resolved = ctx_->_resolve_core(
-                frag.exons, frag.introns,
-                frag.genomic_footprint(), cr);
-
-            if (!resolved) {
-                // Intergenic
-                if (frag.has_introns()) {
-                    stats_.n_intergenic_spliced++;
-                } else {
-                    stats_.n_intergenic_unspliced++;
-                }
-
-                // Train intergenic fragment length (unique mappers, unspliced)
-                if (is_unique_mapper && !frag.has_introns()) {
-                    int32_t flen = frag.genomic_footprint();
-                    if (flen > 0) {
-                        fraglen_obs_.intergenic_lengths.push_back(flen);
-                        stats_.n_frag_length_intergenic++;
-                    }
-                }
-
-                // Train intergenic strand model
-                if (is_unique_mapper) {
-                    int32_t ig_strand = STRAND_NONE;
-                    for (const auto& eb : frag.exons) {
-                        ig_strand |= eb.strand;
-                    }
-                    if (ig_strand == STRAND_POS || ig_strand == STRAND_NEG) {
-                        strand_obs_.intergenic_obs.push_back(ig_strand);
-                        strand_obs_.intergenic_truth.push_back(STRAND_POS);
-                    }
-                }
-                continue;
-            }
-
-            // Build ResolvedFragment for accumulator
-            ResolvedFragment result = ResolvedFragment::from_core(cr);
-            result.num_hits = num_hits;
-            result.nm = frag.nm;
-
-            // --- Handle chimeric fragments ---
-            if (result.get_is_chimeric()) {
-                stats_.n_chimeric++;
-                if (result.chimera_type == CHIMERA_TRANS)
-                    stats_.n_chimeric_trans++;
-                else if (result.chimera_type == CHIMERA_CIS_STRAND_SAME)
-                    stats_.n_chimeric_cis_strand_same++;
-                else if (result.chimera_type == CHIMERA_CIS_STRAND_DIFF)
-                    stats_.n_chimeric_cis_strand_diff++;
-                accumulator_.append(result, frag_id);
-                continue;
-            }
-
-            // --- Stats: overlap type ---
-            stats_.n_with_exon++;
-            if (result.splice_type == SPLICE_SPLICED_ANNOT) {
-                stats_.n_with_annotated_sj++;
-            } else if (result.splice_type == SPLICE_SPLICED_UNANNOT) {
-                stats_.n_with_unannotated_sj++;
-            }
-
-            if (result.get_is_same_strand()) {
-                stats_.n_same_strand++;
-            } else {
-                stats_.n_ambig_strand++;
-            }
-
-            if (is_unique_mapper) {
-                // --- Train strand models ---
-                if (result.get_is_strand_qualified()) {
-                    strand_obs_.exonic_spliced_obs.push_back(result.exon_strand);
-                    strand_obs_.exonic_spliced_truth.push_back(result.sj_strand);
-                    stats_.n_strand_trained++;
-                } else if (result.splice_type != SPLICE_SPLICED_ANNOT) {
-                    stats_.n_strand_skipped_no_sj++;
-                } else if (!result.get_is_same_strand()) {
-                    stats_.n_strand_skipped_ambig_strand++;
-                } else {
-                    stats_.n_strand_skipped_ambiguous++;
-                }
-
-                // Train exonic fallback model
-                // Use transcript strand directly (no gene indirection).
-                if (result.get_is_same_strand() &&
-                    (result.exon_strand == STRAND_POS ||
-                     result.exon_strand == STRAND_NEG)) {
-                    int32_t t_idx = result.get_first_t_ind();
-                    if (t_idx >= 0 &&
-                        t_idx < static_cast<int32_t>(ctx_->t_strand_arr_.size())) {
-                        int32_t t_strand = ctx_->t_strand_arr_[t_idx];
-                        if (t_strand == STRAND_POS ||
-                            t_strand == STRAND_NEG) {
-                            strand_obs_.exonic_obs.push_back(result.exon_strand);
-                            strand_obs_.exonic_truth.push_back(t_strand);
-                        }
-                    }
-                }
-
-                // Train fragment length model
-                int32_t ufl = result.get_unique_frag_length();
-                if (ufl > 0) {
-                    fraglen_obs_.lengths.push_back(ufl);
-                    fraglen_obs_.splice_types.push_back(result.splice_type);
-                    stats_.n_frag_length_unambiguous++;
-                } else {
-                    stats_.n_frag_length_ambiguous++;
-                }
-            }
-
-            // Buffer resolved fragment
-            accumulator_.append(result, frag_id);
-
-            if (!is_unique_mapper) {
-                n_buffered_mm++;
-            }
-        }
-
-        if (n_buffered_mm > 0) {
-            stats_.n_multimapper_groups++;
-            stats_.n_multimapper_alignments += n_buffered_mm;
         }
     }
 
@@ -1936,6 +1493,9 @@ public:
         int64_t n_chimeric = 0;
         int64_t n_records_written = 0;
 
+        // Scratch buffer for resolve calls (single-threaded, reused)
+        ResolverScratch scratch(ctx_->n_transcripts_);
+
         auto process_and_write = [&]() {
             if (light_group.empty()) return;
 
@@ -1978,10 +1538,10 @@ public:
                                   std::vector<ParsedAlignment*>>> secondary_pairs;
             if (!hit_result.sec_r1_locs.empty() ||
                 !hit_result.sec_r2_locs.empty()) {
-                secondary_pairs = pair_multimapper_reads_native(
+                secondary_pairs = pair_multimapper_reads(
                     hit_result.sec_r1_locs,
                     hit_result.sec_r2_locs,
-                    *ctx_);
+                    *ctx_, scratch);
             }
 
             // Combine all hits
@@ -2044,7 +1604,7 @@ public:
                             RawResolveResult cr;
                             if (ctx_->_resolve_core(
                                     frag.exons, frag.introns,
-                                    frag.genomic_footprint(), cr)) {
+                                    frag.genomic_footprint(), cr, scratch)) {
                                 for (int32_t ti : cr.t_inds) {
                                     if (ti == best_tid_val) {
                                         is_primary = true;
@@ -2284,29 +1844,22 @@ NB_MODULE(_bam_impl, m) {
         )
         .def("scan", &BamScanner::scan,
              nb::arg("bam_path"),
-             "Scan BAM file and return results dict.\n\n"
-             "Returns a dict with keys:\n"
-             "  'stats' — dict of all counters\n"
-             "  'strand_observations' — dict of strand training arrays\n"
-             "  'frag_length_observations' — dict of frag length arrays\n"
-             "  'accumulator_size' — number of resolved fragments\n")
-        .def("scan_threaded", &BamScanner::scan_threaded,
-             nb::arg("bam_path"),
-             nb::arg("n_workers") = 4,
+             nb::arg("n_workers") = 1,
              nb::arg("n_decomp_threads") = 2,
-             "Scan BAM file using multiple threads.\n\n"
+             "Scan BAM file and return results dict.\n\n"
              "Parameters\n"
              "----------\n"
              "bam_path : str\n"
              "    Path to name-sorted BAM file.\n"
              "n_workers : int\n"
-             "    Number of worker threads for parsing/resolution (default 4).\n"
+             "    Number of worker threads for parsing/resolution (default 1).\n"
              "n_decomp_threads : int\n"
              "    Number of htslib BGZF decompression threads (default 2).\n\n"
              "Returns\n"
              "-------\n"
              "dict\n"
-             "    Same format as scan().\n")
+             "    Dict with keys: 'stats', 'strand_observations',\n"
+             "    'frag_length_observations', 'accumulator_size'.\n")
         .def("finalize_accumulator", &BamScanner::finalize_accumulator,
              nb::arg("t_strand_arr"),
              "Finalize the internal accumulator to raw bytes dict.\n\n"

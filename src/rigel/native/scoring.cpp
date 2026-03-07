@@ -1330,7 +1330,7 @@ public:
     // Pass 2: fill pre-allocated arrays at exact sizes.
     // Returns capsule-backed numpy arrays (zero-copy to Python).
     //
-    // Float32 output for log_liks, coverage_weights, gdna_log_liks.
+    // Float64 output for log_liks, coverage_weights, gdna_log_liks.
 
 private:
 
@@ -1357,9 +1357,9 @@ private:
     struct FillState {
         // CSR candidate arrays
         int32_t*  ti;
-        float*    ll;
+        double*   ll;
         uint8_t*  ct;
-        float*    cw;
+        double*   cw;
         int32_t*  ts;
         int32_t*  te;
         // CSR offsets (n_units + 1)
@@ -1368,7 +1368,7 @@ private:
         int32_t*  locus_t;
         uint8_t*  locus_ct;
         int8_t*   is_spliced;
-        float*    gdna_ll;
+        double*   gdna_ll;
         int32_t*  gfp;
         int32_t*  fid;
         int8_t*   fclass;
@@ -1615,12 +1615,10 @@ private:
                         if constexpr (FillMode) {
                             int64_t c = st.cand_cur;
                             st.ti[c] = s.t_idx;
-                            st.ll[c] = static_cast<float>(
-                                s.log_lik);
+                            st.ll[c] = s.log_lik;
                             st.ct[c] = static_cast<uint8_t>(
                                 s.ct);
-                            st.cw[c] = static_cast<float>(
-                                s.cov_wt);
+                            st.cw[c] = s.cov_wt;
                             st.ts[c] = s.tx_s;
                             st.te[c] = s.tx_e;
                         }
@@ -1731,13 +1729,9 @@ private:
                                 int64_t c = st.cand_cur;
                                 st.ti[c] =
                                     nrna_base_ + s.t_idx;
-                                st.ll[c] =
-                                    static_cast<float>(
-                                        s.nrna_ll);
+                                st.ll[c] = s.nrna_ll;
                                 st.ct[c] = 0;
-                                st.cw[c] =
-                                    static_cast<float>(
-                                        s.cov_wt);
+                                st.cw[c] = s.cov_wt;
                                 st.ts[c] = s.tx_s;
                                 st.te[c] = s.tx_e;
                             }
@@ -1774,12 +1768,10 @@ private:
                             frag_len_log_lik(
                                 genomic_footprint);
                         st.gdna_ll[st.unit_cur] =
-                            static_cast<float>(
                                 LOG_HALF + gdna_fl
-                                + gdna_log_sp);
+                                + gdna_log_sp;
                     } else {
-                        st.gdna_ll[st.unit_cur] =
-                            static_cast<float>(NEG_INF);
+                        st.gdna_ll[st.unit_cur] = NEG_INF;
                     }
                 }
                 ++st.unit_cur;
@@ -1876,15 +1868,15 @@ public:
         auto* v_offsets = new std::vector<int64_t>(
             total_units + 1, 0);
         auto* v_ti  = new std::vector<int32_t>(total_cands);
-        auto* v_ll  = new std::vector<float>(total_cands);
+        auto* v_ll  = new std::vector<double>(total_cands);
         auto* v_ct  = new std::vector<uint8_t>(total_cands);
-        auto* v_cw  = new std::vector<float>(total_cands);
+        auto* v_cw  = new std::vector<double>(total_cands);
         auto* v_ts  = new std::vector<int32_t>(total_cands);
         auto* v_te  = new std::vector<int32_t>(total_cands);
         auto* v_lt  = new std::vector<int32_t>(total_units);
         auto* v_lct = new std::vector<uint8_t>(total_units);
         auto* v_isp = new std::vector<int8_t>(total_units);
-        auto* v_gll = new std::vector<float>(total_units);
+        auto* v_gll = new std::vector<double>(total_units);
         auto* v_gfp = new std::vector<int32_t>(total_units);
         auto* v_fid = new std::vector<int32_t>(total_units);
         auto* v_fc  = new std::vector<int8_t>(total_units);
@@ -1950,14 +1942,14 @@ public:
                                nb::ndim<1>>(
                 v->data(), {n}, del).cast();
         };
-        auto mk_f32 = [](std::vector<float>* v)
+        auto mk_f64 = [](std::vector<double>* v)
             -> nb::object {
             size_t n = v->size();
             nb::capsule del(v, [](void* p) noexcept {
                 delete static_cast<
-                    std::vector<float>*>(p);
+                    std::vector<double>*>(p);
             });
-            return nb::ndarray<nb::numpy, float,
+            return nb::ndarray<nb::numpy, double,
                                nb::ndim<1>>(
                 v->data(), {n}, del).cast();
         };
@@ -1988,16 +1980,16 @@ public:
             // CSR arrays
             mk_i64(v_offsets),
             mk_i32(v_ti),
-            mk_f32(v_ll),
+            mk_f64(v_ll),
             mk_u8(v_ct),
-            mk_f32(v_cw),
+            mk_f64(v_cw),
             mk_i32(v_ts),
             mk_i32(v_te),
             // Per-unit metadata
             mk_i32(v_lt),
             mk_u8(v_lct),
             mk_i8(v_isp),
-            mk_f32(v_gll),
+            mk_f64(v_gll),
             mk_i32(v_gfp),
             mk_i32(v_fid),
             mk_i8(v_fc),

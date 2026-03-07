@@ -210,6 +210,87 @@ class _FinalizedChunk:
             nm=int(self.nm[i]),
         )
 
+    def sort_by_frag_id(self) -> '_FinalizedChunk':
+        """Return a new chunk with fragments sorted by frag_id.
+
+        Restores deterministic fragment ordering after multi-threaded
+        BAM scanning, where worker threads may process fragments in
+        non-deterministic order.  The frag_id is assigned sequentially
+        by the single-threaded reader, so sorting by it recovers the
+        original BAM order.
+        """
+        order = np.argsort(self.frag_id, kind='stable')
+
+        # Check if already sorted
+        if np.all(order == np.arange(len(order))):
+            return self
+
+        # Reindex per-fragment arrays
+        new_splice_type = self.splice_type[order]
+        new_exon_strand = self.exon_strand[order]
+        new_sj_strand = self.sj_strand[order]
+        new_num_hits = self.num_hits[order]
+        new_merge_criteria = self.merge_criteria[order]
+        new_chimera_type = self.chimera_type[order]
+        new_ambig_strand = self.ambig_strand[order]
+        new_frag_id = self.frag_id[order]
+        new_read_length = self.read_length[order]
+        new_genomic_footprint = self.genomic_footprint[order]
+        new_genomic_start = self.genomic_start[order]
+        new_nm = self.nm[order]
+
+        # Reindex CSR arrays
+        old_offsets = self.t_offsets
+        # Compute per-fragment candidate counts
+        counts = np.diff(old_offsets)
+        new_counts = counts[order]
+        new_offsets = np.empty(len(new_counts) + 1, dtype=old_offsets.dtype)
+        new_offsets[0] = 0
+        np.cumsum(new_counts, out=new_offsets[1:])
+
+        # Gather CSR flat arrays in new order
+        total_cands = int(new_offsets[-1])
+        new_t_indices = np.empty(total_cands, dtype=self.t_indices.dtype)
+        new_frag_lengths = np.empty(total_cands, dtype=self.frag_lengths.dtype)
+        new_exon_bp = np.empty(total_cands, dtype=self.exon_bp.dtype)
+        new_intron_bp = np.empty(total_cands, dtype=self.intron_bp.dtype)
+        new_unambig_intron_bp = np.empty(
+            total_cands, dtype=self.unambig_intron_bp.dtype)
+
+        for new_i, old_i in enumerate(order):
+            src_s = old_offsets[old_i]
+            src_e = old_offsets[old_i + 1]
+            dst_s = new_offsets[new_i]
+            dst_e = new_offsets[new_i + 1]
+            new_t_indices[dst_s:dst_e] = self.t_indices[src_s:src_e]
+            new_frag_lengths[dst_s:dst_e] = self.frag_lengths[src_s:src_e]
+            new_exon_bp[dst_s:dst_e] = self.exon_bp[src_s:src_e]
+            new_intron_bp[dst_s:dst_e] = self.intron_bp[src_s:src_e]
+            new_unambig_intron_bp[dst_s:dst_e] = (
+                self.unambig_intron_bp[src_s:src_e])
+
+        return _FinalizedChunk(
+            splice_type=new_splice_type,
+            exon_strand=new_exon_strand,
+            sj_strand=new_sj_strand,
+            num_hits=new_num_hits,
+            merge_criteria=new_merge_criteria,
+            chimera_type=new_chimera_type,
+            t_offsets=new_offsets,
+            t_indices=new_t_indices,
+            frag_lengths=new_frag_lengths,
+            exon_bp=new_exon_bp,
+            intron_bp=new_intron_bp,
+            unambig_intron_bp=new_unambig_intron_bp,
+            ambig_strand=new_ambig_strand,
+            frag_id=new_frag_id,
+            read_length=new_read_length,
+            genomic_footprint=new_genomic_footprint,
+            genomic_start=new_genomic_start,
+            nm=new_nm,
+            size=self.size,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Arrow IPC (Feather v2) spill / load

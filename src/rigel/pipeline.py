@@ -306,10 +306,7 @@ def scan_and_buffer(
     if n_scan == 0:
         import os
         n_scan = os.cpu_count() or 1
-    if n_scan > 1:
-        result = scanner.scan_threaded(bam_path, n_workers=n_scan)
-    else:
-        result = scanner.scan(bam_path)
+    result = scanner.scan(bam_path, n_workers=n_scan)
 
     # Replay stats
     _apply_scan_stats(stats, result["stats"])
@@ -367,6 +364,11 @@ def scan_and_buffer(
                 raw["nm"], dtype=np.uint16).copy(),
             size=size,
         )
+
+        # # Sort by frag_id to restore deterministic order after
+        # # multi-threaded scanning (frag_id is assigned sequentially
+        # # by the single-threaded BAM reader).
+        # chunk = chunk.sort_by_frag_id()
 
         buffer.inject_chunk(chunk)
 

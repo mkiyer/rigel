@@ -86,9 +86,9 @@ class FragmentRouter:
         from array import array as _array
         self.offsets = _array('q', [0])          # int64
         self.t_indices_list = _array('i')         # int32
-        self.log_liks_list = _array('f')          # float32
+        self.log_liks_list = _array('d')          # float64
         self.count_cols_list = _array('B')        # uint8
-        self.coverage_weights_list = _array('f')  # float32
+        self.coverage_weights_list = _array('d')  # float64
         self.tx_starts_list = _array('i')         # int32
         self.tx_ends_list = _array('i')           # int32
 
@@ -96,7 +96,7 @@ class FragmentRouter:
         self.locus_t_list = _array('i')           # int32
         self.locus_ct_list = _array('B')          # uint8
         self.is_spliced_list = _array('b')        # int8 (→ bool at finalize)
-        self.gdna_ll_list = _array('f')           # float32
+        self.gdna_ll_list = _array('d')           # float64
         self.genomic_footprints_list = _array('i')  # int32
         self.frag_id_list = _array('i')           # int32
         self.frag_class_list = _array('b')        # int8
@@ -853,7 +853,7 @@ class FragmentRouter:
             ])
             log_liks = np.concatenate([
                 cpp_ll,
-                _to_np(self.log_liks_list, np.float32),
+                _to_np(self.log_liks_list, np.float64),
             ])
             count_cols = np.concatenate([
                 cpp_ct,
@@ -861,7 +861,7 @@ class FragmentRouter:
             ])
             coverage_weights = np.concatenate([
                 cpp_cw,
-                _to_np(self.coverage_weights_list, np.float32),
+                _to_np(self.coverage_weights_list, np.float64),
             ])
             tx_starts = np.concatenate([
                 cpp_ts,
@@ -885,7 +885,7 @@ class FragmentRouter:
             ]).astype(bool)
             gdna_log_liks = np.concatenate([
                 cpp_gdna_ll,
-                _to_np(self.gdna_ll_list, np.float32),
+                _to_np(self.gdna_ll_list, np.float64),
             ])
             genomic_footprints = np.concatenate([
                 cpp_gfp,

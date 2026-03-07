@@ -204,12 +204,20 @@ class StrandModel:
         return (a * b) / ((a + b) ** 2 * (a + b + 1))
 
     def posterior_95ci(self) -> tuple[float, float]:
-        """95% credible interval for p_r1_sense."""
-        from scipy.stats import beta as beta_dist
-        return (
-            beta_dist.ppf(_CI_LOWER_QUANTILE, self.alpha, self.beta),
-            beta_dist.ppf(_CI_UPPER_QUANTILE, self.alpha, self.beta),
-        )
+        """95% credible interval for p_r1_sense.
+
+        Uses a normal approximation to the Beta posterior, which is
+        accurate when alpha + beta > ~10 (i.e. enough observations).
+        """
+        import math
+        a, b = self.alpha, self.beta
+        mu = a / (a + b)
+        sigma = math.sqrt((a * b) / ((a + b) ** 2 * (a + b + 1)))
+        # z_{0.025} ≈ 1.96 for 95% CI
+        z = 1.959964
+        lo = max(0.0, mu - z * sigma)
+        hi = min(1.0, mu + z * sigma)
+        return (lo, hi)
 
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
@@ -340,15 +348,12 @@ class StrandModel:
         path = Path(path)
         d = self.to_dict()
 
-        # Add 95% CI if enough observations (requires scipy)
+        # Add 95% CI if enough observations
         if self.n_observations >= _MIN_CI_OBSERVATIONS:
-            try:
-                lo, hi = self.posterior_95ci()
-                d["posterior"]["ci_95"] = [
-                    float(round(lo, 6)), float(round(hi, 6)),
-                ]
-            except ImportError:
-                pass
+            lo, hi = self.posterior_95ci()
+            d["posterior"]["ci_95"] = [
+                float(round(lo, 6)), float(round(hi, 6)),
+            ]
 
         with open(path, "w") as fh:
             json.dump(
@@ -531,13 +536,10 @@ class StrandModels:
 
         # Add 95% CI for exonic_spliced model if enough observations
         if self.exonic_spliced.n_observations >= _MIN_CI_OBSERVATIONS:
-            try:
-                lo, hi = self.exonic_spliced.posterior_95ci()
-                d["exonic_spliced"]["posterior"]["ci_95"] = [
-                    float(round(lo, 6)), float(round(hi, 6)),
-                ]
-            except ImportError:
-                pass
+            lo, hi = self.exonic_spliced.posterior_95ci()
+            d["exonic_spliced"]["posterior"]["ci_95"] = [
+                float(round(lo, 6)), float(round(hi, 6)),
+            ]
 
         with open(path, "w") as fh:
             json.dump({"strand_models": d}, fh, indent=2)
