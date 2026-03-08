@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12", "3.13"]
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge,bioconda
+          channel-priority: strict
+          python-version: ${{ matrix.python-version }}
+          activate-environment: rigel-ci
+
+      - name: Install system dependencies
+        run: |
+          conda install -y htslib samtools
+
+      - name: Install package with dev extras
+        run: |
+          pip install --no-build-isolation -ve ".[dev]"
+
+      - name: Run tests
+        run: |
+          pytest tests/ -x -q --tb=short

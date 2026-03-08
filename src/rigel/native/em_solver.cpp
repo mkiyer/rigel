@@ -15,12 +15,16 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <numeric>
 #include <unordered_map>
 #include <vector>
 
 #include <atomic>
 #include <thread>
+
+#include "fast_exp.h"
+#include "thread_pool.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -269,47 +273,98 @@ static void apply_bias_correction_uniform(
 }
 
 // ================================================================
-// EM step kernel — the hot inner loop
+// Kahan summation helper for numerical stability
 // ================================================================
 //
-// For one equivalence class: computes posteriors from log_weights,
-// normalizes rows via log-sum-exp, accumulates column sums into
-// em_totals.
+// Reduces FP accumulation error from O(n*eps) to O(eps).  Critical
+// for column-sum accumulators in the E-step where n can be 500K+.
 
-static inline void em_step_kernel(
+struct KahanAccumulator {
+    double sum = 0.0;
+    double c = 0.0;
+
+    inline void add(double val) {
+        double y = val - c;
+        double t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+};
+
+// ================================================================
+// EM step kernel — the hot inner loop (range-based)
+// ================================================================
+//
+// Processes rows [row_start, row_end) of one equivalence class:
+// computes posteriors from log_weights, normalizes rows via
+// log-sum-exp, accumulates column sums into em_totals with
+// Kahan summation for numerical stability.
+//
+// Thread safety: multiple threads may process non-overlapping row
+// ranges of the same EC concurrently.  Each writes to disjoint
+// regions of ec.scratch (which is mutable).  em_totals must be
+// thread-private when called from parallel_estep.
+
+static inline void em_step_kernel_range(
     const EmEquivClass& ec,
+    int               row_start,
+    int               row_end,
     const double*     log_weights,   // [n_components]
     double*           em_totals)     // [n_components], accumulated
 {
-    const int n = ec.n;
     const int k = ec.k;
     const double* ll = ec.ll_flat.data();
     double* scratch = ec.scratch.data();
     const int32_t* cidx = ec.comp_idx.data();
 
-    // 1. Add log_weights to log-likelihoods
-    for (int i = 0; i < n; ++i) {
-        const int offset = i * k;
-        for (int j = 0; j < k; ++j) {
-            scratch[offset + j] = ll[offset + j] + log_weights[cidx[j]];
-        }
-    }
-
-    // 2. Log-sum-exp normalize (row-wise) + accumulate column sums
-    for (int i = 0; i < n; ++i) {
+    // Pass 1: Add log_weights + log-sum-exp normalize (fused for cache locality)
+    for (int i = row_start; i < row_end; ++i) {
         double* row = scratch + i * k;
 
-        // Find row max
-        double max_val = row[0];
+        // Compute row values and find max
+        double max_val = ll[i * k] + log_weights[cidx[0]];
+        row[0] = max_val;
         for (int j = 1; j < k; ++j) {
-            if (row[j] > max_val) max_val = row[j];
+            double val = ll[i * k + j] + log_weights[cidx[j]];
+            row[j] = val;
+            if (val > max_val) max_val = val;
         }
 
-        // exp and sum
+        // Exp and sum — vectorized with early-zero skip
         double row_sum = 0.0;
-        for (int j = 0; j < k; ++j) {
-            row[j] = std::exp(row[j] - max_val);
-            row_sum += row[j];
+        int j = 0;
+
+#if RIGEL_HAS_NEON
+        {
+            float64x2_t sum_v = vdupq_n_f64(0.0);
+            const float64x2_t max_v = vdupq_n_f64(max_val);
+            const float64x2_t cutoff_v = vdupq_n_f64(rigel::detail::EXP_CUTOFF);
+            const float64x2_t zero_v = vdupq_n_f64(0.0);
+
+            for (; j + 2 <= k; j += 2) {
+                float64x2_t v = vld1q_f64(row + j);
+                v = vsubq_f64(v, max_v);
+
+                // Whole-vector early-zero skip: if BOTH lanes < cutoff, store zeros
+                uint64x2_t mask = vcltq_f64(v, cutoff_v);
+                if (vgetq_lane_u64(mask, 0) & vgetq_lane_u64(mask, 1)) {
+                    vst1q_f64(row + j, zero_v);
+                    continue;
+                }
+
+                v = rigel::fast_exp_neon(v);
+                vst1q_f64(row + j, v);
+                sum_v = vaddq_f64(sum_v, v);
+            }
+            row_sum = vgetq_lane_f64(sum_v, 0) + vgetq_lane_f64(sum_v, 1);
+        }
+#endif
+        // Scalar tail (odd k, or non-NEON builds)
+        for (; j < k; ++j) {
+            double x = row[j] - max_val;
+            double e = rigel::fast_exp_scalar(x);
+            row[j] = e;
+            row_sum += e;
         }
 
         // Normalize
@@ -325,13 +380,121 @@ static inline void em_step_kernel(
         }
     }
 
-    // 3. Accumulate column sums into em_totals
+    // Pass 2: Accumulate column sums with Kahan summation
     for (int j = 0; j < k; ++j) {
-        double col_sum = 0.0;
-        for (int i = 0; i < n; ++i) {
-            col_sum += scratch[i * k + j];
+        KahanAccumulator acc;
+        for (int i = row_start; i < row_end; ++i) {
+            acc.add(scratch[i * k + j]);
         }
-        em_totals[cidx[j]] += col_sum;
+        em_totals[cidx[j]] += acc.sum;
+    }
+}
+
+// ================================================================
+// Parallel E-step: task-based load balancing with Kahan reduction
+// ================================================================
+//
+// Breaks large ECs into row-range tasks of bounded size (~4096/k
+// rows), partitions tasks across threads by actual computational
+// cost (n*k), and reduces with Kahan summation.
+//
+// Determinism: tasks are created and assigned in a fixed order;
+// each thread processes its partition sequentially; cross-thread
+// reduction sums in thread-index order with Kahan.  Result is
+// fully deterministic.
+
+struct EStepTask {
+    int ec_idx;
+    int row_start;
+    int row_end;
+    int64_t cost;
+};
+
+static void parallel_estep(
+    const std::vector<EmEquivClass>& ec_data,
+    const double*  log_weights,
+    double*        em_totals,      // [n_components], zeroed by caller
+    int            n_components,
+    int            n_threads,
+    rigel::EStepThreadPool* pool = nullptr)
+{
+    // 1. Break ECs into granular tasks for load balance
+    std::vector<EStepTask> tasks;
+    int64_t total_cost = 0;
+
+    for (int i = 0; i < static_cast<int>(ec_data.size()); ++i) {
+        int n = ec_data[i].n;
+        int k = ec_data[i].k;
+        int chunk_rows = std::max(1, 4096 / std::max(k, 1));
+
+        for (int r = 0; r < n; r += chunk_rows) {
+            int r_end = std::min(r + chunk_rows, n);
+            int64_t cost = static_cast<int64_t>(r_end - r) * k;
+            tasks.push_back({i, r, r_end, cost});
+            total_cost += cost;
+        }
+    }
+
+    // 2. Partition tasks by cumulative cost (greedy sequential)
+    std::vector<int> thread_bounds(n_threads + 1, 0);
+    {
+        int cur_thread = 1;
+        int64_t cur_cost = 0;
+        int64_t target = total_cost / n_threads;
+
+        for (size_t t = 0; t < tasks.size(); ++t) {
+            cur_cost += tasks[t].cost;
+            if (cur_cost >= target && cur_thread < n_threads) {
+                thread_bounds[cur_thread++] = static_cast<int>(t + 1);
+                cur_cost = 0;
+            }
+        }
+        while (cur_thread <= n_threads) {
+            thread_bounds[cur_thread++] = static_cast<int>(tasks.size());
+        }
+    }
+
+    // 3. Thread-local em_totals buffers
+    std::vector<std::vector<double>> local_totals(n_threads);
+    for (int t = 0; t < n_threads; ++t) {
+        local_totals[t].assign(static_cast<size_t>(n_components), 0.0);
+    }
+
+    // 4. Worker: process assigned tasks
+    auto worker = [&](int tid) {
+        int start_task = thread_bounds[tid];
+        int end_task   = thread_bounds[tid + 1];
+        double* my_totals = local_totals[tid].data();
+
+        for (int t = start_task; t < end_task; ++t) {
+            em_step_kernel_range(ec_data[tasks[t].ec_idx],
+                                 tasks[t].row_start,
+                                 tasks[t].row_end,
+                                 log_weights,
+                                 my_totals);
+        }
+    };
+
+    // 5. Launch threads (use pool if available, else spawn/join)
+    if (pool) {
+        pool->run_parallel(worker);
+    } else {
+        std::vector<std::thread> threads;
+        threads.reserve(n_threads - 1);
+        for (int t = 1; t < n_threads; ++t) {
+            threads.emplace_back(worker, t);
+        }
+        worker(0);
+        for (auto& th : threads) th.join();
+    }
+
+    // 6. Deterministic Kahan reduction across threads
+    for (int i = 0; i < n_components; ++i) {
+        KahanAccumulator acc;
+        for (int t = 0; t < n_threads; ++t) {
+            acc.add(local_totals[t][i]);
+        }
+        em_totals[i] += acc.sum;
     }
 }
 
@@ -347,7 +510,9 @@ static void map_em_step(
     const double* prior,
     double*       em_totals,    // zeroed then accumulated
     double*       theta_new,    // output: normalized
-    int           n_components)
+    int           n_components,
+    int           estep_threads = 1,
+    rigel::EStepThreadPool* pool = nullptr)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -359,8 +524,13 @@ static void map_em_step(
     std::fill(em_totals, em_totals + n_components, 0.0);
 
     // E-step: accumulate posteriors
-    for (const auto& ec : ec_data) {
-        em_step_kernel(ec, log_weights.data(), em_totals);
+    if (estep_threads > 1) {
+        parallel_estep(ec_data, log_weights.data(), em_totals,
+                       n_components, estep_threads, pool);
+    } else {
+        for (const auto& ec : ec_data) {
+            em_step_kernel_range(ec, 0, ec.n, log_weights.data(), em_totals);
+        }
     }
 
     // M-step: theta_new = (unambig_totals + em_totals + prior), normalized
@@ -389,7 +559,9 @@ static void vbem_step(
     const double* prior,
     double*       em_totals,
     double*       alpha_new,
-    int           n_components)
+    int           n_components,
+    int           estep_threads = 1,
+    rigel::EStepThreadPool* pool = nullptr)
 {
     // Compute alpha_sum
     double alpha_sum = 0.0;
@@ -409,8 +581,13 @@ static void vbem_step(
     std::fill(em_totals, em_totals + n_components, 0.0);
 
     // E-step
-    for (const auto& ec : ec_data) {
-        em_step_kernel(ec, log_weights.data(), em_totals);
+    if (estep_threads > 1) {
+        parallel_estep(ec_data, log_weights.data(), em_totals,
+                       n_components, estep_threads, pool);
+    } else {
+        for (const auto& ec : ec_data) {
+            em_step_kernel_range(ec, 0, ec.n, log_weights.data(), em_totals);
+        }
     }
 
     // M-step: alpha_new = unambig_totals + em_totals + prior (unnormalized)
@@ -443,7 +620,9 @@ static void linked_map_em_step(
     double*       theta_t_new,   // [n_t + 1]: output (normalised)
     double*       nrna_frac_new,       // [n_t]: output
     int           n_transcripts,
-    int           n_components)
+    int           n_components,
+    int           estep_threads = 1,
+    rigel::EStepThreadPool* pool = nullptr)  // thread pool for parallel E-step
 {
     int n_t = n_transcripts;
     int gdna_idx = 2 * n_t;
@@ -468,9 +647,14 @@ static void linked_map_em_step(
     // Zero em_totals
     std::fill(em_totals, em_totals + n_components, 0.0);
 
-    // E-step: accumulate posteriors (kernel unchanged)
-    for (const auto& ec : ec_data) {
-        em_step_kernel(ec, log_weights.data(), em_totals);
+    // E-step: accumulate posteriors — parallel for mega-loci
+    if (estep_threads > 1) {
+        parallel_estep(ec_data, log_weights.data(), em_totals,
+                       n_components, estep_threads, pool);
+    } else {
+        for (const auto& ec : ec_data) {
+            em_step_kernel_range(ec, 0, ec.n, log_weights.data(), em_totals);
+        }
     }
 
     // M-step: aggregate into theta_t and update nrna_frac
@@ -593,7 +777,9 @@ static EMResult run_squarem(
     int           max_iterations,
     double        convergence_delta,
     bool          use_vbem,
-    double        prune_threshold)
+    double        prune_threshold,
+    int           estep_threads = 1,
+    rigel::EStepThreadPool* pool = nullptr)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -623,11 +809,11 @@ static EMResult run_squarem(
             // Two plain VBEM steps
             vbem_step(state0.data(), ec_data, log_eff_len,
                       unambig_totals, prior, em_totals.data(),
-                      state1.data(), n_components);
+                      state1.data(), n_components, estep_threads, pool);
 
             vbem_step(state1.data(), ec_data, log_eff_len,
                       unambig_totals, prior, em_totals.data(),
-                      state2.data(), n_components);
+                      state2.data(), n_components, estep_threads, pool);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -654,7 +840,7 @@ static EMResult run_squarem(
             // Stabilisation step
             vbem_step(state_extrap.data(), ec_data, log_eff_len,
                       unambig_totals, prior, em_totals.data(),
-                      state_new.data(), n_components);
+                      state_new.data(), n_components, estep_threads, pool);
 
             // Convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
@@ -707,11 +893,11 @@ static EMResult run_squarem(
             // Two plain EM steps
             map_em_step(state0.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
-                        state1.data(), n_components);
+                        state1.data(), n_components, estep_threads, pool);
 
             map_em_step(state1.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
-                        state2.data(), n_components);
+                        state2.data(), n_components, estep_threads, pool);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -746,7 +932,7 @@ static EMResult run_squarem(
             // Stabilisation step
             map_em_step(state_extrap.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
-                        state_new.data(), n_components);
+                        state_new.data(), n_components, estep_threads, pool);
 
             // Convergence
             double delta = 0.0;
@@ -860,7 +1046,9 @@ static EMResult linked_run_squarem(
     int           n_components,    // 2*n_t + 1
     int           max_iterations,
     double        convergence_delta,
-    double        prune_threshold)
+    double        prune_threshold,
+    int           estep_threads = 1,
+    rigel::EStepThreadPool* pool = nullptr)
 {
     int n_t = n_transcripts;
     int nc  = n_components;
@@ -901,7 +1089,7 @@ static EMResult linked_run_squarem(
             log_eff_len, unambig_totals, prior,
             nrna_frac_alpha, nrna_frac_beta,
             em_totals.data(), state1.data(), nrna_frac_tmp.data(),
-            n_transcripts, n_components);
+            n_transcripts, n_components, estep_threads, pool);
         std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
 
         linked_map_em_step(
@@ -909,7 +1097,7 @@ static EMResult linked_run_squarem(
             log_eff_len, unambig_totals, prior,
             nrna_frac_alpha, nrna_frac_beta,
             em_totals.data(), state2.data(), nrna_frac_tmp.data(),
-            n_transcripts, n_components);
+            n_transcripts, n_components, estep_threads, pool);
         std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
 
         // SQUAREM extrapolation on theta_t
@@ -948,7 +1136,7 @@ static EMResult linked_run_squarem(
             log_eff_len, unambig_totals, prior,
             nrna_frac_alpha, nrna_frac_beta,
             em_totals.data(), state_new.data(), nrna_frac_tmp.data(),
-            n_transcripts, n_components);
+            n_transcripts, n_components, estep_threads, pool);
         std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
 
         // Convergence check
@@ -1020,7 +1208,7 @@ static EMResult linked_run_squarem(
                     log_eff_len, unambig_totals, prior,
                     nrna_frac_alpha, nrna_frac_beta,
                     em_totals.data(), t_new.data(), nrna_frac_tmp.data(),
-                    n_transcripts, n_components);
+                    n_transcripts, n_components, estep_threads, pool);
                 std::swap(state0, t_new);
                 std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
             }
@@ -1839,8 +2027,51 @@ batch_locus_em(
     {
         nb::gil_scoped_release release;
 
-        // --- Main locus loop (thread-parallel via std::thread) ---
+        // --- Locus scheduling: sort by descending work, two-phase ---
         //
+        // Phase 1 ("mega-loci"): loci with work >= fair_share are processed
+        // one at a time; all threads collaborate on the intra-locus E-step.
+        //
+        // Phase 2 ("normal loci"): remaining loci are distributed via
+        // dynamic work-stealing (chunks of 16), each with single-threaded
+        // E-step.
+        //
+        // Sorting largest-first ensures the biggest loci get maximum
+        // parallelism and are scheduled first to reduce the critical path.
+
+        // Pre-compute approximate work per locus (n_transcripts * n_units).
+        // This is a proxy for the actual E-step work (sum of n*k over ECs),
+        // which requires building ECs first.  The proxy is sufficient for
+        // ordering and thread allocation.
+        std::vector<int64_t> locus_work(static_cast<size_t>(n_loci));
+        int64_t total_work = 0;
+        for (int li = 0; li < n_loci; ++li) {
+            int64_t nt = static_cast<int64_t>(lt_off[li + 1] - lt_off[li]);
+            int64_t nu = static_cast<int64_t>(lu_off[li + 1] - lu_off[li]);
+            locus_work[li] = nt * nu;
+            total_work += locus_work[li];
+        }
+
+        // Sort locus indices by descending work
+        std::vector<int> locus_order(static_cast<size_t>(n_loci));
+        std::iota(locus_order.begin(), locus_order.end(), 0);
+        std::sort(locus_order.begin(), locus_order.end(),
+                  [&](int a, int b) { return locus_work[a] > locus_work[b]; });
+
+        // Fair share = average work per thread.  Loci with work >= fair_share
+        // are "mega-loci" that benefit from intra-locus E-step parallelism.
+        int64_t fair_share = (actual_threads > 1 && total_work > 0)
+            ? total_work / actual_threads
+            : total_work + 1;  // single-thread: nothing is mega
+
+        int mega_end = 0;
+        for (int i = 0; i < n_loci; ++i) {
+            if (locus_work[locus_order[i]] >= fair_share)
+                ++mega_end;
+            else
+                break;
+        }
+
         // Key safety property: loci are connected components of the
         // transcript-unit bipartite graph, so each transcript and each unit
         // belongs to exactly one locus.  This means different loci write to
@@ -1849,25 +2080,14 @@ batch_locus_em(
         //
         // The only shared scalar accumulator is total_gdna_em, handled via
         // std::atomic<double>.
-        //
-        // Each thread gets its own LocusSubProblem and local_map scratch.
-        // Work is distributed dynamically via an atomic counter (chunks of 16).
-        constexpr int CHUNK_SIZE = 16;
-        std::atomic<int> next_locus{0};
 
-        auto worker_fn = [&]() {
-            // Thread-private scratch state (allocated once per thread, reused
-            // across all loci assigned to this thread by dynamic scheduling).
-            LocusSubProblem sub;
-            std::vector<int32_t> local_map(local_map_size, -1);
-            double local_gdna = 0.0;
-
-            for (;;) {
-                int chunk_start = next_locus.fetch_add(CHUNK_SIZE,
-                    std::memory_order_relaxed);
-                if (chunk_start >= n_loci) break;
-                int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_loci);
-                for (int li = chunk_start; li < chunk_end; ++li) {
+        // Lambda: process one locus.  Thread-private scratch (sub,
+        // local_map) is passed by reference to avoid per-call allocation.
+        // Returns the locus gDNA total.
+        auto process_locus = [&](int li, int estep_thr,
+                                 LocusSubProblem& sub,
+                                 std::vector<int32_t>& local_map,
+                                 rigel::EStepThreadPool* pool = nullptr) -> double {
             // Get locus transcript and unit index ranges
             auto t_start = lt_off[li];
             auto t_end   = lt_off[li + 1];
@@ -1880,7 +2100,7 @@ batch_locus_em(
                 locus_mrna_data[li] = 0.0;
                 locus_nrna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
-                continue;
+                return 0.0;
             }
 
             const int32_t* t_arr = lt_fl + t_start;
@@ -1919,7 +2139,7 @@ batch_locus_em(
                 locus_mrna_data[li] = 0.0;
                 locus_nrna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
-                continue;
+                return 0.0;
             }
 
             // 4. Compute log(effective_lengths) — all 1.0, so log = 0.0
@@ -1946,6 +2166,7 @@ batch_locus_em(
             // 7. Run SQUAREM (linked or classic)
             bool linked = (sub_n_t > 0);
             EMResult result;
+
             if (linked) {
                 // Collapse warm start to theta_t space
                 int ns = sub_n_t + 1;
@@ -1977,7 +2198,7 @@ batch_locus_em(
                     sub.nrna_frac_beta.data(),
                     sub_n_t, nc,
                     max_iterations, convergence_delta,
-                    prune_threshold);
+                    prune_threshold, estep_thr, pool);
             } else {
                 result = run_squarem(
                     ec_data, log_eff_len.data(),
@@ -1985,7 +2206,7 @@ batch_locus_em(
                     prior.data(),
                     theta_init.data(),
                     nc, max_iterations, convergence_delta,
-                    use_vbem, prune_threshold);
+                    use_vbem, prune_threshold, estep_thr, pool);
             }
 
             // 8. Assign posteriors (writes to disjoint transcript
@@ -2002,27 +2223,73 @@ batch_locus_em(
             locus_nrna_data[li] = locus_nrna;
             locus_gdna_data[li] = locus_gdna;
 
-            local_gdna += locus_gdna;
-                } // end chunk loop
-            } // end work-stealing loop
+            return locus_gdna;
+        }; // end process_locus
 
-            // Flush thread-local gdna to shared atomic
-            double prev = total_gdna_em.load(std::memory_order_relaxed);
-            while (!total_gdna_em.compare_exchange_weak(
-                prev, prev + local_gdna,
-                std::memory_order_relaxed, std::memory_order_relaxed)) {}
-        }; // end worker_fn
+        // ---- Phase 1: mega-loci (all threads collaborate on E-step) ----
+        {
+            LocusSubProblem sub;
+            std::vector<int32_t> local_map(local_map_size, -1);
 
-        if (actual_threads <= 1) {
-            // Single-threaded: run directly, no thread overhead
-            worker_fn();
-        } else {
-            std::vector<std::thread> threads;
-            threads.reserve(actual_threads);
-            for (int t = 0; t < actual_threads; ++t)
-                threads.emplace_back(worker_fn);
-            for (auto& th : threads)
-                th.join();
+            // Create a persistent thread pool for the duration of Phase 1.
+            // This eliminates per-E-step pthread_create/join overhead
+            // across all SQUAREM iterations of all mega-loci.
+            std::unique_ptr<rigel::EStepThreadPool> pool;
+            if (actual_threads > 1 && mega_end > 0) {
+                pool = std::make_unique<rigel::EStepThreadPool>(actual_threads);
+            }
+
+            for (int i = 0; i < mega_end; ++i) {
+                int li = locus_order[i];
+                double gdna = process_locus(li, actual_threads, sub, local_map,
+                                            pool.get());
+                // No atomic needed — single-threaded phase
+                double prev = total_gdna_em.load(std::memory_order_relaxed);
+                while (!total_gdna_em.compare_exchange_weak(
+                    prev, prev + gdna,
+                    std::memory_order_relaxed, std::memory_order_relaxed)) {}
+            }
+        }
+
+        // ---- Phase 2: work-steal remaining loci (single-thread E-step) ----
+        int n_phase2 = n_loci - mega_end;
+        if (n_phase2 > 0) {
+            constexpr int CHUNK_SIZE = 16;
+            std::atomic<int> next_idx{0};
+
+            auto worker_fn = [&]() {
+                LocusSubProblem sub;
+                std::vector<int32_t> local_map(local_map_size, -1);
+                double local_gdna = 0.0;
+
+                for (;;) {
+                    int chunk_start = next_idx.fetch_add(CHUNK_SIZE,
+                        std::memory_order_relaxed);
+                    if (chunk_start >= n_phase2) break;
+                    int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_phase2);
+                    for (int idx = chunk_start; idx < chunk_end; ++idx) {
+                        int li = locus_order[mega_end + idx];
+                        local_gdna += process_locus(li, 1, sub, local_map);
+                    }
+                }
+
+                // Flush thread-local gdna to shared atomic
+                double prev = total_gdna_em.load(std::memory_order_relaxed);
+                while (!total_gdna_em.compare_exchange_weak(
+                    prev, prev + local_gdna,
+                    std::memory_order_relaxed, std::memory_order_relaxed)) {}
+            };
+
+            if (actual_threads <= 1) {
+                worker_fn();
+            } else {
+                std::vector<std::thread> threads;
+                threads.reserve(actual_threads);
+                for (int t = 0; t < actual_threads; ++t)
+                    threads.emplace_back(worker_fn);
+                for (auto& th : threads)
+                    th.join();
+            }
         }
     } // end gil_scoped_release — GIL re-acquired here
 
@@ -2376,4 +2643,34 @@ NB_MODULE(_em_impl, m) {
     m.attr("SQUAREM_BUDGET_DIVISOR") = SQUAREM_BUDGET_DIVISOR;
     m.attr("NRNA_FRAC_CLAMP_EPS")   = NRNA_FRAC_CLAMP_EPS;
     m.attr("EM_PRIOR_EPSILON")       = EM_PRIOR_EPSILON;
+
+    // ----------------------------------------------------------------
+    // Test-only: expose fast_exp for accuracy validation from Python
+    // ----------------------------------------------------------------
+    m.def("_fast_exp_test_array",
+          [](nb::ndarray<double, nb::ndim<1>, nb::c_contig> inputs) {
+              const size_t n = inputs.shape(0);
+              const double* src = inputs.data();
+              // Allocate output array
+              double* out = new double[n];
+              size_t i = 0;
+#if RIGEL_HAS_NEON
+              for (; i + 2 <= n; i += 2) {
+                  float64x2_t v = vld1q_f64(src + i);
+                  v = rigel::fast_exp_neon(v);
+                  vst1q_f64(out + i, v);
+              }
+#endif
+              for (; i < n; ++i) {
+                  out[i] = rigel::fast_exp_scalar(src[i]);
+              }
+              // Return as numpy array, transfer ownership
+              nb::capsule owner(out, [](void* p) noexcept {
+                  delete[] static_cast<double*>(p);
+              });
+              return nb::ndarray<nb::numpy, double, nb::ndim<1>>(
+                  out, {n}, owner);
+          },
+          nb::arg("inputs"),
+          "Apply fast_exp to an array (test-only). Returns numpy array.");
 }

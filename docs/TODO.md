@@ -1,12 +1,15 @@
 # TODO
 
+## AVX2
+
+Need to write SIMD AVX2 instructions
+
+
 ## Equivalence class sorting?
 
 This seems to affect non-deterministic behavior of the EM. Is this necessary?
 
-## Conversion from float to double for EM?
 
-Is this necessary? There was non-determinism attributed to floating point rounding precision.
 
 ## Bug in BAM scanning (might not be a bug)
 

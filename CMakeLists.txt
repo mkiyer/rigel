@@ -169,7 +169,7 @@ endif()
 
 # C++ EM solver — replaces the Python EM hot path (_em_step, _vbem_step,
 # _build_equiv_classes, SQUAREM loop) with a single native call.
-# Pure C++17 + nanobind + numpy, no external dependencies beyond OpenMP.
+# Pure C++17 + nanobind + numpy, no external dependencies.
 nanobind_add_module(
   _em_impl
   NOMINSIZE
@@ -180,3 +180,82 @@ nanobind_add_module(
 target_compile_options(_em_impl PRIVATE -g)
 
 install(TARGETS _em_impl LIBRARY DESTINATION rigel)
+
+# --- SIMD / Architecture Detection -------------------------------------------
+#
+# Detect CPU architecture and report available SIMD instruction sets.
+# The C++ header simd_detect.h uses standard compiler-defined macros
+# (__ARM_NEON, __AVX2__, etc.) for compile-time detection, plus CPUID
+# for runtime dispatch on x86.  With -march=native the compiler sets
+# these macros automatically; for portable builds the C++ code uses
+# function-level __attribute__((target(...))) for multi-versioned SIMD.
+#
+# This block just reports what's available and sets RIGEL_ARCH for
+# any downstream CMake logic.
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    set(RIGEL_ARCH "ARM64")
+    message(STATUS "SIMD: ARM64 — NEON is baseline (always available)")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    set(RIGEL_ARCH "X86_64")
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx2 -mfma" _rigel_has_avx2_fma)
+    check_cxx_compiler_flag("-mavx512f" _rigel_has_avx512f)
+    if(_rigel_has_avx512f)
+        message(STATUS "SIMD: x86_64 — SSE2 + AVX2/FMA + AVX-512F available")
+    elseif(_rigel_has_avx2_fma)
+        message(STATUS "SIMD: x86_64 — SSE2 + AVX2/FMA available")
+    else()
+        message(STATUS "SIMD: x86_64 — SSE2 only")
+    endif()
+else()
+    set(RIGEL_ARCH "UNKNOWN")
+    message(STATUS "SIMD: ${CMAKE_SYSTEM_PROCESSOR} — no explicit SIMD detection")
+endif()
+
+# --- Compiler optimizations ---------------------------------------------------
+#
+# Phase 2 performance flags: -O3, -march=native, FMA contraction, and LTO.
+# Applied per-target to control fast-math scope.
+#
+# _em_impl gets -ffp-contract=fast (enables FMA) but NOT full -ffast-math,
+# because -ffast-math allows the compiler to reassociate floating-point
+# additions, which would break the Kahan compensated summation used in
+# the E-step kernel for numerical stability.
+#
+# _scoring_impl gets full -ffast-math (no compensated summation there).
+# All other targets get -O3 -march=native without fast-math.
+
+# RIGEL_PORTABLE: when ON, omit -march=native so wheels run on any machine
+# of the same architecture. CI wheel builds set this; local dev leaves it OFF.
+option(RIGEL_PORTABLE "Build portable wheels (no -march=native)" OFF)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    if(RIGEL_PORTABLE)
+        set(RIGEL_OPT_FLAGS -O3 -DNDEBUG)
+    else()
+        set(RIGEL_OPT_FLAGS -O3 -march=native -DNDEBUG)
+    endif()
+
+    target_compile_options(_em_impl      PRIVATE ${RIGEL_OPT_FLAGS} -ffp-contract=fast)
+    target_compile_options(_scoring_impl PRIVATE ${RIGEL_OPT_FLAGS} -ffast-math)
+    target_compile_options(_resolve_impl PRIVATE ${RIGEL_OPT_FLAGS})
+    target_compile_options(_cgranges_impl PRIVATE ${RIGEL_OPT_FLAGS})
+    if(TARGET _bam_impl)
+        target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
+    endif()
+endif()
+
+# Link-Time Optimization (LTO): enables cross-TU inlining and dead code
+# elimination across compilation units.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported)
+if(ipo_supported)
+    set_property(TARGET _em_impl      PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET _scoring_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET _resolve_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET _cgranges_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    if(TARGET _bam_impl)
+        set_property(TARGET _bam_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+endif()

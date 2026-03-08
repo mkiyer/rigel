@@ -341,6 +341,13 @@ The genomic DNA rate prior uses a two-level hierarchy:
 | `--tmpdir` | system temp | Directory for buffer spill files when memory limits are exceeded. Use a fast SSD. |
 | `--seed` | timestamp | Random seed for reproducibility. Setting a fixed seed ensures deterministic results with `--threads 1`. |
 
+> **Note — OpenMP thread suppression.**  On import, Rigel sets
+> `OMP_NUM_THREADS=1` (via `os.environ.setdefault`) to prevent numpy's
+> OpenMP runtime from spawning idle worker threads that compete with
+> Rigel's own C++ parallelism for CPU cores and cache.  If you need
+> multi-threaded numpy/BLAS operations in the same process, set
+> `OMP_NUM_THREADS` to your desired value **before** `import rigel`.
+
 ---
 
 ## Configuration file

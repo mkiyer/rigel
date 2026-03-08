@@ -241,7 +241,8 @@ the quantification stage.
 
 **Pre-EM accumulation.** Before entering the EM, four accumulator arrays
 are computed from single-gene fragments:
-- Per-gene sense and antisense counts (for gDNA initialization)
+- Per-transcript unspliced sense and antisense counts (aggregated to
+  per-locus totals for gDNA initialization)
 - Per-transcript intronic sense and antisense counts (for nRNA
   initialization)
 
@@ -567,11 +568,11 @@ $$
 #### The antisense principle
 
 At perfect strand specificity ($\text{SS} = 1.0$), every fragment aligning
-antisense to a gene must originate from gDNA, because both mRNA and nRNA
-are stranded (sense-only) while gDNA is unstranded:
+antisense to annotated transcripts must originate from gDNA, because both
+mRNA and nRNA are stranded (sense-only) while gDNA is unstranded:
 
 $$
-\text{gDNA}_{\text{total},g} = 2 \times \text{antisense}_g
+\text{gDNA}_{\text{total},\ell} = 2 \times \text{antisense}_\ell
 $$
 
 At imperfect strand specificity, some sense RNA fragments are flipped to
@@ -579,12 +580,12 @@ the antisense strand by library preparation noise. The corrected
 antisense count accounts for this:
 
 $$
-\text{corrected}_g = \max\!\left(0, \;
-  \text{antisense}_g - \text{sense}_g \times (1 - \text{SS})\right)
+\text{corrected}_\ell = \max\!\left(0, \;
+  \text{antisense}_\ell - \text{sense}_\ell \times (1 - \text{SS})\right)
 $$
 
 $$
-\text{gDNA}_{\text{init},g} = 2 \times \text{corrected}_g
+\text{gDNA}_{\text{init},\ell} = 2 \times \text{corrected}_\ell
 $$
 
 #### Density estimation
@@ -872,16 +873,20 @@ with no intronic overlap receive no count.
 
 Antisense fragments provide the primary gDNA estimator. In a stranded
 library, mRNA and nRNA produce exclusively sense fragments relative to
-the gene strand. Any antisense fragment must therefore originate from
-either gDNA (which is unstranded) or library preparation noise (strand
-flip).
+the transcript strand. Any antisense fragment must therefore originate
+from either gDNA (which is unstranded) or library preparation noise
+(strand flip).
 
-The strand-corrected gDNA initialization per gene is:
+The strand-corrected gDNA initialization per locus is:
 
 $$
-\text{gDNA\_init}_g = 2 \times \max\!\left(0, \;
-  N_g^{\text{anti}} - N_g^{\text{sense}} \times (1 - \text{SS})\right)
+\text{gDNA\_init}_\ell = 2 \times \max\!\left(0, \;
+  N_\ell^{\text{anti}} - N_\ell^{\text{sense}} \times (1 - \text{SS})\right)
 $$
+
+where $N_\ell^{\text{anti}}$ and $N_\ell^{\text{sense}}$ are the
+unspliced antisense and sense counts summed over all transcripts in
+locus $\ell$.
 
 The factor of 2 accounts for the sense projection: if $n$ fragments are
 observed on the antisense strand from gDNA, an equal number are expected
@@ -889,7 +894,7 @@ on the sense strand.
 
 ### 10.2 Restriction to Unspliced Fragments
 
-Only unspliced fragments contribute to the gene-level gDNA accumulators.
+Only unspliced fragments contribute to the locus-level gDNA accumulators.
 gDNA cannot produce splice junctions (neither annotated nor unannotated),
 so spliced antisense fragments must originate from RNA of overlapping
 genes on the opposite strand. Excluding them makes the gDNA
@@ -1085,8 +1090,10 @@ could partially resolve such degeneracies.
 
 **Overlapping antisense genes.** When genes overlap on opposite strands,
 RNA from one gene may appear as antisense evidence for the other,
-inflating gDNA estimates. A per-locus gDNA architecture (rather than
-per-gene) would address this.
+inflating gDNA estimates. Rigel mitigates this by modeling gDNA at the
+locus level (a single shadow per locus) and restricting gDNA accumulators
+to unspliced fragments, but residual cross-talk remains possible at
+highly overlapping antisense loci.
 
 **Mappability.** Rigel does not currently account for regional variation
 in read mappability, which can bias both gDNA and transcript abundance

@@ -1,0 +1,112 @@
+name: Build & Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to PyPI (yes/no)"
+        required: true
+        default: "no"
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Source distribution ──────────────────────────────────────────────
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  # ── Binary wheels ───────────────────────────────────────────────────
+  wheels:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            cibw_archs: x86_64
+          # Linux aarch64 (emulated)
+          - os: ubuntu-latest
+            cibw_archs: aarch64
+          # macOS x86_64
+          - os: macos-13
+            cibw_archs: x86_64
+          # macOS arm64
+          - os: macos-latest
+            cibw_archs: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Emulation for Linux aarch64 builds
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.cibw_archs == 'aarch64'
+        with:
+          platforms: arm64
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.22
+        env:
+          CIBW_ARCHS: ${{ matrix.cibw_archs }}
+          # Build for CPython 3.12+ only (stable ABI)
+          CIBW_BUILD: "cp312-*"
+          CIBW_SKIP: "*-musllinux_*"
+          # Install htslib inside the build container
+          CIBW_BEFORE_ALL_LINUX: >
+            yum install -y autoconf automake bzip2-devel curl-devel
+            libcurl-devel xz-devel zlib-devel &&
+            cd /tmp &&
+            curl -L https://github.com/samtools/htslib/releases/download/1.21/htslib-1.21.tar.bz2 | tar xj &&
+            cd htslib-1.21 &&
+            ./configure --prefix=/usr/local --enable-libcurl &&
+            make -j$(nproc) && make install &&
+            ldconfig
+          CIBW_BEFORE_ALL_MACOS: >
+            brew install htslib
+          # Set portable build flag (no -march=native)
+          CIBW_ENVIRONMENT: >
+            CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
+            PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          # Basic import test
+          CIBW_TEST_COMMAND: "python -c 'import rigel; print(rigel.__version__)'"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.cibw_archs }}
+          path: wheelhouse/*.whl
+
+  # ── Publish to PyPI ─────────────────────────────────────────────────
+  publish:
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'yes')
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publisher (no API token needed)
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -1209,8 +1209,10 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
                 hn = _rigel_tool_name(ac, hc, multi_rigel)
                 print(f"    rigel ({hn})...", end="", flush=True)
                 try:
+                    annotated_bam = align_dir / f"annotated_{hc.name}.bam"
                     counts, elapsed, pools, n_frags = run_rigel_tool(
                         bam_ns, rigel_index, ds.pipeline_seed, hc,
+                        annotated_bam_path=annotated_bam,
                     )
                     tool_tx_counts[hn] = counts
                     tool_pool[hn] = pools

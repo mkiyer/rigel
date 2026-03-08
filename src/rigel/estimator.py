@@ -943,7 +943,7 @@ class AbundanceEstimator:
         # --- Pre-EM strand accumulators (for gDNA init via EB) ---
         # Transcript-level: all same-strand UNSPLICED fragments.
         # Accumulated during scan pass for empirical Bayes gDNA prior.
-        # Gene-level totals are derived via np.add.at(g_arr, t_to_g, t_arr).
+        # Locus-level totals are derived by summing over locus.transcript_indices.
         self.transcript_unspliced_sense = np.zeros(
             num_transcripts, dtype=np.float64
         )
