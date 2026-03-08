@@ -92,24 +92,24 @@ static SJTagMode parse_sj_tag_spec(const std::string& spec) {
 
 static const char* frag_class_label(int code) {
     switch (code) {
-        case 0:  return "unambig";
-        case 1:  return "ambig_same_strand";
-        case 2:  return "ambig_opp_strand";
-        case 3:  return "multimapper";
-        case 4:  return "chimeric";
-        case -1: return "intergenic";
-        default: return "unknown";
+        case FRAG_UNAMBIG:           return "unambig";
+        case FRAG_AMBIG_SAME_STRAND: return "ambig_same_strand";
+        case FRAG_AMBIG_OPP_STRAND:  return "ambig_opp_strand";
+        case FRAG_MULTIMAPPER:       return "multimapper";
+        case FRAG_CHIMERIC:          return "chimeric";
+        case -1:                     return "intergenic";
+        default:                     return "unknown";
     }
 }
 
 static const char* pool_label(int code) {
     switch (code) {
-        case 0:  return "mRNA";
-        case 1:  return "nRNA";
-        case 2:  return "gDNA";
-        case 3:  return "intergenic";
-        case 4:  return "chimeric";
-        default: return "unknown";
+        case POOL_CODE_MRNA:       return "mRNA";
+        case POOL_CODE_NRNA:       return "nRNA";
+        case POOL_CODE_GDNA:       return "gDNA";
+        case POOL_CODE_INTERGENIC: return "intergenic";
+        case POOL_CODE_CHIMERIC:   return "chimeric";
+        default:                   return "unknown";
     }
 }
 

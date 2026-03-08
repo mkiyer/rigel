@@ -56,6 +56,20 @@ static constexpr int32_t STRAND_POS       = 1;
 static constexpr int32_t STRAND_NEG       = 2;
 static constexpr int32_t STRAND_AMBIGUOUS = 3;  // POS | NEG
 
+// FragmentClass (rigel.buffer — fragment classification codes)
+static constexpr int32_t FRAG_UNAMBIG           = 0;
+static constexpr int32_t FRAG_AMBIG_SAME_STRAND = 1;
+static constexpr int32_t FRAG_AMBIG_OPP_STRAND  = 2;
+static constexpr int32_t FRAG_MULTIMAPPER       = 3;
+static constexpr int32_t FRAG_CHIMERIC          = 4;
+
+// PoolCode (rigel.annotate — annotation pool codes)
+static constexpr int32_t POOL_CODE_MRNA       = 0;
+static constexpr int32_t POOL_CODE_NRNA       = 1;
+static constexpr int32_t POOL_CODE_GDNA       = 2;
+static constexpr int32_t POOL_CODE_INTERGENIC = 3;
+static constexpr int32_t POOL_CODE_CHIMERIC   = 4;
+
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)
 // ================================================================

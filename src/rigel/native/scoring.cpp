@@ -10,6 +10,7 @@
  *       .score_wta_mrna(...)         — mRNA WTA scoring kernel
  *       .score_wta_nrna(...)         — nRNA WTA scoring kernel
  *       .score_emit_fragment(...)    — fused score+emit (bytes output)
+ *       .fused_score_buffer(...)     — two-pass bulk scoring (production hot path)
  *
  * Build:
  *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
@@ -31,6 +32,24 @@ namespace nb = nanobind;
 using rigel::LOG_HALF;
 using rigel::TAIL_DECAY_LP;
 using rigel::STRAND_NEG;
+using rigel::SPLICE_UNSPLICED;
+using rigel::SPLICE_SPLICED_UNANNOT;
+using rigel::SPLICE_SPLICED_ANNOT;
+using rigel::FRAG_UNAMBIG;
+using rigel::FRAG_AMBIG_SAME_STRAND;
+using rigel::FRAG_AMBIG_OPP_STRAND;
+using rigel::FRAG_MULTIMAPPER;
+using rigel::FRAG_CHIMERIC;
+using rigel::POOL_CODE_MRNA;
+using rigel::POOL_CODE_NRNA;
+using rigel::POOL_CODE_GDNA;
+using rigel::POOL_CODE_INTERGENIC;
+using rigel::POOL_CODE_CHIMERIC;
+
+// Maximum candidates handled via stack-allocated buffer before falling
+// back to heap allocation.  Avoids malloc in the common case where a
+// fragment overlaps a moderate number of transcripts.
+static constexpr int SCORED_STACK_CAPACITY = 64;
 
 // ----------------------------------------------------------------
 // Array type aliases
@@ -324,10 +343,10 @@ public:
             int32_t t_idx, oh, ct, tx_s, tx_e;
             double  log_lik, cov_wt;
         };
-        Scored stack_buf[64];
+        Scored stack_buf[SCORED_STACK_CAPACITY];
         std::vector<Scored> heap_buf;
         Scored* scored = stack_buf;
-        if (n_cand > 64) {
+        if (n_cand > SCORED_STACK_CAPACITY) {
             heap_buf.resize(n_cand);
             scored = heap_buf.data();
         }
@@ -435,10 +454,10 @@ public:
             int32_t t_idx, oh, tx_s, tx_e;
             double  nrna_ll, cov_wt;
         };
-        Scored stack_buf[64];
+        Scored stack_buf[SCORED_STACK_CAPACITY];
         std::vector<Scored> heap_buf;
         Scored* scored = stack_buf;
-        if (n_cand > 64) {
+        if (n_cand > SCORED_STACK_CAPACITY) {
             heap_buf.resize(n_cand);
             scored = heap_buf.data();
         }
@@ -541,7 +560,6 @@ public:
         int genomic_footprint,
         int genomic_start)
     {
-        static constexpr int SPLICE_ANNOT_VAL = 2;
         static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
 
         int n_cand = static_cast<int>(t_inds.shape(0));
@@ -573,10 +591,10 @@ public:
                 int32_t t_idx, oh, ct, tx_s, tx_e;
                 double  log_lik, cov_wt;
             };
-            MrnaScored m_stack[64];
+            MrnaScored m_stack[SCORED_STACK_CAPACITY];
             std::vector<MrnaScored> m_heap;
             MrnaScored* m_scored = m_stack;
-            if (n_cand > 64) {
+            if (n_cand > SCORED_STACK_CAPACITY) {
                 m_heap.resize(n_cand);
                 m_scored = m_heap.data();
             }
@@ -654,15 +672,15 @@ public:
             }
 
             // ========== nRNA scoring (skip if SPLICE_ANNOT) ==========
-            if (splice_type != SPLICE_ANNOT_VAL) {
+            if (splice_type != SPLICE_SPLICED_ANNOT) {
                 struct NrnaScored {
                     int32_t t_idx, oh, tx_s, tx_e;
                     double  nrna_ll, cov_wt;
                 };
-                NrnaScored n_stack[64];
+                NrnaScored n_stack[SCORED_STACK_CAPACITY];
                 std::vector<NrnaScored> n_heap;
                 NrnaScored* n_scored = n_stack;
-                if (n_cand > 64) {
+                if (n_cand > SCORED_STACK_CAPACITY) {
                     n_heap.resize(n_cand);
                     n_scored = n_heap.data();
                 }
@@ -763,565 +781,6 @@ public:
     }
 
     // ---------------------------------------------------------------
-    // scan_chunk — process entire chunk in C++ (Phase 1 optimization)
-    // ---------------------------------------------------------------
-    //
-    // Processes all non-multimapper, non-chimeric fragments in one call.
-    // Replaces per-fragment Python dispatch, BufferedFragment creation,
-    // pre-EM accumulation, assign_unambig, and score_emit_fragment calls.
-    //
-    // Returns a tuple of numpy arrays + scalar stats.
-
-    nb::tuple scan_chunk(
-        // Chunk columnar arrays
-        i64_1d  chunk_t_offsets,      // int64[N+1]
-        i32_1d  chunk_t_indices,      // int32[M]
-        i32_1d  chunk_frag_lengths,   // int32[M]
-        i32_1d  chunk_exon_bp,        // int32[M]
-        i32_1d  chunk_intron_bp,      // int32[M]
-        i32_1d  chunk_unambig_intron, // int32[M]
-        u8_1d   chunk_splice_type,    // uint8[N]
-        u8_1d   chunk_exon_strand,    // uint8[N]
-        u8_1d   chunk_frag_classes,   // uint8[N]
-        i64_1d  chunk_frag_id,        // int64[N]
-        u32_1d  chunk_read_length,    // uint32[N]
-        i32_1d  chunk_genomic_fp,     // int32[N]
-        i32_1d  chunk_genomic_start,  // int32[N]
-        u16_1d  chunk_nm,             // uint16[N]
-        // Index arrays for strand classification
-        i8_1d   t_to_strand_arr,      // int8[T]
-        // Pre-EM accumulator arrays (modified in-place)
-        f64_mut exonic_sense,
-        f64_mut exonic_antisense,
-        f64_mut unspliced_sense,
-        f64_mut unspliced_antisense,
-        f64_mut intronic_sense,
-        f64_mut intronic_antisense,
-        f64_2d_mut unambig_counts,    // float64[T, 6]
-        // gDNA splice penalty for unspliced (log already applied outside)
-        double  gdna_log_splice_pen_unspliced)
-    {
-        static constexpr int FRAG_UNAMBIG            = 0;
-        static constexpr int FRAG_AMBIG_SAME_STRAND  = 1;
-        // static constexpr int FRAG_AMBIG_OPP_STRAND = 2;
-        static constexpr int FRAG_MULTIMAPPER        = 3;
-        static constexpr int FRAG_CHIMERIC           = 4;
-        static constexpr int SPLICE_UNSPLICED_VAL    = 0;
-        // static constexpr int SPLICE_UNANNOT_VAL   = 1;
-        static constexpr int SPLICE_ANNOT_VAL        = 2;
-        static constexpr double NEG_INF =
-            -std::numeric_limits<double>::infinity();
-
-        int N = static_cast<int>(chunk_splice_type.shape(0));
-
-        const int64_t*  t_off  = chunk_t_offsets.data();
-        const int32_t*  t_ind  = chunk_t_indices.data();
-        const int32_t*  f_len  = chunk_frag_lengths.data();
-        const int32_t*  e_bp   = chunk_exon_bp.data();
-        const int32_t*  i_bp   = chunk_intron_bp.data();
-        const int32_t*  ui_bp  = chunk_unambig_intron.data();
-        const uint8_t*  s_type = chunk_splice_type.data();
-        const uint8_t*  e_str  = chunk_exon_strand.data();
-        const uint8_t*  fc     = chunk_frag_classes.data();
-        const int64_t*  f_id   = chunk_frag_id.data();
-        const uint32_t* r_len  = chunk_read_length.data();
-        const int32_t*  g_fp   = chunk_genomic_fp.data();
-        const int32_t*  g_sta  = chunk_genomic_start.data();
-        const uint16_t* nm_arr = chunk_nm.data();
-        const int8_t*   t_str  = t_to_strand_arr.data();
-
-        double* acc_exonic_s     = exonic_sense.data();
-        double* acc_exonic_a     = exonic_antisense.data();
-        double* acc_unspl_s      = unspliced_sense.data();
-        double* acc_unspl_a      = unspliced_antisense.data();
-        double* acc_intron_s     = intronic_sense.data();
-        double* acc_intron_a     = intronic_antisense.data();
-        double* ua_counts        = unambig_counts.data();
-        int ua_ncols = static_cast<int>(unambig_counts.shape(1));
-
-        // CSR output vectors (will be returned as numpy arrays)
-        std::vector<int64_t>  out_offsets;
-        std::vector<int32_t>  out_ti, out_ts, out_te;
-        std::vector<double>   out_ll, out_cw;
-        std::vector<uint8_t>  out_ct;
-
-        // Per-unit metadata
-        std::vector<int32_t>  out_locus_t;
-        std::vector<uint8_t>  out_locus_ct;
-        std::vector<int8_t>   out_is_spliced;
-        std::vector<double>   out_gdna_ll;
-        std::vector<int32_t>  out_gfp;
-        std::vector<int64_t>  out_fid;
-        std::vector<int8_t>   out_fclass;
-        std::vector<uint8_t>  out_stype;
-
-        // Det-unambig tracking (for annotation support)
-        std::vector<int32_t>  det_t_indices;
-        std::vector<int64_t>  det_frag_ids;
-
-        // Stats
-        int64_t n_det_unambig  = 0;
-        int64_t n_em_unambig   = 0;
-        int64_t n_em_ambig_ss  = 0;
-        int64_t n_em_ambig_os  = 0;
-        int64_t n_gated_out    = 0;
-        int64_t n_chimeric     = 0;
-
-        // Reserve reasonable capacity (typical ~50% of N goes to EM)
-        out_offsets.reserve(N / 2 + 1);
-        int64_t csr_len = 0;  // tracks current CSR offset
-
-        for (int i = 0; i < N; ++i) {
-            int fclass = fc[i];
-
-            // Skip chimeric
-            if (fclass == FRAG_CHIMERIC) {
-                ++n_chimeric;
-                continue;
-            }
-            // Skip multimapper (handled in Python)
-            if (fclass == FRAG_MULTIMAPPER)
-                continue;
-
-            int stype      = s_type[i];
-            int exon_str   = e_str[i];
-            int64_t start  = t_off[i];
-            int64_t end    = t_off[i + 1];
-            int n_cand     = static_cast<int>(end - start);
-
-            // ---- Pre-EM strand accumulation ----
-            // For FRAG_UNAMBIG and FRAG_AMBIG_SAME_STRAND
-            if (fclass == FRAG_UNAMBIG ||
-                fclass == FRAG_AMBIG_SAME_STRAND)
-            {
-                int32_t first_t = t_ind[start];
-                int first_t_strand = static_cast<int>(t_str[first_t]);
-
-                // is_antisense: same logic as Python estimator.is_antisense
-                bool is_anti;
-                if (exon_str == 1 || exon_str == 2) {
-                    bool same = (exon_str == first_t_strand);
-                    double log_p = same ? log_p_sense_ : log_p_antisense_;
-                    is_anti = std::exp(log_p) < 0.5;
-                } else {
-                    is_anti = false;
-                }
-
-                bool is_unspliced = (stype == SPLICE_UNSPLICED_VAL);
-                double weight = n_cand > 0 ? 1.0 / n_cand : 0.0;
-
-                for (int64_t k = start; k < end; ++k) {
-                    int32_t t_idx = t_ind[k];
-                    bool has_ui = (ui_bp[k] > 0);
-
-                    // Exonic accumulation (exclude intronic fragments)
-                    if (!has_ui) {
-                        if (is_anti)
-                            acc_exonic_a[t_idx] += weight;
-                        else
-                            acc_exonic_s[t_idx] += weight;
-                    }
-
-                    // Unspliced accumulation
-                    if (is_unspliced) {
-                        if (is_anti)
-                            acc_unspl_a[t_idx] += weight;
-                        else
-                            acc_unspl_s[t_idx] += weight;
-                    }
-
-                    // Intronic accumulation
-                    if (has_ui) {
-                        if (is_anti)
-                            acc_intron_a[t_idx] += weight;
-                        else
-                            acc_intron_s[t_idx] += weight;
-                    }
-                }
-
-                // ---- Deterministic unique: SPLICE_ANNOT + FRAG_UNAMBIG ----
-                if (fclass == FRAG_UNAMBIG && stype == SPLICE_ANNOT_VAL) {
-                    int32_t t_idx = t_ind[start];
-                    int t_strand_val = static_cast<int>(t_str[t_idx]);
-                    bool anti;
-                    if (exon_str == 1 || exon_str == 2) {
-                        bool same = (exon_str == t_strand_val);
-                        double log_p = same ? log_p_sense_
-                                           : log_p_antisense_;
-                        anti = std::exp(log_p) < 0.5;
-                    } else {
-                        anti = false;
-                    }
-                    int col = stype * 2 + (anti ? 1 : 0);
-                    if (col < ua_ncols)
-                        ua_counts[t_idx * ua_ncols + col] += 1.0;
-                    ++n_det_unambig;
-
-                    // Track for annotation support
-                    det_t_indices.push_back(t_idx);
-                    det_frag_ids.push_back(f_id[i]);
-
-                    continue;  // Det-unambig DOES NOT go to EM
-                }
-            }
-
-            // ---- EM-routed scoring (non-MM, non-chimeric, non-det) ----
-            // Reuses the same logic as score_emit_fragment, inlined here.
-
-            int rl = r_len[i] > 0 ? static_cast<int>(r_len[i]) : 1;
-            int nm = nm_arr[i];
-            double log_nm = nm > 0 ? nm * mm_log_pen_ : 0.0;
-            bool has_strand  = (exon_str == 1 || exon_str == 2);
-            int genomic_start = g_sta[i];
-            int genomic_footprint = g_fp[i];
-            bool has_genomic = (genomic_start >= 0);
-
-            // Result vectors for this fragment
-            size_t emit_start = out_ti.size();
-            double best_ll = NEG_INF;
-            int32_t best_t = -1;
-            int32_t best_ct = 0;
-
-            if (n_cand > 0) {
-                // ========== mRNA scoring ==========
-                struct MrnaScored {
-                    int32_t t_idx, oh, ct, tx_s, tx_e;
-                    double  log_lik, cov_wt;
-                };
-                MrnaScored m_stack[64];
-                std::vector<MrnaScored> m_heap;
-                MrnaScored* m_scored = m_stack;
-                if (n_cand > 64) {
-                    m_heap.resize(n_cand);
-                    m_scored = m_heap.data();
-                }
-                int m_n = 0;
-                int32_t m_min_oh = 0x7FFFFFFF;
-
-                for (int64_t k = start; k < end; ++k) {
-                    int32_t t_idx = t_ind[k];
-                    int32_t ebp   = e_bp[k];
-                    if (ebp <= 0) continue;
-
-                    int32_t oh = rl - ebp;
-                    if (oh < 0) oh = 0;
-
-                    int32_t flen = f_len[k];
-                    double log_fl = frag_len_log_lik(flen);
-
-                    double log_strand;
-                    bool is_anti;
-                    if (has_strand) {
-                        bool same = (exon_str ==
-                                     static_cast<int>(t_strand_[t_idx]));
-                        log_strand = same ? log_p_sense_
-                                         : log_p_antisense_;
-                        is_anti = same ? r1_antisense_ : !r1_antisense_;
-                    } else {
-                        log_strand = LOG_HALF;
-                        is_anti = false;
-                    }
-
-                    double log_lik = log_strand + log_fl
-                                   + oh * oh_log_pen_ + log_nm;
-                    int32_t ct = stype * 2 + (is_anti ? 1 : 0);
-
-                    int32_t t_len = t_length_[t_idx];
-                    int32_t tx_s = 0;
-                    int32_t tx_e = flen > 0 ? flen : t_len;
-                    double cov_wt = 1.0;
-
-                    if (has_genomic && flen > 0) {
-                        int32_t n_exons = exon_offsets_[t_idx + 1]
-                                        - exon_offsets_[t_idx];
-                        if (n_exons > 0 && t_len > 0) {
-                            tx_s = genomic_to_tx_pos(genomic_start, t_idx);
-                            tx_e = tx_s + flen;
-                            int32_t cov_end = tx_e < t_len ? tx_e : t_len;
-                            cov_wt = compute_fragment_weight(
-                                tx_s, cov_end, t_len);
-                        } else {
-                            tx_s = 0;
-                            tx_e = flen;
-                        }
-                    }
-
-                    m_scored[m_n++] = {t_idx, oh, ct, tx_s, tx_e,
-                                       log_lik, cov_wt};
-                    if (oh < m_min_oh) m_min_oh = oh;
-                }
-
-                // mRNA WTA winners → output
-                for (int j = 0; j < m_n; ++j) {
-                    auto& s = m_scored[j];
-                    if (s.oh == m_min_oh) {
-                        out_ti.push_back(s.t_idx);
-                        out_ll.push_back(s.log_lik);
-                        out_ct.push_back(static_cast<uint8_t>(s.ct));
-                        out_cw.push_back(s.cov_wt);
-                        out_ts.push_back(s.tx_s);
-                        out_te.push_back(s.tx_e);
-                        if (s.log_lik > best_ll) {
-                            best_ll = s.log_lik;
-                            best_t  = s.t_idx;
-                            best_ct = s.ct;
-                        }
-                    }
-                }
-
-                // ========== nRNA scoring (skip if SPLICE_ANNOT) ==========
-                if (stype != SPLICE_ANNOT_VAL) {
-                    double n_log_fl = frag_len_log_lik(genomic_footprint);
-                    bool n_has_genomic = (genomic_start >= 0
-                                          && genomic_footprint > 0);
-                    int32_t nrna_gfp = genomic_footprint > 0
-                                     ? genomic_footprint : 0;
-
-                    struct NrnaScored {
-                        int32_t t_idx, oh, tx_s, tx_e;
-                        double  nrna_ll, cov_wt;
-                    };
-                    NrnaScored n_stack[64];
-                    std::vector<NrnaScored> n_heap;
-                    NrnaScored* n_scored = n_stack;
-                    if (n_cand > 64) {
-                        n_heap.resize(n_cand);
-                        n_scored = n_heap.data();
-                    }
-                    int n_n = 0;
-                    int32_t n_min_oh = 0x7FFFFFFF;
-
-                    for (int64_t k = start; k < end; ++k) {
-                        int32_t t_idx = t_ind[k];
-                        int32_t t_span   = t_span_[t_idx];
-                        int32_t t_exonic = t_length_[t_idx];
-                        if (t_span <= t_exonic) continue;
-
-                        int32_t ebp = e_bp[k];
-                        int32_t ibp = i_bp[k];
-                        int32_t span_bp = ebp + ibp;
-                        if (span_bp <= 0) continue;
-
-                        int32_t oh = rl - span_bp;
-                        if (oh < 0) oh = 0;
-
-                        double log_strand;
-                        if (has_strand) {
-                            bool same = (exon_str ==
-                                         static_cast<int>(t_strand_[t_idx]));
-                            log_strand = same ? log_p_sense_
-                                             : log_p_antisense_;
-                        } else {
-                            log_strand = LOG_HALF;
-                        }
-
-                        double nrna_ll = log_strand + n_log_fl
-                                       + oh * oh_log_pen_ + log_nm;
-
-                        int32_t tx_s = 0;
-                        int32_t tx_e = nrna_gfp > 0 ? nrna_gfp : t_span;
-                        double cov_wt = 1.0;
-
-                        if (n_has_genomic) {
-                            int32_t tx_start_g = t_start_[t_idx];
-                            int32_t frag_pos = genomic_start - tx_start_g;
-                            int32_t frag_end_pos =
-                                frag_pos + genomic_footprint;
-                            int32_t fpc = frag_pos < t_span
-                                        ? frag_pos : t_span;
-                            if (fpc < 0) fpc = 0;
-                            int32_t fec = frag_end_pos < t_span
-                                        ? frag_end_pos : t_span;
-                            if (fec < 0) fec = 0;
-                            if (fec > fpc && t_span > 0)
-                                cov_wt = compute_fragment_weight(
-                                    fpc, fec, t_span);
-                            tx_s = frag_pos > 0 ? frag_pos : 0;
-                            tx_e = tx_s + genomic_footprint;
-                        }
-
-                        n_scored[n_n++] = {t_idx, oh, tx_s, tx_e,
-                                           nrna_ll, cov_wt};
-                        if (oh < n_min_oh) n_min_oh = oh;
-                    }
-
-                    // nRNA WTA winners → output (with nrna_base offset)
-                    for (int j = 0; j < n_n; ++j) {
-                        auto& s = n_scored[j];
-                        if (s.oh == n_min_oh) {
-                            out_ti.push_back(nrna_base_ + s.t_idx);
-                            out_ll.push_back(s.nrna_ll);
-                            out_ct.push_back(0);  // nRNA count_col = 0
-                            out_cw.push_back(s.cov_wt);
-                            out_ts.push_back(s.tx_s);
-                            out_te.push_back(s.tx_e);
-                        }
-                    }
-                }
-            }
-
-            // ---- Finalize this EM unit ----
-            size_t new_cands = out_ti.size() - emit_start;
-            if (new_cands > 0) {
-                csr_len += static_cast<int64_t>(new_cands);
-                out_offsets.push_back(csr_len);
-                out_locus_t.push_back(best_t);
-                out_locus_ct.push_back(static_cast<uint8_t>(best_ct));
-                out_fid.push_back(f_id[i]);
-                out_fclass.push_back(static_cast<int8_t>(fclass));
-                out_stype.push_back(static_cast<uint8_t>(stype));
-
-                // is_spliced and gDNA log-likelihood
-                bool is_spl = (stype == SPLICE_ANNOT_VAL || stype == 1);
-                out_is_spliced.push_back(is_spl ? 1 : 0);
-                out_gfp.push_back(genomic_footprint);
-
-                if (!is_spl) {
-                    // gDNA log-lik for unspliced fragments
-                    double gdna_fl = frag_len_log_lik(genomic_footprint);
-                    out_gdna_ll.push_back(
-                        LOG_HALF + gdna_fl + gdna_log_splice_pen_unspliced);
-                } else {
-                    out_gdna_ll.push_back(NEG_INF);
-                }
-
-                // Stats
-                if (fclass == FRAG_UNAMBIG)
-                    ++n_em_unambig;
-                else if (fclass == FRAG_AMBIG_SAME_STRAND)
-                    ++n_em_ambig_ss;
-                else
-                    ++n_em_ambig_os;
-            } else {
-                ++n_gated_out;
-            }
-        }
-
-        // ---- Pack output as numpy arrays ----
-        // Helper: wrap std::vector<T> as a numpy array (capsule-based
-        // ownership transfer).
-        auto to_np_i32 = [](std::vector<int32_t>&& v) -> nb::object {
-            size_t n = v.size();
-            if (n == 0) {
-                auto* empty = new std::vector<int32_t>();
-                nb::capsule del(empty, [](void* p) noexcept {
-                    delete static_cast<std::vector<int32_t>*>(p);
-                });
-                return nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(
-                    empty->data(), {0}, del).cast();
-            }
-            auto* owner = new std::vector<int32_t>(std::move(v));
-            nb::capsule del(owner, [](void* p) noexcept {
-                delete static_cast<std::vector<int32_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(
-                owner->data(), {n}, del).cast();
-        };
-
-        auto to_np_i64 = [](std::vector<int64_t>&& v) -> nb::object {
-            size_t n = v.size();
-            if (n == 0) {
-                auto* empty = new std::vector<int64_t>();
-                nb::capsule del(empty, [](void* p) noexcept {
-                    delete static_cast<std::vector<int64_t>*>(p);
-                });
-                return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(
-                    empty->data(), {0}, del).cast();
-            }
-            auto* owner = new std::vector<int64_t>(std::move(v));
-            nb::capsule del(owner, [](void* p) noexcept {
-                delete static_cast<std::vector<int64_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(
-                owner->data(), {n}, del).cast();
-        };
-
-        auto to_np_f64 = [](std::vector<double>&& v) -> nb::object {
-            size_t n = v.size();
-            if (n == 0) {
-                auto* empty = new std::vector<double>();
-                nb::capsule del(empty, [](void* p) noexcept {
-                    delete static_cast<std::vector<double>*>(p);
-                });
-                return nb::ndarray<nb::numpy, double, nb::ndim<1>>(
-                    empty->data(), {0}, del).cast();
-            }
-            auto* owner = new std::vector<double>(std::move(v));
-            nb::capsule del(owner, [](void* p) noexcept {
-                delete static_cast<std::vector<double>*>(p);
-            });
-            return nb::ndarray<nb::numpy, double, nb::ndim<1>>(
-                owner->data(), {n}, del).cast();
-        };
-
-        auto to_np_u8 = [](std::vector<uint8_t>&& v) -> nb::object {
-            size_t n = v.size();
-            if (n == 0) {
-                auto* empty = new std::vector<uint8_t>();
-                nb::capsule del(empty, [](void* p) noexcept {
-                    delete static_cast<std::vector<uint8_t>*>(p);
-                });
-                return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(
-                    empty->data(), {0}, del).cast();
-            }
-            auto* owner = new std::vector<uint8_t>(std::move(v));
-            nb::capsule del(owner, [](void* p) noexcept {
-                delete static_cast<std::vector<uint8_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(
-                owner->data(), {n}, del).cast();
-        };
-
-        auto to_np_i8 = [](std::vector<int8_t>&& v) -> nb::object {
-            size_t n = v.size();
-            if (n == 0) {
-                auto* empty = new std::vector<int8_t>();
-                nb::capsule del(empty, [](void* p) noexcept {
-                    delete static_cast<std::vector<int8_t>*>(p);
-                });
-                return nb::ndarray<nb::numpy, int8_t, nb::ndim<1>>(
-                    empty->data(), {0}, del).cast();
-            }
-            auto* owner = new std::vector<int8_t>(std::move(v));
-            nb::capsule del(owner, [](void* p) noexcept {
-                delete static_cast<std::vector<int8_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int8_t, nb::ndim<1>>(
-                owner->data(), {n}, del).cast();
-        };
-
-        return nb::make_tuple(
-            // CSR arrays
-            to_np_i64(std::move(out_offsets)),
-            to_np_i32(std::move(out_ti)),
-            to_np_f64(std::move(out_ll)),
-            to_np_u8(std::move(out_ct)),
-            to_np_f64(std::move(out_cw)),
-            to_np_i32(std::move(out_ts)),
-            to_np_i32(std::move(out_te)),
-            // Per-unit metadata
-            to_np_i32(std::move(out_locus_t)),
-            to_np_u8(std::move(out_locus_ct)),
-            to_np_i8(std::move(out_is_spliced)),
-            to_np_f64(std::move(out_gdna_ll)),
-            to_np_i32(std::move(out_gfp)),
-            to_np_i64(std::move(out_fid)),
-            to_np_i8(std::move(out_fclass)),
-            to_np_u8(std::move(out_stype)),
-            // Det-unambig data (for annotations)
-            to_np_i32(std::move(det_t_indices)),
-            to_np_i64(std::move(det_frag_ids)),
-            // Stats
-            n_det_unambig,
-            n_em_unambig,
-            n_em_ambig_ss,
-            n_em_ambig_os,
-            n_gated_out,
-            n_chimeric
-        );
-    }
-
-    // ---------------------------------------------------------------
     // fused_score_buffer — two-pass scoring of entire buffer in C++
     // ---------------------------------------------------------------
     //
@@ -1399,12 +858,6 @@ private:
         int64_t& stat_em_as, int64_t& stat_em_ao,
         int64_t& stat_gated, int64_t& stat_chim) const
     {
-        static constexpr int FRAG_UNAMBIG            = 0;
-        static constexpr int FRAG_AMBIG_SAME_STRAND  = 1;
-        static constexpr int FRAG_MULTIMAPPER        = 3;
-        static constexpr int FRAG_CHIMERIC           = 4;
-        static constexpr int SPLICE_UNSPLICED_VAL    = 0;
-        static constexpr int SPLICE_ANNOT_VAL        = 2;
         static constexpr double NEG_INF =
             -std::numeric_limits<double>::infinity();
 
@@ -1455,7 +908,7 @@ private:
                         is_anti = false;
                     }
 
-                    bool is_unspliced = (stype == SPLICE_UNSPLICED_VAL);
+                    bool is_unspliced = (stype == SPLICE_UNSPLICED);
                     double weight =
                         n_cand > 0 ? 1.0 / n_cand : 0.0;
 
@@ -1479,7 +932,7 @@ private:
 
                     // Det-unambig: SPLICE_ANNOT + FRAG_UNAMBIG
                     if (fclass == FRAG_UNAMBIG &&
-                        stype == SPLICE_ANNOT_VAL) {
+                        stype == SPLICE_SPLICED_ANNOT) {
                         int32_t t_idx = t_ind[start];
                         int t_sv =
                             static_cast<int>(t_str[t_idx]);
@@ -1508,7 +961,7 @@ private:
                     fclass == FRAG_AMBIG_SAME_STRAND)
                 {
                     if (fclass == FRAG_UNAMBIG &&
-                        stype == SPLICE_ANNOT_VAL)
+                        stype == SPLICE_SPLICED_ANNOT)
                     {
                         // Record det-unambig for annotations
                         st.det_ti[st.det_cur] = t_ind[start];
@@ -1541,10 +994,10 @@ private:
                     int32_t t_idx, oh, ct, tx_s, tx_e;
                     double  log_lik, cov_wt;
                 };
-                MrnaScored m_stack[64];
+                MrnaScored m_stack[SCORED_STACK_CAPACITY];
                 std::vector<MrnaScored> m_heap;
                 MrnaScored* m_scored = m_stack;
-                if (n_cand > 64) {
+                if (n_cand > SCORED_STACK_CAPACITY) {
                     m_heap.resize(n_cand);
                     m_scored = m_heap.data();
                 }
@@ -1632,7 +1085,7 @@ private:
                 }
 
                 // ===== nRNA scoring (skip if SPLICE_ANNOT) =====
-                if (stype != SPLICE_ANNOT_VAL) {
+                if (stype != SPLICE_SPLICED_ANNOT) {
                     double n_log_fl =
                         frag_len_log_lik(genomic_footprint);
                     bool n_has_genomic =
@@ -1646,10 +1099,10 @@ private:
                         int32_t t_idx, oh, tx_s, tx_e;
                         double  nrna_ll, cov_wt;
                     };
-                    NrnaScored n_stack[64];
+                    NrnaScored n_stack[SCORED_STACK_CAPACITY];
                     std::vector<NrnaScored> n_heap;
                     NrnaScored* n_scored = n_stack;
-                    if (n_cand > 64) {
+                    if (n_cand > SCORED_STACK_CAPACITY) {
                         n_heap.resize(n_cand);
                         n_scored = n_heap.data();
                     }
@@ -1757,8 +1210,8 @@ private:
                         static_cast<uint8_t>(stype);
 
                     bool is_spl =
-                        (stype == SPLICE_ANNOT_VAL
-                         || stype == 1);
+                        (stype == SPLICE_SPLICED_ANNOT
+                         || stype == SPLICE_SPLICED_UNANNOT);
                     st.is_spliced[st.unit_cur] =
                         is_spl ? 1 : 0;
                     st.gfp[st.unit_cur] = genomic_footprint;
@@ -2063,31 +1516,6 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("exon_strand"), nb::arg("splice_type"),
              nb::arg("nm"), nb::arg("read_length"),
              nb::arg("genomic_footprint"), nb::arg("genomic_start"))
-        .def("scan_chunk",
-             &NativeFragmentScorer::scan_chunk,
-             nb::arg("chunk_t_offsets"),
-             nb::arg("chunk_t_indices"),
-             nb::arg("chunk_frag_lengths"),
-             nb::arg("chunk_exon_bp"),
-             nb::arg("chunk_intron_bp"),
-             nb::arg("chunk_unambig_intron"),
-             nb::arg("chunk_splice_type"),
-             nb::arg("chunk_exon_strand"),
-             nb::arg("chunk_frag_classes"),
-             nb::arg("chunk_frag_id"),
-             nb::arg("chunk_read_length"),
-             nb::arg("chunk_genomic_fp"),
-             nb::arg("chunk_genomic_start"),
-             nb::arg("chunk_nm"),
-             nb::arg("t_to_strand_arr"),
-             nb::arg("exonic_sense"),
-             nb::arg("exonic_antisense"),
-             nb::arg("unspliced_sense"),
-             nb::arg("unspliced_antisense"),
-             nb::arg("intronic_sense"),
-             nb::arg("intronic_antisense"),
-             nb::arg("unambig_counts"),
-             nb::arg("gdna_log_splice_pen_unspliced"))
         .def("fused_score_buffer",
              &NativeFragmentScorer::fused_score_buffer,
              nb::arg("chunk_arrays"),
@@ -2104,4 +1532,21 @@ NB_MODULE(_scoring_impl, m) {
     // Export scoring constants for Python-side parity tests
     m.attr("LOG_HALF")      = rigel::LOG_HALF;
     m.attr("TAIL_DECAY_LP") = rigel::TAIL_DECAY_LP;
+
+    // Fragment classification constants (mirrors rigel.buffer)
+    m.attr("FRAG_UNAMBIG")           = rigel::FRAG_UNAMBIG;
+    m.attr("FRAG_AMBIG_SAME_STRAND") = rigel::FRAG_AMBIG_SAME_STRAND;
+    m.attr("FRAG_AMBIG_OPP_STRAND")  = rigel::FRAG_AMBIG_OPP_STRAND;
+    m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
+    m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
+
+    // Pool code constants (mirrors rigel.annotate)
+    m.attr("POOL_CODE_MRNA")       = rigel::POOL_CODE_MRNA;
+    m.attr("POOL_CODE_NRNA")       = rigel::POOL_CODE_NRNA;
+    m.attr("POOL_CODE_GDNA")       = rigel::POOL_CODE_GDNA;
+    m.attr("POOL_CODE_INTERGENIC") = rigel::POOL_CODE_INTERGENIC;
+    m.attr("POOL_CODE_CHIMERIC")   = rigel::POOL_CODE_CHIMERIC;
+
+    // Internal tuning constant
+    m.attr("SCORED_STACK_CAPACITY") = SCORED_STACK_CAPACITY;
 }

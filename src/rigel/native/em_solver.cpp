@@ -42,6 +42,11 @@ static constexpr int    MAX_FRAG_LEN  = 1000000;
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 static constexpr double NRNA_FRAC_CLAMP_EPS = 1e-8;
 
+// Target number of element-operations per E-step parallel task.
+// Each equivalence class row with k components costs O(k); tasks are
+// sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
+static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
+
 // ================================================================
 // Array type aliases
 // ================================================================
@@ -394,9 +399,9 @@ static inline void em_step_kernel_range(
 // Parallel E-step: task-based load balancing with Kahan reduction
 // ================================================================
 //
-// Breaks large ECs into row-range tasks of bounded size (~4096/k
-// rows), partitions tasks across threads by actual computational
-// cost (n*k), and reduces with Kahan summation.
+// Breaks large ECs into row-range tasks of bounded size
+// (~ESTEP_TASK_WORK_TARGET/k rows), partitions tasks across threads
+// by actual computational cost (n*k), and reduces with Kahan summation.
 //
 // Determinism: tasks are created and assigned in a fixed order;
 // each thread processes its partition sequentially; cross-thread
@@ -425,7 +430,7 @@ static void parallel_estep(
     for (int i = 0; i < static_cast<int>(ec_data.size()); ++i) {
         int n = ec_data[i].n;
         int k = ec_data[i].k;
-        int chunk_rows = std::max(1, 4096 / std::max(k, 1));
+        int chunk_rows = std::max(1, ESTEP_TASK_WORK_TARGET / std::max(k, 1));
 
         for (int r = 0; r < n; r += chunk_rows) {
             int r_end = std::min(r + chunk_rows, n);
@@ -2254,6 +2259,7 @@ batch_locus_em(
         // ---- Phase 2: work-steal remaining loci (single-thread E-step) ----
         int n_phase2 = n_loci - mega_end;
         if (n_phase2 > 0) {
+            // Number of loci per work-stealing chunk in Phase 2.
             constexpr int CHUNK_SIZE = 16;
             std::atomic<int> next_idx{0};
 
@@ -2643,6 +2649,7 @@ NB_MODULE(_em_impl, m) {
     m.attr("SQUAREM_BUDGET_DIVISOR") = SQUAREM_BUDGET_DIVISOR;
     m.attr("NRNA_FRAC_CLAMP_EPS")   = NRNA_FRAC_CLAMP_EPS;
     m.attr("EM_PRIOR_EPSILON")       = EM_PRIOR_EPSILON;
+    m.attr("ESTEP_TASK_WORK_TARGET") = ESTEP_TASK_WORK_TARGET;
 
     // ----------------------------------------------------------------
     // Test-only: expose fast_exp for accuracy validation from Python

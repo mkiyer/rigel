@@ -1,15 +1,34 @@
 # TODO
 
+
+## nascent RNA definition
+
+Currently each transcript has its own nascent RNA shadow. This is not exactly correct. Transcripts that share the same genomic start and genomic span may have different splicing combinations, but the nascent RNA is by definition the same!
+
+Scenario: 
+- Genome 20kb
+- Transcript T1 + strand with exons [(1000, 2000), (5000,5500), (7000,7500), (9000,10000)]
+- Transcript T2 + strand with exons [(1000, 2000), (9000,10000)]
+- Transcript T3 + strand with exons [(1000, 2000), (5000,5500), (9000,10000)]
+- Transcript T4 + strand with exons [(4500,5500), (9000,10000)]
+
+Consider this scenario - the current algorithm will define 4 nascent RNA shadows for the 4 transcripts. However, transcripts T1, T2, and T3 actually share the same nascent RNA defined by the transcript span (1000, 10000). The 4 nascent RNAs are exactly the same. The only way nascent RNAs can be distinguished is if their genomic span is different.
+
+This is good news for the Rigel tool! This is because we can consolidate nascent RNAs which will lead to fewer candidates in the EM, and will simplify the EM solver.
+
+We need a complete redesign to support the new definition of nascent RNA. With the new definition, nascent RNA will no longer be associated with each individual transcript. Rather, nascent RNA will be associated with genome_start:genome_end spans.
+
+We need to construct 
+
+
+
 ## AVX2
 
 Need to write SIMD AVX2 instructions
 
-
 ## Equivalence class sorting?
 
 This seems to affect non-deterministic behavior of the EM. Is this necessary?
-
-
 
 ## Bug in BAM scanning (might not be a bug)
 
@@ -17,13 +36,6 @@ Previous test runs noted different row counts in quant_detai (280690 vs 280693) 
 
 It seems like we have a bug in BAM scanning / grouping by query name / multi-threaded processing / outputting to buffer leading to different row counts. This is a huge problem and something that needs to be fixed.
 
-
-## Benchmark
-
-- benchmark.py
-- salmon needs a salmon index (full transcriptome)
-- kallisto needs a kallisto index (full transcriptome)
-- build or point to it
 
 
 ## Fragment length distribution integration
@@ -248,3 +260,11 @@ Previous versions of the code had hard cutoffs for strand specificity. Do those 
 can we simplify by using pthread for our parallel locus EM? what is the benefit to openmp?
 
 2026-03-06: Replaced OpenMP with std::thread. The locus EM now uses a simple atomic-counter work-stealing loop (chunks of 16 loci) with std::thread workers and std::atomic<double> for the single shared accumulator. Removed libomp dependency from CMakeLists.txt and mamba_env.yaml. All 766 tests pass.
+
+
+## (RESOLVED) Benchmark improvements
+
+- benchmark.py
+- salmon needs a salmon index (full transcriptome)
+- kallisto needs a kallisto index (full transcriptome)
+- build or point to it

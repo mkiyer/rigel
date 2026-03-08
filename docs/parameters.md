@@ -150,3 +150,131 @@ These fields are set programmatically and not exposed as CLI flags:
 | `BamScanConfig` | `chunk_size` | 1,000,000 | Fragments per buffer chunk. |
 | `BamScanConfig` | `max_memory_bytes` | 2 GiB | Max memory before disk spill. |
 | `BamScanConfig` | `spill_dir` | None | Directory for spilled buffer chunks (set via `--tmpdir`). |
+
+---
+
+## Internal Constants Reference
+
+The following constants are used internally by the C++ scoring, EM, and BAM
+scanning kernels.  They are defined in C++ header/source files and exported
+to Python via nanobind module attributes for transparency and parity testing.
+They are **not** user-configurable — changing them requires a code edit and
+rebuild.
+
+### Enum-Mirror Constants (`constants.h`)
+
+These mirror Python `IntEnum` definitions and must stay in sync.
+
+#### IntervalType (`rigel.types.IntervalType` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `ITYPE_EXON` | 0 | Individual exon boundary interval. |
+| `ITYPE_TRANSCRIPT` | 1 | Full transcript span `[start, end)`. |
+| `ITYPE_UNAMBIG_INTRON` | 5 | Intronic region not overlapping any other transcript's exon. |
+
+#### SpliceType (`rigel.splice.SpliceType` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SPLICE_UNSPLICED` | 0 | Fragment has no splice junctions. |
+| `SPLICE_SPLICED_UNANNOT` | 1 | Fragment has a splice junction not matching any annotated intron. |
+| `SPLICE_SPLICED_ANNOT` | 2 | Fragment has a splice junction matching an annotated intron. |
+
+#### FragmentClass (`rigel.buffer` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `FRAG_UNAMBIG` | 0 | Same-strand, 1 transcript, NH=1. |
+| `FRAG_AMBIG_SAME_STRAND` | 1 | Same-strand, >1 transcript, NH=1. |
+| `FRAG_AMBIG_OPP_STRAND` | 2 | Ambiguous-strand transcripts, NH=1. |
+| `FRAG_MULTIMAPPER` | 3 | NH > 1 (multimapped molecule). |
+| `FRAG_CHIMERIC` | 4 | Chimeric fragment (disjoint transcript sets). |
+
+#### PoolCode (`rigel.annotate` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `POOL_CODE_MRNA` | 0 | Mature mRNA pool. |
+| `POOL_CODE_NRNA` | 1 | Nascent RNA (pre-mRNA) pool. |
+| `POOL_CODE_GDNA` | 2 | Genomic DNA pool. |
+| `POOL_CODE_INTERGENIC` | 3 | Intergenic (no gene overlap). |
+| `POOL_CODE_CHIMERIC` | 4 | Chimeric fragment pool. |
+
+#### MergeOutcome (`rigel.types.MergeOutcome` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MC_INTERSECTION` | 0 | Mate-pair transcript sets intersect. |
+| `MC_INTERSECTION_NONEMPTY` | 1 | Non-empty intersection after filtering. |
+| `MC_UNION` | 2 | Union of mate-pair transcript sets. |
+| `MC_EMPTY` | 3 | No shared transcripts. |
+
+#### ChimeraType (`rigel.types.ChimeraType` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `CHIMERA_NONE` | 0 | Not chimeric. |
+| `CHIMERA_TRANS` | 1 | Trans-chromosomal chimera. |
+| `CHIMERA_CIS_STRAND_SAME` | 2 | Cis-chromosomal chimera, same strand. |
+| `CHIMERA_CIS_STRAND_DIFF` | 3 | Cis-chromosomal chimera, different strand. |
+
+#### Strand (`rigel.types.Strand` → `constants.h`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `STRAND_NONE` | 0 | No strand information. |
+| `STRAND_POS` | 1 | Positive (+) strand. |
+| `STRAND_NEG` | 2 | Negative (−) strand. |
+| `STRAND_AMBIGUOUS` | 3 | Ambiguous (POS \| NEG). |
+
+### Scoring Constants (`constants.h` → `_scoring_impl`)
+
+| Constant | Value | Source | Description |
+|----------|-------|--------|-------------|
+| `LOG_HALF` | −0.6931… | `log(0.5)` | Uninformative strand log-probability. |
+| `TAIL_DECAY_LP` | −0.01005… | `log(0.99)` | Per-base tail decay for fragment length model beyond max_frag_length. |
+| `SCORED_STACK_CAPACITY` | 64 | `scoring.cpp` | Stack-allocated buffer size for transcript candidates before heap fallback. |
+
+### EM Solver Constants (`em_solver.cpp` → `_em_impl`)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `EM_LOG_EPSILON` | 1e-300 | Floor for log-domain clamping to avoid log(0). |
+| `MAX_FRAG_LEN` | 1,000,000 | Internal maximum fragment length (overflow bin). |
+| `SQUAREM_BUDGET_DIVISOR` | 3 | SQUAREM acceleration: budget = max_iter / divisor. |
+| `NRNA_FRAC_CLAMP_EPS` | 1e-8 | Floor/ceiling epsilon for nRNA fraction clamping. |
+| `EM_PRIOR_EPSILON` | 1e-10 | Numerical-stability floor for prior components. |
+| `ESTEP_TASK_WORK_TARGET` | 4,096 | Target element-ops per E-step parallel task for load balancing. |
+
+### Python-Side Scoring Defaults (`scoring.py`)
+
+These are used as defaults when no user override is provided:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `LOG_SAFE_FLOOR` | 1e-10 | Floor for log-safe clamping. |
+| `DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT` | 0.01 | gDNA penalty for unannotated splice junctions. |
+| `DEFAULT_OVERHANG_ALPHA` | 0.01 | Per-base overhang penalty α (maps to `--overhang-alpha`). |
+| `DEFAULT_MISMATCH_ALPHA` | 0.1 | Per-mismatch penalty α (maps to `--mismatch-alpha`). |
+
+### Constant Flow: Python ↔ C++
+
+Constants defined in Python (`rigel.types`, `rigel.splice`, `rigel.buffer`,
+`rigel.annotate`) are mirrored as `static constexpr` in `constants.h` for
+compile-time use in C++ kernels.  The C++ values are exported back to Python
+via nanobind module attributes (`_scoring_impl`, `_em_impl`, `_resolve_impl`)
+enabling parity tests.
+
+| Python Source | C++ Mirror | Nanobind Module |
+|---------------|-----------|-----------------|
+| `rigel.types.IntervalType` | `constants.h` | `_resolve_impl` |
+| `rigel.types.Strand` | `constants.h` | — |
+| `rigel.types.MergeOutcome` | `constants.h` | — |
+| `rigel.types.ChimeraType` | `constants.h` | — |
+| `rigel.splice.SpliceType` | `constants.h` | `_resolve_impl`, `_scoring_impl` (via `using`) |
+| `rigel.buffer.FRAG_*` | `constants.h` | `_scoring_impl` |
+| `rigel.annotate.POOL_CODE_*` | `constants.h` | `_scoring_impl` |
+| `rigel.scoring.LOG_HALF` | `constants.h` | `_scoring_impl` |
+| `rigel.frag_length_model._TAIL_DECAY_LP` | `constants.h` | `_scoring_impl` |
+| — (C++ only) | `em_solver.cpp` | `_em_impl` |
