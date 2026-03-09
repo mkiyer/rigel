@@ -117,7 +117,7 @@ def _get_peak_rss_mb() -> float:
 
 
 @dataclass
-class HulkrnaConfig:
+class RigelConfig:
     """Named rigel parameterization for benchmarking."""
 
     name: str
@@ -168,7 +168,7 @@ class BenchmarkConfig:
     datasets: list[Dataset] = field(default_factory=list)
 
     aligners: list[AlignerConfig] = field(default_factory=list)
-    rigel_configs: list[HulkrnaConfig] = field(default_factory=list)
+    rigel_configs: list[RigelConfig] = field(default_factory=list)
 
     salmon_enabled: bool = False
     salmon_index: str | None = None
@@ -230,10 +230,10 @@ def parse_yaml_config(path: str | Path) -> BenchmarkConfig:
             atype = name
         cfg.aligners.append(AlignerConfig(name=name, type=atype, params=params))
 
-    # HulkRNA configs
+    # Rigel configs
     rigel_raw = raw.get("rigel_configs", {"default": {}})
     for name, params in rigel_raw.items():
-        cfg.rigel_configs.append(HulkrnaConfig(name=name, params=params or {}))
+        cfg.rigel_configs.append(RigelConfig(name=name, params=params or {}))
 
     # Optional tools
     salmon_raw = raw.get("salmon", {})
@@ -568,7 +568,7 @@ def coord_sort_bam(
 
 def _build_pipeline_config(
     pipeline_seed: int = 42,
-    rigel_config: HulkrnaConfig | None = None,
+    rigel_config: RigelConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> PipelineConfig:
     """Build PipelineConfig from benchmark config + overrides."""
@@ -617,7 +617,7 @@ def run_rigel_tool(
     bam_path: Path,
     index: TranscriptIndex,
     pipeline_seed: int = 42,
-    rigel_config: HulkrnaConfig | None = None,
+    rigel_config: RigelConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> tuple[dict[str, float], float, dict[str, float], int]:
     """Run rigel pipeline → (transcript_counts, elapsed, pool_counts, n_fragments)."""
@@ -1036,7 +1036,7 @@ def write_per_transcript_csv(
 
 def _rigel_tool_name(
     aligner: AlignerConfig,
-    rigel_config: HulkrnaConfig,
+    rigel_config: RigelConfig,
     multi_rigel: bool = False,
 ) -> str:
     if multi_rigel:
@@ -1401,7 +1401,7 @@ def main() -> int:
     if cfg.sim_dir:
         print(f"  Sim dir:         {cfg.sim_dir}", flush=True)
     print(f"  Aligners:        {[a.name for a in cfg.aligners]}", flush=True)
-    print(f"  HulkRNA configs: {[h.name for h in cfg.rigel_configs]}", flush=True)
+    print(f"  Rigel configs: {[h.name for h in cfg.rigel_configs]}", flush=True)
     print(f"  Salmon:          {cfg.salmon_enabled}"
           f"{' (index: ' + cfg.salmon_index + ')' if cfg.salmon_index else ''}",
           flush=True)

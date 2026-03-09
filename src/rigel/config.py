@@ -65,39 +65,28 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
-    tss_window: int = 200
-    """Fuzzy TSS grouping window (bp).
-
-    Transcripts whose 5' ends lie within this distance are grouped
-    together for the nRNA fraction prior hierarchy.  Set to 0
-    for exact-coordinate matching.  Default 200 bp.
-    """
     nrna_frac_kappa_global: float | None = None
     """Shrinkage pseudo-count pulling locus-strand nRNA fraction toward the global
-    prior (nrna_frac = 0.5).  ``None`` (default) → auto-estimate from the data
+    prior.  ``None`` (default) → auto-estimate from the data
     via Method of Moments.  Set a positive value to override.
     """
     nrna_frac_kappa_locus: float | None = None
-    """Shrinkage pseudo-count pulling TSS-group nRNA fraction toward the (shrunk)
+    """Shrinkage pseudo-count pulling per-nRNA nRNA fraction toward the (shrunk)
     locus-strand estimate.  ``None`` → auto-estimate.
     """
-    nrna_frac_kappa_tss: float | None = None
-    """Shrinkage pseudo-count pulling transcript nRNA fraction toward the (shrunk)
-    TSS-group estimate.  Also sets the effective sample size (κ) of the
-    final Beta prior passed to the EM.
-    ``None`` → auto-estimate.
+    nrna_frac_kappa_nrna: float = 5.0
+    """Constant pseudo-count (effective sample size) of the Beta prior
+    passed to the EM solver.  Controls how strongly the hierarchical
+    prior mean constrains the EM.  Default 5.0 (weakly informative).
     """
 
     # -- MoM estimation advanced knobs --
     nrna_frac_mom_min_evidence_global: float = 50.0
     """Minimum fragment evidence for a locus-strand group to be
     included in the global Method-of-Moments κ estimate."""
-    nrna_frac_mom_min_evidence_locus: float = 30.0
-    """Minimum fragment evidence for a TSS group to be included
+    nrna_frac_mom_min_evidence_locus: float = 20.0
+    """Minimum fragment evidence for an nRNA to be included
     in the locus-level MoM κ estimate."""
-    nrna_frac_mom_min_evidence_tss: float = 20.0
-    """Minimum fragment evidence for a transcript to be included
-    in the TSS-level MoM κ estimate."""
     nrna_frac_kappa_min: float = 2.0
     """Lower clamp for MoM-estimated κ values."""
     nrna_frac_kappa_max: float = 200.0

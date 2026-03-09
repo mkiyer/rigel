@@ -442,8 +442,8 @@ def build_locus_em_data(
         effective_lengths=eff_len,
         prior=prior,
         bias_profiles=bias_profiles,
-        nrna_frac_alpha=estimator.nrna_frac_alpha[t_arr].copy(),
-        nrna_frac_beta=estimator.nrna_frac_beta[t_arr].copy(),
+        nrna_frac_alpha=estimator.nrna_frac_alpha[unique_global_nrna].copy(),
+        nrna_frac_beta=estimator.nrna_frac_beta[unique_global_nrna].copy(),
     )
 
 

@@ -141,7 +141,7 @@ ALIGNER_CHOICES = ("minimap2", "hisat2", "oracle")
 
 
 @dataclass
-class HulkrnaConfig:
+class RigelConfig:
     """Named rigel parameterization for benchmarking.
 
     Parameters in *params* are forwarded as keyword arguments to
@@ -191,7 +191,7 @@ class AlignerConfig:
 
 def _rigel_tool_name(
     aligner: str | AlignerConfig,
-    rigel_config: HulkrnaConfig | None = None,
+    rigel_config: RigelConfig | None = None,
     *,
     multi_rigel: bool = False,
 ) -> str:
@@ -215,7 +215,7 @@ def _htseq_tool_name(aligner: str | AlignerConfig) -> str:
 
 def _get_transcript_tools(
     aligner_configs: list[AlignerConfig],
-    rigel_configs: list[HulkrnaConfig],
+    rigel_configs: list[RigelConfig],
 ) -> tuple[str, ...]:
     """Build transcript-level tool list from active configs."""
     multi = len(rigel_configs) > 1
@@ -229,7 +229,7 @@ def _get_transcript_tools(
 
 def _get_gene_tools(
     aligner_configs: list[AlignerConfig],
-    rigel_configs: list[HulkrnaConfig],
+    rigel_configs: list[RigelConfig],
     include_htseq: bool = False,
 ) -> tuple[str, ...]:
     """Build gene-level tool list from active configs."""
@@ -1288,7 +1288,7 @@ def write_read_accuracy_summary_csv(
 
 def _build_pipeline_config(
     args: argparse.Namespace,
-    rigel_config: HulkrnaConfig | None = None,
+    rigel_config: RigelConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> PipelineConfig:
     """Build a :class:`PipelineConfig` from benchmark args + overrides."""
@@ -1351,7 +1351,7 @@ def run_rigel_tool(
     bam_path: Path,
     index: TranscriptIndex,
     args: argparse.Namespace,
-    rigel_config: HulkrnaConfig | None = None,
+    rigel_config: RigelConfig | None = None,
     annotated_bam_path: Path | None = None,
 ) -> tuple[dict[str, float], float, dict[str, float]]:
     """Run rigel pipeline and return (transcript_counts, elapsed_sec, pool_counts).
@@ -1689,7 +1689,7 @@ def run_region_benchmark(
     include_htseq: bool,
     htseq_conda_env: str,
     aligner_configs: list[AlignerConfig] | None = None,
-    rigel_configs: list[HulkrnaConfig] | None = None,
+    rigel_configs: list[RigelConfig] | None = None,
 ) -> list[ConditionResult]:
     """Run benchmark for one region across all conditions.
 
@@ -1698,9 +1698,9 @@ def run_region_benchmark(
     aligner_configs : list of AlignerConfig, optional
         Named aligner configurations.  When *None*, falls back to
         building default configs from ``args.aligner``.
-    rigel_configs : list of HulkrnaConfig, optional
+    rigel_configs : list of RigelConfig, optional
         Named rigel parameterizations.  When *None* a single
-        ``HulkrnaConfig(name="default")`` is used.
+        ``RigelConfig(name="default")`` is used.
 
     Returns a list of ConditionResult (one per condition combination).
     """
@@ -1711,7 +1711,7 @@ def run_region_benchmark(
             AlignerConfig(name=a, type=a) for a in args.aligner
         ]
     if rigel_configs is None:
-        rigel_configs = [HulkrnaConfig(name="default")]
+        rigel_configs = [RigelConfig(name="default")]
 
     multi_rigel = len(rigel_configs) > 1
     has_hisat2 = any(ac.type == "hisat2" for ac in aligner_configs)
@@ -2797,7 +2797,7 @@ def apply_yaml_config(args: argparse.Namespace, argv: list[str]) -> argparse.Nam
         raw_hc = cfg.pop("rigel_configs")
         if isinstance(raw_hc, dict):
             args.rigel_configs = [
-                HulkrnaConfig(name=str(name), params=dict(params) if isinstance(params, dict) else {})
+                RigelConfig(name=str(name), params=dict(params) if isinstance(params, dict) else {})
                 for name, params in raw_hc.items()
             ]
         else:
@@ -2943,11 +2943,11 @@ def main() -> int:
             AlignerConfig(name=a, type=a) for a in args.aligner
         ]
 
-    # ── Build HulkrnaConfig list ────────────────────────────────────
+    # ── Build RigelConfig list ────────────────────────────────────
 
-    rigel_configs: list[HulkrnaConfig] = getattr(args, "rigel_configs", None) or []
+    rigel_configs: list[RigelConfig] = getattr(args, "rigel_configs", None) or []
     if not rigel_configs:
-        rigel_configs = [HulkrnaConfig(name="default")]
+        rigel_configs = [RigelConfig(name="default")]
 
     # Keep args.aligner in sync for any code that still reads it
     args.aligner = [ac.name for ac in aligner_configs]
@@ -3050,7 +3050,7 @@ def main() -> int:
     )
     if n_rigel > 1:
         logger.info(
-            "HulkRNA configs: %s",
+            "Rigel configs: %s",
             ", ".join(
                 f"{hc.name}" + (f" ({hc.params})" if hc.params else "")
                 for hc in rigel_configs

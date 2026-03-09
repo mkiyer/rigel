@@ -28,7 +28,7 @@ region:
 aligners:
   oracle: {}
 
-# ── HulkRNA configs ─────────────────────────────────────────────────
+# ── Rigel configs ─────────────────────────────────────────────────
 rigel_configs:
   default: {}
 

@@ -55,7 +55,7 @@ aligners:
 #   index: /path/to/genome.mmi
 #   bed: /path/to/annotation.bed
 
-# ── HulkRNA configurations ───────────────────────────────────
+# ── Rigel configurations ───────────────────────────────────
 # Multiple named configs for head-to-head comparison.
 rigel_configs:
   default: {}

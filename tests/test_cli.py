@@ -111,9 +111,9 @@ class TestBooleanFlags:
 class TestAdvancedParams:
     """Advanced parameters are parsed correctly."""
 
-    def test_tss_window(self):
-        args = _parse_quant("--tss-window", "500")
-        assert args.tss_window == 500
+    def test_nrna_frac_kappa_nrna(self):
+        args = _parse_quant("--nrna-frac-kappa-nrna", "8.0")
+        assert args.nrna_frac_kappa_nrna == 8.0
 
     def test_nrna_frac_mom_min_evidence_global(self):
         args = _parse_quant("--nrna-frac-mom-min-evidence-global", "100")
@@ -141,34 +141,34 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is True
         assert args.em_prior_alpha == 0.01
-        assert args.tss_window == 200
+        assert args.nrna_frac_kappa_nrna == 5.0
         assert args.nrna_frac_kappa_min == 2.0
         assert args.sj_strand_tag == ["auto"]
 
     def test_cli_overrides_default(self):
-        args = _parse_quant("--no-include-multimap", "--tss-window", "500")
+        args = _parse_quant("--no-include-multimap", "--nrna-frac-kappa-nrna", "8.0")
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is False
-        assert args.tss_window == 500
+        assert args.nrna_frac_kappa_nrna == 8.0
 
     def test_yaml_overrides_default(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text(textwrap.dedent("""\
             em_prior_alpha: 0.05
-            tss_window: 300
+            nrna_frac_kappa_nrna: 7.0
             include_multimap: false
         """))
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.em_prior_alpha == 0.05
-        assert args.tss_window == 300
+        assert args.nrna_frac_kappa_nrna == 7.0
         assert args.include_multimap is False
 
     def test_cli_overrides_yaml(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text(textwrap.dedent("""\
             em_prior_alpha: 0.05
-            tss_window: 300
+            nrna_frac_kappa_nrna: 7.0
         """))
         args = _parse_quant(
             "--config", str(cfg),
@@ -178,7 +178,7 @@ class TestResolveQuant:
         # CLI wins
         assert args.em_prior_alpha == 0.1
         # YAML wins over default
-        assert args.tss_window == 300
+        assert args.nrna_frac_kappa_nrna == 7.0
 
     def test_yaml_hyphens_normalised(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"

@@ -264,9 +264,9 @@ class LocusEMInput:
     prior : np.ndarray
         float64[n_components] - Prior eligibility mask.
     nrna_frac_alpha : np.ndarray
-        float64[n_transcripts] - Beta prior alpha for nrna_frac.
+        float64[n_nrna] - Beta prior alpha for nrna_frac.
     nrna_frac_beta : np.ndarray
-        float64[n_transcripts] - Beta prior beta for nrna_frac.
+        float64[n_nrna] - Beta prior beta for nrna_frac.
     """
 
     locus: Locus
@@ -572,172 +572,156 @@ def _aggregate_nrna_frac_by_group(
     return g_nrna_frac, g_evidence, per_t_nrna_frac, per_t_evidence
 
 
-def compute_hybrid_nrna_frac_priors(
+def compute_nrna_frac_priors(
     estimator: "AbundanceEstimator",
-    t_to_tss_group: np.ndarray | None,
-    t_to_strand: np.ndarray,
-    locus_id_per_transcript: np.ndarray,
+    nrna_strands: np.ndarray,
+    nrna_spans: np.ndarray,
     strand_specificity: float,
     gdna_density: float,
     kappa_global: float | None = None,
     kappa_locus: float | None = None,
-    kappa_tss: float | None = None,
+    kappa_nrna: float = _EM_DEFAULTS.nrna_frac_kappa_nrna,
     mom_min_evidence_global: float = 50.0,
-    mom_min_evidence_locus: float = 30.0,
-    mom_min_evidence_tss: float = 20.0,
+    mom_min_evidence_locus: float = 20.0,
     kappa_min: float = _EM_DEFAULTS.nrna_frac_kappa_min,
     kappa_max: float = _EM_DEFAULTS.nrna_frac_kappa_max,
     kappa_fallback: float = _EM_DEFAULTS.nrna_frac_kappa_fallback,
     kappa_min_obs: int = _EM_DEFAULTS.nrna_frac_kappa_min_obs,
 ) -> None:
-    """Compute per-transcript nrna_frac (nascent fraction) Beta priors.
+    """Compute per-nRNA nrna_frac (nascent fraction) Beta priors.
 
-    Uses a **density + strand hybrid** model with smooth Empirical-Bayes
-    hierarchical shrinkage.  Raw nrna_frac estimates are computed at three levels
-    (transcript, TSS group, locus-strand) and each level is smoothly
-    shrunk toward its parent:
+    Uses a 3-tier **density + strand hybrid** model with smooth
+    Empirical-Bayes hierarchical shrinkage.  nRNA fractions are computed
+    natively at the nRNA level (aggregating transcript-level exonic data)
+    and shrunk through a 2-stage hierarchy:
 
     1. **Locus-strand nrna_frac** ← shrink toward empirical global nrna_frac
-       (evidence-weighted mean of all locus-strand estimates) with
-       strength *kappa_global*.
-    2. **TSS-group nrna_frac** ← shrink toward shrunk locus-strand nrna_frac with
-       strength *kappa_locus*.
-    3. **Transcript nrna_frac** ← shrink toward shrunk TSS-group nrna_frac with
-       strength *kappa_tss*.
+       with strength *kappa_global*.
+    2. **Per-nRNA nrna_frac** ← shrink toward shrunk locus-strand nrna_frac
+       with strength *kappa_locus*.
 
-    The shrinkage formula at each level is::
-
-        nrna_frac_shrunk = (E_local · nrna_frac_local + κ · nrna_frac_parent) / (E_local + κ)
-
-    When a κ parameter is ``None`` (the default), it is estimated
-    automatically from the data using the Method of Moments:
-
-    .. math::
-
-        \\kappa = \\frac{\\mu (1 - \\mu)}{\\sigma^2} - 1
-
-    where μ and σ² are the mean and variance of the raw nrna_frac values at
-    the corresponding hierarchy level.
-
-    The final effective sample size (κ) for the Beta prior equals
-    ``kappa_tss`` — a weak, constant prior that lets the EM update
-    nrna_frac freely from the fragment-level data.
+    The final Beta prior uses a constant pseudo-count *kappa_nrna*
+    (default 5.0) so the EM solver is guided but not overwhelmed.
 
     Parameters
     ----------
     estimator : AbundanceEstimator
-        Must have ``unambig_counts``, ``transcript_intronic_sense``,
-        ``transcript_intronic_antisense``, ``_exonic_lengths``, and
-        ``_transcript_spans`` populated.
-    t_to_tss_group : ndarray or None
-        int32[n_t] TSS group IDs.  None disables TSS level.
-    t_to_strand : ndarray
-        int[n_t] strand values (Strand enum ints).
-    locus_id_per_transcript : ndarray
-        int32[n_t] locus IDs (−1 when not in a locus).
+        Must have exonic/intronic accumulators and geometry populated.
+    nrna_strands : ndarray
+        int[n_nrna] strand values from nrna_df.
+    nrna_spans : ndarray
+        float64[n_nrna] genomic spans (end - start) per nRNA.
     strand_specificity : float
         Library strand specificity ∈ [0.5, 1.0].
     gdna_density : float
         Global intergenic gDNA density (frags / bp).
     kappa_global : float or None
         Shrinkage strength pulling locus-strand toward global.
-        ``None`` (default) → estimate from data via Method of Moments.
+        ``None`` → estimate via Method of Moments.
     kappa_locus : float or None
-        Shrinkage strength pulling TSS-group toward locus-strand.
+        Shrinkage strength pulling nRNA toward locus-strand.
         ``None`` → auto-estimate.
-    kappa_tss : float or None
-        Shrinkage strength pulling transcript toward TSS-group.
-        ``None`` → auto-estimate.
-    mom_min_evidence_global : float
-        Minimum evidence for MoM κ estimation at the global level.
-    mom_min_evidence_locus : float
-        Minimum evidence for MoM κ estimation at the locus level.
-    mom_min_evidence_tss : float
-        Minimum evidence for MoM κ estimation at the TSS level.
-    kappa_min : float
-        Lower clamp for MoM-estimated κ.
-    kappa_max : float
-        Upper clamp for MoM-estimated κ.
-    kappa_fallback : float
-        Fallback κ when too few features pass the evidence filter.
-    kappa_min_obs : int
-        Minimum features required for MoM estimation.
+    kappa_nrna : float
+        Constant pseudo-count for the final Beta prior (default 5.0).
     """
-    n_t = estimator.num_transcripts
-    if n_t == 0:
+    n_nrna = estimator.num_nrna
+    if n_nrna == 0:
         return
 
-    # --- Per-transcript count vectors ---
-    # Exonic: all fragments overlapping exons (unambig + ambig-same-strand,
-    # weighted by 1/n_candidates).  These define D_exon.  Using the
-    # pre-EM exonic accumulators provides balanced evidence matching the
-    # completeness of the intronic accumulators (which also include
-    # ambiguous fragments), rather than the sparse unambig_counts that
-    # only contain splice-spanning unambig.
-    exon_sense = estimator.transcript_exonic_sense.copy()
-    exon_anti = estimator.transcript_exonic_antisense.copy()
+    t_to_nrna = estimator._t_to_nrna
+    n_t = estimator.num_transcripts
 
-    # Intronic: fragments with unambiguous intronic overlap.
-    # These are now per-nRNA — fan out to per-transcript via t_to_nrna.
-    if estimator._t_to_nrna is not None:
-        intron_sense = estimator.transcript_intronic_sense[estimator._t_to_nrna].copy()
-        intron_anti = estimator.transcript_intronic_antisense[estimator._t_to_nrna].copy()
+    # === Phase 1: nRNA-level data aggregation ===
+
+    # Exonic counts: aggregate transcript-level → nRNA-level
+    nrna_exon_sense = np.zeros(n_nrna, dtype=np.float64)
+    nrna_exon_anti = np.zeros(n_nrna, dtype=np.float64)
+    if t_to_nrna is not None:
+        np.add.at(nrna_exon_sense, t_to_nrna, estimator.transcript_exonic_sense)
+        np.add.at(nrna_exon_anti, t_to_nrna, estimator.transcript_exonic_antisense)
     else:
-        intron_sense = estimator.transcript_intronic_sense.copy()
-        intron_anti = estimator.transcript_intronic_antisense.copy()
+        nrna_exon_sense[:] = estimator.transcript_exonic_sense
+        nrna_exon_anti[:] = estimator.transcript_exonic_antisense
 
-    # --- Lengths ---
+    # Intronic counts: already nRNA-level (native)
+    nrna_intron_sense = estimator.transcript_intronic_sense.copy()
+    nrna_intron_anti = estimator.transcript_intronic_antisense.copy()
+
+    # Exonic lengths: count-weighted average of transcript exonic lengths
+    # Uses exonic fragment counts as weights (dominant isoform drives length)
     if estimator._exonic_lengths is not None:
-        L_exonic = estimator._exonic_lengths.copy()
+        exonic_lengths = estimator._exonic_lengths
     else:
-        # Fallback: treat exonic length as 1 to avoid div-by-zero.
-        L_exonic = np.ones(n_t, dtype=np.float64)
-    if estimator._transcript_spans is not None:
-        L_intronic = np.maximum(
-            estimator._transcript_spans - L_exonic, 0.0,
-        )
+        exonic_lengths = np.ones(n_t, dtype=np.float64)
+
+    # Per-transcript weight = total exonic fragments
+    t_exon_total = estimator.transcript_exonic_sense + estimator.transcript_exonic_antisense
+
+    nrna_wt_len = np.zeros(n_nrna, dtype=np.float64)
+    nrna_wt_sum = np.zeros(n_nrna, dtype=np.float64)
+    if t_to_nrna is not None:
+        np.add.at(nrna_wt_len, t_to_nrna, t_exon_total * exonic_lengths)
+        np.add.at(nrna_wt_sum, t_to_nrna, t_exon_total)
     else:
-        L_intronic = np.zeros(n_t, dtype=np.float64)
+        nrna_wt_len[:] = t_exon_total * exonic_lengths
+        nrna_wt_sum[:] = t_exon_total
+
+    # Fallback for zero-count nRNAs: unweighted mean of exonic lengths
+    nrna_len_fallback = np.zeros(n_nrna, dtype=np.float64)
+    nrna_t_count = np.zeros(n_nrna, dtype=np.float64)
+    if t_to_nrna is not None:
+        np.add.at(nrna_len_fallback, t_to_nrna, exonic_lengths)
+        np.add.at(nrna_t_count, t_to_nrna, 1.0)
+    else:
+        nrna_len_fallback[:] = exonic_lengths
+        nrna_t_count[:] = 1.0
+    nrna_len_fallback = np.where(
+        nrna_t_count > 0, nrna_len_fallback / nrna_t_count, 1.0,
+    )
+
+    nrna_exonic_length = np.where(
+        nrna_wt_sum > 0, nrna_wt_len / nrna_wt_sum, nrna_len_fallback,
+    )
+    nrna_intronic_length = np.maximum(1.0, nrna_spans - nrna_exonic_length)
+
+    # Locus IDs: derive per-nRNA from per-transcript locus assignments
+    nrna_locus_ids = np.full(n_nrna, -1, dtype=np.int32)
+    if t_to_nrna is not None:
+        np.maximum.at(nrna_locus_ids, t_to_nrna, estimator.locus_id_per_transcript)
+    else:
+        nrna_locus_ids[:] = estimator.locus_id_per_transcript
 
     strand_spec = strand_specificity
 
-    # === Level 1: per-transcript ===
-    t_nrna_frac, t_evidence = _compute_hybrid_nrna_frac_vec(
-        exon_sense, exon_anti, intron_sense, intron_anti,
-        L_exonic, L_intronic, strand_spec, gdna_density,
+    # === Phase 2: 3-tier shrinkage pipeline ===
+
+    # Level 1: per-nRNA η via hybrid density+strand model
+    nrna_eta, nrna_evidence = _compute_hybrid_nrna_frac_vec(
+        nrna_exon_sense, nrna_exon_anti,
+        nrna_intron_sense, nrna_intron_anti,
+        nrna_exonic_length, nrna_intronic_length,
+        strand_spec, gdna_density,
     )
 
-    # === Level 2: TSS group (aggregate counts then compute nrna_frac) ===
-    if t_to_tss_group is not None and n_t > 0:
-        n_groups = int(t_to_tss_group.max()) + 1
-        g_nrna_frac, g_evidence, tss_nrna_frac, tss_evidence = (
-            _aggregate_nrna_frac_by_group(
-                t_to_tss_group, n_groups,
-                exon_sense, exon_anti, intron_sense, intron_anti,
-                L_exonic, L_intronic, strand_spec, gdna_density,
-            )
-        )
-    else:
-        tss_nrna_frac = np.zeros(n_t, dtype=np.float64)
-        tss_evidence = np.zeros(n_t, dtype=np.float64)
-
-    # === Level 3: locus-strand (aggregate by locus × strand) ===
-    has_locus = locus_id_per_transcript >= 0
+    # Level 2: locus-strand η (aggregate nRNA-level arrays by locus × strand)
+    has_locus = nrna_locus_ids >= 0
     max_locus = (
-        int(locus_id_per_transcript.max()) + 1 if has_locus.any() else 0
+        int(nrna_locus_ids.max()) + 1 if has_locus.any() else 0
     )
-    ls_key = np.full(n_t, -1, dtype=np.int64)
+    ls_key = np.full(n_nrna, -1, dtype=np.int64)
     if max_locus > 0:
         ls_key[has_locus] = (
-            locus_id_per_transcript[has_locus].astype(np.int64) * 4
-            + t_to_strand[has_locus].astype(np.int64)
+            nrna_locus_ids[has_locus].astype(np.int64) * 4
+            + nrna_strands[has_locus].astype(np.int64)
         )
     n_ls = max(max_locus * 4, 1)
-    ls_nrna_frac_flat, ls_ev_flat, ls_nrna_frac, ls_evidence = (
+    ls_eta_flat, ls_ev_flat, ls_eta_per_nrna, ls_ev_per_nrna = (
         _aggregate_nrna_frac_by_group(
             ls_key, n_ls,
-            exon_sense, exon_anti, intron_sense, intron_anti,
-            L_exonic, L_intronic, strand_spec, gdna_density,
+            nrna_exon_sense, nrna_exon_anti,
+            nrna_intron_sense, nrna_intron_anti,
+            nrna_exonic_length, nrna_intronic_length,
+            strand_spec, gdna_density,
         )
     )
 
@@ -748,95 +732,64 @@ def compute_hybrid_nrna_frac_priors(
     )
     if kappa_global is None:
         kappa_global = estimate_kappa(
-            ls_nrna_frac_flat, ls_ev_flat,
+            ls_eta_flat, ls_ev_flat,
             min_evidence=mom_min_evidence_global, **_mom_kw,
         )
     if kappa_locus is None:
-        if t_to_tss_group is not None:
-            kappa_locus = estimate_kappa(
-                g_nrna_frac, g_evidence,
-                min_evidence=mom_min_evidence_locus, **_mom_kw,
-            )
-        else:
-            # No TSS groups → fall back to locus-strand estimates
-            kappa_locus = estimate_kappa(
-                ls_nrna_frac_flat, ls_ev_flat,
-                min_evidence=mom_min_evidence_locus, **_mom_kw,
-            )
-    if kappa_tss is None:
-        kappa_tss = estimate_kappa(
-            t_nrna_frac, t_evidence,
-            min_evidence=mom_min_evidence_tss, **_mom_kw,
+        kappa_locus = estimate_kappa(
+            nrna_eta, nrna_evidence,
+            min_evidence=mom_min_evidence_locus, **_mom_kw,
         )
 
-    # === Empirical global nrna_frac prior ===
-    #
-    # Instead of a hard-coded nrna_frac_global = 0.5, we compute an
-    # evidence-weighted mean of locus-strand nrna_frac values.  This makes
-    # the global prior fully data-driven: in a pristine experiment
-    # (no nRNA) nrna_frac_global ≈ 0; in a pol-II inhibition experiment
-    # it naturally rises toward the empirical nascent fraction.
+    # === Empirical global nrna_frac ===
     total_ls_evidence = float(ls_ev_flat.sum())
     if total_ls_evidence > 0:
-        nrna_frac_global = float(np.dot(ls_ev_flat, ls_nrna_frac_flat) / total_ls_evidence)
+        nrna_frac_global = float(
+            np.dot(ls_ev_flat, ls_eta_flat) / total_ls_evidence,
+        )
     else:
-        nrna_frac_global = 0.0  # no evidence → assume no nRNA
+        nrna_frac_global = 0.0
 
     logger.debug(
         f"nrna_frac EB hyperparameters: nrna_frac_global={nrna_frac_global:.4f}, "
-        f"κ_global={kappa_global:.1f}, "
-        f"κ_locus={kappa_locus:.1f}, κ_tss={kappa_tss:.1f}"
+        f"κ_global={kappa_global:.1f}, κ_locus={kappa_locus:.1f}, "
+        f"κ_nrna={kappa_nrna:.1f}"
     )
 
     # === Smooth Empirical-Bayes hierarchical shrinkage ===
-    #
-    #   nrna_frac_shrunk = (E_local · nrna_frac_local + κ · nrna_frac_parent) / (E_local + κ)
 
-    # Level 3 → shrink toward empirical global
-    nrna_frac_L3 = (
-        (ls_evidence * ls_nrna_frac + kappa_global * nrna_frac_global)
-        / (ls_evidence + kappa_global)
+    # Locus-strand → shrink toward empirical global
+    nrna_frac_ls = (
+        (ls_ev_per_nrna * ls_eta_per_nrna + kappa_global * nrna_frac_global)
+        / (ls_ev_per_nrna + kappa_global)
     )
 
-    # Level 2 → shrink toward shrunk Level 3
-    nrna_frac_L2 = (
-        (tss_evidence * tss_nrna_frac + kappa_locus * nrna_frac_L3)
-        / (tss_evidence + kappa_locus)
-    )
-
-    # Level 1 → shrink toward shrunk Level 2
+    # Per-nRNA → shrink toward shrunk locus-strand
     nrna_frac_est = (
-        (t_evidence * t_nrna_frac + kappa_tss * nrna_frac_L2)
-        / (t_evidence + kappa_tss)
+        (nrna_evidence * nrna_eta + kappa_locus * nrna_frac_ls)
+        / (nrna_evidence + kappa_locus)
     )
 
-    # Effective sample size for the Beta prior.  Use only the
-    # hierarchical shrinkage strength (kappa_tss), NOT the raw
-    # fragment evidence.  Adding t_evidence makes the prior
-    # overwhelmingly strong (kappa ~ 10 000), which locks nrna_frac
-    # near the pre-EM estimate and prevents the EM from correcting
-    # it.  The EM itself sees all the data, so a weakly informative
-    # prior (kappa ~ 5–20) is appropriate.
-    kappa = np.full_like(t_evidence, kappa_tss)
-
-    # Clamp nrna_frac away from exact 0 or 1 to keep Beta parameters finite
+    # Clamp away from exact 0 or 1 to keep Beta parameters finite
     nrna_frac_est = np.clip(nrna_frac_est, 1e-4, 1.0 - 1e-4)
 
-    # Convert to Beta(α, β)
-    estimator.nrna_frac_alpha = nrna_frac_est * kappa
-    estimator.nrna_frac_beta = (1.0 - nrna_frac_est) * kappa
+    # Convert to Beta(α, β) with constant κ_nrna pseudo-count
+    estimator.nrna_frac_alpha = nrna_frac_est * kappa_nrna
+    estimator.nrna_frac_beta = (1.0 - nrna_frac_est) * kappa_nrna
 
     # --- Diagnostic logging ---
-    median_nrna_frac = float(np.median(nrna_frac_est))
-    median_kappa = float(np.median(kappa))
-    mean_l1_weight = float(np.mean(t_evidence / (t_evidence + kappa_tss)))
-    n_zero_nrna_frac = int(np.sum(nrna_frac_est <= 1e-4))
-    n_high_nrna_frac = int(np.sum(nrna_frac_est >= 0.1))
+    median_eta = float(np.median(nrna_frac_est))
+    mean_nrna_weight = float(
+        np.mean(nrna_evidence / (nrna_evidence + kappa_locus)),
+    )
+    n_zero = int(np.sum(nrna_frac_est <= 1e-4))
+    n_high = int(np.sum(nrna_frac_est >= 0.1))
     logger.info(
-        f"nrna_frac priors: global={nrna_frac_global:.4f}, median={median_nrna_frac:.4f}, "
-        f"κ=[{kappa_global:.1f}, {kappa_locus:.1f}, {kappa_tss:.1f}], "
-        f"median_κ_final={median_kappa:.1f}, L1_wt={mean_l1_weight:.2f}, "
-        f"n_zero={n_zero_nrna_frac}/{n_t}, n_high(≥0.1)={n_high_nrna_frac}/{n_t}"
+        f"nrna_frac priors: global={nrna_frac_global:.4f}, "
+        f"median={median_eta:.4f}, "
+        f"κ=[{kappa_global:.1f}, {kappa_locus:.1f}, {kappa_nrna:.1f}], "
+        f"nRNA_wt={mean_nrna_weight:.2f}, "
+        f"n_zero={n_zero}/{n_nrna}, n_high(≥0.1)={n_high}/{n_nrna}"
     )
 
 
@@ -935,10 +888,10 @@ class AbundanceEstimator:
         self.nrna_init = np.zeros(self.num_nrna, dtype=np.float64)
         self.nrna_em_counts = np.zeros(self.num_nrna, dtype=np.float64)
 
-        # Per-transcript nrna_frac (nascent fraction) Beta prior parameters.
-        # Computed after the scan phase by compute_hybrid_nrna_frac_priors().
-        self.nrna_frac_alpha = np.ones(num_transcripts, dtype=np.float64)
-        self.nrna_frac_beta = np.ones(num_transcripts, dtype=np.float64)
+        # Per-nRNA nrna_frac (nascent fraction) Beta prior parameters.
+        # Computed after the scan phase by compute_nrna_frac_priors().
+        self.nrna_frac_alpha = np.ones(self.num_nrna, dtype=np.float64)
+        self.nrna_frac_beta = np.ones(self.num_nrna, dtype=np.float64)
 
         # --- gDNA: locus-level, NOT per-gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)

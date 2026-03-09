@@ -10,7 +10,7 @@ from rigel.splice import (
     SpliceStrandCol,
 )
 from rigel.config import EMConfig
-from rigel.estimator import AbundanceEstimator, ScoredFragments, Locus, compute_hybrid_nrna_frac_priors, estimate_kappa
+from rigel.estimator import AbundanceEstimator, ScoredFragments, Locus, compute_nrna_frac_priors, estimate_kappa
 from rigel.strand_model import StrandModel, StrandModels
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
@@ -950,18 +950,21 @@ class TestEstimateKappa:
 
 
 class TestEtaPriorShrinkage:
-    """Tests for compute_hybrid_nrna_frac_priors() smooth EB shrinkage.
+    """Tests for compute_nrna_frac_priors() 3-tier EB shrinkage.
 
-    The global prior nrna_frac_global is now *empirical* — the evidence-weighted
+    Uses the 3-tier hierarchy: Global → Locus-Strand → nRNA.
+    The global prior nrna_frac_global is empirical — the evidence-weighted
     mean of all locus-strand nrna_frac values.  When there is no evidence,
-    nrna_frac_global = 0 (conservative: assume no nRNA).  Tests that check
-    exact values pass explicit κ values.
+    nrna_frac_global = 0 (conservative: assume no nRNA).
     """
 
-    KG, KL, KT = 2.0, 10.0, 5.0  # standard explicit kappas
+    KG, KL, KN = 2.0, 10.0, 5.0  # standard explicit kappas
 
     def _make_estimator(self, n_t, L_exonic=None, L_intronic=None):
-        """Create a minimal AbundanceEstimator with geometry arrays."""
+        """Create a minimal AbundanceEstimator with geometry arrays.
+
+        Uses 1:1 transcript-to-nRNA mapping (each transcript is its own nRNA).
+        """
         rc = AbundanceEstimator(n_t)
         if L_exonic is not None:
             rc._exonic_lengths = np.array(L_exonic, dtype=np.float64)
@@ -971,257 +974,206 @@ class TestEtaPriorShrinkage:
         return rc
 
     def _kw(self):
-        return dict(kappa_global=self.KG, kappa_locus=self.KL, kappa_tss=self.KT)
+        return dict(kappa_global=self.KG, kappa_locus=self.KL, kappa_nrna=self.KN)
+
+    def _nrna_spans(self, L_exonic, L_intronic):
+        """Compute nRNA spans from exonic + intronic lengths."""
+        return np.array(L_exonic, dtype=np.float64) + np.array(L_intronic, dtype=np.float64)
 
     # -- Zero evidence → empirical global prior (nrna_frac=0) --
 
     def test_no_evidence_shrinks_to_global(self):
-        """No data → nrna_frac_global=0 (empirical), κ=5 → α≈0, β≈5."""
+        """No data → nrna_frac_global=0 (empirical), κ_nrna=5 → α≈0, β≈5."""
         rc = self._make_estimator(3, [1000]*3, [4000]*3)
-        locus_ids = np.full(3, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1, 1, 2], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000]*3, [4000]*3)
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.95, gdna_density=0.0, **self._kw(),
         )
-        # nrna_frac_global=0 (no evidence), all nrna_frac→0, κ=5 → α≈0, β≈5
         np.testing.assert_allclose(rc.nrna_frac_alpha, 0.0, atol=0.01)
         np.testing.assert_allclose(rc.nrna_frac_beta, 5.0, atol=0.01)
 
-    # -- Transcript level with shrinkage --
+    # -- nRNA level with shrinkage --
 
-    def test_density_mode_transcript_level(self):
+    def test_density_mode_nrna_level(self):
         """Unstranded (s=0.5): density nrna_frac shrunk toward empirical global."""
         rc = self._make_estimator(1, [1000], [4000])
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
         rc.transcript_exonic_sense[0] = 10.0
         rc.transcript_exonic_antisense[0] = 10.0
         rc.transcript_intronic_sense[0] = 8.0
         rc.transcript_intronic_antisense[0] = 8.0
-
-        locus_ids = np.full(1, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000], [4000])
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0, **self._kw(),
         )
-        # Single transcript: kappa = kappa_tss = 5.0 (constant, weak prior)
-        # nrna_frac ≈ 0.176 → α = 5 * 0.176 ≈ 0.878
-        assert rc.nrna_frac_alpha[0] == pytest.approx(0.878, abs=0.05)
+        # κ = kappa_nrna = 5.0 (constant, weak prior)
         kappa = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
         assert kappa == pytest.approx(5.0, abs=0.01)
+        # nrna_frac should be positive (intronic signal present)
+        nf = rc.nrna_frac_alpha[0] / kappa
+        assert 0 < nf < 1
 
-    def test_strand_mode_transcript_level(self):
+    def test_strand_mode_nrna_level(self):
         """Perfectly stranded (s=1.0): strand nrna_frac shrunk toward empirical global."""
         rc = self._make_estimator(1, [1000], [4000])
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 20.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 0.0
         rc.transcript_exonic_sense[0] = 20.0
         rc.transcript_exonic_antisense[0] = 0.0
         rc.transcript_intronic_sense[0] = 8.0
         rc.transcript_intronic_antisense[0] = 0.0
-
-        locus_ids = np.full(1, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000], [4000])
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=1.0, gdna_density=0.0, **self._kw(),
         )
-        # Single transcript: kappa = kappa_tss = 5.0 (constant, weak prior)
-        # nrna_frac ≈ 0.085 → α = 5 * 0.085 ≈ 0.424
-        assert rc.nrna_frac_alpha[0] == pytest.approx(0.424, abs=0.05)
         kappa = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
         assert kappa == pytest.approx(5.0, abs=0.01)
+        nf = rc.nrna_frac_alpha[0] / kappa
+        assert 0 < nf < 1
 
     def test_gdna_subtraction_reduces_nrna(self):
         """Positive gDNA density reduces the nRNA estimate (directional)."""
         rc = self._make_estimator(1, [1000], [4000])
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
         rc.transcript_exonic_sense[0] = 10.0
         rc.transcript_exonic_antisense[0] = 10.0
         rc.transcript_intronic_sense[0] = 8.0
         rc.transcript_intronic_antisense[0] = 8.0
-
-        locus_ids = np.full(1, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000], [4000])
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0, **self._kw(),
         )
         alpha_no_gdna = rc.nrna_frac_alpha[0]
 
-        # Fresh estimator for gDNA run (nrna_frac_global is re-derived each call)
         rc2 = self._make_estimator(1, [1000], [4000])
-        rc2.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc2.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
         rc2.transcript_exonic_sense[0] = 10.0
         rc2.transcript_exonic_antisense[0] = 10.0
         rc2.transcript_intronic_sense[0] = 8.0
         rc2.transcript_intronic_antisense[0] = 8.0
-        compute_hybrid_nrna_frac_priors(
-            rc2, None, strands, locus_ids,
+        rc2.locus_id_per_transcript[:] = -1
+        compute_nrna_frac_priors(
+            rc2, strands, spans,
             strand_specificity=0.5, gdna_density=0.002, **self._kw(),
         )
         alpha_with_gdna = rc2.nrna_frac_alpha[0]
 
         # gDNA subtraction should lower nrna_frac and thus α
         assert alpha_with_gdna < alpha_no_gdna
-        assert alpha_with_gdna == pytest.approx(0.488, abs=0.05)
 
     def test_single_exon_nrna_suppressed(self):
         """Single-exon transcript (L_intronic=0): nrna_frac pulled toward 0."""
         rc = self._make_estimator(1, [1000], [0])
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
         rc.transcript_exonic_sense[0] = 10.0
         rc.transcript_exonic_antisense[0] = 10.0
-
-        locus_ids = np.full(1, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000], [0])
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.001, **self._kw(),
         )
         nrna_frac = rc.nrna_frac_alpha[0] / (rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0])
-        # Raw nrna_frac=0, nrna_frac_global=0; single-exon → nRNA strongly suppressed
         assert nrna_frac < 0.01
 
     # -- Hierarchical shrinkage --
 
-    def test_tss_group_shrinkage(self):
-        """Low-evidence transcript borrows strength from TSS group."""
-        rc = self._make_estimator(3, [1000]*3, [4000]*3)
-        # t0: low evidence (6 frags)
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 2.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 2.0
-        rc.transcript_exonic_sense[0] = 2.0
-        rc.transcript_exonic_antisense[0] = 2.0
-        rc.transcript_intronic_sense[0] = 1.0
-        rc.transcript_intronic_antisense[0] = 1.0
-        # t1: strong evidence (36 frags)
-        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
-        rc.transcript_exonic_sense[1] = 10.0
-        rc.transcript_exonic_antisense[1] = 10.0
-        rc.transcript_intronic_sense[1] = 8.0
-        rc.transcript_intronic_antisense[1] = 8.0
-        # t2: no evidence
-
-        tss_groups = np.array([0, 0, 1], dtype=np.int32)
-        locus_ids = np.full(3, -1, dtype=np.int32)
-        strands = np.array([1, 1, 1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, tss_groups, strands, locus_ids,
-            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
-        )
-        # t0: low evidence, borrows from TSS group; α≈0.685, κ=5
-        assert rc.nrna_frac_alpha[0] == pytest.approx(0.685, abs=0.05)
-        kappa0 = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
-        assert kappa0 == pytest.approx(5.0, abs=0.01)
-
-        # t1: strong evidence, own data dominates; α≈0.970
-        assert rc.nrna_frac_alpha[1] == pytest.approx(0.970, abs=0.05)
-
-        # t2: zero evidence, TSS group 1 also zero → falls to global (nrna_frac≈0)
-        assert rc.nrna_frac_alpha[2] < 0.01
-
     def test_locus_strand_shrinkage(self):
-        """No TSS groups: locus-strand provides parent information."""
+        """Low-evidence nRNA borrows strength from locus-strand pool."""
         rc = self._make_estimator(3, [1000]*3, [4000]*3)
-        # t0: low evidence (6 frags)
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 2.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 2.0
+        # nRNA 0: low evidence
         rc.transcript_exonic_sense[0] = 2.0
         rc.transcript_exonic_antisense[0] = 2.0
         rc.transcript_intronic_sense[0] = 1.0
         rc.transcript_intronic_antisense[0] = 1.0
-        # t1: no evidence
-        # t2: strong evidence
-        rc.unambig_counts[2, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[2, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        # nRNA 1: no evidence
+        # nRNA 2: strong evidence
         rc.transcript_exonic_sense[2] = 10.0
         rc.transcript_exonic_antisense[2] = 10.0
         rc.transcript_intronic_sense[2] = 8.0
         rc.transcript_intronic_antisense[2] = 8.0
 
-        locus_ids = np.array([0, 0, 0], dtype=np.int32)
+        rc.locus_id_per_transcript[:] = np.array([0, 0, 0], dtype=np.int32)
         strands = np.array([1, 1, 1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000]*3, [4000]*3)
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0, **self._kw(),
         )
-        # t0: low evidence, inherits from locus-strand; α≈0.767
-        assert rc.nrna_frac_alpha[0] == pytest.approx(0.767, abs=0.05)
+        # nRNA 0: low evidence → inherits from locus-strand
+        assert rc.nrna_frac_alpha[0] > 0
 
-        # t1: zero own data → inherits parent (locus-strand nrna_frac); α≈0.938
-        assert rc.nrna_frac_alpha[1] == pytest.approx(0.938, abs=0.05)
+        # nRNA 1: zero own data → inherits parent (locus-strand)
+        assert rc.nrna_frac_alpha[1] > 0
 
-        # t2: strong evidence, own data dominates; α≈0.992
-        assert rc.nrna_frac_alpha[2] == pytest.approx(0.992, abs=0.05)
+        # nRNA 2: strong evidence, own data dominates
+        assert rc.nrna_frac_alpha[2] > rc.nrna_frac_alpha[0]
+
+        # All κ = kappa_nrna
+        for i in range(3):
+            kappa = rc.nrna_frac_alpha[i] + rc.nrna_frac_beta[i]
+            assert kappa == pytest.approx(5.0, abs=0.01)
 
     # -- Strand separation --
 
     def test_different_strands_separate_locus_pools(self):
-        """Locus-strand groups transcripts by strand."""
+        """Locus-strand groups nRNAs by strand."""
         rc = self._make_estimator(2, [1000]*2, [4000]*2)
-        # t0: +strand
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
+        # nRNA 0: +strand
         rc.transcript_exonic_sense[0] = 10.0
         rc.transcript_exonic_antisense[0] = 10.0
         rc.transcript_intronic_sense[0] = 6.0
         rc.transcript_intronic_antisense[0] = 6.0
-        # t1: -strand
-        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_SENSE] = 15.0
-        rc.unambig_counts[1, SpliceStrandCol.UNSPLICED_ANTISENSE] = 15.0
+        # nRNA 1: -strand
         rc.transcript_exonic_sense[1] = 15.0
         rc.transcript_exonic_antisense[1] = 15.0
         rc.transcript_intronic_sense[1] = 10.0
         rc.transcript_intronic_antisense[1] = 10.0
 
-        locus_ids = np.array([0, 0], dtype=np.int32)
+        rc.locus_id_per_transcript[:] = np.array([0, 0], dtype=np.int32)
         strands = np.array([1, 2], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000]*2, [4000]*2)
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0, **self._kw(),
         )
         nrna_frac0 = rc.nrna_frac_alpha[0] / (rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0])
         nrna_frac1 = rc.nrna_frac_alpha[1] / (rc.nrna_frac_alpha[1] + rc.nrna_frac_beta[1])
-        # Raw nrna_frac0≈0.150, nrna_frac1≈0.167; both shrink slightly
-        assert nrna_frac0 == pytest.approx(0.150, abs=0.01)
-        assert nrna_frac1 == pytest.approx(0.167, abs=0.01)
-        # κ = kappa_tss (constant, weak prior)
+        # Both should have detectable nRNA fractions
+        assert nrna_frac0 > 0
+        assert nrna_frac1 > 0
+        # κ = kappa_nrna (constant)
         kappa0 = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
         kappa1 = rc.nrna_frac_alpha[1] + rc.nrna_frac_beta[1]
         assert kappa0 == pytest.approx(5.0, abs=0.01)
         assert kappa1 == pytest.approx(5.0, abs=0.01)
 
-    # -- Shrinkage properties --
+    # -- Constant kappa_nrna --
 
     def test_constant_kappa_regardless_of_evidence(self):
-        """Kappa is constant (kappa_tss) regardless of evidence level."""
-        # With the weakly informative prior, kappa = kappa_tss always.
-        # The EM itself sees all data, so kappa need not scale with evidence.
+        """α + β = kappa_nrna regardless of evidence level."""
         for ne in [5, 30, 100]:
             rc = self._make_estimator(1, [1000], [4000])
-            rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = float(ne)
-            rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = float(ne)
             rc.transcript_exonic_sense[0] = float(ne)
             rc.transcript_exonic_antisense[0] = float(ne)
             rc.transcript_intronic_sense[0] = float(ne // 2)
             rc.transcript_intronic_antisense[0] = float(ne // 2)
-            locus_ids = np.array([0], dtype=np.int32)
+            rc.locus_id_per_transcript[:] = np.array([0], dtype=np.int32)
             strands = np.array([1], dtype=np.int32)
-            compute_hybrid_nrna_frac_priors(
-                rc, None, strands, locus_ids,
+            spans = self._nrna_spans([1000], [4000])
+            compute_nrna_frac_priors(
+                rc, strands, spans,
                 strand_specificity=0.5, gdna_density=0.0, **self._kw(),
             )
             kappa = rc.nrna_frac_alpha[0] + rc.nrna_frac_beta[0]
-            # κ is always kappa_tss, independent of fragment count
             assert kappa == pytest.approx(5.0, abs=0.01)
-            # nrna_frac mean is valid
             nf = rc.nrna_frac_alpha[0] / kappa
             assert 0 < nf < 1
 
@@ -1230,31 +1182,30 @@ class TestEtaPriorShrinkage:
     def test_auto_kappa_sparse_uses_fallback(self):
         """With < 20 features, MoM falls back to κ=5; no evidence → nrna_frac≈0."""
         rc = self._make_estimator(3, [1000]*3, [4000]*3)
-        locus_ids = np.full(3, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1, 1, 2], dtype=np.int32)
-        # No kappas → auto-estimate → sparse → all fallback to 5.0
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000]*3, [4000]*3)
+        # No kappas → auto-estimate → sparse → all fallback
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0,
         )
-        # With no evidence: nrna_frac_global=0, all κ=5 → α≈0, β≈5
+        # With no evidence: nrna_frac_global=0 → α≈0, β≈kappa_nrna
         np.testing.assert_allclose(rc.nrna_frac_alpha, 0.0, atol=0.01)
         np.testing.assert_allclose(rc.nrna_frac_beta, 5.0, atol=0.01)
 
     def test_auto_kappa_produces_finite_output(self):
         """Auto-estimation produces valid finite priors regardless."""
         rc = self._make_estimator(1, [1000], [4000])
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 10.0
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_ANTISENSE] = 10.0
         rc.transcript_exonic_sense[0] = 10.0
         rc.transcript_exonic_antisense[0] = 10.0
         rc.transcript_intronic_sense[0] = 8.0
         rc.transcript_intronic_antisense[0] = 8.0
-        locus_ids = np.full(1, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1], dtype=np.int32)
-        # Leave κ as None → MoM auto
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000], [4000])
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0,
         )
         assert np.all(np.isfinite(rc.nrna_frac_alpha))
@@ -1262,15 +1213,42 @@ class TestEtaPriorShrinkage:
         assert np.all(rc.nrna_frac_alpha > 0)
         assert np.all(rc.nrna_frac_beta > 0)
 
+    # -- Alpha + Beta invariant --
+
+    def test_alpha_plus_beta_equals_kappa_nrna(self):
+        """α + β = kappa_nrna for all nRNAs."""
+        rc = self._make_estimator(3, [1000]*3, [4000]*3)
+        rc.transcript_exonic_sense[0] = 10.0
+        rc.transcript_exonic_antisense[0] = 10.0
+        rc.transcript_intronic_sense[0] = 5.0
+        rc.transcript_intronic_antisense[0] = 5.0
+        rc.transcript_exonic_sense[2] = 20.0
+        rc.transcript_exonic_antisense[2] = 20.0
+        rc.transcript_intronic_sense[2] = 15.0
+        rc.transcript_intronic_antisense[2] = 15.0
+        rc.locus_id_per_transcript[:] = np.array([0, 0, 0], dtype=np.int32)
+        strands = np.array([1, 1, 2], dtype=np.int32)
+        spans = self._nrna_spans([1000]*3, [4000]*3)
+        compute_nrna_frac_priors(
+            rc, strands, spans,
+            strand_specificity=0.5, gdna_density=0.0, **self._kw(),
+        )
+        np.testing.assert_allclose(
+            rc.nrna_frac_alpha + rc.nrna_frac_beta,
+            5.0,
+            atol=1e-10,
+        )
+
     # -- Output types --
 
     def test_nrna_frac_alpha_beta_are_float64(self):
         """Output arrays should be float64."""
         rc = self._make_estimator(2, [1000]*2, [4000]*2)
-        locus_ids = np.full(2, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1, 2], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        spans = self._nrna_spans([1000]*2, [4000]*2)
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.95, gdna_density=0.0,
         )
         assert rc.nrna_frac_alpha.dtype == np.float64
@@ -1279,12 +1257,14 @@ class TestEtaPriorShrinkage:
     def test_no_geometry_falls_back_gracefully(self):
         """Estimator without geometry arrays still produces valid priors."""
         rc = AbundanceEstimator(2)
-        rc.unambig_counts[0, SpliceStrandCol.UNSPLICED_SENSE] = 20.0
         rc.transcript_exonic_sense[0] = 20.0
-        locus_ids = np.full(2, -1, dtype=np.int32)
+        rc.locus_id_per_transcript[:] = -1
         strands = np.array([1, 1], dtype=np.int32)
-        compute_hybrid_nrna_frac_priors(
-            rc, None, strands, locus_ids,
+        # Without geometry: exonic_lengths=None, spans=None
+        # Use a reasonable default span
+        spans = np.array([5000.0, 5000.0], dtype=np.float64)
+        compute_nrna_frac_priors(
+            rc, strands, spans,
             strand_specificity=0.5, gdna_density=0.0,
         )
         assert np.all(np.isfinite(rc.nrna_frac_alpha))

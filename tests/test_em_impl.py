@@ -71,7 +71,7 @@ def _make_locus(
 
     eff_lens = np.ones(n_components, dtype=np.float64)
 
-    theta, alpha, em_totals, _eta = run_locus_em_native(
+    theta, alpha, em_totals = run_locus_em_native(
         offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
         tx_starts_arr, tx_ends_arr, bias_profiles,
         unambig_totals, eff_lens, prior_eligible,
@@ -585,6 +585,7 @@ def _make_linked_locus(
         n_components = n_t + n_nrna + 1 = 2*n_t + 1.
 
     Returns (theta, alpha, em_totals, nrna_frac) as numpy arrays.
+    nrna_frac is derived post-hoc from theta: η[n] = θ[n_t+n] / (θ[n_t+n] + θ[n]).
     """
     n_t = n_transcripts
     n_nrna = n_t  # assume 1:1 transcript→nRNA
@@ -621,16 +622,16 @@ def _make_linked_locus(
     if effective_lengths is None:
         effective_lengths = np.ones(n_components, dtype=np.float64)
     if nrna_frac_alpha is None:
-        nrna_frac_alpha = np.ones(n_t, dtype=np.float64)  # Beta(1,1) = uniform
+        nrna_frac_alpha = np.ones(n_nrna, dtype=np.float64)  # Beta(1,1) = uniform
     if nrna_frac_beta is None:
-        nrna_frac_beta = np.ones(n_t, dtype=np.float64)
+        nrna_frac_beta = np.ones(n_nrna, dtype=np.float64)
 
     # 1:1 transcript→nRNA mapping for tests
     t_to_nrna = np.arange(n_t, dtype=np.int32)
     nrna_to_t_offsets = np.arange(n_nrna + 1, dtype=np.int32)
     nrna_to_t_indices = np.arange(n_t, dtype=np.int32)
 
-    theta, alpha, em_totals, nrna_frac = run_locus_em_native(
+    theta, alpha, em_totals = run_locus_em_native(
         offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
         tx_starts_arr, tx_ends_arr, bias_profiles,
         unambig_totals, effective_lengths, prior_eligible,
@@ -642,19 +643,27 @@ def _make_linked_locus(
         nrna_frac_alpha, nrna_frac_beta,
         t_to_nrna, nrna_to_t_offsets, nrna_to_t_indices,
     )
+    theta = np.asarray(theta)
+    # Derive nrna_frac from theta: η[n] = θ[n_t+n] / (θ[n_t+n] + θ[n])
+    nrna_frac = np.zeros(n_nrna, dtype=np.float64)
+    for n in range(n_nrna):
+        nrna_w = theta[n_t + n]
+        mrna_w = theta[n]  # 1:1 mapping
+        denom = nrna_w + mrna_w
+        nrna_frac[n] = nrna_w / denom if denom > 0 else 0.5
     return (
-        np.asarray(theta),
+        theta,
         np.asarray(alpha),
         np.asarray(em_totals),
-        np.asarray(nrna_frac),
+        nrna_frac,
     )
 
 
 class TestLinkedEmBasic:
     """Basic linked-model EM tests."""
 
-    def test_empty_locus_returns_nrna_frac(self):
-        """Empty linked locus returns prior-mean nrna_frac."""
+    def test_empty_locus_nrna_frac_near_zero(self):
+        """Empty linked locus: nrna_frac is near zero (no nRNA evidence)."""
         n_t = 2
         ea = np.array([3.0, 7.0])
         eb = np.array([7.0, 3.0])
@@ -664,8 +673,8 @@ class TestLinkedEmBasic:
             nrna_frac_alpha=ea, nrna_frac_beta=eb,
         )
         assert nrna_frac.shape == (n_t,)
-        np.testing.assert_allclose(nrna_frac[0], 0.3, atol=1e-10)
-        np.testing.assert_allclose(nrna_frac[1], 0.7, atol=1e-10)
+        # No data for nRNA → nrna_frac should be very low
+        assert np.all(nrna_frac < 0.05)
 
     def test_theta_is_simplex(self):
         """Linked EM produces a valid simplex θ[2*n_t+1]."""

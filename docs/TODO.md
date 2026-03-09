@@ -5,6 +5,13 @@ I want to implement a major architectural change to improve the functionality of
 
 ## nascent RNA decoupling from individual transcripts
 
+In progress
+
+Need to address:
+- Output
+- Cleanup
+
+
 Currently each transcript has its own nascent RNA shadow. This is not exactly correct. Transcripts that share the same genomic start and genomic span may have different splicing combinations, but the nascent RNA is by definition the same!
 
 Scenario: 
@@ -97,7 +104,7 @@ The gene-level output file can be updated as well. In the gene file, we should a
 - output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
 
 Context
-hulkrna separates gDNA from RNA using splice status and strand specificity. Fragment length is currently unused for discrimination — a single global_model is used for all pools. Bioanalyzer/tapestation confirms gDNA and RNA have distinct insert size distributions.
+rigel separates gDNA from RNA using splice status and strand specificity. Fragment length is currently unused for discrimination — a single global_model is used for all pools. Bioanalyzer/tapestation confirms gDNA and RNA have distinct insert size distributions.
 Key insight: We know strand specificity (s_RNA) and that gDNA is perfectly unstranded (0.5). Using Bayes' theorem, we can compute the exact gDNA fraction per compartment, then decompose existing fragment length histograms into weighted gDNA and RNA contributions — no per-fragment iteration needed.
 Approach: Bayesian Histogram Mixing ("0th-Iteration E-Step")
 Instead of arbitrary thresholds or algebraic decontamination, we compute the probability that fragments in each compartment are gDNA, then use those probabilities as fractional weights to build two model histograms via O(1) numpy operations on pre-collected per-compartment histograms.
@@ -130,7 +137,7 @@ H_unspliced_opp_strand — NEW: unspliced unique-mapper genic where exon_strand 
 Collection strategy: Add two new vectors to FragLenObservations in the C++ BAM scanner (bam_scanner.cpp). At the point where fragment lengths are recorded for genic fragments (~line 1050), additionally record genomic_footprint into same_strand or opp_strand vectors for unspliced unique-mapper fragments with unambiguous strand.
 In Python _replay_fraglen_observations(), route these into two new FragmentLengthModel instances on FragmentLengthModels.
 Alternative (no C++ changes): Collect from the buffer after scan via a single vectorized numpy pass using existing buffer columns (splice_type, exon_strand, t_indices, num_hits, genomic_footprint). Fast but adds one O(N) pass.
-Files: src/hulkrna/native/bam_scanner.cpp (add 2 vectors ~15 lines), src/hulkrna/frag_length_model.py (add 2 models), src/hulkrna/pipeline.py (replay new observations)
+Files: src/rigel/native/bam_scanner.cpp (add 2 vectors ~15 lines), src/rigel/frag_length_model.py (add 2 models), src/rigel/pipeline.py (replay new observations)
 Step 2: Add mix_models() to FragmentLengthModels
 New method that performs the Bayesian histogram mixing:
 pythondef mix_models(self, s_rna: float, p_r1_sense: float) -> None:
@@ -172,7 +179,7 @@ pythondef mix_models(self, s_rna: float, p_r1_sense: float) -> None:
     self.rna_model._total_weight = float(self.rna_model.counts.sum())
     self.rna_model.n_observations = int(self.rna_model._total_weight)
 Also add rna_model = FragmentLengthModel(max_size=max_size) to __init__.
-File: src/hulkrna/frag_length_model.py
+File: src/rigel/frag_length_model.py
 Step 3: Wire mixing into pipeline.py
 pythonstrand_models.finalize()
 frag_length_models.mix_models(
@@ -182,7 +189,7 @@ frag_length_models.mix_models(
 frag_length_models.finalize()  # caches LUTs for gdna_model, rna_model, etc.
 ```
 
-**File**: `src/hulkrna/pipeline.py` (~line 747-748)
+**File**: `src/rigel/pipeline.py` (~line 747-748)
 
 ### Step 4: Add gDNA LUT fields to `FragmentScorer`
 
@@ -191,20 +198,20 @@ Add after line 112:
 gdna_fl_log_prob: np.ndarray | None
 gdna_fl_max_size: int
 gdna_fl_tail_base: float
-File: src/hulkrna/scoring.py
+File: src/rigel/scoring.py
 Step 5: Update from_models() to build both LUTs
 Change the RNA LUT source from global_model to rna_model (the mixed RNA model). Add gDNA LUT extraction from gdna_model (the mixed gDNA model). Fall back to global_model if either mixed model has very few observations (< some small threshold like 10).
 C++ NativeFragmentScorer automatically picks up the new RNA LUT since fl_log_prob is passed from Python. No C++ constructor changes.
-File: src/hulkrna/scoring.py (from_models(), ~line 162)
+File: src/rigel/scoring.py (from_models(), ~line 162)
 Step 6: Add gdna_frag_len_log_lik() function
 Same structure as frag_len_log_lik() (line 253) but reads ctx.gdna_fl_* fields.
-File: src/hulkrna/scoring.py (after line 262)
+File: src/rigel/scoring.py (after line 262)
 Step 7: Update score_gdna_standalone() and _gdna_log_lik()
 
 score_gdna_standalone() (line 349): use gdna_model.log_likelihood() instead of global_model
 scan.py:_gdna_log_lik() (line 429): use gdna_frag_len_log_lik(ctx, ...) instead of frag_len_log_lik(ctx, ...)
 
-Files: src/hulkrna/scoring.py, src/hulkrna/scan.py
+Files: src/rigel/scoring.py, src/rigel/scan.py
 Step 8: Logging
 Enhance frag_length_models.log_summary() and pipeline logging:
 
@@ -212,7 +219,7 @@ Report computed gDNA weights (W_sense, W_anti)
 Report gDNA model stats (mean, mode, n_obs) vs RNA model stats
 Report whether mixing was applied or fell back (s_rna ≈ 0.5)
 
-Files: src/hulkrna/frag_length_model.py, src/hulkrna/pipeline.py
+Files: src/rigel/frag_length_model.py, src/rigel/pipeline.py
 Step 9: Tests
 New tests/test_gdna_frag_length.py:
 
@@ -225,7 +232,7 @@ End-to-end: pool-specific scoring improves gDNA/RNA discrimination
 
 Update existing scoring tests if they assert specific gDNA/RNA log-likelihood values.
 Files Modified
-FileChangesrc/hulkrna/native/bam_scanner.cppAdd 2 new observation vectors (same/opp strand unspliced lengths)src/hulkrna/frag_length_model.pyAdd rna_model, unspliced_same_strand, unspliced_opp_strand models; add mix_models()src/hulkrna/scoring.pygDNA LUT fields, gdna_frag_len_log_lik(), update from_models() (RNA LUT from rna_model), update score_gdna_standalone()src/hulkrna/scan.py_gdna_log_lik() → gdna_frag_len_log_lik()src/hulkrna/pipeline.pyReplay new observations, call mix_models(), loggingtests/test_gdna_frag_length.pyNew test file
+FileChangesrc/rigel/native/bam_scanner.cppAdd 2 new observation vectors (same/opp strand unspliced lengths)src/rigel/frag_length_model.pyAdd rna_model, unspliced_same_strand, unspliced_opp_strand models; add mix_models()src/rigel/scoring.pygDNA LUT fields, gdna_frag_len_log_lik(), update from_models() (RNA LUT from rna_model), update score_gdna_standalone()src/rigel/scan.py_gdna_log_lik() → gdna_frag_len_log_lik()src/rigel/pipeline.pyReplay new observations, call mix_models(), loggingtests/test_gdna_frag_length.pyNew test file
 Key Properties
 
 Zero parameters: No SS thresholds, no min_obs cutoffs, no decontamination coefficients

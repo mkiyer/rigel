@@ -78,7 +78,7 @@ from rigel.config import (
 from rigel.estimator import AbundanceEstimator
 from rigel.index import TranscriptIndex
 from rigel.locus import build_loci, build_locus_em_data, compute_eb_gdna_priors, compute_nrna_init
-from rigel.estimator import compute_global_gdna_density, compute_hybrid_nrna_frac_priors
+from rigel.estimator import compute_global_gdna_density, compute_nrna_frac_priors
 from rigel.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer, _compute_intergenic_density
 from rigel.scan import FragmentRouter
 from rigel.scoring import (
@@ -222,8 +222,8 @@ def _snap_rss_current() -> float:
 
 
 @dataclass
-class HulkrnaParams:
-    """rigel parameter set (same keys as benchmark.py HulkrnaConfig)."""
+class RigelParams:
+    """rigel parameter set (same keys as benchmark.py RigelConfig)."""
 
     name: str = "default"
     params: dict = field(default_factory=dict)
@@ -237,7 +237,7 @@ class ProfileConfig:
     index: str = ""
     outdir: str = "profile_output"
 
-    rigel_configs: list[HulkrnaParams] = field(default_factory=list)
+    rigel_configs: list[RigelParams] = field(default_factory=list)
 
     stages: bool = False
     enable_cprofile: bool = False
@@ -265,10 +265,10 @@ def parse_yaml_config(path: str | Path) -> ProfileConfig:
     cfg.verbose = bool(raw.get("verbose", True))
 
     for name, params in raw.get("rigel_configs", {"default": {}}).items():
-        cfg.rigel_configs.append(HulkrnaParams(name=name, params=params or {}))
+        cfg.rigel_configs.append(RigelParams(name=name, params=params or {}))
 
     if not cfg.rigel_configs:
-        cfg.rigel_configs.append(HulkrnaParams())
+        cfg.rigel_configs.append(RigelParams())
 
     return cfg
 
@@ -279,7 +279,7 @@ def parse_yaml_config(path: str | Path) -> ProfileConfig:
 
 
 def _build_pipeline_config(
-    rigel_params: HulkrnaParams | None = None,
+    rigel_params: RigelParams | None = None,
     tmpdir: str | None = None,
 ) -> PipelineConfig:
     """Build PipelineConfig from profile config."""
@@ -420,7 +420,7 @@ def profile_simple(
     bam_path: str,
     index: TranscriptIndex,
     config_name: str,
-    rigel_params: HulkrnaParams | None = None,
+    rigel_params: RigelParams | None = None,
     enable_cprofile: bool = False,
     tmpdir: str | None = None,
 ) -> tuple[ProfileResult, cProfile.Profile | None]:
@@ -475,7 +475,7 @@ def profile_stages(
     bam_path: str,
     index: TranscriptIndex,
     config_name: str,
-    rigel_params: HulkrnaParams | None = None,
+    rigel_params: RigelParams | None = None,
     enable_cprofile: bool = False,
     tmpdir: str | None = None,
 ) -> tuple[ProfileResult, cProfile.Profile | None]:
@@ -537,10 +537,8 @@ def profile_stages(
         )
     timings.compute_geometry = t_geom.elapsed
 
-    # 3b: TSS groups + create estimator
+    # 3b: create estimator
     with Timer("create_estimator") as t_est:
-        if index.t_to_tss_group is None:
-            index.compute_and_set_tss_groups(tss_window=em_config.tss_window)
         estimator = AbundanceEstimator(
             index.num_transcripts,
             num_nrna=index.num_nrna,
@@ -625,19 +623,17 @@ def profile_stages(
                 gdna_density = compute_global_gdna_density(
                     estimator, strand_models.strand_specificity,
                 )
-                compute_hybrid_nrna_frac_priors(
+                compute_nrna_frac_priors(
                     estimator,
-                    t_to_tss_group=index.t_to_tss_group,
-                    t_to_strand=index.t_to_strand_arr,
-                    locus_id_per_transcript=estimator.locus_id_per_transcript,
+                    nrna_strands=index.nrna_df["strand"].values,
+                    nrna_spans=nrna_spans,
                     strand_specificity=strand_models.strand_specificity,
                     gdna_density=gdna_density,
                     kappa_global=em_config.nrna_frac_kappa_global,
                     kappa_locus=em_config.nrna_frac_kappa_locus,
-                    kappa_tss=em_config.nrna_frac_kappa_tss,
+                    kappa_nrna=em_config.nrna_frac_kappa_nrna,
                     mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
                     mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
-                    mom_min_evidence_tss=em_config.nrna_frac_mom_min_evidence_tss,
                     kappa_min=em_config.nrna_frac_kappa_min,
                     kappa_max=em_config.nrna_frac_kappa_max,
                     kappa_fallback=em_config.nrna_frac_kappa_fallback,
@@ -722,7 +718,7 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
     """Format profile results as a human-readable text report."""
     lines: list[str] = []
     lines.append("=" * 72)
-    lines.append("HULKRNA PROFILE REPORT")
+    lines.append("RIGEL PROFILE REPORT")
     lines.append("=" * 72)
     lines.append(f"Platform:   {platform.platform()}")
     lines.append(f"Python:     {sys.version.split()[0]}")
@@ -1027,7 +1023,7 @@ def main() -> int:
     else:
         cfg = ProfileConfig()
         if not cfg.rigel_configs:
-            cfg.rigel_configs.append(HulkrnaParams())
+            cfg.rigel_configs.append(RigelParams())
 
     # CLI overrides
     if args.bam:

@@ -33,7 +33,7 @@ aligners:
   oracle: {}
   minimap2: {}
 
-# ── HulkRNA configs ─────────────────────────────────────────────────
+# ── Rigel configs ─────────────────────────────────────────────────
 rigel_configs:
   default: {}
 

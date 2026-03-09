@@ -252,7 +252,7 @@ class TestBiasCorrectionCpp:
         eff_lens = np.ones(n_comp, dtype=np.float64)
         eligible = np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
-        theta, alpha, em_totals, _eta = run_locus_em_native(
+        theta, alpha, em_totals = run_locus_em_native(
             offsets, t_indices, log_liks, cov_wts,
             tx_starts, tx_ends, bias_profiles,
             unambig_totals, eff_lens, eligible,
@@ -283,7 +283,7 @@ class TestBiasCorrectionCpp:
         eff_lens = np.ones(n_comp, dtype=np.float64)
         eligible = np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
-        theta, alpha, em_totals, _eta = run_locus_em_native(
+        theta, alpha, em_totals = run_locus_em_native(
             offsets, t_indices, log_liks, cov_wts,
             tx_starts, tx_ends, bias_profiles,
             unambig_totals, eff_lens, eligible,

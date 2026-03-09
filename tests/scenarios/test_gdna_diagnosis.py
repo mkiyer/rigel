@@ -36,7 +36,7 @@ from rigel.locus import (
     compute_eb_gdna_priors,
 )
 from rigel.estimator import (
-    compute_hybrid_nrna_frac_priors,
+    compute_nrna_frac_priors,
     compute_global_gdna_density,
     estimate_kappa,
 )
@@ -211,8 +211,9 @@ def _collect_diagnostics(pr, result, bench, label):
     # --- nrna_frac priors ---
     for t in result.transcripts:
         ti = t.t_index
-        a = float(est.nrna_frac_alpha[ti])
-        b = float(est.nrna_frac_beta[ti])
+        nrna_idx = int(est._t_to_nrna[ti]) if est._t_to_nrna is not None else ti
+        a = float(est.nrna_frac_alpha[nrna_idx])
+        b = float(est.nrna_frac_beta[nrna_idx])
         diag[f"nrna_frac_alpha_{t.t_id}"] = a
         diag[f"nrna_frac_beta_{t.t_id}"] = b
         diag[f"nrna_frac_mean_{t.t_id}"] = a / (a + b) if (a + b) > 0 else 0.0

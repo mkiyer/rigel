@@ -174,7 +174,7 @@ If `type` is omitted, the key name itself is used as the type (so `oracle: {}` w
 aligner: minimap2          # or: aligner: [minimap2, hisat2]
 ```
 
-### `rigel_configs` — HulkRNA parameterizations
+### `rigel_configs` — Rigel parameterizations
 
 A mapping of named configurations, each specifying keyword arguments forwarded to `run_pipeline()`. An empty dict `{}` uses pipeline defaults. Multiple configs are compared against each other in the output.
 

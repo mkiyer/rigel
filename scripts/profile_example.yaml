@@ -35,7 +35,7 @@ cprofile_top_n: 60
 # Set to 0 to disable memory timeline.
 memory_sample_interval_ms: 100
 
-# ── HulkRNA configurations ───────────────────────────────────
+# ── Rigel configurations ───────────────────────────────────
 # Multiple named configs for side-by-side comparison.
 # Keys match benchmark.py rigel_configs format.
 rigel_configs:

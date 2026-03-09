@@ -412,13 +412,11 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("em_convergence_delta", "em.convergence_delta"),
     _ParamSpec("prune_threshold", "em.prune_threshold"),
     _ParamSpec("confidence_threshold", "em.confidence_threshold"),
-    _ParamSpec("tss_window", "em.tss_window"),
     _ParamSpec("nrna_frac_kappa_global", "em.nrna_frac_kappa_global"),
     _ParamSpec("nrna_frac_kappa_locus", "em.nrna_frac_kappa_locus"),
-    _ParamSpec("nrna_frac_kappa_tss", "em.nrna_frac_kappa_tss"),
+    _ParamSpec("nrna_frac_kappa_nrna", "em.nrna_frac_kappa_nrna"),
     _ParamSpec("nrna_frac_mom_min_evidence_global", "em.nrna_frac_mom_min_evidence_global"),
     _ParamSpec("nrna_frac_mom_min_evidence_locus", "em.nrna_frac_mom_min_evidence_locus"),
-    _ParamSpec("nrna_frac_mom_min_evidence_tss", "em.nrna_frac_mom_min_evidence_tss"),
     _ParamSpec("nrna_frac_kappa_min", "em.nrna_frac_kappa_min"),
     _ParamSpec("nrna_frac_kappa_max", "em.nrna_frac_kappa_max"),
     _ParamSpec("nrna_frac_kappa_fallback", "em.nrna_frac_kappa_fallback"),
@@ -779,13 +777,6 @@ def build_parser() -> argparse.ArgumentParser:
              "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
-        "--tss-window", dest="tss_window",
-        type=int, default=None,
-        help="Fuzzy TSS grouping window in bp (default: 200). "
-             "Transcripts whose 5' ends lie within this distance are "
-             "grouped for the nrna_frac prior hierarchy.",
-    )
-    adv.add_argument(
         "--nrna-frac-kappa-global", dest="nrna_frac_kappa_global",
         type=float, default=None,
         help="Shrinkage κ pulling locus-strand nrna_frac toward the global "
@@ -794,14 +785,14 @@ def build_parser() -> argparse.ArgumentParser:
     adv.add_argument(
         "--nrna-frac-kappa-locus", dest="nrna_frac_kappa_locus",
         type=float, default=None,
-        help="Shrinkage κ pulling TSS-group nrna_frac toward the "
+        help="Shrinkage κ pulling per-nRNA nrna_frac toward the "
              "locus-strand estimate.  Default: auto-estimate.",
     )
     adv.add_argument(
-        "--nrna-frac-kappa-tss", dest="nrna_frac_kappa_tss",
+        "--nrna-frac-kappa-nrna", dest="nrna_frac_kappa_nrna",
         type=float, default=None,
-        help="Shrinkage κ pulling transcript nrna_frac toward the "
-             "TSS-group estimate.  Default: auto-estimate.",
+        help="Constant pseudo-count for the final Beta prior fed to "
+             "the EM solver (default: 5.0).",
     )
     adv.add_argument(
         "--nrna-frac-mom-min-evidence-global",
@@ -815,13 +806,6 @@ def build_parser() -> argparse.ArgumentParser:
         dest="nrna_frac_mom_min_evidence_locus",
         type=float, default=None,
         help="Min fragment evidence for locus MoM κ estimation "
-             "(default: 30).",
-    )
-    adv.add_argument(
-        "--nrna-frac-mom-min-evidence-tss",
-        dest="nrna_frac_mom_min_evidence_tss",
-        type=float, default=None,
-        help="Min fragment evidence for TSS-level MoM κ estimation "
              "(default: 20).",
     )
     adv.add_argument(

@@ -40,7 +40,7 @@ from .splice import SpliceType
 from .estimator import (
     AbundanceEstimator,
     compute_global_gdna_density,
-    compute_hybrid_nrna_frac_priors,
+    compute_nrna_frac_priors,
 )
 from .types import ChimeraType, Strand
 from .index import TranscriptIndex
@@ -462,10 +462,6 @@ def quant_from_buffer(
         transcript_spans=transcript_spans,
     )
 
-    # --- Compute fuzzy TSS groups for nrna_frac prior hierarchy ---
-    if index.t_to_tss_group is None:
-        index.compute_and_set_tss_groups(tss_window=em_config.tss_window)
-
     estimator = AbundanceEstimator(
         index.num_transcripts,
         num_nrna=index.num_nrna,
@@ -566,21 +562,19 @@ def quant_from_buffer(
         )
 
         # Compute nrna_frac (nascent fraction) Beta priors via hybrid
-        # density + strand model with smooth EB shrinkage.
-        # None → auto-estimate κ via Method of Moments.
-        compute_hybrid_nrna_frac_priors(
+        # density + strand model with 3-tier EB shrinkage.
+        # (Global → Locus-Strand → nRNA)
+        compute_nrna_frac_priors(
             estimator,
-            t_to_tss_group=index.t_to_tss_group,
-            t_to_strand=index.t_to_strand_arr,
-            locus_id_per_transcript=estimator.locus_id_per_transcript,
+            nrna_strands=index.nrna_df["strand"].values,
+            nrna_spans=nrna_spans,
             strand_specificity=strand_models.strand_specificity,
             gdna_density=gdna_density,
             kappa_global=em_config.nrna_frac_kappa_global,
             kappa_locus=em_config.nrna_frac_kappa_locus,
-            kappa_tss=em_config.nrna_frac_kappa_tss,
+            kappa_nrna=em_config.nrna_frac_kappa_nrna,
             mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
             mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
-            mom_min_evidence_tss=em_config.nrna_frac_mom_min_evidence_tss,
             kappa_min=em_config.nrna_frac_kappa_min,
             kappa_max=em_config.nrna_frac_kappa_max,
             kappa_fallback=em_config.nrna_frac_kappa_fallback,

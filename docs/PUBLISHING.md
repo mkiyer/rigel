@@ -2,6 +2,15 @@
 
 This guide covers the complete process for publishing Rigel releases.
 
+> **Note on naming:** The GitHub repository, Python import name, Bioconda package,
+> and CLI command are all **`rigel`**. Only the **PyPI distribution name** is
+> **`rigel-rnaseq`** (because `rigel` was already taken on PyPI).
+>
+> - Install from PyPI: `pip install rigel-rnaseq`
+> - Install from Bioconda: `conda install -c bioconda rigel`
+> - Import in Python: `import rigel`
+> - Run CLI: `rigel --version`
+
 ---
 
 ## Prerequisites
@@ -21,7 +30,7 @@ authenticates directly via OpenID Connect.
 
 1. Go to [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/)
 2. Add a new **pending publisher**:
-   - **PyPI project name:** `rigel`
+   - **PyPI project name:** `rigel-rnaseq`
    - **Owner:** `mkiyer`
    - **Repository:** `rigel`
    - **Workflow name:** `publish.yml`
@@ -65,18 +74,18 @@ pip install build
 python -m build
 
 # Test the sdist builds correctly
-pip install dist/rigel-0.1.0.tar.gz
+pip install dist/rigel_rnaseq-0.1.0.tar.gz
 
 # Test the wheel installs correctly
-pip install dist/rigel-0.1.0-cp312-abi3-*.whl
+pip install dist/rigel_rnaseq-0.1.0-cp312-abi3-*.whl
 rigel --help
 ```
 
 ### Verifying the PyPI Upload
 
 After the workflow completes:
-- Check [pypi.org/project/rigel](https://pypi.org/project/rigel/)
-- Verify `pip install rigel` works in a clean environment
+- Check [pypi.org/project/rigel-rnaseq](https://pypi.org/project/rigel-rnaseq/)
+- Verify `pip install rigel-rnaseq` works in a clean environment
 
 ---
 
@@ -90,13 +99,13 @@ source tarball URL). The typical flow is: PyPI first, then Bioconda.
 After the PyPI upload, get the hash of the source tarball:
 
 ```bash
-pip download --no-binary :all: --no-deps rigel==0.1.0 -d /tmp/rigel-dl
-sha256sum /tmp/rigel-dl/rigel-0.1.0.tar.gz
+pip download --no-binary :all: --no-deps rigel-rnaseq==0.1.0 -d /tmp/rigel-dl
+sha256sum /tmp/rigel-dl/rigel_rnaseq-0.1.0.tar.gz
 ```
 
 Or from the PyPI JSON API:
 ```bash
-curl -s https://pypi.org/pypi/rigel/0.1.0/json | python -c "
+curl -s https://pypi.org/pypi/rigel-rnaseq/0.1.0/json | python -c "
 import sys, json
 data = json.load(sys.stdin)
 for f in data['urls']:
@@ -137,7 +146,7 @@ cp /path/to/rigel/conda/meta.yaml recipes/rigel/meta.yaml
 
 ```yaml
 source:
-  url: https://pypi.org/packages/source/r/rigel/rigel-0.1.0.tar.gz
+  url: https://pypi.org/packages/source/r/rigel-rnaseq/rigel_rnaseq-0.1.0.tar.gz
   sha256: ACTUAL_HASH_HERE
 ```
 
@@ -233,7 +242,7 @@ PyPI releases and open PRs automatically.
 2. [ ] Update `CHANGELOG.md`
 3. [ ] Commit, tag, push
 4. [ ] Create GitHub Release → triggers PyPI publish
-5. [ ] Verify on PyPI: `pip install rigel==X.Y.Z`
+5. [ ] Verify on PyPI: `pip install rigel-rnaseq==X.Y.Z`
 6. [ ] Get sdist SHA256 from PyPI
 7. [ ] Update bioconda recipe with new version + hash
 8. [ ] Open PR to bioconda-recipes

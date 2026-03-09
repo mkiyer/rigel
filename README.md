@@ -8,9 +8,9 @@
 
 <p align="center">
   <a href="https://github.com/mkiyer/rigel/actions"><img src="https://img.shields.io/github/actions/workflow/status/mkiyer/rigel/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <a href="https://pypi.org/project/rigel/"><img src="https://img.shields.io/pypi/v/rigel" alt="PyPI"></a>
+  <a href="https://pypi.org/project/rigel-rnaseq/"><img src="https://img.shields.io/pypi/v/rigel-rnaseq" alt="PyPI"></a>
   <a href="https://anaconda.org/bioconda/rigel"><img src="https://img.shields.io/conda/vn/bioconda/rigel" alt="Bioconda"></a>
-  <a href="https://pypi.org/project/rigel/"><img src="https://img.shields.io/pypi/pyversions/rigel" alt="Python"></a>
+  <a href="https://pypi.org/project/rigel-rnaseq/"><img src="https://img.shields.io/pypi/pyversions/rigel-rnaseq" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
 </p>
 
@@ -75,7 +75,7 @@ conda install -c conda-forge -c bioconda rigel
 ### From PyPI
 
 ```bash
-pip install rigel
+pip install rigel-rnaseq
 ```
 
 Requires a C++17-capable compiler (GCC 7+, Clang 5+) and htslib headers.
