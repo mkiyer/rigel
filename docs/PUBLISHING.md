@@ -1,260 +1,194 @@
-# Publishing Rigel to PyPI and Bioconda
+# Publishing Rigel
 
-This guide covers the complete process for publishing Rigel releases.
+This guide covers the release workflow for PyPI and Bioconda.
 
-> **Note on naming:** The GitHub repository, Python import name, Bioconda package,
-> and CLI command are all **`rigel`**. Only the **PyPI distribution name** is
-> **`rigel-rnaseq`** (because `rigel` was already taken on PyPI).
+> Naming summary:
 >
-> - Install from PyPI: `pip install rigel-rnaseq`
-> - Install from Bioconda: `conda install -c bioconda rigel`
-> - Import in Python: `import rigel`
-> - Run CLI: `rigel --version`
+> - PyPI distribution: `rigel-rnaseq`
+> - Bioconda package: `rigel`
+> - Python import: `rigel`
+> - CLI command: `rigel`
 
 ---
 
-## Prerequisites
+## 1. Prerequisites
 
-1. **GitHub repository** at `https://github.com/mkiyer/rigel` (public)
-2. **PyPI account** at [pypi.org](https://pypi.org/account/register/)
-3. **GitHub account** with fork of [bioconda-recipes](https://github.com/bioconda/bioconda-recipes)
+You need:
+
+1. A public GitHub repository at `mkiyer/rigel`
+2. A PyPI account
+3. A fork of `bioconda/bioconda-recipes`
 
 ---
 
-## Part 1: Publishing to PyPI
+## 2. PyPI publishing
 
-### One-Time Setup (Trusted Publisher)
+### 2.1 One-time trusted publisher setup
 
-PyPI supports "trusted publishing" — no API tokens needed. GitHub Actions
-authenticates directly via OpenID Connect.
+Rigel is configured for trusted publishing from GitHub Actions.
 
-1. Go to [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/)
-2. Add a new **pending publisher**:
-   - **PyPI project name:** `rigel-rnaseq`
-   - **Owner:** `mkiyer`
-   - **Repository:** `rigel`
-   - **Workflow name:** `publish.yml`
-   - **Environment name:** `pypi`
-3. In your GitHub repo, go to **Settings → Environments** and create an
-   environment called `pypi`. Optionally add a deployment protection rule
-   requiring manual approval.
+Create a pending publisher on PyPI with:
 
-### Release Workflow
+- project name: `rigel-rnaseq`
+- owner: `mkiyer`
+- repository: `rigel`
+- workflow: `publish.yml`
+- environment: `pypi`
 
-```bash
-# 1. Update version in pyproject.toml
-#    version = "0.1.0" → "0.2.0"
+Then create a GitHub environment named `pypi` in the repository settings.
 
-# 2. Update CHANGELOG.md
+### 2.2 Release preparation
 
-# 3. Commit and tag
-git add pyproject.toml CHANGELOG.md
-git commit -m "Release v0.2.0"
-git tag v0.2.0
-git push origin main --tags
+Before a release:
 
-# 4. Create a GitHub Release from the tag
-#    Go to: https://github.com/mkiyer/rigel/releases/new
-#    Select tag: v0.2.0
-#    Title: "Rigel v0.2.0"
-#    Paste changelog notes
-#    Click "Publish release"
-```
+1. Bump `version` in `pyproject.toml`
+2. Update `CHANGELOG.md`
+3. Ensure the docs are current
+4. Verify that local builds still work
 
-Publishing the GitHub Release triggers the `publish.yml` workflow which:
-1. Builds an sdist (source distribution)
-2. Builds binary wheels for Linux (x86_64, aarch64) and macOS (x86_64, arm64)
-3. Uploads everything to PyPI via trusted publishing
-
-### Manual Testing Before First Release
+Local validation:
 
 ```bash
-# Build locally and inspect
 pip install build
 python -m build
 
-# Test the sdist builds correctly
-pip install dist/rigel_rnaseq-0.1.0.tar.gz
-
-# Test the wheel installs correctly
-pip install dist/rigel_rnaseq-0.1.0-cp312-abi3-*.whl
+pip install dist/rigel_rnaseq-X.Y.Z.tar.gz
 rigel --help
+
+pip install dist/rigel_rnaseq-X.Y.Z-cp312-abi3-*.whl
+rigel --version
 ```
 
-### Verifying the PyPI Upload
+### 2.3 Create the release
 
-After the workflow completes:
-- Check [pypi.org/project/rigel-rnaseq](https://pypi.org/project/rigel-rnaseq/)
-- Verify `pip install rigel-rnaseq` works in a clean environment
+```bash
+git add pyproject.toml CHANGELOG.md README.md docs/
+git commit -m "Release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main --tags
+```
+
+Create a GitHub Release from `vX.Y.Z`. Publishing the release triggers the
+`publish.yml` workflow, which should:
+
+1. build the sdist
+2. build wheels for supported Linux and macOS targets
+3. upload all artifacts to PyPI via trusted publishing
+
+### 2.4 Post-release checks
+
+Verify:
+
+```bash
+pip install rigel-rnaseq==X.Y.Z
+rigel --version
+```
+
+Also check the project page:
+
+- `https://pypi.org/project/rigel-rnaseq/`
 
 ---
 
-## Part 2: Publishing to Bioconda
+## 3. Bioconda publishing
 
-Bioconda requires that the package is **already on PyPI** (or has a stable
-source tarball URL). The typical flow is: PyPI first, then Bioconda.
+Bioconda should be done after PyPI, because the recipe source URL points to the
+PyPI sdist.
 
-### Step 1: Get the sdist SHA256
-
-After the PyPI upload, get the hash of the source tarball:
+### 3.1 Fetch the sdist hash
 
 ```bash
-pip download --no-binary :all: --no-deps rigel-rnaseq==0.1.0 -d /tmp/rigel-dl
-sha256sum /tmp/rigel-dl/rigel_rnaseq-0.1.0.tar.gz
+pip download --no-binary :all: --no-deps rigel-rnaseq==X.Y.Z -d /tmp/rigel-dl
+shasum -a 256 /tmp/rigel-dl/rigel_rnaseq-X.Y.Z.tar.gz
 ```
 
-Or from the PyPI JSON API:
+Or via the PyPI JSON API:
+
 ```bash
-curl -s https://pypi.org/pypi/rigel-rnaseq/0.1.0/json | python -c "
-import sys, json
+curl -s https://pypi.org/pypi/rigel-rnaseq/X.Y.Z/json | python -c '
+import json, sys
 data = json.load(sys.stdin)
-for f in data['urls']:
-    if f['packagetype'] == 'sdist':
-        print(f['digests']['sha256'])
-"
+for item in data["urls"]:
+      if item["packagetype"] == "sdist":
+            print(item["digests"]["sha256"])
+'
 ```
 
-### Step 2: Fork and Clone bioconda-recipes
+### 3.2 Update the Bioconda recipe
 
-```bash
-# One-time setup
-git clone https://github.com/mkiyer/bioconda-recipes.git
-cd bioconda-recipes
-git remote add upstream https://github.com/bioconda/bioconda-recipes.git
-```
-
-### Step 3: Create the Recipe Branch
-
-```bash
-git fetch upstream
-git checkout -b add-rigel upstream/master
-
-# Create the recipe directory
-mkdir -p recipes/rigel
-```
-
-### Step 4: Write the Recipe
-
-Copy the template from `conda/meta.yaml` in this repo to
-`recipes/rigel/meta.yaml` in the bioconda-recipes fork:
+Use the recipe template from this repository:
 
 ```bash
 cp /path/to/rigel/conda/meta.yaml recipes/rigel/meta.yaml
 ```
 
-**Update the sha256 hash** with the actual value from Step 1:
+Update at least:
+
+- version
+- source URL
+- source SHA256
+- build number if needed
+
+The source stanza should look like:
 
 ```yaml
 source:
-  url: https://pypi.org/packages/source/r/rigel-rnaseq/rigel_rnaseq-0.1.0.tar.gz
-  sha256: ACTUAL_HASH_HERE
+   url: https://pypi.org/packages/source/r/rigel-rnaseq/rigel_rnaseq-X.Y.Z.tar.gz
+   sha256: ACTUAL_SHA256_HERE
 ```
 
-### Step 5: Test Locally with bioconda-utils
+### 3.3 Validate locally
 
 ```bash
-# Install bioconda-utils
 conda install -c conda-forge -c bioconda bioconda-utils
-
-# Lint the recipe
 bioconda-utils lint --packages rigel
-
-# Build locally (requires Docker on Linux)
 bioconda-utils build --packages rigel --docker
 ```
 
-### Step 6: Submit the Pull Request
+### 3.4 Submit the PR
 
 ```bash
-git add recipes/rigel/meta.yaml
-git commit -m "Add rigel 0.1.0"
-git push origin add-rigel
-```
-
-Then open a PR to `bioconda/bioconda-recipes`. The PR template will appear
-with a checklist. Key requirements:
-
-- [x] Recipe follows [bioconda guidelines](https://bioconda.github.io/contributor/guidelines.html)
-- [x] Package is already on PyPI (or has a stable URL)
-- [x] License is open source (GPL-3.0-or-later ✓)
-- [x] `test` section verifies the install (import + CLI)
-- [x] `about.license_file` points to LICENSE
-- [x] `extra.recipe-maintainers` lists your GitHub username
-
-### Step 7: Review Process
-
-Bioconda uses automated CI bots:
-1. **BiocondaBot** checks recipe formatting and runs linting
-2. **Azure Pipelines** builds the package on Linux and macOS
-3. A bioconda team member reviews and merges
-
-Common issues to watch for:
-- Missing `run_exports` for C libraries
-- Build failures from missing `pkg-config` or compiler packages
-- Test failures if `rigel --help` has non-zero exit or unexpected output
-- Hash mismatch if you updated the PyPI package after getting the hash
-
-After merge, the package appears on bioconda within ~30 minutes:
-```bash
-conda install -c conda-forge -c bioconda rigel
-```
-
-### Updating Bioconda for New Releases
-
-For subsequent releases, the bioconda bot can auto-bump:
-
-```bash
-cd bioconda-recipes
 git fetch upstream
-git checkout -b update-rigel-0.2.0 upstream/master
-
-# Edit recipes/rigel/meta.yaml:
-#   version: "0.2.0"
-#   sha256: NEW_HASH
-#   number: 0
-
+git checkout -b update-rigel-X.Y.Z upstream/master
 git add recipes/rigel/meta.yaml
-git commit -m "Update rigel to 0.2.0"
-git push origin update-rigel-0.2.0
-# Open PR
+git commit -m "Update rigel to X.Y.Z"
+git push origin update-rigel-X.Y.Z
 ```
 
-Alternatively, if you've set up the **autobump bot**, it will detect new
-PyPI releases and open PRs automatically.
+Open a pull request against `bioconda/bioconda-recipes`.
+
+After merge, verify:
+
+```bash
+conda install -c conda-forge -c bioconda rigel==X.Y.Z
+rigel --version
+```
 
 ---
 
-## Part 3: Checklist Summary
+## 4. Release checklist
 
-### Before First Release
+### Before tagging
 
-- [ ] Verify `pyproject.toml` metadata (name, version, description, URLs, license)
-- [ ] Ensure `MANIFEST.in` includes all C/C++ sources and headers
-- [ ] Ensure `CHANGELOG.md` has release notes
-- [ ] Test local build: `python -m build` succeeds
-- [ ] Test local install: `pip install dist/rigel-*.tar.gz` works
-- [ ] Set up PyPI trusted publisher (one-time)
-- [ ] Create GitHub `pypi` environment (one-time)
+- `pyproject.toml` version bumped
+- `CHANGELOG.md` updated
+- `README.md`, `docs/MANUAL.md`, `docs/METHODS.md`, and `docs/PUBLISHING.md` reviewed
+- `MANIFEST.in` still includes native sources and docs needed for the sdist
+- `python -m build` succeeds locally
 
-### For Each Release
+### After the GitHub Release
 
-1. [ ] Bump version in `pyproject.toml`
-2. [ ] Update `CHANGELOG.md`
-3. [ ] Commit, tag, push
-4. [ ] Create GitHub Release → triggers PyPI publish
-5. [ ] Verify on PyPI: `pip install rigel-rnaseq==X.Y.Z`
-6. [ ] Get sdist SHA256 from PyPI
-7. [ ] Update bioconda recipe with new version + hash
-8. [ ] Open PR to bioconda-recipes
-9. [ ] Verify on Bioconda: `conda install -c bioconda rigel==X.Y.Z`
+- PyPI workflow completed successfully
+- `pip install rigel-rnaseq==X.Y.Z` works in a clean environment
+- Bioconda recipe updated with the new hash
+- Bioconda PR opened or autobump verified
 
-### Files Created/Modified
+---
 
-| File | Purpose |
-|------|---------|
-| `.github/workflows/ci.yml` | CI testing on push/PR |
-| `.github/workflows/publish.yml` | Build wheels + publish to PyPI on release |
-| `conda/meta.yaml` | Bioconda recipe template |
-| `MANIFEST.in` | Ensures sdist includes C/C++ sources |
-| `pyproject.toml` | Added project URLs, verified metadata |
-| `CMakeLists.txt` | Added `RIGEL_PORTABLE` option for distributable wheels |
+## 5. Common failure modes
+
+- PyPI trusted publisher mismatch: verify project name, repo name, workflow name, and environment
+- Source build failure: verify `MANIFEST.in` still includes native source files
+- Wheel portability issue: verify CI builds use the portable wheel configuration
+- Bioconda hash mismatch: regenerate the SHA256 from the final PyPI sdist
+- CLI smoke-test failure: ensure `rigel --help` and `rigel --version` both work in the built artifact

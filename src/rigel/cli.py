@@ -421,10 +421,12 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("nrna_frac_kappa_max", "em.nrna_frac_kappa_max"),
     _ParamSpec("nrna_frac_kappa_fallback", "em.nrna_frac_kappa_fallback"),
     _ParamSpec("nrna_frac_kappa_min_obs", "em.nrna_frac_kappa_min_obs"),
-    _ParamSpec("gdna_kappa_chrom", "em.gdna_kappa_chrom"),
+    _ParamSpec("gdna_kappa_ref", "em.gdna_kappa_ref"),
     _ParamSpec("gdna_kappa_locus", "em.gdna_kappa_locus"),
-    _ParamSpec("gdna_mom_min_evidence_chrom", "em.gdna_mom_min_evidence_chrom"),
+    _ParamSpec("gdna_mom_min_evidence_ref", "em.gdna_mom_min_evidence_ref"),
     _ParamSpec("gdna_mom_min_evidence_locus", "em.gdna_mom_min_evidence_locus"),
+    _ParamSpec("strand_symmetry_kappa", "em.strand_symmetry_kappa"),
+    _ParamSpec("strand_symmetry_pseudo", "em.strand_symmetry_pseudo"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("strand_prior_kappa", "scan.strand_prior_kappa"),
@@ -830,22 +832,22 @@ def build_parser() -> argparse.ArgumentParser:
              "fewer triggers fallback (default: 20).",
     )
     adv.add_argument(
-        "--gdna-kappa-chrom", dest="gdna_kappa_chrom",
+        "--gdna-kappa-ref", dest="gdna_kappa_ref",
         type=float, default=None,
-        help="Shrinkage κ pulling chromosome gDNA rate toward the "
+        help="Shrinkage κ pulling reference-level gDNA rate toward the "
              "global estimate.  Default: auto-estimate via MoM.",
     )
     adv.add_argument(
         "--gdna-kappa-locus", dest="gdna_kappa_locus",
         type=float, default=None,
-        help="Shrinkage κ pulling locus gDNA rate toward the "
-             "chromosome estimate.  Default: auto-estimate via MoM.",
+           help="Shrinkage κ pulling locus gDNA rate toward the "
+               "reference-level estimate.  Default: auto-estimate via MoM.",
     )
     adv.add_argument(
-        "--gdna-mom-min-evidence-chrom",
-        dest="gdna_mom_min_evidence_chrom",
+           "--gdna-mom-min-evidence-ref",
+           dest="gdna_mom_min_evidence_ref",
         type=float, default=None,
-        help="Min fragment evidence for chromosome gDNA MoM κ "
+           help="Min fragment evidence for reference-level gDNA MoM κ "
              "estimation (default: 50).",
     )
     adv.add_argument(
@@ -854,6 +856,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=float, default=None,
         help="Min fragment evidence for locus gDNA MoM κ "
              "estimation (default: 30).",
+    )
+    adv.add_argument(
+        "--strand-symmetry-kappa", dest="strand_symmetry_kappa",
+        type=float, default=None,
+        help="Strand symmetry penalty κ for gDNA in the M-step. "
+             "Beta(κ/2, κ/2) prior on gDNA strand fraction. "
+             "Higher = sharper penalty for asymmetry. "
+             "Set ≤ 2.0 to disable (default: 6.0).",
+    )
+    adv.add_argument(
+        "--strand-symmetry-pseudo", dest="strand_symmetry_pseudo",
+        type=float, default=None,
+        help="Bayesian pseudo-count (α₀) for gDNA strand fraction. "
+             "Controls evidence threshold for the symmetry penalty. "
+             "Higher = more forgiving at low counts (default: 50.0).",
     )
     adv.add_argument(
         "--strand-prior-kappa", dest="strand_prior_kappa",

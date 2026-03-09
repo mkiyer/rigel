@@ -419,7 +419,15 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels):
     dims.setdefault("strand_specificity", [1.0])
     dims.setdefault("n_fragments", [2000])
 
-    return dims, linked_names
+    # EM config overrides (recognized but not defaulted — absent = EMConfig default)
+    # Supported: prune_threshold, prior_alpha, prior_gamma,
+    #            strand_symmetry_kappa, strand_symmetry_pseudo
+    EM_OVERRIDE_KEYS = {
+        "prune_threshold", "prior_alpha", "prior_gamma",
+        "strand_symmetry_kappa", "strand_symmetry_pseudo",
+    }
+
+    return dims, linked_names, EM_OVERRIDE_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +477,7 @@ def run_sweep(config, output_dir, *, gtf_path=None,
     # -- Build sweep grid --
     sweep_config = config.get("sweep", {})
     patterns_config = config.get("patterns")
-    dims, linked_names = build_sweep_grid(
+    dims, linked_names, em_override_keys = build_sweep_grid(
         sweep_config, patterns_config, all_t_ids, nrna_labels)
 
     # Cartesian product
@@ -555,6 +563,9 @@ def run_sweep(config, output_dir, *, gtf_path=None,
             ss = float(params.get("strand_specificity", 1.0))
             if ss < 1.0:
                 parts.append(f"ss={ss}")
+            for ek in sorted(em_override_keys):
+                if ek in params:
+                    parts.append(f"{ek}={params[ek]}")
             run_label = " ".join(parts) or "baseline"
 
             logger.info("=" * 60)
@@ -619,7 +630,11 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                 )
 
                 pipe_cfg = PipelineConfig(
-                    em=EMConfig(seed=seed),
+                    em=EMConfig(
+                        seed=seed,
+                        **{k: params[k] for k in em_override_keys
+                           if k in params},
+                    ),
                     scan=BamScanConfig(sj_strand_tag="auto"),
                 )
                 pr = run_pipeline(

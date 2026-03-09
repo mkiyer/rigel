@@ -56,8 +56,8 @@ You need:
 - genome FASTA (indexed by `samtools faidx` as needed; supports `.bgz`)
 - gene annotation GTF or GTF.GZ
 - region definitions via either:
-  - `region` list in YAML/CLI (`chr:start-end`), or
-  - `region_file` TSV (`chrom<TAB>start1<TAB>end1<TAB>label`)
+  - `region` list in YAML/CLI (`ref:start-end`), or
+  - `region_file` TSV (`ref<TAB>start1<TAB>end1<TAB>label`)
 
 The 10-region benchmark TSV already exists at `scripts/benchmarking/regions_benchmark.tsv`.
 
@@ -116,7 +116,7 @@ region:
   - BRCA1: chr17:43044295-43170245
 ```
 
-Each named region is a single-key YAML dict `{Name: "chr:start-end"}`. Coordinates are 1-based inclusive.
+Each named region is a single-key YAML dict `{Name: "ref:start-end"}`. Coordinates are 1-based inclusive.
 
 Alternatively, use `region_file` to point to a TSV:
 
@@ -124,7 +124,7 @@ Alternatively, use `region_file` to point to a TSV:
 region_file: /path/to/regions.tsv
 ```
 
-TSV format: `chrom<TAB>start<TAB>end<TAB>label` (1-based start, 0-based end as per BED conventions).
+TSV format: `ref<TAB>start<TAB>end<TAB>label` (1-based start, 0-based end as per BED conventions).
 
 ### `aligners` — Aligner parameterizations
 

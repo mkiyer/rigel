@@ -20,7 +20,7 @@ independent EM instance solving:
 The gDNA shadow is a **single genomic component** per locus, built from
 the coverage islands of unspliced fragment alignments.  It represents the
 genome as a competing source, NOT attributed to genes.  gDNA is a property
-of the reference chromosomes; fragments classified as gDNA are reported
+of the reference sequence; fragments classified as gDNA are reported
 in genomic coordinates.
 
 Posterior expected-count assignment
@@ -422,15 +422,10 @@ def compute_global_gdna_density(
     float
         Global gDNA density in fragments per base pair.
     """
-    from .locus import compute_gdna_rate_from_strand
+    from .locus import compute_gdna_density_from_strand
 
     total_sense = float(estimator.transcript_unspliced_sense.sum())
     total_anti = float(estimator.transcript_unspliced_antisense.sum())
-    gdna_rate = compute_gdna_rate_from_strand(
-        total_sense, total_anti, strand_specificity,
-    )
-    total_unspliced = total_sense + total_anti
-    gdna_frag_count = gdna_rate * total_unspliced
 
     # Normalise by total exonic span to get per-bp density.
     if estimator._exonic_lengths is not None:
@@ -439,7 +434,9 @@ def compute_global_gdna_density(
         total_exonic_bp = 0.0
 
     if total_exonic_bp > 0:
-        return gdna_frag_count / total_exonic_bp
+        return compute_gdna_density_from_strand(
+            total_sense, total_anti, total_exonic_bp, strand_specificity,
+        )
     return 0.0
 
 
@@ -897,7 +894,7 @@ class AbundanceEstimator:
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
 
-        # Per-locus results (locus_id, chrom, n_transcripts, n_genes,
+        # Per-locus results (locus_id, ref, n_transcripts, n_genes,
         # n_em_fragments, mrna, nrna, gdna, gdna_init).
         self.locus_results: list[dict] = []
 
@@ -1160,6 +1157,8 @@ class AbundanceEstimator:
             N_T,
             NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,
+            self.em_config.strand_symmetry_kappa,
+            self.em_config.strand_symmetry_pseudo,
         )
 
         return (
@@ -1383,7 +1382,7 @@ class AbundanceEstimator:
         Columns
         -------
         locus_id : int, sequential locus identifier
-        chrom : str, primary chromosome
+        ref : str, primary reference name
         n_transcripts : int
         n_genes : int
         n_em_fragments : int, ambiguous fragments entering EM
@@ -1394,7 +1393,7 @@ class AbundanceEstimator:
         gdna_init : float, EB-shrunk gDNA initialization
         """
         cols = [
-            "locus_id", "chrom", "n_transcripts", "n_genes",
+            "locus_id", "ref", "n_transcripts", "n_genes",
             "n_em_fragments", "mrna", "nrna", "gdna",
             "gdna_rate", "gdna_init",
         ]
@@ -1407,7 +1406,7 @@ class AbundanceEstimator:
             rate = r["gdna"] / total if total > 0 else 0.0
             rows.append({
                 "locus_id": r["locus_id"],
-                "chrom": r.get("chrom", ""),
+                "ref": r.get("ref", ""),
                 "n_transcripts": r["n_transcripts"],
                 "n_genes": r["n_genes"],
                 "n_em_fragments": r["n_em_fragments"],

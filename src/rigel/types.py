@@ -83,7 +83,7 @@ class Interval(NamedTuple):
     """A simple 0-based half-open interval (start, end).
 
     Used by ``Transcript`` to store exon coordinates. For intervals
-    positioned on a specific chromosome/strand, use ``GenomicInterval``.
+    positioned on a specific reference/strand, use ``GenomicInterval``.
     """
     start: int
     end: int
@@ -94,7 +94,7 @@ class Interval(NamedTuple):
 # ---------------------------------------------------------------------------
 
 class GenomicInterval(NamedTuple):
-    """An interval located on a specific chromosome and strand.
+    """An interval located on a specific reference and strand.
 
     Used by ``Fragment`` for aligned exons and splice junctions (introns),
     and anywhere a positioned interval is needed without annotation metadata.

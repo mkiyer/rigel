@@ -98,18 +98,33 @@ class EMConfig:
     fewer triggers the fallback."""
 
     # -- gDNA EB shrinkage knobs --
-    gdna_kappa_chrom: float | None = None
-    """Shrinkage pseudo-count pulling chromosome gDNA rate toward the
+    gdna_kappa_ref: float | None = None
+    """Shrinkage pseudo-count pulling reference-level gDNA rate toward the
     global estimate.  ``None`` (default) → auto-estimate via MoM."""
     gdna_kappa_locus: float | None = None
     """Shrinkage pseudo-count pulling locus gDNA rate toward the
-    (shrunk) chromosome estimate.  ``None`` → auto-estimate."""
-    gdna_mom_min_evidence_chrom: float = 50.0
-    """Minimum fragment evidence for a chromosome to contribute to
-    the gDNA MoM κ_chrom estimate."""
+    (shrunk) reference-level estimate.  ``None`` → auto-estimate."""
+    gdna_mom_min_evidence_ref: float = 50.0
+    """Minimum fragment evidence for a reference sequence to contribute to
+    the gDNA MoM κ_ref estimate."""
     gdna_mom_min_evidence_locus: float = 30.0
     """Minimum fragment evidence for a locus to contribute to
     the gDNA MoM κ_locus estimate."""
+
+    # -- gDNA strand symmetry penalty knobs --
+    strand_symmetry_kappa: float = 6.0
+    """Strand symmetry penalty strength for gDNA in the M-step.
+    Uses a Beta(κ/2, κ/2) prior on gDNA strand fraction.
+    Higher → sharper penalty for strand asymmetry.
+    Set ≤ 2.0 to disable the penalty entirely.
+    """
+    strand_symmetry_pseudo: float = 50.0
+    """Bayesian pseudo-count (α₀) for gDNA strand fraction regularisation.
+    Acts as a Beta(α₀, α₀) prior belief: "α₀ sense and α₀ antisense
+    fragments" before observing data.  Controls evidence threshold
+    for the symmetry penalty to engage.  Higher → more forgiving
+    at low fragment counts.
+    """
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):

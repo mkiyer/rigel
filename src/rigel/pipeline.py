@@ -55,8 +55,8 @@ from .scoring import FragmentScorer
 from .locus import (
     build_loci,
     compute_nrna_init,
-    compute_gdna_rate_from_strand,
-    compute_gdna_rate_hybrid,
+    compute_gdna_density_from_strand,
+    compute_gdna_density_hybrid,
     compute_eb_gdna_priors,
 )
 from .scan import FragmentRouter
@@ -99,7 +99,7 @@ def _compute_intergenic_density(
 ) -> float:
     """Compute background intergenic density (frags / bp).
 
-    Uses reference chromosome lengths from the index and the merged
+    Uses reference lengths from the index and the merged
     genic union span to derive intergenic territory, then normalises
     the intergenic fragment count to obtain per-bp density.
 
@@ -546,9 +546,9 @@ def quant_from_buffer(
         gdna_inits = compute_eb_gdna_priors(
             loci, em_data, estimator, index, strand_models,
             intergenic_density=intergenic_density,
-            kappa_chrom=em_config.gdna_kappa_chrom,
+            kappa_ref=em_config.gdna_kappa_ref,
             kappa_locus=em_config.gdna_kappa_locus,
-            mom_min_evidence_chrom=em_config.gdna_mom_min_evidence_chrom,
+            mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
             mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
             kappa_min=em_config.nrna_frac_kappa_min,
             kappa_max=em_config.nrna_frac_kappa_max,
@@ -592,13 +592,13 @@ def quant_from_buffer(
             for t_idx in locus.transcript_indices:
                 ref = str(t_refs[int(t_idx)])
                 ref_counts[ref] = ref_counts.get(ref, 0) + 1
-            primary_chrom = (
+            primary_ref = (
                 max(ref_counts, key=ref_counts.get) if ref_counts else ""
             )
             gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
             return {
                 "locus_id": locus.locus_id,
-                "chrom": primary_chrom,
+                "ref": primary_ref,
                 "n_transcripts": len(locus.transcript_indices),
                 "n_genes": len(gene_set),
                 "n_em_fragments": len(locus.unit_indices),

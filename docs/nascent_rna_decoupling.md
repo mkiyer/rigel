@@ -98,7 +98,7 @@ def compute_nrna_table(t_df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray]:
 | Column      | Type   | Description                                     |
 |-------------|--------|-------------------------------------------------|
 | `nrna_idx`  | int32  | Global unique identifier (0 to N-1)             |
-| `ref`       | string | Chromosome / reference name                      |
+| `ref`       | string | Reference name                                   |
 | `strand`    | int8   | Strand (1=POS, 2=NEG)                            |
 | `start`     | int32  | Genomic start of nRNA span                       |
 | `end`       | int32  | Genomic end of nRNA span                         |
@@ -579,7 +579,7 @@ A dedicated nascent RNA abundance output file.
 | `nrna_idx`        | int32   | Unique nRNA index (matches index `nrna.feather`)         |
 | `gene_id`         | string  | Gene identifier(s) — derived from transcript table; comma-delimited if multiple genes share this nRNA |
 | `gene_name`       | string  | Gene name(s) — same derivation as `gene_id`              |
-| `ref`             | string  | Chromosome                                               |
+| `ref`             | string  | Reference                                                |
 | `strand`          | string  | Strand (+/-)                                             |
 | `start`           | int32   | Genomic start                                            |
 | `end`             | int32   | Genomic end                                              |

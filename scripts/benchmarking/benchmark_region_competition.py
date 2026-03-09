@@ -257,7 +257,7 @@ DEFAULT_NRNA_RATES = (0.0,)
 @dataclass
 class RegionSpec:
     label: str
-    chrom: str
+    ref: str
     start0: int  # 0-based inclusive
     end0: int  # 0-based exclusive
 
@@ -311,12 +311,12 @@ class StringGenome:
     def __len__(self) -> int:
         return len(self.seq)
 
-    def fetch(self, chrom: str, start: int, end: int) -> str:
-        assert chrom == self.name
+    def fetch(self, ref: str, start: int, end: int) -> str:
+        assert ref == self.name
         return self.seq[start:end]
 
-    def get_reference_length(self, chrom: str) -> int:
-        assert chrom == self.name
+    def get_reference_length(self, ref: str) -> int:
+        assert ref == self.name
         return len(self.seq)
 
     def references(self) -> list[str]:
@@ -339,11 +339,11 @@ def parse_region(region_str: str, name: str | None = None) -> RegionSpec:
     m = re.match(r"(.+):(\d+)-(\d+)$", region_str)
     if not m:
         raise ValueError(f"Invalid region format: {region_str}")
-    chrom = m.group(1)
+    ref = m.group(1)
     start1 = int(m.group(2))
     end1 = int(m.group(3))
-    label = name if name else f"{chrom}_{start1}_{end1}"
-    return RegionSpec(label=label, chrom=chrom, start0=start1 - 1, end0=end1)
+    label = name if name else f"{ref}_{start1}_{end1}"
+    return RegionSpec(label=label, ref=ref, start0=start1 - 1, end0=end1)
 
 
 def _parse_region_entry(entry) -> RegionSpec:
@@ -373,12 +373,12 @@ def parse_regions(args: argparse.Namespace) -> list[RegionSpec]:
                 parts = line.split("\t")
                 if len(parts) < 3:
                     continue
-                chrom = parts[0]
+                ref = parts[0]
                 start1 = int(parts[1])
                 end1 = int(parts[2])
-                label = parts[3] if len(parts) > 3 else f"{chrom}_{start1}_{end1}"
+                label = parts[3] if len(parts) > 3 else f"{ref}_{start1}_{end1}"
                 regions.append(
-                    RegionSpec(label=label, chrom=chrom, start0=start1 - 1, end0=end1)
+                    RegionSpec(label=label, ref=ref, start0=start1 - 1, end0=end1)
                 )
     if not regions:
         raise ValueError("No regions specified (use --region or --region-file)")
@@ -408,7 +408,7 @@ def extract_region(
     logger.info(
         "Extracting region %s (%s:%d-%d)",
         region.label,
-        region.chrom,
+        region.ref,
         region.start0 + 1,
         region.end0,
     )
@@ -418,7 +418,7 @@ def extract_region(
             "samtools",
             "faidx",
             str(genome_fa),
-            f"{region.chrom}:{region.start0 + 1}-{region.end0}",
+            f"{region.ref}:{region.start0 + 1}-{region.end0}",
         ],
         capture_output=True,
         text=True,
@@ -448,7 +448,7 @@ def extract_region(
             parts = line.strip().split("\t")
             if len(parts) < 9:
                 continue
-            if parts[0] != region.chrom:
+            if parts[0] != region.ref:
                 continue
             feature = parts[2]
             if feature != "exon":
@@ -708,7 +708,7 @@ def write_hisat2_splice_sites(
 
     Format (tab-separated, 0-based)::
 
-        chrom  left_flanking_base  right_flanking_base  strand
+        ref  left_flanking_base  right_flanking_base  strand
 
     where *left_flanking_base* is the last base of the upstream exon and
     *right_flanking_base* is the first base of the downstream exon.
@@ -739,7 +739,7 @@ def write_hisat2_exons(
 
     Format (tab-separated, 0-based inclusive)::
 
-        chrom  left_position  right_position
+        ref  left_position  right_position
 
     Coordinates are 0-based, inclusive on both ends, matching the format
     expected by ``hisat2-build --exon``.
@@ -1719,8 +1719,8 @@ def run_region_benchmark(
     reg_dir = out_root / region.label
     reg_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("[REGION] %s:%d-%d", region.chrom, region.start0 + 1, region.end0)
-    print(f"\n>>> REGION: {region.label} ({region.chrom}:{region.start0+1}-{region.end0})", flush=True)
+    logger.info("[REGION] %s:%d-%d", region.ref, region.start0 + 1, region.end0)
+    print(f"\n>>> REGION: {region.label} ({region.ref}:{region.start0+1}-{region.end0})", flush=True)
 
     # ── Per-region setup (done once) ────────────────────────────────
 
@@ -2557,7 +2557,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--region-file",
         type=Path,
         default=None,
-        help="TSV: chrom<TAB>start1<TAB>end1<TAB>optional_label",
+        help="TSV: ref<TAB>start1<TAB>end1<TAB>optional_label",
     )
     p.add_argument("--outdir", type=Path, required=False, default=None, help="Output directory")
     p.add_argument(

@@ -1,6 +1,30 @@
 # TODO
 
 
+## 'chrom' vs' ref
+
+For genomes and genomic intervals, we are using 'reference' or 'ref' instead of 'chromosome' or 'chrom' throughout the code base. the code is not completely consistent and there are some items incorrectly named 'chrom'. Please change these back to 'ref'.
+
+## gDNA siphoning problem
+
+Currently gDNA siphons mRNA + nRNA fragments.
+
+Initialization is a major problem
+The EM solver might also need constraints
+
+Two ideas:
+1) Predicted expected unspliced vs spliced counts for each transcript. 
+
+We need a function:
+
+unspliced_counts_t <- function(spliced_counts_t, fragment length distribution)
+
+This perfectly complements your Geometric Splicing derivation. The geometric math tells you exactly how many unspliced reads the mRNA *should* have, and these constraints ensure that gDNA can never steal more than its fair, symmetric share of the remainder.
+
+Shall we work out the Python implementation for the Geometric Splicing prediction next?
+
+
+
 I want to implement a major architectural change to improve the functionality of Rigel. This is a breaking change that will change the output and the function of the tool. It will be a dramatic conceptual improvement. We must carefully plan this implementation in multiple stages.
 
 ## nascent RNA decoupling from individual transcripts

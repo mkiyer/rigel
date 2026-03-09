@@ -256,7 +256,7 @@ class Scenario:
         Working directory for output files.  If None, a temporary
         directory is created and cleaned up on ``cleanup()``.
     ref_name : str or None
-        Chromosome name. Defaults to *name*.
+        Reference name. Defaults to *name*.
     """
 
     def __init__(

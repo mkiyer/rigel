@@ -1,2 +1,2 @@
-locus_id	chrom	n_transcripts	n_genes	n_em_fragments	mrna	nrna	gdna	gdna_rate	gdna_init
-0	golden_as	2	2	510	509.63272773687544	4.309356276835251e-06	0.36726795376831617	0.0007201332426829729	320.45657346817376
+locus_id	ref	n_transcripts	n_genes	n_em_fragments	mrna	nrna	gdna	gdna_rate	gdna_init
+0	golden_as	2	2	510	509.6327277622703	4.309356277355712e-06	0.36726792837329314	0.0007201331928888104	1.2566924449732304

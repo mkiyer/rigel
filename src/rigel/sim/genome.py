@@ -36,7 +36,7 @@ class MutableGenome:
     seed : int
         Seed for the random number generator (reproducibility).
     name : str
-        Reference/chromosome name for the FASTA header.
+        Reference name for the FASTA header.
 
     Examples
     --------

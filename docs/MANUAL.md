@@ -1,73 +1,33 @@
 # Rigel User Manual
 
-Complete usage guide for Rigel, a Bayesian RNA-seq transcript
-quantification tool with joint mRNA, nascent RNA, and genomic DNA
-deconvolution.
-
-**Version:** 0.1.0
-
----
-
-## Table of contents
-
-1. [Overview](#overview)
-2. [Installation](#installation)
-3. [Input requirements](#input-requirements)
-4. [Commands](#commands)
-   - [rigel index](#rigel-index)
-   - [rigel quant](#rigel-quant)
-   - [rigel sim](#rigel-sim)
-5. [Parameters reference](#parameters-reference)
-   - [Required arguments](#required-arguments)
-   - [Common options](#common-options)
-   - [EM algorithm](#em-algorithm)
-   - [Scoring penalties](#scoring-penalties)
-   - [nRNA fraction hierarchical shrinkage](#nrna-fraction-hierarchical-shrinkage)
-   - [gDNA rate hierarchical shrinkage](#gdna-rate-hierarchical-shrinkage)
-   - [Strand model](#strand-model)
-   - [Output options](#output-options)
-   - [Performance](#performance)
-6. [Configuration file](#configuration-file)
-7. [Output files](#output-files)
-   - [quant.tsv / quant.feather](#quanttsv--quantfeather)
-   - [gene_quant.tsv / gene_quant.feather](#gene_quanttsv--gene_quantfeather)
-   - [loci.tsv / loci.feather](#locitsv--locifeather)
-   - [quant_detail.tsv / quant_detail.feather](#quant_detailtsv--quant_detailfeather)
-   - [summary.json](#summaryjson)
-   - [config.json](#configjson)
-   - [Annotated BAM](#annotated-bam)
-8. [Supported aligners](#supported-aligners)
-9. [Recipes and examples](#recipes-and-examples)
-10. [FAQ](#faq)
+Complete usage reference for Rigel 0.2.0.
 
 ---
 
 ## Overview
 
-Rigel quantifies transcript-level abundances from RNA-seq data while
-jointly modeling three species of nucleic acid present in a typical
-library:
+Rigel quantifies RNA-seq libraries while jointly modeling:
 
-| Species | Symbol | Description |
-|---------|--------|-------------|
-| Mature RNA | mRNA | Spliced, fully processed transcripts |
-| Nascent RNA | nRNA | Unspliced pre-mRNA captured mid-transcription |
-| Genomic DNA | gDNA | Background contamination from genomic DNA |
+- mRNA from annotated transcripts
+- nRNA from shared genomic spans
+- gDNA contamination at the locus level
 
-The pipeline operates in two stages:
+The quantifier runs in two stages:
 
-1. **BAM scan** — A single-pass C++ scanner reads the name-sorted BAM,
-   resolves each fragment against the reference index, trains strand and
-   fragment-length models, and buffers fragments in memory.
-2. **EM quantification** — Fragments are partitioned into independent loci
-   and solved via per-locus Expectation-Maximization with SQUAREM
-   acceleration.
+1. A native BAM scan resolves fragments, trains the strand and
+   fragment-length models, and buffers fragment metadata.
+2. A locus-level EM solver assigns ambiguous signal across mRNA, nRNA,
+   and gDNA components.
+
+In the current implementation, nRNA is represented by a global table of unique
+genomic spans `(ref, strand, start, end)`. Transcripts that share the same span
+share the same nRNA component.
 
 ---
 
 ## Installation
 
-### Bioconda (recommended)
+### Bioconda
 
 ```bash
 conda install -c conda-forge -c bioconda rigel
@@ -76,14 +36,7 @@ conda install -c conda-forge -c bioconda rigel
 ### PyPI
 
 ```bash
-pip install rigel
-```
-
-A C++17-capable compiler is required for building the native extension.
-On macOS, install Xcode Command Line Tools first:
-
-```bash
-xcode-select --install
+pip install rigel-rnaseq
 ```
 
 ### From source
@@ -92,15 +45,24 @@ xcode-select --install
 git clone https://github.com/mkiyer/rigel.git
 cd rigel
 
-# Create and activate the environment
 mamba env create -f mamba_env.yaml
 conda activate rigel
-
-# Install in editable mode
 pip install --no-build-isolation -e .
 ```
 
-### Verify installation
+### Requirements
+
+- Python 3.12+
+- C++17-capable compiler for source builds
+- `numpy`, `pandas`, `pyarrow`, `pysam`, `pyyaml`
+
+On macOS:
+
+```bash
+xcode-select --install
+```
+
+Verify the install:
 
 ```bash
 rigel --version
@@ -110,22 +72,24 @@ rigel --version
 
 ## Input requirements
 
-### Reference files
+### Reference inputs
 
-- **Genome FASTA** — A reference genome FASTA file with an accompanying
-  `.fai` index. Generate the index with `samtools faidx genome.fa`.
-- **Gene annotation GTF** — A GTF file with gene and transcript annotations.
-  GENCODE annotations are recommended. The GTF must contain `gene`,
-  `transcript`, and `exon` features.
+- Genome FASTA with `.fai` index
+- Gene annotation GTF with `gene`, `transcript`, and `exon` features
 
-### BAM file
+### BAM requirements
 
-- Must be **name-sorted** or **collated** (not coordinate-sorted).
-  Use `samtools sort -n` or `samtools collate` to re-sort if needed.
-- Must contain the **NH tag** for multimapper detection. This tag is
-  produced by STAR, HISAT2, minimap2, and most RNA-seq aligners.
-- Paired-end reads are expected. Single-end reads should work but are
-  less thoroughly tested.
+- Name-sorted or collated, not coordinate-sorted
+- `NH` tag present for multimapper handling
+- Splice-junction strand tag available when possible
+- Paired-end is the main supported mode; single-end is less exercised
+
+Typical resort commands:
+
+```bash
+samtools sort -n -o sample.name_sorted.bam sample.bam
+samtools collate -o sample.collated.bam sample.bam
+```
 
 ---
 
@@ -133,430 +97,365 @@ rigel --version
 
 ### rigel index
 
-Build a reference index from genome FASTA and gene annotation GTF.
-
-```
-rigel index --fasta <genome.fa> --gtf <annotation.gtf> -o <index_dir>
-```
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `--fasta` | Yes | Genome FASTA file (must have `.fai` index) |
-| `--gtf` | Yes | Gene annotation GTF file |
-| `-o`, `--output-dir` | Yes | Output directory for index files |
-| `--feather-compression` | No | Compression for Feather files: `lz4` (default), `zstd`, `uncompressed` |
-| `--no-tsv` | No | Skip writing TSV mirror files |
-| `--gtf-parse-mode` | No | `strict` (default, fails on errors) or `warn-skip` (skip malformed lines) |
-
-**Example:**
+Build the reference index used for fragment resolution.
 
 ```bash
-rigel index \
-    --fasta ~/ref/GRCh38.p14.genome.fa \
-    --gtf ~/ref/gencode.v46.primary_assembly.annotation.gtf \
-    -o ~/indices/gencode_v46
+rigel index --fasta genome.fa --gtf annotation.gtf -o index/
 ```
 
-The index directory will contain interval-based lookup structures
-(cgranges) and transcript metadata in Feather format.
+Arguments:
 
----
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--fasta` | yes | Genome FASTA, indexed with `samtools faidx` |
+| `--gtf` | yes | Annotation GTF |
+| `-o`, `--output-dir` | yes | Output directory |
+| `--feather-compression` | no | `lz4`, `zstd`, or `uncompressed`; default `lz4` |
+| `--no-tsv` | no | Skip TSV mirrors |
+| `--gtf-parse-mode` | no | `strict` or `warn-skip`; default `strict` |
+
+Index outputs:
+
+- `ref_lengths.feather` and optional `ref_lengths.tsv`
+- `transcripts.feather` and optional `transcripts.tsv`
+- `nrna.feather` and optional `nrna.tsv`
+- `sj.feather` and optional `sj.tsv`
+- `intervals.feather` and optional `intervals.tsv`
 
 ### rigel quant
 
-Quantify transcript abundances from an aligned BAM file.
+Run the full scan-plus-EM quantification pipeline.
 
+```bash
+rigel quant --bam sample.bam --index index/ -o results/
 ```
-rigel quant --bam <aligned.bam> --index <index_dir> -o <output_dir> [options]
-```
 
-This is the primary command. It performs a single-pass BAM scan followed
-by locus-level EM quantification.
-
-**Minimal example:**
+Common example:
 
 ```bash
 rigel quant \
     --bam sample.bam \
-    --index ~/indices/gencode_v46 \
-    -o results/sample1/
-```
-
-**Full-featured example:**
-
-```bash
-rigel quant \
-    --bam sample.bam \
-    --index ~/indices/gencode_v46 \
-    -o results/sample1/ \
-    --config my_params.yaml \
+    --index index/ \
+    -o results/ \
+    --config params.yaml \
     --threads 16 \
-    --em-prior-alpha 0.01 \
-    --em-prior-gamma 1.0 \
-    --confidence-threshold 0.95 \
-    --prune-threshold 0.1 \
-    --annotated-bam results/sample1/annotated.bam \
+    --annotated-bam results/annotated.bam \
     --seed 42
 ```
 
-See the [Parameters reference](#parameters-reference) section for all
-available options.
-
----
-
 ### rigel sim
 
-Generate synthetic test scenarios for benchmarking and validation.
+Generate synthetic scenarios for benchmarking and regression testing.
 
+```bash
+rigel sim --config scenario.yaml -o sim_out/
 ```
-rigel sim --config <scenario.yaml> -o <output_dir> [options]
-```
 
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `--config` | Yes | YAML configuration defining the test scenario |
-| `-o`, `--output-dir` | Yes | Output directory for scenario artifacts |
-| `--genome-length` | No | Genome length in bp (default: 5000, overridden by YAML) |
-| `--seed` | No | Random seed (default: 42, overridden by YAML) |
-| `--num-reads` | No | Number of fragments to simulate (default: 1000, overridden by YAML) |
+Arguments:
 
-The simulation generates:
-- A synthetic genome FASTA
-- Gene annotation GTF
-- Simulated BAM with known ground-truth assignments
-- Oracle abundance files for benchmarking
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--config` | yes | Scenario YAML |
+| `-o`, `--output-dir` | yes | Output directory |
+| `--genome-length` | no | Default `5000`; YAML can override |
+| `--seed` | no | Default `42`; YAML can override |
+| `--num-reads` | no | Default `1000`; YAML can override |
 
 ---
 
-## Parameters reference
+## Quant parameters
 
-All parameters apply to the `rigel quant` subcommand. Defaults are from
-the config dataclasses. The resolution order is:
-**CLI flag** > **YAML config file** > **dataclass default**.
+Resolution order is:
+
+1. Explicit CLI flag
+2. YAML config file via `--config`
+3. Built-in default
+
+Unknown YAML keys are ignored with a warning. YAML keys may use either
+underscores or hyphens.
 
 ### Required arguments
 
 | Flag | Description |
 |------|-------------|
-| `--bam` | Name-sorted or collated BAM file (must have NH tag) |
-| `--index` | Directory containing rigel index files |
-| `-o`, `--output-dir` | Output directory for quantification results |
+| `--bam` | Name-sorted or collated BAM |
+| `--index` | Rigel index directory |
+| `-o`, `--output-dir` | Output directory |
 
-### Common options
-
-#### Read filtering
+### Read filtering and routing
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--include-multimap` / `--no-include-multimap` | yes | Include multimapping reads. Detected via NH tag (STAR) or secondary BAM flag (minimap2). |
-| `--keep-duplicates` / `--no-keep-duplicates` | no | Keep reads marked as PCR/optical duplicates. |
+| `--include-multimap` / `--no-include-multimap` | yes | Include multimappers detected by `NH` or secondary flags |
+| `--keep-duplicates` / `--no-keep-duplicates` | no | Keep duplicate-marked reads |
+| `--sj-strand-tag` | `auto` | Auto-detect or specify one or more tags such as `XS` or `ts` |
+| `--seed` | current timestamp | Used for reproducibility when set |
 
-#### Splice-junction strand
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--sj-strand-tag` | `auto` | BAM tag(s) for splice-junction strand. `auto` detects from the BAM header. Use `XS` for STAR, `ts` for minimap2, or list multiple to check in order. |
-
-### EM algorithm
+### Core EM settings
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--em-iterations` | 1000 | Maximum EM iterations. Set to 0 for unambiguous-only quantification. |
-| `--em-prior-alpha` | 0.01 | Flat Dirichlet pseudocount per eligible EM component. Small values allow the coverage-weighted OVR prior to dominate. |
-| `--em-prior-gamma` | 1.0 | OVR (One Virtual Read) prior scale factor. Controls coverage-weighted prior strength. Set to 0 to disable. |
-| `--em-convergence-delta` | 1e-6 | Convergence threshold for parameter updates (max absolute change in θ). |
-| `--confidence-threshold` | 0.95 | Minimum RNA-normalized posterior for high-confidence deterministic assignment. |
-| `--prune-threshold` | 0.1 | Post-EM evidence-ratio threshold. Components with zero unambiguous evidence and data/prior ratio below this value are zeroed and the EM re-runs. Set to -1 to disable. |
+| `--em-iterations` | `1000` | Max EM iterations; `0` means unambiguous-only quantification |
+| `--em-prior-alpha` | `0.01` | Flat Dirichlet pseudocount per eligible component |
+| `--em-prior-gamma` | `1.0` | OVR prior scale factor |
+| `--em-convergence-delta` | `1e-6` | Convergence threshold |
+| `--prune-threshold` | `0.1` | Post-EM evidence-ratio threshold; set negative to disable |
+| `--confidence-threshold` | `0.95` | RNA-normalized posterior threshold for high-confidence assignment |
 
-### Scoring penalties
-
-Per-fragment log-likelihood penalties applied during candidate scoring.
-Values are in [0, 1] where 0 is a hard gate (zero probability) and 1
-disables the penalty.
+### Fragment scoring
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--overhang-alpha` | 0.01 | Per-base overhang penalty. Each base of soft-clip or overhang multiplies the score by α. |
-| `--mismatch-alpha` | 0.1 | Per-mismatch penalty. Each edit (NM tag) multiplies the score by α. |
-| `--gdna-splice-penalty-unannot` | 0.01 | gDNA score penalty for unannotated splice junctions. |
+| `--overhang-alpha` | `0.01` | Per-base overhang penalty in probability space |
+| `--mismatch-alpha` | `0.1` | Per-mismatch penalty from the `NM` tag |
+| `--gdna-splice-penalty-unannot` | `0.01` | gDNA penalty for unannotated spliced fragments |
 
-### nRNA fraction hierarchical shrinkage
+### nRNA prior settings
 
-The nascent RNA fraction per transcript uses a three-level empirical Bayes
-hierarchy: **global → locus-strand → TSS-group → transcript**. At each
-level, a shrinkage pseudo-count κ pulls the estimate toward the parent.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--tss-window` | 200 | Fuzzy TSS grouping window (bp). Transcripts whose 5' ends lie within this distance are grouped. |
-| `--nrna-frac-kappa-global` | auto | κ pulling locus-strand estimate toward global. Auto-estimated via Method of Moments. |
-| `--nrna-frac-kappa-locus` | auto | κ pulling TSS-group estimate toward locus-strand. |
-| `--nrna-frac-kappa-tss` | auto | κ pulling transcript estimate toward TSS-group. |
-| `--nrna-frac-kappa-min` | 2.0 | Lower clamp for MoM-estimated κ. |
-| `--nrna-frac-kappa-max` | 200.0 | Upper clamp for MoM-estimated κ. |
-| `--nrna-frac-kappa-fallback` | 5.0 | Fallback κ when insufficient features for MoM. |
-| `--nrna-frac-kappa-min-obs` | 20 | Minimum features required for MoM estimation; fewer triggers fallback. |
-
-#### MoM minimum evidence thresholds
-
-Groups with fewer fragments than the threshold are excluded from
-Method-of-Moments κ estimation at each hierarchy level.
+The implemented nRNA hierarchy is `global -> locus-strand -> nRNA`. The final
+Beta prior is attached to each shared nRNA span, not to each transcript.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--nrna-frac-mom-min-evidence-global` | 50 | Min fragment evidence for global MoM κ. |
-| `--nrna-frac-mom-min-evidence-locus` | 30 | Min fragment evidence for locus MoM κ. |
-| `--nrna-frac-mom-min-evidence-tss` | 20 | Min fragment evidence for TSS-level MoM κ. |
+| `--nrna-frac-kappa-global` | auto | Shrinkage from locus-strand toward global |
+| `--nrna-frac-kappa-locus` | auto | Shrinkage from nRNA toward locus-strand |
+| `--nrna-frac-kappa-nrna` | `5.0` | Final Beta prior pseudo-count supplied to the EM solver |
+| `--nrna-frac-mom-min-evidence-global` | `50.0` | Minimum evidence for global MoM estimation |
+| `--nrna-frac-mom-min-evidence-locus` | `20.0` | Minimum evidence for locus-level MoM estimation |
+| `--nrna-frac-kappa-min` | `2.0` | Lower clamp for auto-estimated kappa |
+| `--nrna-frac-kappa-max` | `200.0` | Upper clamp for auto-estimated kappa |
+| `--nrna-frac-kappa-fallback` | `5.0` | Fallback kappa when evidence is insufficient |
+| `--nrna-frac-kappa-min-obs` | `20` | Minimum number of features needed for MoM estimation |
 
-### gDNA rate hierarchical shrinkage
-
-The genomic DNA rate prior uses a two-level hierarchy:
-**global → chromosome → locus**.
+### gDNA prior and symmetry settings
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gdna-kappa-chrom` | auto | κ pulling chromosome gDNA rate toward global. Auto-estimated via MoM. |
-| `--gdna-kappa-locus` | auto | κ pulling locus gDNA rate toward chromosome. |
-| `--gdna-mom-min-evidence-chrom` | 50 | Min fragment evidence for chromosome gDNA MoM κ. |
-| `--gdna-mom-min-evidence-locus` | 30 | Min fragment evidence for locus gDNA MoM κ. |
+| `--gdna-kappa-ref` | auto | Shrinkage from reference toward global |
+| `--gdna-kappa-locus` | auto | Shrinkage from locus toward reference |
+| `--gdna-mom-min-evidence-ref` | `50.0` | Minimum evidence for reference MoM estimation |
+| `--gdna-mom-min-evidence-locus` | `30.0` | Minimum evidence for locus MoM estimation |
+| `--strand-symmetry-kappa` | `6.0` | Strength of gDNA strand-symmetry penalty |
+| `--strand-symmetry-pseudo` | `10.0` | Pseudo-count controlling when the symmetry penalty engages |
 
 ### Strand model
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--strand-prior-kappa` | 2.0 | Beta prior pseudocount κ for the strand model. The prior is Beta(κ/2, κ/2), shrinking toward 0.5 (maximum entropy). Default 2.0 gives a uniform Beta(1, 1) prior. |
+| `--strand-prior-kappa` | `2.0` | Beta prior pseudo-count for the RNA strand model |
 
-### Output options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--no-tsv` | off | Skip writing human-readable TSV files (produce Feather only). |
-| `--annotated-bam` | — | Write an annotated BAM with per-fragment assignment tags to the specified path. Requires a second BAM pass. |
-
-### Performance
+### Output and performance
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--threads` | 0 (all cores) | Number of threads for BAM scanning and parallel locus EM. 0 = all available cores, 1 = sequential. |
-| `--tmpdir` | system temp | Directory for buffer spill files when memory limits are exceeded. Use a fast SSD. |
-| `--seed` | timestamp | Random seed for reproducibility. Setting a fixed seed ensures deterministic results with `--threads 1`. |
+| `--no-tsv` | off | Write Feather only |
+| `--annotated-bam` | unset | Write a second-pass BAM with per-fragment assignment tags |
+| `--tmpdir` | system temp | Spill directory for fragment-buffer overflow |
+| `--threads` | `0` | `0` means all available cores; used for both scan and locus EM |
 
-> **Note — OpenMP thread suppression.**  On import, Rigel sets
-> `OMP_NUM_THREADS=1` (via `os.environ.setdefault`) to prevent numpy's
-> OpenMP runtime from spawning idle worker threads that compete with
-> Rigel's own C++ parallelism for CPU cores and cache.  If you need
-> multi-threaded numpy/BLAS operations in the same process, set
-> `OMP_NUM_THREADS` to your desired value **before** `import rigel`.
+Rigel sets `OMP_NUM_THREADS=1` on import via `os.environ.setdefault(...)` to
+avoid idle OpenMP thread pools competing with Rigel's native parallelism. If a
+different OpenMP setting is required in the same process, set it before
+importing Rigel.
 
 ---
 
-## Configuration file
+## YAML configuration
 
-Parameters can be specified in a YAML file passed via `--config`. Keys
-use underscores matching the CLI flag names. Explicit CLI flags always
-override the config file.
-
-**Example `config.yaml`:**
+Example:
 
 ```yaml
-# EM parameters
-em_prior_alpha: 0.01
+em_prior_alpha: 0.02
 em_prior_gamma: 1.0
 em_iterations: 1000
-em_convergence_delta: 1.0e-6
 confidence_threshold: 0.95
 prune_threshold: 0.1
 
-# Scoring
-overhang_alpha: 0.01
-mismatch_alpha: 0.1
-
-# nRNA fraction shrinkage (auto = Method of Moments)
-tss_window: 200
-nrna_frac_kappa_global: auto
-nrna_frac_kappa_locus: auto
-nrna_frac_kappa_tss: auto
-
-# gDNA shrinkage
-gdna_kappa_chrom: auto
-gdna_kappa_locus: auto
-
-# Read filtering
 include_multimap: true
 keep_duplicates: false
+sj_strand_tag: [XS, ts]
 
-# Performance
-threads: 0
+nrna_frac_kappa_global: null
+nrna_frac_kappa_locus: null
+nrna_frac_kappa_nrna: 5.0
+
+gdna_kappa_ref: null
+gdna_kappa_locus: null
+
+threads: 16
 seed: 42
 ```
 
-**Usage:**
+Usage:
 
 ```bash
-rigel quant --bam sample.bam --index idx/ -o out/ --config config.yaml
+rigel quant --bam sample.bam --index index/ -o out/ --config params.yaml
 ```
 
-Any CLI flag overrides the corresponding YAML key:
+CLI still wins over YAML:
 
 ```bash
-# Use config.yaml but override threads
-rigel quant --bam sample.bam --index idx/ -o out/ \
-    --config config.yaml --threads 8
+rigel quant \
+    --bam sample.bam \
+    --index index/ \
+    -o out/ \
+    --config params.yaml \
+    --threads 8
 ```
 
 ---
 
 ## Output files
 
-All output files are written to the directory specified by `--output-dir`.
+All quant outputs are written under `--output-dir`.
 
-### quant.tsv / quant.feather
+### quant.feather and quant.tsv
 
-Per-transcript abundance estimates. One row per transcript.
+Transcript-level abundance table.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `transcript_id` | string | Transcript identifier from the GTF |
-| `gene_id` | string | Gene identifier |
-| `gene_name` | string | Gene name (symbol) |
-| `mrna` | float | Estimated mRNA (mature RNA) fragment count |
-| `nrna` | float | Estimated nRNA (nascent RNA) fragment count |
-| `length` | int | Transcript length in bp |
-| `effective_length` | float | Effective length after fragment-length correction |
-| `tpm` | float | Transcripts Per Million (mRNA-based) |
+| Column | Description |
+|--------|-------------|
+| `transcript_id` | Transcript ID from the index |
+| `gene_id` | Parent gene ID |
+| `gene_name` | Gene symbol or name field from the GTF |
+| `locus_id` | Locus identifier, or `-1` if no EM locus was formed |
+| `effective_length` | Effective transcript length used for TPM |
+| `mrna` | Total mRNA count |
+| `mrna_unambig` | Deterministic mRNA count |
+| `mrna_em` | EM-assigned mRNA count |
+| `mrna_high_conf` | Unambiguous plus high-confidence EM assignments |
+| `mrna_spliced` | Spliced mRNA count |
+| `nrna` | nRNA count fanned back from shared nRNA spans |
+| `rna_total` | `mrna + nrna` |
+| `tpm` | mRNA-based TPM |
+| `posterior_mean` | Mean posterior of EM assignments touching the transcript |
 
-### gene_quant.tsv / gene_quant.feather
+### gene_quant.feather and gene_quant.tsv
 
-Per-gene aggregated abundances. Transcript-level estimates are summed
-within each gene.
+Gene-level aggregation.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `gene_id` | string | Gene identifier |
-| `gene_name` | string | Gene name (symbol) |
-| `mrna` | float | Total mRNA fragment count across all transcripts |
-| `nrna` | float | Total nRNA fragment count across all transcripts |
-| `tpm` | float | Gene-level TPM (sum of transcript TPMs) |
+| Column | Description |
+|--------|-------------|
+| `gene_id` | Gene ID |
+| `gene_name` | Gene name |
+| `locus_id` | Primary locus assigned to the gene, or `-1` |
+| `effective_length` | Abundance-weighted mean transcript effective length |
+| `mrna` | Total mRNA count |
+| `mrna_unambig` | Deterministic mRNA count |
+| `mrna_em` | EM-assigned mRNA count |
+| `mrna_high_conf` | High-confidence mRNA count |
+| `mrna_spliced` | Spliced mRNA count |
+| `nrna` | Gene-level nRNA after transcript fan-out |
+| `rna_total` | `mrna + nrna` |
+| `tpm` | mRNA-based TPM |
 
-### loci.tsv / loci.feather
+### loci.feather and loci.tsv
 
-Per-locus summary. A locus is a connected component of transcripts
-sharing at least one fragment.
+Per-locus EM summary.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `locus_id` | int | Locus identifier |
-| `chrom` | string | Chromosome |
-| `start` | int | Locus start position |
-| `end` | int | Locus end position |
-| `n_transcripts` | int | Number of transcripts in the locus |
-| `n_genes` | int | Number of genes in the locus |
-| `n_fragments` | int | Total fragments assigned to this locus |
-| `mrna` | float | Total mRNA count |
-| `nrna` | float | Total nRNA count |
-| `gdna` | float | Estimated gDNA count |
+| Column | Description |
+|--------|-------------|
+| `locus_id` | Locus ID |
+| `ref` | Primary reference represented in the locus |
+| `n_transcripts` | Number of transcripts in the locus |
+| `n_genes` | Number of genes in the locus |
+| `n_em_fragments` | Number of ambiguous units entering the locus EM |
+| `mrna` | Locus mRNA total |
+| `nrna` | Locus nRNA total |
+| `gdna` | Locus gDNA total |
+| `gdna_rate` | `gdna / (mrna + nrna + gdna)` |
+| `gdna_init` | Empirical Bayes gDNA initialization before EM |
 
-### quant_detail.tsv / quant_detail.feather
+### quant_detail.feather and quant_detail.tsv
 
-Fragment-level detail counts broken down by splice type and strand
-orientation.
+Long-format QC table.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `transcript_id` | string | Transcript identifier |
-| `spliced_sense` | float | Annotated-spliced sense fragments |
-| `spliced_antisense` | float | Annotated-spliced antisense fragments |
-| `unspliced_sense` | float | Unspliced sense fragments |
-| `unspliced_antisense` | float | Unspliced antisense fragments |
-| `unannotated_sense` | float | Unannotated-junction sense fragments |
-| `unannotated_antisense` | float | Unannotated-junction antisense fragments |
+| Column | Description |
+|--------|-------------|
+| `transcript_id` | Transcript ID |
+| `gene_id` | Gene ID |
+| `category` | One of `unspliced`, `spliced_unannot`, `spliced_annot` |
+| `source` | Either `unambig` or `em` |
+| `count` | Count in that category/source cell |
 
 ### summary.json
 
-Run statistics and trained model parameters.
+`summary.json` contains:
 
-```json
-{
-  "rigel_version": "0.1.0",
-  "library": {
-    "protocol": "R1-antisense",
-    "strand_specificity": 0.97,
-    "read1_sense": false,
-    "p_r1_sense": 0.03,
-    "frag_length_mean": 198.5,
-    "frag_length_median": 195,
-    "frag_length_std": 52.3
-  },
-  "alignment": {
-    "total_reads": 50000000,
-    "mapped_reads": 48500000,
-    "unique_reads": 42000000,
-    "multimapping_reads": 6500000,
-    "duplicate_reads": 2100000
-  },
-  "fragments": {
-    "total": 24250000,
-    "genic": 23800000,
-    "intergenic": 450000,
-    "chimeric": 38000
-  },
-  "quantification": {
-    "n_transcripts": 150000,
-    "n_genes": 50000,
-    "n_loci": 45000,
-    "mrna_total": 23000000.0,
-    "nrna_total": 620000.0,
-    "gdna_total": 180000.0,
-    "mrna_fraction": 0.966,
-    "nrna_fraction": 0.026,
-    "gdna_fraction": 0.008
-  }
-}
-```
+- `rigel_version`, `command`, `timestamp`
+- `input` with absolute BAM and index paths
+- `library` with `protocol`, `strand_specificity`, `p_r1_sense`, `read1_sense`, and fragment-length summary stats
+- `alignment` with BAM-level counters
+- `fragments` with total, genic, intergenic, and chimeric counts
+- `quantification` with transcript/gene/locus counts and global mRNA, nRNA, and gDNA totals and fractions
+- `strand_models`, `frag_length_models`, and `pipeline_stats`
 
-Key fields:
-
-- **`library.protocol`** — Detected library protocol: `R1-sense`
-  (e.g., KAPA Stranded) or `R1-antisense` (e.g., Illumina dUTP/TruSeq).
-- **`library.strand_specificity`** — Strand specificity in [0.5, 1.0].
-  Values near 1.0 indicate a highly stranded library; 0.5 indicates
-  unstranded.
-- **`quantification.mrna_fraction`** — Fraction of genic fragments
-  attributed to mature RNA, providing a global measure of library
-  composition.
+The `protocol` field is reported as `R1-sense` when `p_r1_sense >= 0.5`, else
+`R1-antisense`.
 
 ### config.json
 
-The complete parameter configuration used for the run, including
-defaults, YAML overrides, and CLI overrides. Useful for reproducibility.
+`config.json` records the resolved runtime configuration after merging:
+
+- command metadata
+- optional source config path
+- absolute input and output paths
+- every quant parameter after YAML and CLI resolution
 
 ### Annotated BAM
 
-When `--annotated-bam` is specified, Rigel writes a copy of the input
-BAM with per-fragment assignment tags. This requires a second pass
-through the input BAM.
+When `--annotated-bam` is set, Rigel performs a second BAM pass and writes tags
+to every record.
 
 | Tag | Type | Description |
 |-----|------|-------------|
-| ZT | int | Assigned transcript index (-1 if unassigned) |
-| ZG | int | Assigned gene index |
-| ZP | float | Posterior probability of the assignment |
-| ZW | float | Fragment coverage weight |
-| ZC | int | Count column index (splice type × strand) |
-| ZH | string | Hash of all candidate transcripts |
-| ZN | int | Number of candidate transcripts (ambiguity level) |
+| `ZT` | string | Transcript ID, or `.` for intergenic or gDNA-only assignments |
+| `ZG` | string | Gene ID, or `.` when not applicable |
+| `ZP` | string | Assignment pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, or `chimeric` |
+| `ZW` | float | Posterior probability of the chosen assignment |
+| `ZC` | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
+| `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise |
+| `ZN` | int | Number of competing candidate components |
+| `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `ambiguous` |
 
 ---
 
 ## Supported aligners
 
-Rigel has been tested with the following RNA-seq aligners:
+Known splice-junction strand tags:
 
-| Aligner | SJ strand tag | Notes |
-|---------|---------------|-------|
-| **STAR** | `XS` | Recommended. Produces NH, XS, nM/NM tags. |
-| **HISAT2** | `XS` | Well supported. |
-| **minimap2** | `ts` | Use `--sj-strand-tag ts` or rely on `auto` detection. |
+| Aligner | Tag | Notes |
+|---------|-----|-------|
+| STAR | `XS` | Recommended |
+| HISAT2 | `XS` | Standard RNA-seq workflow |
+| minimap2 | `ts` | Long-read and splice-aware mappings |
+
+Use `--sj-strand-tag auto` unless automatic detection fails.
+
+---
+
+## FAQ
+
+### Why does PyPI use `rigel-rnaseq`?
+
+The name `rigel` is already occupied on PyPI. The CLI, import name, GitHub
+repository, and Bioconda package are still `rigel`.
+
+### Why can transcript `nrna` be non-integer or shared?
+
+Because the EM now estimates nRNA on shared genomic spans. Those shared counts
+are fanned back to transcripts for transcript- and gene-level reporting.
+
+### Why is `strand_specificity` close to `0.5`?
+
+Rigel only trains the primary strand model from annotated spliced fragments. If
+the library is unstranded, poorly stranded, or has too few informative splice
+reads, the estimate will stay near the prior.
+
+### When should I use `--annotated-bam`?
+
+Use it for read-level inspection, debugging, and method validation. It requires
+an extra BAM pass and adds some runtime overhead.
 
 The `--sj-strand-tag auto` default detects the appropriate tag from the
 BAM header. If your aligner uses a non-standard tag, specify it

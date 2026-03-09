@@ -5,7 +5,7 @@ The index is constructed from a genome FASTA (with samtools .fai) and a
 GENCODE GTF annotation file. It produces four Feather files (with optional
 TSV mirrors) in an output directory:
 
-    ref_lengths.feather   — chromosome names and lengths
+    ref_lengths.feather   — reference names and lengths
     transcripts.feather   — one row per transcript with integer indices
     intervals.feather     — exon/intron/intergenic tiling of the genome
     sj.feather            — annotated splice junctions from transcript introns
@@ -57,7 +57,7 @@ NRNA_TSV = "nrna.tsv"
 # ---------------------------------------------------------------------------
 
 def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
-    """Read chromosome names and lengths from a FASTA file.
+    """Read reference names and lengths from a FASTA file.
 
     The FASTA must be indexed (``samtools faidx``). We read the index
     rather than scanning the full file.
@@ -198,26 +198,26 @@ def write_bed12(
         for t in transcripts:
             if not t.exons:
                 continue
-            chrom = t.ref
-            chrom_start = t.exons[0].start
-            chrom_end = t.exons[-1].end
+            ref = t.ref
+            ref_start = t.exons[0].start
+            ref_end = t.exons[-1].end
             name = t.t_id or "."
             score = 0
             strand = t.strand.to_str()
             if strand not in ("+", "-"):
                 strand = "+"
-            thick_start = chrom_start
-            thick_end = chrom_end
+            thick_start = ref_start
+            thick_end = ref_end
             rgb = "0"
             block_count = len(t.exons)
             block_sizes = ",".join(
                 str(e.end - e.start) for e in t.exons
             )
             block_starts = ",".join(
-                str(e.start - chrom_start) for e in t.exons
+                str(e.start - ref_start) for e in t.exons
             )
             fh.write(
-                f"{chrom}\t{chrom_start}\t{chrom_end}\t{name}\t"
+                f"{ref}\t{ref_start}\t{ref_end}\t{name}\t"
                 f"{score}\t{strand}\t{thick_start}\t{thick_end}\t"
                 f"{rgb}\t{block_count}\t{block_sizes}\t{block_starts}\n"
             )
@@ -359,7 +359,7 @@ def _gen_genomic_intervals(
 
     Transcripts must be sorted by ``(ref, start, end)``. Intergenic
     intervals fill the gaps between transcript clusters and extend to
-    chromosome boundaries.
+    reference boundaries.
 
     Also emits ``UNAMBIG_INTRON`` intervals for each multi-exon transcript
     by subtracting the global exon union of the cluster from intronic gaps.
@@ -379,7 +379,7 @@ def _gen_genomic_intervals(
         t_list = ref_transcripts.get(ref, [])
 
         if not t_list:
-            # Entire chromosome is intergenic
+            # Entire reference is intergenic
             yield AnnotatedInterval(ref, 0, ref_length)
             continue
 
@@ -405,7 +405,7 @@ def _gen_genomic_intervals(
             yield from _gen_transcript_intervals(tc)
         yield from _gen_cluster_unambig_intron_intervals(cluster)
 
-        # Intergenic gap to end of chromosome
+        # Intergenic gap to end of reference
         if end < ref_length:
             yield AnnotatedInterval(ref, end, ref_length)
 
@@ -970,7 +970,7 @@ class TranscriptIndex:
         Parameters
         ----------
         ref : str
-            Chromosome / reference name.
+            Reference name.
         start : int
             Left edge of the gap (0-based, inclusive).
         end : int

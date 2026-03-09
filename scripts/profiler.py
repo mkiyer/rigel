@@ -609,9 +609,9 @@ def profile_stages(
                 gdna_inits = compute_eb_gdna_priors(
                     loci, em_data, estimator, index, strand_models,
                     intergenic_density=intergenic_density,
-                    kappa_chrom=em_config.gdna_kappa_chrom,
+                    kappa_ref=em_config.gdna_kappa_ref,
                     kappa_locus=em_config.gdna_kappa_locus,
-                    mom_min_evidence_chrom=em_config.gdna_mom_min_evidence_chrom,
+                    mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
                     mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
                     kappa_min=em_config.nrna_frac_kappa_min,
                     kappa_max=em_config.nrna_frac_kappa_max,

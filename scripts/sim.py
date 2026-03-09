@@ -627,14 +627,14 @@ class WholeGenomeSimulator:
             else sim_params.frag_max
         )
 
-        # gDNA setup: annotated chromosomes weighted by length
-        annotated_chroms = {t.ref for t in transcripts}
-        self._gdna_chroms: list[str] = []
-        self._gdna_chrom_lengths: list[int] = []
+        # gDNA setup: annotated references weighted by length
+        annotated_refs = {t.ref for t in transcripts}
+        self._gdna_refs: list[str] = []
+        self._gdna_ref_lengths: list[int] = []
         for ref in self.fasta.references:
-            if ref in annotated_chroms:
-                self._gdna_chroms.append(ref)
-                self._gdna_chrom_lengths.append(
+            if ref in annotated_refs:
+                self._gdna_refs.append(ref)
+                self._gdna_ref_lengths.append(
                     self.fasta.get_reference_length(ref),
                 )
 
@@ -661,9 +661,9 @@ class WholeGenomeSimulator:
         })
 
         logger.info(
-            "Simulator ready: %d transcripts, %d gDNA chromosomes, "
+            "Simulator ready: %d transcripts, %d gDNA references, "
             "max mRNA length=%d",
-            N, len(self._gdna_chroms), max_mrna,
+            N, len(self._gdna_refs), max_mrna,
         )
 
     # -- Sequence extraction ------------------------------------------------
@@ -1049,7 +1049,7 @@ class WholeGenomeSimulator:
         bam_fh: pysam.AlignmentFile | None,
     ) -> int:
         """Generate and write all gDNA reads."""
-        if n_gdna == 0 or not self._gdna_chroms:
+        if n_gdna == 0 or not self._gdna_refs:
             return 0
 
         frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
@@ -1063,7 +1063,7 @@ class WholeGenomeSimulator:
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
             chrom_eff = np.array(
-                [max(0, cl - fl + 1) for cl in self._gdna_chrom_lengths],
+                [max(0, cl - fl + 1) for cl in self._gdna_ref_lengths],
                 dtype=float,
             )
             total_eff = chrom_eff.sum()
@@ -1071,7 +1071,7 @@ class WholeGenomeSimulator:
                 continue
             chrom_probs = chrom_eff / total_eff
             chrom_indices = rng.choice(
-                len(self._gdna_chroms), size=fc, p=chrom_probs,
+                len(self._gdna_refs), size=fc, p=chrom_probs,
             )
             unique_chroms, chrom_counts = np.unique(
                 chrom_indices, return_counts=True,
@@ -1079,9 +1079,9 @@ class WholeGenomeSimulator:
 
             for ci, cc in zip(unique_chroms, chrom_counts):
                 ci, cc = int(ci), int(cc)
-                chrom = self._gdna_chroms[ci]
-                chrom_len = self._gdna_chrom_lengths[ci]
-                ref_id = self._ref_name_to_id.get(chrom)
+                ref = self._gdna_refs[ci]
+                chrom_len = self._gdna_ref_lengths[ci]
+                ref_id = self._ref_name_to_id.get(ref)
                 eff_len = chrom_len - fl + 1
                 starts = rng.integers(0, eff_len, size=cc)
                 strands = rng.integers(0, 2, size=cc)
@@ -1090,7 +1090,7 @@ class WholeGenomeSimulator:
                     start = int(starts[j])
                     end = start + fl
                     read_len = min(read_len_cfg, fl)
-                    seq = self.fasta.fetch(chrom, start, end).upper()
+                    seq = self.fasta.fetch(ref, start, end).upper()
 
                     is_neg = bool(strands[j])
                     if is_neg:
@@ -1103,7 +1103,7 @@ class WholeGenomeSimulator:
                     r1_seq = self._introduce_errors(r1_seq)
                     r2_seq = self._introduce_errors(r2_seq)
 
-                    qname = f"gdna:{chrom}:{start}-{end}:{strand_char}:{n_written}"
+                    qname = f"gdna:{ref}:{start}-{end}:{strand_char}:{n_written}"
                     quals = "I" * read_len
 
                     r1_fh.write(f"@{qname}/1\n{r1_seq}\n+\n{quals}\n")

@@ -4,7 +4,7 @@ Verifies that:
 - _score_gdna_candidate computes correct log-likelihoods
 - gDNA shadow component competes with mRNA in locus EM
 - gDNA assignments propagate to correct counters
-- _compute_gdna_rate_from_strand returns correct rates
+- _compute_gdna_density_from_strand returns correct densities
 - _compute_nrna_init returns correct nRNA priors
 - StrandModels container works correctly
 - PipelineStats gDNA fields are correct
@@ -382,66 +382,74 @@ class TestStatsGDNA:
 
 
 # =====================================================================
-# _compute_gdna_rate_from_strand
+# _compute_gdna_density_from_strand
 # =====================================================================
 
 
-class TestComputeGdnaRate:
-    """Tests for pipeline._compute_gdna_rate_from_strand."""
+class TestComputeGdnaDensity:
+    """Tests for locus.compute_gdna_density_from_strand."""
+
+    EXONIC_BP = 1000.0
 
     def test_zero_counts_returns_zero(self):
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
-        rate = _compute_gdna_rate_from_strand(0.0, 0.0, 1.0)
-        assert rate == 0.0
+        from rigel.locus import compute_gdna_density_from_strand
+        density = compute_gdna_density_from_strand(0.0, 0.0, self.EXONIC_BP, 1.0)
+        assert density == 0.0
 
     def test_no_antisense_gives_zero(self):
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
-        rate = _compute_gdna_rate_from_strand(100.0, 0.0, 1.0)
-        assert rate == 0.0
+        from rigel.locus import compute_gdna_density_from_strand
+        density = compute_gdna_density_from_strand(100.0, 0.0, self.EXONIC_BP, 1.0)
+        assert density == 0.0
 
     def test_antisense_at_perfect_ss(self):
-        """At SS=1.0, G = 2 × antisense, rate = G / (S + A)."""
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
-        # S=100, A=50, SS=1.0 → G=2*50=100, rate=100/150
-        rate = _compute_gdna_rate_from_strand(100.0, 50.0, 1.0)
-        expected = (2.0 * 50.0) / (100.0 + 50.0)
-        assert rate == pytest.approx(expected, abs=0.01)
+        """At SS=1.0, G = 2 × antisense, density = G / exonic_bp."""
+        from rigel.locus import compute_gdna_density_from_strand
+        # S=100, A=50, SS=1.0 → G=2*50=100, density=100/1000
+        density = compute_gdna_density_from_strand(100.0, 50.0, self.EXONIC_BP, 1.0)
+        expected = (2.0 * 50.0) / self.EXONIC_BP
+        assert density == pytest.approx(expected, abs=1e-6)
 
     def test_strand_correction_at_imperfect_ss(self):
         """At SS < 1.0, exact formula with strand correction."""
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_density_from_strand
         # S=200, A=50, SS=0.9
         ss = 0.9
         denom_ss = 2.0 * ss - 1.0
         numerator = 50.0 * ss - 200.0 * (1.0 - ss)
         g = 2.0 * max(0.0, numerator / denom_ss)
-        expected_rate = g / (200.0 + 50.0)
-        rate = _compute_gdna_rate_from_strand(200.0, 50.0, ss)
-        assert rate == pytest.approx(expected_rate, abs=0.01)
+        expected = g / self.EXONIC_BP
+        density = compute_gdna_density_from_strand(200.0, 50.0, self.EXONIC_BP, ss)
+        assert density == pytest.approx(expected, abs=1e-6)
 
     def test_returns_zero_at_low_ss(self):
         """At SS ≤ 0.6, strand info too weak → returns 0."""
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        from rigel.locus import compute_gdna_density_from_strand
         # denom_ss = 2*0.5-1 = 0 ≤ 0.2 → returns 0
-        rate = _compute_gdna_rate_from_strand(500.0, 500.0, 0.5)
-        assert rate == 0.0
+        density = compute_gdna_density_from_strand(500.0, 500.0, self.EXONIC_BP, 0.5)
+        assert density == 0.0
         # SS=0.6 → denom_ss=0.2 ≤ 0.2 → returns 0
-        rate2 = _compute_gdna_rate_from_strand(500.0, 500.0, 0.6)
-        assert rate2 == 0.0
+        density2 = compute_gdna_density_from_strand(500.0, 500.0, self.EXONIC_BP, 0.6)
+        assert density2 == 0.0
 
     def test_clamps_at_zero(self):
-        """Corrected G is clamped at zero (no negative rate)."""
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+        """Corrected G is clamped at zero (no negative density)."""
+        from rigel.locus import compute_gdna_density_from_strand
         # S=1000, A=10, SS=0.8 → G = 2(10*0.8 - 1000*0.2)/0.6 < 0 → 0
-        rate = _compute_gdna_rate_from_strand(1000.0, 10.0, 0.8)
-        assert rate == 0.0
+        density = compute_gdna_density_from_strand(1000.0, 10.0, self.EXONIC_BP, 0.8)
+        assert density == 0.0
 
-    def test_rate_clamped_at_one(self):
-        """Rate is clamped to [0, 1]."""
-        from rigel.locus import compute_gdna_rate_from_strand as _compute_gdna_rate_from_strand
+    def test_zero_exonic_bp_returns_zero(self):
+        """Zero exonic_bp → returns 0 (avoids division by zero)."""
+        from rigel.locus import compute_gdna_density_from_strand
+        density = compute_gdna_density_from_strand(100.0, 50.0, 0.0, 1.0)
+        assert density == 0.0
+
+    def test_density_nonnegative(self):
+        """Density is always ≥ 0."""
+        from rigel.locus import compute_gdna_density_from_strand
         # Extreme antisense dominance
-        rate = _compute_gdna_rate_from_strand(1.0, 1000.0, 0.99)
-        assert rate <= 1.0
+        density = compute_gdna_density_from_strand(1.0, 1000.0, self.EXONIC_BP, 0.99)
+        assert density >= 0.0
 
 
 # =====================================================================
@@ -719,84 +727,85 @@ class TestStrandModelsContainer:
 
 
 # =====================================================================
-# compute_gdna_rate_hybrid
+# compute_gdna_density_hybrid
 # =====================================================================
 
 
-class TestComputeGdnaRateHybrid:
-    """Tests for the hybrid density+strand gDNA rate estimator."""
+class TestComputeGdnaDensityHybrid:
+    """Tests for the hybrid density+strand gDNA density estimator."""
+
+    EXONIC_BP = 1000.0
 
     def test_zero_counts_returns_zero(self):
-        from rigel.locus import compute_gdna_rate_hybrid
-        rate, ev = compute_gdna_rate_hybrid(0.0, 0.0, 1000.0, 1.0, 0.001)
-        assert rate == 0.0
+        from rigel.locus import compute_gdna_density_hybrid
+        density, ev = compute_gdna_density_hybrid(0.0, 0.0, self.EXONIC_BP, 1.0, 0.001)
+        assert density == 0.0
         assert ev == 0.0
 
     def test_strand_dominated_at_high_ss(self):
-        """At SS=1.0, W=1 → pure strand estimate."""
-        from rigel.locus import compute_gdna_rate_hybrid
-        rate, ev = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 1.0, 0.001)
-        # Strand rate: G = 2*50 = 100, rate = 100/150
-        expected_strand = (2.0 * 50.0) / 150.0
-        assert rate == pytest.approx(expected_strand, abs=0.01)
+        """At SS=1.0, W=1 → pure strand density estimate."""
+        from rigel.locus import compute_gdna_density_hybrid
+        density, ev = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, 1.0, 0.001)
+        # Strand density: G = 2*50 = 100, density = 100/1000 = 0.1
+        expected_strand = (2.0 * 50.0) / self.EXONIC_BP
+        assert density == pytest.approx(expected_strand, abs=1e-6)
         assert ev == 150.0
 
     def test_density_dominated_at_low_ss(self):
-        """At SS=0.5, W≈0 → pure density estimate."""
-        from rigel.locus import compute_gdna_rate_hybrid
+        """At SS=0.5, W≈0 → pure intergenic density."""
+        from rigel.locus import compute_gdna_density_hybrid
         # SS=0.5 → denom_ss=0 → W=0
-        # density: intergenic_density * exonic_bp / total = 0.001 * 1000 / 200
-        rate, ev = compute_gdna_rate_hybrid(100.0, 100.0, 1000.0, 0.5, 0.001)
-        expected = 0.001 * 1000.0 / 200.0
-        assert rate == pytest.approx(expected, abs=0.01)
+        # density component = intergenic_density directly
+        density, ev = compute_gdna_density_hybrid(100.0, 100.0, self.EXONIC_BP, 0.5, 0.001)
+        expected = 0.001
+        assert density == pytest.approx(expected, abs=1e-6)
         assert ev == 200.0
 
     def test_density_zero_falls_back_to_strand(self):
         """With intergenic_density=0, only strand contributes."""
-        from rigel.locus import compute_gdna_rate_hybrid
-        rate, ev = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 0.9, 0.0)
-        # Should match strand-only
-        from rigel.locus import compute_gdna_rate_from_strand
-        strand_rate = compute_gdna_rate_from_strand(100.0, 50.0, 0.9)
-        # W = (2*0.9-1)^2 = 0.64 → rate = 0.64*strand + 0.36*0
+        from rigel.locus import compute_gdna_density_hybrid
+        density, ev = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, 0.9, 0.0)
+        # Should match strand-only, weighted by W
+        from rigel.locus import compute_gdna_density_from_strand
+        strand_density = compute_gdna_density_from_strand(100.0, 50.0, self.EXONIC_BP, 0.9)
+        # W = (2*0.9-1)^2 = 0.64 → density = 0.64*strand + 0.36*0
         W = (2.0 * 0.9 - 1.0) ** 2
-        expected = W * strand_rate
-        assert rate == pytest.approx(expected, abs=0.01)
+        expected = W * strand_density
+        assert density == pytest.approx(expected, abs=1e-6)
 
     def test_unstranded_with_density_nonzero(self):
-        """Unstranded (SS=0.5) with intergenic density gives nonzero rate."""
-        from rigel.locus import compute_gdna_rate_hybrid
-        rate, ev = compute_gdna_rate_hybrid(500.0, 500.0, 10000.0, 0.5, 0.01)
-        # density component: 0.01 * 10000 / 1000 = 0.1
-        expected = 0.01 * 10000.0 / 1000.0
-        assert rate == pytest.approx(expected, abs=0.01)
-        assert rate > 0.0  # Critical: nonzero for unstranded
+        """Unstranded (SS=0.5) with intergenic density gives nonzero density."""
+        from rigel.locus import compute_gdna_density_hybrid
+        density, ev = compute_gdna_density_hybrid(500.0, 500.0, 10000.0, 0.5, 0.01)
+        # density component = intergenic_density = 0.01
+        expected = 0.01
+        assert density == pytest.approx(expected, abs=1e-6)
+        assert density > 0.0  # Critical: nonzero for unstranded
 
     def test_unstranded_no_density_returns_zero(self):
         """Unstranded with no density → both components zero."""
-        from rigel.locus import compute_gdna_rate_hybrid
-        rate, _ = compute_gdna_rate_hybrid(500.0, 500.0, 10000.0, 0.5, 0.0)
-        assert rate == 0.0
+        from rigel.locus import compute_gdna_density_hybrid
+        density, _ = compute_gdna_density_hybrid(500.0, 500.0, 10000.0, 0.5, 0.0)
+        assert density == 0.0
 
-    def test_rate_clamped_to_unit_interval(self):
-        """Rate is always in [0, 1]."""
-        from rigel.locus import compute_gdna_rate_hybrid
-        # Huge density → would exceed 1.0 without clamping
-        rate, _ = compute_gdna_rate_hybrid(1.0, 1.0, 100000.0, 0.5, 1.0)
-        assert 0.0 <= rate <= 1.0
+    def test_density_nonnegative(self):
+        """Density is always >= 0."""
+        from rigel.locus import compute_gdna_density_hybrid
+        density, _ = compute_gdna_density_hybrid(1.0, 1.0, 100000.0, 0.5, 1.0)
+        assert density >= 0.0
 
     def test_hybrid_blend_at_moderate_ss(self):
         """At intermediate SS, both components contribute."""
-        from rigel.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_density_hybrid
         ss = 0.8  # W = (2*0.8-1)^2 = 0.36
-        rate, _ = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, ss, 0.01)
+        density, _ = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, ss, 0.01)
         # Both strand and density components should be nonzero
-        assert rate > 0.0
+        assert density > 0.0
 
     def test_returns_tuple(self):
-        """Returns (rate, evidence) tuple."""
-        from rigel.locus import compute_gdna_rate_hybrid
-        result = compute_gdna_rate_hybrid(100.0, 50.0, 1000.0, 1.0, 0.0)
+        """Returns (density, evidence) tuple."""
+        from rigel.locus import compute_gdna_density_hybrid
+        result = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, 1.0, 0.0)
         assert isinstance(result, tuple)
         assert len(result) == 2
 
@@ -838,47 +847,47 @@ class TestGdnaMoMKappa:
 
 
 class TestUnstrandedGdna:
-    """Verify gDNA rate estimation works for unstranded libraries."""
+    """Verify gDNA density estimation works for unstranded libraries."""
 
     def test_hybrid_nonzero_for_unstranded_with_density(self):
-        """With intergenic density, unstranded gives nonzero gDNA rate."""
-        from rigel.locus import compute_gdna_rate_hybrid
+        """With intergenic density, unstranded gives nonzero gDNA density."""
+        from rigel.locus import compute_gdna_density_hybrid
 
         # SS=0.5 (unstranded), with intergenic density
-        rate, _ = compute_gdna_rate_hybrid(
+        density, _ = compute_gdna_density_hybrid(
             1000.0, 1000.0, 50000.0, 0.5, 0.005,
         )
-        assert rate > 0.0
-        # Expected: density_rate = 0.005 * 50000 / 2000 = 0.125
-        expected = 0.005 * 50000.0 / 2000.0
-        assert rate == pytest.approx(expected, abs=0.01)
+        assert density > 0.0
+        # Expected: intergenic_density directly = 0.005
+        expected = 0.005
+        assert density == pytest.approx(expected, abs=1e-6)
 
     def test_strand_only_zero_for_unstranded(self):
-        """Without density, unstranded gives zero gDNA rate."""
-        from rigel.locus import compute_gdna_rate_from_strand
+        """Without density, unstranded gives zero gDNA density."""
+        from rigel.locus import compute_gdna_density_from_strand
 
-        rate = compute_gdna_rate_from_strand(1000.0, 1000.0, 0.5)
-        assert rate == 0.0
+        density = compute_gdna_density_from_strand(1000.0, 1000.0, 50000.0, 0.5)
+        assert density == 0.0
 
     def test_hybrid_zero_for_unstranded_no_density(self):
         """Unstranded with no density falls back to zero (backward compat)."""
-        from rigel.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_density_hybrid
 
-        rate, _ = compute_gdna_rate_hybrid(
+        density, _ = compute_gdna_density_hybrid(
             1000.0, 1000.0, 50000.0, 0.5, 0.0,
         )
-        assert rate == 0.0
+        assert density == 0.0
 
     def test_moderate_ss_blends_components(self):
         """At SS=0.7 (moderate), both strand and density contribute."""
-        from rigel.locus import compute_gdna_rate_hybrid
+        from rigel.locus import compute_gdna_density_hybrid
 
         ss = 0.7
-        rate, _ = compute_gdna_rate_hybrid(
+        density, _ = compute_gdna_density_hybrid(
             100.0, 40.0, 5000.0, ss, 0.001,
         )
         # Should be between pure-strand and pure-density
-        assert rate > 0.0
+        assert density > 0.0
 
 
 # =====================================================================
@@ -891,21 +900,23 @@ class TestGdnaConfig:
 
     def test_emconfig_defaults(self):
         cfg = EMConfig()
-        assert cfg.gdna_kappa_chrom is None
+        assert cfg.gdna_kappa_ref is None
         assert cfg.gdna_kappa_locus is None
-        assert cfg.gdna_mom_min_evidence_chrom == 50.0
+        assert cfg.gdna_mom_min_evidence_ref == 50.0
         assert cfg.gdna_mom_min_evidence_locus == 30.0
+        assert cfg.strand_symmetry_kappa == 6.0
+        assert cfg.strand_symmetry_pseudo == 50.0
 
     def test_emconfig_explicit(self):
         cfg = EMConfig(
-            gdna_kappa_chrom=25.0,
+            gdna_kappa_ref=25.0,
             gdna_kappa_locus=10.0,
-            gdna_mom_min_evidence_chrom=40.0,
+            gdna_mom_min_evidence_ref=40.0,
             gdna_mom_min_evidence_locus=20.0,
         )
-        assert cfg.gdna_kappa_chrom == 25.0
+        assert cfg.gdna_kappa_ref == 25.0
         assert cfg.gdna_kappa_locus == 10.0
-        assert cfg.gdna_mom_min_evidence_chrom == 40.0
+        assert cfg.gdna_mom_min_evidence_ref == 40.0
         assert cfg.gdna_mom_min_evidence_locus == 20.0
 
     def test_cli_parser_has_gdna_args(self):
@@ -916,14 +927,14 @@ class TestGdnaConfig:
             "--bam", "test.bam",
             "--index", "test_idx",
             "-o", "out",
-            "--gdna-kappa-chrom", "30.0",
+            "--gdna-kappa-ref", "30.0",
             "--gdna-kappa-locus", "15.0",
-            "--gdna-mom-min-evidence-chrom", "60.0",
+            "--gdna-mom-min-evidence-ref", "60.0",
             "--gdna-mom-min-evidence-locus", "25.0",
         ])
-        assert args.gdna_kappa_chrom == 30.0
+        assert args.gdna_kappa_ref == 30.0
         assert args.gdna_kappa_locus == 15.0
-        assert args.gdna_mom_min_evidence_chrom == 60.0
+        assert args.gdna_mom_min_evidence_ref == 60.0
         assert args.gdna_mom_min_evidence_locus == 25.0
 
     def test_cli_defaults_none(self):
@@ -936,5 +947,5 @@ class TestGdnaConfig:
             "-o", "out",
         ])
         # Before _resolve_quant_args, CLI defaults are None
-        assert args.gdna_kappa_chrom is None
+        assert args.gdna_kappa_ref is None
         assert args.gdna_kappa_locus is None

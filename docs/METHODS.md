@@ -4,507 +4,411 @@
 
 ---
 
-## Abstract
-
-We present Rigel, a Bayesian transcript quantification method for RNA-seq
-data that jointly models three nucleic acid species present in a single
-library: mature messenger RNA (mRNA), nascent pre-mRNA (nRNA), and
-genomic DNA contamination (gDNA). Rigel introduces a linked kinetic model
-that couples mRNA and nRNA abundances through a shared per-transcript
-parameter and a nascent fraction grounded in the steady-state kinetics of
-transcription, splicing, and degradation. A hierarchical empirical Bayes
-framework initializes per-transcript nascent fractions and per-locus gDNA
-rates from strand specificity and genomic density signals. The method
-operates through a two-stage single-pass pipeline: a C++ BAM scanner that
-resolves fragments against a reference index and trains strand and
-fragment-length models, followed by locus-level Expectation-Maximization
-(EM) with SQUAREM acceleration. We describe the complete mathematical
-framework, the fragment likelihood model, the hierarchical prior system,
-convergence properties, and the output specification.
-
----
-
-## 1. Introduction
-
-### 1.1 Motivation
-
-RNA-seq measures transcript abundances by sequencing fragmented cDNA
-libraries. The standard quantification problem—estimating how many
-fragments originate from each transcript—has been addressed by
-methods including Cufflinks (Trapnell et al., 2010), RSEM (Li and Dewey,
-2011), Salmon (Patro et al., 2017), and kallisto (Bray et al., 2016).
-These methods model fragments as originating from mature (spliced)
-transcripts and assign ambiguous fragments via expectation-maximization
-or equivalent optimization.
-
-However, total RNA-seq libraries and many stranded library preparations
-capture additional nucleic acid species beyond spliced mRNA:
-
-1. **Nascent RNA (nRNA / pre-mRNA):** Unspliced precursor transcripts
-   captured mid-transcription. These contain intronic sequence and
-   represent the active transcriptional output of the cell. Nascent RNA
-   is abundant in total RNA-seq, nuclear RNA-seq, and chromatin-associated
-   RNA-seq protocols.
-
-2. **Genomic DNA (gDNA):** Residual genomic DNA contamination that
-   survives DNase treatment during library preparation. gDNA fragments
-   are unstranded and uniformly distributed across the genome.
-
-Existing quantifiers do not model nRNA or gDNA, leading to systematic
-biases: intronic fragments from pre-mRNA inflate apparent expression of
-long transcripts, while gDNA contamination creates false-positive
-expression signals particularly for long genes with extensive intronic
-sequence.
-
-### 1.2 Approach
-
-Rigel addresses these limitations through three innovations:
-
-1. **Three-species generative model.** Each fragment in the library
-   originates from one of three species—mRNA, nRNA, or gDNA—with
-   species-specific strand, splice, and length distributions.
-
-2. **Linked kinetic model.** Rather than treating mRNA and nRNA as
-   independent parameters, Rigel couples them through a shared
-   per-transcript total abundance $\theta_t$ and a per-transcript
-   nascent fraction $\beta_t$, motivated by the steady-state kinetics
-   of the RNA lifecycle.
-
-3. **Hierarchical empirical Bayes initialization.** Per-transcript
-   nascent fractions and per-locus gDNA rates are initialized through
-   multi-level shrinkage hierarchies that borrow strength across
-   transcripts, loci, chromosomes, and the genome.
-
-### 1.3 Notation
-
-Throughout this document we use the following notation:
-
-| Symbol | Description |
-|--------|-------------|
-| $T$ | Number of transcripts in a locus |
-| $G$ | Number of genes |
-| $L$ | Number of loci (connected components of overlapping transcripts) |
-| $F$ | Total number of fragments |
-| $\theta_t$ | Total abundance (mRNA + nRNA) for transcript $t$ on the simplex |
-| $\beta_t$ | Nascent RNA fraction for transcript $t$, $\beta_t \in [\varepsilon, 1-\varepsilon]$ |
-| $\gamma_\ell$ | gDNA fraction for locus $\ell$ |
-| $\text{SS}$ | Strand specificity, $\text{SS} \in [0.5, 1.0]$ |
-| $p_{\text{r1s}}$ | Probability that read 1 aligns sense to the gene |
-| $\kappa$ | Shrinkage pseudo-count (effective sample size) |
-| $\alpha$ | Dirichlet prior pseudo-count per component |
-| $\gamma_{\text{ovr}}$ | One Virtual Read (OVR) prior scale factor |
-
----
-
-## 2. Generative Model
-
-### 2.1 Three-Species Mixture
-
-We model each fragment $f$ in the library as drawn from a mixture of
-three species at each genomic locus $\ell$ containing $T$ transcripts:
-
-$$
-p(f \mid \Theta) = \sum_{t=1}^{T} \left[
-  \theta_t (1 - \beta_t) \cdot \frac{\ell_{\text{mRNA}}(f, t)}{K_{t,\text{mRNA}}}
-  + \theta_t \beta_t \cdot \frac{\ell_{\text{nRNA}}(f, t)}{K_{t,\text{nRNA}}}
-\right]
-+ \gamma_\ell \cdot \frac{\ell_{\text{gDNA}}(f)}{K_{\text{gDNA}}}
-$$
-
-where:
-- $\theta_t$ is the total abundance of transcript $t$ on the simplex
-  (with $\sum_t \theta_t + \gamma_\ell = 1$)
-- $\beta_t$ is the nascent fraction of transcript $t$
-- $\ell_{\text{mRNA}}(f, t)$, $\ell_{\text{nRNA}}(f, t)$,
-  $\ell_{\text{gDNA}}(f)$ are per-component likelihoods
-- $K_{t,c}$ are normalization constants (effective lengths)
-
-This defines a **2T + 1 component** mixture model per locus:
-$T$ mRNA components, $T$ nRNA components, and 1 gDNA component.
-
-### 2.2 The Linked Kinetic Model
-
-The central modeling innovation is the coupling of mRNA and nRNA through
-the RNA lifecycle. At steady state, the kinetic model of transcription,
-splicing, and degradation gives:
-
-$$
-\text{DNA} \xrightarrow{r_{\text{txn}}} \text{nRNA} \xrightarrow{r_{\text{splice}}}
-\text{mRNA} \xrightarrow{r_{\text{deg}}} \varnothing
-$$
-
-The steady-state nascent fraction for transcript $t$ is:
-
-$$
-\beta_t = \frac{1}{1 + \rho_t}, \quad
-\rho_t = \frac{r_{\text{splice},t}}{r_{\text{deg},t}}
-$$
-
-where $\rho_t$ is the ratio of splicing rate to degradation rate.
-
-**Key properties:**
-- When splicing is fast relative to degradation ($\rho_t \gg 1$):
-  $\beta_t \to 0$, and most RNA is mature mRNA.
-- When splicing is slow ($\rho_t \ll 1$): $\beta_t \to 1$, and most RNA
-  is nascent pre-mRNA.
-- $\beta_t$ is per-transcript, allowing different isoforms of the same
-  gene to have different splicing kinetics.
-
-The derived abundances are:
-
-$$
-\text{mRNA}_t = \theta_t (1 - \beta_t), \quad
-\text{nRNA}_t = \theta_t \beta_t
-$$
-
-This parameterization halves the effective degrees of freedom compared to
-treating mRNA and nRNA as fully independent, encodes the biological
-constraint that observing mRNA from a transcript increases the probability
-of observing nRNA from the same transcript, and prevents the EM from
-freely trading mass between mRNA and nRNA of unrelated transcripts.
-
----
-
-## 3. Pipeline Architecture
-
-Rigel operates through a two-stage single-pass pipeline.
-
-### 3.1 Stage 1: BAM Scan and Model Training
-
-A high-performance C++ BAM scanner reads the name-sorted input BAM once
-using htslib, performing the following operations per fragment:
-
-**Fragment resolution.** Each fragment (mate pair or single read) is
-resolved against a cgranges-based interval index to determine:
-- Exonic overlap with each candidate transcript (in base pairs)
-- Intronic overlap with each candidate transcript
-- Intergenic extent (bases outside any annotated gene)
-- Splice junction classification: annotated (matching known intron
-  boundaries), unannotated (novel boundaries), or unspliced
-
-**Read 2 strand flip.** For paired-end reads, the BAM scanner
-normalizes strand representation by flipping R2's alignment strand,
-ensuring all exon blocks carry R1's alignment strand regardless of
-which mate contributed the alignment. This foundational normalization
-enables protocol-agnostic downstream analysis.
-
-**Fragment classification.** Each fragment is classified into one of
-the following categories:
-- `FRAG_UNIQUE`: Maps to a single transcript unambiguously
-- `FRAG_AMBIG_SAME_STRAND`: Maps to multiple transcripts of the same
-  gene — resolved by the EM
-- `FRAG_MULTIMAPPER`: Multiple globally optimal alignments (NH > 1)
-- `FRAG_CHIMERIC`: Inter-chromosome, inter-locus, or mixed-strand mappings
-
-**Strand model training.** The strand model is trained from spliced
-fragments with known splice-junction strand (the XS or ts BAM tag). A
-Beta posterior on the R1-sense probability is computed:
-
-$$
-p_{\text{r1s}} = \frac{n_{\text{same}} + \kappa/2}{n_{\text{same}} + n_{\text{opp}} + \kappa}
-$$
-
-where $n_{\text{same}}$ counts fragments where the exon alignment strand
-matches the splice-junction strand, $n_{\text{opp}}$ counts mismatches,
-and $\kappa$ is a prior pseudo-count (default 2.0, giving a uniform
-Beta(1,1) prior). The strand specificity is:
-
-$$
-\text{SS} = \max(p_{\text{r1s}}, 1 - p_{\text{r1s}}) \in [0.5, 1.0]
-$$
-
-The library protocol is determined as R1-sense ($p_{\text{r1s}} > 0.5$)
-or R1-antisense ($p_{\text{r1s}} < 0.5$). Both protocols are handled
-identically through the same code path because all downstream
-computations use gene-relative sense/antisense classifications rather
-than read-relative orientations.
-
-**Fragment length model training.** Separate fragment length histograms
-are trained for RNA and gDNA from uniquely mapped fragments:
-- RNA model: trained from spliced fragments (which are definitively RNA)
-- gDNA model: trained from intergenic fragments
-
-Each model stores per-length bin probabilities with Laplace smoothing for
-lengths $[0, L_{\max})$ (default $L_{\max} = 1000$) and an exponential
-tail decay beyond $L_{\max}$:
-
-$$
-\log p(k) = \log p(L_{\max}) + (k - L_{\max}) \cdot \log(0.99), \quad k > L_{\max}
-$$
-
-**Buffering.** Fragments are stored in a memory-efficient columnar format
-with configurable memory limits (default 2 GB). When the buffer fills,
-chunks are spilled to disk in a temporary directory and recombined during
-the quantification stage.
-
-### 3.2 Stage 2: Locus-Level EM Quantification
-
-**Pre-EM accumulation.** Before entering the EM, four accumulator arrays
-are computed from single-gene fragments:
-- Per-transcript unspliced sense and antisense counts (aggregated to
-  per-locus totals for gDNA initialization)
-- Per-transcript intronic sense and antisense counts (for nRNA
-  initialization)
-
-**Fragment routing.** Fragments are routed into compressed sparse row
-(CSR) format. For each fragment $f$, the CSR stores:
-- Candidate transcript indices
-- Per-candidate log-likelihoods incorporating strand, insert length,
-  alignment penalties, and effective length
-- Coverage weights
-- Splice type and strand classification
-
-**Locus partitioning.** Transcripts are partitioned into independent loci
-via union-find with path compression. An edge exists between two
-transcripts if any fragment maps to both. Each connected component defines
-a locus that is solved independently.
-
-**EM optimization.** For each locus, the EM solves the 2T + 1 component
-mixture (Section 4). Post-EM pruning (Section 4.6) removes low-evidence
-components and re-optimizes.
-
-**Output assembly.** Per-transcript mRNA and nRNA abundances are computed
-from the converged $\theta$ and $\beta$ parameters. TPM values are
-computed using mRNA effective lengths. Results are assembled into
-per-transcript, per-gene, and per-locus tables.
-
----
-
-## 4. EM Algorithm
-
-### 4.1 Component Layout
-
-For a locus with $T$ transcripts, the EM operates on a vector of
-$2T + 1$ components:
-
-| Index range | Component | Description |
-|-------------|-----------|-------------|
-| $[0, T)$ | mRNA$_t$ | Mature RNA from transcript $t$ |
-| $[T, 2T)$ | nRNA$_t$ | Nascent RNA from transcript $t$ |
-| $2T$ | gDNA | Genomic DNA background for the locus |
-
-The abundance vector $\boldsymbol{\theta}$ lies on the simplex:
-$\sum_{k=0}^{2T} \theta_k = 1$.
-
-### 4.2 Fragment Likelihood
-
-For each fragment $f$ and candidate component $c$, the log-likelihood
-combines four terms:
-
-$$
-\log \ell(f, c) = \log p_{\text{strand}}(f, c)
-  + \log p_{\text{insert}}(l_f, c)
-  + \log p_{\text{align}}(f, c)
-  - \log K_c(f)
-$$
-
-where:
-
-**Strand likelihood.** The strand probability depends on whether the
-fragment aligns sense or antisense to the gene:
-
-$$
-p_{\text{strand}}(f, c) = \begin{cases}
-p_{\text{r1s}} & \text{if exon strand = gene strand (sense)} \\
-1 - p_{\text{r1s}} & \text{if exon strand} \neq \text{gene strand (antisense)}
-\end{cases}
-$$
-
-For gDNA, which is unstranded, the strand likelihood is 0.5 regardless
-of alignment orientation.
-
-**Insert size likelihood.** The probability of observing insert length
-$l_f$ under the RNA or gDNA fragment length model:
-
-$$
-p_{\text{insert}}(l_f, c) = \begin{cases}
-p_{\text{RNA}}(l_f) & \text{if } c \in \{\text{mRNA}, \text{nRNA}\} \\
-p_{\text{gDNA}}(l_f) & \text{if } c = \text{gDNA}
-\end{cases}
-$$
-
-**Alignment penalty.** A multiplicative log-penalty for alignment
-imperfections:
-
-$$
-\log p_{\text{align}}(f, c) = n_{\text{overhang}} \cdot \log \alpha_o
-  + n_{\text{mismatch}} \cdot \log \alpha_m
-  + \mathbb{1}[\text{unannot. splice}] \cdot \log \alpha_s
-$$
-
-where $\alpha_o = 0.01$ (per-base overhang penalty), $\alpha_m = 0.1$
-(per-mismatch penalty from the NM tag), and $\alpha_s = 0.01$ (gDNA
-penalty for unannotated splice junctions). A fragment with 5 bp overhang
-and 2 mismatches receives a penalty of $5 \times \log(0.01) + 2 \times
-\log(0.1) \approx -27.6$ in log space.
-
-**Effective length normalization.** The normalization constant $K_c(f)$
-accounts for the probability of observing a fragment of length $l_f$ at
-a random position within the transcript:
-
-$$
 K_c = \text{eff\_len}(t, c) = (L_t + 1) \cdot (\text{CDF}[k] - P(0))
-  - \text{CMOM}[k]
-$$
 
-where $k = \min(L_t, L_{\max})$, CDF is the cumulative distribution
-function of the fragment length model, and CMOM is the cumulative first
-moment. This is the Salmon-style effective length correction (Patro et
-al., 2017), computed efficiently via pre-tabulated cumulative arrays.
+# Rigel Methods
 
-For mRNA components, $L_t$ is the sum of exon lengths (spliced
-transcript length). For nRNA components, $L_t$ is the genomic span of
-the transcript (including introns). For the gDNA component, $L_t$ is
-the genomic span of the locus.
-
-### 4.3 E-Step
-
-The E-step computes posterior responsibilities for each fragment $f$
-over its candidate components:
-
-$$
-r(f, c) = \frac{\theta_c \cdot \ell(f, c) / K_c}
-  {\sum_{c'} \theta_{c'} \cdot \ell(f, c') / K_{c'}}
-$$
-
-Fragments that map unambiguously to a single component (unique mappers
-to single-transcript loci) bypass the E-step entirely and contribute
-directly to the M-step accumulators.
-
-### 4.4 M-Step
-
-The M-step updates the abundance vector using Maximum A Posteriori (MAP)
-estimation with a Dirichlet prior:
-
-$$
-\theta_c^{(\text{new})} = \frac{1}{Z} \left(
-  U_c + \sum_f r(f, c) + \alpha_c
-\right)
-$$
-
-where $U_c$ is the unambiguous fragment count for component $c$, the
-sum is over ambiguous fragments, and $\alpha_c$ is the Dirichlet prior
-for component $c$. The normalization constant $Z$ ensures the simplex
-constraint.
-
-**Prior structure.** The prior $\alpha_c$ has two additive components:
-
-$$
-\alpha_c = \alpha_{\text{base}} + \gamma_{\text{ovr}} \cdot \text{OVR}_c
-$$
-
-where $\alpha_{\text{base}} = 0.01$ is a flat pseudo-count providing
-numerical stability, and $\text{OVR}_c$ is the coverage-weighted One
-Virtual Read share (Section 5.3). The OVR distributes a single virtual
-read's worth of prior mass across components proportionally to their
-coverage evidence:
-
-$$
-\text{OVR}_c = \frac{\sum_f w(f, c) \cdot r(f, c)}
-  {\sum_{c'} \sum_f w(f, c') \cdot r(f, c')}
-$$
-
-where $w(f, c)$ is the positional coverage weight of fragment $f$ under
-component $c$.
-
-**Nascent fraction update.** The per-transcript nascent fraction $\beta_t$
-is updated via MAP estimation with a Beta prior:
-
-$$
-\beta_t^{(\text{new})} = \frac{N_{t,\text{nRNA}} + \alpha_t^{(\beta)} - 1}
-  {N_{t,\text{total}} + \alpha_t^{(\beta)} + \beta_t^{(\beta)} - 2}
-$$
-
-where $N_{t,\text{nRNA}} = \sum_f r(f, t, \text{nRNA})$,
-$N_{t,\text{total}} = N_{t,\text{mRNA}} + N_{t,\text{nRNA}}$, and
-$\text{Beta}(\alpha_t^{(\beta)}, \beta_t^{(\beta)})$ is the hierarchical
-prior (Section 5.1). The result is clamped to $[\varepsilon, 1-\varepsilon]$
-with $\varepsilon = 10^{-8}$.
-
-### 4.5 SQUAREM Acceleration
-
-The EM is accelerated using SQUAREM (Squared Iterative Methods; Varadhan
-and Roland, 2008), which operates on the abundance vector $\boldsymbol{\theta}$
-(the simplex of total component abundances including gDNA):
-
-1. Compute one EM step: $\boldsymbol{\theta}^{(k)} \to \boldsymbol{\theta}^{(k+1)}$
-2. Compute extrapolation direction:
-   $\Delta = \boldsymbol{\theta}^{(k+1)} - \boldsymbol{\theta}^{(k)}$
-3. Evaluate extrapolated point:
-   $\boldsymbol{\theta}^{(k+2)} = \boldsymbol{\theta}^{(k+1)} + \lambda \Delta$
-   with adaptive step size $\lambda$
-4. Project back to the simplex if necessary
-5. Revert to the standard EM step if the extrapolation increases the
-   objective
-
-The nascent fraction $\beta_t$ is **not** included in the SQUAREM state
-vector. It is derived deterministically from the M-step ratio after each
-EM iteration and clamped to $[\varepsilon, 1-\varepsilon]$. This avoids
-boundary violations from extrapolation and requires no structural changes
-to the SQUAREM infrastructure.
-
-In practice, SQUAREM achieves convergence in approximately 10–50× fewer
-iterations than standard EM on real RNA-seq data.
-
-### 4.6 Post-EM Pruning
-
-After initial convergence, Rigel identifies components that are likely
-false positives—components sustained by prior mass rather than data
-evidence. For each component $c$:
-
-1. Compute the evidence ratio: $E_c = D_c / \alpha_c$, where $D_c$ is
-   the data-contributed count and $\alpha_c$ is the prior.
-2. If $U_c = 0$ (no unambiguous fragments) and $E_c < \tau_{\text{prune}}$
-   (default $\tau_{\text{prune}} = 0.1$), zero the component.
-3. Re-run the EM to redistribute the pruned mass.
-
-This two-pass strategy allows the initial EM to explore the full
-component space, then eliminates ghost components that cannot sustain
-themselves without prior support.
-
-### 4.7 Confidence-Based Assignment
-
-For each ambiguous fragment, the RNA-normalized posterior is computed:
-
-$$
-p_{\text{RNA}}(f, t) = \frac{r(f, t, \text{mRNA}) + r(f, t, \text{nRNA})}
-  {\sum_{t'} [r(f, t', \text{mRNA}) + r(f, t', \text{nRNA})]}
-$$
-
-If $\max_t p_{\text{RNA}}(f, t) \geq \tau_{\text{conf}}$ (default 0.95),
-the fragment is classified as a high-confidence assignment.
+This document describes the model that is currently implemented in the Rigel
+codebase. It is intentionally implementation-facing: when the code and earlier
+design notes disagree, this document follows the code.
 
 ---
 
-## 5. Hierarchical Prior System
+## 1. Scope and motivation
 
-### 5.1 Nascent Fraction Prior
+Rigel quantifies RNA-seq alignments while explicitly modeling three signal
+sources in the same library:
 
-The nascent fraction $\beta_t$ for each transcript $t$ is given a
-$\text{Beta}(\alpha_t, \beta_t)$ prior computed through a three-level
-empirical Bayes hierarchy:
+- mature spliced RNA (`mRNA`)
+- nascent RNA (`nRNA`)
+- genomic DNA contamination (`gDNA`)
+
+The main motivation is to avoid forcing intronic or contamination-derived signal
+into transcript abundance estimates. In total RNA or imperfectly DNase-treated
+libraries, that distinction matters.
+
+---
+
+## 2. Reference model
+
+Rigel builds an index from a FASTA and GTF and materializes five core tables:
+
+- reference lengths
+- transcripts
+- splice junctions
+- genomic intervals
+- nRNA spans
+
+The nRNA table is central to the current implementation. An nRNA entry is not a
+copy of a transcript. It is a unique genomic span:
 
 $$
-\text{transcript} \leftarrow \text{TSS group} \leftarrow
-\text{locus-strand} \leftarrow \text{global}
+n = (\mathrm{ref}, \mathrm{strand}, \mathrm{start}, \mathrm{end})
 $$
 
-At each level, the prior is parameterized by a mean estimate $\hat{\beta}$
-and a concentration $\kappa = \alpha + \beta$ (effective sample size),
-giving $\alpha = \hat{\beta} \kappa$ and $\beta = (1 - \hat{\beta}) \kappa$.
+Each transcript $t$ maps to exactly one nRNA span through a transcript-to-nRNA
+map $a(t)$. If multiple transcripts share the same genomic span, they share the
+same nRNA entry.
 
-#### Level 0: Global prior
+For a locus with $T$ transcripts there are therefore two counts that matter:
 
-The global nascent fraction is a weakly informative prior of
-$\hat{\beta}_{\text{global}} = 0.5$ with $\kappa = 2.0$, corresponding
-to a uniform $\text{Beta}(1, 1)$ prior.
+- $T$: transcript count
+- $N$: number of unique nRNA spans among those transcripts
 
-#### Level 1: Locus-strand
+Usually $N \leq T$, often strictly smaller in isoform-rich loci.
 
-For each (locus, strand) combination, the nascent fraction is estimated
-from the ratio of unspliced to total exonic fragments across all
-transcripts on that strand:
+---
 
+## 3. Pipeline architecture
+
+Rigel runs in two logical stages.
+
+### 3.1 Native BAM scan
+
+A native htslib-backed scanner reads the BAM once and performs:
+
+- fragment grouping by read name
+- annotation overlap resolution against the interval index
+- splice classification as `UNSPLICED`, `SPLICED_UNANNOT`, or `SPLICED_ANNOT`
+- strand observation collection for the RNA strand model
+- fragment-length observation collection for RNA and intergenic gDNA models
+- buffering of resolved fragments into a columnar in-memory structure with optional spill-to-disk
+
+The scanner normalizes paired-end strand representation by flipping read 2 so
+that downstream logic consistently works in a read-1-relative orientation.
+
+### 3.2 Fragment routing and loci
+
+Buffered fragments are rescored and routed into CSR arrays containing:
+
+- candidate component indices
+- per-candidate log-likelihoods
+- coverage weights
+- transcript-space start and end coordinates
+- per-fragment splice metadata
+
+Transcripts are then partitioned into loci using connected components: two
+transcripts belong to the same locus if at least one fragment can support both.
+
+### 3.3 Batch locus EM
+
+All loci are solved through a batched native EM call. Before the EM, Rigel
+computes:
+
+- per-transcript deterministic counts
+- per-nRNA nRNA initialization from intronic strand-aware evidence
+- per-locus empirical Bayes gDNA initializations
+- per-nRNA Beta prior parameters for nascent fraction updates
+
+---
+
+## 4. Component layout
+
+For a locus with $T$ transcripts and $N$ unique nRNA spans, Rigel solves a
+mixture with:
+
+$$
+T + N + 1
+$$
+
+components:
+
+| Index range | Component |
+|-------------|-----------|
+| $[0, T)$ | one mRNA component per transcript |
+| $[T, T+N)$ | one nRNA component per unique nRNA span |
+| $T+N$ | one merged gDNA component for the whole locus |
+
+This is the main architectural difference from the older `2T + 1` design.
+nRNA is no longer represented as one shadow per transcript.
+
+Only unspliced ambiguous units receive a gDNA candidate. Spliced units compete
+among RNA candidates only.
+
+---
+
+## 5. Fragment likelihood
+
+For a fragment $f$ and candidate component $c$, Rigel combines four terms in
+log space:
+
+$$
+\log \ell(f, c) =
+\log p_{\mathrm{strand}}(f, c) +
+\log p_{\mathrm{insert}}(f, c) +
+\log p_{\mathrm{align}}(f, c) -
+\log K(f, c)
+$$
+
+where:
+
+- $p_{\mathrm{strand}}$ uses the trained RNA strand model for RNA candidates and
+  a fixed value of $0.5$ for gDNA
+- $p_{\mathrm{insert}}$ uses the RNA fragment-length model for RNA candidates and
+  the intergenic model for gDNA
+- $p_{\mathrm{align}}$ applies mismatch and overhang penalties, plus a gDNA
+  penalty for unannotated splice junctions
+- $K(f,c)$ is the effective-length term used for length normalization
+
+The user-facing penalty parameters are:
+
+- `overhang_alpha = 0.01`
+- `mismatch_alpha = 0.1`
+- `gdna_splice_penalty_unannot = 0.01`
+
+Rigel stores these in config space as log penalties and applies them additively
+in log space.
+
+---
+
+## 6. Strand model
+
+Rigel retains three strand models, but only one is used for scoring.
+
+### 6.1 Primary RNA strand model
+
+The primary model is trained from annotated spliced fragments with unique gene
+assignment. Those fragments are the cleanest RNA-only evidence in the pipeline.
+
+Let $p_{\mathrm{r1s}}$ be the posterior mean probability that read 1 is sense to
+the gene. With a Beta prior parameterized by `strand_prior_kappa`, the model
+derives:
+
+$$
+\mathrm{SS} = \max(p_{\mathrm{r1s}}, 1 - p_{\mathrm{r1s}})
+$$
+
+and reports protocol as:
+
+- `R1-sense` if $p_{\mathrm{r1s}} \ge 0.5$
+- `R1-antisense` otherwise
+
+### 6.2 Diagnostic strand models
+
+Rigel also tracks:
+
+- an exonic diagnostic model trained on all exonic signal
+- an intergenic diagnostic model trained on intergenic fragments
+
+These are reported in `summary.json` but are not used to score gDNA. gDNA is
+always treated as unstranded for scoring.
+
+---
+
+## 7. Fragment-length model and effective length
+
+Rigel trains separate fragment-length models for:
+
+- RNA-like fragments
+- intergenic gDNA-like fragments
+
+Transcript effective lengths are computed from the RNA model. When no fragment-
+length observations are available, Rigel falls back to:
+
+$$
+\max(L - \bar{f} + 1, 1)
+$$
+
+using a default mean fragment length.
+
+At EM time, the native solver also applies per-fragment effective-length logic
+through component-specific bias profiles:
+
+- mRNA uses exonic transcript length
+- nRNA uses genomic span length of the shared nRNA entity
+- gDNA uses locus span
+
+---
+
+## 8. EM objective
+
+Rigel performs MAP-EM on the component simplex with effective-length
+normalization and a coverage-weighted One Virtual Read prior.
+
+### 8.1 E-step
+
+For each ambiguous unit, posterior mass is distributed over candidate
+components in proportion to current weight times candidate likelihood.
+
+### 8.2 M-step
+
+The component simplex is updated from:
+
+- deterministic counts
+- expected ambiguous counts
+- flat Dirichlet prior mass
+- OVR prior mass
+
+When a locus contains shared nRNA spans, the native M-step switches into a
+hierarchical nRNA-group mode and enforces one nascent-fraction update per nRNA
+span rather than one per transcript.
+
+### 8.3 SQUAREM acceleration
+
+The native solver accelerates the simplex updates with SQUAREM. This is the
+dominant compute kernel in realistic runs and is where most runtime is spent.
+
+### 8.4 Pruning
+
+After convergence, components with zero deterministic support and insufficient
+data-to-prior evidence may be pruned according to `prune_threshold`, then the
+EM is rerun once to redistribute mass.
+
+### 8.5 Confidence assignments
+
+Rigel separately tracks high-confidence RNA assignments using the
+RNA-normalized posterior and `confidence_threshold`.
+
+---
+
+## 9. nRNA prior system
+
+The current nRNA prior is defined on shared nRNA spans, not transcripts.
+
+### 9.1 Evidence model
+
+Rigel accumulates strand-aware exon and intron evidence, then computes a hybrid
+nRNA fraction estimate from two views of the data:
+
+- density subtraction against the global gDNA background
+- strand subtraction using the library strand specificity
+
+The strand contribution is weighted by:
+
+$$
+W = (2 \cdot \mathrm{SS} - 1)^2
+$$
+
+so that density-based estimates dominate when the library is weakly stranded.
+
+### 9.2 Hierarchy
+
+The implemented hierarchy is:
+
+$$
+\mathrm{global} \rightarrow \mathrm{locus\text{-}strand} \rightarrow \mathrm{nRNA}
+$$
+
+The user-visible parameters are:
+
+- `nrna_frac_kappa_global`
+- `nrna_frac_kappa_locus`
+- `nrna_frac_kappa_nrna`
+
+The first two can be auto-estimated by Method of Moments subject to minimum-
+evidence thresholds and lower/upper clamps. The last is a fixed pseudo-count for
+the final Beta prior passed into the EM solver.
+
+### 9.3 Initialization and gating
+
+Rigel computes a separate `nrna_init` signal from intronic sense-excess counts.
+nRNA components are disabled when they fail biological or structural checks,
+including cases where the shared nRNA span is supported only by single-exon
+transcripts.
+
+---
+
+## 10. gDNA prior system
+
+gDNA is modeled as one merged locus-level component.
+
+### 10.1 Background density
+
+Rigel estimates a global intergenic density from total intergenic fragments and
+the inferred intergenic territory of the reference.
+
+### 10.2 Hierarchy
+
+The gDNA prior hierarchy is:
+
+$$
+\mathrm{global} \rightarrow \mathrm{reference} \rightarrow \mathrm{locus}
+$$
+
+with optional auto-estimation of:
+
+- `gdna_kappa_ref`
+- `gdna_kappa_locus`
+
+using Method of Moments and evidence thresholds.
+
+### 10.3 Strand symmetry penalty
+
+The native M-step can penalize asymmetric gDNA strand usage using:
+
+- `strand_symmetry_kappa`
+- `strand_symmetry_pseudo`
+
+This acts as a Beta prior on gDNA strand fraction and discourages gDNA solutions
+that look implausibly strand-specific.
+
+---
+
+## 11. Reporting semantics
+
+Rigel reports several views of the fitted model.
+
+### 11.1 Transcript table
+
+`quant.feather` and `quant.tsv` contain transcript-level mRNA and nRNA values.
+The `nrna` column is not a direct per-transcript latent state from the EM. It
+is produced by equal-share fan-out of shared nRNA-span counts back to the
+transcripts mapping to that span.
+
+### 11.2 Gene table
+
+`gene_quant.feather` and `gene_quant.tsv` sum transcript-level quantities by
+gene after transcript fan-out.
+
+### 11.3 Locus table
+
+`loci.feather` and `loci.tsv` report the direct locus-level EM totals:
+
+- `mrna`
+- `nrna`
+- `gdna`
+- `gdna_init`
+- `gdna_rate`
+
+### 11.4 Detail table
+
+`quant_detail.feather` and `quant_detail.tsv` are long-format QC tables over:
+
+- transcript
+- gene
+- splice category
+- source (`unambig` or `em`)
+
+### 11.5 Annotated BAM
+
+When enabled, a second BAM pass stamps each record with tags describing the
+winning assignment, its pool, posterior, fragment class, number of candidates,
+and splice type.
+
+---
+
+## 12. Implementation notes
+
+Rigel is split between Python orchestration and native kernels.
+
+### Python responsibilities
+
+- CLI parsing and YAML merge logic
+- index build and load
+- pipeline orchestration
+- prior estimation
+- output writing
+
+### Native responsibilities
+
+- BAM scanning through htslib
+- high-volume fragment resolution and routing
+- batched locus EM
+- SQUAREM acceleration
+- annotated BAM writing
+
+The project is packaged with scikit-build-core, nanobind, and CMake, and builds
+stable-ABI wheels for Python 3.12+.
 $$
 \hat{\beta}_{\ell,s} = \frac{\sum_{t \in (\ell,s)} U_t^{\text{unspliced}}}
   {\sum_{t \in (\ell,s)} (U_t^{\text{spliced}} + U_t^{\text{unspliced}})}
@@ -523,7 +427,7 @@ auto-estimated or manually set via `--nrna-frac-kappa-global`.
 Transcripts sharing a transcription start site (TSS) are expected to have
 similar nascent fractions because they share the same promoter and
 5' kinetics. Rigel groups transcripts by fuzzy TSS matching using
-**single-linkage clustering**: transcripts on the same chromosome and
+**single-linkage clustering**: transcripts on the same reference and
 strand whose 5' positions lie within a configurable window (default
 200 bp) are merged into a single TSS group.
 
@@ -562,7 +466,7 @@ $$
 The gDNA rate prior uses a two-level empirical Bayes hierarchy:
 
 $$
-\text{locus} \leftarrow \text{chromosome} \leftarrow \text{global}
+	ext{locus} \leftarrow \text{reference} \leftarrow \text{global}
 $$
 
 #### The antisense principle
@@ -628,7 +532,7 @@ The weight $W$ is the squared reliability of the strand signal:
 
 #### Hierarchical shrinkage
 
-The per-locus gDNA rate is shrunk toward chromosome-level and
+The per-locus gDNA rate is shrunk toward reference-level and
 global estimates through two levels of Beta-distribution shrinkage
 with auto-estimated $\kappa$ parameters via Method of Moments.
 

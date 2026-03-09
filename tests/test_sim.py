@@ -281,9 +281,9 @@ class TestGeneBuilder:
         # Parse first transcript (2-exon, + strand)
         fields = lines[0].split("\t")
         assert len(fields) == 12
-        assert fields[0] == "chr1"     # chrom
-        assert fields[1] == "100"      # chromStart
-        assert fields[2] == "700"      # chromEnd
+        assert fields[0] == "chr1"     # ref
+        assert fields[1] == "100"      # refStart
+        assert fields[2] == "700"      # refEnd
         assert fields[3] == "t1"       # name
         assert fields[5] == "+"        # strand
         assert fields[9] == "2"        # blockCount

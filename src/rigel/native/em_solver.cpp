@@ -103,6 +103,8 @@ struct EmEquivClass {
     std::vector<double>  ll_flat;   // n*k log-likelihoods (row-major)
     std::vector<double>  wt_flat;   // n*k coverage weights (row-major)
     mutable std::vector<double> scratch;  // n*k workspace (reused each iteration)
+    int gdna_col;  // column in comp_idx that is gDNA (-1 if absent)
+    std::vector<uint8_t> gdna_is_anti;  // [n]: 1 if unit is antisense, 0 if sense
     int n;  // number of units in this class
     int k;  // number of components per unit
 };
@@ -133,11 +135,13 @@ static std::vector<EmEquivClass> build_equiv_classes(
     const int32_t* t_indices,
     const double*  log_liks,
     const double*  coverage_wts,
-    int n_units)
+    int n_units,
+    const uint8_t* locus_ct_arr = nullptr,
+    int gdna_idx = -1)
 {
     if (n_units == 0) return {};
 
-    // Group units by candidate component set
+    // Group units by candidate component set — store unit index u
     std::unordered_map<std::vector<int32_t>, std::vector<int>, VecHash> class_map;
     class_map.reserve(static_cast<size_t>(n_units));
 
@@ -147,32 +151,48 @@ static std::vector<EmEquivClass> build_equiv_classes(
         if (start == end) continue;
 
         std::vector<int32_t> key(t_indices + start, t_indices + end);
-        class_map[std::move(key)].push_back(static_cast<int>(start));
+        class_map[std::move(key)].push_back(u);
     }
 
     // Build dense matrices per class
     std::vector<EmEquivClass> result;
     result.reserve(class_map.size());
 
-    for (auto& [key, start_list] : class_map) {
+    for (auto& [key, unit_list] : class_map) {
         int k = static_cast<int>(key.size());
-        int n = static_cast<int>(start_list.size());
+        int n = static_cast<int>(unit_list.size());
 
         EmEquivClass ec;
-        ec.comp_idx = std::move(key);
+        ec.comp_idx = key;
         ec.n = n;
         ec.k = k;
         ec.ll_flat.resize(static_cast<size_t>(n) * k);
         ec.wt_flat.resize(static_cast<size_t>(n) * k);
         ec.scratch.resize(static_cast<size_t>(n) * k);
 
+        // Find gDNA column
+        ec.gdna_col = -1;
+        if (gdna_idx >= 0) {
+            for (int j = 0; j < k; ++j) {
+                if (ec.comp_idx[j] == gdna_idx) { ec.gdna_col = j; break; }
+            }
+        }
+
+        if (ec.gdna_col >= 0 && locus_ct_arr) {
+            ec.gdna_is_anti.resize(static_cast<size_t>(n));
+        }
+
         for (int i = 0; i < n; ++i) {
-            int s = start_list[i];
+            int u = unit_list[i];
+            auto s = static_cast<size_t>(offsets[u]);
             for (int j = 0; j < k; ++j) {
                 ec.ll_flat[static_cast<size_t>(i) * k + j] =
-                    log_liks[static_cast<size_t>(s) + j];
+                    log_liks[s + static_cast<size_t>(j)];
                 ec.wt_flat[static_cast<size_t>(i) * k + j] =
-                    coverage_wts[static_cast<size_t>(s) + j];
+                    coverage_wts[s + static_cast<size_t>(j)];
+            }
+            if (ec.gdna_col >= 0 && locus_ct_arr) {
+                ec.gdna_is_anti[i] = locus_ct_arr[u] % 2;
             }
         }
 
@@ -230,7 +250,7 @@ static std::vector<EmEquivClass> build_equiv_classes(
         }
         if (already_sorted) continue;
 
-        // Reorder ll_flat and wt_flat
+        // Reorder ll_flat, wt_flat, and gdna_is_anti
         std::vector<double> new_ll(static_cast<size_t>(n) * k);
         std::vector<double> new_wt(static_cast<size_t>(n) * k);
         for (int i = 0; i < n; ++i) {
@@ -243,6 +263,14 @@ static std::vector<EmEquivClass> build_equiv_classes(
         }
         ec.ll_flat = std::move(new_ll);
         ec.wt_flat = std::move(new_wt);
+
+        if (!ec.gdna_is_anti.empty()) {
+            std::vector<uint8_t> new_anti(static_cast<size_t>(n));
+            for (int i = 0; i < n; ++i) {
+                new_anti[i] = ec.gdna_is_anti[idx[i]];
+            }
+            ec.gdna_is_anti = std::move(new_anti);
+        }
     }
 
     return result;
@@ -537,7 +565,10 @@ static void hierarchical_map_em_step(
     const double* nrna_frac_alpha = nullptr,
     const double* nrna_frac_beta = nullptr,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr)
+    rigel::EStepThreadPool* pool = nullptr,
+    // Strand symmetry penalty parameters
+    double        strand_symmetry_kappa = 2.0,
+    double        strand_eps = 10.0)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -558,13 +589,61 @@ static void hierarchical_map_em_step(
         }
     }
 
+    // --- Targeted Excess Penalty for gDNA strand symmetry ---
+    //
+    // Decomposes gDNA EM counts into a perfectly symmetric baseline
+    // (2 * min(sense, anti)) that is fully protected, and an asymmetric
+    // excess (|sense - anti|) that receives the Beta discount w_sym.
+    // This prevents the penalty from destroying legitimate symmetric
+    // gDNA and transferring that mass into nRNA.
+    //
+    // kappa <= 2.0 disables the penalty entirely (fast path).
+    // The strand accumulation loop only runs when the penalty is active.
+
     if (n_nrna == 0) {
         // Plain MAP-EM: theta_new = (unambig + em + prior), normalized
+        int gi = n_components - 1;  // gDNA is always last
         double total = 0.0;
         for (int i = 0; i < n_components; ++i) {
             theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
             total += theta_new[i];
         }
+
+        // Apply targeted excess penalty to gDNA
+        if (strand_symmetry_kappa > 2.0 && n_components > 0) {
+            double e_sense_gdna = 0.0, e_anti_gdna = 0.0;
+            for (const auto& ec : ec_data) {
+                if (ec.gdna_col < 0) continue;
+                int gcol = ec.gdna_col;
+                for (int i = 0; i < ec.n; ++i) {
+                    double p = ec.scratch[static_cast<size_t>(i) * ec.k + gcol];
+                    if (ec.gdna_is_anti[i])
+                        e_anti_gdna += p;
+                    else
+                        e_sense_gdna += p;
+                }
+            }
+
+            double e_min = std::min(e_sense_gdna, e_anti_gdna);
+            double e_max = std::max(e_sense_gdna, e_anti_gdna);
+            double e_sym = 2.0 * e_min;
+            double e_excess = e_max - e_min;
+
+            double N_g = e_sense_gdna + e_anti_gdna;
+            double w_sym = 1.0;
+            if (N_g > 0.0) {
+                double pseudo_half = strand_eps / 2.0;
+                double p_hat = (e_sense_gdna + pseudo_half) / (N_g + strand_eps);
+                double balance = 4.0 * p_hat * (1.0 - p_hat);
+                w_sym = std::pow(balance, strand_symmetry_kappa / 2.0 - 1.0);
+            }
+
+            double penalized_em = e_sym + e_excess * w_sym;
+            double old_g = theta_new[gi];
+            theta_new[gi] = penalized_em + unambig_totals[gi] + prior[gi];
+            total += theta_new[gi] - old_g;
+        }
+
         if (total > 0.0) {
             double inv_total = 1.0 / total;
             for (int i = 0; i < n_components; ++i) {
@@ -628,9 +707,41 @@ static void hierarchical_map_em_step(
         }
     }
 
-    // gDNA: independent
-    theta_new[gdna_idx] = em_totals[gdna_idx] + unambig_totals[gdna_idx]
-                        + prior[gdna_idx];
+    // gDNA: independent, apply targeted excess penalty
+    if (strand_symmetry_kappa > 2.0) {
+        double e_sense_gdna = 0.0, e_anti_gdna = 0.0;
+        for (const auto& ec : ec_data) {
+            if (ec.gdna_col < 0) continue;
+            int gcol = ec.gdna_col;
+            for (int i = 0; i < ec.n; ++i) {
+                double p = ec.scratch[static_cast<size_t>(i) * ec.k + gcol];
+                if (ec.gdna_is_anti[i])
+                    e_anti_gdna += p;
+                else
+                    e_sense_gdna += p;
+            }
+        }
+
+        double e_min = std::min(e_sense_gdna, e_anti_gdna);
+        double e_max = std::max(e_sense_gdna, e_anti_gdna);
+        double e_sym = 2.0 * e_min;
+        double e_excess = e_max - e_min;
+
+        double N_g = e_sense_gdna + e_anti_gdna;
+        double w_sym = 1.0;
+        if (N_g > 0.0) {
+            double pseudo_half = strand_eps / 2.0;
+            double p_hat = (e_sense_gdna + pseudo_half) / (N_g + strand_eps);
+            double balance = 4.0 * p_hat * (1.0 - p_hat);
+            w_sym = std::pow(balance, strand_symmetry_kappa / 2.0 - 1.0);
+        }
+
+        double penalized_em = e_sym + e_excess * w_sym;
+        theta_new[gdna_idx] = penalized_em + unambig_totals[gdna_idx] + prior[gdna_idx];
+    } else {
+        theta_new[gdna_idx] = em_totals[gdna_idx] + unambig_totals[gdna_idx]
+                            + prior[gdna_idx];
+    }
 
     // Normalize theta_new to sum to 1.0
     double total = 0.0;
@@ -780,7 +891,10 @@ static EMResult run_squarem(
     const double* nrna_frac_alpha = nullptr,
     const double* nrna_frac_beta = nullptr,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr)
+    rigel::EStepThreadPool* pool = nullptr,
+    // Strand symmetry penalty parameters
+    double        strand_symmetry_kappa = 2.0,
+    double        strand_eps = 10.0)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -898,7 +1012,8 @@ static EMResult run_squarem(
                         n_transcripts, n_nrna, t_to_nrna,
                         nrna_to_t_off, nrna_to_t_idx,
                         nrna_frac_alpha, nrna_frac_beta,
-                        estep_threads, pool);
+                        estep_threads, pool,
+                        strand_symmetry_kappa, strand_eps);
 
             hierarchical_map_em_step(state1.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
@@ -906,7 +1021,8 @@ static EMResult run_squarem(
                         n_transcripts, n_nrna, t_to_nrna,
                         nrna_to_t_off, nrna_to_t_idx,
                         nrna_frac_alpha, nrna_frac_beta,
-                        estep_threads, pool);
+                        estep_threads, pool,
+                        strand_symmetry_kappa, strand_eps);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -945,7 +1061,8 @@ static EMResult run_squarem(
                         n_transcripts, n_nrna, t_to_nrna,
                         nrna_to_t_off, nrna_to_t_idx,
                         nrna_frac_alpha, nrna_frac_beta,
-                        estep_threads, pool);
+                        estep_threads, pool,
+                        strand_symmetry_kappa, strand_eps);
 
             // Convergence
             double delta = 0.0;
@@ -1029,7 +1146,9 @@ static EMResult run_squarem(
                                 t_new.data(), n_components,
                                 n_transcripts, n_nrna, t_to_nrna,
                                 nrna_to_t_off, nrna_to_t_idx,
-                                nrna_frac_alpha, nrna_frac_beta);
+                                nrna_frac_alpha, nrna_frac_beta,
+                                1, nullptr,
+                                strand_symmetry_kappa, strand_eps);
                     std::swap(theta, t_new);
                 }
                 for (size_t i = 0; i < nc; ++i) {
@@ -1785,7 +1904,10 @@ batch_locus_em(
     double confidence_threshold,
     int    n_transcripts_total,
     int    n_splice_strand_cols,
-    int    n_threads)
+    int    n_threads,
+    // Strand symmetry penalty parameters
+    double strand_symmetry_kappa = 2.0,
+    double strand_eps = 10.0)
 {
     int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
     int N_T = n_transcripts_total;
@@ -1996,7 +2118,9 @@ batch_locus_em(
                 sub.t_indices.data(),
                 sub.log_liks.data(),
                 sub.coverage_wts.data(),
-                n_local_units);
+                n_local_units,
+                sub.locus_ct_arr.data(),
+                sub.gdna_idx);
 
             // 6. Coverage-weighted warm start + OVR prior
             std::vector<double> prior(nc);
@@ -2022,7 +2146,8 @@ batch_locus_em(
                 sub.nrna_to_t_idx.data(),
                 sub.nrna_frac_alpha.data(),
                 sub.nrna_frac_beta.data(),
-                estep_thr, pool);
+                estep_thr, pool,
+                strand_symmetry_kappa, strand_eps);
 
             // 8. Assign posteriors (writes to disjoint transcript
             //    indices — safe across threads, no atomics needed)
@@ -2471,6 +2596,8 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_transcripts_total"),
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
+          nb::arg("strand_symmetry_kappa") = 2.0,
+          nb::arg("strand_eps") = 10.0,
           "Run locus EM for ALL loci in a single C++ call.\n\n"
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"

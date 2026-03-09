@@ -108,13 +108,13 @@ are excluded from the Method-of-Moments κ estimation.
 ### gDNA Rate Hierarchical Shrinkage
 
 The gDNA rate prior uses a two-level hierarchy:
-**global → chromosome → locus**.
+**global → reference → locus**.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gdna-kappa-chrom` | auto (MoM) | κ pulling chromosome gDNA rate toward the global estimate. |
-| `--gdna-kappa-locus` | auto (MoM) | κ pulling locus gDNA rate toward the chromosome estimate. |
-| `--gdna-mom-min-evidence-chrom` | 50 | Min fragment evidence for chromosome gDNA MoM κ. |
+| `--gdna-kappa-ref` | auto (MoM) | κ pulling reference gDNA rate toward the global estimate. |
+| `--gdna-kappa-locus` | auto (MoM) | κ pulling locus gDNA rate toward the reference estimate. |
+| `--gdna-mom-min-evidence-ref` | 50 | Min fragment evidence for reference gDNA MoM κ. |
 | `--gdna-mom-min-evidence-locus` | 30 | Min fragment evidence for locus gDNA MoM κ. |
 
 ### Strand Model

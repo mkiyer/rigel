@@ -31,8 +31,8 @@ from rigel.locus import (
     build_loci,
     build_locus_em_data,
     compute_nrna_init,
-    compute_gdna_rate_from_strand,
-    compute_gdna_rate_hybrid,
+    compute_gdna_density_from_strand,
+    compute_gdna_density_hybrid,
     compute_eb_gdna_priors,
 )
 from rigel.estimator import (

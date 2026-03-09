@@ -56,7 +56,7 @@ class GeneBuilder:
     genome : MutableGenome
         The genome to edit with splice motifs.
     ref_name : str or None
-        Chromosome name. Defaults to ``genome.name``.
+        Reference name. Defaults to ``genome.name``.
     """
 
     def __init__(self, genome: MutableGenome, ref_name: str | None = None):
