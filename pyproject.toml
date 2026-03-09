@@ -3,8 +3,8 @@ requires = ["scikit-build-core>=0.4.3", "nanobind>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "rigel"
-version = "0.1.0"
+name = "rigel-rnaseq"
+version = "0.2.0"
 description = "Bayesian RNA-seq transcript quantification tool"
 readme = "README.md"
 license = "GPL-3.0-or-later"
