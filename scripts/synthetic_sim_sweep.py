@@ -5,7 +5,7 @@ Entities
 --------
 - **Transcripts**: defined by strand and exon coordinates.
 - **Nascent RNAs (nRNAs)**: defined by genomic coordinates
-  ``[ref, strand, start, end]``, matching Rigel's internal nRNA model.
+  ``[strand, start, end]``, matching Rigel's internal nRNA model.
   Transcripts whose span falls within the nRNA coordinates are
   automatically assigned to that group.  Each group has a single
   abundance value; the widest-span multi-exon transcript carries the
@@ -40,7 +40,7 @@ Config structure (YAML)
       nrna_TA: [TA1, TA2, TA3, TA4]
 
     nrnas:                 # coordinate-defined nRNAs (preferred)
-      NTA: ["sweep", "+", 1000, 10000]
+      NTA: ["+", 1000, 10000]
 
     sweep:                 # each entity → constant / list / {start,stop,step}
       nrna_TA: [0, 100]
@@ -55,7 +55,7 @@ Config structure (YAML)
 Usage
 -----
     python scripts/synthetic_sim_sweep.py -c scripts/nrna_sweep_config.yaml
-    python scripts/synthetic_sim_sweep.py -c config.yaml -o results/ -v
+    python scripts/synthetic_sim_sweep.py -c config.yaml -o outdir/ -v
     python scripts/synthetic_sim_sweep.py -c config.yaml --gtf genes.gtf -L 50000
     python scripts/synthetic_sim_sweep.py -c config.yaml --dry-run
 """
@@ -63,6 +63,7 @@ Usage
 import argparse
 import csv
 import itertools
+import json
 import logging
 import sys
 import tempfile
@@ -183,7 +184,6 @@ class NrnaGroup:
     start: int
     end: int
     carrier: str  # transcript ID that carries the nrna_abundance
-    ref: str = "sweep"
 
 
 def _transcript_span(t_def):
@@ -306,7 +306,7 @@ def compute_nrna_groups(transcripts_config, user_groups=None):
 def parse_nrna_coords(nrnas_config, transcripts_config):
     """Build nRNA groups from coordinate definitions.
 
-    Each nRNA is defined as ``label → [ref, strand, start, end]``.
+    Each nRNA is defined as ``label → [strand, start, end]``.
     Transcripts whose genomic span is contained within the nRNA's
     coordinates (same strand) are automatically assigned to that group.
     Unassigned transcripts get auto-derived singleton groups.
@@ -324,13 +324,12 @@ def parse_nrna_coords(nrnas_config, transcripts_config):
     groups: dict[str, NrnaGroup] = {}
 
     for label, coords in nrnas_config.items():
-        if not isinstance(coords, list) or len(coords) != 4:
+        if not isinstance(coords, list) or len(coords) != 3:
             raise ValueError(
-                f"nrna '{label}': expected [ref, strand, start, end], "
+                f"nrna '{label}': expected [strand, start, end], "
                 f"got {coords!r}")
-        ref = str(coords[0])
-        strand = str(coords[1])
-        start, end = int(coords[2]), int(coords[3])
+        strand = str(coords[0])
+        start, end = int(coords[1]), int(coords[2])
 
         # Match transcripts whose span is contained in (strand, start, end)
         matching: list[str] = []
@@ -340,13 +339,13 @@ def parse_nrna_coords(nrnas_config, transcripts_config):
 
         if not matching:
             raise ValueError(
-                f"nrna '{label}' at ({ref}, {strand}, {start}, {end}) "
+                f"nrna '{label}' at ({strand}, {start}, {end}) "
                 f"does not match any transcript genomic span")
 
         carrier = _pick_carrier(matching, t_spans)
         groups[label] = NrnaGroup(
             label=label, t_ids=matching, strand=strand,
-            start=start, end=end, carrier=carrier, ref=ref)
+            start=start, end=end, carrier=carrier)
         assigned.update(matching)
 
     # Auto-derive groups for unassigned transcripts
@@ -520,12 +519,15 @@ def run_sweep(config, output_dir, *, gtf_path=None,
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    csv_path = out / "sweep_results.csv"
+    tsv_path = out / "sweep_results.tsv"
+    json_path = out / "sweep_results.json"
 
     summary_rows: list[dict] = []
+    all_rows: list[dict] = []
 
-    with open(csv_path, "w", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    with open(tsv_path, "w", newline="") as tsvfile:
+        writer = csv.DictWriter(tsvfile, fieldnames=fieldnames,
+                                delimiter="\t")
         writer.writeheader()
 
         for run_idx, combo in enumerate(combinations):
@@ -679,7 +681,8 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                 row["n_chimeric"] = bench.n_chimeric
 
                 writer.writerow(row)
-                csvfile.flush()
+                tsvfile.flush()
+                all_rows.append(row)
 
                 summary_rows.append({
                     "run": run_idx + 1,
@@ -691,18 +694,23 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     "gdna_diff": bench.gdna_abs_diff,
                 })
 
-    _print_summary(summary_rows, csv_path)
+    # Write JSON
+    with open(json_path, "w") as jf:
+        json.dump(all_rows, jf, indent=2)
+
+    _print_summary(summary_rows, tsv_path, json_path)
 
 
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
-def _print_summary(rows, csv_path):
+def _print_summary(rows, tsv_path, json_path):
     sep = "=" * 74
     print(f"\n{sep}")
     print(f"SWEEP COMPLETE — {len(rows)} runs")
-    print(f"Results: {csv_path}")
+    print(f"Results: {tsv_path}")
+    print(f"         {json_path}")
     print(sep)
 
     hdr = f"{'#':>3}  {'Configuration':<40}  {'mRNA%':>6}  {'nRNA':>6}  {'gDNA':>6}"
@@ -734,7 +742,7 @@ Sweep value specifications (YAML):
 
 Examples:
   python scripts/synthetic_sim_sweep.py -c scripts/nrna_sweep_config.yaml
-  python scripts/synthetic_sim_sweep.py -c config.yaml -o results/ -v
+  python scripts/synthetic_sim_sweep.py -c config.yaml -o outdir/ -v
   python scripts/synthetic_sim_sweep.py -c config.yaml --gtf genes.gtf -L 50000
   python scripts/synthetic_sim_sweep.py -c config.yaml --dry-run
 """,
@@ -746,7 +754,7 @@ Examples:
                              "(overrides 'transcripts' in YAML)")
     parser.add_argument("-L", "--genome-length", type=int, default=None,
                         help="Genome length in bp (overrides YAML)")
-    parser.add_argument("-o", "--output", default="sweep_results",
+    parser.add_argument("-o", "--outdir", default="sweep_results",
                         help="Output directory (default: sweep_results)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show sweep grid without running")
@@ -764,7 +772,7 @@ Examples:
 
     run_sweep(
         config,
-        args.output,
+        args.outdir,
         gtf_path=args.gtf,
         genome_length_override=args.genome_length,
         dry_run=args.dry_run,

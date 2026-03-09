@@ -18,7 +18,7 @@
 #
 # Entities in the model:
 #   Transcripts:  TA1, TA2, TA3, TA4, TB, TC — each with mRNA abundance
-#   nRNAs:        NTA at (sweep, +, 1000, 10000) covers TA1–TA4
+#   nRNAs:        NTA at (+, 1000, 10000) covers TA1–TA4
 #                 nrna_TB, nrna_TC auto-derived (default to 0)
 #   gDNA:         single global contamination abundance
 #
@@ -74,12 +74,13 @@ transcripts:
     exons: [[30000, 31000], [35000, 36000]]
 
 # ── Nascent RNA definitions ──────────────────────────────────────────
-# Each nRNA is defined by its genomic coordinates [ref, strand, start, end],
+# Each nRNA is defined by its genomic coordinates [strand, start, end],
 # matching Rigel's internal (ref, strand, start, end) nRNA model.
-# Transcripts whose genomic span falls within these coordinates are
-# automatically assigned to that nRNA group.  The group's nRNA abundance
-# is assigned to the widest-span multi-exon transcript (the "carrier");
-# other transcripts in the group get nrna_abundance=0.
+# The ref name is derived from the Scenario and does not need to be
+# specified here.  Transcripts whose span falls within these coordinates
+# are automatically assigned to that nRNA group.  The group's nRNA
+# abundance is assigned to the widest-span multi-exon transcript
+# (the "carrier"); other transcripts in the group get nrna_abundance=0.
 #
 # Transcripts not covered by any nRNA entry are auto-grouped by
 # overlapping genomic spans on the same strand.  Since TB and TC
@@ -87,7 +88,7 @@ transcripts:
 # defaulting to 0.
 
 nrnas:
-  NTA: ["sweep", "+", 1000, 10000]
+  NTA: ["+", 1000, 10000]
 
 # ── Sweep grid ───────────────────────────────────────────────────────
 # Each entity is an independent sweep dimension.
