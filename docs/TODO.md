@@ -1,7 +1,9 @@
 # TODO
 
 
-## nascent RNA definition
+I want to implement a major architectural change to improve the functionality of Rigel. This is a breaking change that will change the output and the function of the tool. It will be a dramatic conceptual improvement. We must carefully plan this implementation in multiple stages.
+
+## nascent RNA decoupling from individual transcripts
 
 Currently each transcript has its own nascent RNA shadow. This is not exactly correct. Transcripts that share the same genomic start and genomic span may have different splicing combinations, but the nascent RNA is by definition the same!
 
@@ -18,23 +20,68 @@ This is good news for the Rigel tool! This is because we can consolidate nascent
 
 We need a complete redesign to support the new definition of nascent RNA. With the new definition, nascent RNA will no longer be associated with each individual transcript. Rather, nascent RNA will be associated with genome_start:genome_end spans.
 
-We need to construct 
+Please plan the new nascent RNA feature so we can implement it. We need to determine an optimal implementation. Here are my thoughts:
+
+### Implementing the new index
+
+It might be efficient to define nascent RNA at index build time, and have a nascent RNA file (feather, TSV) that can be referenced. The transcript index file will need to be changed as well, to include the nascent RNA index corresponding to each transcript. The index files should be useful to 'rigel' but also downstream tools, so that we can map between transcript <-> nascent RNA <-> gene
+
+### Define nascent RNAs at index time
+
+- At index generation time we can iterate through Transcripts sorted by (ref), genome_start). Nascent RNAs are defined by unique (ref, strand, start, end) tuples in genome coordinate space. 
+- We can define the complete list of nascent RNAs at this time and use nrna_id (unique index), ref, strand, start, end, gene index (each gene -> multiple nascent RNAs and each nascent RNA -> 1 gene), perhaps other fields?
+- Transcripts will need to be associated with their nascent RNA through a t_to_nrna_index array that maps transcript id -> nascent rna id
+- Nascent RNA -> transcripts list? Not sure if we need to maintain this or not but it would be key by nrna_idx -> value is list of transcript_ids.. i have to think whether the algorithm will need this
+
+### Change nascent RNA initialization
+
+Currently to initialize nascent RNA shadows there must be evidence of fragment overlapping an "unambiguous intron" interval. In otherwords, a fragment must at least partially overlap an intronic interval where there is no exon on either strand. This is sufficient to initialize nascent RNA shadows.
+
+### "linking" mature RNA to nascent RNA
+
+Currently we model the steady state nascent fraction for each transcript using a nrna fraction 'beta'. This nascent RNA fraction  remains a 'transcript level' property. 
+
+The derived abundance for mature RNA is the same: 
+mature RNA = theta_t (from EM) x (1 - nrna_fraction_t)
+
+However, the abundance for each nascent RNA different:
+
+nascent RNA = sum((theta_t x nrna_fraction_t) for t in (transcripts that map to this nascent RNA))
+
+This models nascent RNA as a "one-to-many" definition: one nascent RNA can produce multiple mature RNAs depending on the splicing fraction. 
+
+### Implementation
+
+This is a major architectural change. It needs to be implemented carefully, in stages. We must assure no regressions at each stage. Ultimately this is a more biologically correct definition of nascent RNA and should lead to more efficient EM behavior (we make the EM assign nascent RNA to transcripts)
+
+### Backward compatibility
+
+There is NO need to support the prior code base or method. We can forge ahead, delete/discard older methods, and produce production quality CLEAN code without stale/vestigial methods or redundancies.
 
 
+Now, consider this feature and PLAN the implementation in phases. Write an extremely detailed implementation plan in 'docs' named 'nascent_rna_decoupling.md' 
 
-## AVX2
 
-Need to write SIMD AVX2 instructions
+### EM algorithm
 
-## Equivalence class sorting?
+The number of components in the EM algorithm will change:
 
-This seems to affect non-deterministic behavior of the EM. Is this necessary?
+[0,T) - mature RNA components (stays the same)
+[T,T+N) - nascent RNA components (where 'N' is number of nascent RNAs)
+T+N - genomic DNA (stays the same, single component)
 
-## Bug in BAM scanning (might not be a bug)
+EM M-Step -- The splicing fraction parameters are updated during the 'M' step of the EM algorithm. The splicing fraction parameters remain specific to each transcript, that doesn't change.
 
-Previous test runs noted different row counts in quant_detai (280690 vs 280693) indicating a structural difference (different row counts) with an additional root cause upstream — possibly in multi-threaded BAM scanning itself producing different fragment sets (not just different orders), which would be a separate bug.
 
-It seems like we have a bug in BAM scanning / grouping by query name / multi-threaded processing / outputting to buffer leading to different row counts. This is a huge problem and something that needs to be fixed.
+### Output
+
+Currently we output transcript abundances (separate file), gene abundances estimated from the transcripts (separate file). Nascent RNA levels are included in the transcript file. Now, nascent RNA is no longer defined as an individual transcript property. It is associated with a group of transcripts that share the same genomic start/end coordinates.
+
+Therefore, we will need to create a new nascent RNA output file. It can include: nrna_idx (index), gene_id, gene_name, transcript_ids (not sure whether to include, it would be a comma-delimited list, but the transcript file could be used to lookup the nascent RNA without this), effective length, counts, and abundance (tpm)
+
+The transcript abundance output file will change. It will no longer report nascent RNA counts. It should add: nrna_idx (index of nascent RNA that produces this mature RNA), nascent rna fraction (0.0-1.0) fraction of nascent RNA.
+
+The gene-level output file can be updated as well. In the gene file, we should add gene-level nascent estimation which can be a weighted average of the nascent RNA counts (same computation as we do for transcripts). This should be added.
 
 
 
@@ -48,6 +95,172 @@ It seems like we have a bug in BAM scanning / grouping by query name / multi-thr
 - gDNA and RNA should have different models
 - different models should be used to help predict
 - output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
+
+Context
+hulkrna separates gDNA from RNA using splice status and strand specificity. Fragment length is currently unused for discrimination — a single global_model is used for all pools. Bioanalyzer/tapestation confirms gDNA and RNA have distinct insert size distributions.
+Key insight: We know strand specificity (s_RNA) and that gDNA is perfectly unstranded (0.5). Using Bayes' theorem, we can compute the exact gDNA fraction per compartment, then decompose existing fragment length histograms into weighted gDNA and RNA contributions — no per-fragment iteration needed.
+Approach: Bayesian Histogram Mixing ("0th-Iteration E-Step")
+Instead of arbitrary thresholds or algebraic decontamination, we compute the probability that fragments in each compartment are gDNA, then use those probabilities as fractional weights to build two model histograms via O(1) numpy operations on pre-collected per-compartment histograms.
+The Math (per compartment, e.g. "unspliced genic"):
+Given S (sense count) and A (antisense count) in a compartment:
+R = max(0, (S - A) / (2·s_RNA - 1))     # total RNA
+G = (S + A) - R                           # total gDNA
+W_sense_gDNA  = (G · 0.5) / S            # gDNA weight for sense hist
+W_anti_gDNA   = (G · 0.5) / A            # gDNA weight for antisense hist
+Final models:
+H_gDNA = H_intergenic + W_sense · H_sense + W_anti · H_anti
+H_RNA  = H_spliced    + (1-W_sense) · H_sense + (1-W_anti) · H_anti
+Properties:
+
+Zero parameters (no SS thresholds, no min_obs cutoffs)
+Graceful degradation: when s_RNA → 0.5, denominator → 0, all W → 0, models collapse to H_intergenic and H_spliced (the only safe anchors)
+O(1) mixing: operates on histograms of size 2001, not millions of fragments
+Architecture-preserving: frozen before EM, locus-level parallelism untouched
+
+Implementation Steps
+Step 1: Collect sense/antisense unspliced histograms during BAM scan
+We need 4 raw histograms (2 already exist, 2 new):
+
+H_spliced = category_models[SPLICED_ANNOT] — exists
+H_intergenic = intergenic — exists
+H_unspliced_same_strand — NEW: unspliced unique-mapper genic fragments where exon_strand == gene_strand
+H_unspliced_opp_strand — NEW: unspliced unique-mapper genic where exon_strand != gene_strand
+
+(After strand model finalization, same_strand/opp_strand are mapped to sense/antisense based on p_r1_sense.)
+Collection strategy: Add two new vectors to FragLenObservations in the C++ BAM scanner (bam_scanner.cpp). At the point where fragment lengths are recorded for genic fragments (~line 1050), additionally record genomic_footprint into same_strand or opp_strand vectors for unspliced unique-mapper fragments with unambiguous strand.
+In Python _replay_fraglen_observations(), route these into two new FragmentLengthModel instances on FragmentLengthModels.
+Alternative (no C++ changes): Collect from the buffer after scan via a single vectorized numpy pass using existing buffer columns (splice_type, exon_strand, t_indices, num_hits, genomic_footprint). Fast but adds one O(N) pass.
+Files: src/hulkrna/native/bam_scanner.cpp (add 2 vectors ~15 lines), src/hulkrna/frag_length_model.py (add 2 models), src/hulkrna/pipeline.py (replay new observations)
+Step 2: Add mix_models() to FragmentLengthModels
+New method that performs the Bayesian histogram mixing:
+pythondef mix_models(self, s_rna: float, p_r1_sense: float) -> None:
+    """Build gDNA and RNA models via Bayesian histogram mixing.
+
+    Uses strand specificity to compute fractional gDNA weights per
+    compartment, then mixes sense/antisense unspliced histograms
+    with intergenic (pure gDNA) and spliced (pure RNA) anchors.
+    """
+    # Map same_strand/opp_strand → sense/antisense based on protocol
+    if p_r1_sense >= 0.5:
+        sense, anti = self.unspliced_same_strand, self.unspliced_opp_strand
+    else:
+        sense, anti = self.unspliced_opp_strand, self.unspliced_same_strand
+
+    S, A = sense.total_weight, anti.total_weight
+
+    if (2 * s_rna - 1) > 1e-6 and S + A > 0:
+        R = max(0.0, (S - A) / (2 * s_rna - 1))
+        G = (S + A) - R
+        w_s = (G * 0.5 / S) if S > 0 else 0.0
+        w_a = (G * 0.5 / A) if A > 0 else 0.0
+    else:
+        w_s, w_a = 0.0, 0.0  # unstranded fallback
+
+    # gDNA model = intergenic + weighted unspliced
+    self.gdna_model.counts = (
+        self.intergenic.counts.copy()
+        + w_s * sense.counts + w_a * anti.counts
+    )
+    self.gdna_model._total_weight = float(self.gdna_model.counts.sum())
+    self.gdna_model.n_observations = int(self.gdna_model._total_weight)
+
+    # RNA model stored in a new field (or reuse an existing model)
+    self.rna_model.counts = (
+        self.category_models[SpliceType.SPLICED_ANNOT].counts.copy()
+        + (1 - w_s) * sense.counts + (1 - w_a) * anti.counts
+    )
+    self.rna_model._total_weight = float(self.rna_model.counts.sum())
+    self.rna_model.n_observations = int(self.rna_model._total_weight)
+Also add rna_model = FragmentLengthModel(max_size=max_size) to __init__.
+File: src/hulkrna/frag_length_model.py
+Step 3: Wire mixing into pipeline.py
+pythonstrand_models.finalize()
+frag_length_models.mix_models(
+    s_rna=strand_models.strand_specificity,
+    p_r1_sense=strand_models.exonic_spliced.p_r1_sense,
+)
+frag_length_models.finalize()  # caches LUTs for gdna_model, rna_model, etc.
+```
+
+**File**: `src/hulkrna/pipeline.py` (~line 747-748)
+
+### Step 4: Add gDNA LUT fields to `FragmentScorer`
+
+Add after line 112:
+```
+gdna_fl_log_prob: np.ndarray | None
+gdna_fl_max_size: int
+gdna_fl_tail_base: float
+File: src/hulkrna/scoring.py
+Step 5: Update from_models() to build both LUTs
+Change the RNA LUT source from global_model to rna_model (the mixed RNA model). Add gDNA LUT extraction from gdna_model (the mixed gDNA model). Fall back to global_model if either mixed model has very few observations (< some small threshold like 10).
+C++ NativeFragmentScorer automatically picks up the new RNA LUT since fl_log_prob is passed from Python. No C++ constructor changes.
+File: src/hulkrna/scoring.py (from_models(), ~line 162)
+Step 6: Add gdna_frag_len_log_lik() function
+Same structure as frag_len_log_lik() (line 253) but reads ctx.gdna_fl_* fields.
+File: src/hulkrna/scoring.py (after line 262)
+Step 7: Update score_gdna_standalone() and _gdna_log_lik()
+
+score_gdna_standalone() (line 349): use gdna_model.log_likelihood() instead of global_model
+scan.py:_gdna_log_lik() (line 429): use gdna_frag_len_log_lik(ctx, ...) instead of frag_len_log_lik(ctx, ...)
+
+Files: src/hulkrna/scoring.py, src/hulkrna/scan.py
+Step 8: Logging
+Enhance frag_length_models.log_summary() and pipeline logging:
+
+Report computed gDNA weights (W_sense, W_anti)
+Report gDNA model stats (mean, mode, n_obs) vs RNA model stats
+Report whether mixing was applied or fell back (s_rna ≈ 0.5)
+
+Files: src/hulkrna/frag_length_model.py, src/hulkrna/pipeline.py
+Step 9: Tests
+New tests/test_gdna_frag_length.py:
+
+Mixing math: given known S, A, s_rna, verify W_sense and W_anti are correct
+Mixing produces distinct gDNA and RNA histograms from synthetic data
+Graceful fallback: s_rna ≈ 0.5 → gDNA = intergenic only, RNA = spliced only
+gdna_frag_len_log_lik() returns different values from frag_len_log_lik()
+score_gdna_standalone() uses gDNA model
+End-to-end: pool-specific scoring improves gDNA/RNA discrimination
+
+Update existing scoring tests if they assert specific gDNA/RNA log-likelihood values.
+Files Modified
+FileChangesrc/hulkrna/native/bam_scanner.cppAdd 2 new observation vectors (same/opp strand unspliced lengths)src/hulkrna/frag_length_model.pyAdd rna_model, unspliced_same_strand, unspliced_opp_strand models; add mix_models()src/hulkrna/scoring.pygDNA LUT fields, gdna_frag_len_log_lik(), update from_models() (RNA LUT from rna_model), update score_gdna_standalone()src/hulkrna/scan.py_gdna_log_lik() → gdna_frag_len_log_lik()src/hulkrna/pipeline.pyReplay new observations, call mix_models(), loggingtests/test_gdna_frag_length.pyNew test file
+Key Properties
+
+Zero parameters: No SS thresholds, no min_obs cutoffs, no decontamination coefficients
+Mathematically closed: The weights balance exactly (expected sense = G·0.5 + R·s_RNA = S)
+Graceful degradation: Unstranded → intergenic + spliced anchors only
+O(1) mixing: Histogram algebra on arrays of size 2001
+Architecture-preserving: Models frozen before EM; locus-level parallelism untouched
+All data used: Sense AND antisense unspliced fragments contribute, weighted by their gDNA probability
+
+Verification
+
+pytest tests/ — existing tests pass
+pytest tests/test_gdna_frag_length.py — new mixing math + scoring tests
+Run on stranded data — log shows distinct gDNA (mean, mode) vs RNA distributions
+Compare quantification with/without — no regression, improved gDNA separation
+
+## C/C++ Optimization: AVX2
+
+SIMD provides enormous speedup for the EM
+We wrote a NEON specific fast_exp() implementation
+We need an AVX2 implementation for linux
+
+Eventually the production system will be Linux
+
+
+## Equivalence class sorting?
+
+This seems to affect non-deterministic behavior of the EM. Is this necessary?
+
+## Bug in BAM scanning (might not be a bug)
+
+Previous test runs noted different row counts in quant_detai (280690 vs 280693) indicating a structural difference (different row counts) with an additional root cause upstream — possibly in multi-threaded BAM scanning itself producing different fragment sets (not just different orders), which would be a separate bug.
+
+It seems like we have a bug in BAM scanning / grouping by query name / multi-threaded processing / outputting to buffer leading to different row counts. This is a huge problem and something that needs to be fixed.
+
 
 
 

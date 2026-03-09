@@ -543,6 +543,8 @@ def profile_stages(
             index.compute_and_set_tss_groups(tss_window=em_config.tss_window)
         estimator = AbundanceEstimator(
             index.num_transcripts,
+            num_nrna=index.num_nrna,
+            t_to_nrna=index.t_to_nrna_arr,
             em_config=em_config,
             geometry=geometry,
         )
@@ -571,12 +573,14 @@ def profile_stages(
 
     # 3e: nRNA init
     with Timer("compute_nrna_init") as t_nrna:
+        nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.float64)
+        nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
+        np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
         nrna_init = compute_nrna_init(
             estimator.transcript_intronic_sense,
             estimator.transcript_intronic_antisense,
-            geometry.transcript_spans,
-            geometry.exonic_lengths,
-            geometry.mean_frag,
+            nrna_spans,
+            nrna_max_exonic,
             strand_models,
         )
         estimator.nrna_init = nrna_init

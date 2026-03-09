@@ -40,6 +40,7 @@ class Transcript:
     is_mane: bool = False
     is_ccds: bool = False
     abundance: float | None = None
+    nrna_idx: int = -1
     nrna_abundance: float = 0.0
     """Nascent RNA (pre-mRNA) molecular abundance.
 
@@ -113,6 +114,7 @@ class Transcript:
             'is_mane': self.is_mane,
             'is_ccds': self.is_ccds,
             'abundance': self.abundance,
+            'nrna_idx': self.nrna_idx,
             'nrna_abundance': self.nrna_abundance,
         }
     

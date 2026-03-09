@@ -48,6 +48,9 @@ INTERVALS_TSV = "intervals.tsv"
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
 
+NRNA_FEATHER = "nrna.feather"
+NRNA_TSV = "nrna.tsv"
+
 
 # ---------------------------------------------------------------------------
 # Build helpers (public for testability)
@@ -103,6 +106,54 @@ def read_transcripts(
 def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     """Convert a list of Transcript objects to a pandas DataFrame."""
     return pd.DataFrame(t.to_dict() for t in transcripts)
+
+
+def compute_nrna_table(
+    transcripts: list[Transcript],
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Compute unique nRNA entities and assign nrna_idx to transcripts.
+
+    An nRNA (nascent RNA) is defined by a unique genomic span
+    ``(ref, strand, start, end)``.  Transcripts sharing the same span
+    map to the same nRNA.
+
+    Parameters
+    ----------
+    transcripts : list[Transcript]
+        Sorted list of transcripts (must have ``t_index`` assigned).
+
+    Returns
+    -------
+    nrna_df : pd.DataFrame
+        Columns: nrna_idx, ref, strand, start, end, length.
+    t_to_nrna : np.ndarray
+        int32[n_transcripts] mapping t_index -> nrna_idx.
+    """
+    n = len(transcripts)
+    t_to_nrna = np.empty(n, dtype=np.int32)
+
+    # Build (ref, strand, start, end) -> nrna_idx mapping
+    span_to_idx: dict[tuple, int] = {}
+    nrna_rows: list[dict] = []
+
+    for t in transcripts:
+        key = (t.ref, int(t.strand), t.start, t.end)
+        if key not in span_to_idx:
+            idx = len(span_to_idx)
+            span_to_idx[key] = idx
+            nrna_rows.append({
+                "nrna_idx": idx,
+                "ref": t.ref,
+                "strand": int(t.strand),
+                "start": t.start,
+                "end": t.end,
+                "length": t.end - t.start,
+            })
+        t_to_nrna[t.t_index] = span_to_idx[key]
+        t.nrna_idx = span_to_idx[key]
+
+    nrna_df = pd.DataFrame(nrna_rows)
+    return nrna_df, t_to_nrna
 
 
 def compute_tss_groups(
@@ -323,10 +374,10 @@ def _gen_cluster_unambig_intron_intervals(
     regions are unambiguously intronic — they don't overlap any exon from
     any transcript in the locus.
 
-    These intervals are the unique evidence for nascent RNA: a read
-    landing in an unambiguously intronic region can only originate from
-    pre-mRNA (or genomic DNA), never from a mature mRNA of a different
-    overlapping transcript.
+    Intervals are tagged with ``nrna_idx`` (not ``t_index``) and
+    deduplicated per nRNA: overlapping pieces from different transcripts
+    sharing the same nRNA are merged so that each genomic position
+    appears at most once per nRNA.
     """
     if not cluster:
         return
@@ -340,20 +391,29 @@ def _gen_cluster_unambig_intron_intervals(
             all_exons.append((e.start, e.end))
     global_exon_union = _merge_exon_intervals(all_exons)
 
-    # For each multi-exon transcript, subtract global exon union from
-    # each intronic gap to find unambiguously intronic regions.
+    # Collect raw unambig-intron pieces grouped by (nrna_idx, strand).
+    # Multiple transcripts sharing the same nRNA may produce overlapping
+    # pieces from their different intron structures.
+    nrna_pieces: dict[tuple[int, int], list[tuple[int, int]]] = (
+        collections.defaultdict(list)
+    )
     for t in cluster:
         if len(t.exons) < 2:
             continue  # single-exon transcripts have no introns
+        key = (t.nrna_idx, int(t.strand))
         for intron_start, intron_end in t.introns():
             pieces = _subtract_from_interval(
                 intron_start, intron_end, global_exon_union,
             )
-            for piece_start, piece_end in pieces:
-                yield AnnotatedInterval(
-                    ref, piece_start, piece_end, t.strand,
-                    IntervalType.UNAMBIG_INTRON, t.t_index,
-                )
+            nrna_pieces[key].extend(pieces)
+
+    # Merge overlapping pieces within each nRNA and yield deduplicated intervals
+    for (nrna_idx, strand), pieces in nrna_pieces.items():
+        for start, end in _merge_exon_intervals(pieces):
+            yield AnnotatedInterval(
+                ref, start, end, strand,
+                IntervalType.UNAMBIG_INTRON, nrna_idx,
+            )
 
 
 def _gen_genomic_intervals(
@@ -448,6 +508,9 @@ class TranscriptIndex:
         self.index_dir: str | None = None
         self.t_df: pd.DataFrame | None = None
         self.g_df: pd.DataFrame | None = None
+        self.nrna_df: pd.DataFrame | None = None
+        self.t_to_nrna_arr: np.ndarray | None = None
+        self.num_nrna: int = 0
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
         self.t_to_tss_group: np.ndarray | None = None
@@ -553,6 +616,18 @@ class TranscriptIndex:
         )
         logger.info(f"[DONE] Read {len(transcripts)} transcripts")
 
+        # -- Nascent RNA entities ---------------------------------------------
+        logger.info("[START] Computing nRNA table")
+        nrna_df, t_to_nrna = compute_nrna_table(transcripts)
+        logger.info(
+            f"[DONE] Found {len(nrna_df)} unique nRNA spans "
+            f"from {len(transcripts)} transcripts"
+        )
+
+        nrna_df.to_feather(output_dir / NRNA_FEATHER, **feather_kwargs)
+        if write_tsv:
+            nrna_df.to_csv(output_dir / NRNA_TSV, sep="\t", index=False)
+
         t_df = transcripts_to_dataframe(transcripts)
         t_df.to_feather(output_dir / TRANSCRIPTS_FEATHER, **feather_kwargs)
         if write_tsv:
@@ -643,6 +718,17 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
         self.g_to_strand_arr = self.g_df["strand"].values
+
+        # -- nRNA table -------------------------------------------------------
+        nrna_path = os.path.join(index_dir, NRNA_FEATHER)
+        if os.path.exists(nrna_path):
+            self.nrna_df = pd.read_feather(nrna_path)
+            self.t_to_nrna_arr = self.t_df["nrna_idx"].values.astype(np.int32)
+            self.num_nrna = len(self.nrna_df)
+        else:
+            self.nrna_df = None
+            self.t_to_nrna_arr = None
+            self.num_nrna = 0
 
         # -- TSS groups (fuzzy 5' clustering, computed lazily on first use) ---
         # Populated by compute_and_set_tss_groups() when tss_window is known.

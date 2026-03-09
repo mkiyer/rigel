@@ -206,11 +206,11 @@ class LocusEMInput:
 
     Component layout::
 
-        [0, n_t)       - mRNA (one per transcript in the locus)
-        [n_t, 2*n_t)   - nRNA (one per transcript, nascent shadow)
-        [2*n_t]        - gDNA (ONE merged shadow for the entire locus)
+        [0, n_t)                - mRNA (one per transcript in the locus)
+        [n_t, n_t + n_nrna)     - nRNA (one per unique nRNA span)
+        [n_t + n_nrna]          - gDNA (ONE merged shadow for the entire locus)
 
-    Total components = 2 * n_transcripts + 1.
+    Total components = n_transcripts + n_nrna + 1.
 
     Only UNSPLICED units have a gDNA candidate.  Spliced units compete
     only among mRNA/nRNA components.
@@ -228,9 +228,7 @@ class LocusEMInput:
     count_cols : np.ndarray
         uint8[n_local_candidates] - column indices for count accumulation.
     coverage_weights : np.ndarray
-        float64[n_candidates] - coverage weight per candidate.  mRNA
-        candidates get position-based weight >= 1.0 (plateau = 1.0,
-        edge > 1.0).  nRNA and gDNA candidates get weight 1.0.
+        float64[n_candidates] - coverage weight per candidate.
     tx_starts : np.ndarray
         int32[n_local_candidates] - transcript-space start positions.
     tx_ends : np.ndarray
@@ -241,27 +239,34 @@ class LocusEMInput:
         uint8[n_local_units] - count column for the best transcript.
     n_transcripts : int
         Number of transcripts in the locus.
+    n_nrna : int
+        Number of unique nRNA spans in the locus.
     n_components : int
-        2 * n_transcripts + 1 (mRNA + nRNA + 1 gDNA).
+        n_transcripts + n_nrna + 1 (mRNA + nRNA + 1 gDNA).
     local_to_global_t : np.ndarray
         int32[n_transcripts] - maps local transcript index to global.
+    local_to_global_nrna : np.ndarray
+        int32[n_nrna] - maps local nRNA index to global nRNA index.
+    local_t_to_local_nrna : np.ndarray
+        int32[n_transcripts] - maps local transcript to local nRNA index.
+    nrna_to_t_offsets : np.ndarray
+        int32[n_nrna + 1] - CSR offsets for nRNA→transcript mapping.
+    nrna_to_t_indices : np.ndarray
+        int32[] - CSR flat indices for nRNA→transcript mapping.
     unambig_totals : np.ndarray
         float64[n_components] - init counts (unambig + shadow inits).
     nrna_init : np.ndarray
-        float64[n_transcripts] - per-transcript nRNA init.
+        float64[n_nrna] - per-nRNA init (intronic evidence).
     gdna_init : float
         Scalar gDNA init from empirical Bayes estimation.
     effective_lengths : np.ndarray
         float64[n_components] - effective lengths for EM normalization.
     prior : np.ndarray
-        float64[n_components] - Prior eligibility mask.  Eligible
-        components carry ``EM_PRIOR_EPSILON``; ineligible ones are 0.0.
-        The OVR prior (``gamma * coverage_weights``) is added to eligible
-        components during ``run_locus_em``.
+        float64[n_components] - Prior eligibility mask.
     nrna_frac_alpha : np.ndarray
-        float64[n_transcripts] - Beta prior α for nrna_frac (nascent fraction).
+        float64[n_transcripts] - Beta prior alpha for nrna_frac.
     nrna_frac_beta : np.ndarray
-        float64[n_transcripts] - Beta prior β for nrna_frac (nascent fraction).
+        float64[n_transcripts] - Beta prior beta for nrna_frac.
     """
 
     locus: Locus
@@ -275,8 +280,13 @@ class LocusEMInput:
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     n_transcripts: int
+    n_nrna: int
     n_components: int
     local_to_global_t: np.ndarray
+    local_to_global_nrna: np.ndarray
+    local_t_to_local_nrna: np.ndarray
+    nrna_to_t_offsets: np.ndarray
+    nrna_to_t_indices: np.ndarray
     unambig_totals: np.ndarray
     nrna_init: np.ndarray
     gdna_init: float
@@ -667,10 +677,14 @@ def compute_hybrid_nrna_frac_priors(
     exon_sense = estimator.transcript_exonic_sense.copy()
     exon_anti = estimator.transcript_exonic_antisense.copy()
 
-    # Intronic: fragments with unambiguous intronic overlap relative to
-    # each transcript.  Already per-transcript from the scan phase.
-    intron_sense = estimator.transcript_intronic_sense.copy()
-    intron_anti = estimator.transcript_intronic_antisense.copy()
+    # Intronic: fragments with unambiguous intronic overlap.
+    # These are now per-nRNA — fan out to per-transcript via t_to_nrna.
+    if estimator._t_to_nrna is not None:
+        intron_sense = estimator.transcript_intronic_sense[estimator._t_to_nrna].copy()
+        intron_anti = estimator.transcript_intronic_antisense[estimator._t_to_nrna].copy()
+    else:
+        intron_sense = estimator.transcript_intronic_sense.copy()
+        intron_anti = estimator.transcript_intronic_antisense.copy()
 
     # --- Lengths ---
     if estimator._exonic_lengths is not None:
@@ -866,6 +880,8 @@ class AbundanceEstimator:
         self,
         num_transcripts: int,
         *,
+        num_nrna: int = 0,
+        t_to_nrna: np.ndarray | None = None,
         em_config: EMConfig | None = None,
         geometry: TranscriptGeometry | None = None,
     ):
@@ -873,6 +889,8 @@ class AbundanceEstimator:
             em_config = EMConfig()
         self.em_config = em_config
         self.num_transcripts = num_transcripts
+        self.num_nrna = num_nrna if num_nrna > 0 else num_transcripts
+        self._t_to_nrna = t_to_nrna  # global transcript → global nRNA mapping
         self._rng = np.random.default_rng(em_config.seed)
 
         # nRNA shadow base index (for global CSR component numbering).
@@ -913,9 +931,9 @@ class AbundanceEstimator:
             (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
 
-        # Per-transcript nRNA shadow initialization and EM counts.
-        self.nrna_init = np.zeros(num_transcripts, dtype=np.float64)
-        self.nrna_em_counts = np.zeros(num_transcripts, dtype=np.float64)
+        # Per-nRNA shadow initialization and EM counts.
+        self.nrna_init = np.zeros(self.num_nrna, dtype=np.float64)
+        self.nrna_em_counts = np.zeros(self.num_nrna, dtype=np.float64)
 
         # Per-transcript nrna_frac (nascent fraction) Beta prior parameters.
         # Computed after the scan phase by compute_hybrid_nrna_frac_priors().
@@ -941,22 +959,22 @@ class AbundanceEstimator:
         )
 
         # --- Pre-EM strand accumulators (for gDNA init via EB) ---
-        # Transcript-level: all same-strand UNSPLICED fragments.
+        # Per-nRNA: all same-strand UNSPLICED fragments.
         # Accumulated during scan pass for empirical Bayes gDNA prior.
         # Locus-level totals are derived by summing over locus.transcript_indices.
         self.transcript_unspliced_sense = np.zeros(
-            num_transcripts, dtype=np.float64
+            self.num_nrna, dtype=np.float64
         )
         self.transcript_unspliced_antisense = np.zeros(
-            num_transcripts, dtype=np.float64
+            self.num_nrna, dtype=np.float64
         )
 
         # --- Pre-EM intronic accumulators (for nRNA init) ---
         self.transcript_intronic_sense = np.zeros(
-            num_transcripts, dtype=np.float64
+            self.num_nrna, dtype=np.float64
         )
         self.transcript_intronic_antisense = np.zeros(
-            num_transcripts, dtype=np.float64
+            self.num_nrna, dtype=np.float64
         )
 
         # --- Pre-EM exonic accumulators (for nrna_frac prior) ---
@@ -1167,6 +1185,9 @@ class AbundanceEstimator:
             t_lengths,
             self._transcript_spans,
             self._exonic_lengths,
+            # nRNA mapping
+            index.t_to_nrna_arr,
+            index.num_nrna,
             # Mutable output accumulators
             self.em_counts,
             self.em_high_conf_counts,
@@ -1243,7 +1264,13 @@ class AbundanceEstimator:
         mrna_spliced = total[:, list(SPLICED_COLS)].sum(axis=1)
         mrna_em = self.em_counts.sum(axis=1)
         mrna_high_conf = self.t_high_conf_counts.sum(axis=1)
-        nrna = self.nrna_em_counts
+        # Fan out per-nRNA counts to per-transcript (equal share)
+        if self._t_to_nrna is not None:
+            fan_counts = np.bincount(self._t_to_nrna, minlength=self.num_nrna).astype(np.float64)
+            fan_counts = np.maximum(fan_counts, 1.0)
+            nrna = self.nrna_em_counts[self._t_to_nrna] / fan_counts[self._t_to_nrna]
+        else:
+            nrna = self.nrna_em_counts
         rna_total = mrna + nrna
         pmean = self.posterior_mean()
 
@@ -1312,7 +1339,13 @@ class AbundanceEstimator:
         # nRNA per gene (EM-assigned only; nrna_init is not added
         # because it overlaps with EM-assigned fragments)
         nrna = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(nrna, t_to_g, self.nrna_em_counts)
+        if self._t_to_nrna is not None:
+            fan_counts = np.bincount(self._t_to_nrna, minlength=self.num_nrna).astype(np.float64)
+            fan_counts = np.maximum(fan_counts, 1.0)
+            nrna_per_t = self.nrna_em_counts[self._t_to_nrna] / fan_counts[self._t_to_nrna]
+        else:
+            nrna_per_t = self.nrna_em_counts
+        np.add.at(nrna, t_to_g, nrna_per_t)
 
         rna_total = mrna + nrna
 

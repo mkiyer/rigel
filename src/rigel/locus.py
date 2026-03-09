@@ -70,11 +70,26 @@ def build_loci(
     if n_units == 0 or len(t_indices) == 0:
         return []
 
+    # Build nRNA → transcript CSR mapping for connected components
+    t_to_nrna = index.t_to_nrna_arr
+    num_nrna = index.num_nrna
+    nrna_counts = np.zeros(num_nrna, dtype=np.int32)
+    np.add.at(nrna_counts, t_to_nrna, 1)
+    nrna_to_t_offsets = np.zeros(num_nrna + 1, dtype=np.int32)
+    np.cumsum(nrna_counts, out=nrna_to_t_offsets[1:])
+    nrna_to_t_indices = np.empty(nt, dtype=np.int32)
+    cursor = nrna_to_t_offsets[:-1].copy()
+    for t in range(nt):
+        ni = t_to_nrna[t]
+        nrna_to_t_indices[cursor[ni]] = t
+        cursor[ni] += 1
+
     # C++ union-find returns per-component transcript and unit lists
     # in CSR form, already sorted ascending.
     n_comp, ct_off, ct_flat, cu_off, cu_flat = _cc_native(
         offsets, t_indices,
         np.int32(nrna_base), np.int32(nt),
+        nrna_to_t_offsets, nrna_to_t_indices,
     )
 
     loci = []
@@ -107,9 +122,9 @@ def build_locus_em_data(
 
     Component layout per locus::
 
-        [0, n_t)           - mRNA (one per local transcript)
-        [n_t, 2*n_t)       - nRNA (one per local transcript)
-        [2*n_t]            - gDNA (ONE shadow for entire locus)
+        [0, n_t)                - mRNA (one per local transcript)
+        [n_t, n_t + n_nrna)     - nRNA (one per unique nRNA span)
+        [n_t + n_nrna]          - gDNA (ONE shadow for entire locus)
 
     Only UNSPLICED units get a gDNA candidate.  Spliced units see
     only mRNA/nRNA components.
@@ -130,21 +145,49 @@ def build_locus_em_data(
     """
     t_arr = locus.transcript_indices
     n_t = len(t_arr)
-    gdna_idx = 2 * n_t  # single gDNA component index
-    n_components = 2 * n_t + 1
-
     nrna_base = em_data.nrna_base_index
     n_local_units = len(locus.unit_indices)
 
+    # ------------------------------------------------------------------
+    # Build unique local nRNA mapping for this locus
+    # ------------------------------------------------------------------
+    global_t_to_nrna = index.t_to_nrna_arr  # global transcript → global nRNA
+    # Unique global nRNA indices used by this locus's transcripts
+    global_nrna_for_locus = global_t_to_nrna[t_arr]  # [n_t]
+    unique_global_nrna, inverse = np.unique(global_nrna_for_locus,
+                                            return_inverse=True)
+    n_nrna = len(unique_global_nrna)
+    # inverse[i] gives local nRNA index for local transcript i
+    local_t_to_local_nrna = inverse.astype(np.int32)
+    local_to_global_nrna = unique_global_nrna.astype(np.int32)
+
+    # Build nRNA→transcript CSR (local indices)
+    nrna_to_t_offsets = np.zeros(n_nrna + 1, dtype=np.int32)
+    for local_t in range(n_t):
+        nrna_to_t_offsets[local_t_to_local_nrna[local_t] + 1] += 1
+    np.cumsum(nrna_to_t_offsets, out=nrna_to_t_offsets)
+    nrna_to_t_indices = np.empty(n_t, dtype=np.int32)
+    fill_pos = nrna_to_t_offsets[:-1].copy()
+    for local_t in range(n_t):
+        ln = local_t_to_local_nrna[local_t]
+        nrna_to_t_indices[fill_pos[ln]] = local_t
+        fill_pos[ln] += 1
+
+    gdna_idx = n_t + n_nrna  # single gDNA component index
+    n_components = n_t + n_nrna + 1
+
     # Build global → local mapping array (fast lookup, no dict)
-    max_global = max(int(nrna_base) + int(t_arr.max()) + 1,
-                     int(t_arr.max()) + 1) if n_t > 0 else 0
+    # mRNA: global_t → local_t
+    # nRNA: nrna_base + global_nrna → n_t + local_nrna
+    max_mRNA_global = int(t_arr.max()) + 1 if n_t > 0 else 0
+    max_nRNA_global = int(nrna_base) + int(unique_global_nrna.max()) + 1 \
+        if n_nrna > 0 else 0
+    max_global = max(max_mRNA_global, max_nRNA_global, 1)
 
     # Reuse pre-allocated local_map buffer if provided
     if _cache is not None and "local_map" in _cache:
         local_map = _cache["local_map"]
         if len(local_map) < max_global:
-            # Grow if needed (rare — only when locus has very large indices)
             local_map = np.full(max_global, -1, dtype=np.int32)
             _cache["local_map"] = local_map
         else:
@@ -154,7 +197,9 @@ def build_locus_em_data(
     for local_i in range(n_t):
         gt = int(t_arr[local_i])
         local_map[gt] = local_i                     # mRNA
-        local_map[nrna_base + gt] = n_t + local_i   # nRNA
+    for local_n in range(n_nrna):
+        gn = int(unique_global_nrna[local_n])
+        local_map[nrna_base + gn] = n_t + local_n   # nRNA
 
     # Gather all candidate ranges for this locus's units at once
     global_offsets = em_data.offsets
@@ -322,23 +367,18 @@ def build_locus_em_data(
     # Build per-component lengths for uniform bias correction.
     #
     # Component layout:
-    #   [0, n_t)       → mRNA: length = exonic transcript length
-    #   [n_t, 2*n_t)   → nRNA: length = genomic span (incl introns)
-    #   [2*n_t]        → gDNA: length = locus span
-    #
-    # Phase H optimisation: pass a flat int64 array of component
-    # lengths to _apply_bias_correction_uniform directly, avoiding
-    # 2*n_t+1 BiasProfile object + np.arange allocations per locus.
+    #   [0, n_t)                → mRNA: length = exonic transcript length
+    #   [n_t, n_t + n_nrna)    → nRNA: length = genomic span of the nRNA
+    #   [n_t + n_nrna]         → gDNA: length = locus span
     _t_lengths_all = _cache["t_lengths"] if _cache is not None else index.t_df["length"].values
     mrna_lengths = _t_lengths_all[t_arr]
-    nrna_lengths = (
-        _t_ends_all[t_arr]
-        - _t_starts_all[t_arr]
-    )
+    # nRNA span comes from the nrna_df (global nRNA table)
+    nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values)
+    nrna_lengths = nrna_spans[unique_global_nrna]
     bias_profiles = np.empty(n_components, dtype=np.int64)
     bias_profiles[:n_t] = mrna_lengths
-    bias_profiles[n_t:2*n_t] = nrna_lengths
-    bias_profiles[2*n_t] = int(locus_span)
+    bias_profiles[n_t:n_t + n_nrna] = nrna_lengths
+    bias_profiles[n_t + n_nrna] = int(locus_span)
 
     # Build prior — start at epsilon (numerical floor) for every
     # component; the real prior mass comes from the OVR coverage
@@ -349,20 +389,28 @@ def build_locus_em_data(
     if gdna_init == 0.0:
         prior[gdna_idx] = 0.0
 
-    # Zero nRNA prior for single-exon transcripts
+    # Zero nRNA prior for nRNAs where all sharing transcripts are single-exon
     if estimator._transcript_spans is not None:
         if estimator._exonic_lengths is not None:
             t_exon = estimator._exonic_lengths[t_arr]
         else:
             t_exon = estimator._t_eff_len[t_arr] + mean_frag - 1.0
         single_exon = estimator._transcript_spans[t_arr] <= t_exon
-        prior[n_t:2*n_t][single_exon] = 0.0
+        # For each local nRNA, check if ALL sharing transcripts are single-exon
+        for ln in range(n_nrna):
+            ts_start = nrna_to_t_offsets[ln]
+            ts_end = nrna_to_t_offsets[ln + 1]
+            all_single = True
+            for j in range(ts_start, ts_end):
+                if not single_exon[nrna_to_t_indices[j]]:
+                    all_single = False
+                    break
+            if all_single:
+                prior[n_t + ln] = 0.0
 
-    # Zero nRNA prior when nrna_init is zero for that transcript.
-    # We read nrna_init directly (not from unambig_totals, which no
-    # longer carries nrna_init after the double-counting fix).
-    nrna_init_local = estimator.nrna_init[t_arr]
-    prior[n_t:2*n_t][nrna_init_local == 0.0] = 0.0
+    # Zero nRNA prior when nrna_init is zero for that nRNA.
+    nrna_init_local = estimator.nrna_init[unique_global_nrna]
+    prior[n_t:n_t + n_nrna][nrna_init_local == 0.0] = 0.0
 
     # Zero unambig_totals for dead components—prevents the EM M-step
     # (theta_new = unambig_totals + em_totals + prior) from seeding
@@ -381,10 +429,15 @@ def build_locus_em_data(
         locus_t_indices=local_locus_t.astype(np.int32),
         locus_count_cols=local_locus_ct.astype(np.uint8),
         n_transcripts=n_t,
+        n_nrna=n_nrna,
         n_components=n_components,
         local_to_global_t=t_arr.copy(),
+        local_to_global_nrna=local_to_global_nrna,
+        local_t_to_local_nrna=local_t_to_local_nrna,
+        nrna_to_t_offsets=nrna_to_t_offsets,
+        nrna_to_t_indices=nrna_to_t_indices,
         unambig_totals=unambig_totals,
-        nrna_init=estimator.nrna_init[t_arr].copy(),
+        nrna_init=estimator.nrna_init[unique_global_nrna].copy(),
         gdna_init=gdna_init,
         effective_lengths=eff_len,
         prior=prior,
@@ -400,14 +453,13 @@ def build_locus_em_data(
 
 
 def compute_nrna_init(
-    transcript_intronic_sense: np.ndarray,
-    transcript_intronic_antisense: np.ndarray,
-    transcript_spans: np.ndarray,
-    exonic_lengths: np.ndarray,
-    mean_frag: float,
+    intronic_sense: np.ndarray,
+    intronic_antisense: np.ndarray,
+    nrna_spans: np.ndarray,
+    nrna_max_exonic: np.ndarray,
     strand_models: StrandModels,
 ) -> np.ndarray:
-    """Compute per-transcript nRNA initialization from intronic evidence.
+    """Compute per-nRNA initialization from intronic evidence.
 
     Model::
 
@@ -419,20 +471,30 @@ def compute_nrna_init(
         nRNA_int = (sense_int - anti_int) / (2SS - 1)
 
     When 2SS − 1 ≤ 0.2, returns zeros.
-    Single-exon transcripts get nrna_init = 0.
+    nRNAs with no intronic span (max_exonic >= span) get nrna_init = 0.
+
+    Parameters
+    ----------
+    intronic_sense, intronic_antisense : np.ndarray
+        float64[num_nrna] - per-nRNA intronic counts.
+    nrna_spans : np.ndarray
+        float64[num_nrna] - genomic span (end - start) per nRNA.
+    nrna_max_exonic : np.ndarray
+        float64[num_nrna] - max exonic length among sharing transcripts.
+    strand_models : StrandModels
     """
     strand_spec = strand_models.strand_specificity
     denom = 2.0 * strand_spec - 1.0
 
     if denom <= STRAND_DENOM_MIN:
-        nrna_init = np.zeros_like(transcript_intronic_sense)
+        nrna_init = np.zeros_like(intronic_sense)
     else:
         raw = (
-            transcript_intronic_sense - transcript_intronic_antisense
+            intronic_sense - intronic_antisense
         ) / denom
         nrna_init = np.maximum(0.0, raw)
 
-    intronic_span = np.maximum(transcript_spans - exonic_lengths, 0.0)
+    intronic_span = np.maximum(nrna_spans - nrna_max_exonic, 0.0)
     nrna_init[intronic_span <= 0] = 0.0
 
     return nrna_init
@@ -676,8 +738,18 @@ def compute_eb_gdna_priors(
         gDNA init count per locus (same order as ``loci``).
     """
     strand_spec = strand_models.strand_specificity
-    t_sense = estimator.transcript_unspliced_sense
-    t_anti = estimator.transcript_unspliced_antisense
+    # Fan out per-nRNA unspliced counts to per-transcript for gDNA EB.
+    # Divide by fan count so that summing across transcripts sharing an
+    # nRNA gives the original per-nRNA total (no double-counting).
+    if estimator._t_to_nrna is not None:
+        _t2n = estimator._t_to_nrna
+        _fan = np.bincount(_t2n, minlength=estimator.num_nrna).astype(np.float64)
+        _fan = np.maximum(_fan, 1.0)
+        t_sense = estimator.transcript_unspliced_sense[_t2n] / _fan[_t2n]
+        t_anti = estimator.transcript_unspliced_antisense[_t2n] / _fan[_t2n]
+    else:
+        t_sense = estimator.transcript_unspliced_sense
+        t_anti = estimator.transcript_unspliced_antisense
     t_refs = index.t_df["ref"].values
     t_exonic = index.t_df["length"].values.astype(np.float64)
 

@@ -461,7 +461,7 @@ class TestComputeNrnaInit:
         spans = np.array([10000.0, 5000.0, 1000.0])
         exonic_len = np.array([699.0, 499.0, 800.0])
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         np.testing.assert_array_equal(nrna, [0.0, 0.0, 0.0])
 
     def test_sense_excess_produces_nrna(self):
@@ -473,7 +473,7 @@ class TestComputeNrnaInit:
         spans = np.array([10000.0, 5000.0])
         exonic_len = np.array([699.0, 499.0])
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         # At SS≈1.0, formula ≈ (sense - anti) / 1.0 ≈ sense - anti
         assert nrna[0] == pytest.approx(80.0, abs=2.0)  # 100 - 20
         assert nrna[1] == pytest.approx(40.0, abs=2.0)  # 50 - 10
@@ -487,7 +487,7 @@ class TestComputeNrnaInit:
         spans = np.array([10000.0])
         exonic_len = np.array([699.0])
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         assert nrna[0] == 0.0
 
     def test_single_exon_zeroed(self):
@@ -501,7 +501,7 @@ class TestComputeNrnaInit:
         mean_frag = 200.0
         spans = np.array([699.0])  # no introns
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, mean_frag, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         assert nrna[0] == 0.0
 
     def test_multi_exon_not_zeroed(self):
@@ -514,7 +514,7 @@ class TestComputeNrnaInit:
         mean_frag = 200.0
         spans = np.array([5000.0])  # large introns
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, mean_frag, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         assert nrna[0] == pytest.approx(90.0, abs=2.0)
 
     def test_output_shape(self):
@@ -526,7 +526,7 @@ class TestComputeNrnaInit:
         spans = np.full(5, 10000.0)
         exonic_len = np.full(5, 699.0)
         sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         assert nrna.shape == (5,)
         assert nrna.dtype == np.float64
 
@@ -539,7 +539,7 @@ class TestComputeNrnaInit:
         spans = np.array([10000.0])
         exonic_len = np.array([699.0])
         sm = _make_strand_models_with_ss(0.9)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         ss = sm.exonic_spliced.strand_specificity
         denom = 2.0 * ss - 1.0
         expected = (100.0 - 20.0) / denom
@@ -555,11 +555,11 @@ class TestComputeNrnaInit:
         exonic_len = np.array([699.0])
         # SS=0.5
         sm = _make_strand_models_with_ss(0.5)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         assert nrna[0] == 0.0
         # SS=0.6 (boundary)
         sm = _make_strand_models_with_ss(0.6)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, 200.0, sm)
+        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
         assert nrna[0] == 0.0
 
 

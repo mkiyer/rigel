@@ -115,6 +115,16 @@ class _Index:
         self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int8)
         self.num_transcripts = len(t_to_g)
         self.num_genes = len(g_to_strand)
+        self.num_nrna = self.num_transcripts
+        self.t_to_nrna_arr = np.arange(self.num_transcripts, dtype=np.int32)
+        self.nrna_df = pd.DataFrame({
+            "nrna_idx": np.arange(self.num_transcripts, dtype=np.int32),
+            "ref": ["chr1"] * self.num_transcripts,
+            "strand": np.zeros(self.num_transcripts, dtype=np.int32),
+            "start": np.zeros(self.num_transcripts, dtype=np.int64),
+            "end": np.full(self.num_transcripts, 10000, dtype=np.int64),
+            "length": np.full(self.num_transcripts, 10000, dtype=np.int64),
+        })
         self.t_df = pd.DataFrame({
             "t_id": [f"t{i}" for i in range(self.num_transcripts)],
             "ref": ["chr1"] * self.num_transcripts,

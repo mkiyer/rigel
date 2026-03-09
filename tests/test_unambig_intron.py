@@ -97,7 +97,7 @@ class TestSubtractFromInterval:
 # =====================================================================
 
 
-def _make_transcript(ref, strand, exons, t_index):
+def _make_transcript(ref, strand, exons, t_index, nrna_idx=None):
     """Create a Transcript with specified exons."""
     t = Transcript()
     t.ref = ref
@@ -107,6 +107,7 @@ def _make_transcript(ref, strand, exons, t_index):
     t.g_index = 0
     t.t_id = f"t{t_index}"
     t.g_id = "g0"
+    t.nrna_idx = nrna_idx if nrna_idx is not None else t_index
     return t
 
 
@@ -119,7 +120,7 @@ class TestGenClusterUnambigIntronIntervals:
         assert len(intervals) == 1
         iv = intervals[0]
         assert iv.interval_type == IntervalType.UNAMBIG_INTRON
-        assert iv.t_index == 0
+        assert iv.t_index == 0  # nrna_idx stored in t_index field
         assert iv.start == 200
         assert iv.end == 400
 
@@ -153,7 +154,7 @@ class TestGenClusterUnambigIntronIntervals:
         assert len(intervals) == 1
         assert intervals[0].start == 200
         assert intervals[0].end == 300
-        assert intervals[0].t_index == 0
+        assert intervals[0].t_index == 0  # nrna_idx stored in t_index field
 
     def test_three_exon_transcript_two_introns(self):
         """3-exon transcript → two introns, each evaluated independently."""
@@ -169,19 +170,22 @@ class TestGenClusterUnambigIntronIntervals:
     def test_multiple_transcripts_complex(self):
         """Two multi-exon transcripts with overlapping introns.
 
-        t0: exon 100-200, exon 500-600 (intron 200-500)
-        t1: exon 150-300, exon 450-550 (intron 300-450)
+        t0: exon 100-200, exon 500-600 (intron 200-500, span 100-600)
+        t1: exon 150-300, exon 450-550 (intron 300-450, span 150-550)
         Global exon union: [(100, 300), (450, 600)]
         t0 intron 200-500 minus global exons → 300-450
         t1 intron 300-450 minus global exons → 300-450
+        Different genomic spans → different nRNAs → 2 intervals.
         """
         t0 = _make_transcript("chr1", Strand.POS,
-                              [(100, 200), (500, 600)], t_index=0)
+                              [(100, 200), (500, 600)], t_index=0,
+                              nrna_idx=0)
         t1 = _make_transcript("chr1", Strand.POS,
-                              [(150, 300), (450, 550)], t_index=1)
+                              [(150, 300), (450, 550)], t_index=1,
+                              nrna_idx=1)
         intervals = list(_gen_cluster_unambig_intron_intervals([t0, t1]))
-        # t0: intron 200-500, minus global exons [(100,300),(450,600)] → 300-450
-        # t1: intron 300-450, minus global exons [(100,300),(450,600)] → 300-450
+        # t0 (nrna_idx=0): intron 200-500, minus global exons → 300-450
+        # t1 (nrna_idx=1): intron 300-450, minus global exons → 300-450
         assert len(intervals) == 2
         for iv in intervals:
             assert iv.start == 300
@@ -210,7 +214,7 @@ class TestBuildGenomicIntervalsWithUnambigIntron:
         row = unambig.iloc[0]
         assert row["start"] == 200
         assert row["end"] == 400
-        assert row["t_index"] == 0
+        assert row["t_index"] == 0  # nrna_idx stored in t_index field
 
     def test_no_unambig_intron_when_fully_covered(self):
         """No UNAMBIG_INTRON when intron is covered by another exon."""

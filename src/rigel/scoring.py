@@ -11,14 +11,12 @@ Design contract:
     - Every function is a candidate for Cython / C acceleration.
 """
 
-import bisect
 import math
 from dataclasses import dataclass
 
 import numpy as np
 
 from .splice import SpliceType, SPLICE_UNSPLICED, SPLICE_UNANNOT, SPLICE_ANNOT
-from .frag_length_model import _TAIL_DECAY_LP
 from .types import Strand, STRAND_POS, STRAND_NEG
 
 # ---------------------------------------------------------------------------
@@ -239,27 +237,17 @@ class FragmentScorer:
                 ctx.t_start_arr, dtype=np.int32),
             nrna_base=int(ctx.nrna_base),
             t_exon_data=ctx._t_exon_data,
+            t_to_nrna_arr=np.ascontiguousarray(
+                index.t_to_nrna_arr, dtype=np.int32),
+            nrna_span_arr=np.ascontiguousarray(
+                (index.nrna_df["end"].values
+                 - index.nrna_df["start"].values).astype(np.int32)),
+            nrna_start_arr=np.ascontiguousarray(
+                index.nrna_df["start"].values.astype(np.int32)),
         )
         object.__setattr__(ctx, '_native_ctx', native_ctx)
 
         return ctx
-
-
-# ---------------------------------------------------------------------------
-# Pure scoring functions (C-translatable)
-# ---------------------------------------------------------------------------
-
-
-def frag_len_log_lik(ctx: FragmentScorer, flen: int) -> float:
-    """Fragment-length log-likelihood (0.0 when unavailable)."""
-    if flen <= 0:
-        return 0.0
-    if ctx.fl_log_prob is not None:
-        if flen <= ctx.fl_max_size:
-            return float(ctx.fl_log_prob[flen])
-        # Exponential tail decay beyond max_size
-        return ctx.fl_tail_base + (flen - ctx.fl_max_size) * _TAIL_DECAY_LP
-    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -358,55 +346,3 @@ def score_gdna_standalone(
     )
 
 
-def genomic_to_transcript_pos_bisect(
-    genomic_pos: int,
-    exon_starts: tuple[int, ...],
-    exon_ends: tuple[int, ...],
-    cumsum_before: tuple[int, ...],
-    strand: int,
-    transcript_length: int,
-) -> int:
-    """Map genomic position to transcript coordinate using binary search.
-
-    Like ``genomic_to_transcript_pos`` but uses pre-computed cumulative
-    sums and ``bisect`` for O(log n) exon lookup instead of O(n) linear
-    scan with numpy int() conversions.
-
-    Parameters
-    ----------
-    genomic_pos : int
-        Genomic coordinate to map.
-    exon_starts : tuple[int, ...]
-        Sorted exon start coordinates (Python ints).
-    exon_ends : tuple[int, ...]
-        Sorted exon end coordinates (Python ints).
-    cumsum_before : tuple[int, ...]
-        Cumulative spliced length before each exon.
-    strand : int
-        Transcript strand (``Strand.POS`` or ``Strand.NEG``).
-    transcript_length : int
-        Total spliced exonic length.
-
-    Returns
-    -------
-    int
-        Transcript-relative position in ``[0, transcript_length]``.
-    """
-    # Find rightmost exon whose start <= genomic_pos
-    ei = bisect.bisect_right(exon_starts, genomic_pos) - 1
-    if ei < 0:
-        # Before first exon
-        offset = 0
-    elif genomic_pos >= exon_ends[ei]:
-        # In intron after exon ei (or past last exon)
-        offset = cumsum_before[ei] + (exon_ends[ei] - exon_starts[ei])
-    else:
-        # Inside exon ei
-        offset = cumsum_before[ei] + (genomic_pos - exon_starts[ei])
-    if offset < 0:
-        offset = 0
-    elif offset > transcript_length:
-        offset = transcript_length
-    if strand == STRAND_NEG:
-        offset = transcript_length - offset
-    return offset

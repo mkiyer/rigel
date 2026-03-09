@@ -468,6 +468,8 @@ def quant_from_buffer(
 
     estimator = AbundanceEstimator(
         index.num_transcripts,
+        num_nrna=index.num_nrna,
+        t_to_nrna=index.t_to_nrna_arr,
         em_config=em_config,
         geometry=geometry,
     )
@@ -495,13 +497,16 @@ def quant_from_buffer(
     buffer.release()
     gc.collect()
 
-    # --- Per-transcript nRNA init from intronic sense excess ---
+    # --- Per-nRNA init from intronic sense excess ---
+    # Compute per-nRNA spans and max exonic lengths for single-exon gating
+    nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.float64)
+    nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
+    np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
     nrna_init = compute_nrna_init(
         estimator.transcript_intronic_sense,
         estimator.transcript_intronic_antisense,
-        geometry.transcript_spans,
-        geometry.exonic_lengths,
-        geometry.mean_frag,
+        nrna_spans,
+        nrna_max_exonic,
         strand_models,
     )
     estimator.nrna_init = nrna_init

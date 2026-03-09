@@ -79,8 +79,12 @@ def _make_locus(
         max_iterations, convergence_delta,
         use_vbem, prune_threshold,
         0,  # n_transcripts=0 → classic (unlinked) mode
+        0,  # n_nrna=0
         np.array([], dtype=np.float64),  # nrna_frac_alpha
         np.array([], dtype=np.float64),  # nrna_frac_beta
+        np.array([], dtype=np.int32),  # t_to_nrna
+        np.array([], dtype=np.int32),  # nrna_to_t_offsets
+        np.array([], dtype=np.int32),  # nrna_to_t_indices
     )
     return np.asarray(theta), np.asarray(alpha), np.asarray(em_totals)
 
@@ -577,12 +581,14 @@ def _make_linked_locus(
     """Build CSR arrays for a linked-model locus and call the C++ solver.
 
     Component layout: [0..n_t) mRNA, [n_t..2*n_t) nRNA, [2*n_t] gDNA.
-    Total components = 2*n_transcripts + 1.
+    With n_nrna = n_t (each transcript has its own unique nRNA):
+        n_components = n_t + n_nrna + 1 = 2*n_t + 1.
 
     Returns (theta, alpha, em_totals, nrna_frac) as numpy arrays.
     """
     n_t = n_transcripts
-    n_components = 2 * n_t + 1
+    n_nrna = n_t  # assume 1:1 transcript→nRNA
+    n_components = n_t + n_nrna + 1
 
     all_t_indices = []
     all_log_liks = []
@@ -619,6 +625,11 @@ def _make_linked_locus(
     if nrna_frac_beta is None:
         nrna_frac_beta = np.ones(n_t, dtype=np.float64)
 
+    # 1:1 transcript→nRNA mapping for tests
+    t_to_nrna = np.arange(n_t, dtype=np.int32)
+    nrna_to_t_offsets = np.arange(n_nrna + 1, dtype=np.int32)
+    nrna_to_t_indices = np.arange(n_t, dtype=np.int32)
+
     theta, alpha, em_totals, nrna_frac = run_locus_em_native(
         offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
         tx_starts_arr, tx_ends_arr, bias_profiles,
@@ -627,7 +638,9 @@ def _make_linked_locus(
         max_iterations, convergence_delta,
         False,  # use_vbem (not supported for linked)
         prune_threshold,
-        n_transcripts, nrna_frac_alpha, nrna_frac_beta,
+        n_transcripts, n_nrna,
+        nrna_frac_alpha, nrna_frac_beta,
+        t_to_nrna, nrna_to_t_offsets, nrna_to_t_indices,
     )
     return (
         np.asarray(theta),

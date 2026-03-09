@@ -134,36 +134,36 @@ if(NOT HTSLIB_FOUND AND DEFINED ENV{CONDA_PREFIX})
 endif()
 
 if(HTSLIB_FOUND)
-  nanobind_add_module(
-    _bam_impl
-    NOMINSIZE
-    STABLE_ABI
-    src/rigel/native/bam_scanner.cpp
-    src/rigel/cgranges/cgranges.c
-  )
-
-  target_include_directories(_bam_impl PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
-  )
-
-  # Link htslib: prefer PkgConfig target, fall back to manual link
-  if(TARGET PkgConfig::HTSLIB)
-    target_link_libraries(_bam_impl PRIVATE PkgConfig::HTSLIB)
-  else()
-    target_include_directories(_bam_impl PRIVATE ${HTSLIB_INCLUDE_DIRS})
-    target_link_directories(_bam_impl PRIVATE ${HTSLIB_LIBRARY_DIRS})
-    target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
-  endif()
-
-  install(TARGETS _bam_impl LIBRARY DESTINATION rigel)
-
   message(STATUS "htslib found — building _bam_impl C++ BAM scanner")
 else()
-  message(STATUS "htslib NOT found — _bam_impl will not be built. "
-                 "Install htslib (conda install -c conda-forge htslib) "
-                 "for native BAM scanning.")
+  message(FATAL_ERROR
+    "htslib NOT found.  _bam_impl is required.\n"
+    "Install htslib (conda install -c conda-forge htslib) and re-run cmake.")
 endif()
+
+nanobind_add_module(
+  _bam_impl
+  NOMINSIZE
+  STABLE_ABI
+  src/rigel/native/bam_scanner.cpp
+  src/rigel/cgranges/cgranges.c
+)
+
+target_include_directories(_bam_impl PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
+)
+
+# Link htslib: prefer PkgConfig target, fall back to manual link
+if(TARGET PkgConfig::HTSLIB)
+  target_link_libraries(_bam_impl PRIVATE PkgConfig::HTSLIB)
+else()
+  target_include_directories(_bam_impl PRIVATE ${HTSLIB_INCLUDE_DIRS})
+  target_link_directories(_bam_impl PRIVATE ${HTSLIB_LIBRARY_DIRS})
+  target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
+endif()
+
+install(TARGETS _bam_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _em_impl extension ---------------------------------------------
 

@@ -616,34 +616,44 @@ static void linked_map_em_step(
     const double* theta_t,       // [n_t + 1]: θ_1..θ_T, γ
     const double* nrna_frac,           // [n_t]: nrna_frac_1..nrna_frac_T
     const std::vector<EmEquivClass>& ec_data,
-    const double* log_eff_len,   // [2*n_t + 1]
-    const double* unambig_totals, // [2*n_t + 1]
-    const double* prior,         // [2*n_t + 1]
+    const double* log_eff_len,   // [n_t + n_nrna + 1]
+    const double* unambig_totals, // [n_t + n_nrna + 1]
+    const double* prior,         // [n_t + n_nrna + 1]
     const double* nrna_frac_alpha,     // [n_t]
     const double* nrna_frac_beta,      // [n_t]
-    double*       em_totals,     // [2*n_t + 1]: zeroed then accumulated
+    double*       em_totals,     // [n_t + n_nrna + 1]: zeroed then accumulated
     double*       theta_t_new,   // [n_t + 1]: output (normalised)
     double*       nrna_frac_new,       // [n_t]: output
     int           n_transcripts,
+    int           n_nrna,
     int           n_components,
+    const int32_t* t_to_nrna,         // [n_t]: local transcript → local nRNA
+    const int32_t* nrna_to_t_off,     // [n_nrna + 1]: CSR offsets
+    const int32_t* nrna_to_t_idx,     // CSR flat: local transcript indices
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr)  // thread pool for parallel E-step
+    rigel::EStepThreadPool* pool = nullptr)
 {
     int n_t = n_transcripts;
-    int gdna_idx = 2 * n_t;
+    int gdna_idx = n_t + n_nrna;
+
+    // Compute nRNA component abundances by summing across transcripts
+    std::vector<double> nrna_abundance(static_cast<size_t>(n_nrna), 0.0);
+    for (int i = 0; i < n_t; ++i) {
+        nrna_abundance[t_to_nrna[i]] += theta_t[i] * nrna_frac[i];
+    }
 
     // Build log_weights from linked parameterisation
     std::vector<double> log_weights(static_cast<size_t>(n_components));
+    // mRNA components [0, n_t)
     for (int i = 0; i < n_t; ++i) {
-        double log_theta = std::log(theta_t[i] + EM_LOG_EPSILON);
-        // mRNA component i
-        log_weights[i] = log_theta
+        log_weights[i] = std::log(theta_t[i] + EM_LOG_EPSILON)
             + std::log(1.0 - nrna_frac[i] + EM_LOG_EPSILON)
             - log_eff_len[i];
-        // nRNA component n_t + i
-        log_weights[n_t + i] = log_theta
-            + std::log(nrna_frac[i] + EM_LOG_EPSILON)
-            - log_eff_len[n_t + i];
+    }
+    // nRNA components [n_t, n_t + n_nrna)
+    for (int n = 0; n < n_nrna; ++n) {
+        log_weights[n_t + n] = std::log(nrna_abundance[n] + EM_LOG_EPSILON)
+            - log_eff_len[n_t + n];
     }
     // gDNA component
     log_weights[gdna_idx] = std::log(theta_t[n_t] + EM_LOG_EPSILON)
@@ -662,15 +672,45 @@ static void linked_map_em_step(
         }
     }
 
-    // M-step: aggregate into theta_t and update nrna_frac
+    // M-step: apportion nRNA counts back to transcripts
+    // For each nRNA n, distribute its EM counts to transcripts proportional
+    // to their mass share: W_t = theta_t * nrna_frac / nrna_abundance[n]
+    // Then update theta_t_new and nrna_frac_new.
+    //
+    // First, compute per-transcript apportioned nRNA counts
+    std::vector<double> apportioned_nrna(static_cast<size_t>(n_t), 0.0);
+    for (int n = 0; n < n_nrna; ++n) {
+        double nrna_count = unambig_totals[n_t + n] + em_totals[n_t + n];
+        double total_mass = nrna_abundance[n];
+        int s = nrna_to_t_off[n];
+        int e = nrna_to_t_off[n + 1];
+        int fan = e - s;
+        for (int j = s; j < e; ++j) {
+            int t = nrna_to_t_idx[j];
+            double share = (total_mass > 0.0)
+                ? (theta_t[t] * nrna_frac[t]) / total_mass
+                : 1.0 / fan;
+            apportioned_nrna[t] = nrna_count * share;
+        }
+    }
+
+    // Update theta_t and nrna_frac
     double total = 0.0;
     for (int i = 0; i < n_t; ++i) {
         double mrna_count = unambig_totals[i] + em_totals[i];
-        double nrna_count = unambig_totals[n_t + i] + em_totals[n_t + i];
+        double nrna_count = apportioned_nrna[i];
         double total_count = mrna_count + nrna_count;
 
-        // θ_t ∝ total_data + sum of mRNA & nRNA priors
-        theta_t_new[i] = total_count + prior[i] + prior[n_t + i];
+        // θ_t ∝ total_data + mRNA prior + share of nRNA prior
+        int32_t ln = t_to_nrna[i];
+        // Apportion nRNA prior similarly
+        int s = nrna_to_t_off[ln];
+        int e = nrna_to_t_off[ln + 1];
+        int fan = e - s;
+        double nrna_prior_share = (nrna_abundance[ln] > 0.0)
+            ? prior[n_t + ln] * (theta_t[i] * nrna_frac[i]) / nrna_abundance[ln]
+            : prior[n_t + ln] / fan;
+        theta_t_new[i] = total_count + prior[i] + nrna_prior_share;
         total += theta_t_new[i];
 
         // nrna_frac MAP Beta: (nrna + α - 1) / (total + α + β - 2)
@@ -1040,15 +1080,19 @@ static EMResult run_squarem(
 
 static EMResult linked_run_squarem(
     const std::vector<EmEquivClass>& ec_data,
-    const double* log_eff_len,     // [2*n_t + 1]
-    const double* unambig_totals,   // [2*n_t + 1]
-    double*       prior,           // [2*n_t + 1], mutable for pruning
+    const double* log_eff_len,     // [n_t + n_nrna + 1]
+    const double* unambig_totals,   // [n_t + n_nrna + 1]
+    double*       prior,           // [n_t + n_nrna + 1], mutable for pruning
     const double* theta_t_init,    // [n_t + 1]
     const double* nrna_frac_init,        // [n_t]
     const double* nrna_frac_alpha,       // [n_t]
     const double* nrna_frac_beta,        // [n_t]
     int           n_transcripts,
-    int           n_components,    // 2*n_t + 1
+    int           n_nrna,
+    int           n_components,    // n_t + n_nrna + 1
+    const int32_t* t_to_nrna,           // [n_t]
+    const int32_t* nrna_to_t_off,       // [n_nrna + 1]
+    const int32_t* nrna_to_t_idx,       // CSR flat
     int           max_iterations,
     double        convergence_delta,
     double        prune_threshold,
@@ -1058,6 +1102,7 @@ static EMResult linked_run_squarem(
     int n_t = n_transcripts;
     int nc  = n_components;
     int ns  = n_t + 1;  // SQUAREM state size (theta_t + gamma)
+    int gdna_idx = n_t + n_nrna;
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
 
     std::vector<double> em_totals(static_cast<size_t>(nc), 0.0);
@@ -1074,10 +1119,13 @@ static EMResult linked_run_squarem(
     std::vector<double> v_vec(static_cast<size_t>(ns));
 
     // Initialize state0 = theta_t_init + collapsed prior, normalised
+    // Apportion each nRNA prior to its transcripts equally for initialization
     for (int i = 0; i < n_t; ++i) {
-        state0[i] = theta_t_init[i] + prior[i] + prior[n_t + i];
+        int32_t ln = t_to_nrna[i];
+        int fan = nrna_to_t_off[ln + 1] - nrna_to_t_off[ln];
+        state0[i] = theta_t_init[i] + prior[i] + prior[n_t + ln] / fan;
     }
-    state0[n_t] = theta_t_init[n_t] + prior[2 * n_t];
+    state0[n_t] = theta_t_init[n_t] + prior[gdna_idx];
     {
         double s = 0.0;
         for (int i = 0; i < ns; ++i) s += state0[i];
@@ -1094,7 +1142,9 @@ static EMResult linked_run_squarem(
             log_eff_len, unambig_totals, prior,
             nrna_frac_alpha, nrna_frac_beta,
             em_totals.data(), state1.data(), nrna_frac_tmp.data(),
-            n_transcripts, n_components, estep_threads, pool);
+            n_transcripts, n_nrna, n_components,
+            t_to_nrna, nrna_to_t_off, nrna_to_t_idx,
+            estep_threads, pool);
         std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
 
         linked_map_em_step(
@@ -1102,7 +1152,9 @@ static EMResult linked_run_squarem(
             log_eff_len, unambig_totals, prior,
             nrna_frac_alpha, nrna_frac_beta,
             em_totals.data(), state2.data(), nrna_frac_tmp.data(),
-            n_transcripts, n_components, estep_threads, pool);
+            n_transcripts, n_nrna, n_components,
+            t_to_nrna, nrna_to_t_off, nrna_to_t_idx,
+            estep_threads, pool);
         std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
 
         // SQUAREM extrapolation on theta_t
@@ -1141,7 +1193,9 @@ static EMResult linked_run_squarem(
             log_eff_len, unambig_totals, prior,
             nrna_frac_alpha, nrna_frac_beta,
             em_totals.data(), state_new.data(), nrna_frac_tmp.data(),
-            n_transcripts, n_components, estep_threads, pool);
+            n_transcripts, n_nrna, n_components,
+            t_to_nrna, nrna_to_t_off, nrna_to_t_idx,
+            estep_threads, pool);
         std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
 
         // Convergence check
@@ -1153,13 +1207,21 @@ static EMResult linked_run_squarem(
         if (delta < convergence_delta) break;
     }
 
-    // Decompose theta_t + nrna_frac → full theta[2*n_t+1]
+    // Decompose theta_t + nrna_frac → full theta[n_t + n_nrna + 1]
     std::vector<double> theta(static_cast<size_t>(nc));
     for (int i = 0; i < n_t; ++i) {
-        theta[i]       = state0[i] * (1.0 - nrna_frac[i]);
-        theta[n_t + i] = state0[i] * nrna_frac[i];
+        theta[i] = state0[i] * (1.0 - nrna_frac[i]);
     }
-    theta[2 * n_t] = state0[n_t];
+    // nRNA components: sum contributions from all transcripts
+    for (int n = 0; n < n_nrna; ++n) {
+        double nrna_sum = 0.0;
+        for (int j = nrna_to_t_off[n]; j < nrna_to_t_off[n + 1]; ++j) {
+            int t = nrna_to_t_idx[j];
+            nrna_sum += state0[t] * nrna_frac[t];
+        }
+        theta[n_t + n] = nrna_sum;
+    }
+    theta[gdna_idx] = state0[n_t];
 
     // alpha_out = unambig_totals + em_totals + prior
     std::vector<double> alpha_out(static_cast<size_t>(nc));
@@ -1176,9 +1238,14 @@ static EMResult linked_run_squarem(
 
         for (int i = 0; i < n_t; ++i) {
             double mrna_data = unambig_totals[i] + em_totals[i];
-            double nrna_data = unambig_totals[n_t + i] + em_totals[n_t + i];
-            double total_data = mrna_data + nrna_data;
-            double total_alpha = alpha_out[i] + alpha_out[n_t + i];
+            // Apportion nRNA data to this transcript for evidence check
+            int32_t ln = t_to_nrna[i];
+            double nrna_total_data = unambig_totals[n_t + ln] + em_totals[n_t + ln];
+            double nrna_total_alpha = alpha_out[n_t + ln];
+            int fan = nrna_to_t_off[ln + 1] - nrna_to_t_off[ln];
+            double nrna_share = nrna_total_data / std::max(fan, 1);
+            double total_data = mrna_data + nrna_share;
+            double total_alpha = alpha_out[i] + nrna_total_alpha / std::max(fan, 1);
             double evidence = total_data
                 / std::max(total_alpha, EM_LOG_EPSILON);
             if (unambig_totals[i] == 0.0
@@ -1193,9 +1260,19 @@ static EMResult linked_run_squarem(
             for (int i = 0; i < n_t; ++i) {
                 if (prune_mask[i]) {
                     prior[i] = 0.0;
-                    prior[n_t + i] = 0.0;
                     state0[i] = 0.0;
                 }
+            }
+            // Zero nRNA prior if ALL transcripts sharing it are pruned
+            for (int n = 0; n < n_nrna; ++n) {
+                bool all_pruned = true;
+                for (int j = nrna_to_t_off[n]; j < nrna_to_t_off[n + 1]; ++j) {
+                    if (!prune_mask[nrna_to_t_idx[j]]) {
+                        all_pruned = false;
+                        break;
+                    }
+                }
+                if (all_pruned) prior[n_t + n] = 0.0;
             }
             // Re-normalise state
             double s = 0.0;
@@ -1213,17 +1290,26 @@ static EMResult linked_run_squarem(
                     log_eff_len, unambig_totals, prior,
                     nrna_frac_alpha, nrna_frac_beta,
                     em_totals.data(), t_new.data(), nrna_frac_tmp.data(),
-                    n_transcripts, n_components, estep_threads, pool);
+                    n_transcripts, n_nrna, n_components,
+                    t_to_nrna, nrna_to_t_off, nrna_to_t_idx,
+                    estep_threads, pool);
                 std::swap(state0, t_new);
                 std::copy(nrna_frac_tmp.begin(), nrna_frac_tmp.end(), nrna_frac.begin());
             }
 
             // Rebuild full theta + alpha
             for (int i = 0; i < n_t; ++i) {
-                theta[i]       = state0[i] * (1.0 - nrna_frac[i]);
-                theta[n_t + i] = state0[i] * nrna_frac[i];
+                theta[i] = state0[i] * (1.0 - nrna_frac[i]);
             }
-            theta[2 * n_t] = state0[n_t];
+            for (int n = 0; n < n_nrna; ++n) {
+                double nrna_sum = 0.0;
+                for (int j = nrna_to_t_off[n]; j < nrna_to_t_off[n + 1]; ++j) {
+                    int t = nrna_to_t_idx[j];
+                    nrna_sum += state0[t] * nrna_frac[t];
+                }
+                theta[n_t + n] = nrna_sum;
+            }
+            theta[gdna_idx] = state0[n_t];
 
             for (int i = 0; i < nc; ++i) {
                 alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
@@ -1270,8 +1356,12 @@ run_locus_em_native(
     double prune_threshold,
     // Linked model parameters
     int    n_transcripts,
+    int    n_nrna,
     f64_1d nrna_frac_alpha_arr,
-    f64_1d nrna_frac_beta_arr)
+    f64_1d nrna_frac_beta_arr,
+    i32_1d t_to_nrna_arr,
+    i32_1d nrna_to_t_offsets_arr,
+    i32_1d nrna_to_t_indices_arr)
 {
     size_t nc = static_cast<size_t>(n_components);
     size_t n_candidates = t_indices.shape(0);
@@ -1291,8 +1381,12 @@ run_locus_em_native(
 
     bool linked = (n_transcripts > 0);
     size_t n_t = linked ? static_cast<size_t>(n_transcripts) : 0;
+    int n_nrna_i = linked ? n_nrna : 0;
     const double* ea_ptr = linked ? nrna_frac_alpha_arr.data() : nullptr;
     const double* eb_ptr = linked ? nrna_frac_beta_arr.data() : nullptr;
+    const int32_t* t2n_ptr = linked ? t_to_nrna_arr.data() : nullptr;
+    const int32_t* n2t_off = linked ? nrna_to_t_offsets_arr.data() : nullptr;
+    const int32_t* n2t_idx = linked ? nrna_to_t_indices_arr.data() : nullptr;
 
     // Copy unambig_totals (we need a mutable copy)
     std::vector<double> unambig_totals(ut_ptr, ut_ptr + nc);
@@ -1376,13 +1470,20 @@ run_locus_em_native(
     // 6. Run SQUAREM (linked or classic)
     EMResult result;
     if (linked) {
-        // Collapse warm start to theta_t space
+        // Collapse warm start to theta_t space (n_t+1)
         int nt_i = n_transcripts;
+        int gdna_idx = nt_i + n_nrna_i;
         std::vector<double> theta_t_init(static_cast<size_t>(nt_i + 1));
+        // Apportion each nRNA's warm-start equally to sharing transcripts
         for (int i = 0; i < nt_i; ++i) {
-            theta_t_init[i] = theta_init[i] + theta_init[nt_i + i];
+            int nrna_local = t2n_ptr[i];
+            int fan = n2t_off[nrna_local + 1] - n2t_off[nrna_local];
+            double nrna_share = (fan > 0)
+                ? theta_init[static_cast<size_t>(nt_i + nrna_local)] / fan
+                : 0.0;
+            theta_t_init[i] = theta_init[i] + nrna_share;
         }
-        theta_t_init[nt_i] = theta_init[2 * nt_i];
+        theta_t_init[nt_i] = theta_init[gdna_idx];
 
         // nrna_frac_init = prior mean, clamped
         std::vector<double> nrna_frac_init(n_t);
@@ -1397,7 +1498,8 @@ run_locus_em_native(
             ec_data, log_eff_len.data(), unambig_totals.data(),
             prior.data(), theta_t_init.data(), nrna_frac_init.data(),
             ea_ptr, eb_ptr,
-            n_transcripts, n_components,
+            n_transcripts, n_nrna_i, n_components,
+            t2n_ptr, n2t_off, n2t_idx,
             max_iterations, convergence_delta,
             prune_threshold);
     } else {
@@ -1464,8 +1566,9 @@ struct LocalCandidate {
 // Per-locus sub-problem (stack-allocated, reused across loci)
 struct LocusSubProblem {
     int n_t;           // number of transcripts in locus
-    int n_components;  // 2*n_t + 1
-    int gdna_idx;      // = 2*n_t
+    int n_nrna;        // number of unique nRNAs in locus
+    int n_components;  // n_t + n_nrna + 1
+    int gdna_idx;      // = n_t + n_nrna
     int n_local_units;
 
     // Local CSR
@@ -1491,10 +1594,17 @@ struct LocusSubProblem {
 
     // Local→global transcript mapping
     std::vector<int32_t>  local_to_global_t; // [n_t]
+
+    // nRNA mapping (decoupled nRNA)
+    std::vector<int32_t>  local_t_to_local_nrna;  // [n_t]: local transcript → local nRNA
+    std::vector<int32_t>  nrna_to_t_off;           // [n_nrna + 1]: CSR offsets
+    std::vector<int32_t>  nrna_to_t_idx;           // CSR flat: local transcript indices
+    std::vector<int32_t>  local_to_global_nrna;    // [n_nrna]: local nRNA → global nRNA idx
 };
 
 // Extract per-locus sub-problem from global CSR data.
 // Reimplements Python build_locus_em_data() entirely in C++.
+// Component layout: [0,n_t) mRNA + [n_t, n_t+n_nrna) nRNA + [n_t+n_nrna] gDNA
 static void extract_locus_sub_problem(
     LocusSubProblem& sub,
     // Locus definition
@@ -1517,7 +1627,7 @@ static void extract_locus_sub_problem(
     int32_t nrna_base,
     // Per-transcript data (global arrays, all N_T_TOTAL elements)
     const double*  all_unambig_row_sums,
-    const double*  all_nrna_init,
+    const double*  all_nrna_init,          // [num_nrna] — indexed by global nrna_idx
     const double*  all_nrna_frac_alpha,
     const double*  all_nrna_frac_beta,
     const int64_t* all_t_starts,
@@ -1526,44 +1636,94 @@ static void extract_locus_sub_problem(
     const double*  all_transcript_spans,
     const double*  all_exonic_lengths,
     double mean_frag,
+    // nRNA mapping (global)
+    const int32_t* global_t_to_nrna,   // [N_T]: transcript → global nRNA idx
     // Scratch: global→local mapping, caller-owned, reset between calls
     int32_t* local_map, int local_map_size)
 {
     sub.n_t = n_t;
-    sub.n_components = 2 * n_t + 1;
-    sub.gdna_idx = 2 * n_t;
     sub.n_local_units = n_u;
+
+    // --- Compute unique local nRNAs for this locus ---
+    // Collect unique global nRNA indices, assign local indices 0..n_nrna-1
+    sub.local_t_to_local_nrna.resize(n_t);
+    std::vector<int32_t> unique_nrna_global;
+    unique_nrna_global.reserve(n_t);
+    // Map global_nrna_idx → local_nrna_idx (temporary)
+    std::unordered_map<int32_t, int32_t> gnrna_to_local;
+    gnrna_to_local.reserve(n_t);
+
+    for (int i = 0; i < n_t; ++i) {
+        int gt = t_arr[i];
+        int32_t gnrna = global_t_to_nrna[gt];
+        auto it = gnrna_to_local.find(gnrna);
+        if (it == gnrna_to_local.end()) {
+            int32_t local_n = static_cast<int32_t>(unique_nrna_global.size());
+            gnrna_to_local[gnrna] = local_n;
+            unique_nrna_global.push_back(gnrna);
+            sub.local_t_to_local_nrna[i] = local_n;
+        } else {
+            sub.local_t_to_local_nrna[i] = it->second;
+        }
+    }
+
+    int n_nrna = static_cast<int>(unique_nrna_global.size());
+    sub.n_nrna = n_nrna;
+    sub.n_components = n_t + n_nrna + 1;
+    sub.gdna_idx = n_t + n_nrna;
+
+    // Build local_to_global_nrna
+    sub.local_to_global_nrna.resize(n_nrna);
+    for (int n = 0; n < n_nrna; ++n) {
+        sub.local_to_global_nrna[n] = unique_nrna_global[n];
+    }
+
+    // Build nRNA→transcript CSR
+    sub.nrna_to_t_off.assign(n_nrna + 1, 0);
+    for (int i = 0; i < n_t; ++i) {
+        sub.nrna_to_t_off[sub.local_t_to_local_nrna[i] + 1]++;
+    }
+    for (int n = 0; n < n_nrna; ++n) {
+        sub.nrna_to_t_off[n + 1] += sub.nrna_to_t_off[n];
+    }
+    sub.nrna_to_t_idx.resize(n_t);
+    std::vector<int32_t> fill_pos(sub.nrna_to_t_off.begin(),
+                                   sub.nrna_to_t_off.begin() + n_nrna);
+    for (int i = 0; i < n_t; ++i) {
+        int32_t ln = sub.local_t_to_local_nrna[i];
+        sub.nrna_to_t_idx[fill_pos[ln]++] = i;
+    }
+
+    int nc = sub.n_components;
 
     // --- Build global→local mapping ---
     int max_global = 0;
     for (int i = 0; i < n_t; ++i) {
         int gt = t_arr[i];
-        int nrna_gt = nrna_base + gt;
         if (gt + 1 > max_global) max_global = gt + 1;
-        if (nrna_gt + 1 > max_global) max_global = nrna_gt + 1;
     }
-    // Ensure we don't exceed scratch buffer
+    // Also account for nRNA indices: nrna_base + global_nrna_idx
+    for (int n = 0; n < n_nrna; ++n) {
+        int nrna_global = nrna_base + unique_nrna_global[n];
+        if (nrna_global + 1 > max_global) max_global = nrna_global + 1;
+    }
     if (max_global > local_map_size) max_global = local_map_size;
 
-    // Reset scratch region to -1
+    // Reset scratch region
     for (int i = 0; i < max_global; ++i) local_map[i] = -1;
 
-    // mRNA: global_t → local_i
-    // nRNA: nrna_base + global_t → n_t + local_i
+    // mRNA: global_t → local_i  [0, n_t)
     for (int i = 0; i < n_t; ++i) {
         int gt = t_arr[i];
         if (gt >= 0 && gt < local_map_size) local_map[gt] = i;
-        int ngt = nrna_base + gt;
-        if (ngt >= 0 && ngt < local_map_size) local_map[ngt] = n_t + i;
+    }
+    // nRNA: nrna_base + global_nrna_idx → n_t + local_nrna_idx  [n_t, n_t+n_nrna)
+    for (int n = 0; n < n_nrna; ++n) {
+        int ngt = nrna_base + unique_nrna_global[n];
+        if (ngt >= 0 && ngt < local_map_size) local_map[ngt] = n_t + n;
     }
 
     // --- Gather + dedup candidates from global CSR ---
-    // For each unit, extract candidates, map to local, dedup by
-    // (unit, local_comp) keeping best log_lik.
-
-    int nc = sub.n_components;
-
-    // Temporary per-unit dedup buffers (indexed by local_comp)
     struct BestCandidate {
         double  log_lik;
         double  cov_wt;
@@ -1572,21 +1732,16 @@ static void extract_locus_sub_problem(
         uint8_t count_col;
     };
     std::vector<BestCandidate> best_buf(nc);
-    // Epoch-based dedup: avoids O(nc) clearing per unit.
-    // seen_epoch[c] == current_epoch means component c is "seen".
     std::vector<int32_t> seen_epoch(nc, 0);
     int32_t current_epoch = 0;
-    // Sparse list of touched components for collection (avoids O(nc) scan).
     std::vector<int32_t> dirty_comps;
     dirty_comps.reserve(256);
 
-    // Pre-size output vectors (estimate: total global candidates for these units)
     size_t total_est = 0;
     for (int ui = 0; ui < n_u; ++ui) {
         int u = u_arr[ui];
         total_est += static_cast<size_t>(g_offsets[u + 1] - g_offsets[u]);
     }
-    // Add space for gDNA candidates (at most n_u)
     total_est += static_cast<size_t>(n_u);
 
     sub.t_indices.clear();
@@ -1624,11 +1779,9 @@ static void extract_locus_sub_problem(
         auto g_start = g_offsets[u];
         auto g_end = g_offsets[u + 1];
 
-        // Per-unit metadata
         sub.locus_t_arr[ui] = g_locus_t_indices[u];
         sub.locus_ct_arr[ui] = g_locus_count_cols[u];
 
-        // Advance epoch (O(1) instead of O(nc) clearing)
         ++current_epoch;
         dirty_comps.clear();
 
@@ -1668,8 +1821,7 @@ static void extract_locus_sub_problem(
             }
         }
 
-        // Collect deduped candidates for this unit (sorted by local_comp
-        // for stable equivalence class keys)
+        // Collect deduped candidates sorted by local component
         std::sort(dirty_comps.begin(), dirty_comps.end());
         for (int32_t c : dirty_comps) {
             sub.t_indices.push_back(c);
@@ -1694,12 +1846,17 @@ static void extract_locus_sub_problem(
     }
     // nRNA and gDNA slots are 0 (no double-counting)
 
-    // Bias profiles: [mRNA lengths, nRNA lengths, locus_span]
+    // Bias profiles: [mRNA lengths | nRNA spans | locus_span]
     sub.bias_profiles.resize(nc);
     for (int i = 0; i < n_t; ++i) {
         int gt = t_arr[i];
-        sub.bias_profiles[i] = all_t_lengths[gt];           // mRNA
-        sub.bias_profiles[n_t + i] = all_t_ends[gt] - all_t_starts[gt]; // nRNA
+        sub.bias_profiles[i] = all_t_lengths[gt];                         // mRNA
+    }
+    for (int n = 0; n < n_nrna; ++n) {
+        // nRNA span from the first transcript with this nRNA (all share same span)
+        int first_t = sub.nrna_to_t_idx[sub.nrna_to_t_off[n]]; // local transcript
+        int gt = t_arr[first_t];
+        sub.bias_profiles[n_t + n] = all_t_ends[gt] - all_t_starts[gt];  // nRNA
     }
     sub.bias_profiles[sub.gdna_idx] = locus_span;
 
@@ -1711,21 +1868,28 @@ static void extract_locus_sub_problem(
         sub.prior[sub.gdna_idx] = 0.0;
     }
 
-    // Zero nRNA prior for single-exon transcripts
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        double span = all_transcript_spans[gt];
-        double exon_len = all_exonic_lengths[gt];
-        if (span <= exon_len) {
-            sub.prior[n_t + i] = 0.0;  // nRNA slot
+    // Zero nRNA prior for nRNAs where ALL transcripts are single-exon
+    for (int n = 0; n < n_nrna; ++n) {
+        bool all_single_exon = true;
+        for (int j = sub.nrna_to_t_off[n]; j < sub.nrna_to_t_off[n + 1]; ++j) {
+            int local_t = sub.nrna_to_t_idx[j];
+            int gt = t_arr[local_t];
+            if (all_transcript_spans[gt] > all_exonic_lengths[gt]) {
+                all_single_exon = false;
+                break;
+            }
+        }
+        if (all_single_exon) {
+            sub.prior[n_t + n] = 0.0;
         }
     }
 
-    // Zero nRNA prior when nrna_init is zero
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        if (all_nrna_init[gt] == 0.0) {
-            sub.prior[n_t + i] = 0.0;
+    // Zero nRNA prior when nrna_init is zero for that nRNA
+    // (all_nrna_init is indexed by global nrna_idx)
+    for (int n = 0; n < n_nrna; ++n) {
+        int32_t gnrna = unique_nrna_global[n];
+        if (all_nrna_init[gnrna] == 0.0) {
+            sub.prior[n_t + n] = 0.0;
         }
     }
 
@@ -1740,7 +1904,7 @@ static void extract_locus_sub_problem(
         sub.eligible[c] = (sub.prior[c] > 0.0) ? 1.0 : 0.0;
     }
 
-    // nrna_frac alpha/beta
+    // nrna_frac alpha/beta (per-transcript)
     sub.nrna_frac_alpha.resize(n_t);
     sub.nrna_frac_beta.resize(n_t);
     for (int i = 0; i < n_t; ++i) {
@@ -1753,7 +1917,9 @@ static void extract_locus_sub_problem(
     for (int i = 0; i < n_t; ++i) {
         int gt = t_arr[i];
         if (gt >= 0 && gt < local_map_size) local_map[gt] = -1;
-        int ngt = nrna_base + gt;
+    }
+    for (int n = 0; n < n_nrna; ++n) {
+        int ngt = nrna_base + unique_nrna_global[n];
         if (ngt >= 0 && ngt < local_map_size) local_map[ngt] = -1;
     }
 }
@@ -1768,7 +1934,7 @@ static void assign_posteriors(
     // Output accumulators (accumulated across loci)
     double* em_counts_2d,          // [N_T, n_cols], row-major
     double* em_high_conf_2d,       // [N_T, n_cols]
-    double* nrna_em_counts,        // [N_T]
+    double* nrna_em_counts,        // [N_NRNA] — indexed by global nrna_idx
     double* gdna_locus_counts_2d,  // [N_T, n_cols]
     double* posterior_sum,         // [N_T]
     double* n_assigned,            // [N_T]
@@ -1777,6 +1943,7 @@ static void assign_posteriors(
     double& nrna_total,
     double& gdna_total,
     int N_T_TOTAL,  // total transcripts for bounds checking
+    int N_NRNA_TOTAL,  // total nRNAs for bounds checking
     int n_cols)     // number of splice-strand columns (actual 2D stride)
 {
     int n_t = sub.n_t;
@@ -1849,10 +2016,12 @@ static void assign_posteriors(
                 posterior_sum[global_t] += p * p;
                 n_assigned[global_t] += p;
             } else if (comp < gdna_idx) {
-                // nRNA
-                int32_t local_t = comp - n_t;
-                int32_t global_t = local_to_global[local_t];
-                nrna_em_counts[global_t] += p;
+                // nRNA — local nRNA index → global nRNA index
+                int32_t local_nrna = comp - n_t;
+                int32_t global_nrna = sub.local_to_global_nrna[local_nrna];
+                if (global_nrna >= 0 && global_nrna < N_NRNA_TOTAL) {
+                    nrna_em_counts[global_nrna] += p;
+                }
                 nrna_total += p;
             } else {
                 // gDNA
@@ -1934,10 +2103,13 @@ batch_locus_em(
     i64_1d t_lengths_arr,
     f64_1d transcript_spans_arr,
     f64_1d exonic_lengths_arr,
+    // --- nRNA mapping ---
+    i32_1d t_to_nrna_arr,              // [N_T]: global transcript → global nRNA idx
+    int    num_nrna_total,             // total number of unique nRNAs
     // --- Mutable output accumulators ---
     f64_2d_mut em_counts_out,          // [N_T, n_cols]
     f64_2d_mut em_high_conf_out,       // [N_T, n_cols]
-    f64_1d_mut nrna_em_counts_out,     // [N_T]
+    f64_1d_mut nrna_em_counts_out,     // [num_nrna_total]
     f64_2d_mut gdna_locus_counts_out,  // [N_T, n_cols]
     f64_1d_mut posterior_sum_out,       // [N_T]
     f64_1d_mut n_assigned_out,         // [N_T]
@@ -1988,6 +2160,9 @@ batch_locus_em(
     const double*   sp_ptr = transcript_spans_arr.data();
     const double*   el_ptr = exonic_lengths_arr.data();
 
+    const int32_t*  t2n_ptr = t_to_nrna_arr.data();
+    int N_NRNA = num_nrna_total;
+
     // Mutable output pointers
     double* em_out    = em_counts_out.data();
     double* hc_out    = em_high_conf_out.data();
@@ -2005,7 +2180,10 @@ batch_locus_em(
     }
 
     // Allocate scratch buffer for global-to-local mapping
-    int local_map_size = nrna_base_index + N_T + 1;
+    // Size must accommodate nrna_base + max_nrna_idx
+    int local_map_size = nrna_base_index + N_NRNA + 1;
+    if (nrna_base_index + N_T + 1 > local_map_size)
+        local_map_size = nrna_base_index + N_T + 1;
 
     // Allocate per-locus result arrays
     std::vector<double> locus_mrna_vec(n_loci, 0.0);
@@ -2121,6 +2299,7 @@ batch_locus_em(
                 unambig_row_sums.data(), nri, nfa, nfb,
                 ts_ptr, te_ptr, tl_ptr, sp_ptr, el_ptr,
                 mean_frag,
+                t2n_ptr,
                 local_map.data(), local_map_size);
 
             int nc = sub.n_components;
@@ -2175,11 +2354,16 @@ batch_locus_em(
             if (linked) {
                 // Collapse warm start to theta_t space
                 int ns = sub_n_t + 1;
+                int sub_n_nrna = sub.n_nrna;
+                int sub_gdna_idx = sub.gdna_idx;
                 std::vector<double> theta_t_init(ns);
+                // Apportion each nRNA warm start to its transcripts equally
                 for (int i = 0; i < sub_n_t; ++i) {
-                    theta_t_init[i] = theta_init[i] + theta_init[sub_n_t + i];
+                    int32_t ln = sub.local_t_to_local_nrna[i];
+                    int fan = sub.nrna_to_t_off[ln + 1] - sub.nrna_to_t_off[ln];
+                    theta_t_init[i] = theta_init[i] + theta_init[sub_n_t + ln] / fan;
                 }
-                theta_t_init[sub_n_t] = theta_init[2 * sub_n_t];
+                theta_t_init[sub_n_t] = theta_init[sub_gdna_idx];
 
                 // nrna_frac_init = prior mean, clamped
                 std::vector<double> nrna_frac_init(sub_n_t);
@@ -2201,7 +2385,10 @@ batch_locus_em(
                     nrna_frac_init.data(),
                     sub.nrna_frac_alpha.data(),
                     sub.nrna_frac_beta.data(),
-                    sub_n_t, nc,
+                    sub_n_t, sub_n_nrna, nc,
+                    sub.local_t_to_local_nrna.data(),
+                    sub.nrna_to_t_off.data(),
+                    sub.nrna_to_t_idx.data(),
                     max_iterations, convergence_delta,
                     prune_threshold, estep_thr, pool);
             } else {
@@ -2222,7 +2409,7 @@ batch_locus_em(
                 em_out, hc_out, nrna_out, gdna_out,
                 psum_out, nass_out,
                 locus_mrna, locus_nrna, locus_gdna,
-                N_T, N_COLS);
+                N_T, N_NRNA, N_COLS);
 
             locus_mrna_data[li] = locus_mrna;
             locus_nrna_data[li] = locus_nrna;
@@ -2390,11 +2577,18 @@ static nb::tuple connected_components_native(
     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>  offsets_arr,
     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>  t_indices_arr,
     int32_t nrna_base,
-    int32_t n_transcripts)
+    int32_t n_transcripts,
+    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>  nrna_to_t_offsets_arr,
+    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>  nrna_to_t_indices_arr)
 {
     const int64_t* offsets = offsets_arr.data();
     const int32_t* t_idx   = t_indices_arr.data();
     const int64_t  n_units = static_cast<int64_t>(offsets_arr.shape(0)) - 1;
+
+    // nRNA → transcript CSR mapping
+    const int32_t* nrna_off = nrna_to_t_offsets_arr.data();
+    const int32_t* nrna_flat = nrna_to_t_indices_arr.data();
+    int32_t n_nrna = static_cast<int32_t>(nrna_to_t_offsets_arr.shape(0)) - 1;
 
     if (n_units <= 0 || n_transcripts <= 0) {
         // Return all -1 labels, 0 components
@@ -2418,26 +2612,41 @@ static nb::tuple connected_components_native(
         int64_t end   = offsets[u + 1];
         if (start >= end) continue;
 
-        // Find first valid transcript in this unit
-        int32_t first_t = -1;
+        // Collect all base transcript indices from this unit.
+        // mRNA candidates: t_idx directly.
+        // nRNA candidates: nrna_idx → fan out to ALL transcripts
+        //                  sharing that nRNA.
+        std::vector<int32_t> unit_ts;
+        unit_ts.reserve(end - start);
+
         for (int64_t j = start; j < end; ++j) {
             int32_t t = t_idx[j];
-            if (t >= nrna_base) t -= nrna_base;  // map nRNA → base transcript
-            if (t >= 0 && t < n_transcripts) {
-                first_t = t;
+            if (t >= nrna_base) {
+                // nRNA candidate: fan out to all transcripts
+                int32_t ni = t - nrna_base;
+                if (ni >= 0 && ni < n_nrna) {
+                    for (int32_t k = nrna_off[ni];
+                         k < nrna_off[ni + 1]; ++k) {
+                        int32_t tt = nrna_flat[k];
+                        if (tt >= 0 && tt < n_transcripts) {
+                            unit_ts.push_back(tt);
+                            active[tt] = true;
+                        }
+                    }
+                }
+            } else if (t >= 0 && t < n_transcripts) {
+                unit_ts.push_back(t);
                 active[t] = true;
-                break;
             }
         }
-        if (first_t < 0) continue;
 
-        // Union all other transcripts in this unit with the first
-        for (int64_t j = start + 1; j < end; ++j) {
-            int32_t t = t_idx[j];
-            if (t >= nrna_base) t -= nrna_base;
-            if (t >= 0 && t < n_transcripts && t != first_t) {
-                active[t] = true;
-                uf.unite(first_t, t);
+        // Union all transcripts in this unit
+        if (unit_ts.size() > 1) {
+            int32_t first = unit_ts[0];
+            for (size_t k = 1; k < unit_ts.size(); ++k) {
+                if (unit_ts[k] != first) {
+                    uf.unite(first, unit_ts[k]);
+                }
             }
         }
     }
@@ -2469,14 +2678,23 @@ static nb::tuple connected_components_native(
         if (labels[t] >= 0) comp_t_counts[labels[t]]++;
     }
 
-    // 2. Assign each unit to a component via its first transcript
+    // 2. Assign each unit to a component via its first base transcript
     std::vector<int32_t> unit_label(n_units, -1);
     for (int64_t u = 0; u < n_units; ++u) {
         int64_t start = offsets[u];
         int64_t end   = offsets[u + 1];
         for (int64_t j = start; j < end; ++j) {
             int32_t t = t_idx[j];
-            if (t >= nrna_base) t -= nrna_base;
+            if (t >= nrna_base) {
+                // nRNA: use first transcript of this nRNA
+                int32_t ni = t - nrna_base;
+                if (ni >= 0 && ni < n_nrna &&
+                    nrna_off[ni] < nrna_off[ni + 1]) {
+                    t = nrna_flat[nrna_off[ni]];
+                } else {
+                    continue;
+                }
+            }
             if (t >= 0 && t < n_transcripts && labels[t] >= 0) {
                 unit_label[u] = labels[t];
                 break;
@@ -2572,8 +2790,12 @@ NB_MODULE(_em_impl, m) {
           nb::arg("use_vbem"),
           nb::arg("prune_threshold"),
           nb::arg("n_transcripts"),
+          nb::arg("n_nrna"),
           nb::arg("nrna_frac_alpha"),
           nb::arg("nrna_frac_beta"),
+          nb::arg("t_to_nrna"),
+          nb::arg("nrna_to_t_offsets"),
+          nb::arg("nrna_to_t_indices"),
           "Run EM for a single locus sub-problem.\n\n"
           "Takes CSR per-locus data + config, returns (theta, alpha, em_totals, nrna_frac).\n"
           "When n_transcripts > 0, uses the linked mRNA-nRNA model.\n"
@@ -2607,6 +2829,8 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_lengths"),
           nb::arg("transcript_spans"),
           nb::arg("exonic_lengths"),
+          nb::arg("t_to_nrna"),
+          nb::arg("num_nrna_total"),
           nb::arg("em_counts_out"),
           nb::arg("em_high_conf_out"),
           nb::arg("nrna_em_counts_out"),
@@ -2635,8 +2859,12 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_indices"),
           nb::arg("nrna_base"),
           nb::arg("n_transcripts"),
+          nb::arg("nrna_to_t_offsets"),
+          nb::arg("nrna_to_t_indices"),
           "Find connected components of the fragment→transcript overlap graph.\n\n"
           "Uses union-find with path compression and union by rank.\n"
+          "nRNA candidates (index >= nrna_base) are fanned out to all\n"
+          "transcripts sharing that nRNA via the CSR mapping.\n"
           "Returns (n_comp, comp_t_offsets, comp_t_flat, comp_u_offsets,\n"
           "comp_u_flat) where the CSR pairs (offsets, flat) give sorted\n"
           "transcript indices and unit indices for each component.");

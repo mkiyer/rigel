@@ -85,8 +85,13 @@ jobs:
           CIBW_ENVIRONMENT: >
             CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
             PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          # Basic import test
-          CIBW_TEST_COMMAND: "python -c 'import rigel; print(rigel.__version__)'"
+          # Smoke test: verify all native extensions are present
+          CIBW_TEST_COMMAND: >-
+            python -c "from rigel._bam_impl import BamScanner;
+            from rigel._scoring_impl import compute_fragment_weight;
+            from rigel._em_impl import batch_locus_em;
+            from rigel._resolve_impl import FragmentResolver;
+            print('OK')"
 
       - uses: actions/upload-artifact@v4
         with:

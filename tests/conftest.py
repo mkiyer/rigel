@@ -291,6 +291,8 @@ class _MockBatchIndex:
 
     def __init__(self, num_transcripts):
         self.num_transcripts = num_transcripts
+        self.num_nrna = num_transcripts
+        self.t_to_nrna_arr = np.arange(num_transcripts, dtype=np.int32)
         self.t_df = pd.DataFrame({
             "t_id": [f"t{i}" for i in range(num_transcripts)],
             "ref": ["chr1"] * num_transcripts,
