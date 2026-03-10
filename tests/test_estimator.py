@@ -75,6 +75,7 @@ def _make_strand_model_fr():
         sm.observe(Strand.POS, Strand.POS)
     for _ in range(2):
         sm.observe(Strand.POS, Strand.NEG)
+    sm.finalize()
     return sm
 
 
@@ -203,6 +204,7 @@ class TestIsAntisense:
     def test_unstranded_returns_false(self):
         """Unstranded model (p=0.5) is treated as non-antisense."""
         sm = StrandModel()  # no observations → p = 0.5
+        sm.finalize()
         result = AbundanceEstimator.is_antisense(Strand.POS, int(Strand.POS), sm)
         assert result is False
 

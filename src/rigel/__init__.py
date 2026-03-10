@@ -1,3 +1,10 @@
+"""rigel — Bayesian RNA-seq transcript quantification.
+
+Single-pass BAM quantification with locus-level EM, strand-aware gDNA
+filtering, and empirical Bayes priors.  Python orchestration backed by
+C++ hot paths (htslib BAM I/O, fragment scoring, EM solver).
+"""
+
 import os as _os
 
 # Prevent numpy/OpenMP from spawning idle thread pools that compete with

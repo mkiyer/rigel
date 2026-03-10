@@ -150,12 +150,8 @@ class FragmentScorer:
         gdna_splice_penalties : dict or None
         """
         rna_sm = strand_models.exonic_spliced
-        p_sense = (
-            rna_sm._cached_p_sense
-            if rna_sm._finalized
-            else rna_sm.p_r1_sense
-        )
-        p_antisense = 1.0 - p_sense
+        p_sense = rna_sm._cached_p_sense
+        p_antisense = rna_sm._cached_p_antisense
 
         fl_model = frag_length_models.global_model
         fl_log_prob = fl_model._log_prob  # numpy array or None
@@ -217,7 +213,7 @@ class FragmentScorer:
         # Build native C++ scoring context for hot-path acceleration.
         # Cast arrays to exact dtypes expected by the C++ nanobind binding
         # to tolerate callers (including test mocks) that provide int64 etc.
-        from rigel._scoring_impl import NativeFragmentScorer
+        from .native import NativeFragmentScorer
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
             log_p_antisense=float(ctx.log_p_antisense),
@@ -248,101 +244,5 @@ class FragmentScorer:
         object.__setattr__(ctx, '_native_ctx', native_ctx)
 
         return ctx
-
-
-# ---------------------------------------------------------------------------
-# Standalone scoring (for unit tests / external callers)
-# ---------------------------------------------------------------------------
-
-
-def genomic_to_transcript_pos(
-    genomic_pos: int,
-    exon_intervals: np.ndarray,
-    strand: int,
-    transcript_length: int,
-) -> int:
-    """Map a genomic position to a transcript-relative 5'→3' coordinate.
-
-    Walks through sorted exon intervals ``(start, end)`` accumulating
-    spliced offset until the exon containing *genomic_pos* is found.
-    Positions falling in introns are mapped to the preceding exon
-    boundary.  Negative-strand transcripts are flipped so that
-    offset 0 is the 5' end.
-
-    Parameters
-    ----------
-    genomic_pos : int
-        Genomic coordinate to map.
-    exon_intervals : np.ndarray
-        ``(n_exons, 2)`` int32 array of ``[start, end)`` intervals,
-        sorted by genomic start position.
-    strand : int
-        Transcript strand (``Strand.POS`` or ``Strand.NEG``).
-    transcript_length : int
-        Total spliced exonic length of the transcript.
-
-    Returns
-    -------
-    int
-        Transcript-relative position in ``[0, transcript_length]``.
-    """
-    offset = 0
-    n = len(exon_intervals)
-    for i in range(n):
-        ex_start = int(exon_intervals[i, 0])
-        ex_end = int(exon_intervals[i, 1])
-        if genomic_pos < ex_start:
-            # Position is upstream of (or in an intron before) this exon
-            break
-        if genomic_pos < ex_end:
-            # Position is inside this exon
-            offset += genomic_pos - ex_start
-            break
-        offset += ex_end - ex_start
-    else:
-        # Position is past the last exon
-        offset = transcript_length
-
-    offset = max(0, min(offset, transcript_length))
-    if strand == STRAND_NEG:
-        offset = transcript_length - offset
-    return offset
-
-
-# ---------------------------------------------------------------------------
-# compute_fragment_weight: C++ kernel
-# ---------------------------------------------------------------------------
-
-from rigel._scoring_impl import compute_fragment_weight
-
-
-def score_gdna_standalone(
-    exon_strand: int,
-    splice_type: int,
-    frag_length: int,
-    frag_length_models,
-    gdna_splice_penalties: dict | None = None,
-) -> float:
-    """Compute gDNA log-likelihood for a fragment.
-
-    gDNA has no strand bias: strand probability is always 0.5.
-
-    Intended for unit tests and external callers that do not construct
-    a ``FragmentScorer``.
-    """
-    penalties = gdna_splice_penalties or GDNA_SPLICE_PENALTIES
-    splice_pen = penalties.get(splice_type, 1.0)
-
-    log_p_insert = (
-        frag_length_models.global_model.log_likelihood(frag_length)
-        if frag_length > 0
-        else 0.0
-    )
-
-    return (
-        LOG_HALF
-        + log_p_insert
-        + math.log(max(splice_pen, LOG_SAFE_FLOOR))
-    )
 
 

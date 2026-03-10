@@ -1,3 +1,10 @@
+"""rigel.gtf — Streaming GTF/GFF2 parser.
+
+Reads GENCODE-style GTF annotation files (plain or gzipped) into
+``GTFRecord`` dataclasses.  Used by ``rigel.index`` during reference
+index construction.  Python-only; no C++ dependency.
+"""
+
 import gzip
 import logging
 import re

@@ -41,15 +41,14 @@ from .estimator import (
     AbundanceEstimator,
     compute_global_gdna_density,
     compute_nrna_frac_priors,
-    compute_unspliced_to_spliced_ratios,
 )
 from .types import ChimeraType, Strand
 from .index import TranscriptIndex
 from .frag_length_model import FragmentLengthModels
 from .stats import PipelineStats
 from .strand_model import StrandModels
-from ._bam_impl import BamScanner as _NativeBamScanner
-from ._bam_impl import detect_sj_strand_tag as _native_detect_sj_tag
+from .native import BamScanner as _NativeBamScanner
+from .native import detect_sj_strand_tag as _native_detect_sj_tag
 
 # --- New modular imports ---
 from .scoring import FragmentScorer
@@ -289,7 +288,7 @@ def scan_and_buffer(
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 
     # Provide gene strand info for exonic fallback strand model training
-    resolve_ctx = index._resolver
+    resolve_ctx = index.resolver
     resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
@@ -324,47 +323,8 @@ def scan_and_buffer(
     acc_size = result["accumulator_size"]
     if acc_size > 0:
         raw = scanner.finalize_accumulator(index.t_to_strand_arr.tolist())
-        size = raw["size"]
 
-        chunk = _FinalizedChunk(
-            splice_type=np.frombuffer(
-                raw["splice_type"], dtype=np.uint8).copy(),
-            exon_strand=np.frombuffer(
-                raw["exon_strand"], dtype=np.uint8).copy(),
-            sj_strand=np.frombuffer(
-                raw["sj_strand"], dtype=np.uint8).copy(),
-            num_hits=np.frombuffer(
-                raw["num_hits"], dtype=np.uint16).copy(),
-            merge_criteria=np.frombuffer(
-                raw["merge_criteria"], dtype=np.uint8).copy(),
-            chimera_type=np.frombuffer(
-                raw["chimera_type"], dtype=np.uint8).copy(),
-            t_offsets=np.frombuffer(
-                raw["t_offsets"], dtype=np.int64).copy(),
-            t_indices=np.frombuffer(
-                raw["t_indices"], dtype=np.int32).copy(),
-            frag_lengths=np.frombuffer(
-                raw["frag_lengths"], dtype=np.int32).copy(),
-            exon_bp=np.frombuffer(
-                raw["exon_bp"], dtype=np.int32).copy(),
-            intron_bp=np.frombuffer(
-                raw["intron_bp"], dtype=np.int32).copy(),
-            unambig_intron_bp=np.frombuffer(
-                raw["unambig_intron_bp"], dtype=np.int32).copy(),
-            ambig_strand=np.frombuffer(
-                raw["ambig_strand"], dtype=np.uint8).copy(),
-            frag_id=np.frombuffer(
-                raw["frag_id"], dtype=np.int64).copy(),
-            read_length=np.frombuffer(
-                raw["read_length"], dtype=np.uint32).copy(),
-            genomic_footprint=np.frombuffer(
-                raw["genomic_footprint"], dtype=np.int32).copy(),
-            genomic_start=np.frombuffer(
-                raw["genomic_start"], dtype=np.int32).copy(),
-            nm=np.frombuffer(
-                raw["nm"], dtype=np.uint16).copy(),
-            size=size,
-        )
+        chunk = _FinalizedChunk.from_raw(raw)
 
         # # Sort by frag_id to restore deterministic order after
         # # multi-threaded scanning (frag_id is assigned sequentially
@@ -392,6 +352,232 @@ def scan_and_buffer(
 # ---------------------------------------------------------------------------
 # Quantify from buffer (locus-level EM, no global EM)
 # ---------------------------------------------------------------------------
+
+def _setup_geometry_and_estimator(
+    index: TranscriptIndex,
+    frag_length_models: FragmentLengthModels,
+    em_config: EMConfig,
+) -> tuple["TranscriptGeometry", AbundanceEstimator]:
+    """Compute transcript geometry and create the AbundanceEstimator."""
+    exonic_lengths = index.t_df["length"].values.astype(np.float64)
+    if frag_length_models.global_model.n_observations > 0:
+        mean_frag = frag_length_models.global_model.mean
+    else:
+        from .estimator import _DEFAULT_MEAN_FRAG
+        mean_frag = _DEFAULT_MEAN_FRAG
+
+    if frag_length_models.global_model.n_observations > 0:
+        effective_lengths = (
+            frag_length_models.global_model.compute_all_transcript_eff_lens(
+                exonic_lengths.astype(np.int64),
+            )
+        )
+    else:
+        effective_lengths = np.maximum(
+            exonic_lengths - mean_frag + 1.0, 1.0,
+        )
+
+    transcript_spans = (
+        index.t_df["end"].values - index.t_df["start"].values
+    ).astype(np.float64)
+
+    geometry = TranscriptGeometry(
+        effective_lengths=effective_lengths,
+        exonic_lengths=exonic_lengths,
+        t_to_g=index.t_to_g_arr,
+        mean_frag=mean_frag,
+        transcript_spans=transcript_spans,
+    )
+
+    estimator = AbundanceEstimator(
+        index.num_transcripts,
+        num_nrna=index.num_nrna,
+        t_to_nrna=index.t_to_nrna_arr,
+        em_config=em_config,
+        geometry=geometry,
+    )
+    return geometry, estimator
+
+
+def _score_fragments(
+    buffer: FragmentBuffer,
+    index: TranscriptIndex,
+    strand_models: StrandModels,
+    frag_length_models: FragmentLengthModels,
+    stats: PipelineStats,
+    estimator: AbundanceEstimator,
+    scoring: "FragmentScoringConfig",
+    log_every: int,
+    annotations,
+) -> "ScoredFragments":
+    """Build FragmentScorer, scan buffer, and return ScoredFragments."""
+    ctx = FragmentScorer.from_models(
+        strand_models, frag_length_models, index, estimator,
+        overhang_log_penalty=scoring.overhang_log_penalty,
+        mismatch_log_penalty=scoring.mismatch_log_penalty,
+        gdna_splice_penalties=scoring.gdna_splice_penalties,
+    )
+    builder = FragmentRouter(
+        ctx, estimator, stats, index, strand_models,
+        annotations=annotations,
+    )
+    em_data = builder.scan(buffer, log_every)
+
+    # Free scanner accumulators + buffer: scan is done
+    del builder, ctx
+    buffer.release()
+    gc.collect()
+    return em_data
+
+
+def _compute_priors(
+    estimator: AbundanceEstimator,
+    em_data: "ScoredFragments",
+    loci: list,
+    index: TranscriptIndex,
+    strand_models: StrandModels,
+    stats: PipelineStats,
+    geometry: "TranscriptGeometry",
+    em_config: EMConfig,
+) -> list[float]:
+    """Compute nRNA init, EB gDNA priors, and nRNA-frac Beta priors.
+
+    Returns the per-locus gdna_inits array.
+    """
+    nrna_spans = (
+        index.nrna_df["end"].values - index.nrna_df["start"].values
+    ).astype(np.float64)
+    nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
+    np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
+    nrna_init = compute_nrna_init(
+        estimator.transcript_intronic_sense,
+        estimator.transcript_intronic_antisense,
+        nrna_spans,
+        nrna_max_exonic,
+        strand_models,
+    )
+    estimator.nrna_init = nrna_init
+
+    strand_spec = strand_models.strand_specificity
+    w_strand = (2.0 * strand_spec - 1.0) ** 2
+    logger.info(
+        f"[INFO] Strand specificity: {strand_spec:.3f} "
+        f"(strand weight={w_strand:.3f}, density weight={1.0 - w_strand:.3f})"
+    )
+
+    # Assign locus_id to every transcript (needed by nrna_frac prior cascade)
+    for locus in loci:
+        for t_idx in locus.transcript_indices:
+            estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
+
+    # EB gDNA priors (must precede nrna_frac priors)
+    intergenic_density = _compute_intergenic_density(stats, index)
+    gdna_inits = compute_eb_gdna_priors(
+        loci, em_data, estimator, index, strand_models,
+        intergenic_density=intergenic_density,
+        kappa_ref=em_config.gdna_kappa_ref,
+        kappa_locus=em_config.gdna_kappa_locus,
+        mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
+        mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
+        kappa_min=em_config.nrna_frac_kappa_min,
+        kappa_max=em_config.nrna_frac_kappa_max,
+        kappa_fallback=em_config.nrna_frac_kappa_fallback,
+        kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
+    )
+
+    # Global gDNA density for the density subtraction component.
+    gdna_density = compute_global_gdna_density(
+        estimator, strand_models.strand_specificity,
+    )
+
+    # Compute nrna_frac (nascent fraction) Beta priors via hybrid
+    # density + strand model with 3-tier EB shrinkage.
+    compute_nrna_frac_priors(
+        estimator,
+        nrna_strands=index.nrna_df["strand"].values,
+        nrna_spans=nrna_spans,
+        strand_specificity=strand_models.strand_specificity,
+        gdna_density=gdna_density,
+        kappa_global=em_config.nrna_frac_kappa_global,
+        kappa_locus=em_config.nrna_frac_kappa_locus,
+        kappa_nrna=em_config.nrna_frac_kappa_nrna,
+        mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
+        mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
+        kappa_min=em_config.nrna_frac_kappa_min,
+        kappa_max=em_config.nrna_frac_kappa_max,
+        kappa_fallback=em_config.nrna_frac_kappa_fallback,
+        kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
+    )
+
+    return gdna_inits
+
+
+def _run_locus_em(
+    estimator: AbundanceEstimator,
+    em_data: "ScoredFragments",
+    loci: list,
+    index: TranscriptIndex,
+    gdna_inits: list[float],
+    em_config: EMConfig,
+) -> None:
+    """Run batch locus-level EM and record per-locus results."""
+    t_refs = index.t_df["ref"].values
+    t_to_g = index.t_to_g_arr
+
+    def _build_locus_meta(locus, *, mrna, nrna, gdna, gdna_init):
+        """Build one locus_results record."""
+        ref_counts: dict[str, int] = {}
+        for t_idx in locus.transcript_indices:
+            ref = str(t_refs[int(t_idx)])
+            ref_counts[ref] = ref_counts.get(ref, 0) + 1
+        primary_ref = (
+            max(ref_counts, key=ref_counts.get) if ref_counts else ""
+        )
+        gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
+        return {
+            "locus_id": locus.locus_id,
+            "ref": primary_ref,
+            "n_transcripts": len(locus.transcript_indices),
+            "n_genes": len(gene_set),
+            "n_em_fragments": len(locus.unit_indices),
+            "mrna": float(mrna),
+            "nrna": float(nrna),
+            "gdna": float(gdna),
+            "gdna_init": float(gdna_init),
+        }
+
+    (
+        total_gdna_em,
+        locus_mrna_arr,
+        locus_nrna_arr,
+        locus_gdna_arr,
+    ) = estimator.run_batch_locus_em(
+        loci,
+        em_data,
+        index,
+        np.asarray(gdna_inits, dtype=np.float64),
+        em_iterations=em_config.iterations,
+        em_convergence_delta=em_config.convergence_delta,
+        confidence_threshold=em_config.confidence_threshold,
+    )
+
+    for i, locus in enumerate(loci):
+        estimator.locus_results.append(_build_locus_meta(
+            locus,
+            mrna=locus_mrna_arr[i],
+            nrna=locus_nrna_arr[i],
+            gdna=locus_gdna_arr[i],
+            gdna_init=gdna_inits[i],
+        ))
+
+    estimator._gdna_em_total = total_gdna_em
+
+    logger.info(
+        f"[DONE] Per-locus EM: {len(loci)} loci, "
+        f"{em_data.n_units:,} ambiguous fragments, "
+        f"gDNA EM={total_gdna_em:.0f}"
+    )
+
 
 def quant_from_buffer(
     buffer: FragmentBuffer,
@@ -432,43 +618,9 @@ def quant_from_buffer(
     if scoring is None:
         scoring = FragmentScoringConfig()
 
-    # --- Compute geometry ---
-    exonic_lengths = index.t_df["length"].values.astype(np.float64)
-    if frag_length_models.global_model.n_observations > 0:
-        mean_frag = frag_length_models.global_model.mean
-    else:
-        from .estimator import _DEFAULT_MEAN_FRAG
-        mean_frag = _DEFAULT_MEAN_FRAG
-
-    if frag_length_models.global_model.n_observations > 0:
-        effective_lengths = (
-            frag_length_models.global_model.compute_all_transcript_eff_lens(
-                exonic_lengths.astype(np.int64),
-            )
-        )
-    else:
-        effective_lengths = np.maximum(
-            exonic_lengths - mean_frag + 1.0, 1.0,
-        )
-
-    transcript_spans = (
-        index.t_df["end"].values - index.t_df["start"].values
-    ).astype(np.float64)
-
-    geometry = TranscriptGeometry(
-        effective_lengths=effective_lengths,
-        exonic_lengths=exonic_lengths,
-        t_to_g=index.t_to_g_arr,
-        mean_frag=mean_frag,
-        transcript_spans=transcript_spans,
-    )
-
-    estimator = AbundanceEstimator(
-        index.num_transcripts,
-        num_nrna=index.num_nrna,
-        t_to_nrna=index.t_to_nrna_arr,
-        em_config=em_config,
-        geometry=geometry,
+    # Phase 1: Geometry + estimator
+    geometry, estimator = _setup_geometry_and_estimator(
+        index, frag_length_models, em_config,
     )
 
     logger.info(
@@ -476,43 +628,10 @@ def quant_from_buffer(
         f"(locus-level EM: mRNA/nRNA/gDNA)"
     )
 
-    # --- Build FragmentScorer and scan buffer ---
-    ctx = FragmentScorer.from_models(
-        strand_models, frag_length_models, index, estimator,
-        overhang_log_penalty=scoring.overhang_log_penalty,
-        mismatch_log_penalty=scoring.mismatch_log_penalty,
-        gdna_splice_penalties=scoring.gdna_splice_penalties,
-    )
-    builder = FragmentRouter(
-        ctx, estimator, stats, index, strand_models,
-        annotations=annotations,
-    )
-    em_data = builder.scan(buffer, log_every)
-
-    # -- Free scanner accumulators + buffer: scan is done --
-    del builder, ctx          # release ~1.3 GB of array.array accumulators
-    buffer.release()
-    gc.collect()
-
-    # --- Per-nRNA init from intronic sense excess ---
-    # Compute per-nRNA spans and max exonic lengths for single-exon gating
-    nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.float64)
-    nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
-    np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
-    nrna_init = compute_nrna_init(
-        estimator.transcript_intronic_sense,
-        estimator.transcript_intronic_antisense,
-        nrna_spans,
-        nrna_max_exonic,
-        strand_models,
-    )
-    estimator.nrna_init = nrna_init
-
-    strand_spec = strand_models.strand_specificity
-    w_strand = (2.0 * strand_spec - 1.0) ** 2
-    logger.info(
-        f"[INFO] Strand specificity: {strand_spec:.3f} "
-        f"(strand weight={w_strand:.3f}, density weight={1.0 - w_strand:.3f})"
+    # Phase 2: Score fragments
+    em_data = _score_fragments(
+        buffer, index, strand_models, frag_length_models,
+        stats, estimator, scoring, log_every, annotations,
     )
 
     logger.info(
@@ -521,7 +640,7 @@ def quant_from_buffer(
         f"({em_data.n_candidates:,} RNA candidates)"
     )
 
-    # --- Locus-based EM ---
+    # Phase 3: Locus construction, priors, and EM
     if em_data.n_units > 0:
         loci = build_loci(em_data, index)
 
@@ -536,135 +655,21 @@ def quant_from_buffer(
             f"(largest: {max_locus_t} transcripts, {max_locus_u} units)"
         )
 
-        # Assign locus_id to every transcript (needed by nrna_frac prior cascade)
-        for locus in loci:
-            for t_idx in locus.transcript_indices:
-                estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
-
-        # Geometric splicing expectation: compute R_t for burden subtraction
-        if frag_length_models.global_model.n_observations > 0:
-            unspliced_to_spliced_ratios = compute_unspliced_to_spliced_ratios(
-                index, frag_length_models.global_model,
-            )
-            n_finite = int(np.isfinite(unspliced_to_spliced_ratios).sum())
-            logger.info(
-                f"[INFO] Geometric splicing: {n_finite}/{index.num_transcripts} "
-                f"multi-exon transcripts with finite R_t"
-            )
-        else:
-            unspliced_to_spliced_ratios = None
-
-        # EB gDNA priors (must precede nrna_frac priors — the hybrid estimator
-        # uses gDNA density for density subtraction).
-        intergenic_density = _compute_intergenic_density(stats, index)
-        gdna_inits = compute_eb_gdna_priors(
-            loci, em_data, estimator, index, strand_models,
-            intergenic_density=intergenic_density,
-            unspliced_to_spliced_ratios=unspliced_to_spliced_ratios,
-            kappa_ref=em_config.gdna_kappa_ref,
-            kappa_locus=em_config.gdna_kappa_locus,
-            mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
-            mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
-            kappa_min=em_config.nrna_frac_kappa_min,
-            kappa_max=em_config.nrna_frac_kappa_max,
-            kappa_fallback=em_config.nrna_frac_kappa_fallback,
-            kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
+        gdna_inits = _compute_priors(
+            estimator, em_data, loci, index, strand_models,
+            stats, geometry, em_config,
         )
 
-        # Global gDNA density for the density subtraction component.
-        gdna_density = compute_global_gdna_density(
-            estimator, strand_models.strand_specificity,
-        )
-
-        # Compute nrna_frac (nascent fraction) Beta priors via hybrid
-        # density + strand model with 3-tier EB shrinkage.
-        # (Global → Locus-Strand → nRNA)
-        compute_nrna_frac_priors(
-            estimator,
-            nrna_strands=index.nrna_df["strand"].values,
-            nrna_spans=nrna_spans,
-            strand_specificity=strand_models.strand_specificity,
-            gdna_density=gdna_density,
-            kappa_global=em_config.nrna_frac_kappa_global,
-            kappa_locus=em_config.nrna_frac_kappa_locus,
-            kappa_nrna=em_config.nrna_frac_kappa_nrna,
-            mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
-            mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
-            kappa_min=em_config.nrna_frac_kappa_min,
-            kappa_max=em_config.nrna_frac_kappa_max,
-            kappa_fallback=em_config.nrna_frac_kappa_fallback,
-            kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
-        )
-
-        # Per-locus EM + posterior assignment
-        total_gdna_em = 0.0
-        t_refs = index.t_df["ref"].values
-        t_to_g = index.t_to_g_arr
-
-        def _build_locus_meta(locus, *, mrna, nrna, gdna, gdna_init):
-            """Build one locus_results record (shared by C++ and Python paths)."""
-            ref_counts: dict[str, int] = {}
-            for t_idx in locus.transcript_indices:
-                ref = str(t_refs[int(t_idx)])
-                ref_counts[ref] = ref_counts.get(ref, 0) + 1
-            primary_ref = (
-                max(ref_counts, key=ref_counts.get) if ref_counts else ""
-            )
-            gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
-            return {
-                "locus_id": locus.locus_id,
-                "ref": primary_ref,
-                "n_transcripts": len(locus.transcript_indices),
-                "n_genes": len(gene_set),
-                "n_em_fragments": len(locus.unit_indices),
-                "mrna": float(mrna),
-                "nrna": float(nrna),
-                "gdna": float(gdna),
-                "gdna_init": float(gdna_init),
-            }
-
-        # ============================================================
-        # Batch C++ path: single call for all loci
-        # ============================================================
-        (
-            total_gdna_em,
-            locus_mrna_arr,
-            locus_nrna_arr,
-            locus_gdna_arr,
-        ) = estimator.run_batch_locus_em(
-            loci,
-            em_data,
-            index,
-            np.asarray(gdna_inits, dtype=np.float64),
-            em_iterations=em_config.iterations,
-            em_convergence_delta=em_config.convergence_delta,
-            confidence_threshold=em_config.confidence_threshold,
-        )
-
-        for i, locus in enumerate(loci):
-            estimator.locus_results.append(_build_locus_meta(
-                locus,
-                mrna=locus_mrna_arr[i],
-                nrna=locus_nrna_arr[i],
-                gdna=locus_gdna_arr[i],
-                gdna_init=gdna_inits[i],
-            ))
-
-        estimator._gdna_em_total = total_gdna_em
-
-        logger.info(
-            f"[DONE] Per-locus EM: {len(loci)} loci, "
-            f"{em_data.n_units:,} ambiguous fragments, "
-            f"gDNA EM={total_gdna_em:.0f}"
+        _run_locus_em(
+            estimator, em_data, loci, index, gdna_inits, em_config,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")
 
-    # -- Free ScoredFragments CSR arrays (no longer needed) --
+    # Phase 4: Cleanup
     del em_data
     gc.collect()
 
-    # --- Update stats ---
     _gdna_em = estimator.gdna_em_count
     stats.n_gdna_em = 0 if (math.isnan(_gdna_em) or math.isinf(_gdna_em)) else int(_gdna_em)
 

@@ -94,6 +94,7 @@ class TestStrandModelLikelihood:
         sm = StrandModel()
         for _ in range(50):
             sm.observe(Strand.POS, Strand.POS)
+        sm.finalize()
         p = sm.strand_likelihood(Strand.POS, Strand.POS)
         assert p == pytest.approx(sm.p_r1_sense)
 
@@ -101,18 +102,21 @@ class TestStrandModelLikelihood:
         sm = StrandModel()
         for _ in range(50):
             sm.observe(Strand.POS, Strand.POS)
+        sm.finalize()
         p = sm.strand_likelihood(Strand.POS, Strand.NEG)
         assert p == pytest.approx(sm.p_r1_antisense)
 
     def test_ambiguous_exon_returns_half(self):
         sm = StrandModel()
         sm.observe(Strand.POS, Strand.POS)
+        sm.finalize()
         p = sm.strand_likelihood(Strand.AMBIGUOUS, Strand.POS)
         assert p == 0.5
 
     def test_none_gene_strand_returns_half(self):
         sm = StrandModel()
         sm.observe(Strand.POS, Strand.POS)
+        sm.finalize()
         p = sm.strand_likelihood(Strand.POS, Strand.NONE)
         assert p == 0.5
 
@@ -214,10 +218,6 @@ class TestStrandModelsContainer:
         with caplog.at_level("WARNING"):
             models.finalize()
         assert "Only 5 spliced strand observations" in caplog.text
-
-    def test_model_property(self):
-        models = StrandModels()
-        assert models.model is models.exonic_spliced
 
     def test_diagnostic_models_finalized(self):
         models = StrandModels()

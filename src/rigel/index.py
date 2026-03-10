@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Literal
 
-from rigel._cgranges_impl import cgranges as _cgranges_cls
+from .native import cgranges as _cgranges_cls
 import numpy as np
 import pandas as pd
 import pysam
@@ -841,7 +841,7 @@ class TranscriptIndex:
                      f"{len(sj_df)} total")
 
         # -- C++ FragmentResolver (native fragment resolution) ------------------
-        from rigel._resolve_impl import FragmentResolver
+        from .native import FragmentResolver
         ctx = FragmentResolver()
 
         # 1. Overlap index from collapsed data
@@ -902,7 +902,7 @@ class TranscriptIndex:
             len(self.t_to_g_arr),
         )
 
-        self._resolver = ctx
+        self.resolver = ctx
         logger.debug("Built native FragmentResolver for C++ resolution")
 
         return self

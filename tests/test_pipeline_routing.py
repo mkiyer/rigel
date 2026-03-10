@@ -97,6 +97,24 @@ class _Chunk:
     def __getitem__(self, idx):
         return self._bfs[idx]
 
+    def to_scoring_arrays(self):
+        return (
+            np.ascontiguousarray(self.t_offsets, dtype=np.int64),
+            np.ascontiguousarray(self.t_indices, dtype=np.int32),
+            np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
+            np.ascontiguousarray(self.exon_bp, dtype=np.int32),
+            np.ascontiguousarray(self.intron_bp, dtype=np.int32),
+            np.ascontiguousarray(self.unambig_intron_bp, dtype=np.int32),
+            np.ascontiguousarray(self.splice_type, dtype=np.uint8),
+            np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
+            np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
+            np.ascontiguousarray(self.frag_id, dtype=np.int64),
+            np.ascontiguousarray(self.read_length, dtype=np.uint32),
+            np.ascontiguousarray(self.genomic_footprint, dtype=np.int32),
+            np.ascontiguousarray(self.genomic_start, dtype=np.int32),
+            np.ascontiguousarray(self.nm, dtype=np.uint16),
+        )
+
 
 class _Buffer:
     def __init__(self, chunks):

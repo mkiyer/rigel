@@ -174,5 +174,5 @@ def resolve_fragment(frag, index):
     """
     if not frag.exons:
         return None
-    return index._resolver.resolve_fragment(frag)
+    return index.resolver.resolve_fragment(frag)
 

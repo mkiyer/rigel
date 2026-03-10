@@ -235,69 +235,27 @@ class StrandModel:
         self._cached_p_antisense = 1.0 - self._cached_p_sense
         self._finalized = True
 
-    def strand_likelihood_int(self, exon_strand: int, gene_strand: int) -> float:
-        """Fast strand likelihood using raw int strand values.
+    def strand_likelihood(self, exon_strand: int, gene_strand: int) -> float:
+        """Strand likelihood: P(exon_strand | fragment from gene_strand).
 
-        Avoids Strand enum construction.  ``exon_strand`` and
-        ``gene_strand`` must be 1 (POS) or 2 (NEG) for an
-        informative result; any other value returns 0.5.
+        Used during Bayesian quantification to weight candidate genes.
+        Accepts int strand values (``Strand`` is an IntEnum so can be
+        passed directly).
 
-        Uses cached values if ``finalize()`` has been called,
-        otherwise falls back to the property chain.
+        * If ``exon_strand == gene_strand`` → ``p_r1_sense``
+        * If ``exon_strand != gene_strand`` → ``1 - p_r1_sense``
+        * If either is NONE/AMBIGUOUS (not 1 or 2) → 0.5 (uninformative)
+
+        Must be called after :meth:`finalize`.
         """
         # 1=POS, 2=NEG are the only informative values
         if exon_strand != 1 and exon_strand != 2:
             return 0.5
         if gene_strand != 1 and gene_strand != 2:
             return 0.5
-        if self._finalized:
-            if exon_strand == gene_strand:
-                return self._cached_p_sense
-            return self._cached_p_antisense
-        # Fallback: compute from property chain
         if exon_strand == gene_strand:
-            return self.p_r1_sense
-        return self.p_r1_antisense
-
-    # ------------------------------------------------------------------
-    # Strand likelihood for Bayesian quantification
-    # ------------------------------------------------------------------
-
-    def strand_likelihood(
-        self, exon_strand: Strand, gene_strand: Strand,
-    ) -> float:
-        """Strand likelihood: P(exon_strand | fragment from gene_strand).
-
-        Used during Bayesian quantification to weight candidate genes.
-
-        * If ``exon_strand == gene_strand`` → ``p_r1_sense``
-        * If ``exon_strand != gene_strand`` → ``1 - p_r1_sense``
-        * If either is NONE or AMBIGUOUS → 0.5 (uninformative)
-
-        Parameters
-        ----------
-        exon_strand : Strand
-            Combined alignment strand of the fragment.
-        gene_strand : Strand
-            Annotated strand of the candidate gene.
-
-        Returns
-        -------
-        float
-            Probability in [0, 1].
-        """
-        if (
-            exon_strand not in (Strand.POS, Strand.NEG)
-            or gene_strand not in (Strand.POS, Strand.NEG)
-        ):
-            return 0.5
-        if self._finalized:
-            if exon_strand == gene_strand:
-                return self._cached_p_sense
-            return self._cached_p_antisense
-        if exon_strand == gene_strand:
-            return self.p_r1_sense
-        return self.p_r1_antisense
+            return self._cached_p_sense
+        return self._cached_p_antisense
 
     # ------------------------------------------------------------------
     # Serialization
@@ -465,25 +423,8 @@ class StrandModels:
         self.intergenic.finalize()
 
     # ------------------------------------------------------------------
-    # Strand model access
-    # ------------------------------------------------------------------
-
-    @property
-    def model(self) -> StrandModel:
-        """The single RNA strand model (exonic_spliced)."""
-        return self.exonic_spliced
-
-    # ------------------------------------------------------------------
     # Delegation to the RNA strand model
     # ------------------------------------------------------------------
-
-    def strand_likelihood(
-        self, exon_strand: Strand, gene_strand: Strand,
-    ) -> float:
-        """Strand likelihood from the RNA strand model."""
-        return self.exonic_spliced.strand_likelihood(
-            exon_strand, gene_strand,
-        )
 
     @property
     def p_r1_sense(self) -> float:

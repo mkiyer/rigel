@@ -277,7 +277,7 @@ def write_annotated_bam(
     dict
         Summary statistics of the annotation pass.
     """
-    from ._bam_impl import BamAnnotationWriter
+    from .native import BamAnnotationWriter
 
     # Convert sj_strand_tag to spec string
     if isinstance(sj_strand_tag, (list, tuple)):
@@ -287,7 +287,7 @@ def write_annotated_bam(
 
     # Build writer using the same FragmentResolver as pass 1
     writer = BamAnnotationWriter(
-        index._resolver,
+        index.resolver,
         sj_spec,
         skip_duplicates,
         include_multimap,

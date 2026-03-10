@@ -158,7 +158,49 @@ same nRNA span.
 
 Rigel runs in two logical stages.
 
-### Stage 1: BAM scan and model training
+### Architecture
+
+```
+ FASTA + GTF ──▶ Index Build (index.py) ──▶ Feather index files
+                                                    │
+ BAM file ──────────────────────────────────────────┤
+                                                    ▼
+                              ┌──────────────────────────────────┐
+                              │  Stage 1: BAM Scan & Training    │
+                              │  C++: BamScanner → Resolver      │
+                              │  Py:  buffer.py, strand_model.py │
+                              └──────────────┬───────────────────┘
+                                             │ FragmentBuffer + models
+                                             ▼
+                              ┌──────────────────────────────────┐
+                              │  Stage 2: Score & Route          │
+                              │  C++: fused_score_buffer         │
+                              │  Py:  scan.py → ScoredFragments  │
+                              └──────────────┬───────────────────┘
+                                             │ CSR arrays
+                                             ▼
+                              ┌──────────────────────────────────┐
+                              │  Stage 3: Empirical Bayes Priors │
+                              │  Py:  priors.py, locus.py        │
+                              └──────────────┬───────────────────┘
+                                             │ gDNA inits + nRNA priors
+                                             ▼
+                              ┌──────────────────────────────────┐
+                              │  Stage 4: Locus-Level EM         │
+                              │  C++: batch_locus_em (SQUAREM)   │
+                              │  Py:  estimator.py dispatch      │
+                              └──────────────┬───────────────────┘
+                                             │ posterior counts
+                                             ▼
+                              ┌──────────────────────────────────┐
+                              │  Stage 5: Output                 │
+                              │  Py:  cli.py → Feather/TSV/JSON  │
+                              └──────────────────────────────────┘
+```
+
+See [docs/CODE_PATH.md](docs/CODE_PATH.md) for the full algorithm code path.
+
+### BAM scan and model training
 
 A native scanner reads the BAM once, resolves fragments against the indexed
 annotation, classifies splice structure, trains strand and fragment-length
@@ -169,7 +211,7 @@ unambiguous gene assignment. Diagnostic exonic and intergenic strand models are
 also retained for reporting, but gDNA itself is always scored with strand
 probability `0.5`.
 
-### Stage 2: Locus-level EM
+### Locus-level EM
 
 Ambiguous fragments are routed into CSR form and grouped into connected
 components of overlapping transcripts. For a locus with `T` transcripts and `N`

@@ -26,6 +26,7 @@ Architecture
 import logging
 import shutil
 import tempfile
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["FragmentBuffer", "BufferedFragment"]
 
-from ._resolve_impl import FragmentAccumulator, ResolvedFragment
+from .native import FragmentAccumulator, ResolvedFragment
 
 # Fragment classification constants used by fragment_classes property
 FRAG_UNAMBIG: int = 0          # same-strand, 1 transcript, NH=1
@@ -117,6 +118,11 @@ class _FinalizedChunk:
 
     Per-fragment strand mixing (``ambig_strand``) is cached as a uint8
     array, derived from transcript strand array at finalization time.
+
+    ``frag_id`` and ``t_offsets`` are stored as **int32**, limiting the
+    maximum number of fragments per chunk to ~2.1 billion.  This is
+    intentional: BAM files rarely exceed this, and int32 halves memory
+    versus int64.
     """
 
     splice_type: np.ndarray       # uint8[N]
@@ -138,6 +144,36 @@ class _FinalizedChunk:
     genomic_start: np.ndarray   # int32[N]
     nm: np.ndarray              # uint16[N]
     size: int
+
+    @classmethod
+    def from_raw(cls, raw: dict) -> "_FinalizedChunk":
+        """Build a chunk from the raw dict returned by C++ FragmentAccumulator.finalize().
+
+        This is the **single** construction path for chunks coming from C++.
+        The C++ accumulator emits int64 for ``t_offsets`` and ``frag_id``;
+        this method narrows them to int32 for memory efficiency.
+        """
+        return cls(
+            splice_type=np.frombuffer(raw["splice_type"], dtype=np.uint8).copy(),
+            exon_strand=np.frombuffer(raw["exon_strand"], dtype=np.uint8).copy(),
+            sj_strand=np.frombuffer(raw["sj_strand"], dtype=np.uint8).copy(),
+            num_hits=np.frombuffer(raw["num_hits"], dtype=np.uint16).copy(),
+            merge_criteria=np.frombuffer(raw["merge_criteria"], dtype=np.uint8).copy(),
+            chimera_type=np.frombuffer(raw["chimera_type"], dtype=np.uint8).copy(),
+            t_offsets=np.frombuffer(raw["t_offsets"], dtype=np.int64).astype(np.int32),
+            t_indices=np.frombuffer(raw["t_indices"], dtype=np.int32).copy(),
+            frag_lengths=np.frombuffer(raw["frag_lengths"], dtype=np.int32).copy(),
+            exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
+            intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
+            unambig_intron_bp=np.frombuffer(raw["unambig_intron_bp"], dtype=np.int32).copy(),
+            ambig_strand=np.frombuffer(raw["ambig_strand"], dtype=np.uint8).copy(),
+            frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).astype(np.int32),
+            read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
+            genomic_footprint=np.frombuffer(raw["genomic_footprint"], dtype=np.int32).copy(),
+            genomic_start=np.frombuffer(raw["genomic_start"], dtype=np.int32).copy(),
+            nm=np.frombuffer(raw["nm"], dtype=np.uint16).copy(),
+            size=raw["size"],
+        )
 
     @property
     def memory_bytes(self) -> int:
@@ -182,6 +218,30 @@ class _FinalizedChunk:
         # Chimeric → highest priority (overrides all others)
         classes[self.chimera_type > 0] = FRAG_CHIMERIC
         return classes
+
+    def to_scoring_arrays(self) -> tuple:
+        """Return the contiguous array tuple expected by ``fused_score_buffer``.
+
+        Upcasts ``t_offsets`` and ``frag_id`` from int32 to int64 as
+        required by the C++ scoring kernel, and computes the derived
+        ``fragment_classes`` column.  All returned arrays are C-contiguous.
+        """
+        return (
+            np.ascontiguousarray(self.t_offsets, dtype=np.int64),
+            np.ascontiguousarray(self.t_indices, dtype=np.int32),
+            np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
+            np.ascontiguousarray(self.exon_bp, dtype=np.int32),
+            np.ascontiguousarray(self.intron_bp, dtype=np.int32),
+            np.ascontiguousarray(self.unambig_intron_bp, dtype=np.int32),
+            np.ascontiguousarray(self.splice_type, dtype=np.uint8),
+            np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
+            np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
+            np.ascontiguousarray(self.frag_id, dtype=np.int64),
+            np.ascontiguousarray(self.read_length, dtype=np.uint32),
+            np.ascontiguousarray(self.genomic_footprint, dtype=np.int32),
+            np.ascontiguousarray(self.genomic_start, dtype=np.int32),
+            np.ascontiguousarray(self.nm, dtype=np.uint16),
+        )
 
     def __len__(self) -> int:
         return self.size
@@ -453,6 +513,11 @@ class FragmentBuffer:
         self._memory_bytes = 0
         self._n_spilled = 0
 
+        # Safety net: ensure spill directory is cleaned up even if
+        # cleanup() is never called.  weakref.finalize is reliable
+        # unlike __del__ (guaranteed ordering, runs during GC).
+        self._ensure_cleanup = weakref.finalize(self, FragmentBuffer._weak_cleanup, self)
+
     # -- Properties -----------------------------------------------------------
 
     @property
@@ -509,29 +574,7 @@ class FragmentBuffer:
 
         t_strand_list = self._t_strand_arr.tolist()
         raw = self._native_acc.finalize(t_strand_list)
-        size = raw["size"]
-
-        chunk = _FinalizedChunk(
-            splice_type=np.frombuffer(raw["splice_type"], dtype=np.uint8).copy(),
-            exon_strand=np.frombuffer(raw["exon_strand"], dtype=np.uint8).copy(),
-            sj_strand=np.frombuffer(raw["sj_strand"], dtype=np.uint8).copy(),
-            num_hits=np.frombuffer(raw["num_hits"], dtype=np.uint16).copy(),
-            merge_criteria=np.frombuffer(raw["merge_criteria"], dtype=np.uint8).copy(),
-            chimera_type=np.frombuffer(raw["chimera_type"], dtype=np.uint8).copy(),
-            t_offsets=np.frombuffer(raw["t_offsets"], dtype=np.int64).astype(np.int32),
-            t_indices=np.frombuffer(raw["t_indices"], dtype=np.int32).copy(),
-            frag_lengths=np.frombuffer(raw["frag_lengths"], dtype=np.int32).copy(),
-            exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
-            intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
-            unambig_intron_bp=np.frombuffer(raw["unambig_intron_bp"], dtype=np.int32).copy(),
-            ambig_strand=np.frombuffer(raw["ambig_strand"], dtype=np.uint8).copy(),
-            frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).astype(np.int32),
-            read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
-            genomic_footprint=np.frombuffer(raw["genomic_footprint"], dtype=np.int32).copy(),
-            genomic_start=np.frombuffer(raw["genomic_start"], dtype=np.int32).copy(),
-            nm=np.frombuffer(raw["nm"], dtype=np.uint16).copy(),
-            size=size,
-        )
+        chunk = _FinalizedChunk.from_raw(raw)
 
         self._accept_chunk(chunk)
         self._native_acc = FragmentAccumulator()
@@ -630,8 +673,12 @@ class FragmentBuffer:
     def __exit__(self, *exc):
         self.cleanup()
 
-    def __del__(self):
-        self.cleanup()
+    @staticmethod
+    def _weak_cleanup(buf: "FragmentBuffer") -> None:
+        """Release callback for weakref.finalize."""
+        if buf._temp_dir is not None:
+            shutil.rmtree(buf._temp_dir, ignore_errors=True)
+            buf._temp_dir = None
 
     # -- Diagnostics ----------------------------------------------------------
 

@@ -1,118 +1,7 @@
 # TODO
 
 
-## 'chrom' vs' ref
-
-For genomes and genomic intervals, we are using 'reference' or 'ref' instead of 'chromosome' or 'chrom' throughout the code base. the code is not completely consistent and there are some items incorrectly named 'chrom'. Please change these back to 'ref'.
-
-## gDNA siphoning problem
-
-Currently gDNA siphons mRNA + nRNA fragments.
-
-Initialization is a major problem
-The EM solver might also need constraints
-
-Two ideas:
-1) Predicted expected unspliced vs spliced counts for each transcript. 
-
-We need a function:
-
-unspliced_counts_t <- function(spliced_counts_t, fragment length distribution)
-
-This perfectly complements your Geometric Splicing derivation. The geometric math tells you exactly how many unspliced reads the mRNA *should* have, and these constraints ensure that gDNA can never steal more than its fair, symmetric share of the remainder.
-
-Shall we work out the Python implementation for the Geometric Splicing prediction next?
-
-
-
-I want to implement a major architectural change to improve the functionality of Rigel. This is a breaking change that will change the output and the function of the tool. It will be a dramatic conceptual improvement. We must carefully plan this implementation in multiple stages.
-
-## nascent RNA decoupling from individual transcripts
-
-In progress
-
-Need to address:
-- Output
-- Cleanup
-
-
-Currently each transcript has its own nascent RNA shadow. This is not exactly correct. Transcripts that share the same genomic start and genomic span may have different splicing combinations, but the nascent RNA is by definition the same!
-
-Scenario: 
-- Genome 20kb
-- Transcript T1 + strand with exons [(1000, 2000), (5000,5500), (7000,7500), (9000,10000)]
-- Transcript T2 + strand with exons [(1000, 2000), (9000,10000)]
-- Transcript T3 + strand with exons [(1000, 2000), (5000,5500), (9000,10000)]
-- Transcript T4 + strand with exons [(4500,5500), (9000,10000)]
-
-Consider this scenario - the current algorithm will define 4 nascent RNA shadows for the 4 transcripts. However, transcripts T1, T2, and T3 actually share the same nascent RNA defined by the transcript span (1000, 10000). The 4 nascent RNAs are exactly the same. The only way nascent RNAs can be distinguished is if their genomic span is different.
-
-This is good news for the Rigel tool! This is because we can consolidate nascent RNAs which will lead to fewer candidates in the EM, and will simplify the EM solver.
-
-We need a complete redesign to support the new definition of nascent RNA. With the new definition, nascent RNA will no longer be associated with each individual transcript. Rather, nascent RNA will be associated with genome_start:genome_end spans.
-
-Please plan the new nascent RNA feature so we can implement it. We need to determine an optimal implementation. Here are my thoughts:
-
-### Implementing the new index
-
-It might be efficient to define nascent RNA at index build time, and have a nascent RNA file (feather, TSV) that can be referenced. The transcript index file will need to be changed as well, to include the nascent RNA index corresponding to each transcript. The index files should be useful to 'rigel' but also downstream tools, so that we can map between transcript <-> nascent RNA <-> gene
-
-### Define nascent RNAs at index time
-
-- At index generation time we can iterate through Transcripts sorted by (ref), genome_start). Nascent RNAs are defined by unique (ref, strand, start, end) tuples in genome coordinate space. 
-- We can define the complete list of nascent RNAs at this time and use nrna_id (unique index), ref, strand, start, end, gene index (each gene -> multiple nascent RNAs and each nascent RNA -> 1 gene), perhaps other fields?
-- Transcripts will need to be associated with their nascent RNA through a t_to_nrna_index array that maps transcript id -> nascent rna id
-- Nascent RNA -> transcripts list? Not sure if we need to maintain this or not but it would be key by nrna_idx -> value is list of transcript_ids.. i have to think whether the algorithm will need this
-
-### Change nascent RNA initialization
-
-Currently to initialize nascent RNA shadows there must be evidence of fragment overlapping an "unambiguous intron" interval. In otherwords, a fragment must at least partially overlap an intronic interval where there is no exon on either strand. This is sufficient to initialize nascent RNA shadows.
-
-### "linking" mature RNA to nascent RNA
-
-Currently we model the steady state nascent fraction for each transcript using a nrna fraction 'beta'. This nascent RNA fraction  remains a 'transcript level' property. 
-
-The derived abundance for mature RNA is the same: 
-mature RNA = theta_t (from EM) x (1 - nrna_fraction_t)
-
-However, the abundance for each nascent RNA different:
-
-nascent RNA = sum((theta_t x nrna_fraction_t) for t in (transcripts that map to this nascent RNA))
-
-This models nascent RNA as a "one-to-many" definition: one nascent RNA can produce multiple mature RNAs depending on the splicing fraction. 
-
-### Implementation
-
-This is a major architectural change. It needs to be implemented carefully, in stages. We must assure no regressions at each stage. Ultimately this is a more biologically correct definition of nascent RNA and should lead to more efficient EM behavior (we make the EM assign nascent RNA to transcripts)
-
-### Backward compatibility
-
-There is NO need to support the prior code base or method. We can forge ahead, delete/discard older methods, and produce production quality CLEAN code without stale/vestigial methods or redundancies.
-
-
-Now, consider this feature and PLAN the implementation in phases. Write an extremely detailed implementation plan in 'docs' named 'nascent_rna_decoupling.md' 
-
-
-### EM algorithm
-
-The number of components in the EM algorithm will change:
-
-[0,T) - mature RNA components (stays the same)
-[T,T+N) - nascent RNA components (where 'N' is number of nascent RNAs)
-T+N - genomic DNA (stays the same, single component)
-
-EM M-Step -- The splicing fraction parameters are updated during the 'M' step of the EM algorithm. The splicing fraction parameters remain specific to each transcript, that doesn't change.
-
-
-### Output
-
-Currently we output transcript abundances (separate file), gene abundances estimated from the transcripts (separate file). Nascent RNA levels are included in the transcript file. Now, nascent RNA is no longer defined as an individual transcript property. It is associated with a group of transcripts that share the same genomic start/end coordinates.
-
-Therefore, we will need to create a new nascent RNA output file. It can include: nrna_idx (index), gene_id, gene_name, transcript_ids (not sure whether to include, it would be a comma-delimited list, but the transcript file could be used to lookup the nascent RNA without this), effective length, counts, and abundance (tpm)
-
-The transcript abundance output file will change. It will no longer report nascent RNA counts. It should add: nrna_idx (index of nascent RNA that produces this mature RNA), nascent rna fraction (0.0-1.0) fraction of nascent RNA.
-
-The gene-level output file can be updated as well. In the gene file, we should add gene-level nascent estimation which can be a weighted average of the nascent RNA counts (same computation as we do for transcripts). This should be added.
+## Fragment length model
 
 
 
@@ -127,29 +16,35 @@ The gene-level output file can be updated as well. In the gene file, we should a
 - different models should be used to help predict
 - output shouldn't necessarily report exonic, intronic, intergenic, etc. that's just for initialization
 
-Context
-rigel separates gDNA from RNA using splice status and strand specificity. Fragment length is currently unused for discrimination — a single global_model is used for all pools. Bioanalyzer/tapestation confirms gDNA and RNA have distinct insert size distributions.
-Key insight: We know strand specificity (s_RNA) and that gDNA is perfectly unstranded (0.5). Using Bayes' theorem, we can compute the exact gDNA fraction per compartment, then decompose existing fragment length histograms into weighted gDNA and RNA contributions — no per-fragment iteration needed.
+
+Rigel separates gDNA from RNA using splice status and strand specificity. Fragment length is currently unused for discrimination — a single global_model is used for all pools. Bioanalyzer/tapestation confirms gDNA and RNA have distinct insert size distributions.
+
+Key insight: We know strand specificity (ss) and that gDNA is symmetric and perfectly unstranded (0.5). Using Bayes' theorem, we can estimate the gDNA fraction per compartment, then decompose existing fragment length histograms into weighted gDNA and RNA contributions.
+
 Approach: Bayesian Histogram Mixing ("0th-Iteration E-Step")
 Instead of arbitrary thresholds or algebraic decontamination, we compute the probability that fragments in each compartment are gDNA, then use those probabilities as fractional weights to build two model histograms via O(1) numpy operations on pre-collected per-compartment histograms.
+
 The Math (per compartment, e.g. "unspliced genic"):
 Given S (sense count) and A (antisense count) in a compartment:
 R = max(0, (S - A) / (2·s_RNA - 1))     # total RNA
-G = (S + A) - R                           # total gDNA
-W_sense_gDNA  = (G · 0.5) / S            # gDNA weight for sense hist
-W_anti_gDNA   = (G · 0.5) / A            # gDNA weight for antisense hist
+G = (S + A) - R                         # total gDNA
+W_sense_gDNA  = (G · 0.5) / S           # gDNA weight for sense hist
+W_anti_gDNA   = (G · 0.5) / A           # gDNA weight for antisense hist
 Final models:
 H_gDNA = H_intergenic + W_sense · H_sense + W_anti · H_anti
 H_RNA  = H_spliced    + (1-W_sense) · H_sense + (1-W_anti) · H_anti
+
 Properties:
 
 Zero parameters (no SS thresholds, no min_obs cutoffs)
 Graceful degradation: when s_RNA → 0.5, denominator → 0, all W → 0, models collapse to H_intergenic and H_spliced (the only safe anchors)
 O(1) mixing: operates on histograms of size 2001, not millions of fragments
+
 Architecture-preserving: frozen before EM, locus-level parallelism untouched
 
 Implementation Steps
 Step 1: Collect sense/antisense unspliced histograms during BAM scan
+
 We need 4 raw histograms (2 already exist, 2 new):
 
 H_spliced = category_models[SPLICED_ANNOT] — exists
@@ -273,6 +168,33 @@ pytest tests/test_gdna_frag_length.py — new mixing math + scoring tests
 Run on stranded data — log shows distinct gDNA (mean, mode) vs RNA distributions
 Compare quantification with/without — no regression, improved gDNA separation
 
+
+
+## gDNA siphoning problem
+
+Currently gDNA siphons mRNA + nRNA fragments.
+
+Initialization is a major problem
+The EM solver might also need constraints
+
+Two ideas:
+1) Predicted expected unspliced vs spliced counts for each transcript. 
+
+We need a function:
+
+unspliced_counts_t <- function(spliced_counts_t, fragment length distribution)
+
+This perfectly complements your Geometric Splicing derivation. The geometric math tells you exactly how many unspliced reads the mRNA *should* have, and these constraints ensure that gDNA can never steal more than its fair, symmetric share of the remainder.
+
+Shall we work out the Python implementation for the Geometric Splicing prediction next?
+
+
+
+
+
+
+
+
 ## C/C++ Optimization: AVX2
 
 SIMD provides enormous speedup for the EM
@@ -286,12 +208,6 @@ Eventually the production system will be Linux
 
 This seems to affect non-deterministic behavior of the EM. Is this necessary?
 
-## Bug in BAM scanning (might not be a bug)
-
-Previous test runs noted different row counts in quant_detai (280690 vs 280693) indicating a structural difference (different row counts) with an additional root cause upstream — possibly in multi-threaded BAM scanning itself producing different fragment sets (not just different orders), which would be a separate bug.
-
-It seems like we have a bug in BAM scanning / grouping by query name / multi-threaded processing / outputting to buffer leading to different row counts. This is a huge problem and something that needs to be fixed.
-
 
 
 
@@ -300,6 +216,7 @@ It seems like we have a bug in BAM scanning / grouping by query name / multi-thr
 - review gdna empirical bayes setup which requires a bunch of constants
 
 - review nascent RNA 'eta' empirical bayes setup
+
 
 ## Edit distance
 
@@ -357,6 +274,7 @@ We can "blacklist" splice junction artifacts by doing genome-wide mapping. Align
 
 - rename 'tpm' -> 'mrna_tpm' and move next to mrna columns
 - for tsv files, truncate floating point for readability
+- nascent rna output
 
 
 
@@ -512,3 +430,92 @@ can we simplify by using pthread for our parallel locus EM? what is the benefit 
 - salmon needs a salmon index (full transcriptome)
 - kallisto needs a kallisto index (full transcriptome)
 - build or point to it
+
+
+
+## (RESOLVED) nascent RNA decoupling from individual transcripts
+
+In progress
+
+Need to address:
+- Output
+- Cleanup
+
+
+Currently each transcript has its own nascent RNA shadow. This is not exactly correct. Transcripts that share the same genomic start and genomic span may have different splicing combinations, but the nascent RNA is by definition the same!
+
+Scenario: 
+- Genome 20kb
+- Transcript T1 + strand with exons [(1000, 2000), (5000,5500), (7000,7500), (9000,10000)]
+- Transcript T2 + strand with exons [(1000, 2000), (9000,10000)]
+- Transcript T3 + strand with exons [(1000, 2000), (5000,5500), (9000,10000)]
+- Transcript T4 + strand with exons [(4500,5500), (9000,10000)]
+
+Consider this scenario - the current algorithm will define 4 nascent RNA shadows for the 4 transcripts. However, transcripts T1, T2, and T3 actually share the same nascent RNA defined by the transcript span (1000, 10000). The 4 nascent RNAs are exactly the same. The only way nascent RNAs can be distinguished is if their genomic span is different.
+
+This is good news for the Rigel tool! This is because we can consolidate nascent RNAs which will lead to fewer candidates in the EM, and will simplify the EM solver.
+
+We need a complete redesign to support the new definition of nascent RNA. With the new definition, nascent RNA will no longer be associated with each individual transcript. Rather, nascent RNA will be associated with genome_start:genome_end spans.
+
+Please plan the new nascent RNA feature so we can implement it. We need to determine an optimal implementation. Here are my thoughts:
+
+### Implementing the new index
+
+It might be efficient to define nascent RNA at index build time, and have a nascent RNA file (feather, TSV) that can be referenced. The transcript index file will need to be changed as well, to include the nascent RNA index corresponding to each transcript. The index files should be useful to 'rigel' but also downstream tools, so that we can map between transcript <-> nascent RNA <-> gene
+
+### Define nascent RNAs at index time
+
+- At index generation time we can iterate through Transcripts sorted by (ref), genome_start). Nascent RNAs are defined by unique (ref, strand, start, end) tuples in genome coordinate space. 
+- We can define the complete list of nascent RNAs at this time and use nrna_id (unique index), ref, strand, start, end, gene index (each gene -> multiple nascent RNAs and each nascent RNA -> 1 gene), perhaps other fields?
+- Transcripts will need to be associated with their nascent RNA through a t_to_nrna_index array that maps transcript id -> nascent rna id
+- Nascent RNA -> transcripts list? Not sure if we need to maintain this or not but it would be key by nrna_idx -> value is list of transcript_ids.. i have to think whether the algorithm will need this
+
+### Change nascent RNA initialization
+
+Currently to initialize nascent RNA shadows there must be evidence of fragment overlapping an "unambiguous intron" interval. In otherwords, a fragment must at least partially overlap an intronic interval where there is no exon on either strand. This is sufficient to initialize nascent RNA shadows.
+
+### "linking" mature RNA to nascent RNA
+
+Currently we model the steady state nascent fraction for each transcript using a nrna fraction 'beta'. This nascent RNA fraction  remains a 'transcript level' property. 
+
+The derived abundance for mature RNA is the same: 
+mature RNA = theta_t (from EM) x (1 - nrna_fraction_t)
+
+However, the abundance for each nascent RNA different:
+
+nascent RNA = sum((theta_t x nrna_fraction_t) for t in (transcripts that map to this nascent RNA))
+
+This models nascent RNA as a "one-to-many" definition: one nascent RNA can produce multiple mature RNAs depending on the splicing fraction. 
+
+### Implementation
+
+This is a major architectural change. It needs to be implemented carefully, in stages. We must assure no regressions at each stage. Ultimately this is a more biologically correct definition of nascent RNA and should lead to more efficient EM behavior (we make the EM assign nascent RNA to transcripts)
+
+### Backward compatibility
+
+There is NO need to support the prior code base or method. We can forge ahead, delete/discard older methods, and produce production quality CLEAN code without stale/vestigial methods or redundancies.
+
+
+Now, consider this feature and PLAN the implementation in phases. Write an extremely detailed implementation plan in 'docs' named 'nascent_rna_decoupling.md' 
+
+
+### EM algorithm
+
+The number of components in the EM algorithm will change:
+
+[0,T) - mature RNA components (stays the same)
+[T,T+N) - nascent RNA components (where 'N' is number of nascent RNAs)
+T+N - genomic DNA (stays the same, single component)
+
+EM M-Step -- The splicing fraction parameters are updated during the 'M' step of the EM algorithm. The splicing fraction parameters remain specific to each transcript, that doesn't change.
+
+
+### Output
+
+Currently we output transcript abundances (separate file), gene abundances estimated from the transcripts (separate file). Nascent RNA levels are included in the transcript file. Now, nascent RNA is no longer defined as an individual transcript property. It is associated with a group of transcripts that share the same genomic start/end coordinates.
+
+Therefore, we will need to create a new nascent RNA output file. It can include: nrna_idx (index), gene_id, gene_name, transcript_ids (not sure whether to include, it would be a comma-delimited list, but the transcript file could be used to lookup the nascent RNA without this), effective length, counts, and abundance (tpm)
+
+The transcript abundance output file will change. It will no longer report nascent RNA counts. It should add: nrna_idx (index of nascent RNA that produces this mature RNA), nascent rna fraction (0.0-1.0) fraction of nascent RNA.
+
+The gene-level output file can be updated as well. In the gene file, we should add gene-level nascent estimation which can be a weighted average of the nascent RNA counts (same computation as we do for transcripts). This should be added.

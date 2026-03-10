@@ -320,8 +320,8 @@ class TestFragmentResolver:
     """Verify the native FragmentResolver is wired up."""
 
     def test_resolver_exists(self, mini_index):
-        assert hasattr(mini_index, "_resolver")
-        assert mini_index._resolver is not None
+        assert hasattr(mini_index, "resolver")
+        assert mini_index.resolver is not None
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -625,4 +625,4 @@ class TestEdgeCases:
         assert len(exon_hits) > 0
 
     def test_single_exon_resolver_exists(self, single_exon_index):
-        assert single_exon_index._resolver is not None
+        assert single_exon_index.resolver is not None

@@ -16,7 +16,8 @@ import pytest
 from rigel.splice import SpliceType, SpliceStrandCol
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
-from rigel.scoring import score_gdna_standalone as _score_gdna_candidate, GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
+from rigel.scoring import GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
+from scoring_helpers import score_gdna_standalone as _score_gdna_candidate
 from rigel.frag_length_model import FragmentLengthModels
 from rigel.strand_model import StrandModel, StrandModels
 from rigel.types import Strand
@@ -667,7 +668,6 @@ class TestStrandModelsContainer:
         assert sm.strand_specificity == sm.exonic_spliced.strand_specificity
         assert sm.read1_sense == sm.exonic_spliced.read1_sense
         assert sm.n_observations == sm.exonic_spliced.n_observations
-        assert sm.strand_likelihood(Strand.POS, Strand.POS) == sm.exonic_spliced.strand_likelihood(Strand.POS, Strand.POS)
 
     def test_to_dict_structure(self):
         from rigel.strand_model import StrandModels

@@ -1,16 +1,14 @@
 """Unit tests for fragment-weight and transcript-position scoring functions.
 
-Tests ``genomic_to_transcript_pos`` and ``compute_fragment_weight``
-from ``rigel.scoring``.
+Tests ``genomic_to_transcript_pos`` (pure-Python helper) and
+``compute_fragment_weight`` (C++ kernel from ``_scoring_impl``).
 """
 
 import numpy as np
 import pytest
 
-from rigel.scoring import (
-    compute_fragment_weight,
-    genomic_to_transcript_pos,
-)
+from rigel._scoring_impl import compute_fragment_weight
+from scoring_helpers import genomic_to_transcript_pos
 from rigel.types import Strand
 
 POS = int(Strand.POS)

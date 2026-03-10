@@ -124,36 +124,7 @@ class FragmentRouter:
         chunk_arrays = []
         chunk_sizes = []
         for chunk in buffer.iter_chunks():
-            chunk_arrays.append((
-                np.ascontiguousarray(
-                    chunk.t_offsets, dtype=np.int64),
-                np.ascontiguousarray(
-                    chunk.t_indices, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.frag_lengths, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.exon_bp, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.intron_bp, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.unambig_intron_bp, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.splice_type, dtype=np.uint8),
-                np.ascontiguousarray(
-                    chunk.exon_strand, dtype=np.uint8),
-                np.ascontiguousarray(
-                    chunk.fragment_classes, dtype=np.uint8),
-                np.ascontiguousarray(
-                    chunk.frag_id, dtype=np.int64),
-                np.ascontiguousarray(
-                    chunk.read_length, dtype=np.uint32),
-                np.ascontiguousarray(
-                    chunk.genomic_footprint, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.genomic_start, dtype=np.int32),
-                np.ascontiguousarray(
-                    chunk.nm, dtype=np.uint16),
-            ))
+            chunk_arrays.append(chunk.to_scoring_arrays())
             chunk_sizes.append(chunk.size)
 
         # ---- Fused two-pass C++ scoring ----
