@@ -298,6 +298,82 @@ class LocusEMInput:
 
 
 # ======================================================================
+# Geometric splicing expectation — unspliced/spliced ratio per transcript
+# ======================================================================
+
+
+def compute_unspliced_to_spliced_ratios(
+    index: "TranscriptIndex",
+    frag_len_model: "FragmentLengthModel",
+) -> np.ndarray:
+    """Compute R_t = L_unspliced / L_spliced for every transcript.
+
+    Uses the empirical fragment length distribution (eCDF) to compute
+    effective lengths per exon, properly weighting each fragment length
+    by its observed probability.
+
+    For multi-exon transcript *t* with exon lengths E_1, ..., E_k::
+
+        L_unspliced(t) = sum_i eff_len(E_i)
+        L_total(t)     = eff_len(sum_i E_i)
+        L_spliced(t)   = L_total(t) - L_unspliced(t)
+        R_t            = L_unspliced(t) / L_spliced(t)
+
+    Returns ``inf`` for single-exon transcripts (L_spliced = 0).
+
+    Parameters
+    ----------
+    index : TranscriptIndex
+    frag_len_model : FragmentLengthModel
+        Trained global fragment length model.
+
+    Returns
+    -------
+    np.ndarray
+        float64[num_transcripts] — R_t values.
+    """
+    n_t = index.num_transcripts
+
+    # Collect per-exon lengths across all multi-exon transcripts
+    exon_lens_list: list[int] = []
+    exon_groups: list[tuple[int, int, int]] = []  # (t_idx, start_pos, n_exons)
+
+    for t_idx in range(n_t):
+        exon_ivs = index.get_exon_intervals(t_idx)
+        if exon_ivs is None or len(exon_ivs) <= 1:
+            continue
+        lens = (exon_ivs[:, 1] - exon_ivs[:, 0]).astype(np.int64)
+        exon_groups.append((t_idx, len(exon_lens_list), len(lens)))
+        exon_lens_list.extend(lens.tolist())
+
+    if not exon_lens_list:
+        return np.full(n_t, np.inf, dtype=np.float64)
+
+    all_exon_lens = np.array(exon_lens_list, dtype=np.int64)
+
+    # Vectorized eCDF-based effective length for all exons at once
+    per_exon_eff = frag_len_model.compute_all_transcript_eff_lens(all_exon_lens)
+
+    # Total effective lengths for each transcript (full exonic span)
+    total_exonic = index.t_df["length"].values.astype(np.int64)
+    total_eff = frag_len_model.compute_all_transcript_eff_lens(total_exonic)
+
+    # Sum per-exon eff_lens by transcript → L_unspliced; compute ratio
+    _L_SPLICED_EPS = 1e-6
+    ratios = np.full(n_t, np.inf, dtype=np.float64)
+    for t_idx, start, n_exons in exon_groups:
+        L_unspliced = per_exon_eff[start:start + n_exons].sum()
+        L_total = total_eff[t_idx]
+        L_spliced = L_total - L_unspliced
+
+        if L_spliced > _L_SPLICED_EPS:
+            ratios[t_idx] = L_unspliced / L_spliced
+        # else: keep inf (no spliced reads expected)
+
+    return ratios
+
+
+# ======================================================================
 # nrna_frac (nascent fraction) prior computation — density + strand hybrid
 # ======================================================================
 
@@ -385,13 +461,18 @@ def _compute_hybrid_nrna_frac_vec(
     final_nrna = inv_var_weight * str_nrna + (1.0 - inv_var_weight) * den_nrna
     final_mrna = inv_var_weight * str_mrna + (1.0 - inv_var_weight) * den_mrna
 
-    # --- nrna_frac = nRNA / (mRNA + nRNA) ---
-    # When total_rate = 0 (no evidence), default to nrna_frac = 0 (no nRNA
-    # detected).  This is the conservative empirical Bayes choice:
-    # absence of evidence → assume fully spliced mRNA.
-    total_rate = final_mrna + final_nrna
+    # --- nrna_frac = nRNA / (mRNA + nRNA) as fragment fraction ---
+    # final_nrna and final_mrna are *densities* (reads / bp).  The EM
+    # M-step interprets η as a fragment fraction, so we must convert
+    # densities to expected counts before taking the ratio:
+    #   C_nrna = D_nrna × L_span,  C_mrna = D_mrna × L_exonic
+    # where L_span = L_exonic + L_intronic is the full nRNA span.
+    L_span = L_exonic + L_intronic
+    C_nrna = final_nrna * L_span
+    C_mrna = final_mrna * L_exonic
+    total_count = C_nrna + C_mrna
     with np.errstate(divide="ignore", invalid="ignore"):
-        nrna_frac = np.where(total_rate > 0, final_nrna / total_rate, 0.0)
+        nrna_frac = np.where(total_count > 0, C_nrna / total_count, 0.0)
 
     return nrna_frac, evidence
 

@@ -1,0 +1,60 @@
+# ablation_gdna_extreme.yaml — gDNA stress test to extreme levels
+#
+# Fixed: TA1=100, TA4=3, NTA=100, 100k fragments
+# Sweep: gDNA from 0 to 10000 (0X to 100X mRNA)
+#        SS: 0.9 and 1.0
+#        kappa: 2.0 (disabled) and 6.0 (targeted penalty)
+#
+# Total: 8 gDNA × 2 SS × 2 kappa = 32 runs
+
+genome_length: 50000
+seed: 42
+
+sim:
+  frag_mean: 200
+  frag_std: 30
+  frag_min: 80
+  frag_max: 450
+  read_length: 100
+
+gdna_config:
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+transcripts:
+  TA1:
+    strand: "+"
+    exons: [[1000, 2000], [5000, 5500], [7000, 7500], [9000, 10000]]
+  TA2:
+    strand: "+"
+    exons: [[1000, 2000], [9000, 10000]]
+  TA3:
+    strand: "+"
+    exons: [[1000, 2000], [5000, 5500], [9000, 10000]]
+  TA4:
+    strand: "+"
+    exons: [[4500, 5500], [9000, 10000]]
+  TB:
+    strand: "-"
+    exons: [[20000, 24000]]
+  TC:
+    strand: "-"
+    exons: [[30000, 31000], [35000, 36000]]
+
+nrnas:
+  NTA: ["+", 1000, 10000]
+
+sweep:
+  TA1: 100
+  TA2: 0
+  TA3: 0
+  TA4: 3
+  TB: 0
+  TC: 0
+  NTA: 100
+  gdna: [0, 10, 50, 100, 500, 1000, 5000, 10000]
+  strand_specificity: [0.9, 1.0]
+  n_fragments: 100000
+  strand_symmetry_kappa: [2.0, 6.0]

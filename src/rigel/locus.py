@@ -497,6 +497,13 @@ def compute_nrna_init(
     intronic_span = np.maximum(nrna_spans - nrna_max_exonic, 0.0)
     nrna_init[intronic_span <= 0] = 0.0
 
+    # Scale intronic-only count to full nRNA span.  nrna_init currently
+    # estimates nRNA fragments landing in the intronic zone only.  nRNA
+    # produces reads uniformly across the full span (intronic + exonic),
+    # so convert to density then scale: init × (span / intronic_span).
+    has_intron = intronic_span > 0
+    nrna_init[has_intron] *= nrna_spans[has_intron] / intronic_span[has_intron]
+
     return nrna_init
 
 
@@ -629,6 +636,66 @@ def _compute_ref_gdna_densities(
     return ref_shrunk
 
 
+def _compute_locus_mrna_burden(
+    locus: Locus,
+    em_data: ScoredFragments,
+    estimator: AbundanceEstimator,
+    ratios: np.ndarray,
+    strand_spec: float,
+) -> tuple[float, float]:
+    """Compute predicted mRNA unspliced burden for a locus.
+
+    Uses the geometric splicing expectation: for each observed spliced
+    fragment, predict the expected number of unspliced mRNA fragments
+    using the per-transcript ratio R_t = L_unspliced / L_spliced.
+
+    Returns (burden_sense, burden_anti) — estimated unspliced mRNA
+    fragments on each strand, distributed by strand specificity.
+    """
+    n_transcripts = estimator.num_transcripts
+    t_arr = locus.transcript_indices
+
+    # Component A: Unambiguous spliced reads (known transcript assignment).
+    # Columns 2:6 = all spliced (UNANNOT + ANNOT) × (sense + anti).
+    burden_unambig = 0.0
+    for t_idx in t_arr:
+        c_spliced = estimator.unambig_counts[int(t_idx), 2:6].sum()
+        r_t = ratios[int(t_idx)]
+        if np.isfinite(r_t) and c_spliced > 0:
+            burden_unambig += c_spliced * r_t
+
+    # Component B: Ambiguous spliced EM units (unknown transcript).
+    # Each unit is one fragment.  Use the mean R_t across its
+    # candidate mRNA transcripts (maximum-entropy prior).
+    burden_ambig = 0.0
+    spliced_mask = em_data.is_spliced[locus.unit_indices]
+    if spliced_mask.any():
+        spliced_global_units = locus.unit_indices[spliced_mask]
+        offsets = em_data.offsets
+        t_indices = em_data.t_indices
+
+        for u in spliced_global_units:
+            start = int(offsets[u])
+            end = int(offsets[u + 1])
+            candidates = t_indices[start:end]
+
+            # Filter to mRNA transcripts (exclude nRNA shadows)
+            tx_cands = candidates[candidates < n_transcripts]
+            if len(tx_cands) == 0:
+                continue
+
+            cand_ratios = ratios[tx_cands]
+            finite = np.isfinite(cand_ratios)
+            if finite.any():
+                burden_ambig += cand_ratios[finite].mean()
+
+    # Total burden, distributed by strand specificity
+    burden = burden_unambig + burden_ambig
+    burden_sense = burden * strand_spec
+    burden_anti = burden * (1.0 - strand_spec)
+    return burden_sense, burden_anti
+
+
 def _compute_per_locus_gdna_densities(
     loci: list,
     t_sense: np.ndarray,
@@ -639,8 +706,15 @@ def _compute_per_locus_gdna_densities(
     intergenic_density: float,
     ref_shrunk: dict[str, float],
     global_density: float,
+    locus_burden_sense: list[float] | None = None,
+    locus_burden_anti: list[float] | None = None,
 ) -> tuple[list[float], list[float], list[float], list[float]]:
     """Compute per-locus gDNA densities and their parent reference densities.
+
+    When ``locus_burden_sense`` / ``locus_burden_anti`` are provided,
+    the predicted mRNA unspliced burden is subtracted from the sense
+    and antisense counts before computing gDNA density (geometric
+    splicing expectation).
 
     Returns (locus_densities, locus_evidence, locus_parents, locus_exonic_bp).
     """
@@ -649,11 +723,16 @@ def _compute_per_locus_gdna_densities(
     locus_parents: list[float] = []
     locus_exonic_bp: list[float] = []
 
-    for locus in loci:
+    for i, locus in enumerate(loci):
         t_arr = locus.transcript_indices
         locus_sense = float(t_sense[t_arr].sum())
         locus_anti = float(t_anti[t_arr].sum())
         locus_bp = float(t_exonic[t_arr].sum())
+
+        # Subtract predicted mRNA unspliced burden (phantom reads)
+        if locus_burden_sense is not None:
+            locus_sense = max(0.0, locus_sense - locus_burden_sense[i])
+            locus_anti = max(0.0, locus_anti - locus_burden_anti[i])
 
         locus_density, locus_n = compute_gdna_density_hybrid(
             locus_sense, locus_anti, locus_bp, strand_spec, intergenic_density,
@@ -686,6 +765,7 @@ def compute_eb_gdna_priors(
     strand_models: StrandModels,
     *,
     intergenic_density: float = 0.0,
+    unspliced_to_spliced_ratios: np.ndarray | None = None,
     kappa_ref: float | None = None,
     kappa_locus: float | None = None,
     mom_min_evidence_ref: float = 50.0,
@@ -705,6 +785,11 @@ def compute_eb_gdna_priors(
     ``gdna_init = shrunk_density × L_locus`` — completely decoupled
     from mRNA expression level.
 
+    When ``unspliced_to_spliced_ratios`` is provided, the geometric
+    splicing expectation is used to subtract predicted mRNA unspliced
+    burden from the per-locus sense/antisense counts before computing
+    gDNA density.
+
     When ``kappa_ref`` or ``kappa_locus`` is ``None``, the shrinkage
     concentration is auto-estimated via Method of Moments using
     :func:`~rigel.estimator.estimate_kappa`.
@@ -719,6 +804,9 @@ def compute_eb_gdna_priors(
     intergenic_density : float
         Background gDNA density (frags / bp) from intergenic regions.
         Pass 0.0 to fall back to strand-only estimation.
+    unspliced_to_spliced_ratios : np.ndarray or None
+        float64[num_transcripts] — R_t = L_unspliced / L_spliced.
+        When provided, enables geometric splicing burden subtraction.
     kappa_ref : float or None
         Shrinkage pseudo-count for reference → global.  ``None`` (default)
         auto-estimates via Method of Moments.
@@ -808,11 +896,36 @@ def compute_eb_gdna_priors(
         strand_spec, intergenic_density, global_density, k_ref,
     )
 
+    # --- Geometric splicing burden subtraction ---
+    # Predict the expected unspliced mRNA fragments ("phantom reads") from
+    # observed spliced counts and the geometric R_t ratio, then subtract
+    # from the per-locus unspliced pool before computing gDNA density.
+    burden_sense_list: list[float] | None = None
+    burden_anti_list: list[float] | None = None
+    if unspliced_to_spliced_ratios is not None:
+        burden_sense_list = []
+        burden_anti_list = []
+        total_burden = 0.0
+        for locus in loci:
+            bs, ba = _compute_locus_mrna_burden(
+                locus, em_data, estimator,
+                unspliced_to_spliced_ratios, strand_spec,
+            )
+            burden_sense_list.append(bs)
+            burden_anti_list.append(ba)
+            total_burden += bs + ba
+        logger.info(
+            f"gDNA EB: mRNA unspliced burden subtracted: "
+            f"{total_burden:.0f} total predicted phantom reads"
+        )
+
     # --- Per-locus level ---
     locus_densities, locus_evidence, locus_parents, locus_bp = (
         _compute_per_locus_gdna_densities(
             loci, t_sense, t_anti, t_exonic, t_refs,
             strand_spec, intergenic_density, ref_shrunk, global_density,
+            locus_burden_sense=burden_sense_list,
+            locus_burden_anti=burden_anti_list,
         )
     )
 

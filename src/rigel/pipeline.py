@@ -41,6 +41,7 @@ from .estimator import (
     AbundanceEstimator,
     compute_global_gdna_density,
     compute_nrna_frac_priors,
+    compute_unspliced_to_spliced_ratios,
 )
 from .types import ChimeraType, Strand
 from .index import TranscriptIndex
@@ -540,12 +541,26 @@ def quant_from_buffer(
             for t_idx in locus.transcript_indices:
                 estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
+        # Geometric splicing expectation: compute R_t for burden subtraction
+        if frag_length_models.global_model.n_observations > 0:
+            unspliced_to_spliced_ratios = compute_unspliced_to_spliced_ratios(
+                index, frag_length_models.global_model,
+            )
+            n_finite = int(np.isfinite(unspliced_to_spliced_ratios).sum())
+            logger.info(
+                f"[INFO] Geometric splicing: {n_finite}/{index.num_transcripts} "
+                f"multi-exon transcripts with finite R_t"
+            )
+        else:
+            unspliced_to_spliced_ratios = None
+
         # EB gDNA priors (must precede nrna_frac priors — the hybrid estimator
         # uses gDNA density for density subtraction).
         intergenic_density = _compute_intergenic_density(stats, index)
         gdna_inits = compute_eb_gdna_priors(
             loci, em_data, estimator, index, strand_models,
             intergenic_density=intergenic_density,
+            unspliced_to_spliced_ratios=unspliced_to_spliced_ratios,
             kappa_ref=em_config.gdna_kappa_ref,
             kappa_locus=em_config.gdna_kappa_locus,
             mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
