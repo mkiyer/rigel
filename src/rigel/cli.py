@@ -412,21 +412,15 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("em_convergence_delta", "em.convergence_delta"),
     _ParamSpec("prune_threshold", "em.prune_threshold"),
     _ParamSpec("confidence_threshold", "em.confidence_threshold"),
-    _ParamSpec("nrna_frac_kappa_global", "em.nrna_frac_kappa_global"),
-    _ParamSpec("nrna_frac_kappa_locus", "em.nrna_frac_kappa_locus"),
-    _ParamSpec("nrna_frac_kappa_nrna", "em.nrna_frac_kappa_nrna"),
-    _ParamSpec("nrna_frac_mom_min_evidence_global", "em.nrna_frac_mom_min_evidence_global"),
-    _ParamSpec("nrna_frac_mom_min_evidence_locus", "em.nrna_frac_mom_min_evidence_locus"),
-    _ParamSpec("nrna_frac_kappa_min", "em.nrna_frac_kappa_min"),
-    _ParamSpec("nrna_frac_kappa_max", "em.nrna_frac_kappa_max"),
-    _ParamSpec("nrna_frac_kappa_fallback", "em.nrna_frac_kappa_fallback"),
-    _ParamSpec("nrna_frac_kappa_min_obs", "em.nrna_frac_kappa_min_obs"),
     _ParamSpec("gdna_kappa_ref", "em.gdna_kappa_ref"),
     _ParamSpec("gdna_kappa_locus", "em.gdna_kappa_locus"),
     _ParamSpec("gdna_mom_min_evidence_ref", "em.gdna_mom_min_evidence_ref"),
     _ParamSpec("gdna_mom_min_evidence_locus", "em.gdna_mom_min_evidence_locus"),
+    _ParamSpec("gdna_kappa_min", "em.gdna_kappa_min"),
+    _ParamSpec("gdna_kappa_max", "em.gdna_kappa_max"),
+    _ParamSpec("gdna_kappa_fallback", "em.gdna_kappa_fallback"),
+    _ParamSpec("gdna_kappa_min_obs", "em.gdna_kappa_min_obs"),
     _ParamSpec("strand_symmetry_kappa", "em.strand_symmetry_kappa"),
-    _ParamSpec("strand_symmetry_pseudo", "em.strand_symmetry_pseudo"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("strand_prior_kappa", "scan.strand_prior_kappa"),
@@ -779,59 +773,6 @@ def build_parser() -> argparse.ArgumentParser:
              "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
-        "--nrna-frac-kappa-global", dest="nrna_frac_kappa_global",
-        type=float, default=None,
-        help="Shrinkage κ pulling locus-strand nrna_frac toward the global "
-             "prior.  Default: auto-estimate via Method of Moments.",
-    )
-    adv.add_argument(
-        "--nrna-frac-kappa-locus", dest="nrna_frac_kappa_locus",
-        type=float, default=None,
-        help="Shrinkage κ pulling per-nRNA nrna_frac toward the "
-             "locus-strand estimate.  Default: auto-estimate.",
-    )
-    adv.add_argument(
-        "--nrna-frac-kappa-nrna", dest="nrna_frac_kappa_nrna",
-        type=float, default=None,
-        help="Constant pseudo-count for the final Beta prior fed to "
-             "the EM solver (default: 5.0).",
-    )
-    adv.add_argument(
-        "--nrna-frac-mom-min-evidence-global",
-        dest="nrna_frac_mom_min_evidence_global",
-        type=float, default=None,
-        help="Min fragment evidence for global MoM κ estimation "
-             "(default: 50).",
-    )
-    adv.add_argument(
-        "--nrna-frac-mom-min-evidence-locus",
-        dest="nrna_frac_mom_min_evidence_locus",
-        type=float, default=None,
-        help="Min fragment evidence for locus MoM κ estimation "
-             "(default: 20).",
-    )
-    adv.add_argument(
-        "--nrna-frac-kappa-min", dest="nrna_frac_kappa_min",
-        type=float, default=None,
-        help="Lower clamp for MoM-estimated κ (default: 2.0).",
-    )
-    adv.add_argument(
-        "--nrna-frac-kappa-max", dest="nrna_frac_kappa_max",
-        type=float, default=None,
-        help="Upper clamp for MoM-estimated κ (default: 200.0).",
-    )
-    adv.add_argument(
-        "--nrna-frac-kappa-fallback", dest="nrna_frac_kappa_fallback",
-        type=float, default=None,
-        help="Fallback κ when too few features for MoM (default: 5.0).",
-    )
-    adv.add_argument(
-        "--nrna-frac-kappa-min-obs", dest="nrna_frac_kappa_min_obs",
-        type=int, default=None,
-        help="Minimum features required for MoM κ estimation; "
-             "fewer triggers fallback (default: 20).",
-    )
-    adv.add_argument(
         "--gdna-kappa-ref", dest="gdna_kappa_ref",
         type=float, default=None,
         help="Shrinkage κ pulling reference-level gDNA rate toward the "
@@ -858,19 +799,33 @@ def build_parser() -> argparse.ArgumentParser:
              "estimation (default: 30).",
     )
     adv.add_argument(
+        "--gdna-kappa-min", dest="gdna_kappa_min",
+        type=float, default=None,
+        help="Lower clamp for MoM-estimated gDNA κ (default: 2.0).",
+    )
+    adv.add_argument(
+        "--gdna-kappa-max", dest="gdna_kappa_max",
+        type=float, default=None,
+        help="Upper clamp for MoM-estimated gDNA κ (default: 200.0).",
+    )
+    adv.add_argument(
+        "--gdna-kappa-fallback", dest="gdna_kappa_fallback",
+        type=float, default=None,
+        help="Fallback gDNA κ when too few features for MoM "
+             "(default: 5.0).",
+    )
+    adv.add_argument(
+        "--gdna-kappa-min-obs", dest="gdna_kappa_min_obs",
+        type=int, default=None,
+        help="Minimum features for gDNA MoM κ estimation; "
+             "fewer triggers fallback (default: 20).",
+    )
+    adv.add_argument(
         "--strand-symmetry-kappa", dest="strand_symmetry_kappa",
         type=float, default=None,
         help="Strand symmetry penalty κ for gDNA in the M-step. "
-             "Beta(κ/2, κ/2) prior on gDNA strand fraction. "
-             "Higher = sharper penalty for asymmetry. "
+             "Effective κ scales by strand specificity: κ_eff = κ·(2·SS−1)². "
              "Set ≤ 2.0 to disable (default: 6.0).",
-    )
-    adv.add_argument(
-        "--strand-symmetry-pseudo", dest="strand_symmetry_pseudo",
-        type=float, default=None,
-        help="Bayesian pseudo-count (α₀) for gDNA strand fraction. "
-             "Controls evidence threshold for the symmetry penalty. "
-             "Higher = more forgiving at low counts (default: 50.0).",
     )
     adv.add_argument(
         "--strand-prior-kappa", dest="strand_prior_kappa",

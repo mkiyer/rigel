@@ -336,7 +336,7 @@ class TestBuildLoadRoundTrip:
     def round_trip_index(self, tmp_path):
         """Build and load an index from GENCODE-style GTF."""
         import pysam
-        from tests.conftest import MINI_GTF
+        from conftest import MINI_GTF
 
         gtf_path = tmp_path / "test.gtf"
         gtf_path.write_text(MINI_GTF)
@@ -356,7 +356,7 @@ class TestBuildLoadRoundTrip:
     def test_two_loads_produce_same_data(self, tmp_path):
         """Loading twice from the same dir should yield identical structures."""
         import pysam
-        from tests.conftest import MINI_GTF
+        from conftest import MINI_GTF
 
         gtf_path = tmp_path / "test.gtf"
         gtf_path.write_text(MINI_GTF)
@@ -443,7 +443,7 @@ class TestLargerIndex:
     def complex_index(self, tmp_path_factory):
         """Build an index with 10 genes, ~30 transcripts, overlapping exons."""
         import pysam
-        from tests.conftest import build_test_index
+        from conftest import build_test_index
 
         # Build a more complex GTF with multiple genes and overlapping exons
         lines = []
@@ -593,7 +593,7 @@ class TestEdgeCases:
     @pytest.fixture
     def single_exon_index(self, tmp_path_factory):
         """Index with only single-exon transcripts (no splice junctions)."""
-        from tests.conftest import build_test_index
+        from conftest import build_test_index
 
         gtf = (
             'chr1\ttest\texon\t100\t500\t.\t+\t.\t'

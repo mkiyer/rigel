@@ -32,6 +32,8 @@ The intended workflow is:
   - practical purity approximations and recommended first implementation path
 - `06_methodology_review.md`
   - assessment of the March 2026 methodology critique and resulting revisions
+- `07_bridge_current_to_target.md`
+  - explicit mapping from current EM heuristics to target probabilistic model
 
 ## Current Recommendation
 

@@ -60,21 +60,33 @@ Recommended direction:
 ### 3.3 Then migrate the solver to the gDNA pair model
 
 Once calibration is stable, update the solver-side gDNA strand treatment so that
-the EM explicitly carries `g_plus` and `g_minus` as ordinary mixture
+the EM explicitly carries `g_pos` and `g_neg` as ordinary mixture
 components. Their total mass is reported as locus-level gDNA abundance, and
 their implied strand fraction is regularized by the symmetric Beta prior
 controlled by `kappa_sym`.
+
+The design must also address the real gDNA/nRNA identifiability problem:
+
+- sense-heavy unspliced excess is ambiguous with nRNA leakage
+- antisense-heavy excess is more diagnostic of genuine gDNA asymmetry
+
+So the first implemented solver constraint should likely be asymmetric rather
+than purely symmetric, preserving the robustness insight behind the current
+one-sided targeted-excess penalty.
 
 ## 4. Step-by-Step Coding Plan
 
 1. define the calibration bundle inputs expected by the locus EM path
 2. thread the bundle through pipeline and estimator orchestration
-3. expand the locus component layout to include `g_plus` and `g_minus`
+3. expand the locus component layout to include `g_pos` and `g_neg`
 4. simplify `gdna_init` and gDNA prior gating semantics in `locus.py`
-5. update native solver logic to use the gDNA pair and symmetry prior
-  structure
-6. add regression tests comparing old and new behavior on pristine cases
-7. add targeted tests for locus-level strand imbalance and gDNA-heavy cases
+5. implement and validate the bridge from the current targeted-excess penalty to
+  the new gDNA-pair prior structure
+6. update native solver logic to use the gDNA pair, symmetry prior, and any
+  required asymmetric strand constraint
+7. add regression tests comparing old and new behavior on pristine cases
+8. add targeted tests for locus-level strand imbalance, gDNA-heavy cases, and
+  high-expression loci with nRNA/gDNA confounding risk
 
 ## 5. Main Risk
 

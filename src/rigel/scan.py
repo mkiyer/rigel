@@ -131,8 +131,6 @@ class FragmentRouter:
         result = nc.fused_score_buffer(
             chunk_arrays,
             t_strand_arr,
-            estimator.transcript_exonic_sense,
-            estimator.transcript_exonic_antisense,
             estimator.transcript_unspliced_sense,
             estimator.transcript_unspliced_antisense,
             estimator.transcript_intronic_sense,

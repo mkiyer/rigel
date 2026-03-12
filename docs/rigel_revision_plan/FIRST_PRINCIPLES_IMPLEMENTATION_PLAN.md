@@ -23,8 +23,9 @@ Implement a cleaner abundance model with the following core properties:
 2. one collapsed public gDNA abundance obtained by summing the gDNA pair
 3. one global empirical-Bayes symmetry hyperparameter
    $\kappa_{\mathrm{sym}}$
-4. calibration of gDNA nuisance parameters from soft-weighted, gDNA-dominant
-   genomic regions
+4. joint calibration of gDNA nuisance parameters from gDNA-dominant genomic
+  regions, especially $\kappa_{\mathrm{sym}}$ and the gDNA fragment-length
+  distribution
 5. a clean separation among:
    - structural likelihoods
    - abundance parameters
@@ -58,18 +59,27 @@ learned in a calibration stage, not improvised inside the locus EM.
 If practical approximations are needed, they should correspond to clearly stated
 latent targets such as posterior regional gDNA purity.
 
+### 2.5 Piggyback on the existing single scan pass
+
+The redesign should avoid introducing a second BAM traversal. Calibration
+evidence should be accumulated from the existing fragment buffer and scan output
+as a post-scan aggregation step.
+
 ## 3. Scope of the First Redesign
 
 The first redesign should focus on the following deliverables.
 
 ### 3.1 In scope
 
-- redesign the gDNA symmetry model around free $\phi_\ell$ and global
+- redesign the gDNA symmetry model around an explicit gDNA pair and global
   $\kappa_{\mathrm{sym}}$
 - define and implement a region-based gDNA calibration stage
-- define and implement a soft regional gDNA-purity weighting framework
-- refactor gDNA fragment-length estimation to use the same calibration logic
+- define and implement a first-pass two-state regional purity model
+- refactor gDNA fragment-length estimation to be a co-target of the same
+  calibration logic
 - simplify the role of initialization versus prior in the main EM
+- write an explicit bridge from the current targeted-excess penalty and gating
+  system to the target probabilistic model
 
 ### 3.2 Explicitly out of scope for the first pass
 
@@ -90,9 +100,9 @@ Build or expose the genomic interval partition needed for calibration.
 
 Required capabilities:
 
-- partition each reference into intervals with constant annotation context
-- preserve exon, intron, intergenic, and strand-specific annotation labels
-- expose strand ambiguity explicitly
+- refine the existing index interval tiling rather than replacing it
+- represent annotation context with a four-flag scheme for exon and intron
+  overlap on both strands
 - expose effective interval lengths for density calculations
 
 Primary output:
@@ -135,21 +145,23 @@ Primary output:
 
 - region-level evidence summaries suitable for purity modeling
 
-### Workstream D: Soft gDNA-purity model
+### Workstream D: First-Pass Purity Model
 
 Goal:
 
-Estimate continuous regional gDNA purity or a practical approximation to it.
+Estimate practical posterior weights for gDNA-dominant versus RNA-contaminated
+regions.
 
-Preferred target:
-
-- latent continuous purity variable $\pi_r \in [0,1]$
-- posterior weight $w_r = \mathbb{E}[\pi_r \mid y_r]$
-
-Fallbacks:
+Preferred first implementation:
 
 - two-state mixture model
-- heuristic score explicitly framed as posterior approximation
+- posterior weight
+  $w_r = \Pr(u_r = \mathrm{gDNA\text{-}dominant} \mid y_r)$
+
+Long-run target:
+
+- continuous latent purity variable $\pi_r \in [0,1]$
+- posterior weight $w_r = \mathbb{E}[\pi_r \mid y_r]$
 
 Primary output:
 
@@ -166,6 +178,9 @@ Primary targets:
 - gDNA fragment-length distribution
 - gDNA symmetry hyperparameter $\kappa_{\mathrm{sym}}$
 
+These should be treated as joint nuisance targets estimated from the same
+purity-weighted regional evidence.
+
 Primary output:
 
 - calibrated gDNA nuisance parameter bundle for the run
@@ -180,6 +195,8 @@ Primary changes:
 
 - replace current gDNA symmetry treatment with an explicit gDNA pair
 - feed calibrated $\kappa_{\mathrm{sym}}$ into the gDNA strand prior
+- account explicitly for the gDNA/nRNA identifiability risk in the strand
+  constraint design
 - ensure total gDNA abundance remains collapsed in public outputs
 - simplify or remove older gDNA-specific initialization machinery that is no
   longer needed once calibration is explicit
@@ -193,6 +210,9 @@ The work should proceed in the following order.
 Deliverables:
 
 - finalized theory docs
+- bridge analysis linking the current targeted-excess penalty and current gates
+  to the target model
+- concrete success metrics for accuracy, interpretability, and runtime overhead
 - stable vocabulary for:
   - calibration region
   - context ambiguity
@@ -210,6 +230,8 @@ Deliverables:
 
 - region partition schema
 - mapping from existing index structures to calibration intervals
+- explicit four-flag calibration-region representation built on the current
+  interval tiling
 - clear policy for ambiguous annotation contexts
 
 Exit criteria:
@@ -229,11 +251,11 @@ Exit criteria:
 
 - a run can emit a region evidence table independent of the main EM
 
-### Phase 3: Purity-model prototype
+### Phase 3: Two-state purity prototype
 
 Deliverables:
 
-- first working soft-weight model
+- first working two-state mixture purity model
 - region weight diagnostics
 - sanity plots or summaries showing that evidently RNA-rich regions receive low
   weights and evidently RNA-poor regions receive high weights
@@ -246,10 +268,11 @@ Exit criteria:
 
 Deliverables:
 
-- weighted gDNA fragment-length estimation
-- weighted empirical-Bayes estimate of $\kappa_{\mathrm{sym}}$
-- self-consistent alternation if the purity weights depend on the current
-  symmetry model
+- joint weighted estimation of gDNA fragment-length distribution and
+  $\kappa_{\mathrm{sym}}$
+- explicit initialization and convergence rules for the empirical-Bayes loop
+- at most a small fixed number of outer alternations in the first
+  implementation
 
 Exit criteria:
 
@@ -261,7 +284,7 @@ Exit criteria:
 Deliverables:
 
 - clean integration of calibrated nuisance parameters into the locus EM
-- explicit `g_plus/g_minus` locus components under a symmetric Beta prior on
+- explicit `g_pos/g_neg` locus components under a symmetric Beta prior on
   their implied strand fraction
 - simplified gDNA initialization semantics
 
@@ -296,18 +319,19 @@ The region table should contain at minimum:
 - `end`
 - `length`
 - `is_genic`
-- `has_exon_plus`
-- `has_exon_minus`
-- `has_intron_plus`
-- `has_intron_minus`
-- `strand_context`
-- `annotation_context`
-- `is_context_ambiguous`
+- `has_exon_pos`
+- `has_exon_neg`
+- `has_intron_pos`
+- `has_intron_neg`
+
+This is best treated as a four-flag scheme for calibration rather than a large
+annotation-context enum. The initial calibration partition should be built as a
+post-index refinement of the existing interval tiling, not as a full index
+refactor.
 
 Open design questions:
 
-- whether to keep context as a compact enum or bitmask
-- whether to merge tiny adjacent intervals with identical context for stability
+- whether to merge tiny adjacent intervals with identical flags for stability
 - whether to precompute neighborhood relations for splice-evidence borrowing
 
 ### 6.2 Workstream B: Fragment-to-region assignment design
@@ -326,6 +350,9 @@ First-pass admissibility rule:
 
 This should be a conscious first-order simplification, not an accidental loss of
 information.
+
+The evidence extractor should run as a post-scan aggregation over the existing
+fragment buffer and scored-fragment data, not as a second BAM pass.
 
 ### 6.3 Workstream C: Splice evidence design
 
@@ -364,8 +391,8 @@ RNA-poor background.
 
 For strand-resolved non-ambiguous regions, accumulate:
 
-- positive-strand count
-- negative-strand count
+- pos-strand count
+- neg-strand count
 - total count
 
 The strand-evidence term should not be a crude imbalance ratio alone. It should
@@ -455,7 +482,7 @@ At minimum, compare:
 
 - old model versus new model
 - hard region filtering versus soft weighting
-- fixed $\phi = 1/2$ versus free $\phi_\ell$
+- fixed symmetric gDNA pair versus adaptive gDNA-pair strand split
 - fixed hand-tuned $\kappa_{\mathrm{sym}}$ versus empirical-Bayes estimate
 - heuristic weights versus probabilistic purity approximation
 
@@ -465,12 +492,13 @@ The most conservative path that still respects the theory is:
 
 1. expose the region partition from existing index structures
 2. build a standalone region evidence table from fragments
-3. implement a simple soft purity approximation first
-4. use it to calibrate weighted gDNA fragment lengths and
+3. implement a seeded two-state purity model first
+4. use it to jointly calibrate weighted gDNA fragment lengths and
    $\kappa_{\mathrm{sym}}$
-5. integrate free $\phi_\ell$ into the main locus EM
+5. migrate the locus EM to the explicit `g_pos/g_neg` model with any needed
+  asymmetric strand constraint
 6. only then decide whether the purity model itself needs to be made more fully
-   probabilistic
+  probabilistic
 
 This sequencing keeps the first implementation tractable while preserving the
 first-principles structure.
@@ -479,8 +507,8 @@ first-principles structure.
 
 This plan intentionally leaves several questions open for future turns.
 
-1. What is the cleanest first implemented approximation to the latent continuous
-   purity model?
+1. What exact likelihood family should the first two-state purity model use for
+  splice, density, and strand evidence?
 2. How should local splice evidence be propagated to nearby unspliced intervals?
 3. Should calibration-region evidence be accumulated per base interval, merged
    neighborhood, or annotation cluster?

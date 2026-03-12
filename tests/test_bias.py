@@ -259,7 +259,6 @@ class TestBiasCorrectionCpp:
             n_comp, 0.01, 1.0, 1000, 1e-6,
             False, -1.0,
             0, 0,
-            np.array([], dtype=np.float64), np.array([], dtype=np.float64),
             np.array([], dtype=np.int32), np.array([], dtype=np.int32),
             np.array([], dtype=np.int32),
         )
@@ -290,7 +289,6 @@ class TestBiasCorrectionCpp:
             n_comp, 0.01, 1.0, 1000, 1e-6,
             False, -1.0,
             0, 0,
-            np.array([], dtype=np.float64), np.array([], dtype=np.float64),
             np.array([], dtype=np.int32), np.array([], dtype=np.int32),
             np.array([], dtype=np.int32),
         )

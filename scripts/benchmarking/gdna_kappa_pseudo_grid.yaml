@@ -9,12 +9,9 @@
 #     - 3-6 = mild penalty
 #     - 8-20 = moderate penalty
 #     - 50 = aggressive penalty
-#   strand_symmetry_pseudo: [1.0, 5.0, 10.0, 20.0, 50.0]
-#     - Controls regularization of p_hat toward 0.5
-#     - Low (1) = less regularization, penalty kicks in with few reads
-#     - High (50) = heavy regularization, need many reads for penalty
+#   strand_symmetry_pseudo: removed (folded into SS-scaled κ_eff)
 #
-# Total runs: 9 kappa × 5 pseudo = 45 runs
+# Total runs: 9 kappa runs
 
 genome_length: 50000
 seed: 42
@@ -67,4 +64,3 @@ sweep:
   strand_specificity: 1.0
   n_fragments: 10000
   strand_symmetry_kappa: [2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 50.0]
-  strand_symmetry_pseudo: [1.0, 5.0, 10.0, 20.0, 50.0]

@@ -14,6 +14,9 @@ The first calibration bundle should contain at least:
 - diagnostics describing the amount and distribution of effective calibration
   mass
 
+These should be treated as joint outputs of one calibration framework, not as
+separate upstream procedures.
+
 ## 2. Why This Fits the Current Code Well
 
 The current code already has localized calibration-like logic:
@@ -29,12 +32,28 @@ than immediately replacing everything.
 
 ## 3. Recommended First Implementation
 
-### 3.1 Weighted `kappa_sym` estimation
+### 3.1 Joint calibration stance
+
+The calibration framework should estimate both:
+
+- the gDNA strand-symmetry hyperparameter `kappa_sym`
+- the gDNA fragment-length distribution
+
+from the same purity-weighted regional evidence.
+
+The bootstrap is:
+
+1. use splice, density, and strand to obtain initial region weights
+2. estimate `kappa_sym` and gDNA fragment length from those weighted regions
+3. optionally let fragment length become a fourth purity signal in a later outer
+  iteration
+
+### 3.2 Weighted `kappa_sym` estimation
 
 Implement a dedicated estimator for the symmetric Beta-Binomial concentration
 parameter using:
 
-- per-region plus counts
+- per-region pos counts
 - per-region total counts
 - per-region gDNA-dominance weights
 
@@ -48,7 +67,7 @@ Recommended output:
 - effective weighted total fragments
 - optional fit diagnostics
 
-### 3.2 Weighted gDNA fragment-length model
+### 3.3 Weighted gDNA fragment-length model
 
 Use the same region weights to train a gDNA-specific fragment-length model from
 calibration-eligible unspliced fragments.
@@ -62,7 +81,7 @@ Recommended implementation:
 - finalize it with the existing fragment-length model machinery
 - report effective total weight and summary moments
 
-### 3.3 Calibration bundle object
+### 3.4 Calibration bundle object
 
 Add a simple container for calibrated nuisance outputs.
 
@@ -79,8 +98,10 @@ Suggested fields:
 1. define a calibration bundle dataclass
 2. implement weighted `kappa_sym` fitting from the region evidence table
 3. implement weighted gDNA fragment-length fitting from eligible fragments
-4. add calibration diagnostics and summaries in the pipeline
-5. validate on synthetic data where true gDNA symmetry dispersion and fragment
+4. define the outer-loop initialization and stopping rules for any optional
+  self-consistent refinement
+5. add calibration diagnostics and summaries in the pipeline
+6. validate on synthetic data where true gDNA symmetry dispersion and fragment
    length are known
 
 ## 5. Concrete Code Touchpoints

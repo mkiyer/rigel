@@ -146,10 +146,6 @@ def _extract_results(pr, bench, result):
             est.transcript_unspliced_sense[ti])
         info[f"{tid}_unspliced_antisense"] = float(
             est.transcript_unspliced_antisense[ti])
-        info[f"{tid}_exonic_sense"] = float(
-            est.transcript_exonic_sense[ti])
-        info[f"{tid}_exonic_antisense"] = float(
-            est.transcript_exonic_antisense[ti])
         info[f"{tid}_nrna_init"] = float(est.nrna_init[ti])
 
     info["gdna_total"] = float(est.gdna_total)

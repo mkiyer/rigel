@@ -14,6 +14,18 @@ where the implementation plan was still too optimistic:
 2. the calibration bootstrap path was underspecified
 3. the sparsity story needed to be stated more explicitly in the objective
 
+Subsequent review of the current solver and calibration stack adds four more
+important refinements:
+
+4. the bridge from the current targeted-excess penalty to the target Beta-prior
+  model should be made explicit
+5. the gDNA/nRNA identifiability problem requires an asymmetric solver-design
+  discussion, not only a symmetric prior
+6. gDNA fragment-length estimation and $\kappa_{\mathrm{sym}}$ estimation are
+  coupled calibration targets
+7. the first purity implementation target should be a two-state mixture rather
+  than a full continuous latent-purity model
+
 ## 2. Point-by-Point Assessment
 
 ### 2.1 Collapsed gDNA versus two internal gDNA components
@@ -21,7 +33,7 @@ where the implementation plan was still too optimistic:
 Assessment:
 
 - mathematically, the critique is right that a collapsed gDNA component with a
-  free strand parameter is isomorphic to a two-component `g_plus/g_minus`
+  free strand parameter is isomorphic to a two-component `g_pos/g_neg`
   representation
 - architecturally, the critique is also right that `T + N + 2` may be easier to
   implement because it keeps the solver closer to a standard mixture update
@@ -90,10 +102,15 @@ The revised near-term plan is:
 
 1. build region partition and evidence extraction first
 2. define a conservative gDNA-dominant seed set
-3. fit initial gDNA nuisance parameters from that seed set
-4. only then add soft weighting for calibration expansion
-5. implement the main EM migration around the `T + N + 2` gDNA pair model while
-  preserving collapsed public gDNA output
+3. fit a first two-state purity model over gDNA-dominant versus
+  RNA-contaminated regions
+4. estimate gDNA fragment length and $\kappa_{\mathrm{sym}}$ jointly from those
+  purity-weighted regions
+5. complete a bridge analysis from the current targeted-excess penalty to the
+  new gDNA-pair prior model
+6. implement the main EM migration around the `T + N + 2` gDNA pair model while
+  preserving collapsed public gDNA output and addressing the asymmetric
+  gDNA/nRNA identifiability risk
 
 ## 4. What Did Not Change
 

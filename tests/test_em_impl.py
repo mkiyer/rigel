@@ -80,8 +80,6 @@ def _make_locus(
         use_vbem, prune_threshold,
         0,  # n_transcripts=0 → classic (unlinked) mode
         0,  # n_nrna=0
-        np.array([], dtype=np.float64),  # nrna_frac_alpha
-        np.array([], dtype=np.float64),  # nrna_frac_beta
         np.array([], dtype=np.int32),  # t_to_nrna
         np.array([], dtype=np.int32),  # nrna_to_t_offsets
         np.array([], dtype=np.int32),  # nrna_to_t_indices
@@ -567,8 +565,6 @@ def _make_linked_locus(
     units: list[list[tuple[int, float, float, int, int]]],
     n_transcripts: int,
     unambig_totals: np.ndarray | None = None,
-    nrna_frac_alpha: np.ndarray | None = None,
-    nrna_frac_beta: np.ndarray | None = None,
     bias_profiles: np.ndarray | None = None,
     prior_eligible: np.ndarray | None = None,
     effective_lengths: np.ndarray | None = None,
@@ -621,10 +617,6 @@ def _make_linked_locus(
         prior_eligible = np.ones(n_components, dtype=np.float64)
     if effective_lengths is None:
         effective_lengths = np.ones(n_components, dtype=np.float64)
-    if nrna_frac_alpha is None:
-        nrna_frac_alpha = np.ones(n_nrna, dtype=np.float64)  # Beta(1,1) = uniform
-    if nrna_frac_beta is None:
-        nrna_frac_beta = np.ones(n_nrna, dtype=np.float64)
 
     # 1:1 transcript→nRNA mapping for tests
     t_to_nrna = np.arange(n_t, dtype=np.int32)
@@ -640,7 +632,6 @@ def _make_linked_locus(
         False,  # use_vbem (not supported for linked)
         prune_threshold,
         n_transcripts, n_nrna,
-        nrna_frac_alpha, nrna_frac_beta,
         t_to_nrna, nrna_to_t_offsets, nrna_to_t_indices,
     )
     theta = np.asarray(theta)
@@ -665,12 +656,9 @@ class TestLinkedEmBasic:
     def test_empty_locus_nrna_frac_near_zero(self):
         """Empty linked locus: nrna_frac is near zero (no nRNA evidence)."""
         n_t = 2
-        ea = np.array([3.0, 7.0])
-        eb = np.array([7.0, 3.0])
         theta, alpha, em, nrna_frac = _make_linked_locus(
             units=[], n_transcripts=n_t,
             unambig_totals=np.array([5.0, 3.0, 0.0, 0.0, 0.0]),
-            nrna_frac_alpha=ea, nrna_frac_beta=eb,
         )
         assert nrna_frac.shape == (n_t,)
         # No data for nRNA → nrna_frac should be very low
@@ -729,57 +717,6 @@ class TestLinkedEmBasic:
                 np.testing.assert_allclose(nrna_frac[i], nrna_frac_from_decomp, atol=1e-8)
 
 
-class TestLinkedEmPriorInfluence:
-    """Test that nrna_frac prior affects convergence."""
-
-    def test_strong_mrna_prior_favours_low_nrna_frac(self):
-        """Strong Beta prior favouring mRNA (low nrna_frac) pulls nrna_frac down."""
-        n_t = 1
-        # Ambiguous data equally between mRNA_0 and nRNA_0
-        units = [
-            [(0, 0.0, 1.0, 0, 0), (1, 0.0, 1.0, 0, 0)],
-        ] * 20
-        unambig = np.array([0.0, 0.0, 0.0])
-
-        # Strong prior: nrna_frac ~ 0.1 with κ=100
-        _, _, _, nrna_frac_low = _make_linked_locus(
-            units=units, n_transcripts=n_t,
-            unambig_totals=unambig.copy(),
-            nrna_frac_alpha=np.array([10.0]),  # α=10
-            nrna_frac_beta=np.array([90.0]),   # β=90 → prior mean 0.1
-        )
-        # Weak prior: nrna_frac ~ 0.5
-        _, _, _, nrna_frac_weak = _make_linked_locus(
-            units=units, n_transcripts=n_t,
-            unambig_totals=unambig.copy(),
-            nrna_frac_alpha=np.array([1.0]),
-            nrna_frac_beta=np.array([1.0]),
-        )
-        assert nrna_frac_low[0] < nrna_frac_weak[0]
-
-    def test_strong_nrna_prior_favours_high_nrna_frac(self):
-        """Strong Beta prior favouring nRNA (high nrna_frac) pulls nrna_frac up."""
-        n_t = 1
-        units = [
-            [(0, 0.0, 1.0, 0, 0), (1, 0.0, 1.0, 0, 0)],
-        ] * 20
-        unambig = np.array([0.0, 0.0, 0.0])
-
-        _, _, _, nrna_frac_high = _make_linked_locus(
-            units=units, n_transcripts=n_t,
-            unambig_totals=unambig.copy(),
-            nrna_frac_alpha=np.array([90.0]),  # prior mean 0.9
-            nrna_frac_beta=np.array([10.0]),
-        )
-        _, _, _, nrna_frac_weak = _make_linked_locus(
-            units=units, n_transcripts=n_t,
-            unambig_totals=unambig.copy(),
-            nrna_frac_alpha=np.array([1.0]),
-            nrna_frac_beta=np.array([1.0]),
-        )
-        assert nrna_frac_high[0] > nrna_frac_weak[0]
-
-
 class TestLinkedEmDataDriven:
     """Test that data overwhelms weak priors correctly."""
 
@@ -791,8 +728,6 @@ class TestLinkedEmDataDriven:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=np.array([50.0, 0.0, 0.0]),
-            nrna_frac_alpha=np.array([1.0]),
-            nrna_frac_beta=np.array([1.0]),
         )
         assert nrna_frac[0] < 0.1
 
@@ -804,8 +739,6 @@ class TestLinkedEmDataDriven:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=np.array([0.0, 50.0, 0.0]),
-            nrna_frac_alpha=np.array([1.0]),
-            nrna_frac_beta=np.array([1.0]),
         )
         assert nrna_frac[0] > 0.9
 
@@ -850,8 +783,6 @@ class TestLinkedEmUnstranded:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=unambig,
-            nrna_frac_alpha=np.array([1.0]),  # Beta(1,1) = uninformative
-            nrna_frac_beta=np.array([1.0]),
         )
         # nrna_frac should be near the data ratio ≈ (10+5)/(30+15+10+5) = 15/60 = 0.25
         assert 0.15 < nrna_frac[0] < 0.40
@@ -866,8 +797,6 @@ class TestLinkedEmUnstranded:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=unambig,
-            nrna_frac_alpha=np.array([1.0]),
-            nrna_frac_beta=np.array([1.0]),
         )
         # nrna_frac should be pulled low by the mRNA-heavy unambig data
         assert nrna_frac[0] < 0.3
@@ -885,8 +814,6 @@ class TestLinkedEmUnstranded:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=unambig,
-            nrna_frac_alpha=np.array([1.0, 1.0]),
-            nrna_frac_beta=np.array([1.0, 1.0]),
         )
         # Both nrna_frac should be similar (near 0.5)
         np.testing.assert_allclose(nrna_frac[0], nrna_frac[1], atol=0.05)
@@ -917,8 +844,6 @@ class TestLinkedEmHighGDNA:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=unambig,
-            nrna_frac_alpha=np.array([1.0]),
-            nrna_frac_beta=np.array([1.0]),
         )
         # gDNA component should get substantial fraction
         assert theta[2] > 0.3  # gDNA
@@ -972,8 +897,6 @@ class TestLinkedEmHighGDNA:
         theta, _, _, nrna_frac = _make_linked_locus(
             units=units, n_transcripts=n_t,
             unambig_totals=unambig,
-            nrna_frac_alpha=np.array([4.0, 4.0]),  # α=4, β=16 → prior mean 0.2
-            nrna_frac_beta=np.array([16.0, 16.0]),
         )
         # gDNA should get the lion's share
         assert theta[4] > 0.5

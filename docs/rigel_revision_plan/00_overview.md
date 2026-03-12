@@ -62,13 +62,22 @@ That order is preferable because:
 4. it avoids prematurely hard-coding a purity model that later turns out to be
    misaligned with the empirical data
 
+The updated recommendation is more specific:
+
+- build the calibration partition on top of the existing index tiling
+- use a two-state purity model as the first practical implementation target
+- estimate gDNA fragment length and $\kappa_{\mathrm{sym}}$ jointly from the
+  same purity-weighted regions
+- preserve the one-sided robustness insight from the current targeted-excess
+  penalty when designing the new gDNA-pair solver constraint
+
 ## 3. Public Model Versus Internal Parameterization
 
 Publicly, Rigel should still report one collapsed gDNA abundance per locus.
 
 Internally, the chosen implementation target is:
 
-1. a `T + N + 2` model with `g_plus` and `g_minus` as ordinary mixture
+1. a `T + N + 2` model with `g_pos` and `g_neg` as ordinary mixture
    components
 2. public reporting that collapses them to total locus gDNA abundance
 
@@ -113,11 +122,12 @@ The current repository supports a fairly definitive plan for these workstreams.
 - Workstream E: weighted calibration interface and estimators
 - much of Workstream F: integration points and deprecation targets
 - conservative calibration seed-set definition
+- bridge analysis from current targeted-excess penalty to target prior model
 
 ### 4.2 Intentionally deferred
 
-- the exact first purity approximation
-- whether the first purity model is continuous, two-state, or heuristic
+- the exact feature family and likelihood parameterization inside the first
+   two-state purity model
 - whether splice evidence should borrow from a strict overlap window or a wider
   neighborhood model
 

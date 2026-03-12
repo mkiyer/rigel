@@ -442,10 +442,10 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels):
 
     # EM config overrides (recognized but not defaulted — absent = EMConfig default)
     # Supported: prune_threshold, prior_alpha, prior_gamma,
-    #            strand_symmetry_kappa, strand_symmetry_pseudo
+    #            strand_symmetry_kappa
     EM_OVERRIDE_KEYS = {
         "prune_threshold", "prior_alpha", "prior_gamma",
-        "strand_symmetry_kappa", "strand_symmetry_pseudo",
+        "strand_symmetry_kappa",
     }
 
     return dims, linked_names, EM_OVERRIDE_KEYS

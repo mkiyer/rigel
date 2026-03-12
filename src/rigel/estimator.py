@@ -11,9 +11,8 @@ then counts are accumulated from the converged posterior.
 
 Data containers (``ScoredFragments``, ``Locus``, ``LocusEMInput``)
 live in ``rigel.scored_fragments``.  Prior computation functions
-(``compute_nrna_frac_priors``, ``estimate_kappa``,
-``compute_global_gdna_density``) live in ``rigel.priors``.
-Both are re-exported here for backward compatibility.
+(``estimate_kappa``, ``compute_global_gdna_density``) live in
+``rigel.priors``.  Both are re-exported here for backward compatibility.
 """
 
 import logging
@@ -38,11 +37,8 @@ from .scored_fragments import ScoredFragments, Locus, LocusEMInput  # noqa: F401
 
 # --- Re-exports from priors (backward compatibility) ---
 from .priors import (  # noqa: F401
-    STRAND_DENOM_EPS as _STRAND_DENOM_EPS,
-    DEFAULT_MEAN_FRAG as _DEFAULT_MEAN_FRAG,
     compute_global_gdna_density,
     estimate_kappa,
-    compute_nrna_frac_priors,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,7 +119,7 @@ class AbundanceEstimator:
             )
         else:
             self._t_to_g = None
-            self._mean_frag = _DEFAULT_MEAN_FRAG
+            self._mean_frag = 200.0
             self._transcript_spans = None
             self._exonic_lengths = None
             self._t_eff_len = np.ones(
@@ -145,11 +141,6 @@ class AbundanceEstimator:
         # Per-nRNA shadow initialization and EM counts.
         self.nrna_init = np.zeros(self.num_nrna, dtype=np.float64)
         self.nrna_em_counts = np.zeros(self.num_nrna, dtype=np.float64)
-
-        # Per-nRNA nrna_frac (nascent fraction) Beta prior parameters.
-        # Computed after the scan phase by compute_nrna_frac_priors().
-        self.nrna_frac_alpha = np.ones(self.num_nrna, dtype=np.float64)
-        self.nrna_frac_beta = np.ones(self.num_nrna, dtype=np.float64)
 
         # --- gDNA: locus-level, NOT per-gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)
@@ -186,18 +177,6 @@ class AbundanceEstimator:
         )
         self.transcript_intronic_antisense = np.zeros(
             self.num_nrna, dtype=np.float64
-        )
-
-        # --- Pre-EM exonic accumulators (for nrna_frac prior) ---
-        # All unambig + ambig-same-strand fragments overlapping each
-        # transcript, weighted by 1/n_candidates.  Provides balanced
-        # exonic evidence for the nrna_frac (nascent fraction) estimator,
-        # unlike unambig_counts which only has splice-spanning unambig.
-        self.transcript_exonic_sense = np.zeros(
-            num_transcripts, dtype=np.float64
-        )
-        self.transcript_exonic_antisense = np.zeros(
-            num_transcripts, dtype=np.float64
         )
 
         # Per-transcript confidence tracking:
@@ -297,6 +276,7 @@ class AbundanceEstimator:
         index,
         gdna_inits: np.ndarray,
         *,
+        strand_specificity: float = 0.5,
         em_iterations: int = _EM_DEFAULTS.iterations,
         em_convergence_delta: float = _EM_DEFAULTS.convergence_delta,
         confidence_threshold: float = _EM_DEFAULTS.confidence_threshold,
@@ -384,8 +364,6 @@ class AbundanceEstimator:
             # Per-transcript data
             self.unambig_counts,
             self.nrna_init,
-            self.nrna_frac_alpha,
-            self.nrna_frac_beta,
             t_starts,
             t_ends,
             t_lengths,
@@ -414,7 +392,7 @@ class AbundanceEstimator:
             NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,
             self.em_config.strand_symmetry_kappa,
-            self.em_config.strand_symmetry_pseudo,
+            strand_specificity,
         )
 
         return (

@@ -29,8 +29,8 @@ The first-pass evidence table should include at least:
 
 - `region_id`
 - total unspliced fragment count
-- plus-strand unspliced count
-- minus-strand unspliced count
+- pos-strand unspliced count
+- neg-strand unspliced count
 - spliced evidence count in or near the region
 - total fragment-length summary for calibration-eligible unspliced fragments
 - effective-length-normalized density summaries by context
@@ -76,8 +76,8 @@ Then assign the fragment to regions according to the admissibility rule.
 Maintain a per-region accumulator with fields such as:
 
 - `n_unspliced`
-- `n_unspliced_plus`
-- `n_unspliced_minus`
+- `n_unspliced_pos`
+- `n_unspliced_neg`
 - `n_spliced_local`
 - `frag_length_sum`
 - `frag_length_weight`
@@ -108,7 +108,7 @@ Initial recommendation:
 
 Initial recommendation:
 
-- store raw plus/minus counts first
+- store raw pos/neg counts first
 - do not transform them into a symmetry score inside the evidence extractor
 - leave Beta-Binomial modeling to the calibration layer
 

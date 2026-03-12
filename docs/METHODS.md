@@ -337,13 +337,10 @@ using Method of Moments and evidence thresholds.
 
 ### 10.3 Strand symmetry penalty
 
-The native M-step can penalize asymmetric gDNA strand usage using:
-
-- `strand_symmetry_kappa`
-- `strand_symmetry_pseudo`
-
-This acts as a Beta prior on gDNA strand fraction and discourages gDNA solutions
-that look implausibly strand-specific.
+The native M-step penalizes asymmetric gDNA strand usage using
+`strand_symmetry_kappa`. The effective κ scales by strand specificity:
+κ_eff = κ · (2·SS − 1)². This auto-disables the penalty at low SS where
+strand balance carries no gDNA-specific information.
 
 ---
 
@@ -435,8 +432,8 @@ strand whose 5' positions lie within a configurable window (default
 200 bp) are merged into a single TSS group.
 
 The 5' position is defined as the genomic start coordinate for
-positive-strand transcripts and the genomic end coordinate for
-negative-strand transcripts.
+pos-strand transcripts and the genomic end coordinate for
+neg-strand transcripts.
 
 Within each TSS group, the nascent fraction is estimated from the
 pooled spliced/unspliced ratio, with $\kappa$ shrinking toward the

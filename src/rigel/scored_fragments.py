@@ -166,5 +166,3 @@ class LocusEMInput:
     effective_lengths: np.ndarray
     prior: np.ndarray
     bias_profiles: np.ndarray | list | None
-    nrna_frac_alpha: np.ndarray
-    nrna_frac_beta: np.ndarray

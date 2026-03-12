@@ -16,7 +16,7 @@ from .native import connected_components as _cc_native
 
 from .config import EMConfig
 from .scored_fragments import Locus, LocusEMInput, ScoredFragments
-from .priors import STRAND_DENOM_EPS as _STRAND_DENOM_EPS, estimate_kappa
+from .priors import estimate_kappa
 from .native import EM_PRIOR_EPSILON
 from .index import TranscriptIndex
 from .strand_model import StrandModels
@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 #: When the denominator is below this threshold, the strand signal is too
 #: weak to reliably estimate nRNA or gDNA fractions — we return 0.0.
 STRAND_DENOM_MIN: float = 0.2
+
+#: Minimum denominator for the strand weight ``2s − 1`` below which
+#: the strand component of the hybrid estimator is zeroed out.
+_STRAND_DENOM_EPS: float = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -408,10 +412,6 @@ def build_locus_em_data(
             if all_single:
                 prior[n_t + ln] = 0.0
 
-    # Zero nRNA prior when nrna_init is zero for that nRNA.
-    nrna_init_local = estimator.nrna_init[unique_global_nrna]
-    prior[n_t:n_t + n_nrna][nrna_init_local == 0.0] = 0.0
-
     # Zero unambig_totals for dead components—prevents the EM M-step
     # (theta_new = unambig_totals + em_totals + prior) from seeding
     # non-zero theta for components whose prior has been zeroed.
@@ -442,8 +442,6 @@ def build_locus_em_data(
         effective_lengths=eff_len,
         prior=prior,
         bias_profiles=bias_profiles,
-        nrna_frac_alpha=estimator.nrna_frac_alpha[unique_global_nrna].copy(),
-        nrna_frac_beta=estimator.nrna_frac_beta[unique_global_nrna].copy(),
     )
 
 
@@ -487,7 +485,10 @@ def compute_nrna_init(
     denom = 2.0 * strand_spec - 1.0
 
     if denom <= STRAND_DENOM_MIN:
-        nrna_init = np.zeros_like(intronic_sense)
+        # Low SS: use total intronic coverage as init
+        # (can't separate nRNA from gDNA by strand, but intronic reads
+        # are still evidence of nRNA or gDNA — let the EM decide)
+        nrna_init = np.maximum(0.0, intronic_sense + intronic_antisense)
     else:
         raw = (
             intronic_sense - intronic_antisense
@@ -690,10 +691,10 @@ def compute_eb_gdna_priors(
     kappa_locus: float | None = None,
     mom_min_evidence_ref: float = 50.0,
     mom_min_evidence_locus: float = 30.0,
-    kappa_min: float = EMConfig().nrna_frac_kappa_min,
-    kappa_max: float = EMConfig().nrna_frac_kappa_max,
-    kappa_fallback: float = EMConfig().nrna_frac_kappa_fallback,
-    kappa_min_obs: int = EMConfig().nrna_frac_kappa_min_obs,
+    kappa_min: float = EMConfig().gdna_kappa_min,
+    kappa_max: float = EMConfig().gdna_kappa_max,
+    kappa_fallback: float = EMConfig().gdna_kappa_fallback,
+    kappa_min_obs: int = EMConfig().gdna_kappa_min_obs,
 ) -> list[float]:
     """Compute empirical Bayes gDNA initialization per locus.
 

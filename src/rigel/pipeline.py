@@ -40,7 +40,6 @@ from .splice import SpliceType
 from .estimator import (
     AbundanceEstimator,
     compute_global_gdna_density,
-    compute_nrna_frac_priors,
 )
 from .types import ChimeraType, Strand
 from .index import TranscriptIndex
@@ -490,34 +489,10 @@ def _compute_priors(
         kappa_locus=em_config.gdna_kappa_locus,
         mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
         mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
-        kappa_min=em_config.nrna_frac_kappa_min,
-        kappa_max=em_config.nrna_frac_kappa_max,
-        kappa_fallback=em_config.nrna_frac_kappa_fallback,
-        kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
-    )
-
-    # Global gDNA density for the density subtraction component.
-    gdna_density = compute_global_gdna_density(
-        estimator, strand_models.strand_specificity,
-    )
-
-    # Compute nrna_frac (nascent fraction) Beta priors via hybrid
-    # density + strand model with 3-tier EB shrinkage.
-    compute_nrna_frac_priors(
-        estimator,
-        nrna_strands=index.nrna_df["strand"].values,
-        nrna_spans=nrna_spans,
-        strand_specificity=strand_models.strand_specificity,
-        gdna_density=gdna_density,
-        kappa_global=em_config.nrna_frac_kappa_global,
-        kappa_locus=em_config.nrna_frac_kappa_locus,
-        kappa_nrna=em_config.nrna_frac_kappa_nrna,
-        mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
-        mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
-        kappa_min=em_config.nrna_frac_kappa_min,
-        kappa_max=em_config.nrna_frac_kappa_max,
-        kappa_fallback=em_config.nrna_frac_kappa_fallback,
-        kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
+        kappa_min=em_config.gdna_kappa_min,
+        kappa_max=em_config.gdna_kappa_max,
+        kappa_fallback=em_config.gdna_kappa_fallback,
+        kappa_min_obs=em_config.gdna_kappa_min_obs,
     )
 
     return gdna_inits
@@ -530,6 +505,7 @@ def _run_locus_em(
     index: TranscriptIndex,
     gdna_inits: list[float],
     em_config: EMConfig,
+    strand_specificity: float = 0.5,
 ) -> None:
     """Run batch locus-level EM and record per-locus results."""
     t_refs = index.t_df["ref"].values
@@ -567,6 +543,7 @@ def _run_locus_em(
         em_data,
         index,
         np.asarray(gdna_inits, dtype=np.float64),
+        strand_specificity=strand_specificity,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
         confidence_threshold=em_config.confidence_threshold,
@@ -673,6 +650,7 @@ def quant_from_buffer(
 
         _run_locus_em(
             estimator, em_data, loci, index, gdna_inits, em_config,
+            strand_specificity=strand_models.strand_specificity,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")

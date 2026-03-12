@@ -73,9 +73,9 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.config is None
 
-    def test_nrna_frac_kappa_min_default_none(self):
+    def test_gdna_kappa_min_default_none(self):
         args = _parse_quant()
-        assert args.nrna_frac_kappa_min is None
+        assert args.gdna_kappa_min is None
 
 
 # ---------------------------------------------------------------------------
@@ -111,21 +111,21 @@ class TestBooleanFlags:
 class TestAdvancedParams:
     """Advanced parameters are parsed correctly."""
 
-    def test_nrna_frac_kappa_nrna(self):
-        args = _parse_quant("--nrna-frac-kappa-nrna", "8.0")
-        assert args.nrna_frac_kappa_nrna == 8.0
+    def test_gdna_kappa_min(self):
+        args = _parse_quant("--gdna-kappa-min", "3.0")
+        assert args.gdna_kappa_min == 3.0
 
-    def test_nrna_frac_mom_min_evidence_global(self):
-        args = _parse_quant("--nrna-frac-mom-min-evidence-global", "100")
-        assert args.nrna_frac_mom_min_evidence_global == 100.0
+    def test_gdna_kappa_max(self):
+        args = _parse_quant("--gdna-kappa-max", "150.0")
+        assert args.gdna_kappa_max == 150.0
 
-    def test_nrna_frac_kappa_fallback(self):
-        args = _parse_quant("--nrna-frac-kappa-fallback", "10")
-        assert args.nrna_frac_kappa_fallback == 10.0
+    def test_gdna_kappa_fallback(self):
+        args = _parse_quant("--gdna-kappa-fallback", "10")
+        assert args.gdna_kappa_fallback == 10.0
 
-    def test_nrna_frac_kappa_min_obs(self):
-        args = _parse_quant("--nrna-frac-kappa-min-obs", "50")
-        assert args.nrna_frac_kappa_min_obs == 50
+    def test_gdna_kappa_min_obs(self):
+        args = _parse_quant("--gdna-kappa-min-obs", "50")
+        assert args.gdna_kappa_min_obs == 50
 
 
 # ---------------------------------------------------------------------------
@@ -141,34 +141,34 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is True
         assert args.em_prior_alpha == 0.01
-        assert args.nrna_frac_kappa_nrna == 5.0
-        assert args.nrna_frac_kappa_min == 2.0
+        assert args.gdna_kappa_min == 2.0
+        assert args.gdna_kappa_max == 200.0
         assert args.sj_strand_tag == ["auto"]
 
     def test_cli_overrides_default(self):
-        args = _parse_quant("--no-include-multimap", "--nrna-frac-kappa-nrna", "8.0")
+        args = _parse_quant("--no-include-multimap", "--gdna-kappa-min", "3.0")
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is False
-        assert args.nrna_frac_kappa_nrna == 8.0
+        assert args.gdna_kappa_min == 3.0
 
     def test_yaml_overrides_default(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text(textwrap.dedent("""\
             em_prior_alpha: 0.05
-            nrna_frac_kappa_nrna: 7.0
+            gdna_kappa_min: 3.0
             include_multimap: false
         """))
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.em_prior_alpha == 0.05
-        assert args.nrna_frac_kappa_nrna == 7.0
+        assert args.gdna_kappa_min == 3.0
         assert args.include_multimap is False
 
     def test_cli_overrides_yaml(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text(textwrap.dedent("""\
             em_prior_alpha: 0.05
-            nrna_frac_kappa_nrna: 7.0
+            gdna_kappa_min: 3.0
         """))
         args = _parse_quant(
             "--config", str(cfg),
@@ -178,14 +178,14 @@ class TestResolveQuant:
         # CLI wins
         assert args.em_prior_alpha == 0.1
         # YAML wins over default
-        assert args.nrna_frac_kappa_nrna == 7.0
+        assert args.gdna_kappa_min == 3.0
 
     def test_yaml_hyphens_normalised(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("nrna-frac-kappa-min: 4.0\n")
+        cfg.write_text("gdna-kappa-min: 4.0\n")
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.nrna_frac_kappa_min == 4.0
+        assert args.gdna_kappa_min == 4.0
 
     def test_yaml_unknown_keys_logged(self, tmp_path, caplog):
         """Unknown YAML keys are logged as warnings, not raised."""

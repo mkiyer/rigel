@@ -828,7 +828,6 @@ private:
         const ChunkPtrs& cp,
         int chunk_idx,
         const int8_t* t_str,
-        double* acc_es, double* acc_ea,
         double* acc_us, double* acc_ua,
         double* acc_is, double* acc_ia,
         double* ua_counts, int ua_ncols,
@@ -923,10 +922,6 @@ private:
                         int32_t nrna_idx = t_to_nrna_[t_idx];
                         bool has_ui = (ui_bp[k] > 0);
 
-                        if (!has_ui) {
-                            if (is_anti) acc_ea[t_idx] += weight;
-                            else         acc_es[t_idx] += weight;
-                        }
                         if (is_unspliced) {
                             if (is_anti) acc_ua[nrna_idx] += weight;
                             else         acc_us[nrna_idx] += weight;
@@ -1274,8 +1269,6 @@ public:
     nb::tuple fused_score_buffer(
         nb::list chunk_arrays,
         i8_1d   t_to_strand_arr,
-        f64_mut exonic_sense,
-        f64_mut exonic_antisense,
         f64_mut unspliced_sense,
         f64_mut unspliced_antisense,
         f64_mut intronic_sense,
@@ -1284,8 +1277,6 @@ public:
         double  gdna_log_splice_pen_unspliced)
     {
         const int8_t* t_str = t_to_strand_arr.data();
-        double* acc_es = exonic_sense.data();
-        double* acc_ea = exonic_antisense.data();
         double* acc_us = unspliced_sense.data();
         double* acc_ua = unspliced_antisense.data();
         double* acc_is = intronic_sense.data();
@@ -1335,7 +1326,7 @@ public:
                 cps[ci],
                 static_cast<int>(ci),
                 t_str,
-                acc_es, acc_ea, acc_us, acc_ua,
+                acc_us, acc_ua,
                 acc_is, acc_ia, ua_c, ua_ncols,
                 gdna_log_splice_pen_unspliced,
                 count_st,
@@ -1408,7 +1399,7 @@ public:
                 cps[ci],
                 static_cast<int>(ci),
                 t_str,
-                acc_es, acc_ea, acc_us, acc_ua,
+                acc_us, acc_ua,
                 acc_is, acc_ia, ua_c, ua_ncols,
                 gdna_log_splice_pen_unspliced,
                 fill_st,
@@ -1562,8 +1553,6 @@ NB_MODULE(_scoring_impl, m) {
              &NativeFragmentScorer::fused_score_buffer,
              nb::arg("chunk_arrays"),
              nb::arg("t_to_strand_arr"),
-             nb::arg("exonic_sense"),
-             nb::arg("exonic_antisense"),
              nb::arg("unspliced_sense"),
              nb::arg("unspliced_antisense"),
              nb::arg("intronic_sense"),

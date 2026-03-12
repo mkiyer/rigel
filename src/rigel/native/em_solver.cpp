@@ -40,7 +40,6 @@ namespace nb = nanobind;
 static constexpr double EM_LOG_EPSILON = 1e-300;
 static constexpr int    MAX_FRAG_LEN  = 1000000;
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
-static constexpr double NRNA_FRAC_CLAMP_EPS = 1e-8;
 
 // Target number of element-operations per E-step parallel task.
 // Each equivalence class row with k components costs O(k); tasks are
@@ -535,19 +534,13 @@ static void parallel_estep(
 // Hierarchical MAP-EM step: theta → theta_new
 // ================================================================
 //
-// Unified EM step that handles both plain MAP-EM (n_nrna == 0) and
-// hierarchical nRNA group EM (n_nrna > 0).
+// Plain MAP-EM step with strand symmetry penalty for gDNA.
 //
-// When n_nrna > 0, the M-step enforces per-nRNA nascent fraction (η)
-// priors via a hierarchical update:
-//   1. Compute group counts (nRNA counts + sum of mature transcript counts)
-//   2. Update η_n via MAP Beta posterior
-//   3. Redistribute group mass: nRNA gets η × C_group,
-//      mature transcripts share (1-η) × C_group proportional to their
-//      individual counts
-//   4. Normalize globally
+// All components (mRNA, nRNA, gDNA) compete independently through the
+// likelihood.  The M-step applies a targeted excess penalty to the gDNA
+// component based on strand symmetry.
 
-static void hierarchical_map_em_step(
+static void map_em_step(
     const double* theta,
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
@@ -556,19 +549,11 @@ static void hierarchical_map_em_step(
     double*       em_totals,    // zeroed then accumulated
     double*       theta_new,    // output: normalized
     int           n_components,
-    // Hierarchical nRNA parameters (all NULL/0 for plain mode)
-    int           n_transcripts = 0,
-    int           n_nrna = 0,
-    const int32_t* t_to_nrna = nullptr,
-    const int32_t* nrna_to_t_off = nullptr,
-    const int32_t* nrna_to_t_idx = nullptr,
-    const double* nrna_frac_alpha = nullptr,
-    const double* nrna_frac_beta = nullptr,
     int           estep_threads = 1,
     rigel::EStepThreadPool* pool = nullptr,
     // Strand symmetry penalty parameters
     double        strand_symmetry_kappa = 2.0,
-    double        strand_eps = 10.0)
+    double        strand_specificity = 0.5)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -600,115 +585,19 @@ static void hierarchical_map_em_step(
     // kappa <= 2.0 disables the penalty entirely (fast path).
     // The strand accumulation loop only runs when the penalty is active.
 
-    if (n_nrna == 0) {
-        // Plain MAP-EM: theta_new = (unambig + em + prior), normalized
-        int gi = n_components - 1;  // gDNA is always last
-        double total = 0.0;
-        for (int i = 0; i < n_components; ++i) {
-            theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
-            total += theta_new[i];
-        }
-
-        // Apply targeted excess penalty to gDNA
-        if (strand_symmetry_kappa > 2.0 && n_components > 0) {
-            double e_sense_gdna = 0.0, e_anti_gdna = 0.0;
-            for (const auto& ec : ec_data) {
-                if (ec.gdna_col < 0) continue;
-                int gcol = ec.gdna_col;
-                for (int i = 0; i < ec.n; ++i) {
-                    double p = ec.scratch[static_cast<size_t>(i) * ec.k + gcol];
-                    if (ec.gdna_is_anti[i])
-                        e_anti_gdna += p;
-                    else
-                        e_sense_gdna += p;
-                }
-            }
-
-            double e_min = std::min(e_sense_gdna, e_anti_gdna);
-            double e_max = std::max(e_sense_gdna, e_anti_gdna);
-            double e_sym = 2.0 * e_min;
-            double e_excess = e_max - e_min;
-
-            double N_g = e_sense_gdna + e_anti_gdna;
-            double w_sym = 1.0;
-            if (N_g > 0.0) {
-                double pseudo_half = strand_eps / 2.0;
-                double p_hat = (e_sense_gdna + pseudo_half) / (N_g + strand_eps);
-                double balance = 4.0 * p_hat * (1.0 - p_hat);
-                w_sym = std::pow(balance, strand_symmetry_kappa / 2.0 - 1.0);
-            }
-
-            double penalized_em = e_sym + e_excess * w_sym;
-            double old_g = theta_new[gi];
-            theta_new[gi] = penalized_em + unambig_totals[gi] + prior[gi];
-            total += theta_new[gi] - old_g;
-        }
-
-        if (total > 0.0) {
-            double inv_total = 1.0 / total;
-            for (int i = 0; i < n_components; ++i) {
-                theta_new[i] *= inv_total;
-            }
-        }
-        return;
+    // Plain MAP-EM: theta_new = (unambig + em + prior), normalized
+    int gi = n_components - 1;  // gDNA is always last
+    double total = 0.0;
+    for (int i = 0; i < n_components; ++i) {
+        theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
+        total += theta_new[i];
     }
 
-    // --- Hierarchical M-step for nRNA groups ---
-    int n_t = n_transcripts;
-    int gdna_idx = n_t + n_nrna;
-
-    // Process each nRNA group
-    for (int n = 0; n < n_nrna; ++n) {
-        // nRNA counts (EM + unambig + prior)
-        double c_nrna = em_totals[n_t + n] + unambig_totals[n_t + n]
-                      + prior[n_t + n];
-
-        // Aggregate mature counts for this group
-        int s = nrna_to_t_off[n];
-        int e = nrna_to_t_off[n + 1];
-        int fan = e - s;
-        double c_mrna = 0.0;
-        for (int j = s; j < e; ++j) {
-            int t = nrna_to_t_idx[j];
-            c_mrna += em_totals[t] + unambig_totals[t] + prior[t];
-        }
-
-        double c_group = c_nrna + c_mrna;
-
-        // Update nascent fraction (η) via MAP Beta posterior
-        double a = nrna_frac_alpha[n];
-        double b = nrna_frac_beta[n];
-        double eta_den = c_group + a + b - 2.0;
-        double eta;
-        if (eta_den > 0.0) {
-            eta = (c_nrna + a - 1.0) / eta_den;
-            if (eta < NRNA_FRAC_CLAMP_EPS) eta = NRNA_FRAC_CLAMP_EPS;
-            else if (eta > 1.0 - NRNA_FRAC_CLAMP_EPS) eta = 1.0 - NRNA_FRAC_CLAMP_EPS;
-        } else {
-            eta = 0.5;
-        }
-
-        // Set nRNA weight
-        theta_new[n_t + n] = eta * c_group;
-
-        // Distribute mature mass proportional to per-transcript counts
-        if (c_mrna > 0.0) {
-            for (int j = s; j < e; ++j) {
-                int t = nrna_to_t_idx[j];
-                double c_t = em_totals[t] + unambig_totals[t] + prior[t];
-                theta_new[t] = (1.0 - eta) * (c_t / c_mrna) * c_group;
-            }
-        } else {
-            // No mature evidence: distribute equally
-            double share = (1.0 - eta) * c_group / std::max(fan, 1);
-            for (int j = s; j < e; ++j) {
-                theta_new[nrna_to_t_idx[j]] = share;
-            }
-        }
-    }
-
-    // gDNA: independent, apply targeted excess penalty
-    if (strand_symmetry_kappa > 2.0) {
+    // Apply targeted excess penalty to gDNA, scaled by strand specificity.
+    // kappa_eff = kappa * (2*SS - 1)^2.  At SS=0.5, kappa_eff=0 → disabled.
+    double ss_scale = 2.0 * strand_specificity - 1.0;
+    double kappa_eff = strand_symmetry_kappa * ss_scale * ss_scale;
+    if (kappa_eff > 2.0 && n_components > 0) {
         double e_sense_gdna = 0.0, e_anti_gdna = 0.0;
         for (const auto& ec : ec_data) {
             if (ec.gdna_col < 0) continue;
@@ -730,25 +619,22 @@ static void hierarchical_map_em_step(
         double N_g = e_sense_gdna + e_anti_gdna;
         double w_sym = 1.0;
         if (N_g > 0.0) {
-            double pseudo_half = strand_eps / 2.0;
-            double p_hat = (e_sense_gdna + pseudo_half) / (N_g + strand_eps);
+            double p_hat = (e_sense_gdna + 0.5) / (N_g + 1.0);
             double balance = 4.0 * p_hat * (1.0 - p_hat);
-            w_sym = std::pow(balance, strand_symmetry_kappa / 2.0 - 1.0);
+            w_sym = std::pow(balance, kappa_eff / 2.0 - 1.0);
         }
 
         double penalized_em = e_sym + e_excess * w_sym;
-        theta_new[gdna_idx] = penalized_em + unambig_totals[gdna_idx] + prior[gdna_idx];
-    } else {
-        theta_new[gdna_idx] = em_totals[gdna_idx] + unambig_totals[gdna_idx]
-                            + prior[gdna_idx];
+        double old_g = theta_new[gi];
+        theta_new[gi] = penalized_em + unambig_totals[gi] + prior[gi];
+        total += theta_new[gi] - old_g;
     }
 
-    // Normalize theta_new to sum to 1.0
-    double total = 0.0;
-    for (int i = 0; i < n_components; ++i) total += theta_new[i];
     if (total > 0.0) {
-        double inv = 1.0 / total;
-        for (int i = 0; i < n_components; ++i) theta_new[i] *= inv;
+        double inv_total = 1.0 / total;
+        for (int i = 0; i < n_components; ++i) {
+            theta_new[i] *= inv_total;
+        }
     }
 }
 
@@ -882,19 +768,11 @@ static EMResult run_squarem(
     double        convergence_delta,
     bool          use_vbem,
     double        prune_threshold,
-    // Hierarchical nRNA parameters (all NULL/0 for plain mode)
-    int           n_transcripts = 0,
-    int           n_nrna = 0,
-    const int32_t* t_to_nrna = nullptr,
-    const int32_t* nrna_to_t_off = nullptr,
-    const int32_t* nrna_to_t_idx = nullptr,
-    const double* nrna_frac_alpha = nullptr,
-    const double* nrna_frac_beta = nullptr,
     int           estep_threads = 1,
     rigel::EStepThreadPool* pool = nullptr,
     // Strand symmetry penalty parameters
     double        strand_symmetry_kappa = 2.0,
-    double        strand_eps = 10.0)
+    double        strand_specificity = 0.5)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -1006,23 +884,17 @@ static EMResult run_squarem(
 
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two EM steps
-            hierarchical_map_em_step(state0.data(), ec_data, log_eff_len,
+            map_em_step(state0.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state1.data(), n_components,
-                        n_transcripts, n_nrna, t_to_nrna,
-                        nrna_to_t_off, nrna_to_t_idx,
-                        nrna_frac_alpha, nrna_frac_beta,
                         estep_threads, pool,
-                        strand_symmetry_kappa, strand_eps);
+                        strand_symmetry_kappa, strand_specificity);
 
-            hierarchical_map_em_step(state1.data(), ec_data, log_eff_len,
+            map_em_step(state1.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state2.data(), n_components,
-                        n_transcripts, n_nrna, t_to_nrna,
-                        nrna_to_t_off, nrna_to_t_idx,
-                        nrna_frac_alpha, nrna_frac_beta,
                         estep_threads, pool,
-                        strand_symmetry_kappa, strand_eps);
+                        strand_symmetry_kappa, strand_specificity);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -1055,14 +927,11 @@ static EMResult run_squarem(
             }
 
             // Stabilisation step
-            hierarchical_map_em_step(state_extrap.data(), ec_data, log_eff_len,
+            map_em_step(state_extrap.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state_new.data(), n_components,
-                        n_transcripts, n_nrna, t_to_nrna,
-                        nrna_to_t_off, nrna_to_t_idx,
-                        nrna_frac_alpha, nrna_frac_beta,
                         estep_threads, pool,
-                        strand_symmetry_kappa, strand_eps);
+                        strand_symmetry_kappa, strand_specificity);
 
             // Convergence
             double delta = 0.0;
@@ -1141,14 +1010,11 @@ static EMResult run_squarem(
                 // Single post-prune EM step to redistribute mass
                 {
                     std::vector<double> t_new(nc);
-                    hierarchical_map_em_step(theta.data(), ec_data, log_eff_len,
+                    map_em_step(theta.data(), ec_data, log_eff_len,
                                 unambig_totals, prior, em_totals.data(),
                                 t_new.data(), n_components,
-                                n_transcripts, n_nrna, t_to_nrna,
-                                nrna_to_t_off, nrna_to_t_idx,
-                                nrna_frac_alpha, nrna_frac_beta,
                                 1, nullptr,
-                                strand_symmetry_kappa, strand_eps);
+                                strand_symmetry_kappa, strand_specificity);
                     std::swap(theta, t_new);
                 }
                 for (size_t i = 0; i < nc; ++i) {
@@ -1193,11 +1059,9 @@ run_locus_em_native(
     double convergence_delta,
     bool   use_vbem,
     double prune_threshold,
-    // Hierarchical nRNA parameters (all 0/empty for plain mode)
+    // nRNA mapping (kept for posterior assignment, not hierarchy)
     int    n_transcripts,
     int    n_nrna,
-    f64_1d nrna_frac_alpha_arr,
-    f64_1d nrna_frac_beta_arr,
     i32_1d t_to_nrna_arr,
     i32_1d nrna_to_t_offsets_arr,
     i32_1d nrna_to_t_indices_arr)
@@ -1217,13 +1081,6 @@ run_locus_em_native(
     const double*   ut_ptr   = unambig_totals_arr.data();
     const double*   el_ptr   = effective_lens.data();
     const double*   pe_ptr   = prior_eligible.data();
-
-    bool hierarchical = (n_transcripts > 0);
-    const double* ea_ptr = hierarchical ? nrna_frac_alpha_arr.data() : nullptr;
-    const double* eb_ptr = hierarchical ? nrna_frac_beta_arr.data() : nullptr;
-    const int32_t* t2n_ptr = hierarchical ? t_to_nrna_arr.data() : nullptr;
-    const int32_t* n2t_off = hierarchical ? nrna_to_t_offsets_arr.data() : nullptr;
-    const int32_t* n2t_idx = hierarchical ? nrna_to_t_indices_arr.data() : nullptr;
 
     // Copy unambig_totals (we need a mutable copy)
     std::vector<double> unambig_totals(ut_ptr, ut_ptr + nc);
@@ -1289,14 +1146,12 @@ run_locus_em_native(
         prior_alpha, prior_gamma,
         prior.data(), theta_init.data(), n_components);
 
-    // 6. Run unified SQUAREM (hierarchical params passed through)
+    // 6. Run SQUAREM
     EMResult result = run_squarem(
         ec_data, log_eff_len.data(), unambig_totals.data(),
         prior.data(), theta_init.data(),
         n_components, max_iterations, convergence_delta,
-        use_vbem, prune_threshold,
-        n_transcripts, n_nrna, t2n_ptr, n2t_off, n2t_idx,
-        ea_ptr, eb_ptr);
+        use_vbem, prune_threshold);
 
     // 7. Return as numpy arrays
     auto* theta_out = new double[nc];
@@ -1368,8 +1223,6 @@ struct LocusSubProblem {
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   prior;            // [n_components]
     std::vector<int64_t>  bias_profiles;    // [n_components]
-    std::vector<double>   nrna_frac_alpha;  // [n_nrna]
-    std::vector<double>   nrna_frac_beta;   // [n_nrna]
     std::vector<double>   eligible;         // [n_components]
 
     // Local→global transcript mapping
@@ -1408,8 +1261,6 @@ static void extract_locus_sub_problem(
     // Per-transcript data (global arrays, all N_T_TOTAL elements)
     const double*  all_unambig_row_sums,
     const double*  all_nrna_init,          // [num_nrna] — indexed by global nrna_idx
-    const double*  all_nrna_frac_alpha,    // [num_nrna] — indexed by global nrna_idx
-    const double*  all_nrna_frac_beta,     // [num_nrna] — indexed by global nrna_idx
     const int64_t* all_t_starts,
     const int64_t* all_t_ends,
     const int64_t* all_t_lengths,
@@ -1664,15 +1515,6 @@ static void extract_locus_sub_problem(
         }
     }
 
-    // Zero nRNA prior when nrna_init is zero for that nRNA
-    // (all_nrna_init is indexed by global nrna_idx)
-    for (int n = 0; n < n_nrna; ++n) {
-        int32_t gnrna = unique_nrna_global[n];
-        if (all_nrna_init[gnrna] == 0.0) {
-            sub.prior[n_t + n] = 0.0;
-        }
-    }
-
     // Zero unambig_totals for dead components
     for (int c = 0; c < nc; ++c) {
         if (sub.prior[c] == 0.0) sub.unambig_totals[c] = 0.0;
@@ -1682,15 +1524,6 @@ static void extract_locus_sub_problem(
     sub.eligible.resize(nc);
     for (int c = 0; c < nc; ++c) {
         sub.eligible[c] = (sub.prior[c] > 0.0) ? 1.0 : 0.0;
-    }
-
-    // nrna_frac alpha/beta (per-nRNA)
-    sub.nrna_frac_alpha.resize(n_nrna);
-    sub.nrna_frac_beta.resize(n_nrna);
-    for (int n = 0; n < n_nrna; ++n) {
-        int32_t gnrna = unique_nrna_global[n];
-        sub.nrna_frac_alpha[n] = all_nrna_frac_alpha[gnrna];
-        sub.nrna_frac_beta[n] = all_nrna_frac_beta[gnrna];
     }
 
     // Clean up local_map scratch for next call
@@ -1876,8 +1709,6 @@ batch_locus_em(
     // --- Per-transcript data ---
     f64_2d unambig_counts,     // [N_T, n_cols]
     f64_1d nrna_init_arr,
-    f64_1d nrna_frac_alpha_arr,  // [num_nrna_total] — indexed by global nRNA idx
-    f64_1d nrna_frac_beta_arr,   // [num_nrna_total] — indexed by global nRNA idx
     i64_1d t_starts_arr,
     i64_1d t_ends_arr,
     i64_1d t_lengths_arr,
@@ -1907,7 +1738,7 @@ batch_locus_em(
     int    n_threads,
     // Strand symmetry penalty parameters
     double strand_symmetry_kappa = 2.0,
-    double strand_eps = 10.0)
+    double strand_specificity = 0.5)
 {
     int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
     int N_T = n_transcripts_total;
@@ -1935,8 +1766,6 @@ batch_locus_em(
 
     const double*   uac    = unambig_counts.data();  // [N_T, N_COLS] row-major
     const double*   nri    = nrna_init_arr.data();
-    const double*   nfa    = nrna_frac_alpha_arr.data();
-    const double*   nfb    = nrna_frac_beta_arr.data();
     const int64_t*  ts_ptr = t_starts_arr.data();
     const int64_t*  te_ptr = t_ends_arr.data();
     const int64_t*  tl_ptr = t_lengths_arr.data();
@@ -2079,14 +1908,13 @@ batch_locus_em(
                 goff, gti, gll, gcw, gtxs, gtxe, gcc,
                 gis, ggll, ggfp, glti, glcc,
                 nrna_base_index,
-                unambig_row_sums.data(), nri, nfa, nfb,
+                unambig_row_sums.data(), nri,
                 ts_ptr, te_ptr, tl_ptr, sp_ptr, el_ptr,
                 mean_frag,
                 t2n_ptr,
                 local_map.data(), local_map_size);
 
             int nc = sub.n_components;
-            int sub_n_t = sub.n_t;
             size_t n_candidates = sub.t_indices.size();
             int n_local_units = sub.n_local_units;
 
@@ -2132,7 +1960,7 @@ batch_locus_em(
                 prior_alpha, prior_gamma,
                 prior.data(), theta_init.data(), nc);
 
-            // 7. Run unified SQUAREM (hierarchical params passed through)
+            // 7. Run unified SQUAREM
             EMResult result = run_squarem(
                 ec_data, log_eff_len.data(),
                 sub.unambig_totals.data(),
@@ -2140,14 +1968,8 @@ batch_locus_em(
                 theta_init.data(),
                 nc, max_iterations, convergence_delta,
                 use_vbem, prune_threshold,
-                sub_n_t, sub.n_nrna,
-                sub.local_t_to_local_nrna.data(),
-                sub.nrna_to_t_off.data(),
-                sub.nrna_to_t_idx.data(),
-                sub.nrna_frac_alpha.data(),
-                sub.nrna_frac_beta.data(),
                 estep_thr, pool,
-                strand_symmetry_kappa, strand_eps);
+                strand_symmetry_kappa, strand_specificity);
 
             // 8. Assign posteriors (writes to disjoint transcript
             //    indices — safe across threads, no atomics needed)
@@ -2539,14 +2361,11 @@ NB_MODULE(_em_impl, m) {
           nb::arg("prune_threshold"),
           nb::arg("n_transcripts"),
           nb::arg("n_nrna"),
-          nb::arg("nrna_frac_alpha"),
-          nb::arg("nrna_frac_beta"),
           nb::arg("t_to_nrna"),
           nb::arg("nrna_to_t_offsets"),
           nb::arg("nrna_to_t_indices"),
           "Run EM for a single locus sub-problem.\n\n"
           "Takes CSR per-locus data + config, returns (theta, alpha, em_totals).\n"
-          "When n_transcripts > 0, uses the hierarchical mRNA-nRNA model.\n"
           "Replaces the Python EM hot path with a single C++ call.");
 
     m.def("batch_locus_em", &batch_locus_em,
@@ -2570,8 +2389,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("gdna_inits"),
           nb::arg("unambig_counts"),
           nb::arg("nrna_init"),
-          nb::arg("nrna_frac_alpha"),
-          nb::arg("nrna_frac_beta"),
           nb::arg("t_starts"),
           nb::arg("t_ends"),
           nb::arg("t_lengths"),
@@ -2597,7 +2414,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
           nb::arg("strand_symmetry_kappa") = 2.0,
-          nb::arg("strand_eps") = 10.0,
+          nb::arg("strand_specificity") = 0.5,
           "Run locus EM for ALL loci in a single C++ call.\n\n"
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"
@@ -2625,7 +2442,6 @@ NB_MODULE(_em_impl, m) {
     m.attr("EM_LOG_EPSILON")         = EM_LOG_EPSILON;
     m.attr("MAX_FRAG_LEN")          = MAX_FRAG_LEN;
     m.attr("SQUAREM_BUDGET_DIVISOR") = SQUAREM_BUDGET_DIVISOR;
-    m.attr("NRNA_FRAC_CLAMP_EPS")   = NRNA_FRAC_CLAMP_EPS;
     m.attr("EM_PRIOR_EPSILON")       = EM_PRIOR_EPSILON;
     m.attr("ESTEP_TASK_WORK_TARGET") = ESTEP_TASK_WORK_TARGET;
 

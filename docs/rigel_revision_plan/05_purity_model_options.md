@@ -13,17 +13,19 @@ The strongest first implementation is a seeded approach:
 
 1. define a highly conservative set of gDNA-dominant seed regions
 2. fit initial nuisance parameters from that seed set
-3. only then introduce a transparent monotone scoring model that produces soft
-   region weights for expansion beyond the seed set
+3. fit a two-state regional purity model whose posterior state probabilities are
+   the calibration weights
+4. only then consider richer soft expansions beyond the seed set
 
 Concretely:
 
 1. build the region evidence table first
 2. define a strict seed subset with minimal RNA evidence
 3. compute a small set of interpretable RNA-likeness features per region
-4. transform those features into a soft gDNA-dominance weight in `[0, 1]`
-5. treat that weight explicitly as an approximation to posterior purity, not as
-   the final theoretical model
+4. fit a two-state mixture over gDNA-dominant versus RNA-contaminated regions
+5. use posterior state probabilities as gDNA-dominance weights
+6. treat that weight explicitly as an approximation to the broader latent
+   purity target, not as the final theoretical model
 
 ## 2. Why This Is the Best First Step
 
@@ -64,21 +66,24 @@ Examples of first-pass seed criteria:
 This does not need to be perfect. It needs to be conservative enough that the
 initial calibration is not contaminated by evidently RNA-rich regions.
 
-### 3.3 Monotone soft weighting rule
+### 3.3 Two-state posterior weighting rule
 
-Then define a conservative hand-specified score:
+Then define a conservative two-state model in which:
 
-- more splice evidence lowers the weight
-- stronger strand asymmetry lowers the weight
-- strongly exon-enriched density lowers the weight
-- intergenic and unambiguous-intronic contexts start from a higher baseline
+- one component represents gDNA-dominant regions
+- one component represents RNA-contaminated regions
+- splice, density, and strand features shift posterior mass toward one state or
+   the other
 
-This can be implemented as a logistic or clipped linear score with a small
-number of interpretable coefficients.
+The operational weight is then:
+
+$$
+w_r = \Pr(u_r = \mathrm{gDNA\text{-}dominant} \mid y_r)
+$$
 
 ### 3.4 Preserve the right interface
 
-Even if the first version is heuristic, the interface should already be:
+Even in the first version, the interface should already be:
 
 - input: region evidence table
 - output: one `w_r in [0,1]` per region
@@ -129,20 +134,19 @@ would do this:
 1. compute raw per-region features
 2. define a very conservative seed set for initial calibration
 3. fit initial nuisance parameters on that seed set
-4. standardize features within broad context classes if necessary
-5. define a soft score with explicit monotone signs
-6. map the score through a logistic transform to get `w_r`
-7. inspect the induced weights on synthetic datasets before fitting any more
+4. fit a two-state model for gDNA-dominant versus RNA-contaminated regions
+5. use posterior state probabilities as `w_r`
+6. inspect the induced weights on synthetic datasets before fitting any more
    ambitious latent model
 
 That is the most pragmatic option suggested by the current code.
 
 ## 8. Upgrade Path
 
-Once the region evidence table and diagnostic plots exist, the score-based
+Once the region evidence table and diagnostic plots exist, the two-state
 weights can later be replaced by either:
 
-1. a two-state mixture over RNA-rich versus gDNA-dominant regions
+1. a richer semiparametric weighting model
 2. a continuous latent purity model with posterior mean weights
 
 Because the downstream interface stays fixed, that upgrade path is clean.

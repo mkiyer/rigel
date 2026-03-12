@@ -67,7 +67,7 @@ So the cleanest first-principles component set is:
 $$
 \mathcal{C}_\ell = \{m_t\}_{t=1}^{T_\ell}
 \cup \{n_k\}_{k=1}^{N_\ell}
-\cup \{d_{\ell,+}, d_{\ell,-}\}
+\cup \{d_{\ell,pos}, d_{\ell,neg}\}
 $$
 
 This gives $T_\ell + N_\ell + 2$ components.
@@ -136,31 +136,31 @@ These should not be conflated.
 The clean explicit gDNA model introduces two latent components per locus:
 
 $$
-d_{\ell,+}, \; d_{\ell,-}
+d_{\ell,pos}, \; d_{\ell,neg}
 $$
 
 with total gDNA mass:
 
 $$
-G_\ell = \theta_{\ell,+}^{(d)} + \theta_{\ell,-}^{(d)}
+G_\ell = \theta_{\ell,pos}^{(d)} + \theta_{\ell,neg}^{(d)}
 $$
 
 and strand fraction:
 
 $$
-\phi_\ell = \frac{\theta_{\ell,+}^{(d)}}{G_\ell}
+\phi_\ell = \frac{\theta_{\ell,pos}^{(d)}}{G_\ell}
 $$
 
 Then a strand-observed fragment has deterministic gDNA strand compatibility:
 
 $$
-p(s_f = + \mid d_{\ell,+}) = 1, \qquad
-p(s_f = - \mid d_{\ell,+}) = 0
+p(s_f = \mathrm{pos} \mid d_{\ell,pos}) = 1, \qquad
+p(s_f = \mathrm{neg} \mid d_{\ell,pos}) = 0
 $$
 
 $$
-p(s_f = - \mid d_{\ell,-}) = 1, \qquad
-p(s_f = + \mid d_{\ell,-}) = 0
+p(s_f = \mathrm{neg} \mid d_{\ell,neg}) = 1, \qquad
+p(s_f = \mathrm{pos} \mid d_{\ell,neg}) = 0
 $$
 
 or, if numerical robustness is needed, those zeroes can be replaced by a tiny
@@ -177,14 +177,14 @@ likelihood becomes the marginal over the hidden DNA strand:
 
 $$
 p(s_f \mid d_\ell)
-= p(s_f \mid d_{\ell,+}) p(d_{\ell,+} \mid d_\ell)
-+ p(s_f \mid d_{\ell,-}) p(d_{\ell,-} \mid d_\ell)
+= p(s_f \mid d_{\ell,pos}) p(d_{\ell,pos} \mid d_\ell)
++ p(s_f \mid d_{\ell,neg}) p(d_{\ell,neg} \mid d_\ell)
 $$
 
 If the two DNA strands are a priori equally likely, then:
 
 $$
-p(d_{\ell,+} \mid d_\ell) = p(d_{\ell,-} \mid d_\ell) = \frac{1}{2}
+p(d_{\ell,pos} \mid d_\ell) = p(d_{\ell,neg} \mid d_\ell) = \frac{1}{2}
 $$
 
 and therefore:
@@ -223,11 +223,11 @@ $$
 with:
 
 $$
-\theta_{\ell,+}^{(d)} = G_\ell \phi_\ell
+   heta_{\ell,pos}^{(d)} = G_\ell \phi_\ell
 $$
 
 $$
-\theta_{\ell,-}^{(d)} = G_\ell (1 - \phi_\ell)
+   heta_{\ell,neg}^{(d)} = G_\ell (1 - \phi_\ell)
 $$
 
 Then symmetry is encoded with a prior centered at $0.5$:
@@ -260,12 +260,12 @@ $$
 \phi_\ell = \frac{1}{2}
 $$
 
-that does not force a locus with 10 gDNA fragments to appear as exactly 5 plus
-and 5 minus. It only says that, conditional on the total number of gDNA
-fragments $N_\ell$, the observed positive-strand count is binomial:
+that does not force a locus with 10 gDNA fragments to appear as exactly 5 pos
+and 5 neg. It only says that, conditional on the total number of gDNA
+fragments $N_\ell$, the observed pos-strand count is binomial:
 
 $$
-K_\ell^+ \mid N_\ell, \phi_\ell = \frac{1}{2}
+K_\ell^{pos} \mid N_\ell, \phi_\ell = \frac{1}{2}
 \sim \operatorname{Binomial}\left(N_\ell, \frac{1}{2}\right)
 $$
 
@@ -298,7 +298,7 @@ However, there is an important caveat:
 ### The benefit of two gDNA strands is not per-fragment competition. The benefit is a cleaner parameterization of locus-level strand symmetry.
 
 Per fragment, once the observed strand is known, the incompatible gDNA strand is
-effectively absent. The competition is not between $d_{\ell,+}$ and $d_{\ell,-}$
+effectively absent. The competition is not between $d_{\ell,pos}$ and $d_{\ell,neg}$
 for the same fragment. The competition is between RNA and the compatible DNA
 strand, while the two DNA strands are coupled only through the prior on
 $\phi_\ell$.
@@ -521,6 +521,32 @@ In this view, $\kappa_{\mathrm{sym}}$ is not a hand-tuned penalty coefficient.
 It is a data-derived description of how variable gDNA strand balance really is
 across loci in that library.
 
+### 18.1 Symmetric prior versus one-sided protection
+
+There is an important practical caveat.
+
+A symmetric Beta prior on $\phi_\ell$ is the clean first-principles model, but
+it does not by itself guarantee the one-sided protection built into the current
+targeted-excess penalty. The current implementation protects a symmetric gDNA
+baseline and discounts only asymmetric excess. That means it never increases the
+sense-heavy part of gDNA in response to RNA-like strand imbalance.
+
+The redesign should preserve this insight even if the model is rewritten in
+cleaner probabilistic form.
+
+### 18.2 Identifiability caveat with nRNA
+
+At loci with both gDNA and nascent RNA, there is a real identifiability risk.
+
+- nRNA contributes unspliced fragments
+- nRNA is usually sense-dominant in stranded libraries
+- a flexible gDNA strand split can imitate part of that same signal
+
+So a naive symmetric strand-fraction prior is not the whole story. In practice,
+the model may need an asymmetric constraint or evidence gate that treats
+sense-heavy gDNA as more suspicious than antisense-heavy gDNA, because
+sense-heavy excess is more confounded with nRNA leakage.
+
 ## 19. What Data Should Inform $\kappa_{\mathrm{sym}}$
 
 In theory, $\kappa_{\mathrm{sym}}$ should be estimated from regions where the
@@ -561,7 +587,7 @@ that are believed to be gDNA-dominant.
 For each such region $r$, let:
 
 - $N_r$ be the total number of fragments attributed to gDNA in that region
-- $K_r^+$ be the positive-strand count among them
+- $K_r^{pos}$ be the pos-strand count among them
 
 Then the theory-level calibration model is:
 
@@ -572,14 +598,14 @@ $$
 $$
 
 $$
-K_r^+ \mid N_r, \phi_r
+K_r^{pos} \mid N_r, \phi_r
 \sim \operatorname{Binomial}(N_r, \phi_r)
 $$
 
 and therefore marginally:
 
 $$
-K_r^+ \mid N_r, \kappa_{\mathrm{sym}}
+K_r^{pos} \mid N_r, \kappa_{\mathrm{sym}}
 \sim \operatorname{BetaBinomial}\left(
 N_r, \frac{\kappa_{\mathrm{sym}}}{2}, \frac{\kappa_{\mathrm{sym}}}{2}
 \right)
@@ -608,6 +634,16 @@ So the general initialization problem is:
 Under that view, $\kappa_{\mathrm{sym}}$ and the gDNA fragment-length
 distribution are parallel statistical objects: both should be learned from
 gDNA-dominant data, not from arbitrary genomic background.
+
+More strongly, they should be treated as joint calibration targets.
+
+The same purity-weighted regional calibration framework should estimate both:
+
+1. the strand-symmetry hyperparameter $\kappa_{\mathrm{sym}}$
+2. the gDNA fragment-length distribution
+
+This unifies two currently fragile upstream procedures under one regional
+purity model.
 
 ## 22. What "RNA-Poor" Means
 
@@ -679,18 +715,18 @@ So a region with strong strand asymmetry is less plausibly gDNA-pure.
 At theory level, for region $r$, let:
 
 $$
-N_r^+ = \text{positive-strand fragment count},
+N_r^{pos} = \text{pos-strand fragment count},
 \qquad
-N_r^- = \text{negative-strand fragment count}
+N_r^{neg} = \text{neg-strand fragment count}
 $$
 
 and total count:
 
 $$
-N_r = N_r^+ + N_r^-
+N_r = N_r^{pos} + N_r^{neg}
 $$
 
-Then deviation of $N_r^+ / N_r$ from $1/2$ is evidence for RNA contamination,
+Then deviation of $N_r^{pos} / N_r$ from $1/2$ is evidence for RNA contamination,
 with the strength of that evidence depending on:
 
 - total count $N_r$
@@ -831,26 +867,24 @@ The relevant annotation axes are:
 
 1. genic versus intergenic
 2. exonic versus intronic membership
-3. positive-strand versus negative-strand versus strand-ambiguous annotation
+3. pos-strand versus neg-strand versus strand-ambiguous annotation
 
 Because exons and introns may overlap across transcripts, the resulting context
-classes are combinatorial. A convenient conceptual partition includes classes
-such as:
+classes are combinatorial. A clean representation is a four-flag annotation
+partition:
 
-- exon-only `+`
-- exon-only `-`
-- exon-only ambiguous
-- intron-only `+`
-- intron-only `-`
-- intron-only ambiguous
-- exon-intron `+`
-- exon-intron `-`
-- exon-intron ambiguous
-- intergenic
+- `has_exon_pos`
+- `has_exon_neg`
+- `has_intron_pos`
+- `has_intron_neg`
 
-The exact label set is less important than the principle: every genomic base in
-the partition should have a well-defined annotation context that can be used to
-interpret fragment density and strand asymmetry.
+This yields a compact 16-state scheme in which all-zero corresponds to
+intergenic sequence and mixed antisense configurations are represented directly
+rather than being pushed into an undifferentiated ambiguity bucket.
+
+The exact implementation should build on the existing interval tiling already
+constructed by the index rather than replacing it from scratch. The calibration
+partition is best viewed as a refinement or remapping of that existing tiling.
 
 ## 27. Admissible Fragments for Calibration
 
@@ -938,11 +972,11 @@ signal than exonic versus intergenic alone.
 For a strand-resolved region $r$, let:
 
 $$
-N_r^+ = \text{positive-strand fragment count},
+N_r^{pos} = \text{pos-strand fragment count},
 \qquad
-N_r^- = \text{negative-strand fragment count},
+N_r^{neg} = \text{neg-strand fragment count},
 \qquad
-N_r = N_r^+ + N_r^-
+N_r = N_r^{pos} + N_r^{neg}
 $$
 
 The strand evidence score should measure deviation from the symmetric gDNA
@@ -956,7 +990,7 @@ So one may write abstractly:
 
 $$
 E_r^{\mathrm{strand}} = \Delta\!
-\left(N_r^+, N_r^- ; \kappa_{\mathrm{sym}}\right)
+\left(N_r^{pos}, N_r^{neg} ; \kappa_{\mathrm{sym}}\right)
 $$
 
 where larger divergence means less gDNA-like and therefore lower purity.
@@ -1035,8 +1069,9 @@ $$
 u_r \in \{\mathrm{gDNA\text{-}dominant},\; \mathrm{RNA\text{-}contaminated}\}
 $$
 
-with uncertainty about that state. The continuous version is usually cleaner,
-because it matches the biological reality that purity varies along a spectrum.
+with uncertainty about that state. The continuous version is usually cleaner in
+the abstract because it matches the biological reality that purity varies along
+a spectrum.
 
 Under this view, the regional soft weight is not an ad hoc score. It is a
 posterior quantity such as:
@@ -1053,6 +1088,10 @@ $$
 
 This is the most coherent interpretation of a soft calibration weight.
 
+However, the first implementation target need not use the full continuous
+version. A two-state mixture with posterior state probabilities is the more
+pragmatic first calibration model.
+
 ## 32. Regional Evidence Model
 
 Let the observed evidence for region $r$ be:
@@ -1061,8 +1100,8 @@ $$
 y_r = \left(
 S_r,
 E_r^{\mathrm{density}},
-N_r^+,
-N_r^-
+N_r^{pos},
+N_r^{neg}
 \right)
 $$
 
@@ -1070,7 +1109,7 @@ where:
 
 - $S_r$ is splice evidence
 - $E_r^{\mathrm{density}}$ summarizes RNA-like density contrast
-- $N_r^+, N_r^-$ are strand-resolved unspliced fragment counts
+- $N_r^{pos}, N_r^{neg}$ are strand-resolved unspliced fragment counts
 
 The theoretically optimal calibration model factorizes as:
 
@@ -1078,7 +1117,7 @@ $$
 p(y_r \mid \pi_r, \kappa_{\mathrm{sym}}, \Theta_{\mathrm{cal}})
 = p(S_r \mid \pi_r, \Theta_{\mathrm{cal}})
 \; p(E_r^{\mathrm{density}} \mid \pi_r, \Theta_{\mathrm{cal}})
-\; p(N_r^+, N_r^- \mid \pi_r, \kappa_{\mathrm{sym}}, \Theta_{\mathrm{cal}})
+\; p(N_r^{pos}, N_r^{neg} \mid \pi_r, \kappa_{\mathrm{sym}}, \Theta_{\mathrm{cal}})
 $$
 
 where $\Theta_{\mathrm{cal}}$ collects any additional nuisance parameters for
@@ -1205,7 +1244,7 @@ Disadvantages:
 
 ## 36. Final Theoretical Recommendation
 
-The preferred target model is the continuous latent purity model.
+The preferred long-run target model is the continuous latent purity model.
 
 That is:
 
@@ -1214,6 +1253,14 @@ That is:
 3. $\kappa_{\mathrm{sym}}$ and other gDNA nuisance parameters are learned by
    empirical Bayes from those posterior-weighted regions
 
-For first implementation work, approximate inference or semiparametric
-shortcuts are acceptable, but they should be viewed as approximations to this
-continuous latent-purity target rather than as the model itself.
+For first implementation work, the preferred calibration submodel is a two-state
+mixture:
+
+1. each region is modeled as either gDNA-dominant or RNA-contaminated
+2. the calibration weight is the posterior probability of the gDNA-dominant
+   state
+3. $\kappa_{\mathrm{sym}}$ and the gDNA fragment-length distribution are learned
+   jointly from those posterior-weighted regions
+
+The continuous latent-purity model remains the clean theoretical endpoint, but
+the two-state model is the preferred first implementation target.

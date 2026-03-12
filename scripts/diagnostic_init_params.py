@@ -103,7 +103,6 @@ def capture_diagnostics(params, label=""):
     ss = params.get("strand_specificity", 1.0)
     n_frags = params.get("n_fragments", 100000)
     kappa = params.get("strand_symmetry_kappa", 6.0)
-    pseudo = params.get("strand_symmetry_pseudo", 50.0)
     gdna_ab = float(params.get("gdna", 0))
     seed = params.get("seed", SEED)
 
@@ -131,7 +130,6 @@ def capture_diagnostics(params, label=""):
             em=EMConfig(
                 seed=seed,
                 strand_symmetry_kappa=kappa,
-                strand_symmetry_pseudo=pseudo,
             ),
             scan=BamScanConfig(sj_strand_tag="auto"),
         )

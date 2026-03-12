@@ -571,8 +571,9 @@ class TestComputeNrnaInit:
         expected = (100.0 - 20.0) / denom
         assert nrna[0] == pytest.approx(expected, abs=1.0)
 
-    def test_ss_at_or_below_threshold_returns_zeros(self):
-        """At SS ≤ 0.6, strand info too weak → returns zeros."""
+    def test_ss_at_or_below_threshold_returns_total_intronic(self):
+        """At SS ≤ 0.6, strand info too weak → returns total intronic
+        coverage so nRNA can compete in the EM."""
         from rigel.locus import compute_nrna_init as _compute_nrna_init
 
         sense = np.array([100.0])
@@ -582,11 +583,11 @@ class TestComputeNrnaInit:
         # SS=0.5
         sm = _make_strand_models_with_ss(0.5)
         nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == 0.0
+        assert nrna[0] == pytest.approx(150.0)  # sense + anti
         # SS=0.6 (boundary)
         sm = _make_strand_models_with_ss(0.6)
         nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == 0.0
+        assert nrna[0] == pytest.approx(150.0)  # sense + anti
 
 
 # =====================================================================
@@ -922,7 +923,6 @@ class TestGdnaConfig:
         assert cfg.gdna_mom_min_evidence_ref == 50.0
         assert cfg.gdna_mom_min_evidence_locus == 30.0
         assert cfg.strand_symmetry_kappa == 6.0
-        assert cfg.strand_symmetry_pseudo == 50.0
 
     def test_emconfig_explicit(self):
         cfg = EMConfig(

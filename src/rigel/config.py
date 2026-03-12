@@ -65,38 +65,6 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
-    nrna_frac_kappa_global: float | None = None
-    """Shrinkage pseudo-count pulling locus-strand nRNA fraction toward the global
-    prior.  ``None`` (default) → auto-estimate from the data
-    via Method of Moments.  Set a positive value to override.
-    """
-    nrna_frac_kappa_locus: float | None = None
-    """Shrinkage pseudo-count pulling per-nRNA nRNA fraction toward the (shrunk)
-    locus-strand estimate.  ``None`` → auto-estimate.
-    """
-    nrna_frac_kappa_nrna: float = 5.0
-    """Constant pseudo-count (effective sample size) of the Beta prior
-    passed to the EM solver.  Controls how strongly the hierarchical
-    prior mean constrains the EM.  Default 5.0 (weakly informative).
-    """
-
-    # -- MoM estimation advanced knobs --
-    nrna_frac_mom_min_evidence_global: float = 50.0
-    """Minimum fragment evidence for a locus-strand group to be
-    included in the global Method-of-Moments κ estimate."""
-    nrna_frac_mom_min_evidence_locus: float = 20.0
-    """Minimum fragment evidence for an nRNA to be included
-    in the locus-level MoM κ estimate."""
-    nrna_frac_kappa_min: float = 2.0
-    """Lower clamp for MoM-estimated κ values."""
-    nrna_frac_kappa_max: float = 200.0
-    """Upper clamp for MoM-estimated κ values."""
-    nrna_frac_kappa_fallback: float = 5.0
-    """Fallback κ when too few features pass the evidence filter."""
-    nrna_frac_kappa_min_obs: int = 20
-    """Minimum number of features required for MoM κ estimation;
-    fewer triggers the fallback."""
-
     # -- gDNA EB shrinkage knobs --
     gdna_kappa_ref: float | None = None
     """Shrinkage pseudo-count pulling reference-level gDNA rate toward the
@@ -110,20 +78,21 @@ class EMConfig:
     gdna_mom_min_evidence_locus: float = 30.0
     """Minimum fragment evidence for a locus to contribute to
     the gDNA MoM κ_locus estimate."""
+    gdna_kappa_min: float = 2.0
+    """Lower clamp for MoM-estimated gDNA κ values."""
+    gdna_kappa_max: float = 200.0
+    """Upper clamp for MoM-estimated gDNA κ values."""
+    gdna_kappa_fallback: float = 5.0
+    """Fallback gDNA κ when too few features for MoM."""
+    gdna_kappa_min_obs: int = 20
+    """Minimum features required for gDNA MoM κ estimation;
+    fewer triggers fallback."""
 
     # -- gDNA strand symmetry penalty knobs --
     strand_symmetry_kappa: float = 6.0
     """Strand symmetry penalty strength for gDNA in the M-step.
-    Uses a Beta(κ/2, κ/2) prior on gDNA strand fraction.
-    Higher → sharper penalty for strand asymmetry.
+    Effective κ scales by strand specificity: κ_eff = κ · (2·SS − 1)².
     Set ≤ 2.0 to disable the penalty entirely.
-    """
-    strand_symmetry_pseudo: float = 50.0
-    """Bayesian pseudo-count (α₀) for gDNA strand fraction regularisation.
-    Acts as a Beta(α₀, α₀) prior belief: "α₀ sense and α₀ antisense
-    fragments" before observing data.  Controls evidence threshold
-    for the symmetry penalty to engage.  Higher → more forgiving
-    at low fragment counts.
     """
 
     def __post_init__(self):

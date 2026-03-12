@@ -78,7 +78,7 @@ from rigel.config import (
 from rigel.estimator import AbundanceEstimator
 from rigel.index import TranscriptIndex
 from rigel.locus import build_loci, build_locus_em_data, compute_eb_gdna_priors, compute_nrna_init
-from rigel.estimator import compute_global_gdna_density, compute_nrna_frac_priors
+from rigel.estimator import compute_global_gdna_density
 from rigel.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer, _compute_intergenic_density
 from rigel.scan import FragmentRouter
 from rigel.scoring import (
@@ -613,32 +613,12 @@ def profile_stages(
                     kappa_locus=em_config.gdna_kappa_locus,
                     mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
                     mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
-                    kappa_min=em_config.nrna_frac_kappa_min,
-                    kappa_max=em_config.nrna_frac_kappa_max,
-                    kappa_fallback=em_config.nrna_frac_kappa_fallback,
-                    kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
+                    kappa_min=em_config.gdna_kappa_min,
+                    kappa_max=em_config.gdna_kappa_max,
+                    kappa_fallback=em_config.gdna_kappa_fallback,
+                    kappa_min_obs=em_config.gdna_kappa_min_obs,
                 )
 
-                # gDNA density + nrna_frac priors (needed before EM)
-                gdna_density = compute_global_gdna_density(
-                    estimator, strand_models.strand_specificity,
-                )
-                compute_nrna_frac_priors(
-                    estimator,
-                    nrna_strands=index.nrna_df["strand"].values,
-                    nrna_spans=nrna_spans,
-                    strand_specificity=strand_models.strand_specificity,
-                    gdna_density=gdna_density,
-                    kappa_global=em_config.nrna_frac_kappa_global,
-                    kappa_locus=em_config.nrna_frac_kappa_locus,
-                    kappa_nrna=em_config.nrna_frac_kappa_nrna,
-                    mom_min_evidence_global=em_config.nrna_frac_mom_min_evidence_global,
-                    mom_min_evidence_locus=em_config.nrna_frac_mom_min_evidence_locus,
-                    kappa_min=em_config.nrna_frac_kappa_min,
-                    kappa_max=em_config.nrna_frac_kappa_max,
-                    kappa_fallback=em_config.nrna_frac_kappa_fallback,
-                    kappa_min_obs=em_config.nrna_frac_kappa_min_obs,
-                )
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
             with Timer("locus_em") as t_em:

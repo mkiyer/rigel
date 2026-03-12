@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze sweep results from kappa/pseudo grid search."""
+"""Analyze sweep results from kappa grid search."""
 import pandas as pd
 import numpy as np
 import sys
@@ -18,32 +18,28 @@ def analyze_grid(tsv_path):
     print("=== COMPOSITE SCORE (|mRNA_diff| + |gDNA_diff| + |nRNA_diff|, lower=better) ===")
     pivot = df.pivot_table(values='composite', 
                            index='strand_symmetry_kappa',
-                           columns='strand_symmetry_pseudo',
-                           aggfunc='first')
+                           aggfunc='mean')
     print(pivot.round(0).to_string())
     print()
     
     print("=== mRNA RELATIVE ERROR % ===")
     pivot_mrna = df.pivot_table(values='total_mrna_rel_err',
                                 index='strand_symmetry_kappa',
-                                columns='strand_symmetry_pseudo',
-                                aggfunc='first')
+                                aggfunc='mean')
     print((pivot_mrna * 100).round(1).to_string())
     print()
     
     print("=== gDNA ABSOLUTE DIFF (from expected) ===")
     pivot_gdna = df.pivot_table(values='gdna_abs_diff',
                                 index='strand_symmetry_kappa',
-                                columns='strand_symmetry_pseudo',
-                                aggfunc='first')
+                                aggfunc='mean')
     print(pivot_gdna.round(0).to_string())
     print()
     
     print("=== nRNA ABSOLUTE DIFF (from expected) ===")
     pivot_nrna = df.pivot_table(values='nrna_abs_diff',
                                 index='strand_symmetry_kappa',
-                                columns='strand_symmetry_pseudo',
-                                aggfunc='first')
+                                aggfunc='mean')
     print(pivot_nrna.round(0).to_string())
     print()
     
@@ -51,7 +47,7 @@ def analyze_grid(tsv_path):
     best_idx = df['composite'].idxmin()
     best = df.loc[best_idx]
     print(f"=== BEST CONFIG ===")
-    print(f"  kappa={best['strand_symmetry_kappa']}, pseudo={best['strand_symmetry_pseudo']}")
+    print(f"  kappa={best['strand_symmetry_kappa']}")
     print(f"  composite={best['composite']:.0f}")
     print(f"  mRNA: exp={best['total_mrna_expected']:.0f}, obs={best['total_mrna_observed']:.0f}, rel_err={best['total_mrna_rel_err']*100:.1f}%")
     print(f"  gDNA: exp={best['gdna_expected']:.0f}, obs={best['gdna_observed']:.0f}, diff={best['gdna_abs_diff']:.0f}")

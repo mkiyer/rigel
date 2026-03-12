@@ -272,7 +272,7 @@ not amplify.
 **Symptom**: Pattern 7 (convergent + moderate nRNA): TCR gets +140% to +179%
 error at SS≥0.75 with lower expression levels.
 
-**Code path**: Minus-strand nRNA intronic reads look like TCR mRNA to the EM.
+**Code path**: neg-strand nRNA intronic reads look like TCR mRNA to the EM.
 The nRNA deduplication by unique genomic span doesn't prevent cross-strand
 nRNA mass from being misattributed. At lower expression levels, the
 signal-to-noise is worse and the shrinkage prior prevents proper nRNA

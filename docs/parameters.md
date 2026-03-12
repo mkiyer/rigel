@@ -224,8 +224,8 @@ These mirror Python `IntEnum` definitions and must stay in sync.
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `STRAND_NONE` | 0 | No strand information. |
-| `STRAND_POS` | 1 | Positive (+) strand. |
-| `STRAND_NEG` | 2 | Negative (−) strand. |
+| `STRAND_POS` | 1 | Positive (`pos`, `+`) strand. |
+| `STRAND_NEG` | 2 | Negative (`neg`, `-`) strand. |
 | `STRAND_AMBIGUOUS` | 3 | Ambiguous (POS \| NEG). |
 
 ### Scoring Constants (`constants.h` → `_scoring_impl`)

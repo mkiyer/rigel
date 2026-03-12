@@ -27,8 +27,7 @@ Produce a calibration-region table with constant annotation context per region.
 The first-pass table should support:
 
 - interval identity: `region_id`, `ref`, `start`, `end`, `length`
-- annotation context summary
-- strand-context summary
+- a four-flag annotation summary
 - context ambiguity flags
 - effective lengths for region-level density calculations
 
@@ -45,25 +44,25 @@ Recommended shape:
 - keep the output as a pandas DataFrame initially for ease of inspection and
   testing
 
-### 3.2 Normalize interval context into a compact schema
+### 3.2 Normalize interval context into a four-flag schema
 
 The current interval representation is useful but not yet the right public shape
 for calibration. The first revision should normalize each region into fields
 such as:
 
-- `annotation_context`
-- `strand_context`
 - `is_genic`
-- `has_exon_plus`
-- `has_exon_minus`
-- `has_unambig_intron_plus`
-- `has_unambig_intron_minus`
+- `has_exon_pos`
+- `has_exon_neg`
+- `has_intron_pos`
+- `has_intron_neg`
 - `is_intergenic`
 - `is_context_ambiguous`
 
-This can be implemented either with booleans or a compact bitmask plus decoded
-columns. The boolean-first version is preferable initially because it is easier
-to validate.
+This four-flag scheme is simpler and more composable than a large context enum,
+and it handles opposite-strand overlaps directly.
+
+It should be built as a calibration-specific refinement of the existing index
+tiling rather than a full refactor of the index and resolver stack.
 
 ### 3.3 Keep tiny-region merging optional
 

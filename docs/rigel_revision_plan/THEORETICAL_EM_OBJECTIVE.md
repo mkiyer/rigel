@@ -4,7 +4,7 @@ This note gives a compact mathematical model for Rigel while staying out of
 implementation details.
 
 It adopts the preferred `T + N + 2` modeling choice discussed in
-`docs/THEORETICAL_MODEL.md`:
+`docs/rigel_revision_plan/THEORETICAL_MODEL.md`:
 
 - two strand-specific gDNA components per locus
 - one collapsed public gDNA abundance obtained by summing those two components
@@ -22,12 +22,12 @@ Let:
 
 - $\mathcal{T}_\ell$ be the set of mature RNA transcript components
 - $\mathcal{N}_\ell$ be the set of nRNA span components
-- $g_+$ and $g_-$ be the two strand-specific gDNA components
+- $g_{pos}$ and $g_{neg}$ be the two strand-specific gDNA components
 
 The component set is:
 
 $$
-\mathcal{C}_\ell = \mathcal{T}_\ell \cup \mathcal{N}_\ell \cup \{g_+, g_-\}
+\mathcal{C}_\ell = \mathcal{T}_\ell \cup \mathcal{N}_\ell \cup \{g_{pos}, g_{neg}\}
 $$
 
 For each fragment $f$ assigned to this locus, define a latent source label:
@@ -39,9 +39,9 @@ $$
 Let the mixture weights be:
 
 $$
-	heta_\ell = \{\theta_c\}_{c \in \mathcal{C}_\ell},
+   heta_\ell = \{\theta_c\}_{c \in \mathcal{C}_\ell},
 \qquad
-	heta_c \ge 0,
+   heta_c \ge 0,
 \qquad
 \sum_{c \in \mathcal{C}_\ell} \theta_c = 1
 $$
@@ -49,17 +49,17 @@ $$
 Define total gDNA mass and the implied strand fraction by:
 
 $$
-G_\ell = \theta_{g_+} + \theta_{g_-}
+G_\ell = \theta_{g_{pos}} + \theta_{g_{neg}}
 $$
 
 and, when $G_\ell > 0$,
 
 $$
-\phi_\ell = \frac{\theta_{g_+}}{G_\ell}
+\phi_\ell = \frac{\theta_{g_{pos}}}{G_\ell}
 $$
 
 The public gDNA abundance reported for the locus is $G_\ell$, while the EM
-internally carries the pair $(\theta_{g_+}, \theta_{g_-})$.
+internally carries the pair $(\theta_{g_{pos}}, \theta_{g_{neg}})$.
 
 ## 2. Observed Fragment Features
 
@@ -71,7 +71,7 @@ $$
 
 where:
 
-- $s_f \in \{+, -\}$ is observed strand orientation
+- $s_f \in \{\mathrm{pos}, \mathrm{neg}\}$ is observed genomic strand orientation
 - $j_f$ is splice class
 - $a_f$ is alignment or compatibility information
 - $l_f$ is fragment-length information
@@ -117,21 +117,21 @@ protocol-error probability.
 For the two gDNA components:
 
 $$
-p(s_f \mid g_+) = \rho_{g_+}(s_f),
+p(s_f \mid g_{pos}) = \rho_{g_{pos}}(s_f),
 \qquad
-p(s_f \mid g_-) = \rho_{g_-}(s_f)
+p(s_f \mid g_{neg}) = \rho_{g_{neg}}(s_f)
 $$
 
 where in the idealized model:
 
 $$
-\rho_{g_+}(+) = 1,
+\rho_{g_{pos}}(\mathrm{pos}) = 1,
 \quad
-\rho_{g_+}(-) = 0,
+\rho_{g_{pos}}(\mathrm{neg}) = 0,
 \quad
-\rho_{g_-}(+) = 0,
+\rho_{g_{neg}}(\mathrm{pos}) = 0,
 \quad
-\rho_{g_-}(-) = 1
+\rho_{g_{neg}}(\mathrm{neg}) = 1
 $$
 
 Exact zeroes may be replaced by tiny numerical error probabilities if the
@@ -153,8 +153,8 @@ $$
 p(x_f \mid \theta_\ell)
 = \sum_{t \in \mathcal{T}_\ell} \theta_t \, \rho_t(s_f) \, \lambda_{ft}
 + \sum_{n \in \mathcal{N}_\ell} \theta_n \, \rho_n(s_f) \, \lambda_{fn}
-+ \theta_{g_+} \, \rho_{g_+}(s_f) \, \lambda_{f g_+}
-+ \theta_{g_-} \, \rho_{g_-}(s_f) \, \lambda_{f g_-}
++ \theta_{g_{pos}} \, \rho_{g_{pos}}(s_f) \, \lambda_{f g_{pos}}
++ \theta_{g_{neg}} \, \rho_{g_{neg}}(s_f) \, \lambda_{f g_{neg}}
 $$
 
 ## 5. Priors
@@ -166,7 +166,7 @@ The compact model keeps only three kinds of regularization.
 Use a Dirichlet prior on the locus mixture:
 
 $$
-	heta_\ell \sim \operatorname{Dirichlet}(\alpha_\ell)
+   heta_\ell \sim \operatorname{Dirichlet}(\alpha_\ell)
 $$
 
 For the redesign target, optional components should use a sparse MAP regime
@@ -225,7 +225,7 @@ $$
 with:
 
 $$
-\phi_\ell = \frac{\theta_{g_+}}{\theta_{g_+} + \theta_{g_-}}
+\phi_\ell = \frac{\theta_{g_{pos}}}{\theta_{g_{pos}} + \theta_{g_{neg}}}
 $$
 
 This gives:
@@ -236,10 +236,10 @@ This gives:
 
 Integrating over the locus-specific strand split gives the correct overdispersed
 count model for gDNA strand balance. If the total gDNA count at locus $\ell$ is
-$N_\ell^{(g)}$, then the positive-strand count satisfies:
+$N_\ell^{(g)}$, then the pos-strand count satisfies:
 
 $$
-K_\ell^+ \mid N_\ell^{(g)}
+K_\ell^{pos} \mid N_\ell^{(g)}
 \sim \operatorname{BetaBinomial}\left(
 N_\ell^{(g)}, \frac{\kappa_{\mathrm{sym}}}{2}, \frac{\kappa_{\mathrm{sym}}}{2}
 \right)
@@ -248,13 +248,13 @@ $$
 with mean:
 
 $$
-\mathbb{E}[K_\ell^+ \mid N_\ell^{(g)}] = \frac{N_\ell^{(g)}}{2}
+\mathbb{E}[K_\ell^{pos} \mid N_\ell^{(g)}] = \frac{N_\ell^{(g)}}{2}
 $$
 
 and variance:
 
 $$
-\operatorname{Var}(K_\ell^+ \mid N_\ell^{(g)})
+\operatorname{Var}(K_\ell^{pos} \mid N_\ell^{(g)})
 = \frac{N_\ell^{(g)}\left(N_\ell^{(g)} + \kappa_{\mathrm{sym}}\right)}
 {4(\kappa_{\mathrm{sym}} + 1)}
 $$
@@ -270,7 +270,7 @@ For one locus, the MAP objective is:
 $$
 \mathcal{L}(\theta)
 = \sum_f \log \left( \sum_{c \in \mathcal{C}_\ell}
-	heta_c \, p(x_f \mid z_f = c) \right)
++ \theta_c \, p(x_f \mid z_f = c) \right)
 + \log p(\theta)
 + \sum_{n \in \mathcal{N}_\ell} \log p(\eta_n(\theta))
 + \log p(\phi(\theta))
@@ -290,7 +290,7 @@ $$
 subject to:
 
 $$
-	heta_c \ge 0,
+   heta_c \ge 0,
 \qquad
 \sum_c \theta_c = 1
 $$
@@ -371,9 +371,9 @@ $$
 Define gDNA responsibility totals:
 
 $$
-R_{g_+} = \sum_f r_{f g_+},
+R_{g_{pos}} = \sum_f r_{f g_{pos}},
 \qquad
-R_{g_-} = \sum_f r_{f g_-}
+R_{g_{neg}} = \sum_f r_{f g_{neg}}
 $$
 
 Then the gDNA-specific behavior is represented inside the same simplex as the
@@ -382,7 +382,7 @@ collapsed gDNA. After the weight update, the implied strand fraction is:
 
 $$
 \phi_\ell^{new}
-= \frac{\theta_{g_+}^{new}}{\theta_{g_+}^{new} + \theta_{g_-}^{new}}
+= \frac{\theta_{g_{pos}}^{new}}{\theta_{g_{pos}}^{new} + \theta_{g_{neg}}^{new}}
 $$
 
 If we temporarily ignore the nRNA coupling terms and focus only on the gDNA
@@ -391,8 +391,8 @@ update:
 
 $$
 \phi_\ell^{new}
-= \frac{R_{g_+} + \frac{\kappa_{\mathrm{sym}}}{2} - 1}
-{R_{g_+} + R_{g_-} + \kappa_{\mathrm{sym}} - 2}
+= \frac{R_{g_{pos}} + \frac{\kappa_{\mathrm{sym}}}{2} - 1}
+{R_{g_{pos}} + R_{g_{neg}} + \kappa_{\mathrm{sym}} - 2}
 $$
 
 provided the Beta prior parameters are greater than $1$. The key point is that
@@ -403,10 +403,44 @@ If we want the strictly symmetric model with no strand adaptation, we can
 constrain:
 
 $$
-   heta_{g_+} = \theta_{g_-}
+   heta_{g_{pos}} = \theta_{g_{neg}}
 $$
 
 which corresponds to the fixed-symmetry submodel.
+
+### 9.1 Relationship to the current targeted-excess penalty
+
+The current native solver applies a targeted-excess penalty rather than a fully
+explicit gDNA pair update. That penalty decomposes gDNA mass into:
+
+- a symmetric protected baseline
+- an asymmetric excess subject to discount
+
+The discount factor has the form:
+
+$$
+w_{\mathrm{sym}} \propto \left[4 \hat{p}(1 - \hat{p})\right]^{\kappa/2 - 1}
+$$
+
+which is the kernel of a symmetric Beta density. So the current implementation
+is already an approximation to the same strand-symmetry prior family proposed
+here.
+
+What changes in the redesign is not the biological regularizer. What changes is
+the parameterization and the explicitness with which that regularizer is
+represented.
+
+### 9.2 Identifiability caveat and asymmetric constraint
+
+There is a real identifiability risk at loci with both gDNA and nascent RNA.
+
+- nRNA contributes sense-dominant unspliced signal
+- a flexible gDNA pair can absorb part of that same signal if unconstrained
+
+So a purely symmetric Beta prior is not necessarily sufficient as the full
+practical story. A principled first implementation may need an asymmetric
+constraint or evidence gate that treats sense-heavy gDNA as more suspect than
+antisense-heavy gDNA, because sense-heavy excess is more confounded with nRNA.
 
 ## 10. M-step for the Mixture Weights
 
@@ -431,14 +465,14 @@ Without the nRNA coupling prior and the gDNA symmetry prior, this reduces to the
 usual normalized-count Dirichlet update:
 
 $$
-	heta_c^{new}
+   heta_c^{new}
 \propto R_c + \alpha_c - 1
 $$
 
 With the nRNA Beta priors included, the M-step is no longer fully separable,
 because each nRNA component is coupled to the mature transcript masses in its
 shared group. The gDNA symmetry prior similarly couples the pair
-$(\theta_{g_+}, \theta_{g_-})$ through the induced strand fraction
+$(\theta_{g_{pos}}, \theta_{g_{neg}})$ through the induced strand fraction
 $\phi(\theta)$.
 
 That coupling is intentional: it is exactly the biological prior that the model
@@ -500,7 +534,7 @@ $$
 with:
 
 $$
-\phi_\ell = \frac{\theta_{g_+}}{\theta_{g_+} + \theta_{g_-}}
+\phi_\ell = \frac{\theta_{g_{pos}}}{\theta_{g_{pos}} + \theta_{g_{neg}}}
 $$
 
 but we do not regard $\kappa_{\mathrm{sym}}$ as fixed a priori. Instead it is a
@@ -529,6 +563,10 @@ Conceptually, this means:
 - all such regions share one global dispersion parameter
 - the estimated $\kappa_{\mathrm{sym}}$ is then recycled as the prior strength
   on the gDNA pair in the locus EM
+
+The same calibration framework should also estimate the gDNA fragment-length
+distribution. These are joint nuisance targets learned from the same
+purity-weighted regional evidence, not two unrelated upstream procedures.
 
 ## 14. What Counts as a Calibration Region
 
@@ -753,15 +791,17 @@ The correct theoretical standard remains the same:
 
 ## 21. Recommended Calibration Submodel
 
-Among the candidate calibration formulations, the preferred theoretical target
-is:
+Among the candidate calibration formulations, the preferred first
+implementation is:
 
-1. a continuous latent purity variable $\pi_r \in [0,1]$ for each region
-2. posterior purity weights
-   $w_r = \mathbb{E}[\pi_r \mid y_r, \kappa_{\mathrm{sym}}, \Theta_{\mathrm{cal}}]$
-3. empirical-Bayes estimation of global gDNA nuisance parameters from those
-   posterior-weighted regions
+1. a two-state mixture with latent region state
+   $u_r \in \{\mathrm{gDNA\text{-}dominant},\mathrm{RNA\text{-}contaminated}\}$
+2. posterior calibration weights
+   $w_r = \Pr(u_r = \mathrm{gDNA\text{-}dominant} \mid y_r)$
+3. joint empirical-Bayes estimation of global gDNA nuisance parameters,
+   especially $\kappa_{\mathrm{sym}}$ and the gDNA fragment-length
+   distribution, from those posterior-weighted regions
 
-The two-state mixture model is the cleanest simplified probabilistic fallback.
-Pure heuristic scoring is acceptable only as an approximation to the posterior
-purity ordering implied by the continuous latent model.
+The continuous latent-purity model remains the cleaner long-run theoretical
+target. Pure heuristic scoring is acceptable only as an approximation to the
+posterior purity ordering implied by the probabilistic model.
