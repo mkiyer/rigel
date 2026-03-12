@@ -31,13 +31,30 @@ from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
 
 def _make_frag_length_models(n_obs=200, size=250):
-    """FragmentLengthModels with observations for all categories + intergenic."""
+    """FragmentLengthModels with a known distribution for gDNA scoring tests.
+
+    Builds the models the same way the production pipeline does:
+    observations → mix_models → finalize.  Since these tests exercise gDNA
+    scoring (not fragment length training), we use a simple single-peak
+    distribution and high strand specificity so that gDNA/RNA models
+    share the same shape.
+    """
     im = FragmentLengthModels()
     for _ in range(n_obs):
         im.observe(size, SpliceType.SPLICED_ANNOT)
         im.observe(size, SpliceType.UNSPLICED)
         im.observe(size, SpliceType.SPLICED_UNANNOT)
-        im.observe(size, None)  # intergenic
+        im.observe(size, None)  # intergenic → also feeds gdna_model
+    # Populate unspliced strand histograms so mix_models works
+    im.unspliced_same_strand.observe_batch(
+        np.full(n_obs, size, dtype=np.intp)
+    )
+    im.unspliced_opp_strand.observe_batch(
+        np.full(n_obs // 2, size, dtype=np.intp)
+    )
+    # Mix with high strand specificity → gdna_model gets meaningful data
+    im.mix_models(s_rna=0.9, p_r1_sense=0.9)
+    im.finalize()
     return im
 
 
@@ -79,11 +96,11 @@ class TestScoreGDNA:
             int(Strand.POS), cat, 250,
             im,
         )
-        # Uses global insert model
-        global_model = im.global_model
+        # Uses gDNA insert model (falls back to global when mix_models not called)
+        gdna_model = im.gdna_model
         assert score < 0
         assert score == pytest.approx(
-            np.log(0.5) + global_model.log_likelihood(250)
+            np.log(0.5) + gdna_model.log_likelihood(250)
         )
 
     def test_spliced_unannot_penalty(self):
@@ -111,8 +128,8 @@ class TestScoreGDNA:
             im,
             gdna_splice_penalties=custom,
         )
-        global_model = im.global_model
-        expected = np.log(0.5) + global_model.log_likelihood(250) + np.log(0.5)
+        gdna_model = im.gdna_model
+        expected = np.log(0.5) + gdna_model.log_likelihood(250) + np.log(0.5)
         assert score == pytest.approx(expected)
 
     def test_zero_frag_length(self):

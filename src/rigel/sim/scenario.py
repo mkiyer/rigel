@@ -412,6 +412,8 @@ class Scenario:
         sim_config: SimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
         nrna_abundance: float = 0.0,
+        n_rna_fragments: int | None = None,
+        gdna_fraction: float | None = None,
     ) -> ScenarioResult:
         """Execute the simulation pipeline using oracle (perfect) alignments.
 
@@ -428,7 +430,8 @@ class Scenario:
         Parameters
         ----------
         n_fragments : int
-            Number of fragments to simulate.
+            Number of fragments to simulate (mode a: fixed total).
+            Ignored when *n_rna_fragments* is set.
         sim_config : SimConfig or None
             Read simulation config. None uses defaults with same seed.
         gdna_config : GDNAConfig or None
@@ -437,6 +440,13 @@ class Scenario:
         nrna_abundance : float
             Nascent RNA molecular abundance applied to all expressed
             transcripts (same semantics as ``build()``).
+        n_rna_fragments : int or None
+            Fixed RNA fragment count (mode b).  When set, exactly this
+            many RNA fragments (mRNA + nRNA) are generated and gDNA
+            is added on top as ``n_rna_fragments × gdna_fraction``.
+        gdna_fraction : float or None
+            Fraction of RNA fragments to add as gDNA contamination
+            (only used when *n_rna_fragments* is set).
 
         Returns
         -------
@@ -469,7 +479,18 @@ class Scenario:
             ref_name=self.ref_name,
         )
         bam_path = wdir / f"{self.name}_oracle.bam"
-        oracle.write_bam(bam_path, n_fragments, name_sorted=True)
+
+        # Fixed-RNA mode (b): compute explicit pool split
+        pool_split = None
+        if n_rna_fragments is not None:
+            n_rna = n_rna_fragments
+            n_gdna = (int(round(n_rna * gdna_fraction))
+                      if gdna_fraction and effective_gdna else 0)
+            n_mrna, n_nrna = oracle._sim.compute_rna_split(n_rna)
+            pool_split = (n_mrna, n_nrna, n_gdna)
+
+        oracle.write_bam(bam_path, n_fragments, name_sorted=True,
+                         pool_split=pool_split)
 
         # 4. Build TranscriptIndex
         index_dir = wdir / "index"
@@ -486,7 +507,7 @@ class Scenario:
             genome=self.genome,
             fastq_r1=None,
             fastq_r2=None,
-            n_simulated=n_fragments,
+            n_simulated=sum(pool_split) if pool_split else n_fragments,
             gdna_config=effective_gdna,
             is_oracle=True,
         )

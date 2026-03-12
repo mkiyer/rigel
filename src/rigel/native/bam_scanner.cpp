@@ -208,6 +208,12 @@ struct FragLenObservations {
 
     // Intergenic fragment lengths (splice_type = -1 meaning None)
     std::vector<int32_t> intergenic_lengths;
+
+    // Unspliced genic fragment lengths by strand direction.
+    // For strand-weighted gDNA/RNA histogram mixing (frag_len_dist_plan_v2).
+    // Uses genomic_footprint for unspliced unique-mapper fragments.
+    std::vector<int32_t> unspliced_same_strand_lengths;  // exon_strand == gene_strand
+    std::vector<int32_t> unspliced_opp_strand_lengths;   // exon_strand != gene_strand
 };
 
 // ================================================================
@@ -418,6 +424,14 @@ static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src
     dst.intergenic_lengths.insert(dst.intergenic_lengths.end(),
                                   src.intergenic_lengths.begin(),
                                   src.intergenic_lengths.end());
+    dst.unspliced_same_strand_lengths.insert(
+        dst.unspliced_same_strand_lengths.end(),
+        src.unspliced_same_strand_lengths.begin(),
+        src.unspliced_same_strand_lengths.end());
+    dst.unspliced_opp_strand_lengths.insert(
+        dst.unspliced_opp_strand_lengths.end(),
+        src.unspliced_opp_strand_lengths.begin(),
+        src.unspliced_opp_strand_lengths.end());
 }
 
 // ================================================================
@@ -1279,6 +1293,32 @@ private:
                 } else {
                     stats.n_frag_length_ambiguous++;
                 }
+
+                // Collect unspliced same/opp strand fragment lengths
+                // for gDNA/RNA histogram mixing (frag_len_dist_plan_v2).
+                if (result.splice_type == SPLICE_UNSPLICED &&
+                    result.get_is_same_strand() &&
+                    (result.exon_strand == STRAND_POS ||
+                     result.exon_strand == STRAND_NEG)) {
+                    int32_t t_idx = result.get_first_t_ind();
+                    if (t_idx >= 0 &&
+                        t_idx < static_cast<int32_t>(ctx.t_strand_arr_.size())) {
+                        int32_t gene_strand = ctx.t_strand_arr_[t_idx];
+                        if (gene_strand == STRAND_POS ||
+                            gene_strand == STRAND_NEG) {
+                            int32_t gfp = result.genomic_footprint;
+                            if (gfp > 0) {
+                                if (result.exon_strand == gene_strand) {
+                                    fraglen_obs.unspliced_same_strand_lengths
+                                        .push_back(gfp);
+                                } else {
+                                    fraglen_obs.unspliced_opp_strand_lengths
+                                        .push_back(gfp);
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             accumulator.append(result, frag_id);
@@ -1353,6 +1393,10 @@ private:
         fraglen_dict["lengths"] = std::move(fraglen_obs_.lengths);
         fraglen_dict["splice_types"] = std::move(fraglen_obs_.splice_types);
         fraglen_dict["intergenic_lengths"] = std::move(fraglen_obs_.intergenic_lengths);
+        fraglen_dict["unspliced_same_strand_lengths"] =
+            std::move(fraglen_obs_.unspliced_same_strand_lengths);
+        fraglen_dict["unspliced_opp_strand_lengths"] =
+            std::move(fraglen_obs_.unspliced_opp_strand_lengths);
         result["frag_length_observations"] = fraglen_dict;
 
         // Accumulator size

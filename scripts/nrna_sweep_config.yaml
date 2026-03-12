@@ -33,16 +33,17 @@
 genome_length: 50000
 seed: 42
 
-# ── Read simulation parameters ───────────────────────────────────────
-sim:
+read_length: 100
+
+# ── RNA fragment length distribution ─────────────────────────────────
+rna:
   frag_mean: 200
   frag_std: 30
   frag_min: 80
   frag_max: 450
-  read_length: 100
 
-# ── gDNA fragment parameters (used when gdna > 0) ───────────────────
-gdna_config:
+# ── gDNA fragment length distribution ───────────────────────────────
+gdna:
   frag_mean: 350
   frag_std: 100
   frag_min: 100

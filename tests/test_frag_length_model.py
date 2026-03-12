@@ -39,7 +39,7 @@ class TestFragmentLengthModelBasic:
     def test_observe_weight(self):
         m = FragmentLengthModel(max_size=100)
         m.observe(50, weight=2.5)
-        assert m.n_observations == 1
+        assert m.n_observations == 2  # int(total_weight) = int(2.5)
         assert m.counts[50] == 2.5
         assert m.total_weight == 2.5
 

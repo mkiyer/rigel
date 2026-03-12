@@ -12,6 +12,9 @@ This document describes the model that is currently implemented in the Rigel
 codebase. It is intentionally implementation-facing: when the code and earlier
 design notes disagree, this document follows the code.
 
+For a theory-first description of the underlying inference problem, separate
+from the current implementation, see `docs/THEORETICAL_MODEL.md`.
+
 ---
 
 ## 1. Scope and motivation

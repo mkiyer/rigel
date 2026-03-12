@@ -274,6 +274,7 @@ class OracleBamSimulator:
         n_fragments: int,
         *,
         name_sorted: bool = True,
+        pool_split: tuple[int, int, int] | None = None,
     ) -> Path:
         """Simulate fragments and write a BAM file.
 
@@ -286,6 +287,10 @@ class OracleBamSimulator:
         name_sorted : bool
             If True (default), produce a name-sorted BAM suitable for
             ``run_pipeline``.  If False, produce a coordinate-sorted BAM.
+        pool_split : tuple[int, int, int] or None
+            Explicit ``(n_mrna, n_nrna, n_gdna)`` split.  When provided,
+            the abundance-based pool split is bypassed and *n_fragments*
+            is ignored (the sum of the split is used instead).
 
         Returns
         -------
@@ -307,7 +312,10 @@ class OracleBamSimulator:
         ref_id = 0  # single reference
         records: list[pysam.AlignedSegment] = []
 
-        n_mrna, n_nrna, n_gdna = self._sim._compute_pool_split(n_fragments)
+        if pool_split is not None:
+            n_mrna, n_nrna, n_gdna = pool_split
+        else:
+            n_mrna, n_nrna, n_gdna = self._sim._compute_pool_split(n_fragments)
         rng = self._sim._rng
         ntranscripts = len(self.transcripts)
         cfg = self.config

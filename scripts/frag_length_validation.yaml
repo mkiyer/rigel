@@ -1,0 +1,102 @@
+# frag_length_validation.yaml — Validate fragment length distribution recovery
+#
+# Uses the complex locus configuration with varied RNA/gDNA fragment length
+# distributions.  The sweep compares simulated (true) distributions against
+# pipeline-estimated distributions via the mix_models() strand-weighted
+# deconvolution.
+#
+# Mode (b): fixed RNA fragment count with gDNA added as a fraction.
+# This gives precise control over the number of RNA fragments, making
+# gDNA contamination levels directly interpretable.
+#
+# Test conditions:
+#   - RNA frag mean 200 vs gDNA frag mean 350 (well separated)
+#   - RNA frag mean 250 vs gDNA frag mean 250 (identical — hardest case)
+#   - gDNA fraction: 0, 5%, 10%, 20%, 50%
+#   - n_rna_fragments: 10000 (enough for stable estimation)
+#
+# Total runs: 3 patterns × 3 nRNA × 5 gDNA_fraction = 45 runs
+
+genome_length: 50000
+seed: 42
+read_length: 150
+
+# ── RNA fragment length distribution ─────────────────────────────────
+rna:
+  frag_mean: 200
+  frag_std: 30
+  frag_min: 80
+  frag_max: 600
+
+# ── gDNA fragment length distribution ───────────────────────────────
+gdna:
+  frag_mean: 350
+  frag_std: 80
+  frag_min: 100
+  frag_max: 1000
+
+# ── Transcript structures ────────────────────────────────────────────
+transcripts:
+  TA1:
+    strand: "+"
+    exons: [[1000, 1020], [5000, 5500], [12000, 13000]]
+  TA2:
+    strand: "+"
+    exons: [[2000, 2500], [5000, 5500], [12000, 13000]]
+  TA3:
+    strand: "+"
+    exons: [[4500, 5500], [7000, 7500], [12000, 13000]]
+  TA4:
+    strand: "+"
+    exons: [[4500, 5500], [12000, 13000]]
+  TB1:
+    strand: "-"
+    exons: [[9000, 10000], [14000, 16000]]
+  TB2:
+    strand: "-"
+    exons: [[9950, 10000], [14000, 16000]]
+  TCF:
+    strand: "+"
+    exons: [[20000, 24000]]
+  TCR:
+    strand: "-"
+    exons: [[23000, 26000], [30000, 31000], [35000, 36000]]
+  TD:
+    strand: "+"
+    exons: [[28000, 29000]]
+  TE:
+    strand: "-"
+    exons: [[40000, 41000], [45000, 46000]]
+
+nrnas:
+  NTA1: ["+", 1000, 13000]
+  NTA2: ["+", 2000, 13000]
+  NTA34: ["+", 4500, 13000]
+  NTB12: ["-", 9000, 16000]
+  NTCR: ["-", 23000, 36000]
+  NTE: ["-", 40000, 46000]
+
+# ── Sweep grid ───────────────────────────────────────────────────────
+sweep:
+  strand_specificity: 1.0
+
+  # Mode (b): fixed RNA fragments, gDNA as fraction on top
+  n_rna_fragments: 10000
+  gdna_fraction: [0, 0.05, 0.1, 0.2, 0.5]
+
+  # Nascent RNA contamination
+  NTA1: [0, 100, 500]
+  NTA2: 0
+  NTA34: 0
+  NTB12: 0
+  NTCR: 0
+  NTE: 0
+
+  # Negative controls
+  TD: 0
+  TE: 0
+
+patterns:
+  - {TA1: 100, TA2: 0, TA3: 0, TA4: 0, TB1: 50, TB2: 0, TCF: 0, TCR: 0}
+  - {TA1: 0, TA2: 100, TA3: 50, TA4: 0, TB1: 0, TB2: 50, TCF: 0, TCR: 0}
+  - {TA1: 50, TA2: 50, TA3: 0, TA4: 50, TB1: 0, TB2: 0, TCF: 50, TCR: 50}

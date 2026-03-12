@@ -104,10 +104,15 @@ class FragmentScorer:
     mismatch_log_penalty: float
     gdna_splice_penalties: dict  # int-keyed
 
-    # Fragment-length LUT (pre-finalized)
+    # Fragment-length LUT — RNA model (pre-finalized)
     fl_log_prob: np.ndarray | None  # numpy array or None
     fl_max_size: int
     fl_tail_base: float
+
+    # Fragment-length LUT — gDNA model (pre-finalized)
+    gdna_fl_log_prob: np.ndarray | None
+    gdna_fl_max_size: int
+    gdna_fl_tail_base: float
 
     # Index arrays (borrowed references, never copied)
     t_strand_arr: np.ndarray     # int8[n_transcripts]
@@ -153,10 +158,15 @@ class FragmentScorer:
         p_sense = rna_sm._cached_p_sense
         p_antisense = rna_sm._cached_p_antisense
 
-        fl_model = frag_length_models.global_model
-        fl_log_prob = fl_model._log_prob  # numpy array or None
-        fl_max_size = fl_model.max_size
-        fl_tail_base: float = getattr(fl_model, "_tail_base", 0.0)
+        rna_fl = frag_length_models.rna_model
+        fl_log_prob = rna_fl._log_prob  # numpy array or None
+        fl_max_size = rna_fl.max_size
+        fl_tail_base: float = getattr(rna_fl, "_tail_base", 0.0)
+
+        gdna_fl = frag_length_models.gdna_model
+        gdna_fl_log_prob = gdna_fl._log_prob
+        gdna_fl_max_size = gdna_fl.max_size
+        gdna_fl_tail_base: float = getattr(gdna_fl, "_tail_base", 0.0)
 
         # Per-transcript length arrays for per-fragment effective length
         t_length_arr = index.t_df["length"].values.astype(np.int32)
@@ -200,6 +210,9 @@ class FragmentScorer:
             fl_log_prob=fl_log_prob,
             fl_max_size=fl_max_size,
             fl_tail_base=fl_tail_base,
+            gdna_fl_log_prob=gdna_fl_log_prob,
+            gdna_fl_max_size=gdna_fl_max_size,
+            gdna_fl_tail_base=gdna_fl_tail_base,
             t_strand_arr=index.t_to_strand_arr,
             g_strand_arr=index.g_to_strand_arr,
             t_to_g=index.t_to_g_arr,
@@ -223,6 +236,9 @@ class FragmentScorer:
             fl_log_prob=ctx.fl_log_prob,
             fl_max_size=int(ctx.fl_max_size),
             fl_tail_base=float(ctx.fl_tail_base),
+            gdna_fl_log_prob=ctx.gdna_fl_log_prob,
+            gdna_fl_max_size=int(ctx.gdna_fl_max_size),
+            gdna_fl_tail_base=float(ctx.gdna_fl_tail_base),
             t_strand_arr=np.ascontiguousarray(
                 ctx.t_strand_arr, dtype=np.int8),
             t_length_arr=np.ascontiguousarray(

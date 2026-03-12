@@ -563,6 +563,33 @@ class ReadSimulator:
         n_mrna = max(0, n_fragments - n_nrna - n_gdna)
         return n_mrna, n_nrna, n_gdna
 
+    def compute_rna_split(self, n_rna: int) -> tuple[int, int]:
+        """Split *n_rna* fragments between mature RNA and nascent RNA.
+
+        Uses the same abundance-weighted effective-length logic as
+        ``_compute_pool_split`` but ignores gDNA entirely.
+
+        Returns ``(n_mrna, n_nrna)``.
+        """
+        mean_frag = int(self.config.frag_mean)
+
+        mrna_weight = sum(
+            (t.abundance or 0) * max(0, tlen - mean_frag + 1)
+            for t, tlen in zip(self.transcripts, self._t_lengths)
+        )
+        nrna_weight = sum(
+            t.nrna_abundance * max(0, plen - mean_frag + 1)
+            for t, plen in zip(self.transcripts, self._premrna_lengths)
+        )
+
+        total = mrna_weight + nrna_weight
+        if total <= 0:
+            return n_rna, 0
+
+        n_nrna = int(round(n_rna * nrna_weight / total))
+        n_mrna = max(0, n_rna - n_nrna)
+        return n_mrna, n_nrna
+
     def simulate(self, n_fragments: int):
         """Generate *n_fragments* paired-end read pairs.
 

@@ -159,8 +159,14 @@ class NativeFragmentScorer {
     std::vector<int32_t> nrna_span_;  // int32[n_nrna]: per-nRNA genomic span
     std::vector<int32_t> nrna_start_; // int32[n_nrna]: per-nRNA genomic start
 
-    // --- Fragment-length LUT (copied from numpy) ---
+    // --- Fragment-length LUT — RNA model (copied from numpy) ---
     std::vector<double> fl_log_prob_;
+
+    // --- Fragment-length LUT — gDNA model (copied from numpy) ---
+    std::vector<double> gdna_fl_log_prob_;
+    int32_t gdna_fl_max_size_;
+    double  gdna_fl_tail_base_;
+    bool    has_gdna_fl_lut_;
 
     // --- Exon data in CSR layout for genomic→transcript mapping ---
     std::vector<int32_t> exon_offsets_;  // [n_transcripts + 1]
@@ -175,6 +181,13 @@ class NativeFragmentScorer {
         if (flen <= fl_max_size_)
             return fl_log_prob_[static_cast<size_t>(flen)];
         return fl_tail_base_ + (flen - fl_max_size_) * TAIL_DECAY_LP;
+    }
+
+    inline double gdna_frag_len_log_lik(int32_t flen) const {
+        if (flen <= 0 || !has_gdna_fl_lut_) return 0.0;
+        if (flen <= gdna_fl_max_size_)
+            return gdna_fl_log_prob_[static_cast<size_t>(flen)];
+        return gdna_fl_tail_base_ + (flen - gdna_fl_max_size_) * TAIL_DECAY_LP;
     }
 
     inline int32_t genomic_to_tx_pos(int32_t genomic_pos,
@@ -229,6 +242,9 @@ public:
         nb::object fl_log_prob_obj,
         int32_t fl_max_size,
         double  fl_tail_base,
+        nb::object gdna_fl_log_prob_obj,
+        int32_t gdna_fl_max_size,
+        double  gdna_fl_tail_base,
         i8_1d   t_strand_arr,
         i32_1d  t_length_arr,
         i32_1d  t_span_arr,
@@ -246,7 +262,10 @@ public:
         fl_max_size_(fl_max_size),
         fl_tail_base_(fl_tail_base),
         has_fl_lut_(false),
-        nrna_base_(nrna_base)
+        nrna_base_(nrna_base),
+        gdna_fl_max_size_(gdna_fl_max_size),
+        gdna_fl_tail_base_(gdna_fl_tail_base),
+        has_gdna_fl_lut_(false)
     {
         // Copy index arrays
         n_transcripts_ = static_cast<int32_t>(t_strand_arr.shape(0));
@@ -280,13 +299,22 @@ public:
             nrna_start_.assign(p, p + n_nrna_);
         }
 
-        // Copy fragment-length LUT
+        // Copy fragment-length LUT (RNA model)
         if (!fl_log_prob_obj.is_none()) {
             auto fl_arr = nb::cast<f64_1d>(fl_log_prob_obj);
             const double* p = fl_arr.data();
             int32_t n = static_cast<int32_t>(fl_arr.shape(0));
             fl_log_prob_.assign(p, p + n);
             has_fl_lut_ = true;
+        }
+
+        // Copy fragment-length LUT (gDNA model)
+        if (!gdna_fl_log_prob_obj.is_none()) {
+            auto fl_arr = nb::cast<f64_1d>(gdna_fl_log_prob_obj);
+            const double* p = fl_arr.data();
+            int32_t n = static_cast<int32_t>(fl_arr.shape(0));
+            gdna_fl_log_prob_.assign(p, p + n);
+            has_gdna_fl_lut_ = true;
         }
 
         // Build exon CSR from Python dict
@@ -767,7 +795,7 @@ private:
                             continue;
                         int32_t gfp_val = cps[ci].g_fp[ri];
                         double gdna_fl =
-                            frag_len_log_lik(gfp_val);
+                            gdna_frag_len_log_lik(gfp_val);
                         double gdna_ll_val =
                             LOG_HALF + gdna_fl + gdna_log_sp;
                         if (gdna_ll_val > best_gdna_ll) {
@@ -1216,7 +1244,7 @@ private:
 
                     if (!is_spl) {
                         double gdna_fl =
-                            frag_len_log_lik(
+                            gdna_frag_len_log_lik(
                                 genomic_footprint);
                         st.gdna_ll[st.unit_cur] =
                                 LOG_HALF + gdna_fl
@@ -1506,6 +1534,7 @@ NB_MODULE(_scoring_impl, m) {
         .def(nb::init<
                  double, double, bool, double, double,
                  nb::object, int32_t, double,
+                 nb::object, int32_t, double,
                  i8_1d, i32_1d, i32_1d, i32_1d,
                  int32_t, nb::object,
                  i32_1d, i32_1d, i32_1d>(),
@@ -1517,6 +1546,9 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("fl_log_prob").none(),
              nb::arg("fl_max_size"),
              nb::arg("fl_tail_base"),
+             nb::arg("gdna_fl_log_prob").none(),
+             nb::arg("gdna_fl_max_size"),
+             nb::arg("gdna_fl_tail_base"),
              nb::arg("t_strand_arr"),
              nb::arg("t_length_arr"),
              nb::arg("t_span_arr"),

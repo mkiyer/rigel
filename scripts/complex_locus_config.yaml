@@ -1,0 +1,129 @@
+# complex_locus_config.yaml — complex locus ablation study
+#
+# Goals:
+#   1. FL distributions EQUAL for DNA/RNA (isolate other issues)
+#   2. Fix total RNA fragments, add gDNA on top (gdna_fraction mode)
+#   3. Expose mRNA, nRNA, gDNA accuracy issues
+#   4. Test complex locus structures: overlapping isoforms, antisense,
+#      convergent transcription, single-exon genes
+#
+# Grid: 16 patterns × 4 nRNA × 4 SS × 4 gdna_frac = 1024 runs
+
+genome_length: 50000
+seed: 42
+read_length: 150
+
+# ── Fragment length: EQUAL for RNA and gDNA ──────────────────────────
+rna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+gdna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+# ── Transcript structures ────────────────────────────────────────────
+transcripts:
+  # Gene A locus (+strand): 4 overlapping isoforms sharing exons
+  TA1:
+    strand: "+"
+    exons: [[1000, 1020], [5000, 5500], [12000, 13000]]
+  TA2:
+    strand: "+"
+    exons: [[2000, 2500], [5000, 5500], [12000, 13000]]
+  TA3:
+    strand: "+"
+    exons: [[4500, 5500], [7000, 7500], [12000, 13000]]
+  TA4:
+    strand: "+"
+    exons: [[4500, 5500], [12000, 13000]]
+
+  # Gene B locus (-strand): 2 overlapping isoforms, partially
+  # overlapping with gene A exons (convergent transcription zone)
+  TB1:
+    strand: "-"
+    exons: [[9000, 10000], [14000, 16000]]
+  TB2:
+    strand: "-"
+    exons: [[9950, 10000], [14000, 16000]]
+
+  # Gene C: convergent pair on opposite strands with exon overlap
+  TCF:
+    strand: "+"
+    exons: [[20000, 24000]]
+  TCR:
+    strand: "-"
+    exons: [[23000, 26000], [30000, 31000], [35000, 36000]]
+
+  # Gene D: single-exon gene (no introns → nRNA indistinguishable)
+  TD:
+    strand: "+"
+    exons: [[28000, 29000]]
+
+  # Gene E: isolated 2-exon gene on - strand (negative control)
+  TE:
+    strand: "-"
+    exons: [[40000, 41000], [45000, 46000]]
+
+# ── Nascent RNA groups ───────────────────────────────────────────────
+nrnas:
+  NTA1: ["+", 1000, 13000]
+  NTA2: ["+", 2000, 13000]
+  NTA34: ["+", 4500, 13000]
+  NTB12: ["-", 9000, 16000]
+  NTCR: ["-", 23000, 36000]
+  NTE: ["-", 40000, 46000]
+
+# ── Sweep grid ───────────────────────────────────────────────────────
+# Uses n_rna_fragments mode: fix RNA at 10000, add gDNA on top
+sweep:
+  strand_specificity: [0.5, 0.75, 0.9, 1.0]
+  n_rna_fragments: 10000
+  gdna_fraction: [0.0, 0.1, 0.3, 0.5]
+
+  # B-locus independent sweep: on or off
+  TB1: [0, 500]
+  TB2: [0, 500]
+
+  # Unexpressed controls: always 0
+  TD: 0
+  TE: 0
+
+  # nRNA: single dimension controlling ALL nRNA groups together
+  # (correlated via patterns below to keep grid manageable)
+
+# ── Correlated patterns ──────────────────────────────────────────────
+# Each pattern = one expression scenario for genes A, C, and nRNA.
+# 16 patterns × 4 B-combos × 4 SS × 4 gdna_frac = 1024 runs
+patterns:
+  # ── Pure mRNA baseline (no nRNA) ──
+  # Single dominant A isoform
+  - {TA1: 1000, TA2: 0, TA3: 0, TA4: 0, TCF: 0, TCR: 0, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 1000, TCF: 0, TCR: 0, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+  # Mixed A isoforms
+  - {TA1: 500, TA2: 300, TA3: 0, TA4: 200, TCF: 0, TCR: 0, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+  # Convergent pair (TCF + TCR with overlapping exons)
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 0, TCF: 500, TCR: 500, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+
+  # ── Moderate nRNA ──
+  - {TA1: 1000, TA2: 0, TA3: 0, TA4: 0, TCF: 0, TCR: 0, NTA1: 200, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 1000, TCF: 0, TCR: 0, NTA1: 0, NTA2: 0, NTA34: 200, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 500, TA2: 300, TA3: 0, TA4: 200, TCF: 0, TCR: 0, NTA1: 200, NTA2: 200, NTA34: 200, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 0, TCF: 500, TCR: 500, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 200, NTE: 0}
+
+  # ── Heavy nRNA ──
+  - {TA1: 1000, TA2: 0, TA3: 0, TA4: 0, TCF: 0, TCR: 0, NTA1: 1000, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 1000, TCF: 0, TCR: 0, NTA1: 0, NTA2: 0, NTA34: 1000, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 500, TA2: 300, TA3: 0, TA4: 200, TCF: 0, TCR: 0, NTA1: 1000, NTA2: 1000, NTA34: 1000, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 0, TCF: 500, TCR: 500, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 1000, NTE: 0}
+
+  # ── Everything: mRNA + nRNA + convergent genes ──
+  - {TA1: 500, TA2: 300, TA3: 200, TA4: 100, TCF: 500, TCR: 500, NTA1: 500, NTA2: 500, NTA34: 500, NTB12: 500, NTCR: 500, NTE: 0}
+  - {TA1: 1000, TA2: 0, TA3: 0, TA4: 0, TCF: 1000, TCR: 0, NTA1: 1000, NTA2: 0, NTA34: 0, NTB12: 500, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 1000, TA4: 0, TCF: 0, TCR: 1000, NTA1: 0, NTA2: 0, NTA34: 1000, NTB12: 0, NTCR: 1000, NTE: 0}
+  # All off except nRNA (stress test: nRNA with no matching mRNA)
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 0, TCF: 0, TCR: 0, NTA1: 1000, NTA2: 1000, NTA34: 1000, NTB12: 1000, NTCR: 1000, NTE: 0}

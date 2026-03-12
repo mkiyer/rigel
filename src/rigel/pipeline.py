@@ -199,6 +199,17 @@ def _replay_fraglen_observations(
             np.asarray(intergenic_lengths, dtype=np.intp),
         )
 
+    unspliced_same = fraglen_dict.get("unspliced_same_strand_lengths", [])
+    if len(unspliced_same) > 0:
+        frag_length_models.unspliced_same_strand.observe_batch(
+            np.asarray(unspliced_same, dtype=np.intp),
+        )
+    unspliced_opp = fraglen_dict.get("unspliced_opp_strand_lengths", [])
+    if len(unspliced_opp) > 0:
+        frag_length_models.unspliced_opp_strand.observe_batch(
+            np.asarray(unspliced_opp, dtype=np.intp),
+        )
+
 
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
     """Apply C++ scan statistics to PipelineStats."""
@@ -733,6 +744,10 @@ def run_pipeline(
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
+    frag_length_models.mix_models(
+        s_rna=strand_models.strand_specificity,
+        p_r1_sense=strand_models.exonic_spliced.p_r1_sense,
+    )
     frag_length_models.finalize()
 
     # -- Annotation table for second BAM pass (opt-in) --

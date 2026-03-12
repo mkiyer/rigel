@@ -89,7 +89,7 @@ def score_gdna_standalone(
     splice_pen = penalties.get(splice_type, 1.0)
 
     log_p_insert = (
-        frag_length_models.global_model.log_likelihood(frag_length)
+        frag_length_models.gdna_model.log_likelihood(frag_length)
         if frag_length > 0
         else 0.0
     )

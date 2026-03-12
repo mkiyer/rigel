@@ -27,8 +27,10 @@ Config structure (YAML)
 
     genome_length: 50000
     seed: 42
-    sim: { frag_mean: 200, ... }
-    gdna_config: { frag_mean: 350, ... }
+    read_length: 150
+
+    rna: { frag_mean: 200, frag_std: 30, frag_min: 80, frag_max: 450 }
+    gdna: { frag_mean: 350, frag_std: 100, frag_min: 100, frag_max: 1000 }
 
     transcripts:
       TA1:
@@ -323,7 +325,15 @@ def parse_nrna_coords(nrnas_config, transcripts_config):
     assigned: set[str] = set()
     groups: dict[str, NrnaGroup] = {}
 
-    for label, coords in nrnas_config.items():
+    # Sort nRNA entries by span size (ascending) so that more specific
+    # (smaller) groups take priority over broader ones when transcripts
+    # fall within multiple overlapping nRNA coordinate regions.
+    sorted_nrnas = sorted(
+        nrnas_config.items(),
+        key=lambda item: int(item[1][2]) - int(item[1][1]),
+    )
+
+    for label, coords in sorted_nrnas:
         if not isinstance(coords, list) or len(coords) != 3:
             raise ValueError(
                 f"nrna '{label}': expected [strand, start, end], "
@@ -331,16 +341,20 @@ def parse_nrna_coords(nrnas_config, transcripts_config):
         strand = str(coords[0])
         start, end = int(coords[1]), int(coords[2])
 
-        # Match transcripts whose span is contained in (strand, start, end)
+        # Match unassigned transcripts within (strand, start, end)
         matching: list[str] = []
         for t_id, (t_strand, t_start, t_end, _) in t_spans.items():
+            if t_id in assigned:
+                continue
             if t_strand == strand and t_start >= start and t_end <= end:
                 matching.append(t_id)
 
         if not matching:
-            raise ValueError(
-                f"nrna '{label}' at ({strand}, {start}, {end}) "
-                f"does not match any transcript genomic span")
+            logger.warning(
+                "nrna '%s' at (%s, %d, %d) has no unassigned transcripts "
+                "(all already claimed by more specific nRNA groups)",
+                label, strand, start, end)
+            continue
 
         carrier = _pick_carrier(matching, t_spans)
         groups[label] = NrnaGroup(
@@ -417,7 +431,14 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels):
     # Core params with defaults
     dims.setdefault("gdna", [0])
     dims.setdefault("strand_specificity", [1.0])
-    dims.setdefault("n_fragments", [2000])
+
+    # Fragment count: mode (a) n_fragments=fixed total (default),
+    # or mode (b) n_rna_fragments + gdna_fraction
+    has_rna_mode = "n_rna_fragments" in dims
+    if not has_rna_mode:
+        dims.setdefault("n_fragments", [2000])
+    if has_rna_mode:
+        dims.setdefault("gdna_fraction", [0.0])
 
     # EM config overrides (recognized but not defaulted — absent = EMConfig default)
     # Supported: prune_threshold, prior_alpha, prior_gamma,
@@ -439,8 +460,11 @@ def run_sweep(config, output_dir, *, gtf_path=None,
     """Run the full combinatorial sweep."""
     genome_length = genome_length_override or config.get("genome_length", 50000)
     seed = config.get("seed", 42)
-    sim_params = config.get("sim", {})
-    gdna_params = config.get("gdna_config", {})
+
+    # -- Fragment distribution parameters --
+    rna_frag_params = config.get("rna", {})
+    gdna_frag_params = config.get("gdna", {})
+    read_length = config.get("read_length", 150)
 
     # -- Parse transcripts --
     gtf_gene_groups = None
@@ -522,6 +546,12 @@ def run_sweep(config, output_dir, *, gtf_path=None,
         + ["total_mrna_expected", "total_mrna_observed", "total_mrna_rel_err"]
         + ["total_rna_expected", "total_rna_observed", "total_rna_rel_err"]
         + ["n_fragments_actual", "n_intergenic", "n_chimeric"]
+        # Fragment length distribution recovery metrics
+        + ["rna_fl_true_mean", "rna_fl_est_mean", "rna_fl_mean_err"]
+        + ["rna_fl_true_std", "rna_fl_est_std"]
+        + ["gdna_fl_true_mean", "gdna_fl_est_mean", "gdna_fl_mean_err"]
+        + ["gdna_fl_true_std", "gdna_fl_est_std"]
+        + ["rna_fl_n_obs", "gdna_fl_n_obs"]
     )
     fieldnames = param_cols + result_cols
 
@@ -573,6 +603,10 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         len(combinations), run_label)
 
             n_frags = int(params.get("n_fragments", 2000))
+            n_rna_frags = (int(params["n_rna_fragments"])
+                           if "n_rna_fragments" in params else None)
+            gdna_frac = (float(params["gdna_fraction"])
+                         if "gdna_fraction" in params else None)
             gdna_ab = float(params.get("gdna", 0))
 
             with tempfile.TemporaryDirectory(prefix="rigel_sweep_") as tmpdir:
@@ -600,23 +634,25 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         })
                     sc.add_gene(grp_label, grp.strand, t_list)
 
-                # gDNA config
+                # gDNA config — needed when gdna abundance > 0 or
+                # gdna_fraction > 0 (mode b)
+                needs_gdna = gdna_ab > 0 or (gdna_frac and gdna_frac > 0)
                 gdna_cfg = None
-                if gdna_ab > 0:
+                if needs_gdna:
                     gdna_cfg = GDNAConfig(
-                        abundance=gdna_ab,
-                        frag_mean=gdna_params.get("frag_mean", 350),
-                        frag_std=gdna_params.get("frag_std", 100),
-                        frag_min=gdna_params.get("frag_min", 100),
-                        frag_max=gdna_params.get("frag_max", 1000),
+                        abundance=gdna_ab if gdna_ab > 0 else 1.0,
+                        frag_mean=gdna_frag_params.get("frag_mean", 350),
+                        frag_std=gdna_frag_params.get("frag_std", 100),
+                        frag_min=gdna_frag_params.get("frag_min", 100),
+                        frag_max=gdna_frag_params.get("frag_max", 1000),
                     )
 
                 sim_cfg = SimConfig(
-                    frag_mean=sim_params.get("frag_mean", 200),
-                    frag_std=sim_params.get("frag_std", 30),
-                    frag_min=sim_params.get("frag_min", 80),
-                    frag_max=sim_params.get("frag_max", 450),
-                    read_length=sim_params.get("read_length", 100),
+                    frag_mean=rna_frag_params.get("frag_mean", 200),
+                    frag_std=rna_frag_params.get("frag_std", 30),
+                    frag_min=rna_frag_params.get("frag_min", 80),
+                    frag_max=rna_frag_params.get("frag_max", 450),
+                    read_length=read_length,
                     strand_specificity=ss,
                     seed=seed,
                 )
@@ -627,6 +663,8 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     sim_config=sim_cfg,
                     gdna_config=gdna_cfg,
                     nrna_abundance=0.0,
+                    n_rna_fragments=n_rna_frags,
+                    gdna_fraction=gdna_frac,
                 )
 
                 pipe_cfg = PipelineConfig(
@@ -694,6 +732,41 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                 row["n_fragments_actual"] = bench.n_fragments
                 row["n_intergenic"] = bench.n_intergenic
                 row["n_chimeric"] = bench.n_chimeric
+
+                # Fragment length distribution recovery metrics
+                fl = pr.frag_length_models
+                rna_m = fl.rna_model
+                gdna_m = fl.gdna_model
+
+                rna_true_mean = rna_frag_params.get("frag_mean", 200)
+                rna_true_std = rna_frag_params.get("frag_std", 30)
+                row["rna_fl_true_mean"] = rna_true_mean
+                row["rna_fl_true_std"] = rna_true_std
+                row["rna_fl_n_obs"] = rna_m.n_observations
+                if rna_m.n_observations > 0:
+                    row["rna_fl_est_mean"] = round(rna_m.mean, 2)
+                    row["rna_fl_est_std"] = round(rna_m.std, 2)
+                    row["rna_fl_mean_err"] = round(
+                        rna_m.mean - rna_true_mean, 2)
+                else:
+                    row["rna_fl_est_mean"] = ""
+                    row["rna_fl_est_std"] = ""
+                    row["rna_fl_mean_err"] = ""
+
+                gdna_true_mean = gdna_frag_params.get("frag_mean", 350)
+                gdna_true_std = gdna_frag_params.get("frag_std", 100)
+                row["gdna_fl_true_mean"] = gdna_true_mean
+                row["gdna_fl_true_std"] = gdna_true_std
+                row["gdna_fl_n_obs"] = gdna_m.n_observations
+                if gdna_m.n_observations > 0:
+                    row["gdna_fl_est_mean"] = round(gdna_m.mean, 2)
+                    row["gdna_fl_est_std"] = round(gdna_m.std, 2)
+                    row["gdna_fl_mean_err"] = round(
+                        gdna_m.mean - gdna_true_mean, 2)
+                else:
+                    row["gdna_fl_est_mean"] = ""
+                    row["gdna_fl_est_std"] = ""
+                    row["gdna_fl_mean_err"] = ""
 
                 writer.writerow(row)
                 tsvfile.flush()

@@ -67,13 +67,10 @@ class FragmentLengthModel:
         exponential tail decay (see ``_TAIL_DECAY_LP``).
     counts : np.ndarray
         Float64 histogram of shape ``(max_size + 1,)``.
-    n_observations : int
-        Total number of observations added.
     """
 
     max_size: int = DEFAULT_MAX_FRAG_SIZE
     counts: np.ndarray = field(default=None, repr=False)
-    n_observations: int = 0
 
     def __post_init__(self):
         if self.counts is None:
@@ -83,6 +80,52 @@ class FragmentLengthModel:
             self._total_weight: float = float(self.counts.sum())
         self._log_prob: np.ndarray | None = None
         self._finalized: bool = False
+
+    @property
+    def n_observations(self) -> int:
+        """Number of observations (derived from total histogram weight)."""
+        return int(self._total_weight)
+
+    # ------------------------------------------------------------------
+    # Factory methods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_counts(
+        cls,
+        counts,
+        max_size: int | None = None,
+    ) -> "FragmentLengthModel":
+        """Create a finalized model from a pre-set histogram.
+
+        Useful for tests and scenarios that need a model with a known
+        distribution without going through the observe/finalize cycle.
+
+        Parameters
+        ----------
+        counts : array-like
+            Histogram of fragment length frequencies.  Index *k*
+            corresponds to fragment length *k*.  The last element is
+            the overflow bin.  If shorter than ``max_size + 1``, the
+            remaining bins are zero-filled.
+        max_size : int or None
+            Maximum fragment length tracked individually.  If *None*,
+            inferred as ``len(counts) - 1``.
+
+        Returns
+        -------
+        FragmentLengthModel
+            A finalized model ready for ``log_likelihood()`` calls.
+        """
+        counts = np.asarray(counts, dtype=np.float64)
+        if max_size is None:
+            max_size = len(counts) - 1
+        model = cls(max_size=max_size)
+        n = min(len(counts), max_size + 1)
+        model.counts[:n] = counts[:n]
+        model._total_weight = float(model.counts.sum())
+        model.finalize()
+        return model
 
     # ------------------------------------------------------------------
     # Training
@@ -100,7 +143,6 @@ class FragmentLengthModel:
         """
         idx = min(max(frag_length, 0), self.max_size)
         self.counts[idx] += weight
-        self.n_observations += 1
         self._total_weight += weight
 
     def observe_batch(self, frag_lengths: "np.ndarray") -> None:
@@ -115,9 +157,7 @@ class FragmentLengthModel:
         clamped = np.clip(lengths, 0, self.max_size)
         counts = np.bincount(clamped, minlength=self.max_size + 1)
         self.counts += counts[:self.max_size + 1].astype(np.float64)
-        n = len(lengths)
-        self.n_observations += n
-        self._total_weight += float(n)
+        self._total_weight += float(len(lengths))
 
     # ------------------------------------------------------------------
     # Distribution properties
@@ -402,22 +442,145 @@ class FragmentLengthModels:
             for cat in SpliceType
         }
         # Combined gDNA fragment length model:
-        # Trained from intergenic + antisense-genic fragments.
-        # Provides a richer gDNA insert profile than intergenic alone
-        # (which can be sparse for small genomes / targeted panels).
+        # After mix_models(), holds intergenic + weighted unspliced gDNA.
         self.gdna_model = FragmentLengthModel(max_size=max_size)
+        # RNA fragment length model:
+        # After mix_models(), holds spliced + weighted unspliced RNA.
+        self.rna_model = FragmentLengthModel(max_size=max_size)
+        # Per-strand unspliced histograms (raw, pre-mixing):
+        self.unspliced_same_strand = FragmentLengthModel(max_size=max_size)
+        self.unspliced_opp_strand = FragmentLengthModel(max_size=max_size)
 
     def finalize(self) -> None:
         """Cache derived values on all sub-models for fast scoring.
 
-        Call after all ``observe()`` calls are complete and before
-        any ``log_likelihood()`` calls during EM scoring.
+        Call after all ``observe()`` calls are complete (and after
+        ``mix_models()`` if applicable) and before any
+        ``log_likelihood()`` calls during EM scoring.
         """
         self.global_model.finalize()
         self.intergenic.finalize()
         self.gdna_model.finalize()
+        self.rna_model.finalize()
+        self.unspliced_same_strand.finalize()
+        self.unspliced_opp_strand.finalize()
         for m in self.category_models.values():
             m.finalize()
+
+    def mix_models(self, s_rna: float, p_r1_sense: float) -> None:
+        """Build gDNA and RNA distributions via strand-weighted mixing.
+
+        Uses the strand-weighted histogram mixing approach: unspliced
+        fragments at genic loci are split into sense/antisense pools,
+        and the known strand specificity of RNA is used to estimate the
+        gDNA fraction in each pool.
+
+        Must be called AFTER ``StrandModels.finalize()`` (so strand
+        specificity is known) and BEFORE ``self.finalize()`` (so the
+        mixed models get their log-probability lookup tables cached).
+
+        Parameters
+        ----------
+        s_rna : float
+            Strand specificity (0.5 = unstranded, 1.0 = perfectly
+            stranded).  From ``strand_models.strand_specificity``.
+        p_r1_sense : float
+            P(read 1 aligns in gene-sense direction).
+            From ``strand_models.exonic_spliced.p_r1_sense``.
+        """
+        from .splice import SpliceType
+
+        # 1. Map same/opp strand to sense/antisense
+        if p_r1_sense >= 0.5:
+            H_sense = self.unspliced_same_strand.counts.copy()
+            H_anti = self.unspliced_opp_strand.counts.copy()
+        else:
+            H_sense = self.unspliced_opp_strand.counts.copy()
+            H_anti = self.unspliced_same_strand.counts.copy()
+
+        # 2. Total counts in each strand bin
+        S = float(H_sense.sum())
+        A = float(H_anti.sum())
+
+        # 3. Estimate total RNA and gDNA in the unspliced pool
+        denom = 2.0 * s_rna - 1.0
+        if denom > 1e-6:
+            R = max(0.0, (S - A) / denom)
+            G = (S + A) - R
+        else:
+            # No strand information — cannot separate
+            R = 0.0
+            G = 0.0
+
+        # 4. Per-strand Bayesian posterior P(gDNA | strand)
+        W_sense = min(max((G * 0.5 / S) if S > 0 else 0.0, 0.0), 1.0)
+        W_anti = min(max((G * 0.5 / A) if A > 0 else 0.0, 0.0), 1.0)
+
+        # 5. Directional certainty penalty
+        #
+        # A pool with posterior gDNA fraction W is a mixture of gDNA and
+        # RNA.  Applying a uniform scalar W to the pool's histogram
+        # preserves the pool's shape, not just the gDNA component's
+        # shape — a pool that is 80% RNA contributes RNA-shaped noise
+        # to the gDNA model.
+        #
+        # The directional certainty penalty ensures each pool only
+        # contributes to the model where it is the majority component:
+        #   gDNA certainty: c(W) = max(2W − 1, 0)   (active when W > 0.5)
+        #   RNA  certainty: c(W) = max(1 − 2W, 0)   (active when W < 0.5)
+        #
+        # Effective weights per pool:
+        #   w_eff_gDNA = W · max(2W − 1, 0)
+        #   w_eff_RNA  = (1 − W) · max(1 − 2W, 0)
+        #
+        # At W = 1.0: gDNA certainty = 1.0 (pure gDNA, full weight).
+        # At W = 0.5: both zero (no information → excluded from both).
+        # At W = 0.0: RNA certainty = 1.0 (pure RNA, full weight).
+        C_gdna_sense = max(2.0 * W_sense - 1.0, 0.0)
+        C_gdna_anti = max(2.0 * W_anti - 1.0, 0.0)
+        C_rna_sense = max(1.0 - 2.0 * W_sense, 0.0)
+        C_rna_anti = max(1.0 - 2.0 * W_anti, 0.0)
+
+        # 6. Build mixed histograms with certainty-penalized weights
+        H_intergenic = self.intergenic.counts
+        H_spliced = self.category_models[SpliceType.SPLICED_ANNOT].counts
+
+        gdna_counts = (
+            H_intergenic
+            + (W_sense * C_gdna_sense) * H_sense
+            + (W_anti * C_gdna_anti) * H_anti
+        )
+        rna_counts = (
+            H_spliced
+            + ((1.0 - W_sense) * C_rna_sense) * H_sense
+            + ((1.0 - W_anti) * C_rna_anti) * H_anti
+        )
+
+        # 7. Write into models (replace counts and total_weight)
+        self.gdna_model.counts = gdna_counts
+        self.gdna_model._total_weight = float(gdna_counts.sum())
+
+        self.rna_model.counts = rna_counts
+        self.rna_model._total_weight = float(rna_counts.sum())
+
+        # 8. Log diagnostics
+        logger.info(
+            f"Fragment length mixing: S={S:.0f} sense, A={A:.0f} anti, "
+            f"s_rna={s_rna:.4f}, W_sense={W_sense:.4f}, "
+            f"W_anti={W_anti:.4f}"
+        )
+        logger.info(
+            f"  Certainty: C_gdna=[{C_gdna_sense:.3f}, {C_gdna_anti:.3f}], "
+            f"C_rna=[{C_rna_sense:.3f}, {C_rna_anti:.3f}]"
+        )
+        logger.info(
+            f"  gDNA model: {self.gdna_model.total_weight:.0f} "
+            f"weighted obs, mean={self.gdna_model.mean:.1f}"
+        )
+        logger.info(
+            f"  RNA model: {self.rna_model.total_weight:.0f} "
+            f"weighted obs, mean={self.rna_model.mean:.1f}"
+        )
 
     @property
     def n_observations(self) -> int:
@@ -498,6 +661,9 @@ class FragmentLengthModels:
         d: dict = {"global": self.global_model.to_dict()}
         d["intergenic"] = self.intergenic.to_dict()
         d["gdna"] = self.gdna_model.to_dict()
+        d["rna"] = self.rna_model.to_dict()
+        d["unspliced_same_strand"] = self.unspliced_same_strand.to_dict()
+        d["unspliced_opp_strand"] = self.unspliced_opp_strand.to_dict()
         for cat in SpliceType:
             d[cat.name.lower()] = self.category_models[cat].to_dict()
         return d
@@ -542,8 +708,27 @@ class FragmentLengthModels:
                 f"  INTERGENIC: {self.intergenic.n_observations:,} obs, "
                 f"mean={self.intergenic.mean:.1f}, mode={self.intergenic.mode}"
             )
-        if self.gdna_model.n_observations > 0:
+        if self.gdna_model.total_weight > 0:
             logger.info(
-                f"  gDNA (combined): {self.gdna_model.n_observations:,} obs, "
+                f"  gDNA (mixed): {self.gdna_model.total_weight:.0f} weighted obs, "
                 f"mean={self.gdna_model.mean:.1f}, mode={self.gdna_model.mode}"
+            )
+        if self.rna_model.total_weight > 0:
+            logger.info(
+                f"  RNA (mixed): {self.rna_model.total_weight:.0f} weighted obs, "
+                f"mean={self.rna_model.mean:.1f}, mode={self.rna_model.mode}"
+            )
+        if self.unspliced_same_strand.n_observations > 0:
+            logger.info(
+                f"  Unspliced same-strand: "
+                f"{self.unspliced_same_strand.n_observations:,} obs, "
+                f"mean={self.unspliced_same_strand.mean:.1f}, "
+                f"mode={self.unspliced_same_strand.mode}"
+            )
+        if self.unspliced_opp_strand.n_observations > 0:
+            logger.info(
+                f"  Unspliced opp-strand: "
+                f"{self.unspliced_opp_strand.n_observations:,} obs, "
+                f"mean={self.unspliced_opp_strand.mean:.1f}, "
+                f"mode={self.unspliced_opp_strand.mode}"
             )
