@@ -9,8 +9,8 @@ cleaner calibration-informed parameterization.
 
 The target state is:
 
-- one collapsed gDNA abundance component per locus
-- one free locus-specific strand-balance parameter `phi_l`
+- two internal strand-specific gDNA components per locus
+- one collapsed public gDNA abundance obtained by summing the gDNA pair
 - one global calibration-derived `kappa_sym`
 - no hidden reuse of initialization quantities as if they were direct abundance
   pseudo-counts
@@ -57,20 +57,24 @@ Recommended direction:
 - do not let a calibration-derived nuisance quantity masquerade as direct EM
   abundance evidence
 
-### 3.3 Then introduce free `phi_l`
+### 3.3 Then migrate the solver to the gDNA pair model
 
 Once calibration is stable, update the solver-side gDNA strand treatment so that
-the only locus-specific gDNA strand nuisance parameter is `phi_l` under a
-symmetric Beta prior controlled by `kappa_sym`.
+the EM explicitly carries `g_plus` and `g_minus` as ordinary mixture
+components. Their total mass is reported as locus-level gDNA abundance, and
+their implied strand fraction is regularized by the symmetric Beta prior
+controlled by `kappa_sym`.
 
 ## 4. Step-by-Step Coding Plan
 
 1. define the calibration bundle inputs expected by the locus EM path
 2. thread the bundle through pipeline and estimator orchestration
-3. simplify `gdna_init` and gDNA prior gating semantics in `locus.py`
-4. update native solver logic to use the new symmetry prior structure
-5. add regression tests comparing old and new behavior on pristine cases
-6. add targeted tests for locus-level strand imbalance and gDNA-heavy cases
+3. expand the locus component layout to include `g_plus` and `g_minus`
+4. simplify `gdna_init` and gDNA prior gating semantics in `locus.py`
+5. update native solver logic to use the gDNA pair and symmetry prior
+  structure
+6. add regression tests comparing old and new behavior on pristine cases
+7. add targeted tests for locus-level strand imbalance and gDNA-heavy cases
 
 ## 5. Main Risk
 

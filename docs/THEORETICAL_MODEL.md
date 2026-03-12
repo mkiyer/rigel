@@ -7,8 +7,8 @@ implementation choices.
 
 The main use of this note is to provide a clean target for redesigning the EM.
 
-For a compact locus-level MAP-EM formulation using the collapsed one-gDNA
-component model, see `docs/THEORETICAL_EM_OBJECTIVE.md`.
+For a compact locus-level MAP-EM formulation using the preferred `T + N + 2`
+gDNA parameterization, see `docs/THEORETICAL_EM_OBJECTIVE.md`.
 
 ## 1. The Problem
 
@@ -72,9 +72,9 @@ $$
 
 This gives $T_\ell + N_\ell + 2$ components.
 
-That does not automatically mean the implementation must literally use two gDNA
-components. It means the theoretical model should first acknowledge that a DNA
-fragment is generated from one strand or the other, never both at once.
+This is now the preferred redesign target. Rigel should keep one collapsed
+public gDNA abundance output per locus, but the internal EM parameterization
+should use two strand-specific gDNA components and sum them at reporting time.
 
 ## 4. Likelihood Factorization
 
@@ -287,6 +287,12 @@ From first principles, the cleanest model is:
 
 This is the most biologically faithful and most interpretable formulation.
 
+It is also now the preferred implementation target. The main reason is
+architectural: the `T + N + 2` representation keeps the EM closer to an
+ordinary mixture over simplex weights, avoids a separate collapsed-gDNA
+nuisance-parameter update, and makes the strand-symmetry prior a coupling prior
+on an ordinary pair of components.
+
 However, there is an important caveat:
 
 ### The benefit of two gDNA strands is not per-fragment competition. The benefit is a cleaner parameterization of locus-level strand symmetry.
@@ -298,9 +304,13 @@ strand, while the two DNA strands are coupled only through the prior on
 $\phi_\ell$.
 
 That means the case for two gDNA components depends on whether we want an
-explicit strand-balance latent variable. If yes, two components are the natural
-representation. If no, a collapsed single-component gDNA model with a $0.5$
-strand term remains mathematically coherent.
+explicit strand-balance latent variable. For the redesign, the answer is yes:
+the preferred internal representation is two gDNA components, while the
+preferred public representation remains collapsed total gDNA abundance.
+
+A collapsed single-component gDNA model with a $0.5$ strand term remains
+mathematically coherent and remains the correct marginal story. It is simply no
+longer the preferred implementation target.
 
 ## 11. Why a Single gDNA State with 1.0 Strand Likelihood Is Not Right
 
@@ -449,17 +459,18 @@ The best current theoretical position is:
 4. The "spring toward symmetry" should be represented as a prior on the gDNA
    strand fraction, not as a change from $0.5$ to $1.0$ in the collapsed
    likelihood.
-5. If interpretability and clean probabilistic structure are the priority, the
-   two-strand gDNA model is the better starting point for redesign.
+5. If interpretability, implementation clarity, and solver simplicity are the
+   priority, the two-strand gDNA model is the preferred redesign target.
+6. Rigel should report total gDNA abundance by collapsing the inferred
+   strand-specific gDNA pair at output time.
 
 ## 17. Immediate Design Implication
 
-Before discussing implementation, the core theoretical decision is this:
+The core theoretical decision is now resolved:
 
-### Do we want gDNA to be represented as an explicit strand-resolved latent variable, or only as a collapsed total nuisance component?
+### gDNA should be represented internally as an explicit strand-resolved latent variable pair, and reported externally as collapsed total gDNA abundance.
 
-If we want explicit strand symmetry as part of the model, then the clean answer
-is to represent:
+The clean internal representation is therefore:
 
 $$
 (G_\ell, \phi_\ell)
@@ -471,19 +482,15 @@ $$
 (D_{\ell,+}, D_{\ell,-})
 $$
 
-If we only care about total gDNA mass, then one collapsed component is still
-theoretically sound, but its strand term should remain $0.5$.
+with the public gDNA output defined by:
 
-More precisely, there are two sensible collapsed one-component gDNA models:
+$$
+G_\ell = D_{\ell,+} + D_{\ell,-}
+$$
 
-1. fixed $\phi_\ell = 1/2$, which implies binomial strand variation around
-   50/50
-2. random $\phi_\ell \sim \operatorname{Beta}(\kappa_{\mathrm{sym}}/2,
-   \kappa_{\mathrm{sym}}/2)$, which implies Beta-Binomial strand variation
-   around 50/50
-
-The second is the right model when global symmetry is nearly perfect but
-individual loci show more variability than pure binomial sampling would allow.
+The collapsed one-component formulation remains useful as a marginal reference
+model and as a conceptual cross-check, but it is no longer the preferred design
+target for implementation.
 
 ## 18. How to Treat $\kappa_{\mathrm{sym}}$
 

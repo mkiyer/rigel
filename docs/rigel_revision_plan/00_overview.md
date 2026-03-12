@@ -64,28 +64,25 @@ That order is preferable because:
 
 ## 3. Public Model Versus Internal Parameterization
 
-One point should remain explicitly open in the implementation plan.
-
 Publicly, Rigel should still report one collapsed gDNA abundance per locus.
 
-Internally, however, there are now two viable implementations:
+Internally, the chosen implementation target is:
 
-1. a `T + N + 1` model with one total gDNA component plus a nuisance strand
-   parameter
-2. a `T + N + 2` model with `g_plus` and `g_minus` as ordinary mixture
-   components whose abundances are summed at reporting time
+1. a `T + N + 2` model with `g_plus` and `g_minus` as ordinary mixture
+   components
+2. public reporting that collapses them to total locus gDNA abundance
 
-The March 2026 methodology review makes a strong engineering case that the
-second option may be easier to code, debug, and optimize because it keeps the
-EM closer to a textbook simplex update.
+The March 2026 methodology review makes a strong engineering case for this
+choice because it keeps the EM closer to a textbook simplex update, avoids a
+custom collapsed-gDNA nuisance-parameter M-step, and makes the strand-symmetry
+prior a coupling prior on an ordinary pair of components.
 
 The current recommendation is therefore:
 
 - keep the public collapsed gDNA output unchanged
-- defer the internal `T + N + 1` versus `T + N + 2` choice until the solver
-  migration design is written in detail
-- treat `T + N + 2` as the default engineering candidate unless the custom
-  `phi_l` M-step turns out to be comparably simple in practice
+- implement the solver around `T + N + 2`
+- reserve the collapsed one-gDNA model as a marginal reference model rather
+   than the preferred implementation target
 
 ## 4. Workstream Dependencies
 
@@ -123,7 +120,6 @@ The current repository supports a fairly definitive plan for these workstreams.
 - whether the first purity model is continuous, two-state, or heuristic
 - whether splice evidence should borrow from a strict overlap window or a wider
   neighborhood model
-- whether the internal EM uses `T + N + 1` or `T + N + 2`
 
 ## 6. Proposed Milestones
 
@@ -159,6 +155,7 @@ Replace the current embedded gDNA heuristics with calibrated nuisance inputs.
 Success criteria:
 
 - one collapsed gDNA abundance per locus remains unchanged publicly
-- the internal solver parameterization is chosen explicitly and justified
+- the internal `T + N + 2` solver parameterization is implemented explicitly
+   and justified
 - older gDNA init semantics are reduced to calibration-informed gating or
   removed entirely

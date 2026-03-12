@@ -19,8 +19,8 @@ This is an initial plan. It is expected to be revised repeatedly.
 
 Implement a cleaner abundance model with the following core properties:
 
-1. one collapsed gDNA abundance component per locus
-2. one free locus-specific gDNA strand-balance parameter $\phi_\ell$
+1. two internal strand-specific gDNA components per locus
+2. one collapsed public gDNA abundance obtained by summing the gDNA pair
 3. one global empirical-Bayes symmetry hyperparameter
    $\kappa_{\mathrm{sym}}$
 4. calibration of gDNA nuisance parameters from soft-weighted, gDNA-dominant
@@ -178,9 +178,9 @@ Refit the locus model around the cleaner parameterization.
 
 Primary changes:
 
-- replace current gDNA symmetry treatment with free locus-specific $\phi_\ell$
+- replace current gDNA symmetry treatment with an explicit gDNA pair
 - feed calibrated $\kappa_{\mathrm{sym}}$ into the gDNA strand prior
-- ensure total gDNA abundance remains one collapsed locus component
+- ensure total gDNA abundance remains collapsed in public outputs
 - simplify or remove older gDNA-specific initialization machinery that is no
   longer needed once calibration is explicit
 
@@ -261,7 +261,8 @@ Exit criteria:
 Deliverables:
 
 - clean integration of calibrated nuisance parameters into the locus EM
-- free locus-specific $\phi_\ell$ under symmetric Beta prior
+- explicit `g_plus/g_minus` locus components under a symmetric Beta prior on
+  their implied strand fraction
 - simplified gDNA initialization semantics
 
 Exit criteria:

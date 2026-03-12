@@ -3,10 +3,11 @@
 This note gives a compact mathematical model for Rigel while staying out of
 implementation details.
 
-It adopts the simpler modeling choice discussed in `docs/THEORETICAL_MODEL.md`:
+It adopts the preferred `T + N + 2` modeling choice discussed in
+`docs/THEORETICAL_MODEL.md`:
 
-- one collapsed gDNA abundance component per locus
-- one locus-level gDNA strand-balance nuisance parameter
+- two strand-specific gDNA components per locus
+- one collapsed public gDNA abundance obtained by summing those two components
 - transcript-level mature RNA components
 - nRNA-span-level nascent RNA components
 
@@ -21,12 +22,12 @@ Let:
 
 - $\mathcal{T}_\ell$ be the set of mature RNA transcript components
 - $\mathcal{N}_\ell$ be the set of nRNA span components
-- $g$ be the single collapsed gDNA component
+- $g_+$ and $g_-$ be the two strand-specific gDNA components
 
 The component set is:
 
 $$
-\mathcal{C}_\ell = \mathcal{T}_\ell \cup \mathcal{N}_\ell \cup \{g\}
+\mathcal{C}_\ell = \mathcal{T}_\ell \cup \mathcal{N}_\ell \cup \{g_+, g_-\}
 $$
 
 For each fragment $f$ assigned to this locus, define a latent source label:
@@ -38,34 +39,27 @@ $$
 Let the mixture weights be:
 
 $$
-\theta_\ell = \{\theta_c\}_{c \in \mathcal{C}_\ell},
+	heta_\ell = \{\theta_c\}_{c \in \mathcal{C}_\ell},
 \qquad
-\theta_c \ge 0,
+	heta_c \ge 0,
 \qquad
 \sum_{c \in \mathcal{C}_\ell} \theta_c = 1
 $$
 
-For the collapsed gDNA component, introduce one nuisance strand-balance
-parameter:
+Define total gDNA mass and the implied strand fraction by:
 
 $$
-\phi_\ell \in (0,1)
+G_\ell = \theta_{g_+} + \theta_{g_-}
 $$
 
-where:
+and, when $G_\ell > 0$,
 
 $$
-\phi_\ell = p(s_f = + \mid z_f = g)
+\phi_\ell = \frac{\theta_{g_+}}{G_\ell}
 $$
 
-and therefore:
-
-$$
-p(s_f = - \mid z_f = g) = 1 - \phi_\ell
-$$
-
-This keeps total gDNA abundance as a single component while still giving the
-model an explicit handle on strand symmetry.
+The public gDNA abundance reported for the locus is $G_\ell$, while the EM
+internally carries the pair $(\theta_{g_+}, \theta_{g_-})$.
 
 ## 2. Observed Fragment Features
 
@@ -120,49 +114,47 @@ protocol-error probability.
 
 ### 3.2 gDNA strand likelihood
 
-For the collapsed gDNA component:
+For the two gDNA components:
 
 $$
-p(s_f \mid g, \phi_\ell) =
-\begin{cases}
-\phi_\ell & \text{if } s_f = + \\
-1 - \phi_\ell & \text{if } s_f = -
-\end{cases}
+p(s_f \mid g_+) = \rho_{g_+}(s_f),
+\qquad
+p(s_f \mid g_-) = \rho_{g_-}(s_f)
 $$
 
-If we fix $\phi_\ell = 1/2$, this reduces to the symmetric collapsed gDNA model:
+where in the idealized model:
 
 $$
-p(s_f \mid g) = \frac{1}{2}
+\rho_{g_+}(+) = 1,
+\quad
+\rho_{g_+}(-) = 0,
+\quad
+\rho_{g_-}(+) = 0,
+\quad
+\rho_{g_-}(-) = 1
 $$
 
-This does not imply deterministic 50/50 strand counts. If a locus has
-$N_\ell^{(g)}$ gDNA-attributed fragments, then under the fixed-symmetry model:
-
-$$
-K_\ell^+ \mid N_\ell^{(g)}, \phi_\ell = \frac{1}{2}
-\sim \operatorname{Binomial}\left(N_\ell^{(g)}, \frac{1}{2}\right)
-$$
-
-So finite-count imbalance is already allowed by ordinary sampling noise.
+Exact zeroes may be replaced by tiny numerical error probabilities if the
+implementation requires it.
 
 ## 4. Mixture Likelihood
 
-Given locus parameters $(\theta_\ell, \phi_\ell)$, the observed-data likelihood
-for one fragment is:
+Given locus mixture parameters $\theta_\ell$, the observed-data likelihood for
+one fragment is:
 
 $$
-p(x_f \mid \theta_\ell, \phi_\ell)
+p(x_f \mid \theta_\ell)
 = \sum_{c \in \mathcal{C}_\ell} \theta_c \, p(x_f \mid z_f = c)
 $$
 
 Equivalently:
 
 $$
-p(x_f \mid \theta_\ell, \phi_\ell)
+p(x_f \mid \theta_\ell)
 = \sum_{t \in \mathcal{T}_\ell} \theta_t \, \rho_t(s_f) \, \lambda_{ft}
 + \sum_{n \in \mathcal{N}_\ell} \theta_n \, \rho_n(s_f) \, \lambda_{fn}
-+ \theta_g \, p(s_f \mid g, \phi_\ell) \, \lambda_{fg}
++ \theta_{g_+} \, \rho_{g_+}(s_f) \, \lambda_{f g_+}
++ \theta_{g_-} \, \rho_{g_-}(s_f) \, \lambda_{f g_-}
 $$
 
 ## 5. Priors
@@ -174,7 +166,7 @@ The compact model keeps only three kinds of regularization.
 Use a Dirichlet prior on the locus mixture:
 
 $$
-\theta_\ell \sim \operatorname{Dirichlet}(\alpha_\ell)
+	heta_\ell \sim \operatorname{Dirichlet}(\alpha_\ell)
 $$
 
 For the redesign target, optional components should use a sparse MAP regime
@@ -223,11 +215,17 @@ transcriptional group.
 
 ### 5.3 gDNA strand-symmetry prior
 
-Put a symmetric Beta prior on the locus gDNA strand-balance parameter:
+Put a symmetric Beta prior on the implied locus gDNA strand fraction:
 
 $$
 \phi_\ell \sim \operatorname{Beta}\left(\frac{\kappa_{\mathrm{sym}}}{2},
 \frac{\kappa_{\mathrm{sym}}}{2}\right)
+$$
+
+with:
+
+$$
+\phi_\ell = \frac{\theta_{g_+}}{\theta_{g_+} + \theta_{g_-}}
 $$
 
 This gives:
@@ -236,8 +234,8 @@ This gives:
 - a weak spring toward symmetry when $\kappa_{\mathrm{sym}}$ is small
 - a strong spring when $\kappa_{\mathrm{sym}}$ is large
 
-Integrating out $\phi_\ell$ gives the correct overdispersed count model for
-locus-level gDNA strand balance. If the total gDNA count at locus $\ell$ is
+Integrating over the locus-specific strand split gives the correct overdispersed
+count model for gDNA strand balance. If the total gDNA count at locus $\ell$ is
 $N_\ell^{(g)}$, then the positive-strand count satisfies:
 
 $$
@@ -270,33 +268,31 @@ expectation while allowing more locus-to-locus strand imbalance.
 For one locus, the MAP objective is:
 
 $$
-\mathcal{L}(\theta, \phi)
+\mathcal{L}(\theta)
 = \sum_f \log \left( \sum_{c \in \mathcal{C}_\ell}
-\theta_c \, p(x_f \mid z_f = c) \right)
+	heta_c \, p(x_f \mid z_f = c) \right)
 + \log p(\theta)
 + \sum_{n \in \mathcal{N}_\ell} \log p(\eta_n(\theta))
-+ \log p(\phi)
++ \log p(\phi(\theta))
 $$
 
 Expanding the prior terms and dropping constants gives:
 
 $$
-\mathcal{L}(\theta, \phi)
+\mathcal{L}(\theta)
 = \sum_f \log \left( \sum_{c} \theta_c \, p(x_f \mid c) \right)
 + \sum_c (\alpha_c - 1) \log \theta_c
 + \sum_n \left[(a_n - 1) \log \eta_n(\theta) + (b_n - 1) \log (1 - \eta_n(\theta))\right]
 + \left(\frac{\kappa_{\mathrm{sym}}}{2} - 1\right)
-\left[\log \phi + \log (1 - \phi)\right]
+\left[\log \phi(\theta) + \log (1 - \phi(\theta))\right]
 $$
 
 subject to:
 
 $$
-\theta_c \ge 0,
+	heta_c \ge 0,
 \qquad
-\sum_c \theta_c = 1,
-\qquad
-0 < \phi < 1
+\sum_c \theta_c = 1
 $$
 
 ## 7. Equivalent Form of the nRNA Prior Term
@@ -327,46 +323,41 @@ the shared group, not on the nRNA component in isolation.
 Introduce the posterior responsibility for fragment $f$ and component $c$:
 
 $$
-r_{fc} = p(z_f = c \mid x_f, \theta, \phi)
+r_{fc} = p(z_f = c \mid x_f, \theta)
 $$
 
 ### 8.1 E-step
 
-Given current parameters $(\theta^{old}, \phi^{old})$:
+Given current parameters $\theta^{old}$:
 
 $$
 r_{fc}
-= \frac{\theta_c^{old} \, p(x_f \mid c; \phi^{old})}
-{\sum_{c'} \theta_{c'}^{old} \, p(x_f \mid c'; \phi^{old})}
+= \frac{\theta_c^{old} \, p(x_f \mid c)}
+{\sum_{c'} \theta_{c'}^{old} \, p(x_f \mid c')}
 $$
-
-where the dependence on $\phi^{old}$ matters only for the gDNA strand term.
 
 ### 8.2 Expected complete-data objective
 
-Ignoring constants that do not depend on $(\theta, \phi)$, the EM auxiliary
-function is:
+Ignoring constants that do not depend on $\theta$, the EM auxiliary function is:
 
 $$
-Q(\theta, \phi)
+Q(\theta)
 = \sum_f \sum_c r_{fc} \log \theta_c
-+ \sum_f r_{fg} \log p(s_f \mid g, \phi)
 + \sum_c (\alpha_c - 1) \log \theta_c
 + \sum_n \log p(\eta_n(\theta))
-+ \log p(\phi)
++ \log p(\phi(\theta))
 $$
 
 The structural terms $\lambda_{fc}$ do not appear in the M-step because they are
-fixed with respect to $(\theta, \phi)$.
+fixed with respect to $\theta$.
 
 Combining terms gives:
 
 $$
-Q(\theta, \phi)
+Q(\theta)
 = \sum_c (R_c + \alpha_c - 1) \log \theta_c
 + \sum_n \log p(\eta_n(\theta))
-+ \sum_f r_{fg} \log p(s_f \mid g, \phi)
-+ \log p(\phi)
++ \log p(\phi(\theta))
 $$
 
 where:
@@ -375,49 +366,47 @@ $$
 R_c = \sum_f r_{fc}
 $$
 
-## 9. M-step for the gDNA Strand Parameter
+## 9. M-step Structure for the gDNA Pair
 
-Let:
+Define gDNA responsibility totals:
 
 $$
-R_g^+ = \sum_{f: s_f = +} r_{fg},
+R_{g_+} = \sum_f r_{f g_+},
 \qquad
-R_g^- = \sum_{f: s_f = -} r_{fg}
+R_{g_-} = \sum_f r_{f g_-}
 $$
 
-Then the part of $Q$ involving $\phi$ is:
+Then the gDNA-specific behavior is represented inside the same simplex as the
+rest of the mixture. There is no separate nuisance-parameter emission update for
+collapsed gDNA. After the weight update, the implied strand fraction is:
 
 $$
-Q_\phi(\phi)
-= R_g^+ \log \phi + R_g^- \log (1 - \phi)
-+ \left(\frac{\kappa_{\mathrm{sym}}}{2} - 1\right)
-\left[\log \phi + \log (1 - \phi)\right]
+\phi_\ell^{new}
+= \frac{\theta_{g_+}^{new}}{\theta_{g_+}^{new} + \theta_{g_-}^{new}}
 $$
 
-This has the closed-form MAP update:
+If we temporarily ignore the nRNA coupling terms and focus only on the gDNA
+pair given total gDNA mass, the Beta prior implies the familiar conditional MAP
+update:
 
 $$
-\phi^{new}
-= \frac{R_g^+ + \frac{\kappa_{\mathrm{sym}}}{2} - 1}
-{R_g^+ + R_g^- + \kappa_{\mathrm{sym}} - 2}
+\phi_\ell^{new}
+= \frac{R_{g_+} + \frac{\kappa_{\mathrm{sym}}}{2} - 1}
+{R_{g_+} + R_{g_-} + \kappa_{\mathrm{sym}} - 2}
 $$
 
-provided the Beta prior parameters are greater than $1$; otherwise the optimum
-can lie on the boundary and a small numerical clamp is appropriate.
+provided the Beta prior parameters are greater than $1$. The key point is that
+this condition is now a property of the gDNA pair inside the ordinary mixture,
+not a separate collapsed-gDNA emission update.
 
-If we want the strictly symmetric collapsed model with no strand adaptation, we
-simply fix:
+If we want the strictly symmetric model with no strand adaptation, we can
+constrain:
 
 $$
-\phi_\ell \equiv \frac{1}{2}
+   heta_{g_+} = \theta_{g_-}
 $$
 
-and remove this update entirely.
-
-That gives a Binomial symmetry model. If the observed per-locus variability is
-larger than Binomial sampling predicts, then $\phi_\ell$ should remain free and
-be regularized by the symmetric Beta prior above, yielding a Beta-Binomial
-symmetry model.
+which corresponds to the fixed-symmetry submodel.
 
 ## 10. M-step for the Mixture Weights
 
@@ -428,6 +417,7 @@ $$
 \left[
 \sum_c (R_c + \alpha_c - 1) \log \theta_c
 + \sum_n \log p(\eta_n(\theta))
++ \log p(\phi(\theta))
 \right]
 $$
 
@@ -437,17 +427,19 @@ $$
 \Delta = \left\{\theta : \theta_c \ge 0, \sum_c \theta_c = 1\right\}
 $$
 
-Without the nRNA coupling priors, this reduces to the usual normalized-count
-Dirichlet update:
+Without the nRNA coupling prior and the gDNA symmetry prior, this reduces to the
+usual normalized-count Dirichlet update:
 
 $$
-\theta_c^{new}
+	heta_c^{new}
 \propto R_c + \alpha_c - 1
 $$
 
 With the nRNA Beta priors included, the M-step is no longer fully separable,
 because each nRNA component is coupled to the mature transcript masses in its
-shared group.
+shared group. The gDNA symmetry prior similarly couples the pair
+$(\theta_{g_+}, \theta_{g_-})$ through the induced strand fraction
+$\phi(\theta)$.
 
 That coupling is intentional: it is exactly the biological prior that the model
 is trying to encode.
@@ -458,14 +450,14 @@ The redesign target can be summarized as follows.
 
 For each locus:
 
-1. infer a simplex over mature RNA transcripts, nRNA spans, and one total gDNA
-   component
+1. infer a simplex over mature RNA transcripts, nRNA spans, and two
+   strand-specific gDNA components
 2. score each fragment by a product of strand, splice, alignment, and
    fragment-length likelihood terms
 3. regularize the mature-versus-nascent split through a Beta prior on each nRNA
    group's nascent fraction
-4. regularize gDNA strand symmetry through a Beta prior on a single nuisance
-   parameter $\phi_\ell$
+4. regularize gDNA strand symmetry through a Beta prior on the implied strand
+   fraction of the gDNA pair
 
 This keeps the public output simple:
 
@@ -473,35 +465,42 @@ This keeps the public output simple:
 - nRNA-span-level or transcript-fanned-out nascent RNA
 - locus-level total gDNA
 
-while still providing a mathematically explicit place for the symmetry spring.
+while using a cleaner internal parameterization for the EM.
 
 ## 12. Recommended Simplest Version
 
 Among all theory-consistent variants, the simplest version is:
 
-1. one collapsed gDNA component per locus
-2. optionally fix $\phi_\ell = 1/2$ at first
-3. if the data show extra locus-level strand variability, free $\phi_\ell$ and
-   use the symmetric Beta prior
-4. keep the nRNA prior only as a prior on group nascent fractions, not as an
+1. two internal gDNA components per locus, one per strand
+2. report their sum as the public locus-level gDNA abundance
+3. optionally fix the gDNA pair to exact symmetry at first
+4. if the data show extra locus-level strand variability, free the implied
+   strand fraction under the symmetric Beta prior
+5. keep the nRNA prior only as a prior on group nascent fractions, not as an
    additional heuristic initializer
 
 That gives a clean progression:
 
-- simplest exact symmetric model
-- then one extra nuisance parameter for strand asymmetry if the data justify it
+- simplest exact symmetric gDNA-pair model
+- then one extra degree of freedom for strand asymmetry if the data justify it
 
 ## 13. Hyperparameter Strategy for $\kappa_{\mathrm{sym}}$
 
 The preferred theoretical treatment is empirical Bayes with hierarchical sharing
 across loci.
 
-That is, within the main locus model we use:
+That is, within the main locus model the implied strand fraction obeys:
 
 $$
 \phi_\ell \mid \kappa_{\mathrm{sym}}
 \sim \operatorname{Beta}\left(\frac{\kappa_{\mathrm{sym}}}{2},
 \frac{\kappa_{\mathrm{sym}}}{2}\right)
+$$
+
+with:
+
+$$
+\phi_\ell = \frac{\theta_{g_+}}{\theta_{g_+} + \theta_{g_-}}
 $$
 
 but we do not regard $\kappa_{\mathrm{sym}}$ as fixed a priori. Instead it is a
@@ -529,7 +528,7 @@ Conceptually, this means:
 - each calibration region has its own latent strand fraction
 - all such regions share one global dispersion parameter
 - the estimated $\kappa_{\mathrm{sym}}$ is then recycled as the prior strength
-   in the locus EM
+  on the gDNA pair in the locus EM
 
 ## 14. What Counts as a Calibration Region
 

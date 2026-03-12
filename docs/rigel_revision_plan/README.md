@@ -43,6 +43,8 @@ The most definitive implementation path is:
    objects already available during scan
 3. Workstream E: calibrate gDNA nuisance parameters from weighted regional
    evidence
+4. Workstream F: migrate the locus solver to the chosen internal `T + N + 2`
+  gDNA-pair model while keeping collapsed public gDNA output
 
 Workstream D, the purity model, should remain flexible for now. The revised
 recommendation is to bootstrap calibration from a highly conservative seed set

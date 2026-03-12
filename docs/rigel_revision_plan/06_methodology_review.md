@@ -10,7 +10,7 @@ The critique is directionally correct and worth acting on.
 It does not invalidate the theory-first redesign. It does expose three places
 where the implementation plan was still too optimistic:
 
-1. the internal `T + N + 1` commitment was stronger than necessary
+1. the internal gDNA parameterization needed to be revisited
 2. the calibration bootstrap path was underspecified
 3. the sparsity story needed to be stated more explicitly in the objective
 
@@ -29,8 +29,7 @@ Assessment:
 Revision:
 
 - keep one collapsed gDNA abundance in the public model and outputs
-- reopen the internal implementation choice
-- treat `T + N + 2` as the default engineering candidate for solver migration
+- adopt `T + N + 2` as the preferred implementation target
 
 ### 2.2 Chicken-and-egg calibration risk
 
@@ -93,8 +92,8 @@ The revised near-term plan is:
 2. define a conservative gDNA-dominant seed set
 3. fit initial gDNA nuisance parameters from that seed set
 4. only then add soft weighting for calibration expansion
-5. delay the final `T + N + 1` versus `T + N + 2` solver choice until the EM
-   migration design is written explicitly
+5. implement the main EM migration around the `T + N + 2` gDNA pair model while
+  preserving collapsed public gDNA output
 
 ## 4. What Did Not Change
 
