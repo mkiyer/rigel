@@ -1,0 +1,74 @@
+# hp_ablation_prune_threshold.yaml — Ablation of prune_threshold
+# 4 patterns × 2 SS × 2 gdna_frac × 6 prune = 96 runs
+
+genome_length: 50000
+seed: 42
+read_length: 150
+
+rna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+gdna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+transcripts:
+  TA1:
+    strand: "+"
+    exons: [[1000, 1020], [5000, 5500], [12000, 13000]]
+  TA2:
+    strand: "+"
+    exons: [[2000, 2500], [5000, 5500], [12000, 13000]]
+  TA3:
+    strand: "+"
+    exons: [[4500, 5500], [7000, 7500], [12000, 13000]]
+  TA4:
+    strand: "+"
+    exons: [[4500, 5500], [12000, 13000]]
+  TB1:
+    strand: "-"
+    exons: [[9000, 10000], [14000, 16000]]
+  TB2:
+    strand: "-"
+    exons: [[9950, 10000], [14000, 16000]]
+  TCF:
+    strand: "+"
+    exons: [[20000, 24000]]
+  TCR:
+    strand: "-"
+    exons: [[23000, 26000], [30000, 31000], [35000, 36000]]
+  TD:
+    strand: "+"
+    exons: [[28000, 29000]]
+  TE:
+    strand: "-"
+    exons: [[40000, 41000], [45000, 46000]]
+
+nrnas:
+  NTA1: ["+", 1000, 13000]
+  NTA2: ["+", 2000, 13000]
+  NTA34: ["+", 4500, 13000]
+  NTB12: ["-", 9000, 16000]
+  NTCR: ["-", 23000, 36000]
+  NTE: ["-", 40000, 46000]
+
+sweep:
+  strand_specificity: [0.9, 1.0]
+  n_rna_fragments: 10000
+  gdna_fraction: [0.1, 0.5]
+  TB1: 500
+  TB2: 500
+  TD: 0
+  TE: 0
+  # disabled(-1) → very permissive(0.01) → default(0.1) → moderate(1.0) → aggressive(5.0) → very aggressive(10.0)
+  prune_threshold: [-1.0, 0.01, 0.1, 1.0, 5.0, 10.0]
+
+patterns:
+  - {TA1: 1000, TA2: 0, TA3: 0, TA4: 0, TCF: 0, TCR: 0, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 500, TA2: 300, TA3: 0, TA4: 200, TCF: 0, TCR: 0, NTA1: 200, NTA2: 200, NTA34: 200, NTB12: 0, NTCR: 0, NTE: 0}
+  - {TA1: 0, TA2: 0, TA3: 0, TA4: 0, TCF: 500, TCR: 500, NTA1: 0, NTA2: 0, NTA34: 0, NTB12: 0, NTCR: 1000, NTE: 0}
+  - {TA1: 500, TA2: 300, TA3: 200, TA4: 100, TCF: 500, TCR: 500, NTA1: 500, NTA2: 500, NTA34: 500, NTB12: 500, NTCR: 500, NTE: 0}

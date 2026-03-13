@@ -101,8 +101,10 @@ Build or expose the genomic interval partition needed for calibration.
 Required capabilities:
 
 - refine the existing index interval tiling rather than replacing it
-- represent annotation context with a four-flag scheme for exon and intron
-  overlap on both strands
+- build a true atomic partition on top of the existing layered interval table
+- represent annotation context with four primitive booleans
+  (`exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`) plus derived reported ambiguity
+  flags (`exon_ambig`, `tx_ambig`)
 - expose effective interval lengths for density calculations
 
 Primary output:
@@ -230,7 +232,7 @@ Deliverables:
 
 - region partition schema
 - mapping from existing index structures to calibration intervals
-- explicit four-flag calibration-region representation built on the current
+- explicit atomic calibration-region representation built on the current
   interval tiling
 - clear policy for ambiguous annotation contexts
 
@@ -319,20 +321,22 @@ The region table should contain at minimum:
 - `end`
 - `length`
 - `is_genic`
-- `has_exon_pos`
-- `has_exon_neg`
-- `has_intron_pos`
-- `has_intron_neg`
+- primitive flags: `exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`
+- derived flags: `exon_ambig`, `tx_ambig`
+- derived region properties: `is_intergenic`, `is_intronic_only`,
+  `is_context_ambiguous`
 
-This is best treated as a four-flag scheme for calibration rather than a large
-annotation-context enum. The initial calibration partition should be built as a
-post-index refinement of the existing interval tiling, not as a full index
+This is best treated as four primitive booleans plus derived flags rather than
+as a large context enum. The initial calibration partition should be built as a
+post-index boundary sweep over the existing interval tiling, not as a full index
 refactor.
 
 Open design questions:
 
 - whether to merge tiny adjacent intervals with identical flags for stability
 - whether to precompute neighborhood relations for splice-evidence borrowing
+- whether to expose a `region_id -> transcript_id set` sidecar for diagnostics,
+  while keeping transcript resolution separate from calibration-region lookup
 
 ### 6.2 Workstream B: Fragment-to-region assignment design
 
@@ -343,9 +347,15 @@ For each fragment, the calibration path needs:
 - its genomic footprint
 - the set of overlapped calibration regions
 
+For unspliced fragments, overlaps can be computed directly from genomic
+footprint. For spliced fragments, genomic footprint alone is not a faithful
+covered-bases representation, so spliced RNA evidence should be accumulated
+separately in the first pass rather than forced through the same overlap logic.
+
 First-pass admissibility rule:
 
-- retain only fragments with one interpretable calibration context
+- retain only fragments whose merged region-overlap summary yields one
+  interpretable calibration context
 - hold out context-ambiguous fragments for the calibration stage
 
 This should be a conscious first-order simplification, not an accidental loss of

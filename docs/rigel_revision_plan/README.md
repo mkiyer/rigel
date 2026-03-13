@@ -56,7 +56,8 @@ the empirical region-evidence distributions are visible.
 ## Near-Term Coding Order
 
 1. add a calibration-region schema and export path on top of `TranscriptIndex`
-2. add a calibration evidence accumulator independent of the main EM
+2. make that schema a true atomic partition rather than a direct reuse of
+  `intervals.feather`
 3. emit diagnostic tables or summaries for region evidence
 4. implement a first weighted calibration pass for gDNA symmetry and fragment
    length

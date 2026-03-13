@@ -102,8 +102,6 @@ struct EmEquivClass {
     std::vector<double>  ll_flat;   // n*k log-likelihoods (row-major)
     std::vector<double>  wt_flat;   // n*k coverage weights (row-major)
     mutable std::vector<double> scratch;  // n*k workspace (reused each iteration)
-    int gdna_col;  // column in comp_idx that is gDNA (-1 if absent)
-    std::vector<uint8_t> gdna_is_anti;  // [n]: 1 if unit is antisense, 0 if sense
     int n;  // number of units in this class
     int k;  // number of components per unit
 };
@@ -134,9 +132,7 @@ static std::vector<EmEquivClass> build_equiv_classes(
     const int32_t* t_indices,
     const double*  log_liks,
     const double*  coverage_wts,
-    int n_units,
-    const uint8_t* locus_ct_arr = nullptr,
-    int gdna_idx = -1)
+    int n_units)
 {
     if (n_units == 0) return {};
 
@@ -169,18 +165,6 @@ static std::vector<EmEquivClass> build_equiv_classes(
         ec.wt_flat.resize(static_cast<size_t>(n) * k);
         ec.scratch.resize(static_cast<size_t>(n) * k);
 
-        // Find gDNA column
-        ec.gdna_col = -1;
-        if (gdna_idx >= 0) {
-            for (int j = 0; j < k; ++j) {
-                if (ec.comp_idx[j] == gdna_idx) { ec.gdna_col = j; break; }
-            }
-        }
-
-        if (ec.gdna_col >= 0 && locus_ct_arr) {
-            ec.gdna_is_anti.resize(static_cast<size_t>(n));
-        }
-
         for (int i = 0; i < n; ++i) {
             int u = unit_list[i];
             auto s = static_cast<size_t>(offsets[u]);
@@ -189,9 +173,6 @@ static std::vector<EmEquivClass> build_equiv_classes(
                     log_liks[s + static_cast<size_t>(j)];
                 ec.wt_flat[static_cast<size_t>(i) * k + j] =
                     coverage_wts[s + static_cast<size_t>(j)];
-            }
-            if (ec.gdna_col >= 0 && locus_ct_arr) {
-                ec.gdna_is_anti[i] = locus_ct_arr[u] % 2;
             }
         }
 
@@ -249,7 +230,7 @@ static std::vector<EmEquivClass> build_equiv_classes(
         }
         if (already_sorted) continue;
 
-        // Reorder ll_flat, wt_flat, and gdna_is_anti
+        // Reorder ll_flat and wt_flat
         std::vector<double> new_ll(static_cast<size_t>(n) * k);
         std::vector<double> new_wt(static_cast<size_t>(n) * k);
         for (int i = 0; i < n; ++i) {
@@ -262,14 +243,6 @@ static std::vector<EmEquivClass> build_equiv_classes(
         }
         ec.ll_flat = std::move(new_ll);
         ec.wt_flat = std::move(new_wt);
-
-        if (!ec.gdna_is_anti.empty()) {
-            std::vector<uint8_t> new_anti(static_cast<size_t>(n));
-            for (int i = 0; i < n; ++i) {
-                new_anti[i] = ec.gdna_is_anti[idx[i]];
-            }
-            ec.gdna_is_anti = std::move(new_anti);
-        }
     }
 
     return result;
@@ -534,11 +507,11 @@ static void parallel_estep(
 // Hierarchical MAP-EM step: theta → theta_new
 // ================================================================
 //
-// Plain MAP-EM step with strand symmetry penalty for gDNA.
-//
-// All components (mRNA, nRNA, gDNA) compete independently through the
-// likelihood.  The M-step applies a targeted excess penalty to the gDNA
-// component based on strand symmetry.
+// Plain MAP-EM step with symmetric Beta coupling for gDNA strand balance.
+// g_pos and g_neg are the last two components (nc-2, nc-1).
+// After the standard M-step accumulation, the coupling redistributes
+// gDNA mass between g_pos and g_neg via a Beta(κ/2, κ/2) prior on the
+// strand balance φ = θ_{g_pos} / (θ_{g_pos} + θ_{g_neg}).
 
 static void map_em_step(
     const double* theta,
@@ -551,9 +524,7 @@ static void map_em_step(
     int           n_components,
     int           estep_threads = 1,
     rigel::EStepThreadPool* pool = nullptr,
-    // Strand symmetry penalty parameters
-    double        strand_symmetry_kappa = 2.0,
-    double        strand_specificity = 0.5)
+    double        strand_symmetry_kappa = 2.0)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -574,60 +545,32 @@ static void map_em_step(
         }
     }
 
-    // --- Targeted Excess Penalty for gDNA strand symmetry ---
-    //
-    // Decomposes gDNA EM counts into a perfectly symmetric baseline
-    // (2 * min(sense, anti)) that is fully protected, and an asymmetric
-    // excess (|sense - anti|) that receives the Beta discount w_sym.
-    // This prevents the penalty from destroying legitimate symmetric
-    // gDNA and transferring that mass into nRNA.
-    //
-    // kappa <= 2.0 disables the penalty entirely (fast path).
-    // The strand accumulation loop only runs when the penalty is active.
-
-    // Plain MAP-EM: theta_new = (unambig + em + prior), normalized
-    int gi = n_components - 1;  // gDNA is always last
+    // Plain MAP-EM: theta_new = (unambig + em + prior)
     double total = 0.0;
     for (int i = 0; i < n_components; ++i) {
         theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
         total += theta_new[i];
     }
 
-    // Apply targeted excess penalty to gDNA, scaled by strand specificity.
-    // kappa_eff = kappa * (2*SS - 1)^2.  At SS=0.5, kappa_eff=0 → disabled.
-    double ss_scale = 2.0 * strand_specificity - 1.0;
-    double kappa_eff = strand_symmetry_kappa * ss_scale * ss_scale;
-    if (kappa_eff > 2.0 && n_components > 0) {
-        double e_sense_gdna = 0.0, e_anti_gdna = 0.0;
-        for (const auto& ec : ec_data) {
-            if (ec.gdna_col < 0) continue;
-            int gcol = ec.gdna_col;
-            for (int i = 0; i < ec.n; ++i) {
-                double p = ec.scratch[static_cast<size_t>(i) * ec.k + gcol];
-                if (ec.gdna_is_anti[i])
-                    e_anti_gdna += p;
-                else
-                    e_sense_gdna += p;
-            }
+    // Couple g_pos and g_neg via symmetric Beta(κ/2, κ/2) prior.
+    // g_pos is always nc-2, g_neg is always nc-1.
+    // kappa <= 2.0 disables the coupling (fast path).
+    if (strand_symmetry_kappa > 2.0 && n_components >= 2) {
+        int g_pos = n_components - 2;
+        int g_neg = n_components - 1;
+        double R_pos = theta_new[g_pos];
+        double R_neg = theta_new[g_neg];
+        double R_g = R_pos + R_neg;
+        if (R_g > 0.0) {
+            double phi = (R_pos + strand_symmetry_kappa / 2.0 - 1.0)
+                       / (R_g + strand_symmetry_kappa - 2.0);
+            phi = std::clamp(phi, 0.0, 1.0);
+            double new_pos = phi * R_g;
+            double new_neg = (1.0 - phi) * R_g;
+            total += (new_pos - theta_new[g_pos]) + (new_neg - theta_new[g_neg]);
+            theta_new[g_pos] = new_pos;
+            theta_new[g_neg] = new_neg;
         }
-
-        double e_min = std::min(e_sense_gdna, e_anti_gdna);
-        double e_max = std::max(e_sense_gdna, e_anti_gdna);
-        double e_sym = 2.0 * e_min;
-        double e_excess = e_max - e_min;
-
-        double N_g = e_sense_gdna + e_anti_gdna;
-        double w_sym = 1.0;
-        if (N_g > 0.0) {
-            double p_hat = (e_sense_gdna + 0.5) / (N_g + 1.0);
-            double balance = 4.0 * p_hat * (1.0 - p_hat);
-            w_sym = std::pow(balance, kappa_eff / 2.0 - 1.0);
-        }
-
-        double penalized_em = e_sym + e_excess * w_sym;
-        double old_g = theta_new[gi];
-        theta_new[gi] = penalized_em + unambig_totals[gi] + prior[gi];
-        total += theta_new[gi] - old_g;
     }
 
     if (total > 0.0) {
@@ -770,9 +713,7 @@ static EMResult run_squarem(
     double        prune_threshold,
     int           estep_threads = 1,
     rigel::EStepThreadPool* pool = nullptr,
-    // Strand symmetry penalty parameters
-    double        strand_symmetry_kappa = 2.0,
-    double        strand_specificity = 0.5)
+    double        strand_symmetry_kappa = 2.0)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -888,13 +829,13 @@ static EMResult run_squarem(
                         unambig_totals, prior, em_totals.data(),
                         state1.data(), n_components,
                         estep_threads, pool,
-                        strand_symmetry_kappa, strand_specificity);
+                        strand_symmetry_kappa);
 
             map_em_step(state1.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state2.data(), n_components,
                         estep_threads, pool,
-                        strand_symmetry_kappa, strand_specificity);
+                        strand_symmetry_kappa);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -931,7 +872,7 @@ static EMResult run_squarem(
                         unambig_totals, prior, em_totals.data(),
                         state_new.data(), n_components,
                         estep_threads, pool,
-                        strand_symmetry_kappa, strand_specificity);
+                        strand_symmetry_kappa);
 
             // Convergence
             double delta = 0.0;
@@ -970,7 +911,8 @@ static EMResult run_squarem(
                 any_pruned = true;
             }
         }
-        // Never prune gDNA (last component)
+        // Never prune gDNA (last two components: g_pos and g_neg)
+        if (nc >= 2) prune_mask[nc - 2] = false;
         prune_mask[nc - 1] = false;
 
         if (any_pruned) {
@@ -1014,7 +956,7 @@ static EMResult run_squarem(
                                 unambig_totals, prior, em_totals.data(),
                                 t_new.data(), n_components,
                                 1, nullptr,
-                                strand_symmetry_kappa, strand_specificity);
+                                strand_symmetry_kappa);
                     std::swap(theta, t_new);
                 }
                 for (size_t i = 0; i < nc; ++i) {
@@ -1202,8 +1144,9 @@ struct LocalCandidate {
 struct LocusSubProblem {
     int n_t;           // number of transcripts in locus
     int n_nrna;        // number of unique nRNAs in locus
-    int n_components;  // n_t + n_nrna + 1
-    int gdna_idx;      // = n_t + n_nrna
+    int n_components;  // n_t + n_nrna + 2
+    int gdna_pos_idx;  // = n_t + n_nrna     (positive-strand gDNA)
+    int gdna_neg_idx;  // = n_t + n_nrna + 1 (negative-strand gDNA)
     int n_local_units;
 
     // Local CSR
@@ -1237,7 +1180,7 @@ struct LocusSubProblem {
 
 // Extract per-locus sub-problem from global CSR data.
 // Reimplements Python build_locus_em_data() entirely in C++.
-// Component layout: [0,n_t) mRNA + [n_t, n_t+n_nrna) nRNA + [n_t+n_nrna] gDNA
+// Component layout: [0,n_t) mRNA + [n_t, n_t+n_nrna) nRNA + [n_t+n_nrna] g_pos + [n_t+n_nrna+1] g_neg
 static void extract_locus_sub_problem(
     LocusSubProblem& sub,
     // Locus definition
@@ -1300,8 +1243,9 @@ static void extract_locus_sub_problem(
 
     int n_nrna = static_cast<int>(unique_nrna_global.size());
     sub.n_nrna = n_nrna;
-    sub.n_components = n_t + n_nrna + 1;
-    sub.gdna_idx = n_t + n_nrna;
+    sub.n_components = n_t + n_nrna + 2;
+    sub.gdna_pos_idx = n_t + n_nrna;
+    sub.gdna_neg_idx = n_t + n_nrna + 1;
 
     // Build local_to_global_nrna
     sub.local_to_global_nrna.resize(n_nrna);
@@ -1436,11 +1380,13 @@ static void extract_locus_sub_problem(
             }
         }
 
-        // Add gDNA candidate for unspliced units
+        // Add gDNA candidate for unspliced units — route to g_pos or g_neg
         bool is_spliced = (g_is_spliced[u] != 0);
         double gdna_ll = g_gdna_log_liks[u];
         if (!is_spliced && std::isfinite(gdna_ll)) {
-            int32_t gdna_comp = sub.gdna_idx;
+            // Strand bit from locus_ct_arr: count_col = stype*2 + is_anti
+            bool is_anti = (sub.locus_ct_arr[ui] % 2) != 0;
+            int32_t gdna_comp = is_anti ? sub.gdna_neg_idx : sub.gdna_pos_idx;
             int32_t footprint = g_genomic_footprints[u];
             if (seen_epoch[gdna_comp] != current_epoch ||
                 gdna_ll > best_buf[gdna_comp].log_lik) {
@@ -1489,14 +1435,16 @@ static void extract_locus_sub_problem(
         int gt = t_arr[first_t];
         sub.bias_profiles[n_t + n] = all_t_ends[gt] - all_t_starts[gt];  // nRNA
     }
-    sub.bias_profiles[sub.gdna_idx] = locus_span;
+    sub.bias_profiles[sub.gdna_pos_idx] = locus_span;
+    sub.bias_profiles[sub.gdna_neg_idx] = locus_span;
 
     // Prior: EM_PRIOR_EPSILON for eligible, 0.0 for ineligible
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
 
     // Zero gDNA prior when gdna_init == 0
     if (gdna_init == 0.0) {
-        sub.prior[sub.gdna_idx] = 0.0;
+        sub.prior[sub.gdna_pos_idx] = 0.0;
+        sub.prior[sub.gdna_neg_idx] = 0.0;
     }
 
     // Zero nRNA prior for nRNAs where ALL transcripts are single-exon
@@ -1561,7 +1509,8 @@ static void assign_posteriors(
 {
     int n_t = sub.n_t;
     int nc  = sub.n_components;
-    int gdna_idx = sub.gdna_idx;
+    int gdna_pos = sub.gdna_pos_idx;
+    int gdna_neg = sub.gdna_neg_idx;
     int n_units = sub.n_local_units;
     const int32_t* local_to_global = sub.local_to_global_t.data();
 
@@ -1628,7 +1577,7 @@ static void assign_posteriors(
                 // Confidence tracking
                 posterior_sum[global_t] += p * p;
                 n_assigned[global_t] += p;
-            } else if (comp < gdna_idx) {
+            } else if (comp < gdna_pos) {
                 // nRNA — local nRNA index → global nRNA index
                 int32_t local_nrna = comp - n_t;
                 int32_t global_nrna = sub.local_to_global_nrna[local_nrna];
@@ -1661,7 +1610,8 @@ static void assign_posteriors(
         // gDNA locus attribution
         double gdna_unit_sum = 0.0;
         for (int j = 0; j < seg_len; ++j) {
-            if (sub.t_indices[s + j] == gdna_idx) {
+            int32_t c = sub.t_indices[s + j];
+            if (c == gdna_pos || c == gdna_neg) {
                 gdna_unit_sum += posteriors[j];
             }
         }
@@ -1736,9 +1686,8 @@ batch_locus_em(
     int    n_transcripts_total,
     int    n_splice_strand_cols,
     int    n_threads,
-    // Strand symmetry penalty parameters
-    double strand_symmetry_kappa = 2.0,
-    double strand_specificity = 0.5)
+    // Strand symmetry coupling parameter
+    double strand_symmetry_kappa = 2.0)
 {
     int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
     int N_T = n_transcripts_total;
@@ -1946,9 +1895,7 @@ batch_locus_em(
                 sub.t_indices.data(),
                 sub.log_liks.data(),
                 sub.coverage_wts.data(),
-                n_local_units,
-                sub.locus_ct_arr.data(),
-                sub.gdna_idx);
+                n_local_units);
 
             // 6. Coverage-weighted warm start + OVR prior
             std::vector<double> prior(nc);
@@ -1969,7 +1916,7 @@ batch_locus_em(
                 nc, max_iterations, convergence_delta,
                 use_vbem, prune_threshold,
                 estep_thr, pool,
-                strand_symmetry_kappa, strand_specificity);
+                strand_symmetry_kappa);
 
             // 8. Assign posteriors (writes to disjoint transcript
             //    indices — safe across threads, no atomics needed)
@@ -2414,7 +2361,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
           nb::arg("strand_symmetry_kappa") = 2.0,
-          nb::arg("strand_specificity") = 0.5,
           "Run locus EM for ALL loci in a single C++ call.\n\n"
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"

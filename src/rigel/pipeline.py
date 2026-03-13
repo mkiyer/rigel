@@ -505,7 +505,6 @@ def _run_locus_em(
     index: TranscriptIndex,
     gdna_inits: list[float],
     em_config: EMConfig,
-    strand_specificity: float = 0.5,
 ) -> None:
     """Run batch locus-level EM and record per-locus results."""
     t_refs = index.t_df["ref"].values
@@ -543,7 +542,6 @@ def _run_locus_em(
         em_data,
         index,
         np.asarray(gdna_inits, dtype=np.float64),
-        strand_specificity=strand_specificity,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
         confidence_threshold=em_config.confidence_threshold,
@@ -650,7 +648,6 @@ def quant_from_buffer(
 
         _run_locus_em(
             estimator, em_data, loci, index, gdna_inits, em_config,
-            strand_specificity=strand_models.strand_specificity,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")

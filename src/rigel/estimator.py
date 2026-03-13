@@ -276,7 +276,6 @@ class AbundanceEstimator:
         index,
         gdna_inits: np.ndarray,
         *,
-        strand_specificity: float = 0.5,
         em_iterations: int = _EM_DEFAULTS.iterations,
         em_convergence_delta: float = _EM_DEFAULTS.convergence_delta,
         confidence_threshold: float = _EM_DEFAULTS.confidence_threshold,
@@ -392,7 +391,6 @@ class AbundanceEstimator:
             NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,
             self.em_config.strand_symmetry_kappa,
-            strand_specificity,
         )
 
         return (

@@ -797,7 +797,7 @@ private:
                         double gdna_fl =
                             gdna_frag_len_log_lik(gfp_val);
                         double gdna_ll_val =
-                            LOG_HALF + gdna_fl + gdna_log_sp;
+                            gdna_fl + gdna_log_sp;
                         if (gdna_ll_val > best_gdna_ll) {
                             best_gdna_ll = gdna_ll_val;
                             best_fp = gfp_val;
@@ -1242,8 +1242,7 @@ private:
                             gdna_frag_len_log_lik(
                                 genomic_footprint);
                         st.gdna_ll[st.unit_cur] =
-                                LOG_HALF + gdna_fl
-                                + gdna_log_sp;
+                                gdna_fl + gdna_log_sp;
                     } else {
                         st.gdna_ll[st.unit_cur] = NEG_INF;
                     }
