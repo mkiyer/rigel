@@ -96,20 +96,24 @@ The redesign naturally decomposes into six workstreams.
 
 Goal:
 
-Build or expose the genomic interval partition needed for calibration.
+Build and persist the flattened genomic region partition needed for
+calibration.
 
 Required capabilities:
 
-- refine the existing index interval tiling rather than replacing it
-- build a true atomic partition on top of the existing layered interval table
-- represent annotation context with four primitive booleans
-  (`exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`) plus derived reported ambiguity
-  flags (`exon_ambig`, `tx_ambig`)
+- derive contiguous non-overlapping bins from transcript-span and exon
+  boundaries during index build
+- persist the result as `regions.feather` with optional diagnostic TSV export
+- represent annotation context with exactly four stored booleans:
+  `exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`
+- infer ambiguity and genic-context classes from those four flags rather than
+  storing `_ambig` columns
+- load `regions.feather` into a dedicated interval lookup keyed by `region_id`
 - expose effective interval lengths for density calculations
 
 Primary output:
 
-- a region table keyed by `(ref, start, end, context)`
+- a flattened region table keyed by `(region_id, ref, start, end)`
 
 ### Workstream B: Calibration fragment extraction
 
@@ -124,8 +128,8 @@ Required capabilities:
 - restrict to unspliced fragments for gDNA-specific calibration signals
 - optionally use nearby spliced fragments as RNA evidence for the same region or
   neighborhood
-- retain only context-unambiguous fragment-to-region assignments in the first
-  implementation
+- summarize fragment overlap against the four region layers
+  (`exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`) in the first implementation
 
 Primary output:
 
@@ -231,14 +235,14 @@ Exit criteria:
 Deliverables:
 
 - region partition schema
-- mapping from existing index structures to calibration intervals
-- explicit atomic calibration-region representation built on the current
-  interval tiling
-- clear policy for ambiguous annotation contexts
+- flattened region builder from transcript and exon boundaries
+- `regions.feather` write path and load path
+- clear interpretation rules for ambiguity derived from the four stored flags
 
 Exit criteria:
 
-- genome can be deterministically partitioned into calibration-ready intervals
+- genome can be deterministically partitioned into calibration-ready regions
+  and reloaded through the index
 
 ### Phase 2: Regional evidence extraction
 
@@ -321,15 +325,14 @@ The region table should contain at minimum:
 - `end`
 - `length`
 - `is_genic`
-- primitive flags: `exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`
-- derived flags: `exon_ambig`, `tx_ambig`
+- stored flags: `exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`
 - derived region properties: `is_intergenic`, `is_intronic_only`,
   `is_context_ambiguous`
 
-This is best treated as four primitive booleans plus derived flags rather than
-as a large context enum. The initial calibration partition should be built as a
-post-index boundary sweep over the existing interval tiling, not as a full index
-refactor.
+This is best treated as four stored booleans plus interpreted region classes
+rather than as a large context enum. The initial calibration partition should
+be built as a flattened index during index build from transcript and exon
+boundaries, not as a post hoc reuse of the layered interval table.
 
 Open design questions:
 

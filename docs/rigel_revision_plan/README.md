@@ -39,8 +39,8 @@ The intended workflow is:
 
 The most definitive implementation path is:
 
-1. Workstream A: expose a calibration-ready region partition from the existing
-   index interval machinery
+1. Workstream A: build and load a flattened calibration-region index as
+  `regions.feather`
 2. Workstream B/C: accumulate a standalone region evidence table from fragment
    objects already available during scan
 3. Workstream E: calibrate gDNA nuisance parameters from weighted regional
@@ -55,8 +55,9 @@ the empirical region-evidence distributions are visible.
 
 ## Near-Term Coding Order
 
-1. add a calibration-region schema and export path on top of `TranscriptIndex`
-2. make that schema a true atomic partition rather than a direct reuse of
+1. add a flattened calibration-region schema and `regions.feather` export path
+  on top of `TranscriptIndex`
+2. load `regions.feather` into a dedicated lookup rather than reusing
   `intervals.feather`
 3. emit diagnostic tables or summaries for region evidence
 4. implement a first weighted calibration pass for gDNA symmetry and fragment

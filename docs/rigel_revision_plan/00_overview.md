@@ -7,14 +7,15 @@ implementation roadmap.
 
 Several ingredients needed by the redesign already exist.
 
-### 1.1 Region partition is partially present already
+### 1.1 Region substrate is partially present already
 
 `src/rigel/index.py` already builds a tiled interval representation of the
 genome in `intervals.feather`, including exon, transcript-span, unambiguous
 intron, splice-junction, and intergenic structure.
 
-This means Workstream A is primarily an exposure and normalization task, not a
-from-scratch interval algorithm.
+This means Workstream A can build a dedicated flattened calibration-region
+index from existing transcript and exon coordinates rather than inventing a
+separate annotation source from scratch.
 
 ### 1.2 Fragment-level calibration signals are already present during scan
 
@@ -64,7 +65,10 @@ That order is preferable because:
 
 The updated recommendation is more specific:
 
-- build the calibration partition on top of the existing index tiling
+- build and persist a flattened calibration-region index as `regions.feather`
+- derive that index from transcript-span and exon boundaries at index-build
+   time
+- store exactly four region flags: `exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`
 - use a two-state purity model as the first practical implementation target
 - estimate gDNA fragment length and $\kappa_{\mathrm{sym}}$ jointly from the
   same purity-weighted regions
@@ -97,7 +101,7 @@ The current recommendation is therefore:
 
 The practical dependency graph is:
 
-1. Workstream A produces a calibration-region table
+1. Workstream A produces a flattened calibration-region table
 2. Workstream B/C produces a per-region evidence table
 3. Workstream D maps region evidence to gDNA-dominance weights
 4. Workstream E consumes those weights to estimate gDNA nuisance parameters
@@ -117,7 +121,7 @@ The current repository supports a fairly definitive plan for these workstreams.
 
 ### 4.1 Definitive now
 
-- Workstream A: region partition exposure
+- Workstream A: flattened region-index build and load path
 - Workstream B/C: fragment-to-region evidence extraction
 - Workstream E: weighted calibration interface and estimators
 - much of Workstream F: integration points and deprecation targets
@@ -140,7 +144,7 @@ changing locus EM behavior.
 
 Success criteria:
 
-- deterministic region table exists
+- deterministic `regions.feather` exists and loads through `TranscriptIndex`
 - fragments can be summarized by region
 - evidence summaries are inspectable on synthetic and real data
 

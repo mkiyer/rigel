@@ -1,6 +1,14 @@
 # TODO
 
 
+## Genome partitioning into regions
+
+## Mapping fragments onto regions
+
+
+The Fragment-Region mapping can be summarized as 'exon_pos_bp', 'exon_neg_bp', 'tx_pos_bp', 'tx_neg_bp'. To compute these sums, we need the Fragment-Region overlap (number of bases) and the Region flags. For example a region (ref='chr1', start=1000, end=2000) with flag (exon_pos = TRUE, exon_neg=FALSE, tx_pos=TRUE, tx_neg=FALSE) overlaps with a Fragment F with aligned block at (ref='chr1', is_reverse=FALSE (pos strand), start=1900, end=2050) overlaps by 100 bases. This can be summed into the Fragment-Region mapping with exon_pos_bp += 100, tx_pos_bp += 100. This should give you an idea of how the Fragment to Region mapping and tabulation/summation should happen. After we compute the Fragment-Region mapping summation/tabulation across all Fragment alignment blocks and their overlapping regions, we then have to determine how to utilize the fragment. When the Fragment-Region mappings are highly ambiguous
+
+
 ## Fragment length model
 
 

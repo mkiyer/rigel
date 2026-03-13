@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
-from .types import GenomicInterval, IntervalType, AnnotatedInterval
+from .types import GenomicInterval, IntervalType, AnnotatedInterval, STRAND_POS
 from .transcript import Transcript
 
 
@@ -50,6 +50,9 @@ SJ_TSV = "sj.tsv"
 
 NRNA_FEATHER = "nrna.feather"
 NRNA_TSV = "nrna.tsv"
+
+REGIONS_FEATHER = "regions.feather"
+REGIONS_TSV = "regions.tsv"
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +427,127 @@ def build_genomic_intervals(
     return pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
 
 
+def build_region_table(
+    transcripts: list[Transcript],
+    ref_lengths: dict[str, int],
+) -> pd.DataFrame:
+    """Build a non-overlapping, reference-complete genomic region partition.
+
+    The partition is constructed by a boundary-sweep algorithm:
+
+    1. Collect all transcript-span and exon start/end coordinates plus
+       reference boundaries (0 and ref_length) per reference.
+    2. Sort and deduplicate into a boundary array.
+    3. Form atomic half-open bins between successive boundaries.
+    4. Assign four boolean flags per bin via ``searchsorted``:
+       ``exon_pos``, ``exon_neg``, ``tx_pos``, ``tx_neg``.
+    5. Assign sequential ``region_id`` across all references.
+
+    Parameters
+    ----------
+    transcripts : list[Transcript]
+        Sorted list of transcripts (must have ``t_index`` assigned).
+    ref_lengths : dict[str, int]
+        Ordered mapping from reference name to length.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: region_id, ref, start, end, length,
+        exon_pos, exon_neg, tx_pos, tx_neg.
+    """
+    # Group transcripts by reference
+    ref_transcripts: dict[str, list[Transcript]] = collections.defaultdict(list)
+    for t in transcripts:
+        ref_transcripts[t.ref].append(t)
+
+    rows: list[dict] = []
+    region_id = 0
+
+    for ref, ref_length in ref_lengths.items():
+        t_list = ref_transcripts.get(ref, [])
+
+        # -- Collect boundary coordinates ------------------------------------
+        boundaries = {0, ref_length}
+        for t in t_list:
+            boundaries.add(t.start)
+            boundaries.add(t.end)
+            for e in t.exons:
+                boundaries.add(e.start)
+                boundaries.add(e.end)
+
+        bounds = np.array(sorted(boundaries), dtype=np.int64)
+        n_bins = len(bounds) - 1
+        if n_bins <= 0:
+            continue
+
+        bin_starts = bounds[:-1]
+        bin_ends = bounds[1:]
+
+        # -- Flag arrays (one per bin) ---------------------------------------
+        exon_pos = np.zeros(n_bins, dtype=bool)
+        exon_neg = np.zeros(n_bins, dtype=bool)
+        tx_pos = np.zeros(n_bins, dtype=bool)
+        tx_neg = np.zeros(n_bins, dtype=bool)
+
+        for t in t_list:
+            is_pos = int(t.strand) == STRAND_POS
+            # Transcript span -> tx flag
+            lo = int(np.searchsorted(bounds, t.start, side="left"))
+            hi = int(np.searchsorted(bounds, t.end, side="left"))
+            if is_pos:
+                tx_pos[lo:hi] = True
+            else:
+                tx_neg[lo:hi] = True
+
+            # Exons -> exon flag (also implies tx flag)
+            for e in t.exons:
+                e_lo = int(np.searchsorted(bounds, e.start, side="left"))
+                e_hi = int(np.searchsorted(bounds, e.end, side="left"))
+                if is_pos:
+                    exon_pos[e_lo:e_hi] = True
+                    tx_pos[e_lo:e_hi] = True
+                else:
+                    exon_neg[e_lo:e_hi] = True
+                    tx_neg[e_lo:e_hi] = True
+
+        # -- Merge adjacent bins with identical flags --------------------------
+        # Encode the four booleans as a single byte for fast comparison.
+        flag_key = (exon_pos.astype(np.uint8)
+                    | (exon_neg.astype(np.uint8) << 1)
+                    | (tx_pos.astype(np.uint8) << 2)
+                    | (tx_neg.astype(np.uint8) << 3))
+
+        # Detect where flag signature changes between adjacent bins.
+        changed = np.empty(n_bins, dtype=bool)
+        changed[0] = True
+        if n_bins > 1:
+            changed[1:] = flag_key[1:] != flag_key[:-1]
+        group_starts_idx = np.where(changed)[0]
+
+        for gi in range(len(group_starts_idx)):
+            first = int(group_starts_idx[gi])
+            last = int(group_starts_idx[gi + 1] - 1) if gi + 1 < len(group_starts_idx) else n_bins - 1
+            s = int(bin_starts[first])
+            e = int(bin_ends[last])
+            if s >= e:
+                continue
+            rows.append({
+                "region_id": region_id,
+                "ref": ref,
+                "start": s,
+                "end": e,
+                "length": e - s,
+                "exon_pos": bool(exon_pos[first]),
+                "exon_neg": bool(exon_neg[first]),
+                "tx_pos": bool(tx_pos[first]),
+                "tx_neg": bool(tx_neg[first]),
+            })
+            region_id += 1
+
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------------------
 # TranscriptIndex — unified index class
 # ---------------------------------------------------------------------------
@@ -469,6 +593,10 @@ class TranscriptIndex:
         # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
         # sorted by genomic start position.
         self._t_exon_intervals: dict[int, np.ndarray] | None = None
+
+        # Calibration-region partition (flattened non-overlapping bins)
+        self.region_df: pd.DataFrame | None = None
+        self.region_cr: _cgranges_cls | None = None
 
     # -- properties -----------------------------------------------------------
 
@@ -568,6 +696,15 @@ class TranscriptIndex:
         iv_df.to_feather(output_dir / INTERVALS_FEATHER, **feather_kwargs)
         if write_tsv:
             iv_df.to_csv(output_dir / INTERVALS_TSV, sep="\t", index=False)
+
+        # -- Calibration regions ----------------------------------------------
+        logger.info("[START] Building calibration regions")
+        region_df = build_region_table(transcripts, ref_lengths)
+        logger.info(f"[DONE] Found {len(region_df)} calibration regions")
+
+        region_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
+        if write_tsv:
+            region_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
 
         logger.info(f"Index written to {output_dir}")
 
@@ -839,6 +976,21 @@ class TranscriptIndex:
         self._sj_strand = _sj_strands
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
+
+        # -- calibration regions -----------------------------------------------
+        regions_path = os.path.join(index_dir, REGIONS_FEATHER)
+        if os.path.exists(regions_path):
+            self.region_df = pd.read_feather(regions_path)
+            _r_refs = self.region_df["ref"].values.tolist()
+            _r_starts = self.region_df["start"].values.tolist()
+            _r_ends = self.region_df["end"].values.tolist()
+            _r_ids = self.region_df["region_id"].values.tolist()
+            region_cr = _cgranges_cls()
+            for i in range(len(_r_ids)):
+                region_cr.add(_r_refs[i], _r_starts[i], _r_ends[i], _r_ids[i])
+            region_cr.index()
+            self.region_cr = region_cr
+            logger.debug(f"Loaded {len(self.region_df)} calibration regions")
 
         # -- C++ FragmentResolver (native fragment resolution) ------------------
         from .native import FragmentResolver

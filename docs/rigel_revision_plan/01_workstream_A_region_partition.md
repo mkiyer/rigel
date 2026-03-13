@@ -17,23 +17,25 @@ Relevant existing concepts:
 - splice junction table
 - transcript and nRNA tables
 
-The redesign should avoid replacing that machinery. Instead it should expose a
-calibration-oriented region layer derived from it.
+The redesign should avoid replacing that machinery. Instead it should add a
+calibration-oriented flattened region layer alongside it.
 
 One important correction is needed up front: `intervals.feather` is not yet a
 true non-overlapping partition. It is a layered interval table containing EXON,
 TRANSCRIPT, INTERGENIC, and UNAMBIG_INTRON rows that may share boundaries and
-overlap each other. Workstream A therefore needs a deterministic remapping from
-that layered representation to atomic calibration regions.
+overlap each other. Workstream A therefore needs its own flattened region index
+rather than a direct reuse of `intervals.feather`.
 
 ## 2. Implementation Goal
 
 Produce a calibration-region table with constant annotation context per region.
 
-More concretely, the output should be a true atomic partition of the genome:
+More concretely, the output should be a true flattened non-overlapping region
+index of the genome:
 
 - non-overlapping half-open intervals per reference
 - one `region_id` per atomic interval
+- persisted metadata in `regions.feather` with optional `regions.tsv`
 - a cgranges lookup keyed by `region_id`
 - region metadata sufficient for later purity modeling and fragment overlap
   summarization
@@ -41,9 +43,7 @@ More concretely, the output should be a true atomic partition of the genome:
 The first-pass table should support:
 
 - interval identity: `region_id`, `ref`, `start`, `end`, `length`
-- an implementation-stable annotation schema for exon and transcript-span
-  presence by strand
-- context ambiguity flags
+- four stored annotation flags: `exon_pos`, `exon_neg`, `tx_pos`, `tx_neg`
 - effective lengths for region-level density calculations
 
 ## 3. Recommended First-Pass Design
@@ -54,65 +54,66 @@ Recommended shape:
 
 - add a pure helper in `src/rigel/index.py` or a new nearby module such as
   `src/rigel/calibration_regions.py`
-- derive calibration regions from existing interval outputs rather than from
-  raw GTF reprocessing
+- build flattened regions directly from transcript and exon coordinates already
+  present during index build
 - keep the output as a pandas DataFrame initially for ease of inspection and
   testing
+- write `regions.feather` at index build time, with optional `regions.tsv`
+- load `regions.feather` into a dedicated cgranges structure at index load time
 
-### 3.2 Build a true atomic partition from boundary sweeps
+### 3.2 Build flattened non-overlapping bins from boundary sweeps
 
-The existing interval table is the right substrate, but not the right final
-object.
+The transcript and exon annotations are the right substrate, but not the right
+final object.
 
 Recommended first implementation:
 
-1. restrict the calibration partition to EXON, TRANSCRIPT, and INTERGENIC
-   layers from `intervals.feather`
-2. collect every unique start and end coordinate per reference from those rows
-3. sort the boundaries and form adjacent half-open atomic segments
-4. evaluate annotation membership on each atomic segment
-5. discard zero-length segments
+1. collect all transcript-span start and end coordinates per reference
+2. collect all exon start and end coordinates per reference
+3. union and sort those coordinates into one boundary array per reference
+4. form adjacent half-open bins between successive boundaries
+5. discard zero-length bins
+6. assign the four boolean flags to each bin by testing whether that bin is
+  spanned by a pos/neg transcript span and by a pos/neg exon
+7. assign `region_id` after the flattened bins are finalized
 
-This gives a deterministic non-overlapping partition without requiring a second
-annotation parser.
+This gives a deterministic non-overlapping partition of the annotation geometry
+itself. It is the flattened index.
 
 `UNAMBIG_INTRON` should remain available as a validation or auxiliary signal,
 but it should not be the primitive geometry for the calibration partition.
 
-### 3.3 Use four primitive booleans and six reported flags
+### 3.3 Use exactly four stored flags
 
 The current interval representation is useful but not yet the right public shape
-for calibration. The first revision should normalize each region into fields
-such as:
+for calibration. The first revision should store exactly these four booleans:
 
-- primitive source-of-truth booleans:
-  - `exon_pos`
-  - `exon_neg`
-  - `tx_pos`
-  - `tx_neg`
-- derived reported flags:
-  - `exon_ambig = exon_pos and exon_neg`
-  - `tx_ambig = tx_pos and tx_neg`
-- derived region properties:
-  - `is_genic = exon_pos or exon_neg or tx_pos or tx_neg`
-  - `is_intergenic = not is_genic`
-  - `is_intronic_only = (not exon_pos) and (not exon_neg) and (tx_pos or tx_neg)`
-  - `has_pos = exon_pos or tx_pos`
-  - `has_neg = exon_neg or tx_neg`
-  - `is_context_ambiguous = exon_ambig or tx_ambig`
+- `exon_pos`
+- `exon_neg`
+- `tx_pos`
+- `tx_neg`
+
+Everything else is inferred:
+
+- strand pos if `exon_pos or tx_pos`
+- strand neg if `exon_neg or tx_neg`
+- strand ambiguous if `(exon_pos or tx_pos) and (exon_neg or tx_neg)`
+- strand none if all four flags are false
+- intergenic if all four flags are false
+- genic if any flag is true
+- intronic if both exon flags are false and either transcript-span flag is true
 
 This is the main design refinement relative to the current docs.
 
-The implementation should treat the four primitive booleans as authoritative
-state and materialize the two `*_ambig` flags as derived columns for reporting.
-That avoids duplicated state and prevents impossible combinations from being
-stored.
+The implementation should store only these four booleans in `regions.feather`.
+No `_ambig` columns should be written. Ambiguity is an interpretation of the
+four stored flags, not persisted state.
 
 Use `tx_*` rather than `t_*` in code and docs. `t_*` is too easily confused
 with transcript indices like `t_index` and with transcript-ID mappings.
 
-It should be built as a calibration-specific refinement of the existing index
-tiling rather than a full refactor of the index and resolver stack.
+It should be built at index-build time from the same transcript objects already
+used to produce the existing index artifacts.
 
 ### 3.4 Keep transcript resolution separate in the first pass
 
@@ -130,7 +131,8 @@ Reason:
 
 So the first-pass contract should be:
 
-- calibration regions have their own `region_id` and cgranges index
+- calibration regions have their own `region_id`, `regions.feather`, and
+  cgranges index
 - transcript resolution continues to use the existing `TranscriptIndex` path
 - any region-to-transcript mapping is an optional sidecar for diagnostics or a
   later simplification pass
@@ -156,10 +158,8 @@ The right first contract is a merged fragment-region summary with fields such as
 - `overlap_bp_total`
 - `exon_pos_bp`
 - `exon_neg_bp`
-- `exon_ambig_bp`
 - `tx_pos_bp`
 - `tx_neg_bp`
-- `tx_ambig_bp`
 
 Important caveat:
 
@@ -173,11 +173,11 @@ totals rather than disjoint coverage bins.
 ## 4. Step-by-Step Coding Plan
 
 1. identify the current loaded interval table shape in `TranscriptIndex.load()`
-2. define the calibration-region schema with four primitive booleans and two
-  derived ambiguity flags
-3. implement a deterministic boundary-sweep conversion from index intervals to
-  atomic calibration regions
-4. build a cgranges index keyed by `region_id`
+2. define the `regions.feather` schema with the four stored flags
+3. implement a deterministic flattened-index builder from transcript and exon
+  boundaries at index build time
+4. write `regions.feather` and optional `regions.tsv`
+5. load `regions.feather` and build a cgranges index keyed by `region_id`
 5. add tests for interval coverage, non-overlap, and reference completeness
 6. add tests for representative annotation contexts:
   intergenic, exon-only, transcript-only, intronic-only, opposite-strand
@@ -193,6 +193,7 @@ Most likely touchpoints:
 
 - `src/rigel/index.py`
 - possibly a new module: `src/rigel/calibration_regions.py`
+- `regions.feather` / optional `regions.tsv` build and load paths
 - possibly a small loader/index helper for `region_id` cgranges construction
 - tests near index integrity and annotation behavior
 
@@ -207,7 +208,8 @@ Likely test additions:
 Workstream A is complete when:
 
 1. the genome can be loaded as a deterministic atomic calibration-region table
-2. every region has stable primitive flags and invariant-derived ambiguity flags
+2. every region has stable `exon_pos`, `exon_neg`, `tx_pos`, and `tx_neg` flags
 3. the region table is non-overlapping and reference-complete
-4. a `region_id` cgranges lookup exists for downstream fragment overlap
-5. the table can be consumed downstream without revisiting annotation parsing
+4. `regions.feather` is written at index build time and loaded successfully
+5. a `region_id` cgranges lookup exists for downstream fragment overlap
+6. the table can be consumed downstream without revisiting annotation parsing

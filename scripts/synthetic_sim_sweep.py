@@ -50,6 +50,16 @@ Config structure (YAML)
       strand_specificity: 1.0
       n_fragments: 2000
 
+    params:                # optional; pipeline hyperparameter overrides
+      em:                  # EMConfig fields
+        prior_alpha: [0.001, 0.01, 0.1]
+        strand_symmetry_kappa: 6.0
+        mode: "map"
+      scan:                # BamScanConfig fields
+        strand_prior_kappa: [1.0, 2.0, 4.0]
+      scoring:             # FragmentScoringConfig fields
+        overhang_log_penalty: -4.605
+
     patterns:              # optional; correlated bundles
       - {TA1: 100, TA2: 0, TA3: 0, TA4: 3}
       - ...
@@ -64,6 +74,7 @@ Usage
 
 import argparse
 import csv
+import dataclasses as _dc
 import itertools
 import json
 import logging
@@ -79,9 +90,27 @@ import yaml
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "src"))
 
-from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+from rigel.config import (
+    EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig,
+)
 from rigel.pipeline import run_pipeline
 from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+
+# ---------------------------------------------------------------------------
+# Config-field registry (auto-derived from dataclasses)
+# ---------------------------------------------------------------------------
+
+_EM_FIELDS = frozenset(f.name for f in _dc.fields(EMConfig))
+_SCAN_FIELDS = frozenset(f.name for f in _dc.fields(BamScanConfig))
+_SCORING_FIELDS = frozenset(f.name for f in _dc.fields(FragmentScoringConfig))
+_ALL_PARAM_FIELDS = _EM_FIELDS | _SCAN_FIELDS | _SCORING_FIELDS
+
+# Mapping from params YAML sub-key to the field set
+_PARAM_SECTIONS = {
+    "em": _EM_FIELDS,
+    "scan": _SCAN_FIELDS,
+    "scoring": _SCORING_FIELDS,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -382,11 +411,57 @@ def parse_nrna_coords(nrnas_config, transcripts_config):
 # Sweep grid builder
 # ---------------------------------------------------------------------------
 
-def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels):
-    """Build combinatorial dimensions from sweep + patterns.
+def _parse_params_section(params_config):
+    """Parse the ``params:`` YAML section into sweepable dimensions.
+
+    Supports nested sub-keys (``em:``, ``scan:``, ``scoring:``) and
+    validated against known config-dataclass fields.  Each field value
+    uses the same scalar / list / ``{start, stop, step}`` syntax as
+    sweep dimensions.
+
+    Returns
+    -------
+    param_dims : dict[str, list]
+        field_name → resolved value list
+    """
+    if not params_config:
+        return {}
+
+    param_dims: dict[str, list] = {}
+
+    for section_key, field_set in _PARAM_SECTIONS.items():
+        section = params_config.get(section_key, {})
+        if not isinstance(section, dict):
+            continue
+        for k, v in section.items():
+            if k not in field_set:
+                logger.warning(
+                    "Unknown param '%s' in params.%s — ignoring", k, section_key)
+                continue
+            param_dims[k] = resolve_values(v)
+
+    # Also accept flat (un-nested) keys for convenience
+    for k, v in params_config.items():
+        if k in _PARAM_SECTIONS:
+            continue
+        if k in _ALL_PARAM_FIELDS:
+            if k not in param_dims:  # nested takes precedence
+                param_dims[k] = resolve_values(v)
+        else:
+            logger.warning(
+                "Unknown param '%s' in params section — ignoring", k)
+
+    return param_dims
+
+
+def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels,
+                     param_dims=None):
+    """Build combinatorial dimensions from sweep + patterns + params.
 
     Entities in patterns are removed from the Cartesian product of
     sweep dims and replaced by a single pattern-index dimension.
+    Hyperparameters from the ``params:`` section are added as additional
+    sweep dimensions.
 
     Returns (dims, linked_names) where dims is an OrderedDict.
 
@@ -412,7 +487,9 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels):
     if patterns_config:
         dims["_pattern_idx"] = list(range(len(patterns_config)))
 
-    # Independent sweep params (skip pattern-linked entities)
+    # Independent sweep params (skip pattern-linked entities and
+    # config-field names — those belong in params:, but we accept
+    # them here for backward compatibility)
     for key, spec in sweep_config.items():
         if key in linked_names:
             continue
@@ -440,15 +517,13 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels):
     if has_rna_mode:
         dims.setdefault("gdna_fraction", [0.0])
 
-    # EM config overrides (recognized but not defaulted — absent = EMConfig default)
-    # Supported: prune_threshold, prior_alpha, prior_gamma,
-    #            strand_symmetry_kappa
-    EM_OVERRIDE_KEYS = {
-        "prune_threshold", "prior_alpha", "prior_gamma",
-        "strand_symmetry_kappa",
-    }
+    # Merge params dimensions (params: section takes precedence over
+    # legacy config keys that happen to appear in sweep:)
+    if param_dims:
+        for k, v in param_dims.items():
+            dims[k] = v  # overwrite if already in dims from sweep:
 
-    return dims, linked_names, EM_OVERRIDE_KEYS
+    return dims, linked_names
 
 
 # ---------------------------------------------------------------------------
@@ -501,8 +576,10 @@ def run_sweep(config, output_dir, *, gtf_path=None,
     # -- Build sweep grid --
     sweep_config = config.get("sweep", {})
     patterns_config = config.get("patterns")
-    dims, linked_names, em_override_keys = build_sweep_grid(
-        sweep_config, patterns_config, all_t_ids, nrna_labels)
+    param_dims = _parse_params_section(config.get("params", {}))
+    dims, linked_names = build_sweep_grid(
+        sweep_config, patterns_config, all_t_ids, nrna_labels,
+        param_dims=param_dims)
 
     # Cartesian product
     dim_names = list(dims.keys())
@@ -593,9 +670,8 @@ def run_sweep(config, output_dir, *, gtf_path=None,
             ss = float(params.get("strand_specificity", 1.0))
             if ss < 1.0:
                 parts.append(f"ss={ss}")
-            for ek in sorted(em_override_keys):
-                if ek in params:
-                    parts.append(f"{ek}={params[ek]}")
+            for ek in sorted(_ALL_PARAM_FIELDS & params.keys()):
+                parts.append(f"{ek}={params[ek]}")
             run_label = " ".join(parts) or "baseline"
 
             logger.info("=" * 60)
@@ -667,13 +743,19 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     gdna_fraction=gdna_frac,
                 )
 
+                # -- Build pipeline config from params --
+                em_kwargs = {k: params[k] for k in _EM_FIELDS
+                             if k in params and k != "seed"}
+                scan_kwargs: dict = {"sj_strand_tag": "auto"}
+                scan_kwargs.update(
+                    {k: params[k] for k in _SCAN_FIELDS if k in params})
+                scoring_kwargs = {k: params[k] for k in _SCORING_FIELDS
+                                  if k in params}
+
                 pipe_cfg = PipelineConfig(
-                    em=EMConfig(
-                        seed=seed,
-                        **{k: params[k] for k in em_override_keys
-                           if k in params},
-                    ),
-                    scan=BamScanConfig(sj_strand_tag="auto"),
+                    em=EMConfig(seed=seed, **em_kwargs),
+                    scan=BamScanConfig(**scan_kwargs),
+                    scoring=FragmentScoringConfig(**scoring_kwargs),
                 )
                 pr = run_pipeline(
                     result.bam_path, result.index, config=pipe_cfg,

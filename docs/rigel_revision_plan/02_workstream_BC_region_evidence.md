@@ -114,10 +114,8 @@ summaries such as:
 
 - `exon_pos_bp`
 - `exon_neg_bp`
-- `exon_ambig_bp`
 - `tx_pos_bp`
 - `tx_neg_bp`
-- `tx_ambig_bp`
 
 These are overlap totals on annotation layers, not disjoint bins. Consumers
 must not sum exon and transcript-span overlap totals as though they were a
