@@ -128,11 +128,10 @@ def build_locus_em_data(
 
         [0, n_t)                - mRNA (one per local transcript)
         [n_t, n_t + n_nrna)     - nRNA (one per unique nRNA span)
-        [n_t + n_nrna]          - g_pos (positive-strand gDNA)
-        [n_t + n_nrna + 1]     - g_neg (negative-strand gDNA)
+        [n_t + n_nrna]          - gdna (single gDNA component)
 
-    Only UNSPLICED units get a gDNA candidate (g_pos or g_neg, depending
-    on strand).  Spliced units see only mRNA/nRNA components.
+    Only UNSPLICED units get a gDNA candidate.
+    Spliced units see only mRNA/nRNA components.
 
     Parameters
     ----------
@@ -178,9 +177,8 @@ def build_locus_em_data(
         nrna_to_t_indices[fill_pos[ln]] = local_t
         fill_pos[ln] += 1
 
-    gdna_pos_idx = n_t + n_nrna  # positive-strand gDNA component index
-    gdna_neg_idx = n_t + n_nrna + 1  # negative-strand gDNA component index
-    n_components = n_t + n_nrna + 2
+    gdna_idx = n_t + n_nrna  # single gDNA component index
+    n_components = n_t + n_nrna + 1
 
     # Build global → local mapping array (fast lookup, no dict)
     # mRNA: global_t → local_t
@@ -299,13 +297,7 @@ def build_locus_em_data(
 
     if n_gdna > 0:
         gdna_units = np.arange(n_local_units, dtype=np.int32)[valid_gdna]
-        # Strand-route: sense → g_pos, antisense → g_neg
-        is_anti = em_data.locus_count_cols[locus.unit_indices][valid_gdna] % 2
-        gdna_lidx_arr = np.where(
-            is_anti,
-            gdna_neg_idx,
-            gdna_pos_idx,
-        ).astype(np.int32)
+        gdna_lidx_arr = np.full(n_gdna, gdna_idx, dtype=np.int32)
         gdna_ll_arr = gdna_lls[valid_gdna].copy()
         gdna_cc_arr = np.zeros(n_gdna, dtype=np.uint8)
 
@@ -381,8 +373,7 @@ def build_locus_em_data(
     # Component layout:
     #   [0, n_t)                → mRNA: length = exonic transcript length
     #   [n_t, n_t + n_nrna)    → nRNA: length = genomic span of the nRNA
-    #   [n_t + n_nrna]         → g_pos: length = locus span
-    #   [n_t + n_nrna + 1]    → g_neg: length = locus span
+    #   [n_t + n_nrna]         → gdna: length = locus span
     _t_lengths_all = _cache["t_lengths"] if _cache is not None else index.t_df["length"].values
     mrna_lengths = _t_lengths_all[t_arr]
     # nRNA span comes from the nrna_df (global nRNA table)
@@ -391,8 +382,7 @@ def build_locus_em_data(
     bias_profiles = np.empty(n_components, dtype=np.int64)
     bias_profiles[:n_t] = mrna_lengths
     bias_profiles[n_t:n_t + n_nrna] = nrna_lengths
-    bias_profiles[gdna_pos_idx] = int(locus_span)
-    bias_profiles[gdna_neg_idx] = int(locus_span)
+    bias_profiles[gdna_idx] = int(locus_span)
 
     # Build prior — start at epsilon (numerical floor) for every
     # component; the real prior mass comes from the OVR coverage
@@ -401,8 +391,7 @@ def build_locus_em_data(
 
     # Zero gDNA prior when there are no unspliced fragments
     if gdna_init == 0.0:
-        prior[gdna_pos_idx] = 0.0
-        prior[gdna_neg_idx] = 0.0
+        prior[gdna_idx] = 0.0
 
     # Zero nRNA prior for nRNAs where all sharing transcripts are single-exon
     if estimator._transcript_spans is not None:

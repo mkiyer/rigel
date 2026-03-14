@@ -78,7 +78,7 @@ def run_scenario(label, n_fragments, nrna_ab, gdna_ab, mrna_ab=100, ss=1.0, seed
     locus_log.setLevel(logging.DEBUG)
 
     pipe_cfg = PipelineConfig(
-        em=EMConfig(seed=42, strand_symmetry_kappa=4.0),
+        em=EMConfig(seed=42),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=pipe_cfg)

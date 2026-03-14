@@ -126,6 +126,18 @@ class GDNAConfig:
         Minimum gDNA fragment length.
     frag_max : int
         Maximum gDNA fragment length.
+    strand_kappa : float or None
+        Beta concentration parameter controlling strand ratio
+        overdispersion across genomic regions.  The genome is
+        partitioned into non-overlapping regions derived from
+        transcript exon boundaries (the same partition used by the
+        calibration algorithm).  Each region draws an independent
+        +strand probability from ``Beta(kappa/2, kappa/2)``; all
+        gDNA fragments within a region share that bias.
+
+        * ``None`` or ``<= 0`` → no overdispersion (exact 50/50).
+        * Large values (e.g. 1000) → nearly symmetric.
+        * Small values (e.g. 5) → high region-to-region variation.
     """
 
     abundance: float = 10.0
@@ -133,6 +145,7 @@ class GDNAConfig:
     frag_std: float = 100.0
     frag_min: int = 100
     frag_max: int = 1000
+    strand_kappa: float | None = None
 
 
 class ReadSimulator:
@@ -216,6 +229,40 @@ class ReadSimulator:
 
         # Clamp frag_max to longest transcript
         self.config.frag_max = min(self.config.frag_max, max_len)
+
+        # Build region boundaries for strand overdispersion
+        self._region_boundaries: np.ndarray | None = None
+        self._region_p_plus: np.ndarray | None = None
+        if (
+            gdna_config is not None
+            and gdna_config.strand_kappa is not None
+            and gdna_config.strand_kappa > 0
+        ):
+            self._init_strand_regions(gdna_config.strand_kappa)
+
+    def _init_strand_regions(self, kappa: float) -> None:
+        """Build annotation-derived region partition and per-region strand bias.
+
+        Collects all exon boundary coordinates from transcripts to form a
+        non-overlapping partition of the genome (matching the calibration
+        algorithm's region partition).  Each region gets an independent
+        +strand probability drawn from Beta(kappa/2, kappa/2).
+        """
+        # Collect all unique boundary points from exon coordinates
+        boundaries = set()
+        boundaries.add(0)
+        boundaries.add(len(self.genome))
+        for t in self.transcripts:
+            boundaries.add(t.start)
+            boundaries.add(t.end)
+            for e in t.exons:
+                boundaries.add(e.start)
+                boundaries.add(e.end)
+
+        self._region_boundaries = np.array(sorted(boundaries), dtype=np.int64)
+        n_regions = len(self._region_boundaries) - 1
+        alpha = kappa / 2.0
+        self._region_p_plus = self._rng.beta(alpha, alpha, size=n_regions)
 
     def _extract_transcript_seq(self, t: Transcript) -> str:
         """Concatenate exonic sequences from the genome.
@@ -306,7 +353,9 @@ class ReadSimulator:
         )
         total = weights.sum()
         if total == 0:
-            # All transcripts shorter than frag_length — uniform fallback
+            # Every transcript is shorter than frag_length — uniform
+            # fallback (downstream _gen_reads_from_transcript will skip
+            #  fragments that exceed the transcript length).
             return np.ones(len(self.transcripts)) / len(self.transcripts)
         return weights / total
 
@@ -464,9 +513,14 @@ class ReadSimulator:
     def _gen_reads_from_genome(self, frag_len: int, count: int):
         """Generate gDNA read pairs from the full genome.
 
-        Fragments are sampled uniformly from the entire genome,
-        with strand chosen uniformly (+/−).  The same read orientation
-        convention is applied as for RNA reads.
+        Fragments are sampled uniformly from the entire genome.
+        Strand assignment depends on ``gdna_config.strand_kappa``:
+
+        * **No overdispersion** (kappa is None or ≤ 0): strand chosen
+          uniformly (+/−) per fragment (classic 50/50 model).
+        * **With overdispersion**: each genomic region (derived from
+          exon boundaries) has an independent +strand probability
+          drawn from ``Beta(kappa/2, kappa/2)``.
 
         Yields (r1_name, r1_seq, r1_qual, r2_name, r2_seq, r2_qual).
         """
@@ -480,7 +534,18 @@ class ReadSimulator:
         quals = "I" * read_len
 
         frag_starts = rng.integers(0, eff_len, size=count)
-        strands = rng.integers(0, 2, size=count)  # 0 = +, 1 = −
+
+        # Strand assignment: with or without Beta overdispersion
+        if self._region_boundaries is not None:
+            # Map each fragment to its region via searchsorted
+            region_idx = np.searchsorted(
+                self._region_boundaries, frag_starts, side="right",
+            ) - 1
+            region_idx = np.clip(region_idx, 0, len(self._region_p_plus) - 1)
+            p_plus = self._region_p_plus[region_idx]
+            strands = (rng.random(count) >= p_plus).astype(int)  # 0=+, 1=−
+        else:
+            strands = rng.integers(0, 2, size=count)  # 0 = +, 1 = −
 
         for i in range(count):
             start = int(frag_starts[i])
@@ -556,7 +621,7 @@ class ReadSimulator:
 
         total_weight = mrna_weight + nrna_weight + gdna_weight
         if total_weight <= 0:
-            return n_fragments, 0, 0
+            return 0, 0, 0
 
         n_nrna = int(round(n_fragments * nrna_weight / total_weight))
         n_gdna = int(round(n_fragments * gdna_weight / total_weight))
@@ -584,7 +649,7 @@ class ReadSimulator:
 
         total = mrna_weight + nrna_weight
         if total <= 0:
-            return n_rna, 0
+            return 0, 0
 
         n_nrna = int(round(n_rna * nrna_weight / total))
         n_mrna = max(0, n_rna - n_nrna)

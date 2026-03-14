@@ -4,7 +4,6 @@
 # (This is the "full contamination" case where siphoning is worst.)
 #
 # Sweep:
-#   strand_symmetry_kappa: [2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 50.0]
 #     - 2.0 = disabled (w_sym ≥ 1)
 #     - 3-6 = mild penalty
 #     - 8-20 = moderate penalty
@@ -63,4 +62,3 @@ sweep:
   gdna: 100
   strand_specificity: 1.0
   n_fragments: 10000
-  strand_symmetry_kappa: [2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 50.0]

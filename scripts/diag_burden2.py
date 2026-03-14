@@ -72,17 +72,17 @@ def make_scenario(n_fragments, nrna_abundance, gdna_abundance, ss=1.0, seed=42):
     return result, sc, tmpdir
 
 
-def run_comparison(n_fragments, nrna, gdna, ss=1.0, kappa=4.0):
+def run_comparison(n_fragments, nrna, gdna, ss=1.0):
     """Run pipeline twice: with and without burden subtraction."""
     print(f"\n{'='*70}")
-    print(f"n={n_fragments}, nRNA={nrna}, gDNA={gdna}, SS={ss}, kappa={kappa}")
+    print(f"n={n_fragments}, nRNA={nrna}, gDNA={gdna}, SS={ss}")
     print(f"{'='*70}")
 
     result, sc, tmpdir = make_scenario(n_fragments, nrna, gdna, ss)
 
     # Run WITH burden subtraction (default)
     pipe_cfg = PipelineConfig(
-        em=EMConfig(seed=42, strand_symmetry_kappa=kappa),
+        em=EMConfig(seed=42),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr_with = run_pipeline(result.bam_path, result.index, config=pipe_cfg)
@@ -130,7 +130,7 @@ def trace_burden_values(n_fragments=50000, nrna=0, gdna=1000, ss=1.0):
     logging.getLogger('rigel').setLevel(logging.DEBUG)
 
     pipe_cfg = PipelineConfig(
-        em=EMConfig(seed=42, strand_symmetry_kappa=4.0),
+        em=EMConfig(seed=42),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=pipe_cfg)
@@ -166,7 +166,7 @@ def quantify_burden_impact():
 
     logging.getLogger('rigel').setLevel(logging.DEBUG)
     pipe_cfg = PipelineConfig(
-        em=EMConfig(seed=42, strand_symmetry_kappa=4.0),
+        em=EMConfig(seed=42),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=pipe_cfg)
@@ -198,7 +198,7 @@ if __name__ == "__main__":
     # Run the worst-case scenario
     result, sc, tmpdir = make_scenario(50000, 0, 1000, ss=1.0)
     pipe_cfg = PipelineConfig(
-        em=EMConfig(seed=42, strand_symmetry_kappa=4.0),
+        em=EMConfig(seed=42),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=pipe_cfg)
@@ -208,7 +208,7 @@ if __name__ == "__main__":
     # Parse logs for key values
     logs = log_capture.getvalue()
     print("\n" + "="*70)
-    print("CAPTURED LOG ANALYSIS: gDNA=1000, nRNA=0, SS=1.0, kappa=4")
+    print("CAPTURED LOG ANALYSIS: gDNA=1000, nRNA=0, SS=1.0")
     print("="*70)
 
     # Extract key log lines

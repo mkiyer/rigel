@@ -1,6 +1,5 @@
 # gdna_fix_baseline_comparison.yaml — Before/after comparison for gDNA siphoning fix
 #
-# Compares strand_symmetry_kappa=2.0 (disabled, old behavior) vs 6.0 (default)
 # across the full pattern × nRNA × gDNA grid.
 #
 # This is the nrna_sweep_config with kappa added as a sweep dimension.
@@ -55,7 +54,6 @@ sweep:
   gdna: [0, 100]
   strand_specificity: 1.0
   n_fragments: 10000
-  strand_symmetry_kappa: [2.0, 6.0]
 
 patterns:
   - {TA1: 100, TA2: 0, TA3: 0, TA4: 3}

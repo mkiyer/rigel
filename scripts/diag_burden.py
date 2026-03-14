@@ -65,15 +65,15 @@ def make_scenario(n_fragments, nrna_abundance, gdna_abundance, ss=1.0, seed=42):
         yield result, sc
 
 
-def run_diagnostic(n_fragments, nrna, gdna, ss=1.0, kappa=4.0):
+def run_diagnostic(n_fragments, nrna, gdna, ss=1.0):
     """Run pipeline and extract diagnostic info about burden subtraction."""
     print(f"\n{'='*70}")
-    print(f"DIAGNOSTIC: n={n_fragments}, nRNA={nrna}, gDNA={gdna}, SS={ss}, kappa={kappa}")
+    print(f"DIAGNOSTIC: n={n_fragments}, nRNA={nrna}, gDNA={gdna}, SS={ss}")
     print(f"{'='*70}")
 
     for result, sc in make_scenario(n_fragments, nrna, gdna, ss):
         pipe_cfg = PipelineConfig(
-            em=EMConfig(seed=42, strand_symmetry_kappa=kappa),
+            em=EMConfig(seed=42),
             scan=BamScanConfig(sj_strand_tag="auto"),
         )
 
@@ -204,18 +204,18 @@ def run_diagnostic(n_fragments, nrna, gdna, ss=1.0, kappa=4.0):
 if __name__ == "__main__":
     # Test case 1: Moderate gDNA, no nRNA — the gDNA siphon scenario
     print("\n" + "#"*70)
-    print("# TEST 1: gDNA=100, nRNA=0, SS=1.0, kappa=4")
+    print("# TEST 1: gDNA=100, nRNA=0, SS=1.0")
     print("#"*70)
-    run_diagnostic(50000, nrna=0, gdna=100, ss=1.0, kappa=4.0)
+    run_diagnostic(50000, nrna=0, gdna=100, ss=1.0)
 
     # Test case 2: Heavy gDNA
     print("\n" + "#"*70)
-    print("# TEST 2: gDNA=1000, nRNA=0, SS=1.0, kappa=4")
+    print("# TEST 2: gDNA=1000, nRNA=0, SS=1.0")
     print("#"*70)
-    run_diagnostic(50000, nrna=0, gdna=1000, ss=1.0, kappa=4.0)
+    run_diagnostic(50000, nrna=0, gdna=1000, ss=1.0)
 
     # Test case 3: With nRNA
     print("\n" + "#"*70)
-    print("# TEST 3: gDNA=100, nRNA=100, SS=0.95, kappa=4")
+    print("# TEST 3: gDNA=100, nRNA=100, SS=0.95")
     print("#"*70)
-    run_diagnostic(50000, nrna=100, gdna=100, ss=0.95, kappa=4.0)
+    run_diagnostic(50000, nrna=100, gdna=100, ss=0.95)

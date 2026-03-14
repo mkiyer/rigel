@@ -335,12 +335,14 @@ with optional auto-estimation of:
 
 using Method of Moments and evidence thresholds.
 
-### 10.3 Strand symmetry penalty
+### 10.3 gDNA strand penalty
 
-The native M-step penalizes asymmetric gDNA strand usage using
-`strand_symmetry_kappa`. The effective κ scales by strand specificity:
-κ_eff = κ · (2·SS − 1)². This auto-disables the penalty at low SS where
-strand balance carries no gDNA-specific information.
+gDNA contamination is strand-symmetric, so a single gDNA component is used per
+locus. A constant log(0.5) term is added to the per-fragment gDNA likelihood,
+reflecting the a priori expectation that gDNA fragments are equally likely to
+originate from either strand. This effectively halves the gDNA likelihood
+relative to strand-specific components, preventing gDNA from absorbing
+sense-strand fragments that belong to nRNA.
 
 ---
 

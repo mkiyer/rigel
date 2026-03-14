@@ -53,7 +53,6 @@ Config structure (YAML)
     params:                # optional; pipeline hyperparameter overrides
       em:                  # EMConfig fields
         prior_alpha: [0.001, 0.01, 0.1]
-        strand_symmetry_kappa: 6.0
         mode: "map"
       scan:                # BamScanConfig fields
         strand_prior_kappa: [1.0, 2.0, 4.0]
@@ -95,6 +94,8 @@ from rigel.config import (
 )
 from rigel.pipeline import run_pipeline
 from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.region_evidence import count_region_evidence
+from rigel.calibration import calibrate_gdna
 
 # ---------------------------------------------------------------------------
 # Config-field registry (auto-derived from dataclasses)
@@ -111,6 +112,11 @@ _PARAM_SECTIONS = {
     "scan": _SCAN_FIELDS,
     "scoring": _SCORING_FIELDS,
 }
+
+# Simulation-level sweep keys (not pipeline config fields)
+_SIM_SWEEP_KEYS = frozenset({
+    "gdna_frag_mean", "gdna_frag_std", "gdna_strand_kappa",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -629,6 +635,14 @@ def run_sweep(config, output_dir, *, gtf_path=None,
         + ["gdna_fl_true_mean", "gdna_fl_est_mean", "gdna_fl_mean_err"]
         + ["gdna_fl_true_std", "gdna_fl_est_std"]
         + ["rna_fl_n_obs", "gdna_fl_n_obs"]
+        # Calibration recovery metrics
+        + ["cal_kappa_true", "cal_kappa_est", "cal_kappa_err"]
+        + ["cal_density_est"]
+        + ["cal_gdna_fl_true_mean", "cal_gdna_fl_est_mean",
+           "cal_gdna_fl_mean_err"]
+        + ["cal_gdna_fl_true_std", "cal_gdna_fl_est_std"]
+        + ["cal_n_seed", "cal_n_iterations", "cal_converged"]
+        + ["cal_mean_weight", "cal_n_regions"]
     )
     fieldnames = param_cols + result_cols
 
@@ -639,6 +653,7 @@ def run_sweep(config, output_dir, *, gtf_path=None,
 
     summary_rows: list[dict] = []
     all_rows: list[dict] = []
+    n_skipped = 0
 
     with open(tsv_path, "w", newline="") as tsvfile:
         writer = csv.DictWriter(tsvfile, fieldnames=fieldnames,
@@ -685,6 +700,21 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                          if "gdna_fraction" in params else None)
             gdna_ab = float(params.get("gdna", 0))
 
+            # Skip degenerate runs where all abundances are zero and no
+            # gDNA is requested — the simulator correctly produces 0
+            # fragments and running the pipeline on an empty BAM is
+            # meaningless.
+            all_rna_zero = all(
+                float(params.get(t, 0)) == 0 for t in all_t_ids
+            ) and all(
+                float(params.get(nl, 0)) == 0 for nl in nrna_labels
+            )
+            no_gdna = gdna_ab == 0 and (gdna_frac is None or gdna_frac == 0)
+            if all_rna_zero and no_gdna:
+                logger.info("  SKIP: all abundances zero, nothing to simulate")
+                n_skipped += 1
+                continue
+
             with tempfile.TemporaryDirectory(prefix="rigel_sweep_") as tmpdir:
                 sc = Scenario(
                     "sweep",
@@ -714,13 +744,22 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                 # gdna_fraction > 0 (mode b)
                 needs_gdna = gdna_ab > 0 or (gdna_frac and gdna_frac > 0)
                 gdna_cfg = None
+                gdna_fm = gdna_frag_params.get("frag_mean", 350)
+                gdna_fs = gdna_frag_params.get("frag_std", 100)
+                # Allow sweep overrides for gDNA sim params
+                gdna_fm = float(params.get("gdna_frag_mean", gdna_fm))
+                gdna_fs = float(params.get("gdna_frag_std", gdna_fs))
+                gdna_sk = params.get("gdna_strand_kappa", None)
+                if gdna_sk is not None:
+                    gdna_sk = float(gdna_sk) if float(gdna_sk) > 0 else None
                 if needs_gdna:
                     gdna_cfg = GDNAConfig(
                         abundance=gdna_ab if gdna_ab > 0 else 1.0,
-                        frag_mean=gdna_frag_params.get("frag_mean", 350),
-                        frag_std=gdna_frag_params.get("frag_std", 100),
+                        frag_mean=gdna_fm,
+                        frag_std=gdna_fs,
                         frag_min=gdna_frag_params.get("frag_min", 100),
                         frag_max=gdna_frag_params.get("frag_max", 1000),
+                        strand_kappa=gdna_sk,
                     )
 
                 sim_cfg = SimConfig(
@@ -835,8 +874,8 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     row["rna_fl_est_std"] = ""
                     row["rna_fl_mean_err"] = ""
 
-                gdna_true_mean = gdna_frag_params.get("frag_mean", 350)
-                gdna_true_std = gdna_frag_params.get("frag_std", 100)
+                gdna_true_mean = gdna_fm
+                gdna_true_std = gdna_fs
                 row["gdna_fl_true_mean"] = gdna_true_mean
                 row["gdna_fl_true_std"] = gdna_true_std
                 row["gdna_fl_n_obs"] = gdna_m.n_observations
@@ -849,6 +888,73 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     row["gdna_fl_est_mean"] = ""
                     row["gdna_fl_est_std"] = ""
                     row["gdna_fl_mean_err"] = ""
+
+                # -- Calibration: region_evidence + calibrate_gdna --
+                cal_kappa_true = (
+                    float(gdna_sk) if gdna_sk is not None else "")
+                row["cal_kappa_true"] = cal_kappa_true
+
+                try:
+                    region_counts, fl_obs = count_region_evidence(
+                        result.bam_path, result.index)
+                    cal = calibrate_gdna(
+                        region_counts, fl_obs, result.index.region_df,
+                        strand_specificity=ss,
+                        diagnostics=True,
+                    )
+                    row["cal_kappa_est"] = round(cal.kappa_sym, 2)
+                    if isinstance(cal_kappa_true, (int, float)):
+                        row["cal_kappa_err"] = round(
+                            cal.kappa_sym - cal_kappa_true, 2)
+                    else:
+                        row["cal_kappa_err"] = ""
+                    row["cal_density_est"] = f"{cal.gdna_density:.4e}"
+
+                    cal_fl = cal.gdna_fl_model
+                    row["cal_gdna_fl_true_mean"] = gdna_true_mean
+                    row["cal_gdna_fl_true_std"] = gdna_true_std
+                    if cal_fl.n_observations > 0:
+                        row["cal_gdna_fl_est_mean"] = round(cal_fl.mean, 2)
+                        row["cal_gdna_fl_est_std"] = round(cal_fl.std, 2)
+                        row["cal_gdna_fl_mean_err"] = round(
+                            cal_fl.mean - gdna_true_mean, 2)
+                    else:
+                        row["cal_gdna_fl_est_mean"] = ""
+                        row["cal_gdna_fl_est_std"] = ""
+                        row["cal_gdna_fl_mean_err"] = ""
+
+                    row["cal_n_seed"] = (
+                        int(cal.seed_mask.sum())
+                        if cal.seed_mask is not None else "")
+                    row["cal_n_iterations"] = cal.n_iterations
+                    row["cal_converged"] = cal.converged
+                    row["cal_mean_weight"] = round(
+                        float(cal.region_weights.mean()), 4)
+                    row["cal_n_regions"] = len(cal.region_weights)
+
+                    logger.info(
+                        "Calibration: κ_est=%.1f (true=%s), "
+                        "density=%.2e, seed=%s, iter=%d, conv=%s",
+                        cal.kappa_sym, cal_kappa_true,
+                        cal.gdna_density,
+                        row["cal_n_seed"], cal.n_iterations,
+                        cal.converged,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Calibration failed for run %d", run_idx + 1,
+                        exc_info=True)
+                    for col in ("cal_kappa_est", "cal_kappa_err",
+                                "cal_density_est",
+                                "cal_gdna_fl_true_mean",
+                                "cal_gdna_fl_est_mean",
+                                "cal_gdna_fl_mean_err",
+                                "cal_gdna_fl_true_std",
+                                "cal_gdna_fl_est_std",
+                                "cal_n_seed", "cal_n_iterations",
+                                "cal_converged", "cal_mean_weight",
+                                "cal_n_regions"):
+                        row[col] = ""
 
                 writer.writerow(row)
                 tsvfile.flush()
@@ -868,17 +974,20 @@ def run_sweep(config, output_dir, *, gtf_path=None,
     with open(json_path, "w") as jf:
         json.dump(all_rows, jf, indent=2)
 
-    _print_summary(summary_rows, tsv_path, json_path)
+    _print_summary(summary_rows, tsv_path, json_path, n_skipped)
 
 
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
-def _print_summary(rows, tsv_path, json_path):
+def _print_summary(rows, tsv_path, json_path, n_skipped=0):
     sep = "=" * 74
     print(f"\n{sep}")
-    print(f"SWEEP COMPLETE — {len(rows)} runs")
+    msg = f"SWEEP COMPLETE — {len(rows)} runs"
+    if n_skipped:
+        msg += f" ({n_skipped} skipped: all-zero abundance)"
+    print(msg)
     print(f"Results: {tsv_path}")
     print(f"         {json_path}")
     print(sep)

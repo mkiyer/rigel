@@ -134,10 +134,9 @@ class LocusEMInput:
 
         [0, n_t)                — mRNA (one per transcript in the locus)
         [n_t, n_t + n_nrna)     — nRNA (one per unique nRNA span)
-        [n_t + n_nrna]          — g_pos (positive-strand gDNA)
-        [n_t + n_nrna + 1]     — g_neg (negative-strand gDNA)
+        [n_t + n_nrna]          — gdna (single gDNA component)
 
-    Total components = n_transcripts + n_nrna + 2.
+    Total components = n_transcripts + n_nrna + 1.
 
     Only UNSPLICED units have a gDNA candidate.  Spliced units compete
     only among mRNA/nRNA components.

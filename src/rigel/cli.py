@@ -420,7 +420,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("gdna_kappa_max", "em.gdna_kappa_max"),
     _ParamSpec("gdna_kappa_fallback", "em.gdna_kappa_fallback"),
     _ParamSpec("gdna_kappa_min_obs", "em.gdna_kappa_min_obs"),
-    _ParamSpec("strand_symmetry_kappa", "em.strand_symmetry_kappa"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("strand_prior_kappa", "scan.strand_prior_kappa"),
@@ -819,13 +818,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int, default=None,
         help="Minimum features for gDNA MoM κ estimation; "
              "fewer triggers fallback (default: 20).",
-    )
-    adv.add_argument(
-        "--strand-symmetry-kappa", dest="strand_symmetry_kappa",
-        type=float, default=None,
-        help="Strand symmetry penalty κ for gDNA in the M-step. "
-             "Effective κ scales by strand specificity: κ_eff = κ·(2·SS−1)². "
-             "Set ≤ 2.0 to disable (default: 6.0).",
     )
     adv.add_argument(
         "--strand-prior-kappa", dest="strand_prior_kappa",

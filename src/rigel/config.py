@@ -88,13 +88,6 @@ class EMConfig:
     """Minimum features required for gDNA MoM κ estimation;
     fewer triggers fallback."""
 
-    # -- gDNA strand symmetry penalty knobs --
-    strand_symmetry_kappa: float = 6.0
-    """Strand symmetry penalty strength for gDNA in the M-step.
-    Effective κ scales by strand specificity: κ_eff = κ · (2·SS − 1)².
-    Set ≤ 2.0 to disable the penalty entirely.
-    """
-
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")

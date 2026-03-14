@@ -102,7 +102,6 @@ def capture_diagnostics(params, label=""):
     """Run one scenario and capture all internal initialization parameters."""
     ss = params.get("strand_specificity", 1.0)
     n_frags = params.get("n_fragments", 100000)
-    kappa = params.get("strand_symmetry_kappa", 6.0)
     gdna_ab = float(params.get("gdna", 0))
     seed = params.get("seed", SEED)
 
@@ -129,7 +128,6 @@ def capture_diagnostics(params, label=""):
         pipe_cfg = PipelineConfig(
             em=EMConfig(
                 seed=seed,
-                strand_symmetry_kappa=kappa,
             ),
             scan=BamScanConfig(sj_strand_tag="auto"),
         )
@@ -230,85 +228,70 @@ SCENARIOS = [
     {"label": "baseline_clean",
      "TA1": 100, "TA4": 3, "NTA": 0, "gdna": 0,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     # Moderate nRNA, no gDNA
     {"label": "nrna_only_100",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 0,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     # Moderate gDNA, no nRNA
     {"label": "gdna_only_100_k2",
      "TA1": 100, "TA4": 3, "NTA": 0, "gdna": 100,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     {"label": "gdna_only_100_k6",
      "TA1": 100, "TA4": 3, "NTA": 0, "gdna": 100,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 6.0},
 
     # Both moderate
     {"label": "both_100_k2",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 100,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     {"label": "both_100_k6",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 100,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 6.0},
 
     # Extreme gDNA
     {"label": "gdna_1000_k2",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 1000,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     {"label": "gdna_1000_k6",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 1000,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 6.0},
 
     # Very extreme gDNA
     {"label": "gdna_5000_k2",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 5000,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     {"label": "gdna_5000_k6",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 5000,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 6.0},
 
     # Extreme nRNA
     {"label": "nrna_1000_k2",
      "TA1": 100, "TA4": 3, "NTA": 1000, "gdna": 100,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     {"label": "nrna_1000_k6",
      "TA1": 100, "TA4": 3, "NTA": 1000, "gdna": 100,
      "strand_specificity": 1.0, "n_fragments": 100000,
-     "strand_symmetry_kappa": 6.0},
 
     # Asymmetric gDNA (SS=0.9) — the penalty should detect imbalance
     {"label": "gdna_1000_ss09_k2",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 1000,
      "strand_specificity": 0.9, "n_fragments": 100000,
-     "strand_symmetry_kappa": 2.0},
 
     {"label": "gdna_1000_ss09_k6",
      "TA1": 100, "TA4": 3, "NTA": 100, "gdna": 1000,
      "strand_specificity": 0.9, "n_fragments": 100000,
-     "strand_symmetry_kappa": 6.0},
 
     # Both extreme
     {"label": "both_5000_k6",
      "TA1": 100, "TA4": 3, "NTA": 5000, "gdna": 5000,
      "strand_specificity": 1.0, "n_fragments": 200000,
-     "strand_symmetry_kappa": 6.0},
 ]
 
 
@@ -323,7 +306,7 @@ def main():
         print(f"[{i+1}/{len(SCENARIOS)}] {label}")
         print(f"  TA1={params.get('TA1',0)}, TA4={params.get('TA4',0)}, "
               f"NTA={params.get('NTA',0)}, gDNA={params.get('gdna',0)}, "
-              f"SS={params.get('strand_specificity',1.0)}, k={params.get('strand_symmetry_kappa',6.0)}")
+              f"SS={params.get('strand_specificity',1.0)}")
 
         diag = capture_diagnostics(params, label=label)
         results.append(diag)

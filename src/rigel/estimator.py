@@ -390,7 +390,6 @@ class AbundanceEstimator:
             N_T,
             NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,
-            self.em_config.strand_symmetry_kappa,
         )
 
         return (

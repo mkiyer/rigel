@@ -504,14 +504,12 @@ static void parallel_estep(
 }
 
 // ================================================================
-// Hierarchical MAP-EM step: theta → theta_new
+// MAP-EM step: theta → theta_new
 // ================================================================
 //
-// Plain MAP-EM step with symmetric Beta coupling for gDNA strand balance.
-// g_pos and g_neg are the last two components (nc-2, nc-1).
-// After the standard M-step accumulation, the coupling redistributes
-// gDNA mass between g_pos and g_neg via a Beta(κ/2, κ/2) prior on the
-// strand balance φ = θ_{g_pos} / (θ_{g_pos} + θ_{g_neg}).
+// Plain MAP-EM with per-component Dirichlet prior.
+// gDNA strand symmetry is enforced via per-fragment log(0.5) in the likelihood
+// (added at scoring time), so no M-step coupling is needed.
 
 static void map_em_step(
     const double* theta,
@@ -523,8 +521,7 @@ static void map_em_step(
     double*       theta_new,    // output: normalized
     int           n_components,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr,
-    double        strand_symmetry_kappa = 2.0)
+    rigel::EStepThreadPool* pool = nullptr)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -550,27 +547,6 @@ static void map_em_step(
     for (int i = 0; i < n_components; ++i) {
         theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
         total += theta_new[i];
-    }
-
-    // Couple g_pos and g_neg via symmetric Beta(κ/2, κ/2) prior.
-    // g_pos is always nc-2, g_neg is always nc-1.
-    // kappa <= 2.0 disables the coupling (fast path).
-    if (strand_symmetry_kappa > 2.0 && n_components >= 2) {
-        int g_pos = n_components - 2;
-        int g_neg = n_components - 1;
-        double R_pos = theta_new[g_pos];
-        double R_neg = theta_new[g_neg];
-        double R_g = R_pos + R_neg;
-        if (R_g > 0.0) {
-            double phi = (R_pos + strand_symmetry_kappa / 2.0 - 1.0)
-                       / (R_g + strand_symmetry_kappa - 2.0);
-            phi = std::clamp(phi, 0.0, 1.0);
-            double new_pos = phi * R_g;
-            double new_neg = (1.0 - phi) * R_g;
-            total += (new_pos - theta_new[g_pos]) + (new_neg - theta_new[g_neg]);
-            theta_new[g_pos] = new_pos;
-            theta_new[g_neg] = new_neg;
-        }
     }
 
     if (total > 0.0) {
@@ -712,8 +688,7 @@ static EMResult run_squarem(
     bool          use_vbem,
     double        prune_threshold,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr,
-    double        strand_symmetry_kappa = 2.0)
+    rigel::EStepThreadPool* pool = nullptr)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -828,14 +803,12 @@ static EMResult run_squarem(
             map_em_step(state0.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state1.data(), n_components,
-                        estep_threads, pool,
-                        strand_symmetry_kappa);
+                        estep_threads, pool);
 
             map_em_step(state1.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state2.data(), n_components,
-                        estep_threads, pool,
-                        strand_symmetry_kappa);
+                        estep_threads, pool);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -871,8 +844,7 @@ static EMResult run_squarem(
             map_em_step(state_extrap.data(), ec_data, log_eff_len,
                         unambig_totals, prior, em_totals.data(),
                         state_new.data(), n_components,
-                        estep_threads, pool,
-                        strand_symmetry_kappa);
+                        estep_threads, pool);
 
             // Convergence
             double delta = 0.0;
@@ -911,8 +883,7 @@ static EMResult run_squarem(
                 any_pruned = true;
             }
         }
-        // Never prune gDNA (last two components: g_pos and g_neg)
-        if (nc >= 2) prune_mask[nc - 2] = false;
+        // Never prune gDNA (last component)
         prune_mask[nc - 1] = false;
 
         if (any_pruned) {
@@ -955,8 +926,7 @@ static EMResult run_squarem(
                     map_em_step(theta.data(), ec_data, log_eff_len,
                                 unambig_totals, prior, em_totals.data(),
                                 t_new.data(), n_components,
-                                1, nullptr,
-                                strand_symmetry_kappa);
+                                1, nullptr);
                     std::swap(theta, t_new);
                 }
                 for (size_t i = 0; i < nc; ++i) {
@@ -1144,9 +1114,8 @@ struct LocalCandidate {
 struct LocusSubProblem {
     int n_t;           // number of transcripts in locus
     int n_nrna;        // number of unique nRNAs in locus
-    int n_components;  // n_t + n_nrna + 2
-    int gdna_pos_idx;  // = n_t + n_nrna     (positive-strand gDNA)
-    int gdna_neg_idx;  // = n_t + n_nrna + 1 (negative-strand gDNA)
+    int n_components;  // n_t + n_nrna + 1
+    int gdna_idx;      // = n_t + n_nrna     (single gDNA component)
     int n_local_units;
 
     // Local CSR
@@ -1180,7 +1149,7 @@ struct LocusSubProblem {
 
 // Extract per-locus sub-problem from global CSR data.
 // Reimplements Python build_locus_em_data() entirely in C++.
-// Component layout: [0,n_t) mRNA + [n_t, n_t+n_nrna) nRNA + [n_t+n_nrna] g_pos + [n_t+n_nrna+1] g_neg
+// Component layout: [0,n_t) mRNA + [n_t, n_t+n_nrna) nRNA + [n_t+n_nrna] gdna
 static void extract_locus_sub_problem(
     LocusSubProblem& sub,
     // Locus definition
@@ -1243,9 +1212,8 @@ static void extract_locus_sub_problem(
 
     int n_nrna = static_cast<int>(unique_nrna_global.size());
     sub.n_nrna = n_nrna;
-    sub.n_components = n_t + n_nrna + 2;
-    sub.gdna_pos_idx = n_t + n_nrna;
-    sub.gdna_neg_idx = n_t + n_nrna + 1;
+    sub.n_components = n_t + n_nrna + 1;
+    sub.gdna_idx = n_t + n_nrna;
 
     // Build local_to_global_nrna
     sub.local_to_global_nrna.resize(n_nrna);
@@ -1380,13 +1348,11 @@ static void extract_locus_sub_problem(
             }
         }
 
-        // Add gDNA candidate for unspliced units — route to g_pos or g_neg
+        // Add gDNA candidate for unspliced units
         bool is_spliced = (g_is_spliced[u] != 0);
         double gdna_ll = g_gdna_log_liks[u];
         if (!is_spliced && std::isfinite(gdna_ll)) {
-            // Strand bit from locus_ct_arr: count_col = stype*2 + is_anti
-            bool is_anti = (sub.locus_ct_arr[ui] % 2) != 0;
-            int32_t gdna_comp = is_anti ? sub.gdna_neg_idx : sub.gdna_pos_idx;
+            int32_t gdna_comp = sub.gdna_idx;
             int32_t footprint = g_genomic_footprints[u];
             if (seen_epoch[gdna_comp] != current_epoch ||
                 gdna_ll > best_buf[gdna_comp].log_lik) {
@@ -1435,16 +1401,14 @@ static void extract_locus_sub_problem(
         int gt = t_arr[first_t];
         sub.bias_profiles[n_t + n] = all_t_ends[gt] - all_t_starts[gt];  // nRNA
     }
-    sub.bias_profiles[sub.gdna_pos_idx] = locus_span;
-    sub.bias_profiles[sub.gdna_neg_idx] = locus_span;
+    sub.bias_profiles[sub.gdna_idx] = locus_span;
 
     // Prior: EM_PRIOR_EPSILON for eligible, 0.0 for ineligible
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
 
     // Zero gDNA prior when gdna_init == 0
     if (gdna_init == 0.0) {
-        sub.prior[sub.gdna_pos_idx] = 0.0;
-        sub.prior[sub.gdna_neg_idx] = 0.0;
+        sub.prior[sub.gdna_idx] = 0.0;
     }
 
     // Zero nRNA prior for nRNAs where ALL transcripts are single-exon
@@ -1509,8 +1473,7 @@ static void assign_posteriors(
 {
     int n_t = sub.n_t;
     int nc  = sub.n_components;
-    int gdna_pos = sub.gdna_pos_idx;
-    int gdna_neg = sub.gdna_neg_idx;
+    int gdna = sub.gdna_idx;
     int n_units = sub.n_local_units;
     const int32_t* local_to_global = sub.local_to_global_t.data();
 
@@ -1577,7 +1540,7 @@ static void assign_posteriors(
                 // Confidence tracking
                 posterior_sum[global_t] += p * p;
                 n_assigned[global_t] += p;
-            } else if (comp < gdna_pos) {
+            } else if (comp < gdna) {
                 // nRNA — local nRNA index → global nRNA index
                 int32_t local_nrna = comp - n_t;
                 int32_t global_nrna = sub.local_to_global_nrna[local_nrna];
@@ -1611,7 +1574,7 @@ static void assign_posteriors(
         double gdna_unit_sum = 0.0;
         for (int j = 0; j < seg_len; ++j) {
             int32_t c = sub.t_indices[s + j];
-            if (c == gdna_pos || c == gdna_neg) {
+            if (c == gdna) {
                 gdna_unit_sum += posteriors[j];
             }
         }
@@ -1685,9 +1648,7 @@ batch_locus_em(
     double confidence_threshold,
     int    n_transcripts_total,
     int    n_splice_strand_cols,
-    int    n_threads,
-    // Strand symmetry coupling parameter
-    double strand_symmetry_kappa = 2.0)
+    int    n_threads)
 {
     int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
     int N_T = n_transcripts_total;
@@ -1915,8 +1876,7 @@ batch_locus_em(
                 theta_init.data(),
                 nc, max_iterations, convergence_delta,
                 use_vbem, prune_threshold,
-                estep_thr, pool,
-                strand_symmetry_kappa);
+                estep_thr, pool);
 
             // 8. Assign posteriors (writes to disjoint transcript
             //    indices — safe across threads, no atomics needed)
@@ -2360,7 +2320,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_transcripts_total"),
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
-          nb::arg("strand_symmetry_kappa") = 2.0,
           "Run locus EM for ALL loci in a single C++ call.\n\n"
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"

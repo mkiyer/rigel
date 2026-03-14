@@ -1,4 +1,3 @@
-# hp_ablation_strand_symmetry_kappa.yaml — Ablation of strand_symmetry_kappa
 # 4 patterns × 2 SS × 2 gdna_frac × 6 kappa = 96 runs
 
 genome_length: 50000
@@ -65,7 +64,6 @@ sweep:
   TD: 0
   TE: 0
   # disabled(2.0) → weak(3.0) → default(6.0) → moderate(12.0) → strong(24.0) → very-strong(50.0)
-  strand_symmetry_kappa: [2.0, 3.0, 6.0, 12.0, 24.0, 50.0]
 
 patterns:
   # 0: pure mRNA, no nRNA

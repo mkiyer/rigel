@@ -922,7 +922,6 @@ class TestGdnaConfig:
         assert cfg.gdna_kappa_locus is None
         assert cfg.gdna_mom_min_evidence_ref == 50.0
         assert cfg.gdna_mom_min_evidence_locus == 30.0
-        assert cfg.strand_symmetry_kappa == 6.0
 
     def test_emconfig_explicit(self):
         cfg = EMConfig(

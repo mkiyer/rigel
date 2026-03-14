@@ -57,4 +57,3 @@ sweep:
   gdna: [0, 10, 50, 100, 500, 1000, 5000, 10000]
   strand_specificity: [0.9, 1.0]
   n_fragments: 100000
-  strand_symmetry_kappa: [2.0, 6.0]
