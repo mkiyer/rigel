@@ -87,7 +87,7 @@ class BenchmarkResult:
     n_gdna_expected : int
         Ground-truth gDNA fragment count (from simulation read names).
     n_gdna_pipeline : float
-        gDNA count reported by the pipeline (``estimator.gdna_total``).
+        gDNA count reported by the pipeline (``estimator.gdna_em_count``).
     transcripts : list[TranscriptAccuracy]
         Per-transcript accuracy breakdown.
     stats_dict : dict

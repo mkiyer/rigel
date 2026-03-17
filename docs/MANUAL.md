@@ -213,25 +213,7 @@ underscores or hyphens.
 | `--mismatch-alpha` | `0.1` | Per-mismatch penalty from the `NM` tag |
 | `--gdna-splice-penalty-unannot` | `0.01` | gDNA penalty for unannotated spliced fragments |
 
-### nRNA prior settings
-
-The implemented nRNA hierarchy is `global -> locus-strand -> nRNA`. The final
-Beta prior is attached to each shared nRNA span, not to each transcript.
-The `--nrna-sparsity-alpha` parameter (in Core EM settings above) controls a
-separate Dirichlet sparsity prior on nRNA EM components.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--nrna-frac-kappa-global` | auto | Shrinkage from locus-strand toward global |
-| `--nrna-frac-kappa-locus` | auto | Shrinkage from nRNA toward locus-strand |
-| `--nrna-frac-mom-min-evidence-global` | `50.0` | Minimum evidence for global MoM estimation |
-| `--nrna-frac-mom-min-evidence-locus` | `20.0` | Minimum evidence for locus-level MoM estimation |
-| `--nrna-frac-kappa-min` | `2.0` | Lower clamp for auto-estimated kappa |
-| `--nrna-frac-kappa-max` | `200.0` | Upper clamp for auto-estimated kappa |
-| `--nrna-frac-kappa-fallback` | `5.0` | Fallback kappa when evidence is insufficient |
-| `--nrna-frac-kappa-min-obs` | `20` | Minimum number of features needed for MoM estimation |
-
-### gDNA prior and symmetry settings
+### gDNA prior settings
 
 The `--gdna-prior-scale` parameter (in Core EM settings above) controls the
 strength of the Empirical Bayes gDNA anchor in the per-locus prior.
@@ -242,8 +224,10 @@ strength of the Empirical Bayes gDNA anchor in the per-locus prior.
 | `--gdna-kappa-locus` | auto | Shrinkage from locus toward reference |
 | `--gdna-mom-min-evidence-ref` | `50.0` | Minimum evidence for reference MoM estimation |
 | `--gdna-mom-min-evidence-locus` | `30.0` | Minimum evidence for locus MoM estimation |
-| `--strand-symmetry-kappa` | `6.0` | Strength of gDNA strand-symmetry penalty |
-| `--strand-symmetry-pseudo` | `10.0` | Pseudo-count controlling when the symmetry penalty engages |
+| `--gdna-kappa-min` | `2.0` | Lower clamp for MoM-estimated kappa |
+| `--gdna-kappa-max` | `200.0` | Upper clamp for MoM-estimated kappa |
+| `--gdna-kappa-fallback` | `5.0` | Fallback kappa when evidence is insufficient |
+| `--gdna-kappa-min-obs` | `20` | Minimum features needed for MoM kappa estimation |
 
 ### Strand model
 
@@ -281,9 +265,6 @@ prune_threshold: 0.1
 include_multimap: true
 keep_duplicates: false
 sj_strand_tag: [XS, ts]
-
-nrna_frac_kappa_global: null
-nrna_frac_kappa_locus: null
 
 em_mode: vbem
 nrna_sparsity_alpha: 0.9
@@ -444,35 +425,6 @@ Use `--sj-strand-tag auto` unless automatic detection fails.
 
 ---
 
-## FAQ
-
-### Why does PyPI use `rigel-rnaseq`?
-
-The name `rigel` is already occupied on PyPI. The CLI, import name, GitHub
-repository, and Bioconda package are still `rigel`.
-
-### Why can transcript `nrna` be non-integer or shared?
-
-Because the EM now estimates nRNA on shared genomic spans. Those shared counts
-are fanned back to transcripts for transcript- and gene-level reporting.
-
-### Why is `strand_specificity` close to `0.5`?
-
-Rigel only trains the primary strand model from annotated spliced fragments. If
-the library is unstranded, poorly stranded, or has too few informative splice
-reads, the estimate will stay near the prior.
-
-### When should I use `--annotated-bam`?
-
-Use it for read-level inspection, debugging, and method validation. It requires
-an extra BAM pass and adds some runtime overhead.
-
-The `--sj-strand-tag auto` default detects the appropriate tag from the
-BAM header. If your aligner uses a non-standard tag, specify it
-explicitly.
-
----
-
 ## Recipes and examples
 
 ### Basic quantification
@@ -557,6 +509,27 @@ rigel quant --bam sample.bam --index idx/ -o out/ \
 ---
 
 ## FAQ
+
+### Why does PyPI use `rigel-rnaseq`?
+
+The name `rigel` is already occupied on PyPI. The CLI, import name, GitHub
+repository, and Bioconda package are still `rigel`.
+
+### Why can transcript `nrna` be non-integer or shared?
+
+Because the EM estimates nRNA on shared genomic spans. Those shared counts
+are fanned back to transcripts for transcript- and gene-level reporting.
+
+### Why is `strand_specificity` close to `0.5`?
+
+Rigel only trains the primary strand model from annotated spliced fragments. If
+the library is unstranded, poorly stranded, or has too few informative splice
+reads, the estimate will stay near the prior.
+
+### When should I use `--annotated-bam`?
+
+Use it for read-level inspection, debugging, and method validation. It requires
+an extra BAM pass and adds some runtime overhead.
 
 ### What BAM sort order does Rigel require?
 

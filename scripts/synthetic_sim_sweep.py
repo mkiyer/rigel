@@ -902,13 +902,13 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         strand_specificity=ss,
                         diagnostics=True,
                     )
-                    row["cal_kappa_est"] = round(cal.kappa_sym, 2)
+                    row["cal_kappa_est"] = round(cal.kappa, 2)
                     if isinstance(cal_kappa_true, (int, float)):
                         row["cal_kappa_err"] = round(
-                            cal.kappa_sym - cal_kappa_true, 2)
+                            cal.kappa - cal_kappa_true, 2)
                     else:
                         row["cal_kappa_err"] = ""
-                    row["cal_density_est"] = f"{cal.gdna_density:.4e}"
+                    row["cal_density_est"] = f"{cal.gdna_density_global:.4e}"
 
                     cal_fl = cal.gdna_fl_model
                     row["cal_gdna_fl_true_mean"] = gdna_true_mean
@@ -929,14 +929,14 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     row["cal_n_iterations"] = cal.n_iterations
                     row["cal_converged"] = cal.converged
                     row["cal_mean_weight"] = round(
-                        float(cal.region_weights.mean()), 4)
-                    row["cal_n_regions"] = len(cal.region_weights)
+                        float(cal.region_posteriors.mean()), 4)
+                    row["cal_n_regions"] = len(cal.region_posteriors)
 
                     logger.info(
                         "Calibration: κ_est=%.1f (true=%s), "
                         "density=%.2e, seed=%s, iter=%d, conv=%s",
-                        cal.kappa_sym, cal_kappa_true,
-                        cal.gdna_density,
+                        cal.kappa, cal_kappa_true,
+                        cal.gdna_density_global,
                         row["cal_n_seed"], cal.n_iterations,
                         cal.converged,
                     )

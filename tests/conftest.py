@@ -26,10 +26,10 @@ import pandas as pd
 from rigel.splice import SpliceStrandCol
 from rigel.estimator import (
     AbundanceEstimator,
-    EM_PRIOR_EPSILON,
     Locus,
     ScoredFragments,
 )
+from rigel.native import EM_PRIOR_EPSILON
 from rigel.index import TranscriptIndex
 
 # ---------------------------------------------------------------------------

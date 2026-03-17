@@ -35,30 +35,10 @@ import pandas as pd
 _ANNOTATION_TABLE_PADDING = 1024
 _ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
-from .buffer import FragmentBuffer, _FinalizedChunk
-from .splice import SpliceType
-from .estimator import (
-    AbundanceEstimator,
-    compute_global_gdna_density,
-)
-from .types import ChimeraType, Strand
-from .index import TranscriptIndex
-from .frag_length_model import FragmentLengthModels
-from .stats import PipelineStats
-from .strand_model import StrandModels
-from .native import BamScanner as _NativeBamScanner
-from .native import detect_sj_strand_tag as _native_detect_sj_tag
+#: Fallback mean fragment length when no observations are available.
+_DEFAULT_MEAN_FRAG: float = 200.0
 
-# --- New modular imports ---
-from .scoring import FragmentScorer
-from .locus import (
-    build_loci,
-    compute_nrna_init,
-    compute_gdna_density_from_strand,
-    compute_gdna_density_hybrid,
-    compute_eb_gdna_priors,
-)
-from .scan import FragmentRouter
+from .buffer import FragmentBuffer, _FinalizedChunk
 from .config import (
     EMConfig,
     PipelineConfig,
@@ -66,12 +46,23 @@ from .config import (
     FragmentScoringConfig,
     TranscriptGeometry,
 )
+from .estimator import AbundanceEstimator
+from .frag_length_model import FragmentLengthModels
+from .index import TranscriptIndex
+from .locus import build_loci, compute_nrna_init, compute_eb_gdna_priors
+from .native import BamScanner as _NativeBamScanner
+from .native import detect_sj_strand_tag as _native_detect_sj_tag
+from .scan import FragmentRouter
+from .scoring import FragmentScorer
+from .stats import PipelineStats
+from .strand_model import StrandModels
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Pipeline result
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class PipelineResult:
@@ -211,54 +202,51 @@ def _replay_fraglen_observations(
 
 
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
-    """Apply C++ scan statistics to PipelineStats."""
-    # BAM-level stats (stored as bam_stats sub-dict fields)
-    stats.total = stats_dict.get("total", 0)
-    stats.qc_fail = stats_dict.get("qc_fail", 0)
-    stats.unmapped = stats_dict.get("unmapped", 0)
-    stats.secondary = stats_dict.get("secondary", 0)
-    stats.supplementary = stats_dict.get("supplementary", 0)
-    stats.duplicate = stats_dict.get("duplicate", 0)
-    stats.n_read_names = stats_dict.get("n_read_names", 0)
-    stats.unique = stats_dict.get("unique", 0)
-    stats.multimapping = stats_dict.get("multimapping", 0)
-    stats.proper_pair = stats_dict.get("proper_pair", 0)
-    stats.improper_pair = stats_dict.get("improper_pair", 0)
-    stats.mate_unmapped = stats_dict.get("mate_unmapped", 0)
+    """Apply C++ scan statistics to PipelineStats.
 
-    # Fragment-level stats
-    stats.n_fragments = stats_dict.get("n_fragments", 0)
-    stats.n_chimeric = stats_dict.get("n_chimeric", 0)
-    stats.n_chimeric_trans = stats_dict.get("n_chimeric_trans", 0)
-    stats.n_chimeric_cis_strand_same = stats_dict.get(
-        "n_chimeric_cis_strand_same", 0)
-    stats.n_chimeric_cis_strand_diff = stats_dict.get(
-        "n_chimeric_cis_strand_diff", 0)
-    stats.n_intergenic_unspliced = stats_dict.get(
-        "n_intergenic_unspliced", 0)
-    stats.n_intergenic_spliced = stats_dict.get("n_intergenic_spliced", 0)
-    stats.n_with_exon = stats_dict.get("n_with_exon", 0)
-    stats.n_with_annotated_sj = stats_dict.get("n_with_annotated_sj", 0)
-    stats.n_with_unannotated_sj = stats_dict.get(
-        "n_with_unannotated_sj", 0)
-    stats.n_same_strand = stats_dict.get("n_same_strand", 0)
-    stats.n_ambig_strand = stats_dict.get("n_ambig_strand", 0)
-    stats.n_strand_trained = stats_dict.get("n_strand_trained", 0)
-    stats.n_strand_skipped_no_sj = stats_dict.get(
-        "n_strand_skipped_no_sj", 0)
-    stats.n_strand_skipped_ambig_strand = stats_dict.get(
-        "n_strand_skipped_ambig_strand", 0)
-    stats.n_strand_skipped_ambiguous = stats_dict.get(
-        "n_strand_skipped_ambiguous", 0)
-    stats.n_frag_length_unambiguous = stats_dict.get(
-        "n_frag_length_unambiguous", 0)
-    stats.n_frag_length_ambiguous = stats_dict.get(
-        "n_frag_length_ambiguous", 0)
-    stats.n_frag_length_intergenic = stats_dict.get(
-        "n_frag_length_intergenic", 0)
-    stats.n_multimapper_groups = stats_dict.get("n_multimapper_groups", 0)
-    stats.n_multimapper_alignments = stats_dict.get(
-        "n_multimapper_alignments", 0)
+    Copies all matching keys from the C++ stats dict to the dataclass.
+    """
+    for key in (
+        # BAM-level
+        "total",
+        "qc_fail",
+        "unmapped",
+        "secondary",
+        "supplementary",
+        "duplicate",
+        "n_read_names",
+        "unique",
+        "multimapping",
+        "proper_pair",
+        "improper_pair",
+        "mate_unmapped",
+        # Fragment-level
+        "n_fragments",
+        "n_chimeric",
+        "n_chimeric_trans",
+        "n_chimeric_cis_strand_same",
+        "n_chimeric_cis_strand_diff",
+        "n_intergenic_unspliced",
+        "n_intergenic_spliced",
+        "n_with_exon",
+        "n_with_annotated_sj",
+        "n_with_unannotated_sj",
+        "n_same_strand",
+        "n_ambig_strand",
+        # Strand model training
+        "n_strand_trained",
+        "n_strand_skipped_no_sj",
+        "n_strand_skipped_ambig_strand",
+        "n_strand_skipped_ambiguous",
+        # Fragment length model training
+        "n_frag_length_unambiguous",
+        "n_frag_length_ambiguous",
+        "n_frag_length_intergenic",
+        # Multimapper
+        "n_multimapper_groups",
+        "n_multimapper_alignments",
+    ):
+        setattr(stats, key, stats_dict.get(key, 0))
 
 
 def scan_and_buffer(
@@ -314,7 +302,6 @@ def scan_and_buffer(
     # Execute the full BAM scan in C++
     n_scan = scan.n_scan_threads
     if n_scan == 0:
-        import os
         n_scan = os.cpu_count() or 1
     result = scanner.scan(bam_path, n_workers=n_scan)
 
@@ -326,7 +313,8 @@ def scan_and_buffer(
 
     # Replay fragment-length observations into Python models
     _replay_fraglen_observations(
-        result["frag_length_observations"], frag_length_models,
+        result["frag_length_observations"],
+        frag_length_models,
     )
 
     # Finalize the C++ accumulator to raw bytes, then build buffer chunk
@@ -335,12 +323,6 @@ def scan_and_buffer(
         raw = scanner.finalize_accumulator(index.t_to_strand_arr.tolist())
 
         chunk = _FinalizedChunk.from_raw(raw)
-
-        # # Sort by frag_id to restore deterministic order after
-        # # multi-threaded scanning (frag_id is assigned sequentially
-        # # by the single-threaded BAM reader).
-        # chunk = chunk.sort_by_frag_id()
-
         buffer.inject_chunk(chunk)
 
     logger.info(
@@ -363,6 +345,7 @@ def scan_and_buffer(
 # Quantify from buffer (locus-level EM, no global EM)
 # ---------------------------------------------------------------------------
 
+
 def _setup_geometry_and_estimator(
     index: TranscriptIndex,
     frag_length_models: FragmentLengthModels,
@@ -373,23 +356,19 @@ def _setup_geometry_and_estimator(
     if frag_length_models.global_model.n_observations > 0:
         mean_frag = frag_length_models.global_model.mean
     else:
-        from .estimator import _DEFAULT_MEAN_FRAG
         mean_frag = _DEFAULT_MEAN_FRAG
 
     if frag_length_models.global_model.n_observations > 0:
-        effective_lengths = (
-            frag_length_models.global_model.compute_all_transcript_eff_lens(
-                exonic_lengths.astype(np.int64),
-            )
+        effective_lengths = frag_length_models.global_model.compute_all_transcript_eff_lens(
+            exonic_lengths.astype(np.int64),
         )
     else:
         effective_lengths = np.maximum(
-            exonic_lengths - mean_frag + 1.0, 1.0,
+            exonic_lengths - mean_frag + 1.0,
+            1.0,
         )
 
-    transcript_spans = (
-        index.t_df["end"].values - index.t_df["start"].values
-    ).astype(np.float64)
+    transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
 
     geometry = TranscriptGeometry(
         effective_lengths=effective_lengths,
@@ -422,13 +401,20 @@ def _score_fragments(
 ) -> "ScoredFragments":
     """Build FragmentScorer, scan buffer, and return ScoredFragments."""
     ctx = FragmentScorer.from_models(
-        strand_models, frag_length_models, index, estimator,
+        strand_models,
+        frag_length_models,
+        index,
+        estimator,
         overhang_log_penalty=scoring.overhang_log_penalty,
         mismatch_log_penalty=scoring.mismatch_log_penalty,
         gdna_splice_penalties=scoring.gdna_splice_penalties,
     )
     builder = FragmentRouter(
-        ctx, estimator, stats, index, strand_models,
+        ctx,
+        estimator,
+        stats,
+        index,
+        strand_models,
         annotations=annotations,
     )
     em_data = builder.scan(buffer, log_every)
@@ -454,9 +440,7 @@ def _compute_priors(
 
     Returns the per-locus gdna_inits array.
     """
-    nrna_spans = (
-        index.nrna_df["end"].values - index.nrna_df["start"].values
-    ).astype(np.float64)
+    nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.float64)
     nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
     np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
     nrna_init = compute_nrna_init(
@@ -483,7 +467,11 @@ def _compute_priors(
     # EB gDNA priors (must precede nrna_frac priors)
     intergenic_density = _compute_intergenic_density(stats, index)
     gdna_inits = compute_eb_gdna_priors(
-        loci, em_data, estimator, index, strand_models,
+        loci,
+        em_data,
+        estimator,
+        index,
+        strand_models,
         intergenic_density=intergenic_density,
         kappa_ref=em_config.gdna_kappa_ref,
         kappa_locus=em_config.gdna_kappa_locus,
@@ -516,9 +504,7 @@ def _run_locus_em(
         for t_idx in locus.transcript_indices:
             ref = str(t_refs[int(t_idx)])
             ref_counts[ref] = ref_counts.get(ref, 0) + 1
-        primary_ref = (
-            max(ref_counts, key=ref_counts.get) if ref_counts else ""
-        )
+        primary_ref = max(ref_counts, key=ref_counts.get) if ref_counts else ""
         gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
         return {
             "locus_id": locus.locus_id,
@@ -548,13 +534,15 @@ def _run_locus_em(
     )
 
     for i, locus in enumerate(loci):
-        estimator.locus_results.append(_build_locus_meta(
-            locus,
-            mrna=locus_mrna_arr[i],
-            nrna=locus_nrna_arr[i],
-            gdna=locus_gdna_arr[i],
-            gdna_init=gdna_inits[i],
-        ))
+        estimator.locus_results.append(
+            _build_locus_meta(
+                locus,
+                mrna=locus_mrna_arr[i],
+                nrna=locus_nrna_arr[i],
+                gdna=locus_gdna_arr[i],
+                gdna_init=gdna_inits[i],
+            )
+        )
 
     estimator._gdna_em_total = total_gdna_em
 
@@ -606,7 +594,9 @@ def quant_from_buffer(
 
     # Phase 1: Geometry + estimator
     geometry, estimator = _setup_geometry_and_estimator(
-        index, frag_length_models, em_config,
+        index,
+        frag_length_models,
+        em_config,
     )
 
     logger.info(
@@ -616,8 +606,15 @@ def quant_from_buffer(
 
     # Phase 2: Score fragments
     em_data = _score_fragments(
-        buffer, index, strand_models, frag_length_models,
-        stats, estimator, scoring, log_every, annotations,
+        buffer,
+        index,
+        strand_models,
+        frag_length_models,
+        stats,
+        estimator,
+        scoring,
+        log_every,
+        annotations,
     )
 
     logger.info(
@@ -631,8 +628,8 @@ def quant_from_buffer(
         loci = build_loci(em_data, index)
 
         if loci:
-            max_locus_t = max(len(l.transcript_indices) for l in loci)
-            max_locus_u = max(len(l.unit_indices) for l in loci)
+            max_locus_t = max(len(loc.transcript_indices) for loc in loci)
+            max_locus_u = max(len(loc.unit_indices) for loc in loci)
         else:
             max_locus_t = max_locus_u = 0
 
@@ -642,12 +639,23 @@ def quant_from_buffer(
         )
 
         gdna_inits = _compute_priors(
-            estimator, em_data, loci, index, strand_models,
-            stats, geometry, em_config,
+            estimator,
+            em_data,
+            loci,
+            index,
+            strand_models,
+            stats,
+            geometry,
+            em_config,
         )
 
         _run_locus_em(
-            estimator, em_data, loci, index, gdna_inits, em_config,
+            estimator,
+            em_data,
+            loci,
+            index,
+            gdna_inits,
+            em_config,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")
@@ -660,7 +668,7 @@ def quant_from_buffer(
     stats.n_gdna_em = 0 if (math.isnan(_gdna_em) or math.isinf(_gdna_em)) else int(_gdna_em)
 
     logger.info(
-        f"[gDNA] total={estimator.gdna_total:.0f} "
+        f"[gDNA] total={estimator.gdna_em_count:.0f} "
         f"(EM={_gdna_em:.0f}), "
         f"contamination rate={estimator.gdna_contamination_rate:.2%}"
     )
@@ -671,6 +679,7 @@ def quant_from_buffer(
 # ---------------------------------------------------------------------------
 # Full pipeline orchestration
 # ---------------------------------------------------------------------------
+
 
 def run_pipeline(
     bam_path,
@@ -713,9 +722,7 @@ def run_pipeline(
         scan = _replace(scan, sj_strand_tag=detected_spec)
 
     # -- Single BAM pass (C++ native scanner) --
-    stats, strand_models, frag_length_models, buffer = (
-        scan_and_buffer(bam_path, index, scan)
-    )
+    stats, strand_models, frag_length_models, buffer = scan_and_buffer(bam_path, index, scan)
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
@@ -729,6 +736,7 @@ def run_pipeline(
     annotations = None
     if config.annotated_bam_path is not None:
         from .annotate import AnnotationTable
+
         annotations = AnnotationTable.create(
             capacity=max(
                 buffer.total_fragments + _ANNOTATION_TABLE_PADDING,
@@ -754,6 +762,7 @@ def run_pipeline(
     # -- Second BAM pass: write annotated BAM (opt-in) --
     if config.annotated_bam_path is not None and annotations is not None:
         from .annotate import write_annotated_bam
+
         write_annotated_bam(
             bam_path,
             str(config.annotated_bam_path),

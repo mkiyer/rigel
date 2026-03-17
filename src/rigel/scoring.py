@@ -70,14 +70,10 @@ def overhang_alpha_to_log_penalty(alpha: float) -> float:
 
 
 #: Default overhang log-penalty.
-DEFAULT_OVERHANG_LOG_PENALTY = overhang_alpha_to_log_penalty(
-    DEFAULT_OVERHANG_ALPHA
-)
+DEFAULT_OVERHANG_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_OVERHANG_ALPHA)
 
 #: Default mismatch log-penalty.
-DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(
-    DEFAULT_MISMATCH_ALPHA
-)
+DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_MISMATCH_ALPHA)
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +93,7 @@ class FragmentScorer:
     # Strand model: RNA
     log_p_sense: float
     log_p_antisense: float
-    r1_antisense: bool           # True when R1-antisense protocol (p_sense < 0.5)
+    r1_antisense: bool  # True when R1-antisense protocol (p_sense < 0.5)
 
     # Penalty parameters
     overhang_log_penalty: float
@@ -115,15 +111,15 @@ class FragmentScorer:
     gdna_fl_tail_base: float
 
     # Index arrays (borrowed references, never copied)
-    t_strand_arr: np.ndarray     # int8[n_transcripts]
-    g_strand_arr: np.ndarray     # int8[n_genes]
-    t_to_g: np.ndarray           # int32[n_transcripts]
-    nrna_base: int               # offset for nRNA indices in CSR
+    t_strand_arr: np.ndarray  # int8[n_transcripts]
+    g_strand_arr: np.ndarray  # int8[n_genes]
+    t_to_g: np.ndarray  # int32[n_transcripts]
+    nrna_base: int  # offset for nRNA indices in CSR
 
     # Per-transcript lengths for per-fragment effective length correction
-    t_length_arr: np.ndarray     # int32[n_transcripts] — spliced exonic length
-    t_span_arr: np.ndarray       # int32[n_transcripts] — genomic span (incl introns)
-    t_start_arr: np.ndarray      # int32[n_transcripts] — genomic start coordinate
+    t_length_arr: np.ndarray  # int32[n_transcripts] — spliced exonic length
+    t_span_arr: np.ndarray  # int32[n_transcripts] — genomic span (incl introns)
+    t_start_arr: np.ndarray  # int32[n_transcripts] — genomic start coordinate
 
     # Pre-computed exon positions for fast bisect-based position mapping.
     # Dict mapping t_idx → (exon_starts: tuple[int], exon_ends: tuple[int],
@@ -170,9 +166,7 @@ class FragmentScorer:
 
         # Per-transcript length arrays for per-fragment effective length
         t_length_arr = index.t_df["length"].values.astype(np.int32)
-        t_span_arr = (
-            index.t_df["end"].values - index.t_df["start"].values
-        ).astype(np.int32)
+        t_span_arr = (index.t_df["end"].values - index.t_df["start"].values).astype(np.int32)
         t_start_arr = index.t_df["start"].values.astype(np.int32)
 
         # Pre-compute per-transcript exon positions as Python tuples
@@ -183,12 +177,12 @@ class FragmentScorer:
             if exon_ivs is not None and len(exon_ivs) > 0:
                 starts = tuple(int(x) for x in exon_ivs[:, 0])
                 ends = tuple(int(x) for x in exon_ivs[:, 1])
-                cs = 0
-                cb: list[int] = []
+                cumulative = 0
+                cumsum_before: list[int] = []
                 for s, e in zip(starts, ends):
-                    cb.append(cs)
-                    cs += e - s
-                t_exon_data[t_idx] = (starts, ends, tuple(cb))
+                    cumsum_before.append(cumulative)
+                    cumulative += e - s
+                t_exon_data[t_idx] = (starts, ends, tuple(cumsum_before))
 
         ctx = FragmentScorer(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
@@ -204,9 +198,7 @@ class FragmentScorer:
                 if mismatch_log_penalty is not None
                 else DEFAULT_MISMATCH_LOG_PENALTY
             ),
-            gdna_splice_penalties=(
-                gdna_splice_penalties or GDNA_SPLICE_PENALTIES
-            ),
+            gdna_splice_penalties=(gdna_splice_penalties or GDNA_SPLICE_PENALTIES),
             fl_log_prob=fl_log_prob,
             fl_max_size=fl_max_size,
             fl_tail_base=fl_tail_base,
@@ -227,6 +219,7 @@ class FragmentScorer:
         # Cast arrays to exact dtypes expected by the C++ nanobind binding
         # to tolerate callers (including test mocks) that provide int64 etc.
         from .native import NativeFragmentScorer
+
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
             log_p_antisense=float(ctx.log_p_antisense),
@@ -239,26 +232,18 @@ class FragmentScorer:
             gdna_fl_log_prob=ctx.gdna_fl_log_prob,
             gdna_fl_max_size=int(ctx.gdna_fl_max_size),
             gdna_fl_tail_base=float(ctx.gdna_fl_tail_base),
-            t_strand_arr=np.ascontiguousarray(
-                ctx.t_strand_arr, dtype=np.int8),
-            t_length_arr=np.ascontiguousarray(
-                ctx.t_length_arr, dtype=np.int32),
-            t_span_arr=np.ascontiguousarray(
-                ctx.t_span_arr, dtype=np.int32),
-            t_start_arr=np.ascontiguousarray(
-                ctx.t_start_arr, dtype=np.int32),
+            t_strand_arr=np.ascontiguousarray(ctx.t_strand_arr, dtype=np.int8),
+            t_length_arr=np.ascontiguousarray(ctx.t_length_arr, dtype=np.int32),
+            t_span_arr=np.ascontiguousarray(ctx.t_span_arr, dtype=np.int32),
+            t_start_arr=np.ascontiguousarray(ctx.t_start_arr, dtype=np.int32),
             nrna_base=int(ctx.nrna_base),
             t_exon_data=ctx._t_exon_data,
-            t_to_nrna_arr=np.ascontiguousarray(
-                index.t_to_nrna_arr, dtype=np.int32),
+            t_to_nrna_arr=np.ascontiguousarray(index.t_to_nrna_arr, dtype=np.int32),
             nrna_span_arr=np.ascontiguousarray(
-                (index.nrna_df["end"].values
-                 - index.nrna_df["start"].values).astype(np.int32)),
-            nrna_start_arr=np.ascontiguousarray(
-                index.nrna_df["start"].values.astype(np.int32)),
+                (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.int32)
+            ),
+            nrna_start_arr=np.ascontiguousarray(index.nrna_df["start"].values.astype(np.int32)),
         )
-        object.__setattr__(ctx, '_native_ctx', native_ctx)
+        object.__setattr__(ctx, "_native_ctx", native_ctx)
 
         return ctx
-
-

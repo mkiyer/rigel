@@ -18,21 +18,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .config import EMConfig
-
 if TYPE_CHECKING:
     from .estimator import AbundanceEstimator
 
 logger = logging.getLogger(__name__)
 
 
-# Default kappa bounds from EMConfig (single source of truth).
-_EM_DEFAULTS = EMConfig()
-
-
 # ======================================================================
 # Global gDNA density
 # ======================================================================
+
 
 def compute_global_gdna_density(
     estimator: AbundanceEstimator,
@@ -59,7 +54,10 @@ def compute_global_gdna_density(
 
     if total_exonic_bp > 0:
         return compute_gdna_density_from_strand(
-            total_sense, total_anti, total_exonic_bp, strand_specificity,
+            total_sense,
+            total_anti,
+            total_exonic_bp,
+            strand_specificity,
         )
     return 0.0
 
@@ -68,15 +66,16 @@ def compute_global_gdna_density(
 # Method-of-Moments κ estimation
 # ======================================================================
 
+
 def estimate_kappa(
     nrna_frac_array: np.ndarray,
     evidence_array: np.ndarray,
     min_evidence: float = 30.0,
     *,
-    kappa_min: float = _EM_DEFAULTS.gdna_kappa_min,
-    kappa_max: float = _EM_DEFAULTS.gdna_kappa_max,
-    kappa_fallback: float = _EM_DEFAULTS.gdna_kappa_fallback,
-    kappa_min_obs: int = _EM_DEFAULTS.gdna_kappa_min_obs,
+    kappa_min: float = 2.0,
+    kappa_max: float = 200.0,
+    kappa_fallback: float = 5.0,
+    kappa_min_obs: int = 20,
 ) -> float:
     """Estimate Beta concentration κ via Method of Moments.
 

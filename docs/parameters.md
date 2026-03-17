@@ -79,29 +79,6 @@ the final value is resolved as: **explicit CLI flag → YAML config file → dat
 
 ## Advanced Options
 
-### nRNA Fraction Hierarchical Shrinkage
-
-The nRNA fraction prior uses a two-level empirical Bayes hierarchy:
-**global → locus-strand → nRNA span**.  At each level a shrinkage
-pseudo-count κ pulls the estimate toward the parent level.
-By default κ is auto-estimated via Method of Moments (MoM).
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--nrna-frac-kappa-global` | auto (MoM) | κ pulling locus-strand nRNA fraction toward the global prior. |
-| `--nrna-frac-kappa-locus` | auto (MoM) | κ pulling nRNA span fraction toward the locus-strand estimate. |
-| `--nrna-frac-kappa-min` | 2.0 | Lower clamp for MoM-estimated κ. |
-| `--nrna-frac-kappa-max` | 200.0 | Upper clamp for MoM-estimated κ. |
-| `--nrna-frac-kappa-fallback` | 5.0 | Fallback κ when too few features pass the evidence filter. |
-| `--nrna-frac-kappa-min-obs` | 20 | Minimum features required for MoM κ estimation; fewer triggers the fallback. |
-
-#### MoM Minimum Evidence Thresholds
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--nrna-frac-mom-min-evidence-global` | 50 | Min fragment evidence for global MoM κ. |
-| `--nrna-frac-mom-min-evidence-locus` | 30 | Min fragment evidence for locus MoM κ. |
-
 ### gDNA Rate Hierarchical Shrinkage
 
 The gDNA rate prior uses a two-level hierarchy:
@@ -113,6 +90,10 @@ The gDNA rate prior uses a two-level hierarchy:
 | `--gdna-kappa-locus` | auto (MoM) | κ pulling locus gDNA rate toward the reference estimate. |
 | `--gdna-mom-min-evidence-ref` | 50 | Min fragment evidence for reference gDNA MoM κ. |
 | `--gdna-mom-min-evidence-locus` | 30 | Min fragment evidence for locus gDNA MoM κ. |
+| `--gdna-kappa-min` | 2.0 | Lower clamp for MoM-estimated gDNA κ. |
+| `--gdna-kappa-max` | 200.0 | Upper clamp for MoM-estimated gDNA κ. |
+| `--gdna-kappa-fallback` | 5.0 | Fallback gDNA κ when too few features for MoM. |
+| `--gdna-kappa-min-obs` | 20 | Minimum features for gDNA MoM κ estimation; fewer triggers fallback. |
 
 ### Strand Model
 

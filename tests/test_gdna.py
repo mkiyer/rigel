@@ -338,7 +338,7 @@ class TestGDNAProperties:
     def test_gdna_total_from_em_total(self):
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc._gdna_em_total = 80.0
-        assert rc.gdna_total == 80.0
+        assert rc.gdna_em_count == 80.0
 
     def test_gdna_contamination_rate(self):
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))

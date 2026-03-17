@@ -62,7 +62,7 @@ class FragmentRouter:
         self.annotations = annotations
 
         # Native scoring context (set by FragmentScorer.from_models)
-        self._native_ctx = getattr(ctx, '_native_ctx', None)
+        self._native_ctx = getattr(ctx, "_native_ctx", None)
 
     # ------------------------------------------------------------------
     # Main scan driver
@@ -80,15 +80,15 @@ class FragmentRouter:
         one spilled chunk is loaded from disk at any moment during
         conversion to contiguous numpy arrays.
         """
-        nc = self._native_ctx
-        if nc is None:
-            raise RuntimeError(
-                "NativeFragmentScorer not available; cannot scan"
-            )
+        native_scorer = self._native_ctx
+        if native_scorer is None:
+            raise RuntimeError("NativeFragmentScorer not available; cannot scan")
         return self._scan_native(buffer, log_every)
 
     def _scan_native(
-        self, buffer: FragmentBuffer, log_every: int,
+        self,
+        buffer: FragmentBuffer,
+        log_every: int,
     ) -> ScoredFragments:
         """Chunk-level C++ scan path (fast).
 
@@ -99,9 +99,10 @@ class FragmentRouter:
         extra chunk.
         """
         import logging
+
         logger = logging.getLogger(__name__)
 
-        nc = self._native_ctx
+        native_scorer = self._native_ctx
         estimator = self.estimator
         stats = self.stats
         index = self.index
@@ -109,13 +110,14 @@ class FragmentRouter:
         annotations = self.annotations
 
         from .scoring import LOG_SAFE_FLOOR
-        _gdna_sp = self.ctx.gdna_splice_penalties.get(
-            SPLICE_UNSPLICED, _DEFAULT_SPLICE_PENALTY,
-        )
-        gdna_log_sp = math.log(max(_gdna_sp, LOG_SAFE_FLOOR))
 
-        t_strand_arr = np.ascontiguousarray(
-            index.t_to_strand_arr, dtype=np.int8)
+        gdna_unspliced_penalty = self.ctx.gdna_splice_penalties.get(
+            SPLICE_UNSPLICED,
+            _DEFAULT_SPLICE_PENALTY,
+        )
+        gdna_log_penalty = math.log(max(gdna_unspliced_penalty, LOG_SAFE_FLOOR))
+
+        t_strand_arr = np.ascontiguousarray(index.t_to_strand_arr, dtype=np.int8)
 
         # ---- Stream chunks: convert one at a time, release raw ----
         # Each iteration loads at most one spilled chunk from disk,
@@ -128,7 +130,7 @@ class FragmentRouter:
             chunk_sizes.append(chunk.size)
 
         # ---- Fused two-pass C++ scoring ----
-        result = nc.fused_score_buffer(
+        result = native_scorer.fused_score_buffer(
             chunk_arrays,
             t_strand_arr,
             estimator.transcript_unspliced_sense,
@@ -136,17 +138,33 @@ class FragmentRouter:
             estimator.transcript_intronic_sense,
             estimator.transcript_intronic_antisense,
             estimator.unambig_counts,
-            gdna_log_sp,
+            gdna_log_penalty,
         )
 
         (
-            cpp_offsets, cpp_ti, cpp_ll, cpp_ct, cpp_cw,
-            cpp_ts, cpp_te,
-            cpp_locus_t, cpp_locus_ct, cpp_is_spliced,
-            cpp_gdna_ll, cpp_gfp, cpp_fid, cpp_fclass,
-            cpp_stype,
-            det_tids, det_fids,
-            n_det, n_em_u, n_em_as, n_em_ao, n_gated, n_chim,
+            offsets,
+            t_indices,
+            log_liks,
+            count_cols,
+            coverage_weights,
+            tx_starts,
+            tx_ends,
+            locus_t_indices,
+            locus_count_cols,
+            is_spliced_raw,
+            gdna_log_liks,
+            genomic_footprints,
+            frag_ids,
+            frag_classes,
+            splice_types,
+            det_tids,
+            det_fids,
+            n_det,
+            n_em_u,
+            n_em_as,
+            n_em_ao,
+            n_gated,
+            n_chim,
             n_mm,
         ) = result
 
@@ -161,11 +179,10 @@ class FragmentRouter:
         # Tuple layout: [6]=splice_type, [8]=fragment_classes, [9]=frag_id
         n_processed = 0
         for ci in range(len(chunk_arrays)):
-            frag_classes = chunk_arrays[ci][8]
+            chunk_frag_classes = chunk_arrays[ci][8]
 
             if annotations is not None:
-                chimeric_indices = np.where(
-                    frag_classes == FRAG_CHIMERIC)[0]
+                chimeric_indices = np.where(chunk_frag_classes == FRAG_CHIMERIC)[0]
                 for idx in chimeric_indices:
                     annotations.add(
                         frag_id=int(chunk_arrays[ci][9][idx]),
@@ -180,10 +197,7 @@ class FragmentRouter:
 
             n_processed += chunk_sizes[ci]
             if n_processed % log_every < chunk_sizes[ci]:
-                logger.debug(
-                    f"  Scan: {n_processed:,} / "
-                    f"{buffer.total_fragments:,}"
-                )
+                logger.debug(f"  Scan: {n_processed:,} / {buffer.total_fragments:,}")
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
@@ -204,26 +218,6 @@ class FragmentRouter:
         # Free chunk_arrays — no longer needed
         del chunk_arrays
 
-        # ---- Use C++ arrays directly (MM now handled in C++) ----
-        offsets = cpp_offsets
-        t_indices = cpp_ti
-        log_liks = cpp_ll
-        count_cols = cpp_ct
-        coverage_weights = cpp_cw
-        tx_starts = cpp_ts
-        tx_ends = cpp_te
-        locus_t_indices = cpp_locus_t
-        locus_count_cols = cpp_locus_ct
-        is_spliced = np.asarray(
-            cpp_is_spliced, dtype=np.int8).astype(bool)
-        gdna_log_liks = cpp_gdna_ll
-        genomic_footprints = cpp_gfp
-        frag_ids = cpp_fid
-        frag_class = cpp_fclass
-        splice_type = cpp_stype
-        n_units = int(len(cpp_offsets) - 1)
-        n_candidates = int(len(cpp_ti))
-
         return ScoredFragments(
             offsets=offsets,
             t_indices=t_indices,
@@ -234,13 +228,13 @@ class FragmentRouter:
             tx_ends=tx_ends,
             locus_t_indices=locus_t_indices,
             locus_count_cols=locus_count_cols,
-            is_spliced=is_spliced,
+            is_spliced=np.asarray(is_spliced_raw, dtype=np.int8).astype(bool),
             gdna_log_liks=gdna_log_liks,
             genomic_footprints=genomic_footprints,
             frag_ids=frag_ids,
-            frag_class=frag_class,
-            splice_type=splice_type,
-            n_units=n_units,
-            n_candidates=n_candidates,
+            frag_class=frag_classes,
+            splice_type=splice_types,
+            n_units=int(len(offsets) - 1),
+            n_candidates=int(len(t_indices)),
             nrna_base_index=self.ctx.nrna_base,
         )

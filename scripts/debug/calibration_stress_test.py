@@ -270,7 +270,7 @@ class ScenarioResult:
     separation: float            # mean_gdna_posterior - mean_rna_posterior
 
     # Kappa
-    kappa_sym: float
+    kappa: float
     gdna_density: float
     expressed_density: float
 
@@ -343,7 +343,7 @@ def evaluate_scenario(
         mean_nrna_posterior=mean_nrna_post,
         auroc=auroc,
         separation=separation,
-        kappa_sym=result.kappa_sym,
+        kappa=result.kappa,
         gdna_density=result.gdna_density_global,
         expressed_density=result.expressed_density,
         elapsed_s=elapsed,

@@ -218,7 +218,7 @@ def _collect_diagnostics(pr, result, bench, label):
 
     # --- gDNA contamination rate ---
     diag["gdna_contamination_rate"] = est.gdna_contamination_rate
-    diag["gdna_total"] = est.gdna_total
+    diag["gdna_total"] = est.gdna_em_count
     diag["gdna_em_count"] = est.gdna_em_count
 
     return diag

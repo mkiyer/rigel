@@ -148,7 +148,7 @@ def _extract_results(pr, bench, result):
             est.transcript_unspliced_antisense[ti])
         info[f"{tid}_nrna_init"] = float(est.nrna_init[ti])
 
-    info["gdna_total"] = float(est.gdna_total)
+    info["gdna_total"] = float(est.gdna_em_count)
     info["gdna_em"] = float(est.gdna_em_count)
     info["n_loci"] = len(est.locus_results)
 

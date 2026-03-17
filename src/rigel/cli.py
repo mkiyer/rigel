@@ -255,7 +255,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     flm = result.frag_length_models
     total_mrna = float(quant_df["mrna"].sum())
     total_nrna = float(quant_df["nrna"].sum())
-    total_gdna = float(estimator.gdna_total)
+    total_gdna = float(estimator.gdna_em_count)
     total_rna = total_mrna + total_nrna
     total_all = total_rna + total_gdna + stats.n_intergenic
 

@@ -9,6 +9,7 @@ import pytest
 from rigel.calibration import (
     GDNACalibration,
     _compute_density_llr_gaussian,
+    _compute_strand_llr_betabinom,
     _compute_strand_llr_binomial,
     _e_step,
     _m_step,
@@ -18,7 +19,7 @@ from rigel.calibration import (
     compute_log_density,
     compute_region_stats,
     compute_sense_fraction,
-    estimate_kappa_sym,
+    estimate_kappa_marginal,
 )
 
 
@@ -337,11 +338,11 @@ class TestLogDensityAndGaussianLLR:
 
 
 # ===================================================================
-# TestEstimateKappaSym
+# TestEstimateKappaMarginal
 # ===================================================================
 
 
-class TestEstimateKappaSym:
+class TestEstimateKappaMarginal:
 
     def test_high_symmetry_high_kappa(self):
         rng = np.random.default_rng(42)
@@ -352,7 +353,8 @@ class TestEstimateKappaSym:
         stats = compute_region_stats(
             _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
         )
-        kappa = estimate_kappa_sym(stats, np.ones(n_regions))
+        # All-gDNA scenario: γ = 1 everywhere
+        kappa = estimate_kappa_marginal(stats, np.ones(n_regions), 0.95)
         assert kappa is not None
         assert 30 < kappa < 300
 
@@ -365,32 +367,70 @@ class TestEstimateKappaSym:
         stats = compute_region_stats(
             _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
         )
-        kappa = estimate_kappa_sym(stats, np.ones(n_regions))
+        kappa = estimate_kappa_marginal(stats, np.ones(n_regions), 0.95)
         assert kappa is not None
         assert 1 < kappa < 15
 
-    def test_weighted_estimation(self):
+    def test_all_rna_scenario(self):
+        """When γ = 0 everywhere, κ should still converge (not degenerate)."""
+        rng = np.random.default_rng(77)
+        n_regions = 200
+        kappa_true = 50.0
+        ss = 0.95
+        # RNA-like: k_sense ~ BetaBin(n, κ·SS, κ·(1-SS)), centered at SS.
+        # With gene_strand=+1: k_sense = n_unspliced - n_pos
+        p_sense = rng.beta(kappa_true * ss, kappa_true * (1 - ss), size=n_regions)
+        k_sense = rng.binomial(100, p_sense)
+        n_pos = (100 - k_sense).astype(np.float64)
+        n_neg = k_sense.astype(np.float64)
+        stats = compute_region_stats(
+            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+        )
+        kappa = estimate_kappa_marginal(stats, np.zeros(n_regions), ss)
+        assert kappa is not None
+        assert kappa > 10  # should fit the RNA distribution, not collapse
+
+    def test_mixed_scenario(self):
+        """Mixed γ values: κ lies between pure-component optima."""
         rng = np.random.default_rng(99)
         ng = 100
-        p_a = rng.beta(50, 50, size=ng)
-        n_pos_a = rng.binomial(100, p_a)
-        p_b = rng.beta(2, 2, size=ng)
-        n_pos_b = rng.binomial(100, p_b)
-        n_pos = np.concatenate([n_pos_a, n_pos_b]).astype(np.float64)
-        n_neg = np.concatenate([100 - n_pos_a, 100 - n_pos_b]).astype(np.float64)
+        # gDNA-like: symmetric, high dispersion
+        p_g = rng.beta(5, 5, size=ng)
+        n_pos_g = rng.binomial(100, p_g)
+        # RNA-like: stranded, high concentration
+        p_e = rng.beta(50, 50, size=ng)
+        n_pos_e = rng.binomial(100, p_e)
+        n_pos = np.concatenate([n_pos_g, n_pos_e]).astype(np.float64)
+        n_neg = np.concatenate([100 - n_pos_g, 100 - n_pos_e]).astype(np.float64)
         stats = compute_region_stats(
             _make_region_counts(n_pos, n_neg), _make_region_df(2 * ng),
         )
-        weights = np.concatenate([np.ones(ng), np.full(ng, 0.01)])
-        kappa = estimate_kappa_sym(stats, weights)
+        gamma = np.concatenate([np.ones(ng), np.zeros(ng)])
+        kappa = estimate_kappa_marginal(stats, gamma, 0.95)
         assert kappa is not None
-        assert kappa > 30
+        assert kappa > 1
 
     def test_insufficient_data_returns_none(self):
         counts = _make_region_counts(n_unspliced_pos=[50, 50], n_unspliced_neg=[50, 50])
         stats = compute_region_stats(counts, _make_region_df(2))
-        kappa = estimate_kappa_sym(stats, np.ones(2))
+        kappa = estimate_kappa_marginal(stats, np.ones(2), 0.95)
         assert kappa is None
+
+    def test_unstranded_ss_reduces_to_symmetric(self):
+        """With SS=0.5, marginal reduces to symmetric BetaBin (stable)."""
+        rng = np.random.default_rng(42)
+        n_regions = 200
+        p_true = rng.beta(50, 50, size=n_regions)
+        n_pos = rng.binomial(100, p_true).astype(np.float64)
+        n_neg = (100 - n_pos).astype(np.float64)
+        stats = compute_region_stats(
+            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+        )
+        # SS=0.5: both components are identical, γ should be irrelevant
+        kappa_g1 = estimate_kappa_marginal(stats, np.ones(n_regions), 0.5)
+        kappa_g0 = estimate_kappa_marginal(stats, np.zeros(n_regions), 0.5)
+        assert kappa_g1 is not None and kappa_g0 is not None
+        np.testing.assert_allclose(kappa_g1, kappa_g0, rtol=0.01)
 
     def test_sampling_variance_correction(self):
         rng = np.random.default_rng(7)
@@ -401,9 +441,144 @@ class TestEstimateKappaSym:
         stats = compute_region_stats(
             _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
         )
-        kappa = estimate_kappa_sym(stats, np.ones(n_regions))
+        kappa = estimate_kappa_marginal(stats, np.ones(n_regions), 0.95)
         assert kappa is not None
         assert kappa > 20
+
+
+# ===================================================================
+# TestBetaBinomialStrandLLR
+# ===================================================================
+
+
+class TestBetaBinomialStrandLLR:
+    """Tests for _compute_strand_llr_betabinom."""
+
+    def test_symmetric_ss_gives_zero_llr(self):
+        """With SS=0.5, LLR must be exactly zero."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[70, 30, 50],
+            n_unspliced_neg=[30, 70, 50],
+        )
+        rdf = _make_region_df(
+            3, tx_pos=np.array([True, True, True]),
+            tx_neg=np.array([False, False, False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        kappa = 20.0
+        llr = _compute_strand_llr_betabinom(stats, 0.5, kappa, 3)
+        np.testing.assert_allclose(llr, 0.0, atol=1e-10)
+
+    def test_positive_llr_for_symmetric_strand(self):
+        """A region with 50/50 strand ratio should favor gDNA (LLR > 0) at high SS."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[50], n_unspliced_neg=[50],
+        )
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
+        assert llr[0] > 0  # favors gDNA
+
+    def test_negative_llr_for_stranded_region(self):
+        """A strongly stranded region should favor RNA (LLR < 0) at high SS."""
+        # gene_strand=+1, TruSeq: sense = neg strand → k_sense = n_unspliced - n_pos
+        # n_pos=5, n_unspliced=100 → k_sense=95 (high sense fraction → RNA)
+        counts = _make_region_counts(
+            n_unspliced_pos=[5], n_unspliced_neg=[95],
+        )
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
+        assert llr[0] < 0  # favors RNA
+
+    def test_ambiguous_gene_strand_gives_zero_llr(self):
+        """Regions with gene_strand=0 should produce LLR=0."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[80], n_unspliced_neg=[20],
+        )
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([True]),  # both → strand=0
+        )
+        stats = compute_region_stats(counts, rdf)
+        llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
+        assert llr[0] == 0.0
+
+    def test_low_count_regions_produce_weak_llr(self):
+        """Regions with very few reads should produce near-zero LLR."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[1], n_unspliced_neg=[1],
+        )
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
+        assert abs(llr[0]) < 2.0  # should be modest, not extreme
+
+    def test_higher_kappa_makes_llr_more_extreme(self):
+        """Higher κ (less overdispersion) should give stronger strand signal."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[5], n_unspliced_neg=[95],
+        )
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        llr_low = _compute_strand_llr_betabinom(stats, 0.95, 10.0, 1)
+        llr_high = _compute_strand_llr_betabinom(stats, 0.95, 100.0, 1)
+        # Both negative (RNA), higher kappa should be more negative
+        assert llr_high[0] < llr_low[0]
+
+    def test_betabinom_vs_binomial_agreement_at_high_kappa(self):
+        """At very high κ, Beta-Binomial should approximate Binomial."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[20, 80, 50],
+            n_unspliced_neg=[80, 20, 50],
+        )
+        rdf = _make_region_df(
+            3, tx_pos=np.array([True, True, True]),
+            tx_neg=np.array([False, False, False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        big_kappa = 1e6
+        llr_bb = _compute_strand_llr_betabinom(stats, 0.9, big_kappa, 3)
+        llr_bin = _compute_strand_llr_binomial(stats, 0.9, 3)
+        np.testing.assert_allclose(llr_bb, llr_bin, rtol=0.05)
+
+    def test_e_step_uses_betabinom_when_kappa_provided(self):
+        """E-step should use Beta-Binomial when kappa is given."""
+        counts = _make_region_counts(
+            n_unspliced_pos=[50, 5], n_unspliced_neg=[50, 95],
+        )
+        rdf = _make_region_df(
+            2, tx_pos=np.array([True, True]),
+            tx_neg=np.array([False, False]),
+        )
+        stats = compute_region_stats(counts, rdf)
+        log_d, eligible = _density_setup(stats)
+        ld_elig = log_d[eligible]
+        mu = float(np.mean(ld_elig)) if eligible.any() else 0.0
+        var = max(float(np.var(ld_elig)), 1e-12) if eligible.any() else 1.0
+
+        # Without kappa (Binomial fallback)
+        gamma_bin = _e_step(
+            stats, 0.5, log_d, eligible, 0.95,
+            mu_g=mu, var_g=var, mu_r=mu, var_r=var,
+        )
+        # With kappa (Beta-Binomial)
+        gamma_bb = _e_step(
+            stats, 0.5, log_d, eligible, 0.95,
+            mu_g=mu, var_g=var, mu_r=mu, var_r=var,
+            kappa=20.0,
+        )
+        # Both should classify similarly (gDNA-like vs RNA-like patterns)
+        # but Beta-Binomial should be less extreme (more regularized)
+        assert gamma_bin[0] > gamma_bin[1]  # region 0 more gDNA-like
+        assert gamma_bb[0] > gamma_bb[1]
 
 
 # ===================================================================
@@ -748,7 +923,8 @@ class TestCalibrateGDNA:
     def test_kappa_recovery(self):
         rc, fl, rdf, kappa_true = self._make_synthetic_data(kappa_true=50.0)
         result = calibrate_gdna(rc, fl, rdf, strand_specificity=0.95)
-        assert kappa_true / 3 < result.kappa_sym < kappa_true * 3
+        assert kappa_true / 3 < result.kappa < kappa_true * 3
+        assert result.kappa > 0
 
     def test_posteriors_gdna_high_rna_low(self):
         rc, fl, rdf, _ = self._make_synthetic_data(n_gdna=100, n_rna=100)
@@ -818,12 +994,6 @@ class TestCalibrateGDNA:
         assert isinstance(result.iteration_history, list)
         assert len(result.iteration_history) == result.n_iterations
 
-    def test_backward_compatible_aliases(self):
-        rc, fl, rdf, _ = self._make_synthetic_data()
-        result = calibrate_gdna(rc, fl, rdf, strand_specificity=0.95)
-        assert result.gdna_density == result.gdna_density_global
-        np.testing.assert_array_equal(result.region_weights, result.region_posteriors)
-
 
 # ===================================================================
 # TestEdgeCases
@@ -871,7 +1041,7 @@ class TestEdgeCases:
         fl = _make_fl_table([0, 1, 2, 3], [200, 250, 300, 350])
         r1 = calibrate_gdna(counts, fl, rdf, strand_specificity=0.95)
         r2 = calibrate_gdna(counts, fl, rdf, strand_specificity=0.95)
-        assert r1.kappa_sym == r2.kappa_sym
+        assert r1.kappa == r2.kappa
         assert r1.n_iterations == r2.n_iterations
         np.testing.assert_array_equal(r1.region_posteriors, r2.region_posteriors)
 

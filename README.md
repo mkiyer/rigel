@@ -199,8 +199,6 @@ Rigel runs in two logical stages.
                               └──────────────────────────────────┘
 ```
 
-See [docs/CODE_PATH.md](docs/CODE_PATH.md) for the full algorithm code path.
-
 ### BAM scan and model training
 
 A native scanner reads the BAM once, resolves fragments against the indexed
@@ -236,7 +234,7 @@ expected-count assignment.
 | [docs/MANUAL.md](docs/MANUAL.md) | CLI reference, parameter defaults, configuration rules, and output schema |
 | [docs/METHODS.md](docs/METHODS.md) | Algorithmic description of the implemented model and priors |
 | [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
-| [docs/parameters.md](docs/parameters.md) | Supplemental parameter notes |
+| [docs/PARAMETERS.md](docs/PARAMETERS.md) | Complete parameter reference with defaults and config dataclass mapping |
 
 ---
 

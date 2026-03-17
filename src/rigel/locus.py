@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from .native import connected_components as _cc_native
 
-from .config import EMConfig
 from .scored_fragments import Locus, LocusEMInput, ScoredFragments
 from .priors import estimate_kappa
 from .native import EM_PRIOR_EPSILON
@@ -116,7 +115,7 @@ def build_loci(
     -------
     list[Locus]
     """
-    nt = index.num_transcripts
+    n_transcripts = index.num_transcripts
     nrna_base = em_data.nrna_base_index
     offsets = em_data.offsets
     t_indices = em_data.t_indices
@@ -132,19 +131,22 @@ def build_loci(
     np.add.at(nrna_counts, t_to_nrna, 1)
     nrna_to_t_offsets = np.zeros(num_nrna + 1, dtype=np.int32)
     np.cumsum(nrna_counts, out=nrna_to_t_offsets[1:])
-    nrna_to_t_indices = np.empty(nt, dtype=np.int32)
+    nrna_to_t_indices = np.empty(n_transcripts, dtype=np.int32)
     cursor = nrna_to_t_offsets[:-1].copy()
-    for t in range(nt):
+    for t in range(n_transcripts):
         ni = t_to_nrna[t]
         nrna_to_t_indices[cursor[ni]] = t
         cursor[ni] += 1
 
     # C++ union-find returns per-component transcript and unit lists
-    # in CSR form, already sorted ascending.
-    n_comp, ct_off, ct_flat, cu_off, cu_flat = _cc_native(
-        offsets, t_indices,
-        np.int32(nrna_base), np.int32(nt),
-        nrna_to_t_offsets, nrna_to_t_indices,
+    # in CSR form (offsets + flat index arrays), already sorted ascending.
+    n_comp, comp_t_offsets, comp_t_indices, comp_u_offsets, comp_u_indices = _cc_native(
+        offsets,
+        t_indices,
+        np.int32(nrna_base),
+        np.int32(n_transcripts),
+        nrna_to_t_offsets,
+        nrna_to_t_indices,
     )
 
     # Pre-fetch per-transcript chromosome/start/end for footprint computation
@@ -154,16 +156,21 @@ def build_loci(
 
     loci = []
     for lid in range(n_comp):
-        t_idx = ct_flat[ct_off[lid]:ct_off[lid + 1]].copy()
+        t_idx = comp_t_indices[comp_t_offsets[lid] : comp_t_offsets[lid + 1]].copy()
         gdna_span = _compute_union_genomic_footprint(
-            t_idx, t_refs, t_starts_all, t_ends_all,
+            t_idx,
+            t_refs,
+            t_starts_all,
+            t_ends_all,
         )
-        loci.append(Locus(
-            locus_id=lid,
-            transcript_indices=t_idx,
-            unit_indices=cu_flat[cu_off[lid]:cu_off[lid + 1]].copy(),
-            gdna_span=gdna_span,
-        ))
+        loci.append(
+            Locus(
+                locus_id=lid,
+                transcript_indices=t_idx,
+                unit_indices=comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]].copy(),
+                gdna_span=gdna_span,
+            )
+        )
 
     return loci
 
@@ -219,8 +226,7 @@ def build_locus_em_data(
     global_t_to_nrna = index.t_to_nrna_arr  # global transcript → global nRNA
     # Unique global nRNA indices used by this locus's transcripts
     global_nrna_for_locus = global_t_to_nrna[t_arr]  # [n_t]
-    unique_global_nrna, inverse = np.unique(global_nrna_for_locus,
-                                            return_inverse=True)
+    unique_global_nrna, inverse = np.unique(global_nrna_for_locus, return_inverse=True)
     n_nrna = len(unique_global_nrna)
     # inverse[i] gives local nRNA index for local transcript i
     local_t_to_local_nrna = inverse.astype(np.int32)
@@ -245,8 +251,7 @@ def build_locus_em_data(
     # mRNA: global_t → local_t
     # nRNA: nrna_base + global_nrna → n_t + local_nrna
     max_mRNA_global = int(t_arr.max()) + 1 if n_t > 0 else 0
-    max_nRNA_global = int(nrna_base) + int(unique_global_nrna.max()) + 1 \
-        if n_nrna > 0 else 0
+    max_nRNA_global = int(nrna_base) + int(unique_global_nrna.max()) + 1 if n_nrna > 0 else 0
     max_global = max(max_mRNA_global, max_nRNA_global, 1)
 
     # Reuse pre-allocated local_map buffer if provided
@@ -261,10 +266,10 @@ def build_locus_em_data(
         local_map = np.full(max_global, -1, dtype=np.int32)
     for local_i in range(n_t):
         gt = int(t_arr[local_i])
-        local_map[gt] = local_i                     # mRNA
+        local_map[gt] = local_i  # mRNA
     for local_n in range(n_nrna):
         gn = int(unique_global_nrna[local_n])
-        local_map[nrna_base + gn] = n_t + local_n   # nRNA
+        local_map[nrna_base + gn] = n_t + local_n  # nRNA
 
     # Gather all candidate ranges for this locus's units at once
     global_offsets = em_data.offsets
@@ -300,8 +305,7 @@ def build_locus_em_data(
         all_lidx[all_gidx >= max_global] = -1
 
         # Which local unit each candidate belongs to
-        unit_of_cand = np.repeat(np.arange(n_local_units, dtype=np.int32),
-                                 seg_lens)
+        unit_of_cand = np.repeat(np.arange(n_local_units, dtype=np.int32), seg_lens)
 
         # Filter valid candidates
         valid = all_lidx >= 0
@@ -380,7 +384,7 @@ def build_locus_em_data(
 
     # Sort by unit to reconstruct CSR
     if len(final_unit) > 0:
-        sort_order = np.argsort(final_unit, kind='stable')
+        sort_order = np.argsort(final_unit, kind="stable")
         final_lidx = final_lidx[sort_order]
         final_ll = final_ll[sort_order]
         final_cc = final_cc[sort_order]
@@ -430,11 +434,11 @@ def build_locus_em_data(
     _t_lengths_all = _cache["t_lengths"] if _cache is not None else index.t_df["length"].values
     mrna_lengths = _t_lengths_all[t_arr]
     # nRNA span comes from the nrna_df (global nRNA table)
-    nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values)
+    nrna_spans = index.nrna_df["end"].values - index.nrna_df["start"].values
     nrna_lengths = nrna_spans[unique_global_nrna]
     bias_profiles = np.empty(n_components, dtype=np.int64)
     bias_profiles[:n_t] = mrna_lengths
-    bias_profiles[n_t:n_t + n_nrna] = nrna_lengths
+    bias_profiles[n_t : n_t + n_nrna] = nrna_lengths
     bias_profiles[gdna_idx] = int(locus_span)
 
     # Build prior — start at epsilon (numerical floor) for every
@@ -543,9 +547,7 @@ def compute_nrna_init(
         # are still evidence of nRNA or gDNA — let the EM decide)
         nrna_init = np.maximum(0.0, intronic_sense + intronic_antisense)
     else:
-        raw = (
-            intronic_sense - intronic_antisense
-        ) / denom
+        raw = (intronic_sense - intronic_antisense) / denom
         nrna_init = np.maximum(0.0, raw)
 
     intronic_span = np.maximum(nrna_spans - nrna_max_exonic, 0.0)
@@ -628,7 +630,7 @@ def compute_gdna_density_hybrid(
 
     # --- Strand component (density) ---
     denom_ss = 2.0 * strand_spec - 1.0
-    inv_var_weight = denom_ss ** 2 if denom_ss > _STRAND_DENOM_EPS else 0.0
+    inv_var_weight = denom_ss**2 if denom_ss > _STRAND_DENOM_EPS else 0.0
 
     if inv_var_weight > 0:
         g = 2.0 * (antisense * strand_spec - sense * (1.0 - strand_spec)) / denom_ss
@@ -674,8 +676,11 @@ def _compute_ref_gdna_densities(
     ref_shrunk: dict[str, float] = {}
     for ref in ref_sense:
         density, evidence = compute_gdna_density_hybrid(
-            ref_sense[ref], ref_anti[ref], ref_exonic[ref],
-            strand_spec, intergenic_density,
+            ref_sense[ref],
+            ref_anti[ref],
+            ref_exonic[ref],
+            strand_spec,
+            intergenic_density,
         )
         shrink_weight = evidence / (evidence + k_ref) if (evidence + k_ref) > 0 else 0.0
         ref_shrunk[ref] = shrink_weight * density + (1.0 - shrink_weight) * global_density
@@ -710,7 +715,11 @@ def _compute_per_locus_gdna_densities(
         locus_bp = float(t_exonic[t_arr].sum())
 
         locus_density, locus_n = compute_gdna_density_hybrid(
-            locus_sense, locus_anti, locus_bp, strand_spec, intergenic_density,
+            locus_sense,
+            locus_anti,
+            locus_bp,
+            strand_spec,
+            intergenic_density,
         )
 
         ref_counts: dict[str, float] = defaultdict(float)
@@ -744,10 +753,10 @@ def compute_eb_gdna_priors(
     kappa_locus: float | None = None,
     mom_min_evidence_ref: float = 50.0,
     mom_min_evidence_locus: float = 30.0,
-    kappa_min: float = EMConfig().gdna_kappa_min,
-    kappa_max: float = EMConfig().gdna_kappa_max,
-    kappa_fallback: float = EMConfig().gdna_kappa_fallback,
-    kappa_min_obs: int = EMConfig().gdna_kappa_min_obs,
+    kappa_min: float = 2.0,
+    kappa_max: float = 200.0,
+    kappa_fallback: float = 5.0,
+    kappa_min_obs: int = 20,
 ) -> list[float]:
     """Compute empirical Bayes gDNA initialization per locus.
 
@@ -800,11 +809,11 @@ def compute_eb_gdna_priors(
     # Divide by fan count so that summing across transcripts sharing an
     # nRNA gives the original per-nRNA total (no double-counting).
     if estimator._t_to_nrna is not None:
-        _t2n = estimator._t_to_nrna
-        _fan = np.bincount(_t2n, minlength=estimator.num_nrna).astype(np.float64)
-        _fan = np.maximum(_fan, 1.0)
-        t_sense = estimator.transcript_unspliced_sense[_t2n] / _fan[_t2n]
-        t_anti = estimator.transcript_unspliced_antisense[_t2n] / _fan[_t2n]
+        t_to_nrna = estimator._t_to_nrna
+        fan_counts = np.bincount(t_to_nrna, minlength=estimator.num_nrna).astype(np.float64)
+        fan_counts = np.maximum(fan_counts, 1.0)
+        t_sense = estimator.transcript_unspliced_sense[t_to_nrna] / fan_counts[t_to_nrna]
+        t_anti = estimator.transcript_unspliced_antisense[t_to_nrna] / fan_counts[t_to_nrna]
     else:
         t_sense = estimator.transcript_unspliced_sense
         t_anti = estimator.transcript_unspliced_antisense
@@ -816,13 +825,19 @@ def compute_eb_gdna_priors(
     total_anti = float(t_anti.sum())
     total_exonic_bp = float(t_exonic.sum())
     global_density, global_n = compute_gdna_density_hybrid(
-        total_sense, total_anti, total_exonic_bp, strand_spec, intergenic_density,
+        total_sense,
+        total_anti,
+        total_exonic_bp,
+        strand_spec,
+        intergenic_density,
     )
 
     # --- Reference level: κ estimation ---
-    _mom_kw = dict(
-        kappa_min=kappa_min, kappa_max=kappa_max,
-        kappa_fallback=kappa_fallback, kappa_min_obs=kappa_min_obs,
+    kappa_params = dict(
+        kappa_min=kappa_min,
+        kappa_max=kappa_max,
+        kappa_fallback=kappa_fallback,
+        kappa_min_obs=kappa_min_obs,
     )
     if kappa_ref is None:
         # Need raw reference-level densities for MoM estimation before shrinking
@@ -838,14 +853,19 @@ def compute_eb_gdna_priors(
         ref_n_arr = np.empty(len(ref_sense), dtype=np.float64)
         for i, ref in enumerate(ref_sense):
             density, evidence = compute_gdna_density_hybrid(
-                ref_sense[ref], ref_anti[ref], ref_exonic[ref],
-                strand_spec, intergenic_density,
+                ref_sense[ref],
+                ref_anti[ref],
+                ref_exonic[ref],
+                strand_spec,
+                intergenic_density,
             )
             ref_density_arr[i] = density
             ref_n_arr[i] = evidence
         k_ref = estimate_kappa(
-            ref_density_arr, ref_n_arr, mom_min_evidence_ref,
-            **_mom_kw,
+            ref_density_arr,
+            ref_n_arr,
+            mom_min_evidence_ref,
+            **kappa_params,
         )
         logger.debug(f"gDNA κ_ref (MoM auto): {k_ref:.1f}")
     else:
@@ -858,16 +878,27 @@ def compute_eb_gdna_priors(
 
     # --- Reference level: shrink toward global ---
     ref_shrunk = _compute_ref_gdna_densities(
-        t_sense, t_anti, t_exonic, t_refs,
-        strand_spec, intergenic_density, global_density, k_ref,
+        t_sense,
+        t_anti,
+        t_exonic,
+        t_refs,
+        strand_spec,
+        intergenic_density,
+        global_density,
+        k_ref,
     )
 
     # --- Per-locus level ---
-    locus_densities, locus_evidence, locus_parents, locus_bp = (
-        _compute_per_locus_gdna_densities(
-            loci, t_sense, t_anti, t_exonic, t_refs,
-            strand_spec, intergenic_density, ref_shrunk, global_density,
-        )
+    locus_densities, locus_evidence, locus_parents, locus_bp = _compute_per_locus_gdna_densities(
+        loci,
+        t_sense,
+        t_anti,
+        t_exonic,
+        t_refs,
+        strand_spec,
+        intergenic_density,
+        ref_shrunk,
+        global_density,
     )
 
     # MoM κ for locus → ref shrinkage
@@ -875,8 +906,10 @@ def compute_eb_gdna_priors(
         locus_density_arr = np.array(locus_densities, dtype=np.float64)
         locus_n_arr = np.array(locus_evidence, dtype=np.float64)
         k_locus = estimate_kappa(
-            locus_density_arr, locus_n_arr, mom_min_evidence_locus,
-            **_mom_kw,
+            locus_density_arr,
+            locus_n_arr,
+            mom_min_evidence_locus,
+            **kappa_params,
         )
         logger.debug(f"gDNA κ_locus (MoM auto): {k_locus:.1f}")
     else:

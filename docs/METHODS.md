@@ -4,16 +4,11 @@
 
 ---
 
-K_c = \text{eff\_len}(t, c) = (L_t + 1) \cdot (\text{CDF}[k] - P(0))
-
 # Rigel Methods
 
 This document describes the model that is currently implemented in the Rigel
 codebase. It is intentionally implementation-facing: when the code and earlier
 design notes disagree, this document follows the code.
-
-For a theory-first description of the underlying inference problem, separate
-from the current implementation, see `docs/THEORETICAL_MODEL.md`.
 
 ---
 
@@ -436,64 +431,17 @@ Rigel is split between Python orchestration and native kernels.
 
 The project is packaged with scikit-build-core, nanobind, and CMake, and builds
 stable-ABI wheels for Python 3.12+.
-$$
-\hat{\beta}_{\ell,s} = \frac{\sum_{t \in (\ell,s)} U_t^{\text{unspliced}}}
-  {\sum_{t \in (\ell,s)} (U_t^{\text{spliced}} + U_t^{\text{unspliced}})}
-$$
 
-If the total evidence exceeds a minimum threshold (default 10 fragments),
-this estimate is used with $\kappa$ estimated via Method of Moments
-(Section 5.4). Otherwise, the global prior ($\hat{\beta} = 0.5$,
-$\kappa = 2$) is used.
+---
 
-The $\kappa$ pulling locus-strand estimates toward the global mean is
-auto-estimated or manually set via `--nrna-frac-kappa-global`.
+## 5. Prior System
 
-#### Level 2: TSS group
-
-Transcripts sharing a transcription start site (TSS) are expected to have
-similar nascent fractions because they share the same promoter and
-5' kinetics. Rigel groups transcripts by fuzzy TSS matching using
-**single-linkage clustering**: transcripts on the same reference and
-strand whose 5' positions lie within a configurable window (default
-200 bp) are merged into a single TSS group.
-
-The 5' position is defined as the genomic start coordinate for
-pos-strand transcripts and the genomic end coordinate for
-neg-strand transcripts.
-
-Within each TSS group, the nascent fraction is estimated from the
-pooled spliced/unspliced ratio, with $\kappa$ shrinking toward the
-locus-strand estimate.
-
-#### Level 3: Transcript
-
-If the transcript has sufficient unique evidence (≥ 10 fragments),
-its own spliced/unspliced ratio provides the finest-grained estimate,
-with $\kappa$ shrinking toward the TSS group.
-
-#### Cascade logic
-
-The cascade proceeds from the transcript level upward. At each level,
-if the evidence exceeds the minimum threshold, the estimate at that
-level is used; otherwise, the algorithm falls back to the next coarser
-level:
-
-$$
-(\hat{\beta}_t, \kappa_t) = \begin{cases}
-(\hat{\beta}_t^{\text{obs}}, n_t) & \text{if } n_t \geq n_{\min} \\
-(\hat{\beta}_{\text{tss}}, \kappa_{\text{tss}}) & \text{if } n_{\text{tss}} \geq n_{\min} \\
-(\hat{\beta}_{\ell,s}, \kappa_{\ell,s}) & \text{if } n_{\ell,s} \geq n_{\min} \\
-(0.5, 2.0) & \text{otherwise}
-\end{cases}
-$$
-
-### 5.2 gDNA Prior
+### 5.1 gDNA Prior
 
 The gDNA rate prior uses a two-level empirical Bayes hierarchy:
 
 $$
-	ext{locus} \leftarrow \text{reference} \leftarrow \text{global}
+\text{locus} \leftarrow \text{reference} \leftarrow \text{global}
 $$
 
 #### The antisense principle
@@ -563,7 +511,7 @@ The per-locus gDNA rate is shrunk toward reference-level and
 global estimates through two levels of Beta-distribution shrinkage
 with auto-estimated $\kappa$ parameters via Method of Moments.
 
-### 5.3 One Virtual Read (OVR) Prior
+### 5.2 One Virtual Read (OVR) Prior
 
 The OVR prior addresses a fundamental asymmetry in the Dirichlet prior:
 a flat pseudo-count $\alpha$ assigns equal prior mass to all components
@@ -591,7 +539,7 @@ Components with no geometric evidence receive $\alpha_c \approx 0.01$,
 which is insufficient to sustain a false positive through the EM. Only
 components with genuine fragment overlap receive meaningful prior support.
 
-### 5.4 Method of Moments for κ Estimation
+### 5.3 Method of Moments for κ Estimation
 
 At each level of the hierarchy, the shrinkage concentration $\kappa$ is
 estimated via Method of Moments (MoM) from the observed distribution of
@@ -714,7 +662,7 @@ arrays and vectorized across all transcripts.
 
 The effective length differs by component type:
 - **mRNA:** Spliced transcript length (sum of exon lengths)
-- **nRNA:** Genomic span of the transcript (exons + introns)
+- **nRNA:** Genomic span of the shared nRNA entity
 - **gDNA:** Genomic span of the locus
 
 ---
@@ -880,7 +828,7 @@ format for memory efficiency. For each fragment $f$, the CSR stores:
 
 mRNA and nRNA candidates are stored during fragment routing. gDNA
 candidates are appended per-locus during EM data construction: for each
-unspliced fragment in a locus, an edge to the gDNA component ($2T$) is
+unspliced fragment in a locus, an edge to the gDNA component ($T+N$) is
 added with the pre-computed gDNA likelihood.
 
 ---
@@ -897,11 +845,17 @@ annotated transcript with the following fields:
 | `transcript_id` | Transcript identifier from the GTF |
 | `gene_id` | Parent gene identifier |
 | `gene_name` | Gene symbol |
-| `mrna` | Estimated mRNA fragment count |
-| `nrna` | Estimated nRNA fragment count |
-| `length` | Transcript length (bp) |
+| `locus_id` | Locus identifier, or `-1` if no EM locus was formed |
 | `effective_length` | Fragment-length-corrected effective length |
+| `mrna` | Total mRNA fragment count |
+| `mrna_unambig` | Deterministic mRNA count |
+| `mrna_em` | EM-assigned mRNA count |
+| `mrna_high_conf` | Unambiguous plus high-confidence EM assignments |
+| `mrna_spliced` | Spliced mRNA count |
+| `nrna` | nRNA count fanned back from shared nRNA spans |
+| `rna_total` | `mrna + nrna` |
 | `tpm` | Transcripts Per Million (mRNA-based) |
+| `posterior_mean` | Mean posterior of EM assignments touching the transcript |
 
 TPM is computed from mRNA counts and effective lengths:
 
@@ -935,13 +889,14 @@ encoding the EM assignment:
 
 | Tag | Type | Description |
 |-----|------|-------------|
-| ZT | int | Assigned transcript index |
-| ZG | int | Assigned gene index |
-| ZP | float | Posterior probability |
-| ZW | float | Coverage weight |
-| ZC | int | Count column (splice type × strand) |
-| ZH | string | Candidate transcript hash |
-| ZN | int | Number of candidates |
+| ZT | string | Transcript ID, or `.` for intergenic or gDNA-only assignments |
+| ZG | string | Gene ID, or `.` when not applicable |
+| ZP | string | Assignment pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, or `chimeric` |
+| ZW | float | Posterior probability of the chosen assignment |
+| ZC | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
+| ZH | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise |
+| ZN | int | Number of competing candidate components |
+| ZS | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `ambiguous` |
 
 ---
 

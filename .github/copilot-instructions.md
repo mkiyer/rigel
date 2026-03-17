@@ -27,7 +27,10 @@ pytest tests/ --update-golden             # regenerate golden outputs after inte
 
 - Known pre-existing failure: `tests/test_calibration.py::TestStrandLLR::test_biased_toward_ss_favors_rna` — unrelated to scoring/EM.
 - Golden output regression files live in `tests/golden/`.
-- 953+ tests should pass (excluding the known failure above).
+
+### Test Failure Investigation
+
+When a test fails, your goal is not to reconfigure the test or change tolerances to make the test pass. Consider the test failure as a sentinel event, or critical information that alludes to a larger problem with the code or methodology. You goal is to understand WHY the test failed, determine the precise root cause of the failure, and evaluate possible solutions. If the solution is not clear, you should propose a plan for further investigation.
 
 ## Linting
 

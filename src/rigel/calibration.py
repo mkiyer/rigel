@@ -7,9 +7,11 @@ Three convergent signals drive the classification:
 
 1. **Density** — Gaussian model on log-density (log(n/L + ε)).
    gDNA and RNA components each have (μ, σ²) estimated via EM.
-2. **Strand balance** — Binomial model.  gDNA: Binom(k | n, 0.5);
-   RNA: Binom(k | n, SS).  LLR vanishes when SS = 0.5 (no magic
-   thresholds) and scales naturally with sample size.
+2. **Strand balance** — Beta-Binomial model with shared κ.
+   gDNA: BetaBin(k | n, κ/2, κ/2); RNA: BetaBin(k | n, κ·SS, κ·(1−SS)).
+   LLR vanishes when SS = 0.5 (no magic thresholds), tempers
+   overdispersion, and scales naturally with sample size.
+   Falls back to Binomial when κ cannot be estimated.
 3. **Fragment length** — FL_E frozen from spliced reads (gold
    standard); FL_G built iteratively from γ-weighted fragments.
 
@@ -21,7 +23,7 @@ Outputs:
 
 * Per-region posteriors γ_r ∈ [0, 1] — P(not expressed | data).
 * Global and per-chromosome gDNA density.
-* Strand symmetry concentration κ (post-hoc diagnostic).
+* Shared Beta-Binomial concentration κ.
 * gDNA fragment-length model.
 * Mixing proportion π.
 
@@ -93,26 +95,14 @@ def _golden_section_max(
     return (a + b) / 2.0
 
 
-def _beta_binom_loglik(
-    kappa: float,
-    k: np.ndarray,
-    n: np.ndarray,
-    w: np.ndarray,
-) -> float:
-    """γ-weighted log-likelihood of the symmetric Beta-Binomial.
+def _betaln_scalar(a: float, b: float) -> float:
+    """Log of the Beta function B(a, b) = Γ(a)Γ(b)/Γ(a+b)."""
+    return math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
 
-    BetaBinom(k | n, κ/2, κ/2), summed over observations with weights *w*.
-    Terms independent of κ are dropped.
-    """
-    alpha = kappa / 2.0
-    per_obs = (
-        _vec_lgamma(k + alpha)
-        + _vec_lgamma(n - k + alpha)
-        - _vec_lgamma(n + kappa)
-        + math.lgamma(kappa)
-        - 2.0 * math.lgamma(alpha)
-    )
-    return float(np.sum(w * per_obs))
+
+def _betaln_vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Vectorised log-Beta function."""
+    return _vec_lgamma(a) + _vec_lgamma(b) - _vec_lgamma(a + b)
 
 
 # ---------------------------------------------------------------------------
@@ -133,8 +123,11 @@ class GDNACalibration:
     # Per-reference-sequence gDNA density
     gdna_density_per_ref: dict[str, float]
 
-    # Strand symmetry concentration: Beta(κ/2, κ/2)
-    kappa_sym: float
+    # Shared Beta-Binomial concentration parameter κ.
+    # gDNA: BetaBin(k | n, κ/2, κ/2); RNA: BetaBin(k | n, κ·SS, κ·(1−SS)).
+    # A single κ is used for both components because overdispersion is
+    # an instrument/library property, not a biological one.
+    kappa: float
 
     # gDNA fragment-length model
     gdna_fl_model: FragmentLengthModel
@@ -156,18 +149,6 @@ class GDNACalibration:
     log_density: np.ndarray | None = None
     sense_frac: np.ndarray | None = None
     eligible: np.ndarray | None = None
-    density_bin_edges: np.ndarray | None = None
-
-    # --- Backward-compatible aliases ---
-    @property
-    def gdna_density(self) -> float:
-        """Alias for ``gdna_density_global``."""
-        return self.gdna_density_global
-
-    @property
-    def region_weights(self) -> np.ndarray:
-        """Alias for ``region_posteriors``."""
-        return self.region_posteriors
 
 
 # ---------------------------------------------------------------------------
@@ -349,43 +330,150 @@ def _compute_strand_llr_binomial(
     return llr
 
 
-# ---------------------------------------------------------------------------
-# κ estimation (Beta-Binomial MLE, forced mean = 0.5)
-# ---------------------------------------------------------------------------
-
-
-def estimate_kappa_sym(
+def _compute_strand_llr_betabinom(
     stats: dict[str, np.ndarray],
-    weights: np.ndarray,
+    strand_specificity: float,
+    kappa: float,
+    n_regions: int,
+) -> np.ndarray:
+    """Strand LLR using Beta-Binomial model with shared κ.
+
+    gDNA: BetaBinom(k_sense | n, κ/2, κ/2)  — symmetric around 0.5.
+    RNA:  BetaBinom(k_sense | n, κ·SS, κ·(1−SS)) — centered at SS.
+
+    LLR = log P_G − log P_E.  The combinatorial C(n,k) cancels exactly.
+
+    Key properties:
+    - When SS = 0.5, LLR = 0 for all regions (automatic).
+    - As κ → ∞, degenerates to the Binomial LLR.
+    - At finite κ, tempers false confidence from overdispersion.
+    - Low-count regions get small LLR (natural uncertainty handling).
+
+    Regions with ``gene_strand == 0`` or ``n_unspliced < 2`` get LLR = 0.
+    """
+    llr = np.zeros(n_regions, dtype=np.float64)
+
+    n_unspliced = stats["n_unspliced"]
+    n_pos = stats["n_pos"]
+    gene_strand = stats["gene_strand"]
+
+    valid = (n_unspliced >= 2) & (gene_strand != 0)
+    if not valid.any():
+        return llr
+
+    # Clip SS away from 0 and 1 for numerical safety
+    ss = float(np.clip(strand_specificity, _EPS, 1.0 - _EPS))
+
+    # k_sense: number of gene-sense reads per region
+    k_sense = np.empty(n_regions, dtype=np.float64)
+    k_sense[gene_strand == 1] = (
+        n_unspliced[gene_strand == 1] - n_pos[gene_strand == 1]
+    )
+    k_sense[gene_strand == -1] = n_pos[gene_strand == -1]
+
+    k = k_sense[valid]
+    n = n_unspliced[valid]
+
+    # gDNA: symmetric Beta-Binomial  α_G = κ/2,  β_G = κ/2
+    a_g = kappa / 2.0
+
+    # RNA: asymmetric Beta-Binomial  α_E = κ·SS,  β_E = κ·(1-SS)
+    a_e = kappa * ss
+    b_e = kappa * (1.0 - ss)
+
+    # log P_G = betaln(k + α_G, n-k + β_G) - betaln(α_G, β_G)
+    ll_g = _betaln_vec(k + a_g, n - k + a_g) - _betaln_scalar(a_g, a_g)
+    # log P_E = betaln(k + α_E, n-k + β_E) - betaln(α_E, β_E)
+    ll_e = _betaln_vec(k + a_e, n - k + b_e) - _betaln_scalar(a_e, b_e)
+
+    llr[valid] = ll_g - ll_e
+    return llr
+
+
+# ---------------------------------------------------------------------------
+# κ estimation (Marginal Beta-Binomial MLE)
+# ---------------------------------------------------------------------------
+
+
+def estimate_kappa_marginal(
+    stats: dict[str, np.ndarray],
+    gamma: np.ndarray,
+    strand_specificity: float,
 ) -> float | None:
-    """Beta-Binomial MLE estimation of κ_sym.
+    """Estimate shared κ via true marginal likelihood of the mixture.
 
-    Maximises the γ-weighted log-likelihood of the symmetric
-    Beta-Binomial model BetaBinom(k | n, κ/2, κ/2) via golden-section
-    search.  Unlike Method-of-Moments, this remains accurate at low
-    per-region counts because the Beta-Binomial generative model
-    inherently accounts for binomial sampling variance.
+    Maximises the exact conditional marginal log-likelihood:
 
-    Returns ``None`` when fewer than 3 valid (weighted, n ≥ 2) regions
-    are available.  Callers should disable the strand signal when κ is
-    ``None``.
+        ℓ(κ) = Σ_r log[ γ_r·P_G(x_r|κ) + (1−γ_r)·P_E(x_r|κ) ]
+
+    where P_G is BetaBin(k|n, κ/2, κ/2) and P_E is
+    BetaBin(k|n, κ·SS, κ·(1−SS)).
+
+    Unlike the symmetric-only estimator, this uses both mixture
+    components.  When one component has less than one effective
+    region of total weight (sum(γ) < 1 or sum(1−γ) < 1), the
+    responsibilities are too extreme for a reliable mixture fit,
+    mirroring the M-step's density fallback.  In that regime,
+    γ is reset to 0.5 (uniform), reducing the objective to fitting
+    a single symmetric Beta-Binomial — which is label-free and
+    always stable.
+
+    When SS = 0.5, P_G = P_E and the objective reduces to fitting
+    a single symmetric Beta-Binomial — completely stable.
+
+    Returns ``None`` when fewer than 3 valid (n ≥ 2) regions are
+    available.
     """
     n_unspliced = stats["n_unspliced"]
     n_pos = stats["n_pos"]
     strand_ratio = stats["strand_ratio"]
+    gene_strand = stats["gene_strand"]
 
-    valid = (n_unspliced >= 2) & (weights > 0) & np.isfinite(strand_ratio)
+    # Need gene_strand != 0 so we can compute k_sense for the RNA model.
+    valid = (n_unspliced >= 2) & np.isfinite(strand_ratio) & (gene_strand != 0)
     if valid.sum() < 3:
         return None
 
-    k = n_pos[valid]
     n = n_unspliced[valid]
-    w = weights[valid]
+    g = gamma[valid]
 
-    kappa = _golden_section_max(
-        lambda kap: _beta_binom_loglik(kap, k, n, w),
-        0.01, 500.0,
-    )
+    # When one component has less than 1 effective region of total
+    # weight, the γ values are too extreme to support a two-component
+    # fit (same logic as M-step density fallback).  Reset to 0.5 so
+    # the marginal reduces to the symmetric BetaBin — label-free
+    # and always stable.
+    if float(g.sum()) < 1.0 or float((1.0 - g).sum()) < 1.0:
+        g = np.full_like(g, 0.5)
+
+    # k_sense: gene-strand-corrected sense-read count (same as LLR code).
+    k_sense = np.empty(int(valid.sum()), dtype=np.float64)
+    gs = gene_strand[valid]
+    np_valid = n_pos[valid]
+    plus = gs == 1
+    minus = gs == -1
+    k_sense[plus] = n[plus] - np_valid[plus]
+    k_sense[minus] = np_valid[minus]
+
+    k = k_sense
+
+    ss = float(np.clip(strand_specificity, _EPS, 1.0 - _EPS))
+
+    # Pre-compute log-weights; log(0) → -inf which logaddexp handles.
+    with np.errstate(divide="ignore"):
+        log_g = np.log(g)
+        log_1mg = np.log(1.0 - g)
+
+    def _marginal_loglik(kappa: float) -> float:
+        a_g = kappa / 2.0
+        ll_g = _betaln_vec(k + a_g, n - k + a_g) - _betaln_scalar(a_g, a_g)
+
+        a_e = kappa * ss
+        b_e = kappa * (1.0 - ss)
+        ll_e = _betaln_vec(k + a_e, n - k + b_e) - _betaln_scalar(a_e, b_e)
+
+        return float(np.sum(np.logaddexp(log_g + ll_g, log_1mg + ll_e)))
+
+    kappa = _golden_section_max(_marginal_loglik, 0.01, 500.0)
     return max(kappa, 0.0)
 
 
@@ -610,15 +698,16 @@ def _seed_initial_partition(
 
         gdna_seed[gdna_candidates] = True
 
-    # Supplementary strand filter (when stranded library)
-    if strand_specificity > 0.55:
-        strand_symmetric = (
-            unspliced_only
-            & np.isfinite(sense_frac)
-            & (np.abs(sense_frac - 0.5) < 0.1)
-            & (gene_strand != 0)
-        )
-        gdna_seed |= strand_symmetric
+    # Supplementary strand filter: regions with symmetric strand balance
+    # are consistent with gDNA.  When SS ≈ 0.5 the filter has no bite
+    # (sense_frac is always near 0.5), so no explicit cutoff is needed.
+    strand_symmetric = (
+        unspliced_only
+        & np.isfinite(sense_frac)
+        & (np.abs(sense_frac - 0.5) < 0.1)
+        & (gene_strand != 0)
+    )
+    gdna_seed |= strand_symmetric
 
     gamma[gdna_seed] = 1.0
 
@@ -661,6 +750,7 @@ def _e_step(
     var_g: float,
     mu_r: float,
     var_r: float,
+    kappa: float | None = None,
     fl_region_ids: np.ndarray | None = None,
     fl_frag_lens: np.ndarray | None = None,
     gdna_fl_model: FragmentLengthModel | None = None,
@@ -673,7 +763,8 @@ def _e_step(
     - not eligible (n_total = 0 or L = 0) → γ = π (prior).
 
     Density channel uses Gaussian model (μ, σ²) per component.
-    Strand channel uses Binomial(k | n, p) — no histograms.
+    Strand channel uses Beta-Binomial when κ is provided,
+    otherwise falls back to Binomial.
     """
     n_spliced = stats["n_spliced"]
     n_regions = len(stats["n_total"])
@@ -698,10 +789,15 @@ def _e_step(
         log_d, mu_g, var_g, mu_r, var_r, soft, n_regions,
     )
 
-    # --- Strand LLR (Binomial) ---
-    llr_strand = _compute_strand_llr_binomial(
-        stats, strand_specificity, n_regions,
-    )
+    # --- Strand LLR (Beta-Binomial or Binomial fallback) ---
+    if kappa is not None:
+        llr_strand = _compute_strand_llr_betabinom(
+            stats, strand_specificity, kappa, n_regions,
+        )
+    else:
+        llr_strand = _compute_strand_llr_binomial(
+            stats, strand_specificity, n_regions,
+        )
 
     # --- Fragment length LLR (optional) ---
     llr_fl = np.zeros(n_regions, dtype=np.float64)
@@ -861,7 +957,8 @@ def calibrate_gdna(
     """Estimate gDNA parameters via Aggregate-First EM.
 
     Classifies regions as *not expressed* (gDNA only) or *expressed*
-    (gDNA + RNA) using Gaussian density and Binomial strand models.
+    (gDNA + RNA) using Gaussian density, Beta-Binomial strand, and
+    fragment-length models.
 
     Parameters
     ----------
@@ -908,7 +1005,7 @@ def calibrate_gdna(
             region_posteriors=np.ones(n_regions, dtype=np.float64),
             gdna_density_global=0.0,
             gdna_density_per_ref={},
-            kappa_sym=0.0,
+            kappa=0.0,
             gdna_fl_model=empty_fl,
             mixing_proportion=1.0,
             expressed_density=0.0,
@@ -920,7 +1017,6 @@ def calibrate_gdna(
             log_density=None,
             sense_frac=None,
             eligible=eligible if diagnostics else None,
-            density_bin_edges=None,
         )
 
     # ------------------------------------------------------------------
@@ -955,6 +1051,9 @@ def calibrate_gdna(
     gdna_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, gamma)
     rna_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, 1.0 - gamma)
 
+    # Initialize shared κ via marginal likelihood.
+    kappa = estimate_kappa_marginal(stats, gamma, strand_specificity)
+
     # Compute pi_soft: mixing proportion over unspliced ("soft") regions.
     # The E-step prior should reflect P(gDNA | unspliced), not P(gDNA)
     # globally, because hard-constraint spliced regions (gamma=0) are
@@ -973,10 +1072,12 @@ def calibrate_gdna(
     logger.info(
         "gDNA calibration init: π=%.3f, π_soft=%.3f, n_expressed=%d, "
         "n_gdna=%d, n_soft=%d, pristine=%s, ε=%.2e, "
-        "μ_G=%.2f, σ²_G=%.2f, μ_R=%.2f, σ²_R=%.2f",
+        "μ_G=%.2f, σ²_G=%.2f, μ_R=%.2f, σ²_R=%.2f, "
+        "κ=%s",
         pi, pi_soft, init_diag["n_expressed_seed"], init_diag["n_gdna_seed"],
         n_soft, init_diag["pristine_sample"], epsilon,
         mu_g, var_g, mu_r, var_r,
+        f"{kappa:.2f}" if kappa is not None else "None",
     )
 
     # ------------------------------------------------------------------
@@ -995,6 +1096,7 @@ def calibrate_gdna(
         gamma = _e_step(
             stats, pi_soft, log_d, eligible, strand_specificity,
             mu_g, var_g, mu_r, var_r,
+            kappa=kappa,
             fl_region_ids=fl_region_ids,
             fl_frag_lens=fl_frag_lens,
             gdna_fl_model=gdna_fl,
@@ -1005,6 +1107,11 @@ def calibrate_gdna(
         new_pi, new_lG, new_lE, mu_g, var_g, mu_r, var_r = _m_step(
             stats, gamma, log_d, eligible,
         )
+
+        # Update shared κ (self-consistent within EM)
+        new_kappa = estimate_kappa_marginal(stats, gamma, strand_specificity)
+        if new_kappa is not None:
+            kappa = new_kappa
 
         # Update FL models
         gdna_fl = build_gdna_fl_model(
@@ -1038,6 +1145,7 @@ def calibrate_gdna(
                 "var_g": var_g,
                 "mu_r": mu_r,
                 "var_r": var_r,
+                "kappa": kappa,
             })
 
         logger.debug(
@@ -1071,6 +1179,7 @@ def calibrate_gdna(
     final_gamma = _e_step(
         stats, pi_soft, log_d, eligible, strand_specificity,
         mu_g, var_g, mu_r, var_r,
+        kappa=kappa,
         fl_region_ids=fl_region_ids,
         fl_frag_lens=fl_frag_lens,
         gdna_fl_model=gdna_fl,
@@ -1079,13 +1188,14 @@ def calibrate_gdna(
 
     per_ref = _compute_per_ref_density(stats, final_gamma)
     final_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, final_gamma)
-    kappa_posthoc = estimate_kappa_sym(stats, final_gamma)
+
+    final_kappa = kappa if kappa is not None else 0.0
 
     return GDNACalibration(
         region_posteriors=final_gamma,
         gdna_density_global=lambda_G,
         gdna_density_per_ref=per_ref,
-        kappa_sym=kappa_posthoc if kappa_posthoc is not None else 0.0,
+        kappa=final_kappa,
         gdna_fl_model=final_fl,
         mixing_proportion=pi,
         expressed_density=lambda_E,
@@ -1097,5 +1207,4 @@ def calibrate_gdna(
         log_density=log_d if diagnostics else None,
         sense_frac=sense_frac if diagnostics else None,
         eligible=eligible if diagnostics else None,
-        density_bin_edges=None,
     )
