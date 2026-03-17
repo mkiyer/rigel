@@ -218,3 +218,50 @@ The gdna_init value might need scaling. If the EB estimate says 10 fragments, us
 Do you want me to start implementing Step 1 — making the prior component-type-aware? 
 
 Completed: *Produce comprehensive explanation* (4/4)
+
+
+
+
+Here is the concise, implementation-ready blueprint for the Tripartite Prior architecture. This completely decouples your prior policy (Python) from the EM engine (C++).
+
+### Phase 1: Configuration Updates (Python)
+
+Update your `EMConfig` class to support the new prior parameters and switch the default solver mode to ensure mathematical stability.
+
+1. Add `nrna_sparsity_alpha: float = 0.9` (Must be $< 1.0$).
+2. Add `gdna_prior_scale: float = 1.0` (To tune the strength of the EB prior).
+3. Change default EM mode: `mode: str = "vbem"` (Crucial for SQUAREM stability when $\alpha < 1$).
+
+### Phase 2: Prior Array Construction (Python)
+
+In `locus.py` (or wherever you prepare the data for the C++ solver), build the complete `prior` array explicitly for all $T + N + 1$ components before passing it to C++.
+
+1. **Initialize Array:** Create a float array of size `T + N + 1`.
+2. **mRNA (Indices `0` to `T-1`):** * Set to `alpha_flat` (e.g., `0.01`). (The C++ engine will add the OVR to this).
+3. **nRNA (Indices `T` to `T+N-1`):** * If eligible: Set to `nrna_sparsity_alpha` (e.g., `0.9`).
+* If dead (e.g., single-exon): Set to `0.0`.
+
+
+4. **gDNA (Index `T+N`):** * Set to `1.0 + (gdna_prior_scale * gdna_init)`.
+* *(Adding 1.0 ensures it safely acts as a flat uniform prior even if `gdna_init` is exactly 0).*
+
+
+
+### Phase 3: Engine Modification (C++)
+
+Modify `compute_ovr_prior_and_warm_start()` in `em_solver.cpp` so it respects the pre-computed nRNA and gDNA priors and restricts OVR solely to mature transcripts.
+
+1. **Restrict OVR:** Wrap the OVR coverage-sharing logic in a condition so it *only* adds mass to mRNA components (`if i < n_t`).
+2. **Preserve Purity:** Ensure the $\alpha$ values passed from Python for nRNA and gDNA are completely untouched by the OVR calculations.
+3. **Keep Warm Starts Unchanged:** You can continue using your intronic evidence (`nrna_init`) to seed the *initial* $\theta$ weights (the starting line) for the EM, but ensure they do not alter the `prior` array (the finish line).
+
+### Phase 4: Execution & Cleanup (C++)
+
+1. **Run VBEM:** Execute the EM using the `"vbem"` mode. The digamma function $\psi(\alpha)$ will automatically enforce the sparsity toll for nRNA and the continuous density anchor for gDNA.
+2. **Post-EM Truncation:** Because VBEM pushes sparse components asymptotically close to zero (e.g., `1e-8`) rather than absolute zero, add a final cleanup loop after the EM converges:
+* `if (theta[i] < 1e-5) theta[i] = 0.0;`
+* Re-normalize the remaining $\theta$ array to sum to 1.0.
+
+
+
+This plan requires zero changes to your actual EM math or Empirical Bayes logic. It strictly enforces the biological priors at the boundaries between Python and C++.

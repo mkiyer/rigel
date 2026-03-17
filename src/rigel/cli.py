@@ -420,6 +420,9 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("gdna_kappa_max", "em.gdna_kappa_max"),
     _ParamSpec("gdna_kappa_fallback", "em.gdna_kappa_fallback"),
     _ParamSpec("gdna_kappa_min_obs", "em.gdna_kappa_min_obs"),
+    _ParamSpec("nrna_sparsity_alpha", "em.nrna_sparsity_alpha"),
+    _ParamSpec("gdna_prior_scale", "em.gdna_prior_scale"),
+    _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("strand_prior_kappa", "scan.strand_prior_kappa"),
@@ -818,6 +821,29 @@ def build_parser() -> argparse.ArgumentParser:
         type=int, default=None,
         help="Minimum features for gDNA MoM κ estimation; "
              "fewer triggers fallback (default: 20).",
+    )
+    adv.add_argument(
+        "--nrna-sparsity-alpha", dest="nrna_sparsity_alpha",
+        type=float, default=None,
+        help="Dirichlet α for nRNA EM components. Values < 1.0 create "
+             "a sparsifying prior that drives weak nRNA components toward "
+             "zero.  1.0 = flat (off), 0.9 = mild, 0.5 = moderate, "
+             "0.3 = strong.  Default: 0.9.",
+    )
+    adv.add_argument(
+        "--gdna-prior-scale", dest="gdna_prior_scale",
+        type=float, default=None,
+        help="Scale factor for the Empirical Bayes gDNA prior anchor. "
+             "The gDNA prior is α = 1 + scale × gdna_init, where gdna_init "
+             "is the EB estimate.  0 = ignore EB (flat unit prior), "
+             "1.0 = default, higher = stronger anchor.  Default: 1.0.",
+    )
+    adv.add_argument(
+        "--em-mode", dest="em_mode",
+        choices=["map", "vbem"], default=None,
+        help="EM algorithm variant.  'map' uses MAP-EM with hard "
+             "max(0, n+α−1) updates; 'vbem' uses Variational Bayes EM "
+             "with digamma-based soft updates.  Default: vbem.",
     )
     adv.add_argument(
         "--strand-prior-kappa", dest="strand_prior_kappa",

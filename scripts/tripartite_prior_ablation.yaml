@@ -1,0 +1,86 @@
+# tripartite_prior_ablation.yaml — Exhaustive ablation of new prior system
+#
+# Goals:
+#   1. Characterize MAP-EM vs VBEM under the tripartite prior
+#   2. Sweep nrna_sparsity_alpha from OFF (1.0) to STRONG (0.3)
+#   3. Explore gdna_prior_scale (EB anchor strength)
+#   4. Stress-test across SS, gDNA contamination, mRNA/nRNA levels
+#
+# Prior formulas under test:
+#   mRNA:  α_flat + OVR_share (unchanged, controlled by prior_alpha/prior_gamma)
+#   nRNA:  nrna_sparsity_alpha  (< 1.0 → sparsifying Dirichlet)
+#   gDNA:  1.0 + gdna_prior_scale × gdna_init  (EB anchor)
+#
+# Grid: 16 TA1×NTA1 × 4 SS × 3 gDNA × 5 α × 3 scale × 2 mode = 5,760 runs
+# After degenerate skip: ~5,640 runs
+
+genome_length: 50000
+seed: 42
+read_length: 150
+
+# ── Fragment length: EQUAL for RNA and gDNA (isolates other effects) ─
+rna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+gdna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+# ── Transcript structures (simple locus) ─────────────────────────────
+transcripts:
+  # Gene A: multi-exon (+strand), main test subject
+  TA1:
+    strand: "+"
+    exons: [[1000, 1020], [5000, 5500], [12000, 13000]]
+
+  # Gene D: single-exon (nRNA indistinguishable from mRNA)
+  TD:
+    strand: "+"
+    exons: [[28000, 29000]]
+
+  # Gene E: isolated 2-exon on - strand (negative control)
+  TE:
+    strand: "-"
+    exons: [[40000, 41000], [45000, 46000]]
+
+# ── Nascent RNA groups ───────────────────────────────────────────────
+nrnas:
+  NTA1: ["+", 1000, 13000]
+  NTD: ["+", 28000, 29000]
+  NTE: ["-", 40000, 46000]
+
+# ── Sweep grid ───────────────────────────────────────────────────────
+# Uses n_rna_fragments mode: fix RNA at 10000, add gDNA as fraction
+sweep:
+  strand_specificity: [0.5, 0.75, 0.9, 1.0]
+  n_rna_fragments: 10000
+  gdna_fraction: [0.0, 0.3, 1.0]
+
+  # mRNA abundance: none → low → medium → high
+  TA1: [0, 50, 200, 1000]
+  # nRNA abundance: none → low → medium → high
+  NTA1: [0, 50, 200, 1000]
+
+  # Unexpressed controls: always 0
+  TD: 0
+  TE: 0
+
+# ── Hyperparameter sweep ─────────────────────────────────────────────
+params:
+  em:
+    # nRNA sparsity prior: 1.0 = off (flat), < 1.0 = sparsifying
+    # In MAP-EM:  max(0, n_k + α - 1), so α<1 zeroes weak components
+    # In VBEM:    ψ(α<1) < 0 creates soft penalty on small components
+    nrna_sparsity_alpha: [0.3, 0.5, 0.7, 0.9, 1.0]
+
+    # gDNA EB anchor: α_gDNA = 1.0 + scale × gdna_init
+    # 0.0 = ignore EB (flat prior), 1.0 = default, 5.0 = strong anchor
+    gdna_prior_scale: [0.0, 1.0, 5.0]
+
+    # Algorithm variant: MAP-EM vs VBEM
+    mode: ["map", "vbem"]

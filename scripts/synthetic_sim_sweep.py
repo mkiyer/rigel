@@ -924,8 +924,8 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         row["cal_gdna_fl_mean_err"] = ""
 
                     row["cal_n_seed"] = (
-                        int(cal.seed_mask.sum())
-                        if cal.seed_mask is not None else "")
+                        f"π={cal.mixing_proportion:.3f}"
+                        if hasattr(cal, 'mixing_proportion') else "")
                     row["cal_n_iterations"] = cal.n_iterations
                     row["cal_converged"] = cal.converged
                     row["cal_mean_weight"] = round(

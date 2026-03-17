@@ -225,8 +225,17 @@ through component-specific bias profiles:
 
 ## 8. EM objective
 
-Rigel performs MAP-EM on the component simplex with effective-length
-normalization and a coverage-weighted One Virtual Read prior.
+Rigel solves a Bayesian EM on the component simplex with effective-length
+normalization and a tripartite prior system that assigns different Dirichlet
+hyperparameters to each component type (mRNA, nRNA, gDNA).
+
+Two solver modes are available, selected via `--em-mode`:
+
+- **MAP-EM** (`map`): M-step uses hard $\max(0,\, n_k + \alpha_k - 1)$ updates.
+- **VBEM** (`vbem`, default): M-step uses digamma-based variational updates
+  $\exp(\psi(n_k + \alpha_k))$, yielding softer posterior estimates.
+
+Both modes share the same E-step, SQUAREM acceleration, and pruning logic.
 
 ### 8.1 E-step
 
@@ -239,8 +248,22 @@ The component simplex is updated from:
 
 - deterministic counts
 - expected ambiguous counts
-- flat Dirichlet prior mass
-- OVR prior mass
+- component-type-specific Dirichlet prior mass ("tripartite prior")
+
+The tripartite prior assigns different $\alpha$ values by component type:
+
+| Component type | Prior $\alpha_k$ | Controlled by |
+|----------------|-------------------|---------------|
+| **mRNA** | $\alpha_{\text{flat}} + \gamma \cdot \text{OVR}_k$ | `--em-prior-alpha`, `--em-prior-gamma` |
+| **nRNA** | `nrna_sparsity_alpha` (default 0.9) | `--nrna-sparsity-alpha` |
+| **gDNA** | $1 + \text{scale} \times \text{gdna\_init}$ | `--gdna-prior-scale` |
+
+For mRNA, the One Virtual Read (OVR) term $\gamma \cdot \text{OVR}_k$
+adds coverage-weighted mass proportional to each transcript's effective length.
+For nRNA, values of $\alpha < 1$ create a sparsifying prior that drives
+weakly-supported nRNA components toward zero without affecting mRNA accuracy.
+For gDNA, the EB-anchored prior anchors the gDNA component to its empirical
+Bayes initialization estimate.
 
 When a locus contains shared nRNA spans, the native M-step switches into a
 hierarchical nRNA-group mode and enforces one nascent-fraction update per nRNA
@@ -320,7 +343,7 @@ gDNA is modeled as one merged locus-level component.
 Rigel estimates a global intergenic density from total intergenic fragments and
 the inferred intergenic territory of the reference.
 
-### 10.2 Hierarchy
+### 10.2 Hierarchy and prior scale
 
 The gDNA prior hierarchy is:
 
@@ -334,6 +357,8 @@ with optional auto-estimation of:
 - `gdna_kappa_locus`
 
 using Method of Moments and evidence thresholds.
+
+The per-locus gDNA prior is constructed as $\alpha_{\text{gDNA}} = 1 + \text{gdna\_prior\_scale} \times \text{gdna\_init}$, where `gdna_init` is the EB-estimated gDNA count for the locus. Setting `gdna_prior_scale = 0` disables the EB anchor and uses a flat unit prior.
 
 ### 10.3 gDNA strand penalty
 

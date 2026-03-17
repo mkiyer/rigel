@@ -41,6 +41,57 @@ _STRAND_DENOM_EPS: float = 0.01
 
 
 # ---------------------------------------------------------------------------
+# Union genomic footprint: merged interval sum across chromosomes
+# ---------------------------------------------------------------------------
+
+
+def _compute_union_genomic_footprint(
+    transcript_indices: np.ndarray,
+    t_refs: np.ndarray,
+    t_starts: np.ndarray,
+    t_ends: np.ndarray,
+) -> int:
+    """Compute the union genomic footprint for a set of transcripts.
+
+    Groups transcript intervals by chromosome, merges overlapping/adjacent
+    intervals on each chromosome, and sums the merged lengths.  Intergenic
+    gaps between disconnected genes on the same chromosome are excluded
+    because gDNA from those regions does not compete within this locus.
+
+    For multi-chromosome mega-loci (created by multimappers), the result
+    is the sum of per-chromosome merged footprints — NOT the cross-
+    chromosome ``max(ends) - min(starts)`` which was the original bug.
+
+    Returns
+    -------
+    int
+        Total merged genomic span in bases (>= 1).
+    """
+    refs = t_refs[transcript_indices]
+    starts = t_starts[transcript_indices]
+    ends = t_ends[transcript_indices]
+
+    # Group intervals by chromosome
+    by_ref: dict = defaultdict(list)
+    for i in range(len(transcript_indices)):
+        by_ref[refs[i]].append((int(starts[i]), int(ends[i])))
+
+    total = 0
+    for intervals in by_ref.values():
+        intervals.sort()
+        cur_start, cur_end = intervals[0]
+        for s, e in intervals[1:]:
+            if s <= cur_end:
+                cur_end = max(cur_end, e)
+            else:
+                total += cur_end - cur_start
+                cur_start, cur_end = s, e
+        total += cur_end - cur_start
+
+    return max(total, 1)
+
+
+# ---------------------------------------------------------------------------
 # Locus builder: C++ union-find connected components
 # ---------------------------------------------------------------------------
 
@@ -96,12 +147,22 @@ def build_loci(
         nrna_to_t_offsets, nrna_to_t_indices,
     )
 
+    # Pre-fetch per-transcript chromosome/start/end for footprint computation
+    t_refs = index.t_df["ref"].values
+    t_starts_all = index.t_df["start"].values
+    t_ends_all = index.t_df["end"].values
+
     loci = []
     for lid in range(n_comp):
+        t_idx = ct_flat[ct_off[lid]:ct_off[lid + 1]].copy()
+        gdna_span = _compute_union_genomic_footprint(
+            t_idx, t_refs, t_starts_all, t_ends_all,
+        )
         loci.append(Locus(
             locus_id=lid,
-            transcript_indices=ct_flat[ct_off[lid]:ct_off[lid + 1]].copy(),
+            transcript_indices=t_idx,
             unit_indices=cu_flat[cu_off[lid]:cu_off[lid + 1]].copy(),
+            gdna_span=gdna_span,
         ))
 
     return loci
@@ -144,8 +205,8 @@ def build_locus_em_data(
         Empirical Bayes estimated gDNA count for this locus.
     _cache : dict or None
         Optional pre-extracted arrays to avoid repeated DataFrame
-        access.  Expected keys: ``"t_starts"``, ``"t_ends"``,
-        ``"t_lengths"``, ``"local_map"`` (reusable scratch buffer).
+        access.  Expected keys: ``"t_lengths"``, ``"local_map"``
+        (reusable scratch buffer).
     """
     t_arr = locus.transcript_indices
     n_t = len(t_arr)
@@ -283,17 +344,9 @@ def build_locus_em_data(
     valid_gdna = (~is_spl) & np.isfinite(gdna_lls)
     n_gdna = int(valid_gdna.sum())
 
-    # Compute true locus span for gDNA per-fragment effective length.
-    # Span extends from leftmost transcript/fragment start to rightmost
-    # transcript/fragment end, capturing any overhanging fragments.
-    _t_starts_all = _cache["t_starts"] if _cache is not None else index.t_df["start"].values
-    _t_ends_all = _cache["t_ends"] if _cache is not None else index.t_df["end"].values
-    t_starts = _t_starts_all[t_arr]
-    t_ends = _t_ends_all[t_arr]
-    locus_start = int(t_starts.min())
-    locus_end = int(t_ends.max())
+    # Use pre-computed union genomic footprint for gDNA bias profile.
     footprints = em_data.genomic_footprints[locus.unit_indices]
-    locus_span = float(locus_end - locus_start)
+    locus_span = float(locus.gdna_span)
 
     if n_gdna > 0:
         gdna_units = np.arange(n_local_units, dtype=np.int32)[valid_gdna]

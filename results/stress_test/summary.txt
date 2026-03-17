@@ -1,0 +1,81 @@
+====================================================================================================
+CALIBRATION STRESS TEST SUMMARY
+====================================================================================================
+
+Total scenarios: 230
+Converged: 211/230
+
+Overall AUC:    mean=0.997  min=0.939  max=1.000
+Overall gDNA F1: mean=0.848  min=0.000  max=1.000
+Overall RNA F1:  mean=0.940  min=0.000  max=1.000
+Overall π error: mean=-0.0912  std=0.1730
+
+--------------------------------------------------------------------------------
+BY STRAND SPECIFICITY
+--------------------------------------------------------------------------------
+  SS=0.50 (n=38): auroc=0.988  gdna_f1=0.450  rna_f1=0.798  pi_error=-0.290  separation=0.400
+  SS=0.60 (n=36): auroc=0.994  gdna_f1=0.681  rna_f1=0.869  pi_error=-0.190  separation=0.585
+  SS=0.75 (n=36): auroc=1.000  gdna_f1=0.995  rna_f1=0.997  pi_error=-0.016  separation=0.959
+  SS=0.90 (n=37): auroc=1.000  gdna_f1=0.996  rna_f1=0.998  pi_error=-0.016  separation=0.961
+  SS=0.95 (n=46): auroc=1.000  gdna_f1=0.953  rna_f1=0.974  pi_error=-0.029  separation=0.962
+  SS=0.99 (n=36): auroc=1.000  gdna_f1=0.996  rna_f1=0.998  pi_error=-0.016  separation=0.961
+  SS=1.00 (n=1): auroc=1.000  gdna_f1=0.999  rna_f1=0.999  pi_error=-0.004  separation=0.991
+
+--------------------------------------------------------------------------------
+BY gDNA CONTAMINATION LEVEL
+--------------------------------------------------------------------------------
+  pristine(<15%) (n=2): auroc=1.000  gdna_f1=0.488  rna_f1=0.999  pi_error=0.001
+  low(15-35%) (n=91): auroc=0.999  gdna_f1=0.969  rna_f1=0.990  pi_error=-0.015
+  medium(35-55%) (n=99): auroc=0.995  gdna_f1=0.768  rna_f1=0.926  pi_error=-0.130
+  high(55-80%) (n=36): auroc=0.998  gdna_f1=0.795  rna_f1=0.874  pi_error=-0.163
+  dominant(>80%) (n=2): auroc=1.000  gdna_f1=0.574  rna_f1=0.500  pi_error=-0.415
+
+--------------------------------------------------------------------------------
+BY FRAGMENT-LENGTH OVERLAP
+--------------------------------------------------------------------------------
+  gDNA_FL_mean=250 (n=86): auroc=0.997  gdna_f1=0.841  rna_f1=0.935
+  gDNA_FL_mean=300 (n=72): auroc=0.997  gdna_f1=0.852  rna_f1=0.943
+  gDNA_FL_mean=400 (n=72): auroc=0.997  gdna_f1=0.852  rna_f1=0.943
+
+--------------------------------------------------------------------------------
+BY NASCENT-RNA PRESENCE
+--------------------------------------------------------------------------------
+  n_nrna=0 (n=84): auroc=1.000  gdna_f1=0.837  rna_f1=0.922
+  n_nrna=150 (n=72): auroc=0.997  gdna_f1=0.848  rna_f1=0.943  mean_nrna_posterior=0.017
+  n_nrna=300 (n=72): auroc=0.993  gdna_f1=0.855  rna_f1=0.956  mean_nrna_posterior=0.006
+  n_nrna=500 (n=2): auroc=1.000  gdna_f1=0.994  rna_f1=0.996  mean_nrna_posterior=0.004
+
+--------------------------------------------------------------------------------
+WORST 15 SCENARIOS (by AUC)
+--------------------------------------------------------------------------------
+  ss0.50_dominant_gdna_fl_identical_high_nrna: AUC=0.939  gF1=0.000  rF1=0.632  π_err=-0.538  sep=0.000
+  ss0.50_dominant_gdna_fl_moderate_high_nrna: AUC=0.939  gF1=0.000  rF1=0.632  π_err=-0.538  sep=0.000
+  ss0.50_dominant_gdna_fl_separated_high_nrna: AUC=0.939  gF1=0.000  rF1=0.632  π_err=-0.538  sep=0.000
+  ss0.50_equal_gdna_fl_identical_high_nrna: AUC=0.956  gF1=0.000  rF1=0.762  π_err=-0.385  sep=0.000
+  ss0.50_equal_gdna_fl_moderate_high_nrna: AUC=0.956  gF1=0.000  rF1=0.762  π_err=-0.385  sep=0.000
+  ss0.50_equal_gdna_fl_separated_high_nrna: AUC=0.956  gF1=0.000  rF1=0.762  π_err=-0.385  sep=0.000
+  ss0.60_equal_gdna_fl_identical_high_nrna: AUC=0.963  gF1=0.000  rF1=0.761  π_err=-0.384  sep=-0.002
+  ss0.60_equal_gdna_fl_moderate_high_nrna: AUC=0.963  gF1=0.000  rF1=0.761  π_err=-0.384  sep=-0.002
+  ss0.60_equal_gdna_fl_separated_high_nrna: AUC=0.963  gF1=0.000  rF1=0.761  π_err=-0.384  sep=-0.002
+  ss0.50_dominant_gdna_fl_identical_mod_nrna: AUC=0.980  gF1=0.000  rF1=0.559  π_err=-0.604  sep=0.001
+  ss0.50_dominant_gdna_fl_moderate_mod_nrna: AUC=0.980  gF1=0.000  rF1=0.559  π_err=-0.604  sep=0.001
+  ss0.50_dominant_gdna_fl_separated_mod_nrna: AUC=0.980  gF1=0.000  rF1=0.559  π_err=-0.604  sep=0.001
+  ss0.60_equal_gdna_fl_identical_mod_nrna: AUC=0.988  gF1=0.000  rF1=0.722  π_err=-0.434  sep=-0.002
+  ss0.60_equal_gdna_fl_moderate_mod_nrna: AUC=0.988  gF1=0.000  rF1=0.722  π_err=-0.434  sep=-0.002
+  ss0.60_equal_gdna_fl_separated_mod_nrna: AUC=0.988  gF1=0.000  rF1=0.722  π_err=-0.434  sep=-0.002
+
+--------------------------------------------------------------------------------
+BEST 10 SCENARIOS (by AUC)
+--------------------------------------------------------------------------------
+  ss0.50_low_gdna_fl_identical_no_nrna: AUC=1.000  gF1=0.953  rF1=0.989  π_err=-0.019
+  ss0.50_low_gdna_fl_moderate_no_nrna: AUC=1.000  gF1=0.953  rF1=0.989  π_err=-0.019
+  ss0.50_low_gdna_fl_separated_no_nrna: AUC=1.000  gF1=0.953  rF1=0.989  π_err=-0.019
+  ss0.50_med_gdna_fl_identical_no_nrna: AUC=1.000  gF1=0.892  rF1=0.939  π_err=-0.074
+  ss0.50_med_gdna_fl_moderate_no_nrna: AUC=1.000  gF1=0.892  rF1=0.939  π_err=-0.074
+  ss0.50_med_gdna_fl_separated_no_nrna: AUC=1.000  gF1=0.892  rF1=0.939  π_err=-0.074
+  ss0.50_equal_gdna_fl_identical_no_nrna: AUC=1.000  gF1=0.000  rF1=0.667  π_err=-0.500
+  ss0.50_equal_gdna_fl_moderate_no_nrna: AUC=1.000  gF1=0.000  rF1=0.667  π_err=-0.500
+  ss0.50_equal_gdna_fl_separated_no_nrna: AUC=1.000  gF1=0.000  rF1=0.667  π_err=-0.500
+  ss0.50_dominant_gdna_fl_identical_no_nrna: AUC=1.000  gF1=0.000  rF1=0.462  π_err=-0.700
+
+No scenarios below AUC threshold 0.75.

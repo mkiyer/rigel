@@ -119,6 +119,7 @@ class Locus:
     locus_id: int
     transcript_indices: np.ndarray
     unit_indices: np.ndarray
+    gdna_span: int
 
 
 # ======================================================================

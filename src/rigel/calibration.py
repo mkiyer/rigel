@@ -1,25 +1,38 @@
-"""rigel.calibration — Iterative seed-extend gDNA calibration.
+"""rigel.calibration — Aggregate-First EM for gDNA deconvolution.
 
-Estimates global gDNA nuisance parameters (κ_sym strand symmetry
-concentration, fragment-length distribution) from region-level evidence
-produced by :mod:`rigel.region_evidence`.
+Classifies genomic regions as *not expressed* (gDNA only) or *expressed*
+(gDNA + RNA) using a two-component mixture model.
 
-Algorithm overview:
+Three convergent signals drive the classification:
 
-1. Compute per-region summary statistics from counts + annotation.
-2. Select *seed* regions (high-confidence gDNA-only: zero spliced,
-   strand-symmetric for stranded data, low-density for unstranded).
-3. Estimate initial κ_sym and gDNA FL from seed.
-4. Score all regions → per-region gDNA weights w_r ∈ [0, 1].
-5. Re-estimate parameters using weights; iterate until convergence.
+1. **Density** — Gaussian model on log-density (log(n/L + ε)).
+   gDNA and RNA components each have (μ, σ²) estimated via EM.
+2. **Strand balance** — Binomial model.  gDNA: Binom(k | n, 0.5);
+   RNA: Binom(k | n, SS).  LLR vanishes when SS = 0.5 (no magic
+   thresholds) and scales naturally with sample size.
+3. **Fragment length** — FL_E frozen from spliced reads (gold
+   standard); FL_G built iteratively from γ-weighted fragments.
 
-See ``docs/rigel_revision_impl/gdna_calibration_plan.md`` for full design.
+Hard constraint: ``n_spliced > 0 → γ = 0`` (definitively expressed).
+Zero-count regions are excluded from estimation; their posterior
+defaults to the prior π.
+
+Outputs:
+
+* Per-region posteriors γ_r ∈ [0, 1] — P(not expressed | data).
+* Global and per-chromosome gDNA density.
+* Strand symmetry concentration κ (post-hoc diagnostic).
+* gDNA fragment-length model.
+* Mixing proportion π.
+
+See ``docs/rigel_revision_plan/calibration_v3_aggregate_em.md``.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -29,34 +42,77 @@ from .frag_length_model import FragmentLengthModel
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Defaults
+# Small constant to avoid division by zero.
+# ---------------------------------------------------------------------------
+_EPS: float = 1e-12
+
+# ---------------------------------------------------------------------------
+# Initialization thresholds.
+GDNA_INIT_DENSITY_PERCENTILE: float = 0.10
+GDNA_INIT_MIN_REGIONS: int = 100
+
+# ---------------------------------------------------------------------------
+# Vectorized log-gamma (for Beta-Binomial MLE)
+# ---------------------------------------------------------------------------
+_lgamma_vec = np.frompyfunc(math.lgamma, 1, 1)
+
+
+def _vec_lgamma(x: np.ndarray) -> np.ndarray:
+    """Vectorized log-gamma via ``math.lgamma``."""
+    return _lgamma_vec(x).astype(np.float64)
+
+
+# ---------------------------------------------------------------------------
+# 1-D golden-section maximiser (no scipy)
 # ---------------------------------------------------------------------------
 
-#: Minimum unspliced fragment count for a region to be eligible.
-MIN_COVERAGE: int = 10
 
-#: z-score threshold for strand symmetry in seed selection.
-#: 1.5 corresponds roughly to a two-sided binomial p ≈ 0.13.
-SEED_SYMMETRY_ZSCORE: float = 1.5
+def _golden_section_max(
+    f,
+    a: float,
+    b: float,
+    tol: float = 1e-4,
+    max_iter: int = 100,
+) -> float:
+    """Argmax of *f* on [*a*, *b*] via golden-section search."""
+    gr = (math.sqrt(5.0) + 1.0) / 2.0
+    c = b - (b - a) / gr
+    d = a + (b - a) / gr
+    fc, fd = f(c), f(d)
+    for _ in range(max_iter):
+        if abs(b - a) < tol:
+            break
+        if fc > fd:
+            b, d, fd = d, c, fc
+            c = b - (b - a) / gr
+            fc = f(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + (b - a) / gr
+            fd = f(d)
+    return (a + b) / 2.0
 
-#: Percentile threshold for coverage density in seed selection.
-#: Applied among zero-spliced, symmetric, sufficient-coverage regions.
-SEED_COVERAGE_PERCENTILE: float = 50.0
 
-#: Iteration limits.
-MAX_ITERATIONS: int = 20
-CONVERGENCE_TOL: float = 0.01
+def _beta_binom_loglik(
+    kappa: float,
+    k: np.ndarray,
+    n: np.ndarray,
+    w: np.ndarray,
+) -> float:
+    """γ-weighted log-likelihood of the symmetric Beta-Binomial.
 
-#: κ bounds.
-KAPPA_MIN: float = 1.0
-KAPPA_MAX: float = 10_000.0
-KAPPA_FALLBACK: float = 50.0
-
-#: Minimum number of weighted regions for κ estimation.
-KAPPA_MIN_OBS: int = 10
-
-#: Small constant to avoid division by zero.
-_EPS: float = 1e-12
+    BetaBinom(k | n, κ/2, κ/2), summed over observations with weights *w*.
+    Terms independent of κ are dropped.
+    """
+    alpha = kappa / 2.0
+    per_obs = (
+        _vec_lgamma(k + alpha)
+        + _vec_lgamma(n - k + alpha)
+        - _vec_lgamma(n + kappa)
+        + math.lgamma(kappa)
+        - 2.0 * math.lgamma(alpha)
+    )
+    return float(np.sum(w * per_obs))
 
 
 # ---------------------------------------------------------------------------
@@ -66,19 +122,52 @@ _EPS: float = 1e-12
 
 @dataclass(frozen=True)
 class GDNACalibration:
-    """Results from iterative gDNA calibration."""
+    """Results from EM two-component gDNA deconvolution."""
 
+    # Per-region posteriors: γ_r = P(not expressed | data)
+    region_posteriors: np.ndarray  # (n_regions,) float64 ∈ [0, 1]
+
+    # Global gDNA density (frags / bp)
+    gdna_density_global: float
+
+    # Per-reference-sequence gDNA density
+    gdna_density_per_ref: dict[str, float]
+
+    # Strand symmetry concentration: Beta(κ/2, κ/2)
     kappa_sym: float
-    gdna_density: float
+
+    # gDNA fragment-length model
     gdna_fl_model: FragmentLengthModel
-    region_weights: np.ndarray  # (n_regions,) float64 ∈ [0, 1]
+
+    # Mixing proportion: π = P(not expressed)
+    mixing_proportion: float
+
+    # Mean density of expressed regions (frags / bp)
+    expressed_density: float
+
+    # Convergence metadata
     n_iterations: int
     converged: bool
-    # Diagnostics (populated when diagnostics=True in calibrate_gdna)
+
+    # Diagnostics (populated when diagnostics=True)
     region_stats: dict[str, np.ndarray] | None = None
-    seed_mask: np.ndarray | None = None
-    kappa_history: list[float] | None = None
-    density_history: list[float] | None = None
+    iteration_history: list[dict] | None = None
+    init_diagnostics: dict | None = None
+    log_density: np.ndarray | None = None
+    sense_frac: np.ndarray | None = None
+    eligible: np.ndarray | None = None
+    density_bin_edges: np.ndarray | None = None
+
+    # --- Backward-compatible aliases ---
+    @property
+    def gdna_density(self) -> float:
+        """Alias for ``gdna_density_global``."""
+        return self.gdna_density_global
+
+    @property
+    def region_weights(self) -> np.ndarray:
+        """Alias for ``region_posteriors``."""
+        return self.region_posteriors
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +192,8 @@ def compute_region_stats(
     Returns
     -------
     dict with keys: n_pos, n_neg, n_unspliced, n_spliced, n_total,
-    strand_ratio, splice_rate, density, gene_strand, region_length.
-    All arrays have shape ``(n_regions,)`` and dtype float64.
+    strand_ratio, splice_rate, density, gene_strand, region_length,
+    tx_pos, tx_neg, exon_pos, exon_neg, ref.
     """
     n_pos = region_counts["n_unspliced_pos"].values.astype(np.float64)
     n_neg = region_counts["n_unspliced_neg"].values.astype(np.float64)
@@ -129,12 +218,29 @@ def compute_region_stats(
     has_length = region_length > 0
     density[has_length] = n_total[has_length] / region_length[has_length]
 
-    # Gene strand context: +1 only‑sense, -1 only‑antisense, 0 ambiguous.
+    # Gene strand context: +1 only-sense, -1 only-antisense, 0 ambiguous.
     tx_pos = region_df["tx_pos"].values.astype(bool)
     tx_neg = region_df["tx_neg"].values.astype(bool)
     gene_strand = np.zeros(len(region_df), dtype=np.int8)
     gene_strand[tx_pos & ~tx_neg] = 1
     gene_strand[~tx_pos & tx_neg] = -1
+
+    # Annotation flags.
+    exon_pos = (
+        region_df["exon_pos"].values.astype(bool)
+        if "exon_pos" in region_df.columns
+        else np.zeros(len(region_df), dtype=bool)
+    )
+    exon_neg = (
+        region_df["exon_neg"].values.astype(bool)
+        if "exon_neg" in region_df.columns
+        else np.zeros(len(region_df), dtype=bool)
+    )
+    ref = (
+        region_df["ref"].values
+        if "ref" in region_df.columns
+        else np.full(len(region_df), "unknown", dtype=object)
+    )
 
     return {
         "n_pos": n_pos,
@@ -147,349 +253,168 @@ def compute_region_stats(
         "density": density,
         "gene_strand": gene_strand,
         "region_length": region_length,
+        "tx_pos": tx_pos,
+        "tx_neg": tx_neg,
+        "exon_pos": exon_pos,
+        "exon_neg": exon_neg,
+        "ref": ref,
     }
 
 
 # ---------------------------------------------------------------------------
-# Seed selection
+# Empirical strand histogram
 # ---------------------------------------------------------------------------
 
 
-def select_seed(
+def compute_sense_fraction(
+    stats: dict[str, np.ndarray],
+) -> np.ndarray:
+    """Convert per-region strand_ratio to gene-strand-normalised sense fraction.
+
+    R1-antisense convention (dUTP / TruSeq Stranded):
+
+    * ``gene_strand == +1``: RNA reads land on − strand, so
+      ``sense_frac = 1 − strand_ratio``.
+    * ``gene_strand == -1``: RNA reads land on + strand, so
+      ``sense_frac = strand_ratio``.
+    * ``gene_strand == 0``: ambiguous — set to NaN (no strand signal).
+
+    For gDNA, sense_frac is ~0.5 regardless of gene_strand.
+    For RNA, sense_frac ≈ SS (close to 1.0 for stranded libraries).
+
+    Returns an array of shape ``(n_regions,)`` with NaN where strand
+    signal is unavailable (gene_strand == 0 or n_unspliced < 2).
+    """
+    strand_ratio = stats["strand_ratio"]
+    gene_strand = stats["gene_strand"]
+    n_unspliced = stats["n_unspliced"]
+
+    sf = np.full(len(strand_ratio), np.nan, dtype=np.float64)
+
+    valid = np.isfinite(strand_ratio) & (n_unspliced >= 2)
+    plus = valid & (gene_strand == 1)
+    minus = valid & (gene_strand == -1)
+
+    sf[plus] = 1.0 - strand_ratio[plus]
+    sf[minus] = strand_ratio[minus]
+
+    return sf
+
+
+def _compute_strand_llr_binomial(
     stats: dict[str, np.ndarray],
     strand_specificity: float,
-    *,
-    min_coverage: int = MIN_COVERAGE,
-    symmetry_zscore: float = SEED_SYMMETRY_ZSCORE,
-    coverage_percentile: float = SEED_COVERAGE_PERCENTILE,
+    n_regions: int,
 ) -> np.ndarray:
-    """Select high-confidence gDNA seed regions.
+    """Strand LLR using simple Binomial model.
 
-    Always applies ALL three criteria simultaneously:
+    gDNA: Binom(k_sense | n, 0.5)  — gDNA is strand-symmetric.
+    RNA:  Binom(k_sense | n, SS)   — RNA follows strand specificity.
 
-    1. Zero spliced fragments + sufficient unspliced coverage.
-    2. Strand symmetry (binomial z-test for p = 0.5).  When the
-       library is unstranded (SS ≈ 0.5) this test is ~vacuous
-       (nearly all regions pass), which is the correct behaviour.
-    3. Low coverage density (bottom percentile among regions that
-       pass criteria 1–2).  This is the primary discriminator
-       for unstranded data and provides an additional safety
-       margin for stranded data.
+    LLR = k·log(0.5/SS) + (n−k)·log(0.5/(1−SS)).
 
-    No hard threshold on strand specificity is needed — the
-    informativeness of each criterion emerges naturally from the
-    data.
+    When SS = 0.5 every term is zero — no magic threshold needed.
+    Signal scales naturally with sample size: low-count regions
+    contribute minimal LLR.
 
-    Parameters
-    ----------
-    stats : dict
-        Output of :func:`compute_region_stats`.
-    strand_specificity : float
-        Library strand specificity ∈ [0.5, 1.0].  Documented for
-        API consistency; not used directly (symmetry test is
-        model-free).
-
-    Returns
-    -------
-    np.ndarray
-        Boolean mask of shape ``(n_regions,)`` — True for seed regions.
+    Regions with ``gene_strand == 0`` or ``n_unspliced < 2`` get LLR = 0.
     """
+    llr = np.zeros(n_regions, dtype=np.float64)
+
     n_unspliced = stats["n_unspliced"]
-    n_spliced = stats["n_spliced"]
     n_pos = stats["n_pos"]
-    density = stats["density"]
+    gene_strand = stats["gene_strand"]
 
-    # 1. Zero spliced + minimum coverage
-    mask = (n_spliced == 0) & (n_unspliced >= min_coverage)
+    valid = (n_unspliced >= 2) & (gene_strand != 0)
+    if not valid.any():
+        return llr
 
-    # 2. Strand symmetry: z = |2k - n| / sqrt(n), require z < threshold
-    z = np.abs(2.0 * n_pos - n_unspliced) / np.sqrt(
-        np.maximum(n_unspliced, 1.0)
+    # Clip SS away from 0 and 1 for numerical safety
+    ss = float(np.clip(strand_specificity, _EPS, 1.0 - _EPS))
+
+    # k_sense: number of gene-sense reads per region
+    k_sense = np.empty(n_regions, dtype=np.float64)
+    k_sense[gene_strand == 1] = (
+        n_unspliced[gene_strand == 1] - n_pos[gene_strand == 1]
     )
-    mask = mask & (z < symmetry_zscore)
+    k_sense[gene_strand == -1] = n_pos[gene_strand == -1]
 
-    # 3. Low coverage density: bottom percentile among qualifying
-    qualifying = mask & (density > 0)
-    if qualifying.any():
-        threshold = np.percentile(
-            density[qualifying], coverage_percentile
-        )
-        mask = mask & (density <= threshold)
+    k = k_sense[valid]
+    n = n_unspliced[valid]
 
-    return mask
+    log_ratio_sense = np.log(0.5 / ss)
+    log_ratio_anti = np.log(0.5 / (1.0 - ss))
+
+    llr[valid] = k * log_ratio_sense + (n - k) * log_ratio_anti
+    return llr
 
 
 # ---------------------------------------------------------------------------
-# κ_sym estimation (MoM, forced mean = 0.5)
+# κ estimation (Beta-Binomial MLE, forced mean = 0.5)
 # ---------------------------------------------------------------------------
 
 
 def estimate_kappa_sym(
     stats: dict[str, np.ndarray],
     weights: np.ndarray,
-    *,
-    kappa_min: float = KAPPA_MIN,
-    kappa_max: float = KAPPA_MAX,
-    kappa_fallback: float = KAPPA_FALLBACK,
-    kappa_min_obs: int = KAPPA_MIN_OBS,
-) -> float:
-    """Weighted Method-of-Moments estimation of κ_sym.
+) -> float | None:
+    """Beta-Binomial MLE estimation of κ_sym.
 
-    Models strand ratios as Beta(κ/2, κ/2): mean forced to 0.5,
-    variance = 0.25 / (κ + 1).
+    Maximises the γ-weighted log-likelihood of the symmetric
+    Beta-Binomial model BetaBinom(k | n, κ/2, κ/2) via golden-section
+    search.  Unlike Method-of-Moments, this remains accurate at low
+    per-region counts because the Beta-Binomial generative model
+    inherently accounts for binomial sampling variance.
 
-    Corrects for within-region sampling variance:
-    ``observed_var = true_var + 0.25 * E[1/n]``.
-
-    Parameters
-    ----------
-    stats : dict
-        Output of :func:`compute_region_stats`.
-    weights : np.ndarray
-        Per-region weights ∈ [0, 1].
-
-    Returns
-    -------
-    float
-        Estimated κ_sym, clamped to [kappa_min, kappa_max].
-    """
-    n_unspliced = stats["n_unspliced"]
-    strand_ratio = stats["strand_ratio"]
-
-    # Only use regions with sufficient data and positive weight
-    valid = (n_unspliced >= 2) & (weights > 0) & np.isfinite(strand_ratio)
-    n_valid = valid.sum()
-
-    if n_valid < kappa_min_obs:
-        return kappa_fallback
-
-    w = weights[valid]
-    p = strand_ratio[valid]
-    n = n_unspliced[valid]
-    w_sum = w.sum()
-
-    if w_sum < _EPS:
-        return kappa_fallback
-
-    # Weighted variance of strand ratios around 0.5
-    observed_var = np.sum(w * (p - 0.5) ** 2) / w_sum
-
-    # Sampling variance correction: E_w[0.25 / n]
-    sampling_var = 0.25 * np.sum(w / n) / w_sum
-
-    true_var = max(observed_var - sampling_var, _EPS)
-
-    # κ from Var[Beta(κ/2, κ/2)] = 0.25 / (κ + 1)
-    kappa = 0.25 / true_var - 1.0
-
-    return float(np.clip(kappa, kappa_min, kappa_max))
-
-
-# ---------------------------------------------------------------------------
-# gDNA density estimation
-# ---------------------------------------------------------------------------
-
-
-def estimate_gdna_density(
-    stats: dict[str, np.ndarray],
-    weights: np.ndarray,
-) -> float:
-    """Weighted average gDNA density (fragments / bp) from region weights.
-
-    Returns 0.0 if no valid regions.
-    """
-    n_unspliced = stats["n_unspliced"]
-    region_length = stats["region_length"]
-
-    valid = (weights > 0) & (region_length > 0) & (n_unspliced > 0)
-    if not valid.any():
-        return 0.0
-
-    w = weights[valid]
-    # Weight by both gDNA weight and region length (longer regions
-    # contribute more to the density estimate).
-    weighted_frags = np.sum(w * n_unspliced[valid])
-    weighted_bp = np.sum(w * region_length[valid])
-
-    if weighted_bp < _EPS:
-        return 0.0
-
-    return float(weighted_frags / weighted_bp)
-
-
-# ---------------------------------------------------------------------------
-# Region scoring
-# ---------------------------------------------------------------------------
-
-
-def score_regions(
-    stats: dict[str, np.ndarray],
-    kappa_sym: float,
-    strand_specificity: float,
-    gdna_density: float = 0.0,
-) -> np.ndarray:
-    """Score each region for gDNA purity.
-
-    Returns per-region weights w_r ∈ [0, 1] indicating estimated
-    proportion of unspliced fragments attributable to gDNA.
-
-    Combines **all** available signals additively in log-likelihood
-    ratio space:
-
-    .. math::
-
-        \\text{llr} = \\text{llr}_{\\text{strand}} + \\text{llr}_{\\text{density}}
-
-    * **Strand**: normal-approximation LLR comparing symmetric gDNA
-      model vs SS-informed RNA model.  Contributes ≈ 0 when
-      SS ≈ 0.5 (unstranded), dominant when SS → 1.
-    * **Density**: Poisson z-score comparing observed coverage to
-      expected gDNA background.  Contributes 0 when *gdna_density*
-      is unknown (≤ 0).
-    * **Splice**: applied multiplicatively as ``(1 − splice_rate)``
-      since spliced reads are definitively RNA.
-
-    No hard threshold on strand specificity — the informativeness of
-    each signal emerges naturally from the data and the math.
-
-    Parameters
-    ----------
-    stats : dict
-        Output of :func:`compute_region_stats`.
-    kappa_sym : float
-        Current κ_sym estimate.
-    strand_specificity : float
-        Library strand specificity ∈ [0.5, 1.0].
-    gdna_density : float
-        Expected gDNA density (frags/bp).  Pass 0.0 to disable the
-        density component.
+    Returns ``None`` when fewer than 3 valid (weighted, n ≥ 2) regions
+    are available.  Callers should disable the strand signal when κ is
+    ``None``.
     """
     n_unspliced = stats["n_unspliced"]
     n_pos = stats["n_pos"]
-    splice_rate = stats["splice_rate"]
-    gene_strand = stats["gene_strand"]
+    strand_ratio = stats["strand_ratio"]
+
+    valid = (n_unspliced >= 2) & (weights > 0) & np.isfinite(strand_ratio)
+    if valid.sum() < 3:
+        return None
+
+    k = n_pos[valid]
+    n = n_unspliced[valid]
+    w = weights[valid]
+
+    kappa = _golden_section_max(
+        lambda kap: _beta_binom_loglik(kap, k, n, w),
+        0.01, 500.0,
+    )
+    return max(kappa, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Per-chromosome gDNA density
+# ---------------------------------------------------------------------------
+
+
+def _compute_per_ref_density(
+    stats: dict[str, np.ndarray],
+    posteriors: np.ndarray,
+) -> dict[str, float]:
+    """Compute γ-weighted gDNA density per reference sequence."""
+    ref = stats["ref"]
+    n_total = stats["n_total"]
     region_length = stats["region_length"]
 
-    n_regions = len(n_unspliced)
-    has_data = n_unspliced >= 2
+    result: dict[str, float] = {}
+    for ref_name in np.unique(ref):
+        mask = (ref == ref_name) & (posteriors > 0) & (region_length > 0)
+        if not mask.any():
+            result[str(ref_name)] = 0.0
+            continue
+        w = posteriors[mask]
+        frags = np.sum(w * n_total[mask])
+        bp = np.sum(w * region_length[mask])
+        result[str(ref_name)] = float(frags / bp) if bp > _EPS else 0.0
 
-    # --- Strand LLR (always computed; ≈0 when SS ≈ 0.5) ---
-    llr_strand = _compute_strand_llr(
-        n_pos, n_unspliced, has_data, kappa_sym,
-        strand_specificity, gene_strand, n_regions,
-    )
-
-    # --- Density LLR (always computed; 0 when density unknown) ---
-    llr_density = _compute_density_llr(
-        n_unspliced, region_length, has_data,
-        gdna_density, n_regions,
-    )
-
-    # --- Combined LLR → gDNA weight for unspliced fragments ---
-    llr = np.clip(llr_strand + llr_density, -500, 500)
-
-    w_unspliced = np.full(n_regions, 0.5, dtype=np.float64)
-    w_unspliced[has_data] = 1.0 / (1.0 + np.exp(-llr[has_data]))
-
-    # Splice adjustment: spliced reads are definitively RNA.
-    weights = (1.0 - splice_rate) * w_unspliced
-
-    return np.clip(weights, 0.0, 1.0)
-
-
-def _compute_strand_llr(
-    n_pos: np.ndarray,
-    n_unspliced: np.ndarray,
-    has_data: np.ndarray,
-    kappa_sym: float,
-    strand_specificity: float,
-    gene_strand: np.ndarray,
-    n_regions: int,
-) -> np.ndarray:
-    """Strand log-likelihood ratio (gDNA vs RNA).
-
-    gDNA model: strand_ratio ~ N(0.5, var_gdna)
-        where var_gdna = 0.25/(κ+1) + 0.25/n
-    RNA model:  strand_ratio ~ N(p_rna, var_rna)
-        where p_rna = SS for + gene, 1-SS for - gene, 0.5 for ambiguous
-        and var_rna = p_rna*(1-p_rna)/n
-
-    When SS ≈ 0.5, both models predict the same strand ratio → LLR ≈ 0.
-    """
-    llr = np.zeros(n_regions, dtype=np.float64)
-
-    p = np.full(n_regions, 0.5)
-    p[has_data] = n_pos[has_data] / n_unspliced[has_data]
-
-    # gDNA variance: overdispersion + sampling
-    var_gdna = np.full(n_regions, 1.0)
-    var_gdna[has_data] = (
-        0.25 / (kappa_sym + 1.0) + 0.25 / n_unspliced[has_data]
-    )
-
-    # RNA expected strand ratio and variance
-    p_rna = np.full(n_regions, 0.5)
-    p_rna[gene_strand == 1] = strand_specificity
-    p_rna[gene_strand == -1] = 1.0 - strand_specificity
-
-    var_rna = np.full(n_regions, 1.0)
-    var_rna[has_data] = np.maximum(
-        p_rna[has_data] * (1.0 - p_rna[has_data]) / n_unspliced[has_data],
-        _EPS,
-    )
-
-    # Normal log-likelihood: -0.5 * ((x - mu)^2 / var + ln(var))
-    ll_gdna = -0.5 * (
-        (p[has_data] - 0.5) ** 2 / var_gdna[has_data]
-        + np.log(var_gdna[has_data])
-    )
-    ll_rna = -0.5 * (
-        (p[has_data] - p_rna[has_data]) ** 2 / var_rna[has_data]
-        + np.log(var_rna[has_data])
-    )
-
-    llr[has_data] = ll_gdna - ll_rna
-    return llr
-
-
-def _compute_density_llr(
-    n_unspliced: np.ndarray,
-    region_length: np.ndarray,
-    has_data: np.ndarray,
-    gdna_density: float,
-    n_regions: int,
-) -> np.ndarray:
-    """Density log-likelihood ratio via Poisson z-score.
-
-    Under gDNA the expected unspliced count is
-    ``μ = gdna_density × region_length``.  The z-score
-    ``z = (k − μ) / √max(μ, 1)`` measures excess/deficit:
-
-    * z > 0 (excess coverage) → LLR < 0 → evidence for RNA.
-    * z < 0 (deficit) → LLR > 0 → evidence for gDNA.
-    * z ≈ 0 (matches expected) → LLR ≈ 0 → no information.
-
-    The z-score magnitude grows as O(√n) while the strand LLR
-    grows as O(n), so strand naturally dominates for large samples
-    where it is most reliable.
-
-    Returns all zeros when *gdna_density* ≤ 0 (density unknown).
-    """
-    llr = np.zeros(n_regions, dtype=np.float64)
-
-    if gdna_density <= 0:
-        return llr
-
-    mu = gdna_density * region_length
-    valid = has_data & (mu > 0)
-
-    z = (
-        (n_unspliced[valid] - mu[valid])
-        / np.sqrt(np.maximum(mu[valid], 1.0))
-    )
-    llr[valid] = -z  # excess → negative LLR (RNA)
-
-    return llr
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +428,7 @@ def build_gdna_fl_model(
     region_weights: np.ndarray,
     max_fl: int = 1000,
 ) -> FragmentLengthModel:
-    """Build gDNA fragment-length model weighted by region gDNA weights.
+    """Build gDNA fragment-length model weighted by region posteriors.
 
     Parameters
     ----------
@@ -512,14 +437,9 @@ def build_gdna_fl_model(
     fl_frag_lens : np.ndarray, shape (n_obs,)
         Fragment length for each observation.
     region_weights : np.ndarray, shape (n_regions,)
-        Per-region gDNA weights ∈ [0, 1].
+        Per-region posteriors γ_r ∈ [0, 1].
     max_fl : int
         Maximum fragment length for the model.
-
-    Returns
-    -------
-    FragmentLengthModel
-        Finalized gDNA FL model.
     """
     model = FragmentLengthModel(max_size=max_fl)
 
@@ -527,28 +447,398 @@ def build_gdna_fl_model(
         model.finalize()
         return model
 
-    # Look up per-observation weight from region weights
     fl_weights = region_weights[fl_region_ids]
-
-    # Filter valid observations
     valid = (fl_weights > 0) & (fl_frag_lens > 0) & (fl_frag_lens <= max_fl)
     if not valid.any():
         model.finalize()
         return model
 
-    # Vectorized histogram via bincount
     valid_fl = fl_frag_lens[valid].astype(np.intp)
     valid_w = fl_weights[valid].astype(np.float64)
 
     weighted_hist = np.bincount(valid_fl, weights=valid_w, minlength=max_fl + 1)
 
-    # Feed into model
     for fl_val in range(1, max_fl + 1):
         if weighted_hist[fl_val] > 0:
             model.observe(fl_val, weight=float(weighted_hist[fl_val]))
 
     model.finalize()
     return model
+
+
+# ---------------------------------------------------------------------------
+# Density histogram (log-density channel)
+# ---------------------------------------------------------------------------
+
+
+def compute_log_density(
+    stats: dict[str, np.ndarray],
+    eligible: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Compute log-density = log(n/L + ε) for all regions.
+
+    Parameters
+    ----------
+    stats : dict
+        Region summary statistics from :func:`compute_region_stats`.
+    eligible : np.ndarray, bool
+        Mask for regions participating in the EM.
+
+    Returns
+    -------
+    (log_d, epsilon) where log_d has shape (n_regions,) and epsilon is
+    the global pseudocount.  Ineligible regions get log_d = 0.
+    """
+    n_total = stats["n_total"]
+    region_length = stats["region_length"]
+    n_regions = len(n_total)
+
+    # Global ε = 1 / median(L) over eligible regions
+    med_L = float(np.median(region_length[eligible]))
+    epsilon = 1.0 / max(med_L, 1.0)
+
+    log_d = np.zeros(n_regions, dtype=np.float64)
+    valid = eligible & (region_length > 0)
+    log_d[valid] = np.log(
+        n_total[valid] / region_length[valid] + epsilon
+    )
+    return log_d, epsilon
+
+
+def _compute_density_llr_gaussian(
+    log_d: np.ndarray,
+    mu_g: float,
+    var_g: float,
+    mu_r: float,
+    var_r: float,
+    eligible: np.ndarray,
+    n_regions: int,
+) -> np.ndarray:
+    """Density LLR from Gaussian model on log-density.
+
+    LLR = log N(x | μ_G, σ_G) − log N(x | μ_R, σ_R) for each region.
+    Ineligible regions get LLR = 0.
+    """
+    llr = np.zeros(n_regions, dtype=np.float64)
+    if not eligible.any():
+        return llr
+
+    x = log_d[eligible]
+    llr[eligible] = -0.5 * (
+        (x - mu_g) ** 2 / var_g
+        - (x - mu_r) ** 2 / var_r
+        + np.log(var_g)
+        - np.log(var_r)
+    )
+    return llr
+
+
+# ---------------------------------------------------------------------------
+# Initialization: two-phase seed partition
+# ---------------------------------------------------------------------------
+
+
+def _seed_initial_partition(
+    stats: dict[str, np.ndarray],
+    log_d: np.ndarray,
+    sense_frac: np.ndarray,
+    strand_specificity: float,
+    eligible: np.ndarray,
+    *,
+    density_percentile: float = GDNA_INIT_DENSITY_PERCENTILE,
+    min_gdna_regions: int = GDNA_INIT_MIN_REGIONS,
+) -> tuple[np.ndarray, float, dict]:
+    """Two-phase initialization for the EM.
+
+    Phase 1: expressed seed from ``n_spliced > 0``.
+    Phase 2: gDNA seed from density eCDF + optional strand filter.
+
+    Returns (gamma, pi_init, diagnostics_dict).
+    """
+    n_total = stats["n_total"]
+    n_spliced = stats["n_spliced"]
+    gene_strand = stats["gene_strand"]
+    n_regions = len(n_total)
+
+    gamma = np.full(n_regions, 0.5, dtype=np.float64)
+    diag: dict = {}
+
+    # Phase 1: expressed seed (definitively expressed)
+    expressed_seed = (n_spliced > 0) & eligible
+    gamma[expressed_seed] = 0.0
+
+    # Build expressed log-density eCDF
+    expressed_log_d = log_d[expressed_seed]
+    n_expressed = expressed_seed.sum()
+
+    if n_expressed < 2:
+        # Fallback: not enough spliced regions
+        # Use top 50th percentile of eligible regions
+        log_d_eligible = log_d[eligible]
+        if len(log_d_eligible) > 0:
+            threshold = float(np.median(log_d_eligible))
+            expressed_seed = eligible & (log_d >= threshold)
+            gamma[expressed_seed] = 0.0
+            expressed_log_d = log_d[expressed_seed]
+            n_expressed = expressed_seed.sum()
+        diag["expressed_fallback"] = True
+
+    # Phase 2: gDNA seed from density eCDF
+    # For each unspliced-only eligible region, compute its quantile in
+    # the expressed log-density distribution.
+    unspliced_only = eligible & (n_spliced == 0)
+    gdna_seed = np.zeros(n_regions, dtype=bool)
+
+    if n_expressed > 0 and unspliced_only.any():
+        expressed_sorted = np.sort(expressed_log_d)
+        # eCDF quantile for each unspliced-only region
+        p_expressed = np.searchsorted(
+            expressed_sorted, log_d[unspliced_only], side="right",
+        ) / len(expressed_sorted)
+
+        # Regions below the density percentile threshold
+        below_threshold = p_expressed < density_percentile
+        candidate_indices = np.where(unspliced_only)[0]
+        gdna_candidates = candidate_indices[below_threshold]
+
+        # Minimum seed size guarantee
+        if len(gdna_candidates) < min_gdna_regions:
+            # Sort all unspliced-only by p_expressed, take bottom N
+            sorted_order = np.argsort(p_expressed)
+            n_take = min(min_gdna_regions, len(sorted_order))
+            gdna_candidates = candidate_indices[sorted_order[:n_take]]
+
+        gdna_seed[gdna_candidates] = True
+
+    # Supplementary strand filter (when stranded library)
+    if strand_specificity > 0.55:
+        strand_symmetric = (
+            unspliced_only
+            & np.isfinite(sense_frac)
+            & (np.abs(sense_frac - 0.5) < 0.1)
+            & (gene_strand != 0)
+        )
+        gdna_seed |= strand_symmetric
+
+    gamma[gdna_seed] = 1.0
+
+    # Ensure expressed and gdna seeds don't overlap
+    gamma[expressed_seed] = 0.0
+
+    # π from seed counts
+    n_eligible = eligible.sum()
+    n_gdna = gdna_seed.sum()
+    if n_eligible > 0:
+        pi_init = float(max(n_gdna, 1)) / float(n_eligible)
+    else:
+        pi_init = 0.5
+
+    # Zero-count regions get the prior
+    gamma[~eligible] = pi_init
+
+    diag["n_expressed_seed"] = int(n_expressed)
+    diag["n_gdna_seed"] = int(n_gdna)
+    diag["pi_init"] = pi_init
+    diag["pristine_sample"] = (
+        pi_init < 0.02 or n_gdna < min_gdna_regions // 2
+    )
+
+    return gamma, pi_init, diag
+
+
+# ---------------------------------------------------------------------------
+# E-step
+# ---------------------------------------------------------------------------
+
+
+def _e_step(
+    stats: dict[str, np.ndarray],
+    pi: float,
+    log_d: np.ndarray,
+    eligible: np.ndarray,
+    strand_specificity: float,
+    mu_g: float,
+    var_g: float,
+    mu_r: float,
+    var_r: float,
+    fl_region_ids: np.ndarray | None = None,
+    fl_frag_lens: np.ndarray | None = None,
+    gdna_fl_model: FragmentLengthModel | None = None,
+    rna_fl_model: FragmentLengthModel | None = None,
+) -> np.ndarray:
+    """Compute per-region posterior γ_r = P(not expressed | data).
+
+    Hard constraints:
+    - n_spliced > 0 → γ = 0 (definitively expressed).
+    - not eligible (n_total = 0 or L = 0) → γ = π (prior).
+
+    Density channel uses Gaussian model (μ, σ²) per component.
+    Strand channel uses Binomial(k | n, p) — no histograms.
+    """
+    n_spliced = stats["n_spliced"]
+    n_regions = len(stats["n_total"])
+
+    gamma = np.full(n_regions, pi, dtype=np.float64)
+
+    # Hard constraint: spliced → expressed
+    has_splice = n_spliced > 0
+    gamma[has_splice] = 0.0
+
+    # Soft classification for eligible unspliced regions
+    soft = eligible & ~has_splice
+    if not soft.any():
+        return gamma
+
+    # --- Log prior odds ---
+    pi_safe = np.clip(pi, _EPS, 1.0 - _EPS)
+    log_prior_odds = np.log(pi_safe / (1.0 - pi_safe))
+
+    # --- Density LLR (Gaussian) ---
+    llr_density = _compute_density_llr_gaussian(
+        log_d, mu_g, var_g, mu_r, var_r, soft, n_regions,
+    )
+
+    # --- Strand LLR (Binomial) ---
+    llr_strand = _compute_strand_llr_binomial(
+        stats, strand_specificity, n_regions,
+    )
+
+    # --- Fragment length LLR (optional) ---
+    llr_fl = np.zeros(n_regions, dtype=np.float64)
+    if (
+        gdna_fl_model is not None
+        and rna_fl_model is not None
+        and fl_region_ids is not None
+        and fl_frag_lens is not None
+        and len(fl_region_ids) > 0
+        and gdna_fl_model._total_weight > 0
+        and rna_fl_model._total_weight > 0
+    ):
+        llr_fl = _compute_fl_llr(
+            fl_region_ids, fl_frag_lens,
+            gdna_fl_model, rna_fl_model, n_regions,
+        )
+
+    # --- Combined → posterior ---
+    log_odds = log_prior_odds + llr_density + llr_strand + llr_fl
+    log_odds_soft = np.clip(log_odds[soft], -500, 500)
+    gamma[soft] = 1.0 / (1.0 + np.exp(-log_odds_soft))
+
+    return gamma
+
+
+def _compute_fl_llr(
+    fl_region_ids: np.ndarray,
+    fl_frag_lens: np.ndarray,
+    gdna_fl_model: FragmentLengthModel,
+    rna_fl_model: FragmentLengthModel,
+    n_regions: int,
+) -> np.ndarray:
+    """Sum of per-fragment FL log-likelihood ratios per region.
+
+    Uses **shape-normalized** densities: both histograms are converted
+    to proportions and smoothed with a shared Dirichlet prior
+    (α = 1/M per bin, i.e. one total pseudo-observation).  This
+    ensures only distributional *shape* differences drive the LLR —
+    not the total amount of data behind each model, which would
+    otherwise introduce a systematic per-fragment bias when the two
+    components have different total weights.
+    """
+    llr = np.zeros(n_regions, dtype=np.float64)
+    if len(fl_region_ids) == 0:
+        return llr
+
+    max_size = gdna_fl_model.max_size
+    M = max_size + 1
+
+    # Normalize histograms to proportions → shape only.
+    T_g = max(gdna_fl_model._total_weight, 1.0)
+    T_r = max(rna_fl_model._total_weight, 1.0)
+
+    # Shared symmetric Dirichlet smoothing: α = 1/M per bin
+    # (one total pseudo-observation spread uniformly).
+    alpha = 1.0 / M
+    q_g = gdna_fl_model.counts / T_g + alpha
+    q_r = rna_fl_model.counts / T_r + alpha
+
+    # Pre-compute log-ratio lookup (both q vectors sum to 1 + Mα = 2,
+    # so the shared denominator cancels in the ratio).
+    log_ratio = np.log(q_g) - np.log(q_r)
+
+    for i in range(len(fl_region_ids)):
+        rid = int(fl_region_ids[i])
+        fl = int(fl_frag_lens[i])
+        if rid < n_regions and fl > 0:
+            idx = min(fl, max_size)
+            llr[rid] += log_ratio[idx]
+
+    return llr
+
+
+# ---------------------------------------------------------------------------
+# M-step
+# ---------------------------------------------------------------------------
+
+
+def _m_step(
+    stats: dict[str, np.ndarray],
+    gamma: np.ndarray,
+    log_d: np.ndarray,
+    eligible: np.ndarray,
+) -> tuple[float, float, float, float, float, float, float]:
+    """Update parameters from posteriors.
+
+    Returns ``(pi, lambda_G, lambda_E, mu_g, var_g, mu_r, var_r)``.
+
+    Density Gaussian parameters use **region-level** weights (γ alone,
+    not γ × n_total) because each region is one observation of
+    log-density.
+    """
+    n_total = stats["n_total"]
+    region_length = stats["region_length"]
+
+    n_eligible = eligible.sum()
+    if n_eligible == 0:
+        return 0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0
+
+    # --- Mixing proportion (eligible regions only) ---
+    pi = float(gamma[eligible].sum() / n_eligible)
+    pi = np.clip(pi, _EPS, 1.0 - _EPS)
+
+    # --- Scalar density summaries (for output / diagnostics) ---
+    w_g = gamma[eligible]
+    w_e = 1.0 - gamma[eligible]
+    nt = n_total[eligible]
+    rl = region_length[eligible]
+
+    g_frags = np.sum(w_g * nt)
+    g_bp = np.sum(w_g * rl)
+    lambda_G = float(g_frags / g_bp) if g_bp > _EPS else 0.0
+
+    e_frags = np.sum(w_e * nt)
+    e_bp = np.sum(w_e * rl)
+    lambda_E = float(e_frags / e_bp) if e_bp > _EPS else 0.0
+
+    # --- Density Gaussian parameters (region-level weights) ---
+    ld = log_d[eligible]
+    mu_overall = float(np.mean(ld))
+    var_overall = max(float(np.var(ld)), _EPS)
+
+    w_g_sum = float(w_g.sum())
+    if w_g_sum >= 1.0:
+        mu_g = float(np.sum(w_g * ld) / w_g_sum)
+        var_g = max(float(np.sum(w_g * (ld - mu_g) ** 2) / w_g_sum), _EPS)
+    else:
+        mu_g, var_g = mu_overall, var_overall
+
+    w_e_sum = float(w_e.sum())
+    if w_e_sum >= 1.0:
+        mu_r = float(np.sum(w_e * ld) / w_e_sum)
+        var_r = max(float(np.sum(w_e * (ld - mu_r) ** 2) / w_e_sum), _EPS)
+    else:
+        mu_r, var_r = mu_overall, var_overall
+
+    return float(pi), lambda_G, lambda_E, mu_g, var_g, mu_r, var_r
 
 
 # ---------------------------------------------------------------------------
@@ -562,21 +852,16 @@ def calibrate_gdna(
     region_df: pd.DataFrame,
     strand_specificity: float,
     *,
-    min_coverage: int = MIN_COVERAGE,
-    max_iterations: int = MAX_ITERATIONS,
-    convergence_tol: float = CONVERGENCE_TOL,
-    seed_symmetry_zscore: float = SEED_SYMMETRY_ZSCORE,
-    seed_coverage_percentile: float = SEED_COVERAGE_PERCENTILE,
-    kappa_min: float = KAPPA_MIN,
-    kappa_max: float = KAPPA_MAX,
-    kappa_fallback: float = KAPPA_FALLBACK,
+    max_iterations: int = 50,
+    convergence_tol: float = 1e-4,
     diagnostics: bool = False,
+    density_percentile: float = GDNA_INIT_DENSITY_PERCENTILE,
+    min_gdna_regions: int = GDNA_INIT_MIN_REGIONS,
 ) -> GDNACalibration:
-    """Iteratively estimate gDNA parameters via seed-extend.
+    """Estimate gDNA parameters via Aggregate-First EM.
 
-    All three signals (strand symmetry, coverage density, spliced-read
-    evidence) are combined into a single additive log-likelihood ratio
-    at every iteration — no hard threshold on strand specificity.
+    Classifies regions as *not expressed* (gDNA only) or *expressed*
+    (gDNA + RNA) using Gaussian density and Binomial strand models.
 
     Parameters
     ----------
@@ -584,142 +869,233 @@ def calibrate_gdna(
         Per-region fragment counts (from :func:`count_region_evidence`).
     fl_table : pd.DataFrame
         Fragment-length observations with ``region_id`` and ``frag_len``
-        columns (from :func:`count_region_evidence`).
+        columns.
     region_df : pd.DataFrame
-        Region metadata (from ``index.region_df``).
+        Region metadata with ``tx_pos``, ``tx_neg``, ``length`` columns.
     strand_specificity : float
         Library strand specificity ∈ [0.5, 1.0].
+    max_iterations : int
+        Maximum EM iterations.
+    convergence_tol : float
+        Convergence tolerance for |Δπ|.
     diagnostics : bool
-        When True, populate ``region_stats``, ``seed_mask``,
-        ``kappa_history``, and ``density_history`` on the result.
-
-    Returns
-    -------
-    GDNACalibration
+        Populate ``region_stats`` and ``iteration_history``.
+    density_percentile : float
+        Quantile threshold for gDNA seed initialization.
+    min_gdna_regions : int
+        Minimum number of gDNA seed regions.
     """
     # ------------------------------------------------------------------
     # Phase 1: summary statistics
     # ------------------------------------------------------------------
     stats = compute_region_stats(region_counts, region_df)
 
-    # ------------------------------------------------------------------
-    # Phase 2: seed selection (all criteria applied simultaneously)
-    # ------------------------------------------------------------------
-    seed_mask = select_seed(
-        stats,
-        strand_specificity,
-        min_coverage=min_coverage,
-        symmetry_zscore=seed_symmetry_zscore,
-        coverage_percentile=seed_coverage_percentile,
-    )
-    seed_weights = seed_mask.astype(np.float64)
-
-    logger.info(
-        "gDNA calibration: %d seed regions (of %d total)",
-        int(seed_mask.sum()),
-        len(seed_mask),
-    )
-
-    # ------------------------------------------------------------------
-    # Phase 3: initial parameter estimates from seed
-    # ------------------------------------------------------------------
-    kappa_sym = estimate_kappa_sym(
-        stats,
-        seed_weights,
-        kappa_min=kappa_min,
-        kappa_max=kappa_max,
-        kappa_fallback=kappa_fallback,
-    )
-    gdna_density = estimate_gdna_density(stats, seed_weights)
-
-    logger.info(
-        "gDNA calibration: initial κ_sym=%.1f, density=%.2e",
-        kappa_sym,
-        gdna_density,
-    )
-
-    # Diagnostics: per-iteration history
-    kappa_hist: list[float] = [kappa_sym] if diagnostics else []
-    density_hist: list[float] = [gdna_density] if diagnostics else []
-
-    # ------------------------------------------------------------------
-    # Phase 4: iterate score → re-estimate
-    # ------------------------------------------------------------------
+    n_regions = len(stats["n_total"])
     fl_region_ids = fl_table["region_id"].values.astype(np.intp)
     fl_frag_lens = fl_table["frag_len"].values.astype(np.intp)
 
-    weights = seed_weights.copy()
+    # Eligible regions: n_total > 0 and L > 0
+    eligible = (stats["n_total"] > 0) & (stats["region_length"] > 0)
+
+    # ------------------------------------------------------------------
+    # Bailout: no data at all
+    # ------------------------------------------------------------------
+    if not eligible.any():
+        logger.warning("gDNA calibration: no eligible regions")
+        empty_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens,
+                                        np.zeros(n_regions))
+        return GDNACalibration(
+            region_posteriors=np.ones(n_regions, dtype=np.float64),
+            gdna_density_global=0.0,
+            gdna_density_per_ref={},
+            kappa_sym=0.0,
+            gdna_fl_model=empty_fl,
+            mixing_proportion=1.0,
+            expressed_density=0.0,
+            n_iterations=0,
+            converged=True,
+            region_stats=stats if diagnostics else None,
+            iteration_history=[] if diagnostics else None,
+            init_diagnostics=None,
+            log_density=None,
+            sense_frac=None,
+            eligible=eligible if diagnostics else None,
+            density_bin_edges=None,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 2: preprocessing
+    # ------------------------------------------------------------------
+    sense_frac = compute_sense_fraction(stats)
+    log_d, epsilon = compute_log_density(stats, eligible)
+
+    # ------------------------------------------------------------------
+    # Phase 3: initialization (two-phase seed partition)
+    # ------------------------------------------------------------------
+    gamma, pi, init_diag = _seed_initial_partition(
+        stats, log_d, sense_frac, strand_specificity, eligible,
+        density_percentile=density_percentile,
+        min_gdna_regions=min_gdna_regions,
+    )
+
+    # Compute initial Gaussian density parameters from seed weights.
+    ld_elig = log_d[eligible]
+    w_g_init = gamma[eligible]
+    w_e_init = 1.0 - gamma[eligible]
+
+    w_g_sum = max(float(w_g_init.sum()), _EPS)
+    mu_g = float(np.sum(w_g_init * ld_elig) / w_g_sum)
+    var_g = max(float(np.sum(w_g_init * (ld_elig - mu_g) ** 2) / w_g_sum), _EPS)
+
+    w_e_sum = max(float(w_e_init.sum()), _EPS)
+    mu_r = float(np.sum(w_e_init * ld_elig) / w_e_sum)
+    var_r = max(float(np.sum(w_e_init * (ld_elig - mu_r) ** 2) / w_e_sum), _EPS)
+
+    # Build initial FL models from seeds
+    gdna_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, gamma)
+    rna_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, 1.0 - gamma)
+
+    # Compute pi_soft: mixing proportion over unspliced ("soft") regions.
+    # The E-step prior should reflect P(gDNA | unspliced), not P(gDNA)
+    # globally, because hard-constraint spliced regions (gamma=0) are
+    # already fixed and should not dilute the prior for soft regions.
+    has_splice = stats["n_spliced"] > 0
+    soft = eligible & ~has_splice
+    n_soft = int(soft.sum())
+    n_eligible = int(eligible.sum())
+    if n_soft > 0:
+        pi_soft = float(np.clip(
+            pi * n_eligible / n_soft, _EPS, 1.0 - _EPS,
+        ))
+    else:
+        pi_soft = pi
+
+    logger.info(
+        "gDNA calibration init: π=%.3f, π_soft=%.3f, n_expressed=%d, "
+        "n_gdna=%d, n_soft=%d, pristine=%s, ε=%.2e, "
+        "μ_G=%.2f, σ²_G=%.2f, μ_R=%.2f, σ²_R=%.2f",
+        pi, pi_soft, init_diag["n_expressed_seed"], init_diag["n_gdna_seed"],
+        n_soft, init_diag["pristine_sample"], epsilon,
+        mu_g, var_g, mu_r, var_r,
+    )
+
+    # ------------------------------------------------------------------
+    # Phase 4: EM iteration
+    # ------------------------------------------------------------------
+    history: list[dict] = []
     converged = False
     n_iter = 0
+    lambda_G = 0.0
+    lambda_E = 0.0
 
     for iteration in range(max_iterations):
         n_iter = iteration + 1
 
-        # Score all regions (unified: strand + density + splice)
-        weights = score_regions(
-            stats,
-            kappa_sym,
-            strand_specificity,
-            gdna_density,
+        # E-step: use pi_soft as prior (conditioned on unspliced)
+        gamma = _e_step(
+            stats, pi_soft, log_d, eligible, strand_specificity,
+            mu_g, var_g, mu_r, var_r,
+            fl_region_ids=fl_region_ids,
+            fl_frag_lens=fl_frag_lens,
+            gdna_fl_model=gdna_fl,
+            rna_fl_model=rna_fl,
         )
 
-        # Re-estimate κ
-        new_kappa = estimate_kappa_sym(
-            stats,
-            weights,
-            kappa_min=kappa_min,
-            kappa_max=kappa_max,
-            kappa_fallback=kappa_fallback,
+        # M-step: update pi, lambdas, and Gaussian density params
+        new_pi, new_lG, new_lE, mu_g, var_g, mu_r, var_r = _m_step(
+            stats, gamma, log_d, eligible,
         )
 
-        # Re-estimate density
-        gdna_density = estimate_gdna_density(stats, weights)
+        # Update FL models
+        gdna_fl = build_gdna_fl_model(
+            fl_region_ids, fl_frag_lens, gamma,
+        )
+        rna_fl = build_gdna_fl_model(
+            fl_region_ids, fl_frag_lens, 1.0 - gamma,
+        )
+
+        # Update pi_soft for next E-step
+        if n_soft > 0:
+            new_pi_soft = float(np.clip(
+                gamma[soft].sum() / n_soft, _EPS, 1.0 - _EPS,
+            ))
+        else:
+            new_pi_soft = new_pi
+
+        # Convergence check on pi_soft (the E-step prior)
+        delta_pi = abs(new_pi_soft - pi_soft)
 
         if diagnostics:
-            kappa_hist.append(new_kappa)
-            density_hist.append(gdna_density)
-
-        # Convergence check
-        rel_change = abs(new_kappa - kappa_sym) / max(kappa_sym, 1.0)
+            history.append({
+                "pi": new_pi,
+                "pi_soft": new_pi_soft,
+                "lambda_G": new_lG,
+                "lambda_E": new_lE,
+                "mean_gamma": float(gamma[eligible].mean()),
+                "delta_pi": delta_pi,
+                "gamma": gamma.copy(),
+                "mu_g": mu_g,
+                "var_g": var_g,
+                "mu_r": mu_r,
+                "var_r": var_r,
+            })
 
         logger.debug(
-            "gDNA calibration iter %d: κ=%.1f → %.1f (Δ=%.4f), "
-            "density=%.2e, mean_weight=%.3f",
-            n_iter,
-            kappa_sym,
-            new_kappa,
-            rel_change,
-            gdna_density,
-            weights.mean(),
+            "gDNA calibration iter %d: π=%.4f, π_soft=%.4f, λ_G=%.2e, "
+            "λ_E=%.2e, mean_γ=%.3f, Δπ_soft=%.6f, "
+            "μ_G=%.2f, σ²_G=%.2f, μ_R=%.2f, σ²_R=%.2f",
+            n_iter, new_pi, new_pi_soft, new_lG, new_lE,
+            gamma[eligible].mean(), delta_pi,
+            mu_g, var_g, mu_r, var_r,
         )
 
-        kappa_sym = new_kappa
+        pi = new_pi
+        pi_soft = new_pi_soft
+        lambda_G = new_lG
+        lambda_E = new_lE
 
-        if rel_change < convergence_tol:
+        if delta_pi < convergence_tol:
             converged = True
             break
 
     logger.info(
-        "gDNA calibration: %s after %d iterations, κ_sym=%.1f",
+        "gDNA calibration: %s after %d iterations. "
+        "π=%.3f, λ_G=%.2e, λ_E=%.2e",
         "converged" if converged else "did not converge",
-        n_iter,
-        kappa_sym,
+        n_iter, pi, lambda_G, lambda_E,
     )
 
     # ------------------------------------------------------------------
-    # Phase 5: final FL model
+    # Phase 5: final posteriors and outputs
     # ------------------------------------------------------------------
-    gdna_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, weights)
+    final_gamma = _e_step(
+        stats, pi_soft, log_d, eligible, strand_specificity,
+        mu_g, var_g, mu_r, var_r,
+        fl_region_ids=fl_region_ids,
+        fl_frag_lens=fl_frag_lens,
+        gdna_fl_model=gdna_fl,
+        rna_fl_model=rna_fl,
+    )
+
+    per_ref = _compute_per_ref_density(stats, final_gamma)
+    final_fl = build_gdna_fl_model(fl_region_ids, fl_frag_lens, final_gamma)
+    kappa_posthoc = estimate_kappa_sym(stats, final_gamma)
 
     return GDNACalibration(
-        kappa_sym=kappa_sym,
-        gdna_density=gdna_density,
-        gdna_fl_model=gdna_fl,
-        region_weights=weights,
+        region_posteriors=final_gamma,
+        gdna_density_global=lambda_G,
+        gdna_density_per_ref=per_ref,
+        kappa_sym=kappa_posthoc if kappa_posthoc is not None else 0.0,
+        gdna_fl_model=final_fl,
+        mixing_proportion=pi,
+        expressed_density=lambda_E,
         n_iterations=n_iter,
         converged=converged,
         region_stats=stats if diagnostics else None,
-        seed_mask=seed_mask if diagnostics else None,
-        kappa_history=kappa_hist if diagnostics else None,
-        density_history=density_hist if diagnostics else None,
+        iteration_history=history if diagnostics else None,
+        init_diagnostics=init_diag if diagnostics else None,
+        log_density=log_d if diagnostics else None,
+        sense_frac=sense_frac if diagnostics else None,
+        eligible=eligible if diagnostics else None,
+        density_bin_edges=None,
     )

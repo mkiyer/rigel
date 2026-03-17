@@ -48,6 +48,9 @@ the final value is resolved as: **explicit CLI flag → YAML config file → dat
 | `--em-convergence-delta` | 1e-6 | Convergence threshold for EM parameter updates. |
 | `--confidence-threshold` | 0.95 | Minimum RNA-normalized posterior for high-confidence assignment. |
 | `--prune-threshold` | 0.1 | Post-EM pruning evidence-ratio threshold. Components with zero unambiguous evidence and an evidence ratio (data\_count / alpha) below this value are zeroed out and the EM re-runs to redistribute mass. Set to -1 to disable. |
+| `--em-mode` | `vbem` | EM algorithm variant. `map` uses MAP-EM with hard max(0, n+α−1) updates; `vbem` uses Variational Bayes EM with digamma-based soft updates. |
+| `--nrna-sparsity-alpha` | 0.9 | Dirichlet α for nRNA EM components. Values < 1.0 create a sparsifying prior that drives weak nRNA components toward zero. 1.0 = flat (off), 0.9 = mild, 0.5 = moderate, 0.3 = strong. Does not affect mRNA accuracy. |
+| `--gdna-prior-scale` | 1.0 | Scale factor for the Empirical Bayes gDNA prior anchor. The gDNA prior is α = 1 + scale × gdna\_init, where gdna\_init is the EB estimate. 0 = ignore EB (flat unit prior), 1.0 = default, higher = stronger anchor. |
 
 ### Scoring Penalties
 
@@ -78,17 +81,15 @@ the final value is resolved as: **explicit CLI flag → YAML config file → dat
 
 ### nRNA Fraction Hierarchical Shrinkage
 
-The nRNA fraction prior uses a three-level empirical Bayes hierarchy:
-**global → locus-strand → TSS-group → transcript**.  At each level a
-shrinkage pseudo-count κ pulls the estimate toward the parent level.
+The nRNA fraction prior uses a two-level empirical Bayes hierarchy:
+**global → locus-strand → nRNA span**.  At each level a shrinkage
+pseudo-count κ pulls the estimate toward the parent level.
 By default κ is auto-estimated via Method of Moments (MoM).
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--tss-window` | 200 | Fuzzy TSS grouping window (bp). Transcripts whose 5′ ends lie within this distance are grouped for the nRNA fraction prior. |
 | `--nrna-frac-kappa-global` | auto (MoM) | κ pulling locus-strand nRNA fraction toward the global prior. |
-| `--nrna-frac-kappa-locus` | auto (MoM) | κ pulling TSS-group nRNA fraction toward the locus-strand estimate. |
-| `--nrna-frac-kappa-tss` | auto (MoM) | κ pulling transcript nRNA fraction toward the TSS-group estimate. Also sets the effective sample size of the final Beta prior passed to the EM. |
+| `--nrna-frac-kappa-locus` | auto (MoM) | κ pulling nRNA span fraction toward the locus-strand estimate. |
 | `--nrna-frac-kappa-min` | 2.0 | Lower clamp for MoM-estimated κ. |
 | `--nrna-frac-kappa-max` | 200.0 | Upper clamp for MoM-estimated κ. |
 | `--nrna-frac-kappa-fallback` | 5.0 | Fallback κ when too few features pass the evidence filter. |
@@ -96,14 +97,10 @@ By default κ is auto-estimated via Method of Moments (MoM).
 
 #### MoM Minimum Evidence Thresholds
 
-At each hierarchy level, groups with fewer fragments than the threshold
-are excluded from the Method-of-Moments κ estimation.
-
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--nrna-frac-mom-min-evidence-global` | 50 | Min fragment evidence for global MoM κ. |
 | `--nrna-frac-mom-min-evidence-locus` | 30 | Min fragment evidence for locus MoM κ. |
-| `--nrna-frac-mom-min-evidence-tss` | 20 | Min fragment evidence for TSS-level MoM κ. |
 
 ### gDNA Rate Hierarchical Shrinkage
 
@@ -144,7 +141,7 @@ These fields are set programmatically and not exposed as CLI flags:
 
 | Dataclass | Field | Default | Description |
 |-----------|-------|---------|-------------|
-| `EMConfig` | `mode` | `"map"` | Algorithm variant: `"map"` or `"vbem"`. |
+| `EMConfig` | `mode` | `"vbem"` | Algorithm variant: `"map"` or `"vbem"`. Exposed via `--em-mode`. |
 | `BamScanConfig` | `max_frag_length` | 1000 | Maximum fragment length for histogram models (bp). |
 | `BamScanConfig` | `log_every` | 1,000,000 | Log progress every N read-name groups. |
 | `BamScanConfig` | `chunk_size` | 1,000,000 | Fragments per buffer chunk. |

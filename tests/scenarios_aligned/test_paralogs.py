@@ -116,7 +116,14 @@ class TestParalogMultimapping:
         sc = self._make_scenario(tmp_path, 100, 100,
                                   name_suffix=f"_gdna_{gdna}")
         try:
-            bench = build_and_run(sc, gdna_abundance=gdna,
+            # Use n_fragments=3000 (6× default) so the EM has enough
+            # symmetric shared-multimapper signal to overcome asymmetric
+            # gDNA noise at gene boundaries.  With identical paralogs,
+            # gDNA fragments that extend into unique flanking sequence
+            # map to only one paralog, creating stochastic warm-start
+            # asymmetry that SQUAREM amplifies at small N.
+            bench = build_and_run(sc, n_fragments=3000,
+                                  gdna_abundance=gdna,
                                   include_multimap=True,
                                   scenario_name=f"paralogs_gdna_{gdna}")
             assert_alignment(bench)
@@ -125,7 +132,7 @@ class TestParalogMultimapping:
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
             total = t1.observed + t2.observed
             if total > 10:
-                tol = 0.45 if gdna > 0 else 0.20
+                tol = 0.25 if gdna > 0 else 0.20
                 assert abs(t1.observed - t2.observed) < total * tol + 5
         finally:
             sc.cleanup()

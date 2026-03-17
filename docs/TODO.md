@@ -1,6 +1,11 @@
 # TODO
 
 
+## Reference ID (not string)
+
+Reference names are stored throughout the code base as strings. We should change this to use their integer IDs for efficiency.
+
+
 ## Genome partitioning into regions
 
 ## Mapping fragments onto regions

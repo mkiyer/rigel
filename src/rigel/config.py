@@ -52,7 +52,11 @@ class EMConfig:
     seed: int | None = None
     prior_alpha: float = 0.01
     prior_gamma: float = 1.0
-    mode: str = "map"
+    nrna_sparsity_alpha: float = 0.9
+    """Dirichlet α for nRNA components (< 1.0 → sparsifying)."""
+    gdna_prior_scale: float = 1.0
+    """Scale factor for EB gDNA prior (gdna_prior = 1.0 + scale × gdna_init)."""
+    mode: str = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
     prune_threshold: float | None = 0.1

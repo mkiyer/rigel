@@ -271,6 +271,7 @@ def _make_locus_em_data(
         locus_id=0,
         transcript_indices=np.arange(n_t, dtype=np.int32),
         unit_indices=np.arange(n_units, dtype=np.int32),
+        gdna_span=10000,
     )
     loci = [locus]
 

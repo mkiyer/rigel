@@ -44,7 +44,8 @@ that start and end at the same coordinates.
 - Single-pass C++ BAM scanner using htslib, with memory-bounded buffering and spill-to-disk support
 - Automatic strand-model training from annotated spliced fragments and protocol detection as `R1-sense` or `R1-antisense`
 - Empirical Bayes priors for nRNA fractions (`global -> locus-strand -> nRNA`) and gDNA rates (`global -> chromosome -> locus`)
-- Coverage-weighted One Virtual Read prior and post-EM pruning for weakly supported components
+- Tripartite EM prior: coverage-weighted OVR for mRNA, sparsifying Dirichlet for nRNA, and EB-anchored prior for gDNA
+- MAP-EM and Variational Bayes EM (VBEM) solver modes with SQUAREM acceleration
 - Parallel BAM scanning and parallel locus EM controlled through one `--threads` setting
 - Feather and TSV outputs plus optional annotated BAM output with per-fragment assignment tags
 
@@ -222,8 +223,9 @@ unique nRNA spans, Rigel solves a `T + N + 1` component problem:
 - `1` merged gDNA component for the locus
 
 The solver applies effective-length correction, strand and insert-size scoring,
-coverage-weighted OVR priors, empirical Bayes initialization, and post-EM
-pruning before expected-count assignment.
+a tripartite prior system (coverage-weighted OVR for mRNA, sparsifying Dirichlet
+for nRNA, EB-anchored prior for gDNA), and post-EM pruning before
+expected-count assignment.
 
 ---
 

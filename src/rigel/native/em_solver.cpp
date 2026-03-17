@@ -614,7 +614,8 @@ static void compute_ovr_prior_and_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
     const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
-    double        alpha_flat,
+    const double* base_prior,  // [n_components] pre-built per-component prior
+    int           n_t,         // number of mRNA components (OVR applies to [0..n_t))
     double        gamma,
     double*       prior_out,       // [n_components] output
     double*       theta_init_out,  // [n_components] output
@@ -652,16 +653,24 @@ static void compute_ovr_prior_and_warm_start(
         }
     }
 
-    // Build prior: alpha_flat + gamma-scaled OVR coverage weights
+    // Build prior: base_prior[i] + gamma-scaled OVR (mRNA only)
     if (n_ambiguous > 0 && gamma > 0.0) {
         double inv_n = gamma / static_cast<double>(n_ambiguous);
         for (int i = 0; i < n_components; ++i) {
-            double ovr_i = coverage_totals[i] * inv_n;
-            prior_out[i] = (eligible[i] > 0.0) ? (alpha_flat + ovr_i) : 0.0;
+            if (eligible[i] <= 0.0) {
+                prior_out[i] = 0.0;
+            } else if (i < n_t) {
+                // mRNA: base_prior + OVR gamma-scaling
+                double ovr_i = coverage_totals[i] * inv_n;
+                prior_out[i] = base_prior[i] + ovr_i;
+            } else {
+                // nRNA / gDNA: base_prior only (no OVR)
+                prior_out[i] = base_prior[i];
+            }
         }
     } else {
         for (int i = 0; i < n_components; ++i) {
-            prior_out[i] = (eligible[i] > 0.0) ? alpha_flat : 0.0;
+            prior_out[i] = (eligible[i] > 0.0) ? base_prior[i] : 0.0;
         }
     }
 }
@@ -1051,11 +1060,14 @@ run_locus_em_native(
         off_ptr, ti_ptr, ll_ptr, cw_ptr, n_units);
 
     // 5. Coverage-weighted warm start + OVR prior
+    //    (run_locus_em_native uses uniform base_prior = alpha_flat)
+    std::vector<double> base_prior_v(nc, prior_alpha);
     std::vector<double> prior(nc);
     std::vector<double> theta_init(nc);
     compute_ovr_prior_and_warm_start(
         ec_data, unambig_totals.data(), pe_ptr,
-        prior_alpha, prior_gamma,
+        base_prior_v.data(), n_components,  // all mRNA → OVR for all
+        prior_gamma,
         prior.data(), theta_init.data(), n_components);
 
     // 6. Run SQUAREM
@@ -1156,6 +1168,7 @@ static void extract_locus_sub_problem(
     const int32_t* t_arr, int n_t,
     const int32_t* u_arr, int n_u,
     double gdna_init,
+    int64_t gdna_span,
     // Global CSR
     const int64_t* g_offsets,
     const int32_t* g_t_indices,
@@ -1306,16 +1319,8 @@ static void extract_locus_sub_problem(
     sub.locus_t_arr.resize(n_u);
     sub.locus_ct_arr.resize(n_u);
 
-    // Compute locus span for gDNA bias profile
-    int64_t locus_start = all_t_starts[t_arr[0]];
-    int64_t locus_end = all_t_ends[t_arr[0]];
-    for (int i = 1; i < n_t; ++i) {
-        int64_t ts = all_t_starts[t_arr[i]];
-        int64_t te = all_t_ends[t_arr[i]];
-        if (ts < locus_start) locus_start = ts;
-        if (te > locus_end) locus_end = te;
-    }
-    int64_t locus_span = locus_end - locus_start;
+    // Use pre-computed union genomic footprint for gDNA bias profile
+    int64_t locus_span = gdna_span;
 
     for (int ui = 0; ui < n_u; ++ui) {
         int u = u_arr[ui];
@@ -1619,6 +1624,7 @@ batch_locus_em(
     i64_1d locus_u_offsets,    // [n_loci + 1]
     i32_1d locus_u_flat,       // concatenated unit indices
     f64_1d gdna_inits,         // [n_loci]
+    i64_1d gdna_spans,         // [n_loci] pre-computed union genomic footprints
     // --- Per-transcript data ---
     f64_2d unambig_counts,     // [N_T, n_cols]
     f64_1d nrna_init_arr,
@@ -1643,6 +1649,8 @@ batch_locus_em(
     double convergence_delta,
     double prior_alpha,
     double prior_gamma,
+    double nrna_sparsity_alpha,
+    double gdna_prior_scale,
     bool   use_vbem,
     double prune_threshold,
     double confidence_threshold,
@@ -1673,6 +1681,7 @@ batch_locus_em(
     const int64_t*  lu_off = locus_u_offsets.data();
     const int32_t*  lu_fl  = locus_u_flat.data();
     const double*   gi_ptr = gdna_inits.data();
+    const int64_t*  gs_ptr = gdna_spans.data();
 
     const double*   uac    = unambig_counts.data();  // [N_T, N_COLS] row-major
     const double*   nri    = nrna_init_arr.data();
@@ -1814,7 +1823,7 @@ batch_locus_em(
 
             // 1. Extract sub-problem
             extract_locus_sub_problem(
-                sub, t_arr, n_t, u_arr, n_u, gdna_init,
+                sub, t_arr, n_t, u_arr, n_u, gdna_init, gs_ptr[li],
                 goff, gti, gll, gcw, gtxs, gtxe, gcc,
                 gis, ggll, ggfp, glti, glcc,
                 nrna_base_index,
@@ -1858,14 +1867,24 @@ batch_locus_em(
                 sub.coverage_wts.data(),
                 n_local_units);
 
-            // 6. Coverage-weighted warm start + OVR prior
+            // 6. Tripartite prior + coverage-weighted warm start
+            //    mRNA [0, n_t): alpha + OVR gamma-scaling
+            //    nRNA [n_t, n_t+n_nrna): nrna_sparsity_alpha
+            //    gDNA [gdna_idx]: gdna_prior_scale * gdna_init
+            int gdna_idx = sub.gdna_idx;
+            std::vector<double> base_prior(nc, prior_alpha);
+            for (int i = sub.n_t; i < gdna_idx; ++i)
+                base_prior[i] = nrna_sparsity_alpha;
+            if (gdna_idx >= 0 && gdna_idx < nc)
+                base_prior[gdna_idx] = gdna_prior_scale * gdna_inits.data()[li];
+
             std::vector<double> prior(nc);
             std::vector<double> theta_init(nc);
             compute_ovr_prior_and_warm_start(
                 ec_data,
                 sub.unambig_totals.data(),
                 sub.eligible.data(),
-                prior_alpha, prior_gamma,
+                base_prior.data(), sub.n_t, prior_gamma,
                 prior.data(), theta_init.data(), nc);
 
             // 7. Run unified SQUAREM
@@ -2294,6 +2313,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_u_offsets"),
           nb::arg("locus_u_flat"),
           nb::arg("gdna_inits"),
+          nb::arg("gdna_spans"),
           nb::arg("unambig_counts"),
           nb::arg("nrna_init"),
           nb::arg("t_starts"),
@@ -2314,6 +2334,8 @@ NB_MODULE(_em_impl, m) {
           nb::arg("convergence_delta"),
           nb::arg("prior_alpha"),
           nb::arg("prior_gamma"),
+          nb::arg("nrna_sparsity_alpha"),
+          nb::arg("gdna_prior_scale"),
           nb::arg("use_vbem"),
           nb::arg("prune_threshold"),
           nb::arg("confidence_threshold"),

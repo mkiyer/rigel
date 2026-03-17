@@ -794,10 +794,13 @@ private:
                             stype == SPLICE_SPLICED_UNANNOT)
                             continue;
                         int32_t gfp_val = cps[ci].g_fp[ri];
+                        int nm_val = cps[ci].nm[ri];
+                        double hit_log_nm = nm_val > 0
+                            ? nm_val * mm_log_pen_ : 0.0;
                         double gdna_fl =
                             gdna_frag_len_log_lik(gfp_val);
                         double gdna_ll_val =
-                            gdna_fl + gdna_log_sp + LOG_HALF;
+                            gdna_fl + gdna_log_sp + LOG_HALF + hit_log_nm;
                         if (gdna_ll_val > best_gdna_ll) {
                             best_gdna_ll = gdna_ll_val;
                             best_fp = gfp_val;
@@ -1242,7 +1245,7 @@ private:
                             gdna_frag_len_log_lik(
                                 genomic_footprint);
                         st.gdna_ll[st.unit_cur] =
-                                gdna_fl + gdna_log_sp + LOG_HALF;
+                                gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
                     } else {
                         st.gdna_ll[st.unit_cur] = NEG_INF;
                     }

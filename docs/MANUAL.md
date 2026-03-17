@@ -201,6 +201,9 @@ underscores or hyphens.
 | `--em-convergence-delta` | `1e-6` | Convergence threshold |
 | `--prune-threshold` | `0.1` | Post-EM evidence-ratio threshold; set negative to disable |
 | `--confidence-threshold` | `0.95` | RNA-normalized posterior threshold for high-confidence assignment |
+| `--em-mode` | `vbem` | EM algorithm variant: `map` (MAP-EM) or `vbem` (Variational Bayes EM) |
+| `--nrna-sparsity-alpha` | `0.9` | Dirichlet α for nRNA components. Values < 1.0 sparsify weak nRNA toward zero |
+| `--gdna-prior-scale` | `1.0` | Scale factor for EB gDNA prior anchor: α = 1 + scale × gdna\_init |
 
 ### Fragment scoring
 
@@ -214,12 +217,13 @@ underscores or hyphens.
 
 The implemented nRNA hierarchy is `global -> locus-strand -> nRNA`. The final
 Beta prior is attached to each shared nRNA span, not to each transcript.
+The `--nrna-sparsity-alpha` parameter (in Core EM settings above) controls a
+separate Dirichlet sparsity prior on nRNA EM components.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--nrna-frac-kappa-global` | auto | Shrinkage from locus-strand toward global |
 | `--nrna-frac-kappa-locus` | auto | Shrinkage from nRNA toward locus-strand |
-| `--nrna-frac-kappa-nrna` | `5.0` | Final Beta prior pseudo-count supplied to the EM solver |
 | `--nrna-frac-mom-min-evidence-global` | `50.0` | Minimum evidence for global MoM estimation |
 | `--nrna-frac-mom-min-evidence-locus` | `20.0` | Minimum evidence for locus-level MoM estimation |
 | `--nrna-frac-kappa-min` | `2.0` | Lower clamp for auto-estimated kappa |
@@ -228,6 +232,9 @@ Beta prior is attached to each shared nRNA span, not to each transcript.
 | `--nrna-frac-kappa-min-obs` | `20` | Minimum number of features needed for MoM estimation |
 
 ### gDNA prior and symmetry settings
+
+The `--gdna-prior-scale` parameter (in Core EM settings above) controls the
+strength of the Empirical Bayes gDNA anchor in the per-locus prior.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -277,7 +284,10 @@ sj_strand_tag: [XS, ts]
 
 nrna_frac_kappa_global: null
 nrna_frac_kappa_locus: null
-nrna_frac_kappa_nrna: 5.0
+
+em_mode: vbem
+nrna_sparsity_alpha: 0.9
+gdna_prior_scale: 1.0
 
 gdna_kappa_ref: null
 gdna_kappa_locus: null

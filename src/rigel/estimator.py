@@ -360,6 +360,8 @@ class AbundanceEstimator:
             locus_u_offsets,
             locus_u_flat,
             np.ascontiguousarray(gdna_inits, dtype=np.float64),
+            # Pre-computed union genomic footprints
+            np.array([l.gdna_span for l in loci], dtype=np.int64),
             # Per-transcript data
             self.unambig_counts,
             self.nrna_init,
@@ -384,6 +386,8 @@ class AbundanceEstimator:
             em_convergence_delta,
             self.em_config.prior_alpha,
             self.em_config.prior_gamma,
+            self.em_config.nrna_sparsity_alpha,
+            self.em_config.gdna_prior_scale,
             self.em_config.mode == "vbem",
             self.em_config.prune_threshold if self.em_config.prune_threshold is not None else -1.0,
             confidence_threshold,
