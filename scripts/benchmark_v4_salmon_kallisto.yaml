@@ -3,7 +3,7 @@
 
 genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
 gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
-outdir: /Users/mkiyer/Downloads/rigel_runs/benchmark_output_v4_salmon_kallisto
+outdir: /Users/mkiyer/Downloads/rigel_runs/benchmark_output_v5_salmon_kallisto
 
 threads: 8
 transcript_filter: basic
