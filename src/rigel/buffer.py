@@ -43,24 +43,24 @@ __all__ = ["FragmentBuffer", "BufferedFragment"]
 from .native import FragmentAccumulator, ResolvedFragment
 
 # Fragment classification constants used by fragment_classes property
-FRAG_UNAMBIG: int = 0          # same-strand, 1 transcript, NH=1
+FRAG_UNAMBIG: int = 0  # same-strand, 1 transcript, NH=1
 FRAG_AMBIG_SAME_STRAND: int = 1  # same-strand, >1 transcript, NH=1
-FRAG_AMBIG_OPP_STRAND: int = 2   # ambig-strand transcripts, NH=1
-FRAG_MULTIMAPPER: int = 3     # NH > 1 (multimapped molecule)
-FRAG_CHIMERIC: int = 4        # chimeric fragment (disjoint transcript sets)
+FRAG_AMBIG_OPP_STRAND: int = 2  # ambig-strand transcripts, NH=1
+FRAG_MULTIMAPPER: int = 3  # NH > 1 (multimapped molecule)
+FRAG_CHIMERIC: int = 4  # chimeric fragment (disjoint transcript sets)
 
 
 # ---------------------------------------------------------------------------
 # BufferedFragment — lightweight view into a finalized chunk
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class BufferedFragment:
     """Lightweight view into a columnar buffer chunk.
 
     Provides the same duck-typed interface as ``ResolvedFragment`` so
-    that ``AbundanceEstimator.assign_unambig`` and the EM scoring functions
-    work without modification.
+    that the C++ scoring functions work without modification.
 
     ``t_inds`` is a NumPy array slice (supports iteration, ``len()``,
     indexing) rather than a frozenset.  Strand mixing is represented
@@ -108,6 +108,7 @@ class BufferedFragment:
 # _FinalizedChunk — immutable chunk in compact NumPy arrays
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class _FinalizedChunk:
     """Immutable chunk of fragment data in compact columnar arrays.
@@ -125,24 +126,24 @@ class _FinalizedChunk:
     versus int64.
     """
 
-    splice_type: np.ndarray       # uint8[N]
-    exon_strand: np.ndarray     # uint8[N]
-    sj_strand: np.ndarray       # uint8[N]
-    num_hits: np.ndarray        # uint16[N]
+    splice_type: np.ndarray  # uint8[N]
+    exon_strand: np.ndarray  # uint8[N]
+    sj_strand: np.ndarray  # uint8[N]
+    num_hits: np.ndarray  # uint16[N]
     merge_criteria: np.ndarray  # uint8[N]
-    chimera_type: np.ndarray    # uint8[N]
-    t_offsets: np.ndarray       # int32[N+1]
-    t_indices: np.ndarray       # int32[M_t]
-    frag_lengths: np.ndarray    # int32[M_t]  (parallel to t_indices)
-    exon_bp: np.ndarray         # int32[M_t]  (parallel to t_indices)
-    intron_bp: np.ndarray       # int32[M_t]  (parallel to t_indices)
+    chimera_type: np.ndarray  # uint8[N]
+    t_offsets: np.ndarray  # int32[N+1]
+    t_indices: np.ndarray  # int32[M_t]
+    frag_lengths: np.ndarray  # int32[M_t]  (parallel to t_indices)
+    exon_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
+    intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     unambig_intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
-    ambig_strand: np.ndarray    # uint8[N]
-    frag_id: np.ndarray         # int32[N]
-    read_length: np.ndarray     # uint32[N]
+    ambig_strand: np.ndarray  # uint8[N]
+    frag_id: np.ndarray  # int32[N]
+    read_length: np.ndarray  # uint32[N]
     genomic_footprint: np.ndarray  # int32[N]
-    genomic_start: np.ndarray   # int32[N]
-    nm: np.ndarray              # uint16[N]
+    genomic_start: np.ndarray  # int32[N]
+    nm: np.ndarray  # uint16[N]
     size: int
 
     @classmethod
@@ -179,16 +180,26 @@ class _FinalizedChunk:
     def memory_bytes(self) -> int:
         """Total bytes consumed by the underlying NumPy arrays."""
         return sum(
-            a.nbytes for a in (
-                self.splice_type, self.exon_strand, self.sj_strand,
-                self.num_hits, self.merge_criteria,
+            a.nbytes
+            for a in (
+                self.splice_type,
+                self.exon_strand,
+                self.sj_strand,
+                self.num_hits,
+                self.merge_criteria,
                 self.chimera_type,
-                self.t_offsets, self.t_indices,
+                self.t_offsets,
+                self.t_indices,
                 self.frag_lengths,
-                self.exon_bp, self.intron_bp,
+                self.exon_bp,
+                self.intron_bp,
                 self.unambig_intron_bp,
-                self.ambig_strand, self.frag_id, self.read_length,
-                self.genomic_footprint, self.genomic_start, self.nm,
+                self.ambig_strand,
+                self.frag_id,
+                self.read_length,
+                self.genomic_footprint,
+                self.genomic_start,
+                self.nm,
             )
         )
 
@@ -208,9 +219,9 @@ class _FinalizedChunk:
         n_transcripts = np.diff(self.t_offsets).astype(np.intp)
         classes = np.full(self.size, FRAG_UNAMBIG, dtype=np.uint8)
         # Same strand, multiple transcripts, single mapper → ambig same-strand
-        classes[
-            (self.ambig_strand == 0) & (n_transcripts > 1) & (self.num_hits == 1)
-        ] = FRAG_AMBIG_SAME_STRAND
+        classes[(self.ambig_strand == 0) & (n_transcripts > 1) & (self.num_hits == 1)] = (
+            FRAG_AMBIG_SAME_STRAND
+        )
         # Mixed strand, single mapper → ambig opposite-strand
         classes[(self.ambig_strand > 0) & (self.num_hits == 1)] = FRAG_AMBIG_OPP_STRAND
         # Multimapper → always FRAG_MULTIMAPPER (highest priority)
@@ -270,91 +281,11 @@ class _FinalizedChunk:
             nm=int(self.nm[i]),
         )
 
-    def sort_by_frag_id(self) -> '_FinalizedChunk':
-        """Return a new chunk with fragments sorted by frag_id.
-
-        Restores deterministic fragment ordering after multi-threaded
-        BAM scanning, where worker threads may process fragments in
-        non-deterministic order.  The frag_id is assigned sequentially
-        by the single-threaded reader, so sorting by it recovers the
-        original BAM order.
-        """
-        order = np.argsort(self.frag_id, kind='stable')
-
-        # Check if already sorted
-        if np.all(order == np.arange(len(order))):
-            return self
-
-        # Reindex per-fragment arrays
-        new_splice_type = self.splice_type[order]
-        new_exon_strand = self.exon_strand[order]
-        new_sj_strand = self.sj_strand[order]
-        new_num_hits = self.num_hits[order]
-        new_merge_criteria = self.merge_criteria[order]
-        new_chimera_type = self.chimera_type[order]
-        new_ambig_strand = self.ambig_strand[order]
-        new_frag_id = self.frag_id[order]
-        new_read_length = self.read_length[order]
-        new_genomic_footprint = self.genomic_footprint[order]
-        new_genomic_start = self.genomic_start[order]
-        new_nm = self.nm[order]
-
-        # Reindex CSR arrays
-        old_offsets = self.t_offsets
-        # Compute per-fragment candidate counts
-        counts = np.diff(old_offsets)
-        new_counts = counts[order]
-        new_offsets = np.empty(len(new_counts) + 1, dtype=old_offsets.dtype)
-        new_offsets[0] = 0
-        np.cumsum(new_counts, out=new_offsets[1:])
-
-        # Gather CSR flat arrays in new order
-        total_cands = int(new_offsets[-1])
-        new_t_indices = np.empty(total_cands, dtype=self.t_indices.dtype)
-        new_frag_lengths = np.empty(total_cands, dtype=self.frag_lengths.dtype)
-        new_exon_bp = np.empty(total_cands, dtype=self.exon_bp.dtype)
-        new_intron_bp = np.empty(total_cands, dtype=self.intron_bp.dtype)
-        new_unambig_intron_bp = np.empty(
-            total_cands, dtype=self.unambig_intron_bp.dtype)
-
-        for new_i, old_i in enumerate(order):
-            src_s = old_offsets[old_i]
-            src_e = old_offsets[old_i + 1]
-            dst_s = new_offsets[new_i]
-            dst_e = new_offsets[new_i + 1]
-            new_t_indices[dst_s:dst_e] = self.t_indices[src_s:src_e]
-            new_frag_lengths[dst_s:dst_e] = self.frag_lengths[src_s:src_e]
-            new_exon_bp[dst_s:dst_e] = self.exon_bp[src_s:src_e]
-            new_intron_bp[dst_s:dst_e] = self.intron_bp[src_s:src_e]
-            new_unambig_intron_bp[dst_s:dst_e] = (
-                self.unambig_intron_bp[src_s:src_e])
-
-        return _FinalizedChunk(
-            splice_type=new_splice_type,
-            exon_strand=new_exon_strand,
-            sj_strand=new_sj_strand,
-            num_hits=new_num_hits,
-            merge_criteria=new_merge_criteria,
-            chimera_type=new_chimera_type,
-            t_offsets=new_offsets,
-            t_indices=new_t_indices,
-            frag_lengths=new_frag_lengths,
-            exon_bp=new_exon_bp,
-            intron_bp=new_intron_bp,
-            unambig_intron_bp=new_unambig_intron_bp,
-            ambig_strand=new_ambig_strand,
-            frag_id=new_frag_id,
-            read_length=new_read_length,
-            genomic_footprint=new_genomic_footprint,
-            genomic_start=new_genomic_start,
-            nm=new_nm,
-            size=self.size,
-        )
-
 
 # ---------------------------------------------------------------------------
 # Arrow IPC (Feather v2) spill / load
 # ---------------------------------------------------------------------------
+
 
 def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
     """Write a finalized chunk to disk as Arrow IPC with LZ4."""
@@ -362,40 +293,47 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
     import pyarrow.feather as pf
 
     t_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32), chunk.t_indices,
+        chunk.t_offsets.astype(np.int32),
+        chunk.t_indices,
     )
     frag_lengths_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32), chunk.frag_lengths,
+        chunk.t_offsets.astype(np.int32),
+        chunk.frag_lengths,
     )
     exon_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32), chunk.exon_bp,
+        chunk.t_offsets.astype(np.int32),
+        chunk.exon_bp,
     )
     intron_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32), chunk.intron_bp,
+        chunk.t_offsets.astype(np.int32),
+        chunk.intron_bp,
     )
     unambig_intron_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32), chunk.unambig_intron_bp,
+        chunk.t_offsets.astype(np.int32),
+        chunk.unambig_intron_bp,
     )
 
-    table = pa.table({
-        "splice_type": chunk.splice_type,
-        "exon_strand": chunk.exon_strand,
-        "sj_strand": chunk.sj_strand,
-        "num_hits": chunk.num_hits,
-        "merge_criteria": chunk.merge_criteria,
-        "chimera_type": chunk.chimera_type,
-        "t_inds": t_list,
-        "frag_lengths": frag_lengths_list,
-        "exon_bp": exon_bp_list,
-        "intron_bp": intron_bp_list,
-        "unambig_intron_bp": unambig_intron_bp_list,
-        "ambig_strand": chunk.ambig_strand,
-        "frag_id": chunk.frag_id,
-        "read_length": chunk.read_length,
-        "genomic_footprint": chunk.genomic_footprint,
-        "genomic_start": chunk.genomic_start,
-        "nm": chunk.nm,
-    })
+    table = pa.table(
+        {
+            "splice_type": chunk.splice_type,
+            "exon_strand": chunk.exon_strand,
+            "sj_strand": chunk.sj_strand,
+            "num_hits": chunk.num_hits,
+            "merge_criteria": chunk.merge_criteria,
+            "chimera_type": chunk.chimera_type,
+            "t_inds": t_list,
+            "frag_lengths": frag_lengths_list,
+            "exon_bp": exon_bp_list,
+            "intron_bp": intron_bp_list,
+            "unambig_intron_bp": unambig_intron_bp_list,
+            "ambig_strand": chunk.ambig_strand,
+            "frag_id": chunk.frag_id,
+            "read_length": chunk.read_length,
+            "genomic_footprint": chunk.genomic_footprint,
+            "genomic_start": chunk.genomic_start,
+            "nm": chunk.nm,
+        }
+    )
 
     pf.write_feather(table, str(path), compression="lz4")
 
@@ -453,6 +391,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
 # ---------------------------------------------------------------------------
 # FragmentBuffer — public API
 # ---------------------------------------------------------------------------
+
 
 class FragmentBuffer:
     """Columnar buffer for resolved fragments with disk-spill support.
@@ -623,9 +562,7 @@ class FragmentBuffer:
         if self._temp_dir is None:
             if self._spill_dir is not None:
                 self._spill_dir.mkdir(parents=True, exist_ok=True)
-                self._temp_dir = tempfile.mkdtemp(
-                    dir=self._spill_dir, prefix="rigel_buf_"
-                )
+                self._temp_dir = tempfile.mkdtemp(dir=self._spill_dir, prefix="rigel_buf_")
             else:
                 self._temp_dir = tempfile.mkdtemp(prefix="rigel_buf_")
         idx = self._n_spilled

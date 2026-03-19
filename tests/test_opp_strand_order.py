@@ -13,10 +13,7 @@ Questions answered:
   4. Does changing fragment order change results?
 """
 
-import itertools
 import logging
-import sys
-import textwrap
 from pathlib import Path
 
 import numpy as np
@@ -133,7 +130,6 @@ def _shuffle_bam(input_bam: Path, output_bam: Path, seed: int = 99):
 def _extract_results(pr, bench, result):
     """Extract key metrics from a pipeline run."""
     est = pr.estimator
-    idx = result.index
 
     info = {}
     for t in result.transcripts:
@@ -146,7 +142,6 @@ def _extract_results(pr, bench, result):
             est.transcript_unspliced_sense[ti])
         info[f"{tid}_unspliced_antisense"] = float(
             est.transcript_unspliced_antisense[ti])
-        info[f"{tid}_nrna_init"] = float(est.nrna_init[ti])
 
     info["gdna_total"] = float(est.gdna_em_count)
     info["gdna_em"] = float(est.gdna_em_count)

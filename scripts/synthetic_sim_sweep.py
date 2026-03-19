@@ -54,8 +54,6 @@ Config structure (YAML)
       em:                  # EMConfig fields
         prior_alpha: [0.001, 0.01, 0.1]
         mode: "map"
-      scan:                # BamScanConfig fields
-        strand_prior_kappa: [1.0, 2.0, 4.0]
       scoring:             # FragmentScoringConfig fields
         overhang_log_penalty: -4.605
 
@@ -94,8 +92,6 @@ from rigel.config import (
 )
 from rigel.pipeline import run_pipeline
 from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
-from rigel.region_evidence import count_region_evidence
-from rigel.calibration import calibrate_gdna
 
 # ---------------------------------------------------------------------------
 # Config-field registry (auto-derived from dataclasses)
@@ -889,23 +885,17 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     row["gdna_fl_est_std"] = ""
                     row["gdna_fl_mean_err"] = ""
 
-                # -- Calibration: region_evidence + calibrate_gdna --
+                # -- Calibration metrics (from pipeline's built-in calibration) --
                 cal_kappa_true = (
                     float(gdna_sk) if gdna_sk is not None else "")
                 row["cal_kappa_true"] = cal_kappa_true
 
-                try:
-                    region_counts, fl_obs = count_region_evidence(
-                        result.bam_path, result.index)
-                    cal = calibrate_gdna(
-                        region_counts, fl_obs, result.index.region_df,
-                        strand_specificity=ss,
-                        diagnostics=True,
-                    )
-                    row["cal_kappa_est"] = round(cal.kappa, 2)
+                cal = pr.calibration
+                if cal is not None:
+                    row["cal_kappa_est"] = round(cal.kappa_strand, 2)
                     if isinstance(cal_kappa_true, (int, float)):
                         row["cal_kappa_err"] = round(
-                            cal.kappa - cal_kappa_true, 2)
+                            cal.kappa_strand - cal_kappa_true, 2)
                     else:
                         row["cal_kappa_err"] = ""
                     row["cal_density_est"] = f"{cal.gdna_density_global:.4e}"
@@ -935,15 +925,12 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     logger.info(
                         "Calibration: κ_est=%.1f (true=%s), "
                         "density=%.2e, seed=%s, iter=%d, conv=%s",
-                        cal.kappa, cal_kappa_true,
+                        cal.kappa_strand, cal_kappa_true,
                         cal.gdna_density_global,
                         row["cal_n_seed"], cal.n_iterations,
                         cal.converged,
                     )
-                except Exception:
-                    logger.warning(
-                        "Calibration failed for run %d", run_idx + 1,
-                        exc_info=True)
+                else:
                     for col in ("cal_kappa_est", "cal_kappa_err",
                                 "cal_density_est",
                                 "cal_gdna_fl_true_mean",

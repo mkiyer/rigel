@@ -30,7 +30,10 @@ pytest tests/ --update-golden             # regenerate golden outputs after inte
 
 ### Test Failure Investigation
 
-When a test fails, your goal is not to reconfigure the test or change tolerances to make the test pass. Consider the test failure as a sentinel event, or critical information that alludes to a larger problem with the code or methodology. You goal is to understand WHY the test failed, determine the precise root cause of the failure, and evaluate possible solutions. If the solution is not clear, you should propose a plan for further investigation.
+- When a test fails, DO NOT reconfigure the test or change tolerances to make the test pass.
+- Consider a test failure as a sentinel event with critical information that alludes to a larger problem with the code or methodology. 
+- Conduct analysis to understand WHY the test failed, determine the precise root cause of the failure, and evaluate possible solutions
+- If the explanation and fix for the failed test is not clear, you should propose a plan for further investigation.
 
 ## Linting
 
@@ -51,7 +54,7 @@ ruff format src/ tests/
 
 ## Simulations / Benchmarking / Profiling
 
-- Create temporary scripts in `scripts/benchmark`, `scripts/profiling`, or `scripts/simulation` as needed. Try not to pollute the base `scripts/` directory.
+- Create temporary scripts in `scripts/benchmark/`, `scripts/profiling/`, or `scripts/simulation/` as needed. Try not to pollute the base `scripts/` directory.
 
 ## Benchmarking
 
@@ -59,11 +62,89 @@ ruff format src/ tests/
 
 ## Profiling
 
-`scripts/profile.py` contains a framework for profiling
+`scripts/profiler.py` contains a framework for profiling.
 
 ## Simulation
 
-`scripts/synthetic_sim_sweep.py` contains a framework for running synthetic simulations with configurable parameters
+`scripts/synthetic_sim_sweep.py` contains a framework for running synthetic simulations with configurable parameters.
+
+## Synthetic Benchmark Framework
+
+### Directory Layout
+
+```
+scripts/benchmark/
+├── configs/              # YAML benchmark definitions (sweep grids)
+│   ├── locus_simple_baseline.yaml
+│   ├── locus_simple_em_prior.yaml
+│   ├── locus_simple_em_mode.yaml
+│   ├── locus_simple_strand.yaml
+│   └── locus_simple_scoring.yaml
+├── golden/               # Gold-standard results (TSV + JSON per sweep)
+│   ├── locus_simple_baseline/
+│   ├── locus_simple_em_prior/
+│   ├── locus_simple_em_mode/
+│   ├── locus_simple_strand/
+│   └── locus_simple_scoring/
+├── analyze_golden.py     # Summary statistics across all sweeps
+└── analyze_deep.py       # Deep drill-down: nRNA siphon, gDNA leakage, param sensitivity
+```
+
+### How to Run Benchmarks
+
+```bash
+conda activate rigel
+
+# Run a single sweep (output goes to golden/ for comparison)
+python scripts/synthetic_sim_sweep.py \
+  -c scripts/benchmark/configs/<name>.yaml \
+  -o scripts/benchmark/golden/<name>
+
+# Run all sweeps
+for cfg in scripts/benchmark/configs/*.yaml; do
+  name=$(basename "$cfg" .yaml)
+  python scripts/synthetic_sim_sweep.py -c "$cfg" -o "scripts/benchmark/golden/$name"
+done
+```
+
+### How to Analyze Results
+
+```bash
+# Summary statistics (aggregate error metrics per sweep)
+python scripts/benchmark/analyze_golden.py
+
+# Deep analysis (nRNA siphon breakdown, gDNA leakage, per-parameter sensitivity)
+python scripts/benchmark/analyze_deep.py
+```
+
+### How to Add a New Benchmark Config
+
+Create a YAML file in `scripts/benchmark/configs/`. The sweep framework (`synthetic_sim_sweep.py`) supports these sweepable parameter dimensions:
+
+- **Simulation params**: `strand_specificity`, `gdna_fraction`, per-entity `n_rna_fragments`
+- **EM params** (`em_config`): `prior_pseudocount`, `mode` (map/vbem), `prune_threshold`, `convergence_delta`, `max_iterations`
+- **BAM scan params** (`scan_config`): (none currently sweepable)
+- **Scoring params** (`scoring_config`): `overhang_log_penalty`, `mismatch_log_penalty`
+
+Each dimension in `sweep_dims` creates a Cartesian product grid. Use `n_rna_fragments` + `gdna_fraction` mode (not `n_fragments`) to keep RNA counts fixed while varying gDNA contamination.
+
+### Benchmark Workflow (for Copilot)
+
+When asked to run benchmarks, compare to gold standard, and analyze results:
+
+1. **Recompile** if any C++ changes: `pip install --no-build-isolation -e .`
+2. **Run** all benchmark configs (or a specific one) using the commands above
+3. **Analyze** with `analyze_golden.py` (summary) and `analyze_deep.py` (deep dive)
+4. **Compare** new results against golden TSVs — look for regressions in mRNA/nRNA/gDNA relative error
+5. **Report** findings with focus on: (a) nRNA siphon magnitude, (b) gDNA leakage at low contamination, (c) any hyperparameter sensitivity changes
+6. **Root cause** any regressions by examining which NTA1/TA1 ratio or ss/gdna_fraction combinations degraded
+
+### Known Benchmark Findings (baseline)
+
+- **nRNA siphon** is the dominant failure mode: when NTA1 >> TA1 (ratio ≥ 5), the nRNA component absorbs mRNA fragments causing up to ~37% mRNA error. This is a fundamental identifiability issue, not a hyperparameter problem.
+- **gDNA overestimation** at low contamination (gdna_fraction=0.3): relative error ~1.5–2.0×, improving at higher contamination.
+- **Scoring penalties** (overhang, mismatch) show zero sensitivity in synthetic data (no mismatches in simulated reads).
+- **EM hyperparameters** (prior_pseudocount 0.1–5.0, MAP vs VBEM, prune_threshold) have negligible effect.
 
 ## Architecture Summary
 
@@ -72,11 +153,11 @@ Two-stage pipeline: (1) C++ BAM scan → FragmentBuffer, (2) Python/C++ locus-le
 - **C++ extensions** (`src/rigel/native/`): `_bam_impl`, `_em_impl`, `_scoring_impl`, `_resolve_impl`, `_cgranges_impl` — compiled via scikit-build-core + nanobind + CMake
 - **Scoring model**: mRNA, nRNA, and gDNA candidates scored with strand, fragment-length, overhang, and NM mismatch penalties
 - **EM solver**: Per-locus EM with `2*n_t + 1` components (mRNA + nRNA per transcript + one gDNA), SQUAREM acceleration, OpenMP parallel
-- **Tripartite prior**: mRNA uses OVR prior, nRNA uses Dirichlet sparsity (α<1), gDNA uses Empirical Bayes anchor
+- **Calibration**: gDNA density, strand balance, and fragment length deconvolution via `calibrate_gdna()` in `calibration.py` — EM mixture model on genomic regions with hard constraints and adaptive shrinkage
 
 ## Key Constraints
 
-- Mega-loci (large connected components from multimappers) are intentional and correct. Do NOT modify connected_components to exclude multimappers.
+- Mega-loci (large connected components from multimappers) are difficult to avoid with real data. The EM solver must be robust to loci with thousands of transcripts and millions of fragments.
 - `read_length` in resolve_context.h is the sum of aligned exon block spans (M/D/=/X), NOT the full query sequence length. Soft-clipped bases are excluded.
 - Chimeric fragments are detected and buffered but **skipped** in scoring — they never enter EM.
 - Input BAM must be name-sorted with `NH` tag (minimap2 doesn't set NH; the code handles this via secondary flag detection).

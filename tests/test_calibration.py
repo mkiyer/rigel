@@ -60,28 +60,32 @@ def _make_region_counts(
     n_spliced_neg=None,
 ):
     n = len(n_unspliced_pos)
-    return pd.DataFrame({
-        "region_id": np.arange(n, dtype=np.int32),
-        "n_unspliced_pos": np.asarray(n_unspliced_pos, dtype=np.float32),
-        "n_unspliced_neg": np.asarray(n_unspliced_neg, dtype=np.float32),
-        "n_spliced_pos": (
-            np.asarray(n_spliced_pos, dtype=np.float32)
-            if n_spliced_pos is not None
-            else np.zeros(n, dtype=np.float32)
-        ),
-        "n_spliced_neg": (
-            np.asarray(n_spliced_neg, dtype=np.float32)
-            if n_spliced_neg is not None
-            else np.zeros(n, dtype=np.float32)
-        ),
-    })
+    return pd.DataFrame(
+        {
+            "region_id": np.arange(n, dtype=np.int32),
+            "n_unspliced_pos": np.asarray(n_unspliced_pos, dtype=np.float32),
+            "n_unspliced_neg": np.asarray(n_unspliced_neg, dtype=np.float32),
+            "n_spliced_pos": (
+                np.asarray(n_spliced_pos, dtype=np.float32)
+                if n_spliced_pos is not None
+                else np.zeros(n, dtype=np.float32)
+            ),
+            "n_spliced_neg": (
+                np.asarray(n_spliced_neg, dtype=np.float32)
+                if n_spliced_neg is not None
+                else np.zeros(n, dtype=np.float32)
+            ),
+        }
+    )
 
 
 def _make_fl_table(region_ids, frag_lens):
-    return pd.DataFrame({
-        "region_id": np.asarray(region_ids, dtype=np.int32),
-        "frag_len": np.asarray(frag_lens, dtype=np.int32),
-    })
+    return pd.DataFrame(
+        {
+            "region_id": np.asarray(region_ids, dtype=np.int32),
+            "frag_len": np.asarray(frag_lens, dtype=np.int32),
+        }
+    )
 
 
 def _density_setup(stats):
@@ -97,7 +101,6 @@ def _density_setup(stats):
 
 
 class TestComputeRegionStats:
-
     def test_basic_computation(self):
         counts = _make_region_counts(
             n_unspliced_pos=[80, 50, 0],
@@ -133,7 +136,9 @@ class TestComputeRegionStats:
 
     def test_intergenic_gene_strand(self):
         region_df = _make_region_df(
-            2, tx_pos=np.array([False, False]), tx_neg=np.array([False, False]),
+            2,
+            tx_pos=np.array([False, False]),
+            tx_neg=np.array([False, False]),
         )
         counts = _make_region_counts(n_unspliced_pos=[10, 10], n_unspliced_neg=[10, 10])
         stats = compute_region_stats(counts, region_df)
@@ -147,14 +152,16 @@ class TestComputeRegionStats:
 
 
 class TestStrandModel:
-
     def test_sense_fraction_plus_gene(self):
         """+ gene: RNA on − strand → sense_frac = 1 − strand_ratio."""
         counts = _make_region_counts(
-            n_unspliced_pos=[10], n_unspliced_neg=[90],
+            n_unspliced_pos=[10],
+            n_unspliced_neg=[90],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         sf = compute_sense_fraction(stats)
@@ -164,10 +171,13 @@ class TestStrandModel:
     def test_sense_fraction_minus_gene(self):
         """− gene: RNA on + strand → sense_frac = strand_ratio."""
         counts = _make_region_counts(
-            n_unspliced_pos=[90], n_unspliced_neg=[10],
+            n_unspliced_pos=[90],
+            n_unspliced_neg=[10],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([False]), tx_neg=np.array([True]),
+            1,
+            tx_pos=np.array([False]),
+            tx_neg=np.array([True]),
         )
         stats = compute_region_stats(counts, rdf)
         sf = compute_sense_fraction(stats)
@@ -176,10 +186,13 @@ class TestStrandModel:
 
     def test_sense_fraction_ambiguous_is_nan(self):
         counts = _make_region_counts(
-            n_unspliced_pos=[70], n_unspliced_neg=[30],
+            n_unspliced_pos=[70],
+            n_unspliced_neg=[30],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([True]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([True]),
         )
         stats = compute_region_stats(counts, rdf)
         sf = compute_sense_fraction(stats)
@@ -189,10 +202,13 @@ class TestStrandModel:
     def test_binomial_llr_zero_when_unstranded(self):
         """When SS=0.5, Binomial LLR is exactly zero for all regions."""
         counts = _make_region_counts(
-            n_unspliced_pos=[50], n_unspliced_neg=[50],
+            n_unspliced_pos=[50],
+            n_unspliced_neg=[50],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_binomial(stats, 0.5, 1)
@@ -201,10 +217,13 @@ class TestStrandModel:
     def test_binomial_symmetric_favors_gdna(self):
         """Symmetric counts (50/50) at SS=0.95 → positive LLR (gDNA)."""
         counts = _make_region_counts(
-            n_unspliced_pos=[50], n_unspliced_neg=[50],
+            n_unspliced_pos=[50],
+            n_unspliced_neg=[50],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_binomial(stats, 0.95, 1)
@@ -213,10 +232,13 @@ class TestStrandModel:
     def test_binomial_biased_favors_rna(self):
         """Strong antisense bias at SS=0.95 → negative LLR (RNA)."""
         counts = _make_region_counts(
-            n_unspliced_pos=[5], n_unspliced_neg=[95],
+            n_unspliced_pos=[5],
+            n_unspliced_neg=[95],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_binomial(stats, 0.95, 1)
@@ -226,13 +248,17 @@ class TestStrandModel:
         """LLR magnitude should increase with sample size."""
         # Symmetric strand (sense_frac ≈ 0.5), different n
         counts_small = _make_region_counts(
-            n_unspliced_pos=[50], n_unspliced_neg=[50],
+            n_unspliced_pos=[50],
+            n_unspliced_neg=[50],
         )
         counts_large = _make_region_counts(
-            n_unspliced_pos=[500], n_unspliced_neg=[500],
+            n_unspliced_pos=[500],
+            n_unspliced_neg=[500],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats_s = compute_region_stats(counts_small, rdf)
         stats_l = compute_region_stats(counts_large, rdf)
@@ -255,7 +281,8 @@ class TestLogDensityAndGaussianLLR:
     def test_compute_log_density_basic(self):
         # Two regions: n_total = [100, 0], lengths = [1000, 1000].
         counts = _make_region_counts(
-            n_unspliced_pos=[50, 0], n_unspliced_neg=[50, 0],
+            n_unspliced_pos=[50, 0],
+            n_unspliced_neg=[50, 0],
         )
         stats = compute_region_stats(counts, _make_region_df(2, lengths=np.array([1000, 1000])))
         eligible = stats["n_total"] > 0
@@ -270,10 +297,12 @@ class TestLogDensityAndGaussianLLR:
     def test_compute_log_density_epsilon_from_median(self):
         # 3 regions with lengths [100, 500, 1000] → median = 500 → ε = 0.002
         counts = _make_region_counts(
-            n_unspliced_pos=[10, 10, 10], n_unspliced_neg=[10, 10, 10],
+            n_unspliced_pos=[10, 10, 10],
+            n_unspliced_neg=[10, 10, 10],
         )
         stats = compute_region_stats(
-            counts, _make_region_df(3, lengths=np.array([100, 500, 1000])),
+            counts,
+            _make_region_df(3, lengths=np.array([100, 500, 1000])),
         )
         eligible = stats["n_total"] > 0
         _, eps = compute_log_density(stats, eligible)
@@ -283,10 +312,12 @@ class TestLogDensityAndGaussianLLR:
         # Two zero-count regions with different lengths.
         # Under ε = 1/median(L), both get log(ε).
         counts = _make_region_counts(
-            n_unspliced_pos=[0, 0, 50], n_unspliced_neg=[0, 0, 50],
+            n_unspliced_pos=[0, 0, 50],
+            n_unspliced_neg=[0, 0, 50],
         )
         stats = compute_region_stats(
-            counts, _make_region_df(3, lengths=np.array([100, 5000, 1000])),
+            counts,
+            _make_region_df(3, lengths=np.array([100, 5000, 1000])),
         )
         eligible = stats["n_total"] > 0
         log_d, eps = compute_log_density(stats, eligible)
@@ -301,8 +332,13 @@ class TestLogDensityAndGaussianLLR:
         log_d = np.array([-4.9])
         eligible = np.array([True])
         llr = _compute_density_llr_gaussian(
-            log_d, mu_g=-5.0, var_g=0.1, mu_r=0.0, var_r=0.5,
-            eligible=eligible, n_regions=1,
+            log_d,
+            mu_g=-5.0,
+            var_g=0.1,
+            mu_r=0.0,
+            var_r=0.5,
+            eligible=eligible,
+            n_regions=1,
         )
         assert llr[0] > 0
 
@@ -311,8 +347,13 @@ class TestLogDensityAndGaussianLLR:
         log_d = np.array([0.5])
         eligible = np.array([True])
         llr = _compute_density_llr_gaussian(
-            log_d, mu_g=-5.0, var_g=0.5, mu_r=0.0, var_r=0.5,
-            eligible=eligible, n_regions=1,
+            log_d,
+            mu_g=-5.0,
+            var_g=0.5,
+            mu_r=0.0,
+            var_r=0.5,
+            eligible=eligible,
+            n_regions=1,
         )
         assert llr[0] < 0
 
@@ -320,8 +361,13 @@ class TestLogDensityAndGaussianLLR:
         log_d = np.array([-3.0, 0.0])
         eligible = np.array([False, True])
         llr = _compute_density_llr_gaussian(
-            log_d, mu_g=-5.0, var_g=0.5, mu_r=0.0, var_r=0.5,
-            eligible=eligible, n_regions=2,
+            log_d,
+            mu_g=-5.0,
+            var_g=0.5,
+            mu_r=0.0,
+            var_r=0.5,
+            eligible=eligible,
+            n_regions=2,
         )
         assert llr[0] == 0.0
         assert llr[1] != 0.0
@@ -331,8 +377,13 @@ class TestLogDensityAndGaussianLLR:
         log_d = np.array([3.0])
         eligible = np.array([True])
         llr = _compute_density_llr_gaussian(
-            log_d, mu_g=-5.0, var_g=1.0, mu_r=0.0, var_r=1.0,
-            eligible=eligible, n_regions=1,
+            log_d,
+            mu_g=-5.0,
+            var_g=1.0,
+            mu_r=0.0,
+            var_r=1.0,
+            eligible=eligible,
+            n_regions=1,
         )
         assert np.isfinite(llr[0])
 
@@ -343,7 +394,6 @@ class TestLogDensityAndGaussianLLR:
 
 
 class TestEstimateKappaMarginal:
-
     def test_high_symmetry_high_kappa(self):
         rng = np.random.default_rng(42)
         n_regions = 200
@@ -351,7 +401,8 @@ class TestEstimateKappaMarginal:
         n_pos = rng.binomial(100, p_true).astype(np.float64)
         n_neg = (100 - n_pos).astype(np.float64)
         stats = compute_region_stats(
-            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+            _make_region_counts(n_pos, n_neg),
+            _make_region_df(n_regions),
         )
         # All-gDNA scenario: γ = 1 everywhere
         kappa = estimate_kappa_marginal(stats, np.ones(n_regions), 0.95)
@@ -365,7 +416,8 @@ class TestEstimateKappaMarginal:
         n_pos = rng.binomial(100, p_true).astype(np.float64)
         n_neg = (100 - n_pos).astype(np.float64)
         stats = compute_region_stats(
-            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+            _make_region_counts(n_pos, n_neg),
+            _make_region_df(n_regions),
         )
         kappa = estimate_kappa_marginal(stats, np.ones(n_regions), 0.95)
         assert kappa is not None
@@ -384,7 +436,8 @@ class TestEstimateKappaMarginal:
         n_pos = (100 - k_sense).astype(np.float64)
         n_neg = k_sense.astype(np.float64)
         stats = compute_region_stats(
-            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+            _make_region_counts(n_pos, n_neg),
+            _make_region_df(n_regions),
         )
         kappa = estimate_kappa_marginal(stats, np.zeros(n_regions), ss)
         assert kappa is not None
@@ -403,7 +456,8 @@ class TestEstimateKappaMarginal:
         n_pos = np.concatenate([n_pos_g, n_pos_e]).astype(np.float64)
         n_neg = np.concatenate([100 - n_pos_g, 100 - n_pos_e]).astype(np.float64)
         stats = compute_region_stats(
-            _make_region_counts(n_pos, n_neg), _make_region_df(2 * ng),
+            _make_region_counts(n_pos, n_neg),
+            _make_region_df(2 * ng),
         )
         gamma = np.concatenate([np.ones(ng), np.zeros(ng)])
         kappa = estimate_kappa_marginal(stats, gamma, 0.95)
@@ -424,7 +478,8 @@ class TestEstimateKappaMarginal:
         n_pos = rng.binomial(100, p_true).astype(np.float64)
         n_neg = (100 - n_pos).astype(np.float64)
         stats = compute_region_stats(
-            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+            _make_region_counts(n_pos, n_neg),
+            _make_region_df(n_regions),
         )
         # SS=0.5: both components are identical, γ should be irrelevant
         kappa_g1 = estimate_kappa_marginal(stats, np.ones(n_regions), 0.5)
@@ -439,7 +494,8 @@ class TestEstimateKappaMarginal:
         n_pos = rng.binomial(10, p_true).astype(np.float64)
         n_neg = (10 - n_pos).astype(np.float64)
         stats = compute_region_stats(
-            _make_region_counts(n_pos, n_neg), _make_region_df(n_regions),
+            _make_region_counts(n_pos, n_neg),
+            _make_region_df(n_regions),
         )
         kappa = estimate_kappa_marginal(stats, np.ones(n_regions), 0.95)
         assert kappa is not None
@@ -461,7 +517,8 @@ class TestBetaBinomialStrandLLR:
             n_unspliced_neg=[30, 70, 50],
         )
         rdf = _make_region_df(
-            3, tx_pos=np.array([True, True, True]),
+            3,
+            tx_pos=np.array([True, True, True]),
             tx_neg=np.array([False, False, False]),
         )
         stats = compute_region_stats(counts, rdf)
@@ -472,10 +529,13 @@ class TestBetaBinomialStrandLLR:
     def test_positive_llr_for_symmetric_strand(self):
         """A region with 50/50 strand ratio should favor gDNA (LLR > 0) at high SS."""
         counts = _make_region_counts(
-            n_unspliced_pos=[50], n_unspliced_neg=[50],
+            n_unspliced_pos=[50],
+            n_unspliced_neg=[50],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
@@ -486,10 +546,13 @@ class TestBetaBinomialStrandLLR:
         # gene_strand=+1, TruSeq: sense = neg strand → k_sense = n_unspliced - n_pos
         # n_pos=5, n_unspliced=100 → k_sense=95 (high sense fraction → RNA)
         counts = _make_region_counts(
-            n_unspliced_pos=[5], n_unspliced_neg=[95],
+            n_unspliced_pos=[5],
+            n_unspliced_neg=[95],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
@@ -498,10 +561,13 @@ class TestBetaBinomialStrandLLR:
     def test_ambiguous_gene_strand_gives_zero_llr(self):
         """Regions with gene_strand=0 should produce LLR=0."""
         counts = _make_region_counts(
-            n_unspliced_pos=[80], n_unspliced_neg=[20],
+            n_unspliced_pos=[80],
+            n_unspliced_neg=[20],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([True]),  # both → strand=0
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([True]),  # both → strand=0
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
@@ -510,10 +576,13 @@ class TestBetaBinomialStrandLLR:
     def test_low_count_regions_produce_weak_llr(self):
         """Regions with very few reads should produce near-zero LLR."""
         counts = _make_region_counts(
-            n_unspliced_pos=[1], n_unspliced_neg=[1],
+            n_unspliced_pos=[1],
+            n_unspliced_neg=[1],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_betabinom(stats, 0.95, 20.0, 1)
@@ -522,10 +591,13 @@ class TestBetaBinomialStrandLLR:
     def test_higher_kappa_makes_llr_more_extreme(self):
         """Higher κ (less overdispersion) should give stronger strand signal."""
         counts = _make_region_counts(
-            n_unspliced_pos=[5], n_unspliced_neg=[95],
+            n_unspliced_pos=[5],
+            n_unspliced_neg=[95],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr_low = _compute_strand_llr_betabinom(stats, 0.95, 10.0, 1)
@@ -540,7 +612,8 @@ class TestBetaBinomialStrandLLR:
             n_unspliced_neg=[80, 20, 50],
         )
         rdf = _make_region_df(
-            3, tx_pos=np.array([True, True, True]),
+            3,
+            tx_pos=np.array([True, True, True]),
             tx_neg=np.array([False, False, False]),
         )
         stats = compute_region_stats(counts, rdf)
@@ -552,10 +625,12 @@ class TestBetaBinomialStrandLLR:
     def test_e_step_uses_betabinom_when_kappa_provided(self):
         """E-step should use Beta-Binomial when kappa is given."""
         counts = _make_region_counts(
-            n_unspliced_pos=[50, 5], n_unspliced_neg=[50, 95],
+            n_unspliced_pos=[50, 5],
+            n_unspliced_neg=[50, 95],
         )
         rdf = _make_region_df(
-            2, tx_pos=np.array([True, True]),
+            2,
+            tx_pos=np.array([True, True]),
             tx_neg=np.array([False, False]),
         )
         stats = compute_region_stats(counts, rdf)
@@ -566,13 +641,27 @@ class TestBetaBinomialStrandLLR:
 
         # Without kappa (Binomial fallback)
         gamma_bin = _e_step(
-            stats, 0.5, log_d, eligible, 0.95,
-            mu_g=mu, var_g=var, mu_r=mu, var_r=var,
+            stats,
+            0.5,
+            log_d,
+            eligible,
+            0.95,
+            mu_g=mu,
+            var_g=var,
+            mu_r=mu,
+            var_r=var,
         )
         # With kappa (Beta-Binomial)
         gamma_bb = _e_step(
-            stats, 0.5, log_d, eligible, 0.95,
-            mu_g=mu, var_g=var, mu_r=mu, var_r=var,
+            stats,
+            0.5,
+            log_d,
+            eligible,
+            0.95,
+            mu_g=mu,
+            var_g=var,
+            mu_r=mu,
+            var_r=var,
             kappa=20.0,
         )
         # Both should classify similarly (gDNA-like vs RNA-like patterns)
@@ -600,7 +689,11 @@ class TestInitialization:
         log_d, eligible = _density_setup(stats)
         sf = compute_sense_fraction(stats)
         gamma, pi_init, diag = _seed_initial_partition(
-            stats, log_d, sf, 0.95, eligible,
+            stats,
+            log_d,
+            sf,
+            0.95,
+            eligible,
         )
         # Spliced regions get gamma = 0
         assert gamma[0] == 0.0
@@ -612,25 +705,35 @@ class TestInitialization:
         rng = np.random.default_rng(42)
         n = 200
         # 100 low-density + 100 high-density
-        n_pos = np.concatenate([
-            rng.binomial(5, 0.5, 100),      # low count
-            rng.binomial(100, 0.5, 100),     # high count
-        ]).astype(np.float32)
-        n_neg = np.concatenate([
-            rng.binomial(5, 0.5, 100),
-            rng.binomial(100, 0.5, 100),
-        ]).astype(np.float32)
+        n_pos = np.concatenate(
+            [
+                rng.binomial(5, 0.5, 100),  # low count
+                rng.binomial(100, 0.5, 100),  # high count
+            ]
+        ).astype(np.float32)
+        n_neg = np.concatenate(
+            [
+                rng.binomial(5, 0.5, 100),
+                rng.binomial(100, 0.5, 100),
+            ]
+        ).astype(np.float32)
         # Give high-density regions spliced reads (expressed seed)
-        sp = np.concatenate([
-            np.zeros(100, dtype=np.float32),
-            rng.poisson(5, 100).astype(np.float32),
-        ])
+        sp = np.concatenate(
+            [
+                np.zeros(100, dtype=np.float32),
+                rng.poisson(5, 100).astype(np.float32),
+            ]
+        )
         counts = _make_region_counts(n_pos, n_neg, sp)
         stats = compute_region_stats(counts, _make_region_df(n, lengths=np.full(n, 1000)))
         log_d, eligible = _density_setup(stats)
         sf = compute_sense_fraction(stats)
         gamma, pi_init, diag = _seed_initial_partition(
-            stats, log_d, sf, 0.95, eligible,
+            stats,
+            log_d,
+            sf,
+            0.95,
+            eligible,
         )
         assert diag["n_gdna_seed"] > 0
         assert 0.0 < pi_init < 1.0
@@ -638,32 +741,45 @@ class TestInitialization:
     def test_min_gdna_regions_guarantee(self):
         # Even when density percentile selects fewer, min_gdna_regions applies.
         counts = _make_region_counts(
-            n_unspliced_pos=[50] * 200, n_unspliced_neg=[50] * 200,
+            n_unspliced_pos=[50] * 200,
+            n_unspliced_neg=[50] * 200,
             n_spliced_pos=[10] * 100 + [0] * 100,
         )
         stats = compute_region_stats(
-            counts, _make_region_df(200, lengths=np.full(200, 1000)),
+            counts,
+            _make_region_df(200, lengths=np.full(200, 1000)),
         )
         log_d, eligible = _density_setup(stats)
         sf = compute_sense_fraction(stats)
         _, _, diag = _seed_initial_partition(
-            stats, log_d, sf, 0.95, eligible, min_gdna_regions=50,
+            stats,
+            log_d,
+            sf,
+            0.95,
+            eligible,
+            min_gdna_regions=50,
         )
         assert diag["n_gdna_seed"] >= 50
 
     def test_pristine_detection(self):
         # All regions have spliced reads → almost no gDNA seed.
         counts = _make_region_counts(
-            n_unspliced_pos=[50] * 20, n_unspliced_neg=[50] * 20,
+            n_unspliced_pos=[50] * 20,
+            n_unspliced_neg=[50] * 20,
             n_spliced_pos=[10] * 20,
         )
         stats = compute_region_stats(
-            counts, _make_region_df(20, lengths=np.full(20, 1000)),
+            counts,
+            _make_region_df(20, lengths=np.full(20, 1000)),
         )
         log_d, eligible = _density_setup(stats)
         sf = compute_sense_fraction(stats)
         _, pi_init, diag = _seed_initial_partition(
-            stats, log_d, sf, 0.95, eligible,
+            stats,
+            log_d,
+            sf,
+            0.95,
+            eligible,
         )
         # All spliced → pi very small or flagged pristine
         assert pi_init < 0.1 or diag["pristine_sample"]
@@ -677,7 +793,8 @@ class TestInitialization:
             n_spliced_pos=[0, 0, 10, 10],
         )
         rdf = _make_region_df(
-            4, tx_pos=np.array([True, True, True, True]),
+            4,
+            tx_pos=np.array([True, True, True, True]),
             tx_neg=np.array([False, False, False, False]),
             lengths=np.full(4, 1000),
         )
@@ -685,7 +802,11 @@ class TestInitialization:
         log_d, eligible = _density_setup(stats)
         sf = compute_sense_fraction(stats)
         gamma, _, diag = _seed_initial_partition(
-            stats, log_d, sf, 0.95, eligible,
+            stats,
+            log_d,
+            sf,
+            0.95,
+            eligible,
         )
         # Regions 0,1 are strand-symmetric → seeded as gDNA
         assert gamma[0] == 1.0 or gamma[1] == 1.0
@@ -697,7 +818,6 @@ class TestInitialization:
 
 
 class TestEStep:
-
     def _call_e_step(self, stats, pi=0.5, ss=0.95):
         """Helper that computes density Gaussian + calls _e_step."""
         log_d, eligible = _density_setup(stats)
@@ -710,13 +830,21 @@ class TestEStep:
         else:
             mu, var = 0.0, 1.0
         return _e_step(
-            stats, pi, log_d, eligible, ss,
-            mu_g=mu, var_g=var, mu_r=mu, var_r=var,
+            stats,
+            pi,
+            log_d,
+            eligible,
+            ss,
+            mu_g=mu,
+            var_g=var,
+            mu_r=mu,
+            var_r=var,
         )
 
     def test_spliced_regions_get_gamma_zero(self):
         counts = _make_region_counts(
-            n_unspliced_pos=[50, 50], n_unspliced_neg=[50, 50],
+            n_unspliced_pos=[50, 50],
+            n_unspliced_neg=[50, 50],
             n_spliced_pos=[10, 0],
         )
         stats = compute_region_stats(counts, _make_region_df(2))
@@ -734,8 +862,9 @@ class TestEStep:
     def test_gdna_like_region_high_gamma(self):
         # + gene, symmetric strand (sf ≈ 0.5), SS=0.95 → gDNA-like
         counts = _make_region_counts(n_unspliced_pos=[50], n_unspliced_neg=[50])
-        rdf = _make_region_df(1, tx_pos=np.array([True]), tx_neg=np.array([False]),
-                              lengths=np.array([10000]))
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]), lengths=np.array([10000])
+        )
         stats = compute_region_stats(counts, rdf)
         gamma = self._call_e_step(stats, pi=0.5)
         assert gamma[0] > 0.5
@@ -743,8 +872,9 @@ class TestEStep:
     def test_rna_like_region_low_gamma(self):
         # + gene, SS=0.95: RNA reads on − strand → n_pos LOW (R1-antisense)
         counts = _make_region_counts(n_unspliced_pos=[5], n_unspliced_neg=[95])
-        rdf = _make_region_df(1, tx_pos=np.array([True]), tx_neg=np.array([False]),
-                              lengths=np.array([1000]))
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]), lengths=np.array([1000])
+        )
         stats = compute_region_stats(counts, rdf)
         gamma = self._call_e_step(stats, pi=0.5, ss=0.95)
         assert gamma[0] < 0.3
@@ -753,8 +883,9 @@ class TestEStep:
         """Binomial strand LLR correctly identifies RNA-like regions."""
         # + gene at SS=0.95: RNA reads on − strand → n_pos LOW
         counts = _make_region_counts(n_unspliced_pos=[5], n_unspliced_neg=[95])
-        rdf = _make_region_df(1, tx_pos=np.array([True]), tx_neg=np.array([False]),
-                              lengths=np.array([1000]))
+        rdf = _make_region_df(
+            1, tx_pos=np.array([True]), tx_neg=np.array([False]), lengths=np.array([1000])
+        )
         stats = compute_region_stats(counts, rdf)
         gamma = self._call_e_step(stats, pi=0.5, ss=0.95)
         # This RNA-like region should have low gamma
@@ -763,8 +894,12 @@ class TestEStep:
     def test_prior_odds_affect_gamma(self):
         # Ambiguous gene_strand → no strand signal; density neutral; prior matters
         counts = _make_region_counts(n_unspliced_pos=[50], n_unspliced_neg=[50])
-        rdf = _make_region_df(1, tx_pos=np.ones(1, dtype=bool),
-                              tx_neg=np.ones(1, dtype=bool), lengths=np.array([1000]))
+        rdf = _make_region_df(
+            1,
+            tx_pos=np.ones(1, dtype=bool),
+            tx_neg=np.ones(1, dtype=bool),
+            lengths=np.array([1000]),
+        )
         stats = compute_region_stats(counts, rdf)
         g_low = self._call_e_step(stats, pi=0.2)
         g_high = self._call_e_step(stats, pi=0.8)
@@ -777,7 +912,6 @@ class TestEStep:
 
 
 class TestMStep:
-
     def test_basic_m_step(self):
         # gDNA regions: low count.  RNA regions: high count.
         counts = _make_region_counts(
@@ -788,7 +922,10 @@ class TestMStep:
         log_d, eligible = _density_setup(stats)
         gamma = np.array([1.0, 1.0, 0.0, 0.0])
         pi, lG, lE, mu_g, var_g, mu_r, var_r = _m_step(
-            stats, gamma, log_d, eligible,
+            stats,
+            gamma,
+            log_d,
+            eligible,
         )
         assert pi == pytest.approx(0.5)
         assert lG == pytest.approx(0.02)
@@ -804,7 +941,10 @@ class TestMStep:
         log_d, eligible = _density_setup(stats)
         gamma = np.array([1.0, 1.0])
         pi, lG, lE, mu_g, var_g, mu_r, var_r = _m_step(
-            stats, gamma, log_d, eligible,
+            stats,
+            gamma,
+            log_d,
+            eligible,
         )
         assert isinstance(lG, float)
         assert isinstance(lE, float)
@@ -817,7 +957,10 @@ class TestMStep:
         log_d, eligible = _density_setup(stats)
         gamma = np.array([0.0, 0.0])
         pi, lG, lE, _, _, _, _ = _m_step(
-            stats, gamma, log_d, eligible,
+            stats,
+            gamma,
+            log_d,
+            eligible,
         )
         assert pi < 0.1
         assert lE >= lG
@@ -829,7 +972,6 @@ class TestMStep:
 
 
 class TestBuildGDNAFLModel:
-
     def test_basic_fl_model(self):
         model = build_gdna_fl_model(
             np.array([0, 0, 1, 1, 2], dtype=np.int32),
@@ -842,10 +984,11 @@ class TestBuildGDNAFLModel:
 
     def test_empty_fl_table(self):
         model = build_gdna_fl_model(
-            np.array([], dtype=np.int32), np.array([], dtype=np.int32), np.ones(5),
+            np.array([], dtype=np.int32),
+            np.array([], dtype=np.int32),
+            np.ones(5),
         )
-        assert model._finalized
-        assert model.total_weight == 0.0
+        assert model is None
 
     def test_zero_weights_excluded(self):
         model = build_gdna_fl_model(
@@ -853,7 +996,7 @@ class TestBuildGDNAFLModel:
             np.array([200, 300], dtype=np.int32),
             np.array([0.0, 0.0]),
         )
-        assert model.total_weight == 0.0
+        assert model is None
 
     def test_fl_out_of_range_excluded(self):
         model = build_gdna_fl_model(
@@ -872,10 +1015,14 @@ class TestBuildGDNAFLModel:
 
 
 class TestCalibrateGDNA:
-
     def _make_synthetic_data(
-        self, n_gdna=100, n_rna=100, kappa_true=50.0, ss=0.95,
-        n_per=100, rng_seed=42,
+        self,
+        n_gdna=100,
+        n_rna=100,
+        kappa_true=50.0,
+        ss=0.95,
+        n_per=100,
+        rng_seed=42,
     ):
         rng = np.random.default_rng(rng_seed)
         n_total = n_gdna + n_rna
@@ -898,8 +1045,10 @@ class TestCalibrateGDNA:
 
         rc = _make_region_counts(n_pos, n_neg, sp_pos, sp_neg)
         rdf = _make_region_df(
-            n_total, tx_pos=np.ones(n_total, dtype=bool),
-            tx_neg=np.zeros(n_total, dtype=bool), lengths=np.full(n_total, 1000),
+            n_total,
+            tx_pos=np.ones(n_total, dtype=bool),
+            tx_neg=np.zeros(n_total, dtype=bool),
+            lengths=np.full(n_total, 1000),
         )
 
         fl_ids_g = np.repeat(np.arange(n_gdna), 5)
@@ -923,8 +1072,8 @@ class TestCalibrateGDNA:
     def test_kappa_recovery(self):
         rc, fl, rdf, kappa_true = self._make_synthetic_data(kappa_true=50.0)
         result = calibrate_gdna(rc, fl, rdf, strand_specificity=0.95)
-        assert kappa_true / 3 < result.kappa < kappa_true * 3
-        assert result.kappa > 0
+        assert kappa_true / 3 < result.kappa_strand < kappa_true * 3
+        assert result.kappa_strand > 0
 
     def test_posteriors_gdna_high_rna_low(self):
         rc, fl, rdf, _ = self._make_synthetic_data(n_gdna=100, n_rna=100)
@@ -940,14 +1089,11 @@ class TestCalibrateGDNA:
         result = calibrate_gdna(rc, fl, rdf, strand_specificity=0.95)
         assert 0.2 < result.mixing_proportion < 0.8
 
-    def test_per_ref_density(self):
+    def test_global_density_is_float(self):
         rc, fl, rdf, _ = self._make_synthetic_data(n_gdna=50, n_rna=50)
-        rdf = rdf.copy()
-        rdf["ref"] = ["chr1"] * 50 + ["chr2"] * 50
         result = calibrate_gdna(rc, fl, rdf, strand_specificity=0.95)
-        assert isinstance(result.gdna_density_per_ref, dict)
-        assert "chr1" in result.gdna_density_per_ref
-        assert "chr2" in result.gdna_density_per_ref
+        assert isinstance(result.gdna_density_global, float)
+        assert result.gdna_density_global >= 0.0
 
     def test_gdna_fl_model_has_data(self):
         rc, fl, rdf, _ = self._make_synthetic_data()
@@ -974,17 +1120,28 @@ class TestCalibrateGDNA:
 
     def test_all_spliced_no_gdna(self):
         counts = _make_region_counts(
-            n_unspliced_pos=[50, 50], n_unspliced_neg=[50, 50],
+            n_unspliced_pos=[50, 50],
+            n_unspliced_neg=[50, 50],
             n_spliced_pos=[10, 10],
         )
-        result = calibrate_gdna(counts, _make_fl_table([], []),
-                                _make_region_df(2), strand_specificity=0.95)
+        result = calibrate_gdna(
+            counts,
+            _make_fl_table([], []),
+            _make_region_df(2),
+            strand_specificity=0.95,
+            min_gdna_regions=1,
+        )
         assert result.region_posteriors.max() == 0.0
 
     def test_single_region(self):
         counts = _make_region_counts(n_unspliced_pos=[50], n_unspliced_neg=[50])
-        result = calibrate_gdna(counts, _make_fl_table([0], [200]),
-                                _make_region_df(1), strand_specificity=0.95)
+        result = calibrate_gdna(
+            counts,
+            _make_fl_table([0], [200]),
+            _make_region_df(1),
+            strand_specificity=0.95,
+            min_gdna_regions=1,
+        )
         assert isinstance(result, GDNACalibration)
 
     def test_diagnostics_populated(self):
@@ -1001,7 +1158,6 @@ class TestCalibrateGDNA:
 
 
 class TestEdgeCases:
-
     def test_all_gdna(self):
         rng = np.random.default_rng(42)
         n = 50
@@ -1009,8 +1165,7 @@ class TestEdgeCases:
         n_pos = rng.binomial(100, p).astype(np.float32)
         n_neg = (100 - n_pos).astype(np.float32)
         rc = _make_region_counts(n_pos, n_neg)
-        rdf = _make_region_df(n, tx_pos=np.ones(n, dtype=bool),
-                              tx_neg=np.zeros(n, dtype=bool))
+        rdf = _make_region_df(n, tx_pos=np.ones(n, dtype=bool), tx_neg=np.zeros(n, dtype=bool))
         fl = _make_fl_table(np.repeat(np.arange(n), 3), rng.integers(150, 300, size=n * 3))
         result = calibrate_gdna(rc, fl, rdf, strand_specificity=0.95)
         assert result.region_posteriors.mean() > 0.5
@@ -1023,8 +1178,9 @@ class TestEdgeCases:
 
     def test_all_zero_coverage(self):
         counts = _make_region_counts(n_unspliced_pos=[0, 0], n_unspliced_neg=[0, 0])
-        result = calibrate_gdna(counts, _make_fl_table([], []),
-                                _make_region_df(2), strand_specificity=0.95)
+        result = calibrate_gdna(
+            counts, _make_fl_table([], []), _make_region_df(2), strand_specificity=0.95
+        )
         assert result.gdna_density_global == 0.0
         assert result.converged
         assert result.n_iterations == 0
@@ -1035,13 +1191,14 @@ class TestEdgeCases:
             n_unspliced_neg=[50, 10, 50, 90],
         )
         rdf = _make_region_df(
-            4, tx_pos=np.array([True, True, False, False]),
+            4,
+            tx_pos=np.array([True, True, False, False]),
             tx_neg=np.array([False, False, True, True]),
         )
         fl = _make_fl_table([0, 1, 2, 3], [200, 250, 300, 350])
         r1 = calibrate_gdna(counts, fl, rdf, strand_specificity=0.95)
         r2 = calibrate_gdna(counts, fl, rdf, strand_specificity=0.95)
-        assert r1.kappa == r2.kappa
+        assert r1.kappa_strand == r2.kappa_strand
         assert r1.n_iterations == r2.n_iterations
         np.testing.assert_array_equal(r1.region_posteriors, r2.region_posteriors)
 
@@ -1052,7 +1209,6 @@ class TestEdgeCases:
 
 
 class TestSignalCombination:
-
     def _call_e_step(self, stats, pi=0.5, ss=0.95):
         """Helper that computes density Gaussian + calls _e_step."""
         log_d, eligible = _density_setup(stats)
@@ -1064,17 +1220,27 @@ class TestSignalCombination:
         else:
             mu, var = 0.0, 1.0
         return _e_step(
-            stats, pi, log_d, eligible, ss,
-            mu_g=mu, var_g=var, mu_r=mu, var_r=var,
+            stats,
+            pi,
+            log_d,
+            eligible,
+            ss,
+            mu_g=mu,
+            var_g=var,
+            mu_r=mu,
+            var_r=var,
         )
 
     def test_strand_contributes_zero_when_unstranded(self):
         """With SS=0.5, Binomial strand LLR should be exactly zero."""
         counts = _make_region_counts(
-            n_unspliced_pos=[50], n_unspliced_neg=[50],
+            n_unspliced_pos=[50],
+            n_unspliced_neg=[50],
         )
         rdf = _make_region_df(
-            1, tx_pos=np.array([True]), tx_neg=np.array([False]),
+            1,
+            tx_pos=np.array([True]),
+            tx_neg=np.array([False]),
         )
         stats = compute_region_stats(counts, rdf)
         llr = _compute_strand_llr_binomial(stats, 0.5, 1)
@@ -1100,7 +1266,8 @@ class TestSignalCombination:
         )
         n_total = n_gdna + n_rna
         rdf = _make_region_df(
-            n_total, tx_pos=np.ones(n_total, dtype=bool),
+            n_total,
+            tx_pos=np.ones(n_total, dtype=bool),
             tx_neg=np.zeros(n_total, dtype=bool),
             lengths=np.full(n_total, 1000),
         )
@@ -1130,8 +1297,10 @@ class TestSignalCombination:
             np.concatenate([spa, spb, spc]),
         )
         rdf = _make_region_df(
-            300, tx_pos=np.ones(300, dtype=bool),
-            tx_neg=np.zeros(300, dtype=bool), lengths=np.full(300, 1000),
+            300,
+            tx_pos=np.ones(300, dtype=bool),
+            tx_neg=np.zeros(300, dtype=bool),
+            lengths=np.full(300, 1000),
         )
         result = calibrate_gdna(rc, _make_fl_table([], []), rdf, strand_specificity=0.95)
         wa = result.region_posteriors[:100].mean()

@@ -162,7 +162,6 @@ class LocusEMInput:
     nrna_to_t_offsets: np.ndarray
     nrna_to_t_indices: np.ndarray
     unambig_totals: np.ndarray
-    nrna_init: np.ndarray
     gdna_init: float
     effective_lengths: np.ndarray
     prior: np.ndarray

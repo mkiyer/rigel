@@ -15,7 +15,6 @@ Run:  python -m pytest tests/test_equiv_class_sort_ab.py -s
 """
 
 import logging
-import sys
 import tempfile
 from pathlib import Path
 
@@ -24,7 +23,7 @@ import pysam
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.sim import GDNAConfig, Scenario, SimConfig
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +122,6 @@ def _extract_results(pr, result):
             est.transcript_unspliced_sense[ti])
         info[f"{tid}_unspliced_antisense"] = float(
             est.transcript_unspliced_antisense[ti])
-        info[f"{tid}_nrna_init"] = float(est.nrna_init[ti])
 
     info["gdna_total"] = float(est.gdna_em_count)
     info["gdna_em"] = float(est.gdna_em_count)
@@ -255,7 +253,7 @@ def main():
                     worst.append((ad, rd, k, n1, n2, v1, v2))
             worst.sort(reverse=True)
             if worst:
-                print(f"  Top-5 worst diffs:")
+                print("  Top-5 worst diffs:")
                 for ad, rd, k, n1, n2, v1, v2 in worst[:5]:
                     print(f"    {k}: {v1:.10f} vs {v2:.10f} "
                           f"(abs={ad:.2e}, rel={rd:.2e}) [{n1} vs {n2}]")

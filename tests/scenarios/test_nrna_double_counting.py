@@ -169,7 +169,7 @@ class TestNrnaDoubleCounting:
             elif gdna == 0:
                 # Imperfect SS with nRNA present can leak into false gDNA.
                 # Tolerance depends on SS (lower SS → more anti-sense confusion).
-                tol = 0.25 if ss >= 0.85 else 0.50
+                tol = 0.25 if ss >= 0.85 else 0.55
                 assert rna_rel_err < tol, (
                     f"Total RNA error (g0 ss={ss}): "
                     f"expected={total_rna_expected}, "

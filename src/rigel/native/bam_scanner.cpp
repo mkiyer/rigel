@@ -208,12 +208,6 @@ struct FragLenObservations {
 
     // Intergenic fragment lengths (splice_type = -1 meaning None)
     std::vector<int32_t> intergenic_lengths;
-
-    // Unspliced genic fragment lengths by strand direction.
-    // For strand-weighted gDNA/RNA histogram mixing (frag_len_dist_plan_v2).
-    // Uses genomic_footprint for unspliced unique-mapper fragments.
-    std::vector<int32_t> unspliced_same_strand_lengths;  // exon_strand == gene_strand
-    std::vector<int32_t> unspliced_opp_strand_lengths;   // exon_strand != gene_strand
 };
 
 // ================================================================
@@ -335,6 +329,7 @@ struct WorkerState {
     BamScanStats stats;
     StrandObservations strand_obs;
     FragLenObservations fraglen_obs;
+    RegionAccumulator region_acc;
 
     explicit WorkerState(int32_t n_transcripts)
         : scratch(n_transcripts) {}
@@ -424,14 +419,10 @@ static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src
     dst.intergenic_lengths.insert(dst.intergenic_lengths.end(),
                                   src.intergenic_lengths.begin(),
                                   src.intergenic_lengths.end());
-    dst.unspliced_same_strand_lengths.insert(
-        dst.unspliced_same_strand_lengths.end(),
-        src.unspliced_same_strand_lengths.begin(),
-        src.unspliced_same_strand_lengths.end());
-    dst.unspliced_opp_strand_lengths.insert(
-        dst.unspliced_opp_strand_lengths.end(),
-        src.unspliced_opp_strand_lengths.begin(),
-        src.unspliced_opp_strand_lengths.end());
+}
+
+static void merge_region_acc(RegionAccumulator& dst, RegionAccumulator& src) {
+    dst.merge_from(src);
 }
 
 // ================================================================
@@ -939,6 +930,7 @@ public:
     FragmentAccumulator accumulator_;
     StrandObservations strand_obs_;
     FragLenObservations fraglen_obs_;
+    RegionAccumulator region_acc_;
 
     BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
@@ -991,8 +983,15 @@ public:
         std::vector<std::unique_ptr<WorkerState>> worker_states;
         worker_states.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
-            worker_states.push_back(
-                std::make_unique<WorkerState>(n_transcripts));
+            auto ws = std::make_unique<WorkerState>(n_transcripts);
+            // Initialize region accumulator if region index is available
+            if (ctx_->has_region_index()) {
+                ws->region_acc.init(
+                    ctx_->n_regions(),
+                    ctx_->region_cr_,
+                    &ctx_->id_to_ref_);
+            }
+            worker_states.push_back(std::move(ws));
         }
 
         // Capture read-only config
@@ -1100,6 +1099,9 @@ public:
             merge_accumulator_into(accumulator_, ws.accumulator);
             merge_strand_obs(strand_obs_, ws.strand_obs);
             merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
+            if (ws.region_acc.enabled()) {
+                merge_region_acc(region_acc_, ws.region_acc);
+            }
         }
 
         return build_result();
@@ -1128,6 +1130,7 @@ private:
         StrandObservations& strand_obs = ws.strand_obs;
         FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
+        RegionAccumulator& region_acc = ws.region_acc;
 
         // Per-worker state refs
         stats.n_read_names++;
@@ -1225,6 +1228,12 @@ private:
                         strand_obs.intergenic_truth.push_back(STRAND_POS);
                     }
                 }
+
+                // Region accumulation for intergenic fragments
+                if (region_acc.enabled()) {
+                    region_acc.accumulate(
+                        frag.exons, frag.has_introns(), is_unique_mapper);
+                }
                 continue;
             }
 
@@ -1293,32 +1302,14 @@ private:
                 } else {
                     stats.n_frag_length_ambiguous++;
                 }
+            }
 
-                // Collect unspliced same/opp strand fragment lengths
-                // for gDNA/RNA histogram mixing (frag_len_dist_plan_v2).
-                if (result.splice_type == SPLICE_UNSPLICED &&
-                    result.get_is_same_strand() &&
-                    (result.exon_strand == STRAND_POS ||
-                     result.exon_strand == STRAND_NEG)) {
-                    int32_t t_idx = result.get_first_t_ind();
-                    if (t_idx >= 0 &&
-                        t_idx < static_cast<int32_t>(ctx.t_strand_arr_.size())) {
-                        int32_t gene_strand = ctx.t_strand_arr_[t_idx];
-                        if (gene_strand == STRAND_POS ||
-                            gene_strand == STRAND_NEG) {
-                            int32_t gfp = result.genomic_footprint;
-                            if (gfp > 0) {
-                                if (result.exon_strand == gene_strand) {
-                                    fraglen_obs.unspliced_same_strand_lengths
-                                        .push_back(gfp);
-                                } else {
-                                    fraglen_obs.unspliced_opp_strand_lengths
-                                        .push_back(gfp);
-                                }
-                            }
-                        }
-                    }
-                }
+            // Region accumulation for resolved (non-chimeric) fragments
+            if (region_acc.enabled()) {
+                bool frag_spliced = (result.splice_type == SPLICE_SPLICED_ANNOT
+                                  || result.splice_type == SPLICE_SPLICED_UNANNOT);
+                region_acc.accumulate(
+                    frag.exons, frag_spliced, is_unique_mapper);
             }
 
             accumulator.append(result, frag_id);
@@ -1393,14 +1384,20 @@ private:
         fraglen_dict["lengths"] = std::move(fraglen_obs_.lengths);
         fraglen_dict["splice_types"] = std::move(fraglen_obs_.splice_types);
         fraglen_dict["intergenic_lengths"] = std::move(fraglen_obs_.intergenic_lengths);
-        fraglen_dict["unspliced_same_strand_lengths"] =
-            std::move(fraglen_obs_.unspliced_same_strand_lengths);
-        fraglen_dict["unspliced_opp_strand_lengths"] =
-            std::move(fraglen_obs_.unspliced_opp_strand_lengths);
         result["frag_length_observations"] = fraglen_dict;
 
         // Accumulator size
         result["accumulator_size"] = accumulator_.get_size();
+
+        // Region evidence (from gDNA calibration region accumulator)
+        if (region_acc_.n_regions > 0 && !region_acc_.counts.empty()) {
+            nb::dict region_dict;
+            region_dict["counts"] = std::move(region_acc_.counts);
+            region_dict["n_regions"] = region_acc_.n_regions;
+            region_dict["fl_region_ids"] = std::move(region_acc_.fl_region_ids);
+            region_dict["fl_frag_lens"] = std::move(region_acc_.fl_frag_lens);
+            result["region_evidence"] = region_dict;
+        }
 
         return result;
     }

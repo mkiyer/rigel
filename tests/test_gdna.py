@@ -4,8 +4,6 @@ Verifies that:
 - _score_gdna_candidate computes correct log-likelihoods
 - gDNA shadow component competes with mRNA in locus EM
 - gDNA assignments propagate to correct counters
-- _compute_gdna_density_from_strand returns correct densities
-- _compute_nrna_init returns correct nRNA priors
 - StrandModels container works correctly
 - PipelineStats gDNA fields are correct
 """
@@ -13,13 +11,12 @@ Verifies that:
 import numpy as np
 import pytest
 
-from rigel.splice import SpliceType, SpliceStrandCol
+from rigel.splice import SpliceType
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
-from rigel.scoring import GDNA_SPLICE_PENALTIES as _GDNA_SPLICE_PENALTIES
 from scoring_helpers import score_gdna_standalone as _score_gdna_candidate
-from rigel.frag_length_model import FragmentLengthModels
-from rigel.strand_model import StrandModel, StrandModels
+from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
+from rigel.strand_model import StrandModels
 from rigel.types import Strand
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
@@ -34,26 +31,21 @@ def _make_frag_length_models(n_obs=200, size=250):
     """FragmentLengthModels with a known distribution for gDNA scoring tests.
 
     Builds the models the same way the production pipeline does:
-    observations → mix_models → finalize.  Since these tests exercise gDNA
-    scoring (not fragment length training), we use a simple single-peak
-    distribution and high strand specificity so that gDNA/RNA models
-    share the same shape.
+    observations → build_scoring_models → inject gDNA → finalize.
+    Since these tests exercise gDNA scoring (not fragment length training),
+    we use a simple single-peak distribution.
     """
     im = FragmentLengthModels()
     for _ in range(n_obs):
         im.observe(size, SpliceType.SPLICED_ANNOT)
         im.observe(size, SpliceType.UNSPLICED)
         im.observe(size, SpliceType.SPLICED_UNANNOT)
-        im.observe(size, None)  # intergenic → also feeds gdna_model
-    # Populate unspliced strand histograms so mix_models works
-    im.unspliced_same_strand.observe_batch(
-        np.full(n_obs, size, dtype=np.intp)
-    )
-    im.unspliced_opp_strand.observe_batch(
-        np.full(n_obs // 2, size, dtype=np.intp)
-    )
-    # Mix with high strand specificity → gdna_model gets meaningful data
-    im.mix_models(s_rna=0.9, p_r1_sense=0.9)
+        im.observe(size, None)  # intergenic
+    im.build_scoring_models()
+    # Inject gDNA model (simulating calibration providing it)
+    gdna_counts = np.zeros(im.max_size + 1, dtype=np.float64)
+    gdna_counts[size] = float(n_obs)
+    im.gdna_model = FragmentLengthModel.from_counts(gdna_counts, max_size=im.max_size)
     im.finalize()
     return im
 
@@ -61,23 +53,6 @@ def _make_frag_length_models(n_obs=200, size=250):
 def _make_strand_models_default():
     """StrandModels with untrained intergenic model (P_strand=0.5)."""
     return StrandModels()
-
-
-def _make_strand_models_with_ss(ss: float) -> StrandModels:
-    """Create StrandModels with a target strand specificity.
-
-    SS = max(p_r1_sense, 1 - p_r1_sense).  For SS >= 0.5, we
-    observe ``n_sense`` + ``n_anti`` reads that produce the desired SS.
-    """
-    sm = StrandModels()
-    total = 1000
-    n_sense = int(ss * total)
-    n_anti = total - n_sense
-    for _ in range(n_sense):
-        sm.exonic_spliced.observe(Strand.POS, Strand.POS)
-    for _ in range(n_anti):
-        sm.exonic_spliced.observe(Strand.POS, Strand.NEG)
-    return sm
 
 
 # =====================================================================
@@ -93,25 +68,29 @@ class TestScoreGDNA:
         im = _make_frag_length_models()
         cat = int(SpliceType.UNSPLICED)
         score = _score_gdna_candidate(
-            int(Strand.POS), cat, 250,
+            int(Strand.POS),
+            cat,
+            250,
             im,
         )
-        # Uses gDNA insert model (falls back to global when mix_models not called)
+        # Uses gDNA insert model (injected from calibration)
         gdna_model = im.gdna_model
         assert score < 0
-        assert score == pytest.approx(
-            np.log(0.5) + gdna_model.log_likelihood(250)
-        )
+        assert score == pytest.approx(np.log(0.5) + gdna_model.log_likelihood(250))
 
     def test_spliced_unannot_penalty(self):
         """SPLICED_UNANNOT gets heavy penalty (default 0.01)."""
         im = _make_frag_length_models()
         score_unannot = _score_gdna_candidate(
-            int(Strand.POS), int(SpliceType.SPLICED_UNANNOT), 250,
+            int(Strand.POS),
+            int(SpliceType.SPLICED_UNANNOT),
+            250,
             im,
         )
         score_unspliced = _score_gdna_candidate(
-            int(Strand.POS), int(SpliceType.UNSPLICED), 250,
+            int(Strand.POS),
+            int(SpliceType.UNSPLICED),
+            250,
             im,
         )
         assert score_unannot < score_unspliced
@@ -124,7 +103,9 @@ class TestScoreGDNA:
         cat = int(SpliceType.UNSPLICED)
         custom = {SpliceType.UNSPLICED: 0.5}
         score = _score_gdna_candidate(
-            int(Strand.POS), cat, 250,
+            int(Strand.POS),
+            cat,
+            250,
             im,
             gdna_splice_penalties=custom,
         )
@@ -136,7 +117,9 @@ class TestScoreGDNA:
         """frag_length=0 → P_insert=1.0 (log=0)."""
         im = _make_frag_length_models()
         score = _score_gdna_candidate(
-            int(Strand.POS), int(SpliceType.UNSPLICED), 0,
+            int(Strand.POS),
+            int(SpliceType.UNSPLICED),
+            0,
             im,
         )
         assert score == pytest.approx(np.log(0.5))
@@ -157,7 +140,7 @@ class TestLocusGDNATheta:
             [[0]] * 10,
             num_transcripts=3,
             include_gdna=True,
-            gdna_init=10.0,
+            locus_gamma=0.2,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=1)
         # gDNA should absorb some fragments
@@ -171,7 +154,7 @@ class TestLocusGDNATheta:
             [[0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=1.0,
+            locus_gamma=0.1,
             gdna_log_lik=5.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -179,8 +162,7 @@ class TestLocusGDNATheta:
         gdna_count = pool_counts["gdna"]
         mrna_count = rc.em_counts.sum()
         assert gdna_count > mrna_count, (
-            f"gDNA count ({gdna_count:.4f}) should dominate "
-            f"over mRNA ({mrna_count:.4f})"
+            f"gDNA count ({gdna_count:.4f}) should dominate over mRNA ({mrna_count:.4f})"
         )
 
     def test_no_gdna_init_minimal_absorption(self):
@@ -192,7 +174,7 @@ class TestLocusGDNATheta:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            gdna_init=0.0,
+            locus_gamma=0.0,
             gdna_log_lik=-5.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -216,7 +198,7 @@ class TestLocusGDNAAssignment:
             log_liks_per_unit=[[-10.0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=1000.0,
+            locus_gamma=0.5,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -234,7 +216,7 @@ class TestLocusGDNAAssignment:
             num_transcripts=3,
             include_nrna=True,
             include_gdna=True,
-            gdna_init=25.0,
+            locus_gamma=0.2,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
@@ -252,7 +234,7 @@ class TestLocusGDNAAssignment:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            gdna_init=1.0,
+            locus_gamma=0.1,
             gdna_log_lik=-20.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -269,15 +251,13 @@ class TestLocusGDNAAssignment:
             log_liks_per_unit=[[-10.0]] * 500,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=1.0,
+            locus_gamma=0.1,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
-        assert gdna_count > 100, (
-            f"Expected gDNA to absorb many fragments, got {gdna_count}"
-        )
+        assert gdna_count > 100, f"Expected gDNA to absorb many fragments, got {gdna_count}"
 
 
 # =====================================================================
@@ -298,7 +278,7 @@ class TestGDNALocusAttribution:
             count_cols_per_unit=[[cc]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=1000.0,
+            locus_gamma=0.5,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -317,7 +297,7 @@ class TestGDNALocusAttribution:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            gdna_init=0.0,
+            locus_gamma=0.0,
             gdna_log_lik=-50.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -400,197 +380,6 @@ class TestStatsGDNA:
 
 
 # =====================================================================
-# _compute_gdna_density_from_strand
-# =====================================================================
-
-
-class TestComputeGdnaDensity:
-    """Tests for locus.compute_gdna_density_from_strand."""
-
-    EXONIC_BP = 1000.0
-
-    def test_zero_counts_returns_zero(self):
-        from rigel.locus import compute_gdna_density_from_strand
-        density = compute_gdna_density_from_strand(0.0, 0.0, self.EXONIC_BP, 1.0)
-        assert density == 0.0
-
-    def test_no_antisense_gives_zero(self):
-        from rigel.locus import compute_gdna_density_from_strand
-        density = compute_gdna_density_from_strand(100.0, 0.0, self.EXONIC_BP, 1.0)
-        assert density == 0.0
-
-    def test_antisense_at_perfect_ss(self):
-        """At SS=1.0, G = 2 × antisense, density = G / exonic_bp."""
-        from rigel.locus import compute_gdna_density_from_strand
-        # S=100, A=50, SS=1.0 → G=2*50=100, density=100/1000
-        density = compute_gdna_density_from_strand(100.0, 50.0, self.EXONIC_BP, 1.0)
-        expected = (2.0 * 50.0) / self.EXONIC_BP
-        assert density == pytest.approx(expected, abs=1e-6)
-
-    def test_strand_correction_at_imperfect_ss(self):
-        """At SS < 1.0, exact formula with strand correction."""
-        from rigel.locus import compute_gdna_density_from_strand
-        # S=200, A=50, SS=0.9
-        ss = 0.9
-        denom_ss = 2.0 * ss - 1.0
-        numerator = 50.0 * ss - 200.0 * (1.0 - ss)
-        g = 2.0 * max(0.0, numerator / denom_ss)
-        expected = g / self.EXONIC_BP
-        density = compute_gdna_density_from_strand(200.0, 50.0, self.EXONIC_BP, ss)
-        assert density == pytest.approx(expected, abs=1e-6)
-
-    def test_returns_zero_at_low_ss(self):
-        """At SS ≤ 0.6, strand info too weak → returns 0."""
-        from rigel.locus import compute_gdna_density_from_strand
-        # denom_ss = 2*0.5-1 = 0 ≤ 0.2 → returns 0
-        density = compute_gdna_density_from_strand(500.0, 500.0, self.EXONIC_BP, 0.5)
-        assert density == 0.0
-        # SS=0.6 → denom_ss=0.2 ≤ 0.2 → returns 0
-        density2 = compute_gdna_density_from_strand(500.0, 500.0, self.EXONIC_BP, 0.6)
-        assert density2 == 0.0
-
-    def test_clamps_at_zero(self):
-        """Corrected G is clamped at zero (no negative density)."""
-        from rigel.locus import compute_gdna_density_from_strand
-        # S=1000, A=10, SS=0.8 → G = 2(10*0.8 - 1000*0.2)/0.6 < 0 → 0
-        density = compute_gdna_density_from_strand(1000.0, 10.0, self.EXONIC_BP, 0.8)
-        assert density == 0.0
-
-    def test_zero_exonic_bp_returns_zero(self):
-        """Zero exonic_bp → returns 0 (avoids division by zero)."""
-        from rigel.locus import compute_gdna_density_from_strand
-        density = compute_gdna_density_from_strand(100.0, 50.0, 0.0, 1.0)
-        assert density == 0.0
-
-    def test_density_nonnegative(self):
-        """Density is always ≥ 0."""
-        from rigel.locus import compute_gdna_density_from_strand
-        # Extreme antisense dominance
-        density = compute_gdna_density_from_strand(1.0, 1000.0, self.EXONIC_BP, 0.99)
-        assert density >= 0.0
-
-
-# =====================================================================
-# _compute_nrna_init (transcript-level intronic evidence)
-# =====================================================================
-
-
-class TestComputeNrnaInit:
-    """Tests for pipeline._compute_nrna_init."""
-
-    def test_zero_counts_returns_zeros(self):
-        """No intronic counts → all inits = 0."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.zeros(3, dtype=np.float64)
-        anti = np.zeros(3, dtype=np.float64)
-        spans = np.array([10000.0, 5000.0, 1000.0])
-        exonic_len = np.array([699.0, 499.0, 800.0])
-        sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        np.testing.assert_array_equal(nrna, [0.0, 0.0, 0.0])
-
-    def test_sense_excess_produces_nrna(self):
-        """Intronic sense > antisense → nrna_init > 0."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.array([100.0, 50.0])
-        anti = np.array([20.0, 10.0])
-        spans = np.array([10000.0, 5000.0])
-        exonic_len = np.array([699.0, 499.0])
-        sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        # At SS≈1.0, formula ≈ (sense - anti) / 1.0 ≈ sense - anti
-        assert nrna[0] == pytest.approx(80.0, abs=2.0)  # 100 - 20
-        assert nrna[1] == pytest.approx(40.0, abs=2.0)  # 50 - 10
-
-    def test_antisense_excess_clamped_to_zero(self):
-        """Intronic antisense > sense → nrna_init = 0 (clamped)."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.array([10.0])
-        anti = np.array([50.0])
-        spans = np.array([10000.0])
-        exonic_len = np.array([699.0])
-        sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == 0.0
-
-    def test_single_exon_zeroed(self):
-        """Single-exon transcripts (span ≈ exonic length) → nrna = 0."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.array([100.0])
-        anti = np.array([10.0])
-        # transcript_span = exonic length (single exon, no introns)
-        exonic_len = np.array([699.0])
-        mean_frag = 200.0
-        spans = np.array([699.0])  # no introns
-        sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == 0.0
-
-    def test_multi_exon_not_zeroed(self):
-        """Multi-exon transcripts (span >> exonic length) → nrna preserved."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.array([100.0])
-        anti = np.array([10.0])
-        exonic_len = np.array([699.0])
-        mean_frag = 200.0
-        spans = np.array([5000.0])  # large introns
-        sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == pytest.approx(90.0, abs=2.0)
-
-    def test_output_shape(self):
-        """Returns array of shape (num_transcripts,)."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.zeros(5, dtype=np.float64)
-        anti = np.zeros(5, dtype=np.float64)
-        spans = np.full(5, 10000.0)
-        exonic_len = np.full(5, 699.0)
-        sm = _make_strand_models_with_ss(1.0)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna.shape == (5,)
-        assert nrna.dtype == np.float64
-
-    def test_ss_correction_moderate(self):
-        """At SS=0.9, nRNA init is corrected upward by 1/(2SS-1)."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.array([100.0])
-        anti = np.array([20.0])
-        spans = np.array([10000.0])
-        exonic_len = np.array([699.0])
-        sm = _make_strand_models_with_ss(0.9)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        ss = sm.exonic_spliced.strand_specificity
-        denom = 2.0 * ss - 1.0
-        expected = (100.0 - 20.0) / denom
-        assert nrna[0] == pytest.approx(expected, abs=1.0)
-
-    def test_ss_at_or_below_threshold_returns_total_intronic(self):
-        """At SS ≤ 0.6, strand info too weak → returns total intronic
-        coverage so nRNA can compete in the EM."""
-        from rigel.locus import compute_nrna_init as _compute_nrna_init
-
-        sense = np.array([100.0])
-        anti = np.array([50.0])
-        spans = np.array([10000.0])
-        exonic_len = np.array([699.0])
-        # SS=0.5
-        sm = _make_strand_models_with_ss(0.5)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == pytest.approx(150.0)  # sense + anti
-        # SS=0.6 (boundary)
-        sm = _make_strand_models_with_ss(0.6)
-        nrna = _compute_nrna_init(sense, anti, spans, exonic_len, sm)
-        assert nrna[0] == pytest.approx(150.0)  # sense + anti
-
-
-# =====================================================================
 # Locus gDNA behavior — integration tests
 # =====================================================================
 
@@ -605,7 +394,7 @@ class TestLocusGDNABehavior:
             [[0, 1]] * 200,
             num_transcripts=3,
             include_gdna=True,
-            gdna_init=100.0,
+            locus_gamma=0.3,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
@@ -624,7 +413,7 @@ class TestLocusGDNABehavior:
             num_transcripts=2,
             rc=rc_low,
             include_gdna=True,
-            gdna_init=1.0,
+            locus_gamma=0.1,
             gdna_log_lik=-5.0,
         )
         pc_low = _run_and_assign(rc_low, bundle_low, em_iterations=10)
@@ -637,7 +426,7 @@ class TestLocusGDNABehavior:
             log_liks_per_unit=[[-10.0]] * 200,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=1.0,
+            locus_gamma=0.1,
             gdna_log_lik=0.0,
         )
         pc_high = _run_and_assign(rc_high, bundle_high, em_iterations=10)
@@ -645,7 +434,7 @@ class TestLocusGDNABehavior:
 
         assert gc_high > gc_low
         assert gc_high > 100  # most fragments go to gDNA
-        assert gc_low < 0.1   # RNA dominates (tiny fractional leak ok)
+        assert gc_low < 0.1  # RNA dominates (tiny fractional leak ok)
 
     def test_gdna_em_count_property(self):
         """AbundanceEstimator.gdna_em_count accumulates across loci."""
@@ -729,239 +518,14 @@ class TestStrandModelsContainer:
         assert sm.exonic.n_observations == 1
         assert sm.intergenic.n_observations == 1
 
-    def test_kappa_prior_on_finalize(self):
-        """finalize() applies κ prior to exonic_spliced."""
+    def test_mle_on_finalize(self):
+        """finalize() uses MLE for exonic_spliced."""
         from rigel.strand_model import StrandModels
         from rigel.types import Strand
 
         sm = StrandModels()
-        sm.strand_prior_kappa = 10.0
         for _ in range(10):
             sm.exonic_spliced.observe(Strand.POS, Strand.POS)
         sm.finalize()
-        # κ=10 → alpha_prior=5, beta_prior=5
-        # p_r1_sense = (5 + 10) / (5 + 10 + 5) = 15/20 = 0.75
-        assert sm.p_r1_sense == pytest.approx(0.75)
-
-
-# =====================================================================
-# compute_gdna_density_hybrid
-# =====================================================================
-
-
-class TestComputeGdnaDensityHybrid:
-    """Tests for the hybrid density+strand gDNA density estimator."""
-
-    EXONIC_BP = 1000.0
-
-    def test_zero_counts_returns_zero(self):
-        from rigel.locus import compute_gdna_density_hybrid
-        density, ev = compute_gdna_density_hybrid(0.0, 0.0, self.EXONIC_BP, 1.0, 0.001)
-        assert density == 0.0
-        assert ev == 0.0
-
-    def test_strand_dominated_at_high_ss(self):
-        """At SS=1.0, W=1 → pure strand density estimate."""
-        from rigel.locus import compute_gdna_density_hybrid
-        density, ev = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, 1.0, 0.001)
-        # Strand density: G = 2*50 = 100, density = 100/1000 = 0.1
-        expected_strand = (2.0 * 50.0) / self.EXONIC_BP
-        assert density == pytest.approx(expected_strand, abs=1e-6)
-        assert ev == 150.0
-
-    def test_density_dominated_at_low_ss(self):
-        """At SS=0.5, W≈0 → pure intergenic density."""
-        from rigel.locus import compute_gdna_density_hybrid
-        # SS=0.5 → denom_ss=0 → W=0
-        # density component = intergenic_density directly
-        density, ev = compute_gdna_density_hybrid(100.0, 100.0, self.EXONIC_BP, 0.5, 0.001)
-        expected = 0.001
-        assert density == pytest.approx(expected, abs=1e-6)
-        assert ev == 200.0
-
-    def test_density_zero_falls_back_to_strand(self):
-        """With intergenic_density=0, only strand contributes."""
-        from rigel.locus import compute_gdna_density_hybrid
-        density, ev = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, 0.9, 0.0)
-        # Should match strand-only, weighted by W
-        from rigel.locus import compute_gdna_density_from_strand
-        strand_density = compute_gdna_density_from_strand(100.0, 50.0, self.EXONIC_BP, 0.9)
-        # W = (2*0.9-1)^2 = 0.64 → density = 0.64*strand + 0.36*0
-        W = (2.0 * 0.9 - 1.0) ** 2
-        expected = W * strand_density
-        assert density == pytest.approx(expected, abs=1e-6)
-
-    def test_unstranded_with_density_nonzero(self):
-        """Unstranded (SS=0.5) with intergenic density gives nonzero density."""
-        from rigel.locus import compute_gdna_density_hybrid
-        density, ev = compute_gdna_density_hybrid(500.0, 500.0, 10000.0, 0.5, 0.01)
-        # density component = intergenic_density = 0.01
-        expected = 0.01
-        assert density == pytest.approx(expected, abs=1e-6)
-        assert density > 0.0  # Critical: nonzero for unstranded
-
-    def test_unstranded_no_density_returns_zero(self):
-        """Unstranded with no density → both components zero."""
-        from rigel.locus import compute_gdna_density_hybrid
-        density, _ = compute_gdna_density_hybrid(500.0, 500.0, 10000.0, 0.5, 0.0)
-        assert density == 0.0
-
-    def test_density_nonnegative(self):
-        """Density is always >= 0."""
-        from rigel.locus import compute_gdna_density_hybrid
-        density, _ = compute_gdna_density_hybrid(1.0, 1.0, 100000.0, 0.5, 1.0)
-        assert density >= 0.0
-
-    def test_hybrid_blend_at_moderate_ss(self):
-        """At intermediate SS, both components contribute."""
-        from rigel.locus import compute_gdna_density_hybrid
-        ss = 0.8  # W = (2*0.8-1)^2 = 0.36
-        density, _ = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, ss, 0.01)
-        # Both strand and density components should be nonzero
-        assert density > 0.0
-
-    def test_returns_tuple(self):
-        """Returns (density, evidence) tuple."""
-        from rigel.locus import compute_gdna_density_hybrid
-        result = compute_gdna_density_hybrid(100.0, 50.0, self.EXONIC_BP, 1.0, 0.0)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-
-# =====================================================================
-# MoM κ auto-estimation in gDNA EB system
-# =====================================================================
-
-
-class TestGdnaMoMKappa:
-    """Tests for MoM κ auto-estimation in compute_eb_gdna_priors."""
-
-    def test_auto_kappa_matches_estimate_kappa(self):
-        """Auto-estimated κ should match estimate_kappa on same data."""
-        from rigel.estimator import estimate_kappa
-
-        # Create synthetic gDNA rates and evidence
-        rates = np.array([0.1, 0.15, 0.12, 0.08, 0.2, 0.11] * 5)
-        evidence = np.full(30, 100.0)
-        kappa = estimate_kappa(rates, evidence, 30.0)
-        assert 2.0 <= kappa <= 200.0
-
-    def test_fallback_when_few_loci(self):
-        """With few loci, MoM returns fallback κ."""
-        from rigel.estimator import estimate_kappa
-
-        rates = np.array([0.1, 0.2])
-        evidence = np.array([100.0, 100.0])
-        kappa = estimate_kappa(
-            rates, evidence, 30.0,
-            kappa_fallback=5.0, kappa_min_obs=20,
-        )
-        assert kappa == 5.0  # Fallback: only 2 loci < 20
-
-
-# =====================================================================
-# Unstranded gDNA behavior
-# =====================================================================
-
-
-class TestUnstrandedGdna:
-    """Verify gDNA density estimation works for unstranded libraries."""
-
-    def test_hybrid_nonzero_for_unstranded_with_density(self):
-        """With intergenic density, unstranded gives nonzero gDNA density."""
-        from rigel.locus import compute_gdna_density_hybrid
-
-        # SS=0.5 (unstranded), with intergenic density
-        density, _ = compute_gdna_density_hybrid(
-            1000.0, 1000.0, 50000.0, 0.5, 0.005,
-        )
-        assert density > 0.0
-        # Expected: intergenic_density directly = 0.005
-        expected = 0.005
-        assert density == pytest.approx(expected, abs=1e-6)
-
-    def test_strand_only_zero_for_unstranded(self):
-        """Without density, unstranded gives zero gDNA density."""
-        from rigel.locus import compute_gdna_density_from_strand
-
-        density = compute_gdna_density_from_strand(1000.0, 1000.0, 50000.0, 0.5)
-        assert density == 0.0
-
-    def test_hybrid_zero_for_unstranded_no_density(self):
-        """Unstranded with no density falls back to zero (backward compat)."""
-        from rigel.locus import compute_gdna_density_hybrid
-
-        density, _ = compute_gdna_density_hybrid(
-            1000.0, 1000.0, 50000.0, 0.5, 0.0,
-        )
-        assert density == 0.0
-
-    def test_moderate_ss_blends_components(self):
-        """At SS=0.7 (moderate), both strand and density contribute."""
-        from rigel.locus import compute_gdna_density_hybrid
-
-        ss = 0.7
-        density, _ = compute_gdna_density_hybrid(
-            100.0, 40.0, 5000.0, ss, 0.001,
-        )
-        # Should be between pure-strand and pure-density
-        assert density > 0.0
-
-
-# =====================================================================
-# gDNA CLI/Config integration
-# =====================================================================
-
-
-class TestGdnaConfig:
-    """Verify gDNA config fields and CLI args."""
-
-    def test_emconfig_defaults(self):
-        cfg = EMConfig()
-        assert cfg.gdna_kappa_ref is None
-        assert cfg.gdna_kappa_locus is None
-        assert cfg.gdna_mom_min_evidence_ref == 50.0
-        assert cfg.gdna_mom_min_evidence_locus == 30.0
-
-    def test_emconfig_explicit(self):
-        cfg = EMConfig(
-            gdna_kappa_ref=25.0,
-            gdna_kappa_locus=10.0,
-            gdna_mom_min_evidence_ref=40.0,
-            gdna_mom_min_evidence_locus=20.0,
-        )
-        assert cfg.gdna_kappa_ref == 25.0
-        assert cfg.gdna_kappa_locus == 10.0
-        assert cfg.gdna_mom_min_evidence_ref == 40.0
-        assert cfg.gdna_mom_min_evidence_locus == 20.0
-
-    def test_cli_parser_has_gdna_args(self):
-        from rigel.cli import build_parser
-        parser = build_parser()
-        args = parser.parse_args([
-            "quant",
-            "--bam", "test.bam",
-            "--index", "test_idx",
-            "-o", "out",
-            "--gdna-kappa-ref", "30.0",
-            "--gdna-kappa-locus", "15.0",
-            "--gdna-mom-min-evidence-ref", "60.0",
-            "--gdna-mom-min-evidence-locus", "25.0",
-        ])
-        assert args.gdna_kappa_ref == 30.0
-        assert args.gdna_kappa_locus == 15.0
-        assert args.gdna_mom_min_evidence_ref == 60.0
-        assert args.gdna_mom_min_evidence_locus == 25.0
-
-    def test_cli_defaults_none(self):
-        from rigel.cli import build_parser
-        parser = build_parser()
-        args = parser.parse_args([
-            "quant",
-            "--bam", "test.bam",
-            "--index", "test_idx",
-            "-o", "out",
-        ])
-        # Before _resolve_quant_args, CLI defaults are None
-        assert args.gdna_kappa_ref is None
-        assert args.gdna_kappa_locus is None
+        # MLE: p_r1_sense = 10/10 = 1.0
+        assert sm.p_r1_sense == pytest.approx(1.0)

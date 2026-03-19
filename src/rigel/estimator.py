@@ -10,9 +10,8 @@ per-locus EM with a coverage-weighted One Virtual Read (OVR) prior,
 then counts are accumulated from the converged posterior.
 
 Data containers (``ScoredFragments``, ``Locus``, ``LocusEMInput``)
-live in ``rigel.scored_fragments``.  Prior computation functions
-(``estimate_kappa``, ``compute_global_gdna_density``) live in
-``rigel.priors``.
+live in ``rigel.scored_fragments``.  Calibration and prior computation
+live in ``rigel.calibration`` and ``rigel.locus``.
 """
 
 import logging
@@ -22,10 +21,8 @@ import pandas as pd
 
 from .config import EMConfig, TranscriptGeometry
 from .native import batch_locus_em as _batch_locus_em
-from .scored_fragments import ScoredFragments, Locus, LocusEMInput  # noqa: F401
-from .priors import compute_global_gdna_density, estimate_kappa  # noqa: F401
+from .scored_fragments import ScoredFragments
 from .splice import (
-    ANTISENSE_COLS,
     SpliceType,
     SpliceStrandCol,
     NUM_SPLICE_STRAND_COLS,
@@ -33,6 +30,44 @@ from .splice import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ======================================================================
+# Helpers
+# ======================================================================
+
+
+def _aggregate_to_gene(t_to_g: np.ndarray, n_genes: int, values: np.ndarray) -> np.ndarray:
+    """Sum per-transcript *values* to gene level using np.add.at."""
+    shape = (n_genes,) if values.ndim == 1 else (n_genes, values.shape[1])
+    out = np.zeros(shape, dtype=np.float64)
+    np.add.at(out, t_to_g, values)
+    return out
+
+
+def _gene_locus_ids(
+    t_to_g: np.ndarray,
+    n_genes: int,
+    locus_id_per_transcript: np.ndarray,
+    t_mrna: np.ndarray,
+) -> np.ndarray:
+    """For each gene, assign the locus_id of its highest-mRNA transcript."""
+    g_locus_id = np.full(n_genes, -1, dtype=np.int32)
+    g_best_mrna = np.full(n_genes, -1.0, dtype=np.float64)
+    valid = locus_id_per_transcript >= 0
+    if not valid.any():
+        return g_locus_id
+    v_g = t_to_g[valid]
+    v_mrna = t_mrna[valid]
+    v_lid = locus_id_per_transcript[valid]
+    # Process in descending mRNA order; first write per gene wins.
+    order = np.argsort(-v_mrna, kind="stable")
+    for i in order:
+        g = int(v_g[i])
+        if v_mrna[i] > g_best_mrna[g]:
+            g_best_mrna[g] = v_mrna[i]
+            g_locus_id[g] = int(v_lid[i])
+    return g_locus_id
 
 
 # ======================================================================
@@ -94,7 +129,6 @@ class AbundanceEstimator:
         # --- Geometry: from TranscriptGeometry or defaults ---
         if geometry is not None:
             self._t_to_g = np.asarray(geometry.t_to_g, dtype=np.int32)
-            self._mean_frag = geometry.mean_frag
             self._transcript_spans = np.asarray(geometry.transcript_spans, dtype=np.float64)
             self._exonic_lengths = np.asarray(geometry.exonic_lengths, dtype=np.float64)
             self._t_eff_len = np.maximum(
@@ -103,7 +137,6 @@ class AbundanceEstimator:
             )
         else:
             self._t_to_g = None
-            self._mean_frag = 200.0
             self._transcript_spans = None
             self._exonic_lengths = None
             self._t_eff_len = np.ones(num_transcripts, dtype=np.float64)
@@ -117,7 +150,6 @@ class AbundanceEstimator:
         )
 
         # Per-nRNA shadow initialization and EM counts.
-        self.nrna_init = np.zeros(self.num_nrna, dtype=np.float64)
         self.nrna_em_counts = np.zeros(self.num_nrna, dtype=np.float64)
 
         # --- gDNA: locus-level, NOT per-gene ---
@@ -186,49 +218,6 @@ class AbundanceEstimator:
         return self.unambig_counts + self.em_high_conf_counts
 
     # ------------------------------------------------------------------
-    # Strand classification (internal)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def is_antisense(
-        exon_strand,
-        ref_strand: int,
-        strand_model,
-    ) -> bool:
-        """Classify whether a fragment is antisense using the trained model.
-
-        Parameters
-        ----------
-        exon_strand : int
-            Observed exon-block strand of the fragment.
-        ref_strand : int
-            Strand of the reference transcript (or gene — they are
-            identical by definition).
-        strand_model
-            Trained strand model with ``strand_likelihood*`` methods.
-        """
-        p = strand_model.strand_likelihood(exon_strand, ref_strand)
-        return p < 0.5
-
-    # ------------------------------------------------------------------
-    # Unique assignment
-    # ------------------------------------------------------------------
-
-    def assign_unambig(self, resolved, index, strand_models) -> None:
-        """Deterministic assignment for a truly unambiguous fragment."""
-        t_inds = resolved.t_inds
-
-        if len(t_inds) == 0:
-            return
-
-        t_idx = int(next(iter(t_inds)))
-        t_strand = int(index.t_to_strand_arr[t_idx])
-        sm = strand_models.exonic_spliced
-        anti = self.is_antisense(resolved.exon_strand, t_strand, sm)
-        col = SpliceStrandCol.from_category(resolved.splice_type, anti)
-        self.unambig_counts[t_idx, col] += 1.0
-
-    # ------------------------------------------------------------------
     # Batch locus EM — Phase 2A: single C++ call for all loci
     # ------------------------------------------------------------------
 
@@ -237,7 +226,7 @@ class AbundanceEstimator:
         loci: list,
         em_data: ScoredFragments,
         index,
-        gdna_inits: np.ndarray,
+        locus_gammas: np.ndarray,
         *,
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
@@ -257,8 +246,8 @@ class AbundanceEstimator:
             Global CSR data.
         index : TranscriptIndex
             Reference index.
-        gdna_inits : np.ndarray
-            float64[n_loci] — EB gDNA prior for each locus.
+        locus_gammas : np.ndarray
+            float64[n_loci] — calibration gDNA fraction ∈ [0, 1] per locus.
         em_iterations, em_convergence_delta, confidence_threshold
             EM algorithm parameters.
 
@@ -322,12 +311,11 @@ class AbundanceEstimator:
             locus_t_flat,
             locus_u_offsets,
             locus_u_flat,
-            np.ascontiguousarray(gdna_inits, dtype=np.float64),
+            np.ascontiguousarray(locus_gammas, dtype=np.float64),
             # Pre-computed union genomic footprints
             np.array([loc.gdna_span for loc in loci], dtype=np.int64),
             # Per-transcript data
             self.unambig_counts,
-            self.nrna_init,
             t_starts,
             t_ends,
             t_lengths,
@@ -344,13 +332,9 @@ class AbundanceEstimator:
             self._em_posterior_sum,
             self._em_n_assigned,
             # EM config
-            self._mean_frag,
             em_iterations,
             em_convergence_delta,
-            self.em_config.prior_alpha,
-            self.em_config.prior_gamma,
-            self.em_config.nrna_sparsity_alpha,
-            self.em_config.gdna_prior_scale,
+            self.em_config.prior_pseudocount,
             self.em_config.mode == "vbem",
             self.em_config.prune_threshold if self.em_config.prune_threshold is not None else -1.0,
             confidence_threshold,
@@ -479,28 +463,20 @@ class AbundanceEstimator:
         t_to_g = index.t_to_g_arr
         total = self.t_counts
         unique = self.unambig_counts
-
         n_genes = index.num_genes
-        g_total = np.zeros((n_genes, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
-        np.add.at(g_total, t_to_g, total)
 
-        g_unambig = np.zeros((n_genes, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
-        np.add.at(g_unambig, t_to_g, unique)
+        g_total = _aggregate_to_gene(t_to_g, n_genes, total)
+        g_unambig = _aggregate_to_gene(t_to_g, n_genes, unique)
 
         mrna = g_total.sum(axis=1)
         mrna_unambig = g_unambig.sum(axis=1)
         mrna_spliced = g_total[:, list(SPLICED_COLS)].sum(axis=1)
 
-        mrna_em_arr = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(mrna_em_arr, t_to_g, self.em_counts.sum(axis=1))
-
-        mrna_hc_arr = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(mrna_hc_arr, t_to_g, self.t_high_conf_counts.sum(axis=1))
+        mrna_em_arr = _aggregate_to_gene(t_to_g, n_genes, self.em_counts.sum(axis=1))
+        mrna_hc_arr = _aggregate_to_gene(t_to_g, n_genes, self.t_high_conf_counts.sum(axis=1))
 
         # nRNA per gene (EM-assigned only)
-        nrna = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(nrna, t_to_g, self._nrna_per_transcript())
-
+        nrna = _aggregate_to_gene(t_to_g, n_genes, self._nrna_per_transcript())
         rna_total = mrna + nrna
 
         # Gene effective length: abundance-weighted mean of transcript
@@ -508,42 +484,20 @@ class AbundanceEstimator:
         # unweighted mean of transcript effective lengths.
         t_eff = self._t_eff_len
         t_counts_flat = (self.unambig_counts + self.em_counts).sum(axis=1)
-        g_eff_num = np.zeros(n_genes, dtype=np.float64)
-        g_eff_den = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(g_eff_num, t_to_g, t_counts_flat * t_eff)
-        np.add.at(g_eff_den, t_to_g, t_counts_flat)
-        g_eff_sum = np.zeros(n_genes, dtype=np.float64)
-        g_eff_cnt = np.zeros(n_genes, dtype=np.float64)
-        np.add.at(g_eff_sum, t_to_g, t_eff)
-        np.add.at(g_eff_cnt, t_to_g, 1.0)
+        g_eff_num = _aggregate_to_gene(t_to_g, n_genes, t_counts_flat * t_eff)
+        g_eff_den = _aggregate_to_gene(t_to_g, n_genes, t_counts_flat)
+        g_eff_sum = _aggregate_to_gene(t_to_g, n_genes, t_eff)
+        g_eff_cnt = _aggregate_to_gene(t_to_g, n_genes, np.ones_like(t_eff))
         with np.errstate(divide="ignore", invalid="ignore"):
-            g_eff_mean = np.where(
-                g_eff_cnt > 0,
-                g_eff_sum / g_eff_cnt,
-                1.0,
-            )
-        with np.errstate(divide="ignore", invalid="ignore"):
-            g_eff_len = np.where(
-                g_eff_den > 0,
-                g_eff_num / g_eff_den,
-                g_eff_mean,
-            )
+            g_eff_mean = np.where(g_eff_cnt > 0, g_eff_sum / g_eff_cnt, 1.0)
+            g_eff_len = np.where(g_eff_den > 0, g_eff_num / g_eff_den, g_eff_mean)
         g_eff_len = np.maximum(g_eff_len, 1.0)
 
         # Gene-level locus_id: assign the locus of the transcript with
         # the highest mRNA count.
-        g_locus_id = np.full(n_genes, -1, dtype=np.int32)
-        g_best_mrna = np.zeros(n_genes, dtype=np.float64)
-        t_mrna_flat = total.sum(axis=1)
-        for t_idx in range(self.num_transcripts):
-            lid = int(self.locus_id_per_transcript[t_idx])
-            if lid < 0:
-                continue
-            g_idx = int(t_to_g[t_idx])
-            t_mrna = t_mrna_flat[t_idx]
-            if g_locus_id[g_idx] < 0 or t_mrna > g_best_mrna[g_idx]:
-                g_locus_id[g_idx] = lid
-                g_best_mrna[g_idx] = t_mrna
+        g_locus_id = _gene_locus_ids(
+            t_to_g, n_genes, self.locus_id_per_transcript, total.sum(axis=1)
+        )
 
         # TPM: mRNA-based at gene level
         rpk = mrna / g_eff_len
@@ -589,7 +543,7 @@ class AbundanceEstimator:
         nrna : float, nRNA count from locus EM
         gdna : float, gDNA count from locus EM
         gdna_rate : float, gdna / (mrna + nrna + gdna)
-        gdna_init : float, EB-shrunk gDNA initialization
+        gdna_init : float, calibration locus γ (gDNA fraction)
         """
         cols = [
             "locus_id",

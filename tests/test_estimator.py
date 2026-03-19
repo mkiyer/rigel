@@ -4,14 +4,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.types import Strand, MergeOutcome
+from rigel.types import Strand
 from rigel.splice import (
     SpliceType,
     SpliceStrandCol,
 )
 from rigel.config import EMConfig
-from rigel.estimator import AbundanceEstimator, ScoredFragments, Locus, estimate_kappa
-from rigel.strand_model import StrandModel, StrandModels
+from rigel.estimator import AbundanceEstimator
+from rigel.scored_fragments import ScoredFragments
 
 from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
@@ -24,8 +24,18 @@ from conftest import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 class MockIndex:
     """Minimal mock of TranscriptIndex with the arrays AbundanceEstimator needs."""
 
-    def __init__(self, num_transcripts, num_genes, t_to_g, t_to_strand, g_to_strand,
-                 t_ids=None, g_ids=None, g_names=None, t_gnames=None):
+    def __init__(
+        self,
+        num_transcripts,
+        num_genes,
+        t_to_g,
+        t_to_strand,
+        g_to_strand,
+        t_ids=None,
+        g_ids=None,
+        g_names=None,
+        t_gnames=None,
+    ):
         self.num_transcripts = num_transcripts
         self.num_genes = num_genes
         self.t_to_g_arr = np.array(t_to_g, dtype=np.int64)
@@ -42,15 +52,19 @@ class MockIndex:
         if t_gnames is None:
             t_gnames = [g_names[g] for g in t_to_g]
 
-        self.t_df = pd.DataFrame({
-            "t_id": t_ids,
-            "g_id": [g_ids[g] for g in t_to_g],
-            "g_name": t_gnames,
-        })
-        self.g_df = pd.DataFrame({
-            "g_id": g_ids,
-            "g_name": g_names,
-        })
+        self.t_df = pd.DataFrame(
+            {
+                "t_id": t_ids,
+                "g_id": [g_ids[g] for g in t_to_g],
+                "g_name": t_gnames,
+            }
+        )
+        self.g_df = pd.DataFrame(
+            {
+                "g_id": g_ids,
+                "g_name": g_names,
+            }
+        )
 
 
 def _make_index():
@@ -68,48 +82,9 @@ def _make_index():
     )
 
 
-def _make_strand_model_fr():
-    """FR-strand model: p_r1_sense ≈ 0.98."""
-    sm = StrandModel()
-    for _ in range(100):
-        sm.observe(Strand.POS, Strand.POS)
-    for _ in range(2):
-        sm.observe(Strand.POS, Strand.NEG)
-    sm.finalize()
-    return sm
-
-
-def _make_strand_models_fr():
-    """StrandModels container with FR-strand model."""
-    sm = _make_strand_model_fr()
-    return StrandModels(
-        exonic_spliced=sm,
-    )
-
-
-def _make_resolved(**kwargs):
-    from types import SimpleNamespace
-    defaults = dict(
-        t_inds=frozenset({0}),
-        ambig_strand=0,
-        splice_type=SpliceType.UNSPLICED,
-        exon_strand=Strand.POS,
-        sj_strand=Strand.NONE,
-        frag_lengths={0: 250},
-        merge_criteria=MergeOutcome.INTERSECTION,
-        num_hits=1,
-        genomic_footprint=250,
-        genomic_start=1000,
-    )
-    defaults.update(kwargs)
-    ns = SimpleNamespace(**defaults)
-    ns.is_chimeric = False
-    ns.is_same_strand = not ns.ambig_strand
-    return ns
-
-
 def _make_frag_length_models():
     from rigel.frag_length_model import FragmentLengthModels
+
     im = FragmentLengthModels()
     im.observe(250, SpliceType.UNSPLICED)
     return im
@@ -184,93 +159,6 @@ def _make_em_data(
 
 
 # =====================================================================
-# is_antisense
-# =====================================================================
-
-
-class TestIsAntisense:
-    def test_high_likelihood_returns_false(self):
-        """Good strand match → sense → not antisense."""
-        sm = _make_strand_model_fr()
-        result = AbundanceEstimator.is_antisense(Strand.POS, int(Strand.POS), sm)
-        assert result is False
-
-    def test_low_likelihood_returns_true(self):
-        """Poor strand match → antisense."""
-        sm = _make_strand_model_fr()
-        result = AbundanceEstimator.is_antisense(Strand.POS, int(Strand.NEG), sm)
-        assert result is True
-
-    def test_unstranded_returns_false(self):
-        """Unstranded model (p=0.5) is treated as non-antisense."""
-        sm = StrandModel()  # no observations → p = 0.5
-        sm.finalize()
-        result = AbundanceEstimator.is_antisense(Strand.POS, int(Strand.POS), sm)
-        assert result is False
-
-
-# =====================================================================
-# assign_unambig
-# =====================================================================
-
-
-class TestAssignUnique:
-    def test_single_transcript_single_gene(self):
-        index = _make_index()
-        sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-
-        resolved = _make_resolved(
-            t_inds=frozenset({0}),
-            ambig_strand=0,
-            exon_strand=Strand.POS,
-            splice_type=SpliceType.UNSPLICED,
-        )
-        rc.assign_unambig(resolved, index, sms)
-
-        col = _UNSPLICED_SENSE
-        assert rc.unambig_counts[0, col] == 1.0
-        assert rc.t_counts[0, col] == 1.0
-
-    def test_empty_t_inds_does_nothing(self):
-        index = _make_index()
-        sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-
-        resolved = _make_resolved(t_inds=frozenset(), ambig_strand=0)
-        rc.assign_unambig(resolved, index, sms)
-
-        assert rc.unambig_counts.sum() == 0.0
-
-    def test_always_assigns_one_count(self):
-        index = _make_index()
-        sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-
-        resolved = _make_resolved(
-            t_inds=frozenset({0}),
-            ambig_strand=0,
-            exon_strand=Strand.POS,
-            num_hits=4,
-        )
-        rc.assign_unambig(resolved, index, sms)
-
-        col = _UNSPLICED_SENSE
-        assert rc.unambig_counts[0, col] == 1.0
-
-    def test_writes_to_unambig_not_em(self):
-        index = _make_index()
-        sms = _make_strand_models_fr()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-
-        resolved = _make_resolved(t_inds=frozenset({0}), ambig_strand=0)
-        rc.assign_unambig(resolved, index, sms)
-
-        assert rc.unambig_counts.sum() == 1.0
-        assert rc.em_counts.sum() == 0.0
-
-
-# =====================================================================
 # ScoredFragments construction
 # =====================================================================
 
@@ -336,7 +224,9 @@ class TestLocusEM:
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 100.0
 
         bundle = _make_locus_em_data(
-            [[0, 1]] * 500, num_transcripts=3, rc=rc,
+            [[0, 1]] * 500,
+            num_transcripts=3,
+            rc=rc,
         )
         _run_and_assign(rc, bundle, em_iterations=10)
 
@@ -349,7 +239,9 @@ class TestLocusEM:
         rc.unambig_counts[1, 0] = 5.0
 
         bundle = _make_locus_em_data(
-            [[0, 1]] * 100, num_transcripts=3, rc=rc,
+            [[0, 1]] * 100,
+            num_transcripts=3,
+            rc=rc,
         )
         _run_and_assign(rc, bundle, em_iterations=0)
 
@@ -376,7 +268,9 @@ class TestLocusEM:
         rc.unambig_counts[1, 0] = 100.0
 
         bundle = _make_locus_em_data(
-            [[0, 1]] * 100, num_transcripts=2, rc=rc,
+            [[0, 1]] * 100,
+            num_transcripts=2,
+            rc=rc,
         )
         _run_and_assign(rc, bundle, em_iterations=100)
         # Just verify it runs without error and produces sensible output
@@ -416,16 +310,10 @@ class TestLocusAssignment:
 
     def test_total_counts_equals_unambig_plus_em(self):
         """t_counts = unambig_counts + em_counts."""
-        index = _make_index()
-        sms = _make_strand_models_fr()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
 
-        # 10 unambig
-        for _ in range(10):
-            rc.assign_unambig(
-                _make_resolved(t_inds=frozenset({0})),
-                index, sms,
-            )
+        # 10 unambig (set directly — deterministic assignment now handled in C++)
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 10.0
 
         # 5 ambiguous
         bundle = _make_locus_em_data([[0, 1]] * 5, num_transcripts=3, rc=rc)
@@ -444,7 +332,9 @@ class TestLocusAssignment:
         rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
 
         bundle = _make_locus_em_data(
-            [[0, 1]] * 10000, num_transcripts=3, rc=rc,
+            [[0, 1]] * 10000,
+            num_transcripts=3,
+            rc=rc,
         )
         _run_and_assign(rc, bundle, em_iterations=10)
 
@@ -494,7 +384,9 @@ class TestLocusAssignment:
             rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unambig_counts[1, _UNSPLICED_SENSE] = 50.0
             bundle = _make_locus_em_data(
-                [[0, 1]] * 100, num_transcripts=3, rc=rc,
+                [[0, 1]] * 100,
+                num_transcripts=3,
+                rc=rc,
             )
             _run_and_assign(rc, bundle, em_iterations=10)
             results.append(rc.em_counts.copy())
@@ -510,7 +402,9 @@ class TestLocusAssignment:
             rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unambig_counts[1, _UNSPLICED_SENSE] = 50.0
             bundle = _make_locus_em_data(
-                [[0, 1]] * 100, num_transcripts=3, rc=rc,
+                [[0, 1]] * 100,
+                num_transcripts=3,
+                rc=rc,
             )
             _run_and_assign(rc, bundle, em_iterations=10)
             counts.append(rc.em_counts.copy())
@@ -524,7 +418,9 @@ class TestLocusAssignment:
         rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
 
         bundle = _make_locus_em_data(
-            [[0, 1]] * 200, num_transcripts=3, rc=rc,
+            [[0, 1]] * 200,
+            num_transcripts=3,
+            rc=rc,
         )
         _run_and_assign(rc, bundle, em_iterations=10)
 
@@ -539,16 +435,15 @@ class TestLocusAssignment:
         """
         rc = AbundanceEstimator(4, em_config=EMConfig(seed=42))
         bundle = _make_locus_em_data(
-            [[0, 1, 2, 3]] * 10000, num_transcripts=4,
+            [[0, 1, 2, 3]] * 10000,
+            num_transcripts=4,
         )
         _run_and_assign(rc, bundle, em_iterations=10)
 
         per_t = rc.em_counts.sum(axis=1)
         # Each should get ~2500 counts; verify all get at least 2000
         for t in range(4):
-            assert per_t[t] > 2000, (
-                f"t{t} got {per_t[t]} counts — expected ~2500"
-            )
+            assert per_t[t] > 2000, f"t{t} got {per_t[t]} counts — expected ~2500"
         assert rc.em_counts.sum() == pytest.approx(10000.0, abs=10.0)
 
 
@@ -579,7 +474,9 @@ class TestPosteriorMean:
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 100.0
         bundle = _make_locus_em_data(
-            [[0, 1]] * 100, num_transcripts=2, rc=rc,
+            [[0, 1]] * 100,
+            num_transcripts=2,
+            rc=rc,
         )
         _run_and_assign(rc, bundle, em_iterations=10)
 
@@ -618,9 +515,7 @@ class TestSimultaneousResolution:
         bundle2 = _make_locus_em_data(units_rev, num_transcripts=4, rc=rc2)
         _run_and_assign(rc2, bundle2, em_iterations=10)
 
-        np.testing.assert_allclose(
-            rc1.em_counts, rc2.em_counts, atol=1e-10
-        )
+        np.testing.assert_allclose(rc1.em_counts, rc2.em_counts, atol=1e-10)
         # Total counts should match (400 units each)
         assert rc1.em_counts.sum() == pytest.approx(400.0, abs=1.0)
         assert rc2.em_counts.sum() == pytest.approx(400.0, abs=1.0)
@@ -664,12 +559,19 @@ class TestCountsOutput:
         df = rc.get_counts_df(index)
         assert df.shape[0] == 3
         expected_cols = [
-            "transcript_id", "gene_id", "gene_name",
+            "transcript_id",
+            "gene_id",
+            "gene_name",
             "locus_id",
             "effective_length",
-            "mrna", "mrna_unambig", "mrna_em",
-            "mrna_high_conf", "mrna_spliced",
-            "nrna", "rna_total", "tpm",
+            "mrna",
+            "mrna_unambig",
+            "mrna_em",
+            "mrna_high_conf",
+            "mrna_spliced",
+            "nrna",
+            "rna_total",
+            "tpm",
             "posterior_mean",
         ]
         assert list(df.columns) == expected_cols
@@ -680,12 +582,18 @@ class TestCountsOutput:
         df = rc.get_gene_counts_df(index)
         assert df.shape[0] == 2
         expected_cols = [
-            "gene_id", "gene_name",
+            "gene_id",
+            "gene_name",
             "locus_id",
             "effective_length",
-            "mrna", "mrna_unambig", "mrna_em",
-            "mrna_high_conf", "mrna_spliced",
-            "nrna", "rna_total", "tpm",
+            "mrna",
+            "mrna_unambig",
+            "mrna_em",
+            "mrna_high_conf",
+            "mrna_spliced",
+            "nrna",
+            "rna_total",
+            "tpm",
         ]
         assert list(df.columns) == expected_cols
 
@@ -829,7 +737,7 @@ class TestGDNAInLocusEM:
             [[0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            gdna_init=500.0,
+            locus_gamma=0.5,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -848,7 +756,7 @@ class TestGDNAInLocusEM:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            gdna_init=1.0,
+            locus_gamma=0.1,
             gdna_log_lik=-20.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -865,7 +773,7 @@ class TestGDNAInLocusEM:
             num_transcripts=2,
             include_nrna=True,
             include_gdna=True,
-            gdna_init=50.0,
+            locus_gamma=0.3,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
@@ -886,66 +794,3 @@ class TestGDNAInLocusEM:
 
         assert gdna_count == 0.0
         assert rc.em_counts.sum() == pytest.approx(100.0, abs=1.0)
-
-
-# =====================================================================
-# nrna_frac (nascent fraction) prior cascade tests
-# =====================================================================
-
-
-class TestEstimateKappa:
-    """Tests for estimate_kappa() Method-of-Moments helper."""
-
-    def test_zero_variance_returns_max(self):
-        """All nrna_frac identical → σ²=0 → returns maximum κ."""
-        nrna_frac = np.full(30, 0.3)
-        ev = np.full(30, 50.0)
-        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
-        assert k == 200.0  # _KAPPA_MAX
-
-    def test_too_few_observations_returns_fallback(self):
-        """Fewer than 20 valid features → returns fallback."""
-        rng = np.random.default_rng(0)
-        nrna_frac = rng.uniform(0.1, 0.9, size=5)
-        ev = np.full(5, 100.0)
-        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
-        assert k == 5.0  # _KAPPA_FALLBACK
-
-    def test_known_beta_distribution(self):
-        """Samples from Beta(2, 8) → μ=0.2, σ²≈0.0145 → κ≈10."""
-        rng = np.random.default_rng(42)
-        nrna_frac = rng.beta(2.0, 8.0, size=1000)
-        ev = np.full(1000, 100.0)
-        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
-        # True κ = α + β = 10
-        assert k == pytest.approx(10.0, abs=1.5)
-
-    def test_high_variance_gives_low_kappa(self):
-        """Uniform(0,1) → σ²≈0.083 → κ close to 2 (our floor)."""
-        rng = np.random.default_rng(7)
-        nrna_frac = rng.uniform(0.0, 1.0, size=500)
-        ev = np.full(500, 100.0)
-        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
-        assert k == pytest.approx(2.0, abs=0.5)
-
-    def test_evidence_filter_excludes_noisy(self):
-        """Only features above min_evidence are used."""
-        rng = np.random.default_rng(99)
-        # 30 confident features with tight distribution → high κ
-        nrna_frac_conf = np.full(30, 0.15)
-        ev_conf = np.full(30, 100.0)
-        # 200 noisy features with random nrna_frac but low evidence
-        nrna_frac_noisy = rng.uniform(0.0, 1.0, size=200)
-        ev_noisy = np.full(200, 5.0)
-        nrna_frac = np.concatenate([nrna_frac_conf, nrna_frac_noisy])
-        ev = np.concatenate([ev_conf, ev_noisy])
-        k = estimate_kappa(nrna_frac, ev, min_evidence=50.0)
-        # Should only see the 30 tight features → high κ
-        assert k >= 100.0
-
-    def test_clamp_lower_bound(self):
-        """κ is clamped to at least 2.0."""
-        nrna_frac = np.array([0.0, 1.0] * 20, dtype=np.float64)
-        ev = np.full(40, 100.0)
-        k = estimate_kappa(nrna_frac, ev, min_evidence=20.0)
-        assert k >= 2.0

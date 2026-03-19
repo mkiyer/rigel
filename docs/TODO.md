@@ -1,14 +1,19 @@
 # TODO
 
 
-## Reference ID (not string)
 
-Reference names are stored throughout the code base as strings. We should change this to use their integer IDs for efficiency.
+## dead/scale code
+
+— Unspliced sense/antisense: Kept as-is (C++ fused_score_buffer requires the arrays in its signature; removing would be too invasive for negligible benefit)
+
+- intronic_sense/antisense accumulators are populated by the C++ scoring pass but are not used. These are likely dead/stale code.
 
 
-## gDNA siphoning problem
 
-Currently gDNA siphons mRNA + nRNA fragments. Initialization is a major problem. The EM solver might also need constraints (strand "symmetry" constraints where gDNA symmetry is 50% sense 50% antisense and RNA symmetry is SS / (1-SS).
+## run_locus_em_native()
+
+When/why is this function needed?
+
 
 
 ## C/C++ Optimization: AVX2
@@ -26,12 +31,6 @@ This seems to affect non-deterministic behavior of the EM. Is this necessary?
 
 
 
-
-## empirical bayes
-
-- review gdna empirical bayes setup which requires a bunch of constants
-
-- review nascent RNA 'eta' empirical bayes setup
 
 
 ## Edit distance

@@ -7,17 +7,21 @@ ambiguous fragments into CSR-formatted equivalence-class data for
 the locus-level EM.
 """
 
+import logging
 import math
 
 import numpy as np
 
 from .buffer import FragmentBuffer, FRAG_UNAMBIG, FRAG_CHIMERIC
-from .estimator import AbundanceEstimator, ScoredFragments
+from .estimator import AbundanceEstimator
+from .scored_fragments import ScoredFragments
 from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
 from .stats import PipelineStats
 from .annotate import POOL_CODE_MRNA, POOL_CODE_CHIMERIC
+
+logger = logging.getLogger(__name__)
 
 # Default splice penalty for splice types not found in the penalty map.
 _DEFAULT_SPLICE_PENALTY = 1.0
@@ -72,7 +76,7 @@ class FragmentRouter:
         """Single pass over buffer.  Returns packed ScoredFragments.
 
         Deterministic-unique (SPLICED_ANNOT + FRAG_UNAMBIG) fragments
-        are assigned directly via ``estimator.assign_unambig``.  All other
+        are assigned directly via the C++ scoring path.  All other
         exonic fragments build EM units.  Chimeric fragments are
         recorded in the annotation table (if active) and skipped.
 
@@ -98,10 +102,6 @@ class FragmentRouter:
         demand, so peak memory during conversion is bounded to one
         extra chunk.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
         native_scorer = self._native_ctx
         estimator = self.estimator
         stats = self.stats

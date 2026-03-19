@@ -31,10 +31,6 @@ from .types import Strand
 
 logger = logging.getLogger(__name__)
 
-# Quantiles for the 95% credible interval on p_r1_sense.
-_CI_LOWER_QUANTILE: float = 0.025
-_CI_UPPER_QUANTILE: float = 0.975
-
 #: Minimum observations needed to report a 95% credible interval.
 #: Below this threshold, the posterior is too diffuse to be useful.
 _MIN_CI_OBSERVATIONS: int = 10
@@ -42,12 +38,13 @@ _MIN_CI_OBSERVATIONS: int = 10
 
 @dataclass
 class StrandModel:
-    """Bayesian strand model learned from high-quality spliced reads.
+    """Strand model learned from high-quality spliced reads.
 
     Accumulates a 2×2 contingency table of alignment strand
     (``exon_strand``) × SJ reference strand (``sj_strand``) from
-    qualified spliced fragments.  All probabilities are derived
-    from these raw counts plus a Beta prior.
+    qualified spliced fragments.  Probabilities are pure MLE
+    from these counts, with a safe fallback to 0.5 when no
+    observations are available.
 
     Qualification criteria (applied by the caller, not this class)
     ---------------------------------------------------------------
@@ -58,26 +55,13 @@ class StrandModel:
     2. SJ merge resolves to a unique gene.
     3. Exon strand is unambiguous (POS or NEG).
     4. SJ strand is unambiguous (POS or NEG).
-
-    Beta posterior
-    --------------
-    ``alpha = prior_alpha + n_same``
-    ``beta  = prior_beta  + n_opposite``
-
-    where *n_same* counts fragments where exon and SJ strands agree
-    (evidence for R1-sense protocol) and *n_opposite* counts
-    disagreements (evidence for R1-antisense protocol).
     """
 
     # --- 2×2 raw counts ---
-    pos_pos: int = 0    # exon POS, SJ POS
-    pos_neg: int = 0    # exon POS, SJ NEG
-    neg_pos: int = 0    # exon NEG, SJ POS
-    neg_neg: int = 0    # exon NEG, SJ NEG
-
-    # --- Beta prior (uniform by default) ---
-    prior_alpha: float = 1.0
-    prior_beta: float = 1.0
+    pos_pos: int = 0  # exon POS, SJ POS
+    pos_neg: int = 0  # exon POS, SJ NEG
+    neg_pos: int = 0  # exon NEG, SJ POS
+    neg_neg: int = 0  # exon NEG, SJ NEG
 
     # --- Cached probabilities (set by finalize()) ---
     _cached_p_sense: float = field(default=0.0, repr=False, compare=False)
@@ -125,11 +109,12 @@ class StrandModel:
             Integer array of SJ strand values (1=POS, 2=NEG).
         """
         import numpy as _np
+
         exon = _np.asarray(exon_strands)
         sj = _np.asarray(sj_strands)
         e_pos = exon == 1  # Strand.POS
         e_neg = ~e_pos
-        s_pos = sj == 1    # Strand.POS
+        s_pos = sj == 1  # Strand.POS
         s_neg = ~s_pos
         self.pos_pos += int(_np.count_nonzero(e_pos & s_pos))
         self.pos_neg += int(_np.count_nonzero(e_pos & s_neg))
@@ -160,24 +145,18 @@ class StrandModel:
     # ------------------------------------------------------------------
 
     @property
-    def alpha(self) -> float:
-        """Posterior alpha (same-direction evidence + prior)."""
-        return self.prior_alpha + self.n_same
-
-    @property
-    def beta(self) -> float:
-        """Posterior beta (opposite-direction evidence + prior)."""
-        return self.prior_beta + self.n_opposite
-
-    @property
     def p_r1_sense(self) -> float:
-        """Posterior mean P(read 1 aligns in gene-sense direction).
+        """MLE P(read 1 aligns in gene-sense direction).
 
         High (≈ 0.95) for R1-sense libraries (e.g. KAPA Stranded).
         Low  (≈ 0.05) for R1-antisense libraries (e.g. Illumina TruSeq dUTP).
         Near 0.50 for weakly-stranded libraries.
+        Returns 0.5 (uninformative) when no observations are available.
         """
-        return self.alpha / (self.alpha + self.beta)
+        n = self.n_observations
+        if n == 0:
+            return 0.5
+        return self.n_same / n
 
     @property
     def p_r1_antisense(self) -> float:
@@ -199,24 +178,25 @@ class StrandModel:
         return self.p_r1_sense >= 0.5
 
     def posterior_variance(self) -> float:
-        """Variance of the Beta posterior."""
-        a, b = self.alpha, self.beta
-        return (a * b) / ((a + b) ** 2 * (a + b + 1))
+        """Variance of p_r1_sense using binomial variance."""
+        n = self.n_observations
+        if n == 0:
+            return 0.25  # max variance when unknown
+        p = self.n_same / n
+        return (p * (1.0 - p)) / n
 
     def posterior_95ci(self) -> tuple[float, float]:
-        """95% credible interval for p_r1_sense.
-
-        Uses a normal approximation to the Beta posterior, which is
-        accurate when alpha + beta > ~10 (i.e. enough observations).
-        """
+        """95% confidence interval for p_r1_sense (Wald interval)."""
         import math
-        a, b = self.alpha, self.beta
-        mu = a / (a + b)
-        sigma = math.sqrt((a * b) / ((a + b) ** 2 * (a + b + 1)))
-        # z_{0.025} ≈ 1.96 for 95% CI
+
+        n = self.n_observations
+        if n == 0:
+            return (0.0, 1.0)
+        p = self.n_same / n
+        se = math.sqrt(p * (1.0 - p) / n)
         z = 1.959964
-        lo = max(0.0, mu - z * sigma)
-        hi = min(1.0, mu + z * sigma)
+        lo = max(0.0, p - z * se)
+        hi = min(1.0, p + z * se)
         return (lo, hi)
 
     # ------------------------------------------------------------------
@@ -228,10 +208,13 @@ class StrandModel:
 
         Must be called after all ``observe()`` calls are complete and
         before any ``strand_likelihood()`` calls during EM scoring.
+        Uses pure MLE; falls back to 0.5 with zero observations.
         """
-        a = self.prior_alpha + self.pos_pos + self.neg_neg  # alpha
-        b = self.prior_beta + self.pos_neg + self.neg_pos   # beta
-        self._cached_p_sense = a / (a + b)
+        n = self.n_observations
+        if n == 0:
+            self._cached_p_sense = 0.5
+        else:
+            self._cached_p_sense = (self.pos_pos + self.neg_neg) / n
         self._cached_p_antisense = 1.0 - self._cached_p_sense
         self._finalized = True
 
@@ -278,11 +261,7 @@ class StrandModel:
                 "n_same": int(self.n_same),
                 "n_opposite": int(self.n_opposite),
             },
-            "posterior": {
-                "alpha": float(round(self.alpha, 4)),
-                "beta": float(round(self.beta, 4)),
-                "prior_alpha": float(self.prior_alpha),
-                "prior_beta": float(self.prior_beta),
+            "estimate": {
                 "variance": float(round(self.posterior_variance(), 10)),
             },
             "probabilities": {
@@ -309,8 +288,9 @@ class StrandModel:
         # Add 95% CI if enough observations
         if self.n_observations >= _MIN_CI_OBSERVATIONS:
             lo, hi = self.posterior_95ci()
-            d["posterior"]["ci_95"] = [
-                float(round(lo, 6)), float(round(hi, 6)),
+            d["estimate"]["ci_95"] = [
+                float(round(lo, 6)),
+                float(round(hi, 6)),
             ]
 
         with open(path, "w") as fh:
@@ -344,11 +324,6 @@ class StrandModel:
 # StrandModels — single-model container with diagnostic sub-models
 # ======================================================================
 
-#: Default strand prior pseudocount (κ).  The Beta prior is
-#: ``Beta(κ/2, κ/2)`` which shrinks toward 0.5 (maximum entropy).
-#: With κ=2 this gives the uniform ``Beta(1, 1)`` prior.
-DEFAULT_STRAND_PRIOR_KAPPA: float = 2.0
-
 #: Minimum spliced observations to consider the strand model
 #: well-supported.  Below this threshold a warning is emitted.
 _MIN_STRAND_OBS_WARNING: int = 20
@@ -362,8 +337,7 @@ class StrandModels:
     SPLICED_ANNOT fragments with unique gene assignment and unambiguous
     exon/SJ strands.  Annotated splice junctions prove RNA origin,
     making this an uncontaminated measure of library strand specificity.
-    A ``Beta(κ/2, κ/2)`` prior shrinks toward 0.5 (max entropy);
-    the default κ=2 gives the uniform ``Beta(1, 1)`` prior.
+    Probabilities are pure MLE from observed counts.
 
     Two additional sub-models are retained **for diagnostics only** and
     are never used for scoring:
@@ -384,22 +358,16 @@ class StrandModels:
     exonic: StrandModel = field(default_factory=StrandModel)
     intergenic: StrandModel = field(default_factory=StrandModel)
 
-    #: Strand prior pseudocount κ.  Beta prior is ``Beta(κ/2, κ/2)``.
-    strand_prior_kappa: float = DEFAULT_STRAND_PRIOR_KAPPA
-
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
     # ------------------------------------------------------------------
 
     def finalize(self) -> None:
-        """Apply κ prior and cache derived probabilities for fast scoring.
+        """Cache derived probabilities for fast scoring.
 
-        Sets ``exonic_spliced.prior_alpha = κ/2`` and ``prior_beta = κ/2``
-        before caching.  Diagnostic sub-models are finalized as-is.
+        Finalizes all sub-models.  Uses pure MLE; falls back to
+        0.5 (uninformative) when no spliced observations exist.
         """
-        kappa = self.strand_prior_kappa
-        self.exonic_spliced.prior_alpha = kappa / 2.0
-        self.exonic_spliced.prior_beta = kappa / 2.0
         self.exonic_spliced.finalize()
 
         n_obs = self.exonic_spliced.n_observations
@@ -478,8 +446,9 @@ class StrandModels:
         # Add 95% CI for exonic_spliced model if enough observations
         if self.exonic_spliced.n_observations >= _MIN_CI_OBSERVATIONS:
             lo, hi = self.exonic_spliced.posterior_95ci()
-            d["exonic_spliced"]["posterior"]["ci_95"] = [
-                float(round(lo, 6)), float(round(hi, 6)),
+            d["exonic_spliced"]["estimate"]["ci_95"] = [
+                float(round(lo, 6)),
+                float(round(hi, 6)),
             ]
 
         with open(path, "w") as fh:
@@ -489,16 +458,22 @@ class StrandModels:
 
     def log_summary(self) -> None:
         """Log a human-readable summary of the trained strand models."""
-        logger.info("Strand models (κ=%.1f):", self.strand_prior_kappa)
-        logger.info(f"  [exonic_spliced] (RNA — used for scoring)  "
-                     f"{self.exonic_spliced.n_observations:,} obs, "
-                     f"p_r1_sense={self.exonic_spliced.p_r1_sense:.4f}, "
-                     f"specificity={self.exonic_spliced.strand_specificity:.4f}")
-        logger.info(f"  [exonic] (diagnostic)  "
-                     f"{self.exonic.n_observations:,} obs, "
-                     f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
-                     f"specificity={self.exonic.strand_specificity:.4f}")
-        logger.info(f"  [intergenic] (diagnostic)  "
-                     f"{self.intergenic.n_observations:,} obs, "
-                     f"p_r1_sense={self.intergenic.p_r1_sense:.4f}, "
-                     f"specificity={self.intergenic.strand_specificity:.4f}")
+        logger.info("Strand models:")
+        logger.info(
+            f"  [exonic_spliced] (RNA — used for scoring)  "
+            f"{self.exonic_spliced.n_observations:,} obs, "
+            f"p_r1_sense={self.exonic_spliced.p_r1_sense:.4f}, "
+            f"specificity={self.exonic_spliced.strand_specificity:.4f}"
+        )
+        logger.info(
+            f"  [exonic] (diagnostic)  "
+            f"{self.exonic.n_observations:,} obs, "
+            f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
+            f"specificity={self.exonic.strand_specificity:.4f}"
+        )
+        logger.info(
+            f"  [intergenic] (diagnostic)  "
+            f"{self.intergenic.n_observations:,} obs, "
+            f"p_r1_sense={self.intergenic.p_r1_sense:.4f}, "
+            f"specificity={self.intergenic.strand_specificity:.4f}"
+        )

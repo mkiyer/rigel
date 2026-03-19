@@ -51,7 +51,6 @@ import gc
 import io
 import json
 import logging
-import os
 import platform
 import pstats
 import resource
@@ -77,9 +76,8 @@ from rigel.config import (
 )
 from rigel.estimator import AbundanceEstimator
 from rigel.index import TranscriptIndex
-from rigel.locus import build_loci, build_locus_em_data, compute_eb_gdna_priors, compute_nrna_init
-from rigel.estimator import compute_global_gdna_density
-from rigel.pipeline import quant_from_buffer, run_pipeline, scan_and_buffer, _compute_intergenic_density
+from rigel.locus import build_loci, compute_gdna_locus_gammas
+from rigel.pipeline import run_pipeline, scan_and_buffer
 from rigel.scan import FragmentRouter
 from rigel.scoring import (
     GDNA_SPLICE_PENALTIES,
@@ -87,8 +85,6 @@ from rigel.scoring import (
     FragmentScorer,
     overhang_alpha_to_log_penalty,
 )
-from rigel.stats import PipelineStats
-from rigel.strand_model import StrandModels
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +364,6 @@ class StageTimings:
     create_estimator: float = 0.0
     fragment_scorer: float = 0.0
     fragment_router_scan: float = 0.0
-    compute_nrna_init: float = 0.0
     build_loci: float = 0.0
     compute_eb_gdna_priors: float = 0.0
     locus_em: float = 0.0
@@ -510,19 +505,14 @@ def profile_stages(
     # 3a: Compute geometry
     with Timer("compute_geometry") as t_geom:
         exonic_lengths = index.t_df["length"].values.astype(np.float64)
-        if frag_length_models.global_model.n_observations > 0:
-            mean_frag = frag_length_models.global_model.mean
-        else:
-            mean_frag = 200.0
-
-        if frag_length_models.global_model.n_observations > 0:
+        if frag_length_models.rna_model.n_observations > 0:
             effective_lengths = (
-                frag_length_models.global_model.compute_all_transcript_eff_lens(
+                frag_length_models.rna_model.compute_all_transcript_eff_lens(
                     exonic_lengths.astype(np.int64),
                 )
             )
         else:
-            effective_lengths = np.maximum(exonic_lengths - mean_frag + 1.0, 1.0)
+            effective_lengths = np.maximum(exonic_lengths - 200.0 + 1.0, 1.0)
 
         transcript_spans = (
             index.t_df["end"].values - index.t_df["start"].values
@@ -532,7 +522,6 @@ def profile_stages(
             effective_lengths=effective_lengths,
             exonic_lengths=exonic_lengths,
             t_to_g=index.t_to_g_arr,
-            mean_frag=mean_frag,
             transcript_spans=transcript_spans,
         )
     timings.compute_geometry = t_geom.elapsed
@@ -569,21 +558,6 @@ def profile_stages(
     buffer.release()
     gc.collect()
 
-    # 3e: nRNA init
-    with Timer("compute_nrna_init") as t_nrna:
-        nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.float64)
-        nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
-        np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
-        nrna_init = compute_nrna_init(
-            estimator.transcript_intronic_sense,
-            estimator.transcript_intronic_antisense,
-            nrna_spans,
-            nrna_max_exonic,
-            strand_models,
-        )
-        estimator.nrna_init = nrna_init
-    timings.compute_nrna_init = t_nrna.elapsed
-
     # 3f–3h: Locus-level EM
     n_loci = 0
     max_locus_t = 0
@@ -596,8 +570,8 @@ def profile_stages(
         n_loci = len(loci) if loci else 0
 
         if loci:
-            max_locus_t = max(len(l.transcript_indices) for l in loci)
-            max_locus_u = max(len(l.unit_indices) for l in loci)
+            max_locus_t = max(len(locus.transcript_indices) for locus in loci)
+            max_locus_u = max(len(locus.unit_indices) for locus in loci)
 
             # Assign locus_id to every transcript
             for locus in loci:
@@ -605,19 +579,7 @@ def profile_stages(
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
             with Timer("compute_eb_gdna_priors") as t_gdna:
-                intergenic_density = _compute_intergenic_density(stats, index)
-                gdna_inits = compute_eb_gdna_priors(
-                    loci, em_data, estimator, index, strand_models,
-                    intergenic_density=intergenic_density,
-                    kappa_ref=em_config.gdna_kappa_ref,
-                    kappa_locus=em_config.gdna_kappa_locus,
-                    mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
-                    mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
-                    kappa_min=em_config.gdna_kappa_min,
-                    kappa_max=em_config.gdna_kappa_max,
-                    kappa_fallback=em_config.gdna_kappa_fallback,
-                    kappa_min_obs=em_config.gdna_kappa_min_obs,
-                )
+                gdna_inits = compute_gdna_locus_gammas(loci, index, calibration=None)
 
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
@@ -651,7 +613,7 @@ def profile_stages(
 
     timings.quant_from_buffer = (
         t_geom.elapsed + t_est.elapsed + t_scorer.elapsed + t_route.elapsed
-        + t_nrna.elapsed + timings.build_loci + timings.compute_eb_gdna_priors
+        + timings.build_loci + timings.compute_eb_gdna_priors
         + timings.locus_em
     )
 
@@ -738,7 +700,6 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
                 ("create_estimator", s.create_estimator),
                 ("fragment_scorer", s.fragment_scorer),
                 ("fragment_router_scan", s.fragment_router_scan),
-                ("compute_nrna_init", s.compute_nrna_init),
                 ("build_loci", s.build_loci),
                 ("eb_gdna_priors", s.compute_eb_gdna_priors),
                 ("locus_em", s.locus_em),

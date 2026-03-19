@@ -1,4 +1,4 @@
-"""Tests for rigel.strand_model — Bayesian strand model."""
+"""Tests for rigel.strand_model — strand model."""
 
 import json
 
@@ -54,12 +54,10 @@ class TestStrandModelObserve:
 
 
 class TestStrandModelPosterior:
-    """Test Beta posterior computation."""
+    """Test MLE probability computation."""
 
-    def test_prior_only(self):
-        sm = StrandModel(prior_alpha=1.0, prior_beta=1.0)
-        assert sm.alpha == 1.0
-        assert sm.beta == 1.0
+    def test_no_observations(self):
+        sm = StrandModel()
         assert sm.p_r1_sense == 0.5
 
     def test_strong_fr_library(self):
@@ -69,8 +67,8 @@ class TestStrandModelPosterior:
             sm.observe(Strand.POS, Strand.POS)
         for _ in range(5):
             sm.observe(Strand.POS, Strand.NEG)
-        # p_r1_sense ≈ (1 + 95) / (1 + 95 + 1 + 5) = 96/102 ≈ 0.941
-        assert sm.p_r1_sense > 0.9
+        # p_r1_sense = 95 / 100 = 0.95
+        assert sm.p_r1_sense == pytest.approx(0.95)
         assert sm.strand_specificity > 0.9
         assert sm.read1_sense is True
 
@@ -130,7 +128,7 @@ class TestStrandModelSerialization:
         sm.observe(Strand.NEG, Strand.POS)
         d = sm.to_dict()
         assert "observations" in d
-        assert "posterior" in d
+        assert "estimate" in d
         assert "probabilities" in d
         assert "protocol" in d
         assert d["observations"]["total"] == 2
@@ -146,7 +144,7 @@ class TestStrandModelSerialization:
         assert path.exists()
         data = json.loads(path.read_text())
         assert "strand_model" in data
-        assert "posterior" in data["strand_model"]
+        assert "estimate" in data["strand_model"]
 
     def test_write_json_includes_ci_with_enough_observations(self, tmp_path):
         sm = StrandModel()
@@ -157,26 +155,35 @@ class TestStrandModelSerialization:
         path = tmp_path / "strand.json"
         sm.write_json(path)
         data = json.loads(path.read_text())
-        ci = data["strand_model"]["posterior"].get("ci_95")
+        ci = data["strand_model"]["estimate"].get("ci_95")
         assert ci is not None
         assert len(ci) == 2
         assert ci[0] < ci[1]
 
 
 class TestStrandModelProperties:
-    def test_posterior_variance(self):
-        sm = StrandModel(prior_alpha=2.0, prior_beta=3.0)
-        # No observations: alpha=2, beta=3
-        # variance = (2*3) / ((5)^2 * 6) = 6/150 = 0.04
-        assert sm.posterior_variance() == pytest.approx(0.04)
+    def test_posterior_variance_with_data(self):
+        sm = StrandModel()
+        for _ in range(80):
+            sm.observe(Strand.POS, Strand.POS)
+        for _ in range(20):
+            sm.observe(Strand.POS, Strand.NEG)
+        # p = 80/100 = 0.8, variance = 0.8 * 0.2 / 100 = 0.0016
+        assert sm.posterior_variance() == pytest.approx(0.0016)
+
+    def test_posterior_variance_no_observations(self):
+        sm = StrandModel()
+        assert sm.posterior_variance() == 0.25
 
     def test_posterior_95ci(self):
         sm = StrandModel()
-        for _ in range(100):
+        for _ in range(95):
             sm.observe(Strand.POS, Strand.POS)
+        for _ in range(5):
+            sm.observe(Strand.POS, Strand.NEG)
         lo, hi = sm.posterior_95ci()
         assert lo < hi
-        assert lo > 0.9  # should be heavily skewed towards 1.0
+        assert lo > 0.88  # should be heavily skewed towards 1.0
         assert hi <= 1.0
 
 
@@ -193,16 +200,13 @@ class TestStrandModelsContainer:
         assert models.read1_sense == models.exonic_spliced.read1_sense
         assert models.n_observations == models.exonic_spliced.n_observations
 
-    def test_kappa_prior_applied_on_finalize(self):
+    def test_mle_on_finalize(self):
         models = StrandModels()
-        models.strand_prior_kappa = 10.0
         for _ in range(10):
             models.exonic_spliced.observe(Strand.POS, Strand.POS)
         models.finalize()
-        # κ=10: alpha_prior=5, beta_prior=5
-        # n_same=10, n_opp=0
-        # p_r1_sense = (5 + 10) / (5 + 10 + 5 + 0) = 15/20 = 0.75
-        assert models.p_r1_sense == pytest.approx(0.75)
+        # MLE: p_r1_sense = 10/10 = 1.0
+        assert models.p_r1_sense == pytest.approx(1.0)
 
     def test_zero_observations_warns(self, caplog):
         models = StrandModels()

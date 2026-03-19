@@ -2,12 +2,11 @@
 
 Handles everything between "buffer scan complete" and "per-locus EM
 loop": connected-component partitioning, per-locus EM data extraction,
-nRNA initialization, and Empirical Bayes gDNA priors.
+and Empirical Bayes gDNA priors.
 """
 
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
@@ -15,79 +14,53 @@ import numpy as np
 from .native import connected_components as _cc_native
 
 from .scored_fragments import Locus, LocusEMInput, ScoredFragments
-from .priors import estimate_kappa
+
 from .native import EM_PRIOR_EPSILON
 from .index import TranscriptIndex
-from .strand_model import StrandModels
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from .calibration import GDNACalibration
     from .estimator import AbundanceEstimator
 
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Empirical Bayes hyperparameters
-# ---------------------------------------------------------------------------
-
-#: Minimum strand specificity denominator (2*SS − 1).
-#: When the denominator is below this threshold, the strand signal is too
-#: weak to reliably estimate nRNA or gDNA fractions — we return 0.0.
-STRAND_DENOM_MIN: float = 0.2
-
-#: Minimum denominator for the strand weight ``2s − 1`` below which
-#: the strand component of the hybrid estimator is zeroed out.
-_STRAND_DENOM_EPS: float = 0.01
-
-
-# ---------------------------------------------------------------------------
-# Union genomic footprint: merged interval sum across chromosomes
+# Merged genomic intervals for a set of transcripts
 # ---------------------------------------------------------------------------
 
 
-def _compute_union_genomic_footprint(
+def _merged_intervals(
     transcript_indices: np.ndarray,
     t_refs: np.ndarray,
     t_starts: np.ndarray,
     t_ends: np.ndarray,
-) -> int:
-    """Compute the union genomic footprint for a set of transcripts.
+) -> Iterator[tuple[object, int, int]]:
+    """Yield merged (ref, start, end) intervals for a set of transcripts.
 
     Groups transcript intervals by chromosome, merges overlapping/adjacent
-    intervals on each chromosome, and sums the merged lengths.  Intergenic
-    gaps between disconnected genes on the same chromosome are excluded
-    because gDNA from those regions does not compete within this locus.
-
-    For multi-chromosome mega-loci (created by multimappers), the result
-    is the sum of per-chromosome merged footprints — NOT the cross-
-    chromosome ``max(ends) - min(starts)`` which was the original bug.
-
-    Returns
-    -------
-    int
-        Total merged genomic span in bases (>= 1).
+    intervals on each chromosome, and yields one tuple per merged span.
+    Handles multi-chromosome mega-loci correctly by processing each
+    chromosome independently.
     """
     refs = t_refs[transcript_indices]
     starts = t_starts[transcript_indices]
     ends = t_ends[transcript_indices]
 
-    # Group intervals by chromosome
     by_ref: dict = defaultdict(list)
     for i in range(len(transcript_indices)):
         by_ref[refs[i]].append((int(starts[i]), int(ends[i])))
 
-    total = 0
-    for intervals in by_ref.values():
+    for ref, intervals in by_ref.items():
         intervals.sort()
         cur_start, cur_end = intervals[0]
         for s, e in intervals[1:]:
             if s <= cur_end:
                 cur_end = max(cur_end, e)
             else:
-                total += cur_end - cur_start
+                yield ref, cur_start, cur_end
                 cur_start, cur_end = s, e
-        total += cur_end - cur_start
-
-    return max(total, 1)
+        yield ref, cur_start, cur_end
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +130,9 @@ def build_loci(
     loci = []
     for lid in range(n_comp):
         t_idx = comp_t_indices[comp_t_offsets[lid] : comp_t_offsets[lid + 1]].copy()
-        gdna_span = _compute_union_genomic_footprint(
-            t_idx,
-            t_refs,
-            t_starts_all,
-            t_ends_all,
+        gdna_span = max(
+            sum(e - s for _, s, e in _merged_intervals(t_idx, t_refs, t_starts_all, t_ends_all)),
+            1,
         )
         loci.append(
             Locus(
@@ -185,7 +156,6 @@ def build_locus_em_data(
     em_data: ScoredFragments,
     estimator: AbundanceEstimator,
     index: TranscriptIndex,
-    mean_frag: float,
     gdna_init: float,
     *,
     _cache: dict | None = None,
@@ -207,7 +177,6 @@ def build_locus_em_data(
     em_data : ScoredFragments
     estimator : AbundanceEstimator
     index : TranscriptIndex
-    mean_frag : float
     gdna_init : float
         Empirical Bayes estimated gDNA count for this locus.
     _cache : dict or None
@@ -408,12 +377,10 @@ def build_locus_em_data(
     #
     # Only mRNA unambig_counts go into unambig_totals because those
     # fragments are deterministically assigned (NOT sent to the EM),
-    # so they are disjoint from em_totals.  nrna_init is derived from
-    # the SAME fragments the EM processes (intronic strand excess),
-    # so putting it here would double-count in the M-step.
+    # so they are disjoint from em_totals.
     unambig_totals = np.zeros(n_components, dtype=np.float64)
     unambig_totals[:n_t] = estimator.unambig_counts[t_arr].sum(axis=1)
-    # nRNA slot intentionally left at 0 — see nrna double-counting fix.
+    # nRNA slot intentionally left at 0 — nRNA has no unambig counts.
     # gDNA slot intentionally left at 0 — gdna_init is derived from the
     # SAME unspliced fragments the EM processes (strand-based EB prior),
     # so adding it to unambig_totals would double-count in the M-step
@@ -452,10 +419,7 @@ def build_locus_em_data(
 
     # Zero nRNA prior for nRNAs where all sharing transcripts are single-exon
     if estimator._transcript_spans is not None:
-        if estimator._exonic_lengths is not None:
-            t_exon = estimator._exonic_lengths[t_arr]
-        else:
-            t_exon = estimator._t_eff_len[t_arr] + mean_frag - 1.0
+        t_exon = estimator._exonic_lengths[t_arr]
         single_exon = estimator._transcript_spans[t_arr] <= t_exon
         # For each local nRNA, check if ALL sharing transcripts are single-exon
         for ln in range(n_nrna):
@@ -494,7 +458,6 @@ def build_locus_em_data(
         nrna_to_t_offsets=nrna_to_t_offsets,
         nrna_to_t_indices=nrna_to_t_indices,
         unambig_totals=unambig_totals,
-        nrna_init=estimator.nrna_init[unique_global_nrna].copy(),
         gdna_init=gdna_init,
         effective_lengths=eff_len,
         prior=prior,
@@ -503,442 +466,58 @@ def build_locus_em_data(
 
 
 # ---------------------------------------------------------------------------
-# nRNA initialization (strand-corrected intronic evidence)
+# Calibration γ aggregation per locus
 # ---------------------------------------------------------------------------
 
 
-def compute_nrna_init(
-    intronic_sense: np.ndarray,
-    intronic_antisense: np.ndarray,
-    nrna_spans: np.ndarray,
-    nrna_max_exonic: np.ndarray,
-    strand_models: StrandModels,
-) -> np.ndarray:
-    """Compute per-nRNA initialization from intronic evidence.
-
-    Model::
-
-        sense_int   = gDNA_int/2 + nRNA_int × SS
-        anti_int    = gDNA_int/2 + nRNA_int × (1-SS)
-
-    Exact solution::
-
-        nRNA_int = (sense_int - anti_int) / (2SS - 1)
-
-    When 2SS − 1 ≤ 0.2, returns zeros.
-    nRNAs with no intronic span (max_exonic >= span) get nrna_init = 0.
-
-    Parameters
-    ----------
-    intronic_sense, intronic_antisense : np.ndarray
-        float64[num_nrna] - per-nRNA intronic counts.
-    nrna_spans : np.ndarray
-        float64[num_nrna] - genomic span (end - start) per nRNA.
-    nrna_max_exonic : np.ndarray
-        float64[num_nrna] - max exonic length among sharing transcripts.
-    strand_models : StrandModels
-    """
-    strand_spec = strand_models.strand_specificity
-    denom = 2.0 * strand_spec - 1.0
-
-    if denom <= STRAND_DENOM_MIN:
-        # Low SS: use total intronic coverage as init
-        # (can't separate nRNA from gDNA by strand, but intronic reads
-        # are still evidence of nRNA or gDNA — let the EM decide)
-        nrna_init = np.maximum(0.0, intronic_sense + intronic_antisense)
-    else:
-        raw = (intronic_sense - intronic_antisense) / denom
-        nrna_init = np.maximum(0.0, raw)
-
-    intronic_span = np.maximum(nrna_spans - nrna_max_exonic, 0.0)
-    nrna_init[intronic_span <= 0] = 0.0
-
-    return nrna_init
-
-
-# ---------------------------------------------------------------------------
-# Empirical Bayes gDNA prior (locus → reference → global)
-# ---------------------------------------------------------------------------
-
-
-def compute_gdna_density_from_strand(
-    sense: float,
-    antisense: float,
-    exonic_bp: float,
-    strand_spec: float,
-) -> float:
-    """Strand-corrected gDNA density (reads/bp) from sense/antisense counts.
-
-    G = 2(A·SS - S·(1-SS)) / (2SS-1)
-    density = G / exonic_bp  (clamped ≥ 0)
-
-    Returns 0.0 when evidence is insufficient.
-    """
-    denom_ss = 2.0 * strand_spec - 1.0
-    if denom_ss <= STRAND_DENOM_MIN:
-        return 0.0
-    if exonic_bp <= 0:
-        return 0.0
-    g = 2.0 * (antisense * strand_spec - sense * (1.0 - strand_spec)) / denom_ss
-    g = max(g, 0.0)
-    return g / exonic_bp
-
-
-def compute_gdna_density_hybrid(
-    sense: float,
-    antisense: float,
-    exonic_bp: float,
-    strand_spec: float,
-    intergenic_density: float,
-) -> tuple[float, float]:
-    """Hybrid density + strand gDNA density estimate.
-
-    Combines strand-based and density-based estimators using
-    inverse-variance weighting ``W = (2s − 1)²``.
-
-    * **Strand component** — isolates gDNA from sense/antisense
-      imbalance, then converts to density (reads/bp).
-    * **Density component** — estimates gDNA from intergenic background
-      density (reads/bp).
-
-    For stranded libraries (W ≈ 1), the strand signal dominates.
-    For weakly-stranded libraries (W ≈ 0), the density signal provides
-    a fallback that is strictly better than the strand-only 0.0.
-
-    Parameters
-    ----------
-    sense, antisense : float
-        Unspliced sense/antisense fragment counts.
-    exonic_bp : float
-        Total exonic base pairs in this region.
-    strand_spec : float
-        Library strand specificity ∈ [0.5, 1.0].
-    intergenic_density : float
-        Background gDNA density (frags / bp) from intergenic regions.
-        Pass 0.0 to disable the density component.
-
-    Returns
-    -------
-    density : float
-        Estimated gDNA density (reads / bp), ≥ 0.
-    evidence : float
-        Total fragment count (sense + antisense).
-    """
-    total = sense + antisense
-    if exonic_bp <= 0:
-        return 0.0, 0.0
-
-    # --- Strand component (density) ---
-    denom_ss = 2.0 * strand_spec - 1.0
-    inv_var_weight = denom_ss**2 if denom_ss > _STRAND_DENOM_EPS else 0.0
-
-    if inv_var_weight > 0:
-        g = 2.0 * (antisense * strand_spec - sense * (1.0 - strand_spec)) / denom_ss
-        g = max(g, 0.0)
-        strand_density = g / exonic_bp
-    else:
-        strand_density = 0.0
-
-    # --- Density component ---
-    if intergenic_density > 0:
-        density_comp = intergenic_density
-    else:
-        density_comp = 0.0
-
-    # --- Weighted combination ---
-    density = inv_var_weight * strand_density + (1.0 - inv_var_weight) * density_comp
-    return max(density, 0.0), total
-
-
-def _compute_ref_gdna_densities(
-    t_sense: np.ndarray,
-    t_anti: np.ndarray,
-    t_exonic: np.ndarray,
-    t_refs: np.ndarray,
-    strand_spec: float,
-    intergenic_density: float,
-    global_density: float,
-    k_ref: float,
-) -> dict[str, float]:
-    """Compute per-reference gDNA densities shrunk toward global.
-
-    Returns a dict mapping reference name to the shrunk gDNA density (reads/bp).
-    """
-    ref_sense: dict[str, float] = defaultdict(float)
-    ref_anti: dict[str, float] = defaultdict(float)
-    ref_exonic: dict[str, float] = defaultdict(float)
-    for t_idx in range(len(t_sense)):
-        ref = str(t_refs[t_idx])
-        ref_sense[ref] += t_sense[t_idx]
-        ref_anti[ref] += t_anti[t_idx]
-        ref_exonic[ref] += t_exonic[t_idx]
-
-    ref_shrunk: dict[str, float] = {}
-    for ref in ref_sense:
-        density, evidence = compute_gdna_density_hybrid(
-            ref_sense[ref],
-            ref_anti[ref],
-            ref_exonic[ref],
-            strand_spec,
-            intergenic_density,
-        )
-        shrink_weight = evidence / (evidence + k_ref) if (evidence + k_ref) > 0 else 0.0
-        ref_shrunk[ref] = shrink_weight * density + (1.0 - shrink_weight) * global_density
-
-    return ref_shrunk
-
-
-def _compute_per_locus_gdna_densities(
-    loci: list,
-    t_sense: np.ndarray,
-    t_anti: np.ndarray,
-    t_exonic: np.ndarray,
-    t_refs: np.ndarray,
-    strand_spec: float,
-    intergenic_density: float,
-    ref_shrunk: dict[str, float],
-    global_density: float,
-) -> tuple[list[float], list[float], list[float], list[float]]:
-    """Compute per-locus gDNA densities and their parent reference densities.
-
-    Returns (locus_densities, locus_evidence, locus_parents, locus_exonic_bp).
-    """
-    locus_densities: list[float] = []
-    locus_evidence: list[float] = []
-    locus_parents: list[float] = []
-    locus_exonic_bp: list[float] = []
-
-    for locus in loci:
-        t_arr = locus.transcript_indices
-        locus_sense = float(t_sense[t_arr].sum())
-        locus_anti = float(t_anti[t_arr].sum())
-        locus_bp = float(t_exonic[t_arr].sum())
-
-        locus_density, locus_n = compute_gdna_density_hybrid(
-            locus_sense,
-            locus_anti,
-            locus_bp,
-            strand_spec,
-            intergenic_density,
-        )
-
-        ref_counts: dict[str, float] = defaultdict(float)
-        for t_idx in t_arr:
-            ref = str(t_refs[int(t_idx)])
-            ref_counts[ref] += t_sense[int(t_idx)] + t_anti[int(t_idx)]
-        if ref_counts:
-            primary_ref = max(ref_counts, key=ref_counts.get)
-        elif len(t_arr) > 0:
-            primary_ref = str(t_refs[int(t_arr[0])])
-        else:
-            primary_ref = ""
-
-        locus_densities.append(locus_density)
-        locus_evidence.append(locus_n)
-        locus_parents.append(ref_shrunk.get(primary_ref, global_density))
-        locus_exonic_bp.append(locus_bp)
-
-    return locus_densities, locus_evidence, locus_parents, locus_exonic_bp
-
-
-def compute_eb_gdna_priors(
+def compute_gdna_locus_gammas(
     loci: list[Locus],
-    em_data: ScoredFragments,
-    estimator: AbundanceEstimator,
     index: TranscriptIndex,
-    strand_models: StrandModels,
-    *,
-    intergenic_density: float = 0.0,
-    kappa_ref: float | None = None,
-    kappa_locus: float | None = None,
-    mom_min_evidence_ref: float = 50.0,
-    mom_min_evidence_locus: float = 30.0,
-    kappa_min: float = 2.0,
-    kappa_max: float = 200.0,
-    kappa_fallback: float = 5.0,
-    kappa_min_obs: int = 20,
-) -> list[float]:
-    """Compute empirical Bayes gDNA initialization per locus.
+    calibration: "GDNACalibration",
+) -> np.ndarray:
+    """Aggregate calibration region posteriors per locus.
 
-    Hierarchical weighted shrinkage: locus → reference → global.
+    For each locus, finds overlapping calibration regions via
+    ``index.region_cr`` (cgranges) and computes a fragment-weighted
+    aggregate gDNA posterior:
 
-    Uses a hybrid density + strand signal for gDNA density estimation
-    (reads/bp) at each hierarchical level (see
-    :func:`compute_gdna_density_hybrid`). Final init is
-    ``gdna_init = shrunk_density × L_locus`` — completely decoupled
-    from mRNA expression level.
+        γ_locus = Σ(γ_r × n_r) / Σ(n_r)
 
-    When ``kappa_ref`` or ``kappa_locus`` is ``None``, the shrinkage
-    concentration is auto-estimated via Method of Moments using
-    :func:`~rigel.estimator.estimate_kappa`.
-
-    Parameters
-    ----------
-    loci : list[Locus]
-    em_data : ScoredFragments
-    estimator : AbundanceEstimator
-    index : TranscriptIndex
-    strand_models : StrandModels
-    intergenic_density : float
-        Background gDNA density (frags / bp) from intergenic regions.
-        Pass 0.0 to fall back to strand-only estimation.
-    kappa_ref : float or None
-        Shrinkage pseudo-count for reference → global.  ``None`` (default)
-        auto-estimates via Method of Moments.
-    kappa_locus : float or None
-        Shrinkage pseudo-count for locus → ref.  ``None`` (default)
-        auto-estimates via Method of Moments.
-    mom_min_evidence_ref : float
-        Minimum evidence for a reference sequence to contribute to MoM κ_ref.
-    mom_min_evidence_locus : float
-        Minimum evidence for a locus to contribute to MoM κ_locus.
-    kappa_min, kappa_max : float
-        Clamps for MoM-estimated κ values.
-    kappa_fallback : float
-        Fallback κ when too few units pass the evidence filter.
-    kappa_min_obs : int
-        Minimum number of units for MoM; fewer triggers fallback.
+    Falls back to ``calibration.mixing_proportion`` (global π) when no
+    regions overlap a locus.
 
     Returns
     -------
-    list[float]
-        gDNA init count per locus (same order as ``loci``).
+    locus_gammas : np.ndarray, shape (n_loci,), float64 ∈ [0, 1]
     """
-    strand_spec = strand_models.strand_specificity
-    # Fan out per-nRNA unspliced counts to per-transcript for gDNA EB.
-    # Divide by fan count so that summing across transcripts sharing an
-    # nRNA gives the original per-nRNA total (no double-counting).
-    if estimator._t_to_nrna is not None:
-        t_to_nrna = estimator._t_to_nrna
-        fan_counts = np.bincount(t_to_nrna, minlength=estimator.num_nrna).astype(np.float64)
-        fan_counts = np.maximum(fan_counts, 1.0)
-        t_sense = estimator.transcript_unspliced_sense[t_to_nrna] / fan_counts[t_to_nrna]
-        t_anti = estimator.transcript_unspliced_antisense[t_to_nrna] / fan_counts[t_to_nrna]
-    else:
-        t_sense = estimator.transcript_unspliced_sense
-        t_anti = estimator.transcript_unspliced_antisense
+    n_loci = len(loci)
+    locus_gammas = np.empty(n_loci, dtype=np.float64)
+
+    region_gamma = calibration.region_posteriors
+    region_n = calibration.region_n_total
+    fallback = calibration.mixing_proportion
+
+    # Use cgranges for spatial overlap if available
+    region_cr = getattr(index, "region_cr", None)
+    if region_cr is None or region_gamma is None or region_n is None:
+        locus_gammas[:] = fallback
+        return locus_gammas
+
     t_refs = index.t_df["ref"].values
-    t_exonic = index.t_df["length"].values.astype(np.float64)
+    t_starts = index.t_df["start"].values
+    t_ends = index.t_df["end"].values
 
-    # --- Global level (hybrid density+strand) ---
-    total_sense = float(t_sense.sum())
-    total_anti = float(t_anti.sum())
-    total_exonic_bp = float(t_exonic.sum())
-    global_density, global_n = compute_gdna_density_hybrid(
-        total_sense,
-        total_anti,
-        total_exonic_bp,
-        strand_spec,
-        intergenic_density,
-    )
+    for li, locus in enumerate(loci):
+        t_arr = locus.transcript_indices
 
-    # --- Reference level: κ estimation ---
-    kappa_params = dict(
-        kappa_min=kappa_min,
-        kappa_max=kappa_max,
-        kappa_fallback=kappa_fallback,
-        kappa_min_obs=kappa_min_obs,
-    )
-    if kappa_ref is None:
-        # Need raw reference-level densities for MoM estimation before shrinking
-        ref_sense: dict[str, float] = defaultdict(float)
-        ref_anti: dict[str, float] = defaultdict(float)
-        ref_exonic: dict[str, float] = defaultdict(float)
-        for t_idx in range(len(t_sense)):
-            ref = str(t_refs[t_idx])
-            ref_sense[ref] += t_sense[t_idx]
-            ref_anti[ref] += t_anti[t_idx]
-            ref_exonic[ref] += t_exonic[t_idx]
-        ref_density_arr = np.empty(len(ref_sense), dtype=np.float64)
-        ref_n_arr = np.empty(len(ref_sense), dtype=np.float64)
-        for i, ref in enumerate(ref_sense):
-            density, evidence = compute_gdna_density_hybrid(
-                ref_sense[ref],
-                ref_anti[ref],
-                ref_exonic[ref],
-                strand_spec,
-                intergenic_density,
-            )
-            ref_density_arr[i] = density
-            ref_n_arr[i] = evidence
-        k_ref = estimate_kappa(
-            ref_density_arr,
-            ref_n_arr,
-            mom_min_evidence_ref,
-            **kappa_params,
-        )
-        logger.debug(f"gDNA κ_ref (MoM auto): {k_ref:.1f}")
-    else:
-        k_ref = kappa_ref
+        wsum = 0.0
+        nsum = 0.0
+        for ref, start, end in _merged_intervals(t_arr, t_refs, t_starts, t_ends):
+            for _s, _e, rid in region_cr.overlap(ref, start, end):
+                n_r = float(region_n[rid])
+                wsum += float(region_gamma[rid]) * n_r
+                nsum += n_r
 
-    logger.info(
-        f"gDNA EB: global_density={global_density:.6g} reads/bp "
-        f"(N={global_n:.0f}), κ_ref={k_ref:.1f}"
-    )
+        locus_gammas[li] = wsum / nsum if nsum > 0.0 else fallback
 
-    # --- Reference level: shrink toward global ---
-    ref_shrunk = _compute_ref_gdna_densities(
-        t_sense,
-        t_anti,
-        t_exonic,
-        t_refs,
-        strand_spec,
-        intergenic_density,
-        global_density,
-        k_ref,
-    )
-
-    # --- Per-locus level ---
-    locus_densities, locus_evidence, locus_parents, locus_bp = _compute_per_locus_gdna_densities(
-        loci,
-        t_sense,
-        t_anti,
-        t_exonic,
-        t_refs,
-        strand_spec,
-        intergenic_density,
-        ref_shrunk,
-        global_density,
-    )
-
-    # MoM κ for locus → ref shrinkage
-    if kappa_locus is None:
-        locus_density_arr = np.array(locus_densities, dtype=np.float64)
-        locus_n_arr = np.array(locus_evidence, dtype=np.float64)
-        k_locus = estimate_kappa(
-            locus_density_arr,
-            locus_n_arr,
-            mom_min_evidence_locus,
-            **kappa_params,
-        )
-        logger.debug(f"gDNA κ_locus (MoM auto): {k_locus:.1f}")
-    else:
-        k_locus = kappa_locus
-
-    # --- Diagnostic logging ---
-    locus_density_arr = np.array(locus_densities, dtype=np.float64)
-    n_zero_gdna = int(np.sum(locus_density_arr == 0.0))
-    n_high_gdna = int(np.sum(locus_density_arr >= 0.001))
-    median_locus_density = float(np.median(locus_density_arr)) if len(locus_densities) > 0 else 0.0
-    logger.info(
-        f"gDNA EB: κ_locus={k_locus:.1f}, "
-        f"median_locus_density={median_locus_density:.6g}, "
-        f"n_zero={n_zero_gdna}/{len(loci)}, "
-        f"n_high(≥0.001)={n_high_gdna}/{len(loci)}"
-    )
-
-    # Shrink locus toward parent reference and compute gdna_init
-    gdna_inits: list[float] = []
-    for i, locus in enumerate(loci):
-        locus_n = locus_evidence[i]
-        locus_density = locus_densities[i]
-        parent_density = locus_parents[i]
-
-        shrink_weight = locus_n / (locus_n + k_locus) if (locus_n + k_locus) > 0 else 0.0
-        shrunk_density = shrink_weight * locus_density + (1.0 - shrink_weight) * parent_density
-
-        # gDNA init = shrunk_density × exonic_bp (decoupled from mRNA expression)
-        gdna_init = shrunk_density * locus_bp[i]
-        gdna_inits.append(max(gdna_init, 0.0))
-
-    return gdna_inits
+    return locus_gammas

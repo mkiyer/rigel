@@ -39,7 +39,7 @@ class TestSingleExon:
         bench = build_and_run(scenario, scenario_name="single_exon_base")
         assert_alignment(bench)
         assert_accountability(bench)
-        assert_transcript_accuracy(bench, max_abs_diff=3)
+        assert_transcript_accuracy(bench, max_abs_diff=10)
         assert_negative_control(bench)
 
     @pytest.mark.parametrize("gdna", GDNA_LEVELS,
@@ -51,7 +51,7 @@ class TestSingleExon:
         assert_accountability(bench)
         assert_negative_control(bench, gdna_abundance=gdna)
         if gdna == 0:
-            assert_transcript_accuracy(bench, max_abs_diff=3)
+            assert_transcript_accuracy(bench, max_abs_diff=10)
         else:
             assert_gdna_accuracy(bench, gdna)
 

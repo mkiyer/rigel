@@ -270,8 +270,7 @@ em_mode: vbem
 nrna_sparsity_alpha: 0.9
 gdna_prior_scale: 1.0
 
-gdna_kappa_ref: null
-gdna_kappa_locus: null
+gdna_kappa_shrink: null
 
 threads: 16
 seed: 42

@@ -1,2 +1,2 @@
 locus_id	ref	n_transcripts	n_genes	n_em_fragments	mrna	nrna	gdna	gdna_rate	gdna_init
-0	golden_as_cont	2	2	1000	1000.0	0.0	4.91036215197112e-298	4.91036215197112e-301	0.0
+0	golden_as_cont	2	2	1000	999.7266075483931	0.0	0.27339245160797854	0.00027339245160797824	1.0

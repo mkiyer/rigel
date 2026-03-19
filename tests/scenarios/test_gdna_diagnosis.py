@@ -15,10 +15,6 @@ Goal: understand why the gDNA model siphons reads from mRNA and nRNA.
 """
 
 import logging
-import textwrap
-
-import numpy as np
-import pytest
 
 from rigel.config import (
     BamScanConfig,
@@ -27,18 +23,6 @@ from rigel.config import (
 )
 from rigel.pipeline import run_pipeline
 from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
-from rigel.locus import (
-    build_loci,
-    build_locus_em_data,
-    compute_nrna_init,
-    compute_gdna_density_from_strand,
-    compute_gdna_density_hybrid,
-    compute_eb_gdna_priors,
-)
-from rigel.estimator import (
-    compute_global_gdna_density,
-    estimate_kappa,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +127,6 @@ def _collect_diagnostics(pr, result, bench, label):
     """Extract and format all diagnostic information."""
     est = pr.estimator
     stats = pr.stats
-    idx = result.index
 
     diag = {}
 
@@ -191,11 +174,6 @@ def _collect_diagnostics(pr, result, bench, label):
             est.transcript_intronic_antisense[ti]
         )
 
-    # --- nRNA init ---
-    for t in result.transcripts:
-        ti = t.t_index
-        diag[f"nrna_init_{t.t_id}"] = float(est.nrna_init[ti])
-
     # --- Transcript geometry ---
     for t in result.transcripts:
         ti = t.t_index
@@ -242,7 +220,7 @@ def _print_diagnostics(diag, label=""):
         f"  gDNA pipeline: {diag['pipeline_gdna']:.1f}",
         f"  nRNA pipeline: {diag['pipeline_nrna']:.1f}",
         "",
-        f"--- Stats ---",
+        "--- Stats ---",
         f"  n_fragments: {diag['n_fragments']}",
         f"  n_intergenic: {diag['n_intergenic']}",
         f"  n_chimeric: {diag['n_chimeric']}",
@@ -261,7 +239,7 @@ def _print_diagnostics(diag, label=""):
     for key in sorted(diag.keys()):
         if key.startswith("unambig_counts_"):
             t_id = key.replace("unambig_counts_", "")
-            lines.append(f"")
+            lines.append("")
             lines.append(f"--- Transcript {t_id} ---")
             lines.append(f"  unambig_counts: {diag[key]}")
             lines.append(
@@ -276,9 +254,6 @@ def _print_diagnostics(diag, label=""):
                 f"  geometry: exonic_len={diag.get(f'exonic_length_{t_id}', '?')}, "
                 f"span={diag.get(f'transcript_span_{t_id}', '?')}, "
                 f"eff_len={diag.get(f't_eff_len_{t_id}', '?')}"
-            )
-            lines.append(
-                f"  nrna_init: {diag.get(f'nrna_init_{t_id}', '?')}"
             )
 
     # Locus results

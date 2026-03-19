@@ -431,6 +431,7 @@ public:
     ~FragmentResolver() {
         if (cr_) cr_destroy(cr_);
         if (sj_cr_) cr_destroy(sj_cr_);
+        if (region_cr_) cr_destroy(region_cr_);
     }
 
     // Non-copyable
@@ -535,6 +536,39 @@ public:
     void set_transcript_strands(const std::vector<int32_t>& t_strand) {
         t_strand_arr_ = t_strand;
     }
+
+    // --- Region partition index (for gDNA calibration) ---
+    cgranges_t* region_cr_ = nullptr;
+    int32_t n_regions_ = 0;
+
+    void build_region_index(
+        const std::vector<std::string>& refs,
+        const std::vector<int32_t>& starts,
+        const std::vector<int32_t>& ends,
+        const std::vector<int32_t>& ids)
+    {
+        size_t n = refs.size();
+        if (n == 0) return;
+
+        // Ensure ref names are registered.
+        for (const auto& ref : refs) get_or_create_ref_id(ref);
+
+        if (region_cr_) { cr_destroy(region_cr_); region_cr_ = nullptr; }
+
+        region_cr_ = cr_init();
+        for (size_t i = 0; i < n; i++)
+            cr_add(region_cr_, refs[i].c_str(), starts[i], ends[i], ids[i]);
+        cr_index(region_cr_);
+
+        // n_regions = max(ids) + 1
+        int32_t max_id = 0;
+        for (size_t i = 0; i < n; i++)
+            max_id = std::max(max_id, ids[i]);
+        n_regions_ = max_id + 1;
+    }
+
+    bool has_region_index() const { return region_cr_ != nullptr; }
+    int32_t n_regions() const { return n_regions_; }
 
     nb::dict get_ref_to_id() const {
         nb::dict d;
@@ -1085,6 +1119,208 @@ public:
             return nb::none();
 
         return nb::cast(ResolvedFragment::from_core(cr));
+    }
+};
+
+// ================================================================
+// RegionAccumulator — per-thread accumulator for region evidence
+// ================================================================
+//
+// Collects per-region fragment counts (fractional overlap) and
+// fragment-length observations for gDNA calibration, accumulated
+// during the BAM scan alongside the existing FragmentAccumulator.
+//
+// Each worker thread has its own RegionAccumulator.  After the scan,
+// worker accumulators are merged via element-wise addition (counts)
+// and concatenation (FL observations).
+
+struct RegionAccumulator {
+    // Per-region counts: [n_regions × 4] row-major float64.
+    // Column order: unspliced_pos(0), unspliced_neg(1),
+    //               spliced_pos(2), spliced_neg(3).
+    std::vector<double> counts;
+    int32_t n_regions = 0;
+
+    // Fragment-length observations for unspliced, single-region,
+    // unique-mapper fragments.
+    std::vector<int32_t> fl_region_ids;
+    std::vector<int32_t> fl_frag_lens;
+
+    // cgranges for region overlap queries (BORROWED, not owned).
+    cgranges_t* region_cr = nullptr;
+
+    // Per-call scratch buffer for cgranges queries.
+    int64_t* rgn_buf = nullptr;
+    int64_t  rgn_buf_cap = 0;
+
+    // Reference name lookup (BORROWED from FragmentResolver).
+    const std::vector<std::string>* id_to_ref = nullptr;
+
+    RegionAccumulator() = default;
+
+    ~RegionAccumulator() {
+        free(rgn_buf);
+    }
+
+    // Non-copyable, movable.
+    RegionAccumulator(const RegionAccumulator&) = delete;
+    RegionAccumulator& operator=(const RegionAccumulator&) = delete;
+
+    RegionAccumulator(RegionAccumulator&& o) noexcept
+        : counts(std::move(o.counts)),
+          n_regions(o.n_regions),
+          fl_region_ids(std::move(o.fl_region_ids)),
+          fl_frag_lens(std::move(o.fl_frag_lens)),
+          region_cr(o.region_cr),
+          rgn_buf(o.rgn_buf), rgn_buf_cap(o.rgn_buf_cap),
+          id_to_ref(o.id_to_ref)
+    {
+        o.region_cr = nullptr;
+        o.rgn_buf = nullptr;
+        o.rgn_buf_cap = 0;
+        o.id_to_ref = nullptr;
+    }
+
+    RegionAccumulator& operator=(RegionAccumulator&& o) noexcept {
+        if (this != &o) {
+            free(rgn_buf);
+            counts = std::move(o.counts);
+            n_regions = o.n_regions;
+            fl_region_ids = std::move(o.fl_region_ids);
+            fl_frag_lens = std::move(o.fl_frag_lens);
+            region_cr = o.region_cr;
+            rgn_buf = o.rgn_buf;
+            rgn_buf_cap = o.rgn_buf_cap;
+            id_to_ref = o.id_to_ref;
+            o.region_cr = nullptr;
+            o.rgn_buf = nullptr;
+            o.rgn_buf_cap = 0;
+            o.id_to_ref = nullptr;
+        }
+        return *this;
+    }
+
+    void init(int32_t nr, cgranges_t* cr,
+              const std::vector<std::string>* ref_names) {
+        n_regions = nr;
+        region_cr = cr;
+        id_to_ref = ref_names;
+        counts.assign(static_cast<size_t>(nr) * 4, 0.0);
+    }
+
+    bool enabled() const { return region_cr != nullptr && n_regions > 0; }
+
+    /// Accumulate fractional region evidence for one fragment.
+    ///
+    /// @param exons        Aligned exon blocks from AssembledFragment.
+    /// @param is_spliced   True if fragment has intron (N) operations.
+    /// @param is_unique    True if fragment is a unique mapper (NH == 1).
+    void accumulate(
+        const std::vector<ExonBlock>& exons,
+        bool is_spliced,
+        bool is_unique)
+    {
+        if (exons.empty() || !enabled()) return;
+
+        // Determine fragment strand — must be unanimous, non-chimeric.
+        int32_t frag_strand = 0;
+        int32_t frag_ref = exons[0].ref_id;
+        bool mixed_strand = false;
+        bool mixed_ref = false;
+        for (const auto& eb : exons) {
+            frag_strand |= eb.strand;
+            if (eb.ref_id != frag_ref) mixed_ref = true;
+        }
+        // Chimeric: multiple strands or multiple references.
+        if (mixed_ref) return;
+        if (frag_strand != STRAND_POS && frag_strand != STRAND_NEG) return;
+
+        // Total aligned length (denominator for fractional counting).
+        int32_t total_aligned = 0;
+        for (const auto& eb : exons)
+            total_aligned += eb.end - eb.start;
+        if (total_aligned <= 0) return;
+
+        // Column index: unspliced=0,1  spliced=2,3  POS=+0, NEG=+1
+        int col = (is_spliced ? 2 : 0) + (frag_strand == STRAND_NEG ? 1 : 0);
+
+        // Track region hits for single-region FL tabulation.
+        int32_t single_region_id = -1;
+        int n_region_hits = 0;
+
+        const char* ref_str = (frag_ref >= 0 &&
+            frag_ref < static_cast<int32_t>(id_to_ref->size()))
+            ? (*id_to_ref)[frag_ref].c_str() : nullptr;
+        if (!ref_str) return;
+
+        for (const auto& eb : exons) {
+            int64_t n_ovlp = cr_overlap(
+                region_cr, ref_str, eb.start, eb.end,
+                &rgn_buf, &rgn_buf_cap);
+
+            for (int64_t j = 0; j < n_ovlp; j++) {
+                cr_intv_t* iv = &region_cr->r[rgn_buf[j]];
+                int32_t region_id = static_cast<int32_t>(iv->label);
+                if (region_id < 0 || region_id >= n_regions) continue;
+
+                int32_t iv_start = cr_st(iv);
+                int32_t iv_end   = cr_en(iv);
+                int32_t ovlp_start = std::max(eb.start, iv_start);
+                int32_t ovlp_end = std::min(eb.end, iv_end);
+                int32_t overlap_bp = ovlp_end - ovlp_start;
+                if (overlap_bp <= 0) continue;
+
+                double frac = static_cast<double>(overlap_bp)
+                            / static_cast<double>(total_aligned);
+                counts[static_cast<size_t>(region_id) * 4 + col] += frac;
+
+                // Track for single-region check.
+                if (n_region_hits == 0) {
+                    single_region_id = region_id;
+                } else if (region_id != single_region_id) {
+                    single_region_id = -1;  // multi-region
+                }
+                n_region_hits++;
+            }
+        }
+
+        // Fragment-length observation: unspliced, single-region, unique.
+        if (!is_spliced && is_unique && n_region_hits > 0
+            && single_region_id >= 0) {
+            int32_t gstart = exons[0].start;
+            int32_t gend = exons[0].end;
+            for (size_t i = 1; i < exons.size(); i++) {
+                gstart = std::min(gstart, exons[i].start);
+                gend = std::max(gend, exons[i].end);
+            }
+            int32_t frag_len = gend - gstart;
+            if (frag_len > 0) {
+                fl_region_ids.push_back(single_region_id);
+                fl_frag_lens.push_back(frag_len);
+            }
+        }
+    }
+
+    /// Merge another accumulator into this one (thread merge).
+    void merge_from(RegionAccumulator& other) {
+        if (other.n_regions == 0) return;
+
+        // Counts: element-wise addition.
+        if (n_regions == 0) {
+            counts = std::move(other.counts);
+            n_regions = other.n_regions;
+        } else {
+            for (size_t i = 0; i < counts.size(); i++)
+                counts[i] += other.counts[i];
+        }
+
+        // FL observations: concatenation.
+        fl_region_ids.insert(fl_region_ids.end(),
+                             other.fl_region_ids.begin(),
+                             other.fl_region_ids.end());
+        fl_frag_lens.insert(fl_frag_lens.end(),
+                            other.fl_frag_lens.begin(),
+                            other.fl_frag_lens.end());
     }
 };
 

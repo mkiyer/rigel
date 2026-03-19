@@ -65,17 +65,13 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.keep_duplicates is None
 
-    def test_em_prior_alpha_default_none(self):
+    def test_prior_pseudocount_default_none(self):
         args = _parse_quant()
-        assert args.em_prior_alpha is None
+        assert args.prior_pseudocount is None
 
     def test_config_default_none(self):
         args = _parse_quant()
         assert args.config is None
-
-    def test_gdna_kappa_min_default_none(self):
-        args = _parse_quant()
-        assert args.gdna_kappa_min is None
 
 
 # ---------------------------------------------------------------------------
@@ -104,31 +100,6 @@ class TestBooleanFlags:
 
 
 # ---------------------------------------------------------------------------
-# Advanced parameters
-# ---------------------------------------------------------------------------
-
-
-class TestAdvancedParams:
-    """Advanced parameters are parsed correctly."""
-
-    def test_gdna_kappa_min(self):
-        args = _parse_quant("--gdna-kappa-min", "3.0")
-        assert args.gdna_kappa_min == 3.0
-
-    def test_gdna_kappa_max(self):
-        args = _parse_quant("--gdna-kappa-max", "150.0")
-        assert args.gdna_kappa_max == 150.0
-
-    def test_gdna_kappa_fallback(self):
-        args = _parse_quant("--gdna-kappa-fallback", "10")
-        assert args.gdna_kappa_fallback == 10.0
-
-    def test_gdna_kappa_min_obs(self):
-        args = _parse_quant("--gdna-kappa-min-obs", "50")
-        assert args.gdna_kappa_min_obs == 50
-
-
-# ---------------------------------------------------------------------------
 # _resolve_quant_args: CLI > YAML > defaults
 # ---------------------------------------------------------------------------
 
@@ -140,52 +111,44 @@ class TestResolveQuant:
         args = _parse_quant()
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is True
-        assert args.em_prior_alpha == 0.01
-        assert args.gdna_kappa_min == 2.0
-        assert args.gdna_kappa_max == 200.0
+        assert args.prior_pseudocount == 1.0
         assert args.sj_strand_tag == ["auto"]
 
     def test_cli_overrides_default(self):
-        args = _parse_quant("--no-include-multimap", "--gdna-kappa-min", "3.0")
+        args = _parse_quant("--no-include-multimap")
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is False
-        assert args.gdna_kappa_min == 3.0
 
     def test_yaml_overrides_default(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text(textwrap.dedent("""\
-            em_prior_alpha: 0.05
-            gdna_kappa_min: 3.0
+            prior_pseudocount: 2.0
             include_multimap: false
         """))
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.em_prior_alpha == 0.05
-        assert args.gdna_kappa_min == 3.0
+        assert args.prior_pseudocount == 2.0
         assert args.include_multimap is False
 
     def test_cli_overrides_yaml(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text(textwrap.dedent("""\
-            em_prior_alpha: 0.05
-            gdna_kappa_min: 3.0
+            prior_pseudocount: 2.0
         """))
         args = _parse_quant(
             "--config", str(cfg),
-            "--em-prior-alpha", "0.1",
+            "--prior-pseudocount", "3.0",
         )
         _resolve_quant_args(args, _build_quant_defaults())
         # CLI wins
-        assert args.em_prior_alpha == 0.1
-        # YAML wins over default
-        assert args.gdna_kappa_min == 3.0
+        assert args.prior_pseudocount == 3.0
 
     def test_yaml_hyphens_normalised(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("gdna-kappa-min: 4.0\n")
+        cfg.write_text("prior-pseudocount: 2.0\n")
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.gdna_kappa_min == 4.0
+        assert args.prior_pseudocount == 2.0
 
     def test_yaml_unknown_keys_logged(self, tmp_path, caplog):
         """Unknown YAML keys are logged as warnings, not raised."""

@@ -112,6 +112,17 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands,
              nb::arg("t_strand"),
              "Set per-transcript strand array (direct lookup, no gene indirection).")
+        .def("build_region_index", &FragmentResolver::build_region_index,
+             nb::arg("refs"), nb::arg("starts"), nb::arg("ends"), nb::arg("ids"),
+             "Build the region partition cgranges index for gDNA calibration.\n\n"
+             "Parameters\n"
+             "----------\n"
+             "refs : list[str]\n"
+             "    Reference names per region.\n"
+             "starts, ends : list[int]\n"
+             "    0-based half-open coordinates.\n"
+             "ids : list[int]\n"
+             "    Region IDs (must be 0-indexed sequential).\n")
         ;
 
     // --- Expose C++ enum constants as module-level attributes ---

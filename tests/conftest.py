@@ -9,7 +9,11 @@ import textwrap
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
+from rigel.scored_fragments import Locus, ScoredFragments
+from rigel.index import TranscriptIndex
+from rigel.splice import SpliceStrandCol
 
 # ---------------------------------------------------------------------------
 # Global pytest options
@@ -21,16 +25,6 @@ def pytest_addoption(parser):
         "--update-golden", action="store_true", default=False,
         help="Regenerate golden output files instead of comparing.",
     )
-import pandas as pd
-
-from rigel.splice import SpliceStrandCol
-from rigel.estimator import (
-    AbundanceEstimator,
-    Locus,
-    ScoredFragments,
-)
-from rigel.native import EM_PRIOR_EPSILON
-from rigel.index import TranscriptIndex
 
 # ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)
@@ -165,16 +159,15 @@ def _make_locus_em_data(
     count_cols_per_unit=None,
     num_transcripts=None,
     rc=None,
-    nrna_init=None,
-    gdna_init=0.0,
     include_nrna=False,
     include_gdna=False,
     nrna_log_lik=-2.0,
     gdna_log_lik=0.0,
+    locus_gamma=0.1,
 ):
-    """Build (ScoredFragments, [Locus], gdna_inits, index) for batch EM tests.
+    """Build (ScoredFragments, [Locus], locus_gammas, index) for batch EM tests.
 
-    Returns a tuple (em_data, loci, gdna_inits, index) suitable for
+    Returns a tuple (em_data, loci, locus_gammas, index) suitable for
     ``run_batch_locus_em()``.
 
     Parameters
@@ -186,10 +179,9 @@ def _make_locus_em_data(
         ``_transcript_spans`` and ``_exonic_lengths`` if they are None.
     include_nrna : bool
         If True, units are marked as unspliced (``is_spliced=False``)
-        so the batch C++ adds nRNA shadow candidates, and
-        ``nrna_init`` on the estimator is populated.
+        so the batch C++ adds nRNA shadow candidates.
     include_gdna : bool
-        If True, ``gdna_inits > 0`` and ``gdna_log_liks`` are finite
+        If True, ``locus_gamma > 0`` and ``gdna_log_liks`` are finite
         so the batch C++ adds a gDNA component.
     """
     if num_transcripts is None:
@@ -275,16 +267,16 @@ def _make_locus_em_data(
     )
     loci = [locus]
 
-    gdna_inits = np.array([gdna_init if include_gdna else 0.0],
+    locus_gammas = np.array([locus_gamma if include_gdna else 0.0],
                           dtype=np.float64)
 
     index = _MockBatchIndex(n_t)
 
     # Ensure estimator geometry arrays are set if rc is provided
     if rc is not None:
-        _ensure_estimator_geometry(rc, nrna_init, include_nrna)
+        _ensure_estimator_geometry(rc)
 
-    return em_data, loci, gdna_inits, index
+    return em_data, loci, locus_gammas, index
 
 
 class _MockBatchIndex:
@@ -303,32 +295,30 @@ class _MockBatchIndex:
         })
 
 
-def _ensure_estimator_geometry(rc, nrna_init=None, include_nrna=False):
+def _ensure_estimator_geometry(rc):
     """Set required geometry arrays on estimator if not already set."""
     n_t = rc.num_transcripts
     if rc._transcript_spans is None:
         rc._transcript_spans = np.full(n_t, 10000.0, dtype=np.float64)
     if rc._exonic_lengths is None:
         rc._exonic_lengths = np.full(n_t, 1000.0, dtype=np.float64)
-    if include_nrna and nrna_init is not None:
-        rc.nrna_init[:len(nrna_init)] = nrna_init
 
 
-def _run_and_assign(rc, em_data, loci=None, index=None, gdna_inits=None,
+def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
                     *, em_iterations=10):
     """Run batch locus EM. Returns pool_counts dict.
 
-    Accepts either the new tuple form (em_data, loci, gdna_inits, index)
+    Accepts either the new tuple form (em_data, loci, locus_gammas, index)
     separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
     """
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):
-        em_data, loci, gdna_inits, index = em_data
+        em_data, loci, locus_gammas, index = em_data
 
     _ensure_estimator_geometry(rc)
 
     total_gdna, _locus_mrna, _locus_nrna, _locus_gdna = rc.run_batch_locus_em(
-        loci, em_data, index, gdna_inits,
+        loci, em_data, index, locus_gammas,
         em_iterations=em_iterations,
     )
     rc._gdna_em_total += total_gdna

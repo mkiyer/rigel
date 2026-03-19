@@ -607,16 +607,16 @@ static void vbem_step(
 }
 
 // ================================================================
-// Coverage-weighted warm start + OVR prior
+// Coverage-weighted warm start + unified OVR prior
 // ================================================================
 
 static void compute_ovr_prior_and_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
     const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
-    const double* base_prior,  // [n_components] pre-built per-component prior
-    int           n_t,         // number of mRNA components (OVR applies to [0..n_t))
-    double        gamma,
+    double        locus_gamma,       // calibration gDNA fraction ∈ [0,1]
+    double        total_pseudocount, // C (total prior budget, default 1.0)
+    int           gdna_idx,          // index of gDNA component (-1 if none)
     double*       prior_out,       // [n_components] output
     double*       theta_init_out,  // [n_components] output
     int           n_components)
@@ -626,12 +626,10 @@ static void compute_ovr_prior_and_warm_start(
 
     // Accumulate coverage totals from all equivalence classes
     std::vector<double> coverage_totals(static_cast<size_t>(n_components), 0.0);
-    int n_ambiguous = 0;
 
     for (const auto& ec : ec_data) {
         const int n = ec.n;
         const int k = ec.k;
-        n_ambiguous += n;
         const int32_t* cidx = ec.comp_idx.data();
         const double* wt = ec.wt_flat.data();
 
@@ -653,24 +651,56 @@ static void compute_ovr_prior_and_warm_start(
         }
     }
 
-    // Build prior: base_prior[i] + gamma-scaled OVR (mRNA only)
-    if (n_ambiguous > 0 && gamma > 0.0) {
-        double inv_n = gamma / static_cast<double>(n_ambiguous);
-        for (int i = 0; i < n_components; ++i) {
-            if (eligible[i] <= 0.0) {
-                prior_out[i] = 0.0;
-            } else if (i < n_t) {
-                // mRNA: base_prior + OVR gamma-scaling
-                double ovr_i = coverage_totals[i] * inv_n;
-                prior_out[i] = base_prior[i] + ovr_i;
-            } else {
-                // nRNA / gDNA: base_prior only (no OVR)
-                prior_out[i] = base_prior[i];
-            }
+    // --- Unified OVR prior: budget-constrained distribution ---
+
+    // Compute total RNA coverage (excluding gDNA and ineligible)
+    double total_rna_coverage = 0.0;
+    int n_rna_eligible = 0;
+    for (int i = 0; i < n_components; ++i) {
+        if (eligible[i] > 0.0 && i != gdna_idx) {
+            total_rna_coverage += coverage_totals[i];
+            ++n_rna_eligible;
         }
-    } else {
-        for (int i = 0; i < n_components; ++i) {
-            prior_out[i] = (eligible[i] > 0.0) ? base_prior[i] : 0.0;
+    }
+
+    double rna_budget = (1.0 - locus_gamma) * total_pseudocount;
+    double gdna_alpha = std::max(locus_gamma * total_pseudocount,
+                                 EM_LOG_EPSILON);
+
+    for (int i = 0; i < n_components; ++i) {
+        if (eligible[i] <= 0.0) {
+            prior_out[i] = 0.0;
+        } else if (i == gdna_idx) {
+            prior_out[i] = gdna_alpha;
+        } else if (total_rna_coverage > 0.0) {
+            prior_out[i] = std::max(
+                rna_budget * coverage_totals[i] / total_rna_coverage,
+                EM_LOG_EPSILON);
+        } else if (n_rna_eligible > 0) {
+            // No coverage data — distribute uniformly
+            prior_out[i] = std::max(rna_budget / n_rna_eligible,
+                                    EM_LOG_EPSILON);
+        } else {
+            prior_out[i] = EM_LOG_EPSILON;
+        }
+    }
+
+    // --- gDNA warm-start override ---
+    if (gdna_idx >= 0 && gdna_idx < n_components
+        && eligible[gdna_idx] > 0.0)
+    {
+        double total_theta = 0.0;
+        for (int i = 0; i < n_components; ++i)
+            total_theta += theta_init_out[i];
+
+        double others = total_theta - theta_init_out[gdna_idx];
+        if (others > 0.0 && locus_gamma < 1.0 - 1e-10) {
+            theta_init_out[gdna_idx] =
+                (locus_gamma / std::max(1.0 - locus_gamma, 1e-10))
+                * others;
+        } else {
+            theta_init_out[gdna_idx] =
+                std::max(locus_gamma * total_theta, EM_LOG_EPSILON);
         }
     }
 }
@@ -974,8 +1004,7 @@ run_locus_em_native(
     f64_1d prior_eligible,
     // Scalar config
     int    n_components,
-    double prior_alpha,
-    double prior_gamma,
+    double total_pseudocount,
     int    max_iterations,
     double convergence_delta,
     bool   use_vbem,
@@ -1014,10 +1043,19 @@ run_locus_em_native(
 
     // 2. Handle empty locus
     if (n_units == 0 || n_candidates == 0) {
+        // Count eligible components for uniform distribution
+        int n_eligible = 0;
+        for (size_t i = 0; i < nc; ++i) {
+            if (pe_ptr[i] > 0.0) ++n_eligible;
+        }
+        double uniform_alpha = (n_eligible > 0)
+            ? std::max(total_pseudocount / n_eligible, EM_LOG_EPSILON)
+            : EM_LOG_EPSILON;
+
         std::vector<double> alpha(nc);
         double total = 0.0;
         for (size_t i = 0; i < nc; ++i) {
-            double p = (pe_ptr[i] > 0.0) ? prior_alpha : 0.0;
+            double p = (pe_ptr[i] > 0.0) ? uniform_alpha : 0.0;
             alpha[i] = unambig_totals[i] + p;
             total += alpha[i];
         }
@@ -1059,15 +1097,15 @@ run_locus_em_native(
     auto ec_data = build_equiv_classes(
         off_ptr, ti_ptr, ll_ptr, cw_ptr, n_units);
 
-    // 5. Coverage-weighted warm start + OVR prior
-    //    (run_locus_em_native uses uniform base_prior = alpha_flat)
-    std::vector<double> base_prior_v(nc, prior_alpha);
+    // 5. Coverage-weighted warm start + unified OVR prior
+    //    (run_locus_em_native: no gDNA component, all budget to RNA)
     std::vector<double> prior(nc);
     std::vector<double> theta_init(nc);
     compute_ovr_prior_and_warm_start(
         ec_data, unambig_totals.data(), pe_ptr,
-        base_prior_v.data(), n_components,  // all mRNA → OVR for all
-        prior_gamma,
+        0.0,               // locus_gamma = 0 (no gDNA)
+        total_pseudocount,
+        -1,                // gdna_idx = -1 (no gDNA)
         prior.data(), theta_init.data(), n_components);
 
     // 6. Run SQUAREM
@@ -1098,7 +1136,7 @@ run_locus_em_native(
 }
 
 // ================================================================
-// Batch locus EM — Phase 2A: single C++ call for all loci
+// Batch locus EM — single C++ call for all loci
 // ================================================================
 //
 // Replaces the Python per-locus for-loop:
@@ -1167,7 +1205,7 @@ static void extract_locus_sub_problem(
     // Locus definition
     const int32_t* t_arr, int n_t,
     const int32_t* u_arr, int n_u,
-    double gdna_init,
+    double locus_gamma,
     int64_t gdna_span,
     // Global CSR
     const int64_t* g_offsets,
@@ -1185,13 +1223,11 @@ static void extract_locus_sub_problem(
     int32_t nrna_base,
     // Per-transcript data (global arrays, all N_T_TOTAL elements)
     const double*  all_unambig_row_sums,
-    const double*  all_nrna_init,          // [num_nrna] — indexed by global nrna_idx
     const int64_t* all_t_starts,
     const int64_t* all_t_ends,
     const int64_t* all_t_lengths,
     const double*  all_transcript_spans,
     const double*  all_exonic_lengths,
-    double mean_frag,
     // nRNA mapping (global)
     const int32_t* global_t_to_nrna,   // [N_T]: transcript → global nRNA idx
     // Scratch: global→local mapping, caller-owned, reset between calls
@@ -1411,8 +1447,8 @@ static void extract_locus_sub_problem(
     // Prior: EM_PRIOR_EPSILON for eligible, 0.0 for ineligible
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
 
-    // Zero gDNA prior when gdna_init == 0
-    if (gdna_init == 0.0) {
+    // Zero gDNA prior when locus_gamma == 0 (no gDNA predicted)
+    if (locus_gamma == 0.0) {
         sub.prior[sub.gdna_idx] = 0.0;
     }
 
@@ -1623,11 +1659,10 @@ batch_locus_em(
     i32_1d locus_t_flat,       // concatenated transcript indices
     i64_1d locus_u_offsets,    // [n_loci + 1]
     i32_1d locus_u_flat,       // concatenated unit indices
-    f64_1d gdna_inits,         // [n_loci]
+    f64_1d locus_gammas,       // [n_loci] calibration gDNA fraction ∈ [0,1]
     i64_1d gdna_spans,         // [n_loci] pre-computed union genomic footprints
     // --- Per-transcript data ---
     f64_2d unambig_counts,     // [N_T, n_cols]
-    f64_1d nrna_init_arr,
     i64_1d t_starts_arr,
     i64_1d t_ends_arr,
     i64_1d t_lengths_arr,
@@ -1644,13 +1679,9 @@ batch_locus_em(
     f64_1d_mut posterior_sum_out,       // [N_T]
     f64_1d_mut n_assigned_out,         // [N_T]
     // --- EM config ---
-    double mean_frag,
     int    max_iterations,
     double convergence_delta,
-    double prior_alpha,
-    double prior_gamma,
-    double nrna_sparsity_alpha,
-    double gdna_prior_scale,
+    double total_pseudocount,
     bool   use_vbem,
     double prune_threshold,
     double confidence_threshold,
@@ -1680,11 +1711,10 @@ batch_locus_em(
     const int32_t*  lt_fl  = locus_t_flat.data();
     const int64_t*  lu_off = locus_u_offsets.data();
     const int32_t*  lu_fl  = locus_u_flat.data();
-    const double*   gi_ptr = gdna_inits.data();
+    const double*   lg_ptr = locus_gammas.data();
     const int64_t*  gs_ptr = gdna_spans.data();
 
     const double*   uac    = unambig_counts.data();  // [N_T, N_COLS] row-major
-    const double*   nri    = nrna_init_arr.data();
     const int64_t*  ts_ptr = t_starts_arr.data();
     const int64_t*  te_ptr = t_ends_arr.data();
     const int64_t*  tl_ptr = t_lengths_arr.data();
@@ -1819,17 +1849,16 @@ batch_locus_em(
 
             const int32_t* t_arr = lt_fl + t_start;
             const int32_t* u_arr = lu_fl + u_start;
-            double gdna_init = gi_ptr[li];
+            double lg = lg_ptr[li];
 
             // 1. Extract sub-problem
             extract_locus_sub_problem(
-                sub, t_arr, n_t, u_arr, n_u, gdna_init, gs_ptr[li],
+                sub, t_arr, n_t, u_arr, n_u, lg, gs_ptr[li],
                 goff, gti, gll, gcw, gtxs, gtxe, gcc,
                 gis, ggll, ggfp, glti, glcc,
                 nrna_base_index,
-                unambig_row_sums.data(), nri,
+                unambig_row_sums.data(),
                 ts_ptr, te_ptr, tl_ptr, sp_ptr, el_ptr,
-                mean_frag,
                 t2n_ptr,
                 local_map.data(), local_map_size);
 
@@ -1867,24 +1896,14 @@ batch_locus_em(
                 sub.coverage_wts.data(),
                 n_local_units);
 
-            // 6. Tripartite prior + coverage-weighted warm start
-            //    mRNA [0, n_t): alpha + OVR gamma-scaling
-            //    nRNA [n_t, n_t+n_nrna): nrna_sparsity_alpha
-            //    gDNA [gdna_idx]: gdna_prior_scale * gdna_init
-            int gdna_idx = sub.gdna_idx;
-            std::vector<double> base_prior(nc, prior_alpha);
-            for (int i = sub.n_t; i < gdna_idx; ++i)
-                base_prior[i] = nrna_sparsity_alpha;
-            if (gdna_idx >= 0 && gdna_idx < nc)
-                base_prior[gdna_idx] = gdna_prior_scale * gdna_inits.data()[li];
-
+            // 6. Unified OVR prior + coverage-weighted warm start
             std::vector<double> prior(nc);
             std::vector<double> theta_init(nc);
             compute_ovr_prior_and_warm_start(
                 ec_data,
                 sub.unambig_totals.data(),
                 sub.eligible.data(),
-                base_prior.data(), sub.n_t, prior_gamma,
+                lg, total_pseudocount, sub.gdna_idx,
                 prior.data(), theta_init.data(), nc);
 
             // 7. Run unified SQUAREM
@@ -2279,8 +2298,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("effective_lens"),
           nb::arg("prior_eligible"),
           nb::arg("n_components"),
-          nb::arg("prior_alpha"),
-          nb::arg("prior_gamma"),
+          nb::arg("total_pseudocount"),
           nb::arg("max_iterations"),
           nb::arg("convergence_delta"),
           nb::arg("use_vbem"),
@@ -2312,10 +2330,9 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_t_flat"),
           nb::arg("locus_u_offsets"),
           nb::arg("locus_u_flat"),
-          nb::arg("gdna_inits"),
+          nb::arg("locus_gammas"),
           nb::arg("gdna_spans"),
           nb::arg("unambig_counts"),
-          nb::arg("nrna_init"),
           nb::arg("t_starts"),
           nb::arg("t_ends"),
           nb::arg("t_lengths"),
@@ -2329,13 +2346,9 @@ NB_MODULE(_em_impl, m) {
           nb::arg("gdna_locus_counts_out"),
           nb::arg("posterior_sum_out"),
           nb::arg("n_assigned_out"),
-          nb::arg("mean_frag"),
           nb::arg("max_iterations"),
           nb::arg("convergence_delta"),
-          nb::arg("prior_alpha"),
-          nb::arg("prior_gamma"),
-          nb::arg("nrna_sparsity_alpha"),
-          nb::arg("gdna_prior_scale"),
+          nb::arg("total_pseudocount"),
           nb::arg("use_vbem"),
           nb::arg("prune_threshold"),
           nb::arg("confidence_threshold"),

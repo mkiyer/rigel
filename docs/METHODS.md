@@ -168,9 +168,8 @@ Rigel retains three strand models, but only one is used for scoring.
 The primary model is trained from annotated spliced fragments with unique gene
 assignment. Those fragments are the cleanest RNA-only evidence in the pipeline.
 
-Let $p_{\mathrm{r1s}}$ be the posterior mean probability that read 1 is sense to
-the gene. With a Beta prior parameterized by `strand_prior_kappa`, the model
-derives:
+Let $p_{\mathrm{r1s}}$ be the MLE probability that read 1 is sense to
+the gene:
 
 $$
 \mathrm{SS} = \max(p_{\mathrm{r1s}}, 1 - p_{\mathrm{r1s}})
@@ -343,15 +342,15 @@ the inferred intergenic territory of the reference.
 The gDNA prior hierarchy is:
 
 $$
-\mathrm{global} \rightarrow \mathrm{reference} \rightarrow \mathrm{locus}
+\mathrm{global} \rightarrow \mathrm{locus}
 $$
 
-with optional auto-estimation of:
+with optional manual override:
 
-- `gdna_kappa_ref`
-- `gdna_kappa_locus`
+- `gdna_kappa_shrink`
 
-using Method of Moments and evidence thresholds.
+The shrinkage pseudo-count controls how many pseudo-observations of
+global density to blend with each locus's local estimate.
 
 The per-locus gDNA prior is constructed as $\alpha_{\text{gDNA}} = 1 + \text{gdna\_prior\_scale} \times \text{gdna\_init}$, where `gdna_init` is the EB-estimated gDNA count for the locus. Setting `gdna_prior_scale = 0` disables the EB anchor and uses a flat unit prior.
 
@@ -580,14 +579,15 @@ strand is known (via the XS or ts BAM tag). After R2 strand normalization
 |---|---|---|
 | **Count** | $n_{\text{same}}$ | $n_{\text{opp}}$ |
 
-The R1-sense probability is estimated as:
+The R1-sense probability is estimated as the MLE:
 
 $$
-p_{\text{r1s}} = \frac{n_{\text{same}} + \kappa/2}
-  {n_{\text{same}} + n_{\text{opp}} + \kappa}
+p_{\text{r1s}} = \frac{n_{\text{same}}}
+  {n_{\text{same}} + n_{\text{opp}}}
 $$
 
-with $\kappa = 2.0$ (uniform $\text{Beta}(1, 1)$ prior).
+When no spliced observations are available, the model falls back to
+$p_{\text{r1s}} = 0.5$ (uninformative).
 
 ### 6.2 Protocol Detection
 

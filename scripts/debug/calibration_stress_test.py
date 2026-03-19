@@ -343,7 +343,7 @@ def evaluate_scenario(
         mean_nrna_posterior=mean_nrna_post,
         auroc=auroc,
         separation=separation,
-        kappa=result.kappa,
+        kappa=result.kappa_strand,
         gdna_density=result.gdna_density_global,
         expressed_density=result.expressed_density,
         elapsed_s=elapsed,

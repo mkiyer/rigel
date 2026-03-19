@@ -21,22 +21,17 @@ initialization live in ``locus.py``.  The CSR builder lives in
 ``scan.py``.  This module is a thin orchestrator.
 """
 
+from __future__ import annotations
+
 import gc
 import logging
 import math
 import os
 from dataclasses import dataclass, replace as _replace
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-
-# Padding and minimum capacity for the annotation table.
-_ANNOTATION_TABLE_PADDING = 1024
-_ANNOTATION_TABLE_MIN_CAPACITY = 4096
-
-#: Fallback mean fragment length when no observations are available.
-_DEFAULT_MEAN_FRAG: float = 200.0
 
 from .buffer import FragmentBuffer, _FinalizedChunk
 from .config import (
@@ -49,7 +44,7 @@ from .config import (
 from .estimator import AbundanceEstimator
 from .frag_length_model import FragmentLengthModels
 from .index import TranscriptIndex
-from .locus import build_loci, compute_nrna_init, compute_eb_gdna_priors
+from .locus import build_loci, compute_gdna_locus_gammas
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
 from .scan import FragmentRouter
@@ -57,7 +52,19 @@ from .scoring import FragmentScorer
 from .stats import PipelineStats
 from .strand_model import StrandModels
 
+if TYPE_CHECKING:
+    from .annotate import AnnotationTable
+    from .calibration import GDNACalibration
+    from .scored_fragments import ScoredFragments
+
 logger = logging.getLogger(__name__)
+
+# Padding and minimum capacity for the annotation table.
+_ANNOTATION_TABLE_PADDING = 1024
+_ANNOTATION_TABLE_MIN_CAPACITY = 4096
+
+#: Fallback mean fragment length when no observations are available.
+_DEFAULT_MEAN_FRAG: float = 200.0
 
 # ---------------------------------------------------------------------------
 # Pipeline result
@@ -72,6 +79,7 @@ class PipelineResult:
     strand_models: StrandModels
     frag_length_models: FragmentLengthModels
     estimator: AbundanceEstimator
+    calibration: "GDNACalibration" = None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -83,91 +91,23 @@ def _sj_tag_to_spec(sj_strand_tag) -> str:
     return "none"
 
 
-def _compute_intergenic_density(
-    stats: PipelineStats,
-    index: TranscriptIndex,
-) -> float:
-    """Compute background intergenic density (frags / bp).
-
-    Uses reference lengths from the index and the merged
-    genic union span to derive intergenic territory, then normalises
-    the intergenic fragment count to obtain per-bp density.
-
-    Returns 0.0 if reference lengths are unavailable (e.g. in unit
-    tests) or no intergenic fragments exist.
-    """
-    n_intergenic = stats.n_intergenic
-    if n_intergenic == 0:
-        return 0.0
-
-    # Load reference lengths from the index directory
-    index_dir = getattr(index, "index_dir", None)
-    if index_dir is None:
-        return 0.0
-    ref_path = os.path.join(index_dir, "ref_lengths.feather")
-    if not os.path.exists(ref_path):
-        return 0.0
-
-    ref_df = pd.read_feather(ref_path)
-    total_genome_bp = float(ref_df["length"].sum())
-    if total_genome_bp <= 0:
-        return 0.0
-
-    # Compute genic union span (merge overlapping transcript intervals)
-    genic_bp = 0
-    for _, grp in index.t_df.groupby("ref"):
-        starts = grp["start"].values
-        ends = grp["end"].values
-        order = np.argsort(starts)
-        starts = starts[order]
-        ends = ends[order]
-        # Merge overlapping intervals
-        ms = int(starts[0])
-        me = int(ends[0])
-        for j in range(1, len(starts)):
-            if int(starts[j]) <= me:
-                me = max(me, int(ends[j]))
-            else:
-                genic_bp += me - ms
-                ms = int(starts[j])
-                me = int(ends[j])
-        genic_bp += me - ms
-
-    intergenic_bp = max(total_genome_bp - genic_bp, 1.0)
-    return n_intergenic / intergenic_bp
-
-
 def _replay_strand_observations(
     strand_dict: dict,
     strand_models: StrandModels,
 ) -> None:
     """Replay C++ strand observation arrays into Python StrandModels."""
-    # Exonic-spliced model
-    obs = strand_dict.get("exonic_spliced_obs", [])
-    truth = strand_dict.get("exonic_spliced_truth", [])
-    if len(obs) > 0:
-        strand_models.exonic_spliced.observe_batch(
-            np.asarray(obs, dtype=np.int8),
-            np.asarray(truth, dtype=np.int8),
-        )
-
-    # Exonic fallback model
-    obs = strand_dict.get("exonic_obs", [])
-    truth = strand_dict.get("exonic_truth", [])
-    if len(obs) > 0:
-        strand_models.exonic.observe_batch(
-            np.asarray(obs, dtype=np.int8),
-            np.asarray(truth, dtype=np.int8),
-        )
-
-    # Intergenic model
-    obs = strand_dict.get("intergenic_obs", [])
-    truth = strand_dict.get("intergenic_truth", [])
-    if len(obs) > 0:
-        strand_models.intergenic.observe_batch(
-            np.asarray(obs, dtype=np.int8),
-            np.asarray(truth, dtype=np.int8),
-        )
+    for prefix, model in [
+        ("exonic_spliced", strand_models.exonic_spliced),
+        ("exonic", strand_models.exonic),
+        ("intergenic", strand_models.intergenic),
+    ]:
+        obs = strand_dict.get(f"{prefix}_obs", [])
+        truth = strand_dict.get(f"{prefix}_truth", [])
+        if len(obs) > 0:
+            model.observe_batch(
+                np.asarray(obs, dtype=np.int8),
+                np.asarray(truth, dtype=np.int8),
+            )
 
 
 def _replay_fraglen_observations(
@@ -187,17 +127,6 @@ def _replay_fraglen_observations(
     if len(intergenic_lengths) > 0:
         frag_length_models.observe_intergenic_batch(
             np.asarray(intergenic_lengths, dtype=np.intp),
-        )
-
-    unspliced_same = fraglen_dict.get("unspliced_same_strand_lengths", [])
-    if len(unspliced_same) > 0:
-        frag_length_models.unspliced_same_strand.observe_batch(
-            np.asarray(unspliced_same, dtype=np.intp),
-        )
-    unspliced_opp = fraglen_dict.get("unspliced_opp_strand_lengths", [])
-    if len(unspliced_opp) > 0:
-        frag_length_models.unspliced_opp_strand.observe_batch(
-            np.asarray(unspliced_opp, dtype=np.intp),
         )
 
 
@@ -253,11 +182,20 @@ def scan_and_buffer(
     bam_path: str,
     index: TranscriptIndex,
     scan: "BamScanConfig",
-) -> tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]:
+) -> tuple[
+    PipelineStats,
+    StrandModels,
+    FragmentLengthModels,
+    FragmentBuffer,
+    pd.DataFrame | None,
+    pd.DataFrame | None,
+]:
     """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
 
     The entire BAM parsing, fragment construction, overlap resolution,
     model training and columnar buffering happens in C++ via htslib.
+    When the index contains a region partition, region-level fragment
+    evidence is accumulated during the same scan pass.
 
     Parameters
     ----------
@@ -270,11 +208,13 @@ def scan_and_buffer(
 
     Returns
     -------
-    tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]
+    tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer,
+          pd.DataFrame | None, pd.DataFrame | None]
+        The last two elements are *region_counts* and *fl_table* when the
+        index contains a region partition, or ``None`` otherwise.
     """
     stats = PipelineStats()
     strand_models = StrandModels()
-    strand_models.strand_prior_kappa = scan.strand_prior_kappa
     frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
     buffer = FragmentBuffer(
         t_strand_arr=index.t_to_strand_arr,
@@ -289,6 +229,18 @@ def scan_and_buffer(
     resolve_ctx = index.resolver
     resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
+
+    # Build region partition index for gDNA calibration (if available)
+    has_regions = index.region_df is not None and len(index.region_df) > 0
+    if has_regions:
+        rdf = index.region_df
+        resolve_ctx.build_region_index(
+            rdf["ref"].values.tolist(),
+            rdf["start"].values.tolist(),
+            rdf["end"].values.tolist(),
+            rdf["region_id"].values.tolist(),
+        )
+        logger.debug(f"Built region index with {len(rdf)} regions for C++ scanner")
 
     # Create the native scanner
     sj_spec = _sj_tag_to_spec(scan.sj_strand_tag)
@@ -325,6 +277,27 @@ def scan_and_buffer(
         chunk = _FinalizedChunk.from_raw(raw)
         buffer.inject_chunk(chunk)
 
+    # Extract region evidence from the scan result (if accumulated)
+    region_counts: pd.DataFrame | None = None
+    fl_table: pd.DataFrame | None = None
+    if "region_evidence" in result:
+        re = result["region_evidence"]
+        n_regions = re["n_regions"]
+        raw_counts = np.asarray(re["counts"], dtype=np.float64).reshape(n_regions, 4)
+        region_counts = pd.DataFrame(
+            {
+                "region_id": np.arange(n_regions, dtype=np.int32),
+                "n_unspliced_pos": raw_counts[:, 0].astype(np.float32),
+                "n_unspliced_neg": raw_counts[:, 1].astype(np.float32),
+                "n_spliced_pos": raw_counts[:, 2].astype(np.float32),
+                "n_spliced_neg": raw_counts[:, 3].astype(np.float32),
+            }
+        )
+        fl_region_ids = np.asarray(re["fl_region_ids"], dtype=np.int32)
+        fl_frag_lens = np.asarray(re["fl_frag_lens"], dtype=np.int32)
+        fl_table = pd.DataFrame({"region_id": fl_region_ids, "frag_len": fl_frag_lens})
+        logger.info(f"[DONE] Region evidence: {n_regions} regions, {len(fl_table)} FL observations")
+
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
         f"{stats.n_same_strand:,} same-strand, "
@@ -338,7 +311,7 @@ def scan_and_buffer(
     strand_models.log_summary()
     frag_length_models.log_summary()
 
-    return stats, strand_models, frag_length_models, buffer
+    return stats, strand_models, frag_length_models, buffer, region_counts, fl_table
 
 
 # ---------------------------------------------------------------------------
@@ -353,20 +326,12 @@ def _setup_geometry_and_estimator(
 ) -> tuple["TranscriptGeometry", AbundanceEstimator]:
     """Compute transcript geometry and create the AbundanceEstimator."""
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
-    if frag_length_models.global_model.n_observations > 0:
-        mean_frag = frag_length_models.global_model.mean
-    else:
-        mean_frag = _DEFAULT_MEAN_FRAG
-
-    if frag_length_models.global_model.n_observations > 0:
-        effective_lengths = frag_length_models.global_model.compute_all_transcript_eff_lens(
+    if frag_length_models.rna_model.n_observations > 0:
+        effective_lengths = frag_length_models.rna_model.compute_all_transcript_eff_lens(
             exonic_lengths.astype(np.int64),
         )
     else:
-        effective_lengths = np.maximum(
-            exonic_lengths - mean_frag + 1.0,
-            1.0,
-        )
+        effective_lengths = np.maximum(exonic_lengths - _DEFAULT_MEAN_FRAG + 1.0, 1.0)
 
     transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
 
@@ -374,7 +339,6 @@ def _setup_geometry_and_estimator(
         effective_lengths=effective_lengths,
         exonic_lengths=exonic_lengths,
         t_to_g=index.t_to_g_arr,
-        mean_frag=mean_frag,
         transcript_spans=transcript_spans,
     )
 
@@ -428,62 +392,23 @@ def _score_fragments(
 
 def _compute_priors(
     estimator: AbundanceEstimator,
-    em_data: "ScoredFragments",
     loci: list,
     index: TranscriptIndex,
-    strand_models: StrandModels,
-    stats: PipelineStats,
-    geometry: "TranscriptGeometry",
-    em_config: EMConfig,
-) -> list[float]:
-    """Compute nRNA init, EB gDNA priors, and nRNA-frac Beta priors.
+    calibration: "GDNACalibration" = None,
+) -> np.ndarray:
+    """Compute calibration locus gammas.
 
-    Returns the per-locus gdna_inits array.
+    Returns the per-locus locus_gammas array (float64[n_loci] ∈ [0, 1]).
     """
-    nrna_spans = (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.float64)
-    nrna_max_exonic = np.zeros(index.num_nrna, dtype=np.float64)
-    np.maximum.at(nrna_max_exonic, index.t_to_nrna_arr, geometry.exonic_lengths)
-    nrna_init = compute_nrna_init(
-        estimator.transcript_intronic_sense,
-        estimator.transcript_intronic_antisense,
-        nrna_spans,
-        nrna_max_exonic,
-        strand_models,
-    )
-    estimator.nrna_init = nrna_init
-
-    strand_spec = strand_models.strand_specificity
-    w_strand = (2.0 * strand_spec - 1.0) ** 2
-    logger.info(
-        f"[INFO] Strand specificity: {strand_spec:.3f} "
-        f"(strand weight={w_strand:.3f}, density weight={1.0 - w_strand:.3f})"
-    )
-
     # Assign locus_id to every transcript (needed by nrna_frac prior cascade)
     for locus in loci:
         for t_idx in locus.transcript_indices:
             estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
-    # EB gDNA priors (must precede nrna_frac priors)
-    intergenic_density = _compute_intergenic_density(stats, index)
-    gdna_inits = compute_eb_gdna_priors(
-        loci,
-        em_data,
-        estimator,
-        index,
-        strand_models,
-        intergenic_density=intergenic_density,
-        kappa_ref=em_config.gdna_kappa_ref,
-        kappa_locus=em_config.gdna_kappa_locus,
-        mom_min_evidence_ref=em_config.gdna_mom_min_evidence_ref,
-        mom_min_evidence_locus=em_config.gdna_mom_min_evidence_locus,
-        kappa_min=em_config.gdna_kappa_min,
-        kappa_max=em_config.gdna_kappa_max,
-        kappa_fallback=em_config.gdna_kappa_fallback,
-        kappa_min_obs=em_config.gdna_kappa_min_obs,
-    )
+    # Aggregate calibration region posteriors per locus
+    locus_gammas = compute_gdna_locus_gammas(loci, index, calibration)
 
-    return gdna_inits
+    return locus_gammas
 
 
 def _run_locus_em(
@@ -491,14 +416,14 @@ def _run_locus_em(
     em_data: "ScoredFragments",
     loci: list,
     index: TranscriptIndex,
-    gdna_inits: list[float],
+    locus_gammas: np.ndarray,
     em_config: EMConfig,
 ) -> None:
     """Run batch locus-level EM and record per-locus results."""
     t_refs = index.t_df["ref"].values
     t_to_g = index.t_to_g_arr
 
-    def _build_locus_meta(locus, *, mrna, nrna, gdna, gdna_init):
+    def _build_locus_meta(locus, *, mrna, nrna, gdna, locus_gamma):
         """Build one locus_results record."""
         ref_counts: dict[str, int] = {}
         for t_idx in locus.transcript_indices:
@@ -515,7 +440,7 @@ def _run_locus_em(
             "mrna": float(mrna),
             "nrna": float(nrna),
             "gdna": float(gdna),
-            "gdna_init": float(gdna_init),
+            "gdna_init": float(locus_gamma),
         }
 
     (
@@ -527,7 +452,7 @@ def _run_locus_em(
         loci,
         em_data,
         index,
-        np.asarray(gdna_inits, dtype=np.float64),
+        locus_gammas,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
         confidence_threshold=em_config.confidence_threshold,
@@ -540,7 +465,7 @@ def _run_locus_em(
                 mrna=locus_mrna_arr[i],
                 nrna=locus_nrna_arr[i],
                 gdna=locus_gdna_arr[i],
-                gdna_init=gdna_inits[i],
+                locus_gamma=locus_gammas[i],
             )
         )
 
@@ -564,6 +489,7 @@ def quant_from_buffer(
     scoring: FragmentScoringConfig | None = None,
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
+    calibration: "GDNACalibration" = None,
 ) -> AbundanceEstimator:
     """Quantify transcripts from buffered fragments via locus-level EM.
 
@@ -604,6 +530,16 @@ def quant_from_buffer(
         f"(locus-level EM: mRNA/nRNA/gDNA)"
     )
 
+    # Apply calibrated gDNA fragment-length model for scoring.
+    # Calibration always provides a gDNA FL model (EM-based when ESS
+    # is sufficient, intergenic fallback otherwise).
+    frag_length_models.gdna_model = calibration.gdna_fl_model
+    logger.info(
+        f"[CAL-FL] gDNA FL model: "
+        f"mean={calibration.gdna_fl_model.mean:.1f}, "
+        f"obs={calibration.gdna_fl_model.n_observations}"
+    )
+
     # Phase 2: Score fragments
     em_data = _score_fragments(
         buffer,
@@ -638,15 +574,11 @@ def quant_from_buffer(
             f"(largest: {max_locus_t} transcripts, {max_locus_u} units)"
         )
 
-        gdna_inits = _compute_priors(
+        locus_gammas = _compute_priors(
             estimator,
-            em_data,
             loci,
             index,
-            strand_models,
-            stats,
-            geometry,
-            em_config,
+            calibration=calibration,
         )
 
         _run_locus_em(
@@ -654,7 +586,7 @@ def quant_from_buffer(
             em_data,
             loci,
             index,
-            gdna_inits,
+            locus_gammas,
             em_config,
         )
     else:
@@ -722,15 +654,41 @@ def run_pipeline(
         scan = _replace(scan, sj_strand_tag=detected_spec)
 
     # -- Single BAM pass (C++ native scanner) --
-    stats, strand_models, frag_length_models, buffer = scan_and_buffer(bam_path, index, scan)
+    stats, strand_models, frag_length_models, buffer, region_counts, fl_table = scan_and_buffer(
+        bam_path, index, scan
+    )
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
-    frag_length_models.mix_models(
-        s_rna=strand_models.strand_specificity,
-        p_r1_sense=strand_models.exonic_spliced.p_r1_sense,
-    )
+    frag_length_models.build_scoring_models()
     frag_length_models.finalize()
+
+    # -- gDNA calibration (post-model, pre-scoring) --
+    if region_counts is None or fl_table is None or index.region_df is None:
+        raise RuntimeError(
+            "gDNA calibration requires region data. Rebuild index with "
+            "'rigel index' to generate regions.feather."
+        )
+    from .calibration import calibrate_gdna
+
+    cal_cfg = config.calibration
+    calibration = calibrate_gdna(
+        region_counts,
+        fl_table,
+        index.region_df,
+        strand_models.strand_specificity,
+        max_iterations=cal_cfg.max_iterations,
+        convergence_tol=cal_cfg.convergence_tol,
+        density_percentile=cal_cfg.density_percentile,
+        min_gdna_regions=cal_cfg.min_gdna_regions,
+        min_fl_ess=cal_cfg.min_fl_ess,
+        intergenic_fl_model=frag_length_models.intergenic,
+    )
+    logger.info(
+        f"[CAL] gDNA calibration: π={calibration.mixing_proportion:.3f}, "
+        f"κ_strand={calibration.kappa_strand:.1f}, λ_G={calibration.gdna_density_global:.2e}, "
+        f"converged={calibration.converged} ({calibration.n_iterations} iters)"
+    )
 
     # -- Annotation table for second BAM pass (opt-in) --
     annotations = None
@@ -755,6 +713,7 @@ def run_pipeline(
             scoring=config.scoring,
             log_every=scan.log_every,
             annotations=annotations,
+            calibration=calibration,
         )
     finally:
         buffer.cleanup()
@@ -778,4 +737,5 @@ def run_pipeline(
         strand_models=strand_models,
         frag_length_models=frag_length_models,
         estimator=estimator,
+        calibration=calibration,
     )

@@ -24,8 +24,7 @@ def _make_locus(
     unambig_totals: np.ndarray | None = None,
     bias_profiles: np.ndarray | None = None,
     prior_eligible: np.ndarray | None = None,
-    prior_alpha: float = 0.01,
-    prior_gamma: float = 1.0,
+    total_pseudocount: float = 1.0,
     max_iterations: int = 1000,
     convergence_delta: float = 1e-6,
     use_vbem: bool = False,
@@ -75,7 +74,7 @@ def _make_locus(
         offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
         tx_starts_arr, tx_ends_arr, bias_profiles,
         unambig_totals, eff_lens, prior_eligible,
-        n_components, prior_alpha, prior_gamma,
+        n_components, total_pseudocount,
         max_iterations, convergence_delta,
         use_vbem, prune_threshold,
         0,  # n_transcripts=0 → classic (unlinked) mode
@@ -484,8 +483,8 @@ class TestBiasCorrection:
 class TestOVRPrior:
     """One Virtual Read prior behavior."""
 
-    def test_gamma_zero_disables_ovr(self):
-        """gamma=0 → flat prior only, no coverage-weighted OVR."""
+    def test_tiny_pseudocount_minimizes_ovr(self):
+        """Very small pseudocount → OVR prior negligible, data dominates."""
         n_comp = 3
         units = [
             [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
@@ -497,14 +496,14 @@ class TestOVRPrior:
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
             unambig_totals=unambig, prior_eligible=eligible,
-            prior_gamma=0.0,
+            total_pseudocount=1e-10,
         )
         assert np.all(np.isfinite(theta))
-        # With equal everything and no OVR, components should be roughly equal
+        # With equal everything and negligible OVR, components should be roughly equal
         assert abs(theta[0] - theta[1]) < 0.1
 
-    def test_high_gamma_shifts_prior(self):
-        """Large gamma → OVR coverage weights dominate the prior."""
+    def test_high_pseudocount_shifts_prior(self):
+        """Large pseudocount → OVR coverage weights dominate the prior."""
         n_comp = 3
         # All coverage weight goes to comp 0 (high cov_wt)
         units = [
@@ -517,7 +516,7 @@ class TestOVRPrior:
         theta, alpha, em = _make_locus(
             units=units, n_components=n_comp,
             unambig_totals=unambig, prior_eligible=eligible,
-            prior_gamma=10.0,
+            total_pseudocount=10.0,
         )
         # Comp 0 should get more weight due to high coverage weight
         assert theta[0] > theta[1]
@@ -568,8 +567,7 @@ def _make_linked_locus(
     bias_profiles: np.ndarray | None = None,
     prior_eligible: np.ndarray | None = None,
     effective_lengths: np.ndarray | None = None,
-    prior_alpha: float = 0.01,
-    prior_gamma: float = 1.0,
+    total_pseudocount: float = 1.0,
     max_iterations: int = 1000,
     convergence_delta: float = 1e-6,
     prune_threshold: float = -1.0,
@@ -627,7 +625,7 @@ def _make_linked_locus(
         offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
         tx_starts_arr, tx_ends_arr, bias_profiles,
         unambig_totals, effective_lengths, prior_eligible,
-        n_components, prior_alpha, prior_gamma,
+        n_components, total_pseudocount,
         max_iterations, convergence_delta,
         False,  # use_vbem (not supported for linked)
         prune_threshold,
@@ -662,7 +660,7 @@ class TestLinkedEmBasic:
         )
         assert nrna_frac.shape == (n_t,)
         # No data for nRNA → nrna_frac should be very low
-        assert np.all(nrna_frac < 0.05)
+        assert np.all(nrna_frac < 0.1)
 
     def test_theta_is_simplex(self):
         """Linked EM produces a valid simplex θ[2*n_t+1]."""

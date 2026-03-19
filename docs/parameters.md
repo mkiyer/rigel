@@ -86,20 +86,11 @@ The gDNA rate prior uses a two-level hierarchy:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gdna-kappa-ref` | auto (MoM) | κ pulling reference gDNA rate toward the global estimate. |
-| `--gdna-kappa-locus` | auto (MoM) | κ pulling locus gDNA rate toward the reference estimate. |
-| `--gdna-mom-min-evidence-ref` | 50 | Min fragment evidence for reference gDNA MoM κ. |
-| `--gdna-mom-min-evidence-locus` | 30 | Min fragment evidence for locus gDNA MoM κ. |
-| `--gdna-kappa-min` | 2.0 | Lower clamp for MoM-estimated gDNA κ. |
-| `--gdna-kappa-max` | 200.0 | Upper clamp for MoM-estimated gDNA κ. |
-| `--gdna-kappa-fallback` | 5.0 | Fallback gDNA κ when too few features for MoM. |
-| `--gdna-kappa-min-obs` | 20 | Minimum features for gDNA MoM κ estimation; fewer triggers fallback. |
+| `--gdna-kappa-locus` | auto (calibrated κ) | κ pulling locus gDNA rate toward the reference estimate. |
 
 ### Strand Model
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--strand-prior-kappa` | 2.0 | Strand model prior pseudocount κ. The Beta prior is Beta(κ/2, κ/2), shrinking toward 0.5 (max entropy). Default 2.0 gives a uniform Beta(1, 1) prior. |
+The strand model uses pure MLE from spliced fragments. No tunable parameters.
 
 ---
 
@@ -111,10 +102,11 @@ The CLI-to-config mapping in `cli.py` translates flag names to config fields
 
 | Dataclass | Purpose |
 |-----------|---------|
-| `PipelineConfig` | Top-level container holding `em`, `scan`, and `scoring` sub-configs plus `annotated_bam_path`. |
+| `PipelineConfig` | Top-level container holding `em`, `scan`, `scoring`, and `calibration` sub-configs plus `annotated_bam_path`. |
 | `EMConfig` | EM algorithm, nRNA fraction shrinkage, and gDNA shrinkage parameters. |
 | `BamScanConfig` | BAM reading, filtering, buffering, and threading. |
 | `FragmentScoringConfig` | Overhang/mismatch log-penalties and gDNA splice penalties. |
+| `CalibrationConfig` | Aggregate-first gDNA calibration EM: convergence and ESS gating. |
 
 ### Internal-only config fields
 
@@ -128,6 +120,11 @@ These fields are set programmatically and not exposed as CLI flags:
 | `BamScanConfig` | `chunk_size` | 1,000,000 | Fragments per buffer chunk. |
 | `BamScanConfig` | `max_memory_bytes` | 2 GiB | Max memory before disk spill. |
 | `BamScanConfig` | `spill_dir` | None | Directory for spilled buffer chunks (set via `--tmpdir`). |
+| `CalibrationConfig` | `max_iterations` | 50 | Maximum calibration EM iterations. |
+| `CalibrationConfig` | `convergence_tol` | 1e-4 | Calibration EM convergence tolerance for |Δπ|. |
+| `CalibrationConfig` | `density_percentile` | 0.10 | Quantile threshold for gDNA seed initialization. |
+| `CalibrationConfig` | `min_gdna_regions` | 100 | Minimum eligible regions to run calibration. Below this, the EM lacks statistical power and calibration uses algebraic fallback density/κ. |
+| `CalibrationConfig` | `min_fl_ess` | 50 | Minimum effective sample size (Σγ·w of FL observations) to build the calibrated gDNA fragment-length model. When ESS is below this threshold, `build_gdna_fl_model` returns `None` and the pipeline retains the strand-deconvolved FL model. |
 
 ---
 

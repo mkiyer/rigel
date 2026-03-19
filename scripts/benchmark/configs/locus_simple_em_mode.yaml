@@ -1,0 +1,53 @@
+# locus_simple_em_mode.yaml — MAP vs VBEM mode comparison
+#
+# Goal: Compare MAP and VBEM EM modes across varying signal complexity.
+#       VBEM should be more aggressive at pruning weak components.
+# Grid: 3 TA1 × 3 nRNA × 3 gdna_frac × 2 mode × 2 prune = 108 runs
+
+genome_length: 50000
+seed: 42
+read_length: 150
+
+rna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+gdna:
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 600
+
+transcripts:
+  TA1:
+    strand: "+"
+    exons: [[1000, 1020], [5000, 5500], [12000, 13000]]
+  TD:
+    strand: "+"
+    exons: [[28000, 29000]]
+  TE:
+    strand: "-"
+    exons: [[40000, 41000], [45000, 46000]]
+
+nrnas:
+  NTA1: ["+", 1000, 13000]
+  NTD: ["+", 28000, 29000]
+  NTE: ["-", 40000, 46000]
+
+sweep:
+  strand_specificity: 0.9
+  n_rna_fragments: 10000
+  gdna_fraction: [0.0, 0.5, 2.0]
+
+  TA1: [50, 200, 1000]
+  NTA1: [0, 100, 500]
+
+  TD: 0
+  TE: 0
+
+params:
+  em:
+    mode: ["map", "vbem"]
+    prune_threshold: [0.1, -1.0]

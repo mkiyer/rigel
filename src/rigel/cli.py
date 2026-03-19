@@ -150,8 +150,7 @@ def _build_pipeline_config(
     scan_kw["sj_strand_tag"] = sj_strand_tag
 
     logging.info(
-        f"Using EM prior: alpha={em_kw['prior_alpha']}, "
-        f"gamma={em_kw['prior_gamma']}"
+        f"Using EM prior: pseudocount={em_kw.get('prior_pseudocount', 1.0)}"
     )
 
     return PipelineConfig(
@@ -397,8 +396,8 @@ import math as _math
 @_dataclass(frozen=True)
 class _ParamSpec:
     """Maps a CLI argparse dest to a config dataclass field."""
-    cli_dest: str               # argparse dest, e.g. "em_prior_alpha"
-    config_path: str            # dotted config path, e.g. "em.prior_alpha"
+    cli_dest: str               # argparse dest, e.g. "prior_pseudocount"
+    config_path: str            # dotted config path, e.g. "em.prior_pseudocount"
     transform: str = "direct"   # "direct" | "invert_bool" | "log_penalty"
     #                             | "gdna_splice" | "path_or_none" | "sj_tag"
 
@@ -406,26 +405,14 @@ class _ParamSpec:
 _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- EMConfig: direct mappings --
     _ParamSpec("seed", "em.seed"),
-    _ParamSpec("em_prior_alpha", "em.prior_alpha"),
-    _ParamSpec("em_prior_gamma", "em.prior_gamma"),
+    _ParamSpec("prior_pseudocount", "em.prior_pseudocount"),
     _ParamSpec("em_iterations", "em.iterations"),
     _ParamSpec("em_convergence_delta", "em.convergence_delta"),
     _ParamSpec("prune_threshold", "em.prune_threshold"),
     _ParamSpec("confidence_threshold", "em.confidence_threshold"),
-    _ParamSpec("gdna_kappa_ref", "em.gdna_kappa_ref"),
-    _ParamSpec("gdna_kappa_locus", "em.gdna_kappa_locus"),
-    _ParamSpec("gdna_mom_min_evidence_ref", "em.gdna_mom_min_evidence_ref"),
-    _ParamSpec("gdna_mom_min_evidence_locus", "em.gdna_mom_min_evidence_locus"),
-    _ParamSpec("gdna_kappa_min", "em.gdna_kappa_min"),
-    _ParamSpec("gdna_kappa_max", "em.gdna_kappa_max"),
-    _ParamSpec("gdna_kappa_fallback", "em.gdna_kappa_fallback"),
-    _ParamSpec("gdna_kappa_min_obs", "em.gdna_kappa_min_obs"),
-    _ParamSpec("nrna_sparsity_alpha", "em.nrna_sparsity_alpha"),
-    _ParamSpec("gdna_prior_scale", "em.gdna_prior_scale"),
     _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
-    _ParamSpec("strand_prior_kappa", "scan.strand_prior_kappa"),
     # -- BamScanConfig: transformed --
     _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
     _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
@@ -443,7 +430,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
 
 
 def _resolve_config_path(cfg: object, path: str) -> object:
-    """Follow a dotted path like ``'em.prior_alpha'`` on a config object."""
+    """Follow a dotted path like ``'em.prior_pseudocount'`` on a config object."""
     obj = cfg
     for attr in path.split("."):
         obj = getattr(obj, attr)
@@ -704,15 +691,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducibility (default: use current timestamp).",
     )
     quant_parser.add_argument(
-        "--em-prior-alpha", dest="em_prior_alpha", type=float, default=None,
-        help="Flat Dirichlet pseudocount per eligible EM component "
-             "(default: 0.01).",
-    )
-    quant_parser.add_argument(
-        "--em-prior-gamma", dest="em_prior_gamma", type=float, default=None,
-        help="OVR prior scale factor (gamma).  Default 1.0.  "
-             "Controls how strongly coverage-weighted One Virtual Read "
-             "priors influence the EM.",
+        "--prior-pseudocount", dest="prior_pseudocount",
+        type=float, default=None,
+        help="Total OVR prior budget C in virtual fragments (default: 1.0). "
+             "Distributed as gamma*C to gDNA and (1-gamma)*C coverage-weighted "
+             "across RNA components.",
     )
     quant_parser.add_argument(
         "--em-iterations", dest="em_iterations", type=int, default=None,
@@ -775,82 +758,11 @@ def build_parser() -> argparse.ArgumentParser:
              "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
-        "--gdna-kappa-ref", dest="gdna_kappa_ref",
-        type=float, default=None,
-        help="Shrinkage κ pulling reference-level gDNA rate toward the "
-             "global estimate.  Default: auto-estimate via MoM.",
-    )
-    adv.add_argument(
-        "--gdna-kappa-locus", dest="gdna_kappa_locus",
-        type=float, default=None,
-           help="Shrinkage κ pulling locus gDNA rate toward the "
-               "reference-level estimate.  Default: auto-estimate via MoM.",
-    )
-    adv.add_argument(
-           "--gdna-mom-min-evidence-ref",
-           dest="gdna_mom_min_evidence_ref",
-        type=float, default=None,
-           help="Min fragment evidence for reference-level gDNA MoM κ "
-             "estimation (default: 50).",
-    )
-    adv.add_argument(
-        "--gdna-mom-min-evidence-locus",
-        dest="gdna_mom_min_evidence_locus",
-        type=float, default=None,
-        help="Min fragment evidence for locus gDNA MoM κ "
-             "estimation (default: 30).",
-    )
-    adv.add_argument(
-        "--gdna-kappa-min", dest="gdna_kappa_min",
-        type=float, default=None,
-        help="Lower clamp for MoM-estimated gDNA κ (default: 2.0).",
-    )
-    adv.add_argument(
-        "--gdna-kappa-max", dest="gdna_kappa_max",
-        type=float, default=None,
-        help="Upper clamp for MoM-estimated gDNA κ (default: 200.0).",
-    )
-    adv.add_argument(
-        "--gdna-kappa-fallback", dest="gdna_kappa_fallback",
-        type=float, default=None,
-        help="Fallback gDNA κ when too few features for MoM "
-             "(default: 5.0).",
-    )
-    adv.add_argument(
-        "--gdna-kappa-min-obs", dest="gdna_kappa_min_obs",
-        type=int, default=None,
-        help="Minimum features for gDNA MoM κ estimation; "
-             "fewer triggers fallback (default: 20).",
-    )
-    adv.add_argument(
-        "--nrna-sparsity-alpha", dest="nrna_sparsity_alpha",
-        type=float, default=None,
-        help="Dirichlet α for nRNA EM components. Values < 1.0 create "
-             "a sparsifying prior that drives weak nRNA components toward "
-             "zero.  1.0 = flat (off), 0.9 = mild, 0.5 = moderate, "
-             "0.3 = strong.  Default: 0.9.",
-    )
-    adv.add_argument(
-        "--gdna-prior-scale", dest="gdna_prior_scale",
-        type=float, default=None,
-        help="Scale factor for the Empirical Bayes gDNA prior anchor. "
-             "The gDNA prior is α = 1 + scale × gdna_init, where gdna_init "
-             "is the EB estimate.  0 = ignore EB (flat unit prior), "
-             "1.0 = default, higher = stronger anchor.  Default: 1.0.",
-    )
-    adv.add_argument(
         "--em-mode", dest="em_mode",
         choices=["map", "vbem"], default=None,
         help="EM algorithm variant.  'map' uses MAP-EM with hard "
              "max(0, n+α−1) updates; 'vbem' uses Variational Bayes EM "
              "with digamma-based soft updates.  Default: vbem.",
-    )
-    adv.add_argument(
-        "--strand-prior-kappa", dest="strand_prior_kappa",
-        type=float, default=None,
-        help="Strand model prior pseudocount κ. Beta prior is "
-             "Beta(κ/2, κ/2), shrinking toward 0.5 (max entropy). "
-             "Default: 2.0 (uniform Beta(1,1) prior).",
     )
     quant_parser.add_argument(
         "--threads", dest="threads", type=int, default=None,

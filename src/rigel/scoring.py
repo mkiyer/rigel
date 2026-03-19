@@ -16,8 +16,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .splice import SpliceType, SPLICE_UNSPLICED, SPLICE_UNANNOT, SPLICE_ANNOT
-from .types import Strand, STRAND_POS, STRAND_NEG
+from .splice import SPLICE_UNSPLICED, SPLICE_UNANNOT, SPLICE_ANNOT
 
 # ---------------------------------------------------------------------------
 # Constants (single source of truth for all scoring/penalty values)
@@ -112,7 +111,6 @@ class FragmentScorer:
 
     # Index arrays (borrowed references, never copied)
     t_strand_arr: np.ndarray  # int8[n_transcripts]
-    g_strand_arr: np.ndarray  # int8[n_genes]
     t_to_g: np.ndarray  # int32[n_transcripts]
     nrna_base: int  # offset for nRNA indices in CSR
 
@@ -206,7 +204,6 @@ class FragmentScorer:
             gdna_fl_max_size=gdna_fl_max_size,
             gdna_fl_tail_base=gdna_fl_tail_base,
             t_strand_arr=index.t_to_strand_arr,
-            g_strand_arr=index.g_to_strand_arr,
             t_to_g=index.t_to_g_arr,
             nrna_base=estimator.nrna_base_index,
             t_length_arr=t_length_arr,
