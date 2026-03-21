@@ -1,5 +1,15 @@
 # Rigel Project Instructions
 
+## Theory
+
+### The problem with 'genes'
+
+The concept of a 'gene' is a convenient abstraction for organizing the transcriptome, but it is not a fundamental biological entity. The 'rigel' tool *must* be designed to handle the complexities and ambiguities that arise from this abstraction, especially when dealing with complex loci with many overlapping transcripts.
+
+- The tool must operate at the transcript level, not the gene level. Grouping of transcripts into genes is sometimes arbitrary and can lead to issues when transcripts overlap multiple genes or when genes have complex splicing patterns.
+- We output gene-level summaries for user convenience, but the core quantification and EM modeling should be transcript-centric. This allows for more accurate handling of multimappers and complex loci.
+
+
 ## Environment
 
 - **Always** activate the conda environment before running any command: `conda activate rigel`
