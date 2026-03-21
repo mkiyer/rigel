@@ -57,7 +57,7 @@ def _make_scenario(tmp_path):
 
 def _run_with_chunk_size(result, index, chunk_size):
     config = PipelineConfig(
-        em=EMConfig(seed=SEED),
+        em=EMConfig(seed=SEED, assignment_mode="fractional"),
         scan=BamScanConfig(sj_strand_tag="auto", chunk_size=chunk_size),
     )
     return run_pipeline(result.bam_path, index, config=config)

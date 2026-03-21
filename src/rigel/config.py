@@ -38,14 +38,17 @@ class EMConfig:
         Maximum EM iterations (default 1000).
     convergence_delta : float
         Convergence threshold for theta updates (default 1e-6).
-    prune_threshold : float or None
-        Post-EM pruning evidence-ratio threshold.  Components with
-        zero unambig evidence and an evidence ratio (data / alpha)
-        below this value are zeroed out and a single EM iteration
-        redistributes the freed mass.
-        Default 0.1.  Set to ``None`` or a negative value to disable.
     confidence_threshold : float
         Posterior threshold for high-confidence assignment (default 0.95).
+    assignment_mode : str
+        Post-EM fragment assignment mode: ``"fractional"`` (traditional
+        EM posterior weights), ``"map"`` (assign to highest-posterior
+        component), or ``"sample"`` (draw from posterior distribution).
+        Default ``"sample"``.
+    assignment_min_posterior : float
+        Minimum posterior for a component to be eligible for discrete
+        assignment (``map``/``sample`` modes only).  Components below
+        this threshold are zeroed before assignment.  Default 0.01.
     """
 
     seed: int | None = None
@@ -55,8 +58,9 @@ class EMConfig:
     mode: str = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
-    prune_threshold: float | None = 0.1
     confidence_threshold: float = 0.95
+    assignment_mode: str = "sample"
+    assignment_min_posterior: float = 0.01
     n_threads: int = 0
     """Number of threads for parallel locus EM (Phase 2B).
 
@@ -68,6 +72,10 @@ class EMConfig:
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
+        if self.assignment_mode not in ("fractional", "map", "sample"):
+            raise ValueError(
+                f"Unknown assignment mode: {self.assignment_mode!r}"
+            )
 
 
 # ======================================================================

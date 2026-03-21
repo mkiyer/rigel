@@ -43,7 +43,6 @@ rigel_configs:
   # fast_em:
   #   em_iterations: 500
   #   em_convergence_delta: 1.0e-4
-  #   prune_threshold: 0.05
   # full_em:
   #   em_iterations: 5000
   #   em_convergence_delta: 1.0e-7

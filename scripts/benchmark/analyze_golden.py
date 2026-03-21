@@ -37,7 +37,7 @@ for name in sorted(os.listdir(golden)):
         worst = df.nlargest(5, "total_mrna_rel_err")
         print("  Worst 5 by mRNA rel_err:")
         key_cols = [c for c in df.columns if c in ("strand_specificity", "gdna_fraction",
-            "TA1", "NTA1", "prior_pseudocount", "mode", "prune_threshold",
+            "TA1", "NTA1", "prior_pseudocount", "mode",
             "strand_specificity", "overhang_log_penalty", "mismatch_log_penalty")]
         for _, row in worst.iterrows():
             cfg = ", ".join(f"{c}={row[c]}" for c in key_cols if pd.notna(row[c]))

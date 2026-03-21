@@ -46,6 +46,34 @@ static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 // sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
 static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
 
+// Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
+static constexpr int ASSIGN_FRACTIONAL = 0;
+static constexpr int ASSIGN_MAP        = 1;
+static constexpr int ASSIGN_SAMPLE     = 2;
+
+// ================================================================
+// SplitMix64 — lightweight, deterministic, thread-local PRNG
+// ================================================================
+
+struct SplitMix64 {
+    uint64_t state;
+
+    explicit SplitMix64(uint64_t seed) : state(seed) {}
+
+    uint64_t next() {
+        state += 0x9e3779b97f4a7c15ULL;
+        uint64_t z = state;
+        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+        return z ^ (z >> 31);
+    }
+
+    /// Return a uniform double in [0, 1).
+    double uniform() {
+        return static_cast<double>(next() >> 11) * 0x1.0p-53;
+    }
+};
+
 // ================================================================
 // Array type aliases
 // ================================================================
@@ -186,8 +214,7 @@ static std::vector<EmEquivClass> build_equiv_classes(
     // units within each class.  Since the EM E-step accumulates column sums
     // over rows, and FP addition is non-associative, different row orders
     // produce ULP-level differences that SQUAREM amplifies across iterations
-    // until post-EM pruning flips borderline decisions, causing large
-    // cascading output differences.
+    // potentially causing large cascading output differences.
     //
     // Fix: sort equiv classes by comp_idx, and sort rows within each class
     // by their log-likelihood fingerprint.  This makes the EM iteration
@@ -725,7 +752,6 @@ static EMResult run_squarem(
     int           max_iterations,
     double        convergence_delta,
     bool          use_vbem,
-    double        prune_threshold,
     int           estep_threads = 1,
     rigel::EStepThreadPool* pool = nullptr)
 {
@@ -905,76 +931,6 @@ static EMResult run_squarem(
         }
     }
 
-    // ----------------------------------------------------------
-    // Post-EM pruning
-    // ----------------------------------------------------------
-    if (prune_threshold >= 0.0) {
-        bool any_pruned = false;
-        std::vector<bool> prune_mask(nc, false);
-
-        for (size_t i = 0; i < nc; ++i) {
-            double data_count = unambig_totals[i] + em_totals[i];
-            double denom = std::max(alpha_out[i], EM_LOG_EPSILON);
-            double evidence_ratio = data_count / denom;
-            if (unambig_totals[i] == 0.0
-                && evidence_ratio < prune_threshold) {
-                prune_mask[i] = true;
-                any_pruned = true;
-            }
-        }
-        // Never prune gDNA (last component)
-        prune_mask[nc - 1] = false;
-
-        if (any_pruned) {
-            for (size_t i = 0; i < nc; ++i) {
-                if (prune_mask[i]) prior[i] = 0.0;
-            }
-
-            if (use_vbem) {
-                for (size_t i = 0; i < nc; ++i) {
-                    if (prune_mask[i]) alpha_out[i] = EM_LOG_EPSILON;
-                }
-                {
-                    std::vector<double> a_new(nc);
-                    vbem_step(alpha_out.data(), ec_data, log_eff_len,
-                              unambig_totals, prior, em_totals.data(),
-                              a_new.data(), n_components);
-                    std::swap(alpha_out, a_new);
-                }
-                double total = 0.0;
-                for (size_t i = 0; i < nc; ++i) total += alpha_out[i];
-                if (total > 0.0) {
-                    double inv = 1.0 / total;
-                    for (size_t i = 0; i < nc; ++i) theta[i] = alpha_out[i] * inv;
-                } else {
-                    std::copy(alpha_out.begin(), alpha_out.end(), theta.begin());
-                }
-            } else {
-                for (size_t i = 0; i < nc; ++i) {
-                    if (prune_mask[i]) theta[i] = 0.0;
-                }
-                double total = 0.0;
-                for (size_t i = 0; i < nc; ++i) total += theta[i];
-                if (total > 0.0) {
-                    double inv = 1.0 / total;
-                    for (size_t i = 0; i < nc; ++i) theta[i] *= inv;
-                }
-                // Single post-prune EM step to redistribute mass
-                {
-                    std::vector<double> t_new(nc);
-                    map_em_step(theta.data(), ec_data, log_eff_len,
-                                unambig_totals, prior, em_totals.data(),
-                                t_new.data(), n_components,
-                                1, nullptr);
-                    std::swap(theta, t_new);
-                }
-                for (size_t i = 0; i < nc; ++i) {
-                    alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
-                }
-            }
-        }
-    }
-
     return { std::move(theta), std::move(alpha_out), std::move(em_totals) };
 }
 
@@ -984,7 +940,7 @@ static EMResult run_squarem(
 //
 // Takes CSR per-locus data + config, returns (theta, alpha, em_totals).
 // Replaces the entire body of AbundanceEstimator.run_locus_em() from
-// bias correction through post-prune.
+// bias correction through EM convergence.
 
 static std::tuple<nb::ndarray<nb::numpy, double, nb::ndim<1>>,
                   nb::ndarray<nb::numpy, double, nb::ndim<1>>,
@@ -1008,7 +964,6 @@ run_locus_em_native(
     int    max_iterations,
     double convergence_delta,
     bool   use_vbem,
-    double prune_threshold,
     // nRNA mapping (kept for posterior assignment, not hierarchy)
     int    n_transcripts,
     int    n_nrna,
@@ -1113,7 +1068,7 @@ run_locus_em_native(
         ec_data, log_eff_len.data(), unambig_totals.data(),
         prior.data(), theta_init.data(),
         n_components, max_iterations, convergence_delta,
-        use_vbem, prune_threshold);
+        use_vbem);
 
     // 7. Return as numpy arrays
     auto* theta_out = new double[nc];
@@ -1493,10 +1448,18 @@ static void extract_locus_sub_problem(
 // Assign posteriors after EM convergence.
 // Reimplements Python assign_locus_ambiguous() entirely in C++.
 // Scatters results into the provided accumulator arrays.
+//
+// assignment_mode: ASSIGN_FRACTIONAL (0), ASSIGN_MAP (1), ASSIGN_SAMPLE (2)
+// min_posterior: components with posterior < min_posterior are zeroed before
+//   discrete (MAP/sample) assignment.  Ignored for fractional mode.
+// rng: thread-local SplitMix64 instance (only used for sample mode).
 static void assign_posteriors(
     const LocusSubProblem& sub,
     const double* theta,
     double confidence_threshold,
+    int assignment_mode,
+    double min_posterior,
+    SplitMix64& rng,
     // Output accumulators (accumulated across loci)
     double* em_counts_2d,          // [N_T, n_cols], row-major
     double* em_high_conf_2d,       // [N_T, n_cols]
@@ -1560,13 +1523,76 @@ static void assign_posteriors(
         } else {
             for (int j = 0; j < seg_len; ++j) posteriors[j] = 0.0;
         }
+
+        // ---- Discrete assignment dispatch ----
+        // For MAP/sample modes: threshold, renormalize, then select winner.
+        // For fractional mode: use raw posteriors as-is.
+        // The "weights" vector holds the final assignment weights (sum to 1).
+        // In discrete modes, exactly one entry is 1.0 and the rest are 0.0.
+        std::vector<double> weights(seg_len);
+
+        if (assignment_mode == ASSIGN_FRACTIONAL) {
+            // Traditional EM: scatter fractional posteriors
+            for (int j = 0; j < seg_len; ++j) weights[j] = posteriors[j];
+        } else {
+            // MAP or sample: threshold then renormalize
+            double renorm_sum = 0.0;
+            for (int j = 0; j < seg_len; ++j) {
+                if (posteriors[j] >= min_posterior) {
+                    weights[j] = posteriors[j];
+                    renorm_sum += posteriors[j];
+                } else {
+                    weights[j] = 0.0;
+                }
+            }
+            if (renorm_sum > 0.0) {
+                double inv = 1.0 / renorm_sum;
+                for (int j = 0; j < seg_len; ++j) weights[j] *= inv;
+            }
+
+            // Find winner index
+            int winner = -1;
+            if (assignment_mode == ASSIGN_MAP) {
+                // Maximum a posteriori: pick the highest posterior
+                double best = -1.0;
+                for (int j = 0; j < seg_len; ++j) {
+                    if (weights[j] > best) {
+                        best = weights[j];
+                        winner = j;
+                    }
+                }
+            } else {
+                // Sample: categorical draw from renormalized posteriors
+                double u = rng.uniform();
+                double cumulative = 0.0;
+                for (int j = 0; j < seg_len; ++j) {
+                    cumulative += weights[j];
+                    if (u < cumulative) {
+                        winner = j;
+                        break;
+                    }
+                }
+                // Edge case: rounding — assign to last non-zero
+                if (winner < 0) {
+                    for (int j = seg_len - 1; j >= 0; --j) {
+                        if (weights[j] > 0.0) { winner = j; break; }
+                    }
+                }
+            }
+
+            // Zero everything, set winner to 1.0
+            for (int j = 0; j < seg_len; ++j) weights[j] = 0.0;
+            if (winner >= 0) weights[winner] = 1.0;
+        }
+
         // Track max mRNA posterior for high-confidence gating
+        // (always use original posteriors for HC gating, not assignment weights)
         double max_mrna_posterior = 0.0;
 
-        // Scatter posteriors
+        // Scatter assignment weights
         for (int j = 0; j < seg_len; ++j) {
             int32_t comp = sub.t_indices[s + j];
-            double p = posteriors[j];
+            double p = weights[j];
             if (p == 0.0) continue;
 
             if (comp < n_t) {
@@ -1576,11 +1602,13 @@ static void assign_posteriors(
                 if (global_t < 0 || global_t >= N_T_TOTAL || col >= n_cols) continue;
                 em_counts_2d[global_t * n_cols + col] += p;
                 mrna_total += p;
-                if (p > max_mrna_posterior) max_mrna_posterior = p;
+                // Use original posteriors for HC gating
+                if (posteriors[j] > max_mrna_posterior)
+                    max_mrna_posterior = posteriors[j];
 
-                // Confidence tracking
-                posterior_sum[global_t] += p * p;
-                n_assigned[global_t] += p;
+                // Confidence tracking (use original posteriors)
+                posterior_sum[global_t] += posteriors[j] * posteriors[j];
+                n_assigned[global_t] += posteriors[j];
             } else if (comp < gdna) {
                 // nRNA — local nRNA index → global nRNA index
                 int32_t local_nrna = comp - n_t;
@@ -1596,11 +1624,11 @@ static void assign_posteriors(
         }
 
         // High-confidence mRNA: if max mRNA posterior >= threshold,
-        // scatter all mRNA posteriors in this unit to hc counts
+        // scatter all mRNA assignment weights in this unit to hc counts
         if (max_mrna_posterior >= confidence_threshold) {
             for (int j = 0; j < seg_len; ++j) {
                 int32_t comp = sub.t_indices[s + j];
-                double p = posteriors[j];
+                double p = weights[j];
                 if (comp < n_t && p > 0.0) {
                     int32_t global_t = local_to_global[comp];
                     uint8_t col = sub.count_cols[s + j];
@@ -1616,7 +1644,7 @@ static void assign_posteriors(
         for (int j = 0; j < seg_len; ++j) {
             int32_t c = sub.t_indices[s + j];
             if (c == gdna) {
-                gdna_unit_sum += posteriors[j];
+                gdna_unit_sum += weights[j];
             }
         }
         if (gdna_unit_sum > 0.0) {
@@ -1683,8 +1711,10 @@ batch_locus_em(
     double convergence_delta,
     double total_pseudocount,
     bool   use_vbem,
-    double prune_threshold,
     double confidence_threshold,
+    int    assignment_mode,
+    double assignment_min_posterior,
+    uint64_t rng_seed,
     int    n_transcripts_total,
     int    n_splice_strand_cols,
     int    n_threads)
@@ -1913,14 +1943,18 @@ batch_locus_em(
                 prior.data(),
                 theta_init.data(),
                 nc, max_iterations, convergence_delta,
-                use_vbem, prune_threshold,
+                use_vbem,
                 estep_thr, pool);
 
             // 8. Assign posteriors (writes to disjoint transcript
             //    indices — safe across threads, no atomics needed)
+            // Per-locus deterministic RNG: mix base seed with locus index
+            // to ensure reproducibility regardless of thread scheduling.
+            SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
             double locus_mrna = 0.0, locus_nrna = 0.0, locus_gdna = 0.0;
             assign_posteriors(
                 sub, result.theta.data(), confidence_threshold,
+                assignment_mode, assignment_min_posterior, locus_rng,
                 em_out, hc_out, nrna_out, gdna_out,
                 psum_out, nass_out,
                 locus_mrna, locus_nrna, locus_gdna,
@@ -2302,7 +2336,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("max_iterations"),
           nb::arg("convergence_delta"),
           nb::arg("use_vbem"),
-          nb::arg("prune_threshold"),
           nb::arg("n_transcripts"),
           nb::arg("n_nrna"),
           nb::arg("t_to_nrna"),
@@ -2350,8 +2383,10 @@ NB_MODULE(_em_impl, m) {
           nb::arg("convergence_delta"),
           nb::arg("total_pseudocount"),
           nb::arg("use_vbem"),
-          nb::arg("prune_threshold"),
           nb::arg("confidence_threshold"),
+          nb::arg("assignment_mode"),
+          nb::arg("assignment_min_posterior"),
+          nb::arg("rng_seed"),
           nb::arg("n_transcripts_total"),
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
@@ -2359,6 +2394,7 @@ NB_MODULE(_em_impl, m) {
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"
           "Returns (total_gdna_em, locus_mrna, locus_nrna, locus_gdna).\n\n"
+          "assignment_mode: 0=fractional, 1=map, 2=sample.\n"
           "n_threads: 0 = all cores, 1 = sequential, N = cap at N threads.");
 
     m.def("connected_components", &connected_components_native,

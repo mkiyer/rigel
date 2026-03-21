@@ -47,7 +47,7 @@ the final value is resolved as: **explicit CLI flag → YAML config file → dat
 | `--em-prior-gamma` | 1.0 | OVR (One Virtual Read) prior scale factor. Controls how strongly coverage-weighted OVR priors influence the EM. 0.0 disables OVR. |
 | `--em-convergence-delta` | 1e-6 | Convergence threshold for EM parameter updates. |
 | `--confidence-threshold` | 0.95 | Minimum RNA-normalized posterior for high-confidence assignment. |
-| `--prune-threshold` | 0.1 | Post-EM pruning evidence-ratio threshold. Components with zero unambiguous evidence and an evidence ratio (data\_count / alpha) below this value are zeroed out and the EM re-runs to redistribute mass. Set to -1 to disable. |
+| `--assignment-mode` | `sample` | Post-EM fragment assignment mode. `fractional` preserves EM posterior weights (traditional). `map` assigns each fragment to its highest-posterior component. `sample` draws from the posterior distribution. |
 | `--em-mode` | `vbem` | EM algorithm variant. `map` uses MAP-EM with hard max(0, n+α−1) updates; `vbem` uses Variational Bayes EM with digamma-based soft updates. |
 | `--nrna-sparsity-alpha` | 0.9 | Dirichlet α for nRNA EM components. Values < 1.0 create a sparsifying prior that drives weak nRNA components toward zero. 1.0 = flat (off), 0.9 = mild, 0.5 = moderate, 0.3 = strong. Does not affect mRNA accuracy. |
 | `--gdna-prior-scale` | 1.0 | Scale factor for the Empirical Bayes gDNA prior anchor. The gDNA prior is α = 1 + scale × gdna\_init, where gdna\_init is the EB estimate. 0 = ignore EB (flat unit prior), 1.0 = default, higher = stronger anchor. |
@@ -78,6 +78,12 @@ the final value is resolved as: **explicit CLI flag → YAML config file → dat
 ---
 
 ## Advanced Options
+
+### Fragment Assignment
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--assignment-min-posterior` | 0.01 | Minimum posterior for a component to be eligible for discrete assignment (`map`/`sample` modes). Components below this threshold are zeroed before assignment. Ignored for `fractional` mode. |
 
 ### gDNA Rate Hierarchical Shrinkage
 

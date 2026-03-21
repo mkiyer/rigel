@@ -229,7 +229,7 @@ Two solver modes are available, selected via `--em-mode`:
 - **VBEM** (`vbem`, default): M-step uses digamma-based variational updates
   $\exp(\psi(n_k + \alpha_k))$, yielding softer posterior estimates.
 
-Both modes share the same E-step, SQUAREM acceleration, and pruning logic.
+Both modes share the same E-step and SQUAREM acceleration.
 
 ### 8.1 E-step
 
@@ -268,16 +268,33 @@ span rather than one per transcript.
 The native solver accelerates the simplex updates with SQUAREM. This is the
 dominant compute kernel in realistic runs and is where most runtime is spent.
 
-### 8.4 Pruning
+### 8.4 Post-EM fragment assignment
 
-After convergence, components with zero deterministic support and insufficient
-data-to-prior evidence may be pruned according to `prune_threshold`, then the
-EM is rerun once to redistribute mass.
+After the EM converges, each ambiguous fragment is assigned to components
+using one of three modes controlled by `--assignment-mode`:
+
+| Mode | Behavior |
+|------|----------|
+| `fractional` | Traditional EM expected-count assignment. Each fragment's probability mass is split across candidate components proportionally to the posterior. Counts are real-valued. |
+| `map` | Maximum a posteriori. Each fragment is assigned entirely (weight 1.0) to the candidate with the highest posterior. All other candidates receive 0. Counts are integers. |
+| `sample` **(default)** | Categorical draw. Each fragment is assigned to one candidate drawn from the posterior distribution. Counts are integers. Deterministic given a fixed `--seed`. |
+
+For `map` and `sample` modes, a threshold filter is applied first:
+components with posterior below `--assignment-min-posterior` (default 0.01)
+are zeroed, and the remaining posteriors are renormalized before the
+discrete selection step. This prevents near-zero components from being
+selected by chance.
+
+The per-locus RNG for `sample` mode is seeded deterministically from the
+global `--seed` and the locus index, ensuring reproducibility regardless
+of thread scheduling.
 
 ### 8.5 Confidence assignments
 
 Rigel separately tracks high-confidence RNA assignments using the
-RNA-normalized posterior and `confidence_threshold`.
+RNA-normalized posterior and `confidence_threshold`. High-confidence
+gating always uses the original (pre-thresholding) fractional posteriors,
+regardless of `--assignment-mode`.
 
 ---
 

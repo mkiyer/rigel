@@ -199,7 +199,6 @@ underscores or hyphens.
 | `--em-prior-alpha` | `0.01` | Flat Dirichlet pseudocount per eligible component |
 | `--em-prior-gamma` | `1.0` | OVR prior scale factor |
 | `--em-convergence-delta` | `1e-6` | Convergence threshold |
-| `--prune-threshold` | `0.1` | Post-EM evidence-ratio threshold; set negative to disable |
 | `--confidence-threshold` | `0.95` | RNA-normalized posterior threshold for high-confidence assignment |
 | `--em-mode` | `vbem` | EM algorithm variant: `map` (MAP-EM) or `vbem` (Variational Bayes EM) |
 | `--nrna-sparsity-alpha` | `0.9` | Dirichlet α for nRNA components. Values < 1.0 sparsify weak nRNA toward zero |
@@ -260,7 +259,6 @@ em_prior_alpha: 0.02
 em_prior_gamma: 1.0
 em_iterations: 1000
 confidence_threshold: 0.95
-prune_threshold: 0.1
 
 include_multimap: true
 keep_duplicates: false
@@ -494,7 +492,6 @@ cat > project_config.yaml << 'EOF'
 em_prior_alpha: 0.01
 em_prior_gamma: 1.0
 confidence_threshold: 0.95
-prune_threshold: 0.1
 threads: 16
 seed: 42
 include_multimap: true

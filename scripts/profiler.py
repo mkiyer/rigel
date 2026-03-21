@@ -290,7 +290,6 @@ def _build_pipeline_config(
         "em_prior_alpha": "prior_alpha",
         "em_prior_gamma": "prior_gamma",
         "em_mode": "mode",
-        "prune_threshold": "prune_threshold",
         "confidence_threshold": "confidence_threshold",
         "n_threads": "n_threads",
     }

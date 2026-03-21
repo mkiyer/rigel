@@ -73,9 +73,9 @@ print("MAP vs VBEM COMPARISON")
 print("=" * 74)
 df_mode = pd.read_csv(f"{golden}/locus_simple_em_mode/sweep_results.tsv", sep="\t")
 both = df_mode[(df_mode["TA1"] > 0) & (df_mode["NTA1"] > 0)]
-print(f"\n{'mode':>6} {'prune':>8} {'n':>4} {'mRNA_err':>10} {'nRNAerr':>10}")
-for (mode, prune), grp in both.groupby(["mode", "prune_threshold"]):
-    print(f"{mode:>6} {prune:>8.1f} {len(grp):>4} {grp['total_mrna_rel_err'].mean():>10.3f} "
+print(f"\n{'mode':>6} {'n':>4} {'mRNA_err':>10} {'nRNAerr':>10}")
+for mode, grp in both.groupby("mode"):
+    print(f"{mode:>6} {len(grp):>4} {grp['total_mrna_rel_err'].mean():>10.3f} "
           f"{grp['nrna_rel_err'].mean():>10.3f}")
 
 # Strand specificity sensitivity

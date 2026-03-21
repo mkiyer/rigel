@@ -585,7 +585,6 @@ def _build_pipeline_config(
         "em_mode": "mode",
         "nrna_sparsity_alpha": "nrna_sparsity_alpha",
         "gdna_prior_scale": "gdna_prior_scale",
-        "prune_threshold": "prune_threshold",
         "confidence_threshold": "confidence_threshold",
     }
     for raw_key, cfg_key in _EM_ALIASES.items():

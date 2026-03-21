@@ -1,6 +1,7 @@
 # Benchmark v6 Analysis: Pruning Impact × Oracle/Minimap2 vs Salmon/Kallisto
 
 **Date:** 2026-03-20  
+**Updated:** 2026-03-21 — Re-run with multimapper counting bugfix in `bam_scanner.cpp`  
 **Config:** [scripts/benchmark_v6_prune.yaml](../../scripts/benchmark_v6_prune.yaml)  
 **Data:** HeLa/Cervix simulation, 10M RNA fragments/condition, 9 conditions (3 gDNA × 3 SS)  
 **Analysis script:** [scripts/debug/benchmark_v6_analysis.py](../../scripts/debug/benchmark_v6_analysis.py)  
@@ -23,7 +24,7 @@
 
 ### Pruning Has Negligible Impact on Accuracy
 
-**Post-EM pruning does not meaningfully affect results.** Disabling pruning changes the average transcript-level MAE by just +0.34% for oracle alignments and −0.00% for minimap2. The false negative rate — which we hypothesized pruning would improve — drops from 1,390 to 1,388 FNs with oracle (2 fewer out of ~14,600 highly expressed transcripts). Only **21 transcripts** were "rescued" by disabling pruning across all 118K+ transcripts, all in multi-isoform genes with median 7 isoforms. The false negatives are overwhelmingly an **identifiability problem**, not a pruning artifact.
+**Post-EM pruning does not meaningfully affect results.** Disabling pruning changes the average transcript-level MAE by just +0.52% for oracle alignments and +0.03% for minimap2. The false negative rate — which we hypothesized pruning would improve — drops from 1,391 to 1,388 FNs with oracle (3 fewer out of ~14,600 highly expressed transcripts). Only **20 transcripts** were \"rescued\" by disabling pruning across all 118K+ transcripts, all in multi-isoform genes with median 6 isoforms. The false negatives are overwhelmingly an **identifiability problem**, not a pruning artifact.
 
 ### Rigel Dominates at Both Alignment Levels
 
@@ -35,7 +36,7 @@ The gap from oracle (MAE=0.95) to minimap2 (MAE=2.41) — a 2.5× degradation �
 
 ### Tripartite Pool Estimation: nRNA and gDNA Accuracy (§10)
 
-With strong strand signal (ss≥0.90) and oracle alignments, Rigel achieves **<1.3% error on all three pools** — near-perfect separation of mRNA, nRNA, and gDNA. At ss=0.50 (unstranded), 10–20% of nRNA fragments leak into gDNA because the two pools are indistinguishable without strand orientation. mRNA estimates remain robust regardless (worst case: −0.47%). With minimap2, gDNA is systematically overestimated by 50–87% due to multimapper-induced fragment inflation (+8–17% total fragment excess).
+With strong strand signal (ss≥0.90) and oracle alignments, Rigel achieves **<1.3% error on all three pools** — near-perfect separation of mRNA, nRNA, and gDNA. At ss=0.50 (unstranded), 10–20% of nRNA fragments leak into gDNA because the two pools are indistinguishable without strand orientation. mRNA estimates remain robust regardless (worst case: −0.47%). With minimap2 (after the multimapper counting bugfix), gDNA estimation is now excellent: **−1.12% overall error** with a slight under-prediction at high contamination (−3–5%) and slight over-prediction at low contamination (+0.8–5.4%). The fragment budget deficit is −0.3% to −2.0%, consistent with unmapped/chimeric reads.
 
 ---
 
@@ -69,30 +70,30 @@ Disabling pruning yields negligible FN improvement. The FNs are caused by the **
 
 | Condition | Prune ON | Prune OFF | Δ% |
 |-----------|----------|-----------|-----|
-| gdna_none, ss=0.50 | 0.9448 | 0.9482 | +0.36% |
-| gdna_none, ss=0.90 | 0.9319 | 0.9322 | +0.03% |
-| gdna_none, ss=1.00 | 0.9162 | 0.9205 | +0.47% |
-| gdna_low, ss=0.50 | 0.9324 | 0.9310 | −0.15% |
-| gdna_low, ss=0.90 | 0.9447 | 0.9365 | −0.86% |
-| gdna_low, ss=1.00 | 0.9505 | 0.9427 | −0.82% |
-| gdna_high, ss=0.50 | 0.9861 | 0.9956 | +0.97% |
-| gdna_high, ss=0.90 | 0.9414 | 0.9500 | +0.91% |
-| gdna_high, ss=1.00 | 0.9836 | 1.0036 | +2.03% |
-| **AVERAGE** | **0.9479** | **0.9511** | **+0.34%** |
+| gdna_none, ss=0.50 | 0.9479 | 0.9501 | +0.23% |
+| gdna_none, ss=0.90 | 0.9317 | 0.9345 | +0.30% |
+| gdna_none, ss=1.00 | 0.9202 | 0.9188 | −0.15% |
+| gdna_low, ss=0.50 | 0.9316 | 0.9325 | +0.09% |
+| gdna_low, ss=0.90 | 0.9380 | 0.9486 | +1.13% |
+| gdna_low, ss=1.00 | 0.9434 | 0.9587 | +1.62% |
+| gdna_high, ss=0.50 | 0.9919 | 0.9892 | −0.27% |
+| gdna_high, ss=0.90 | 0.9466 | 0.9480 | +0.16% |
+| gdna_high, ss=1.00 | 0.9869 | 1.0020 | +1.53% |
+| **AVERAGE** | **0.9487** | **0.9536** | **+0.52%** |
 
 **Minimap2 alignments:**
 
 | Metric | Prune ON | Prune OFF | Δ% |
 |--------|----------|-----------|-----|
-| Avg MAE | 2.4087 | 2.4086 | −0.00% |
-| Pearson | 0.985587 | 0.985590 | negligible |
+| Avg MAE | 2.4086 | 2.4093 | +0.03% |
+| Pearson | 0.985588 | 0.985582 | negligible |
 
 **Gene-level:**
 
 | Aligner | Prune ON | Prune OFF | Δ% |
 |---------|----------|-----------|-----|
-| Oracle | 0.4063 | 0.4107 | +1.08% |
-| Minimap2 | 2.0619 | 2.0619 | −0.00% |
+| Oracle | 0.4066 | 0.4116 | +1.23% |
+| Minimap2 | 2.0618 | 2.0623 | +0.02% |
 
 **Pruning has near-zero effect on minimap2** because the alignment noise dominates any post-EM fine-tuning. With oracle alignments, pruning provides a slight benefit at high gDNA levels (+2% lower MAE) but slightly hurts at low gDNA (−0.8%).
 
@@ -100,36 +101,36 @@ Disabling pruning yields negligible FN improvement. The FNs are caused by the **
 
 | Aligner | Tool | Avg FP | Avg FN (truth>10) |
 |---------|------|--------|-------------------|
-| Oracle | prune ON | 1,091 | **1,390** |
+| Oracle | prune ON | 1,091 | **1,391** |
 | Oracle | prune OFF | 1,092 | **1,388** |
-| Minimap2 | prune ON | 3,978 | **1,878** |
+| Minimap2 | prune ON | 3,978 | **1,877** |
 | Minimap2 | prune OFF | 3,983 | **1,864** |
 
-Disabling pruning rescues only **2 FNs** with oracle and **14 FNs** with minimap2 — out of ~14,600 highly expressed transcripts.
+Disabling pruning rescues only **3 FNs** with oracle and **13 FNs** with minimap2 — out of ~14,600 highly expressed transcripts.
 
 ### Rescued Transcripts (Oracle, gdna_low ss=0.90)
 
-Only 21 transcripts were rescued (FN with pruning → detected without). All are in multi-isoform genes (median 7 isoforms per gene, no single-isoform rescues):
+Only 20 transcripts were rescued (FN with pruning → detected without). All are in multi-isoform genes (median 6 isoforms per gene, no single-isoform rescues):
 
 | Transcript | Gene | Truth | Prune ON | Prune OFF |
 |------------|------|-------|----------|-----------|
-| ENST00000646319 | DDX3X | 531 | 0.0 | 549.8 |
-| ENST00000261772 | AARS1 | 287 | 0.0 | 269.7 |
-| ENST00000444746 | RIF1 | 226 | 0.0 | 209.7 |
-| ENST00000389266 | GARS1 | 197 | 0.0 | 218.6 |
-| ENST00000356401 | ARIH2 | 155 | 0.0 | 113.9 |
-| ENST00000267973 | SKIC8 | 144 | 0.0 | 145.2 |
-| ... (15 more) | | | | |
+| ENST00000439958 | CPSF7 | 197 | 0.0 | 231.6 |
+| ENST00000356401 | ARIH2 | 155 | 0.0 | 107.4 |
+| ENST00000372806 | STK4 | 115 | 0.0 | 111.9 |
+| ENST00000538426 | OTUB1 | 115 | 0.0 | 108.5 |
+| ENST00000592224 | SAFB | 85 | 0.0 | 96.2 |
+| ENST00000251143 | VPS35L | 78 | 0.0 | 11.8 |
+| ... (14 more) | | | | |
 
-These rescues are real and meaningful (DDX3X: truth=531 recovered to 549.8), but they're rare: 21 out of 1,325 FNs (1.6%).
+These rescues are real and meaningful (CPSF7: truth=197 recovered to 231.6), but they're rare: 20 out of 1,322 FNs (1.5%).
 
 ### Per-Transcript Win Rate (Oracle, prune ON vs OFF)
 
 | | Count | % |
 |---|-------|---|
-| Prune ON wins | 5,469 | 17.2% |
-| Prune OFF wins | 15,547 | 48.9% |
-| Ties | 10,789 | 33.9% |
+| Prune ON wins | 5,508 | 17.3% |
+| Prune OFF wins | 15,474 | 48.7% |
+| Ties | 10,823 | 34.0% |
 
 **Paradox:** Pruning OFF "wins" on nearly 3× more transcripts, yet its average MAE is slightly *worse*. Explanation: disabling pruning produces many tiny improvements (rounding-level changes on thousands of transcripts) but also occasional large regressions (particularly at high gDNA), resulting in a net wash or slight degradation.
 
@@ -194,7 +195,7 @@ Even with realistic alignments, rigel wins the majority of per-transcript compar
 
 | Tool | MAE | RMSE | Pearson |
 |------|-----|------|---------|
-| **rigel_oracle** | **0.95** | **7.70** | **0.9989** |
+| **rigel_oracle** | **0.95** | **7.73** | **0.9989** |
 | salmon | 10.19 | 76.73 | 0.9540 |
 | kallisto | 15.89 | 97.47 | 0.9302 |
 
@@ -221,8 +222,8 @@ The oracle MAE is remarkably stable across all 9 conditions: 0.92–0.99 (7% var
 | Stratum | rigel_oracle | salmon | kallisto | Rigel advantage |
 |---------|-------------|--------|----------|-----------------|
 | Low (0, Q25] | 1.50 | 10.33 | 15.72 | 6.9× |
-| Mid (Q25, Q75] | 6.06 | 21.24 | 29.47 | 3.5× |
-| High (>Q75) | 14.24 | 48.65 | 81.02 | 3.4× |
+| Mid (Q25, Q75] | 6.03 | 21.24 | 29.47 | 3.5× |
+| High (>Q75) | 14.13 | 48.65 | 81.02 | 3.4× |
 | Zero truth | 0.18 | 2.62 | 4.74 | **14.6×** |
 
 ### Minimap2 (gdna_low, ss=0.90)
@@ -231,7 +232,7 @@ The oracle MAE is remarkably stable across all 9 conditions: 0.92–0.99 (7% var
 |---------|--------------|
 | Low (0, Q25] | 2.90 |
 | Mid (Q25, Q75] | 7.43 |
-| High (>Q75) | 33.32 |
+| High (>Q75) | 33.33 |
 | Zero truth | 0.70 |
 
 Minimap2 rigel is consistently better than salmon across all strata (salmon MAE: 10.33/21.24/48.65/2.62).
@@ -244,27 +245,27 @@ Minimap2 rigel is consistently better than salmon across all strata (salmon MAE:
 
 | Metric | rigel_oracle | salmon | kallisto |
 |--------|-------------|--------|----------|
-| P50 abs error | 2.55 | 5.00 | 9.31 |
-| P90 abs error | 16.05 | 47.72 | 74.67 |
-| P95 abs error | 26.17 | 88.00 | 134.01 |
-| P99 abs error | 59.32 | 292.45 | 465.72 |
-| Mean signed error | −0.69 | +13.18 | +25.25 |
+| P50 abs error | 2.54 | 5.00 | 9.31 |
+| P90 abs error | 16.07 | 47.72 | 74.67 |
+| P95 abs error | 26.15 | 88.00 | 134.01 |
+| P99 abs error | 59.00 | 292.45 | 465.72 |
+| Mean signed error | −0.68 | +13.18 | +25.25 |
 | FP rate (truth=0) | **1.4%** | 22.3% | 39.8% |
-| FN rate (truth>10) | 9.1% | **6.7%** | **5.5%** |
+| FN rate (truth>10) | 9.0% | **6.7%** | **5.5%** |
 
 ### Minimap2
 
 | Metric | rigel_mm2 |
 |--------|----------|
 | P50 abs error | 3.06 |
-| P90 abs error | 23.53 |
-| P95 abs error | 40.66 |
+| P90 abs error | 23.55 |
+| P95 abs error | 40.62 |
 | P99 abs error | 137.06 |
 | Mean signed error | −6.28 |
 | FP rate | 4.6% |
 | FN rate | 10.8% |
 
-**Key trade-off:** Rigel has the lowest false positive rate (1.4% oracle, 4.6% mm2) by a wide margin, but the highest false negative rate (9.1% oracle, 10.8% mm2). This is inherited from the EM's identifiability problem — isoforms sharing sequence collapse to one winner — not from pruning.
+**Key trade-off:** Rigel has the lowest false positive rate (1.4% oracle, 4.6% mm2) by a wide margin, but the highest false negative rate (9.0% oracle, 10.8% mm2). This is inherited from the EM's identifiability problem — isoforms sharing sequence collapse to one winner — not from pruning.
 
 ---
 
@@ -275,7 +276,7 @@ Minimap2 rigel is consistently better than salmon across all strata (salmon MAE:
 | nRNA:mRNA Ratio | N | rigel_oracle MAE | salmon MAE | kallisto MAE |
 |-----------------|---|------------------|------------|--------------|
 | 0 (no nRNA) | 4,352 | 1.74 | 20.52 | 23.04 |
-| 0 < ratio ≤ 1 | 6,385 | 7.53 | 28.45 | 37.58 |
+| 0 < ratio ≤ 1 | 6,385 | 7.52 | 28.45 | 37.58 |
 | 1 < ratio ≤ 5 | 10,623 | 7.99 | 25.94 | 40.31 |
 | ratio > 5 | 10,445 | 6.94 | 18.60 | 38.98 |
 
@@ -292,9 +293,9 @@ Rigel outperforms at all nRNA strata. With minimap2, the rigel MAE ranges from 6
 | Isoform Count | rigel_oracle MAE | salmon MAE | kallisto MAE |
 |---------------|------------------|------------|--------------|
 | 1 isoform | 2.14 | 21.56 | 31.10 |
-| 2 isoforms | 6.28 | 20.60 | 38.26 |
+| 2 isoforms | 6.27 | 20.60 | 38.26 |
 | 3-5 isoforms | 7.61 | 20.93 | 33.03 |
-| 6-10 isoforms | 8.37 | 26.76 | 44.08 |
+| 6-10 isoforms | 8.38 | 26.76 | 44.08 |
 | >10 isoforms | 8.36 | 31.65 | 44.66 |
 
 ### Minimap2
@@ -317,8 +318,8 @@ Rigel's pool-level mRNA estimates remain excellent:
 
 | Aligner | Best Condition | Worst Condition |
 |---------|---------------|-----------------|
-| Oracle | +0.03% (gdna_high, ss=0.90) | −0.71% (gdna_high, ss=1.00) |
-| Minimap2 | −1.00% (gdna_high, ss=0.90) | −3.02% (gdna_high, ss=0.50) |
+| Oracle | +0.03% (gdna_high, ss=0.90) | −0.70% (gdna_high, ss=1.00) |
+| Minimap2 | −1.01% (gdna_high, ss=0.90) | −3.02% (gdna_high, ss=0.50) |
 
 The tripartite model correctly partitions fragments regardless of pruning. Pruning ON vs OFF produces identical pool-level totals (within 0.01%).
 
@@ -346,11 +347,11 @@ Unlike salmon and kallisto, which report only mature RNA abundance, Rigel's trip
 | gDNA Level | mRNA Error | nRNA Error | gDNA Error |
 |------------|-----------|-----------|-----------|
 | none (0%) | −1.19% | −0.65% | N/A (truth=0) |
-| low (20%) | −1.64% | −1.51% | +82.75% |
-| high (50%) | −1.77% | −1.40% | +53.84% |
-| **OVERALL** | **−1.53%** | **−1.19%** | **+68.30%** |
+| low (20%) | −1.64% | −1.51% | +0.84% |
+| high (50%) | −1.77% | −1.40% | −3.07% |
+| **OVERALL** | **−1.53%** | **−1.19%** | **−1.12%** |
 
-**Key insight:** mRNA estimation is excellent with both aligners (−0.24% oracle, −1.53% minimap2). nRNA estimation is good on average but has a bimodal failure mode driven by strand specificity (see §10.2). gDNA is systematically overestimated, especially with minimap2 (+68%).
+**Key insight:** mRNA estimation is excellent with both aligners (−0.24% oracle, −1.53% minimap2). nRNA estimation is good on average but has a bimodal failure mode driven by strand specificity (see §10.2). gDNA estimation is now excellent with both aligners after the multimapper counting bugfix: oracle shows +11.9% overall error (driven by ss=0.50 nRNA→gDNA leakage), while minimap2 achieves −1.12% overall error.
 
 ### 10.2 Strand Specificity Is the Dominant Factor for nRNA/gDNA Separation
 
@@ -390,13 +391,13 @@ When `gdna_truth=0`, ideally Rigel would predict zero genomic DNA. In practice:
 
 | Condition | Phantom gDNA Predicted | % of Total Fragments |
 |-----------|----------------------|---------------------|
-| ss=0.50 | 903,416 | 9.0% |
-| ss=0.90 | 881,441 | 8.8% |
-| ss=1.00 | 871,991 | 8.7% |
+| ss=0.50 | 67,330 | 0.67% |
+| ss=0.90 | 45,729 | 0.46% |
+| ss=1.00 | 33,683 | 0.34% |
 
 **Oracle** shows a stark dichotomy: at ss=0.50, 1.6M phantom gDNA fragments (16% of total!) are predicted; at ss≥0.90, phantom gDNA is negligible (~0.1%). This confirms that the phantom gDNA is specifically nRNA fragments that lack strand discrimination.
 
-**Minimap2** shows a consistent ~9% phantom gDNA regardless of strand specificity. This is a separate phenomenon: the minimap2 fragment budget exceeds truth by ~8% due to multimapper-induced double-counting (see §10.5). The excess fragments are classified as gDNA because they cannot be accounted for by any mRNA or nRNA component.
+**Minimap2** now shows very low phantom gDNA across all strand specificity levels (0.3–0.7%), consistent with the oracle behavior at ss≥0.90. After the multimapper counting bugfix, the minimap2 fragment budget no longer inflates, eliminating the previous ~9% phantom gDNA that was caused by excess fragments being dumped into the gDNA pool.
 
 ### 10.4 nRNA→gDNA Leakage: Fragment Accounting
 
@@ -425,17 +426,17 @@ The nRNA under-prediction and gDNA overestimation are two sides of the same coin
 
 | Condition | nRNA→gDNA Leak (% of nRNA truth) |
 |-----------|----------------------------------|
-| gdna_none, ss=0.50 | 11.14% |
-| gdna_none, ss=0.90 | 10.87% |
-| gdna_none, ss=1.00 | 10.75% |
-| gdna_low, ss=0.50 | **21.56%** |
-| gdna_low, ss=0.90 | 20.01% |
-| gdna_low, ss=1.00 | 19.66% |
-| gdna_high, ss=0.50 | **35.14%** |
-| gdna_high, ss=0.90 | 32.39% |
-| gdna_high, ss=1.00 | 32.04% |
+| gdna_none, ss=0.50 | 0.83% |
+| gdna_none, ss=0.90 | 0.56% |
+| gdna_none, ss=1.00 | 0.42% |
+| gdna_low, ss=0.50 | 1.33% |
+| gdna_low, ss=0.90 | 0.00% (gDNA under-estimated) |
+| gdna_low, ss=1.00 | 0.00% (gDNA under-estimated) |
+| gdna_high, ss=0.50 | 0.03% |
+| gdna_high, ss=0.90 | 0.00% (gDNA under-estimated) |
+| gdna_high, ss=1.00 | 0.00% (gDNA under-estimated) |
 
-With minimap2, the leakage is substantial and **strand-independent** — confirming that minimap2's gDNA overestimation is driven by alignment-level fragment inflation, not the strand model.
+With minimap2 (after the multimapper counting bugfix), the nRNA→gDNA leakage is negligible — under 1.4% everywhere. The gDNA pool is now slightly **under-estimated** at higher contamination levels, which is the opposite direction from the pre-fix behavior. This is because minimap2's fragment budget runs slightly below truth (−0.3% to −2.0%), and the deficit is distributed across all pools.
 
 ### 10.5 Fragment Budget: Total Fragment Accounting
 
@@ -453,19 +454,19 @@ Rigel's pools should sum to the total input fragments. With oracle alignments, t
 
 | gDNA Level | Total Truth | Total Predicted | Δ% |
 |------------|------------|-----------------|-----|
-| none | 10,000,000 | 10,809,186–10,812,243 | **+8.1%** |
-| low | 12,000,000 | 13,497,136–13,504,184 | **+12.5%** |
-| high | 15,000,000 | 17,540,462–17,547,035 | **+17.0%** |
+| none | 10,000,000 | 9,973,474–9,973,935 | **−0.26%** |
+| low | 12,000,000 | 11,863,321–11,863,734 | **−1.14%** |
+| high | 15,000,000 | 14,698,744–14,699,279 | **−2.01%** |
 
-The minimap2 inflation scales with gDNA level because gDNA fragments (intergenic, non-genic) tend to multimap more when aligned to a transcriptome-aware aligner. The excess is absorbed entirely by the gDNA pool, inflating gDNA estimates by 50–87%.
+The minimap2 fragment budget now shows a **slight deficit** (−0.3% to −2.0%) consistent with unmapped/chimeric reads, similar in direction to oracle. The deficit scales with gDNA level because intergenic gDNA fragments have lower alignment rates. This is a dramatic improvement from the pre-bugfix values (+8.1%, +12.5%, +17.0%) which were caused by multimapper double-counting in `bam_scanner.cpp`.
 
 ### 10.6 Implications for Real Data
 
-1. **For stranded libraries (ss≥0.90):** Rigel's tripartite decomposition is near-perfect with oracle alignments (<1.3% error on all pools). Real-world accuracy will depend primarily on alignment quality.
+1. **For stranded libraries (ss≥0.90):** Rigel's tripartite decomposition is near-perfect with both oracle and minimap2 alignments (<1.3% error on all pools with oracle; <5% gDNA error with minimap2). The multimapper counting bugfix has eliminated the previous systematic gDNA inflation.
 
-2. **For unstranded libraries (ss≈0.50):** Users should interpret nRNA and gDNA pool estimates with caution — expect ~10–20% of nRNA to be reported as gDNA. The mRNA estimates remain accurate (−0.47% even at ss=0.50) because the mRNA→nRNA/gDNA confusion is limited to unspliced intronic fragments that do not overlap mature exons.
+2. **For unstranded libraries (ss≈0.50):** With oracle alignments, expect ~10–20% of nRNA to be reported as gDNA (fundamental identifiability limit). With minimap2, nRNA→gDNA leakage is minimal (<1.4%), but mRNA and nRNA are slightly under-predicted (~1–3%).
 
-3. **Minimap2 gDNA inflation:** The systematic +50–87% gDNA overestimation with minimap2 is driven by multimapper fragment inflation, not the statistical model. This should be addressed at the alignment/counting layer, not the EM.
+3. **Minimap2 fragment budget:** The fragment budget now runs slightly below truth (−0.3% to −2.0%) due to unmapped/chimeric reads, consistent with oracle behavior. The pre-fix +8–17% inflation caused by multimapper double-counting has been eliminated.
 
 ---
 
@@ -473,8 +474,8 @@ The minimap2 inflation scales with gDNA level because gDNA fragments (intergenic
 
 | Tool | Avg Time (s) | Avg RSS (MB) | Throughput |
 |------|-------------|-------------|------------|
-| rigel_oracle | 416 | 21,616 | 64K frags/s |
-| rigel_minimap2 | 480 | 22,745 | 66K frags/s |
+| rigel_oracle | 422 | 22,271 | 63K frags/s |
+| rigel_minimap2 | 500 | 23,557 | 63K frags/s |
 | salmon | 215 | — | 57K frags/s |
 | kallisto | 88 | — | 141K frags/s |
 
@@ -488,10 +489,10 @@ Pruning has zero impact on runtime (±0.5%). Rigel is ~2× slower than salmon an
 
 | Rank | Tool | Avg Rank | Wins |
 |------|------|----------|------|
-| 1 | rigel_default_oracle | 1.33 | 6/9 conditions |
-| 2 | rigel_no_prune_oracle | 1.67 | 3/9 conditions |
-| 3 | rigel_default_minimap2 | 3.44 | 0 |
-| 4 | rigel_no_prune_minimap2 | 3.56 | 0 |
+| 1 | rigel_default_oracle | 1.22 | 7/9 conditions |
+| 2 | rigel_no_prune_oracle | 1.78 | 2/9 conditions |
+| 3 | rigel_default_minimap2 | 3.33 | 0 |
+| 4 | rigel_no_prune_minimap2 | 3.67 | 0 |
 | 5 | salmon | 5.00 | 0 |
 | 6 | kallisto | 6.00 | 0 |
 
@@ -499,8 +500,8 @@ Pruning has zero impact on runtime (±0.5%). Rigel is ~2× slower than salmon an
 
 | Rank | Tool | Avg Rank |
 |------|------|----------|
-| 1 | rigel_default_minimap2 | 1.44 |
-| 2 | rigel_no_prune_minimap2 | 1.56 |
+| 1 | rigel_default_minimap2 | 1.33 |
+| 2 | rigel_no_prune_minimap2 | 1.67 |
 | 3 | salmon | 3.00 |
 | 4 | kallisto | 4.00 |
 
@@ -512,7 +513,7 @@ Rigel wins **every condition** even with minimap2 alignments.
 
 ### Finding 1: Pruning Is Not the Problem
 
-The post-EM pruning mechanism has negligible impact on accuracy. The 9% false negative rate is driven by **EM convergence identifiability** — when isoforms share >90% of their sequence, the EM assigns all mass to one winner before pruning ever fires. Disabling pruning rescues only 21/1,325 FNs (1.6%) with oracle alignments.
+The post-EM pruning mechanism has negligible impact on accuracy. The 9% false negative rate is driven by **EM convergence identifiability** — when isoforms share >90% of their sequence, the EM assigns all mass to one winner before pruning ever fires. Disabling pruning rescues only 20/1,322 FNs (1.5%) with oracle alignments.
 
 **Recommendation:** Keep pruning enabled (default threshold=0.1). It's benign and provides a minor benefit at high gDNA levels. Future FN reduction efforts should focus on the EM initialization or regularization, not post-EM pruning.
 
@@ -531,13 +532,13 @@ The post-EM pruning mechanism has negligible impact on accuracy. The 9% false ne
 
 With oracle alignments and strong strand signal (ss≥0.90), Rigel achieves **<1.3% error on all three pools** — near-perfect tripartite decomposition. At ss=0.50 (unstranded), 10–20% of nRNA fragments leak into gDNA because the two pools share identical fragment-level features except strand orientation. **mRNA estimates are robust regardless of strand specificity** (worst case: −0.47%).
 
-With minimap2, gDNA is systematically overestimated by 50–87% due to multimapper-induced fragment inflation (+8–17% more total fragments than truth). This is an alignment-layer issue, not a model issue.
+With minimap2 (after the multimapper counting bugfix), gDNA estimation is now excellent: **−1.12% overall error**, with slight under-prediction at high contamination (−3–5%) and a small over-prediction at low contamination (+0.8–5.4%). The fragment budget is slightly below truth (−0.3% to −2.0%) due to unmapped/chimeric reads.
 
 | Pool | Oracle (ss≥0.90) | Oracle (ss=0.50) | Minimap2 (all SS) |
 |------|-----------------|-----------------|-------------------|
 | mRNA | −0.24% | −0.37% | −1.53% |
 | nRNA | −0.43% | **−15.87%** | −1.19% |
-| gDNA | +0.99% | **+34.51%** | **+68.30%** |
+| gDNA | +0.99% | **+34.51%** | **−1.12%** |
 
 ### Finding 4: The Oracle-to-Minimap2 Gap Is the Key Opportunity
 
@@ -545,7 +546,7 @@ With minimap2, gDNA is systematically overestimated by 50–87% due to multimapp
 |--------|--------|----------|-------------|
 | MAE | 0.95 | 2.41 | 2.5× |
 | Pearson | 0.9989 | 0.9856 | — |
-| FN rate | 9.1% | 10.8% | +1.7pp |
+| FN rate | 9.0% | 10.8% | +1.8pp |
 | FP rate | 1.3% | 4.6% | +3.3pp |
 
 The 2.5× gap is entirely alignment-driven. Improving alignment quality, MAPQ filtering, or minimap2 parameter tuning would directly translate to accuracy gains. This is the single largest opportunity for improving rigel's real-world performance.
@@ -567,7 +568,7 @@ Rigel trades higher FN rate (9%) for dramatically lower FP rate (1.4% vs 22% sal
 | 1 | ~~Disable pruning to reduce FNs~~ | ~~Moderate~~ | ~~Low~~ | **Refuted** — pruning has negligible effect |
 | 2 | **Close minimap2 gap** via alignment filtering/MAPQ weighting | High (2.5× MAE improvement potential) | Medium-High | |
 | 3 | **EM isoform regularization** — prevent full zeroing of near-identical isoforms within the EM | Moderate (targets 1,325 FNs) | Medium | |
-| 4 | **Minimap2 gDNA inflation** — fragment counting inflates totals by +8–17%, dumped into gDNA pool | High (68% gDNA overestimate) | Medium | |
+| 4 | ~~Minimap2 gDNA inflation~~ — ~~fragment counting inflates totals by +8–17%, dumped into gDNA pool~~ | ~~High (68% gDNA overestimate)~~ | ~~Medium~~ | **RESOLVED** — multimapper counting bugfix in `bam_scanner.cpp` eliminated the +8–17% fragment inflation. gDNA error now −1.12% overall |
 | 5 | **Unstranded nRNA/gDNA separation** — without strand signal, 10–20% of nRNA leaks into gDNA | Moderate (affects ss<0.90 only) | High (fundamental identifiability limit) | |
 | 6 | **Speed optimization** — reduce 416s runtime | High (user experience) | High | |
 | 7 | **Memory reduction** from 22 GB | Moderate (broader accessibility) | Medium | |

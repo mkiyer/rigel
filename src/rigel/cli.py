@@ -408,8 +408,9 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("prior_pseudocount", "em.prior_pseudocount"),
     _ParamSpec("em_iterations", "em.iterations"),
     _ParamSpec("em_convergence_delta", "em.convergence_delta"),
-    _ParamSpec("prune_threshold", "em.prune_threshold"),
     _ParamSpec("confidence_threshold", "em.confidence_threshold"),
+    _ParamSpec("assignment_mode", "em.assignment_mode"),
+    _ParamSpec("assignment_min_posterior", "em.assignment_min_posterior"),
     _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
@@ -709,6 +710,14 @@ def build_parser() -> argparse.ArgumentParser:
              "assignment (default: 0.95).",
     )
     quant_parser.add_argument(
+        "--assignment-mode", dest="assignment_mode",
+        choices=["fractional", "map", "sample"], default=None,
+        help="Post-EM fragment assignment mode. 'fractional' preserves "
+             "EM posterior weights (traditional). 'map' assigns each "
+             "fragment to its highest-posterior component. 'sample' draws "
+             "from the posterior distribution (default: sample).",
+    )
+    quant_parser.add_argument(
         "--annotated-bam", dest="annotated_bam", default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
              "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path.  "
@@ -724,13 +733,10 @@ def build_parser() -> argparse.ArgumentParser:
     # -- Advanced parameters --------------------------------------------------
     adv = quant_parser.add_argument_group("advanced options")
     adv.add_argument(
-        "--prune-threshold", dest="prune_threshold",
+        "--assignment-min-posterior", dest="assignment_min_posterior",
         type=float, default=None,
-        help="Post-EM pruning evidence-ratio threshold (default: 0.1). "
-             "Components with zero unambig evidence and evidence ratio "
-             "(data_count / alpha) below this value are zeroed out and "
-             "the EM is re-run to redistribute mass.  Set to -1 to "
-             "disable pruning entirely.",
+        help="Minimum posterior for a component to be eligible for "
+             "discrete assignment (map/sample modes). Default: 0.01.",
     )
     adv.add_argument(
         "--em-convergence-delta", dest="em_convergence_delta",

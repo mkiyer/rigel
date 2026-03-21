@@ -79,7 +79,7 @@ _SIM_SS65 = SimConfig(
 
 def _pipeline_config(seed=PIPELINE_SEED):
     return PipelineConfig(
-        em=EMConfig(seed=seed),
+        em=EMConfig(seed=seed, assignment_mode="fractional"),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
 

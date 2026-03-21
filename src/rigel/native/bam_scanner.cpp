@@ -1192,9 +1192,18 @@ private:
         bool is_unique_mapper = (num_hits == 1);
         int32_t n_buffered_mm = 0;
 
+        // Track per-molecule intergenic status across all hits.
+        // For multimappers: count intergenic only if NO hit resolves,
+        // and count it exactly once (not per-hit).
+        bool any_hit_resolved = false;
+        bool any_unresolved_spliced = false;
+        bool any_unresolved_unspliced = false;
+
+        // Count ONE fragment per physical molecule (not per hit).
+        stats.n_fragments++;
+
         for (const auto& [r1_reads, r2_reads] : all_hits) {
             AssembledFragment frag = build_fragment(r1_reads, r2_reads);
-            stats.n_fragments++;
 
             if (frag.exons.empty()) continue;
 
@@ -1204,10 +1213,12 @@ private:
                 frag.genomic_footprint(), cr, scratch);
 
             if (!resolved) {
+                // Defer intergenic counting until after all hits
+                // are processed to avoid multi-counting.
                 if (frag.has_introns()) {
-                    stats.n_intergenic_spliced++;
+                    any_unresolved_spliced = true;
                 } else {
-                    stats.n_intergenic_unspliced++;
+                    any_unresolved_unspliced = true;
                 }
 
                 if (is_unique_mapper && !frag.has_introns()) {
@@ -1237,6 +1248,8 @@ private:
                 continue;
             }
 
+            any_hit_resolved = true;
+
             ResolvedFragment result = ResolvedFragment::from_core(cr);
             result.num_hits = num_hits;
             result.nm = frag.nm;
@@ -1253,17 +1266,23 @@ private:
                 continue;
             }
 
-            stats.n_with_exon++;
-            if (result.splice_type == SPLICE_SPLICED_ANNOT) {
-                stats.n_with_annotated_sj++;
-            } else if (result.splice_type == SPLICE_SPLICED_UNANNOT) {
-                stats.n_with_unannotated_sj++;
-            }
+            // For multimappers, count exon/splice/strand stats only
+            // on the first resolved non-chimeric hit to avoid inflation.
+            bool count_stats = is_unique_mapper || (n_buffered_mm == 0);
 
-            if (result.get_is_same_strand()) {
-                stats.n_same_strand++;
-            } else {
-                stats.n_ambig_strand++;
+            if (count_stats) {
+                stats.n_with_exon++;
+                if (result.splice_type == SPLICE_SPLICED_ANNOT) {
+                    stats.n_with_annotated_sj++;
+                } else if (result.splice_type == SPLICE_SPLICED_UNANNOT) {
+                    stats.n_with_unannotated_sj++;
+                }
+
+                if (result.get_is_same_strand()) {
+                    stats.n_same_strand++;
+                } else {
+                    stats.n_ambig_strand++;
+                }
             }
 
             if (is_unique_mapper) {
@@ -1316,6 +1335,19 @@ private:
 
             if (!is_unique_mapper) {
                 n_buffered_mm++;
+            }
+        }
+
+        // Intergenic counting: only if NO hit resolved to transcripts.
+        // For a multimapper, if any hit resolves, the fragment goes
+        // through the EM which handles gDNA allocation — don't also
+        // count it as intergenic (that would double-count the molecule).
+        if (!any_hit_resolved &&
+            (any_unresolved_spliced || any_unresolved_unspliced)) {
+            if (any_unresolved_spliced) {
+                stats.n_intergenic_spliced++;
+            } else {
+                stats.n_intergenic_unspliced++;
             }
         }
 

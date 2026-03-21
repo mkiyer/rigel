@@ -291,6 +291,13 @@ class AbundanceEstimator:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
 
+        # Map assignment_mode string to int for C++: 0=fractional, 1=map, 2=sample
+        _ASSIGNMENT_MODE_MAP = {"fractional": 0, "map": 1, "sample": 2}
+        assignment_mode_int = _ASSIGNMENT_MODE_MAP[self.em_config.assignment_mode]
+
+        # Derive a per-batch RNG seed from the Python-level RNG
+        rng_seed = int(self._rng.integers(0, 2**63))
+
         total_gdna_em, locus_mrna, locus_nrna, locus_gdna = _batch_locus_em(
             # Global CSR
             em_data.offsets,
@@ -336,8 +343,10 @@ class AbundanceEstimator:
             em_convergence_delta,
             self.em_config.prior_pseudocount,
             self.em_config.mode == "vbem",
-            self.em_config.prune_threshold if self.em_config.prune_threshold is not None else -1.0,
             confidence_threshold,
+            assignment_mode_int,
+            self.em_config.assignment_min_posterior,
+            rng_seed,
             n_transcripts,
             NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,

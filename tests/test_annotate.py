@@ -226,7 +226,7 @@ class TestAnnotatedBamIntegration:
         )
 
         base_config = PipelineConfig(
-            em=EMConfig(seed=42),
+            em=EMConfig(seed=42, assignment_mode="fractional"),
             scan=BamScanConfig(sj_strand_tag="ts"),
         )
 

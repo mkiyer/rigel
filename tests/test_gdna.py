@@ -135,7 +135,7 @@ class TestLocusGDNATheta:
 
     def test_gdna_absorbs_with_high_init(self):
         """With large gdna_init and equal likelihoods, gDNA takes share."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         bundle = _make_locus_em_data(
             [[0]] * 10,
             num_transcripts=3,
@@ -389,7 +389,7 @@ class TestLocusGDNABehavior:
 
     def test_two_transcripts_share_one_gdna_shadow(self):
         """Two transcripts in one locus share a single gDNA component."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         bundle = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=3,

@@ -49,18 +49,3 @@ for r in load("diag_frag_count"):
         f"gdna_diff={r['gdna_abs_diff']:>6.1f}  "
         f"mrna_rel={r['total_mrna_rel_err']*100:>5.1f}%"
     )
-
-print()
-print("=" * 80)
-print("PRUNE THRESHOLD (TA1=100, TA4=3, nRNA=100, gDNA=100, SS=1.0)")
-print("=" * 80)
-for r in load("diag_prune_threshold"):
-    pt = r.get("prune_threshold", "?")
-    print(
-        f"pt={pt}  "
-        f"TA1_obs={r['TA1_observed']:>7.1f}  "
-        f"TA4_exp={r['TA4_expected']:>3}  TA4_obs={r['TA4_observed']:>6.1f}  "
-        f"TA4_rel={r['TA4_rel_err']*100:>5.1f}%  "
-        f"gdna_diff={r['gdna_abs_diff']:>6.1f}  "
-        f"mrna_rel={r['total_mrna_rel_err']*100:>5.1f}%"
-    )

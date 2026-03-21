@@ -63,7 +63,6 @@ rigel_configs:
   #   em_iterations: 2000
   #   em_convergence_delta: 1.0e-6
   #   em_prior_alpha: 0.01
-  #   prune_threshold: 0.01
   #   overhang_alpha: 5.0e-3
 
 # ── Optional tools ────────────────────────────────────────────

@@ -98,20 +98,16 @@ def assert_alignment(bench, min_rate=0.70):
 
 def assert_accountability(bench, tolerance=5):
     sd = bench.stats_dict
-    mm_extra = sd.get("n_multimapper_alignments", 0) - sd.get(
-        "n_multimapper_groups", 0
-    )
     n_gated_out = sd.get("n_gated_out", 0)
-    effective_fragments = bench.n_fragments - mm_extra
     total = (
         bench.total_observed + bench.n_nrna_pipeline
         + bench.n_gdna_pipeline + bench.n_chimeric
         + n_gated_out
     )
-    assert abs(total - effective_fragments) <= tolerance, (
-        f"Accountability gap: {abs(total - effective_fragments):.0f} "
-        f"(total={total:.0f}, eff_frags={effective_fragments}, "
-        f"mm_extra={mm_extra})"
+    gap = abs(total - bench.n_fragments)
+    assert gap <= tolerance, (
+        f"Accountability gap: {gap:.0f} "
+        f"(total={total:.0f}, n_fragments={bench.n_fragments})"
     )
 
 

@@ -398,7 +398,7 @@ class TestLocusAssignment:
         """Different seeds do not affect expected-count assignment."""
         counts = []
         for seed in [1, 2]:
-            rc = AbundanceEstimator(3, em_config=EMConfig(seed=seed))
+            rc = AbundanceEstimator(3, em_config=EMConfig(seed=seed, assignment_mode="fractional"))
             rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
             rc.unambig_counts[1, _UNSPLICED_SENSE] = 50.0
             bundle = _make_locus_em_data(
@@ -413,7 +413,7 @@ class TestLocusAssignment:
 
     def test_fractional_counts(self):
         """EM counts may be fractional under expected-count assignment."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
         rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
 
@@ -499,7 +499,7 @@ class TestSimultaneousResolution:
 
         EM convergence is order-independent.  Expected counts agree.
         """
-        rc1 = AbundanceEstimator(4, em_config=EMConfig(seed=42))
+        rc1 = AbundanceEstimator(4, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         rc1.unambig_counts[0, 0] = 50.0
         rc1.unambig_counts[2, 0] = 30.0
 
@@ -507,7 +507,7 @@ class TestSimultaneousResolution:
         bundle1 = _make_locus_em_data(units, num_transcripts=4, rc=rc1)
         _run_and_assign(rc1, bundle1, em_iterations=10)
 
-        rc2 = AbundanceEstimator(4, em_config=EMConfig(seed=42))
+        rc2 = AbundanceEstimator(4, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         rc2.unambig_counts[0, 0] = 50.0
         rc2.unambig_counts[2, 0] = 30.0
 
@@ -732,7 +732,7 @@ class TestGDNAInLocusEM:
 
     def test_gdna_absorbs_when_init_high(self):
         """With large gdna_init and equal likelihoods, gDNA takes share."""
-        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         bundle = _make_locus_em_data(
             [[0]] * 100,
             num_transcripts=2,
@@ -794,3 +794,136 @@ class TestGDNAInLocusEM:
 
         assert gdna_count == 0.0
         assert rc.em_counts.sum() == pytest.approx(100.0, abs=1.0)
+
+
+# =====================================================================
+# Discrete assignment modes (map / sample)
+# =====================================================================
+
+
+class TestDiscreteAssignment:
+    """Test post-EM discrete fragment assignment modes."""
+
+    def test_map_mode_produces_integer_counts(self):
+        """MAP assignment assigns each fragment to exactly one component."""
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="map"))
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
+        bundle = _make_locus_em_data(
+            [[0, 1]] * 200,
+            num_transcripts=3,
+            rc=rc,
+        )
+        _run_and_assign(rc, bundle, em_iterations=10)
+        # All EM counts should be integers
+        frac = rc.em_counts - np.floor(rc.em_counts)
+        assert not np.any(frac > 0.0), "MAP mode should produce only integer counts"
+        assert rc.em_counts.sum() == pytest.approx(200.0, abs=1.0)
+
+    def test_sample_mode_produces_integer_counts(self):
+        """Sample assignment assigns each fragment to exactly one component."""
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="sample"))
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
+        bundle = _make_locus_em_data(
+            [[0, 1]] * 200,
+            num_transcripts=3,
+            rc=rc,
+        )
+        _run_and_assign(rc, bundle, em_iterations=10)
+        frac = rc.em_counts - np.floor(rc.em_counts)
+        assert not np.any(frac > 0.0), "Sample mode should produce only integer counts"
+        assert rc.em_counts.sum() == pytest.approx(200.0, abs=1.0)
+
+    def test_sample_mode_deterministic_with_same_seed(self):
+        """Same seed → same sample assignment results."""
+        results = []
+        for _ in range(2):
+            rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="sample"))
+            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+            rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
+            bundle = _make_locus_em_data(
+                [[0, 1]] * 200,
+                num_transcripts=3,
+                rc=rc,
+            )
+            _run_and_assign(rc, bundle, em_iterations=10)
+            results.append(rc.em_counts.copy())
+        np.testing.assert_array_equal(results[0], results[1])
+
+    def test_sample_mode_different_seeds_differ(self):
+        """Different seeds → different sample assignment results."""
+        results = []
+        for seed in [42, 99]:
+            rc = AbundanceEstimator(3, em_config=EMConfig(seed=seed, assignment_mode="sample"))
+            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+            rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
+            bundle = _make_locus_em_data(
+                [[0, 1]] * 200,
+                num_transcripts=3,
+                rc=rc,
+            )
+            _run_and_assign(rc, bundle, em_iterations=10)
+            results.append(rc.em_counts.copy())
+        # With different seeds, counts should differ (probabilistic but overwhelming)
+        assert not np.array_equal(results[0], results[1])
+
+    def test_map_mode_winner_matches_highest_posterior(self):
+        """MAP assigns all ambiguous fragments to the component with higher prior."""
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="map"))
+        # Transcript 0 has much more unambiguous support
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
+        bundle = _make_locus_em_data(
+            [[0, 1]] * 100,
+            num_transcripts=3,
+            rc=rc,
+        )
+        _run_and_assign(rc, bundle, em_iterations=10)
+        # In MAP mode, the stronger transcript should win all or most
+        assert rc.em_counts[0].sum() >= 90, "MAP should favor the transcript with higher posterior"
+
+    def test_fractional_mode_preserves_posteriors(self):
+        """Fractional mode produces non-integer counts (original behavior)."""
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="fractional"))
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
+        bundle = _make_locus_em_data(
+            [[0, 1]] * 200,
+            num_transcripts=3,
+            rc=rc,
+        )
+        _run_and_assign(rc, bundle, em_iterations=10)
+        frac = rc.em_counts - np.floor(rc.em_counts)
+        assert np.any(frac > 0.0), "Fractional mode should produce non-integer counts"
+
+    def test_total_counts_preserved_all_modes(self):
+        """All three modes preserve total fragment count."""
+        for mode in ["fractional", "map", "sample"]:
+            rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode=mode))
+            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
+            bundle = _make_locus_em_data(
+                [[0, 1]] * 300,
+                num_transcripts=3,
+                rc=rc,
+            )
+            _run_and_assign(rc, bundle, em_iterations=10)
+            total = rc.em_counts.sum() + rc.nrna_em_counts.sum()
+            assert total == pytest.approx(300.0, abs=1.0), f"mode={mode} lost fragments"
+
+    def test_min_posterior_threshold(self):
+        """Components below min_posterior threshold are excluded from assignment."""
+        # With a high min_posterior, only the dominant component should win
+        rc = AbundanceEstimator(
+            4, em_config=EMConfig(seed=42, assignment_mode="map", assignment_min_posterior=0.3)
+        )
+        # Strongly favor transcript 0
+        rc.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
+        bundle = _make_locus_em_data(
+            [[0, 1, 2, 3]] * 200,
+            num_transcripts=4,
+            rc=rc,
+        )
+        _run_and_assign(rc, bundle, em_iterations=10)
+        # Transcript 0 should get all 200 (others below threshold)
+        assert rc.em_counts[0].sum() >= 190

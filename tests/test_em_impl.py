@@ -2,7 +2,7 @@
 
 Tests run_locus_em_native() directly with synthetic CSR data,
 verifying correctness of bias correction, equivalence-class grouping,
-SQUAREM convergence, OVR prior, pruning, and VBEM mode.
+SQUAREM convergence, OVR prior, and VBEM mode.
 """
 
 import math
@@ -28,7 +28,6 @@ def _make_locus(
     max_iterations: int = 1000,
     convergence_delta: float = 1e-6,
     use_vbem: bool = False,
-    prune_threshold: float = -1.0,
 ):
     """Build CSR arrays from a list of units and call the C++ solver.
 
@@ -76,7 +75,7 @@ def _make_locus(
         unambig_totals, eff_lens, prior_eligible,
         n_components, total_pseudocount,
         max_iterations, convergence_delta,
-        use_vbem, prune_threshold,
+        use_vbem,
         0,  # n_transcripts=0 → classic (unlinked) mode
         0,  # n_nrna=0
         np.array([], dtype=np.int32),  # t_to_nrna
@@ -286,55 +285,6 @@ class TestVBEM:
         )
         # VBEM should give less weight to comp 1 than MAP-EM
         assert theta_vb[1] <= theta_map[1] + 0.01
-
-
-class TestPruning:
-    """Post-EM pruning."""
-
-    def test_pruning_removes_weak_components(self):
-        """Components with no unambig evidence and low evidence ratio
-        should be pruned to near-zero."""
-        n_comp = 3
-        # 10 ambiguous units, all map to comp 0 and comp 1
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
-            for _ in range(10)
-        ]
-        # Only comp 0 has unambig evidence
-        unambig = np.array([50.0, 0.0, 0.0])
-        eligible = np.array([1.0, 1.0, 0.0])
-
-        theta, alpha, em = _make_locus(
-            units=units,
-            n_components=n_comp,
-            unambig_totals=unambig,
-            prior_eligible=eligible,
-            prune_threshold=0.1,
-        )
-        # Comp 1 should be pruned (no unambig, low evidence ratio)
-        assert theta[0] > 0.9
-
-    def test_gdna_never_pruned(self):
-        """gDNA (last component) should never be pruned."""
-        n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (2, -1.0, 1.0, 0, 200)]
-            for _ in range(10)
-        ]
-        # gDNA (comp 2) has no unambig evidence
-        unambig = np.array([50.0, 0.0, 0.0])
-        eligible = np.array([1.0, 0.0, 1.0])
-
-        theta, alpha, em = _make_locus(
-            units=units,
-            n_components=n_comp,
-            unambig_totals=unambig,
-            prior_eligible=eligible,
-            prune_threshold=0.1,
-        )
-        # gDNA should NOT be pruned to zero (it's the last component)
-        # It should retain some weight from the ambiguous evidence
-        assert theta[2] > 0.0
 
 
 class TestNumericalStability:
@@ -570,7 +520,6 @@ def _make_linked_locus(
     total_pseudocount: float = 1.0,
     max_iterations: int = 1000,
     convergence_delta: float = 1e-6,
-    prune_threshold: float = -1.0,
 ):
     """Build CSR arrays for a linked-model locus and call the C++ solver.
 
@@ -628,7 +577,6 @@ def _make_linked_locus(
         n_components, total_pseudocount,
         max_iterations, convergence_delta,
         False,  # use_vbem (not supported for linked)
-        prune_threshold,
         n_transcripts, n_nrna,
         t_to_nrna, nrna_to_t_offsets, nrna_to_t_indices,
     )
