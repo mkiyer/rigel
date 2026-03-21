@@ -173,14 +173,11 @@ class FragmentScorer:
         for t_idx in range(index.num_transcripts):
             exon_ivs = index.get_exon_intervals(t_idx)
             if exon_ivs is not None and len(exon_ivs) > 0:
-                starts = tuple(int(x) for x in exon_ivs[:, 0])
-                ends = tuple(int(x) for x in exon_ivs[:, 1])
-                cumulative = 0
-                cumsum_before: list[int] = []
-                for s, e in zip(starts, ends):
-                    cumsum_before.append(cumulative)
-                    cumulative += e - s
-                t_exon_data[t_idx] = (starts, ends, tuple(cumsum_before))
+                starts = tuple(exon_ivs[:, 0].tolist())
+                ends = tuple(exon_ivs[:, 1].tolist())
+                lengths = exon_ivs[:, 1] - exon_ivs[:, 0]
+                cumsum_before = tuple(np.concatenate(([0], np.cumsum(lengths[:-1]))).tolist())
+                t_exon_data[t_idx] = (starts, ends, cumsum_before)
 
         ctx = FragmentScorer(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),

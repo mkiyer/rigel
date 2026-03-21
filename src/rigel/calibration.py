@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize_scalar as _minimize_scalar
+from scipy.special import betaln as _betaln_vec
 
 from .frag_length_model import FragmentLengthModel
 
@@ -68,55 +70,25 @@ GDNA_INIT_DENSITY_PERCENTILE: float = 0.10
 GDNA_INIT_MIN_REGIONS: int = 100
 
 # ---------------------------------------------------------------------------
-# Vectorized log-gamma (for Beta-Binomial MLE)
-# ---------------------------------------------------------------------------
-_lgamma_vec = np.frompyfunc(math.lgamma, 1, 1)
-
-
-def _vec_lgamma(x: np.ndarray) -> np.ndarray:
-    """Vectorized log-gamma via ``math.lgamma``."""
-    return _lgamma_vec(x).astype(np.float64)
-
-
-# ---------------------------------------------------------------------------
-# 1-D golden-section maximiser (no scipy)
+# 1-D bounded maximiser (Brent's method via scipy)
 # ---------------------------------------------------------------------------
 
 
-def _golden_section_max(
+def _bounded_max(
     f,
     a: float,
     b: float,
     tol: float = 1e-4,
-    max_iter: int = 100,
 ) -> float:
-    """Argmax of *f* on [*a*, *b*] via golden-section search."""
-    gr = (math.sqrt(5.0) + 1.0) / 2.0
-    c = b - (b - a) / gr
-    d = a + (b - a) / gr
-    fc, fd = f(c), f(d)
-    for _ in range(max_iter):
-        if abs(b - a) < tol:
-            break
-        if fc > fd:
-            b, d, fd = d, c, fc
-            c = b - (b - a) / gr
-            fc = f(c)
-        else:
-            a, c, fc = c, d, fd
-            d = a + (b - a) / gr
-            fd = f(d)
-    return (a + b) / 2.0
+    """Argmax of *f* on [*a*, *b*] via Brent's method."""
+    res = _minimize_scalar(lambda x: -f(x), bounds=(a, b), method="bounded",
+                           options={"xatol": tol})
+    return float(res.x)
 
 
 def _betaln_scalar(a: float, b: float) -> float:
     """Log of the Beta function B(a, b) = Γ(a)Γ(b)/Γ(a+b)."""
     return math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
-
-
-def _betaln_vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Vectorised log-Beta function."""
-    return _vec_lgamma(a) + _vec_lgamma(b) - _vec_lgamma(a + b)
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +479,7 @@ def estimate_kappa_marginal(
 
         return float(np.sum(np.logaddexp(log_g + ll_g, log_1mg + ll_e)))
 
-    kappa = _golden_section_max(_marginal_loglik, 0.01, 500.0)
+    kappa = _bounded_max(_marginal_loglik, 0.01, 500.0)
     return max(kappa, 0.0)
 
 
@@ -563,9 +535,8 @@ def build_gdna_fl_model(
 
     weighted_hist = np.bincount(valid_fl, weights=valid_w, minlength=max_fl + 1)
 
-    for fl_val in range(1, max_fl + 1):
-        if weighted_hist[fl_val] > 0:
-            model.observe(fl_val, weight=float(weighted_hist[fl_val]))
+    model.counts[:max_fl + 1] = weighted_hist[:max_fl + 1]
+    model._total_weight = float(weighted_hist.sum())
 
     model.finalize()
     return model
@@ -887,12 +858,11 @@ def _compute_fl_llr(
     # so the shared denominator cancels in the ratio).
     log_ratio = np.log(q_g) - np.log(q_r)
 
-    for i in range(len(fl_region_ids)):
-        rid = int(fl_region_ids[i])
-        fl = int(fl_frag_lens[i])
-        if rid < n_regions and fl > 0:
-            idx = min(fl, max_size)
-            llr[rid] += log_ratio[idx]
+    # Vectorized scatter-add: accumulate per-region FL LLR
+    valid = (fl_region_ids < n_regions) & (fl_frag_lens > 0)
+    rids = fl_region_ids[valid]
+    fl_clamped = np.minimum(fl_frag_lens[valid], max_size).astype(np.intp)
+    np.add.at(llr, rids, log_ratio[fl_clamped])
 
     return llr
 

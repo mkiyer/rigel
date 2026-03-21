@@ -1,0 +1,216 @@
+========================================================================
+RIGEL PROFILE REPORT
+========================================================================
+Platform:   macOS-26.3-arm64-arm-64bit
+Python:     3.12.13
+Date:       2026-03-21 06:54:32
+
+------------------------------------------------------------------------
+Config: default
+------------------------------------------------------------------------
+  BAM:             /Users/mkiyer/Downloads/rigel_runs/benchmark_output_v6_prune/gdna_high_ss_1.00_nrna_default/align_minimap2/reads_namesort.bam
+  Index:           /Users/mkiyer/Downloads/rigel_runs/benchmark_output_v6_prune/rigel_index
+  Transcripts:     254,461
+  Genes:           63,472
+
+  Wall time:       254.30s
+  Peak RSS:        20788 MB
+  RSS before:      3981 MB
+  RSS after:       20788 MB
+  RSS delta:       16807 MB
+
+  Fragments:       38,687,666
+  Buffered:        14,731,596
+  Unique align:    13,143,685
+  Multimapping:    1,587,911
+  Intergenic:      1,732,516
+  gDNA total:      1,732,516
+  Throughput:      152,135 frags/s
+
+  Stage Breakdown:
+  Stage                        Time       %  Bar
+  ------------------------ --------  ------  ----------------------------------------
+  scan_and_buffer          109.778s   43.2%  █████████████████░░░░░░░░░░░░░░░░░░░░░░░
+  finalize_models            0.000s    0.0%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  calibration               11.733s    4.6%  █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  compute_geometry           0.005s    0.0%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  create_estimator           0.002s    0.0%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  fragment_scorer            1.394s    0.5%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  fragment_router_scan      18.131s    7.1%  ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  build_loci                 2.391s    0.9%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  eb_gdna_priors             1.515s    0.6%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  locus_em                 109.349s   43.0%  █████████████████░░░░░░░░░░░░░░░░░░░░░░░
+  TOTAL                    254.299s
+
+  Locus EM sub-stages:
+    build_locus_em_data: 0.000s
+    run_locus_em:        109.349s
+    assign_posteriors:   0.000s
+    Loci:                9,486
+    Max transcripts:     226,028
+    Max units:           12,670,762
+
+  Top-3 hotspots:
+    1. scan_and_buffer: 109.778s (43.2%)
+    2. locus_em: 109.349s (43.0%)
+    3. fragment_router_scan: 18.131s (7.1%)
+
+  RSS Memory Snapshots (MB):
+    before                       3981 MB
+    after_scan                  17282 MB
+    after_finalize              17282 MB
+    after_calibration           17282 MB
+    after_router_scan           17282 MB
+    after_buffer_release        17282 MB
+    after_locus_em              20788 MB
+    after_cleanup               20788 MB
+
+
+========================================================================
+cProfile: default
+========================================================================
+========================================================================
+Top 60 by cumulative time
+========================================================================
+         9248077 function calls (9246994 primitive calls) in 254.750 seconds
+
+   Ordered by: cumulative time
+   List reduced from 553 to 60 due to restriction <60>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     1204    0.754    0.001  273.873    0.227 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/threading.py:323(wait)
+4816/4814  238.033    0.049  243.216    0.051 {method 'acquire' of '_thread.lock' objects}
+ 1203/165    0.265    0.000  155.583    0.943 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/threading.py:637(wait)
+1209/1206    0.080    0.000   14.036    0.012 /Users/mkiyer/proj/rigel/scripts/profiler.py:184(_snap_rss_current)
+       13    0.161    0.012    7.721    0.594 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:404(estimate_kappa_marginal)
+       13    0.000    0.000    7.554    0.581 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:77(_bounded_max)
+       13    0.001    0.000    7.554    0.581 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/scipy/optimize/_minimize.py:831(minimize_scalar)
+      251    0.052    0.000    6.546    0.026 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:84(<lambda>)
+      251    6.480    0.026    6.494    0.026 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:472(_marginal_loglik)
+   511463    0.673    0.000    2.512    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/arrow/array.py:722(__getitem__)
+        1    0.000    0.000    2.358    2.358 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:537(inject_chunk)
+        1    0.000    0.000    2.358    2.358 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:525(_accept_chunk)
+    40199    0.023    0.000    1.948    0.000 /Users/mkiyer/proj/rigel/src/rigel/locus.py:134(<genexpr>)
+     9488    0.004    0.000    1.835    0.000 {built-in method builtins.sum}
+    80398    0.151    0.000    1.723    0.000 /Users/mkiyer/proj/rigel/src/rigel/locus.py:33(_merged_intervals)
+    19053    1.415    0.000    1.415    0.000 {built-in method numpy.asarray}
+    18972    0.039    0.000    1.204    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/arrow/array.py:1539(take)
+       27    1.010    0.037    1.155    0.043 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:491(build_gdna_fl_model)
+    18972    1.026    0.000    1.029    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/compute.py:467(take)
+        1    0.067    0.067    0.784    0.784 /Users/mkiyer/proj/rigel/src/rigel/locus.py:473(compute_gdna_locus_gammas)
+   254465    0.068    0.000    0.671    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:2838(cumsum)
+       13    0.000    0.000    0.622    0.048 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/scipy/optimize/_optimize.py:2289(_minimize_scalar_bounded)
+       13    0.303    0.023    0.604    0.046 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:823(_compute_fl_llr)
+       13    0.093    0.007    0.532    0.041 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:726(_e_step)
+      119    0.473    0.004    0.473    0.004 {method 'astype' of 'numpy.ndarray' objects}
+       13    0.414    0.032    0.415    0.032 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:341(_compute_strand_llr_betabinom)
+   254569    0.095    0.000    0.395    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:48(_wrapfunc)
+       14    0.387    0.028    0.387    0.028 {method 'at' of 'numpy.ufunc' objects}
+        1    0.008    0.008    0.386    0.386 /Users/mkiyer/proj/rigel/src/rigel/locus.py:71(build_loci)
+        1    0.361    0.361    0.361    0.361 {built-in method gc.collect}
+    19006    0.292    0.000    0.292    0.000 {method 'copy' of 'numpy.ndarray' objects}
+   254465    0.259    0.000    0.259    0.000 {method 'cumsum' of 'numpy.ndarray' objects}
+   511463    0.137    0.000    0.209    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/indexers/utils.py:441(check_array_indexer)
+       12    0.130    0.011    0.156    0.013 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:875(_m_step)
+  2180122    0.144    0.000    0.152    0.000 {built-in method builtins.isinstance}
+        2    0.037    0.018    0.139    0.070 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:591(iter_chunks)
+   763389    0.126    0.000    0.126    0.000 {method 'tolist' of 'numpy.ndarray' objects}
+        1    0.001    0.001    0.103    0.103 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:237(to_scoring_arrays)
+        1    0.046    0.046    0.102    0.102 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:345(_load_chunk)
+    38592    0.098    0.000    0.098    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+        1    0.091    0.091    0.091    0.091 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/feather.py:230(read_table)
+    18972    0.010    0.000    0.083    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/string_arrow.py:161(_from_pyarrow_array)
+        1    0.064    0.064    0.081    0.081 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:207(fragment_classes)
+        1    0.003    0.003    0.080    0.080 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:941(calibrate_gdna)
+       13    0.073    0.006    0.076    0.006 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:582(_compute_density_llr_gaussian)
+        1    0.075    0.075    0.075    0.075 /Users/mkiyer/proj/rigel/src/rigel/estimator.py:224(run_batch_locus_em)
+    18974    0.034    0.000    0.072    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/string_arrow.py:133(__init__)
+        1    0.027    0.027    0.067    0.067 /Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py:524(observe_batch)
+        1    0.013    0.013    0.063    0.063 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:612(_seed_initial_partition)
+        1    0.001    0.001    0.062    0.062 /Users/mkiyer/proj/rigel/src/rigel/pipeline.py:94(_replay_strand_observations)
+   254461    0.032    0.000    0.059    0.000 /Users/mkiyer/proj/rigel/src/rigel/index.py:1094(get_exon_intervals)
+        1    0.000    0.000    0.054    0.054 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:150(from_raw)
+   440606    0.042    0.000    0.044    0.000 {built-in method builtins.max}
+        6    0.030    0.005    0.044    0.007 /Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py:148(observe_batch)
+      175    0.000    0.000    0.042    0.000 {method 'sum' of 'numpy.ndarray' objects}
+      175    0.000    0.000    0.042    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/_methods.py:47(_sum)
+   503174    0.034    0.000    0.034    0.000 {method 'append' of 'list' objects}
+        1    0.002    0.002    0.033    0.033 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:547(_spill_oldest)
+    18972    0.011    0.000    0.033    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/dtypes/common.py:1392(is_bool_dtype)
+        1    0.000    0.000    0.030    0.030 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:294(_spill_chunk)
+
+
+
+========================================================================
+Top 60 by self time
+========================================================================
+         9248077 function calls (9246994 primitive calls) in 254.750 seconds
+
+   Ordered by: internal time
+   List reduced from 553 to 60 due to restriction <60>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+4816/4814  238.033    0.049  243.216    0.051 {method 'acquire' of '_thread.lock' objects}
+      251    6.480    0.026    6.494    0.026 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:472(_marginal_loglik)
+    19053    1.415    0.000    1.415    0.000 {built-in method numpy.asarray}
+    18972    1.026    0.000    1.029    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/compute.py:467(take)
+       27    1.010    0.037    1.155    0.043 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:491(build_gdna_fl_model)
+     1204    0.754    0.001  273.873    0.227 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/threading.py:323(wait)
+   511463    0.673    0.000    2.512    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/arrow/array.py:722(__getitem__)
+      119    0.473    0.004    0.473    0.004 {method 'astype' of 'numpy.ndarray' objects}
+       13    0.414    0.032    0.415    0.032 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:341(_compute_strand_llr_betabinom)
+       14    0.387    0.028    0.387    0.028 {method 'at' of 'numpy.ufunc' objects}
+        1    0.361    0.361    0.361    0.361 {built-in method gc.collect}
+       13    0.303    0.023    0.604    0.046 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:823(_compute_fl_llr)
+    19006    0.292    0.000    0.292    0.000 {method 'copy' of 'numpy.ndarray' objects}
+ 1203/165    0.265    0.000  155.583    0.943 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/threading.py:637(wait)
+   254465    0.259    0.000    0.259    0.000 {method 'cumsum' of 'numpy.ndarray' objects}
+       13    0.161    0.012    7.721    0.594 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:404(estimate_kappa_marginal)
+    80398    0.151    0.000    1.723    0.000 /Users/mkiyer/proj/rigel/src/rigel/locus.py:33(_merged_intervals)
+  2180122    0.144    0.000    0.152    0.000 {built-in method builtins.isinstance}
+   511463    0.137    0.000    0.209    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/indexers/utils.py:441(check_array_indexer)
+       12    0.130    0.011    0.156    0.013 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:875(_m_step)
+   763389    0.126    0.000    0.126    0.000 {method 'tolist' of 'numpy.ndarray' objects}
+    38592    0.098    0.000    0.098    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+   254569    0.095    0.000    0.395    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:48(_wrapfunc)
+       13    0.093    0.007    0.532    0.041 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:726(_e_step)
+        1    0.091    0.091    0.091    0.091 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/feather.py:230(read_table)
+1209/1206    0.080    0.000   14.036    0.012 /Users/mkiyer/proj/rigel/scripts/profiler.py:184(_snap_rss_current)
+        1    0.075    0.075    0.075    0.075 /Users/mkiyer/proj/rigel/src/rigel/estimator.py:224(run_batch_locus_em)
+       13    0.073    0.006    0.076    0.006 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:582(_compute_density_llr_gaussian)
+   254465    0.068    0.000    0.671    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:2838(cumsum)
+        1    0.067    0.067    0.784    0.784 /Users/mkiyer/proj/rigel/src/rigel/locus.py:473(compute_gdna_locus_gammas)
+        1    0.064    0.064    0.081    0.081 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:207(fragment_classes)
+      251    0.052    0.000    6.546    0.026 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:84(<lambda>)
+        1    0.046    0.046    0.102    0.102 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:345(_load_chunk)
+   440606    0.042    0.000    0.044    0.000 {built-in method builtins.max}
+    18972    0.039    0.000    1.204    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/arrow/array.py:1539(take)
+        2    0.037    0.018    0.139    0.070 /Users/mkiyer/proj/rigel/src/rigel/buffer.py:591(iter_chunks)
+    18974    0.034    0.000    0.072    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/string_arrow.py:133(__init__)
+   503174    0.034    0.000    0.034    0.000 {method 'append' of 'list' objects}
+   254461    0.032    0.000    0.059    0.000 /Users/mkiyer/proj/rigel/src/rigel/index.py:1094(get_exon_intervals)
+        1    0.030    0.030    0.030    0.030 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/feather.py:115(write_feather)
+   492495    0.030    0.000    0.030    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/types.py:272(is_timestamp)
+        6    0.030    0.005    0.044    0.007 /Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py:148(observe_batch)
+   254625    0.028    0.000    0.028    0.000 {method 'get' of 'dict' objects}
+   492495    0.027    0.000    0.027    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pyarrow/types.py:277(is_duration)
+        1    0.027    0.027    0.067    0.067 /Users/mkiyer/proj/rigel/src/rigel/frag_length_model.py:524(observe_batch)
+        1    0.026    0.026    0.027    0.027 /Users/mkiyer/proj/rigel/src/rigel/scan.py:75(scan)
+368565/368527    0.024    0.000    0.024    0.000 {built-in method builtins.len}
+    40199    0.023    0.000    1.948    0.000 /Users/mkiyer/proj/rigel/src/rigel/locus.py:134(<genexpr>)
+   273682    0.021    0.000    0.021    0.000 {built-in method builtins.getattr}
+       23    0.020    0.001    0.020    0.001 {built-in method numpy.ascontiguousarray}
+       84    0.019    0.000    0.019    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/_methods.py:96(_clip)
+        2    0.017    0.008    0.017    0.008 {built-in method posix.unlink}
+      104    0.016    0.000    0.016    0.000 {built-in method numpy.zeros}
+        1    0.014    0.014    0.018    0.018 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:170(compute_region_stats)
+        1    0.013    0.013    0.063    0.063 /Users/mkiyer/proj/rigel/src/rigel/calibration.py:612(_seed_initial_partition)
+   254465    0.013    0.000    0.013    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:2834(_cumsum_dispatcher)
+    18974    0.011    0.000    0.023    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/arrow/array.py:310(__init__)
+   254462    0.011    0.000    0.011    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/numpy/_core/multiarray.py:197(concatenate)
+    18972    0.011    0.000    0.033    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/dtypes/common.py:1392(is_bool_dtype)
+    18972    0.010    0.000    0.083    0.000 /Users/mkiyer/sw/miniforge3/envs/rigel/lib/python3.12/site-packages/pandas/core/arrays/string_arrow.py:161(_from_pyarrow_array)
+
+
+
+Total function calls: 9,246,994

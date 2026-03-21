@@ -67,8 +67,10 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
+from rigel.calibration import calibrate_gdna
 from rigel.config import (
     BamScanConfig,
+    CalibrationConfig,
     EMConfig,
     FragmentScoringConfig,
     PipelineConfig,
@@ -77,6 +79,7 @@ from rigel.config import (
 from rigel.estimator import AbundanceEstimator
 from rigel.index import TranscriptIndex
 from rigel.locus import build_loci, compute_gdna_locus_gammas
+from rigel.native import detect_sj_strand_tag
 from rigel.pipeline import run_pipeline, scan_and_buffer
 from rigel.scan import FragmentRouter
 from rigel.scoring import (
@@ -287,8 +290,7 @@ def _build_pipeline_config(
     _EM_ALIASES = {
         "em_convergence_delta": "convergence_delta",
         "em_iterations": "iterations",
-        "em_prior_alpha": "prior_alpha",
-        "em_prior_gamma": "prior_gamma",
+        "em_prior_pseudocount": "prior_pseudocount",
         "em_mode": "mode",
         "confidence_threshold": "confidence_threshold",
         "n_threads": "n_threads",
@@ -356,6 +358,7 @@ class StageTimings:
     index_load: float = 0.0
     scan_and_buffer: float = 0.0
     finalize_models: float = 0.0
+    calibration: float = 0.0
     quant_from_buffer: float = 0.0
 
     # Sub-stages of quant_from_buffer (if --stages)
@@ -403,6 +406,9 @@ class ProfileResult:
     # Locus summary
     max_locus_transcripts: int = 0
     max_locus_units: int = 0
+
+    # Per-stage RSS memory snapshots (MB) taken at end of each stage
+    rss_snapshots: dict = field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -478,23 +484,57 @@ def profile_stages(
     pcfg = _build_pipeline_config(rigel_params, tmpdir=tmpdir)
     profiler = cProfile.Profile() if enable_cprofile else None
     timings = StageTimings()
+    rss_snaps: dict[str, float] = {}
+
+    # Resolve sj_strand_tag "auto" before calling scan_and_buffer
+    scan_cfg = pcfg.scan
+    if scan_cfg.sj_strand_tag == "auto":
+        from dataclasses import replace as _replace
+        detected = detect_sj_strand_tag(bam_path)
+        scan_cfg = _replace(scan_cfg, sj_strand_tag=detected)
 
     rss_before = _get_rss_mb()
+    rss_snaps["before"] = rss_before
 
     # ── Stage 1: scan_and_buffer ────────────────────────────
     if profiler:
         profiler.enable()
     with Timer("scan_and_buffer") as t_scan:
-        stats, strand_models, frag_length_models, buffer = scan_and_buffer(
-            bam_path, index, pcfg.scan,
+        stats, strand_models, frag_length_models, buffer, region_counts, fl_table = (
+            scan_and_buffer(bam_path, index, scan_cfg)
         )
     timings.scan_and_buffer = t_scan.elapsed
+    rss_snaps["after_scan"] = _snap_rss_current()
 
     # ── Stage 2: Finalize models ────────────────────────────
     with Timer("finalize_models") as t_fin:
         strand_models.finalize()
+        frag_length_models.build_scoring_models()
         frag_length_models.finalize()
     timings.finalize_models = t_fin.elapsed
+    rss_snaps["after_finalize"] = _snap_rss_current()
+
+    # ── Stage 2b: gDNA calibration ──────────────────────────
+    cal_cfg = CalibrationConfig()
+    calibration_obj = None
+    with Timer("calibration") as t_cal:
+        if region_counts is not None and fl_table is not None and index.region_df is not None:
+            calibration_obj = calibrate_gdna(
+                region_counts,
+                fl_table,
+                index.region_df,
+                strand_models.strand_specificity,
+                max_iterations=cal_cfg.max_iterations,
+                convergence_tol=cal_cfg.convergence_tol,
+                density_percentile=cal_cfg.density_percentile,
+                min_gdna_regions=cal_cfg.min_gdna_regions,
+                min_fl_ess=cal_cfg.min_fl_ess,
+                intergenic_fl_model=frag_length_models.intergenic,
+            )
+            # Apply calibrated gDNA FL model for scoring
+            frag_length_models.gdna_model = calibration_obj.gdna_fl_model
+    timings.calibration = t_cal.elapsed
+    rss_snaps["after_calibration"] = _snap_rss_current()
 
     # ── Stage 3: quant_from_buffer (decomposed) ─────────────
 
@@ -551,11 +591,13 @@ def profile_stages(
         builder = FragmentRouter(ctx, estimator, stats, index, strand_models)
         em_data = builder.scan(buffer, log_every=1_000_000)
     timings.fragment_router_scan = t_route.elapsed
+    rss_snaps["after_router_scan"] = _snap_rss_current()
 
     # -- Free scanner accumulators + buffer after scan --
     del builder, ctx          # release ~1.3 GB of array.array accumulators
     buffer.release()
     gc.collect()
+    rss_snaps["after_buffer_release"] = _snap_rss_current()
 
     # 3f–3h: Locus-level EM
     n_loci = 0
@@ -578,7 +620,7 @@ def profile_stages(
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
             with Timer("compute_eb_gdna_priors") as t_gdna:
-                gdna_inits = compute_gdna_locus_gammas(loci, index, calibration=None)
+                gdna_inits = compute_gdna_locus_gammas(loci, index, calibration=calibration_obj)
 
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
@@ -606,9 +648,13 @@ def profile_stages(
     if profiler:
         profiler.disable()
 
+    rss_snaps["after_locus_em"] = _snap_rss_current()
+
     # -- Phase 5B: Free ScoredFragments CSR arrays --
     del em_data
     gc.collect()
+
+    rss_snaps["after_cleanup"] = _snap_rss_current()
 
     timings.quant_from_buffer = (
         t_geom.elapsed + t_est.elapsed + t_scorer.elapsed + t_route.elapsed
@@ -617,7 +663,10 @@ def profile_stages(
     )
 
     rss_after = _get_rss_mb()
-    total_wall = timings.scan_and_buffer + timings.finalize_models + timings.quant_from_buffer
+    total_wall = (
+        timings.scan_and_buffer + timings.finalize_models
+        + timings.calibration + timings.quant_from_buffer
+    )
 
     result = ProfileResult(
         config_name=config_name,
@@ -641,6 +690,7 @@ def profile_stages(
         n_genes=index.num_genes,
         max_locus_transcripts=max_locus_t,
         max_locus_units=max_locus_u,
+        rss_snapshots=rss_snaps,
     )
     return result, profiler
 
@@ -695,6 +745,7 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
             stages = [
                 ("scan_and_buffer", s.scan_and_buffer),
                 ("finalize_models", s.finalize_models),
+                ("calibration", s.calibration),
                 ("compute_geometry", s.compute_geometry),
                 ("create_estimator", s.create_estimator),
                 ("fragment_scorer", s.fragment_scorer),
@@ -731,6 +782,13 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
                 pct = dur / total * 100 if total > 0 else 0
                 lines.append(f"    {i + 1}. {name}: {dur:.3f}s ({pct:.1f}%)")
             lines.append("")
+
+            # Memory snapshots
+            if r.rss_snapshots:
+                lines.append("  RSS Memory Snapshots (MB):")
+                for snap_name, snap_mb in r.rss_snapshots.items():
+                    lines.append(f"    {snap_name:<24s} {snap_mb:>8.0f} MB")
+                lines.append("")
 
     # Comparison table (if multiple configs)
     if len(results) > 1:
@@ -903,6 +961,7 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
                 "n_genes": r.n_genes,
                 "stages": asdict(r.stages),
                 "pipeline_stats": r.pipeline_stats,
+                "rss_snapshots": r.rss_snapshots,
             }
             for r in results
         ],

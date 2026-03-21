@@ -145,6 +145,7 @@ class _FinalizedChunk:
     genomic_start: np.ndarray  # int32[N]
     nm: np.ndarray  # uint16[N]
     size: int
+    _fragment_classes: np.ndarray | None = None  # cached uint8[N]
 
     @classmethod
     def from_raw(cls, raw: dict) -> "_FinalizedChunk":
@@ -216,6 +217,8 @@ class _FinalizedChunk:
             ``FRAG_MULTIMAPPER`` (3): NH > 1.
             ``FRAG_CHIMERIC`` (4): chimeric fragment.
         """
+        if self._fragment_classes is not None:
+            return self._fragment_classes
         n_transcripts = np.diff(self.t_offsets).astype(np.intp)
         classes = np.full(self.size, FRAG_UNAMBIG, dtype=np.uint8)
         # Same strand, multiple transcripts, single mapper → ambig same-strand
@@ -228,6 +231,7 @@ class _FinalizedChunk:
         classes[self.num_hits > 1] = FRAG_MULTIMAPPER
         # Chimeric → highest priority (overrides all others)
         classes[self.chimera_type > 0] = FRAG_CHIMERIC
+        object.__setattr__(self, '_fragment_classes', classes)
         return classes
 
     def to_scoring_arrays(self) -> tuple:
