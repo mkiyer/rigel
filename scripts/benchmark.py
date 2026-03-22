@@ -635,7 +635,7 @@ def run_rigel_tool(
         for row in counts_df.itertuples(index=False)
     }
     mature_pred = float(sum(counts.values()))
-    nascent_pred = float(pipe.estimator.nrna_em_counts.sum())
+    nascent_pred = float(pipe.estimator.nrna_em_count)
     genomic_pred = float(pipe.stats.n_gdna_total)
     pool_counts = {
         "mature_rna": mature_pred,

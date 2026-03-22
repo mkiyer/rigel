@@ -211,7 +211,6 @@ def _make_locus_em_data(
         offsets.append(len(flat_t))
 
     n_candidates = len(flat_t)
-    nrna_base = n_t
 
     # Per-unit locus tracking
     locus_t = np.full(n_units, -1, dtype=np.int32)
@@ -255,7 +254,6 @@ def _make_locus_em_data(
         splice_type=np.zeros(n_units, dtype=np.uint8),
         n_units=n_units,
         n_candidates=n_candidates,
-        nrna_base_index=nrna_base,
         genomic_footprints=np.full(n_units, 200, dtype=np.int32),
     )
 
@@ -284,14 +282,13 @@ class _MockBatchIndex:
 
     def __init__(self, num_transcripts):
         self.num_transcripts = num_transcripts
-        self.num_nrna = num_transcripts
-        self.t_to_nrna_arr = np.arange(num_transcripts, dtype=np.int32)
         self.t_df = pd.DataFrame({
             "t_id": [f"t{i}" for i in range(num_transcripts)],
             "ref": ["chr1"] * num_transcripts,
             "start": np.zeros(num_transcripts, dtype=np.int64),
             "end": np.full(num_transcripts, 10000, dtype=np.int64),
             "length": np.full(num_transcripts, 1000, dtype=np.int64),
+            "is_synthetic_nrna": np.zeros(num_transcripts, dtype=bool),
         })
 
 
@@ -317,7 +314,7 @@ def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
 
     _ensure_estimator_geometry(rc)
 
-    total_gdna, _locus_mrna, _locus_nrna, _locus_gdna = rc.run_batch_locus_em(
+    total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em(
         loci, em_data, index, locus_gammas,
         em_iterations=em_iterations,
     )
@@ -325,6 +322,6 @@ def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
 
     return {
         "mrna": float(rc.em_counts.sum()),
-        "nrna": float(rc.nrna_em_counts.sum()),
+        "nrna": float(rc.nrna_em_count),
         "gdna": float(total_gdna),
     }

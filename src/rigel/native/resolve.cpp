@@ -155,5 +155,4 @@ NB_MODULE(_resolve_impl, m) {
     // IntervalType
     m.attr("ITYPE_EXON")           = rigel::ITYPE_EXON;
     m.attr("ITYPE_INTRON")         = static_cast<int8_t>(1);  // TRANSCRIPT slot
-    m.attr("ITYPE_UNAMBIG_INTRON") = rigel::ITYPE_UNAMBIG_INTRON;
 }

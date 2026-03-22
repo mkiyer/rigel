@@ -39,6 +39,60 @@ Examining the EM internals, the sections receive **identical treatment** in almo
 
 The nrna_sparsity_alpha (previously 0.9) that was part of the tripartite prior has been removed — the current code uses uniform OVR for all RNA components. There is no remaining EM-level reason to separate mRNA from nRNA.
 
+
+## UNAMBIG_INTRON and evidence gating — investigation results
+
+### Original intent
+
+The *intended* design was to require unambiguous intronic evidence before emitting nRNA candidates. The UNAMBIG_INTRON interval type marks genomic regions that are intronic for a transcript and do NOT overlap any exon from any transcript on either strand. If a fragment overlaps such a region, it constitutes evidence for nascent RNA (or gDNA) — exonic unspliced fragments alone are ambiguous.
+
+### What was actually implemented
+
+A thorough code audit (March 2026) revealed the following data flow:
+
+**Index → resolve chain (FUNCTIONAL)**:
+- `_gen_cluster_unambig_intron_intervals()` correctly identifies unambiguous intronic regions by subtracting the global exon union from each transcript's introns
+- UNAMBIG_INTRON intervals are stored in cgranges with `nrna_idx` as the label (in the `t_index` field of `AnnotatedInterval`)
+- The resolve step in `resolve_context.h` accumulates `t_unambig_intron_bp` from cgranges overlaps
+
+**Index mismatch bug**: The resolve scratch buffer is written at `scratch.t_unambig_intron_bp[nrna_idx]` (during overlap accumulation) but read at `scratch.t_unambig_intron_bp[t_index]` (during output assembly). Since `nrna_idx != t_index` in general, the values reaching downstream are unreliable.
+
+**Scoring consumption (WAS DEAD CODE — NOW REMOVED)**:
+- The ONLY consumer of `unambig_intron_bp` in scoring was `has_ui = (ui_bp[k] > 0)`, which gated writes to `acc_ia`/`acc_is` (intronic sense/antisense accumulators)
+- The `transcript_intronic_sense/antisense` arrays were allocated in `estimator.py`, populated by C++ scoring, but **never read by any downstream production code** — no EM, no priors, no output consumed them
+- These were dead code, confirmed by the existing TODO.md note: "intronic_sense/antisense accumulators are populated by the C++ scoring pass but are not used"
+
+**nRNA candidate emission has NO evidence gate**:
+- The nRNA scoring path (`scoring.cpp` lines 1092-1210 singlemapper, 620-760 multimapper) does NOT check `unambig_intron_bp` at all
+- The actual gates for nRNA candidate emission are:
+  1. `stype != SPLICE_SPLICED_ANNOT` — skip splice-annotated fragments
+  2. `t_span_v <= t_exonic` — skip single-exon transcripts (no intronic space)
+  3. `span_bp <= 0` — skip no-overlap
+
+### Dead code cleaned up (March 2026)
+
+The following dead code has been removed:
+- `intronic_sense`/`intronic_antisense` parameters from `fused_score_buffer()` (scoring.cpp)
+- `acc_is`/`acc_ia` accumulators and `has_ui` gating logic in `score_chunk_impl()`
+- `ui_bp` field from `ChunkPtrs` struct and local variable in scoring
+- `transcript_intronic_sense/antisense` arrays in `estimator.py`
+- Corresponding parameters in `scan.py` call
+- `unambig_intron_bp` removed from scoring tuple (`to_scoring_arrays()`)
+- Diagnostic reads of dead accumulators in test files
+
+### What remains
+
+- **UNAMBIG_INTRON interval generation** in index.py — preserved (correct infrastructure)
+- **Resolution of `unambig_intron_bp`** in resolve_context.h — preserved (data still flows into buffer)
+- **Buffer transport** of `unambig_intron_bp` in buffer.py — preserved (serialized in feather files)
+- The nrna_idx/t_index mismatch bug exists but is harmless since no production code consumes the values
+- Future evidence gating can be implemented by adding a guard in scoring.cpp that checks `unambig_intron_bp > 0` before emitting nRNA candidates
+
+### Design decision for unified architecture
+
+The unified architecture does NOT add evidence gating. This matches the current behavior: nRNA candidates are emitted based on transcript geometry (multi-exon) and fragment overlap, not on unambiguous intronic evidence. Evidence gating can be added as a future enhancement when needed.
+
+
 ## Proposed unified architecture
 
 **Promote synthetic nRNA shadows to full transcripts.** Rather than maintaining a parallel nRNA index space, add synthetic transcripts to the transcript list at index build time. They get their own `t_index`, participate in the EM as regular components, and need no special indexing.
@@ -74,7 +128,7 @@ The nrna_sparsity_alpha (previously 0.9) that was part of the tripartite prior h
 | `_nrna_per_transcript()` fan-out in `estimator.py` | Not needed |
 | All-single-exon prior zeroing (`em_solver.cpp:1413-1424`) | Not needed — no dummy entities |
 | `nrna_span_`, `nrna_start_` arrays in scorer | Not needed |
-| Per-nRNA strand accumulators (`acc_ua`, `acc_us`, `acc_ia`, `acc_is`) | Retain but index by transcript |
+| Per-nRNA unspliced strand accumulators (`acc_ua`, `acc_us`) | Rework to per-transcript indexing |
 
 ### What is gained
 
@@ -95,9 +149,10 @@ The nrna_sparsity_alpha (previously 0.9) that was part of the tripartite prior h
    - For loci WITHOUT annotated equivalents: one synthetic shadow per **unique span** (not per transcript) is still possible — create one synthetic transcript per unique (ref, strand, start, end) and let multiple multi-exon transcripts share it through fragment co-occurrence. This preserves dedup without requiring a separate index space.
    - The increase in components is bounded: in the worst case, it doubles n_t for a locus, but the EM's actual computation is dominated by equivalence classes (not raw component count).
 
-2. **transcript count increases**: The transcript index grows by the number of synthetic nRNA transcripts. For GENCODE this might add ~60-80K entries (one per unique nRNA span that has no annotated equivalent). This is a moderate increase in memory but trivial compared to fragment buffer sizes.
+2. **Transcript count increases**: The transcript index grows by the number of synthetic nRNA transcripts. For GENCODE this adds ~203K entries with tol=20bp. This is a moderate increase in memory but trivial compared to fragment buffer sizes.
 
-3. **Strand accumulation**: Currently per-nRNA; would need to be per-transcript for synthetic nRNAs. Straightforward — just index by `t_index`.
+3. **Splice-annotated fragments**: In the unified architecture, splice-annotated fragments will resolve to the synthetic (since its EXON interval covers the region). They will score as mRNA candidates against the synthetic at competitive likelihoods. The current architecture explicitly skips nRNA scoring for splice-annotated fragments. This is a behavioral change — but the EM should naturally assign these fragments to the real multi-exon transcripts (which have higher likelihoods for spliced reads due to proper exon structure). Benchmark validation is needed to confirm.
+
 
 ### Deduplication strategy for synthetic nRNAs
 
@@ -111,11 +166,8 @@ This gives us span-level dedup WITHOUT a separate index space:
 
 The union-find naturally connects them through shared equivalence classes rather than forced fan-out.
 
+
 ## Tolerance-based nRNA span merging
-
-### Problem
-
-Exact-match dedup on `(ref, strand, start, end)` produces too many near-duplicate nRNA spans. Transcripts from the same biological gene locus often have TSS/TES differing by a few bases due to annotation ambiguity, alternative promoters, or polyA site variation. Without merging, each becomes a separate synthetic transcript competing for fragments in the EM.
 
 ### Algorithm: coordinate-based TSS/TES clustering
 
@@ -124,70 +176,7 @@ The algorithm is gene-independent, operating purely on genomic coordinates per (
 **Parameters:**
 - `nrna_merge_tolerance`: int, default 20 bp. Maximum distance between coordinates in the same cluster.
 
-**Step 1 — Collect multi-exon transcript coordinates by (ref, strand):**
-
-```
-For each multi-exon transcript t:
-  Group by (t.ref, t.strand)
-  Record (t.start, t.end, t.t_index)
-```
-
-**Step 2 — Cluster TSS (start sites) within each (ref, strand) group:**
-
-Sort starts ascending. Sweep left-to-right:
-```
-cluster_min = starts[0]
-for each start in sorted order:
-  if start - cluster_min > tolerance:
-    Close current cluster → representative_start = cluster_min  (outer envelope)
-    Open new cluster: cluster_min = start
-  else:
-    Continue in current cluster (cluster_min stays at minimum)
-Close final cluster → representative_start = cluster_min
-```
-
-For + strand transcripts: the outer envelope TSS is the **minimum** start in the cluster (leftmost). For - strand: the outer envelope TSS is the **maximum** start (rightmost, which is the outer boundary). However, since we always want the span that is >= every contributing transcript's span, we use: `representative_start = min(cluster starts)` regardless of strand. Same logic applies to TES: `representative_end = max(cluster ends)`.
-
-This guarantees the merged span fully contains every contributing transcript.
-
-**Step 3 — Cluster TES (end sites) within each (ref, strand) group:**
-
-Same sweep algorithm on ends, sorted ascending:
-```
-cluster_max = ends[0]
-for each end in sorted order:
-  if end - cluster_max_start > tolerance:
-    Close current cluster → representative_end = cluster_max
-    Open new cluster
-  else:
-    cluster_max = max(cluster_max, end)
-Close final cluster → representative_end = cluster_max
-```
-
-Where `cluster_max_start` tracks the first (smallest) end in the current cluster for gap detection.
-
-**Step 4 — Define merged nRNA spans:**
-
-Each multi-exon transcript maps to a merged span:
-```
-merged_span = (ref, strand, representative_start[t], representative_end[t])
-```
-
-Dedup on this merged key: one synthetic transcript per unique merged span.
-
-### Why cluster TSS and TES independently?
-
-TSS and TES variation are biologically independent (promoter choice vs polyA site choice). Two transcripts might share a TSS cluster but differ in TES by >tolerance, or vice versa. Independent clustering handles this correctly:
-
-```
-t1:  chr1:+:1000-5000  → TSS cluster A (min=1000), TES cluster X (max=5000)
-t2:  chr1:+:1003-5002  → TSS cluster A (min=1000), TES cluster X (max=5002)
-t3:  chr1:+:1001-8000  → TSS cluster A (min=1000), TES cluster Y (max=8000)
-
-Merged spans:
-  (chr1, +, 1000, 5002) for t1, t2  → one synthetic
-  (chr1, +, 1000, 8000) for t3      → one synthetic
-```
+The algorithm clusters starts and ends independently, using the outer envelope (min start, max end) to ensure the merged span fully contains every contributing transcript. TSS and TES variation are biologically independent (promoter choice vs polyA site choice), so independent clustering is correct.
 
 ### Complexity
 
@@ -195,77 +184,14 @@ Merged spans:
 - Clustering sweep: O(N)
 - Total: O(N log N) dominated by sorting, negligible compared to index build
 
-## Detection algorithm: annotated equivalents + tolerance merging
 
-```
-Step 0 — Tolerance-based TSS/TES clustering:
-  For each (ref, strand) group of multi-exon transcripts:
-    Cluster TSS within tolerance → map each start to representative_start (cluster min)
-    Cluster TES within tolerance → map each end to representative_end (cluster max)
-    Compute merged_span = (ref, strand, representative_start, representative_end)
-  Dedup merged spans → set of unique nRNA spans needing coverage
-
-Step 1 — Exact match (annotated equiv detection):
-  For each single-exon transcript s:
-    If s.span matches any merged_span exactly:
-      Mark s as is_nascent_equiv = True
-      Mark that merged_span as covered
-
-Step 2 — Full containment:
-  Group single-exon transcripts by (ref, strand), sorted by start
-  For each uncovered merged_span:
-    Binary search for single-exon tx with start ≤ merged_span.start
-    Among those, check if any has end ≥ merged_span.end
-    If found: mark that tx as is_nascent_equiv, mark span as covered
-
-Step 3 — Create synthetics:
-  For each uncovered merged_span:
-    Create synthetic Transcript with one exon = [merged_span.start, merged_span.end]
-    Assign new t_index, flag is_synthetic_nrna = True
-```
-
-Containment criterion: `S.start ≤ merged_span.start AND merged_span.end ≤ S.end`, same ref and strand.
-
-## Component count examples
-
-**Locus with multi-exon T and single-exon S (annotated equiv):**
-
-| | Current | Proposed |
-|---|---------|----------|
-| Components | mRNA(T), mRNA(S), nRNA(shadow), gDNA = **4** | mRNA(T), mRNA(S), gDNA = **3** |
-| Intronic fragments | Score against mRNA(S) AND nRNA(shadow) | Score against mRNA(S) only |
-| Siphon risk | nRNA siphons from mRNA(S) | Eliminated |
-
-**Pure single-exon gene (S only):**
-
-| | Current | Proposed |
-|---|---------|----------|
-| Components | mRNA(S), nRNA(shadow), gDNA = **3** | mRNA(S), gDNA = **2** |
-| nRNA shadow | Created then zeroed | Not created |
-
-**Multi-exon T without annotated equiv:**
-
-| | Current | Proposed |
-|---|---------|----------|
-| Components | mRNA(T), nRNA(shadow), gDNA = **3** | mRNA(T), mRNA(synth_S), gDNA = **3** |
-| nRNA handling | Separate index space | Regular transcript |
-
-**100 multi-exon transcripts, 20 unique spans, no annotated equiv:**
-
-| | Current | Proposed |
-|---|---------|----------|
-| Components | 100 mRNA + 20 nRNA + 1 gDNA = **121** | 100 mRNA + 20 synth + 1 gDNA = **121** |
-| Connectivity | Forced fan-out from shared nRNA | Natural fragment co-occurrence |
-
-## Phases
-
-### Phase A: Diagnostic — COMPLETED
+## Phase A: Diagnostic — COMPLETED
 
 **Script**: `scripts/debug/nrna_diagnostic.py`
 
 **Dataset**: GENCODE-based index — 254,461 transcripts (26,484 single-exon / 227,977 multi-exon). Current architecture: 246,058 nRNA entities.
 
-#### Summary table
+### Summary table
 
 | Tol (bp) | Exact spans | Merged spans | Reduction % | Annot. equiv | Synthetic needed |
 |----------|-------------|-------------|-------------|-------------|-----------------|
@@ -276,7 +202,7 @@ Containment criterion: `S.start ≤ merged_span.start AND merged_span.end ≤ S.
 | 50 | 219,610 | 192,903 | 12.2% | 570 | 192,333 |
 | 100 | 219,610 | 183,291 | 16.5% | 492 | 182,799 |
 
-#### Component count comparison
+### Component count comparison
 
 | Architecture | Total components |
 |-------------|-----------------|
@@ -285,35 +211,92 @@ Containment criterion: `S.start ≤ merged_span.start AND merged_span.end ≤ S.
 | **Proposed tol=20bp (203K synth)** | **457,513 (−43K)** |
 | Proposed tol=100bp (183K synth) | 437,260 (−63K) |
 
-#### Key observations
 
-1. **Annotated equivalents are rare**: Only 644–875 spans (0.3–0.4%) are covered by existing single-exon transcripts. The vast majority of nRNA spans need synthetic transcripts.
-2. **Tolerance-based merging is effective**: At tol=20bp, 11,029 merged spans consolidate multiple exact spans (7.2% reduction). Diminishing returns above ~50bp.
-3. **Net component reduction**: Even at tol=0, the proposed architecture eliminates 27K components (single-exon transcripts no longer need dummy nRNA). At tol=20bp: 43K fewer components.
-4. **Near-duplicate examples**: LINC00635 has 25 exact spans collapsed to 1 (64 transcripts with TSS/TES differing by <10bp). SNHG5, FANCL, POLD2 show similar patterns.
-5. **20bp tolerance recommended**: Good balance — 7.2% span reduction, well within biological TSS/TES variation, no risk of merging genuinely distinct regulatory elements.
+## Phased Implementation Plan
 
 ### Phase B: Index changes
 
-1. Add `nrna_merge_tolerance` parameter (default 20 bp) to index build config
-2. Add `is_synthetic_nrna` and `is_nascent_equiv` fields to `Transcript` dataclass
-3. Modify `compute_nrna_table()` → replace with `create_nrna_transcripts()`:
-   - TSS/TES clustering with configurable tolerance
-   - Detect annotated equivalents (exact match + containment against merged spans)
-   - Create synthetic `Transcript` objects for remaining uncovered spans
-   - Return augmented transcript list (no separate nRNA table)
-3. Remove `nrna.feather` serialization; synthetic transcripts are part of `transcripts.feather`
-4. Remove `t_to_nrna_arr` from index
-5. Update `_gen_transcript_intervals()` — synthetic transcripts generate intervals like any single-exon transcript
+**Status**: COMPLETED (2026-03-22). All 1011 tests pass.
+
+**What was done**:
+- B.1: `TranscriptIndex.build()` calls `create_nrna_transcripts()`, assigns `t_index`/`g_index` to synthetics, appends to transcript list BEFORE `compute_nrna_table()`
+- B.2: `compute_nrna_table()` operates on augmented transcript list (no changes needed — automatic)
+- B.3: `TranscriptIndex.load()` has backward compat for `is_synthetic_nrna`/`is_nascent_equiv` columns
+- B.4: UNAMBIG_INTRON was fully removed in dead code cleanup (moot)
+- B.5: Fixed 139 test failures:
+  - Benchmark accountability: Added `n_synthetic_observed` to `BenchmarkResult` to account for EM mass assigned to synthetic transcript mRNA components
+  - Updated `total_rna_observed` property and `assert_accountability` helpers
+  - Region partition: Synthetic nRNA exons cover full gene spans, merging intronic regions (11 → 5 regions in mini_index)
+  - Fragment resolution: Synthetic transcripts appear in `t_inds` for unspliced reads
+  - Count assertions: Updated hardcoded transcript/gene counts across all test files
+  - Golden outputs regenerated
+
+**Code already implemented** (in `src/rigel/index.py`):
+- `NRNA_MERGE_TOLERANCE = 20` constant
+- `_cluster_coordinates(coords, tolerance)` helper
+- `create_nrna_transcripts(transcripts, tolerance=20)` function
+
+**Code already implemented** (in `src/rigel/transcript.py`):
+- `is_synthetic_nrna: bool = False` field on `Transcript`
+- `is_nascent_equiv: bool = False` field on `Transcript`
+- Both fields included in `to_dict()` for serialization
+
+**Remaining work for Phase B**:
+
+1. **B.1**: Modify `TranscriptIndex.build()` to call `create_nrna_transcripts()`, assign `t_index`/`g_index` to synthetics, append to transcript list
+2. **B.2**: Keep `compute_nrna_table()` operating on the augmented transcript list for backward compatibility — the existing scoring/EM pipeline needs `nrna_idx`, `t_to_nrna_arr`, `nrna.feather` until Phase C removes them
+3. **B.3**: Add backward compat in `TranscriptIndex.load()` for the new boolean columns (old indices won't have them)
+4. **B.4**: Update UNAMBIG_INTRON interval generation — currently uses `nrna_idx` as the label; need to ensure synthetics get proper nrna_idx from `compute_nrna_table()` (they will, automatically, since they're in the transcript list)
+5. **B.5**: Update tests that assert hardcoded transcript counts / IDs — these will increase by the number of synthetics
+
+**Ordering constraint**: Synthetics must be appended BEFORE `compute_nrna_table()` is called, BEFORE intervals are generated, and BEFORE transcripts.feather is written.
+
+**Key observation**: Phase B can be deployed independently. The synthetics will participate in cgranges (getting EXON + TRANSCRIPT intervals), get their own `nrna_idx`, and enter the existing scoring/EM pipeline as regular transcripts. Their nRNA candidates will also be emitted via the existing nRNA scoring path (since `compute_nrna_table()` gives them nrna_idx entries). This is correct — both mRNA and nRNA candidates will be emitted for synthetics, and the EM will handle them.
 
 ### Phase C: Remove nRNA-specific machinery
 
-1. **`scoring.cpp`**: Remove entire nRNA scoring path (two template paths: ~200 lines). Remove nRNA dedup hash map. Remove `nrna_base_`, `t_to_nrna_`, `nrna_span_`, `nrna_start_` members. Synthetic transcripts score as mRNA automatically.
-2. **`em_solver.cpp`**: Remove nRNA section from `extract_locus_sub_problem` (unique nRNA collection, nRNA→transcript CSR, all-single-exon zeroing). Remove `nrna_base` from batch_locus_em. Remove nRNA fan-out from union-find.
-3. **`locus.py`**: Remove nRNA→transcript CSR construction in `build_loci()`. Remove nRNA-specific logic in `build_locus_em_data()`.
-4. **`estimator.py`**: Remove `nrna_em_counts`, `_nrna_per_transcript()` fan-out. Synthetic transcripts have direct per-transcript counts.
-5. **`scoring.py`**: Remove nRNA array parameters from scorer construction.
-6. **Strand accumulators**: Rework per-nRNA accumulators to per-transcript (or remove if not needed for synthetic transcripts).
+**Prerequisite**: Phase B deployed and validated.
+
+This is the major simplification phase. Remove the separate nRNA index space entirely.
+
+**C.1 — scoring.cpp**: Remove entire nRNA scoring path.
+- Delete nRNA dedup hash map, nRNA WTA logic in `score_chunk_impl` (singlemapper path, lines ~1092-1210)
+- Delete nRNA handling in `flush_mm_group` (multimapper path, lines ~620-760)
+- Remove `nrna_base_`, `t_to_nrna_`, `nrna_span_`, `nrna_start_` member variables from `NativeFragmentScorer`
+- Remove corresponding constructor parameters and nanobind bindings
+- **Net**: ~200 lines of C++ removed
+
+**C.2 — em_solver.cpp**: Remove nRNA section from EM.
+- Delete nRNA collection/CSR construction in `extract_locus_sub_problem()`
+- Delete all-single-exon prior zeroing (lines ~1413-1424)
+- Delete `nrna_base` parameter from `batch_locus_em()` signature
+- Delete `nrna_em_counts_out` accumulator and output
+- Delete nRNA fan-out in union-find connected components (lines ~2160-2185)
+- Simplify EM layout: `[mRNA(0..n_t), gDNA]` with `n_t + 1` components
+- **Net**: ~150 lines of C++ removed
+
+**C.3 — scoring.py**: Remove nRNA parameters from Python scorer interface.
+- Remove `nrna_base`, `t_to_nrna_arr`, `nrna_span_arr`, `nrna_start_arr` from `FragmentScorer` construction
+
+**C.4 — locus.py**: Remove nRNA CSR construction.
+- Remove nRNA→transcript CSR building in `build_loci()`
+- Remove nRNA-specific prior logic in `build_locus_em_data()`
+- Simplify `_compute_gamma()` — no nRNA totals needed
+
+**C.5 — estimator.py**: Remove nRNA fan-out.
+- Delete `_nrna_per_transcript()` method
+- Delete `nrna_em_counts` array
+- Synthetic transcripts have direct per-transcript counts in `em_counts`
+
+**C.6 — scan.py**: Remove `nrna_base_index` computation.
+
+**C.7 — pipeline.py**: Simplify — fewer nRNA-specific parameters.
+
+**C.8 — native.py**: Update public interface — remove nRNA parameters.
+
+**C.9 — Unspliced strand accumulators**: These currently use `nrna_idx` for indexing (`acc_us[nrna_idx]`, `acc_ua[nrna_idx]`). Must be reworked to index by `t_index` or removed. Options:
+  - **Rework**: Change to `acc_us[t_idx]`, `acc_ua[t_idx]` — array sized to `n_transcripts`
+  - **Remove**: They're currently not consumed by production code (only by tests for diagnostics). Could be removed as dead code. Decision: keep and rework for now (diagnostic value).
 
 ### Phase D: Prior for synthetic nRNAs
 
@@ -330,18 +313,27 @@ Synthetic nRNA transcripts may benefit from a sparsity prior to prevent them fro
 4. Run benchmark suite: compare nRNA siphon metrics, mRNA/gDNA relative error
 5. Verify locus sizes decreased (no forced fan-out)
 6. Spot-check specific genes (MALAT1-like) for correct behavior
+7. **Splice-annotated regression**: Verify that splice-annotated fragments are correctly assigned to multi-exon transcripts (not siphoned by synthetics)
+
 
 ## Files affected
 
 | File | Role | Change |
 |------|------|--------|
-| `src/rigel/index.py` | nRNA table → synthetic transcripts | Major rewrite of `compute_nrna_table()` |
-| `src/rigel/transcript.py` | Transcript dataclass | Add `is_synthetic_nrna`, `is_nascent_equiv` fields |
-| `src/rigel/native/scoring.cpp` | Fragment scoring | Major: remove ~200 lines of nRNA scoring |
-| `src/rigel/native/em_solver.cpp` | EM solver | Major: remove nRNA section, fan-out, CSR |
-| `src/rigel/locus.py` | Locus construction | Remove nRNA CSR, simplify `build_loci` |
-| `src/rigel/estimator.py` | Abundance estimation | Remove nRNA fan-out, simplify output |
-| `src/rigel/scoring.py` | Python scorer interface | Remove nRNA parameters |
-| `src/rigel/scan.py` | Scored fragments | Remove `nrna_base_index` |
-| `src/rigel/pipeline.py` | Orchestrator | Simplify — fewer parameters to thread |
-| `src/rigel/native.py` | C++ binding interface | Remove nRNA parameters |
+| `src/rigel/index.py` | nRNA table → synthetic transcripts | Integrate `create_nrna_transcripts()` into build (Phase B), remove `compute_nrna_table()` (Phase C) |
+| `src/rigel/transcript.py` | Transcript dataclass | `is_synthetic_nrna`, `is_nascent_equiv` fields added (done) |
+| `src/rigel/native/scoring.cpp` | Fragment scoring | Phase C: remove ~200 lines of nRNA scoring |
+| `src/rigel/native/em_solver.cpp` | EM solver | Phase C: remove nRNA section, fan-out, CSR |
+| `src/rigel/locus.py` | Locus construction | Phase C: remove nRNA CSR, simplify `build_loci` |
+| `src/rigel/estimator.py` | Abundance estimation | Phase C: remove nRNA fan-out, simplify output |
+| `src/rigel/scoring.py` | Python scorer interface | Phase C: remove nRNA parameters |
+| `src/rigel/scan.py` | Scored fragments | Phase C: remove `nrna_base_index` |
+| `src/rigel/pipeline.py` | Orchestrator | Phase C: simplify — fewer parameters to thread |
+| `src/rigel/native.py` | C++ binding interface | Phase C: remove nRNA parameters |
+
+
+## Changelog
+
+- **2026-03-21**: Dead code cleanup — removed `intronic_sense/antisense` accumulators (scoring.cpp, estimator.py, scan.py), `ui_bp` consumption, `has_ui` gating logic, and `unambig_intron_bp` from scoring tuple. All 1,037 tests pass. Added UNAMBIG_INTRON investigation results section documenting the nrna_idx/t_index mismatch bug, the evidence-gating gap, and the design decision to maintain current behavior.
+- **2026-03-20**: Phase A diagnostic completed on GENCODE index. 20bp tolerance recommended. Implementation infrastructure (`create_nrna_transcripts()`, `_cluster_coordinates()`, `Transcript` fields) written.
+- **2026-03-19**: Initial plan — unified architecture proposal, tolerance-based merging algorithm.

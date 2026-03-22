@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -160,6 +160,26 @@ class GDNACalibration:
     log_density: np.ndarray | None = None
     sense_frac: np.ndarray | None = None
     eligible: np.ndarray | None = None
+
+    def to_summary_dict(self) -> dict:
+        """Return a concise JSON-serializable summary of calibration results."""
+        d: dict = {
+            "gdna_density_global": round(self.gdna_density_global, 8),
+            "mixing_proportion": round(self.mixing_proportion, 6),
+            "expressed_density": round(self.expressed_density, 8),
+            "kappa_strand": round(self.kappa_strand, 2),
+            "n_iterations": self.n_iterations,
+            "converged": self.converged,
+            "gdna_fl_mean": None,
+            "gdna_fl_mode": None,
+            "n_eligible_regions": None,
+        }
+        if self.gdna_fl_model is not None:
+            d["gdna_fl_mean"] = round(self.gdna_fl_model.mean, 2)
+            d["gdna_fl_mode"] = int(self.gdna_fl_model.mode)
+        if self.eligible is not None:
+            d["n_eligible_regions"] = int(self.eligible.sum())
+        return d
 
 
 # ---------------------------------------------------------------------------

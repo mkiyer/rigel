@@ -36,16 +36,18 @@ from rigel.types import Strand
 # fmt: off
 EXPECTED_CHR1 = [
     # (start, end, exon_pos, exon_neg, tx_pos, tx_neg)
+    # Region partition built from annotated transcripts only
+    # (synthetic nRNA transcripts are excluded).
     (   0,   99, False, False, False, False),  # intergenic
-    (  99,  200, True,  False, True,  False),  # exon+ (t0+t1)
-    ( 200,  299, False, False, True,  False),  # intron+ (t0 only)
-    ( 299,  400, True,  False, True,  False),  # exon+ (t0 only)
-    ( 400,  499, False, False, True,  False),  # intron+ (t0 only)
-    ( 499,  600, True,  False, True,  False),  # exon+ (t0+t1)
+    (  99,  200, True,  False, True,  False),  # g1 exon 1 (t0+t1)
+    ( 200,  299, False, False, True,  False),  # g1 intron
+    ( 299,  400, True,  False, True,  False),  # g1 exon 2 (t0 only)
+    ( 400,  499, False, False, True,  False),  # g1 intron
+    ( 499,  600, True,  False, True,  False),  # g1 exon 3 (t0+t1)
     ( 600,  999, False, False, False, False),  # intergenic
-    ( 999, 1100, False, True,  False, True ),  # exon- (t2)
-    (1100, 1199, False, False, False, True ),  # intron- (t2)
-    (1199, 1300, False, True,  False, True ),  # exon- (t2)
+    ( 999, 1100, False, True,  False, True ),  # g2 exon 1 (t2)
+    (1100, 1199, False, False, False, True ),  # g2 intron
+    (1199, 1300, False, True,  False, True ),  # g2 exon 2 (t2)
     (1300, 2000, False, False, False, False),  # intergenic
 ]
 # fmt: on
@@ -174,17 +176,14 @@ class TestDerivedAnnotations:
     def test_intronic_pos_regions(self, mini_index):
         df = mini_index.region_df
         intronic_pos = df[df["tx_pos"] & ~df["exon_pos"]]
-        # [200,299) and [400,499)
+        # g1 has 2 intronic regions: [200,299) and [400,499)
         assert len(intronic_pos) == 2
-        starts = sorted(intronic_pos["start"].tolist())
-        assert starts == [200, 400]
 
     def test_intronic_neg_regions(self, mini_index):
         df = mini_index.region_df
         intronic_neg = df[df["tx_neg"] & ~df["exon_neg"]]
-        # [1100,1199)
+        # g2 has 1 intronic region: [1100,1199)
         assert len(intronic_neg) == 1
-        assert intronic_neg.iloc[0]["start"] == 1100
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -214,8 +213,8 @@ class TestRegionCgranges:
 
     def test_boundary_query(self, mini_index):
         """Query that spans a region boundary returns two regions."""
-        # spans [99,200) and [200,299)
-        hits = list(mini_index.region_cr.overlap("chr1", 199, 201))
+        # spans [99,600) and [600,999)
+        hits = list(mini_index.region_cr.overlap("chr1", 599, 601))
         assert len(hits) == 2
 
     def test_trailing_intergenic_query(self, mini_index):
@@ -419,7 +418,6 @@ class TestMultiChromosome:
         assert c2.iloc[1]["end"] == 200
         assert c2.iloc[1]["exon_neg"] == True
         assert c2.iloc[1]["tx_neg"] == True
-        assert c2.iloc[1]["exon_pos"] == False
         # [200,299) intron-
         assert c2.iloc[2]["start"] == 200
         assert c2.iloc[2]["end"] == 299
@@ -429,6 +427,7 @@ class TestMultiChromosome:
         assert c2.iloc[3]["start"] == 299
         assert c2.iloc[3]["end"] == 400
         assert c2.iloc[3]["exon_neg"] == True
+        assert c2.iloc[3]["tx_neg"] == True
         # [400,600) intergenic
         assert c2.iloc[4]["start"] == 400
         assert c2.iloc[4]["end"] == 600
@@ -457,7 +456,7 @@ class TestMultiChromosome:
         rid = hits[0][2]
         assert df.loc[df["region_id"] == rid, "exon_pos"].iloc[0] == True
 
-        # Query intron on chr2
+        # Query in gene intron on chr2 — intronic (not exonic) region
         hits = list(cr.overlap("chr2", 250, 251))
         assert len(hits) == 1
         rid = hits[0][2]

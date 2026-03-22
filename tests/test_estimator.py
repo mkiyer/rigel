@@ -57,12 +57,29 @@ class MockIndex:
                 "t_id": t_ids,
                 "g_id": [g_ids[g] for g in t_to_g],
                 "g_name": t_gnames,
+                "g_type": ["protein_coding"] * num_transcripts,
+                "ref": ["chr1"] * num_transcripts,
+                "strand": t_to_strand,
+                "start": list(range(0, num_transcripts * 1000, 1000)),
+                "end": list(range(500, num_transcripts * 1000 + 500, 1000)),
+                "length": [500] * num_transcripts,
+                "is_basic": [True] * num_transcripts,
+                "is_mane": [False] * num_transcripts,
+                "is_nascent_equiv": [False] * num_transcripts,
+                "is_synthetic_nrna": [False] * num_transcripts,
+                "nrna_t_index": [-1] * num_transcripts,
+                "nrna_n_contributors": [0] * num_transcripts,
             }
         )
         self.g_df = pd.DataFrame(
             {
                 "g_id": g_ids,
                 "g_name": g_names,
+                "g_type": ["protein_coding"] * num_genes,
+                "ref": ["chr1"] * num_genes,
+                "strand": g_to_strand,
+                "start": list(range(0, num_genes * 2000, 2000)),
+                "end": list(range(1500, num_genes * 2000 + 1500, 2000)),
             }
         )
 
@@ -123,7 +140,6 @@ def _make_em_data(
 
     if num_transcripts is None:
         num_transcripts = (max(flat_t) + 1) if flat_t else 0
-    nrna_base = num_transcripts
 
     # Build locus tracking arrays
     locus_t = np.full(n_units, -1, dtype=np.int32)
@@ -131,10 +147,9 @@ def _make_em_data(
     for u, t_list in enumerate(t_indices_per_unit):
         cc_list = count_cols_per_unit[u] if count_cols_per_unit else None
         for j, t_idx in enumerate(t_list):
-            if t_idx < nrna_base:
-                locus_t[u] = t_idx
-                locus_cc[u] = cc_list[j] if cc_list else _UNSPLICED_SENSE
-                break
+            locus_t[u] = t_idx
+            locus_cc[u] = cc_list[j] if cc_list else _UNSPLICED_SENSE
+            break
 
     return ScoredFragments(
         offsets=np.array(offsets, dtype=np.int64),
@@ -153,7 +168,6 @@ def _make_em_data(
         splice_type=np.zeros(n_units, dtype=np.uint8),
         n_units=n_units,
         n_candidates=n_candidates,
-        nrna_base_index=nrna_base,
         genomic_footprints=np.full(n_units, 200, dtype=np.int32),
     )
 
@@ -562,12 +576,21 @@ class TestCountsOutput:
             "transcript_id",
             "gene_id",
             "gene_name",
-            "locus_id",
+            "gene_type",
+            "ref",
+            "strand",
+            "start",
+            "end",
+            "length",
             "effective_length",
+            "locus_id",
+            "nrna_id",
+            "is_basic",
+            "is_mane",
+            "is_nascent_equiv",
             "mrna",
             "mrna_unambig",
             "mrna_em",
-            "mrna_high_conf",
             "mrna_spliced",
             "nrna",
             "rna_total",
@@ -584,12 +607,17 @@ class TestCountsOutput:
         expected_cols = [
             "gene_id",
             "gene_name",
+            "gene_type",
+            "ref",
+            "strand",
+            "start",
+            "end",
+            "n_transcripts",
             "locus_id",
             "effective_length",
             "mrna",
             "mrna_unambig",
             "mrna_em",
-            "mrna_high_conf",
             "mrna_spliced",
             "nrna",
             "rna_total",
@@ -778,7 +806,7 @@ class TestGDNAInLocusEM:
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
-        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        total = rc.em_counts.sum() + gdna_count
         assert total == pytest.approx(200.0, abs=1.0)
 
     def test_no_gdna_candidate_means_no_gdna_assignment(self):
@@ -908,7 +936,7 @@ class TestDiscreteAssignment:
                 rc=rc,
             )
             _run_and_assign(rc, bundle, em_iterations=10)
-            total = rc.em_counts.sum() + rc.nrna_em_counts.sum()
+            total = rc.em_counts.sum()
             assert total == pytest.approx(300.0, abs=1.0), f"mode={mode} lost fragments"
 
     def test_min_posterior_threshold(self):

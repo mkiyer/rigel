@@ -60,7 +60,6 @@ public:
     std::vector<int32_t> frag_lengths;      // -1 if missing
     std::vector<int32_t> exon_bp;
     std::vector<int32_t> intron_bp;
-    std::vector<int32_t> unambig_intron_bp;
 
     // --- Properties for Python model training ---
 
@@ -123,7 +122,7 @@ public:
         nb::dict d;
         for (size_t i = 0; i < t_inds.size(); i++) {
             d[nb::cast(t_inds[i])] = nb::make_tuple(
-                exon_bp[i], intron_bp[i], unambig_intron_bp[i]);
+                exon_bp[i], intron_bp[i]);
         }
         return d;
     }
@@ -144,7 +143,6 @@ public:
         r.chimera_gap = cr.chimera_gap;
         r.exon_bp = std::move(cr.t_exon_bp);
         r.intron_bp = std::move(cr.t_intron_bp);
-        r.unambig_intron_bp = std::move(cr.t_unambig_intron_bp);
         // Convert frag_length_map to parallel array
         r.frag_lengths.reserve(r.t_inds.size());
         for (int32_t t : r.t_inds) {
@@ -173,7 +171,6 @@ public:
     std::vector<int32_t>  frag_lengths_;
     std::vector<int32_t>  exon_bp_;
     std::vector<int32_t>  intron_bp_;
-    std::vector<int32_t>  unambig_intron_bp_;
     std::vector<int64_t>  frag_id_;
     std::vector<uint32_t> read_length_;
     std::vector<int32_t>  genomic_footprint_;
@@ -202,9 +199,6 @@ public:
                         r.exon_bp.begin(), r.exon_bp.end());
         intron_bp_.insert(intron_bp_.end(),
                           r.intron_bp.begin(), r.intron_bp.end());
-        unambig_intron_bp_.insert(unambig_intron_bp_.end(),
-                                  r.unambig_intron_bp.begin(),
-                                  r.unambig_intron_bp.end());
         t_offsets_.push_back(static_cast<int64_t>(t_indices_.size()));
 
         frag_id_.push_back(frag_id);
@@ -273,9 +267,6 @@ public:
             exon_bp_.data(), exon_bp_.size() * sizeof(int32_t));
         result["intron_bp"] = to_bytes(
             intron_bp_.data(), intron_bp_.size() * sizeof(int32_t));
-        result["unambig_intron_bp"] = to_bytes(
-            unambig_intron_bp_.data(),
-            unambig_intron_bp_.size() * sizeof(int32_t));
         result["ambig_strand"] = to_bytes(ambig_strand.data(), ambig_strand.size());
         result["frag_id"] = to_bytes(
             frag_id_.data(), frag_id_.size() * sizeof(int64_t));
@@ -307,7 +298,6 @@ struct ResolverScratch {
     // Per-transcript bp counters (sparse-cleaned)
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_transcript_bp;
-    std::vector<int32_t> t_unambig_intron_bp;
     std::vector<uint8_t> t_dirty;
     std::vector<int32_t> dirty_indices;
 
@@ -322,7 +312,6 @@ struct ResolverScratch {
     explicit ResolverScratch(int32_t n_transcripts)
         : t_exon_bp(n_transcripts, 0),
           t_transcript_bp(n_transcripts, 0),
-          t_unambig_intron_bp(n_transcripts, 0),
           t_dirty(n_transcripts, 0)
     {
         dirty_indices.reserve(512);
@@ -340,7 +329,6 @@ struct ResolverScratch {
     ResolverScratch(ResolverScratch&& o) noexcept
         : t_exon_bp(std::move(o.t_exon_bp)),
           t_transcript_bp(std::move(o.t_transcript_bp)),
-          t_unambig_intron_bp(std::move(o.t_unambig_intron_bp)),
           t_dirty(std::move(o.t_dirty)),
           dirty_indices(std::move(o.dirty_indices)),
           buf(o.buf), buf_cap(o.buf_cap),
@@ -355,7 +343,6 @@ struct ResolverScratch {
             free(buf); free(sj_buf);
             t_exon_bp = std::move(o.t_exon_bp);
             t_transcript_bp = std::move(o.t_transcript_bp);
-            t_unambig_intron_bp = std::move(o.t_unambig_intron_bp);
             t_dirty = std::move(o.t_dirty);
             dirty_indices = std::move(o.dirty_indices);
             buf = o.buf; buf_cap = o.buf_cap;
@@ -377,7 +364,6 @@ struct ResolverScratch {
         for (int32_t t : dirty_indices) {
             t_exon_bp[t] = 0;
             t_transcript_bp[t] = 0;
-            t_unambig_intron_bp[t] = 0;
             t_dirty[t] = 0;
         }
         dirty_indices.clear();
@@ -818,17 +804,6 @@ public:
                             scratch.t_transcript_bp[ti] += bp;
                         }
                     }
-                } else if (itype == ITYPE_UNAMBIG_INTRON) {
-                    int32_t clo = std::max(bstart, h_start);
-                    int32_t chi = std::min(bend, h_end);
-                    if (chi > clo) {
-                        int32_t bp = chi - clo;
-                        for (int32_t k = 0; k < cnt; k++) {
-                            int32_t ti = t_set_data_[off + k];
-                            scratch.mark_dirty(ti);
-                            scratch.t_unambig_intron_bp[ti] += bp;
-                        }
-                    }
                 }
             }
 
@@ -950,21 +925,17 @@ public:
         bool any_overlap = !all_overlap_t.empty() && cr.read_length > 0;
         cr.t_exon_bp.reserve(cr.t_inds.size());
         cr.t_intron_bp.reserve(cr.t_inds.size());
-        cr.t_unambig_intron_bp.reserve(cr.t_inds.size());
         for (int32_t t : cr.t_inds) {
             if (any_overlap && all_overlap_t.count(t)) {
                 cr.t_exon_bp.push_back(scratch.t_exon_bp[t]);
                 cr.t_intron_bp.push_back(
                     std::max(scratch.t_transcript_bp[t] - scratch.t_exon_bp[t], 0));
-                cr.t_unambig_intron_bp.push_back(scratch.t_unambig_intron_bp[t]);
             } else if (!any_overlap) {
                 cr.t_exon_bp.push_back(0);
                 cr.t_intron_bp.push_back(cr.read_length);
-                cr.t_unambig_intron_bp.push_back(cr.read_length);
             } else {
                 cr.t_exon_bp.push_back(cr.read_length);
                 cr.t_intron_bp.push_back(0);
-                cr.t_unambig_intron_bp.push_back(0);
             }
         }
 
@@ -1053,8 +1024,7 @@ public:
         nb::dict overlap_bp_dict;
         for (size_t i = 0; i < cr.t_inds.size(); i++) {
             overlap_bp_dict[nb::cast(cr.t_inds[i])] = nb::make_tuple(
-                cr.t_exon_bp[i], cr.t_intron_bp[i],
-                cr.t_unambig_intron_bp[i]);
+                cr.t_exon_bp[i], cr.t_intron_bp[i]);
         }
 
         return nb::make_tuple(

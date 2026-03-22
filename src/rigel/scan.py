@@ -19,7 +19,7 @@ from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
 from .stats import PipelineStats
-from .annotate import POOL_CODE_MRNA, POOL_CODE_CHIMERIC
+from .annotate import POOL_CODE_MRNA, POOL_CODE_NRNA, POOL_CODE_CHIMERIC
 
 logger = logging.getLogger(__name__)
 
@@ -133,10 +133,6 @@ class FragmentRouter:
         result = native_scorer.fused_score_buffer(
             chunk_arrays,
             t_strand_arr,
-            estimator.transcript_unspliced_sense,
-            estimator.transcript_unspliced_antisense,
-            estimator.transcript_intronic_sense,
-            estimator.transcript_intronic_antisense,
             estimator.unambig_counts,
             gdna_log_penalty,
         )
@@ -201,14 +197,16 @@ class FragmentRouter:
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
+            is_syn = index.t_df["is_synthetic_nrna"].values
             for j in range(len(det_tids)):
                 tid = int(det_tids[j])
                 gid = int(t_to_g[tid])
+                pool = POOL_CODE_NRNA if is_syn[tid] else POOL_CODE_MRNA
                 annotations.add(
                     frag_id=int(det_fids[j]),
                     best_tid=tid,
                     best_gid=gid,
-                    pool=POOL_CODE_MRNA,
+                    pool=pool,
                     posterior=1.0,
                     frag_class=FRAG_UNAMBIG,
                     n_candidates=1,
@@ -236,5 +234,4 @@ class FragmentRouter:
             splice_type=splice_types,
             n_units=int(len(offsets) - 1),
             n_candidates=int(len(t_indices)),
-            nrna_base_index=self.ctx.nrna_base,
         )

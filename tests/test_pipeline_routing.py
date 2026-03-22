@@ -32,13 +32,8 @@ class _BF:
     intron_bp: np.ndarray
     read_length: int
     nm: int = 0
-    unambig_intron_bp: np.ndarray = None
     genomic_footprint: int = 200
     genomic_start: int = -1
-
-    def __post_init__(self):
-        if self.unambig_intron_bp is None:
-            self.unambig_intron_bp = np.zeros_like(self.intron_bp)
 
 
 class _Chunk:
@@ -74,7 +69,6 @@ class _Chunk:
         flat_fl = []
         flat_exon = []
         flat_intron = []
-        flat_uintron = []
         for bf in bfs:
             n_cand = len(bf.t_inds)
             flat_t.extend(bf.t_inds)
@@ -84,7 +78,6 @@ class _Chunk:
                 flat_fl.extend([200] * n_cand)
             flat_exon.extend(bf.exon_bp)
             flat_intron.extend(bf.intron_bp)
-            flat_uintron.extend(bf.unambig_intron_bp)
             offsets.append(len(flat_t))
 
         self.t_offsets = np.array(offsets, dtype=np.int64)
@@ -92,7 +85,6 @@ class _Chunk:
         self.frag_lengths = np.array(flat_fl, dtype=np.int32)
         self.exon_bp = np.array(flat_exon, dtype=np.int32)
         self.intron_bp = np.array(flat_intron, dtype=np.int32)
-        self.unambig_intron_bp = np.array(flat_uintron, dtype=np.int32)
 
     def __getitem__(self, idx):
         return self._bfs[idx]
@@ -104,7 +96,6 @@ class _Chunk:
             np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
             np.ascontiguousarray(self.exon_bp, dtype=np.int32),
             np.ascontiguousarray(self.intron_bp, dtype=np.int32),
-            np.ascontiguousarray(self.unambig_intron_bp, dtype=np.int32),
             np.ascontiguousarray(self.splice_type, dtype=np.uint8),
             np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
             np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
@@ -133,22 +124,13 @@ class _Index:
         self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int8)
         self.num_transcripts = len(t_to_g)
         self.num_genes = len(g_to_strand)
-        self.num_nrna = self.num_transcripts
-        self.t_to_nrna_arr = np.arange(self.num_transcripts, dtype=np.int32)
-        self.nrna_df = pd.DataFrame({
-            "nrna_idx": np.arange(self.num_transcripts, dtype=np.int32),
-            "ref": ["chr1"] * self.num_transcripts,
-            "strand": np.zeros(self.num_transcripts, dtype=np.int32),
-            "start": np.zeros(self.num_transcripts, dtype=np.int64),
-            "end": np.full(self.num_transcripts, 10000, dtype=np.int64),
-            "length": np.full(self.num_transcripts, 10000, dtype=np.int64),
-        })
         self.t_df = pd.DataFrame({
             "t_id": [f"t{i}" for i in range(self.num_transcripts)],
             "ref": ["chr1"] * self.num_transcripts,
             "start": np.zeros(self.num_transcripts, dtype=np.int32),
             "end": np.full(self.num_transcripts, 10000, dtype=np.int32),
             "length": np.full(self.num_transcripts, 1000, dtype=np.int32),
+            "is_synthetic_nrna": np.zeros(self.num_transcripts, dtype=bool),
         })
 
     def get_exon_intervals(self, t_idx):
@@ -234,15 +216,16 @@ def test_multimapper_spliced_annot_skips_shadows():
 
     assert em.n_units == 1
     assert stats.em_routed_multimapper_units == 1
-    # Spliced multimappers: only mRNA candidates (no nRNA/gDNA)
-    assert np.all(em.t_indices < em.nrna_base_index)
+    # Spliced multimappers: only transcript candidates
+    assert np.all(em.t_indices < index.num_transcripts)
 
 
 def test_multimapper_unspliced_adds_nrna_shadows():
-    """Unspliced multimappers get nRNA candidates in global CSR.
+    """Unspliced multimappers get transcript candidates in global CSR.
 
     gDNA candidates are no longer in the global CSR — they are added
-    per-locus during locus EM construction.
+    per-locus during locus EM construction. nRNA shadows no longer exist
+    (synthetic nRNA transcripts are regular transcripts).
     """
     index = _Index(
         t_to_g=[0, 0],
@@ -290,8 +273,8 @@ def test_multimapper_unspliced_adds_nrna_shadows():
 
     assert em.n_units == 1
     assert stats.em_routed_multimapper_units == 1
-    # nRNA candidates present (index >= nrna_base_index)
-    assert np.any(em.t_indices >= em.nrna_base_index)
+    # All candidates are transcript-level (no nRNA shadows)
+    assert np.all(em.t_indices < index.num_transcripts)
     # gDNA candidates NOT in global CSR (added per-locus)
     # gDNA log-likelihood is pre-computed per unit for unspliced
     assert em.gdna_log_liks[0] > -np.inf
@@ -419,9 +402,8 @@ def test_nm_penalty_discriminates_multimapper_hits():
 
     assert em.n_units == 1
     # Both transcripts should be candidates
-    mRNA_mask = em.t_indices < estimator.nrna_base_index
-    mRNA_t = em.t_indices[mRNA_mask]
-    mRNA_ll = em.log_liks[mRNA_mask]
+    mRNA_t = em.t_indices
+    mRNA_ll = em.log_liks
     assert len(mRNA_t) == 2
     # t0 (NM=0) should have higher log-lik than t1 (NM=4)
     t0_idx = np.where(mRNA_t == 0)[0][0]

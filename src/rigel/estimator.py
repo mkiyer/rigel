@@ -80,21 +80,20 @@ class AbundanceEstimator:
 
     Accumulates per-transcript and per-gene fragment counts from both
     deterministic (unambig) and probabilistic (EM) assignment paths.
-    Estimates transcript-level mRNA, nRNA, and gDNA abundances.
+    Estimates transcript-level mRNA and gDNA abundances.
 
     Locus-level EM architecture::
 
         Per locus:
-        [0, n_t)       - mRNA transcript components
-        [n_t, 2*n_t)   - nRNA shadow per transcript
-        [2*n_t]        - gDNA: ONE shadow per locus
+        [0, n_t)       - transcript components (mRNA + synthetic nRNA)
+        [n_t]          - gDNA: ONE shadow per locus
 
     Fragment routing:
 
     - SPLICED_ANNOT + unambig -> deterministic mRNA (no EM)
     - All other -> enter locus EM
-      - Spliced fragments: mRNA + nRNA candidates only
-      - Unspliced fragments: mRNA + nRNA + gDNA candidates
+      - Spliced fragments: transcript candidates only
+      - Unspliced fragments: transcript + gDNA candidates
 
     Parameters
     ----------
@@ -110,21 +109,20 @@ class AbundanceEstimator:
         self,
         num_transcripts: int,
         *,
-        num_nrna: int = 0,
-        t_to_nrna: np.ndarray | None = None,
         em_config: EMConfig | None = None,
         geometry: TranscriptGeometry | None = None,
+        is_synthetic_nrna: np.ndarray | None = None,
     ):
         if em_config is None:
             em_config = EMConfig()
         self.em_config = em_config
         self.num_transcripts = num_transcripts
-        self.num_nrna = num_nrna if num_nrna > 0 else num_transcripts
-        self._t_to_nrna = t_to_nrna  # global transcript → global nRNA mapping
         self._rng = np.random.default_rng(em_config.seed)
-
-        # nRNA shadow base index (for global CSR component numbering).
-        self.nrna_base_index = num_transcripts
+        self._synthetic_mask = (
+            np.asarray(is_synthetic_nrna, dtype=bool)
+            if is_synthetic_nrna is not None
+            else np.zeros(num_transcripts, dtype=bool)
+        )
 
         # --- Geometry: from TranscriptGeometry or defaults ---
         if geometry is not None:
@@ -149,15 +147,12 @@ class AbundanceEstimator:
             (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
 
-        # Per-nRNA shadow initialization and EM counts.
-        self.nrna_em_counts = np.zeros(self.num_nrna, dtype=np.float64)
-
         # --- gDNA: locus-level, NOT per-gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
 
         # Per-locus results (locus_id, ref, n_transcripts, n_genes,
-        # n_em_fragments, mrna, nrna, gdna, gdna_init).
+        # n_em_fragments, mrna, gdna, gdna_init).
         self.locus_results: list[dict] = []
 
         # Per-transcript locus_id assignment (-1 = no locus).
@@ -167,17 +162,6 @@ class AbundanceEstimator:
         self.gdna_locus_counts = np.zeros(
             (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
         )
-
-        # --- Pre-EM strand accumulators (for gDNA init via EB) ---
-        # Per-nRNA: all same-strand UNSPLICED fragments.
-        # Accumulated during scan pass for empirical Bayes gDNA prior.
-        # Locus-level totals are derived by summing over locus.transcript_indices.
-        self.transcript_unspliced_sense = np.zeros(self.num_nrna, dtype=np.float64)
-        self.transcript_unspliced_antisense = np.zeros(self.num_nrna, dtype=np.float64)
-
-        # --- Pre-EM intronic accumulators (for nRNA init) ---
-        self.transcript_intronic_sense = np.zeros(self.num_nrna, dtype=np.float64)
-        self.transcript_intronic_antisense = np.zeros(self.num_nrna, dtype=np.float64)
 
         # Per-transcript confidence tracking:
         self._em_posterior_sum: np.ndarray | None = None
@@ -194,11 +178,6 @@ class AbundanceEstimator:
         return self._gdna_em_total
 
     @property
-    def nrna_em_count(self) -> float:
-        """Total EM-assigned nRNA count."""
-        return float(self.nrna_em_counts.sum())
-
-    @property
     def gdna_contamination_rate(self) -> float:
         """Fraction of all fragments attributed to gDNA."""
         total_rna = float(self.unambig_counts.sum() + self.em_counts.sum())
@@ -206,6 +185,14 @@ class AbundanceEstimator:
         if total == 0:
             return 0.0
         return self._gdna_em_total / total
+
+    @property
+    def nrna_em_count(self) -> float:
+        """Total nRNA count (sum of EM + unambig counts for synthetic nRNA transcripts)."""
+        mask = self._synthetic_mask
+        if not mask.any():
+            return 0.0
+        return float(self.t_counts[mask].sum())
 
     @property
     def t_counts(self) -> np.ndarray:
@@ -231,7 +218,7 @@ class AbundanceEstimator:
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
         confidence_threshold: float = 0.95,
-    ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[float, np.ndarray, np.ndarray]:
         """Run locus-level EM for ALL loci in a single C++ call.
 
         Replaces the Python per-locus for-loop
@@ -253,8 +240,8 @@ class AbundanceEstimator:
 
         Returns
         -------
-        tuple[float, np.ndarray, np.ndarray, np.ndarray]
-            (total_gdna_em, locus_mrna, locus_nrna, locus_gdna)
+        tuple[float, np.ndarray, np.ndarray]
+            (total_gdna_em, locus_mrna, locus_gdna)
         """
         n_loci = len(loci)
         n_transcripts = self.num_transcripts
@@ -298,7 +285,7 @@ class AbundanceEstimator:
         # Derive a per-batch RNG seed from the Python-level RNG
         rng_seed = int(self._rng.integers(0, 2**63))
 
-        total_gdna_em, locus_mrna, locus_nrna, locus_gdna = _batch_locus_em(
+        total_gdna_em, locus_mrna, locus_gdna = _batch_locus_em(
             # Global CSR
             em_data.offsets,
             em_data.t_indices,
@@ -312,7 +299,6 @@ class AbundanceEstimator:
             em_data.genomic_footprints,
             em_data.locus_t_indices,
             em_data.locus_count_cols,
-            np.int32(em_data.nrna_base_index),
             # Locus definitions
             locus_t_offsets,
             locus_t_flat,
@@ -326,15 +312,9 @@ class AbundanceEstimator:
             t_starts,
             t_ends,
             t_lengths,
-            self._transcript_spans,
-            self._exonic_lengths,
-            # nRNA mapping
-            index.t_to_nrna_arr,
-            index.num_nrna,
             # Mutable output accumulators
             self.em_counts,
             self.em_high_conf_counts,
-            self.nrna_em_counts,
             self.gdna_locus_counts,
             self._em_posterior_sum,
             self._em_n_assigned,
@@ -355,7 +335,6 @@ class AbundanceEstimator:
         return (
             total_gdna_em,
             np.asarray(locus_mrna),
-            np.asarray(locus_nrna),
             np.asarray(locus_gdna),
         )
 
@@ -381,35 +360,26 @@ class AbundanceEstimator:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _nrna_per_transcript(self) -> np.ndarray:
-        """Fan out per-nRNA EM counts to per-transcript (equal share)."""
-        if self._t_to_nrna is not None:
-            fan_counts = np.bincount(
-                self._t_to_nrna,
-                minlength=self.num_nrna,
-            ).astype(np.float64)
-            fan_counts = np.maximum(fan_counts, 1.0)
-            return self.nrna_em_counts[self._t_to_nrna] / fan_counts[self._t_to_nrna]
-        return self.nrna_em_counts
-
     # ------------------------------------------------------------------
     # Output - primary counts
     # ------------------------------------------------------------------
 
     def get_counts_df(self, index) -> pd.DataFrame:
-        """Primary transcript-level abundance estimates.
+        """Primary transcript-level abundance estimates (annotated only).
 
         Columns
         -------
-        transcript_id, gene_id, gene_name : identifiers
-        locus_id : int32, EM locus (-1 if no locus)
+        transcript_id, gene_id, gene_name, gene_type : identifiers
+        ref, strand, start, end, length : genomic coordinates
         effective_length : bias-corrected effective length
+        locus_id : int32, EM locus (-1 if no locus)
+        nrna_id : str, associated nRNA entity transcript ID ("." if none)
+        is_basic, is_mane, is_nascent_equiv : flags
         mrna : total mRNA count (unambig + EM)
         mrna_unambig : uniquely-assigned mRNA
         mrna_em : EM-assigned mRNA
-        mrna_high_conf : high-confidence mRNA (unambig + EM >= threshold)
         mrna_spliced : spliced mRNA fragments
-        nrna : nascent RNA count (EM-assigned only)
+        nrna : nascent RNA count (0 for annotated transcripts)
         rna_total : mrna + nrna
         tpm : transcripts per million (mRNA-based)
         posterior_mean : mean posterior at EM assignment
@@ -417,32 +387,60 @@ class AbundanceEstimator:
         total = self.t_counts
         unique = self.unambig_counts
 
-        mrna = total.sum(axis=1)
+        t_total = total.sum(axis=1)
         mrna_unambig = unique.sum(axis=1)
         mrna_spliced = total[:, list(SPLICED_COLS)].sum(axis=1)
         mrna_em = self.em_counts.sum(axis=1)
-        mrna_high_conf = self.t_high_conf_counts.sum(axis=1)
-        nrna = self._nrna_per_transcript()
+
+        # nRNA: for synthetic nRNA transcripts, their transcript count IS the
+        # nRNA count; their mrna count is 0. For annotated transcripts, nrna = 0.
+        is_synthetic = index.t_df["is_synthetic_nrna"].values if "is_synthetic_nrna" in index.t_df.columns else np.zeros(self.num_transcripts, dtype=bool)
+        nrna = np.where(is_synthetic, t_total, 0.0)
+        mrna = np.where(is_synthetic, 0.0, t_total)
         rna_total = mrna + nrna
         pmean = self.posterior_mean()
 
         # TPM: mRNA-based, using effective lengths
         eff = self._t_eff_len
-        rpk = mrna / eff  # reads per kilobase (un-scaled)
+        rpk = mrna / eff
         rpk_sum = rpk.sum()
         tpm = (rpk / rpk_sum * 1e6) if rpk_sum > 0 else np.zeros_like(rpk)
 
+        # Build nrna_id: lookup nrna_t_index → transcript ID
+        t_ids = index.t_df["t_id"].values
+        nrna_t_idx = index.t_df["nrna_t_index"].values if "nrna_t_index" in index.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        nrna_id = np.where(
+            nrna_t_idx >= 0,
+            t_ids[nrna_t_idx.clip(0)],
+            ".",
+        )
+        # Fix entries where nrna_t_index == -1 (clip(0) forced index 0)
+        nrna_id = np.where(nrna_t_idx >= 0, nrna_id, ".")
+
+        # Strand: convert 1 → "+", 2 → "-"
+        strand_raw = index.t_df["strand"].values
+        strand = np.where(strand_raw == 1, "+", np.where(strand_raw == 2, "-", "."))
+
         df = pd.DataFrame(
             {
-                "transcript_id": index.t_df["t_id"].values,
+                "transcript_id": t_ids,
                 "gene_id": index.t_df["g_id"].values,
                 "gene_name": index.t_df["g_name"].values,
-                "locus_id": self.locus_id_per_transcript,
+                "gene_type": index.t_df["g_type"].values,
+                "ref": index.t_df["ref"].values,
+                "strand": strand,
+                "start": index.t_df["start"].values,
+                "end": index.t_df["end"].values,
+                "length": index.t_df["length"].values,
                 "effective_length": eff,
+                "locus_id": self.locus_id_per_transcript,
+                "nrna_id": nrna_id,
+                "is_basic": index.t_df["is_basic"].values,
+                "is_mane": index.t_df["is_mane"].values,
+                "is_nascent_equiv": index.t_df["is_nascent_equiv"].values,
                 "mrna": mrna,
                 "mrna_unambig": mrna_unambig,
                 "mrna_em": mrna_em,
-                "mrna_high_conf": mrna_high_conf,
                 "mrna_spliced": mrna_spliced,
                 "nrna": nrna,
                 "rna_total": rna_total,
@@ -450,6 +448,10 @@ class AbundanceEstimator:
                 "posterior_mean": pmean,
             }
         )
+        # Filter out synthetic nRNA transcripts (they go to nrna_quant)
+        df = df[~is_synthetic].reset_index(drop=True)
+        # Sort by genomic position
+        df = df.sort_values(["ref", "start", "end"]).reset_index(drop=True)
         return df
 
     def get_gene_counts_df(self, index) -> pd.DataFrame:
@@ -457,13 +459,14 @@ class AbundanceEstimator:
 
         Columns
         -------
-        gene_id, gene_name : identifiers
+        gene_id, gene_name, gene_type : identifiers
+        ref, strand, start, end : genomic coordinates
+        n_transcripts : int, number of annotated transcripts
         locus_id : int32, primary EM locus for this gene (-1 if none)
         effective_length : abundance-weighted mean effective length
         mrna : total mRNA count (unambig + EM)
         mrna_unambig : uniquely-assigned mRNA
         mrna_em : EM-assigned mRNA
-        mrna_high_conf : high-confidence mRNA
         mrna_spliced : spliced mRNA fragments
         nrna : nascent RNA count
         rna_total : mrna + nrna
@@ -477,15 +480,18 @@ class AbundanceEstimator:
         g_total = _aggregate_to_gene(t_to_g, n_genes, total)
         g_unambig = _aggregate_to_gene(t_to_g, n_genes, unique)
 
-        mrna = g_total.sum(axis=1)
+        g_all = g_total.sum(axis=1)
         mrna_unambig = g_unambig.sum(axis=1)
         mrna_spliced = g_total[:, list(SPLICED_COLS)].sum(axis=1)
 
         mrna_em_arr = _aggregate_to_gene(t_to_g, n_genes, self.em_counts.sum(axis=1))
-        mrna_hc_arr = _aggregate_to_gene(t_to_g, n_genes, self.t_high_conf_counts.sum(axis=1))
 
-        # nRNA per gene (EM-assigned only)
-        nrna = _aggregate_to_gene(t_to_g, n_genes, self._nrna_per_transcript())
+        # nRNA per gene: sum counts of synthetic nRNA transcripts in each gene
+        is_synthetic = index.t_df["is_synthetic_nrna"].values if "is_synthetic_nrna" in index.t_df.columns else np.zeros(len(t_to_g), dtype=bool)
+        t_counts_all = (self.unambig_counts + self.em_counts).sum(axis=1)
+        t_nrna = np.where(is_synthetic, t_counts_all, 0.0)
+        nrna = _aggregate_to_gene(t_to_g, n_genes, t_nrna)
+        mrna = g_all - nrna
         rna_total = mrna + nrna
 
         # Gene effective length: abundance-weighted mean of transcript
@@ -508,6 +514,14 @@ class AbundanceEstimator:
             t_to_g, n_genes, self.locus_id_per_transcript, total.sum(axis=1)
         )
 
+        # n_transcripts (annotated only, excluding synthetics)
+        annotated_mask = (~is_synthetic).astype(np.float64)
+        n_annotated = _aggregate_to_gene(t_to_g, n_genes, annotated_mask).astype(int)
+
+        # Strand: convert 1 → "+", 2 → "-"
+        strand_raw = index.g_df["strand"].values
+        strand = np.where(strand_raw == 1, "+", np.where(strand_raw == 2, "-", "."))
+
         # TPM: mRNA-based at gene level
         rpk = mrna / g_eff_len
         rpk_sum = rpk.sum()
@@ -517,26 +531,106 @@ class AbundanceEstimator:
             {
                 "gene_id": index.g_df["g_id"].values,
                 "gene_name": index.g_df["g_name"].values,
+                "gene_type": index.g_df["g_type"].values,
+                "ref": index.g_df["ref"].values,
+                "strand": strand,
+                "start": index.g_df["start"].values,
+                "end": index.g_df["end"].values,
+                "n_transcripts": n_annotated,
                 "locus_id": g_locus_id,
                 "effective_length": g_eff_len,
                 "mrna": mrna,
                 "mrna_unambig": mrna_unambig,
                 "mrna_em": mrna_em_arr,
-                "mrna_high_conf": mrna_hc_arr,
                 "mrna_spliced": mrna_spliced,
                 "nrna": nrna,
                 "rna_total": rna_total,
                 "tpm": tpm,
             }
         )
+        # Sort by genomic position
+        df = df.sort_values(["ref", "start", "end"]).reset_index(drop=True)
+        return df
+
+    # ------------------------------------------------------------------
+    # Output - nRNA entity table
+    # ------------------------------------------------------------------
+
+    def get_nrna_counts_df(self, index) -> pd.DataFrame:
+        """Nascent RNA entity table (synthetics + nascent equivalents).
+
+        Columns
+        -------
+        nrna_id : str, transcript ID for the nRNA entity
+        gene_id, gene_name : representative gene identifiers
+        ref, strand, start, end, length : genomic coordinates
+        effective_length : bias-corrected effective length
+        locus_id : int32, EM locus
+        is_synthetic : bool, True for RIGEL-generated synthetics
+        n_contributing_transcripts : int, annotated transcripts merged
+        count : float, nascent RNA fragment count
+        tpm : float, TPM (nRNA-pool normalized)
+        """
+        t_df = index.t_df
+        is_syn = t_df["is_synthetic_nrna"].values if "is_synthetic_nrna" in t_df.columns else np.zeros(self.num_transcripts, dtype=bool)
+        is_equiv = t_df["is_nascent_equiv"].values if "is_nascent_equiv" in t_df.columns else np.zeros(self.num_transcripts, dtype=bool)
+        mask = is_syn | is_equiv
+
+        if not mask.any():
+            return pd.DataFrame(columns=[
+                "nrna_id", "gene_id", "gene_name",
+                "ref", "strand", "start", "end", "length", "effective_length",
+                "locus_id", "is_synthetic", "n_contributing_transcripts",
+                "count", "tpm",
+            ])
+
+        idx = np.where(mask)[0]
+        t_total = self.t_counts.sum(axis=1)
+
+        # For synthetics, count = their total. For nascent-equiv, count = 0
+        # (their fragments are counted as mRNA in quant.tsv).
+        counts = np.where(is_syn[mask], t_total[idx], 0.0)
+
+        eff = self._t_eff_len[idx]
+
+        # nRNA-pool TPM
+        rpk = counts / np.maximum(eff, 1.0)
+        rpk_sum = rpk.sum()
+        tpm = (rpk / rpk_sum * 1e6) if rpk_sum > 0 else np.zeros_like(rpk)
+
+        # Strand: convert 1 → "+", 2 → "-"
+        strand_raw = t_df["strand"].values[idx]
+        strand = np.where(strand_raw == 1, "+", np.where(strand_raw == 2, "-", "."))
+
+        n_contrib = t_df["nrna_n_contributors"].values[idx] if "nrna_n_contributors" in t_df.columns else np.zeros(len(idx), dtype=int)
+
+        df = pd.DataFrame(
+            {
+                "nrna_id": t_df["t_id"].values[idx],
+                "gene_id": t_df["g_id"].values[idx],
+                "gene_name": t_df["g_name"].values[idx],
+                "ref": t_df["ref"].values[idx],
+                "strand": strand,
+                "start": t_df["start"].values[idx],
+                "end": t_df["end"].values[idx],
+                "length": t_df["length"].values[idx],
+                "effective_length": eff,
+                "locus_id": self.locus_id_per_transcript[idx],
+                "is_synthetic": is_syn[mask],
+                "n_contributing_transcripts": n_contrib,
+                "count": counts,
+                "tpm": tpm,
+            }
+        )
+        df = df.sort_values(["ref", "start", "end"]).reset_index(drop=True)
         return df
 
     # ------------------------------------------------------------------
     # Output - locus-level breakdown
     # ------------------------------------------------------------------
 
-    def get_loci_df(self) -> pd.DataFrame:
-        """Locus-level output with gDNA/nRNA/mRNA breakdown.
+    def get_loci_df(self, index=None) -> pd.DataFrame:
+        """Locus-level output with three-pool breakdown.
 
         Returns an empty DataFrame (with correct columns) if no loci
         were processed.
@@ -545,46 +639,70 @@ class AbundanceEstimator:
         -------
         locus_id : int, sequential locus identifier
         ref : str, primary reference name
-        n_transcripts : int
+        n_transcripts : int, total transcripts in locus
+        n_annotated_transcripts : int, annotated transcripts only
+        n_nrna_entities : int, synthetic nRNA transcripts in locus
         n_genes : int
         n_em_fragments : int, ambiguous fragments entering EM
         mrna : float, mRNA count from locus EM
         nrna : float, nRNA count from locus EM
         gdna : float, gDNA count from locus EM
-        gdna_rate : float, gdna / (mrna + nrna + gdna)
-        gdna_init : float, calibration locus γ (gDNA fraction)
+        total : float, mrna + nrna + gdna
+        gdna_rate : float, gdna / total
+        gdna_prior : float, calibration-derived gDNA prior (γ)
         """
         cols = [
             "locus_id",
             "ref",
             "n_transcripts",
+            "n_annotated_transcripts",
+            "n_nrna_entities",
             "n_genes",
             "n_em_fragments",
             "mrna",
             "nrna",
             "gdna",
+            "total",
             "gdna_rate",
-            "gdna_init",
+            "gdna_prior",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
 
+        # Pre-compute per-transcript nRNA counts and synthetic mask
+        t_total = self.t_counts.sum(axis=1)
+        if index is not None:
+            is_syn = index.t_df["is_synthetic_nrna"].values if "is_synthetic_nrna" in index.t_df.columns else np.zeros(self.num_transcripts, dtype=bool)
+        else:
+            is_syn = np.zeros(self.num_transcripts, dtype=bool)
+        locus_ids = self.locus_id_per_transcript
+
         rows = []
         for r in self.locus_results:
-            total = r["mrna"] + r["nrna"] + r["gdna"]
+            lid = r["locus_id"]
+            in_locus = locus_ids == lid
+            syn_in_locus = in_locus & is_syn
+            nrna = float(t_total[syn_in_locus].sum())
+            n_syn = int(syn_in_locus.sum())
+            n_annot = int(in_locus.sum()) - n_syn
+
+            total = r["mrna"] + nrna + r["gdna"]
             rate = r["gdna"] / total if total > 0 else 0.0
             rows.append(
                 {
-                    "locus_id": r["locus_id"],
+                    "locus_id": lid,
                     "ref": r.get("ref", ""),
                     "n_transcripts": r["n_transcripts"],
+                    "n_annotated_transcripts": n_annot,
+                    "n_nrna_entities": n_syn,
                     "n_genes": r["n_genes"],
                     "n_em_fragments": r["n_em_fragments"],
                     "mrna": r["mrna"],
-                    "nrna": r["nrna"],
+                    "nrna": nrna,
                     "gdna": r["gdna"],
+                    "total": total,
                     "gdna_rate": rate,
-                    "gdna_init": r.get("gdna_init", 0.0),
+                    "gdna_prior": r.get("gdna_init", 0.0),
                 }
             )
         return pd.DataFrame(rows, columns=cols)

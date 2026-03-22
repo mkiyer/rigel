@@ -222,8 +222,6 @@ class TestFragmentScorerGdnaFL:
         )
         estimator = AbundanceEstimator(
             index.num_transcripts,
-            num_nrna=index.num_nrna,
-            t_to_nrna=index.t_to_nrna_arr,
             em_config=EMConfig(),
             geometry=geometry,
         )
@@ -320,7 +318,10 @@ class TestGdnaFLEndToEnd:
         """Pipeline with calibration produces valid quantification."""
         pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
         df = pr.estimator.get_counts_df(self.index)
-        assert len(df) == 3
+        n_annotated = sum(
+            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
+        )
+        assert n_annotated == 3
         assert (df["mrna"] >= 0).all()
         assert df["mrna"].sum() > 0
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)

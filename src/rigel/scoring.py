@@ -112,7 +112,6 @@ class FragmentScorer:
     # Index arrays (borrowed references, never copied)
     t_strand_arr: np.ndarray  # int8[n_transcripts]
     t_to_g: np.ndarray  # int32[n_transcripts]
-    nrna_base: int  # offset for nRNA indices in CSR
 
     # Per-transcript lengths for per-fragment effective length correction
     t_length_arr: np.ndarray  # int32[n_transcripts] — spliced exonic length
@@ -202,7 +201,6 @@ class FragmentScorer:
             gdna_fl_tail_base=gdna_fl_tail_base,
             t_strand_arr=index.t_to_strand_arr,
             t_to_g=index.t_to_g_arr,
-            nrna_base=estimator.nrna_base_index,
             t_length_arr=t_length_arr,
             t_span_arr=t_span_arr,
             t_start_arr=t_start_arr,
@@ -230,13 +228,7 @@ class FragmentScorer:
             t_length_arr=np.ascontiguousarray(ctx.t_length_arr, dtype=np.int32),
             t_span_arr=np.ascontiguousarray(ctx.t_span_arr, dtype=np.int32),
             t_start_arr=np.ascontiguousarray(ctx.t_start_arr, dtype=np.int32),
-            nrna_base=int(ctx.nrna_base),
             t_exon_data=ctx._t_exon_data,
-            t_to_nrna_arr=np.ascontiguousarray(index.t_to_nrna_arr, dtype=np.int32),
-            nrna_span_arr=np.ascontiguousarray(
-                (index.nrna_df["end"].values - index.nrna_df["start"].values).astype(np.int32)
-            ),
-            nrna_start_arr=np.ascontiguousarray(index.nrna_df["start"].values.astype(np.int32)),
         )
         object.__setattr__(ctx, "_native_ctx", native_ctx)
 

@@ -28,10 +28,6 @@ namespace rigel {
 // IntervalType (rigel.types.IntervalType)
 static constexpr int8_t ITYPE_EXON           = 0;
 static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
-// INTERGENIC = 2 — not used in resolve
-// SJ = 3 — not used in resolve
-// SJ_UNANNOT = 4 — not used in resolve
-static constexpr int8_t ITYPE_UNAMBIG_INTRON  = 5;
 
 // SpliceType (rigel.categories.SpliceType)
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
@@ -150,7 +146,6 @@ struct RawResolveResult {
     // Parallel arrays to t_inds
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_intron_bp;
-    std::vector<int32_t> t_unambig_intron_bp;
 };
 
 // ================================================================

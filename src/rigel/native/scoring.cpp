@@ -146,7 +146,6 @@ class NativeFragmentScorer {
     int32_t fl_max_size_;
     double  fl_tail_base_;
     bool    has_fl_lut_;
-    int32_t nrna_base_;
     int32_t n_transcripts_;
 
     // --- Copied index arrays ---
@@ -154,10 +153,6 @@ class NativeFragmentScorer {
     std::vector<int32_t> t_length_;   // spliced exonic length
     std::vector<int32_t> t_span_;     // genomic span (incl introns)
     std::vector<int32_t> t_start_;    // genomic start coordinate
-    std::vector<int32_t> t_to_nrna_;  // int32[n_transcripts]: t_idx → nrna_idx
-    int32_t n_nrna_;
-    std::vector<int32_t> nrna_span_;  // int32[n_nrna]: per-nRNA genomic span
-    std::vector<int32_t> nrna_start_; // int32[n_nrna]: per-nRNA genomic start
 
     // --- Fragment-length LUT — RNA model (copied from numpy) ---
     std::vector<double> fl_log_prob_;
@@ -249,11 +244,7 @@ public:
         i32_1d  t_length_arr,
         i32_1d  t_span_arr,
         i32_1d  t_start_arr,
-        int32_t nrna_base,
-        nb::object t_exon_data_obj,
-        i32_1d  t_to_nrna_arr,
-        i32_1d  nrna_span_arr,
-        i32_1d  nrna_start_arr)
+        nb::object t_exon_data_obj)
       : log_p_sense_(log_p_sense),
         log_p_antisense_(log_p_antisense),
         r1_antisense_(r1_antisense),
@@ -262,7 +253,6 @@ public:
         fl_max_size_(fl_max_size),
         fl_tail_base_(fl_tail_base),
         has_fl_lut_(false),
-        nrna_base_(nrna_base),
         gdna_fl_max_size_(gdna_fl_max_size),
         gdna_fl_tail_base_(gdna_fl_tail_base),
         has_gdna_fl_lut_(false)
@@ -284,19 +274,6 @@ public:
         {
             const auto* p = t_start_arr.data();
             t_start_.assign(p, p + n_transcripts_);
-        }
-        {
-            const auto* p = t_to_nrna_arr.data();
-            t_to_nrna_.assign(p, p + n_transcripts_);
-        }
-        n_nrna_ = static_cast<int32_t>(nrna_span_arr.shape(0));
-        {
-            const auto* p = nrna_span_arr.data();
-            nrna_span_.assign(p, p + n_nrna_);
-        }
-        {
-            const auto* p = nrna_start_arr.data();
-            nrna_start_.assign(p, p + n_nrna_);
         }
 
         // Copy fragment-length LUT (RNA model)
@@ -378,7 +355,6 @@ private:
         const int32_t*  f_len;
         const int32_t*  e_bp;
         const int32_t*  i_bp;
-        const int32_t*  ui_bp;
         const uint8_t*  s_type;
         const uint8_t*  e_str;
         const uint8_t*  fc;
@@ -444,13 +420,6 @@ private:
         double  coverage_wt;
         int32_t tx_start, tx_end;
     };
-    struct MergedNrna {
-        int32_t overhang;
-        double  nrna_ll;
-        double  coverage_wt;
-        int32_t tx_start, tx_end;
-    };
-
     // ---------------------------------------------------------------
     // flush_mm_group — score and emit one multimapper group
     // ---------------------------------------------------------------
@@ -478,15 +447,12 @@ private:
 
         // --- Determine splice status across all hits ---
         bool is_any_spliced = false;
-        bool is_annot_spliced = false;
         for (auto& [ci, ri] : members) {
             int stype = cps[ci].s_type[ri];
-            if (stype == SPLICE_SPLICED_ANNOT) {
-                is_annot_spliced = true;
+            if (stype == SPLICE_SPLICED_ANNOT ||
+                stype == SPLICE_SPLICED_UNANNOT) {
                 is_any_spliced = true;
                 break;
-            } else if (stype == SPLICE_SPLICED_UNANNOT) {
-                is_any_spliced = true;
             }
         }
 
@@ -614,147 +580,6 @@ private:
             }
         }
 
-        // --- nRNA pool (independent, skip if any hit is ANNOT) ---
-        if (!is_annot_spliced) {
-            std::unordered_map<int32_t, MergedNrna> merged_nrna;
-
-            for (auto& [ci, ri] : members) {
-                const auto& cp = cps[ci];
-                int hit_stype = cp.s_type[ri];
-                if (hit_stype == SPLICE_SPLICED_ANNOT) continue;
-
-                int64_t start = cp.t_off[ri];
-                int64_t end   = cp.t_off[ri + 1];
-                int n_cand    = static_cast<int>(end - start);
-                if (n_cand <= 0) continue;
-
-                int exon_str = cp.e_str[ri];
-                int rl = cp.r_len[ri] > 0
-                       ? static_cast<int>(cp.r_len[ri]) : 1;
-                int nm = cp.nm[ri];
-                double log_nm = nm > 0
-                    ? nm * mm_log_pen_ : 0.0;
-                bool has_strand =
-                    (exon_str == 1 || exon_str == 2);
-                int genomic_start_val = cp.g_sta[ri];
-                int genomic_footprint_val = cp.g_fp[ri];
-                bool n_has_genomic =
-                    (genomic_start_val >= 0
-                     && genomic_footprint_val > 0);
-                int32_t nrna_gfp =
-                    genomic_footprint_val > 0
-                    ? genomic_footprint_val : 0;
-                double n_log_fl =
-                    frag_len_log_lik(genomic_footprint_val);
-
-                for (int64_t k = start; k < end; ++k) {
-                    int32_t t_idx = cp.t_ind[k];
-                    int32_t t_span_v = t_span_[t_idx];
-                    int32_t t_exonic = t_length_[t_idx];
-                    if (t_span_v <= t_exonic) continue;
-
-                    int32_t ebp = cp.e_bp[k];
-                    int32_t ibp = cp.i_bp[k];
-                    int32_t span_bp = ebp + ibp;
-                    if (span_bp <= 0) continue;
-
-                    int32_t oh = rl - span_bp;
-                    if (oh < 0) oh = 0;
-
-                    double log_strand;
-                    if (has_strand) {
-                        bool same = (exon_str ==
-                            static_cast<int>(
-                                t_strand_[t_idx]));
-                        log_strand = same
-                            ? log_p_sense_
-                            : log_p_antisense_;
-                    } else {
-                        log_strand = LOG_HALF;
-                    }
-
-                    double nrna_ll =
-                        log_strand + n_log_fl
-                        + oh * oh_log_pen_ + log_nm;
-
-                    // Use nRNA-relative coordinates
-                    int32_t nrna_idx =
-                        t_to_nrna_[t_idx];
-                    int32_t ns =
-                        nrna_span_[nrna_idx];
-                    int32_t tx_s = 0;
-                    int32_t tx_e = nrna_gfp > 0
-                        ? nrna_gfp : ns;
-                    double cov_wt = 1.0;
-
-                    if (n_has_genomic) {
-                        int32_t nrna_start_g =
-                            nrna_start_[nrna_idx];
-                        int32_t frag_pos =
-                            genomic_start_val
-                            - nrna_start_g;
-                        int32_t frag_end_pos =
-                            frag_pos
-                            + genomic_footprint_val;
-                        int32_t fpc =
-                            frag_pos < ns
-                            ? frag_pos : ns;
-                        if (fpc < 0) fpc = 0;
-                        int32_t fec =
-                            frag_end_pos < ns
-                            ? frag_end_pos : ns;
-                        if (fec < 0) fec = 0;
-                        if (fec > fpc && ns > 0)
-                            cov_wt =
-                                compute_fragment_weight(
-                                    fpc, fec, ns);
-                        tx_s = frag_pos > 0
-                            ? frag_pos : 0;
-                        tx_e = tx_s
-                            + genomic_footprint_val;
-                    }
-
-                    // Merge: best per nrna_idx
-                    auto it = merged_nrna.find(nrna_idx);
-                    if (it == merged_nrna.end()) {
-                        merged_nrna[nrna_idx] = {oh, nrna_ll,
-                                              cov_wt,
-                                              tx_s, tx_e};
-                    } else {
-                        auto& prev = it->second;
-                        if (oh < prev.overhang ||
-                            (oh == prev.overhang &&
-                             nrna_ll > prev.nrna_ll))
-                        {
-                            prev = {oh, nrna_ll, cov_wt,
-                                    tx_s, tx_e};
-                        }
-                    }
-                }
-            }
-
-            // Global nRNA WTA
-            int32_t nrna_min_oh = 0x7FFFFFFF;
-            for (auto& [ni, nc] : merged_nrna) {
-                if (nc.overhang < nrna_min_oh)
-                    nrna_min_oh = nc.overhang;
-            }
-            for (auto& [ni, nc] : merged_nrna) {
-                if (nc.overhang == nrna_min_oh) {
-                    if constexpr (FillMode) {
-                        int64_t c = st.cand_cur;
-                        st.ti[c] = nrna_base_ + ni;
-                        st.ll[c] = nc.nrna_ll;
-                        st.ct[c] = 0;
-                        st.cw[c] = nc.coverage_wt;
-                        st.ts[c] = nc.tx_start;
-                        st.te[c] = nc.tx_end;
-                    }
-                    ++st.cand_cur;
-                }
-            }
-        }
-
         // --- Finalize this MM EM unit ---
         int64_t new_cands = st.cand_cur - emit_start;
         if (new_cands > 0) {
@@ -831,8 +656,6 @@ private:
         const ChunkPtrs& cp,
         int chunk_idx,
         const int8_t* t_str,
-        double* acc_us, double* acc_ua,
-        double* acc_is, double* acc_ia,
         double* ua_counts, int ua_ncols,
         double gdna_log_sp,
         FillState& st,
@@ -850,7 +673,6 @@ private:
         const int32_t*  f_len  = cp.f_len;
         const int32_t*  e_bp   = cp.e_bp;
         const int32_t*  i_bp   = cp.i_bp;
-        const int32_t*  ui_bp  = cp.ui_bp;
         const uint8_t*  s_type = cp.s_type;
         const uint8_t*  e_str  = cp.e_str;
         const uint8_t*  fc     = cp.fc;
@@ -902,39 +724,6 @@ private:
                 if (fclass == FRAG_UNAMBIG ||
                     fclass == FRAG_AMBIG_SAME_STRAND)
                 {
-                    int32_t first_t = t_ind[start];
-                    int first_t_strand =
-                        static_cast<int>(t_str[first_t]);
-
-                    bool is_anti;
-                    if (exon_str == 1 || exon_str == 2) {
-                        bool same = (exon_str == first_t_strand);
-                        double log_p = same ? log_p_sense_
-                                           : log_p_antisense_;
-                        is_anti = std::exp(log_p) < 0.5;
-                    } else {
-                        is_anti = false;
-                    }
-
-                    bool is_unspliced = (stype == SPLICE_UNSPLICED);
-                    double weight =
-                        n_cand > 0 ? 1.0 / n_cand : 0.0;
-
-                    for (int64_t k = start; k < end; ++k) {
-                        int32_t t_idx = t_ind[k];
-                        int32_t nrna_idx = t_to_nrna_[t_idx];
-                        bool has_ui = (ui_bp[k] > 0);
-
-                        if (is_unspliced) {
-                            if (is_anti) acc_ua[nrna_idx] += weight;
-                            else         acc_us[nrna_idx] += weight;
-                        }
-                        if (has_ui) {
-                            if (is_anti) acc_ia[nrna_idx] += weight;
-                            else         acc_is[nrna_idx] += weight;
-                        }
-                    }
-
                     // Det-unambig: SPLICE_ANNOT + FRAG_UNAMBIG
                     if (fclass == FRAG_UNAMBIG &&
                         stype == SPLICE_SPLICED_ANNOT) {
@@ -1088,134 +877,6 @@ private:
                         }
                     }
                 }
-
-                // ===== nRNA scoring (skip if SPLICE_ANNOT) =====
-                if (stype != SPLICE_SPLICED_ANNOT) {
-                    double n_log_fl =
-                        frag_len_log_lik(genomic_footprint);
-                    bool n_has_genomic =
-                        (genomic_start >= 0
-                         && genomic_footprint > 0);
-                    int32_t nrna_gfp =
-                        genomic_footprint > 0
-                        ? genomic_footprint : 0;
-
-                    // Merge nRNA candidates by nrna_idx (deduplicate
-                    // transcripts sharing the same nRNA entity).
-                    struct NrnaMerged {
-                        int32_t oh, tx_s, tx_e;
-                        double  nrna_ll, cov_wt;
-                    };
-                    std::unordered_map<int32_t, NrnaMerged>
-                        nrna_map;
-
-                    for (int64_t k = start; k < end; ++k) {
-                        int32_t t_idx = t_ind[k];
-                        int32_t t_span_v = t_span_[t_idx];
-                        int32_t t_exonic = t_length_[t_idx];
-                        if (t_span_v <= t_exonic) continue;
-
-                        int32_t ebp = e_bp[k];
-                        int32_t ibp = i_bp[k];
-                        int32_t span_bp = ebp + ibp;
-                        if (span_bp <= 0) continue;
-
-                        int32_t oh = rl - span_bp;
-                        if (oh < 0) oh = 0;
-
-                        double log_strand;
-                        if (has_strand) {
-                            bool same = (exon_str ==
-                                static_cast<int>(
-                                    t_strand_[t_idx]));
-                            log_strand = same
-                                ? log_p_sense_
-                                : log_p_antisense_;
-                        } else {
-                            log_strand = LOG_HALF;
-                        }
-
-                        double nrna_ll =
-                            log_strand + n_log_fl
-                            + oh * oh_log_pen_ + log_nm;
-
-                        // Use nRNA-relative coordinates
-                        int32_t nrna_idx =
-                            t_to_nrna_[t_idx];
-                        int32_t ns =
-                            nrna_span_[nrna_idx];
-                        int32_t tx_s = 0;
-                        int32_t tx_e = nrna_gfp > 0
-                            ? nrna_gfp : ns;
-                        double cov_wt = 1.0;
-
-                        if (n_has_genomic) {
-                            int32_t nrna_start_g =
-                                nrna_start_[nrna_idx];
-                            int32_t frag_pos =
-                                genomic_start
-                                - nrna_start_g;
-                            int32_t frag_end_pos =
-                                frag_pos
-                                + genomic_footprint;
-                            int32_t fpc =
-                                frag_pos < ns
-                                ? frag_pos : ns;
-                            if (fpc < 0) fpc = 0;
-                            int32_t fec =
-                                frag_end_pos < ns
-                                ? frag_end_pos : ns;
-                            if (fec < 0) fec = 0;
-                            if (fec > fpc && ns > 0)
-                                cov_wt =
-                                    compute_fragment_weight(
-                                        fpc, fec, ns);
-                            tx_s = frag_pos > 0
-                                ? frag_pos : 0;
-                            tx_e = tx_s
-                                + genomic_footprint;
-                        }
-
-                        // Merge: best per nrna_idx
-                        auto it = nrna_map.find(nrna_idx);
-                        if (it == nrna_map.end()) {
-                            nrna_map[nrna_idx] =
-                                {oh, tx_s, tx_e,
-                                 nrna_ll, cov_wt};
-                        } else {
-                            auto& prev = it->second;
-                            if (oh < prev.oh ||
-                                (oh == prev.oh &&
-                                 nrna_ll > prev.nrna_ll))
-                            {
-                                prev = {oh, tx_s, tx_e,
-                                         nrna_ll, cov_wt};
-                            }
-                        }
-                    }
-
-                    // nRNA WTA: keep only min-overhang
-                    int32_t n_min_oh = 0x7FFFFFFF;
-                    for (auto& [ni, nc] : nrna_map) {
-                        if (nc.oh < n_min_oh)
-                            n_min_oh = nc.oh;
-                    }
-                    for (auto& [ni, nc] : nrna_map) {
-                        if (nc.oh == n_min_oh) {
-                            if constexpr (FillMode) {
-                                int64_t c = st.cand_cur;
-                                st.ti[c] =
-                                    nrna_base_ + ni;
-                                st.ll[c] = nc.nrna_ll;
-                                st.ct[c] = 0;
-                                st.cw[c] = nc.cov_wt;
-                                st.ts[c] = nc.tx_s;
-                                st.te[c] = nc.tx_e;
-                            }
-                            ++st.cand_cur;
-                        }
-                    }
-                }
             }
 
             // ---- Finalize this EM unit ----
@@ -1271,18 +932,10 @@ public:
     nb::tuple fused_score_buffer(
         nb::list chunk_arrays,
         i8_1d   t_to_strand_arr,
-        f64_mut unspliced_sense,
-        f64_mut unspliced_antisense,
-        f64_mut intronic_sense,
-        f64_mut intronic_antisense,
         f64_2d_mut unambig_counts,
         double  gdna_log_splice_pen_unspliced)
     {
         const int8_t* t_str = t_to_strand_arr.data();
-        double* acc_us = unspliced_sense.data();
-        double* acc_ua = unspliced_antisense.data();
-        double* acc_is = intronic_sense.data();
-        double* acc_ia = intronic_antisense.data();
         double* ua_c   = unambig_counts.data();
         int ua_ncols   =
             static_cast<int>(unambig_counts.shape(1));
@@ -1302,17 +955,16 @@ public:
             cp.f_len  = nb::cast<i32_1d>(c[2]).data();
             cp.e_bp   = nb::cast<i32_1d>(c[3]).data();
             cp.i_bp   = nb::cast<i32_1d>(c[4]).data();
-            cp.ui_bp  = nb::cast<i32_1d>(c[5]).data();
-            cp.s_type = nb::cast<u8_1d>(c[6]).data();
-            cp.e_str  = nb::cast<u8_1d>(c[7]).data();
-            cp.fc     = nb::cast<u8_1d>(c[8]).data();
-            cp.f_id   = nb::cast<i64_1d>(c[9]).data();
-            cp.r_len  = nb::cast<u32_1d>(c[10]).data();
-            cp.g_fp   = nb::cast<i32_1d>(c[11]).data();
-            cp.g_sta  = nb::cast<i32_1d>(c[12]).data();
-            cp.nm     = nb::cast<u16_1d>(c[13]).data();
+            cp.s_type = nb::cast<u8_1d>(c[5]).data();
+            cp.e_str  = nb::cast<u8_1d>(c[6]).data();
+            cp.fc     = nb::cast<u8_1d>(c[7]).data();
+            cp.f_id   = nb::cast<i64_1d>(c[8]).data();
+            cp.r_len  = nb::cast<u32_1d>(c[9]).data();
+            cp.g_fp   = nb::cast<i32_1d>(c[10]).data();
+            cp.g_sta  = nb::cast<i32_1d>(c[11]).data();
+            cp.nm     = nb::cast<u16_1d>(c[12]).data();
             cp.N      = static_cast<int>(
-                nb::cast<u8_1d>(c[6]).shape(0));
+                nb::cast<u8_1d>(c[5]).shape(0));
         }
 
         // ============ PASS 1: COUNT ============
@@ -1328,8 +980,7 @@ public:
                 cps[ci],
                 static_cast<int>(ci),
                 t_str,
-                acc_us, acc_ua,
-                acc_is, acc_ia, ua_c, ua_ncols,
+                ua_c, ua_ncols,
                 gdna_log_splice_pen_unspliced,
                 count_st,
                 stat_det, stat_em_u, stat_em_as,
@@ -1401,8 +1052,7 @@ public:
                 cps[ci],
                 static_cast<int>(ci),
                 t_str,
-                acc_us, acc_ua,
-                acc_is, acc_ia, ua_c, ua_ncols,
+                ua_c, ua_ncols,
                 gdna_log_splice_pen_unspliced,
                 fill_st,
                 f_det, f_em_u, f_em_as,
@@ -1529,8 +1179,7 @@ NB_MODULE(_scoring_impl, m) {
                  nb::object, int32_t, double,
                  nb::object, int32_t, double,
                  i8_1d, i32_1d, i32_1d, i32_1d,
-                 int32_t, nb::object,
-                 i32_1d, i32_1d, i32_1d>(),
+                 nb::object>(),
              nb::arg("log_p_sense"),
              nb::arg("log_p_antisense"),
              nb::arg("r1_antisense"),
@@ -1546,19 +1195,11 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("t_length_arr"),
              nb::arg("t_span_arr"),
              nb::arg("t_start_arr"),
-             nb::arg("nrna_base"),
-             nb::arg("t_exon_data").none(),
-             nb::arg("t_to_nrna_arr"),
-             nb::arg("nrna_span_arr"),
-             nb::arg("nrna_start_arr"))
+             nb::arg("t_exon_data").none())
         .def("fused_score_buffer",
              &NativeFragmentScorer::fused_score_buffer,
              nb::arg("chunk_arrays"),
              nb::arg("t_to_strand_arr"),
-             nb::arg("unspliced_sense"),
-             nb::arg("unspliced_antisense"),
-             nb::arg("intronic_sense"),
-             nb::arg("intronic_antisense"),
              nb::arg("unambig_counts"),
              nb::arg("gdna_log_splice_pen_unspliced"));
 

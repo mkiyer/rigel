@@ -29,10 +29,7 @@ aligners:
 
 # ── Rigel configurations ─────────────────────────────────────
 rigel_configs:
-  default:
-    prune_threshold: 0.1
-  no_prune:
-    prune_threshold: -1.0
+  default: {}
 
 # ── External tools ────────────────────────────────────────────
 salmon:

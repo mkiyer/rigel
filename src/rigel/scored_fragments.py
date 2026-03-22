@@ -30,7 +30,7 @@ class ScoredFragments:
     their log-likelihoods.  Produced by ``FragmentRouter`` in scan.py
     and consumed during locus EM construction.
 
-    The global ScoredFragments contains mRNA + nRNA candidates only
+    The global ScoredFragments contains transcript candidates only
     (NO gDNA).  gDNA candidates are added per-locus during locus EM
     construction.
 
@@ -39,7 +39,7 @@ class ScoredFragments:
     offsets : np.ndarray
         int64[n_units + 1] — CSR offsets into flat arrays.
     t_indices : np.ndarray
-        int32[n_candidates] — candidate transcript or nRNA shadow indices.
+        int32[n_candidates] — candidate transcript indices.
     log_liks : np.ndarray
         float64[n_candidates] — log(P_strand × P_insert) per candidate.
     count_cols : np.ndarray
@@ -72,8 +72,6 @@ class ScoredFragments:
         Number of ambiguous units.
     n_candidates : int
         Total number of (unit, candidate) entries.
-    nrna_base_index : int
-        First nRNA shadow index (= num_transcripts).
     """
 
     offsets: np.ndarray
@@ -93,7 +91,6 @@ class ScoredFragments:
     splice_type: np.ndarray
     n_units: int
     n_candidates: int
-    nrna_base_index: int
 
 
 # ======================================================================
@@ -133,14 +130,13 @@ class LocusEMInput:
 
     Component layout::
 
-        [0, n_t)                — mRNA (one per transcript in the locus)
-        [n_t, n_t + n_nrna)     — nRNA (one per unique nRNA span)
-        [n_t + n_nrna]          — gdna (single gDNA component)
+        [0, n_t)     — transcript (one per transcript in the locus)
+        [n_t]        — gdna (single gDNA component)
 
-    Total components = n_transcripts + n_nrna + 1.
+    Total components = n_transcripts + 1.
 
     Only UNSPLICED units have a gDNA candidate.  Spliced units compete
-    only among mRNA/nRNA components.
+    only among transcript components.
     """
 
     locus: Locus
@@ -154,13 +150,8 @@ class LocusEMInput:
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     n_transcripts: int
-    n_nrna: int
     n_components: int
     local_to_global_t: np.ndarray
-    local_to_global_nrna: np.ndarray
-    local_t_to_local_nrna: np.ndarray
-    nrna_to_t_offsets: np.ndarray
-    nrna_to_t_indices: np.ndarray
     unambig_totals: np.ndarray
     gdna_init: float
     effective_lengths: np.ndarray

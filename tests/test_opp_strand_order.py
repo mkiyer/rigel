@@ -136,12 +136,8 @@ def _extract_results(pr, bench, result):
         ti = t.t_index
         tid = t.t_id
         info[f"{tid}_mrna"] = float(est.em_counts[ti].sum())
-        info[f"{tid}_nrna"] = float(est.nrna_em_counts[ti])
+        info[f"{tid}_nrna"] = float(est.em_counts[ti].sum()) if est._synthetic_mask[ti] else 0.0
         info[f"{tid}_unambig"] = float(est.unambig_counts[ti].sum())
-        info[f"{tid}_unspliced_sense"] = float(
-            est.transcript_unspliced_sense[ti])
-        info[f"{tid}_unspliced_antisense"] = float(
-            est.transcript_unspliced_antisense[ti])
 
     info["gdna_total"] = float(est.gdna_em_count)
     info["gdna_em"] = float(est.gdna_em_count)
@@ -215,8 +211,6 @@ class TestOppositeStrandOverlap:
         # With SS=1.0, check if they are truly independent:
         if info["n_loci"] == 1:
             print("  NOTE: T1 and T2 are in the SAME locus (shared unspliced territory)")
-            print(f"  T1_unspliced_sense={info['T1_unspliced_sense']}, "
-                  f"T2_unspliced_sense={info['T2_unspliced_sense']}")
         else:
             print(f"  T1 and T2 are in SEPARATE loci ({info['n_loci']} total)")
         sc.cleanup()

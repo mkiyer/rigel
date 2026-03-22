@@ -158,22 +158,6 @@ def _collect_diagnostics(pr, result, bench, label):
     diag["exonic_ss"] = sm.exonic.strand_specificity
     diag["intergenic_ss"] = sm.intergenic.strand_specificity
 
-    # --- Unspliced sense/antisense per transcript ---
-    for t in result.transcripts:
-        ti = t.t_index
-        diag[f"unspliced_sense_{t.t_id}"] = float(
-            est.transcript_unspliced_sense[ti]
-        )
-        diag[f"unspliced_antisense_{t.t_id}"] = float(
-            est.transcript_unspliced_antisense[ti]
-        )
-        diag[f"intronic_sense_{t.t_id}"] = float(
-            est.transcript_intronic_sense[ti]
-        )
-        diag[f"intronic_antisense_{t.t_id}"] = float(
-            est.transcript_intronic_antisense[ti]
-        )
-
     # --- Transcript geometry ---
     for t in result.transcripts:
         ti = t.t_index
@@ -242,14 +226,7 @@ def _print_diagnostics(diag, label=""):
             lines.append("")
             lines.append(f"--- Transcript {t_id} ---")
             lines.append(f"  unambig_counts: {diag[key]}")
-            lines.append(
-                f"  unspliced: sense={diag.get(f'unspliced_sense_{t_id}', '?')}, "
-                f"anti={diag.get(f'unspliced_antisense_{t_id}', '?')}"
-            )
-            lines.append(
-                f"  intronic: sense={diag.get(f'intronic_sense_{t_id}', '?')}, "
-                f"anti={diag.get(f'intronic_antisense_{t_id}', '?')}"
-            )
+
             lines.append(
                 f"  geometry: exonic_len={diag.get(f'exonic_length_{t_id}', '?')}, "
                 f"span={diag.get(f'transcript_span_{t_id}', '?')}, "
@@ -264,7 +241,7 @@ def _print_diagnostics(diag, label=""):
             f"  Locus {lr['locus_id']}: "
             f"n_t={lr['n_transcripts']}, n_genes={lr['n_genes']}, "
             f"n_em_frags={lr['n_em_fragments']}, "
-            f"mRNA={lr['mrna']:.1f}, nRNA={lr['nrna']:.1f}, "
+            f"mRNA={lr['mrna']:.1f}, "
             f"gDNA={lr['gdna']:.1f}, gdna_init={lr['gdna_init']:.2f}"
         )
 

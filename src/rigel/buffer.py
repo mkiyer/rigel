@@ -84,7 +84,6 @@ class BufferedFragment:
     nm: int = 0
     exon_bp: np.ndarray | None = None
     intron_bp: np.ndarray | None = None
-    unambig_intron_bp: np.ndarray | None = None
 
     @property
     def is_chimeric(self) -> bool:
@@ -137,7 +136,6 @@ class _FinalizedChunk:
     frag_lengths: np.ndarray  # int32[M_t]  (parallel to t_indices)
     exon_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
-    unambig_intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     ambig_strand: np.ndarray  # uint8[N]
     frag_id: np.ndarray  # int32[N]
     read_length: np.ndarray  # uint32[N]
@@ -167,7 +165,6 @@ class _FinalizedChunk:
             frag_lengths=np.frombuffer(raw["frag_lengths"], dtype=np.int32).copy(),
             exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
             intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
-            unambig_intron_bp=np.frombuffer(raw["unambig_intron_bp"], dtype=np.int32).copy(),
             ambig_strand=np.frombuffer(raw["ambig_strand"], dtype=np.uint8).copy(),
             frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).astype(np.int32),
             read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
@@ -194,7 +191,6 @@ class _FinalizedChunk:
                 self.frag_lengths,
                 self.exon_bp,
                 self.intron_bp,
-                self.unambig_intron_bp,
                 self.ambig_strand,
                 self.frag_id,
                 self.read_length,
@@ -247,7 +243,6 @@ class _FinalizedChunk:
             np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
             np.ascontiguousarray(self.exon_bp, dtype=np.int32),
             np.ascontiguousarray(self.intron_bp, dtype=np.int32),
-            np.ascontiguousarray(self.unambig_intron_bp, dtype=np.int32),
             np.ascontiguousarray(self.splice_type, dtype=np.uint8),
             np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
             np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
@@ -270,7 +265,6 @@ class _FinalizedChunk:
             frag_lengths=self.frag_lengths[start:end],
             exon_bp=self.exon_bp[start:end],
             intron_bp=self.intron_bp[start:end],
-            unambig_intron_bp=self.unambig_intron_bp[start:end],
             ambig_strand=int(self.ambig_strand[i]),
             splice_type=int(self.splice_type[i]),
             exon_strand=int(self.exon_strand[i]),
@@ -312,10 +306,6 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
         chunk.t_offsets.astype(np.int32),
         chunk.intron_bp,
     )
-    unambig_intron_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32),
-        chunk.unambig_intron_bp,
-    )
 
     table = pa.table(
         {
@@ -329,7 +319,6 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
             "frag_lengths": frag_lengths_list,
             "exon_bp": exon_bp_list,
             "intron_bp": intron_bp_list,
-            "unambig_intron_bp": unambig_intron_bp_list,
             "ambig_strand": chunk.ambig_strand,
             "frag_id": chunk.frag_id,
             "read_length": chunk.read_length,
@@ -362,9 +351,6 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
     intron_bp_col = table.column("intron_bp").combine_chunks()
     intron_bp_arr = intron_bp_col.values.to_numpy().astype(np.int32)
 
-    uib_col = table.column("unambig_intron_bp").combine_chunks()
-    unambig_intron_bp_arr = uib_col.values.to_numpy().astype(np.int32)
-
     return _FinalizedChunk(
         splice_type=table.column("splice_type").to_numpy().copy(),
         exon_strand=table.column("exon_strand").to_numpy().copy(),
@@ -377,7 +363,6 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         frag_lengths=frag_lengths_arr,
         exon_bp=exon_bp_arr,
         intron_bp=intron_bp_arr,
-        unambig_intron_bp=unambig_intron_bp_arr,
         ambig_strand=table.column("ambig_strand").to_numpy().copy(),
         frag_id=table.column("frag_id").to_numpy().astype(np.int32),
         read_length=table.column("read_length").to_numpy().copy(),

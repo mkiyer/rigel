@@ -222,7 +222,7 @@ class TestConfigRoundTrip:
         from rigel.cli import _PARAM_SPECS
 
         spec_dests = {s.cli_dest for s in _PARAM_SPECS}
-        cli_only = {"no_tsv"}
+        cli_only: set[str] = set()
         defaults = _build_quant_defaults()
         for key in defaults:
             assert key in spec_dests or key in cli_only, (

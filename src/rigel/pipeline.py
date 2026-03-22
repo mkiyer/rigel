@@ -79,6 +79,7 @@ class PipelineResult:
     strand_models: StrandModels
     frag_length_models: FragmentLengthModels
     estimator: AbundanceEstimator
+    pipeline_config: "PipelineConfig" = None
     calibration: "GDNACalibration" = None
 
 
@@ -344,10 +345,9 @@ def _setup_geometry_and_estimator(
 
     estimator = AbundanceEstimator(
         index.num_transcripts,
-        num_nrna=index.num_nrna,
-        t_to_nrna=index.t_to_nrna_arr,
         em_config=em_config,
         geometry=geometry,
+        is_synthetic_nrna=index.t_df["is_synthetic_nrna"].values,
     )
     return geometry, estimator
 
@@ -423,7 +423,7 @@ def _run_locus_em(
     t_refs = index.t_df["ref"].values
     t_to_g = index.t_to_g_arr
 
-    def _build_locus_meta(locus, *, mrna, nrna, gdna, locus_gamma):
+    def _build_locus_meta(locus, *, mrna, gdna, locus_gamma):
         """Build one locus_results record."""
         ref_counts: dict[str, int] = {}
         for t_idx in locus.transcript_indices:
@@ -438,7 +438,6 @@ def _run_locus_em(
             "n_genes": len(gene_set),
             "n_em_fragments": len(locus.unit_indices),
             "mrna": float(mrna),
-            "nrna": float(nrna),
             "gdna": float(gdna),
             "gdna_init": float(locus_gamma),
         }
@@ -446,7 +445,6 @@ def _run_locus_em(
     (
         total_gdna_em,
         locus_mrna_arr,
-        locus_nrna_arr,
         locus_gdna_arr,
     ) = estimator.run_batch_locus_em(
         loci,
@@ -463,7 +461,6 @@ def _run_locus_em(
             _build_locus_meta(
                 locus,
                 mrna=locus_mrna_arr[i],
-                nrna=locus_nrna_arr[i],
                 gdna=locus_gdna_arr[i],
                 locus_gamma=locus_gammas[i],
             )
@@ -730,6 +727,7 @@ def run_pipeline(
             skip_duplicates=scan.skip_duplicates,
             include_multimap=scan.include_multimap,
             sj_strand_tag=scan.sj_strand_tag,
+            locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
 
     return PipelineResult(
@@ -737,5 +735,6 @@ def run_pipeline(
         strand_models=strand_models,
         frag_length_models=frag_length_models,
         estimator=estimator,
+        pipeline_config=config,
         calibration=calibration,
     )

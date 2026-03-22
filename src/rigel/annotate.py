@@ -135,6 +135,7 @@ class AnnotationTable:
     frag_class: np.ndarray = field(repr=False)
     n_candidates: np.ndarray = field(repr=False)
     splice_type: np.ndarray = field(repr=False)
+    locus_id: np.ndarray = field(repr=False)
     _size: int = 0
     frag_id_to_row: dict = field(default_factory=dict, repr=False)
 
@@ -151,6 +152,7 @@ class AnnotationTable:
             frag_class=np.full(capacity, -1, dtype=np.int8),
             n_candidates=np.zeros(capacity, dtype=np.int16),
             splice_type=np.zeros(capacity, dtype=np.uint8),
+            locus_id=np.full(capacity, -1, dtype=np.int32),
         )
 
     def add(
@@ -185,11 +187,12 @@ class AnnotationTable:
         for attr in (
             "frag_ids", "best_tid", "best_gid", "pool",
             "posterior", "frag_class", "n_candidates", "splice_type",
+            "locus_id",
         ):
             old = getattr(self, attr)
             new = np.empty(new_cap, dtype=old.dtype)
             new[:self.capacity] = old
-            if attr in ("frag_ids", "best_tid", "best_gid", "frag_class"):
+            if attr in ("frag_ids", "best_tid", "best_gid", "frag_class", "locus_id"):
                 new[self.capacity:] = -1
             else:
                 new[self.capacity:] = 0
@@ -245,6 +248,7 @@ def write_annotated_bam(
     skip_duplicates: bool = True,
     include_multimap: bool = False,
     sj_strand_tag: str | tuple[str, ...] = "auto",
+    locus_id_per_transcript: np.ndarray | None = None,
 ) -> dict:
     """Second BAM pass: stamp every record with assignment tags.
 
@@ -271,6 +275,9 @@ def write_annotated_bam(
         Must match the value used in Pass 1.
     sj_strand_tag : str or tuple
         Must match the value used in Pass 1.
+    locus_id_per_transcript : np.ndarray or None
+        int32 array mapping transcript index → locus_id. If provided,
+        used to populate the ZL (locus_id) BAM tag.
 
     Returns
     -------
@@ -295,6 +302,17 @@ def write_annotated_bam(
 
     # Slice annotation arrays to populated size
     n = annotations.size
+
+    # Populate locus_id from best_tid → locus_id_per_transcript
+    if locus_id_per_transcript is not None:
+        best_tid = annotations.best_tid[:n]
+        valid = best_tid >= 0
+        annotations.locus_id[:n] = np.where(
+            valid,
+            locus_id_per_transcript[np.clip(best_tid, 0, None)],
+            -1,
+        )
+
     t_ids = list(index.t_df["t_id"].values)
     g_ids = list(index.g_df["g_id"].values)
 
@@ -309,6 +327,7 @@ def write_annotated_bam(
         annotations.frag_class[:n],
         annotations.n_candidates[:n],
         annotations.splice_type[:n],
+        annotations.locus_id[:n],
         n,
         t_ids,
         g_ids,

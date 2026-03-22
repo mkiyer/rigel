@@ -120,21 +120,12 @@ class IntervalType(IntEnum):
     intron in the transcript reference.  ``SJ_UNANNOT`` is a splice
     junction observed in the CIGAR (N-operation) but not matching any
     annotated intron — these are recorded with ``t_index = -1``.
-
-    ``UNAMBIG_INTRON`` marks intronic regions of a transcript that do
-    **not** overlap any exon of any other transcript in the same locus.
-    These intervals provide the unique evidence for nascent RNA: a read
-    landing in an unambiguously intronic region can only originate from
-    pre-mRNA of that transcript (or genomic DNA).  Computed at index
-    build time by subtracting the global exon union of each overlapping
-    transcript cluster from each transcript's intronic gaps.
     """
     EXON = 0
     TRANSCRIPT = 1
     INTERGENIC = 2
     SJ = 3
     SJ_UNANNOT = 4
-    UNAMBIG_INTRON = 5
 
 
 # ---------------------------------------------------------------------------

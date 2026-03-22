@@ -266,8 +266,8 @@ class TestOverlapProfileViaResolve:
         result = resolve_fragment(frag, overlap_index)
         assert result is not None
         assert result.read_length == 50
-        assert result.overlap_bp[tm["t_two_exon"]] == (50, 0, 0)
-        assert result.overlap_bp[tm["t_one_left"]] == (50, 0, 0)
+        assert result.overlap_bp[tm["t_two_exon"]] == (50, 0)
+        assert result.overlap_bp[tm["t_one_left"]] == (50, 0)
 
     def test_intronic_overlap(self, overlap_index):
         """Fragment in intronic region → exon_bp=0, intron_bp=read_length."""
@@ -277,10 +277,9 @@ class TestOverlapProfileViaResolve:
         assert result is not None
         assert result.read_length == 100
         # Only t_two_exon's transcript span covers 220-320
-        # intron (200,350) is unambiguous → unambig_intron_bp = 100
         t2e = tm["t_two_exon"]
         assert t2e in result.t_inds
-        assert result.overlap_bp[t2e] == (0, 100, 100)
+        assert result.overlap_bp[t2e] == (0, 100)
 
     def test_mixed_exon_intron_overlap(self, overlap_index):
         """Fragment spanning exon-intron boundary → partial exon + intron bp."""
@@ -290,11 +289,11 @@ class TestOverlapProfileViaResolve:
         assert result is not None
         assert result.read_length == 40
         # t_two_exon: exon(100-200) covers 180-200=20bp; tx span covers all 40bp
-        #   intron_bp=40-20=20; unambig_intron(200-350) covers 200-220=20bp
-        assert result.overlap_bp[tm["t_two_exon"]] == (20, 20, 20)
+        #   intron_bp=40-20=20
+        assert result.overlap_bp[tm["t_two_exon"]] == (20, 20)
         # t_one_left: exon(100-200) covers 180-200=20bp; tx ends at 200 → 20bp tx
         #   intron_bp=0
-        assert result.overlap_bp[tm["t_one_left"]] == (20, 0, 0)
+        assert result.overlap_bp[tm["t_one_left"]] == (20, 0)
 
     def test_multi_block_overlap_sums(self, overlap_index):
         """Two exon blocks accumulate exon overlap: 50+50=100bp for t_two_exon."""
@@ -313,14 +312,14 @@ class TestOverlapProfileViaResolve:
         t2e = tm["t_two_exon"]
         assert result.t_inds == frozenset({t2e})
         # exon(150-200)=50 + exon(350-400)=50 = 100bp exon
-        assert result.overlap_bp[t2e] == (100, 0, 0)
+        assert result.overlap_bp[t2e] == (100, 0)
 
-    def test_unambig_intron_subtracts_cross_transcript_exons(self, tmp_path_factory):
+    def test_intronic_cross_transcript_exons(self, tmp_path_factory):
         """Fragment in t0's intronic region covered by t1's exon → unambig=0.
 
         t0: exons (100,200),(400,500) — intron (200,400)
         t1: exon  (100,500)           — covers t0's entire intron
-        Fragment (250,350): t0 intron_bp=100, unambig_intron_bp=0
+        Fragment (250,350): t0 intron_bp=100, t1 exon_bp=100.
         """
         gtf = textwrap.dedent("""\
             chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
@@ -333,16 +332,15 @@ class TestOverlapProfileViaResolve:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        assert result.overlap_bp[tm["t0"]] == (0, 100, 0)
-        assert result.overlap_bp[tm["t1"]] == (100, 0, 0)
+        assert result.overlap_bp[tm["t0"]] == (0, 100)
+        assert result.overlap_bp[tm["t1"]] == (100, 0)
 
-    def test_unambig_intron_partial_exon_overlap(self, tmp_path_factory):
+    def test_intronic_partial_exon_overlap(self, tmp_path_factory):
         """Partial overlap: some intronic bp are exonic for another transcript.
 
         t0: exons (100,200),(400,500) — intron (200,400)
         t1: exon  (300,400) — covers only part of t0's intron
-        UNAMBIG_INTRON for t0: (200,300) (part not covered by t1)
-        Fragment (250,350): unambig clipped to (250,300)=50bp
+        Fragment (250,350): t0 has intron_bp=100, t1 has exon_bp=50
         """
         gtf = textwrap.dedent("""\
             chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
@@ -355,10 +353,10 @@ class TestOverlapProfileViaResolve:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: intron_bp=100, unambig_intron_bp=50 (region 250-300)
-        assert result.overlap_bp[tm["t0"]] == (0, 100, 50)
+        # t0: intron_bp=100
+        assert result.overlap_bp[tm["t0"]] == (0, 100)
         # t1: exon(300-400) clipped to (300,350)=50bp
-        assert result.overlap_bp[tm["t1"]] == (50, 0, 0)
+        assert result.overlap_bp[tm["t1"]] == (50, 0)
 
 
 # =====================================================================
@@ -453,26 +451,27 @@ class TestFragLengthDiscrimination:
         assert result.t_inds == frozenset({tm["t2"]})
 
     def test_unspliced_read_in_shared_exon(self, mini_index):
-        """Unspliced read fully in shared exon1 → both t1 and t2."""
+        """Unspliced read fully in shared exon1 → t1, t2, and synthetic nRNA."""
         tm = _t_map(mini_index)
         frag = make_fragment(exons=(_exon("chr1", 120, 180),), introns=())
         result = resolve_fragment(frag, mini_index)
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
-        assert result.t_inds == frozenset({tm["t1"], tm["t2"]})
+        assert {tm["t1"], tm["t2"]}.issubset(result.t_inds)
 
     def test_unspliced_read_in_t1_only_exon(self, mini_index):
         """Unspliced read in exon2 (299,400) — exonic for t1 only.
 
         t2's transcript span (99,600) also covers this region via
-        intronic overlap, so both are candidates; scoring differentiates.
+        intronic overlap, and the synthetic nRNA exon covers the full
+        span, so all three are candidates; scoring differentiates.
         """
         tm = _t_map(mini_index)
         frag = make_fragment(exons=(_exon("chr1", 320, 380),), introns=())
         result = resolve_fragment(frag, mini_index)
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
-        assert result.t_inds == frozenset({tm["t1"], tm["t2"]})
+        assert {tm["t1"], tm["t2"]}.issubset(result.t_inds)
 
     def test_frag_length_differs_between_isoforms(self, mini_index):
         """Fragment spanning exon1→exon3 via SJ (200,499) → t2 only."""
@@ -488,23 +487,18 @@ class TestFragLengthDiscrimination:
 
 
 # =====================================================================
-# UNAMBIG_INTRON regression tests
+# Intronic bp regression tests
 # =====================================================================
 
 
-class TestUnambigIntronAccumulation:
-    """Verify resolve_fragment correctly computes unambig_intron_bp.
+class TestIntronicBpAccumulation:
+    """Verify resolve_fragment correctly computes exon_bp and intron_bp."""
 
-    These tests guard against the nRNA phantom-count bug where using
-    ``intron_bp > 0`` instead of ``unambig_intron_bp > 0`` caused
-    massive false nRNA assignment in pristine conditions.
-    """
+    def test_intron_bp_for_lone_intron(self, tmp_path_factory):
+        """Fragment in a transcript's intron (single transcript).
 
-    def test_unambig_intron_accumulated_for_lone_intron(self, tmp_path_factory):
-        """Fragment in a transcript's unambiguous intron (single transcript).
-
-        t0: exons (100,200),(400,500) → intron (200,400) is fully unambiguous
-        Fragment (250,350) → unambig_intron_bp = 100.
+        t0: exons (100,200),(400,500) → intron (200,400)
+        Fragment (250,350) → intron_bp = 100.
         """
         gtf = textwrap.dedent("""\
             chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
@@ -515,14 +509,14 @@ class TestUnambigIntronAccumulation:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        assert result.overlap_bp[0] == (0, 100, 100)
+        assert result.overlap_bp[0] == (0, 100)
 
-    def test_unambig_intron_zero_when_cross_exon_covers(self, tmp_path_factory):
-        """Fragment in t0's intron entirely covered by t1's exon → unambig=0.
+    def test_intron_bp_when_cross_exon_covers(self, tmp_path_factory):
+        """Fragment in t0's intron entirely covered by t1's exon.
 
         t0: exons (100,200),(400,500) — intron (200,400)
         t1: exon  (200,400) — covers t0's entire intron
-        Fragment (250,350) → unambig_intron_bp = 0.
+        Fragment (250,350) → t0 intron_bp=100, t1 exon_bp=100.
         """
         gtf = textwrap.dedent("""\
             chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
@@ -535,18 +529,15 @@ class TestUnambigIntronAccumulation:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        # t0: intron_bp=100, unambig_intron_bp=0 (t1's exon covers it)
-        assert result.overlap_bp[tm["t0"]] == (0, 100, 0)
-        # t1: exon_bp=100
-        assert result.overlap_bp[tm["t1"]] == (100, 0, 0)
+        assert result.overlap_bp[tm["t0"]] == (0, 100)
+        assert result.overlap_bp[tm["t1"]] == (100, 0)
 
-    def test_unambig_intron_partial(self, tmp_path_factory):
-        """Fragment partially in unambiguous intron, partially in cross-exon.
+    def test_intron_partial(self, tmp_path_factory):
+        """Fragment partially intronic for t0, partially exonic for t1.
 
         t0: exons (100,200),(400,500) — intron (200,400)
         t1: exon  (300,400) — covers only part of t0's intron
-        UNAMBIG for t0: (200,300)
-        Fragment (250,350) → unambig clipped to (250,300) = 50bp.
+        Fragment (250,350) → t0 intron_bp=100, t1 exon_bp=50
         """
         gtf = textwrap.dedent("""\
             chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
@@ -559,11 +550,11 @@ class TestUnambigIntronAccumulation:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        assert result.overlap_bp[tm["t0"]] == (0, 100, 50)
-        assert result.overlap_bp[tm["t1"]] == (50, 0, 0)
+        assert result.overlap_bp[tm["t0"]] == (0, 100)
+        assert result.overlap_bp[tm["t1"]] == (50, 0)
 
-    def test_exon_only_fragment_has_zero_unambig_intron(self, tmp_path_factory):
-        """Fragment fully within an exon → unambig_intron_bp=0.
+    def test_exon_only_fragment_has_zero_intron_bp(self, tmp_path_factory):
+        """Fragment fully within an exon → intron_bp=0.
 
         t0: exons (100,300),(400,500) — intron (300,400)
         Fragment (150,250) → fully in first exon.
@@ -577,4 +568,4 @@ class TestUnambigIntronAccumulation:
         result = resolve_fragment(frag, idx)
         assert result is not None
         assert result.read_length == 100
-        assert result.overlap_bp[0] == (100, 0, 0)
+        assert result.overlap_bp[0] == (100, 0)

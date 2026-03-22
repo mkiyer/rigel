@@ -89,7 +89,10 @@ class TestPipelineSmoke:
 
     def test_transcript_df_rows(self):
         df = self.pr.estimator.get_counts_df(self.index)
-        assert len(df) == 3, f"Expected 3 transcripts, got {len(df)}"
+        n_annotated = sum(
+            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
+        )
+        assert n_annotated == 3, f"Expected 3 annotated transcripts, got {n_annotated}"
 
     def test_transcript_positive_mrna(self):
         df = self.pr.estimator.get_counts_df(self.index)
@@ -113,7 +116,7 @@ class TestPipelineSmoke:
 
     def test_loci_df_schema(self):
         df = self.pr.estimator.get_loci_df()
-        required = {"locus_id", "mrna", "nrna", "gdna"}
+        required = {"locus_id", "mrna", "gdna"}
         assert required.issubset(df.columns), (
             f"Missing columns: {required - set(df.columns)}"
         )

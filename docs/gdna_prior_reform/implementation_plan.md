@@ -219,8 +219,7 @@ prior, which under VBEM (digamma(ε) → -∞) ensures instant collapse.
 | C++ sense/antisense accumulation in scanner | Only feeds deleted code |
 | Tripartite `base_prior` construction in `batch_locus_em()` | Prior computed inside unified OVR |
 
-(Confirmed: `transcript_intronic_sense/antisense` used by nRNA init —
-preserved.)
+(Note: `transcript_intronic_sense/antisense` were dead code and have been removed.)
 
 ## What Changes
 

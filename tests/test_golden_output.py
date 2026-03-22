@@ -32,7 +32,6 @@ DESIGN
 """
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -109,7 +108,7 @@ def _capture_output(result, index):
 
     transcript_df = est.get_counts_df(index)
     gene_df = est.get_gene_counts_df(index)
-    loci_df = est.get_loci_df()
+    loci_df = est.get_loci_df(index)
 
     # Sort for deterministic ordering
     transcript_df = transcript_df.sort_values("transcript_id").reset_index(drop=True)
@@ -181,18 +180,18 @@ def _golden_exists(scenario_name):
 # Columns to compare with bit-exact precision
 _TRANSCRIPT_NUMERIC_COLS = [
     "effective_length",
-    "mrna", "mrna_unambig", "mrna_em", "mrna_high_conf", "mrna_spliced",
+    "mrna", "mrna_unambig", "mrna_em", "mrna_spliced",
     "nrna", "rna_total", "tpm", "posterior_mean",
 ]
 
 _GENE_NUMERIC_COLS = [
     "effective_length",
-    "mrna", "mrna_unambig", "mrna_em", "mrna_high_conf", "mrna_spliced",
+    "mrna", "mrna_unambig", "mrna_em", "mrna_spliced",
     "nrna", "rna_total", "tpm",
 ]
 
 _LOCI_NUMERIC_COLS = [
-    "n_em_fragments", "mrna", "nrna", "gdna", "gdna_rate", "gdna_init",
+    "n_em_fragments", "mrna", "nrna", "gdna", "total", "gdna_rate", "gdna_prior",
 ]
 
 

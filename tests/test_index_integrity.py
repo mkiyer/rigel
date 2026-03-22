@@ -27,7 +27,7 @@ class TestTranscriptTable:
     """Verify t_df and derived arrays."""
 
     def test_num_transcripts(self, mini_index):
-        assert mini_index.num_transcripts == 3
+        assert mini_index.num_transcripts == 5  # 3 annotated + 2 synthetic nRNA
 
     def test_num_genes(self, mini_index):
         assert mini_index.num_genes == 2
@@ -38,14 +38,19 @@ class TestTranscriptTable:
 
     def test_transcript_ids(self, mini_index):
         t_ids = mini_index.t_df["t_id"].tolist()
-        assert t_ids == ["t1", "t2", "t3"]
+        assert t_ids[:3] == ["t1", "t2", "t3"]
+        # 2 synthetic nRNA transcripts appended
+        assert len(t_ids) == 5
+        assert all(tid.startswith("RIGEL_NRNA_") for tid in t_ids[3:])
 
     def test_gene_ids(self, mini_index):
         g_ids = mini_index.t_df["g_id"].tolist()
-        assert g_ids == ["g1", "g1", "g2"]
+        assert g_ids[:3] == ["g1", "g1", "g2"]
+        # synthetics inherit parent gene IDs
+        assert g_ids[3:] == ["g1", "g2"]
 
     def test_t_to_g_arr(self, mini_index):
-        expected = np.array([0, 0, 1], dtype=mini_index.t_to_g_arr.dtype)
+        expected = np.array([0, 0, 1, 0, 1], dtype=mini_index.t_to_g_arr.dtype)
         np.testing.assert_array_equal(mini_index.t_to_g_arr, expected)
 
     def test_t_to_strand_arr(self, mini_index):
@@ -84,8 +89,8 @@ class TestGeneTable:
 
     def test_gene_num_transcripts(self, mini_index):
         g_df = mini_index.g_df
-        assert g_df.loc[0, "num_transcripts"] == 2
-        assert g_df.loc[1, "num_transcripts"] == 1
+        assert g_df.loc[0, "num_transcripts"] == 3  # t1, t2 + 1 synthetic
+        assert g_df.loc[1, "num_transcripts"] == 2  # t3 + 1 synthetic
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -502,7 +507,8 @@ class TestLargerIndex:
         )
 
     def test_transcript_count(self, complex_index):
-        assert complex_index.num_transcripts == 7  # tA1,tA2,tA3,tB1,tB2,tC1,tD1
+        # 7 annotated + 5 synthetic nRNA (gA:2, gB:2, gC:1)
+        assert complex_index.num_transcripts == 12
 
     def test_gene_count(self, complex_index):
         assert complex_index.num_genes == 4  # gA, gB, gC, gD
@@ -522,10 +528,17 @@ class TestLargerIndex:
             t_idx = row["t_index"]
             t_id = row["t_id"]
             exons = complex_index._t_exon_intervals[t_idx]
-            assert exons.shape[0] == expected_exon_counts[t_id], (
-                f"{t_id} (t_idx={t_idx}): expected {expected_exon_counts[t_id]} "
-                f"exons, got {exons.shape[0]}"
-            )
+            if t_id.startswith("RIGEL_NRNA_"):
+                # synthetic nRNA transcripts are single-exon
+                assert exons.shape[0] == 1, (
+                    f"{t_id} (t_idx={t_idx}): synthetic nRNA should have "
+                    f"1 exon, got {exons.shape[0]}"
+                )
+            else:
+                assert exons.shape[0] == expected_exon_counts[t_id], (
+                    f"{t_id} (t_idx={t_idx}): expected {expected_exon_counts[t_id]} "
+                    f"exons, got {exons.shape[0]}"
+                )
 
     def test_unspliced_gene_has_no_sj(self, complex_index):
         """tD1 is single-exon → should have no splice junctions."""

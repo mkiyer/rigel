@@ -8,11 +8,10 @@ aligners (minimap2, samtools).
 
 import logging
 
-import pytest
 
 from rigel.config import EMConfig, PipelineConfig, BamScanConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.sim import GDNAConfig, SimConfig, run_benchmark
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +99,10 @@ def assert_accountability(bench, tolerance=5):
     """Every fragment must be accounted for (mRNA + nRNA + gDNA + chimeric)."""
     sd = bench.stats_dict
     n_gated_out = sd.get("n_gated_out", 0)
+    # n_synthetic_observed already includes nRNA counts (synthetic transcripts),
+    # so we don't add n_nrna_pipeline separately.
     total = (
-        bench.total_observed + bench.n_nrna_pipeline
+        bench.total_observed + bench.n_synthetic_observed
         + bench.n_gdna_pipeline + bench.n_chimeric
         + n_gated_out
     )

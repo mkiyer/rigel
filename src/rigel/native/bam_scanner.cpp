@@ -379,9 +379,6 @@ static void merge_accumulator_into(FragmentAccumulator& dst,
                         src.exon_bp_.begin(), src.exon_bp_.end());
     dst.intron_bp_.insert(dst.intron_bp_.end(),
                           src.intron_bp_.begin(), src.intron_bp_.end());
-    dst.unambig_intron_bp_.insert(dst.unambig_intron_bp_.end(),
-                                  src.unambig_intron_bp_.begin(),
-                                  src.unambig_intron_bp_.end());
 
     // Shift and append t_offsets (skip src's leading 0)
     for (int32_t i = 1; i <= src.size_; i++) {
@@ -1501,6 +1498,7 @@ public:
         ci8_1d  ann_frag_class,
         ci16_1d ann_n_candidates,
         cu8_1d  ann_splice_type,
+        ci32_1d ann_locus_id,
         int64_t ann_size,
         // String ID lookup
         const std::vector<std::string>& t_ids,
@@ -1522,6 +1520,7 @@ public:
         const int8_t*  fc_ptr   = ann_frag_class.data();
         const int16_t* nc_ptr   = ann_n_candidates.data();
         const uint8_t* st_ptr   = ann_splice_type.data();
+        const int32_t* lid_ptr  = ann_locus_id.data();
 
         // Open input BAM
         htsFile* fp = hts_open(bam_path.c_str(), "rb");
@@ -1596,7 +1595,7 @@ public:
                 // these records get intergenic-default tags.
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".",
                                     "intergenic", 0.0f,
-                                    "intergenic", 1, 0, "unknown");
+                                    "intergenic", 1, 0, "unknown", -1);
                 n_intergenic++;
                 n_records_written += static_cast<int64_t>(raw_group.size());
                 // Do NOT increment frag_id (pass 1 skipped this group)
@@ -1688,6 +1687,8 @@ public:
                         }
                     }
 
+                    int32_t lid_val = lid_ptr[row];
+
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
                         t_id_str, g_id_str,
@@ -1695,7 +1696,8 @@ public:
                         frag_class_label(fc_val),
                         is_primary ? 1 : 0,
                         static_cast<int>(nc_val),
-                        splice_type_label(st_val));
+                        splice_type_label(st_val),
+                        static_cast<int>(lid_val));
 
                     n_annotated++;
                 } else {
@@ -1706,7 +1708,7 @@ public:
                         "intergenic", 0.0f,
                         "intergenic",
                         (hit_idx == 0) ? 1 : 0,
-                        0, "unknown");
+                        0, "unknown", -1);
                     n_intergenic++;
                 }
 
@@ -1808,7 +1810,8 @@ private:
         const char* zc,    // fragment class label
         int zh,            // primary hit flag
         int zn,            // n_candidates
-        const char* zs)    // splice type label
+        const char* zs,    // splice type label
+        int zl)            // locus_id (-1 = no locus)
     {
         for (bam1_t* r : records) {
             bam_aux_update_str(r, "ZT",
@@ -1824,6 +1827,7 @@ private:
             bam_aux_update_int(r, "ZN", zn);
             bam_aux_update_str(r, "ZS",
                 static_cast<int>(strlen(zs) + 1), zs);
+            bam_aux_update_int(r, "ZL", zl);
 
             if (sam_write1(out, hdr, r) < 0) {
                 throw std::runtime_error("Failed to write BAM record");
@@ -1972,6 +1976,7 @@ NB_MODULE(_bam_impl, m) {
              nb::arg("ann_frag_class"),
              nb::arg("ann_n_candidates"),
              nb::arg("ann_splice_type"),
+             nb::arg("ann_locus_id"),
              nb::arg("ann_size"),
              nb::arg("t_ids"),
              nb::arg("g_ids"),

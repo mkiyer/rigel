@@ -533,5 +533,5 @@ class TestGeneBuilderIndexIntegration:
         TranscriptIndex.build(fasta, gtf, index_dir, write_tsv=False)
 
         index = TranscriptIndex.load(index_dir)
-        assert index.num_transcripts == 2
+        assert index.num_transcripts == 4  # 2 annotated + 2 synthetic nRNA
         assert index.num_genes == 2

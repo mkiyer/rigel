@@ -185,6 +185,18 @@ class PipelineConfig:
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     annotated_bam_path: str | Path | None = None
 
+    def to_dict(self) -> dict:
+        """JSON-serializable dict of all configuration fields."""
+        from dataclasses import asdict
+
+        d = asdict(self)
+        # Convert Path objects to strings
+        if d.get("annotated_bam_path") is not None:
+            d["annotated_bam_path"] = str(d["annotated_bam_path"])
+        if d.get("scan", {}).get("spill_dir") is not None:
+            d["scan"]["spill_dir"] = str(d["scan"]["spill_dir"])
+        return d
+
 
 # ======================================================================
 # Pre-computed transcript geometry (not user-configurable)

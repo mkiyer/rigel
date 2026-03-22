@@ -376,26 +376,26 @@ class TestFragId:
 
 class TestFragmentClasses:
     def test_unique_gene_single_transcript(self, mini_index):
-        """Single-transcript hit, NH=1 -> FRAG_UNAMBIG."""
+        """g2 exon region -> t3 + synthetic nRNA -> FRAG_AMBIG_SAME_STRAND."""
         r = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         assert r is not None
         assert r.ambig_strand == 0
         t_inds = list(r.t_inds)
-        assert len(t_inds) == 1
+        assert len(t_inds) == 2  # t3 + synthetic nRNA
 
         buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
         buf.append(r)
         buf.finalize()
 
         chunk = list(buf.iter_chunks())[0]
-        assert chunk.fragment_classes[0] == FRAG_UNAMBIG
+        assert chunk.fragment_classes[0] == FRAG_AMBIG_SAME_STRAND
 
     def test_isoform_ambiguous(self, mini_index):
         """g1 shared exon region -> t1 + t2 (same strand) -> FRAG_AMBIG_SAME_STRAND."""
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert r is not None
         assert r.ambig_strand == 0
-        assert len(list(r.t_inds)) == 2
+        assert len(list(r.t_inds)) == 3  # t1, t2 + synthetic nRNA
 
         buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
         buf.append(r)
@@ -435,7 +435,7 @@ class TestFragmentClasses:
 
         chunk = list(buf.iter_chunks())[0]
         fc = chunk.fragment_classes
-        assert fc[0] == FRAG_UNAMBIG
+        assert fc[0] == FRAG_AMBIG_SAME_STRAND  # t3 + synthetic nRNA
         assert fc[1] == FRAG_AMBIG_SAME_STRAND
         assert fc[2] == FRAG_MULTIMAPPER
 

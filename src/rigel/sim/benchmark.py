@@ -105,6 +105,7 @@ class BenchmarkResult:
     n_gdna_pipeline: float = 0.0
     n_nrna_expected: int = 0
     n_nrna_pipeline: float = 0.0
+    n_synthetic_observed: float = 0.0
     transcripts: list[TranscriptAccuracy] = field(default_factory=list)
     stats_dict: dict = field(default_factory=dict)
 
@@ -127,8 +128,13 @@ class BenchmarkResult:
 
     @property
     def total_rna_observed(self) -> float:
-        """Sum of mRNA + nRNA counts (total RNA attribution)."""
-        return self.total_observed + self.n_nrna_pipeline
+        """Sum of mRNA + nRNA counts (total RNA attribution).
+
+        total_observed covers annotated transcripts; n_synthetic_observed
+        covers synthetic nRNA transcripts (which are regular transcripts
+        in the EM, not tracked via n_nrna_pipeline).
+        """
+        return self.total_observed + self.n_synthetic_observed
 
     @property
     def total_abs_error(self) -> float:
@@ -244,9 +250,6 @@ def run_benchmark(
     t_counts = pipeline_result.estimator.t_counts  # (N_t, 12) array
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
 
-    # Build t_id → t_index mapping
-    t_id_to_index = {t.t_id: t.t_index for t in scenario_result.transcripts}
-
     # Stats
     stats = pipeline_result.stats
 
@@ -263,12 +266,14 @@ def run_benchmark(
 
     # Per-transcript accuracy
     transcript_results: list[TranscriptAccuracy] = []
+    annotated_t_indices: set[int] = set()
     for t in scenario_result.transcripts:
         expected = simulated_counts.get(t.t_id, 0)
         observed = float(observed_per_t[t.t_index])
         abs_diff = abs(observed - expected)
         rel_error = abs_diff / expected if expected > 0 else 0.0
         exact = observed == expected
+        annotated_t_indices.add(t.t_index)
 
         transcript_results.append(TranscriptAccuracy(
             t_id=t.t_id,
@@ -279,6 +284,15 @@ def run_benchmark(
             abs_diff=abs_diff,
             rel_error=rel_error,
         ))
+
+    # EM-assigned mRNA counts for synthetic nRNA transcripts (in the index
+    # but not in simulation ground truth).  These must be included in the
+    # accountability equation so that all fragment mass is accounted for.
+    n_synthetic_observed = sum(
+        float(observed_per_t[i])
+        for i in range(len(observed_per_t))
+        if i not in annotated_t_indices
+    )
 
     return BenchmarkResult(
         scenario_name=scenario_name or "unnamed",
@@ -292,6 +306,7 @@ def run_benchmark(
         n_gdna_pipeline=n_gdna_pipeline,
         n_nrna_expected=n_nrna_expected,
         n_nrna_pipeline=n_nrna_pipeline,
+        n_synthetic_observed=n_synthetic_observed,
         transcripts=transcript_results,
         stats_dict=stats.to_dict(),
     )

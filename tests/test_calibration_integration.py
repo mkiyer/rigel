@@ -154,7 +154,10 @@ class TestCalibrationEndToEnd:
     def test_produces_valid_output(self):
         pr = _run_with_calibration(self.result, self.index)
         df = pr.estimator.get_counts_df(self.index)
-        assert len(df) == 3
+        n_annotated = sum(
+            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
+        )
+        assert n_annotated == 3
         assert (df["mrna"] >= 0).all()
         assert df["mrna"].sum() > 0
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
@@ -178,7 +181,10 @@ class TestCalibratedOutputFields:
 
     def test_produces_valid_transcripts(self):
         df = self.pr.estimator.get_counts_df(self.index)
-        assert len(df) == 3
+        n_annotated = sum(
+            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
+        )
+        assert n_annotated == 3
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
 
     def test_calibration_result_populated(self):

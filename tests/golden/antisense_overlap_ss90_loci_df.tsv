@@ -1,2 +1,2 @@
-locus_id	ref	n_transcripts	n_genes	n_em_fragments	mrna	nrna	gdna	gdna_rate	gdna_init
-0	golden_as	2	2	510	509.73861950841456	0.26138049158515475	2.1248012110533344e-298	4.1662768844183055e-301	0.0
+locus_id	ref	n_transcripts	n_annotated_transcripts	n_nrna_entities	n_genes	n_em_fragments	mrna	nrna	gdna	total	gdna_rate	gdna_prior
+0	golden_as	4	2	2	2	510	509.9999999999998	0.2723543754941572	2.1247839699478554e-298	510.27235437549393	4.16401937461086e-301	0.0

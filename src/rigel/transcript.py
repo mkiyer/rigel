@@ -39,8 +39,24 @@ class Transcript:
     is_basic: bool = False
     is_mane: bool = False
     is_ccds: bool = False
+    is_synthetic_nrna: bool = False
+    is_nascent_equiv: bool = False
+    nrna_t_index: int = -1
+    """t_index of the associated nRNA entity (-1 = none).
+
+    For multi-exon transcripts: points to the synthetic nRNA transcript
+    (or nascent-equiv annotated transcript) that covers this transcript's
+    merged TSS/TES span.
+    For nascent-equiv transcripts: points to itself.
+    For synthetics: -1 (self-referential by definition).
+    """
+    nrna_n_contributors: int = 0
+    """Number of annotated multi-exon transcripts merged into this nRNA entity.
+
+    Only meaningful for synthetic nRNA transcripts and nascent equivalents.
+    Zero for regular annotated transcripts.
+    """
     abundance: float | None = None
-    nrna_idx: int = -1
     nrna_abundance: float = 0.0
     """Nascent RNA (pre-mRNA) molecular abundance.
 
@@ -113,8 +129,11 @@ class Transcript:
             'is_basic': self.is_basic,
             'is_mane': self.is_mane,
             'is_ccds': self.is_ccds,
+            'is_synthetic_nrna': self.is_synthetic_nrna,
+            'is_nascent_equiv': self.is_nascent_equiv,
+            'nrna_t_index': self.nrna_t_index,
+            'nrna_n_contributors': self.nrna_n_contributors,
             'abundance': self.abundance,
-            'nrna_idx': self.nrna_idx,
             'nrna_abundance': self.nrna_abundance,
         }
     

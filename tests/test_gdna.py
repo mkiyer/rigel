@@ -205,11 +205,11 @@ class TestLocusGDNAAssignment:
         gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 0
-        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        total = rc.em_counts.sum() + gdna_count
         assert total == pytest.approx(100.0, abs=1.0)
 
     def test_total_counts_preserved(self):
-        """em_counts + nrna_em + gdna == n_units."""
+        """em_counts + gdna == n_units."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         bundle = _make_locus_em_data(
             [[0, 1]] * 200,
@@ -221,7 +221,7 @@ class TestLocusGDNAAssignment:
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
 
-        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        total = rc.em_counts.sum() + gdna_count
         assert total == pytest.approx(200.0, abs=1.0)
 
     def test_strong_transcript_signal_beats_gdna(self):
@@ -400,7 +400,7 @@ class TestLocusGDNABehavior:
         gdna_count = pool_counts["gdna"]
 
         assert gdna_count > 0  # gDNA has non-zero count
-        total = rc.em_counts.sum() + rc.nrna_em_counts.sum() + gdna_count
+        total = rc.em_counts.sum() + gdna_count
         assert total == pytest.approx(200.0, abs=1.0)
 
     def test_gdna_log_lik_determines_absorption(self):

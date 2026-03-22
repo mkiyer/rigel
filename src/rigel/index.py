@@ -48,9 +48,6 @@ INTERVALS_TSV = "intervals.tsv"
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
 
-NRNA_FEATHER = "nrna.feather"
-NRNA_TSV = "nrna.tsv"
-
 REGIONS_FEATHER = "regions.feather"
 REGIONS_TSV = "regions.tsv"
 
@@ -111,52 +108,197 @@ def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     return pd.DataFrame(t.to_dict() for t in transcripts)
 
 
-def compute_nrna_table(
-    transcripts: list[Transcript],
-) -> tuple[pd.DataFrame, np.ndarray]:
-    """Compute unique nRNA entities and assign nrna_idx to transcripts.
 
-    An nRNA (nascent RNA) is defined by a unique genomic span
-    ``(ref, strand, start, end)``.  Transcripts sharing the same span
-    map to the same nRNA.
+# -- Tolerance-based nRNA merging (unified architecture) ----------------------
+
+#: Default merge tolerance (bp) for TSS/TES clustering.
+NRNA_MERGE_TOLERANCE: int = 20
+
+
+def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
+    """Assign sorted coordinates to clusters within *tolerance* bp.
+
+    Returns an int array of the same length, where each element is the
+    cluster id (0-based).  Coordinates must be sorted ascending.
+    """
+    n = len(coords)
+    if n == 0:
+        return np.empty(0, dtype=np.intp)
+    ids = np.empty(n, dtype=np.intp)
+    cid = 0
+    anchor = 0  # index of the first element in the current cluster
+    for i in range(n):
+        if coords[i] - coords[anchor] > tolerance:
+            cid += 1
+            anchor = i
+        ids[i] = cid
+    return ids
+
+
+def create_nrna_transcripts(
+    transcripts: list[Transcript],
+    tolerance: int = NRNA_MERGE_TOLERANCE,
+) -> tuple[list[Transcript], dict[int, tuple]]:
+    """Create synthetic nRNA transcripts, detect annotated equivalents.
+
+    This function implements the unified nRNA architecture:
+
+    1. Collect (ref, strand, start, end) for each **multi-exon** transcript.
+    2. Cluster nearby TSS and TES within *tolerance* bp independently.
+       The merged span uses the **outer envelope** (min start, max end)
+       so synthetics are never smaller than any contributing transcript.
+    3. Check if an existing **single-exon** transcript already covers
+       each merged span (exact match or full containment).
+       If so, mark it ``is_nascent_equiv = True`` — no synthetic needed.
+    4. For uncovered spans, create a synthetic single-exon ``Transcript``
+       flagged ``is_synthetic_nrna = True``.
+    5. The synthetics inherit the gene id / name of one contributing
+       transcript for output convenience.
 
     Parameters
     ----------
     transcripts : list[Transcript]
-        Sorted list of transcripts (must have ``t_index`` assigned).
+        Sorted transcript list (``t_index`` already assigned).
+    tolerance : int
+        Maximum distance (bp) for TSS/TES clustering.
 
     Returns
     -------
-    nrna_df : pd.DataFrame
-        Columns: nrna_idx, ref, strand, start, end, length.
-    t_to_nrna : np.ndarray
-        int32[n_transcripts] mapping t_index -> nrna_idx.
+    synthetics : list[Transcript]
+        Synthetic nRNA transcripts to append to the transcript list.
+        Callers must assign ``t_index`` to each returned transcript.
+    t_to_span_key : dict[int, tuple]
+        Mapping from annotated multi-exon transcript ``t_index`` to its
+        merged nRNA span key ``(ref, strand, start, end)``.  Used by
+        the caller to set ``nrna_t_index`` after ``t_index`` assignment.
+    span_to_syn_idx : dict[tuple, int]
+        Mapping from uncovered span key to the index in *synthetics*.
+    covered_equiv : dict[tuple, Transcript]
+        Mapping from covered span key to the annotated nascent-equiv
+        transcript.
     """
-    n = len(transcripts)
-    t_to_nrna = np.empty(n, dtype=np.int32)
+    from .types import Interval, Strand
 
-    # Build (ref, strand, start, end) -> nrna_idx mapping
-    span_to_idx: dict[tuple, int] = {}
-    nrna_rows: list[dict] = []
-
+    # -- Step 1: Collect multi-exon transcript spans --------------------------
+    multi_exon: list[Transcript] = []
     for t in transcripts:
-        key = (t.ref, int(t.strand), t.start, t.end)
-        if key not in span_to_idx:
-            idx = len(span_to_idx)
-            span_to_idx[key] = idx
-            nrna_rows.append({
-                "nrna_idx": idx,
-                "ref": t.ref,
-                "strand": int(t.strand),
-                "start": t.start,
-                "end": t.end,
-                "length": t.end - t.start,
-            })
-        t_to_nrna[t.t_index] = span_to_idx[key]
-        t.nrna_idx = span_to_idx[key]
+        if len(t.exons) >= 2:
+            multi_exon.append(t)
 
-    nrna_df = pd.DataFrame(nrna_rows)
-    return nrna_df, t_to_nrna
+    if not multi_exon:
+        return [], {}, {}, {}
+
+    # -- Step 2: TSS/TES clustering per (ref, strand) ------------------------
+    # Group multi-exon transcripts by (ref, strand)
+    groups: dict[tuple[str, int], list[Transcript]] = collections.defaultdict(list)
+    for t in multi_exon:
+        groups[(t.ref, int(t.strand))].append(t)
+
+    # For each transcript, compute merged (representative) start and end.
+    # Store as {t_index: (merged_start, merged_end)}.
+    t_to_merged_span: dict[int, tuple[int, int]] = {}
+
+    for (ref, strand), grp in groups.items():
+        # Cluster starts
+        starts = np.array([t.start for t in grp], dtype=np.int64)
+        order_s = np.argsort(starts, kind="mergesort")
+        sorted_starts = starts[order_s]
+        cids_s = _cluster_coordinates(sorted_starts, tolerance)
+
+        # Map cluster_id → min start (outer envelope)
+        n_clusters_s = cids_s[-1] + 1 if len(cids_s) else 0
+        cid_min_start = np.full(n_clusters_s, np.iinfo(np.int64).max, dtype=np.int64)
+        np.minimum.at(cid_min_start, cids_s, sorted_starts)
+
+        # Back-map to original order
+        rep_starts = np.empty(len(grp), dtype=np.int64)
+        for i, oi in enumerate(order_s):
+            rep_starts[oi] = cid_min_start[cids_s[i]]
+
+        # Cluster ends
+        ends = np.array([t.end for t in grp], dtype=np.int64)
+        order_e = np.argsort(ends, kind="mergesort")
+        sorted_ends = ends[order_e]
+        cids_e = _cluster_coordinates(sorted_ends, tolerance)
+
+        n_clusters_e = cids_e[-1] + 1 if len(cids_e) else 0
+        cid_max_end = np.full(n_clusters_e, np.iinfo(np.int64).min, dtype=np.int64)
+        np.maximum.at(cid_max_end, cids_e, sorted_ends)
+
+        rep_ends = np.empty(len(grp), dtype=np.int64)
+        for i, oi in enumerate(order_e):
+            rep_ends[oi] = cid_max_end[cids_e[i]]
+
+        for j, t in enumerate(grp):
+            t_to_merged_span[t.t_index] = (int(rep_starts[j]), int(rep_ends[j]))
+
+    # -- Step 3: Dedup merged spans -------------------------------------------
+    # Map merged_key → (first transcript for metadata, set of contributing t_indices)
+    merged_spans: dict[tuple, Transcript] = {}  # key → representative transcript
+    span_contributor_count: dict[tuple, int] = collections.defaultdict(int)
+    t_to_span_key: dict[int, tuple] = {}  # annotated t_index → span key
+    for t in multi_exon:
+        ms, me = t_to_merged_span[t.t_index]
+        key = (t.ref, int(t.strand), ms, me)
+        if key not in merged_spans:
+            merged_spans[key] = t  # keep first for gene metadata
+        span_contributor_count[key] += 1
+        t_to_span_key[t.t_index] = key
+
+    # -- Step 4: Detect annotated equivalents ---------------------------------
+    # Build single-exon lookup: (ref, strand) → sorted list of (start, end, t)
+    se_by_loc: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = (
+        collections.defaultdict(list)
+    )
+    for t in transcripts:
+        if len(t.exons) == 1:
+            se_by_loc[(t.ref, int(t.strand))].append((t.start, t.end, t))
+    for key in se_by_loc:
+        se_by_loc[key].sort(key=lambda x: (x[0], x[1]))
+
+    covered: set[tuple] = set()
+    covered_equiv: dict[tuple, Transcript] = {}  # span_key → equiv transcript
+    for span_key in merged_spans:
+        ref, strand, m_start, m_end = span_key
+        candidates = se_by_loc.get((ref, strand), [])
+        for s_start, s_end, s_tx in candidates:
+            if s_start > m_start:
+                break  # sorted by start, no more can contain
+            if s_start <= m_start and m_end <= s_end:
+                s_tx.is_nascent_equiv = True
+                s_tx.nrna_n_contributors = span_contributor_count[span_key]
+                covered.add(span_key)
+                covered_equiv[span_key] = s_tx
+                break
+
+    # -- Step 5: Create synthetic transcripts ---------------------------------
+    synthetics: list[Transcript] = []
+    span_to_syn_idx: dict[tuple, int] = {}  # span_key → index in synthetics list
+    for span_key, rep_tx in merged_spans.items():
+        if span_key in covered:
+            continue
+        ref, strand_int, s, e = span_key
+        syn = Transcript(
+            ref=ref,
+            strand=Strand(strand_int),
+            exons=[Interval(s, e)],
+            length=e - s,
+            t_id=f"RIGEL_NRNA_{ref}_{strand_int}_{s}_{e}",
+            g_id=rep_tx.g_id,
+            g_name=rep_tx.g_name,
+            g_type=rep_tx.g_type,
+            is_synthetic_nrna=True,
+            nrna_n_contributors=span_contributor_count[span_key],
+        )
+        span_to_syn_idx[span_key] = len(synthetics)
+        synthetics.append(syn)
+
+    logger.info(
+        f"nRNA: {len(merged_spans)} merged spans "
+        f"({len(covered)} annotated equiv, "
+        f"{len(synthetics)} synthetic)"
+    )
+    return synthetics, t_to_span_key, span_to_syn_idx, covered_equiv
 
 
 def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
@@ -264,96 +406,6 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
                           t.strand, IntervalType.TRANSCRIPT, t.t_index)
 
 
-def _merge_exon_intervals(
-    intervals: list[tuple[int, int]],
-) -> list[tuple[int, int]]:
-    """Merge a sorted list of (start, end) intervals into non-overlapping form."""
-    if not intervals:
-        return []
-    intervals.sort()
-    merged = [list(intervals[0])]
-    for lo, hi in intervals[1:]:
-        if lo <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], hi)
-        else:
-            merged.append([lo, hi])
-    return [(s, e) for s, e in merged]
-
-
-def _subtract_from_interval(
-    lo: int, hi: int,
-    subtract: list[tuple[int, int]],
-) -> list[tuple[int, int]]:
-    """Subtract merged intervals from [lo, hi) and return remaining pieces."""
-    if lo >= hi:
-        return []
-    result: list[tuple[int, int]] = []
-    cursor = lo
-    for s_lo, s_hi in subtract:
-        if s_lo >= hi:
-            break
-        if s_hi <= cursor:
-            continue
-        if s_lo > cursor:
-            result.append((cursor, min(s_lo, hi)))
-        cursor = max(cursor, s_hi)
-    if cursor < hi:
-        result.append((cursor, hi))
-    return result
-
-
-def _gen_cluster_unambig_intron_intervals(
-    cluster: list[Transcript],
-) -> Iterator[AnnotatedInterval]:
-    """Yield UNAMBIG_INTRON intervals for a cluster of overlapping transcripts.
-
-    For each multi-exon transcript, subtract the global exon union of the
-    entire cluster from the transcript's intronic gaps.  The remaining
-    regions are unambiguously intronic — they don't overlap any exon from
-    any transcript in the locus.
-
-    Intervals are tagged with ``nrna_idx`` (not ``t_index``) and
-    deduplicated per nRNA: overlapping pieces from different transcripts
-    sharing the same nRNA are merged so that each genomic position
-    appears at most once per nRNA.
-    """
-    if not cluster:
-        return
-
-    ref = cluster[0].ref
-
-    # Build global exon union across all transcripts in the cluster
-    all_exons: list[tuple[int, int]] = []
-    for t in cluster:
-        for e in t.exons:
-            all_exons.append((e.start, e.end))
-    global_exon_union = _merge_exon_intervals(all_exons)
-
-    # Collect raw unambig-intron pieces grouped by (nrna_idx, strand).
-    # Multiple transcripts sharing the same nRNA may produce overlapping
-    # pieces from their different intron structures.
-    nrna_pieces: dict[tuple[int, int], list[tuple[int, int]]] = (
-        collections.defaultdict(list)
-    )
-    for t in cluster:
-        if len(t.exons) < 2:
-            continue  # single-exon transcripts have no introns
-        key = (t.nrna_idx, int(t.strand))
-        for intron_start, intron_end in t.introns():
-            pieces = _subtract_from_interval(
-                intron_start, intron_end, global_exon_union,
-            )
-            nrna_pieces[key].extend(pieces)
-
-    # Merge overlapping pieces within each nRNA and yield deduplicated intervals
-    for (nrna_idx, strand), pieces in nrna_pieces.items():
-        for start, end in _merge_exon_intervals(pieces):
-            yield AnnotatedInterval(
-                ref, start, end, strand,
-                IntervalType.UNAMBIG_INTRON, nrna_idx,
-            )
-
-
 def _gen_genomic_intervals(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
@@ -363,9 +415,6 @@ def _gen_genomic_intervals(
     Transcripts must be sorted by ``(ref, start, end)``. Intergenic
     intervals fill the gaps between transcript clusters and extend to
     reference boundaries.
-
-    Also emits ``UNAMBIG_INTRON`` intervals for each multi-exon transcript
-    by subtracting the global exon union of the cluster from intronic gaps.
     """
     # Group transcripts by reference
     ref_transcripts: dict[str, list[Transcript]] = collections.defaultdict(list)
@@ -397,7 +446,6 @@ def _gen_genomic_intervals(
                 # Emit intervals for the previous cluster
                 for tc in cluster:
                     yield from _gen_transcript_intervals(tc)
-                yield from _gen_cluster_unambig_intron_intervals(cluster)
                 cluster = []
 
             end = max(end, t.end)
@@ -406,7 +454,6 @@ def _gen_genomic_intervals(
         # Emit final cluster
         for tc in cluster:
             yield from _gen_transcript_intervals(tc)
-        yield from _gen_cluster_unambig_intron_intervals(cluster)
 
         # Intergenic gap to end of reference
         if end < ref_length:
@@ -567,9 +614,6 @@ class TranscriptIndex:
         self.index_dir: str | None = None
         self.t_df: pd.DataFrame | None = None
         self.g_df: pd.DataFrame | None = None
-        self.nrna_df: pd.DataFrame | None = None
-        self.t_to_nrna_arr: np.ndarray | None = None
-        self.num_nrna: int = 0
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
         self.g_to_strand_arr: np.ndarray | None = None
@@ -619,6 +663,7 @@ class TranscriptIndex:
         feather_compression: str = "lz4",
         write_tsv: bool = True,
         gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
+        nrna_tolerance: int = NRNA_MERGE_TOLERANCE,
     ) -> None:
         """Build the rigel reference index and write to disk.
 
@@ -638,6 +683,9 @@ class TranscriptIndex:
         gtf_parse_mode : {"strict", "warn-skip"}
             GTF parsing behavior. ``"strict"`` (default) fails fast on
             malformed lines; ``"warn-skip"`` logs warnings and skips.
+        nrna_tolerance : int
+            Max distance (bp) for clustering transcript start/end sites
+            when building synthetic nascent RNA transcripts.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -662,17 +710,48 @@ class TranscriptIndex:
         )
         logger.info(f"[DONE] Read {len(transcripts)} transcripts")
 
-        # -- Nascent RNA entities ---------------------------------------------
-        logger.info("[START] Computing nRNA table")
-        nrna_df, t_to_nrna = compute_nrna_table(transcripts)
+        # -- Synthetic nRNA transcripts ---------------------------------------
+        logger.info("[START] Creating synthetic nRNA transcripts")
+        synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = (
+            create_nrna_transcripts(transcripts, tolerance=nrna_tolerance)
+        )
+        # Build g_id → g_index mapping from annotated transcripts
+        g_id_to_gindex: dict[str, int] = {}
+        for t in transcripts:
+            if t.g_id not in g_id_to_gindex:
+                g_id_to_gindex[t.g_id] = t.g_index
+
+        # Assign t_index and g_index to each synthetic; build span→t_index
+        span_to_nrna_t_index: dict[tuple, int] = {}
+        next_t_index = len(transcripts)
+        for syn in synthetics:
+            syn.t_index = next_t_index
+            next_t_index += 1
+            syn.g_index = g_id_to_gindex.get(syn.g_id, -1)
+            span_key = (syn.ref, int(syn.strand), syn.start, syn.end)
+            span_to_nrna_t_index[span_key] = syn.t_index
+
+        # For covered spans, the nRNA entity is the nascent-equiv transcript
+        for span_key, equiv_tx in covered_equiv.items():
+            span_to_nrna_t_index[span_key] = equiv_tx.t_index
+            equiv_tx.nrna_t_index = equiv_tx.t_index
+
+        # Set nrna_t_index on every multi-exon annotated transcript
+        for me_tidx, span_key in t_to_span_key.items():
+            transcripts[me_tidx].nrna_t_index = span_to_nrna_t_index.get(
+                span_key, -1
+            )
+
+        transcripts.extend(synthetics)
         logger.info(
-            f"[DONE] Found {len(nrna_df)} unique nRNA spans "
-            f"from {len(transcripts)} transcripts"
+            f"[DONE] {len(synthetics)} synthetics added, "
+            f"{len(transcripts)} total transcripts"
         )
 
-        nrna_df.to_feather(output_dir / NRNA_FEATHER, **feather_kwargs)
-        if write_tsv:
-            nrna_df.to_csv(output_dir / NRNA_TSV, sep="\t", index=False)
+        # Partition: annotated-only list for region table and splice junctions
+        annotated_transcripts = [
+            t for t in transcripts if not t.is_synthetic_nrna
+        ]
 
         t_df = transcripts_to_dataframe(transcripts)
         t_df.to_feather(output_dir / TRANSCRIPTS_FEATHER, **feather_kwargs)
@@ -681,7 +760,7 @@ class TranscriptIndex:
 
         # -- Splice junctions -------------------------------------------------
         logger.info("[START] Building splice junctions")
-        sj_df = build_splice_junctions(transcripts)
+        sj_df = build_splice_junctions(annotated_transcripts)
         logger.info(f"[DONE] Found {len(sj_df)} splice junctions")
 
         sj_df.to_feather(output_dir / SJ_FEATHER, **feather_kwargs)
@@ -699,7 +778,7 @@ class TranscriptIndex:
 
         # -- Calibration regions ----------------------------------------------
         logger.info("[START] Building calibration regions")
-        region_df = build_region_table(transcripts, ref_lengths)
+        region_df = build_region_table(annotated_transcripts, ref_lengths)
         logger.info(f"[DONE] Found {len(region_df)} calibration regions")
 
         region_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
@@ -756,6 +835,12 @@ class TranscriptIndex:
                 f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
             )
 
+        # Backward compat: older indices lack synthetic nRNA columns
+        if "is_synthetic_nrna" not in self.t_df.columns:
+            self.t_df["is_synthetic_nrna"] = False
+        if "is_nascent_equiv" not in self.t_df.columns:
+            self.t_df["is_nascent_equiv"] = False
+
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)
         if "g_index" not in self.g_df.columns:
@@ -773,17 +858,6 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
         self.g_to_strand_arr = self.g_df["strand"].values
-
-        # -- nRNA table -------------------------------------------------------
-        nrna_path = os.path.join(index_dir, NRNA_FEATHER)
-        if os.path.exists(nrna_path):
-            self.nrna_df = pd.read_feather(nrna_path)
-            self.t_to_nrna_arr = self.t_df["nrna_idx"].values.astype(np.int32)
-            self.num_nrna = len(self.nrna_df)
-        else:
-            self.nrna_df = None
-            self.t_to_nrna_arr = None
-            self.num_nrna = 0
 
         # -- interval index (unified cgranges) ---------------------------------
         logger.debug("Reading intervals")

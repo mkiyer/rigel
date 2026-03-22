@@ -97,7 +97,10 @@ class TestCalibratedDensityEndToEnd:
         sc, result = high_ss_scenario
         pr = self._run(result, result.index)
         df = pr.estimator.get_counts_df(result.index)
-        assert len(df) == 3
+        n_annotated = sum(
+            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
+        )
+        assert n_annotated == 3
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
 
     def test_low_ss_valid(self, low_ss_scenario):
@@ -105,7 +108,10 @@ class TestCalibratedDensityEndToEnd:
         sc, result = low_ss_scenario
         pr = self._run(result, result.index)
         df = pr.estimator.get_counts_df(result.index)
-        assert len(df) == 3
+        n_annotated = sum(
+            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
+        )
+        assert n_annotated == 3
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
 
     def test_high_ss_calibration_populates(self, high_ss_scenario):

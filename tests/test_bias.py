@@ -258,9 +258,7 @@ class TestBiasCorrectionCpp:
             unambig_totals, eff_lens, eligible,
             n_comp, 1.0, 1000, 1e-6,
             False,
-            0, 0,
-            np.array([], dtype=np.int32), np.array([], dtype=np.int32),
-            np.array([], dtype=np.int32),
+            0,
         )
         # All evidence points to component 0; theta[0] should dominate
         assert np.asarray(theta)[0] > 0.9
@@ -288,9 +286,7 @@ class TestBiasCorrectionCpp:
             unambig_totals, eff_lens, eligible,
             n_comp, 1.0, 1000, 1e-6,
             False,
-            0, 0,
-            np.array([], dtype=np.int32), np.array([], dtype=np.int32),
-            np.array([], dtype=np.int32),
+            0,
         )
         # Should converge without issues
         assert np.all(np.isfinite(np.asarray(theta)))

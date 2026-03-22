@@ -7,6 +7,7 @@ Subcommands:
     rigel index   — Build reference index from FASTA + GTF
     rigel quant   — Single-pass Bayesian fragment abundance estimation
     rigel sim     — Generate synthetic test scenarios
+    rigel export  — Convert feather outputs to TSV or Parquet
 """
 
 import argparse
@@ -47,6 +48,7 @@ def index_command(args: argparse.Namespace) -> int:
         feather_compression=args.feather_compression,
         write_tsv=not args.no_tsv,
         gtf_parse_mode=args.gtf_parse_mode,
+        nrna_tolerance=args.nrna_tolerance,
     )
     return 0
 
@@ -83,8 +85,7 @@ def quant_command(args: argparse.Namespace) -> int:
     sj_tag_list = args.sj_strand_tag
     sj_strand_tag = sj_tag_list[0] if len(sj_tag_list) == 1 else tuple(sj_tag_list)
 
-    # -- Persist run config --
-    _write_run_config(args, output_dir, seed, sj_strand_tag)
+    # -- Persist run config (now part of summary.json, written at end) --
 
     # -- Load reference index --
     logging.info(f"[START] Loading index from {index_dir}")
@@ -161,57 +162,14 @@ def _build_pipeline_config(
     )
 
 
-def _write_run_config(
-    args: argparse.Namespace,
-    output_dir: Path,
-    seed: int,
-    sj_strand_tag: str | tuple[str, ...],
-) -> None:
-    """Serialize the resolved run parameters to ``config.json``.
-
-    Parameter keys are derived from ``_PARAM_SPECS`` so that adding a
-    new parameter automatically includes it in config.json.
-    """
-    import json
-
-    params: dict = {
-        "bam_file": str(Path(args.bam_file).resolve()),
-        "index_dir": str(Path(args.index_dir).resolve()),
-        "output_dir": str(output_dir.resolve()),
-        "seed": seed,
-    }
-    seen = {"seed"}
-    for spec in _PARAM_SPECS:
-        dest = spec.cli_dest
-        if dest in seen:
-            continue
-        seen.add(dest)
-        val = getattr(args, dest)
-        if dest == "sj_strand_tag":
-            val = sj_strand_tag if isinstance(sj_strand_tag, str) else list(sj_strand_tag)
-        params[dest] = val
-    params["no_tsv"] = args.no_tsv
-
-    config = {
-        "command": "rigel quant",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "source_config": str(Path(args.config).resolve()) if args.config else None,
-        "parameters": params,
-    }
-    config_path = output_dir / "config.json"
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
-    logging.info(f"[CONFIG] Written to {config_path}")
-
-
 def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
-    """Write quantification tables, optional TSVs, and summary.json."""
+    """Write quantification tables and summary.json."""
     import json
 
     quant_path = output_dir / "quant.feather"
     gene_quant_path = output_dir / "gene_quant.feather"
+    nrna_quant_path = output_dir / "nrna_quant.feather"
     loci_path = output_dir / "loci.feather"
-    detail_path = output_dir / "quant_detail.feather"
     summary_path = output_dir / "summary.json"
 
     # Log stats
@@ -219,34 +177,30 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         if isinstance(val, (int, float)):
             logging.info(f"  {key}: {val:,}")
 
-    # Write quant tables
+    # Write quant tables (Feather v2 + ZSTD compression)
     estimator = result.estimator
     quant_df = estimator.get_counts_df(index)
     gene_quant_df = estimator.get_gene_counts_df(index)
-    loci_df = estimator.get_loci_df()
-    detail_df = estimator.get_detail_df(index)
+    nrna_quant_df = estimator.get_nrna_counts_df(index)
+    loci_df = estimator.get_loci_df(index)
 
-    quant_df.to_feather(str(quant_path))
-    gene_quant_df.to_feather(str(gene_quant_path))
-    loci_df.to_feather(str(loci_path))
-    detail_df.to_feather(str(detail_path))
+    feather_kw = {"compression": "zstd"}
+    quant_df.to_feather(str(quant_path), **feather_kw)
+    gene_quant_df.to_feather(str(gene_quant_path), **feather_kw)
+    nrna_quant_df.to_feather(str(nrna_quant_path), **feather_kw)
+    loci_df.to_feather(str(loci_path), **feather_kw)
     logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, "
-                 f"{loci_path}, {detail_path}")
+                 f"{nrna_quant_path}, {loci_path}")
 
     # Write TSV mirrors if requested
-    if not args.no_tsv:
-        quant_df.to_csv(
-            quant_path.with_suffix(".tsv"), sep="\t", index=False
-        )
-        gene_quant_df.to_csv(
-            gene_quant_path.with_suffix(".tsv"), sep="\t", index=False
-        )
-        loci_df.to_csv(
-            loci_path.with_suffix(".tsv"), sep="\t", index=False
-        )
-        detail_df.to_csv(
-            detail_path.with_suffix(".tsv"), sep="\t", index=False
-        )
+    if getattr(args, "tsv", False):
+        for df, path in [
+            (quant_df, quant_path),
+            (gene_quant_df, gene_quant_path),
+            (nrna_quant_df, nrna_quant_path),
+            (loci_df, loci_path),
+        ]:
+            df.to_csv(str(path.with_suffix(".tsv")), sep="\t", index=False)
 
     # Build and write summary.json
     stats = result.stats
@@ -259,27 +213,71 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     total_all = total_rna + total_gdna + stats.n_intergenic
 
     from . import __version__
+
+    # Strand model summary (exonic_spliced only)
+    sm_primary = sm.exonic_spliced
+    ci_lo, ci_hi = sm_primary.posterior_95ci()
+
+    # Fragment length summary (per-category stats, no histograms)
+    def _fl_summary(model) -> dict:
+        if model.n_observations == 0:
+            return {"mean": None, "std": None, "median": None, "mode": None, "n_obs": 0}
+        return {
+            "mean": round(model.mean, 2),
+            "std": round(model.std, 2),
+            "median": round(model.median, 2),
+            "mode": int(model.mode),
+            "n_obs": int(model.n_observations),
+        }
+
+    from .splice import SpliceType
+    fl_dict = {
+        "global": _fl_summary(flm.global_model),
+        "rna": _fl_summary(flm.rna_model),
+        "gdna": _fl_summary(flm.gdna_model),
+        "intergenic": _fl_summary(flm.intergenic),
+    }
+    for cat in SpliceType:
+        fl_dict[cat.name.lower()] = _fl_summary(flm.category_models[cat])
+
+    # Calibration section
+    cal_dict = None
+    if result.calibration is not None:
+        cal_dict = result.calibration.to_summary_dict()
+
+    # Command section — record CLI arguments
+    cmd_params: dict = {
+        "bam_file": str(Path(args.bam_file).resolve()),
+        "index_dir": str(Path(args.index_dir).resolve()),
+        "output_dir": str(output_dir.resolve()),
+    }
+    seen = set()
+    for spec in _PARAM_SPECS:
+        dest = spec.cli_dest
+        if dest in seen:
+            continue
+        seen.add(dest)
+        val = getattr(args, dest, None)
+        if dest == "sj_strand_tag" and not isinstance(val, str):
+            val = list(val) if val else val
+        cmd_params[dest] = val
+
     summary = {
         "rigel_version": __version__,
-        "command": "rigel quant",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "command": {
+            "subcommand": "quant",
+            "arguments": cmd_params,
+            "config_file": (
+                str(Path(args.config).resolve()) if getattr(args, "config", None) else None
+            ),
+        },
+        "configuration": result.pipeline_config.to_dict(),
         "input": {
             "bam_file": str(Path(args.bam_file).resolve()),
             "index_dir": str(Path(args.index_dir).resolve()),
         },
-        "library": {
-            "protocol": (
-                "R1-sense" if sm.read1_sense else "R1-antisense"
-            ),
-            "strand_specificity": round(sm.strand_specificity, 6),
-            "p_r1_sense": round(sm.p_r1_sense, 6),
-            "read1_sense": bool(sm.read1_sense),
-            "frag_length_mean": round(flm.global_model.mean, 1),
-            "frag_length_median": round(flm.global_model.median, 1),
-            "frag_length_std": round(flm.global_model.std, 1),
-            "frag_length_mode": int(flm.global_model.mode),
-        },
-        "alignment": {
+        "alignment_stats": {
             "total_reads": stats.total,
             "mapped_reads": stats.total - stats.unmapped,
             "unique_reads": stats.unique,
@@ -288,12 +286,28 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "duplicate_reads": stats.duplicate,
             "qc_fail_reads": stats.qc_fail,
         },
-        "fragments": {
+        "fragment_stats": {
             "total": stats.n_fragments,
             "genic": stats.n_fragments - stats.n_intergenic - stats.n_chimeric,
             "intergenic": stats.n_intergenic,
             "chimeric": stats.n_chimeric,
+            "chimeric_trans": stats.n_chimeric_trans,
+            "chimeric_cis_same": stats.n_chimeric_cis_strand_same,
+            "chimeric_cis_diff": stats.n_chimeric_cis_strand_diff,
+            "with_annotated_sj": stats.n_with_annotated_sj,
+            "with_unannotated_sj": stats.n_with_unannotated_sj,
         },
+        "strand_model": {
+            "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
+            "strand_specificity": round(sm.strand_specificity, 6),
+            "p_r1_sense": round(sm.p_r1_sense, 6),
+            "read1_sense": bool(sm.read1_sense),
+            "n_training_fragments": sm.n_observations,
+            "posterior_variance": round(sm_primary.posterior_variance(), 8),
+            "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
+        },
+        "calibration": cal_dict,
+        "fragment_length": fl_dict,
         "quantification": {
             "n_transcripts": index.num_transcripts,
             "n_genes": index.num_genes,
@@ -313,9 +327,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "nrna_fraction": round(total_nrna / total_all, 6) if total_all > 0 else 0.0,
             "gdna_fraction": round(total_gdna / total_all, 6) if total_all > 0 else 0.0,
         },
-        "strand_models": sm.to_dict(),
-        "frag_length_models": flm.to_dict(),
-        "pipeline_stats": stats.to_dict(),
     }
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
@@ -374,6 +385,34 @@ def sim_command(args: argparse.Namespace) -> int:
     logging.info(f"  GTF:   {result.gtf_path}")
     logging.info(f"  BAM:   {result.bam_path}")
     logging.info(f"  Index: {result.index_dir}")
+    return 0
+
+
+def export_command(args: argparse.Namespace) -> int:
+    """Run the ``rigel export`` subcommand — convert feather outputs to TSV or Parquet."""
+    import pandas as pd
+
+    output_dir = Path(args.output_dir)
+    fmt = args.format
+    feather_files = sorted(output_dir.glob("*.feather"))
+    if not feather_files:
+        logging.error(f"No .feather files found in {output_dir}")
+        return 1
+
+    for fpath in feather_files:
+        df = pd.read_feather(str(fpath))
+        if fmt == "tsv":
+            out = fpath.with_suffix(".tsv")
+            df.to_csv(str(out), sep="\t", index=False)
+        elif fmt == "parquet":
+            out = fpath.with_suffix(".parquet")
+            df.to_parquet(str(out), compression="zstd", index=False)
+        else:
+            logging.error(f"Unknown format: {fmt}")
+            return 1
+        logging.info(f"  {fpath.name} -> {out.name}")
+
+    logging.info(f"[DONE] Exported {len(feather_files)} file(s) to {fmt}")
     return 0
 
 
@@ -526,7 +565,6 @@ def _build_quant_defaults() -> dict:
         else:
             val = _resolve_config_path(cfg, spec.config_path)
             defaults[spec.cli_dest] = _config_to_cli(val, spec.transform)
-    defaults["no_tsv"] = False  # CLI-only, no config mapping
     return defaults
 
 
@@ -628,6 +666,16 @@ def build_parser() -> argparse.ArgumentParser:
             "'warn-skip' logs warnings and skips malformed lines"
         ),
     )
+    idx.add_argument(
+        "--nrna-tolerance",
+        dest="nrna_tolerance",
+        type=int,
+        default=20,
+        help=(
+            "Max distance (bp) for clustering transcript start/end sites "
+            "when building synthetic nascent RNA transcripts (default: 20)"
+        ),
+    )
     idx.set_defaults(func=index_command)
 
     # --- QUANT ---------------------------------------------------------------
@@ -675,8 +723,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep reads marked as PCR/optical duplicates (default: no).",
     )
     quant_parser.add_argument(
-        "--no-tsv", dest="no_tsv", action="store_true", default=None,
-        help="Skip writing human-readable TSV quant files.",
+        "--tsv", dest="tsv", action="store_true", default=False,
+        help="Also write TSV (.tsv) mirrors of quant tables.",
     )
 
     # Common options (all default=None for YAML override)
@@ -804,6 +852,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of fragments to simulate (default: 1000, overridden by YAML)",
     )
     sim.set_defaults(func=sim_command)
+
+    # --- EXPORT --------------------------------------------------------------
+    export = subparsers.add_parser(
+        "export", help="Convert feather output files to TSV or Parquet",
+    )
+    export.add_argument(
+        "output_dir",
+        help="Directory containing .feather output files from rigel quant",
+    )
+    export.add_argument(
+        "-f", "--format", dest="format", default="tsv",
+        choices=["tsv", "parquet"],
+        help="Output format (default: tsv)",
+    )
+    export.set_defaults(func=export_command)
 
     return parser
 
