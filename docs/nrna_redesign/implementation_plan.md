@@ -121,7 +121,7 @@ The unified architecture does NOT add evidence gating. This matches the current 
 | `t_to_nrna_arr` | No transcript→nRNA mapping |
 | `nrna_df` / `nrna.feather` | No nRNA entity table |
 | nRNA scoring path in `scoring.cpp` (lines 620-760, 1092-1212) | Synthetic transcripts score as mRNA |
-| nRNA WTA / dedup hash map in `scoring.cpp` | Not needed |
+| nRNA hard overhang gate / dedup hash map in `scoring.cpp` | Not needed |
 | nRNA fan-out in union-find (`em_solver.cpp:2160-2185`) | Natural connectivity via cgranges |
 | nRNA→transcript CSR in `locus.py` and `em_solver.cpp` | Not needed |
 | `nrna_em_counts_out` accumulator | Direct per-transcript output |
@@ -260,7 +260,7 @@ The algorithm clusters starts and ends independently, using the outer envelope (
 This is the major simplification phase. Remove the separate nRNA index space entirely.
 
 **C.1 — scoring.cpp**: Remove entire nRNA scoring path.
-- Delete nRNA dedup hash map, nRNA WTA logic in `score_chunk_impl` (singlemapper path, lines ~1092-1210)
+- Delete nRNA dedup hash map, nRNA hard overhang gate logic in `score_chunk_impl` (singlemapper path, lines ~1092-1210)
 - Delete nRNA handling in `flush_mm_group` (multimapper path, lines ~620-760)
 - Remove `nrna_base_`, `t_to_nrna_`, `nrna_span_`, `nrna_start_` member variables from `NativeFragmentScorer`
 - Remove corresponding constructor parameters and nanobind bindings

@@ -131,7 +131,7 @@ static double compute_fragment_weight(int32_t frag_start,
 // ================================================================
 //
 // Holds all pre-computed scoring parameters and index arrays so that
-// score_wta_mrna / score_wta_nrna can execute entirely in C++ with
+// scoring and candidate pruning execute entirely in C++ with
 // zero Python round-trips.  Constructed once per pipeline run from
 // the Python FragmentScorer.
 
@@ -153,6 +153,10 @@ class NativeFragmentScorer {
     std::vector<int32_t> t_length_;   // spliced exonic length
     std::vector<int32_t> t_span_;     // genomic span (incl introns)
     std::vector<int32_t> t_start_;    // genomic start coordinate
+    std::vector<uint8_t> t_is_nrna_;  // uint8[n_transcripts] — 1=nRNA, 0=mRNA
+
+    // --- Pool-separated likelihood pruning ---
+    double max_ll_delta_;             // Δ = -log(ε), pre-computed
 
     // --- Fragment-length LUT — RNA model (copied from numpy) ---
     std::vector<double> fl_log_prob_;
@@ -244,7 +248,9 @@ public:
         i32_1d  t_length_arr,
         i32_1d  t_span_arr,
         i32_1d  t_start_arr,
-        nb::object t_exon_data_obj)
+        nb::object t_exon_data_obj,
+        u8_1d   t_is_nrna_arr,
+        double  pruning_max_ll_delta)
       : log_p_sense_(log_p_sense),
         log_p_antisense_(log_p_antisense),
         r1_antisense_(r1_antisense),
@@ -255,7 +261,8 @@ public:
         has_fl_lut_(false),
         gdna_fl_max_size_(gdna_fl_max_size),
         gdna_fl_tail_base_(gdna_fl_tail_base),
-        has_gdna_fl_lut_(false)
+        has_gdna_fl_lut_(false),
+        max_ll_delta_(pruning_max_ll_delta)
     {
         // Copy index arrays
         n_transcripts_ = static_cast<int32_t>(t_strand_arr.shape(0));
@@ -274,6 +281,10 @@ public:
         {
             const auto* p = t_start_arr.data();
             t_start_.assign(p, p + n_transcripts_);
+        }
+        {
+            const auto* p = t_is_nrna_arr.data();
+            t_is_nrna_.assign(p, p + n_transcripts_);
         }
 
         // Copy fragment-length LUT (RNA model)
@@ -425,9 +436,9 @@ private:
     // ---------------------------------------------------------------
     //
     // Members are identified by (chunk_idx, row_idx) pairs stored in
-    // st.mm_members.  Uses the same mRNA/nRNA WTA scoring logic as
-    // the non-MM path, but merges across all alignments in the group
-    // before applying the global WTA gate.
+    // st.mm_members.  Uses pool-separated likelihood pruning (same as
+    // the non-MM path), but merges across all alignments in the group
+    // before applying the pruning gate.
     //
     // Mirrors the Python _flush_mm_group logic exactly.
 
@@ -548,11 +559,14 @@ private:
             }
         }
 
-        // Global mRNA WTA: keep only min-overhang winners
-        int32_t mrna_min_oh = 0x7FFFFFFF;
+        // Pool-separated likelihood pruning (multimapper)
+        double mrna_best = NEG_INF;
+        double nrna_best = NEG_INF;
         for (auto& [t_idx, mc] : merged_mrna) {
-            if (mc.overhang < mrna_min_oh)
-                mrna_min_oh = mc.overhang;
+            if (t_is_nrna_[t_idx])
+                nrna_best = std::max(nrna_best, mc.log_lik);
+            else
+                mrna_best = std::max(mrna_best, mc.log_lik);
         }
 
         int64_t emit_start = st.cand_cur;
@@ -561,7 +575,9 @@ private:
         int32_t best_ct = 0;
 
         for (auto& [t_idx, mc] : merged_mrna) {
-            if (mc.overhang == mrna_min_oh) {
+            double pool_best = t_is_nrna_[t_idx]
+                             ? nrna_best : mrna_best;
+            if (pool_best - mc.log_lik <= max_ll_delta_) {
                 if constexpr (FillMode) {
                     int64_t c = st.cand_cur;
                     st.ti[c] = t_idx;
@@ -796,7 +812,6 @@ private:
                     m_scored = m_heap.data();
                 }
                 int m_n = 0;
-                int32_t m_min_oh = 0x7FFFFFFF;
 
                 for (int64_t k = start; k < end; ++k) {
                     int32_t t_idx = t_ind[k];
@@ -852,13 +867,27 @@ private:
 
                     m_scored[m_n++] = {t_idx, oh, ct, tx_s,
                                        tx_e, log_lik, cov_wt};
-                    if (oh < m_min_oh) m_min_oh = oh;
                 }
 
-                // mRNA WTA winners → output
+                // Pool-separated likelihood pruning:
+                // Find best log_lik within each pool (mRNA vs nRNA)
+                double mrna_best = NEG_INF;
+                double nrna_best = NEG_INF;
+                for (int j = 0; j < m_n; ++j) {
+                    if (t_is_nrna_[m_scored[j].t_idx])
+                        nrna_best = std::max(nrna_best,
+                                             m_scored[j].log_lik);
+                    else
+                        mrna_best = std::max(mrna_best,
+                                             m_scored[j].log_lik);
+                }
+
+                // Emit candidates within Δ of their pool's best
                 for (int j = 0; j < m_n; ++j) {
                     auto& s = m_scored[j];
-                    if (s.oh == m_min_oh) {
+                    double pool_best = t_is_nrna_[s.t_idx]
+                                     ? nrna_best : mrna_best;
+                    if (pool_best - s.log_lik <= max_ll_delta_) {
                         if constexpr (FillMode) {
                             int64_t c = st.cand_cur;
                             st.ti[c] = s.t_idx;
@@ -1179,7 +1208,8 @@ NB_MODULE(_scoring_impl, m) {
                  nb::object, int32_t, double,
                  nb::object, int32_t, double,
                  i8_1d, i32_1d, i32_1d, i32_1d,
-                 nb::object>(),
+                 nb::object,
+                 u8_1d, double>(),
              nb::arg("log_p_sense"),
              nb::arg("log_p_antisense"),
              nb::arg("r1_antisense"),
@@ -1195,7 +1225,9 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("t_length_arr"),
              nb::arg("t_span_arr"),
              nb::arg("t_start_arr"),
-             nb::arg("t_exon_data").none())
+             nb::arg("t_exon_data").none(),
+             nb::arg("t_is_nrna_arr"),
+             nb::arg("pruning_max_ll_delta"))
         .def("fused_score_buffer",
              &NativeFragmentScorer::fused_score_buffer,
              nb::arg("chunk_arrays"),

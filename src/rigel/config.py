@@ -105,6 +105,7 @@ class FragmentScoringConfig:
     overhang_log_penalty: float = math.log(0.01)
     mismatch_log_penalty: float = math.log(0.1)
     gdna_splice_penalties: dict[int, float] | None = None
+    pruning_min_posterior: float = 1e-4
 
 
 # ======================================================================

@@ -1,3 +1,3 @@
 transcript_id	gene_id	gene_name	gene_type	ref	strand	start	end	length	effective_length	locus_id	nrna_id	is_basic	is_mane	is_nascent_equiv	mrna	mrna_unambig	mrna_em	mrna_spliced	nrna	rna_total	tpm	posterior_mean
-t_anti	g_anti	g_anti	protein_coding	golden_as_cont	-	700	1500	800	461.15442278860286	0	.	True	False	False	201.43618942248497	0.0	201.43618942248497	0.0	0.0	201.43618942248497	386451.8938831612	0.35288272411431343
-t_sense	g_sense	g_sense	protein_coding	golden_as_cont	+	500	2000	1500	1151.1094452773543	0	.	True	False	False	798.2904181258598	0.0	798.2904181258598	0.0	0.0	798.2904181258598	613548.1061168389	0.836480498032301
+t_anti	g_anti	g_anti	protein_coding	golden_as_cont	-	700	1500	800	461.15442278860286	0	.	True	False	False	201.4361894224852	0.0	201.4361894224852	0.0	0.0	201.4361894224852	386451.8938831616	0.3528827241143135
+t_sense	g_sense	g_sense	protein_coding	golden_as_cont	+	500	2000	1500	1151.1094452773543	0	.	True	False	False	798.2904181258594	0.0	798.2904181258594	0.0	0.0	798.2904181258594	613548.1061168385	0.8364804980322997

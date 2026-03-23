@@ -372,6 +372,7 @@ def _score_fragments(
         overhang_log_penalty=scoring.overhang_log_penalty,
         mismatch_log_penalty=scoring.mismatch_log_penalty,
         gdna_splice_penalties=scoring.gdna_splice_penalties,
+        pruning_min_posterior=scoring.pruning_min_posterior,
     )
     builder = FragmentRouter(
         ctx,

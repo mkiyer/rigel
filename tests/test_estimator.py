@@ -355,7 +355,7 @@ class TestLocusAssignment:
         t0_em = rc.em_counts[0].sum()
         t1_em = rc.em_counts[1].sum()
         assert t0_em > t1_em
-        # Both should receive counts (not winner-take-all)
+        # Both should receive counts (not hard-gated to one)
         assert t1_em > 500  # ~10% of 10000
 
     def test_writes_to_em_not_unambig(self):

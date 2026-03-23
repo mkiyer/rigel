@@ -637,10 +637,15 @@ public:
                     int32_t hs = cr_start(sj_cr_, idx);
                     int32_t he = cr_end(sj_cr_, idx);
                     int32_t label = cr_label(sj_cr_, idx);
-                    if (hs >= gs && he <= ge) {
-                        int32_t ti = sj_t_index_[label];
-                        if (t_set.count(ti))
-                            t_gap_size[ti] += (he - hs);
+                    int32_t ti = sj_t_index_[label];
+                    if (t_set.count(ti)) {
+                        // Use overlap instead of strict containment so
+                        // that introns extending a few bp beyond the gap
+                        // (reads aligned slightly into intronic regions)
+                        // are still correctly subtracted.
+                        int32_t overlap = std::min(he, ge) - std::max(hs, gs);
+                        if (overlap > 0)
+                            t_gap_size[ti] += overlap;
                     }
                 }
             }

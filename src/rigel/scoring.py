@@ -134,6 +134,7 @@ class FragmentScorer:
         overhang_log_penalty: float | None = None,
         mismatch_log_penalty: float | None = None,
         gdna_splice_penalties: dict | None = None,
+        pruning_min_posterior: float = 1e-4,
     ) -> "FragmentScorer":
         """Build a FragmentScorer from trained models and index.
 
@@ -146,6 +147,9 @@ class FragmentScorer:
         overhang_log_penalty : float or None
         mismatch_log_penalty : float or None
         gdna_splice_penalties : dict or None
+        pruning_min_posterior : float
+            Minimum posterior threshold for candidate pruning.
+            Lower values are more conservative (keep more candidates).
         """
         rna_sm = strand_models.exonic_spliced
         p_sense = rna_sm._cached_p_sense
@@ -212,6 +216,15 @@ class FragmentScorer:
         # to tolerate callers (including test mocks) that provide int64 etc.
         from .native import NativeFragmentScorer
 
+        # Pool-separated likelihood pruning: compute Δ = -log(ε)
+        _eps = max(pruning_min_posterior, 1e-300)
+        max_ll_delta = -math.log(_eps) if _eps < 1.0 else 0.0
+
+        # Build is_synthetic_nrna array for pool separation
+        t_is_nrna_arr = np.zeros(index.num_transcripts, dtype=np.uint8)
+        if "is_synthetic_nrna" in index.t_df.columns:
+            t_is_nrna_arr = index.t_df["is_synthetic_nrna"].values.astype(np.uint8)
+
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
             log_p_antisense=float(ctx.log_p_antisense),
@@ -229,6 +242,8 @@ class FragmentScorer:
             t_span_arr=np.ascontiguousarray(ctx.t_span_arr, dtype=np.int32),
             t_start_arr=np.ascontiguousarray(ctx.t_start_arr, dtype=np.int32),
             t_exon_data=ctx._t_exon_data,
+            t_is_nrna_arr=np.ascontiguousarray(t_is_nrna_arr),
+            pruning_max_ll_delta=max_ll_delta,
         )
         object.__setattr__(ctx, "_native_ctx", native_ctx)
 

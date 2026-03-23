@@ -461,6 +461,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("overhang_alpha", "scoring.overhang_log_penalty", "log_penalty"),
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
+    _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- Fan-out: threads → both EM and scan --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.n_scan_threads"),
@@ -810,6 +811,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=float, default=None,
         help="Per-mismatch (NM tag) penalty alpha in [0,1] (default: 0.1). "
              "0 = hard gate, 1 = no penalty.",
+    )
+    adv.add_argument(
+        "--pruning-min-posterior", dest="pruning_min_posterior",
+        type=float, default=None,
+        help="Minimum posterior threshold for candidate pruning "
+             "(default: 1e-4). Lower values keep more candidates "
+             "(conservative). Set to 0 to disable pruning entirely.",
     )
     adv.add_argument(
         "--em-mode", dest="em_mode",

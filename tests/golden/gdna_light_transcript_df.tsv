@@ -1,3 +1,3 @@
 transcript_id	gene_id	gene_name	gene_type	ref	strand	start	end	length	effective_length	locus_id	nrna_id	is_basic	is_mane	is_nascent_equiv	mrna	mrna_unambig	mrna_em	mrna_spliced	nrna	rna_total	tpm	posterior_mean
-t1	g1	g1	protein_coding	golden_gdna_lo	+	500	1500	600	208.80695652174168	0	RIGEL_NRNA_golden_gdna_lo_1_500_1500	True	False	False	164.9873698279884	85.0	79.9873698279884	85.0	0.0	164.9873698279884	588693.7076030432	0.8953766842705645
-t2	g2	g2	protein_coding	golden_gdna_lo	-	4000	5000	600	208.80695652174168	1	RIGEL_NRNA_golden_gdna_lo_2_4000_5000	True	False	False	115.2727513473505	64.0	51.27275134735051	64.0	0.0	115.2727513473505	411306.2923969569	0.8891104056856081
+t1	g1	g1	protein_coding	golden_gdna_lo	+	500	1500	600	208.80695652174168	0	RIGEL_NRNA_golden_gdna_lo_1_500_1500	True	False	False	165.02504046316616	85.0	80.02504046316616	85.0	0.0	165.02504046316616	588652.1533378822	0.895794680484966
+t2	g2	g2	protein_coding	golden_gdna_lo	-	4000	5000	600	208.80695652174168	1	RIGEL_NRNA_golden_gdna_lo_2_4000_5000	True	False	False	115.31885962691462	64.0	51.318859626914616	64.0	0.0	115.31885962691462	411347.8466621177	0.8898584142769796

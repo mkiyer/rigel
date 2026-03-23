@@ -54,14 +54,14 @@ C.9 (tests + golden) ──── depends on all above ────────�
 4. **Multimapper nRNA block** in `flush_mm_group()` (lines ~616-755):
    - nRNA dedup hash map construction
    - nRNA scoring loop (overhang, fragment length, coverage weight, strand)
-   - nRNA WTA selection
+   - nRNA hard overhang gate selection
    - nRNA candidate emission with `nrna_base_ + ni` indexing
    - ~140 lines
 
 5. **Singlemapper nRNA block** in `score_chunk_impl()` (lines ~1055-1184):
    - `NrnaMerged` struct and `nrna_map` construction
    - nRNA scoring loop (same computations as multimapper path)
-   - nRNA WTA selection
+   - nRNA hard overhang gate selection
    - nRNA candidate emission with `nrna_base_ + ni` indexing
    - ~130 lines
 

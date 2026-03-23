@@ -1,2 +1,2 @@
 locus_id	ref	n_transcripts	n_annotated_transcripts	n_nrna_entities	n_genes	n_em_fragments	mrna	nrna	gdna	total	gdna_rate	gdna_prior
-0	golden_as_cont	2	2	0	2	1000	999.726607548348	0.0	0.2733924516558161	1000.0000000000039	0.00027339245165581503	1.0
+0	golden_as_cont	2	2	0	2	1000	999.7266075483462	0.0	0.2733924516558159	1000.000000000002	0.0002733924516558153	1.0
