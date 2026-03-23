@@ -879,7 +879,13 @@ pair_multimapper_reads(
         }
     }
 
-    // CROSS-PAIR remaining
+    // CROSS-PAIR remaining unmatched R1 × R2 combinatorially.
+    // This produces all possible pairings.  Some may be chimeric
+    // (e.g. R1 chr12 × R2 chrX) — those are detected downstream
+    // by _resolve_core and skipped during scoring.  The non-chimeric
+    // combinations (e.g. R1 chr12 × R2 chr12) are valid PE hits
+    // that preserve fragment-length information and give the EM
+    // better resolution than singletons would.
     std::vector<int> final_r1, final_r2;
     for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
         if (!r1_paired.count(i)) final_r1.push_back(i);
@@ -897,7 +903,7 @@ pair_multimapper_reads(
         }
     }
 
-    // SINGLETONS
+    // SINGLETONS — only if one side has reads but the other doesn't.
     for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
         if (!r1_paired.count(i))
             paired.push_back({*r1_resolved[i].reads, {}});
@@ -1193,8 +1199,15 @@ private:
         // For multimappers: count intergenic only if NO hit resolves,
         // and count it exactly once (not per-hit).
         bool any_hit_resolved = false;
+        bool any_non_chimeric_resolved = false;
         bool any_unresolved_spliced = false;
         bool any_unresolved_unspliced = false;
+
+        // Track chimera per-fragment (not per-hit).
+        // A fragment is chimeric only if it resolves but ALL
+        // resolved hits are chimeric.
+        bool any_hit_chimeric = false;
+        int32_t worst_chimera_type = CHIMERA_NONE;
 
         // Count ONE fragment per physical molecule (not per hit).
         stats.n_fragments++;
@@ -1252,16 +1265,14 @@ private:
             result.nm = frag.nm;
 
             if (result.get_is_chimeric()) {
-                stats.n_chimeric++;
-                if (result.chimera_type == CHIMERA_TRANS)
-                    stats.n_chimeric_trans++;
-                else if (result.chimera_type == CHIMERA_CIS_STRAND_SAME)
-                    stats.n_chimeric_cis_strand_same++;
-                else if (result.chimera_type == CHIMERA_CIS_STRAND_DIFF)
-                    stats.n_chimeric_cis_strand_diff++;
+                any_hit_chimeric = true;
+                if (result.chimera_type > worst_chimera_type)
+                    worst_chimera_type = result.chimera_type;
                 accumulator.append(result, frag_id);
                 continue;
             }
+
+            any_non_chimeric_resolved = true;
 
             // For multimappers, count exon/splice/strand stats only
             // on the first resolved non-chimeric hit to avoid inflation.
@@ -1334,6 +1345,19 @@ private:
             if (!is_unique_mapper) {
                 n_buffered_mm++;
             }
+        }
+
+        // Chimera counting: per-fragment, not per-hit.
+        // A fragment is chimeric only if it resolves but every
+        // resolved hit is chimeric (no non-chimeric alternative).
+        if (any_hit_chimeric && !any_non_chimeric_resolved) {
+            stats.n_chimeric++;
+            if (worst_chimera_type == CHIMERA_TRANS)
+                stats.n_chimeric_trans++;
+            else if (worst_chimera_type == CHIMERA_CIS_STRAND_SAME)
+                stats.n_chimeric_cis_strand_same++;
+            else if (worst_chimera_type == CHIMERA_CIS_STRAND_DIFF)
+                stats.n_chimeric_cis_strand_diff++;
         }
 
         // Intergenic counting: only if NO hit resolved to transcripts.

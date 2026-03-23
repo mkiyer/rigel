@@ -1,0 +1,33 @@
+# GAPDH-focused simulation for debugging pseudogene multimapping
+# Only GAPDH transcripts get reads — everything else is zero.
+# Uses full human genome so reads multimap to pseudogenes.
+
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/gapdh_debug
+
+transcript_filter: basic
+oracle_bam: true
+verbose: true
+
+simulation:
+  n_rna_fragments: 50000
+  sim_seed: 42
+  frag_mean: 300.0
+  frag_std: 50.0
+  frag_min: 150
+  frag_max: 600
+  read_length: 150
+  error_rate: 0.001
+
+abundance:
+  mode: file
+  file: scripts/debug/gapdh_abundances.tsv
+
+gdna:
+  rates: [0.0]
+
+nrna:
+  fracs: []
+
+strand_specificities: [0.95]

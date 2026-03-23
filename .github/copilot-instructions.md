@@ -70,6 +70,27 @@ ruff format src/ tests/
 
 `scripts/benchmark.py` contains a framework for running full-scale simulations, comparing multiple methods, and generating summary tables.
 
+### Minimap2 short read RNA-Seq alignment
+
+Minimap2 accepts an annotated junctions file (BED12 format) to improve spliced alignment. See https://lh3.github.io/2025/04/18/short-rna-seq-read-alignment-with-minimap2.
+
+We want to generate a comprehensive splice junction annotation file (BED12) for minimap2. More junctions likely improves spliced alignment sensitivity. There is a built-in script with minimap2 for converting GTF to BED12:
+
+```
+paftools.js gff2bed gencode.gtf.gz > gencode.bed  # if not done already
+```
+
+How to run minimap2:
+
+```bash
+minimap2 -ax splice:sr \
+    -j junctions.bed \
+    --secondary=yes -N 20 -t 8 \
+    genome.fasta R1.fq.gz R2.fq.gz | \
+  samtools sort -n -o output.bam
+```
+
+
 ## Profiling
 
 `scripts/profiler.py` contains a framework for profiling.

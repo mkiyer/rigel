@@ -479,12 +479,16 @@ def build_minimap2_bed(
     gtf_path: Path,
     out_dir: Path,
     prebuilt: str | None = None,
+    fallback_bed12: Path | None = None,
 ) -> Path:
-    """Return a splice-junction BED for minimap2 ``--junc-bed``.
+    """Return a splice-junction BED (12-column) for minimap2 ``-j``.
 
-    Uses minimap2's bundled ``paftools.js gff2bed`` which produces the
-    12-column BED that minimap2's ``--junc-bed`` expects.  Falls back
-    to rigel's ``write_bed12`` if paftools.js is not available.
+    Preferred: ``paftools.js gff2bed`` converts a GTF to BED12 format
+    with all transcript isoforms (recommended in the minimap2 splice:sr
+    blog post by Heng Li, 2025-04-18).
+
+    Fallback: if k8/paftools.js is unavailable, uses the rigel
+    ``write_bed12``-generated BED passed via ``fallback_bed12``.
     """
     if prebuilt:
         p = Path(prebuilt)
@@ -496,13 +500,27 @@ def build_minimap2_bed(
     if bed_path.exists():
         logger.info("minimap2 BED already exists at %s", bed_path)
         return bed_path
-    logger.info("Building minimap2 splice BED via paftools.js → %s", bed_path)
-    with open(bed_path, "w") as fh:
-        subprocess.run(
-            [_find_tool("k8"), _find_tool("paftools.js"), "gff2bed", str(gtf_path)],
-            check=True, stdout=fh, stderr=subprocess.PIPE,
-        )
-    return bed_path
+    # Try paftools.js gff2bed (preferred: includes all isoforms)
+    try:
+        k8 = _find_tool("k8")
+        paftools = _find_tool("paftools.js")
+        logger.info("Building minimap2 splice BED via paftools.js → %s", bed_path)
+        with open(bed_path, "w") as fh:
+            subprocess.run(
+                [k8, paftools, "gff2bed", str(gtf_path)],
+                check=True, stdout=fh, stderr=subprocess.PIPE,
+            )
+        return bed_path
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        logger.warning("paftools.js not available (%s); falling back to rigel BED12", exc)
+    # Fallback: reuse the rigel annotation.bed12 (may be filtered to basic transcripts)
+    if fallback_bed12 and fallback_bed12.exists():
+        logger.info("Using rigel annotation.bed12 as minimap2 junction BED: %s", fallback_bed12)
+        return fallback_bed12
+    raise RuntimeError(
+        "Cannot build minimap2 splice BED: paftools.js unavailable and no fallback_bed12 provided. "
+        "Either install k8+paftools.js (conda install k8) or specify minimap2_bed in the config."
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -525,12 +543,17 @@ def align_minimap2(
     """
     out_bam.parent.mkdir(parents=True, exist_ok=True)
 
+    # -N 20: report up to 20 secondary alignments per read (critical for genes with
+    # many pseudogene copies; -N 10 is insufficient for GAPDH/EEF1A1 which have
+    # 60+ processed pseudogenes in the human genome).
+    # -j FILE (not --junc-bed): documented short form for splice junction BED12;
+    # boosts alignment scores at annotated junction sites, critical for tiny exons.
     mm2_cmd = [
-        _find_tool("minimap2"), "-a", "-x", "splice:sr",
-        "--secondary=yes", "-N", "10", "-t", str(threads),
+        _find_tool("minimap2"), "-ax", "splice:sr",
+        "--secondary=yes", "-N", "20", "-t", str(threads),
     ]
     if bed_path is not None:
-        mm2_cmd.extend(["--junc-bed", str(bed_path)])
+        mm2_cmd.extend(["-j", str(bed_path)])
     mm2_cmd.extend([str(genome_or_index), str(fastq_r1), str(fastq_r2)])
 
     sort_cmd = [
@@ -540,12 +563,18 @@ def align_minimap2(
     ]
 
     logger.info("Running minimap2 | samtools sort -n → %s", out_bam)
+    logger.info("minimap2 cmd: %s", " ".join(mm2_cmd))
     p1 = subprocess.Popen(mm2_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    p2 = subprocess.Popen(sort_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p2 = subprocess.Popen(sort_cmd, stdin=p1.stdout, stderr=subprocess.PIPE)
     p1.stdout.close()
     _, stderr2 = p2.communicate()
+    mm2_stderr = p1.stderr.read().decode(errors="replace") if p1.stderr else ""
     p1.wait()
+    if mm2_stderr:
+        for line in mm2_stderr.strip().splitlines()[-10:]:
+            logger.debug("minimap2: %s", line)
     if p1.returncode != 0 or p2.returncode != 0:
+        logger.error("minimap2 stderr:\n%s", mm2_stderr[-2000:])
         raise RuntimeError(f"minimap2 alignment failed: mm2={p1.returncode}, sort={p2.returncode}")
 
 
@@ -1097,7 +1126,14 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
         genome_path, gtf_path, outdir / "rigel_index",
     )
 
+    # BED12 for rigel (always needed); also used as fallback for minimap2 junction BED
+    bed_path = outdir / "annotation.bed12"
+    if not bed_path.exists():
+        write_bed12(transcripts, bed_path)
+
     # Minimap2 index + splice BED (build-if-absent)
+    # build_minimap2_bed tries paftools.js gff2bed (preferred: all isoforms) and
+    # falls back to the rigel annotation.bed12 if k8/paftools.js is unavailable.
     has_minimap2 = any(a.type == "minimap2" for a in cfg.aligners)
     mm2_index_path: Path | None = None
     mm2_bed_path: Path | None = None
@@ -1106,13 +1142,8 @@ def run_benchmark(cfg: BenchmarkConfig) -> list[ConditionResult]:
             genome_path, outdir, cfg.threads, prebuilt=cfg.minimap2_index,
         )
         mm2_bed_path = build_minimap2_bed(
-            gtf_path, outdir, prebuilt=cfg.minimap2_bed,
+            gtf_path, outdir, prebuilt=cfg.minimap2_bed, fallback_bed12=bed_path,
         )
-
-    # BED12 for rigel (always needed)
-    bed_path = outdir / "annotation.bed12"
-    if not bed_path.exists():
-        write_bed12(transcripts, bed_path)
 
     # Optional tool indexes
     transcript_fa = outdir / "transcripts.fa"
