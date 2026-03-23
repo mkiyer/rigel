@@ -112,6 +112,10 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands,
              nb::arg("t_strand"),
              "Set per-transcript strand array (direct lookup, no gene indirection).")
+        .def("set_nrna_status", &FragmentResolver::set_nrna_status,
+             nb::arg("t_is_nrna"),
+             "Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).\n"
+             "Used to exclude nRNA candidates from FL unanimity check.")
         .def("build_region_index", &FragmentResolver::build_region_index,
              nb::arg("refs"), nb::arg("starts"), nb::arg("ends"), nb::arg("ids"),
              "Build the region partition cgranges index for gDNA calibration.\n\n"

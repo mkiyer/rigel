@@ -1310,7 +1310,8 @@ private:
                     }
                 }
 
-                int32_t ufl = result.get_unique_frag_length();
+                int32_t ufl = result.get_unique_frag_length_mrna(
+                    ctx.nrna_mask());
                 if (ufl > 0) {
                     fraglen_obs.lengths.push_back(ufl);
                     fraglen_obs.splice_types.push_back(result.splice_type);

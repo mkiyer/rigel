@@ -231,6 +231,10 @@ def scan_and_buffer(
     resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
+    # Provide nRNA status so FL training excludes nRNA candidates
+    nrna_arr = index.t_df["is_synthetic_nrna"].values.astype("uint8")
+    resolve_ctx.set_nrna_status(nrna_arr.tolist())
+
     # Build region partition index for gDNA calibration (if available)
     has_regions = index.region_df is not None and len(index.region_df) > 0
     if has_regions:

@@ -43,15 +43,17 @@ class TestFragmentLengthModelBasic:
         assert m.counts[50] == 2.5
         assert m.total_weight == 2.5
 
-    def test_observe_clamps_negative(self):
+    def test_observe_drops_negative(self):
         m = FragmentLengthModel(max_size=100)
         m.observe(-10)
-        assert m.counts[0] == 1.0
+        assert m.total_weight == 0.0
+        assert m.counts[0] == 0.0
 
-    def test_observe_clamps_overflow(self):
+    def test_observe_drops_overflow(self):
         m = FragmentLengthModel(max_size=100)
         m.observe(999)
-        assert m.counts[100] == 1.0  # overflow bin
+        assert m.total_weight == 0.0
+        assert m.counts[100] == 0.0
 
 
 class TestFragmentLengthModelStatistics:

@@ -141,8 +141,9 @@ class FragmentLengthModel:
         weight : float
             Observation weight (default 1.0).
         """
-        idx = min(max(frag_length, 0), self.max_size)
-        self.counts[idx] += weight
+        if frag_length < 0 or frag_length > self.max_size:
+            return
+        self.counts[frag_length] += weight
         self._total_weight += weight
 
     def observe_batch(self, frag_lengths: "np.ndarray") -> None:
@@ -154,10 +155,14 @@ class FragmentLengthModel:
             Integer array of fragment lengths.  All weights are 1.0.
         """
         lengths = np.asarray(frag_lengths, dtype=np.intp)
-        clamped = np.clip(lengths, 0, self.max_size)
-        counts = np.bincount(clamped, minlength=self.max_size + 1)
+        # Drop out-of-range values instead of clamping to overflow bin
+        mask = (lengths >= 0) & (lengths <= self.max_size)
+        valid = lengths[mask]
+        if len(valid) == 0:
+            return
+        counts = np.bincount(valid, minlength=self.max_size + 1)
         self.counts += counts[: self.max_size + 1].astype(np.float64)
-        self._total_weight += float(len(lengths))
+        self._total_weight += float(len(valid))
 
     # ------------------------------------------------------------------
     # Distribution properties

@@ -80,7 +80,7 @@ jobs:
             make -j$(nproc) && make install &&
             ldconfig
           CIBW_BEFORE_ALL_MACOS: >
-            brew install htslib
+            brew install htslib pkg-config
           # Set portable build flag (no -march=native)
           CIBW_ENVIRONMENT: >
             CMAKE_ARGS="-DRIGEL_PORTABLE=ON"

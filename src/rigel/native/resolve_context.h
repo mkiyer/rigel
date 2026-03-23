@@ -100,6 +100,22 @@ public:
         return val;
     }
 
+    /// Variant that excludes nRNA candidates from the unanimity check.
+    /// This prevents nRNA's inflated FL (= genomic footprint) from
+    /// blocking legitimate mRNA FL observations during FL model training.
+    int32_t get_unique_frag_length_mrna(const uint8_t* t_is_nrna) const {
+        if (!t_is_nrna) return get_unique_frag_length();
+        int32_t val = -1;
+        for (size_t i = 0; i < frag_lengths.size(); i++) {
+            int32_t fl = frag_lengths[i];
+            if (fl <= 0) continue;
+            if (i < t_inds.size() && t_is_nrna[t_inds[i]]) continue;
+            if (val == -1) val = fl;
+            else if (fl != val) return -1;
+        }
+        return val;
+    }
+
     // Return t_inds as a Python frozenset for compatibility
     nb::object get_t_inds() const {
         nb::set s;
@@ -402,6 +418,9 @@ public:
     // --- Transcript strand metadata (direct lookup, no gene indirection) ---
     std::vector<int32_t> t_strand_arr_;
 
+    // --- Per-transcript nRNA status (1 = nRNA synthetic, 0 = annotated) ---
+    std::vector<uint8_t> t_is_nrna_;
+
     // --- Reference name <-> ID ---
     std::unordered_map<std::string, int32_t> ref_to_id_;
     std::vector<std::string> id_to_ref_;
@@ -521,6 +540,17 @@ public:
     /// Set per-transcript strand array (direct lookup, no gene indirection).
     void set_transcript_strands(const std::vector<int32_t>& t_strand) {
         t_strand_arr_ = t_strand;
+    }
+
+    /// Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).
+    /// Used by get_unique_frag_length_mrna() to exclude nRNA candidates
+    /// from the FL unanimity check during model training.
+    void set_nrna_status(const std::vector<uint8_t>& t_is_nrna) {
+        t_is_nrna_ = t_is_nrna;
+    }
+
+    const uint8_t* nrna_mask() const {
+        return t_is_nrna_.empty() ? nullptr : t_is_nrna_.data();
     }
 
     // --- Region partition index (for gDNA calibration) ---
