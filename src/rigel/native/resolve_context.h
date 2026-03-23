@@ -320,8 +320,7 @@ struct ResolverScratch {
     // cgranges query buffers (reusable per-call)
     int64_t* buf = nullptr;
     int64_t  buf_cap = 0;
-    int64_t* sj_buf = nullptr;
-    int64_t  sj_buf_cap = 0;
+
 
     ResolverScratch() = default;
 
@@ -335,7 +334,6 @@ struct ResolverScratch {
 
     ~ResolverScratch() {
         free(buf);
-        free(sj_buf);
     }
 
     // Non-copyable, movable
@@ -347,24 +345,20 @@ struct ResolverScratch {
           t_transcript_bp(std::move(o.t_transcript_bp)),
           t_dirty(std::move(o.t_dirty)),
           dirty_indices(std::move(o.dirty_indices)),
-          buf(o.buf), buf_cap(o.buf_cap),
-          sj_buf(o.sj_buf), sj_buf_cap(o.sj_buf_cap)
+          buf(o.buf), buf_cap(o.buf_cap)
     {
         o.buf = nullptr; o.buf_cap = 0;
-        o.sj_buf = nullptr; o.sj_buf_cap = 0;
     }
 
     ResolverScratch& operator=(ResolverScratch&& o) noexcept {
         if (this != &o) {
-            free(buf); free(sj_buf);
+            free(buf);
             t_exon_bp = std::move(o.t_exon_bp);
             t_transcript_bp = std::move(o.t_transcript_bp);
             t_dirty = std::move(o.t_dirty);
             dirty_indices = std::move(o.dirty_indices);
             buf = o.buf; buf_cap = o.buf_cap;
-            sj_buf = o.sj_buf; sj_buf_cap = o.sj_buf_cap;
             o.buf = nullptr; o.buf_cap = 0;
-            o.sj_buf = nullptr; o.sj_buf_cap = 0;
         }
         return *this;
     }
@@ -403,10 +397,7 @@ public:
     SJMap sj_map_;
     std::vector<int32_t> sj_map_data_;
 
-    // --- SJ gap index (for fragment-length computation) ---
-    cgranges_t* sj_cr_ = nullptr;
-    std::vector<int32_t> sj_t_index_;
-    std::vector<int32_t> sj_strand_;
+
 
     // --- Transcript metadata ---
     std::vector<int32_t> t_to_g_arr_;
@@ -420,6 +411,13 @@ public:
 
     // --- Per-transcript nRNA status (1 = nRNA synthetic, 0 = annotated) ---
     std::vector<uint8_t> t_is_nrna_;
+
+    // --- Per-transcript exon structure (CSR layout) for FL computation ---
+    std::vector<int32_t> exon_offsets_;    // [n_transcripts + 1]
+    std::vector<int32_t> exon_starts_;     // [total_exons] — genomic start coords
+    std::vector<int32_t> exon_ends_;       // [total_exons] — genomic end coords
+    std::vector<int32_t> exon_cumsum_;     // [total_exons] — cumulative spliced bp before each exon
+    std::vector<int32_t> t_length_;        // [n_transcripts] — spliced transcript lengths
 
     // --- Reference name <-> ID ---
     std::unordered_map<std::string, int32_t> ref_to_id_;
@@ -435,7 +433,7 @@ public:
 
     ~FragmentResolver() {
         if (cr_) cr_destroy(cr_);
-        if (sj_cr_) cr_destroy(sj_cr_);
+
         if (region_cr_) cr_destroy(region_cr_);
     }
 
@@ -503,26 +501,6 @@ public:
         }
     }
 
-    void build_sj_gap_index(
-        const std::vector<std::string>& refs,
-        const std::vector<int32_t>& starts,
-        const std::vector<int32_t>& ends,
-        const std::vector<int32_t>& t_indices,
-        const std::vector<int32_t>& strands)
-    {
-        size_t n = refs.size();
-        for (const auto& ref : refs) get_or_create_ref_id(ref);
-
-        sj_cr_ = cr_init();
-        for (size_t i = 0; i < n; i++)
-            cr_add(sj_cr_, refs[i].c_str(), starts[i], ends[i],
-                   static_cast<int32_t>(i));
-        cr_index(sj_cr_);
-
-        sj_t_index_ = t_indices;
-        sj_strand_ = strands;
-    }
-
     void set_metadata(const std::vector<int32_t>& t_to_g,
                       int32_t n_transcripts) {
         t_to_g_arr_ = t_to_g;
@@ -551,6 +529,64 @@ public:
 
     const uint8_t* nrna_mask() const {
         return t_is_nrna_.empty() ? nullptr : t_is_nrna_.data();
+    }
+
+    /// Build per-transcript exon CSR index for FL computation.
+    void build_exon_index(
+        const std::vector<int32_t>& offsets,
+        const std::vector<int32_t>& starts,
+        const std::vector<int32_t>& ends,
+        const std::vector<int32_t>& cumsum,
+        const std::vector<int32_t>& lengths)
+    {
+        exon_offsets_ = offsets;
+        exon_starts_ = starts;
+        exon_ends_ = ends;
+        exon_cumsum_ = cumsum;
+        t_length_ = lengths;
+    }
+
+    bool has_exon_index() const {
+        return !exon_offsets_.empty();
+    }
+
+    /// Map a genomic position to transcript-space offset for FL computation.
+    ///
+    /// Designed for projecting fragment ENDPOINTS (gstart, gend) only.
+    /// When a position falls outside an exon, the overhang distance is added
+    /// rather than snapped/clipped, because fragment endpoints represent the
+    /// physical extent of the molecule and those bases must be counted in FL.
+    ///
+    /// - Strand-agnostic (no strand flip): always returns forward-strand
+    ///   spliced coordinate.
+    /// - NOT clamped: returns negative values (before first exon), values
+    ///   > t_len (past last exon), or tx-position + intronic-overhang
+    ///   (endpoint in internal intron).
+    inline int32_t genomic_to_tx_pos(int32_t genomic_pos, int32_t t_idx) const {
+        int32_t begin   = exon_offsets_[t_idx];
+        int32_t end     = exon_offsets_[t_idx + 1];
+        int32_t n_exons = end - begin;
+        if (n_exons <= 0) return 0;
+
+        const int32_t* starts = exon_starts_.data() + begin;
+        const int32_t* ends   = exon_ends_.data()   + begin;
+        const int32_t* cumsum = exon_cumsum_.data()  + begin;
+
+        // bisect_right(starts, genomic_pos) - 1
+        int ei = static_cast<int>(
+            std::upper_bound(starts, starts + n_exons, genomic_pos) - starts) - 1;
+
+        if (ei < 0) {
+            // Before first exon: negative offset
+            return genomic_pos - starts[0];
+        }
+        if (genomic_pos >= ends[ei]) {
+            // Past end of exon[ei] — either in intron or past last exon.
+            // Always add the overhang: endpoint bases must be counted in FL.
+            return cumsum[ei] + (ends[ei] - starts[ei]) + (genomic_pos - ends[ei]);
+        }
+        // Inside exon ei
+        return cumsum[ei] + (genomic_pos - starts[ei]);
     }
 
     // --- Region partition index (for gDNA calibration) ---
@@ -594,20 +630,21 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // Fragment-length computation (ports compute_frag_lengths)
+    // Fragment-length computation via transcript-space projection
     // ----------------------------------------------------------------
 
-    /// Thread-safe overload: uses caller-supplied scratch for sj_buf.
+    /// Thread-safe overload: uses caller-supplied scratch (unused now,
+    /// kept for API compatibility with _resolve_core).
     std::unordered_map<int32_t, int32_t> compute_frag_lengths(
         const std::vector<ExonBlock>& exons,
-        const std::vector<IntronBlock>& introns,
+        const std::vector<IntronBlock>& /*introns*/,
         const std::vector<int32_t>& t_inds,
-        ResolverScratch& scratch) const
+        ResolverScratch& /*scratch*/) const
     {
         std::unordered_map<int32_t, int32_t> result;
         if (exons.empty() || t_inds.empty()) return result;
 
-        // Single exon block: shared fragment length
+        // Single exon block: FL is trivially block length (same for all candidates)
         if (exons.size() == 1) {
             int32_t fl = exons[0].end - exons[0].start;
             if (fl > 0)
@@ -615,77 +652,19 @@ public:
             return result;
         }
 
-        int32_t ref_id = exons[0].ref_id;
-
-        // Sort exons by start
-        std::vector<std::pair<int32_t, int32_t>> sorted_ex;
-        sorted_ex.reserve(exons.size());
-        for (const auto& e : exons)
-            sorted_ex.push_back({e.start, e.end});
-        std::sort(sorted_ex.begin(), sorted_ex.end());
-
-        int32_t footprint = sorted_ex.back().second - sorted_ex.front().first;
-
-        // Observed introns on this reference
-        std::set<std::pair<int32_t, int32_t>> obs_introns;
-        int32_t obs_total = 0;
-        for (const auto& intr : introns) {
-            if (intr.ref_id == ref_id) {
-                auto p = std::make_pair(intr.start, intr.end);
-                if (obs_introns.insert(p).second)
-                    obs_total += intr.end - intr.start;
-            }
-        }
-        int32_t upper = footprint - obs_total;
-
-        // Gaps between consecutive blocks not in observed introns
-        std::vector<std::pair<int32_t, int32_t>> gaps;
-        for (size_t i = 0; i + 1 < sorted_ex.size(); i++) {
-            int32_t gs = sorted_ex[i].second;
-            int32_t ge = sorted_ex[i + 1].first;
-            if (gs < ge && obs_introns.find({gs, ge}) == obs_introns.end())
-                gaps.push_back({gs, ge});
-        }
-
-        if (gaps.empty()) {
-            if (upper > 0)
-                for (int32_t t : t_inds) result[t] = upper;
-            return result;
-        }
-
-        // Per-transcript gap correction using SJ gap index
-        std::unordered_set<int32_t> t_set(t_inds.begin(), t_inds.end());
-        std::unordered_map<int32_t, int32_t> t_gap_size;
-
-        if (ref_id >= 0 && ref_id < static_cast<int32_t>(id_to_ref_.size())) {
-            const char* ref_str = id_to_ref_[ref_id].c_str();
-            for (const auto& [gs, ge] : gaps) {
-                int64_t n = cr_overlap(sj_cr_, ref_str, gs, ge,
-                                       &scratch.sj_buf, &scratch.sj_buf_cap);
-                for (int64_t i = 0; i < n; i++) {
-                    int64_t idx = scratch.sj_buf[i];
-                    int32_t hs = cr_start(sj_cr_, idx);
-                    int32_t he = cr_end(sj_cr_, idx);
-                    int32_t label = cr_label(sj_cr_, idx);
-                    int32_t ti = sj_t_index_[label];
-                    if (t_set.count(ti)) {
-                        // Use overlap instead of strict containment so
-                        // that introns extending a few bp beyond the gap
-                        // (reads aligned slightly into intronic regions)
-                        // are still correctly subtracted.
-                        int32_t overlap = std::min(he, ge) - std::max(hs, gs);
-                        if (overlap > 0)
-                            t_gap_size[ti] += overlap;
-                    }
-                }
-            }
+        // Find outermost genomic positions across all alignment blocks
+        int32_t gstart = exons[0].start;
+        int32_t gend = exons[0].end;
+        for (const auto& e : exons) {
+            gstart = std::min(gstart, e.start);
+            gend = std::max(gend, e.end);
         }
 
         for (int32_t t : t_inds) {
-            auto it = t_gap_size.find(t);
-            int32_t corr = (it != t_gap_size.end()) ? it->second : 0;
-            int32_t sz = upper - corr;
-            if (sz > 0) result[t] = sz;
+            int32_t tx_s = genomic_to_tx_pos(gstart, t);
+            int32_t tx_e = genomic_to_tx_pos(gend, t);
+            int32_t fl = std::abs(tx_e - tx_s);
+            if (fl > 0) result[t] = fl;
         }
         return result;
     }

@@ -1,12 +1,9 @@
 # TODO
 
 
-## Gap SJ correction
+## Genome to transcript coordinate search
 
-I would like to review our "Gap splice junction" (Gap SJ) algorithm and concept. There might be an opportunity for improvement. Gap splice jucntion detection and subtraction is intended to solve cases where a fragment is not completely sequenced by paired-end reads leaving an unsequenced "gap" in the center of the fragment. If the gap contains splice junctions (introns) the splice junctions will not be detected and the fragment may appear to be unspliced (with a very long fragment length). Our current approach looks for introns within the gap that can be subtracted from the fragment length, effectively correcting the fragment. For the purposes of scoring and competition in the EM, these fragment I believe still remain "unspliced". So we rely on the fragment length calculation to allow the mature RNA candidates to outcompete nascent RNA or genomic DNA in the EM. IF we correct for Gap introns/SJ correctly, the mature RNA candidates should score MUCH MUCH better than their nascent RNA or gDNA equivalents. Now, I have another idea for gap SJ correction. At the point where we are resolving gap splice junctions, we have both a fragment and its transcript match. We KNOW the transcript structure. So if we translate the fragment genomic coordinates to transcript coordinates, we could then compute the fragment length trivially in transcript coordinate space (rather than genomic coordinate space). We would find the transcript coordinates of the fragment and compute the fragment length in transcript coordinate space. The rigel tool should already have efficient code to convert from genomic to transcript coordinates -- this could be reused or we could develop an extremely computationally efficient method for this. If we compute fragment length this way, then the fragment length computation will be robust to tiny overhang issues (where we few bases overhang into intronic space). --- I would like you to evaluate this carefully and propose a plan. Do you think this is a better idea than our current implementation? Will it be more robust? If so, create an implementation plan to replace the existing gap splice junction detection and subtraction code. I'll review the plan before we implement it.
-
-
-
+This code may be duplicated/redundant in more than one place? It is being used in scoring and also in fragment length calculation. Can we consolidate code? Can we improve the efficiency of data structures?
 
 
 ## Unannotated splice junctions

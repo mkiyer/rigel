@@ -84,10 +84,6 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("strands"), nb::arg("tset_data"),
              nb::arg("tset_offsets"),
              "Build the splice-junction exact-match lookup map.")
-        .def("build_sj_gap_index", &FragmentResolver::build_sj_gap_index,
-             nb::arg("refs"), nb::arg("starts"), nb::arg("ends"),
-             nb::arg("t_indices"), nb::arg("strands"),
-             "Build the SJ gap cgranges index for fragment-length computation.")
         .def("set_metadata", &FragmentResolver::set_metadata,
              nb::arg("t_to_g"), nb::arg("n_transcripts"),
              "Set transcript-to-gene mapping and allocate scratch buffers.")
@@ -116,6 +112,10 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("t_is_nrna"),
              "Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).\n"
              "Used to exclude nRNA candidates from FL unanimity check.")
+        .def("build_exon_index", &FragmentResolver::build_exon_index,
+             nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),
+             nb::arg("cumsum"), nb::arg("lengths"),
+             "Build per-transcript exon CSR index for FL computation.")
         .def("build_region_index", &FragmentResolver::build_region_index,
              nb::arg("refs"), nb::arg("starts"), nb::arg("ends"), nb::arg("ids"),
              "Build the region partition cgranges index for gDNA calibration.\n\n"

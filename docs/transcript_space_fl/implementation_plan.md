@@ -42,7 +42,7 @@ for each candidate transcript t:
 **Strengths:**
 
 - **Conceptually direct.** FL is the distance between the fragment's endpoints in the coordinate system where FL is defined (spliced transcript space). No gap detection, no subtraction.
-- **Inherently robust to overhangs.** If a read extends a few bases into intronic space, `genomic_to_tx_pos()` snaps intronic positions to the nearest exon boundary. The FL is therefore insensitive to small alignment overhangs — no heuristic needed.
+- **Inherently robust to overhangs.** Fragment endpoint overhang (into introns or beyond transcript boundaries) is handled by adding the overhang distance rather than snapping. Internal intronic overhang (at non-endpoint block boundaries) is irrelevant because only gstart/gend are projected.
 - **Eliminates the SJ gap cgranges index.** The `sj_cr_` index, `sj_t_index_[]`, and `sj_strand_[]` become unnecessary for FL computation.
 - **Simpler code.** The entire `compute_frag_lengths()` function reduces to: look up two transcript positions, subtract.
 - **Already proven.** `genomic_to_tx_pos()` is already production code in `scoring.cpp` used for coverage weight computation. It handles strand flip and clamps correctly.
@@ -56,7 +56,7 @@ for each candidate transcript t:
 | **nRNA (nascent RNA) candidates** | nRNA spans are single synthetic exons covering the full genomic interval. Projection gives `FL = genomic_end - genomic_start` (the unspliced length), which is the correct FL for an nRNA interpretation. This is the same behavior as the current code. |
 | **Strand handling** | `genomic_to_tx_pos()` already handles negative-strand transcripts via `t_len - offset`. However, for FL computation we want the *unsigned* distance in transcript space (strand-agnostic FL), so we should either skip the strand flip or take `abs(tx_end - tx_start)`. |
 | **Multi-contig / chimeric fragments** | Current code already returns empty for chimeric fragments (`chimera_type != CHIMERA_NONE`). No change needed. |
-| **Transcript boundary overhang** | A fragment's alignment blocks may extend beyond the transcript's first or last exon in genomic space (e.g., a read starts 5 bp before the first exon). The coordinate projection must NOT clamp to `[0, t_len]` — it must return negative values (pre-transcript overhang) or values > t_len (post-transcript overhang) so that these bases are counted in the FL. See Step 2 for details. |
+| **Fragment endpoint overhang** | Fragment endpoints (gstart, gend) can fall outside exons — before the first exon, past the last exon, or in an internal intron. All three cases must add the overhang distance to the transcript-space coordinate (no clamping, no snapping). Internal block-level intronic overhang (not at gstart/gend) is safe because `compute_frag_lengths()` only projects the outermost endpoints. See Step 2 for detailed examples and rationale. |
 
 ### Verdict
 
@@ -101,35 +101,55 @@ Port the existing `genomic_to_tx_pos()` from `scoring.cpp` with two critical cha
 1. **Omit the strand flip** — FL must be strand-agnostic (physical length of the molecule).
 2. **Do NOT clamp to `[0, t_len]`** — fragments may overhang beyond transcript boundaries, and those bases must be counted in the FL.
 
-**Transcript boundary overhang:** A fragment's alignment blocks can extend beyond the transcript's exon structure in genomic space. For example:
+**Fragment endpoint overhang:** `compute_frag_lengths()` calls `genomic_to_tx_pos()` exactly twice per candidate transcript — once for `gstart` (min of all block starts) and once for `gend` (max of all block ends). These are always the **outermost physical endpoints** of the fragment. When an endpoint falls outside an exon, those bases are physically part of the fragment and must be counted.
 
-- Fragment blocks: `(chr1, 2995, 3100)` and `(chr1, 14400, 14445)`
-- Transcript exons: `(chr1, 3000, 3100)` and `(chr1, 14400, 17000)`
-- The fragment starts 5 bp before the first exon of the transcript
+There are two types of overhang, with different desired behavior:
 
-The projection must return:
-- `genomic_to_tx_pos(2995) = -5` (5 bp before transcript start)
-- `genomic_to_tx_pos(14445) = 145` (100 bp from exon 1 + 45 bp into exon 2)
-- `FL = |145 - (-5)| = 150 bp` ✓ (matches the total aligned bases: 105 + 45)
+1. **Endpoint overhang** — `gstart` or `gend` falls outside an exon (before the first exon, past the last exon, or in an internal intron). These bases **must** be counted because they are the physical ends of the fragment.
 
-There are three boundary cases to handle:
+2. **Internal overhang** — An alignment block extends a few bases into intronic space, but the overhang is at an inner block boundary (not at gstart or gend). This is **safe to ignore** because `compute_frag_lengths()` never queries internal block boundaries — only the outermost endpoints.
 
-| Case | Position relative to transcript | Behavior |
-|------|--------------------------------|----------|
-| **Before first exon** | `genomic_pos < starts[0]` | Return `genomic_pos - starts[0]` (negative) |
-| **In intron between exons** | `ends[ei] ≤ genomic_pos < starts[ei+1]` | Snap to end of exon `ei` in transcript space |
-| **Past last exon** | `genomic_pos ≥ ends[last]` | Return `t_len + (genomic_pos - ends[last])` |
+Since the function is only called for gstart/gend, the correct behavior is: **always add the overhang** when a position is outside an exon. There is no need to distinguish intron-between-exons from past-last-exon.
 
-Intronic overhang (reads extending a few bases into intronic space) is inherently handled by the snap-to-exon-boundary behavior — no special treatment needed.
+**Example A — Endpoint overhang into intron:**
+
+- Transcript exons: `(1000, 2000)` and `(5000, 6000)`, transcript length = 2000
+- Fragment blocks: `(1600, 1750)` and `(1855, 2005)` — gend extends 5 bp past exon 1 into the intron
+- `genomic_to_tx_pos(1600) = 600` (inside exon 0)
+- `genomic_to_tx_pos(2005) = 1000 + 5 = 1005` (end of exon 0 in tx space + 5 bp overhang)
+- `FL = |1005 - 600| = 405` ✓ (matches genomic footprint: 2005 − 1600 = 405)
+
+**Example B — Internal intronic overhang (naturally safe):**
+
+- Same transcript exons: `(1000, 2000)` and `(5000, 6000)`
+- Fragment blocks: `(1855, 2005)` and `(4999, 5149)` — both blocks overhang into the intron at their inner edges
+- gstart = 1855 (inside exon 0), gend = 5149 (inside exon 1) — neither endpoint is in an intron
+- `genomic_to_tx_pos(1855) = 855`, `genomic_to_tx_pos(5149) = 1149`
+- `FL = |1149 - 855| = 294` ✓ — the internal overhangs at 2005 and 4999 are irrelevant because they are not the fragment's outer endpoints
+
+**Example C — Endpoint overhang before first exon:**
+
+- Transcript exons: `(3000, 3100)` and `(14400, 17000)`, transcript length = 2700
+- Fragment blocks: `(2995, 3100)` and `(14400, 14445)` — gstart extends 5 bp before first exon
+- `genomic_to_tx_pos(2995) = 2995 - 3000 = -5`
+- `genomic_to_tx_pos(14445) = 100 + 45 = 145`
+- `FL = |145 - (-5)| = 150` ✓
+
+All three cases (before-first, intron-between, past-last) use the same logic: transcript-space position at nearest exon boundary **plus** the genomic distance into non-exonic space.
 
 ```cpp
 /// Map a genomic position to transcript-space offset for FL computation.
+///
+/// Designed for projecting fragment ENDPOINTS (gstart, gend) only.
+/// When a position falls outside an exon, the overhang distance is added
+/// rather than snapped/clipped, because fragment endpoints represent the
+/// physical extent of the molecule and those bases must be counted in FL.
+///
 /// - Strand-agnostic (no strand flip): always returns forward-strand
 ///   spliced coordinate.
-/// - NOT clamped to [0, t_len]: positions outside the transcript return
-///   negative (before first exon) or > t_len (past last exon) so that
-///   transcript boundary overhangs are counted in the fragment length.
-/// - Intronic positions snap to the nearest preceding exon boundary.
+/// - NOT clamped: returns negative values (before first exon), values
+///   > t_len (past last exon), or tx-position + intronic-overhang
+///   (endpoint in internal intron).
 inline int32_t genomic_to_tx_pos(int32_t genomic_pos, int32_t t_idx) const {
     int32_t begin   = exon_offsets_[t_idx];
     int32_t end     = exon_offsets_[t_idx + 1];
@@ -145,24 +165,22 @@ inline int32_t genomic_to_tx_pos(int32_t genomic_pos, int32_t t_idx) const {
         std::upper_bound(starts, starts + n_exons, genomic_pos) - starts) - 1;
 
     if (ei < 0) {
-        // Before first exon: return negative offset (transcript boundary overhang)
+        // Before first exon: negative offset
         return genomic_pos - starts[0];
     }
     if (genomic_pos >= ends[ei]) {
-        int32_t exon_end_tx = cumsum[ei] + (ends[ei] - starts[ei]);
-        if (ei + 1 < n_exons) {
-            // In intron between exon[ei] and exon[ei+1]: snap to end of exon[ei]
-            return exon_end_tx;
-        }
-        // Past last exon: return t_len + genomic overhang
-        return exon_end_tx + (genomic_pos - ends[ei]);
+        // Past end of exon[ei] — either in intron or past last exon.
+        // Always add the overhang (no snapping): this is correct because
+        // compute_frag_lengths() only calls this for fragment endpoints,
+        // and endpoint bases must be counted in the FL.
+        return cumsum[ei] + (ends[ei] - starts[ei]) + (genomic_pos - ends[ei]);
     }
     // Inside exon ei
     return cumsum[ei] + (genomic_pos - starts[ei]);
 }
 ```
 
-Note: The returned value is always in forward-strand spliced coordinates, suitable for computing `|tx_end - tx_start|`. Negative return values are valid and expected for pre-transcript overhang.
+Note: The returned value is always in forward-strand spliced coordinates. Negative return values are valid (pre-transcript overhang). Values exceeding `t_len` are valid (post-transcript or intron-end overhang). Internal intronic overhangs at non-endpoint block boundaries are safe because they are never passed to this function.
 
 ### Step 3: Replace `compute_frag_lengths()`
 
@@ -255,10 +273,11 @@ Once the new FL computation is verified:
    - Position past last exon (transcript boundary overhang) → value > t_len
    - Single-exon transcript (nRNA) — position before, inside, and after
 4. **New unit tests for `compute_frag_lengths()` with overhang:**
-   - **Start overhang:** Fragment block starts 5 bp before the transcript's first exon. Verify FL counts the overhang (e.g., the example from this plan: blocks at `(2995, 3100)` + `(14400, 14445)` with exons `(3000, 3100)` + `(14400, 17000)` → FL = 150).
-   - **End overhang:** Fragment block extends 5 bp past the transcript's last exon. Verify FL counts the overhang.
+   - **Start overhang (before first exon):** Fragment block starts 5 bp before the transcript's first exon. Verify FL counts the overhang (e.g., Example C from this plan: blocks at `(2995, 3100)` + `(14400, 14445)` with exons `(3000, 3100)` + `(14400, 17000)` → FL = 150).
+   - **End overhang (past last exon):** Fragment block extends 5 bp past the transcript's last exon. Verify FL counts the overhang.
    - **Both-end overhang:** Fragment overhangs both the start and end of the transcript boundaries.
-   - **Intronic overhang (NOT counted):** Fragment block extends 3 bp into intronic space between two exons. Verify FL snaps to exon boundary (intronic bases do not inflate FL).
+   - **Endpoint overhang into internal intron:** Fragment endpoint (`gend`) extends past an exon into the intron between two exons (Example A: blocks at `(1600, 1750)` + `(1855, 2005)` with exons `(1000, 2000)` + `(5000, 6000)` → FL must be 405, not 400). This is the critical case that distinguishes endpoint overhang from internal overhang.
+   - **Internal intronic overhang (NOT at endpoints, safe):** Fragment blocks overhang into intronic space at inner block boundaries but gstart/gend are inside exons (Example B: blocks at `(1855, 2005)` + `(4999, 5149)` with same exons → FL = 294). Verify the internal overhangs don't inflate FL.
 5. **Golden output:** Run `pytest tests/ --update-golden` if any golden outputs change due to improved FL accuracy.
 
 ---

@@ -247,7 +247,7 @@ class TestExonIntervals:
 
 
 class TestSpliceJunctions:
-    """Verify sj_map, sj_cr, _sj_t_index, _sj_strand."""
+    """Verify sj_map."""
 
     def test_sj_map_not_empty(self, mini_index):
         """mini_index has spliced transcripts so SJ map should be non-empty."""
@@ -292,28 +292,6 @@ class TestSpliceJunctions:
                 assert strand == 2  # neg strand
                 break
         assert found, "t2 intron 1100-1199 not found in sj_map"
-
-    def test_sj_cr_overlap(self, mini_index):
-        """sj_cr should return hits when querying a region containing a SJ."""
-        hits = list(mini_index.sj_cr.overlap("chr1", 200, 500))
-        # t0 has introns 200-299 and 400-499, t1 has intron 200-499
-        assert len(hits) > 0
-
-    def test_sj_t_index_and_strand_shapes(self, mini_index):
-        """_sj_t_index and _sj_strand must be 1-D arrays of same length."""
-        assert mini_index._sj_t_index.ndim == 1
-        assert mini_index._sj_strand.ndim == 1
-        assert len(mini_index._sj_t_index) == len(mini_index._sj_strand)
-
-    def test_query_gap_sjs(self, mini_index):
-        """query_gap_sjs should find introns contained in a gap."""
-        hits = mini_index.query_gap_sjs("chr1", 180, 520)
-        # Should find t0's introns (200-299, 400-499) and possibly t1's (200-499)
-        assert len(hits) > 0
-        for t_idx, strand, sj_start, sj_end in hits:
-            assert sj_start >= 180
-            assert sj_end <= 520
-            assert isinstance(t_idx, (int, np.integer))
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -403,8 +381,6 @@ class TestBuildLoadRoundTrip:
 
         # Splice junctions
         assert idx1.sj_map == idx2.sj_map
-        np.testing.assert_array_equal(idx1._sj_t_index, idx2._sj_t_index)
-        np.testing.assert_array_equal(idx1._sj_strand, idx2._sj_strand)
 
     def test_query_all_exons_round_trip(self, round_trip_index):
         """Query each exon from t_exon_intervals and confirm EXON hits."""
@@ -421,17 +397,6 @@ class TestBuildLoadRoundTrip:
                     f"({start},{end}): {merged}"
                 )
 
-    def test_sj_map_matches_query_gap_sjs(self, round_trip_index):
-        """SJ map entries should be findable via query_gap_sjs."""
-        idx = round_trip_index
-        for (ref, start, end, strand), tset in idx.sj_map.items():
-            hits = idx.query_gap_sjs(ref, start, end)
-            found_tidx = {h[0] for h in hits}
-            for t_idx in tset:
-                assert t_idx in found_tidx, (
-                    f"t_idx={t_idx} from sj_map not found in query_gap_sjs "
-                    f"for ({ref}, {start}, {end})"
-                )
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -573,20 +538,6 @@ class TestLargerIndex:
         hits = complex_index.query(gi)
         types = {h[2] for h in hits}
         assert int(IntervalType.INTERGENIC) in types
-
-    def test_sj_map_symmetry(self, complex_index):
-        """Every SJ in sj_map should be queryable via sj_cr."""
-        for (ref, start, end, strand), tset in complex_index.sj_map.items():
-            hits = list(complex_index.sj_cr.overlap(ref, start, end))
-            # At least one hit should match exactly
-            found = False
-            for h_start, h_end, label in hits:
-                if h_start == start and h_end == end:
-                    found = True
-                    break
-            assert found, (
-                f"SJ ({ref},{start},{end},{strand}) in sj_map but not in sj_cr"
-            )
 
     def test_exon_interval_values_are_int32(self, complex_index):
         for t_idx, exons in complex_index._t_exon_intervals.items():

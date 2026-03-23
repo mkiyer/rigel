@@ -1,3 +1,3 @@
 transcript_id	gene_id	gene_name	gene_type	ref	strand	start	end	length	effective_length	locus_id	nrna_id	is_basic	is_mane	is_nascent_equiv	mrna	mrna_unambig	mrna_em	mrna_spliced	nrna	rna_total	tpm	posterior_mean
-t_anti	g_anti	g_anti	protein_coding	golden_as	-	400	1400	600	251.4574111334759	0	RIGEL_NRNA_golden_as_2_400_1400	True	False	False	404.3572031948318	202.0	202.3572031948318	202.0	0.0	404.3572031948318	404467.22255697614	0.9775860730454271
-t_sense	g_sense	g_sense	protein_coding	golden_as	+	500	1500	600	251.4574111334759	0	RIGEL_NRNA_golden_as_1_500_1500	True	False	False	595.3707862292583	288.0	307.3707862292584	288.0	0.0	595.3707862292583	595532.7774430237	0.9852531119523091
+t_anti	g_anti	g_anti	protein_coding	golden_as	-	400	1400	600	251.4574111334759	0	RIGEL_NRNA_golden_as_2_400_1400	True	False	False	404.35720319483187	202.0	202.35720319483187	202.0	0.0	404.35720319483187	404467.2225569761	0.9775860730454263
+t_sense	g_sense	g_sense	protein_coding	golden_as	+	500	1500	600	251.4574111334759	0	RIGEL_NRNA_golden_as_1_500_1500	True	False	False	595.3707862292586	288.0	307.3707862292585	288.0	0.0	595.3707862292586	595532.7774430239	0.9852531119523094

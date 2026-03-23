@@ -627,12 +627,6 @@ class TranscriptIndex:
         # Splice-junction exact-match map  (ref, start, end, strand) → frozenset[int]
         self.sj_map: dict | None = None
 
-        # Splice-junction cgranges index (for gap containment queries / fragment length)
-        # Label = row index into the _sj_* lookup arrays.
-        self.sj_cr: _cgranges_cls | None = None
-        self._sj_t_index: np.ndarray | None = None
-        self._sj_strand: np.ndarray | None = None
-
         # Per-transcript exon intervals for coverage-weight model.
         # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
         # sorted by genomic start position.
@@ -1034,20 +1028,6 @@ class TranscriptIndex:
             sj_map[key] = frozenset(_sj_ti_list[s:e])
         self.sj_map = sj_map
 
-        # cgranges tree for containment / gap queries (fragment length)
-        # Use raw arrays directly instead of itertuples
-        logger.debug("Building splice junction cgranges index")
-        sj_cr = _cgranges_cls()
-        _sj_refs_list = _sj_refs.tolist()
-        _sj_starts_list = _sj_starts.tolist()
-        _sj_ends_list = _sj_ends.tolist()
-        for label in range(len(_sj_refs_list)):
-            sj_cr.add(_sj_refs_list[label], _sj_starts_list[label],
-                       _sj_ends_list[label], label)
-        sj_cr.index()
-        self.sj_cr = sj_cr
-        self._sj_t_index = _sj_tidxs
-        self._sj_strand = _sj_strands
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
 
@@ -1113,16 +1093,37 @@ class TranscriptIndex:
             sj_t_offsets,
         )
 
-        # 3. SJ gap index (raw sj_df rows — use pre-extracted arrays)
-        ctx.build_sj_gap_index(
-            _sj_refs_list,
-            _sj_starts.astype(np.int32).tolist(),
-            _sj_ends.astype(np.int32).tolist(),
-            _sj_tidxs.astype(np.int32).tolist(),
-            _sj_strands.astype(np.int32).tolist(),
+        # 3. Per-transcript exon CSR for transcript-space FL computation
+        n_t = len(self.t_to_g_arr)
+        exon_offsets = [0] * (n_t + 1)
+        for t_idx, ivs in (self._t_exon_intervals or {}).items():
+            exon_offsets[t_idx + 1] = len(ivs)
+        for i in range(n_t):
+            exon_offsets[i + 1] += exon_offsets[i]
+        total_exons = exon_offsets[n_t]
+        exon_starts_flat = [0] * total_exons
+        exon_ends_flat = [0] * total_exons
+        exon_cumsum_flat = [0] * total_exons
+        t_lengths = [0] * n_t
+        for t_idx, ivs in (self._t_exon_intervals or {}).items():
+            off = exon_offsets[t_idx]
+            cum = 0
+            for j in range(len(ivs)):
+                s, e = int(ivs[j, 0]), int(ivs[j, 1])
+                exon_starts_flat[off + j] = s
+                exon_ends_flat[off + j] = e
+                exon_cumsum_flat[off + j] = cum
+                cum += e - s
+            t_lengths[t_idx] = cum
+        ctx.build_exon_index(
+            exon_offsets,
+            exon_starts_flat,
+            exon_ends_flat,
+            exon_cumsum_flat,
+            t_lengths,
         )
 
-        # 4. Metadata
+        # 5. Metadata
         ctx.set_metadata(
             self.t_to_g_arr.astype(np.int32).tolist(),
             len(self.t_to_g_arr),
@@ -1183,38 +1184,3 @@ class TranscriptIndex:
             return None
         return self._t_exon_intervals.get(t_idx)
 
-    def query_gap_sjs(
-        self, ref: str, start: int, end: int
-    ) -> list[tuple[int, int, int, int]]:
-        """Find annotated splice junctions fully contained in a gap region.
-
-        Used for fragment-length computation: given the gap between paired-end
-        reads, find all annotated introns (splice junctions) that are
-        fully contained within that gap so their lengths can be subtracted
-        from the genomic distance.
-
-        Parameters
-        ----------
-        ref : str
-            Reference name.
-        start : int
-            Left edge of the gap (0-based, inclusive).
-        end : int
-            Right edge of the gap (0-based, exclusive).
-
-        Returns
-        -------
-        list[tuple[int, int, int, int]]
-            List of (t_index, strand, sj_start, sj_end) tuples
-            where sj_start >= start and sj_end <= end.
-        """
-        hits: list[tuple[int, int, int, int]] = []
-        for h_start, h_end, label in self.sj_cr.overlap(ref, start, end):
-            if h_start >= start and h_end <= end:
-                hits.append((
-                    int(self._sj_t_index[label]),
-                    int(self._sj_strand[label]),
-                    h_start,
-                    h_end,
-                ))
-        return hits
