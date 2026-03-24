@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://pypi.org/packages/source/r/rigel-rnaseq/rigel_rnaseq-{{ version }}.tar.gz
-  # sha256: UPDATE_WITH_ACTUAL_HASH_AFTER_PYPI_UPLOAD
+  sha256: f38811f32d9c44b4c187b03f3747d12e4863bc8da8c4d3b00447829c28e99e35
 
 build:
   number: 0
@@ -29,6 +29,12 @@ requirements:
     - scikit-build-core >=0.4.3
     - nanobind >=2.0
     - htslib
+    - zlib
+    - libcurl
+    - openssl
+    - bzip2
+    - xz
+    - libdeflate
     - numpy >=1.26
   run:
     - python >=3.12

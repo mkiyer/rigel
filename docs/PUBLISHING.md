@@ -80,7 +80,28 @@ rigel --version
 
 Check: https://pypi.org/project/rigel-rnaseq/
 
-### Step 5: Update bioconda
+### Step 5: Publish to your personal conda channel (fast path)
+
+This uploads to your own `anaconda.org/mkiyer` channel — no review required.
+Useful for immediate availability while waiting for bioconda.
+
+```bash
+# One-time login (saved in ~/.anaconda/config.yaml):
+conda activate bioconda-build
+anaconda login
+
+# Build and upload:
+./scripts/conda_publish.sh
+```
+
+The script builds the package from `conda/meta.yaml` (using the PyPI sdist as
+source), then uploads to your personal channel. Install with:
+
+```bash
+conda install -c mkiyer -c conda-forge -c bioconda rigel==0.3.0
+```
+
+### Step 6: Update bioconda
 
 After the PyPI upload succeeds, fetch the sdist SHA256:
 
@@ -101,7 +122,7 @@ mkdir -p recipes/rigel
 cp /path/to/rigel/conda/meta.yaml recipes/rigel/meta.yaml
 git add recipes/rigel/meta.yaml
 git commit -m "Add rigel 0.3.0"
-git push origin add-rigel-0.3.0
+git push origin add-rigel
 # Open a PR at https://github.com/bioconda/bioconda-recipes/pulls
 ```
 
@@ -109,7 +130,7 @@ git push origin add-rigel-0.3.0
 opens a PR within 24 hours. If it doesn't, manually update
 `recipes/rigel/meta.yaml` with the new version and hash.
 
-### Step 6: Verify bioconda
+### Step 7: Verify bioconda
 
 After the bioconda PR merges (allow ~24h for the package to build):
 
@@ -250,4 +271,5 @@ Ubuntu 20.04+, Debian 10+).
 - [ ] `publish.yml` succeeds (all wheel + sdist jobs green)
 - [ ] `pip install rigel-rnaseq==X.Y.Z` works in a clean environment
 - [ ] `./scripts/bioconda_hash.sh X.Y.Z` — patches conda recipe with SHA256
+- [ ] `./scripts/conda_publish.sh` — builds and uploads to personal anaconda.org channel
 - [ ] Bioconda recipe PR opened (first time) or auto-bump confirmed
