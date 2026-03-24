@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - GitHub Actions workflow for automated testing on Linux and macOS
     (Python 3.12 + 3.13).
   - Automated wheel building and PyPI publishing via OIDC trusted publisher.
-  - Binary wheels for Linux (x86_64, aarch64) and macOS (x86_64, arm64).
+  - Binary wheels for Linux (x86_64, aarch64) and macOS (arm64).
 
 - **Bioconda Recipe**: Template recipe at [conda/meta.yaml](conda/meta.yaml).
 

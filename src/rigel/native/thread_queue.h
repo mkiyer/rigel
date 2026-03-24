@@ -16,7 +16,7 @@
 namespace rigel {
 
 // ================================================================
-// BoundedQueue — bounded SPMC queue with backpressure
+// BoundedQueue — bounded SPMC queue with backpressure + abort
 // ================================================================
 
 template <typename T>
@@ -27,18 +27,22 @@ class BoundedQueue {
     std::condition_variable not_full_;
     size_t capacity_;
     bool closed_ = false;
+    bool aborted_ = false;
 
 public:
     explicit BoundedQueue(size_t capacity) : capacity_(capacity) {}
 
     /// Producer: push an item, blocking if queue is full.
-    void push(T item) {
+    /// Returns false if the queue has been aborted.
+    bool push(T item) {
         std::unique_lock<std::mutex> lock(mutex_);
         not_full_.wait(lock, [this] {
-            return items_.size() < capacity_;
+            return items_.size() < capacity_ || aborted_;
         });
+        if (aborted_) return false;
         items_.push_back(std::move(item));
         not_empty_.notify_one();
+        return true;
     }
 
     /// Producer: signal no more items will be pushed.
@@ -48,17 +52,28 @@ public:
         not_empty_.notify_all();
     }
 
-    /// Consumer: pop an item. Returns false when queue is closed AND empty.
+    /// Consumer: pop an item. Returns false when queue is
+    /// (closed AND empty) or aborted.
     bool pop(T& item) {
         std::unique_lock<std::mutex> lock(mutex_);
         not_empty_.wait(lock, [this] {
-            return !items_.empty() || closed_;
+            return !items_.empty() || closed_ || aborted_;
         });
-        if (items_.empty()) return false;  // closed and drained
+        if (aborted_ || items_.empty()) return false;
         item = std::move(items_.front());
         items_.pop_front();
         not_full_.notify_one();
         return true;
+    }
+
+    /// Abort: wake all blocked threads immediately. All subsequent
+    /// push()/pop() calls return false. Used for error propagation
+    /// to prevent deadlocks when one side throws an exception.
+    void abort() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        aborted_ = true;
+        not_empty_.notify_all();
+        not_full_.notify_all();
     }
 };
 

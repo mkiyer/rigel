@@ -1,0 +1,66 @@
+========================================================================
+RIGEL PROFILE REPORT
+========================================================================
+Platform:   macOS-26.3-arm64-arm-64bit
+Python:     3.12.13
+Date:       2026-03-24 08:30:21
+
+------------------------------------------------------------------------
+Config: default
+------------------------------------------------------------------------
+  BAM:             /Users/mkiyer/Downloads/rigel_runs/benchmark_pristine_v4/gdna_none_ss_0.95_nrna_none/align_minimap2/reads_namesort.bam
+  Index:           /Users/mkiyer/Downloads/rigel_runs/benchmark_pristine_v4/rigel_index
+  Transcripts:     457,513
+  Genes:           63,472
+
+  Wall time:       119.50s
+  Peak RSS:        10870 MB
+  RSS before:      3105 MB
+  RSS after:       10870 MB
+  RSS delta:       7765 MB
+
+  Fragments:       31,242,867
+  Buffered:        9,999,650
+  Unique align:    7,183,818
+  Multimapping:    2,815,832
+  Intergenic:      0
+  gDNA total:      0
+  Throughput:      261,456 frags/s
+
+  Stage Breakdown:
+  Stage                        Time       %  Bar
+  ------------------------ --------  ------  ----------------------------------------
+  scan_and_buffer           84.564s   70.8%  ████████████████████████████░░░░░░░░░░░░
+  finalize_models            0.000s    0.0%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  calibration                9.886s    8.3%  ███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  compute_geometry           0.006s    0.0%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  create_estimator           0.005s    0.0%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  fragment_scorer            1.658s    1.4%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  fragment_router_scan       5.974s    5.0%  █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  build_loci                 1.787s    1.5%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  eb_gdna_priors             1.602s    1.3%  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  locus_em                  14.012s   11.7%  ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  TOTAL                    119.496s
+
+  Locus EM sub-stages:
+    build_locus_em_data: 0.000s
+    run_locus_em:        14.012s
+    assign_posteriors:   0.000s
+    Loci:                10,386
+    Max transcripts:     91,456
+    Max units:           4,573,447
+
+  Top-3 hotspots:
+    1. scan_and_buffer: 84.564s (70.8%)
+    2. locus_em: 14.012s (11.7%)
+    3. calibration: 9.886s (8.3%)
+
+  RSS Memory Snapshots (MB):
+    before                       3105 MB
+    after_scan                   8149 MB
+    after_finalize               8149 MB
+    after_calibration            8149 MB
+    after_router_scan           10870 MB
+    after_buffer_release        10870 MB
+    after_locus_em              10870 MB
+    after_cleanup               10870 MB

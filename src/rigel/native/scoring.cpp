@@ -377,49 +377,53 @@ private:
         int N;
     };
 
-    // Pre-allocated output arrays + write cursors.
+    // Growing output vectors + write cursors for single-pass scoring.
     struct FillState {
-        // CSR candidate arrays
-        int32_t*  ti;
-        double*   ll;
-        uint8_t*  ct;
-        double*   cw;
-        int32_t*  ts;
-        int32_t*  te;
-        // CSR offsets (n_units + 1)
-        int64_t*  offsets;
-        // Per-unit metadata
-        int32_t*  locus_t;
-        uint8_t*  locus_ct;
-        int8_t*   is_spliced;
-        double*   gdna_ll;
-        int32_t*  gfp;
-        int32_t*  fid;
-        int8_t*   fclass;
-        uint8_t*  stype;
-        // Det-unambig
-        int32_t*  det_ti;
-        int64_t*  det_fid;
+        // CSR candidate arrays (growing)
+        std::vector<int32_t>*  v_ti;
+        std::vector<double>*   v_ll;
+        std::vector<uint8_t>*  v_ct;
+        std::vector<double>*   v_cw;
+        std::vector<int32_t>*  v_ts;
+        std::vector<int32_t>*  v_te;
+        // CSR offsets (growing; starts with {0})
+        std::vector<int64_t>*  v_offsets;
+        // Per-unit metadata (growing)
+        std::vector<int32_t>*  v_locus_t;
+        std::vector<uint8_t>*  v_locus_ct;
+        std::vector<int8_t>*   v_is_spliced;
+        std::vector<double>*   v_gdna_ll;
+        std::vector<int32_t>*  v_gfp;
+        std::vector<int32_t>*  v_fid;
+        std::vector<int8_t>*   v_fclass;
+        std::vector<uint8_t>*  v_stype;
+        // Det-unambig (growing)
+        std::vector<int32_t>*  v_det_ti;
+        std::vector<int64_t>*  v_det_fid;
+        // Unambig counts accumulation (single-pass)
+        double* ua_counts;
+        int ua_ncols;
+        const int8_t* t_str;
         // Cursors
-        int64_t unit_cur;
         int64_t cand_cur;
+        int64_t unit_cur;
         int64_t det_cur;
 
         // Pending multimapper group state (persists across chunks)
-        int64_t mm_fid;     // frag_id of current pending group (-1 = none)
-        // Members stored as (chunk_index, row_index) pairs
+        int64_t mm_fid;
         std::vector<std::pair<int, int>> mm_members;
-        // Pointer to all chunk data (set before scoring begins)
         const std::vector<ChunkPtrs>* all_cps;
 
         FillState()
-            : ti(nullptr), ll(nullptr), ct(nullptr), cw(nullptr),
-              ts(nullptr), te(nullptr), offsets(nullptr),
-              locus_t(nullptr), locus_ct(nullptr), is_spliced(nullptr),
-              gdna_ll(nullptr), gfp(nullptr), fid(nullptr),
-              fclass(nullptr), stype(nullptr),
-              det_ti(nullptr), det_fid(nullptr),
-              unit_cur(0), cand_cur(0), det_cur(0),
+            : v_ti(nullptr), v_ll(nullptr), v_ct(nullptr),
+              v_cw(nullptr), v_ts(nullptr), v_te(nullptr),
+              v_offsets(nullptr), v_locus_t(nullptr),
+              v_locus_ct(nullptr), v_is_spliced(nullptr),
+              v_gdna_ll(nullptr), v_gfp(nullptr), v_fid(nullptr),
+              v_fclass(nullptr), v_stype(nullptr),
+              v_det_ti(nullptr), v_det_fid(nullptr),
+              ua_counts(nullptr), ua_ncols(0), t_str(nullptr),
+              cand_cur(0), unit_cur(0), det_cur(0),
               mm_fid(-1), all_cps(nullptr) {}
     };
 
@@ -435,14 +439,10 @@ private:
     // flush_mm_group — score and emit one multimapper group
     // ---------------------------------------------------------------
     //
-    // Members are identified by (chunk_idx, row_idx) pairs stored in
-    // st.mm_members.  Uses pool-separated likelihood pruning (same as
-    // the non-MM path), but merges across all alignments in the group
-    // before applying the pruning gate.
-    //
-    // Mirrors the Python _flush_mm_group logic exactly.
+    // Single-pass: scores all hits in the group, merges across
+    // alignments, applies pool-separated pruning, and pushes
+    // results to the growing output vectors.
 
-    template<bool FillMode>
     void flush_mm_group(
         FillState& st,
         double gdna_log_sp,
@@ -540,8 +540,6 @@ private:
                     }
                 }
 
-                // Merge: keep best per transcript
-                // (lower overhang wins; ties broken by higher log_lik)
                 auto it = merged_mrna.find(t_idx);
                 if (it == merged_mrna.end()) {
                     merged_mrna[t_idx] = {oh, log_lik, ct,
@@ -578,15 +576,13 @@ private:
             double pool_best = t_is_nrna_[t_idx]
                              ? nrna_best : mrna_best;
             if (pool_best - mc.log_lik <= max_ll_delta_) {
-                if constexpr (FillMode) {
-                    int64_t c = st.cand_cur;
-                    st.ti[c] = t_idx;
-                    st.ll[c] = mc.log_lik;
-                    st.ct[c] = static_cast<uint8_t>(mc.count_col);
-                    st.cw[c] = mc.coverage_wt;
-                    st.ts[c] = mc.tx_start;
-                    st.te[c] = mc.tx_end;
-                }
+                st.v_ti->push_back(t_idx);
+                st.v_ll->push_back(mc.log_lik);
+                st.v_ct->push_back(
+                    static_cast<uint8_t>(mc.count_col));
+                st.v_cw->push_back(mc.coverage_wt);
+                st.v_ts->push_back(mc.tx_start);
+                st.v_te->push_back(mc.tx_end);
                 ++st.cand_cur;
                 if (mc.log_lik > best_ll) {
                     best_ll = mc.log_lik;
@@ -599,80 +595,74 @@ private:
         // --- Finalize this MM EM unit ---
         int64_t new_cands = st.cand_cur - emit_start;
         if (new_cands > 0) {
-            if constexpr (FillMode) {
-                st.offsets[st.unit_cur + 1] = st.cand_cur;
-                st.locus_t[st.unit_cur] = best_t;
-                st.locus_ct[st.unit_cur] =
-                    static_cast<uint8_t>(best_ct);
-                st.fid[st.unit_cur] =
-                    static_cast<int32_t>(st.mm_fid);
-                st.fclass[st.unit_cur] =
-                    static_cast<int8_t>(FRAG_MULTIMAPPER);
+            st.v_offsets->push_back(st.cand_cur);
+            st.v_locus_t->push_back(best_t);
+            st.v_locus_ct->push_back(
+                static_cast<uint8_t>(best_ct));
+            st.v_fid->push_back(
+                static_cast<int32_t>(st.mm_fid));
+            st.v_fclass->push_back(
+                static_cast<int8_t>(FRAG_MULTIMAPPER));
 
-                // Splice type: ANNOT > UNANNOT > UNSPLICED
-                int mm_stype = SPLICE_UNSPLICED;
-                for (auto& [ci, ri] : members) {
-                    int stype = cps[ci].s_type[ri];
-                    if (stype == SPLICE_SPLICED_ANNOT) {
-                        mm_stype = SPLICE_SPLICED_ANNOT;
-                        break;
-                    } else if (stype == SPLICE_SPLICED_UNANNOT) {
-                        mm_stype = SPLICE_SPLICED_UNANNOT;
-                    }
-                }
-                st.stype[st.unit_cur] =
-                    static_cast<uint8_t>(mm_stype);
-                st.is_spliced[st.unit_cur] =
-                    is_any_spliced ? 1 : 0;
-
-                if (!is_any_spliced) {
-                    // gDNA log-lik: best across unspliced hits
-                    double best_gdna_ll = NEG_INF;
-                    int32_t best_fp = 0;
-                    for (auto& [ci, ri] : members) {
-                        int stype = cps[ci].s_type[ri];
-                        if (stype == SPLICE_SPLICED_ANNOT ||
-                            stype == SPLICE_SPLICED_UNANNOT)
-                            continue;
-                        int32_t gfp_val = cps[ci].g_fp[ri];
-                        int nm_val = cps[ci].nm[ri];
-                        double hit_log_nm = nm_val > 0
-                            ? nm_val * mm_log_pen_ : 0.0;
-                        double gdna_fl =
-                            gdna_frag_len_log_lik(gfp_val);
-                        double gdna_ll_val =
-                            gdna_fl + gdna_log_sp + LOG_HALF + hit_log_nm;
-                        if (gdna_ll_val > best_gdna_ll) {
-                            best_gdna_ll = gdna_ll_val;
-                            best_fp = gfp_val;
-                        }
-                    }
-                    st.gdna_ll[st.unit_cur] = best_gdna_ll;
-                    st.gfp[st.unit_cur] = best_fp;
-                } else {
-                    st.gdna_ll[st.unit_cur] = NEG_INF;
-                    // Use first hit's footprint
-                    auto& [ci0, ri0] = members[0];
-                    st.gfp[st.unit_cur] = cps[ci0].g_fp[ri0];
+            // Splice type: ANNOT > UNANNOT > UNSPLICED
+            int mm_stype = SPLICE_UNSPLICED;
+            for (auto& [ci, ri] : members) {
+                int stype = cps[ci].s_type[ri];
+                if (stype == SPLICE_SPLICED_ANNOT) {
+                    mm_stype = SPLICE_SPLICED_ANNOT;
+                    break;
+                } else if (stype == SPLICE_SPLICED_UNANNOT) {
+                    mm_stype = SPLICE_SPLICED_UNANNOT;
                 }
             }
+            st.v_stype->push_back(
+                static_cast<uint8_t>(mm_stype));
+            st.v_is_spliced->push_back(
+                is_any_spliced ? 1 : 0);
+
+            if (!is_any_spliced) {
+                double best_gdna_ll = NEG_INF;
+                int32_t best_fp = 0;
+                for (auto& [ci, ri] : members) {
+                    int stype = cps[ci].s_type[ri];
+                    if (stype == SPLICE_SPLICED_ANNOT ||
+                        stype == SPLICE_SPLICED_UNANNOT)
+                        continue;
+                    int32_t gfp_val = cps[ci].g_fp[ri];
+                    int nm_val = cps[ci].nm[ri];
+                    double hit_log_nm = nm_val > 0
+                        ? nm_val * mm_log_pen_ : 0.0;
+                    double gdna_fl =
+                        gdna_frag_len_log_lik(gfp_val);
+                    double gdna_ll_val =
+                        gdna_fl + gdna_log_sp + LOG_HALF
+                        + hit_log_nm;
+                    if (gdna_ll_val > best_gdna_ll) {
+                        best_gdna_ll = gdna_ll_val;
+                        best_fp = gfp_val;
+                    }
+                }
+                st.v_gdna_ll->push_back(best_gdna_ll);
+                st.v_gfp->push_back(best_fp);
+            } else {
+                st.v_gdna_ll->push_back(NEG_INF);
+                auto& [ci0, ri0] = members[0];
+                st.v_gfp->push_back(cps[ci0].g_fp[ri0]);
+            }
+
             ++st.unit_cur;
             ++stat_mm;
         } else {
-            st.cand_cur = emit_start;
             ++stat_gated;
         }
     }
 
-    // Templated inner loop — shared by count and fill passes.
-    // FillMode=false: count only, update accumulators (out is unused).
-    // FillMode=true:  write into pre-allocated arrays, skip accumulators.
-    template<bool FillMode>
+    // Single-pass inner loop — scores fragments and pushes results
+    // to growing output vectors.  Also accumulates ua_counts for
+    // det-unambig fragments (merged from the former count pass).
     void score_chunk_impl(
         const ChunkPtrs& cp,
         int chunk_idx,
-        const int8_t* t_str,
-        double* ua_counts, int ua_ncols,
         double gdna_log_sp,
         FillState& st,
         int64_t& stat_det, int64_t& stat_em_u,
@@ -707,9 +697,8 @@ private:
             if (fclass == FRAG_MULTIMAPPER) {
                 int64_t fid_val = f_id[i];
                 if (fid_val != st.mm_fid) {
-                    // New group — flush previous if any
                     if (!st.mm_members.empty()) {
-                        flush_mm_group<FillMode>(
+                        flush_mm_group(
                             st, gdna_log_sp,
                             stat_mm, stat_gated);
                     }
@@ -722,7 +711,7 @@ private:
 
             // Non-MM fragment: flush any pending MM group
             if (!st.mm_members.empty()) {
-                flush_mm_group<FillMode>(
+                flush_mm_group(
                     st, gdna_log_sp,
                     stat_mm, stat_gated);
                 st.mm_members.clear();
@@ -735,17 +724,18 @@ private:
             int64_t end    = t_off[i + 1];
             int n_cand     = static_cast<int>(end - start);
 
-            // ---- Pre-EM strand accumulation (count pass only) ----
-            if constexpr (!FillMode) {
-                if (fclass == FRAG_UNAMBIG ||
-                    fclass == FRAG_AMBIG_SAME_STRAND)
-                {
-                    // Det-unambig: SPLICE_ANNOT + FRAG_UNAMBIG
-                    if (fclass == FRAG_UNAMBIG &&
-                        stype == SPLICE_SPLICED_ANNOT) {
-                        int32_t t_idx = t_ind[start];
+            // ---- Det-unambig: both ua_counts + det arrays ----
+            if (fclass == FRAG_UNAMBIG ||
+                fclass == FRAG_AMBIG_SAME_STRAND)
+            {
+                if (fclass == FRAG_UNAMBIG &&
+                    stype == SPLICE_SPLICED_ANNOT) {
+                    int32_t t_idx = t_ind[start];
+
+                    // ua_counts accumulation
+                    {
                         int t_sv =
-                            static_cast<int>(t_str[t_idx]);
+                            static_cast<int>(st.t_str[t_idx]);
                         bool anti;
                         if (exon_str == 1 || exon_str == 2) {
                             bool same = (exon_str == t_sv);
@@ -757,30 +747,18 @@ private:
                         }
                         int col =
                             stype * 2 + (anti ? 1 : 0);
-                        if (col < ua_ncols)
-                            ua_counts[t_idx * ua_ncols + col]
+                        if (col < st.ua_ncols)
+                            st.ua_counts[
+                                t_idx * st.ua_ncols + col]
                                 += 1.0;
-                        ++stat_det;
-                        ++st.det_cur;
-                        continue;
                     }
-                }
-            } else {
-                // Fill pass: skip accum, still skip det-unambig
-                if (fclass == FRAG_UNAMBIG ||
-                    fclass == FRAG_AMBIG_SAME_STRAND)
-                {
-                    if (fclass == FRAG_UNAMBIG &&
-                        stype == SPLICE_SPLICED_ANNOT)
-                    {
-                        // Record det-unambig for annotations
-                        st.det_ti[st.det_cur] = t_ind[start];
-                        st.det_fid[st.det_cur] =
-                            f_id[i];
-                        ++st.det_cur;
-                        ++stat_det;
-                        continue;
-                    }
+
+                    // Det-unambig output arrays
+                    st.v_det_ti->push_back(t_idx);
+                    st.v_det_fid->push_back(f_id[i]);
+                    ++st.det_cur;
+                    ++stat_det;
+                    continue;
                 }
             }
 
@@ -869,8 +847,7 @@ private:
                                        tx_e, log_lik, cov_wt};
                 }
 
-                // Pool-separated likelihood pruning:
-                // Find best log_lik within each pool (mRNA vs nRNA)
+                // Pool-separated likelihood pruning
                 double mrna_best = NEG_INF;
                 double nrna_best = NEG_INF;
                 for (int j = 0; j < m_n; ++j) {
@@ -882,22 +859,18 @@ private:
                                              m_scored[j].log_lik);
                 }
 
-                // Emit candidates within Δ of their pool's best
                 for (int j = 0; j < m_n; ++j) {
                     auto& s = m_scored[j];
                     double pool_best = t_is_nrna_[s.t_idx]
                                      ? nrna_best : mrna_best;
                     if (pool_best - s.log_lik <= max_ll_delta_) {
-                        if constexpr (FillMode) {
-                            int64_t c = st.cand_cur;
-                            st.ti[c] = s.t_idx;
-                            st.ll[c] = s.log_lik;
-                            st.ct[c] = static_cast<uint8_t>(
-                                s.ct);
-                            st.cw[c] = s.cov_wt;
-                            st.ts[c] = s.tx_s;
-                            st.te[c] = s.tx_e;
-                        }
+                        st.v_ti->push_back(s.t_idx);
+                        st.v_ll->push_back(s.log_lik);
+                        st.v_ct->push_back(
+                            static_cast<uint8_t>(s.ct));
+                        st.v_cw->push_back(s.cov_wt);
+                        st.v_ts->push_back(s.tx_s);
+                        st.v_te->push_back(s.tx_e);
                         ++st.cand_cur;
                         if (s.log_lik > best_ll) {
                             best_ll = s.log_lik;
@@ -911,35 +884,34 @@ private:
             // ---- Finalize this EM unit ----
             int64_t new_cands = st.cand_cur - emit_start;
             if (new_cands > 0) {
-                if constexpr (FillMode) {
-                    st.offsets[st.unit_cur + 1] = st.cand_cur;
-                    st.locus_t[st.unit_cur] = best_t;
-                    st.locus_ct[st.unit_cur] =
-                        static_cast<uint8_t>(best_ct);
-                    st.fid[st.unit_cur] =
-                        static_cast<int32_t>(f_id[i]);
-                    st.fclass[st.unit_cur] =
-                        static_cast<int8_t>(fclass);
-                    st.stype[st.unit_cur] =
-                        static_cast<uint8_t>(stype);
+                st.v_offsets->push_back(st.cand_cur);
+                st.v_locus_t->push_back(best_t);
+                st.v_locus_ct->push_back(
+                    static_cast<uint8_t>(best_ct));
+                st.v_fid->push_back(
+                    static_cast<int32_t>(f_id[i]));
+                st.v_fclass->push_back(
+                    static_cast<int8_t>(fclass));
+                st.v_stype->push_back(
+                    static_cast<uint8_t>(stype));
 
-                    bool is_spl =
-                        (stype == SPLICE_SPLICED_ANNOT
-                         || stype == SPLICE_SPLICED_UNANNOT);
-                    st.is_spliced[st.unit_cur] =
-                        is_spl ? 1 : 0;
-                    st.gfp[st.unit_cur] = genomic_footprint;
+                bool is_spl =
+                    (stype == SPLICE_SPLICED_ANNOT
+                     || stype == SPLICE_SPLICED_UNANNOT);
+                st.v_is_spliced->push_back(
+                    is_spl ? 1 : 0);
+                st.v_gfp->push_back(genomic_footprint);
 
-                    if (!is_spl) {
-                        double gdna_fl =
-                            gdna_frag_len_log_lik(
-                                genomic_footprint);
-                        st.gdna_ll[st.unit_cur] =
-                                gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
-                    } else {
-                        st.gdna_ll[st.unit_cur] = NEG_INF;
-                    }
+                if (!is_spl) {
+                    double gdna_fl =
+                        gdna_frag_len_log_lik(
+                            genomic_footprint);
+                    st.v_gdna_ll->push_back(
+                        gdna_fl + gdna_log_sp + LOG_HALF + log_nm);
+                } else {
+                    st.v_gdna_ll->push_back(NEG_INF);
                 }
+
                 ++st.unit_cur;
 
                 if (fclass == FRAG_UNAMBIG)
@@ -949,8 +921,6 @@ private:
                 else
                     ++stat_em_ao;
             } else {
-                // Revert cand_cur (no candidates emitted)
-                st.cand_cur = emit_start;
                 ++stat_gated;
             }
         }
@@ -972,8 +942,6 @@ public:
         size_t n_chunks = chunk_arrays.size();
 
         // ---- Extract and cache chunk pointers ----
-        // The Python list keeps all tuples alive; tuples keep
-        // the numpy arrays alive, so raw pointers stay valid.
         std::vector<ChunkPtrs> cps(n_chunks);
         for (size_t ci = 0; ci < n_chunks; ++ci) {
             nb::tuple c =
@@ -996,106 +964,98 @@ public:
                 nb::cast<u8_1d>(c[5]).shape(0));
         }
 
-        // ============ PASS 1: COUNT ============
-        FillState count_st{};
-        count_st.all_cps = &cps;
+        // ---- Estimate sizes for reserve heuristic ----
+        int64_t total_frags = 0;
+        for (auto& cp : cps) total_frags += cp.N;
+        int64_t est_units = total_frags;
+        int64_t est_cands = total_frags * 2;
+        int64_t est_det   = total_frags / 3;
+
+        // ---- Allocate growing vectors ----
+        auto* v_offsets = new std::vector<int64_t>();
+        v_offsets->reserve(est_units + 1);
+        v_offsets->push_back(0);  // CSR starts at 0
+
+        auto* v_ti  = new std::vector<int32_t>();
+        v_ti->reserve(est_cands);
+        auto* v_ll  = new std::vector<double>();
+        v_ll->reserve(est_cands);
+        auto* v_ct  = new std::vector<uint8_t>();
+        v_ct->reserve(est_cands);
+        auto* v_cw  = new std::vector<double>();
+        v_cw->reserve(est_cands);
+        auto* v_ts  = new std::vector<int32_t>();
+        v_ts->reserve(est_cands);
+        auto* v_te  = new std::vector<int32_t>();
+        v_te->reserve(est_cands);
+        auto* v_lt  = new std::vector<int32_t>();
+        v_lt->reserve(est_units);
+        auto* v_lct = new std::vector<uint8_t>();
+        v_lct->reserve(est_units);
+        auto* v_isp = new std::vector<int8_t>();
+        v_isp->reserve(est_units);
+        auto* v_gll = new std::vector<double>();
+        v_gll->reserve(est_units);
+        auto* v_gfp = new std::vector<int32_t>();
+        v_gfp->reserve(est_units);
+        auto* v_fid = new std::vector<int32_t>();
+        v_fid->reserve(est_units);
+        auto* v_fc  = new std::vector<int8_t>();
+        v_fc->reserve(est_units);
+        auto* v_st  = new std::vector<uint8_t>();
+        v_st->reserve(est_units);
+        auto* v_dti = new std::vector<int32_t>();
+        v_dti->reserve(est_det);
+        auto* v_dfid = new std::vector<int64_t>();
+        v_dfid->reserve(est_det);
+
+        // ============ SINGLE PASS ============
+        FillState st{};
+        st.v_offsets    = v_offsets;
+        st.v_ti         = v_ti;
+        st.v_ll         = v_ll;
+        st.v_ct         = v_ct;
+        st.v_cw         = v_cw;
+        st.v_ts         = v_ts;
+        st.v_te         = v_te;
+        st.v_locus_t    = v_lt;
+        st.v_locus_ct   = v_lct;
+        st.v_is_spliced = v_isp;
+        st.v_gdna_ll    = v_gll;
+        st.v_gfp        = v_gfp;
+        st.v_fid        = v_fid;
+        st.v_fclass     = v_fc;
+        st.v_stype      = v_st;
+        st.v_det_ti     = v_dti;
+        st.v_det_fid    = v_dfid;
+        st.ua_counts    = ua_c;
+        st.ua_ncols     = ua_ncols;
+        st.t_str        = t_str;
+        st.all_cps      = &cps;
+
         int64_t stat_det = 0, stat_em_u = 0;
         int64_t stat_em_as = 0, stat_em_ao = 0;
         int64_t stat_gated = 0, stat_chim = 0;
         int64_t stat_mm = 0;
 
         for (size_t ci = 0; ci < n_chunks; ++ci) {
-            score_chunk_impl<false>(
+            score_chunk_impl(
                 cps[ci],
                 static_cast<int>(ci),
-                t_str,
-                ua_c, ua_ncols,
                 gdna_log_splice_pen_unspliced,
-                count_st,
+                st,
                 stat_det, stat_em_u, stat_em_as,
                 stat_em_ao, stat_gated, stat_chim,
                 stat_mm);
         }
-        // Flush final pending MM group from count pass
-        if (!count_st.mm_members.empty()) {
-            flush_mm_group<false>(
-                count_st,
+        // Flush final pending MM group
+        if (!st.mm_members.empty()) {
+            flush_mm_group(
+                st,
                 gdna_log_splice_pen_unspliced,
                 stat_mm, stat_gated);
-            count_st.mm_members.clear();
-            count_st.mm_fid = -1;
-        }
-
-        int64_t total_units = count_st.unit_cur;
-        int64_t total_cands = count_st.cand_cur;
-        int64_t total_det   = count_st.det_cur;
-
-        // ============ ALLOCATE ============
-        auto* v_offsets = new std::vector<int64_t>(
-            total_units + 1, 0);
-        auto* v_ti  = new std::vector<int32_t>(total_cands);
-        auto* v_ll  = new std::vector<double>(total_cands);
-        auto* v_ct  = new std::vector<uint8_t>(total_cands);
-        auto* v_cw  = new std::vector<double>(total_cands);
-        auto* v_ts  = new std::vector<int32_t>(total_cands);
-        auto* v_te  = new std::vector<int32_t>(total_cands);
-        auto* v_lt  = new std::vector<int32_t>(total_units);
-        auto* v_lct = new std::vector<uint8_t>(total_units);
-        auto* v_isp = new std::vector<int8_t>(total_units);
-        auto* v_gll = new std::vector<double>(total_units);
-        auto* v_gfp = new std::vector<int32_t>(total_units);
-        auto* v_fid = new std::vector<int32_t>(total_units);
-        auto* v_fc  = new std::vector<int8_t>(total_units);
-        auto* v_st  = new std::vector<uint8_t>(total_units);
-        auto* v_dti = new std::vector<int32_t>(total_det);
-        auto* v_dfid = new std::vector<int64_t>(total_det);
-
-        // ============ PASS 2: FILL ============
-        FillState fill_st{};
-        fill_st.offsets   = v_offsets->data();
-        fill_st.ti        = v_ti->data();
-        fill_st.ll        = v_ll->data();
-        fill_st.ct        = v_ct->data();
-        fill_st.cw        = v_cw->data();
-        fill_st.ts        = v_ts->data();
-        fill_st.te        = v_te->data();
-        fill_st.locus_t   = v_lt->data();
-        fill_st.locus_ct  = v_lct->data();
-        fill_st.is_spliced = v_isp->data();
-        fill_st.gdna_ll   = v_gll->data();
-        fill_st.gfp       = v_gfp->data();
-        fill_st.fid       = v_fid->data();
-        fill_st.fclass    = v_fc->data();
-        fill_st.stype     = v_st->data();
-        fill_st.det_ti    = v_dti->data();
-        fill_st.det_fid   = v_dfid->data();
-
-        // Reset stats for fill pass (should match)
-        fill_st.all_cps = &cps;
-        int64_t f_det = 0, f_em_u = 0, f_em_as = 0;
-        int64_t f_em_ao = 0, f_gated = 0, f_chim = 0;
-        int64_t f_mm = 0;
-
-        for (size_t ci = 0; ci < n_chunks; ++ci) {
-            score_chunk_impl<true>(
-                cps[ci],
-                static_cast<int>(ci),
-                t_str,
-                ua_c, ua_ncols,
-                gdna_log_splice_pen_unspliced,
-                fill_st,
-                f_det, f_em_u, f_em_as,
-                f_em_ao, f_gated, f_chim,
-                f_mm);
-        }
-        // Flush final pending MM group from fill pass
-        if (!fill_st.mm_members.empty()) {
-            flush_mm_group<true>(
-                fill_st,
-                gdna_log_splice_pen_unspliced,
-                f_mm, f_gated);
-            fill_st.mm_members.clear();
-            fill_st.mm_fid = -1;
+            st.mm_members.clear();
+            st.mm_fid = -1;
         }
 
         // ============ RETURN NUMPY CAPSULES ============

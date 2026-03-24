@@ -147,31 +147,52 @@ class _FinalizedChunk:
 
     @classmethod
     def from_raw(cls, raw: dict) -> "_FinalizedChunk":
-        """Build a chunk from the raw dict returned by C++ FragmentAccumulator.finalize().
+        """Build a chunk from the raw dict returned by C++ FragmentAccumulator.
 
-        This is the **single** construction path for chunks coming from C++.
-        The C++ accumulator emits int64 for ``t_offsets`` and ``frag_id``;
-        this method narrows them to int32 for memory efficiency.
+        Accepts both legacy bytes (from ``finalize()``) and zero-copy
+        numpy arrays (from ``finalize_zero_copy()``).  When the value
+        is already an ndarray the data is used directly; ``t_offsets``
+        and ``frag_id`` are narrowed from int64→int32 for memory
+        efficiency.
         """
+
+        def _arr(val, dtype, src_dtype=None):
+            """Convert bytes or ndarray to a NumPy array of *dtype*.
+
+            *src_dtype* overrides the dtype used when interpreting raw
+            bytes (needed when the C++ source type differs from the
+            desired Python storage type, e.g. int64 → int32).
+            """
+            if isinstance(val, np.ndarray):
+                if val.dtype == dtype:
+                    return np.ascontiguousarray(val)
+                return val.astype(dtype, copy=False)
+            # Legacy path: raw bytes from finalize()
+            read_dtype = src_dtype if src_dtype is not None else dtype
+            arr = np.frombuffer(val, dtype=read_dtype).copy()
+            if read_dtype != dtype:
+                return arr.astype(dtype)
+            return arr
+
         return cls(
-            splice_type=np.frombuffer(raw["splice_type"], dtype=np.uint8).copy(),
-            exon_strand=np.frombuffer(raw["exon_strand"], dtype=np.uint8).copy(),
-            sj_strand=np.frombuffer(raw["sj_strand"], dtype=np.uint8).copy(),
-            num_hits=np.frombuffer(raw["num_hits"], dtype=np.uint16).copy(),
-            merge_criteria=np.frombuffer(raw["merge_criteria"], dtype=np.uint8).copy(),
-            chimera_type=np.frombuffer(raw["chimera_type"], dtype=np.uint8).copy(),
-            t_offsets=np.frombuffer(raw["t_offsets"], dtype=np.int64).astype(np.int32),
-            t_indices=np.frombuffer(raw["t_indices"], dtype=np.int32).copy(),
-            frag_lengths=np.frombuffer(raw["frag_lengths"], dtype=np.int32).copy(),
-            exon_bp=np.frombuffer(raw["exon_bp"], dtype=np.int32).copy(),
-            intron_bp=np.frombuffer(raw["intron_bp"], dtype=np.int32).copy(),
-            ambig_strand=np.frombuffer(raw["ambig_strand"], dtype=np.uint8).copy(),
-            frag_id=np.frombuffer(raw["frag_id"], dtype=np.int64).astype(np.int32),
-            read_length=np.frombuffer(raw["read_length"], dtype=np.uint32).copy(),
-            genomic_footprint=np.frombuffer(raw["genomic_footprint"], dtype=np.int32).copy(),
-            genomic_start=np.frombuffer(raw["genomic_start"], dtype=np.int32).copy(),
-            nm=np.frombuffer(raw["nm"], dtype=np.uint16).copy(),
-            size=raw["size"],
+            splice_type=_arr(raw["splice_type"], np.uint8),
+            exon_strand=_arr(raw["exon_strand"], np.uint8),
+            sj_strand=_arr(raw["sj_strand"], np.uint8),
+            num_hits=_arr(raw["num_hits"], np.uint16),
+            merge_criteria=_arr(raw["merge_criteria"], np.uint8),
+            chimera_type=_arr(raw["chimera_type"], np.uint8),
+            t_offsets=_arr(raw["t_offsets"], np.int32, src_dtype=np.int64),
+            t_indices=_arr(raw["t_indices"], np.int32),
+            frag_lengths=_arr(raw["frag_lengths"], np.int32),
+            exon_bp=_arr(raw["exon_bp"], np.int32),
+            intron_bp=_arr(raw["intron_bp"], np.int32),
+            ambig_strand=_arr(raw["ambig_strand"], np.uint8),
+            frag_id=_arr(raw["frag_id"], np.int32, src_dtype=np.int64),
+            read_length=_arr(raw["read_length"], np.uint32),
+            genomic_footprint=_arr(raw["genomic_footprint"], np.int32),
+            genomic_start=_arr(raw["genomic_start"], np.int32),
+            nm=_arr(raw["nm"], np.uint16),
+            size=raw["size"] if isinstance(raw["size"], int) else int(raw["size"]),
         )
 
     @property

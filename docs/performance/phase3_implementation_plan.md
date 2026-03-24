@@ -482,228 +482,417 @@ for (auto& chunk : chunks) {
 
 ## Phase 3c: Streaming Chunk Architecture
 
-**Effort:** High  
-**Risk:** High (fundamental architecture change to C++/Python boundary)  
+**Effort:** Medium–High  
+**Risk:** Moderate (well-constrained threading model with clean GIL boundaries)  
 **Expected impact:** ~10–20s wall time, ~5–10 GB peak RSS reduction
 
-### Overview
+### Architecture
 
-The streaming architecture changes the fundamental contract between C++ scanner and Python buffer. Instead of accumulating ALL fragments in C++ and returning one giant result, workers periodically emit bounded chunks to Python while scanning continues.
+The streaming design replaces the two-call `scan()` + `finalize_worker_accumulators()` API with a single `scan()` that delivers chunks to Python via callback as they are produced. Three thread roles with clean separation of concerns:
 
 ```
-Current:  scan(ALL) → merge → finalize → Python
-Proposed: scan(chunk₁) → Python(chunk₁)
-          scan(chunk₂) → Python(chunk₂)   (concurrent with spill of chunk₁)
-          scan(chunk₃) → Python(chunk₃)
-          ...
-          scan_done → finalize remaining
+┌─────────────────────┐
+│    Main Thread       │  Python's thread. Owns the GIL.
+│                      │  Drains output queue, converts C++ → Python,
+│    (GIL consumer)    │  calls chunk_callback.
+└──────────┬──────────┘
+           │ output_queue.pop(acc)      ← blocks (GIL released)
+           │ finalize_zero_copy(acc)    ← GIL held
+           │ chunk_callback(dict)       ← GIL held
+           │
+┌──────────┴──────────┐
+│   Output Queue       │  BoundedQueue<FragmentAccumulator>
+│   (MPSC, capacity N) │  Workers push, main thread pops.
+└──────────┬──────────┘
+           │
+     ┌─────┴─────┬─────────┬─── ... ───┐
+     │           │         │            │
+┌────┴───┐ ┌────┴───┐ ┌───┴────┐ ┌────┴───┐
+│Worker 0│ │Worker 1│ │Worker 2│ │Worker N│  Pure C++ threads.
+│        │ │        │ │        │ │        │  Pop input queue, resolve
+│        │ │        │ │        │ │        │  fragments, push full
+│        │ │        │ │        │ │        │  accumulators to output.
+└────┬───┘ └────┬───┘ └────┬───┘ └────┬───┘
+     │          │          │           │
+     └─────┬────┴──────────┴─── ... ───┘
+           │
+┌──────────┴──────────┐
+│   Input Queue        │  BoundedQueue<QnameGroup>
+│   (SPMC, capacity 2N)│  Reader pushes, workers pop.
+└──────────┬──────────┘
+           │
+┌──────────┴──────────┐
+│   Reader Thread      │  Background C++ thread.
+│                      │  BAM I/O → qname grouping → push to input queue.
+│   (BAM I/O)          │  After EOF: close input → join workers →
+│                      │  merge stats → close output queue.
+└─────────────────────┘
 ```
 
-### Step 3c.1 — Worker-Side Chunk Emission
+**Key design principle:** No thread ever needs the GIL except the main thread. Workers and reader are pure C++. The GIL is released while the main thread blocks on `output_queue.pop()` and re-acquired before creating Python objects.
 
-**Problem:** Each worker's `FragmentAccumulator` grows without bound during the entire scan. For 14.7M fragments / N workers, each accumulator holds ~1.3GB / N.
+### Thread Lifecycle
 
-**Solution:** When a worker's accumulator reaches a configurable chunk size (e.g., 1M fragments), it finalizes and emits the chunk, then creates a fresh accumulator.
+```
+Main Thread                    Reader Thread                  Workers
+═══════════                    ═════════════                  ═══════
+scan() called
+ ├─ Open BAM, create queues
+ ├─ Launch workers             ─────────────────────────────→ start
+ ├─ Launch reader              ─→ BAM read loop:
+ ├─ Release GIL                   sam_read1 → parse →
+ │                                input_queue.push(group) ──→ pop(group)
+ │                                                            resolve fragment
+ │                                                            accumulator.append()
+ │                                                            if size ≥ chunk_size:
+ │                                                              output_queue.push(acc)
+ │                                                              acc = fresh
+ ├─ output_queue.pop(acc)  ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←  ↑
+ ├─ Acquire GIL                   ...
+ ├─ finalize_zero_copy(acc)       ...
+ ├─ chunk_callback(dict)          ...
+ ├─ Release GIL                   ...
+ │   ... repeat ...               BAM EOF
+ │                                input_queue.close() ──────→ drain remaining
+ │                                                            push final partial acc
+ │                                join workers ←←←←←←←←←←←←  exit
+ │                                merge stats/strand/fraglen
+ │                                output_queue.close()
+ ├─ pop() returns false ←←←←←←←  ↑
+ ├─ Acquire GIL
+ ├─ Join reader thread ←───────  exit
+ ├─ Build result dict
+ └─ Return
+```
 
-**Files to modify:**
-- [src/rigel/native/bam_scanner.cpp](../../src/rigel/native/bam_scanner.cpp) — Add chunk emission logic to worker loop
-- [src/rigel/native/resolve_context.h](../../src/rigel/native/resolve_context.h) — No changes
-- [src/rigel/native/thread_queue.h](../../src/rigel/native/thread_queue.h) — Add output queue for finalized chunks
+### GIL Safety Proof
 
-**Implementation approach:**
+| Thread | Touches Python objects? | GIL needed? | How? |
+|--------|------------------------|-------------|------|
+| Main | Yes (finalize_zero_copy, callback) | Yes, cycled | Release before pop(), acquire before finalize |
+| Reader | No (htslib, C++ queues, stats) | Never | Pure C++ |
+| Workers | No (resolve, accumulate, push C++ objects) | Never | Pure C++ |
 
-Two architectural options:
+The GIL is released while the main thread blocks on `output_queue.pop()`. This means:
+- Python signal handlers can fire (Ctrl-C works)
+- Workers and reader run freely (no GIL contention)
+- Backpressure: if Python callback is slow, `output_queue` fills → workers block on push → natural throttling
 
-#### Option A: Callback-Based (Recommended)
+### Deadlock Freedom Proof
 
-Workers push finalized chunks to a shared output queue. A dedicated Python-side consumer thread (or the main thread after scan) drains the queue.
+The system has two queues forming a pipeline: `input_queue → workers → output_queue → main`.
+
+- **Input queue full, workers blocked on pop:** Cannot happen simultaneously — if workers are blocked on pop, input queue is empty, not full.
+- **Output queue full, workers blocked on push:** Main thread is either (a) blocked on pop (queue is full → pop succeeds immediately) or (b) executing callback → will return to pop soon. Workers unblock.
+- **Reader blocked on input push, output queue full:** Reader blocks on input push only when input queue is full. Workers are blocked on output push (queue full). Main thread pops output → frees worker → worker pops input → frees reader. Chain unblocks.
+- **All blocked:** Impossible — main thread's pop on a full output queue always succeeds immediately.
+
+### Step 3c.1 — `scan()` Becomes Streaming
+
+Replace the current two-call API with a unified `scan()` that accepts a callback and chunk size. One call does everything.
+
+**New `scan()` signature (C++):**
 
 ```cpp
-// bam_scanner.cpp — WorkerState additions
-struct WorkerState {
-    // ... existing fields ...
-    int64_t chunk_size_limit;
-    BoundedQueue<nb::dict>* output_queue;  // shared output queue
-    std::vector<int32_t>* t_strand_arr;    // for finalize
-    
-    void maybe_emit_chunk() {
-        if (accumulator.get_size() >= chunk_size_limit) {
-            auto chunk = accumulator.finalize_zero_copy(*t_strand_arr);
-            output_queue->push(std::move(chunk));
-            accumulator = FragmentAccumulator();
-            accumulator.reserve(chunk_size_limit, chunk_size_limit * 12 / 10);
-        }
-    }
-};
-
-// In process_qname_group_threaded(), after accumulator.append():
-ws.maybe_emit_chunk();
-```
-
-**Issue with Option A:** `nb::dict` and nanobind Python objects cannot be created/manipulated from non-Python threads without holding the GIL. This makes a callback/queue approach with Python objects complex.
-
-#### Option B: C++ Output Queue with Deferred Finalization (Recommended)
-
-Workers push raw C++ accumulators (moved) to a shared output queue. The main thread (holding GIL) drains the queue after scan and finalizes each to Python objects.
-
-```cpp
-// bam_scanner.cpp
-BoundedQueue<FragmentAccumulator> chunk_queue_;  // capacity = 2 × n_workers
-
-// Worker loop:
-void process_in_worker(QnameGroup& group, WorkerState& ws) {
-    // ... resolve + append ...
-    if (ws.accumulator.get_size() >= ws.chunk_size_limit) {
-        chunk_queue_.push(std::move(ws.accumulator));
-        ws.accumulator = FragmentAccumulator();
-        ws.accumulator.reserve(ws.chunk_size_limit, ...);
-    }
-}
-
-// After scan:
-nb::list finalize_all_chunks(const std::vector<int32_t>& t_strand_arr) {
-    nb::list result;
-    // Drain output queue
-    FragmentAccumulator acc;
-    while (chunk_queue_.pop(acc)) {
-        result.append(acc.finalize_zero_copy(t_strand_arr));
-    }
-    // Finalize remaining per-worker accumulators
-    for (auto& ws : worker_states_) {
-        if (ws.accumulator.get_size() > 0) {
-            result.append(ws.accumulator.finalize_zero_copy(t_strand_arr));
-        }
-    }
-    return result;
-}
-```
-
-**Memory bound:** At any point, there are at most `n_workers` in-flight accumulators (each ≤ chunk_size_limit) plus `queue_capacity` drained accumulators. With chunk_size_limit = 1M fragments and 87 bytes/fragment:
-
-```
-Peak accumulator memory = (n_workers + queue_capacity) × 1M × 87 bytes
-                        = (8 + 16) × 87 MB
-                        = ~2.1 GB  (vs current ~1.3 GB + merge copy overhead)
-```
-
-For the actual data, peak is bounded. The drained accumulators are finalized immediately to Python arrays and freed.
-
-#### Option C: True Streaming with Python Callback (Most Complex, Highest Reward)
-
-A Python callback is invoked from C++ (on the main thread) every time the output queue has a chunk. This allows Python to spill chunks to disk while scanning continues, overlapping I/O.
-
-```python
-# pipeline.py
-def _on_chunk(raw_dict):
-    chunk = _FinalizedChunk.from_raw(raw_dict)
-    buffer.inject_chunk(chunk)  # may spill to disk
-
-result = scanner.scan_streaming(
-    bam_path,
-    n_workers=n_scan,
-    n_decomp_threads=scan.n_decomp_threads,
-    chunk_callback=_on_chunk,
-    chunk_size=scan.chunk_size,
+nb::dict scan(
+    const std::string& bam_path,
+    nb::callable chunk_callback,
+    const std::vector<int32_t>& t_strand_arr,
+    int n_workers = 1,
+    int n_decomp_threads = 4,
+    int64_t chunk_size = 1000000
 )
 ```
 
-```cpp
-// bam_scanner.cpp — scan_streaming()
-// Reader thread also acts as chunk drainer:
-// After pushing each qname_group and periodically:
-while (chunk_queue_.try_pop(acc)) {
-    nb::dict chunk = acc.finalize_zero_copy(t_strand_arr);
-    callback(chunk);  // Call Python callback (holding GIL)
-}
+**New Python usage:**
+
+```python
+result = scanner.scan(
+    bam_path,
+    chunk_callback=on_chunk,
+    t_strand_arr=index.t_to_strand_arr.tolist(),
+    n_workers=8,
+    n_decomp_threads=4,
+    chunk_size=1_000_000,
+)
+# result contains stats, strand_observations, frag_length_observations
+# No separate finalize call — chunks already delivered via callback.
 ```
 
-**GIL management:** The reader thread holds the GIL when calling the Python callback. Workers release the GIL during resolution work. The reader must briefly acquire the GIL for callbacks. This is feasible because the reader thread alternates between BAM I/O (no GIL needed) and queue pushing.
-
-### Step 3c.2 — Python Buffer Integration with Streaming
-
 **Files to modify:**
-- [src/rigel/pipeline.py](../../src/rigel/pipeline.py) — New `_scan_streaming()` path
-- [src/rigel/buffer.py](../../src/rigel/buffer.py) — Chunk injection already works; add incremental memory tracking
+- [src/rigel/native/bam_scanner.cpp](../../src/rigel/native/bam_scanner.cpp) — Rewrite `scan()`, add reader thread, remove `finalize_worker_accumulators()` and `finalize_accumulator()`
 
 **Implementation:**
 
+```cpp
+nb::dict scan(
+    const std::string& bam_path,
+    nb::callable chunk_callback,
+    const std::vector<int32_t>& t_strand_arr,
+    int n_workers,
+    int n_decomp_threads,
+    int64_t chunk_size)
+{
+    if (n_workers < 1) n_workers = 1;
+
+    // ── Setup (main thread, GIL held) ─────────────────────
+    // Open BAM, build tid mapping, create worker states, reserve accumulators.
+    // Create input_queue (capacity: 2 * n_workers).
+    // Create output_queue (capacity: n_workers).
+    BoundedQueue<QnameGroup> input_queue(n_workers * 2);
+    BoundedQueue<FragmentAccumulator> output_queue(n_workers);
+
+    // ── Launch workers ────────────────────────────────────
+    for (int i = 0; i < n_workers; i++) {
+        workers.emplace_back([&input_queue, &output_queue, ctx, chunk_size, i, ...]() {
+            WorkerState& ws = *worker_states_[i];
+            QnameGroup group;
+            while (input_queue.pop(group)) {
+                process_qname_group_threaded(group, *ctx, ws, include_multimap);
+
+                // Emit chunk when accumulator reaches threshold
+                if (ws.accumulator.get_size() >= chunk_size) {
+                    output_queue.push(std::move(ws.accumulator));
+                    ws.accumulator = FragmentAccumulator();
+                    ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+                }
+            }
+            // Flush remaining data
+            if (ws.accumulator.get_size() > 0) {
+                output_queue.push(std::move(ws.accumulator));
+            }
+        });
+    }
+
+    // ── Launch reader thread ──────────────────────────────
+    BamScanStats reader_stats;
+    std::thread reader_thread([&]() {
+        // BAM read loop (identical to current scan() reader loop)
+        bam1_t* b = bam_init1();
+        QnameGroup current_group;
+        std::string current_qname;
+        int64_t frag_id = 0;
+
+        while (sam_read1(fp, hdr, b) >= 0) {
+            reader_stats.total++;
+            // ... filter, group by qname, push to input_queue ...
+        }
+        // Flush last group
+        if (!current_group.records.empty()) {
+            current_group.frag_id = frag_id++;
+            input_queue.push(std::move(current_group));
+        }
+        input_queue.close();
+
+        // Wait for all workers to finish
+        for (auto& w : workers) w.join();
+
+        // Merge lightweight observations (NOT accumulators — already pushed)
+        for (auto& ws_ptr : worker_states_) {
+            stats_.merge_from(ws_ptr->stats);
+            merge_strand_obs(strand_obs_, ws_ptr->strand_obs);
+            merge_fraglen_obs(fraglen_obs_, ws_ptr->fraglen_obs);
+            if (ws_ptr->region_acc.enabled())
+                merge_region_acc(region_acc_, ws_ptr->region_acc);
+        }
+        stats_.merge_from(reader_stats);
+        worker_states_.clear();
+
+        // Signal main thread: all chunks delivered
+        output_queue.close();
+
+        bam_destroy1(b);
+        bam_hdr_destroy(hdr);
+        hts_close(fp);
+    });
+
+    // ── Main thread: drain output queue ───────────────────
+    {
+        nb::gil_scoped_release release;    // free the GIL
+        FragmentAccumulator acc;
+        while (output_queue.pop(acc)) {    // blocks until chunk or closed
+            nb::gil_scoped_acquire acquire;  // re-acquire for Python work
+            nb::dict chunk = acc.finalize_zero_copy(t_strand_arr);
+            chunk_callback(chunk);
+        }
+    }
+
+    reader_thread.join();
+    return build_result();
+}
+```
+
+**Removed methods:**
+- `finalize_accumulator()` — folded into streaming scan
+- `finalize_worker_accumulators()` — folded into streaming scan
+
+**Removed members:**
+- `accumulator_` — vestigial (unused since Phase 3b)
+
+**Key subtlety — reader stats:** The reader thread maintains its own `BamScanStats reader_stats` for record-level counters (total, qc_fail, unmapped, duplicate, secondary, supplementary). These are disjoint from worker stats (which track fragment-level counters). The reader merges both into `stats_` after joining workers.
+
+### Step 3c.2 — Worker Chunk Emission
+
+Workers push full accumulators to the output queue and create fresh ones. This is the inner loop of each worker thread:
+
+```cpp
+// Inside worker lambda, after process_qname_group_threaded():
+if (ws.accumulator.get_size() >= chunk_size) {
+    output_queue.push(std::move(ws.accumulator));
+    ws.accumulator = FragmentAccumulator();
+    ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+}
+```
+
+**Why this works:**
+- `FragmentAccumulator` is implicitly moveable (all members are `std::vector`).
+- After `std::move`, the source accumulator is empty. The `= FragmentAccumulator()` creates a fresh one with the leading `t_offsets_[0] = 0` sentinel.
+- `reserve(chunk_size, chunk_size * 3/2)` pre-allocates for the next chunk. This is exact (not a heuristic) since we know the target.
+- The `BoundedQueue::push()` blocks if the output queue is full — this is the backpressure mechanism that bounds C++ memory.
+
+**Worker exit:** After the input queue is drained, each worker pushes its remaining partial accumulator (if non-empty) and exits. The reader thread joins all workers, then closes the output queue.
+
+### Step 3c.3 — Pipeline Integration
+
+**Files to modify:**
+- [src/rigel/pipeline.py](../../src/rigel/pipeline.py) — Simplify `scan_and_buffer()` to use callback
+
+**New `scan_and_buffer()` (complete rewrite of the scan section):**
+
 ```python
-# pipeline.py — scan_and_buffer() modified for streaming
-def scan_and_buffer(bam_path, index, scan_config):
-    buffer = FragmentBuffer(...)
-    
+def scan_and_buffer(bam_path, index, scan):
+    stats = PipelineStats()
+    strand_models = StrandModels()
+    frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
+    buffer = FragmentBuffer(
+        t_strand_arr=index.t_to_strand_arr,
+        chunk_size=scan.chunk_size,
+        max_memory_bytes=scan.max_memory_bytes,
+        spill_dir=scan.spill_dir,
+    )
+
+    # ... resolver setup (unchanged) ...
+
+    scanner = _NativeBamScanner(resolve_ctx, sj_spec, ...)
+
     def _on_chunk(raw_dict):
         chunk = _FinalizedChunk.from_raw(raw_dict)
         buffer.inject_chunk(chunk)
-        logger.debug(f"Chunk: {chunk.size:,} fragments, "
-                     f"buffer: {buffer.memory_bytes / 1024**2:.0f} MB")
-    
-    result = scanner.scan_streaming(
+
+    n_scan = scan.n_scan_threads or os.cpu_count() or 1
+    result = scanner.scan(
         bam_path,
-        n_workers=n_scan,
-        n_decomp_threads=scan_config.n_decomp_threads,
         chunk_callback=_on_chunk,
-        chunk_size=scan_config.chunk_size,
+        t_strand_arr=index.t_to_strand_arr.tolist(),
+        n_workers=n_scan,
+        n_decomp_threads=scan.n_decomp_threads,
+        chunk_size=scan.chunk_size,
     )
-    
-    # Stats/observations replay (unchanged)
+
+    # Replay stats / strand / fraglen observations (unchanged)
     _apply_scan_stats(stats, result["stats"])
-    # ...
+    _replay_strand_observations(result["strand_observations"], strand_models)
+    _replay_fraglen_observations(result["frag_length_observations"], frag_length_models)
+
+    # No finalize step — chunks already delivered via callback.
+
+    # ... region evidence extraction (unchanged) ...
+
+    return stats, strand_models, frag_length_models, buffer, region_counts, fl_table
 ```
 
-### Step 3c.3 — Configurable Chunk Size
+What changed:
+- The `scanner.scan()` call gains `chunk_callback`, `t_strand_arr`, and `chunk_size` parameters
+- The `finalize_worker_accumulators()` loop is deleted entirely
+- The `accumulator_size` check is deleted
+- One call does everything: scan, resolve, train, deliver chunks
 
-**Files to modify:**
-- [src/rigel/config.py](../../src/rigel/config.py) — Already has `chunk_size: int = 1_000_000`
-- Wire through to C++ `scan_streaming()` as `chunk_size` parameter
+### Step 3c.4 — Chunk Size Configuration
 
-**Guidance for tuning:**
-- **1M fragments**: ~87 MB per chunk, good balance of memory and overhead
-- **500K fragments**: ~44 MB per chunk, lower peak memory
-- **2M fragments**: ~174 MB per chunk, less overhead but higher peak
+The existing `BamScanConfig.chunk_size` field (default 1,000,000) is already the right knob. It is now passed through to the C++ `scan()` as the streaming threshold.
 
-### Step 3c.4 — Backward Compatibility
+**Tuning guidance:**
 
-Maintain the existing `scan()` + `finalize_accumulator()` API alongside the new `scan_streaming()` API. The old path is useful for:
-- Small BAMs where streaming overhead isn't justified
-- Testing and debugging
-- Gradual migration
+| chunk_size | Per-chunk memory | Chunks for 15M frags | Notes |
+|------------|-----------------|---------------------|-------|
+| 500K | ~44 MB | ~30 | Lower peak, more GIL cycles |
+| **1M** | **~87 MB** | **~15** | **Default. Good balance.** |
+| 2M | ~174 MB | ~8 | Higher peak, fewer GIL cycles |
 
-**Selection logic:**
+The GIL acquisition cost per chunk is negligible (~1 µs) compared to the ~87 MB of data being finalized (~5 ms). Even with 30 chunks (500K), the overhead is < 0.1% of scan time.
+
+### Error Handling
+
+If the Python callback raises an exception:
+
+1. The main thread catches the exception (nanobind propagates Python exceptions as C++ exceptions from `chunk_callback()`).
+2. The main thread sets `std::atomic<bool> abort_{false}` on the scanner.
+3. The main thread continues draining the output queue **discarding chunks** until it closes.
+4. Meanwhile, the reader thread checks `abort_` periodically (every N records) and breaks out of the BAM read loop early, closes the input queue.
+5. Workers drain naturally, push remaining data (which is discarded by main).
+6. Reader joins workers, closes output queue.
+7. Main thread joins reader, re-throws the original Python exception.
+
+The abort path adds one atomic load per BAM record on the reader thread (~0.5 ns, uncontended). No performance impact on the happy path.
+
+### Memory Profile
+
+```
+Steady-state during scan (N=8 workers, chunk_size=1M, ~87 bytes/frag):
+
+  C++ worker accumulators:  8 × ≤87 MB  =  ≤ 696 MB  (each capped at chunk_size)
+  C++ output queue:         8 × ≤87 MB  =  ≤ 696 MB  (capacity N, worst case full)
+  C++ total:                             ≤  1.4 GB
+
+  Python buffer:            bounded by max_memory_bytes (default 2 GB)
+  Python spill:             excess chunks written to Arrow IPC on disk
+
+  Total peak:               ≤ 3.4 GB    (vs current ~11 GB observed)
+  Expected peak:            ~ 2.5 GB    (mix of full/partial accumulators)
+```
+
+**Why this is dramatically better:** The current architecture lets accumulator memory grow unbounded (all fragments in one accumulator per worker, ~1.3 GB total), then doubles it during finalize-to-numpy. The streaming architecture caps each accumulator at `chunk_size` fragments and pipelines delivery to Python, which can spill excess to disk.
+
+### Test Migration
+
+Tests that call `scan()` and `finalize_worker_accumulators()` separately need updating. The migration is mechanical:
+
 ```python
-# pipeline.py
-if scan_config.streaming:  # new config flag, default True
-    # streaming path
-else:
-    # legacy path
+# OLD (two calls):
+result = scanner.scan(bam_path, n_workers=4, n_decomp_threads=2)
+chunks = scanner.finalize_worker_accumulators(t_strand_arr)
+for raw in chunks:
+    buffer.inject_chunk(_FinalizedChunk.from_raw(raw))
+
+# NEW (one call, callback):
+chunks = []
+result = scanner.scan(
+    bam_path,
+    chunk_callback=chunks.append,
+    t_strand_arr=t_strand_arr,
+    n_workers=4,
+    n_decomp_threads=2,
+    chunk_size=999_999_999,  # large → one chunk per worker (batch behavior)
+)
+for raw in chunks:
+    buffer.inject_chunk(_FinalizedChunk.from_raw(raw))
 ```
 
-### Phase 3c Memory Profile (Expected)
-
-```
-Phase                              C++ Heap    Python      Total Δ
-──────────────────────────────────────────────────────────────────
-Workers accumulating               N × ~87 MB              ~700 MB (8 workers)
-Chunk emitted → queue              +87 MB                  ~787 MB
-Python callback → buffer           -87 MB C++  +87 MB Py   ~787 MB
-Buffer spill (if threshold)                    -87 MB      ~700 MB
-... repeats for each chunk ...
-──────────────────────────────────────────────────────────────────
-Peak C++: ~700 MB  (vs current ~2.6 GB during merge)
-Peak Python buffer: bounded by max_memory_bytes config (default 2 GB)
-Total peak: ~2.7 GB  (vs current ~3.9 GB, observed ~11+ GB with overhead)
-```
+Setting `chunk_size` to a very large value replicates the old "accumulate everything" behavior — workers never hit the threshold during scanning and only push their final partial accumulator at exit.
 
 ### Phase 3c Completion Criteria
 
-- [ ] Streaming scan implemented (Option B or C)
-- [ ] Chunk emission from workers at configurable threshold
-- [ ] Python buffer receives chunks incrementally
+- [ ] `scan()` rewritten with reader thread + output queue + callback
+- [ ] Workers emit bounded chunks at configurable threshold
+- [ ] Main thread drains with proper GIL acquire/release cycling
+- [ ] `finalize_worker_accumulators()` and `finalize_accumulator()` removed
+- [ ] `pipeline.py` uses the new single-call API
+- [ ] `pytest tests/ -v` passes (all tests migrated)
+- [ ] Golden output match (order-independent — EM is order-invariant)
 - [ ] Peak RSS reduced by ≥ 5 GB on benchmark workload
-- [ ] `pytest tests/ -v` passes
-- [ ] Golden output match (order-independent)
 - [ ] Profiler confirms wall time improvement
-- [ ] No deadlocks under heavy workloads (stress test with small chunk sizes)
+- [ ] No deadlocks (verified with chunk_size=1000 stress test)
+- [ ] Ctrl-C works during scan (GIL released while blocking)
 
 ---
 
@@ -736,31 +925,9 @@ for (int c = 0; c < n_chunks; c++) {
 
 **Constraint:** The output CSR must be assembled in deterministic order. Use per-chunk local outputs, then concatenate in chunk order.
 
-### Step 3d.2 — Score-While-Scanning Pipeline
+### Step 3d.2 — Score-While-Scanning Pipeline (Deferred to Phase 4)
 
-**Problem:** Currently, scoring waits for the entire scan to finish. With streaming chunks, scoring can start as chunks arrive.
-
-**Design:**
-
-This is an extension of Step 3c.3 (streaming callback). The callback not only buffers the chunk but also queues it for scoring:
-
-```python
-# pipeline.py — conceptual
-def _on_chunk(raw_dict):
-    chunk = _FinalizedChunk.from_raw(raw_dict)
-    buffer.inject_chunk(chunk)
-    scoring_queue.put(chunk)  # score in parallel
-```
-
-However, scoring requires the strand and fragment-length models, which are only finalized after the scan completes. So true overlap is only possible for chunks scored with a *preliminary* model, then re-scored with the final model only for affected chunks.
-
-**Decision:** Defer this to Phase 4. The complexity of preliminary model scoring is high and the benefit is marginal given that the scan dominates wall time.
-
-### Phase 3d Completion Criteria
-
-- [ ] Parallel chunk scoring implemented
-- [ ] Deterministic output ordering maintained
-- [ ] Router wall time drops from ~18s to ~9–13s with single-pass, or ~5–8s with parallelism
+Scoring requires finalized strand and fragment-length models, which are only available after the scan completes. True scan-score overlap would need preliminary models — high complexity, marginal benefit. Defer.
 
 ---
 
@@ -776,12 +943,12 @@ Phase 3b.1 (zero-copy)       ──── depends on nothing extra ─┐
 Phase 3b.2 (merge elim)      ──── depends on 3b.1 ──────────┤
 Phase 3b.3 (single-pass)     ──── independent ───────────────┤
                                                               ├─→ Profile & validate 3b
-Phase 3c.1 (streaming)       ──── depends on 3b.1 + 3b.2 ──┐
-Phase 3c.2 (buffer integ)    ──── depends on 3c.1 ──────────┤
-Phase 3c.3 (chunk config)    ──── depends on 3c.1 ──────────┤
-Phase 3c.4 (compat)          ──── depends on 3c.1 ──────────┤
-                                                              ├─→ Profile & validate 3c
-Phase 3d.1 (parallel score)  ──── depends on 3b.3 ────────────→ Profile & validate 3d
+Phase 3c.1 (streaming scan)  ──── depends on 3b.1 ─────────────┐
+Phase 3c.2 (worker emission) ──── part of 3c.1 ────────────────┤
+Phase 3c.3 (pipeline integ)  ──── depends on 3c.1 ─────────────┤
+Phase 3c.4 (chunk config)    ──── depends on 3c.1 ─────────────┤
+                                                                ├─→ Profile & validate 3c
+Phase 3d.1 (parallel score)  ──── depends on 3b.3 ──────────────→ Profile & validate 3d
 Phase 3d.2 (pipelining)      ──── defer to Phase 4
 ```
 
@@ -796,8 +963,9 @@ Phase 3d.2 (pipelining)      ──── defer to Phase 4
 | 3b.1 | Medium — capsule lifecycle errors | ASAN build, stress test, fuzz with small chunks |
 | 3b.2 | Medium — fragment ordering changes | Verify EM is order-invariant; add canonical sort to golden test comparisons |
 | 3b.3 | Medium — vector over-allocation waste | Limit to 10% over-reserve; shrink_to_fit before transfer |
-| 3c.1 | High — threading + GIL + queue design | Start with Option B (deferred finalization); Option C later |
-| 3c.2 | Medium — incremental buffer bookkeeping | Existing inject_chunk handles this |
+| 3c.1 | Medium — reader thread + GIL cycling | Deadlock-free by construction (pipeline topology); stress test with chunk_size=1000 |
+| 3c.2 | Low — worker flush is a simple threshold check | Accumulator move semantics are trivially correct (all vector members) |
+| 3c.3 | Low — mechanical pipeline.py rewrite | One-call API is simpler than the two-call API it replaces |
 | 3d.1 | Medium — determinism of parallel scoring | Per-chunk local buffers, deterministic merge |
 
 ### Regression Testing Strategy
@@ -827,16 +995,15 @@ After each phase, run the profiler and record:
 
 ## Appendix A: File Change Matrix
 
-| File | 3a.1 | 3a.2 | 3a.3 | 3a.4 | 3b.1 | 3b.2 | 3b.3 | 3c.1 | 3c.2 | 3d.1 |
+| File | 3a.1 | 3a.2 | 3a.3 | 3a.4 | 3b.1 | 3b.2 | 3b.3 | 3c.1 | 3c.3 | 3d.1 |
 |------|------|------|------|------|------|------|------|------|------|------|
 | config.py | ✓ | | | | | | | | | |
 | pipeline.py | ✓ | | | | | ✓ | | ✓ | ✓ | |
-| buffer.py | | | | | ✓ | | | | ✓ | |
+| buffer.py | | | | | ✓ | | | | | |
 | index.py | | | ✓ | ✓ | | | | | | |
 | scan.py | | | | | | | | | | ✓ |
 | resolve_context.h | | ✓ | | | ✓ | | | | | |
 | bam_scanner.cpp | | ✓ | | | | ✓ | | ✓ | | |
-| thread_queue.h | | | | | | | | ✓ | | |
 | scoring.cpp | | | | | | | ✓ | | | ✓ |
 | cli.py | ✓ | | | | | | | | | |
 

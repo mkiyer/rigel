@@ -932,7 +932,6 @@ public:
 
     // Results
     BamScanStats stats_;
-    FragmentAccumulator accumulator_;
     StrandObservations strand_obs_;
     FragLenObservations fraglen_obs_;
     RegionAccumulator region_acc_;
@@ -949,184 +948,221 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // Main scan entry point (threaded; n_workers=1 for single-threaded)
+    // Main scan entry point — streaming chunk architecture
     // ----------------------------------------------------------------
+    //
+    // Three-thread architecture:
+    //   Reader thread (background): BAM I/O → input_queue
+    //   Worker threads (background): input_queue → accumulate → output_queue
+    //   Main thread: output_queue → finalize_zero_copy → chunk_callback
+    //
+    // The main thread holds the GIL while calling the Python callback
+    // and releases it while waiting on the output queue.
 
     nb::dict scan(const std::string& bam_path,
+                  nb::callable chunk_callback,
+                  const std::vector<int32_t>& t_strand_arr,
+                  int64_t chunk_size = 1000000,
                   int n_workers = 1,
                   int n_decomp_threads = 2)
     {
         if (n_workers < 1) n_workers = 1;
+        if (chunk_size < 1) chunk_size = 1;
 
-        // Open BAM file
-        htsFile* fp = hts_open(bam_path.c_str(), "rb");
-        if (!fp) {
-            throw std::runtime_error("Failed to open BAM file: " + bam_path);
-        }
-
-        // Enable htslib BGZF decompression thread pool
-        if (n_decomp_threads > 0) {
-            hts_set_threads(fp, n_decomp_threads);
-        }
-
-        bam_hdr_t* hdr = sam_hdr_read(fp);
-        if (!hdr) {
-            hts_close(fp);
-            throw std::runtime_error("Failed to read BAM header: " + bam_path);
-        }
-
-        // Build tid → ref_id mapping
-        build_tid_mapping(hdr, ctx_->ref_to_id_, tid_to_ref_id_);
-
-        int32_t n_transcripts = ctx_->n_transcripts_;
-
-        // Create bounded queue (capacity: 2 * n_workers groups)
-        BoundedQueue<QnameGroup> queue(
+        // Two queues: input (SPMC) and output (MPSC)
+        BoundedQueue<QnameGroup> input_queue(
+            static_cast<size_t>(n_workers * 2));
+        BoundedQueue<FragmentAccumulator> output_queue(
             static_cast<size_t>(n_workers * 2));
 
-        // Create per-worker state
+        // Per-worker state (local to scan — not a class member)
         std::vector<std::unique_ptr<WorkerState>> worker_states;
         worker_states.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
+            int32_t n_transcripts = ctx_->n_transcripts_;
             auto ws = std::make_unique<WorkerState>(n_transcripts);
-            // Initialize region accumulator if region index is available
             if (ctx_->has_region_index()) {
                 ws->region_acc.init(
                     ctx_->n_regions(),
                     ctx_->region_cr_,
                     &ctx_->id_to_ref_);
             }
+            // Pre-allocate accumulator for chunk_size
+            ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
             worker_states.push_back(std::move(ws));
-        }
-
-        // Pre-allocate accumulator vectors based on BAM file size.
-        // Heuristic: ~50 compressed bytes/record, ~0.5 fragments/record,
-        // ~1.5 CSR candidates/fragment.  Over-estimation is cheap (just
-        // reserved address space); under-estimation still works (vectors
-        // grow dynamically).
-        {
-            struct stat st;
-            if (stat(bam_path.c_str(), &st) == 0 && st.st_size > 0) {
-                int64_t est_records = st.st_size / 50;
-                int64_t est_frags = est_records / 2;
-                int64_t est_cands = est_frags * 3 / 2;
-                int64_t est_frags_pw = std::max<int64_t>(est_frags / n_workers, 1024);
-                int64_t est_cands_pw = est_frags_pw * 3 / 2;
-                accumulator_.reserve(est_frags, est_cands);
-                for (auto& ws_ptr : worker_states) {
-                    ws_ptr->accumulator.reserve(est_frags_pw, est_cands_pw);
-                }
-            }
         }
 
         // Capture read-only config
         bool include_multimap = include_multimap_;
         FragmentResolver* ctx = ctx_;
 
-        // Launch worker threads
+        // ---- Launch worker threads ----
+        // Workers pop from input_queue, process groups, accumulate, and
+        // push full chunks to output_queue.
         std::vector<std::thread> workers;
         workers.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
-            workers.emplace_back([&queue, ctx, &worker_states, i,
-                                  include_multimap]()
+            workers.emplace_back([&input_queue, &output_queue,
+                                  &worker_states, ctx, i,
+                                  include_multimap, chunk_size]()
             {
                 WorkerState& ws = *worker_states[i];
                 QnameGroup group;
-                while (queue.pop(group)) {
+                while (input_queue.pop(group)) {
                     process_qname_group_threaded(
                         group, *ctx, ws, include_multimap);
+                    // Emit a chunk when accumulator reaches threshold
+                    if (ws.accumulator.get_size() >= chunk_size) {
+                        if (!output_queue.push(std::move(ws.accumulator))) {
+                            break;  // aborted
+                        }
+                        ws.accumulator = FragmentAccumulator();
+                        ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+                    }
+                }
+                // Flush remaining fragments
+                if (ws.accumulator.get_size() > 0) {
+                    output_queue.push(std::move(ws.accumulator));
                 }
             });
         }
 
-        // ---- Reader loop (runs on main thread) ----
-        bam1_t* b = bam_init1();
-        if (!b) {
-            queue.close();
-            for (auto& w : workers) w.join();
-            bam_hdr_destroy(hdr);
-            hts_close(fp);
-            throw std::runtime_error("Failed to allocate bam1_t");
-        }
+        // ---- Launch reader thread (BAM I/O → input_queue) ----
+        std::exception_ptr reader_exception;
+        std::thread reader_thread([&]() {
+            try {
+                htsFile* fp = hts_open(bam_path.c_str(), "rb");
+                if (!fp) {
+                    throw std::runtime_error(
+                        "Failed to open BAM file: " + bam_path);
+                }
+                if (n_decomp_threads > 0) {
+                    hts_set_threads(fp, n_decomp_threads);
+                }
+                bam_hdr_t* hdr = sam_hdr_read(fp);
+                if (!hdr) {
+                    hts_close(fp);
+                    throw std::runtime_error(
+                        "Failed to read BAM header: " + bam_path);
+                }
+                build_tid_mapping(hdr, ctx->ref_to_id_, tid_to_ref_id_);
 
-        QnameGroup current_group;
-        std::string current_qname;
-        int64_t frag_id = 0;
+                bam1_t* b = bam_init1();
+                if (!b) {
+                    bam_hdr_destroy(hdr);
+                    hts_close(fp);
+                    throw std::runtime_error("Failed to allocate bam1_t");
+                }
 
-        while (sam_read1(fp, hdr, b) >= 0) {
-            stats_.total++;
+                QnameGroup current_group;
+                std::string current_qname;
+                int64_t frag_id = 0;
 
-            uint16_t flag = b->core.flag;
+                while (sam_read1(fp, hdr, b) >= 0) {
+                    stats_.total++;
 
-            if (flag & BAM_FQCFAIL) {
-                stats_.qc_fail++;
-                continue;
-            }
-            if (flag & BAM_FUNMAP) {
-                stats_.unmapped++;
-                continue;
-            }
-            if (flag & BAM_FDUP) {
-                stats_.duplicate++;
-                if (skip_duplicates_) continue;
-            }
+                    uint16_t flag = b->core.flag;
+                    if (flag & BAM_FQCFAIL) { stats_.qc_fail++; continue; }
+                    if (flag & BAM_FUNMAP) { stats_.unmapped++; continue; }
+                    if (flag & BAM_FDUP) {
+                        stats_.duplicate++;
+                        if (skip_duplicates_) continue;
+                    }
+                    if (!(flag & BAM_FPAIRED)) {
+                        bam_destroy1(b);
+                        bam_hdr_destroy(hdr);
+                        hts_close(fp);
+                        throw std::runtime_error(
+                            "Input BAM must be paired-end, "
+                            "but found unpaired read");
+                    }
+                    if (flag & BAM_FSECONDARY) stats_.secondary++;
+                    if (flag & BAM_FSUPPLEMENTARY) stats_.supplementary++;
 
-            // Enforce paired-end
-            if (!(flag & BAM_FPAIRED)) {
-                queue.close();
-                for (auto& w : workers) w.join();
+                    const char* qname = bam_get_qname(b);
+                    if (!current_group.records.empty() &&
+                        current_qname != qname) {
+                        current_group.frag_id = frag_id++;
+                        if (!input_queue.push(std::move(current_group))) {
+                            break;  // aborted
+                        }
+                        current_group = QnameGroup{};
+                    }
+                    current_qname = qname;
+                    current_group.records.push_back(
+                        parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_));
+                }
+
+                // Flush last group
+                if (!current_group.records.empty()) {
+                    current_group.frag_id = frag_id++;
+                    input_queue.push(std::move(current_group));
+                }
+
                 bam_destroy1(b);
                 bam_hdr_destroy(hdr);
                 hts_close(fp);
-                throw std::runtime_error(
-                    "Input BAM must be paired-end, but found unpaired read");
+
+                // Signal workers: no more input
+                input_queue.close();
+
+                // Wait for workers to finish, then close output queue
+                for (auto& w : workers) w.join();
+
+                // Merge worker results (stats, strand, fraglen, regions)
+                for (auto& ws_ptr : worker_states) {
+                    WorkerState& ws = *ws_ptr;
+                    stats_.merge_from(ws.stats);
+                    merge_strand_obs(strand_obs_, ws.strand_obs);
+                    merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
+                    if (ws.region_acc.enabled()) {
+                        merge_region_acc(region_acc_, ws.region_acc);
+                    }
+                }
+
+                output_queue.close();
+            } catch (...) {
+                reader_exception = std::current_exception();
+                input_queue.abort();
+                // Still need to join workers before closing output
+                for (auto& w : workers) {
+                    if (w.joinable()) w.join();
+                }
+                output_queue.abort();
             }
+        });
 
-            // Count secondary/supplementary
-            if (flag & BAM_FSECONDARY) stats_.secondary++;
-            if (flag & BAM_FSUPPLEMENTARY) stats_.supplementary++;
-
-            const char* qname = bam_get_qname(b);
-
-            // On qname boundary: dispatch group to queue
-            if (!current_group.records.empty() && current_qname != qname) {
-                current_group.frag_id = frag_id++;
-                queue.push(std::move(current_group));
-                current_group = QnameGroup{};
+        // ---- Main thread: drain output queue with GIL cycling ----
+        std::exception_ptr main_exception;
+        try {
+            FragmentAccumulator acc;
+            // Release GIL while waiting for chunks
+            {
+                nb::gil_scoped_release release;
+                while (output_queue.pop(acc)) {
+                    // Acquire GIL for finalize_zero_copy + Python callback
+                    nb::gil_scoped_acquire acquire;
+                    nb::dict chunk = acc.finalize_zero_copy(t_strand_arr);
+                    chunk_callback(chunk);
+                    // GIL released again at loop top
+                }
             }
-
-            current_qname = qname;
-
-            // Parse bam1_t in-place; only value types enter the queue
-            current_group.records.push_back(
-                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_));
+        } catch (...) {
+            main_exception = std::current_exception();
+            // Abort both queues to unblock reader/workers
+            input_queue.abort();
+            output_queue.abort();
         }
 
-        // Flush last group
-        if (!current_group.records.empty()) {
-            current_group.frag_id = frag_id++;
-            queue.push(std::move(current_group));
+        // Wait for reader thread to finish
+        reader_thread.join();
+
+        // Propagate exceptions: prefer reader exception (root cause)
+        if (reader_exception) {
+            std::rethrow_exception(reader_exception);
         }
-
-        // Signal workers to drain and exit
-        queue.close();
-        for (auto& w : workers) w.join();
-
-        // Clean up htslib
-        bam_destroy1(b);
-        bam_hdr_destroy(hdr);
-        hts_close(fp);
-
-        // ---- Merge worker results ----
-        for (auto& ws_ptr : worker_states) {
-            WorkerState& ws = *ws_ptr;
-            stats_.merge_from(ws.stats);
-            merge_accumulator_into(accumulator_, ws.accumulator);
-            merge_strand_obs(strand_obs_, ws.strand_obs);
-            merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
-            if (ws.region_acc.enabled()) {
-                merge_region_acc(region_acc_, ws.region_acc);
-            }
+        if (main_exception) {
+            std::rethrow_exception(main_exception);
         }
 
         return build_result();
@@ -1462,9 +1498,6 @@ private:
         fraglen_dict["intergenic_lengths"] = std::move(fraglen_obs_.intergenic_lengths);
         result["frag_length_observations"] = fraglen_dict;
 
-        // Accumulator size
-        result["accumulator_size"] = accumulator_.get_size();
-
         // Region evidence (from gDNA calibration region accumulator)
         if (region_acc_.n_regions > 0 && !region_acc_.counts.empty()) {
             nb::dict region_dict;
@@ -1476,14 +1509,6 @@ private:
         }
 
         return result;
-    }
-
-public:
-    // Expose accumulator for finalize
-    FragmentAccumulator& get_accumulator() { return accumulator_; }
-
-    nb::dict finalize_accumulator(const std::vector<int32_t>& t_strand_arr) {
-        return accumulator_.finalize(t_strand_arr);
     }
 };
 
@@ -1966,29 +1991,35 @@ NB_MODULE(_bam_impl, m) {
         )
         .def("scan", &BamScanner::scan,
              nb::arg("bam_path"),
+             nb::arg("chunk_callback"),
+             nb::arg("t_strand_arr"),
+             nb::arg("chunk_size") = 1000000,
              nb::arg("n_workers") = 1,
              nb::arg("n_decomp_threads") = 2,
-             "Scan BAM file and return results dict.\n\n"
+             "Scan BAM file with streaming chunk output.\n\n"
+             "Reads the BAM in a background thread, resolves fragments in\n"
+             "worker threads, and streams finalized chunks to a Python\n"
+             "callback on the main thread.\n\n"
              "Parameters\n"
              "----------\n"
              "bam_path : str\n"
              "    Path to name-sorted BAM file.\n"
+             "chunk_callback : callable\n"
+             "    Called with a dict of capsule-backed numpy arrays for\n"
+             "    each finalized chunk.\n"
+             "t_strand_arr : list[int]\n"
+             "    Per-transcript strand array (int32).\n"
+             "chunk_size : int\n"
+             "    Target number of fragments per chunk (default 1000000).\n"
              "n_workers : int\n"
-             "    Number of worker threads for parsing/resolution (default 1).\n"
+             "    Number of worker threads (default 1).\n"
              "n_decomp_threads : int\n"
              "    Number of htslib BGZF decompression threads (default 2).\n\n"
              "Returns\n"
              "-------\n"
              "dict\n"
              "    Dict with keys: 'stats', 'strand_observations',\n"
-             "    'frag_length_observations', 'accumulator_size'.\n")
-        .def("finalize_accumulator", &BamScanner::finalize_accumulator,
-             nb::arg("t_strand_arr"),
-             "Finalize the internal accumulator to raw bytes dict.\n\n"
-             "Parameters\n"
-             "----------\n"
-             "t_strand_arr : list[int]\n"
-             "    Per-transcript strand array (int32).\n")
+             "    'frag_length_observations'.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

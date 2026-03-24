@@ -323,6 +323,120 @@ public:
 
         return result;
     }
+
+    /// Zero-copy finalize: moves internal vectors to heap-allocated
+    /// storage and returns capsule-backed numpy arrays.  The accumulator
+    /// is consumed (left empty) after this call.
+    nb::dict finalize_zero_copy(const std::vector<int32_t>& t_strand_arr) {
+        int32_t n = size_;
+
+        // Compute ambig_strand (small enough to allocate fresh)
+        auto* v_ambig = new std::vector<uint8_t>(n, 0);
+        for (int32_t i = 0; i < n; i++) {
+            int64_t start = t_offsets_[i];
+            int64_t end = t_offsets_[i + 1];
+            if (end - start <= 1) continue;
+            int32_t first_strand = -999;
+            for (int64_t j = start; j < end; j++) {
+                int32_t t = t_indices_[j];
+                if (t >= 0 && t < static_cast<int32_t>(t_strand_arr.size())) {
+                    int32_t s = t_strand_arr[t];
+                    if (first_strand == -999) {
+                        first_strand = s;
+                    } else if (s != first_strand) {
+                        (*v_ambig)[i] = 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Move each internal vector to the heap so the capsule
+        // deleter owns the memory.  After this the accumulator
+        // vectors are empty / moved-from.
+        auto* v_splice_type  = new std::vector<uint8_t>(std::move(splice_type_));
+        auto* v_exon_strand  = new std::vector<uint8_t>(std::move(exon_strand_));
+        auto* v_sj_strand    = new std::vector<uint8_t>(std::move(sj_strand_));
+        auto* v_num_hits     = new std::vector<uint16_t>(std::move(num_hits_));
+        auto* v_merge_crit   = new std::vector<uint8_t>(std::move(merge_criteria_));
+        auto* v_chimera_type = new std::vector<uint8_t>(std::move(chimera_type_));
+        auto* v_t_indices    = new std::vector<int32_t>(std::move(t_indices_));
+        auto* v_t_offsets    = new std::vector<int64_t>(std::move(t_offsets_));
+        auto* v_frag_lengths = new std::vector<int32_t>(std::move(frag_lengths_));
+        auto* v_exon_bp      = new std::vector<int32_t>(std::move(exon_bp_));
+        auto* v_intron_bp    = new std::vector<int32_t>(std::move(intron_bp_));
+        auto* v_frag_id      = new std::vector<int64_t>(std::move(frag_id_));
+        auto* v_read_length  = new std::vector<uint32_t>(std::move(read_length_));
+        auto* v_genomic_fp   = new std::vector<int32_t>(std::move(genomic_footprint_));
+        auto* v_genomic_sta  = new std::vector<int32_t>(std::move(genomic_start_));
+        auto* v_nm           = new std::vector<uint16_t>(std::move(nm_));
+
+        size_ = 0;  // accumulator is now consumed
+
+        // Helper lambdas: capsule-backed ndarray (same pattern as scoring.cpp)
+        auto mk_u8 = [](std::vector<uint8_t>* v) -> nb::object {
+            size_t sz = v->size();
+            nb::capsule del(v, [](void* p) noexcept {
+                delete static_cast<std::vector<uint8_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(
+                v->data(), {sz}, del).cast();
+        };
+        auto mk_u16 = [](std::vector<uint16_t>* v) -> nb::object {
+            size_t sz = v->size();
+            nb::capsule del(v, [](void* p) noexcept {
+                delete static_cast<std::vector<uint16_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, uint16_t, nb::ndim<1>>(
+                v->data(), {sz}, del).cast();
+        };
+        auto mk_i32 = [](std::vector<int32_t>* v) -> nb::object {
+            size_t sz = v->size();
+            nb::capsule del(v, [](void* p) noexcept {
+                delete static_cast<std::vector<int32_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(
+                v->data(), {sz}, del).cast();
+        };
+        auto mk_i64 = [](std::vector<int64_t>* v) -> nb::object {
+            size_t sz = v->size();
+            nb::capsule del(v, [](void* p) noexcept {
+                delete static_cast<std::vector<int64_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(
+                v->data(), {sz}, del).cast();
+        };
+        auto mk_u32 = [](std::vector<uint32_t>* v) -> nb::object {
+            size_t sz = v->size();
+            nb::capsule del(v, [](void* p) noexcept {
+                delete static_cast<std::vector<uint32_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>>(
+                v->data(), {sz}, del).cast();
+        };
+
+        nb::dict result;
+        result["splice_type"]       = mk_u8(v_splice_type);
+        result["exon_strand"]       = mk_u8(v_exon_strand);
+        result["sj_strand"]         = mk_u8(v_sj_strand);
+        result["num_hits"]          = mk_u16(v_num_hits);
+        result["merge_criteria"]    = mk_u8(v_merge_crit);
+        result["chimera_type"]      = mk_u8(v_chimera_type);
+        result["t_indices"]         = mk_i32(v_t_indices);
+        result["t_offsets"]         = mk_i64(v_t_offsets);
+        result["frag_lengths"]      = mk_i32(v_frag_lengths);
+        result["exon_bp"]           = mk_i32(v_exon_bp);
+        result["intron_bp"]         = mk_i32(v_intron_bp);
+        result["ambig_strand"]      = mk_u8(v_ambig);
+        result["frag_id"]           = mk_i64(v_frag_id);
+        result["read_length"]       = mk_u32(v_read_length);
+        result["genomic_footprint"] = mk_i32(v_genomic_fp);
+        result["genomic_start"]     = mk_i32(v_genomic_sta);
+        result["nm"]                = mk_u16(v_nm);
+        result["size"]              = nb::cast(n);
+
+        return result;
+    }
 };
 
 // ================================================================

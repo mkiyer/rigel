@@ -256,12 +256,20 @@ def scan_and_buffer(
         include_multimap=scan.include_multimap,
     )
 
-    # Execute the full BAM scan in C++
+    # Streaming chunk callback — receives zero-copy dict from C++
+    def _on_chunk(raw: dict) -> None:
+        chunk = _FinalizedChunk.from_raw(raw)
+        buffer.inject_chunk(chunk)
+
+    # Execute the full BAM scan in C++ with streaming chunk output
     n_scan = scan.n_scan_threads
     if n_scan == 0:
         n_scan = os.cpu_count() or 1
     result = scanner.scan(
         bam_path,
+        chunk_callback=_on_chunk,
+        t_strand_arr=index.t_to_strand_arr.tolist(),
+        chunk_size=scan.chunk_size,
         n_workers=n_scan,
         n_decomp_threads=scan.n_decomp_threads,
     )
@@ -277,14 +285,6 @@ def scan_and_buffer(
         result["frag_length_observations"],
         frag_length_models,
     )
-
-    # Finalize the C++ accumulator to raw bytes, then build buffer chunk
-    acc_size = result["accumulator_size"]
-    if acc_size > 0:
-        raw = scanner.finalize_accumulator(index.t_to_strand_arr.tolist())
-
-        chunk = _FinalizedChunk.from_raw(raw)
-        buffer.inject_chunk(chunk)
 
     # Extract region evidence from the scan result (if accumulated)
     region_counts: pd.DataFrame | None = None
