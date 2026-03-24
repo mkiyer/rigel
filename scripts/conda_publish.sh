@@ -33,7 +33,7 @@ _conda_publish() {
         _die "Not logged in to anaconda.org. Run: anaconda login"; return 1
     fi
     local ANACONDA_USER
-    ANACONDA_USER=$(anaconda whoami 2>/dev/null | grep 'Username:' | awk '{print $2}')
+    ANACONDA_USER=$(anaconda whoami 2>/dev/null | awk '/Username:/{print $2; found=1} END{if(!found && NR>0) print $1}')
     _info "Logged in to anaconda.org as: ${ANACONDA_USER}"
 
     if grep -q 'UPDATE_WITH_ACTUAL_HASH' conda/meta.yaml; then
@@ -50,16 +50,19 @@ Run: source scripts/bioconda_hash.sh <version>"; return 1
     echo "Building conda package from conda/meta.yaml..."
     echo "─────────────────────────────────────────────────"
 
+    local OUTPUT_DIR
+    OUTPUT_DIR="${PWD}/conda-build-artifacts"
+
     conda-build conda/ \
         --channel conda-forge \
         --channel bioconda \
+        --python 3.12 \
+        --numpy 1.26 \
+        --output-folder "${OUTPUT_DIR}" \
         --no-anaconda-upload || { _die "conda-build failed"; return 1; }
 
     local PKG_PATH
-    PKG_PATH=$(conda-build conda/ \
-        --channel conda-forge \
-        --channel bioconda \
-        --output 2>/dev/null)
+    PKG_PATH=$(find "${OUTPUT_DIR}" -type f \( -name "rigel-${VERSION}-*.conda" -o -name "rigel-${VERSION}-*.tar.bz2" \) | head -n 1)
 
     [[ -f "$PKG_PATH" ]] || { _die "Built package not found at: $PKG_PATH"; return 1; }
     _info "Package built: ${PKG_PATH}"

@@ -7,14 +7,14 @@ package:
 
 source:
   url: https://pypi.org/packages/source/r/rigel-rnaseq/rigel_rnaseq-{{ version }}.tar.gz
-  sha256: f38811f32d9c44b4c187b03f3747d12e4863bc8da8c4d3b00447829c28e99e35
+  sha256: e0b3e1686c88f1fe9ffab2cef3392d9a43c23642020bf9d701fff1dbdc6a10dc
 
 build:
   number: 0
   skip: true  # [py < 312]
   script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
   run_exports:
-    - {{ pin_subpackage(name, max_pin="x.x") }}
+    - {{ name }} >= {{ version }}, <0.4.0a0
 
 requirements:
   build:
