@@ -395,7 +395,6 @@ def _score_fragments(
     # Free scanner accumulators + buffer: scan is done
     del builder, ctx
     buffer.release()
-    gc.collect()
     return em_data
 
 

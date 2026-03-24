@@ -7,7 +7,6 @@ and Empirical Bayes gDNA priors.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -19,48 +18,8 @@ from .native import EM_PRIOR_EPSILON
 from .index import TranscriptIndex
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from .calibration import GDNACalibration
     from .estimator import AbundanceEstimator
-
-
-# ---------------------------------------------------------------------------
-# Merged genomic intervals for a set of transcripts
-# ---------------------------------------------------------------------------
-
-
-def _merged_intervals(
-    transcript_indices: np.ndarray,
-    t_refs: np.ndarray,
-    t_starts: np.ndarray,
-    t_ends: np.ndarray,
-) -> Iterator[tuple[object, int, int]]:
-    """Yield merged (ref, start, end) intervals for a set of transcripts.
-
-    Groups transcript intervals by chromosome, merges overlapping/adjacent
-    intervals on each chromosome, and yields one tuple per merged span.
-    Handles multi-chromosome mega-loci correctly by processing each
-    chromosome independently.
-    """
-    refs = t_refs[transcript_indices]
-    starts = t_starts[transcript_indices]
-    ends = t_ends[transcript_indices]
-
-    by_ref: dict = defaultdict(list)
-    for i in range(len(transcript_indices)):
-        by_ref[refs[i]].append((int(starts[i]), int(ends[i])))
-
-    for ref, intervals in by_ref.items():
-        intervals.sort()
-        cur_start, cur_end = intervals[0]
-        for s, e in intervals[1:]:
-            if s <= cur_end:
-                cur_end = max(cur_end, e)
-            else:
-                yield ref, cur_start, cur_end
-                cur_start, cur_end = s, e
-        yield ref, cur_start, cur_end
 
 
 # ---------------------------------------------------------------------------
@@ -104,24 +63,55 @@ def build_loci(
         np.int32(n_transcripts),
     )
 
-    # Pre-fetch per-transcript chromosome/start/end for footprint computation
-    t_refs = index.t_df["ref"].values
+    # Pre-extract transcript coordinates as numpy arrays.
+    # to_numpy(dtype=object) converts the Arrow-backed string column
+    # to a plain object array, avoiding repeated pyarrow.compute.take
+    # overhead in the per-locus loop below.
+    t_ref_strs = index.t_df["ref"].to_numpy(dtype=object, na_value="")
     t_starts_all = index.t_df["start"].values
     t_ends_all = index.t_df["end"].values
 
+    # Integer ref codes for fast sort/compare within merge loops
+    _ref_names, _ref_codes = np.unique(t_ref_strs, return_inverse=True)
+
     loci = []
     for lid in range(n_comp):
-        t_idx = comp_t_indices[comp_t_offsets[lid] : comp_t_offsets[lid + 1]].copy()
-        gdna_span = max(
-            sum(e - s for _, s, e in _merged_intervals(t_idx, t_refs, t_starts_all, t_ends_all)),
-            1,
-        )
+        t_lo = comp_t_offsets[lid]
+        t_hi = comp_t_offsets[lid + 1]
+        t_idx = comp_t_indices[t_lo:t_hi].copy()
+
+        # Sort transcript intervals by (ref_code, start), then merge
+        # overlapping spans to compute the genomic footprint.
+        rc = _ref_codes[t_idx]
+        ss = t_starts_all[t_idx]
+        ee = t_ends_all[t_idx]
+        order = np.lexsort((ss, rc))
+
+        merged = []
+        span = 0
+        prev_rc = int(rc[order[0]])
+        prev_s = int(ss[order[0]])
+        prev_e = int(ee[order[0]])
+        for k in range(1, len(order)):
+            j = order[k]
+            rj, sj, ej = int(rc[j]), int(ss[j]), int(ee[j])
+            if rj != prev_rc or sj > prev_e:
+                merged.append((_ref_names[prev_rc], prev_s, prev_e))
+                span += prev_e - prev_s
+                prev_rc, prev_s, prev_e = rj, sj, ej
+            else:
+                if ej > prev_e:
+                    prev_e = ej
+        merged.append((_ref_names[prev_rc], prev_s, prev_e))
+        span += prev_e - prev_s
+
         loci.append(
             Locus(
                 locus_id=lid,
                 transcript_indices=t_idx,
                 unit_indices=comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]].copy(),
-                gdna_span=gdna_span,
+                gdna_span=max(span, 1),
+                merged_intervals=merged,
             )
         )
 
@@ -426,16 +416,10 @@ def compute_gdna_locus_gammas(
         locus_gammas[:] = fallback
         return locus_gammas
 
-    t_refs = index.t_df["ref"].values
-    t_starts = index.t_df["start"].values
-    t_ends = index.t_df["end"].values
-
     for li, locus in enumerate(loci):
-        t_arr = locus.transcript_indices
-
         wsum = 0.0
         nsum = 0.0
-        for ref, start, end in _merged_intervals(t_arr, t_refs, t_starts, t_ends):
+        for ref, start, end in locus.merged_intervals:
             for _s, _e, rid in region_cr.overlap(ref, start, end):
                 n_r = float(region_n[rid])
                 wsum += float(region_gamma[rid]) * n_r

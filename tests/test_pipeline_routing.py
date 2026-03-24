@@ -136,6 +136,12 @@ class _Index:
     def get_exon_intervals(self, t_idx):
         return None
 
+    def build_exon_csr(self):
+        n_t = self.num_transcripts
+        offsets = np.zeros(n_t + 1, dtype=np.int32)
+        empty = np.empty(0, dtype=np.int32)
+        return offsets, empty, empty, empty
+
 
 def _make_env(index):
     strand_models = StrandModels()

@@ -1196,3 +1196,55 @@ class TranscriptIndex:
             return None
         return self._t_exon_intervals.get(t_idx)
 
+    def build_exon_csr(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Build CSR arrays for per-transcript exon positions.
+
+        Converts the per-transcript exon dict into flat CSR arrays
+        suitable for direct C++ consumption, eliminating the need for
+        a Python dict → C++ dict-unpacking round-trip.
+
+        Returns
+        -------
+        offsets : np.ndarray
+            int32[num_transcripts + 1] — CSR offsets.
+        starts : np.ndarray
+            int32[total_exons] — exon start positions.
+        ends : np.ndarray
+            int32[total_exons] — exon end positions.
+        cumsum_before : np.ndarray
+            int32[total_exons] — cumulative exon length before each exon.
+        """
+        n_t = self.num_transcripts
+        offsets = np.zeros(n_t + 1, dtype=np.int32)
+        empty = np.empty(0, dtype=np.int32)
+
+        if self._t_exon_intervals is None or len(self._t_exon_intervals) == 0:
+            return offsets, empty, empty, empty
+
+        # Pass 1: count exons per transcript
+        for t_idx, ivs in self._t_exon_intervals.items():
+            offsets[t_idx + 1] = len(ivs)
+        np.cumsum(offsets, out=offsets)
+        total = int(offsets[n_t])
+
+        starts = np.empty(total, dtype=np.int32)
+        ends = np.empty(total, dtype=np.int32)
+        cumsum_before = np.empty(total, dtype=np.int32)
+
+        # Pass 2: fill exon data
+        for t_idx, ivs in self._t_exon_intervals.items():
+            off = offsets[t_idx]
+            n = len(ivs)
+            s = ivs[:, 0]
+            e = ivs[:, 1]
+            starts[off : off + n] = s
+            ends[off : off + n] = e
+            lengths = e - s
+            cumsum_before[off] = 0
+            if n > 1:
+                np.cumsum(lengths[:-1], out=cumsum_before[off + 1 : off + n])
+
+        return offsets, starts, ends, cumsum_before
+

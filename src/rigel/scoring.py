@@ -118,12 +118,6 @@ class FragmentScorer:
     t_span_arr: np.ndarray  # int32[n_transcripts] — genomic span (incl introns)
     t_start_arr: np.ndarray  # int32[n_transcripts] — genomic start coordinate
 
-    # Pre-computed exon positions for fast bisect-based position mapping.
-    # Dict mapping t_idx → (exon_starts: tuple[int], exon_ends: tuple[int],
-    #                        cumsum_before: tuple[int]).
-    # Python tuples of ints for zero-overhead bisect access.
-    _t_exon_data: dict | None = None
-
     @staticmethod
     def from_models(
         strand_models,
@@ -170,17 +164,10 @@ class FragmentScorer:
         t_span_arr = (index.t_df["end"].values - index.t_df["start"].values).astype(np.int32)
         t_start_arr = index.t_df["start"].values.astype(np.int32)
 
-        # Pre-compute per-transcript exon positions as Python tuples
-        # for fast bisect-based genomic → transcript coordinate mapping.
-        t_exon_data: dict = {}
-        for t_idx in range(index.num_transcripts):
-            exon_ivs = index.get_exon_intervals(t_idx)
-            if exon_ivs is not None and len(exon_ivs) > 0:
-                starts = tuple(exon_ivs[:, 0].tolist())
-                ends = tuple(exon_ivs[:, 1].tolist())
-                lengths = exon_ivs[:, 1] - exon_ivs[:, 0]
-                cumsum_before = tuple(np.concatenate(([0], np.cumsum(lengths[:-1]))).tolist())
-                t_exon_data[t_idx] = (starts, ends, cumsum_before)
+        # Build per-transcript exon CSR arrays for coverage-weight
+        # and genomic→transcript coordinate mapping. This replaces
+        # a 457K-iteration Python loop with a single vectorized call.
+        exon_offsets, exon_starts, exon_ends, exon_cumsum = index.build_exon_csr()
 
         ctx = FragmentScorer(
             log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
@@ -208,7 +195,6 @@ class FragmentScorer:
             t_length_arr=t_length_arr,
             t_span_arr=t_span_arr,
             t_start_arr=t_start_arr,
-            _t_exon_data=t_exon_data,
         )
 
         # Build native C++ scoring context for hot-path acceleration.
@@ -241,7 +227,10 @@ class FragmentScorer:
             t_length_arr=np.ascontiguousarray(ctx.t_length_arr, dtype=np.int32),
             t_span_arr=np.ascontiguousarray(ctx.t_span_arr, dtype=np.int32),
             t_start_arr=np.ascontiguousarray(ctx.t_start_arr, dtype=np.int32),
-            t_exon_data=ctx._t_exon_data,
+            exon_offsets=np.ascontiguousarray(exon_offsets, dtype=np.int32),
+            exon_starts=np.ascontiguousarray(exon_starts, dtype=np.int32),
+            exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
+            exon_cumsum=np.ascontiguousarray(exon_cumsum, dtype=np.int32),
             t_is_nrna_arr=np.ascontiguousarray(t_is_nrna_arr),
             pruning_max_ll_delta=max_ll_delta,
         )

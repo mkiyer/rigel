@@ -337,59 +337,6 @@ struct WorkerState {
         : scratch(n_transcripts) {}
 };
 
-// ================================================================
-// Accumulator merge helper
-// ================================================================
-
-static void merge_accumulator_into(FragmentAccumulator& dst,
-                                   FragmentAccumulator& src)
-{
-    if (src.size_ == 0) return;
-
-    int64_t t_base = static_cast<int64_t>(dst.t_indices_.size());
-
-    // Append per-fragment columns
-    dst.splice_type_.insert(dst.splice_type_.end(),
-                            src.splice_type_.begin(), src.splice_type_.end());
-    dst.exon_strand_.insert(dst.exon_strand_.end(),
-                            src.exon_strand_.begin(), src.exon_strand_.end());
-    dst.sj_strand_.insert(dst.sj_strand_.end(),
-                          src.sj_strand_.begin(), src.sj_strand_.end());
-    dst.num_hits_.insert(dst.num_hits_.end(),
-                         src.num_hits_.begin(), src.num_hits_.end());
-    dst.merge_criteria_.insert(dst.merge_criteria_.end(),
-                               src.merge_criteria_.begin(), src.merge_criteria_.end());
-    dst.chimera_type_.insert(dst.chimera_type_.end(),
-                             src.chimera_type_.begin(), src.chimera_type_.end());
-    dst.frag_id_.insert(dst.frag_id_.end(),
-                        src.frag_id_.begin(), src.frag_id_.end());
-    dst.read_length_.insert(dst.read_length_.end(),
-                            src.read_length_.begin(), src.read_length_.end());
-    dst.genomic_footprint_.insert(dst.genomic_footprint_.end(),
-                                  src.genomic_footprint_.begin(),
-                                  src.genomic_footprint_.end());
-    dst.genomic_start_.insert(dst.genomic_start_.end(),
-                              src.genomic_start_.begin(), src.genomic_start_.end());
-    dst.nm_.insert(dst.nm_.end(), src.nm_.begin(), src.nm_.end());
-
-    // Append CSR data
-    dst.t_indices_.insert(dst.t_indices_.end(),
-                          src.t_indices_.begin(), src.t_indices_.end());
-    dst.frag_lengths_.insert(dst.frag_lengths_.end(),
-                             src.frag_lengths_.begin(), src.frag_lengths_.end());
-    dst.exon_bp_.insert(dst.exon_bp_.end(),
-                        src.exon_bp_.begin(), src.exon_bp_.end());
-    dst.intron_bp_.insert(dst.intron_bp_.end(),
-                          src.intron_bp_.begin(), src.intron_bp_.end());
-
-    // Shift and append t_offsets (skip src's leading 0)
-    for (int32_t i = 1; i <= src.size_; i++) {
-        dst.t_offsets_.push_back(src.t_offsets_[i] + t_base);
-    }
-
-    dst.size_ += src.size_;
-}
-
 // Merge observations
 static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
     dst.exonic_spliced_obs.insert(dst.exonic_spliced_obs.end(),

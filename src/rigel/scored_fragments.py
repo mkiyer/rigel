@@ -111,12 +111,18 @@ class Locus:
     unit_indices : np.ndarray
         int32 — EM unit indices (rows in global CSR) belonging to
         this locus.
+    gdna_span : int
+        Total merged genomic footprint (bp) across all chromosomes.
+    merged_intervals : list[tuple[str, int, int]]
+        Merged (ref, start, end) intervals for this locus, cached
+        during ``build_loci`` to avoid recomputation.
     """
 
     locus_id: int
     transcript_indices: np.ndarray
     unit_indices: np.ndarray
     gdna_span: int
+    merged_intervals: list
 
 
 # ======================================================================

@@ -248,7 +248,10 @@ public:
         i32_1d  t_length_arr,
         i32_1d  t_span_arr,
         i32_1d  t_start_arr,
-        nb::object t_exon_data_obj,
+        i32_1d  exon_offsets_arr,
+        i32_1d  exon_starts_arr,
+        i32_1d  exon_ends_arr,
+        i32_1d  exon_cumsum_arr,
         u8_1d   t_is_nrna_arr,
         double  pruning_max_ll_delta)
       : log_p_sense_(log_p_sense),
@@ -305,44 +308,26 @@ public:
             has_gdna_fl_lut_ = true;
         }
 
-        // Build exon CSR from Python dict
-        exon_offsets_.assign(n_transcripts_ + 1, 0);
-        if (!t_exon_data_obj.is_none()) {
-            nb::dict exon_dict = nb::cast<nb::dict>(t_exon_data_obj);
-
-            // First pass: count exons per transcript
-            for (auto item : exon_dict) {
-                int32_t t_idx = nb::cast<int32_t>(item.first);
-                nb::tuple tup = nb::cast<nb::tuple>(item.second);
-                nb::object starts_obj = tup[0];
-                exon_offsets_[t_idx + 1] =
-                    static_cast<int32_t>(nb::len(starts_obj));
-            }
-
-            // Prefix sum
-            for (int32_t i = 0; i < n_transcripts_; ++i)
-                exon_offsets_[i + 1] += exon_offsets_[i];
-
-            int32_t total = exon_offsets_[n_transcripts_];
-            exon_starts_.resize(total);
-            exon_ends_.resize(total);
-            exon_cumsum_.resize(total);
-
-            // Second pass: fill data
-            for (auto item : exon_dict) {
-                int32_t t_idx = nb::cast<int32_t>(item.first);
-                nb::tuple tup = nb::cast<nb::tuple>(item.second);
-                nb::tuple starts_t = nb::cast<nb::tuple>(tup[0]);
-                nb::tuple ends_t   = nb::cast<nb::tuple>(tup[1]);
-                nb::tuple cum_t    = nb::cast<nb::tuple>(tup[2]);
-                int32_t off = exon_offsets_[t_idx];
-                int32_t n   = static_cast<int32_t>(nb::len(starts_t));
-                for (int32_t j = 0; j < n; ++j) {
-                    exon_starts_[off + j] = nb::cast<int32_t>(starts_t[j]);
-                    exon_ends_[off + j]   = nb::cast<int32_t>(ends_t[j]);
-                    exon_cumsum_[off + j]  = nb::cast<int32_t>(cum_t[j]);
-                }
-            }
+        // Copy pre-built exon CSR arrays directly
+        {
+            const auto* p = exon_offsets_arr.data();
+            int32_t n = static_cast<int32_t>(exon_offsets_arr.shape(0));
+            exon_offsets_.assign(p, p + n);
+        }
+        {
+            const auto* p = exon_starts_arr.data();
+            int32_t n = static_cast<int32_t>(exon_starts_arr.shape(0));
+            exon_starts_.assign(p, p + n);
+        }
+        {
+            const auto* p = exon_ends_arr.data();
+            int32_t n = static_cast<int32_t>(exon_ends_arr.shape(0));
+            exon_ends_.assign(p, p + n);
+        }
+        {
+            const auto* p = exon_cumsum_arr.data();
+            int32_t n = static_cast<int32_t>(exon_cumsum_arr.shape(0));
+            exon_cumsum_.assign(p, p + n);
         }
     }
 
@@ -1168,7 +1153,7 @@ NB_MODULE(_scoring_impl, m) {
                  nb::object, int32_t, double,
                  nb::object, int32_t, double,
                  i8_1d, i32_1d, i32_1d, i32_1d,
-                 nb::object,
+                 i32_1d, i32_1d, i32_1d, i32_1d,
                  u8_1d, double>(),
              nb::arg("log_p_sense"),
              nb::arg("log_p_antisense"),
@@ -1185,7 +1170,10 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("t_length_arr"),
              nb::arg("t_span_arr"),
              nb::arg("t_start_arr"),
-             nb::arg("t_exon_data").none(),
+             nb::arg("exon_offsets"),
+             nb::arg("exon_starts"),
+             nb::arg("exon_ends"),
+             nb::arg("exon_cumsum"),
              nb::arg("t_is_nrna_arr"),
              nb::arg("pruning_max_ll_delta"))
         .def("fused_score_buffer",
