@@ -99,7 +99,7 @@ jobs:
           # rigel wheel is installed, to avoid building from source in the
           # test virtualenv (pyarrow/pysam have no sdist-only fallback).
           CIBW_TEST_REQUIRES: >
-            "numpy>=1.26" "pandas>=2.1" "pyarrow>=14.0" "pysam>=0.22" "pyyaml>=6.0"
+            numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0
           # Smoke test: verify all native extensions are present
           CIBW_TEST_COMMAND: >-
             python -c "from rigel._bam_impl import BamScanner;

@@ -41,6 +41,8 @@
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 
+#include <sys/stat.h>
+
 #include "resolve_context.h"
 #include "thread_queue.h"
 
@@ -995,6 +997,26 @@ public:
                     &ctx_->id_to_ref_);
             }
             worker_states.push_back(std::move(ws));
+        }
+
+        // Pre-allocate accumulator vectors based on BAM file size.
+        // Heuristic: ~50 compressed bytes/record, ~0.5 fragments/record,
+        // ~1.5 CSR candidates/fragment.  Over-estimation is cheap (just
+        // reserved address space); under-estimation still works (vectors
+        // grow dynamically).
+        {
+            struct stat st;
+            if (stat(bam_path.c_str(), &st) == 0 && st.st_size > 0) {
+                int64_t est_records = st.st_size / 50;
+                int64_t est_frags = est_records / 2;
+                int64_t est_cands = est_frags * 3 / 2;
+                int64_t est_frags_pw = std::max<int64_t>(est_frags / n_workers, 1024);
+                int64_t est_cands_pw = est_frags_pw * 3 / 2;
+                accumulator_.reserve(est_frags, est_cands);
+                for (auto& ws_ptr : worker_states) {
+                    ws_ptr->accumulator.reserve(est_frags_pw, est_cands_pw);
+                }
+            }
         }
 
         // Capture read-only config

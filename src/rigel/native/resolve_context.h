@@ -198,6 +198,29 @@ public:
         t_offsets_.push_back(0);
     }
 
+    /// Pre-allocate internal vectors to avoid repeated reallocation.
+    /// @param n_fragments  Expected number of fragments.
+    /// @param n_candidates Expected total CSR entries (sum of per-fragment
+    ///                     transcript candidate counts).
+    void reserve(int64_t n_fragments, int64_t n_candidates) {
+        splice_type_.reserve(n_fragments);
+        exon_strand_.reserve(n_fragments);
+        sj_strand_.reserve(n_fragments);
+        num_hits_.reserve(n_fragments);
+        merge_criteria_.reserve(n_fragments);
+        chimera_type_.reserve(n_fragments);
+        frag_id_.reserve(n_fragments);
+        read_length_.reserve(n_fragments);
+        genomic_footprint_.reserve(n_fragments);
+        genomic_start_.reserve(n_fragments);
+        nm_.reserve(n_fragments);
+        t_indices_.reserve(n_candidates);
+        t_offsets_.reserve(n_fragments + 1);
+        frag_lengths_.reserve(n_candidates);
+        exon_bp_.reserve(n_candidates);
+        intron_bp_.reserve(n_candidates);
+    }
+
     void append(const ResolvedFragment& r, int64_t frag_id) {
         splice_type_.push_back(static_cast<uint8_t>(r.splice_type));
         exon_strand_.push_back(static_cast<uint8_t>(r.exon_strand));

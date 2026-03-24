@@ -146,6 +146,13 @@ class BamScanConfig:
     max_memory_bytes: int = 2 * 1024**3
     spill_dir: Path | str | None = None
     n_scan_threads: int = 0
+    n_decomp_threads: int = 4
+    """Number of htslib BGZF decompression threads (default 4).
+
+    Controls how many threads htslib uses for BAM decompression,
+    independent of the worker threads used for fragment resolution.
+    Set to 0 to disable multi-threaded decompression.
+    """
 
 
 # ======================================================================

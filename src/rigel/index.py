@@ -15,6 +15,7 @@ the index and ``load()`` / query methods for using it during quantification.
 """
 
 import collections
+import functools
 import logging
 import os
 from pathlib import Path
@@ -632,10 +633,6 @@ class TranscriptIndex:
         # sorted by genomic start position.
         self._t_exon_intervals: dict[int, np.ndarray] | None = None
 
-        # Calibration-region partition (flattened non-overlapping bins)
-        self.region_df: pd.DataFrame | None = None
-        self.region_cr: _cgranges_cls | None = None
-
     # -- properties -----------------------------------------------------------
 
     @property
@@ -645,6 +642,36 @@ class TranscriptIndex:
     @property
     def num_genes(self) -> int:
         return len(self.g_df)
+
+    # -- lazy-loaded calibration regions --------------------------------------
+
+    @functools.cached_property
+    def region_df(self) -> pd.DataFrame | None:
+        """Calibration-region partition table, loaded on first access."""
+        if self.index_dir is None:
+            return None
+        regions_path = os.path.join(self.index_dir, REGIONS_FEATHER)
+        if not os.path.exists(regions_path):
+            return None
+        df = pd.read_feather(regions_path)
+        logger.debug(f"Loaded {len(df)} calibration regions (lazy)")
+        return df
+
+    @functools.cached_property
+    def region_cr(self):
+        """cgranges index over calibration regions, built on first access."""
+        df = self.region_df
+        if df is None or len(df) == 0:
+            return None
+        _r_refs = df["ref"].values.tolist()
+        _r_starts = df["start"].values.tolist()
+        _r_ends = df["end"].values.tolist()
+        _r_ids = df["region_id"].values.tolist()
+        region_cr = _cgranges_cls()
+        for i in range(len(_r_ids)):
+            region_cr.add(_r_refs[i], _r_starts[i], _r_ends[i], _r_ids[i])
+        region_cr.index()
+        return region_cr
 
     # -- build (static) -------------------------------------------------------
 
@@ -1030,21 +1057,6 @@ class TranscriptIndex:
 
         logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
                      f"{len(sj_df)} total")
-
-        # -- calibration regions -----------------------------------------------
-        regions_path = os.path.join(index_dir, REGIONS_FEATHER)
-        if os.path.exists(regions_path):
-            self.region_df = pd.read_feather(regions_path)
-            _r_refs = self.region_df["ref"].values.tolist()
-            _r_starts = self.region_df["start"].values.tolist()
-            _r_ends = self.region_df["end"].values.tolist()
-            _r_ids = self.region_df["region_id"].values.tolist()
-            region_cr = _cgranges_cls()
-            for i in range(len(_r_ids)):
-                region_cr.add(_r_refs[i], _r_starts[i], _r_ends[i], _r_ids[i])
-            region_cr.index()
-            self.region_cr = region_cr
-            logger.debug(f"Loaded {len(self.region_df)} calibration regions")
 
         # -- C++ FragmentResolver (native fragment resolution) ------------------
         from .native import FragmentResolver

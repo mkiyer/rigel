@@ -260,7 +260,11 @@ def scan_and_buffer(
     n_scan = scan.n_scan_threads
     if n_scan == 0:
         n_scan = os.cpu_count() or 1
-    result = scanner.scan(bam_path, n_workers=n_scan)
+    result = scanner.scan(
+        bam_path,
+        n_workers=n_scan,
+        n_decomp_threads=scan.n_decomp_threads,
+    )
 
     # Replay stats
     _apply_scan_stats(stats, result["stats"])
