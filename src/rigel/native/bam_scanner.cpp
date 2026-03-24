@@ -1613,17 +1613,15 @@ public:
 
             if (is_multimap && !include_multimap_) {
                 // Write records without annotation (match pass 1 skip)
-                // Actually, pass 1 skipped these entirely, so frag_id
-                // was NOT incremented — do NOT increment here either.
-                // But we still need to write the records through.
-                // Since pass 1 doesn't assign frag_ids to skipped groups,
-                // these records get intergenic-default tags.
+                // Pass 1 assigns frag_id per qname group before worker-side
+                // multimapper filtering, so we must still advance frag_id
+                // here to keep pass-2 lookup synchronized.
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".",
                                     "intergenic", 0.0f,
                                     "intergenic", 1, 0, "unknown", -1);
                 n_intergenic++;
                 n_records_written += static_cast<int64_t>(raw_group.size());
-                // Do NOT increment frag_id (pass 1 skipped this group)
+                frag_id++;
                 return;
             }
 

@@ -569,10 +569,9 @@ def profile_stages(
     with Timer("create_estimator") as t_est:
         estimator = AbundanceEstimator(
             index.num_transcripts,
-            num_nrna=index.num_nrna,
-            t_to_nrna=index.t_to_nrna_arr,
             em_config=em_config,
             geometry=geometry,
+            is_synthetic_nrna=index.t_df["is_synthetic_nrna"].values,
         )
     timings.create_estimator = t_est.elapsed
 
@@ -629,7 +628,6 @@ def profile_stages(
                 (
                     total_gdna_em,
                     locus_mrna_arr,
-                    locus_nrna_arr,
                     locus_gdna_arr,
                 ) = estimator.run_batch_locus_em(
                     loci,
