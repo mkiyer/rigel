@@ -97,7 +97,7 @@ jobs:
           # Smoke test: install rigel wheel with all runtime deps and verify
           # all native extensions load correctly.
           CIBW_TEST_REQUIRES: >
-            numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0
+            numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0 scipy>=1.11
           CIBW_TEST_COMMAND: >-
             python -c "from rigel._bam_impl import BamScanner;
             from rigel._scoring_impl import compute_fragment_weight;
