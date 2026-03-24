@@ -5,6 +5,80 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-24
+
+### Performance
+
+This release focuses on performance improvements across both the C++ BAM scan
+stage and the Python quantification stage, delivering a **2.23× throughput
+increase** and **25% wall-time reduction** on a production-scale 1.6M-fragment
+real BAM (`v0.2.0`: 22.7 s → `v0.3.0`: 17.0 s; throughput 261 K → 581 K
+frags/s; peak RSS −3.2 %).
+
+#### Phase 3a — C++ BAM scan stage
+
+- **Zero-copy fragment buffer transfer**: `ResolveContext` adopts `std::move`
+  semantics to transfer internal vectors to heap-allocated storage and expose
+  them as numpy arrays without any data copies (`finalize_zero_copy()`).
+
+- **Pre-allocated internal vectors**: Added `ResolveContext::reserve()` to
+  pre-allocate all accumulator vectors before scanning each chunk, eliminating
+  repeated `push_back` reallocation overhead on large chunks.
+
+- **Configurable BGZF decompression threads**: `BamScanConfig.n_decomp_threads`
+  (default `4`) controls how many htslib threads decompress the BGZF-compressed
+  BAM. Previously hardcoded to 2. Set to `0` to disable multi-threaded
+  decompression.
+
+#### Phase 4 — Python quantification stage
+
+- **Vectorized interval merging (Phase 4a)**: Deleted the `_merged_intervals()`
+  generator that was called 69 K times (5.3 s cumulative). Replaced with a
+  single vectorized numpy merge per locus. Reference chromosome strings are
+  factorized to integer codes for fast sort/compare. Merged intervals are now
+  computed once in `build_loci()` and cached on `Locus.merged_intervals`.
+  `compute_gdna_locus_gammas()` reuses the cached intervals. Combined speedup:
+  `build_loci` −80 %, `compute_gdna_locus_gammas` −87 %.
+
+- **Bulk exon CSR construction (Phase 4b)**: Added
+  `TranscriptIndex.build_exon_csr()` which converts the per-transcript exon
+  dict to four flat numpy CSR arrays in two vectorized passes. Replaces a
+  457 K-iteration Python loop that previously fed the C++ fragment scorer.
+  The C++ `NativeFragmentScorer` constructor now accepts pre-built numpy arrays
+  directly (removing 55 lines of dict-unpacking code). `fragment_scorer`
+  speedup: −60 %.
+
+- **Dead code removal and GC hygiene (Phase 4c)**: Deleted the unreachable
+  `merge_accumulator_into()` function from `bam_scanner.cpp` (53 lines, never
+  called since Phase 3b). Removed a spurious `gc.collect()` call after the
+  scoring stage that was consuming 0.69 s; CPython's reference-count GC
+  correctly handles the `del` + `release()` pattern without assistance.
+
+### Fixed
+
+- **Annotated BAM `frag_id` desynchronisation with `--no-include-multimap`**:
+  When `include_multimap=False`, the write pass was not advancing `frag_id`
+  for skipped multimapper groups. This created a deterministic offset between
+  the scan-pass `frag_id` assignments and the write-pass lookups, causing
+  incorrect per-fragment annotation tags (`ZT`, `ZG`, `ZP`, etc.) for all
+  fragments after the first skipped multimapper group. Fixed by incrementing
+  `frag_id` in the write pass for every qname group, including skipped ones.
+
+### Changed
+
+- **Lazy-loaded calibration regions**: `TranscriptIndex.region_df` and
+  `region_cr` are now `functools.cached_property` attributes instead of
+  eagerly loaded in `load()`. The calibration-region index is built on first
+  access, reducing startup overhead for tools that access only transcript
+  or gene data.
+
+### Platform
+
+- Dropped macOS 13 (x86_64) binary wheels. macOS arm64 wheels now target
+  macOS 15.0 (`MACOSX_DEPLOYMENT_TARGET=15.0`).
+
+---
+
 ## [0.2.0] - 2026-03-23
 
 ### Added
@@ -124,5 +198,6 @@ Initial development release.
 - Fragment length models trained separately for RNA and gDNA.
 - Coverage weight model for positional bias correction.
 
+[0.3.0]: https://github.com/mkiyer/rigel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mkiyer/rigel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mkiyer/rigel/releases/tag/v0.1.0

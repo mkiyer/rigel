@@ -140,6 +140,7 @@ The `_PARAM_SPECS` registry in `cli.py` maps CLI flag names to config fields.
 | `BamScanConfig` | `chunk_size` | `1,000,000` | Fragments per buffer chunk |
 | `BamScanConfig` | `max_memory_bytes` | 2 GiB | Fragment-buffer memory limit before disk spill |
 | `BamScanConfig` | `log_every` | `1,000,000` | Progress log interval (read-name groups) |
+| `BamScanConfig` | `n_decomp_threads` | `4` | htslib BGZF decompression threads. Set to `0` to disable multi-threaded decompression. Tuned independently from the worker thread count. |
 | `CalibrationConfig` | `max_iterations` | `50` | Max calibration EM iterations |
 | `CalibrationConfig` | `convergence_tol` | `1e-4` | Calibration EM convergence tolerance |
 | `CalibrationConfig` | `density_percentile` | `0.10` | Percentile of density distribution used to seed gDNA initialization |
