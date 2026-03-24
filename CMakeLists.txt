@@ -110,27 +110,37 @@ install(TARGETS _resolve_impl LIBRARY DESTINATION rigel)
 # Reads BAM → resolves fragments → buffers results in one C++ call.
 
 # Find htslib (pkg-config or cmake find)
+# Note: IMPORTED_TARGET is intentionally omitted — it forces transitive dep
+# resolution via pkg-config (e.g. bzip2.pc), which is not always available in
+# conda cross-compilation builds.  We link against the shared libhts directly,
+# so no -lbz2 etc. are needed at link time.
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
-  pkg_check_modules(HTSLIB IMPORTED_TARGET htslib)
+  pkg_check_modules(HTSLIB htslib)
 endif()
 
-# Fallback: look for htslib in conda prefix or CONDA_PREFIX
-if(NOT HTSLIB_FOUND AND DEFINED ENV{CONDA_PREFIX})
-  set(_conda "$ENV{CONDA_PREFIX}")
-  if(EXISTS "${_conda}/include/htslib/hts.h" AND EXISTS "${_conda}/lib/libhts.dylib")
-    set(HTSLIB_FOUND TRUE)
-    set(HTSLIB_INCLUDE_DIRS "${_conda}/include")
-    set(HTSLIB_LIBRARY_DIRS "${_conda}/lib")
-    set(HTSLIB_LIBRARIES "hts")
-    message(STATUS "htslib found via CONDA_PREFIX: ${_conda}")
-  elseif(EXISTS "${_conda}/include/htslib/hts.h" AND EXISTS "${_conda}/lib/libhts.so")
-    set(HTSLIB_FOUND TRUE)
-    set(HTSLIB_INCLUDE_DIRS "${_conda}/include")
-    set(HTSLIB_LIBRARY_DIRS "${_conda}/lib")
-    set(HTSLIB_LIBRARIES "hts")
-    message(STATUS "htslib found via CONDA_PREFIX: ${_conda}")
+# Helper macro to detect htslib in a given directory prefix
+macro(_find_htslib_in_prefix _prefix _label)
+  if(NOT HTSLIB_FOUND AND EXISTS "${_prefix}/include/htslib/hts.h")
+    foreach(_lib libhts.dylib libhts.so libhts.a)
+      if(EXISTS "${_prefix}/lib/${_lib}")
+        set(HTSLIB_FOUND TRUE)
+        set(HTSLIB_INCLUDE_DIRS "${_prefix}/include")
+        set(HTSLIB_LIBRARY_DIRS "${_prefix}/lib")
+        set(HTSLIB_LIBRARIES "hts")
+        message(STATUS "htslib found via ${_label}: ${_prefix}")
+        break()
+      endif()
+    endforeach()
   endif()
+endmacro()
+
+# Fallback: conda-build host env ($PREFIX), then activated env ($CONDA_PREFIX)
+if(DEFINED ENV{PREFIX})
+  _find_htslib_in_prefix("$ENV{PREFIX}" "conda PREFIX")
+endif()
+if(DEFINED ENV{CONDA_PREFIX})
+  _find_htslib_in_prefix("$ENV{CONDA_PREFIX}" "CONDA_PREFIX")
 endif()
 
 if(HTSLIB_FOUND)
@@ -154,14 +164,10 @@ target_include_directories(_bam_impl PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
 )
 
-# Link htslib: prefer PkgConfig target, fall back to manual link
-if(TARGET PkgConfig::HTSLIB)
-  target_link_libraries(_bam_impl PRIVATE PkgConfig::HTSLIB)
-else()
-  target_include_directories(_bam_impl PRIVATE ${HTSLIB_INCLUDE_DIRS})
-  target_link_directories(_bam_impl PRIVATE ${HTSLIB_LIBRARY_DIRS})
-  target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
-endif()
+# Link htslib via variables set by pkg_check_modules or the manual fallback
+target_include_directories(_bam_impl PRIVATE ${HTSLIB_INCLUDE_DIRS})
+target_link_directories(_bam_impl PRIVATE ${HTSLIB_LIBRARY_DIRS})
+target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
 
 install(TARGETS _bam_impl LIBRARY DESTINATION rigel)
 

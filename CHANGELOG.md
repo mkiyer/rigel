@@ -5,6 +5,20 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-24
+
+### Fixed
+
+- **Bioconda build failure on macOS x86_64**: `pkg_check_modules(HTSLIB IMPORTED_TARGET htslib)`
+  caused CMake to fail when pkg-config could not resolve `bzip2` as a transitive htslib
+  dependency inside the conda-build environment. Dropped `IMPORTED_TARGET` (transitive
+  resolution is not needed — we link against the shared `libhts` directly). Also extended
+  the htslib fallback discovery to check `$PREFIX` (set by conda-build) before
+  `$CONDA_PREFIX` (set in an activated dev environment), and made the library-file
+  probe loop over `.dylib`, `.so`, and `.a` suffixes.
+
+---
+
 ## [0.3.0] - 2026-03-24
 
 ### Performance
@@ -198,6 +212,7 @@ Initial development release.
 - Fragment length models trained separately for RNA and gDNA.
 - Coverage weight model for positional bias correction.
 
+[0.3.1]: https://github.com/mkiyer/rigel/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mkiyer/rigel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mkiyer/rigel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mkiyer/rigel/releases/tag/v0.1.0
