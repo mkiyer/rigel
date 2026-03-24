@@ -120,6 +120,78 @@ rigel --version
 
 ---
 
+## Recovery: re-releasing the same version
+
+If CI fails after `release.sh` ran (e.g., a missing dependency), you need to
+fix the code and re-tag. The exact steps depend on how far the release got.
+
+### Case A: Tag was pushed but no GitHub Release yet
+
+The tag exists on GitHub but publish.yml hasn't run (no Release created).
+
+```bash
+# 1. Fix the bug on main
+git add <files>
+git commit -m "Fix: description of fix"
+
+# 2. Delete the old tag (local + remote)
+git tag -d v0.3.0
+git push origin --delete v0.3.0
+
+# 3. Re-run the release script (it will re-tag the new HEAD)
+./scripts/release.sh 0.3.0
+```
+
+### Case B: GitHub Release was created and publish.yml failed
+
+The Release exists on GitHub but the PyPI upload didn't happen (or partially
+failed).
+
+```bash
+# 1. Delete the GitHub Release
+#    Go to https://github.com/mkiyer/rigel/releases
+#    Click on the release → Delete release
+
+# 2. Fix the bug on main
+git add <files>
+git commit -m "Fix: description of fix"
+
+# 3. Delete the old tag (local + remote)
+git tag -d v0.3.0
+git push origin --delete v0.3.0
+
+# 4. Re-run the release script
+./scripts/release.sh 0.3.0
+
+# 5. Create a new GitHub Release from the new tag
+```
+
+### Case C: PyPI upload succeeded but the release is broken
+
+PyPI does **not** allow re-uploading the same version. You must bump to a
+patch release.
+
+```bash
+# 1. Fix the bug on main
+# 2. Update CHANGELOG.md with a 0.3.1 entry
+# 3. Run release for the new version:
+./scripts/release.sh 0.3.1
+```
+
+### Case D: release.sh failed before creating the tag
+
+The script died mid-way (e.g., CHANGELOG check failed, or you answered "N"
+at the confirmation prompt). No tag was created.
+
+```bash
+# 1. Fix whatever caused the failure
+# 2. Commit the fix
+# 3. Re-run — the script is idempotent when no tag exists:
+./scripts/release.sh 0.3.0
+```
+
+---
+
 ## One-time setup (already done)
 
 ### PyPI trusted publisher
@@ -151,7 +223,7 @@ A matching GitHub environment named `pypi` exists in the repository settings.
 | macOS | arm64 | `macos-latest` (macOS 15) |
 
 Intel Mac users install from the sdist (`pip install rigel-rnaseq` compiles
-locally). Linux glibc ≥ 2.28 is required for the binary wheel (RHEL 8+,
+locally). Linux glibc >= 2.28 is required for the binary wheel (RHEL 8+,
 Ubuntu 20.04+, Debian 10+).
 
 ---
@@ -163,8 +235,10 @@ Ubuntu 20.04+, Debian 10+).
 | Trusted publisher mismatch | Verify project name, repo, workflow name, and environment match exactly |
 | Wheel build fails on Linux | Check htslib compilation in `CIBW_BEFORE_ALL_LINUX` |
 | pyarrow install fails in test | Ensure `CIBW_MANYLINUX_*_IMAGE` is `manylinux_2_28` (pyarrow dropped manylinux2014) |
+| Missing dependency in CI | Add it to `pyproject.toml` dependencies, `conda/meta.yaml` run deps, and `publish.yml` `CIBW_TEST_REQUIRES` |
 | Bioconda hash mismatch | Re-run `./scripts/bioconda_hash.sh` after PyPI upload completes |
 | sdist missing native sources | Check `MANIFEST.in` includes `src/rigel/native/*.cpp` and `*.h` |
+| `release.sh` says tag exists | See "Recovery: re-releasing the same version" above |
 
 ---
 
@@ -172,7 +246,7 @@ Ubuntu 20.04+, Debian 10+).
 
 - [ ] `CHANGELOG.md` updated with new version entry
 - [ ] `./scripts/release.sh X.Y.Z` — bumps versions, commits, tags, pushes
-- [ ] GitHub Release created from tag → `publish.yml` runs
+- [ ] GitHub Release created from tag -> `publish.yml` runs
 - [ ] `publish.yml` succeeds (all wheel + sdist jobs green)
 - [ ] `pip install rigel-rnaseq==X.Y.Z` works in a clean environment
 - [ ] `./scripts/bioconda_hash.sh X.Y.Z` — patches conda recipe with SHA256
