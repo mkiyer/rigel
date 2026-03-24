@@ -40,12 +40,13 @@ that start and end at the same coordinates.
 ### Key features
 
 - Joint mRNA, nRNA, and gDNA quantification in one locus-level model
-- Shared-span nRNA architecture with one nRNA component per unique genomic span
+- Shared-span nRNA architecture with one component per unique genomic span `(ref, strand, start, end)`
 - Single-pass C++ BAM scanner using htslib, with memory-bounded buffering and spill-to-disk support
-- Automatic strand-model training from annotated spliced fragments and protocol detection as `R1-sense` or `R1-antisense`
-- Empirical Bayes priors for nRNA fractions (`global -> locus-strand -> nRNA`) and gDNA rates (`global -> chromosome -> locus`)
-- Tripartite EM prior: coverage-weighted OVR for mRNA, sparsifying Dirichlet for nRNA, and EB-anchored prior for gDNA
-- MAP-EM and Variational Bayes EM (VBEM) solver modes with SQUAREM acceleration
+- Automatic strand-model training from annotated spliced fragments; protocol auto-detection (`R1-sense` / `R1-antisense`)
+- Aggregate-first gDNA calibration using density, strand balance (Beta-Binomial), and fragment-length signals
+- Empirical Bayes priors for nRNA fractions and gDNA rates; calibrated per-locus gDNA initialization
+- MAP-EM and Variational Bayes EM (VBEM, default) solver modes with SQUAREM acceleration
+- Discrete fragment assignment: `fractional`, `map`, or `sample` (default) post-EM assignment modes
 - Parallel BAM scanning and parallel locus EM controlled through one `--threads` setting
 - Feather and TSV outputs plus optional annotated BAM output with per-fragment assignment tags
 
@@ -131,6 +132,7 @@ Input BAM requirements:
 ```bash
 head results/quant.tsv
 head results/gene_quant.tsv
+head results/nrna_quant.tsv
 head results/loci.tsv
 cat results/summary.json
 ```
@@ -143,15 +145,13 @@ cat results/summary.json
 |------|-------------|
 | `quant.feather` / `quant.tsv` | Transcript-level abundance table with `mrna`, `nrna`, `rna_total`, `tpm`, and QC columns |
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
+| `nrna_quant.feather` / `nrna_quant.tsv` | nRNA-span-level abundance estimates (one row per unique genomic nRNA span) |
 | `loci.feather` / `loci.tsv` | Per-locus EM summary with `mrna`, `nrna`, `gdna`, and `gdna_init` |
-| `quant_detail.feather` / `quant_detail.tsv` | Long-format QC table by transcript, splice category, and source (`unambig` or `em`) |
-| `summary.json` | Library protocol, strand specificity, fragment-length statistics, alignment counts, and global quantification totals |
-| `config.json` | Fully resolved run configuration after CLI and YAML merging |
+| `summary.json` | Library protocol, strand specificity, fragment-length statistics, calibration results, alignment counts, and global quantification totals |
 | `annotated.bam` | Optional annotated BAM with `ZT`, `ZG`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, and `ZS` tags |
 
-The `nrna` values reported in transcript- and gene-level tables are derived from
-shared nRNA-span counts that are fanned back out across transcripts sharing the
-same nRNA span.
+The `nrna` values in transcript- and gene-level tables are derived from shared
+nRNA-span counts that are pro-rated across transcripts sharing the same span.
 
 ---
 
@@ -181,10 +181,10 @@ Rigel runs in two logical stages.
                                              │ CSR arrays
                                              ▼
                               ┌──────────────────────────────────┐
-                              │  Stage 3: Empirical Bayes Priors │
-                              │  Py:  priors.py, locus.py        │
+                              │  Stage 3: gDNA Calibration       │
+                              │  Py:  calibration.py, locus.py   │
                               └──────────────┬───────────────────┘
-                                             │ gDNA inits + nRNA priors
+                                             │ per-locus γ (gDNA fraction)
                                              ▼
                               ┌──────────────────────────────────┐
                               │  Stage 4: Locus-Level EM         │
@@ -210,6 +210,16 @@ unambiguous gene assignment. Diagnostic exonic and intergenic strand models are
 also retained for reporting, but gDNA itself is always scored with strand
 probability `0.5`.
 
+### gDNA calibration
+
+Before per-locus EM, Rigel runs an aggregate-first calibration pass over
+genomic regions. Each region is classified using three signals: fragment
+density (Gaussian mixture), strand balance (Beta-Binomial with shared κ),
+and fragment length (separate RNA and gDNA models). Any region with spliced
+fragments is forced to zero gDNA probability. The resulting per-region
+posteriors (γ) are fragment-count-weighted to the locus level and used to
+initialize the gDNA component in the EM.
+
 ### Locus-level EM
 
 Ambiguous fragments are routed into CSR form and grouped into connected
@@ -220,10 +230,10 @@ unique nRNA spans, Rigel solves a `T + N + 1` component problem:
 - `N` shared nRNA components
 - `1` merged gDNA component for the locus
 
-The solver applies effective-length correction, strand and insert-size scoring,
-a tripartite prior system (coverage-weighted OVR for mRNA, sparsifying Dirichlet
-for nRNA, EB-anchored prior for gDNA), and post-EM pruning before
-expected-count assignment.
+The solver runs VBEM (default) or MAP-EM with SQUAREM acceleration. A
+tripartite prior (coverage-weighted OVR for mRNA, sparsifying Dirichlet for
+nRNA, calibrated γ for gDNA) is applied. Post-EM fragments are assigned using
+the configured assignment mode (`sample` by default).
 
 ---
 

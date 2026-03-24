@@ -5,51 +5,104 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-03-09
+## [0.2.0] - 2026-03-23
 
 ### Added
 
-- **Nascent RNA Decoupling Architecture**: nRNA components are now defined by unique genomic spans `(ref, strand, start, end)` rather than 1:1 transcript shadows. This dramatically reduces EM component count for genes with many isoforms sharing the same genomic coordinates (N ≪ T), improves convergence speed, and consolidates intronic read evidence.
+- **gDNA Calibration Framework** (`calibration.py`): New `GDNACalibration`
+  class performs aggregate-first region-level EM before per-locus quantification.
+  Three convergent signals drive per-region gDNA posterior estimates (γ):
+  - *Density*: Gaussian model on log fragment density, fit to expressed vs.
+    unexpressed regions.
+  - *Strand balance*: Beta-Binomial model with shared overdispersion κ.
+    Regions near 0.5 strand balance are consistent with gDNA; those near the
+    library strand-specificity are consistent with RNA.  κ is fit from data;
+    the LLR vanishes naturally when strand specificity is 0.5.
+  - *Fragment length*: Separate RNA and gDNA FL models built iteratively.
+  Hard constraint: any region with at least one spliced read has γ forced to 0.
+  Per-region posteriors are fragment-count-weighted to the locus level and
+  used as gDNA priors in the per-locus EM.
 
-- **Comprehensive Documentation**:
-  - [docs/MANUAL.md](docs/MANUAL.md): Complete user manual with all commands, parameters, output formats, examples, and FAQ.
-  - [docs/METHODS.md](docs/METHODS.md): Publication-quality mathematical methods document (14 sections) describing the complete Bayesian framework, generative model, EM algorithm, hierarchical priors, and implementation details.
-  - [docs/PUBLISHING.md](docs/PUBLISHING.md): Step-by-step guide for publishing releases to PyPI and Bioconda.
+- **Shared-span nRNA Architecture**: nRNA components are defined by unique
+  genomic spans `(ref, strand, start, end)` rather than 1:1 transcript
+  shadows. Spans are shared across isoforms with the same genomic coordinates,
+  reducing EM component count for isoform-rich loci and consolidating intronic
+  read evidence.
+
+- **Region-based Evidence Accumulation**: The C++ BAM scanner accumulates
+  per-region strand-resolved counts and fragment-length observations in a
+  single scan pass. This evidence feeds the calibration EM without a second
+  pass over the BAM.
+
+- **Discrete Fragment Assignment Modes**: New `--assignment-mode` parameter
+  controls post-EM fragment assignment: `"fractional"` (traditional EM
+  weights), `"map"` (assign to highest-posterior component), or `"sample"`
+  (stochastic draw). Default: `"sample"`.
+
+- **VBEM Solver Mode**: Variational Bayes EM (VBEM) is now the default solver
+  (`--em-mode vbem`). Classic MAP-EM is still available with `--em-mode map`.
+
+- **Posterior Pruning**: `--pruning-min-posterior` removes negligible candidates
+  from the CSR data structure before EM, reducing state space and improving
+  convergence speed.
+
+- **`nrna_quant.feather`**: New output with nRNA-span-level abundance estimates.
+  Complements the per-transcript nRNA values in `quant.feather`.
+
+- **`rigel export` Subcommand**: Converts any `.feather` files in a results
+  directory to TSV or Parquet:
+  ```bash
+  rigel export -o results/ --format tsv
+  rigel export -o results/ --format parquet
+  ```
+
+- **Category-specific Fragment Length Models**: Separate FL histograms for
+  spliced, unspliced, intergenic, and gDNA fragments. Intronic fragment
+  lengths use the gDNA FL model from calibration.
+
+- **Exponential Tail Decay**: Fragment lengths beyond `max_frag_length` receive
+  exponential log-penalty decay (≈ −0.01/bp) rather than a flat overflow bin.
 
 - **CI/CD Infrastructure**:
-  - GitHub Actions workflow for automated testing on Linux and macOS (Python 3.12 + 3.13).
-  - Automated wheel building and PyPI publishing via trusted publisher (OIDC).
+  - GitHub Actions workflow for automated testing on Linux and macOS
+    (Python 3.12 + 3.13).
+  - Automated wheel building and PyPI publishing via OIDC trusted publisher.
   - Binary wheels for Linux (x86_64, aarch64) and macOS (x86_64, arm64).
 
-- **Bioconda Recipe**: Template recipe at [conda/meta.yaml](conda/meta.yaml) for publishing to the Bioconda channel.
+- **Bioconda Recipe**: Template recipe at [conda/meta.yaml](conda/meta.yaml).
 
 ### Changed
 
-- **Package Naming**: PyPI distribution name is now `rigel-rnaseq` (install with `pip install rigel-rnaseq`) to avoid conflict with existing PyPI package. Import name, CLI command, GitHub repo, and Bioconda package remain `rigel`.
+- **Package Naming**: PyPI distribution name is `rigel-rnaseq` (install with
+  `pip install rigel-rnaseq`). Import name, CLI command, GitHub repo, and
+  Bioconda package remain `rigel`.
 
-- **Portable Wheel Builds**: Added `RIGEL_PORTABLE` CMake option to build wheels without `-march=native`, ensuring binaries run on any machine of the same architecture. CI builds use this flag automatically.
+- **Default EM Mode**: Changed from `"map"` to `"vbem"`.
 
-### Performance
+- **Default Assignment Mode**: Changed from `"fractional"` to `"sample"`.
 
-- **C++ Multithreading Optimizations**: Enhanced thread work-stealing and reduced synchronization overhead in EM solver and BAM scanner.
+- **`priors.py` removed**: Prior logic is now split between `calibration.py`
+  (gDNA calibration EM) and `locus.py` (per-locus initialization).
 
-- **BAM Reading Parallelism**: Improved htslib thread pool utilization for BGZF decompression.
-
-- **Double Precision EM**: Switched to `double` precision (64-bit float) throughout the EM kernel for improved numerical stability, particularly for loci with many transcripts.
-
-- **Memory Efficiency**: Reduced peak memory usage through optimized buffer management and columnar fragment storage.
+- **Portable Wheel Builds**: `RIGEL_PORTABLE` CMake option omits `-march=native`
+  for redistributable wheels. CI builds use this flag automatically.
 
 ### Fixed
 
-- **Documentation Accuracy**: Corrected gDNA model description in all documentation from "per-gene" to "per-locus" to match actual implementation. gDNA is modeled as a single shadow per locus at component index `[2T]`, not per-gene.
+- **Multimapper gDNA Double-counting**: Fixed a bug where multimapping fragments
+  near gDNA-heavy regions were double-counted, inflating gDNA estimates
+  particularly with minimap2-aligned BAMs.
 
-- **CMake Compiler Flags**: Reorganized optimization flags with separate handling for `-ffast-math` (applied to scoring but not EM to preserve Kahan summation accuracy).
+- **Splice-junction Gap Fragment Length**: Simplified and corrected the gap
+  correction applied to fragment lengths for reads spanning splice junctions.
 
-### Technical
+### Performance
 
-- **Build System**: Verified compatibility with scikit-build-core ≥0.4.3 and nanobind ≥2.0 for stable ABI wheel builds (CPython 3.12+).
-
-- **Link-Time Optimization (LTO)**: Enabled interprocedural optimization for cross-translation-unit inlining and dead code elimination.
+- Competitive with salmon/kallisto in pristine mRNA-only conditions while
+  adding joint nRNA and gDNA deconvolution.
+- C++ multithreading improvements: reduced synchronisation overhead in the
+  BAM scanner and EM solver.
+- Link-time optimisation (LTO) enabled across all native extension modules.
 
 ---
 
