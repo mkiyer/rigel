@@ -46,12 +46,14 @@ jobs:
           # Linux aarch64 (emulated)
           - os: ubuntu-latest
             cibw_archs: aarch64
-          # macOS x86_64
+          # macOS x86_64 — Ventura runner, brew targets 13.0
           - os: macos-13
             cibw_archs: x86_64
-          # macOS arm64
+            macos_target: "13.0"
+          # macOS arm64 — latest runner (macOS 15), brew targets 15.0
           - os: macos-latest
             cibw_archs: arm64
+            macos_target: "15.0"
 
     steps:
       - uses: actions/checkout@v4
@@ -81,10 +83,18 @@ jobs:
             ldconfig
           CIBW_BEFORE_ALL_MACOS: >
             brew install htslib pkg-config
-          # Set portable build flag (no -march=native)
+          # Set portable build flag (no -march=native) — Linux
           CIBW_ENVIRONMENT: >
             CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
             PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          # macOS: add homebrew paths and pin deployment target to match
+          # the macOS version of the runner (brew builds against that version).
+          # arm64: macos-latest = macOS 15, brew targets 15.0
+          # x86_64: macos-13 = macOS 13, brew targets 13.0
+          CIBW_ENVIRONMENT_MACOS: >
+            CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
+            PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            MACOSX_DEPLOYMENT_TARGET="${{ matrix.macos_target }}"
           # Smoke test: verify all native extensions are present
           CIBW_TEST_COMMAND: >-
             python -c "from rigel._bam_impl import BamScanner;

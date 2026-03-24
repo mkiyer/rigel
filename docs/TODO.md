@@ -1,5 +1,12 @@
 # TODO
 
+
+## Annotation BAM file
+
+There is a synchronization issue between the original BAM file parsing and the output annotated BAM file creation. This is because with multithreading, the fragments are parsed in an unpredicable order. The 'frag_id' should identify the fragment. Although the reads may not be in exact order, they should maintain _some_ of the original organization. The annotation BAM file will need to synchronize the original BAM file and the output by the fragment id (frag_id).
+
+
+
 ## Overhang likelihood penalty
 
 It appears to be fairly common the minimap2 alignments that *should* span introns do not because they would have a 'tiny' anchor on one of the two exons. It seems that the aligner aligns the reads as unspliced with an intronic overhang instead of spliced with a CIGAR 'N' operation and a tiny anchor on the following exon. This is fundamentally an aligner problem.
@@ -12,7 +19,6 @@ My gut feeling tells me that overhang penalty is too strict. However, the overha
 
 Now that we have our gDNA calibration results, we are estimating gDNA levels in the sample. I wonder if we can set the overhang penalty to something more reasonable, possibly related to gDNA levels. However, we don't have nascent RNA levels as part of our calibration. Nascent RNA cannot be estimated globally as nascent RNA varies widely from transcript to transcript.
 
-- First, ensure that the overhang penalty is wired through the pipeline and can be configured in the config YAML and CLI.
 - Try running the tool with different settings for the overhang penalty. This should confirm the suspicion that tiny overhangs effectively 'kill' the correct transcript.
 
 ### Investigation results (2026-03-23)
