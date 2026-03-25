@@ -117,11 +117,11 @@ This patches `conda/meta.yaml` with the real hash from PyPI.
 # Fork https://github.com/bioconda/bioconda-recipes on GitHub, then:
 git clone https://github.com/mkiyer/bioconda-recipes.git
 cd bioconda-recipes
-git checkout -b add-rigel-0.3.0
+git checkout -b add-rigel
 mkdir -p recipes/rigel
 cp /path/to/rigel/conda/meta.yaml recipes/rigel/meta.yaml
 git add recipes/rigel/meta.yaml
-git commit -m "Add rigel 0.3.0"
+git commit -m "Add rigel version"
 git push origin add-rigel
 # Open a PR at https://github.com/bioconda/bioconda-recipes/pulls
 ```

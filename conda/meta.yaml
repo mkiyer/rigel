@@ -68,5 +68,8 @@ about:
   doc_url: https://github.com/mkiyer/rigel/blob/main/docs/MANUAL.md
 
 extra:
+  additional-platforms:
+    - linux-aarch64
+    - osx-arm64
   recipe-maintainers:
     - mkiyer
