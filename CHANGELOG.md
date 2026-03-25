@@ -5,6 +5,35 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-03-24
+
+### Added
+
+- **Run-reproducible config export**: `rigel quant` now writes `config.yaml` to
+  the output directory with all resolved parameters and I/O paths, so runs can
+  be reproduced via `rigel quant --config config.yaml`.
+
+### Changed
+
+- **CLI/config resolution cleanup**: quant I/O options (`--bam`, `--index`,
+  `--output-dir`) can now be provided from YAML config when not set on CLI,
+  with explicit validation and clearer error messages for missing required
+  inputs.
+
+- **EM output simplification**: removed the high-confidence EM count pathway
+  (`confidence_threshold` and related accumulators) from Python/C++ EM plumbing,
+  keeping transcript EM accounting focused on the primary assignment outputs.
+
+- **Bioconda platform coverage**: recipe now opts into additional builds for
+  `linux-aarch64` and `osx-arm64`.
+
+### Fixed
+
+- **Bioconda macOS packaging robustness**: conda recipe build flow was updated
+  to use a dedicated `build.sh` that disables scikit-build stripping and forces
+  classic macOS linking, addressing `llvm-otool`/Mach-O post-processing
+  failures seen in cross-compiled macOS builds.
+
 ## [0.3.1] - 2026-03-24
 
 ### Fixed
@@ -212,6 +241,7 @@ Initial development release.
 - Fragment length models trained separately for RNA and gDNA.
 - Coverage weight model for positional bias correction.
 
+[0.3.2]: https://github.com/mkiyer/rigel/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/mkiyer/rigel/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mkiyer/rigel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mkiyer/rigel/compare/v0.1.0...v0.2.0
