@@ -228,27 +228,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     sm_primary = sm.exonic_spliced
     ci_lo, ci_hi = sm_primary.posterior_95ci()
 
-    # Fragment length summary (per-category stats, no histograms)
-    def _fl_summary(model) -> dict:
-        if model.n_observations == 0:
-            return {"mean": None, "std": None, "median": None, "mode": None, "n_obs": 0}
-        return {
-            "mean": round(model.mean, 2),
-            "std": round(model.std, 2),
-            "median": round(model.median, 2),
-            "mode": int(model.mode),
-            "n_obs": int(model.n_observations),
-        }
-
-    from .splice import SpliceType
-    fl_dict = {
-        "global": _fl_summary(flm.global_model),
-        "rna": _fl_summary(flm.rna_model),
-        "gdna": _fl_summary(flm.gdna_model),
-        "intergenic": _fl_summary(flm.intergenic),
-    }
-    for cat in SpliceType:
-        fl_dict[cat.name.lower()] = _fl_summary(flm.category_models[cat])
+    # Fragment length: full histograms + summary statistics per category
+    fl_dict = flm.to_dict()
 
     # Calibration section
     cal_dict = None
