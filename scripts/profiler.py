@@ -292,7 +292,6 @@ def _build_pipeline_config(
         "em_iterations": "iterations",
         "em_prior_pseudocount": "prior_pseudocount",
         "em_mode": "mode",
-        "confidence_threshold": "confidence_threshold",
         "n_threads": "n_threads",
     }
     for raw_key, cfg_key in _EM_ALIASES.items():
@@ -636,7 +635,6 @@ def profile_stages(
                     np.asarray(gdna_inits, dtype=np.float64),
                     em_iterations=em_config.iterations,
                     em_convergence_delta=em_config.convergence_delta,
-                    confidence_threshold=em_config.confidence_threshold,
                 )
             timings.locus_em = t_em.elapsed
             timings.locus_em_build = 0.0

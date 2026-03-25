@@ -1356,13 +1356,11 @@ static void extract_locus_sub_problem(
 static void assign_posteriors(
     const LocusSubProblem& sub,
     const double* theta,
-    double confidence_threshold,
     int assignment_mode,
     double min_posterior,
     SplitMix64& rng,
     // Output accumulators (accumulated across loci)
     double* em_counts_2d,          // [N_T, n_cols], row-major
-    double* em_high_conf_2d,       // [N_T, n_cols]
     double* gdna_locus_counts_2d,  // [N_T, n_cols]
     double* posterior_sum,         // [N_T]
     double* n_assigned,            // [N_T]
@@ -1481,9 +1479,7 @@ static void assign_posteriors(
             if (winner >= 0) weights[winner] = 1.0;
         }
 
-        // Track max mRNA posterior for high-confidence gating
-        // (always use original posteriors for HC gating, not assignment weights)
-        double max_mrna_posterior = 0.0;
+        // Track max mRNA posterior (for diagnostics)
 
         // Scatter assignment weights
         for (int j = 0; j < seg_len; ++j) {
@@ -1498,9 +1494,6 @@ static void assign_posteriors(
                 if (global_t < 0 || global_t >= N_T_TOTAL || col >= n_cols) continue;
                 em_counts_2d[global_t * n_cols + col] += p;
                 mrna_total += p;
-                // Use original posteriors for HC gating
-                if (posteriors[j] > max_mrna_posterior)
-                    max_mrna_posterior = posteriors[j];
 
                 // Confidence tracking (use original posteriors)
                 posterior_sum[global_t] += posteriors[j] * posteriors[j];
@@ -1508,22 +1501,6 @@ static void assign_posteriors(
             } else {
                 // gDNA
                 gdna_total += p;
-            }
-        }
-
-        // High-confidence mRNA: if max mRNA posterior >= threshold,
-        // scatter all mRNA assignment weights in this unit to hc counts
-        if (max_mrna_posterior >= confidence_threshold) {
-            for (int j = 0; j < seg_len; ++j) {
-                int32_t comp = sub.t_indices[s + j];
-                double p = weights[j];
-                if (comp < n_t && p > 0.0) {
-                    int32_t global_t = local_to_global[comp];
-                    uint8_t col = sub.count_cols[s + j];
-                    if (global_t >= 0 && global_t < N_T_TOTAL && col < n_cols) {
-                        em_high_conf_2d[global_t * n_cols + col] += p;
-                    }
-                }
             }
         }
 
@@ -1582,7 +1559,6 @@ batch_locus_em(
     i64_1d t_lengths_arr,
     // --- Mutable output accumulators ---
     f64_2d_mut em_counts_out,          // [N_T, n_cols]
-    f64_2d_mut em_high_conf_out,       // [N_T, n_cols]
     f64_2d_mut gdna_locus_counts_out,  // [N_T, n_cols]
     f64_1d_mut posterior_sum_out,       // [N_T]
     f64_1d_mut n_assigned_out,         // [N_T]
@@ -1591,7 +1567,6 @@ batch_locus_em(
     double convergence_delta,
     double total_pseudocount,
     bool   use_vbem,
-    double confidence_threshold,
     int    assignment_mode,
     double assignment_min_posterior,
     uint64_t rng_seed,
@@ -1631,7 +1606,6 @@ batch_locus_em(
 
     // Mutable output pointers
     double* em_out    = em_counts_out.data();
-    double* hc_out    = em_high_conf_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
     double* psum_out  = posterior_sum_out.data();
     double* nass_out  = n_assigned_out.data();
@@ -1718,7 +1692,7 @@ batch_locus_em(
         // Key safety property: loci are connected components of the
         // transcript-unit bipartite graph, so each transcript and each unit
         // belongs to exactly one locus.  This means different loci write to
-        // DISJOINT indices in the output arrays (em_out, hc_out, nrna_out,
+        // DISJOINT indices in the output arrays (em_out, nrna_out,
         // gdna_out, psum_out, nass_out).  No data races on those arrays.
         //
         // The only shared scalar accumulator is total_gdna_em, handled via
@@ -1818,9 +1792,9 @@ batch_locus_em(
             SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
             double locus_mrna = 0.0, locus_gdna = 0.0;
             assign_posteriors(
-                sub, result.theta.data(), confidence_threshold,
+                sub, result.theta.data(),
                 assignment_mode, assignment_min_posterior, locus_rng,
-                em_out, hc_out, gdna_out,
+                em_out, gdna_out,
                 psum_out, nass_out,
                 locus_mrna, locus_gdna,
                 N_T, N_COLS);
@@ -2181,7 +2155,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_ends"),
           nb::arg("t_lengths"),
           nb::arg("em_counts_out"),
-          nb::arg("em_high_conf_out"),
           nb::arg("gdna_locus_counts_out"),
           nb::arg("posterior_sum_out"),
           nb::arg("n_assigned_out"),
@@ -2189,7 +2162,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("convergence_delta"),
           nb::arg("total_pseudocount"),
           nb::arg("use_vbem"),
-          nb::arg("confidence_threshold"),
           nb::arg("assignment_mode"),
           nb::arg("assignment_min_posterior"),
           nb::arg("rng_seed"),

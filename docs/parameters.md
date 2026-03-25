@@ -97,7 +97,6 @@ sj_strand_tag: [auto]          # [XS] for STAR, [ts] for minimap2
 # EM algorithm
 prior_pseudocount: 1.0
 em_iterations: 1000
-confidence_threshold: 0.95
 assignment_mode: sample        # fractional | map | sample
 em_mode: vbem                  # vbem | map
 

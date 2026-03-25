@@ -1306,7 +1306,6 @@ def _build_pipeline_config(
         "em_pseudocount": "prior_alpha",
         "em_prior_gamma": "prior_gamma",
         "em_mode": "mode",
-        "confidence_threshold": "confidence_threshold",
         "n_threads": "n_threads",
     }
     for raw_key, cfg_key in _EM_ALIASES.items():

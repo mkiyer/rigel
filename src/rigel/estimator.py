@@ -142,11 +142,6 @@ class AbundanceEstimator:
         self.unambig_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         self.em_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
 
-        # Per-transcript high-confidence EM counts (posterior >= threshold).
-        self.em_high_conf_counts = np.zeros(
-            (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
-        )
-
         # --- gDNA: locus-level, NOT per-gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
@@ -199,11 +194,6 @@ class AbundanceEstimator:
         """Total transcript counts (unambig + EM), shape (N_t, 8)."""
         return self.unambig_counts + self.em_counts
 
-    @property
-    def t_high_conf_counts(self) -> np.ndarray:
-        """High-confidence transcript counts (unambig + EM above threshold)."""
-        return self.unambig_counts + self.em_high_conf_counts
-
     # ------------------------------------------------------------------
     # Batch locus EM — Phase 2A: single C++ call for all loci
     # ------------------------------------------------------------------
@@ -217,7 +207,6 @@ class AbundanceEstimator:
         *,
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
-        confidence_threshold: float = 0.95,
     ) -> tuple[float, np.ndarray, np.ndarray]:
         """Run locus-level EM for ALL loci in a single C++ call.
 
@@ -235,7 +224,7 @@ class AbundanceEstimator:
             Reference index.
         locus_gammas : np.ndarray
             float64[n_loci] — calibration gDNA fraction ∈ [0, 1] per locus.
-        em_iterations, em_convergence_delta, confidence_threshold
+        em_iterations, em_convergence_delta
             EM algorithm parameters.
 
         Returns
@@ -273,7 +262,6 @@ class AbundanceEstimator:
         t_lengths = index.t_df["length"].values.astype(np.int64)
 
         # Prepare mutable output accumulators
-        # (em_counts, em_high_conf_counts already on self)
         if self._em_posterior_sum is None:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
@@ -314,7 +302,6 @@ class AbundanceEstimator:
             t_lengths,
             # Mutable output accumulators
             self.em_counts,
-            self.em_high_conf_counts,
             self.gdna_locus_counts,
             self._em_posterior_sum,
             self._em_n_assigned,
@@ -323,7 +310,6 @@ class AbundanceEstimator:
             em_convergence_delta,
             self.em_config.prior_pseudocount,
             self.em_config.mode == "vbem",
-            confidence_threshold,
             assignment_mode_int,
             self.em_config.assignment_min_posterior,
             rng_seed,

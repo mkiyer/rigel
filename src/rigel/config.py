@@ -38,8 +38,6 @@ class EMConfig:
         Maximum EM iterations (default 1000).
     convergence_delta : float
         Convergence threshold for theta updates (default 1e-6).
-    confidence_threshold : float
-        Posterior threshold for high-confidence assignment (default 0.95).
     assignment_mode : str
         Post-EM fragment assignment mode: ``"fractional"`` (traditional
         EM posterior weights), ``"map"`` (assign to highest-posterior
@@ -58,7 +56,6 @@ class EMConfig:
     mode: str = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
-    confidence_threshold: float = 0.95
     assignment_mode: str = "sample"
     assignment_min_posterior: float = 0.01
     n_threads: int = 0

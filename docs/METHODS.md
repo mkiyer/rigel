@@ -289,13 +289,6 @@ The per-locus RNG for `sample` mode is seeded deterministically from the
 global `--seed` and the locus index, ensuring reproducibility regardless
 of thread scheduling.
 
-### 8.5 Confidence assignments
-
-Rigel separately tracks high-confidence RNA assignments using the
-RNA-normalized posterior and `confidence_threshold`. High-confidence
-gating always uses the original (pre-thresholding) fractional posteriors,
-regardless of `--assignment-mode`.
-
 ---
 
 ## 9. nRNA prior system
@@ -867,7 +860,6 @@ annotated transcript with the following fields:
 | `mrna` | Total mRNA fragment count |
 | `mrna_unambig` | Deterministic mRNA count |
 | `mrna_em` | EM-assigned mRNA count |
-| `mrna_high_conf` | Unambiguous plus high-confidence EM assignments |
 | `mrna_spliced` | Spliced mRNA count |
 | `nrna` | nRNA count fanned back from shared nRNA spans |
 | `rna_total` | `mrna + nrna` |

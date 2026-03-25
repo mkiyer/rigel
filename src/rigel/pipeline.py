@@ -461,7 +461,6 @@ def _run_locus_em(
         locus_gammas,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
-        confidence_threshold=em_config.confidence_threshold,
     )
 
     for i, locus in enumerate(loci):
