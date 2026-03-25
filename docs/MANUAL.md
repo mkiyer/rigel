@@ -181,7 +181,7 @@ sj_strand_tag: [auto]       # [XS] for STAR, [ts] for minimap2, [XS, ts] to try 
 # EM algorithm (defaults are suitable for most libraries)
 prior_pseudocount: 1.0
 em_iterations: 1000
-assignment_mode: sample     # fractional | map | sample
+assignment_mode: sample     # sample | fractional | map
 em_mode: vbem               # vbem | map
 
 # Performance
@@ -212,6 +212,13 @@ rigel quant --bam sample.bam --index index/ -o results/ \
 All outputs are written to `--output-dir`. Feather files (`.feather`) use
 ZSTD compression and are readable with `pandas.read_feather()` or
 `pyarrow.feather.read_feather()`.
+
+A `config.yaml` is also written to the output directory, recording all
+resolved parameters and I/O paths. Rerun the exact same analysis with:
+
+```bash
+rigel quant --config results/config.yaml
+```
 
 ### quant.feather / quant.tsv
 
@@ -318,7 +325,7 @@ Run-level summary. Key sections:
 | `fragment_stats` | Genic, intergenic, chimeric counts |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, 95% CI |
 | `calibration` | gDNA calibration summary: density, κ, π, per-ref stats |
-| `fragment_length` | Mean/std/median/mode/n_obs per category (rna, gdna, intergenic, spliced, unspliced) |
+| `fragment_length` | Per-category summary statistics (mean/std/median/mode/n_obs) and full histograms with trimmed zero bins for QC plotting |
 | `quantification` | n_transcripts, n_genes, n_loci, mRNA/nRNA/gDNA totals and fractions |
 
 ### Annotated BAM
@@ -329,12 +336,15 @@ Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 |-----|------|-------------|
 | `ZT` | string | Assigned transcript ID, or `.` |
 | `ZG` | string | Assigned gene ID, or `.` |
+| `ZI` | int | Transcript index into rigel reference (`-1` if unassigned) |
+| `ZJ` | int | Gene index into rigel reference (`-1` if unassigned) |
 | `ZP` | string | Assignment pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, or `chimeric` |
 | `ZW` | float | Posterior probability of the assignment |
 | `ZC` | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
 | `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise |
 | `ZN` | int | Number of competing candidate components |
 | `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `ambiguous` |
+| `ZL` | int | Locus ID (`-1` if no locus) |
 
 ---
 
@@ -402,6 +412,7 @@ rule rigel_quant:
         nrna_quant = "results/{sample}/nrna_quant.feather",
         loci       = "results/{sample}/loci.feather",
         summary    = "results/{sample}/summary.json",
+        run_config = "results/{sample}/config.yaml",
     log:
         "logs/rigel_{sample}.log",
     threads: 8
@@ -505,6 +516,12 @@ rigel quant \
 rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --seed 42 --threads 1
+```
+
+A `config.yaml` is written to the output directory, so you can rerun later:
+
+```bash
+rigel quant --config results/config.yaml
 ```
 
 ### Output TSV tables

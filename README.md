@@ -147,8 +147,9 @@ cat results/summary.json
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
 | `nrna_quant.feather` / `nrna_quant.tsv` | nRNA-span-level abundance estimates (one row per unique genomic nRNA span) |
 | `loci.feather` / `loci.tsv` | Per-locus EM summary with `mrna`, `nrna`, `gdna`, and `gdna_init` |
-| `summary.json` | Library protocol, strand specificity, fragment-length statistics, calibration results, alignment counts, and global quantification totals |
-| `annotated.bam` | Optional annotated BAM with `ZT`, `ZG`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, and `ZS` tags |
+| `summary.json` | Library protocol, strand specificity, fragment-length histograms, calibration results, alignment counts, and global quantification totals |
+| `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
+| `annotated.bam` | Optional annotated BAM with `ZT`, `ZG`, `ZI`, `ZJ`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL` tags |
 
 The `nrna` values in transcript- and gene-level tables are derived from shared
 nRNA-span counts that are pro-rated across transcripts sharing the same span.

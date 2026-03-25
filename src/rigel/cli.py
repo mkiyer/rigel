@@ -828,7 +828,7 @@ def build_parser() -> argparse.ArgumentParser:
     quant_parser.add_argument(
         "--annotated-bam", dest="annotated_bam", default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
-             "(ZT, ZG, ZP, ZW, ZC, ZH, ZN, ZS) to this path. "
+             "(ZT, ZG, ZI, ZJ, ZP, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
              "Requires a second pass over the BAM.",
     )
     quant_parser.add_argument(

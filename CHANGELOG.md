@@ -5,6 +5,36 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Fragment length histograms in summary.json**: the `fragment_length` section
+  now includes full per-category histograms (trimmed zero bins) alongside the
+  existing summary statistics. Each category (global, rna, gdna, intergenic,
+  and per-SpliceType) reports `{summary: {...}, histogram: {range, values}}`.
+  Enables downstream QC plotting and RNA-vs-gDNA distribution comparison.
+
+- **Annotated BAM: transcript and gene index tags**: new integer tags `ZI`
+  (transcript index) and `ZJ` (gene index) encode the zero-based index into
+  the rigel reference, enabling compact downstream encodings without string
+  lookups. Unassigned fragments get `-1`.
+
+- **config.yaml output**: `rigel quant` writes a `config.yaml` to the output
+  directory recording all resolved parameters. Rerun with
+  `rigel quant --config results/config.yaml`.
+
+### Changed
+
+- **Removed `--confidence-threshold`**: the high-confidence EM count pathway
+  has been fully removed from Python, C++, CLI, and config. The EM now focuses
+  on primary assignment outputs only.
+
+- **CLI cleanup**: default-first ordering for `--assignment-mode` and
+  `--em-mode` choices; clearer help strings throughout; fixed duplicate
+  `--no-*` flags from `BooleanOptionalAction`; quant I/O args can now be
+  provided from YAML config.
+
 ## [0.3.2] - 2026-03-24
 
 ### Added

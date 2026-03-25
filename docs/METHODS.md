@@ -886,7 +886,7 @@ totals, number of transcripts and genes, and genomic coordinates.
 
 The `summary.json` file reports:
 - Library protocol and strand specificity
-- Fragment length distribution statistics
+- Fragment length distribution histograms (per-category: global, rna, gdna, intergenic, and per-SpliceType) with trimmed zero bins, plus summary statistics (mean, std, median, mode, n_obs)
 - Alignment statistics (total, mapped, unique, multimapping, duplicate reads)
 - Fragment classification counts (genic, intergenic, chimeric)
 - Global quantification totals (mRNA/nRNA/gDNA fractions)
@@ -900,12 +900,15 @@ encoding the EM assignment:
 |-----|------|-------------|
 | ZT | string | Transcript ID, or `.` for intergenic or gDNA-only assignments |
 | ZG | string | Gene ID, or `.` when not applicable |
+| ZI | int | Transcript index into rigel reference (`-1` if unassigned) |
+| ZJ | int | Gene index into rigel reference (`-1` if unassigned) |
 | ZP | string | Assignment pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, or `chimeric` |
 | ZW | float | Posterior probability of the chosen assignment |
 | ZC | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
 | ZH | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise |
 | ZN | int | Number of competing candidate components |
 | ZS | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `ambiguous` |
+| ZL | int | Locus ID (`-1` if no locus) |
 
 ---
 

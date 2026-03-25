@@ -38,6 +38,12 @@ BAM Tag Schema
    * - ZG
      - Z
      - Gene ID (``"."`` for intergenic)
+   * - ZI
+     - i
+     - Transcript index into rigel reference (``-1`` if unassigned)
+   * - ZJ
+     - i
+     - Gene index into rigel reference (``-1`` if unassigned)
    * - ZP
      - Z
      - Pool: ``mRNA``, ``nRNA``, ``gDNA``, ``intergenic``, ``chimeric``

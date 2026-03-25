@@ -25,8 +25,8 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 
 | Flag | Description |
 |------|-------------|
-| `--bam` | Name-sorted or collated BAM (must have `NH` tag) |
-| `--index` | Rigel index directory |
+| `--bam` | Name-sorted BAM file. Minimap2 and STAR are supported. NH tag used when present; otherwise multimappers are detected from secondary BAM flags. |
+| `--index` | Rigel index directory (from `rigel index`) |
 | `-o`, `--output-dir` | Output directory |
 
 ### Library and input
@@ -44,8 +44,7 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 |------|---------|-------------|
 | `--prior-pseudocount` | `1.0` | Total OVR prior budget C (virtual fragments). Distributed as γ×C to gDNA and (1−γ)×C coverage-weighted across RNA components. Increase to strengthen priors in low-count loci. |
 | `--em-iterations` | `1000` | Maximum EM iterations. `0` = skip EM entirely (unambiguous fragments only). |
-| `--confidence-threshold` | `0.95` | RNA-normalized posterior threshold for high-confidence assignment (used in `mrna_spliced` QC column). |
-| `--assignment-mode` | `sample` | Post-EM fragment assignment mode: `fractional` (preserve EM weights), `map` (assign to argmax component), `sample` (draw from posterior distribution). |
+| `--assignment-mode` | `sample` | Post-EM fragment assignment mode: `sample` (draw from posterior distribution, default), `fractional` (preserve EM weights), `map` (assign to argmax component). |
 | `--em-mode` | `vbem` | EM algorithm variant: `vbem` (Variational Bayes EM, default) or `map` (MAP-EM). |
 
 ### Output
@@ -53,7 +52,7 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--tsv` | off | Write TSV mirrors alongside Feather files |
-| `--annotated-bam PATH` | — | Write annotated BAM with per-fragment assignment tags (`ZT`, `ZG`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`). Requires a second BAM pass. |
+| `--annotated-bam PATH` | — | Write annotated BAM with per-fragment assignment tags (`ZT`, `ZG`, `ZI`, `ZJ`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL`). Requires a second BAM pass. |
 
 ### Performance
 
@@ -97,7 +96,7 @@ sj_strand_tag: [auto]          # [XS] for STAR, [ts] for minimap2
 # EM algorithm
 prior_pseudocount: 1.0
 em_iterations: 1000
-assignment_mode: sample        # fractional | map | sample
+assignment_mode: sample        # sample | fractional | map
 em_mode: vbem                  # vbem | map
 
 # Performance

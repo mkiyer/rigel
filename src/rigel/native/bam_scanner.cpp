@@ -1611,6 +1611,7 @@ public:
                 // multimapper filtering, so we must still advance frag_id
                 // here to keep pass-2 lookup synchronized.
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".",
+                                    -1, -1,
                                     "intergenic", 0.0f,
                                     "intergenic", 1, 0, "unknown", -1);
                 n_intergenic++;
@@ -1709,6 +1710,8 @@ public:
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
                         t_id_str, g_id_str,
+                        static_cast<int>(best_tid_val),
+                        static_cast<int>(best_gid_val),
                         pool_label(pool_val), post_val,
                         frag_class_label(fc_val),
                         is_primary ? 1 : 0,
@@ -1722,6 +1725,7 @@ public:
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
                         ".", ".",
+                        -1, -1,
                         "intergenic", 0.0f,
                         "intergenic",
                         (hit_idx == 0) ? 1 : 0,
@@ -1822,6 +1826,8 @@ private:
         const bam_hdr_t* hdr,
         const char* zt,    // transcript ID
         const char* zg,    // gene ID
+        int zi,            // transcript index (-1 = unassigned)
+        int zj,            // gene index (-1 = unassigned)
         const char* zp,    // pool label
         float zw,          // posterior
         const char* zc,    // fragment class label
@@ -1835,6 +1841,8 @@ private:
                 static_cast<int>(strlen(zt) + 1), zt);
             bam_aux_update_str(r, "ZG",
                 static_cast<int>(strlen(zg) + 1), zg);
+            bam_aux_update_int(r, "ZI", zi);
+            bam_aux_update_int(r, "ZJ", zj);
             bam_aux_update_str(r, "ZP",
                 static_cast<int>(strlen(zp) + 1), zp);
             bam_aux_update_float(r, "ZW", zw);
