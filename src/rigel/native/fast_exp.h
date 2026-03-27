@@ -33,6 +33,10 @@
 #include <arm_neon.h>
 #endif
 
+#if RIGEL_ARCH_X86_64
+#include <immintrin.h>
+#endif
+
 namespace rigel {
 
 // ================================================================
@@ -159,5 +163,109 @@ inline float64x2_t fast_exp_neon(float64x2_t x) {
 }
 
 #endif // RIGEL_HAS_NEON
+
+// ================================================================
+// AVX2 4-wide fast_exp (x86_64 with AVX2+FMA)
+// ================================================================
+
+#if RIGEL_HAS_AVX2 && RIGEL_HAS_FMA
+
+inline __m256d fast_exp_avx2(__m256d x) {
+    const __m256d log2e  = _mm256_set1_pd(detail::EXP_LOG2E);
+    const __m256d ln2_hi = _mm256_set1_pd(detail::EXP_LN2_HI);
+    const __m256d ln2_lo = _mm256_set1_pd(detail::EXP_LN2_LO);
+    const __m256d cutoff = _mm256_set1_pd(detail::EXP_CUTOFF);
+
+    // Underflow mask: lanes where x < -708.0
+    __m256d uf_mask = _mm256_cmp_pd(x, cutoff, _CMP_LT_OQ);
+
+    // Range reduction: n = round(x / ln2), r = x - n*ln2
+    __m256d n = _mm256_round_pd(
+        _mm256_mul_pd(x, log2e),
+        _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    // r = x - n*ln2_hi - n*ln2_lo  (Cody-Waite two-part reduction)
+    __m256d r = _mm256_fnmadd_pd(n, ln2_hi, x);      // r = x - n*ln2_hi
+    r = _mm256_fnmadd_pd(n, ln2_lo, r);               // r = r - n*ln2_lo
+
+    // Horner polynomial evaluation: exp(r) ≈ 1 + r*(1 + r*(C2 + ...C11))
+    __m256d p = _mm256_set1_pd(detail::C11);
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C10));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C9));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C8));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C7));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C6));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C5));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C4));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C3));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(detail::C2));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0));
+
+    // Scale by 2^n via IEEE-754 exponent bit manipulation
+    __m128i ni = _mm256_cvtpd_epi32(n);                // double → int32 (4 lanes → 128-bit)
+    __m256i ni64 = _mm256_cvtepi32_epi64(ni);          // int32 → int64
+    __m256i shift = _mm256_slli_epi64(ni64, 52);       // n << 52
+    __m256i p_bits = _mm256_castpd_si256(p);
+    p_bits = _mm256_add_epi64(p_bits, shift);
+    p = _mm256_castsi256_pd(p_bits);
+
+    // Zero out underflow lanes
+    p = _mm256_andnot_pd(uf_mask, p);
+
+    return p;
+}
+
+#endif // RIGEL_HAS_AVX2 && RIGEL_HAS_FMA
+
+// ================================================================
+// AVX-512 8-wide fast_exp (x86_64 with AVX-512F)
+// ================================================================
+
+#if RIGEL_HAS_AVX512F
+
+inline __m512d fast_exp_avx512(__m512d x) {
+    const __m512d log2e  = _mm512_set1_pd(detail::EXP_LOG2E);
+    const __m512d ln2_hi = _mm512_set1_pd(detail::EXP_LN2_HI);
+    const __m512d ln2_lo = _mm512_set1_pd(detail::EXP_LN2_LO);
+    const __m512d cutoff = _mm512_set1_pd(detail::EXP_CUTOFF);
+
+    // Underflow mask: lanes where x < -708.0
+    __mmask8 uf_mask = _mm512_cmp_pd_mask(x, cutoff, _CMP_LT_OQ);
+
+    // Range reduction
+    __m512d n = _mm512_roundscale_pd(
+        _mm512_mul_pd(x, log2e), _MM_FROUND_TO_NEAREST_INT);
+    __m512d r = _mm512_fnmadd_pd(n, ln2_hi, x);
+    r = _mm512_fnmadd_pd(n, ln2_lo, r);
+
+    // Horner polynomial
+    __m512d p = _mm512_set1_pd(detail::C11);
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C10));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C9));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C8));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C7));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C6));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C5));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C4));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C3));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(detail::C2));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(1.0));
+    p = _mm512_fmadd_pd(p, r, _mm512_set1_pd(1.0));
+
+    // Scale by 2^n
+    __m256i ni = _mm512_cvtpd_epi32(n);                // double → int32 (8 lanes → 256-bit)
+    __m512i ni64 = _mm512_cvtepi32_epi64(ni);          // int32 → int64
+    __m512i shift = _mm512_slli_epi64(ni64, 52);
+    __m512i p_bits = _mm512_castpd_si512(p);
+    p_bits = _mm512_add_epi64(p_bits, shift);
+    p = _mm512_castsi512_pd(p_bits);
+
+    // Zero out underflow lanes using mask
+    p = _mm512_maskz_mov_pd(~uf_mask, p);
+
+    return p;
+}
+
+#endif // RIGEL_HAS_AVX512F
 
 } // namespace rigel

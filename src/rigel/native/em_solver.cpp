@@ -366,7 +366,71 @@ static inline void em_step_kernel_range(
         double row_sum = 0.0;
         int j = 0;
 
-#if RIGEL_HAS_NEON
+#if RIGEL_HAS_AVX512F
+        {
+            __m512d sum_v = _mm512_setzero_pd();
+            const __m512d max_v = _mm512_set1_pd(max_val);
+            const __m512d cutoff_v = _mm512_set1_pd(rigel::detail::EXP_CUTOFF);
+
+            for (; j + 8 <= k; j += 8) {
+                __m512d v = _mm512_loadu_pd(row + j);
+                v = _mm512_sub_pd(v, max_v);
+
+                // Whole-vector early-zero skip: if ALL 8 lanes < cutoff
+                __mmask8 mask = _mm512_cmp_pd_mask(v, cutoff_v, _CMP_LT_OQ);
+                if (mask == 0xFF) {
+                    _mm512_storeu_pd(row + j, _mm512_setzero_pd());
+                    continue;
+                }
+
+                v = rigel::fast_exp_avx512(v);
+                _mm512_storeu_pd(row + j, v);
+                sum_v = _mm512_add_pd(sum_v, v);
+            }
+            row_sum = _mm512_reduce_add_pd(sum_v);
+        }
+        // AVX-512 scalar tail
+        for (; j < k; ++j) {
+            double x = row[j] - max_val;
+            double e = rigel::fast_exp_scalar(x);
+            row[j] = e;
+            row_sum += e;
+        }
+#elif RIGEL_HAS_AVX2 && RIGEL_HAS_FMA
+        {
+            __m256d sum_v = _mm256_setzero_pd();
+            const __m256d max_v = _mm256_set1_pd(max_val);
+            const __m256d cutoff_v = _mm256_set1_pd(rigel::detail::EXP_CUTOFF);
+
+            for (; j + 4 <= k; j += 4) {
+                __m256d v = _mm256_loadu_pd(row + j);
+                v = _mm256_sub_pd(v, max_v);
+
+                // Whole-vector early-zero skip: if ALL 4 lanes < cutoff
+                __m256d cmp = _mm256_cmp_pd(v, cutoff_v, _CMP_LT_OQ);
+                if (_mm256_movemask_pd(cmp) == 0xF) {
+                    _mm256_storeu_pd(row + j, _mm256_setzero_pd());
+                    continue;
+                }
+
+                v = rigel::fast_exp_avx2(v);
+                _mm256_storeu_pd(row + j, v);
+                sum_v = _mm256_add_pd(sum_v, v);
+            }
+            // Horizontal sum of 4 lanes
+            __m128d lo = _mm256_castpd256_pd128(sum_v);
+            __m128d hi = _mm256_extractf128_pd(sum_v, 1);
+            lo = _mm_add_pd(lo, hi);
+            row_sum = _mm_cvtsd_f64(lo) + _mm_cvtsd_f64(_mm_unpackhi_pd(lo, lo));
+        }
+        // AVX2 scalar tail
+        for (; j < k; ++j) {
+            double x = row[j] - max_val;
+            double e = rigel::fast_exp_scalar(x);
+            row[j] = e;
+            row_sum += e;
+        }
+#elif RIGEL_HAS_NEON
         {
             float64x2_t sum_v = vdupq_n_f64(0.0);
             const float64x2_t max_v = vdupq_n_f64(max_val);
@@ -390,14 +454,22 @@ static inline void em_step_kernel_range(
             }
             row_sum = vgetq_lane_f64(sum_v, 0) + vgetq_lane_f64(sum_v, 1);
         }
-#endif
-        // Scalar tail (odd k, or non-NEON builds)
+        // NEON scalar tail
         for (; j < k; ++j) {
             double x = row[j] - max_val;
             double e = rigel::fast_exp_scalar(x);
             row[j] = e;
             row_sum += e;
         }
+#else
+        // Pure scalar path (no SIMD)
+        for (; j < k; ++j) {
+            double x = row[j] - max_val;
+            double e = rigel::fast_exp_scalar(x);
+            row[j] = e;
+            row_sum += e;
+        }
+#endif
 
         // Normalize
         if (row_sum > 0.0 && std::isfinite(row_sum)) {
@@ -2205,7 +2277,19 @@ NB_MODULE(_em_impl, m) {
               // Allocate output array
               double* out = new double[n];
               size_t i = 0;
-#if RIGEL_HAS_NEON
+#if RIGEL_HAS_AVX512F
+              for (; i + 8 <= n; i += 8) {
+                  __m512d v = _mm512_loadu_pd(src + i);
+                  v = rigel::fast_exp_avx512(v);
+                  _mm512_storeu_pd(out + i, v);
+              }
+#elif RIGEL_HAS_AVX2 && RIGEL_HAS_FMA
+              for (; i + 4 <= n; i += 4) {
+                  __m256d v = _mm256_loadu_pd(src + i);
+                  v = rigel::fast_exp_avx2(v);
+                  _mm256_storeu_pd(out + i, v);
+              }
+#elif RIGEL_HAS_NEON
               for (; i + 2 <= n; i += 2) {
                   float64x2_t v = vld1q_f64(src + i);
                   v = rigel::fast_exp_neon(v);
