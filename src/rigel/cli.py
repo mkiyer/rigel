@@ -12,8 +12,10 @@ Subcommands:
 
 import argparse
 import logging
+import math as _math
 import sys
 import time
+from dataclasses import dataclass as _dataclass
 from pathlib import Path
 
 
@@ -131,7 +133,7 @@ def _build_pipeline_config(
     args: argparse.Namespace,
     seed: int,
     sj_strand_tag: str | tuple[str, ...],
-) -> "PipelineConfig":
+) -> "PipelineConfig":  # noqa: F821
     """Translate resolved CLI args into a ``PipelineConfig``.
 
     Field mapping is driven by ``_PARAM_SPECS`` — see the declarative
@@ -217,7 +219,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     sm = result.strand_models
     flm = result.frag_length_models
     total_mrna = float(quant_df["mrna"].sum())
-    total_nrna = float(quant_df["nrna"].sum())
+    total_nrna = float(estimator.nrna_em_count)
     total_gdna = float(estimator.gdna_em_count)
     total_rna = total_mrna + total_nrna
     total_all = total_rna + total_gdna + stats.n_intergenic
@@ -478,9 +480,6 @@ def export_command(args: argparse.Namespace) -> int:
 #   3. Add a _ParamSpec entry here
 # Everything else (_build_quant_defaults, _build_pipeline_config,
 # _write_run_config, _resolve_quant_args) is driven by this registry.
-
-from dataclasses import dataclass as _dataclass
-import math as _math
 
 
 @_dataclass(frozen=True)

@@ -15,16 +15,12 @@ Tag type scenarios covered:
 - Read-strand flipping for the 'ts' tag on reverse reads
 """
 
-import struct
-import tempfile
 from pathlib import Path
 
-import numpy as np
 import pysam
 import pytest
 
-from rigel._bam_impl import BamScanner, detect_sj_strand_tag
-from rigel.index import TranscriptIndex
+from rigel._bam_impl import detect_sj_strand_tag
 
 
 # =====================================================================
@@ -68,7 +64,7 @@ def _make_spliced_read(
         # 50M 200N 50M — two exon blocks separated by a 200bp intron
         cigar = [(0, 50), (3, 200), (0, 50)]
     a.cigar = cigar
-    a.query_sequence = "A" * sum(l for op, l in cigar if op in (0, 1, 4))
+    a.query_sequence = "A" * sum(n for op, n in cigar if op in (0, 1, 4))
     a.query_qualities = pysam.qualitystring_to_array(
         "I" * len(a.query_sequence)
     )
@@ -97,8 +93,8 @@ def _make_read_pair(
     if r2_cigar is None:
         r2_cigar = [(0, 100)]
 
-    seq_len_r1 = sum(l for op, l in r1_cigar if op in (0, 1, 4))
-    seq_len_r2 = sum(l for op, l in r2_cigar if op in (0, 1, 4))
+    seq_len_r1 = sum(n for op, n in r1_cigar if op in (0, 1, 4))
+    seq_len_r2 = sum(n for op, n in r2_cigar if op in (0, 1, 4))
 
     r2_start = pos + 400
 
@@ -152,7 +148,6 @@ def _read_back_tags(bam_path: str) -> list[dict]:
     results = []
     with pysam.AlignmentFile(bam_path, "rb") as bam:
         for read in bam:
-            tag_info = {}
             for tag, val in read.get_tags(with_value_type=True):
                 # get_tags with_value_type returns (tag, value, type_code)
                 pass

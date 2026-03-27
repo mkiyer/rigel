@@ -1,9 +1,7 @@
 """CLI parser tests."""
 
 import textwrap
-from pathlib import Path
 
-import pytest
 
 from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
 

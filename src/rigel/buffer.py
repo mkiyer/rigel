@@ -33,14 +33,13 @@ from typing import Iterator
 
 import numpy as np
 
+from .native import FragmentAccumulator
 from .splice import SpliceType
 from .types import ChimeraType, Strand
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["FragmentBuffer", "BufferedFragment"]
-
-from .native import FragmentAccumulator, ResolvedFragment
 
 # Fragment classification constants used by fragment_classes property
 FRAG_UNAMBIG: int = 0  # same-strand, 1 transcript, NH=1

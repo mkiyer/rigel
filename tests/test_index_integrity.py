@@ -412,7 +412,6 @@ class TestLargerIndex:
     @pytest.fixture(scope="class")
     def complex_index(self, tmp_path_factory):
         """Build an index with 10 genes, ~30 transcripts, overlapping exons."""
-        import pysam
         from conftest import build_test_index
 
         # Build a more complex GTF with multiple genes and overlapping exons
@@ -461,9 +460,9 @@ class TestLargerIndex:
 
         # Gene D (+ strand): single-exon gene (unspliced)
         lines.append(
-            f'chr1\ttest\texon\t4000\t5000\t.\t+\t.\t'
-            f'gene_id "gD"; transcript_id "tD1"; gene_name "GeneD"; '
-            f'gene_type "protein_coding"; tag "basic";'
+            'chr1\ttest\texon\t4000\t5000\t.\t+\t.\t'
+            'gene_id "gD"; transcript_id "tD1"; gene_name "GeneD"; '
+            'gene_type "protein_coding"; tag "basic";'
         )
 
         gtf_text = "\n".join(lines) + "\n"

@@ -141,7 +141,7 @@ class TestAnnotatedBamIntegration:
         """run_pipeline with annotated_bam_path writes a valid BAM."""
         import pysam
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
-        from rigel.sim import SimConfig, run_benchmark
+        from rigel.sim import SimConfig
         from rigel.pipeline import run_pipeline
 
         sim_config = SimConfig(
@@ -153,7 +153,7 @@ class TestAnnotatedBamIntegration:
         )
 
         annotated_bam = tmp_path / "annotated.bam"
-        pr = run_pipeline(
+        run_pipeline(
             result.bam_path,
             result.index,
             config=PipelineConfig(

@@ -1,6 +1,9 @@
 """Tests for rigel.resolution — chimera detection and fragment resolution."""
 
+import textwrap
+
 import pytest
+from conftest import build_test_index
 
 from rigel.types import ChimeraType, Strand, GenomicInterval
 from rigel.splice import SpliceType
@@ -175,9 +178,6 @@ class TestDetectIntrachromosomalChimera:
 # specific TranscriptIndex it needs.  A shared mini_index fixture (from
 # conftest.py) is reused when the MINI_GTF layout suffices.
 # =====================================================================
-
-import textwrap
-from conftest import build_test_index
 
 
 def _t_map(index):

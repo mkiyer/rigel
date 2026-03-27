@@ -1,6 +1,5 @@
 """Tests for rigel.sim.oracle_bam — Oracle BAM fragment simulator."""
 
-import numpy as np
 import pysam
 import pytest
 from pathlib import Path

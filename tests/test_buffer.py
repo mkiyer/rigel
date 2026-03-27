@@ -5,21 +5,16 @@ FragmentResolver.resolve_fragment(), exercising the real native code path.
 """
 
 import numpy as np
-import pytest
 
-from rigel.types import Strand, MergeOutcome, GenomicInterval, ChimeraType
+from rigel.types import Strand, MergeOutcome, GenomicInterval
 from rigel.splice import SpliceType
 from rigel.resolution import make_fragment, resolve_fragment
 from rigel.buffer import (
     FragmentBuffer,
     BufferedFragment,
-    FRAG_UNAMBIG,
     FRAG_AMBIG_SAME_STRAND,
-    FRAG_AMBIG_OPP_STRAND,
     FRAG_MULTIMAPPER,
-    FRAG_CHIMERIC,
 )
-from rigel.index import TranscriptIndex
 
 
 # =====================================================================

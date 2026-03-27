@@ -9,7 +9,6 @@ import math
 
 import numpy as np
 import numpy.testing as npt
-import pytest
 
 from rigel._em_impl import _fast_exp_test_array
 

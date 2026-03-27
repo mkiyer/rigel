@@ -7,7 +7,6 @@ orientation, interval representation, and set-merging primitives.
 Coordinate convention: all coordinates are 0-based, half-open (BED style).
 """
 
-from dataclasses import dataclass
 from enum import IntEnum
 from typing import NamedTuple
 

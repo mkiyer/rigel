@@ -1,6 +1,5 @@
 """Tests for rigel.sim — simulation framework components."""
 
-import numpy as np
 import pytest
 
 from rigel.sim.genome import MutableGenome, reverse_complement
@@ -474,7 +473,7 @@ class TestReadSimulator:
             frag_mean=250, frag_std=50, frag_min=100,
             frag_max=700, read_length=100, seed=42,
         )
-        sim = ReadSimulator(g, transcripts, config=config)
+        ReadSimulator(g, transcripts, config=config)
 
         # Single-exon transcript should have nrna_abundance zeroed
         t_single = [t for t in transcripts if t.t_id == "t_single"][0]

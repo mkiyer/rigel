@@ -45,7 +45,7 @@ import pysam
 
 from ..transcript import Transcript
 from ..types import Strand
-from .genome import MutableGenome, reverse_complement
+from .genome import MutableGenome
 from .reads import GDNAConfig, ReadSimulator, SimConfig
 
 logger = logging.getLogger(__name__)
@@ -552,7 +552,6 @@ class OracleBamSimulator:
                 is_reverse_strand = bool(strands[i])
                 strand_char = "r" if is_reverse_strand else "f"
 
-                blocks = [(gstart, gend)]
                 frag_genomic_seq = self.genome[gstart:gend]
 
                 rname = f"gdna:{gstart}-{gend}:{strand_char}:{global_idx}"
@@ -727,7 +726,7 @@ class OracleBamSimulator:
         if the fragment is on the + strand, R1 is reverse-complement of the
         3' end, R2 is sense from the 5' end (and vice versa for − strand).
         """
-        frag_len = gend - gstart
+        gend - gstart
 
         if not is_reverse_strand:
             # Fragment on + strand:

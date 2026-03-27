@@ -821,7 +821,7 @@ class TestEStep:
     def _call_e_step(self, stats, pi=0.5, ss=0.95):
         """Helper that computes density Gaussian + calls _e_step."""
         log_d, eligible = _density_setup(stats)
-        n = len(stats["n_total"])
+        len(stats["n_total"])
         # Use broad uninformative Gaussian (equal for both components)
         ld_elig = log_d[eligible]
         if eligible.any():
@@ -1212,7 +1212,7 @@ class TestSignalCombination:
     def _call_e_step(self, stats, pi=0.5, ss=0.95):
         """Helper that computes density Gaussian + calls _e_step."""
         log_d, eligible = _density_setup(stats)
-        n = len(stats["n_total"])
+        len(stats["n_total"])
         ld_elig = log_d[eligible]
         if eligible.any():
             mu = float(np.mean(ld_elig))

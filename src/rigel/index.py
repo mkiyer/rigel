@@ -1063,7 +1063,7 @@ class TranscriptIndex:
         ctx = FragmentResolver()
 
         # 1. Overlap index from collapsed data
-        n_collapsed = len(_collapse_keys)
+        len(_collapse_keys)
         cr_refs = [k[0] for k in _collapse_keys]
         cr_starts = [k[1] for k in _collapse_keys]
         cr_ends = [k[2] for k in _collapse_keys]

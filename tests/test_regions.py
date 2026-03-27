@@ -15,6 +15,8 @@ Expected region boundaries on chr1 (sorted unique):
   → 11 atomic regions
 """
 
+import textwrap
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -23,10 +25,7 @@ from rigel.index import (
     TranscriptIndex,
     build_region_table,
     read_transcripts,
-    load_reference_lengths,
-    REGIONS_FEATHER,
 )
-from rigel.types import Strand
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -209,7 +208,7 @@ class TestRegionCgranges:
         assert len(hits) == 1
         region_id = hits[0][2]
         row = mini_index.region_df[mini_index.region_df["region_id"] == region_id]
-        assert row.iloc[0]["exon_pos"] is True or row.iloc[0]["exon_pos"] == True
+        assert row.iloc[0]["exon_pos"] is True or row.iloc[0]["exon_pos"]
 
     def test_boundary_query(self, mini_index):
         """Query that spans a region boundary returns two regions."""
@@ -259,10 +258,10 @@ class TestStrandAmbiguous:
         overlap = df[(df["start"] == 199) & (df["end"] == 300)]
         assert len(overlap) == 1
         row = overlap.iloc[0]
-        assert row["exon_pos"] == True
-        assert row["exon_neg"] == True
-        assert row["tx_pos"] == True
-        assert row["tx_neg"] == True
+        assert row["exon_pos"]
+        assert row["exon_neg"]
+        assert row["tx_pos"]
+        assert row["tx_neg"]
 
     def test_pos_only_region(self, ambig_region_df):
         """[99,199) should be positive-strand only."""
@@ -270,8 +269,8 @@ class TestStrandAmbiguous:
         region = df[(df["start"] == 99) & (df["end"] == 199)]
         assert len(region) == 1
         row = region.iloc[0]
-        assert row["exon_pos"] == True
-        assert row["exon_neg"] == False
+        assert row["exon_pos"]
+        assert not row["exon_neg"]
 
     def test_neg_only_region(self, ambig_region_df):
         """[300,400) should be negative-strand only."""
@@ -279,8 +278,8 @@ class TestStrandAmbiguous:
         region = df[(df["start"] == 300) & (df["end"] == 400)]
         assert len(region) == 1
         row = region.iloc[0]
-        assert row["exon_pos"] == False
-        assert row["exon_neg"] == True
+        assert not row["exon_pos"]
+        assert row["exon_neg"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -326,8 +325,6 @@ class TestEmptyReference:
 # 0-based half-open after GTF parse:
 #   tA: exon (99,200), span [99,200)
 #   tB: exons (99,200),(299,400), span [99,400)
-
-import textwrap
 
 MULTI_CHR_GTF = textwrap.dedent("""\
     chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id "gA"; transcript_id "tA"; gene_name "A"; gene_type "pc";
@@ -398,9 +395,9 @@ class TestMultiChromosome:
         # Exon +
         assert c1.iloc[1]["start"] == 99
         assert c1.iloc[1]["end"] == 200
-        assert c1.iloc[1]["exon_pos"] == True
-        assert c1.iloc[1]["tx_pos"] == True
-        assert c1.iloc[1]["exon_neg"] == False
+        assert c1.iloc[1]["exon_pos"]
+        assert c1.iloc[1]["tx_pos"]
+        assert not c1.iloc[1]["exon_neg"]
         # Trailing intergenic
         assert c1.iloc[2]["start"] == 200
         assert c1.iloc[2]["end"] == 500
@@ -416,18 +413,18 @@ class TestMultiChromosome:
         # [99,200) exon-
         assert c2.iloc[1]["start"] == 99
         assert c2.iloc[1]["end"] == 200
-        assert c2.iloc[1]["exon_neg"] == True
-        assert c2.iloc[1]["tx_neg"] == True
+        assert c2.iloc[1]["exon_neg"]
+        assert c2.iloc[1]["tx_neg"]
         # [200,299) intron-
         assert c2.iloc[2]["start"] == 200
         assert c2.iloc[2]["end"] == 299
-        assert c2.iloc[2]["exon_neg"] == False
-        assert c2.iloc[2]["tx_neg"] == True
+        assert not c2.iloc[2]["exon_neg"]
+        assert c2.iloc[2]["tx_neg"]
         # [299,400) exon-
         assert c2.iloc[3]["start"] == 299
         assert c2.iloc[3]["end"] == 400
-        assert c2.iloc[3]["exon_neg"] == True
-        assert c2.iloc[3]["tx_neg"] == True
+        assert c2.iloc[3]["exon_neg"]
+        assert c2.iloc[3]["tx_neg"]
         # [400,600) intergenic
         assert c2.iloc[4]["start"] == 400
         assert c2.iloc[4]["end"] == 600
@@ -454,15 +451,15 @@ class TestMultiChromosome:
         hits = list(cr.overlap("chr1", 150, 151))
         assert len(hits) == 1
         rid = hits[0][2]
-        assert df.loc[df["region_id"] == rid, "exon_pos"].iloc[0] == True
+        assert df.loc[df["region_id"] == rid, "exon_pos"].iloc[0]
 
         # Query in gene intron on chr2 — intronic (not exonic) region
         hits = list(cr.overlap("chr2", 250, 251))
         assert len(hits) == 1
         rid = hits[0][2]
         row = df[df["region_id"] == rid].iloc[0]
-        assert row["tx_neg"] == True
-        assert row["exon_neg"] == False
+        assert row["tx_neg"]
+        assert not row["exon_neg"]
 
         # Query intergenic on chr3
         hits = list(cr.overlap("chr3", 400, 401))
@@ -512,8 +509,8 @@ class TestAdjacentMerging:
         mid = df.iloc[1]
         assert mid["start"] == 99
         assert mid["end"] == 300
-        assert mid["exon_pos"] == True
-        assert mid["tx_pos"] == True
+        assert mid["exon_pos"]
+        assert mid["tx_pos"]
 
     def test_non_adjacent_not_merged(self):
         """Non-adjacent regions with same flags stay separate."""

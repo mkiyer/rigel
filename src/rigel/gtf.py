@@ -41,7 +41,7 @@ class GTFRecord:
     ATTR_TOKEN_PATTERN = re.compile(r'\s*([^";\s]+)\s+(?:"([^"]*)"|([^;]+))\s*;')
 
     @classmethod
-    def from_str(cls, s: str) -> 'GTF':
+    def from_str(cls, s: str) -> 'GTFRecord':
         """
         Parses a raw GTF string line into a GTF object.
         """
@@ -124,7 +124,7 @@ class GTFRecord:
         line_iter: Iterable[str],
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
-    ) -> Generator['GTF', None, None]:
+    ) -> Generator['GTFRecord', None, None]:
         """
         Generator to parse lines from an iterator (file object or list).
 
@@ -191,7 +191,7 @@ class GTFRecord:
         filepath: str | Path,
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
-    ) -> Generator['GTF', None, None]:
+    ) -> Generator['GTFRecord', None, None]:
         """
         Parse a GTF file and yield GTF objects.
         Handles both plain text and gzip files (.gz).

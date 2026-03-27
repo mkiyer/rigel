@@ -17,11 +17,10 @@ import pytest
 from rigel.sim import Scenario
 
 from .conftest import (
-    GDNA_LEVELS, STRAND_LEVELS, NRNA_LEVELS,
+    STRAND_LEVELS, NRNA_LEVELS,
     STRESS_COMBOS, STRESS_IDS,
     SIM_SEED, build_and_run,
-    assert_alignment, assert_accountability, assert_transcript_accuracy,
-    assert_negative_control, assert_gdna_accuracy, assert_nrna_detected,
+    assert_alignment, assert_accountability, assert_negative_control, assert_nrna_detected,
 )
 
 

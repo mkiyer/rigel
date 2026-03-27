@@ -1,6 +1,5 @@
 """Tests for rigel.splice — splice classification enums."""
 
-import pytest
 
 from rigel.splice import (
     ANTISENSE_COLS,
