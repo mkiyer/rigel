@@ -355,8 +355,7 @@ class AbundanceEstimator:
 
         Columns
         -------
-        transcript_id, gene_id, gene_name, gene_type : identifiers
-        ref, strand, start, end, length : genomic coordinates
+        transcript_id, gene_id, gene_name : identifiers
         effective_length : bias-corrected effective length
         locus_id : int32, EM locus (-1 if no locus)
         nrna_id : str, associated nRNA entity transcript ID ("." if none)
@@ -365,8 +364,6 @@ class AbundanceEstimator:
         mrna_unambig : uniquely-assigned mRNA
         mrna_em : EM-assigned mRNA
         mrna_spliced : spliced mRNA fragments
-        nrna : nascent RNA count (0 for annotated transcripts)
-        rna_total : mrna + nrna
         tpm : transcripts per million (mRNA-based)
         posterior_mean : mean posterior at EM assignment
         """
@@ -381,9 +378,7 @@ class AbundanceEstimator:
         # nRNA: for synthetic nRNA transcripts, their transcript count IS the
         # nRNA count; their mrna count is 0. For annotated transcripts, nrna = 0.
         is_synthetic = index.t_df["is_synthetic_nrna"].values if "is_synthetic_nrna" in index.t_df.columns else np.zeros(self.num_transcripts, dtype=bool)
-        nrna = np.where(is_synthetic, t_total, 0.0)
         mrna = np.where(is_synthetic, 0.0, t_total)
-        rna_total = mrna + nrna
         pmean = self.posterior_mean()
 
         # TPM: mRNA-based, using effective lengths
@@ -403,21 +398,11 @@ class AbundanceEstimator:
         # Fix entries where nrna_t_index == -1 (clip(0) forced index 0)
         nrna_id = np.where(nrna_t_idx >= 0, nrna_id, ".")
 
-        # Strand: convert 1 → "+", 2 → "-"
-        strand_raw = index.t_df["strand"].values
-        strand = np.where(strand_raw == 1, "+", np.where(strand_raw == 2, "-", "."))
-
         df = pd.DataFrame(
             {
                 "transcript_id": t_ids,
                 "gene_id": index.t_df["g_id"].values,
                 "gene_name": index.t_df["g_name"].values,
-                "gene_type": index.t_df["g_type"].values,
-                "ref": index.t_df["ref"].values,
-                "strand": strand,
-                "start": index.t_df["start"].values,
-                "end": index.t_df["end"].values,
-                "length": index.t_df["length"].values,
                 "effective_length": eff,
                 "locus_id": self.locus_id_per_transcript,
                 "nrna_id": nrna_id,
@@ -428,16 +413,14 @@ class AbundanceEstimator:
                 "mrna_unambig": mrna_unambig,
                 "mrna_em": mrna_em,
                 "mrna_spliced": mrna_spliced,
-                "nrna": nrna,
-                "rna_total": rna_total,
                 "tpm": tpm,
                 "posterior_mean": pmean,
             }
         )
         # Filter out synthetic nRNA transcripts (they go to nrna_quant)
         df = df[~is_synthetic].reset_index(drop=True)
-        # Sort by genomic position
-        df = df.sort_values(["ref", "start", "end"]).reset_index(drop=True)
+        # Sort by transcript_id for deterministic output
+        df = df.sort_values("transcript_id").reset_index(drop=True)
         return df
 
     def get_gene_counts_df(self, index) -> pd.DataFrame:
@@ -445,8 +428,7 @@ class AbundanceEstimator:
 
         Columns
         -------
-        gene_id, gene_name, gene_type : identifiers
-        ref, strand, start, end : genomic coordinates
+        gene_id, gene_name : identifiers
         n_transcripts : int, number of annotated transcripts
         locus_id : int32, primary EM locus for this gene (-1 if none)
         effective_length : abundance-weighted mean effective length
@@ -454,8 +436,6 @@ class AbundanceEstimator:
         mrna_unambig : uniquely-assigned mRNA
         mrna_em : EM-assigned mRNA
         mrna_spliced : spliced mRNA fragments
-        nrna : nascent RNA count
-        rna_total : mrna + nrna
         tpm : transcripts per million (mRNA-based)
         """
         t_to_g = index.t_to_g_arr
@@ -478,7 +458,6 @@ class AbundanceEstimator:
         t_nrna = np.where(is_synthetic, t_counts_all, 0.0)
         nrna = _aggregate_to_gene(t_to_g, n_genes, t_nrna)
         mrna = g_all - nrna
-        rna_total = mrna + nrna
 
         # Gene effective length: abundance-weighted mean of transcript
         # effective lengths.  For genes with zero counts, use the
@@ -504,10 +483,6 @@ class AbundanceEstimator:
         annotated_mask = (~is_synthetic).astype(np.float64)
         n_annotated = _aggregate_to_gene(t_to_g, n_genes, annotated_mask).astype(int)
 
-        # Strand: convert 1 → "+", 2 → "-"
-        strand_raw = index.g_df["strand"].values
-        strand = np.where(strand_raw == 1, "+", np.where(strand_raw == 2, "-", "."))
-
         # TPM: mRNA-based at gene level
         rpk = mrna / g_eff_len
         rpk_sum = rpk.sum()
@@ -517,11 +492,6 @@ class AbundanceEstimator:
             {
                 "gene_id": index.g_df["g_id"].values,
                 "gene_name": index.g_df["g_name"].values,
-                "gene_type": index.g_df["g_type"].values,
-                "ref": index.g_df["ref"].values,
-                "strand": strand,
-                "start": index.g_df["start"].values,
-                "end": index.g_df["end"].values,
                 "n_transcripts": n_annotated,
                 "locus_id": g_locus_id,
                 "effective_length": g_eff_len,
@@ -529,13 +499,11 @@ class AbundanceEstimator:
                 "mrna_unambig": mrna_unambig,
                 "mrna_em": mrna_em_arr,
                 "mrna_spliced": mrna_spliced,
-                "nrna": nrna,
-                "rna_total": rna_total,
                 "tpm": tpm,
             }
         )
-        # Sort by genomic position
-        df = df.sort_values(["ref", "start", "end"]).reset_index(drop=True)
+        # Sort by gene_id for deterministic output
+        df = df.sort_values("gene_id").reset_index(drop=True)
         return df
 
     # ------------------------------------------------------------------
@@ -548,8 +516,6 @@ class AbundanceEstimator:
         Columns
         -------
         nrna_id : str, transcript ID for the nRNA entity
-        gene_id, gene_name : representative gene identifiers
-        ref, strand, start, end, length : genomic coordinates
         effective_length : bias-corrected effective length
         locus_id : int32, EM locus
         is_synthetic : bool, True for RIGEL-generated synthetics
@@ -564,8 +530,7 @@ class AbundanceEstimator:
 
         if not mask.any():
             return pd.DataFrame(columns=[
-                "nrna_id", "gene_id", "gene_name",
-                "ref", "strand", "start", "end", "length", "effective_length",
+                "nrna_id", "effective_length",
                 "locus_id", "is_synthetic", "n_contributing_transcripts",
                 "count", "tpm",
             ])
@@ -584,22 +549,11 @@ class AbundanceEstimator:
         rpk_sum = rpk.sum()
         tpm = (rpk / rpk_sum * 1e6) if rpk_sum > 0 else np.zeros_like(rpk)
 
-        # Strand: convert 1 → "+", 2 → "-"
-        strand_raw = t_df["strand"].values[idx]
-        strand = np.where(strand_raw == 1, "+", np.where(strand_raw == 2, "-", "."))
-
         n_contrib = t_df["nrna_n_contributors"].values[idx] if "nrna_n_contributors" in t_df.columns else np.zeros(len(idx), dtype=int)
 
         df = pd.DataFrame(
             {
                 "nrna_id": t_df["t_id"].values[idx],
-                "gene_id": t_df["g_id"].values[idx],
-                "gene_name": t_df["g_name"].values[idx],
-                "ref": t_df["ref"].values[idx],
-                "strand": strand,
-                "start": t_df["start"].values[idx],
-                "end": t_df["end"].values[idx],
-                "length": t_df["length"].values[idx],
                 "effective_length": eff,
                 "locus_id": self.locus_id_per_transcript[idx],
                 "is_synthetic": is_syn[mask],
@@ -608,7 +562,7 @@ class AbundanceEstimator:
                 "tpm": tpm,
             }
         )
-        df = df.sort_values(["ref", "start", "end"]).reset_index(drop=True)
+        df = df.sort_values("nrna_id").reset_index(drop=True)
         return df
 
     # ------------------------------------------------------------------
@@ -624,7 +578,7 @@ class AbundanceEstimator:
         Columns
         -------
         locus_id : int, sequential locus identifier
-        ref : str, primary reference name
+        locus_span_bp : int, merged genomic footprint in base pairs
         n_transcripts : int, total transcripts in locus
         n_annotated_transcripts : int, annotated transcripts only
         n_nrna_entities : int, synthetic nRNA transcripts in locus
@@ -639,7 +593,7 @@ class AbundanceEstimator:
         """
         cols = [
             "locus_id",
-            "ref",
+            "locus_span_bp",
             "n_transcripts",
             "n_annotated_transcripts",
             "n_nrna_entities",
@@ -677,7 +631,7 @@ class AbundanceEstimator:
             rows.append(
                 {
                     "locus_id": lid,
-                    "ref": r.get("ref", ""),
+                    "locus_span_bp": r.get("locus_span_bp", 0),
                     "n_transcripts": r["n_transcripts"],
                     "n_annotated_transcripts": n_annot,
                     "n_nrna_entities": n_syn,

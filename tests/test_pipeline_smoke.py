@@ -79,8 +79,6 @@ class TestPipelineSmoke:
             "transcript_id",
             "gene_id",
             "mrna",
-            "nrna",
-            "rna_total",
             "tpm",
         }
         assert required.issubset(df.columns), (
@@ -103,7 +101,7 @@ class TestPipelineSmoke:
 
     def test_gene_df_schema(self):
         df = self.pr.estimator.get_gene_counts_df(self.index)
-        required = {"gene_id", "mrna", "nrna", "rna_total", "tpm"}
+        required = {"gene_id", "mrna", "tpm"}
         assert required.issubset(df.columns), (
             f"Missing columns: {required - set(df.columns)}"
         )

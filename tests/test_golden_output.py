@@ -181,17 +181,17 @@ def _golden_exists(scenario_name):
 _TRANSCRIPT_NUMERIC_COLS = [
     "effective_length",
     "mrna", "mrna_unambig", "mrna_em", "mrna_spliced",
-    "nrna", "rna_total", "tpm", "posterior_mean",
+    "tpm", "posterior_mean",
 ]
 
 _GENE_NUMERIC_COLS = [
     "effective_length",
     "mrna", "mrna_unambig", "mrna_em", "mrna_spliced",
-    "nrna", "rna_total", "tpm",
+    "tpm",
 ]
 
 _LOCI_NUMERIC_COLS = [
-    "n_em_fragments", "mrna", "nrna", "gdna", "total", "gdna_rate", "gdna_prior",
+    "locus_span_bp", "n_em_fragments", "mrna", "nrna", "gdna", "total", "gdna_rate", "gdna_prior",
 ]
 
 

@@ -1,3 +1,3 @@
-gene_id	gene_name	gene_type	ref	strand	start	end	n_transcripts	locus_id	effective_length	mrna	mrna_unambig	mrna_em	mrna_spliced	nrna	rna_total	tpm
-g_anti	g_anti	protein_coding	golden_as_cont	-	700	1500	1	0	461.15442278860286	201.43618942248509	0.0	201.43618942248509	0.0	0.0	201.43618942248509	386451.8938831616
-g_sense	g_sense	protein_coding	golden_as_cont	+	500	2000	1	0	1151.1094452773543	798.290418125859	0.0	798.290418125859	0.0	0.0	798.290418125859	613548.1061168384
+gene_id	gene_name	n_transcripts	locus_id	effective_length	mrna	mrna_unambig	mrna_em	mrna_spliced	tpm
+g_anti	g_anti	1	0	461.15442278860286	201.43618942248503	0.0	201.43618942248503	0.0	386451.8938831613
+g_sense	g_sense	1	0	1151.1094452773543	798.2904181258596	0.0	798.2904181258596	0.0	613548.1061168388

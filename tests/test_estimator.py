@@ -576,12 +576,6 @@ class TestCountsOutput:
             "transcript_id",
             "gene_id",
             "gene_name",
-            "gene_type",
-            "ref",
-            "strand",
-            "start",
-            "end",
-            "length",
             "effective_length",
             "locus_id",
             "nrna_id",
@@ -592,8 +586,6 @@ class TestCountsOutput:
             "mrna_unambig",
             "mrna_em",
             "mrna_spliced",
-            "nrna",
-            "rna_total",
             "tpm",
             "posterior_mean",
         ]
@@ -607,11 +599,6 @@ class TestCountsOutput:
         expected_cols = [
             "gene_id",
             "gene_name",
-            "gene_type",
-            "ref",
-            "strand",
-            "start",
-            "end",
             "n_transcripts",
             "locus_id",
             "effective_length",
@@ -619,8 +606,6 @@ class TestCountsOutput:
             "mrna_unambig",
             "mrna_em",
             "mrna_spliced",
-            "nrna",
-            "rna_total",
             "tpm",
         ]
         assert list(df.columns) == expected_cols

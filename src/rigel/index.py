@@ -1248,3 +1248,89 @@ class TranscriptIndex:
 
         return offsets, starts, ends, cumsum_before
 
+    # -- nRNA ↔ gene / transcript lookup methods ----------------------------
+
+    def nrna_to_transcripts(self, nrna_id: str) -> list[str]:
+        """Return transcript IDs associated with an nRNA entity.
+
+        An nRNA entity is associated with every multi-exon transcript
+        whose ``nrna_t_index`` points to this nRNA's transcript index.
+
+        Parameters
+        ----------
+        nrna_id : str
+            The nRNA entity ID (e.g. ``RIGEL_NRNA_...`` or an annotated
+            nascent-equivalent transcript ID).
+
+        Returns
+        -------
+        list[str]
+            Sorted list of contributing transcript IDs.
+        """
+        t_ids = self.t_df["t_id"].values
+        nrna_mask = t_ids == nrna_id
+        if not nrna_mask.any():
+            return []
+        nrna_t_idx = int(self.t_df.index[nrna_mask][0])
+
+        # Find all transcripts whose nrna_t_index points here
+        nrna_col = self.t_df["nrna_t_index"].values if "nrna_t_index" in self.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        contrib_mask = nrna_col == nrna_t_idx
+        return sorted(t_ids[contrib_mask].tolist())
+
+    def nrna_to_genes(self, nrna_id: str) -> list[tuple[str, str]]:
+        """Return (gene_id, gene_name) pairs for genes associated with an nRNA.
+
+        Follows the chain: nRNA → contributing transcripts → genes.
+
+        Parameters
+        ----------
+        nrna_id : str
+            The nRNA entity ID.
+
+        Returns
+        -------
+        list[tuple[str, str]]
+            Sorted unique ``(gene_id, gene_name)`` pairs.
+        """
+        t_ids = self.t_df["t_id"].values
+        nrna_mask = t_ids == nrna_id
+        if not nrna_mask.any():
+            return []
+        nrna_t_idx = int(self.t_df.index[nrna_mask][0])
+
+        nrna_col = self.t_df["nrna_t_index"].values if "nrna_t_index" in self.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        contrib_mask = nrna_col == nrna_t_idx
+        g_ids = self.t_df["g_id"].values[contrib_mask]
+        g_names = self.t_df["g_name"].values[contrib_mask]
+        return sorted(set(zip(g_ids.tolist(), g_names.tolist())))
+
+    def gene_to_nrna_ids(self, gene_id: str) -> list[str]:
+        """Return nRNA entity IDs associated with a gene.
+
+        Follows the chain: gene → transcripts → nRNA entities.
+
+        Parameters
+        ----------
+        gene_id : str
+            The gene ID (e.g. ``ENSG00000...``).
+
+        Returns
+        -------
+        list[str]
+            Sorted unique nRNA entity IDs.
+        """
+        t_ids = self.t_df["t_id"].values
+        g_ids = self.t_df["g_id"].values
+        gene_mask = g_ids == gene_id
+        if not gene_mask.any():
+            return []
+
+        nrna_col = self.t_df["nrna_t_index"].values if "nrna_t_index" in self.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        nrna_t_indices = nrna_col[gene_mask]
+        valid = nrna_t_indices >= 0
+        if not valid.any():
+            return []
+        unique_nrna_idx = sorted(set(nrna_t_indices[valid].tolist()))
+        return sorted(t_ids[unique_nrna_idx].tolist())
+

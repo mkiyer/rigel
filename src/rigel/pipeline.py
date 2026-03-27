@@ -428,20 +428,14 @@ def _run_locus_em(
     em_config: EMConfig,
 ) -> None:
     """Run batch locus-level EM and record per-locus results."""
-    t_refs = index.t_df["ref"].values
     t_to_g = index.t_to_g_arr
 
     def _build_locus_meta(locus, *, mrna, gdna, locus_gamma):
         """Build one locus_results record."""
-        ref_counts: dict[str, int] = {}
-        for t_idx in locus.transcript_indices:
-            ref = str(t_refs[int(t_idx)])
-            ref_counts[ref] = ref_counts.get(ref, 0) + 1
-        primary_ref = max(ref_counts, key=ref_counts.get) if ref_counts else ""
         gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
         return {
             "locus_id": locus.locus_id,
-            "ref": primary_ref,
+            "locus_span_bp": locus.gdna_span,
             "n_transcripts": len(locus.transcript_indices),
             "n_genes": len(gene_set),
             "n_em_fragments": len(locus.unit_indices),
