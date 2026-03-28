@@ -426,6 +426,8 @@ def _run_locus_em(
     index: TranscriptIndex,
     locus_gammas: np.ndarray,
     em_config: EMConfig,
+    *,
+    emit_locus_stats: bool = False,
 ) -> None:
     """Run batch locus-level EM and record per-locus results."""
     t_to_g = index.t_to_g_arr
@@ -455,6 +457,7 @@ def _run_locus_em(
         locus_gammas,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
+        emit_locus_stats=emit_locus_stats,
     )
 
     for i, locus in enumerate(loci):
@@ -488,6 +491,7 @@ def quant_from_buffer(
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
     calibration: "GDNACalibration" = None,
+    emit_locus_stats: bool = False,
 ) -> AbundanceEstimator:
     """Quantify transcripts from buffered fragments via locus-level EM.
 
@@ -586,6 +590,7 @@ def quant_from_buffer(
             index,
             locus_gammas,
             em_config,
+            emit_locus_stats=emit_locus_stats,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")
@@ -712,6 +717,7 @@ def run_pipeline(
             log_every=scan.log_every,
             annotations=annotations,
             calibration=calibration,
+            emit_locus_stats=config.emit_locus_stats,
         )
     finally:
         buffer.cleanup()

@@ -1,0 +1,9 @@
+bam: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/runs/human/mctp_MI_1190_SI_43014_HNMVYDMXY/rigel/annotated.bam
+index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/rigel_index
+
+outdir: results/profile_map_large
+
+rigel_configs:
+  map_8t:
+    em_mode: map
+    n_threads: 8

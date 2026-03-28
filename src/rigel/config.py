@@ -189,6 +189,7 @@ class PipelineConfig:
     scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     annotated_bam_path: str | Path | None = None
+    emit_locus_stats: bool = False
 
     def to_dict(self) -> dict:
         """JSON-serializable dict of all configuration fields."""

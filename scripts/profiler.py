@@ -372,6 +372,9 @@ class StageTimings:
     locus_em_run: float = 0.0
     locus_em_assign: float = 0.0
 
+    # Per-locus profiling stats from C++ instrumentation
+    locus_stats: list | None = field(default=None, repr=False)
+
 
 @dataclass
 class ProfileResult:
@@ -635,11 +638,15 @@ def profile_stages(
                     np.asarray(gdna_inits, dtype=np.float64),
                     em_iterations=em_config.iterations,
                     em_convergence_delta=em_config.convergence_delta,
+                    emit_locus_stats=True,
                 )
             timings.locus_em = t_em.elapsed
             timings.locus_em_build = 0.0
             timings.locus_em_run = timings.locus_em
             timings.locus_em_assign = 0.0
+
+            # Capture per-locus profiling stats from C++ instrumentation
+            timings.locus_stats = getattr(estimator, "locus_stats", None)
 
     if profiler:
         profiler.disable()
@@ -955,7 +962,10 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
                 "throughput_frags_per_sec": r.throughput_frags_per_sec,
                 "n_transcripts": r.n_transcripts,
                 "n_genes": r.n_genes,
-                "stages": asdict(r.stages),
+                "stages": {
+                    k: v for k, v in asdict(r.stages).items()
+                    if k != "locus_stats"
+                },
                 "pipeline_stats": r.pipeline_stats,
                 "rss_snapshots": r.rss_snapshots,
             }
@@ -966,6 +976,15 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
     with open(json_path, "w") as f:
         json.dump(json_data, f, indent=2, default=str)
     print(f"JSON:   {json_path}", flush=True)
+
+    # Save per-locus profiling stats if available (separate file to avoid bloat)
+    for r in results:
+        locus_stats = r.stages.locus_stats
+        if locus_stats:
+            stats_path = outdir / f"locus_stats_{r.config_name}.json"
+            with open(stats_path, "w") as f:
+                json.dump(locus_stats, f, indent=1)
+            print(f"Locus stats ({len(locus_stats)} loci): {stats_path}", flush=True)
 
     return results
 

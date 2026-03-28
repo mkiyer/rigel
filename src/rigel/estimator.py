@@ -162,6 +162,9 @@ class AbundanceEstimator:
         self._em_posterior_sum: np.ndarray | None = None
         self._em_n_assigned: np.ndarray | None = None
 
+        # Per-locus profiling stats (populated if emit_locus_stats=True)
+        self.locus_stats: list[dict] | None = None
+
     @property
     def effective_lengths(self) -> np.ndarray:
         """Per-transcript effective lengths (read-only)."""
@@ -207,6 +210,7 @@ class AbundanceEstimator:
         *,
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
+        emit_locus_stats: bool = False,
     ) -> tuple[float, np.ndarray, np.ndarray]:
         """Run locus-level EM for ALL loci in a single C++ call.
 
@@ -226,6 +230,9 @@ class AbundanceEstimator:
             float64[n_loci] — calibration gDNA fraction ∈ [0, 1] per locus.
         em_iterations, em_convergence_delta
             EM algorithm parameters.
+        emit_locus_stats : bool
+            If True, collect per-locus profiling stats (timing, EC metrics,
+            iteration counts) and store in ``self.locus_stats``.
 
         Returns
         -------
@@ -273,7 +280,7 @@ class AbundanceEstimator:
         # Derive a per-batch RNG seed from the Python-level RNG
         rng_seed = int(self._rng.integers(0, 2**63))
 
-        total_gdna_em, locus_mrna, locus_gdna = _batch_locus_em(
+        total_gdna_em, locus_mrna, locus_gdna, locus_stats_raw = _batch_locus_em(
             # Global CSR
             em_data.offsets,
             em_data.t_indices,
@@ -316,7 +323,14 @@ class AbundanceEstimator:
             n_transcripts,
             NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,
+            emit_locus_stats,
         )
+
+        # Store locus stats if collected
+        if emit_locus_stats:
+            self.locus_stats = list(locus_stats_raw)
+        else:
+            self.locus_stats = None
 
         return (
             total_gdna_em,

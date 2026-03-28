@@ -12,6 +12,7 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -28,7 +29,9 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
+#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 
@@ -50,6 +53,39 @@ static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
 static constexpr int ASSIGN_FRACTIONAL = 0;
 static constexpr int ASSIGN_MAP        = 1;
 static constexpr int ASSIGN_SAMPLE     = 2;
+
+// ================================================================
+// Profiling instrumentation — per-locus and aggregate statistics
+// ================================================================
+
+using hrclock = std::chrono::steady_clock;
+
+/// Per-locus profiling statistics collected during batch_locus_em.
+struct LocusProfile {
+    int locus_idx = -1;
+    int n_transcripts = 0;
+    int n_units = 0;
+    int n_components = 0;        // n_t + 1
+    int n_equiv_classes = 0;
+    int64_t ec_total_elements = 0; // sum of n*k across all ECs
+    int max_ec_width = 0;        // max k across ECs
+    int max_ec_depth = 0;        // max n across ECs
+    int squarem_iterations = 0;
+    int estep_threads_used = 0;
+    bool is_mega_locus = false;
+
+    // Sub-phase wall times in microseconds
+    double extract_us = 0.0;
+    double bias_us = 0.0;
+    double build_ec_us = 0.0;
+    double warm_start_us = 0.0;
+    double squarem_us = 0.0;
+    double assign_us = 0.0;
+    double total_us = 0.0;
+
+    // VBEM-specific: digamma calls per E-step
+    int64_t digamma_calls_per_estep = 0;
+};
 
 // ================================================================
 // SplitMix64 — lightweight, deterministic, thread-local PRNG
@@ -812,6 +848,7 @@ struct EMResult {
     std::vector<double> theta;
     std::vector<double> alpha;
     std::vector<double> em_totals;
+    int squarem_iterations = 0;  // number of SQUAREM iterations completed
 };
 
 static EMResult run_squarem(
@@ -843,6 +880,7 @@ static EMResult run_squarem(
 
     std::vector<double> theta(nc);
     std::vector<double> alpha_out(nc);
+    int completed_iterations = 0;
 
     if (use_vbem) {
         // ---- VBEM with SQUAREM acceleration ----
@@ -906,7 +944,11 @@ static EMResult run_squarem(
 
             std::swap(state0, state_new);
 
-            if (delta < convergence_delta) break;
+            if (delta < convergence_delta) {
+                completed_iterations = iter + 1;
+                break;
+            }
+            completed_iterations = iter + 1;
         }
 
         // alpha_out = state0 (converged Dirichlet params)
@@ -991,7 +1033,11 @@ static EMResult run_squarem(
 
             std::swap(state0, state_new);
 
-            if (delta < convergence_delta) break;
+            if (delta < convergence_delta) {
+                completed_iterations = iter + 1;
+                break;
+            }
+            completed_iterations = iter + 1;
         }
 
         // theta = state0 (converged normalized theta)
@@ -1003,7 +1049,8 @@ static EMResult run_squarem(
         }
     }
 
-    return { std::move(theta), std::move(alpha_out), std::move(em_totals) };
+    return { std::move(theta), std::move(alpha_out), std::move(em_totals),
+             completed_iterations };
 }
 
 // ================================================================
@@ -1601,7 +1648,8 @@ static void assign_posteriors(
 static std::tuple<
     double,  // total_gdna_em
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_mrna[n_loci]
-    nb::ndarray<nb::numpy, double, nb::ndim<1>>   // locus_gdna[n_loci]
+    nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_gdna[n_loci]
+    nb::list   // locus_stats: list of dicts (empty if emit_locus_stats=false)
 >
 batch_locus_em(
     // --- Global CSR (ScoredFragments) ---
@@ -1644,7 +1692,8 @@ batch_locus_em(
     uint64_t rng_seed,
     int    n_transcripts_total,
     int    n_splice_strand_cols,
-    int    n_threads)
+    int    n_threads,
+    bool   emit_locus_stats)
 {
     int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
     int N_T = n_transcripts_total;
@@ -1698,6 +1747,11 @@ batch_locus_em(
     std::vector<double> locus_gdna_vec(n_loci, 0.0);
     double* locus_mrna_data = locus_mrna_vec.data();
     double* locus_gdna_data = locus_gdna_vec.data();
+
+    // Per-locus profiling stats (allocated BEFORE GIL release so it
+    // survives into the GIL-held post-processing section).
+    std::vector<LocusProfile> locus_profiles(
+        emit_locus_stats ? static_cast<size_t>(n_loci) : 0);
 
     std::atomic<double> total_gdna_em{0.0};
 
@@ -1776,7 +1830,9 @@ batch_locus_em(
         auto process_locus = [&](int li, int estep_thr,
                                  LocusSubProblem& sub,
                                  std::vector<int32_t>& local_map,
+                                 bool mega,
                                  rigel::EStepThreadPool* pool = nullptr) -> double {
+            auto locus_t0 = hrclock::now();
             // Get locus transcript and unit index ranges
             auto t_start = lt_off[li];
             auto t_end   = lt_off[li + 1];
@@ -1796,6 +1852,7 @@ batch_locus_em(
             double lg = lg_ptr[li];
 
             // 1. Extract sub-problem
+            auto t1 = hrclock::now();
             extract_locus_sub_problem(
                 sub, t_arr, n_t, u_arr, n_u, lg, gs_ptr[li],
                 goff, gti, gll, gcw, gtxs, gtxe, gcc,
@@ -1803,6 +1860,7 @@ batch_locus_em(
                 unambig_row_sums.data(),
                 ts_ptr, te_ptr, tl_ptr,
                 local_map.data(), local_map_size);
+            auto t2 = hrclock::now();
 
             int nc = sub.n_components;
             size_t n_candidates = sub.t_indices.size();
@@ -1818,6 +1876,7 @@ batch_locus_em(
                     sub.bias_profiles.data(),
                     n_candidates);
             }
+            auto t3 = hrclock::now();
 
             // 3. Handle empty sub-problem
             if (n_local_units == 0 || n_candidates == 0) {
@@ -1836,6 +1895,7 @@ batch_locus_em(
                 sub.log_liks.data(),
                 sub.coverage_wts.data(),
                 n_local_units);
+            auto t4 = hrclock::now();
 
             // 6. Unified OVR prior + coverage-weighted warm start
             std::vector<double> prior(nc);
@@ -1846,6 +1906,7 @@ batch_locus_em(
                 sub.eligible.data(),
                 lg, total_pseudocount, sub.gdna_idx,
                 prior.data(), theta_init.data(), nc);
+            auto t5 = hrclock::now();
 
             // 7. Run unified SQUAREM
             EMResult result = run_squarem(
@@ -1856,6 +1917,7 @@ batch_locus_em(
                 nc, max_iterations, convergence_delta,
                 use_vbem,
                 estep_thr, pool);
+            auto t6 = hrclock::now();
 
             // 8. Assign posteriors (writes to disjoint transcript
             //    indices — safe across threads, no atomics needed)
@@ -1870,9 +1932,51 @@ batch_locus_em(
                 psum_out, nass_out,
                 locus_mrna, locus_gdna,
                 N_T, N_COLS);
+            auto t7 = hrclock::now();
 
             locus_mrna_data[li] = locus_mrna;
             locus_gdna_data[li] = locus_gdna;
+
+            // Collect profiling stats if requested
+            if (emit_locus_stats) {
+                auto us = [](auto a, auto b) {
+                    return std::chrono::duration<double, std::micro>(b - a).count();
+                };
+                LocusProfile& prof = locus_profiles[li];
+                prof.locus_idx = li;
+                prof.n_transcripts = n_t;
+                prof.n_units = n_u;
+                prof.n_components = nc;
+                prof.n_equiv_classes = static_cast<int>(ec_data.size());
+                prof.squarem_iterations = result.squarem_iterations;
+                prof.estep_threads_used = estep_thr;
+                prof.is_mega_locus = mega;
+
+                // EC statistics
+                int64_t total_elems = 0;
+                int max_k = 0, max_n = 0;
+                for (const auto& ec : ec_data) {
+                    total_elems += static_cast<int64_t>(ec.n) * ec.k;
+                    if (ec.k > max_k) max_k = ec.k;
+                    if (ec.n > max_n) max_n = ec.n;
+                }
+                prof.ec_total_elements = total_elems;
+                prof.max_ec_width = max_k;
+                prof.max_ec_depth = max_n;
+
+                // digamma calls per E-step: nc components, called once per
+                // VBEM step (3 per SQUAREM iteration)
+                prof.digamma_calls_per_estep = use_vbem ? nc : 0;
+
+                // Sub-phase timing
+                prof.extract_us = us(locus_t0, t2);
+                prof.bias_us = us(t2, t3);
+                prof.build_ec_us = us(t3, t4);
+                prof.warm_start_us = us(t4, t5);
+                prof.squarem_us = us(t5, t6);
+                prof.assign_us = us(t6, t7);
+                prof.total_us = us(locus_t0, t7);
+            }
 
             return locus_gdna;
         }; // end process_locus
@@ -1893,7 +1997,7 @@ batch_locus_em(
             for (int i = 0; i < mega_end; ++i) {
                 int li = locus_order[i];
                 double gdna = process_locus(li, actual_threads, sub, local_map,
-                                            pool.get());
+                                            true, pool.get());
                 // No atomic needed — single-threaded phase
                 double prev = total_gdna_em.load(std::memory_order_relaxed);
                 while (!total_gdna_em.compare_exchange_weak(
@@ -1921,7 +2025,8 @@ batch_locus_em(
                     int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_phase2);
                     for (int idx = chunk_start; idx < chunk_end; ++idx) {
                         int li = locus_order[mega_end + idx];
-                        local_gdna += process_locus(li, 1, sub, local_map);
+                        local_gdna += process_locus(li, 1, sub, local_map,
+                                                    false);
                     }
                 }
 
@@ -1959,12 +2064,53 @@ batch_locus_em(
     nb::capsule mrna_owner(mrna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
     nb::capsule gdna_owner(gdna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
 
+    // Build locus stats list (GIL is held here)
+    nb::list stats_list;
+    if (emit_locus_stats) {
+        // Sort profiles by descending total_us for easy inspection
+        std::vector<size_t> sorted_idx(locus_profiles.size());
+        std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+        std::sort(sorted_idx.begin(), sorted_idx.end(),
+                  [&](size_t a, size_t b) {
+                      return locus_profiles[a].total_us >
+                             locus_profiles[b].total_us;
+                  });
+
+        for (size_t si : sorted_idx) {
+            const auto& p = locus_profiles[si];
+            if (p.total_us == 0.0 && p.n_units == 0) continue;  // skip empty
+
+            nb::dict d;
+            d["locus_idx"] = p.locus_idx;
+            d["n_transcripts"] = p.n_transcripts;
+            d["n_units"] = p.n_units;
+            d["n_components"] = p.n_components;
+            d["n_equiv_classes"] = p.n_equiv_classes;
+            d["ec_total_elements"] = p.ec_total_elements;
+            d["max_ec_width"] = p.max_ec_width;
+            d["max_ec_depth"] = p.max_ec_depth;
+            d["squarem_iterations"] = p.squarem_iterations;
+            d["estep_threads_used"] = p.estep_threads_used;
+            d["is_mega_locus"] = p.is_mega_locus;
+            d["digamma_calls_per_estep"] = p.digamma_calls_per_estep;
+            d["extract_us"] = p.extract_us;
+            d["bias_us"] = p.bias_us;
+            d["build_ec_us"] = p.build_ec_us;
+            d["warm_start_us"] = p.warm_start_us;
+            d["squarem_us"] = p.squarem_us;
+            d["assign_us"] = p.assign_us;
+            d["total_us"] = p.total_us;
+            stats_list.append(d);
+        }
+    }
+
     return std::make_tuple(
         total_gdna_em_val,
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(
             mrna_copy, 1, shape, std::move(mrna_owner)),
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(
-            gdna_copy, 1, shape, std::move(gdna_owner))
+            gdna_copy, 1, shape, std::move(gdna_owner)),
+        stats_list
     );
 }
 
@@ -2240,12 +2386,15 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_transcripts_total"),
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
+          nb::arg("emit_locus_stats") = false,
           "Run locus EM for ALL loci in a single C++ call.\n\n"
           "Replaces the Python per-locus for-loop:\n"
           "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"
-          "Returns (total_gdna_em, locus_mrna, locus_gdna).\n\n"
+          "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats).\n\n"
           "assignment_mode: 0=fractional, 1=map, 2=sample.\n"
-          "n_threads: 0 = all cores, 1 = sequential, N = cap at N threads.");
+          "n_threads: 0 = all cores, 1 = sequential, N = cap at N threads.\n"
+          "emit_locus_stats: if True, return per-locus profiling stats as\n"
+          "  a list of dicts (sorted by descending wall time).");
 
     m.def("connected_components", &connected_components_native,
           nb::arg("offsets"),
