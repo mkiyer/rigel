@@ -227,7 +227,8 @@ static std::vector<EmEquivClass> build_equiv_classes(
         ec.k = k;
         ec.ll_flat.resize(static_cast<size_t>(n) * k);
         ec.wt_flat.resize(static_cast<size_t>(n) * k);
-        ec.scratch.resize(static_cast<size_t>(n) * k);
+        // scratch is no longer used by em_step_kernel_range (uses
+        // stack-local row buffer instead), so skip allocation.
 
         for (int i = 0; i < n; ++i) {
             int u = unit_list[i];
@@ -382,12 +383,32 @@ static inline void em_step_kernel_range(
 {
     const int k = ec.k;
     const double* ll = ec.ll_flat.data();
-    double* scratch = ec.scratch.data();
     const int32_t* cidx = ec.comp_idx.data();
 
-    // Pass 1: Add log_weights + log-sum-exp normalize (fused for cache locality)
+    // Stack-local row buffer: avoids writing to the heap-allocated
+    // ec.scratch buffer entirely.  ec.scratch is never read after
+    // the E-step (assign_posteriors recomputes from theta + CSR),
+    // so eliminating the writes reduces memory traffic.
+    // For k <= 512 (covers all practical ECs), use stack allocation.
+    constexpr int MAX_K_STACK = 512;
+    double stack_row[MAX_K_STACK];
+    std::vector<double> heap_row;
+    double* row;
+    if (k <= MAX_K_STACK) {
+        row = stack_row;
+    } else {
+        heap_row.resize(k);
+        row = heap_row.data();
+    }
+
+    // Per-column Kahan accumulators for fused column-sum accumulation.
+    // Fusing the column sums into the row-processing loop eliminates a
+    // separate column-stride pass over scratch, improving cache locality.
+    // Each column's accumulator sees values in the same order as before
+    // (row_start to row_end), so results are bit-for-bit identical.
+    std::vector<KahanAccumulator> col_acc(k);
+
     for (int i = row_start; i < row_end; ++i) {
-        double* row = scratch + i * k;
 
         // Compute row values and find max
         double max_val = ll[i * k] + log_weights[cidx[0]];
@@ -507,26 +528,21 @@ static inline void em_step_kernel_range(
         }
 #endif
 
-        // Normalize
+        // Normalize and accumulate column sums (fused)
         if (row_sum > 0.0 && std::isfinite(row_sum)) {
             double inv_sum = 1.0 / row_sum;
             for (int j = 0; j < k; ++j) {
                 row[j] *= inv_sum;
+                col_acc[j].add(row[j]);
             }
         } else {
-            for (int j = 0; j < k; ++j) {
-                row[j] = 0.0;
-            }
+            // col_acc: adding 0.0 is a no-op, skip
         }
     }
 
-    // Pass 2: Accumulate column sums with Kahan summation
+    // Flush column sums to em_totals
     for (int j = 0; j < k; ++j) {
-        KahanAccumulator acc;
-        for (int i = row_start; i < row_end; ++i) {
-            acc.add(scratch[i * k + j]);
-        }
-        em_totals[cidx[j]] += acc.sum;
+        em_totals[cidx[j]] += col_acc[j].sum;
     }
 }
 
