@@ -514,6 +514,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- Fan-out: threads → both EM and scan --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.n_scan_threads"),
+    # -- BamScanConfig: buffer sizing --
+    _ParamSpec("buffer_size", "scan.max_memory_bytes", "gb_to_bytes"),
     # -- Top-level PipelineConfig --
     _ParamSpec("annotated_bam", "annotated_bam_path"),
 )
@@ -545,6 +547,8 @@ def _config_to_cli(val: object, transform: str) -> object:
         return val.get(SPLICE_UNANNOT, DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT)
     if transform == "path_or_none":
         return str(val) if val else None
+    if transform == "gb_to_bytes":
+        return val / (1024**3)  # bytes → GiB for CLI display
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -571,6 +575,8 @@ def _cli_to_config(val: object, transform: str) -> object:
         return penalties
     if transform == "path_or_none":
         return Path(val) if val else None
+    if transform == "gb_to_bytes":
+        return int(val * 1024**3)  # GiB → bytes
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -745,54 +751,56 @@ def build_parser() -> argparse.ArgumentParser:
         help="Single-pass BAM scan and Bayesian transcript abundance estimation",
     )
 
-    # I/O (required via CLI or config YAML)
-    quant_parser.add_argument(
+    # -- Input / Output -------------------------------------------------------
+    io_grp = quant_parser.add_argument_group("input / output")
+    io_grp.add_argument(
         "--bam", dest="bam_file", default=None,
         help="Name-sorted BAM file. Minimap2 and STAR aligners are "
              "supported. The NH tag is used when present; otherwise "
              "multimappers are detected from secondary BAM flags.",
     )
-    quant_parser.add_argument(
+    io_grp.add_argument(
         "--index", dest="index_dir", default=None,
         help="Directory containing rigel index files (from 'rigel index').",
     )
-    quant_parser.add_argument(
+    io_grp.add_argument(
         "-o", "--output-dir", dest="output_dir", default=None,
         help="Output directory for quantification results.",
     )
-
-    # Optional config file
-    quant_parser.add_argument(
+    io_grp.add_argument(
         "--config", dest="config", default=None,
         help="YAML configuration file. Accepts the same keys as CLI "
              "options (with underscores). CLI flags override config file "
              "values. A config.yaml is written to the output directory "
              "after each run for easy reproducibility.",
     )
+    io_grp.add_argument(
+        "--annotated-bam", dest="annotated_bam", default=None,
+        help="Write an annotated BAM with per-fragment assignment tags "
+             "(ZT, ZG, ZI, ZJ, ZP, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
+             "Requires a second pass over the BAM.",
+    )
+    io_grp.add_argument(
+        "--tsv", dest="tsv", action="store_true", default=False,
+        help="Also write TSV (.tsv) mirrors of quant tables.",
+    )
 
-    # Boolean flags — use BooleanOptionalAction so both --flag and
-    # --no-flag forms exist, and default=None lets us detect "not set
-    # on CLI" for proper YAML override.
-    quant_parser.add_argument(
+    # -- Alignment options ----------------------------------------------------
+    aln_grp = quant_parser.add_argument_group("alignment options")
+    aln_grp.add_argument(
         "--include-multimap",
         dest="include_multimap",
         action=argparse.BooleanOptionalAction, default=None,
         help="Include multimapping reads (default: yes). "
              "Detected via NH tag or secondary BAM flag.",
     )
-    quant_parser.add_argument(
+    aln_grp.add_argument(
         "--keep-duplicates",
         dest="keep_duplicates",
         action=argparse.BooleanOptionalAction, default=None,
         help="Keep reads marked as PCR/optical duplicates (default: no).",
     )
-    quant_parser.add_argument(
-        "--tsv", dest="tsv", action="store_true", default=False,
-        help="Also write TSV (.tsv) mirrors of quant tables.",
-    )
-
-    # Common options (all default=None for YAML override)
-    quant_parser.add_argument(
+    aln_grp.add_argument(
         "--sj-strand-tag", dest="sj_strand_tag",
         nargs="+", default=None,
         help="BAM tag(s) for splice-junction strand (default: auto). "
@@ -800,23 +808,33 @@ def build_parser() -> argparse.ArgumentParser:
              "Use 'XS' for STAR, 'ts' for minimap2, or list multiple "
              "tags to check in order (e.g. XS ts).",
     )
-    quant_parser.add_argument(
+
+    # -- Model parameters -----------------------------------------------------
+    model_grp = quant_parser.add_argument_group("model parameters")
+    model_grp.add_argument(
         "--seed", dest="seed", type=int, default=None,
         help="Random seed for reproducibility (default: use current timestamp).",
     )
-    quant_parser.add_argument(
+    model_grp.add_argument(
         "--prior-pseudocount", dest="prior_pseudocount",
         type=float, default=None,
         help="Total OVR prior budget C in virtual fragments (default: 1.0). "
              "Distributed as gamma*C to gDNA and (1-gamma)*C coverage-weighted "
              "across RNA components.",
     )
-    quant_parser.add_argument(
+    model_grp.add_argument(
         "--em-iterations", dest="em_iterations", type=int, default=None,
         help="Maximum EM iterations (default: 1000). "
              "Set to 0 for unambiguous-only quantification.",
     )
-    quant_parser.add_argument(
+    model_grp.add_argument(
+        "--em-mode", dest="em_mode",
+        choices=["vbem", "map"], default=None,
+        help="EM algorithm variant (default: vbem). "
+             "'vbem' uses Variational Bayes EM with digamma-based soft "
+             "updates. 'map' uses MAP-EM with hard max(0, n+a-1) updates.",
+    )
+    model_grp.add_argument(
         "--assignment-mode", dest="assignment_mode",
         choices=["sample", "fractional", "map"], default=None,
         help="Post-EM fragment assignment mode (default: sample). "
@@ -824,19 +842,28 @@ def build_parser() -> argparse.ArgumentParser:
              "'fractional' preserves EM posterior weights (traditional). "
              "'map' assigns each fragment to its highest-posterior component.",
     )
-    quant_parser.add_argument(
-        "--annotated-bam", dest="annotated_bam", default=None,
-        help="Write an annotated BAM with per-fragment assignment tags "
-             "(ZT, ZG, ZI, ZJ, ZP, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
-             "Requires a second pass over the BAM.",
+
+    # -- Performance ----------------------------------------------------------
+    perf_grp = quant_parser.add_argument_group("performance")
+    perf_grp.add_argument(
+        "--threads", dest="threads", type=int, default=None,
+        help="Number of threads for BAM scanning and locus EM "
+             "(default: 0 = all available cores). Set to 1 for "
+             "sequential execution.",
     )
-    quant_parser.add_argument(
+    perf_grp.add_argument(
+        "--buffer-size", dest="buffer_size", type=float, default=None,
+        help="Maximum in-memory buffer size in GiB before chunks are "
+             "spilled to disk (default: 4). Increase if you have ample "
+             "RAM to avoid disk I/O overhead from spilling.",
+    )
+    perf_grp.add_argument(
         "--tmpdir", default=None,
         help="Directory for temporary buffer spill files when memory "
              "limits are exceeded (default: system temp directory).",
     )
 
-    # -- Advanced parameters --------------------------------------------------
+    # -- Advanced scoring / convergence ---------------------------------------
     adv = quant_parser.add_argument_group("advanced options")
     adv.add_argument(
         "--assignment-min-posterior", dest="assignment_min_posterior",
@@ -851,13 +878,6 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: 1e-6).",
     )
     adv.add_argument(
-        "--gdna-splice-penalty-unannot",
-        dest="gdna_splice_penalty_unannot",
-        type=float, default=None,
-        help="gDNA splice penalty for SPLICED_UNANNOT fragments "
-             "(default: 0.01).",
-    )
-    adv.add_argument(
         "--overhang-alpha", dest="overhang_alpha",
         type=float, default=None,
         help="Per-base overhang penalty alpha in [0,1] (default: 0.01). "
@@ -870,24 +890,18 @@ def build_parser() -> argparse.ArgumentParser:
              "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
+        "--gdna-splice-penalty-unannot",
+        dest="gdna_splice_penalty_unannot",
+        type=float, default=None,
+        help="gDNA splice penalty for SPLICED_UNANNOT fragments "
+             "(default: 0.01).",
+    )
+    adv.add_argument(
         "--pruning-min-posterior", dest="pruning_min_posterior",
         type=float, default=None,
         help="Minimum posterior threshold for candidate pruning "
              "(default: 1e-4). Lower values keep more candidates "
              "(conservative). Set to 0 to disable pruning entirely.",
-    )
-    adv.add_argument(
-        "--em-mode", dest="em_mode",
-        choices=["vbem", "map"], default=None,
-        help="EM algorithm variant (default: vbem). "
-             "'vbem' uses Variational Bayes EM with digamma-based soft "
-             "updates. 'map' uses MAP-EM with hard max(0, n+a-1) updates.",
-    )
-    quant_parser.add_argument(
-        "--threads", dest="threads", type=int, default=None,
-        help="Number of threads for BAM scanning and locus EM "
-             "(default: 0 = all available cores). Set to 1 for "
-             "sequential execution.",
     )
     quant_parser.set_defaults(func=quant_command)
 

@@ -251,7 +251,7 @@ class _FinalizedChunk:
         return classes
 
     def to_scoring_arrays(self) -> tuple:
-        """Return the contiguous array tuple expected by ``fused_score_buffer``.
+        """Return the contiguous array tuple expected by ``StreamingScorer.score_chunk``.
 
         Upcasts ``t_offsets`` and ``frag_id`` from int32 to int64 as
         required by the C++ scoring kernel, and computes the derived

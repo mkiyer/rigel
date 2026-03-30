@@ -304,19 +304,38 @@ def _ensure_estimator_geometry(rc):
 
 def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
                     *, em_iterations=10):
-    """Run batch locus EM. Returns pool_counts dict.
+    """Run batch locus EM via the partitioned path. Returns pool_counts dict.
 
     Accepts either the new tuple form (em_data, loci, locus_gammas, index)
     separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
     """
+    from rigel.partition import partition_and_free
+
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):
         em_data, loci, locus_gammas, index = em_data
 
     _ensure_estimator_geometry(rc)
 
-    total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em(
-        loci, em_data, index, locus_gammas,
+    # Partition ScoredFragments into per-locus LocusPartition objects
+    partitions = partition_and_free(em_data, loci)
+
+    # Build the 12-tuples and transcript index lists expected by C++
+    partition_tuples = [
+        (
+            p.offsets, p.t_indices, p.log_liks, p.coverage_weights,
+            p.tx_starts, p.tx_ends, p.count_cols,
+            p.is_spliced, p.gdna_log_liks, p.genomic_footprints,
+            p.locus_t_indices, p.locus_count_cols,
+        )
+        for p in [partitions[i] for i in range(len(loci))]
+    ]
+    locus_t_lists = [l.transcript_indices for l in loci]
+    gdna_spans = np.array([l.gdna_span for l in loci], dtype=np.int64)
+
+    total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
+        partition_tuples, locus_t_lists,
+        locus_gammas, gdna_spans, index,
         em_iterations=em_iterations,
     )
     rc._gdna_em_total += total_gdna

@@ -163,3 +163,45 @@ class LocusEMInput:
     effective_lengths: np.ndarray
     prior: np.ndarray
     bias_profiles: np.ndarray | list | None
+
+
+# ======================================================================
+# LocusPartition — per-locus CSR subset for partitioned EM
+# ======================================================================
+
+
+@dataclass(slots=True)
+class LocusPartition:
+    """Per-locus CSR subset with contiguous, 0-indexed arrays.
+
+    Produced by ``partition_and_free()`` which scatters the global
+    ``ScoredFragments`` CSR into per-locus partitions.  Each partition
+    is self-contained: its ``offsets`` array defines a local CSR over
+    ``n_units`` rows and ``n_candidates`` total candidate entries.
+
+    Transcript indices (``t_indices``) remain in **global** transcript
+    space.  Remapping to local indices is deferred to the C++ extraction
+    function, consistent with the existing ``extract_locus_sub_problem``.
+    """
+
+    locus_id: int
+    n_units: int
+    n_candidates: int
+
+    # CSR structure
+    offsets: np.ndarray  # int64[n_units + 1]
+
+    # Per-candidate arrays (indexed by offsets)
+    t_indices: np.ndarray  # int32 — GLOBAL transcript indices
+    log_liks: np.ndarray  # float64
+    count_cols: np.ndarray  # uint8
+    coverage_weights: np.ndarray  # float64
+    tx_starts: np.ndarray  # int32
+    tx_ends: np.ndarray  # int32
+
+    # Per-unit arrays
+    is_spliced: np.ndarray  # uint8 (bool viewed as uint8 for C++)
+    gdna_log_liks: np.ndarray  # float64
+    genomic_footprints: np.ndarray  # int32
+    locus_t_indices: np.ndarray  # int32
+    locus_count_cols: np.ndarray  # uint8

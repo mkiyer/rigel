@@ -1,0 +1,44 @@
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  Benchmark v5: rigel + salmon + kallisto comparison        ║
+# ╚═════════════════════════════════════════════════════════════╝
+#
+# Usage:
+#   python scripts/benchmark.py --config scripts/benchmark_v5_all.yaml
+
+# ── Inputs ────────────────────────────────────────────────────
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/benchmark_output_v5_all
+
+threads: 8
+transcript_filter: basic
+
+# ── Data source ───────────────────────────────────────────────
+sim_dir: /Users/mkiyer/Downloads/rigel_runs/sim_ccle_hela_salmon
+
+# ── Aligners ──────────────────────────────────────────────────
+aligners:
+  oracle:
+    type: oracle
+  minimap2:
+    type: minimap2
+
+# ── Rigel configurations ─────────────────────────────────────
+rigel_configs:
+  default: {}
+
+# ── External tools ────────────────────────────────────────────
+salmon:
+  enabled: true
+
+kallisto:
+  enabled: true
+
+htseq:
+  enabled: false
+
+# ── Runtime ───────────────────────────────────────────────────
+runtime:
+  keep_going: true
+
+verbose: true

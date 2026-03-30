@@ -79,6 +79,7 @@ from rigel.config import (
 from rigel.estimator import AbundanceEstimator
 from rigel.index import TranscriptIndex
 from rigel.locus import build_loci, compute_gdna_locus_gammas
+from rigel.partition import partition_and_free
 from rigel.native import detect_sj_strand_tag
 from rigel.pipeline import run_pipeline, scan_and_buffer
 from rigel.scan import FragmentRouter
@@ -625,19 +626,22 @@ def profile_stages(
 
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
+            with Timer("partition") as t_part:
+                partitions = partition_and_free(em_data, loci)
+            timings.partition = t_part.elapsed
+
+            locus_gammas = np.asarray(gdna_inits, dtype=np.float64)
+
             with Timer("locus_em") as t_em:
-                # Use batch C++ path (same as quant_from_buffer default)
-                (
-                    total_gdna_em,
-                    locus_mrna_arr,
-                    locus_gdna_arr,
-                ) = estimator.run_batch_locus_em(
+                # Use partitioned batch C++ path (same as pipeline)
+                from rigel.pipeline import _run_locus_em_partitioned
+                _run_locus_em_partitioned(
+                    estimator,
+                    partitions,
                     loci,
-                    em_data,
                     index,
-                    np.asarray(gdna_inits, dtype=np.float64),
-                    em_iterations=em_config.iterations,
-                    em_convergence_delta=em_config.convergence_delta,
+                    locus_gammas,
+                    em_config,
                     emit_locus_stats=True,
                 )
             timings.locus_em = t_em.elapsed
@@ -653,8 +657,6 @@ def profile_stages(
 
     rss_snaps["after_locus_em"] = _snap_rss_current()
 
-    # -- Phase 5B: Free ScoredFragments CSR arrays --
-    del em_data
     gc.collect()
 
     rss_snaps["after_cleanup"] = _snap_rss_current()

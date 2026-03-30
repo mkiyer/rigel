@@ -1,4 +1,4 @@
-"""Cross-chunk regression test for fused_score_buffer.
+"""Cross-chunk regression test for StreamingScorer.
 
 Verifies that splitting fragments across multiple buffer chunks
 produces identical quantification output to processing in a single

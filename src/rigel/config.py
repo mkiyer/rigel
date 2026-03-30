@@ -129,7 +129,7 @@ class BamScanConfig:
     chunk_size : int
         Fragments per buffer chunk (default 1M).
     max_memory_bytes : int
-        Max memory before disk spill (default 2 GiB).
+        Max memory before disk spill (default 4 GiB).
     spill_dir : Path, str, or None
         Directory for spilled buffer chunks (default None).
     """
@@ -140,7 +140,7 @@ class BamScanConfig:
     sj_strand_tag: str | tuple[str, ...] = "auto"
     log_every: int = 1_000_000
     chunk_size: int = 1_000_000
-    max_memory_bytes: int = 2 * 1024**3
+    max_memory_bytes: int = 4 * 1024**3
     spill_dir: Path | str | None = None
     n_scan_threads: int = 0
     n_decomp_threads: int = 4

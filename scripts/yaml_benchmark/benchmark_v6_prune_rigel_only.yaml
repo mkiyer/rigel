@@ -1,0 +1,37 @@
+# Re-run only rigel quantification on existing BAMs from v6 benchmark.
+# Salmon/kallisto disabled — alignment is auto-skipped if BAMs exist.
+
+genome: /Users/mkiyer/Downloads/rigel_runs/refs/human/genome_controls.fasta.bgz
+gtf: /Users/mkiyer/Downloads/rigel_runs/refs/human/genes_controls.gtf.gz
+outdir: /Users/mkiyer/Downloads/rigel_runs/benchmark_output_v6_prune
+
+threads: 8
+transcript_filter: basic
+
+sim_dir: /Users/mkiyer/Downloads/rigel_runs/sim_ccle_hela_salmon
+
+aligners:
+  oracle:
+    type: oracle
+  minimap2:
+    type: minimap2
+
+rigel_configs:
+  default:
+    prune_threshold: 0.1
+  no_prune:
+    prune_threshold: -1.0
+
+salmon:
+  enabled: false
+
+kallisto:
+  enabled: false
+
+htseq:
+  enabled: false
+
+runtime:
+  keep_going: true
+
+verbose: true

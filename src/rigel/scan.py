@@ -94,13 +94,13 @@ class FragmentRouter:
         buffer: FragmentBuffer,
         log_every: int,
     ) -> ScoredFragments:
-        """Chunk-level C++ scan path (fast).
+        """Streaming C++ scan path.
 
-        Streams chunks from the buffer iterator, converting each to
-        contiguous numpy arrays and releasing the raw chunk before
-        loading the next.  Spilled chunks are loaded from disk on
-        demand, so peak memory during conversion is bounded to one
-        extra chunk.
+        Processes chunks one at a time via StreamingScorer, freeing
+        each chunk's arrays immediately after scoring.  Multimapper
+        groups are scored eagerly — no cross-chunk data references.
+        Peak memory is bounded to one chunk (~200 MB) plus the
+        growing CSR output.
         """
         native_scorer = self._native_ctx
         estimator = self.estimator
@@ -110,6 +110,7 @@ class FragmentRouter:
         annotations = self.annotations
 
         from .scoring import LOG_SAFE_FLOOR
+        from .native import StreamingScorer
 
         gdna_unspliced_penalty = self.ctx.gdna_splice_penalties.get(
             SPLICE_UNSPLICED,
@@ -119,23 +120,26 @@ class FragmentRouter:
 
         t_strand_arr = np.ascontiguousarray(index.t_to_strand_arr, dtype=np.int8)
 
-        # ---- Stream chunks: convert one at a time, release raw ----
-        # Each iteration loads at most one spilled chunk from disk,
-        # converts it to contiguous arrays, then lets the raw chunk
-        # be garbage-collected before the next iteration.
-        chunk_arrays = []
-        chunk_sizes = []
-        for chunk in buffer.iter_chunks():
-            chunk_arrays.append(chunk.to_scoring_arrays())
-            chunk_sizes.append(chunk.size)
-
-        # ---- Fused two-pass C++ scoring ----
-        result = native_scorer.fused_score_buffer(
-            chunk_arrays,
+        # ---- Streaming scoring: one chunk at a time ----
+        scorer = StreamingScorer(
+            native_scorer,
             t_strand_arr,
             estimator.unambig_counts,
             gdna_log_penalty,
         )
+
+        n_processed = 0
+        for chunk in buffer.iter_chunks():
+            arrays = chunk.to_scoring_arrays()
+            scorer.score_chunk(arrays)
+            n_processed += chunk.size
+            if n_processed % log_every < chunk.size:
+                logger.debug(
+                    f"  Scan: {n_processed:,} / {buffer.total_fragments:,}"
+                )
+            del arrays  # free immediately
+
+        result = scorer.finish()
 
         (
             offsets,
@@ -155,6 +159,8 @@ class FragmentRouter:
             splice_types,
             det_tids,
             det_fids,
+            chim_fids,
+            chim_stypes,
             n_det,
             n_em_u,
             n_em_as,
@@ -171,29 +177,19 @@ class FragmentRouter:
         stats.n_gated_out += int(n_gated)
         stats.em_routed_multimapper_units += int(n_mm)
 
-        # ---- Annotations (from chunk_arrays — no raw chunks) ----
-        # Tuple layout: [6]=splice_type, [8]=fragment_classes, [9]=frag_id
-        n_processed = 0
-        for ci in range(len(chunk_arrays)):
-            chunk_frag_classes = chunk_arrays[ci][8]
-
-            if annotations is not None:
-                chimeric_indices = np.where(chunk_frag_classes == FRAG_CHIMERIC)[0]
-                for idx in chimeric_indices:
-                    annotations.add(
-                        frag_id=int(chunk_arrays[ci][9][idx]),
-                        best_tid=-1,
-                        best_gid=-1,
-                        pool=POOL_CODE_CHIMERIC,
-                        posterior=0.0,
-                        frag_class=FRAG_CHIMERIC,
-                        n_candidates=0,
-                        splice_type=int(chunk_arrays[ci][6][idx]),
-                    )
-
-            n_processed += chunk_sizes[ci]
-            if n_processed % log_every < chunk_sizes[ci]:
-                logger.debug(f"  Scan: {n_processed:,} / {buffer.total_fragments:,}")
+        # ---- Chimeric annotations (from C++ accumulators) ----
+        if annotations is not None and len(chim_fids) > 0:
+            for j in range(len(chim_fids)):
+                annotations.add(
+                    frag_id=int(chim_fids[j]),
+                    best_tid=-1,
+                    best_gid=-1,
+                    pool=POOL_CODE_CHIMERIC,
+                    posterior=0.0,
+                    frag_class=FRAG_CHIMERIC,
+                    n_candidates=0,
+                    splice_type=int(chim_stypes[j]),
+                )
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
@@ -212,9 +208,6 @@ class FragmentRouter:
                     n_candidates=1,
                     splice_type=int(SPLICE_ANNOT),
                 )
-
-        # Free chunk_arrays — no longer needed
-        del chunk_arrays
 
         return ScoredFragments(
             offsets=offsets,

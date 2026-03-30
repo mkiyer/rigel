@@ -60,7 +60,7 @@ static constexpr int ASSIGN_SAMPLE     = 2;
 
 using hrclock = std::chrono::steady_clock;
 
-/// Per-locus profiling statistics collected during batch_locus_em.
+/// Per-locus profiling statistics collected during batch_locus_em_partitioned.
 struct LocusProfile {
     int locus_idx = -1;
     int n_transcripts = 0;
@@ -1276,210 +1276,6 @@ struct LocusSubProblem {
     std::vector<int32_t>  local_to_global_t; // [n_t]
 };
 
-// Extract per-locus sub-problem from global CSR data.
-// Reimplements Python build_locus_em_data() entirely in C++.
-// Component layout: [0,n_t) transcript + [n_t] gdna
-static void extract_locus_sub_problem(
-    LocusSubProblem& sub,
-    // Locus definition
-    const int32_t* t_arr, int n_t,
-    const int32_t* u_arr, int n_u,
-    double locus_gamma,
-    int64_t gdna_span,
-    // Global CSR
-    const int64_t* g_offsets,
-    const int32_t* g_t_indices,
-    const double*  g_log_liks,
-    const double*  g_coverage_wts,
-    const int32_t* g_tx_starts,
-    const int32_t* g_tx_ends,
-    const uint8_t* g_count_cols,
-    const uint8_t* g_is_spliced,
-    const double*  g_gdna_log_liks,
-    const int32_t* g_genomic_footprints,
-    const int32_t* g_locus_t_indices,
-    const uint8_t* g_locus_count_cols,
-    // Per-transcript data (global arrays, all N_T_TOTAL elements)
-    const double*  all_unambig_row_sums,
-    const int64_t* all_t_starts,
-    const int64_t* all_t_ends,
-    const int64_t* all_t_lengths,
-    // Scratch: global→local mapping, caller-owned, reset between calls
-    int32_t* local_map, int local_map_size)
-{
-    sub.n_t = n_t;
-    sub.n_local_units = n_u;
-    sub.n_components = n_t + 1;
-    sub.gdna_idx = n_t;
-
-    int nc = sub.n_components;
-
-    // --- Build global→local mapping ---
-    int max_global = 0;
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        if (gt + 1 > max_global) max_global = gt + 1;
-    }
-    if (max_global > local_map_size) max_global = local_map_size;
-
-    // Reset scratch region
-    for (int i = 0; i < max_global; ++i) local_map[i] = -1;
-
-    // transcript: global_t → local_i  [0, n_t)
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        if (gt >= 0 && gt < local_map_size) local_map[gt] = i;
-    }
-
-    // --- Gather + dedup candidates from global CSR ---
-    struct BestCandidate {
-        double  log_lik;
-        double  cov_wt;
-        int32_t tx_start;
-        int32_t tx_end;
-        uint8_t count_col;
-    };
-    std::vector<BestCandidate> best_buf(nc);
-    std::vector<int32_t> seen_epoch(nc, 0);
-    int32_t current_epoch = 0;
-    std::vector<int32_t> dirty_comps;
-    dirty_comps.reserve(256);
-
-    size_t total_est = 0;
-    for (int ui = 0; ui < n_u; ++ui) {
-        int u = u_arr[ui];
-        total_est += static_cast<size_t>(g_offsets[u + 1] - g_offsets[u]);
-    }
-    total_est += static_cast<size_t>(n_u);
-
-    sub.t_indices.clear();
-    sub.log_liks.clear();
-    sub.coverage_wts.clear();
-    sub.tx_starts.clear();
-    sub.tx_ends.clear();
-    sub.count_cols.clear();
-    sub.t_indices.reserve(total_est);
-    sub.log_liks.reserve(total_est);
-    sub.coverage_wts.reserve(total_est);
-    sub.tx_starts.reserve(total_est);
-    sub.tx_ends.reserve(total_est);
-    sub.count_cols.reserve(total_est);
-
-    sub.offsets.resize(n_u + 1);
-    sub.offsets[0] = 0;
-
-    sub.locus_t_arr.resize(n_u);
-    sub.locus_ct_arr.resize(n_u);
-
-    // Use pre-computed union genomic footprint for gDNA bias profile
-    int64_t locus_span = gdna_span;
-
-    for (int ui = 0; ui < n_u; ++ui) {
-        int u = u_arr[ui];
-        auto g_start = g_offsets[u];
-        auto g_end = g_offsets[u + 1];
-
-        sub.locus_t_arr[ui] = g_locus_t_indices[u];
-        sub.locus_ct_arr[ui] = g_locus_count_cols[u];
-
-        ++current_epoch;
-        dirty_comps.clear();
-
-        // Gather and dedup RNA candidates
-        for (auto j = g_start; j < g_end; ++j) {
-            int32_t global_t = g_t_indices[j];
-            if (global_t < 0 || global_t >= local_map_size) continue;
-            int32_t local = local_map[global_t];
-            if (local < 0 || local >= nc) continue;
-
-            double ll = g_log_liks[j];
-            if (seen_epoch[local] != current_epoch ||
-                ll > best_buf[local].log_lik) {
-                best_buf[local] = {ll, g_coverage_wts[j],
-                                   g_tx_starts[j], g_tx_ends[j],
-                                   g_count_cols[j]};
-                if (seen_epoch[local] != current_epoch) {
-                    seen_epoch[local] = current_epoch;
-                    dirty_comps.push_back(local);
-                }
-            }
-        }
-
-        // Add gDNA candidate for unspliced units
-        bool is_spliced = (g_is_spliced[u] != 0);
-        double gdna_ll = g_gdna_log_liks[u];
-        if (!is_spliced && std::isfinite(gdna_ll)) {
-            int32_t gdna_comp = sub.gdna_idx;
-            int32_t footprint = g_genomic_footprints[u];
-            if (seen_epoch[gdna_comp] != current_epoch ||
-                gdna_ll > best_buf[gdna_comp].log_lik) {
-                best_buf[gdna_comp] = {gdna_ll, 1.0, 0, footprint, 0};
-                if (seen_epoch[gdna_comp] != current_epoch) {
-                    seen_epoch[gdna_comp] = current_epoch;
-                    dirty_comps.push_back(gdna_comp);
-                }
-            }
-        }
-
-        // Collect deduped candidates sorted by local component
-        std::sort(dirty_comps.begin(), dirty_comps.end());
-        for (int32_t c : dirty_comps) {
-            sub.t_indices.push_back(c);
-            sub.log_liks.push_back(best_buf[c].log_lik);
-            sub.coverage_wts.push_back(best_buf[c].cov_wt);
-            sub.tx_starts.push_back(best_buf[c].tx_start);
-            sub.tx_ends.push_back(best_buf[c].tx_end);
-            sub.count_cols.push_back(best_buf[c].count_col);
-        }
-
-        sub.offsets[ui + 1] = static_cast<int64_t>(sub.t_indices.size());
-    }
-
-    // --- Build per-component arrays ---
-    sub.local_to_global_t.resize(n_t);
-    for (int i = 0; i < n_t; ++i) sub.local_to_global_t[i] = t_arr[i];
-
-    // Unambig totals: transcript slot = row sum of unambig_counts[t_arr[i], :]
-    sub.unambig_totals.assign(nc, 0.0);
-    for (int i = 0; i < n_t; ++i) {
-        sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
-    }
-    // gDNA slot is 0 (no double-counting)
-
-    // Bias profiles: [transcript lengths | locus_span]
-    sub.bias_profiles.resize(nc);
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        sub.bias_profiles[i] = all_t_lengths[gt];
-    }
-    sub.bias_profiles[sub.gdna_idx] = gdna_span;
-
-    // Prior: EM_PRIOR_EPSILON for eligible, 0.0 for ineligible
-    sub.prior.assign(nc, EM_PRIOR_EPSILON);
-
-    // Zero gDNA prior when locus_gamma == 0 (no gDNA predicted)
-    if (locus_gamma == 0.0) {
-        sub.prior[sub.gdna_idx] = 0.0;
-    }
-
-    // Zero unambig_totals for dead components
-    for (int c = 0; c < nc; ++c) {
-        if (sub.prior[c] == 0.0) sub.unambig_totals[c] = 0.0;
-    }
-
-    // Eligible = (prior > 0)
-    sub.eligible.resize(nc);
-    for (int c = 0; c < nc; ++c) {
-        sub.eligible[c] = (sub.prior[c] > 0.0) ? 1.0 : 0.0;
-    }
-
-    // Clean up local_map scratch for next call
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        if (gt >= 0 && gt < local_map_size) local_map[gt] = -1;
-    }
-}
-
 // Assign posteriors after EM convergence.
 // Reimplements Python assign_locus_ambiguous() entirely in C++.
 // Scatters results into the provided accumulator arrays.
@@ -1657,48 +1453,412 @@ static void assign_posteriors(
     }
 }
 
+// ================================================================
+// Partition scatter functions — array-by-array global→per-locus scatter
+// ================================================================
+
+/// Build per-locus CSR offsets from global offsets and per-locus unit lists.
+///
+/// For each locus li with units [u0, u1, ...]:
+///   partition_offsets[li][0] = 0
+///   partition_offsets[li][k+1] = partition_offsets[li][k]
+///                                + (g_offsets[u+1] - g_offsets[u])
+///
+/// Returns a Python list of int64 numpy arrays, one per locus.
+static nb::list build_partition_offsets(
+    i64_1d g_offsets,
+    nb::list locus_units,
+    int n_loci)
+{
+    const int64_t* goff = g_offsets.data();
+
+    // Extract raw pointers from locus_units under GIL
+    struct UnitInfo {
+        const int32_t* data;
+        int n;
+    };
+    std::vector<UnitInfo> unit_infos(n_loci);
+    for (int li = 0; li < n_loci; ++li) {
+        auto arr = nb::cast<i32_1d>(locus_units[li]);
+        unit_infos[li] = {arr.data(), static_cast<int>(arr.shape(0))};
+    }
+
+    // Compute offsets (sequential — I/O bound)
+    struct PartOffsets {
+        int64_t* data;
+        int n;  // n_units for this locus
+    };
+    std::vector<PartOffsets> results(n_loci);
+    for (int li = 0; li < n_loci; ++li) {
+        int n_u = unit_infos[li].n;
+        const int32_t* u_arr = unit_infos[li].data;
+        int64_t* out = new int64_t[n_u + 1];
+        out[0] = 0;
+        for (int k = 0; k < n_u; ++k) {
+            int u = u_arr[k];
+            out[k + 1] = out[k] + (goff[u + 1] - goff[u]);
+        }
+        results[li] = {out, n_u};
+    }
+
+    // Wrap results as numpy arrays
+    nb::list result_list;
+    for (int li = 0; li < n_loci; ++li) {
+        int64_t* ptr = results[li].data;
+        size_t shape[1] = {static_cast<size_t>(results[li].n + 1)};
+        nb::capsule owner(ptr, [](void* p) noexcept {
+            delete[] static_cast<int64_t*>(p);
+        });
+        result_list.append(
+            nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(ptr, 1, shape, std::move(owner)));
+    }
+    return result_list;
+}
+
+/// Scatter per-candidate data from global CSR into per-locus arrays.
+///
+/// For each locus, copies candidate segments:
+///   For unit k with global index u = locus_units[li][k]:
+///     memcpy(dst + p_off[k], src + g_off[u], (g_off[u+1]-g_off[u]) * sizeof(T))
+///
+/// Returns a Python list of numpy arrays, one per locus.
+template <typename T>
+static nb::list scatter_candidates_impl(
+    nb::ndarray<const T, nb::ndim<1>, nb::c_contig> global_arr,
+    i64_1d g_offsets,
+    nb::list locus_units,
+    nb::list partition_offsets,
+    int n_loci)
+{
+    const T* src = global_arr.data();
+    const int64_t* goff = g_offsets.data();
+
+    // Extract pointers under GIL
+    struct LInfo {
+        const int32_t* units;
+        const int64_t* p_off;
+        int n_units;
+        int64_t n_candidates;
+    };
+    std::vector<LInfo> infos(n_loci);
+    for (int li = 0; li < n_loci; ++li) {
+        auto u_arr = nb::cast<i32_1d>(locus_units[li]);
+        auto p_arr = nb::cast<i64_1d>(partition_offsets[li]);
+        int n_u = static_cast<int>(u_arr.shape(0));
+        const int64_t* poff = p_arr.data();
+        infos[li] = {u_arr.data(), poff, n_u, poff[n_u]};
+    }
+
+    // Scatter (sequential)
+    struct Result { T* data; int64_t n; };
+    std::vector<Result> results(n_loci);
+    for (int li = 0; li < n_loci; ++li) {
+        const auto& info = infos[li];
+        T* dst = new T[info.n_candidates > 0 ? info.n_candidates : 1];
+        for (int k = 0; k < info.n_units; ++k) {
+            int u = info.units[k];
+            int64_t g_start = goff[u];
+            int64_t seg_len = goff[u + 1] - g_start;
+            if (seg_len > 0) {
+                std::memcpy(dst + info.p_off[k],
+                            src + g_start,
+                            static_cast<size_t>(seg_len) * sizeof(T));
+            }
+        }
+        results[li] = {dst, info.n_candidates};
+    }
+
+    // Wrap as numpy arrays
+    nb::list result_list;
+    for (int li = 0; li < n_loci; ++li) {
+        T* ptr = results[li].data;
+        size_t shape[1] = {static_cast<size_t>(results[li].n)};
+        nb::capsule owner(ptr, [](void* p) noexcept {
+            delete[] static_cast<T*>(p);
+        });
+        result_list.append(
+            nb::ndarray<nb::numpy, T, nb::ndim<1>>(ptr, 1, shape, std::move(owner)));
+    }
+    return result_list;
+}
+
+/// Scatter per-unit data from global array into per-locus arrays.
+///
+/// For each locus, gathers elements: dst[k] = src[units[k]]
+///
+/// Returns a Python list of numpy arrays, one per locus.
+template <typename T>
+static nb::list scatter_units_impl(
+    nb::ndarray<const T, nb::ndim<1>, nb::c_contig> global_arr,
+    nb::list locus_units,
+    int n_loci)
+{
+    const T* src = global_arr.data();
+
+    // Extract pointers under GIL
+    struct UInfo { const int32_t* data; int n; };
+    std::vector<UInfo> infos(n_loci);
+    for (int li = 0; li < n_loci; ++li) {
+        auto arr = nb::cast<i32_1d>(locus_units[li]);
+        infos[li] = {arr.data(), static_cast<int>(arr.shape(0))};
+    }
+
+    // Gather (sequential)
+    struct Result { T* data; int n; };
+    std::vector<Result> results(n_loci);
+    for (int li = 0; li < n_loci; ++li) {
+        int n_u = infos[li].n;
+        const int32_t* u_arr = infos[li].data;
+        T* dst = new T[n_u > 0 ? n_u : 1];
+        for (int k = 0; k < n_u; ++k) {
+            dst[k] = src[u_arr[k]];
+        }
+        results[li] = {dst, n_u};
+    }
+
+    // Wrap as numpy arrays
+    nb::list result_list;
+    for (int li = 0; li < n_loci; ++li) {
+        T* ptr = results[li].data;
+        size_t shape[1] = {static_cast<size_t>(results[li].n)};
+        nb::capsule owner(ptr, [](void* p) noexcept {
+            delete[] static_cast<T*>(p);
+        });
+        result_list.append(
+            nb::ndarray<nb::numpy, T, nb::ndim<1>>(ptr, 1, shape, std::move(owner)));
+    }
+    return result_list;
+}
+
+// ================================================================
+// PartitionView — per-locus CSR data for partition-native EM
+// ================================================================
+
+struct PartitionView {
+    // Per-locus CSR data (contiguous, 0-indexed)
+    const int64_t* offsets;
+    const int32_t* t_indices;
+    const double*  log_liks;
+    const double*  coverage_wts;
+    const int32_t* tx_starts;
+    const int32_t* tx_ends;
+    const uint8_t* count_cols;
+    const uint8_t* is_spliced;
+    const double*  gdna_log_liks;
+    const int32_t* genomic_footprints;
+    const int32_t* locus_t_indices;
+    const uint8_t* locus_count_cols;
+    int     n_units;
+    int64_t n_candidates;
+
+    // Locus transcript membership (from Locus.transcript_indices)
+    const int32_t* transcript_indices;
+    int n_transcripts;
+};
+
+// Extract per-locus sub-problem from a PartitionView.
+//
+// Remaps global transcript indices to local component indices [0, n_t),
+// appends a gDNA component (index n_t) for unspliced units, and sorts
+// candidates within each unit by component index (required by the
+// equivalence-class builder downstream).
+//
+// Candidates are written to pre-allocated output arrays via a write cursor
+// to avoid dynamic allocation in the inner loop. A reusable sort buffer
+// (std::vector<LocalCandidate>) is shared across all units — resize() is
+// a no-op when existing capacity is sufficient, so after the first unit
+// there are effectively zero allocations.
+static void extract_locus_sub_problem_from_partition(
+    LocusSubProblem& sub,
+    const PartitionView& pv,
+    double locus_gamma,
+    int64_t gdna_span,
+    const double*  all_unambig_row_sums,
+    const int64_t* all_t_lengths,
+    int32_t* local_map, int local_map_size)
+{
+    int n_t = pv.n_transcripts;
+    int n_u = pv.n_units;
+    const int32_t* t_arr = pv.transcript_indices;
+
+    sub.n_t = n_t;
+    sub.n_local_units = n_u;
+    sub.n_components = n_t + 1;
+    sub.gdna_idx = n_t;
+    int nc = sub.n_components;
+
+    // --- Build global→local mapping ---
+    int max_global = 0;
+    for (int i = 0; i < n_t; ++i) {
+        int gt = t_arr[i];
+        if (gt + 1 > max_global) max_global = gt + 1;
+    }
+    if (max_global > local_map_size) max_global = local_map_size;
+
+    for (int i = 0; i < max_global; ++i) local_map[i] = -1;
+    for (int i = 0; i < n_t; ++i) {
+        int gt = t_arr[i];
+        if (gt >= 0 && gt < local_map_size) local_map[gt] = i;
+    }
+
+    // --- Pre-allocate output arrays to worst-case size ---
+    // Maximum output candidates = input RNA candidates + one gDNA per unit.
+    size_t max_out = static_cast<size_t>(pv.n_candidates)
+                   + static_cast<size_t>(n_u);
+
+    sub.t_indices.resize(max_out);
+    sub.log_liks.resize(max_out);
+    sub.coverage_wts.resize(max_out);
+    sub.tx_starts.resize(max_out);
+    sub.tx_ends.resize(max_out);
+    sub.count_cols.resize(max_out);
+
+    sub.offsets.resize(n_u + 1);
+    sub.offsets[0] = 0;
+
+    sub.locus_t_arr.resize(n_u);
+    sub.locus_ct_arr.resize(n_u);
+
+    // Reusable sort buffer — persists across units, only grows.
+    std::vector<LocalCandidate> sort_buf;
+
+    size_t cursor = 0;
+
+    for (int ui = 0; ui < n_u; ++ui) {
+        auto p_start = pv.offsets[ui];
+        auto p_end   = pv.offsets[ui + 1];
+        int width_in = static_cast<int>(p_end - p_start);
+
+        sub.locus_t_arr[ui] = pv.locus_t_indices[ui];
+        sub.locus_ct_arr[ui] = pv.locus_count_cols[ui];
+
+        // Determine if this unit gets a gDNA candidate
+        bool is_spliced = (pv.is_spliced[ui] != 0);
+        double gdna_ll = pv.gdna_log_liks[ui];
+        bool has_gdna = (!is_spliced && std::isfinite(gdna_ll));
+        int width_out = width_in + (has_gdna ? 1 : 0);
+
+        // Fill sort buffer with remapped candidates
+        sort_buf.resize(width_out);
+        int k = 0;
+
+        for (auto j = p_start; j < p_end; ++j) {
+            int32_t global_t = pv.t_indices[j];
+            if (global_t < 0 || global_t >= local_map_size) continue;
+            int32_t local = local_map[global_t];
+            if (local < 0 || local >= nc) continue;
+
+            sort_buf[k++] = {local, pv.log_liks[j], pv.coverage_wts[j],
+                             pv.tx_starts[j], pv.tx_ends[j],
+                             pv.count_cols[j]};
+        }
+
+        // Append gDNA candidate (component = n_t, always the largest index)
+        if (has_gdna) {
+            int32_t footprint = pv.genomic_footprints[ui];
+            sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0,
+                             0, footprint, 0};
+        }
+
+        // Trim to actual count (candidates may have been skipped above)
+        int actual = k;
+
+        // Sort by local component index (required by equiv-class builder).
+        // For n <= 1 this is a no-op. std::sort handles small n efficiently
+        // via insertion sort internally.
+        if (actual > 1) {
+            std::sort(sort_buf.begin(), sort_buf.begin() + actual,
+                      [](const LocalCandidate& a, const LocalCandidate& b) {
+                          return a.local_comp < b.local_comp;
+                      });
+        }
+
+        // Write sorted candidates directly to pre-allocated output
+        for (int i = 0; i < actual; ++i) {
+            const auto& c = sort_buf[i];
+            sub.t_indices[cursor]    = c.local_comp;
+            sub.log_liks[cursor]     = c.log_lik;
+            sub.coverage_wts[cursor] = c.cov_wt;
+            sub.tx_starts[cursor]    = c.tx_start;
+            sub.tx_ends[cursor]      = c.tx_end;
+            sub.count_cols[cursor]   = c.count_col;
+            ++cursor;
+        }
+
+        sub.offsets[ui + 1] = static_cast<int64_t>(cursor);
+    }
+
+    // Trim output arrays to actual size
+    sub.t_indices.resize(cursor);
+    sub.log_liks.resize(cursor);
+    sub.coverage_wts.resize(cursor);
+    sub.tx_starts.resize(cursor);
+    sub.tx_ends.resize(cursor);
+    sub.count_cols.resize(cursor);
+
+    // --- Build per-component arrays ---
+    sub.local_to_global_t.resize(n_t);
+    for (int i = 0; i < n_t; ++i) sub.local_to_global_t[i] = t_arr[i];
+
+    sub.unambig_totals.assign(nc, 0.0);
+    for (int i = 0; i < n_t; ++i) {
+        sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
+    }
+
+    sub.bias_profiles.resize(nc);
+    for (int i = 0; i < n_t; ++i) {
+        sub.bias_profiles[i] = all_t_lengths[t_arr[i]];
+    }
+    sub.bias_profiles[sub.gdna_idx] = gdna_span;
+
+    sub.prior.assign(nc, EM_PRIOR_EPSILON);
+    if (locus_gamma == 0.0) {
+        sub.prior[sub.gdna_idx] = 0.0;
+    }
+
+    for (int c = 0; c < nc; ++c) {
+        if (sub.prior[c] == 0.0) sub.unambig_totals[c] = 0.0;
+    }
+
+    sub.eligible.resize(nc);
+    for (int c = 0; c < nc; ++c) {
+        sub.eligible[c] = (sub.prior[c] > 0.0) ? 1.0 : 0.0;
+    }
+
+    // Clean up local_map scratch for next call
+    for (int i = 0; i < n_t; ++i) {
+        int gt = t_arr[i];
+        if (gt >= 0 && gt < local_map_size) local_map[gt] = -1;
+    }
+}
+
 // ----------------------------------------------------------------
-// Top-level batch entry point
+// Partition-native batch EM entry point
 // ----------------------------------------------------------------
 
 static std::tuple<
     double,  // total_gdna_em
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_mrna[n_loci]
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_gdna[n_loci]
-    nb::list   // locus_stats: list of dicts (empty if emit_locus_stats=false)
+    nb::list   // locus_stats
 >
-batch_locus_em(
-    // --- Global CSR (ScoredFragments) ---
-    i64_1d g_offsets,
-    i32_1d g_t_indices,
-    f64_1d g_log_liks,
-    f64_1d g_coverage_wts,
-    i32_1d g_tx_starts,
-    i32_1d g_tx_ends,
-    u8_1d  g_count_cols,
-    u8_1d  g_is_spliced,
-    f64_1d g_gdna_log_liks,
-    i32_1d g_genomic_footprints,
-    i32_1d g_locus_t_indices,
-    u8_1d  g_locus_count_cols,
-    // --- Locus definitions (flattened CSR) ---
-    i64_1d locus_t_offsets,    // [n_loci + 1]
-    i32_1d locus_t_flat,       // concatenated transcript indices
-    i64_1d locus_u_offsets,    // [n_loci + 1]
-    i32_1d locus_u_flat,       // concatenated unit indices
-    f64_1d locus_gammas,       // [n_loci] calibration gDNA fraction ∈ [0,1]
-    i64_1d gdna_spans,         // [n_loci] pre-computed union genomic footprints
-    // --- Per-transcript data ---
-    f64_2d unambig_counts,     // [N_T, n_cols]
-    i64_1d t_starts_arr,
-    i64_1d t_ends_arr,
-    i64_1d t_lengths_arr,
-    // --- Mutable output accumulators ---
-    f64_2d_mut em_counts_out,          // [N_T, n_cols]
-    f64_2d_mut gdna_locus_counts_out,  // [N_T, n_cols]
-    f64_1d_mut posterior_sum_out,       // [N_T]
-    f64_1d_mut n_assigned_out,         // [N_T]
-    // --- EM config ---
+batch_locus_em_partitioned(
+    // Per-locus partition data (list of 12-tuples)
+    nb::list partition_tuples,
+    // Per-locus transcript membership (list of int32[])
+    nb::list locus_transcript_indices,
+    // Per-locus scalars
+    f64_1d   locus_gammas,
+    i64_1d   gdna_spans,
+    // Per-transcript globals
+    f64_2d   unambig_counts,
+    i64_1d   t_lengths_arr,
+    // Mutable output accumulators
+    f64_2d_mut em_counts_out,
+    f64_2d_mut gdna_locus_counts_out,
+    f64_1d_mut posterior_sum_out,
+    f64_1d_mut n_assigned_out,
+    // EM config
     int    max_iterations,
     double convergence_delta,
     double total_pseudocount,
@@ -1711,37 +1871,41 @@ batch_locus_em(
     int    n_threads,
     bool   emit_locus_stats)
 {
-    int n_loci = static_cast<int>(locus_t_offsets.shape(0)) - 1;
+    int n_loci = static_cast<int>(nb::len(partition_tuples));
     int N_T = n_transcripts_total;
     int N_COLS = n_splice_strand_cols;
 
-    // Get raw pointers to all input arrays
-    const int64_t*  goff  = g_offsets.data();
-    const int32_t*  gti   = g_t_indices.data();
-    const double*   gll   = g_log_liks.data();
-    const double*   gcw   = g_coverage_wts.data();
-    const int32_t*  gtxs  = g_tx_starts.data();
-    const int32_t*  gtxe  = g_tx_ends.data();
-    const uint8_t*  gcc   = g_count_cols.data();
-    const uint8_t*  gis   = g_is_spliced.data();
-    const double*   ggll  = g_gdna_log_liks.data();
-    const int32_t*  ggfp  = g_genomic_footprints.data();
-    const int32_t*  glti  = g_locus_t_indices.data();
-    const uint8_t*  glcc  = g_locus_count_cols.data();
+    // --- Under GIL: extract PartitionViews from tuples ---
+    std::vector<PartitionView> views(n_loci);
+    for (int i = 0; i < n_loci; ++i) {
+        nb::tuple tup = nb::borrow<nb::tuple>(partition_tuples[i]);
+        auto& v = views[i];
+        auto off_arr = nb::cast<i64_1d>(tup[0]);
+        v.offsets          = off_arr.data();
+        v.t_indices        = nb::cast<i32_1d>(tup[1]).data();
+        v.log_liks         = nb::cast<f64_1d>(tup[2]).data();
+        v.coverage_wts     = nb::cast<f64_1d>(tup[3]).data();
+        v.tx_starts        = nb::cast<i32_1d>(tup[4]).data();
+        v.tx_ends          = nb::cast<i32_1d>(tup[5]).data();
+        v.count_cols       = nb::cast<u8_1d>(tup[6]).data();
+        v.is_spliced       = nb::cast<u8_1d>(tup[7]).data();
+        v.gdna_log_liks    = nb::cast<f64_1d>(tup[8]).data();
+        v.genomic_footprints = nb::cast<i32_1d>(tup[9]).data();
+        v.locus_t_indices  = nb::cast<i32_1d>(tup[10]).data();
+        v.locus_count_cols = nb::cast<u8_1d>(tup[11]).data();
+        v.n_units = static_cast<int>(off_arr.shape(0)) - 1;
+        v.n_candidates = v.offsets[v.n_units];
 
-    const int64_t*  lt_off = locus_t_offsets.data();
-    const int32_t*  lt_fl  = locus_t_flat.data();
-    const int64_t*  lu_off = locus_u_offsets.data();
-    const int32_t*  lu_fl  = locus_u_flat.data();
+        auto t_arr = nb::cast<i32_1d>(locus_transcript_indices[i]);
+        v.transcript_indices = t_arr.data();
+        v.n_transcripts = static_cast<int>(t_arr.shape(0));
+    }
+
     const double*   lg_ptr = locus_gammas.data();
     const int64_t*  gs_ptr = gdna_spans.data();
-
-    const double*   uac    = unambig_counts.data();  // [N_T, N_COLS] row-major
-    const int64_t*  ts_ptr = t_starts_arr.data();
-    const int64_t*  te_ptr = t_ends_arr.data();
+    const double*   uac    = unambig_counts.data();
     const int64_t*  tl_ptr = t_lengths_arr.data();
 
-    // Mutable output pointers
     double* em_out    = em_counts_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
     double* psum_out  = posterior_sum_out.data();
@@ -1755,23 +1919,18 @@ batch_locus_em(
         unambig_row_sums[t] = s;
     }
 
-    // Allocate scratch buffer for global-to-local mapping
     int local_map_size = N_T + 1;
 
-    // Allocate per-locus result arrays
     std::vector<double> locus_mrna_vec(n_loci, 0.0);
     std::vector<double> locus_gdna_vec(n_loci, 0.0);
     double* locus_mrna_data = locus_mrna_vec.data();
     double* locus_gdna_data = locus_gdna_vec.data();
 
-    // Per-locus profiling stats (allocated BEFORE GIL release so it
-    // survives into the GIL-held post-processing section).
     std::vector<LocusProfile> locus_profiles(
         emit_locus_stats ? static_cast<size_t>(n_loci) : 0);
 
     std::atomic<double> total_gdna_em{0.0};
 
-    // Determine actual thread count
     int actual_threads = n_threads;
     if (actual_threads <= 0) {
         int hw = static_cast<int>(std::thread::hardware_concurrency());
@@ -1779,49 +1938,26 @@ batch_locus_em(
     }
     if (actual_threads < 1) actual_threads = 1;
 
-    // Release the GIL for the compute-intensive parallel section.
-    // All numpy data pointers have been extracted above; pure C++ from here
-    // until the scoped block ends and GIL is re-acquired for numpy return
-    // array creation.
     {
         nb::gil_scoped_release release;
 
-        // --- Locus scheduling: sort by descending work, two-phase ---
-        //
-        // Phase 1 ("mega-loci"): loci with work >= fair_share are processed
-        // one at a time; all threads collaborate on the intra-locus E-step.
-        //
-        // Phase 2 ("normal loci"): remaining loci are distributed via
-        // dynamic work-stealing (chunks of 16), each with single-threaded
-        // E-step.
-        //
-        // Sorting largest-first ensures the biggest loci get maximum
-        // parallelism and are scheduled first to reduce the critical path.
-
-        // Pre-compute approximate work per locus (n_transcripts * n_units).
-        // This is a proxy for the actual E-step work (sum of n*k over ECs),
-        // which requires building ECs first.  The proxy is sufficient for
-        // ordering and thread allocation.
+        // --- Scheduling ---
         std::vector<int64_t> locus_work(static_cast<size_t>(n_loci));
         int64_t total_work = 0;
         for (int li = 0; li < n_loci; ++li) {
-            int64_t nt = static_cast<int64_t>(lt_off[li + 1] - lt_off[li]);
-            int64_t nu = static_cast<int64_t>(lu_off[li + 1] - lu_off[li]);
-            locus_work[li] = nt * nu;
+            locus_work[li] = static_cast<int64_t>(views[li].n_transcripts) *
+                             static_cast<int64_t>(views[li].n_units);
             total_work += locus_work[li];
         }
 
-        // Sort locus indices by descending work
         std::vector<int> locus_order(static_cast<size_t>(n_loci));
         std::iota(locus_order.begin(), locus_order.end(), 0);
         std::sort(locus_order.begin(), locus_order.end(),
                   [&](int a, int b) { return locus_work[a] > locus_work[b]; });
 
-        // Fair share = average work per thread.  Loci with work >= fair_share
-        // are "mega-loci" that benefit from intra-locus E-step parallelism.
         int64_t fair_share = (actual_threads > 1 && total_work > 0)
             ? total_work / actual_threads
-            : total_work + 1;  // single-thread: nothing is mega
+            : total_work + 1;
 
         int mega_end = 0;
         for (int i = 0; i < n_loci; ++i) {
@@ -1831,31 +1967,16 @@ batch_locus_em(
                 break;
         }
 
-        // Key safety property: loci are connected components of the
-        // transcript-unit bipartite graph, so each transcript and each unit
-        // belongs to exactly one locus.  This means different loci write to
-        // DISJOINT indices in the output arrays (em_out, nrna_out,
-        // gdna_out, psum_out, nass_out).  No data races on those arrays.
-        //
-        // The only shared scalar accumulator is total_gdna_em, handled via
-        // std::atomic<double>.
-
-        // Lambda: process one locus.  Thread-private scratch (sub,
-        // local_map) is passed by reference to avoid per-call allocation.
-        // Returns the locus gDNA total.
+        // Lambda: process one locus from partition data
         auto process_locus = [&](int li, int estep_thr,
                                  LocusSubProblem& sub,
-                                 std::vector<int32_t>& local_map,
+                                 std::vector<int32_t>& local_map_vec,
                                  bool mega,
                                  rigel::EStepThreadPool* pool = nullptr) -> double {
             auto locus_t0 = hrclock::now();
-            // Get locus transcript and unit index ranges
-            auto t_start = lt_off[li];
-            auto t_end   = lt_off[li + 1];
-            auto u_start = lu_off[li];
-            auto u_end   = lu_off[li + 1];
-            int n_t = static_cast<int>(t_end - t_start);
-            int n_u = static_cast<int>(u_end - u_start);
+            const auto& pv = views[li];
+            int n_t = pv.n_transcripts;
+            int n_u = pv.n_units;
 
             if (n_u == 0) {
                 locus_mrna_data[li] = 0.0;
@@ -1863,26 +1984,19 @@ batch_locus_em(
                 return 0.0;
             }
 
-            const int32_t* t_arr = lt_fl + t_start;
-            const int32_t* u_arr = lu_fl + u_start;
-            double lg = lg_ptr[li];
-
-            // 1. Extract sub-problem
+            // 1. Extract sub-problem from partition
             auto t1 = hrclock::now();
-            extract_locus_sub_problem(
-                sub, t_arr, n_t, u_arr, n_u, lg, gs_ptr[li],
-                goff, gti, gll, gcw, gtxs, gtxe, gcc,
-                gis, ggll, ggfp, glti, glcc,
-                unambig_row_sums.data(),
-                ts_ptr, te_ptr, tl_ptr,
-                local_map.data(), local_map_size);
+            extract_locus_sub_problem_from_partition(
+                sub, pv, lg_ptr[li], gs_ptr[li],
+                unambig_row_sums.data(), tl_ptr,
+                local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
 
             int nc = sub.n_components;
             size_t n_candidates = sub.t_indices.size();
             int n_local_units = sub.n_local_units;
 
-            // 2. Apply bias correction (mutates log_liks in-place)
+            // 2. Apply bias correction
             if (n_candidates > 0) {
                 apply_bias_correction_uniform(
                     sub.log_liks.data(),
@@ -1901,7 +2015,7 @@ batch_locus_em(
                 return 0.0;
             }
 
-            // 4. Compute log(effective_lengths) — all 1.0, so log = 0.0
+            // 4. Log effective lengths (all 1.0 → log = 0.0)
             std::vector<double> log_eff_len(nc, 0.0);
 
             // 5. Build equivalence classes
@@ -1913,18 +2027,18 @@ batch_locus_em(
                 n_local_units);
             auto t4 = hrclock::now();
 
-            // 6. Unified OVR prior + coverage-weighted warm start
+            // 6. OVR prior + coverage-weighted warm start
             std::vector<double> prior(nc);
             std::vector<double> theta_init(nc);
             compute_ovr_prior_and_warm_start(
                 ec_data,
                 sub.unambig_totals.data(),
                 sub.eligible.data(),
-                lg, total_pseudocount, sub.gdna_idx,
+                lg_ptr[li], total_pseudocount, sub.gdna_idx,
                 prior.data(), theta_init.data(), nc);
             auto t5 = hrclock::now();
 
-            // 7. Run unified SQUAREM
+            // 7. SQUAREM
             EMResult result = run_squarem(
                 ec_data, log_eff_len.data(),
                 sub.unambig_totals.data(),
@@ -1935,10 +2049,7 @@ batch_locus_em(
                 estep_thr, pool);
             auto t6 = hrclock::now();
 
-            // 8. Assign posteriors (writes to disjoint transcript
-            //    indices — safe across threads, no atomics needed)
-            // Per-locus deterministic RNG: mix base seed with locus index
-            // to ensure reproducibility regardless of thread scheduling.
+            // 8. Assign posteriors
             SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
             double locus_mrna = 0.0, locus_gdna = 0.0;
             assign_posteriors(
@@ -1953,7 +2064,6 @@ batch_locus_em(
             locus_mrna_data[li] = locus_mrna;
             locus_gdna_data[li] = locus_gdna;
 
-            // Collect profiling stats if requested
             if (emit_locus_stats) {
                 auto us = [](auto a, auto b) {
                     return std::chrono::duration<double, std::micro>(b - a).count();
@@ -1968,7 +2078,6 @@ batch_locus_em(
                 prof.estep_threads_used = estep_thr;
                 prof.is_mega_locus = mega;
 
-                // EC statistics
                 int64_t total_elems = 0;
                 int max_k = 0, max_n = 0;
                 for (const auto& ec : ec_data) {
@@ -1979,12 +2088,7 @@ batch_locus_em(
                 prof.ec_total_elements = total_elems;
                 prof.max_ec_width = max_k;
                 prof.max_ec_depth = max_n;
-
-                // digamma calls per E-step: nc components, called once per
-                // VBEM step (3 per SQUAREM iteration)
                 prof.digamma_calls_per_estep = use_vbem ? nc : 0;
-
-                // Sub-phase timing
                 prof.extract_us = us(locus_t0, t2);
                 prof.bias_us = us(t2, t3);
                 prof.build_ec_us = us(t3, t4);
@@ -1997,14 +2101,11 @@ batch_locus_em(
             return locus_gdna;
         }; // end process_locus
 
-        // ---- Phase 1: mega-loci (all threads collaborate on E-step) ----
+        // ---- Phase 1: mega-loci ----
         {
             LocusSubProblem sub;
-            std::vector<int32_t> local_map(local_map_size, -1);
+            std::vector<int32_t> local_map_vec(local_map_size, -1);
 
-            // Create a persistent thread pool for the duration of Phase 1.
-            // This eliminates per-E-step pthread_create/join overhead
-            // across all SQUAREM iterations of all mega-loci.
             std::unique_ptr<rigel::EStepThreadPool> pool;
             if (actual_threads > 1 && mega_end > 0) {
                 pool = std::make_unique<rigel::EStepThreadPool>(actual_threads);
@@ -2012,9 +2113,8 @@ batch_locus_em(
 
             for (int i = 0; i < mega_end; ++i) {
                 int li = locus_order[i];
-                double gdna = process_locus(li, actual_threads, sub, local_map,
+                double gdna = process_locus(li, actual_threads, sub, local_map_vec,
                                             true, pool.get());
-                // No atomic needed — single-threaded phase
                 double prev = total_gdna_em.load(std::memory_order_relaxed);
                 while (!total_gdna_em.compare_exchange_weak(
                     prev, prev + gdna,
@@ -2022,16 +2122,15 @@ batch_locus_em(
             }
         }
 
-        // ---- Phase 2: work-steal remaining loci (single-thread E-step) ----
+        // ---- Phase 2: work-steal normal loci ----
         int n_phase2 = n_loci - mega_end;
         if (n_phase2 > 0) {
-            // Number of loci per work-stealing chunk in Phase 2.
             constexpr int CHUNK_SIZE = 16;
             std::atomic<int> next_idx{0};
 
             auto worker_fn = [&]() {
                 LocusSubProblem sub;
-                std::vector<int32_t> local_map(local_map_size, -1);
+                std::vector<int32_t> local_map_vec(local_map_size, -1);
                 double local_gdna = 0.0;
 
                 for (;;) {
@@ -2041,12 +2140,11 @@ batch_locus_em(
                     int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_phase2);
                     for (int idx = chunk_start; idx < chunk_end; ++idx) {
                         int li = locus_order[mega_end + idx];
-                        local_gdna += process_locus(li, 1, sub, local_map,
+                        local_gdna += process_locus(li, 1, sub, local_map_vec,
                                                     false);
                     }
                 }
 
-                // Flush thread-local gdna to shared atomic
                 double prev = total_gdna_em.load(std::memory_order_relaxed);
                 while (!total_gdna_em.compare_exchange_weak(
                     prev, prev + local_gdna,
@@ -2064,14 +2162,11 @@ batch_locus_em(
                     th.join();
             }
         }
-    } // end gil_scoped_release — GIL re-acquired here
+    } // end gil_scoped_release
 
     double total_gdna_em_val = total_gdna_em.load(std::memory_order_relaxed);
 
-    // Package per-locus results as numpy arrays (copy from vector)
-    size_t shape[1] = { static_cast<size_t>(n_loci) };
-
-    // Allocate new arrays, copy data, and transfer ownership via capsules
+    size_t shape[1] = {static_cast<size_t>(n_loci)};
     auto* mrna_copy = new double[n_loci];
     auto* gdna_copy = new double[n_loci];
     std::memcpy(mrna_copy, locus_mrna_vec.data(), n_loci * sizeof(double));
@@ -2080,10 +2175,8 @@ batch_locus_em(
     nb::capsule mrna_owner(mrna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
     nb::capsule gdna_owner(gdna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
 
-    // Build locus stats list (GIL is held here)
     nb::list stats_list;
     if (emit_locus_stats) {
-        // Sort profiles by descending total_us for easy inspection
         std::vector<size_t> sorted_idx(locus_profiles.size());
         std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
         std::sort(sorted_idx.begin(), sorted_idx.end(),
@@ -2094,7 +2187,7 @@ batch_locus_em(
 
         for (size_t si : sorted_idx) {
             const auto& p = locus_profiles[si];
-            if (p.total_us == 0.0 && p.n_units == 0) continue;  // skip empty
+            if (p.total_us == 0.0 && p.n_units == 0) continue;
 
             nb::dict d;
             d["locus_idx"] = p.locus_idx;
@@ -2129,8 +2222,6 @@ batch_locus_em(
         stats_list
     );
 }
-
-
 // ================================================================
 // Phase 3 — C++ Union-Find Connected Components
 // ================================================================
@@ -2341,8 +2432,8 @@ NB_MODULE(_em_impl, m) {
     m.doc() = "C++ EM solver for rigel locus-level abundance estimation.\n\n"
               "Provides run_locus_em_native() which replaces the Python EM hot path:\n"
               "_em_step, _vbem_step, _build_equiv_classes, SQUAREM loop.\n\n"
-              "Also provides batch_locus_em() which replaces the entire per-locus\n"
-              "Python for-loop with a single C++ call.";
+              "Also provides batch_locus_em_partitioned() which replaces the entire\n"
+              "per-locus Python for-loop with a single C++ call.";
 
     m.def("run_locus_em_native", &run_locus_em_native,
           nb::arg("offsets"),
@@ -2365,28 +2456,52 @@ NB_MODULE(_em_impl, m) {
           "Takes CSR per-locus data + config, returns (theta, alpha, em_totals).\n"
           "Replaces the Python EM hot path with a single C++ call.");
 
-    m.def("batch_locus_em", &batch_locus_em,
+    // ---- Partition scatter functions ----
+    m.def("build_partition_offsets", &build_partition_offsets,
           nb::arg("g_offsets"),
-          nb::arg("g_t_indices"),
-          nb::arg("g_log_liks"),
-          nb::arg("g_coverage_wts"),
-          nb::arg("g_tx_starts"),
-          nb::arg("g_tx_ends"),
-          nb::arg("g_count_cols"),
-          nb::arg("g_is_spliced"),
-          nb::arg("g_gdna_log_liks"),
-          nb::arg("g_genomic_footprints"),
-          nb::arg("g_locus_t_indices"),
-          nb::arg("g_locus_count_cols"),
-          nb::arg("locus_t_offsets"),
-          nb::arg("locus_t_flat"),
-          nb::arg("locus_u_offsets"),
-          nb::arg("locus_u_flat"),
+          nb::arg("locus_units"),
+          nb::arg("n_loci"),
+          "Build per-locus CSR offsets from global offsets and locus unit lists.");
+
+    m.def("scatter_candidates_f64",
+          &scatter_candidates_impl<double>,
+          nb::arg("global_arr"), nb::arg("g_offsets"),
+          nb::arg("locus_units"), nb::arg("partition_offsets"),
+          nb::arg("n_loci"),
+          "Scatter per-candidate float64 array into per-locus arrays.");
+    m.def("scatter_candidates_i32",
+          &scatter_candidates_impl<int32_t>,
+          nb::arg("global_arr"), nb::arg("g_offsets"),
+          nb::arg("locus_units"), nb::arg("partition_offsets"),
+          nb::arg("n_loci"),
+          "Scatter per-candidate int32 array into per-locus arrays.");
+    m.def("scatter_candidates_u8",
+          &scatter_candidates_impl<uint8_t>,
+          nb::arg("global_arr"), nb::arg("g_offsets"),
+          nb::arg("locus_units"), nb::arg("partition_offsets"),
+          nb::arg("n_loci"),
+          "Scatter per-candidate uint8 array into per-locus arrays.");
+
+    m.def("scatter_units_f64",
+          &scatter_units_impl<double>,
+          nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
+          "Scatter per-unit float64 array into per-locus arrays.");
+    m.def("scatter_units_i32",
+          &scatter_units_impl<int32_t>,
+          nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
+          "Scatter per-unit int32 array into per-locus arrays.");
+    m.def("scatter_units_u8",
+          &scatter_units_impl<uint8_t>,
+          nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
+          "Scatter per-unit uint8 array into per-locus arrays.");
+
+    // ---- Partition-native batch EM ----
+    m.def("batch_locus_em_partitioned", &batch_locus_em_partitioned,
+          nb::arg("partition_tuples"),
+          nb::arg("locus_transcript_indices"),
           nb::arg("locus_gammas"),
           nb::arg("gdna_spans"),
           nb::arg("unambig_counts"),
-          nb::arg("t_starts"),
-          nb::arg("t_ends"),
           nb::arg("t_lengths"),
           nb::arg("em_counts_out"),
           nb::arg("gdna_locus_counts_out"),
@@ -2403,14 +2518,10 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
           nb::arg("emit_locus_stats") = false,
-          "Run locus EM for ALL loci in a single C++ call.\n\n"
-          "Replaces the Python per-locus for-loop:\n"
-          "  build_locus_em_data -> run_locus_em -> assign_locus_ambiguous\n"
-          "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats).\n\n"
-          "assignment_mode: 0=fractional, 1=map, 2=sample.\n"
-          "n_threads: 0 = all cores, 1 = sequential, N = cap at N threads.\n"
-          "emit_locus_stats: if True, return per-locus profiling stats as\n"
-          "  a list of dicts (sorted by descending wall time).");
+          "Run locus EM from per-locus partition data.\n\n"
+          "Accepts a list of 12-tuples (one per locus) containing partition\n"
+          "arrays, plus a list of transcript index arrays per locus.\n"
+          "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats).");
 
     m.def("connected_components", &connected_components_native,
           nb::arg("offsets"),

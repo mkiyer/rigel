@@ -6,8 +6,8 @@
  *
  * Contents:
  *   - compute_fragment_weight(frag_start, frag_end, transcript_length)
- *   - NativeFragmentScorer class:
- *       .fused_score_buffer(...)     — two-pass bulk scoring (production hot path)
+ *   - NativeFragmentScorer class (scoring parameters + per-chunk kernels)
+ *   - StreamingScorer class (stateful per-chunk scoring for streaming memory)
  *
  * Build:
  *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
@@ -331,16 +331,7 @@ public:
         }
     }
 
-    // ---------------------------------------------------------------
-    // fused_score_buffer — two-pass scoring of entire buffer in C++
-    // ---------------------------------------------------------------
-    //
-    // Replaces the Python accumulation loop in FragmentRouter._scan_native.
-    // Pass 1: count EM units + candidates (accumulate unambig counts).
-    // Pass 2: fill pre-allocated arrays at exact sizes.
-    // Returns capsule-backed numpy arrays (zero-copy to Python).
-    //
-    // Float64 output for log_liks, coverage_weights, gdna_log_liks.
+    friend class StreamingScorer;
 
 private:
 
@@ -360,6 +351,15 @@ private:
         const int32_t*  g_sta;
         const uint16_t* nm;
         int N;
+    };
+
+    // Merged candidate entry for MM cross-alignment merge.
+    struct MergedMrna {
+        int32_t overhang;
+        double  log_lik;
+        int32_t count_col;
+        double  coverage_wt;
+        int32_t tx_start, tx_end;
     };
 
     // Growing output vectors + write cursors for single-pass scoring.
@@ -385,6 +385,9 @@ private:
         // Det-unambig (growing)
         std::vector<int32_t>*  v_det_ti;
         std::vector<int64_t>*  v_det_fid;
+        // Chimeric accumulation (growing)
+        std::vector<int64_t>*  v_chim_fid;
+        std::vector<uint8_t>*  v_chim_stype;
         // Unambig counts accumulation (single-pass)
         double* ua_counts;
         int ua_ncols;
@@ -394,10 +397,17 @@ private:
         int64_t unit_cur;
         int64_t det_cur;
 
-        // Pending multimapper group state (persists across chunks)
+        // Eager MM group accumulators (persists across chunks).
+        // Candidates are scored and merged eagerly as alignments
+        // arrive.  flush_mm_group() only prunes + emits.
         int64_t mm_fid;
-        std::vector<std::pair<int, int>> mm_members;
-        const std::vector<ChunkPtrs>* all_cps;
+        int     mm_n_members;
+        std::unordered_map<int32_t, MergedMrna> mm_merged;
+        bool    mm_is_any_spliced;
+        int     mm_best_stype;
+        double  mm_best_gdna_ll;
+        int32_t mm_best_gdna_fp;
+        int32_t mm_first_gfp;
 
         FillState()
             : v_ti(nullptr), v_ll(nullptr), v_ct(nullptr),
@@ -407,26 +417,171 @@ private:
               v_gdna_ll(nullptr), v_gfp(nullptr), v_fid(nullptr),
               v_fclass(nullptr), v_stype(nullptr),
               v_det_ti(nullptr), v_det_fid(nullptr),
+              v_chim_fid(nullptr), v_chim_stype(nullptr),
               ua_counts(nullptr), ua_ncols(0), t_str(nullptr),
               cand_cur(0), unit_cur(0), det_cur(0),
-              mm_fid(-1), all_cps(nullptr) {}
+              mm_fid(-1), mm_n_members(0),
+              mm_is_any_spliced(false),
+              mm_best_stype(SPLICE_UNSPLICED),
+              mm_best_gdna_ll(-std::numeric_limits<double>::infinity()),
+              mm_best_gdna_fp(0), mm_first_gfp(0) {}
+
+        void reset_mm_group() {
+            mm_merged.clear();  // reuses hash bucket allocation
+            mm_fid = -1;
+            mm_n_members = 0;
+            mm_is_any_spliced = false;
+            mm_best_stype = SPLICE_UNSPLICED;
+            mm_best_gdna_ll = -std::numeric_limits<double>::infinity();
+            mm_best_gdna_fp = 0;
+            mm_first_gfp = 0;
+        }
     };
 
-    // Merged candidate entry for MM cross-alignment merge.
-    struct MergedMrna {
-        int32_t overhang;
-        double  log_lik;
-        int32_t count_col;
-        double  coverage_wt;
-        int32_t tx_start, tx_end;
-    };
     // ---------------------------------------------------------------
-    // flush_mm_group — score and emit one multimapper group
+    // score_mm_alignment — eagerly score one MM alignment
     // ---------------------------------------------------------------
     //
-    // Single-pass: scores all hits in the group, merges across
-    // alignments, applies pool-separated pruning, and pushes
-    // results to the growing output vectors.
+    // Called during score_chunk_impl() for each MM alignment.
+    // Reads from the current chunk's live arrays and merges scored
+    // candidates into st.mm_merged.  Also updates the per-group
+    // metadata accumulators (splice status, gDNA, footprint).
+
+    void score_mm_alignment(
+        const ChunkPtrs& cp, int row,
+        FillState& st, double gdna_log_sp) const
+    {
+        static constexpr double NEG_INF =
+            -std::numeric_limits<double>::infinity();
+
+        int64_t start = cp.t_off[row];
+        int64_t end   = cp.t_off[row + 1];
+        int n_cand    = static_cast<int>(end - start);
+
+        int stype    = cp.s_type[row];
+        int exon_str = cp.e_str[row];
+        int rl = cp.r_len[row] > 0
+               ? static_cast<int>(cp.r_len[row]) : 1;
+        int nm = cp.nm[row];
+        double log_nm = nm > 0 ? nm * mm_log_pen_ : 0.0;
+        bool has_strand  = (exon_str == 1 || exon_str == 2);
+        int genomic_start_val = cp.g_sta[row];
+        bool has_genomic = (genomic_start_val >= 0);
+
+        // Update per-group metadata accumulators
+        if (stype == SPLICE_SPLICED_ANNOT ||
+            stype == SPLICE_SPLICED_UNANNOT) {
+            st.mm_is_any_spliced = true;
+        }
+        if (stype == SPLICE_SPLICED_ANNOT) {
+            st.mm_best_stype = SPLICE_SPLICED_ANNOT;
+        } else if (stype == SPLICE_SPLICED_UNANNOT &&
+                   st.mm_best_stype != SPLICE_SPLICED_ANNOT) {
+            st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
+        }
+
+        // gDNA: track best across unspliced alignments
+        if (stype != SPLICE_SPLICED_ANNOT &&
+            stype != SPLICE_SPLICED_UNANNOT)
+        {
+            int32_t gfp_val = cp.g_fp[row];
+            double hit_log_nm = nm > 0
+                ? nm * mm_log_pen_ : 0.0;
+            double gdna_fl = gdna_frag_len_log_lik(gfp_val);
+            double gdna_ll_val =
+                gdna_fl + gdna_log_sp + LOG_HALF + hit_log_nm;
+            if (gdna_ll_val > st.mm_best_gdna_ll) {
+                st.mm_best_gdna_ll = gdna_ll_val;
+                st.mm_best_gdna_fp = gfp_val;
+            }
+        }
+
+        // Track first member's footprint (fallback for spliced groups)
+        if (st.mm_n_members == 0) {
+            st.mm_first_gfp = cp.g_fp[row];
+        }
+        ++st.mm_n_members;
+
+        // Score and merge mRNA candidates
+        if (n_cand <= 0) return;
+
+        for (int64_t k = start; k < end; ++k) {
+            int32_t t_idx = cp.t_ind[k];
+            int32_t ebp   = cp.e_bp[k];
+            if (ebp <= 0) continue;
+
+            int32_t oh = rl - ebp;
+            if (oh < 0) oh = 0;
+
+            int32_t flen = cp.f_len[k];
+            double log_fl = frag_len_log_lik(flen);
+
+            double log_strand;
+            bool is_anti;
+            if (has_strand) {
+                bool same = (exon_str ==
+                    static_cast<int>(t_strand_[t_idx]));
+                log_strand = same ? log_p_sense_
+                                 : log_p_antisense_;
+                is_anti = same ? r1_antisense_
+                              : !r1_antisense_;
+            } else {
+                log_strand = LOG_HALF;
+                is_anti = false;
+            }
+
+            double log_lik = log_strand + log_fl
+                           + oh * oh_log_pen_ + log_nm;
+            int32_t ct = stype * 2 + (is_anti ? 1 : 0);
+
+            // Coverage weight + transcript position
+            int32_t t_len = t_length_[t_idx];
+            int32_t tx_s = 0;
+            int32_t tx_e = flen > 0 ? flen : t_len;
+            double cov_wt = 1.0;
+
+            if (has_genomic && flen > 0) {
+                int32_t n_exons =
+                    exon_offsets_[t_idx + 1]
+                    - exon_offsets_[t_idx];
+                if (n_exons > 0 && t_len > 0) {
+                    tx_s = genomic_to_tx_pos(
+                        genomic_start_val, t_idx);
+                    tx_e = tx_s + flen;
+                    int32_t cov_end =
+                        tx_e < t_len ? tx_e : t_len;
+                    cov_wt = compute_fragment_weight(
+                        tx_s, cov_end, t_len);
+                } else {
+                    tx_s = 0;
+                    tx_e = flen;
+                }
+            }
+
+            auto it = st.mm_merged.find(t_idx);
+            if (it == st.mm_merged.end()) {
+                st.mm_merged[t_idx] = {oh, log_lik, ct,
+                                       cov_wt, tx_s, tx_e};
+            } else {
+                auto& prev = it->second;
+                if (oh < prev.overhang ||
+                    (oh == prev.overhang &&
+                     log_lik > prev.log_lik))
+                {
+                    prev = {oh, log_lik, ct,
+                            cov_wt, tx_s, tx_e};
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // flush_mm_group — prune and emit one multimapper group
+    // ---------------------------------------------------------------
+    //
+    // All scoring has already been done eagerly by score_mm_alignment.
+    // This method only prunes mm_merged and emits to the CSR vectors,
+    // then resets the accumulators for the next group.
 
     void flush_mm_group(
         FillState& st,
@@ -437,115 +592,12 @@ private:
         static constexpr double NEG_INF =
             -std::numeric_limits<double>::infinity();
 
-        const auto& members = st.mm_members;
-        const auto& cps = *st.all_cps;
-        if (members.empty()) return;
+        if (st.mm_n_members == 0) return;
 
-        // --- Determine splice status across all hits ---
-        bool is_any_spliced = false;
-        for (auto& [ci, ri] : members) {
-            int stype = cps[ci].s_type[ri];
-            if (stype == SPLICE_SPLICED_ANNOT ||
-                stype == SPLICE_SPLICED_UNANNOT) {
-                is_any_spliced = true;
-                break;
-            }
-        }
-
-        // --- mRNA pool: score each hit, merge across alignments ---
-        std::unordered_map<int32_t, MergedMrna> merged_mrna;
-
-        for (auto& [ci, ri] : members) {
-            const auto& cp = cps[ci];
-            int64_t start = cp.t_off[ri];
-            int64_t end   = cp.t_off[ri + 1];
-            int n_cand    = static_cast<int>(end - start);
-            if (n_cand <= 0) continue;
-
-            int stype    = cp.s_type[ri];
-            int exon_str = cp.e_str[ri];
-            int rl = cp.r_len[ri] > 0
-                   ? static_cast<int>(cp.r_len[ri]) : 1;
-            int nm = cp.nm[ri];
-            double log_nm = nm > 0 ? nm * mm_log_pen_ : 0.0;
-            bool has_strand  = (exon_str == 1 || exon_str == 2);
-            int genomic_start_val = cp.g_sta[ri];
-            bool has_genomic = (genomic_start_val >= 0);
-
-            for (int64_t k = start; k < end; ++k) {
-                int32_t t_idx = cp.t_ind[k];
-                int32_t ebp   = cp.e_bp[k];
-                if (ebp <= 0) continue;
-
-                int32_t oh = rl - ebp;
-                if (oh < 0) oh = 0;
-
-                int32_t flen = cp.f_len[k];
-                double log_fl = frag_len_log_lik(flen);
-
-                double log_strand;
-                bool is_anti;
-                if (has_strand) {
-                    bool same = (exon_str ==
-                        static_cast<int>(t_strand_[t_idx]));
-                    log_strand = same ? log_p_sense_
-                                     : log_p_antisense_;
-                    is_anti = same ? r1_antisense_
-                                  : !r1_antisense_;
-                } else {
-                    log_strand = LOG_HALF;
-                    is_anti = false;
-                }
-
-                double log_lik = log_strand + log_fl
-                               + oh * oh_log_pen_ + log_nm;
-                int32_t ct = stype * 2 + (is_anti ? 1 : 0);
-
-                // Coverage weight + transcript position
-                int32_t t_len = t_length_[t_idx];
-                int32_t tx_s = 0;
-                int32_t tx_e = flen > 0 ? flen : t_len;
-                double cov_wt = 1.0;
-
-                if (has_genomic && flen > 0) {
-                    int32_t n_exons =
-                        exon_offsets_[t_idx + 1]
-                        - exon_offsets_[t_idx];
-                    if (n_exons > 0 && t_len > 0) {
-                        tx_s = genomic_to_tx_pos(
-                            genomic_start_val, t_idx);
-                        tx_e = tx_s + flen;
-                        int32_t cov_end =
-                            tx_e < t_len ? tx_e : t_len;
-                        cov_wt = compute_fragment_weight(
-                            tx_s, cov_end, t_len);
-                    } else {
-                        tx_s = 0;
-                        tx_e = flen;
-                    }
-                }
-
-                auto it = merged_mrna.find(t_idx);
-                if (it == merged_mrna.end()) {
-                    merged_mrna[t_idx] = {oh, log_lik, ct,
-                                          cov_wt, tx_s, tx_e};
-                } else {
-                    auto& prev = it->second;
-                    if (oh < prev.overhang ||
-                        (oh == prev.overhang &&
-                         log_lik > prev.log_lik))
-                    {
-                        prev = {oh, log_lik, ct,
-                                cov_wt, tx_s, tx_e};
-                    }
-                }
-            }
-        }
-
-        // Pool-separated likelihood pruning (multimapper)
+        // Pool-separated likelihood pruning
         double mrna_best = NEG_INF;
         double nrna_best = NEG_INF;
-        for (auto& [t_idx, mc] : merged_mrna) {
+        for (auto& [t_idx, mc] : st.mm_merged) {
             if (t_is_nrna_[t_idx])
                 nrna_best = std::max(nrna_best, mc.log_lik);
             else
@@ -557,7 +609,7 @@ private:
         int32_t best_t = -1;
         int32_t best_ct = 0;
 
-        for (auto& [t_idx, mc] : merged_mrna) {
+        for (auto& [t_idx, mc] : st.mm_merged) {
             double pool_best = t_is_nrna_[t_idx]
                              ? nrna_best : mrna_best;
             if (pool_best - mc.log_lik <= max_ll_delta_) {
@@ -589,50 +641,17 @@ private:
             st.v_fclass->push_back(
                 static_cast<int8_t>(FRAG_MULTIMAPPER));
 
-            // Splice type: ANNOT > UNANNOT > UNSPLICED
-            int mm_stype = SPLICE_UNSPLICED;
-            for (auto& [ci, ri] : members) {
-                int stype = cps[ci].s_type[ri];
-                if (stype == SPLICE_SPLICED_ANNOT) {
-                    mm_stype = SPLICE_SPLICED_ANNOT;
-                    break;
-                } else if (stype == SPLICE_SPLICED_UNANNOT) {
-                    mm_stype = SPLICE_SPLICED_UNANNOT;
-                }
-            }
             st.v_stype->push_back(
-                static_cast<uint8_t>(mm_stype));
+                static_cast<uint8_t>(st.mm_best_stype));
             st.v_is_spliced->push_back(
-                is_any_spliced ? 1 : 0);
+                st.mm_is_any_spliced ? 1 : 0);
 
-            if (!is_any_spliced) {
-                double best_gdna_ll = NEG_INF;
-                int32_t best_fp = 0;
-                for (auto& [ci, ri] : members) {
-                    int stype = cps[ci].s_type[ri];
-                    if (stype == SPLICE_SPLICED_ANNOT ||
-                        stype == SPLICE_SPLICED_UNANNOT)
-                        continue;
-                    int32_t gfp_val = cps[ci].g_fp[ri];
-                    int nm_val = cps[ci].nm[ri];
-                    double hit_log_nm = nm_val > 0
-                        ? nm_val * mm_log_pen_ : 0.0;
-                    double gdna_fl =
-                        gdna_frag_len_log_lik(gfp_val);
-                    double gdna_ll_val =
-                        gdna_fl + gdna_log_sp + LOG_HALF
-                        + hit_log_nm;
-                    if (gdna_ll_val > best_gdna_ll) {
-                        best_gdna_ll = gdna_ll_val;
-                        best_fp = gfp_val;
-                    }
-                }
-                st.v_gdna_ll->push_back(best_gdna_ll);
-                st.v_gfp->push_back(best_fp);
+            if (!st.mm_is_any_spliced) {
+                st.v_gdna_ll->push_back(st.mm_best_gdna_ll);
+                st.v_gfp->push_back(st.mm_best_gdna_fp);
             } else {
                 st.v_gdna_ll->push_back(NEG_INF);
-                auto& [ci0, ri0] = members[0];
-                st.v_gfp->push_back(cps[ci0].g_fp[ri0]);
+                st.v_gfp->push_back(st.mm_first_gfp);
             }
 
             ++st.unit_cur;
@@ -640,6 +659,8 @@ private:
         } else {
             ++stat_gated;
         }
+
+        st.reset_mm_group();
     }
 
     // Single-pass inner loop — scores fragments and pushes results
@@ -647,7 +668,6 @@ private:
     // det-unambig fragments (merged from the former count pass).
     void score_chunk_impl(
         const ChunkPtrs& cp,
-        int chunk_idx,
         double gdna_log_sp,
         FillState& st,
         int64_t& stat_det, int64_t& stat_em_u,
@@ -676,31 +696,34 @@ private:
         for (int i = 0; i < N; ++i) {
             int fclass = fc[i];
 
-            if (fclass == FRAG_CHIMERIC) { ++stat_chim; continue; }
+            if (fclass == FRAG_CHIMERIC) {
+                // Accumulate chimeric info for annotation
+                st.v_chim_fid->push_back(f_id[i]);
+                st.v_chim_stype->push_back(s_type[i]);
+                ++stat_chim;
+                continue;
+            }
 
-            // ---- Multimapper accumulation ----
+            // ---- Multimapper: eager scoring ----
             if (fclass == FRAG_MULTIMAPPER) {
                 int64_t fid_val = f_id[i];
                 if (fid_val != st.mm_fid) {
-                    if (!st.mm_members.empty()) {
+                    if (st.mm_n_members > 0) {
                         flush_mm_group(
                             st, gdna_log_sp,
                             stat_mm, stat_gated);
                     }
                     st.mm_fid = fid_val;
-                    st.mm_members.clear();
                 }
-                st.mm_members.emplace_back(chunk_idx, i);
+                score_mm_alignment(cp, i, st, gdna_log_sp);
                 continue;
             }
 
             // Non-MM fragment: flush any pending MM group
-            if (!st.mm_members.empty()) {
+            if (st.mm_n_members > 0) {
                 flush_mm_group(
                     st, gdna_log_sp,
                     stat_mm, stat_gated);
-                st.mm_members.clear();
-                st.mm_fid = -1;
             }
 
             int stype      = s_type[i];
@@ -911,139 +934,185 @@ private:
         }
     }
 
-public:
+    // (fused_score_buffer removed — use StreamingScorer instead)
+};
 
-    nb::tuple fused_score_buffer(
-        nb::list chunk_arrays,
+// ================================================================
+// StreamingScorer — stateful per-chunk scoring for streaming memory
+// ================================================================
+//
+// Processes one chunk at a time via score_chunk(), allowing Python
+// to free each chunk's arrays immediately after the call returns.
+// Multimapper groups are scored eagerly (no cross-chunk references).
+// Call finish() after all chunks to flush the final MM group and
+// retrieve the CSR result arrays.
+
+class StreamingScorer {
+    const NativeFragmentScorer& scorer_;
+
+    // Growing output vectors (heap-allocated, capsule-transferred)
+    std::vector<int64_t>*  v_offsets_;
+    std::vector<int32_t>*  v_ti_;
+    std::vector<double>*   v_ll_;
+    std::vector<uint8_t>*  v_ct_;
+    std::vector<double>*   v_cw_;
+    std::vector<int32_t>*  v_ts_;
+    std::vector<int32_t>*  v_te_;
+    std::vector<int32_t>*  v_lt_;
+    std::vector<uint8_t>*  v_lct_;
+    std::vector<int8_t>*   v_isp_;
+    std::vector<double>*   v_gll_;
+    std::vector<int32_t>*  v_gfp_;
+    std::vector<int32_t>*  v_fid_;
+    std::vector<int8_t>*   v_fc_;
+    std::vector<uint8_t>*  v_st_;
+    std::vector<int32_t>*  v_dti_;
+    std::vector<int64_t>*  v_dfid_;
+    std::vector<int64_t>*  v_chim_fid_;
+    std::vector<uint8_t>*  v_chim_stype_;
+
+    NativeFragmentScorer::FillState st_;
+    double gdna_log_sp_;
+
+    // Statistics
+    int64_t stat_det_, stat_em_u_, stat_em_as_, stat_em_ao_;
+    int64_t stat_gated_, stat_chim_, stat_mm_;
+
+    bool finished_;
+
+public:
+    StreamingScorer(
+        NativeFragmentScorer& scorer,
         i8_1d   t_to_strand_arr,
         f64_2d_mut unambig_counts,
         double  gdna_log_splice_pen_unspliced)
+      : scorer_(scorer),
+        gdna_log_sp_(gdna_log_splice_pen_unspliced),
+        stat_det_(0), stat_em_u_(0), stat_em_as_(0),
+        stat_em_ao_(0), stat_gated_(0), stat_chim_(0),
+        stat_mm_(0), finished_(false)
     {
-        const int8_t* t_str = t_to_strand_arr.data();
-        double* ua_c   = unambig_counts.data();
-        int ua_ncols   =
+        // Allocate growing vectors
+        v_offsets_ = new std::vector<int64_t>();
+        v_offsets_->push_back(0);
+
+        v_ti_  = new std::vector<int32_t>();
+        v_ll_  = new std::vector<double>();
+        v_ct_  = new std::vector<uint8_t>();
+        v_cw_  = new std::vector<double>();
+        v_ts_  = new std::vector<int32_t>();
+        v_te_  = new std::vector<int32_t>();
+        v_lt_  = new std::vector<int32_t>();
+        v_lct_ = new std::vector<uint8_t>();
+        v_isp_ = new std::vector<int8_t>();
+        v_gll_ = new std::vector<double>();
+        v_gfp_ = new std::vector<int32_t>();
+        v_fid_ = new std::vector<int32_t>();
+        v_fc_  = new std::vector<int8_t>();
+        v_st_  = new std::vector<uint8_t>();
+        v_dti_ = new std::vector<int32_t>();
+        v_dfid_ = new std::vector<int64_t>();
+        v_chim_fid_   = new std::vector<int64_t>();
+        v_chim_stype_ = new std::vector<uint8_t>();
+
+        // Wire up FillState
+        st_ = NativeFragmentScorer::FillState{};
+        st_.v_offsets    = v_offsets_;
+        st_.v_ti         = v_ti_;
+        st_.v_ll         = v_ll_;
+        st_.v_ct         = v_ct_;
+        st_.v_cw         = v_cw_;
+        st_.v_ts         = v_ts_;
+        st_.v_te         = v_te_;
+        st_.v_locus_t    = v_lt_;
+        st_.v_locus_ct   = v_lct_;
+        st_.v_is_spliced = v_isp_;
+        st_.v_gdna_ll    = v_gll_;
+        st_.v_gfp        = v_gfp_;
+        st_.v_fid        = v_fid_;
+        st_.v_fclass     = v_fc_;
+        st_.v_stype      = v_st_;
+        st_.v_det_ti     = v_dti_;
+        st_.v_det_fid    = v_dfid_;
+        st_.v_chim_fid   = v_chim_fid_;
+        st_.v_chim_stype = v_chim_stype_;
+        st_.ua_counts    = unambig_counts.data();
+        st_.ua_ncols     =
             static_cast<int>(unambig_counts.shape(1));
+        st_.t_str        = t_to_strand_arr.data();
+    }
 
-        size_t n_chunks = chunk_arrays.size();
+    ~StreamingScorer() {
+        // If finish() was never called, clean up owned vectors.
+        // After finish() these are nullptr (ownership transferred).
+        delete v_offsets_;
+        delete v_ti_;
+        delete v_ll_;
+        delete v_ct_;
+        delete v_cw_;
+        delete v_ts_;
+        delete v_te_;
+        delete v_lt_;
+        delete v_lct_;
+        delete v_isp_;
+        delete v_gll_;
+        delete v_gfp_;
+        delete v_fid_;
+        delete v_fc_;
+        delete v_st_;
+        delete v_dti_;
+        delete v_dfid_;
+        delete v_chim_fid_;
+        delete v_chim_stype_;
+    }
 
-        // ---- Extract and cache chunk pointers ----
-        std::vector<ChunkPtrs> cps(n_chunks);
-        for (size_t ci = 0; ci < n_chunks; ++ci) {
-            nb::tuple c =
-                nb::borrow<nb::tuple>(chunk_arrays[ci]);
-            auto& cp  = cps[ci];
-            cp.t_off  = nb::cast<i64_1d>(c[0]).data();
-            cp.t_ind  = nb::cast<i32_1d>(c[1]).data();
-            cp.f_len  = nb::cast<i32_1d>(c[2]).data();
-            cp.e_bp   = nb::cast<i32_1d>(c[3]).data();
-            cp.i_bp   = nb::cast<i32_1d>(c[4]).data();
-            cp.s_type = nb::cast<u8_1d>(c[5]).data();
-            cp.e_str  = nb::cast<u8_1d>(c[6]).data();
-            cp.fc     = nb::cast<u8_1d>(c[7]).data();
-            cp.f_id   = nb::cast<i64_1d>(c[8]).data();
-            cp.r_len  = nb::cast<u32_1d>(c[9]).data();
-            cp.g_fp   = nb::cast<i32_1d>(c[10]).data();
-            cp.g_sta  = nb::cast<i32_1d>(c[11]).data();
-            cp.nm     = nb::cast<u16_1d>(c[12]).data();
-            cp.N      = static_cast<int>(
-                nb::cast<u8_1d>(c[5]).shape(0));
-        }
+    // Non-copyable
+    StreamingScorer(const StreamingScorer&) = delete;
+    StreamingScorer& operator=(const StreamingScorer&) = delete;
 
-        // ---- Estimate sizes for reserve heuristic ----
-        int64_t total_frags = 0;
-        for (auto& cp : cps) total_frags += cp.N;
-        int64_t est_units = total_frags;
-        int64_t est_cands = total_frags * 2;
-        int64_t est_det   = total_frags / 3;
+    void score_chunk(nb::tuple chunk_arrays) {
+        if (finished_)
+            throw std::runtime_error(
+                "StreamingScorer: score_chunk called after finish");
 
-        // ---- Allocate growing vectors ----
-        auto* v_offsets = new std::vector<int64_t>();
-        v_offsets->reserve(est_units + 1);
-        v_offsets->push_back(0);  // CSR starts at 0
+        NativeFragmentScorer::ChunkPtrs cp{};
+        cp.t_off  = nb::cast<i64_1d>(chunk_arrays[0]).data();
+        cp.t_ind  = nb::cast<i32_1d>(chunk_arrays[1]).data();
+        cp.f_len  = nb::cast<i32_1d>(chunk_arrays[2]).data();
+        cp.e_bp   = nb::cast<i32_1d>(chunk_arrays[3]).data();
+        cp.i_bp   = nb::cast<i32_1d>(chunk_arrays[4]).data();
+        cp.s_type = nb::cast<u8_1d>(chunk_arrays[5]).data();
+        cp.e_str  = nb::cast<u8_1d>(chunk_arrays[6]).data();
+        cp.fc     = nb::cast<u8_1d>(chunk_arrays[7]).data();
+        cp.f_id   = nb::cast<i64_1d>(chunk_arrays[8]).data();
+        cp.r_len  = nb::cast<u32_1d>(chunk_arrays[9]).data();
+        cp.g_fp   = nb::cast<i32_1d>(chunk_arrays[10]).data();
+        cp.g_sta  = nb::cast<i32_1d>(chunk_arrays[11]).data();
+        cp.nm     = nb::cast<u16_1d>(chunk_arrays[12]).data();
+        cp.N      = static_cast<int>(
+            nb::cast<u8_1d>(chunk_arrays[5]).shape(0));
 
-        auto* v_ti  = new std::vector<int32_t>();
-        v_ti->reserve(est_cands);
-        auto* v_ll  = new std::vector<double>();
-        v_ll->reserve(est_cands);
-        auto* v_ct  = new std::vector<uint8_t>();
-        v_ct->reserve(est_cands);
-        auto* v_cw  = new std::vector<double>();
-        v_cw->reserve(est_cands);
-        auto* v_ts  = new std::vector<int32_t>();
-        v_ts->reserve(est_cands);
-        auto* v_te  = new std::vector<int32_t>();
-        v_te->reserve(est_cands);
-        auto* v_lt  = new std::vector<int32_t>();
-        v_lt->reserve(est_units);
-        auto* v_lct = new std::vector<uint8_t>();
-        v_lct->reserve(est_units);
-        auto* v_isp = new std::vector<int8_t>();
-        v_isp->reserve(est_units);
-        auto* v_gll = new std::vector<double>();
-        v_gll->reserve(est_units);
-        auto* v_gfp = new std::vector<int32_t>();
-        v_gfp->reserve(est_units);
-        auto* v_fid = new std::vector<int32_t>();
-        v_fid->reserve(est_units);
-        auto* v_fc  = new std::vector<int8_t>();
-        v_fc->reserve(est_units);
-        auto* v_st  = new std::vector<uint8_t>();
-        v_st->reserve(est_units);
-        auto* v_dti = new std::vector<int32_t>();
-        v_dti->reserve(est_det);
-        auto* v_dfid = new std::vector<int64_t>();
-        v_dfid->reserve(est_det);
+        scorer_.score_chunk_impl(
+            cp, gdna_log_sp_, st_,
+            stat_det_, stat_em_u_, stat_em_as_,
+            stat_em_ao_, stat_gated_, stat_chim_,
+            stat_mm_);
+    }
 
-        // ============ SINGLE PASS ============
-        FillState st{};
-        st.v_offsets    = v_offsets;
-        st.v_ti         = v_ti;
-        st.v_ll         = v_ll;
-        st.v_ct         = v_ct;
-        st.v_cw         = v_cw;
-        st.v_ts         = v_ts;
-        st.v_te         = v_te;
-        st.v_locus_t    = v_lt;
-        st.v_locus_ct   = v_lct;
-        st.v_is_spliced = v_isp;
-        st.v_gdna_ll    = v_gll;
-        st.v_gfp        = v_gfp;
-        st.v_fid        = v_fid;
-        st.v_fclass     = v_fc;
-        st.v_stype      = v_st;
-        st.v_det_ti     = v_dti;
-        st.v_det_fid    = v_dfid;
-        st.ua_counts    = ua_c;
-        st.ua_ncols     = ua_ncols;
-        st.t_str        = t_str;
-        st.all_cps      = &cps;
+    nb::tuple finish() {
+        if (finished_)
+            throw std::runtime_error(
+                "StreamingScorer: finish called twice");
+        finished_ = true;
 
-        int64_t stat_det = 0, stat_em_u = 0;
-        int64_t stat_em_as = 0, stat_em_ao = 0;
-        int64_t stat_gated = 0, stat_chim = 0;
-        int64_t stat_mm = 0;
-
-        for (size_t ci = 0; ci < n_chunks; ++ci) {
-            score_chunk_impl(
-                cps[ci],
-                static_cast<int>(ci),
-                gdna_log_splice_pen_unspliced,
-                st,
-                stat_det, stat_em_u, stat_em_as,
-                stat_em_ao, stat_gated, stat_chim,
-                stat_mm);
-        }
         // Flush final pending MM group
-        if (!st.mm_members.empty()) {
-            flush_mm_group(
-                st,
-                gdna_log_splice_pen_unspliced,
-                stat_mm, stat_gated);
-            st.mm_members.clear();
-            st.mm_fid = -1;
+        if (st_.mm_n_members > 0) {
+            scorer_.flush_mm_group(
+                st_, gdna_log_sp_,
+                stat_mm_, stat_gated_);
         }
 
-        // ============ RETURN NUMPY CAPSULES ============
+        // Build capsule-backed numpy arrays (zero-copy to Python)
         auto mk_i64 = [](std::vector<int64_t>* v)
             -> nb::object {
             size_t n = v->size();
@@ -1100,38 +1169,52 @@ public:
                 v->data(), {n}, del).cast();
         };
 
-        return nb::make_tuple(
-            // CSR arrays
-            mk_i64(v_offsets),
-            mk_i32(v_ti),
-            mk_f64(v_ll),
-            mk_u8(v_ct),
-            mk_f64(v_cw),
-            mk_i32(v_ts),
-            mk_i32(v_te),
-            // Per-unit metadata
-            mk_i32(v_lt),
-            mk_u8(v_lct),
-            mk_i8(v_isp),
-            mk_f64(v_gll),
-            mk_i32(v_gfp),
-            mk_i32(v_fid),
-            mk_i8(v_fc),
-            mk_u8(v_st),
-            // Det-unambig
-            mk_i32(v_dti),
-            mk_i64(v_dfid),
-            // Stats
-            stat_det,
-            stat_em_u,
-            stat_em_as,
-            stat_em_ao,
-            stat_gated,
-            stat_chim,
-            stat_mm
+        // Transfer ownership to capsules — set pointers to null
+        // so destructor doesn't double-free.
+        auto result = nb::make_tuple(
+            mk_i64(v_offsets_),
+            mk_i32(v_ti_),
+            mk_f64(v_ll_),
+            mk_u8(v_ct_),
+            mk_f64(v_cw_),
+            mk_i32(v_ts_),
+            mk_i32(v_te_),
+            mk_i32(v_lt_),
+            mk_u8(v_lct_),
+            mk_i8(v_isp_),
+            mk_f64(v_gll_),
+            mk_i32(v_gfp_),
+            mk_i32(v_fid_),
+            mk_i8(v_fc_),
+            mk_u8(v_st_),
+            mk_i32(v_dti_),
+            mk_i64(v_dfid_),
+            mk_i64(v_chim_fid_),
+            mk_u8(v_chim_stype_),
+            stat_det_,
+            stat_em_u_,
+            stat_em_as_,
+            stat_em_ao_,
+            stat_gated_,
+            stat_chim_,
+            stat_mm_
         );
-    }
 
+        // Null out pointers — capsules now own the memory
+        v_offsets_ = nullptr;
+        v_ti_ = nullptr;  v_ll_ = nullptr;
+        v_ct_ = nullptr;  v_cw_ = nullptr;
+        v_ts_ = nullptr;  v_te_ = nullptr;
+        v_lt_ = nullptr;  v_lct_ = nullptr;
+        v_isp_ = nullptr; v_gll_ = nullptr;
+        v_gfp_ = nullptr; v_fid_ = nullptr;
+        v_fc_ = nullptr;  v_st_ = nullptr;
+        v_dti_ = nullptr; v_dfid_ = nullptr;
+        v_chim_fid_ = nullptr;
+        v_chim_stype_ = nullptr;
+
+        return result;
+    }
 };
 
 // ----------------------------------------------------------------
@@ -1176,12 +1259,23 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("exon_cumsum"),
              nb::arg("t_is_nrna_arr"),
              nb::arg("pruning_max_ll_delta"))
-        .def("fused_score_buffer",
-             &NativeFragmentScorer::fused_score_buffer,
-             nb::arg("chunk_arrays"),
+;
+
+    nb::class_<StreamingScorer>(m, "StreamingScorer")
+        .def(nb::init<
+                 NativeFragmentScorer&,
+                 i8_1d,
+                 f64_2d_mut,
+                 double>(),
+             nb::arg("scorer"),
              nb::arg("t_to_strand_arr"),
              nb::arg("unambig_counts"),
-             nb::arg("gdna_log_splice_pen_unspliced"));
+             nb::arg("gdna_log_splice_pen_unspliced"))
+        .def("score_chunk",
+             &StreamingScorer::score_chunk,
+             nb::arg("chunk_arrays"))
+        .def("finish",
+             &StreamingScorer::finish);
 
     // Export scoring constants for Python-side parity tests
     m.attr("LOG_HALF")      = rigel::LOG_HALF;

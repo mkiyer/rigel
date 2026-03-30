@@ -1,0 +1,56 @@
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  Simulation: CCLE salmon TPM abundances             ║
+# ╚═════════════════════════════════════════════════════════════╝
+#
+# Usage:
+#   python scripts/sim.py --config scripts/sim_ccle_salmon.yaml
+
+# ── Inputs ────────────────────────────────────────────────────
+genome: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genome_controls.fasta.bgz
+gtf: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genes_controls.gtf.gz
+outdir: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_sim/ccle_salmon/ccle_nugc_4_stomach
+
+# ── Transcript filter ─────────────────────────────────────────
+transcript_filter: all
+
+# ── Simulation parameters ─────────────────────────────────────
+simulation:
+  n_rna_fragments: 10_000_000
+  sim_seed: 42
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 50
+  frag_max: 1000
+  read_length: 101
+  error_rate: 0.0
+
+# ── Abundance model ───────────────────────────────────────────
+abundance:
+  mode: file
+  seed: 42
+  file: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_runs/human/ccle_nugc_4_stomach/salmon/quant.sf.gz
+
+# ── gDNA contamination ────────────────────────────────────────
+gdna:
+  rates: [0.0, 0.2, 0.5]
+  rate_labels: [none, low, high]
+  # Same fragment length distribution as RNA
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 50
+  frag_max: 1000
+
+# ── Strand specificity ───────────────────────────────────────
+strand_specificities: [0.5, 0.9, 1.0]
+
+# ── Nascent RNA spike-in sweep ────────────────────────────────
+nrna:
+  fracs:
+    - [0.0, 0.0]
+    - [0.0, 0.5]
+  frac_labels: [none, rand]
+
+# ── Oracle BAM ────────────────────────────────────────────────
+oracle_bam: true
+
+verbose: true

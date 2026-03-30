@@ -47,6 +47,7 @@ from .index import TranscriptIndex
 from .locus import build_loci, compute_gdna_locus_gammas
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
+from .partition import partition_and_free
 from .scan import FragmentRouter
 from .scoring import FragmentScorer
 from .stats import PipelineStats
@@ -419,9 +420,9 @@ def _compute_priors(
     return locus_gammas
 
 
-def _run_locus_em(
+def _run_locus_em_partitioned(
     estimator: AbundanceEstimator,
-    em_data: "ScoredFragments",
+    partitions: dict,
     loci: list,
     index: TranscriptIndex,
     locus_gammas: np.ndarray,
@@ -429,11 +430,11 @@ def _run_locus_em(
     *,
     emit_locus_stats: bool = False,
 ) -> None:
-    """Run batch locus-level EM and record per-locus results."""
+    """Run batch locus EM from partitioned data with incremental freeing."""
     t_to_g = index.t_to_g_arr
+    n_threads = em_config.n_threads or os.cpu_count() or 1
 
     def _build_locus_meta(locus, *, mrna, gdna, locus_gamma):
-        """Build one locus_results record."""
         gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
         return {
             "locus_id": locus.locus_id,
@@ -446,35 +447,106 @@ def _run_locus_em(
             "gdna_init": float(locus_gamma),
         }
 
-    (
-        total_gdna_em,
-        locus_mrna_arr,
-        locus_gdna_arr,
-    ) = estimator.run_batch_locus_em(
-        loci,
-        em_data,
-        index,
-        locus_gammas,
-        em_iterations=em_config.iterations,
-        em_convergence_delta=em_config.convergence_delta,
-        emit_locus_stats=emit_locus_stats,
-    )
+    def _call_batch_em(parts, batch_loci, batch_gammas, batch_spans):
+        """Pack tuples, call C++, record results."""
+        partition_tuples = [
+            (
+                p.offsets, p.t_indices, p.log_liks, p.coverage_weights,
+                p.tx_starts, p.tx_ends, p.count_cols,
+                p.is_spliced, p.gdna_log_liks, p.genomic_footprints,
+                p.locus_t_indices, p.locus_count_cols,
+            )
+            for p in parts
+        ]
+        locus_t_lists = [l.transcript_indices for l in batch_loci]
 
-    for i, locus in enumerate(loci):
+        return estimator.run_batch_locus_em_partitioned(
+            partition_tuples,
+            locus_t_lists,
+            batch_gammas,
+            batch_spans,
+            index,
+            em_iterations=em_config.iterations,
+            em_convergence_delta=em_config.convergence_delta,
+            emit_locus_stats=emit_locus_stats,
+        )
+
+    # Classify mega vs normal
+    total_work = sum(
+        len(l.transcript_indices) * partitions[l.locus_id].n_units
+        for l in loci
+    )
+    fair_share = total_work // n_threads if n_threads > 1 else total_work + 1
+
+    mega_loci = sorted(
+        [l for l in loci
+         if len(l.transcript_indices) * partitions[l.locus_id].n_units >= fair_share],
+        key=lambda l: len(l.transcript_indices) * partitions[l.locus_id].n_units,
+        reverse=True,
+    )
+    mega_ids = {l.locus_id for l in mega_loci}
+
+    total_gdna_em = 0.0
+
+    # Phase A: Mega-loci (one at a time, free after each)
+    for locus in mega_loci:
+        part = partitions.pop(locus.locus_id)
+        gdna_em, mrna_arr, gdna_arr = _call_batch_em(
+            [part], [locus],
+            np.array([locus_gammas[locus.locus_id]], dtype=np.float64),
+            np.array([locus.gdna_span], dtype=np.int64),
+        )
+        total_gdna_em += gdna_em
         estimator.locus_results.append(
             _build_locus_meta(
                 locus,
-                mrna=locus_mrna_arr[i],
-                gdna=locus_gdna_arr[i],
-                locus_gamma=locus_gammas[i],
+                mrna=mrna_arr[0],
+                gdna=gdna_arr[0],
+                locus_gamma=locus_gammas[locus.locus_id],
             )
         )
+        del part
+        gc.collect()
+        logger.debug(
+            f"[MEGA] Locus {locus.locus_id}: "
+            f"{len(locus.transcript_indices)} transcripts, "
+            f"{len(locus.unit_indices)} units"
+        )
+
+    # Phase B: Normal loci (one batched call)
+    normal_loci = [l for l in loci if l.locus_id not in mega_ids]
+    if normal_loci:
+        normal_parts = [partitions[l.locus_id] for l in normal_loci]
+        normal_gammas = np.array(
+            [locus_gammas[l.locus_id] for l in normal_loci], dtype=np.float64
+        )
+        normal_spans = np.array(
+            [l.gdna_span for l in normal_loci], dtype=np.int64
+        )
+        gdna_em, mrna_arr, gdna_arr = _call_batch_em(
+            normal_parts, normal_loci, normal_gammas, normal_spans,
+        )
+        total_gdna_em += gdna_em
+        for i, locus in enumerate(normal_loci):
+            estimator.locus_results.append(
+                _build_locus_meta(
+                    locus,
+                    mrna=mrna_arr[i],
+                    gdna=gdna_arr[i],
+                    locus_gamma=locus_gammas[locus.locus_id],
+                )
+            )
+
+    del partitions
+    gc.collect()
 
     estimator._gdna_em_total = total_gdna_em
 
+    n_total_units = sum(len(l.unit_indices) for l in loci)
     logger.info(
-        f"[DONE] Per-locus EM: {len(loci)} loci, "
-        f"{em_data.n_units:,} ambiguous fragments, "
+        f"[DONE] Per-locus EM (partitioned): {len(loci)} loci "
+        f"({len(mega_loci)} mega), "
+        f"{n_total_units:,} ambiguous fragments, "
         f"gDNA EM={total_gdna_em:.0f}"
     )
 
@@ -583,9 +655,16 @@ def quant_from_buffer(
             calibration=calibration,
         )
 
-        _run_locus_em(
+        # Phase 4 (NEW): Array-by-array scatter + incremental free
+        n_em_units = em_data.n_units
+        partitions = partition_and_free(em_data, loci)
+        del em_data
+        gc.collect()
+
+        # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
+        _run_locus_em_partitioned(
             estimator,
-            em_data,
+            partitions,
             loci,
             index,
             locus_gammas,
@@ -594,9 +673,9 @@ def quant_from_buffer(
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")
+        del em_data
 
-    # Phase 4: Cleanup
-    del em_data
+    # Phase 6: Cleanup
     gc.collect()
 
     _gdna_em = estimator.gdna_em_count

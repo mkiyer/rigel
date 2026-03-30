@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from .config import EMConfig, TranscriptGeometry
-from .native import batch_locus_em as _batch_locus_em
+from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
 from .scored_fragments import ScoredFragments
 from .splice import (
     SpliceType,
@@ -198,139 +198,86 @@ class AbundanceEstimator:
         return self.unambig_counts + self.em_counts
 
     # ------------------------------------------------------------------
-    # Batch locus EM — Phase 2A: single C++ call for all loci
+    # Batch locus EM (partition-native)
     # ------------------------------------------------------------------
 
-    def run_batch_locus_em(
+    def run_batch_locus_em_partitioned(
         self,
-        loci: list,
-        em_data: ScoredFragments,
-        index,
+        partition_tuples: list,
+        locus_transcript_indices: list,
         locus_gammas: np.ndarray,
+        gdna_spans: np.ndarray,
+        index,
         *,
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
         emit_locus_stats: bool = False,
     ) -> tuple[float, np.ndarray, np.ndarray]:
-        """Run locus-level EM for ALL loci in a single C++ call.
-
-        Replaces the Python per-locus for-loop
-        (build_locus_em_data → run_locus_em → assign_locus_ambiguous)
-        with one batched C++ call to ``batch_locus_em()``.
+        """Run locus-level EM from pre-partitioned data.
 
         Parameters
         ----------
-        loci : list[Locus]
-            All loci to process.
-        em_data : ScoredFragments
-            Global CSR data.
+        partition_tuples : list[tuple]
+            List of 12-tuples, one per locus, containing partition arrays.
+        locus_transcript_indices : list[np.ndarray]
+            List of int32 transcript index arrays, one per locus.
+        locus_gammas : np.ndarray
+            float64 — calibration gDNA fraction per locus being processed.
+        gdna_spans : np.ndarray
+            int64 — pre-computed union genomic footprints per locus.
         index : TranscriptIndex
             Reference index.
-        locus_gammas : np.ndarray
-            float64[n_loci] — calibration gDNA fraction ∈ [0, 1] per locus.
         em_iterations, em_convergence_delta
             EM algorithm parameters.
         emit_locus_stats : bool
-            If True, collect per-locus profiling stats (timing, EC metrics,
-            iteration counts) and store in ``self.locus_stats``.
+            If True, collect per-locus profiling stats.
 
         Returns
         -------
         tuple[float, np.ndarray, np.ndarray]
             (total_gdna_em, locus_mrna, locus_gdna)
         """
-        n_loci = len(loci)
         n_transcripts = self.num_transcripts
-
-        # Flatten locus definitions into contiguous CSR arrays.
-        locus_t_offsets = np.empty(n_loci + 1, dtype=np.int64)
-        locus_u_offsets = np.empty(n_loci + 1, dtype=np.int64)
-        locus_t_offsets[0] = 0
-        locus_u_offsets[0] = 0
-        for i, locus in enumerate(loci):
-            locus_t_offsets[i + 1] = locus_t_offsets[i] + len(locus.transcript_indices)
-            locus_u_offsets[i + 1] = locus_u_offsets[i] + len(locus.unit_indices)
-
-        total_t = int(locus_t_offsets[-1])
-        total_u = int(locus_u_offsets[-1])
-        locus_t_flat = np.empty(total_t, dtype=np.int32)
-        locus_u_flat = np.empty(total_u, dtype=np.int32)
-        for i, locus in enumerate(loci):
-            ts = int(locus_t_offsets[i])
-            te = int(locus_t_offsets[i + 1])
-            us = int(locus_u_offsets[i])
-            ue = int(locus_u_offsets[i + 1])
-            locus_t_flat[ts:te] = locus.transcript_indices
-            locus_u_flat[us:ue] = locus.unit_indices
-
-        # Per-transcript geometry arrays
-        t_starts = index.t_df["start"].values.astype(np.int64)
-        t_ends = index.t_df["end"].values.astype(np.int64)
         t_lengths = index.t_df["length"].values.astype(np.int64)
 
-        # Prepare mutable output accumulators
         if self._em_posterior_sum is None:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
 
-        # Map assignment_mode string to int for C++: 0=fractional, 1=map, 2=sample
         _ASSIGNMENT_MODE_MAP = {"fractional": 0, "map": 1, "sample": 2}
         assignment_mode_int = _ASSIGNMENT_MODE_MAP[self.em_config.assignment_mode]
-
-        # Derive a per-batch RNG seed from the Python-level RNG
         rng_seed = int(self._rng.integers(0, 2**63))
 
-        total_gdna_em, locus_mrna, locus_gdna, locus_stats_raw = _batch_locus_em(
-            # Global CSR
-            em_data.offsets,
-            em_data.t_indices,
-            em_data.log_liks,
-            em_data.coverage_weights,
-            em_data.tx_starts,
-            em_data.tx_ends,
-            em_data.count_cols,
-            em_data.is_spliced.view(np.uint8),
-            em_data.gdna_log_liks,
-            em_data.genomic_footprints,
-            em_data.locus_t_indices,
-            em_data.locus_count_cols,
-            # Locus definitions
-            locus_t_offsets,
-            locus_t_flat,
-            locus_u_offsets,
-            locus_u_flat,
-            np.ascontiguousarray(locus_gammas, dtype=np.float64),
-            # Pre-computed union genomic footprints
-            np.array([loc.gdna_span for loc in loci], dtype=np.int64),
-            # Per-transcript data
-            self.unambig_counts,
-            t_starts,
-            t_ends,
-            t_lengths,
-            # Mutable output accumulators
-            self.em_counts,
-            self.gdna_locus_counts,
-            self._em_posterior_sum,
-            self._em_n_assigned,
-            # EM config
-            em_iterations,
-            em_convergence_delta,
-            self.em_config.prior_pseudocount,
-            self.em_config.mode == "vbem",
-            assignment_mode_int,
-            self.em_config.assignment_min_posterior,
-            rng_seed,
-            n_transcripts,
-            NUM_SPLICE_STRAND_COLS,
-            self.em_config.n_threads,
-            emit_locus_stats,
+        total_gdna_em, locus_mrna, locus_gdna, locus_stats_raw = (
+            _batch_locus_em_partitioned(
+                partition_tuples,
+                locus_transcript_indices,
+                np.ascontiguousarray(locus_gammas, dtype=np.float64),
+                np.ascontiguousarray(gdna_spans, dtype=np.int64),
+                self.unambig_counts,
+                t_lengths,
+                self.em_counts,
+                self.gdna_locus_counts,
+                self._em_posterior_sum,
+                self._em_n_assigned,
+                em_iterations,
+                em_convergence_delta,
+                self.em_config.prior_pseudocount,
+                self.em_config.mode == "vbem",
+                assignment_mode_int,
+                self.em_config.assignment_min_posterior,
+                rng_seed,
+                n_transcripts,
+                NUM_SPLICE_STRAND_COLS,
+                self.em_config.n_threads,
+                emit_locus_stats,
+            )
         )
 
-        # Store locus stats if collected
         if emit_locus_stats:
-            self.locus_stats = list(locus_stats_raw)
-        else:
-            self.locus_stats = None
+            if self.locus_stats is None:
+                self.locus_stats = []
+            self.locus_stats.extend(locus_stats_raw)
 
         return (
             total_gdna_em,
