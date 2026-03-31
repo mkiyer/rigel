@@ -198,6 +198,99 @@ Two-stage pipeline: (1) C++ BAM scan → FragmentBuffer, (2) Python/C++ locus-le
 - C++17, `-O3`, LTO enabled
 - `_scoring_impl` uses `-ffast-math`; `_em_impl` uses `-ffp-contract=fast` (preserves Kahan summation)
 - SIMD: `fast_exp.h` provides AVX2/AVX-512/NEON code paths
-- multithreading for parallel BAM scanning and batch locus EM
+
+## Armis2 SLURM Cluster — Full-Scale Simulation Benchmarking
+
+### Unified Benchmark Directory
+
+All simulation data, tool outputs, and indexes are consolidated in:
+
+```
+/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/
+├── manifest.json                       # simulation parameters & condition definitions
+├── truth_abundances_nrna_none.tsv      # ground truth (nrna_none conditions)
+├── truth_abundances_nrna_rand.tsv      # ground truth (nrna_rand conditions)
+├── sample_sheet.tsv                    # sample metadata
+├── rigel_index/                        # pre-built rigel index
+├── salmon_index/                       # pre-built salmon index
+└── runs/<condition>/
+    ├── sim_oracle.bam                  # oracle BAM with true read origins
+    ├── sim_R1.fq.gz, sim_R2.fq.gz     # simulated paired-end FASTQ
+    ├── rigel_star/                     # rigel output from STAR-aligned BAM
+    │   ├── annotated.bam               # name-sorted STAR-aligned BAM
+    │   ├── quant.feather               # transcript-level quantification
+    │   ├── gene_quant.feather          # gene-level quantification
+    │   ├── nrna_quant.feather          # nRNA quantification
+    │   ├── loci.feather                # locus-level summary
+    │   ├── summary.json                # run stats (calibration, strand model, etc.)
+    │   └── config.yaml                 # rigel config used
+    └── salmon/
+        ├── quant.sf.gz                 # salmon transcript-level quantification
+        └── quant.genes.sf.gz           # salmon gene-level quantification
+```
+
+New rigel runs with different configurations go into new subdirectories:
+`runs/<condition>/rigel_<config_name>/`
+
+### Reference Data (original locations)
+
+All references are under `/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/`:
+
+| Asset | Path |
+|-------|------|
+| Rigel index | `.../refs/human/rigel_index` |
+| Salmon index | `.../refs/human/salmon_index` |
+| STAR index | `.../refs/human/star_index` |
+| Genome FASTA | `.../refs/human/genome.fasta.gz` |
+| Genome+controls FASTA | `.../refs/human/genome_controls.fasta.bgz` |
+| GTF annotation | `.../refs/human/genes.gtf.gz` |
+| GTF+controls annotation | `.../refs/human/genes_controls.gtf.gz` |
+
+### Condition Naming Convention
+
+`gdna_{none|low|high}_ss_{0.50|0.90|1.00}_nrna_{none|rand}`
+
+- `gdna_none/low/high` — gDNA contamination level (0%, low%, high%)
+- `ss_0.50/0.90/1.00` — strand specificity (0.5=unstranded, 1.0=perfectly stranded)
+- `nrna_none/rand` — nascent RNA contamination (none or random)
+
+13 simulation conditions available (14 total; `gdna_low_ss_0.90_nrna_rand` failed).
+
+### Truth Columns
+
+`transcript_id, gene_id, gene_name, ref, strand, mrna_abundance, nrna_abundance, total_rna, n_exons, spliced_length, genomic_span`
+
+### Running Rigel Quant on a Condition
+
+```bash
+conda activate rigel
+BENCH=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks
+COND=gdna_none_ss_1.00_nrna_none
+
+rigel quant \
+  --bam $BENCH/runs/$COND/rigel_star/annotated.bam \
+  --index $BENCH/rigel_index \
+  -o $BENCH/runs/$COND/rigel_<new_config_name>/
+```
+
+### Benchmark Analysis
+
+```bash
+conda activate rigel
+
+# Analyze all tool outputs vs truth (fast, no FASTQ parsing)
+python scripts/benchmark_analysis.py \
+  -b /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks \
+  -o results/benchmark_report
+
+# With exact per-fragment truth from FASTQ (slower, ~10 min/condition)
+python scripts/benchmark_analysis.py \
+  -b /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks \
+  -o results/benchmark_report \
+  --parse-fastq-truth
+```
+
+Output: transcript_metrics.csv, gene_metrics.csv, pool_summary.csv,
+stratified_metrics.csv, per_transcript_detail.parquet, report.md
 
 
