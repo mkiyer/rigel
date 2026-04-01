@@ -193,7 +193,7 @@ class FragmentRouter:
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
-            is_syn = index.t_df["is_synthetic_nrna"].values
+            is_syn = index.t_df["is_nrna"].values
             for j in range(len(det_tids)):
                 tid = int(det_tids[j])
                 gid = int(t_to_g[tid])

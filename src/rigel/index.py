@@ -150,9 +150,9 @@ def create_nrna_transcripts(
        so synthetics are never smaller than any contributing transcript.
     3. Check if an existing **single-exon** transcript already covers
        each merged span (exact match or full containment).
-       If so, mark it ``is_nascent_equiv = True`` — no synthetic needed.
+       If so, mark it ``is_nrna = True`` — no synthetic needed.
     4. For uncovered spans, create a synthetic single-exon ``Transcript``
-       flagged ``is_synthetic_nrna = True``.
+       flagged ``is_nrna = True, is_synthetic = True``.
     5. The synthetics inherit the gene id / name of one contributing
        transcript for output convenience.
 
@@ -266,7 +266,7 @@ def create_nrna_transcripts(
             if s_start > m_start:
                 break  # sorted by start, no more can contain
             if s_start <= m_start and m_end <= s_end:
-                s_tx.is_nascent_equiv = True
+                s_tx.is_nrna = True
                 s_tx.nrna_n_contributors = span_contributor_count[span_key]
                 covered.add(span_key)
                 covered_equiv[span_key] = s_tx
@@ -288,7 +288,8 @@ def create_nrna_transcripts(
             g_id=rep_tx.g_id,
             g_name=rep_tx.g_name,
             g_type=rep_tx.g_type,
-            is_synthetic_nrna=True,
+            is_nrna=True,
+            is_synthetic=True,
             nrna_n_contributors=span_contributor_count[span_key],
         )
         span_to_syn_idx[span_key] = len(synthetics)
@@ -771,7 +772,7 @@ class TranscriptIndex:
 
         # Partition: annotated-only list for region table and splice junctions
         annotated_transcripts = [
-            t for t in transcripts if not t.is_synthetic_nrna
+            t for t in transcripts if not t.is_synthetic
         ]
 
         t_df = transcripts_to_dataframe(transcripts)
@@ -855,12 +856,6 @@ class TranscriptIndex:
                 f"Invalid index in {index_dir}: row index does not match "
                 f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
             )
-
-        # Backward compat: older indices lack synthetic nRNA columns
-        if "is_synthetic_nrna" not in self.t_df.columns:
-            self.t_df["is_synthetic_nrna"] = False
-        if "is_nascent_equiv" not in self.t_df.columns:
-            self.t_df["is_nascent_equiv"] = False
 
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)

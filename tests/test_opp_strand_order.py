@@ -136,7 +136,7 @@ def _extract_results(pr, bench, result):
         ti = t.t_index
         tid = t.t_id
         info[f"{tid}_mrna"] = float(est.em_counts[ti].sum())
-        info[f"{tid}_nrna"] = float(est.em_counts[ti].sum()) if est._synthetic_mask[ti] else 0.0
+        info[f"{tid}_nrna"] = float(est.em_counts[ti].sum()) if est._nrna_mask[ti] else 0.0
         info[f"{tid}_unambig"] = float(est.unambig_counts[ti].sum())
 
     info["gdna_total"] = float(est.gdna_em_count)

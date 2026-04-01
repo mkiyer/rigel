@@ -322,8 +322,8 @@ class TestGdnaFLEndToEnd:
             1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
         )
         assert n_annotated == 3
-        assert (df["mrna"] >= 0).all()
-        assert df["mrna"].sum() > 0
+        assert (df["count"] >= 0).all()
+        assert df["count"].sum() > 0
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
         assert pr.calibration is not None
 
@@ -496,5 +496,5 @@ class TestGdnaFLScoringImpact:
         pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
         df = pr.estimator.get_counts_df(self.index)
         assert len(df) > 0
-        assert (df["mrna"] >= 0).all()
+        assert (df["count"] >= 0).all()
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)

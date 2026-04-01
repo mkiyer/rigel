@@ -1,6 +1,29 @@
 # TODO
 
+## BAM annotation
 
+"pool" forces an either-or when both can be true
+
+bit flags instead?
+is_gdna?
+is_nrna?
+is_mrna?
+
+## Nascent RNA count set to zero? 
+
+Someone the transcript counts is setting synthetic nRNA counts to zero? That seems silly.
+
+
+## Gene counting
+
+Ensure gene quantification is correct.
+
+Regarding gene quantification. Yes, we can sum counts of the transcript isoforms of the gene. Annotated single-exon transcripts are associated with a gene and will be included in those counts (they are both mature and nascent so this is okay). For gene quantification, we MUST exclude synthetic nascent RNA (synthetic nascent RNA should not be associated with a gene. Remember, we can sum counts, but when we compute transcripts-per-milion (TPM), we use a weighted average of counts respecting different effective lengths.
+
+## Collated annotated BAM output
+
+Is annotation BAM output collated?
+Can we ensure that it is collated?
 
 ## Overhang likelihood penalty
 

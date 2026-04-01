@@ -1,0 +1,44 @@
+# MAP-EM vs VBEM head-to-head comparison
+#
+# Purpose: Establish baseline accuracy and performance numbers for MAP vs VBEM
+# on clean (no gDNA/nRNA) and dirty (high gDNA) conditions.
+#
+# Usage:
+#   python -m scripts.benchmarking run     -c scripts/benchmarking/configs/map_vs_vbem.yaml
+#   python -m scripts.benchmarking analyze -c scripts/benchmarking/configs/map_vs_vbem.yaml \
+#       -o /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/results/map_vs_vbem
+
+# ── Paths ──────────────────────────────────────────────────────────
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/rigel_index_new
+bam_relpath: rigel_star/annotated.bam
+
+# ── Global defaults ───────────────────────────────────────────────
+
+threads: 8
+seed: 42
+
+# ── Named rigel configurations ────────────────────────────────────
+
+rigel_configs:
+  vbem:
+    em_mode: vbem
+    assignment_mode: sample
+
+  map:
+    em_mode: map
+    assignment_mode: sample
+
+# ── Conditions ─────────────────────────────────────────────────────
+
+conditions:
+  - gdna_none_ss_1.00_nrna_none   # clean: pure mRNA, perfectly stranded
+  - gdna_high_ss_0.90_nrna_none   # dirty: 50% gDNA, high strandedness
+
+# ── Analysis options ──────────────────────────────────────────────
+
+analysis:
+  output_dir: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/results/map_vs_vbem
+  log2_pseudocount: 1.0
+  parse_fastq_truth: false

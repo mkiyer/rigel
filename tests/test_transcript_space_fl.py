@@ -628,9 +628,9 @@ class TestNRNAFragLength:
         )
         result = resolve_fragment(frag, basic_index)
         assert result is not None
-        # Find the nRNA candidate (synthetic nRNA has "is_synthetic_nrna" flag)
+        # Find the nRNA candidate (synthetic nRNA has "is_synthetic" flag)
         t_df = basic_index.t_df
-        nrna_mask = t_df["is_synthetic_nrna"].values if "is_synthetic_nrna" in t_df.columns else None
+        nrna_mask = t_df["is_synthetic"].values if "is_synthetic" in t_df.columns else None
         if nrna_mask is not None:
             nrna_tidxs = set(t_df.loc[nrna_mask.astype(bool), "t_index"].tolist())
             fl_dict = result.frag_lengths

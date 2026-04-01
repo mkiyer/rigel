@@ -218,7 +218,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     stats = result.stats
     sm = result.strand_models
     flm = result.frag_length_models
-    total_mrna = float(quant_df["mrna"].sum())
+    total_mrna = float(quant_df["count"].sum())
     total_nrna = float(estimator.nrna_em_count)
     total_gdna = float(estimator.gdna_em_count)
     total_rna = total_mrna + total_nrna

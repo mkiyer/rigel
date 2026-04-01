@@ -222,7 +222,8 @@ rigel quant --config results/config.yaml
 
 ### quant.feather / quant.tsv
 
-Transcript-level abundance estimates.
+Transcript-level abundance estimates. Only annotated (non-synthetic)
+transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 
 | Column | Description |
 |--------|-------------|
@@ -236,22 +237,23 @@ Transcript-level abundance estimates.
 | `length` | Spliced exonic length (bp) |
 | `effective_length` | Length after fragment-length correction |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
-| `nrna_id` | ID of the shared nRNA span for this transcript |
+| `nrna_id` | ID of the parent nRNA entity for this transcript (`"."` if none or if the transcript is itself an nRNA entity) |
 | `is_basic` | `1` if transcript has the GENCODE `basic` tag |
 | `is_mane` | `1` if transcript is MANE Select or MANE Plus Clinical |
-| `is_nascent_equiv` | `1` if transcript is a synthetic nRNA span |
-| `mrna` | Total mRNA count |
-| `mrna_unambig` | Deterministically assigned mRNA count |
-| `mrna_em` | EM-assigned mRNA count |
-| `mrna_spliced` | mRNA count from annotated-spliced fragments |
-| `nrna` | nRNA count pro-rated from the shared nRNA span |
-| `rna_total` | `mrna + nrna` |
-| `tpm` | Transcripts per million (mRNA-based) |
+| `is_nrna` | `1` if transcript is single-exon (indistinguishable from nascent RNA) |
+| `count` | Fragment count assigned to this transcript |
+| `count_unambig` | Deterministically assigned fragment count |
+| `count_em` | EM-assigned fragment count |
+| `count_spliced` | Fragment count from annotated-spliced fragments |
+| `nrna_parent_count` | Parent nRNA entity's count. Zero if `is_nrna=1` (progenitors have no parent) or if no parent nRNA exists |
+| `tpm` | Transcripts per million (annotated transcripts only) |
+| `tpm_total_rna` | TPM normalized over all RNA (annotated + synthetic nRNA). Comparable to `tpm` in `nrna_quant` |
 | `posterior_mean` | Mean EM posterior over units assigned to this transcript |
 
 ### gene_quant.feather / gene_quant.tsv
 
-Gene-level abundance aggregated from transcript estimates.
+Gene-level abundance aggregated from annotated (non-synthetic) transcript
+estimates. No nRNA attribution is performed at the gene level.
 
 | Column | Description |
 |--------|-------------|
@@ -259,36 +261,38 @@ Gene-level abundance aggregated from transcript estimates.
 | `gene_name` | Gene name/symbol |
 | `gene_type` | Biotype from GTF |
 | `ref`, `strand`, `start`, `end` | Gene genomic coordinates |
-| `n_transcripts` | Number of transcripts |
+| `n_transcripts` | Number of annotated transcripts |
 | `locus_id` | Primary locus assigned to the gene |
 | `effective_length` | Abundance-weighted mean effective transcript length |
-| `mrna` | Total mRNA count |
-| `mrna_unambig` | Deterministic mRNA count |
-| `mrna_em` | EM-assigned mRNA count |
-| `mrna_spliced` | Spliced mRNA count |
-| `nrna` | nRNA count pro-rated from shared nRNA spans |
-| `rna_total` | `mrna + nrna` |
-| `tpm` | Gene-level TPM (mRNA-based) |
+| `count` | Total fragment count (sum of annotated transcript counts) |
+| `count_unambig` | Deterministic fragment count |
+| `count_em` | EM-assigned fragment count |
+| `count_spliced` | Spliced fragment count |
+| `tpm` | Gene-level TPM |
 
 ### nrna_quant.feather / nrna_quant.tsv
 
-nRNA-span-level estimates. Each row is one unique genomic nRNA span
-`(ref, strand, start, end)`. Multiple isoforms with the same span share
-one row.
+nRNA entity estimates. Each row is one nRNA entity (a single-exon
+transcript, either annotated or synthetic) that has at least one
+multi-exon mRNA child transcript. Standalone single-exon genes with
+no multi-exon overlap are excluded; they appear in `quant.feather`
+with `is_nrna=True`.
 
 | Column | Description |
 |--------|-------------|
-| `nrna_id` | nRNA span ID |
+| `nrna_id` | nRNA entity transcript ID |
 | `gene_id` | Overlapping gene ID |
 | `gene_name` | Gene name |
-| `ref`, `strand`, `start`, `end` | Span genomic coordinates |
-| `length` | Span length (bp) |
-| `effective_length` | Effective span length after fragment-length correction |
-| `locus_id` | Locus containing this span |
-| `is_synthetic` | `1` if this span was synthesized from transcript coordinates |
-| `n_contributing_transcripts` | Number of transcripts sharing this span |
-| `count` | nRNA fragment count |
-| `tpm` | nRNA TPM |
+| `ref`, `strand`, `start`, `end` | Entity genomic coordinates |
+| `length` | Entity length (bp) |
+| `effective_length` | Effective length after fragment-length correction |
+| `locus_id` | Locus containing this entity |
+| `is_synthetic` | `1` if this entity was synthesized by rigel |
+| `n_contributing_transcripts` | Number of multi-exon transcripts merged into this span |
+| `n_mrna` | Number of multi-exon mRNA transcripts associated with this nRNA entity |
+| `mrna_count` | Sum of mRNA children's fragment counts |
+| `count` | nRNA entity's own fragment count |
+| `tpm` | Total RNA TPM (denominator includes all annotated + synthetic transcripts). Directly comparable to `tpm_total_rna` in `quant.feather` |
 
 ### loci.feather / loci.tsv
 
@@ -301,7 +305,7 @@ transcripts.
 | `ref` | Primary chromosome |
 | `n_transcripts` | Total transcript count (mRNA + nRNA spans) |
 | `n_annotated_transcripts` | Annotated (non-synthetic) transcript count |
-| `n_nrna_entities` | Number of unique nRNA spans |
+| `n_nrna_entities` | Number of nRNA entities (all single-exon transcripts) |
 | `n_genes` | Number of genes |
 | `n_em_fragments` | Ambiguous fragments entering EM |
 | `mrna` | Total mRNA count |

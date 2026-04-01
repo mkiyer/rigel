@@ -574,7 +574,8 @@ def profile_stages(
             index.num_transcripts,
             em_config=em_config,
             geometry=geometry,
-            is_synthetic_nrna=index.t_df["is_synthetic_nrna"].values,
+            is_nrna=index.t_df["is_nrna"].values,
+            is_synthetic=index.t_df["is_synthetic"].values,
         )
     timings.create_estimator = t_est.elapsed
 

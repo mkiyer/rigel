@@ -180,13 +180,14 @@ def _golden_exists(scenario_name):
 # Columns to compare with bit-exact precision
 _TRANSCRIPT_NUMERIC_COLS = [
     "effective_length",
-    "mrna", "mrna_unambig", "mrna_em", "mrna_spliced",
-    "tpm", "posterior_mean",
+    "count", "count_unambig", "count_em", "count_spliced",
+    "nrna_parent_count",
+    "tpm", "tpm_total_rna", "posterior_mean",
 ]
 
 _GENE_NUMERIC_COLS = [
     "effective_length",
-    "mrna", "mrna_unambig", "mrna_em", "mrna_spliced",
+    "count", "count_unambig", "count_em", "count_spliced",
     "tpm",
 ]
 

@@ -172,10 +172,10 @@ class TestPureRNA:
 
     def test_mrna_dominates(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
-        assert df["mrna"].sum() > 0
+        assert df["count"].sum() > 0
         loci = self.pr.estimator.get_loci_df()
         if len(loci) > 0:
-            assert loci["gdna"].sum() < df["mrna"].sum() * 0.15
+            assert loci["gdna"].sum() < df["count"].sum() * 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -747,7 +747,7 @@ class TestRealisticScale:
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
-        expressed = df[df["mrna"] > 0]
+        expressed = df[df["count"] > 0]
         assert len(expressed) >= 10
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-2)
 

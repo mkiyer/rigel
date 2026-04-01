@@ -289,7 +289,8 @@ class _MockBatchIndex:
             "start": np.zeros(num_transcripts, dtype=np.int64),
             "end": np.full(num_transcripts, 10000, dtype=np.int64),
             "length": np.full(num_transcripts, 1000, dtype=np.int64),
-            "is_synthetic_nrna": np.zeros(num_transcripts, dtype=bool),
+            "is_nrna": np.zeros(num_transcripts, dtype=bool),
+            "is_synthetic": np.zeros(num_transcripts, dtype=bool),
         })
 
 

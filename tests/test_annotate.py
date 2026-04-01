@@ -245,8 +245,8 @@ class TestAnnotatedBamIntegration:
 
         # Counts should be identical (annotation doesn't change quantification)
         np.testing.assert_array_almost_equal(
-            counts1["mrna"].values,
-            counts2["mrna"].values,
+            counts1["count"].values,
+            counts2["count"].values,
             decimal=6,
-            err_msg="Annotation mode changed mrna totals",
+            err_msg="Annotation mode changed count totals",
         )

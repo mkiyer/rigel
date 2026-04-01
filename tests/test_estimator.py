@@ -65,8 +65,8 @@ class MockIndex:
                 "length": [500] * num_transcripts,
                 "is_basic": [True] * num_transcripts,
                 "is_mane": [False] * num_transcripts,
-                "is_nascent_equiv": [False] * num_transcripts,
-                "is_synthetic_nrna": [False] * num_transcripts,
+                "is_nrna": [False] * num_transcripts,
+                "is_synthetic": [False] * num_transcripts,
                 "nrna_t_index": [-1] * num_transcripts,
                 "nrna_n_contributors": [0] * num_transcripts,
             }
@@ -581,12 +581,14 @@ class TestCountsOutput:
             "nrna_id",
             "is_basic",
             "is_mane",
-            "is_nascent_equiv",
-            "mrna",
-            "mrna_unambig",
-            "mrna_em",
-            "mrna_spliced",
+            "is_nrna",
+            "count",
+            "count_unambig",
+            "count_em",
+            "count_spliced",
+            "nrna_parent_count",
             "tpm",
+            "tpm_total_rna",
             "posterior_mean",
         ]
         assert list(df.columns) == expected_cols
@@ -602,10 +604,10 @@ class TestCountsOutput:
             "n_transcripts",
             "locus_id",
             "effective_length",
-            "mrna",
-            "mrna_unambig",
-            "mrna_em",
-            "mrna_spliced",
+            "count",
+            "count_unambig",
+            "count_em",
+            "count_spliced",
             "tpm",
         ]
         assert list(df.columns) == expected_cols
@@ -618,9 +620,9 @@ class TestCountsOutput:
         rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
 
         df = rc.get_counts_df(index)
-        assert df.loc[0, "mrna"] == 8.0
-        assert df.loc[0, "mrna_unambig"] == 5.0
-        assert df.loc[0, "mrna_em"] == 3.0
+        assert df.loc[0, "count"] == 8.0
+        assert df.loc[0, "count_unambig"] == 5.0
+        assert df.loc[0, "count_em"] == 3.0
 
     def test_gene_counts_aggregate(self):
         """Gene counts aggregate across transcripts."""
@@ -631,8 +633,8 @@ class TestCountsOutput:
         rc.unambig_counts[2, _UNSPLICED_SENSE] = 7.0  # different gene
 
         df = rc.get_gene_counts_df(index)
-        assert df.loc[0, "mrna"] == 8.0  # g0 = t0 + t1
-        assert df.loc[1, "mrna"] == 7.0  # g1 = t2
+        assert df.loc[0, "count"] == 8.0  # g0 = t0 + t1
+        assert df.loc[1, "count"] == 7.0  # g1 = t2
 
     def test_gene_effective_length_abundance_weighted(self):
         """Gene effective length is abundance-weighted mean of transcript eff lens."""
@@ -677,8 +679,8 @@ class TestCountsOutput:
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 10.0
 
         df = rc.get_counts_df(index)
-        assert df.loc[0, "mrna_spliced"] == 5.0
-        assert df.loc[0, "mrna"] == 15.0
+        assert df.loc[0, "count_spliced"] == 5.0
+        assert df.loc[0, "count"] == 15.0
 
     def test_identifiers_present(self):
         """Output includes transcript/gene identifiers."""

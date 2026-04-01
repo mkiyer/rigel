@@ -158,8 +158,8 @@ class TestCalibrationEndToEnd:
             1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
         )
         assert n_annotated == 3
-        assert (df["mrna"] >= 0).all()
-        assert df["mrna"].sum() > 0
+        assert (df["count"] >= 0).all()
+        assert df["count"].sum() > 0
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
 
 
@@ -279,7 +279,7 @@ class TestCalibrationCleanScenario:
         # With no gDNA in the simulation, gDNA should be near zero
         loci_df = pr.estimator.get_loci_df()
         if len(loci_df) > 0:
-            assert loci_df["gdna"].sum() < df["mrna"].sum() * 0.1
+            assert loci_df["gdna"].sum() < df["count"].sum() * 0.1
 
     def test_output_valid(self):
         pr = _run_with_calibration(self.result, self.index)

@@ -238,8 +238,11 @@ def scan_and_buffer(
     resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
-    # Provide nRNA status so FL training excludes nRNA candidates
-    nrna_arr = index.t_df["is_synthetic_nrna"].values.astype("uint8")
+    # Provide nRNA status so FL training excludes synthetic nRNA candidates
+    # (whose fragment lengths represent genomic spans, not real fragment sizes).
+    # Only synthetic nRNAs should be excluded; annotated single-exon transcripts
+    # have legitimate fragment lengths and must contribute to FL training.
+    nrna_arr = index.t_df["is_synthetic"].values.astype("uint8")
     resolve_ctx.set_nrna_status(nrna_arr.tolist())
 
     # Build region partition index for gDNA calibration (if available)
@@ -362,7 +365,8 @@ def _setup_geometry_and_estimator(
         index.num_transcripts,
         em_config=em_config,
         geometry=geometry,
-        is_synthetic_nrna=index.t_df["is_synthetic_nrna"].values,
+        is_nrna=index.t_df["is_nrna"].values,
+        is_synthetic=index.t_df["is_synthetic"].values,
     )
     return geometry, estimator
 
@@ -439,7 +443,7 @@ def _populate_em_annotations(
         return
 
     t_to_g = index.t_to_g_arr
-    is_syn = index.t_df["is_synthetic_nrna"].values
+    is_syn = index.t_df["is_nrna"].values
 
     # Concatenate per-locus metadata in same order as C++ output
     frag_ids = np.concatenate([p.frag_ids for p in batch_parts])
