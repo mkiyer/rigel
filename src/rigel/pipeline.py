@@ -33,6 +33,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from .annotate import (
+    POOL_CODE_GDNA,
+    POOL_CODE_INTERGENIC,
+    POOL_CODE_MRNA,
+    POOL_CODE_NRNA,
+)
 from .buffer import FragmentBuffer, _FinalizedChunk
 from .config import (
     EMConfig,
@@ -420,6 +426,61 @@ def _compute_priors(
     return locus_gammas
 
 
+def _populate_em_annotations(
+    batch_parts,
+    out_winner_tid,
+    out_winner_post,
+    out_n_candidates,
+    annotations,
+    index,
+):
+    """Populate AnnotationTable from EM assignment output and partition metadata."""
+    if out_winner_tid is None:
+        return
+
+    t_to_g = index.t_to_g_arr
+    is_syn = index.t_df["is_synthetic_nrna"].values
+
+    # Concatenate per-locus metadata in same order as C++ output
+    frag_ids = np.concatenate([p.frag_ids for p in batch_parts])
+    frag_class = np.concatenate([p.frag_class for p in batch_parts])
+    splice_type_arr = np.concatenate([p.splice_type for p in batch_parts])
+
+    n = len(frag_ids)
+    best_tid = np.asarray(out_winner_tid, dtype=np.int32)
+    posteriors = np.asarray(out_winner_post, dtype=np.float32)
+    n_cand = np.asarray(out_n_candidates, dtype=np.int16)
+
+    # Gene index: map valid transcript winners to gene
+    valid_t = best_tid >= 0
+    best_gid = np.full(n, -1, dtype=np.int32)
+    best_gid[valid_t] = t_to_g[best_tid[valid_t]]
+
+    # Pool code: classify each unit
+    pool = np.full(n, POOL_CODE_INTERGENIC, dtype=np.uint8)
+    pool[best_tid == -2] = POOL_CODE_GDNA
+    if valid_t.any():
+        is_nrna = is_syn[best_tid[valid_t]].astype(bool)
+        pool[valid_t] = np.where(
+            is_nrna, POOL_CODE_NRNA, POOL_CODE_MRNA
+        ).astype(np.uint8)
+
+    # Clean sentinel: -2 (gDNA) -> -1
+    best_tid_clean = best_tid.copy()
+    best_tid_clean[best_tid == -2] = -1
+
+    annotations.add_batch(
+        frag_ids=frag_ids,
+        best_tids=best_tid_clean,
+        best_gids=best_gid,
+        pools=pool,
+        posteriors=posteriors,
+        frag_classes=frag_class.view(np.int8),
+        n_candidates=n_cand,
+        splice_types=splice_type_arr,
+    )
+
+
 def _run_locus_em_partitioned(
     estimator: AbundanceEstimator,
     partitions: dict,
@@ -429,10 +490,12 @@ def _run_locus_em_partitioned(
     em_config: EMConfig,
     *,
     emit_locus_stats: bool = False,
+    annotations: "AnnotationTable | None" = None,
 ) -> None:
     """Run batch locus EM from partitioned data with incremental freeing."""
     t_to_g = index.t_to_g_arr
     n_threads = em_config.n_threads or os.cpu_count() or 1
+    emit_assignments = annotations is not None
 
     def _build_locus_meta(locus, *, mrna, gdna, locus_gamma):
         gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
@@ -469,6 +532,7 @@ def _run_locus_em_partitioned(
             em_iterations=em_config.iterations,
             em_convergence_delta=em_config.convergence_delta,
             emit_locus_stats=emit_locus_stats,
+            emit_assignments=emit_assignments,
         )
 
     # Classify mega vs normal
@@ -491,12 +555,18 @@ def _run_locus_em_partitioned(
     # Phase A: Mega-loci (one at a time, free after each)
     for locus in mega_loci:
         part = partitions.pop(locus.locus_id)
-        gdna_em, mrna_arr, gdna_arr = _call_batch_em(
+        em_result = _call_batch_em(
             [part], [locus],
             np.array([locus_gammas[locus.locus_id]], dtype=np.float64),
             np.array([locus.gdna_span], dtype=np.int64),
         )
+        gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
+        if annotations is not None and len(em_result) > 3:
+            _populate_em_annotations(
+                [part], em_result[3], em_result[4], em_result[5],
+                annotations, index,
+            )
         estimator.locus_results.append(
             _build_locus_meta(
                 locus,
@@ -523,10 +593,16 @@ def _run_locus_em_partitioned(
         normal_spans = np.array(
             [l.gdna_span for l in normal_loci], dtype=np.int64
         )
-        gdna_em, mrna_arr, gdna_arr = _call_batch_em(
+        em_result = _call_batch_em(
             normal_parts, normal_loci, normal_gammas, normal_spans,
         )
+        gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
+        if annotations is not None and len(em_result) > 3:
+            _populate_em_annotations(
+                normal_parts, em_result[3], em_result[4], em_result[5],
+                annotations, index,
+            )
         for i, locus in enumerate(normal_loci):
             estimator.locus_results.append(
                 _build_locus_meta(
@@ -670,6 +746,7 @@ def quant_from_buffer(
             locus_gammas,
             em_config,
             emit_locus_stats=emit_locus_stats,
+            annotations=annotations,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")

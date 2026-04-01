@@ -34,10 +34,10 @@ abundance:
 gdna:
   rates: [0.0, 0.2, 0.5]
   rate_labels: [none, low, high]
-  # Same fragment length distribution as RNA
+  # gDNA fragments are typically longer than size-selected RNA
   frag_mean: 250
-  frag_std: 50
-  frag_min: 50
+  frag_std: 100
+  frag_min: 100
   frag_max: 1000
 
 # ── Strand specificity ───────────────────────────────────────

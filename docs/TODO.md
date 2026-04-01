@@ -1,11 +1,6 @@
 # TODO
 
 
-## Annotation BAM file
-
-There is a synchronization issue between the original BAM file parsing and the output annotated BAM file creation. This is because with multithreading, the fragments are parsed in an unpredicable order. The 'frag_id' should identify the fragment. Although the reads may not be in exact order, they should maintain _some_ of the original organization. The annotation BAM file will need to synchronize the original BAM file and the output by the fragment id (frag_id).
-
-
 
 ## Overhang likelihood penalty
 

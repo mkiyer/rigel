@@ -1128,17 +1128,20 @@ class WholeGenomeSimulator:
                         else:
                             r1_tlen, r2_tlen = -tlen, tlen
 
+                        gdna_tags = [("NH", 1)]
                         bam_fh.write(_make_bam_record(
                             self._bam_header, qname, r1_seq,
                             r1_flag, ref_id, r1_start_pos,
                             [(pysam.CMATCH, read_len)],
                             ref_id, r2_start_pos, r1_tlen,
+                            tags=gdna_tags,
                         ))
                         bam_fh.write(_make_bam_record(
                             self._bam_header, qname, r2_seq,
                             r2_flag, ref_id, r2_start_pos,
                             [(pysam.CMATCH, read_len)],
                             ref_id, r1_start_pos, r2_tlen,
+                            tags=gdna_tags,
                         ))
 
                     n_written += 1
@@ -1402,6 +1405,9 @@ def write_manifest(
         "transcript_filter": cfg.transcript_filter,
         "truth_abundances": "truth_abundances.tsv",
         "simulation": asdict(cfg.simulation),
+        "gdna": asdict(cfg.gdna),
+        "nrna": asdict(cfg.nrna),
+        "strand_specificities": cfg.strand_specificities,
         "abundance": asdict(cfg.abundance),
         "conditions": conditions,
     }

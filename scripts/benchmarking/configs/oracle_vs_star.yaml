@@ -1,0 +1,57 @@
+# Benchmark configuration: oracle vs STAR-aligned BAM comparison.
+#
+# Purpose: Deep root cause analysis comparing rigel on oracle BAM
+#          (perfect alignment) vs STAR-aligned BAM vs salmon.
+#
+# Usage:
+#   python -m scripts.benchmarking run     -c scripts/benchmarking/configs/oracle_vs_star.yaml
+#   python -m scripts.benchmarking analyze -c scripts/benchmarking/configs/oracle_vs_star.yaml -o results/oracle_vs_star
+
+# ── Paths ──────────────────────────────────────────────────────────
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/rigel_index
+
+# Default BAM (STAR-aligned)
+bam_relpath: rigel_star/annotated.bam
+
+# ── Global defaults ───────────────────────────────────────────────
+
+threads: 8
+seed: 42
+
+# ── Named rigel configurations ────────────────────────────────────
+
+rigel_configs:
+  # STAR-aligned BAM (default pipeline)
+  star:
+    em_mode: vbem
+    assignment_mode: sample
+
+  # Oracle BAM (perfect alignment — no aligner error)
+  oracle:
+    em_mode: vbem
+    assignment_mode: sample
+    bam_relpath: sim_oracle.bam
+
+# ── Conditions ─────────────────────────────────────────────────────
+#
+# 3 conditions spanning a range of contamination scenarios:
+#   1. Clean: no gDNA, perfect strandedness, no nRNA
+#   2. Contaminated: high gDNA, moderate strandedness, no nRNA
+#   3. nRNA contamination: no gDNA, moderate strandedness, with nRNA
+#
+# Note: gdna_high_ss_0.90_nrna_rand does not exist in the simulation data.
+# Substituted with gdna_none_ss_0.90_nrna_rand.
+
+conditions:
+  - gdna_none_ss_1.00_nrna_none
+  - gdna_high_ss_0.90_nrna_none
+  - gdna_none_ss_0.90_nrna_rand
+
+# ── Analysis options ──────────────────────────────────────────────
+
+analysis:
+  output_dir: results/oracle_vs_star
+  log2_pseudocount: 1.0
+  parse_fastq_truth: true

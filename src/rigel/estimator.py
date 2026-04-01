@@ -212,7 +212,8 @@ class AbundanceEstimator:
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
         emit_locus_stats: bool = False,
-    ) -> tuple[float, np.ndarray, np.ndarray]:
+        emit_assignments: bool = False,
+    ) -> tuple[float, np.ndarray, np.ndarray, ...]:
         """Run locus-level EM from pre-partitioned data.
 
         Parameters
@@ -231,11 +232,13 @@ class AbundanceEstimator:
             EM algorithm parameters.
         emit_locus_stats : bool
             If True, collect per-locus profiling stats.
+        emit_assignments : bool
+            If True, return per-unit winner_tid / posterior / n_candidates.
 
         Returns
         -------
-        tuple[float, np.ndarray, np.ndarray]
-            (total_gdna_em, locus_mrna, locus_gdna)
+        tuple
+            (total_gdna_em, locus_mrna, locus_gdna[, winner_tid, winner_post, n_candidates])
         """
         n_transcripts = self.num_transcripts
         t_lengths = index.t_df["length"].values.astype(np.int64)
@@ -248,7 +251,8 @@ class AbundanceEstimator:
         assignment_mode_int = _ASSIGNMENT_MODE_MAP[self.em_config.assignment_mode]
         rng_seed = int(self._rng.integers(0, 2**63))
 
-        total_gdna_em, locus_mrna, locus_gdna, locus_stats_raw = (
+        total_gdna_em, locus_mrna, locus_gdna, locus_stats_raw, \
+            out_winner_tid, out_winner_post, out_n_candidates = (
             _batch_locus_em_partitioned(
                 partition_tuples,
                 locus_transcript_indices,
@@ -271,6 +275,7 @@ class AbundanceEstimator:
                 NUM_SPLICE_STRAND_COLS,
                 self.em_config.n_threads,
                 emit_locus_stats,
+                emit_assignments,
             )
         )
 
@@ -279,6 +284,15 @@ class AbundanceEstimator:
                 self.locus_stats = []
             self.locus_stats.extend(locus_stats_raw)
 
+        if emit_assignments:
+            return (
+                total_gdna_em,
+                np.asarray(locus_mrna),
+                np.asarray(locus_gdna),
+                np.asarray(out_winner_tid),
+                np.asarray(out_winner_post),
+                np.asarray(out_n_candidates),
+            )
         return (
             total_gdna_em,
             np.asarray(locus_mrna),

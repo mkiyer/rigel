@@ -205,3 +205,8 @@ class LocusPartition:
     genomic_footprints: np.ndarray  # int32
     locus_t_indices: np.ndarray  # int32
     locus_count_cols: np.ndarray  # uint8
+
+    # Per-unit annotation metadata (not passed to C++ EM)
+    frag_ids: np.ndarray  # int64[n_units] — buffer frag_id per unit
+    frag_class: np.ndarray  # uint8[n_units] — fragment class code
+    splice_type: np.ndarray  # uint8[n_units] — SpliceType enum value

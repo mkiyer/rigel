@@ -1,0 +1,56 @@
+# Benchmark configuration for full-scale simulation studies.
+#
+# Usage:
+#   python -m scripts.benchmarking status  -c scripts/benchmarking/configs/default.yaml
+#   python -m scripts.benchmarking run     -c scripts/benchmarking/configs/default.yaml
+#   python -m scripts.benchmarking analyze -c scripts/benchmarking/configs/default.yaml -o results/benchmark_report
+
+# ── Paths ──────────────────────────────────────────────────────────
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/rigel_index
+
+# BAM input relative to each condition directory
+bam_relpath: rigel_star/annotated.bam
+
+# ── Global defaults ───────────────────────────────────────────────
+
+threads: 8
+seed: 42
+
+# ── Named rigel configurations ────────────────────────────────────
+#
+# Each key is a config name; output goes to runs/<cond>/rigel/<name>/
+# Values are rigel quant CLI params (underscored or hyphenated).
+# Omitted params use rigel defaults.
+
+rigel_configs:
+  default:
+    # Use all rigel defaults — baseline configuration
+    em_mode: vbem
+    assignment_mode: sample
+
+  # Example: MAP-EM with higher pseudocount
+  # map_high_prior:
+  #   em_mode: map
+  #   prior_pseudocount: 5.0
+
+  # Example: fractional assignment
+  # fractional:
+  #   assignment_mode: fractional
+
+# ── Conditions ─────────────────────────────────────────────────────
+#
+# Omit or set to null to auto-discover all conditions.
+# Uncomment to restrict to a subset:
+# conditions:
+#   - gdna_none_ss_1.00_nrna_none
+#   - gdna_low_ss_0.90_nrna_none
+#   - gdna_high_ss_0.50_nrna_rand
+
+# ── Analysis options ──────────────────────────────────────────────
+
+analysis:
+  output_dir: results/benchmark_report
+  log2_pseudocount: 1.0
+  parse_fastq_truth: false

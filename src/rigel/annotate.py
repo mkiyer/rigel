@@ -187,9 +187,48 @@ class AnnotationTable:
         self.frag_id_to_row[frag_id] = idx
         self._size += 1
 
-    def _grow(self) -> None:
-        """Double capacity when full."""
-        new_cap = max(self.capacity * 2, 1024)
+    def add_batch(
+        self,
+        frag_ids: np.ndarray,
+        best_tids: np.ndarray,
+        best_gids: np.ndarray,
+        pools: np.ndarray,
+        posteriors: np.ndarray,
+        frag_classes: np.ndarray,
+        n_candidates: np.ndarray,
+        splice_types: np.ndarray,
+    ) -> None:
+        """Append multiple annotation rows in batch."""
+        n = len(frag_ids)
+        if n == 0:
+            return
+
+        needed = self._size + n
+        if needed > self.capacity:
+            self._grow_to(max(self.capacity * 2, needed))
+
+        start = self._size
+        end = start + n
+
+        self.frag_ids[start:end] = frag_ids
+        self.best_tid[start:end] = best_tids
+        self.best_gid[start:end] = best_gids
+        self.pool[start:end] = pools
+        self.posterior[start:end] = posteriors
+        self.frag_class[start:end] = frag_classes
+        self.n_candidates[start:end] = n_candidates
+        self.splice_type[start:end] = splice_types
+
+        self.frag_id_to_row.update(
+            zip(frag_ids.tolist(), range(start, end))
+        )
+
+        self._size = end
+
+    def _grow_to(self, new_cap: int) -> None:
+        """Grow capacity to at least new_cap."""
+        if new_cap <= self.capacity:
+            return
         for attr in (
             "frag_ids", "best_tid", "best_gid", "pool",
             "posterior", "frag_class", "n_candidates", "splice_type",
@@ -204,6 +243,10 @@ class AnnotationTable:
                 new[self.capacity:] = 0
             setattr(self, attr, new)
         self.capacity = new_cap
+
+    def _grow(self) -> None:
+        """Double capacity when full."""
+        self._grow_to(max(self.capacity * 2, 1024))
 
     def get(self, frag_id: int):
         """Return annotation dict for a frag_id, or None if absent."""

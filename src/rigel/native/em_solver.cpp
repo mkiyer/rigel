@@ -1299,7 +1299,12 @@ static void assign_posteriors(
     double& mrna_total,
     double& gdna_total,
     int N_T_TOTAL,  // total transcripts for bounds checking
-    int n_cols)     // number of splice-strand columns (actual 2D stride)
+    int n_cols,     // number of splice-strand columns (actual 2D stride)
+    // --- Per-unit assignment output (nullable) ---
+    int32_t* out_winner_tid,   // [total_units] or nullptr
+    float*   out_winner_post,  // [total_units] or nullptr
+    int16_t* out_n_candidates, // [total_units] or nullptr
+    int      out_offset)       // write offset for this locus
 {
     int n_t = sub.n_t;
     int nc  = sub.n_components;
@@ -1356,6 +1361,8 @@ static void assign_posteriors(
         // In discrete modes, exactly one entry is 1.0 and the rest are 0.0.
         std::vector<double> weights(seg_len);
 
+        int winner = -1;  // MAP/sample winner index (used by annotation output)
+
         if (assignment_mode == ASSIGN_FRACTIONAL) {
             // Traditional EM: scatter fractional posteriors
             for (int j = 0; j < seg_len; ++j) weights[j] = posteriors[j];
@@ -1376,7 +1383,7 @@ static void assign_posteriors(
             }
 
             // Find winner index
-            int winner = -1;
+            winner = -1;
             if (assignment_mode == ASSIGN_MAP) {
                 // Maximum a posteriori: pick the highest posterior
                 double best = -1.0;
@@ -1411,6 +1418,41 @@ static void assign_posteriors(
         }
 
         // Track max mRNA posterior (for diagnostics)
+
+        // --- Per-unit annotation output ---
+        if (out_winner_tid != nullptr) {
+            int ann_winner = -1;
+            if (assignment_mode == ASSIGN_FRACTIONAL) {
+                // Fractional mode: find MAP winner for annotation display
+                double best_post = -1.0;
+                for (int j = 0; j < seg_len; ++j) {
+                    if (posteriors[j] > best_post) {
+                        best_post = posteriors[j];
+                        ann_winner = j;
+                    }
+                }
+            } else {
+                ann_winner = winner;
+            }
+
+            int write_idx = out_offset + ui;
+            out_n_candidates[write_idx] = static_cast<int16_t>(
+                std::min(seg_len, static_cast<int>(INT16_MAX)));
+
+            if (ann_winner >= 0) {
+                int32_t comp = sub.t_indices[s + ann_winner];
+                if (comp < n_t) {
+                    out_winner_tid[write_idx] = local_to_global[comp];
+                } else {
+                    out_winner_tid[write_idx] = -2;  // gDNA
+                }
+                out_winner_post[write_idx] = static_cast<float>(
+                    posteriors[ann_winner]);
+            } else {
+                out_winner_tid[write_idx] = -1;
+                out_winner_post[write_idx] = 0.0f;
+            }
+        }
 
         // Scatter assignment weights
         for (int j = 0; j < seg_len; ++j) {
@@ -1840,7 +1882,10 @@ static std::tuple<
     double,  // total_gdna_em
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_mrna[n_loci]
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_gdna[n_loci]
-    nb::list   // locus_stats
+    nb::list,  // locus_stats
+    nb::object,  // out_winner_tid (ndarray or None)
+    nb::object,  // out_winner_post (ndarray or None)
+    nb::object   // out_n_candidates (ndarray or None)
 >
 batch_locus_em_partitioned(
     // Per-locus partition data (list of 12-tuples)
@@ -1869,7 +1914,8 @@ batch_locus_em_partitioned(
     int    n_transcripts_total,
     int    n_splice_strand_cols,
     int    n_threads,
-    bool   emit_locus_stats)
+    bool   emit_locus_stats,
+    bool   emit_assignments)
 {
     int n_loci = static_cast<int>(nb::len(partition_tuples));
     int N_T = n_transcripts_total;
@@ -1920,6 +1966,31 @@ batch_locus_em_partitioned(
     }
 
     int local_map_size = N_T + 1;
+
+    // --- Per-unit assignment output arrays ---
+    int total_units = 0;
+    std::vector<int> locus_write_offsets(n_loci, 0);
+    for (int i = 0; i < n_loci; ++i) {
+        locus_write_offsets[i] = total_units;
+        total_units += views[i].n_units;
+    }
+
+    int32_t* out_tid_ptr   = nullptr;
+    float*   out_post_ptr  = nullptr;
+    int16_t* out_ncand_ptr = nullptr;
+
+    std::vector<int32_t> out_tid_vec;
+    std::vector<float>   out_post_vec;
+    std::vector<int16_t> out_ncand_vec;
+
+    if (emit_assignments && total_units > 0) {
+        out_tid_vec.assign(total_units, -1);
+        out_post_vec.assign(total_units, 0.0f);
+        out_ncand_vec.assign(total_units, 0);
+        out_tid_ptr   = out_tid_vec.data();
+        out_post_ptr  = out_post_vec.data();
+        out_ncand_ptr = out_ncand_vec.data();
+    }
 
     std::vector<double> locus_mrna_vec(n_loci, 0.0);
     std::vector<double> locus_gdna_vec(n_loci, 0.0);
@@ -2058,7 +2129,9 @@ batch_locus_em_partitioned(
                 em_out, gdna_out,
                 psum_out, nass_out,
                 locus_mrna, locus_gdna,
-                N_T, N_COLS);
+                N_T, N_COLS,
+                out_tid_ptr, out_post_ptr, out_ncand_ptr,
+                locus_write_offsets[li]);
             auto t7 = hrclock::now();
 
             locus_mrna_data[li] = locus_mrna;
@@ -2219,7 +2292,31 @@ batch_locus_em_partitioned(
             mrna_copy, 1, shape, std::move(mrna_owner)),
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(
             gdna_copy, 1, shape, std::move(gdna_owner)),
-        stats_list
+        stats_list,
+        [&]() -> nb::object {
+            if (!emit_assignments || total_units <= 0) return nb::none();
+            size_t u_shape[1] = {static_cast<size_t>(total_units)};
+            auto* p = new int32_t[total_units];
+            std::memcpy(p, out_tid_vec.data(), total_units * sizeof(int32_t));
+            nb::capsule own(p, [](void* x) noexcept { delete[] static_cast<int32_t*>(x); });
+            return nb::cast(nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(p, 1, u_shape, std::move(own)));
+        }(),
+        [&]() -> nb::object {
+            if (!emit_assignments || total_units <= 0) return nb::none();
+            size_t u_shape[1] = {static_cast<size_t>(total_units)};
+            auto* p = new float[total_units];
+            std::memcpy(p, out_post_vec.data(), total_units * sizeof(float));
+            nb::capsule own(p, [](void* x) noexcept { delete[] static_cast<float*>(x); });
+            return nb::cast(nb::ndarray<nb::numpy, float, nb::ndim<1>>(p, 1, u_shape, std::move(own)));
+        }(),
+        [&]() -> nb::object {
+            if (!emit_assignments || total_units <= 0) return nb::none();
+            size_t u_shape[1] = {static_cast<size_t>(total_units)};
+            auto* p = new int16_t[total_units];
+            std::memcpy(p, out_ncand_vec.data(), total_units * sizeof(int16_t));
+            nb::capsule own(p, [](void* x) noexcept { delete[] static_cast<int16_t*>(x); });
+            return nb::cast(nb::ndarray<nb::numpy, int16_t, nb::ndim<1>>(p, 1, u_shape, std::move(own)));
+        }()
     );
 }
 // ================================================================
@@ -2494,6 +2591,10 @@ NB_MODULE(_em_impl, m) {
           &scatter_units_impl<uint8_t>,
           nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
           "Scatter per-unit uint8 array into per-locus arrays.");
+    m.def("scatter_units_i64",
+          &scatter_units_impl<int64_t>,
+          nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
+          "Scatter per-unit int64 array into per-locus arrays.");
 
     // ---- Partition-native batch EM ----
     m.def("batch_locus_em_partitioned", &batch_locus_em_partitioned,
@@ -2518,10 +2619,12 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
           nb::arg("emit_locus_stats") = false,
+          nb::arg("emit_assignments") = false,
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 12-tuples (one per locus) containing partition\n"
           "arrays, plus a list of transcript index arrays per locus.\n"
-          "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats).");
+          "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats,\n"
+          " out_winner_tid, out_winner_post, out_n_candidates).");
 
     m.def("connected_components", &connected_components_native,
           nb::arg("offsets"),

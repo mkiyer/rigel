@@ -36,6 +36,7 @@ from ._em_impl import scatter_candidates_i32
 from ._em_impl import scatter_candidates_u8
 from ._em_impl import scatter_units_f64
 from ._em_impl import scatter_units_i32
+from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
 # -- Interval overlap -------------------------------------------------------
@@ -63,6 +64,7 @@ __all__ = [
     "scatter_candidates_u8",
     "scatter_units_f64",
     "scatter_units_i32",
+    "scatter_units_i64",
     "scatter_units_u8",
     # Intervals
     "cgranges",

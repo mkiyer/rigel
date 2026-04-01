@@ -216,8 +216,9 @@ All simulation data, tool outputs, and indexes are consolidated in:
 └── runs/<condition>/
     ├── sim_oracle.bam                  # oracle BAM with true read origins
     ├── sim_R1.fq.gz, sim_R2.fq.gz     # simulated paired-end FASTQ
-    ├── rigel_star/                     # rigel output from STAR-aligned BAM
-    │   ├── annotated.bam               # name-sorted STAR-aligned BAM
+    ├── rigel_star/
+    │   └── annotated.bam               # name-sorted STAR-aligned BAM (input)
+    ├── rigel/<config_name>/            # rigel output per named config
     │   ├── quant.feather               # transcript-level quantification
     │   ├── gene_quant.feather          # gene-level quantification
     │   ├── nrna_quant.feather          # nRNA quantification
@@ -229,8 +230,7 @@ All simulation data, tool outputs, and indexes are consolidated in:
         └── quant.genes.sf.gz           # salmon gene-level quantification
 ```
 
-New rigel runs with different configurations go into new subdirectories:
-`runs/<condition>/rigel_<config_name>/`
+New rigel runs go into `runs/<condition>/rigel/<config_name>/`.
 
 ### Reference Data (original locations)
 
@@ -260,37 +260,63 @@ All references are under `/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/
 
 `transcript_id, gene_id, gene_name, ref, strand, mrna_abundance, nrna_abundance, total_rna, n_exons, spliced_length, genomic_span`
 
-### Running Rigel Quant on a Condition
+### Running Benchmarks
+
+The benchmarking system is in `scripts/benchmarking/` with three subcommands:
 
 ```bash
 conda activate rigel
-BENCH=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks
-COND=gdna_none_ss_1.00_nrna_none
 
-rigel quant \
-  --bam $BENCH/runs/$COND/rigel_star/annotated.bam \
-  --index $BENCH/rigel_index \
-  -o $BENCH/runs/$COND/rigel_<new_config_name>/
+# Check what's been run and what's pending
+python -m scripts.benchmarking status -c scripts/benchmarking/configs/default.yaml
+
+# Run rigel quant across conditions with named configs
+python -m scripts.benchmarking run -c scripts/benchmarking/configs/default.yaml
+
+# Run on specific conditions only
+python -m scripts.benchmarking run -c scripts/benchmarking/configs/default.yaml \
+  --conditions gdna_none_ss_1.00_nrna_none gdna_high_ss_0.90_nrna_none
+
+# Dry-run (print commands without executing)
+python -m scripts.benchmarking run -c scripts/benchmarking/configs/default.yaml --dry-run
+
+# Force re-run even if output exists
+python -m scripts.benchmarking run -c scripts/benchmarking/configs/default.yaml --force
 ```
 
 ### Benchmark Analysis
 
 ```bash
-conda activate rigel
-
-# Analyze all tool outputs vs truth (fast, no FASTQ parsing)
-python scripts/benchmark_analysis.py \
-  -b /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks \
+# Analyze all tool outputs vs truth
+python -m scripts.benchmarking analyze -c scripts/benchmarking/configs/default.yaml \
   -o results/benchmark_report
 
-# With exact per-fragment truth from FASTQ (slower, ~10 min/condition)
-python scripts/benchmark_analysis.py \
-  -b /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks \
-  -o results/benchmark_report \
-  --parse-fastq-truth
+# Analyze specific conditions only
+python -m scripts.benchmarking analyze -c scripts/benchmarking/configs/default.yaml \
+  -o results/benchmark_report --conditions gdna_none_ss_1.00_nrna_none
 ```
 
-Output: transcript_metrics.csv, gene_metrics.csv, pool_summary.csv,
-stratified_metrics.csv, per_transcript_detail.parquet, report.md
+### Benchmark Config Format
+
+YAML config at `scripts/benchmarking/configs/default.yaml` defines:
+- `benchmark_dir` — path to unified benchmark directory
+- `rigel_configs` — named configs mapping to `rigel quant` CLI params
+- `conditions` — optional condition filter (null = discover all)
+- `analysis` — analysis options (output_dir, log2_pseudocount, parse_fastq_truth)
+
+Output goes to `runs/<condition>/rigel/<config_name>/`.
+
+### Benchmarking Package Structure
+
+```
+scripts/benchmarking/
+├── __init__.py
+├── __main__.py        # CLI dispatcher (run, analyze, status)
+├── config.py          # BenchmarkConfig dataclass + YAML loader
+├── runner.py          # rigel quant CLI runner
+├── analysis.py        # metrics + report generation
+└── configs/
+    └── default.yaml   # default benchmark config
+```
 
 

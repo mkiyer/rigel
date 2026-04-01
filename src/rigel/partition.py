@@ -16,6 +16,7 @@ from .native import (
     scatter_candidates_u8,
     scatter_units_f64,
     scatter_units_i32,
+    scatter_units_i64,
     scatter_units_u8,
 )
 from .scored_fragments import LocusPartition, ScoredFragments
@@ -42,12 +43,6 @@ def partition_and_free(
     """
     n_loci = len(loci)
     locus_units = [locus.unit_indices for locus in loci]
-
-    # ---- Free dead-weight arrays (never used after construction) ----
-    em_data.frag_ids = None
-    em_data.frag_class = None
-    em_data.splice_type = None
-    gc.collect()
 
     # ---- Build per-locus CSR offsets ----
     offsets_list = build_partition_offsets(
@@ -85,11 +80,16 @@ def partition_and_free(
         ("locus_t_indices", scatter_units_i32),
         ("locus_count_cols", scatter_units_u8),
         ("is_spliced", scatter_units_u8),
+        ("frag_ids", scatter_units_i64),
+        ("frag_class", scatter_units_u8),
+        ("splice_type", scatter_units_u8),
     ]
     unit_results = {}
     for attr, scatter_fn in UNIT_ARRAYS:
         global_arr = getattr(em_data, attr)
         if global_arr.dtype == np.bool_:
+            global_arr = global_arr.view(np.uint8)
+        elif global_arr.dtype == np.int8:
             global_arr = global_arr.view(np.uint8)
         unit_results[attr] = scatter_fn(global_arr, locus_units, n_loci)
         setattr(em_data, attr, None)
@@ -115,6 +115,9 @@ def partition_and_free(
             genomic_footprints=unit_results["genomic_footprints"][li],
             locus_t_indices=unit_results["locus_t_indices"][li],
             locus_count_cols=unit_results["locus_count_cols"][li],
+            frag_ids=unit_results["frag_ids"][li],
+            frag_class=unit_results["frag_class"][li],
+            splice_type=unit_results["splice_type"][li],
         )
 
     return partitions
