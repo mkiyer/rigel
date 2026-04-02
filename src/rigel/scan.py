@@ -19,7 +19,12 @@ from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
 from .stats import PipelineStats
-from .annotate import POOL_CODE_MRNA, POOL_CODE_NRNA, POOL_CODE_CHIMERIC
+from .annotate import (
+    ZF_NRNA_RESOLVED,
+    ZF_SYNTH_RESOLVED,
+    ZF_TRANSCRIPT,
+    ZF_UNRESOLVED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +189,7 @@ class FragmentRouter:
                     frag_id=int(chim_fids[j]),
                     best_tid=-1,
                     best_gid=-1,
-                    pool=POOL_CODE_CHIMERIC,
+                    tx_flags=ZF_UNRESOLVED,
                     posterior=0.0,
                     frag_class=FRAG_CHIMERIC,
                     n_candidates=0,
@@ -193,16 +198,22 @@ class FragmentRouter:
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
-            is_syn = index.t_df["is_nrna"].values
+            is_nrna_arr = index.t_df["is_nrna"].values.astype(bool)
+            is_synth_arr = index.t_df["is_synthetic"].values.astype(bool)
             for j in range(len(det_tids)):
                 tid = int(det_tids[j])
                 gid = int(t_to_g[tid])
-                pool = POOL_CODE_NRNA if is_syn[tid] else POOL_CODE_MRNA
+                if is_synth_arr[tid]:
+                    flags = ZF_SYNTH_RESOLVED
+                elif is_nrna_arr[tid]:
+                    flags = ZF_NRNA_RESOLVED
+                else:
+                    flags = ZF_TRANSCRIPT
                 annotations.add(
                     frag_id=int(det_fids[j]),
                     best_tid=tid,
                     best_gid=gid,
-                    pool=pool,
+                    tx_flags=flags,
                     posterior=1.0,
                     frag_class=FRAG_UNAMBIG,
                     n_candidates=1,

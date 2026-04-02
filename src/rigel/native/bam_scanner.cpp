@@ -104,17 +104,6 @@ static const char* frag_class_label(int code) {
     }
 }
 
-static const char* pool_label(int code) {
-    switch (code) {
-        case POOL_CODE_MRNA:       return "mRNA";
-        case POOL_CODE_NRNA:       return "nRNA";
-        case POOL_CODE_GDNA:       return "gDNA";
-        case POOL_CODE_INTERGENIC: return "intergenic";
-        case POOL_CODE_CHIMERIC:   return "chimeric";
-        default:                   return "unknown";
-    }
-}
-
 static const char* splice_type_label(int code) {
     switch (code) {
         case SPLICE_UNSPLICED:       return "unspliced";
@@ -1512,7 +1501,7 @@ public:
         ci64_1d ann_frag_ids,
         ci32_1d ann_best_tid,
         ci32_1d ann_best_gid,
-        cu8_1d  ann_pool,
+        cu8_1d  ann_tx_flags,
         cf32_1d ann_posterior,
         ci8_1d  ann_frag_class,
         ci16_1d ann_n_candidates,
@@ -1521,7 +1510,8 @@ public:
         int64_t ann_size,
         // String ID lookup
         const std::vector<std::string>& t_ids,
-        const std::vector<std::string>& g_ids)
+        const std::vector<std::string>& g_ids,
+        const std::vector<std::string>& g_names)
     {
         // Build frag_id → row lookup
         std::unordered_map<int64_t, int64_t> frag_to_row;
@@ -1534,7 +1524,7 @@ public:
         // Raw data pointers
         const int32_t* tid_ptr  = ann_best_tid.data();
         const int32_t* gid_ptr  = ann_best_gid.data();
-        const uint8_t* pool_ptr = ann_pool.data();
+        const uint8_t* flags_ptr = ann_tx_flags.data();
         const float*   post_ptr = ann_posterior.data();
         const int8_t*  fc_ptr   = ann_frag_class.data();
         const int16_t* nc_ptr   = ann_n_candidates.data();
@@ -1610,9 +1600,9 @@ public:
                 // Pass 1 assigns frag_id per qname group before worker-side
                 // multimapper filtering, so we must still advance frag_id
                 // here to keep pass-2 lookup synchronized.
-                stamp_and_write_hit(raw_group, out, hdr, ".", ".",
+                stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
                                     -1, -1,
-                                    "intergenic", 0.0f,
+                                    0, 0.0f,
                                     "intergenic", 1, 0, "unknown", -1);
                 n_intergenic++;
                 n_records_written += static_cast<int64_t>(raw_group.size());
@@ -1668,7 +1658,7 @@ public:
                     int64_t row = ann_it->second;
                     int32_t best_tid_val = tid_ptr[row];
                     int32_t best_gid_val = gid_ptr[row];
-                    uint8_t pool_val     = pool_ptr[row];
+                    uint8_t flags_val    = flags_ptr[row];
                     float   post_val     = post_ptr[row];
                     int8_t  fc_val       = fc_ptr[row];
                     int16_t nc_val       = nc_ptr[row];
@@ -1680,6 +1670,9 @@ public:
                     const char* g_id_str = (best_gid_val >= 0 &&
                         best_gid_val < static_cast<int32_t>(g_ids.size()))
                         ? g_ids[best_gid_val].c_str() : ".";
+                    const char* g_name_str = (best_gid_val >= 0 &&
+                        best_gid_val < static_cast<int32_t>(g_names.size()))
+                        ? g_names[best_gid_val].c_str() : ".";
 
                     // Determine primary hit
                     bool is_primary = false;
@@ -1709,10 +1702,10 @@ public:
 
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
-                        t_id_str, g_id_str,
+                        t_id_str, g_id_str, g_name_str,
                         static_cast<int>(best_tid_val),
                         static_cast<int>(best_gid_val),
-                        pool_label(pool_val), post_val,
+                        static_cast<int>(flags_val), post_val,
                         frag_class_label(fc_val),
                         is_primary ? 1 : 0,
                         static_cast<int>(nc_val),
@@ -1724,9 +1717,9 @@ public:
                     // Intergenic / no annotation
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
-                        ".", ".",
+                        ".", ".", ".",
                         -1, -1,
-                        "intergenic", 0.0f,
+                        0, 0.0f,
                         "intergenic",
                         (hit_idx == 0) ? 1 : 0,
                         0, "unknown", -1);
@@ -1826,9 +1819,10 @@ private:
         const bam_hdr_t* hdr,
         const char* zt,    // transcript ID
         const char* zg,    // gene ID
+        const char* zr,    // gene name / symbol
         int zi,            // transcript index (-1 = unassigned)
         int zj,            // gene index (-1 = unassigned)
-        const char* zp,    // pool label
+        int zf,            // assignment flags bitfield
         float zw,          // posterior
         const char* zc,    // fragment class label
         int zh,            // primary hit flag
@@ -1841,10 +1835,11 @@ private:
                 static_cast<int>(strlen(zt) + 1), zt);
             bam_aux_update_str(r, "ZG",
                 static_cast<int>(strlen(zg) + 1), zg);
+            bam_aux_update_str(r, "ZR",
+                static_cast<int>(strlen(zr) + 1), zr);
             bam_aux_update_int(r, "ZI", zi);
             bam_aux_update_int(r, "ZJ", zj);
-            bam_aux_update_str(r, "ZP",
-                static_cast<int>(strlen(zp) + 1), zp);
+            bam_aux_update_int(r, "ZF", zf);
             bam_aux_update_float(r, "ZW", zw);
             bam_aux_update_str(r, "ZC",
                 static_cast<int>(strlen(zc) + 1), zc);
@@ -2002,7 +1997,7 @@ NB_MODULE(_bam_impl, m) {
              nb::arg("ann_frag_ids"),
              nb::arg("ann_best_tid"),
              nb::arg("ann_best_gid"),
-             nb::arg("ann_pool"),
+             nb::arg("ann_tx_flags"),
              nb::arg("ann_posterior"),
              nb::arg("ann_frag_class"),
              nb::arg("ann_n_candidates"),
@@ -2011,6 +2006,7 @@ NB_MODULE(_bam_impl, m) {
              nb::arg("ann_size"),
              nb::arg("t_ids"),
              nb::arg("g_ids"),
+             nb::arg("g_names"),
              "Stamp annotation tags and write BAM.\n\n"
              "Parameters\n"
              "----------\n"
@@ -2022,8 +2018,8 @@ NB_MODULE(_bam_impl, m) {
              "    Annotation arrays (sliced to ann_size).\n"
              "ann_size : int\n"
              "    Number of annotation entries.\n"
-             "t_ids, g_ids : list[str]\n"
-             "    Transcript / gene ID lookup arrays.\n\n"
+             "t_ids, g_ids, g_names : list[str]\n"
+             "    Transcript / gene ID / gene name lookup arrays.\n\n"
              "Returns\n"
              "-------\n"
              "dict\n"

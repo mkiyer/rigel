@@ -34,10 +34,11 @@ import numpy as np
 import pandas as pd
 
 from .annotate import (
-    POOL_CODE_GDNA,
-    POOL_CODE_INTERGENIC,
-    POOL_CODE_MRNA,
-    POOL_CODE_NRNA,
+    ZF_GDNA_RESOLVED,
+    ZF_NRNA_RESOLVED,
+    ZF_SYNTH_RESOLVED,
+    ZF_TRANSCRIPT,
+    ZF_UNRESOLVED,
 )
 from .buffer import FragmentBuffer, _FinalizedChunk
 from .config import (
@@ -443,7 +444,8 @@ def _populate_em_annotations(
         return
 
     t_to_g = index.t_to_g_arr
-    is_syn = index.t_df["is_nrna"].values
+    is_nrna_arr = index.t_df["is_nrna"].values.astype(bool)
+    is_synth_arr = index.t_df["is_synthetic"].values.astype(bool)
 
     # Concatenate per-locus metadata in same order as C++ output
     frag_ids = np.concatenate([p.frag_ids for p in batch_parts])
@@ -460,14 +462,17 @@ def _populate_em_annotations(
     best_gid = np.full(n, -1, dtype=np.int32)
     best_gid[valid_t] = t_to_g[best_tid[valid_t]]
 
-    # Pool code: classify each unit
-    pool = np.full(n, POOL_CODE_INTERGENIC, dtype=np.uint8)
-    pool[best_tid == -2] = POOL_CODE_GDNA
+    # ZF assignment flags bitfield
+    tx_flags = np.full(n, ZF_UNRESOLVED, dtype=np.uint8)
+    tx_flags[best_tid == -2] = ZF_GDNA_RESOLVED
     if valid_t.any():
-        is_nrna = is_syn[best_tid[valid_t]].astype(bool)
-        pool[valid_t] = np.where(
-            is_nrna, POOL_CODE_NRNA, POOL_CODE_MRNA
-        ).astype(np.uint8)
+        winner_tids = best_tid[valid_t]
+        nrna_mask = is_nrna_arr[winner_tids]
+        synth_mask = is_synth_arr[winner_tids]
+        flags = np.full(valid_t.sum(), ZF_TRANSCRIPT, dtype=np.uint8)
+        flags[nrna_mask & ~synth_mask] = ZF_NRNA_RESOLVED
+        flags[synth_mask] = ZF_SYNTH_RESOLVED
+        tx_flags[valid_t] = flags
 
     # Clean sentinel: -2 (gDNA) -> -1
     best_tid_clean = best_tid.copy()
@@ -477,7 +482,7 @@ def _populate_em_annotations(
         frag_ids=frag_ids,
         best_tids=best_tid_clean,
         best_gids=best_gid,
-        pools=pool,
+        tx_flags=tx_flags,
         posteriors=posteriors,
         frag_classes=frag_class.view(np.int8),
         n_candidates=n_cand,

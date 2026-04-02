@@ -12,7 +12,7 @@ assignment decision for each fragment:
 
 - ``best_tid`` — transcript index (-1 = intergenic / gDNA / unassigned)
 - ``best_gid`` — gene index (-1 = intergenic / unassigned)
-- ``pool``     — assignment pool (mRNA / nRNA / gDNA / intergenic / chimeric)
+- ``tx_flags`` — assignment flags bitfield (is_resolved, is_gdna, is_nrna, is_synthetic)
 - ``posterior``— posterior probability of the winning assignment
 - ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
 - ``n_candidates`` — number of competing EM candidates
@@ -38,15 +38,22 @@ BAM Tag Schema
    * - ZG
      - Z
      - Gene ID (``"."`` for intergenic)
+   * - ZR
+     - Z
+     - Gene name / symbol (``"."`` for intergenic)
    * - ZI
      - i
      - Transcript index into rigel reference (``-1`` if unassigned)
    * - ZJ
      - i
      - Gene index into rigel reference (``-1`` if unassigned)
-   * - ZP
-     - Z
-     - Pool: ``mRNA``, ``nRNA``, ``gDNA``, ``intergenic``, ``chimeric``
+   * - ZF
+     - i
+     - Assignment flags bitfield:
+       bit 0 = is_resolved (fragment scored and assigned by EM),
+       bit 1 = is_gdna (EM gDNA component won),
+       bit 2 = is_nrna (assigned transcript is single-exon),
+       bit 3 = is_synthetic (assigned transcript is rigel-generated nRNA span)
    * - ZW
      - f
      - Posterior probability of assignment
@@ -63,7 +70,10 @@ BAM Tag Schema
    * - ZS
      - Z
      - Splice type (``spliced_annot``, ``spliced_unannot``,
-       ``unspliced``, ``ambiguous``)
+       ``unspliced``, ``unknown``)
+   * - ZL
+     - i
+     - Locus ID (``-1`` if no locus)
 """
 
 import logging
@@ -74,19 +84,20 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-# Pool names for the ZP tag.
-POOL_MRNA = "mRNA"
-POOL_NRNA = "nRNA"
-POOL_GDNA = "gDNA"
-POOL_INTERGENIC = "intergenic"
-POOL_CHIMERIC = "chimeric"
+# ---------------------------------------------------------------------------
+# ZF flag bits (written to BAM as ZF:i tag)
+# ---------------------------------------------------------------------------
+ZF_RESOLVED: int = 0x1   # bit 0: fragment was scored and assigned by EM
+ZF_GDNA: int = 0x2       # bit 1: EM gDNA component won
+ZF_NRNA: int = 0x4       # bit 2: assigned transcript is single-exon
+ZF_SYNTHETIC: int = 0x8  # bit 3: assigned transcript is rigel-generated nRNA span
 
-# Integer pool codes used in AnnotationTable and EM output.
-POOL_CODE_MRNA: int = 0
-POOL_CODE_NRNA: int = 1
-POOL_CODE_GDNA: int = 2
-POOL_CODE_INTERGENIC: int = 3
-POOL_CODE_CHIMERIC: int = 4
+# Pre-computed valid ZF values for common assignment outcomes.
+ZF_UNRESOLVED: int = 0                                      # 0  — not modeled
+ZF_TRANSCRIPT: int = ZF_RESOLVED                             # 1  — multi-exon transcript
+ZF_GDNA_RESOLVED: int = ZF_RESOLVED | ZF_GDNA               # 3  — gDNA component
+ZF_NRNA_RESOLVED: int = ZF_RESOLVED | ZF_NRNA               # 5  — single-exon annotated
+ZF_SYNTH_RESOLVED: int = ZF_RESOLVED | ZF_NRNA | ZF_SYNTHETIC  # 13 — synthetic nRNA span
 
 # Fragment-class labels for the ZC tag.
 _FRAG_CLASS_LABELS = {
@@ -116,8 +127,8 @@ class AnnotationTable:
         int32 — assigned transcript index (-1 = none).
     best_gid : np.ndarray
         int32 — assigned gene index (-1 = none).
-    pool : np.ndarray
-        uint8 — pool code (0=mRNA, 1=nRNA, 2=gDNA, 3=intergenic, 4=chimeric).
+    tx_flags : np.ndarray
+        uint8 — ZF assignment flags bitfield (see ZF_* constants).
     posterior : np.ndarray
         float32 — posterior probability of assignment.
     frag_class : np.ndarray
@@ -136,7 +147,7 @@ class AnnotationTable:
     frag_ids: np.ndarray = field(repr=False)
     best_tid: np.ndarray = field(repr=False)
     best_gid: np.ndarray = field(repr=False)
-    pool: np.ndarray = field(repr=False)
+    tx_flags: np.ndarray = field(repr=False)
     posterior: np.ndarray = field(repr=False)
     frag_class: np.ndarray = field(repr=False)
     n_candidates: np.ndarray = field(repr=False)
@@ -153,7 +164,7 @@ class AnnotationTable:
             frag_ids=np.full(capacity, -1, dtype=np.int64),
             best_tid=np.full(capacity, -1, dtype=np.int32),
             best_gid=np.full(capacity, -1, dtype=np.int32),
-            pool=np.zeros(capacity, dtype=np.uint8),
+            tx_flags=np.zeros(capacity, dtype=np.uint8),
             posterior=np.zeros(capacity, dtype=np.float32),
             frag_class=np.full(capacity, -1, dtype=np.int8),
             n_candidates=np.zeros(capacity, dtype=np.int16),
@@ -166,7 +177,7 @@ class AnnotationTable:
         frag_id: int,
         best_tid: int = -1,
         best_gid: int = -1,
-        pool: int = POOL_CODE_INTERGENIC,
+        tx_flags: int = ZF_UNRESOLVED,
         posterior: float = 0.0,
         frag_class: int = -1,
         n_candidates: int = 0,
@@ -179,7 +190,7 @@ class AnnotationTable:
         self.frag_ids[idx] = frag_id
         self.best_tid[idx] = best_tid
         self.best_gid[idx] = best_gid
-        self.pool[idx] = pool
+        self.tx_flags[idx] = tx_flags
         self.posterior[idx] = posterior
         self.frag_class[idx] = frag_class
         self.n_candidates[idx] = n_candidates
@@ -192,7 +203,7 @@ class AnnotationTable:
         frag_ids: np.ndarray,
         best_tids: np.ndarray,
         best_gids: np.ndarray,
-        pools: np.ndarray,
+        tx_flags: np.ndarray,
         posteriors: np.ndarray,
         frag_classes: np.ndarray,
         n_candidates: np.ndarray,
@@ -213,7 +224,7 @@ class AnnotationTable:
         self.frag_ids[start:end] = frag_ids
         self.best_tid[start:end] = best_tids
         self.best_gid[start:end] = best_gids
-        self.pool[start:end] = pools
+        self.tx_flags[start:end] = tx_flags
         self.posterior[start:end] = posteriors
         self.frag_class[start:end] = frag_classes
         self.n_candidates[start:end] = n_candidates
@@ -230,7 +241,7 @@ class AnnotationTable:
         if new_cap <= self.capacity:
             return
         for attr in (
-            "frag_ids", "best_tid", "best_gid", "pool",
+            "frag_ids", "best_tid", "best_gid", "tx_flags",
             "posterior", "frag_class", "n_candidates", "splice_type",
             "locus_id",
         ):
@@ -256,7 +267,7 @@ class AnnotationTable:
         return {
             "best_tid": int(self.best_tid[row]),
             "best_gid": int(self.best_gid[row]),
-            "pool": int(self.pool[row]),
+            "tx_flags": int(self.tx_flags[row]),
             "posterior": float(self.posterior[row]),
             "frag_class": int(self.frag_class[row]),
             "n_candidates": int(self.n_candidates[row]),
@@ -266,17 +277,6 @@ class AnnotationTable:
     @property
     def size(self) -> int:
         return self._size
-
-
-# Pool code mapping: string label -> integer code.
-POOL_CODE = {
-    POOL_MRNA: POOL_CODE_MRNA,
-    POOL_NRNA: POOL_CODE_NRNA,
-    POOL_GDNA: POOL_CODE_GDNA,
-    POOL_INTERGENIC: POOL_CODE_INTERGENIC,
-    POOL_CHIMERIC: POOL_CODE_CHIMERIC,
-}
-POOL_LABEL = {v: k for k, v in POOL_CODE.items()}
 
 
 def _splice_type_label(code: int) -> str:
@@ -364,6 +364,7 @@ def write_annotated_bam(
 
     t_ids = list(index.t_df["t_id"].values)
     g_ids = list(index.g_df["g_id"].values)
+    g_names = list(index.g_df["g_name"].values)
 
     summary = writer.write(
         bam_path,
@@ -371,7 +372,7 @@ def write_annotated_bam(
         annotations.frag_ids[:n],
         annotations.best_tid[:n],
         annotations.best_gid[:n],
-        annotations.pool[:n],
+        annotations.tx_flags[:n],
         annotations.posterior[:n],
         annotations.frag_class[:n],
         annotations.n_candidates[:n],
@@ -380,6 +381,7 @@ def write_annotated_bam(
         n,
         t_ids,
         g_ids,
+        g_names,
     )
 
     logger.info(

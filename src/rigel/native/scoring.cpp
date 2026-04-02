@@ -38,11 +38,10 @@ using rigel::FRAG_AMBIG_SAME_STRAND;
 using rigel::FRAG_AMBIG_OPP_STRAND;
 using rigel::FRAG_MULTIMAPPER;
 using rigel::FRAG_CHIMERIC;
-using rigel::POOL_CODE_MRNA;
-using rigel::POOL_CODE_NRNA;
-using rigel::POOL_CODE_GDNA;
-using rigel::POOL_CODE_INTERGENIC;
-using rigel::POOL_CODE_CHIMERIC;
+using rigel::ZF_RESOLVED;
+using rigel::ZF_GDNA;
+using rigel::ZF_NRNA;
+using rigel::ZF_SYNTHETIC;
 
 // Maximum candidates handled via stack-allocated buffer before falling
 // back to heap allocation.  Avoids malloc in the common case where a
@@ -379,7 +378,7 @@ private:
         std::vector<int8_t>*   v_is_spliced;
         std::vector<double>*   v_gdna_ll;
         std::vector<int32_t>*  v_gfp;
-        std::vector<int32_t>*  v_fid;
+        std::vector<int64_t>*  v_fid;
         std::vector<int8_t>*   v_fclass;
         std::vector<uint8_t>*  v_stype;
         // Det-unambig (growing)
@@ -636,8 +635,7 @@ private:
             st.v_locus_t->push_back(best_t);
             st.v_locus_ct->push_back(
                 static_cast<uint8_t>(best_ct));
-            st.v_fid->push_back(
-                static_cast<int32_t>(st.mm_fid));
+            st.v_fid->push_back(st.mm_fid);
             st.v_fclass->push_back(
                 static_cast<int8_t>(FRAG_MULTIMAPPER));
 
@@ -896,8 +894,7 @@ private:
                 st.v_locus_t->push_back(best_t);
                 st.v_locus_ct->push_back(
                     static_cast<uint8_t>(best_ct));
-                st.v_fid->push_back(
-                    static_cast<int32_t>(f_id[i]));
+                st.v_fid->push_back(f_id[i]);
                 st.v_fclass->push_back(
                     static_cast<int8_t>(fclass));
                 st.v_stype->push_back(
@@ -963,7 +960,7 @@ class StreamingScorer {
     std::vector<int8_t>*   v_isp_;
     std::vector<double>*   v_gll_;
     std::vector<int32_t>*  v_gfp_;
-    std::vector<int32_t>*  v_fid_;
+    std::vector<int64_t>*  v_fid_;
     std::vector<int8_t>*   v_fc_;
     std::vector<uint8_t>*  v_st_;
     std::vector<int32_t>*  v_dti_;
@@ -1007,7 +1004,7 @@ public:
         v_isp_ = new std::vector<int8_t>();
         v_gll_ = new std::vector<double>();
         v_gfp_ = new std::vector<int32_t>();
-        v_fid_ = new std::vector<int32_t>();
+        v_fid_ = new std::vector<int64_t>();
         v_fc_  = new std::vector<int8_t>();
         v_st_  = new std::vector<uint8_t>();
         v_dti_ = new std::vector<int32_t>();
@@ -1184,7 +1181,7 @@ public:
             mk_i8(v_isp_),
             mk_f64(v_gll_),
             mk_i32(v_gfp_),
-            mk_i32(v_fid_),
+            mk_i64(v_fid_),
             mk_i8(v_fc_),
             mk_u8(v_st_),
             mk_i32(v_dti_),
@@ -1288,12 +1285,11 @@ NB_MODULE(_scoring_impl, m) {
     m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
     m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
 
-    // Pool code constants (mirrors rigel.annotate)
-    m.attr("POOL_CODE_MRNA")       = rigel::POOL_CODE_MRNA;
-    m.attr("POOL_CODE_NRNA")       = rigel::POOL_CODE_NRNA;
-    m.attr("POOL_CODE_GDNA")       = rigel::POOL_CODE_GDNA;
-    m.attr("POOL_CODE_INTERGENIC") = rigel::POOL_CODE_INTERGENIC;
-    m.attr("POOL_CODE_CHIMERIC")   = rigel::POOL_CODE_CHIMERIC;
+    // ZF assignment flags (mirrors rigel.annotate)
+    m.attr("ZF_RESOLVED")  = rigel::ZF_RESOLVED;
+    m.attr("ZF_GDNA")      = rigel::ZF_GDNA;
+    m.attr("ZF_NRNA")      = rigel::ZF_NRNA;
+    m.attr("ZF_SYNTHETIC") = rigel::ZF_SYNTHETIC;
 
     // Internal tuning constant
     m.attr("SCORED_STACK_CAPACITY") = SCORED_STACK_CAPACITY;

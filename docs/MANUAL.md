@@ -340,15 +340,49 @@ Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 |-----|------|-------------|
 | `ZT` | string | Assigned transcript ID, or `.` |
 | `ZG` | string | Assigned gene ID, or `.` |
+| `ZR` | string | Assigned gene name / symbol, or `.` |
 | `ZI` | int | Transcript index into rigel reference (`-1` if unassigned) |
 | `ZJ` | int | Gene index into rigel reference (`-1` if unassigned) |
-| `ZP` | string | Assignment pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, or `chimeric` |
+| `ZF` | int | Assignment flags bitfield (see below) |
 | `ZW` | float | Posterior probability of the assignment |
 | `ZC` | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
-| `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise |
+| `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise. Note: this reflects rigel's EM assignment, which may differ from the aligner's primary/secondary FLAG. |
 | `ZN` | int | Number of competing candidate components |
-| `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `ambiguous` |
+| `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `unknown` |
 | `ZL` | int | Locus ID (`-1` if no locus) |
+
+#### ZF assignment flags
+
+The `ZF` tag is an integer bitfield encoding both the EM assignment result
+and properties of the assigned transcript:
+
+| Bit | Mask | Flag | Meaning |
+|-----|------|------|---------|
+| 0 | 0x1 | `is_resolved` | Fragment was scored and assigned by the EM |
+| 1 | 0x2 | `is_gdna` | Assigned to the gDNA EM component |
+| 2 | 0x4 | `is_nrna` | Assigned transcript is single-exon (nRNA candidate) |
+| 3 | 0x8 | `is_synthetic` | Assigned transcript is a rigel-generated nRNA span |
+
+Valid ZF values:
+
+| ZF | Meaning |
+|----|---------|
+| 0 | Not resolved (intergenic, chimeric, or filtered) |
+| 1 | Transcript assigned (multi-exon, annotated) |
+| 3 | gDNA component assigned |
+| 5 | Transcript assigned (single-exon nRNA, annotated) |
+| 13 | Transcript assigned (single-exon nRNA, synthetic) |
+
+Pysam usage:
+
+```python
+zf = read.get_tag("ZF")
+is_resolved  = (zf & 0x1) != 0
+is_gdna      = (zf & 0x2) != 0
+is_nrna      = (zf & 0x4) != 0
+is_synthetic = (zf & 0x8) != 0
+is_transcript = is_resolved and not is_gdna
+```
 
 ---
 
@@ -545,9 +579,9 @@ rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --annotated-bam results/annotated.bam
 
-# Count gDNA-assigned fragments
+# Count gDNA-assigned fragments (ZF=3)
 samtools view -F 256 results/annotated.bam \
-    | awk '{ for(i=12;i<=NF;i++) if($i~/^ZP:Z:gDNA/) count++ } END { print count }'
+    | awk '{ for(i=12;i<=NF;i++) if($i=="ZF:i:3") count++ } END { print count }'
 ```
 
 ### Exclude multimappers

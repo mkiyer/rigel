@@ -1,13 +1,5 @@
 # TODO
 
-## BAM annotation
-
-"pool" forces an either-or when both can be true
-
-bit flags instead?
-is_gdna?
-is_nrna?
-is_mrna?
 
 ## Nascent RNA count set to zero? 
 
@@ -262,7 +254,6 @@ Eventually the production system will be Linux
 
 
 
-
 ## Mappability
 
 ### Genomic footprints
@@ -281,10 +272,6 @@ Solutions:
 - This will require mapping billions of reads. For every read length, we must map ~4 billion reads.
 
 
-## Output 
-
-- revised outputs (2026-03-22)
-- need to review the output files carefully and see if changes are needed
 
 ## Post-EM Pruning
 

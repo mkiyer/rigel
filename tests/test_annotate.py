@@ -14,13 +14,15 @@ import pytest
 
 from rigel.annotate import (
     AnnotationTable,
-    POOL_CODE,
-    POOL_LABEL,
-    POOL_MRNA,
-    POOL_NRNA,
-    POOL_GDNA,
-    POOL_INTERGENIC,
-    POOL_CHIMERIC,
+    ZF_GDNA,
+    ZF_GDNA_RESOLVED,
+    ZF_NRNA,
+    ZF_NRNA_RESOLVED,
+    ZF_RESOLVED,
+    ZF_SYNTH_RESOLVED,
+    ZF_SYNTHETIC,
+    ZF_TRANSCRIPT,
+    ZF_UNRESOLVED,
     _FRAG_CLASS_LABELS,
     _splice_type_label,
 )
@@ -45,7 +47,7 @@ class TestAnnotationTable:
             frag_id=42,
             best_tid=5,
             best_gid=2,
-            pool=POOL_CODE[POOL_MRNA],
+            tx_flags=ZF_TRANSCRIPT,
             posterior=0.95,
             frag_class=0,
             n_candidates=3,
@@ -56,7 +58,7 @@ class TestAnnotationTable:
         assert ann is not None
         assert ann["best_tid"] == 5
         assert ann["best_gid"] == 2
-        assert ann["pool"] == POOL_CODE[POOL_MRNA]
+        assert ann["tx_flags"] == ZF_TRANSCRIPT
         assert abs(ann["posterior"] - 0.95) < 0.01
         assert ann["frag_class"] == 0
         assert ann["n_candidates"] == 3
@@ -69,7 +71,7 @@ class TestAnnotationTable:
     def test_grow(self):
         tbl = AnnotationTable.create(2)
         for i in range(10):
-            tbl.add(frag_id=i, best_tid=i, best_gid=0, pool=0,
+            tbl.add(frag_id=i, best_tid=i, best_gid=0, tx_flags=ZF_TRANSCRIPT,
                     posterior=1.0, frag_class=0, n_candidates=1)
         assert tbl.size == 10
         assert tbl.capacity >= 10
@@ -78,10 +80,16 @@ class TestAnnotationTable:
             assert ann is not None
             assert ann["best_tid"] == i
 
-    def test_pool_codes_roundtrip(self):
-        """All pool labels have codes and vice versa."""
-        for label, code in POOL_CODE.items():
-            assert POOL_LABEL[code] == label
+    def test_zf_flags_valid_values(self):
+        """Valid ZF values follow the implication chain."""
+        assert ZF_UNRESOLVED == 0
+        assert ZF_TRANSCRIPT == ZF_RESOLVED  # 1
+        assert ZF_GDNA_RESOLVED == (ZF_RESOLVED | ZF_GDNA)  # 3
+        assert ZF_NRNA_RESOLVED == (ZF_RESOLVED | ZF_NRNA)  # 5
+        assert ZF_SYNTH_RESOLVED == (ZF_RESOLVED | ZF_NRNA | ZF_SYNTHETIC)  # 13
+        # All resolved values are odd (bit 0 set)
+        for v in (ZF_TRANSCRIPT, ZF_GDNA_RESOLVED, ZF_NRNA_RESOLVED, ZF_SYNTH_RESOLVED):
+            assert v & ZF_RESOLVED, f"ZF={v} should have is_resolved set"
 
     def test_frag_class_labels(self):
         """Known fragment class codes have labels."""
@@ -171,7 +179,7 @@ class TestAnnotatedBamIntegration:
         assert len(records) > 0, "Annotated BAM is empty"
 
         # Every record should have the expected tags
-        expected_tags = {"ZT", "ZG", "ZP", "ZW", "ZC", "ZH", "ZN", "ZS"}
+        expected_tags = {"ZT", "ZG", "ZR", "ZF", "ZW", "ZC", "ZH", "ZN", "ZS"}
         for rec in records:
             tags_present = {t[0] for t in rec.get_tags()}
             missing = expected_tags - tags_present
@@ -183,20 +191,20 @@ class TestAnnotatedBamIntegration:
         rec = records[0]
         assert isinstance(rec.get_tag("ZT"), str)
         assert isinstance(rec.get_tag("ZG"), str)
-        assert isinstance(rec.get_tag("ZP"), str)
+        assert isinstance(rec.get_tag("ZR"), str)
+        assert isinstance(rec.get_tag("ZF"), int)
         assert isinstance(rec.get_tag("ZW"), float)
         assert isinstance(rec.get_tag("ZC"), str)
         assert isinstance(rec.get_tag("ZH"), int)
         assert isinstance(rec.get_tag("ZN"), int)
         assert isinstance(rec.get_tag("ZS"), str)
 
-        # Pool values should be valid
-        valid_pools = {POOL_MRNA, POOL_NRNA, POOL_GDNA,
-                       POOL_INTERGENIC, POOL_CHIMERIC}
+        # ZF values should be valid (0, 1, 3, 5, or 13)
+        valid_zf = {ZF_UNRESOLVED, ZF_TRANSCRIPT, ZF_GDNA_RESOLVED,
+                     ZF_NRNA_RESOLVED, ZF_SYNTH_RESOLVED}
         for rec in records:
-            assert rec.get_tag("ZP") in valid_pools, (
-                f"Invalid pool: {rec.get_tag('ZP')}"
-            )
+            zf = rec.get_tag("ZF")
+            assert zf in valid_zf, f"Invalid ZF: {zf}"
 
         # ZH should be 0 or 1
         for rec in records:
@@ -207,9 +215,11 @@ class TestAnnotatedBamIntegration:
             w = rec.get_tag("ZW")
             assert 0.0 <= w <= 1.0 + 1e-6, f"ZW out of range: {w}"
 
-        # At least some records should have mRNA assignment
-        mrna_records = [r for r in records if r.get_tag("ZP") == POOL_MRNA]
-        assert len(mrna_records) > 0, "No mRNA assignments found"
+        # At least some records should have transcript assignment (ZF & 1 set)
+        transcript_records = [
+            r for r in records if (r.get_tag("ZF") & ZF_RESOLVED)
+        ]
+        assert len(transcript_records) > 0, "No resolved assignments found"
 
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
         """Pipeline counts are identical with and without annotation."""
