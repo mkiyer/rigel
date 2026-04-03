@@ -95,6 +95,10 @@ class BenchmarkConfig:
     seed: int = 42
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
+    # External tool indexes (optional)
+    salmon_index: str | None = None
+    kallisto_index: str | None = None
+
     @property
     def runs_dir(self) -> Path:
         return self.benchmark_dir / "runs"
@@ -175,6 +179,10 @@ def load_config(path: str | Path) -> BenchmarkConfig:
         output_dir=analysis_raw.get("output_dir", "results/benchmark_report"),
     )
 
+    # External tool indexes
+    salmon_index = raw.get("salmon_index")
+    kallisto_index = raw.get("kallisto_index")
+
     return BenchmarkConfig(
         benchmark_dir=benchmark_dir,
         rigel_index=rigel_index,
@@ -184,4 +192,6 @@ def load_config(path: str | Path) -> BenchmarkConfig:
         threads=threads,
         seed=seed,
         analysis=analysis,
+        salmon_index=salmon_index,
+        kallisto_index=kallisto_index,
     )

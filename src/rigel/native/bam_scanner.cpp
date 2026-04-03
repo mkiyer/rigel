@@ -1573,6 +1573,7 @@ public:
         int64_t n_intergenic = 0;
         int64_t n_chimeric = 0;
         int64_t n_records_written = 0;
+        int64_t n_filtered_passthrough = 0;
 
         // Scratch buffer for resolve calls (single-threaded, reused)
         ResolverScratch scratch(ctx_->n_transcripts_);
@@ -1737,10 +1738,22 @@ public:
         while (sam_read1(fp, hdr, b) >= 0) {
             uint16_t flag = b->core.flag;
 
-            if (flag & BAM_FQCFAIL) continue;
-            if (flag & BAM_FUNMAP) continue;
-            if ((flag & BAM_FDUP) && skip_duplicates_) continue;
-            if (!(flag & BAM_FPAIRED)) continue;
+            // Filtered reads: write through as-is (no annotation tags)
+            // to preserve every record from the original BAM.  These
+            // records are also skipped by Pass 1, so they never receive
+            // a frag_id and must NOT advance the frag_id counter.
+            bool filtered = (flag & BAM_FQCFAIL)
+                         || (flag & BAM_FUNMAP)
+                         || ((flag & BAM_FDUP) && skip_duplicates_)
+                         || !(flag & BAM_FPAIRED);
+            if (filtered) {
+                if (sam_write1(out, hdr, b) < 0)
+                    throw std::runtime_error(
+                        "Failed to write filtered BAM record");
+                n_filtered_passthrough++;
+                n_records_written++;
+                continue;
+            }
 
             const char* qname = bam_get_qname(b);
 
@@ -1808,6 +1821,7 @@ public:
         summary["n_intergenic"] = n_intergenic;
         summary["n_chimeric"] = n_chimeric;
         summary["n_records_written"] = n_records_written;
+        summary["n_filtered_passthrough"] = n_filtered_passthrough;
         return summary;
     }
 

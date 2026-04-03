@@ -244,22 +244,17 @@ transcript_mask = resolved_mask & ~gdna_mask
 ## Internal Representation (Python)
 
 ```python
-# ZF flag bits (written to BAM as ZF:i tag)
-ZF_RESOLVED: int  = 0x1    # bit 0
-ZF_GDNA: int      = 0x2    # bit 1
-ZF_NRNA: int      = 0x4    # bit 2
-ZF_SYNTHETIC: int  = 0x8   # bit 3
+# Assignment flag bits (written to BAM as ZF:i tag)
+AF_RESOLVED: int  = 0x1    # bit 0
+AF_GDNA: int      = 0x2    # bit 1
+AF_NRNA: int      = 0x4    # bit 2
+AF_SYNTHETIC: int  = 0x8   # bit 3
 
-# Pre-computed valid ZF values for convenience
-ZF_TRANSCRIPT: int     = ZF_RESOLVED                          # 1
-ZF_GDNA_RESOLVED: int  = ZF_RESOLVED | ZF_GDNA               # 3
-ZF_NRNA_RESOLVED: int  = ZF_RESOLVED | ZF_NRNA               # 5
-ZF_SYNTH_RESOLVED: int = ZF_RESOLVED | ZF_NRNA | ZF_SYNTHETIC  # 13
-
-# Internal pool codes (drive ZF computation, not written to BAM)
-POOL_CODE_TRANSCRIPT: int = 0
-POOL_CODE_GDNA: int = 1
-POOL_CODE_NONE: int = 2   # intergenic, chimeric, unassigned
+# Pre-computed valid assignment flag values for convenience
+AF_TRANSCRIPT: int     = AF_RESOLVED                          # 1
+AF_GDNA_RESOLVED: int  = AF_RESOLVED | AF_GDNA               # 3
+AF_NRNA_RESOLVED: int  = AF_RESOLVED | AF_NRNA               # 5
+AF_SYNTH_RESOLVED: int = AF_RESOLVED | AF_NRNA | AF_SYNTHETIC  # 13
 ```
 
 The `AnnotationTable` adds a `tx_flags: np.ndarray` (uint8) column. The C++
@@ -274,9 +269,9 @@ The `AnnotationTable` adds a `tx_flags: np.ndarray` (uint8) column. The C++
 
 | File | Change |
 |------|--------|
-| `annotate.py` | Remove 5 `POOL_*` string constants. Add `ZF_*` bit constants + `POOL_CODE_*` internal codes. Add `tx_flags` to `AnnotationTable`. Remove ZP from docstring, add ZF. |
+| `annotate.py` | Remove 5 `POOL_*` string constants. Add `AF_*` bit constants. Add `tx_flags` to `AnnotationTable`. Remove ZP from docstring, add ZF. |
 | `bam_scanner.cpp` | Remove `pool_label()`. Remove ZP string tag from `stamp_and_write_hit()`. Add `tx_flags` param → write `ZF:i` tag. |
-| `pipeline.py` | `_populate_em_annotations()`: transcripts → `ZF_TRANSCRIPT` or `ZF_NRNA_RESOLVED` or `ZF_SYNTH_RESOLVED`. gDNA → `ZF_GDNA_RESOLVED`. Unmodeled → `0`. |
+| `pipeline.py` | `_populate_em_annotations()`: transcripts → `AF_TRANSCRIPT` or `AF_NRNA_RESOLVED` or `AF_SYNTH_RESOLVED`. gDNA → `AF_GDNA_RESOLVED`. Unmodeled → `0`. |
 | `scan.py` | Det-unambig: compute `tx_flags` from `is_nrna`/`is_synthetic`. Chimeric: `tx_flags=0`. |
 | `test_annotate.py` | Remove ZP assertions, add ZF assertions. |
 | `test_golden_output.py` | Regenerate golden files (`--update-golden`). |

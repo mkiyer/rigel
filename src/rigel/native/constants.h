@@ -59,11 +59,11 @@ static constexpr int32_t FRAG_AMBIG_OPP_STRAND  = 2;
 static constexpr int32_t FRAG_MULTIMAPPER       = 3;
 static constexpr int32_t FRAG_CHIMERIC          = 4;
 
-// ZF assignment flags bitfield (rigel.annotate — BAM ZF:i tag)
-static constexpr int32_t ZF_RESOLVED  = 0x1;   // bit 0: scored and assigned
-static constexpr int32_t ZF_GDNA      = 0x2;   // bit 1: gDNA component won
-static constexpr int32_t ZF_NRNA      = 0x4;   // bit 2: single-exon transcript
-static constexpr int32_t ZF_SYNTHETIC = 0x8;   // bit 3: rigel-generated nRNA span
+// Assignment flags bitfield (written to BAM as ZF:i tag)
+static constexpr int32_t AF_RESOLVED  = 0x1;   // bit 0: scored and assigned
+static constexpr int32_t AF_GDNA      = 0x2;   // bit 1: gDNA component won
+static constexpr int32_t AF_NRNA      = 0x4;   // bit 2: single-exon transcript
+static constexpr int32_t AF_SYNTHETIC = 0x8;   // bit 3: rigel-generated nRNA span
 
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)

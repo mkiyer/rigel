@@ -15,15 +15,15 @@ from rigel.config import EMConfig, PipelineConfig, BamScanConfig
 from rigel.pipeline import run_pipeline
 from rigel.sim import SimConfig, Scenario
 from rigel.annotate import (
-    ZF_RESOLVED,
-    ZF_GDNA,
-    ZF_NRNA,
-    ZF_SYNTHETIC,
-    ZF_TRANSCRIPT,
-    ZF_GDNA_RESOLVED,
-    ZF_NRNA_RESOLVED,
-    ZF_SYNTH_RESOLVED,
-    ZF_UNRESOLVED,
+    AF_RESOLVED,
+    AF_GDNA,
+    AF_NRNA,
+    AF_SYNTHETIC,
+    AF_TRANSCRIPT,
+    AF_GDNA_RESOLVED,
+    AF_NRNA_RESOLVED,
+    AF_SYNTH_RESOLVED,
+    AF_UNRESOLVED,
 )
 
 
@@ -88,37 +88,37 @@ def main():
         records = list(bam.fetch(until_eof=True))
         bam.close()
 
-        zf_labels = {
-            ZF_UNRESOLVED: "unresolved",
-            ZF_TRANSCRIPT: "transcript",
-            ZF_GDNA_RESOLVED: "gDNA",
-            ZF_NRNA_RESOLVED: "nRNA",
-            ZF_SYNTH_RESOLVED: "synthetic_nRNA",
+        flag_labels = {
+            AF_UNRESOLVED: "unresolved",
+            AF_TRANSCRIPT: "transcript",
+            AF_GDNA_RESOLVED: "gDNA",
+            AF_NRNA_RESOLVED: "nRNA",
+            AF_SYNTH_RESOLVED: "synthetic_nRNA",
         }
 
-        zf_counts = {}
+        flag_counts = {}
         fclass_counts = {}
         for rec in records:
-            zf = rec.get_tag("ZF")
-            label = zf_labels.get(zf, f"unknown({zf})")
-            zf_counts[label] = zf_counts.get(label, 0) + 1
+            flags = rec.get_tag("ZF")
+            label = flag_labels.get(flags, f"unknown({flags})")
+            flag_counts[label] = flag_counts.get(label, 0) + 1
             zc = rec.get_tag("ZC")
             fclass_counts[zc] = fclass_counts.get(zc, 0) + 1
 
         print(f"  Total records: {len(records)}")
-        print(f"  Assignment flags distribution (ZF):")
-        for k, v in sorted(zf_counts.items(), key=lambda x: -x[1]):
+        print(f"  Assignment flags distribution:")
+        for k, v in sorted(flag_counts.items(), key=lambda x: -x[1]):
             print(f"    {k}: {v} ({v/len(records)*100:.1f}%)")
-        print(f"  Fragment class distribution (ZC):")
+        print(f"  Fragment class distribution:")
         for k, v in sorted(fclass_counts.items(), key=lambda x: -x[1]):
             print(f"    {k}: {v} ({v/len(records)*100:.1f}%)")
 
-        # Count unique qnames per ZF category
+        # Count unique qnames per assignment flag category
         qname_flags = {}
         for rec in records:
             qn = rec.query_name
-            zf = rec.get_tag("ZF")
-            label = zf_labels.get(zf, f"unknown({zf})")
+            flags = rec.get_tag("ZF")
+            label = flag_labels.get(flags, f"unknown({flags})")
             if qn not in qname_flags:
                 qname_flags[qn] = set()
             qname_flags[qn].add(label)
@@ -128,7 +128,7 @@ def main():
             for lbl in labels:
                 flag_frag_counts[lbl] = flag_frag_counts.get(lbl, 0) + 1
 
-        print(f"\n  Fragments (unique qnames) per ZF category:")
+        print(f"\n  Fragments (unique qnames) per assignment flag category:")
         total_frags = len(qname_flags)
         for k, v in sorted(flag_frag_counts.items(), key=lambda x: -x[1]):
             print(f"    {k}: {v} ({v/total_frags*100:.1f}%)")

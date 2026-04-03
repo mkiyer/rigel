@@ -1,6 +1,11 @@
 # TODO
 
 
+## Annotated BAM "failed" reads
+
+Reads that fail for various reasons are written directly to the annotated BAM and not processed by Rigel.
+
+
 ## Nascent RNA count set to zero? 
 
 Someone the transcript counts is setting synthetic nRNA counts to zero? That seems silly.

@@ -20,10 +20,10 @@ from .scoring import FragmentScorer
 from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
 from .stats import PipelineStats
 from .annotate import (
-    ZF_NRNA_RESOLVED,
-    ZF_SYNTH_RESOLVED,
-    ZF_TRANSCRIPT,
-    ZF_UNRESOLVED,
+    AF_NRNA_RESOLVED,
+    AF_SYNTH_RESOLVED,
+    AF_TRANSCRIPT,
+    AF_UNRESOLVED,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,7 +189,7 @@ class FragmentRouter:
                     frag_id=int(chim_fids[j]),
                     best_tid=-1,
                     best_gid=-1,
-                    tx_flags=ZF_UNRESOLVED,
+                    tx_flags=AF_UNRESOLVED,
                     posterior=0.0,
                     frag_class=FRAG_CHIMERIC,
                     n_candidates=0,
@@ -204,11 +204,11 @@ class FragmentRouter:
                 tid = int(det_tids[j])
                 gid = int(t_to_g[tid])
                 if is_synth_arr[tid]:
-                    flags = ZF_SYNTH_RESOLVED
+                    flags = AF_SYNTH_RESOLVED
                 elif is_nrna_arr[tid]:
-                    flags = ZF_NRNA_RESOLVED
+                    flags = AF_NRNA_RESOLVED
                 else:
-                    flags = ZF_TRANSCRIPT
+                    flags = AF_TRANSCRIPT
                 annotations.add(
                     frag_id=int(det_fids[j]),
                     best_tid=tid,

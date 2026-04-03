@@ -32,6 +32,26 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+# ─── align ───────────────────────────────────────────────────────
+
+
+def cmd_align(args: argparse.Namespace) -> int:
+    from .aligner import run_all_alignments
+
+    cfg = load_config(args.config)
+    t0 = time.monotonic()
+    summary = run_all_alignments(
+        cfg,
+        aligners=args.aligners,
+        force=args.force,
+        dry_run=args.dry_run,
+        condition_filter=args.conditions,
+    )
+    elapsed = time.monotonic() - t0
+    print(f"\nTotal elapsed: {elapsed:.1f}s")
+    return 1 if summary.n_failed > 0 else 0
+
+
 # ─── run ─────────────────────────────────────────────────────────
 
 
@@ -45,6 +65,26 @@ def cmd_run(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
         config_names=args.config_names,
+        condition_filter=args.conditions,
+    )
+    elapsed = time.monotonic() - t0
+    print(f"\nTotal elapsed: {elapsed:.1f}s")
+    return 1 if summary.n_failed > 0 else 0
+
+
+# ─── analyze ─────────────────────────────────────────────────────
+
+
+def cmd_run_tools(args: argparse.Namespace) -> int:
+    from .tools import run_all_tools
+
+    cfg = load_config(args.config)
+    t0 = time.monotonic()
+    summary = run_all_tools(
+        cfg,
+        tools=args.tools,
+        force=args.force,
+        dry_run=args.dry_run,
         condition_filter=args.conditions,
     )
     elapsed = time.monotonic() - t0
@@ -163,6 +203,17 @@ def main() -> int:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    # align
+    align_p = subparsers.add_parser("align", help="Align FASTQ reads (minimap2)")
+    _add_common_args(align_p)
+    align_p.add_argument("--force", action="store_true", help="Re-align even if BAM exists")
+    align_p.add_argument("--dry-run", action="store_true", help="Print commands without executing")
+    align_p.add_argument(
+        "--aligners", nargs="*", default=None,
+        help="Aligners to run (default: minimap2). Options: minimap2, oracle",
+    )
+    align_p.set_defaults(func=cmd_align)
+
     # run
     run_p = subparsers.add_parser("run", help="Run rigel quant with named configs")
     _add_common_args(run_p)
@@ -173,6 +224,17 @@ def main() -> int:
         help="Subset of named configs to run (default: all)",
     )
     run_p.set_defaults(func=cmd_run)
+
+    # run-tools
+    tools_p = subparsers.add_parser("run-tools", help="Run external tools (salmon, kallisto)")
+    _add_common_args(tools_p)
+    tools_p.add_argument("--force", action="store_true", help="Re-run even if output exists")
+    tools_p.add_argument("--dry-run", action="store_true", help="Print commands without executing")
+    tools_p.add_argument(
+        "--tools", nargs="*", default=None,
+        help="Tools to run (default: auto-detect from config). Options: salmon, kallisto",
+    )
+    tools_p.set_defaults(func=cmd_run_tools)
 
     # analyze
     analyze_p = subparsers.add_parser("analyze", help="Analyze benchmark results")

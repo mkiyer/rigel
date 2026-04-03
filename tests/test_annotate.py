@@ -14,15 +14,15 @@ import pytest
 
 from rigel.annotate import (
     AnnotationTable,
-    ZF_GDNA,
-    ZF_GDNA_RESOLVED,
-    ZF_NRNA,
-    ZF_NRNA_RESOLVED,
-    ZF_RESOLVED,
-    ZF_SYNTH_RESOLVED,
-    ZF_SYNTHETIC,
-    ZF_TRANSCRIPT,
-    ZF_UNRESOLVED,
+    AF_GDNA,
+    AF_GDNA_RESOLVED,
+    AF_NRNA,
+    AF_NRNA_RESOLVED,
+    AF_RESOLVED,
+    AF_SYNTH_RESOLVED,
+    AF_SYNTHETIC,
+    AF_TRANSCRIPT,
+    AF_UNRESOLVED,
     _FRAG_CLASS_LABELS,
     _splice_type_label,
 )
@@ -47,7 +47,7 @@ class TestAnnotationTable:
             frag_id=42,
             best_tid=5,
             best_gid=2,
-            tx_flags=ZF_TRANSCRIPT,
+            tx_flags=AF_TRANSCRIPT,
             posterior=0.95,
             frag_class=0,
             n_candidates=3,
@@ -58,7 +58,7 @@ class TestAnnotationTable:
         assert ann is not None
         assert ann["best_tid"] == 5
         assert ann["best_gid"] == 2
-        assert ann["tx_flags"] == ZF_TRANSCRIPT
+        assert ann["tx_flags"] == AF_TRANSCRIPT
         assert abs(ann["posterior"] - 0.95) < 0.01
         assert ann["frag_class"] == 0
         assert ann["n_candidates"] == 3
@@ -71,7 +71,7 @@ class TestAnnotationTable:
     def test_grow(self):
         tbl = AnnotationTable.create(2)
         for i in range(10):
-            tbl.add(frag_id=i, best_tid=i, best_gid=0, tx_flags=ZF_TRANSCRIPT,
+            tbl.add(frag_id=i, best_tid=i, best_gid=0, tx_flags=AF_TRANSCRIPT,
                     posterior=1.0, frag_class=0, n_candidates=1)
         assert tbl.size == 10
         assert tbl.capacity >= 10
@@ -82,14 +82,14 @@ class TestAnnotationTable:
 
     def test_zf_flags_valid_values(self):
         """Valid ZF values follow the implication chain."""
-        assert ZF_UNRESOLVED == 0
-        assert ZF_TRANSCRIPT == ZF_RESOLVED  # 1
-        assert ZF_GDNA_RESOLVED == (ZF_RESOLVED | ZF_GDNA)  # 3
-        assert ZF_NRNA_RESOLVED == (ZF_RESOLVED | ZF_NRNA)  # 5
-        assert ZF_SYNTH_RESOLVED == (ZF_RESOLVED | ZF_NRNA | ZF_SYNTHETIC)  # 13
+        assert AF_UNRESOLVED == 0
+        assert AF_TRANSCRIPT == AF_RESOLVED  # 1
+        assert AF_GDNA_RESOLVED == (AF_RESOLVED | AF_GDNA)  # 3
+        assert AF_NRNA_RESOLVED == (AF_RESOLVED | AF_NRNA)  # 5
+        assert AF_SYNTH_RESOLVED == (AF_RESOLVED | AF_NRNA | AF_SYNTHETIC)  # 13
         # All resolved values are odd (bit 0 set)
-        for v in (ZF_TRANSCRIPT, ZF_GDNA_RESOLVED, ZF_NRNA_RESOLVED, ZF_SYNTH_RESOLVED):
-            assert v & ZF_RESOLVED, f"ZF={v} should have is_resolved set"
+        for v in (AF_TRANSCRIPT, AF_GDNA_RESOLVED, AF_NRNA_RESOLVED, AF_SYNTH_RESOLVED):
+            assert v & AF_RESOLVED, f"ZF={v} should have is_resolved set"
 
     def test_frag_class_labels(self):
         """Known fragment class codes have labels."""
@@ -200,8 +200,8 @@ class TestAnnotatedBamIntegration:
         assert isinstance(rec.get_tag("ZS"), str)
 
         # ZF values should be valid (0, 1, 3, 5, or 13)
-        valid_zf = {ZF_UNRESOLVED, ZF_TRANSCRIPT, ZF_GDNA_RESOLVED,
-                     ZF_NRNA_RESOLVED, ZF_SYNTH_RESOLVED}
+        valid_zf = {AF_UNRESOLVED, AF_TRANSCRIPT, AF_GDNA_RESOLVED,
+                     AF_NRNA_RESOLVED, AF_SYNTH_RESOLVED}
         for rec in records:
             zf = rec.get_tag("ZF")
             assert zf in valid_zf, f"Invalid ZF: {zf}"
@@ -217,7 +217,7 @@ class TestAnnotatedBamIntegration:
 
         # At least some records should have transcript assignment (ZF & 1 set)
         transcript_records = [
-            r for r in records if (r.get_tag("ZF") & ZF_RESOLVED)
+            r for r in records if (r.get_tag("ZF") & AF_RESOLVED)
         ]
         assert len(transcript_records) > 0, "No resolved assignments found"
 

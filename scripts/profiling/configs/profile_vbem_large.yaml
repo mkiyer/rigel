@@ -1,4 +1,4 @@
-bam: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/runs/human/mctp_MI_1190_SI_43014_HNMVYDMXY/rigel/annotated.bam
+bam: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/runs/human/ccle_capan_1_pancreas/rigel/collate.bam
 index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/rigel_index
 
 outdir: results/profile_vbem_large

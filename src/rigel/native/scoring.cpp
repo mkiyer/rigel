@@ -38,10 +38,10 @@ using rigel::FRAG_AMBIG_SAME_STRAND;
 using rigel::FRAG_AMBIG_OPP_STRAND;
 using rigel::FRAG_MULTIMAPPER;
 using rigel::FRAG_CHIMERIC;
-using rigel::ZF_RESOLVED;
-using rigel::ZF_GDNA;
-using rigel::ZF_NRNA;
-using rigel::ZF_SYNTHETIC;
+using rigel::AF_RESOLVED;
+using rigel::AF_GDNA;
+using rigel::AF_NRNA;
+using rigel::AF_SYNTHETIC;
 
 // Maximum candidates handled via stack-allocated buffer before falling
 // back to heap allocation.  Avoids malloc in the common case where a
@@ -1285,11 +1285,11 @@ NB_MODULE(_scoring_impl, m) {
     m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
     m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
 
-    // ZF assignment flags (mirrors rigel.annotate)
-    m.attr("ZF_RESOLVED")  = rigel::ZF_RESOLVED;
-    m.attr("ZF_GDNA")      = rigel::ZF_GDNA;
-    m.attr("ZF_NRNA")      = rigel::ZF_NRNA;
-    m.attr("ZF_SYNTHETIC") = rigel::ZF_SYNTHETIC;
+    // Assignment flags (mirrors rigel.annotate)
+    m.attr("AF_RESOLVED")  = rigel::AF_RESOLVED;
+    m.attr("AF_GDNA")      = rigel::AF_GDNA;
+    m.attr("AF_NRNA")      = rigel::AF_NRNA;
+    m.attr("AF_SYNTHETIC") = rigel::AF_SYNTHETIC;
 
     // Internal tuning constant
     m.attr("SCORED_STACK_CAPACITY") = SCORED_STACK_CAPACITY;

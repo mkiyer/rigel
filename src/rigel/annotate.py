@@ -85,19 +85,19 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# ZF flag bits (written to BAM as ZF:i tag)
+# Assignment flag bits (written to BAM as the ZF:i tag)
 # ---------------------------------------------------------------------------
-ZF_RESOLVED: int = 0x1   # bit 0: fragment was scored and assigned by EM
-ZF_GDNA: int = 0x2       # bit 1: EM gDNA component won
-ZF_NRNA: int = 0x4       # bit 2: assigned transcript is single-exon
-ZF_SYNTHETIC: int = 0x8  # bit 3: assigned transcript is rigel-generated nRNA span
+AF_RESOLVED: int = 0x1   # bit 0: fragment was scored and assigned by EM
+AF_GDNA: int = 0x2       # bit 1: EM gDNA component won
+AF_NRNA: int = 0x4       # bit 2: assigned transcript is single-exon
+AF_SYNTHETIC: int = 0x8  # bit 3: assigned transcript is rigel-generated nRNA span
 
-# Pre-computed valid ZF values for common assignment outcomes.
-ZF_UNRESOLVED: int = 0                                      # 0  — not modeled
-ZF_TRANSCRIPT: int = ZF_RESOLVED                             # 1  — multi-exon transcript
-ZF_GDNA_RESOLVED: int = ZF_RESOLVED | ZF_GDNA               # 3  — gDNA component
-ZF_NRNA_RESOLVED: int = ZF_RESOLVED | ZF_NRNA               # 5  — single-exon annotated
-ZF_SYNTH_RESOLVED: int = ZF_RESOLVED | ZF_NRNA | ZF_SYNTHETIC  # 13 — synthetic nRNA span
+# Pre-computed valid assignment flag values for common outcomes.
+AF_UNRESOLVED: int = 0                                      # 0  — not modeled
+AF_TRANSCRIPT: int = AF_RESOLVED                             # 1  — multi-exon transcript
+AF_GDNA_RESOLVED: int = AF_RESOLVED | AF_GDNA               # 3  — gDNA component
+AF_NRNA_RESOLVED: int = AF_RESOLVED | AF_NRNA               # 5  — single-exon annotated
+AF_SYNTH_RESOLVED: int = AF_RESOLVED | AF_NRNA | AF_SYNTHETIC  # 13 — synthetic nRNA span
 
 # Fragment-class labels for the ZC tag.
 _FRAG_CLASS_LABELS = {
@@ -128,7 +128,7 @@ class AnnotationTable:
     best_gid : np.ndarray
         int32 — assigned gene index (-1 = none).
     tx_flags : np.ndarray
-        uint8 — ZF assignment flags bitfield (see ZF_* constants).
+        uint8 — assignment flags bitfield (see AF_* constants).
     posterior : np.ndarray
         float32 — posterior probability of assignment.
     frag_class : np.ndarray
@@ -177,7 +177,7 @@ class AnnotationTable:
         frag_id: int,
         best_tid: int = -1,
         best_gid: int = -1,
-        tx_flags: int = ZF_UNRESOLVED,
+        tx_flags: int = AF_UNRESOLVED,
         posterior: float = 0.0,
         frag_class: int = -1,
         n_candidates: int = 0,
@@ -388,7 +388,8 @@ def write_annotated_bam(
         f"[ANNOTATE] Wrote {summary['n_records_written']:,} records "
         f"to {output_path} "
         f"({summary['n_annotated']:,} annotated, "
-        f"{summary['n_intergenic']:,} intergenic)"
+        f"{summary['n_intergenic']:,} intergenic, "
+        f"{summary['n_filtered_passthrough']:,} filtered pass-through)"
     )
 
     return summary

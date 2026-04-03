@@ -34,11 +34,11 @@ import numpy as np
 import pandas as pd
 
 from .annotate import (
-    ZF_GDNA_RESOLVED,
-    ZF_NRNA_RESOLVED,
-    ZF_SYNTH_RESOLVED,
-    ZF_TRANSCRIPT,
-    ZF_UNRESOLVED,
+    AF_GDNA_RESOLVED,
+    AF_NRNA_RESOLVED,
+    AF_SYNTH_RESOLVED,
+    AF_TRANSCRIPT,
+    AF_UNRESOLVED,
 )
 from .buffer import FragmentBuffer, _FinalizedChunk
 from .config import (
@@ -463,15 +463,15 @@ def _populate_em_annotations(
     best_gid[valid_t] = t_to_g[best_tid[valid_t]]
 
     # ZF assignment flags bitfield
-    tx_flags = np.full(n, ZF_UNRESOLVED, dtype=np.uint8)
-    tx_flags[best_tid == -2] = ZF_GDNA_RESOLVED
+    tx_flags = np.full(n, AF_UNRESOLVED, dtype=np.uint8)
+    tx_flags[best_tid == -2] = AF_GDNA_RESOLVED
     if valid_t.any():
         winner_tids = best_tid[valid_t]
         nrna_mask = is_nrna_arr[winner_tids]
         synth_mask = is_synth_arr[winner_tids]
-        flags = np.full(valid_t.sum(), ZF_TRANSCRIPT, dtype=np.uint8)
-        flags[nrna_mask & ~synth_mask] = ZF_NRNA_RESOLVED
-        flags[synth_mask] = ZF_SYNTH_RESOLVED
+        flags = np.full(valid_t.sum(), AF_TRANSCRIPT, dtype=np.uint8)
+        flags[nrna_mask & ~synth_mask] = AF_NRNA_RESOLVED
+        flags[synth_mask] = AF_SYNTH_RESOLVED
         tx_flags[valid_t] = flags
 
     # Clean sentinel: -2 (gDNA) -> -1

@@ -368,6 +368,7 @@ class StageTimings:
     fragment_router_scan: float = 0.0
     build_loci: float = 0.0
     compute_eb_gdna_priors: float = 0.0
+    partition: float = 0.0
     locus_em: float = 0.0
     locus_em_build: float = 0.0
     locus_em_run: float = 0.0

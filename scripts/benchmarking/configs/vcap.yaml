@@ -1,0 +1,49 @@
+# Benchmark configuration for VCaP prostate cancer simulation.
+#
+# Usage:
+#   python -m scripts.benchmarking align      -c scripts/benchmarking/configs/vcap.yaml
+#   python -m scripts.benchmarking run        -c scripts/benchmarking/configs/vcap.yaml
+#   python -m scripts.benchmarking run-tools  -c scripts/benchmarking/configs/vcap.yaml
+#   python -m scripts.benchmarking analyze    -c scripts/benchmarking/configs/vcap.yaml -o results/vcap
+#   python -m scripts.benchmarking status     -c scripts/benchmarking/configs/vcap.yaml
+
+# ── Paths ──────────────────────────────────────────────────────────
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/rigel_benchmarks/ccle_vcap_prostate
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/rigel_index
+
+# BAM input: use minimap2-aligned BAM (produced by 'align' subcommand)
+bam_relpath: minimap2/aligned.bam
+
+# ── External tool indexes ─────────────────────────────────────────
+
+salmon_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/salmon_index
+kallisto_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/kallisto.idx
+
+# ── Global defaults ───────────────────────────────────────────────
+
+threads: 8
+seed: 42
+
+# ── Named rigel configurations ────────────────────────────────────
+
+rigel_configs:
+  # VBEM with all defaults — baseline
+  vbem:
+    em_mode: vbem
+
+  # MAP-EM comparison
+  map:
+    em_mode: map
+
+  # Oracle alignment (direct from simulator, perfect alignment)
+  oracle:
+    em_mode: vbem
+    bam_relpath: sim_oracle.bam
+
+# ── Analysis ──────────────────────────────────────────────────────
+
+analysis:
+  output_dir: results/vcap
+  log2_pseudocount: 1.0
+  parse_fastq_truth: false

@@ -49,6 +49,10 @@ static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 // sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
 static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
 
+// VBEM zero-forcing: collapse component to its prior when posterior
+// alpha <= prior * (1 + tol), i.e. the data contributed negligible evidence.
+static constexpr double VBEM_ZERO_FORCE_REL_TOL = 1e-6;
+
 // Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
 static constexpr int ASSIGN_FRACTIONAL = 0;
 static constexpr int ASSIGN_MAP        = 1;
@@ -931,9 +935,9 @@ static EMResult run_squarem(
                 for (size_t i = 0; i < nc; ++i) {
                     state_extrap[i] = state0[i] + 2.0 * step * r_vec[i]
                                     + step * step * v_vec[i];
-                    // Alpha must stay positive
-                    if (state_extrap[i] < EM_LOG_EPSILON)
-                        state_extrap[i] = EM_LOG_EPSILON;
+                    // Clamp to prior: below-prior means data says "not here"
+                    if (state_extrap[i] < prior[i])
+                        state_extrap[i] = prior[i];
                 }
             }
 
@@ -942,9 +946,13 @@ static EMResult run_squarem(
                       unambig_totals, prior, em_totals.data(),
                       state_new.data(), n_components, estep_threads, pool);
 
-            // Convergence check on normalized theta
+            // Zero-force + convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
             for (size_t i = 0; i < nc; ++i) {
+                // Zero-force: if posterior <= prior, data provides no evidence
+                if (state_new[i] <= prior[i] * (1.0 + VBEM_ZERO_FORCE_REL_TOL)) {
+                    state_new[i] = prior[i];
+                }
                 sum_old += state0[i];
                 sum_new += state_new[i];
             }
