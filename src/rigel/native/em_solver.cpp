@@ -49,9 +49,14 @@ static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 // sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
 static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
 
-// VBEM zero-forcing: collapse component to its prior when posterior
-// alpha <= prior * (1 + tol), i.e. the data contributed negligible evidence.
-static constexpr double VBEM_ZERO_FORCE_REL_TOL = 1e-6;
+// VBEM SQUAREM clamp floor: minimum alpha value after SQUAREM extrapolation
+// or stabilization.  Prevents components from entering the digamma absorbing
+// regime (psi(a) ~ -1/a for small a) where recovery is impossible.
+// At 0.1, psi(0.1) ~ -10.4, giving weight ~3e-5 — small enough not to steal
+// mass, but large enough that a component with genuine read support can
+// accumulate evidence and recover.  Any value >= 0.01 avoids the absorbing
+// barrier; values below ~0.01 are effectively dead in double precision.
+static constexpr double VBEM_CLAMP_FLOOR = 0.1;
 
 // Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
 static constexpr int ASSIGN_FRACTIONAL = 0;
@@ -935,9 +940,12 @@ static EMResult run_squarem(
                 for (size_t i = 0; i < nc; ++i) {
                     state_extrap[i] = state0[i] + 2.0 * step * r_vec[i]
                                     + step * step * v_vec[i];
-                    // Clamp to prior: below-prior means data says "not here"
-                    if (state_extrap[i] < prior[i])
-                        state_extrap[i] = prior[i];
+                    // Clamp to recoverable floor: keeps components out of
+                    // the digamma absorbing regime (prior alone is ~1e-6
+                    // in mega-loci, deep in the death zone).
+                    double floor_i = std::max(prior[i], VBEM_CLAMP_FLOOR);
+                    if (state_extrap[i] < floor_i)
+                        state_extrap[i] = floor_i;
                 }
             }
 
@@ -946,12 +954,14 @@ static EMResult run_squarem(
                       unambig_totals, prior, em_totals.data(),
                       state_new.data(), n_components, estep_threads, pool);
 
-            // Zero-force + convergence check on normalized theta
+            // Floor-clamp + convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
             for (size_t i = 0; i < nc; ++i) {
-                // Zero-force: if posterior <= prior, data provides no evidence
-                if (state_new[i] <= prior[i] * (1.0 + VBEM_ZERO_FORCE_REL_TOL)) {
-                    state_new[i] = prior[i];
+                // Clamp stabilisation output to recoverable floor —
+                // prevents the absorbing barrier at tiny alpha values.
+                double floor_i = std::max(prior[i], VBEM_CLAMP_FLOOR);
+                if (state_new[i] < floor_i) {
+                    state_new[i] = floor_i;
                 }
                 sum_old += state0[i];
                 sum_new += state_new[i];

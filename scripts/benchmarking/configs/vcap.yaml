@@ -31,6 +31,7 @@ rigel_configs:
   # VBEM with all defaults — baseline
   vbem:
     em_mode: vbem
+    emit_locus_stats: true
 
   # MAP-EM comparison
   map:

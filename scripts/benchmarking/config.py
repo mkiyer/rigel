@@ -41,6 +41,7 @@ RIGEL_CLI_FLAGS: dict[str, str] = {
     "annotated_bam": "--annotated-bam",
     "tsv": "--tsv",
     "tmpdir": "--tmpdir",
+    "emit_locus_stats": "--emit-locus-stats",
 }
 
 

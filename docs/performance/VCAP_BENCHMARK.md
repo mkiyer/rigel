@@ -160,58 +160,10 @@ python -m scripts.benchmarking analyze \
   -o results/vcap
 ```
 
-## SLURM Submission
-
-The rigel oracle run on the 6.3 GB oracle BAM requires >48 GB of RAM due to the high mapping density (64.5M buffered fragments). Submit via SLURM with sufficient memory.
-
-### Example SLURM script
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=vcap_benchmark
-#SBATCH --partition=standard
-#SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=96G
-#SBATCH --time=08:00:00
-#SBATCH --output=vcap_benchmark_%j.log
-#SBATCH --account=mkiyer0
-
-cd /home/mkiyer/proj/rigel
-source activate rigel
-
-CONFIG=scripts/benchmarking/configs/vcap.yaml
-
-# Step 1: Align (skip if already done)
-python -m scripts.benchmarking align -c $CONFIG -v
-
-# Step 2: External tools (skip if already done)
-python -m scripts.benchmarking run-tools -c $CONFIG -v
-
-# Step 3: Rigel quant (all configs)
-python -m scripts.benchmarking run -c $CONFIG -v
-
-# Step 4: Analyze
-python -m scripts.benchmarking analyze -c $CONFIG -o results/vcap
-```
 
 **Key**: The `--mem=96G` is critical. The oracle BAM buffers ~64.5M fragments with dense multimapping and requires ~60-80 GB during EM quantification. The minimap2-aligned BAM configs (`vbem`, `map`) use less memory (~25-30 GB) due to fewer secondary alignments.
 
-### Running individual steps via SLURM
 
-```bash
-# Just the oracle run (memory-intensive)
-sbatch --mem=96G --cpus-per-task=8 --time=04:00:00 --wrap="
-  cd /home/mkiyer/proj/rigel && source activate rigel && \
-  python -m scripts.benchmarking run -c scripts/benchmarking/configs/vcap.yaml --configs oracle -v
-"
-
-# Just vbem + map (lower memory)
-sbatch --mem=48G --cpus-per-task=8 --time=04:00:00 --wrap="
-  cd /home/mkiyer/proj/rigel && source activate rigel && \
-  python -m scripts.benchmarking run -c scripts/benchmarking/configs/vcap.yaml --configs vbem map -v
-"
-```
 
 ## Current State
 

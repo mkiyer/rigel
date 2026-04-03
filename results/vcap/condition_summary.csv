@@ -1,0 +1,2 @@
+condition,gdna_label,strand_specificity,nrna_label,n_rna,n_gdna,gdna_rate,mrna_frag_truth,nrna_frag_truth,truth_scale
+gdna_high_ss_0.90_nrna_none,high,0.9,none,50000000,25000000,0.5,50000000,0,49.99999924500001

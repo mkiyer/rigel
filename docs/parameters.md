@@ -144,3 +144,17 @@ The `_PARAM_SPECS` registry in `cli.py` maps CLI flag names to config fields.
 | `CalibrationConfig` | `density_percentile` | `0.10` | Percentile of density distribution used to seed gDNA initialization |
 | `CalibrationConfig` | `min_gdna_regions` | `100` | Minimum eligible regions to run the calibration EM; below this, algebraic fallback is used |
 | `CalibrationConfig` | `min_fl_ess` | `50` | Minimum effective sample size (Σγ·w) of FL observations needed to build a gDNA fragment-length model |
+
+---
+
+## C++ compile-time constants
+
+These constants are defined in `src/rigel/native/em_solver.cpp` and cannot be
+changed at runtime. They control numerical behavior of the EM solver.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `EM_LOG_EPSILON` | `1e-300` | Global floor for log-space operations and zero-valued priors |
+| `SQUAREM_BUDGET_DIVISOR` | `3` | SQUAREM iteration budget = `em_iterations / 3` (each SQUAREM step costs 3 EM iterations) |
+| `VBEM_CLAMP_FLOOR` | `0.1` | Minimum Dirichlet alpha after SQUAREM extrapolation or stabilization in VBEM mode. Prevents components from entering the digamma absorbing regime where `ψ(α) ≈ −1/α` makes recovery impossible. At 0.1, `ψ(0.1) ≈ −10.4` gives relative weight ≈ 3×10⁻⁵ — small enough not to steal mass from other components, but large enough that a component with genuine read support can accumulate evidence and recover. Has no effect on MAP-EM. |
+| `ESTEP_TASK_WORK_TARGET` | `4096` | Target element-operations per parallel E-step task for load-balanced threading |

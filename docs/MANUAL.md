@@ -647,3 +647,15 @@ a second BAM pass and adds some runtime overhead.
 **Does Rigel support single-end reads?**
 Single-end reads are handled but less thoroughly tested than paired-end.
 Fragment length estimation uses alignment length rather than insert size.
+
+**What is `VBEM_CLAMP_FLOOR` and why does it matter?**
+In VBEM mode, Rigel uses SQUAREM acceleration to speed up EM convergence.
+SQUAREM can overshoot, pushing a component's Dirichlet alpha to very small
+values. Because VBEM E-step weights depend on `digamma(α)`, which diverges
+as `−1/α` near zero, components pushed below α ≈ 0.01 enter an absorbing
+regime where they can never recover — even if they have genuine read
+support. `VBEM_CLAMP_FLOOR` (default 0.1) sets a minimum alpha after each
+SQUAREM iteration, keeping components in the recoverable regime. This
+constant is defined in `src/rigel/native/em_solver.cpp` and has no effect
+on MAP-EM mode. See [parameters.md](parameters.md) for all compile-time
+constants.

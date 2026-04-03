@@ -1,0 +1,45 @@
+# Benchmark configuration for VCaP Pristine (no gDNA, no nRNA).
+#
+# Usage:
+#   python -m scripts.benchmarking align      -c scripts/benchmarking/configs/vcap_pristine.yaml
+#   python -m scripts.benchmarking run        -c scripts/benchmarking/configs/vcap_pristine.yaml
+#   python -m scripts.benchmarking run-tools  -c scripts/benchmarking/configs/vcap_pristine.yaml
+#   python -m scripts.benchmarking analyze    -c scripts/benchmarking/configs/vcap_pristine.yaml -o results/vcap_pristine
+#   python -m scripts.benchmarking status     -c scripts/benchmarking/configs/vcap_pristine.yaml
+
+# ── Paths ──────────────────────────────────────────────────────────
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/rigel_benchmarks/ccle_vcap_pristine
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/rigel_index
+
+# BAM input: use minimap2-aligned BAM (produced by 'align' subcommand)
+bam_relpath: minimap2/aligned.bam
+
+# ── External tool indexes ─────────────────────────────────────────
+
+salmon_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/salmon_index
+kallisto_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/kallisto.idx
+
+# ── Global defaults ───────────────────────────────────────────────
+
+threads: 8
+seed: 42
+
+# ── Named rigel configurations ────────────────────────────────────
+
+rigel_configs:
+  # VBEM with all defaults — baseline
+  vbem:
+    em_mode: vbem
+    emit_locus_stats: true
+
+  # MAP-EM comparison
+  map:
+    em_mode: map
+
+# ── Analysis ──────────────────────────────────────────────────────
+
+analysis:
+  output_dir: results/vcap_pristine
+  log2_pseudocount: 1.0
+  parse_fastq_truth: false

@@ -165,12 +165,13 @@ def _build_pipeline_config(
         f"Using EM prior: pseudocount={em_kw.get('prior_pseudocount', 1.0)}"
     )
 
-    return PipelineConfig(
+    cfg = PipelineConfig(
         em=EMConfig(**em_kw),
         scan=BamScanConfig(**scan_kw),
         scoring=FragmentScoringConfig(**scoring_kw),
         **top_kw,
     )
+    return cfg
 
 
 def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
@@ -203,6 +204,15 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     loci_df.to_feather(str(loci_path), **feather_kw)
     logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, "
                  f"{nrna_quant_path}, {loci_path}")
+
+    # Write locus-level profiling stats if requested
+    if getattr(args, "emit_locus_stats", False) and estimator.locus_stats:
+        import pandas as _pd
+        locus_stats_path = output_dir / "locus_stats.feather"
+        locus_stats_df = _pd.DataFrame(estimator.locus_stats)
+        locus_stats_df.to_feather(str(locus_stats_path), **feather_kw)
+        logging.info(f"[DONE] Wrote {locus_stats_path} "
+                     f"({len(locus_stats_df)} loci)")
 
     # Write TSV mirrors if requested
     if getattr(args, "tsv", False):
@@ -518,6 +528,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("buffer_size", "scan.max_memory_bytes", "gb_to_bytes"),
     # -- Top-level PipelineConfig --
     _ParamSpec("annotated_bam", "annotated_bam_path"),
+    _ParamSpec("emit_locus_stats", "emit_locus_stats"),
 )
 
 
@@ -902,6 +913,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum posterior threshold for candidate pruning "
              "(default: 1e-4). Lower values keep more candidates "
              "(conservative). Set to 0 to disable pruning entirely.",
+    )
+    adv.add_argument(
+        "--emit-locus-stats", dest="emit_locus_stats",
+        action="store_true", default=False,
+        help="Write per-locus EM convergence profiling data to "
+             "locus_stats.feather in the output directory. Includes "
+             "iteration counts, timing, and equivalence class statistics "
+             "for every locus. Useful for debugging convergence.",
     )
     quant_parser.set_defaults(func=quant_command)
 

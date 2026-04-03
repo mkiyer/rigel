@@ -1,9 +1,9 @@
 # TODO
 
+## Locus stats
 
-## Annotated BAM "failed" reads
+Enable locus status to be written to the output
 
-Reads that fail for various reasons are written directly to the annotated BAM and not processed by Rigel.
 
 
 ## Nascent RNA count set to zero? 
