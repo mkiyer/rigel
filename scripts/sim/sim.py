@@ -92,6 +92,14 @@ logger = logging.getLogger(__name__)
 _DNA_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 _DNA_BASES = np.array(list("ACGT"), dtype="<U1")
 
+# Byte-level complement table for vectorized reverse-complement
+_BYTE_COMPLEMENT = np.zeros(256, dtype=np.uint8)
+for _c, _rc in zip(b"ACGTNacgtn", b"TGCANtgcan"):
+    _BYTE_COMPLEMENT[_c] = _rc
+
+# Default FASTQ write buffer size (number of records before flush)
+_FASTQ_BUFFER_SIZE = 50_000
+
 # SAM flag bits
 _FLAG_PAIRED = 0x1
 _FLAG_PROPER_PAIR = 0x2
@@ -106,6 +114,104 @@ _BASE_R2_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ2
 def reverse_complement(seq: str) -> str:
     """Return the reverse complement of a DNA sequence."""
     return seq.translate(_DNA_COMPLEMENT)[::-1]
+
+
+def _seq_to_bytes(seq: str) -> np.ndarray:
+    """Convert a DNA string to a numpy uint8 array."""
+    return np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
+
+
+def _bytes_to_seq(arr: np.ndarray) -> str:
+    """Convert a numpy uint8 array back to a DNA string."""
+    return arr.tobytes().decode("ascii")
+
+
+def _batch_extract_reads(
+    seq_bytes: np.ndarray,
+    frag_starts: np.ndarray,
+    frag_len: int,
+    read_len: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Vectorized extraction of R1 and R2 read sequences.
+
+    Given a source sequence as a byte array, extract all fragments at once
+    using stride tricks, then slice R2 (first read_len bases) and R1
+    (reverse complement of last read_len bases).
+
+    Returns (r2_seqs, r1_seqs) as 2D uint8 arrays of shape (count, read_len).
+    """
+    count = len(frag_starts)
+
+    # Build index arrays for all positions
+    offsets = np.arange(read_len, dtype=np.int64)
+
+    # R2: first read_len bases of each fragment
+    r2_indices = frag_starts[:, np.newaxis] + offsets[np.newaxis, :]
+    r2_seqs = seq_bytes[r2_indices]
+
+    # R1: reverse complement of last read_len bases
+    r1_start = frag_starts + (frag_len - read_len)
+    r1_indices = r1_start[:, np.newaxis] + offsets[np.newaxis, :]
+    r1_raw = seq_bytes[r1_indices]
+    # Reverse complement: complement each byte, then reverse column order
+    r1_seqs = _BYTE_COMPLEMENT[r1_raw[:, ::-1]]
+
+    return r2_seqs, r1_seqs
+
+
+class _FastqBuffer:
+    """Buffered FASTQ writer that accumulates records before flushing.
+
+    Reduces the number of gzip write calls from ~8 per fragment to
+    ~8 per flush (every ``buf_size`` fragments).
+    """
+
+    __slots__ = ("_fh", "_buf", "_size", "_count")
+
+    def __init__(self, fh, buf_size: int = _FASTQ_BUFFER_SIZE):
+        self._fh = fh
+        self._buf: list[str] = []
+        self._size = buf_size
+        self._count = 0
+
+    def write_record(self, qname: str, seq: str, quals: str) -> None:
+        self._buf.append(f"@{qname}\n{seq}\n+\n{quals}\n")
+        self._count += 1
+        if self._count >= self._size:
+            self.flush()
+
+    def write_records_batch(
+        self,
+        qnames: list[str],
+        seqs: np.ndarray,
+        quals: str,
+        suffix: str,
+    ) -> None:
+        """Write a batch of FASTQ records from numpy byte arrays.
+
+        Parameters
+        ----------
+        qnames : list of query names (without /1 or /2 suffix)
+        seqs : 2D uint8 array (count × read_len)
+        quals : quality string (same for all reads)
+        suffix : "/1" or "/2"
+        """
+        buf = self._buf
+        for i in range(len(qnames)):
+            seq_str = seqs[i].tobytes().decode("ascii")
+            buf.append(f"@{qnames[i]}{suffix}\n{seq_str}\n+\n{quals}\n")
+        self._count += len(qnames)
+        if self._count >= self._size:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._buf:
+            self._fh.write("".join(self._buf))
+            self._buf.clear()
+            self._count = 0
+
+    def close(self) -> None:
+        self.flush()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -599,11 +705,24 @@ class WholeGenomeSimulator:
         # Pre-extract spliced mRNA sequences
         logger.info("Pre-extracting %d mRNA sequences...", N)
         self._t_seqs: list[str] = []
+        self._t_seq_bytes: list[np.ndarray] = []
         self._t_lengths: list[int] = []
         for t in transcripts:
             seq = self._extract_mrna_seq(t)
             self._t_seqs.append(seq)
+            self._t_seq_bytes.append(_seq_to_bytes(seq))
             self._t_lengths.append(len(seq))
+
+        # Pre-compute strand chars per transcript
+        self._t_strand_chars: list[str] = [
+            "r" if t.strand == Strand.NEG else "f" for t in transcripts
+        ]
+
+        # Pre-compute quality strings cache (keyed by read length)
+        self._quals_cache: dict[int, str] = {}
+
+        # Fast-path flag: skip error introduction when error_rate == 0
+        self._has_errors = sim_params.error_rate > 0
 
         # Vectorised abundance / length arrays for weight computation
         self._mrna_abund = np.array(
@@ -685,6 +804,14 @@ class WholeGenomeSimulator:
         if t.strand == Strand.NEG:
             seq = reverse_complement(seq)
         return seq
+
+    def _get_quals(self, read_len: int) -> str:
+        """Return cached quality string of the given length."""
+        q = self._quals_cache.get(read_len)
+        if q is None:
+            q = "I" * read_len
+            self._quals_cache[read_len] = q
+        return q
 
     # -- Fragment length sampling -------------------------------------------
 
@@ -924,18 +1051,21 @@ class WholeGenomeSimulator:
         self,
         t_idx: int,
         len_counts: dict[int, int],
-        r1_fh,
-        r2_fh,
+        r1_buf: _FastqBuffer,
+        r2_buf: _FastqBuffer,
         bam_fh: pysam.AlignmentFile | None,
     ) -> int:
         """Generate and write all mRNA reads for one transcript."""
         t = self.transcripts[t_idx]
         t_seq = self._t_seqs[t_idx]
+        t_seq_bytes = self._t_seq_bytes[t_idx]
         t_len = self._t_lengths[t_idx]
         ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
         rng = self._rng
         ss = self.strand_specificity
-        strand_char = "r" if t.strand == Strand.NEG else "f"
+        strand_char = self._t_strand_chars[t_idx]
+        has_errors = self._has_errors
+        t_id = t.t_id
         n_written = 0
 
         for frag_len in sorted(len_counts):
@@ -947,35 +1077,64 @@ class WholeGenomeSimulator:
 
             frag_starts = rng.integers(0, eff_len, size=count)
             flip_mask = rng.random(count) >= ss if ss < 1.0 else None
-            quals = "I" * read_len
+            quals = self._get_quals(read_len)
 
-            for i in range(count):
-                frag_start = int(frag_starts[i])
-                frag_end = frag_start + frag_len
-                frag_seq = t_seq[frag_start:frag_end]
+            # Vectorized extraction of R2 and R1 sequences
+            r2_seqs, r1_seqs = _batch_extract_reads(
+                t_seq_bytes, frag_starts, frag_len, read_len,
+            )
 
-                r1_seq = reverse_complement(frag_seq[-read_len:])
-                r2_seq = frag_seq[:read_len]
+            # Apply strand flipping in batch
+            if flip_mask is not None:
+                flip_idx = np.where(flip_mask)[0]
+                if len(flip_idx) > 0:
+                    r1_seqs[flip_idx], r2_seqs[flip_idx] = (
+                        r2_seqs[flip_idx].copy(),
+                        r1_seqs[flip_idx].copy(),
+                    )
 
-                flipped = flip_mask is not None and flip_mask[i]
-                if flipped:
-                    r1_seq, r2_seq = r2_seq, r1_seq
+            # Apply errors in batch if needed
+            if has_errors:
+                error_rate = self.sim_params.error_rate
+                for i in range(count):
+                    mask = rng.random(read_len) < error_rate
+                    if np.any(mask):
+                        r1_seqs[i, mask] = np.array(
+                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
+                            dtype=np.uint8,
+                        )
+                    mask = rng.random(read_len) < error_rate
+                    if np.any(mask):
+                        r2_seqs[i, mask] = np.array(
+                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
+                            dtype=np.uint8,
+                        )
 
-                r1_seq = self._introduce_errors(r1_seq)
-                r2_seq = self._introduce_errors(r2_seq)
+            # Build query names
+            base_n = n_written
+            qnames = [
+                f"{t_id}:{int(frag_starts[i])}-{int(frag_starts[i]) + frag_len}:{strand_char}:{base_n + i}"
+                for i in range(count)
+            ]
 
-                qname = f"{t.t_id}:{frag_start}-{frag_end}:{strand_char}:{n_written}"
+            # Batch write FASTQ records
+            r1_buf.write_records_batch(qnames, r1_seqs, quals, "/1")
+            r2_buf.write_records_batch(qnames, r2_seqs, quals, "/2")
 
-                r1_fh.write(f"@{qname}/1\n{r1_seq}\n+\n{quals}\n")
-                r2_fh.write(f"@{qname}/2\n{r2_seq}\n+\n{quals}\n")
-
-                if bam_fh is not None and ref_id is not None:
+            # BAM records still written per-fragment (pysam API requires it)
+            if bam_fh is not None and ref_id is not None:
+                for i in range(count):
+                    frag_start = int(frag_starts[i])
+                    frag_end = frag_start + frag_len
+                    flipped = flip_mask is not None and flip_mask[i]
+                    r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
+                    r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
                     self._write_mrna_bam_pair(
-                        bam_fh, qname, r1_seq, r2_seq, t,
+                        bam_fh, qnames[i], r1_seq_str, r2_seq_str, t,
                         frag_start, frag_end, read_len, flipped, ref_id,
                     )
 
-                n_written += 1
+            n_written += count
 
         return n_written
 
@@ -983,8 +1142,8 @@ class WholeGenomeSimulator:
         self,
         t_idx: int,
         len_counts: dict[int, int],
-        r1_fh,
-        r2_fh,
+        r1_buf: _FastqBuffer,
+        r2_buf: _FastqBuffer,
         bam_fh: pysam.AlignmentFile | None,
     ) -> int:
         """Generate and write all nRNA reads for one transcript.
@@ -994,10 +1153,13 @@ class WholeGenomeSimulator:
         t = self.transcripts[t_idx]
         premrna_len = self._premrna_lengths[t_idx]
         premrna_seq = self._fetch_premrna_seq(t)
+        premrna_bytes = _seq_to_bytes(premrna_seq)
         ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
         rng = self._rng
         ss = self.strand_specificity
-        strand_char = "r" if t.strand == Strand.NEG else "f"
+        strand_char = self._t_strand_chars[t_idx]
+        has_errors = self._has_errors
+        t_id = t.t_id
         n_written = 0
 
         for frag_len in sorted(len_counts):
@@ -1009,43 +1171,72 @@ class WholeGenomeSimulator:
 
             frag_starts = rng.integers(0, eff_len, size=count)
             flip_mask = rng.random(count) >= ss if ss < 1.0 else None
-            quals = "I" * read_len
+            quals = self._get_quals(read_len)
 
-            for i in range(count):
-                frag_start = int(frag_starts[i])
-                frag_end = frag_start + frag_len
-                frag_seq = premrna_seq[frag_start:frag_end]
+            # Vectorized extraction
+            r2_seqs, r1_seqs = _batch_extract_reads(
+                premrna_bytes, frag_starts, frag_len, read_len,
+            )
 
-                r1_seq = reverse_complement(frag_seq[-read_len:])
-                r2_seq = frag_seq[:read_len]
+            # Apply strand flipping in batch
+            if flip_mask is not None:
+                flip_idx = np.where(flip_mask)[0]
+                if len(flip_idx) > 0:
+                    r1_seqs[flip_idx], r2_seqs[flip_idx] = (
+                        r2_seqs[flip_idx].copy(),
+                        r1_seqs[flip_idx].copy(),
+                    )
 
-                flipped = flip_mask is not None and flip_mask[i]
-                if flipped:
-                    r1_seq, r2_seq = r2_seq, r1_seq
+            # Apply errors in batch if needed
+            if has_errors:
+                error_rate = self.sim_params.error_rate
+                for i in range(count):
+                    mask = rng.random(read_len) < error_rate
+                    if np.any(mask):
+                        r1_seqs[i, mask] = np.array(
+                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
+                            dtype=np.uint8,
+                        )
+                    mask = rng.random(read_len) < error_rate
+                    if np.any(mask):
+                        r2_seqs[i, mask] = np.array(
+                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
+                            dtype=np.uint8,
+                        )
 
-                r1_seq = self._introduce_errors(r1_seq)
-                r2_seq = self._introduce_errors(r2_seq)
+            # Build query names
+            base_n = n_written
+            qnames = [
+                f"nrna_{t_id}:{int(frag_starts[i])}-{int(frag_starts[i]) + frag_len}:{strand_char}:{base_n + i}"
+                for i in range(count)
+            ]
 
-                qname = f"nrna_{t.t_id}:{frag_start}-{frag_end}:{strand_char}:{n_written}"
+            # Batch write FASTQ records
+            r1_buf.write_records_batch(qnames, r1_seqs, quals, "/1")
+            r2_buf.write_records_batch(qnames, r2_seqs, quals, "/2")
 
-                r1_fh.write(f"@{qname}/1\n{r1_seq}\n+\n{quals}\n")
-                r2_fh.write(f"@{qname}/2\n{r2_seq}\n+\n{quals}\n")
-
-                if bam_fh is not None and ref_id is not None:
+            # BAM records still written per-fragment
+            if bam_fh is not None and ref_id is not None:
+                for i in range(count):
+                    frag_start = int(frag_starts[i])
+                    frag_end = frag_start + frag_len
+                    flipped = flip_mask is not None and flip_mask[i]
+                    r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
+                    r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
                     self._write_nrna_bam_pair(
-                        bam_fh, qname, r1_seq, r2_seq, t,
+                        bam_fh, qnames[i], r1_seq_str, r2_seq_str, t,
                         frag_start, frag_end, read_len, flipped, ref_id,
                     )
 
-                n_written += 1
+            n_written += count
 
         return n_written
 
     def _write_gdna_reads(
         self,
         n_gdna: int,
-        r1_fh,
-        r2_fh,
+        r1_buf: _FastqBuffer,
+        r2_buf: _FastqBuffer,
         bam_fh: pysam.AlignmentFile | None,
     ) -> int:
         """Generate and write all gDNA reads."""
@@ -1058,6 +1249,7 @@ class WholeGenomeSimulator:
         )
         rng = self._rng
         read_len_cfg = self.sim_params.read_length
+        has_errors = self._has_errors
         n_written = 0
 
         for fl, fc in zip(unique_lengths, length_counts):
@@ -1077,6 +1269,9 @@ class WholeGenomeSimulator:
                 chrom_indices, return_counts=True,
             )
 
+            read_len = min(read_len_cfg, fl)
+            quals = self._get_quals(read_len)
+
             for ci, cc in zip(unique_chroms, chrom_counts):
                 ci, cc = int(ci), int(cc)
                 ref = self._gdna_refs[ci]
@@ -1086,10 +1281,19 @@ class WholeGenomeSimulator:
                 starts = rng.integers(0, eff_len, size=cc)
                 strands = rng.integers(0, 2, size=cc)
 
+                # Fetch the whole chromosome region we need for this batch
+                # For large batches on the same chromosome, we can vectorize
+                # by fetching a single region if starts are close together,
+                # but genomic positions are typically scattered, so we fetch
+                # per-fragment but batch the FASTQ writing.
+                qnames_batch: list[str] = []
+                r1_seqs_list: list[str] = []
+                r2_seqs_list: list[str] = []
+                bam_data: list[tuple] = []  # for deferred BAM writing
+
                 for j in range(cc):
                     start = int(starts[j])
                     end = start + fl
-                    read_len = min(read_len_cfg, fl)
                     seq = self.fasta.fetch(ref, start, end).upper()
 
                     is_neg = bool(strands[j])
@@ -1100,16 +1304,26 @@ class WholeGenomeSimulator:
                     r1_seq = reverse_complement(seq[-read_len:])
                     r2_seq = seq[:read_len]
 
-                    r1_seq = self._introduce_errors(r1_seq)
-                    r2_seq = self._introduce_errors(r2_seq)
+                    if has_errors:
+                        r1_seq = self._introduce_errors(r1_seq)
+                        r2_seq = self._introduce_errors(r2_seq)
 
-                    qname = f"gdna:{ref}:{start}-{end}:{strand_char}:{n_written}"
-                    quals = "I" * read_len
-
-                    r1_fh.write(f"@{qname}/1\n{r1_seq}\n+\n{quals}\n")
-                    r2_fh.write(f"@{qname}/2\n{r2_seq}\n+\n{quals}\n")
+                    qname = f"gdna:{ref}:{start}-{end}:{strand_char}:{n_written + j}"
+                    qnames_batch.append(qname)
+                    r1_seqs_list.append(r1_seq)
+                    r2_seqs_list.append(r2_seq)
 
                     if bam_fh is not None and ref_id is not None:
+                        bam_data.append((qname, r1_seq, r2_seq, start, end, is_neg))
+
+                # Batch FASTQ writes
+                for k in range(cc):
+                    r1_buf.write_record(qnames_batch[k] + "/1", r1_seqs_list[k], quals)
+                    r2_buf.write_record(qnames_batch[k] + "/2", r2_seqs_list[k], quals)
+
+                # BAM writes
+                if bam_fh is not None and ref_id is not None:
+                    for qname, r1_seq, r2_seq, start, end, is_neg in bam_data:
                         r1_flag = _BASE_R1_FLAG
                         r2_flag = _BASE_R2_FLAG
                         if is_neg:
@@ -1144,7 +1358,7 @@ class WholeGenomeSimulator:
                             tags=gdna_tags,
                         ))
 
-                    n_written += 1
+                n_written += cc
 
         return n_written
 
@@ -1198,6 +1412,8 @@ class WholeGenomeSimulator:
             gzip.open(r1_path, "wt") as r1_fh,
             gzip.open(r2_path, "wt") as r2_fh,
         ):
+            r1_buf = _FastqBuffer(r1_fh)
+            r2_buf = _FastqBuffer(r2_fh)
             if oracle_bam:
                 bam_fh = pysam.AlignmentFile(
                     str(bam_path), "wb", header=self._bam_header,
@@ -1207,20 +1423,24 @@ class WholeGenomeSimulator:
                 for t_idx in sorted(mrna_counts):
                     n_written += self._write_mrna_reads(
                         t_idx, mrna_counts[t_idx],
-                        r1_fh, r2_fh, bam_fh,
+                        r1_buf, r2_buf, bam_fh,
                     )
 
                 # nRNA reads (pre-mRNA fetched once per transcript)
                 for t_idx in sorted(nrna_counts):
                     n_written += self._write_nrna_reads(
                         t_idx, nrna_counts[t_idx],
-                        r1_fh, r2_fh, bam_fh,
+                        r1_buf, r2_buf, bam_fh,
                     )
 
                 # gDNA reads
                 n_written += self._write_gdna_reads(
-                    n_gdna, r1_fh, r2_fh, bam_fh,
+                    n_gdna, r1_buf, r2_buf, bam_fh,
                 )
+
+                # Flush remaining buffered records
+                r1_buf.close()
+                r2_buf.close()
             finally:
                 if bam_fh is not None:
                     bam_fh.close()

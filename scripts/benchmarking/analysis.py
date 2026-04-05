@@ -568,31 +568,54 @@ def write_report(
                 tdf = tx_df[tx_df["tool"] == tool]
                 f.write(f"### {tool}\n\n")
                 f.write(f"- Conditions evaluated: {len(tdf)}\n")
+                f.write(f"- Mean Spearman R: {tdf['spearman_r'].mean():.4f}\n")
                 f.write(f"- Mean Pearson R: {tdf['pearson_r'].mean():.4f} "
                         f"(range: {tdf['pearson_r'].min():.4f}"
                         f"–{tdf['pearson_r'].max():.4f})\n")
-                f.write(f"- Mean Spearman R: {tdf['spearman_r'].mean():.4f}\n")
+                if "log2_spearman_r" in tdf.columns and tdf["log2_spearman_r"].notna().any():
+                    f.write(f"- Mean log₂ Spearman R: "
+                            f"{tdf['log2_spearman_r'].mean():.4f}\n")
+                    f.write(f"- Mean log₂ Pearson R: "
+                            f"{tdf['log2_pearson_r'].mean():.4f}\n")
                 f.write(f"- Mean MAPE: {tdf['mape'].mean():.1f}%\n")
                 f.write(f"- Mean RMSE: {tdf['rmse'].mean():.2f}\n")
                 f.write(f"- Mean MAE: {tdf['mae'].mean():.2f}\n")
-                f.write(f"- Mean WARE: {tdf['ware'].mean():.4f}\n\n")
+                f.write(f"- Mean WARE: {tdf['ware'].mean():.4f}\n")
+                # Count-level metrics if available
+                if "count_spearman_r" in tdf.columns and tdf["count_spearman_r"].notna().any():
+                    f.write(f"- Count Spearman R: "
+                            f"{tdf['count_spearman_r'].mean():.4f}\n")
+                    f.write(f"- Count MAE: "
+                            f"{tdf['count_mae'].mean():.1f}\n")
+                    f.write(f"- Count RMSE: "
+                            f"{tdf['count_rmse'].mean():.1f}\n")
+                f.write("\n")
 
         # Full tables
         if not tx_df.empty:
             f.write("## Transcript-Level Metrics (All Conditions)\n\n")
             cols = [
                 "condition", "tool", "gdna_label", "strand_specificity",
-                "nrna_label", "pearson_r", "spearman_r", "rmse", "mae",
-                "mape", "ware", "precision", "recall", "f1",
+                "nrna_label", "spearman_r", "pearson_r",
+                "log2_spearman_r", "log2_pearson_r",
+                "rmse", "mae", "mape", "ware",
+                "precision", "recall", "f1",
             ]
+            # Add count columns if present
+            count_cols = [
+                "count_spearman_r", "count_pearson_r",
+                "count_mae", "count_rmse",
+            ]
+            cols.extend(c for c in count_cols if c in tx_df.columns)
             _write_md_table(f, tx_df[[c for c in cols if c in tx_df.columns]])
 
         if not gene_df.empty:
             f.write("\n## Gene-Level Metrics (All Conditions)\n\n")
             cols = [
                 "condition", "tool", "gdna_label", "strand_specificity",
-                "nrna_label", "pearson_r", "spearman_r", "rmse", "mae",
-                "mape", "ware",
+                "nrna_label", "spearman_r", "pearson_r",
+                "log2_spearman_r", "log2_pearson_r",
+                "rmse", "mae", "mape", "ware",
             ]
             _write_md_table(f, gene_df[[c for c in cols if c in gene_df.columns]])
 
@@ -612,8 +635,8 @@ def write_report(
                 f.write(f"### {tool}\n\n")
                 tdf = strat_df[strat_df["tool"] == tool]
                 pivot = tdf.groupby("expression_bin").agg(
-                    mean_pearson=("pearson_r", "mean"),
                     mean_spearman=("spearman_r", "mean"),
+                    mean_pearson=("pearson_r", "mean"),
                     mean_mape=("mape", "mean"),
                     mean_mae=("mae", "mean"),
                     mean_ware=("ware", "mean"),
@@ -638,6 +661,7 @@ def write_report(
         if not tx_df.empty and len(tx_df["tool"].unique()) > 1:
             f.write("\n## Cross-Tool Comparison\n\n")
             for metric, label in [
+                ("spearman_r", "Spearman R"),
                 ("pearson_r", "Pearson R"),
                 ("mape", "MAPE"),
                 ("ware", "WARE"),
@@ -822,18 +846,36 @@ def run_analysis(
             if tx_df is not None:
                 # Use TPM columns for comparison: truth mrna_abundance
                 # is already in TPM units (sum ≈ 1,000,000).
-                pred_col = tool.tx_tpm_col or tool.tx_count_col
+                pred_tpm_col = tool.tx_tpm_col or tool.tx_count_col
+                pred_count_col = tool.tx_count_col
+
+                # Build merge columns
+                merge_cols = [tool.tx_id_col, pred_tpm_col]
+                rename_map = {
+                    tool.tx_id_col: "transcript_id",
+                    pred_tpm_col: "predicted",
+                }
+                # Also grab counts if available and different from TPM col
+                has_counts = (
+                    pred_count_col
+                    and pred_count_col != pred_tpm_col
+                    and pred_count_col in tx_df.columns
+                )
+                if has_counts:
+                    merge_cols.append(pred_count_col)
+                    rename_map[pred_count_col] = "pred_count"
+
                 merged = truth_df.merge(
-                    tx_df[[tool.tx_id_col, pred_col]].rename(
-                        columns={
-                            tool.tx_id_col: "transcript_id",
-                            pred_col: "predicted",
-                        }
-                    ),
+                    tx_df[merge_cols].rename(columns=rename_map),
                     on="transcript_id",
                     how="left",
                 )
                 merged["predicted"] = merged["predicted"].fillna(0.0)
+                if has_counts:
+                    merged["pred_count"] = merged["pred_count"].fillna(0.0)
+                elif pred_count_col and pred_count_col in tx_df.columns:
+                    # count col is same as tpm col (e.g. salmon NumReads)
+                    pass
 
                 # Renormalize truth mRNA TPM to sum to 1M for fair comparison.
                 # In nrna_rand conditions, truth mrna_abundance sums to <1M
@@ -854,6 +896,17 @@ def run_analysis(
                 metrics.update(meta)
                 all_tx_metrics.append(metrics)
 
+                # Count-based metrics (if tool provides counts)
+                count_metrics = None
+                if has_counts:
+                    pred_counts = merged["pred_count"].values.astype(np.float64)
+                    # Compute truth counts: scale mrna_abundance by truth_scale
+                    truth_counts = truth_raw * truth_scale
+                    count_metrics = compute_metrics(truth_counts, pred_counts)
+                    # Prefix count metrics
+                    for k, v in count_metrics.items():
+                        metrics[f"count_{k}"] = v
+
                 # Stratified
                 strat = compute_stratified_metrics(truth_arr, pred_arr)
                 for bin_name, bin_metrics in strat.items():
@@ -868,14 +921,12 @@ def run_analysis(
                 merged["truth_tpm"] = merged["mrna_abundance"] * truth_norm_factor
                 detail_mask = (merged["truth_tpm"] > 0) | (merged["predicted"] > 0)
                 if detail_mask.any():
-                    detail = merged.loc[
-                        detail_mask,
-                        [
-                            "transcript_id", "gene_id", "gene_name",
-                            "mrna_abundance", "nrna_abundance",
-                            "truth_tpm", "predicted",
-                        ],
-                    ].copy()
+                    detail_cols = [
+                        "transcript_id", "gene_id", "gene_name",
+                        "mrna_abundance", "nrna_abundance",
+                        "truth_tpm", "predicted",
+                    ]
+                    detail = merged.loc[detail_mask, detail_cols].copy()
                     detail["condition"] = condition
                     detail["tool"] = tool.name
                     detail["residual"] = detail["predicted"] - detail["truth_tpm"]
@@ -885,6 +936,18 @@ def run_analysis(
                         detail["abs_error"] / detail["truth_tpm"],
                         np.nan,
                     )
+                    # Add count columns if available
+                    if has_counts:
+                        detail["pred_count"] = merged.loc[
+                            detail_mask, "pred_count"
+                        ].values
+                        detail["truth_count"] = (
+                            merged.loc[detail_mask, "mrna_abundance"].values
+                            * truth_scale
+                        )
+                        detail["count_abs_error"] = np.abs(
+                            detail["pred_count"] - detail["truth_count"]
+                        )
                     all_per_tx_rows.append(detail)
 
             # ── Gene-level (TPM-to-TPM) ────────────────────────

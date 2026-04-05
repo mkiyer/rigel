@@ -139,6 +139,8 @@ def run_salmon(
         "-p", str(cfg.threads),
         "--validateMappings",
     ]
+    if cfg.annotation_gtf:
+        cmd.extend(["--geneMap", str(cfg.annotation_gtf)])
 
     cmd_str = shlex.join(cmd)
 

@@ -96,9 +96,14 @@ class BenchmarkConfig:
     seed: int = 42
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
+    # Annotation GTF (for salmon --geneMap)
+    annotation_gtf: str | None = None
+
     # External tool indexes (optional)
     salmon_index: str | None = None
     kallisto_index: str | None = None
+    star_index: str | None = None
+    star_params_file: str | None = None
 
     @property
     def runs_dir(self) -> Path:
@@ -180,9 +185,14 @@ def load_config(path: str | Path) -> BenchmarkConfig:
         output_dir=analysis_raw.get("output_dir", "results/benchmark_report"),
     )
 
+    # Annotation GTF
+    annotation_gtf = raw.get("annotation_gtf")
+
     # External tool indexes
     salmon_index = raw.get("salmon_index")
     kallisto_index = raw.get("kallisto_index")
+    star_index = raw.get("star_index")
+    star_params_file = raw.get("star_params_file")
 
     return BenchmarkConfig(
         benchmark_dir=benchmark_dir,
@@ -193,6 +203,9 @@ def load_config(path: str | Path) -> BenchmarkConfig:
         threads=threads,
         seed=seed,
         analysis=analysis,
+        annotation_gtf=annotation_gtf,
         salmon_index=salmon_index,
         kallisto_index=kallisto_index,
+        star_index=star_index,
+        star_params_file=star_params_file,
     )

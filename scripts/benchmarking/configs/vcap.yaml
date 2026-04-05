@@ -19,6 +19,8 @@ bam_relpath: minimap2/aligned.bam
 
 salmon_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/salmon_index
 kallisto_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/kallisto.idx
+annotation_gtf: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genes_controls.gtf.gz
+star_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/star_index
 
 # ── Global defaults ───────────────────────────────────────────────
 
@@ -41,6 +43,17 @@ rigel_configs:
   oracle:
     em_mode: vbem
     bam_relpath: sim_oracle.bam
+
+  # STAR alignment — VBEM
+  star_vbem:
+    em_mode: vbem
+    emit_locus_stats: true
+    bam_relpath: star/aligned.bam
+
+  # STAR alignment — MAP
+  star_map:
+    em_mode: map
+    bam_relpath: star/aligned.bam
 
 # ── Analysis ──────────────────────────────────────────────────────
 

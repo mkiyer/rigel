@@ -107,6 +107,26 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+# ─── report ──────────────────────────────────────────────────────
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from .report import generate_report
+
+    analysis_dir = Path(args.analysis_dir)
+    out_dir = Path(args.output) if args.output else analysis_dir
+    title = args.title or f"Benchmark Report — {analysis_dir.name}"
+    t0 = time.monotonic()
+    generate_report(
+        analysis_dir, out_dir,
+        title=title,
+        figs_only=args.figs_only,
+    )
+    elapsed = time.monotonic() - t0
+    print(f"\nReport generated in {elapsed:.1f}s → {out_dir}")
+    return 0
+
+
 # ─── status ──────────────────────────────────────────────────────
 
 
@@ -204,13 +224,13 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # align
-    align_p = subparsers.add_parser("align", help="Align FASTQ reads (minimap2)")
+    align_p = subparsers.add_parser("align", help="Align FASTQ reads (minimap2, star)")
     _add_common_args(align_p)
     align_p.add_argument("--force", action="store_true", help="Re-align even if BAM exists")
     align_p.add_argument("--dry-run", action="store_true", help="Print commands without executing")
     align_p.add_argument(
         "--aligners", nargs="*", default=None,
-        help="Aligners to run (default: minimap2). Options: minimap2, oracle",
+        help="Aligners to run (default: minimap2). Options: minimap2, star, oracle",
     )
     align_p.set_defaults(func=cmd_align)
 
@@ -241,6 +261,20 @@ def main() -> int:
     _add_common_args(analyze_p)
     analyze_p.add_argument("-o", "--output", default=None, help="Output directory for reports")
     analyze_p.set_defaults(func=cmd_analyze)
+
+    # report (publication figures + HTML)
+    report_p = subparsers.add_parser(
+        "report", help="Generate publication-quality figures and HTML report",
+    )
+    report_p.add_argument(
+        "analysis_dir",
+        help="Path to analysis output directory (containing transcript_metrics.csv, etc.)",
+    )
+    report_p.add_argument("-o", "--output", default=None, help="Output directory (default: analysis_dir)")
+    report_p.add_argument("--title", default=None, help="Report title")
+    report_p.add_argument("--figs-only", action="store_true", help="Generate figures only, no HTML")
+    report_p.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
+    report_p.set_defaults(func=cmd_report)
 
     # status
     status_p = subparsers.add_parser("status", help="Show benchmark status")

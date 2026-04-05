@@ -1,3 +1,0 @@
-condition,tool,gdna_label,strand_specificity,nrna_label,mrna_frag_truth,nrna_frag_truth,gdna_frag_truth,total_frag_truth,mrna_pred,nrna_pred,gdna_pred,gdna_em_pred,intergenic_pred,mrna_error,nrna_error,gdna_error,mrna_rel_error,nrna_rel_error,gdna_rel_error,strand_specificity_estimated,gdna_density_estimated
-gdna_high_ss_0.90_nrna_none,rigel/map,high,0.9,none,50000000,0,25000000,75000000,49970646.0,2186473.0,21309015.0,13121951.0,8187064,-29354.0,2186473.0,-3690985.0,-0.00058708,,-0.1476394,0.899989,0.01046138
-gdna_high_ss_0.90_nrna_none,rigel/vbem,high,0.9,none,50000000,0,25000000,75000000,49970443.0,2136992.0,21358699.0,13171635.0,8187064,-29557.0,2136992.0,-3641301.0,-0.00059114,,-0.14565204,0.899989,0.01046138

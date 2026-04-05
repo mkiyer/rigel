@@ -1,0 +1,17 @@
+genomeLoad NoSharedMemory
+outSAMtype BAM Unsorted
+outSAMstrandField intronMotif
+outSAMattributes NH HI AS NM MD MC
+outSAMunmapped Within KeepPairs
+outFilterMultimapNmax 50
+peOverlapNbasesMin 10
+alignSplicedMateMapLminOverLmate 0.5
+alignSJstitchMismatchNmax 5 -1 5 5
+chimSegmentMin 10
+chimOutType WithinBAM HardClip
+chimJunctionOverhangMin 10
+chimScoreDropMax 30
+chimScoreJunctionNonGTAG 0
+chimScoreSeparation 1
+chimSegmentReadGapMax 3
+chimMultimapNmax 50

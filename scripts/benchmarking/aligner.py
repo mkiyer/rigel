@@ -172,9 +172,97 @@ def align_minimap2(
         )
 
 
+def align_star(
+    star_index: str,
+    fastq_r1: Path,
+    fastq_r2: Path,
+    out_bam: Path,
+    *,
+    params_file: Path | None = None,
+    threads: int = 8,
+    conda_env: str = "star",
+) -> None:
+    """Align paired-end short reads with STAR → name-sorted BAM.
+
+    STAR is invoked via ``conda run -n <conda_env>`` because it lives in
+    a separate conda environment.  Output is ``BAM Unsorted`` (from the
+    params file), then piped through ``samtools sort -n`` for name-sorting.
+
+    Key STAR settings (from the params file):
+
+    - ``outFilterMultimapNmax 50`` — report up to 50 multimappers
+    - ``outSAMattributes NH HI AS NM MD MC`` — tags required by rigel
+    - Chimeric alignment enabled for chimera detection
+    """
+    out_dir = out_bam.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # STAR writes to outFileNamePrefix, we use a temp subdirectory
+    star_tmp = out_dir / "_star_tmp"
+    star_tmp.mkdir(parents=True, exist_ok=True)
+    prefix = str(star_tmp) + "/"
+
+    star_cmd = [
+        "conda", "run", "-n", conda_env,
+        "STAR",
+        "--runThreadN", str(threads),
+        "--genomeDir", str(star_index),
+        "--readFilesIn", str(fastq_r1), str(fastq_r2),
+        "--readFilesCommand", "gunzip", "-c",
+        "--outFileNamePrefix", prefix,
+    ]
+    if params_file is not None:
+        star_cmd.extend(["--parametersFiles", str(params_file)])
+
+    sort_cmd = [
+        _find_tool("samtools"), "sort", "-n",
+        "-@", str(max(1, threads // 2)),
+        "-o", str(out_bam),
+        str(star_tmp / "Aligned.out.bam"),
+    ]
+
+    logger.info("STAR → %s", out_bam)
+    logger.info("STAR cmd: %s", shlex.join(star_cmd))
+
+    # Run STAR (writes Aligned.out.bam to star_tmp)
+    result = subprocess.run(star_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        stderr_tail = result.stderr[-1000:] if result.stderr else ""
+        raise RuntimeError(
+            f"STAR failed (exit {result.returncode}): {stderr_tail}"
+        )
+
+    star_bam = star_tmp / "Aligned.out.bam"
+    if not star_bam.exists():
+        raise RuntimeError(f"STAR produced no BAM: {star_bam}")
+
+    # Name-sort the output
+    logger.info("samtools sort -n → %s", out_bam)
+    result = subprocess.run(sort_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"samtools sort failed (exit {result.returncode}): "
+            f"{result.stderr[-500:]}"
+        )
+
+    # Copy STAR log for diagnostics, then clean up temp dir
+    log_final = star_tmp / "Log.final.out"
+    if log_final.exists():
+        shutil.copy2(log_final, out_dir / "Log.final.out")
+    sj_tab = star_tmp / "SJ.out.tab"
+    if sj_tab.exists():
+        shutil.copy2(sj_tab, out_dir / "SJ.out.tab")
+
+    shutil.rmtree(star_tmp, ignore_errors=True)
+
+
 def _oracle_bam_path(cond_dir: Path) -> Path:
     """Return the oracle BAM path for a condition directory."""
     return cond_dir / "sim_oracle.bam"
+
+
+# Default STAR params file, relative to this module
+_DEFAULT_STAR_PARAMS = Path(__file__).parent / "configs" / "star_params.txt"
 
 
 def run_alignment(
@@ -190,7 +278,7 @@ def run_alignment(
     Parameters
     ----------
     aligner : str
-        ``"minimap2"`` or ``"oracle"``.
+        ``"minimap2"``, ``"star"``, or ``"oracle"``.
     """
     cond_dir = cfg.condition_dir(condition)
     manifest = cfg.load_manifest()
@@ -288,6 +376,89 @@ def run_alignment(
             logger.error("%s / minimap2 failed: %s", condition, exc)
             return AlignResult(
                 condition=condition, aligner="minimap2",
+                success=False, elapsed=elapsed,
+                error=str(exc),
+            )
+
+    elif aligner == "star":
+        # Output BAM path
+        out_dir = cond_dir / "star"
+        out_bam = out_dir / "aligned.bam"
+
+        if not force and out_bam.exists():
+            logger.info("Skipping %s / star — BAM exists", condition)
+            return AlignResult(
+                condition=condition, aligner="star",
+                success=True, skipped=True,
+                bam_path=str(out_bam),
+            )
+
+        star_index = cfg.star_index
+        if not star_index:
+            return AlignResult(
+                condition=condition, aligner="star",
+                success=False,
+                error="No star_index configured",
+            )
+
+        # Find FASTQ files
+        r1 = cond_dir / "sim_R1.fq.gz"
+        r2 = cond_dir / "sim_R2.fq.gz"
+        if not r1.exists() or not r2.exists():
+            return AlignResult(
+                condition=condition, aligner="star",
+                success=False,
+                error=f"FASTQ not found: {r1}",
+            )
+
+        # Resolve params file
+        params_file = _DEFAULT_STAR_PARAMS
+        if cfg.star_params_file:
+            params_file = Path(cfg.star_params_file)
+        if not params_file.exists():
+            return AlignResult(
+                condition=condition, aligner="star",
+                success=False,
+                error=f"STAR params file not found: {params_file}",
+            )
+
+        cmd_str = (
+            f"conda run -n star STAR --runThreadN {cfg.threads} "
+            f"--genomeDir {star_index} "
+            f"--readFilesIn {r1} {r2} --readFilesCommand gunzip -c "
+            f"--parametersFiles {params_file} "
+            f"| samtools sort -n -o {out_bam}"
+        )
+
+        if dry_run:
+            print(f"[dry-run] {cmd_str}")
+            return AlignResult(
+                condition=condition, aligner="star",
+                success=True, skipped=True,
+            )
+
+        print(f"  Aligning: {condition} / star", flush=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        t0 = time.monotonic()
+        try:
+            align_star(
+                star_index, r1, r2, out_bam,
+                params_file=params_file,
+                threads=cfg.threads,
+            )
+            elapsed = time.monotonic() - t0
+            logger.info("%s / star completed in %.1fs", condition, elapsed)
+            return AlignResult(
+                condition=condition, aligner="star",
+                success=True, elapsed=elapsed,
+                bam_path=str(out_bam),
+            )
+        except Exception as exc:
+            elapsed = time.monotonic() - t0
+            logger.error("%s / star failed: %s", condition, exc)
+            return AlignResult(
+                condition=condition, aligner="star",
                 success=False, elapsed=elapsed,
                 error=str(exc),
             )
