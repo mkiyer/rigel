@@ -530,7 +530,7 @@ def _run_locus_em_partitioned(
             )
             for p in parts
         ]
-        locus_t_lists = [l.transcript_indices for l in batch_loci]
+        locus_t_lists = [loc.transcript_indices for loc in batch_loci]
 
         return estimator.run_batch_locus_em_partitioned(
             partition_tuples,
@@ -545,19 +545,19 @@ def _run_locus_em_partitioned(
         )
 
     # Classify mega vs normal
-    total_work = sum(
-        len(l.transcript_indices) * partitions[l.locus_id].n_units
-        for l in loci
-    )
+    locus_work = {
+        loc.locus_id: len(loc.transcript_indices) * partitions[loc.locus_id].n_units
+        for loc in loci
+    }
+    total_work = sum(locus_work.values())
     fair_share = total_work // n_threads if n_threads > 1 else total_work + 1
 
     mega_loci = sorted(
-        [l for l in loci
-         if len(l.transcript_indices) * partitions[l.locus_id].n_units >= fair_share],
-        key=lambda l: len(l.transcript_indices) * partitions[l.locus_id].n_units,
+        [loc for loc in loci if locus_work[loc.locus_id] >= fair_share],
+        key=lambda loc: locus_work[loc.locus_id],
         reverse=True,
     )
-    mega_ids = {l.locus_id for l in mega_loci}
+    mega_ids = {loc.locus_id for loc in mega_loci}
 
     total_gdna_em = 0.0
 
@@ -593,14 +593,14 @@ def _run_locus_em_partitioned(
         )
 
     # Phase B: Normal loci (one batched call)
-    normal_loci = [l for l in loci if l.locus_id not in mega_ids]
+    normal_loci = [loc for loc in loci if loc.locus_id not in mega_ids]
     if normal_loci:
-        normal_parts = [partitions[l.locus_id] for l in normal_loci]
+        normal_parts = [partitions[loc.locus_id] for loc in normal_loci]
         normal_gammas = np.array(
-            [locus_gammas[l.locus_id] for l in normal_loci], dtype=np.float64
+            [locus_gammas[loc.locus_id] for loc in normal_loci], dtype=np.float64
         )
         normal_spans = np.array(
-            [l.gdna_span for l in normal_loci], dtype=np.int64
+            [loc.gdna_span for loc in normal_loci], dtype=np.int64
         )
         em_result = _call_batch_em(
             normal_parts, normal_loci, normal_gammas, normal_spans,
@@ -627,7 +627,7 @@ def _run_locus_em_partitioned(
 
     estimator._gdna_em_total = total_gdna_em
 
-    n_total_units = sum(len(l.unit_indices) for l in loci)
+    n_total_units = sum(len(loc.unit_indices) for loc in loci)
     logger.info(
         f"[DONE] Per-locus EM (partitioned): {len(loci)} loci "
         f"({len(mega_loci)} mega), "
@@ -741,7 +741,6 @@ def quant_from_buffer(
         )
 
         # Phase 4 (NEW): Array-by-array scatter + incremental free
-        n_em_units = em_data.n_units
         partitions = partition_and_free(em_data, loci)
         del em_data
         gc.collect()

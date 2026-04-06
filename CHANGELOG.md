@@ -5,6 +5,98 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-05
+
+### Added
+
+- **Annotated BAM: gene name tag (`ZR`)**: the annotated BAM now writes a `ZR:Z`
+  tag containing the gene name/symbol for the assigned fragment (`"."` for
+  intergenic), enabling fast human-readable lookups without a separate index
+  query.
+
+- **Annotated BAM: locus ID tag (`ZL`)**: new `ZL:i` integer tag records the
+  locus ID (zero-based) for each resolved fragment (`-1` if no locus was
+  assigned). Enables grouping and filtering by locus in downstream tools.
+
+- **Annotated BAM: filtered-read passthrough**: reads filtered during BAM
+  scanning (QC-fail, unmapped, duplicates, unpaired) are now written through
+  to the annotated BAM without annotation tags. Previously these records were
+  silently dropped, making the output read count differ from the input. The
+  summary JSON gains a corresponding `n_filtered_passthrough` counter.
+
+- **`RigelIndex.nrna_to_transcripts()` / `nrna_to_genes()`**: new lookup
+  methods on the index object that, given an nRNA entity ID, return the
+  contributing transcript IDs or `(gene_id, gene_name)` pairs, respectively.
+  Useful for interpreting nRNA quantification results.
+
+- **VBEM clamp floor (`VBEM_CLAMP_FLOOR = 0.1`)**: VBEM SQUAREM now clamps
+  all alpha values to a minimum of 0.1 after each extrapolation step.
+  Prevents components from entering the digamma absorbing regime
+  (`ψ(α) ≈ −1/α` for small `α`) from which recovery is impossible in
+  double precision, eliminating the catastrophic zeroing failure mode that
+  caused spurious zero-abundance estimates for lowly expressed transcripts.
+
+- **Per-locus profiling statistics**: `AbundanceEstimator` gains an
+  `emit_locus_stats` option that populates `estimator.locus_stats` with
+  per-locus timing breakdowns (extract, bias, build_ec, warm_start,
+  SQUAREM, assign phases in microseconds) and iteration counts. Useful for
+  diagnosing bottlenecks on mega-loci.
+
+- **AVX2 4-wide `fast_exp`**: `fast_exp.h` now provides a 4-wide double-
+  precision `fast_exp_avx2()` using Cody-Waite range reduction and a
+  degree-11 Horner polynomial with FMA. Paired with the existing AVX-512
+  8-wide path, the E-step automatically selects the widest available SIMD
+  lane width at compile time.
+
+### Changed
+
+- **Annotated BAM: `ZP` pool tag replaced by `ZF` assignment flags bitfield**
+  *(breaking)*: the string pool tag `ZP` (`mRNA`/`nRNA`/`gDNA`/`intergenic`/
+  `chimeric`) is replaced by `ZF:i`, a compact integer bitfield:
+  - bit 0 (`0x1`) — fragment was scored and assigned by EM (`is_resolved`)
+  - bit 1 (`0x2`) — EM gDNA component won (`is_gdna`)
+  - bit 2 (`0x4`) — assigned transcript is single-exon (`is_nrna`)
+  - bit 3 (`0x8`) — assigned transcript is a rigel-generated nRNA span (`is_synthetic`)
+
+  Common values: `0` = unresolved/intergenic, `1` = multi-exon mRNA, `3` =
+  gDNA, `5` = annotated single-exon nRNA, `13` = synthetic nRNA span. The old
+  `ZP` string decoding is no longer supported.
+
+- **nRNA transcript classification redesigned** *(breaking)*: the index
+  transcript table columns `is_synthetic_nrna` and `is_nascent_equiv` are
+  replaced by a cleaner two-column scheme:
+  - `is_nrna` — `True` for any single-exon transcript used as an nRNA
+    component (both annotated transcripts and generated spans)
+  - `is_synthetic` — `True` only for rigel-generated nRNA spans
+    (`RIGEL_NRNA_*` IDs); `False` for annotated single-exon transcripts
+
+  Annotated single-exon transcripts now correctly contribute to fragment-
+  length model training (only synthetic spans are excluded, as their
+  genomic spans do not represent real insert sizes).
+
+- **Partition-native EM dispatch**: the internal `batch_locus_em` C++ entry
+  point is replaced by `batch_locus_em_partitioned`, which accepts
+  pre-partitioned per-locus CSR arrays (`LocusPartition` objects) produced
+  by the new `partition_and_free()` helper. Global CSR arrays are freed
+  array-by-array immediately after scatter, substantially reducing peak
+  memory usage on large samples without changing quantification results.
+
+- **E-step memory layout**: the heap-allocated `ec.scratch` matrix (one row
+  per fragment per candidate) is eliminated. The E-step now uses a
+  stack-local row buffer (≤512 candidates) or a small heap vector for wider
+  equivalence classes, combined with fused per-column Kahan accumulators that
+  accumulate column sums in a single pass. Reduces memory traffic by
+  ~50% for typical loci and improves cache utilization.
+
+- **`splice_type` value rename**: the splice-type label `"ambiguous"` is
+  renamed to `"unknown"` throughout the annotated BAM and output tables for
+  clarity.
+
+### Fixed
+
+- **nRNA summary bug**: fixed an accounting error in the nRNA quantification
+  summary that caused synthetic nRNA span counts to be misreported.
+
 ## [0.3.3] - 2026-03-25
 
 ### Added

@@ -331,8 +331,8 @@ def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
         )
         for p in [partitions[i] for i in range(len(loci))]
     ]
-    locus_t_lists = [l.transcript_indices for l in loci]
-    gdna_spans = np.array([l.gdna_span for l in loci], dtype=np.int64)
+    locus_t_lists = [loc.transcript_indices for loc in loci]
+    gdna_spans = np.array([loc.gdna_span for loc in loci], dtype=np.int64)
 
     total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
         partition_tuples, locus_t_lists,

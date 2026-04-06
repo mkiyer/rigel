@@ -1,9 +1,8 @@
 """Tests for partition scatter functions and partition-native EM equivalence."""
 
 import numpy as np
-import pytest
 
-from rigel.scored_fragments import Locus, LocusPartition, ScoredFragments
+from rigel.scored_fragments import Locus, ScoredFragments
 from rigel.partition import partition_and_free
 from rigel.native import (
     build_partition_offsets,
@@ -53,7 +52,6 @@ def _make_loci(n_units, n_transcripts_per_locus, rng):
     """Create loci that partition all units and transcripts."""
     # Simple 2-locus case: split units and transcripts in half
     n_loci = len(n_transcripts_per_locus)
-    total_t = sum(n_transcripts_per_locus)
 
     # Assign units round-robin to loci
     unit_assignments = np.arange(n_units) % n_loci

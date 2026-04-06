@@ -202,6 +202,13 @@ class TestDistinguishableParalogs:
              "abundance": g2_abund},
         ])
         sc.genome.edit(5000, sc.genome[500:800])
+        # Spliced helper gene anchors calibration (provides splice signal
+        # so the algebraic fallback doesn't misclassify RNA as gDNA).
+        sc.add_gene("g_helper", "+", [
+            {"t_id": "t_helper",
+             "exons": [(8000, 8300), (8700, 9000)],
+             "abundance": 50},
+        ])
         sc.add_gene("g_ctrl", "-", [
             {"t_id": "t_ctrl", "exons": [(9500, 9800)], "abundance": 0},
         ])

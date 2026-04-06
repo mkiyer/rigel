@@ -21,7 +21,6 @@ import pandas as pd
 
 from .config import EMConfig, TranscriptGeometry
 from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
-from .scored_fragments import ScoredFragments
 from .splice import (
     SpliceType,
     SpliceStrandCol,

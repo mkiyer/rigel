@@ -1070,7 +1070,37 @@ def calibrate_gdna(
         spliced = stats["n_spliced"] > 0
         fallback[spliced] = 0.0
         unspliced_only = (~spliced) & (stats["n_total"] > 0)
-        fallback[unspliced_only] = 1.0
+
+        # Strand-aware classification for unspliced-only regions.
+        # When the library is stranded (SS > 0.55), use strand balance
+        # to distinguish RNA from gDNA.  For stranded libraries, default
+        # unspliced-only regions to RNA (γ=0) and only set γ=1 when
+        # strand evidence favors gDNA (balanced strands).  For unstranded
+        # libraries, default unspliced-only regions to gDNA (γ=1).
+        if strand_specificity > 0.55:
+            # Stranded: default to RNA, reclassify to gDNA only if
+            # strand LLR favors gDNA (balanced reads).
+            fallback[unspliced_only] = 0.0
+            sense_frac = compute_sense_fraction(stats)
+            valid_strand = (
+                np.isfinite(sense_frac)
+                & unspliced_only
+                & (stats["n_unspliced"] >= 5)
+            )
+            if valid_strand.any():
+                sf = sense_frac[valid_strand]
+                n = stats["n_unspliced"][valid_strand]
+                k = sf * n  # sense-strand count
+                ss_clamped = min(strand_specificity, 0.99)
+                # LLR > 0 means RNA more likely; LLR < 0 means gDNA
+                llr = k * np.log(ss_clamped / 0.5) + (n - k) * np.log(
+                    (1.0 - ss_clamped) / 0.5
+                )
+                fallback[valid_strand] = np.where(llr > 0, 0.0, 1.0)
+        else:
+            # Unstranded: no strand signal, default unspliced to gDNA
+            fallback[unspliced_only] = 1.0
+
         has_data = stats["n_total"] > 0
         fallback_pi = float(np.mean(fallback[has_data])) if has_data.any() else 0.5
 

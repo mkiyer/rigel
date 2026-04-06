@@ -206,8 +206,11 @@ class FragmentScorer:
         _eps = max(pruning_min_posterior, 1e-300)
         max_ll_delta = -math.log(_eps) if _eps < 1.0 else 0.0
 
-        # Build is_nrna array for pool separation
-        t_is_nrna_arr = index.t_df["is_nrna"].values.astype(np.uint8)
+        # Build is_nrna array for pool separation.
+        # Only synthetic (rigel-generated) nRNA spans belong to the nRNA pool.
+        # Annotated single-exon transcripts are valid mRNA and must be scored
+        # as mRNA even though they can serve as nRNA components.
+        t_is_nrna_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
 
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
