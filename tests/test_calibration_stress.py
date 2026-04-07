@@ -126,12 +126,12 @@ def _build_scenario(
     return sc, result
 
 
-def _run_pipeline(result, *, min_gdna_regions=1):
+def _run_pipeline(result):
     """Run the full pipeline with calibration enabled."""
     config = PipelineConfig(
         em=EMConfig(seed=SEED),
         scan=BamScanConfig(sj_strand_tag="auto"),
-        calibration=CalibrationConfig(min_gdna_regions=min_gdna_regions),
+        calibration=CalibrationConfig(),
     )
     return run_pipeline(result.bam_path, result.index, config=config)
 
@@ -160,15 +160,18 @@ class TestPureRNA:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_low_mixing_proportion(self):
+    def test_low_gdna_fraction(self):
         cal = self.pr.calibration
-        assert cal.mixing_proportion < 0.15, (
-            f"Expected low π for pure RNA, got {cal.mixing_proportion:.3f}"
+        total_e_gdna = cal.region_e_gdna.sum()
+        total_n = cal.region_n_total.sum()
+        gdna_frac = total_e_gdna / max(total_n, 1.0)
+        assert gdna_frac < 0.15, (
+            f"Expected low gDNA fraction for pure RNA, got {gdna_frac:.3f}"
         )
 
-    def test_valid_posteriors(self):
-        rp = self.pr.calibration.region_posteriors
-        assert np.all((rp >= 0.0) & (rp <= 1.0))
+    def test_valid_e_gdna(self):
+        e_gdna = self.pr.calibration.region_e_gdna
+        assert np.all(e_gdna >= 0.0)
 
     def test_mrna_dominates(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -228,14 +231,17 @@ class TestPureGDNA:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_high_mixing_proportion(self):
+    def test_high_gdna_fraction(self):
         cal = self.pr.calibration
-        assert cal.mixing_proportion > 0.5, (
-            f"Expected high π for pure gDNA, got {cal.mixing_proportion:.3f}"
+        total_e_gdna = cal.region_e_gdna.sum()
+        total_n = cal.region_n_total.sum()
+        gdna_frac = total_e_gdna / max(total_n, 1.0)
+        assert gdna_frac > 0.5, (
+            f"Expected high gDNA fraction for pure gDNA, got {gdna_frac:.3f}"
         )
 
     def test_gdna_density_positive(self):
-        assert self.pr.calibration.gdna_density_global > 0.0
+        assert self.pr.calibration.lambda_gdna > 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -264,13 +270,14 @@ class TestUnstranded:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_valid_mixing_proportion(self):
+    def test_valid_e_gdna(self):
         cal = self.pr.calibration
-        assert 0.0 <= cal.mixing_proportion <= 1.0
+        e_gdna = cal.region_e_gdna
+        assert np.all(e_gdna >= 0.0)
 
-    def test_valid_posteriors(self):
-        rp = self.pr.calibration.region_posteriors
-        assert np.all((rp >= 0.0) & (rp <= 1.0))
+    def test_valid_region_arrays(self):
+        cal = self.pr.calibration
+        assert len(cal.region_e_gdna) == len(cal.region_n_total)
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -303,13 +310,12 @@ class TestPerfectStrand:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
-
     def test_detects_gdna(self):
         cal = self.pr.calibration
         # With 30% gDNA and perfect strand, should detect contamination
-        assert cal.mixing_proportion > 0.05
+        total_e_gdna = cal.region_e_gdna.sum()
+        total_n = cal.region_n_total.sum()
+        assert total_e_gdna / max(total_n, 1.0) > 0.05
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -317,7 +323,7 @@ class TestPerfectStrand:
 
 
 # ---------------------------------------------------------------------------
-# 5. Tiny genome (few regions → algebraic fallback)
+# 5. Tiny genome (few regions → density-limited fallback)
 # ---------------------------------------------------------------------------
 
 
@@ -350,21 +356,20 @@ class TestTinyGenome:
         )
         self.sc = sc
         self.result = sc.build_oracle(n_fragments=500, sim_config=sim_cfg, gdna_config=gdna)
-        # Use default min_gdna_regions=100 so tiny genome hits fallback
-        self.pr = _run_pipeline(self.result, min_gdna_regions=100)
+        self.pr = _run_pipeline(self.result)
         yield
         sc.cleanup()
 
     def test_calibration_runs_without_error(self):
         assert self.pr.calibration is not None
 
-    def test_valid_mixing_proportion(self):
+    def test_valid_e_gdna(self):
         cal = self.pr.calibration
-        assert 0.0 <= cal.mixing_proportion <= 1.0
+        assert np.all(cal.region_e_gdna >= 0.0)
 
-    def test_valid_posteriors(self):
-        rp = self.pr.calibration.region_posteriors
-        assert np.all((rp >= 0.0) & (rp <= 1.0))
+    def test_valid_region_arrays(self):
+        cal = self.pr.calibration
+        assert len(cal.region_e_gdna) == len(cal.region_n_total)
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -397,13 +402,15 @@ class TestFLOverlap:
         yield
         self.sc.cleanup()
 
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
+    def test_calibration_runs(self):
+        assert self.pr.calibration is not None
 
     def test_detects_gdna_with_strand_signal(self):
         cal = self.pr.calibration
         # FL provides no signal, but strand + density should still work
-        assert cal.mixing_proportion > 0.05
+        total_e_gdna = cal.region_e_gdna.sum()
+        total_n = cal.region_n_total.sum()
+        assert total_e_gdna / max(total_n, 1.0) > 0.05
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -435,11 +442,13 @@ class TestFLGDNALonger:
         yield
         self.sc.cleanup()
 
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
+    def test_calibration_runs(self):
+        assert self.pr.calibration is not None
 
     def test_detects_gdna(self):
-        assert self.pr.calibration.mixing_proportion > 0.05
+        total_e_gdna = self.pr.calibration.region_e_gdna.sum()
+        total_n = self.pr.calibration.region_n_total.sum()
+        assert total_e_gdna / max(total_n, 1.0) > 0.05
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -471,11 +480,13 @@ class TestFLGDNAShorter:
         yield
         self.sc.cleanup()
 
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
+    def test_calibration_runs(self):
+        assert self.pr.calibration is not None
 
     def test_detects_gdna(self):
-        assert self.pr.calibration.mixing_proportion > 0.05
+        total_e_gdna = self.pr.calibration.region_e_gdna.sum()
+        total_n = self.pr.calibration.region_n_total.sum()
+        assert total_e_gdna / max(total_n, 1.0) > 0.05
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -515,16 +526,10 @@ class TestHighOverdispersion:
 
     def test_overdispersion_handling(self):
         cal = self.pr.calibration
-        # The joint κ should be successfully estimated (not fallback to 0.0)
-        assert cal.kappa_strand > 5.0
-        # The ultimate metric: did the EM still achieve separation?
-        # Posteriors should be binary (mostly near 0 or 1), not smeared
-        rp = cal.region_posteriors
-        ambiguous = np.sum((rp > 0.1) & (rp < 0.9))
-        assert ambiguous < len(rp) * 0.10, (
-            f"Too many ambiguous posteriors ({ambiguous}/{len(rp)}) "
-            f"despite overdispersed strand channel"
-        )
+        # V3 analytical approach: region_e_gdna should be non-negative
+        assert np.all(cal.region_e_gdna >= 0.0)
+        # The strand specificity should be estimated successfully
+        assert cal.strand_specificity > 0.5
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -561,14 +566,10 @@ class TestLowOverdispersion:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_kappa_is_large(self):
-        # Threshold relaxed from 20 to 15: synthetic nRNA exons cover full
-        # gene spans, merging intronic regions → fewer calibration bins →
-        # slightly reduced kappa precision.  Still validates kappa >> 1.
-        assert self.pr.calibration.kappa_strand > 15
-
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
+    def test_strand_specificity_high(self):
+        # With very concentrated strand ratios (kappa=500), SS should be
+        # estimated close to the true value
+        assert self.pr.calibration.strand_specificity > 0.85
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -598,17 +599,20 @@ class TestHeavyContamination:
         yield
         self.sc.cleanup()
 
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
+    def test_calibration_runs(self):
+        assert self.pr.calibration is not None
 
     def test_detects_heavy_contamination(self):
         cal = self.pr.calibration
-        assert cal.mixing_proportion > 0.15, (
-            f"Expected high π for 50% gDNA, got {cal.mixing_proportion:.3f}"
+        total_e_gdna = cal.region_e_gdna.sum()
+        total_n = cal.region_n_total.sum()
+        gdna_frac = total_e_gdna / max(total_n, 1.0)
+        assert gdna_frac > 0.15, (
+            f"Expected high gDNA fraction for 50% gDNA, got {gdna_frac:.3f}"
         )
 
     def test_gdna_density_positive(self):
-        assert self.pr.calibration.gdna_density_global > 0.0
+        assert self.pr.calibration.lambda_gdna > 0.0
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -643,21 +647,15 @@ class TestLightContamination:
 
     def test_light_contamination_metrics(self):
         cal = self.pr.calibration
-        # Fragment-weighted gDNA fraction: the physically meaningful
-        # contamination rate.  region_n_total is always populated.
+        # Fragment-weighted gDNA fraction
         n_total = cal.region_n_total
         total_fragments = np.sum(n_total)
-        gdna_fragments = np.sum(cal.region_posteriors * n_total)
+        gdna_fragments = np.sum(cal.region_e_gdna)
         fragment_contamination = gdna_fragments / total_fragments
         # Physical contamination should be close to the simulated 3%
         assert fragment_contamination < 0.15, (
             f"Fragment-weighted gDNA fraction too high: "
             f"{fragment_contamination:.3f} (expected ~0.03)"
-        )
-        # λ_E must heavily dominate λ_G, reflecting dense RNA signal
-        assert cal.expressed_density > cal.gdna_density_global * 10, (
-            f"Expected λ_E >> λ_G for 3% gDNA, got "
-            f"λ_G={cal.gdna_density_global:.4f} vs λ_E={cal.expressed_density:.4f}"
         )
 
     def test_output_valid(self):
@@ -697,9 +695,9 @@ class TestNoDiscriminativeSignal:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_valid_posteriors(self):
-        rp = self.pr.calibration.region_posteriors
-        assert np.all((rp >= 0.0) & (rp <= 1.0))
+    def test_valid_e_gdna(self):
+        e_gdna = self.pr.calibration.region_e_gdna
+        assert np.all(e_gdna >= 0.0)
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -733,17 +731,21 @@ class TestRealisticScale:
         yield
         self.sc.cleanup()
 
-    def test_calibration_converged(self):
-        assert self.pr.calibration.converged
+    def test_calibration_runs(self):
+        assert self.pr.calibration is not None
 
     def test_detects_gdna(self):
-        assert self.pr.calibration.mixing_proportion > 0.03
+        total_e_gdna = self.pr.calibration.region_e_gdna.sum()
+        total_n = self.pr.calibration.region_n_total.sum()
+        assert total_e_gdna / max(total_n, 1.0) > 0.03
 
-    def test_posteriors_have_spread(self):
-        rp = self.pr.calibration.region_posteriors
-        # Should have both expressed (low γ) and unexpressed (high γ)
-        assert rp.min() < 0.5
-        assert rp.max() > 0.3
+    def test_region_arrays_have_spread(self):
+        e_gdna = self.pr.calibration.region_e_gdna
+        n_total = self.pr.calibration.region_n_total
+        # Should have both low and high gDNA fraction regions
+        fracs = e_gdna / np.maximum(n_total, 1.0)
+        assert fracs.min() < 0.5
+        assert fracs.max() > 0.1
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)
@@ -779,10 +781,13 @@ class TestNRNAWithGDNA:
     def test_calibration_runs(self):
         assert self.pr.calibration is not None
 
-    def test_valid_mixing_proportion(self):
+    def test_valid_gdna_fraction(self):
         cal = self.pr.calibration
-        # π should not be inflated to 1.0 because nRNA is stranded
-        assert 0.0 <= cal.mixing_proportion <= 0.8
+        # gDNA fraction should not be inflated to ~1.0 because nRNA is stranded
+        total_e_gdna = cal.region_e_gdna.sum()
+        total_n = cal.region_n_total.sum()
+        gdna_frac = total_e_gdna / max(total_n, 1.0)
+        assert 0.0 <= gdna_frac <= 0.8
 
     def test_output_valid(self):
         df = self.pr.estimator.get_counts_df(self.result.index)

@@ -5,7 +5,6 @@ verifying correctness of bias correction, equivalence-class grouping,
 SQUAREM convergence, OVR prior, and VBEM mode.
 """
 
-
 import numpy as np
 
 from rigel._em_impl import run_locus_em_native
@@ -15,6 +14,7 @@ from rigel._em_impl import run_locus_em_native
 # Helper to build minimal CSR data for run_locus_em_native
 # ---------------------------------------------------------------------------
 
+
 def _make_locus(
     *,
     units: list[list[tuple[int, float, float, int, int]]],
@@ -22,7 +22,7 @@ def _make_locus(
     unambig_totals: np.ndarray | None = None,
     bias_profiles: np.ndarray | None = None,
     prior_eligible: np.ndarray | None = None,
-    total_pseudocount: float = 1.0,
+    alpha_rna: float = 1.0,
     max_iterations: int = 1000,
     convergence_delta: float = 1e-6,
     use_vbem: bool = False,
@@ -68,11 +68,20 @@ def _make_locus(
     eff_lens = np.ones(n_components, dtype=np.float64)
 
     theta, alpha, em_totals = run_locus_em_native(
-        offsets_arr, t_indices_arr, log_liks_arr, cov_wts_arr,
-        tx_starts_arr, tx_ends_arr, bias_profiles,
-        unambig_totals, eff_lens, prior_eligible,
-        n_components, total_pseudocount,
-        max_iterations, convergence_delta,
+        offsets_arr,
+        t_indices_arr,
+        log_liks_arr,
+        cov_wts_arr,
+        tx_starts_arr,
+        tx_ends_arr,
+        bias_profiles,
+        unambig_totals,
+        eff_lens,
+        prior_eligible,
+        n_components,
+        alpha_rna,
+        max_iterations,
+        convergence_delta,
         use_vbem,
         0,  # n_transcripts=0 → classic (unlinked) mode
     )
@@ -142,10 +151,7 @@ class TestTwoTranscriptLocus:
         """Higher log-likelihood shifts posterior toward that component."""
         n_comp = 3
         # 5 ambiguous units: comp 0 has much better log-lik than comp 1
-        units = [
-            [(0, -0.1, 1.0, 0, 200), (1, -5.0, 1.0, 0, 200)]
-            for _ in range(5)
-        ]
+        units = [[(0, -0.1, 1.0, 0, 200), (1, -5.0, 1.0, 0, 200)] for _ in range(5)]
         unambig = np.array([1.0, 1.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -165,10 +171,7 @@ class TestConvergence:
     def test_converges_within_budget(self):
         """Well-conditioned input should converge well before max_iterations."""
         n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
-            for _ in range(20)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)] for _ in range(20)]
         unambig = np.array([50.0, 50.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -186,10 +189,7 @@ class TestConvergence:
     def test_single_iteration(self):
         """max_iterations=3 → one SQUAREM iteration (3/3=1)."""
         n_comp = 3
-        units = [
-            [(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)]
-            for _ in range(5)
-        ]
+        units = [[(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)] for _ in range(5)]
         unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -210,8 +210,7 @@ class TestPriorEligibility:
         """Ineligible component gets no weight even with ambiguous evidence."""
         n_comp = 5  # mRNA_A, mRNA_B, nRNA_A, nRNA_B, gDNA
         units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200),
-             (2, -1.0, 1.0, 0, 200)]
+            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200), (2, -1.0, 1.0, 0, 200)]
             for _ in range(10)
         ]
         unambig = np.array([5.0, 5.0, 0.0, 0.0, 0.0])
@@ -236,10 +235,7 @@ class TestVBEM:
     def test_vbem_converges(self):
         """VBEM should converge and produce valid theta."""
         n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200)]
-            for _ in range(15)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200)] for _ in range(15)]
         unambig = np.array([10.0, 5.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -259,26 +255,76 @@ class TestVBEM:
         """VBEM should suppress low-evidence components more aggressively
         than MAP-EM due to digamma's behavior at small alpha."""
         n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
-            for _ in range(5)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)] for _ in range(5)]
         # Component 0 has strong unambig evidence, comp 1 has none
         unambig = np.array([50.0, 0.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta_map, _, _ = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig.copy(),
+            prior_eligible=eligible.copy(),
             use_vbem=False,
         )
         theta_vb, _, _ = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig.copy(),
+            prior_eligible=eligible.copy(),
             use_vbem=True,
         )
         # VBEM should give less weight to comp 1 than MAP-EM
         assert theta_vb[1] <= theta_map[1] + 0.01
+
+    def test_vbem_tiny_alpha_suppresses_component(self):
+        """VBEM with very small α_RNA → digamma drives low-evidence
+        components to near-zero (no artificial clamp floor)."""
+        n_comp = 3
+        # All data favors component 0
+        units = [[(0, 0.0, 1.0, 0, 200)] for _ in range(100)]
+        unambig = np.array([50.0, 0.0, 0.0])
+        eligible = np.array([1.0, 1.0, 0.0])
+
+        theta, _, _ = _make_locus(
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig,
+            prior_eligible=eligible,
+            alpha_rna=0.001,
+            use_vbem=True,
+        )
+        assert np.all(np.isfinite(theta))
+        # Comp 0 dominates; comp 1 naturally suppressed
+        assert theta[0] > 0.99
+        assert theta[1] < 0.01
+
+    def test_vbem_zero_prior_disables_component(self):
+        """When prior_eligible = 0, VBEM suppresses component more
+        aggressively than MAP — digamma at near-zero alpha penalizes it."""
+        n_comp = 3
+        units = [[(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)] for _ in range(50)]
+        unambig = np.array([10.0, 10.0, 0.0])
+        eligible = np.array([1.0, 0.0, 0.0])  # comp 1 ineligible
+
+        theta_map, _, _ = _make_locus(
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig.copy(),
+            prior_eligible=eligible.copy(),
+            use_vbem=False,
+        )
+        theta_vb, _, _ = _make_locus(
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig.copy(),
+            prior_eligible=eligible.copy(),
+            use_vbem=True,
+        )
+        # VBEM should suppress ineligible comp 1 more than MAP
+        assert theta_vb[1] <= theta_map[1] + 0.01
+        # Comp 0 should dominate in both modes
+        assert theta_vb[0] > theta_vb[1]
 
 
 class TestNumericalStability:
@@ -287,10 +333,7 @@ class TestNumericalStability:
     def test_extreme_log_liks(self):
         """Very negative log-likelihoods should not produce NaN/Inf."""
         n_comp = 3
-        units = [
-            [(0, -500.0, 1.0, 0, 200), (1, -500.0, 1.0, 0, 200)]
-            for _ in range(5)
-        ]
+        units = [[(0, -500.0, 1.0, 0, 200), (1, -500.0, 1.0, 0, 200)] for _ in range(5)]
         unambig = np.array([5.0, 5.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -306,10 +349,7 @@ class TestNumericalStability:
     def test_disparate_log_liks(self):
         """One log-lik much larger than another → proper normalization."""
         n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -900.0, 1.0, 0, 200)]
-            for _ in range(5)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -900.0, 1.0, 0, 200)] for _ in range(5)]
         unambig = np.array([1.0, 1.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -326,10 +366,7 @@ class TestNumericalStability:
     def test_all_zero_unambig(self):
         """No unambig evidence, only ambiguous → should still converge."""
         n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
-            for _ in range(10)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)] for _ in range(10)]
         unambig = np.zeros(n_comp)
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -351,16 +388,15 @@ class TestEquivalenceClasses:
         regardless of their ordering in the CSR."""
         n_comp = 3
         # All units map to {0, 1} — should form one equivalence class
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200)]
-            for _ in range(10)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200)] for _ in range(10)]
         unambig = np.array([5.0, 5.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig, prior_eligible=eligible,
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig,
+            prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
         assert theta[0] > theta[1]  # comp 0 has better log-lik
@@ -381,8 +417,10 @@ class TestEquivalenceClasses:
         eligible = np.array([1.0, 1.0, 1.0, 0.0, 0.0])
 
         theta, alpha, em = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig, prior_eligible=eligible,
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig,
+            prior_eligible=eligible,
         )
         assert np.all(np.isfinite(theta))
         assert abs(theta.sum() - 1.0) < 1e-10
@@ -401,10 +439,7 @@ class TestBiasCorrection:
         """
         n_comp = 3
         # Both map to comp 0 and comp 1 with equal log-lik
-        units = [
-            [(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)]
-            for _ in range(20)
-        ]
+        units = [[(0, 0.0, 1.0, 0, 200), (1, 0.0, 1.0, 0, 200)] for _ in range(20)]
         unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
@@ -416,8 +451,10 @@ class TestBiasCorrection:
         profiles = np.array([500, 10000, 100000], dtype=np.int64)
 
         theta, alpha, em = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig, prior_eligible=eligible,
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig,
+            prior_eligible=eligible,
             bias_profiles=profiles,
         )
         # Shorter transcript (comp 0) should get MORE weight
@@ -430,17 +467,16 @@ class TestOVRPrior:
     def test_tiny_pseudocount_minimizes_ovr(self):
         """Very small pseudocount → OVR prior negligible, data dominates."""
         n_comp = 3
-        units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)]
-            for _ in range(10)
-        ]
+        units = [[(0, -1.0, 1.0, 0, 200), (1, -1.0, 1.0, 0, 200)] for _ in range(10)]
         unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig, prior_eligible=eligible,
-            total_pseudocount=1e-10,
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig,
+            prior_eligible=eligible,
+            alpha_rna=1e-10,
         )
         assert np.all(np.isfinite(theta))
         # With equal everything and negligible OVR, components should be roughly equal
@@ -450,17 +486,16 @@ class TestOVRPrior:
         """Large pseudocount → OVR coverage weights dominate the prior."""
         n_comp = 3
         # All coverage weight goes to comp 0 (high cov_wt)
-        units = [
-            [(0, -1.0, 10.0, 0, 200), (1, -1.0, 0.1, 0, 200)]
-            for _ in range(10)
-        ]
+        units = [[(0, -1.0, 10.0, 0, 200), (1, -1.0, 0.1, 0, 200)] for _ in range(10)]
         unambig = np.array([1.0, 1.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
         theta, alpha, em = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig, prior_eligible=eligible,
-            total_pseudocount=10.0,
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig,
+            prior_eligible=eligible,
+            alpha_rna=10.0,
         )
         # Comp 0 should get more weight due to high coverage weight
         assert theta[0] > theta[1]
@@ -473,21 +508,24 @@ class TestMAPvsVBEMConsistency:
         """Both MAP-EM and VBEM produce valid theta on same input."""
         n_comp = 5
         units = [
-            [(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200),
-             (4, -3.0, 1.0, 0, 200)]
+            [(0, -1.0, 1.0, 0, 200), (1, -2.0, 1.0, 0, 200), (4, -3.0, 1.0, 0, 200)]
             for _ in range(20)
         ]
         unambig = np.array([10.0, 5.0, 0.0, 0.0, 1.0])
         eligible = np.array([1.0, 1.0, 0.0, 0.0, 1.0])
 
         theta_map, _, _ = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig.copy(),
+            prior_eligible=eligible.copy(),
             use_vbem=False,
         )
         theta_vb, _, _ = _make_locus(
-            units=units, n_components=n_comp,
-            unambig_totals=unambig.copy(), prior_eligible=eligible.copy(),
+            units=units,
+            n_components=n_comp,
+            unambig_totals=unambig.copy(),
+            prior_eligible=eligible.copy(),
             use_vbem=True,
         )
         assert np.all(np.isfinite(theta_map))
@@ -496,4 +534,3 @@ class TestMAPvsVBEMConsistency:
         assert abs(theta_vb.sum() - 1.0) < 1e-10
         # Both should agree on which component is dominant
         assert np.argmax(theta_map) == np.argmax(theta_vb)
-

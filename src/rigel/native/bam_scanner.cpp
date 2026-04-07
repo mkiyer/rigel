@@ -1441,6 +1441,7 @@ private:
             region_dict["n_regions"] = region_acc_.n_regions;
             region_dict["fl_region_ids"] = std::move(region_acc_.fl_region_ids);
             region_dict["fl_frag_lens"] = std::move(region_acc_.fl_frag_lens);
+            region_dict["fl_frag_strands"] = std::move(region_acc_.fl_frag_strands);
             result["region_evidence"] = region_dict;
         }
 

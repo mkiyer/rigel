@@ -76,14 +76,12 @@ def _make_gdna_scenario(tmp_path, *, gdna_abundance=40.0, n_fragments=600):
     return sc, result
 
 
-def _run_pipeline(result, index, *, min_gdna_regions=1):
+def _run_pipeline(result, index):
     """Run the pipeline with calibration."""
     config = PipelineConfig(
         em=EMConfig(seed=SEED),
         scan=BamScanConfig(sj_strand_tag="auto"),
-        calibration=CalibrationConfig(
-            min_gdna_regions=min_gdna_regions,
-        ),
+        calibration=CalibrationConfig(),
     )
     return run_pipeline(result.bam_path, index, config=config)
 
@@ -289,7 +287,7 @@ class TestGdnaFLEndToEnd:
 
     def test_calibration_produces_gdna_fl_model(self):
         """Calibration result contains a valid gDNA FL model."""
-        pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
+        pr = _run_pipeline(self.result, self.index)
         assert pr.calibration is not None
         cal_fl = pr.calibration.gdna_fl_model
         assert cal_fl is not None
@@ -300,7 +298,7 @@ class TestGdnaFLEndToEnd:
     def test_frag_length_models_gdna_replacement(self):
         """After pipeline with calibration, the gDNA model is replaced when the
         calibrated model provides better FL discrimination than strand-deconvolved."""
-        pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
+        pr = _run_pipeline(self.result, self.index)
         # The calibrated model should exist
         assert pr.calibration is not None
         cal_fl = pr.calibration.gdna_fl_model
@@ -316,7 +314,7 @@ class TestGdnaFLEndToEnd:
 
     def test_pipeline_produces_valid_output(self):
         """Pipeline with calibration produces valid quantification."""
-        pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
+        pr = _run_pipeline(self.result, self.index)
         df = pr.estimator.get_counts_df(self.index)
         n_annotated = sum(
             1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
@@ -329,54 +327,96 @@ class TestGdnaFLEndToEnd:
 
 
 # ---------------------------------------------------------------------------
-# Test: ESS gate in build_gdna_fl_model
+# Test: ESS gate in _build_gdna_fl_model
 # ---------------------------------------------------------------------------
 
 
+def _make_fl_table(region_ids, frag_lens, frag_strands=None):
+    """Create a fl_table DataFrame for _build_gdna_fl_model."""
+    import pandas as pd
+
+    d = {"region_id": np.array(region_ids, dtype=np.intp), "frag_len": np.array(frag_lens, dtype=np.intp)}
+    if frag_strands is not None:
+        d["frag_strand"] = np.array(frag_strands, dtype=np.int8)
+    return pd.DataFrame(d)
+
+
+def _make_stats(n_regions, gene_strand=None, region_length=None, n_unspliced=None):
+    """Create a stats dict for _build_gdna_fl_model."""
+    if gene_strand is None:
+        gene_strand = np.ones(n_regions, dtype=np.int8)  # all on +
+    if region_length is None:
+        region_length = np.full(n_regions, 1000.0)
+    if n_unspliced is None:
+        n_unspliced = np.full(n_regions, 100.0)
+    return {
+        "gene_strand": np.asarray(gene_strand),
+        "region_length": np.asarray(region_length, dtype=np.float64),
+        "n_unspliced": np.asarray(n_unspliced, dtype=np.float64),
+    }
+
+
 class TestESSGate:
-    """Verify that build_gdna_fl_model returns None when ESS is below threshold."""
+    """Verify that _build_gdna_fl_model returns fallback when ESS is below threshold."""
 
-    def test_returns_none_when_ess_below_threshold(self):
-        """Low ESS → None."""
-        from rigel.calibration import build_gdna_fl_model
+    def test_returns_fallback_when_ess_below_threshold(self):
+        """Low fragment count → returns intergenic fallback."""
+        from rigel.calibration import _build_gdna_fl_model
 
-        region_ids = np.array([0, 0, 1, 1], dtype=np.intp)
-        frag_lens = np.array([200, 250, 300, 350], dtype=np.intp)
-        weights = np.array([0.1, 0.1])  # ESS = 0.1*2 + 0.1*2 = 0.4
+        # Only 4 fragments — well below min_ess=50
+        fl_table = _make_fl_table(
+            region_ids=[0, 0, 1, 1],
+            frag_lens=[200, 250, 300, 350],
+            frag_strands=[1, 1, 1, 1],  # STRAND_POS = antisense for gene_strand=+1
+        )
+        stats = _make_stats(2)
+        eligible = np.ones(2, dtype=bool)
 
-        model = build_gdna_fl_model(
-            region_ids,
-            frag_lens,
-            weights,
+        model = _build_gdna_fl_model(
+            fl_table, stats, eligible,
+            strand_specificity=0.95,
+            density_percentile=10.0,
+            intergenic_fl_model=None,
             min_ess=50,
         )
         assert model is None
 
     def test_returns_model_when_ess_above_threshold(self):
-        """Sufficient ESS → valid model."""
-        from rigel.calibration import build_gdna_fl_model
+        """Sufficient fragment count → valid model."""
+        from rigel.calibration import _build_gdna_fl_model
 
-        region_ids = np.array([0, 0, 1, 1], dtype=np.intp)
-        frag_lens = np.array([200, 250, 300, 350], dtype=np.intp)
-        weights = np.array([30.0, 30.0])  # ESS = 30*2 + 30*2 = 120
+        # 60 antisense fragments — above min_ess=50
+        rids = np.zeros(60, dtype=np.intp)
+        flens = np.random.default_rng(42).integers(150, 400, size=60)
+        fstrands = np.ones(60, dtype=np.int8)  # STRAND_POS = antisense for +
 
-        model = build_gdna_fl_model(
-            region_ids,
-            frag_lens,
-            weights,
+        fl_table = _make_fl_table(rids, flens, fstrands)
+        stats = _make_stats(1)
+        eligible = np.ones(1, dtype=bool)
+
+        model = _build_gdna_fl_model(
+            fl_table, stats, eligible,
+            strand_specificity=0.95,
+            density_percentile=10.0,
+            intergenic_fl_model=None,
             min_ess=50,
         )
         assert model is not None
         assert model.n_observations > 0
 
-    def test_returns_none_for_empty_input(self):
-        """No FL observations → None regardless of threshold."""
-        from rigel.calibration import build_gdna_fl_model
+    def test_returns_fallback_for_empty_input(self):
+        """No FL observations → returns intergenic fallback."""
+        from rigel.calibration import _build_gdna_fl_model
 
-        model = build_gdna_fl_model(
-            np.array([], dtype=np.intp),
-            np.array([], dtype=np.intp),
-            np.ones(5),
+        fl_table = _make_fl_table([], [])
+        stats = _make_stats(2)
+        eligible = np.ones(2, dtype=bool)
+
+        model = _build_gdna_fl_model(
+            fl_table, stats, eligible,
+            strand_specificity=0.95,
+            density_percentile=10.0,
+            intergenic_fl_model=None,
             min_ess=0,
         )
         assert model is None
@@ -413,7 +453,6 @@ class TestESSGate:
         )
         # No gDNA → calibration ESS should be ~0 → gdna_fl_model is None
         pr = _run_pipeline(result, result.index)
-        # The strand-deconvolved model should be retained (not replaced)
         # Verify valid output
         df = pr.estimator.get_counts_df(result.index)
         assert len(df) > 0
@@ -478,7 +517,7 @@ class TestGdnaFLScoringImpact:
 
     def test_calibrated_gdna_fl_reflects_true_distribution(self):
         """The calibrated gDNA FL model should have mean closer to the true gDNA FL."""
-        pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
+        pr = _run_pipeline(self.result, self.index)
 
         cal_mean = pr.frag_length_models.gdna_model.mean
 
@@ -493,7 +532,7 @@ class TestGdnaFLScoringImpact:
 
     def test_pipeline_produces_valid_output(self):
         """Pipeline with calibration produces valid quantification."""
-        pr = _run_pipeline(self.result, self.index, min_gdna_regions=1)
+        pr = _run_pipeline(self.result, self.index)
         df = pr.estimator.get_counts_df(self.index)
         assert len(df) > 0
         assert (df["count"] >= 0).all()

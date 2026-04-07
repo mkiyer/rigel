@@ -22,6 +22,7 @@ from pathlib import Path
 def get_version() -> str:
     try:
         from . import __version__
+
         return f"rigel {__version__}"
     except ImportError:
         return "rigel (unknown version)"
@@ -30,6 +31,7 @@ def get_version() -> str:
 # ---------------------------------------------------------------------------
 # Subcommand handlers
 # ---------------------------------------------------------------------------
+
 
 def index_command(args: argparse.Namespace) -> int:
     """Run the ``rigel index`` subcommand."""
@@ -101,8 +103,9 @@ def quant_command(args: argparse.Namespace) -> int:
     # -- Load reference index --
     logging.info(f"[START] Loading index from {index_dir}")
     index = TranscriptIndex.load(index_dir)
-    logging.info(f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
-                 f"{index.num_genes} genes")
+    logging.info(
+        f"[DONE] Loaded index: {index.num_transcripts} transcripts, {index.num_genes} genes"
+    )
 
     # -- Build pipeline config + run --
     pipeline_config = _build_pipeline_config(args, seed, sj_strand_tag)
@@ -117,6 +120,7 @@ def quant_command(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # quant_command helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_seed(args: argparse.Namespace) -> int:
     """Return an explicit seed or generate one from the current timestamp."""
@@ -161,10 +165,6 @@ def _build_pipeline_config(
     em_kw["seed"] = seed
     scan_kw["sj_strand_tag"] = sj_strand_tag
 
-    logging.info(
-        f"Using EM prior: pseudocount={em_kw.get('prior_pseudocount', 1.0)}"
-    )
-
     cfg = PipelineConfig(
         em=EMConfig(**em_kw),
         scan=BamScanConfig(**scan_kw),
@@ -202,17 +202,16 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     gene_quant_df.to_feather(str(gene_quant_path), **feather_kw)
     nrna_quant_df.to_feather(str(nrna_quant_path), **feather_kw)
     loci_df.to_feather(str(loci_path), **feather_kw)
-    logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, "
-                 f"{nrna_quant_path}, {loci_path}")
+    logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, {nrna_quant_path}, {loci_path}")
 
     # Write locus-level profiling stats if requested
     if getattr(args, "emit_locus_stats", False) and estimator.locus_stats:
         import pandas as _pd
+
         locus_stats_path = output_dir / "locus_stats.feather"
         locus_stats_df = _pd.DataFrame(estimator.locus_stats)
         locus_stats_df.to_feather(str(locus_stats_path), **feather_kw)
-        logging.info(f"[DONE] Wrote {locus_stats_path} "
-                     f"({len(locus_stats_df)} loci)")
+        logging.info(f"[DONE] Wrote {locus_stats_path} ({len(locus_stats_df)} loci)")
 
     # Write TSV mirrors if requested
     if getattr(args, "tsv", False):
@@ -388,7 +387,8 @@ def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None
     with open(config_yaml_path, "w") as f:
         f.write(header)
         yaml.dump(
-            data, f,
+            data,
+            f,
             default_flow_style=False,
             sort_keys=False,
             allow_unicode=True,
@@ -413,10 +413,18 @@ def sim_command(args: argparse.Namespace) -> int:
     ref_name = cfg.get("ref_name", "chr1")
 
     sim_config = SimConfig(
-        **{k: cfg[k] for k in (
-            "frag_mean", "frag_std", "frag_min", "frag_max",
-            "read_length", "error_rate",
-        ) if k in cfg},
+        **{
+            k: cfg[k]
+            for k in (
+                "frag_mean",
+                "frag_std",
+                "frag_min",
+                "frag_max",
+                "read_length",
+                "error_rate",
+            )
+            if k in cfg
+        },
         seed=seed,
     )
 
@@ -495,16 +503,16 @@ def export_command(args: argparse.Namespace) -> int:
 @_dataclass(frozen=True)
 class _ParamSpec:
     """Maps a CLI argparse dest to a config dataclass field."""
-    cli_dest: str               # argparse dest, e.g. "prior_pseudocount"
-    config_path: str            # dotted config path, e.g. "em.prior_pseudocount"
-    transform: str = "direct"   # "direct" | "invert_bool" | "log_penalty"
+
+    cli_dest: str  # argparse dest, e.g. "em_iterations"
+    config_path: str  # dotted config path, e.g. "em.iterations"
+    transform: str = "direct"  # "direct" | "invert_bool" | "log_penalty"
     #                             | "gdna_splice" | "path_or_none" | "sj_tag"
 
 
 _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- EMConfig: direct mappings --
     _ParamSpec("seed", "em.seed"),
-    _ParamSpec("prior_pseudocount", "em.prior_pseudocount"),
     _ParamSpec("em_iterations", "em.iterations"),
     _ParamSpec("em_convergence_delta", "em.convergence_delta"),
     _ParamSpec("assignment_mode", "em.assignment_mode"),
@@ -533,7 +541,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
 
 
 def _resolve_config_path(cfg: object, path: str) -> object:
-    """Follow a dotted path like ``'em.prior_pseudocount'`` on a config object."""
+    """Follow a dotted path like ``'em.iterations'`` on a config object."""
     obj = cfg
     for attr in path.split("."):
         obj = getattr(obj, attr)
@@ -552,9 +560,11 @@ def _config_to_cli(val: object, transform: str) -> object:
         return _math.exp(val) if val > float("-inf") else 0.0
     if transform == "gdna_splice":
         from .scoring import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
+
         if val is None:
             return DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
         from .splice import SPLICE_UNANNOT
+
         return val.get(SPLICE_UNANNOT, DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT)
     if transform == "path_or_none":
         return str(val) if val else None
@@ -577,10 +587,12 @@ def _cli_to_config(val: object, transform: str) -> object:
         return val[0] if len(val) == 1 else tuple(val)
     if transform == "log_penalty":
         from .scoring import overhang_alpha_to_log_penalty
+
         return overhang_alpha_to_log_penalty(val)
     if transform == "gdna_splice":
         from .scoring import GDNA_SPLICE_PENALTIES
         from .splice import SPLICE_UNANNOT
+
         penalties = dict(GDNA_SPLICE_PENALTIES)
         penalties[SPLICE_UNANNOT] = val
         return penalties
@@ -612,6 +624,7 @@ def _build_quant_defaults() -> dict:
         DEFAULT_MISMATCH_ALPHA,
         DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     )
+
     cfg = PipelineConfig()
 
     # Scoring fields have different representations in CLI (alpha) vs
@@ -666,7 +679,8 @@ def _resolve_quant_args(
         unknown = set(yaml_config) - valid_keys
         if unknown:
             logging.warning(
-                "Unknown config keys ignored: %s", sorted(unknown),
+                "Unknown config keys ignored: %s",
+                sorted(unknown),
             )
 
     # Populate I/O args and extra flags from YAML when not set on CLI
@@ -693,6 +707,7 @@ def _resolve_quant_args(
 # Argument parsing
 # ---------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
@@ -700,10 +715,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="rigel: Bayesian RNA-seq fragment abundance estimation",
     )
     parser.add_argument(
-        "--version", action="version", version=get_version(),
+        "--version",
+        action="version",
+        version=get_version(),
     )
     parser.add_argument(
-        "-v", "--verbose", action="store_true", default=False,
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
         help="Enable verbose (DEBUG-level) logging",
     )
 
@@ -711,27 +731,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- INDEX ---------------------------------------------------------------
     idx = subparsers.add_parser(
-        "index", help="Build reference index from FASTA + GTF",
+        "index",
+        help="Build reference index from FASTA + GTF",
     )
     idx.add_argument(
-        "--fasta", dest="fasta_file", required=True,
+        "--fasta",
+        dest="fasta_file",
+        required=True,
         help="Genome FASTA file (must be indexed with samtools faidx)",
     )
     idx.add_argument(
-        "--gtf", dest="gtf_file", required=True,
+        "--gtf",
+        dest="gtf_file",
+        required=True,
         help="Gene annotation GTF file (GENCODE recommended)",
     )
     idx.add_argument(
-        "-o", "--output-dir", dest="output_dir", required=True,
+        "-o",
+        "--output-dir",
+        dest="output_dir",
+        required=True,
         help="Output directory for index files",
     )
     idx.add_argument(
-        "--feather-compression", dest="feather_compression", default="lz4",
+        "--feather-compression",
+        dest="feather_compression",
+        default="lz4",
         choices=["lz4", "zstd", "uncompressed"],
         help="Compression for Feather files (default: lz4)",
     )
     idx.add_argument(
-        "--no-tsv", dest="no_tsv", action="store_true", default=False,
+        "--no-tsv",
+        dest="no_tsv",
+        action="store_true",
+        default=False,
         help="Skip writing human-readable TSV mirror files",
     )
     idx.add_argument(
@@ -765,34 +798,48 @@ def build_parser() -> argparse.ArgumentParser:
     # -- Input / Output -------------------------------------------------------
     io_grp = quant_parser.add_argument_group("input / output")
     io_grp.add_argument(
-        "--bam", dest="bam_file", default=None,
+        "--bam",
+        dest="bam_file",
+        default=None,
         help="Name-sorted BAM file. Minimap2 and STAR aligners are "
-             "supported. The NH tag is used when present; otherwise "
-             "multimappers are detected from secondary BAM flags.",
+        "supported. The NH tag is used when present; otherwise "
+        "multimappers are detected from secondary BAM flags.",
     )
     io_grp.add_argument(
-        "--index", dest="index_dir", default=None,
+        "--index",
+        dest="index_dir",
+        default=None,
         help="Directory containing rigel index files (from 'rigel index').",
     )
     io_grp.add_argument(
-        "-o", "--output-dir", dest="output_dir", default=None,
+        "-o",
+        "--output-dir",
+        dest="output_dir",
+        default=None,
         help="Output directory for quantification results.",
     )
     io_grp.add_argument(
-        "--config", dest="config", default=None,
+        "--config",
+        dest="config",
+        default=None,
         help="YAML configuration file. Accepts the same keys as CLI "
-             "options (with underscores). CLI flags override config file "
-             "values. A config.yaml is written to the output directory "
-             "after each run for easy reproducibility.",
+        "options (with underscores). CLI flags override config file "
+        "values. A config.yaml is written to the output directory "
+        "after each run for easy reproducibility.",
     )
     io_grp.add_argument(
-        "--annotated-bam", dest="annotated_bam", default=None,
+        "--annotated-bam",
+        dest="annotated_bam",
+        default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
-             "(ZT, ZG, ZI, ZJ, ZP, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
-             "Requires a second pass over the BAM.",
+        "(ZT, ZG, ZI, ZJ, ZP, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
+        "Requires a second pass over the BAM.",
     )
     io_grp.add_argument(
-        "--tsv", dest="tsv", action="store_true", default=False,
+        "--tsv",
+        dest="tsv",
+        action="store_true",
+        default=False,
         help="Also write TSV (.tsv) mirrors of quant tables.",
     )
 
@@ -801,165 +848,208 @@ def build_parser() -> argparse.ArgumentParser:
     aln_grp.add_argument(
         "--include-multimap",
         dest="include_multimap",
-        action=argparse.BooleanOptionalAction, default=None,
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Include multimapping reads (default: yes). "
-             "Detected via NH tag or secondary BAM flag.",
+        "Detected via NH tag or secondary BAM flag.",
     )
     aln_grp.add_argument(
         "--keep-duplicates",
         dest="keep_duplicates",
-        action=argparse.BooleanOptionalAction, default=None,
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Keep reads marked as PCR/optical duplicates (default: no).",
     )
     aln_grp.add_argument(
-        "--sj-strand-tag", dest="sj_strand_tag",
-        nargs="+", default=None,
+        "--sj-strand-tag",
+        dest="sj_strand_tag",
+        nargs="+",
+        default=None,
         help="BAM tag(s) for splice-junction strand (default: auto). "
-             "'auto' detects the tag from the first 10,000 reads. "
-             "Use 'XS' for STAR, 'ts' for minimap2, or list multiple "
-             "tags to check in order (e.g. XS ts).",
+        "'auto' detects the tag from the first 10,000 reads. "
+        "Use 'XS' for STAR, 'ts' for minimap2, or list multiple "
+        "tags to check in order (e.g. XS ts).",
     )
 
     # -- Model parameters -----------------------------------------------------
     model_grp = quant_parser.add_argument_group("model parameters")
     model_grp.add_argument(
-        "--seed", dest="seed", type=int, default=None,
+        "--seed",
+        dest="seed",
+        type=int,
+        default=None,
         help="Random seed for reproducibility (default: use current timestamp).",
     )
     model_grp.add_argument(
-        "--prior-pseudocount", dest="prior_pseudocount",
-        type=float, default=None,
-        help="Total OVR prior budget C in virtual fragments (default: 1.0). "
-             "Distributed as gamma*C to gDNA and (1-gamma)*C coverage-weighted "
-             "across RNA components.",
+        "--em-iterations",
+        dest="em_iterations",
+        type=int,
+        default=None,
+        help="Maximum EM iterations (default: 1000). Set to 0 for unambiguous-only quantification.",
     )
     model_grp.add_argument(
-        "--em-iterations", dest="em_iterations", type=int, default=None,
-        help="Maximum EM iterations (default: 1000). "
-             "Set to 0 for unambiguous-only quantification.",
-    )
-    model_grp.add_argument(
-        "--em-mode", dest="em_mode",
-        choices=["vbem", "map"], default=None,
+        "--em-mode",
+        dest="em_mode",
+        choices=["vbem", "map"],
+        default=None,
         help="EM algorithm variant (default: vbem). "
-             "'vbem' uses Variational Bayes EM with digamma-based soft "
-             "updates. 'map' uses MAP-EM with hard max(0, n+a-1) updates.",
+        "'vbem' uses Variational Bayes EM with digamma-based soft "
+        "updates. 'map' uses MAP-EM with hard max(0, n+a-1) updates.",
     )
     model_grp.add_argument(
-        "--assignment-mode", dest="assignment_mode",
-        choices=["sample", "fractional", "map"], default=None,
+        "--assignment-mode",
+        dest="assignment_mode",
+        choices=["sample", "fractional", "map"],
+        default=None,
         help="Post-EM fragment assignment mode (default: sample). "
-             "'sample' draws from the posterior distribution. "
-             "'fractional' preserves EM posterior weights (traditional). "
-             "'map' assigns each fragment to its highest-posterior component.",
+        "'sample' draws from the posterior distribution. "
+        "'fractional' preserves EM posterior weights (traditional). "
+        "'map' assigns each fragment to its highest-posterior component.",
     )
 
     # -- Performance ----------------------------------------------------------
     perf_grp = quant_parser.add_argument_group("performance")
     perf_grp.add_argument(
-        "--threads", dest="threads", type=int, default=None,
+        "--threads",
+        dest="threads",
+        type=int,
+        default=None,
         help="Number of threads for BAM scanning and locus EM "
-             "(default: 0 = all available cores). Set to 1 for "
-             "sequential execution.",
+        "(default: 0 = all available cores). Set to 1 for "
+        "sequential execution.",
     )
     perf_grp.add_argument(
-        "--buffer-size", dest="buffer_size", type=float, default=None,
+        "--buffer-size",
+        dest="buffer_size",
+        type=float,
+        default=None,
         help="Maximum in-memory buffer size in GiB before chunks are "
-             "spilled to disk (default: 4). Increase if you have ample "
-             "RAM to avoid disk I/O overhead from spilling.",
+        "spilled to disk (default: 4). Increase if you have ample "
+        "RAM to avoid disk I/O overhead from spilling.",
     )
     perf_grp.add_argument(
-        "--tmpdir", default=None,
+        "--tmpdir",
+        default=None,
         help="Directory for temporary buffer spill files when memory "
-             "limits are exceeded (default: system temp directory).",
+        "limits are exceeded (default: system temp directory).",
     )
 
     # -- Advanced scoring / convergence ---------------------------------------
     adv = quant_parser.add_argument_group("advanced options")
     adv.add_argument(
-        "--assignment-min-posterior", dest="assignment_min_posterior",
-        type=float, default=None,
+        "--assignment-min-posterior",
+        dest="assignment_min_posterior",
+        type=float,
+        default=None,
         help="Minimum posterior for a component to be eligible for "
-             "discrete assignment (map/sample modes). Default: 0.01.",
+        "discrete assignment (map/sample modes). Default: 0.01.",
     )
     adv.add_argument(
-        "--em-convergence-delta", dest="em_convergence_delta",
-        type=float, default=None,
-        help="Convergence threshold for EM parameter updates "
-             "(default: 1e-6).",
+        "--em-convergence-delta",
+        dest="em_convergence_delta",
+        type=float,
+        default=None,
+        help="Convergence threshold for EM parameter updates (default: 1e-6).",
     )
     adv.add_argument(
-        "--overhang-alpha", dest="overhang_alpha",
-        type=float, default=None,
+        "--overhang-alpha",
+        dest="overhang_alpha",
+        type=float,
+        default=None,
         help="Per-base overhang penalty alpha in [0,1] (default: 0.01). "
-             "0 = hard gate, 1 = no penalty.",
+        "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
-        "--mismatch-alpha", dest="mismatch_alpha",
-        type=float, default=None,
+        "--mismatch-alpha",
+        dest="mismatch_alpha",
+        type=float,
+        default=None,
         help="Per-mismatch (NM tag) penalty alpha in [0,1] (default: 0.1). "
-             "0 = hard gate, 1 = no penalty.",
+        "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
         "--gdna-splice-penalty-unannot",
         dest="gdna_splice_penalty_unannot",
-        type=float, default=None,
-        help="gDNA splice penalty for SPLICED_UNANNOT fragments "
-             "(default: 0.01).",
+        type=float,
+        default=None,
+        help="gDNA splice penalty for SPLICED_UNANNOT fragments (default: 0.01).",
     )
     adv.add_argument(
-        "--pruning-min-posterior", dest="pruning_min_posterior",
-        type=float, default=None,
+        "--pruning-min-posterior",
+        dest="pruning_min_posterior",
+        type=float,
+        default=None,
         help="Minimum posterior threshold for candidate pruning "
-             "(default: 1e-4). Lower values keep more candidates "
-             "(conservative). Set to 0 to disable pruning entirely.",
+        "(default: 1e-4). Lower values keep more candidates "
+        "(conservative). Set to 0 to disable pruning entirely.",
     )
     adv.add_argument(
-        "--emit-locus-stats", dest="emit_locus_stats",
-        action="store_true", default=False,
+        "--emit-locus-stats",
+        dest="emit_locus_stats",
+        action="store_true",
+        default=False,
         help="Write per-locus EM convergence profiling data to "
-             "locus_stats.feather in the output directory. Includes "
-             "iteration counts, timing, and equivalence class statistics "
-             "for every locus. Useful for debugging convergence.",
+        "locus_stats.feather in the output directory. Includes "
+        "iteration counts, timing, and equivalence class statistics "
+        "for every locus. Useful for debugging convergence.",
     )
     quant_parser.set_defaults(func=quant_command)
 
     # --- SIM -----------------------------------------------------------------
     sim = subparsers.add_parser(
-        "sim", help="Generate synthetic test scenarios",
+        "sim",
+        help="Generate synthetic test scenarios",
     )
     sim.add_argument(
-        "--config", dest="config", required=True,
+        "--config",
+        dest="config",
+        required=True,
         help="YAML configuration file defining the scenario",
     )
     sim.add_argument(
-        "-o", "--output-dir", dest="output_dir", required=True,
+        "-o",
+        "--output-dir",
+        dest="output_dir",
+        required=True,
         help="Output directory for scenario artifacts",
     )
     sim.add_argument(
-        "--genome-length", dest="genome_length", type=int, default=5000,
+        "--genome-length",
+        dest="genome_length",
+        type=int,
+        default=5000,
         help="Genome length in bases (default: 5000, overridden by YAML)",
     )
     sim.add_argument(
-        "--seed", dest="seed", type=int, default=42,
+        "--seed",
+        dest="seed",
+        type=int,
+        default=42,
         help="Random seed (default: 42, overridden by YAML)",
     )
     sim.add_argument(
-        "--num-reads", dest="num_reads", type=int, default=1000,
+        "--num-reads",
+        dest="num_reads",
+        type=int,
+        default=1000,
         help="Number of fragments to simulate (default: 1000, overridden by YAML)",
     )
     sim.set_defaults(func=sim_command)
 
     # --- EXPORT --------------------------------------------------------------
     export = subparsers.add_parser(
-        "export", help="Convert feather output files to TSV or Parquet",
+        "export",
+        help="Convert feather output files to TSV or Parquet",
     )
     export.add_argument(
         "output_dir",
         help="Directory containing .feather output files from rigel quant",
     )
     export.add_argument(
-        "-f", "--format", dest="format", default="tsv",
+        "-f",
+        "--format",
+        dest="format",
+        default="tsv",
         choices=["tsv", "parquet"],
         help="Output format (default: tsv)",
     )
@@ -972,12 +1062,13 @@ def build_parser() -> argparse.ArgumentParser:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     """CLI entry point registered as ``rigel`` in pyproject.toml."""
     parser = build_parser()
     args = parser.parse_args()
 
-    log_level = logging.DEBUG if getattr(args, 'verbose', False) else logging.INFO
+    log_level = logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(levelname)s - %(message)s",

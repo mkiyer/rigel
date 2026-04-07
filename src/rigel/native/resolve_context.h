@@ -1266,6 +1266,7 @@ struct RegionAccumulator {
     // unique-mapper fragments.
     std::vector<int32_t> fl_region_ids;
     std::vector<int32_t> fl_frag_lens;
+    std::vector<int32_t> fl_frag_strands;  // STRAND_POS or STRAND_NEG
 
     // cgranges for region overlap queries (BORROWED, not owned).
     cgranges_t* region_cr = nullptr;
@@ -1292,6 +1293,7 @@ struct RegionAccumulator {
           n_regions(o.n_regions),
           fl_region_ids(std::move(o.fl_region_ids)),
           fl_frag_lens(std::move(o.fl_frag_lens)),
+          fl_frag_strands(std::move(o.fl_frag_strands)),
           region_cr(o.region_cr),
           rgn_buf(o.rgn_buf), rgn_buf_cap(o.rgn_buf_cap),
           id_to_ref(o.id_to_ref)
@@ -1309,6 +1311,7 @@ struct RegionAccumulator {
             n_regions = o.n_regions;
             fl_region_ids = std::move(o.fl_region_ids);
             fl_frag_lens = std::move(o.fl_frag_lens);
+            fl_frag_strands = std::move(o.fl_frag_strands);
             region_cr = o.region_cr;
             rgn_buf = o.rgn_buf;
             rgn_buf_cap = o.rgn_buf_cap;
@@ -1418,6 +1421,7 @@ struct RegionAccumulator {
             if (frag_len > 0) {
                 fl_region_ids.push_back(single_region_id);
                 fl_frag_lens.push_back(frag_len);
+                fl_frag_strands.push_back(frag_strand);
             }
         }
     }
@@ -1442,6 +1446,9 @@ struct RegionAccumulator {
         fl_frag_lens.insert(fl_frag_lens.end(),
                             other.fl_frag_lens.begin(),
                             other.fl_frag_lens.end());
+        fl_frag_strands.insert(fl_frag_strands.end(),
+                               other.fl_frag_strands.begin(),
+                               other.fl_frag_strands.end());
     }
 };
 

@@ -139,9 +139,7 @@ def _collect_diagnostics(pr, result, bench, label):
     diag["gt_nrna"] = gt_nrna
 
     # --- Pipeline results ---
-    diag["pipeline_mrna"] = {
-        t.t_id: t.observed for t in bench.transcripts
-    }
+    diag["pipeline_mrna"] = {t.t_id: t.observed for t in bench.transcripts}
     diag["pipeline_gdna"] = bench.n_gdna_pipeline
     diag["pipeline_nrna"] = bench.n_nrna_pipeline
 
@@ -164,9 +162,7 @@ def _collect_diagnostics(pr, result, bench, label):
         if est._exonic_lengths is not None:
             diag[f"exonic_length_{t.t_id}"] = float(est._exonic_lengths[ti])
         if est._transcript_spans is not None:
-            diag[f"transcript_span_{t.t_id}"] = float(
-                est._transcript_spans[ti]
-            )
+            diag[f"transcript_span_{t.t_id}"] = float(est._transcript_spans[ti])
         diag[f"t_eff_len_{t.t_id}"] = float(est._t_eff_len[ti])
 
     # --- Locus results ---
@@ -242,7 +238,7 @@ def _print_diagnostics(diag, label=""):
             f"n_t={lr['n_transcripts']}, n_genes={lr['n_genes']}, "
             f"n_em_frags={lr['n_em_fragments']}, "
             f"mRNA={lr['mrna']:.1f}, "
-            f"gDNA={lr['gdna']:.1f}, gdna_init={lr['gdna_init']:.2f}"
+            f"gDNA={lr['gdna']:.1f}, alpha_gdna={lr['alpha_gdna']:.2f}, alpha_rna={lr['alpha_rna']:.2f}"
         )
 
     # Error analysis
@@ -251,10 +247,7 @@ def _print_diagnostics(diag, label=""):
     for t_id, expected in diag["gt_mrna"].items():
         observed = diag["pipeline_mrna"].get(t_id, 0)
         diff = observed - expected
-        lines.append(
-            f"  {t_id}: expected={expected}, observed={observed:.1f}, "
-            f"diff={diff:+.1f}"
-        )
+        lines.append(f"  {t_id}: expected={expected}, observed={observed:.1f}, diff={diff:+.1f}")
     gdna_diff = diag["pipeline_gdna"] - diag["gt_gdna"]
     lines.append(
         f"  gDNA: expected={diag['gt_gdna']}, "
@@ -296,12 +289,8 @@ class TestGDNADiagnosis:
 
         # All fragments should be mRNA
         t1 = next(t for t in bench.transcripts if t.t_id == "T1")
-        assert t1.abs_diff <= 5, (
-            f"T1 mRNA: expected={t1.expected}, observed={t1.observed:.0f}"
-        )
-        assert bench.n_gdna_pipeline <= 3, (
-            f"Spurious gDNA: {bench.n_gdna_pipeline:.0f}"
-        )
+        assert t1.abs_diff <= 5, f"T1 mRNA: expected={t1.expected}, observed={t1.observed:.0f}"
+        assert bench.n_gdna_pipeline <= 3, f"Spurious gDNA: {bench.n_gdna_pipeline:.0f}"
 
     def test_mrna_plus_gdna_ss1(self, tmp_path):
         """mRNA + gDNA contamination with perfect strandedness.
@@ -374,8 +363,7 @@ class TestGDNADiagnosis:
         nrna_diff = bench.n_nrna_pipeline - bench.n_nrna_expected
 
         logger.warning(
-            f"\n  >>> mRNA diff = {-mrna_loss:.0f} frags\n"
-            f"  >>> nRNA diff = {nrna_diff:.0f} frags"
+            f"\n  >>> mRNA diff = {-mrna_loss:.0f} frags\n  >>> nRNA diff = {nrna_diff:.0f} frags"
         )
 
     def test_mrna_gdna_nrna_ss1(self, tmp_path):

@@ -184,14 +184,18 @@ class TestBuildScoringModels:
         assert m.rna_model.total_weight == pytest.approx(100.0)
         assert m.rna_model.mean == pytest.approx(200.0)
 
-    def test_empty_spliced_falls_back_to_global(self):
-        """No spliced observations -> rna_model falls back to global."""
+    def test_empty_spliced_uses_global_prior(self):
+        """No spliced observations -> rna_model has 0 weight but gets global prior."""
         m = FragmentLengthModels(max_size=100)
         for fl in [50] * 10:
             m.observe(fl, splice_type=SpliceType.UNSPLICED)
         m.build_scoring_models()
-        # Falls back to global model (which has the unspliced observations)
-        assert m.rna_model.total_weight == pytest.approx(10.0)
+        # rna_model stays at 0 category-specific weight;
+        # global prior (applied during finalize) provides the distribution.
+        assert m.rna_model.total_weight == pytest.approx(0.0)
+        m.finalize()
+        assert m.rna_model._finalized
+        assert np.isfinite(m.rna_model.log_likelihood(50))
 
     def test_finalize_after_build(self):
         """build -> finalize produces valid lookup tables."""

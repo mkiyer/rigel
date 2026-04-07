@@ -228,7 +228,11 @@ class FragmentLengthModel:
     # Finalization (call after training, before scoring)
     # ------------------------------------------------------------------
 
-    def finalize(self) -> None:
+    def finalize(
+        self,
+        prior_counts: np.ndarray | None = None,
+        prior_ess: float | None = None,
+    ) -> None:
         """Pre-compute log-likelihood lookup table for fast scoring.
 
         Builds ``_log_prob`` array so ``log_likelihood()`` becomes a
@@ -236,13 +240,51 @@ class FragmentLengthModel:
 
         Also caches the tail-decay base value so that queries beyond
         ``max_size`` can be answered with a single multiply-add.
+
+        Parameters
+        ----------
+        prior_counts : np.ndarray or None
+            Optional Dirichlet prior pseudocounts (typically the global
+            FL histogram).  When provided, the log-probability table
+            becomes the posterior predictive of a Dirichlet-Multinomial:
+
+                p[k] = (count[k] + prior[k] + 1) / (N + N_prior + K)
+
+            This shrinks the estimate toward the prior when
+            category-specific data is sparse.  With zero category
+            observations, the model equals the prior — ensuring
+            symmetric FL scoring between RNA and gDNA.
+
+        prior_ess : float or None
+            Effective sample size to normalize ``prior_counts`` to.
+            When provided, the prior histogram is rescaled so its total
+            weight equals ``prior_ess``, controlling how quickly
+            category-specific data overrides the prior.  With
+            ``N_cat`` category observations, the category has
+            ``N_cat / (N_cat + prior_ess)`` influence.
         """
-        total = self._total_weight
-        if total == 0:
-            n = self.max_size + 1
+        n = self.max_size + 1
+        if prior_counts is not None:
+            # Dirichlet-Multinomial posterior predictive.
+            # Align prior to our bin count (handles mismatched max_size).
+            pc = np.zeros(n, dtype=np.float64)
+            m = min(n, len(prior_counts))
+            pc[:m] = prior_counts[:m]
+            # Normalize prior to the requested ESS.
+            # Cap at raw_total so we never amplify beyond the observed data.
+            raw_total = float(pc.sum())
+            if prior_ess is not None and raw_total > 0:
+                ess = min(prior_ess, raw_total)
+                pc *= ess / raw_total
+            prior_total = float(pc.sum())
+            self._log_prob = (
+                np.log(self.counts + pc + 1.0)
+                - np.log(self._total_weight + prior_total + n)
+            )
+        elif self._total_weight == 0:
             self._log_prob = np.full(n, -np.log(n), dtype=np.float64)
         else:
-            self._log_prob = np.log(self.counts + 1.0) - np.log(total + self.max_size + 1)
+            self._log_prob = np.log(self.counts + 1.0) - np.log(self._total_weight + n)
         self._tail_base: float = float(self._log_prob[self.max_size])
         self._finalized = True
 
@@ -446,31 +488,49 @@ class FragmentLengthModels:
         # gDNA fragment length model (injected from calibration):
         self.gdna_model = FragmentLengthModel(max_size=max_size)
 
-    def finalize(self) -> None:
+    def finalize(self, prior_ess: float | None = None) -> None:
         """Cache derived values on all sub-models for fast scoring.
 
-        Call after all ``observe()`` calls are complete (and after
-        ``build_scoring_models()``) and before any
-        ``log_likelihood()`` calls during EM scoring.
+        The RNA and gDNA scoring models use the global fragment length
+        histogram as a Dirichlet prior, normalized to ``prior_ess``
+        pseudo-observations.  This ensures symmetric FL scoring when
+        category-specific data is sparse while still allowing FL to
+        discriminate when category data is abundant.
+
+        Diagnostic models (global, intergenic, per-category) are
+        finalized with standard Laplace smoothing.
+
+        Parameters
+        ----------
+        prior_ess : float or None
+            Effective sample size for the global prior.  The global
+            histogram is rescaled to this many pseudo-observations.
+            With ``N_cat`` category observations, the category has
+            ``N_cat / (N_cat + prior_ess)`` influence.  If None,
+            the raw global counts are used (backward compatibility).
         """
         self.global_model.finalize()
         self.intergenic.finalize()
-        self.gdna_model.finalize()
-        self.rna_model.finalize()
         for m in self.category_models.values():
             m.finalize()
+
+        # RNA and gDNA: Dirichlet prior from global observations,
+        # normalized to prior_ess pseudo-observations so that
+        # category-specific data can diverge from the prior at
+        # a controlled rate.
+        global_prior = self.global_model.counts
+        self.rna_model.finalize(prior_counts=global_prior, prior_ess=prior_ess)
+        self.gdna_model.finalize(prior_counts=global_prior, prior_ess=prior_ess)
 
     def build_scoring_models(self) -> None:
         """Set the RNA scoring model from annotated-spliced observations.
 
-        The RNA fragment length model is simply the SPLICED_ANNOT
-        histogram — the gold-standard distribution from fragments
-        that definitively originate from mature mRNA.
-
-        When no annotated-spliced observations exist (e.g. unspliced-only
-        libraries), falls back to the global model so that effective
-        length computation and FL scoring still have a reasonable
-        distribution.
+        The RNA fragment length model uses the SPLICED_ANNOT
+        histogram as its category-specific evidence.  During
+        ``finalize()``, the global FL histogram is applied as a
+        Dirichlet prior, naturally handling the case where few or
+        no spliced observations exist — the model shrinks toward
+        the global distribution with no explicit fallback logic.
 
         The gDNA model is NOT set here; it is injected from the
         calibration module after calibration completes.
@@ -487,16 +547,11 @@ class FragmentLengthModels:
                 f"RNA FL model: {self.rna_model.total_weight:.0f} obs "
                 f"(annotated-spliced), mean={self.rna_model.mean:.1f}"
             )
-        elif self.global_model.total_weight > 0:
-            self.rna_model.counts = self.global_model.counts.copy()
-            self.rna_model._total_weight = float(self.global_model.counts.sum())
-            logger.warning(
-                f"RNA FL model: no annotated-spliced observations; "
-                f"falling back to global model ({self.rna_model.total_weight:.0f} obs, "
-                f"mean={self.rna_model.mean:.1f})"
-            )
         else:
-            logger.warning("RNA FL model: no observations available")
+            logger.info(
+                "RNA FL model: no annotated-spliced observations; "
+                "global Dirichlet prior will provide the distribution"
+            )
 
     @property
     def n_observations(self) -> int:

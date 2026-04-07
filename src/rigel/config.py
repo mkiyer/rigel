@@ -29,9 +29,6 @@ class EMConfig:
     ----------
     seed : int or None
         Random seed for reproducibility.
-    prior_pseudocount : float
-        Total OVR prior budget in virtual fragments (default 1.0).
-        Distributed as γ×C to gDNA and (1-γ)×C coverage-weighted to RNA.
     mode : str
         Algorithm variant: ``"map"`` (default) or ``"vbem"``.
     iterations : int
@@ -50,9 +47,6 @@ class EMConfig:
     """
 
     seed: int | None = None
-    prior_pseudocount: float = 1.0
-    """Total OVR prior budget C (virtual fragments). Distributed as
-    γ×C to gDNA and (1-γ)×C coverage-weighted across all RNA components."""
     mode: str = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
@@ -66,13 +60,12 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
+
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
-            raise ValueError(
-                f"Unknown assignment mode: {self.assignment_mode!r}"
-            )
+            raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
 
 
 # ======================================================================
@@ -159,21 +152,31 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for the aggregate-first gDNA calibration EM.
+    """Configuration for analytical gDNA-RNA deconvolution (V3).
 
-    The pipeline always runs ``calibrate_gdna()`` between model
-    finalization and quantification.  The resulting ``GDNACalibration``
-    provides calibrated gDNA density (global + per-ref), a shared κ, and
-    a gDNA fragment-length model.  Per-region posteriors and fragment
-    counts are used by ``compute_gdna_locus_gammas()`` to set the
-    per-locus gDNA fraction (γ) for the unified OVR prior.
+    The pipeline runs ``calibrate_gdna()`` between model finalization
+    and quantification.  The resulting ``CalibrationResult`` provides
+    per-region expected gDNA fragment counts, a global gDNA density,
+    and a gDNA fragment-length model.  These are used by
+    ``compute_locus_gdna_priors()`` to set the per-locus gDNA Dirichlet
+    prior for the unified OVR EM.
     """
 
-    max_iterations: int = 50
-    convergence_tol: float = 1e-4
-    density_percentile: float = 0.10
-    min_gdna_regions: int = 100
-    min_fl_ess: int = 50
+    #: Total Dirichlet prior budget split between gDNA and RNA components
+    #: by the calibrated mixing fraction γ.  α_gDNA = γ × C, α_RNA = (1−γ) × C.
+    total_pseudocount: float = 1.0
+
+    #: Percentile (0-100) of unspliced density for λ_G baseline estimation.
+    density_percentile: float = 10.0
+
+    #: Effective sample size (ESS) for the global fragment-length prior.
+    #: The global FL histogram is rescaled to this many pseudo-observations
+    #: before being used as a Dirichlet prior for category-specific FL models
+    #: (RNA, gDNA).  Controls how quickly category data overrides the prior:
+    #: with N category observations, the category has N/(N+ESS) influence.
+    #: Default 1000 is appropriate for real data (millions of fragments);
+    #: lower values (10-50) may be useful for small simulations.
+    fl_prior_ess: float = 1000.0
 
 
 @dataclass(frozen=True)

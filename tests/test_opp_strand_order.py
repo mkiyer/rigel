@@ -37,8 +37,13 @@ GENOME_LENGTH = 20_000
 
 def _sim_config(*, strand_specificity: float = 0.9, seed: int = SIM_SEED):
     return SimConfig(
-        frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-        read_length=100, strand_specificity=strand_specificity, seed=seed,
+        frag_mean=200,
+        frag_std=30,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=strand_specificity,
+        seed=seed,
     )
 
 
@@ -46,46 +51,60 @@ def _gdna_config(abundance: float) -> GDNAConfig | None:
     if abundance == 0:
         return None
     return GDNAConfig(
-        abundance=abundance, frag_mean=350, frag_std=100,
-        frag_min=100, frag_max=1000,
+        abundance=abundance,
+        frag_mean=350,
+        frag_std=100,
+        frag_min=100,
+        frag_max=1000,
     )
 
 
 def _build_scenario(tmp_path, name="opp_strand"):
     """Build the 20kb scenario with two opposite-strand transcripts."""
     sc = Scenario(
-        name, genome_length=GENOME_LENGTH, seed=SIM_SEED,
+        name,
+        genome_length=GENOME_LENGTH,
+        seed=SIM_SEED,
         work_dir=tmp_path / name,
     )
     # T1: + strand, multi-exon
-    sc.add_gene("G1", "+", [
-        {
-            "t_id": "T1",
-            "exons": [(1000, 1500), (3000, 3500), (8000, 10000)],
-            "abundance": 100,
-        },
-    ])
+    sc.add_gene(
+        "G1",
+        "+",
+        [
+            {
+                "t_id": "T1",
+                "exons": [(1000, 1500), (3000, 3500), (8000, 10000)],
+                "abundance": 100,
+            },
+        ],
+    )
     # T2: - strand, multi-exon, on opposite strand
-    sc.add_gene("G2", "-", [
-        {
-            "t_id": "T2",
-            "exons": [(6000, 7000), (12000, 13000), (15000, 15500)],
-            "abundance": 100,
-        },
-    ])
+    sc.add_gene(
+        "G2",
+        "-",
+        [
+            {
+                "t_id": "T2",
+                "exons": [(6000, 7000), (12000, 13000), (15000, 15500)],
+                "abundance": 100,
+            },
+        ],
+    )
     return sc
 
 
-def _run(tmp_path, *, gdna_abundance=0, nrna_abundance=0,
-         strand_specificity=0.9, label=""):
+def _run(tmp_path, *, gdna_abundance=0, nrna_abundance=0, strand_specificity=0.9, label=""):
     """Build scenario, run pipeline, return pipeline result + scenario result."""
     sc = _build_scenario(tmp_path, name=label or "opp_strand")
     sim = _sim_config(strand_specificity=strand_specificity)
     gdna = _gdna_config(gdna_abundance)
 
     result = sc.build_oracle(
-        n_fragments=N_FRAGMENTS, sim_config=sim,
-        gdna_config=gdna, nrna_abundance=nrna_abundance,
+        n_fragments=N_FRAGMENTS,
+        sim_config=sim,
+        gdna_config=gdna,
+        nrna_abundance=nrna_abundance,
     )
 
     config = PipelineConfig(
@@ -148,11 +167,11 @@ def _extract_results(pr, bench, result):
         if isinstance(lr, dict):
             info[f"locus_{i}_n_transcripts"] = lr.get("n_transcripts", 0)
             info[f"locus_{i}_n_em_fragments"] = lr.get("n_em_fragments", 0)
-            info[f"locus_{i}_gdna_init"] = lr.get("gdna_init", 0.0)
+            info[f"locus_{i}_alpha_gdna"] = lr.get("alpha_gdna", 0.0)
         else:
             info[f"locus_{i}_n_transcripts"] = lr.n_transcripts
             info[f"locus_{i}_n_em_fragments"] = lr.n_em_fragments
-            info[f"locus_{i}_gdna_init"] = lr.gdna_init
+            info[f"locus_{i}_alpha_gdna"] = lr.alpha_gdna
 
     return info
 
@@ -193,8 +212,11 @@ class TestOppositeStrandOverlap:
     def test_mrna_only_independent(self, tmp_path):
         """With zero gDNA and zero nRNA, transcripts should be independent."""
         sc, result, pr, bench = _run(
-            tmp_path, gdna_abundance=0, nrna_abundance=0,
-            strand_specificity=1.0, label="mrna_only",
+            tmp_path,
+            gdna_abundance=0,
+            nrna_abundance=0,
+            strand_specificity=1.0,
+            label="mrna_only",
         )
         info = _extract_results(pr, bench, result)
 
@@ -218,8 +240,11 @@ class TestOppositeStrandOverlap:
     def test_nrna_creates_shared_locus(self, tmp_path):
         """With nRNA, unspliced reads span introns → shared territory."""
         sc, result, pr, bench = _run(
-            tmp_path, gdna_abundance=0, nrna_abundance=50,
-            strand_specificity=0.9, label="nrna_sharing",
+            tmp_path,
+            gdna_abundance=0,
+            nrna_abundance=50,
+            strand_specificity=0.9,
+            label="nrna_sharing",
         )
         info = _extract_results(pr, bench, result)
 
@@ -232,8 +257,11 @@ class TestOppositeStrandOverlap:
     def test_gdna_creates_shared_locus(self, tmp_path):
         """With gDNA, genomic reads span both genes → shared territory."""
         sc, result, pr, bench = _run(
-            tmp_path, gdna_abundance=50, nrna_abundance=0,
-            strand_specificity=0.9, label="gdna_sharing",
+            tmp_path,
+            gdna_abundance=50,
+            nrna_abundance=0,
+            strand_specificity=0.9,
+            label="gdna_sharing",
         )
         info = _extract_results(pr, bench, result)
 
@@ -246,8 +274,11 @@ class TestOppositeStrandOverlap:
     def test_full_stress(self, tmp_path):
         """Both nRNA and gDNA active."""
         sc, result, pr, bench = _run(
-            tmp_path, gdna_abundance=50, nrna_abundance=50,
-            strand_specificity=0.9, label="full_stress",
+            tmp_path,
+            gdna_abundance=50,
+            nrna_abundance=50,
+            strand_specificity=0.9,
+            label="full_stress",
         )
         info = _extract_results(pr, bench, result)
 
@@ -264,41 +295,56 @@ class TestOppositeStrandOverlap:
     def test_fragment_order_mrna_only(self, tmp_path):
         """mRNA-only: shuffling should not change results."""
         self._test_order_sensitivity(
-            tmp_path, gdna_abundance=0, nrna_abundance=0,
-            strand_specificity=1.0, label="order_mrna",
+            tmp_path,
+            gdna_abundance=0,
+            nrna_abundance=0,
+            strand_specificity=1.0,
+            label="order_mrna",
         )
 
     def test_fragment_order_with_nrna(self, tmp_path):
         """nRNA active: shuffling should not change results."""
         self._test_order_sensitivity(
-            tmp_path, gdna_abundance=0, nrna_abundance=50,
-            strand_specificity=0.9, label="order_nrna",
+            tmp_path,
+            gdna_abundance=0,
+            nrna_abundance=50,
+            strand_specificity=0.9,
+            label="order_nrna",
         )
 
     def test_fragment_order_with_gdna(self, tmp_path):
         """gDNA active: shuffling should not change results."""
         self._test_order_sensitivity(
-            tmp_path, gdna_abundance=50, nrna_abundance=0,
-            strand_specificity=0.9, label="order_gdna",
+            tmp_path,
+            gdna_abundance=50,
+            nrna_abundance=0,
+            strand_specificity=0.9,
+            label="order_gdna",
         )
 
     def test_fragment_order_full_stress(self, tmp_path):
         """Both nRNA and gDNA: shuffling should not change results."""
         self._test_order_sensitivity(
-            tmp_path, gdna_abundance=50, nrna_abundance=50,
-            strand_specificity=0.9, label="order_full",
+            tmp_path,
+            gdna_abundance=50,
+            nrna_abundance=50,
+            strand_specificity=0.9,
+            label="order_full",
         )
 
-    def _test_order_sensitivity(self, tmp_path, *, gdna_abundance, nrna_abundance,
-                                 strand_specificity, label):
+    def _test_order_sensitivity(
+        self, tmp_path, *, gdna_abundance, nrna_abundance, strand_specificity, label
+    ):
         """Run pipeline on original + shuffled BAM, compare results."""
         # --- Run 1: normal order ---
         sc = _build_scenario(tmp_path, name=f"{label}_orig")
         sim = _sim_config(strand_specificity=strand_specificity)
         gdna = _gdna_config(gdna_abundance)
         result = sc.build_oracle(
-            n_fragments=N_FRAGMENTS, sim_config=sim,
-            gdna_config=gdna, nrna_abundance=nrna_abundance,
+            n_fragments=N_FRAGMENTS,
+            sim_config=sim,
+            gdna_config=gdna,
+            nrna_abundance=nrna_abundance,
         )
         config = PipelineConfig(
             em=EMConfig(seed=PIPELINE_SEED),
@@ -327,16 +373,13 @@ class TestOppositeStrandOverlap:
         else:
             print(f"  RESULT: {len(diffs)} differences found")
             for k, v1, v2, ad, rd in sorted(diffs, key=lambda x: -x[3]):
-                print(f"    {k}: {v1:.10f} vs {v2:.10f} "
-                      f"(abs={ad:.2e}, rel={rd:.2e})")
+                print(f"    {k}: {v1:.10f} vs {v2:.10f} (abs={ad:.2e}, rel={rd:.2e})")
 
         # Check that results are close (allow small FP tolerance)
         for k, v1, v2, ad, rd in diffs:
             if "n_loci" in k or "n_transcripts" in k or "n_em_fragments" in k:
                 # Structural properties must be exact
-                assert v1 == v2, (
-                    f"Structural difference in {k}: {v1} vs {v2}"
-                )
+                assert v1 == v2, f"Structural difference in {k}: {v1} vs {v2}"
 
         sc.cleanup()
 

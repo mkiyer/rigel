@@ -3,8 +3,8 @@ test_calibration_integration.py — Integration tests for calibration wiring.
 
 Validates that:
 1. calibrate_gdna() is invoked by run_pipeline() and its output is stored on PipelineResult.
-2. Calibrated gDNA priors flow into compute_gdna_locus_gammas() and produce valid
-   per-locus gamma values.
+2. Calibrated gDNA priors flow into compute_locus_priors() and produce valid
+   per-locus alpha values.
 3. Clean scenarios (no gDNA) produce valid output with calibration.
 """
 
@@ -78,7 +78,7 @@ def _run_with_calibration(result, index):
     config = PipelineConfig(
         em=EMConfig(seed=SEED),
         scan=BamScanConfig(sj_strand_tag="auto"),
-        calibration=CalibrationConfig(min_gdna_regions=1),
+        calibration=CalibrationConfig(),
     )
     return run_pipeline(result.bam_path, index, config=config)
 
@@ -93,8 +93,9 @@ class TestCalibrationConfig:
 
     def test_default_values(self):
         cfg = CalibrationConfig()
-        assert cfg.min_gdna_regions == 100
-        assert cfg.convergence_tol > 0
+        assert cfg.total_pseudocount == 1.0
+        assert cfg.density_percentile == 10.0
+        assert cfg.fl_prior_ess == 1000.0
 
     def test_pipeline_config_includes_calibration(self):
         pcfg = PipelineConfig()
@@ -104,7 +105,7 @@ class TestCalibrationConfig:
     def test_frozen(self):
         cfg = CalibrationConfig()
         with pytest.raises(AttributeError):
-            cfg.min_gdna_regions = 99
+            cfg.total_pseudocount = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -129,34 +130,34 @@ class TestCalibrationEndToEnd:
     def test_calibration_has_expected_fields(self):
         pr = _run_with_calibration(self.result, self.index)
         cal = pr.calibration
-        assert isinstance(cal.gdna_density_global, float)
-        assert isinstance(cal.kappa_strand, float)
-        assert isinstance(cal.mixing_proportion, float)
-        assert isinstance(cal.converged, bool)
-        assert isinstance(cal.n_iterations, int)
-        assert cal.region_posteriors is not None
+        assert isinstance(cal.lambda_gdna, float)
+        assert isinstance(cal.strand_specificity, float)
+        assert cal.region_e_gdna is not None
+        assert cal.region_n_total is not None
+        assert cal.region_e_gdna.ndim == 1
+        assert cal.region_n_total.ndim == 1
+        assert len(cal.region_e_gdna) == len(cal.region_n_total)
 
-    def test_calibration_density_positive(self):
+    def test_calibration_lambda_nonnegative(self):
         pr = _run_with_calibration(self.result, self.index)
         cal = pr.calibration
-        assert cal.gdna_density_global >= 0.0
+        assert cal.lambda_gdna >= 0.0
 
-    def test_calibration_mixing_proportion_valid(self):
+    def test_calibration_e_gdna_valid(self):
         pr = _run_with_calibration(self.result, self.index)
         cal = pr.calibration
-        assert 0.0 <= cal.mixing_proportion <= 1.0
+        assert np.all(cal.region_e_gdna >= 0.0)
+        assert cal.region_e_gdna.sum() > 0  # scenario has gDNA
 
-    def test_calibration_kappa_positive(self):
+    def test_calibration_strand_specificity_valid(self):
         pr = _run_with_calibration(self.result, self.index)
         cal = pr.calibration
-        assert cal.kappa_strand >= 0.0
+        assert 0.5 <= cal.strand_specificity <= 1.0
 
     def test_produces_valid_output(self):
         pr = _run_with_calibration(self.result, self.index)
         df = pr.estimator.get_counts_df(self.index)
-        n_annotated = sum(
-            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
-        )
+        n_annotated = sum(1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_"))
         assert n_annotated == 3
         assert (df["count"] >= 0).all()
         assert df["count"].sum() > 0
@@ -181,18 +182,16 @@ class TestCalibratedOutputFields:
 
     def test_produces_valid_transcripts(self):
         df = self.pr.estimator.get_counts_df(self.index)
-        n_annotated = sum(
-            1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_")
-        )
+        n_annotated = sum(1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_"))
         assert n_annotated == 3
         assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
 
     def test_calibration_result_populated(self):
         assert self.pr.calibration is not None
 
-    def test_per_ref_densities_populated(self):
+    def test_lambda_gdna_nonnegative(self):
         cal = self.pr.calibration
-        assert cal.gdna_density_global >= 0.0
+        assert cal.lambda_gdna >= 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -218,17 +217,18 @@ class TestCalibrationObjectValid:
 
     def test_calibration_object_valid(self):
         assert self.cal is not None
-        assert self.cal.gdna_density_global >= 0.0
-        assert self.cal.kappa_strand >= 0.0
+        assert self.cal.lambda_gdna >= 0.0
+        assert self.cal.strand_specificity > 0.0
 
-    def test_calibration_per_ref_has_entries(self):
-        assert self.cal.gdna_density_global >= 0.0
+    def test_calibration_region_arrays_populated(self):
+        assert self.cal.region_e_gdna is not None
+        assert len(self.cal.region_e_gdna) > 0
 
-    def test_calibration_region_posteriors_shape(self):
-        rp = self.cal.region_posteriors
-        assert rp.ndim == 1
-        assert len(rp) > 0
-        assert np.all((rp >= 0.0) & (rp <= 1.0))
+    def test_calibration_region_e_gdna_valid(self):
+        e_gdna = self.cal.region_e_gdna
+        assert e_gdna.ndim == 1
+        assert len(e_gdna) > 0
+        assert np.all(e_gdna >= 0.0)
 
 
 # ---------------------------------------------------------------------------

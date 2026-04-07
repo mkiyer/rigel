@@ -49,9 +49,9 @@ from .config import (
     TranscriptGeometry,
 )
 from .estimator import AbundanceEstimator
-from .frag_length_model import FragmentLengthModels
+from .frag_length_model import FragmentLengthModel, FragmentLengthModels
 from .index import TranscriptIndex
-from .locus import build_loci, compute_gdna_locus_gammas
+from .locus import build_loci, compute_locus_priors
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
 from .partition import partition_and_free
@@ -62,7 +62,7 @@ from .strand_model import StrandModels
 
 if TYPE_CHECKING:
     from .annotate import AnnotationTable
-    from .calibration import GDNACalibration
+    from .calibration import CalibrationResult
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ class PipelineResult:
     frag_length_models: FragmentLengthModels
     estimator: AbundanceEstimator
     pipeline_config: "PipelineConfig" = None
-    calibration: "GDNACalibration" = None
+    calibration: "CalibrationResult" = None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -315,7 +315,14 @@ def scan_and_buffer(
         )
         fl_region_ids = np.asarray(re["fl_region_ids"], dtype=np.int32)
         fl_frag_lens = np.asarray(re["fl_frag_lens"], dtype=np.int32)
-        fl_table = pd.DataFrame({"region_id": fl_region_ids, "frag_len": fl_frag_lens})
+        fl_frag_strands = np.asarray(re["fl_frag_strands"], dtype=np.int32)
+        fl_table = pd.DataFrame(
+            {
+                "region_id": fl_region_ids,
+                "frag_len": fl_frag_lens,
+                "frag_strand": fl_frag_strands,
+            }
+        )
         logger.info(f"[DONE] Region evidence: {n_regions} regions, {len(fl_table)} FL observations")
 
     logger.info(
@@ -414,21 +421,22 @@ def _compute_priors(
     estimator: AbundanceEstimator,
     loci: list,
     index: TranscriptIndex,
-    calibration: "GDNACalibration" = None,
-) -> np.ndarray:
-    """Compute calibration locus gammas.
+    calibration: "CalibrationResult",
+    total_pseudocount: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute per-locus Dirichlet priors from calibration.
 
-    Returns the per-locus locus_gammas array (float64[n_loci] ∈ [0, 1]).
+    Returns (alpha_gdna, alpha_rna) — fraction-based priors splitting
+    a fixed budget C by the calibrated gDNA mixing fraction.
     """
     # Assign locus_id to every transcript (needed by nrna_frac prior cascade)
     for locus in loci:
         for t_idx in locus.transcript_indices:
             estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
-    # Aggregate calibration region posteriors per locus
-    locus_gammas = compute_gdna_locus_gammas(loci, index, calibration)
-
-    return locus_gammas
+    return compute_locus_priors(
+        loci, index, calibration, total_pseudocount=total_pseudocount,
+    )
 
 
 def _populate_em_annotations(
@@ -495,7 +503,8 @@ def _run_locus_em_partitioned(
     partitions: dict,
     loci: list,
     index: TranscriptIndex,
-    locus_gammas: np.ndarray,
+    alpha_gdna: np.ndarray,
+    alpha_rna: np.ndarray,
     em_config: EMConfig,
     *,
     emit_locus_stats: bool = False,
@@ -506,7 +515,7 @@ def _run_locus_em_partitioned(
     n_threads = em_config.n_threads or os.cpu_count() or 1
     emit_assignments = annotations is not None
 
-    def _build_locus_meta(locus, *, mrna, gdna, locus_gamma):
+    def _build_locus_meta(locus, *, mrna, gdna, alpha_g, alpha_r):
         gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
         return {
             "locus_id": locus.locus_id,
@@ -516,17 +525,26 @@ def _run_locus_em_partitioned(
             "n_em_fragments": len(locus.unit_indices),
             "mrna": float(mrna),
             "gdna": float(gdna),
-            "gdna_init": float(locus_gamma),
+            "alpha_gdna": float(alpha_g),
+            "alpha_rna": float(alpha_r),
         }
 
-    def _call_batch_em(parts, batch_loci, batch_gammas, batch_spans):
+    def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna, batch_spans):
         """Pack tuples, call C++, record results."""
         partition_tuples = [
             (
-                p.offsets, p.t_indices, p.log_liks, p.coverage_weights,
-                p.tx_starts, p.tx_ends, p.count_cols,
-                p.is_spliced, p.gdna_log_liks, p.genomic_footprints,
-                p.locus_t_indices, p.locus_count_cols,
+                p.offsets,
+                p.t_indices,
+                p.log_liks,
+                p.coverage_weights,
+                p.tx_starts,
+                p.tx_ends,
+                p.count_cols,
+                p.is_spliced,
+                p.gdna_log_liks,
+                p.genomic_footprints,
+                p.locus_t_indices,
+                p.locus_count_cols,
             )
             for p in parts
         ]
@@ -535,7 +553,8 @@ def _run_locus_em_partitioned(
         return estimator.run_batch_locus_em_partitioned(
             partition_tuples,
             locus_t_lists,
-            batch_gammas,
+            batch_alpha_gdna,
+            batch_alpha_rna,
             batch_spans,
             index,
             em_iterations=em_config.iterations,
@@ -546,8 +565,7 @@ def _run_locus_em_partitioned(
 
     # Classify mega vs normal
     locus_work = {
-        loc.locus_id: len(loc.transcript_indices) * partitions[loc.locus_id].n_units
-        for loc in loci
+        loc.locus_id: len(loc.transcript_indices) * partitions[loc.locus_id].n_units for loc in loci
     }
     total_work = sum(locus_work.values())
     fair_share = total_work // n_threads if n_threads > 1 else total_work + 1
@@ -564,24 +582,32 @@ def _run_locus_em_partitioned(
     # Phase A: Mega-loci (one at a time, free after each)
     for locus in mega_loci:
         part = partitions.pop(locus.locus_id)
+        lid = locus.locus_id
         em_result = _call_batch_em(
-            [part], [locus],
-            np.array([locus_gammas[locus.locus_id]], dtype=np.float64),
+            [part],
+            [locus],
+            np.array([alpha_gdna[lid]], dtype=np.float64),
+            np.array([alpha_rna[lid]], dtype=np.float64),
             np.array([locus.gdna_span], dtype=np.int64),
         )
         gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
         if annotations is not None and len(em_result) > 3:
             _populate_em_annotations(
-                [part], em_result[3], em_result[4], em_result[5],
-                annotations, index,
+                [part],
+                em_result[3],
+                em_result[4],
+                em_result[5],
+                annotations,
+                index,
             )
         estimator.locus_results.append(
             _build_locus_meta(
                 locus,
                 mrna=mrna_arr[0],
                 gdna=gdna_arr[0],
-                locus_gamma=locus_gammas[locus.locus_id],
+                alpha_g=alpha_gdna[lid],
+                alpha_r=alpha_rna[lid],
             )
         )
         del part
@@ -596,21 +622,26 @@ def _run_locus_em_partitioned(
     normal_loci = [loc for loc in loci if loc.locus_id not in mega_ids]
     if normal_loci:
         normal_parts = [partitions[loc.locus_id] for loc in normal_loci]
-        normal_gammas = np.array(
-            [locus_gammas[loc.locus_id] for loc in normal_loci], dtype=np.float64
-        )
-        normal_spans = np.array(
-            [loc.gdna_span for loc in normal_loci], dtype=np.int64
-        )
+        normal_ag = np.array([alpha_gdna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
+        normal_ar = np.array([alpha_rna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
+        normal_spans = np.array([loc.gdna_span for loc in normal_loci], dtype=np.int64)
         em_result = _call_batch_em(
-            normal_parts, normal_loci, normal_gammas, normal_spans,
+            normal_parts,
+            normal_loci,
+            normal_ag,
+            normal_ar,
+            normal_spans,
         )
         gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
         if annotations is not None and len(em_result) > 3:
             _populate_em_annotations(
-                normal_parts, em_result[3], em_result[4], em_result[5],
-                annotations, index,
+                normal_parts,
+                em_result[3],
+                em_result[4],
+                em_result[5],
+                annotations,
+                index,
             )
         for i, locus in enumerate(normal_loci):
             estimator.locus_results.append(
@@ -618,7 +649,8 @@ def _run_locus_em_partitioned(
                     locus,
                     mrna=mrna_arr[i],
                     gdna=gdna_arr[i],
-                    locus_gamma=locus_gammas[locus.locus_id],
+                    alpha_g=normal_ag[i],
+                    alpha_r=normal_ar[i],
                 )
             )
 
@@ -647,8 +679,10 @@ def quant_from_buffer(
     scoring: FragmentScoringConfig | None = None,
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
-    calibration: "GDNACalibration" = None,
+    calibration: "CalibrationResult" = None,
     emit_locus_stats: bool = False,
+    calibration_total_pseudocount: float = 1.0,
+    fl_prior_ess: float | None = None,
 ) -> AbundanceEstimator:
     """Quantify transcripts from buffered fragments via locus-level EM.
 
@@ -690,9 +724,15 @@ def quant_from_buffer(
     )
 
     # Apply calibrated gDNA fragment-length model for scoring.
-    # Calibration always provides a gDNA FL model (EM-based when ESS
-    # is sufficient, intergenic fallback otherwise).
-    frag_length_models.gdna_model = calibration.gdna_fl_model
+    # Copy to avoid aliasing (calibration may return the intergenic
+    # model object directly).  Re-finalize with global Dirichlet prior
+    # so gDNA and RNA FL models share the same prior baseline.
+    cal_gdna = calibration.gdna_fl_model
+    gdna_copy = FragmentLengthModel(max_size=cal_gdna.max_size)
+    gdna_copy.counts = cal_gdna.counts.copy()
+    gdna_copy._total_weight = cal_gdna._total_weight
+    gdna_copy.finalize(prior_counts=frag_length_models.global_model.counts, prior_ess=fl_prior_ess)
+    frag_length_models.gdna_model = gdna_copy
     logger.info(
         f"[CAL-FL] gDNA FL model: "
         f"mean={calibration.gdna_fl_model.mean:.1f}, "
@@ -733,11 +773,12 @@ def quant_from_buffer(
             f"(largest: {max_locus_t} transcripts, {max_locus_u} units)"
         )
 
-        locus_gammas = _compute_priors(
+        alpha_gdna, alpha_rna = _compute_priors(
             estimator,
             loci,
             index,
             calibration=calibration,
+            total_pseudocount=calibration_total_pseudocount,
         )
 
         # Phase 4 (NEW): Array-by-array scatter + incremental free
@@ -751,7 +792,8 @@ def quant_from_buffer(
             partitions,
             loci,
             index,
-            locus_gammas,
+            alpha_gdna,
+            alpha_rna,
             em_config,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
@@ -828,7 +870,7 @@ def run_pipeline(
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
     frag_length_models.build_scoring_models()
-    frag_length_models.finalize()
+    frag_length_models.finalize(prior_ess=config.calibration.fl_prior_ess)
 
     # -- gDNA calibration (post-model, pre-scoring) --
     if region_counts is None or fl_table is None or index.region_df is None:
@@ -844,17 +886,15 @@ def run_pipeline(
         fl_table,
         index.region_df,
         strand_models.strand_specificity,
-        max_iterations=cal_cfg.max_iterations,
-        convergence_tol=cal_cfg.convergence_tol,
         density_percentile=cal_cfg.density_percentile,
-        min_gdna_regions=cal_cfg.min_gdna_regions,
-        min_fl_ess=cal_cfg.min_fl_ess,
         intergenic_fl_model=frag_length_models.intergenic,
     )
+    cal_summary = calibration.to_summary_dict()
     logger.info(
-        f"[CAL] gDNA calibration: π={calibration.mixing_proportion:.3f}, "
-        f"κ_strand={calibration.kappa_strand:.1f}, λ_G={calibration.gdna_density_global:.2e}, "
-        f"converged={calibration.converged} ({calibration.n_iterations} iters)"
+        f"[CAL] gDNA calibration: λ_G={cal_summary['lambda_gdna']:.2e}, "
+        f"E[gDNA]={cal_summary['total_expected_gdna']:.0f}, "
+        f"gDNA_frac={cal_summary['gdna_fraction']:.3f}, "
+        f"SS={cal_summary['strand_specificity']:.3f}"
     )
 
     # -- Annotation table for second BAM pass (opt-in) --
@@ -882,6 +922,8 @@ def run_pipeline(
             annotations=annotations,
             calibration=calibration,
             emit_locus_stats=config.emit_locus_stats,
+            calibration_total_pseudocount=config.calibration.total_pseudocount,
+            fl_prior_ess=config.calibration.fl_prior_ess,
         )
     finally:
         buffer.cleanup()

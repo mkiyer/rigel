@@ -119,14 +119,14 @@ class TestCalibratedDensityEndToEnd:
         sc, result = high_ss_scenario
         pr = self._run(result, result.index)
         assert pr.calibration is not None
-        assert pr.calibration.gdna_density_global >= 0.0
+        assert pr.calibration.lambda_gdna >= 0.0
 
     def test_low_ss_calibration_populates(self, low_ss_scenario):
         """Calibration result is populated at low SS."""
         sc, result = low_ss_scenario
         pr = self._run(result, result.index)
         assert pr.calibration is not None
-        assert pr.calibration.gdna_density_global >= 0.0
+        assert pr.calibration.lambda_gdna >= 0.0
 
     def test_low_ss_calibrated_gdna_reasonable(self, low_ss_scenario):
         """At low SS with gDNA, calibrated path should detect gDNA contamination."""

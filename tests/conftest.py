@@ -22,9 +22,12 @@ from rigel.splice import SpliceStrandCol
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--update-golden", action="store_true", default=False,
+        "--update-golden",
+        action="store_true",
+        default=False,
         help="Regenerate golden output files instead of comparing.",
     )
+
 
 # ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)
@@ -82,6 +85,7 @@ def mini_fasta_file(tmp_path: Path) -> Path:
 
     # Create the .fai index
     import pysam
+
     pysam.faidx(str(fasta_path))
 
     return fasta_path
@@ -163,11 +167,12 @@ def _make_locus_em_data(
     include_gdna=False,
     nrna_log_lik=-2.0,
     gdna_log_lik=0.0,
-    locus_gamma=0.1,
+    alpha_gdna=1.0,
+    alpha_rna=9.0,
 ):
-    """Build (ScoredFragments, [Locus], locus_gammas, index) for batch EM tests.
+    """Build (ScoredFragments, [Locus], alpha_gdna, alpha_rna, index) for batch EM tests.
 
-    Returns a tuple (em_data, loci, locus_gammas, index) suitable for
+    Returns a tuple (em_data, loci, alpha_gdna_arr, alpha_rna_arr, index) suitable for
     ``run_batch_locus_em()``.
 
     Parameters
@@ -181,7 +186,7 @@ def _make_locus_em_data(
         If True, units are marked as unspliced (``is_spliced=False``)
         so the batch C++ adds nRNA shadow candidates.
     include_gdna : bool
-        If True, ``locus_gamma > 0`` and ``gdna_log_liks`` are finite
+        If True, ``alpha_gdna > 0`` and ``gdna_log_liks`` are finite
         so the batch C++ adds a gDNA component.
     """
     if num_transcripts is None:
@@ -200,14 +205,8 @@ def _make_locus_em_data(
     for u, t_list in enumerate(t_indices_per_unit):
         for j, t_idx in enumerate(t_list):
             flat_t.append(t_idx)
-            flat_lk.append(
-                log_liks_per_unit[u][j] if log_liks_per_unit else 0.0
-            )
-            flat_cc.append(
-                count_cols_per_unit[u][j]
-                if count_cols_per_unit
-                else _UNSPLICED_SENSE
-            )
+            flat_lk.append(log_liks_per_unit[u][j] if log_liks_per_unit else 0.0)
+            flat_cc.append(count_cols_per_unit[u][j] if count_cols_per_unit else _UNSPLICED_SENSE)
         offsets.append(len(flat_t))
 
     n_candidates = len(flat_t)
@@ -218,11 +217,7 @@ def _make_locus_em_data(
     for u, t_list in enumerate(t_indices_per_unit):
         if t_list:
             locus_t[u] = t_list[0]
-            locus_cc[u] = (
-                count_cols_per_unit[u][0]
-                if count_cols_per_unit
-                else _UNSPLICED_SENSE
-            )
+            locus_cc[u] = count_cols_per_unit[u][0] if count_cols_per_unit else _UNSPLICED_SENSE
 
     # is_spliced: True (spliced) → no nRNA/gDNA shadows.
     # For include_nrna or include_gdna, set False (unspliced).
@@ -266,8 +261,8 @@ def _make_locus_em_data(
     )
     loci = [locus]
 
-    locus_gammas = np.array([locus_gamma if include_gdna else 0.0],
-                          dtype=np.float64)
+    alpha_gdna_arr = np.array([alpha_gdna if include_gdna else 0.0], dtype=np.float64)
+    alpha_rna_arr = np.array([alpha_rna], dtype=np.float64)
 
     index = _MockBatchIndex(n_t)
 
@@ -275,7 +270,7 @@ def _make_locus_em_data(
     if rc is not None:
         _ensure_estimator_geometry(rc)
 
-    return em_data, loci, locus_gammas, index
+    return em_data, loci, alpha_gdna_arr, alpha_rna_arr, index
 
 
 class _MockBatchIndex:
@@ -283,15 +278,17 @@ class _MockBatchIndex:
 
     def __init__(self, num_transcripts):
         self.num_transcripts = num_transcripts
-        self.t_df = pd.DataFrame({
-            "t_id": [f"t{i}" for i in range(num_transcripts)],
-            "ref": ["chr1"] * num_transcripts,
-            "start": np.zeros(num_transcripts, dtype=np.int64),
-            "end": np.full(num_transcripts, 10000, dtype=np.int64),
-            "length": np.full(num_transcripts, 1000, dtype=np.int64),
-            "is_nrna": np.zeros(num_transcripts, dtype=bool),
-            "is_synthetic": np.zeros(num_transcripts, dtype=bool),
-        })
+        self.t_df = pd.DataFrame(
+            {
+                "t_id": [f"t{i}" for i in range(num_transcripts)],
+                "ref": ["chr1"] * num_transcripts,
+                "start": np.zeros(num_transcripts, dtype=np.int64),
+                "end": np.full(num_transcripts, 10000, dtype=np.int64),
+                "length": np.full(num_transcripts, 1000, dtype=np.int64),
+                "is_nrna": np.zeros(num_transcripts, dtype=bool),
+                "is_synthetic": np.zeros(num_transcripts, dtype=bool),
+            }
+        )
 
 
 def _ensure_estimator_geometry(rc):
@@ -303,18 +300,19 @@ def _ensure_estimator_geometry(rc):
         rc._exonic_lengths = np.full(n_t, 1000.0, dtype=np.float64)
 
 
-def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
-                    *, em_iterations=10):
+def _run_and_assign(
+    rc, em_data, loci=None, index=None, alpha_gdna=None, alpha_rna=None, *, em_iterations=10
+):
     """Run batch locus EM via the partitioned path. Returns pool_counts dict.
 
-    Accepts either the new tuple form (em_data, loci, locus_gammas, index)
+    Accepts either the new tuple form (em_data, loci, alpha_gdna, alpha_rna, index)
     separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
     """
     from rigel.partition import partition_and_free
 
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):
-        em_data, loci, locus_gammas, index = em_data
+        em_data, loci, alpha_gdna, alpha_rna, index = em_data
 
     _ensure_estimator_geometry(rc)
 
@@ -324,10 +322,18 @@ def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
     # Build the 12-tuples and transcript index lists expected by C++
     partition_tuples = [
         (
-            p.offsets, p.t_indices, p.log_liks, p.coverage_weights,
-            p.tx_starts, p.tx_ends, p.count_cols,
-            p.is_spliced, p.gdna_log_liks, p.genomic_footprints,
-            p.locus_t_indices, p.locus_count_cols,
+            p.offsets,
+            p.t_indices,
+            p.log_liks,
+            p.coverage_weights,
+            p.tx_starts,
+            p.tx_ends,
+            p.count_cols,
+            p.is_spliced,
+            p.gdna_log_liks,
+            p.genomic_footprints,
+            p.locus_t_indices,
+            p.locus_count_cols,
         )
         for p in [partitions[i] for i in range(len(loci))]
     ]
@@ -335,8 +341,12 @@ def _run_and_assign(rc, em_data, loci=None, index=None, locus_gammas=None,
     gdna_spans = np.array([loc.gdna_span for loc in loci], dtype=np.int64)
 
     total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
-        partition_tuples, locus_t_lists,
-        locus_gammas, gdna_spans, index,
+        partition_tuples,
+        locus_t_lists,
+        alpha_gdna,
+        alpha_rna,
+        gdna_spans,
+        index,
         em_iterations=em_iterations,
     )
     rc._gdna_em_total += total_gdna

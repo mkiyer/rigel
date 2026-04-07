@@ -140,7 +140,7 @@ class TestLocusGDNATheta:
             [[0]] * 10,
             num_transcripts=3,
             include_gdna=True,
-            locus_gamma=0.2,
+            alpha_gdna=2.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=1)
         # gDNA should absorb some fragments
@@ -154,7 +154,7 @@ class TestLocusGDNATheta:
             [[0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            locus_gamma=0.1,
+            alpha_gdna=1.0,
             gdna_log_lik=5.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -174,7 +174,7 @@ class TestLocusGDNATheta:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            locus_gamma=0.0,
+            alpha_gdna=0.0,
             gdna_log_lik=-5.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -198,7 +198,7 @@ class TestLocusGDNAAssignment:
             log_liks_per_unit=[[-10.0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            locus_gamma=0.5,
+            alpha_gdna=5.0,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -216,7 +216,7 @@ class TestLocusGDNAAssignment:
             num_transcripts=3,
             include_nrna=True,
             include_gdna=True,
-            locus_gamma=0.2,
+            alpha_gdna=2.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
@@ -234,7 +234,7 @@ class TestLocusGDNAAssignment:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            locus_gamma=0.1,
+            alpha_gdna=1.0,
             gdna_log_lik=-20.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -251,7 +251,7 @@ class TestLocusGDNAAssignment:
             log_liks_per_unit=[[-10.0]] * 500,
             num_transcripts=2,
             include_gdna=True,
-            locus_gamma=0.1,
+            alpha_gdna=1.0,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -278,7 +278,7 @@ class TestGDNALocusAttribution:
             count_cols_per_unit=[[cc]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            locus_gamma=0.5,
+            alpha_gdna=5.0,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -297,7 +297,7 @@ class TestGDNALocusAttribution:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            locus_gamma=0.0,
+            alpha_gdna=0.0,
             gdna_log_lik=-50.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -394,7 +394,7 @@ class TestLocusGDNABehavior:
             [[0, 1]] * 200,
             num_transcripts=3,
             include_gdna=True,
-            locus_gamma=0.3,
+            alpha_gdna=3.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]
@@ -413,7 +413,7 @@ class TestLocusGDNABehavior:
             num_transcripts=2,
             rc=rc_low,
             include_gdna=True,
-            locus_gamma=0.1,
+            alpha_gdna=1.0,
             gdna_log_lik=-5.0,
         )
         pc_low = _run_and_assign(rc_low, bundle_low, em_iterations=10)
@@ -426,7 +426,7 @@ class TestLocusGDNABehavior:
             log_liks_per_unit=[[-10.0]] * 200,
             num_transcripts=2,
             include_gdna=True,
-            locus_gamma=0.1,
+            alpha_gdna=1.0,
             gdna_log_lik=0.0,
         )
         pc_high = _run_and_assign(rc_high, bundle_high, em_iterations=10)
@@ -443,6 +443,61 @@ class TestLocusGDNABehavior:
 
         rc._gdna_em_total = 42.0
         assert rc.gdna_em_count == 42.0
+
+
+# =====================================================================
+# VBEM alpha prior interaction with gDNA (Phase 5 tests)
+# =====================================================================
+
+
+class TestVBEMGDNAAlpha:
+    """Verify VBEM naturally suppresses/enables gDNA via alpha priors."""
+
+    def test_tiny_alpha_gdna_suppresses_gdna(self):
+        """Very small α_gDNA → gDNA component gets negligible weight."""
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42, assignment_mode="fractional"))
+        bundle = _make_locus_em_data(
+            [[0]] * 200,
+            num_transcripts=2,
+            include_gdna=True,
+            alpha_gdna=0.001,  # tiny gDNA prior
+        )
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
+
+        # With tiny prior and no gDNA signal, gDNA should be negligible
+        assert gdna_count < 5.0
+
+    def test_zero_alpha_gdna_disables_gdna(self):
+        """α_gDNA = 0 → gDNA component disabled (gate removes it)."""
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
+        bundle = _make_locus_em_data(
+            [[0]] * 200,
+            num_transcripts=2,
+            include_gdna=True,
+            alpha_gdna=0.0,  # zero → disabled
+            gdna_log_lik=5.0,  # high gDNA likelihood (should be irrelevant)
+        )
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
+
+        # With alpha_gdna=0, gate disables gDNA entirely
+        assert gdna_count < 1e-10
+
+    def test_large_alpha_gdna_enables_absorption(self):
+        """Large α_gDNA + equal likelihoods → gDNA absorbs fragments."""
+        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42, assignment_mode="fractional"))
+        bundle = _make_locus_em_data(
+            [[0]] * 200,
+            num_transcripts=2,
+            include_gdna=True,
+            alpha_gdna=50.0,  # strong gDNA prior
+        )
+        pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
+        gdna_count = pool_counts["gdna"]
+
+        # Strong gDNA prior should pull fragments toward gDNA
+        assert gdna_count > 2.0
 
 
 # =====================================================================

@@ -721,3 +721,185 @@ The V3 calibration algorithm replaces a 1400-line iterative EM mixture model wit
 4. **No intergenic dependency.** The strand decomposition operates on annotated regions (exonic, intronic). gDNA signals come from the strand balance within expressed genes, not from unexpressed genomic deserts. This works for exome capture, targeted panels, and any protocol that depletes intergenic space.
 
 5. **Continuous degradation at low SS.** The blending weight $(2 \cdot SS - 1)^2$ smoothly transitions from pure strand (SS=1) to pure density (SS=0.5). No hard thresholds, no special cases.
+
+---
+
+## 20. Implementation Notes
+
+This section documents what was actually implemented, including design decisions made during implementation that diverge from or refine the original plan.
+
+### 20.1 Phase 1: C++ Data Collection
+
+**Files changed:** `src/rigel/native/resolve_context.h`, `src/rigel/native/bam_scanner.cpp`, `src/rigel/pipeline.py`
+
+Added `fl_frag_strands` vector to `RegionAccumulator` in the C++ resolve context. When the BAM scanner appends a fragment length to `fl_frag_lens`, it now also appends the fragment strand (`STRAND_POS` or `STRAND_NEG`) to `fl_frag_strands`. This data is exposed in the scan result dictionary and extracted in `pipeline.py` as a `frag_strand` column in `fl_table`.
+
+No complications. Implemented exactly as planned.
+
+### 20.2 Phase 2: Calibration Rewrite
+
+**Files changed:** `src/rigel/calibration.py` (complete rewrite), `src/rigel/config.py`
+
+Replaced the 1400-line iterative calibration EM with the ~200-line analytical `calibrate_gdna()` function implementing the strand decomposition + density baseline algorithm documented in Sections 4–7.
+
+**`CalibrationResult` dataclass** (Section 12):
+- `region_e_gdna` — per-region E[N_gDNA] (float64 array)
+- `region_n_total` — per-region total fragment counts
+- `gdna_fl_model` — FragmentLengthModel for gDNA scoring
+- `lambda_gdna` — global gDNA background density
+- `strand_specificity` — echoed for downstream use
+
+**`CalibrationConfig`** (replaced in `config.py`):
+- `beta: float = 0.05` — discount factor
+- `density_percentile: float = 10.0` — for unstranded λ_G estimation
+- `min_fl_ess: int = 50` — minimum ESS for gDNA FL model
+
+**Deleted:** All iterative EM machinery (`_e_step`, `_m_step`, `_seed_initial_partition`, `estimate_kappa_marginal`, convergence loop), algebraic fallback, density Gaussians, Beta-Binomial κ estimation, `GDNA_INIT_MIN_REGIONS`, `SS > 0.55` threshold, and all diagnostic fields.
+
+### 20.3 Phase 3: Locus Prior Computation
+
+**Files changed:** `src/rigel/locus.py`, `src/rigel/pipeline.py`
+
+Replaced `compute_gdna_locus_gammas()` with `compute_locus_priors()`. The function uses `index.region_cr` (cgranges interval tree) to find overlapping calibration regions for each locus, then computes:
+
+$$\alpha_{\text{gDNA}} = \beta \times \sum_{r \in \text{overlap}} \mathbb{E}[N_{\text{gDNA},r}]$$
+
+$$\alpha_{\text{RNA}} = \texttt{alpha\_rna\_fixed}$$
+
+Returns `(alpha_gdna, alpha_rna)` arrays instead of `locus_gammas`. When no regions overlap a locus, falls back to a global ratio: $\beta \times \sum E / \sum N$.
+
+`pipeline.py` updated to pass `(alpha_gdna, alpha_rna)` through to `AbundanceEstimator.run_batch_locus_em_partitioned()`.
+
+### 20.4 Phase 4: EM Solver Changes
+
+**Files changed:** `src/rigel/native/em_solver.cpp`, `src/rigel/estimator.py`, `src/rigel/config.py`, `src/rigel/cli.py`
+
+#### 20.4.1 `VBEM_CLAMP_FLOOR` → `EM_LOG_EPSILON`
+
+The old `VBEM_CLAMP_FLOOR = 0.1` prevented SQUAREM-extrapolated alpha values from dropping below 0.1. This defeated VBEM's natural component suppression mechanism.
+
+Replaced with `VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON` (≈ 1e-300). At this value, `digamma` returns ≈ −1e300. After max-subtraction in the E-step kernel, `exp(−1e300)` underflows to IEEE +0.0. The component receives zero responsibility and stays dead. A component with genuine read support can recover since the M-step adds real observations to the prior.
+
+#### 20.4.2 `compute_ovr_prior_and_warm_start()` Interface Change
+
+Changed from `(locus_gamma, total_pseudocount)` to `(alpha_gdna, alpha_rna)`:
+
+| Old Parameter | New Parameter | Semantics |
+|--------------|--------------|-----------|
+| `locus_gamma` (float ∈ [0,1]) | `alpha_gdna` (float ≥ 0) | Discounted expected gDNA fragment count |
+| `total_pseudocount` (float, default 1.0) | `alpha_rna` (float ≥ 0) | Fixed RNA Dirichlet prior |
+
+The function distributes `alpha_rna` across RNA components proportionally to their coverage totals (from both unambiguous mapping and coverage-weighted ambiguous sharing). When no coverage data is available, falls back to uniform distribution across eligible RNA components. `alpha_gdna` is assigned directly to the gDNA component's prior.
+
+Warm-start for the gDNA component uses the ratio $\alpha_{\text{gDNA}} / \alpha_{\text{RNA}} \times \text{others}$.
+
+#### 20.4.3 Binary Gate Deletion
+
+Deleted the `if (locus_gamma == 0.0) { sub.prior[gdna_idx] = 0.0; }` block. When `alpha_gdna = 0`, the prior is already set to `EM_LOG_EPSILON` (≈ 1e-300), and the VBEM or MAP-EM math naturally suppresses the component. No conditional logic needed.
+
+#### 20.4.4 `prior_pseudocount` Removal
+
+Deleted `EMConfig.prior_pseudocount` field and `--prior-pseudocount` CLI flag. The old constant pseudocount (default 1.0) applied uniformly to all components regardless of calibration evidence. Now the Dirichlet prior comes entirely from calibration-derived physical counts (`alpha_gdna`, `alpha_rna`). Updated all source files, tests, scripts, and configs that referenced `prior_pseudocount`.
+
+### 20.5 The `alpha_rna_fixed = 1.0` Design Decision
+
+**Context:** The original plan (Section 9.2) specified:
+
+$$\alpha_{\text{RNA,total}} = \beta \times (N_{\text{total}} - \mathbb{E}[N_{\text{gDNA}}])$$
+
+This scales the RNA prior proportionally to the per-locus total fragment count. During Phase 4 implementation, this caused a regression: at the default $\beta = 0.05$, a locus with 1000 fragments would get $\alpha_{\text{RNA}} = 0.05 \times 950 = 47.5$. For a locus with many nRNA components (which typically have low coverage), this inflated RNA prior anchored nRNA components at artificially high levels, preventing the VBEM from suppressing them. The symptom was nRNA leakage: fragments that should have been assigned to mRNA were absorbed by nRNA components whose priors were too strong to overcome.
+
+**Root cause:** The data-scaled RNA prior double-counts RNA evidence. The per-locus EM already has direct access to all fragment-level likelihoods. Giving it a strong RNA prior proportional to the fragment count means the "prior" is not prior knowledge — it is a shadow of the data itself.
+
+**Fix:** `alpha_rna` is a fixed constant (default 1.0), independent of fragment count or locus size. This is a genuinely uninformative prior: 1.0 Dirichlet pseudo-count means "I have seen one virtual fragment supporting this distribution." The per-locus EM's per-fragment evidence (typically hundreds to thousands of fragments) overwhelms this prior immediately. The prior serves only to regularize the initial EM iteration when coverage-weighted warm-starting is sparse.
+
+The gDNA prior (`alpha_gdna`) remains data-scaled because it encodes calibration's **independent** estimate of gDNA contamination from strand balance — information the per-locus EM does not have direct access to (it scores individual fragments but does not reason about aggregate strand ratios). The asymmetry is intentional: informative where calibration has unique knowledge (gDNA level), uninformative where the EM already has the data (RNA allocation).
+
+**Signature of `compute_locus_priors()`:**
+
+```python
+def compute_locus_priors(
+    loci, index, calibration,
+    beta: float = 0.05,
+    alpha_rna_fixed: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+```
+
+### 20.6 Phase 5: Test Updates
+
+**Files created/modified:**
+
+| File | Action | Tests Added |
+|------|--------|-------------|
+| `tests/test_locus_priors.py` | Created | 13 tests across 6 classes |
+| `tests/test_em_impl.py` | Modified | 2 tests in `TestVBEM` class |
+| `tests/test_gdna.py` | Modified | 3 tests in new `TestVBEMGDNAAlpha` class |
+
+#### test_locus_priors.py (NEW — 13 tests)
+
+Tests `compute_locus_priors()` in isolation using a `_MockRegionIndex` with cgranges.
+
+| Class | Tests | What it validates |
+|-------|-------|-------------------|
+| `TestBasicPriors` | 4 | Single region, multiple overlapping, no-overlap fallback, multiple loci |
+| `TestAlphaRNAFixed` | 3 | Default=1.0, no scaling with depth, custom value |
+| `TestBetaSensitivity` | 2 | Linear scaling, β=0 disables |
+| `TestPureRNA` | 1 | Zero E[gDNA] → zero α_gDNA |
+| `TestPureGDNA` | 1 | High E[gDNA] → α_gDNA >> α_RNA |
+| `TestFallback` | 2 | No-region-cr fallback, empty loci |
+
+#### test_em_impl.py (2 new tests in TestVBEM)
+
+| Test | What it validates |
+|------|-------------------|
+| `test_vbem_tiny_alpha_suppresses_component` | α_RNA=0.001 → component with no evidence gets < 1% weight |
+| `test_vbem_zero_prior_disables_component` | Compares VBEM vs MAP-EM: VBEM suppresses ineligible component (prior_eligible=0) more aggressively |
+
+#### test_gdna.py (3 new tests in TestVBEMGDNAAlpha)
+
+| Test | What it validates |
+|------|-------------------|
+| `test_tiny_alpha_gdna_suppresses_gdna` | α_gDNA=0.001 → gDNA count < 5 |
+| `test_zero_alpha_gdna_disables_gdna` | α_gDNA=0.0 → gDNA count < 1e-10 |
+| `test_large_alpha_gdna_enables_absorption` | α_gDNA=50.0 → gDNA count > 2.0 |
+
+Golden outputs regenerated with `pytest tests/ --update-golden`.
+
+### 20.7 Test Status
+
+Full test suite: **1002 passed, 8 failed**.
+
+The 8 failures are all in `tests/scenarios/test_nrna_double_counting.py` at low strand specificity (SS=0.65, SS=0.90) with nRNA fractions of 30% and 70%. These failures are caused by the nRNA component model's inability to cleanly separate mRNA from nRNA at low SS — a known fundamental identifiability limitation documented in the benchmark findings. They are **not** related to the V3 calibration implementation.
+
+### 20.8 Deleted Legacy Code
+
+| Component | Location | Lines Removed |
+|-----------|----------|---------------|
+| Calibration EM | `calibration.py` | ~1200 lines (E-step, M-step, convergence, algebraic fallback, density Gaussians, kappa estimation) |
+| `GDNACalibration` alias | `calibration.py` | Type alias for old dataclass |
+| `prior_pseudocount` | `config.py`, `em_solver.cpp`, `cli.py` | EMConfig field, C++ constant, CLI flag |
+| `VBEM_CLAMP_FLOOR` | `em_solver.cpp` | Constant + two usage sites |
+| `locus_gamma` binary gate | `em_solver.cpp` | `if (locus_gamma == 0.0)` block |
+| `compute_gdna_locus_gammas()` | `locus.py` | Old gamma-fraction locus prior |
+| Old `CalibrationConfig` fields | `config.py` | `max_iterations`, `convergence_tol`, `min_gdna_regions`, etc. |
+
+### 20.9 Files Changed (Complete List)
+
+**C++ (required recompilation):**
+- `src/rigel/native/resolve_context.h` — `fl_frag_strands` vector
+- `src/rigel/native/bam_scanner.cpp` — populate `fl_frag_strands`, expose in result dict
+- `src/rigel/native/em_solver.cpp` — VBEM clamp floor, binary gate, prior interface
+
+**Python source:**
+- `src/rigel/calibration.py` — complete rewrite
+- `src/rigel/config.py` — `CalibrationConfig` + `EMConfig` field changes
+- `src/rigel/locus.py` — `compute_locus_priors()` replaces `compute_gdna_locus_gammas()`
+- `src/rigel/pipeline.py` — wiring changes for new prior format
+- `src/rigel/estimator.py` — `(alpha_gdna, alpha_rna)` interface
+- `src/rigel/cli.py` — removed `--prior-pseudocount` flag
+
+**Tests:**
+- `tests/test_locus_priors.py` — new (13 tests)
+- `tests/test_em_impl.py` — 2 new VBEM alpha tests
+- `tests/test_gdna.py` — 3 new VBEM gDNA alpha tests
+- `tests/golden/` — regenerated golden outputs

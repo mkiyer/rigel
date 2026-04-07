@@ -49,14 +49,13 @@ static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 // sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
 static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
 
-// VBEM SQUAREM clamp floor: minimum alpha value after SQUAREM extrapolation
-// or stabilization.  Prevents components from entering the digamma absorbing
-// regime (psi(a) ~ -1/a for small a) where recovery is impossible.
-// At 0.1, psi(0.1) ~ -10.4, giving weight ~3e-5 — small enough not to steal
-// mass, but large enough that a component with genuine read support can
-// accumulate evidence and recover.  Any value >= 0.01 avoids the absorbing
-// barrier; values below ~0.01 are effectively dead in double precision.
-static constexpr double VBEM_CLAMP_FLOOR = 0.1;
+// VBEM SQUAREM prior floor: minimum alpha value after SQUAREM extrapolation
+// or stabilization.  Uses EM_LOG_EPSILON (≈1e-300) which is deep enough
+// that digamma returns ≈ −1e300.  After max-subtraction in the E-step
+// kernel, exp(−1e300) = 0.0 (IEEE underflow), so the component receives
+// zero responsibility and stays dead.  A component with genuine read
+// support can recover since the M-step adds real observations to the prior.
+static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
 // Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
 static constexpr int ASSIGN_FRACTIONAL = 0;
@@ -774,8 +773,8 @@ static void compute_ovr_prior_and_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
     const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
-    double        locus_gamma,       // calibration gDNA fraction ∈ [0,1]
-    double        total_pseudocount, // C (total prior budget, default 1.0)
+    double        alpha_gdna,        // calibration gDNA prior (physical count)
+    double        alpha_rna,         // calibration RNA prior (physical count)
     int           gdna_idx,          // index of gDNA component (-1 if none)
     double*       prior_out,       // [n_components] output
     double*       theta_init_out,  // [n_components] output
@@ -811,7 +810,7 @@ static void compute_ovr_prior_and_warm_start(
         }
     }
 
-    // --- Unified OVR prior: budget-constrained distribution ---
+    // --- Unified OVR prior: calibration-derived distribution ---
 
     // Compute total RNA coverage (excluding gDNA and ineligible)
     double total_rna_coverage = 0.0;
@@ -823,22 +822,18 @@ static void compute_ovr_prior_and_warm_start(
         }
     }
 
-    double rna_budget = (1.0 - locus_gamma) * total_pseudocount;
-    double gdna_alpha = std::max(locus_gamma * total_pseudocount,
-                                 EM_LOG_EPSILON);
-
     for (int i = 0; i < n_components; ++i) {
         if (eligible[i] <= 0.0) {
             prior_out[i] = 0.0;
         } else if (i == gdna_idx) {
-            prior_out[i] = gdna_alpha;
+            prior_out[i] = std::max(alpha_gdna, EM_LOG_EPSILON);
         } else if (total_rna_coverage > 0.0) {
             prior_out[i] = std::max(
-                rna_budget * coverage_totals[i] / total_rna_coverage,
+                alpha_rna * coverage_totals[i] / total_rna_coverage,
                 EM_LOG_EPSILON);
         } else if (n_rna_eligible > 0) {
             // No coverage data — distribute uniformly
-            prior_out[i] = std::max(rna_budget / n_rna_eligible,
+            prior_out[i] = std::max(alpha_rna / n_rna_eligible,
                                     EM_LOG_EPSILON);
         } else {
             prior_out[i] = EM_LOG_EPSILON;
@@ -847,20 +842,20 @@ static void compute_ovr_prior_and_warm_start(
 
     // --- gDNA warm-start override ---
     if (gdna_idx >= 0 && gdna_idx < n_components
-        && eligible[gdna_idx] > 0.0)
+        && eligible[gdna_idx] > 0.0 && alpha_gdna > 0.0)
     {
         double total_theta = 0.0;
         for (int i = 0; i < n_components; ++i)
             total_theta += theta_init_out[i];
 
         double others = total_theta - theta_init_out[gdna_idx];
-        if (others > 0.0 && locus_gamma < 1.0 - 1e-10) {
+        double total_alpha = alpha_gdna + alpha_rna;
+        if (others > 0.0 && total_alpha > 0.0 && alpha_rna > 0.0) {
             theta_init_out[gdna_idx] =
-                (locus_gamma / std::max(1.0 - locus_gamma, 1e-10))
-                * others;
+                (alpha_gdna / alpha_rna) * others;
         } else {
             theta_init_out[gdna_idx] =
-                std::max(locus_gamma * total_theta, EM_LOG_EPSILON);
+                std::max(alpha_gdna, EM_LOG_EPSILON);
         }
     }
 }
@@ -940,10 +935,9 @@ static EMResult run_squarem(
                 for (size_t i = 0; i < nc; ++i) {
                     state_extrap[i] = state0[i] + 2.0 * step * r_vec[i]
                                     + step * step * v_vec[i];
-                    // Clamp to recoverable floor: keeps components out of
-                    // the digamma absorbing regime (prior alone is ~1e-6
-                    // in mega-loci, deep in the death zone).
-                    double floor_i = std::max(prior[i], VBEM_CLAMP_FLOOR);
+                    // Clamp to prior floor: prevents SQUAREM extrapolation
+                    // from creating negative or near-zero alpha values.
+                    double floor_i = std::max(prior[i], VBEM_SQUAREM_PRIOR_FLOOR);
                     if (state_extrap[i] < floor_i)
                         state_extrap[i] = floor_i;
                 }
@@ -957,9 +951,8 @@ static EMResult run_squarem(
             // Floor-clamp + convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
             for (size_t i = 0; i < nc; ++i) {
-                // Clamp stabilisation output to recoverable floor —
-                // prevents the absorbing barrier at tiny alpha values.
-                double floor_i = std::max(prior[i], VBEM_CLAMP_FLOOR);
+                // Clamp stabilisation output to prior floor.
+                double floor_i = std::max(prior[i], VBEM_SQUAREM_PRIOR_FLOOR);
                 if (state_new[i] < floor_i) {
                     state_new[i] = floor_i;
                 }
@@ -1113,7 +1106,7 @@ run_locus_em_native(
     f64_1d prior_eligible,
     // Scalar config
     int    n_components,
-    double total_pseudocount,
+    double alpha_rna,
     int    max_iterations,
     double convergence_delta,
     bool   use_vbem,
@@ -1153,7 +1146,7 @@ run_locus_em_native(
             if (pe_ptr[i] > 0.0) ++n_eligible;
         }
         double uniform_alpha = (n_eligible > 0)
-            ? std::max(total_pseudocount / n_eligible, EM_LOG_EPSILON)
+            ? std::max(alpha_rna / n_eligible, EM_LOG_EPSILON)
             : EM_LOG_EPSILON;
 
         std::vector<double> alpha(nc);
@@ -1207,8 +1200,8 @@ run_locus_em_native(
     std::vector<double> theta_init(nc);
     compute_ovr_prior_and_warm_start(
         ec_data, unambig_totals.data(), pe_ptr,
-        0.0,               // locus_gamma = 0 (no gDNA)
-        total_pseudocount,
+        0.0,               // alpha_gdna = 0 (no gDNA)
+        alpha_rna,          // alpha_rna = total budget
         -1,                // gdna_idx = -1 (no gDNA)
         prior.data(), theta_init.data(), n_components);
 
@@ -1731,7 +1724,7 @@ struct PartitionView {
 static void extract_locus_sub_problem_from_partition(
     LocusSubProblem& sub,
     const PartitionView& pv,
-    double locus_gamma,
+    double alpha_gdna,
     int64_t gdna_span,
     const double*  all_unambig_row_sums,
     const int64_t* all_t_lengths,
@@ -1872,7 +1865,9 @@ static void extract_locus_sub_problem_from_partition(
     sub.bias_profiles[sub.gdna_idx] = gdna_span;
 
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
-    if (locus_gamma == 0.0) {
+
+    // Disable gDNA component when calibration assigns zero gDNA prior.
+    if (alpha_gdna <= 0.0) {
         sub.prior[sub.gdna_idx] = 0.0;
     }
 
@@ -1910,8 +1905,9 @@ batch_locus_em_partitioned(
     nb::list partition_tuples,
     // Per-locus transcript membership (list of int32[])
     nb::list locus_transcript_indices,
-    // Per-locus scalars
-    f64_1d   locus_gammas,
+    // Per-locus calibration priors
+    f64_1d   locus_alpha_gdna,
+    f64_1d   locus_alpha_rna,
     i64_1d   gdna_spans,
     // Per-transcript globals
     f64_2d   unambig_counts,
@@ -1924,7 +1920,6 @@ batch_locus_em_partitioned(
     // EM config
     int    max_iterations,
     double convergence_delta,
-    double total_pseudocount,
     bool   use_vbem,
     int    assignment_mode,
     double assignment_min_posterior,
@@ -1965,7 +1960,8 @@ batch_locus_em_partitioned(
         v.n_transcripts = static_cast<int>(t_arr.shape(0));
     }
 
-    const double*   lg_ptr = locus_gammas.data();
+    const double*   ag_ptr = locus_alpha_gdna.data();
+    const double*   ar_ptr = locus_alpha_rna.data();
     const int64_t*  gs_ptr = gdna_spans.data();
     const double*   uac    = unambig_counts.data();
     const int64_t*  tl_ptr = t_lengths_arr.data();
@@ -2076,7 +2072,7 @@ batch_locus_em_partitioned(
             // 1. Extract sub-problem from partition
             auto t1 = hrclock::now();
             extract_locus_sub_problem_from_partition(
-                sub, pv, lg_ptr[li], gs_ptr[li],
+                sub, pv, ag_ptr[li], gs_ptr[li],
                 unambig_row_sums.data(), tl_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
@@ -2123,7 +2119,7 @@ batch_locus_em_partitioned(
                 ec_data,
                 sub.unambig_totals.data(),
                 sub.eligible.data(),
-                lg_ptr[li], total_pseudocount, sub.gdna_idx,
+                ag_ptr[li], ar_ptr[li], sub.gdna_idx,
                 prior.data(), theta_init.data(), nc);
             auto t5 = hrclock::now();
 
@@ -2562,7 +2558,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("effective_lens"),
           nb::arg("prior_eligible"),
           nb::arg("n_components"),
-          nb::arg("total_pseudocount"),
+          nb::arg("alpha_rna"),
           nb::arg("max_iterations"),
           nb::arg("convergence_delta"),
           nb::arg("use_vbem"),
@@ -2618,7 +2614,8 @@ NB_MODULE(_em_impl, m) {
     m.def("batch_locus_em_partitioned", &batch_locus_em_partitioned,
           nb::arg("partition_tuples"),
           nb::arg("locus_transcript_indices"),
-          nb::arg("locus_gammas"),
+          nb::arg("locus_alpha_gdna"),
+          nb::arg("locus_alpha_rna"),
           nb::arg("gdna_spans"),
           nb::arg("unambig_counts"),
           nb::arg("t_lengths"),
@@ -2628,7 +2625,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_assigned_out"),
           nb::arg("max_iterations"),
           nb::arg("convergence_delta"),
-          nb::arg("total_pseudocount"),
           nb::arg("use_vbem"),
           nb::arg("assignment_mode"),
           nb::arg("assignment_min_posterior"),
@@ -2640,7 +2636,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("emit_assignments") = false,
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 12-tuples (one per locus) containing partition\n"
-          "arrays, plus a list of transcript index arrays per locus.\n"
+          "arrays, plus per-locus calibration priors (alpha_gdna, alpha_rna).\n"
           "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats,\n"
           " out_winner_tid, out_winner_post, out_n_candidates).");
 

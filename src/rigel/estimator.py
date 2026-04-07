@@ -210,7 +210,8 @@ class AbundanceEstimator:
         self,
         partition_tuples: list,
         locus_transcript_indices: list,
-        locus_gammas: np.ndarray,
+        alpha_gdna: np.ndarray,
+        alpha_rna: np.ndarray,
         gdna_spans: np.ndarray,
         index,
         *,
@@ -227,8 +228,10 @@ class AbundanceEstimator:
             List of 12-tuples, one per locus, containing partition arrays.
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
-        locus_gammas : np.ndarray
-            float64 — calibration gDNA fraction per locus being processed.
+        alpha_gdna : np.ndarray
+            float64 — calibration gDNA prior per locus (physical counts).
+        alpha_rna : np.ndarray
+            float64 — calibration RNA prior per locus (physical counts).
         gdna_spans : np.ndarray
             int64 — pre-computed union genomic footprints per locus.
         index : TranscriptIndex
@@ -261,7 +264,8 @@ class AbundanceEstimator:
             _batch_locus_em_partitioned(
                 partition_tuples,
                 locus_transcript_indices,
-                np.ascontiguousarray(locus_gammas, dtype=np.float64),
+                np.ascontiguousarray(alpha_gdna, dtype=np.float64),
+                np.ascontiguousarray(alpha_rna, dtype=np.float64),
                 np.ascontiguousarray(gdna_spans, dtype=np.int64),
                 self.unambig_counts,
                 t_lengths,
@@ -271,7 +275,6 @@ class AbundanceEstimator:
                 self._em_n_assigned,
                 em_iterations,
                 em_convergence_delta,
-                self.em_config.prior_pseudocount,
                 self.em_config.mode == "vbem",
                 assignment_mode_int,
                 self.em_config.assignment_min_posterior,

@@ -18,7 +18,7 @@ from .native import EM_PRIOR_EPSILON
 from .index import TranscriptIndex
 
 if TYPE_CHECKING:
-    from .calibration import GDNACalibration
+    from .calibration import CalibrationResult
     from .estimator import AbundanceEstimator
 
 
@@ -383,48 +383,72 @@ def build_locus_em_data(
 # ---------------------------------------------------------------------------
 
 
-def compute_gdna_locus_gammas(
+def compute_locus_priors(
     loci: list[Locus],
     index: TranscriptIndex,
-    calibration: "GDNACalibration",
-) -> np.ndarray:
-    """Aggregate calibration region posteriors per locus.
+    calibration: "CalibrationResult",
+    total_pseudocount: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute per-locus Dirichlet priors from calibration.
 
     For each locus, finds overlapping calibration regions via
-    ``index.region_cr`` (cgranges) and computes a fragment-weighted
-    aggregate gDNA posterior:
+    ``index.region_cr`` (cgranges), computes a local gDNA mixing
+    fraction γ, and splits a fixed prior budget *C* by that fraction:
 
-        γ_locus = Σ(γ_r × n_r) / Σ(n_r)
+        γ_locus = Σ(E[gDNA]_r) / Σ(N_total_r)
+        α_gDNA  = γ × C
+        α_RNA   = (1 − γ) × C
 
-    Falls back to ``calibration.mixing_proportion`` (global π) when no
-    regions overlap a locus.
+    This preserves the gDNA/RNA ratio from calibration while keeping
+    the total prior budget bounded, preventing VBEM from anchoring
+    unsupported components at artificially high levels.
+
+    Falls back to global γ when no regions overlap a locus.
 
     Returns
     -------
-    locus_gammas : np.ndarray, shape (n_loci,), float64 ∈ [0, 1]
+    alpha_gdna : np.ndarray, shape (n_loci,), float64 ≥ 0
+    alpha_rna : np.ndarray, shape (n_loci,), float64 ≥ 0
     """
     n_loci = len(loci)
-    locus_gammas = np.empty(n_loci, dtype=np.float64)
+    alpha_gdna = np.empty(n_loci, dtype=np.float64)
+    alpha_rna = np.empty(n_loci, dtype=np.float64)
+    C = total_pseudocount
 
-    region_gamma = calibration.region_posteriors
+    region_e_gdna = calibration.region_e_gdna
     region_n = calibration.region_n_total
-    fallback = calibration.mixing_proportion
 
-    # Use cgranges for spatial overlap if available
     region_cr = getattr(index, "region_cr", None)
-    if region_cr is None or region_gamma is None or region_n is None:
-        locus_gammas[:] = fallback
-        return locus_gammas
+    if region_cr is None or region_e_gdna is None or region_n is None:
+        # Global fallback
+        total_e = float(region_e_gdna.sum()) if region_e_gdna is not None else 0.0
+        total_n = float(region_n.sum()) if region_n is not None else 0.0
+        gamma = total_e / max(total_n, 1.0)
+        alpha_gdna[:] = gamma * C
+        alpha_rna[:] = (1.0 - gamma) * C
+        return alpha_gdna, alpha_rna
+
+    # Global fallback γ for loci with no overlapping regions
+    total_e = float(region_e_gdna.sum())
+    total_n = float(region_n.sum())
+    fallback_gamma = total_e / max(total_n, 1.0)
 
     for li, locus in enumerate(loci):
-        wsum = 0.0
-        nsum = 0.0
+        e_sum = 0.0
+        n_sum = 0.0
+        has_overlap = False
         for ref, start, end in locus.merged_intervals:
             for _s, _e, rid in region_cr.overlap(ref, start, end):
-                n_r = float(region_n[rid])
-                wsum += float(region_gamma[rid]) * n_r
-                nsum += n_r
+                e_sum += float(region_e_gdna[rid])
+                n_sum += float(region_n[rid])
+                has_overlap = True
 
-        locus_gammas[li] = wsum / nsum if nsum > 0.0 else fallback
+        if has_overlap and n_sum > 0:
+            gamma = e_sum / n_sum
+        else:
+            gamma = fallback_gamma
 
-    return locus_gammas
+        alpha_gdna[li] = gamma * C
+        alpha_rna[li] = (1.0 - gamma) * C
+
+    return alpha_gdna, alpha_rna

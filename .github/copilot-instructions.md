@@ -181,10 +181,6 @@ When asked to run benchmarks, compare to gold standard, and analyze results:
 
 Two-stage pipeline: (1) C++ BAM scan → FragmentBuffer, (2) Python/C++ locus-level EM quantification.
 
-- **C++ extensions** (`src/rigel/native/`): `_bam_impl`, `_em_impl`, `_scoring_impl`, `_resolve_impl`, `_cgranges_impl` — compiled via scikit-build-core + nanobind + CMake
-- **Scoring model**: mRNA, nRNA, and gDNA candidates scored with strand, fragment-length, overhang, and NM mismatch penalties
-- **EM solver**: Per-locus EM with `2*n_t + 1` components (mRNA + nRNA per transcript + one gDNA), SQUAREM acceleration, OpenMP parallel
-- **Calibration**: gDNA density, strand balance, and fragment length deconvolution via `calibrate_gdna()` in `calibration.py` — EM mixture model on genomic regions with hard constraints and adaptive shrinkage
 
 ## Key Constraints
 

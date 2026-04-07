@@ -21,7 +21,6 @@ DEFAULT_BAM_RELPATH = "rigel_star/annotated.bam"
 # Maps config YAML key → rigel CLI flag.
 RIGEL_CLI_FLAGS: dict[str, str] = {
     "seed": "--seed",
-    "prior_pseudocount": "--prior-pseudocount",
     "em_iterations": "--em-iterations",
     "em_mode": "--em-mode",
     "em_convergence_delta": "--em-convergence-delta",

@@ -78,7 +78,7 @@ from rigel.config import (
 )
 from rigel.estimator import AbundanceEstimator
 from rigel.index import TranscriptIndex
-from rigel.locus import build_loci, compute_gdna_locus_gammas
+from rigel.locus import build_loci, compute_locus_priors
 from rigel.partition import partition_and_free
 from rigel.native import detect_sj_strand_tag
 from rigel.pipeline import run_pipeline, scan_and_buffer
@@ -624,15 +624,13 @@ def profile_stages(
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
             with Timer("compute_eb_gdna_priors") as t_gdna:
-                gdna_inits = compute_gdna_locus_gammas(loci, index, calibration=calibration_obj)
+                alpha_gdna, alpha_rna = compute_locus_priors(loci, index, calibration=calibration_obj)
 
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
             with Timer("partition") as t_part:
                 partitions = partition_and_free(em_data, loci)
             timings.partition = t_part.elapsed
-
-            locus_gammas = np.asarray(gdna_inits, dtype=np.float64)
 
             with Timer("locus_em") as t_em:
                 # Use partitioned batch C++ path (same as pipeline)
@@ -642,7 +640,8 @@ def profile_stages(
                     partitions,
                     loci,
                     index,
-                    locus_gammas,
+                    alpha_gdna,
+                    alpha_rna,
                     em_config,
                     emit_locus_stats=True,
                 )

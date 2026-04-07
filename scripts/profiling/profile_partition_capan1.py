@@ -110,7 +110,7 @@ def main():
     # ── quant_from_buffer (NEW partitioned path) ────────────
     from rigel.config import EMConfig, FragmentScoringConfig, TranscriptGeometry
     from rigel.estimator import AbundanceEstimator
-    from rigel.locus import build_loci, compute_gdna_locus_gammas
+    from rigel.locus import build_loci, compute_locus_priors
     from rigel.partition import partition_and_free
     from rigel.scan import FragmentRouter
     from rigel.scoring import FragmentScorer
@@ -180,7 +180,7 @@ def main():
             estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
     t0 = time.perf_counter()
-    locus_gammas = compute_gdna_locus_gammas(loci, index, calibration=calibration)
+    alpha_gdna, alpha_rna = compute_locus_priors(loci, index, calibration=calibration)
     t_priors = time.perf_counter() - t0
     results["compute_priors_sec"] = t_priors
     rss_snapshots["after_priors"] = rss_mb()
@@ -221,7 +221,7 @@ def main():
     results["n_mega_loci"] = len(mega_loci)
     results["n_normal_loci"] = len(normal_loci)
 
-    def _pack_and_call(parts, batch_loci, batch_gammas, batch_spans, emit_stats=False):
+    def _pack_and_call(parts, batch_loci, batch_ag, batch_ar, batch_spans, emit_stats=False):
         partition_tuples = [
             (p.offsets, p.t_indices, p.log_liks, p.coverage_weights,
              p.tx_starts, p.tx_ends, p.count_cols,
@@ -232,7 +232,7 @@ def main():
         locus_t_lists = [l.transcript_indices for l in batch_loci]
         return estimator.run_batch_locus_em_partitioned(
             partition_tuples, locus_t_lists,
-            batch_gammas, batch_spans, index,
+            batch_ag, batch_ar, batch_spans, index,
             em_iterations=em_config.iterations,
             em_convergence_delta=em_config.convergence_delta,
             emit_locus_stats=emit_stats,
@@ -246,7 +246,8 @@ def main():
         part = partitions.pop(locus.locus_id)
         gdna_em, mrna_arr, gdna_arr = _pack_and_call(
             [part], [locus],
-            np.array([locus_gammas[locus.locus_id]], dtype=np.float64),
+            np.array([alpha_gdna[locus.locus_id]], dtype=np.float64),
+            np.array([alpha_rna[locus.locus_id]], dtype=np.float64),
             np.array([locus.gdna_span], dtype=np.int64),
             emit_stats=True,
         )
@@ -269,12 +270,14 @@ def main():
     t0 = time.perf_counter()
     if normal_loci:
         normal_parts = [partitions[l.locus_id] for l in normal_loci]
-        normal_gammas = np.array(
-            [locus_gammas[l.locus_id] for l in normal_loci], dtype=np.float64)
+        normal_ag = np.array(
+            [alpha_gdna[l.locus_id] for l in normal_loci], dtype=np.float64)
+        normal_ar = np.array(
+            [alpha_rna[l.locus_id] for l in normal_loci], dtype=np.float64)
         normal_spans = np.array(
             [l.gdna_span for l in normal_loci], dtype=np.int64)
         gdna_em, mrna_arr, gdna_arr = _pack_and_call(
-            normal_parts, normal_loci, normal_gammas, normal_spans,
+            normal_parts, normal_loci, normal_ag, normal_ar, normal_spans,
             emit_stats=True,
         )
         total_gdna_em += gdna_em

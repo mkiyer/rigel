@@ -26,24 +26,35 @@ def _parse_quant(*extra_args):
 
 def test_index_gtf_parse_mode_default_strict():
     parser = build_parser()
-    args = parser.parse_args([
-        "index",
-        "--fasta", "a.fa",
-        "--gtf", "a.gtf",
-        "--output-dir", "out",
-    ])
+    args = parser.parse_args(
+        [
+            "index",
+            "--fasta",
+            "a.fa",
+            "--gtf",
+            "a.gtf",
+            "--output-dir",
+            "out",
+        ]
+    )
     assert args.gtf_parse_mode == "strict"
 
 
 def test_index_gtf_parse_mode_warn_skip():
     parser = build_parser()
-    args = parser.parse_args([
-        "index",
-        "--fasta", "a.fa",
-        "--gtf", "a.gtf",
-        "--output-dir", "out",
-        "--gtf-parse-mode", "warn-skip",
-    ])
+    args = parser.parse_args(
+        [
+            "index",
+            "--fasta",
+            "a.fa",
+            "--gtf",
+            "a.gtf",
+            "--output-dir",
+            "out",
+            "--gtf-parse-mode",
+            "warn-skip",
+        ]
+    )
     assert args.gtf_parse_mode == "warn-skip"
 
 
@@ -62,10 +73,6 @@ class TestQuantDefaults:
     def test_keep_duplicates_default_none(self):
         args = _parse_quant()
         assert args.keep_duplicates is None
-
-    def test_prior_pseudocount_default_none(self):
-        args = _parse_quant()
-        assert args.prior_pseudocount is None
 
     def test_config_default_none(self):
         args = _parse_quant()
@@ -109,7 +116,6 @@ class TestResolveQuant:
         args = _parse_quant()
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.include_multimap is True
-        assert args.prior_pseudocount == 1.0
         assert args.sj_strand_tag == ["auto"]
 
     def test_cli_overrides_default(self):
@@ -119,34 +125,40 @@ class TestResolveQuant:
 
     def test_yaml_overrides_default(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text(textwrap.dedent("""\
-            prior_pseudocount: 2.0
+        cfg.write_text(
+            textwrap.dedent("""\
+            em_iterations: 500
             include_multimap: false
-        """))
+        """)
+        )
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.prior_pseudocount == 2.0
+        assert args.em_iterations == 500
         assert args.include_multimap is False
 
     def test_cli_overrides_yaml(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text(textwrap.dedent("""\
-            prior_pseudocount: 2.0
-        """))
+        cfg.write_text(
+            textwrap.dedent("""\
+            em_iterations: 500
+        """)
+        )
         args = _parse_quant(
-            "--config", str(cfg),
-            "--prior-pseudocount", "3.0",
+            "--config",
+            str(cfg),
+            "--em-iterations",
+            "200",
         )
         _resolve_quant_args(args, _build_quant_defaults())
         # CLI wins
-        assert args.prior_pseudocount == 3.0
+        assert args.em_iterations == 200
 
     def test_yaml_hyphens_normalised(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("prior-pseudocount: 2.0\n")
+        cfg.write_text("em-iterations: 500\n")
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.prior_pseudocount == 2.0
+        assert args.em_iterations == 500
 
     def test_yaml_unknown_keys_logged(self, tmp_path, caplog):
         """Unknown YAML keys are logged as warnings, not raised."""
@@ -154,6 +166,7 @@ class TestResolveQuant:
         cfg.write_text("bogus_key: 99\n")
         args = _parse_quant("--config", str(cfg))
         import logging
+
         with caplog.at_level(logging.WARNING):
             _resolve_quant_args(args, _build_quant_defaults())
         assert "bogus_key" in caplog.text

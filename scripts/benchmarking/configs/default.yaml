@@ -30,10 +30,9 @@ rigel_configs:
     em_mode: vbem
     assignment_mode: sample
 
-  # Example: MAP-EM with higher pseudocount
-  # map_high_prior:
+  # Example: MAP-EM variant
+  # map_em:
   #   em_mode: map
-  #   prior_pseudocount: 5.0
 
   # Example: fractional assignment
   # fractional:

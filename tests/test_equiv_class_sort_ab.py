@@ -49,8 +49,13 @@ CONFIGS = [
 
 def _sim_config(*, strand_specificity: float = 0.9, seed: int = SIM_SEED):
     return SimConfig(
-        frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-        read_length=100, strand_specificity=strand_specificity, seed=seed,
+        frag_mean=200,
+        frag_std=30,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=strand_specificity,
+        seed=seed,
     )
 
 
@@ -58,30 +63,43 @@ def _gdna_config(abundance: float):
     if abundance == 0:
         return None
     return GDNAConfig(
-        abundance=abundance, frag_mean=350, frag_std=100,
-        frag_min=100, frag_max=1000,
+        abundance=abundance,
+        frag_mean=350,
+        frag_std=100,
+        frag_min=100,
+        frag_max=1000,
     )
 
 
 def _build_scenario(tmp_path, name="ab_test"):
     sc = Scenario(
-        name, genome_length=GENOME_LENGTH, seed=SIM_SEED,
+        name,
+        genome_length=GENOME_LENGTH,
+        seed=SIM_SEED,
         work_dir=tmp_path / name,
     )
-    sc.add_gene("G1", "+", [
-        {
-            "t_id": "T1",
-            "exons": [(1000, 1500), (3000, 3500), (8000, 10000)],
-            "abundance": 100,
-        },
-    ])
-    sc.add_gene("G2", "-", [
-        {
-            "t_id": "T2",
-            "exons": [(6000, 7000), (12000, 13000), (15000, 15500)],
-            "abundance": 100,
-        },
-    ])
+    sc.add_gene(
+        "G1",
+        "+",
+        [
+            {
+                "t_id": "T1",
+                "exons": [(1000, 1500), (3000, 3500), (8000, 10000)],
+                "abundance": 100,
+            },
+        ],
+    )
+    sc.add_gene(
+        "G2",
+        "-",
+        [
+            {
+                "t_id": "T2",
+                "exons": [(6000, 7000), (12000, 13000), (15000, 15500)],
+                "abundance": 100,
+            },
+        ],
+    )
     return sc
 
 
@@ -127,11 +145,11 @@ def _extract_results(pr, result):
         if isinstance(lr, dict):
             info[f"locus_{i}_n_transcripts"] = lr.get("n_transcripts", 0)
             info[f"locus_{i}_n_em_fragments"] = lr.get("n_em_fragments", 0)
-            info[f"locus_{i}_gdna_init"] = lr.get("gdna_init", 0.0)
+            info[f"locus_{i}_alpha_gdna"] = lr.get("alpha_gdna", 0.0)
         else:
             info[f"locus_{i}_n_transcripts"] = lr.n_transcripts
             info[f"locus_{i}_n_em_fragments"] = lr.n_em_fragments
-            info[f"locus_{i}_gdna_init"] = lr.gdna_init
+            info[f"locus_{i}_alpha_gdna"] = lr.alpha_gdna
 
     return info
 
@@ -151,16 +169,19 @@ def _compare(r1, r2):
     return diffs
 
 
-def run_ab_test(tmp_path, *, gdna_abundance, nrna_abundance,
-                strand_specificity, label, n_fragments=N_FRAGMENTS):
+def run_ab_test(
+    tmp_path, *, gdna_abundance, nrna_abundance, strand_specificity, label, n_fragments=N_FRAGMENTS
+):
     """Run original + N_SHUFFLES shuffled BAMs, return all pairwise diffs."""
     sc = _build_scenario(tmp_path, name=label)
     sim = _sim_config(strand_specificity=strand_specificity)
     gdna = _gdna_config(gdna_abundance)
 
     result = sc.build_oracle(
-        n_fragments=n_fragments, sim_config=sim,
-        gdna_config=gdna, nrna_abundance=nrna_abundance,
+        n_fragments=n_fragments,
+        sim_config=sim,
+        gdna_config=gdna,
+        nrna_abundance=nrna_abundance,
     )
 
     config = PipelineConfig(
@@ -222,8 +243,11 @@ def main():
             print(f"\n--- Config: {label} (gdna={gdna}, nrna={nrna}, ss={ss}) ---")
 
             runs, all_diffs, max_abs, max_rel, structural_diffs = run_ab_test(
-                tmp, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, label=label,
+                tmp,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                label=label,
             )
 
             # Report
@@ -251,8 +275,10 @@ def main():
             if worst:
                 print("  Top-5 worst diffs:")
                 for ad, rd, k, n1, n2, v1, v2 in worst[:5]:
-                    print(f"    {k}: {v1:.10f} vs {v2:.10f} "
-                          f"(abs={ad:.2e}, rel={rd:.2e}) [{n1} vs {n2}]")
+                    print(
+                        f"    {k}: {v1:.10f} vs {v2:.10f} "
+                        f"(abs={ad:.2e}, rel={rd:.2e}) [{n1} vs {n2}]"
+                    )
 
             overall_max_abs = max(overall_max_abs, max_abs)
             overall_max_rel = max(overall_max_rel, max_rel)

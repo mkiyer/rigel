@@ -43,7 +43,7 @@ if str(_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_ROOT / "src"))
 
 from rigel.calibration import (
-    GDNACalibration,
+    CalibrationResult,
     _DENSITY_BINS,
     _STRAND_BINS,
     build_density_histogram,
@@ -385,7 +385,7 @@ def plot_empirical_histograms(
 
 
 def plot_initialization(
-    result: GDNACalibration,
+    result: CalibrationResult,
     log_d: np.ndarray,
     sense_frac: np.ndarray,
     eligible: np.ndarray,
@@ -520,7 +520,7 @@ def plot_initialization(
 
 
 def plot_em_convergence(
-    result: GDNACalibration,
+    result: CalibrationResult,
     eligible: np.ndarray,
     plot_dir: Path,
 ) -> list[str]:
@@ -644,7 +644,7 @@ def plot_em_convergence(
 
 
 def plot_final_results(
-    result: GDNACalibration,
+    result: CalibrationResult,
     log_d: np.ndarray,
     sense_frac: np.ndarray,
     eligible: np.ndarray,
@@ -780,7 +780,7 @@ def plot_final_results(
 
 
 def plot_ground_truth(
-    result: GDNACalibration,
+    result: CalibrationResult,
     truth_meta: dict,
     eligible: np.ndarray,
     log_d: np.ndarray,
@@ -858,7 +858,7 @@ def plot_ground_truth(
 
 
 def generate_report(
-    result: GDNACalibration,
+    result: CalibrationResult,
     bam_path: str,
     ss: float,
     plot_paths: dict[str, list[str]],
