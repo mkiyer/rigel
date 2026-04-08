@@ -540,25 +540,34 @@ def calibrate_gdna(
     # density distribution.  With too few regions, the percentile is
     # not informative (e.g. single expressed gene → its own density
     # becomes the "background").
-    # The density pathway requires at least 2 eligible regions to
-    # compute a meaningful percentile (1 region → degenerate).
+    # The density pathway requires at least 2 regions with length > 0
+    # to compute a meaningful percentile (1 region → degenerate).
     _MIN_DENSITY_REGIONS = 2
 
+    # Density eligibility: all regions with non-zero length,
+    # INCLUDING zero-count regions.  Zero-count intergenic regions
+    # provide the critical "zero baseline" — without them, the
+    # percentile sees only gene-body density and overestimates λ_G
+    # when high nRNA dominates (unspliced reads fill gene bodies
+    # uniformly, mimicking gDNA).
+    density_eligible = region_length > 0
+    n_density_eligible = int(density_eligible.sum())
+
     d_unspliced = np.zeros(n_regions, dtype=np.float64)
-    pos = (region_length > 0) & eligible
+    pos = density_eligible & (n_unspliced > 0)
     d_unspliced[pos] = n_unspliced[pos] / region_length[pos]
 
-    if n_eligible >= _MIN_DENSITY_REGIONS:
+    if n_density_eligible >= _MIN_DENSITY_REGIONS:
         lambda_g_density = _length_weighted_percentile(
-            d_unspliced[eligible],
-            region_length[eligible],
+            d_unspliced[density_eligible],
+            region_length[density_eligible],
             density_percentile,
         )
     else:
         lambda_g_density = 0.0
         logger.info(
-            f"[CAL] Density pathway disabled: only {n_eligible} eligible "
-            f"regions (need {_MIN_DENSITY_REGIONS})"
+            f"[CAL] Density pathway disabled: only {n_density_eligible} "
+            f"regions with length (need {_MIN_DENSITY_REGIONS})"
         )
 
     e_gdna_density = np.minimum(

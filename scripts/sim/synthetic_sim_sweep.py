@@ -892,18 +892,17 @@ def run_sweep(config, output_dir, *, gtf_path=None,
 
                 cal = pr.calibration
                 if cal is not None:
-                    row["cal_kappa_est"] = round(cal.kappa_strand, 2)
-                    if isinstance(cal_kappa_true, (int, float)):
-                        row["cal_kappa_err"] = round(
-                            cal.kappa_strand - cal_kappa_true, 2)
-                    else:
-                        row["cal_kappa_err"] = ""
-                    row["cal_density_est"] = f"{cal.gdna_density_global:.4e}"
+                    # V3 CalibrationResult: lambda_gdna, strand_specificity,
+                    # region_e_gdna, region_n_total, gdna_fl_model
+                    cal_ss = cal.strand_specificity
+                    row["cal_kappa_est"] = round(cal_ss, 4)
+                    row["cal_kappa_err"] = ""
+                    row["cal_density_est"] = f"{cal.lambda_gdna:.4e}"
 
                     cal_fl = cal.gdna_fl_model
                     row["cal_gdna_fl_true_mean"] = gdna_true_mean
                     row["cal_gdna_fl_true_std"] = gdna_true_std
-                    if cal_fl.n_observations > 0:
+                    if cal_fl is not None and cal_fl.n_observations > 0:
                         row["cal_gdna_fl_est_mean"] = round(cal_fl.mean, 2)
                         row["cal_gdna_fl_est_std"] = round(cal_fl.std, 2)
                         row["cal_gdna_fl_mean_err"] = round(
@@ -913,22 +912,21 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         row["cal_gdna_fl_est_std"] = ""
                         row["cal_gdna_fl_mean_err"] = ""
 
-                    row["cal_n_seed"] = (
-                        f"π={cal.mixing_proportion:.3f}"
-                        if hasattr(cal, 'mixing_proportion') else "")
-                    row["cal_n_iterations"] = cal.n_iterations
-                    row["cal_converged"] = cal.converged
-                    row["cal_mean_weight"] = round(
-                        float(cal.region_posteriors.mean()), 4)
-                    row["cal_n_regions"] = len(cal.region_posteriors)
+                    total_e_gdna = float(cal.region_e_gdna.sum())
+                    total_n = float(cal.region_n_total.sum())
+                    gdna_frac_cal = total_e_gdna / max(total_n, 1.0)
+                    row["cal_n_seed"] = f"γ={gdna_frac_cal:.3f}"
+                    row["cal_n_iterations"] = ""
+                    row["cal_converged"] = ""
+                    row["cal_mean_weight"] = round(gdna_frac_cal, 4)
+                    row["cal_n_regions"] = len(cal.region_e_gdna)
 
                     logger.info(
-                        "Calibration: κ_est=%.1f (true=%s), "
-                        "density=%.2e, seed=%s, iter=%d, conv=%s",
-                        cal.kappa_strand, cal_kappa_true,
-                        cal.gdna_density_global,
-                        row["cal_n_seed"], cal.n_iterations,
-                        cal.converged,
+                        "Calibration: SS=%.3f, λ_G=%.2e, "
+                        "E[gDNA]=%.0f/%d, γ=%.3f, n_regions=%d",
+                        cal_ss, cal.lambda_gdna,
+                        total_e_gdna, int(total_n),
+                        gdna_frac_cal, len(cal.region_e_gdna),
                     )
                 else:
                     for col in ("cal_kappa_est", "cal_kappa_err",
