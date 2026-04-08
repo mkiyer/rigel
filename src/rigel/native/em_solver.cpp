@@ -778,7 +778,8 @@ static void compute_ovr_prior_and_warm_start(
     int           gdna_idx,          // index of gDNA component (-1 if none)
     double*       prior_out,       // [n_components] output
     double*       theta_init_out,  // [n_components] output
-    int           n_components)
+    int           n_components,
+    bool          use_vbem)
 {
     // Initialize theta_init from unambig_totals
     std::copy(unambig_totals, unambig_totals + n_components, theta_init_out);
@@ -822,21 +823,25 @@ static void compute_ovr_prior_and_warm_start(
         }
     }
 
+    // Mode-aware baseline: VBEM needs +0.5 (Jeffreys) to cancel
+    // digamma sparsification bias; MAP has no bias, needs 0.0.
+    const double baseline = use_vbem ? 0.5 : 0.0;
+
     for (int i = 0; i < n_components; ++i) {
         if (eligible[i] <= 0.0) {
             prior_out[i] = 0.0;
         } else if (i == gdna_idx) {
-            prior_out[i] = std::max(alpha_gdna, EM_LOG_EPSILON);
+            prior_out[i] = baseline + std::max(alpha_gdna, EM_LOG_EPSILON);
         } else if (total_rna_coverage > 0.0) {
-            prior_out[i] = std::max(
+            prior_out[i] = baseline + std::max(
                 alpha_rna * coverage_totals[i] / total_rna_coverage,
                 EM_LOG_EPSILON);
         } else if (n_rna_eligible > 0) {
             // No coverage data — distribute uniformly
-            prior_out[i] = std::max(alpha_rna / n_rna_eligible,
+            prior_out[i] = baseline + std::max(alpha_rna / n_rna_eligible,
                                     EM_LOG_EPSILON);
         } else {
-            prior_out[i] = EM_LOG_EPSILON;
+            prior_out[i] = baseline;
         }
     }
 
@@ -1203,7 +1208,8 @@ run_locus_em_native(
         0.0,               // alpha_gdna = 0 (no gDNA)
         alpha_rna,          // alpha_rna = total budget
         -1,                // gdna_idx = -1 (no gDNA)
-        prior.data(), theta_init.data(), n_components);
+        prior.data(), theta_init.data(), n_components,
+        use_vbem);
 
     // 6. Run SQUAREM
     EMResult result = run_squarem(
@@ -2120,7 +2126,8 @@ batch_locus_em_partitioned(
                 sub.unambig_totals.data(),
                 sub.eligible.data(),
                 ag_ptr[li], ar_ptr[li], sub.gdna_idx,
-                prior.data(), theta_init.data(), nc);
+                prior.data(), theta_init.data(), nc,
+                use_vbem);
             auto t5 = hrclock::now();
 
             // 7. SQUAREM

@@ -162,9 +162,12 @@ class CalibrationConfig:
     prior for the unified OVR EM.
     """
 
-    #: Total Dirichlet prior budget split between gDNA and RNA components
-    #: by the calibrated mixing fraction γ.  α_gDNA = γ × C, α_RNA = (1−γ) × C.
-    total_pseudocount: float = 1.0
+    #: Calibration evidence strength for the Dirichlet prior.
+    #: Combined with a mode-aware baseline (+0.5 for VBEM, 0.0 for MAP)
+    #: per component.  The equilibrium is insensitive to this value
+    #: for degenerate likelihoods — any value in [1, 50] gives identical
+    #: results.  Default 5.0.
+    gdna_prior_c_base: float = 5.0
 
     #: Percentile (0-100) of unspliced density for λ_G baseline estimation.
     density_percentile: float = 10.0

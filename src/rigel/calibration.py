@@ -502,13 +502,25 @@ def calibrate_gdna(
     )
 
     denom = max(SS - 0.5, _EPS)
-    e_gdna_strand = np.maximum(
-        0.0,
-        (n_anti - n_unspliced * (1.0 - SS)) / denom,
-    )
-    # Zero out regions without strand annotation or ineligible
-    e_gdna_strand[~has_strand | ~eligible] = 0.0
-    # Cap at observed unspliced count
+
+    # Global aggregation before rectification (eliminates rectifier bias).
+    # Sum numerator/denominator across all eligible stranded regions,
+    # then apply max(0, ...) once globally. This prevents per-region
+    # noise from creating false γ > 0 for pure RNA at moderate SS.
+    strand_eligible = has_strand & eligible
+    total_anti = float(n_anti[strand_eligible].sum())
+    total_unspliced_strand = float(n_unspliced[strand_eligible].sum())
+
+    global_e_gdna = max(0.0, (total_anti - total_unspliced_strand * (1.0 - SS)) / denom)
+    global_e_gdna = min(global_e_gdna, total_unspliced_strand)
+
+    # Distribute global estimate proportionally to per-region unspliced count
+    e_gdna_strand = np.zeros_like(n_unspliced, dtype=np.float64)
+    if total_unspliced_strand > 0 and global_e_gdna > 0:
+        e_gdna_strand[strand_eligible] = (
+            global_e_gdna * n_unspliced[strand_eligible] / total_unspliced_strand
+        )
+    # Cap at observed unspliced count (should hold by construction, but be safe)
     e_gdna_strand = np.minimum(e_gdna_strand, n_unspliced)
 
     # -- Strand-derived λ_G --
@@ -528,7 +540,9 @@ def calibrate_gdna(
     # density distribution.  With too few regions, the percentile is
     # not informative (e.g. single expressed gene → its own density
     # becomes the "background").
-    _MIN_DENSITY_REGIONS = 20
+    # The density pathway requires at least 2 eligible regions to
+    # compute a meaningful percentile (1 region → degenerate).
+    _MIN_DENSITY_REGIONS = 2
 
     d_unspliced = np.zeros(n_regions, dtype=np.float64)
     pos = (region_length > 0) & eligible

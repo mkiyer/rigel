@@ -422,12 +422,13 @@ def _compute_priors(
     loci: list,
     index: TranscriptIndex,
     calibration: "CalibrationResult",
-    total_pseudocount: float = 1.0,
+    *,
+    c_base: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute per-locus Dirichlet priors from calibration.
 
-    Returns (alpha_gdna, alpha_rna) — fraction-based priors splitting
-    a fixed budget C by the calibrated gDNA mixing fraction.
+    Returns (alpha_gdna, alpha_rna) — mode-aware Dirichlet priors with
+    Jeffreys correction applied in the C++ EM solver.
     """
     # Assign locus_id to every transcript (needed by nrna_frac prior cascade)
     for locus in loci:
@@ -435,7 +436,7 @@ def _compute_priors(
             estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
     return compute_locus_priors(
-        loci, index, calibration, total_pseudocount=total_pseudocount,
+        loci, index, calibration, c_base=c_base,
     )
 
 
@@ -507,6 +508,7 @@ def _run_locus_em_partitioned(
     alpha_rna: np.ndarray,
     em_config: EMConfig,
     *,
+    gdna_flank: int = 0,
     emit_locus_stats: bool = False,
     annotations: "AnnotationTable | None" = None,
 ) -> None:
@@ -588,7 +590,7 @@ def _run_locus_em_partitioned(
             [locus],
             np.array([alpha_gdna[lid]], dtype=np.float64),
             np.array([alpha_rna[lid]], dtype=np.float64),
-            np.array([locus.gdna_span], dtype=np.int64),
+            np.array([locus.gdna_span + gdna_flank], dtype=np.int64),
         )
         gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
@@ -624,7 +626,7 @@ def _run_locus_em_partitioned(
         normal_parts = [partitions[loc.locus_id] for loc in normal_loci]
         normal_ag = np.array([alpha_gdna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
         normal_ar = np.array([alpha_rna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
-        normal_spans = np.array([loc.gdna_span for loc in normal_loci], dtype=np.int64)
+        normal_spans = np.array([loc.gdna_span + gdna_flank for loc in normal_loci], dtype=np.int64)
         em_result = _call_batch_em(
             normal_parts,
             normal_loci,
@@ -681,7 +683,7 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     calibration: "CalibrationResult" = None,
     emit_locus_stats: bool = False,
-    calibration_total_pseudocount: float = 1.0,
+    gdna_prior_c_base: float = 5.0,
     fl_prior_ess: float | None = None,
 ) -> AbundanceEstimator:
     """Quantify transcripts from buffered fragments via locus-level EM.
@@ -778,7 +780,7 @@ def quant_from_buffer(
             loci,
             index,
             calibration=calibration,
-            total_pseudocount=calibration_total_pseudocount,
+            c_base=gdna_prior_c_base,
         )
 
         # Phase 4 (NEW): Array-by-array scatter + incremental free
@@ -787,6 +789,11 @@ def quant_from_buffer(
         gc.collect()
 
         # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
+        # Honest gDNA flank: extend effective gDNA span by one mean gDNA
+        # fragment length to account for partial-overlap reads at locus edges.
+        gdna_flank = 0
+        if calibration is not None and calibration.gdna_fl_model is not None:
+            gdna_flank = int(calibration.gdna_fl_model.mean)
         _run_locus_em_partitioned(
             estimator,
             partitions,
@@ -795,6 +802,7 @@ def quant_from_buffer(
             alpha_gdna,
             alpha_rna,
             em_config,
+            gdna_flank=gdna_flank,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
         )
@@ -922,7 +930,7 @@ def run_pipeline(
             annotations=annotations,
             calibration=calibration,
             emit_locus_stats=config.emit_locus_stats,
-            calibration_total_pseudocount=config.calibration.total_pseudocount,
+            gdna_prior_c_base=config.calibration.gdna_prior_c_base,
             fl_prior_ess=config.calibration.fl_prior_ess,
         )
     finally:

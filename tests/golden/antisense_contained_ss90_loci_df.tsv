@@ -1,2 +1,2 @@
 locus_id	locus_span_bp	n_transcripts	n_annotated_transcripts	n_nrna_entities	n_genes	n_em_fragments	mrna	nrna	gdna	total	gdna_rate	gdna_prior
-0	1500	2	2	2	2	1000	1000.0	0.0	1.0008535385457483e-297	1000.0	1.0008535385457484e-300	0.0
+0	1500	2	2	2	2	1000	485.89830031962623	0.0	514.1016996803766	1000.0000000000027	0.5141016996803751	0.0

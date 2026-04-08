@@ -103,7 +103,8 @@ def run_trace(nrna_abundance, strand_specificity):
         loci = build_loci(em_data, result.index)
         alpha_gdna, alpha_rna = compute_locus_priors(
             loci, result.index, calibration,
-            total_pseudocount=config.calibration.total_pseudocount,
+            kappa_min=config.calibration.gdna_prior_kappa_min,
+            kappa_max=config.calibration.gdna_prior_kappa_max,
         )
 
         # Access the raw scored fragment arrays

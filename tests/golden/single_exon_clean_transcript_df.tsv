@@ -1,3 +1,3 @@
 transcript_id	gene_id	gene_name	effective_length	locus_id	nrna_id	is_basic	is_mane	is_nrna	count	count_unambig	count_em	count_spliced	nrna_parent_count	tpm	tpm_total_rna	posterior_mean
-t1	g1	g1	501.0	0	.	True	False	True	837.0	0.0	837.0	0.0	0.0	755206.8345323742	755206.8345323742	1.0
-t_h	g_h	g_h	301.0	1	.	True	False	True	163.0	0.0	163.0	0.0	0.0	244793.16546762592	244793.16546762592	1.0
+t1	g1	g1	501.0	0	.	True	False	True	832.6986170863933	0.0	832.6986170863933	0.0	0.0	767936.5813982947	767936.5813982947	0.9948611768325035
+t_h	g_h	g_h	301.0	1	.	True	False	True	151.1812537713714	0.0	151.1812537713714	0.0	0.0	232063.41860170523	232063.41860170523	0.9275630439872345

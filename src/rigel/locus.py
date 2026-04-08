@@ -387,21 +387,22 @@ def compute_locus_priors(
     loci: list[Locus],
     index: TranscriptIndex,
     calibration: "CalibrationResult",
-    total_pseudocount: float = 1.0,
+    *,
+    c_base: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute per-locus Dirichlet priors from calibration.
 
     For each locus, finds overlapping calibration regions via
     ``index.region_cr`` (cgranges), computes a local gDNA mixing
-    fraction γ, and splits a fixed prior budget *C* by that fraction:
+    fraction γ, and sets:
 
-        γ_locus = Σ(E[gDNA]_r) / Σ(N_total_r)
-        α_gDNA  = γ × C
-        α_RNA   = (1 − γ) × C
+        α_gDNA = γ × c_base
+        α_RNA  = (1 − γ) × c_base
 
-    This preserves the gDNA/RNA ratio from calibration while keeping
-    the total prior budget bounded, preventing VBEM from anchoring
-    unsupported components at artificially high levels.
+    The C++ EM solver adds a mode-aware baseline per eligible
+    component (+0.5 for VBEM, 0.0 for MAP) before running EM.
+    This compensates for VBEM's digamma sparsification bias
+    while remaining bias-free for MAP.
 
     Falls back to global γ when no regions overlap a locus.
 
@@ -413,7 +414,6 @@ def compute_locus_priors(
     n_loci = len(loci)
     alpha_gdna = np.empty(n_loci, dtype=np.float64)
     alpha_rna = np.empty(n_loci, dtype=np.float64)
-    C = total_pseudocount
 
     region_e_gdna = calibration.region_e_gdna
     region_n = calibration.region_n_total
@@ -424,8 +424,9 @@ def compute_locus_priors(
         total_e = float(region_e_gdna.sum()) if region_e_gdna is not None else 0.0
         total_n = float(region_n.sum()) if region_n is not None else 0.0
         gamma = total_e / max(total_n, 1.0)
-        alpha_gdna[:] = gamma * C
-        alpha_rna[:] = (1.0 - gamma) * C
+        for li in range(n_loci):
+            alpha_gdna[li] = gamma * c_base
+            alpha_rna[li] = (1.0 - gamma) * c_base
         return alpha_gdna, alpha_rna
 
     # Global fallback γ for loci with no overlapping regions
@@ -448,7 +449,7 @@ def compute_locus_priors(
         else:
             gamma = fallback_gamma
 
-        alpha_gdna[li] = gamma * C
-        alpha_rna[li] = (1.0 - gamma) * C
+        alpha_gdna[li] = gamma * c_base
+        alpha_rna[li] = (1.0 - gamma) * c_base
 
     return alpha_gdna, alpha_rna
