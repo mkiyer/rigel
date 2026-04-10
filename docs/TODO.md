@@ -1,9 +1,23 @@
 # TODO
 
+
+## Calibration issues
+
+We now allowing regions with ZERO fragments to be used to train the calibration module.
+
+This exposes several issues
+- Unmappable genomic regions may have zero counts because they are unmappable
+- We need to discard unmappable regions. Otherwise calibration will underestimate gDNA desntiy
+
+- If we are running hybrid capture, we need the calibration module to only use "captured" regions to train itself. We need to provide 'on target' and 'off target' regions.
+
+
+
+### Hybrid capture support
+
 ## Locus stats
 
 Enable locus status to be written to the output
-
 
 
 ## Nascent RNA count set to zero? 
