@@ -68,11 +68,9 @@ import json
 import logging
 import sys
 import time
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import copy
-from collections import defaultdict
-from typing import Generator
 
 import numpy as np
 import pysam
@@ -82,6 +80,11 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
+try:
+    import pgzip
+except ImportError:
+    pgzip = None  # type: ignore[assignment]
+
 from rigel.transcript import Transcript
 from rigel.types import Strand
 
@@ -90,15 +93,13 @@ logger = logging.getLogger(__name__)
 # ── Constants ───────────────────────────────────────────────────────
 
 _DNA_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
-_DNA_BASES = np.array(list("ACGT"), dtype="<U1")
 
 # Byte-level complement table for vectorized reverse-complement
 _BYTE_COMPLEMENT = np.zeros(256, dtype=np.uint8)
 for _c, _rc in zip(b"ACGTNacgtn", b"TGCANtgcan"):
     _BYTE_COMPLEMENT[_c] = _rc
 
-# Default FASTQ write buffer size (number of records before flush)
-_FASTQ_BUFFER_SIZE = 50_000
+_FASTQ_BUFFER_SIZE = 100_000
 
 # SAM flag bits
 _FLAG_PAIRED = 0x1
@@ -117,13 +118,8 @@ def reverse_complement(seq: str) -> str:
 
 
 def _seq_to_bytes(seq: str) -> np.ndarray:
-    """Convert a DNA string to a numpy uint8 array."""
-    return np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
-
-
-def _bytes_to_seq(arr: np.ndarray) -> str:
-    """Convert a numpy uint8 array back to a DNA string."""
-    return arr.tobytes().decode("ascii")
+    """Convert a DNA string to a numpy uint8 array (writable copy)."""
+    return np.frombuffer(seq.encode("ascii"), dtype=np.uint8).copy()
 
 
 def _batch_extract_reads(
@@ -140,9 +136,6 @@ def _batch_extract_reads(
 
     Returns (r2_seqs, r1_seqs) as 2D uint8 arrays of shape (count, read_len).
     """
-    count = len(frag_starts)
-
-    # Build index arrays for all positions
     offsets = np.arange(read_len, dtype=np.int64)
 
     # R2: first read_len bases of each fragment
@@ -152,11 +145,16 @@ def _batch_extract_reads(
     # R1: reverse complement of last read_len bases
     r1_start = frag_starts + (frag_len - read_len)
     r1_indices = r1_start[:, np.newaxis] + offsets[np.newaxis, :]
-    r1_raw = seq_bytes[r1_indices]
-    # Reverse complement: complement each byte, then reverse column order
-    r1_seqs = _BYTE_COMPLEMENT[r1_raw[:, ::-1]]
+    r1_seqs = _BYTE_COMPLEMENT[seq_bytes[r1_indices][:, ::-1]]
 
     return r2_seqs, r1_seqs
+
+
+def _open_gzip_write(path: Path, threads: int = 4):
+    """Open a gzip file for text writing, using pgzip if available."""
+    if pgzip is not None:
+        return pgzip.open(path, "wt", thread=threads, compresslevel=3)
+    return gzip.open(path, "wt", compresslevel=3)
 
 
 class _FastqBuffer:
@@ -166,16 +164,16 @@ class _FastqBuffer:
     ~8 per flush (every ``buf_size`` fragments).
     """
 
-    __slots__ = ("_fh", "_buf", "_size", "_count")
+    __slots__ = ("_fh", "_parts", "_size", "_count")
 
     def __init__(self, fh, buf_size: int = _FASTQ_BUFFER_SIZE):
         self._fh = fh
-        self._buf: list[str] = []
+        self._parts: list[str] = []
         self._size = buf_size
         self._count = 0
 
     def write_record(self, qname: str, seq: str, quals: str) -> None:
-        self._buf.append(f"@{qname}\n{seq}\n+\n{quals}\n")
+        self._parts.append(f"@{qname}\n{seq}\n+\n{quals}\n")
         self._count += 1
         if self._count >= self._size:
             self.flush()
@@ -192,22 +190,22 @@ class _FastqBuffer:
         Parameters
         ----------
         qnames : list of query names (without /1 or /2 suffix)
-        seqs : 2D uint8 array (count × read_len)
+        seqs : 2D uint8 array (count x read_len)
         quals : quality string (same for all reads)
         suffix : "/1" or "/2"
         """
-        buf = self._buf
+        parts = self._parts
         for i in range(len(qnames)):
             seq_str = seqs[i].tobytes().decode("ascii")
-            buf.append(f"@{qnames[i]}{suffix}\n{seq_str}\n+\n{quals}\n")
+            parts.append(f"@{qnames[i]}{suffix}\n{seq_str}\n+\n{quals}\n")
         self._count += len(qnames)
         if self._count >= self._size:
             self.flush()
 
     def flush(self) -> None:
-        if self._buf:
-            self._fh.write("".join(self._buf))
-            self._buf.clear()
+        if self._parts:
+            self._fh.write("".join(self._parts))
+            self._parts.clear()
             self._count = 0
 
     def close(self) -> None:
@@ -657,6 +655,41 @@ def write_truth_abundances(
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Genome cache — pre-load chromosome sequences as numpy byte arrays
+# ═══════════════════════════════════════════════════════════════════
+
+
+class GenomeCache:
+    """Caches full chromosome sequences as numpy byte arrays.
+
+    Eliminates per-fragment ``pysam.FastaFile.fetch()`` overhead which
+    dominates gDNA simulation time.  Chromosomes are loaded lazily on
+    first access and stored as uppercase uint8 arrays.
+    """
+
+    __slots__ = ("_fasta", "_cache")
+
+    def __init__(self, fasta: pysam.FastaFile):
+        self._fasta = fasta
+        self._cache: dict[str, np.ndarray] = {}
+
+    def get(self, ref: str) -> np.ndarray:
+        arr = self._cache.get(ref)
+        if arr is None:
+            seq = self._fasta.fetch(ref).upper()
+            arr = np.frombuffer(seq.encode("ascii"), dtype=np.uint8).copy()
+            self._cache[ref] = arr
+        return arr
+
+    def preload(self, refs: list[str]) -> None:
+        for ref in refs:
+            self.get(ref)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Whole-genome read simulator
 # ═══════════════════════════════════════════════════════════════════
 
@@ -665,6 +698,16 @@ class WholeGenomeSimulator:
     """Whole-genome paired-end RNA-seq read simulator.
 
     Generates gzipped FASTQ and collated oracle BAM in a single pass.
+
+    Performance strategy
+    --------------------
+    1. Pre-cache all chromosome sequences as numpy byte arrays at init.
+    2. Pre-extract all mRNA and pre-mRNA sequences as byte arrays.
+    3. Sample fragment lengths in bulk, then sample transcript
+       assignments per unique fragment length.
+    4. Vectorized read extraction via numpy fancy indexing.
+    5. Multi-threaded gzip compression via pgzip (if available).
+    6. Unified RNA read writer handles both mRNA and nRNA.
 
     Architecture
     ------------
@@ -701,50 +744,45 @@ class WholeGenomeSimulator:
         )
 
         N = len(transcripts)
+        self._genome = GenomeCache(self.fasta)
 
-        # Pre-extract spliced mRNA sequences
+        # Pre-extract spliced mRNA sequences as byte arrays
         logger.info("Pre-extracting %d mRNA sequences...", N)
-        self._t_seqs: list[str] = []
         self._t_seq_bytes: list[np.ndarray] = []
-        self._t_lengths: list[int] = []
-        for t in transcripts:
+        self._t_lengths = np.empty(N, dtype=np.int64)
+        for i, t in enumerate(transcripts):
             seq = self._extract_mrna_seq(t)
-            self._t_seqs.append(seq)
             self._t_seq_bytes.append(_seq_to_bytes(seq))
-            self._t_lengths.append(len(seq))
+            self._t_lengths[i] = len(seq)
 
-        # Pre-compute strand chars per transcript
+        # Pre-mRNA lengths and sequences
+        self._premrna_lengths = np.array(
+            [t.end - t.start for t in transcripts], dtype=np.int64,
+        )
+
+        # Pre-extract pre-mRNA sequences for nRNA-eligible transcripts
+        logger.info("Pre-extracting pre-mRNA sequences for nRNA...")
+        self._premrna_seq_bytes: list[np.ndarray | None] = [None] * N
+        for i, t in enumerate(transcripts):
+            if t.nrna_abundance > 0 and len(t.exons) > 1:
+                self._premrna_seq_bytes[i] = self._fetch_premrna_bytes(t)
+
+        # Strand chars and abundance arrays
         self._t_strand_chars: list[str] = [
             "r" if t.strand == Strand.NEG else "f" for t in transcripts
         ]
+        self._mrna_abund = np.array([t.abundance or 0.0 for t in transcripts])
+        self._nrna_abund = np.array([t.nrna_abundance for t in transcripts])
 
-        # Pre-compute quality strings cache (keyed by read length)
+        # Quality string cache
         self._quals_cache: dict[int, str] = {}
 
-        # Fast-path flag: skip error introduction when error_rate == 0
+        # Fast-path flag for error introduction
         self._has_errors = sim_params.error_rate > 0
 
-        # Vectorised abundance / length arrays for weight computation
-        self._mrna_abund = np.array(
-            [t.abundance or 0.0 for t in transcripts],
-        )
-        self._nrna_abund = np.array(
-            [t.nrna_abundance for t in transcripts],
-        )
-        self._t_lengths_arr = np.array(self._t_lengths, dtype=np.int64)
-        self._premrna_lengths: list[int] = [
-            t.end - t.start for t in transcripts
-        ]
-        self._premrna_lengths_arr = np.array(
-            self._premrna_lengths, dtype=np.int64,
-        )
-
         # Clamp frag_max to longest transcript
-        max_mrna = int(self._t_lengths_arr.max()) if N > 0 else 0
-        self._frag_max = (
-            min(sim_params.frag_max, max_mrna) if max_mrna > 0
-            else sim_params.frag_max
-        )
+        max_mrna = int(self._t_lengths.max()) if N > 0 else 0
+        self._frag_max = min(sim_params.frag_max, max_mrna) if max_mrna > 0 else sim_params.frag_max
 
         # gDNA setup: annotated references weighted by length
         annotated_refs = {t.ref for t in transcripts}
@@ -753,15 +791,16 @@ class WholeGenomeSimulator:
         for ref in self.fasta.references:
             if ref in annotated_refs:
                 self._gdna_refs.append(ref)
-                self._gdna_ref_lengths.append(
-                    self.fasta.get_reference_length(ref),
-                )
+                self._gdna_ref_lengths.append(self.fasta.get_reference_length(ref))
+
+        # Pre-load gDNA chromosomes into cache (major perf win)
+        if self._gdna_refs:
+            logger.info("Pre-loading %d chromosomes for gDNA...", len(self._gdna_refs))
+            self._genome.preload(self._gdna_refs)
 
         # BAM header and reference mapping (built once, reused)
         self._ref_names = list(self.fasta.references)
-        self._ref_lengths = [
-            self.fasta.get_reference_length(r) for r in self._ref_names
-        ]
+        self._ref_lengths = [self.fasta.get_reference_length(r) for r in self._ref_names]
         self._ref_name_to_id: dict[str, int] = {
             name: i for i, name in enumerate(self._ref_names)
         }
@@ -779,9 +818,11 @@ class WholeGenomeSimulator:
             }],
         })
 
+        # Pre-built shared tag lists for BAM records
+        self._nh1_tags = [("NH", 1)]
+
         logger.info(
-            "Simulator ready: %d transcripts, %d gDNA references, "
-            "max mRNA length=%d",
+            "Simulator ready: %d transcripts, %d gDNA refs, max mRNA len=%d",
             N, len(self._gdna_refs), max_mrna,
         )
 
@@ -791,19 +832,26 @@ class WholeGenomeSimulator:
         """Extract spliced mRNA sequence (5'-to-3' oriented)."""
         exon_seqs = []
         for e in t.exons:
-            seq = self.fasta.fetch(t.ref, e.start, e.end)
-            exon_seqs.append(seq.upper())
+            exon_seqs.append(self.fasta.fetch(t.ref, e.start, e.end).upper())
         seq = "".join(exon_seqs)
         if t.strand == Strand.NEG:
             seq = reverse_complement(seq)
         return seq
 
-    def _fetch_premrna_seq(self, t: Transcript) -> str:
-        """Fetch unspliced pre-mRNA sequence on demand."""
+    def _fetch_premrna_bytes(self, t: Transcript) -> np.ndarray:
+        """Fetch unspliced pre-mRNA sequence as uint8 array."""
         seq = self.fasta.fetch(t.ref, t.start, t.end).upper()
         if t.strand == Strand.NEG:
             seq = reverse_complement(seq)
-        return seq
+        return _seq_to_bytes(seq)
+
+    def _get_premrna_bytes(self, t_idx: int) -> np.ndarray:
+        """Get pre-mRNA bytes, fetching on demand if not pre-cached."""
+        arr = self._premrna_seq_bytes[t_idx]
+        if arr is None:
+            arr = self._fetch_premrna_bytes(self.transcripts[t_idx])
+            self._premrna_seq_bytes[t_idx] = arr
+        return arr
 
     def _get_quals(self, read_len: int) -> str:
         """Return cached quality string of the given length."""
@@ -847,54 +895,104 @@ class WholeGenomeSimulator:
 
     # -- Error introduction -------------------------------------------------
 
-    def _introduce_errors(self, seq: str) -> str:
-        if self.sim_params.error_rate <= 0:
-            return seq
-        arr = np.array(list(seq), dtype="<U1")
-        mask = self._rng.random(len(seq)) < self.sim_params.error_rate
-        if not np.any(mask):
-            return seq
-        arr[mask] = _DNA_BASES[self._rng.integers(4, size=int(mask.sum()))]
-        return "".join(arr)
+    def _introduce_errors_batch(self, seqs: np.ndarray) -> np.ndarray:
+        """Apply random substitution errors to a batch of sequences in-place.
 
-    # -- Steps 1-3: accumulate per-transcript fragment counts ---------------
+        Parameters
+        ----------
+        seqs : 2D uint8 array (count x read_len)
+        """
+        if not self._has_errors:
+            return seqs
+        count, read_len = seqs.shape
+        mask = self._rng.random((count, read_len)) < self.sim_params.error_rate
+        n_errors = int(mask.sum())
+        if n_errors > 0:
+            bases = np.array([65, 67, 71, 84], dtype=np.uint8)  # A, C, G, T
+            seqs[mask] = bases[self._rng.integers(4, size=n_errors)]
+        return seqs
+
+    # -- Fragment count accumulation ----------------------------------------
+
+    def _accumulate_pool(
+        self,
+        n_frags: int,
+        abundances: np.ndarray,
+        lengths: np.ndarray,
+    ) -> dict[int, dict[int, int]]:
+        """Sample fragment counts from a single abundance/length pool.
+
+        Returns dict[t_idx, dict[frag_len, count]].
+        """
+        if n_frags <= 0:
+            return {}
+
+        rng = self._rng
+        frag_lengths = self._sample_rna_frag_lengths(n_frags)
+        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
+
+        counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+
+        for fl, fc in zip(unique_lengths, length_counts):
+            fl, fc = int(fl), int(fc)
+            eff = np.maximum(0, lengths - fl + 1)
+            weights = abundances * eff
+            total_w = weights.sum()
+            if total_w <= 0:
+                continue
+            probs = weights / total_w
+            indices = rng.choice(len(abundances), size=fc, p=probs)
+            unique_idx, idx_counts = np.unique(indices, return_counts=True)
+            for idx, cnt in zip(unique_idx, idx_counts):
+                counts[int(idx)][fl] += int(cnt)
+
+        return dict(counts)
 
     def _accumulate_rna_counts(
-        self, n_rna: int,
+        self,
+        n_rna: int,
+        *,
+        n_mrna: int | None = None,
+        n_nrna: int | None = None,
     ) -> tuple[dict[int, dict[int, int]], dict[int, dict[int, int]]]:
         """Sample fragment lengths and transcript assignments.
 
-        Returns
-        -------
-        mrna_counts : dict[t_idx, dict[frag_len, count]]
-        nrna_counts : dict[t_idx, dict[frag_len, count]]
+        If *n_mrna* and *n_nrna* are given, samples each pool
+        independently (fragment-count control).  Otherwise falls back
+        to the combined-pool approach where *n_rna* fragments are
+        drawn jointly from mRNA + nRNA weighted by abundance × length.
+
+        Returns (mrna_counts, nrna_counts) where each is
+        dict[t_idx, dict[frag_len, count]].
         """
+        # Separate-pool mode: precise fragment-level control
+        if n_mrna is not None and n_nrna is not None:
+            mrna_counts = self._accumulate_pool(
+                n_mrna, self._mrna_abund, self._t_lengths,
+            )
+            nrna_counts = self._accumulate_pool(
+                n_nrna, self._nrna_abund, self._premrna_lengths,
+            )
+            return mrna_counts, nrna_counts
+
+        # Combined-pool mode (original behaviour)
         if n_rna <= 0:
             return {}, {}
 
         N = len(self.transcripts)
         rng = self._rng
 
-        # Step 2: sample all RNA fragment lengths up front
         frag_lengths = self._sample_rna_frag_lengths(n_rna)
-        unique_lengths, length_counts = np.unique(
-            frag_lengths, return_counts=True,
-        )
+        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
 
-        mrna_counts: dict[int, dict[int, int]] = defaultdict(
-            lambda: defaultdict(int),
-        )
-        nrna_counts: dict[int, dict[int, int]] = defaultdict(
-            lambda: defaultdict(int),
-        )
+        mrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        nrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
-        # Step 3: for each fragment length, sample transcripts
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
 
-            # Vectorised weight computation
-            mrna_eff = np.maximum(0, self._t_lengths_arr - fl + 1)
-            nrna_eff = np.maximum(0, self._premrna_lengths_arr - fl + 1)
+            mrna_eff = np.maximum(0, self._t_lengths - fl + 1)
+            nrna_eff = np.maximum(0, self._premrna_lengths - fl + 1)
             weights = np.concatenate([
                 self._mrna_abund * mrna_eff,
                 self._nrna_abund * nrna_eff,
@@ -916,256 +1014,45 @@ class WholeGenomeSimulator:
 
         return dict(mrna_counts), dict(nrna_counts)
 
-    # -- Step 4: generate reads and write FASTQ + BAM ----------------------
+    # -- Unified RNA read writer --------------------------------------------
 
-    def _write_mrna_bam_pair(
-        self,
-        bam_fh: pysam.AlignmentFile,
-        qname: str,
-        r1_seq: str,
-        r2_seq: str,
-        t: Transcript,
-        frag_start: int,
-        frag_end: int,
-        read_len: int,
-        flipped: bool,
-        ref_id: int,
-    ) -> None:
-        """Write one mRNA R1+R2 BAM record pair (collated)."""
-        r2_t_end = min(frag_start + read_len, frag_end)
-        r2_blocks = _transcript_to_genomic_blocks(frag_start, r2_t_end, t)
-        r1_t_start = max(frag_end - read_len, frag_start)
-        r1_blocks = _transcript_to_genomic_blocks(r1_t_start, frag_end, t)
-        if not r2_blocks or not r1_blocks:
-            return
-
-        r2_cigar = _blocks_to_cigar(r2_blocks)
-        r1_cigar = _blocks_to_cigar(r1_blocks)
-        r2_start = r2_blocks[0][0]
-        r1_start = r1_blocks[0][0]
-
-        if t.strand == Strand.POS:
-            r2_is_rev, r1_is_rev = False, True
-        else:
-            r2_is_rev, r1_is_rev = True, False
-        if flipped:
-            r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
-
-        leftmost = min(r1_blocks[0][0], r2_blocks[0][0])
-        rightmost = max(r1_blocks[-1][1], r2_blocks[-1][1])
-        tlen = rightmost - leftmost
-
-        tags: list = [("NH", 1)]
-        if len(r2_blocks) > 1 or len(r1_blocks) > 1:
-            xs_strand = "-" if t.strand == Strand.NEG else "+"
-            tags.append(("XS", xs_strand))
-
-        r1_flag = _BASE_R1_FLAG
-        if r1_is_rev:
-            r1_flag |= _FLAG_REVERSE
-        if r2_is_rev:
-            r1_flag |= _FLAG_MATE_REVERSE
-        r2_flag = _BASE_R2_FLAG
-        if r2_is_rev:
-            r2_flag |= _FLAG_REVERSE
-        if r1_is_rev:
-            r2_flag |= _FLAG_MATE_REVERSE
-
-        if r1_start <= r2_start:
-            r1_tlen, r2_tlen = tlen, -tlen
-        else:
-            r1_tlen, r2_tlen = -tlen, tlen
-
-        bam_fh.write(_make_bam_record(
-            self._bam_header, qname, r1_seq, r1_flag, ref_id,
-            r1_start, r1_cigar, ref_id, r2_start, r1_tlen, tags=tags,
-        ))
-        bam_fh.write(_make_bam_record(
-            self._bam_header, qname, r2_seq, r2_flag, ref_id,
-            r2_start, r2_cigar, ref_id, r1_start, r2_tlen, tags=tags,
-        ))
-
-    def _write_nrna_bam_pair(
-        self,
-        bam_fh: pysam.AlignmentFile,
-        qname: str,
-        r1_seq: str,
-        r2_seq: str,
-        t: Transcript,
-        frag_start: int,
-        frag_end: int,
-        read_len: int,
-        flipped: bool,
-        ref_id: int,
-    ) -> None:
-        """Write one nRNA R1+R2 BAM record pair (collated)."""
-        g_start, g_end = _premrna_to_genomic_interval(
-            frag_start, frag_end, t,
-        )
-        r2_g_start = g_start
-        r2_g_end = min(g_start + read_len, g_end)
-        r1_g_end = g_end
-        r1_g_start = max(g_end - read_len, g_start)
-
-        if t.strand == Strand.POS:
-            r2_is_rev, r1_is_rev = False, True
-        else:
-            r2_is_rev, r1_is_rev = True, False
-        if flipped:
-            r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
-
-        tlen = g_end - g_start
-        tags: list = [("NH", 1)]
-
-        r1_flag = _BASE_R1_FLAG
-        if r1_is_rev:
-            r1_flag |= _FLAG_REVERSE
-        if r2_is_rev:
-            r1_flag |= _FLAG_MATE_REVERSE
-        r2_flag = _BASE_R2_FLAG
-        if r2_is_rev:
-            r2_flag |= _FLAG_REVERSE
-        if r1_is_rev:
-            r2_flag |= _FLAG_MATE_REVERSE
-
-        r1_read_len = r1_g_end - r1_g_start
-        r2_read_len = r2_g_end - r2_g_start
-
-        if r1_g_start <= r2_g_start:
-            r1_tlen, r2_tlen = tlen, -tlen
-        else:
-            r1_tlen, r2_tlen = -tlen, tlen
-
-        bam_fh.write(_make_bam_record(
-            self._bam_header, qname, r1_seq, r1_flag, ref_id,
-            r1_g_start, [(pysam.CMATCH, r1_read_len)],
-            ref_id, r2_g_start, r1_tlen, tags=tags,
-        ))
-        bam_fh.write(_make_bam_record(
-            self._bam_header, qname, r2_seq, r2_flag, ref_id,
-            r2_g_start, [(pysam.CMATCH, r2_read_len)],
-            ref_id, r1_g_start, r2_tlen, tags=tags,
-        ))
-
-    def _write_mrna_reads(
+    def _write_rna_reads(
         self,
         t_idx: int,
         len_counts: dict[int, int],
         r1_buf: _FastqBuffer,
         r2_buf: _FastqBuffer,
         bam_fh: pysam.AlignmentFile | None,
+        *,
+        is_nrna: bool,
     ) -> int:
-        """Generate and write all mRNA reads for one transcript."""
-        t = self.transcripts[t_idx]
-        t_seq = self._t_seqs[t_idx]
-        t_seq_bytes = self._t_seq_bytes[t_idx]
-        t_len = self._t_lengths[t_idx]
-        ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
-        rng = self._rng
-        ss = self.strand_specificity
-        strand_char = self._t_strand_chars[t_idx]
-        has_errors = self._has_errors
-        t_id = t.t_id
-        n_written = 0
+        """Generate and write all mRNA or nRNA reads for one transcript.
 
-        for frag_len in sorted(len_counts):
-            count = len_counts[frag_len]
-            read_len = min(self.sim_params.read_length, frag_len)
-            eff_len = t_len - frag_len + 1
-            if eff_len <= 0:
-                continue
-
-            frag_starts = rng.integers(0, eff_len, size=count)
-            flip_mask = rng.random(count) >= ss if ss < 1.0 else None
-            quals = self._get_quals(read_len)
-
-            # Vectorized extraction of R2 and R1 sequences
-            r2_seqs, r1_seqs = _batch_extract_reads(
-                t_seq_bytes, frag_starts, frag_len, read_len,
-            )
-
-            # Apply strand flipping in batch
-            if flip_mask is not None:
-                flip_idx = np.where(flip_mask)[0]
-                if len(flip_idx) > 0:
-                    r1_seqs[flip_idx], r2_seqs[flip_idx] = (
-                        r2_seqs[flip_idx].copy(),
-                        r1_seqs[flip_idx].copy(),
-                    )
-
-            # Apply errors in batch if needed
-            if has_errors:
-                error_rate = self.sim_params.error_rate
-                for i in range(count):
-                    mask = rng.random(read_len) < error_rate
-                    if np.any(mask):
-                        r1_seqs[i, mask] = np.array(
-                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
-                            dtype=np.uint8,
-                        )
-                    mask = rng.random(read_len) < error_rate
-                    if np.any(mask):
-                        r2_seqs[i, mask] = np.array(
-                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
-                            dtype=np.uint8,
-                        )
-
-            # Build query names
-            base_n = n_written
-            qnames = [
-                f"{t_id}:{int(frag_starts[i])}-{int(frag_starts[i]) + frag_len}:{strand_char}:{base_n + i}"
-                for i in range(count)
-            ]
-
-            # Batch write FASTQ records
-            r1_buf.write_records_batch(qnames, r1_seqs, quals, "/1")
-            r2_buf.write_records_batch(qnames, r2_seqs, quals, "/2")
-
-            # BAM records still written per-fragment (pysam API requires it)
-            if bam_fh is not None and ref_id is not None:
-                for i in range(count):
-                    frag_start = int(frag_starts[i])
-                    frag_end = frag_start + frag_len
-                    flipped = flip_mask is not None and flip_mask[i]
-                    r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
-                    r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
-                    self._write_mrna_bam_pair(
-                        bam_fh, qnames[i], r1_seq_str, r2_seq_str, t,
-                        frag_start, frag_end, read_len, flipped, ref_id,
-                    )
-
-            n_written += count
-
-        return n_written
-
-    def _write_nrna_reads(
-        self,
-        t_idx: int,
-        len_counts: dict[int, int],
-        r1_buf: _FastqBuffer,
-        r2_buf: _FastqBuffer,
-        bam_fh: pysam.AlignmentFile | None,
-    ) -> int:
-        """Generate and write all nRNA reads for one transcript.
-
-        Fetches the pre-mRNA sequence ONCE for this transcript.
+        When ``is_nrna=False``, uses the pre-extracted spliced mRNA sequence.
+        When ``is_nrna=True``, uses the pre-mRNA (unspliced) sequence.
         """
         t = self.transcripts[t_idx]
-        premrna_len = self._premrna_lengths[t_idx]
-        premrna_seq = self._fetch_premrna_seq(t)
-        premrna_bytes = _seq_to_bytes(premrna_seq)
-        ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
         rng = self._rng
         ss = self.strand_specificity
         strand_char = self._t_strand_chars[t_idx]
-        has_errors = self._has_errors
         t_id = t.t_id
+
+        if is_nrna:
+            seq_bytes = self._get_premrna_bytes(t_idx)
+            seq_len = int(self._premrna_lengths[t_idx])
+            qname_prefix = f"nrna_{t_id}"
+        else:
+            seq_bytes = self._t_seq_bytes[t_idx]
+            seq_len = int(self._t_lengths[t_idx])
+            qname_prefix = t_id
+
+        ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
         n_written = 0
 
         for frag_len in sorted(len_counts):
             count = len_counts[frag_len]
             read_len = min(self.sim_params.read_length, frag_len)
-            eff_len = premrna_len - frag_len + 1
+            eff_len = seq_len - frag_len + 1
             if eff_len <= 0:
                 continue
 
@@ -1173,12 +1060,10 @@ class WholeGenomeSimulator:
             flip_mask = rng.random(count) >= ss if ss < 1.0 else None
             quals = self._get_quals(read_len)
 
-            # Vectorized extraction
-            r2_seqs, r1_seqs = _batch_extract_reads(
-                premrna_bytes, frag_starts, frag_len, read_len,
-            )
+            # Vectorized read extraction
+            r2_seqs, r1_seqs = _batch_extract_reads(seq_bytes, frag_starts, frag_len, read_len)
 
-            # Apply strand flipping in batch
+            # Strand flipping
             if flip_mask is not None:
                 flip_idx = np.where(flip_mask)[0]
                 if len(flip_idx) > 0:
@@ -1187,50 +1072,176 @@ class WholeGenomeSimulator:
                         r1_seqs[flip_idx].copy(),
                     )
 
-            # Apply errors in batch if needed
-            if has_errors:
-                error_rate = self.sim_params.error_rate
-                for i in range(count):
-                    mask = rng.random(read_len) < error_rate
-                    if np.any(mask):
-                        r1_seqs[i, mask] = np.array(
-                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
-                            dtype=np.uint8,
-                        )
-                    mask = rng.random(read_len) < error_rate
-                    if np.any(mask):
-                        r2_seqs[i, mask] = np.array(
-                            [b"ACGT"[x] for x in rng.integers(4, size=int(mask.sum()))],
-                            dtype=np.uint8,
-                        )
+            # Batch error introduction
+            if self._has_errors:
+                self._introduce_errors_batch(r1_seqs)
+                self._introduce_errors_batch(r2_seqs)
 
             # Build query names
             base_n = n_written
             qnames = [
-                f"nrna_{t_id}:{int(frag_starts[i])}-{int(frag_starts[i]) + frag_len}:{strand_char}:{base_n + i}"
+                f"{qname_prefix}:{int(frag_starts[i])}-{int(frag_starts[i]) + frag_len}:{strand_char}:{base_n + i}"
                 for i in range(count)
             ]
 
-            # Batch write FASTQ records
+            # Batch FASTQ writes
             r1_buf.write_records_batch(qnames, r1_seqs, quals, "/1")
             r2_buf.write_records_batch(qnames, r2_seqs, quals, "/2")
 
-            # BAM records still written per-fragment
+            # BAM records (pysam API requires per-record construction)
             if bam_fh is not None and ref_id is not None:
-                for i in range(count):
-                    frag_start = int(frag_starts[i])
-                    frag_end = frag_start + frag_len
-                    flipped = flip_mask is not None and flip_mask[i]
-                    r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
-                    r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
-                    self._write_nrna_bam_pair(
-                        bam_fh, qnames[i], r1_seq_str, r2_seq_str, t,
-                        frag_start, frag_end, read_len, flipped, ref_id,
+                if is_nrna:
+                    self._write_nrna_bam_batch(
+                        bam_fh, qnames, r1_seqs, r2_seqs, t,
+                        frag_starts, frag_len, read_len, flip_mask, ref_id,
+                    )
+                else:
+                    self._write_mrna_bam_batch(
+                        bam_fh, qnames, r1_seqs, r2_seqs, t,
+                        frag_starts, frag_len, read_len, flip_mask, ref_id,
                     )
 
             n_written += count
 
         return n_written
+
+    # -- BAM batch writers --------------------------------------------------
+
+    def _write_mrna_bam_batch(
+        self,
+        bam_fh: pysam.AlignmentFile,
+        qnames: list[str],
+        r1_seqs: np.ndarray,
+        r2_seqs: np.ndarray,
+        t: Transcript,
+        frag_starts: np.ndarray,
+        frag_len: int,
+        read_len: int,
+        flip_mask: np.ndarray | None,
+        ref_id: int,
+    ) -> None:
+        for i in range(len(qnames)):
+            frag_start = int(frag_starts[i])
+            frag_end = frag_start + frag_len
+            flipped = flip_mask is not None and flip_mask[i]
+
+            r2_t_end = min(frag_start + read_len, frag_end)
+            r2_blocks = _transcript_to_genomic_blocks(frag_start, r2_t_end, t)
+            r1_t_start = max(frag_end - read_len, frag_start)
+            r1_blocks = _transcript_to_genomic_blocks(r1_t_start, frag_end, t)
+            if not r2_blocks or not r1_blocks:
+                continue
+
+            r2_cigar = _blocks_to_cigar(r2_blocks)
+            r1_cigar = _blocks_to_cigar(r1_blocks)
+            r2_start = r2_blocks[0][0]
+            r1_start = r1_blocks[0][0]
+
+            if t.strand == Strand.POS:
+                r2_is_rev, r1_is_rev = False, True
+            else:
+                r2_is_rev, r1_is_rev = True, False
+            if flipped:
+                r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
+
+            leftmost = min(r1_blocks[0][0], r2_blocks[0][0])
+            rightmost = max(r1_blocks[-1][1], r2_blocks[-1][1])
+            tlen = rightmost - leftmost
+
+            tags = self._nh1_tags
+            if len(r2_blocks) > 1 or len(r1_blocks) > 1:
+                xs_strand = "-" if t.strand == Strand.NEG else "+"
+                tags = [("NH", 1), ("XS", xs_strand)]
+
+            r1_flag = _BASE_R1_FLAG
+            r2_flag = _BASE_R2_FLAG
+            if r1_is_rev:
+                r1_flag |= _FLAG_REVERSE
+            if r2_is_rev:
+                r1_flag |= _FLAG_MATE_REVERSE
+                r2_flag |= _FLAG_REVERSE
+            if r1_is_rev:
+                r2_flag |= _FLAG_MATE_REVERSE
+
+            r1_tlen = tlen if r1_start <= r2_start else -tlen
+            r2_tlen = -r1_tlen
+
+            r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
+            r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
+
+            bam_fh.write(_make_bam_record(
+                self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
+                r1_start, r1_cigar, ref_id, r2_start, r1_tlen, tags=tags,
+            ))
+            bam_fh.write(_make_bam_record(
+                self._bam_header, qnames[i], r2_seq_str, r2_flag, ref_id,
+                r2_start, r2_cigar, ref_id, r1_start, r2_tlen, tags=tags,
+            ))
+
+    def _write_nrna_bam_batch(
+        self,
+        bam_fh: pysam.AlignmentFile,
+        qnames: list[str],
+        r1_seqs: np.ndarray,
+        r2_seqs: np.ndarray,
+        t: Transcript,
+        frag_starts: np.ndarray,
+        frag_len: int,
+        read_len: int,
+        flip_mask: np.ndarray | None,
+        ref_id: int,
+    ) -> None:
+        for i in range(len(qnames)):
+            frag_start = int(frag_starts[i])
+            frag_end = frag_start + frag_len
+            flipped = flip_mask is not None and flip_mask[i]
+
+            g_start, g_end = _premrna_to_genomic_interval(frag_start, frag_end, t)
+            r2_g_start = g_start
+            r2_g_end = min(g_start + read_len, g_end)
+            r1_g_end = g_end
+            r1_g_start = max(g_end - read_len, g_start)
+
+            if t.strand == Strand.POS:
+                r2_is_rev, r1_is_rev = False, True
+            else:
+                r2_is_rev, r1_is_rev = True, False
+            if flipped:
+                r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
+
+            tlen = g_end - g_start
+
+            r1_flag = _BASE_R1_FLAG
+            r2_flag = _BASE_R2_FLAG
+            if r1_is_rev:
+                r1_flag |= _FLAG_REVERSE
+            if r2_is_rev:
+                r1_flag |= _FLAG_MATE_REVERSE
+                r2_flag |= _FLAG_REVERSE
+            if r1_is_rev:
+                r2_flag |= _FLAG_MATE_REVERSE
+
+            r1_tlen = tlen if r1_g_start <= r2_g_start else -tlen
+            r2_tlen = -r1_tlen
+
+            r1_read_len = r1_g_end - r1_g_start
+            r2_read_len = r2_g_end - r2_g_start
+
+            r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
+            r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
+
+            bam_fh.write(_make_bam_record(
+                self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
+                r1_g_start, [(pysam.CMATCH, r1_read_len)],
+                ref_id, r2_g_start, r1_tlen, tags=self._nh1_tags,
+            ))
+            bam_fh.write(_make_bam_record(
+                self._bam_header, qnames[i], r2_seq_str, r2_flag, ref_id,
+                r2_g_start, [(pysam.CMATCH, r2_read_len)],
+                ref_id, r1_g_start, r2_tlen, tags=self._nh1_tags,
+            ))
+
+    # -- gDNA reads (vectorized per chromosome) -----------------------------
 
     def _write_gdna_reads(
         self,
@@ -1239,91 +1250,95 @@ class WholeGenomeSimulator:
         r2_buf: _FastqBuffer,
         bam_fh: pysam.AlignmentFile | None,
     ) -> int:
-        """Generate and write all gDNA reads."""
+        """Generate and write all gDNA reads using vectorized extraction."""
         if n_gdna == 0 or not self._gdna_refs:
             return 0
 
         frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
-        unique_lengths, length_counts = np.unique(
-            frag_lengths, return_counts=True,
-        )
+        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
         rng = self._rng
         read_len_cfg = self.sim_params.read_length
-        has_errors = self._has_errors
+
+        gdna_ref_lengths_arr = np.array(self._gdna_ref_lengths, dtype=np.float64)
         n_written = 0
 
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
-            chrom_eff = np.array(
-                [max(0, cl - fl + 1) for cl in self._gdna_ref_lengths],
-                dtype=float,
-            )
-            total_eff = chrom_eff.sum()
-            if total_eff <= 0:
-                continue
-            chrom_probs = chrom_eff / total_eff
-            chrom_indices = rng.choice(
-                len(self._gdna_refs), size=fc, p=chrom_probs,
-            )
-            unique_chroms, chrom_counts = np.unique(
-                chrom_indices, return_counts=True,
-            )
-
             read_len = min(read_len_cfg, fl)
             quals = self._get_quals(read_len)
 
-            for ci, cc in zip(unique_chroms, chrom_counts):
-                ci, cc = int(ci), int(cc)
+            # Effective lengths per chromosome for this fragment length
+            chrom_eff = np.maximum(0, gdna_ref_lengths_arr - fl + 1)
+            total_eff = chrom_eff.sum()
+            if total_eff <= 0:
+                continue
+
+            # Sample chromosomes for all fragments at this length
+            chrom_probs = chrom_eff / total_eff
+            chrom_indices = rng.choice(len(self._gdna_refs), size=fc, p=chrom_probs)
+            strands = rng.integers(0, 2, size=fc)
+
+            # Group by chromosome for vectorized extraction
+            unique_chroms, chrom_inv, chrom_counts = np.unique(
+                chrom_indices, return_inverse=True, return_counts=True,
+            )
+
+            for ci_pos, ci in enumerate(unique_chroms):
+                ci = int(ci)
                 ref = self._gdna_refs[ci]
                 chrom_len = self._gdna_ref_lengths[ci]
                 ref_id = self._ref_name_to_id.get(ref)
+                chrom_bytes = self._genome.get(ref)
                 eff_len = chrom_len - fl + 1
+
+                # Get indices into the flat arrays for this chromosome
+                chrom_mask = chrom_inv == ci_pos
+                cc = int(chrom_mask.sum())
+                chrom_strands = strands[chrom_mask]
+
+                # Sample start positions
                 starts = rng.integers(0, eff_len, size=cc)
-                strands = rng.integers(0, 2, size=cc)
 
-                # Fetch the whole chromosome region we need for this batch
-                # For large batches on the same chromosome, we can vectorize
-                # by fetching a single region if starts are close together,
-                # but genomic positions are typically scattered, so we fetch
-                # per-fragment but batch the FASTQ writing.
-                qnames_batch: list[str] = []
-                r1_seqs_list: list[str] = []
-                r2_seqs_list: list[str] = []
-                bam_data: list[tuple] = []  # for deferred BAM writing
+                # Vectorized read extraction from cached chromosome bytes
+                r2_seqs, r1_seqs = _batch_extract_reads(chrom_bytes, starts, fl, read_len)
 
-                for j in range(cc):
-                    start = int(starts[j])
-                    end = start + fl
-                    seq = self.fasta.fetch(ref, start, end).upper()
+                # Handle negative strand: swap R1/R2
+                # For fwd strand: R2=first bases, R1=revcomp(last bases) -- correct.
+                # For neg strand we want fragment = revcomp(genomic), which means:
+                #   neg R2 = revcomp(last bases on fwd) = fwd R1
+                #   neg R1 = first bases on fwd = fwd R2
+                # So: just swap R1 and R2 for neg-strand fragments.
+                neg_mask = chrom_strands.astype(bool)
+                if neg_mask.any():
+                    neg_idx = np.where(neg_mask)[0]
+                    r1_seqs[neg_idx], r2_seqs[neg_idx] = (
+                        r2_seqs[neg_idx].copy(),
+                        r1_seqs[neg_idx].copy(),
+                    )
 
-                    is_neg = bool(strands[j])
-                    if is_neg:
-                        seq = reverse_complement(seq)
-                    strand_char = "r" if is_neg else "f"
+                # Batch errors
+                if self._has_errors:
+                    self._introduce_errors_batch(r1_seqs)
+                    self._introduce_errors_batch(r2_seqs)
 
-                    r1_seq = reverse_complement(seq[-read_len:])
-                    r2_seq = seq[:read_len]
-
-                    if has_errors:
-                        r1_seq = self._introduce_errors(r1_seq)
-                        r2_seq = self._introduce_errors(r2_seq)
-
-                    qname = f"gdna:{ref}:{start}-{end}:{strand_char}:{n_written + j}"
-                    qnames_batch.append(qname)
-                    r1_seqs_list.append(r1_seq)
-                    r2_seqs_list.append(r2_seq)
-
-                    if bam_fh is not None and ref_id is not None:
-                        bam_data.append((qname, r1_seq, r2_seq, start, end, is_neg))
+                # Build query names
+                qnames = [
+                    f"gdna:{ref}:{int(starts[j])}-{int(starts[j]) + fl}:"
+                    f"{'r' if chrom_strands[j] else 'f'}:{n_written + j}"
+                    for j in range(cc)
+                ]
 
                 # Batch FASTQ writes
-                for k in range(cc):
-                    r1_buf.write_record(qnames_batch[k] + "/1", r1_seqs_list[k], quals)
-                    r2_buf.write_record(qnames_batch[k] + "/2", r2_seqs_list[k], quals)
+                r1_buf.write_records_batch(qnames, r1_seqs, quals, "/1")
+                r2_buf.write_records_batch(qnames, r2_seqs, quals, "/2")
 
-                # BAM writes
+                # BAM records
                 if bam_fh is not None and ref_id is not None:
-                    for qname, r1_seq, r2_seq, start, end, is_neg in bam_data:
+                    for j in range(cc):
+                        start = int(starts[j])
+                        end = start + fl
+                        is_neg = bool(chrom_strands[j])
+
                         r1_flag = _BASE_R1_FLAG
                         r2_flag = _BASE_R2_FLAG
                         if is_neg:
@@ -1336,26 +1351,25 @@ class WholeGenomeSimulator:
                         tlen = end - start
                         r2_start_pos = start
                         r1_start_pos = end - read_len
+                        r1_tlen = tlen if r1_start_pos <= r2_start_pos else -tlen
+                        r2_tlen = -r1_tlen
 
-                        if r1_start_pos <= r2_start_pos:
-                            r1_tlen, r2_tlen = tlen, -tlen
-                        else:
-                            r1_tlen, r2_tlen = -tlen, tlen
+                        r1_seq_str = r1_seqs[j].tobytes().decode("ascii")
+                        r2_seq_str = r2_seqs[j].tobytes().decode("ascii")
 
-                        gdna_tags = [("NH", 1)]
                         bam_fh.write(_make_bam_record(
-                            self._bam_header, qname, r1_seq,
+                            self._bam_header, qnames[j], r1_seq_str,
                             r1_flag, ref_id, r1_start_pos,
                             [(pysam.CMATCH, read_len)],
                             ref_id, r2_start_pos, r1_tlen,
-                            tags=gdna_tags,
+                            tags=self._nh1_tags,
                         ))
                         bam_fh.write(_make_bam_record(
-                            self._bam_header, qname, r2_seq,
+                            self._bam_header, qnames[j], r2_seq_str,
                             r2_flag, ref_id, r2_start_pos,
                             [(pysam.CMATCH, read_len)],
                             ref_id, r1_start_pos, r2_tlen,
-                            tags=gdna_tags,
+                            tags=self._nh1_tags,
                         ))
 
                 n_written += cc
@@ -1370,75 +1384,64 @@ class WholeGenomeSimulator:
         n_rna: int,
         n_gdna: int = 0,
         *,
+        n_mrna: int | None = None,
+        n_nrna: int | None = None,
         oracle_bam: bool = True,
         prefix: str = "sim",
     ) -> tuple[Path, Path, Path | None]:
         """Single-pass simulation: accumulate counts, generate, write.
 
-        Steps
-        -----
-        1-3. Accumulate per-transcript (mRNA/nRNA) fragment counts.
-        4.   Iterate transcripts: pull sequence once, generate all
-             fragments, write gzipped FASTQ + collated BAM.
+        When *n_mrna* and *n_nrna* are provided, the mRNA and nRNA
+        fragment pools are sampled independently (precise fragment-count
+        control).  *n_rna* is ignored in this mode but still used for
+        logging.  Otherwise *n_rna* fragments are drawn from the
+        combined mRNA + nRNA pool (original behaviour).
 
-        Returns
-        -------
-        (r1_path, r2_path, bam_path | None)
+        Returns (r1_path, r2_path, bam_path | None).
         """
         output_dir.mkdir(parents=True, exist_ok=True)
         r1_path = output_dir / f"{prefix}_R1.fq.gz"
         r2_path = output_dir / f"{prefix}_R2.fq.gz"
         bam_path = output_dir / f"{prefix}_oracle.bam" if oracle_bam else None
 
-        # Steps 1-3: accumulate per-transcript fragment counts
+        # Accumulate per-transcript fragment counts
         logger.info("Accumulating RNA fragment counts...")
-        mrna_counts, nrna_counts = self._accumulate_rna_counts(n_rna)
+        mrna_counts, nrna_counts = self._accumulate_rna_counts(
+            n_rna, n_mrna=n_mrna, n_nrna=n_nrna,
+        )
 
-        n_mrna_tx = len(mrna_counts)
-        n_nrna_tx = len(nrna_counts)
         total_mrna = sum(sum(d.values()) for d in mrna_counts.values())
         total_nrna = sum(sum(d.values()) for d in nrna_counts.values())
         logger.info(
-            "Fragment counts: %d mRNA frags across %d transcripts, "
-            "%d nRNA frags across %d transcripts",
-            total_mrna, n_mrna_tx, total_nrna, n_nrna_tx,
+            "Fragment counts: %d mRNA (%d txs), %d nRNA (%d txs)",
+            total_mrna, len(mrna_counts), total_nrna, len(nrna_counts),
         )
 
-        # Step 4: generate reads and write outputs
+        # Generate reads and write outputs
         n_written = 0
         bam_fh: pysam.AlignmentFile | None = None
 
         with (
-            gzip.open(r1_path, "wt") as r1_fh,
-            gzip.open(r2_path, "wt") as r2_fh,
+            _open_gzip_write(r1_path) as r1_fh,
+            _open_gzip_write(r2_path) as r2_fh,
         ):
             r1_buf = _FastqBuffer(r1_fh)
             r2_buf = _FastqBuffer(r2_fh)
             if oracle_bam:
-                bam_fh = pysam.AlignmentFile(
-                    str(bam_path), "wb", header=self._bam_header,
-                )
+                bam_fh = pysam.AlignmentFile(str(bam_path), "wb", header=self._bam_header)
             try:
-                # mRNA reads (sequence already pre-extracted)
                 for t_idx in sorted(mrna_counts):
-                    n_written += self._write_mrna_reads(
-                        t_idx, mrna_counts[t_idx],
-                        r1_buf, r2_buf, bam_fh,
+                    n_written += self._write_rna_reads(
+                        t_idx, mrna_counts[t_idx], r1_buf, r2_buf, bam_fh, is_nrna=False,
                     )
 
-                # nRNA reads (pre-mRNA fetched once per transcript)
                 for t_idx in sorted(nrna_counts):
-                    n_written += self._write_nrna_reads(
-                        t_idx, nrna_counts[t_idx],
-                        r1_buf, r2_buf, bam_fh,
+                    n_written += self._write_rna_reads(
+                        t_idx, nrna_counts[t_idx], r1_buf, r2_buf, bam_fh, is_nrna=True,
                     )
 
-                # gDNA reads
-                n_written += self._write_gdna_reads(
-                    n_gdna, r1_buf, r2_buf, bam_fh,
-                )
+                n_written += self._write_gdna_reads(n_gdna, r1_buf, r2_buf, bam_fh)
 
-                # Flush remaining buffered records
                 r1_buf.close()
                 r2_buf.close()
             finally:
@@ -1452,7 +1455,8 @@ class WholeGenomeSimulator:
         return r1_path, r2_path, bam_path
 
     def close(self) -> None:
-        """Close the underlying FASTA file handle."""
+        """Release resources."""
+        self._genome.clear()
         self.fasta.close()
 
 
@@ -1645,18 +1649,14 @@ def write_manifest(
 def run_simulation(cfg: SimConfig) -> list[dict]:
     """Run full simulation.
 
-    1. Load genome + GTF → transcripts
+    1. Load genome + GTF -> transcripts
     2. Assign base abundances (total RNA) once
-    3. Sweep nrna_fracs × gdna_rates × strand_specificities
+    3. Sweep nrna_fracs x gdna_rates x strand_specificities
     4. Write manifest
-
-    When the abundance file provides explicit nRNA data, the nRNA
-    sweep is skipped — file values are used as-is.  Otherwise each
-    entry in ``nrna.fracs`` produces a separate nRNA condition via
-    ``_spike_in_nrna``.
 
     Returns list of condition dicts (for manifest).
     """
+    import copy
     outdir = Path(cfg.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 

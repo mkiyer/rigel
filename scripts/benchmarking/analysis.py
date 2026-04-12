@@ -120,6 +120,18 @@ def load_truth(benchmark_dir: Path, nrna_label: str) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t")
 
 
+def load_truth_for_condition(
+    benchmark_dir: Path, condition: str, nrna_label: str,
+) -> pd.DataFrame:
+    """Load truth: prefer per-condition file, fall back to nrna-label file."""
+    # Per-condition truth (e.g. truth_abundances_pristine.tsv)
+    per_cond = benchmark_dir / f"truth_abundances_{condition}.tsv"
+    if per_cond.exists():
+        return pd.read_csv(per_cond, sep="\t")
+    # Legacy format (truth_abundances_nrna_none.tsv)
+    return load_truth(benchmark_dir, nrna_label)
+
+
 def discover_tools(cond_dir: Path) -> list[ToolOutput]:
     """Discover available tool outputs for a condition directory."""
     tools = []
@@ -738,7 +750,7 @@ def run_analysis(
         sim_params.get("sim_seed", 0),
     )
 
-    # Load truth tables
+    # Load truth tables (legacy nrna-label format)
     truth_cache: dict[str, pd.DataFrame] = {}
     for nrna_label in ("none", "rand"):
         try:
@@ -748,11 +760,14 @@ def run_analysis(
                 nrna_label, len(truth_cache[nrna_label]),
             )
         except FileNotFoundError:
-            logger.warning("Truth file for nrna_%s not found", nrna_label)
+            logger.debug("Truth file for nrna_%s not found", nrna_label)
 
     # Discover conditions
     conditions = condition_filter or cfg.get_conditions()
     logger.info("Found %d conditions: %s", len(conditions), conditions)
+
+    # Per-condition truth cache (loaded on demand below)
+    cond_truth_cache: dict[str, pd.DataFrame] = {}
 
     # Precompute tx→gene mapping from truth
     tx2gene: dict[str, str] = {}
@@ -775,10 +790,26 @@ def run_analysis(
     for ci, condition in enumerate(conditions):
         meta = parse_condition(condition)
         nrna_label = meta["nrna_label"]
-        truth_df = truth_cache.get(nrna_label)
+
+        # Try per-condition truth, then fall back to nrna-label truth
+        if condition not in cond_truth_cache:
+            try:
+                cond_truth_cache[condition] = load_truth_for_condition(
+                    benchmark_dir, condition, nrna_label,
+                )
+            except FileNotFoundError:
+                pass
+        truth_df = cond_truth_cache.get(condition)
+        if truth_df is None:
+            truth_df = truth_cache.get(nrna_label)
         if truth_df is None:
             logger.warning("No truth for %s (nrna=%s), skipping", condition, nrna_label)
             continue
+
+        # Ensure tx2gene has entries from per-condition truth
+        if condition in cond_truth_cache:
+            for row in truth_df[["transcript_id", "gene_id"]].itertuples(index=False):
+                tx2gene.setdefault(row.transcript_id, row.gene_id)
 
         print(
             f"[{ci + 1}/{len(conditions)}] {condition} "

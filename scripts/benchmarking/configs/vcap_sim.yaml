@@ -1,0 +1,57 @@
+# Benchmark configuration for VCaP simulation (pristine / gdna / gdna_nrna).
+#
+# Usage:
+#   python -m scripts.benchmarking align      -c scripts/benchmarking/configs/vcap_sim.yaml
+#   python -m scripts.benchmarking run        -c scripts/benchmarking/configs/vcap_sim.yaml
+#   python -m scripts.benchmarking run-tools  -c scripts/benchmarking/configs/vcap_sim.yaml
+#   python -m scripts.benchmarking analyze    -c scripts/benchmarking/configs/vcap_sim.yaml -o results/vcap_sim
+#   python -m scripts.benchmarking report     -c scripts/benchmarking/configs/vcap_sim.yaml -o results/vcap_sim
+
+# ── Paths ──────────────────────────────────────────────────────────
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/rigel_benchmarks/vcap_sim
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/rigel_index
+
+# Default BAM for rigel (STAR-aligned)
+bam_relpath: star/aligned.bam
+
+# ── External tool indexes ─────────────────────────────────────────
+
+salmon_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/salmon_index
+kallisto_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/kallisto.idx
+annotation_gtf: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genes_controls.gtf.gz
+star_index: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/star_index
+
+# ── Global defaults ───────────────────────────────────────────────
+
+threads: 8
+seed: 42
+
+# ── Explicit conditions ───────────────────────────────────────────
+
+conditions:
+  - pristine
+  - gdna
+  - gdna_nrna
+
+# ── Named rigel configurations ────────────────────────────────────
+
+rigel_configs:
+  # Oracle BAM (perfect alignment from simulator)
+  oracle_vbem:
+    em_mode: vbem
+    emit_locus_stats: true
+    bam_relpath: sim_oracle.bam
+
+  # STAR-aligned BAM
+  star_vbem:
+    em_mode: vbem
+    emit_locus_stats: true
+    bam_relpath: star/aligned.bam
+
+# ── Analysis ──────────────────────────────────────────────────────
+
+analysis:
+  output_dir: results/vcap_sim
+  log2_pseudocount: 1.0
+  parse_fastq_truth: false
