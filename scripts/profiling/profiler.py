@@ -528,11 +528,7 @@ def profile_stages(
                 fl_table,
                 index.region_df,
                 strand_models.strand_specificity,
-                max_iterations=cal_cfg.max_iterations,
-                convergence_tol=cal_cfg.convergence_tol,
                 density_percentile=cal_cfg.density_percentile,
-                min_gdna_regions=cal_cfg.min_gdna_regions,
-                min_fl_ess=cal_cfg.min_fl_ess,
                 intergenic_fl_model=frag_length_models.intergenic,
             )
             # Apply calibrated gDNA FL model for scoring
