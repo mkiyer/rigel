@@ -1,19 +1,46 @@
 # TODO
 
 
-## Calibration issues
+## Calibration 
 
-We now allowing regions with ZERO fragments to be used to train the calibration module.
+### Performance
+
+- Huge regression in performance
+
+## Gene strand
+
+- Variables named 'gene_strand' need to be refactored
+- Change references from 'gene' to 'transcript' or 't' or 'tx'
+
+### Mappability 
+
+- Calibration now *correctly* allows regions with ZERO fragments to be used to train the calibration module.
 
 This exposes several issues
 - Unmappable genomic regions may have zero counts because they are unmappable
-- We need to discard unmappable regions. Otherwise calibration will underestimate gDNA desntiy
-
-- If we are running hybrid capture, we need the calibration module to only use "captured" regions to train itself. We need to provide 'on target' and 'off target' regions.
-
+- We need to discard unmappable regions. Otherwise calibration will underestimate gDNA density
 
 
 ### Hybrid capture support
+
+- If we are running hybrid capture, we need the calibration module to only use "captured" regions to train itself. We need to provide 'on target' and 'off target' regions.
+- Defer for now
+
+
+## Mappability
+
+### Genomic footprints
+
+Genomic footprint is an important aspect of the coverage density model. It is the denominator upon which we compute coverage density. Without accounting for mappability, gDNA will be underestimated because the unmappable genomic regions will inflate the denominator.
+
+The solution was to create a new tool 'alignable' that computes genome-wide mappability. The mappability data is stored in read-length bins, default (50, 75, 100, 125).
+
+With the 'alignable' result, it should be possible to estimate the genomic region span / footprint as a function of read length.
+
+This could be computationally expensive. If we use per-fragment effective length, we need to compute the effective length by querying the mappability data using the fragment length. 
+
+Shortcuts for this? We could use the 'mean' fragment length and compute the mappability-corrected effective length once per locus for the genomic dna component. We also need to compute this for each nascent RNA component.
+
 
 ## Locus stats
 
@@ -22,7 +49,12 @@ Enable locus status to be written to the output
 
 ## Nascent RNA count set to zero? 
 
-Someone the transcript counts is setting synthetic nRNA counts to zero? That seems silly.
+Copilot suggseted that synthetic nRNA counts are being set to zero? Is this some kind of gating?
+
+### nascent RNA gating?
+
+- formalize nascent RNA gating policy and implement this
+- "gate" nascent RNA only when there are intronic reads. if only exonic reads, nascent RNA component not activated
 
 
 ## Gene counting
@@ -31,10 +63,12 @@ Ensure gene quantification is correct.
 
 Regarding gene quantification. Yes, we can sum counts of the transcript isoforms of the gene. Annotated single-exon transcripts are associated with a gene and will be included in those counts (they are both mature and nascent so this is okay). For gene quantification, we MUST exclude synthetic nascent RNA (synthetic nascent RNA should not be associated with a gene. Remember, we can sum counts, but when we compute transcripts-per-milion (TPM), we use a weighted average of counts respecting different effective lengths.
 
+
 ## Collated annotated BAM output
 
 Is annotation BAM output collated?
 Can we ensure that it is collated?
+
 
 ## Overhang likelihood penalty
 
@@ -272,34 +306,7 @@ We need an AVX2 implementation for linux
 Eventually the production system will be Linux
 
 
-
-## Mappability
-
-### Genomic footprints
-
-Genomic footprint is an important aspect of the coverage density model. It is the denominator upon which we compute coverage density. Without accounting for mappability, gDNA will be underestimated because the unmappable genomic regions will inflate the denominator.
-
-Solution: as part of indexing, compute "mappability" tracks across the genome. 
-
-Complicating factors:
-- Mappability depends on read length
-- Paired-end reads may "anchor" unmappable regions allowing them to be resolved.
-
-Solutions:
-- Compute mappability tracks for different read lengths
-- Estimate total genomic footprint as a function of read length
-- This will require mapping billions of reads. For every read length, we must map ~4 billion reads.
-
-
-
 ## Post-EM Pruning
 
 - pruning was recently removed
 - now we have 'discrete' fragment count assignment as the default
-
-
-## (RESOLVED) Fragment length distribution
-
-- Review FL distribution observations
-- Should be spliced fragments with unambiguous fragment length (sometimes fragment can map to different transcripts and have different fragment lengths)
-- Need to ensure nascent RNAs are not interfering with FL distribution observations

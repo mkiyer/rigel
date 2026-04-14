@@ -360,17 +360,13 @@ def _build_gdna_fl_model(
     strand_mask = np.zeros(len(fl_table), dtype=bool)
     if has_frag_strand and strand_specificity > 0.5:
         fstrands = fl_table["frag_strand"].values
-        for rid_val in range(len(gene_strand)):
-            if not eligible[rid_val] or not has_strand[rid_val]:
-                continue
-            gs = gene_strand[rid_val]
-            rid_match = rids == rid_val
-            if gs == 1:
-                # gene on +: antisense = R1 on + strand = STRAND_POS
-                strand_mask |= rid_match & (fstrands == STRAND_POS)
-            elif gs == -1:
-                # gene on −: antisense = R1 on − strand = STRAND_NEG
-                strand_mask |= rid_match & (fstrands == STRAND_NEG)
+        # Vectorized: look up per-observation region properties via fancy indexing
+        obs_eligible = eligible[rids] & has_strand[rids]
+        obs_gs = gene_strand[rids]
+        # gene on +: antisense = R1 on + strand = STRAND_POS
+        strand_mask |= obs_eligible & (obs_gs == 1) & (fstrands == STRAND_POS)
+        # gene on −: antisense = R1 on − strand = STRAND_NEG
+        strand_mask |= obs_eligible & (obs_gs == -1) & (fstrands == STRAND_NEG)
 
     # Density pathway: fragments from low-density regions
     density_mask = np.isin(rids, np.where(low_density_regions)[0])

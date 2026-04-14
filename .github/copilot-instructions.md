@@ -95,6 +95,8 @@ minimap2 -ax splice:sr \
 
 `scripts/profiler.py` contains a framework for profiling.
 
+If possible store profiling results in a 'scratch' directory or other location outside the repo (okay to ask for location if unclear).
+
 ## Simulation
 
 `scripts/synthetic_sim_sweep.py` contains a framework for running synthetic simulations with configurable parameters.
