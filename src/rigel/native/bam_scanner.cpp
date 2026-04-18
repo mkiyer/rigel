@@ -180,22 +180,22 @@ struct QnameGroup {
 
 struct StrandObservations {
     // exonic_spliced: (exon_strand, sj_strand) for strand-qualified
-    std::vector<int32_t> exonic_spliced_obs;
-    std::vector<int32_t> exonic_spliced_truth;
+    std::vector<int8_t> exonic_spliced_obs;
+    std::vector<int8_t> exonic_spliced_truth;
 
     // exonic: (exon_strand, gene_strand) for unique-gene unambiguous strand
-    std::vector<int32_t> exonic_obs;
-    std::vector<int32_t> exonic_truth;
+    std::vector<int8_t> exonic_obs;
+    std::vector<int8_t> exonic_truth;
 
     // intergenic: (intergenic_strand, POS) for unique-mapper intergenic
-    std::vector<int32_t> intergenic_obs;
-    std::vector<int32_t> intergenic_truth;
+    std::vector<int8_t> intergenic_obs;
+    std::vector<int8_t> intergenic_truth;
 };
 
 struct FragLenObservations {
     // Resolved fragments with unambiguous fragment length
     std::vector<int32_t> lengths;
-    std::vector<int32_t> splice_types;  // SpliceType enum value
+    std::vector<int8_t>  splice_types;  // SpliceType enum: {0, 1, 2}
 
     // Intergenic fragment lengths (splice_type = -1 meaning None)
     std::vector<int32_t> intergenic_lengths;
@@ -1239,8 +1239,8 @@ private:
                         ig_strand |= eb.strand;
                     }
                     if (ig_strand == STRAND_POS || ig_strand == STRAND_NEG) {
-                        strand_obs.intergenic_obs.push_back(ig_strand);
-                        strand_obs.intergenic_truth.push_back(STRAND_POS);
+                        strand_obs.intergenic_obs.push_back(static_cast<int8_t>(ig_strand));
+                        strand_obs.intergenic_truth.push_back(static_cast<int8_t>(STRAND_POS));
                     }
                 }
 
@@ -1289,8 +1289,8 @@ private:
 
             if (is_unique_mapper) {
                 if (result.get_is_strand_qualified()) {
-                    strand_obs.exonic_spliced_obs.push_back(result.exon_strand);
-                    strand_obs.exonic_spliced_truth.push_back(result.sj_strand);
+                    strand_obs.exonic_spliced_obs.push_back(static_cast<int8_t>(result.exon_strand));
+                    strand_obs.exonic_spliced_truth.push_back(static_cast<int8_t>(result.sj_strand));
                     stats.n_strand_trained++;
                 } else if (result.splice_type != SPLICE_SPLICED_ANNOT) {
                     stats.n_strand_skipped_no_sj++;
@@ -1309,8 +1309,8 @@ private:
                         int32_t t_strand = ctx.t_strand_arr_[t_idx];
                         if (t_strand == STRAND_POS ||
                             t_strand == STRAND_NEG) {
-                            strand_obs.exonic_obs.push_back(result.exon_strand);
-                            strand_obs.exonic_truth.push_back(t_strand);
+                            strand_obs.exonic_obs.push_back(static_cast<int8_t>(result.exon_strand));
+                            strand_obs.exonic_truth.push_back(static_cast<int8_t>(t_strand));
                         }
                     }
                 }
@@ -1319,7 +1319,7 @@ private:
                     ctx.nrna_mask());
                 if (ufl > 0) {
                     fraglen_obs.lengths.push_back(ufl);
-                    fraglen_obs.splice_types.push_back(result.splice_type);
+                    fraglen_obs.splice_types.push_back(static_cast<int8_t>(result.splice_type));
                     stats.n_frag_length_unambiguous++;
                 } else {
                     stats.n_frag_length_ambiguous++;
@@ -1419,29 +1419,29 @@ private:
 
         // Strand observations
         nb::dict strand_dict;
-        strand_dict["exonic_spliced_obs"] = std::move(strand_obs_.exonic_spliced_obs);
-        strand_dict["exonic_spliced_truth"] = std::move(strand_obs_.exonic_spliced_truth);
-        strand_dict["exonic_obs"] = std::move(strand_obs_.exonic_obs);
-        strand_dict["exonic_truth"] = std::move(strand_obs_.exonic_truth);
-        strand_dict["intergenic_obs"] = std::move(strand_obs_.intergenic_obs);
-        strand_dict["intergenic_truth"] = std::move(strand_obs_.intergenic_truth);
+        strand_dict["exonic_spliced_obs"]   = vec_to_ndarray(std::move(strand_obs_.exonic_spliced_obs));
+        strand_dict["exonic_spliced_truth"] = vec_to_ndarray(std::move(strand_obs_.exonic_spliced_truth));
+        strand_dict["exonic_obs"]           = vec_to_ndarray(std::move(strand_obs_.exonic_obs));
+        strand_dict["exonic_truth"]         = vec_to_ndarray(std::move(strand_obs_.exonic_truth));
+        strand_dict["intergenic_obs"]       = vec_to_ndarray(std::move(strand_obs_.intergenic_obs));
+        strand_dict["intergenic_truth"]     = vec_to_ndarray(std::move(strand_obs_.intergenic_truth));
         result["strand_observations"] = strand_dict;
 
         // Fragment length observations
         nb::dict fraglen_dict;
-        fraglen_dict["lengths"] = std::move(fraglen_obs_.lengths);
-        fraglen_dict["splice_types"] = std::move(fraglen_obs_.splice_types);
-        fraglen_dict["intergenic_lengths"] = std::move(fraglen_obs_.intergenic_lengths);
+        fraglen_dict["lengths"]            = vec_to_ndarray(std::move(fraglen_obs_.lengths));
+        fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
+        fraglen_dict["intergenic_lengths"] = vec_to_ndarray(std::move(fraglen_obs_.intergenic_lengths));
         result["frag_length_observations"] = fraglen_dict;
 
         // Region evidence (from gDNA calibration region accumulator)
         if (region_acc_.n_regions > 0 && !region_acc_.counts.empty()) {
             nb::dict region_dict;
-            region_dict["counts"] = std::move(region_acc_.counts);
-            region_dict["n_regions"] = region_acc_.n_regions;
-            region_dict["fl_region_ids"] = std::move(region_acc_.fl_region_ids);
-            region_dict["fl_frag_lens"] = std::move(region_acc_.fl_frag_lens);
-            region_dict["fl_frag_strands"] = std::move(region_acc_.fl_frag_strands);
+            region_dict["counts"]          = vec_to_ndarray(std::move(region_acc_.counts));
+            region_dict["n_regions"]       = region_acc_.n_regions;
+            region_dict["fl_region_ids"]   = vec_to_ndarray(std::move(region_acc_.fl_region_ids));
+            region_dict["fl_frag_lens"]    = vec_to_ndarray(std::move(region_acc_.fl_frag_lens));
+            region_dict["fl_frag_strands"] = vec_to_ndarray(std::move(region_acc_.fl_frag_strands));
             result["region_evidence"] = region_dict;
         }
 

@@ -334,7 +334,7 @@ class TestBuildLoadRoundTrip:
 
         idx_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-        return TranscriptIndex.load(idx_dir)
+        return TranscriptIndex.load(idx_dir, retain_test_structures=True)
 
     def test_two_loads_produce_same_data(self, tmp_path):
         """Loading twice from the same dir should yield identical structures."""
@@ -354,8 +354,8 @@ class TestBuildLoadRoundTrip:
         idx_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
 
-        idx1 = TranscriptIndex.load(idx_dir)
-        idx2 = TranscriptIndex.load(idx_dir)
+        idx1 = TranscriptIndex.load(idx_dir, retain_test_structures=True)
+        idx2 = TranscriptIndex.load(idx_dir, retain_test_structures=True)
 
         # Transcript tables
         assert idx1.t_df.equals(idx2.t_df)

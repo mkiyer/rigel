@@ -634,6 +634,10 @@ class TranscriptIndex:
         # sorted by genomic start position.
         self._t_exon_intervals: dict[int, np.ndarray] | None = None
 
+        # When True, Python-side structures are kept after C++ projection
+        # (for unit tests that inspect _iv_t_set, sj_map, _t_exon_intervals).
+        self._retain_test_structures: bool = False
+
     # -- properties -----------------------------------------------------------
 
     @property
@@ -824,23 +828,39 @@ class TranscriptIndex:
                 strand=("strand", "first"),
                 g_id=("g_id", "first"),
                 g_name=("g_name", "first"),
-                g_type=("g_type", "first"),
                 num_transcripts=("t_index", "count"),
             )
             .reset_index()
         )
+        # Re-apply categorical encoding (groupby first() returns plain strings).
+        for col in ("ref", "g_id", "g_name"):
+            if col in g_df.columns:
+                g_df[col] = g_df[col].astype("category")
         return g_df
 
     @classmethod
-    def load(cls, index_dir: str | Path) -> "TranscriptIndex":
+    def load(
+        cls,
+        index_dir: str | Path,
+        *,
+        retain_test_structures: bool = False,
+    ) -> "TranscriptIndex":
         """Load an index from the Feather files in *index_dir*.
 
         Builds cgranges interval trees and splice-junction lookup maps
         for fast overlap queries during quantification.
+
+        Parameters
+        ----------
+        retain_test_structures : bool
+            If True, keep Python-side structures (``_iv_t_set``,
+            ``sj_map``) that are normally freed after C++ projection.
+            Intended for unit tests that inspect these structures directly.
         """
         index_dir = str(index_dir)
         self = cls()
         self.index_dir = index_dir
+        self._retain_test_structures = retain_test_structures
 
         # -- transcripts ------------------------------------------------------
         self.t_df = pd.read_feather(
@@ -856,6 +876,25 @@ class TranscriptIndex:
                 f"Invalid index in {index_dir}: row index does not match "
                 f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
             )
+
+        # -- compact in-memory representation ---------------------------------
+        # String columns → categorical (integer codes + small dictionary).
+        for col in ("ref", "t_id", "g_id", "g_name", "g_type"):
+            if col in self.t_df.columns:
+                self.t_df[col] = self.t_df[col].astype("category")
+        # Integer columns → narrowest safe dtype.
+        _INT_DOWNCAST = {
+            "strand": np.int8,
+            "t_index": np.int32,
+            "g_index": np.int32,
+            "n_exons": np.int16,
+            "nrna_t_index": np.int32,
+            "nrna_n_contributors": np.int16,
+            "length": np.int32,
+        }
+        for col, dtype in _INT_DOWNCAST.items():
+            if col in self.t_df.columns:
+                self.t_df[col] = self.t_df[col].astype(dtype)
 
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)
@@ -1076,6 +1115,9 @@ class TranscriptIndex:
             tset_flat,
             tset_offsets,
         )
+        # C++ resolver owns the overlap data now; free the Python frozensets.
+        if not retain_test_structures:
+            self._iv_t_set = None
 
         # 2. SJ exact-match map
         sj_refs_l: list[str] = []
@@ -1099,6 +1141,9 @@ class TranscriptIndex:
             sj_t_flat,
             sj_t_offsets,
         )
+        # C++ resolver owns the SJ data now; free the Python dict.
+        if not retain_test_structures:
+            self.sj_map = None
 
         # 3. Per-transcript exon CSR for transcript-space FL computation
         n_t = len(self.t_to_g_arr)
@@ -1130,9 +1175,9 @@ class TranscriptIndex:
             t_lengths,
         )
 
-        # 5. Metadata
+        # 5. Metadata  (t_to_g_arr is already int32 from downcast above)
         ctx.set_metadata(
-            self.t_to_g_arr.astype(np.int32).tolist(),
+            self.t_to_g_arr.tolist(),
             len(self.t_to_g_arr),
         )
 
@@ -1163,6 +1208,12 @@ class TranscriptIndex:
             List of ``(hit_start, hit_end, interval_type, t_set)``
             tuples.  ``t_set`` is empty for INTERGENIC intervals.
         """
+        if self._iv_t_set is None:
+            raise RuntimeError(
+                "query() unavailable: interval sets were freed after C++ "
+                "resolver construction. Use the C++ resolver for production "
+                "overlap queries."
+            )
         hits: list[tuple[int, int, int, frozenset[int]]] = []
         for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
             hits.append((
@@ -1200,6 +1251,10 @@ class TranscriptIndex:
         suitable for direct C++ consumption, eliminating the need for
         a Python dict → C++ dict-unpacking round-trip.
 
+        The result is cached: subsequent calls return the same arrays
+        and the source ``_t_exon_intervals`` dict is freed after the
+        first call to reclaim memory.
+
         Returns
         -------
         offsets : np.ndarray
@@ -1211,12 +1266,18 @@ class TranscriptIndex:
         cumsum_before : np.ndarray
             int32[total_exons] — cumulative exon length before each exon.
         """
+        # Return cached result if available.
+        if hasattr(self, "_exon_csr_cache") and self._exon_csr_cache is not None:
+            return self._exon_csr_cache
+
         n_t = self.num_transcripts
         offsets = np.zeros(n_t + 1, dtype=np.int32)
         empty = np.empty(0, dtype=np.int32)
 
         if self._t_exon_intervals is None or len(self._t_exon_intervals) == 0:
-            return offsets, empty, empty, empty
+            result = (offsets, empty, empty, empty)
+            self._exon_csr_cache = result
+            return result
 
         # Pass 1: count exons per transcript
         for t_idx, ivs in self._t_exon_intervals.items():
@@ -1241,7 +1302,13 @@ class TranscriptIndex:
             if n > 1:
                 np.cumsum(lengths[:-1], out=cumsum_before[off + 1 : off + n])
 
-        return offsets, starts, ends, cumsum_before
+        # CSR arrays now hold all exon data; free the per-transcript dict.
+        if not self._retain_test_structures:
+            self._t_exon_intervals = None
+        result = (offsets, starts, ends, cumsum_before)
+        self._exon_csr_cache = result
+
+        return result
 
     # -- nRNA ↔ gene / transcript lookup methods ----------------------------
 

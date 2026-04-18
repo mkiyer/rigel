@@ -23,7 +23,6 @@ initialization live in ``locus.py``.  The CSR builder lives in
 
 from __future__ import annotations
 
-import gc
 import logging
 import math
 import os
@@ -113,10 +112,7 @@ def _replay_strand_observations(
         obs = strand_dict.get(f"{prefix}_obs", [])
         truth = strand_dict.get(f"{prefix}_truth", [])
         if len(obs) > 0:
-            model.observe_batch(
-                np.asarray(obs, dtype=np.int8),
-                np.asarray(truth, dtype=np.int8),
-            )
+            model.observe_batch(obs, truth)
 
 
 def _replay_fraglen_observations(
@@ -315,7 +311,7 @@ def scan_and_buffer(
         )
         fl_region_ids = np.asarray(re["fl_region_ids"], dtype=np.int32)
         fl_frag_lens = np.asarray(re["fl_frag_lens"], dtype=np.int32)
-        fl_frag_strands = np.asarray(re["fl_frag_strands"], dtype=np.int32)
+        fl_frag_strands = np.asarray(re["fl_frag_strands"], dtype=np.int8)
         fl_table = pd.DataFrame(
             {
                 "region_id": fl_region_ids,
@@ -411,9 +407,8 @@ def _score_fragments(
     )
     em_data = builder.scan(buffer, log_every)
 
-    # Free scanner accumulators + buffer: scan is done
+    # Scanner accumulators no longer needed; buffer was consumed during scan
     del builder, ctx
-    buffer.release()
     return em_data
 
 
@@ -613,7 +608,6 @@ def _run_locus_em_partitioned(
             )
         )
         del part
-        gc.collect()
         logger.debug(
             f"[MEGA] Locus {locus.locus_id}: "
             f"{len(locus.transcript_indices)} transcripts, "
@@ -657,7 +651,6 @@ def _run_locus_em_partitioned(
             )
 
     del partitions
-    gc.collect()
 
     estimator._gdna_em_total = total_gdna_em
 
@@ -783,10 +776,10 @@ def quant_from_buffer(
             c_base=gdna_prior_c_base,
         )
 
+        # Phase 4 (NEW): Fused scatter into per-locus tuples
         # Phase 4 (NEW): Array-by-array scatter + incremental free
         partitions = partition_and_free(em_data, loci)
         del em_data
-        gc.collect()
 
         # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
         # Honest gDNA flank: extend effective gDNA span by one mean gDNA
@@ -809,9 +802,6 @@ def quant_from_buffer(
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")
         del em_data
-
-    # Phase 6: Cleanup
-    gc.collect()
 
     _gdna_em = estimator.gdna_em_count
     stats.n_gdna_em = 0 if (math.isnan(_gdna_em) or math.isinf(_gdna_em)) else int(_gdna_em)

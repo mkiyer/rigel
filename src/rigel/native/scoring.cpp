@@ -23,6 +23,7 @@
 #include <nanobind/ndarray.h>
 
 #include "constants.h"
+#include "ndarray_util.h"
 
 namespace nb = nanobind;
 
@@ -33,6 +34,7 @@ using rigel::STRAND_NEG;
 using rigel::SPLICE_UNSPLICED;
 using rigel::SPLICE_SPLICED_UNANNOT;
 using rigel::SPLICE_SPLICED_ANNOT;
+using rigel::vec_to_ndarray;
 using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
 using rigel::FRAG_AMBIG_OPP_STRAND;
@@ -336,7 +338,7 @@ private:
 
     // Cached raw pointers for one prepared chunk.
     struct ChunkPtrs {
-        const int64_t*  t_off;
+        const int32_t*  t_off;
         const int32_t*  t_ind;
         const int32_t*  f_len;
         const int32_t*  e_bp;
@@ -677,7 +679,7 @@ private:
             -std::numeric_limits<double>::infinity();
 
         const int N            = cp.N;
-        const int64_t*  t_off  = cp.t_off;
+        const int32_t*  t_off  = cp.t_off;
         const int32_t*  t_ind  = cp.t_ind;
         const int32_t*  f_len  = cp.f_len;
         const int32_t*  e_bp   = cp.e_bp;
@@ -1073,7 +1075,7 @@ public:
                 "StreamingScorer: score_chunk called after finish");
 
         NativeFragmentScorer::ChunkPtrs cp{};
-        cp.t_off  = nb::cast<i64_1d>(chunk_arrays[0]).data();
+        cp.t_off  = nb::cast<i32_1d>(chunk_arrays[0]).data();
         cp.t_ind  = nb::cast<i32_1d>(chunk_arrays[1]).data();
         cp.f_len  = nb::cast<i32_1d>(chunk_arrays[2]).data();
         cp.e_bp   = nb::cast<i32_1d>(chunk_arrays[3]).data();
@@ -1110,84 +1112,28 @@ public:
         }
 
         // Build capsule-backed numpy arrays (zero-copy to Python)
-        auto mk_i64 = [](std::vector<int64_t>* v)
-            -> nb::object {
-            size_t n = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<
-                    std::vector<int64_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int64_t,
-                               nb::ndim<1>>(
-                v->data(), {n}, del).cast();
-        };
-        auto mk_i32 = [](std::vector<int32_t>* v)
-            -> nb::object {
-            size_t n = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<
-                    std::vector<int32_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int32_t,
-                               nb::ndim<1>>(
-                v->data(), {n}, del).cast();
-        };
-        auto mk_f64 = [](std::vector<double>* v)
-            -> nb::object {
-            size_t n = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<
-                    std::vector<double>*>(p);
-            });
-            return nb::ndarray<nb::numpy, double,
-                               nb::ndim<1>>(
-                v->data(), {n}, del).cast();
-        };
-        auto mk_u8 = [](std::vector<uint8_t>* v)
-            -> nb::object {
-            size_t n = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<
-                    std::vector<uint8_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, uint8_t,
-                               nb::ndim<1>>(
-                v->data(), {n}, del).cast();
-        };
-        auto mk_i8 = [](std::vector<int8_t>* v)
-            -> nb::object {
-            size_t n = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<
-                    std::vector<int8_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int8_t,
-                               nb::ndim<1>>(
-                v->data(), {n}, del).cast();
-        };
-
         // Transfer ownership to capsules — set pointers to null
         // so destructor doesn't double-free.
         auto result = nb::make_tuple(
-            mk_i64(v_offsets_),
-            mk_i32(v_ti_),
-            mk_f64(v_ll_),
-            mk_u8(v_ct_),
-            mk_f64(v_cw_),
-            mk_i32(v_ts_),
-            mk_i32(v_te_),
-            mk_i32(v_lt_),
-            mk_u8(v_lct_),
-            mk_i8(v_isp_),
-            mk_f64(v_gll_),
-            mk_i32(v_gfp_),
-            mk_i64(v_fid_),
-            mk_i8(v_fc_),
-            mk_u8(v_st_),
-            mk_i32(v_dti_),
-            mk_i64(v_dfid_),
-            mk_i64(v_chim_fid_),
-            mk_u8(v_chim_stype_),
+            vec_to_ndarray(v_offsets_),
+            vec_to_ndarray(v_ti_),
+            vec_to_ndarray(v_ll_),
+            vec_to_ndarray(v_ct_),
+            vec_to_ndarray(v_cw_),
+            vec_to_ndarray(v_ts_),
+            vec_to_ndarray(v_te_),
+            vec_to_ndarray(v_lt_),
+            vec_to_ndarray(v_lct_),
+            vec_to_ndarray(v_isp_),
+            vec_to_ndarray(v_gll_),
+            vec_to_ndarray(v_gfp_),
+            vec_to_ndarray(v_fid_),
+            vec_to_ndarray(v_fc_),
+            vec_to_ndarray(v_st_),
+            vec_to_ndarray(v_dti_),
+            vec_to_ndarray(v_dfid_),
+            vec_to_ndarray(v_chim_fid_),
+            vec_to_ndarray(v_chim_stype_),
             stat_det_,
             stat_em_u_,
             stat_em_as_,

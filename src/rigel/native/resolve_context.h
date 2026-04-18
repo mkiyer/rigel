@@ -31,6 +31,7 @@ extern "C" {
 }
 
 #include "constants.h"
+#include "ndarray_util.h"
 
 namespace nb = nanobind;
 
@@ -183,7 +184,7 @@ public:
     std::vector<uint8_t>  merge_criteria_;
     std::vector<uint8_t>  chimera_type_;
     std::vector<int32_t>  t_indices_;
-    std::vector<int64_t>  t_offsets_;
+    std::vector<int32_t>  t_offsets_;
     std::vector<int32_t>  frag_lengths_;
     std::vector<int32_t>  exon_bp_;
     std::vector<int32_t>  intron_bp_;
@@ -238,7 +239,7 @@ public:
                         r.exon_bp.begin(), r.exon_bp.end());
         intron_bp_.insert(intron_bp_.end(),
                           r.intron_bp.begin(), r.intron_bp.end());
-        t_offsets_.push_back(static_cast<int64_t>(t_indices_.size()));
+        t_offsets_.push_back(static_cast<int32_t>(t_indices_.size()));
 
         frag_id_.push_back(frag_id);
         read_length_.push_back(static_cast<uint32_t>(r.read_length));
@@ -258,11 +259,11 @@ public:
         // Compute ambig_strand per fragment from transcript strand array
         std::vector<uint8_t> ambig_strand(n, 0);
         for (int32_t i = 0; i < n; i++) {
-            int64_t start = t_offsets_[i];
-            int64_t end = t_offsets_[i + 1];
+            int32_t start = t_offsets_[i];
+            int32_t end = t_offsets_[i + 1];
             if (end - start <= 1) continue;  // 0 or 1 transcript: not mixed
             int32_t first_strand = -999;
-            for (int64_t j = start; j < end; j++) {
+            for (int32_t j = start; j < end; j++) {
                 int32_t t = t_indices_[j];
                 if (t >= 0 && t < static_cast<int32_t>(t_strand_arr.size())) {
                     int32_t s = t_strand_arr[t];
@@ -299,7 +300,7 @@ public:
         result["t_indices"] = to_bytes(
             t_indices_.data(), t_indices_.size() * sizeof(int32_t));
         result["t_offsets"] = to_bytes(
-            t_offsets_.data(), t_offsets_.size() * sizeof(int64_t));
+            t_offsets_.data(), t_offsets_.size() * sizeof(int32_t));
         result["frag_lengths"] = to_bytes(
             frag_lengths_.data(), frag_lengths_.size() * sizeof(int32_t));
         result["exon_bp"] = to_bytes(
@@ -330,111 +331,48 @@ public:
     nb::dict finalize_zero_copy(const std::vector<int32_t>& t_strand_arr) {
         int32_t n = size_;
 
-        // Compute ambig_strand (small enough to allocate fresh)
-        auto* v_ambig = new std::vector<uint8_t>(n, 0);
+        // Compute ambig_strand (stack-allocated, then moved)
+        std::vector<uint8_t> ambig_strand(n, 0);
         for (int32_t i = 0; i < n; i++) {
-            int64_t start = t_offsets_[i];
-            int64_t end = t_offsets_[i + 1];
+            int32_t start = t_offsets_[i];
+            int32_t end = t_offsets_[i + 1];
             if (end - start <= 1) continue;
             int32_t first_strand = -999;
-            for (int64_t j = start; j < end; j++) {
+            for (int32_t j = start; j < end; j++) {
                 int32_t t = t_indices_[j];
                 if (t >= 0 && t < static_cast<int32_t>(t_strand_arr.size())) {
                     int32_t s = t_strand_arr[t];
                     if (first_strand == -999) {
                         first_strand = s;
                     } else if (s != first_strand) {
-                        (*v_ambig)[i] = 1;
+                        ambig_strand[i] = 1;
                         break;
                     }
                 }
             }
         }
 
-        // Move each internal vector to the heap so the capsule
-        // deleter owns the memory.  After this the accumulator
-        // vectors are empty / moved-from.
-        auto* v_splice_type  = new std::vector<uint8_t>(std::move(splice_type_));
-        auto* v_exon_strand  = new std::vector<uint8_t>(std::move(exon_strand_));
-        auto* v_sj_strand    = new std::vector<uint8_t>(std::move(sj_strand_));
-        auto* v_num_hits     = new std::vector<uint16_t>(std::move(num_hits_));
-        auto* v_merge_crit   = new std::vector<uint8_t>(std::move(merge_criteria_));
-        auto* v_chimera_type = new std::vector<uint8_t>(std::move(chimera_type_));
-        auto* v_t_indices    = new std::vector<int32_t>(std::move(t_indices_));
-        auto* v_t_offsets    = new std::vector<int64_t>(std::move(t_offsets_));
-        auto* v_frag_lengths = new std::vector<int32_t>(std::move(frag_lengths_));
-        auto* v_exon_bp      = new std::vector<int32_t>(std::move(exon_bp_));
-        auto* v_intron_bp    = new std::vector<int32_t>(std::move(intron_bp_));
-        auto* v_frag_id      = new std::vector<int64_t>(std::move(frag_id_));
-        auto* v_read_length  = new std::vector<uint32_t>(std::move(read_length_));
-        auto* v_genomic_fp   = new std::vector<int32_t>(std::move(genomic_footprint_));
-        auto* v_genomic_sta  = new std::vector<int32_t>(std::move(genomic_start_));
-        auto* v_nm           = new std::vector<uint16_t>(std::move(nm_));
-
-        size_ = 0;  // accumulator is now consumed
-
-        // Helper lambdas: capsule-backed ndarray (same pattern as scoring.cpp)
-        auto mk_u8 = [](std::vector<uint8_t>* v) -> nb::object {
-            size_t sz = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<std::vector<uint8_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(
-                v->data(), {sz}, del).cast();
-        };
-        auto mk_u16 = [](std::vector<uint16_t>* v) -> nb::object {
-            size_t sz = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<std::vector<uint16_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, uint16_t, nb::ndim<1>>(
-                v->data(), {sz}, del).cast();
-        };
-        auto mk_i32 = [](std::vector<int32_t>* v) -> nb::object {
-            size_t sz = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<std::vector<int32_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(
-                v->data(), {sz}, del).cast();
-        };
-        auto mk_i64 = [](std::vector<int64_t>* v) -> nb::object {
-            size_t sz = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<std::vector<int64_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(
-                v->data(), {sz}, del).cast();
-        };
-        auto mk_u32 = [](std::vector<uint32_t>* v) -> nb::object {
-            size_t sz = v->size();
-            nb::capsule del(v, [](void* p) noexcept {
-                delete static_cast<std::vector<uint32_t>*>(p);
-            });
-            return nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>>(
-                v->data(), {sz}, del).cast();
-        };
-
         nb::dict result;
-        result["splice_type"]       = mk_u8(v_splice_type);
-        result["exon_strand"]       = mk_u8(v_exon_strand);
-        result["sj_strand"]         = mk_u8(v_sj_strand);
-        result["num_hits"]          = mk_u16(v_num_hits);
-        result["merge_criteria"]    = mk_u8(v_merge_crit);
-        result["chimera_type"]      = mk_u8(v_chimera_type);
-        result["t_indices"]         = mk_i32(v_t_indices);
-        result["t_offsets"]         = mk_i64(v_t_offsets);
-        result["frag_lengths"]      = mk_i32(v_frag_lengths);
-        result["exon_bp"]           = mk_i32(v_exon_bp);
-        result["intron_bp"]         = mk_i32(v_intron_bp);
-        result["ambig_strand"]      = mk_u8(v_ambig);
-        result["frag_id"]           = mk_i64(v_frag_id);
-        result["read_length"]       = mk_u32(v_read_length);
-        result["genomic_footprint"] = mk_i32(v_genomic_fp);
-        result["genomic_start"]     = mk_i32(v_genomic_sta);
-        result["nm"]                = mk_u16(v_nm);
+        result["splice_type"]       = vec_to_ndarray(std::move(splice_type_));
+        result["exon_strand"]       = vec_to_ndarray(std::move(exon_strand_));
+        result["sj_strand"]         = vec_to_ndarray(std::move(sj_strand_));
+        result["num_hits"]          = vec_to_ndarray(std::move(num_hits_));
+        result["merge_criteria"]    = vec_to_ndarray(std::move(merge_criteria_));
+        result["chimera_type"]      = vec_to_ndarray(std::move(chimera_type_));
+        result["t_indices"]         = vec_to_ndarray(std::move(t_indices_));
+        result["t_offsets"]         = vec_to_ndarray(std::move(t_offsets_));
+        result["frag_lengths"]      = vec_to_ndarray(std::move(frag_lengths_));
+        result["exon_bp"]           = vec_to_ndarray(std::move(exon_bp_));
+        result["intron_bp"]         = vec_to_ndarray(std::move(intron_bp_));
+        result["ambig_strand"]      = vec_to_ndarray(std::move(ambig_strand));
+        result["frag_id"]           = vec_to_ndarray(std::move(frag_id_));
+        result["read_length"]       = vec_to_ndarray(std::move(read_length_));
+        result["genomic_footprint"] = vec_to_ndarray(std::move(genomic_footprint_));
+        result["genomic_start"]     = vec_to_ndarray(std::move(genomic_start_));
+        result["nm"]                = vec_to_ndarray(std::move(nm_));
         result["size"]              = nb::cast(n);
 
+        size_ = 0;
         return result;
     }
 };
@@ -1266,7 +1204,7 @@ struct RegionAccumulator {
     // unique-mapper fragments.
     std::vector<int32_t> fl_region_ids;
     std::vector<int32_t> fl_frag_lens;
-    std::vector<int32_t> fl_frag_strands;  // STRAND_POS or STRAND_NEG
+    std::vector<int8_t>  fl_frag_strands;  // STRAND_POS or STRAND_NEG
 
     // cgranges for region overlap queries (BORROWED, not owned).
     cgranges_t* region_cr = nullptr;
@@ -1421,7 +1359,7 @@ struct RegionAccumulator {
             if (frag_len > 0) {
                 fl_region_ids.push_back(single_region_id);
                 fl_frag_lens.push_back(frag_len);
-                fl_frag_strands.push_back(frag_strand);
+                fl_frag_strands.push_back(static_cast<int8_t>(frag_strand));
             }
         }
     }

@@ -593,10 +593,8 @@ def profile_stages(
     timings.fragment_router_scan = t_route.elapsed
     rss_snaps["after_router_scan"] = _snap_rss_current()
 
-    # -- Free scanner accumulators + buffer after scan --
-    del builder, ctx          # release ~1.3 GB of array.array accumulators
-    buffer.release()
-    gc.collect()
+    # Scanner accumulators no longer needed; buffer was consumed during scan
+    del builder, ctx
     rss_snaps["after_buffer_release"] = _snap_rss_current()
 
     # 3f–3h: Locus-level EM

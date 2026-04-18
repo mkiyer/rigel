@@ -80,7 +80,7 @@ class _Chunk:
             flat_intron.extend(bf.intron_bp)
             offsets.append(len(flat_t))
 
-        self.t_offsets = np.array(offsets, dtype=np.int64)
+        self.t_offsets = np.array(offsets, dtype=np.int32)
         self.t_indices = np.array(flat_t, dtype=np.int32)
         self.frag_lengths = np.array(flat_fl, dtype=np.int32)
         self.exon_bp = np.array(flat_exon, dtype=np.int32)
@@ -91,7 +91,7 @@ class _Chunk:
 
     def to_scoring_arrays(self):
         return (
-            np.ascontiguousarray(self.t_offsets, dtype=np.int64),
+            np.ascontiguousarray(self.t_offsets, dtype=np.int32),
             np.ascontiguousarray(self.t_indices, dtype=np.int32),
             np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
             np.ascontiguousarray(self.exon_bp, dtype=np.int32),
@@ -109,11 +109,15 @@ class _Chunk:
 
 class _Buffer:
     def __init__(self, chunks):
-        self._chunks = chunks
-        self.total_fragments = sum(ch.size for ch in chunks)
+        self._chunks = list(chunks)
+        self.total_fragments = sum(ch.size for ch in self._chunks)
 
     def iter_chunks(self):
         yield from self._chunks
+
+    def iter_chunks_consuming(self):
+        while self._chunks:
+            yield self._chunks.pop(0)
 
 
 class _Index:

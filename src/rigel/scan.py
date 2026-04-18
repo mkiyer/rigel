@@ -134,15 +134,16 @@ class FragmentRouter:
         )
 
         n_processed = 0
-        for chunk in buffer.iter_chunks():
+        n_total = buffer.total_fragments
+        for chunk in buffer.iter_chunks_consuming():
             arrays = chunk.to_scoring_arrays()
             scorer.score_chunk(arrays)
             n_processed += chunk.size
             if n_processed % log_every < chunk.size:
                 logger.debug(
-                    f"  Scan: {n_processed:,} / {buffer.total_fragments:,}"
+                    f"  Scan: {n_processed:,} / {n_total:,}"
                 )
-            del arrays  # free immediately
+            del arrays, chunk  # free immediately
 
         result = scorer.finish()
 

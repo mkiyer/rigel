@@ -64,15 +64,15 @@ def build_loci(
     )
 
     # Pre-extract transcript coordinates as numpy arrays.
-    # to_numpy(dtype=object) converts the Arrow-backed string column
-    # to a plain object array, avoiding repeated pyarrow.compute.take
-    # overhead in the per-locus loop below.
-    t_ref_strs = index.t_df["ref"].to_numpy(dtype=object, na_value="")
     t_starts_all = index.t_df["start"].values
     t_ends_all = index.t_df["end"].values
 
-    # Integer ref codes for fast sort/compare within merge loops
-    _ref_names, _ref_codes = np.unique(t_ref_strs, return_inverse=True)
+    # Integer ref codes for fast sort/compare within merge loops.
+    # The "ref" column is already categorical; use its codes directly
+    # instead of an O(N log N) np.unique sort on 457K string objects.
+    ref_cat = index.t_df["ref"].cat
+    _ref_names = ref_cat.categories.values
+    _ref_codes = ref_cat.codes.values
 
     loci = []
     for lid in range(n_comp):

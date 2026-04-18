@@ -131,7 +131,7 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
 
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-    return TranscriptIndex.load(idx_dir)
+    return TranscriptIndex.load(idx_dir, retain_test_structures=True)
 
 
 @pytest.fixture(scope="session")

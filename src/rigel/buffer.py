@@ -27,6 +27,7 @@ import logging
 import shutil
 import tempfile
 import weakref
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -118,10 +119,10 @@ class _FinalizedChunk:
     Per-fragment strand mixing (``ambig_strand``) is cached as a uint8
     array, derived from transcript strand array at finalization time.
 
-    ``frag_id`` and ``t_offsets`` are stored as **int32**, limiting the
-    maximum number of fragments per chunk to ~2.1 billion.  This is
-    intentional: BAM files rarely exceed this, and int32 halves memory
-    versus int64.
+    ``frag_id`` is stored as **int64** to accommodate BAM files with
+    more than 2 billion fragments.  ``t_offsets`` is **int32**, which
+    limits the maximum number of candidates per chunk to ~2.1 billion
+    — well above practical chunk sizes.
     """
 
     splice_type: np.ndarray  # uint8[N]
@@ -136,7 +137,7 @@ class _FinalizedChunk:
     exon_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
     ambig_strand: np.ndarray  # uint8[N]
-    frag_id: np.ndarray  # int32[N]
+    frag_id: np.ndarray  # int64[N]
     read_length: np.ndarray  # uint32[N]
     genomic_footprint: np.ndarray  # int32[N]
     genomic_start: np.ndarray  # int32[N]
@@ -151,8 +152,8 @@ class _FinalizedChunk:
         Accepts both legacy bytes (from ``finalize()``) and zero-copy
         numpy arrays (from ``finalize_zero_copy()``).  When the value
         is already an ndarray the data is used directly; ``t_offsets``
-        and ``frag_id`` are narrowed from int64→int32 for memory
-        efficiency.
+        is stored as int32 (native from C++) and ``frag_id`` is kept
+        as int64.
         """
 
         def _arr(val, dtype, src_dtype=None):
@@ -180,13 +181,13 @@ class _FinalizedChunk:
             num_hits=_arr(raw["num_hits"], np.uint16),
             merge_criteria=_arr(raw["merge_criteria"], np.uint8),
             chimera_type=_arr(raw["chimera_type"], np.uint8),
-            t_offsets=_arr(raw["t_offsets"], np.int32, src_dtype=np.int64),
+            t_offsets=_arr(raw["t_offsets"], np.int32),
             t_indices=_arr(raw["t_indices"], np.int32),
             frag_lengths=_arr(raw["frag_lengths"], np.int32),
             exon_bp=_arr(raw["exon_bp"], np.int32),
             intron_bp=_arr(raw["intron_bp"], np.int32),
             ambig_strand=_arr(raw["ambig_strand"], np.uint8),
-            frag_id=_arr(raw["frag_id"], np.int32, src_dtype=np.int64),
+            frag_id=_arr(raw["frag_id"], np.int64),
             read_length=_arr(raw["read_length"], np.uint32),
             genomic_footprint=_arr(raw["genomic_footprint"], np.int32),
             genomic_start=_arr(raw["genomic_start"], np.int32),
@@ -253,12 +254,13 @@ class _FinalizedChunk:
     def to_scoring_arrays(self) -> tuple:
         """Return the contiguous array tuple expected by ``StreamingScorer.score_chunk``.
 
-        Upcasts ``t_offsets`` and ``frag_id`` from int32 to int64 as
-        required by the C++ scoring kernel, and computes the derived
-        ``fragment_classes`` column.  All returned arrays are C-contiguous.
+        ``t_offsets`` is int32 (native) and ``frag_id`` is int64 (native),
+        matching the C++ scoring kernel types directly without copying.
+        Computes the derived ``fragment_classes`` column.
+        All returned arrays are C-contiguous.
         """
         return (
-            np.ascontiguousarray(self.t_offsets, dtype=np.int64),
+            np.ascontiguousarray(self.t_offsets, dtype=np.int32),
             np.ascontiguousarray(self.t_indices, dtype=np.int32),
             np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
             np.ascontiguousarray(self.exon_bp, dtype=np.int32),
@@ -311,19 +313,19 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
     import pyarrow.feather as pf
 
     t_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32),
+        chunk.t_offsets,
         chunk.t_indices,
     )
     frag_lengths_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32),
+        chunk.t_offsets,
         chunk.frag_lengths,
     )
     exon_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32),
+        chunk.t_offsets,
         chunk.exon_bp,
     )
     intron_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets.astype(np.int32),
+        chunk.t_offsets,
         chunk.intron_bp,
     )
 
@@ -384,7 +386,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         exon_bp=exon_bp_arr,
         intron_bp=intron_bp_arr,
         ambig_strand=table.column("ambig_strand").to_numpy().copy(),
-        frag_id=table.column("frag_id").to_numpy().astype(np.int32),
+        frag_id=table.column("frag_id").to_numpy().astype(np.int64),
         read_length=table.column("read_length").to_numpy().copy(),
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
         genomic_start=(
@@ -456,7 +458,7 @@ class FragmentBuffer:
         self._temp_dir: str | None = None
 
         self._native_acc = FragmentAccumulator()
-        self._chunks: list[_FinalizedChunk | Path] = []
+        self._chunks: deque[_FinalizedChunk | Path] = deque()
         self._total_size = 0
         self._memory_bytes = 0
         self._n_spilled = 0
@@ -604,6 +606,26 @@ class FragmentBuffer:
                 yield _load_chunk(chunk_ref)
             else:
                 yield chunk_ref
+
+    def iter_chunks_consuming(self) -> Iterator[_FinalizedChunk]:
+        """Yield chunks one at a time, releasing each after the caller advances.
+
+        After this method returns, the buffer is empty.  Spilled chunk
+        files are deleted as they are consumed.
+
+        This is the streaming counterpart to :meth:`iter_chunks`.  Use
+        it when chunks will not be revisited — the typical case during
+        scoring, where each chunk is scored exactly once.
+        """
+        while self._chunks:
+            chunk_ref = self._chunks.popleft()
+            if isinstance(chunk_ref, Path):
+                chunk = _load_chunk(chunk_ref)
+                chunk_ref.unlink(missing_ok=True)
+            else:
+                chunk = chunk_ref
+                self._memory_bytes -= chunk.memory_bytes
+            yield chunk
 
     # -- Cleanup --------------------------------------------------------------
 

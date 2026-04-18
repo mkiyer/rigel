@@ -5,8 +5,6 @@ Scatters the monolithic ``ScoredFragments`` global CSR into per-locus
 scatter to bound peak memory.
 """
 
-import gc
-
 import numpy as np
 
 from .native import (
@@ -67,11 +65,9 @@ def partition_and_free(
         )
         setattr(em_data, attr, None)
         del global_arr
-        gc.collect()
 
     # g_offsets no longer needed
     em_data.offsets = None
-    gc.collect()
 
     # ---- Scatter per-unit arrays ----
     UNIT_ARRAYS = [
@@ -94,7 +90,6 @@ def partition_and_free(
         unit_results[attr] = scatter_fn(global_arr, locus_units, n_loci)
         setattr(em_data, attr, None)
         del global_arr
-        gc.collect()
 
     # ---- Assemble LocusPartition objects ----
     partitions = {}
