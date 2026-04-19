@@ -2,13 +2,16 @@
 rigel.index — Build, load, and query the rigel reference index.
 
 The index is constructed from a genome FASTA (with samtools .fai) and a
-GENCODE GTF annotation file. It produces four Feather files (with optional
+GENCODE GTF annotation file. It produces feather files (with optional
 TSV mirrors) in an output directory:
 
-    ref_lengths.feather   — reference names and lengths
-    transcripts.feather   — one row per transcript with integer indices
-    intervals.feather     — exon/intron/intergenic tiling of the genome
-    sj.feather            — annotated splice junctions from transcript introns
+    ref_lengths.feather        — reference names and lengths
+    transcripts.feather        — one row per transcript with integer indices
+    intervals.feather          — exon/intron/intergenic tiling of the genome
+    sj.feather                 — annotated splice junctions from transcript introns
+    regions.feather            — calibration regions
+    splice_blacklist.feather   — (optional) splice-artifact junctions derived
+                                 from the alignable Zarr store
 
 The ``TranscriptIndex`` class provides both the ``build()`` method for creating
 the index and ``load()`` / query methods for using it during quantification.
@@ -16,6 +19,7 @@ the index and ``load()`` / query methods for using it during quantification.
 
 import collections
 import functools
+import json
 import logging
 import os
 from pathlib import Path
@@ -51,6 +55,36 @@ SJ_TSV = "sj.tsv"
 
 REGIONS_FEATHER = "regions.feather"
 REGIONS_TSV = "regions.tsv"
+
+SJ_BLACKLIST_FEATHER = "splice_blacklist.feather"
+SJ_BLACKLIST_TSV = "splice_blacklist.tsv"
+
+MANIFEST_JSON = "manifest.json"
+
+#: On-disk index format version. Bumped whenever the schema or the
+#: meaning of any persisted column changes. Loaders should refuse
+#: indexes whose ``format_version`` they do not understand.
+INDEX_FORMAT_VERSION = 1
+
+
+def _rigel_version() -> str:
+    try:
+        from . import __version__  # type: ignore[attr-defined]
+        return str(__version__)
+    except Exception:  # pragma: no cover
+        return "unknown"
+
+
+def load_manifest(index_dir: str | Path) -> dict | None:
+    """Load ``manifest.json`` from an index directory.
+
+    Returns ``None`` for legacy indexes (no manifest file present).
+    """
+    path = Path(index_dir) / MANIFEST_JSON
+    if not path.exists():
+        return None
+    with open(path) as fh:
+        return json.load(fh)
 
 
 # ---------------------------------------------------------------------------
@@ -690,6 +724,9 @@ class TranscriptIndex:
         write_tsv: bool = True,
         gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
         nrna_tolerance: int = NRNA_MERGE_TOLERANCE,
+        alignable_zarr_path: str | Path | None = None,
+        mappability_read_length: int = 100,
+        splice_blacklist_min_count: int = 2,
     ) -> None:
         """Build the rigel reference index and write to disk.
 
@@ -712,6 +749,24 @@ class TranscriptIndex:
         nrna_tolerance : int
             Max distance (bp) for clustering transcript start/end sites
             when building synthetic nascent RNA transcripts.
+        alignable_zarr_path : path, optional
+            Path to an alignable Zarr store built for the same genome+
+            aligner.  When provided, the splice-junction artifact
+            blacklist is derived from
+            ``AlignableStore.splice_blacklist()`` and persisted as
+            ``splice_blacklist.feather`` in the index, and the
+            ``mappable_effective_length`` column on ``regions.feather``
+            is populated from per-base fractional mappability.  When
+            ``None``, no blacklist is written and
+            ``mappable_effective_length`` falls back to ``length``
+            (i.e. assume the genome is fully mappable).
+        mappability_read_length : int
+            Read-length bin to query in the alignable store when
+            computing per-region exposures.  Default 100.  Ignored when
+            ``alignable_zarr_path`` is None.
+        splice_blacklist_min_count : int
+            Minimum per-row count for a (chrom, intron, read_length)
+            artifact to enter the blacklist.  Default ``2``.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -807,9 +862,60 @@ class TranscriptIndex:
         region_df = build_region_table(annotated_transcripts, ref_lengths)
         logger.info(f"[DONE] Found {len(region_df)} calibration regions")
 
+        # -- Per-region mappable effective length -----------------------------
+        from .mappability import (
+            compute_region_exposures,
+            uniform_region_exposures,
+        )
+
+        mappability_provenance = None
+        if alignable_zarr_path is not None:
+            logger.info(
+                f"[START] Computing mappable_effective_length "
+                f"(read_length={mappability_read_length})"
+            )
+            exposures, mappability_provenance = compute_region_exposures(
+                alignable_zarr_path,
+                region_df,
+                read_length=mappability_read_length,
+            )
+        else:
+            logger.info(
+                "[CAL] --no-mappability: setting mappable_effective_length=length"
+            )
+            exposures = uniform_region_exposures(region_df)
+        region_df["mappable_effective_length"] = exposures.astype(np.float32)
+
         region_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
         if write_tsv:
             region_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
+
+        # -- Splice-junction artifact blacklist (from alignable Zarr) -------
+        if alignable_zarr_path is not None:
+            from .splice_blacklist import load_splice_blacklist_from_zarr
+
+            bl_df = load_splice_blacklist_from_zarr(
+                alignable_zarr_path,
+                min_count=splice_blacklist_min_count,
+            )
+            bl_df.to_feather(output_dir / SJ_BLACKLIST_FEATHER, **feather_kwargs)
+            if write_tsv:
+                bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
+
+        # -- Manifest --------------------------------------------------------
+        manifest = {
+            "format_version": INDEX_FORMAT_VERSION,
+            "rigel_version": _rigel_version(),
+            "mappability": (
+                None if mappability_provenance is None
+                else {
+                    **mappability_provenance.to_dict(),
+                    "splice_blacklist_min_count": int(splice_blacklist_min_count),
+                }
+            ),
+        }
+        with open(output_dir / MANIFEST_JSON, "w") as fh:
+            json.dump(manifest, fh, indent=2, sort_keys=True)
 
         logger.info(f"Index written to {output_dir}")
 
@@ -1144,6 +1250,22 @@ class TranscriptIndex:
         # C++ resolver owns the SJ data now; free the Python dict.
         if not retain_test_structures:
             self.sj_map = None
+
+        # 2b. Splice-junction artifact blacklist (optional)
+        blacklist_path = os.path.join(index_dir, SJ_BLACKLIST_FEATHER)
+        if os.path.exists(blacklist_path):
+            logger.debug("Loading splice-artifact blacklist")
+            bl_df = pd.read_feather(blacklist_path)
+            ctx.build_sj_blacklist_map(
+                bl_df["ref"].astype(str).tolist(),
+                bl_df["start"].astype(np.int32).tolist(),
+                bl_df["end"].astype(np.int32).tolist(),
+                bl_df["max_anchor_left"].astype(np.int32).tolist(),
+                bl_df["max_anchor_right"].astype(np.int32).tolist(),
+            )
+            logger.info(
+                f"Splice artifact blacklist: {len(bl_df):,} junctions active"
+            )
 
         # 3. Per-transcript exon CSR for transcript-space FL computation
         n_t = len(self.t_to_g_arr)

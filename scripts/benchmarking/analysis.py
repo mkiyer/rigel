@@ -478,7 +478,7 @@ def compute_pool_metrics(
             "strand_specificity", np.nan
         ),
         "gdna_density_estimated": summary.get("calibration", {}).get(
-            "gdna_density_global", np.nan
+            "lambda_gdna", np.nan
         ),
     }
 
@@ -506,17 +506,25 @@ def rigel_detailed_analysis(
         "p_r1_sense": strand.get("p_r1_sense", np.nan),
         "strand_n_training": strand.get("n_training_fragments", 0),
         "strand_posterior_var": strand.get("posterior_variance", np.nan),
-        "gdna_density_global": calib.get("gdna_density_global", np.nan),
-        "gdna_mixing_prop": calib.get("mixing_proportion", np.nan),
-        "kappa_strand": calib.get("kappa_strand", np.nan),
+        "lambda_gdna": calib.get("lambda_gdna", np.nan),
+        "mixing_pi": calib.get("mixing_pi", np.nan),
+        "mixing_pi_soft": calib.get("mixing_pi_soft", np.nan),
+        "strand_used": calib.get("strand_used", False),
+        "strand_z": calib.get("strand_z", np.nan),
+        "mu_R": calib.get("mu_R", np.nan),
+        "sigma_R": calib.get("sigma_R", np.nan),
+        "total_expected_gdna": calib.get("total_expected_gdna", np.nan),
+        "gdna_fraction": calib.get("gdna_fraction", np.nan),
         "gdna_fl_mean": calib.get("gdna_fl_mean", np.nan),
-        "gdna_fl_mode": calib.get("gdna_fl_mode", np.nan),
-        "n_eligible_regions": calib.get("n_eligible_regions", 0),
-        "calibration_converged": calib.get("converged", False),
-        "fl_global_mean": frag_len.get("global", {}).get("mean", np.nan),
-        "fl_global_mode": frag_len.get("global", {}).get("mode", np.nan),
-        "fl_rna_mean": frag_len.get("rna", {}).get("mean", np.nan),
-        "fl_intergenic_mean": frag_len.get("intergenic", {}).get("mean", np.nan),
+        "gdna_fl_observations": calib.get("gdna_fl_observations", 0),
+        "n_eligible": calib.get("n_eligible", 0),
+        "n_soft": calib.get("n_soft", 0),
+        "n_spliced_hard": calib.get("n_spliced_hard", 0),
+        "em_n_iter": calib.get("em_n_iter", 0),
+        "calibration_converged": calib.get("em_converged", False),
+        "fl_global_mean": frag_len.get("global", {}).get("summary", {}).get("mean", np.nan),
+        "fl_rna_mean": frag_len.get("rna", {}).get("summary", {}).get("mean", np.nan),
+        "fl_intergenic_mean": frag_len.get("intergenic", {}).get("summary", {}).get("mean", np.nan),
         "n_transcripts": quant.get("n_transcripts", 0),
         "n_genes": quant.get("n_genes", 0),
         "n_loci": quant.get("n_loci", 0),
@@ -662,8 +670,11 @@ def write_report(
             cols = [
                 "condition", "tool",
                 "strand_specificity", "strand_protocol",
-                "gdna_density_global", "gdna_mixing_prop",
-                "kappa_strand", "calibration_converged",
+                "lambda_gdna", "mixing_pi", "mixing_pi_soft",
+                "strand_used", "strand_z",
+                "mu_R", "sigma_R",
+                "gdna_fraction", "gdna_fl_mean", "gdna_fl_observations",
+                "n_eligible", "em_n_iter", "calibration_converged",
                 "fl_global_mean", "fl_rna_mean", "fl_intergenic_mean",
                 "n_loci", "n_unambig", "n_em", "mrna_fraction",
             ]

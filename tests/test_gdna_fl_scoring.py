@@ -327,12 +327,12 @@ class TestGdnaFLEndToEnd:
 
 
 # ---------------------------------------------------------------------------
-# Test: ESS gate in _build_gdna_fl_model
+# Test: Bayesian FL prior blending replaces v3 ESS gate
 # ---------------------------------------------------------------------------
 
 
 def _make_fl_table(region_ids, frag_lens, frag_strands=None):
-    """Create a fl_table DataFrame for _build_gdna_fl_model."""
+    """Create a fl_table DataFrame for build_gdna_fl_model."""
     import pandas as pd
 
     d = {"region_id": np.array(region_ids, dtype=np.intp), "frag_len": np.array(frag_lens, dtype=np.intp)}
@@ -342,9 +342,9 @@ def _make_fl_table(region_ids, frag_lens, frag_strands=None):
 
 
 def _make_stats(n_regions, gene_strand=None, region_length=None, n_unspliced=None):
-    """Create a stats dict for _build_gdna_fl_model."""
+    """Create a stats dict for build_gdna_fl_model."""
     if gene_strand is None:
-        gene_strand = np.ones(n_regions, dtype=np.int8)  # all on +
+        gene_strand = np.ones(n_regions, dtype=np.int8)
     if region_length is None:
         region_length = np.full(n_regions, 1000.0)
     if n_unspliced is None:
@@ -353,111 +353,73 @@ def _make_stats(n_regions, gene_strand=None, region_length=None, n_unspliced=Non
         "gene_strand": np.asarray(gene_strand),
         "region_length": np.asarray(region_length, dtype=np.float64),
         "n_unspliced": np.asarray(n_unspliced, dtype=np.float64),
+        "n_total": np.asarray(n_unspliced, dtype=np.float64),
     }
 
 
-class TestESSGate:
-    """Verify that _build_gdna_fl_model returns fallback when ESS is below threshold."""
+class TestFLPriorBlending:
+    """v4 replaces the v3 min_ess cliff with smooth Bayesian prior blending.
 
-    def test_returns_fallback_when_ess_below_threshold(self):
-        """Low fragment count → returns intergenic fallback."""
-        from rigel.calibration import _build_gdna_fl_model
+    The model is always returned; with zero data it equals the prior, with
+    enough data it approaches the empirical histogram.
+    """
 
-        # Only 4 fragments — well below min_ess=50
-        fl_table = _make_fl_table(
-            region_ids=[0, 0, 1, 1],
-            frag_lens=[200, 250, 300, 350],
-            frag_strands=[1, 1, 1, 1],  # STRAND_POS = antisense for gene_strand=+1
-        )
-        stats = _make_stats(2)
-        eligible = np.ones(2, dtype=bool)
+    def test_returns_uniform_when_no_data_no_prior(self):
+        from rigel.calibration import build_gdna_fl_model
 
-        model = _build_gdna_fl_model(
-            fl_table, stats, eligible,
+        model = build_gdna_fl_model(
+            _make_fl_table([], []), _make_stats(2),
+            region_weight=np.ones(2),
             strand_specificity=0.95,
-            density_percentile=10.0,
             intergenic_fl_model=None,
-            min_ess=50,
-        )
-        assert model is None
-
-    def test_returns_model_when_ess_above_threshold(self):
-        """Sufficient fragment count → valid model."""
-        from rigel.calibration import _build_gdna_fl_model
-
-        # 60 antisense fragments — above min_ess=50
-        rids = np.zeros(60, dtype=np.intp)
-        flens = np.random.default_rng(42).integers(150, 400, size=60)
-        fstrands = np.ones(60, dtype=np.int8)  # STRAND_POS = antisense for +
-
-        fl_table = _make_fl_table(rids, flens, fstrands)
-        stats = _make_stats(1)
-        eligible = np.ones(1, dtype=bool)
-
-        model = _build_gdna_fl_model(
-            fl_table, stats, eligible,
-            strand_specificity=0.95,
-            density_percentile=10.0,
-            intergenic_fl_model=None,
-            min_ess=50,
+            fl_prior_ess=0.0,
         )
         assert model is not None
-        assert model.n_observations > 0
+        assert model.total_weight == 0.0
 
-    def test_returns_fallback_for_empty_input(self):
-        """No FL observations → returns intergenic fallback."""
-        from rigel.calibration import _build_gdna_fl_model
+    def test_data_dominates_prior_at_high_n(self):
+        from rigel.calibration import build_gdna_fl_model
+        from rigel.frag_length_model import FragmentLengthModel
 
-        fl_table = _make_fl_table([], [])
-        stats = _make_stats(2)
-        eligible = np.ones(2, dtype=bool)
+        # Build a prior with mass concentrated at 100bp.
+        prior = FragmentLengthModel(max_size=1000)
+        prior.counts[100] = 100.0
+        prior._total_weight = 100.0
 
-        model = _build_gdna_fl_model(
-            fl_table, stats, eligible,
-            strand_specificity=0.95,
-            density_percentile=10.0,
-            intergenic_fl_model=None,
-            min_ess=0,
-        )
-        assert model is None
+        # 10000 fragments at 300bp easily dominate prior_ess=10.
+        rids = np.zeros(10000, dtype=np.intp)
+        flens = np.full(10000, 300, dtype=np.intp)
+        fstrands = np.ones(10000, dtype=np.int8)
+        fl = _make_fl_table(rids, flens, fstrands)
 
-    def test_pipeline_skips_replacement_when_ess_low(self, tmp_path):
-        """No-gDNA scenario: ESS gate prevents contaminated FL replacement."""
-        sc = Scenario(
-            "ess_gate_no_gdna",
-            genome_length=5000,
-            seed=SEED,
-            work_dir=tmp_path / "ess_gate",
+        model = build_gdna_fl_model(
+            fl, _make_stats(1), region_weight=np.ones(1),
+            strand_specificity=0.95, intergenic_fl_model=prior,
+            fl_prior_ess=10.0,
         )
-        sc.add_gene(
-            "g1",
-            "+",
-            [{"t_id": "t1", "exons": [(200, 400), (600, 800)], "abundance": 100}],
+        # Mode at 300bp.
+        assert model.counts.argmax() == 300
+
+    def test_prior_dominates_at_low_n(self):
+        from rigel.calibration import build_gdna_fl_model
+        from rigel.frag_length_model import FragmentLengthModel
+
+        # Prior: 1000 obs at 200bp.
+        prior = FragmentLengthModel(max_size=1000)
+        prior.counts[200] = 1000.0
+        prior._total_weight = 1000.0
+
+        # Only 2 fragments at 400bp.
+        fl = _make_fl_table([0, 0], [400, 400], [1, 1])
+        model = build_gdna_fl_model(
+            fl, _make_stats(1), region_weight=np.ones(1),
+            strand_specificity=0.95, intergenic_fl_model=prior,
+            fl_prior_ess=1000.0,
         )
-        sc.add_gene(
-            "g2",
-            "-",
-            [{"t_id": "t2", "exons": [(2500, 2700), (3000, 3200)], "abundance": 50}],
-        )
-        result = sc.build_oracle(
-            n_fragments=500,
-            sim_config=SimConfig(
-                frag_mean=200,
-                frag_std=30,
-                frag_min=80,
-                frag_max=450,
-                read_length=100,
-                strand_specificity=0.95,
-                seed=SEED,
-            ),
-        )
-        # No gDNA → calibration ESS should be ~0 → gdna_fl_model is None
-        pr = _run_pipeline(result, result.index)
-        # Verify valid output
-        df = pr.estimator.get_counts_df(result.index)
-        assert len(df) > 0
-        assert df["tpm"].sum() == pytest.approx(1e6, rel=1e-3)
-        sc.cleanup()
+        # The empirical posterior counts (model.counts) only hold the
+        # two raw observations, but log_prob blends with the prior.  The
+        # log_prob at 200 (prior mode) should exceed log_prob at 400.
+        assert model.log_likelihood(200) > model.log_likelihood(400)
 
 
 # ---------------------------------------------------------------------------

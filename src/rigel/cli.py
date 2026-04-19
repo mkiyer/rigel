@@ -45,6 +45,16 @@ def index_command(args: argparse.Namespace) -> int:
     if not gtf.exists():
         sys.exit(f"Error: GTF file not found: {gtf}")
 
+    if args.no_mappability and args.alignable_zarr is not None:
+        sys.exit(
+            "Error: --no-mappability and --alignable-zarr are mutually exclusive."
+        )
+    if not args.no_mappability and args.alignable_zarr is None:
+        sys.exit(
+            "Error: --alignable-zarr PATH is required (use --no-mappability to opt out "
+            "explicitly when running on synthetic genomes or stranded-only benchmarks)."
+        )
+
     TranscriptIndex.build(
         fasta_file=fasta,
         gtf_file=gtf,
@@ -53,6 +63,11 @@ def index_command(args: argparse.Namespace) -> int:
         write_tsv=not args.no_tsv,
         gtf_parse_mode=args.gtf_parse_mode,
         nrna_tolerance=args.nrna_tolerance,
+        alignable_zarr_path=(
+            Path(args.alignable_zarr) if args.alignable_zarr else None
+        ),
+        mappability_read_length=args.mappability_read_length,
+        splice_blacklist_min_count=args.splice_blacklist_min_count,
     )
     return 0
 
@@ -785,6 +800,55 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Max distance (bp) for clustering transcript start/end sites "
             "when building synthetic nascent RNA transcripts (default: 20)"
+        ),
+    )
+    idx.add_argument(
+        "--alignable-zarr",
+        dest="alignable_zarr",
+        default=None,
+        help=(
+            "Path to an alignable Zarr store built for the same genome+aligner. "
+            "Provides per-base fractional mappability (for gDNA calibration) "
+            "and the splice-junction artifact blacklist (for filtering spurious "
+            "junctions at BAM-scan time). Required unless --no-mappability is "
+            "set explicitly."
+        ),
+    )
+    idx.add_argument(
+        "--no-mappability",
+        dest="no_mappability",
+        action="store_true",
+        default=False,
+        help=(
+            "Explicitly opt out of mappability and splice-blacklist ingestion. "
+            "Use this for synthetic genomes, stranded-only benchmarks, or "
+            "any setting where running 'alignable' is unnecessary. "
+            "Mutually exclusive with --alignable-zarr."
+        ),
+    )
+    idx.add_argument(
+        "--splice-blacklist-min-count",
+        dest="splice_blacklist_min_count",
+        type=int,
+        default=2,
+        help=(
+            "(Advanced) Minimum unique-fragment count per (chrom, intron, "
+            "read_length) for a junction to enter the splice-artifact blacklist. "
+            "Default 2 matches the historical alignable threshold. Lower values "
+            "(e.g. 1) admit more singleton artifacts; higher values keep only "
+            "the most reproducible. Ignored when --no-mappability is set."
+        ),
+    )
+    idx.add_argument(
+        "--mappability-read-length",
+        dest="mappability_read_length",
+        type=int,
+        default=100,
+        help=(
+            "(Advanced) Read-length bin to query in the alignable Zarr store "
+            "when computing per-region mappable effective length. Must match "
+            "one of the bins the store was built with (commonly 50, 75, 100, "
+            "125). Default 100. Ignored when --no-mappability is set."
         ),
     )
     idx.set_defaults(func=index_command)

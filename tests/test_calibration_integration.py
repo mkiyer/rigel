@@ -94,7 +94,6 @@ class TestCalibrationConfig:
     def test_default_values(self):
         cfg = CalibrationConfig()
         assert cfg.gdna_prior_c_base == 5.0
-        assert cfg.density_percentile == 10.0
         assert cfg.fl_prior_ess == 1000.0
 
     def test_pipeline_config_includes_calibration(self):

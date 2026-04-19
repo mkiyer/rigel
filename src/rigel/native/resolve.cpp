@@ -84,6 +84,14 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("strands"), nb::arg("tset_data"),
              nb::arg("tset_offsets"),
              "Build the splice-junction exact-match lookup map.")
+        .def("build_sj_blacklist_map",
+             &FragmentResolver::build_sj_blacklist_map,
+             nb::arg("refs"), nb::arg("starts"), nb::arg("ends"),
+             nb::arg("max_anchor_left"), nb::arg("max_anchor_right"),
+             "Build the splice-junction artifact blacklist map.\n\n"
+             "Junctions are keyed by (ref, start, end) without strand.\n"
+             "A CIGAR junction is rejected when EITHER its left or right\n"
+             "anchor is <= the blacklist maximum for that junction.")
         .def("set_metadata", &FragmentResolver::set_metadata,
              nb::arg("t_to_g"), nb::arg("n_transcripts"),
              "Set transcript-to-gene mapping and allocate scratch buffers.")

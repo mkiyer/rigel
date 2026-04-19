@@ -152,14 +152,17 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for analytical gDNA-RNA deconvolution (V3).
+    """Configuration for the v4 gDNA calibration EM.
 
     The pipeline runs ``calibrate_gdna()`` between model finalization
-    and quantification.  The resulting ``CalibrationResult`` provides
-    per-region expected gDNA fragment counts, a global gDNA density,
-    and a gDNA fragment-length model.  These are used by
-    ``compute_locus_gdna_priors()`` to set the per-locus gDNA Dirichlet
-    prior for the unified OVR EM.
+    and quantification.  It fits a two-component (RNA / gDNA) mixture
+    on per-reference-region evidence using a fused count / strand /
+    fragment-length log-likelihood ratio.  The resulting
+    ``CalibrationResult`` provides per-region expected gDNA fragment
+    counts, a single global gDNA rate ``lambda_gdna`` (fragments per
+    mappable base), and a gDNA fragment-length model.  These are
+    consumed by ``compute_locus_gdna_priors()`` to set the per-locus
+    gDNA Dirichlet prior for the unified OVR EM.
     """
 
     #: Calibration evidence strength for the Dirichlet prior.
@@ -168,9 +171,6 @@ class CalibrationConfig:
     #: for degenerate likelihoods — any value in [1, 50] gives identical
     #: results.  Default 5.0.
     gdna_prior_c_base: float = 5.0
-
-    #: Percentile (0-100) of unspliced density for λ_G baseline estimation.
-    density_percentile: float = 10.0
 
     #: Effective sample size (ESS) for the global fragment-length prior.
     #: The global FL histogram is rescaled to this many pseudo-observations

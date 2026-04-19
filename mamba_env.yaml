@@ -19,3 +19,8 @@ dependencies:
   # - cmake>=3.15
   - scikit-build-core
   - nanobind>=2.1
+  # Optional: 'alignable' powers --alignable-zarr at index time. It is
+  # not yet on PyPI / bioconda; install from a local checkout when you
+  # need real-data mappability:
+  #     pip install -e /path/to/alignable
+  # Without alignable installed, build indexes with --no-mappability.

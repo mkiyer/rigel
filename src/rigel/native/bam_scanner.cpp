@@ -136,6 +136,20 @@ static void build_tid_mapping(
 // Lightweight record for one BAM alignment in a qname group
 // ================================================================
 
+/// CIGAR-derived splice junction with per-read anchor lengths.
+///
+/// The anchor on each side of the junction is the number of
+/// reference-advancing CIGAR bases between that side and the nearest
+/// clip (or the end of the alignment).  Both anchors are required to
+/// test against the artifact blacklist.
+struct SJCigarEntry {
+    int32_t start;
+    int32_t end;
+    int32_t strand;
+    int32_t anchor_left;
+    int32_t anchor_right;
+};
+
 struct ParsedAlignment {
     int32_t ref_id;         // tid
     int32_t ref_start;      // pos
@@ -148,8 +162,8 @@ struct ParsedAlignment {
     int32_t sj_strand;      // from XS/ts tag, STRAND_NONE if absent
 
     // CIGAR-parsed exon blocks and splice junctions
-    std::vector<std::pair<int32_t, int32_t>> exons;              // (start, end)
-    std::vector<std::tuple<int32_t, int32_t, int32_t>> sjs;      // (start, end, strand)
+    std::vector<std::pair<int32_t, int32_t>> exons;  // (start, end)
+    std::vector<SJCigarEntry> sjs;
 
     bool is_read1()         const { return flag & BAM_FREAD1; }
     bool is_read2()         const { return flag & BAM_FREAD2; }
@@ -249,6 +263,10 @@ struct BamScanStats {
     int64_t n_multimapper_groups = 0;
     int64_t n_multimapper_alignments = 0;
 
+    // Splice-junction artifact blacklist (per read, across all alignments)
+    int64_t n_sj_observed = 0;
+    int64_t n_sj_blacklisted = 0;
+
     /// Add all counters from another stats struct (for merge).
     void merge_from(const BamScanStats& o) {
         total += o.total;
@@ -284,6 +302,8 @@ struct BamScanStats {
         n_frag_length_intergenic += o.n_frag_length_intergenic;
         n_multimapper_groups += o.n_multimapper_groups;
         n_multimapper_alignments += o.n_multimapper_alignments;
+        n_sj_observed += o.n_sj_observed;
+        n_sj_blacklisted += o.n_sj_blacklisted;
     }
 };
 
@@ -363,14 +383,25 @@ static void merge_region_acc(RegionAccumulator& dst, RegionAccumulator& src) {
 // ================================================================
 // CIGAR parsing — ports parse_read() from bam.py
 // ================================================================
+//
+// In addition to emitting exon blocks and splice junctions, we compute
+// per-junction anchor lengths (left, right).  An "anchor" is the count
+// of reference-advancing CIGAR bases on one side of the N op, bounded
+// by clips/ends.  Insertions never contribute; deletions do (they
+// occupy reference positions in the aligner's evidence for the anchor).
+//
+// Example: CIGAR 10M 500N 15M 1000N 125M
+//   junction 1 (500N):  anchor_left = 10,  anchor_right = 15 + 125 = 140
+//   junction 2 (1000N): anchor_left = 10 + 15 = 25, anchor_right = 125
 
 static void parse_cigar(
     const bam1_t* b,
     int32_t ref_id,
     int32_t sj_strand,
     std::vector<std::pair<int32_t, int32_t>>& exons,
-    std::vector<std::tuple<int32_t, int32_t, int32_t>>& sjs)
+    std::vector<SJCigarEntry>& sjs)
 {
+    (void)ref_id;  // ref_id carried by the caller; kept for API stability
     exons.clear();
     sjs.clear();
 
@@ -378,31 +409,70 @@ static void parse_cigar(
     if (n_cigar == 0) return;
 
     const uint32_t* cigar = bam_get_cigar(b);
-    int32_t pos = b->core.pos;  // 0-based
-    int32_t start = pos;
+    int32_t pos = b->core.pos;     // 0-based genomic position
+    int32_t start = pos;           // current exon start
+    int32_t ref_advanced = 0;      // ref-advancing bases seen so far
 
+    // First pass: build exons, record each junction's left anchor and
+    // its CIGAR intron length so the right anchor can be back-filled.
+    const size_t sj_base = sjs.size();
     for (int32_t i = 0; i < n_cigar; i++) {
         int op = bam_cigar_op(cigar[i]);
         int len = bam_cigar_oplen(cigar[i]);
 
         if (op == CIG_REF_SKIP) {
-            // End current exon, record splice junction
-            if (pos > start) {
-                exons.push_back({start, pos});
-            }
-            sjs.push_back({pos, pos + len, sj_strand});
+            if (pos > start) exons.push_back({start, pos});
+            SJCigarEntry sj{};
+            sj.start = pos;
+            sj.end = pos + len;
+            sj.strand = sj_strand;
+            sj.anchor_left = ref_advanced;
+            sj.anchor_right = 0;  // patched below
+            sjs.push_back(sj);
             start = pos + len;
             pos = start;
         } else if (cigar_advances_ref(op)) {
             pos += len;
+            ref_advanced += len;
         }
-        // INS, SOFT_CLIP, HARD_CLIP, PAD: don't advance ref
+        // INS, SOFT_CLIP, HARD_CLIP, PAD: do not advance the reference
+        // and therefore do not contribute to anchor lengths.
     }
+    if (pos > start) exons.push_back({start, pos});
 
-    // Final exon
-    if (pos > start) {
-        exons.push_back({start, pos});
+    // Back-fill right anchors: right = total - left.  ``ref_advanced`` is
+    // the grand total of ref-advancing bases across the whole CIGAR.
+    for (size_t k = sj_base; k < sjs.size(); k++) {
+        sjs[k].anchor_right = ref_advanced - sjs[k].anchor_left;
     }
+}
+
+// ================================================================
+// Splice-junction artifact filtering
+// ================================================================
+//
+// Drop each CIGAR splice junction whose (left, right) anchors sit
+// inside the blacklist's observed artifact envelope.  Rejection rule:
+// either anchor <= max → junction is indistinguishable from known
+// gDNA-derived artifacts and is treated as unspliced.
+//
+// Returns the number of junctions dropped (for scanner statistics).
+static inline int32_t filter_blacklisted_sjs(
+    std::vector<SJCigarEntry>& sjs,
+    const FragmentResolver& resolver,
+    int32_t ref_id)
+{
+    if (sjs.empty() || !resolver.has_sj_blacklist() || ref_id < 0) return 0;
+    int32_t n_before = static_cast<int32_t>(sjs.size());
+    sjs.erase(std::remove_if(sjs.begin(), sjs.end(),
+        [&](const SJCigarEntry& sj) {
+            const auto* hit = resolver.sj_blacklist_lookup(
+                ref_id, sj.start, sj.end);
+            if (!hit) return false;
+            return sj.anchor_left  <= hit->max_anchor_left
+                || sj.anchor_right <= hit->max_anchor_right;
+        }), sjs.end());
+    return n_before - static_cast<int32_t>(sjs.size());
 }
 
 // ================================================================
@@ -472,7 +542,10 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
 static ParsedAlignment parse_bam_record(
     const bam1_t* b,
     const std::vector<int32_t>& tid_to_ref_id,
-    SJTagMode sj_tag_mode)
+    SJTagMode sj_tag_mode,
+    const FragmentResolver* resolver,
+    int64_t* n_sj_observed,
+    int64_t* n_sj_blacklisted)
 {
     ParsedAlignment rec;
     rec.flag = b->core.flag;
@@ -503,6 +576,18 @@ static ParsedAlignment parse_bam_record(
     parse_cigar(b, mapped_ref_id, rec.sj_strand,
                 rec.exons, rec.sjs);
     rec.ref_id = mapped_ref_id;
+
+    // Splice-junction artifact filtering.  Per-read, immediately after
+    // CIGAR parsing.  Downstream fragment assembly unions across mates,
+    // so this is the permissive rule: a junction survives as long as at
+    // least one read supports it with anchors above the blacklist envelope.
+    if (resolver && resolver->has_sj_blacklist() && !rec.sjs.empty()) {
+        if (n_sj_observed) *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
+        int32_t n_dropped = filter_blacklisted_sjs(rec.sjs, *resolver, mapped_ref_id);
+        if (n_sj_blacklisted) *n_sj_blacklisted += n_dropped;
+    } else if (n_sj_observed) {
+        *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
+    }
 
     return rec;
 }
@@ -535,8 +620,8 @@ static AssembledFragment build_fragment(
         for (const auto& [s, e] : rec->exons) {
             exon_dict[key].push_back({s, e});
         }
-        for (const auto& [s, e, st] : rec->sjs) {
-            intron_set.insert({rec->ref_id, s, e, st});
+        for (const auto& sj : rec->sjs) {
+            intron_set.insert({rec->ref_id, sj.start, sj.end, sj.strand});
         }
         nm_total += rec->nm;
     }
@@ -550,8 +635,8 @@ static AssembledFragment build_fragment(
         for (const auto& [s, e] : rec->exons) {
             exon_dict[key].push_back({s, e});
         }
-        for (const auto& [s, e, st] : rec->sjs) {
-            intron_set.insert({rec->ref_id, s, e, st});
+        for (const auto& sj : rec->sjs) {
+            intron_set.insert({rec->ref_id, sj.start, sj.end, sj.strand});
         }
         nm_total += rec->nm;
     }
@@ -1026,7 +1111,10 @@ public:
                     }
                     current_qname = qname;
                     current_group.records.push_back(
-                        parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_));
+                        parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_,
+                                          ctx_,
+                                          &stats_.n_sj_observed,
+                                          &stats_.n_sj_blacklisted));
                 }
 
                 // Flush last group
@@ -1244,10 +1332,14 @@ private:
                     }
                 }
 
-                // Region accumulation for intergenic fragments
+                // Region accumulation for intergenic fragments.
+                // Every hit accumulates with 1/num_hits weight; the
+                // sum across hits of one molecule is 1.0, matching
+                // the 1/NH crediting of E_i (mappable_effective_length).
                 if (region_acc.enabled()) {
                     region_acc.accumulate(
-                        frag.exons, frag.has_introns(), is_unique_mapper);
+                        frag.exons, frag.has_introns(), is_unique_mapper,
+                        num_hits);
                 }
                 continue;
             }
@@ -1326,12 +1418,19 @@ private:
                 }
             }
 
-            // Region accumulation for resolved (non-chimeric) fragments
+            // Region accumulation for resolved (non-chimeric) fragments.
+            // Every resolved hit of a multimapper accumulates with
+            // 1/num_hits weight; summed across all hits of a single
+            // molecule the total is 1.0, matching the 1/NH crediting
+            // convention of the E_i (mappable_effective_length)
+            // denominator.  No count_stats gate: that would bias the
+            // numerator high by a factor of NH relative to E_i.
             if (region_acc.enabled()) {
                 bool frag_spliced = (result.splice_type == SPLICE_SPLICED_ANNOT
                                   || result.splice_type == SPLICE_SPLICED_UNANNOT);
                 region_acc.accumulate(
-                    frag.exons, frag_spliced, is_unique_mapper);
+                    frag.exons, frag_spliced, is_unique_mapper,
+                    num_hits);
             }
 
             accumulator.append(result, frag_id);
@@ -1415,6 +1514,8 @@ private:
         stats_dict["n_frag_length_intergenic"] = stats_.n_frag_length_intergenic;
         stats_dict["n_multimapper_groups"] = stats_.n_multimapper_groups;
         stats_dict["n_multimapper_alignments"] = stats_.n_multimapper_alignments;
+        stats_dict["n_sj_observed"] = stats_.n_sj_observed;
+        stats_dict["n_sj_blacklisted"] = stats_.n_sj_blacklisted;
         result["stats"] = stats_dict;
 
         // Strand observations
@@ -1799,6 +1900,13 @@ public:
             parse_cigar(b, mapped_ref_id, rec.sj_strand,
                         rec.exons, rec.sjs);
             rec.ref_id = mapped_ref_id;
+
+            // Apply the same splice-junction blacklist filter that the
+            // scanner uses so the annotated BAM sees a consistent view
+            // of the evidence.
+            if (ctx_ && ctx_->has_sj_blacklist()) {
+                filter_blacklisted_sjs(rec.sjs, *ctx_, mapped_ref_id);
+            }
 
             light_group.push_back(std::move(rec));
         }

@@ -73,6 +73,7 @@ class TestRegionPartitionShape:
         expected_cols = {
             "region_id", "ref", "start", "end", "length",
             "exon_pos", "exon_neg", "tx_pos", "tx_neg",
+            "mappable_effective_length",
         }
         assert set(mini_index.region_df.columns) == expected_cols
 

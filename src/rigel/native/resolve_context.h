@@ -472,6 +472,14 @@ public:
     SJMap sj_map_;
     std::vector<int32_t> sj_map_data_;
 
+    // --- SJ artifact blacklist (from alignable) ---
+    // Strand-agnostic: keyed on (ref_id, start, end).  A CIGAR splice
+    // junction is rejected at BAM-scan time when either its left or
+    // right anchor is <= the stored maximum.
+    using SJBlacklistMap = std::unordered_map<
+        SJBlacklistKey, SJBlacklistEntry, SJBlacklistKeyHash>;
+    SJBlacklistMap sj_blacklist_;
+
 
 
     // --- Transcript metadata ---
@@ -574,6 +582,38 @@ public:
             sj_map_[key] = {tset_offsets[i],
                             tset_offsets[i + 1] - tset_offsets[i]};
         }
+    }
+
+    /// Build the splice-junction artifact blacklist (from alignable).
+    ///
+    /// Strand-agnostic: a single entry per (ref, start, end).  At BAM
+    /// scan time ``sj_blacklist_lookup`` is used to test a CIGAR-derived
+    /// junction; rejection uses the OR rule (either anchor <= max).
+    void build_sj_blacklist_map(
+        const std::vector<std::string>& refs,
+        const std::vector<int32_t>& starts,
+        const std::vector<int32_t>& ends,
+        const std::vector<int32_t>& max_anchor_left,
+        const std::vector<int32_t>& max_anchor_right)
+    {
+        size_t n = refs.size();
+        sj_blacklist_.clear();
+        sj_blacklist_.reserve(n);
+        for (size_t i = 0; i < n; i++) {
+            int32_t ref_id = get_or_create_ref_id(refs[i]);
+            SJBlacklistKey key{ref_id, starts[i], ends[i]};
+            sj_blacklist_[key] = {max_anchor_left[i], max_anchor_right[i]};
+        }
+    }
+
+    bool has_sj_blacklist() const { return !sj_blacklist_.empty(); }
+
+    /// Return blacklist entry for a junction, or nullptr if not present.
+    inline const SJBlacklistEntry* sj_blacklist_lookup(
+        int32_t ref_id, int32_t start, int32_t end) const
+    {
+        auto it = sj_blacklist_.find(SJBlacklistKey{ref_id, start, end});
+        return (it == sj_blacklist_.end()) ? nullptr : &it->second;
     }
 
     void set_metadata(const std::vector<int32_t>& t_to_g,
@@ -1272,17 +1312,44 @@ struct RegionAccumulator {
 
     bool enabled() const { return region_cr != nullptr && n_regions > 0; }
 
-    /// Accumulate fractional region evidence for one fragment.
+    /// Accumulate fractional region evidence for one fragment hit.
+    ///
+    /// For a unique mapper (NH=1) this is called once with
+    /// ``num_hits=1`` and the fragment contributes its full overlap
+    /// fraction to the regions it overlaps.
+    ///
+    /// For a multimapper with ``NH=k`` this is called ``k`` times
+    /// (once per resolved/unresolved hit, not gated on
+    /// ``count_stats``); each call contributes ``1/k`` of the
+    /// overlap fraction.  Summed over all hits of a single molecule,
+    /// the total contributed weight is exactly the overlap-fraction
+    /// sum a unique mapper would have contributed to its single
+    /// location.  This matches the ``1/NH`` on-target crediting
+    /// convention of the ``mappable_effective_length`` denominator
+    /// (see ``src/rigel/mappability.py``), so numerator and
+    /// denominator are on the same mappability footing and the
+    /// ratio estimator ``λ̂ = Σaᵢ / Σ Eᵢ`` is unbiased.
+    ///
+    /// Fragment-length observations are only emitted for unique
+    /// single-region fragments (the existing gate).  Multimappers
+    /// are not used for FL training.
     ///
     /// @param exons        Aligned exon blocks from AssembledFragment.
     /// @param is_spliced   True if fragment has intron (N) operations.
     /// @param is_unique    True if fragment is a unique mapper (NH == 1).
+    /// @param num_hits     Fragment-level NH (≥ 1).  Authoritative
+    ///                     hit count determined upstream
+    ///                     (``std::max(NH_tag, all_hits.size())``
+    ///                     in ``bam_scanner.cpp``), robust to
+    ///                     aligners that don't set NH (minimap2).
     void accumulate(
         const std::vector<ExonBlock>& exons,
         bool is_spliced,
-        bool is_unique)
+        bool is_unique,
+        int32_t num_hits)
     {
         if (exons.empty() || !enabled()) return;
+        if (num_hits < 1) num_hits = 1;
 
         // Determine fragment strand — must be unanimous, non-chimeric.
         int32_t frag_strand = 0;
@@ -1332,8 +1399,9 @@ struct RegionAccumulator {
                 int32_t overlap_bp = ovlp_end - ovlp_start;
                 if (overlap_bp <= 0) continue;
 
-                double frac = static_cast<double>(overlap_bp)
-                            / static_cast<double>(total_aligned);
+                double frac = (static_cast<double>(overlap_bp)
+                            / static_cast<double>(total_aligned))
+                            / static_cast<double>(num_hits);
                 counts[static_cast<size_t>(region_id) * 4 + col] += frac;
 
                 // Track for single-region check.

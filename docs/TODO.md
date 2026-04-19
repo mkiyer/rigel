@@ -1,24 +1,35 @@
 # TODO
 
 
+
 ## Calibration 
 
 ### Performance
 
-- Huge regression in performance
+Once this is working, we will need to convert it to C/C++ for performance reasons
+
+## Calibration: estimate_kappa_sym
+
+This was computed at time where we were trying to constrain gDNA to be "symmetric" by strand so that gDNA strand assignments needed to approach 50/50 with some variance (binomial with overdispersion) and this was trying to assess the variance/overdispersion. We may not need this at all anymore.
+
+
+
+
+## cgranges interval searching
+
+### possible to serialize cgranges index? saves time and memory...
+
+### should we "lazily" build cgranges index if only used during one stage of pipeline? for example, calibration requires cgranges index for mappability but then might not be used again. could lazily build and free, potentially decreasing overall RSS
+
+
+
+
 
 ## Gene strand
 
 - Variables named 'gene_strand' need to be refactored
 - Change references from 'gene' to 'transcript' or 't' or 'tx'
 
-### Mappability 
-
-- Calibration now *correctly* allows regions with ZERO fragments to be used to train the calibration module.
-
-This exposes several issues
-- Unmappable genomic regions may have zero counts because they are unmappable
-- We need to discard unmappable regions. Otherwise calibration will underestimate gDNA density
 
 
 ### Hybrid capture support
@@ -26,20 +37,6 @@ This exposes several issues
 - If we are running hybrid capture, we need the calibration module to only use "captured" regions to train itself. We need to provide 'on target' and 'off target' regions.
 - Defer for now
 
-
-## Mappability
-
-### Genomic footprints
-
-Genomic footprint is an important aspect of the coverage density model. It is the denominator upon which we compute coverage density. Without accounting for mappability, gDNA will be underestimated because the unmappable genomic regions will inflate the denominator.
-
-The solution was to create a new tool 'alignable' that computes genome-wide mappability. The mappability data is stored in read-length bins, default (50, 75, 100, 125).
-
-With the 'alignable' result, it should be possible to estimate the genomic region span / footprint as a function of read length.
-
-This could be computationally expensive. If we use per-fragment effective length, we need to compute the effective length by querying the mappability data using the fragment length. 
-
-Shortcuts for this? We could use the 'mean' fragment length and compute the mappability-corrected effective length once per locus for the genomic dna component. We also need to compute this for each nascent RNA component.
 
 
 ## Locus stats
@@ -64,10 +61,6 @@ Ensure gene quantification is correct.
 Regarding gene quantification. Yes, we can sum counts of the transcript isoforms of the gene. Annotated single-exon transcripts are associated with a gene and will be included in those counts (they are both mature and nascent so this is okay). For gene quantification, we MUST exclude synthetic nascent RNA (synthetic nascent RNA should not be associated with a gene. Remember, we can sum counts, but when we compute transcripts-per-milion (TPM), we use a weighted average of counts respecting different effective lengths.
 
 
-## Collated annotated BAM output
-
-Is annotation BAM output collated?
-Can we ensure that it is collated?
 
 
 ## Overhang likelihood penalty

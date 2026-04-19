@@ -125,6 +125,32 @@ struct SJKeyHash {
     }
 };
 
+// Splice-junction artifact blacklist key.
+// Strand-agnostic: alignable records a single entry per (ref, start, end).
+struct SJBlacklistKey {
+    int32_t ref_id;
+    int32_t start;
+    int32_t end;
+
+    bool operator==(const SJBlacklistKey& o) const {
+        return ref_id == o.ref_id && start == o.start && end == o.end;
+    }
+};
+
+struct SJBlacklistKeyHash {
+    size_t operator()(const SJBlacklistKey& k) const {
+        size_t h = std::hash<int32_t>()(k.ref_id);
+        h ^= std::hash<int32_t>()(k.start) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int32_t>()(k.end)   + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+struct SJBlacklistEntry {
+    int32_t max_anchor_left;
+    int32_t max_anchor_right;
+};
+
 // ================================================================
 // RawResolveResult — internal result from _resolve_core()
 // ================================================================

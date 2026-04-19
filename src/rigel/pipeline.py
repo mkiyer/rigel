@@ -884,8 +884,9 @@ def run_pipeline(
         fl_table,
         index.region_df,
         strand_models.strand_specificity,
-        density_percentile=cal_cfg.density_percentile,
+        mean_frag_len=frag_length_models.global_model.mean,
         intergenic_fl_model=frag_length_models.intergenic,
+        fl_prior_ess=cal_cfg.fl_prior_ess,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(
