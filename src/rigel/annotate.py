@@ -74,6 +74,13 @@ BAM Tag Schema
    * - ZL
      - i
      - Locus ID (``-1`` if no locus)
+   * - ZB
+     - i
+     - Number of splice junctions in this record's CIGAR that matched the
+       splice-artifact blacklist and were treated as unspliced during
+       scoring.  Record-local (not fragment-level): a mate with clean
+       junctions reports ``0`` even if its mate reports ``>0``.  Always
+       ``0`` when no blacklist is loaded.
 """
 
 import logging

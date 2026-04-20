@@ -177,6 +177,9 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         # Multimapper
         "n_multimapper_groups",
         "n_multimapper_alignments",
+        # Splice-artifact blacklist
+        "n_sj_observed",
+        "n_sj_blacklisted",
     ):
         setattr(stats, key, stats_dict.get(key, 0))
 

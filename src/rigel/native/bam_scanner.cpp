@@ -156,6 +156,11 @@ struct ParsedAlignment {
     int32_t mate_ref_id;    // mtid
     int32_t mate_ref_start; // mpos
     uint16_t flag;
+    // Per-record count of CIGAR junctions dropped by the splice-artifact
+    // blacklist.  Populated by filter_blacklisted_sjs in Pass 1 (for
+    // scanner stats parity) and Pass 2 (for the ZB:i annotated-BAM tag).
+    // Fits into the padding after `flag` — zero effective memory growth.
+    uint16_t n_sj_blacklisted = 0;
     int32_t nm;             // NM tag (edit distance), 0 if absent
     int32_t nh;             // NH tag, 1 if absent
     int32_t hi;             // HI tag, -1 if absent
@@ -1703,6 +1708,11 @@ public:
                 // Pass 1 assigns frag_id per qname group before worker-side
                 // multimapper filtering, so we must still advance frag_id
                 // here to keep pass-2 lookup synchronized.
+                for (size_t i = 0; i < raw_group.size(); i++) {
+                    bam_aux_update_int(
+                        raw_group[i], "ZB",
+                        static_cast<int>(light_group[i].n_sj_blacklisted));
+                }
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
                                     -1, -1,
                                     0, 0.0f,
@@ -1740,22 +1750,46 @@ public:
             auto ann_it = frag_to_row.find(frag_id);
             bool has_ann = (ann_it != frag_to_row.end());
 
+            // Deduplicate raw records across hits: the cross-pair
+            // combinatorial block in pair_multimapper_reads intentionally
+            // produces overlapping hits for EM scoring, so a single raw
+            // record can appear in multiple hits.  For the annotated BAM
+            // output we must write each input record EXACTLY once.
+            // First-containing-hit wins.
+            std::vector<bool> rec_written(raw_group.size(), false);
+
             for (int hit_idx = 0;
                  hit_idx < static_cast<int>(all_hits.size());
                  hit_idx++)
             {
                 const auto& [r1_reads, r2_reads] = all_hits[hit_idx];
 
-                // Gather bam1_t* for all records in this hit
+                // Gather bam1_t* for all records in this hit,
+                // skipping any already emitted by an earlier hit.
+                // Stamp the per-record ZB:i tag (splice-artifact count)
+                // on each bam1_t as we select it \u2014 this is a record-local
+                // property of the CIGAR, not a hit-level value, so it
+                // lives outside the uniform stamp_and_write_hit helper.
                 std::vector<bam1_t*> hit_raws;
                 for (const auto* lr : r1_reads) {
                     ptrdiff_t idx = lr - &light_group[0];
+                    if (rec_written[idx]) continue;
+                    rec_written[idx] = true;
+                    bam_aux_update_int(
+                        raw_group[idx], "ZB",
+                        static_cast<int>(light_group[idx].n_sj_blacklisted));
                     hit_raws.push_back(raw_group[idx]);
                 }
                 for (const auto* lr : r2_reads) {
                     ptrdiff_t idx = lr - &light_group[0];
+                    if (rec_written[idx]) continue;
+                    rec_written[idx] = true;
+                    bam_aux_update_int(
+                        raw_group[idx], "ZB",
+                        static_cast<int>(light_group[idx].n_sj_blacklisted));
                     hit_raws.push_back(raw_group[idx]);
                 }
+                if (hit_raws.empty()) continue;
 
                 if (has_ann) {
                     int64_t row = ann_it->second;
@@ -1833,6 +1867,30 @@ public:
                     static_cast<int64_t>(hit_raws.size());
             }
 
+            // Defensive end-of-group sweep: any raw record not yet
+            // emitted via a hit is written as a single intergenic
+            // pass-through so output record count == input record count.
+            std::vector<bam1_t*> orphan;
+            for (size_t i = 0; i < raw_group.size(); i++) {
+                if (!rec_written[i]) {
+                    bam_aux_update_int(
+                        raw_group[i], "ZB",
+                        static_cast<int>(light_group[i].n_sj_blacklisted));
+                    orphan.push_back(raw_group[i]);
+                }
+            }
+            if (!orphan.empty()) {
+                stamp_and_write_hit(
+                    orphan, out, hdr,
+                    ".", ".", ".",
+                    -1, -1,
+                    0, 0.0f,
+                    "intergenic", 0, 0, "unknown", -1);
+                n_intergenic++;
+                n_records_written +=
+                    static_cast<int64_t>(orphan.size());
+            }
+
             frag_id++;
         };
 
@@ -1903,9 +1961,12 @@ public:
 
             // Apply the same splice-junction blacklist filter that the
             // scanner uses so the annotated BAM sees a consistent view
-            // of the evidence.
+            // of the evidence.  Capture the drop count for the per-record
+            // ZB:i tag stamped below.
             if (ctx_ && ctx_->has_sj_blacklist()) {
-                filter_blacklisted_sjs(rec.sjs, *ctx_, mapped_ref_id);
+                int32_t n_dropped =
+                    filter_blacklisted_sjs(rec.sjs, *ctx_, mapped_ref_id);
+                rec.n_sj_blacklisted = static_cast<uint16_t>(n_dropped);
             }
 
             light_group.push_back(std::move(rec));

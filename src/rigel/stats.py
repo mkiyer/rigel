@@ -72,6 +72,10 @@ class PipelineStats:
     n_multimapper_groups: int = 0
     n_multimapper_alignments: int = 0
 
+    # --- Splice-artifact blacklist (per-read, across all alignments) ---
+    n_sj_observed: int = 0
+    n_sj_blacklisted: int = 0
+
     # --- gDNA contamination ---
     n_gdna_em: int = 0
 
