@@ -27,7 +27,7 @@ def build_gdna_fl_model(
 
     Each fragment receives a soft weight ``w = w_density[region_id] · α``
     where ``α`` is 1 for unstranded data, the antisense indicator for
-    stranded data, or 1 for unstranded gene_strand=0 regions.  The
+    stranded data, or 1 for unstranded tx_strand=0 regions.  The
     weighted histogram is blended with ``intergenic_fl_model.counts`` as
     a Dirichlet-Multinomial prior with effective sample size
     ``fl_prior_ess`` — a Bayesian replacement for the v3 ``min_ess``
@@ -39,7 +39,7 @@ def build_gdna_fl_model(
     information" fallback is the uniform distribution implied by
     Laplace smoothing on an empty histogram.
     """
-    n_regions = len(stats["gene_strand"])
+    n_regions = len(stats["tx_strand"])
     region_weight = np.asarray(region_weight, dtype=np.float64)
     if region_weight.shape[0] != n_regions:
         raise ValueError("region_weight length must match stats arrays")
@@ -57,12 +57,12 @@ def build_gdna_fl_model(
         w = region_weight[rid]
 
         # Stranded selection: keep antisense fragments in stranded regions
-        # at full weight; in unstranded regions (gene_strand == 0) keep all
+        # at full weight; in unstranded regions (tx_strand == 0) keep all
         # fragments at full weight.  No cliff — this is just a deterministic
         # selector consistent with the strand pathway's likelihood.
         if "frag_strand" in fl_table.columns and float(strand_specificity) > 0.5:
             fstrand = fl_table["frag_strand"].to_numpy(dtype=np.int8)[keep_idx]
-            gs = stats["gene_strand"][rid]
+            gs = stats["tx_strand"][rid]
             # R1-antisense convention: antisense fragments are POS in +1
             # genes and NEG in -1 genes (matches `_stats.compute_sense_fraction`).
             anti = np.zeros_like(w)

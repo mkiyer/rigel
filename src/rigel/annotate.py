@@ -99,6 +99,36 @@ AF_GDNA_RESOLVED: int = AF_RESOLVED | AF_GDNA               # 3  — gDNA compon
 AF_NRNA_RESOLVED: int = AF_RESOLVED | AF_NRNA               # 5  — single-exon annotated
 AF_SYNTH_RESOLVED: int = AF_RESOLVED | AF_NRNA | AF_SYNTHETIC  # 13 — synthetic nRNA span
 
+
+def winner_flag(is_nrna: bool, is_synthetic: bool) -> int:
+    """Return the AF_* flag for a single winning transcript.
+
+    Precedence: synthetic > nRNA > plain transcript.  A row flagged
+    ``is_synthetic`` is by construction also an nRNA row, so the synthetic
+    branch takes priority.
+    """
+    if is_synthetic:
+        return AF_SYNTH_RESOLVED
+    if is_nrna:
+        return AF_NRNA_RESOLVED
+    return AF_TRANSCRIPT
+
+
+def winner_flags(
+    is_nrna: np.ndarray,
+    is_synthetic: np.ndarray,
+) -> np.ndarray:
+    """Vectorized :func:`winner_flag` over bool arrays of equal length.
+
+    Returns a ``uint8`` array with the same precedence rule as the
+    scalar form.  Use on arrays of winner-transcript flags (already
+    filtered to valid-winner indices).
+    """
+    flags = np.full(len(is_nrna), AF_TRANSCRIPT, dtype=np.uint8)
+    flags[np.asarray(is_nrna, dtype=bool) & ~np.asarray(is_synthetic, dtype=bool)] = AF_NRNA_RESOLVED
+    flags[np.asarray(is_synthetic, dtype=bool)] = AF_SYNTH_RESOLVED
+    return flags
+
 # Fragment-class labels for the ZC tag.
 _FRAG_CLASS_LABELS = {
     0: "unambig",

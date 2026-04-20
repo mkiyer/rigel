@@ -78,10 +78,10 @@ In `_build_gdna_fl_model()` ([calibration.py](../../src/rigel/calibration.py#L36
 
 ```python
 # BEFORE (O(N×M) — ~45 minutes)
-for rid_val in range(len(gene_strand)):          # N = 542,510 regions
+for rid_val in range(len(tx_strand)):          # N = 542,510 regions
     if not eligible[rid_val] or not has_strand[rid_val]:
         continue
-    gs = gene_strand[rid_val]
+    gs = tx_strand[rid_val]
     rid_match = rids == rid_val                   # M = 13,266,376 comparisons
     if gs == 1:
         strand_mask |= rid_match & (fstrands == STRAND_POS)
@@ -94,7 +94,7 @@ for rid_val in range(len(gene_strand)):          # N = 542,510 regions
 ```python
 # AFTER (O(M) — 0.58 seconds)
 obs_eligible = eligible[rids] & has_strand[rids]  # fancy index: O(M)
-obs_gs = gene_strand[rids]                         # fancy index: O(M)
+obs_gs = tx_strand[rids]                         # fancy index: O(M)
 strand_mask |= obs_eligible & (obs_gs == 1) & (fstrands == STRAND_POS)
 strand_mask |= obs_eligible & (obs_gs == -1) & (fstrands == STRAND_NEG)
 ```

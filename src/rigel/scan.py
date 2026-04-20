@@ -19,12 +19,7 @@ from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
 from .stats import PipelineStats
-from .annotate import (
-    AF_NRNA_RESOLVED,
-    AF_SYNTH_RESOLVED,
-    AF_TRANSCRIPT,
-    AF_UNRESOLVED,
-)
+from .annotate import AF_UNRESOLVED, winner_flag
 
 logger = logging.getLogger(__name__)
 
@@ -204,12 +199,7 @@ class FragmentRouter:
             for j in range(len(det_tids)):
                 tid = int(det_tids[j])
                 gid = int(t_to_g[tid])
-                if is_synth_arr[tid]:
-                    flags = AF_SYNTH_RESOLVED
-                elif is_nrna_arr[tid]:
-                    flags = AF_NRNA_RESOLVED
-                else:
-                    flags = AF_TRANSCRIPT
+                flags = winner_flag(bool(is_nrna_arr[tid]), bool(is_synth_arr[tid]))
                 annotations.add(
                     frag_id=int(det_fids[j]),
                     best_tid=tid,

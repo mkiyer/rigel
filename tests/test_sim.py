@@ -533,4 +533,5 @@ class TestGeneBuilderIndexIntegration:
 
         index = TranscriptIndex.load(index_dir)
         assert index.num_transcripts == 4  # 2 annotated + 2 synthetic nRNA
-        assert index.num_genes == 2
+        assert index.num_annotated_genes == 2
+        assert index.num_genes == 4  # 2 annotated + 2 synthetic gene rows

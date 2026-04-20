@@ -9,7 +9,7 @@ For ambiguous fragments, transcript abundances are estimated via
 per-locus EM with a coverage-weighted One Virtual Read (OVR) prior,
 then counts are accumulated from the converged posterior.
 
-Data containers (``ScoredFragments``, ``Locus``, ``LocusEMInput``)
+Data containers (``ScoredFragments``, ``Locus``, ``LocusPartition``)
 live in ``rigel.scored_fragments``.  Calibration and prior computation
 live in ``rigel.calibration`` and ``rigel.locus``.
 """
@@ -67,6 +67,51 @@ def _gene_locus_ids(
             g_best_mrna[g] = v_mrna[i]
             g_locus_id[g] = int(v_lid[i])
     return g_locus_id
+
+
+def _tpm(counts: np.ndarray, eff_len: np.ndarray, denom_counts: np.ndarray | None = None) -> np.ndarray:
+    """Transcripts per million from count + effective-length arrays.
+
+    If ``denom_counts`` is provided, TPM is normalized by the rpk sum of
+    that alternate pool (used for ``tpm_total_rna``, where annotated
+    counts are normalized over the annotated + synthetic pool).
+
+    All inputs must share the same length; the denominator uses
+    ``eff_len`` in both the numerator and denominator rpk.
+    """
+    rpk = counts / np.maximum(eff_len, 1.0)
+    denom_rpk = rpk if denom_counts is None else denom_counts / np.maximum(eff_len, 1.0)
+    denom = denom_rpk.sum()
+    return (rpk / denom * 1e6) if denom > 0 else np.zeros_like(rpk)
+
+
+def _nrna_children_counts(
+    nrna_t_idx: np.ndarray,
+    t_totals: np.ndarray,
+    n_transcripts: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aggregate multi-exon children to their parent nRNA entity.
+
+    For every transcript ``i`` with ``nrna_t_idx[i] >= 0`` and
+    ``nrna_t_idx[i] != i`` (i.e., a *proper* child — not a nascent-equiv
+    self-reference), accumulate ``t_totals[i]`` into the parent row.
+
+    Returns
+    -------
+    n_children : int32[n_transcripts]
+        Number of proper children per transcript.
+    children_count : float64[n_transcripts]
+        Sum of children's totals per transcript.
+    """
+    child_mask = (nrna_t_idx >= 0) & (nrna_t_idx != np.arange(n_transcripts))
+    parents = nrna_t_idx[child_mask]
+    n_children = np.bincount(parents, minlength=n_transcripts).astype(np.int32)
+    children_count = np.bincount(
+        parents,
+        weights=t_totals[child_mask],
+        minlength=n_transcripts,
+    ).astype(np.float64)
+    return n_children, children_count
 
 
 # ======================================================================
@@ -367,28 +412,24 @@ class AbundanceEstimator:
         count = np.where(is_synthetic, 0.0, t_total)
         pmean = self.posterior_mean()
 
-        # TPM using effective lengths — annotated transcripts only
+        # TPM:
+        #   - ``tpm``           — annotated-only (synthetic counts forced to 0).
+        #   - ``tpm_total_rna`` — annotated-only numerator, but normalized over
+        #     annotated + synthetic so values are directly comparable to the
+        #     nrna_quant TPM column.
         eff = self._t_eff_len
-        rpk = count / eff
-        rpk_sum = rpk.sum()
-        tpm = (rpk / rpk_sum * 1e6) if rpk_sum > 0 else np.zeros_like(rpk)
+        tpm = _tpm(count, eff)
+        tpm_total_rna = _tpm(count, eff, denom_counts=t_total)
 
-        # Total RNA TPM: denominator includes all transcripts (annotated +
-        # synthetic nRNA).  Comparable across quant.feather and nrna_quant.
-        rpk_all = t_total / eff
-        rpk_sum_total = rpk_all.sum()
-        tpm_total_rna = (rpk / rpk_sum_total * 1e6) if rpk_sum_total > 0 else np.zeros_like(rpk)
-
-        # Build nrna_id: lookup nrna_t_index → transcript ID
+        # nrna_id: lookup nrna_t_index → transcript ID. The column is
+        # guaranteed by the index schema (see TranscriptIndex.load).
         t_ids = index.t_df["t_id"].values
-        nrna_t_idx = index.t_df["nrna_t_index"].values if "nrna_t_index" in index.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        nrna_t_idx = index.t_df["nrna_t_index"].values
         nrna_id = np.where(
             nrna_t_idx >= 0,
             t_ids[nrna_t_idx.clip(0)],
             ".",
         )
-        # Fix entries where nrna_t_index == -1 (clip(0) forced index 0)
-        nrna_id = np.where(nrna_t_idx >= 0, nrna_id, ".")
 
         # nrna_parent_count: for multi-exon transcripts with a parent nRNA,
         # show the parent nRNA's count. nRNA entities themselves have no parent.
@@ -488,15 +529,29 @@ class AbundanceEstimator:
         # n_transcripts (annotated only, excluding synthetics)
         n_annotated = _aggregate_to_gene(t_to_g, n_genes, annotated_mask).astype(int)
 
-        # TPM
-        rpk = count / g_eff_len
-        rpk_sum = rpk.sum()
-        tpm = (rpk / rpk_sum * 1e6) if rpk_sum > 0 else np.zeros_like(rpk)
+        # TPM — computed from annotated-only counts.  Synthetic gene rows
+        # (placeholders for gene-neutral nRNA transcripts) contribute zero to
+        # all aggregates above because ``annotated_mask`` zeros them out, so
+        # excluding them here is a display-level filter only.
+        annotated_gene_mask = (
+            ~index.g_df["is_synthetic"].to_numpy()
+            if "is_synthetic" in index.g_df.columns
+            else np.ones(n_genes, dtype=bool)
+        )
+        count = count[annotated_gene_mask]
+        count_unambig = count_unambig[annotated_gene_mask]
+        count_em = count_em[annotated_gene_mask]
+        count_spliced = count_spliced[annotated_gene_mask]
+        g_eff_len = g_eff_len[annotated_gene_mask]
+        g_locus_id = g_locus_id[annotated_gene_mask]
+        n_annotated = n_annotated[annotated_gene_mask]
+
+        tpm = _tpm(count, g_eff_len)
 
         df = pd.DataFrame(
             {
-                "gene_id": index.g_df["g_id"].values,
-                "gene_name": index.g_df["g_name"].values,
+                "gene_id": index.g_df["g_id"].values[annotated_gene_mask],
+                "gene_name": index.g_df["g_name"].values[annotated_gene_mask],
                 "n_transcripts": n_annotated,
                 "locus_id": g_locus_id,
                 "effective_length": g_eff_len,
@@ -547,27 +602,23 @@ class AbundanceEstimator:
                 "count", "n_mrna", "mrna_count", "tpm",
             ])
 
-        idx = np.where(mask)[0]
         t_total = self.t_counts.sum(axis=1)
 
-        # All nRNA entities get their actual counts
+        # nrna_t_index and nrna_n_contributors are guaranteed by the index
+        # schema (see TranscriptIndex.load dtype contract).  Compute the
+        # parent → children aggregation once, vectorized, then take the
+        # slice for nRNA-entity rows.
+        nrna_t_idx = t_df["nrna_t_index"].values
+        n_mrna_per_parent, children_count_per_parent = _nrna_children_counts(
+            nrna_t_idx, t_total, n_transcripts=len(t_df),
+        )
+
+        idx = np.where(mask)[0]
         counts = t_total[idx]
-
         eff = self._t_eff_len[idx]
-
-        n_contrib = t_df["nrna_n_contributors"].values[idx] if "nrna_n_contributors" in t_df.columns else np.zeros(len(idx), dtype=int)
-
-        # Compute children info: multi-exon transcripts whose nrna_t_index
-        # points to this nRNA entity
-        nrna_t_idx = t_df["nrna_t_index"].values if "nrna_t_index" in t_df.columns else np.full(len(t_df), -1, dtype=int)
-        n_mrna_children = np.zeros(len(idx), dtype=int)
-        mrna_children_count = np.zeros(len(idx), dtype=np.float64)
-        for i, nrna_tidx in enumerate(idx):
-            children = np.where(nrna_t_idx == nrna_tidx)[0]
-            # Exclude self-references (nascent-equiv points to itself)
-            children = children[children != nrna_tidx]
-            n_mrna_children[i] = len(children)
-            mrna_children_count[i] = float(t_total[children].sum())
+        n_contrib = t_df["nrna_n_contributors"].values[idx]
+        n_mrna_children = n_mrna_per_parent[idx]
+        mrna_children_count = children_count_per_parent[idx]
 
         # Filter: only include nRNA entities with at least one mRNA child.
         # Standalone single-exon singletons (n_mrna_children == 0) are
@@ -580,12 +631,13 @@ class AbundanceEstimator:
         n_mrna_children = n_mrna_children[has_children]
         mrna_children_count = mrna_children_count[has_children]
 
-        # Total RNA TPM: denominator includes all transcripts (annotated +
-        # synthetic nRNA) so values are directly comparable to the
-        # tpm_total_rna column in quant.feather.
+        # Total RNA TPM: normalized over annotated + synthetic rpk pool so
+        # values are directly comparable to tpm_total_rna in quant.feather.
+        # (The _tpm helper normalizes within a single array; here the
+        # denominator is an alternate full-pool rpk sum, so compute inline.)
         rpk = counts / np.maximum(eff, 1.0)
-        rpk_sum_total = (t_total / self._t_eff_len).sum()
-        tpm = (rpk / rpk_sum_total * 1e6) if rpk_sum_total > 0 else np.zeros_like(rpk)
+        total_rpk = float((t_total / np.maximum(self._t_eff_len, 1.0)).sum())
+        tpm = (rpk / total_rpk * 1e6) if total_rpk > 0 else np.zeros_like(rpk)
 
         df = pd.DataFrame(
             {

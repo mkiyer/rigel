@@ -1,0 +1,4 @@
+condition,gdna_label,strand_specificity,nrna_label,n_rna,n_gdna,gdna_rate,mrna_frag_truth,nrna_frag_truth,truth_scale
+pristine,unknown,1.0,none,10000000,0,0.0,10000000,0,13.397532436688076
+gdna,unknown,1.0,none,10000000,10000000,0.0,10000000,0,13.397532436688076
+gdna_nrna,nrna,1.0,none,15000000,10000000,0.0,10139172,4860828,20.096299096587057

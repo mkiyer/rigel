@@ -119,7 +119,8 @@ def quant_command(args: argparse.Namespace) -> int:
     logging.info(f"[START] Loading index from {index_dir}")
     index = TranscriptIndex.load(index_dir)
     logging.info(
-        f"[DONE] Loaded index: {index.num_transcripts} transcripts, {index.num_genes} genes"
+        f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
+        f"{index.num_annotated_genes} genes"
     )
 
     # -- Build pipeline config + run --
@@ -327,7 +328,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "fragment_length": fl_dict,
         "quantification": {
             "n_transcripts": index.num_transcripts,
-            "n_genes": index.num_genes,
+            "n_genes": index.num_annotated_genes,
             "n_loci": len(estimator.locus_results),
             "n_unambig_assigned": stats.deterministic_unambig_units,
             "n_em_assigned": (

@@ -111,7 +111,7 @@ class TestStrandModelLikelihood:
         p = sm.strand_likelihood(Strand.AMBIGUOUS, Strand.POS)
         assert p == 0.5
 
-    def test_none_gene_strand_returns_half(self):
+    def test_none_tx_strand_returns_half(self):
         sm = StrandModel()
         sm.observe(Strand.POS, Strand.POS)
         sm.finalize()

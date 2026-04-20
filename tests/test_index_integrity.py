@@ -30,7 +30,11 @@ class TestTranscriptTable:
         assert mini_index.num_transcripts == 5  # 3 annotated + 2 synthetic nRNA
 
     def test_num_genes(self, mini_index):
-        assert mini_index.num_genes == 2
+        # Option A: synthetic nRNA transcripts get dedicated gene-neutral
+        # rows in g_df. ``num_genes`` is the kernel-facing count (annotated
+        # + synthetic), ``num_annotated_genes`` is user-facing.
+        assert mini_index.num_annotated_genes == 2
+        assert mini_index.num_genes == 4  # 2 annotated + 2 synthetic
 
     def test_t_index_matches_row_index(self, mini_index):
         t_df = mini_index.t_df
@@ -46,12 +50,18 @@ class TestTranscriptTable:
     def test_gene_ids(self, mini_index):
         g_ids = mini_index.t_df["g_id"].tolist()
         assert g_ids[:3] == ["g1", "g1", "g2"]
-        # synthetics inherit parent gene IDs
-        assert g_ids[3:] == ["g1", "g2"]
+        # Synthetic nRNA transcripts are gene-neutral: their g_id equals
+        # their own t_id (``RIGEL_NRNA_...``).
+        assert all(gid.startswith("RIGEL_NRNA_") for gid in g_ids[3:])
+        assert g_ids[3:] == mini_index.t_df["t_id"].tolist()[3:]
 
     def test_t_to_g_arr(self, mini_index):
-        expected = np.array([0, 0, 1, 0, 1], dtype=mini_index.t_to_g_arr.dtype)
-        np.testing.assert_array_equal(mini_index.t_to_g_arr, expected)
+        # Synthetics now claim their own g_index (2 and 3); which maps to
+        # which depends on merge order but each annotated gene still has
+        # its two transcripts at indices 0, 1, 2.
+        arr = mini_index.t_to_g_arr
+        assert list(arr[:3]) == [0, 0, 1]
+        assert sorted(arr[3:].tolist()) == [2, 3]
 
     def test_t_to_strand_arr(self, mini_index):
         arr = mini_index.t_to_strand_arr
@@ -70,7 +80,10 @@ class TestGeneTable:
     """Verify derived gene table."""
 
     def test_gene_table_shape(self, mini_index):
-        assert len(mini_index.g_df) == 2
+        # 2 annotated + 2 synthetic gene-neutral rows
+        assert len(mini_index.g_df) == 4
+        assert "is_synthetic" in mini_index.g_df.columns
+        assert int(mini_index.g_df["is_synthetic"].sum()) == 2
 
     def test_gene_g_index_matches(self, mini_index):
         g_df = mini_index.g_df
@@ -89,8 +102,12 @@ class TestGeneTable:
 
     def test_gene_num_transcripts(self, mini_index):
         g_df = mini_index.g_df
-        assert g_df.loc[0, "num_transcripts"] == 3  # t1, t2 + 1 synthetic
-        assert g_df.loc[1, "num_transcripts"] == 2  # t3 + 1 synthetic
+        # Annotated gene rows now contain only annotated transcripts;
+        # synthetics get their own dedicated rows (num_transcripts == 1).
+        assert g_df.loc[0, "num_transcripts"] == 2  # t1, t2
+        assert g_df.loc[1, "num_transcripts"] == 1  # t3
+        assert g_df.loc[2, "num_transcripts"] == 1  # synthetic
+        assert g_df.loc[3, "num_transcripts"] == 1  # synthetic
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -475,7 +492,9 @@ class TestLargerIndex:
         assert complex_index.num_transcripts == 12
 
     def test_gene_count(self, complex_index):
-        assert complex_index.num_genes == 4  # gA, gB, gC, gD
+        # 4 annotated (gA, gB, gC, gD) + 5 synthetic gene-neutral rows
+        assert complex_index.num_annotated_genes == 4
+        assert complex_index.num_genes == 9
 
     def test_all_transcripts_have_exon_intervals(self, complex_index):
         for t_idx in range(complex_index.num_transcripts):

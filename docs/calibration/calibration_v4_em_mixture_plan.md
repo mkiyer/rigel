@@ -106,7 +106,7 @@ with the hard constraint `P(z_i = G | k_i^s > 0) = 0` applied first.
    fix we need.
 2. **Strand LLR** — unchanged from the old module (Binomial: G ∼
    Binom(n, 0.5); R ∼ Binom(n, p_i)). Disabled when SS ≤ 0.55 or
-   `gene_strand == 0`. When unavailable it contributes exactly zero.
+   `tx_strand == 0`. When unavailable it contributes exactly zero.
 3. **Fragment-length LLR** — unchanged form (shape-normalised
    histograms with shared Dirichlet smoothing), but the FL models
    are trained only after iteration 0 so that the initial E-step

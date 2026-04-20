@@ -173,7 +173,7 @@ def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
 def create_nrna_transcripts(
     transcripts: list[Transcript],
     tolerance: int = NRNA_MERGE_TOLERANCE,
-) -> tuple[list[Transcript], dict[int, tuple]]:
+) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, int], dict[tuple, "Transcript"]]:
     """Create synthetic nRNA transcripts, detect annotated equivalents.
 
     This function implements the unified nRNA architecture:
@@ -187,8 +187,13 @@ def create_nrna_transcripts(
        If so, mark it ``is_nrna = True`` — no synthetic needed.
     4. For uncovered spans, create a synthetic single-exon ``Transcript``
        flagged ``is_nrna = True, is_synthetic = True``.
-    5. The synthetics inherit the gene id / name of one contributing
-       transcript for output convenience.
+    5. Synthetic transcripts are **gene-neutral** by design: they receive a
+       sentinel ``g_id`` equal to their own ``t_id`` and ``g_type =
+       "nascent_rna"``.  Rigel is transcript-centric, and a merged nRNA span
+       may be contributed to by transcripts from more than one annotated
+       gene — inheriting one contributor's gene metadata would bake an
+       arbitrary projection into the core index.  Gene-oriented summaries
+       are derived downstream from annotated contributors only.
 
     Parameters
     ----------
@@ -201,7 +206,8 @@ def create_nrna_transcripts(
     -------
     synthetics : list[Transcript]
         Synthetic nRNA transcripts to append to the transcript list.
-        Callers must assign ``t_index`` to each returned transcript.
+        Callers must assign ``t_index`` and ``g_index`` to each returned
+        transcript.
     t_to_span_key : dict[int, tuple]
         Mapping from annotated multi-exon transcript ``t_index`` to its
         merged nRNA span key ``(ref, strand, start, end)``.  Used by
@@ -268,8 +274,10 @@ def create_nrna_transcripts(
             t_to_merged_span[t.t_index] = (int(rep_starts[j]), int(rep_ends[j]))
 
     # -- Step 3: Dedup merged spans -------------------------------------------
-    # Map merged_key → (first transcript for metadata, set of contributing t_indices)
-    merged_spans: dict[tuple, Transcript] = {}  # key → representative transcript
+    # Track one representative transcript per span only to preserve stable
+    # iteration order across hash-table rebuilds.  Synthetics are gene-neutral
+    # (see docstring) so we do NOT inherit any gene metadata from the rep.
+    merged_spans: dict[tuple, Transcript] = {}  # key → first-seen transcript
     span_contributor_count: dict[tuple, int] = collections.defaultdict(int)
     t_to_span_key: dict[int, tuple] = {}  # annotated t_index → span key
     for t in multi_exon:
@@ -309,19 +317,23 @@ def create_nrna_transcripts(
     # -- Step 5: Create synthetic transcripts ---------------------------------
     synthetics: list[Transcript] = []
     span_to_syn_idx: dict[tuple, int] = {}  # span_key → index in synthetics list
-    for span_key, rep_tx in merged_spans.items():
+    for span_key in merged_spans:
         if span_key in covered:
             continue
         ref, strand_int, s, e = span_key
+        t_id = f"RIGEL_NRNA_{ref}_{strand_int}_{s}_{e}"
+        # Synthetic rows are gene-neutral. The sentinel g_id ( = t_id) keeps
+        # the g_id column non-null so downstream categorical/string code works
+        # unchanged; a dedicated g_index is allocated by the index builder.
         syn = Transcript(
             ref=ref,
             strand=Strand(strand_int),
             exons=[Interval(s, e)],
             length=e - s,
-            t_id=f"RIGEL_NRNA_{ref}_{strand_int}_{s}_{e}",
-            g_id=rep_tx.g_id,
-            g_name=rep_tx.g_name,
-            g_type=rep_tx.g_type,
+            t_id=t_id,
+            g_id=t_id,
+            g_name="",
+            g_type="nascent_rna",
             is_nrna=True,
             is_synthetic=True,
             nrna_n_contributors=span_contributor_count[span_key],
@@ -680,7 +692,20 @@ class TranscriptIndex:
 
     @property
     def num_genes(self) -> int:
+        """Total rows in ``g_df`` (annotated genes + synthetic nRNA placeholders).
+
+        This is the kernel-facing count used by ``_aggregate_to_gene``; it
+        matches ``len(g_df)`` and preserves the ``g_index == row`` invariant.
+        User-facing summaries should use :attr:`num_annotated_genes` instead.
+        """
         return len(self.g_df)
+
+    @property
+    def num_annotated_genes(self) -> int:
+        """Number of real (non-synthetic) gene rows in ``g_df``."""
+        if "is_synthetic" not in self.g_df.columns:
+            return len(self.g_df)
+        return int((~self.g_df["is_synthetic"].to_numpy()).sum())
 
     # -- lazy-loaded calibration regions --------------------------------------
 
@@ -796,11 +821,14 @@ class TranscriptIndex:
         synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = (
             create_nrna_transcripts(transcripts, tolerance=nrna_tolerance)
         )
-        # Build g_id → g_index mapping from annotated transcripts
-        g_id_to_gindex: dict[str, int] = {}
-        for t in transcripts:
-            if t.g_id not in g_id_to_gindex:
-                g_id_to_gindex[t.g_id] = t.g_index
+        # Synthetic transcripts are gene-neutral (see create_nrna_transcripts
+        # docstring). Each synthetic gets its OWN dedicated g_index — we do
+        # not map synthetics into any annotated gene, because a merged nRNA
+        # span may be contributed to by transcripts from multiple genes and
+        # rigel is transcript-centric.  The dedicated g_index keeps the
+        # invariant ``t.g_index == row in g_df`` while preventing phantom
+        # contributions from polluting real gene-level summaries.
+        next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
 
         # Assign t_index and g_index to each synthetic; build span→t_index
         span_to_nrna_t_index: dict[tuple, int] = {}
@@ -808,7 +836,8 @@ class TranscriptIndex:
         for syn in synthetics:
             syn.t_index = next_t_index
             next_t_index += 1
-            syn.g_index = g_id_to_gindex.get(syn.g_id, -1)
+            syn.g_index = next_g_index
+            next_g_index += 1
             span_key = (syn.ref, int(syn.strand), syn.start, syn.end)
             span_to_nrna_t_index[span_key] = syn.t_index
 
@@ -923,7 +952,15 @@ class TranscriptIndex:
 
     @staticmethod
     def _build_gene_table(t_df: pd.DataFrame) -> pd.DataFrame:
-        """Derive a gene-level summary table from the transcript table."""
+        """Derive a gene-level summary table from the transcript table.
+
+        Every ``g_index`` in ``t_df`` gets one row here, including synthetic
+        nRNA gene rows (which are gene-neutral placeholders, one per synthetic
+        transcript).  The ``is_synthetic`` column flags those rows so callers
+        can filter them out of user-facing gene summaries.  Keeping them in
+        the table preserves the invariant ``g_df.index == g_df["g_index"]``
+        used by the EM aggregation kernels.
+        """
         g_df = (
             t_df
             .groupby("g_index", sort=True)
@@ -935,6 +972,7 @@ class TranscriptIndex:
                 g_id=("g_id", "first"),
                 g_name=("g_name", "first"),
                 num_transcripts=("t_index", "count"),
+                is_synthetic=("is_synthetic", "all"),
             )
             .reset_index()
         )

@@ -4,9 +4,6 @@
 
 ## Calibration 
 
-### Performance
-
-Once this is working, we will need to convert it to C/C++ for performance reasons
 
 ## Calibration: estimate_kappa_sym
 
@@ -21,14 +18,6 @@ This was computed at time where we were trying to constrain gDNA to be "symmetri
 
 ### should we "lazily" build cgranges index if only used during one stage of pipeline? for example, calibration requires cgranges index for mappability but then might not be used again. could lazily build and free, potentially decreasing overall RSS
 
-
-
-
-
-## Gene strand
-
-- Variables named 'gene_strand' need to be refactored
-- Change references from 'gene' to 'transcript' or 't' or 'tx'
 
 
 
@@ -47,6 +36,7 @@ Enable locus status to be written to the output
 ## Nascent RNA count set to zero? 
 
 Copilot suggseted that synthetic nRNA counts are being set to zero? Is this some kind of gating?
+
 
 ### nascent RNA gating?
 
@@ -284,22 +274,3 @@ This seems to affect non-deterministic behavior of the EM. Is this necessary?
     // by their log-likelihood fingerprint.  This makes the EM iteration
     // fully deterministic regardless of input fragment order.
 
-
-## run_locus_em_native()
-
-When/why is this function needed?
-
-
-## C/C++ Optimization: AVX2
-
-SIMD provides enormous speedup for the EM
-We wrote a NEON specific fast_exp() implementation
-We need an AVX2 implementation for linux
-
-Eventually the production system will be Linux
-
-
-## Post-EM Pruning
-
-- pruning was recently removed
-- now we have 'discrete' fragment count assignment as the default

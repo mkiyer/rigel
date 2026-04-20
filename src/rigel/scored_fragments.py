@@ -7,8 +7,8 @@ Pure dataclasses with no logic.  These are shared between scan.py
   candidate transcripts with log-likelihoods.
 - ``Locus`` — connected component of transcripts linked by shared
   fragments.
-- ``LocusEMInput`` — per-locus sub-problem with locally-renumbered
-  components, ready for the C++ EM solver.
+- ``LocusPartition`` — per-locus CSR subset for the partitioned native
+  EM path.
 """
 
 from dataclasses import dataclass
@@ -123,46 +123,6 @@ class Locus:
     unit_indices: np.ndarray
     gdna_span: int
     merged_intervals: list
-
-
-# ======================================================================
-# LocusEMInput — per-locus sub-problem with local component indices
-# ======================================================================
-
-
-@dataclass(slots=True)
-class LocusEMInput:
-    """Per-locus EM input: locally-renumbered components and likelihoods.
-
-    Component layout::
-
-        [0, n_t)     — transcript (one per transcript in the locus)
-        [n_t]        — gdna (single gDNA component)
-
-    Total components = n_transcripts + 1.
-
-    Only UNSPLICED units have a gDNA candidate.  Spliced units compete
-    only among transcript components.
-    """
-
-    locus: Locus
-    offsets: np.ndarray
-    t_indices: np.ndarray
-    log_liks: np.ndarray
-    count_cols: np.ndarray
-    coverage_weights: np.ndarray
-    tx_starts: np.ndarray
-    tx_ends: np.ndarray
-    locus_t_indices: np.ndarray
-    locus_count_cols: np.ndarray
-    n_transcripts: int
-    n_components: int
-    local_to_global_t: np.ndarray
-    unambig_totals: np.ndarray
-    gdna_init: float
-    effective_lengths: np.ndarray
-    prior: np.ndarray
-    bias_profiles: np.ndarray | list | None
 
 
 # ======================================================================

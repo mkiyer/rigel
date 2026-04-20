@@ -341,16 +341,16 @@ def _make_fl_table(region_ids, frag_lens, frag_strands=None):
     return pd.DataFrame(d)
 
 
-def _make_stats(n_regions, gene_strand=None, region_length=None, n_unspliced=None):
+def _make_stats(n_regions, tx_strand=None, region_length=None, n_unspliced=None):
     """Create a stats dict for build_gdna_fl_model."""
-    if gene_strand is None:
-        gene_strand = np.ones(n_regions, dtype=np.int8)
+    if tx_strand is None:
+        tx_strand = np.ones(n_regions, dtype=np.int8)
     if region_length is None:
         region_length = np.full(n_regions, 1000.0)
     if n_unspliced is None:
         n_unspliced = np.full(n_regions, 100.0)
     return {
-        "gene_strand": np.asarray(gene_strand),
+        "tx_strand": np.asarray(tx_strand),
         "region_length": np.asarray(region_length, dtype=np.float64),
         "n_unspliced": np.asarray(n_unspliced, dtype=np.float64),
         "n_total": np.asarray(n_unspliced, dtype=np.float64),

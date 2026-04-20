@@ -26,7 +26,7 @@ def compute_region_stats(
     Returns
     -------
     dict with keys: n_pos, n_neg, n_unspliced, n_spliced, n_total,
-    strand_ratio, splice_rate, density, gene_strand, region_length,
+    strand_ratio, splice_rate, density, tx_strand, region_length,
     mappable_bp, tx_pos, tx_neg, exon_pos, exon_neg, ref.
 
     Notes
@@ -69,9 +69,9 @@ def compute_region_stats(
 
     tx_pos = region_df["tx_pos"].values.astype(bool)
     tx_neg = region_df["tx_neg"].values.astype(bool)
-    gene_strand = np.zeros(len(region_df), dtype=np.int8)
-    gene_strand[tx_pos & ~tx_neg] = 1
-    gene_strand[~tx_pos & tx_neg] = -1
+    tx_strand = np.zeros(len(region_df), dtype=np.int8)
+    tx_strand[tx_pos & ~tx_neg] = 1
+    tx_strand[~tx_pos & tx_neg] = -1
 
     exon_pos = (
         region_df["exon_pos"].values.astype(bool)
@@ -98,7 +98,7 @@ def compute_region_stats(
         "strand_ratio": strand_ratio,
         "splice_rate": splice_rate,
         "density": density,
-        "gene_strand": gene_strand,
+        "tx_strand": tx_strand,
         "region_length": region_length,
         "mappable_bp": mappable_bp,
         "tx_pos": tx_pos,
@@ -116,24 +116,24 @@ def compute_sense_fraction(
 
     R1-antisense convention (dUTP / TruSeq Stranded):
 
-    * ``gene_strand == +1``: RNA reads land on − strand, so
+    * ``tx_strand == +1``: RNA reads land on − strand, so
       ``sense_frac = 1 − strand_ratio``.
-    * ``gene_strand == -1``: RNA reads land on + strand, so
+    * ``tx_strand == -1``: RNA reads land on + strand, so
       ``sense_frac = strand_ratio``.
-    * ``gene_strand == 0``: ambiguous — set to NaN.
+    * ``tx_strand == 0``: ambiguous — set to NaN.
 
-    For gDNA, sense_frac is ~0.5 regardless of gene_strand.
+    For gDNA, sense_frac is ~0.5 regardless of tx_strand.
     For RNA, sense_frac ≈ SS.
     """
     strand_ratio = stats["strand_ratio"]
-    gene_strand = stats["gene_strand"]
+    tx_strand = stats["tx_strand"]
     n_unspliced = stats["n_unspliced"]
 
     sf = np.full(len(strand_ratio), np.nan, dtype=np.float64)
 
     valid = np.isfinite(strand_ratio) & (n_unspliced >= 2)
-    plus = valid & (gene_strand == 1)
-    minus = valid & (gene_strand == -1)
+    plus = valid & (tx_strand == 1)
+    minus = valid & (tx_strand == -1)
 
     sf[plus] = 1.0 - strand_ratio[plus]
     sf[minus] = strand_ratio[minus]

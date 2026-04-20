@@ -119,9 +119,9 @@ class TestComputeRegionStats:
         assert np.isnan(s["strand_ratio"][2])
         assert s["splice_rate"][0] == pytest.approx(10 / 110)
         assert s["density"][0] == pytest.approx(110 / 1000)
-        assert s["gene_strand"][0] == 1
-        assert s["gene_strand"][1] == -1
-        assert s["gene_strand"][2] == 0
+        assert s["tx_strand"][0] == 1
+        assert s["tx_strand"][1] == -1
+        assert s["tx_strand"][2] == 0
 
     def test_exposure_uses_mappable_when_present(self):
         counts = _make_region_counts(n_unspliced_pos=[10], n_unspliced_neg=[10])
@@ -165,10 +165,10 @@ class TestSenseFraction:
 
 
 class TestBuildGDNAFLModel:
-    def _stats(self, n, *, gene_strand=None, length=1000.0, n_unspliced=100.0):
+    def _stats(self, n, *, tx_strand=None, length=1000.0, n_unspliced=100.0):
         return {
-            "gene_strand": np.full(n, 1, dtype=np.int8) if gene_strand is None
-                            else np.asarray(gene_strand, dtype=np.int8),
+            "tx_strand": np.full(n, 1, dtype=np.int8) if tx_strand is None
+                            else np.asarray(tx_strand, dtype=np.int8),
             "region_length": np.full(n, length, dtype=np.float64),
             "n_unspliced": np.full(n, n_unspliced, dtype=np.float64),
             "n_total": np.full(n, n_unspliced, dtype=np.float64),

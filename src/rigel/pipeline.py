@@ -34,10 +34,8 @@ import pandas as pd
 
 from .annotate import (
     AF_GDNA_RESOLVED,
-    AF_NRNA_RESOLVED,
-    AF_SYNTH_RESOLVED,
-    AF_TRANSCRIPT,
     AF_UNRESOLVED,
+    winner_flags,
 )
 from .buffer import FragmentBuffer, _FinalizedChunk
 from .config import (
@@ -471,12 +469,10 @@ def _populate_em_annotations(
     tx_flags[best_tid == -2] = AF_GDNA_RESOLVED
     if valid_t.any():
         winner_tids = best_tid[valid_t]
-        nrna_mask = is_nrna_arr[winner_tids]
-        synth_mask = is_synth_arr[winner_tids]
-        flags = np.full(valid_t.sum(), AF_TRANSCRIPT, dtype=np.uint8)
-        flags[nrna_mask & ~synth_mask] = AF_NRNA_RESOLVED
-        flags[synth_mask] = AF_SYNTH_RESOLVED
-        tx_flags[valid_t] = flags
+        tx_flags[valid_t] = winner_flags(
+            is_nrna_arr[winner_tids],
+            is_synth_arr[winner_tids],
+        )
 
     # Clean sentinel: -2 (gDNA) -> -1
     best_tid_clean = best_tid.copy()
@@ -509,11 +505,21 @@ def _run_locus_em_partitioned(
 ) -> None:
     """Run batch locus EM from partitioned data with incremental freeing."""
     t_to_g = index.t_to_g_arr
+    # ``is_synthetic_g`` marks synthetic (gene-neutral) gene rows so they can
+    # be excluded from the user-facing ``n_genes`` per locus.
+    if "is_synthetic" in index.g_df.columns:
+        is_synthetic_g = index.g_df["is_synthetic"].to_numpy()
+    else:
+        is_synthetic_g = np.zeros(len(index.g_df), dtype=bool)
     n_threads = em_config.n_threads or os.cpu_count() or 1
     emit_assignments = annotations is not None
 
     def _build_locus_meta(locus, *, mrna, gdna, alpha_g, alpha_r):
-        gene_set = {int(t_to_g[int(t_idx)]) for t_idx in locus.transcript_indices}
+        gene_set = {
+            int(t_to_g[int(t_idx)])
+            for t_idx in locus.transcript_indices
+            if not is_synthetic_g[int(t_to_g[int(t_idx)])]
+        }
         return {
             "locus_id": locus.locus_id,
             "locus_span_bp": locus.gdna_span,
@@ -669,12 +675,12 @@ def quant_from_buffer(
     strand_models: StrandModels,
     frag_length_models: FragmentLengthModels,
     stats: PipelineStats,
+    calibration: "CalibrationResult",
     *,
     em_config: EMConfig | None = None,
     scoring: FragmentScoringConfig | None = None,
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
-    calibration: "CalibrationResult" = None,
     emit_locus_stats: bool = False,
     gdna_prior_c_base: float = 5.0,
     fl_prior_ess: float | None = None,
@@ -688,6 +694,9 @@ def quant_from_buffer(
     strand_models : StrandModels
     frag_length_models : FragmentLengthModels
     stats : PipelineStats
+    calibration : CalibrationResult
+        Required.  Provides the gDNA fragment-length model used for
+        scoring and the per-locus gDNA Dirichlet prior parameters.
     em_config : EMConfig or None
         EM algorithm configuration.  Defaults to ``EMConfig()``.
     scoring : FragmentScoringConfig or None
@@ -701,6 +710,13 @@ def quant_from_buffer(
     -------
     AbundanceEstimator
     """
+    if calibration is None or calibration.gdna_fl_model is None:
+        raise ValueError(
+            "quant_from_buffer() requires a calibrated CalibrationResult "
+            "with a populated gdna_fl_model; got "
+            f"{calibration!r}.  Run the calibration stage before "
+            "locus-level quantification."
+        )
     if em_config is None:
         em_config = EMConfig()
     if scoring is None:
@@ -784,9 +800,9 @@ def quant_from_buffer(
         # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
         # Honest gDNA flank: extend effective gDNA span by one mean gDNA
         # fragment length to account for partial-overlap reads at locus edges.
-        gdna_flank = 0
-        if calibration is not None and calibration.gdna_fl_model is not None:
-            gdna_flank = int(calibration.gdna_fl_model.mean)
+        # ``calibration.gdna_fl_model`` is guaranteed non-None by the early
+        # check at the top of this function.
+        gdna_flank = int(calibration.gdna_fl_model.mean)
         _run_locus_em_partitioned(
             estimator,
             partitions,
@@ -879,6 +895,13 @@ def run_pipeline(
     from .calibration import calibrate_gdna
 
     cal_cfg = config.calibration
+    strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
+    logger.info(
+        "[CAL] Strand trainer: n_spliced_obs=%d  ss_est=%.6f  ε_CI(99%%)=%.4g",
+        strand_models.n_observations,
+        strand_models.strand_specificity,
+        strand_ci_eps,
+    )
     calibration = calibrate_gdna(
         region_counts,
         fl_table,
@@ -887,6 +910,9 @@ def run_pipeline(
         mean_frag_len=frag_length_models.global_model.mean,
         intergenic_fl_model=frag_length_models.intergenic,
         fl_prior_ess=cal_cfg.fl_prior_ess,
+        strand_specificity_noise_floor=cal_cfg.strand_specificity_noise_floor,
+        strand_specificity_ci_epsilon=strand_ci_eps,
+        strand_llr_mode=cal_cfg.strand_llr_mode,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

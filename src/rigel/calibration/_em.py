@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from scipy.special import gammaln as _vlgamma
 
 from ..frag_length_model import FragmentLengthModel
 from ._fl_model import build_gdna_fl_model
@@ -64,13 +65,17 @@ class EMFit:
     strand_used: bool
     # Aggregate sense-bias z-score log: z = (p̂_sense - 0.5)/sqrt(0.25/N)
     strand_z: float
+    # Strand LLR mode actually used ("binomial" or "betabinom")
+    strand_llr_mode: str = "binomial"
+    # Beta-Binomial shared concentration κ (0.0 when binomial mode)
+    kappa: float = 0.0
     # Convergence
-    n_iter: int
-    converged: bool
+    n_iter: int = 0
+    converged: bool = False
     # Effective counts
-    n_eligible: int
-    n_soft: int
-    n_spliced_hard: int
+    n_eligible: int = 0
+    n_soft: int = 0
+    n_spliced_hard: int = 0
     # Iteration trace (optional diagnostics)
     history: list[dict] = field(default_factory=list)
 
@@ -102,13 +107,6 @@ def _poisson_logpmf(k: np.ndarray, rate: np.ndarray) -> np.ndarray:
     return out
 
 
-_vec_lgamma = np.frompyfunc(math.lgamma, 1, 1)
-
-
-def _vlgamma(x: np.ndarray) -> np.ndarray:
-    return _vec_lgamma(np.asarray(x, dtype=np.float64)).astype(np.float64)
-
-
 def _logsumexp(a: np.ndarray, axis: int = 0) -> np.ndarray:
     m = np.max(a, axis=axis, keepdims=True)
     finite = np.isfinite(m)
@@ -138,17 +136,23 @@ def _count_llr_poisson_ln(
     k = np.asarray(k_u, dtype=np.float64)
     E = np.asarray(E, dtype=np.float64)
 
-    # G-class log-likelihood (vector over regions)
-    ll_G = _poisson_logpmf(k, np.maximum(lam_G * E, 0.0))
+    # lgamma(k+1) is constant across both classes and all 21 quadrature nodes;
+    # compute once and reuse (≈10× cheaper via scipy.gammaln than frompyfunc,
+    # and eliminates the 21-node Python for-loop entirely).
+    lgamma_k1 = _vlgamma(k + 1.0)
 
-    # R-class: quadrature nodes on log μ → μ_j = exp(μ_R + σ_R · x_j)
-    # Shape: (K, N)
-    log_mu_j = mu_R + sigma_R * _GH_NODES  # (K,)
-    mu_j = np.exp(log_mu_j)  # (K,)
+    # G-class log-likelihood (vector over regions). In practice lam_G > 0 and
+    # E > 0 for every soft region (mappable-bp floor is applied upstream in
+    # _stats.compute_region_stats), so we can skip the safe-mask branch.
+    rate_G = lam_G * E
+    ll_G = k * np.log(np.maximum(rate_G, _EPS)) - rate_G - lgamma_k1
+
+    # R-class: quadrature nodes on log μ → μ_j = exp(μ_R + σ_R · x_j).
+    # Single broadcast over (K, N) avoids the per-node Python loop and the
+    # associated (K,) copies from _poisson_logpmf.
+    mu_j = np.exp(mu_R + sigma_R * _GH_NODES)  # (K,)
     rate_R = (lam_G + mu_j[:, None]) * E[None, :]  # (K, N)
-    log_p_R_nodes = np.empty_like(rate_R)
-    for j in range(rate_R.shape[0]):
-        log_p_R_nodes[j] = _poisson_logpmf(k, rate_R[j])
+    log_p_R_nodes = k[None, :] * np.log(rate_R) - rate_R - lgamma_k1[None, :]
     # logsumexp with weights
     log_p_R = _logsumexp(log_p_R_nodes + _GH_LOGW[:, None], axis=0)
 
@@ -167,19 +171,19 @@ def _aggregate_strand_z(
     """Aggregate one-sided z-score for "library is stranded".
 
     Pools sense/antisense counts across all eligible regions with a
-    known gene_strand and tests H0: p_sense = 0.5 vs H1: p_sense > 0.5
+    known tx_strand and tests H0: p_sense = 0.5 vs H1: p_sense > 0.5
     under a Binomial null.  Returns ``(z, p_hat, N)``; ``z = 0`` when
     ``N < 1``.
     """
     n_unspliced = stats["n_unspliced"]
     n_pos = stats["n_pos"]
-    gene_strand = stats["gene_strand"]
-    mask = eligible & (gene_strand != 0) & (n_unspliced > 0)
+    tx_strand = stats["tx_strand"]
+    mask = eligible & (tx_strand != 0) & (n_unspliced > 0)
     if not mask.any():
         return 0.0, 0.5, 0.0
     k_sense_i = np.zeros_like(n_unspliced)
-    pos_mask = mask & (gene_strand == 1)
-    neg_mask = mask & (gene_strand == -1)
+    pos_mask = mask & (tx_strand == 1)
+    neg_mask = mask & (tx_strand == -1)
     k_sense_i[pos_mask] = n_unspliced[pos_mask] - n_pos[pos_mask]
     k_sense_i[neg_mask] = n_pos[neg_mask]
     K = float(k_sense_i[mask].sum())
@@ -196,31 +200,44 @@ def _strand_llr(
     stats: dict[str, np.ndarray],
     strand_specificity: float,
     enabled: bool,
+    noise_floor: float = 1e-12,
 ) -> np.ndarray:
     """Binomial strand LLR: log Binom(k_sense | n, 0.5) − log Binom(k_sense | n, p_i).
 
     Returns zeros unless ``enabled`` is True (the caller decides via an
     aggregate z-test on observed strand bias).  Zero contribution also
     when the region's gene orientation is ambiguous or n_unspliced < 2.
+
+    Parameters
+    ----------
+    noise_floor
+        Effective floor applied to ``1 − ss`` under the RNA model.
+        This is ``max(ε_bio, ε_CI)`` computed by the caller and
+        captures structural antisense (ε_bio) and strand-trainer
+        measurement uncertainty (ε_CI).  Defaults to 1e-12 for
+        backwards compatibility in callers that don't yet pass it;
+        production callers should pass the config-derived value.
+        See ``docs/calibration/strand_llr_noise_floor_design.md``.
     """
     n_unspliced = stats["n_unspliced"]
     n_pos = stats["n_pos"]
-    gene_strand = stats["gene_strand"]
+    tx_strand = stats["tx_strand"]
     n = n_unspliced.shape[0]
     llr = np.zeros(n, dtype=np.float64)
 
     if not enabled:
         return llr
 
-    valid = (n_unspliced >= 2) & (gene_strand != 0)
+    valid = (n_unspliced >= 2) & (tx_strand != 0)
     if not valid.any():
         return llr
 
-    ss_c = float(np.clip(strand_specificity, _EPS, 1.0 - _EPS))
+    eps = float(max(noise_floor, _EPS))
+    ss_c = float(np.clip(strand_specificity, 0.5, 1.0 - eps))
     # Sense-read count per region (R1-antisense convention).
     k_sense = np.zeros(n, dtype=np.float64)
-    k_sense[gene_strand == 1] = n_unspliced[gene_strand == 1] - n_pos[gene_strand == 1]
-    k_sense[gene_strand == -1] = n_pos[gene_strand == -1]
+    k_sense[tx_strand == 1] = n_unspliced[tx_strand == 1] - n_pos[tx_strand == 1]
+    k_sense[tx_strand == -1] = n_pos[tx_strand == -1]
 
     k = k_sense[valid]
     tot = n_unspliced[valid]
@@ -228,6 +245,161 @@ def _strand_llr(
     log_ratio_anti = math.log(0.5 / (1.0 - ss_c))
     llr[valid] = k * log_ratio_sense + (tot - k) * log_ratio_anti
     return llr
+
+
+# ---------------------------------------------------------------------------
+# Beta-Binomial strand LLR (shared κ)
+# ---------------------------------------------------------------------------
+
+
+def _betaln_scalar(a: float, b: float) -> float:
+    return math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+
+
+def _betaln_vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return _vlgamma(a) + _vlgamma(b) - _vlgamma(a + b)
+
+
+def _compute_k_sense_valid(
+    stats: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (valid_mask, k_sense[valid], n_unspliced[valid]).
+
+    Same gating as the Binomial strand LLR: tx_strand != 0 and
+    n_unspliced >= 2.  ``k_sense`` is the R1-antisense-convention
+    sense-read count.
+    """
+    n_unspliced = stats["n_unspliced"]
+    n_pos = stats["n_pos"]
+    tx_strand = stats["tx_strand"]
+    valid = (n_unspliced >= 2) & (tx_strand != 0)
+    if not valid.any():
+        return valid, np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
+    k_sense = np.zeros(n_unspliced.shape[0], dtype=np.float64)
+    k_sense[tx_strand == 1] = n_unspliced[tx_strand == 1] - n_pos[tx_strand == 1]
+    k_sense[tx_strand == -1] = n_pos[tx_strand == -1]
+    return valid, k_sense[valid].astype(np.float64), n_unspliced[valid].astype(np.float64)
+
+
+def _strand_llr_betabinom(
+    stats: dict[str, np.ndarray],
+    strand_specificity: float,
+    kappa: float,
+    enabled: bool,
+    noise_floor: float = 1e-12,
+) -> np.ndarray:
+    """Beta-Binomial strand LLR with shared dispersion κ.
+
+    gDNA: BetaBinom(k_sense | n, κ/2, κ/2)  — symmetric around 0.5.
+    RNA:  BetaBinom(k_sense | n, κ·ss, κ·(1−ss)).
+
+    LLR = log P_G − log P_R (the C(n,k) combinatorial cancels exactly).
+    Degenerates to the Binomial LLR as κ → ∞ and vanishes identically
+    when ss = 0.5 (G and R coincide).
+
+    Applies the same gating (``tx_strand != 0``, ``n_unspliced ≥ 2``)
+    as the Binomial channel, and the same ``(0.5, 1-eps)`` clip on
+    ``ss`` for numerical safety.
+    """
+    n = stats["n_unspliced"].shape[0]
+    llr = np.zeros(n, dtype=np.float64)
+    if not enabled or kappa <= 0.0:
+        return llr
+    valid, k, tot = _compute_k_sense_valid(stats)
+    if k.size == 0:
+        return llr
+
+    eps = float(max(noise_floor, _EPS))
+    ss_c = float(np.clip(strand_specificity, 0.5, 1.0 - eps))
+
+    a_g = kappa / 2.0
+    a_e = kappa * ss_c
+    b_e = kappa * (1.0 - ss_c)
+
+    ll_g = _betaln_vec(k + a_g, tot - k + a_g) - _betaln_scalar(a_g, a_g)
+    ll_r = _betaln_vec(k + a_e, tot - k + b_e) - _betaln_scalar(a_e, b_e)
+
+    llr[valid] = ll_g - ll_r
+    return llr
+
+
+def _golden_section_max(
+    f,
+    a: float,
+    b: float,
+    tol: float = 1e-4,
+    max_iter: int = 100,
+) -> float:
+    """Argmax of *f* on [*a*, *b*] via golden-section search (no scipy)."""
+    gr = (math.sqrt(5.0) + 1.0) / 2.0
+    c = b - (b - a) / gr
+    d = a + (b - a) / gr
+    fc, fd = f(c), f(d)
+    for _ in range(max_iter):
+        if abs(b - a) < tol:
+            break
+        if fc > fd:
+            b, d, fd = d, c, fc
+            c = b - (b - a) / gr
+            fc = f(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + (b - a) / gr
+            fd = f(d)
+    return (a + b) / 2.0
+
+
+def _estimate_kappa_marginal(
+    stats: dict[str, np.ndarray],
+    gamma: np.ndarray,
+    strand_specificity: float,
+    *,
+    noise_floor: float = 1e-12,
+    kappa_lo: float = 0.01,
+    kappa_hi: float = 500.0,
+) -> float | None:
+    """Estimate shared κ via exact mixture marginal log-likelihood.
+
+    Maximises
+
+        ℓ(κ) = Σ_r log[ γ_r · P_G(k_r | n_r, κ) + (1 − γ_r) · P_R(k_r | n_r, κ) ]
+
+    where P_G = BetaBin(·, κ/2, κ/2) and P_R = BetaBin(·, κ·ss, κ·(1-ss)).
+
+    When one component carries less than one effective region of weight
+    (``sum(γ) < 1`` or ``sum(1−γ) < 1``), the responsibilities are too
+    extreme for a stable two-component fit, so γ is reset to 0.5 — the
+    objective collapses to a single symmetric Beta-Binomial, which is
+    label-free and always stable.
+
+    Returns ``None`` when fewer than 3 eligible (n ≥ 2, tx_strand != 0)
+    regions are available.
+    """
+    valid, k, n = _compute_k_sense_valid(stats)
+    if k.size < 3:
+        return None
+
+    g = gamma[valid].astype(np.float64)
+    if float(g.sum()) < 1.0 or float((1.0 - g).sum()) < 1.0:
+        g = np.full_like(g, 0.5)
+
+    eps = float(max(noise_floor, _EPS))
+    ss = float(np.clip(strand_specificity, 0.5, 1.0 - eps))
+
+    with np.errstate(divide="ignore"):
+        log_g = np.log(np.clip(g, _EPS, 1.0))
+        log_1mg = np.log(np.clip(1.0 - g, _EPS, 1.0))
+
+    def _ll(kappa: float) -> float:
+        a_g = kappa / 2.0
+        ll_g = _betaln_vec(k + a_g, n - k + a_g) - _betaln_scalar(a_g, a_g)
+        a_e = kappa * ss
+        b_e = kappa * (1.0 - ss)
+        ll_r = _betaln_vec(k + a_e, n - k + b_e) - _betaln_scalar(a_e, b_e)
+        return float(np.sum(np.logaddexp(log_g + ll_g, log_1mg + ll_r)))
+
+    kappa = _golden_section_max(_ll, kappa_lo, kappa_hi)
+    return max(kappa, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -264,9 +436,8 @@ def _fl_llr(
 
     rid = np.asarray(fl_region_ids, dtype=np.intp)
     flen = np.asarray(fl_frag_lens, dtype=np.intp)
-    ok = (rid >= 0) & (rid < n_regions) & (flen >= 0) & (flen <= max_size)
-    rid = rid[ok]
-    flen = flen[ok]
+    # Bounds validated once up-front in run_em; see bounds-check block there.
+    # Per-iter loop avoids re-masking 15M+ items.
     contrib = log_ratio[flen]
     # Scatter-add per region.
     np.add.at(llr, rid, contrib)
@@ -355,6 +526,9 @@ def _e_step(
     strand_specificity: float,
     strand_enabled: bool,
     llr_fl: np.ndarray | None,
+    strand_noise_floor: float = 1e-12,
+    strand_llr_mode: str = "binomial",
+    kappa: float = 0.0,
 ) -> np.ndarray:
     """Compute γ_i = P(z=G | data_i) for eligible soft regions.
 
@@ -383,7 +557,15 @@ def _e_step(
         mu_R,
         sigma_R,
     )
-    llr_strand_full = _strand_llr(stats, strand_specificity, strand_enabled)
+    if strand_llr_mode == "betabinom" and kappa > 0.0:
+        llr_strand_full = _strand_llr_betabinom(
+            stats, strand_specificity, kappa, strand_enabled,
+            noise_floor=strand_noise_floor,
+        )
+    else:
+        llr_strand_full = _strand_llr(
+            stats, strand_specificity, strand_enabled, noise_floor=strand_noise_floor
+        )
     llr_strand = llr_strand_full[soft]
 
     if llr_fl is not None:
@@ -496,22 +678,20 @@ def _build_fl_histogram(
         return model
     rid = np.asarray(fl_region_ids, dtype=np.intp)
     flen = np.asarray(fl_frag_lens, dtype=np.intp)
-    ok = (rid >= 0) & (rid < n_regions) & (flen >= 1) & (flen <= max_size)
-    if not ok.any():
+    # Upstream (EM driver) guarantees rid ∈ [0, n_regions) and
+    # flen ∈ [0, max_size]; we only need to drop the flen==0 bin (no signal
+    # there) and let bincount handle everything else. Zero-weight entries are
+    # valid for np.bincount and cost less than explicit masking on 15M fragments.
+    valid = flen >= 1
+    if not valid.any():
         model.finalize()
         return model
-    w = weights[rid[ok]] * 1.0
-    sub_flen = flen[ok]
-    sub_w = w
-    pos = sub_w > 0
-    if not pos.any():
-        model.finalize()
-        return model
-    counts = np.bincount(
-        sub_flen[pos], weights=sub_w[pos], minlength=max_size + 1
-    ).astype(np.float64)
+    rid_v = rid[valid]
+    flen_v = flen[valid]
+    w_v = weights[rid_v]
+    counts = np.bincount(flen_v, weights=w_v, minlength=max_size + 1).astype(np.float64)
     model.counts[: max_size + 1] = counts[: max_size + 1]
-    model._total_weight = float(sub_w[pos].sum())
+    model._total_weight = float(w_v.sum())
     model.finalize()
     return model
 
@@ -527,6 +707,8 @@ def run_em(
     strand_specificity: float,
     *,
     mean_frag_len: float,
+    strand_noise_floor: float = 1e-12,
+    strand_llr_mode: str = "binomial",
     max_iterations: int = 50,
     convergence_tol: float = 1e-4,
     strand_z_threshold: float = 3.0,
@@ -539,7 +721,7 @@ def run_em(
     stats
         Output of :func:`rigel.calibration._stats.compute_region_stats`.
         Must contain ``n_unspliced``, ``n_spliced``, ``n_pos``,
-        ``gene_strand``, ``mappable_bp``, and ``ref``.
+        ``tx_strand``, ``mappable_bp``, and ``ref``.
     fl_table
         Per-fragment (region_id, frag_len) table; may be ``None`` or
         empty.  When available, the FL LLR channel is enabled from
@@ -593,6 +775,20 @@ def run_em(
     if fl_table is not None and len(fl_table) > 0:
         fl_region_ids = fl_table["region_id"].to_numpy(dtype=np.intp)
         fl_frag_lens = fl_table["frag_len"].to_numpy(dtype=np.intp)
+        # Validate bounds ONCE up-front so the per-iteration hot-path
+        # (_build_fl_histogram, _fl_llr — both called on up to ~15M items
+        # per EM iter) can skip the mask entirely. This saves ~4.6 s/iter
+        # on VCaP-scale inputs.
+        _FL_MAX_SIZE = 1000
+        _ok = (
+            (fl_region_ids >= 0)
+            & (fl_region_ids < n_regions)
+            & (fl_frag_lens >= 0)
+            & (fl_frag_lens <= _FL_MAX_SIZE)
+        )
+        if not _ok.all():
+            fl_region_ids = fl_region_ids[_ok]
+            fl_frag_lens = fl_frag_lens[_ok]
 
     # --- Data-driven strand channel gating ---
     # One-sided binomial z-test on the *aggregate* sense fraction.
@@ -610,6 +806,14 @@ def run_em(
         n_strand_pool, p_sense_hat, strand_z, strand_z_threshold,
         "ENABLED" if strand_used else "disabled",
     )
+    if strand_used:
+        ss_clipped = float(np.clip(strand_specificity, 0.5, 1.0 - max(strand_noise_floor, _EPS)))
+        logger.info(
+            "EM calibration strand LLR: ss=%.6f → ss_clipped=%.6f  floor=%.4g  "
+            "log_ratio_sense=%+.3f  log_ratio_anti=%+.3f nats (max_per_anti_read)",
+            float(strand_specificity), ss_clipped, strand_noise_floor,
+            math.log(0.5 / ss_clipped), math.log(0.5 / (1.0 - ss_clipped)),
+        )
 
     # --- Anchor-only seed ---
     gamma, pi_init, n_spliced_hard = _seed_gamma(stats, eligible)
@@ -656,6 +860,22 @@ def run_em(
     n_iter = 0
     gdna_fl_model = None  # built after iter 0
 
+    # Shared Beta-Binomial κ (only updated when strand_llr_mode == "betabinom"
+    # and the strand channel is enabled).
+    kappa: float = 0.0
+    if strand_llr_mode == "betabinom" and strand_used:
+        k0 = _estimate_kappa_marginal(
+            stats, gamma, strand_specificity,
+            noise_floor=strand_noise_floor,
+        )
+        kappa = float(k0) if k0 is not None else 0.0
+        logger.info(
+            "EM calibration strand channel: mode=betabinom  κ_init=%.2f",
+            kappa,
+        )
+    elif strand_used:
+        logger.info("EM calibration strand channel: mode=binomial")
+
     prev_pi_soft = pi_soft
 
     for iteration in range(max_iterations):
@@ -681,10 +901,22 @@ def run_em(
         gamma = _e_step(
             stats, eligible, lam_G, mu_R, sigma_R,
             pi_soft, strand_specificity, strand_used, llr_fl,
+            strand_noise_floor=strand_noise_floor,
+            strand_llr_mode=strand_llr_mode,
+            kappa=kappa,
         )
 
         # --- M-step ---
         lam_G, mu_R, sigma_R, pi, pi_soft = _m_step(stats, eligible, gamma)
+
+        # --- κ update (self-consistent within EM) ---
+        if strand_llr_mode == "betabinom" and strand_used:
+            k_new = _estimate_kappa_marginal(
+                stats, gamma, strand_specificity,
+                noise_floor=strand_noise_floor,
+            )
+            if k_new is not None:
+                kappa = float(k_new)
 
         # --- FL model update (γ-weighted gDNA FL) ---
         if fl_region_ids.size > 0:
@@ -701,13 +933,14 @@ def run_em(
                 "sigma_R": sigma_R,
                 "pi": pi,
                 "pi_soft": pi_soft,
+                "kappa": kappa,
                 "delta_pi_soft": delta,
                 "mean_gamma_soft": float(np.mean(gamma[eligible & (n_s == 0)]))
                     if (eligible & (n_s == 0)).any() else float("nan"),
             })
         logger.debug(
-            "EM iter %d: λ_G=%.3e μ_R=%.2f σ_R=%.2f π=%.3f π_soft=%.3f Δ=%.2e",
-            n_iter, lam_G, mu_R, sigma_R, pi, pi_soft, delta,
+            "EM iter %d: λ_G=%.3e μ_R=%.2f σ_R=%.2f π=%.3f π_soft=%.3f κ=%.2f Δ=%.2e",
+            n_iter, lam_G, mu_R, sigma_R, pi, pi_soft, kappa, delta,
         )
 
         if delta < convergence_tol:
@@ -716,9 +949,10 @@ def run_em(
         prev_pi_soft = pi_soft
 
     logger.info(
-        "EM calibration %s in %d iters: λ_G=%.3e, μ_R=%.2f, σ_R=%.2f, π=%.3f",
+        "EM calibration %s in %d iters: λ_G=%.3e, μ_R=%.2f, σ_R=%.2f, π=%.3f, "
+        "mode=%s, κ=%.2f",
         "converged" if converged else "did NOT converge",
-        n_iter, lam_G, mu_R, sigma_R, pi,
+        n_iter, lam_G, mu_R, sigma_R, pi, strand_llr_mode, kappa,
     )
 
     return EMFit(
@@ -730,6 +964,8 @@ def run_em(
         gamma=gamma,
         strand_used=bool(strand_used),
         strand_z=float(strand_z),
+        strand_llr_mode=str(strand_llr_mode),
+        kappa=float(kappa),
         n_iter=n_iter,
         converged=converged,
         n_eligible=n_elig,

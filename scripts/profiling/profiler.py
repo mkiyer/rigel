@@ -511,25 +511,30 @@ def profile_stages(
     rss_snaps["after_scan"] = _snap_rss_current()
 
     # ── Stage 2: Finalize models ────────────────────────────
+    cal_cfg = pcfg.calibration
     with Timer("finalize_models") as t_fin:
         strand_models.finalize()
         frag_length_models.build_scoring_models()
-        frag_length_models.finalize()
+        frag_length_models.finalize(prior_ess=cal_cfg.fl_prior_ess)
     timings.finalize_models = t_fin.elapsed
     rss_snaps["after_finalize"] = _snap_rss_current()
 
     # ── Stage 2b: gDNA calibration ──────────────────────────
-    cal_cfg = CalibrationConfig()
     calibration_obj = None
     with Timer("calibration") as t_cal:
         if region_counts is not None and fl_table is not None and index.region_df is not None:
+            strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
             calibration_obj = calibrate_gdna(
                 region_counts,
                 fl_table,
                 index.region_df,
                 strand_models.strand_specificity,
-                density_percentile=cal_cfg.density_percentile,
+                mean_frag_len=frag_length_models.global_model.mean,
                 intergenic_fl_model=frag_length_models.intergenic,
+                fl_prior_ess=cal_cfg.fl_prior_ess,
+                strand_specificity_noise_floor=cal_cfg.strand_specificity_noise_floor,
+                strand_specificity_ci_epsilon=strand_ci_eps,
+                strand_llr_mode=cal_cfg.strand_llr_mode,
             )
             # Apply calibrated gDNA FL model for scoring
             frag_length_models.gdna_model = calibration_obj.gdna_fl_model
@@ -767,7 +772,6 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
 
             if s.locus_em > 0:
                 lines.append("  Locus EM sub-stages:")
-                lines.append(f"    build_locus_em_data: {s.locus_em_build:.3f}s")
                 lines.append(f"    run_locus_em:        {s.locus_em_run:.3f}s")
                 lines.append(f"    assign_posteriors:   {s.locus_em_assign:.3f}s")
                 lines.append(f"    Loci:                {r.n_loci:,}")

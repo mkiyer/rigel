@@ -13,11 +13,11 @@ direction as the gene (R1-sense) or the *opposite* direction (R1-antisense).
 
 The model stores a single Beta posterior over:
 
-    p_r1_sense = P(exon_strand == gene_strand)
+    p_r1_sense = P(exon_strand == tx_strand)
 
 and provides:
 
-* ``strand_likelihood(exon_strand, gene_strand)`` for Bayesian quantification
+* ``strand_likelihood(exon_strand, tx_strand)`` for Bayesian quantification
 * ``to_dict()`` / ``write_json()`` for human-readable output including
   derived protocol flags for downstream tools.
 """
@@ -201,6 +201,38 @@ class StrandModel:
         hi = min(1.0, p + z * se)
         return (lo, hi)
 
+    def strand_specificity_ci_epsilon(self, confidence: float = 0.99) -> float:
+        """Measurement-uncertainty floor on (1 − strand_specificity).
+
+        Returns ``ε_CI = 1 − UCL(ss)`` where ``UCL`` is the one-sided
+        upper credible limit on ``strand_specificity = max(p, 1-p)``
+        under a Beta(k + 1, (n − k) + 1) posterior on the minor-orientation
+        rate (Jeffreys-ish / Laplace prior).  Used by the gDNA calibration
+        mixture to avoid runaway strand LLRs when the training set is
+        small or when ``ss_est`` saturates to 1.0.
+
+        - ``n = 0``: returns 0.5 (maximally uncertain → caps LLR completely).
+        - ``n_minor = 0`` (degenerate): closed-form exact upper limit
+          ``UCL = 1 − (1−conf)^(1/(n+1))`` from Beta(1, n+1).
+        - general case: scipy ``betaincinv`` evaluation.
+        """
+        from scipy.special import betaincinv
+
+        n = self.n_observations
+        if n == 0:
+            return 0.5
+        # Minor-orientation count: the observations that argue *against*
+        # perfect strand specificity.  Whichever side (sense or antisense)
+        # the trainer chose as "sense" is irrelevant — we care about the
+        # stray-minority rate.
+        k_minor = min(self.n_same, self.n_opposite)
+        alpha = k_minor + 1.0
+        beta = (n - k_minor) + 1.0
+        # UCL on minor-orientation rate r = 1 − ss at the given confidence.
+        r_ucl = float(betaincinv(alpha, beta, confidence))
+        # Clamp to (0, 0.5): ss = max(p, 1-p) ≥ 0.5 so ε_CI ≤ 0.5.
+        return max(0.0, min(0.5, r_ucl))
+
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
     # ------------------------------------------------------------------
@@ -220,15 +252,15 @@ class StrandModel:
         self._cached_p_antisense = 1.0 - self._cached_p_sense
         self._finalized = True
 
-    def strand_likelihood(self, exon_strand: int, gene_strand: int) -> float:
-        """Strand likelihood: P(exon_strand | fragment from gene_strand).
+    def strand_likelihood(self, exon_strand: int, tx_strand: int) -> float:
+        """Strand likelihood: P(exon_strand | fragment from tx_strand).
 
         Used during Bayesian quantification to weight candidate genes.
         Accepts int strand values (``Strand`` is an IntEnum so can be
         passed directly).
 
-        * If ``exon_strand == gene_strand`` → ``p_r1_sense``
-        * If ``exon_strand != gene_strand`` → ``1 - p_r1_sense``
+        * If ``exon_strand == tx_strand`` → ``p_r1_sense``
+        * If ``exon_strand != tx_strand`` → ``1 - p_r1_sense``
         * If either is NONE/AMBIGUOUS (not 1 or 2) → 0.5 (uninformative)
 
         Must be called after :meth:`finalize`.
@@ -236,9 +268,9 @@ class StrandModel:
         # 1=POS, 2=NEG are the only informative values
         if exon_strand != 1 and exon_strand != 2:
             return 0.5
-        if gene_strand != 1 and gene_strand != 2:
+        if tx_strand != 1 and tx_strand != 2:
             return 0.5
-        if exon_strand == gene_strand:
+        if exon_strand == tx_strand:
             return self._cached_p_sense
         return self._cached_p_antisense
 
@@ -415,6 +447,10 @@ class StrandModels:
     def n_observations(self) -> int:
         """RNA model's observation count."""
         return self.exonic_spliced.n_observations
+
+    def strand_specificity_ci_epsilon(self, confidence: float = 0.99) -> float:
+        """Delegate: ε_CI from the primary (exonic_spliced) strand model."""
+        return self.exonic_spliced.strand_specificity_ci_epsilon(confidence)
 
     # ------------------------------------------------------------------
     # Serialization
