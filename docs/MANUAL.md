@@ -104,6 +104,10 @@ rigel index --fasta genome.fa --gtf annotation.gtf -o index/
 | `--fasta` | required | Genome FASTA (must have `.fai` index) |
 | `--gtf` | required | Annotation GTF |
 | `-o`, `--output-dir` | required | Output directory |
+| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides per-base fractional mappability (used during gDNA calibration) and the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
+| `--no-mappability` | off | Opt out of mappability and the splice-artifact blacklist. Mutually exclusive with `--alignable-zarr`. |
+| `--splice-blacklist-min-count` | `2` | Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
+| `--mappability-read-length` | `100` | Read-length bin used when querying the alignable store. |
 | `--nrna-tolerance` | `20` | Max distance (bp) for clustering transcript start/end sites into shared nRNA spans |
 | `--gtf-parse-mode` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them |
 | `--feather-compression` | `lz4` | Feather compression: `lz4`, `zstd`, or `uncompressed` |
@@ -336,6 +340,16 @@ Run-level summary. Key sections:
 
 Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 
+**Guarantees.** Rigel accepts a collated BAM in and produces a collated BAM
+out with **exactly the same records**:
+
+- Record-count parity: the output contains the same multiset of records as
+  the input (no drops, no duplications). This is enforced by regression tests.
+- Collation is preserved: every qname appears in a single contiguous run in
+  the output.
+- Filtered records (QCFAIL / unmapped / unpaired / duplicates when skipped)
+  are written through unchanged without annotation tags.
+
 | Tag | Type | Description |
 |-----|------|-------------|
 | `ZT` | string | Assigned transcript ID, or `.` |
@@ -345,43 +359,65 @@ Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 | `ZJ` | int | Gene index into rigel reference (`-1` if unassigned) |
 | `ZF` | int | Assignment flags bitfield (see below) |
 | `ZW` | float | Posterior probability of the assignment |
-| `ZC` | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
+| `ZC` | string | Input-ambiguity class for scored fragments: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`. `.` for records that were not scored by the EM (chimeric, intergenic, or dropped multimappers) |
 | `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise. Note: this reflects rigel's EM assignment, which may differ from the aligner's primary/secondary FLAG. |
 | `ZN` | int | Number of competing candidate components |
 | `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `unknown` |
 | `ZL` | int | Locus ID (`-1` if no locus) |
+| `ZB` | int | Number of splice junctions in **this record's CIGAR** that matched the splice-artifact blacklist and were treated as unspliced during scoring. Record-local (a mate with clean junctions reports `0` even if its mate reports `>0`). Always `0` when no blacklist is loaded. Sum of `ZB` across the annotated BAM equals the Pass-1 stat `n_sj_blacklisted`. |
 
 #### ZF assignment flags
 
-The `ZF` tag is an integer bitfield encoding both the EM assignment result
-and properties of the assigned transcript:
+The `ZF` tag is an 8-bit integer bitfield describing the fate of the fragment
+(or read when unpaired) in the EM pipeline:
 
 | Bit | Mask | Flag | Meaning |
 |-----|------|------|---------|
-| 0 | 0x1 | `is_resolved` | Fragment was scored and assigned by the EM |
-| 1 | 0x2 | `is_gdna` | Assigned to the gDNA EM component |
-| 2 | 0x4 | `is_nrna` | Assigned transcript is single-exon (nRNA candidate) |
-| 3 | 0x8 | `is_synthetic` | Assigned transcript is a rigel-generated nRNA span |
+| 0 | 0x01 | `is_resolved` | Fragment was scored and assigned by the EM |
+| 1 | 0x02 | `is_mrna` | Assigned to a spliced mRNA transcript |
+| 2 | 0x04 | `is_gdna` | Assigned to the gDNA component (EM gDNA or intergenic) |
+| 3 | 0x08 | `is_nrna` | Assigned to a nascent-RNA component |
+| 4 | 0x10 | `is_synthetic` | Assigned to a rigel-generated synthetic nRNA span |
+| 5 | 0x20 | `is_intergenic` | No annotation overlap (always paired with `is_gdna`) |
+| 6 | 0x40 | `is_chimeric` | Chimeric fragment, skipped before scoring |
+| 7 | 0x80 | `is_multimapper_dropped` | Multimapper dropped when `--include-multimap` is off |
 
-Valid ZF values:
+Canonical ZF values (the only values produced):
 
-| ZF | Meaning |
-|----|---------|
-| 0 | Not resolved (intergenic, chimeric, or filtered) |
-| 1 | Transcript assigned (multi-exon, annotated) |
-| 3 | gDNA component assigned |
-| 5 | Transcript assigned (single-exon nRNA, annotated) |
-| 13 | Transcript assigned (single-exon nRNA, synthetic) |
+| ZF (hex) | Dec | Meaning |
+|----------|-----|---------|
+| `0x00` |   0 | Unresolved (placeholder; never written by rigel) |
+| `0x03` |   3 | mRNA assigned (multi-exon transcript) |
+| `0x09` |   9 | nRNA assigned (annotated single-exon transcript) |
+| `0x19` |  25 | nRNA assigned (rigel-synthesized span) |
+| `0x05` |   5 | gDNA assigned by EM (annotation-overlapping) |
+| `0x25` |  37 | gDNA assigned by intergenic fallback |
+| `0x40` |  64 | Chimeric, not scored |
+| `0x80` | 128 | Multimapper dropped, not scored |
+
+Invariants (enforced by tests):
+
+- Exactly one of `{is_mrna, is_gdna, is_nrna}` is set on any resolved record.
+- `is_resolved` ⇒ the record participated in the EM (mRNA/nRNA/gDNA); the
+  complement (`is_chimeric` or `is_multimapper_dropped` or unresolved) never
+  has `is_resolved` set.
+- `is_synthetic` ⇒ `is_nrna`.
+- `is_intergenic` ⇒ `is_gdna`.
+- `is_chimeric` and `is_multimapper_dropped` are mutually exclusive and never
+  combine with any assignment bit.
 
 Pysam usage:
 
 ```python
 zf = read.get_tag("ZF")
-is_resolved  = (zf & 0x1) != 0
-is_gdna      = (zf & 0x2) != 0
-is_nrna      = (zf & 0x4) != 0
-is_synthetic = (zf & 0x8) != 0
-is_transcript = is_resolved and not is_gdna
+is_resolved   = (zf & 0x01) != 0
+is_mrna       = (zf & 0x02) != 0
+is_gdna       = (zf & 0x04) != 0
+is_nrna       = (zf & 0x08) != 0
+is_synthetic  = (zf & 0x10) != 0
+is_intergenic = (zf & 0x20) != 0
+is_chimeric   = (zf & 0x40) != 0
+is_mm_dropped = (zf & 0x80) != 0
 ```
 
 ---

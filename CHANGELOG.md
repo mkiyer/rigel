@@ -5,7 +5,30 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-04-05
+## [Unreleased]
+
+### Changed (Breaking)
+
+- **Annotated BAM `ZF` tag redesigned** (breaking): `ZF` is now an 8-bit
+  bitfield with explicit flags for every fragment outcome. New bits:
+  `is_resolved` (0x01), `is_mrna` (0x02), `is_gdna` (0x04), `is_nrna` (0x08),
+  `is_synthetic` (0x10), `is_intergenic` (0x20), `is_chimeric` (0x40),
+  `is_multimapper_dropped` (0x80). Canonical values: `0x03` mRNA, `0x09` nRNA,
+  `0x19` synthetic nRNA, `0x05` EM-gDNA, `0x25` intergenic gDNA, `0x40`
+  chimeric, `0x80` dropped multimapper. Consumers that decoded the legacy
+  bits (`is_resolved=0x1, is_gdna=0x2, is_nrna=0x4, is_synthetic=0x8`) or
+  the legacy numeric values `{0, 1, 3, 5, 13}` must update. The old
+  `is_resolved` bit did not distinguish mRNA from nRNA; readers should now
+  branch on the explicit `is_mrna` / `is_nrna` / `is_gdna` bits.
+
+- **Annotated BAM `ZC` tag narrowed** (breaking): `ZC` now reflects input
+  ambiguity only and takes one of `{unambig, ambig_same_strand,
+  ambig_opp_strand, multimapper}` on scored records, or `"."` on records
+  that were not scored (chimeric, intergenic, dropped multimappers). The
+  former `chimeric` and `intergenic` string values have been removed — that
+  information is now exclusively carried in `ZF`.
+
+
 
 ### Added
 

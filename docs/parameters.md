@@ -12,6 +12,10 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 | `--fasta` | required | Genome FASTA (must have `.fai` index) |
 | `--gtf` | required | Annotation GTF |
 | `-o`, `--output-dir` | required | Output directory |
+| `--alignable-zarr PATH` | — | Alignable Zarr store. Provides fractional mappability (for gDNA calibration) and the splice-artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
+| `--no-mappability` | off | Opt out of mappability and the splice-artifact blacklist. Mutually exclusive with `--alignable-zarr`. |
+| `--splice-blacklist-min-count` | `2` | Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Ignored under `--no-mappability`. |
+| `--mappability-read-length` | `100` | Read-length bin used when querying the alignable store. |
 | `--nrna-tolerance` | `20` | Max distance (bp) for clustering transcript start/end sites into shared nRNA spans |
 | `--gtf-parse-mode` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs and skips them |
 | `--feather-compression` | `lz4` | Feather file compression: `lz4`, `zstd`, or `uncompressed` |
@@ -52,7 +56,7 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--tsv` | off | Write TSV mirrors alongside Feather files |
-| `--annotated-bam PATH` | — | Write annotated BAM with per-fragment assignment tags (`ZT`, `ZG`, `ZI`, `ZJ`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL`). Requires a second BAM pass. |
+| `--annotated-bam PATH` | — | Write annotated BAM with per-fragment assignment tags (`ZT`, `ZG`, `ZR`, `ZI`, `ZJ`, `ZF`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL`, `ZB`). Rigel guarantees the output is collated and contains exactly the same records as the input. Requires a second BAM pass. |
 
 ### Performance
 
@@ -74,7 +78,7 @@ suitable for standard total RNA-seq libraries.
 | `--assignment-min-posterior` | `0.01` | Minimum component posterior for discrete assignment (`map`/`sample` modes only). Components below this threshold are zeroed before assignment. |
 | `--em-convergence-delta` | `1e-6` | EM convergence threshold for parameter updates (‖Δθ‖). |
 | `--pruning-min-posterior` | `1e-4` | Remove CSR candidates with posterior below this threshold before running EM. Reduces state space for complex loci. Set to `0` to disable. |
-| `--overhang-alpha` | `0.01` | Per-base overhang penalty α ∈ (0, 1]. Fragment score multiplied by α for each overhang base. `0` = hard gate, `1` = no penalty. |
+| `--overhang-alpha` | `0.1` | Per-base overhang penalty α ∈ (0, 1]. Fragment score multiplied by α for each overhang base. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha` | `0.1` | Per-mismatch (NM tag) penalty α ∈ (0, 1]. Score multiplied by α per mismatch. `0` = hard gate, `1` = no penalty. |
 | `--gdna-splice-penalty-unannot` | `0.01` | Multiplier applied to the gDNA candidate score for fragments with unannotated splice junctions. Values close to 0 make gDNA attribution less likely for spliced fragments. |
 
@@ -105,7 +109,7 @@ seed: null                     # null = use current timestamp
 tmpdir: null                   # null = system temp directory
 
 # Advanced scoring
-overhang_alpha: 0.01
+overhang_alpha: 0.1
 mismatch_alpha: 0.1
 gdna_splice_penalty_unannot: 0.01
 pruning_min_posterior: 0.0001

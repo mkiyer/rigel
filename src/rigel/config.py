@@ -83,8 +83,8 @@ class FragmentScoringConfig:
     Parameters
     ----------
     overhang_log_penalty : float
-        Log-penalty per base of overhang.  Default ``log(0.01) ≈ −4.605``
-        (i.e. each overhang base cuts probability by 100×).
+        Log-penalty per base of overhang.  Default ``log(0.1) ≈ −2.303``
+        (i.e. each overhang base cuts probability by 10×).
     mismatch_log_penalty : float
         Log-penalty per NM mismatch.  Default ``log(0.1) ≈ −2.303``
         (i.e. each mismatch cuts probability by 10×).
@@ -92,7 +92,7 @@ class FragmentScoringConfig:
         Per-SpliceType gDNA penalties (int keys → float values).
     """
 
-    overhang_log_penalty: float = math.log(0.01)
+    overhang_log_penalty: float = math.log(0.1)
     mismatch_log_penalty: float = math.log(0.1)
     gdna_splice_penalties: dict[int, float] | None = None
     pruning_min_posterior: float = 1e-4

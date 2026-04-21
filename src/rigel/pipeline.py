@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from .annotate import (
-    AF_GDNA_RESOLVED,
+    AF_GDNA_EM,
     AF_UNRESOLVED,
     winner_flags,
 )
@@ -469,7 +469,7 @@ def _populate_em_annotations(
 
     # ZF assignment flags bitfield
     tx_flags = np.full(n, AF_UNRESOLVED, dtype=np.uint8)
-    tx_flags[best_tid == -2] = AF_GDNA_RESOLVED
+    tx_flags[best_tid == -2] = AF_GDNA_EM
     if valid_t.any():
         winner_tids = best_tid[valid_t]
         tx_flags[valid_t] = winner_flags(

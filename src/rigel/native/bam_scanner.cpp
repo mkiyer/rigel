@@ -98,11 +98,29 @@ static const char* frag_class_label(int code) {
         case FRAG_AMBIG_SAME_STRAND: return "ambig_same_strand";
         case FRAG_AMBIG_OPP_STRAND:  return "ambig_opp_strand";
         case FRAG_MULTIMAPPER:       return "multimapper";
-        case FRAG_CHIMERIC:          return "chimeric";
-        case -1:                     return "intergenic";
+        // Chimeric / intergenic fragments never entered EM; ZC reports the
+        // *input-ambiguity* axis only and is blanked for these cases.  The
+        // outcome is carried entirely by ZF (AF_CHIMERIC / AF_GDNA_INTERGENIC).
+        case FRAG_CHIMERIC:          return ".";
+        case -1:                     return ".";
         default:                     return "unknown";
     }
 }
+
+// ================================================================
+// ZF assignment-flag constants are defined in constants.h.  This file
+// references them through the unqualified names via the using-decls
+// below so the stamp sites read cleanly.
+// ================================================================
+
+using rigel::AF_UNRESOLVED;
+using rigel::AF_MRNA;
+using rigel::AF_NRNA;
+using rigel::AF_NRNA_SYNTH;
+using rigel::AF_GDNA_EM;
+using rigel::AF_GDNA_INTERGENIC;
+using rigel::AF_CHIMERIC;
+using rigel::AF_MULTIMAPPER_DROP;
 
 static const char* splice_type_label(int code) {
     switch (code) {
@@ -1715,8 +1733,8 @@ public:
                 }
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
                                     -1, -1,
-                                    0, 0.0f,
-                                    "intergenic", 1, 0, "unknown", -1);
+                                    AF_MULTIMAPPER_DROP, 0.0f,
+                                    ".", 1, 0, "unknown", -1);
                 n_intergenic++;
                 n_records_written += static_cast<int64_t>(raw_group.size());
                 frag_id++;
@@ -1851,13 +1869,17 @@ public:
 
                     n_annotated++;
                 } else {
-                    // Intergenic / no annotation
+                    // No EM annotation for this frag_id: deterministic
+                    // intergenic gDNA fast-path.  Stamp ZF with the
+                    // intergenic+gDNA outcome bits so a single AND-mask on
+                    // ZF captures total gDNA.  ZW=1.0 because there is no
+                    // competing hypothesis.
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
                         ".", ".", ".",
                         -1, -1,
-                        0, 0.0f,
-                        "intergenic",
+                        AF_GDNA_INTERGENIC, 1.0f,
+                        ".",
                         (hit_idx == 0) ? 1 : 0,
                         0, "unknown", -1);
                     n_intergenic++;
@@ -1884,8 +1906,8 @@ public:
                     orphan, out, hdr,
                     ".", ".", ".",
                     -1, -1,
-                    0, 0.0f,
-                    "intergenic", 0, 0, "unknown", -1);
+                    AF_GDNA_INTERGENIC, 1.0f,
+                    ".", 0, 0, "unknown", -1);
                 n_intergenic++;
                 n_records_written +=
                     static_cast<int64_t>(orphan.size());

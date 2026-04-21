@@ -12,7 +12,9 @@ assignment decision for each fragment:
 
 - ``best_tid`` — transcript index (-1 = intergenic / gDNA / unassigned)
 - ``best_gid`` — gene index (-1 = intergenic / unassigned)
-- ``tx_flags`` — assignment flags bitfield (is_resolved, is_gdna, is_nrna, is_synthetic)
+- ``tx_flags`` — ZF outcome bitfield (see ``AF_*`` constants; includes
+  is_resolved, is_mrna, is_gdna, is_nrna, is_synthetic, is_intergenic,
+  is_chimeric, is_multimapper_dropped)
 - ``posterior``— posterior probability of the winning assignment
 - ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
 - ``n_candidates`` — number of competing EM candidates
@@ -49,18 +51,19 @@ BAM Tag Schema
      - Gene index into rigel reference (``-1`` if unassigned)
    * - ZF
      - i
-     - Assignment flags bitfield:
-       bit 0 = is_resolved (fragment scored and assigned by EM),
-       bit 1 = is_gdna (EM gDNA component won),
-       bit 2 = is_nrna (assigned transcript is single-exon),
-       bit 3 = is_synthetic (assigned transcript is rigel-generated nRNA span)
+     - Outcome bitfield fully answering "what happened to this fragment?":
+       bit 0 = is_resolved, bit 1 = is_mrna, bit 2 = is_gdna
+       (intergenic + EM-gDNA), bit 3 = is_nrna, bit 4 = is_synthetic,
+       bit 5 = is_intergenic, bit 6 = is_chimeric, bit 7 =
+       is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
    * - ZW
      - f
      - Posterior probability of assignment
    * - ZC
      - Z
-     - Fragment class: ``unambig``, ``ambig_same_strand``,
-       ``ambig_opp_strand``, ``multimapper``, ``chimeric``, ``intergenic``
+     - Input-ambiguity class (pre-EM candidate-set structure):
+       ``unambig``, ``ambig_same_strand``, ``ambig_opp_strand``,
+       ``multimapper``, or ``.`` for fragments that never entered EM
    * - ZH
      - i
      - Primary hit flag: 1 = winning alignment, 0 = secondary
@@ -93,32 +96,63 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Assignment flag bits (written to BAM as the ZF:i tag)
+#
+# ZF is the unified per-fragment outcome bitfield.  One AND-mask per
+# predicate answers "what happened to this fragment?" without requiring
+# cross-reference to any other tag.
+#
+#   bit 0 (0x01)  is_resolved             rigel assigned this fragment to a pool
+#   bit 1 (0x02)  is_mrna                 pool = mRNA
+#   bit 2 (0x04)  is_gdna                 pool = gDNA (intergenic + EM-gDNA)
+#   bit 3 (0x08)  is_nrna                 pool = nRNA (annotated or synthetic)
+#   bit 4 (0x10)  is_synthetic            nRNA subtype: rigel-generated span
+#   bit 5 (0x20)  is_intergenic           gDNA subtype: deterministic fast-path
+#   bit 6 (0x40)  is_chimeric             unresolved reason: chimeric
+#   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-multimap drop
+#
+# Invariants (enforced by tests):
+#   1. is_resolved XOR (is_chimeric | is_multimapper_dropped)
+#   2. When is_resolved, exactly one of {is_mrna, is_gdna, is_nrna} is set
+#   3. is_synthetic  -> is_nrna
+#   4. is_intergenic -> is_resolved & is_gdna
+#   5. is_chimeric and is_multimapper_dropped are mutually exclusive
+#   6. Subtype bits (is_synthetic, is_intergenic) only set with their pool bit
 # ---------------------------------------------------------------------------
-AF_RESOLVED: int = 0x1   # bit 0: fragment was scored and assigned by EM
-AF_GDNA: int = 0x2       # bit 1: EM gDNA component won
-AF_NRNA: int = 0x4       # bit 2: assigned transcript is single-exon
-AF_SYNTHETIC: int = 0x8  # bit 3: assigned transcript is rigel-generated nRNA span
 
-# Pre-computed valid assignment flag values for common outcomes.
-AF_UNRESOLVED: int = 0                                      # 0  — not modeled
-AF_TRANSCRIPT: int = AF_RESOLVED                             # 1  — multi-exon transcript
-AF_GDNA_RESOLVED: int = AF_RESOLVED | AF_GDNA               # 3  — gDNA component
-AF_NRNA_RESOLVED: int = AF_RESOLVED | AF_NRNA               # 5  — single-exon annotated
-AF_SYNTH_RESOLVED: int = AF_RESOLVED | AF_NRNA | AF_SYNTHETIC  # 13 — synthetic nRNA span
+# Primitive bits
+AF_RESOLVED: int = 0x01
+AF_MRNA_BIT: int = 0x02
+AF_GDNA_BIT: int = 0x04
+AF_NRNA_BIT: int = 0x08
+AF_SYNTHETIC_BIT: int = 0x10
+AF_INTERGENIC_BIT: int = 0x20
+AF_CHIMERIC_BIT: int = 0x40
+AF_MULTIMAPPER_DROP_BIT: int = 0x80
+
+# Canonical composed values (the only legitimate ZF outputs).
+AF_UNRESOLVED: int = 0x00                                            # 0x00
+AF_MRNA: int = AF_RESOLVED | AF_MRNA_BIT                             # 0x03
+AF_NRNA: int = AF_RESOLVED | AF_NRNA_BIT                             # 0x09
+AF_NRNA_SYNTH: int = AF_NRNA | AF_SYNTHETIC_BIT                      # 0x19
+AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT                          # 0x05
+AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT             # 0x25
+AF_CHIMERIC: int = AF_CHIMERIC_BIT                                   # 0x40
+AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT                   # 0x80
 
 
 def winner_flag(is_nrna: bool, is_synthetic: bool) -> int:
-    """Return the AF_* flag for a single winning transcript.
+    """Return the AF_* flag for a single winning (non-gDNA) transcript.
 
-    Precedence: synthetic > nRNA > plain transcript.  A row flagged
-    ``is_synthetic`` is by construction also an nRNA row, so the synthetic
-    branch takes priority.
+    Precedence: synthetic > nRNA > mRNA.  A row flagged ``is_synthetic``
+    is by construction also an nRNA row, so the synthetic branch takes
+    priority.  gDNA-component winners are stamped separately at the call
+    site using ``AF_GDNA_EM`` and do not pass through this helper.
     """
     if is_synthetic:
-        return AF_SYNTH_RESOLVED
+        return AF_NRNA_SYNTH
     if is_nrna:
-        return AF_NRNA_RESOLVED
-    return AF_TRANSCRIPT
+        return AF_NRNA
+    return AF_MRNA
 
 
 def winner_flags(
@@ -131,19 +165,23 @@ def winner_flags(
     scalar form.  Use on arrays of winner-transcript flags (already
     filtered to valid-winner indices).
     """
-    flags = np.full(len(is_nrna), AF_TRANSCRIPT, dtype=np.uint8)
-    flags[np.asarray(is_nrna, dtype=bool) & ~np.asarray(is_synthetic, dtype=bool)] = AF_NRNA_RESOLVED
-    flags[np.asarray(is_synthetic, dtype=bool)] = AF_SYNTH_RESOLVED
+    is_nrna_b = np.asarray(is_nrna, dtype=bool)
+    is_synth_b = np.asarray(is_synthetic, dtype=bool)
+    flags = np.full(len(is_nrna_b), AF_MRNA, dtype=np.uint8)
+    flags[is_nrna_b & ~is_synth_b] = AF_NRNA
+    flags[is_synth_b] = AF_NRNA_SYNTH
     return flags
 
-# Fragment-class labels for the ZC tag.
+
+# Fragment-class labels for the ZC tag.  ZC is the *input-ambiguity* axis,
+# orthogonal to ZF.  Fragments that never entered EM (intergenic, chimeric,
+# multimapper-dropped) are stamped with ZC="." by the writer directly and
+# do not appear in this map.
 _FRAG_CLASS_LABELS = {
     0: "unambig",
     1: "ambig_same_strand",
     2: "ambig_opp_strand",
     3: "multimapper",
-    4: "chimeric",
-    -1: "intergenic",
 }
 
 

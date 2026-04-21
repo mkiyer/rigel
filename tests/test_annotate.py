@@ -14,18 +14,85 @@ import pytest
 
 from rigel.annotate import (
     AnnotationTable,
-    AF_GDNA,
-    AF_GDNA_RESOLVED,
+    AF_CHIMERIC,
+    AF_CHIMERIC_BIT,
+    AF_GDNA_BIT,
+    AF_GDNA_EM,
+    AF_GDNA_INTERGENIC,
+    AF_INTERGENIC_BIT,
+    AF_MRNA,
+    AF_MRNA_BIT,
+    AF_MULTIMAPPER_DROP,
+    AF_MULTIMAPPER_DROP_BIT,
     AF_NRNA,
-    AF_NRNA_RESOLVED,
+    AF_NRNA_BIT,
+    AF_NRNA_SYNTH,
     AF_RESOLVED,
-    AF_SYNTH_RESOLVED,
-    AF_SYNTHETIC,
-    AF_TRANSCRIPT,
+    AF_SYNTHETIC_BIT,
     AF_UNRESOLVED,
     _FRAG_CLASS_LABELS,
     _splice_type_label,
 )
+
+
+# Set of the only legitimate ZF outputs produced by rigel.
+VALID_ZF_VALUES = {
+    AF_UNRESOLVED,
+    AF_MRNA,
+    AF_NRNA,
+    AF_NRNA_SYNTH,
+    AF_GDNA_EM,
+    AF_GDNA_INTERGENIC,
+    AF_CHIMERIC,
+    AF_MULTIMAPPER_DROP,
+}
+
+
+def _assert_zf_invariants(zf: int) -> None:
+    """Assert the 6 ZF invariants from docs/annotated_bam_fix/ZF_TAG_REDESIGN.md."""
+    is_resolved  = bool(zf & AF_RESOLVED)
+    is_mrna      = bool(zf & AF_MRNA_BIT)
+    is_gdna      = bool(zf & AF_GDNA_BIT)
+    is_nrna      = bool(zf & AF_NRNA_BIT)
+    is_synth     = bool(zf & AF_SYNTHETIC_BIT)
+    is_interg    = bool(zf & AF_INTERGENIC_BIT)
+    is_chim      = bool(zf & AF_CHIMERIC_BIT)
+    is_mm_drop   = bool(zf & AF_MULTIMAPPER_DROP_BIT)
+
+    # 1: resolved XOR (chimeric OR mm_dropped) — every stamped record is
+    #    exactly one or the other (unresolved sentinel ZF=0 also
+    #    satisfies this: neither side is set).
+    assert not (is_resolved and (is_chim or is_mm_drop)), (
+        f"ZF={zf:#x}: resolved AND dropped bits both set"
+    )
+    # 2: resolved -> exactly one pool bit
+    if is_resolved:
+        pool_count = int(is_mrna) + int(is_gdna) + int(is_nrna)
+        assert pool_count == 1, (
+            f"ZF={zf:#x}: resolved but {pool_count} pool bits set"
+        )
+    else:
+        # Pool bits are only meaningful when resolved
+        assert not (is_mrna or is_gdna or is_nrna), (
+            f"ZF={zf:#x}: pool bit set without is_resolved"
+        )
+    # 3: synthetic -> nrna
+    if is_synth:
+        assert is_nrna, f"ZF={zf:#x}: is_synthetic set without is_nrna"
+    # 4: intergenic -> resolved & gdna
+    if is_interg:
+        assert is_resolved and is_gdna, (
+            f"ZF={zf:#x}: is_intergenic without resolved&gdna"
+        )
+    # 5: chimeric and mm_dropped mutually exclusive
+    assert not (is_chim and is_mm_drop), (
+        f"ZF={zf:#x}: chimeric AND mm_dropped both set"
+    )
+    # 6: subtype bits only with their pool
+    if is_synth:
+        assert is_nrna, f"ZF={zf:#x}: synthetic subtype without nrna"
+    if is_interg:
+        assert is_gdna, f"ZF={zf:#x}: intergenic subtype without gdna"
 
 
 # =====================================================================
@@ -47,7 +114,7 @@ class TestAnnotationTable:
             frag_id=42,
             best_tid=5,
             best_gid=2,
-            tx_flags=AF_TRANSCRIPT,
+            tx_flags=AF_MRNA,
             posterior=0.95,
             frag_class=0,
             n_candidates=3,
@@ -58,7 +125,7 @@ class TestAnnotationTable:
         assert ann is not None
         assert ann["best_tid"] == 5
         assert ann["best_gid"] == 2
-        assert ann["tx_flags"] == AF_TRANSCRIPT
+        assert ann["tx_flags"] == AF_MRNA
         assert abs(ann["posterior"] - 0.95) < 0.01
         assert ann["frag_class"] == 0
         assert ann["n_candidates"] == 3
@@ -71,7 +138,7 @@ class TestAnnotationTable:
     def test_grow(self):
         tbl = AnnotationTable.create(2)
         for i in range(10):
-            tbl.add(frag_id=i, best_tid=i, best_gid=0, tx_flags=AF_TRANSCRIPT,
+            tbl.add(frag_id=i, best_tid=i, best_gid=0, tx_flags=AF_MRNA,
                     posterior=1.0, frag_class=0, n_candidates=1)
         assert tbl.size == 10
         assert tbl.capacity >= 10
@@ -80,23 +147,41 @@ class TestAnnotationTable:
             assert ann is not None
             assert ann["best_tid"] == i
 
-    def test_zf_flags_valid_values(self):
-        """Valid ZF values follow the implication chain."""
-        assert AF_UNRESOLVED == 0
-        assert AF_TRANSCRIPT == AF_RESOLVED  # 1
-        assert AF_GDNA_RESOLVED == (AF_RESOLVED | AF_GDNA)  # 3
-        assert AF_NRNA_RESOLVED == (AF_RESOLVED | AF_NRNA)  # 5
-        assert AF_SYNTH_RESOLVED == (AF_RESOLVED | AF_NRNA | AF_SYNTHETIC)  # 13
-        # All resolved values are odd (bit 0 set)
-        for v in (AF_TRANSCRIPT, AF_GDNA_RESOLVED, AF_NRNA_RESOLVED, AF_SYNTH_RESOLVED):
-            assert v & AF_RESOLVED, f"ZF={v} should have is_resolved set"
+    def test_zf_canonical_values(self):
+        """All canonical ZF values satisfy the redesign invariants."""
+        # Documented composed values
+        assert AF_UNRESOLVED == 0x00
+        assert AF_MRNA == 0x03
+        assert AF_NRNA == 0x09
+        assert AF_NRNA_SYNTH == 0x19
+        assert AF_GDNA_EM == 0x05
+        assert AF_GDNA_INTERGENIC == 0x25
+        assert AF_CHIMERIC == 0x40
+        assert AF_MULTIMAPPER_DROP == 0x80
+        # All canonical values satisfy the invariants
+        for v in VALID_ZF_VALUES:
+            _assert_zf_invariants(v)
+        # Resolved-ness is coherent
+        assert AF_MRNA & AF_RESOLVED
+        assert AF_NRNA & AF_RESOLVED
+        assert AF_NRNA_SYNTH & AF_RESOLVED
+        assert AF_GDNA_EM & AF_RESOLVED
+        assert AF_GDNA_INTERGENIC & AF_RESOLVED
+        assert not (AF_CHIMERIC & AF_RESOLVED)
+        assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
 
     def test_frag_class_labels(self):
-        """Known fragment class codes have labels."""
+        """Known fragment class codes have labels.
+
+        Chimeric / intergenic codes are NOT in _FRAG_CLASS_LABELS under
+        the ZF/ZC redesign — those outcomes are encoded in ZF, and the
+        BAM writer stamps ``ZC="."`` for them directly.
+        """
         assert _FRAG_CLASS_LABELS[0] == "unambig"
         assert _FRAG_CLASS_LABELS[1] == "ambig_same_strand"
         assert _FRAG_CLASS_LABELS[3] == "multimapper"
-        assert _FRAG_CLASS_LABELS[-1] == "intergenic"
+        assert -1 not in _FRAG_CLASS_LABELS
+        assert 4 not in _FRAG_CLASS_LABELS  # FRAG_CHIMERIC
 
     def test_splice_type_label(self):
         """SpliceType codes convert to lowercase labels."""
@@ -199,12 +284,19 @@ class TestAnnotatedBamIntegration:
         assert isinstance(rec.get_tag("ZN"), int)
         assert isinstance(rec.get_tag("ZS"), str)
 
-        # ZF values should be valid (0, 1, 3, 5, or 13)
-        valid_zf = {AF_UNRESOLVED, AF_TRANSCRIPT, AF_GDNA_RESOLVED,
-                     AF_NRNA_RESOLVED, AF_SYNTH_RESOLVED}
+        # ZF values must be one of the canonical outputs, and every
+        # value must satisfy the redesign invariants.
         for rec in records:
             zf = rec.get_tag("ZF")
-            assert zf in valid_zf, f"Invalid ZF: {zf}"
+            assert zf in VALID_ZF_VALUES, f"Invalid ZF: {zf:#x}"
+            _assert_zf_invariants(zf)
+
+        # ZC values: pre-EM ambiguity enum + "." for non-EM records.
+        valid_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand",
+                    "multimapper", "."}
+        for rec in records:
+            zc = rec.get_tag("ZC")
+            assert zc in valid_zc, f"Unexpected ZC value: {zc!r}"
 
         # ZH should be 0 or 1
         for rec in records:
@@ -636,4 +728,228 @@ class TestAnnotatedBamIntegration:
             assert tag not in tags, (
                 f"Filtered pass-through record carries {tag}; should not"
             )
+
+    # =================================================================
+    # ZF redesign — outcome-specific stamping tests
+    # =================================================================
+
+    def test_zf_invariants_and_zc_domain_hold_over_fixture(
+        self, scenario, tmp_path
+    ):
+        """Every annotated record satisfies the ZF invariants, and ZC is
+        restricted to the new input-ambiguity enum (no ``intergenic`` /
+        ``chimeric`` strings in ZC).
+        """
+        import pysam
+        from rigel.sim import SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
+
+        sim_config = SimConfig(
+            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
+            read_length=100, strand_specificity=1.0, seed=42,
+        )
+        result = scenario.build(n_fragments=300, sim_config=sim_config)
+
+        annotated_bam = tmp_path / "annotated_inv.bam"
+        run_pipeline(
+            result.bam_path,
+            result.index,
+            config=PipelineConfig(
+                em=EMConfig(seed=42),
+                scan=BamScanConfig(sj_strand_tag="ts"),
+                annotated_bam_path=annotated_bam,
+            ),
+        )
+
+        allowed_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand",
+                      "multimapper", "."}
+
+        with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
+            for rec in fout.fetch(until_eof=True):
+                if not rec.has_tag("ZF"):
+                    continue  # filtered pass-through
+                zf = rec.get_tag("ZF")
+                assert zf in VALID_ZF_VALUES, (
+                    f"Unexpected ZF={zf:#x} on {rec.query_name}"
+                )
+                _assert_zf_invariants(zf)
+                zc = rec.get_tag("ZC")
+                assert zc in allowed_zc, (
+                    f"ZC={zc!r} not in redesign enum on {rec.query_name}"
+                )
+                # ZC retains no legacy terminal-outcome strings
+                assert zc not in ("intergenic", "chimeric")
+
+    def test_zf_intergenic_marked_gdna(self, scenario, tmp_path):
+        """A read placed in a pure intergenic region is stamped with the
+        deterministic gDNA fast-path bits on ZF (is_resolved & is_gdna &
+        is_intergenic) and ZC=".".
+        """
+        import pysam
+        from rigel.sim import SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
+
+        sim_config = SimConfig(
+            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
+            read_length=100, strand_specificity=1.0, seed=42,
+        )
+        result = scenario.build(n_fragments=200, sim_config=sim_config)
+
+        # Inject a clearly intergenic pair by cloning the last pair and
+        # moving it to ref position 7500 (scenario genome_length=8000,
+        # gene bounds end at 5500 — coordinate 7500 is outside any
+        # transcript).
+        augmented = tmp_path / "aug_intergenic.bam"
+        with pysam.AlignmentFile(str(result.bam_path), "rb") as fin:
+            header = fin.header
+            records = list(fin.fetch(until_eof=True))
+
+        # Find an R1/R2 pair we can relocate.
+        from collections import defaultdict
+        by_qname = defaultdict(list)
+        for r in records:
+            by_qname[r.query_name].append(r)
+        donor_qname = next(
+            qn for qn, rs in by_qname.items()
+            if len(rs) >= 2 and not any(r.is_secondary for r in rs)
+        )
+        donor = by_qname[donor_qname]
+        new_pair = []
+        for r in donor:
+            c = r.__copy__()
+            c.query_name = "INTERGENIC_SENTINEL"
+            c.reference_start = 7500
+            # Clear alignment tags that might reference old coords.
+            for tag in ("XS", "ts", "NH", "HI"):
+                try:
+                    c.set_tag(tag, None)
+                except Exception:
+                    pass
+            new_pair.append(c)
+        # Place the sentinel at the front so it's clearly separated.
+        records = new_pair + records
+
+        with pysam.AlignmentFile(
+            str(augmented), "wb", header=header
+        ) as fout:
+            for r in records:
+                fout.write(r)
+
+        annotated_bam = tmp_path / "annotated_intergenic.bam"
+        run_pipeline(
+            augmented,
+            result.index,
+            config=PipelineConfig(
+                em=EMConfig(seed=42),
+                scan=BamScanConfig(sj_strand_tag="ts"),
+                annotated_bam_path=annotated_bam,
+            ),
+        )
+
+        with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
+            sentinel_out = [
+                r for r in fout.fetch(until_eof=True)
+                if r.query_name == "INTERGENIC_SENTINEL"
+            ]
+
+        assert len(sentinel_out) >= 1, "Intergenic sentinel lost in output"
+        for rec in sentinel_out:
+            zf = rec.get_tag("ZF")
+            assert zf == AF_GDNA_INTERGENIC, (
+                f"Intergenic record should have ZF=AF_GDNA_INTERGENIC "
+                f"({AF_GDNA_INTERGENIC:#x}), got {zf:#x}"
+            )
+            _assert_zf_invariants(zf)
+            assert zf & AF_GDNA_BIT, "Intergenic should set is_gdna bit"
+            assert zf & AF_INTERGENIC_BIT, (
+                "Intergenic should set is_intergenic bit"
+            )
+            assert rec.get_tag("ZC") == "."
+
+    def test_zf_multimapper_dropped_without_include_multimap(
+        self, scenario, tmp_path
+    ):
+        """When --no-multimap drops a multimapper, ZF is
+        AF_MULTIMAPPER_DROP and ZC is '.'.
+        """
+        import pysam
+        from collections import defaultdict
+        from rigel.sim import SimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
+
+        sim_config = SimConfig(
+            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
+            read_length=100, strand_specificity=1.0, seed=42,
+        )
+        result = scenario.build(n_fragments=100, sim_config=sim_config)
+
+        # Augment: turn one qname group into an NH=2 multimapper.
+        augmented = tmp_path / "aug_mm_drop.bam"
+        with pysam.AlignmentFile(str(result.bam_path), "rb") as fin:
+            header = fin.header
+            records = list(fin.fetch(until_eof=True))
+
+        by_qname = defaultdict(list)
+        for r in records:
+            by_qname[r.query_name].append(r)
+        victim_qname = next(
+            qn for qn, rs in by_qname.items() if len(rs) >= 2
+        )
+        out_records = []
+        for qn, recs in by_qname.items():
+            if qn == victim_qname:
+                group = []
+                for r in recs:
+                    r.set_tag("NH", 2)
+                    group.append(r)
+                for r in recs:
+                    sec = r.__copy__()
+                    sec.flag = r.flag | 0x100
+                    sec.reference_start = max(0, r.reference_start + 500)
+                    sec.set_tag("NH", 2)
+                    group.append(sec)
+                out_records.extend(group)
+            else:
+                out_records.extend(recs)
+
+        with pysam.AlignmentFile(
+            str(augmented), "wb", header=header
+        ) as fout:
+            for r in out_records:
+                fout.write(r)
+
+        annotated_bam = tmp_path / "annotated_mm_drop.bam"
+        run_pipeline(
+            augmented,
+            result.index,
+            config=PipelineConfig(
+                em=EMConfig(seed=42),
+                scan=BamScanConfig(
+                    sj_strand_tag="ts", include_multimap=False,
+                ),
+                annotated_bam_path=annotated_bam,
+            ),
+        )
+
+        with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
+            victim_out = [
+                r for r in fout.fetch(until_eof=True)
+                if r.query_name == victim_qname
+            ]
+
+        assert len(victim_out) >= 1, (
+            "Dropped-multimapper qname lost from output"
+        )
+        for rec in victim_out:
+            zf = rec.get_tag("ZF")
+            assert zf == AF_MULTIMAPPER_DROP, (
+                f"Dropped multimapper should have ZF=AF_MULTIMAPPER_DROP "
+                f"({AF_MULTIMAPPER_DROP:#x}), got {zf:#x}"
+            )
+            _assert_zf_invariants(zf)
+            assert not (zf & AF_RESOLVED)
+            assert rec.get_tag("ZC") == "."
 

@@ -59,11 +59,30 @@ static constexpr int32_t FRAG_AMBIG_OPP_STRAND  = 2;
 static constexpr int32_t FRAG_MULTIMAPPER       = 3;
 static constexpr int32_t FRAG_CHIMERIC          = 4;
 
-// Assignment flags bitfield (written to BAM as ZF:i tag)
-static constexpr int32_t AF_RESOLVED  = 0x1;   // bit 0: scored and assigned
-static constexpr int32_t AF_GDNA      = 0x2;   // bit 1: gDNA component won
-static constexpr int32_t AF_NRNA      = 0x4;   // bit 2: single-exon transcript
-static constexpr int32_t AF_SYNTHETIC = 0x8;   // bit 3: rigel-generated nRNA span
+// Assignment flags bitfield (written to BAM as ZF:i tag).
+// ZF is the unified per-fragment outcome bitfield.  See
+// src/rigel/annotate.py for the full schema + invariants.  C++ stamp
+// sites reference only the composed values below.
+//
+// Primitive bits
+static constexpr int32_t AF_RESOLVED_BIT         = 0x01;
+static constexpr int32_t AF_MRNA_BIT             = 0x02;
+static constexpr int32_t AF_GDNA_BIT             = 0x04;
+static constexpr int32_t AF_NRNA_BIT             = 0x08;
+static constexpr int32_t AF_SYNTHETIC_BIT        = 0x10;
+static constexpr int32_t AF_INTERGENIC_BIT       = 0x20;
+static constexpr int32_t AF_CHIMERIC_BIT         = 0x40;
+static constexpr int32_t AF_MULTIMAPPER_DROP_BIT = 0x80;
+
+// Canonical composed values (the only legitimate ZF outputs).
+static constexpr int32_t AF_UNRESOLVED        = 0x00;
+static constexpr int32_t AF_MRNA              = AF_RESOLVED_BIT | AF_MRNA_BIT;               // 0x03
+static constexpr int32_t AF_NRNA              = AF_RESOLVED_BIT | AF_NRNA_BIT;               // 0x09
+static constexpr int32_t AF_NRNA_SYNTH        = AF_NRNA | AF_SYNTHETIC_BIT;                  // 0x19
+static constexpr int32_t AF_GDNA_EM           = AF_RESOLVED_BIT | AF_GDNA_BIT;               // 0x05
+static constexpr int32_t AF_GDNA_INTERGENIC   = AF_GDNA_EM | AF_INTERGENIC_BIT;              // 0x25
+static constexpr int32_t AF_CHIMERIC          = AF_CHIMERIC_BIT;                             // 0x40
+static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;                     // 0x80
 
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)

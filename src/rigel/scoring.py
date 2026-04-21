@@ -31,8 +31,8 @@ LOG_HALF = math.log(0.5)
 #: Default gDNA splice penalty for SPLICED_UNANNOT fragments.
 DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = 0.01
 
-#: Default overhang alpha: each base of overhang reduces probability by 100×.
-DEFAULT_OVERHANG_ALPHA = 0.01
+#: Default overhang alpha: each base of overhang reduces probability by 10×.
+DEFAULT_OVERHANG_ALPHA = 0.1
 
 #: Default mismatch alpha: each edit-distance mismatch (NM tag) reduces
 #: probability by 10×.
@@ -56,6 +56,7 @@ def overhang_alpha_to_log_penalty(alpha: float) -> float:
         Per-base overhang penalty in [0, 1].
         - 0.0 → hard binary gate (any overhang → −∞)
         - 0.01 → aggressive (−4.605 per base)
+        - 0.1 → default (−2.303 per base)
         - 1.0 → no penalty (off)
 
     Returns

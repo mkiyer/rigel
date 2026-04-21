@@ -1021,7 +1021,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="overhang_alpha",
         type=float,
         default=None,
-        help="Per-base overhang penalty alpha in [0,1] (default: 0.01). "
+        help="Per-base overhang penalty alpha in [0,1] (default: 0.1). "
         "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(

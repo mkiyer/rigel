@@ -40,10 +40,6 @@ using rigel::FRAG_AMBIG_SAME_STRAND;
 using rigel::FRAG_AMBIG_OPP_STRAND;
 using rigel::FRAG_MULTIMAPPER;
 using rigel::FRAG_CHIMERIC;
-using rigel::AF_RESOLVED;
-using rigel::AF_GDNA;
-using rigel::AF_NRNA;
-using rigel::AF_SYNTHETIC;
 
 // Maximum candidates handled via stack-allocated buffer before falling
 // back to heap allocation.  Avoids malloc in the common case where a
@@ -1230,12 +1226,6 @@ NB_MODULE(_scoring_impl, m) {
     m.attr("FRAG_AMBIG_OPP_STRAND")  = rigel::FRAG_AMBIG_OPP_STRAND;
     m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
     m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
-
-    // Assignment flags (mirrors rigel.annotate)
-    m.attr("AF_RESOLVED")  = rigel::AF_RESOLVED;
-    m.attr("AF_GDNA")      = rigel::AF_GDNA;
-    m.attr("AF_NRNA")      = rigel::AF_NRNA;
-    m.attr("AF_SYNTHETIC") = rigel::AF_SYNTHETIC;
 
     // Internal tuning constant
     m.attr("SCORED_STACK_CAPACITY") = SCORED_STACK_CAPACITY;

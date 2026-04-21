@@ -19,7 +19,7 @@ from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
 from .stats import PipelineStats
-from .annotate import AF_UNRESOLVED, winner_flag
+from .annotate import AF_CHIMERIC, winner_flag
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ class FragmentRouter:
                     frag_id=int(chim_fids[j]),
                     best_tid=-1,
                     best_gid=-1,
-                    tx_flags=AF_UNRESOLVED,
+                    tx_flags=AF_CHIMERIC,
                     posterior=0.0,
                     frag_class=FRAG_CHIMERIC,
                     n_candidates=0,

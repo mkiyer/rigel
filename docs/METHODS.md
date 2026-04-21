@@ -150,7 +150,7 @@ where:
 
 The user-facing penalty parameters are:
 
-- `overhang_alpha = 0.01`
+- `overhang_alpha = 0.1`
 - `mismatch_alpha = 0.1`
 - `gdna_splice_penalty_unannot = 0.01`
 
@@ -412,9 +412,25 @@ gene after transcript fan-out.
 
 ### 11.5 Annotated BAM
 
-When enabled, a second BAM pass stamps each record with tags describing the
-winning assignment, its pool, posterior, fragment class, number of candidates,
-and splice type.
+When `--annotated-bam PATH` is supplied, Rigel makes a second pass over the
+input BAM and stamps each processed record with the tags documented in
+§12.5: transcript/gene identifiers (`ZT`/`ZG`/`ZR`), reference indices
+(`ZI`/`ZJ`), assignment-flag bitfield (`ZF`), posterior (`ZW`), fragment
+class (`ZC`), primary-hit bit (`ZH`), candidate count (`ZN`), splice type
+(`ZS`), locus id (`ZL`), and a per-record blacklisted-junction counter
+(`ZB`).
+
+Two invariants are guaranteed (and regression-tested):
+
+- **Record-count parity**: the annotated BAM contains exactly the same
+  multiset of records as the input (keyed by qname, flag, ref, pos). Every
+  record is either stamped or passed through verbatim — nothing is dropped
+  or duplicated.
+- **Pass-1 / Pass-2 parity for splice-artifact filtering**: the sum of `ZB`
+  across the annotated BAM equals the Pass-1 scanner stat `n_sj_blacklisted`.
+  Both passes consult the same blacklist and apply the same anchor-aware
+  filter, so downstream tools that consume the annotated BAM see exactly the
+  same set of junctions that were used during quantification.
 
 ---
 
@@ -893,22 +909,49 @@ The `summary.json` file reports:
 
 ### 12.5 Annotated BAM
 
-When requested, an annotated BAM is produced with per-fragment tags
-encoding the EM assignment:
+When requested, an annotated BAM is produced with per-record tags encoding
+the EM assignment and scoring provenance. Rigel accepts a collated BAM in
+and produces a collated BAM out with exactly the same multiset of records
+(no drops, no duplications); regression tests guarantee this contract for
+downstream tools.
 
 | Tag | Type | Description |
 |-----|------|-------------|
 | ZT | string | Transcript ID, or `.` for intergenic or gDNA-only assignments |
 | ZG | string | Gene ID, or `.` when not applicable |
+| ZR | string | Gene name / symbol, or `.` |
 | ZI | int | Transcript index into rigel reference (`-1` if unassigned) |
 | ZJ | int | Gene index into rigel reference (`-1` if unassigned) |
-| ZP | string | Assignment pool: `mRNA`, `nRNA`, `gDNA`, `intergenic`, or `chimeric` |
+| ZF | int | Assignment flags bitfield (see table below) |
 | ZW | float | Posterior probability of the chosen assignment |
-| ZC | string | Fragment class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, `chimeric`, or `intergenic` |
-| ZH | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise |
+| ZC | string | Input-ambiguity class for scored fragments: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`. `.` for records that were not scored (chimeric, intergenic, dropped multimappers) |
+| ZH | int | Primary-hit flag: `1` for rigel's winning alignment, `0` otherwise |
 | ZN | int | Number of competing candidate components |
-| ZS | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `ambiguous` |
+| ZS | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `unknown` |
 | ZL | int | Locus ID (`-1` if no locus) |
+| ZB | int | Number of splice junctions in this record's CIGAR that matched the splice-artifact blacklist. Record-local (not fragment-level). Sum over the annotated BAM equals the Pass-1 scanner stat `n_sj_blacklisted`. |
+
+#### ZF bit layout
+
+`ZF` is an 8-bit bitfield with canonical values only (never a free combination
+of bits):
+
+| Bit | Mask | Flag |
+|-----|------|------|
+| 0 | 0x01 | `is_resolved` — scored and assigned by EM |
+| 1 | 0x02 | `is_mrna` — assigned to a spliced mRNA transcript |
+| 2 | 0x04 | `is_gdna` — assigned to the gDNA component (EM gDNA or intergenic) |
+| 3 | 0x08 | `is_nrna` — assigned to a nascent-RNA component |
+| 4 | 0x10 | `is_synthetic` — rigel-generated synthetic nRNA span |
+| 5 | 0x20 | `is_intergenic` — no annotation overlap (paired with `is_gdna`) |
+| 6 | 0x40 | `is_chimeric` — chimeric fragment, skipped before scoring |
+| 7 | 0x80 | `is_multimapper_dropped` — multimapper dropped when `--include-multimap` is off |
+
+Canonical values: `0x03` mRNA, `0x09` nRNA (annotated), `0x19` nRNA
+(synthetic), `0x05` gDNA (EM), `0x25` gDNA (intergenic), `0x40` chimeric,
+`0x80` multimapper dropped. Exactly one of `{is_mrna, is_gdna, is_nrna}` is
+set on any resolved record; `is_chimeric` and `is_multimapper_dropped` never
+co-occur with any assignment bit.
 
 ---
 

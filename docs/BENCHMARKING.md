@@ -254,7 +254,7 @@ Each named config under `rigel_configs` accepts any `rigel quant` CLI parameter 
 | `em_convergence_delta` | `--em-convergence-delta` | `1e-6` | Convergence threshold |
 | `assignment_mode` | `--assignment-mode` | `sample` | Post-EM assignment: `sample`, `fractional`, `map` |
 | `assignment_min_posterior` | `--assignment-min-posterior` | `0.01` | Min posterior for assignment eligibility |
-| `overhang_alpha` | `--overhang-alpha` | `0.01` | Per-base overhang penalty (0=hard gate, 1=no penalty) |
+| `overhang_alpha` | `--overhang-alpha` | `0.1` | Per-base overhang penalty (0=hard gate, 1=no penalty) |
 | `mismatch_alpha` | `--mismatch-alpha` | `0.1` | Per-mismatch penalty (0=hard gate, 1=no penalty) |
 | `gdna_splice_penalty_unannot` | `--gdna-splice-penalty-unannot` | `0.01` | gDNA splice penalty for unannotated junctions |
 | `pruning_min_posterior` | `--pruning-min-posterior` | `1e-4` | Min posterior for candidate pruning |

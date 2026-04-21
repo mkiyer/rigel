@@ -149,7 +149,7 @@ cat results/summary.json
 | `loci.feather` / `loci.tsv` | Per-locus EM summary with `mrna`, `nrna`, `gdna`, and `gdna_init` |
 | `summary.json` | Library protocol, strand specificity, fragment-length histograms, calibration results, alignment counts, and global quantification totals |
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
-| `annotated.bam` | Optional annotated BAM with `ZT`, `ZG`, `ZI`, `ZJ`, `ZP`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL` tags |
+| `annotated.bam` | Optional annotated BAM with `ZT`, `ZG`, `ZR`, `ZI`, `ZJ`, `ZF`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL`, `ZB` tags. Rigel guarantees a collated-in → collated-out contract: the output contains exactly the same records as the input (no drops, no duplications). |
 
 The `nrna` values in transcript- and gene-level tables are derived from shared
 nRNA-span counts that are pro-rated across transcripts sharing the same span.
