@@ -98,15 +98,17 @@ jobs:
             PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             MACOSX_DEPLOYMENT_TARGET="${{ matrix.macos_target }}"
           # Smoke test: install rigel wheel with all runtime deps and verify
-          # all native extensions load correctly.
+          # all native extensions load. We only check that each module
+          # imports (not specific symbol names), so routine refactors don't
+          # break the release pipeline.
           CIBW_TEST_REQUIRES: >
             numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0 scipy>=1.11
           CIBW_TEST_COMMAND: >-
-            python -c "from rigel._bam_impl import BamScanner;
-            from rigel._scoring_impl import compute_fragment_weight;
-            from rigel._em_impl import batch_locus_em;
-            from rigel._resolve_impl import FragmentResolver;
-            print('OK')"
+            python -c "import importlib;
+            mods = ['rigel._bam_impl', 'rigel._scoring_impl',
+            'rigel._em_impl', 'rigel._resolve_impl'];
+            [importlib.import_module(m) for m in mods];
+            import rigel; print('OK', rigel.__version__)"
 
       - uses: actions/upload-artifact@v4
         with:

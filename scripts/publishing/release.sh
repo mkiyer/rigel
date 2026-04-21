@@ -48,8 +48,18 @@ sed_inplace() {
 }
 
 # ── Args ─────────────────────────────────────────────────────────────────
-[[ $# -eq 1 ]] || die "Usage: $0 <version>  (e.g. $0 0.4.0)"
-VERSION="$1"
+FORCE=0
+POSITIONAL=()
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) FORCE=1 ;;
+        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+        -*) die "Unknown flag: $arg" ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+[[ ${#POSITIONAL[@]} -eq 1 ]] || die "Usage: $0 <version> [--force]  (e.g. $0 0.4.0)"
+VERSION="${POSITIONAL[0]}"
 TAG="v${VERSION}"
 TODAY=$(date +%Y-%m-%d)
 
@@ -62,10 +72,34 @@ cd "$(git rev-parse --show-toplevel)" || die "Not in a git repository"
 BRANCH=$(git branch --show-current)
 [[ "$BRANCH" == "main" ]] || die "Must be on 'main' (currently on '$BRANCH')"
 
-git tag -l "$TAG" | grep -q . && die "Tag $TAG already exists"
+# PyPI refuses re-uploads, so we never reuse a version that PyPI already has.
+if PYPI_JSON=$(curl -sf "https://pypi.org/pypi/rigel-rnaseq/${VERSION}/json" 2>/dev/null); then
+    if echo "$PYPI_JSON" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("urls") else 1)' 2>/dev/null; then
+        die "PyPI already has rigel-rnaseq==${VERSION}. Pick a new version (PyPI forbids re-uploads)."
+    fi
+fi
 
-# Previous version = latest v-tag (by semver-ish sort).
-PREV_TAG=$(git tag -l 'v*' | sort -V | tail -1)
+# Handle pre-existing tag.
+TAG_EXISTS_LOCAL=0
+TAG_EXISTS_REMOTE=0
+git tag -l "$TAG" | grep -q . && TAG_EXISTS_LOCAL=1
+if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+    TAG_EXISTS_REMOTE=1
+fi
+
+if [[ $TAG_EXISTS_LOCAL -eq 1 || $TAG_EXISTS_REMOTE -eq 1 ]]; then
+    if [[ $FORCE -eq 0 ]]; then
+        die "Tag $TAG already exists (local=$TAG_EXISTS_LOCAL remote=$TAG_EXISTS_REMOTE).
+Re-run with --force to delete and recreate it (only safe if PyPI upload didn't succeed)."
+    fi
+    warn "Deleting existing tag $TAG (--force)"
+    [[ $TAG_EXISTS_LOCAL -eq 1 ]] && git tag -d "$TAG" >/dev/null
+    [[ $TAG_EXISTS_REMOTE -eq 1 ]] && git push origin --delete "$TAG" >/dev/null
+    info "Removed pre-existing $TAG"
+fi
+
+# Previous version = latest v-tag that isn't the one we're about to (re)create.
+PREV_TAG=$(git tag -l 'v*' | grep -v "^${TAG}$" | sort -V | tail -1)
 PREV_VERSION="${PREV_TAG#v}"
 
 # Current version in pyproject.toml (source of truth).
@@ -73,7 +107,10 @@ OLD_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/.*"([^"
 
 info "Current:  ${OLD_VERSION}  (last tag: ${PREV_TAG:-none})"
 info "New:      ${VERSION}  (tag: ${TAG})"
-[[ "$VERSION" != "$OLD_VERSION" ]] || die "New version equals current version"
+# Equal versions are OK under --force (re-release of an existing commit).
+if [[ "$VERSION" == "$OLD_VERSION" && $FORCE -eq 0 ]]; then
+    die "New version equals current version (use --force to re-release)"
+fi
 
 # ── CHANGELOG.md auto-update ─────────────────────────────────────────────
 CHANGELOG="CHANGELOG.md"
@@ -114,14 +151,19 @@ if ! grep -q "^\[${VERSION}\]: " "$CHANGELOG"; then
     info "CHANGELOG: appended link $LINK"
 fi
 
-# ── Bump versions ────────────────────────────────────────────────────────
-sed_inplace "s|^version = \"${OLD_VERSION}\"|version = \"${VERSION}\"|" pyproject.toml
-grep -q "^version = \"${VERSION}\"" pyproject.toml || die "Failed to bump pyproject.toml"
-info "Bumped pyproject.toml"
+# ── Bump versions (idempotent) ───────────────────────────────────────────
+if [[ "$OLD_VERSION" != "$VERSION" ]]; then
+    sed_inplace "s|^version = \"${OLD_VERSION}\"|version = \"${VERSION}\"|" pyproject.toml
+    info "Bumped pyproject.toml: ${OLD_VERSION} → ${VERSION}"
+fi
+grep -q "^version = \"${VERSION}\"" pyproject.toml || die "pyproject.toml version is not ${VERSION}"
 
-sed_inplace "s|{% set version = \"${OLD_VERSION}\" %}|{% set version = \"${VERSION}\" %}|" conda/meta.yaml
-grep -q "{% set version = \"${VERSION}\" %}" conda/meta.yaml || die "Failed to bump conda/meta.yaml"
-info "Bumped conda/meta.yaml"
+META_OLD=$(grep -E '\{% set version' conda/meta.yaml | sed -E 's/.*"([^"]+)".*/\1/')
+if [[ "$META_OLD" != "$VERSION" ]]; then
+    sed_inplace "s|{% set version = \"${META_OLD}\" %}|{% set version = \"${VERSION}\" %}|" conda/meta.yaml
+    info "Bumped conda/meta.yaml: ${META_OLD} → ${VERSION}"
+fi
+grep -q "{% set version = \"${VERSION}\" %}" conda/meta.yaml || die "conda/meta.yaml version is not ${VERSION}"
 
 # ── Show & confirm ───────────────────────────────────────────────────────
 echo ""
@@ -140,9 +182,14 @@ if ! [[ "$answer" =~ ^[Yy]$ ]]; then
 fi
 
 # ── Commit / tag / push ──────────────────────────────────────────────────
-git add pyproject.toml conda/meta.yaml "$CHANGELOG"
-git commit -m "Release ${TAG}"
-info "Committed"
+if git diff --cached --quiet pyproject.toml conda/meta.yaml "$CHANGELOG" && \
+   git diff --quiet pyproject.toml conda/meta.yaml "$CHANGELOG"; then
+    info "No version/changelog changes to commit (tagging HEAD)"
+else
+    git add pyproject.toml conda/meta.yaml "$CHANGELOG"
+    git commit -m "Release ${TAG}"
+    info "Committed"
+fi
 
 git tag -a "$TAG" -m "Release ${TAG}"
 info "Tagged ${TAG}"
