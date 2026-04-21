@@ -1,37 +1,86 @@
 # Publishing Rigel
 
-Step-by-step release process for PyPI and Bioconda.
+Cutting a new release is now two commands, plus one wait.
 
-> **Naming:**
+> **Naming**
 > - PyPI distribution: `rigel-rnaseq` (`pip install rigel-rnaseq`)
 > - Bioconda package: `rigel` (`conda install -c bioconda rigel`)
 > - Python import / CLI: `rigel`
 
 ---
 
-## Quick reference
+## TL;DR
 
 ```bash
-# 1. Edit CHANGELOG.md with the new version's notes
-# 2. Run the release script:
-./scripts/release.sh 0.3.0
-# 3. Create a GitHub Release from the tag (triggers PyPI publish)
-# 4. After PyPI succeeds, fetch the hash for bioconda:
-./scripts/bioconda_hash.sh 0.3.0
+# 1. Add a `## [Unreleased]` section to CHANGELOG.md with your notes,
+#    then cut the release:
+./scripts/publishing/release.sh 0.4.0
+
+# 2. Wait for the GitHub Actions publish workflow to go green
+#    (~15–30 min): https://github.com/mkiyer/rigel/actions
+
+# 3. Finalize: patch conda recipe with PyPI sha256 and (optionally)
+#    upload to your personal anaconda.org channel:
+./scripts/publishing/post_release.sh 0.4.0
+```
+
+That's it. No GitHub UI clicks, no manual sha256 lookups, no
+`sed`-by-hand of YAML files.
+
+---
+
+## How it works
+
+### `release.sh X.Y.Z` — stage 1 (fast)
+
+1. Validates version format, clean tree, branch is `main`, tag free.
+2. Auto-finishes the CHANGELOG:
+   - renames `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD` (or verifies an
+     explicit `## [X.Y.Z]` section already exists);
+   - appends the `[X.Y.Z]: …compare/vPREV…vX.Y.Z` link at the bottom.
+3. Bumps the version string in `pyproject.toml` **and** `conda/meta.yaml`.
+4. Shows the diff and asks for confirmation.
+5. `git commit`, `git tag vX.Y.Z`, `git push origin main --tags`.
+
+**Pushing the tag is the trigger.** `.github/workflows/publish.yml` runs on
+any `v*` tag push: it builds the sdist + Linux x86_64/aarch64 + macOS arm64
+wheels and uploads to PyPI via OIDC trusted publishing. You no longer need
+to open the GitHub Releases UI.
+
+### `post_release.sh X.Y.Z` — stage 2 (run after the workflow is green)
+
+1. Polls `https://pypi.org/pypi/rigel-rnaseq/X.Y.Z/json` every 30 s (up to
+   30 min) until the sdist is live.
+2. Extracts the sdist `sha256` from the PyPI API.
+3. Patches `conda/meta.yaml` (portable Linux / macOS sed).
+4. Commits `Release vX.Y.Z: update conda sha256` and pushes to `main`.
+5. Optionally runs `conda_publish.sh` to build and upload to your personal
+   anaconda.org channel (pass `--conda-publish` to skip the prompt, or
+   `--skip-conda-publish` to suppress it entirely).
+
+### `conda_publish.sh` — personal channel upload (optional)
+
+Builds the conda recipe from the PyPI sdist and uploads it to your own
+`anaconda.org/<user>` channel. Requires a `bioconda-build` env plus
+`anaconda login`. Useful when you want the package installable right away
+while bioconda is still reviewing.
+
+```bash
+conda activate bioconda-build
+./scripts/publishing/conda_publish.sh
 ```
 
 ---
 
-## Full walkthrough
+## Full walkthrough (first time)
 
-### Step 1: Update the changelog
+### 1. Write changelog notes
 
-Add an entry to `CHANGELOG.md` for the new version **before** running the
-release script. The script checks for this entry and will refuse to proceed
-without it.
+Under the top of `CHANGELOG.md`, add an Unreleased section with your
+release notes:
 
 ```markdown
-## [0.3.0] - 2026-04-15
+## [Unreleased]
 
 ### Added
 - ...
@@ -40,184 +89,103 @@ without it.
 - ...
 ```
 
-Also add the comparison link at the bottom of the file:
+You do **not** need to fill in the version number or the date — stage 1
+will do that for you. You also don't need to append the comparison link at
+the bottom; stage 1 adds it.
 
-```markdown
-[0.3.0]: https://github.com/mkiyer/rigel/compare/v0.2.0...v0.3.0
-```
-
-### Step 2: Run the release script
+### 2. Cut the release
 
 ```bash
-./scripts/release.sh 0.3.0
+./scripts/publishing/release.sh 0.4.0
 ```
 
-This script:
-1. Validates that `CHANGELOG.md` has the version entry
-2. Bumps the version in `pyproject.toml` and `conda/meta.yaml`
-3. Shows a diff for confirmation
-4. Commits, tags `v0.3.0`, and pushes to `origin main`
+The script prints the diff and asks for confirmation. If you answer "N",
+your working tree keeps the staged edits and you can revert with
+`git checkout -- pyproject.toml conda/meta.yaml CHANGELOG.md`.
 
-### Step 3: Create a GitHub Release
+### 3. Watch the PyPI build
 
-Go to the link printed by the script (or navigate to **Releases → Draft a new
-release** on GitHub). Select the tag, paste the changelog entry as the body,
-and click **Publish release**.
+<https://github.com/mkiyer/rigel/actions/workflows/publish.yml>
 
-Publishing the release triggers `.github/workflows/publish.yml`, which:
-1. Builds the source distribution (sdist)
-2. Builds binary wheels for Linux x86_64, Linux aarch64, and macOS arm64
-3. Uploads everything to PyPI via OIDC trusted publishing (no API token needed)
+The `publish` job uses PyPI OIDC trusted publishing, so no API token is
+needed.
 
-Monitor the workflow at: `https://github.com/mkiyer/rigel/actions`
-
-### Step 4: Verify the PyPI release
+Verify once green:
 
 ```bash
-pip install rigel-rnaseq==0.3.0
+pip install rigel-rnaseq==0.4.0
 rigel --version
 ```
 
-Check: https://pypi.org/project/rigel-rnaseq/
-
-### Step 5: Publish to your personal conda channel (fast path)
-
-This uploads to your own `anaconda.org/mkiyer` channel — no review required.
-Useful for immediate availability while waiting for bioconda.
+### 4. Finalize
 
 ```bash
-# One-time login (saved in ~/.anaconda/config.yaml):
-conda activate bioconda-build
-anaconda login
-
-# Build and upload:
-./scripts/conda_publish.sh
+./scripts/publishing/post_release.sh 0.4.0
 ```
 
-The script builds the package from `conda/meta.yaml` (using the PyPI sdist as
-source), then uploads to your personal channel. Install with:
+It will block until PyPI has the sdist, then patch/commit/push the conda
+recipe and (on prompt) upload to your personal channel. The next bioconda
+auto-bump bot run (within ~24h) picks up the new PyPI release and opens a
+PR against `bioconda-recipes`.
 
-```bash
-conda install -c mkiyer -c conda-forge -c bioconda rigel==0.3.0
-```
-
-### Step 6: Update bioconda
-
-After the PyPI upload succeeds, fetch the sdist SHA256:
-
-```bash
-./scripts/bioconda_hash.sh 0.3.0
-```
-
-This patches `conda/meta.yaml` with the real hash from PyPI.
-
-**First submission** (one-time setup):
-
-```bash
-# Fork https://github.com/bioconda/bioconda-recipes on GitHub, then:
-git clone https://github.com/mkiyer/bioconda-recipes.git
-cd bioconda-recipes
-git checkout -b add-rigel
-mkdir -p recipes/rigel
-cp /path/to/rigel/conda/meta.yaml recipes/rigel/meta.yaml
-git add recipes/rigel/meta.yaml
-git commit -m "Add rigel version"
-git push origin add-rigel
-# Open a PR at https://github.com/bioconda/bioconda-recipes/pulls
-```
-
-**Subsequent releases**: Bioconda's auto-bump bot watches PyPI and usually
-opens a PR within 24 hours. If it doesn't, manually update
-`recipes/rigel/meta.yaml` with the new version and hash.
-
-### Step 7: Verify bioconda
-
-After the bioconda PR merges (allow ~24h for the package to build):
-
-```bash
-conda install -c conda-forge -c bioconda rigel==0.3.0
-rigel --version
-```
+If the auto-bump bot doesn't fire, `post_release.sh` prints the exact git
+commands to open a manual PR.
 
 ---
 
-## Recovery: re-releasing the same version
+## Recovery scenarios
 
-If CI fails after `release.sh` ran (e.g., a missing dependency), you need to
-fix the code and re-tag. The exact steps depend on how far the release got.
+### I answered "N" at the confirmation prompt
 
-### Case A: Tag was pushed but no GitHub Release yet
-
-The tag exists on GitHub but publish.yml hasn't run (no Release created).
+Nothing was committed, tagged, or pushed. Revert the staged edits and
+start over:
 
 ```bash
-# 1. Fix the bug on main
-git add <files>
-git commit -m "Fix: description of fix"
-
-# 2. Delete the old tag (local + remote)
-git tag -d v0.3.0
-git push origin --delete v0.3.0
-
-# 3. Re-run the release script (it will re-tag the new HEAD)
-./scripts/release.sh 0.3.0
+git checkout -- pyproject.toml conda/meta.yaml CHANGELOG.md
+./scripts/publishing/release.sh 0.4.0
 ```
 
-### Case B: GitHub Release was created and publish.yml failed
+### The tag pushed but `publish.yml` failed before uploading to PyPI
 
-The Release exists on GitHub but the PyPI upload didn't happen (or partially
-failed).
+You can re-run the workflow against the same tag:
 
 ```bash
-# 1. Delete the GitHub Release
-#    Go to https://github.com/mkiyer/rigel/releases
-#    Click on the release → Delete release
-
-# 2. Fix the bug on main
-git add <files>
-git commit -m "Fix: description of fix"
-
-# 3. Delete the old tag (local + remote)
-git tag -d v0.3.0
-git push origin --delete v0.3.0
-
-# 4. Re-run the release script
-./scripts/release.sh 0.3.0
-
-# 5. Create a new GitHub Release from the new tag
+# From the Actions tab → publish.yml run → "Re-run failed jobs"
 ```
 
-### Case C: PyPI upload succeeded but the release is broken
-
-PyPI does **not** allow re-uploading the same version. You must bump to a
-patch release.
+Or delete the tag and retry:
 
 ```bash
-# 1. Fix the bug on main
-# 2. Update CHANGELOG.md with a 0.3.1 entry
-# 3. Run release for the new version:
-./scripts/release.sh 0.3.1
+git tag -d v0.4.0
+git push origin --delete v0.4.0
+# fix the underlying problem, commit, then:
+./scripts/publishing/release.sh 0.4.0
 ```
 
-### Case D: release.sh failed before creating the tag
+### PyPI upload succeeded but the release is broken
 
-The script died mid-way (e.g., CHANGELOG check failed, or you answered "N"
-at the confirmation prompt). No tag was created.
+PyPI refuses re-uploads of the same version. Bump to a patch:
 
 ```bash
-# 1. Fix whatever caused the failure
-# 2. Commit the fix
-# 3. Re-run — the script is idempotent when no tag exists:
-./scripts/release.sh 0.3.0
+# Add a ## [Unreleased] section to CHANGELOG.md with the fix,
+# then:
+./scripts/publishing/release.sh 0.4.1
 ```
+
+### `release.sh` says the tag already exists
+
+You've already run stage 1. Either continue with
+`./scripts/publishing/post_release.sh <same-version>`, or delete the tag
+locally + remotely and retry (see above).
 
 ---
 
-## One-time setup (already done)
+## One-time setup (already configured)
 
 ### PyPI trusted publisher
 
-Configured at https://pypi.org/manage/project/rigel-rnaseq/settings/publishing/:
+Registered at
+<https://pypi.org/manage/project/rigel-rnaseq/settings/publishing/>:
 
 | Field | Value |
 |-------|-------|
@@ -226,50 +194,32 @@ Configured at https://pypi.org/manage/project/rigel-rnaseq/settings/publishing/:
 | Workflow | `publish.yml` |
 | Environment | `pypi` |
 
-A matching GitHub environment named `pypi` exists in the repository settings.
+A matching GitHub environment named `pypi` exists in repo settings.
 
-### CI/CD workflows
+### Workflows
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `ci.yml` | Push/PR to `main` | Tests on Ubuntu + macOS, Python 3.12 + 3.13 |
-| `publish.yml` | GitHub Release or manual dispatch | Builds sdist + wheels, uploads to PyPI |
+| `ci.yml` | Push / PR to `main` | Tests on Ubuntu + macOS, Python 3.12 + 3.13 |
+| `publish.yml` | **Tag push `v*`** / GitHub Release / manual dispatch | Builds sdist + wheels → PyPI |
 
-### Wheel targets
+### Wheel matrix
 
-| Platform | Architecture | Image / Runner |
-|----------|-------------|----------------|
-| Linux | x86_64 | `manylinux_2_28` (AlmaLinux 8) |
-| Linux | aarch64 | `manylinux_2_28` (QEMU emulated) |
-| macOS | arm64 | `macos-latest` (macOS 15) |
+| Platform | Arch | Runner / image |
+|----------|------|----------------|
+| Linux | x86_64 | `manylinux_2_28` |
+| Linux | aarch64 | `manylinux_2_28` (QEMU) |
+| macOS | arm64 | `macos-latest` |
 
-Intel Mac users install from the sdist (`pip install rigel-rnaseq` compiles
-locally). Linux glibc >= 2.28 is required for the binary wheel (RHEL 8+,
-Ubuntu 20.04+, Debian 10+).
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| Trusted publisher mismatch | Verify project name, repo, workflow name, and environment match exactly |
-| Wheel build fails on Linux | Check htslib compilation in `CIBW_BEFORE_ALL_LINUX` |
-| pyarrow install fails in test | Ensure `CIBW_MANYLINUX_*_IMAGE` is `manylinux_2_28` (pyarrow dropped manylinux2014) |
-| Missing dependency in CI | Add it to `pyproject.toml` dependencies, `conda/meta.yaml` run deps, and `publish.yml` `CIBW_TEST_REQUIRES` |
-| Bioconda hash mismatch | Re-run `./scripts/bioconda_hash.sh` after PyPI upload completes |
-| sdist missing native sources | Check `MANIFEST.in` includes `src/rigel/native/*.cpp` and `*.h` |
-| `release.sh` says tag exists | See "Recovery: re-releasing the same version" above |
+Intel Mac users install from the sdist. Linux glibc ≥ 2.28 required.
 
 ---
 
 ## Release checklist
 
-- [ ] `CHANGELOG.md` updated with new version entry
-- [ ] `./scripts/release.sh X.Y.Z` — bumps versions, commits, tags, pushes
-- [ ] GitHub Release created from tag -> `publish.yml` runs
-- [ ] `publish.yml` succeeds (all wheel + sdist jobs green)
-- [ ] `pip install rigel-rnaseq==X.Y.Z` works in a clean environment
-- [ ] `./scripts/bioconda_hash.sh X.Y.Z` — patches conda recipe with SHA256
-- [ ] `./scripts/conda_publish.sh` — builds and uploads to personal anaconda.org channel
-- [ ] Bioconda recipe PR opened (first time) or auto-bump confirmed
+- [ ] `CHANGELOG.md` has a `## [Unreleased]` section with real notes
+- [ ] `./scripts/publishing/release.sh X.Y.Z`
+- [ ] `publish.yml` green on <https://github.com/mkiyer/rigel/actions>
+- [ ] `pip install rigel-rnaseq==X.Y.Z` works in a clean env
+- [ ] `./scripts/publishing/post_release.sh X.Y.Z`
+- [ ] Bioconda PR opened (manually, or by the auto-bump bot within 24h)

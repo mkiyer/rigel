@@ -1,86 +1,89 @@
+#!/usr/bin/env bash
 # conda_publish.sh — Build and upload a conda package to your personal
 # anaconda.org channel (no bioconda review required).
 #
 # Prerequisites:
-#   conda activate bioconda-build   (needs conda-build + anaconda-client)
-#   anaconda login                  (one-time login to anaconda.org)
+#   conda activate bioconda-build   # needs conda-build + anaconda-client
+#   anaconda login                  # one-time, saved in ~/.anaconda/config.yaml
 #
-# Usage (source it so conda is available):
-#   conda activate bioconda-build
-#   source scripts/conda_publish.sh
+# Usage:
+#   ./scripts/publishing/conda_publish.sh
 #
-# This builds from conda/meta.yaml using the PyPI sdist as the source.
-# Make sure the PyPI release exists first (run release.sh + create GitHub Release).
+# This builds from conda/meta.yaml using the PyPI sdist as the source, so
+# make sure post_release.sh has already patched the sha256.
 
-# Use return instead of exit so sourcing doesn't kill the shell
-_conda_publish() {
-    local RED='\033[0;31m'
-    local GREEN='\033[0;32m'
-    local NC='\033[0m'
+set -euo pipefail
 
-    _die() { echo -e "${RED}Error: $1${NC}" >&2; return 1; }
-    _info() { echo -e "${GREEN}✓${NC} $1"; }
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-    cd "$(git rev-parse --show-toplevel)" || { _die "Not in a git repository"; return 1; }
+die()  { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
+info() { echo -e "${GREEN}✓${NC} $1"; }
+warn() { echo -e "${YELLOW}⚠${NC} $1"; }
 
-    # ── Pre-flight checks ────────────────────────────────────────────────
-    command -v conda-build >/dev/null 2>&1 || \
-        { _die "conda-build not found. Run: conda activate bioconda-build"; return 1; }
-    command -v anaconda >/dev/null 2>&1 || \
-        { _die "anaconda-client not found. Run: conda activate bioconda-build"; return 1; }
+cd "$(git rev-parse --show-toplevel)" || die "Not in a git repository"
 
-    if ! anaconda whoami >/dev/null 2>&1; then
-        _die "Not logged in to anaconda.org. Run: anaconda login"; return 1
-    fi
-    local ANACONDA_USER
-    ANACONDA_USER=$(anaconda whoami 2>/dev/null | awk '/Username:/{print $2; found=1} END{if(!found && NR>0) print $1}')
-    _info "Logged in to anaconda.org as: ${ANACONDA_USER}"
+# ── Pre-flight ──────────────────────────────────────────────────────────
+command -v conda-build >/dev/null 2>&1 || \
+    die "conda-build not found. Run: conda activate bioconda-build"
+command -v anaconda >/dev/null 2>&1 || \
+    die "anaconda-client not found. Run: conda activate bioconda-build"
 
-    if grep -q 'UPDATE_WITH_ACTUAL_HASH' conda/meta.yaml; then
-        _die "conda/meta.yaml still has the placeholder SHA256.
-Run: source scripts/bioconda_hash.sh <version>"; return 1
-    fi
+anaconda whoami >/dev/null 2>&1 || die "Not logged in to anaconda.org. Run: anaconda login"
 
-    local VERSION
-    VERSION=$(grep '{% set version' conda/meta.yaml | sed 's/.*"\(.*\)".*/\1/')
-    _info "Building rigel ${VERSION}"
+ANACONDA_USER=$(anaconda whoami 2>&1 | awk '/Username:/{print $2}')
+[[ -n "$ANACONDA_USER" ]] || die "Could not determine anaconda.org username"
+info "Logged in to anaconda.org as: ${ANACONDA_USER}"
 
-    # ── Build ────────────────────────────────────────────────────────────
-    echo ""
-    echo "Building conda package from conda/meta.yaml..."
-    echo "─────────────────────────────────────────────────"
+# Extract version from conda/meta.yaml.
+VERSION=$(grep -E '\{% set version' conda/meta.yaml | sed -E 's/.*"([^"]+)".*/\1/')
+[[ -n "$VERSION" ]] || die "Could not parse version from conda/meta.yaml"
 
-    local OUTPUT_DIR
-    OUTPUT_DIR="${PWD}/conda-build-artifacts"
+# Sanity check: meta.yaml must have a real sha256 (not a placeholder).
+if grep -Eq 'sha256:[[:space:]]*(UPDATE_WITH_ACTUAL_HASH|PLACEHOLDER|TBD)' conda/meta.yaml; then
+    die "conda/meta.yaml has a placeholder sha256.
+Run: ./scripts/publishing/post_release.sh ${VERSION}"
+fi
 
-    conda-build conda/ \
-        --channel conda-forge \
-        --channel bioconda \
-        --python 3.12 \
-        --numpy 1.26 \
-        --output-folder "${OUTPUT_DIR}" \
-        --no-anaconda-upload || { _die "conda-build failed"; return 1; }
+info "Building rigel ${VERSION}"
 
-    local PKG_PATH
-    PKG_PATH=$(find "${OUTPUT_DIR}" -type f \( -name "rigel-${VERSION}-*.conda" -o -name "rigel-${VERSION}-*.tar.bz2" \) | head -n 1)
+# ── Build ───────────────────────────────────────────────────────────────
+OUTPUT_DIR="${PWD}/conda-build-artifacts"
+mkdir -p "$OUTPUT_DIR"
 
-    [[ -f "$PKG_PATH" ]] || { _die "Built package not found at: $PKG_PATH"; return 1; }
-    _info "Package built: ${PKG_PATH}"
+echo ""
+echo "Building conda package from conda/meta.yaml…"
+echo "────────────────────────────────────────────"
 
-    # ── Upload ───────────────────────────────────────────────────────────
-    echo ""
-    echo "Uploading to anaconda.org/${ANACONDA_USER}..."
-    echo "─────────────────────────────────────────────────"
+conda-build conda/ \
+    --channel conda-forge \
+    --channel bioconda \
+    --python 3.12 \
+    --numpy 1.26 \
+    --output-folder "$OUTPUT_DIR" \
+    --no-anaconda-upload
 
-    anaconda upload --user "${ANACONDA_USER}" "$PKG_PATH" || { _die "Upload failed"; return 1; }
+PKG_PATH=$(find "$OUTPUT_DIR" -type f \
+    \( -name "rigel-${VERSION}-*.conda" -o -name "rigel-${VERSION}-*.tar.bz2" \) \
+    | head -n 1)
 
-    _info "Uploaded!"
-    echo ""
-    echo -e "${GREEN}Done!${NC} Install with:"
-    echo ""
-    echo "  conda install -c ${ANACONDA_USER} -c conda-forge -c bioconda rigel==${VERSION}"
-}
+[[ -f "$PKG_PATH" ]] || die "Built package not found in $OUTPUT_DIR"
+info "Built: ${PKG_PATH}"
 
-# Run the function, then clean up
-_conda_publish
-unset -f _conda_publish _die _info
+# ── Upload ──────────────────────────────────────────────────────────────
+echo ""
+echo "Uploading to anaconda.org/${ANACONDA_USER}…"
+echo "────────────────────────────────────────────"
+
+anaconda upload --user "$ANACONDA_USER" "$PKG_PATH"
+info "Uploaded"
+
+cat <<EOF
+
+${GREEN}Done.${NC} Install with:
+
+  conda install -c ${ANACONDA_USER} -c conda-forge -c bioconda rigel==${VERSION}
+
+EOF

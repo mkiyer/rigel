@@ -1,6 +1,9 @@
 name: Build & Publish
 
 on:
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
   workflow_dispatch:
@@ -114,7 +117,10 @@ jobs:
   publish:
     needs: [sdist, wheels]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'yes')
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'yes')
     environment: pypi
     permissions:
       id-token: write  # trusted publisher (no API token needed)
