@@ -1312,8 +1312,18 @@ static void assign_posteriors(
     double* gdna_locus_counts_2d,  // [N_T, n_cols]
     double* posterior_sum,         // [N_T]
     double* n_assigned,            // [N_T]
-    // Per-locus accumulation
-    double& mrna_total,
+    // Per-locus accumulation.
+    //
+    // ``rna_total`` is the sum of posterior mass assigned to ANY
+    // transcript-like component in the locus — this includes annotated
+    // mRNA AND synthetic nRNA components (both are RNA), which the
+    // solver treats identically (see scatter loop below).  It is NOT
+    // "mRNA" alone.  The caller must split annotated vs synthetic
+    // after the fact by subtracting per-transcript synthetic counts.
+    // Invariant:
+    //   rna_total + gdna_total == sum of assigned posteriors
+    //                          ≈ n_units entering the EM.
+    double& rna_total,
     double& gdna_total,
     int N_T_TOTAL,  // total transcripts for bounds checking
     int n_cols,     // number of splice-strand columns (actual 2D stride)
@@ -1336,7 +1346,7 @@ static void assign_posteriors(
         log_weights[c] = std::log(theta[c] + EM_LOG_EPSILON);
     }
 
-    mrna_total = 0.0;
+    rna_total = 0.0;
     gdna_total = 0.0;
 
     // Process each unit
@@ -1478,12 +1488,15 @@ static void assign_posteriors(
             if (p == 0.0) continue;
 
             if (comp < n_t) {
-                // Transcript (mRNA or synthetic nRNA — both handled the same way)
+                // Transcript component (annotated mRNA or synthetic nRNA
+                // — both are RNA and accumulate into rna_total;
+                // annotated-vs-synthetic splitting is deferred to the
+                // Python caller).
                 int32_t global_t = local_to_global[comp];
                 uint8_t col = sub.count_cols[s + j];
                 if (global_t < 0 || global_t >= N_T_TOTAL || col >= n_cols) continue;
                 em_counts_2d[global_t * n_cols + col] += p;
-                mrna_total += p;
+                rna_total += p;
 
                 // Confidence tracking (use original posteriors)
                 posterior_sum[global_t] += posteriors[j] * posteriors[j];
@@ -1899,7 +1912,7 @@ static void extract_locus_sub_problem_from_partition(
 
 static std::tuple<
     double,  // total_gdna_em
-    nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_mrna[n_loci]
+    nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_rna_total[n_loci] (annotated mRNA + synthetic nRNA)
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_gdna[n_loci]
     nb::list,  // locus_stats
     nb::object,  // out_winner_tid (ndarray or None)
@@ -2012,9 +2025,9 @@ batch_locus_em_partitioned(
         out_ncand_ptr = out_ncand_vec.data();
     }
 
-    std::vector<double> locus_mrna_vec(n_loci, 0.0);
+    std::vector<double> locus_rna_vec(n_loci, 0.0);
     std::vector<double> locus_gdna_vec(n_loci, 0.0);
-    double* locus_mrna_data = locus_mrna_vec.data();
+    double* locus_rna_data = locus_rna_vec.data();
     double* locus_gdna_data = locus_gdna_vec.data();
 
     std::vector<LocusProfile> locus_profiles(
@@ -2070,7 +2083,7 @@ batch_locus_em_partitioned(
             int n_u = pv.n_units;
 
             if (n_u == 0) {
-                locus_mrna_data[li] = 0.0;
+                locus_rna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
                 return 0.0;
             }
@@ -2101,7 +2114,7 @@ batch_locus_em_partitioned(
 
             // 3. Handle empty sub-problem
             if (n_local_units == 0 || n_candidates == 0) {
-                locus_mrna_data[li] = 0.0;
+                locus_rna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
                 return 0.0;
             }
@@ -2143,19 +2156,19 @@ batch_locus_em_partitioned(
 
             // 8. Assign posteriors
             SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
-            double locus_mrna = 0.0, locus_gdna = 0.0;
+            double locus_rna = 0.0, locus_gdna = 0.0;
             assign_posteriors(
                 sub, result.theta.data(),
                 assignment_mode, assignment_min_posterior, locus_rng,
                 em_out, gdna_out,
                 psum_out, nass_out,
-                locus_mrna, locus_gdna,
+                locus_rna, locus_gdna,
                 N_T, N_COLS,
                 out_tid_ptr, out_post_ptr, out_ncand_ptr,
                 locus_write_offsets[li]);
             auto t7 = hrclock::now();
 
-            locus_mrna_data[li] = locus_mrna;
+            locus_rna_data[li] = locus_rna;
             locus_gdna_data[li] = locus_gdna;
 
             if (emit_locus_stats) {
@@ -2261,12 +2274,12 @@ batch_locus_em_partitioned(
     double total_gdna_em_val = total_gdna_em.load(std::memory_order_relaxed);
 
     size_t shape[1] = {static_cast<size_t>(n_loci)};
-    auto* mrna_copy = new double[n_loci];
+    auto* rna_copy = new double[n_loci];
     auto* gdna_copy = new double[n_loci];
-    std::memcpy(mrna_copy, locus_mrna_vec.data(), n_loci * sizeof(double));
+    std::memcpy(rna_copy, locus_rna_vec.data(), n_loci * sizeof(double));
     std::memcpy(gdna_copy, locus_gdna_vec.data(), n_loci * sizeof(double));
 
-    nb::capsule mrna_owner(mrna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
+    nb::capsule rna_owner(rna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
     nb::capsule gdna_owner(gdna_copy, [](void* p) noexcept { delete[] static_cast<double*>(p); });
 
     nb::list stats_list;
@@ -2310,7 +2323,7 @@ batch_locus_em_partitioned(
     return std::make_tuple(
         total_gdna_em_val,
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(
-            mrna_copy, 1, shape, std::move(mrna_owner)),
+            rna_copy, 1, shape, std::move(rna_owner)),
         nb::ndarray<nb::numpy, double, nb::ndim<1>>(
             gdna_copy, 1, shape, std::move(gdna_owner)),
         stats_list,
@@ -2644,8 +2657,13 @@ NB_MODULE(_em_impl, m) {
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 12-tuples (one per locus) containing partition\n"
           "arrays, plus per-locus calibration priors (alpha_gdna, alpha_rna).\n"
-          "Returns (total_gdna_em, locus_mrna, locus_gdna, locus_stats,\n"
-          " out_winner_tid, out_winner_post, out_n_candidates).");
+          "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
+          " out_winner_tid, out_winner_post, out_n_candidates).\n"
+          "\n"
+          "locus_rna_total is the sum of posteriors assigned to any\n"
+          "transcript-like component (annotated mRNA + synthetic nRNA);\n"
+          "splitting into annotated mRNA vs synthetic nRNA is done by\n"
+          "the Python caller.");
 
     m.def("connected_components", &connected_components_native,
           nb::arg("offsets"),

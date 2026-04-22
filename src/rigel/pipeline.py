@@ -517,7 +517,7 @@ def _run_locus_em_partitioned(
     n_threads = em_config.n_threads or os.cpu_count() or 1
     emit_assignments = annotations is not None
 
-    def _build_locus_meta(locus, *, mrna, gdna, alpha_g, alpha_r):
+    def _build_locus_meta(locus, *, rna_total, gdna, alpha_g, alpha_r):
         gene_set = {
             int(t_to_g[int(t_idx)])
             for t_idx in locus.transcript_indices
@@ -529,7 +529,14 @@ def _run_locus_em_partitioned(
             "n_transcripts": len(locus.transcript_indices),
             "n_genes": len(gene_set),
             "n_em_fragments": len(locus.unit_indices),
-            "mrna": float(mrna),
+            # ``rna_total`` = sum of posterior mass assigned to every
+            # non-gDNA component in the locus. The C++ EM treats annotated
+            # mRNA and synthetic nRNA transcripts identically, so this
+            # value is NOT mRNA alone — it is (annotated mRNA + synthetic
+            # nRNA), i.e. total RNA. The annotated vs synthetic split is
+            # done downstream in ``AbundanceEstimator.get_loci_df`` using
+            # per-transcript ``is_synthetic`` flags from the index.
+            "rna_total": float(rna_total),
             "gdna": float(gdna),
             "alpha_gdna": float(alpha_g),
             "alpha_rna": float(alpha_r),
@@ -596,7 +603,7 @@ def _run_locus_em_partitioned(
             np.array([alpha_rna[lid]], dtype=np.float64),
             np.array([locus.gdna_span + gdna_flank], dtype=np.int64),
         )
-        gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
+        gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
         if annotations is not None and len(em_result) > 3:
             _populate_em_annotations(
@@ -610,7 +617,7 @@ def _run_locus_em_partitioned(
         estimator.locus_results.append(
             _build_locus_meta(
                 locus,
-                mrna=mrna_arr[0],
+                rna_total=rna_arr[0],
                 gdna=gdna_arr[0],
                 alpha_g=alpha_gdna[lid],
                 alpha_r=alpha_rna[lid],
@@ -637,7 +644,7 @@ def _run_locus_em_partitioned(
             normal_ar,
             normal_spans,
         )
-        gdna_em, mrna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
+        gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
         if annotations is not None and len(em_result) > 3:
             _populate_em_annotations(
@@ -652,7 +659,7 @@ def _run_locus_em_partitioned(
             estimator.locus_results.append(
                 _build_locus_meta(
                     locus,
-                    mrna=mrna_arr[i],
+                    rna_total=rna_arr[i],
                     gdna=gdna_arr[i],
                     alpha_g=normal_ag[i],
                     alpha_r=normal_ar[i],

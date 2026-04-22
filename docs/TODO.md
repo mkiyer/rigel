@@ -1,6 +1,11 @@
 # TODO
 
 
+## Summary (output)
+
+- Put "quantification" section towards the top with high-level results
+- Fragment length distributions should be the last thing
+
 
 ## Calibration 
 

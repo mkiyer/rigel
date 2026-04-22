@@ -131,19 +131,50 @@ def compute_locus_priors(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute per-locus Dirichlet priors from calibration.
 
-    For each locus, finds overlapping calibration regions via
-    ``index.region_cr`` (cgranges), computes a local gDNA mixing
-    fraction γ, and sets:
+    For each locus we compute a **local gDNA mixing fraction** γ_ℓ
+    representing "what fraction of fragments in this locus do we
+    expect to be gDNA?".  γ_ℓ is set to
 
-        α_gDNA = γ × c_base
-        α_RNA  = (1 − γ) × c_base
+        γ_ℓ = Σ_i  region_e_gdna[i]   /   Σ_i  region_n_total[i]
 
-    The C++ EM solver adds a mode-aware baseline per eligible
-    component (+0.5 for VBEM, 0.0 for MAP) before running EM.
-    This compensates for VBEM's digamma sparsification bias
-    while remaining bias-free for MAP.
+    where the sum runs over all calibration regions overlapping the
+    locus's merged transcript-span intervals.
 
-    Falls back to global γ when no regions overlap a locus.
+    * ``region_e_gdna[i]`` is the **expected** gDNA count in region
+      *i* computed by calibration: ``min(λ_G × mappable_bp[i],
+      n_total[i])``.  λ_G is the global gDNA fragment density (per
+      mappable base) fitted by the v4 EM and applies everywhere on
+      the genome — intergenic, intronic, exonic alike.  The
+      ``min(·, n_total)`` clip is a defensive cap that should
+      rarely fire outside very small low-coverage regions.
+    * ``region_n_total[i]`` is the **observed** total fragment count
+      in region *i* (all four strand/splice columns summed).  This
+      is *all* fragments seen in the region, not gDNA-only.
+
+    So γ_ℓ = (expected gDNA frags in locus) / (observed total frags
+    in locus).  This is a density-aware local mixing prior: in an
+    RNA-rich region n_total is large so γ_ℓ is small; in a
+    pure-intergenic region n_total ≈ λ_G·mbp so γ_ℓ ≈ 1.
+
+    The priors returned to the EM solver are:
+
+        α_gDNA = γ_ℓ × c_base
+        α_RNA  = (1 − γ_ℓ) × c_base
+
+    Downstream, the C++ EM solver uses them in **two** ways:
+
+    1. As a Dirichlet pseudocount in the M-step (negligible vs the
+       per-locus fragment count for all but tiny loci).
+    2. As the **warm-start ratio** for θ: at iter 0,
+       ``θ_gDNA = (α_gDNA/α_RNA) × θ_RNA_total``.  This is what
+       actually matters — it places gDNA at the density-expected
+       share before EM iterations begin.
+
+    A mode-aware baseline (+0.5 for VBEM, 0 for MAP) is added by
+    the solver to compensate for VBEM sparsification bias.
+
+    Loci with no overlapping calibration regions fall back to the
+    genome-wide γ = Σ region_e_gdna / Σ region_n_total.
 
     Returns
     -------

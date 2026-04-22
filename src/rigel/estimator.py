@@ -197,7 +197,7 @@ class AbundanceEstimator:
         self._gdna_em_total = 0.0
 
         # Per-locus results (locus_id, ref, n_transcripts, n_genes,
-        # n_em_fragments, mrna, gdna, gdna_init).
+        # n_em_fragments, mrna, gdna, alpha_gdna, alpha_rna).
         self.locus_results: list[dict] = []
 
         # Per-transcript locus_id assignment (-1 = no locus).
@@ -695,6 +695,8 @@ class AbundanceEstimator:
             "total",
             "gdna_rate",
             "gdna_prior",
+            "alpha_gdna",
+            "alpha_rna",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -713,16 +715,37 @@ class AbundanceEstimator:
         for r in self.locus_results:
             lid = r["locus_id"]
             in_locus = locus_ids == lid
-            # nrna column: synthetic-only for additive total (mrna + nrna + gdna)
+            # ``r["rna_total"]`` is the C++ EM accumulator
+            # (em_solver.cpp::assign_posteriors -> ````rna_total````):
+            # the sum of posteriors assigned to every non-gDNA component
+            # in the locus. The solver treats annotated mRNA and
+            # synthetic nRNA transcripts identically, so this is
+            # (mRNA + nRNA) posterior mass, NOT mRNA alone.
+            #
+            # To produce user-facing, non-overlapping columns:
+            #   nrna       = sum over synthetic transcripts only
+            #   mrna       = ``rna_total`` - nrna   (annotated only)
+            #   total      = mrna + nrna + gdna
+            #              = ``rna_total`` + gdna
+            #              = n_em_fragments (modulo discrete rounding)
+            # n_nrna_entities: count all nRNA entities (informational)
             syn_in_locus = in_locus & is_synthetic
             nrna = float(t_total[syn_in_locus].sum())
-            # n_nrna_entities: count all nRNA entities (informational)
             n_nrna = int((in_locus & is_nrna).sum())
             n_syn = int(syn_in_locus.sum())
             n_annot = int(in_locus.sum()) - n_syn
 
-            total = r["mrna"] + nrna + r["gdna"]
-            rate = r["gdna"] / total if total > 0 else 0.0
+            rna_total = float(r["rna_total"])  # annotated mRNA + synthetic nRNA
+            mrna = max(rna_total - nrna, 0.0)    # annotated only
+            gdna = float(r["gdna"])
+            total = rna_total + gdna                   # \u2248 n_em_fragments
+            rate = gdna / total if total > 0 else 0.0
+            # Per-locus Dirichlet prior fraction computed by
+            # compute_locus_priors(): \u03b3_\u2113 = \u03b1_gDNA / (\u03b1_gDNA + \u03b1_RNA).
+            alpha_g = float(r.get("alpha_gdna", 0.0))
+            alpha_r = float(r.get("alpha_rna", 0.0))
+            prior_sum = alpha_g + alpha_r
+            gdna_prior = alpha_g / prior_sum if prior_sum > 0 else 0.0
             rows.append(
                 {
                     "locus_id": lid,
@@ -732,12 +755,14 @@ class AbundanceEstimator:
                     "n_nrna_entities": n_nrna,
                     "n_genes": r["n_genes"],
                     "n_em_fragments": r["n_em_fragments"],
-                    "mrna": r["mrna"],
+                    "mrna": mrna,
                     "nrna": nrna,
-                    "gdna": r["gdna"],
+                    "gdna": gdna,
                     "total": total,
                     "gdna_rate": rate,
-                    "gdna_prior": r.get("gdna_init", 0.0),
+                    "gdna_prior": gdna_prior,
+                    "alpha_gdna": alpha_g,
+                    "alpha_rna": alpha_r,
                 }
             )
         return pd.DataFrame(rows, columns=cols)

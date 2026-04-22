@@ -1,11 +1,22 @@
 """Mappability-aware EM mixture deconvolution for gDNA calibration (v4).
 
-Two-component mixture over exonic regions:
+Two-component mixture over the **full genome partition** produced by
+``index.build_region_table`` — intergenic, intronic, and exonic atomic
+bins alike.  There is no exon-only restriction; every region with
+mappable bp above ``mappable_floor`` is eligible.  Spliced-read
+evidence (only possible in exonic regions) acts as a *hard* RNA
+anchor, nothing more.  The two latent classes are:
 
-* Class G (gDNA-only):  k^u_i ~ Poisson(λ_G · E_i),  k^s_i = 0 (hard).
-* Class R (expressed):   k^u_i ~ Poisson((λ_G + (1-ρ)·μ_i) · E_i),
-                         k^s_i ~ Poisson(ρ·μ_i·E_i),
-                         log μ_i ~ N(μ_R, σ_R²).
+* Class G (not-expressed; gDNA-only):
+        k^u_i ~ Poisson(λ_G · E_i),  k^s_i = 0 (hard).
+* Class R (expressed; gDNA + any RNA):
+        k^u_i ~ Poisson((λ_G + (1-ρ)·μ_i) · E_i),
+        k^s_i ~ Poisson(ρ·μ_i·E_i),
+        log μ_i ~ N(μ_R, σ_R²).
+
+λ_G is the *global* gDNA fragment density (fragments per mappable
+base); once estimated from the mixture it applies uniformly across
+every region in the genome, including expressed loci.
 
 Signals fused as additive LLRs on logit γ:
   1. Count LLR via Poisson-LogNormal marginal (Gauss-Hermite quadrature).
