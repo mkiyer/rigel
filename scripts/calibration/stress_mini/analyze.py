@@ -27,7 +27,7 @@ def summary(sweep: pd.DataFrame) -> None:
             "lambda_truth", "lambda_est", "lambda_ratio",
             "ss_est", "mu_R", "sigma_R",
             "mixing_pi", "mixing_pi_soft",
-            "strand_used", "em_n_iter"]
+            "kappa_G", "kappa_R", "em_n_iter"]
     with pd.option_context("display.float_format", "{:.4g}".format,
                             "display.width", 220):
         print("=" * 80)

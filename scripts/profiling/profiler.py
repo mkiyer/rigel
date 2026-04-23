@@ -523,7 +523,6 @@ def profile_stages(
     calibration_obj = None
     with Timer("calibration") as t_cal:
         if region_counts is not None and fl_table is not None and index.region_df is not None:
-            strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
             calibration_obj = calibrate_gdna(
                 region_counts,
                 fl_table,
@@ -532,9 +531,6 @@ def profile_stages(
                 mean_frag_len=frag_length_models.global_model.mean,
                 intergenic_fl_model=frag_length_models.intergenic,
                 fl_prior_ess=cal_cfg.fl_prior_ess,
-                strand_specificity_noise_floor=cal_cfg.strand_specificity_noise_floor,
-                strand_specificity_ci_epsilon=strand_ci_eps,
-                strand_llr_mode=cal_cfg.strand_llr_mode,
             )
             # Apply calibrated gDNA FL model for scoring
             frag_length_models.gdna_model = calibration_obj.gdna_fl_model

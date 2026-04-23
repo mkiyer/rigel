@@ -908,9 +908,6 @@ def run_pipeline(
         mean_frag_len=frag_length_models.global_model.mean,
         intergenic_fl_model=frag_length_models.intergenic,
         fl_prior_ess=cal_cfg.fl_prior_ess,
-        strand_specificity_noise_floor=cal_cfg.strand_specificity_noise_floor,
-        strand_specificity_ci_epsilon=strand_ci_eps,
-        strand_llr_mode=cal_cfg.strand_llr_mode,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

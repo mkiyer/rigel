@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -20,14 +20,13 @@ class CalibrationResult:
     strand_specificity: float
 
     region_gamma: np.ndarray | None = None
+    region_gamma_strand: np.ndarray | None = None
     mu_R: float | None = None
     sigma_R: float | None = None
     mixing_pi: float | None = None
     mixing_pi_soft: float | None = None
-    strand_used: bool = False
-    strand_z: float = 0.0
-    strand_llr_mode: str = "binomial"
-    kappa: float = 0.0
+    kappa_G: float = 0.0
+    kappa_R: float = 0.0
     em_n_iter: int = 0
     em_converged: bool = False
     n_eligible: int = 0
@@ -43,10 +42,8 @@ class CalibrationResult:
             "sigma_R": _round_or_none(self.sigma_R, 4),
             "mixing_pi": _round_or_none(self.mixing_pi, 4),
             "mixing_pi_soft": _round_or_none(self.mixing_pi_soft, 4),
-            "strand_used": bool(self.strand_used),
-            "strand_z": round(float(self.strand_z), 3),
-            "strand_llr_mode": str(self.strand_llr_mode),
-            "kappa": round(float(self.kappa), 4),
+            "kappa_G": round(float(self.kappa_G), 4),
+            "kappa_R": round(float(self.kappa_R), 4),
             "em_n_iter": int(self.em_n_iter),
             "em_converged": bool(self.em_converged),
             "n_eligible": int(self.n_eligible),

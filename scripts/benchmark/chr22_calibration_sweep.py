@@ -295,8 +295,8 @@ def run_one(
             "mixing_pi": None if cal is None else cal.mixing_pi,
             "mixing_pi_soft": (None if cal is None
                                else cal.mixing_pi_soft),
-            "strand_used": None if cal is None else cal.strand_used,
-            "strand_z": None if cal is None else cal.strand_z,
+            "kappa_G": None if cal is None else cal.kappa_G,
+            "kappa_R": None if cal is None else cal.kappa_R,
             "em_n_iter": None if cal is None else cal.em_n_iter,
             "em_converged": None if cal is None else cal.em_converged,
             "n_eligible": None if cal is None else cal.n_eligible,

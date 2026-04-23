@@ -297,7 +297,7 @@ class TestCalibrateGDNA:
         d = r.to_summary_dict()
         for key in (
             "lambda_gdna", "mu_R", "sigma_R", "mixing_pi", "mixing_pi_soft",
-            "strand_used", "strand_z",
+            "kappa_G", "kappa_R",
             "em_n_iter", "em_converged", "n_eligible", "n_soft",
             "n_spliced_hard", "total_expected_gdna",
             "gdna_fraction", "strand_specificity",

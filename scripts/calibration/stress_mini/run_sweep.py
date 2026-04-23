@@ -337,8 +337,8 @@ def run_cell(
         "em_n_iter": cal.em_n_iter,
         "em_converged": bool(cal.em_converged),
         "n_eligible": cal.n_eligible,
-        "strand_used": bool(cal.strand_used),
-        "strand_z": cal.strand_z,
+        "kappa_G": cal.kappa_G,
+        "kappa_R": cal.kappa_R,
         "total_E_gdna": float(cal.region_e_gdna.sum()),
         "total_n_gdna_truth_regions": int(truth_regions["n_gdna_true"].sum()),
         "fl_gdna_mean": (cal.gdna_fl_model.mean

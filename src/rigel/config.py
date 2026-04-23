@@ -181,31 +181,6 @@ class CalibrationConfig:
     #: lower values (10-50) may be useful for small simulations.
     fl_prior_ess: float = 1000.0
 
-    #: Structural biological floor on the RNA-model antisense rate used in
-    #: the calibration mixture's strand LLR.  Interpreted as "the minimum
-    #: antisense-read rate ascribable to RNA under any prep", capturing
-    #: readthrough, convergent transcription, antisense ncRNA, template
-    #: switching, and alignment noise.  The effective floor applied to
-    #: ``1 − ss`` is ``max(STRAND_SPECIFICITY_NOISE_FLOOR, ε_CI)`` where
-    #: ``ε_CI`` is the upper credible-limit width from the strand trainer
-    #: itself (shrinks with training-set size).  Default 0.001 caps the
-    #: per-antisense-read LLR at ``log(0.5/0.001) ≈ 6.2`` nats — strong
-    #: but non-catastrophic.  See
-    #: ``docs/calibration/strand_llr_noise_floor_design.md``.
-    strand_specificity_noise_floor: float = 0.001
-
-    #: Strand LLR parametrisation used by the calibration EM.
-    #:
-    #: * ``"binomial"`` (default) — plain Binomial per region, with a
-    #:   fixed ``max(ε_bio, ε_CI)`` floor on ``1 − ss`` for numerical
-    #:   safety.  Current shipping behaviour.
-    #: * ``"betabinom"`` — shared Beta-Binomial dispersion κ, re-estimated
-    #:   inside the EM loop via exact mixture marginal log-likelihood.
-    #:   Tempers overdispersion in the strand channel with a learned,
-    #:   data-dependent per-region LLR cap.  Pilot; see
-    #:   ``docs/calibration/calibration_v3_vs_v4_comparison.md``.
-    strand_llr_mode: str = "binomial"
-
 
 @dataclass(frozen=True)
 class PipelineConfig:

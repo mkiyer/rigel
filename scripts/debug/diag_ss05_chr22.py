@@ -66,7 +66,7 @@ def main() -> None:
     print(f"  λ_pool  = {fit.lam_G:.3e}")
     print(f"  μ_R = {fit.mu_R:.3f}, σ_R = {fit.sigma_R:.3f}")
     print(f"  π = {fit.pi:.3f}, π_soft = {fit.pi_soft:.3f}")
-    print(f"  strand_used = {fit.strand_used}, strand_z = {fit.strand_z:.2f}")
+    print(f"  strand κ_G = {fit.kappa_G:.2f}, κ_R = {fit.kappa_R:.2f}")
 
     ref_arr = np.asarray(stats["ref"])
     mask22 = ref_arr == REF_NAME

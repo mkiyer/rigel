@@ -9,6 +9,11 @@
 
 ## Calibration 
 
+## Calibration: beta binomial versus binomial
+
+- Current implementation is Binomial with strand floor and various other fixes
+- Prior implementation used beta binomial which required estimating parameter kappa which was not straightforward and required limits
+
 
 ## Calibration: estimate_kappa_sym
 
