@@ -60,8 +60,6 @@ class ScoredFragments:
     gdna_log_liks : np.ndarray
         float64[n_units] — pre-computed gDNA log-likelihood per unit.
         -inf for spliced units.
-    genomic_footprints : np.ndarray
-        int32[n_units] — genomic footprint per unit.
     frag_ids : np.ndarray
         int64[n_units] — buffer frag_id for each EM unit.
     frag_class : np.ndarray
@@ -85,7 +83,6 @@ class ScoredFragments:
     locus_count_cols: np.ndarray
     is_spliced: np.ndarray
     gdna_log_liks: np.ndarray
-    genomic_footprints: np.ndarray
     frag_ids: np.ndarray
     frag_class: np.ndarray
     splice_type: np.ndarray
@@ -162,7 +159,6 @@ class LocusPartition:
     # Per-unit arrays
     is_spliced: np.ndarray  # uint8 (bool viewed as uint8 for C++)
     gdna_log_liks: np.ndarray  # float64
-    genomic_footprints: np.ndarray  # int32
     locus_t_indices: np.ndarray  # int32
     locus_count_cols: np.ndarray  # uint8
 

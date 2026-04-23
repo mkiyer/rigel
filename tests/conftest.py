@@ -249,7 +249,6 @@ def _make_locus_em_data(
         splice_type=np.zeros(n_units, dtype=np.uint8),
         n_units=n_units,
         n_candidates=n_candidates,
-        genomic_footprints=np.full(n_units, 200, dtype=np.int32),
     )
 
     locus = Locus(
@@ -319,7 +318,7 @@ def _run_and_assign(
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)
 
-    # Build the 12-tuples and transcript index lists expected by C++
+    # Build the 11-tuples and transcript index lists expected by C++
     partition_tuples = [
         (
             p.offsets,
@@ -331,21 +330,18 @@ def _run_and_assign(
             p.count_cols,
             p.is_spliced,
             p.gdna_log_liks,
-            p.genomic_footprints,
             p.locus_t_indices,
             p.locus_count_cols,
         )
         for p in [partitions[i] for i in range(len(loci))]
     ]
     locus_t_lists = [loc.transcript_indices for loc in loci]
-    gdna_spans = np.array([loc.gdna_span for loc in loci], dtype=np.int64)
 
     total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
         partition_tuples,
         locus_t_lists,
         alpha_gdna,
         alpha_rna,
-        gdna_spans,
         index,
         em_iterations=em_iterations,
     )

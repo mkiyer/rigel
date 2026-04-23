@@ -47,6 +47,26 @@ using rigel::FRAG_CHIMERIC;
 static constexpr int SCORED_STACK_CAPACITY = 64;
 
 // ----------------------------------------------------------------
+// Online log-sum-exp accumulator (numerically stable)
+// ----------------------------------------------------------------
+//
+// Maintains running (max_v, sum_v) such that the logsumexp of the
+// stream of inputs x_1,..,x_n equals  max_v + log(sum_v).
+// Skips -inf inputs.  Called once per contributing hit in the
+// gDNA per-hit accumulator for multimapper units.
+static inline void lse_update(double& max_v, double& sum_v, double x) {
+    if (!std::isfinite(x)) return;
+    if (x > max_v) {
+        if (std::isfinite(max_v)) sum_v *= std::exp(max_v - x);
+        else                      sum_v = 0.0;
+        max_v = x;
+        sum_v += 1.0;
+    } else {
+        sum_v += std::exp(x - max_v);
+    }
+}
+
+// ----------------------------------------------------------------
 // Array type aliases
 // ----------------------------------------------------------------
 
@@ -164,6 +184,13 @@ class NativeFragmentScorer {
     double  gdna_fl_tail_base_;
     bool    has_gdna_fl_lut_;
 
+    // --- gDNA length-correction flank (mean gDNA fragment length) ---
+    // Added to each hit's t_span to form the local gDNA sampling
+    // window L_h = t_span[t_h] + gdna_flank.  Together with the
+    // fragment footprint this defines e_h = max(L_h - gfp + 1, 1),
+    // the per-hit effective length for the uniform-position gDNA prior.
+    int32_t gdna_flank_;
+
     // --- Exon data in CSR layout for genomic→transcript mapping ---
     std::vector<int32_t> exon_offsets_;  // [n_transcripts + 1]
     std::vector<int32_t> exon_starts_;   // flattened
@@ -241,6 +268,7 @@ public:
         nb::object gdna_fl_log_prob_obj,
         int32_t gdna_fl_max_size,
         double  gdna_fl_tail_base,
+        int32_t gdna_flank,
         i8_1d   t_strand_arr,
         i32_1d  t_length_arr,
         i32_1d  t_span_arr,
@@ -262,6 +290,7 @@ public:
         gdna_fl_max_size_(gdna_fl_max_size),
         gdna_fl_tail_base_(gdna_fl_tail_base),
         has_gdna_fl_lut_(false),
+        gdna_flank_(gdna_flank),
         max_ll_delta_(pruning_max_ll_delta)
     {
         // Copy index arrays
@@ -375,7 +404,6 @@ private:
         std::vector<uint8_t>*  v_locus_ct;
         std::vector<int8_t>*   v_is_spliced;
         std::vector<double>*   v_gdna_ll;
-        std::vector<int32_t>*  v_gfp;
         std::vector<int64_t>*  v_fid;
         std::vector<int8_t>*   v_fclass;
         std::vector<uint8_t>*  v_stype;
@@ -402,16 +430,21 @@ private:
         std::unordered_map<int32_t, MergedMrna> mm_merged;
         bool    mm_is_any_spliced;
         int     mm_best_stype;
-        double  mm_best_gdna_ll;
-        int32_t mm_best_gdna_fp;
-        int32_t mm_first_gfp;
+
+        // Option B harmonic-mean gDNA length correction: online
+        // logsumexp of per-hit log-liks with per-hit length term
+        // baked in.  The emitted gdna_log_lik at flush time is
+        //   lse_max + log(lse_sum) - log(nh_gdna).
+        double  mm_gdna_lse_max;
+        double  mm_gdna_lse_sum;
+        int32_t mm_nh_gdna;
 
         FillState()
             : v_ti(nullptr), v_ll(nullptr), v_ct(nullptr),
               v_cw(nullptr), v_ts(nullptr), v_te(nullptr),
               v_offsets(nullptr), v_locus_t(nullptr),
               v_locus_ct(nullptr), v_is_spliced(nullptr),
-              v_gdna_ll(nullptr), v_gfp(nullptr), v_fid(nullptr),
+              v_gdna_ll(nullptr), v_fid(nullptr),
               v_fclass(nullptr), v_stype(nullptr),
               v_det_ti(nullptr), v_det_fid(nullptr),
               v_chim_fid(nullptr), v_chim_stype(nullptr),
@@ -420,8 +453,9 @@ private:
               mm_fid(-1), mm_n_members(0),
               mm_is_any_spliced(false),
               mm_best_stype(SPLICE_UNSPLICED),
-              mm_best_gdna_ll(-std::numeric_limits<double>::infinity()),
-              mm_best_gdna_fp(0), mm_first_gfp(0) {}
+              mm_gdna_lse_max(-std::numeric_limits<double>::infinity()),
+              mm_gdna_lse_sum(0.0),
+              mm_nh_gdna(0) {}
 
         void reset_mm_group() {
             mm_merged.clear();  // reuses hash bucket allocation
@@ -429,9 +463,9 @@ private:
             mm_n_members = 0;
             mm_is_any_spliced = false;
             mm_best_stype = SPLICE_UNSPLICED;
-            mm_best_gdna_ll = -std::numeric_limits<double>::infinity();
-            mm_best_gdna_fp = 0;
-            mm_first_gfp = 0;
+            mm_gdna_lse_max = -std::numeric_limits<double>::infinity();
+            mm_gdna_lse_sum = 0.0;
+            mm_nh_gdna = 0;
         }
     };
 
@@ -477,26 +511,37 @@ private:
             st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
         }
 
-        // gDNA: track best across unspliced alignments
+        // gDNA per-hit contribution (Option B harmonic-mean length
+        // correction).  Only unspliced hits enter the gDNA hypothesis.
+        // We anchor the local sampling window L_h on this hit's first
+        // candidate transcript span (t_span_[t_h] + gdna_flank), bake in
+        // the per-hit log-lik -log(e_h), and accumulate via online
+        // logsumexp.  At flush time:
+        //    gdna_log_lik = lse_max + log(lse_sum) - log(nh_gdna)
+        // which equals  log((1/NH) * sum_h exp(log p_h^gDNA - log e_h)).
         if (stype != SPLICE_SPLICED_ANNOT &&
-            stype != SPLICE_SPLICED_UNANNOT)
+            stype != SPLICE_SPLICED_UNANNOT &&
+            n_cand > 0)
         {
-            int32_t gfp_val = cp.g_fp[row];
-            double hit_log_nm = nm > 0
-                ? nm * mm_log_pen_ : 0.0;
-            double gdna_fl = gdna_frag_len_log_lik(gfp_val);
-            double gdna_ll_val =
-                gdna_fl + gdna_log_sp + LOG_HALF + hit_log_nm;
-            if (gdna_ll_val > st.mm_best_gdna_ll) {
-                st.mm_best_gdna_ll = gdna_ll_val;
-                st.mm_best_gdna_fp = gfp_val;
+            int32_t gfp_val  = cp.g_fp[row];
+            int32_t anchor_t = cp.t_ind[start];
+            if (anchor_t >= 0 && anchor_t < n_transcripts_) {
+                int64_t L_h = static_cast<int64_t>(t_span_[anchor_t])
+                            + gdna_flank_;
+                int64_t e_h = L_h - static_cast<int64_t>(gfp_val) + 1;
+                if (e_h < 1) e_h = 1;
+
+                double gdna_fl    = gdna_frag_len_log_lik(gfp_val);
+                double hit_log_ll = gdna_fl + gdna_log_sp + LOG_HALF
+                                  + log_nm
+                                  - std::log(static_cast<double>(e_h));
+                lse_update(st.mm_gdna_lse_max,
+                           st.mm_gdna_lse_sum, hit_log_ll);
+                ++st.mm_nh_gdna;
             }
         }
 
-        // Track first member's footprint (fallback for spliced groups)
-        if (st.mm_n_members == 0) {
-            st.mm_first_gfp = cp.g_fp[row];
-        }
+        // Track member count for NH bookkeeping
         ++st.mm_n_members;
 
         // Score and merge mRNA candidates
@@ -642,12 +687,16 @@ private:
             st.v_is_spliced->push_back(
                 st.mm_is_any_spliced ? 1 : 0);
 
-            if (!st.mm_is_any_spliced) {
-                st.v_gdna_ll->push_back(st.mm_best_gdna_ll);
-                st.v_gfp->push_back(st.mm_best_gdna_fp);
+            // Emit per-unit gDNA log-lik.  Under Option B the scorer
+            // delivers the fully length-corrected scalar; the EM sees
+            // no gDNA-specific bias correction downstream.
+            if (!st.mm_is_any_spliced && st.mm_nh_gdna > 0) {
+                double final_gdna_ll = st.mm_gdna_lse_max
+                                     + std::log(st.mm_gdna_lse_sum)
+                                     - std::log((double)st.mm_nh_gdna);
+                st.v_gdna_ll->push_back(final_gdna_ll);
             } else {
                 st.v_gdna_ll->push_back(NEG_INF);
-                st.v_gfp->push_back(st.mm_first_gfp);
             }
 
             ++st.unit_cur;
@@ -903,14 +952,21 @@ private:
                      || stype == SPLICE_SPLICED_UNANNOT);
                 st.v_is_spliced->push_back(
                     is_spl ? 1 : 0);
-                st.v_gfp->push_back(genomic_footprint);
 
-                if (!is_spl) {
+                // Non-MM path (NH=1 or ambig-same-strand): Option B
+                // reduces to a single-term expression using best_t as
+                // the anchor transcript.
+                if (!is_spl && best_t >= 0) {
+                    int64_t L = static_cast<int64_t>(t_span_[best_t])
+                              + gdna_flank_;
+                    int64_t e_h = L - static_cast<int64_t>(
+                                          genomic_footprint) + 1;
+                    if (e_h < 1) e_h = 1;
                     double gdna_fl =
-                        gdna_frag_len_log_lik(
-                            genomic_footprint);
+                        gdna_frag_len_log_lik(genomic_footprint);
                     st.v_gdna_ll->push_back(
-                        gdna_fl + gdna_log_sp + LOG_HALF + log_nm);
+                        gdna_fl + gdna_log_sp + LOG_HALF + log_nm
+                      - std::log(static_cast<double>(e_h)));
                 } else {
                     st.v_gdna_ll->push_back(NEG_INF);
                 }
@@ -957,7 +1013,6 @@ class StreamingScorer {
     std::vector<uint8_t>*  v_lct_;
     std::vector<int8_t>*   v_isp_;
     std::vector<double>*   v_gll_;
-    std::vector<int32_t>*  v_gfp_;
     std::vector<int64_t>*  v_fid_;
     std::vector<int8_t>*   v_fc_;
     std::vector<uint8_t>*  v_st_;
@@ -1001,7 +1056,6 @@ public:
         v_lct_ = new std::vector<uint8_t>();
         v_isp_ = new std::vector<int8_t>();
         v_gll_ = new std::vector<double>();
-        v_gfp_ = new std::vector<int32_t>();
         v_fid_ = new std::vector<int64_t>();
         v_fc_  = new std::vector<int8_t>();
         v_st_  = new std::vector<uint8_t>();
@@ -1023,7 +1077,6 @@ public:
         st_.v_locus_ct   = v_lct_;
         st_.v_is_spliced = v_isp_;
         st_.v_gdna_ll    = v_gll_;
-        st_.v_gfp        = v_gfp_;
         st_.v_fid        = v_fid_;
         st_.v_fclass     = v_fc_;
         st_.v_stype      = v_st_;
@@ -1051,7 +1104,6 @@ public:
         delete v_lct_;
         delete v_isp_;
         delete v_gll_;
-        delete v_gfp_;
         delete v_fid_;
         delete v_fc_;
         delete v_st_;
@@ -1122,7 +1174,6 @@ public:
             vec_to_ndarray(v_lct_),
             vec_to_ndarray(v_isp_),
             vec_to_ndarray(v_gll_),
-            vec_to_ndarray(v_gfp_),
             vec_to_ndarray(v_fid_),
             vec_to_ndarray(v_fc_),
             vec_to_ndarray(v_st_),
@@ -1146,7 +1197,7 @@ public:
         v_ts_ = nullptr;  v_te_ = nullptr;
         v_lt_ = nullptr;  v_lct_ = nullptr;
         v_isp_ = nullptr; v_gll_ = nullptr;
-        v_gfp_ = nullptr; v_fid_ = nullptr;
+        v_fid_ = nullptr;
         v_fc_ = nullptr;  v_st_ = nullptr;
         v_dti_ = nullptr; v_dfid_ = nullptr;
         v_chim_fid_ = nullptr;
@@ -1173,7 +1224,7 @@ NB_MODULE(_scoring_impl, m) {
         .def(nb::init<
                  double, double, bool, double, double,
                  nb::object, int32_t, double,
-                 nb::object, int32_t, double,
+                 nb::object, int32_t, double, int32_t,
                  i8_1d, i32_1d, i32_1d, i32_1d,
                  i32_1d, i32_1d, i32_1d, i32_1d,
                  u8_1d, double>(),
@@ -1188,6 +1239,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("gdna_fl_log_prob").none(),
              nb::arg("gdna_fl_max_size"),
              nb::arg("gdna_fl_tail_base"),
+             nb::arg("gdna_flank"),
              nb::arg("t_strand_arr"),
              nb::arg("t_length_arr"),
              nb::arg("t_span_arr"),

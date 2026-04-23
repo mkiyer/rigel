@@ -404,8 +404,14 @@ class TestLocusGDNABehavior:
         assert total == pytest.approx(200.0, abs=1.0)
 
     def test_gdna_log_lik_determines_absorption(self):
-        """Higher gDNA log-likelihood → more fragments absorbed by gDNA."""
-        # Low gDNA log-lik + strong RNA prior → no gDNA absorption
+        """Higher gDNA log-likelihood → more fragments absorbed by gDNA.
+
+        Under Option B the scorer emits gdna_log_liks that are already
+        length-corrected (harmonic-mean of per-hit effective lengths),
+        so tests supply explicit pre-corrected values rather than
+        relying on a downstream subtraction.
+        """
+        # Low gDNA log-lik + strong RNA prior → no gDNA absorption.
         rc_low = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         rc_low.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
         bundle_low = _make_locus_em_data(
@@ -414,12 +420,12 @@ class TestLocusGDNABehavior:
             rc=rc_low,
             include_gdna=True,
             alpha_gdna=1.0,
-            gdna_log_lik=-5.0,
+            gdna_log_lik=-14.0,
         )
         pc_low = _run_and_assign(rc_low, bundle_low, em_iterations=10)
         gc_low = pc_low["gdna"]
 
-        # High gDNA log-lik → gDNA absorbs fragments
+        # High gDNA log-lik → gDNA absorbs fragments.
         rc_high = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         bundle_high = _make_locus_em_data(
             [[0]] * 200,
@@ -427,7 +433,7 @@ class TestLocusGDNABehavior:
             num_transcripts=2,
             include_gdna=True,
             alpha_gdna=1.0,
-            gdna_log_lik=0.0,
+            gdna_log_lik=-9.0,
         )
         pc_high = _run_and_assign(rc_high, bundle_high, em_iterations=10)
         gc_high = pc_high["gdna"]
@@ -461,6 +467,7 @@ class TestVBEMGDNAAlpha:
             num_transcripts=2,
             include_gdna=True,
             alpha_gdna=0.001,  # tiny gDNA prior
+            gdna_log_lik=-9.0,  # realistic pre-corrected value (Option B)
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]

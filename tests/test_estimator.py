@@ -168,7 +168,6 @@ def _make_em_data(
         splice_type=np.zeros(n_units, dtype=np.uint8),
         n_units=n_units,
         n_candidates=n_candidates,
-        genomic_footprints=np.full(n_units, 200, dtype=np.int32),
     )
 
 

@@ -502,7 +502,6 @@ def _run_locus_em_partitioned(
     alpha_rna: np.ndarray,
     em_config: EMConfig,
     *,
-    gdna_flank: int = 0,
     emit_locus_stats: bool = False,
     annotations: "AnnotationTable | None" = None,
 ) -> None:
@@ -542,7 +541,7 @@ def _run_locus_em_partitioned(
             "alpha_rna": float(alpha_r),
         }
 
-    def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna, batch_spans):
+    def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna):
         """Pack tuples, call C++, record results."""
         partition_tuples = [
             (
@@ -555,7 +554,6 @@ def _run_locus_em_partitioned(
                 p.count_cols,
                 p.is_spliced,
                 p.gdna_log_liks,
-                p.genomic_footprints,
                 p.locus_t_indices,
                 p.locus_count_cols,
             )
@@ -568,7 +566,6 @@ def _run_locus_em_partitioned(
             locus_t_lists,
             batch_alpha_gdna,
             batch_alpha_rna,
-            batch_spans,
             index,
             em_iterations=em_config.iterations,
             em_convergence_delta=em_config.convergence_delta,
@@ -601,7 +598,6 @@ def _run_locus_em_partitioned(
             [locus],
             np.array([alpha_gdna[lid]], dtype=np.float64),
             np.array([alpha_rna[lid]], dtype=np.float64),
-            np.array([locus.gdna_span + gdna_flank], dtype=np.int64),
         )
         gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
@@ -636,13 +632,11 @@ def _run_locus_em_partitioned(
         normal_parts = [partitions[loc.locus_id] for loc in normal_loci]
         normal_ag = np.array([alpha_gdna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
         normal_ar = np.array([alpha_rna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
-        normal_spans = np.array([loc.gdna_span + gdna_flank for loc in normal_loci], dtype=np.int64)
         em_result = _call_batch_em(
             normal_parts,
             normal_loci,
             normal_ag,
             normal_ar,
-            normal_spans,
         )
         gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
@@ -808,11 +802,6 @@ def quant_from_buffer(
         del em_data
 
         # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
-        # Honest gDNA flank: extend effective gDNA span by one mean gDNA
-        # fragment length to account for partial-overlap reads at locus edges.
-        # ``calibration.gdna_fl_model`` is guaranteed non-None by the early
-        # check at the top of this function.
-        gdna_flank = int(calibration.gdna_fl_model.mean)
         _run_locus_em_partitioned(
             estimator,
             partitions,
@@ -821,7 +810,6 @@ def quant_from_buffer(
             alpha_gdna,
             alpha_rna,
             em_config,
-            gdna_flank=gdna_flank,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
         )

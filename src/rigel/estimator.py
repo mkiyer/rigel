@@ -257,7 +257,6 @@ class AbundanceEstimator:
         locus_transcript_indices: list,
         alpha_gdna: np.ndarray,
         alpha_rna: np.ndarray,
-        gdna_spans: np.ndarray,
         index,
         *,
         em_iterations: int = 1000,
@@ -270,15 +269,13 @@ class AbundanceEstimator:
         Parameters
         ----------
         partition_tuples : list[tuple]
-            List of 12-tuples, one per locus, containing partition arrays.
+            List of 11-tuples, one per locus, containing partition arrays.
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
         alpha_gdna : np.ndarray
             float64 — calibration gDNA prior per locus (physical counts).
         alpha_rna : np.ndarray
             float64 — calibration RNA prior per locus (physical counts).
-        gdna_spans : np.ndarray
-            int64 — pre-computed union genomic footprints per locus.
         index : TranscriptIndex
             Reference index.
         em_iterations, em_convergence_delta
@@ -311,7 +308,6 @@ class AbundanceEstimator:
                 locus_transcript_indices,
                 np.ascontiguousarray(alpha_gdna, dtype=np.float64),
                 np.ascontiguousarray(alpha_rna, dtype=np.float64),
-                np.ascontiguousarray(gdna_spans, dtype=np.int64),
                 self.unambig_counts,
                 t_lengths,
                 self.em_counts,

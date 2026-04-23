@@ -72,7 +72,6 @@ def partition_and_free(
     # ---- Scatter per-unit arrays ----
     UNIT_ARRAYS = [
         ("gdna_log_liks", scatter_units_f64),
-        ("genomic_footprints", scatter_units_i32),
         ("locus_t_indices", scatter_units_i32),
         ("locus_count_cols", scatter_units_u8),
         ("is_spliced", scatter_units_u8),
@@ -107,7 +106,6 @@ def partition_and_free(
             tx_ends=cand_results["tx_ends"][li],
             is_spliced=unit_results["is_spliced"][li],
             gdna_log_liks=unit_results["gdna_log_liks"][li],
-            genomic_footprints=unit_results["genomic_footprints"][li],
             locus_t_indices=unit_results["locus_t_indices"][li],
             locus_count_cols=unit_results["locus_count_cols"][li],
             frag_ids=unit_results["frag_ids"][li],

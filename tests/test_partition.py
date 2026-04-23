@@ -39,7 +39,6 @@ def _make_scored_fragments(n_units, candidates_per_unit, n_transcripts, rng):
         locus_count_cols=rng.integers(0, 8, size=n_units, dtype=np.uint8),
         is_spliced=rng.choice([True, False], size=n_units),
         gdna_log_liks=rng.standard_normal(n_units),
-        genomic_footprints=rng.integers(100, 500, size=n_units, dtype=np.int32),
         frag_ids=np.arange(n_units, dtype=np.int64),
         frag_class=np.zeros(n_units, dtype=np.int8),
         splice_type=np.zeros(n_units, dtype=np.uint8),
@@ -221,7 +220,6 @@ class TestPartitionAndFree:
         orig_count_cols = em_data.count_cols.copy()
         orig_is_spliced = em_data.is_spliced.copy()
         orig_gdna_log_liks = em_data.gdna_log_liks.copy()
-        orig_genomic_footprints = em_data.genomic_footprints.copy()
         orig_locus_t_indices = em_data.locus_t_indices.copy()
         orig_locus_count_cols = em_data.locus_count_cols.copy()
 
@@ -244,7 +242,6 @@ class TestPartitionAndFree:
                 assert part.is_spliced[k] == orig_is_spliced[u]
                 np.testing.assert_equal(
                     part.gdna_log_liks[k], orig_gdna_log_liks[u])
-                assert part.genomic_footprints[k] == orig_genomic_footprints[u]
                 assert part.locus_t_indices[k] == orig_locus_t_indices[u]
                 assert part.locus_count_cols[k] == orig_locus_count_cols[u]
 
@@ -335,7 +332,6 @@ class TestNoDuplicateCandidatesPerUnit:
             locus_count_cols=np.zeros(n_units, dtype=np.uint8),
             is_spliced=rng.choice([True, False], size=n_units),
             gdna_log_liks=rng.standard_normal(n_units),
-            genomic_footprints=rng.integers(100, 500, size=n_units, dtype=np.int32),
             frag_ids=np.arange(n_units, dtype=np.int64),
             frag_class=np.zeros(n_units, dtype=np.int8),
             splice_type=np.zeros(n_units, dtype=np.uint8),
