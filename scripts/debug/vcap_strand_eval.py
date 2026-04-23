@@ -27,9 +27,8 @@ from rigel.pipeline import scan_and_buffer
 from rigel.calibration._stats import compute_region_stats
 from rigel.calibration._em import (
     run_em, _StrandBBCache, _strand_llr_bb_rho, _strand_posterior,
-    _compute_k_sense_valid, _bb_g_loglik_cached, _bb_r_loglik_cached,
-    _bracketed_log_search, _logsumexp,
-    _KAPPA_LO, _KAPPA_HI,
+    _compute_k_sense_valid, _estimate_kappa_G, _estimate_kappa_R,
+    _logsumexp, _KAPPA_LO, _KAPPA_HI,
 )
 
 
@@ -125,27 +124,10 @@ def run_strand_only_em(
         pi = float(np.clip(pi, 1e-12, 1.0 - 1e-12))
         pi_soft = float(np.clip(pi_soft, 1e-12, 1.0 - 1e-12))
 
-        # κ updates via cached soft MLE
-        valid_w_G = float(gamma[cache.valid].sum())
-        valid_w_R = float((1.0 - gamma[cache.valid]).sum())
-        if cache.k.size >= 2 and valid_w_G >= 2.0:
-            wG = gamma[cache.valid]
-            prev = kappa_G if kappa_G < _KAPPA_HI else None
-            kappa_G = _bracketed_log_search(
-                lambda kG: float(np.sum(wG * _bb_g_loglik_cached(cache, kG))),
-                _KAPPA_LO, _KAPPA_HI, prev,
-            )
-        else:
-            kappa_G = _KAPPA_HI
-        if cache.k.size >= 2 and valid_w_R >= 2.0:
-            wR = 1.0 - gamma[cache.valid]
-            prev = kappa_R if kappa_R < _KAPPA_HI else None
-            kappa_R = _bracketed_log_search(
-                lambda kR: float(np.sum(wR * _bb_r_loglik_cached(cache, kR))),
-                _KAPPA_LO, _KAPPA_HI, prev,
-            )
-        else:
-            kappa_R = _KAPPA_HI
+        # κ updates (MLEs on unique (k, n) pairs)
+        gamma_valid = gamma[cache.valid]
+        kappa_G = _estimate_kappa_G(cache, gamma_valid)
+        kappa_R = _estimate_kappa_R(cache, gamma_valid)
 
         delta = abs(pi_soft - prev_pi)
         if delta < tol:

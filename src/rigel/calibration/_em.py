@@ -60,7 +60,7 @@ _GH_LOGW = np.log(_GH_WEIGHTS) - 0.5 * _LOG_2PI
 # up to degree 17 exactly and are overkill for the per-region LLR
 # accuracy needed by the downstream E-step (sigmoid saturates well
 # before 0.01 nats per-region error).  Halving node count roughly
-# halves the dominant ``_bb_r_loglik_cached`` cost.
+# halves the dominant R-class BB log-likelihood cost.
 # np.polynomial.legendre.leggauss returns nodes on [-1, 1] with weights
 # summing to 2; we remap to ρ = (x+1)/2 with w' = w/2 so Σ w' = 1.
 _RHO_NODES_X, _RHO_WEIGHTS_X = np.polynomial.legendre.leggauss(9)
@@ -221,22 +221,127 @@ def _compute_k_sense_valid(
     return valid, k_sense[valid].astype(np.float64), n_unspliced[valid].astype(np.float64)
 
 
+# ---------------------------------------------------------------------------
+# Beta-Binomial strand channel — sufficiency-grouped fast path
+# ---------------------------------------------------------------------------
+#
+# The BB strand log-likelihood depends only on (k_sense, n_unspliced).
+# Empirically ~97% of valid regions share a (k, n) pattern with another
+# region — VCaP dna01m: 258K valid regions → 6.6K unique pairs.  Grouping
+# turns every EM step from O(N) into O(U) where U ≪ N.
+
+
+class _StrandBBCache:
+    """Pre-computed invariants for Beta-Binomial strand log-likelihoods.
+
+    Groups the N valid (k, n) pairs into U unique patterns with an
+    ``inverse`` index back to the full N-vector.  All per-κ kernel
+    work happens on the U-long arrays.  The full per-region output
+    is recovered by a single gather ``out_u[inverse]``.
+    """
+
+    __slots__ = (
+        "valid", "inverse", "uk", "un", "un_minus_uk", "log_binom",
+        "p_rho", "one_minus_p_rho",
+    )
+
+    def __init__(self, stats: dict[str, np.ndarray]):
+        self.valid, k_all, n_all = _compute_k_sense_valid(stats)
+        if k_all.size == 0:
+            self.inverse = np.empty(0, dtype=np.intp)
+            self.uk = np.empty(0, dtype=np.float64)
+            self.un = np.empty(0, dtype=np.float64)
+            self.un_minus_uk = np.empty(0, dtype=np.float64)
+            self.log_binom = np.empty(0, dtype=np.float64)
+        else:
+            # Combine (k, n) into one int64 key; n fits well under 2^31 on
+            # any realistic RNA-seq region so this is exact.
+            n_stride = int(n_all.max()) + 2
+            key = k_all.astype(np.int64) * n_stride + n_all.astype(np.int64)
+            _, first_idx, inverse = np.unique(
+                key, return_index=True, return_inverse=True,
+            )
+            self.inverse = inverse.astype(np.intp, copy=False)
+            self.uk = k_all[first_idx].astype(np.float64, copy=False)
+            self.un = n_all[first_idx].astype(np.float64, copy=False)
+            self.un_minus_uk = self.un - self.uk
+            # log C(n, k) — invariant in κ and ρ; cache once.
+            self.log_binom = (
+                _vlgamma(self.un + 1.0)
+                - _vlgamma(self.uk + 1.0)
+                - _vlgamma(self.un_minus_uk + 1.0)
+            )
+        # ρ grid depends on SS; filled by ``set_ss``.
+        self.p_rho = None
+        self.one_minus_p_rho = None
+
+    def set_ss(self, strand_specificity: float) -> None:
+        ss = float(strand_specificity)
+        p = _RHO_NODES * ss + (1.0 - _RHO_NODES) * 0.5
+        self.p_rho = p
+        self.one_minus_p_rho = 1.0 - p
+
+    def aggregate_weights(self, w_valid: np.ndarray) -> np.ndarray:
+        """Sum per-valid-region weights into per-unique-pair weights.
+
+        ``w_valid`` has shape (N_valid,).  Result has shape (U,).
+        """
+        if self.uk.size == 0:
+            return np.zeros(0, dtype=np.float64)
+        return np.bincount(
+            self.inverse, weights=w_valid, minlength=self.uk.shape[0],
+        ).astype(np.float64, copy=False)
+
+
+def _bb_g_loglik_unique(cache: _StrandBBCache, kappa_G: float) -> np.ndarray:
+    """G-class BB log-likelihood on the U unique (k, n) pairs.
+
+    Symmetric BB with α = β = κ_G / 2.  The log-Beta denominator
+    collapses to a scalar ``2·lgamma(α) − lgamma(2α)``.
+    """
+    a = 0.5 * float(kappa_G)
+    log_B_num = (
+        _vlgamma(cache.uk + a)
+        + _vlgamma(cache.un_minus_uk + a)
+        - _vlgamma(cache.un + 2.0 * a)
+    )
+    log_B_den = 2.0 * math.lgamma(a) - math.lgamma(2.0 * a)
+    return cache.log_binom + log_B_num - log_B_den
+
+
+def _bb_r_loglik_unique(cache: _StrandBBCache, kappa_R: float) -> np.ndarray:
+    """R-class ρ-integrated BB log-likelihood on the U unique pairs."""
+    if cache.p_rho is None:
+        raise RuntimeError("_StrandBBCache.set_ss() must be called first")
+    kR = float(kappa_R)
+    alpha_j = (kR * cache.p_rho)[:, None]              # (K_rho, 1)
+    beta_j = (kR * cache.one_minus_p_rho)[:, None]     # (K_rho, 1)
+    # lgamma(n + κ) is ρ-independent: compute as (U,) once and broadcast.
+    lgamma_n_plus_k = _vlgamma(cache.un + kR)          # (U,)
+    log_B_num = (
+        _vlgamma(cache.uk[None, :] + alpha_j)
+        + _vlgamma(cache.un_minus_uk[None, :] + beta_j)
+        - lgamma_n_plus_k[None, :]
+    )                                                  # (K_rho, U)
+    log_B_den = (
+        _vlgamma(kR * cache.p_rho)
+        + _vlgamma(kR * cache.one_minus_p_rho)
+        - math.lgamma(kR)
+    )                                                  # (K_rho,)
+    log_p_nodes = cache.log_binom[None, :] + log_B_num - log_B_den[:, None]
+    return _logsumexp(log_p_nodes + _RHO_LOGW[:, None], axis=0)
+
+
 def _bb_logpmf(
     k: np.ndarray,
     n: np.ndarray,
     alpha: np.ndarray | float,
     beta: np.ndarray | float,
 ) -> np.ndarray:
-    """Log PMF of BetaBinomial(k; n, α, β), vectorized and numerically safe.
+    """Log PMF of BetaBinomial(k; n, α, β).  Reference implementation.
 
-    Uses the ``log C(n,k) + log B(k+α, n-k+β) - log B(α, β)`` form, which
-    has no ``gammaln(0)`` traps at k=0 or k=n (the log-Beta terms stay
-    finite as long as α, β > 0).  All inputs broadcast.
-
-    Kept as the canonical reference; the hot path in the EM now routes
-    through ``_StrandBBCache`` which pre-computes the k/n-only terms
-    (``log_binom``) once per EM run, avoiding ~3 of the 6 gammaln calls
-    per evaluation.
+    Kept for tests and external callers.  The EM hot path uses the
+    grouped-unique-pairs code above which is ~30-100× cheaper.
     """
     k = np.asarray(k, dtype=np.float64)
     n = np.asarray(n, dtype=np.float64)
@@ -244,131 +349,6 @@ def _bb_logpmf(
     log_B_num = _vlgamma(k + alpha) + _vlgamma(n - k + beta) - _vlgamma(n + alpha + beta)
     log_B_den = _vlgamma(alpha) + _vlgamma(beta) - _vlgamma(alpha + beta)
     return log_binom + log_B_num - log_B_den
-
-
-class _StrandBBCache:
-    """Precomputed quantities for Beta-Binomial strand log-likelihoods.
-
-    The EM calls ``_bb_g_loglik`` / ``_bb_r_loglik`` many times per
-    iteration (golden-section search over κ), but the region-level
-    arrays (k, n) and the binomial coefficient ``log C(n,k)`` never
-    change during an EM run.  This cache computes them once, plus
-    the shifted counts and the 17-node ρ grid used by the R channel,
-    so each κ evaluation costs ~3 vector ``gammaln`` calls instead
-    of ~6 for G and ~19 for R (was ~34 for R before).
-    """
-
-    __slots__ = (
-        "valid", "k", "n", "n_minus_k", "log_binom",
-        "p_rho", "one_minus_p_rho",
-    )
-
-    def __init__(self, stats: dict[str, np.ndarray]):
-        self.valid, k, n = _compute_k_sense_valid(stats)
-        self.k = k
-        self.n = n
-        self.n_minus_k = n - k
-        # log C(n, k) — depends only on (k, n); cache once.
-        if k.size:
-            self.log_binom = (
-                _vlgamma(n + 1.0) - _vlgamma(k + 1.0) - _vlgamma(n - k + 1.0)
-            )
-        else:
-            self.log_binom = np.empty(0, dtype=np.float64)
-        # ρ quadrature grid is fixed by the module constants and SS,
-        # but SS is needed at call time; populate on first use via setter.
-        self.p_rho = None
-        self.one_minus_p_rho = None
-
-    def set_ss(self, strand_specificity: float) -> None:
-        ss = float(strand_specificity)
-        p = _RHO_NODES * ss + (1.0 - _RHO_NODES) * 0.5  # (17,)
-        self.p_rho = p
-        self.one_minus_p_rho = 1.0 - p
-
-
-def _bb_g_loglik_cached(cache: _StrandBBCache, kappa_G: float) -> np.ndarray:
-    """Cached version of G-class BB log-likelihood (symmetric, α=β=κ/2).
-
-    Avoids recomputing the (k, n)-only ``log_binom`` term and collapses
-    the denominator to a single scalar ``2·lgamma(α) - lgamma(2α)``.
-    """
-    a = 0.5 * float(kappa_G)
-    # Numerator: lgamma(k+a) + lgamma(n-k+a) - lgamma(n+2a)
-    log_B_num = (
-        _vlgamma(cache.k + a)
-        + _vlgamma(cache.n_minus_k + a)
-        - _vlgamma(cache.n + 2.0 * a)
-    )
-    # Denominator (scalar): 2*lgamma(a) - lgamma(2a)
-    log_B_den = 2.0 * math.lgamma(a) - math.lgamma(2.0 * a)
-    return cache.log_binom + log_B_num - log_B_den
-
-
-def _bb_r_loglik_cached(cache: _StrandBBCache, kappa_R: float) -> np.ndarray:
-    """Cached version of R-class ρ-integrated BB log-likelihood.
-
-    Optimisations vs. the reference implementation:
-      * ``log_binom`` (k/n-only) is cached once per EM run.
-      * ``lgamma(n + κ_R)`` depends on n and κ only (not on ρ), so it
-        is a vector of size N computed once per κ — not a (17, N)
-        tensor as it would be if fused with the α_j, β_j broadcast.
-      * ``lgamma(α_j) + lgamma(β_j) - lgamma(α_j + β_j)`` has shape (17,)
-        (scalars over regions).
-    """
-    if cache.p_rho is None:
-        raise RuntimeError("_StrandBBCache.set_ss() must be called first")
-    kR = float(kappa_R)
-    alpha_j = (kR * cache.p_rho)[:, None]              # (17, 1)
-    beta_j = (kR * cache.one_minus_p_rho)[:, None]     # (17, 1)
-    # Numerator per node: lgamma(k + α_j) + lgamma(n-k + β_j) - lgamma(n + κ)
-    # The third term does NOT depend on ρ; compute as (N,) once and broadcast.
-    lgamma_n_plus_k = _vlgamma(cache.n + kR)           # (N,)
-    log_B_num = (
-        _vlgamma(cache.k[None, :] + alpha_j)
-        + _vlgamma(cache.n_minus_k[None, :] + beta_j)
-        - lgamma_n_plus_k[None, :]
-    )                                                  # (17, N)
-    # Denominator (17,): lgamma(α_j) + lgamma(β_j) - lgamma(κ)  [since α+β=κ]
-    log_B_den = (
-        _vlgamma(kR * cache.p_rho)
-        + _vlgamma(kR * cache.one_minus_p_rho)
-        - math.lgamma(kR)
-    )                                                  # (17,)
-    log_p_nodes = cache.log_binom[None, :] + log_B_num - log_B_den[:, None]
-    return _logsumexp(log_p_nodes + _RHO_LOGW[:, None], axis=0)
-
-
-def _bb_g_loglik(k: np.ndarray, n: np.ndarray, kappa_G: float) -> np.ndarray:
-    """Per-region log P(k | n, G, κ_G) under BB(κ_G/2, κ_G/2).  Shape (N,).
-
-    Uncached convenience wrapper (kept for tests / external callers).
-    """
-    a = 0.5 * float(kappa_G)
-    return _bb_logpmf(k, n, a, a)
-
-
-def _bb_r_loglik(
-    k: np.ndarray,
-    n: np.ndarray,
-    kappa_R: float,
-    strand_specificity: float,
-) -> np.ndarray:
-    """Per-region log P(k | n, R, κ_R) marginalising ρ ~ Uniform(0, 1).
-
-    Evaluates
-        ∫₀¹ BB(k; n, κ_R · p(ρ), κ_R · (1-p(ρ))) dρ
-    with p(ρ) = ρ · SS + (1-ρ) · 0.5, via 17-node Gauss-Legendre on [0, 1].
-    Returns log-values of shape (N,).  Uncached convenience wrapper.
-    """
-    ss = float(strand_specificity)
-    # p(ρ) spans [0.5, SS].  At SS → 0.5 the R and G integrands coincide
-    # and the LLR collapses to 0 automatically — no gating required.
-    p_rho = _RHO_NODES * ss + (1.0 - _RHO_NODES) * 0.5     # (17,)
-    alpha = (float(kappa_R) * p_rho)[:, None]              # (17, 1)
-    beta = (float(kappa_R) * (1.0 - p_rho))[:, None]       # (17, 1)
-    log_p_nodes = _bb_logpmf(k[None, :], n[None, :], alpha, beta)  # (17, N)
-    return _logsumexp(log_p_nodes + _RHO_LOGW[:, None], axis=0)
 
 
 def _strand_llr_bb_rho(
@@ -380,21 +360,23 @@ def _strand_llr_bb_rho(
 ) -> np.ndarray:
     """Per-region strand LLR = log P(k|n,G,κ_G) − log P(k|n,R,κ_R).
 
-    Zero for invalid regions (n=0 or tx_strand=0).  No library-level
-    gate: SS near 0.5 makes G and R integrands coincide and the LLR
-    vanishes naturally.  If ``cache`` is supplied, uses the fast
-    path; otherwise builds a one-shot cache internally.
+    Zero for invalid regions (n=0 or tx_strand=0).  Computes the LLR
+    once on the U unique (k, n) pairs, then scatters to the N valid
+    regions via ``cache.inverse``.  At SS → 0.5 the R integrand
+    collapses onto G and the LLR vanishes automatically.
     """
     n_regions = stats["n_unspliced"].shape[0]
     llr = np.zeros(n_regions, dtype=np.float64)
     if cache is None:
         cache = _StrandBBCache(stats)
         cache.set_ss(strand_specificity)
-    if cache.k.size == 0:
+    if cache.uk.size == 0:
         return llr
-    ll_g = _bb_g_loglik_cached(cache, kappa_G)
-    ll_r = _bb_r_loglik_cached(cache, kappa_R)
-    llr[cache.valid] = ll_g - ll_r
+    ll_g_u = _bb_g_loglik_unique(cache, kappa_G)
+    ll_r_u = _bb_r_loglik_unique(cache, kappa_R)
+    llr_u = ll_g_u - ll_r_u
+    # Gather to full valid-region vector, then place in the N-long output.
+    llr[cache.valid] = llr_u[cache.inverse]
     return llr
 
 
@@ -405,190 +387,79 @@ def _strand_posterior(llr: np.ndarray, pi_0: float = 0.5) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(logit + llr, -500.0, 500.0)))
 
 
-def _golden_section_max(
-    f,
-    a: float,
-    b: float,
-    tol: float = 1e-4,
-    max_iter: int = 100,
-) -> float:
-    """Argmax of *f* on [*a*, *b*] via golden-section search."""
-    gr = (math.sqrt(5.0) + 1.0) / 2.0
-    c = b - (b - a) / gr
-    d = a + (b - a) / gr
-    fc, fd = f(c), f(d)
-    for _ in range(max_iter):
-        if abs(b - a) < tol:
-            break
-        if fc > fd:
-            b, d, fd = d, c, fc
-            c = b - (b - a) / gr
-            fc = f(c)
-        else:
-            a, c, fc = c, d, fd
-            d = a + (b - a) / gr
-            fd = f(d)
-    return (a + b) / 2.0
-
-
-def _golden_section_max_logx(
-    f_on_x,
-    a: float,
-    b: float,
+def _golden_section_max_log(
+    obj,
+    a: float = _KAPPA_LO,
+    b: float = _KAPPA_HI,
     log_tol: float = 0.03,
     max_iter: int = 40,
 ) -> float:
-    """Argmax of ``x ↦ f_on_x(x)`` for x ∈ [a, b] searched in log space.
+    """Argmax of ``κ ↦ obj(κ)`` on [a, b] searched in log-κ space.
 
-    κ spans four orders of magnitude (0.1 → 1000), so a linear-space
-    search with tol=1e-3 wastes ~28 evals.  Searching on ln(κ) with a
-    relative tolerance (default ``log_tol`` = 0.03 ↔ ~3% in κ) needs
-    only ~9 evals while preserving convergence quality: BB log-
-    likelihoods are slowly varying in κ around the optimum, and the
-    E-step only cares about the integrated posterior which is
-    insensitive to κ at the 1% level.
+    κ spans four orders of magnitude (0.1 → 1000).  A log-space
+    golden-section search with relative tolerance ~3% needs ~9
+    evaluations and gives more than enough precision for the E-step
+    posterior (BB log-likelihood is slowly varying in κ near the
+    optimum).
     """
     la, lb = math.log(a), math.log(b)
     gr = (math.sqrt(5.0) + 1.0) / 2.0
     lc = lb - (lb - la) / gr
     ld = la + (lb - la) / gr
-    fc, fd = f_on_x(math.exp(lc)), f_on_x(math.exp(ld))
+    fc, fd = obj(math.exp(lc)), obj(math.exp(ld))
     for _ in range(max_iter):
         if abs(lb - la) < log_tol:
             break
         if fc > fd:
             lb, ld, fd = ld, lc, fc
             lc = lb - (lb - la) / gr
-            fc = f_on_x(math.exp(lc))
+            fc = obj(math.exp(lc))
         else:
             la, lc, fc = lc, ld, fd
             ld = la + (lb - la) / gr
-            fd = f_on_x(math.exp(ld))
+            fd = obj(math.exp(ld))
     return math.exp(0.5 * (la + lb))
 
 
-def _estimate_kappa_G_soft(
-    stats: dict[str, np.ndarray],
-    gamma: np.ndarray,
-    kappa_lo: float = _KAPPA_LO,
-    kappa_hi: float = _KAPPA_HI,
+def _estimate_kappa_G(
+    cache: _StrandBBCache,
+    gamma_valid: np.ndarray,
     min_eff_regions: float = 2.0,
-    cache: "_StrandBBCache | None" = None,
-    prev_kappa: float | None = None,
 ) -> float:
-    """γ-weighted soft MLE for κ_G on the G-class symmetric Beta-Binomial.
+    """γ-weighted MLE of κ_G on the G-class symmetric Beta-Binomial.
 
-    When the effective γ-weight is below ``min_eff_regions`` (not
-    enough data attributed to G to constrain overdispersion), falls
-    back to the Binomial limit ``kappa_hi`` — the strongest, least
-    conservative default.  This prevents a run-away low-κ fit from
-    absorbing extreme k values through the symmetric BB's U-shape.
-
-    If ``prev_kappa`` is supplied, narrows the initial search bracket
-    to [prev/4, prev*4] in log-κ before widening to [lo, hi] only
-    when the optimum is at the bracket edge.  κ trajectories within
-    an EM run change by < 2× per iteration once the mixture firms up,
-    so this warm-start typically halves the search cost.
+    Operates on the U unique (k, n) pairs with aggregated weights.
+    Falls back to the Binomial limit when effective G-weight is too
+    small to constrain overdispersion.
     """
-    if cache is None:
-        cache = _StrandBBCache(stats)
-    if cache.k.size < 2:
-        return kappa_hi
-    w = np.asarray(gamma[cache.valid], dtype=np.float64)
-    if float(w.sum()) < min_eff_regions:
-        return kappa_hi
-
-    def obj(kappa: float) -> float:
-        return float(np.sum(w * _bb_g_loglik_cached(cache, kappa)))
-
-    return _bracketed_log_search(obj, kappa_lo, kappa_hi, prev_kappa)
+    if cache.uk.size < 2:
+        return _KAPPA_HI
+    if float(gamma_valid.sum()) < min_eff_regions:
+        return _KAPPA_HI
+    w_u = cache.aggregate_weights(gamma_valid)
+    return _golden_section_max_log(
+        lambda kG: float(np.dot(w_u, _bb_g_loglik_unique(cache, kG))),
+    )
 
 
-def _estimate_kappa_R_soft(
-    stats: dict[str, np.ndarray],
-    gamma: np.ndarray,
-    strand_specificity: float,
-    kappa_lo: float = _KAPPA_LO,
-    kappa_hi: float = _KAPPA_HI,
+def _estimate_kappa_R(
+    cache: _StrandBBCache,
+    gamma_valid: np.ndarray,
     min_eff_regions: float = 2.0,
-    cache: "_StrandBBCache | None" = None,
-    prev_kappa: float | None = None,
 ) -> float:
-    """(1-γ)-weighted soft MLE for κ_R on the ρ-integrated R-class BB.
+    """(1-γ)-weighted MLE of κ_R on the ρ-integrated R-class BB.
 
-    Same low-weight fallback and warm-start strategy as
-    :func:`_estimate_kappa_G_soft`.
+    Operates on the U unique (k, n) pairs.
     """
-    if cache is None:
-        cache = _StrandBBCache(stats)
-        cache.set_ss(strand_specificity)
-    if cache.k.size < 2:
-        return kappa_hi
-    w = np.asarray(1.0 - gamma[cache.valid], dtype=np.float64)
+    if cache.uk.size < 2:
+        return _KAPPA_HI
+    w = 1.0 - gamma_valid
     if float(w.sum()) < min_eff_regions:
-        return kappa_hi
-
-    def obj(kappa: float) -> float:
-        return float(np.sum(w * _bb_r_loglik_cached(cache, kappa)))
-
-    return _bracketed_log_search(obj, kappa_lo, kappa_hi, prev_kappa)
-
-
-def _bracketed_log_search(
-    obj,
-    kappa_lo: float,
-    kappa_hi: float,
-    prev_kappa: float | None,
-    warm_factor: float = 4.0,
-) -> float:
-    """Golden-section maximisation in log-κ with an optional warm-start bracket.
-
-    When ``prev_kappa`` is supplied, searches [prev/warm_factor, prev*warm_factor]
-    first; if the optimum lies at the edge (suggesting the warm window
-    is too narrow), widens to [kappa_lo, kappa_hi] and re-searches.
-    In the typical case (after iter 2) this requires ~7 evaluations;
-    a full widen adds ~9 more only when warranted.
-    """
-    if prev_kappa is None or not (kappa_lo < prev_kappa < kappa_hi):
-        return _golden_section_max_logx(obj, kappa_lo, kappa_hi)
-    a = max(prev_kappa / warm_factor, kappa_lo)
-    b = min(prev_kappa * warm_factor, kappa_hi)
-    if b <= a:
-        return _golden_section_max_logx(obj, kappa_lo, kappa_hi)
-    best = _golden_section_max_logx(obj, a, b)
-    # Edge check: if the optimum sits on the warm-window boundary
-    # (within 20% of an endpoint in log space) fall through to the
-    # wider search.
-    log_span = math.log(b / a)
-    if log_span <= 0.0:
-        return best
-    edge_margin = 0.20 * log_span
-    log_best = math.log(best)
-    if log_best - math.log(a) < edge_margin and a > kappa_lo * 1.01:
-        return _golden_section_max_logx(obj, kappa_lo, kappa_hi)
-    if math.log(b) - log_best < edge_margin and b < kappa_hi * 0.99:
-        return _golden_section_max_logx(obj, kappa_lo, kappa_hi)
-    return best
-
-
-def _init_kappa_pooled(
-    stats: dict[str, np.ndarray],
-    strand_specificity: float,
-) -> tuple[float, float]:
-    """Initialise (κ_G, κ_R) at the Binomial limit ``_KAPPA_HI``.
-
-    The pooled MLE fit at γ = 0.5 is unstable in homogeneous-population
-    cases: a pure-RNA library would force κ_G to the lower bound (a
-    U-shaped symmetric BB happily absorbs any extreme k), producing a
-    degenerate iter-0 E-step where strand LLR collapses to zero.  The
-    correct default before any classification is "no region-level
-    overdispersion" — i.e., Binomial(0.5) for G and Binomial(p(ρ)) for R.
-    The γ-weighted M-step then adapts both κ's as the classification
-    firms up; the low-weight fallback in ``_estimate_kappa_*_soft``
-    keeps the Binomial default whenever a component has too little
-    effective data to constrain overdispersion.
-    """
-    return _KAPPA_HI, _KAPPA_HI
+        return _KAPPA_HI
+    w_u = cache.aggregate_weights(w)
+    return _golden_section_max_log(
+        lambda kR: float(np.dot(w_u, _bb_r_loglik_unique(cache, kR))),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -990,8 +861,12 @@ def run_em(
         mu_R = math.log(max(10.0 * lam_G, 1e-6))
         sigma_R = 2.0
 
-    # --- Initial (κ_G, κ_R): pooled MLE at γ = 0.5.  No magic numbers.
-    kappa_G, kappa_R = _init_kappa_pooled(stats, strand_specificity)
+    # --- Initial (κ_G, κ_R): Binomial limit.  Pooled MLE at γ = 0.5 is
+    # unstable in homogeneous-population cases (a pure-RNA library would
+    # force κ_G to the lower bound and collapse iter-0 LLR to zero).  The
+    # γ-weighted M-step adapts κ as the classification firms up.
+    kappa_G = _KAPPA_HI
+    kappa_R = _KAPPA_HI
 
     n_soft = int(soft_mask.sum())
     n_elig = int(eligible.sum())
@@ -1049,18 +924,10 @@ def run_em(
         # --- M-step ---
         lam_G, mu_R, sigma_R, pi, pi_soft = _m_step(stats, eligible, gamma)
 
-        # --- κ updates (γ-weighted soft MLEs, self-consistent within EM) ---
-        # Warm-start the log-κ search with the previous iteration's
-        # value once κ has moved off the Binomial-limit default.
-        prev_kG = kappa_G if kappa_G < _KAPPA_HI else None
-        prev_kR = kappa_R if kappa_R < _KAPPA_HI else None
-        kappa_G = _estimate_kappa_G_soft(
-            stats, gamma, cache=bb_cache, prev_kappa=prev_kG,
-        )
-        kappa_R = _estimate_kappa_R_soft(
-            stats, gamma, strand_specificity, cache=bb_cache,
-            prev_kappa=prev_kR,
-        )
+        # --- κ updates (γ-weighted MLEs on unique (k, n) pairs) ---
+        gamma_valid = gamma[bb_cache.valid]
+        kappa_G = _estimate_kappa_G(bb_cache, gamma_valid)
+        kappa_R = _estimate_kappa_R(bb_cache, gamma_valid)
 
         # --- FL model update (γ-weighted gDNA FL) ---
         if fl_region_ids.size > 0:
