@@ -33,6 +33,16 @@ class CalibrationResult:
     n_soft: int = 0
     n_spliced_hard: int = 0
 
+    # -- Composite-Poisson capture-class rates --
+    # When ``capture_class_mode`` is True these report the on- and
+    # off-target per-bp gDNA rates fit by the composite-Poisson EM
+    # (see ``docs/calibration/capture_class_density_plan.md``).  In
+    # non-capture mode they are ``None`` and ``lambda_gdna`` holds
+    # the single global rate.
+    lam_G_on: float | None = None
+    lam_G_off: float | None = None
+    capture_class_mode: bool = False
+
     def to_summary_dict(self) -> dict:
         total_e_gdna = float(self.region_e_gdna.sum())
         total_n = float(self.region_n_total.sum())
@@ -58,6 +68,15 @@ class CalibrationResult:
         if self.gdna_fl_model is not None:
             d["gdna_fl_mean"] = round(self.gdna_fl_model.mean, 2)
             d["gdna_fl_observations"] = self.gdna_fl_model.n_observations
+        if self.capture_class_mode:
+            d["capture_class_mode"] = True
+            d["lambda_gdna_on"] = _round_or_none(self.lam_G_on, 8)
+            d["lambda_gdna_off"] = _round_or_none(self.lam_G_off, 8)
+            if self.lam_G_on is not None and self.lam_G_off is not None:
+                d["on_target_enrichment_ratio"] = round(
+                    float(self.lam_G_on) / max(float(self.lam_G_off), 1e-12),
+                    3,
+                )
         return d
 
 

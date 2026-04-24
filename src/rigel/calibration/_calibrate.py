@@ -32,11 +32,25 @@ def calibrate_gdna(
     mean_frag_len: float,
     intergenic_fl_model: FragmentLengthModel | None = None,
     fl_prior_ess: float = 1000.0,
+    kappa_gdna_min: float = 3.0,
     max_iterations: int = 50,
     convergence_tol: float = 1e-4,
     diagnostics: bool = False,
+    capture_e: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> CalibrationResult:
-    """Calibrate gDNA contamination via the v5 mixture EM."""
+    """Calibrate gDNA contamination via the v5 mixture EM.
+
+    Parameters
+    ----------
+    capture_e
+        Optional ``(E_on, E_off)`` tuple of per-region mappable-bp
+        attributions produced by
+        :func:`rigel.calibration._annotate.annotate_capture_class`.
+        When provided, the gDNA density channel is fit as a composite
+        Poisson ``λ_on·E_on + λ_off·E_off`` via a nested EM; when
+        ``None`` a single global density model is used (default for
+        whole-genome / total-RNA libraries).
+    """
     if len(region_counts) != len(region_df):
         raise ValueError("region_counts and region_df length mismatch")
 
@@ -51,10 +65,22 @@ def calibrate_gdna(
         mean_frag_len=float(mean_frag_len),
         max_iterations=max_iterations,
         convergence_tol=convergence_tol,
+        kappa_gdna_min=float(kappa_gdna_min),
         diagnostics=diagnostics,
+        capture_e=capture_e,
     )
 
-    region_e_gdna = fit.lam_G * mappable_bp.astype(np.float64)
+    # Per-region expected gDNA count under the composite-Poisson
+    # model: rate_G_i = λ_on·E_on_i + λ_off·E_off_i.  In non-capture
+    # mode ``capture_e`` is None and we fall back to the single-rate
+    # ``λ_G · mappable_bp`` product (bit-identical to pre-composite).
+    if fit.capture_class_mode and capture_e is not None:
+        e_on, e_off = capture_e
+        e_on = np.asarray(e_on, dtype=np.float64)
+        e_off = np.asarray(e_off, dtype=np.float64)
+        region_e_gdna = fit.lam_G_on * e_on + fit.lam_G_off * e_off
+    else:
+        region_e_gdna = fit.lam_G * mappable_bp.astype(np.float64)
     region_e_gdna = np.minimum(region_e_gdna, n_total)
     region_e_gdna = np.where(np.isfinite(region_e_gdna), region_e_gdna, 0.0)
     region_e_gdna = np.maximum(region_e_gdna, 0.0)
@@ -70,13 +96,25 @@ def calibrate_gdna(
 
     total_e = float(region_e_gdna.sum())
     total_n = float(n_total.sum())
-    logger.info(
-        "Calibration v5: lam_G=%.3e, pi=%.3f, pi_soft=%.3f, "
-        "κ_G=%.2f, κ_R=%.2f, iters=%d%s, E[gDNA]=%.0f, frac=%.3f",
-        fit.lam_G, fit.pi, fit.pi_soft, fit.kappa_G, fit.kappa_R, fit.n_iter,
-        " (converged)" if fit.converged else " (NOT converged)",
-        total_e, total_e / max(total_n, 1.0),
-    )
+    if fit.capture_class_mode:
+        enrichment = (fit.lam_G_on or 0.0) / max(fit.lam_G_off or 0.0, 1e-12)
+        logger.info(
+            "Calibration v5 (capture-class, composite-Poisson): "
+            "λ_on=%.3e, λ_off=%.3e (%.1fx), λ_eff=%.3e, π=%.3f, π_soft=%.3f, "
+            "κ_G=%.2f, κ_R=%.2f, iters=%d%s, E[gDNA]=%.0f, frac=%.3f",
+            fit.lam_G_on, fit.lam_G_off, enrichment, fit.lam_G,
+            fit.pi, fit.pi_soft, fit.kappa_G, fit.kappa_R, fit.n_iter,
+            " (converged)" if fit.converged else " (NOT converged)",
+            total_e, total_e / max(total_n, 1.0),
+        )
+    else:
+        logger.info(
+            "Calibration v5: lam_G=%.3e, pi=%.3f, pi_soft=%.3f, "
+            "κ_G=%.2f, κ_R=%.2f, iters=%d%s, E[gDNA]=%.0f, frac=%.3f",
+            fit.lam_G, fit.pi, fit.pi_soft, fit.kappa_G, fit.kappa_R, fit.n_iter,
+            " (converged)" if fit.converged else " (NOT converged)",
+            total_e, total_e / max(total_n, 1.0),
+        )
 
     return CalibrationResult(
         region_e_gdna=region_e_gdna,
@@ -97,4 +135,7 @@ def calibrate_gdna(
         n_eligible=fit.n_eligible,
         n_soft=fit.n_soft,
         n_spliced_hard=fit.n_spliced_hard,
+        lam_G_on=float(fit.lam_G_on) if fit.capture_class_mode else None,
+        lam_G_off=float(fit.lam_G_off) if fit.capture_class_mode else None,
+        capture_class_mode=bool(fit.capture_class_mode),
     )

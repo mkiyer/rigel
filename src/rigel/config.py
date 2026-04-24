@@ -181,6 +181,53 @@ class CalibrationConfig:
     #: lower values (10-50) may be useful for small simulations.
     fl_prior_ess: float = 1000.0
 
+    #: Lower bound on the gDNA-class Beta-Binomial dispersion κ_G.
+    #:
+    #: The G-class strand channel models gDNA as a symmetric
+    #: BetaBinomial(κ_G/2, κ_G/2) over the per-region antisense count.
+    #: The underlying Beta's shape parameters are α = β = κ_G / 2, so κ_G
+    #: directly controls the morphology of the p = k/n distribution:
+    #:
+    #:   * κ_G  <  2  →  α, β  <  1:  U-shape (mass piles at 0 and 1).
+    #:                    Biologically impossible for real gDNA — a region
+    #:                    cannot be "all sense" or "all antisense" when the
+    #:                    template is double-stranded.  At low
+    #:                    contamination levels the unconstrained MLE will
+    #:                    drift here to absorb authentic-RNA tails, falsely
+    #:                    inflating π_gDNA.
+    #:   * κ_G  =  2   →  α = β = 1:   Uniform on [0, 1].  Flat, no peak.
+    #:   * κ_G  >  2   →  α, β  >  1:  Unimodal, peaked at 0.5 (correct
+    #:                    shape for a coin-flip-like process with PCR /
+    #:                    mappability / GC-bias overdispersion).
+    #:
+    #: Clipping κ_G to ≥ ``kappa_gdna_min`` (default 3.0) guarantees the
+    #: G-class always behaves like gDNA — a modest, visible peak at 0.5 —
+    #: while preserving real overdispersion beyond the Binomial limit.
+    #: 3.0 is chosen over 2.0 so the peak is unambiguously present; the
+    #: upper end of κ_G is unconstrained and the M-step can drive it as
+    #: high as the data warrants (near-Binomial at high gDNA load).
+    kappa_gdna_min: float = 3.0
+
+    #: Path to a BED3+ file enumerating the hybrid-capture panel's
+    #: target intervals.  When set, regions are partitioned into
+    #: ``{on, off}`` capture classes and the density channel fits
+    #: ``(λ_G, μ_R, σ_R²)`` independently per class.  This is required
+    #: on hybrid-capture data, where on-target regions receive 50–150×
+    #: more gDNA *and* more captured RNA than off-target regions; a
+    #: single global density model is catastrophically mis-specified
+    #: in that setting.  When ``None`` (default) all regions are
+    #: treated as a single class — exactly the pre-existing behavior
+    #: for whole-genome / total-RNA / non-capture libraries.
+    targets_bed: Path | None = None
+
+    #: Padding (bp) applied symmetrically to every BED interval before
+    #: overlap scoring.  Capture probes produce fragment "bleed" beyond
+    #: their target edges: a 300 bp fragment captured by a probe on a
+    #: 100 bp exon overhangs the exon edges by roughly half the
+    #: fragment length.  A 150 bp default classifies those intronic /
+    #: UTR shoulders as on-target, which is what they physically are.
+    targets_pad: int = 150
+
 
 @dataclass(frozen=True)
 class PipelineConfig:

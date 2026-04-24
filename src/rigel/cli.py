@@ -159,13 +159,22 @@ def _build_pipeline_config(
     Field mapping is driven by ``_PARAM_SPECS`` — see the declarative
     registry below ``sim_command``.
     """
-    from .config import EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig
+    from .config import (
+        EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig,
+        CalibrationConfig,
+    )
 
     em_kw: dict = {}
     scan_kw: dict = {}
     scoring_kw: dict = {}
+    calibration_kw: dict = {}
     top_kw: dict = {}
-    _section = {"em": em_kw, "scan": scan_kw, "scoring": scoring_kw}
+    _section = {
+        "em": em_kw,
+        "scan": scan_kw,
+        "scoring": scoring_kw,
+        "calibration": calibration_kw,
+    }
 
     for spec in _PARAM_SPECS:
         cli_val = getattr(args, spec.cli_dest)
@@ -185,6 +194,7 @@ def _build_pipeline_config(
         em=EMConfig(**em_kw),
         scan=BamScanConfig(**scan_kw),
         scoring=FragmentScoringConfig(**scoring_kw),
+        calibration=CalibrationConfig(**calibration_kw),
         **top_kw,
     )
     return cfg
@@ -545,6 +555,10 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
+    # -- CalibrationConfig --
+    _ParamSpec("calibration_kappa_gdna_min", "calibration.kappa_gdna_min"),
+    _ParamSpec("targets_bed", "calibration.targets_bed", "path_or_none"),
+    _ParamSpec("targets_pad", "calibration.targets_pad"),
     # -- Fan-out: threads → both EM and scan --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.n_scan_threads"),
@@ -971,6 +985,28 @@ def build_parser() -> argparse.ArgumentParser:
         "'fractional' preserves EM posterior weights (traditional). "
         "'map' assigns each fragment to its highest-posterior component.",
     )
+    model_grp.add_argument(
+        "--targets",
+        dest="targets_bed",
+        default=None,
+        help="BED3+ file of hybrid-capture panel target intervals. When "
+        "provided, calibration fits the gDNA density channel "
+        "independently per on-target and off-target region class. "
+        "Strongly recommended (and often required) on hybrid-capture "
+        "RNA-seq libraries, where on-target regions receive 50-150x "
+        "more coverage than off-target; a single global density model "
+        "is mis-specified on this data. Not needed for whole-genome / "
+        "total-RNA / non-capture libraries.",
+    )
+    model_grp.add_argument(
+        "--targets-pad",
+        dest="targets_pad",
+        type=int,
+        default=None,
+        help="Symmetric padding (bp) applied to every --targets interval "
+        "before overlap scoring (default: 150). Accounts for fragment "
+        "bleed beyond probe edges.",
+    )
 
     # -- Performance ----------------------------------------------------------
     perf_grp = quant_parser.add_argument_group("performance")
@@ -1047,6 +1083,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum posterior threshold for candidate pruning "
         "(default: 1e-4). Lower values keep more candidates "
         "(conservative). Set to 0 to disable pruning entirely.",
+    )
+    adv.add_argument(
+        "--calibration-kappa-gdna-min",
+        dest="calibration_kappa_gdna_min",
+        type=float,
+        default=None,
+        help="Lower bound on the gDNA-class Beta-Binomial dispersion κ_G "
+        "in the calibration strand channel (default: 3.0). The G-class "
+        "models gDNA as BetaBinomial(κ_G/2, κ_G/2); κ_G > 2 keeps the "
+        "distribution unimodal and peaked at 0.5 (correct shape for a "
+        "coin-flip-like process). Values below 2 admit a biologically-"
+        "impossible U-shape that can absorb authentic-RNA tails at low "
+        "contamination. Rarely needs tuning.",
     )
     adv.add_argument(
         "--emit-locus-stats",

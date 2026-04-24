@@ -81,9 +81,27 @@ _KAPPA_HI: float = 1000.0
 
 @dataclass(frozen=True)
 class EMFit:
-    """EM fit results for the two-component gDNA mixture."""
+    """EM fit results for the two-component gDNA mixture.
 
-    # Global gDNA rate (fragments per base)
+    Capture-class (composite-Poisson) mode: when
+    ``capture_class_mode`` is True (an ``(E_on, E_off)`` attribution
+    was supplied), ``lam_G_on`` and ``lam_G_off`` are fit
+    independently via a Poisson-superposition nested EM and
+    ``lam_G`` reports the effective coverage-weighted rate
+    ``(λ_on · ΣE_on + λ_off · ΣE_off) / ΣE``.  In single-rate mode the
+    three rate fields are identical.
+
+    The R-class expressed-rate prior is kept global and unscaled: a
+    single ``(μ_R, σ_R²)`` LogNormal applies to on- and off-target
+    regions alike — the prior's cross-transcript variance absorbs any
+    residual probe-enrichment in RNA counts (Phase 3a Option (a)).
+    """
+
+    # Effective / legacy global gDNA rate (fragments per base).  In
+    # capture mode this is the coverage-weighted average of
+    # ``lam_G_on`` and ``lam_G_off``; in non-capture mode they all
+    # coincide.  Kept for backward compatibility with downstream
+    # callers that read a single rate.
     lam_G: float
     # LogNormal(μ_R, σ_R²) parameters of the expressed-rate prior
     mu_R: float
@@ -109,6 +127,14 @@ class EMFit:
     n_spliced_hard: int = 0
     # Iteration trace (optional diagnostics)
     history: list[dict] = field(default_factory=list)
+
+    # -- Composite-Poisson capture-class rates --
+    # In non-capture mode both equal ``lam_G``.  In capture mode
+    # ``lam_G_on`` is the rate per on-target mappable bp and
+    # ``lam_G_off`` the rate per off-target mappable bp.
+    lam_G_on: float = 0.0
+    lam_G_off: float = 0.0
+    capture_class_mode: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +215,52 @@ def _count_llr_poisson_ln(
     rate_R = (lam_G + mu_j[:, None]) * E[None, :]  # (K, N)
     log_p_R_nodes = k[None, :] * np.log(rate_R) - rate_R - lgamma_k1[None, :]
     # logsumexp with weights
+    log_p_R = _logsumexp(log_p_R_nodes + _GH_LOGW[:, None], axis=0)
+
+    return ll_G - log_p_R
+
+
+def _count_llr_poisson_ln_composite(
+    k_u: np.ndarray,
+    E_on: np.ndarray,
+    E_off: np.ndarray,
+    lam_G_on: float,
+    lam_G_off: float,
+    mu_R: float,
+    sigma_R: float,
+) -> np.ndarray:
+    """Composite-Poisson per-region count LLR: log P(k|G) − log P(k|R).
+
+    P(k|G) = Poisson(k | λ_on · E_on + λ_off · E_off).
+    P(k|R) = ∫ Poisson(k | λ_on·E_on + λ_off·E_off + μ · (E_on+E_off))
+             · LogNormal(μ; μ_R, σ_R²) dμ, evaluated by 21-node
+    Gauss-HermiteE quadrature on log μ.
+
+    When ``E_off`` is identically zero and ``lam_G_off`` is passed as
+    anything (it drops out), this reduces to :func:`_count_llr_poisson_ln`
+    with ``lam_G = lam_G_on`` and ``E = E_on`` — preserving the
+    single-rate result.
+    """
+    k = np.asarray(k_u, dtype=np.float64)
+    E_on = np.asarray(E_on, dtype=np.float64)
+    E_off = np.asarray(E_off, dtype=np.float64)
+    lgamma_k1 = _vlgamma(k + 1.0)
+
+    # G-class: composite Poisson rate (sum of two independent
+    # channels).  Floor with _EPS to avoid log(0) on the rare region
+    # where both attributions are zero (e.g. fully-unmapped block);
+    # such regions are filtered out upstream by the mappable_bp floor.
+    rate_G = lam_G_on * E_on + lam_G_off * E_off
+    ll_G = k * np.log(np.maximum(rate_G, _EPS)) - rate_G - lgamma_k1
+
+    # R-class: μ_R prior on a single expressed-rate acting on total
+    # mappable_bp (E_on + E_off).  Option (a): keep μ global /
+    # unscaled across capture classes; the LogNormal σ_R absorbs any
+    # residual probe enrichment in RNA counts.
+    E_tot = E_on + E_off
+    mu_j = np.exp(mu_R + sigma_R * _GH_NODES)  # (K,)
+    rate_R = rate_G[None, :] + mu_j[:, None] * E_tot[None, :]  # (K, N)
+    log_p_R_nodes = k[None, :] * np.log(np.maximum(rate_R, _EPS)) - rate_R - lgamma_k1[None, :]
     log_p_R = _logsumexp(log_p_R_nodes + _GH_LOGW[:, None], axis=0)
 
     return ll_G - log_p_R
@@ -425,12 +497,18 @@ def _estimate_kappa_G(
     cache: _StrandBBCache,
     gamma_valid: np.ndarray,
     min_eff_regions: float = 2.0,
+    kappa_lo: float = _KAPPA_LO,
 ) -> float:
     """γ-weighted MLE of κ_G on the G-class symmetric Beta-Binomial.
 
     Operates on the U unique (k, n) pairs with aggregated weights.
     Falls back to the Binomial limit when effective G-weight is too
     small to constrain overdispersion.
+
+    ``kappa_lo`` clips the search lower bound; caller typically sets
+    it to ``CalibrationConfig.kappa_gdna_min`` (default 3.0) to keep the
+    G-class strictly unimodal (α = β = κ/2 > 1) and prevent the
+    U-shape pathology at low gDNA loads.
     """
     if cache.uk.size < 2:
         return _KAPPA_HI
@@ -439,6 +517,7 @@ def _estimate_kappa_G(
     w_u = cache.aggregate_weights(gamma_valid)
     return _golden_section_max_log(
         lambda kG: float(np.dot(w_u, _bb_g_loglik_unique(cache, kG))),
+        a=kappa_lo,
     )
 
 
@@ -579,7 +658,8 @@ def _seed_gamma(
 def _e_step(
     stats: dict[str, np.ndarray],
     eligible: np.ndarray,
-    lam_G: float,
+    lam_G_on: float,
+    lam_G_off: float,
     mu_R: float,
     sigma_R: float,
     pi_soft: float,
@@ -587,6 +667,8 @@ def _e_step(
     kappa_G: float,
     kappa_R: float,
     llr_fl: np.ndarray | None,
+    E_on: np.ndarray,
+    E_off: np.ndarray,
     cache: "_StrandBBCache | None" = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute γ_i = P(z=G | data_i) and the per-region strand LLR.
@@ -594,6 +676,13 @@ def _e_step(
     Hard:
       * k^s > 0 → γ = 0
       * ineligible → γ = π_soft
+
+    Count channel: composite-Poisson (``lam_G_on · E_on + lam_G_off ·
+    E_off``) under G; single global LogNormal(μ_R, σ_R²) prior over
+    an additive expressed rate under R.  When no capture BED was
+    supplied, ``E_on`` is identically zero and the composite rate
+    collapses to ``lam_G_off · E_off = lam_G · mappable_bp`` —
+    bit-identical to the pre-composite single-rate pathway.
 
     Returns (gamma, llr_strand_full) where ``llr_strand_full`` covers
     all regions (zero on invalid rows) — kept for diagnostics and the
@@ -617,13 +706,28 @@ def _e_step(
     pi_safe = float(np.clip(pi_soft, _EPS, 1.0 - _EPS))
     log_prior_odds = math.log(pi_safe / (1.0 - pi_safe))
 
-    llr_count = _count_llr_poisson_ln(
-        stats["n_unspliced"][soft],
-        stats["mappable_bp"][soft],
-        lam_G,
-        mu_R,
-        sigma_R,
-    )
+    if E_on is None or not bool(np.any(E_on[soft] > 0)):
+        # Non-capture fast path: ``E_on ≡ 0`` → the composite model
+        # reduces algebraically to the classical single-rate form, but
+        # the factored ``rate_R = (λ + μ) · E`` computation preserves
+        # bit-identical FP with the pre-composite code path.
+        llr_count = _count_llr_poisson_ln(
+            stats["n_unspliced"][soft],
+            stats["mappable_bp"][soft],
+            lam_G_off,
+            mu_R,
+            sigma_R,
+        )
+    else:
+        llr_count = _count_llr_poisson_ln_composite(
+            stats["n_unspliced"][soft],
+            E_on[soft],
+            E_off[soft],
+            lam_G_on,
+            lam_G_off,
+            mu_R,
+            sigma_R,
+        )
     llr_strand = llr_strand_full[soft]
 
     if llr_fl is not None:
@@ -646,65 +750,151 @@ def _m_step(
     stats: dict[str, np.ndarray],
     eligible: np.ndarray,
     gamma: np.ndarray,
-) -> tuple[float, float, float, float, float]:
-    """Update (λ_G, μ_R, σ_R, π, π_soft) from posteriors.
+    E_on: np.ndarray,
+    E_off: np.ndarray,
+    lam_G_on_prev: float,
+    lam_G_off_prev: float,
+    *,
+    capture_class_mode: bool,
+    inner_iters: int = 2,
+) -> tuple[float, float, float, float, float, float]:
+    """Update (λ_G_on, λ_G_off, μ_R, σ_R, π, π_soft) from posteriors.
 
-    * λ_G: γ-weighted Poisson MLE = Σ γ_i k^u_i / Σ γ_i E_i over eligible.
-    * (μ_R, σ_R²): moments of ``log(max(k^u_i/E_i − λ_G, eps_μ))`` taken
-      **only over hard-spliced anchor regions** (``k^s > 0 & eligible``).
-      Those regions are definitively RNA — their per-bp rate directly
-      reflects the expressed-gene distribution.  Using ``(1−γ)``-weights
-      over *all* eligible regions (the naive Gaussian-mixture update)
-      is circular: it lets class R absorb empty/low-count regions via
-      a broadening σ_R, which then reclassifies more regions as R,
-      collapsing λ_G.  Hard anchors break that loop.
-    * π: γ-mean over eligible.
-    * π_soft: γ-mean over eligible & k^s == 0.
+    Composite-Poisson M-step:
+
+    * In capture-class mode (``capture_class_mode=True``) the on/off
+      rates are updated by a 2-iteration nested EM that analytically
+      unmixes the two independent Poisson channels.  The Poisson
+      superposition theorem gives
+
+          E[k_on_i | k_i, λ_on, λ_off] = k_i · (λ_on · E_on_i) / rate_G_i,
+
+      and the γ-weighted M-step is
+      ``λ_on = Σ γ_i · k̂_on_i / Σ γ_i · E_on_i`` (symmetric off).
+      Two inner iterations suffice — the objective is strictly
+      convex in (λ_on, λ_off) and the fixed point is well inside
+      the convergence basin after one inner pass.
+
+    * Without capture-class (``E_on`` identically zero), the update
+      collapses to the classical closed-form
+      ``λ = Σ γ·k / Σ γ·E_off`` with ``λ_on = λ_off`` — bit-identical
+      to the pre-composite single-rate code path.
+
+    * (μ_R, σ_R²) use the anchor-only (hard-spliced) update operating
+      on the per-region effective rate
+      ``rate_G_i / (E_on_i + E_off_i)``.  Anchor regions are
+      definitively RNA; their raw per-bp rate minus the G-channel
+      offset gives the expressed μ̂_i.
+
+    * π, π_soft use the usual γ-means over eligible regions.
     """
     n_u = stats["n_unspliced"]
-    E = stats["mappable_bp"]
     n_s = stats["n_spliced"]
 
     if not eligible.any():
-        return 0.0, 0.0, 1.0, 0.5, 0.5
+        return 0.0, 0.0, 0.0, 1.0, 0.5, 0.5
 
     g = gamma[eligible]
-    ku = n_u[eligible]
-    ee = E[eligible]
+    ku = n_u[eligible].astype(np.float64)
     ns = n_s[eligible]
+    eon = E_on[eligible]
+    eoff = E_off[eligible]
+    E_tot = eon + eoff
 
-    # λ_G update
-    num = float(np.sum(g * ku))
-    den = float(np.sum(g * ee))
-    lam_G = num / den if den > _EPS else 0.0
+    # -- λ_G_on, λ_G_off: nested inner EM over the Poisson channels --
+    if capture_class_mode:
+        lam_on = float(lam_G_on_prev)
+        lam_off = float(lam_G_off_prev)
+        # Seed from the coverage-weighted pooled rate if the previous
+        # iteration supplied zeros (iter 1 before any gDNA was
+        # attributed).  Keeps the inner update away from the 0/0
+        # fixed-point of both rates being zero.
+        if lam_on <= 0.0 and lam_off <= 0.0:
+            den = float(np.sum(g * E_tot))
+            lam_seed = float(np.sum(g * ku)) / den if den > _EPS else 0.0
+            lam_on = lam_seed
+            lam_off = lam_seed
+        for _ in range(int(inner_iters)):
+            # Inner E-step: unmix k_i into (k_on, k_off) under the
+            # current (λ_on, λ_off).  The 1e-12 floor in the
+            # denominator guards against regions where both rate
+            # components are exactly zero (e.g. fully-off-target
+            # region with λ_off driven to zero transiently).
+            rate_on = lam_on * eon
+            rate_off = lam_off * eoff
+            denom = rate_on + rate_off + 1e-12
+            k_on_hat = g * ku * (rate_on / denom)
+            k_off_hat = g * ku - k_on_hat
+            # Inner M-step: γ-weighted Poisson MLE per channel.
+            den_on = float(np.sum(g * eon))
+            den_off = float(np.sum(g * eoff))
+            lam_on = float(np.sum(k_on_hat)) / den_on if den_on > _EPS else 0.0
+            lam_off = float(np.sum(k_off_hat)) / den_off if den_off > _EPS else 0.0
+    else:
+        # Non-capture path: eon is identically zero; rate_G =
+        # lam_off · eoff; single closed-form update.  Use the
+        # original-dtype ``n_u`` / ``mappable_bp`` arrays (typically
+        # float32) for bit-identical FP with the pre-composite single-
+        # rate code path.
+        _ku_raw = n_u[eligible]
+        _E_raw = stats["mappable_bp"][eligible]
+        num = float(np.sum(g * _ku_raw))
+        den = float(np.sum(g * _E_raw))
+        lam_off = num / den if den > _EPS else 0.0
+        lam_on = lam_off  # keep fields consistent; unused downstream
 
-    # μ_R, σ_R: anchor-only update.  If no anchors are available
-    # (e.g. tiny test cases), fall back to a broad uninformative
-    # LogNormal — the E-step count LLR will then depend mostly on
-    # Poisson(λ_G).
-    anchor_mask = (n_s > 0) & eligible
-    if anchor_mask.any():
-        ee_a = E[anchor_mask]
-        ku_a = n_u[anchor_mask]
-        rate_a = np.where(ee_a > 0, ku_a / ee_a, 0.0)
-        med_E = float(np.median(ee_a[ee_a > 0])) if np.any(ee_a > 0) else 1.0
+    # Per-region effective G rate for the anchor μ_R update.  In
+    # non-capture mode this is exactly ``lam_off`` (eon ≡ 0); broadcast
+    # the scalar to preserve bit-identical FP with the pre-composite
+    # single-rate code path.
+    if capture_class_mode:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lam_eff = np.where(
+                E_tot > 0,
+                (lam_on * eon + lam_off * eoff) / E_tot,
+                0.0,
+            )
+    else:
+        lam_eff = np.full_like(E_tot, lam_off)
+
+    # -- μ_R, σ_R: anchor-only update on the eligible subset --
+    anchor_local = ns > 0
+    if anchor_local.any():
+        if capture_class_mode:
+            ku_a = ku[anchor_local]
+            E_a = E_tot[anchor_local]
+            lam_a = lam_eff[anchor_local]
+            rate_a = np.where(E_a > 0, ku_a / E_a, 0.0)
+        else:
+            # Preserve pre-composite FP: work in the original stats
+            # dtypes (typically float32) for bit-identical ``rate_a``
+            # and therefore identical ``μ_R``, ``σ_R``.  Under the
+            # non-capture path ``E_tot ≡ mappable_bp`` and
+            # ``lam_eff ≡ lam_off``.
+            anchor_mask_full = eligible.copy()
+            anchor_mask_full[eligible] = anchor_local
+            ku_a = n_u[anchor_mask_full]
+            ee_a = stats["mappable_bp"][anchor_mask_full]
+            rate_a = np.where(ee_a > 0, ku_a / ee_a, 0.0)
+            lam_a = lam_off
+            E_a = ee_a
+        med_E = float(np.median(E_a[E_a > 0])) if np.any(E_a > 0) else 1.0
         eps_mu = 1.0 / max(med_E, 1.0)
-        mu_hat = np.maximum(rate_a - lam_G, eps_mu)
+        mu_hat = np.maximum(rate_a - lam_a, eps_mu)
         log_mu = np.log(mu_hat)
         if log_mu.size >= 2:
             mu_R = float(np.mean(log_mu))
             var_R = float(np.var(log_mu))
             sigma_R = math.sqrt(max(var_R, 1e-4))
         else:
-            # Single anchor: center on it but keep a broad σ.
             mu_R = float(log_mu.item())
             sigma_R = 1.5
     else:
-        # No anchors — uninformative broad prior centered well above λ_G.
-        mu_R = math.log(max(10.0 * lam_G, 1e-6))
+        lam_scalar = lam_off if lam_off > 0 else max(lam_on, 1e-12)
+        mu_R = math.log(max(10.0 * lam_scalar, 1e-6))
         sigma_R = 2.0
 
-    # Mixing proportions
+    # -- Mixing proportions --
     pi = float(np.mean(g))
     soft_mask = ns == 0
     if soft_mask.any():
@@ -714,7 +904,7 @@ def _m_step(
     pi = float(np.clip(pi, _EPS, 1.0 - _EPS))
     pi_soft = float(np.clip(pi_soft, _EPS, 1.0 - _EPS))
 
-    return lam_G, mu_R, sigma_R, pi, pi_soft
+    return lam_on, lam_off, mu_R, sigma_R, pi, pi_soft
 
 
 # ---------------------------------------------------------------------------
@@ -767,7 +957,9 @@ def run_em(
     mean_frag_len: float,
     max_iterations: int = 50,
     convergence_tol: float = 1e-4,
+    kappa_gdna_min: float = 3.0,
     diagnostics: bool = False,
+    capture_e: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> EMFit:
     """Run the two-component mixture EM and return an :class:`EMFit`.
 
@@ -788,11 +980,43 @@ def run_em(
     mean_frag_len
         Library mean fragment length — eligibility floor for
         ``mappable_bp_i``.
+    kappa_gdna_min
+        Lower bound on the G-class Beta-Binomial dispersion.  Default
+        3.0 keeps α = β = κ_G/2 > 1 — the G-class stays unimodal and
+        peaked at 0.5, the correct shape for real gDNA.  Values below
+        2.0 admit the biologically-nonsense U-shape that absorbs
+        authentic-RNA tails at low contamination.
+    capture_e
+        Optional ``(E_on, E_off)`` tuple from
+        :func:`rigel.calibration._annotate.annotate_capture_class`.
+        When provided, the gDNA density channel fits two rates
+        (``λ_on``, ``λ_off``) via a composite-Poisson superposition
+        model with per-bp attribution.  When ``None``, a single global
+        rate is fit over ``mappable_bp`` (classical behavior).
     """
     n_u = stats["n_unspliced"]
     n_s = stats["n_spliced"]
     E = stats["mappable_bp"]
     n_regions = n_u.shape[0]
+
+    # Composite-Poisson capture-class attribution.  When no BED is
+    # supplied we emulate the single-rate pathway by setting
+    # ``E_on ≡ 0`` and ``E_off ≡ mappable_bp`` — the composite count
+    # LLR and M-step then reduce to the classical single-rate update
+    # for ``lam_G_off`` (and ``lam_G_on`` is inert).
+    capture_class_mode = capture_e is not None
+    if capture_e is None:
+        E_on = np.zeros(n_regions, dtype=np.float64)
+        E_off = E.astype(np.float64, copy=False)
+    else:
+        _e_on, _e_off = capture_e
+        E_on = np.asarray(_e_on, dtype=np.float64)
+        E_off = np.asarray(_e_off, dtype=np.float64)
+        if E_on.shape != (n_regions,) or E_off.shape != (n_regions,):
+            raise ValueError(
+                f"capture_e shapes {E_on.shape}/{E_off.shape} do not match "
+                f"n_regions {n_regions}"
+            )
 
     # Eligibility: region must carry ≥ one fragment's worth of mappable bp.
     mappable_floor = max(1.0, float(mean_frag_len))
@@ -818,6 +1042,9 @@ def run_em(
             n_eligible=0,
             n_soft=0,
             n_spliced_hard=0,
+            lam_G_on=0.0,
+            lam_G_off=0.0,
+            capture_class_mode=capture_class_mode,
         )
 
     fl_region_ids = np.empty(0, dtype=np.intp)
@@ -839,12 +1066,19 @@ def run_em(
     # --- Anchor-only seed ---
     gamma, pi_init, n_spliced_hard = _seed_gamma(stats, eligible)
 
-    # Initial λ_G: robust median-split pooled rate over soft eligible regions.
+    # Initial λ_G: pooled rate over soft eligible regions.
     soft_mask = eligible & (n_s == 0)
     if soft_mask.any():
-        lam_G = _robust_initial_lam_G(n_u[soft_mask], E[soft_mask])
+        lam_G_init = _robust_initial_lam_G(n_u[soft_mask], E[soft_mask])
     else:
-        lam_G = 0.0
+        lam_G_init = 0.0
+
+    # Seed both capture-class rates with the same pooled init; they
+    # diverge after the first composite M-step.  In single-rate mode
+    # ``lam_G_on`` is inert (E_on ≡ 0) so only ``lam_G_off`` drives
+    # the subsequent E-step.
+    lam_G_on = lam_G_init
+    lam_G_off = lam_G_init
 
     # Initial μ_R, σ_R from spliced-seed regions (definitively RNA).
     expressed_seed_mask = (n_s > 0) & eligible
@@ -853,18 +1087,16 @@ def run_em(
         rates = np.where(ee > 0, n_u[expressed_seed_mask] / ee, 0.0)
         med_E = float(np.median(ee[ee > 0])) if np.any(ee > 0) else 1.0
         eps_mu = 1.0 / max(med_E, 1.0)
-        mu_hat = np.maximum(rates - lam_G, eps_mu)
+        mu_hat = np.maximum(rates - lam_G_init, eps_mu)
         log_mu = np.log(mu_hat)
         mu_R = float(np.mean(log_mu))
         sigma_R = max(float(np.std(log_mu)), 0.5)
     else:
-        mu_R = math.log(max(10.0 * lam_G, 1e-6))
+        mu_R = math.log(max(10.0 * lam_G_init, 1e-6))
         sigma_R = 2.0
 
-    # --- Initial (κ_G, κ_R): Binomial limit.  Pooled MLE at γ = 0.5 is
-    # unstable in homogeneous-population cases (a pure-RNA library would
-    # force κ_G to the lower bound and collapse iter-0 LLR to zero).  The
-    # γ-weighted M-step adapts κ as the classification firms up.
+    # --- Initial (κ_G, κ_R): Binomial limit.  γ-weighted M-step
+    # adapts κ as the classification firms up.
     kappa_G = _KAPPA_HI
     kappa_R = _KAPPA_HI
 
@@ -873,14 +1105,27 @@ def run_em(
     pi = pi_init
     pi_soft = pi_init
 
-    logger.info(
-        "EM calibration init: n_elig=%d, n_soft=%d, n_spliced_hard=%d, "
-        "π=%.3f, π_soft=%.3f, λ_G=%.3e, μ_R=%.2f, σ_R=%.2f, "
-        "κ_G=%.2f, κ_R=%.2f  (SS=%.3f)",
-        n_elig, n_soft, n_spliced_hard,
-        pi, pi_soft, lam_G, mu_R, sigma_R,
-        kappa_G, kappa_R, float(strand_specificity),
-    )
+    if capture_class_mode:
+        n_regions_on = int((E_on > 0).sum())
+        logger.info(
+            "EM calibration init (composite-Poisson, capture-class): "
+            "n_elig=%d, n_soft=%d, n_spliced_hard=%d, π=%.3f, π_soft=%.3f, "
+            "λ_G(seed)=%.3e, μ_R=%.2f, σ_R=%.2f, κ_G=%.2f, κ_R=%.2f  "
+            "(ΣE_on/ΣE=%.3f, n_regions_on=%d/%d, SS=%.3f)",
+            n_elig, n_soft, n_spliced_hard,
+            pi, pi_soft, lam_G_init, mu_R, sigma_R, kappa_G, kappa_R,
+            float(E_on.sum()) / max(float(E_on.sum() + E_off.sum()), 1.0),
+            n_regions_on, n_regions, float(strand_specificity),
+        )
+    else:
+        logger.info(
+            "EM calibration init: n_elig=%d, n_soft=%d, n_spliced_hard=%d, "
+            "π=%.3f, π_soft=%.3f, λ_G=%.3e, μ_R=%.2f, σ_R=%.2f, "
+            "κ_G=%.2f, κ_R=%.2f  (SS=%.3f)",
+            n_elig, n_soft, n_spliced_hard,
+            pi, pi_soft, lam_G_init, mu_R, sigma_R,
+            kappa_G, kappa_R, float(strand_specificity),
+        )
 
     history: list[dict] = []
     converged = False
@@ -890,8 +1135,6 @@ def run_em(
     prev_pi_soft = pi_soft
     llr_strand_full = np.zeros(n_regions, dtype=np.float64)
 
-    # One-shot cache for BB strand log-likelihoods (k, n, log_binom are
-    # invariant across EM iterations and across both κ_G / κ_R searches).
     bb_cache = _StrandBBCache(stats)
     bb_cache.set_ss(strand_specificity)
 
@@ -916,17 +1159,23 @@ def run_em(
 
         # --- E-step ---
         gamma, llr_strand_full = _e_step(
-            stats, eligible, lam_G, mu_R, sigma_R,
+            stats, eligible, lam_G_on, lam_G_off, mu_R, sigma_R,
             pi_soft, strand_specificity, kappa_G, kappa_R, llr_fl,
-            cache=bb_cache,
+            E_on, E_off, cache=bb_cache,
         )
 
-        # --- M-step ---
-        lam_G, mu_R, sigma_R, pi, pi_soft = _m_step(stats, eligible, gamma)
+        # --- M-step (composite-Poisson nested EM) ---
+        (lam_G_on, lam_G_off, mu_R, sigma_R, pi, pi_soft) = _m_step(
+            stats, eligible, gamma, E_on, E_off,
+            lam_G_on, lam_G_off,
+            capture_class_mode=capture_class_mode,
+        )
 
         # --- κ updates (γ-weighted MLEs on unique (k, n) pairs) ---
         gamma_valid = gamma[bb_cache.valid]
-        kappa_G = _estimate_kappa_G(bb_cache, gamma_valid)
+        kappa_G = _estimate_kappa_G(
+            bb_cache, gamma_valid, kappa_lo=float(kappa_gdna_min),
+        )
         kappa_R = _estimate_kappa_R(bb_cache, gamma_valid)
 
         # --- FL model update (γ-weighted gDNA FL) ---
@@ -937,9 +1186,10 @@ def run_em(
 
         delta = abs(pi_soft - prev_pi_soft)
         if diagnostics:
-            history.append({
+            hist_entry = {
                 "iter": n_iter,
-                "lam_G": lam_G,
+                "lam_G_on": lam_G_on,
+                "lam_G_off": lam_G_off,
                 "mu_R": mu_R,
                 "sigma_R": sigma_R,
                 "pi": pi,
@@ -949,30 +1199,67 @@ def run_em(
                 "delta_pi_soft": delta,
                 "mean_gamma_soft": float(np.mean(gamma[eligible & (n_s == 0)]))
                     if (eligible & (n_s == 0)).any() else float("nan"),
-            })
-        logger.debug(
-            "EM iter %d: λ_G=%.3e μ_R=%.2f σ_R=%.2f π=%.3f π_soft=%.3f "
-            "κ_G=%.2f κ_R=%.2f Δ=%.2e",
-            n_iter, lam_G, mu_R, sigma_R, pi, pi_soft, kappa_G, kappa_R, delta,
-        )
+            }
+            history.append(hist_entry)
+        if capture_class_mode:
+            logger.debug(
+                "EM iter %d: λ_on/λ_off=%.3e/%.3e μ_R=%.2f σ_R=%.2f π=%.3f "
+                "π_soft=%.3f κ_G=%.2f κ_R=%.2f Δ=%.2e",
+                n_iter, lam_G_on, lam_G_off, mu_R, sigma_R, pi, pi_soft,
+                kappa_G, kappa_R, delta,
+            )
+        else:
+            logger.debug(
+                "EM iter %d: λ_G=%.3e μ_R=%.2f σ_R=%.2f π=%.3f π_soft=%.3f "
+                "κ_G=%.2f κ_R=%.2f Δ=%.2e",
+                n_iter, lam_G_off, mu_R, sigma_R, pi, pi_soft,
+                kappa_G, kappa_R, delta,
+            )
 
         if delta < convergence_tol:
             converged = True
             break
         prev_pi_soft = pi_soft
 
-    logger.info(
-        "EM calibration %s in %d iters: λ_G=%.3e, μ_R=%.2f, σ_R=%.2f, π=%.3f, "
-        "κ_G=%.2f, κ_R=%.2f",
-        "converged" if converged else "did NOT converge",
-        n_iter, lam_G, mu_R, sigma_R, pi, kappa_G, kappa_R,
-    )
+    # Effective / legacy single-rate λ_G: coverage-weighted average
+    # of the two channels.  In non-capture mode this equals
+    # ``lam_G_off`` exactly (E_on ≡ 0) — short-circuit to avoid the
+    # 1-ULP drift that ``(0 + lam_off*E)/E`` can introduce.
+    if not capture_class_mode:
+        lam_G_eff = float(lam_G_off)
+    else:
+        sum_on = float(E_on.sum())
+        sum_off = float(E_off.sum())
+        sum_tot = sum_on + sum_off
+        lam_G_eff = (
+            (lam_G_on * sum_on + lam_G_off * sum_off) / sum_tot
+            if sum_tot > _EPS
+            else float(lam_G_off)
+        )
+
+    if capture_class_mode:
+        enrichment = lam_G_on / max(lam_G_off, _EPS)
+        logger.info(
+            "EM calibration %s in %d iters (composite-Poisson): "
+            "λ_on=%.3e, λ_off=%.3e (λ_on/λ_off=%.1fx), λ_eff=%.3e, "
+            "μ_R=%.2f, σ_R=%.2f, π=%.3f, κ_G=%.2f, κ_R=%.2f",
+            "converged" if converged else "did NOT converge",
+            n_iter, lam_G_on, lam_G_off, enrichment, lam_G_eff,
+            mu_R, sigma_R, pi, kappa_G, kappa_R,
+        )
+    else:
+        logger.info(
+            "EM calibration %s in %d iters: λ_G=%.3e, μ_R=%.2f, σ_R=%.2f, π=%.3f, "
+            "κ_G=%.2f, κ_R=%.2f",
+            "converged" if converged else "did NOT converge",
+            n_iter, lam_G_eff, mu_R, sigma_R, pi, kappa_G, kappa_R,
+        )
 
     # Strand-only diagnostic posterior (what does strand alone say?).
     region_gamma_strand = _strand_posterior(llr_strand_full, pi_0=0.5)
 
     return EMFit(
-        lam_G=float(lam_G),
+        lam_G=float(lam_G_eff),
         mu_R=float(mu_R),
         sigma_R=float(sigma_R),
         pi=float(pi),
@@ -987,4 +1274,7 @@ def run_em(
         n_soft=n_soft,
         n_spliced_hard=n_spliced_hard,
         history=history,
+        lam_G_on=float(lam_G_on),
+        lam_G_off=float(lam_G_off),
+        capture_class_mode=capture_class_mode,
     )

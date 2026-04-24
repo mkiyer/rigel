@@ -70,7 +70,7 @@ def get_scan_outputs(sample: str, index):
 
 def run_strand_only_em(
     stats_dict, strand_specificity, mean_frag_len,
-    *, max_iter=50, tol=1e-4,
+    *, max_iter=50, tol=1e-4, kappa_gdna_min=3.0,
 ):
     """Strand-channel-only EM: no count LLR, no FL LLR, no spliced anchor.
 
@@ -126,7 +126,7 @@ def run_strand_only_em(
 
         # κ updates (MLEs on unique (k, n) pairs)
         gamma_valid = gamma[cache.valid]
-        kappa_G = _estimate_kappa_G(cache, gamma_valid)
+        kappa_G = _estimate_kappa_G(cache, gamma_valid, kappa_lo=float(kappa_gdna_min))
         kappa_R = _estimate_kappa_R(cache, gamma_valid)
 
         delta = abs(pi_soft - prev_pi)
@@ -168,12 +168,13 @@ def evaluate(sample: str, index, region_df):
     full = run_em(
         stats_dict, fl, ss,
         mean_frag_len=mean_fl, max_iterations=50, convergence_tol=1e-4,
+        kappa_gdna_min=3.0,
     )
     t_full = time.perf_counter() - t0
 
     # --- Strand-only EM ---
     t0 = time.perf_counter()
-    so = run_strand_only_em(stats_dict, ss, mean_fl)
+    so = run_strand_only_em(stats_dict, ss, mean_fl, kappa_gdna_min=3.0)
     t_so = time.perf_counter() - t0
 
     # --- Strand-only posterior using the FULL-EM fitted κ (diagnostic) ---
@@ -187,21 +188,28 @@ def evaluate(sample: str, index, region_df):
     n_s = stats_dict["n_spliced"]
     E = stats_dict["mappable_bp"]
     eligible = E >= max(1.0, mean_fl)
+    tx_strand = stats_dict["tx_strand"]
+    # The strand channel can only inform on regions that are
+    # eligible AND on a stranded transcript (tx_strand ≠ 0).  Any
+    # metric we compare to MoM / truth must use that same denominator;
+    # using ALL fragments (including unstranded / ineligible regions
+    # where γ is pinned to π_soft) guarantees a ceiling below the true
+    # fraction.
+    valid = eligible & (tx_strand != 0)
+    valid_frags = float(n_u[valid].sum())
 
-    # "Implied gDNA fragments" under each model = Σ γ_i · k^u_i  (spliced
-    # are definitionally RNA; ineligible regions don't contribute).
-    elig_mask = eligible
+    # "Implied gDNA fragments" under each model = Σ γ_i · k^u_i over
+    # strand-valid regions only.
     def implied_frags(gamma):
-        return float(np.sum(gamma[elig_mask] * n_u[elig_mask]))
+        return float(np.sum(gamma[valid] * n_u[valid]))
 
     gdna_full = implied_frags(full.gamma)
     gdna_strand_only = implied_frags(so["gamma"])
     gdna_strand_k_from_full = implied_frags(gamma_strand_full_k)
 
-    # ≈ "Truth-proxy" fraction = n_gdna / total_fragments
-    # But we also need "lambda * E" total-expected-gDNA metric
-    lam_full_exp = float(full.lam_G * np.sum(E[elig_mask]))
-    lam_so_exp = float(so["lam_G"] * np.sum(E[elig_mask]))
+    # λ_G · E expected counts over strand-valid regions
+    lam_full_exp = float(full.lam_G * np.sum(E[valid]))
+    lam_so_exp = float(so["lam_G"] * np.sum(E[valid]))
 
     # Region-level assignment
     out = pd.DataFrame({
@@ -224,6 +232,8 @@ def evaluate(sample: str, index, region_df):
         "mean_fl": mean_fl,
         "n_fragments_total": total_frags,
         "n_eligible": int(eligible.sum()),
+        "n_strand_valid": int(valid.sum()),
+        "valid_frags": valid_frags,
         # Full joint EM
         "full_lam_G": full.lam_G,
         "full_kappa_G": full.kappa_G,
@@ -233,9 +243,9 @@ def evaluate(sample: str, index, region_df):
         "full_n_iter": full.n_iter,
         "full_converged": full.converged,
         "full_gdna_frags_implied": gdna_full,
-        "full_gdna_frac_implied": gdna_full / total_frags if total_frags else 0.0,
+        "full_gdna_frac_implied": gdna_full / valid_frags if valid_frags else 0.0,
         "full_lam_times_E": lam_full_exp,
-        "full_frac_lam_times_E": lam_full_exp / total_frags if total_frags else 0.0,
+        "full_frac_lam_times_E": lam_full_exp / valid_frags if valid_frags else 0.0,
         "full_time_s": t_full,
         # Strand-only EM
         "so_lam_G": so["lam_G"],
@@ -246,12 +256,14 @@ def evaluate(sample: str, index, region_df):
         "so_n_iter": so["n_iter"],
         "so_converged": so["converged"],
         "so_gdna_frags_implied": gdna_strand_only,
-        "so_gdna_frac_implied": gdna_strand_only / total_frags if total_frags else 0.0,
+        "so_gdna_frac_implied": gdna_strand_only / valid_frags if valid_frags else 0.0,
         "so_lam_times_E": lam_so_exp,
-        "so_frac_lam_times_E": lam_so_exp / total_frags if total_frags else 0.0,
+        "so_frac_lam_times_E": lam_so_exp / valid_frags if valid_frags else 0.0,
         "so_time_s": t_so,
         # Full-κ strand-only posterior
-        "strand_gdna_frac_with_full_k": gdna_strand_k_from_full / total_frags if total_frags else 0.0,
+        "strand_gdna_frac_with_full_k": (
+            gdna_strand_k_from_full / valid_frags if valid_frags else 0.0
+        ),
     }
     return summary
 

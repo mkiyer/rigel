@@ -900,6 +900,18 @@ def run_pipeline(
         strand_models.strand_specificity,
         strand_ci_eps,
     )
+
+    # -- Optional capture-class annotation (hybrid-capture panels only) --
+    capture_e = None
+    if cal_cfg.targets_bed is not None:
+        from .calibration import annotate_capture_class
+
+        capture_e = annotate_capture_class(
+            index.region_df,
+            cal_cfg.targets_bed,
+            pad=int(cal_cfg.targets_pad),
+        )
+
     calibration = calibrate_gdna(
         region_counts,
         fl_table,
@@ -908,6 +920,8 @@ def run_pipeline(
         mean_frag_len=frag_length_models.global_model.mean,
         intergenic_fl_model=frag_length_models.intergenic,
         fl_prior_ess=cal_cfg.fl_prior_ess,
+        kappa_gdna_min=cal_cfg.kappa_gdna_min,
+        capture_e=capture_e,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(
