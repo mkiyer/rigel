@@ -49,7 +49,7 @@ ruff format src/ tests/
 
 1. **BAM Scan** (`scan_and_buffer`): C++ htslib-based single-pass BAM reader. Resolves fragments against the reference index, trains strand/fragment-length models from unique mappers, and buffers results into a columnar `FragmentBuffer`.
 
-2. **Quantification** (`quant_from_buffer`): Iterates the buffer to build CSR EM data (`scan.FragmentRouter`), constructs loci via connected components (`locus.build_loci`), computes Empirical Bayes gDNA priors, and runs per-locus EM with `2*n_t + 1` components (mRNA + nRNA per transcript, plus one gDNA).
+2. **Quantification** (`quant_from_buffer`): Runs Simple Regional Deconvolution (SRD) calibration on the FragmentBuffer to recover the library-wide gDNA fraction `π_pool` and the gDNA fragment-length model. Iterates the buffer to build CSR EM data (`scan.FragmentRouter`), constructs loci via connected components (`locus.build_loci`), derives per-locus Dirichlet priors from per-fragment SRD posteriors (`compute_locus_priors_from_partitions`), and runs per-locus EM with `2*n_t + 1` components (mRNA + nRNA per transcript, plus one gDNA).
 
 ### Python Module Roles
 
@@ -58,7 +58,12 @@ ruff format src/ tests/
 - `config.py` — Frozen dataclasses (`EMConfig`, `BamScanConfig`, `PipelineConfig`)
 - `index.py` — Reference index build/load (produces feather files from GTF+FASTA)
 - `scoring.py` — Fragment likelihood scoring (`FragmentScorer`)
-- `locus.py` — Locus construction, nRNA initialization, gDNA priors
+- `locus.py` — Locus construction, nRNA initialization, per-locus Dirichlet priors
+- `calibration/_simple.py` — SRD orchestrator (`calibrate_gdna`)
+- `calibration/_categorize.py` — Pass 0 per-fragment 7-way categorization
+- `calibration/_fl_mixture.py` — Pass 2 1-D fragment-length mixture EM
+- `calibration/_fl_empirical_bayes.py` — Pass 3 empirical-Bayes Dirichlet smoothing
+- `calibration/_result.py` — `CalibrationResult` schema
 - `estimator.py` — `AbundanceEstimator` class, EM dispatch
 - `scan.py` — `FragmentRouter` (CSR builder from scored fragments)
 - `buffer.py` — Memory-efficient columnar fragment buffer with CSR layout

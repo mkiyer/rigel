@@ -363,7 +363,6 @@ struct WorkerState {
     BamScanStats stats;
     StrandObservations strand_obs;
     FragLenObservations fraglen_obs;
-    RegionAccumulator region_acc;
 
     explicit WorkerState(int32_t n_transcripts)
         : scratch(n_transcripts) {}
@@ -397,10 +396,6 @@ static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src
     dst.intergenic_lengths.insert(dst.intergenic_lengths.end(),
                                   src.intergenic_lengths.begin(),
                                   src.intergenic_lengths.end());
-}
-
-static void merge_region_acc(RegionAccumulator& dst, RegionAccumulator& src) {
-    dst.merge_from(src);
 }
 
 // ================================================================
@@ -978,7 +973,6 @@ public:
     BamScanStats stats_;
     StrandObservations strand_obs_;
     FragLenObservations fraglen_obs_;
-    RegionAccumulator region_acc_;
 
     BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
@@ -1025,12 +1019,6 @@ public:
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
             auto ws = std::make_unique<WorkerState>(n_transcripts);
-            if (ctx_->has_region_index()) {
-                ws->region_acc.init(
-                    ctx_->n_regions(),
-                    ctx_->region_cr_,
-                    &ctx_->id_to_ref_);
-            }
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
             worker_states.push_back(std::move(ws));
@@ -1156,15 +1144,12 @@ public:
                 // Wait for workers to finish, then close output queue
                 for (auto& w : workers) w.join();
 
-                // Merge worker results (stats, strand, fraglen, regions)
+                // Merge worker results (stats, strand, fraglen)
                 for (auto& ws_ptr : worker_states) {
                     WorkerState& ws = *ws_ptr;
                     stats_.merge_from(ws.stats);
                     merge_strand_obs(strand_obs_, ws.strand_obs);
                     merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
-                    if (ws.region_acc.enabled()) {
-                        merge_region_acc(region_acc_, ws.region_acc);
-                    }
                 }
 
                 output_queue.close();
@@ -1238,7 +1223,6 @@ private:
         StrandObservations& strand_obs = ws.strand_obs;
         FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
-        RegionAccumulator& region_acc = ws.region_acc;
 
         // Per-worker state refs
         stats.n_read_names++;
@@ -1355,15 +1339,6 @@ private:
                     }
                 }
 
-                // Region accumulation for intergenic fragments.
-                // Every hit accumulates with 1/num_hits weight; the
-                // sum across hits of one molecule is 1.0, matching
-                // the 1/NH crediting of E_i (mappable_effective_length).
-                if (region_acc.enabled()) {
-                    region_acc.accumulate(
-                        frag.exons, frag.has_introns(), is_unique_mapper,
-                        num_hits);
-                }
                 continue;
             }
 
@@ -1448,13 +1423,6 @@ private:
             // convention of the E_i (mappable_effective_length)
             // denominator.  No count_stats gate: that would bias the
             // numerator high by a factor of NH relative to E_i.
-            if (region_acc.enabled()) {
-                bool frag_spliced = (result.splice_type == SPLICE_SPLICED_ANNOT
-                                  || result.splice_type == SPLICE_SPLICED_UNANNOT);
-                region_acc.accumulate(
-                    frag.exons, frag_spliced, is_unique_mapper,
-                    num_hits);
-            }
 
             accumulator.append(result, frag_id);
 
@@ -1557,17 +1525,6 @@ private:
         fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
         fraglen_dict["intergenic_lengths"] = vec_to_ndarray(std::move(fraglen_obs_.intergenic_lengths));
         result["frag_length_observations"] = fraglen_dict;
-
-        // Region evidence (from gDNA calibration region accumulator)
-        if (region_acc_.n_regions > 0 && !region_acc_.counts.empty()) {
-            nb::dict region_dict;
-            region_dict["counts"]          = vec_to_ndarray(std::move(region_acc_.counts));
-            region_dict["n_regions"]       = region_acc_.n_regions;
-            region_dict["fl_region_ids"]   = vec_to_ndarray(std::move(region_acc_.fl_region_ids));
-            region_dict["fl_frag_lens"]    = vec_to_ndarray(std::move(region_acc_.fl_frag_lens));
-            region_dict["fl_frag_strands"] = vec_to_ndarray(std::move(region_acc_.fl_frag_strands));
-            result["region_evidence"] = region_dict;
-        }
 
         return result;
     }

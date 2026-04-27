@@ -340,6 +340,16 @@ transcripts.
 
 ## 10. gDNA prior system
 
+> **Note (v0.5.0):** the density-based per-region calibration described
+> in this chapter has been **replaced** by Simple Regional Deconvolution
+> (SRD v1). See `docs/calibration/srd_v1_implementation.md` for the
+> current model, `docs/calibration/srd_v1_results.md` for benchmark
+> validation, and `docs/calibration/srd_v2_plan.md` for the roadmap.
+> The text below is retained as historical context; some referenced
+> code paths (`build_region_table`, `lambda_gdna`, regional density
+> estimators, the strand+density blended estimator) no longer exist
+> in the codebase.
+
 gDNA is modeled as one merged locus-level component.
 
 ### 10.1 Background density

@@ -152,81 +152,46 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for the v4 gDNA calibration EM.
+    """Configuration for SRD v1 gDNA calibration.
 
     The pipeline runs ``calibrate_gdna()`` between model finalization
-    and quantification.  It fits a two-component (RNA / gDNA) mixture
-    on per-reference-region evidence using a fused count / strand /
-    fragment-length log-likelihood ratio.  The resulting
-    ``CalibrationResult`` provides per-region expected gDNA fragment
-    counts, a single global gDNA rate ``lambda_gdna`` (fragments per
-    mappable base), and a gDNA fragment-length model.  These are
-    consumed by ``compute_locus_gdna_priors()`` to set the per-locus
-    gDNA Dirichlet prior for the unified OVR EM.
+    and quantification.  It walks the finalized fragment buffer once,
+    categorizes each unique fragment by geometry alone, and fits a
+    convex 1-D mixture (RNA vs gDNA) on the unspliced-incompatible /
+    intronic / intergenic pool with ``RNA_FL`` fixed to the spliced
+    histogram.  The resulting :class:`CalibrationResult` exposes three
+    Empirical-Bayes-shrunk fragment-length models (``rna_fl_model``,
+    ``gdna_fl_model``, ``global_fl_model``) used for downstream
+    fragment scoring.  No regional priors, no per-locus warm-starts,
+    no Beta-Binomial / LogNormal moments.
     """
 
-    #: Calibration evidence strength for the Dirichlet prior.
-    #: Combined with a mode-aware baseline (+0.5 for VBEM, 0.0 for MAP)
-    #: per component.  The equilibrium is insensitive to this value
-    #: for degenerate likelihoods — any value in [1, 50] gives identical
-    #: results.  Default 5.0.
-    gdna_prior_c_base: float = 5.0
+    #: Tolerance (bp) for the exon-fit geometric test.  An aligned
+    #: unspliced fragment is judged "exon-compatible" if at least one
+    #: candidate transcript's annotated exons cover the read up to this
+    #: many bp of slop, i.e. ``read_length - max(exon_bp) ≤ tol``.
+    exon_fit_tolerance_bp: int = 5
 
     #: Effective sample size (ESS) for the global fragment-length prior.
     #: The global FL histogram is rescaled to this many pseudo-observations
-    #: before being used as a Dirichlet prior for category-specific FL models
-    #: (RNA, gDNA).  Controls how quickly category data overrides the prior:
-    #: with N category observations, the category has N/(N+ESS) influence.
-    #: Default 1000 is appropriate for real data (millions of fragments);
-    #: lower values (10-50) may be useful for small simulations.
-    fl_prior_ess: float = 1000.0
+    #: before being used as a Dirichlet prior on the category-specific FL
+    #: models (``RNA_FL``, ``gDNA_FL``).  Controls how quickly category
+    #: data overrides the prior: with N category observations, the
+    #: category has ``N/(N+ESS)`` influence.  The same ESS shrinks small
+    #: pools to the global FL shape, eliminating the need for a separate
+    #: pool-size gate.
+    fl_prior_ess: float = 500.0
 
-    #: Lower bound on the gDNA-class Beta-Binomial dispersion κ_G.
-    #:
-    #: The G-class strand channel models gDNA as a symmetric
-    #: BetaBinomial(κ_G/2, κ_G/2) over the per-region antisense count.
-    #: The underlying Beta's shape parameters are α = β = κ_G / 2, so κ_G
-    #: directly controls the morphology of the p = k/n distribution:
-    #:
-    #:   * κ_G  <  2  →  α, β  <  1:  U-shape (mass piles at 0 and 1).
-    #:                    Biologically impossible for real gDNA — a region
-    #:                    cannot be "all sense" or "all antisense" when the
-    #:                    template is double-stranded.  At low
-    #:                    contamination levels the unconstrained MLE will
-    #:                    drift here to absorb authentic-RNA tails, falsely
-    #:                    inflating π_gDNA.
-    #:   * κ_G  =  2   →  α = β = 1:   Uniform on [0, 1].  Flat, no peak.
-    #:   * κ_G  >  2   →  α, β  >  1:  Unimodal, peaked at 0.5 (correct
-    #:                    shape for a coin-flip-like process with PCR /
-    #:                    mappability / GC-bias overdispersion).
-    #:
-    #: Clipping κ_G to ≥ ``kappa_gdna_min`` (default 3.0) guarantees the
-    #: G-class always behaves like gDNA — a modest, visible peak at 0.5 —
-    #: while preserving real overdispersion beyond the Binomial limit.
-    #: 3.0 is chosen over 2.0 so the peak is unambiguously present; the
-    #: upper end of κ_G is unconstrained and the M-step can drive it as
-    #: high as the data warrants (near-Binomial at high gDNA load).
-    kappa_gdna_min: float = 3.0
+    #: Maximum iterations for the 1-D mixture EM.
+    #: The mid-gDNA-fraction regime (π ≈ 0.5–0.7) converges most
+    #: slowly: the per-step ``|Δπ|`` drops just below ``tol`` only
+    #: around iter 200–400 even when the iterate has effectively
+    #: stabilised. Setting a generous cap (1000) costs <1s of CPU and
+    #: avoids spurious ``gdna_fl_quality=fallback`` classifications.
+    max_iter: int = 1000
 
-    #: Path to a BED3+ file enumerating the hybrid-capture panel's
-    #: target intervals.  When set, regions are partitioned into
-    #: ``{on, off}`` capture classes and the density channel fits
-    #: ``(λ_G, μ_R, σ_R²)`` independently per class.  This is required
-    #: on hybrid-capture data, where on-target regions receive 50–150×
-    #: more gDNA *and* more captured RNA than off-target regions; a
-    #: single global density model is catastrophically mis-specified
-    #: in that setting.  When ``None`` (default) all regions are
-    #: treated as a single class — exactly the pre-existing behavior
-    #: for whole-genome / total-RNA / non-capture libraries.
-    targets_bed: Path | None = None
-
-    #: Padding (bp) applied symmetrically to every BED interval before
-    #: overlap scoring.  Capture probes produce fragment "bleed" beyond
-    #: their target edges: a 300 bp fragment captured by a probe on a
-    #: 100 bp exon overhangs the exon edges by roughly half the
-    #: fragment length.  A 150 bp default classifies those intronic /
-    #: UTR shoulders as on-target, which is what they physically are.
-    targets_pad: int = 150
+    #: Convergence tolerance for the 1-D mixture EM.
+    tol: float = 1e-4
 
 
 @dataclass(frozen=True)

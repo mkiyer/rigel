@@ -74,19 +74,22 @@ from rigel.config import (
     EMConfig,
     FragmentScoringConfig,
     PipelineConfig,
-    TranscriptGeometry,
 )
-from rigel.estimator import AbundanceEstimator
+from rigel.frag_length_model import FragmentLengthModel
 from rigel.index import TranscriptIndex
-from rigel.locus import build_loci, compute_locus_priors
-from rigel.partition import partition_and_free
+from rigel.locus import build_loci, compute_locus_priors_from_partitions
+from rigel.locus_partition import partition_and_free
 from rigel.native import detect_sj_strand_tag
-from rigel.pipeline import run_pipeline, scan_and_buffer
-from rigel.scan import FragmentRouter
+from rigel.pipeline import (
+    _run_locus_em_partitioned,
+    _score_fragments,
+    _setup_geometry_and_estimator,
+    run_pipeline,
+    scan_and_buffer,
+)
 from rigel.scoring import (
     GDNA_SPLICE_PENALTIES,
     SPLICE_UNANNOT,
-    FragmentScorer,
     overhang_alpha_to_log_penalty,
 )
 
@@ -504,7 +507,7 @@ def profile_stages(
     if profiler:
         profiler.enable()
     with Timer("scan_and_buffer") as t_scan:
-        stats, strand_models, frag_length_models, buffer, region_counts, fl_table = (
+        stats, strand_models, frag_length_models, buffer = (
             scan_and_buffer(bam_path, index, scan_cfg)
         )
     timings.scan_and_buffer = t_scan.elapsed
@@ -520,20 +523,30 @@ def profile_stages(
     rss_snaps["after_finalize"] = _snap_rss_current()
 
     # ── Stage 2b: gDNA calibration ──────────────────────────
-    calibration_obj = None
+    cal_cfg = pcfg.calibration
     with Timer("calibration") as t_cal:
-        if region_counts is not None and fl_table is not None and index.region_df is not None:
-            calibration_obj = calibrate_gdna(
-                region_counts,
-                fl_table,
-                index.region_df,
-                strand_models.strand_specificity,
-                mean_frag_len=frag_length_models.global_model.mean,
-                intergenic_fl_model=frag_length_models.intergenic,
-                fl_prior_ess=cal_cfg.fl_prior_ess,
-            )
-            # Apply calibrated gDNA FL model for scoring
-            frag_length_models.gdna_model = calibration_obj.gdna_fl_model
+        calibration_obj = calibrate_gdna(
+            buffer,
+            index,
+            frag_length_models,
+            strand_models.strand_specificity,
+            exon_fit_tolerance_bp=cal_cfg.exon_fit_tolerance_bp,
+            fl_prior_ess=cal_cfg.fl_prior_ess,
+            max_iter=cal_cfg.max_iter,
+            tol=cal_cfg.tol,
+        )
+        # Apply calibrated gDNA fragment-length model for scoring (matches
+        # ``quant_from_buffer``: copy + re-finalize with the global FL prior
+        # so RNA and gDNA share the same prior baseline).
+        cal_gdna = calibration_obj.gdna_fl_model
+        gdna_copy = FragmentLengthModel(max_size=cal_gdna.max_size)
+        gdna_copy.counts = cal_gdna.counts.copy()
+        gdna_copy._total_weight = cal_gdna._total_weight
+        gdna_copy.finalize(
+            prior_counts=frag_length_models.global_model.counts,
+            prior_ess=cal_cfg.fl_prior_ess,
+        )
+        frag_length_models.gdna_model = gdna_copy
     timings.calibration = t_cal.elapsed
     rss_snaps["after_calibration"] = _snap_rss_current()
 
@@ -542,63 +555,34 @@ def profile_stages(
     em_config = pcfg.em
     scoring = pcfg.scoring
 
-    # 3a: Compute geometry
+    # 3a: Geometry + estimator (single helper in current pipeline)
     with Timer("compute_geometry") as t_geom:
-        exonic_lengths = index.t_df["length"].values.astype(np.float64)
-        if frag_length_models.rna_model.n_observations > 0:
-            effective_lengths = (
-                frag_length_models.rna_model.compute_all_transcript_eff_lens(
-                    exonic_lengths.astype(np.int64),
-                )
-            )
-        else:
-            effective_lengths = np.maximum(exonic_lengths - 200.0 + 1.0, 1.0)
-
-        transcript_spans = (
-            index.t_df["end"].values - index.t_df["start"].values
-        ).astype(np.float64)
-
-        geometry = TranscriptGeometry(
-            effective_lengths=effective_lengths,
-            exonic_lengths=exonic_lengths,
-            t_to_g=index.t_to_g_arr,
-            transcript_spans=transcript_spans,
+        geometry, estimator = _setup_geometry_and_estimator(
+            index, frag_length_models, em_config,
         )
     timings.compute_geometry = t_geom.elapsed
+    timings.create_estimator = 0.0  # folded into _setup_geometry_and_estimator
 
-    # 3b: create estimator
-    with Timer("create_estimator") as t_est:
-        estimator = AbundanceEstimator(
-            index.num_transcripts,
-            em_config=em_config,
-            geometry=geometry,
-            is_nrna=index.t_df["is_nrna"].values,
-            is_synthetic=index.t_df["is_synthetic"].values,
-        )
-    timings.create_estimator = t_est.elapsed
-
-    # 3c: FragmentScorer
-    with Timer("fragment_scorer") as t_scorer:
-        ctx = FragmentScorer.from_models(
-            strand_models, frag_length_models, index, estimator,
-            overhang_log_penalty=scoring.overhang_log_penalty,
-            mismatch_log_penalty=scoring.mismatch_log_penalty,
-            gdna_splice_penalties=scoring.gdna_splice_penalties,
-        )
-    timings.fragment_scorer = t_scorer.elapsed
-
-    # 3d: FragmentRouter.scan (scoring + routing)
+    # 3b: Score fragments via the same helper the pipeline uses (builds
+    # FragmentScorer + FragmentRouter and consumes the buffer).
     with Timer("fragment_router_scan") as t_route:
-        builder = FragmentRouter(ctx, estimator, stats, index, strand_models)
-        em_data = builder.scan(buffer, log_every=1_000_000)
+        em_data = _score_fragments(
+            buffer,
+            index,
+            strand_models,
+            frag_length_models,
+            stats,
+            estimator,
+            scoring,
+            log_every=1_000_000,
+            annotations=None,
+        )
+    timings.fragment_scorer = 0.0  # folded into _score_fragments
     timings.fragment_router_scan = t_route.elapsed
     rss_snaps["after_router_scan"] = _snap_rss_current()
-
-    # Scanner accumulators no longer needed; buffer was consumed during scan
-    del builder, ctx
     rss_snaps["after_buffer_release"] = _snap_rss_current()
 
-    # 3f–3h: Locus-level EM
+    # 3c–3e: Locus-level EM
     n_loci = 0
     max_locus_t = 0
     max_locus_u = 0
@@ -613,23 +597,29 @@ def profile_stages(
             max_locus_t = max(len(locus.transcript_indices) for locus in loci)
             max_locus_u = max(len(locus.unit_indices) for locus in loci)
 
-            # Assign locus_id to every transcript
+            # Assign locus_id to every transcript (required by the
+            # nRNA-fraction prior cascade in the C++ EM).
             for locus in loci:
                 for t_idx in locus.transcript_indices:
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
 
-            with Timer("compute_eb_gdna_priors") as t_gdna:
-                alpha_gdna, alpha_rna = compute_locus_priors(loci, index, calibration=calibration_obj)
-
-            timings.compute_eb_gdna_priors = t_gdna.elapsed
-
+            # Partition global CSR data into per-locus tuples (must
+            # happen BEFORE the prior pass, which reads partitioned
+            # log-likelihoods).
             with Timer("partition") as t_part:
                 partitions = partition_and_free(em_data, loci)
+                del em_data
             timings.partition = t_part.elapsed
 
+            with Timer("compute_eb_gdna_priors") as t_gdna:
+                alpha_gdna, alpha_rna = compute_locus_priors_from_partitions(
+                    partitions,
+                    loci,
+                    pi_pool=float(calibration_obj.pi_pool),
+                )
+            timings.compute_eb_gdna_priors = t_gdna.elapsed
+
             with Timer("locus_em") as t_em:
-                # Use partitioned batch C++ path (same as pipeline)
-                from rigel.pipeline import _run_locus_em_partitioned
                 _run_locus_em_partitioned(
                     estimator,
                     partitions,
@@ -658,9 +648,9 @@ def profile_stages(
     rss_snaps["after_cleanup"] = _snap_rss_current()
 
     timings.quant_from_buffer = (
-        t_geom.elapsed + t_est.elapsed + t_scorer.elapsed + t_route.elapsed
-        + timings.build_loci + timings.compute_eb_gdna_priors
-        + timings.locus_em
+        timings.compute_geometry + timings.fragment_router_scan
+        + timings.build_loci + timings.partition
+        + timings.compute_eb_gdna_priors + timings.locus_em
     )
 
     rss_after = _get_rss_mb()
@@ -748,10 +738,9 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
                 ("finalize_models", s.finalize_models),
                 ("calibration", s.calibration),
                 ("compute_geometry", s.compute_geometry),
-                ("create_estimator", s.create_estimator),
-                ("fragment_scorer", s.fragment_scorer),
                 ("fragment_router_scan", s.fragment_router_scan),
                 ("build_loci", s.build_loci),
+                ("partition", s.partition),
                 ("eb_gdna_priors", s.compute_eb_gdna_priors),
                 ("locus_em", s.locus_em),
             ]

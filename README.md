@@ -43,7 +43,7 @@ that start and end at the same coordinates.
 - Shared-span nRNA architecture with one component per unique genomic span `(ref, strand, start, end)`
 - Single-pass C++ BAM scanner using htslib, with memory-bounded buffering and spill-to-disk support
 - Automatic strand-model training from annotated spliced fragments; protocol auto-detection (`R1-sense` / `R1-antisense`)
-- Aggregate-first gDNA calibration using density, strand balance (Beta-Binomial), and fragment-length signals
+- gDNA calibration via Simple Regional Deconvolution (SRD): per-fragment geometric categorization plus a 1-D fragment-length mixture, library-agnostic
 - Empirical Bayes priors for nRNA fractions and gDNA rates; calibrated per-locus gDNA initialization
 - MAP-EM and Variational Bayes EM (VBEM, default) solver modes with SQUAREM acceleration
 - Discrete fragment assignment: `fractional`, `map`, or `sample` (default) post-EM assignment modes
@@ -182,8 +182,8 @@ Rigel runs in two logical stages.
                                              │ CSR arrays
                                              ▼
                               ┌──────────────────────────────────┐
-                              │  Stage 3: gDNA Calibration       │
-                              │  Py:  calibration.py, locus.py   │
+                              │  Stage 3: SRD gDNA Calibration   │
+                              │  Py:  calibration/_simple.py     │
                               └──────────────┬───────────────────┘
                                              │ per-locus γ (gDNA fraction)
                                              ▼
@@ -213,13 +213,23 @@ probability `0.5`.
 
 ### gDNA calibration
 
-Before per-locus EM, Rigel runs an aggregate-first calibration pass over
-genomic regions. Each region is classified using three signals: fragment
-density (Gaussian mixture), strand balance (Beta-Binomial with shared κ),
-and fragment length (separate RNA and gDNA models). Any region with spliced
-fragments is forced to zero gDNA probability. The resulting per-region
-posteriors (γ) are fragment-count-weighted to the locus level and used to
-initialize the gDNA component in the EM.
+Before per-locus EM, Rigel runs Simple Regional Deconvolution (SRD).
+Every uniquely-aligned fragment is classified into one of seven geometric
+categories using only per-candidate exon-overlap counts computed by the
+C++ scanner. Fragments that geometrically *cannot* originate from mature
+mRNA — those overhanging transcript edges, falling entirely in introns,
+or mapping outside any annotated transcript — form a "gDNA pool". A
+1-D fragment-length mixture
+
+```
+pool_FL(L) ≈ π·gDNA_FL(L) + (1−π)·RNA_FL(L)
+```
+
+recovers `gDNA_FL(L)` and the library-wide gDNA fraction `π`. Per-locus
+Dirichlet priors are derived from per-fragment posteriors and feed the
+EM. No regional density model, no per-region exposure, no SS-threshold
+magic numbers. See `docs/calibration/srd_v1_implementation.md` for the
+full derivation.
 
 ### Locus-level EM
 

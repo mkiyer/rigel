@@ -307,7 +307,7 @@ def _run_and_assign(
     Accepts either the new tuple form (em_data, loci, alpha_gdna, alpha_rna, index)
     separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
     """
-    from rigel.partition import partition_and_free
+    from rigel.locus_partition import partition_and_free
 
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):

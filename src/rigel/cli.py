@@ -555,10 +555,9 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
-    # -- CalibrationConfig --
-    _ParamSpec("calibration_kappa_gdna_min", "calibration.kappa_gdna_min"),
-    _ParamSpec("targets_bed", "calibration.targets_bed", "path_or_none"),
-    _ParamSpec("targets_pad", "calibration.targets_pad"),
+    # -- CalibrationConfig (SRD v1) --
+    _ParamSpec("calibration_exon_fit_tolerance_bp", "calibration.exon_fit_tolerance_bp"),
+    _ParamSpec("calibration_fl_prior_ess", "calibration.fl_prior_ess"),
     # -- Fan-out: threads → both EM and scan --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.n_scan_threads"),
@@ -985,28 +984,6 @@ def build_parser() -> argparse.ArgumentParser:
         "'fractional' preserves EM posterior weights (traditional). "
         "'map' assigns each fragment to its highest-posterior component.",
     )
-    model_grp.add_argument(
-        "--targets",
-        dest="targets_bed",
-        default=None,
-        help="BED3+ file of hybrid-capture panel target intervals. When "
-        "provided, calibration fits the gDNA density channel "
-        "independently per on-target and off-target region class. "
-        "Strongly recommended (and often required) on hybrid-capture "
-        "RNA-seq libraries, where on-target regions receive 50-150x "
-        "more coverage than off-target; a single global density model "
-        "is mis-specified on this data. Not needed for whole-genome / "
-        "total-RNA / non-capture libraries.",
-    )
-    model_grp.add_argument(
-        "--targets-pad",
-        dest="targets_pad",
-        type=int,
-        default=None,
-        help="Symmetric padding (bp) applied to every --targets interval "
-        "before overlap scoring (default: 150). Accounts for fragment "
-        "bleed beyond probe edges.",
-    )
 
     # -- Performance ----------------------------------------------------------
     perf_grp = quant_parser.add_argument_group("performance")
@@ -1085,17 +1062,25 @@ def build_parser() -> argparse.ArgumentParser:
         "(conservative). Set to 0 to disable pruning entirely.",
     )
     adv.add_argument(
-        "--calibration-kappa-gdna-min",
-        dest="calibration_kappa_gdna_min",
+        "--calibration-exon-fit-tolerance-bp",
+        dest="calibration_exon_fit_tolerance_bp",
+        type=int,
+        default=None,
+        help="Tolerance (bp) for the exon-fit geometric test in SRD "
+        "calibration (default: 5). A unique fragment is judged "
+        "exon-compatible if its smallest intronic-gap to any annotated "
+        "transcript is ≤ this value.",
+    )
+    adv.add_argument(
+        "--calibration-fl-prior-ess",
+        dest="calibration_fl_prior_ess",
         type=float,
         default=None,
-        help="Lower bound on the gDNA-class Beta-Binomial dispersion κ_G "
-        "in the calibration strand channel (default: 3.0). The G-class "
-        "models gDNA as BetaBinomial(κ_G/2, κ_G/2); κ_G > 2 keeps the "
-        "distribution unimodal and peaked at 0.5 (correct shape for a "
-        "coin-flip-like process). Values below 2 admit a biologically-"
-        "impossible U-shape that can absorb authentic-RNA tails at low "
-        "contamination. Rarely needs tuning.",
+        help="Effective sample size for the global fragment-length "
+        "Dirichlet prior used to shrink RNA_FL and gDNA_FL toward the "
+        "global FL shape (default: 500). Larger values pull category "
+        "models toward the global shape; smaller values let category "
+        "data dominate.",
     )
     adv.add_argument(
         "--emit-locus-stats",

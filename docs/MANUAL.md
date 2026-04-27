@@ -104,8 +104,8 @@ rigel index --fasta genome.fa --gtf annotation.gtf -o index/
 | `--fasta` | required | Genome FASTA (must have `.fai` index) |
 | `--gtf` | required | Annotation GTF |
 | `-o`, `--output-dir` | required | Output directory |
-| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides per-base fractional mappability (used during gDNA calibration) and the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
-| `--no-mappability` | off | Opt out of mappability and the splice-artifact blacklist. Mutually exclusive with `--alignable-zarr`. |
+| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist applied at BAM-scan time. (Per-base mappability is no longer consumed by calibration as of v0.5.0; the SRD calibrator does not use the per-region mappability table.) Required unless `--no-mappability` is set. |
+| `--no-mappability` | off | Opt out of the splice-artifact blacklist. Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count` | `2` | Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
 | `--mappability-read-length` | `100` | Read-length bin used when querying the alignable store. |
 | `--nrna-tolerance` | `20` | Max distance (bp) for clustering transcript start/end sites into shared nRNA spans |

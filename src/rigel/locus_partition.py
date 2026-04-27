@@ -1,8 +1,12 @@
-"""rigel.partition — Array-by-array scatter from global CSR to per-locus partitions.
+"""rigel.locus_partition — Per-locus CSR scatter for the per-locus EM solver.
 
 Scatters the monolithic ``ScoredFragments`` global CSR into per-locus
 ``LocusPartition`` objects, freeing each global array immediately after
 scatter to bound peak memory.
+
+Unrelated to region/annotation partitioning. The name reflects what the
+module actually does: it builds the input arrays the per-locus EM
+requires (one ``LocusPartition`` per connected-component locus).
 """
 
 import numpy as np

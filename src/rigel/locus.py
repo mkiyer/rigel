@@ -1,24 +1,21 @@
-"""rigel.locus — Locus graph construction and gDNA prior aggregation.
+"""rigel.locus — Locus graph construction and per-locus EM priors.
 
-Handles everything between "buffer scan complete" and "per-locus EM
-loop": connected-component partitioning of transcripts linked by
-shared fragments, and Empirical-Bayes-style gDNA Dirichlet priors
-aggregated from calibration regions.
+* :func:`build_loci` — connected-component partitioning of transcripts
+  linked by shared fragments, producing per-locus :class:`Locus` records.
+* :func:`compute_locus_priors_from_partitions` — SRD v1 per-locus
+  Dirichlet prior (``α_gdna``, ``α_rna``) computed from per-fragment
+  posteriors on already-scored partitions; consumed by the C++ EM solver
+  as a persistent M-step pseudocount and warm-start ratio.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 from .native import connected_components as _cc_native
 
-from .scored_fragments import Locus, ScoredFragments
+from .scored_fragments import Locus, LocusPartition, ScoredFragments
 
 from .index import TranscriptIndex
-
-if TYPE_CHECKING:
-    from .calibration import CalibrationResult
 
 
 # ---------------------------------------------------------------------------
@@ -118,108 +115,94 @@ def build_loci(
 
 
 # ---------------------------------------------------------------------------
-# Calibration γ aggregation per locus
+# SRD v1 per-locus Dirichlet priors from per-fragment posteriors
 # ---------------------------------------------------------------------------
 
 
-def compute_locus_priors(
+# Default Dirichlet evidence strength.  Matches the v5 ``gdna_prior_c_base``
+# default; kept as a module constant rather than a config knob per the SRD
+# simplicity constraint.  Promote to ``CalibrationConfig`` only if Phase 5
+# benchmarks show sensitivity.
+_C_BASE_DEFAULT = 5.0
+
+# Floor on ``pi_pool`` so the log-prior never blows up when the calibrator
+# returns 0 (QC-fail libraries) or 1 (degenerate gDNA-only inputs).
+_PI_FLOOR = 1e-6
+
+
+def compute_locus_priors_from_partitions(
+    partitions: dict[int, LocusPartition],
     loci: list[Locus],
-    index: TranscriptIndex,
-    calibration: "CalibrationResult",
+    pi_pool: float,
     *,
-    c_base: float = 5.0,
+    c_base: float = _C_BASE_DEFAULT,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute per-locus Dirichlet priors from calibration.
+    """SRD v1 per-locus Dirichlet priors from per-fragment posteriors.
 
-    For each locus we compute a **local gDNA mixing fraction** γ_ℓ
-    representing "what fraction of fragments in this locus do we
-    expect to be gDNA?".  γ_ℓ is set to
+    For each fragment ``f`` in each per-locus partition, compute the
+    2-class gDNA posterior
 
-        γ_ℓ = Σ_i  region_e_gdna[i]   /   Σ_i  region_n_total[i]
+    .. math::
 
-    where the sum runs over all calibration regions overlapping the
-    locus's merged transcript-span intervals.
+        \\gamma_f = \\sigma\\!\\Big(
+            \\log\\tfrac{\\pi_{\\text{pool}}}{1-\\pi_{\\text{pool}}}
+            + \\log p_{\\text{gDNA}}(f)
+            - \\log\\max_t p_{\\text{RNA}}(f \\mid t)
+        \\Big)
 
-    * ``region_e_gdna[i]`` is the **expected** gDNA count in region
-      *i* computed by calibration: ``min(λ_G × mappable_bp[i],
-      n_total[i])``.  λ_G is the global gDNA fragment density (per
-      mappable base) fitted by the v4 EM and applies everywhere on
-      the genome — intergenic, intronic, exonic alike.  The
-      ``min(·, n_total)`` clip is a defensive cap that should
-      rarely fire outside very small low-coverage regions.
-    * ``region_n_total[i]`` is the **observed** total fragment count
-      in region *i* (all four strand/splice columns summed).  This
-      is *all* fragments seen in the region, not gDNA-only.
+    using the calibrated ``gdna_log_liks`` and per-candidate RNA
+    ``log_liks`` already stored in the partition.  Aggregate to a
+    per-locus mean ``\\gamma_\\ell`` and emit symmetric Dirichlet
+    pseudocounts ``\\alpha_{gDNA}[\\ell] = c_{\\text{base}}\\gamma_\\ell``,
+    ``\\alpha_{RNA}[\\ell] = c_{\\text{base}}(1 - \\gamma_\\ell)``.
 
-    So γ_ℓ = (expected gDNA frags in locus) / (observed total frags
-    in locus).  This is a density-aware local mixing prior: in an
-    RNA-rich region n_total is large so γ_ℓ is small; in a
-    pure-intergenic region n_total ≈ λ_G·mbp so γ_ℓ ≈ 1.
-
-    The priors returned to the EM solver are:
-
-        α_gDNA = γ_ℓ × c_base
-        α_RNA  = (1 − γ_ℓ) × c_base
-
-    Downstream, the C++ EM solver uses them in **two** ways:
-
-    1. As a Dirichlet pseudocount in the M-step (negligible vs the
-       per-locus fragment count for all but tiny loci).
-    2. As the **warm-start ratio** for θ: at iter 0,
-       ``θ_gDNA = (α_gDNA/α_RNA) × θ_RNA_total``.  This is what
-       actually matters — it places gDNA at the density-expected
-       share before EM iterations begin.
-
-    A mode-aware baseline (+0.5 for VBEM, 0 for MAP) is added by
-    the solver to compensate for VBEM sparsification bias.
-
-    Loci with no overlapping calibration regions fall back to the
-    genome-wide γ = Σ region_e_gdna / Σ region_n_total.
+    Parameters
+    ----------
+    partitions
+        Per-locus partitions keyed by ``locus_id``.  Each partition's
+        ``log_liks`` (per-candidate RNA log-likelihood) and
+        ``gdna_log_liks`` (per-unit gDNA log-likelihood) must already
+        reflect the calibrated ``gdna_fl_model`` / ``rna_fl_model``.
+    loci
+        Locus list defining iteration order; the returned arrays are
+        indexed positionally (``[i]`` corresponds to ``loci[i]``).
+    pi_pool
+        Library-wide gDNA prior from
+        :class:`~rigel.calibration.CalibrationResult.pi_pool`.
+    c_base
+        Dirichlet evidence strength.  Default 5.0.
 
     Returns
     -------
-    alpha_gdna : np.ndarray, shape (n_loci,), float64 ≥ 0
-    alpha_rna : np.ndarray, shape (n_loci,), float64 ≥ 0
+    alpha_gdna : np.ndarray, shape (n_loci,), float64
+    alpha_rna : np.ndarray, shape (n_loci,), float64
     """
     n_loci = len(loci)
-    alpha_gdna = np.empty(n_loci, dtype=np.float64)
-    alpha_rna = np.empty(n_loci, dtype=np.float64)
+    alpha_gdna = np.zeros(n_loci, dtype=np.float64)
+    alpha_rna = np.zeros(n_loci, dtype=np.float64)
 
-    region_e_gdna = calibration.region_e_gdna
-    region_n = calibration.region_n_total
-
-    region_cr = getattr(index, "region_cr", None)
-    if region_cr is None or region_e_gdna is None or region_n is None:
-        # Global fallback
-        total_e = float(region_e_gdna.sum()) if region_e_gdna is not None else 0.0
-        total_n = float(region_n.sum()) if region_n is not None else 0.0
-        gamma = total_e / max(total_n, 1.0)
-        for li in range(n_loci):
-            alpha_gdna[li] = gamma * c_base
-            alpha_rna[li] = (1.0 - gamma) * c_base
-        return alpha_gdna, alpha_rna
-
-    # Global fallback γ for loci with no overlapping regions
-    total_e = float(region_e_gdna.sum())
-    total_n = float(region_n.sum())
-    fallback_gamma = total_e / max(total_n, 1.0)
+    pi = float(np.clip(pi_pool, _PI_FLOOR, 1.0 - _PI_FLOOR))
+    log_prior_g = np.log(pi) - np.log1p(-pi)
 
     for li, locus in enumerate(loci):
-        e_sum = 0.0
-        n_sum = 0.0
-        has_overlap = False
-        for ref, start, end in locus.merged_intervals:
-            for _s, _e, rid in region_cr.overlap(ref, start, end):
-                e_sum += float(region_e_gdna[rid])
-                n_sum += float(region_n[rid])
-                has_overlap = True
+        part = partitions.get(locus.locus_id)
+        if part is None or part.n_units == 0:
+            continue
 
-        if has_overlap and n_sum > 0:
-            gamma = e_sum / n_sum
-        else:
-            gamma = fallback_gamma
+        offsets = np.asarray(part.offsets, dtype=np.intp)
+        log_liks = np.asarray(part.log_liks, dtype=np.float64)
+        gdna_log_liks = np.asarray(part.gdna_log_liks, dtype=np.float64)
 
-        alpha_gdna[li] = gamma * c_base
-        alpha_rna[li] = (1.0 - gamma) * c_base
+        # Per-unit max RNA log-lik via reduceat over CSR offsets.
+        max_rna = np.maximum.reduceat(log_liks, offsets[:-1])
+
+        # γ_f = σ(z); use clipped z to avoid overflow in exp().
+        z = log_prior_g + gdna_log_liks - max_rna
+        z = np.clip(z, -50.0, 50.0)
+        gamma_f = 1.0 / (1.0 + np.exp(-z))
+        gamma_l = float(gamma_f.mean())
+
+        alpha_gdna[li] = c_base * gamma_l
+        alpha_rna[li] = c_base * (1.0 - gamma_l)
 
     return alpha_gdna, alpha_rna

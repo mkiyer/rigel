@@ -1,6 +1,12 @@
 # TODO
 
-## 
+## Calibration
+
+- INTRONIC,
+- INTERGENIC
+- EXON_INCOMPATIBLE
+
+Should all be used to train gdna fl distribution
 
 
 

@@ -139,8 +139,6 @@ class TestScanAndBufferNdarrayDtypes:
             self.strand_models,
             self.frag_length_models,
             self.buffer,
-            _region_counts,
-            _fl_table,
         ) = scan_and_buffer(
             str(result.bam_path),
             self.index,
@@ -307,8 +305,6 @@ class TestMemorySafety:
             _strand_models,
             _fl_models,
             buf,
-            _region_counts,
-            _fl_table,
         ) = scan_and_buffer(
             str(result.bam_path),
             result.index,

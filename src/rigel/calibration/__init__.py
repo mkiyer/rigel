@@ -1,20 +1,20 @@
-"""Rigel gDNA calibration (v4: mappability-aware EM mixture deconvolution)."""
+"""Rigel gDNA calibration (SRD v1: Simple Regional Deconvolution).
 
-from ._annotate import annotate_capture_class
-from ._calibrate import calibrate_gdna
-from ._em import EMFit, run_em
-from ._fl_model import build_gdna_fl_model
-from ._result import CalibrationResult
-from ._stats import compute_region_stats, compute_sense_fraction
+The public surface is intentionally tiny:
+
+* :class:`CalibrationResult` — dataclass returned by ``calibrate_gdna``.
+* :func:`calibrate_gdna` — single buffer-walk orchestrator implementing
+  Pass 0 (geometric categorization) → Pass 1 (pool assembly) → Pass 2
+  (1-D RNA/gDNA mixture) → Pass 3 (Empirical-Bayes fragment-length
+  models).  See ``docs/calibration/srd_v1_implementation.md``.
+"""
+
+from ._result import CalibrationResult, GdnaFlQuality
+from ._simple import calibrate_gdna
 
 
 __all__ = [
     "CalibrationResult",
-    "EMFit",
-    "annotate_capture_class",
-    "build_gdna_fl_model",
+    "GdnaFlQuality",
     "calibrate_gdna",
-    "compute_region_stats",
-    "compute_sense_fraction",
-    "run_em",
 ]

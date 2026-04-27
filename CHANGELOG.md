@@ -5,6 +5,124 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-24
+
+### Changed (Breaking)
+
+- **Calibration replaced with Simple Regional Deconvolution (SRD v1)**
+  (breaking): the v5 regional-density calibration is gone. Calibration
+  now classifies every uniquely-aligned fragment into one of seven
+  geometric categories (SPLICED, UNSPLICED_SENSE_EXONIC,
+  UNSPLICED_ANTISENSE_EXONIC, UNSPLICED_EXONIC_AMBIG, EXON_INCOMPATIBLE,
+  INTRONIC, INTERGENIC) using only the per-candidate `exon_bp` overlap
+  computed by the C++ scanner, then fits a 1-D fragment-length mixture
+  `pool ∝ π·gDNA(L) + (1−π)·RNA(L)` over the geometric pool
+  `EXON_INCOMPATIBLE ∪ INTRONIC ∪ INTERGENIC` plus the scanner's
+  intergenic-FL accumulator. Per-locus Dirichlet priors are derived from
+  per-fragment posteriors via `compute_locus_priors_from_partitions`.
+  No regional density, no per-region exposure, no SS-threshold magic
+  numbers. See `docs/calibration/srd_v1_implementation.md` and
+  `docs/calibration/srd_v1_results.md`.
+
+- **`CalibrationResult` schema rewritten** (breaking): v5 fields
+  (`lambda_gdna`, `density_*`, region-evidence-derived statistics) are
+  removed. New schema includes `gdna_fl_quality`, `pi_pool`,
+  `n_pool`, `n_intergenic_unique`, `mixture_converged`,
+  `mixture_iterations`, `category_counts`, `exon_fit_tolerance_bp`,
+  `fl_prior_ess`. Consumers reading `summary.json` must update.
+
+- **Index format: `regions.feather` removed** (breaking): the offline
+  region partition is no longer built or stored. The `--no-mappability`
+  flag and `mappable_effective_length` per-region column are removed.
+  Existing indexes built with v0.4.x can still be loaded; the missing
+  table is tolerated. Re-indexing is **not** required.
+
+- **`TranscriptIndex.region_df` and `region_cr` removed** (breaking):
+  any external code that touched `index.region_df`, `index.region_cr`,
+  or `rigel.index.build_region_table` must be updated. SRD calibration
+  has no dependency on these tables.
+
+- **C++ scanner: `RegionAccumulator` and `region_evidence` output
+  removed** (breaking): the `bam_scanner.cpp` no longer emits
+  `region_evidence` from `scanner.scan(...)`. Downstream consumers of
+  the result dict should not reference this key.
+
+- **`rigel.mappability.uniform_region_exposures` and
+  `compute_mappable_effective_length` removed** (breaking): per-region
+  mappability machinery is gone. Per-transcript effective length is
+  unaffected — it is computed by
+  `frag_length_models.rna_model.compute_all_transcript_eff_lens`
+  during scoring.
+
+### Added
+
+- **SRD calibration modules**: `src/rigel/calibration/_simple.py`,
+  `_categorize.py`, `_fl_mixture.py`, `_fl_empirical_bayes.py`,
+  `_result.py`. Total ~400 LOC replacing ~1000 LOC of v5 calibration.
+
+- **Per-locus γ → Dirichlet prior**: `compute_locus_priors_from_partitions`
+  in `src/rigel/locus.py` derives per-locus α from per-fragment SRD
+  posteriors. Replaces the v5 density-based per-locus prior; restores
+  scenario-test pass rates.
+
+- **C++ intergenic fragment-length accumulator**: the BAM scanner
+  populates `frag_length_models.intergenic` for unique-mapper unspliced
+  fragments that resolve to zero transcript candidates. SRD folds these
+  into Pool B for a higher-statistics gDNA-FL signal.
+
+- **Tests**: `tests/test_categorize.py` (15), `tests/test_fl_mixture.py`,
+  `tests/test_fl_empirical_bayes.py`, `tests/test_calibration_simple.py`
+  (10), `tests/test_locus_priors.py`. All previously-passing tests
+  remain green; goldens regenerated.
+
+### Fixed
+
+- **`exon_fit` rule overhang bug**: the original SRD Pass 0 rule used
+  `min(intron_bp_per_candidate) ≤ tol`. `intron_bp` excludes read bases
+  that overhang transcript edges into intergenic territory, so 100+ bp
+  gDNA-splash reads were mis-classified `UNSPLICED_SENSE_EXONIC` and
+  Pool A was empty for every gDNA-rich library. New rule:
+  `(read_length − max(exon_bp_per_candidate)) ≤ tol`. Regression test
+  reproduces the production scenario at chr11:48244998 (192 bp read,
+  87 bp exonic, 105 bp overhang).
+
+- **Intergenic FL never folded into Pool B**: the C++ scanner drops
+  zero-candidate unspliced fragments before they reach the
+  FragmentBuffer (resolve_context.h:1043), so they never reached
+  Pass 0. Their FL was being captured in `frag_length_models.intergenic`
+  but not consumed. SRD now reads from this accumulator; dna80m gained
+  976 k unique gDNA fragments.
+
+- **Mixture EM iteration cap**: mid-π libraries (`gdna_fraction ∈
+  [0.2, 0.5]`) genuinely converge slowly (per-step `|Δπ| ≈ 1e-4` near
+  iter 200–300). Default `max_iter` raised 200 → 1000; cost <1 s/library.
+
+### Removed
+
+- v5 calibration modules (`_em.py`, `_stats.py`, `_fl_model.py` (old),
+  `_calibrate.py` (old), `_annotate.py`).
+- Region partition machinery: `build_region_table`,
+  `TranscriptIndex.region_df`, `region_cr`, `regions.feather`,
+  `mappable_effective_length` per-region column,
+  `rigel.mappability.uniform_region_exposures`,
+  `compute_mappable_effective_length`.
+- C++ `RegionAccumulator`, `build_region_index`, `has_region_index`,
+  `region_cr_` field, and the `region_evidence` output channel from
+  `bam_scanner.cpp`.
+- Tests: `tests/test_regions.py` (entire file), region portions of
+  `tests/test_mappability.py` and `tests/test_calibration_integration.py`.
+
+### Validation
+
+VCaP mixture benchmarks (8 libraries, 20 M cell-line RNA-Seq combined
+with 0–80 M reads of pure exome-capture DNA) all converge with
+`gdna_fl_quality=good`. Recovered gDNA fraction tracks nominal within
+±2 pp at intermediate contamination (5–50%). mRNA linear Pearson r ≥
+0.97 across the entire ladder. See `docs/calibration/srd_v1_results.md`
+for the full report.
+
+---
+
 ## [0.4.0] - 2026-04-21
 
 ### Changed (Breaking)

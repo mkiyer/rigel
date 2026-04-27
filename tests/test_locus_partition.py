@@ -3,7 +3,7 @@
 import numpy as np
 
 from rigel.scored_fragments import Locus, ScoredFragments
-from rigel.partition import partition_and_free
+from rigel.locus_partition import partition_and_free
 from rigel.native import (
     build_partition_offsets,
     scatter_candidates_f64,

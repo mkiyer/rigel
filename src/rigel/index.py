@@ -9,7 +9,6 @@ TSV mirrors) in an output directory:
     transcripts.feather        — one row per transcript with integer indices
     intervals.feather          — exon/intron/intergenic tiling of the genome
     sj.feather                 — annotated splice junctions from transcript introns
-    regions.feather            — calibration regions
     splice_blacklist.feather   — (optional) splice-artifact junctions derived
                                  from the alignable Zarr store
 
@@ -53,9 +52,6 @@ INTERVALS_TSV = "intervals.tsv"
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
 
-REGIONS_FEATHER = "regions.feather"
-REGIONS_TSV = "regions.tsv"
-
 SJ_BLACKLIST_FEATHER = "splice_blacklist.feather"
 SJ_BLACKLIST_TSV = "splice_blacklist.tsv"
 
@@ -64,7 +60,7 @@ MANIFEST_JSON = "manifest.json"
 #: On-disk index format version. Bumped whenever the schema or the
 #: meaning of any persisted column changes. Loaders should refuse
 #: indexes whose ``format_version`` they do not understand.
-INDEX_FORMAT_VERSION = 1
+INDEX_FORMAT_VERSION = 2
 
 
 def _rigel_version() -> str:
@@ -522,125 +518,17 @@ def build_genomic_intervals(
     return pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
 
 
-def build_region_table(
-    transcripts: list[Transcript],
-    ref_lengths: dict[str, int],
-) -> pd.DataFrame:
-    """Build a non-overlapping, reference-complete genomic region partition.
+def build_region_table(*args, **kwargs):  # pragma: no cover - removed in v0.5.0
+    """Removed in v0.5.0. Calibration no longer uses a regional partition.
 
-    The partition is constructed by a boundary-sweep algorithm:
-
-    1. Collect all transcript-span and exon start/end coordinates plus
-       reference boundaries (0 and ref_length) per reference.
-    2. Sort and deduplicate into a boundary array.
-    3. Form atomic half-open bins between successive boundaries.
-    4. Assign four boolean flags per bin via ``searchsorted``:
-       ``exon_pos``, ``exon_neg``, ``tx_pos``, ``tx_neg``.
-    5. Assign sequential ``region_id`` across all references.
-
-    Parameters
-    ----------
-    transcripts : list[Transcript]
-        Sorted list of transcripts (must have ``t_index`` assigned).
-    ref_lengths : dict[str, int]
-        Ordered mapping from reference name to length.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: region_id, ref, start, end, length,
-        exon_pos, exon_neg, tx_pos, tx_neg.
+    Kept as a stub solely so any external import raises a clear error
+    instead of an opaque ``AttributeError`` at module-load time.
     """
-    # Group transcripts by reference
-    ref_transcripts: dict[str, list[Transcript]] = collections.defaultdict(list)
-    for t in transcripts:
-        ref_transcripts[t.ref].append(t)
-
-    rows: list[dict] = []
-    region_id = 0
-
-    for ref, ref_length in ref_lengths.items():
-        t_list = ref_transcripts.get(ref, [])
-
-        # -- Collect boundary coordinates ------------------------------------
-        boundaries = {0, ref_length}
-        for t in t_list:
-            boundaries.add(t.start)
-            boundaries.add(t.end)
-            for e in t.exons:
-                boundaries.add(e.start)
-                boundaries.add(e.end)
-
-        bounds = np.array(sorted(boundaries), dtype=np.int64)
-        n_bins = len(bounds) - 1
-        if n_bins <= 0:
-            continue
-
-        bin_starts = bounds[:-1]
-        bin_ends = bounds[1:]
-
-        # -- Flag arrays (one per bin) ---------------------------------------
-        exon_pos = np.zeros(n_bins, dtype=bool)
-        exon_neg = np.zeros(n_bins, dtype=bool)
-        tx_pos = np.zeros(n_bins, dtype=bool)
-        tx_neg = np.zeros(n_bins, dtype=bool)
-
-        for t in t_list:
-            is_pos = int(t.strand) == STRAND_POS
-            # Transcript span -> tx flag
-            lo = int(np.searchsorted(bounds, t.start, side="left"))
-            hi = int(np.searchsorted(bounds, t.end, side="left"))
-            if is_pos:
-                tx_pos[lo:hi] = True
-            else:
-                tx_neg[lo:hi] = True
-
-            # Exons -> exon flag (also implies tx flag)
-            for e in t.exons:
-                e_lo = int(np.searchsorted(bounds, e.start, side="left"))
-                e_hi = int(np.searchsorted(bounds, e.end, side="left"))
-                if is_pos:
-                    exon_pos[e_lo:e_hi] = True
-                    tx_pos[e_lo:e_hi] = True
-                else:
-                    exon_neg[e_lo:e_hi] = True
-                    tx_neg[e_lo:e_hi] = True
-
-        # -- Merge adjacent bins with identical flags --------------------------
-        # Encode the four booleans as a single byte for fast comparison.
-        flag_key = (exon_pos.astype(np.uint8)
-                    | (exon_neg.astype(np.uint8) << 1)
-                    | (tx_pos.astype(np.uint8) << 2)
-                    | (tx_neg.astype(np.uint8) << 3))
-
-        # Detect where flag signature changes between adjacent bins.
-        changed = np.empty(n_bins, dtype=bool)
-        changed[0] = True
-        if n_bins > 1:
-            changed[1:] = flag_key[1:] != flag_key[:-1]
-        group_starts_idx = np.where(changed)[0]
-
-        for gi in range(len(group_starts_idx)):
-            first = int(group_starts_idx[gi])
-            last = int(group_starts_idx[gi + 1] - 1) if gi + 1 < len(group_starts_idx) else n_bins - 1
-            s = int(bin_starts[first])
-            e = int(bin_ends[last])
-            if s >= e:
-                continue
-            rows.append({
-                "region_id": region_id,
-                "ref": ref,
-                "start": s,
-                "end": e,
-                "length": e - s,
-                "exon_pos": bool(exon_pos[first]),
-                "exon_neg": bool(exon_neg[first]),
-                "tx_pos": bool(tx_pos[first]),
-                "tx_neg": bool(tx_neg[first]),
-            })
-            region_id += 1
-
-    return pd.DataFrame(rows)
+    raise NotImplementedError(
+        "build_region_table was removed in rigel v0.5.0; SRD calibration "
+        "operates directly on FragmentBuffer columns and does not require "
+        "a regional partition. See docs/calibration/srd_v1_implementation.md."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -707,36 +595,6 @@ class TranscriptIndex:
             return len(self.g_df)
         return int((~self.g_df["is_synthetic"].to_numpy()).sum())
 
-    # -- lazy-loaded calibration regions --------------------------------------
-
-    @functools.cached_property
-    def region_df(self) -> pd.DataFrame | None:
-        """Calibration-region partition table, loaded on first access."""
-        if self.index_dir is None:
-            return None
-        regions_path = os.path.join(self.index_dir, REGIONS_FEATHER)
-        if not os.path.exists(regions_path):
-            return None
-        df = pd.read_feather(regions_path)
-        logger.debug(f"Loaded {len(df)} calibration regions (lazy)")
-        return df
-
-    @functools.cached_property
-    def region_cr(self):
-        """cgranges index over calibration regions, built on first access."""
-        df = self.region_df
-        if df is None or len(df) == 0:
-            return None
-        _r_refs = df["ref"].values.tolist()
-        _r_starts = df["start"].values.tolist()
-        _r_ends = df["end"].values.tolist()
-        _r_ids = df["region_id"].values.tolist()
-        region_cr = _cgranges_cls()
-        for i in range(len(_r_ids)):
-            region_cr.add(_r_refs[i], _r_starts[i], _r_ends[i], _r_ids[i])
-        region_cr.index()
-        return region_cr
-
     # -- build (static) -------------------------------------------------------
 
     @staticmethod
@@ -779,16 +637,13 @@ class TranscriptIndex:
             aligner.  When provided, the splice-junction artifact
             blacklist is derived from
             ``AlignableStore.splice_blacklist()`` and persisted as
-            ``splice_blacklist.feather`` in the index, and the
-            ``mappable_effective_length`` column on ``regions.feather``
-            is populated from per-base fractional mappability.  When
-            ``None``, no blacklist is written and
-            ``mappable_effective_length`` falls back to ``length``
-            (i.e. assume the genome is fully mappable).
+            ``splice_blacklist.feather`` in the index.  When ``None``,
+            no blacklist is written.  (Per-region mappability was
+            removed in v0.5.0; SRD calibration does not consume it.)
         mappability_read_length : int
             Read-length bin to query in the alignable store when
-            computing per-region exposures.  Default 100.  Ignored when
-            ``alignable_zarr_path`` is None.
+            building the splice-artifact blacklist.  Default 100.
+            Ignored when ``alignable_zarr_path`` is None.
         splice_blacklist_min_count : int
             Minimum per-row count for a (chrom, intron, read_length)
             artifact to enter the blacklist.  Default ``2``.
@@ -886,38 +741,12 @@ class TranscriptIndex:
         if write_tsv:
             iv_df.to_csv(output_dir / INTERVALS_TSV, sep="\t", index=False)
 
-        # -- Calibration regions ----------------------------------------------
-        logger.info("[START] Building calibration regions")
-        region_df = build_region_table(annotated_transcripts, ref_lengths)
-        logger.info(f"[DONE] Found {len(region_df)} calibration regions")
-
-        # -- Per-region mappable effective length -----------------------------
-        from .mappability import (
-            compute_region_exposures,
-            uniform_region_exposures,
-        )
-
+        # -- Calibration regions (REMOVED in v0.5.0) --------------------------
+        # The per-region partition table and ``mappable_effective_length``
+        # column were used by the legacy v5 calibrator. SRD v1 operates
+        # directly on the FragmentBuffer and has no use for them.
+        # ``regions.feather`` is no longer written.
         mappability_provenance = None
-        if alignable_zarr_path is not None:
-            logger.info(
-                f"[START] Computing mappable_effective_length "
-                f"(read_length={mappability_read_length})"
-            )
-            exposures, mappability_provenance = compute_region_exposures(
-                alignable_zarr_path,
-                region_df,
-                read_length=mappability_read_length,
-            )
-        else:
-            logger.info(
-                "[CAL] --no-mappability: setting mappable_effective_length=length"
-            )
-            exposures = uniform_region_exposures(region_df)
-        region_df["mappable_effective_length"] = exposures.astype(np.float32)
-
-        region_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
-        if write_tsv:
-            region_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
 
         # -- Splice-junction artifact blacklist (from alignable Zarr) -------
         if alignable_zarr_path is not None:
