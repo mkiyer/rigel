@@ -2,7 +2,7 @@
 rigel.frag_length_model — Fragment length distribution model.
 
 Learns the fragment length distribution from fragment-to-transcript
-mappings produced by Pass 1.  Fragments where all candidate
+mappings produced by the BAM-scan stage.  Fragments where all candidate
 transcripts yield the *same* fragment length contribute to training;
 ambiguous fragments are deferred to Bayesian quantification where the
 learned distribution provides a likelihood term.

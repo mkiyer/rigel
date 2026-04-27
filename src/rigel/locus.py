@@ -119,10 +119,10 @@ def build_loci(
 # ---------------------------------------------------------------------------
 
 
-# Default Dirichlet evidence strength.  Matches the v5 ``gdna_prior_c_base``
-# default; kept as a module constant rather than a config knob per the SRD
-# simplicity constraint.  Promote to ``CalibrationConfig`` only if Phase 5
-# benchmarks show sensitivity.
+# Default Dirichlet evidence strength for the per-locus (gDNA, RNA)
+# prior derived from per-fragment SRD posteriors.  Empirically tuned;
+# kept as a module constant rather than a config knob per the SRD
+# simplicity constraint.
 _C_BASE_DEFAULT = 5.0
 
 # Floor on ``pi_pool`` so the log-prior never blows up when the calibrator

@@ -1,32 +1,92 @@
 # TODO
 
+## Implicit splicing
+
+- Not handled yet
+
+
 ## Calibration
 
-- INTRONIC,
-- INTERGENIC
-- EXON_INCOMPATIBLE
+We are going to need to redesign the BAM scanning phase to correctly support our new calibration module
 
-Should all be used to train gdna fl distribution
+The main steps:
 
+1) The first step towards estimating the gDNA FL is obtaining a reliable/robust pool of unspliced fragments.
+
+2) The second step is to categorized unspliced fragments by exon and transcript overlap.
+
+3) The third step is to consolidate fragments likely to be gDNA candidates and estimate the gDNA FL distribution
+
+
+### BAM scanning phase should gather calibration data correctly
+
+Each fragment has multiple aligned blocks. Each aligned block is a contiguous genomic region. The full genomic footprint of a fragment is the entire span of its aligned blocks.
+
+We wish to ensure that the BAM scanning phase properly identifies "spliced" and "unspliced" fragments.
+
+Spliced fragments may include:
+- EXPLICIT: Fragments where reads have CIGAR "N" (skip) where the skip matches an annotated splice junction and passes the splice junction "blacklist" filter
+- IMPLICIT: Fragments without an explicit CIGAR (skip) that have an unsequenced "gap" between aligned blocks (fragment length must be greater than 2 x read length, leaving an unsequenced gap in the fragment), where read1 and read2 match exons of the same transcript and the unsequenced "gap" contains an intron (splice) of that transcript. Presumably the splice junction was not explicitly sequenced but is present in the unsequenced gap.
+
+Spliced fragments should NOT compete for genomic DNA.
+
+Unspliced fragments include:
+- TRUE: Fragments without CIGAR "N" (skip) AND (aligned blocks either overlap (no unsequenced gap) OR (aligned blocks span a contiguous genomic region without an "intron" in the unsequenced gap). The genomic span should be a single contiguous genomic region
+
+- ARTIFACT: Fragment with CIGAR N Skip that is "blacklisted" because it is found in the splicing blacklist (the blacklist was created by aligning contiguous regions of DNA using a spliced aligner resulting in false positive spliced alignments). The aligned blocks from an artifact fragment should not be combined into a single genomic footprint. These fragments can be partitioned into distinct "blocks" for calibration purposes. One fragment -> multiple "blocks" for calibration where each block is an unspliced contiguous genomic region. It may be best to "hold out" these artifact fragments or consider them ambiguous for the first version of the calibration tool.
+
+During the BAM scanning phase, fragments should be correctly classified and feed into the calibration step.
+
+### Unspliced fragment pipeline
+
+We consider unspliced, UNIQUELY ALIGNED fragments from the BAM scanning phase as initial candidates for gDNA.
+
+Unspliced fragments should have defined, reliable contiguous genomic region span (ref, start, end) with a defined fragment length.
+
+We then categorize unspliced fragments by their overlap with index features. Specifically overlap with transcripts and exons.
+
+At this point each unspliced fragment has a defined fragment length!
+
+The data need for categorization are:
+- exon_overlap_pos: number of bases of fragment that overlaps exon from transcript on the positive strand
+- exon_overlap_neg: number of bases of fragment that overlaps exon from transcript on the negative strand
+- transcript_overlap_pos: number of bases of fragment that overlaps transcript on the positive strand
+- transcript_overlap_neg: number of bases of fragment that overlaps transcript on the negative strand
+
+Once we have this data, we can assign categories:
+
+- INTERGENIC: ZERO overlap with transcripts (and by definition exons) on either strand
+- INTRONIC: (ZERO overlap with exons on either strand) AND (non-zero overlap with introns).
+- EXON_CONTAINED: ENTIRE fragment overlaps exons (fully contained within exons)
+- EXON_INCOMPATIBLE: fragment partially but does not completely overlap exons.
+
+We also assign each fragment a merged 'strand':
+- none (undefined strand)
+- pos (positive strand)
+- neg (negative strand)
+- ambiguous (overlaps transcripts on both strands)
+
+The previous "region partition" github code (now removed) created a genome-wide interval index to allow rapid interval overlap query and efficient computation of exon/transcript overlap in base pairs. This is removed. We need to consider the most efficient solution to compute this in the current framework.
+
+
+### Defined pool for gDNA FL estimation
+
+The above steps (unspliced fragment pool, unspliced fragment categorization) are needed to find a pool of unspliced fragments that are compatible with gDNA.
+
+We then build the initial gDNA FL model using the following categories:
+1) INTERGENIC
+2) INTRONIC
+3) EXON_INCOMPATIBLE: here is where a "tolerance" in bp comes into play. If "overhanging" portion that does not overlap exon is within a tolerance (default 3bp) we will not include it in the gDNA FL model (at a small number of bp overhang, the fragment may simply be misaligned)
+
+We then fit the gDNA FL model.
+
+There is a 1D mixture EM step to refine the gDNA FL model using the RNA FL model and gDNA FL model.
 
 
 ## Summary (output)
 
 - Put "quantification" section towards the top with high-level results
 - Fragment length distributions should be the last thing
-
-
-## Calibration 
-
-## Calibration: beta binomial versus binomial
-
-- Current implementation is Binomial with strand floor and various other fixes
-- Prior implementation used beta binomial which required estimating parameter kappa which was not straightforward and required limits
-
-
-## Calibration: estimate_kappa_sym
-
-This was computed at time where we were trying to constrain gDNA to be "symmetric" by strand so that gDNA strand assignments needed to approach 50/50 with some variance (binomial with overdispersion) and this was trying to assess the variance/overdispersion. We may not need this at all anymore.
 
 
 

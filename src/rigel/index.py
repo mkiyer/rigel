@@ -741,13 +741,6 @@ class TranscriptIndex:
         if write_tsv:
             iv_df.to_csv(output_dir / INTERVALS_TSV, sep="\t", index=False)
 
-        # -- Calibration regions (REMOVED in v0.5.0) --------------------------
-        # The per-region partition table and ``mappable_effective_length``
-        # column were used by the legacy v5 calibrator. SRD v1 operates
-        # directly on the FragmentBuffer and has no use for them.
-        # ``regions.feather`` is no longer written.
-        mappability_provenance = None
-
         # -- Splice-junction artifact blacklist (from alignable Zarr) -------
         if alignable_zarr_path is not None:
             from .splice_blacklist import load_splice_blacklist_from_zarr
@@ -761,16 +754,14 @@ class TranscriptIndex:
                 bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
 
         # -- Manifest --------------------------------------------------------
+        # Per-region calibration tables (regions.feather, MappabilityProvenance)
+        # were removed in v0.5.0 with the SRD v1 calibrator overhaul. The
+        # "mappability" key is preserved (always null) for manifest
+        # compatibility with external consumers.
         manifest = {
             "format_version": INDEX_FORMAT_VERSION,
             "rigel_version": _rigel_version(),
-            "mappability": (
-                None if mappability_provenance is None
-                else {
-                    **mappability_provenance.to_dict(),
-                    "splice_blacklist_min_count": int(splice_blacklist_min_count),
-                }
-            ),
+            "mappability": None,
         }
         with open(output_dir / MANIFEST_JSON, "w") as fh:
             json.dump(manifest, fh, indent=2, sort_keys=True)

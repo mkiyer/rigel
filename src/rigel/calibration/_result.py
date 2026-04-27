@@ -1,7 +1,9 @@
 """SRD v1 :class:`CalibrationResult` — the public calibration output.
 
-Diagnostics-only beyond the three FL models. No regional priors,
-no per-locus warm-starts, no Beta-Binomial / LogNormal moments.
+Carries the three Empirical-Bayes-shrunk fragment-length models
+(``rna_fl_model``, ``gdna_fl_model``, ``global_fl_model``), the
+library-wide gDNA pool fraction ``pi_pool``, and per-category
+diagnostic counts.
 """
 
 from __future__ import annotations
@@ -48,6 +50,13 @@ class CalibrationResult:
     ``calibration._simple.calibrate_gdna``.
     """
 
+    n_pool_dropped_out_of_range: int
+    """Pool fragments dropped because ``frag_length`` was outside
+    ``[0, max_size]``. With SRD v2 Phase 1 sourcing length from
+    ``genomic_footprint`` (always >= 0), this counts only fragments
+    longer than ``max_size``. Expected to be <0.1% of the pool.
+    """
+
     # ---- Config echo (for reproducibility) ----
     exon_fit_tolerance_bp: int
     fl_prior_ess: float
@@ -64,6 +73,7 @@ class CalibrationResult:
             "n_multimap_excluded": int(self.n_multimap_excluded),
             "n_pool": int(self.n_pool),
             "n_intergenic_unique": int(self.n_intergenic_unique),
+            "n_pool_dropped_out_of_range": int(self.n_pool_dropped_out_of_range),
             "pi_pool": float(self.pi_pool),
             "mixture_converged": bool(self.mixture_converged),
             "mixture_iterations": int(self.mixture_iterations),

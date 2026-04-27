@@ -127,13 +127,13 @@ def categorize_chunk(
     t_indices = chunk.t_indices
     intron_bp = chunk.intron_bp
     exon_bp = chunk.exon_bp
-    cand_frag_lengths = chunk.frag_lengths
 
     n_cands = np.diff(t_offsets).astype(np.intp)
     has_cands = n_cands > 0
 
-    # First-candidate index per fragment (-1 if none). Used to derive
-    # ref_id and a representative fragment length.
+    # First-candidate index per fragment (-1 if none). Used only to derive
+    # ref_id; fragment length now comes from genomic_footprint (SRD v2
+    # Phase 1 — see docs/calibration/srd_v2_final_plan.md §Pillar 1).
     first_cand_idx = np.where(has_cands, t_offsets[:-1], -1)
 
     valid_first = first_cand_idx >= 0
@@ -141,12 +141,17 @@ def categorize_chunk(
         idx = first_cand_idx[valid_first]
         first_t = t_indices[idx]
         ref_id[valid_first] = t_to_ref_id[first_t]
-        frag_length[valid_first] = cand_frag_lengths[idx]
-    # For fragments with no transcript candidates, fall back to read_length
-    # so Pool B has a sensible length for histogram construction.
-    no_cands = ~valid_first
-    if no_cands.any():
-        frag_length[no_cands] = chunk.read_length[no_cands].astype(np.int32)
+
+    # SRD v2 Phase 1: fragment length for calibration is the contiguous
+    # genomic span (`genomic_footprint`), not the per-candidate
+    # transcript-projected length. The per-candidate `frag_lengths` array
+    # contains -1 sentinels (~33% of EXON_INCOMPATIBLE in pure-RNA libraries)
+    # for fragments whose transcript projection collapses, which when
+    # clipped to [0, max_size] dumped them all into bin 0 and produced a
+    # physically impossible gDNA_FL with mode=0.
+    # `genomic_footprint` is universally populated and >= 0 for every
+    # resolved fragment (see docs/calibration/srd_v2_audit.md §4).
+    frag_length = chunk.genomic_footprint.astype(np.int32, copy=False)
 
     # SPLICED — anything with N in the CIGAR.
     spliced_mask = (splice_type == SpliceType.SPLICED_ANNOT) | (

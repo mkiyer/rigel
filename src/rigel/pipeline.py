@@ -569,7 +569,11 @@ def _run_locus_em_partitioned(
     # Phase B: Normal loci (one batched call)
     normal_loci = [loc for loc in loci if loc.locus_id not in mega_ids]
     if normal_loci:
-        normal_parts = [partitions[loc.locus_id] for loc in normal_loci]
+        # Pop partitions out of the dict so the only references during
+        # the batched C++ call live in ``normal_parts``.  After the call
+        # completes and annotations are written we drop ``normal_parts``
+        # to release per-locus arrays before EM downstream phases run.
+        normal_parts = [partitions.pop(loc.locus_id) for loc in normal_loci]
         normal_ag = np.array([alpha_gdna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
         normal_ar = np.array([alpha_rna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
         em_result = _call_batch_em(
@@ -599,6 +603,8 @@ def _run_locus_em_partitioned(
                     alpha_r=normal_ar[i],
                 )
             )
+        # Release per-locus partition arrays before downstream phases.
+        del normal_parts, em_result
 
     del partitions
 

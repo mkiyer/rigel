@@ -125,6 +125,7 @@ def test_unspliced_sense_exonic(tx_strand_arr, tx_ref_arr):
             "frag_lengths": [150],
             "exon_bp": [150],
             "intron_bp": [0],  # fits inside an exon
+            "genomic_footprint": 150,
         },
     ])
     out = categorize_chunk(chunk, tx_strand_arr, tx_ref_arr)
@@ -250,11 +251,12 @@ def test_intergenic_when_no_candidates(tx_strand_arr, tx_ref_arr):
             "exon_bp": [],
             "intron_bp": [],
             "read_length": 175,
+            "genomic_footprint": 175,
         },
     ])
     out = categorize_chunk(chunk, tx_strand_arr, tx_ref_arr)
     assert out.category[0] == int(FragmentCategory.INTERGENIC)
-    assert out.frag_length[0] == 175  # falls back to read_length
+    assert out.frag_length[0] == 175  # frag_length sourced from genomic_footprint
     assert out.ref_id[0] == -1
 
 

@@ -162,8 +162,8 @@ class CalibrationConfig:
     histogram.  The resulting :class:`CalibrationResult` exposes three
     Empirical-Bayes-shrunk fragment-length models (``rna_fl_model``,
     ``gdna_fl_model``, ``global_fl_model``) used for downstream
-    fragment scoring.  No regional priors, no per-locus warm-starts,
-    no Beta-Binomial / LogNormal moments.
+    fragment scoring, plus a library-wide gDNA pool fraction
+    ``pi_pool`` consumed by the per-locus Dirichlet prior.
     """
 
     #: Tolerance (bp) for the exon-fit geometric test.  An aligned

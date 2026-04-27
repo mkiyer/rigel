@@ -150,22 +150,23 @@ class _FinalizedChunk:
         """Build a chunk from the raw dict returned by C++ FragmentAccumulator.
 
         Accepts both legacy bytes (from ``finalize()``) and zero-copy
-        numpy arrays (from ``finalize_zero_copy()``).  When the value
-        is already an ndarray the data is used directly; ``t_offsets``
-        is stored as int32 (native from C++) and ``frag_id`` is kept
-        as int64.
+        numpy arrays (from ``finalize_zero_copy()``).  In the zero-copy
+        path — the only one used in production — the C++ accumulator
+        already produces arrays with the exact target dtypes, so this
+        constructor is allocation-free for in-memory chunks.
         """
 
         def _arr(val, dtype, src_dtype=None):
             """Convert bytes or ndarray to a NumPy array of *dtype*.
 
-            *src_dtype* overrides the dtype used when interpreting raw
-            bytes (needed when the C++ source type differs from the
-            desired Python storage type, e.g. int64 → int32).
+            Fast path: zero-copy ndarray with matching dtype is
+            returned unchanged (the C++ side guarantees C-contiguity).
+            Slow path: legacy bytes are wrapped via ``np.frombuffer``
+            and copied, then optionally cast.
             """
             if isinstance(val, np.ndarray):
                 if val.dtype == dtype:
-                    return np.ascontiguousarray(val)
+                    return val
                 return val.astype(dtype, copy=False)
             # Legacy path: raw bytes from finalize()
             read_dtype = src_dtype if src_dtype is not None else dtype
@@ -254,25 +255,26 @@ class _FinalizedChunk:
     def to_scoring_arrays(self) -> tuple:
         """Return the contiguous array tuple expected by ``StreamingScorer.score_chunk``.
 
-        ``t_offsets`` is int32 (native) and ``frag_id`` is int64 (native),
-        matching the C++ scoring kernel types directly without copying.
-        Computes the derived ``fragment_classes`` column.
-        All returned arrays are C-contiguous.
+        ``from_raw`` and ``_load_chunk`` both guarantee that every
+        stored array is C-contiguous with the exact dtype the C++
+        scoring kernel expects, so this method is a zero-copy view
+        constructor (apart from the lazy ``fragment_classes`` compute
+        on first access).
         """
         return (
-            np.ascontiguousarray(self.t_offsets, dtype=np.int32),
-            np.ascontiguousarray(self.t_indices, dtype=np.int32),
-            np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
-            np.ascontiguousarray(self.exon_bp, dtype=np.int32),
-            np.ascontiguousarray(self.intron_bp, dtype=np.int32),
-            np.ascontiguousarray(self.splice_type, dtype=np.uint8),
-            np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
-            np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
-            np.ascontiguousarray(self.frag_id, dtype=np.int64),
-            np.ascontiguousarray(self.read_length, dtype=np.uint32),
-            np.ascontiguousarray(self.genomic_footprint, dtype=np.int32),
-            np.ascontiguousarray(self.genomic_start, dtype=np.int32),
-            np.ascontiguousarray(self.nm, dtype=np.uint16),
+            self.t_offsets,
+            self.t_indices,
+            self.frag_lengths,
+            self.exon_bp,
+            self.intron_bp,
+            self.splice_type,
+            self.exon_strand,
+            self.fragment_classes,
+            self.frag_id,
+            self.read_length,
+            self.genomic_footprint,
+            self.genomic_start,
+            self.nm,
         )
 
     def __len__(self) -> int:

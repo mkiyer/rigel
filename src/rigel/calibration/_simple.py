@@ -1,11 +1,7 @@
-"""SRD v1 calibration orchestrator (the new ``calibrate_gdna``).
+"""SRD v1 calibration orchestrator (``calibrate_gdna``).
 
 Single buffer walk → categorize → pool assembly → 1-D mixture fit →
-EB-smoothed FL models. Library-agnostic, no regional priors, no
-density modelling, no overlap clusters.
-
-This is the Phase 2 staging entry point. It runs parallel to v5's
-``_calibrate.calibrate_gdna``; Phase 3 wires it into ``pipeline.py``.
+EB-smoothed FL models. Library-agnostic.
 """
 
 from __future__ import annotations
@@ -130,8 +126,18 @@ def calibrate_gdna(
     )
     pool_lens = frag_length[pool_mask]
     n_pool_categorized = int(pool_mask.sum())
+
+    # SRD v2 Phase 1: drop out-of-range fragments instead of silently
+    # clipping into bin 0 / bin max_size. The previous `np.clip(pool_lens,
+    # 0, max_size)` mapped per-candidate `-1` sentinels into bin 0 and
+    # saturated long fragments into bin `max_size`, producing a
+    # non-physical gDNA_FL with mode=0. With `frag_length` now sourced
+    # from `genomic_footprint` (always >= 0), the only out-of-range case
+    # is fragments longer than `max_size` (typically <0.1% of pool).
+    in_range = (pool_lens >= 0) & (pool_lens <= max_size)
+    n_pool_dropped_out_of_range = int(pool_lens.size - in_range.sum())
     pool_hist = np.bincount(
-        np.clip(pool_lens, 0, max_size).astype(np.intp),
+        pool_lens[in_range].astype(np.intp),
         minlength=n_bins,
     ).astype(np.float64)
 
@@ -203,7 +209,8 @@ def calibrate_gdna(
 
     logger.info(
         "[CAL-SRD] quality=%s SS=%.3f n_pool=%d (categorized=%d + intergenic=%d) "
-        "pi=%.4f conv=%s n_iter=%d categories=%s n_multimap_excluded=%d",
+        "pi=%.4f conv=%s n_iter=%d categories=%s n_multimap_excluded=%d "
+        "n_pool_dropped_out_of_range=%d",
         quality,
         float(strand_specificity),
         n_pool,
@@ -214,6 +221,7 @@ def calibrate_gdna(
         mixture_iterations,
         cat_counts.tolist(),
         n_multimap_excluded,
+        n_pool_dropped_out_of_range,
     )
 
     return CalibrationResult(
@@ -229,6 +237,7 @@ def calibrate_gdna(
         mixture_converged=mixture_converged,
         mixture_iterations=mixture_iterations,
         n_intergenic_unique=n_intergenic_unique,
+        n_pool_dropped_out_of_range=n_pool_dropped_out_of_range,
         exon_fit_tolerance_bp=int(exon_fit_tolerance_bp),
         fl_prior_ess=float(fl_prior_ess),
         extra=extra,
@@ -289,6 +298,7 @@ def _fallback_result(
         mixture_converged=False,
         mixture_iterations=0,
         n_intergenic_unique=0,
+        n_pool_dropped_out_of_range=0,
         exon_fit_tolerance_bp=int(exon_fit_tolerance_bp),
         fl_prior_ess=float(fl_prior_ess),
         extra=dict(extra),
