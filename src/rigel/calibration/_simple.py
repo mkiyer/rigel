@@ -13,10 +13,12 @@ import numpy as np
 from ..buffer import FragmentBuffer
 from ..frag_length_model import FragmentLengthModels
 from ..index import TranscriptIndex
+from ..splice import SPLICE_UNSPLICED
 from ._categorize import (
     FragmentCategory,
     N_CATEGORIES,
-    build_t_to_ref_id,
+    N_STRAND_LABELS,
+    StrandLabel,
     categorize_chunk,
 )
 from ._fl_empirical_bayes import build_gdna_fl, build_global_fl, build_rna_fl
@@ -68,30 +70,39 @@ def calibrate_gdna(
         to the global FL prior; no separate ``min_pool_size`` gate is
         needed.
     """
-    t_to_strand = np.asarray(index.t_to_strand_arr, dtype=np.int8)
-    t_to_ref_id = build_t_to_ref_id(index.t_df)
+    del index  # unused after Phase 3 schema change (kept in signature for API stability)
     max_size = int(frag_length_models.max_size)
     n_bins = max_size + 1
 
-    # ---- Pass 0: walk chunks, apply unique-map filter, categorize -------
+    # ---- Pass 0: walk chunks, categorize geometrically ------------------
+    # Categorization itself filters to (num_hits == 1) AND (splice_type ==
+    # UNSPLICED).  We separately tally multimappers and spliced fragments
+    # for diagnostics.
     cat_chunks: list[np.ndarray] = []
+    strand_chunks: list[np.ndarray] = []
     len_chunks: list[np.ndarray] = []
     n_multimap_excluded = 0
+    n_spliced = 0
 
     for chunk in buffer.iter_chunks():
         unique_mask = chunk.num_hits == 1
         n_multimap_excluded += int((~unique_mask).sum())
+        # Count spliced unique-mapper fragments for the QC warning.
+        n_spliced += int(
+            (unique_mask & (chunk.splice_type != np.uint8(SPLICE_UNSPLICED))).sum()
+        )
         if not unique_mask.any():
             continue
 
         cc = categorize_chunk(
             chunk,
-            t_to_strand=t_to_strand,
-            t_to_ref_id=t_to_ref_id,
             exon_fit_tolerance_bp=exon_fit_tolerance_bp,
         )
-        cat_chunks.append(cc.category[unique_mask])
-        len_chunks.append(cc.frag_length[unique_mask])
+        if not cc.keep.any():
+            continue
+        cat_chunks.append(cc.category[cc.keep])
+        strand_chunks.append(cc.strand[cc.keep])
+        len_chunks.append(cc.frag_length[cc.keep])
 
     global_counts = np.asarray(frag_length_models.global_model.counts, dtype=np.float64)
     spliced_counts = np.asarray(frag_length_models.rna_model.counts, dtype=np.float64)
@@ -110,19 +121,30 @@ def calibrate_gdna(
         )
 
     category = np.concatenate(cat_chunks)
+    strand = np.concatenate(strand_chunks)
     frag_length = np.concatenate(len_chunks)
-    cat_counts = np.bincount(category, minlength=N_CATEGORIES).astype(np.int64)
+
+    # 2-D (category, strand) tally; categorize_chunk only labels
+    # unique-mapper UNSPLICED fragments, so this matches the pre-filter.
+    flat = (
+        category.astype(np.intp) * N_STRAND_LABELS + strand.astype(np.intp)
+    )
+    cat_counts = np.bincount(
+        flat, minlength=N_CATEGORIES * N_STRAND_LABELS
+    ).astype(np.int64).reshape((N_CATEGORIES, N_STRAND_LABELS))
 
     # ---- Pass 1: pool assembly -----------------------------------------
-    # Pool = EXON_INCOMPATIBLE ∪ INTRONIC ∪ INTERGENIC.
-    # Library-agnostic; no SS dependence. UNSPLICED_ANTISENSE_EXONIC is
-    # tracked as a diagnostic (n_antisense_exonic) but excluded from the
-    # pool: at imperfect SS it is dominated by RNA from highly-expressed
-    # loci and would dilute the gDNA_FL signal we are trying to recover.
+    # Pool = INTERGENIC ∪ INTRONIC ∪ EXON_INCOMPATIBLE.
+    # Library-agnostic; no SS dependence.  EXON_CONTAINED is treated as
+    # mature mRNA and held out -- at imperfect SS it is dominated by RNA
+    # from highly-expressed loci and would dilute the gDNA_FL signal we
+    # are trying to recover.  SRD v2 intentionally does not subdivide on
+    # the antisense sub-label here; that is the v2.1 follow-up
+    # (SS-gated antisense-exonic pool inclusion).
     pool_mask = (
-        (category == int(FragmentCategory.EXON_INCOMPATIBLE))
+        (category == int(FragmentCategory.INTERGENIC))
         | (category == int(FragmentCategory.INTRONIC))
-        | (category == int(FragmentCategory.INTERGENIC))
+        | (category == int(FragmentCategory.EXON_INCOMPATIBLE))
     )
     pool_lens = frag_length[pool_mask]
     n_pool_categorized = int(pool_mask.sum())
@@ -141,28 +163,18 @@ def calibrate_gdna(
         minlength=n_bins,
     ).astype(np.float64)
 
-    # Pool B contribution from the C++ scanner's intergenic FL accumulator.
-    # Unique-mapper unspliced fragments that resolve to ZERO transcript
-    # candidates are dropped before reaching the buffer (resolve_context.h:1043),
-    # so they never reach `categorize_chunk`. The scanner sets them aside
-    # in `frag_length_models.intergenic` (see bam_scanner.cpp:1340-1344 and
-    # pipeline._replay_fraglen_observations). They are pure-by-construction
-    # gDNA/extra-genic candidates and belong in Pool B.
-    intergenic_counts = np.zeros(n_bins, dtype=np.float64)
-    n_intergenic_unique = 0
-    intergenic_model = getattr(frag_length_models, "intergenic", None)
-    if intergenic_model is not None:
-        ic = np.asarray(intergenic_model.counts, dtype=np.float64)
-        if ic.size != n_bins:
-            adj = np.zeros(n_bins, dtype=np.float64)
-            m = min(ic.size, n_bins)
-            adj[:m] = ic[:m]
-            ic = adj
-        intergenic_counts = ic
-        n_intergenic_unique = int(ic.sum())
-        pool_hist = pool_hist + ic
+    # SRD v2: zero-candidate (intergenic) fragments flow through the
+    # buffer as INTERGENIC and are already counted in `pool_lens`.
 
-    n_pool = n_pool_categorized + n_intergenic_unique
+    n_pool = n_pool_categorized
+
+    # ---- Diagnostic: intronic strand asymmetry (nRNA pollution surface)
+    n_pool_intronic_strand_pos = int(
+        cat_counts[int(FragmentCategory.INTRONIC), int(StrandLabel.POS)]
+    )
+    n_pool_intronic_strand_neg = int(
+        cat_counts[int(FragmentCategory.INTRONIC), int(StrandLabel.NEG)]
+    )
 
     # ---- Pass 2: 1-D mixture EM (always run; EB handles small pools) ---
     rna_probs = _spliced_probs(spliced_counts, global_counts, n_bins)
@@ -188,7 +200,6 @@ def calibrate_gdna(
         quality = "good"
 
     # QC-fail: near-zero spliced fragments → loud warning.
-    n_spliced = int(cat_counts[int(FragmentCategory.SPLICED)])
     if n_spliced < 100:
         extra["warning_low_spliced"] = (
             f"only {n_spliced} spliced fragments; RNA_FL collapses to global FL"
@@ -208,20 +219,21 @@ def calibrate_gdna(
     )
 
     logger.info(
-        "[CAL-SRD] quality=%s SS=%.3f n_pool=%d (categorized=%d + intergenic=%d) "
+        "[CAL-SRD] quality=%s SS=%.3f n_pool=%d "
         "pi=%.4f conv=%s n_iter=%d categories=%s n_multimap_excluded=%d "
-        "n_pool_dropped_out_of_range=%d",
+        "n_spliced=%d n_pool_dropped_out_of_range=%d intronic_strand=(+%d,-%d)",
         quality,
         float(strand_specificity),
         n_pool,
-        n_pool_categorized,
-        n_intergenic_unique,
         pi,
         mixture_converged,
         mixture_iterations,
         cat_counts.tolist(),
         n_multimap_excluded,
+        n_spliced,
         n_pool_dropped_out_of_range,
+        n_pool_intronic_strand_pos,
+        n_pool_intronic_strand_neg,
     )
 
     return CalibrationResult(
@@ -232,11 +244,13 @@ def calibrate_gdna(
         strand_specificity=float(strand_specificity),
         category_counts=cat_counts,
         n_multimap_excluded=n_multimap_excluded,
+        n_spliced=n_spliced,
         n_pool=n_pool,
         pi_pool=pi,
         mixture_converged=mixture_converged,
         mixture_iterations=mixture_iterations,
-        n_intergenic_unique=n_intergenic_unique,
+        n_pool_intronic_strand_pos=n_pool_intronic_strand_pos,
+        n_pool_intronic_strand_neg=n_pool_intronic_strand_neg,
         n_pool_dropped_out_of_range=n_pool_dropped_out_of_range,
         exon_fit_tolerance_bp=int(exon_fit_tolerance_bp),
         fl_prior_ess=float(fl_prior_ess),
@@ -291,13 +305,15 @@ def _fallback_result(
         global_fl_model=global_fl,
         gdna_fl_quality="fallback",
         strand_specificity=float(strand_specificity),
-        category_counts=np.zeros(N_CATEGORIES, dtype=np.int64),
+        category_counts=np.zeros((N_CATEGORIES, N_STRAND_LABELS), dtype=np.int64),
         n_multimap_excluded=int(n_multimap_excluded),
+        n_spliced=0,
         n_pool=0,
         pi_pool=0.0,
         mixture_converged=False,
         mixture_iterations=0,
-        n_intergenic_unique=0,
+        n_pool_intronic_strand_pos=0,
+        n_pool_intronic_strand_neg=0,
         n_pool_dropped_out_of_range=0,
         exon_fit_tolerance_bp=int(exon_fit_tolerance_bp),
         fl_prior_ess=float(fl_prior_ess),

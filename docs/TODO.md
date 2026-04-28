@@ -5,6 +5,13 @@
 - Not handled yet
 
 
+## Chimeric fragments
+
+- How are these flowing through buffer?
+- Phase 6
+
+
+
 ## Calibration
 
 We are going to need to redesign the BAM scanning phase to correctly support our new calibration module

@@ -665,9 +665,19 @@ class TestResolvedFragment:
         assert r.splice_type == int(SpliceType.SPLICED_ANNOT)
 
     def test_intergenic_returns_none(self, mini_index):
-        """Fragment in intergenic region -> None."""
+        """Fragment in intergenic region -> resolves with empty t_inds.
+
+        SRD v2: zero-candidate fragments are no longer dropped at the
+        resolver boundary; they flow through with empty ``t_inds`` so
+        SRD calibration can categorize them as INTERGENIC.
+        """
         r = _resolve(mini_index, [_exon("chr1", 1500, 1600)])
-        assert r is None
+        assert r is not None
+        assert len(r.t_inds) == 0
+        assert r.exon_bp_pos == 0
+        assert r.exon_bp_neg == 0
+        assert r.tx_bp_pos == 0
+        assert r.tx_bp_neg == 0
 
     def test_unique_gene_property(self, mini_index):
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])

@@ -300,7 +300,6 @@ class TestToDict:
         assert "rna" in d
         assert "gdna" in d
         assert "global" in d
-        assert "intergenic" in d
         assert "unspliced_same_strand" not in d
         assert "unspliced_opp_strand" not in d
 

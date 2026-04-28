@@ -521,7 +521,6 @@ class TestStrandModelsContainer:
         sm = StrandModels()
         assert sm.exonic_spliced.n_observations == 0
         assert sm.exonic.n_observations == 0
-        assert sm.intergenic.n_observations == 0
 
     def test_delegation_to_exonic_spliced(self):
         from rigel.strand_model import StrandModels
@@ -546,7 +545,6 @@ class TestStrandModelsContainer:
         assert "exonic_spliced" in d
         assert "diagnostics" in d
         assert "exonic" in d["diagnostics"]
-        assert "intergenic" in d["diagnostics"]
         assert "observations" in d["exonic_spliced"]
 
     def test_write_json(self, tmp_path):
@@ -574,11 +572,9 @@ class TestStrandModelsContainer:
         sm = StrandModels()
         sm.exonic_spliced.observe(Strand.POS, Strand.POS)
         sm.exonic.observe(Strand.POS, Strand.NEG)
-        sm.intergenic.observe(Strand.NEG, Strand.NEG)
 
         assert sm.exonic_spliced.n_observations == 1
         assert sm.exonic.n_observations == 1
-        assert sm.intergenic.n_observations == 1
 
     def test_mle_on_finalize(self):
         """finalize() uses MLE for exonic_spliced."""

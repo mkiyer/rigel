@@ -5,6 +5,58 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-27
+
+### Changed (Breaking)
+
+- **Calibration upgraded to Simple Regional Deconvolution (SRD v2)**
+  (breaking): the calibration scanner now emits four strand-aware
+  collapsed overlap counts per fragment (`exon_bp_pos/neg`,
+  `tx_bp_pos/neg`) instead of per-candidate `exon_bp` arrays.
+  Categorization is rewritten as pure column arithmetic over a
+  `(N_CATEGORIES, 4_strand_sublabels)` matrix. Two new splice types
+  are recognized: `SPLICED_IMPLICIT` (paired-end gap collapses an
+  annotated intron) and `SPLICE_ARTIFACT` (alignment crosses a
+  blacklisted SJ). Zero-candidate (intergenic) fragments now flow
+  through the buffer and are categorized as INTERGENIC by the same
+  geometric rule rather than via a side-channel accumulator.
+  See [docs/calibration/srd_v2_results.md](docs/calibration/srd_v2_results.md)
+  and [docs/calibration/srd_v2_phase2plus_handoff.md](docs/calibration/srd_v2_phase2plus_handoff.md).
+
+- **Headline gDNA-FL recovery**: the v1 saturation failure mode
+  (gDNA-FL mode pinned at bin-0, bin-0 fraction up to 55%) is
+  eliminated. v2 recovers gDNA-FL mode 256–336 bp on the VCaP spike
+  series with bin-0 / bin-max edge fractions ≈ 0%.
+
+- **Headline gDNA fraction shifts ~20% lower across the board**
+  (correction, not regression): v1 was attributing edge-saturated
+  RNA mis-routed mass to gDNA. The relative monotonicity across the
+  spike series is preserved and tightened.
+
+### Removed (Breaking)
+
+- `FragmentLengthModels.intergenic` member and
+  `observe_intergenic_batch()` method (replaced by buffer-routed
+  INTERGENIC categorization).
+- `StrandModels.intergenic` member (legacy diagnostic; no longer trained).
+- `n_frag_length_intergenic` counter on `PipelineStats` and the
+  C++ `intergenic_obs/truth/lengths` accumulators on `BamScanStats`,
+  `StrandObservations`, and `FragLenObservations`.
+- The `frag_length_models.intergenic` and
+  `strand_models.diagnostics.intergenic` keys are no longer present
+  in JSON summary output.
+
+### Added
+
+- `category_counts` shape widened from `(N_CATEGORIES,)` to
+  `(N_CATEGORIES, 4)` with strand sub-labels `(none, pos, neg, ambig)`.
+- New diagnostic fields on `CalibrationResult`: `n_spliced`,
+  `n_pool_intronic_strand_pos`, `n_pool_intronic_strand_neg`.
+- `splice_type` enum gains `SPLICED_IMPLICIT = 3` and
+  `SPLICE_ARTIFACT = 4`.
+- Buffer schema gains four int32 columns: `exon_bp_pos`,
+  `exon_bp_neg`, `tx_bp_pos`, `tx_bp_neg` (16 bytes/fragment).
+
 ## [0.5.0] - 2026-04-24
 
 ### Changed (Breaking)

@@ -471,7 +471,7 @@ class FragmentLengthModels:
     is injected externally from the calibration module.
 
     The :meth:`observe` method routes each observation to the global
-    model plus the appropriate category or intergenic model.
+    model plus the appropriate category model.
     """
 
     def __init__(self, max_size: int = DEFAULT_MAX_FRAG_SIZE):
@@ -479,7 +479,6 @@ class FragmentLengthModels:
 
         self.max_size = max_size
         self.global_model = FragmentLengthModel(max_size=max_size)
-        self.intergenic = FragmentLengthModel(max_size=max_size)
         self.category_models: dict = {
             cat: FragmentLengthModel(max_size=max_size) for cat in SpliceType
         }
@@ -497,7 +496,7 @@ class FragmentLengthModels:
         category-specific data is sparse while still allowing FL to
         discriminate when category data is abundant.
 
-        Diagnostic models (global, intergenic, per-category) are
+        Diagnostic models (global, per-category) are
         finalized with standard Laplace smoothing.
 
         Parameters
@@ -510,7 +509,6 @@ class FragmentLengthModels:
             the raw global counts are used (backward compatibility).
         """
         self.global_model.finalize()
-        self.intergenic.finalize()
         for m in self.category_models.values():
             m.finalize()
 
@@ -571,14 +569,13 @@ class FragmentLengthModels:
         frag_length : int
             Fragment fragment length (must be >= 0).
         splice_type : SpliceType or None
-            The fragment's count category, or ``None`` for intergenic.
+            The fragment's count category, or ``None`` to record
+            only against the global model.
         weight : float
             Observation weight (default 1.0).
         """
         self.global_model.observe(frag_length, weight)
-        if splice_type is None:
-            self.intergenic.observe(frag_length, weight)
-        else:
+        if splice_type is not None:
             self.category_models[splice_type].observe(frag_length, weight)
 
     def observe_batch(
@@ -608,27 +605,11 @@ class FragmentLengthModels:
             if mask.any():
                 self.category_models[cat].observe_batch(lengths[mask])
 
-    def observe_intergenic_batch(
-        self,
-        frag_lengths: "np.ndarray",
-    ) -> None:
-        """Record a batch of intergenic fragment lengths (vectorized).
-
-        Parameters
-        ----------
-        frag_lengths : np.ndarray
-            Integer array of intergenic fragment lengths.
-        """
-        lengths = np.asarray(frag_lengths, dtype=np.intp)
-        self.global_model.observe_batch(lengths)
-        self.intergenic.observe_batch(lengths)
-
     def to_dict(self) -> dict:
         """JSON/YAML-serializable summary of all fragment length models."""
         from .splice import SpliceType
 
         d: dict = {"global": self.global_model.to_dict()}
-        d["intergenic"] = self.intergenic.to_dict()
         d["gdna"] = self.gdna_model.to_dict()
         d["rna"] = self.rna_model.to_dict()
         for cat in SpliceType:
@@ -668,11 +649,6 @@ class FragmentLengthModels:
                 logger.info(
                     f"  {cat.name}: {m.n_observations:,} obs, mean={m.mean:.1f}, mode={m.mode}"
                 )
-        if self.intergenic.n_observations > 0:
-            logger.info(
-                f"  INTERGENIC: {self.intergenic.n_observations:,} obs, "
-                f"mean={self.intergenic.mean:.1f}, mode={self.intergenic.mode}"
-            )
         if self.gdna_model.total_weight > 0:
             logger.info(
                 f"  gDNA: {self.gdna_model.total_weight:.0f} weighted obs, "

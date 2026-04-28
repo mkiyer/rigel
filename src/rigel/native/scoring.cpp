@@ -512,16 +512,17 @@ private:
         }
 
         // gDNA per-hit contribution (Option B harmonic-mean length
-        // correction).  Only unspliced hits enter the gDNA hypothesis.
-        // We anchor the local sampling window L_h on this hit's first
-        // candidate transcript span (t_span_[t_h] + gdna_flank), bake in
-        // the per-hit log-lik -log(e_h), and accumulate via online
-        // logsumexp.  At flush time:
+        // correction).  Only truly-unspliced hits enter the gDNA
+        // hypothesis.  SRD v2: this gate also excludes the new
+        // SPLICE_IMPLICIT and SPLICE_ARTIFACT classes (any non-zero
+        // splice_type is held out of gDNA).  We anchor the local
+        // sampling window L_h on this hit's first candidate transcript
+        // span (t_span_[t_h] + gdna_flank), bake in the per-hit
+        // log-lik -log(e_h), and accumulate via online logsumexp.
+        // At flush time:
         //    gdna_log_lik = lse_max + log(lse_sum) - log(nh_gdna)
         // which equals  log((1/NH) * sum_h exp(log p_h^gDNA - log e_h)).
-        if (stype != SPLICE_SPLICED_ANNOT &&
-            stype != SPLICE_SPLICED_UNANNOT &&
-            n_cand > 0)
+        if (stype == SPLICE_UNSPLICED && n_cand > 0)
         {
             int32_t gfp_val  = cp.g_fp[row];
             int32_t anchor_t = cp.t_ind[start];
@@ -777,6 +778,14 @@ private:
             int64_t end    = t_off[i + 1];
             int n_cand     = static_cast<int>(end - start);
 
+            // SRD v2: zero-candidate fragments are present in the
+            // buffer for SRD calibration only (intergenic / dropped
+            // by merge).  Skip silently — they must not contribute
+            // to stat_gated, otherwise accountability double-counts
+            // (the legacy n_intergenic_unspliced/_spliced counter
+            // already represents these fragments).
+            if (n_cand <= 0) continue;
+
             // ---- Det-unambig: both ua_counts + det arrays ----
             if (fclass == FRAG_UNAMBIG ||
                 fclass == FRAG_AMBIG_SAME_STRAND)
@@ -948,8 +957,7 @@ private:
                     static_cast<uint8_t>(stype));
 
                 bool is_spl =
-                    (stype == SPLICE_SPLICED_ANNOT
-                     || stype == SPLICE_SPLICED_UNANNOT);
+                    (stype != SPLICE_UNSPLICED);
                 st.v_is_spliced->push_back(
                     is_spl ? 1 : 0);
 

@@ -32,22 +32,37 @@ class CalibrationResult:
     # ---- Library-level signal passed through ----
     strand_specificity: float
 
-    # ---- Per-category counts (length 7; matches FragmentCategory enum) ----
-    category_counts: np.ndarray  # int64[7]
+    # ---- Per-(category, strand) counts (shape (N_CATEGORIES, 4)) ----
+    # See `rigel.calibration._categorize` for the row/column semantics:
+    #   rows    = FragmentCategory  (INTERGENIC, INTRONIC,
+    #                                EXON_CONTAINED, EXON_INCOMPATIBLE)
+    #   columns = StrandLabel       (NONE, POS, NEG, AMBIG)
+    # Counts only unique-mapper UNSPLICED fragments; non-UNSPLICED
+    # fragments are excluded from calibration entirely and are tallied
+    # separately under `n_spliced`.
+    category_counts: np.ndarray  # int64[N_CATEGORIES, 4]
     n_multimap_excluded: int
+    n_spliced: int
+    """Unique-mapper fragments with ``splice_type != UNSPLICED`` (any of
+    SPLICED_ANNOT / SPLICED_UNANNOT / SPLICED_IMPLICIT / SPLICE_ARTIFACT).
+    Excluded from calibration; surfaced for the QC warning that fires
+    when fewer than 100 spliced fragments are seen (``RNA_FL`` then
+    collapses to ``global_FL``).
+    """
 
     # ---- Pool diagnostics ----
     n_pool: int
     pi_pool: float
     mixture_converged: bool
     mixture_iterations: int
-    n_intergenic_unique: int
-    """Unique-mapper unspliced fragments with no transcript candidates.
 
-    These are dropped before reaching the buffer (they never appear in
-    ``category_counts[INTERGENIC]``) but their FL distribution is folded
-    into Pool B from ``frag_length_models.intergenic``. See
-    ``calibration._simple.calibrate_gdna``.
+    n_pool_intronic_strand_pos: int
+    n_pool_intronic_strand_neg: int
+    """Strand-asymmetry diagnostic for the INTRONIC bucket.  Extreme
+    asymmetry given high library strand specificity is the signal of
+    nascent-RNA pollution of the calibration pool (a structural
+    identifiability limit of the 1-D mixture; see
+    ``docs/calibration/srd_v2_phase2plus_handoff.md`` §7a).
     """
 
     n_pool_dropped_out_of_range: int
@@ -65,14 +80,22 @@ class CalibrationResult:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_summary_dict(self) -> dict[str, Any]:
-        """JSON-serializable summary for ``summary.json``."""
+        """JSON-serializable summary for ``summary.json``.
+
+        ``category_counts`` is flattened row-major:
+        ``flat[i * N_STRAND_LABELS + j]`` = count of fragments in
+        ``(FragmentCategory(i), StrandLabel(j))``.
+        """
         return {
             "gdna_fl_quality": self.gdna_fl_quality,
             "strand_specificity": float(self.strand_specificity),
-            "category_counts": [int(c) for c in self.category_counts],
+            "category_counts": [int(c) for c in np.asarray(self.category_counts).ravel()],
+            "category_counts_shape": list(np.asarray(self.category_counts).shape),
             "n_multimap_excluded": int(self.n_multimap_excluded),
+            "n_spliced": int(self.n_spliced),
             "n_pool": int(self.n_pool),
-            "n_intergenic_unique": int(self.n_intergenic_unique),
+            "n_pool_intronic_strand_pos": int(self.n_pool_intronic_strand_pos),
+            "n_pool_intronic_strand_neg": int(self.n_pool_intronic_strand_neg),
             "n_pool_dropped_out_of_range": int(self.n_pool_dropped_out_of_range),
             "pi_pool": float(self.pi_pool),
             "mixture_converged": bool(self.mixture_converged),

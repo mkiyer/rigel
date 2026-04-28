@@ -186,7 +186,6 @@ class TestFragmentLengthModels:
     def test_construction(self):
         models = FragmentLengthModels(max_size=200)
         assert models.global_model.max_size == 200
-        assert models.intergenic.max_size == 200
         assert len(models.category_models) == len(SpliceType)
 
     def test_observe_routes_to_global_and_category(self):
@@ -195,13 +194,11 @@ class TestFragmentLengthModels:
         assert models.global_model.n_observations == 1
         assert models.category_models[SpliceType.SPLICED_ANNOT].n_observations == 1
         assert models.category_models[SpliceType.UNSPLICED].n_observations == 0
-        assert models.intergenic.n_observations == 0
 
-    def test_observe_intergenic(self):
+    def test_observe_without_category_only_global(self):
         models = FragmentLengthModels()
         models.observe(300, splice_type=None)
         assert models.global_model.n_observations == 1
-        assert models.intergenic.n_observations == 1
         for cat in SpliceType:
             assert models.category_models[cat].n_observations == 0
 
@@ -216,7 +213,6 @@ class TestFragmentLengthModels:
         models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
         d = models.to_dict()
         assert "global" in d
-        assert "intergenic" in d
         assert "spliced_annot" in d
         assert "unspliced" in d
 

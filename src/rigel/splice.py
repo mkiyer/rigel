@@ -22,6 +22,9 @@ class SpliceType(IntEnum):
     UNSPLICED = 0
     SPLICED_UNANNOT = 1
     SPLICED_ANNOT = 2
+    # SRD v2 additions:
+    SPLICED_IMPLICIT = 3   # PE gap spans an annotated intron of any candidate
+    SPLICE_ARTIFACT = 4    # CIGAR junction was rejected by the SJ blacklist
 
 
 NUM_SPLICE_TYPES = len(SpliceType)
@@ -30,20 +33,23 @@ NUM_SPLICE_TYPES = len(SpliceType)
 SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)         # 0
 SPLICE_UNANNOT: int = int(SpliceType.SPLICED_UNANNOT)     # 1
 SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)         # 2
+SPLICE_IMPLICIT: int = int(SpliceType.SPLICED_IMPLICIT)   # 3
+SPLICE_ARTIFACT: int = int(SpliceType.SPLICE_ARTIFACT)    # 4
 
 
 class SpliceStrandCol(IntEnum):
     """Internal column index for count arrays.
 
-    Layout: 3 splice categories × 2 strands (sense/antisense) = 6 columns.
+    Layout: 5 splice categories × 2 strands (sense/antisense) = 10 columns.
 
     Column formula::
 
         col = splice_type * 2 + int(is_antisense)
 
-    where ``splice_type`` is a :class:`SpliceType` value (0, 1, 2).
+    where ``splice_type`` is a :class:`SpliceType` value (0..4).
 
-    Even indices (0, 2, 4) are sense; odd indices (1, 3, 5) are antisense.
+    Even indices (0, 2, 4, 6, 8) are sense; odd indices (1, 3, 5, 7, 9)
+    are antisense.
     """
     UNSPLICED_SENSE = 0
     UNSPLICED_ANTISENSE = 1
@@ -51,6 +57,10 @@ class SpliceStrandCol(IntEnum):
     SPLICED_UNANNOT_ANTISENSE = 3
     SPLICED_ANNOT_SENSE = 4
     SPLICED_ANNOT_ANTISENSE = 5
+    SPLICED_IMPLICIT_SENSE = 6
+    SPLICED_IMPLICIT_ANTISENSE = 7
+    SPLICE_ARTIFACT_SENSE = 8
+    SPLICE_ARTIFACT_ANTISENSE = 9
 
     @classmethod
     def from_category(cls, category: int, is_antisense: bool) -> "SpliceStrandCol":

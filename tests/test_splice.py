@@ -21,20 +21,22 @@ class TestSpliceType:
         assert int(SpliceType.UNSPLICED) == 0
         assert int(SpliceType.SPLICED_UNANNOT) == 1
         assert int(SpliceType.SPLICED_ANNOT) == 2
+        assert int(SpliceType.SPLICED_IMPLICIT) == 3
+        assert int(SpliceType.SPLICE_ARTIFACT) == 4
 
     def test_length(self):
-        assert len(SpliceType) == 3
-        assert NUM_SPLICE_TYPES == 3
+        assert len(SpliceType) == 5
+        assert NUM_SPLICE_TYPES == 5
 
 
 # =====================================================================
-# SpliceStrandCol — 3 categories × 2 strands = 6 columns
+# SpliceStrandCol — 5 categories × 2 strands = 10 columns
 # =====================================================================
 
 
 class TestSpliceStrandCol:
     def test_num_splice_strand_cols(self):
-        assert NUM_SPLICE_STRAND_COLS == 6
+        assert NUM_SPLICE_STRAND_COLS == 10
 
     def test_enum_values(self):
         assert int(SpliceStrandCol.UNSPLICED_SENSE) == 0
@@ -43,6 +45,10 @@ class TestSpliceStrandCol:
         assert int(SpliceStrandCol.SPLICED_UNANNOT_ANTISENSE) == 3
         assert int(SpliceStrandCol.SPLICED_ANNOT_SENSE) == 4
         assert int(SpliceStrandCol.SPLICED_ANNOT_ANTISENSE) == 5
+        assert int(SpliceStrandCol.SPLICED_IMPLICIT_SENSE) == 6
+        assert int(SpliceStrandCol.SPLICED_IMPLICIT_ANTISENSE) == 7
+        assert int(SpliceStrandCol.SPLICE_ARTIFACT_SENSE) == 8
+        assert int(SpliceStrandCol.SPLICE_ARTIFACT_ANTISENSE) == 9
 
     def test_from_category(self):
         """from_category(category, is_antisense) == category * 2 + is_antisense."""
@@ -72,7 +78,7 @@ class TestSpliceStrandCol:
 
 class TestColumnSubsets:
     def test_antisense_cols(self):
-        assert ANTISENSE_COLS == (1, 3, 5)
+        assert ANTISENSE_COLS == (1, 3, 5, 7, 9)
 
     def test_spliced_cols(self):
         assert SPLICED_COLS == (2, 3, 4, 5)

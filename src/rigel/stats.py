@@ -56,7 +56,6 @@ class PipelineStats:
     # --- Fragment length model training ---
     n_frag_length_unambiguous: int = 0
     n_frag_length_ambiguous: int = 0
-    n_frag_length_intergenic: int = 0
 
     # --- Routing counters (authoritative) ---
     deterministic_unambig_units: int = 0

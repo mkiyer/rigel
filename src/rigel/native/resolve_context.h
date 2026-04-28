@@ -62,6 +62,12 @@ public:
     std::vector<int32_t> exon_bp;
     std::vector<int32_t> intron_bp;
 
+    // SRD v2: strand-aware collapsed overlap counts
+    int32_t exon_bp_pos = 0;
+    int32_t exon_bp_neg = 0;
+    int32_t tx_bp_pos = 0;
+    int32_t tx_bp_neg = 0;
+
     // --- Properties for Python model training ---
 
     bool get_is_chimeric() const {
@@ -160,6 +166,10 @@ public:
         r.chimera_gap = cr.chimera_gap;
         r.exon_bp = std::move(cr.t_exon_bp);
         r.intron_bp = std::move(cr.t_intron_bp);
+        r.exon_bp_pos = cr.exon_bp_pos;
+        r.exon_bp_neg = cr.exon_bp_neg;
+        r.tx_bp_pos = cr.tx_bp_pos;
+        r.tx_bp_neg = cr.tx_bp_neg;
         // Convert frag_length_map to parallel array
         r.frag_lengths.reserve(r.t_inds.size());
         for (int32_t t : r.t_inds) {
@@ -193,6 +203,11 @@ public:
     std::vector<int32_t>  genomic_footprint_;
     std::vector<int32_t>  genomic_start_;
     std::vector<uint16_t> nm_;
+    // SRD v2: per-fragment strand-aware overlap counts
+    std::vector<int32_t>  exon_bp_pos_;
+    std::vector<int32_t>  exon_bp_neg_;
+    std::vector<int32_t>  tx_bp_pos_;
+    std::vector<int32_t>  tx_bp_neg_;
     int32_t size_ = 0;
 
     FragmentAccumulator() {
@@ -215,6 +230,10 @@ public:
         genomic_footprint_.reserve(n_fragments);
         genomic_start_.reserve(n_fragments);
         nm_.reserve(n_fragments);
+        exon_bp_pos_.reserve(n_fragments);
+        exon_bp_neg_.reserve(n_fragments);
+        tx_bp_pos_.reserve(n_fragments);
+        tx_bp_neg_.reserve(n_fragments);
         t_indices_.reserve(n_candidates);
         t_offsets_.reserve(n_fragments + 1);
         frag_lengths_.reserve(n_candidates);
@@ -246,6 +265,10 @@ public:
         genomic_footprint_.push_back(r.genomic_footprint);
         genomic_start_.push_back(r.genomic_start);
         nm_.push_back(static_cast<uint16_t>(r.nm));
+        exon_bp_pos_.push_back(r.exon_bp_pos);
+        exon_bp_neg_.push_back(r.exon_bp_neg);
+        tx_bp_pos_.push_back(r.tx_bp_pos);
+        tx_bp_neg_.push_back(r.tx_bp_neg);
         size_++;
     }
 
@@ -320,6 +343,18 @@ public:
             genomic_start_.size() * sizeof(int32_t));
         result["nm"] = to_bytes(
             nm_.data(), nm_.size() * sizeof(uint16_t));
+        result["exon_bp_pos"] = to_bytes(
+            exon_bp_pos_.data(),
+            exon_bp_pos_.size() * sizeof(int32_t));
+        result["exon_bp_neg"] = to_bytes(
+            exon_bp_neg_.data(),
+            exon_bp_neg_.size() * sizeof(int32_t));
+        result["tx_bp_pos"] = to_bytes(
+            tx_bp_pos_.data(),
+            tx_bp_pos_.size() * sizeof(int32_t));
+        result["tx_bp_neg"] = to_bytes(
+            tx_bp_neg_.data(),
+            tx_bp_neg_.size() * sizeof(int32_t));
         result["size"] = nb::cast(size_);
 
         return result;
@@ -370,6 +405,10 @@ public:
         result["genomic_footprint"] = vec_to_ndarray(std::move(genomic_footprint_));
         result["genomic_start"]     = vec_to_ndarray(std::move(genomic_start_));
         result["nm"]                = vec_to_ndarray(std::move(nm_));
+        result["exon_bp_pos"]       = vec_to_ndarray(std::move(exon_bp_pos_));
+        result["exon_bp_neg"]       = vec_to_ndarray(std::move(exon_bp_neg_));
+        result["tx_bp_pos"]         = vec_to_ndarray(std::move(tx_bp_pos_));
+        result["tx_bp_neg"]         = vec_to_ndarray(std::move(tx_bp_neg_));
         result["size"]              = nb::cast(n);
 
         size_ = 0;
@@ -494,6 +533,13 @@ public:
 
     // --- Per-transcript nRNA status (1 = nRNA synthetic, 0 = annotated) ---
     std::vector<uint8_t> t_is_nrna_;
+
+    // --- Per-transcript nRNA parent index (-1 if none, else index of
+    //     the parent nRNA entity for derive-on-demand resolution).
+    //     Synthetic nRNAs are not in cgranges; they are surfaced into
+    //     each fragment's candidate set during _resolve_core by
+    //     mapping each real-tx hit to its nrna_parent_ entry.
+    std::vector<int32_t> nrna_parent_;
 
     // --- Per-transcript exon structure (CSR layout) for FL computation ---
     std::vector<int32_t> exon_offsets_;    // [n_transcripts + 1]
@@ -638,6 +684,13 @@ public:
     /// from the FL unanimity check during model training.
     void set_nrna_status(const std::vector<uint8_t>& t_is_nrna) {
         t_is_nrna_ = t_is_nrna;
+    }
+
+    /// Set per-transcript nRNA parent index (int32; -1 = no parent).
+    /// Used by _resolve_core to derive synthetic-nRNA candidates from
+    /// real-transcript hits without bloating the cgranges index.
+    void set_nrna_parent_index(const std::vector<int32_t>& nrna_parent) {
+        nrna_parent_ = nrna_parent;
     }
 
     const uint8_t* nrna_mask() const {
@@ -880,30 +933,46 @@ public:
                 int32_t cnt = t_set_offsets_[label + 1] - off;
 
                 if (itype == ITYPE_EXON) {
-                    for (int32_t k = 0; k < cnt; k++)
-                        block_exon_t.insert(t_set_data_[off + k]);
                     int32_t clo = std::max(bstart, h_start);
                     int32_t chi = std::min(bend, h_end);
-                    if (chi > clo) {
-                        int32_t bp = chi - clo;
-                        for (int32_t k = 0; k < cnt; k++) {
-                            int32_t ti = t_set_data_[off + k];
+                    int32_t bp = (chi > clo) ? (chi - clo) : 0;
+                    bool any_pos = false, any_neg = false;
+                    for (int32_t k = 0; k < cnt; k++) {
+                        int32_t ti = t_set_data_[off + k];
+                        block_exon_t.insert(ti);
+                        if (bp > 0) {
                             scratch.mark_dirty(ti);
                             scratch.t_exon_bp[ti] += bp;
+                            int32_t s = (ti >= 0 && ti < static_cast<int32_t>(t_strand_arr_.size()))
+                                        ? t_strand_arr_[ti] : STRAND_NONE;
+                            if (s == STRAND_POS) any_pos = true;
+                            else if (s == STRAND_NEG) any_neg = true;
                         }
                     }
+                    if (bp > 0) {
+                        if (any_pos) cr.exon_bp_pos += bp;
+                        if (any_neg) cr.exon_bp_neg += bp;
+                    }
                 } else if (itype == ITYPE_TRANSCRIPT) {
-                    for (int32_t k = 0; k < cnt; k++)
-                        block_transcript_t.insert(t_set_data_[off + k]);
                     int32_t clo = std::max(bstart, h_start);
                     int32_t chi = std::min(bend, h_end);
-                    if (chi > clo) {
-                        int32_t bp = chi - clo;
-                        for (int32_t k = 0; k < cnt; k++) {
-                            int32_t ti = t_set_data_[off + k];
+                    int32_t bp = (chi > clo) ? (chi - clo) : 0;
+                    bool any_pos = false, any_neg = false;
+                    for (int32_t k = 0; k < cnt; k++) {
+                        int32_t ti = t_set_data_[off + k];
+                        block_transcript_t.insert(ti);
+                        if (bp > 0) {
                             scratch.mark_dirty(ti);
                             scratch.t_transcript_bp[ti] += bp;
+                            int32_t s = (ti >= 0 && ti < static_cast<int32_t>(t_strand_arr_.size()))
+                                        ? t_strand_arr_[ti] : STRAND_NONE;
+                            if (s == STRAND_POS) any_pos = true;
+                            else if (s == STRAND_NEG) any_neg = true;
                         }
+                    }
+                    if (bp > 0) {
+                        if (any_pos) cr.tx_bp_pos += bp;
+                        if (any_neg) cr.tx_bp_neg += bp;
                     }
                 }
             }
@@ -922,6 +991,60 @@ public:
             if (cr_res.type != CHIMERA_NONE) {
                 cr.chimera_type = cr_res.type;
                 cr.chimera_gap = cr_res.gap;
+            }
+        }
+
+        // --- Derive nRNA candidates from real-tx hits ---------------
+        // Synthetic nRNAs are intentionally absent from the cgranges
+        // index (see _gen_transcript_intervals).  Each real-tx hit
+        // carries a one-to-one link to its parent nRNA entity via
+        // nrna_parent_; collect the unique parents the fragment
+        // overlaps, accumulate fragment-bp inside each parent's span,
+        // and inject them into every per-block exon_t_set so that
+        // merge_sets() naturally picks them up.  Run AFTER chimera
+        // detection (nRNAs would otherwise mask cis-chimeras since
+        // they cover both blocks by construction) and AFTER the
+        // strand-aware exon_bp_pos/_neg accumulation (nRNAs must not
+        // pollute the calibration overlap counts).
+        if (!nrna_parent_.empty()) {
+            std::unordered_set<int32_t> nrna_set;
+            auto add_nrna = [&](int32_t ti) {
+                if (ti < 0 ||
+                    ti >= static_cast<int32_t>(nrna_parent_.size())) return;
+                int32_t n = nrna_parent_[ti];
+                if (n >= 0 && n != ti) nrna_set.insert(n);
+            };
+            for (const auto& s : exon_t_sets)
+                for (int32_t ti : s) add_nrna(ti);
+            for (const auto& s : transcript_t_sets)
+                for (int32_t ti : s) add_nrna(ti);
+
+            for (int32_t n : nrna_set) {
+                // Synthetic nRNAs have exactly one exon by construction;
+                // annotated nascent-equivs are handled via cgranges and
+                // never appear here (their nrna_parent_[ti] == ti was
+                // filtered out by the n != ti guard above).
+                int32_t ns = exon_starts_[exon_offsets_[n]];
+                int32_t ne = exon_ends_  [exon_offsets_[n]];
+                int32_t bp_total = 0;
+                for (const auto& eb : exons) {
+                    int32_t lo = std::max(eb.start, ns);
+                    int32_t hi = std::min(eb.end,   ne);
+                    if (hi > lo) bp_total += (hi - lo);
+                }
+                if (bp_total <= 0) continue;
+                scratch.mark_dirty(n);
+                scratch.t_exon_bp[n] += bp_total;
+                scratch.t_transcript_bp[n] += bp_total;
+                // Insert into every block's exon_t_set so merge_sets'
+                // intersection logic surfaces the nRNA across blocks.
+                // Sets are sorted; use lower_bound to keep them sorted
+                // and unique.
+                for (auto& bset : exon_t_sets) {
+                    auto it = std::lower_bound(bset.begin(), bset.end(), n);
+                    if (it == bset.end() || *it != n)
+                        bset.insert(it, n);
+                }
             }
         }
 
@@ -1007,16 +1130,27 @@ public:
                                                 : SPLICE_UNSPLICED;
 
         } else {
-            scratch.clean();
-            return false;
+            // No exon and no transcript overlap -> truly intergenic.
+            // SRD v2: do NOT early-exit; let the fragment flow through
+            // the buffer with empty t_inds so calibration can categorize
+            // it as INTERGENIC.
+            cr.splice_type = has_unannotated_sj ? SPLICE_SPLICED_UNANNOT
+                                                : SPLICE_UNSPLICED;
         }
 
-        if (cr.t_inds.empty()) {
-            scratch.clean();
-            return false;
+        // SRD v2: SPLICE_ARTIFACT promotion.  When the alignment had
+        // CIGAR splice junctions that were rejected by the artifact
+        // blacklist (set by caller in cr.n_sj_blacklisted before this
+        // call), promote any non-spliced classification so the
+        // fragment is held out of calibration.
+        if (cr.n_sj_blacklisted > 0 &&
+            cr.splice_type != SPLICE_SPLICED_ANNOT &&
+            cr.splice_type != SPLICE_SPLICED_UNANNOT) {
+            cr.splice_type = SPLICE_ARTIFACT;
         }
 
         // --- Overlap profiles (parallel to t_inds) ---
+        // Skip when t_inds is empty (intergenic / unresolved).
         std::unordered_set<int32_t> all_overlap_t;
         for (const auto& s : exon_t_sets)
             for (int32_t v : s) all_overlap_t.insert(v);
@@ -1059,6 +1193,24 @@ public:
         // --- Fragment lengths ---
         if (cr.chimera_type == CHIMERA_NONE) {
             cr.frag_length_map = compute_frag_lengths(exons, introns, cr.t_inds, scratch);
+        }
+
+        // --- SRD v2: SPLICED_IMPLICIT detection ---
+        // For multi-block (paired-end gap) fragments, if the gap fully
+        // spans an annotated intron of any candidate transcript, the
+        // projected tx_distance for that transcript will be < genomic_span.
+        // We use this as a "free" implicit-splice detector.  Conservative
+        // ANY-candidate rule: if any candidate shows shortening, classify
+        // as SPLICED_IMPLICIT so the fragment stays out of the gDNA pool.
+        if (cr.splice_type == SPLICE_UNSPLICED && exons.size() >= 2) {
+            int32_t genomic_span = cr.genomic_footprint;
+            for (const auto& kv : cr.frag_length_map) {
+                int32_t fl = kv.second;
+                if (fl > 0 && (genomic_span - fl) > 0) {
+                    cr.splice_type = SPLICE_IMPLICIT;
+                    break;
+                }
+            }
         }
 
         // --- Genomic start ---

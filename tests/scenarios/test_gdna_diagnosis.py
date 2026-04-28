@@ -154,7 +154,6 @@ def _collect_diagnostics(pr, result, bench, label):
     diag["strand_specificity"] = sm.strand_specificity
     diag["exonic_spliced_ss"] = sm.exonic_spliced.strand_specificity
     diag["exonic_ss"] = sm.exonic.strand_specificity
-    diag["intergenic_ss"] = sm.intergenic.strand_specificity
 
     # --- Transcript geometry ---
     for t in result.transcripts:
@@ -212,7 +211,6 @@ def _print_diagnostics(diag, label=""):
         f"  strand_specificity: {diag['strand_specificity']:.4f}",
         f"  exonic_spliced_ss: {diag['exonic_spliced_ss']:.4f}",
         f"  exonic_ss: {diag['exonic_ss']:.4f}",
-        f"  intergenic_ss: {diag['intergenic_ss']:.4f}",
     ]
 
     # Per-transcript details

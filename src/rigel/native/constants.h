@@ -29,10 +29,13 @@ namespace rigel {
 static constexpr int8_t ITYPE_EXON           = 0;
 static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 
-// SpliceType (rigel.categories.SpliceType)
+// SpliceType (rigel.splice.SpliceType)
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
 static constexpr int32_t SPLICE_SPLICED_UNANNOT = 1;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
+// SRD v2 additions:
+static constexpr int32_t SPLICE_IMPLICIT        = 3;  // PE gap spans an annotated intron
+static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR junction rejected by blacklist
 
 // MergeOutcome (rigel.types.MergeOutcome)
 static constexpr int32_t MC_INTERSECTION          = 0;
@@ -190,6 +193,18 @@ struct RawResolveResult {
     // Parallel arrays to t_inds
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_intron_bp;
+
+    // --- SRD v2: strand-aware collapsed overlap counts ---
+    // bp of fragment overlapping ANY (+/-)-strand transcript's exon / span.
+    int32_t exon_bp_pos = 0;
+    int32_t exon_bp_neg = 0;
+    int32_t tx_bp_pos = 0;
+    int32_t tx_bp_neg = 0;
+    // Per-fragment count of CIGAR splice junctions rejected by the
+    // alignment-time blacklist.  Caller sets this BEFORE calling
+    // _resolve_core so the resolver can promote SPLICE_UNSPLICED
+    // to SPLICE_ARTIFACT.
+    int32_t n_sj_blacklisted = 0;
 };
 
 // ================================================================

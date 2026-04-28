@@ -142,6 +142,11 @@ class _FinalizedChunk:
     genomic_footprint: np.ndarray  # int32[N]
     genomic_start: np.ndarray  # int32[N]
     nm: np.ndarray  # uint16[N]
+    # SRD v2: per-fragment strand-aware collapsed overlap counts.
+    exon_bp_pos: np.ndarray  # int32[N]
+    exon_bp_neg: np.ndarray  # int32[N]
+    tx_bp_pos: np.ndarray  # int32[N]
+    tx_bp_neg: np.ndarray  # int32[N]
     size: int
     _fragment_classes: np.ndarray | None = None  # cached uint8[N]
 
@@ -193,6 +198,10 @@ class _FinalizedChunk:
             genomic_footprint=_arr(raw["genomic_footprint"], np.int32),
             genomic_start=_arr(raw["genomic_start"], np.int32),
             nm=_arr(raw["nm"], np.uint16),
+            exon_bp_pos=_arr(raw["exon_bp_pos"], np.int32),
+            exon_bp_neg=_arr(raw["exon_bp_neg"], np.int32),
+            tx_bp_pos=_arr(raw["tx_bp_pos"], np.int32),
+            tx_bp_neg=_arr(raw["tx_bp_neg"], np.int32),
             size=raw["size"] if isinstance(raw["size"], int) else int(raw["size"]),
         )
 
@@ -219,6 +228,10 @@ class _FinalizedChunk:
                 self.genomic_footprint,
                 self.genomic_start,
                 self.nm,
+                self.exon_bp_pos,
+                self.exon_bp_neg,
+                self.tx_bp_pos,
+                self.tx_bp_neg,
             )
         )
 
@@ -349,6 +362,10 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
             "genomic_footprint": chunk.genomic_footprint,
             "genomic_start": chunk.genomic_start,
             "nm": chunk.nm,
+            "exon_bp_pos": chunk.exon_bp_pos,
+            "exon_bp_neg": chunk.exon_bp_neg,
+            "tx_bp_pos": chunk.tx_bp_pos,
+            "tx_bp_neg": chunk.tx_bp_neg,
         }
     )
 
@@ -397,6 +414,26 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
             else np.full(len(table), -1, dtype=np.int32)
         ),
         nm=table.column("nm").to_numpy().copy().astype(np.uint16),
+        exon_bp_pos=(
+            table.column("exon_bp_pos").to_numpy().copy()
+            if "exon_bp_pos" in table.column_names
+            else np.zeros(len(table), dtype=np.int32)
+        ),
+        exon_bp_neg=(
+            table.column("exon_bp_neg").to_numpy().copy()
+            if "exon_bp_neg" in table.column_names
+            else np.zeros(len(table), dtype=np.int32)
+        ),
+        tx_bp_pos=(
+            table.column("tx_bp_pos").to_numpy().copy()
+            if "tx_bp_pos" in table.column_names
+            else np.zeros(len(table), dtype=np.int32)
+        ),
+        tx_bp_neg=(
+            table.column("tx_bp_neg").to_numpy().copy()
+            if "tx_bp_neg" in table.column_names
+            else np.zeros(len(table), dtype=np.int32)
+        ),
         size=len(table),
     )
 

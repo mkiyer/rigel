@@ -227,11 +227,8 @@ class TestStrandModelsContainer:
         models = StrandModels()
         for _ in range(10):
             models.exonic.observe(Strand.POS, Strand.POS)
-        for _ in range(10):
-            models.intergenic.observe(Strand.POS, Strand.POS)
         models.finalize()
         assert models.exonic._finalized
-        assert models.intergenic._finalized
 
     def test_to_dict_structure(self):
         models = StrandModels()
@@ -242,4 +239,3 @@ class TestStrandModelsContainer:
         assert "exonic_spliced" in d
         assert "diagnostics" in d
         assert "exonic" in d["diagnostics"]
-        assert "intergenic" in d["diagnostics"]

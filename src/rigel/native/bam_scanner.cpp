@@ -223,19 +223,12 @@ struct StrandObservations {
     // exonic: (exon_strand, gene_strand) for unique-gene unambiguous strand
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
-
-    // intergenic: (intergenic_strand, POS) for unique-mapper intergenic
-    std::vector<int8_t> intergenic_obs;
-    std::vector<int8_t> intergenic_truth;
 };
 
 struct FragLenObservations {
     // Resolved fragments with unambiguous fragment length
     std::vector<int32_t> lengths;
     std::vector<int8_t>  splice_types;  // SpliceType enum: {0, 1, 2}
-
-    // Intergenic fragment lengths (splice_type = -1 meaning None)
-    std::vector<int32_t> intergenic_lengths;
 };
 
 // ================================================================
@@ -280,7 +273,6 @@ struct BamScanStats {
     // Fragment length model training
     int64_t n_frag_length_unambiguous = 0;
     int64_t n_frag_length_ambiguous = 0;
-    int64_t n_frag_length_intergenic = 0;
 
     // Multimapper
     int64_t n_multimapper_groups = 0;
@@ -322,7 +314,6 @@ struct BamScanStats {
         n_strand_skipped_ambiguous += o.n_strand_skipped_ambiguous;
         n_frag_length_unambiguous += o.n_frag_length_unambiguous;
         n_frag_length_ambiguous += o.n_frag_length_ambiguous;
-        n_frag_length_intergenic += o.n_frag_length_intergenic;
         n_multimapper_groups += o.n_multimapper_groups;
         n_multimapper_alignments += o.n_multimapper_alignments;
         n_sj_observed += o.n_sj_observed;
@@ -380,12 +371,6 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
                           src.exonic_obs.begin(), src.exonic_obs.end());
     dst.exonic_truth.insert(dst.exonic_truth.end(),
                             src.exonic_truth.begin(), src.exonic_truth.end());
-    dst.intergenic_obs.insert(dst.intergenic_obs.end(),
-                              src.intergenic_obs.begin(),
-                              src.intergenic_obs.end());
-    dst.intergenic_truth.insert(dst.intergenic_truth.end(),
-                                src.intergenic_truth.begin(),
-                                src.intergenic_truth.end());
 }
 
 static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src) {
@@ -393,9 +378,6 @@ static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src
                        src.lengths.begin(), src.lengths.end());
     dst.splice_types.insert(dst.splice_types.end(),
                             src.splice_types.begin(), src.splice_types.end());
-    dst.intergenic_lengths.insert(dst.intergenic_lengths.end(),
-                                  src.intergenic_lengths.begin(),
-                                  src.intergenic_lengths.end());
 }
 
 // ================================================================
@@ -602,6 +584,7 @@ static ParsedAlignment parse_bam_record(
     if (resolver && resolver->has_sj_blacklist() && !rec.sjs.empty()) {
         if (n_sj_observed) *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
         int32_t n_dropped = filter_blacklisted_sjs(rec.sjs, *resolver, mapped_ref_id);
+        rec.n_sj_blacklisted = static_cast<uint16_t>(n_dropped);
         if (n_sj_blacklisted) *n_sj_blacklisted += n_dropped;
     } else if (n_sj_observed) {
         *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
@@ -1306,12 +1289,27 @@ private:
 
             if (frag.exons.empty()) continue;
 
+            // SRD v2: aggregate per-record blacklist counts into a
+            // per-fragment total so the resolver can promote
+            // SPLICE_UNSPLICED -> SPLICE_ARTIFACT.
+            int32_t frag_n_sj_blacklisted = 0;
+            for (const auto* r : r1_reads)
+                frag_n_sj_blacklisted += r->n_sj_blacklisted;
+            for (const auto* r : r2_reads)
+                frag_n_sj_blacklisted += r->n_sj_blacklisted;
+
             RawResolveResult cr;
+            cr.n_sj_blacklisted = frag_n_sj_blacklisted;
             bool resolved = ctx._resolve_core(
                 frag.exons, frag.introns,
                 frag.genomic_footprint(), cr, scratch);
 
-            if (!resolved) {
+            // SRD v2: _resolve_core now returns true even when t_inds
+            // is empty (truly intergenic).  Treat empty-t_inds as the
+            // legacy "unresolved" path for stats but ALSO append to
+            // the buffer (for unique mappers) so calibration can
+            // categorize the fragment as INTERGENIC.
+            if (!resolved || cr.t_inds.empty()) {
                 // Defer intergenic counting until after all hits
                 // are processed to avoid multi-counting.
                 if (frag.has_introns()) {
@@ -1320,23 +1318,38 @@ private:
                     any_unresolved_unspliced = true;
                 }
 
-                if (is_unique_mapper && !frag.has_introns()) {
-                    int32_t flen = frag.genomic_footprint();
-                    if (flen > 0) {
-                        fraglen_obs.intergenic_lengths.push_back(flen);
-                        stats.n_frag_length_intergenic++;
+                // SRD v2: unique-mapper zero-candidate fragments are
+                // appended to the buffer so that calibration's
+                // geometric categorization can label them INTERGENIC.
+                //
+                // We do NOT set any_hit_resolved here -- the
+                // n_intergenic_unspliced/_spliced telemetry counter
+                // (driven by !any_hit_resolved below) must keep firing
+                // so the PipelineStats accountability sum stays
+                // consistent.  The C++ scorer skips empty-t_inds
+                // fragments silently (n_cand <= 0 early skip) so they
+                // don't increment stat_gated either.
+                if (resolved && is_unique_mapper) {
+                    // Feed intergenic FL into global histogram so the
+                    // Dirichlet prior used by both rna_model and
+                    // gdna_model sees the full library FL distribution.
+                    // Single-block only: paired-end intergenic
+                    // genomic_footprint is unreliable (may include
+                    // arbitrary inter-read gaps).
+                    if (!frag.has_introns()) {
+                        int32_t flen = frag.genomic_footprint();
+                        if (flen > 0) {
+                            fraglen_obs.lengths.push_back(flen);
+                            fraglen_obs.splice_types.push_back(
+                                static_cast<int8_t>(SPLICE_UNSPLICED));
+                            stats.n_frag_length_unambiguous++;
+                        }
                     }
-                }
 
-                if (is_unique_mapper) {
-                    int32_t ig_strand = STRAND_NONE;
-                    for (const auto& eb : frag.exons) {
-                        ig_strand |= eb.strand;
-                    }
-                    if (ig_strand == STRAND_POS || ig_strand == STRAND_NEG) {
-                        strand_obs.intergenic_obs.push_back(static_cast<int8_t>(ig_strand));
-                        strand_obs.intergenic_truth.push_back(static_cast<int8_t>(STRAND_POS));
-                    }
+                    ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
+                    ig_result.num_hits = num_hits;
+                    ig_result.nm = frag.nm;
+                    accumulator.append(ig_result, frag_id);
                 }
 
                 continue;
@@ -1502,7 +1515,6 @@ private:
         stats_dict["n_strand_skipped_ambiguous"] = stats_.n_strand_skipped_ambiguous;
         stats_dict["n_frag_length_unambiguous"] = stats_.n_frag_length_unambiguous;
         stats_dict["n_frag_length_ambiguous"] = stats_.n_frag_length_ambiguous;
-        stats_dict["n_frag_length_intergenic"] = stats_.n_frag_length_intergenic;
         stats_dict["n_multimapper_groups"] = stats_.n_multimapper_groups;
         stats_dict["n_multimapper_alignments"] = stats_.n_multimapper_alignments;
         stats_dict["n_sj_observed"] = stats_.n_sj_observed;
@@ -1515,15 +1527,12 @@ private:
         strand_dict["exonic_spliced_truth"] = vec_to_ndarray(std::move(strand_obs_.exonic_spliced_truth));
         strand_dict["exonic_obs"]           = vec_to_ndarray(std::move(strand_obs_.exonic_obs));
         strand_dict["exonic_truth"]         = vec_to_ndarray(std::move(strand_obs_.exonic_truth));
-        strand_dict["intergenic_obs"]       = vec_to_ndarray(std::move(strand_obs_.intergenic_obs));
-        strand_dict["intergenic_truth"]     = vec_to_ndarray(std::move(strand_obs_.intergenic_truth));
         result["strand_observations"] = strand_dict;
 
         // Fragment length observations
         nb::dict fraglen_dict;
         fraglen_dict["lengths"]            = vec_to_ndarray(std::move(fraglen_obs_.lengths));
         fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
-        fraglen_dict["intergenic_lengths"] = vec_to_ndarray(std::move(fraglen_obs_.intergenic_lengths));
         result["frag_length_observations"] = fraglen_dict;
 
         return result;

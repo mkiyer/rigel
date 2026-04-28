@@ -105,7 +105,6 @@ def _replay_strand_observations(
     for prefix, model in [
         ("exonic_spliced", strand_models.exonic_spliced),
         ("exonic", strand_models.exonic),
-        ("intergenic", strand_models.intergenic),
     ]:
         obs = strand_dict.get(f"{prefix}_obs", [])
         truth = strand_dict.get(f"{prefix}_truth", [])
@@ -124,12 +123,6 @@ def _replay_fraglen_observations(
         frag_length_models.observe_batch(
             np.asarray(lengths, dtype=np.intp),
             np.asarray(splice_types, dtype=np.intp),
-        )
-
-    intergenic_lengths = fraglen_dict.get("intergenic_lengths", [])
-    if len(intergenic_lengths) > 0:
-        frag_length_models.observe_intergenic_batch(
-            np.asarray(intergenic_lengths, dtype=np.intp),
         )
 
 
@@ -173,7 +166,6 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         # Fragment length model training
         "n_frag_length_unambiguous",
         "n_frag_length_ambiguous",
-        "n_frag_length_intergenic",
         # Multimapper
         "n_multimapper_groups",
         "n_multimapper_alignments",
@@ -235,6 +227,10 @@ def scan_and_buffer(
     # have legitimate fragment lengths and must contribute to FL training.
     nrna_arr = index.t_df["is_synthetic"].values.astype("uint8")
     resolve_ctx.set_nrna_status(nrna_arr.tolist())
+
+    # nRNA parent-index wiring (set_nrna_parent_index) is performed by
+    # TranscriptIndex.load() at index-load time, so no need to repeat
+    # it here.
 
     # Create the native scanner
     sj_spec = _sj_tag_to_spec(scan.sj_strand_tag)

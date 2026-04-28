@@ -106,7 +106,6 @@ class TestPipelineNdarrayTransfer:
         total = (
             sm.exonic_spliced.n_observations
             + sm.exonic.n_observations
-            + sm.intergenic.n_observations
         )
         assert total > 0
 
@@ -150,7 +149,6 @@ class TestScanAndBufferNdarrayDtypes:
         total = (
             self.strand_models.exonic_spliced.n_observations
             + self.strand_models.exonic.n_observations
-            + self.strand_models.intergenic.n_observations
         )
         assert total > 0
 
@@ -186,8 +184,6 @@ class TestReplayStrandObservationsNdarray:
             "exonic_spliced_truth": np.array([1, 2, 1, 2], dtype=np.int8),
             "exonic_obs": np.array([1, 2], dtype=np.int8),
             "exonic_truth": np.array([1, 2], dtype=np.int8),
-            "intergenic_obs": np.array([], dtype=np.int8),
-            "intergenic_truth": np.array([], dtype=np.int8),
         }
         _replay_strand_observations(strand_dict, models)
 
@@ -197,7 +193,6 @@ class TestReplayStrandObservationsNdarray:
         assert models.exonic_spliced.neg_pos == 1
         assert models.exonic_spliced.neg_neg == 1
         assert models.exonic.n_observations == 2
-        assert models.intergenic.n_observations == 0
 
     def test_empty_arrays(self):
         """Empty ndarray arrays produce no observations."""
@@ -207,13 +202,10 @@ class TestReplayStrandObservationsNdarray:
             "exonic_spliced_truth": np.array([], dtype=np.int8),
             "exonic_obs": np.array([], dtype=np.int8),
             "exonic_truth": np.array([], dtype=np.int8),
-            "intergenic_obs": np.array([], dtype=np.int8),
-            "intergenic_truth": np.array([], dtype=np.int8),
         }
         _replay_strand_observations(strand_dict, models)
         assert models.exonic_spliced.n_observations == 0
         assert models.exonic.n_observations == 0
-        assert models.intergenic.n_observations == 0
 
     def test_observe_batch_int8_directly(self):
         """StrandModel.observe_batch works with int8 ndarray directly."""
@@ -253,10 +245,9 @@ class TestReplayFraglenObservationsNdarray:
         fraglen_dict = {
             "lengths": np.array([200, 250, 300, 150], dtype=np.int32),
             "splice_types": np.array([0, 2, 2, 0], dtype=np.int8),
-            "intergenic_lengths": np.array([180, 220], dtype=np.int32),
         }
         _replay_fraglen_observations(fraglen_dict, models)
-        assert models.global_model.n_observations == 6  # 4 + 2 intergenic
+        assert models.global_model.n_observations == 4
 
     def test_empty_fraglen_arrays(self):
         """Empty ndarray arrays produce no observations."""
@@ -264,7 +255,6 @@ class TestReplayFraglenObservationsNdarray:
         fraglen_dict = {
             "lengths": np.array([], dtype=np.int32),
             "splice_types": np.array([], dtype=np.int8),
-            "intergenic_lengths": np.array([], dtype=np.int32),
         }
         _replay_fraglen_observations(fraglen_dict, models)
         assert models.global_model.n_observations == 0
@@ -280,7 +270,6 @@ class TestReplayFraglenObservationsNdarray:
                 [int(SpliceType.UNSPLICED), int(SpliceType.SPLICED_ANNOT)],
                 dtype=np.int8,
             ),
-            "intergenic_lengths": np.array([], dtype=np.int32),
         }
         _replay_fraglen_observations(fraglen_dict, models)
         assert models.global_model.n_observations == 2

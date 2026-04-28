@@ -44,6 +44,10 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("read_length", &ResolvedFragment::read_length)
         .def_ro("genomic_footprint", &ResolvedFragment::genomic_footprint)
         .def_ro("genomic_start", &ResolvedFragment::genomic_start)
+        .def_ro("exon_bp_pos", &ResolvedFragment::exon_bp_pos)
+        .def_ro("exon_bp_neg", &ResolvedFragment::exon_bp_neg)
+        .def_ro("tx_bp_pos", &ResolvedFragment::tx_bp_pos)
+        .def_ro("tx_bp_neg", &ResolvedFragment::tx_bp_neg)
         .def_prop_ro("is_chimeric", &ResolvedFragment::get_is_chimeric)
         .def_prop_ro("is_same_strand", &ResolvedFragment::get_is_same_strand)
         .def_prop_ro("is_strand_qualified",
@@ -120,6 +124,12 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("t_is_nrna"),
              "Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).\n"
              "Used to exclude nRNA candidates from FL unanimity check.")
+        .def("set_nrna_parent_index",
+             &FragmentResolver::set_nrna_parent_index,
+             nb::arg("nrna_parent"),
+             "Set per-transcript nRNA parent index (int32; -1 = none).\n"
+             "Synthetic nRNA candidates are derived from real-tx hits\n"
+             "during _resolve_core; synthetics are not in cgranges.")
         .def("build_exon_index", &FragmentResolver::build_exon_index,
              nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),
              nb::arg("cumsum"), nb::arg("lengths"),

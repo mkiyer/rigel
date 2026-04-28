@@ -400,9 +400,22 @@ class TestBuildLoadRoundTrip:
         assert idx1.sj_map == idx2.sj_map
 
     def test_query_all_exons_round_trip(self, round_trip_index):
-        """Query each exon from t_exon_intervals and confirm EXON hits."""
+        """Query each exon from t_exon_intervals and confirm EXON hits.
+
+        Synthetic nRNA transcripts are intentionally absent from the
+        cgranges overlap index (they are derived on-the-fly from real-tx
+        hits via ``nrna_parent_index`` inside the C++ resolver).  Skip
+        them here.
+        """
         idx = round_trip_index
+        is_synth = (
+            idx.t_df["is_synthetic"].to_numpy()
+            if "is_synthetic" in idx.t_df.columns
+            else np.zeros(len(idx.t_df), dtype=bool)
+        )
         for t_idx, exons in idx._t_exon_intervals.items():
+            if t_idx < is_synth.size and is_synth[t_idx]:
+                continue
             for start, end in exons:
                 gi = GenomicInterval("chr1", int(start), int(end), 0)
                 hits = idx.query(gi)

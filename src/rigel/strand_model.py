@@ -390,7 +390,6 @@ class StrandModels:
 
     # Diagnostic sub-models (not used for scoring)
     exonic: StrandModel = field(default_factory=StrandModel)
-    intergenic: StrandModel = field(default_factory=StrandModel)
 
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
@@ -422,7 +421,6 @@ class StrandModels:
 
         # Diagnostic sub-models (finalize for reporting, never for scoring)
         self.exonic.finalize()
-        self.intergenic.finalize()
 
     # ------------------------------------------------------------------
     # Delegation to the RNA strand model
@@ -460,13 +458,12 @@ class StrandModels:
         """JSON-serializable summary of strand models.
 
         The primary ``exonic_spliced`` model is used for scoring.
-        ``exonic`` and ``intergenic`` are diagnostic only.
+        ``exonic`` is diagnostic only.
         """
         return {
             "exonic_spliced": self.exonic_spliced.to_dict(),
             "diagnostics": {
                 "exonic": self.exonic.to_dict(),
-                "intergenic": self.intergenic.to_dict(),
             },
         }
 
@@ -508,10 +505,4 @@ class StrandModels:
             f"{self.exonic.n_observations:,} obs, "
             f"p_r1_sense={self.exonic.p_r1_sense:.4f}, "
             f"specificity={self.exonic.strand_specificity:.4f}"
-        )
-        logger.info(
-            f"  [intergenic] (diagnostic)  "
-            f"{self.intergenic.n_observations:,} obs, "
-            f"p_r1_sense={self.intergenic.p_r1_sense:.4f}, "
-            f"specificity={self.intergenic.strand_specificity:.4f}"
         )
