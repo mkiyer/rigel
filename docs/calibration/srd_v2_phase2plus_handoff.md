@@ -416,6 +416,18 @@ Pure deletion. Sequence after Phase 4 acceptance.
 
 ### 7a. nRNA pool pollution
 
+> **UPDATE 2026-04-28 (SRD v3 Phase 1 landed):** the diagnostic
+> referenced below was renamed to transcript frame —
+> `n_pool_intronic_strand_sense / _antisense / _ambig`. The old
+> `n_pool_intronic_strand_pos / _neg` reflected which genomic strand
+> the local gene happened to live on (a coordinate artifact); the new
+> labels compare the read's own genomic strand against the
+> overlapping transcript's strand and are therefore directly
+> interpretable as a nRNA-vs-gDNA strand-asymmetry signal. The full
+> resolution of this limitation (a joint FL × strand mixture) is
+> scheduled for v3 Phase 2; see `srd_v3_early_plan.md` and
+> `srd_v3_phase1_strand_relabel.md`.
+
 The 1-D mixture `pool ∝ π·gDNA + (1−π)·RNA_FL` cannot distinguish gDNA
 from nascent RNA when their fragment-length distributions overlap, which
 they typically do (both span 100–600 bp from sonication). nRNA fragments
@@ -424,9 +436,10 @@ inflating fitted `π`.
 
 This is a **structural identifiability limit**, not a bug — fixing it
 requires a strand-aware mixture or a third component, both out of scope
-for v2. Surface it via the new `n_pool_intronic_strand_pos` /
-`n_pool_intronic_strand_neg` diagnostic so the user can spot nRNA-heavy
-libraries (extreme strand asymmetry inside the INTRONIC bucket given high SS).
+for v2. Surface it via the new `n_pool_intronic_strand_sense` /
+`n_pool_intronic_strand_antisense` diagnostic so the user can spot
+nRNA-heavy libraries (extreme strand asymmetry inside the INTRONIC
+bucket given high SS).
 
 ### 7b. SPLICE_ARTIFACT block-disjunction not preserved in buffer
 

@@ -1,5 +1,37 @@
 # SRD v2 — Chimera Leak Into Calibration Pool: Diagnosis & Plan
 
+> **STATUS: REJECTED / SUPERSEDED (2026-04-28).**
+>
+> Option B (introducing `CHIMERA_CIS_INTERGENIC` and `CHIMERA_CIS_NOVEL_SJ`
+> types) was rejected. Rationale:
+>
+> - In short-read PE data with `max_frag_length ≤ 1 kb`, a fragment whose
+>   two reads sit within that distance on the same contig is, by
+>   definition, a contiguous piece of DNA. Calling it a "chimera"
+>   because of an unannotated splice or a read-through into intergenic
+>   space misdiagnoses the event — the simpler explanations are
+>   annotation error, unannotated isoforms / TSSs / TTSs, or unannotated
+>   splice junctions.
+> - True chimeras (case D in the table below — disjoint exon sets across
+>   blocks) remain handled by the existing `detect_chimera()` and are
+>   not affected by this rejection.
+> - Trying to root-cause every long-genomic-footprint fragment is a
+>   losing game: we are at the whim of the gene annotation, and any
+>   classification we add will misfire on the next annotation refresh.
+>
+> **Adopted policy (SRD v2 Phase 7):** drop fragments with
+> `genomic_footprint > max_frag_length` from FL training for both the
+> RNA and gDNA models. The drop count is reported as
+> `CalibrationResult.n_pool_dropped_out_of_range` for telemetry. The
+> `n_pool` denominator now reflects the in-range subset that actually
+> fed the 1-D mixture EM. No new chimera enum values, no per-transcript
+> max-intron lookup, no novel-SJ heuristic.
+>
+> Implementation: [src/rigel/calibration/_simple.py](../../src/rigel/calibration/_simple.py#L155-L175),
+> [src/rigel/frag_length_model.py](../../src/rigel/frag_length_model.py#L149-L165) (already in effect for the per-category models).
+>
+> The original analysis below is preserved for historical context.
+
 ## Problem
 
 In Phase 4 validation we observed ~5–11% of the SRD v2 pool fragments

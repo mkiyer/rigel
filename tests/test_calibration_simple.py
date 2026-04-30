@@ -19,8 +19,7 @@ from rigel.calibration import CalibrationResult, calibrate_gdna
 from rigel.calibration._categorize import (
     FragmentCategory,
     N_CATEGORIES,
-    N_STRAND_LABELS,
-    StrandLabel,
+    N_FRAGMENT_STRANDS,
 )
 from rigel.config import BamScanConfig
 from rigel.frag_length_model import FragmentLengthModel
@@ -115,7 +114,7 @@ class TestSchema:
         assert isinstance(cal.global_fl_model, FragmentLengthModel)
         assert cal.gdna_fl_quality in {"good", "weak", "fallback"}
         assert 0.0 <= cal.strand_specificity <= 1.0
-        assert cal.category_counts.shape == (N_CATEGORIES, N_STRAND_LABELS)
+        assert cal.category_counts.shape == (N_CATEGORIES, N_FRAGMENT_STRANDS)
         assert cal.category_counts.dtype.kind == "i"
         assert cal.n_multimap_excluded >= 0
         assert cal.n_spliced >= 0
@@ -123,7 +122,7 @@ class TestSchema:
         assert 0.0 <= cal.pi_pool <= 1.0
         assert isinstance(cal.mixture_converged, bool)
         assert cal.mixture_iterations >= 0
-        assert cal.exon_fit_tolerance_bp == 5
+        assert cal.exon_fit_tolerance_bp == 0
         assert cal.fl_prior_ess == 500.0
 
     def test_no_v5_fields(self, tmp_path):
@@ -149,8 +148,8 @@ class TestSchema:
         assert "gdna_fl_quality" in d
         assert "pi_pool" in d
         assert "category_counts" in d
-        assert len(d["category_counts"]) == N_CATEGORIES * N_STRAND_LABELS
-        assert d["category_counts_shape"] == [N_CATEGORIES, N_STRAND_LABELS]
+        assert len(d["category_counts"]) == N_CATEGORIES * N_FRAGMENT_STRANDS
+        assert d["category_counts_shape"] == [N_CATEGORIES, N_FRAGMENT_STRANDS]
 
 
 # ---------------------------------------------------------------------------
@@ -210,14 +209,17 @@ class TestLibraryAgnostic:
         # the buffer as INTERGENIC; no separate `n_intergenic_unique`
         # accumulator merge.
         cats = cal.category_counts
-        expected_pool = (
+        expected_pool_categorized = (
             int(cats[int(FragmentCategory.INTERGENIC)].sum())
             + int(cats[int(FragmentCategory.INTRONIC)].sum())
             + int(cats[int(FragmentCategory.EXON_INCOMPATIBLE)].sum())
         )
+        # SRD v2 Phase 7: n_pool is the in-range denominator that fed
+        # the mixture EM (categorized minus OOR drops).
+        expected_pool = expected_pool_categorized - cal.n_pool_dropped_out_of_range
         assert cal.n_pool == expected_pool, (
             f"n_pool={cal.n_pool} != "
-            f"INTERGENIC+INTRONIC+EXON_INCOMPATIBLE={expected_pool}"
+            f"INTERGENIC+INTRONIC+EXON_INCOMPATIBLE - OOR={expected_pool}"
         )
 
     def test_exon_contained_excluded_from_pool(self, tmp_path):
@@ -238,11 +240,13 @@ class TestLibraryAgnostic:
         )
         assert n_exon_contained >= 0  # tolerate zero on tiny scenarios
 
-        # Pool excludes the entire EXON_CONTAINED row.
+        # Pool excludes the entire EXON_CONTAINED row. n_pool is the
+        # in-range denominator (after OOR drop, SRD v2 Phase 7).
         expected_pool = (
             int(cal.category_counts[int(FragmentCategory.INTERGENIC)].sum())
             + int(cal.category_counts[int(FragmentCategory.INTRONIC)].sum())
             + int(cal.category_counts[int(FragmentCategory.EXON_INCOMPATIBLE)].sum())
+            - cal.n_pool_dropped_out_of_range
         )
         assert cal.n_pool == expected_pool
 

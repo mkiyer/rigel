@@ -1,0 +1,23 @@
+# Benchmark: VCaP pristine oracle BAM — exercise SRD calibration on
+# perfect-input data (no alignment errors). Two conditions:
+#   * gdna_none_ss_0.99_nrna_none   — 20M RNA, 0 gDNA  (truth π_gdna ≈ 0)
+#   * gdna_dna20m_ss_0.99_nrna_none — 20M RNA, 20M gDNA (truth π_gdna ≈ 0.5)
+
+benchmark_dir: /scratch/mkiyer_root/mkiyer0/shared_data/rigel/sim_vcap/pristine
+rigel_index: /scratch/mkiyer_root/mkiyer0/shared_data/rigel/rigel_index
+
+# Oracle BAM lives directly under each condition dir
+bam_relpath: sim_oracle.bam
+
+threads: 8
+seed: 42
+
+rigel_configs:
+  oracle_vbem:
+    em_mode: vbem
+    emit_locus_stats: true
+
+analysis:
+  output_dir: results/vcap_pristine_oracle
+  log2_pseudocount: 1.0
+  parse_fastq_truth: false

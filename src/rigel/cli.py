@@ -353,7 +353,19 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "intergenic_total": stats.n_intergenic,
             "mrna_fraction": round(total_mrna / total_all, 6) if total_all > 0 else 0.0,
             "nrna_fraction": round(total_nrna / total_all, 6) if total_all > 0 else 0.0,
-            "gdna_fraction": round(total_gdna / total_all, 6) if total_all > 0 else 0.0,
+            # gDNA contamination = EM-assigned genic gDNA + intergenic.
+            # Intergenic fragments are gDNA by construction (no transcript
+            # overlap), so excluding them here would visually halve the
+            # observed contamination on libraries with substantial gDNA.
+            # ``gdna_em_fraction`` exposes the EM-only portion separately
+            # for users who want to disambiguate the two pools.
+            "gdna_fraction": round(
+                (total_gdna + stats.n_intergenic) / total_all, 6
+            ) if total_all > 0 else 0.0,
+            "gdna_em_fraction": round(total_gdna / total_all, 6) if total_all > 0 else 0.0,
+            "intergenic_fraction": round(
+                stats.n_intergenic / total_all, 6
+            ) if total_all > 0 else 0.0,
         },
     }
     with open(summary_path, "w") as f:

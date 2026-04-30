@@ -1,5 +1,41 @@
 # TODO
 
+
+## Calibration
+
+Currently, calibration does a good job of obtaining high confidence gDNA fragments from which to train the gDNA FL distribution. However, the calibration system fails to accomplish its other main objective -- estimate locoregional gDNA levels within each genomic region. Locoregional gDNA estimates are what makes up the "prior" used in the EM. If we imagine a total amount of "prior" weight (c_base=10 for example), we wish to divide thus first between gDNA and total RNA (total RNA = mature RNA and nascent RNA). I think the first priority is to accurately estimate gDNA levels during calibration. We are making progress towards accurate gDNA estimation but we have not yet achieved this. Starting from the simple mini-genome single multi-exonic transcript case is helpful, but this is just the beginning. Currently, gDNA is estimated from intergenic, intronic, and exon-incompatible fragments. There is gDNA present as fragments completely contained within exons (exon-contained category) but these fragments are not utilized. Thus there is a population of gDNA that is not being estimated and is unaccounted for. Our strategy needs to estimate gDNA levels without being "blind" to certain regions of gDNA. Our intention is to eventually predict gDNA in all regions -- including the exon-contained regions where it is most difficult to predict. Having a reasonably accurate "pool level" estimate of gDNA is critical. First, we need to separate gDNA from RNA (RNA = mature RNA and nascent RNA). Then, we may need to distinguish nascent from mature RNA but that is a separate concern. So now we need to design a robust gDNA estimation system that will work for both unstranded and stranded libraries. Let's design it. Problem definition -- given a genomic region (e.g. "Locus") or set of genomic regions (e.g. a "MultiLocus") estimate the fraction of gDNA vs total RNA in the locus.
+
+Fragments need to be categorized first:
+
+Spliced fragments
+- artifacts (splicing blacklist -> artifact category)
+- mature RNA
+
+Implicitly spliced fragments / non-contiguous alignment blocks
+- intron within unsequenced gap between reads -> spliced equivalent
+- other out-of-range fragments -> unannotated isoforms, chimeras, etc. -> held out of calibration
+
+Unspliced fragments: aligned blocks to contiguous genomic region, no intron within unsequenced gap, fragment length within limit
+- intergenic (gDNA only)
+- overlapping intergenic AND transcript (gDNA vs extended transcript start/end)
+- contained within transcript
+-- entirely exon-contained (gdna + mature rna + nascent rna)
+-- partially overlapping exon (gdna + nascent rna)
+-- completely intronic (gdna + nascent RNA)
+
+
+### Region "math"
+
+Entire genome needs to be partitioned into contiguous non-overlapping "regions". 
+
+Genomic region definition:
+- ref, start, end
+- tx_pos_bp, tx_neg_bp (bp of overlapping transcript on + and - strand)
+- exon_pos_bp, exon_neg_bp (bp of overlapping exon on + and - strand)
+- n_unspliced
+
+
+
 ## Implicit splicing
 
 - Not handled yet

@@ -845,6 +845,7 @@ def run_pipeline(
         index,
         frag_length_models,
         strand_models.strand_specificity,
+        read1_sense=bool(strand_models.read1_sense),
         exon_fit_tolerance_bp=cal_cfg.exon_fit_tolerance_bp,
         fl_prior_ess=cal_cfg.fl_prior_ess,
         max_iter=cal_cfg.max_iter,

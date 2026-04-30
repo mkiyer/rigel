@@ -16,9 +16,9 @@ from ..index import TranscriptIndex
 from ..splice import SPLICE_UNSPLICED
 from ._categorize import (
     FragmentCategory,
+    FragmentStrand,
     N_CATEGORIES,
-    N_STRAND_LABELS,
-    StrandLabel,
+    N_FRAGMENT_STRANDS,
     categorize_chunk,
 )
 from ._fl_empirical_bayes import build_gdna_fl, build_global_fl, build_rna_fl
@@ -39,7 +39,8 @@ def calibrate_gdna(
     frag_length_models: FragmentLengthModels,
     strand_specificity: float,
     *,
-    exon_fit_tolerance_bp: int = 5,
+    read1_sense: bool = True,
+    exon_fit_tolerance_bp: int = 0,
     fl_prior_ess: float = 500.0,
     max_iter: int = 1000,
     tol: float = 1e-4,
@@ -70,7 +71,12 @@ def calibrate_gdna(
         to the global FL prior; no separate ``min_pool_size`` gate is
         needed.
     """
-    del index  # unused after Phase 3 schema change (kept in signature for API stability)
+    # Per-transcript strand lookup, needed for the per-T EXON_CONTAINED
+    # check inside `categorize_chunk`.  After this snapshot the full
+    # index object is unused (the schema-change comment from Phase 3
+    # still applies to everything else).
+    t_strand_arr = np.asarray(index.t_to_strand_arr)
+    del index
     max_size = int(frag_length_models.max_size)
     n_bins = max_size + 1
 
@@ -96,7 +102,9 @@ def calibrate_gdna(
 
         cc = categorize_chunk(
             chunk,
+            t_strand_arr=t_strand_arr,
             exon_fit_tolerance_bp=exon_fit_tolerance_bp,
+            read1_sense=read1_sense,
         )
         if not cc.keep.any():
             continue
@@ -125,13 +133,14 @@ def calibrate_gdna(
     frag_length = np.concatenate(len_chunks)
 
     # 2-D (category, strand) tally; categorize_chunk only labels
-    # unique-mapper UNSPLICED fragments, so this matches the pre-filter.
+    # unique-mapper UNSPLICED fragments with known read strand, so this
+    # matches the pre-filter.
     flat = (
-        category.astype(np.intp) * N_STRAND_LABELS + strand.astype(np.intp)
+        category.astype(np.intp) * N_FRAGMENT_STRANDS + strand.astype(np.intp)
     )
     cat_counts = np.bincount(
-        flat, minlength=N_CATEGORIES * N_STRAND_LABELS
-    ).astype(np.int64).reshape((N_CATEGORIES, N_STRAND_LABELS))
+        flat, minlength=N_CATEGORIES * N_FRAGMENT_STRANDS
+    ).astype(np.int64).reshape((N_CATEGORIES, N_FRAGMENT_STRANDS))
 
     # ---- Pass 1: pool assembly -----------------------------------------
     # Pool = INTERGENIC ∪ INTRONIC ∪ EXON_INCOMPATIBLE.
@@ -141,6 +150,11 @@ def calibrate_gdna(
     # are trying to recover.  SRD v2 intentionally does not subdivide on
     # the antisense sub-label here; that is the v2.1 follow-up
     # (SS-gated antisense-exonic pool inclusion).
+    # SRD v3 Phase 1: strand sub-label is now in transcript frame
+    # (SENSE / ANTISENSE / AMBIG); the pool membership rule itself is
+    # still strand-agnostic.  Per-bucket strand asymmetry is surfaced
+    # via the diagnostic counters below; the upcoming v3 Phase 2 joint
+    # mixture will consume the strand axis directly.
     pool_mask = (
         (category == int(FragmentCategory.INTERGENIC))
         | (category == int(FragmentCategory.INTRONIC))
@@ -155,7 +169,14 @@ def calibrate_gdna(
     # saturated long fragments into bin `max_size`, producing a
     # non-physical gDNA_FL with mode=0. With `frag_length` now sourced
     # from `genomic_footprint` (always >= 0), the only out-of-range case
-    # is fragments longer than `max_size` (typically <0.1% of pool).
+    # is fragments longer than `max_size`.
+    #
+    # POLICY (SRD v2 Phase 7): fragments with `genomic_footprint >
+    # max_frag_length` are biologically anomalous (true chimeras,
+    # unannotated splicing, read-through into intergenic, annotation
+    # errors). We do not attempt to root-cause classify them — the hard
+    # decision is to exclude them from FL training entirely. The dropped
+    # count is reported via `n_pool_dropped_out_of_range` for visibility.
     in_range = (pool_lens >= 0) & (pool_lens <= max_size)
     n_pool_dropped_out_of_range = int(pool_lens.size - in_range.sum())
     pool_hist = np.bincount(
@@ -165,15 +186,25 @@ def calibrate_gdna(
 
     # SRD v2: zero-candidate (intergenic) fragments flow through the
     # buffer as INTERGENIC and are already counted in `pool_lens`.
+    #
+    # `n_pool` is the denominator that actually fed the 1-D mixture EM
+    # (i.e., in-range pool only). OOR fragments are tracked separately
+    # via `n_pool_dropped_out_of_range`.
+    n_pool = n_pool_categorized - n_pool_dropped_out_of_range
 
-    n_pool = n_pool_categorized
-
-    # ---- Diagnostic: intronic strand asymmetry (nRNA pollution surface)
-    n_pool_intronic_strand_pos = int(
-        cat_counts[int(FragmentCategory.INTRONIC), int(StrandLabel.POS)]
+    # ---- Diagnostic: intronic strand asymmetry (nRNA pollution surface).
+    # SRD v3 Phase 1: now expressed in transcript frame, so SENSE >>
+    # ANTISENSE in a stranded library is a direct nRNA-contamination
+    # signal (where v2 saw a meaningless POS vs NEG asymmetry tied to
+    # which genomic strand the local genes happened to live on).
+    n_pool_intronic_strand_sense = int(
+        cat_counts[int(FragmentCategory.INTRONIC), int(FragmentStrand.SENSE)]
     )
-    n_pool_intronic_strand_neg = int(
-        cat_counts[int(FragmentCategory.INTRONIC), int(StrandLabel.NEG)]
+    n_pool_intronic_strand_antisense = int(
+        cat_counts[int(FragmentCategory.INTRONIC), int(FragmentStrand.ANTISENSE)]
+    )
+    n_pool_intronic_strand_ambig = int(
+        cat_counts[int(FragmentCategory.INTRONIC), int(FragmentStrand.AMBIG)]
     )
 
     # ---- Pass 2: 1-D mixture EM (always run; EB handles small pools) ---
@@ -221,7 +252,8 @@ def calibrate_gdna(
     logger.info(
         "[CAL-SRD] quality=%s SS=%.3f n_pool=%d "
         "pi=%.4f conv=%s n_iter=%d categories=%s n_multimap_excluded=%d "
-        "n_spliced=%d n_pool_dropped_out_of_range=%d intronic_strand=(+%d,-%d)",
+        "n_spliced=%d n_pool_dropped_out_of_range=%d "
+        "intronic_strand=(sense=%d,antisense=%d,ambig=%d)",
         quality,
         float(strand_specificity),
         n_pool,
@@ -232,8 +264,9 @@ def calibrate_gdna(
         n_multimap_excluded,
         n_spliced,
         n_pool_dropped_out_of_range,
-        n_pool_intronic_strand_pos,
-        n_pool_intronic_strand_neg,
+        n_pool_intronic_strand_sense,
+        n_pool_intronic_strand_antisense,
+        n_pool_intronic_strand_ambig,
     )
 
     return CalibrationResult(
@@ -249,8 +282,9 @@ def calibrate_gdna(
         pi_pool=pi,
         mixture_converged=mixture_converged,
         mixture_iterations=mixture_iterations,
-        n_pool_intronic_strand_pos=n_pool_intronic_strand_pos,
-        n_pool_intronic_strand_neg=n_pool_intronic_strand_neg,
+        n_pool_intronic_strand_sense=n_pool_intronic_strand_sense,
+        n_pool_intronic_strand_antisense=n_pool_intronic_strand_antisense,
+        n_pool_intronic_strand_ambig=n_pool_intronic_strand_ambig,
         n_pool_dropped_out_of_range=n_pool_dropped_out_of_range,
         exon_fit_tolerance_bp=int(exon_fit_tolerance_bp),
         fl_prior_ess=float(fl_prior_ess),
@@ -305,15 +339,16 @@ def _fallback_result(
         global_fl_model=global_fl,
         gdna_fl_quality="fallback",
         strand_specificity=float(strand_specificity),
-        category_counts=np.zeros((N_CATEGORIES, N_STRAND_LABELS), dtype=np.int64),
+        category_counts=np.zeros((N_CATEGORIES, N_FRAGMENT_STRANDS), dtype=np.int64),
         n_multimap_excluded=int(n_multimap_excluded),
         n_spliced=0,
         n_pool=0,
         pi_pool=0.0,
         mixture_converged=False,
         mixture_iterations=0,
-        n_pool_intronic_strand_pos=0,
-        n_pool_intronic_strand_neg=0,
+        n_pool_intronic_strand_sense=0,
+        n_pool_intronic_strand_antisense=0,
+        n_pool_intronic_strand_ambig=0,
         n_pool_dropped_out_of_range=0,
         exon_fit_tolerance_bp=int(exon_fit_tolerance_bp),
         fl_prior_ess=float(fl_prior_ess),

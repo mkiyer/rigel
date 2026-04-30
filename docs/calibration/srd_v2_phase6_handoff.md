@@ -100,7 +100,17 @@ Max absolute change ≤4.2%; EM is robust to the calibration shift.
 
 ## 3. Open issues / known anomalies
 
-1. **Q3 chimera leak (PENDING approval)** — `docs/calibration/srd_v2_chimera_leak_plan.md`. Option B = extend `detect_chimera` with `CIS_INTERGENIC` + `CIS_NOVEL_SJ` types. Most likely cause of residual pi_pool mis-monotonicity.
+1. **Q3 chimera leak — RESOLVED 2026-04-28 (REJECTED → policy adopted).**
+   Option B in `docs/calibration/srd_v2_chimera_leak_plan.md` was
+   rejected: in short-read PE data, contiguous-genome fragments with
+   anomalously large `genomic_footprint` are overwhelmingly explained
+   by annotation gaps (unannotated splicing, isoforms, TSS/TTS,
+   read-through into intergenic), not true chimeras. Adopted policy:
+   drop fragments with `genomic_footprint > max_frag_length` from FL
+   training for both RNA and gDNA models. Drop count surfaced as
+   `CalibrationResult.n_pool_dropped_out_of_range`; `n_pool` tightened
+   to the in-range denominator that actually fed the mixture EM.
+   See the rejection banner in `srd_v2_chimera_leak_plan.md`.
 2. **`fragment_length.intergenic` block removed** from `summary.json` (BASE 9 blocks → NEW 8). Consistent with Q2 (intergenic now folded into `global`). Consider restoring as a diagnostic-only block.
 3. **FL mixture iterations spike** — `mixture_iterations: 778` at dna00m (typical 50–200). Convergence works but slow; perf optimization opportunity, not a bug.
 4. **`n_pool_dropped_out_of_range`** essentially unchanged BASE↔NEW (~0.07–0.5% of pool). Q3 territory.
@@ -126,9 +136,10 @@ ls /scratch/mkiyer_root/mkiyer0/shared_data/rigel/srd_v2_phase6/default/*/quant.
 
 ### 4.1 Likely next tasks (in priority order)
 
-1. **Approve / implement Q3 chimera leak plan** — `docs/calibration/srd_v2_chimera_leak_plan.md`.
+1. ~~Approve / implement Q3 chimera leak plan~~ — **REJECTED 2026-04-28**;
+   superseded by SRD v2 Phase 7 OOR-drop policy (see §3 item 1).
 2. **Run Phase 4 dna40m + dna80m** to complete the sweep (use existing `run_sweep.sh`, just extend `LIBS=()`).
-3. **Re-run analyzer** once Q3 lands: `python scripts/calibration/analyze_srd_v2.py`.
+3. **Re-run analyzer** with Phase 7 (`n_pool` is now in-range only): `python scripts/calibration/analyze_srd_v2.py`.
 4. **Investigate FL mixture iteration cap** if dna40m/dna80m show >1000 iterations.
 
 ### 4.2 Key paths quick-reference
@@ -140,7 +151,7 @@ ls /scratch/mkiyer_root/mkiyer0/shared_data/rigel/srd_v2_phase6/default/*/quant.
 | Baseline (BASE) | `/scratch/mkiyer_root/mkiyer0/shared_data/rigel/srd_v2_vcap_mixture/default/<lib>/` |
 | Phase 4 sweep script | `/scratch/mkiyer_root/mkiyer0/shared_data/rigel/srd_v2_phase6/run_sweep.sh` |
 | Source BAMs | `/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/runs/human/<lib>/rigel/annotated.bam` |
-| Q3 plan | `docs/calibration/srd_v2_chimera_leak_plan.md` |
+| Q3 plan (REJECTED, see banner) | `docs/calibration/srd_v2_chimera_leak_plan.md` |
 | Q5 plan (implemented) | `docs/calibration/nrna_derive_plan.md` |
 
 ### 4.3 Critical session facts (for the next agent)
@@ -151,3 +162,8 @@ ls /scratch/mkiyer_root/mkiyer0/shared_data/rigel/srd_v2_phase6/default/*/quant.
 - **Order in `_resolve_core` matters**: nRNA derivation must run AFTER chimera detection (else nRNAs mask cis-chimeras) AND AFTER strand-bp accumulation (else nRNAs pollute calibration counts).
 - **2 golden regressions** were intentionally regenerated for Q5: combo_moderate, combo_extreme.
 - **Pre-existing test failure** unrelated to this work: `tests/test_calibration.py::TestStrandLLR::test_biased_toward_ss_favors_rna`.
+- **Phase 7 (2026-04-28)**: `CalibrationResult.n_pool` is now the in-range
+  denominator (i.e., `n_pool_categorized - n_pool_dropped_out_of_range`).
+  Anything reading `n_pool` from older `summary.json` should be aware of
+  the semantic shift. The Q3 chimera-leak plan was rejected in favor of
+  this simpler drop-by-max-frag-length policy.

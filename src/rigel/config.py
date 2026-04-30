@@ -170,7 +170,7 @@ class CalibrationConfig:
     #: unspliced fragment is judged "exon-compatible" if at least one
     #: candidate transcript's annotated exons cover the read up to this
     #: many bp of slop, i.e. ``read_length - max(exon_bp) ≤ tol``.
-    exon_fit_tolerance_bp: int = 5
+    exon_fit_tolerance_bp: int = 0
 
     #: Effective sample size (ESS) for the global fragment-length prior.
     #: The global FL histogram is rescaled to this many pseudo-observations

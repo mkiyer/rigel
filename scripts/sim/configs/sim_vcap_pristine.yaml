@@ -8,14 +8,14 @@
 # ── Inputs ────────────────────────────────────────────────────
 genome: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genome_controls.fasta.bgz
 gtf: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genes_controls.gtf.gz
-outdir: /scratch/mkiyer_root/mkiyer0/shared_data/rigel_benchmarks/ccle_vcap_pristine
+outdir: /scratch/mkiyer_root/mkiyer0/shared_data/rigel/sim_vcap/pristine
 
 # ── Transcript filter ─────────────────────────────────────────
 transcript_filter: all
 
 # ── Simulation parameters ─────────────────────────────────────
 simulation:
-  n_rna_fragments: 50_000_000
+  n_rna_fragments: 20_000_000
   sim_seed: 42
   frag_mean: 250
   frag_std: 50
@@ -28,19 +28,19 @@ simulation:
 abundance:
   mode: file
   seed: 42
-  file: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/runs/human/ccle_vcap_prostate/salmon/quant.sf.gz
+  file: /scratch/mkiyer_root/mkiyer0/shared_data/rigel/sim_vcap/abundance.tsv.gz
 
 # ── gDNA contamination ────────────────────────────────────────
 gdna:
-  rates: [0.0]
-  rate_labels: [none]
+  rates: [0.0, 1.0]
+  rate_labels: [none, dna20m]
   frag_mean: 250
   frag_std: 100
   frag_min: 100
   frag_max: 1000
 
 # ── Strand specificity ───────────────────────────────────────
-strand_specificities: [0.9]
+strand_specificities: [0.99]
 
 # ── Nascent RNA spike-in sweep ────────────────────────────────
 nrna:
