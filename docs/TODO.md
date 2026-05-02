@@ -48,6 +48,10 @@ Type:
 - INTRON
 - EXON
 
+### Calibration region splicing map
+
+
+
 
 ### Input fragment categorization 
 
