@@ -1,5 +1,84 @@
 # TODO
 
+## Calibration
+
+Rigel has a calibration module with three goals:
+1) estimate the gDNA fragment length (FL) distribution
+2) estimate the global gDNA fraction
+3) store data that will be used to estimate local/regional (locoregional) gDNA prior to running the EM
+
+Currently the calibration module successfully completes task #1. Global and locoregional gDNA are not properly estimated. This PR is aimed at improving calibration to solve these problems.
+
+### Calibration region index
+
+To collect the data we need for calibration, we need to resurrect a modified version of the "region partition" approach that was used in a prior version of calibration.
+
+We need to partition the genome into:
+- transcribed (exons)
+- non-transcribed (intergenic or introns)
+
+The reference annotation provides a list of transcripts. Each transcripts contains a list of exons.
+
+We must first build an index by iterating over transcripts and exons. A general algorithm is:
+
+1) Cluster overlapping transcripts (either strand). Clusters of overlapping transcripts are used to define 'intergenic' vs 'genic' space within the genome. Intervening contigous regions between clusters of overlapping transcripts comprise 'intergenic' space. 
+
+2) Within each cluster of overlapping transcripts, cluster overlapping exons (either strand) into contiguous regions. These by definition are 'transcribed/exon' regions. The intervening regions are 'non-transcribed/intron' regions.
+
+Our index should therefore define:
+1) intergenic (non-transcribed) regions
+2) intronic (non-transcribed) regions
+3) exon (transcribed) regions
+
+Each region therefore should have the following information:
+
+Coordinates:
+- ref (int which maps to string (chromosome name))
+- start (int)
+- end (int) 
+
+Strand:
+- NONE (intergenic)
+- POS (forward, +, positive)
+- NEG (reverse, -, negative)
+- AMBIG (region contains transcripts or exons on both strands)
+
+Type:
+- INTERGENIC
+- INTRON
+- EXON
+
+
+### Input fragment categorization 
+
+The BAM scanning phase parses BAM records and creates "fragments" which are representations of paired-end read alignments.
+
+The three main categories of fragments are
+- spliced: validated (non artifact) spliced fragments
+- unspliced: fragments that align to a contiguous genomic region with no annotated introns, within a user-defined fragment length limit (~1kb)
+- excluded: unmapped, chimera, artifact, and other types of fragments that we omit from calibration
+
+To collect calibration data, we iterate over fragments and map them onto calibration regions using the calibration region index. After excluding fragments that cannot be used for calibration, we are left with 'spliced' and 'unspliced' fragments.
+
+### Spliced fragments
+
+Spliced fragments are regarded as "pure RNA". They are used to estimate the fraction of total fragments that can be attributed to RNA in a particular region.
+
+
+### Unspliced fragments
+
+Unspliced fragments need to be associated with calibration regions using genomic overlap. For each fragment, we query the calibration region index (cgranges) and find the overlapping calibration intervals. We can then categorize the fragment as:
+
+- *intergenic only* ~ ONLY overlaps intergenic intervals, fragment regarded as "pure" gDNA, useful for calibration
+- *intronic only* ~ ONLY overlaps intronic intervals, this is either gDNA or nascent RNA (nRNA), useful for calibration
+- *exon only* ~ entirely contained within exon intervals, this can be gdna or nRNA or mature RNA (mRNA), to be determined by the EM
+
+Fragments may overlap multiple regions with different types:
+
+- *(intron AND exon)* OR intergenic: this is very useful for calibration and occurs when a fragment overlaps an intron AND an exon (and possibly intergenic region as well). Previously, this was referred to as an "exon incompatible" fragment. Now, we will refer to it as an 'INTRON_EXON' fragment. Fragments that overlap intron AND exon regions can still be used if they also overlap intergenic regions (this will be rare).
+
+- *intergenic + exon*: currentl NOT useful for calibration as these are compatible with gDNA or as an unannotated extension of a transcript start site or end site
+
 
 ## Calibration
 
@@ -248,9 +327,6 @@ A fraction of splice junctions are "unannotated" in that they don't have exact m
 - (medium) how much 'anchor' on either side of the intron?
 - (hard) does this junction match any of the 'blacklist' splice junctions -- requires building a splice junction blacklist.
 
-### False positive splice junctions
-
-We can "blacklist" splice junction artifacts by doing genome-wide mapping. Align to the genome and detect cases where gDNA sequence -> spliced alignment (artifact). Compile a "blacklist" from these cases.
 
 
 
