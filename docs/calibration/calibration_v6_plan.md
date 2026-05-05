@@ -478,7 +478,11 @@ back, do not yet wire it into the scanner.
   - `RegionType(IntEnum)`: `INTERGENIC=0`, `INTRON=1`, `EXON=2`.
   - `RegionStrand(IntFlag)`: `NONE=0`, `POS=1`, `NEG=2`, `AMBIG=3`.
   - `emit_regions(ref, layout) -> Iterator[RegionRecord]` consumer of the
-    layout iterator.
+    layout iterator.  Per-genic-span partition uses an **endpoint event
+    sweep** (O(E log E) time, O(E) memory in the number of intervals;
+    NEVER allocates per-base arrays) so that mega-loci such as HLA — where
+    a single genic span can exceed a few Mb — never trigger a transient
+    multi-hundred-MB allocation.
 - `src/rigel/index.py`:
   - `_GenicSpan`, `_IntergenicSpan` frozen dataclasses.
   - `_iter_reference_layout(ref_length, transcripts)` — single sweep
@@ -496,7 +500,16 @@ new tests green; protected suite green.
 ### M2 — Region index persistence + load validation
 
 **Scope:** load and validate `regions.feather` on `TranscriptIndex.load()`;
-build the cgranges/RegionIndex; bump `INDEX_FORMAT_VERSION`.
+attach `region_df`, `ref_lengths`, and `ref_name_to_id` to the index;
+bump `INDEX_FORMAT_VERSION`.
+
+The load-time invariant — per-reference, regions are sorted, non-
+overlapping, and tile `[0, ref_lengths[ref])` exactly — is what lets M3
+use a **native per-reference CSR** (`region_index.h`, `upper_bound` plus
+linear scan) for overlap queries.  The calibration path **does not**
+introduce a second cgranges instance; reusing the existing resolver-side
+cgranges would cost a per-fragment dynamic-allocation hit that the
+per-ref CSR avoids.
 
 **Code:**
 - `src/rigel/calibration/regions.py`:
@@ -516,58 +529,86 @@ fixture extended with `ref_lengths.feather` + minimal `regions.feather`.
 
 ### M3 — C++ scanner: in-place calibration accumulator
 
-**Scope:** scanner builds `RegionIndex` from `region_df`; per-worker
-`CalibrationAccumulator` tracks the 8-state mask, per-region counts,
-per-mask FL histogram, and `u_L`/`u_R` boundary-flux counters. Worker
-results merged after `workers.join()`. Payload exported via nanobind.
+**Scope:** scanner builds a per-reference CSR `RegionIndex` from
+`region_df`; per-worker `CalibrationAccumulator` tracks the 8-state mask,
+per-region counts, per-mask FL histogram, and `u_left`/`u_right`
+boundary-flux counters.  Worker results merged after `workers.join()`.
+Payload exported via nanobind.
 
 **Code:**
-- `src/rigel/native/calibration/small_region_set.h` — inline-16 set with
-  spill vector, reused per worker.
-- `src/rigel/native/calibration/region_index.h` — sorted-array
-  binary-search overlap, keyed by integer `ref_id`. Public accessors:
-  `overlap_into`, `type_mask`, `start`, `end`, `n_regions`, `n_refs`.
+- `src/rigel/native/calibration/region_index.h` — per-reference CSR over
+  sorted region intervals, `upper_bound` + linear scan overlap.  Public
+  accessors: `set(ref_ids, starts, ends, type_masks, n_regions, n_refs)`,
+  `overlap_into<N>(ref_id, qstart, qend, out_inline, out_spill,
+  already_inline)`, `type_mask`, `start`, `end`, `n_regions`, `n_refs`.
 - `src/rigel/native/calibration/accumulator.h` and `.cpp` —
   `CalibrationAccumulator(int32_t n_regions)` with `observe(splice_type,
-  genomic_footprint, exons, n_exons, region_index, boundary_tol = 0)` and
+  ref_id, frag_start, frag_end, exons, n_exons, region_index)` and
   `merge_from(other)`.
 - `src/rigel/native/bam_scanner.cpp`:
-  - `BamScanner::set_regions(ref_names, starts, ends, type_masks)` —
-    Python-callable; constructs `RegionIndex`; allocates merged accumulator.
-    Must be called before `scan()`.
+  - `BamScanner::set_regions(ref_ids, starts, ends, type_masks, n_refs)`
+    — Python-callable, takes `int32_t` ref-ids (NOT strings; the
+    Python-side `_wire_calibration_regions` translates ref-name → ref-id
+    via `index.resolver.get_ref_to_id()` before calling).  Must be called
+    before `scan()`; raises on length mismatch or double-set.
   - `WorkerState::cal_acc(n_regions)` per worker.
-  - Three observation sites in `process_qname_group_threaded`:
-    intergenic-resolved, chimeric, genic-resolved-non-chimeric. Gate per §2.10.
-  - After `workers.join()`, fold worker accumulators into
-    `cal_acc_merged_`.
+  - One observation site at the end of `process_qname_group_threaded`,
+    plus an early dispatch for `is_multimap` that calls
+    `cal_acc.note_multimap()` and returns.  Chimeric and artifact
+    excluded classes use `cal_acc.note_chimera()` /
+    `cal_acc.note_artifact()`.  Resolved fragments with no observable
+    hit call `cal_acc.note_unobserved()` so the balance assertion stays
+    exact.
+  - After `workers.join()`, fold worker accumulators into the merged
+    payload.
   - `build_result()` exports `result["calibration"]` dict (see below).
 - `src/rigel/calibration/scan_payload.py`:
   - `@dataclass(frozen=True) class CalibrationScanPayload` with fields:
     `global_counts (8,)`, `per_region_counts (n_regions, 8)`,
-    `fl_hist (8, 1024)`, `u_L (n_regions,)`, `u_R (n_regions,)`,
+    `fl_hist (8, 1024)`, `u_left (n_regions,)`, `u_right (n_regions,)`,
     `n_observed`, `n_excluded_multimap`, `n_excluded_chimera`,
-    `n_excluded_artifact`, `n_oor`.
-  - `from_scan_dict` validator + balance assertion
-    `n_observed + n_excluded_multimap + ... + n_unresolved == n_total`.
+    `n_excluded_artifact`, `n_unobserved`, `n_oor`.
+  - `from_scan_dict(d, *, n_total=None)` validator + balance assertion
+    `n_observed + n_excluded_multimap + n_excluded_chimera +
+    n_excluded_artifact + n_unobserved == n_total` where the balance
+    basis `n_total` is `stats.n_read_names` (not `stats.n_fragments`).
 
-**Pass D inside `observe()`** (§2.5):
+**Pass D (boundary-flux) inside `observe()`** (§2.5) — fires for
+`splice_type == SPLICE_UNSPLICED` and only against exon-typed regions
+that the fragment overlaps; **no `boundary_tol`** parameter (the closed-
+box `frag_start < rs && frag_end > rs` test is exact for half-open
+regions and the integer fragment endpoints htslib delivers):
+
 ```cpp
-if (splice_type == SPLICE_UNSPLICED && same_ref) {
-    scratch_.for_each([&](int32_t rid) {
+if (splice_type == SPLICE_UNSPLICED) {
+    auto check_one = [&](int32_t rid) {
         if ((regions.type_mask(rid) & kExonBit) == 0) return;
         const int64_t rs = regions.start(rid), re = regions.end(rid);
-        if (frag_start < rs - boundary_tol && frag_end > rs)
-            u_L_[rid] += 1;
-        if (frag_start < re && frag_end > re + boundary_tol)
-            u_R_[rid] += 1;
-    });
+        if (frag_start < rs && frag_end > rs) u_left[rid]++;
+        if (frag_start < re && frag_end > re) u_right[rid]++;
+    };
+    /* iterate the inline+spill region set */
 }
 ```
 
-**Tests:** `tests/test_calibration_accumulator.py` (1-vs-4-worker merge
-equality, mask correctness on hand-built fragments, `u_L`/`u_R` shape +
-non-negativity, `EXON`-only non-zero on synthetic gDNA, mRNA-only
-zero, pin observation policy with one fragment per excluded class).
+**Tests (`tests/test_calibration_accumulator.py`):**
+- `TestSetRegions` (3): binding contract, length-mismatch rejection,
+  double-set rejection.
+- `TestPipelinePayload` (2): scan returns payload, `run_pipeline`
+  attaches `PipelineResult.calibration_payload`.
+- `TestPayloadValidation` (7): shape, dtype, balance, `n_oor`
+  accounting, `None`-dict rejection.
+- `TestWorkerMergeEquality` (1): 1-vs-4-worker payload byte-equal.
+- `TestMaskCorrectness` (5): hand-built BAM, one unspliced fragment per
+  intended mask (`EXON_ONLY`, `INTRON_ONLY`, `INTERGENIC_ONLY`,
+  `EXON+INTRON`, `INTERGENIC+EXON`); assert exactly one bin populated.
+- `TestBoundaryFlux` (4): single-fragment left-straddle, right-straddle,
+  full-span (both flags), interior (neither flag) against a known exon
+  region in `mini_index`.
+- `TestObservationPolicy` (2 + 1 deferred): NH=2 → `n_excluded_multimap`,
+  trans-chromosomal pair → `n_excluded_chimera`.  `SPLICE_ARTIFACT` is
+  deferred to M9 once `splice_blacklist.feather` is wired into the test
+  fixtures (skip with explicit reason).
 
 **Exit gate:** new tests green; protected suite green;
 `PipelineResult.calibration_payload: CalibrationScanPayload | None`
@@ -710,22 +751,56 @@ budget < 1s for 5K MultiLoci on a synthetic stress test.
 
 ### M7 — Pool FL models + `CalibrationResult` schema
 
-**Scope:** build the three pool FL models from `payload.fl_hist`; assemble
-the canonical `CalibrationResult` carrier.
+**Scope:** build the gDNA pool FL model from `payload.fl_hist`; carry the
+scan-trained RNA/global FL models through unchanged; assemble the
+canonical `CalibrationResult` carrier.
+
+**Critical FL semantics — read this before touching M7.**  The M3
+accumulator records `fl_raw = frag_end - frag_start` (genomic span) into
+`fl_hist[mask, :]` for every observed fragment.  For unspliced fragments
+this equals the true fragment length; for **spliced** fragments
+(`SPLICE_SPLICED`, which dominates `mask = EXON_ONLY = 0b001`) this is
+the genomic span, NOT the fragment length, and is on average several
+kilobases too large.  Therefore:
+
+- **`payload.fl_hist[gdna_pool_masks, :]` IS a valid fragment-length
+  histogram** — gDNA fragments are never spliced, so their genomic span
+  equals their fragment length by construction.
+- **`payload.fl_hist[1, :]` (`EXON_ONLY`) is NOT a fragment-length
+  histogram** — it is dominated by spliced fragments whose genomic span
+  bears no relationship to their FL.
+- M7 therefore uses the payload **only** for the gDNA pool FL.  The
+  RNA-pool and global FL models continue to come from the scan-trained
+  `frag_length_models` carried out of `scan_and_buffer` (which work in
+  transcript space via `_resolve_core` and so are correct for spliced
+  fragments by construction).  This is what `pipeline.py` already does;
+  M7 codifies it.
+
+  *Future option (out of scope here):* widen `fl_hist` to a `(8, 2,
+  kFlBins)` tensor that splits each mask into spliced vs unspliced strata
+  using the resolved `splice_type`.  That would let an `EXON_ONLY +
+  unspliced` slice supply a payload-derived RNA FL.  Tracked as a
+  follow-up; not required for the calibration to be correct.
 
 **Code:**
 - `src/rigel/calibration/_fl_pool.py`:
   - `PoolFLModels` (frozen, slots): `gdna_fl_model, rna_fl_model,
     global_fl_model, gdna_fl_quality, n_pool, n_rna, n_global,
     n_pool_annotation_gap`.
-  - `compute_pool_fl_models(fl_hist, max_size, prior_ess=1000.0,
-    quality_threshold_good=5_000, quality_threshold_weak=200) -> PoolFLModels`.
+  - `compute_pool_fl_models(
+      fl_hist, *, scan_rna_fl_model, scan_global_fl_model,
+      max_size, prior_ess=1000.0,
+      quality_threshold_good=5_000, quality_threshold_weak=200,
+    ) -> PoolFLModels`.
   - Pool definition:
     - gDNA pool = mask 2 ∪ mask 3 ∪ mask 4 (`INTRON_ONLY`, `EXON_INTRON`,
-      `INTERGENIC_ONLY`).
-    - RNA pool = mask 1 (`EXON_ONLY`).
-    - Global = sum over all 8.
-  - Quality classifier:
+      `INTERGENIC_ONLY`) — all unspliced by construction, so genomic
+      span equals FL.
+    - RNA pool model = `scan_rna_fl_model` (passed through; no payload
+      use).
+    - Global model = `scan_global_fl_model` (passed through; no payload
+      use).
+  - Quality classifier (gates only the gDNA model):
     - `n_pool ≥ 5000` → `"good"`, no shrinkage.
     - `200 ≤ n_pool < 5000` → `"weak"`, EB-shrink toward global with
       `prior_ess=1000`.
@@ -795,9 +870,83 @@ locks).
 
 ### M8 — `calibrate()` orchestrator + pipeline integration
 
-**Scope:** compose M4 + M7 into a top-level `calibrate()`; wire it into
-`pipeline.run_pipeline` and `pipeline.quant_from_buffer`. **Hard cut** —
-no bootstrap fallback, no `CalibrationStub`.
+**Scope:** compose M4 + M7 into a top-level `calibrate()` and migrate
+the pipeline off the live SRD-v1 surface.  This is **NOT** a hard cut
+from a stub; the migration target is the in-tree calibration code
+(`_simple.py`, `_categorize.py`, `_fl_mixture.py`,
+`_fl_empirical_bayes.py`, `_result.py`, the SRD-v1 `CalibrationConfig`
+fields, the SRD-v1 CLI flags, and the SRD-v1 `summary.json` keys).
+Splitting into three focused commits keeps each diff reviewable and lets
+us bisect any benchmark regression to a single switchover.
+
+**Migration table (SRD-v1 → v6):**
+
+| Surface | SRD-v1 (current) | v6 (target) |
+|---|---|---|
+| Module entrypoint | `from .calibration import calibrate_gdna` | `from .calibration import calibrate` |
+| Result type | `CalibrationResult` (in `_result.py`, v1 schema) | `CalibrationResult` (in `_result.py`, v6 schema below) |
+| Config dataclass | `CalibrationConfig.exon_fit_tolerance_bp`, `fl_prior_ess`, `max_iter`, `tol` | `CalibrationConfig.pool_quality_thresholds=(5000,200)`, `prior_ess=1000.0`, `nrna_weight`, `c_base` |
+| CLI flags | `--cal-exon-fit-tolerance-bp`, `--cal-fl-prior-ess`, `--cal-max-iter`, `--cal-tol` | `--cal-quality-good`, `--cal-quality-weak`, `--cal-prior-ess`, `--cal-nrna-weight`, `--cal-c-base` |
+| `summary.json` keys | `calibration.pi_pool`, `gdna_fl.{mu,sigma,quality}`, `srd.*` | `calibration.pi_pool`, `calibration.gdna_fl.{mu,sigma,quality}`, `calibration.kappa_diagnostics`, `calibration.boundary_flux_gdna_summary`, `calibration.global_densities` |
+| `quant_from_buffer` arg | `calibration: CalibrationResult` (v1) | `calibration: CalibrationResult` (v6 — same name, new schema) |
+| Per-locus prior | `compute_locus_priors_from_partitions(...)` | `assemble_priors(...)` (M6) → `calibration.with_priors(...)` |
+
+**Three-commit split:**
+
+#### M8a — Introduce v6 surface alongside SRD-v1 (additive)
+
+- New `src/rigel/calibration/_orchestrator.py` exporting `calibrate(...)`.
+- New `src/rigel/calibration/_fl_pool.py` (per M7).
+- New `src/rigel/calibration/_result_v6.py` exporting
+  `CalibrationResultV6` (renamed back to `CalibrationResult` in M8c when
+  the v1 class is deleted; the temporary suffix avoids collision).
+- New `CalibrationConfig.v6_*` fields added alongside the v1 fields; v1
+  fields untouched.
+- New CLI flags added (`--cal-quality-good`, etc.); v1 flags untouched.
+- No change to `pipeline.run_pipeline` or `quant_from_buffer` yet.
+- Tests: `tests/test_calibrate_orchestrator.py` (6 cases) verifying the
+  new surface produces a sensible `CalibrationResultV6` from a synthetic
+  payload + index.
+- Exit gate: new tests green; SRD-v1 path still wired and still passes
+  the protected suite untouched.
+
+#### M8b — Pipeline switchover (replace v1 wiring)
+
+- `pipeline.run_pipeline` calls `calibrate(...)` instead of
+  `calibrate_gdna(...)`.
+- `pipeline.quant_from_buffer` consumes the v6 result shape;
+  `assemble_priors(...)` (M6) backfills via `with_priors(...)`.
+- `_run_locus_em_partitioned` accepts `prior_weight_rna_per_locus`.
+- CLI: v1 flags become deprecation-warning shims that map onto the
+  closest v6 flag (or are ignored with a one-line warning if no
+  equivalent exists).
+- `summary.json` writer emits the v6 keys; v1 keys are temporarily
+  emitted in parallel to avoid breaking external dashboards.
+- Golden outputs regenerated; diffs documented in the commit message.
+- Tests: `tests/test_pipeline_integration.py` (8 cases) — end-to-end on
+  synthetic scenarios + `π̂_pool > 0` on a contaminated scenario.
+- Exit gate: full suite green; benchmark sweep (Armis2 13-condition
+  matrix, see `.github/copilot-instructions.md`) shows no regression vs
+  the M8a baseline.
+
+#### M8c — Legacy deletion (subtractive)
+
+- Delete `_simple.py`, `_categorize.py`, `_fl_mixture.py`,
+  `_fl_empirical_bayes.py`, the v1 `_result.py`.  Move the two general
+  FL utilities to `src/rigel/frag_length_mixture.py` and
+  `src/rigel/frag_length_eb.py` (they are not calibration-specific).
+- Rename `CalibrationResultV6` → `CalibrationResult`; rename
+  `_result_v6.py` → `_result.py`.
+- Drop the v1 `CalibrationConfig` fields and v1 CLI flags (after one
+  release cycle of the M8b deprecation warnings).
+- Drop the v1 keys from `summary.json`.
+- Delete the v1 tests: `tests/test_calibration_simple.py`,
+  `tests/test_categorize.py`, `tests/test_gdna.py`,
+  `tests/test_gdna_harmonic_length.py`.
+- Exit gate: full suite green; legacy modules absent (verified via
+  `git grep`); CHANGELOG entry written.
+
+**Hard cut** — no bootstrap fallback, no `CalibrationStub`.
 
 **Code:**
 - `src/rigel/calibration/_orchestrator.py`:
@@ -867,20 +1016,16 @@ from .locus_prior import (
 from .scan_payload import CalibrationScanPayload
 ```
 
-**Legacy deletion (in this same commit):** `_simple.py`, `_categorize.py`,
-`_result.py` (old version), `_fl_mixture.py`, `_fl_empirical_bayes.py`. The
-last two move to `src/rigel/frag_length_mixture.py` and
-`src/rigel/frag_length_eb.py` respectively (they are general FL utilities,
-not calibration-specific). The legacy tests
+**Legacy deletion** is performed in M8c (see above), not in M8a or M8b.
+The v1 modules (`_simple.py`, `_categorize.py`, `_fl_mixture.py`,
+`_fl_empirical_bayes.py`, the v1 `_result.py`) and their tests
 (`tests/test_calibration_simple.py`, `tests/test_categorize.py`,
-`tests/test_gdna.py`, `tests/test_gdna_harmonic_length.py`) are deleted.
+`tests/test_gdna.py`, `tests/test_gdna_harmonic_length.py`) are deleted
+in M8c.
 
-**Tests:** `tests/test_calibrate_orchestrator.py` (6 cases),
-`tests/test_pipeline_integration.py` (8 cases — end-to-end on synthetic
-scenarios + π̂_pool > 0 on a contaminated scenario).
-
-**Exit gate:** ≥ 14 new tests green; legacy tests deleted (not skipped);
-golden outputs regenerated with documented diffs; full suite green.
+**Combined exit gate (M8a + M8b + M8c):** ≥ 14 new tests green; legacy
+tests deleted (not skipped); golden outputs regenerated with documented
+diffs; full suite green; benchmark matrix shows no regression.
 
 ### M9 — Validation + documentation
 

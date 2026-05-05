@@ -125,17 +125,22 @@ def emit_regions(
         assert isinstance(span, _GenicSpan)
         s_start, s_end = int(span.start), int(span.end)
         L = s_end - s_start
+        if L <= 0:
+            continue
 
-        # Boolean coverage: (POS-exon, NEG-exon, POS-tx, NEG-tx) per bp.
-        # int8 marks for any/either-strand exon, used to find region boundaries.
-        # Note: we allocate L bytes per genic span; for typical loci this is
-        # << 1MB. Mega-loci (HLA, etc.) may hit ~5MB which is still fine.
-        import numpy as np
-        exon_pos = np.zeros(L, dtype=np.bool_)
-        exon_neg = np.zeros(L, dtype=np.bool_)
-        tx_pos = np.zeros(L, dtype=np.bool_)
-        tx_neg = np.zeros(L, dtype=np.bool_)
+        # Event sweep over the genic span: O(E log E) time, O(E) memory
+        # in the number of intervals (transcripts + their exons), NOT
+        # O(L) bytes.  This is critical for mega-loci such as HLA where
+        # L can exceed a few Mb; the previous per-base implementation
+        # allocated ~36L bytes (4 bool + 4 int64 cumsums) and would
+        # transient-spike at ~180 MB on a 5 Mb genic span.
+        #
+        # Flags tracked (active interval counts):
+        #   ep = exon_pos, en = exon_neg, tp = tx_pos, tn = tx_neg
+        # Events are (pos_in_span, ep_d, en_d, tp_d, tn_d) where each
+        # delta is +1 at interval start, -1 at interval end.
 
+        events: list[tuple[int, int, int, int, int]] = []
         for t in span.transcripts:
             if t.is_synthetic:
                 continue
@@ -144,66 +149,116 @@ def emit_regions(
             if t_hi <= t_lo:
                 continue
             if t.strand == Strand.POS:
-                tx_pos[t_lo:t_hi] = True
+                events.append((t_lo, 0, 0, +1, 0))
+                events.append((t_hi, 0, 0, -1, 0))
             elif t.strand == Strand.NEG:
-                tx_neg[t_lo:t_hi] = True
+                events.append((t_lo, 0, 0, 0, +1))
+                events.append((t_hi, 0, 0, 0, -1))
             for e in t.exons:
                 e_lo = max(0, int(e.start) - s_start)
                 e_hi = min(L, int(e.end) - s_start)
                 if e_hi <= e_lo:
                     continue
                 if t.strand == Strand.POS:
-                    exon_pos[e_lo:e_hi] = True
+                    events.append((e_lo, +1, 0, 0, 0))
+                    events.append((e_hi, -1, 0, 0, 0))
                 elif t.strand == Strand.NEG:
-                    exon_neg[e_lo:e_hi] = True
+                    events.append((0 + e_lo, 0, +1, 0, 0))
+                    events.append((e_hi, 0, -1, 0, 0))
 
-        any_exon = exon_pos | exon_neg
-        # Run-length decompose any_exon into alternating EXON/INTRON runs.
-        # The first run is INTRON iff any_exon[0] is False.
-        # Genic span by construction contains at least one exon, so any_exon
-        # has at least one True position somewhere.
-        # Find boundary indices via diff:
-        diffs = np.diff(any_exon.astype(np.int8))
-        boundary_idx = np.flatnonzero(diffs) + 1   # positions where state flips
-        run_starts = np.concatenate(([0], boundary_idx))
-        run_ends = np.concatenate((boundary_idx, [L]))
+        # Sort by position; deltas at the same position aggregate cleanly
+        # because we only inspect (counts > 0) when emitting region rows.
+        events.sort(key=lambda x: x[0])
 
-        # Pre-compute genic-span-relative cumulative sums for fast bp counts.
-        cum = {
-            "exon_pos": np.concatenate(([0], np.cumsum(exon_pos.astype(np.int64)))),
-            "exon_neg": np.concatenate(([0], np.cumsum(exon_neg.astype(np.int64)))),
-            "tx_pos": np.concatenate(([0], np.cumsum(tx_pos.astype(np.int64)))),
-            "tx_neg": np.concatenate(([0], np.cumsum(tx_neg.astype(np.int64)))),
-        }
+        # Running per-flag interval-count, and accumulated bp counters
+        # for the *current* region (reset on EXON↔INTRON transition).
+        ep = en = tp = tn = 0
+        cur_ep_bp = cur_en_bp = cur_tp_bp = cur_tn_bp = 0
+        cur_start = 0
+        cur_is_exon: bool | None = None  # set at first non-empty step
+        n_runs = 0  # to populate boundary_flux flags after loop
+        emitted: list[tuple[int, int, bool, int, int, int, int]] = []
 
-        n_runs = run_starts.size
-        for i in range(n_runs):
-            r_lo = int(run_starts[i])
-            r_hi = int(run_ends[i])
-            is_exon = bool(any_exon[r_lo])
+        def _flush(end: int) -> None:
+            nonlocal cur_ep_bp, cur_en_bp, cur_tp_bp, cur_tn_bp
+            nonlocal cur_start, cur_is_exon
+            if cur_is_exon is None or end <= cur_start:
+                cur_start = end
+                cur_ep_bp = cur_en_bp = cur_tp_bp = cur_tn_bp = 0
+                return
+            emitted.append((
+                cur_start, end, cur_is_exon,
+                cur_ep_bp, cur_en_bp, cur_tp_bp, cur_tn_bp,
+            ))
+            cur_start = end
+            cur_ep_bp = cur_en_bp = cur_tp_bp = cur_tn_bp = 0
 
-            ep = int(cum["exon_pos"][r_hi] - cum["exon_pos"][r_lo])
-            en = int(cum["exon_neg"][r_hi] - cum["exon_neg"][r_lo])
-            tp = int(cum["tx_pos"][r_hi] - cum["tx_pos"][r_lo])
-            tn = int(cum["tx_neg"][r_hi] - cum["tx_neg"][r_lo])
+        # Walk events; between two consecutive distinct positions the
+        # active flag counts are constant, so we accumulate (width *
+        # bool(count > 0)) into the current region's bp counters and
+        # split the region whenever any_exon flips.
+        i = 0
+        n_events = len(events)
+        prev_pos = 0
+        while i < n_events:
+            pos, dep, den, dtp, dtn = events[i]
+            # Flush span from prev_pos..pos under current state
+            if pos > prev_pos:
+                width = pos - prev_pos
+                this_is_exon = (ep > 0) or (en > 0)
+                if cur_is_exon is None:
+                    cur_is_exon = this_is_exon
+                    cur_start = prev_pos
+                elif this_is_exon != cur_is_exon:
+                    _flush(prev_pos)
+                    cur_is_exon = this_is_exon
+                if ep > 0: cur_ep_bp += width
+                if en > 0: cur_en_bp += width
+                if tp > 0: cur_tp_bp += width
+                if tn > 0: cur_tn_bp += width
+                prev_pos = pos
+            # Aggregate all deltas at the same position
+            ep += dep; en += den; tp += dtp; tn += dtn
+            i += 1
+            while i < n_events and events[i][0] == pos:
+                _, dep2, den2, dtp2, dtn2 = events[i]
+                ep += dep2; en += den2; tp += dtp2; tn += dtn2
+                i += 1
 
+        # Tail span from last event to L
+        if L > prev_pos:
+            width = L - prev_pos
+            this_is_exon = (ep > 0) or (en > 0)
+            if cur_is_exon is None:
+                cur_is_exon = this_is_exon
+                cur_start = prev_pos
+            elif this_is_exon != cur_is_exon:
+                _flush(prev_pos)
+                cur_is_exon = this_is_exon
+            if ep > 0: cur_ep_bp += width
+            if en > 0: cur_en_bp += width
+            if tp > 0: cur_tp_bp += width
+            if tn > 0: cur_tn_bp += width
+            prev_pos = L
+        _flush(L)
+
+        n_runs = len(emitted)
+        for i_r, (r_lo, r_hi, is_exon, e_p, e_n, t_p, t_n) in enumerate(emitted):
             if is_exon:
                 rtype = RegionType.EXON
                 strand = RegionStrand.NONE
-                if ep > 0:
+                if e_p > 0:
                     strand |= RegionStrand.POS
-                if en > 0:
+                if e_n > 0:
                     strand |= RegionStrand.NEG
-                # Boundary-flux: True iff the boundary touches an INTRON of
-                # the same genic span (i.e., not the first/last run).
-                bfl = i > 0
-                bfr = i < n_runs - 1
+                bfl = i_r > 0
+                bfr = i_r < n_runs - 1
             else:
                 rtype = RegionType.INTRON
                 strand = RegionStrand.NONE
-                if tp > 0:
+                if t_p > 0:
                     strand |= RegionStrand.POS
-                if tn > 0:
+                if t_n > 0:
                     strand |= RegionStrand.NEG
                 bfl = False
                 bfr = False
@@ -215,10 +270,10 @@ def emit_regions(
                 end=s_start + r_hi,
                 type=int(rtype),
                 strand=int(strand),
-                tx_pos_bp=tp,
-                tx_neg_bp=tn,
-                exon_pos_bp=ep,
-                exon_neg_bp=en,
+                tx_pos_bp=t_p,
+                tx_neg_bp=t_n,
+                exon_pos_bp=e_p,
+                exon_neg_bp=e_n,
                 boundary_flux_left=bfl,
                 boundary_flux_right=bfr,
             )
