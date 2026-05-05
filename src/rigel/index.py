@@ -65,7 +65,13 @@ MANIFEST_JSON = "manifest.json"
 #: On-disk index format version. Bumped whenever the schema or the
 #: meaning of any persisted column changes. Loaders should refuse
 #: indexes whose ``format_version`` they do not understand.
-INDEX_FORMAT_VERSION = 2
+#:
+#: Version history:
+#:   2 — (legacy) intervals.feather + sj.feather + transcripts.feather.
+#:   3 — adds regions.feather (calibration partition); ref_lengths.feather
+#:        is now mandatory at load time and used to validate the region
+#:        partition.
+INDEX_FORMAT_VERSION = 3
 
 
 def _rigel_version() -> str:
@@ -990,6 +996,38 @@ class TranscriptIndex:
         self.index_dir = index_dir
         self._retain_test_structures = retain_test_structures
 
+        # -- manifest (version gate) ------------------------------------------
+        manifest = load_manifest(index_dir)
+        if manifest is None:
+            raise RuntimeError(
+                f"Index at {index_dir} has no manifest.json. "
+                f"Rebuild the index (rigel index --fasta ... --gtf ...). "
+                f"Older indexes are not supported."
+            )
+        on_disk_version = int(manifest.get("format_version", -1))
+        if on_disk_version != INDEX_FORMAT_VERSION:
+            raise RuntimeError(
+                f"Index at {index_dir} has format_version={on_disk_version}, "
+                f"but this rigel build requires {INDEX_FORMAT_VERSION}. "
+                f"Rebuild the index (rigel index --fasta ... --gtf ...)."
+            )
+
+        # -- reference lengths -------------------------------------------------
+        from .calibration.regions import (
+            load_ref_lengths,
+            load_regions,
+            validate_against_ref_lengths,
+        )
+        ref_lengths_path = os.path.join(index_dir, REF_LENGTHS_FEATHER)
+        if not os.path.exists(ref_lengths_path):
+            raise RuntimeError(
+                f"Index at {index_dir} is missing {REF_LENGTHS_FEATHER}. "
+                f"Rebuild the index."
+            )
+        self.ref_lengths = load_ref_lengths(ref_lengths_path)
+        self.ref_names = list(self.ref_lengths.keys())
+        self.ref_name_to_id = {name: i for i, name in enumerate(self.ref_names)}
+
         # -- transcripts ------------------------------------------------------
         self.t_df = pd.read_feather(
             os.path.join(index_dir, TRANSCRIPTS_FEATHER)
@@ -1041,6 +1079,17 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
         self.g_to_strand_arr = self.g_df["strand"].values
+
+        # -- region partition (calibration) -----------------------------------
+        logger.debug("Reading regions")
+        regions_path = os.path.join(index_dir, REGIONS_FEATHER)
+        if not os.path.exists(regions_path):
+            raise RuntimeError(
+                f"Index at {index_dir} is missing {REGIONS_FEATHER}. "
+                f"Rebuild the index (rigel index --fasta ... --gtf ...)."
+            )
+        self.region_df = load_regions(regions_path)
+        validate_against_ref_lengths(self.region_df, self.ref_lengths)
 
         # -- interval index (unified cgranges) ---------------------------------
         logger.debug("Reading intervals")

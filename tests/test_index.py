@@ -1,5 +1,6 @@
 """Tests for rigel.index validation behavior."""
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +8,11 @@ import pytest
 
 from rigel.index import (
     TranscriptIndex,
+    INDEX_FORMAT_VERSION,
     INTERVALS_FEATHER,
+    MANIFEST_JSON,
+    REF_LENGTHS_FEATHER,
+    REGIONS_FEATHER,
     SJ_FEATHER,
     TRANSCRIPTS_FEATHER,
 )
@@ -18,6 +23,34 @@ def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
     idx_dir.mkdir(parents=True, exist_ok=True)
 
     t_df.to_feather(idx_dir / TRANSCRIPTS_FEATHER)
+
+    # Manifest with current format_version (load() refuses anything else).
+    (idx_dir / MANIFEST_JSON).write_text(json.dumps({
+        "format_version": INDEX_FORMAT_VERSION,
+        "rigel_version": "test",
+    }))
+
+    # ref_lengths.feather: a single 1000-bp chr1.
+    pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(
+        idx_dir / REF_LENGTHS_FEATHER
+    )
+
+    # regions.feather: a single INTERGENIC region tiling chr1.
+    rdf = pd.DataFrame({
+        "region_id": [0],
+        "ref_name": pd.array(["chr1"], dtype="string"),
+        "start": [0],
+        "end": [1000],
+        "type": [0],          # INTERGENIC
+        "strand": [0],        # NONE
+        "tx_pos_bp": [0],
+        "tx_neg_bp": [0],
+        "exon_pos_bp": [0],
+        "exon_neg_bp": [0],
+        "boundary_flux_left": [False],
+        "boundary_flux_right": [False],
+    })
+    rdf.to_feather(idx_dir / REGIONS_FEATHER)
 
     iv_df = pd.DataFrame(
         {
