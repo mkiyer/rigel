@@ -9,17 +9,13 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from rigel.calibration.regions import (
-    RegionRecord,
     RegionStrand,
     RegionType,
     emit_regions,
 )
 from rigel.index import (
-    _GenicSpan,
-    _IntergenicSpan,
     _iter_reference_layout,
     build_index_artifacts,
 )

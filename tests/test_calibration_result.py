@@ -1,4 +1,4 @@
-"""Tests for ``rigel.calibration._result_v6.CalibrationResult`` (M7 v2)."""
+"""Tests for ``rigel.calibration._result.CalibrationResult``."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 
 from rigel.calibration._diagnostics import Diagnostics
 from rigel.calibration._kappa import KappaEstimate
-from rigel.calibration._result_v6 import (
+from rigel.calibration._result import (
     CalibrationResult,
     build_calibration_result,
     build_multi_locus_prior_df,

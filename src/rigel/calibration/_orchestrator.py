@@ -1,7 +1,6 @@
 """rigel.calibration._orchestrator — top-level ``calibrate(...)``.
 
-Composes the M3–M7 building blocks into a single entry point that
-replaces the SRD-v1 :func:`rigel.calibration.calibrate_gdna`.
+Composes the M3–M7 building blocks into a single entry point.
 
 The function is deliberately thin: it builds the FL models once,
 uses the resulting gDNA-FL mean to compute the three global gDNA
@@ -24,7 +23,7 @@ from ._fl_sources import (
     extract_global_counts,
     extract_rna_counts,
 )
-from ._result_v6 import CalibrationResult, build_calibration_result
+from ._result import CalibrationResult, build_calibration_result
 from .density_global import compute_global_densities
 from .fl import POOL_EB_PRIOR_ESS, build_fl_models
 from .scan_payload import CalibrationScanPayload

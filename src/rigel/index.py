@@ -18,7 +18,6 @@ the index and ``load()`` / query methods for using it during quantification.
 """
 
 import collections
-import functools
 import json
 import logging
 import os
@@ -31,7 +30,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
-from .types import GenomicInterval, IntervalType, AnnotatedInterval, STRAND_POS
+from .types import GenomicInterval, IntervalType, AnnotatedInterval
 from .transcript import Transcript
 
 

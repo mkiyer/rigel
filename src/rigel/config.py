@@ -152,15 +152,8 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for gDNA calibration.
-
-    During the M8 migration this dataclass carries both the v6 fields
-    (consumed by the new :func:`rigel.calibration.calibrate` orchestrator)
-    and the legacy SRD-v1 fields (consumed by the still-wired
-    :func:`rigel.calibration.calibrate_gdna`).  M8c removes the v1 fields.
-    """
-
-    # ---- v6 fields (M8a) ---------------------------------------------
+    """Configuration for the v6 gDNA calibration orchestrator
+    (:func:`rigel.calibration.calibrate`)."""
 
     #: Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage
     #: in :func:`rigel.calibration.calibrate`.  The ``rna`` and ``gdna``
@@ -177,20 +170,6 @@ class CalibrationConfig:
     #: ``(α_gdna, α_rna)`` prior assembled by
     #: :func:`rigel.calibration.assemble_priors`.
     c_base: float = 10.0
-
-    # ---- v1 fields (deleted in M8c) ----------------------------------
-
-    #: Tolerance (bp) for the SRD-v1 exon-fit geometric test.
-    exon_fit_tolerance_bp: int = 0
-
-    #: SRD-v1 effective sample size for the global FL Dirichlet prior.
-    fl_prior_ess: float = 500.0
-
-    #: Maximum iterations for the SRD-v1 1-D mixture EM.
-    max_iter: int = 1000
-
-    #: Convergence tolerance for the SRD-v1 1-D mixture EM.
-    tol: float = 1e-4
 
 
 @dataclass(frozen=True)

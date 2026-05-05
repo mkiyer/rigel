@@ -14,10 +14,8 @@ from rigel.calibration._fl_sources import (
     extract_rna_counts,
 )
 from rigel.calibration.fl import (
-    POOL_EB_PRIOR_ESS,
     POOL_QUALITY_GOOD_THRESHOLD,
     POOL_QUALITY_WEAK_THRESHOLD,
-    FLModels,
     build_fl_models,
 )
 from rigel.calibration.scan_payload import (

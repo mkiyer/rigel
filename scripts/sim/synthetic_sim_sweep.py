@@ -892,14 +892,17 @@ def run_sweep(config, output_dir, *, gtf_path=None,
 
                 cal = pr.calibration
                 if cal is not None:
-                    # V3 CalibrationResult: lambda_gdna, strand_specificity,
-                    # region_e_gdna, region_n_total, gdna_fl_model
-                    cal_ss = cal.strand_specificity
+                    # v6 CalibrationResult: fl_models, global_densities,
+                    # prior_table, diagnostics.
+                    summary = cal.to_summary_dict()
+                    cal_ss = float(pr.strand_models.strand_specificity)
                     row["cal_kappa_est"] = round(cal_ss, 4)
                     row["cal_kappa_err"] = ""
-                    row["cal_density_est"] = f"{cal.lambda_gdna:.4e}"
+                    row["cal_density_est"] = (
+                        f"{cal.global_densities.intergenic.lambda_gdna:.4e}"
+                    )
 
-                    cal_fl = cal.gdna_fl_model
+                    cal_fl = cal.fl_models.gdna
                     row["cal_gdna_fl_true_mean"] = gdna_true_mean
                     row["cal_gdna_fl_true_std"] = gdna_true_std
                     if cal_fl is not None and cal_fl.n_observations > 0:
@@ -912,21 +915,20 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         row["cal_gdna_fl_est_std"] = ""
                         row["cal_gdna_fl_mean_err"] = ""
 
-                    total_e_gdna = float(cal.region_e_gdna.sum())
-                    total_n = float(cal.region_n_total.sum())
-                    gdna_frac_cal = total_e_gdna / max(total_n, 1.0)
-                    row["cal_n_seed"] = f"γ={gdna_frac_cal:.3f}"
+                    mean_pi = float(summary["mean_pi_gdna"])
+                    n_ml = int(summary["n_multi_loci"])
+                    row["cal_n_seed"] = f"π̄_g={mean_pi:.3f}"
                     row["cal_n_iterations"] = ""
                     row["cal_converged"] = ""
-                    row["cal_mean_weight"] = round(gdna_frac_cal, 4)
-                    row["cal_n_regions"] = len(cal.region_e_gdna)
+                    row["cal_mean_weight"] = round(mean_pi, 4)
+                    row["cal_n_regions"] = n_ml
 
                     logger.info(
-                        "Calibration: SS=%.3f, λ_G=%.2e, "
-                        "E[gDNA]=%.0f/%d, γ=%.3f, n_regions=%d",
-                        cal_ss, cal.lambda_gdna,
-                        total_e_gdna, int(total_n),
-                        gdna_frac_cal, len(cal.region_e_gdna),
+                        "Calibration v6: SS=%.3f, λ_G=%.2e, "
+                        "mean π_gDNA=%.3f, n_multi_loci=%d",
+                        cal_ss,
+                        cal.global_densities.intergenic.lambda_gdna,
+                        mean_pi, n_ml,
                     )
                 else:
                     for col in ("cal_kappa_est", "cal_kappa_err",

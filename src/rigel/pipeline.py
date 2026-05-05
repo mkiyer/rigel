@@ -30,7 +30,6 @@ from dataclasses import dataclass, replace as _replace
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
 
 from .annotate import (
     AF_GDNA_EM,

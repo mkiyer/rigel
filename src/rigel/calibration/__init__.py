@@ -1,9 +1,15 @@
-"""Rigel gDNA calibration.
+"""Rigel gDNA calibration (v6).
 
-The legacy SRD v1 surface (``calibrate_gdna``, ``CalibrationResult``,
-``GdnaFlQuality``) is kept here while the v6 surface is built up
-incrementally per ``docs/calibration/calibration_v6_plan.md``.  The v6
-exports below are additive; they will replace the v1 names in M8c.
+Public entry point is :func:`calibrate`, which assembles a
+:class:`CalibrationResult` carrying:
+
+* :class:`FLModels` — empirical-Bayes shrunk RNA / gDNA / global
+  fragment-length distributions, ready for scoring.
+* :class:`GlobalDensityTable` — per-region eligible counts and the
+  global gDNA density used by per-locus prior assembly.
+* :class:`PriorTable` — back-filled by
+  :meth:`CalibrationResult.with_priors` after multi-locus
+  construction in :func:`rigel.pipeline.quant_from_buffer`.
 """
 
 from ._diagnostics import Diagnostics
@@ -20,21 +26,11 @@ from ._kappa import (
     estimate_kappa,
 )
 from ._orchestrator import calibrate
-from ._result import CalibrationResult, GdnaFlQuality
-from ._result_v6 import (
-    CalibrationResult as CalibrationResultV6,
+from ._result import (
+    CalibrationResult,
     build_calibration_result,
     build_multi_locus_prior_df,
     build_per_locus_gdna_df,
-)
-from ._simple import calibrate_gdna
-from .fl import (
-    POOL_EB_PRIOR_ESS,
-    POOL_QUALITY_GOOD_THRESHOLD,
-    POOL_QUALITY_WEAK_THRESHOLD,
-    FLModels,
-    Quality,
-    build_fl_models,
 )
 from .density_global import (
     GlobalDensityTable,
@@ -43,6 +39,14 @@ from .density_global import (
     l_eff_overlap,
 )
 from .density_loco import shrink_to_loco
+from .fl import (
+    POOL_EB_PRIOR_ESS,
+    POOL_QUALITY_GOOD_THRESHOLD,
+    POOL_QUALITY_WEAK_THRESHOLD,
+    FLModels,
+    Quality,
+    build_fl_models,
+)
 from .locus_prior import (
     C_BASE_DEFAULT,
     FLAG_EXON_INTRON_NO_ELIGIBLE,
@@ -58,15 +62,15 @@ from .locus_prior import (
     estimate_locus_gdna,
 )
 
-
 __all__ = [
-    # SRD v1 (legacy; deleted in M8c)
-    "CalibrationResult",
-    "GdnaFlQuality",
-    "calibrate_gdna",
-    # M8a — top-level v6 orchestrator
+    # Top-level orchestrator
     "calibrate",
-    # M4 — global gDNA densities + κ
+    # CalibrationResult + helpers
+    "CalibrationResult",
+    "build_calibration_result",
+    "build_multi_locus_prior_df",
+    "build_per_locus_gdna_df",
+    # Global gDNA densities + κ
     "GlobalDensityTable",
     "GlobalGdnaDensity",
     "compute_global_densities",
@@ -76,9 +80,9 @@ __all__ = [
     "KAPPA_DEFAULT",
     "KAPPA_MIN",
     "KAPPA_MAX",
-    # M5 — EM prior_weight_rna helper
+    # EM prior_weight_rna helper
     "build_prior_weight_rna",
-    # M6 — locoregional shrinkage + per-Locus / MultiLocus priors
+    # Locoregional shrinkage + per-locus / MultiLocus priors
     "shrink_to_loco",
     "LocusGdnaEstimate",
     "MultiLocusPrior",
@@ -91,7 +95,7 @@ __all__ = [
     "FLAG_INTRON_ZERO_LEFF",
     "FLAG_EXON_INTRON_NO_ELIGIBLE",
     "FLAG_PI_CLIPPED",
-    # M7 — fragment-length models + diagnostics + CalibrationResult v6
+    # Fragment-length models + diagnostics
     "FLModels",
     "Quality",
     "POOL_QUALITY_GOOD_THRESHOLD",
@@ -102,8 +106,4 @@ __all__ = [
     "extract_global_counts",
     "extract_rna_counts",
     "extract_gdna_counts",
-    "CalibrationResultV6",
-    "build_calibration_result",
-    "build_multi_locus_prior_df",
-    "build_per_locus_gdna_df",
 ]

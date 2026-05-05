@@ -26,7 +26,6 @@ from rigel.pipeline import (
 from rigel.sim import Scenario, SimConfig
 from rigel.strand_model import StrandModel, StrandModels
 from rigel.frag_length_model import FragmentLengthModels
-from rigel.buffer import FragmentBuffer
 
 SEED = 42
 

@@ -9,7 +9,6 @@ nRNAs excluded.
 
 from __future__ import annotations
 
-import pytest
 
 from rigel.index import _GenicSpan, _IntergenicSpan, _iter_reference_layout
 from rigel.transcript import Transcript

@@ -1,134 +1,225 @@
-"""SRD v1 :class:`CalibrationResult` — the public calibration output.
+"""rigel.calibration._result — immutable calibration result.
 
-Carries the three Empirical-Bayes-shrunk fragment-length models
-(``rna_fl_model``, ``gdna_fl_model``, ``global_fl_model``), the
-library-wide gDNA pool fraction ``pi_pool``, and per-category
-diagnostic counts.
+The frozen :class:`CalibrationResult` is the public hand-off between
+:func:`rigel.calibration.calibrate` (the v6 orchestrator) and
+:func:`rigel.pipeline.quant_from_buffer` (which consumes
+``fl_models``/``global_densities`` and back-fills the per-locus
+:class:`PriorTable` via :meth:`CalibrationResult.with_priors`).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal
+import dataclasses
+from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 
-from ..frag_length_model import FragmentLengthModel
+from ..frag_length_model import FragmentLengthModels
+from ._diagnostics import Diagnostics
+from ._fl_sources import (
+    extract_gdna_counts,
+    extract_global_counts,
+    extract_rna_counts,
+)
+from .density_global import GlobalDensityTable
+from .fl import POOL_EB_PRIOR_ESS, FLModels, build_fl_models
+from .locus_prior import LocusGdnaEstimate, MultiLocusPrior, PriorTable
+from .scan_payload import CalibrationScanPayload
 
 
-GdnaFlQuality = Literal["good", "weak", "fallback"]
+__all__ = [
+    "CalibrationResult",
+    "build_calibration_result",
+    "build_multi_locus_prior_df",
+    "build_per_locus_gdna_df",
+]
 
 
-@dataclass(frozen=True)
+# ---------------------------------------------------------------------------
+# Diagnostic-dataframe builders (locked column order; pinned by tests)
+# ---------------------------------------------------------------------------
+
+_MULTI_LOCUS_COLUMNS: tuple[str, ...] = (
+    "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
+)
+
+_PER_LOCUS_COLUMNS: tuple[str, ...] = (
+    "multi_locus_id", "ref", "start", "end", "span",
+    "n_obs", "n_gdna",
+    "n_gdna_intergenic", "n_gdna_intron", "n_gdna_exon_intron",
+    "pi_gdna", "n_eligible_boundaries", "fallback_flags",
+)
+
+
+def build_multi_locus_prior_df(
+    mlps: tuple[MultiLocusPrior, ...],
+) -> pd.DataFrame:
+    if not mlps:
+        return pd.DataFrame({c: [] for c in _MULTI_LOCUS_COLUMNS})
+    return pd.DataFrame(
+        {
+            "multi_locus_id": [m.multi_locus_id for m in mlps],
+            "n_obs":          [m.n_obs          for m in mlps],
+            "n_gdna":         [m.n_gdna         for m in mlps],
+            "n_rna":          [m.n_rna          for m in mlps],
+            "pi_gdna":        [m.pi_gdna        for m in mlps],
+            "n_loci":         [len(m.per_locus) for m in mlps],
+        },
+        columns=list(_MULTI_LOCUS_COLUMNS),
+    )
+
+
+def build_per_locus_gdna_df(
+    mlps: tuple[MultiLocusPrior, ...],
+) -> pd.DataFrame:
+    if not mlps:
+        return pd.DataFrame({c: [] for c in _PER_LOCUS_COLUMNS})
+    rows: list[dict[str, object]] = []
+    for ml in mlps:
+        e: LocusGdnaEstimate
+        for e in ml.per_locus:
+            rows.append(
+                {
+                    "multi_locus_id":        ml.multi_locus_id,
+                    "ref":                   e.locus.ref,
+                    "start":                 e.locus.start,
+                    "end":                   e.locus.end,
+                    "span":                  e.locus.span,
+                    "n_obs":                 e.n_obs,
+                    "n_gdna":                e.n_gdna,
+                    "n_gdna_intergenic":     e.n_gdna_intergenic,
+                    "n_gdna_intron":         e.n_gdna_intron,
+                    "n_gdna_exon_intron":    e.n_gdna_exon_intron,
+                    "pi_gdna":               e.pi_gdna,
+                    "n_eligible_boundaries": e.n_eligible_boundaries,
+                    "fallback_flags":        e.fallback_flags,
+                }
+            )
+    return pd.DataFrame(rows, columns=list(_PER_LOCUS_COLUMNS))
+
+
+# ---------------------------------------------------------------------------
+# CalibrationResult schema
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True, slots=True)
 class CalibrationResult:
-    """SRD v1 calibration output."""
+    """Immutable v6 calibration result."""
 
-    # ---- Models (the only product the rest of the pipeline consumes) ----
-    gdna_fl_model: FragmentLengthModel
-    rna_fl_model: FragmentLengthModel
-    global_fl_model: FragmentLengthModel
-    gdna_fl_quality: GdnaFlQuality
+    global_densities: GlobalDensityTable    # M4
+    fl_models:        FLModels              # M7 — sole finalized FL surface
+    prior_table:      PriorTable            # M6
 
-    # ---- Library-level signal passed through ----
-    strand_specificity: float
+    diagnostics:  Diagnostics               # named breakdown of n_observed
+    n_multi_loci: int
 
-    # ---- Per-(category, strand) counts (shape (N_CATEGORIES, 3)) ----
-    # See `rigel.calibration._categorize` for the row/column semantics:
-    #   rows    = FragmentCategory  (INTERGENIC, INTRONIC,
-    #                                EXON_CONTAINED, EXON_INCOMPATIBLE)
-    #   columns = FragmentStrand    (SENSE, ANTISENSE, AMBIG)
-    # SRD v3 Phase 1: SENSE/ANTISENSE are in the **transcript frame**
-    # for transcript-overlapping rows.  For the INTERGENIC row the
-    # labels are reused as a pure naming convention based on the read's
-    # genomic strand (SENSE = read on "+", ANTISENSE = read on "-");
-    # downstream consumers should treat the INTERGENIC row only as a
-    # 50/50 sanity check.  AMBIG marks transcript-overlapping fragments
-    # where transcripts on BOTH strands overlap.
-    # Counts only unique-mapper UNSPLICED fragments with a known read
-    # strand; non-UNSPLICED and AMBIG-read-strand fragments are
-    # excluded from calibration entirely.
-    category_counts: np.ndarray  # int64[N_CATEGORIES, 3]
-    n_multimap_excluded: int
-    n_spliced: int
-    """Unique-mapper fragments with ``splice_type != UNSPLICED`` (any of
-    SPLICED_ANNOT / SPLICED_UNANNOT / SPLICED_IMPLICIT / SPLICE_ARTIFACT).
-    Excluded from calibration; surfaced for the QC warning that fires
-    when fewer than 100 spliced fragments are seen (``RNA_FL`` then
-    collapses to ``global_FL``).
-    """
+    # Eager diagnostic dataframes (locked schemas)
+    multi_locus_prior_df: pd.DataFrame
+    per_locus_gdna_df:    pd.DataFrame
 
-    # ---- Pool diagnostics ----
-    n_pool: int
-    """Number of unique-mapper UNSPLICED fragments in the calibration
-    pool (INTERGENIC ∪ INTRONIC ∪ EXON_INCOMPATIBLE) **after** dropping
-    out-of-range lengths. This is the denominator that actually fed the
-    1-D mixture EM. Pre-drop count is ``n_pool + n_pool_dropped_out_of_range``.
-    """
-    pi_pool: float
-    mixture_converged: bool
-    mixture_iterations: int
+    # ---- Convenience zero-copy aliases ----
+    @property
+    def alpha_gdna(self) -> np.ndarray:
+        return self.prior_table.alpha_gdna
 
-    n_pool_intronic_strand_sense: int
-    n_pool_intronic_strand_antisense: int
-    n_pool_intronic_strand_ambig: int
-    """Transcript-frame strand-asymmetry diagnostic for the INTRONIC
-    bucket (SRD v3 Phase 1).  In a stranded library, gDNA produces a
-    50/50 sense/antisense split (sonicated dsDNA); nRNA produces a
-    SS/(1-SS) split.  An INTRONIC sense fraction much closer to the
-    library SS than to 0.5 is the direct signal of nascent-RNA
-    contamination of the calibration pool.  Phase 2 of v3 will consume
-    the strand axis directly via a joint (FL × strand) mixture; until
-    then, see ``docs/calibration/srd_v2_phase2plus_handoff.md`` §7a
-    for the underlying limitation and ``docs/calibration/srd_v3_early_plan.md``
-    for the planned resolution.
-    """
+    @property
+    def alpha_rna(self) -> np.ndarray:
+        return self.prior_table.alpha_rna
 
-    n_pool_dropped_out_of_range: int
-    """Pool fragments dropped because ``frag_length`` was outside
-    ``[0, max_size]``. With SRD v2 Phase 1 sourcing length from
-    ``genomic_footprint`` (always >= 0), this counts only fragments
-    longer than ``max_size``. These are biologically anomalous (true
-    chimeras, unannotated splicing, read-through into intergenic,
-    annotation errors) and intentionally excluded from FL training; the
-    count is reported here purely as telemetry. Typically <0.5% of pool;
-    investigate if it spikes.
-    """
+    @property
+    def prior_weight_rna(self) -> list[np.ndarray]:
+        return self.prior_table.prior_weight_rna
 
-    # ---- Config echo (for reproducibility) ----
-    exon_fit_tolerance_bp: int
-    fl_prior_ess: float
+    @property
+    def global_fl_mean(self) -> float:
+        return float(self.fl_models.global_.mean)
 
-    # ---- Free-form extras (warnings, debug strings) ----
-    extra: dict[str, Any] = field(default_factory=dict)
+    @property
+    def rna_fl_mean(self) -> float:
+        return float(self.fl_models.rna.mean)
 
-    def to_summary_dict(self) -> dict[str, Any]:
-        """JSON-serializable summary for ``summary.json``.
+    @property
+    def gdna_fl_mean(self) -> float:
+        return float(self.fl_models.gdna.mean)
 
-        ``category_counts`` is flattened row-major:
-        ``flat[i * N_FRAGMENT_STRANDS + j]`` = count of fragments in
-        ``(FragmentCategory(i), FragmentStrand(j))``.
-        """
-        return {
-            "gdna_fl_quality": self.gdna_fl_quality,
-            "strand_specificity": float(self.strand_specificity),
-            "category_counts": [int(c) for c in np.asarray(self.category_counts).ravel()],
-            "category_counts_shape": list(np.asarray(self.category_counts).shape),
-            "n_multimap_excluded": int(self.n_multimap_excluded),
-            "n_spliced": int(self.n_spliced),
-            "n_pool": int(self.n_pool),
-            "n_pool_intronic_strand_sense": int(self.n_pool_intronic_strand_sense),
-            "n_pool_intronic_strand_antisense": int(self.n_pool_intronic_strand_antisense),
-            "n_pool_intronic_strand_ambig": int(self.n_pool_intronic_strand_ambig),
-            "n_pool_dropped_out_of_range": int(self.n_pool_dropped_out_of_range),
-            "pi_pool": float(self.pi_pool),
-            "mixture_converged": bool(self.mixture_converged),
-            "mixture_iterations": int(self.mixture_iterations),
-            "gdna_fl_mean": (
-                round(self.gdna_fl_model.mean, 2)
-                if self.gdna_fl_model is not None
-                else None
+    # ---- Mutator-style helper (frozen-safe) ----
+    def with_priors(self, prior_table: PriorTable) -> "CalibrationResult":
+        return dataclasses.replace(
+            self,
+            prior_table=prior_table,
+            n_multi_loci=len(prior_table.multi_locus_priors),
+            multi_locus_prior_df=build_multi_locus_prior_df(
+                prior_table.multi_locus_priors
             ),
-            "exon_fit_tolerance_bp": int(self.exon_fit_tolerance_bp),
-            "fl_prior_ess": float(self.fl_prior_ess),
-            "extra": dict(self.extra),
+            per_locus_gdna_df=build_per_locus_gdna_df(
+                prior_table.multi_locus_priors
+            ),
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        mean_pi = (
+            float(np.mean([m.pi_gdna for m in self.prior_table.multi_locus_priors]))
+            if self.prior_table.multi_locus_priors
+            else 0.0
+        )
+        return {
+            "global_densities": self.global_densities.to_summary_dict(),
+            "fl_models":        self.fl_models.to_summary_dict(),
+            "diagnostics":      self.diagnostics.to_summary_dict(),
+            "n_multi_loci":     self.n_multi_loci,
+            "c_base":           float(self.prior_table.c_base_value),
+            "mean_pi_gdna":     mean_pi,
         }
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+def build_calibration_result(
+    *,
+    payload:          CalibrationScanPayload,
+    scan_trained:     FragmentLengthModels,
+    global_densities: GlobalDensityTable,
+    prior_table:      PriorTable | None = None,
+    fl_prior_ess:     float = POOL_EB_PRIOR_ESS,
+    fl_models:        FLModels | None = None,
+) -> CalibrationResult:
+    """Assemble the immutable v6 calibration result.
+
+    Six explicit lines, zero ambiguity about ownership: the FL submodule
+    owns the FL pipeline, the diagnostics submodule owns the named
+    breakdown, the locus_prior submodule owns the priors, and this
+    function just wires them together.
+
+    ``prior_table`` defaults to :meth:`PriorTable.empty` so callers
+    that have not yet built the locus graph (e.g. the calibration
+    orchestrator) can produce a result and later swap the real table
+    in via :meth:`CalibrationResult.with_priors`.
+
+    ``fl_models`` may be passed by callers that already built the
+    FL models (e.g. to seed ``compute_global_densities`` with the
+    gDNA-FL mean).  When ``None`` (default), this function builds them
+    via :func:`build_fl_models`.
+    """
+    if prior_table is None:
+        prior_table = PriorTable.empty()
+    if fl_models is None:
+        fl_models = build_fl_models(
+            global_counts = extract_global_counts(scan_trained),
+            rna_counts    = extract_rna_counts(scan_trained),
+            gdna_counts   = extract_gdna_counts(payload),
+            max_size      = scan_trained.max_size,
+            prior_ess     = fl_prior_ess,
+        )
+    diagnostics = Diagnostics.from_payload(payload)
+    return CalibrationResult(
+        global_densities=global_densities,
+        fl_models=fl_models,
+        prior_table=prior_table,
+        diagnostics=diagnostics,
+        n_multi_loci=len(prior_table.multi_locus_priors),
+        multi_locus_prior_df=build_multi_locus_prior_df(prior_table.multi_locus_priors),
+        per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
+    )

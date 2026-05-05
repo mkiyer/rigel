@@ -67,7 +67,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from rigel.calibration import calibrate_gdna
+from rigel.calibration import assemble_priors, calibrate
 from rigel.config import (
     BamScanConfig,
     CalibrationConfig,
@@ -75,9 +75,8 @@ from rigel.config import (
     FragmentScoringConfig,
     PipelineConfig,
 )
-from rigel.frag_length_model import FragmentLengthModel
 from rigel.index import TranscriptIndex
-from rigel.locus import build_multi_loci, compute_locus_priors_from_partitions
+from rigel.locus import build_multi_loci
 from rigel.locus_partition import partition_and_free
 from rigel.native import detect_sj_strand_tag
 from rigel.pipeline import (
@@ -507,7 +506,7 @@ def profile_stages(
     if profiler:
         profiler.enable()
     with Timer("scan_and_buffer") as t_scan:
-        stats, strand_models, frag_length_models, buffer, _cal_payload = (
+        stats, strand_models, frag_length_models, buffer, cal_payload = (
             scan_and_buffer(bam_path, index, scan_cfg)
         )
     timings.scan_and_buffer = t_scan.elapsed
@@ -517,36 +516,19 @@ def profile_stages(
     cal_cfg = pcfg.calibration
     with Timer("finalize_models") as t_fin:
         strand_models.finalize()
-        frag_length_models.build_scoring_models()
-        frag_length_models.finalize(prior_ess=cal_cfg.fl_prior_ess)
+        # v6 calibration handles its own FL finalization; no
+        # build_scoring_models / finalize on the scanner accumulator.
     timings.finalize_models = t_fin.elapsed
     rss_snaps["after_finalize"] = _snap_rss_current()
 
-    # ── Stage 2b: gDNA calibration ──────────────────────────
-    cal_cfg = pcfg.calibration
+    # ── Stage 2b: gDNA calibration (v6) ─────────────────────
     with Timer("calibration") as t_cal:
-        calibration_obj = calibrate_gdna(
-            buffer,
-            index,
-            frag_length_models,
-            strand_models.strand_specificity,
-            exon_fit_tolerance_bp=cal_cfg.exon_fit_tolerance_bp,
-            fl_prior_ess=cal_cfg.fl_prior_ess,
-            max_iter=cal_cfg.max_iter,
-            tol=cal_cfg.tol,
+        calibration_obj = calibrate(
+            index=index,
+            payload=cal_payload,
+            scan_trained=frag_length_models,
+            fl_prior_ess=cal_cfg.prior_ess,
         )
-        # Apply calibrated gDNA fragment-length model for scoring (matches
-        # ``quant_from_buffer``: copy + re-finalize with the global FL prior
-        # so RNA and gDNA share the same prior baseline).
-        cal_gdna = calibration_obj.gdna_fl_model
-        gdna_copy = FragmentLengthModel(max_size=cal_gdna.max_size)
-        gdna_copy.counts = cal_gdna.counts.copy()
-        gdna_copy._total_weight = cal_gdna._total_weight
-        gdna_copy.finalize(
-            prior_counts=frag_length_models.global_model.counts,
-            prior_ess=cal_cfg.fl_prior_ess,
-        )
-        frag_length_models.gdna_model = gdna_copy
     timings.calibration = t_cal.elapsed
     rss_snaps["after_calibration"] = _snap_rss_current()
 
@@ -558,7 +540,7 @@ def profile_stages(
     # 3a: Geometry + estimator (single helper in current pipeline)
     with Timer("compute_geometry") as t_geom:
         geometry, estimator = _setup_geometry_and_estimator(
-            index, frag_length_models, em_config,
+            index, calibration_obj.fl_models.rna, em_config,
         )
     timings.compute_geometry = t_geom.elapsed
     timings.create_estimator = 0.0  # folded into _setup_geometry_and_estimator
@@ -570,7 +552,8 @@ def profile_stages(
             buffer,
             index,
             strand_models,
-            frag_length_models,
+            calibration_obj.fl_models.rna,
+            calibration_obj.fl_models.gdna,
             stats,
             estimator,
             scoring,
@@ -603,21 +586,27 @@ def profile_stages(
                 for t_idx in locus.transcript_indices:
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
 
-            # Partition global CSR data into per-locus tuples (must
-            # happen BEFORE the prior pass, which reads partitioned
-            # log-likelihoods).
+            # Assemble v6 PriorTable BEFORE partition_and_free
+            # (the latter nulls em_data arrays as it scatters).
+            with Timer("compute_eb_gdna_priors") as t_gdna:
+                prior_table = assemble_priors(
+                    loci,
+                    em_data,
+                    index,
+                    cal_payload,
+                    calibration_obj.global_densities,
+                    gdna_fl_mean=calibration_obj.fl_models.gdna.mean,
+                    c_base=cal_cfg.c_base,
+                )
+                alpha_gdna = prior_table.alpha_gdna
+                alpha_rna = prior_table.alpha_rna
+                prior_weight_rna_per_locus = list(prior_table.prior_weight_rna)
+            timings.compute_eb_gdna_priors = t_gdna.elapsed
+
             with Timer("partition") as t_part:
                 partitions = partition_and_free(em_data, loci)
                 del em_data
             timings.partition = t_part.elapsed
-
-            with Timer("compute_eb_gdna_priors") as t_gdna:
-                alpha_gdna, alpha_rna = compute_locus_priors_from_partitions(
-                    partitions,
-                    loci,
-                    pi_pool=float(calibration_obj.pi_pool),
-                )
-            timings.compute_eb_gdna_priors = t_gdna.elapsed
 
             with Timer("locus_em") as t_em:
                 _run_locus_em_partitioned(
@@ -628,6 +617,7 @@ def profile_stages(
                     alpha_gdna,
                     alpha_rna,
                     em_config,
+                    prior_weight_rna_per_locus=prior_weight_rna_per_locus,
                     emit_locus_stats=True,
                 )
             timings.locus_em = t_em.elapsed
