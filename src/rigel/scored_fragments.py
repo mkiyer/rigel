@@ -90,36 +90,10 @@ class ScoredFragments:
     n_candidates: int
 
 
-# ======================================================================
-# Locus — connected component of transcripts linked by shared fragments
-# ======================================================================
-
-
-@dataclass(slots=True)
-class Locus:
-    """A connected component of transcripts linked by shared fragments.
-
-    Attributes
-    ----------
-    locus_id : int
-        Sequential label (0-based).
-    transcript_indices : np.ndarray
-        int32 — global transcript indices in this locus.
-    unit_indices : np.ndarray
-        int32 — EM unit indices (rows in global CSR) belonging to
-        this locus.
-    gdna_span : int
-        Total merged genomic footprint (bp) across all chromosomes.
-    merged_intervals : list[tuple[str, int, int]]
-        Merged (ref, start, end) intervals for this locus, cached
-        during ``build_loci`` to avoid recomputation.
-    """
-
-    locus_id: int
-    transcript_indices: np.ndarray
-    unit_indices: np.ndarray
-    gdna_span: int
-    merged_intervals: list
+# Note: the locus / multi-locus types have been moved to :mod:`rigel.locus`
+# (the module that also builds them).  ``LocusPartition`` (a per-locus CSR
+# view used by the EM batch entry point) stays here because it is the EM
+# data layout, not a locus container.
 
 
 # ======================================================================

@@ -13,7 +13,7 @@ a memory-efficient columnar buffer (``FragmentBuffer``).
 
 **Quantification** (``quant_from_buffer``): Iterate the buffer once
 to assign unambig counts, build CSR EM data (via ``scan.FragmentRouter``),
-construct loci (via ``locus.build_loci``), compute Empirical Bayes gDNA
+construct loci (via ``locus.build_multi_loci``), compute Empirical Bayes gDNA
 priors, and run per-locus EM with ``2*n_t + 1`` components.
 
 Scoring functions live in ``scoring.py``.  Locus construction and EM
@@ -48,7 +48,7 @@ from .config import (
 from .estimator import AbundanceEstimator
 from .frag_length_model import FragmentLengthModel, FragmentLengthModels
 from .index import TranscriptIndex
-from .locus import build_loci, compute_locus_priors_from_partitions
+from .locus import build_multi_loci, compute_locus_priors_from_partitions
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
 from .locus_partition import partition_and_free
@@ -444,14 +444,14 @@ def _score_fragments(
     return em_data
 
 
-def _assign_locus_ids(estimator: AbundanceEstimator, loci: list) -> None:
-    """Stamp ``locus_id`` onto every transcript on the estimator.
+def _assign_locus_ids(estimator: AbundanceEstimator, multi_loci: list) -> None:
+    """Stamp ``multi_locus_id`` onto every transcript on the estimator.
 
     Required by the nRNA-fraction prior cascade in the C++ EM.
     """
-    for locus in loci:
+    for locus in multi_loci:
         for t_idx in locus.transcript_indices:
-            estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
+            estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
 
 
 def _populate_em_annotations(
@@ -514,7 +514,7 @@ def _populate_em_annotations(
 def _run_locus_em_partitioned(
     estimator: AbundanceEstimator,
     partitions: dict,
-    loci: list,
+    multi_loci: list,
     index: TranscriptIndex,
     alpha_gdna: np.ndarray,
     alpha_rna: np.ndarray,
@@ -541,7 +541,7 @@ def _run_locus_em_partitioned(
             if not is_synthetic_g[int(t_to_g[int(t_idx)])]
         }
         return {
-            "locus_id": locus.locus_id,
+            "locus_id": locus.multi_locus_id,
             "locus_span_bp": locus.gdna_span,
             "n_transcripts": len(locus.transcript_indices),
             "n_genes": len(gene_set),
@@ -593,24 +593,25 @@ def _run_locus_em_partitioned(
 
     # Classify mega vs normal
     locus_work = {
-        loc.locus_id: len(loc.transcript_indices) * partitions[loc.locus_id].n_units for loc in loci
+        loc.multi_locus_id: len(loc.transcript_indices) * partitions[loc.multi_locus_id].n_units
+        for loc in multi_loci
     }
     total_work = sum(locus_work.values())
     fair_share = total_work // n_threads if n_threads > 1 else total_work + 1
 
     mega_loci = sorted(
-        [loc for loc in loci if locus_work[loc.locus_id] >= fair_share],
-        key=lambda loc: locus_work[loc.locus_id],
+        [loc for loc in multi_loci if locus_work[loc.multi_locus_id] >= fair_share],
+        key=lambda loc: locus_work[loc.multi_locus_id],
         reverse=True,
     )
-    mega_ids = {loc.locus_id for loc in mega_loci}
+    mega_ids = {loc.multi_locus_id for loc in mega_loci}
 
     total_gdna_em = 0.0
 
     # Phase A: Mega-loci (one at a time, free after each)
     for locus in mega_loci:
-        part = partitions.pop(locus.locus_id)
-        lid = locus.locus_id
+        part = partitions.pop(locus.multi_locus_id)
+        lid = locus.multi_locus_id
         em_result = _call_batch_em(
             [part],
             [locus],
@@ -639,21 +640,25 @@ def _run_locus_em_partitioned(
         )
         del part
         logger.debug(
-            f"[MEGA] Locus {locus.locus_id}: "
+            f"[MEGA] Locus {locus.multi_locus_id}: "
             f"{len(locus.transcript_indices)} transcripts, "
             f"{len(locus.unit_indices)} units"
         )
 
     # Phase B: Normal loci (one batched call)
-    normal_loci = [loc for loc in loci if loc.locus_id not in mega_ids]
+    normal_loci = [loc for loc in multi_loci if loc.multi_locus_id not in mega_ids]
     if normal_loci:
         # Pop partitions out of the dict so the only references during
         # the batched C++ call live in ``normal_parts``.  After the call
         # completes and annotations are written we drop ``normal_parts``
         # to release per-locus arrays before EM downstream phases run.
-        normal_parts = [partitions.pop(loc.locus_id) for loc in normal_loci]
-        normal_ag = np.array([alpha_gdna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
-        normal_ar = np.array([alpha_rna[loc.locus_id] for loc in normal_loci], dtype=np.float64)
+        normal_parts = [partitions.pop(loc.multi_locus_id) for loc in normal_loci]
+        normal_ag = np.array(
+            [alpha_gdna[loc.multi_locus_id] for loc in normal_loci], dtype=np.float64
+        )
+        normal_ar = np.array(
+            [alpha_rna[loc.multi_locus_id] for loc in normal_loci], dtype=np.float64
+        )
         em_result = _call_batch_em(
             normal_parts,
             normal_loci,
@@ -688,9 +693,9 @@ def _run_locus_em_partitioned(
 
     estimator._gdna_em_total = total_gdna_em
 
-    n_total_units = sum(len(loc.unit_indices) for loc in loci)
+    n_total_units = sum(len(loc.unit_indices) for loc in multi_loci)
     logger.info(
-        f"[DONE] Per-locus EM (partitioned): {len(loci)} loci "
+        f"[DONE] Per-locus EM (partitioned): {len(multi_loci)} loci "
         f"({len(mega_loci)} mega), "
         f"{n_total_units:,} ambiguous fragments, "
         f"gDNA EM={total_gdna_em:.0f}"
@@ -798,24 +803,24 @@ def quant_from_buffer(
 
     # Phase 3: Locus construction, priors, and EM
     if em_data.n_units > 0:
-        loci = build_loci(em_data, index)
+        multi_loci = build_multi_loci(em_data, index)
 
-        if loci:
-            max_locus_t = max(len(loc.transcript_indices) for loc in loci)
-            max_locus_u = max(len(loc.unit_indices) for loc in loci)
+        if multi_loci:
+            max_locus_t = max(len(loc.transcript_indices) for loc in multi_loci)
+            max_locus_u = max(len(loc.unit_indices) for loc in multi_loci)
         else:
             max_locus_t = max_locus_u = 0
 
         logger.info(
-            f"[LOCI] {len(loci)} loci from {em_data.n_units:,} units "
+            f"[LOCI] {len(multi_loci)} loci from {em_data.n_units:,} units "
             f"(largest: {max_locus_t} transcripts, {max_locus_u} units)"
         )
 
-        _assign_locus_ids(estimator, loci)
+        _assign_locus_ids(estimator, multi_loci)
 
         # Phase 4 (NEW): Fused scatter into per-locus tuples
         # Phase 4 (NEW): Array-by-array scatter + incremental free
-        partitions = partition_and_free(em_data, loci)
+        partitions = partition_and_free(em_data, multi_loci)
         del em_data
 
         # SRD v1 Pass 4: per-locus Dirichlet prior from per-fragment
@@ -823,7 +828,7 @@ def quant_from_buffer(
         # docs/calibration/srd_v1_implementation.md §2.6.
         alpha_gdna, alpha_rna = compute_locus_priors_from_partitions(
             partitions,
-            loci,
+            multi_loci,
             pi_pool=float(calibration.pi_pool),
         )
 
@@ -831,7 +836,7 @@ def quant_from_buffer(
         _run_locus_em_partitioned(
             estimator,
             partitions,
-            loci,
+            multi_loci,
             index,
             alpha_gdna,
             alpha_rna,

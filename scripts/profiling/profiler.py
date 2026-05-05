@@ -77,7 +77,7 @@ from rigel.config import (
 )
 from rigel.frag_length_model import FragmentLengthModel
 from rigel.index import TranscriptIndex
-from rigel.locus import build_loci, compute_locus_priors_from_partitions
+from rigel.locus import build_multi_loci, compute_locus_priors_from_partitions
 from rigel.locus_partition import partition_and_free
 from rigel.native import detect_sj_strand_tag
 from rigel.pipeline import (
@@ -589,7 +589,7 @@ def profile_stages(
 
     if em_data.n_units > 0:
         with Timer("build_loci") as t_loci:
-            loci = build_loci(em_data, index)
+            loci = build_multi_loci(em_data, index)
         timings.build_loci = t_loci.elapsed
         n_loci = len(loci) if loci else 0
 
@@ -601,7 +601,7 @@ def profile_stages(
             # nRNA-fraction prior cascade in the C++ EM).
             for locus in loci:
                 for t_idx in locus.transcript_indices:
-                    estimator.locus_id_per_transcript[int(t_idx)] = locus.locus_id
+                    estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
 
             # Partition global CSR data into per-locus tuples (must
             # happen BEFORE the prior pass, which reads partitioned

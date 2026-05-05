@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from rigel.scored_fragments import Locus, ScoredFragments
+from rigel.scored_fragments import ScoredFragments
+from rigel.locus import Locus, MultiLocus
 from rigel.locus_partition import partition_and_free
 from rigel.native import (
     build_partition_offsets,
@@ -62,12 +63,12 @@ def _make_loci(n_units, n_transcripts_per_locus, rng):
         n_t = n_transcripts_per_locus[li]
         t_indices = np.arange(t_offset, t_offset + n_t, dtype=np.int32)
         u_indices = np.where(unit_assignments == li)[0].astype(np.int32)
-        loci.append(Locus(
-            locus_id=li,
+        loci.append(MultiLocus(
+            multi_locus_id=li,
             transcript_indices=t_indices,
             unit_indices=u_indices,
             gdna_span=10000,
-            merged_intervals=[("chr1", 0, 10000)],
+            loci=(Locus(ref="chr1", ref_id=0, start=0, end=10000),),
         ))
         t_offset += n_t
 

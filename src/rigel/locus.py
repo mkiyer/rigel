@@ -1,7 +1,12 @@
 """rigel.locus — Locus graph construction and per-locus EM priors.
 
-* :func:`build_loci` — connected-component partitioning of transcripts
-  linked by shared fragments, producing per-locus :class:`Locus` records.
+* :class:`Locus` — one contiguous genomic interval (the calibration
+  estimation unit; introduced in M5).
+* :class:`MultiLocus` — one connected component of transcripts linked
+  by shared fragments (the unit the EM is run on; was named ``Locus``
+  prior to M5).
+* :func:`build_multi_loci` — connected-component partitioning of
+  transcripts producing per-component :class:`MultiLocus` records.
 * :func:`compute_locus_priors_from_partitions` — SRD v1 per-locus
   Dirichlet prior (``α_gdna``, ``α_rna``) computed from per-fragment
   posteriors on already-scored partitions; consumed by the C++ EM solver
@@ -10,24 +15,83 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from .native import connected_components as _cc_native
 
-from .scored_fragments import Locus, LocusPartition, ScoredFragments
+from .scored_fragments import LocusPartition, ScoredFragments
 
 from .index import TranscriptIndex
 
 
 # ---------------------------------------------------------------------------
-# Locus builder: C++ union-find connected components
+# Locus / MultiLocus dataclasses
 # ---------------------------------------------------------------------------
 
 
-def build_loci(
+@dataclass(frozen=True, slots=True)
+class Locus:
+    """One contiguous genomic interval — the calibration-estimation unit.
+
+    A :class:`MultiLocus` is composed of one or more :class:`Locus`
+    intervals; most ``MultiLocus``es have exactly one, but paralog
+    clusters spanning multiple references carry several.
+    """
+
+    ref: str
+    ref_id: int
+    start: int
+    end: int
+
+    @property
+    def span(self) -> int:
+        return self.end - self.start
+
+
+@dataclass(frozen=True, slots=True)
+class MultiLocus:
+    """A connected component of transcripts linked by shared fragments.
+
+    The unit the EM is run on.  Composed of one or more :class:`Locus`
+    intervals (the calibration-estimation unit).
+
+    Attributes
+    ----------
+    multi_locus_id : int
+        Sequential label (0-based).
+    transcript_indices : np.ndarray
+        int32 — global transcript indices in this multi-locus.
+    unit_indices : np.ndarray
+        int32 — EM unit indices (rows in global CSR) belonging to
+        this multi-locus.
+    gdna_span : int
+        Total merged genomic footprint (bp).  Equal to
+        ``sum(l.span for l in loci)`` (precomputed cache for the EM
+        hot path).
+    loci : tuple[Locus, ...]
+        The contiguous intervals composing this multi-locus, sorted
+        ascending by ``(ref_id, start)``.
+    """
+
+    multi_locus_id: int
+    transcript_indices: np.ndarray
+    unit_indices: np.ndarray
+    gdna_span: int
+    loci: tuple[Locus, ...]
+
+
+# ---------------------------------------------------------------------------
+# MultiLocus builder: C++ union-find connected components
+# ---------------------------------------------------------------------------
+
+
+def build_multi_loci(
     em_data: ScoredFragments,
     index: TranscriptIndex,
-) -> list[Locus]:
-    """Build loci as connected components of transcripts linked by fragments.
+) -> list[MultiLocus]:
+    """Build multi-loci as connected components of transcripts linked
+    by fragments.
 
     Uses C++ union-find (disjoint-set with path compression and union
     by rank) for fast component detection.
@@ -41,7 +105,7 @@ def build_loci(
 
     Returns
     -------
-    list[Locus]
+    list[MultiLocus]
     """
     n_transcripts = index.num_transcripts
     offsets = em_data.offsets
@@ -70,7 +134,7 @@ def build_loci(
     _ref_names = ref_cat.categories.values
     _ref_codes = ref_cat.codes.values
 
-    loci = []
+    multi_loci: list[MultiLocus] = []
     for lid in range(n_comp):
         t_lo = comp_t_offsets[lid]
         t_hi = comp_t_offsets[lid + 1]
@@ -83,7 +147,7 @@ def build_loci(
         ee = t_ends_all[t_idx]
         order = np.lexsort((ss, rc))
 
-        merged = []
+        merged: list[tuple[int, int, int]] = []  # (ref_code, start, end)
         span = 0
         prev_rc = int(rc[order[0]])
         prev_s = int(ss[order[0]])
@@ -92,26 +156,31 @@ def build_loci(
             j = order[k]
             rj, sj, ej = int(rc[j]), int(ss[j]), int(ee[j])
             if rj != prev_rc or sj > prev_e:
-                merged.append((_ref_names[prev_rc], prev_s, prev_e))
+                merged.append((prev_rc, prev_s, prev_e))
                 span += prev_e - prev_s
                 prev_rc, prev_s, prev_e = rj, sj, ej
             else:
                 if ej > prev_e:
                     prev_e = ej
-        merged.append((_ref_names[prev_rc], prev_s, prev_e))
+        merged.append((prev_rc, prev_s, prev_e))
         span += prev_e - prev_s
 
-        loci.append(
-            Locus(
-                locus_id=lid,
+        loci_tuple = tuple(
+            Locus(ref=str(_ref_names[rcode]), ref_id=int(rcode), start=s, end=e)
+            for rcode, s, e in merged
+        )
+
+        multi_loci.append(
+            MultiLocus(
+                multi_locus_id=lid,
                 transcript_indices=t_idx,
                 unit_indices=comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]].copy(),
                 gdna_span=max(span, 1),
-                merged_intervals=merged,
+                loci=loci_tuple,
             )
         )
 
-    return loci
+    return multi_loci
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +201,7 @@ _PI_FLOOR = 1e-6
 
 def compute_locus_priors_from_partitions(
     partitions: dict[int, LocusPartition],
-    loci: list[Locus],
+    multi_loci: list[MultiLocus],
     pi_pool: float,
     *,
     c_base: float | None = None,  # retained for back-compat (vestigial; see Notes)
@@ -206,9 +275,9 @@ def compute_locus_priors_from_partitions(
     Parameters
     ----------
     partitions
-        Per-locus partitions keyed by ``locus_id``.
-    loci
-        Locus list defining iteration order.
+        Per-locus partitions keyed by ``multi_locus_id``.
+    multi_loci
+        MultiLocus list defining iteration order.
     pi_pool
         Library-wide gDNA prior from
         :class:`~rigel.calibration.CalibrationResult.pi_pool`.
@@ -220,7 +289,7 @@ def compute_locus_priors_from_partitions(
     alpha_gdna : np.ndarray, shape (n_loci,), float64
     alpha_rna  : np.ndarray, shape (n_loci,), float64
     """
-    n_loci = len(loci)
+    n_loci = len(multi_loci)
     alpha_gdna = np.zeros(n_loci, dtype=np.float64)
     alpha_rna = np.zeros(n_loci, dtype=np.float64)
 
@@ -229,8 +298,8 @@ def compute_locus_priors_from_partitions(
 
     cb = _C_BASE_DEFAULT if c_base is None else float(c_base)
 
-    for li, locus in enumerate(loci):
-        part = partitions.get(locus.locus_id)
+    for li, locus in enumerate(multi_loci):
+        part = partitions.get(locus.multi_locus_id)
         if part is None or part.n_units == 0:
             continue
 

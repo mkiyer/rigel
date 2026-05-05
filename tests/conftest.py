@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from rigel.scored_fragments import Locus, ScoredFragments
+from rigel.scored_fragments import ScoredFragments
+from rigel.locus import Locus, MultiLocus
 from rigel.index import TranscriptIndex
 from rigel.splice import SpliceStrandCol
 
@@ -251,12 +252,12 @@ def _make_locus_em_data(
         n_candidates=n_candidates,
     )
 
-    locus = Locus(
-        locus_id=0,
+    locus = MultiLocus(
+        multi_locus_id=0,
         transcript_indices=np.arange(n_t, dtype=np.int32),
         unit_indices=np.arange(n_units, dtype=np.int32),
         gdna_span=10000,
-        merged_intervals=[("chr1", 0, 10000)],
+        loci=(Locus(ref="chr1", ref_id=0, start=0, end=10000),),
     )
     loci = [locus]
 

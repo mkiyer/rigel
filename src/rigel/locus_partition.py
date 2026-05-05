@@ -26,7 +26,7 @@ from .scored_fragments import LocusPartition, ScoredFragments
 
 def partition_and_free(
     em_data: ScoredFragments,
-    loci: list,
+    multi_loci: list,
 ) -> dict[int, LocusPartition]:
     """Scatter global CSR into per-locus partitions, freeing each global
     array immediately after scatter.
@@ -35,16 +35,16 @@ def partition_and_free(
     ----------
     em_data : ScoredFragments
         Global CSR arrays. All data arrays are set to None after scatter.
-    loci : list[Locus]
-        Locus objects with ``unit_indices`` arrays.
+    multi_loci : list[MultiLocus]
+        MultiLocus objects with ``unit_indices`` arrays.
 
     Returns
     -------
     dict[int, LocusPartition]
-        Mapping from locus index to LocusPartition.
+        Mapping from multi-locus index to LocusPartition.
     """
-    n_loci = len(loci)
-    locus_units = [locus.unit_indices for locus in loci]
+    n_loci = len(multi_loci)
+    locus_units = [locus.unit_indices for locus in multi_loci]
 
     # ---- Build per-locus CSR offsets ----
     offsets_list = build_partition_offsets(
