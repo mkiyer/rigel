@@ -8,6 +8,7 @@ TSV mirrors) in an output directory:
     ref_lengths.feather        — reference names and lengths
     transcripts.feather        — one row per transcript with integer indices
     intervals.feather          — exon/intron/intergenic tiling of the genome
+    regions.feather            — calibration region partition (INTERGENIC/INTRON/EXON)
     sj.feather                 — annotated splice junctions from transcript introns
     splice_blacklist.feather   — (optional) splice-artifact junctions derived
                                  from the alignable Zarr store
@@ -21,6 +22,7 @@ import functools
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Literal
 
@@ -48,6 +50,9 @@ TRANSCRIPTS_TSV = "transcripts.tsv"
 
 INTERVALS_FEATHER = "intervals.feather"
 INTERVALS_TSV = "intervals.tsv"
+
+REGIONS_FEATHER = "regions.feather"
+REGIONS_TSV = "regions.tsv"
 
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
@@ -461,17 +466,109 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
                           t.strand, IntervalType.TRANSCRIPT, t.t_index)
 
 
-def _gen_genomic_intervals(
+@dataclass(frozen=True, slots=True)
+class _IntergenicSpan:
+    """A reference span containing no real (non-synthetic) transcript.
+
+    Half-open coordinates ``[start, end)``.
+    """
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class _GenicSpan:
+    """A reference span covered by one connected (strand-agnostic) transcript cluster.
+
+    ``transcripts`` is the cluster's transcript list in input order; it
+    is strand-agnostic and excludes synthetic nRNAs (which are
+    constructed downstream of the layout sweep).
+    """
+    start: int
+    end: int
+    transcripts: tuple = field(default_factory=tuple)
+
+
+def _iter_reference_layout(
+    ref_length: int,
+    transcripts: list[Transcript],
+) -> Iterator["_IntergenicSpan | _GenicSpan"]:
+    """Yield interleaved ``_IntergenicSpan`` / ``_GenicSpan`` tiling [0, ref_length).
+
+    ``transcripts`` is the per-reference list (already filtered to one
+    reference), and **must be sorted by ``(start, end)``**. Synthetic
+    transcripts are excluded from the sweep so they cannot coalesce
+    real genic spans.
+
+    Invariants:
+      - Spans alternate (no two intergenic in a row) and tile the
+        reference exactly with no gaps and no overlaps.
+      - Each ``_GenicSpan`` contains at least one (non-synthetic)
+        transcript with at least one exon.
+      - If the reference contains no real transcripts, a single
+        ``_IntergenicSpan(0, ref_length)`` is yielded (when
+        ``ref_length > 0``).
+    """
+    real_ts = [t for t in transcripts if not t.is_synthetic]
+
+    if not real_ts:
+        if ref_length > 0:
+            yield _IntergenicSpan(0, ref_length)
+        return
+
+    cursor = 0
+    cluster_start = real_ts[0].start
+    cluster_end = real_ts[0].end
+    cluster: list[Transcript] = [real_ts[0]]
+
+    for t in real_ts[1:]:
+        if t.start > cluster_end:
+            # Close current cluster.
+            if cursor < cluster_start:
+                yield _IntergenicSpan(cursor, cluster_start)
+            yield _GenicSpan(cluster_start, cluster_end, tuple(cluster))
+            cursor = cluster_end
+            cluster_start = t.start
+            cluster_end = t.end
+            cluster = [t]
+        else:
+            if t.end > cluster_end:
+                cluster_end = t.end
+            cluster.append(t)
+
+    # Final cluster.
+    if cursor < cluster_start:
+        yield _IntergenicSpan(cursor, cluster_start)
+    yield _GenicSpan(cluster_start, cluster_end, tuple(cluster))
+    if cluster_end < ref_length:
+        yield _IntergenicSpan(cluster_end, ref_length)
+
+
+def _emit_genomic_intervals(
+    ref: str,
+    layout: Iterator["_IntergenicSpan | _GenicSpan"],
+) -> Iterator[AnnotatedInterval]:
+    """Convert a per-reference layout stream into ``AnnotatedInterval`` rows.
+
+    Each ``_IntergenicSpan`` becomes one INTERGENIC interval. Each
+    ``_GenicSpan`` is decomposed via :func:`_gen_transcript_intervals`
+    (per-exon EXON intervals plus one TRANSCRIPT span per transcript).
+    Synthetic transcripts are filtered out by ``_gen_transcript_intervals``.
+    """
+    for span in layout:
+        if isinstance(span, _IntergenicSpan):
+            yield AnnotatedInterval(ref, span.start, span.end)
+        else:
+            assert isinstance(span, _GenicSpan)
+            for tc in span.transcripts:
+                yield from _gen_transcript_intervals(tc)
+
+
+def _group_transcripts_by_ref(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
-) -> Iterator[AnnotatedInterval]:
-    """Tile the genome into exon, intron, and intergenic intervals.
-
-    Transcripts must be sorted by ``(ref, start, end)``. Intergenic
-    intervals fill the gaps between transcript clusters and extend to
-    reference boundaries.
-    """
-    # Group transcripts by reference
+) -> dict[str, list[Transcript]]:
+    """Group transcripts by reference, validating each ref appears in ``ref_lengths``."""
     ref_transcripts: dict[str, list[Transcript]] = collections.defaultdict(list)
     for t in transcripts:
         if t.ref not in ref_lengths:
@@ -480,39 +577,23 @@ def _gen_genomic_intervals(
                 f"not found in the FASTA index"
             )
         ref_transcripts[t.ref].append(t)
+    return ref_transcripts
 
-    # Process each reference
+
+def _gen_genomic_intervals(
+    transcripts: list[Transcript],
+    ref_lengths: dict[str, int],
+) -> Iterator[AnnotatedInterval]:
+    """Tile the genome into exon, transcript-span, and intergenic intervals.
+
+    Thin wrapper over :func:`_iter_reference_layout` + :func:`_emit_genomic_intervals`,
+    iterating across all references in ``ref_lengths`` order. Transcripts
+    must be sorted by ``(ref, start, end)``.
+    """
+    ref_transcripts = _group_transcripts_by_ref(transcripts, ref_lengths)
     for ref, ref_length in ref_lengths.items():
-        t_list = ref_transcripts.get(ref, [])
-
-        if not t_list:
-            # Entire reference is intergenic
-            yield AnnotatedInterval(ref, 0, ref_length)
-            continue
-
-        end = 0  # tracks the rightmost coordinate reached
-        cluster: list[Transcript] = []
-
-        for t in t_list:
-            if t.start > end:
-                # Intergenic gap before this transcript cluster
-                if end < t.start:
-                    yield AnnotatedInterval(ref, end, t.start)
-                # Emit intervals for the previous cluster
-                for tc in cluster:
-                    yield from _gen_transcript_intervals(tc)
-                cluster = []
-
-            end = max(end, t.end)
-            cluster.append(t)
-
-        # Emit final cluster
-        for tc in cluster:
-            yield from _gen_transcript_intervals(tc)
-
-        # Intergenic gap to end of reference
-        if end < ref_length:
-            yield AnnotatedInterval(ref, end, ref_length)
+        layout = _iter_reference_layout(ref_length, ref_transcripts.get(ref, []))
+        yield from _emit_genomic_intervals(ref, layout)
 
 
 def build_genomic_intervals(
@@ -527,6 +608,72 @@ def build_genomic_intervals(
     intervals = list(_gen_genomic_intervals(transcripts, ref_lengths))
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
     return pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
+
+
+def build_index_artifacts(
+    transcripts: list[Transcript],
+    ref_lengths: dict[str, int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build both ``intervals.feather`` and ``regions.feather`` from a single sweep.
+
+    Iterates each reference's layout (intergenic / genic spans) exactly
+    once and feeds it into two emitters: the cgranges-style annotated
+    interval table and the calibration region partition.
+
+    Returns ``(intervals_df, regions_df)``. Both DataFrames are typed
+    per the on-disk schemas:
+
+      - intervals_df: columns of :class:`AnnotatedInterval`, sorted by
+        ``(ref, start, end, strand)``.
+      - regions_df: columns of :class:`rigel.calibration.regions.RegionRecord`,
+        with ``region_id`` assigned globally in genomic order
+        (matching ``ref_lengths`` iteration order, then start).
+
+    Transcripts must be sorted by ``(ref, start, end)``.
+    """
+    from .calibration.regions import emit_regions, RegionRecord
+
+    ref_transcripts = _group_transcripts_by_ref(transcripts, ref_lengths)
+
+    intervals: list[AnnotatedInterval] = []
+    regions: list[RegionRecord] = []
+
+    for ref, ref_length in ref_lengths.items():
+        layout_for_intervals = list(_iter_reference_layout(
+            ref_length, ref_transcripts.get(ref, [])
+        ))
+        intervals.extend(_emit_genomic_intervals(ref, iter(layout_for_intervals)))
+        regions.extend(emit_regions(ref, iter(layout_for_intervals)))
+
+    intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
+    iv_df = pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
+
+    # Assign region_id globally, in genomic order (ref_lengths iteration
+    # order, then start).  Within a single reference the layout sweep
+    # already emits regions in start order.
+    if regions:
+        regions = [r._replace(region_id=i) for i, r in enumerate(regions)]
+    region_df = pd.DataFrame(regions, columns=RegionRecord._fields)
+
+    # Coerce dtypes to the locked schema.
+    if not region_df.empty:
+        region_df = region_df.astype({
+            "region_id": np.int64,
+            "start": np.int64,
+            "end": np.int64,
+            "type": np.uint8,
+            "strand": np.uint8,
+            "tx_pos_bp": np.int64,
+            "tx_neg_bp": np.int64,
+            "exon_pos_bp": np.int64,
+            "exon_neg_bp": np.int64,
+            "boundary_flux_left": np.bool_,
+            "boundary_flux_right": np.bool_,
+        })
+        # ref_name is left as pandas' default string dtype.
+        region_df["ref_name"] = region_df["ref_name"].astype("string")
+
+    return iv_df, region_df
 
 
 def build_region_table(*args, **kwargs):  # pragma: no cover - removed in v0.5.0
@@ -743,14 +890,20 @@ class TranscriptIndex:
         if write_tsv:
             sj_df.to_csv(output_dir / SJ_TSV, sep="\t", index=False)
 
-        # -- Genomic intervals ------------------------------------------------
-        logger.info("[START] Building genomic intervals")
-        iv_df = build_genomic_intervals(transcripts, ref_lengths)
-        logger.info(f"[DONE] Found {len(iv_df)} genomic intervals")
+        # -- Genomic intervals + region partition ----------------------------
+        logger.info("[START] Building genomic intervals + region partition")
+        iv_df, region_df = build_index_artifacts(transcripts, ref_lengths)
+        logger.info(
+            f"[DONE] {len(iv_df)} genomic intervals, {len(region_df)} regions"
+        )
 
         iv_df.to_feather(output_dir / INTERVALS_FEATHER, **feather_kwargs)
         if write_tsv:
             iv_df.to_csv(output_dir / INTERVALS_TSV, sep="\t", index=False)
+
+        region_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
+        if write_tsv:
+            region_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
 
         # -- Splice-junction artifact blacklist (from alignable Zarr) -------
         if alignable_zarr_path is not None:
