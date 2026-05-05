@@ -25,13 +25,15 @@ import pandas as pd
 
 from ._kappa import KappaEstimate, estimate_kappa
 from .regions import RegionType
-from .scan_payload import CalibrationScanPayload
+from .scan_payload import (
+    MASK_EXON as _MASK_EXON,
+    MASK_INTERGENIC as _MASK_INTERGENIC,
+    MASK_INTRON as _MASK_INTRON,
+    CalibrationScanPayload,
+)
 
 
-# 8-state mask layout (mirrors ``rigel::calibration::mask`` in C++).
-_MASK_EXON = 0b001
-_MASK_INTRON = 0b010
-_MASK_INTERGENIC = 0b100
+# (mask constants are imported from scan_payload — single source of truth)
 
 DensityType = Literal["INTERGENIC", "INTRON", "EXON-INTRON"]
 

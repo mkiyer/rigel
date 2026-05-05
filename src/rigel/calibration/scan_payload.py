@@ -29,6 +29,13 @@ FL_HIST_N_BINS = 1024
 #: ``rigel::calibration::mask::N_STATES`` in C++.
 MASK_N_STATES = 8
 
+#: Public mask bit positions (3-bit code).  Mirrors the ``rigel::calibration::mask``
+#: enum in C++.  Single source of truth for the calibration package; do not
+#: re-declare these as private ``_MASK_*`` constants in callers.
+MASK_EXON = 0b001        # bit 0
+MASK_INTRON = 0b010      # bit 1
+MASK_INTERGENIC = 0b100  # bit 2
+
 
 _ERR_SUFFIX = " Rebuild the index or rerun the scan."
 
