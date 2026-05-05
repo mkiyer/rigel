@@ -6,13 +6,11 @@ incrementally per ``docs/calibration/calibration_v6_plan.md``.  The v6
 exports below are additive; they will replace the v1 names in M8c.
 """
 
-from ._fl_pool import (
-    POOL_EB_PRIOR_ESS,
-    POOL_QUALITY_GOOD_THRESHOLD,
-    POOL_QUALITY_WEAK_THRESHOLD,
-    PoolFLModels,
-    PoolQuality,
-    compute_pool_fl_models,
+from ._diagnostics import Diagnostics
+from ._fl_sources import (
+    extract_gdna_counts,
+    extract_global_counts,
+    extract_rna_counts,
 )
 from ._kappa import (
     KAPPA_DEFAULT,
@@ -29,6 +27,14 @@ from ._result_v6 import (
     build_per_locus_gdna_df,
 )
 from ._simple import calibrate_gdna
+from .fl import (
+    POOL_EB_PRIOR_ESS,
+    POOL_QUALITY_GOOD_THRESHOLD,
+    POOL_QUALITY_WEAK_THRESHOLD,
+    FLModels,
+    Quality,
+    build_fl_models,
+)
 from .density_global import (
     GlobalDensityTable,
     GlobalGdnaDensity,
@@ -82,13 +88,17 @@ __all__ = [
     "FLAG_INTRON_ZERO_LEFF",
     "FLAG_EXON_INTRON_NO_ELIGIBLE",
     "FLAG_PI_CLIPPED",
-    # M7 — pool FL models + CalibrationResult v6
-    "PoolFLModels",
-    "PoolQuality",
+    # M7 — fragment-length models + diagnostics + CalibrationResult v6
+    "FLModels",
+    "Quality",
     "POOL_QUALITY_GOOD_THRESHOLD",
     "POOL_QUALITY_WEAK_THRESHOLD",
     "POOL_EB_PRIOR_ESS",
-    "compute_pool_fl_models",
+    "build_fl_models",
+    "Diagnostics",
+    "extract_global_counts",
+    "extract_rna_counts",
+    "extract_gdna_counts",
     "CalibrationResultV6",
     "build_calibration_result",
     "build_multi_locus_prior_df",

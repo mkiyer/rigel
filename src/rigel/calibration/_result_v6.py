@@ -1,20 +1,10 @@
-"""rigel.calibration._result_v6 — Immutable v6 calibration result.
+"""rigel.calibration._result_v6 — immutable v6 calibration result.
 
-Per ``docs/calibration/calibration_v6_plan.md`` §2.10 and
-``docs/calibration/m7_implementation_plan.md`` §4.
+Per ``docs/calibration/m7_implementation_plan.md``.
 
 Coexists with the legacy SRD-v1 :class:`rigel.calibration._result.CalibrationResult`
 until M8c, when the legacy schema is deleted and this module is renamed
 to ``result.py``.
-
-Field discipline:
-
-* No ``version`` field (the class is the version).
-* No ``active`` / ``enabled`` flag (existence implies use).
-* No mutable cache slots (``with_priors`` returns a new instance via
-  ``dataclasses.replace``).
-* No reference to the raw ``CalibrationScanPayload`` (downstream code
-  reads diagnostic dataframes, not ``fl_hist``).
 """
 
 from __future__ import annotations
@@ -25,8 +15,15 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from ..frag_length_model import FragmentLengthModels
+from ._diagnostics import Diagnostics
+from ._fl_sources import (
+    extract_gdna_counts,
+    extract_global_counts,
+    extract_rna_counts,
+)
 from .density_global import GlobalDensityTable
-from ._fl_pool import PoolFLModels
+from .fl import POOL_EB_PRIOR_ESS, FLModels, build_fl_models
 from .locus_prior import LocusGdnaEstimate, MultiLocusPrior, PriorTable
 from .scan_payload import CalibrationScanPayload
 
@@ -43,12 +40,10 @@ __all__ = [
 # Diagnostic-dataframe builders (locked column order; pinned by tests)
 # ---------------------------------------------------------------------------
 
-#: Column order for ``CalibrationResult.multi_locus_prior_df``.
 _MULTI_LOCUS_COLUMNS: tuple[str, ...] = (
     "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
 )
 
-#: Column order for ``CalibrationResult.per_locus_gdna_df``.
 _PER_LOCUS_COLUMNS: tuple[str, ...] = (
     "multi_locus_id", "ref", "start", "end", "span",
     "n_obs", "n_gdna",
@@ -60,7 +55,6 @@ _PER_LOCUS_COLUMNS: tuple[str, ...] = (
 def build_multi_locus_prior_df(
     mlps: tuple[MultiLocusPrior, ...],
 ) -> pd.DataFrame:
-    """One row per ``MultiLocusPrior`` with the locked schema."""
     if not mlps:
         return pd.DataFrame({c: [] for c in _MULTI_LOCUS_COLUMNS})
     return pd.DataFrame(
@@ -79,7 +73,6 @@ def build_multi_locus_prior_df(
 def build_per_locus_gdna_df(
     mlps: tuple[MultiLocusPrior, ...],
 ) -> pd.DataFrame:
-    """One row per ``LocusGdnaEstimate`` (across all MultiLoci)."""
     if not mlps:
         return pd.DataFrame({c: [] for c in _PER_LOCUS_COLUMNS})
     rows: list[dict[str, object]] = []
@@ -114,24 +107,18 @@ def build_per_locus_gdna_df(
 class CalibrationResult:
     """Immutable v6 calibration result."""
 
-    # ---- Block 1: global gDNA densities (M4) ----
-    global_densities: GlobalDensityTable
+    global_densities: GlobalDensityTable    # M4
+    fl_models:        FLModels              # M7 — sole finalized FL surface
+    prior_table:      PriorTable            # M6
 
-    # ---- Block 2: pool FL models (M7) ----
-    pool: PoolFLModels
-
-    # ---- Block 3: per-MultiLocus priors (M6) ----
-    prior_table: PriorTable
-
-    # ---- Block 4: provenance ----
-    payload_summary: dict[str, int]
+    diagnostics:  Diagnostics               # named breakdown of n_observed
     n_multi_loci: int
 
-    # ---- Block 5: derived diagnostic dataframes (eager) ----
+    # Eager diagnostic dataframes (locked schemas)
     multi_locus_prior_df: pd.DataFrame
-    per_locus_gdna_df: pd.DataFrame
+    per_locus_gdna_df:    pd.DataFrame
 
-    # ---- Convenience accessors (zero-copy) ----
+    # ---- Convenience zero-copy aliases ----
     @property
     def alpha_gdna(self) -> np.ndarray:
         return self.prior_table.alpha_gdna
@@ -145,16 +132,19 @@ class CalibrationResult:
         return self.prior_table.prior_weight_rna
 
     @property
+    def global_fl_mean(self) -> float:
+        return float(self.fl_models.global_.mean)
+
+    @property
+    def rna_fl_mean(self) -> float:
+        return float(self.fl_models.rna.mean)
+
+    @property
     def gdna_fl_mean(self) -> float:
-        return self.pool.gdna_fl_mean
+        return float(self.fl_models.gdna.mean)
 
-    # ---- Mutator-style helpers (return a new instance; frozen-safe) ----
+    # ---- Mutator-style helper (frozen-safe) ----
     def with_priors(self, prior_table: PriorTable) -> "CalibrationResult":
-        """Return a copy with ``prior_table`` replaced.
-
-        Both diagnostic dataframes are rebuilt from the new
-        ``prior_table.multi_locus_priors``.
-        """
         return dataclasses.replace(
             self,
             prior_table=prior_table,
@@ -168,7 +158,6 @@ class CalibrationResult:
         )
 
     def to_summary_dict(self) -> dict[str, object]:
-        """JSON-serializable summary for ``summary.json``."""
         mean_pi = (
             float(np.mean([m.pi_gdna for m in self.prior_table.multi_locus_priors]))
             if self.prior_table.multi_locus_priors
@@ -176,9 +165,9 @@ class CalibrationResult:
         )
         return {
             "global_densities": self.global_densities.to_summary_dict(),
-            "pool":             self.pool.to_summary_dict(),
+            "fl_models":        self.fl_models.to_summary_dict(),
+            "diagnostics":      self.diagnostics.to_summary_dict(),
             "n_multi_loci":     self.n_multi_loci,
-            "payload_summary":  dict(self.payload_summary),
             "c_base":           float(self.prior_table.c_base_value),
             "mean_pi_gdna":     mean_pi,
         }
@@ -190,26 +179,32 @@ class CalibrationResult:
 
 def build_calibration_result(
     *,
-    payload: CalibrationScanPayload,
+    payload:          CalibrationScanPayload,
+    scan_trained:     FragmentLengthModels,
     global_densities: GlobalDensityTable,
-    pool: PoolFLModels,
-    prior_table: PriorTable,
+    prior_table:      PriorTable,
+    fl_prior_ess:     float = POOL_EB_PRIOR_ESS,
 ) -> CalibrationResult:
-    """Assemble the immutable v6 calibration result."""
-    payload_summary = {
-        "n_observed":           int(payload.n_observed),
-        "n_excluded_multimap":  int(payload.n_excluded_multimap),
-        "n_excluded_chimera":   int(payload.n_excluded_chimera),
-        "n_excluded_artifact":  int(payload.n_excluded_artifact),
-        "n_unobserved":         int(payload.n_unobserved),
-        "n_unannotated_ref":    int(payload.n_unannotated_ref),
-    }
+    """Assemble the immutable v6 calibration result.
 
+    Six explicit lines, zero ambiguity about ownership: the FL submodule
+    owns the FL pipeline, the diagnostics submodule owns the named
+    breakdown, the locus_prior submodule owns the priors, and this
+    function just wires them together.
+    """
+    fl_models = build_fl_models(
+        global_counts = extract_global_counts(scan_trained),
+        rna_counts    = extract_rna_counts(scan_trained),
+        gdna_counts   = extract_gdna_counts(payload),
+        max_size      = scan_trained.max_size,
+        prior_ess     = fl_prior_ess,
+    )
+    diagnostics = Diagnostics.from_payload(payload)
     return CalibrationResult(
         global_densities=global_densities,
-        pool=pool,
+        fl_models=fl_models,
         prior_table=prior_table,
-        payload_summary=payload_summary,
+        diagnostics=diagnostics,
         n_multi_loci=len(prior_table.multi_locus_priors),
         multi_locus_prior_df=build_multi_locus_prior_df(prior_table.multi_locus_priors),
         per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
