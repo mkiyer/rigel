@@ -86,6 +86,7 @@ class PipelineResult:
     estimator: AbundanceEstimator
     pipeline_config: "PipelineConfig" = None
     calibration: "CalibrationResult" = None
+    calibration_payload: "object" = None  # CalibrationScanPayload | None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -185,6 +186,7 @@ def scan_and_buffer(
     StrandModels,
     FragmentLengthModels,
     FragmentBuffer,
+    "object",  # CalibrationScanPayload | None
 ]:
     """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
 
@@ -202,7 +204,10 @@ def scan_and_buffer(
 
     Returns
     -------
-    tuple[PipelineStats, StrandModels, FragmentLengthModels, FragmentBuffer]
+    tuple
+        ``(stats, strand_models, frag_length_models, buffer,
+        calibration_payload)`` — the last is ``None`` if the index has
+        no ``regions.feather`` (legacy indexes pre-v3).
     """
     stats = PipelineStats()
     strand_models = StrandModels()
@@ -240,6 +245,14 @@ def scan_and_buffer(
         skip_duplicates=scan.skip_duplicates,
         include_multimap=scan.include_multimap,
     )
+
+    # Calibration region wiring (M3): install the per-genome region
+    # partition into the scanner so per-fragment 8-state observations
+    # are collected during the scan.  Skipped when the index has no
+    # regions.feather (legacy index, INDEX_FORMAT_VERSION < 3).
+    region_df = getattr(index, "region_df", None)
+    if region_df is not None and len(region_df) > 0:
+        _wire_calibration_regions(scanner, index, region_df)
 
     # Streaming chunk callback — receives zero-copy dict from C++
     def _on_chunk(raw: dict) -> None:
@@ -284,7 +297,76 @@ def scan_and_buffer(
     strand_models.log_summary()
     frag_length_models.log_summary()
 
-    return stats, strand_models, frag_length_models, buffer
+    # Calibration payload (optional — present iff regions were wired)
+    cal_dict = result.get("calibration") if isinstance(result, dict) else None
+    if cal_dict is None:
+        calibration_payload = None
+    else:
+        from .calibration.scan_payload import CalibrationScanPayload
+
+        # Balance basis: n_read_names is the count of non-empty qname
+        # groups, which is exactly the number of times the calibration
+        # dispatch site fires (multimappers are noted before the early
+        # return; non-multimappers reach the end-of-function policy).
+        calibration_payload = CalibrationScanPayload.from_scan_dict(
+            cal_dict,
+            n_total=stats.n_read_names,
+        )
+
+    return stats, strand_models, frag_length_models, buffer, calibration_payload
+
+
+def _wire_calibration_regions(
+    scanner,
+    index: TranscriptIndex,
+    region_df,
+) -> None:
+    """Install the index's region partition into a native BamScanner.
+
+    Translates ``ref_name`` to the resolver's internal ref_id (the same
+    numbering the BAM scanner uses for ``ExonBlock.ref_id``).  Regions
+    on references unknown to the resolver are dropped — the resolver
+    only registers refs that have transcripts, so dropped regions are
+    on intergenic-only chromosomes whose BAM fragments map with
+    ``ref_id == -1`` and would never overlap any region anyway.
+    """
+    resolver_ref_to_id = index.resolver.get_ref_to_id()
+    region_ref_names = region_df["ref_name"].astype(str).to_numpy()
+    ref_ids = np.fromiter(
+        (resolver_ref_to_id.get(name, -1) for name in region_ref_names),
+        dtype=np.int32,
+        count=len(region_ref_names),
+    )
+    keep = ref_ids >= 0
+    if not keep.all():
+        ref_ids = ref_ids[keep]
+        region_df = region_df.loc[keep]
+
+    starts = np.ascontiguousarray(region_df["start"].to_numpy(np.int64))
+    ends = np.ascontiguousarray(region_df["end"].to_numpy(np.int64))
+    types = region_df["type"].to_numpy(np.uint8)
+    # Bit layout: bit 0 = EXON (type 2), bit 1 = INTRON (type 1),
+    # bit 2 = INTERGENIC (type 0).
+    type_masks = (np.uint8(1) << (np.uint8(2) - types)).astype(np.uint8)
+
+    # set_regions requires sorted (ref_id, start) order.  region_df is
+    # already in genomic order per ref but ref iteration order may not
+    # match resolver IDs — re-sort to be safe.
+    order = np.lexsort((starts, ref_ids))
+    if not np.all(order == np.arange(len(order))):
+        ref_ids = ref_ids[order]
+        starts = starts[order]
+        ends = ends[order]
+        type_masks = type_masks[order]
+
+    n_refs = max(int(resolver_ref_to_id[name]) for name in resolver_ref_to_id) + 1
+    scanner.set_regions(
+        np.ascontiguousarray(ref_ids),
+        np.ascontiguousarray(starts),
+        np.ascontiguousarray(ends),
+        np.ascontiguousarray(type_masks),
+        n_refs,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +901,7 @@ def run_pipeline(
         scan = _replace(scan, sj_strand_tag=detected_spec)
 
     # -- Single BAM pass (C++ native scanner) --
-    stats, strand_models, frag_length_models, buffer = scan_and_buffer(
+    stats, strand_models, frag_length_models, buffer, calibration_payload = scan_and_buffer(
         bam_path, index, scan
     )
 
@@ -911,4 +993,5 @@ def run_pipeline(
         estimator=estimator,
         pipeline_config=config,
         calibration=calibration,
+        calibration_payload=calibration_payload,
     )

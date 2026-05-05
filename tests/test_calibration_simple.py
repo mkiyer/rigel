@@ -78,7 +78,7 @@ def _run_calibration(
             gdna_config=gdna, nrna_abundance=0,
         )
         scan_cfg = BamScanConfig(sj_strand_tag="auto", n_scan_threads=1)
-        _stats, strand_models, frag_length_models, buffer = scan_and_buffer(
+        _stats, strand_models, frag_length_models, buffer, _cal_payload = scan_and_buffer(
             str(sim_result.bam_path), sim_result.index, scan_cfg,
         )
         try:
@@ -298,7 +298,7 @@ class TestKnobs:
                 gdna_config=_gdna_cfg(20), nrna_abundance=0,
             )
             scan_cfg = BamScanConfig(sj_strand_tag="auto", n_scan_threads=1)
-            _stats, sm, flm, buf = scan_and_buffer(
+            _stats, sm, flm, buf, _cal_payload = scan_and_buffer(
                 str(sim_result.bam_path), sim_result.index, scan_cfg,
             )
             try:

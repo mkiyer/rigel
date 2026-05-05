@@ -156,6 +156,7 @@ nanobind_add_module(
   NOMINSIZE
   STABLE_ABI
   src/rigel/native/bam_scanner.cpp
+  src/rigel/native/calibration/accumulator.cpp
   src/rigel/cgranges/cgranges.c
 )
 

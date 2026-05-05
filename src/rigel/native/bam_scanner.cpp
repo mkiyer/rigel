@@ -45,6 +45,8 @@
 
 #include "resolve_context.h"
 #include "thread_queue.h"
+#include "ndarray_util.h"
+#include "calibration/accumulator.h"
 
 namespace nb = nanobind;
 using namespace rigel;
@@ -354,9 +356,10 @@ struct WorkerState {
     BamScanStats stats;
     StrandObservations strand_obs;
     FragLenObservations fraglen_obs;
+    rigel::calibration::CalibrationAccumulator cal_acc;
 
-    explicit WorkerState(int32_t n_transcripts)
-        : scratch(n_transcripts) {}
+    WorkerState(int32_t n_transcripts, int64_t n_regions)
+        : scratch(n_transcripts), cal_acc(n_regions) {}
 };
 
 // Merge observations
@@ -957,6 +960,11 @@ public:
     StrandObservations strand_obs_;
     FragLenObservations fraglen_obs_;
 
+    // Calibration region partition (set via set_regions; optional).
+    std::unique_ptr<rigel::calibration::RegionIndex> region_index_;
+    // Calibration accumulator (built from per-worker merges in scan()).
+    std::unique_ptr<rigel::calibration::CalibrationAccumulator> cal_acc_merged_;
+
     BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
                bool skip_duplicates,
@@ -966,6 +974,43 @@ public:
           include_multimap_(include_multimap)
     {
         sj_tag_mode_ = parse_sj_tag_spec(sj_tag_spec);
+    }
+
+    // ----------------------------------------------------------------
+    // Calibration region setup
+    // ----------------------------------------------------------------
+    //
+    // Loads the per-genome region partition (regions.feather) into a
+    // per-ref CSR overlap index.  Must be called BEFORE scan() if
+    // calibration observations are required.  The four input arrays
+    // must be of equal length, sorted by (ref_id, start), and
+    // per-ref contiguous + non-overlapping.  ``type_masks`` are the
+    // pre-computed bit masks (bit 0 = EXON, bit 1 = INTRON,
+    // bit 2 = INTERGENIC).
+    void set_regions(
+        nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
+        int32_t n_refs)
+    {
+        const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
+        if (static_cast<int64_t>(starts.shape(0)) != n ||
+            static_cast<int64_t>(ends.shape(0))    != n ||
+            static_cast<int64_t>(type_masks.shape(0)) != n)
+        {
+            throw std::invalid_argument(
+                "set_regions: ref_ids, starts, ends, type_masks "
+                "must all have the same length");
+        }
+        if (region_index_) {
+            throw std::runtime_error(
+                "set_regions: regions already set on this BamScanner; "
+                "create a new instance");
+        }
+        region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
+        region_index_->set(ref_ids.data(), starts.data(), ends.data(),
+                           type_masks.data(), n, n_refs);
     }
 
     // ----------------------------------------------------------------
@@ -999,9 +1044,16 @@ public:
         // Per-worker state (local to scan — not a class member)
         std::vector<std::unique_ptr<WorkerState>> worker_states;
         worker_states.reserve(n_workers);
+        const int64_t n_regions =
+            region_index_ ? region_index_->n_regions() : 0;
+        if (region_index_) {
+            cal_acc_merged_ =
+                std::make_unique<rigel::calibration::CalibrationAccumulator>(
+                    n_regions);
+        }
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
-            auto ws = std::make_unique<WorkerState>(n_transcripts);
+            auto ws = std::make_unique<WorkerState>(n_transcripts, n_regions);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
             worker_states.push_back(std::move(ws));
@@ -1010,6 +1062,8 @@ public:
         // Capture read-only config
         bool include_multimap = include_multimap_;
         FragmentResolver* ctx = ctx_;
+        const rigel::calibration::RegionIndex* region_index =
+            region_index_.get();
 
         // ---- Launch worker threads ----
         // Workers pop from input_queue, process groups, accumulate, and
@@ -1019,13 +1073,14 @@ public:
         for (int i = 0; i < n_workers; i++) {
             workers.emplace_back([&input_queue, &output_queue,
                                   &worker_states, ctx, i,
-                                  include_multimap, chunk_size]()
+                                  include_multimap, chunk_size,
+                                  region_index]()
             {
                 WorkerState& ws = *worker_states[i];
                 QnameGroup group;
                 while (input_queue.pop(group)) {
                     process_qname_group_threaded(
-                        group, *ctx, ws, include_multimap);
+                        group, *ctx, ws, include_multimap, region_index);
                     // Emit a chunk when accumulator reaches threshold
                     if (ws.accumulator.get_size() >= chunk_size) {
                         if (!output_queue.push(std::move(ws.accumulator))) {
@@ -1133,6 +1188,9 @@ public:
                     stats_.merge_from(ws.stats);
                     merge_strand_obs(strand_obs_, ws.strand_obs);
                     merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
+                    if (region_index_) {
+                        cal_acc_merged_->merge_from(ws.cal_acc);
+                    }
                 }
 
                 output_queue.close();
@@ -1195,7 +1253,8 @@ private:
         QnameGroup& group,
         FragmentResolver& ctx,
         WorkerState& ws,
-        bool include_multimap)
+        bool include_multimap,
+        const rigel::calibration::RegionIndex* region_index)
     {
         if (group.records.empty()) return;
 
@@ -1223,6 +1282,7 @@ private:
 
         if (is_multimap) {
             stats.multimapping++;
+            if (region_index != nullptr) ws.cal_acc.note_multimap();
             if (!include_multimap) return;
         } else {
             stats.unique++;
@@ -1280,6 +1340,17 @@ private:
         // resolved hits are chimeric.
         bool any_hit_chimeric = false;
         int32_t worst_chimera_type = CHIMERA_NONE;
+
+        // Calibration observation tracking (unique mappers only).
+        // Captures the chosen fragment for the end-of-function
+        // observation site.  See docs/calibration/m3_implementation_plan.md
+        // §3.5.
+        bool obs_set = false;
+        int8_t obs_splice = 0;
+        int32_t obs_ref = -1;
+        int64_t obs_fs = 0;
+        int64_t obs_fe = 0;
+        std::vector<ExonBlock> obs_exons;
 
         // Count ONE fragment per physical molecule (not per hit).
         stats.n_fragments++;
@@ -1350,6 +1421,16 @@ private:
                     ig_result.num_hits = num_hits;
                     ig_result.nm = frag.nm;
                     accumulator.append(ig_result, frag_id);
+
+                    // Calibration: capture intergenic-resolved fragment.
+                    if (region_index != nullptr && !obs_set) {
+                        obs_set = true;
+                        obs_splice = static_cast<int8_t>(cr.splice_type);
+                        obs_ref = frag.exons[0].ref_id;
+                        obs_fs = frag.exons.front().start;
+                        obs_fe = frag.exons.back().end;
+                        obs_exons = frag.exons;
+                    }
                 }
 
                 continue;
@@ -1439,6 +1520,18 @@ private:
 
             accumulator.append(result, frag_id);
 
+            // Calibration: capture chosen non-chimeric resolved hit
+            // (unique mappers only — multimappers were note_multimap'd
+            // at the early dispatch).
+            if (region_index != nullptr && is_unique_mapper && !obs_set) {
+                obs_set = true;
+                obs_splice = static_cast<int8_t>(result.splice_type);
+                obs_ref = frag.exons[0].ref_id;
+                obs_fs = frag.exons.front().start;
+                obs_fe = frag.exons.back().end;
+                obs_exons = frag.exons;
+            }
+
             if (!is_unique_mapper) {
                 n_buffered_mm++;
             }
@@ -1473,6 +1566,31 @@ private:
         if (n_buffered_mm > 0) {
             stats.n_multimapper_groups++;
             stats.n_multimapper_alignments += n_buffered_mm;
+        }
+
+        // Calibration observation site (single point per molecule).
+        // Multimappers were already counted at the early dispatch.
+        // See docs/calibration/m3_implementation_plan.md §3.5.
+        if (region_index != nullptr && !is_multimap) {
+            if (any_hit_chimeric && !any_non_chimeric_resolved) {
+                ws.cal_acc.note_chimera();
+            } else if (obs_set) {
+                if (obs_splice == SPLICE_ARTIFACT) {
+                    ws.cal_acc.note_artifact();
+                } else {
+                    ws.cal_acc.observe(
+                        obs_splice, obs_ref, obs_fs, obs_fe,
+                        obs_exons.data(),
+                        static_cast<int32_t>(obs_exons.size()),
+                        *region_index);
+                }
+            } else {
+                // Reached the end of a non-mm qname group with nothing
+                // to observe (e.g., the only hit had empty exons or
+                // _resolve_core returned false outright).  Counted
+                // separately so the balance assertion stays exact.
+                ws.cal_acc.note_unobserved();
+            }
         }
     }
 
@@ -1534,6 +1652,37 @@ private:
         fraglen_dict["lengths"]            = vec_to_ndarray(std::move(fraglen_obs_.lengths));
         fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
         result["frag_length_observations"] = fraglen_dict;
+
+        // Calibration payload (optional — present iff set_regions() was called).
+        if (cal_acc_merged_) {
+            auto& payload = cal_acc_merged_->payload();
+            const size_t n_reg =
+                static_cast<size_t>(cal_acc_merged_->n_regions());
+            nb::dict cal_dict;
+            // Copy the fixed-size global counts to a heap vector for capsule
+            // ownership (std::array can't be moved into capsule cleanly).
+            std::vector<int64_t> gc(payload.global_counts.begin(),
+                                    payload.global_counts.end());
+            cal_dict["global_counts"]      = vec_to_ndarray(std::move(gc));
+            cal_dict["per_region_counts"]  = vec_to_ndarray2d(
+                std::move(payload.per_region_counts), n_reg,
+                static_cast<size_t>(rigel::calibration::CalibrationPayload::kMaskCard));
+            cal_dict["fl_hist"]            = vec_to_ndarray2d(
+                std::move(payload.fl_hist),
+                static_cast<size_t>(rigel::calibration::CalibrationPayload::kMaskCard),
+                static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlBins));
+            cal_dict["u_left"]             = vec_to_ndarray(std::move(payload.u_left));
+            cal_dict["u_right"]            = vec_to_ndarray(std::move(payload.u_right));
+            cal_dict["n_observed"]         = payload.n_observed;
+            cal_dict["n_excluded_multimap"]= payload.n_excluded_multimap;
+            cal_dict["n_excluded_chimera"] = payload.n_excluded_chimera;
+            cal_dict["n_excluded_artifact"]= payload.n_excluded_artifact;
+            cal_dict["n_unobserved"]       = payload.n_unobserved;
+            cal_dict["n_oor"]              = payload.n_oor;
+            result["calibration"] = cal_dict;
+        } else {
+            result["calibration"] = nb::none();
+        }
 
         return result;
     }
@@ -2142,6 +2291,28 @@ NB_MODULE(_bam_impl, m) {
              "dict\n"
              "    Dict with keys: 'stats', 'strand_observations',\n"
              "    'frag_length_observations'.\n")
+        .def("set_regions", &BamScanner::set_regions,
+             nb::arg("ref_ids"),
+             nb::arg("starts"),
+             nb::arg("ends"),
+             nb::arg("type_masks"),
+             nb::arg("n_refs"),
+             "Install the calibration region partition.\n\n"
+             "Must be called before scan() to enable calibration\n"
+             "observation collection.  All four arrays must be the\n"
+             "same length, sorted by (ref_id, start), with regions\n"
+             "per-ref contiguous and non-overlapping.\n\n"
+             "Parameters\n"
+             "----------\n"
+             "ref_ids : ndarray[int32]\n"
+             "ref_id of each region (FragmentResolver numbering).\n"
+             "starts, ends : ndarray[int64]\n"
+             "    0-based half-open region intervals.\n"
+             "type_masks : ndarray[uint8]\n"
+             "    Pre-computed bit masks (bit 0=EXON, 1=INTRON,\n"
+             "    2=INTERGENIC).\n"
+             "n_refs : int\n"
+             "    Total number of references in the index.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

@@ -13,6 +13,8 @@
 #pragma once
 
 #include <cstddef>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <nanobind/nanobind.h>
@@ -45,6 +47,27 @@ nb::object vec_to_ndarray(std::vector<T>* v) {
     });
     return nb::ndarray<nb::numpy, T, nb::ndim<1>>(
         v->data(), {n}, del).cast();
+}
+
+/// Move a std::vector<T> to the heap and return a capsule-backed 2-D
+/// ndarray with shape (rows, cols), row-major.  Requires
+/// rows * cols == v.size().  The source vector is consumed.
+template <typename T>
+nb::object vec_to_ndarray2d(std::vector<T>&& v, size_t rows, size_t cols) {
+    auto* heap = new std::vector<T>(std::move(v));
+    if (heap->size() != rows * cols) {
+        size_t actual = heap->size();
+        delete heap;
+        throw std::runtime_error(
+            "vec_to_ndarray2d: size mismatch (expected " +
+            std::to_string(rows * cols) + ", got " +
+            std::to_string(actual) + ")");
+    }
+    nb::capsule del(heap, [](void* p) noexcept {
+        delete static_cast<std::vector<T>*>(p);
+    });
+    return nb::ndarray<nb::numpy, T, nb::ndim<2>>(
+        heap->data(), {rows, cols}, del).cast();
 }
 
 }  // namespace rigel

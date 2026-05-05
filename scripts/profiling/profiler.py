@@ -507,7 +507,7 @@ def profile_stages(
     if profiler:
         profiler.enable()
     with Timer("scan_and_buffer") as t_scan:
-        stats, strand_models, frag_length_models, buffer = (
+        stats, strand_models, frag_length_models, buffer, _cal_payload = (
             scan_and_buffer(bam_path, index, scan_cfg)
         )
     timings.scan_and_buffer = t_scan.elapsed
