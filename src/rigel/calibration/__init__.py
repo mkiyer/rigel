@@ -21,6 +21,7 @@ from .density_global import (
     compute_global_densities,
     l_eff_overlap,
 )
+from .locus_prior import build_prior_weight_rna
 
 
 __all__ = [
@@ -38,4 +39,6 @@ __all__ = [
     "KAPPA_DEFAULT",
     "KAPPA_MIN",
     "KAPPA_MAX",
+    # M5 — EM prior_weight_rna helper
+    "build_prior_weight_rna",
 ]

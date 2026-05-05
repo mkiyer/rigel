@@ -263,6 +263,7 @@ class AbundanceEstimator:
         em_convergence_delta: float = 1e-6,
         emit_locus_stats: bool = False,
         emit_assignments: bool = False,
+        locus_prior_weight_rna: list | None = None,
     ) -> tuple[float, np.ndarray, np.ndarray, ...]:
         """Run locus-level EM from pre-partitioned data.
 
@@ -325,6 +326,7 @@ class AbundanceEstimator:
                 self.em_config.n_threads,
                 emit_locus_stats,
                 emit_assignments,
+                locus_prior_weight_rna,
             )
         )
 
