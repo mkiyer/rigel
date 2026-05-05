@@ -53,7 +53,7 @@ class CalibrationScanPayload:
     n_excluded_chimera: int
     n_excluded_artifact: int
     n_unobserved: int
-    n_oor: int
+    n_unannotated_ref: int
 
     @classmethod
     def from_scan_dict(
@@ -104,13 +104,15 @@ class CalibrationScanPayload:
         n_ex_ch = int(d["n_excluded_chimera"])
         n_ex_ar = int(d["n_excluded_artifact"])
         n_unobs = int(d["n_unobserved"])
-        n_oor = int(d["n_oor"])
+        n_unann = int(d["n_unannotated_ref"])
 
-        # Internal consistency: n_oor is a subset of n_observed (mask == 0).
-        if n_oor > n_observed:
+        # Internal consistency: n_unannotated_ref is a subset of n_observed
+        # (it counts observed fragments whose every block fell outside any
+        # region — mask == 0 after the overlap pass).
+        if n_unann > n_observed:
             raise ValueError(
-                f"calibration payload: n_oor ({n_oor}) > n_observed "
-                f"({n_observed}).{_ERR_SUFFIX}"
+                f"calibration payload: n_unannotated_ref ({n_unann}) > "
+                f"n_observed ({n_observed}).{_ERR_SUFFIX}"
             )
 
         # global_counts must sum to n_observed.
@@ -145,5 +147,5 @@ class CalibrationScanPayload:
             n_excluded_chimera=n_ex_ch,
             n_excluded_artifact=n_ex_ar,
             n_unobserved=n_unobs,
-            n_oor=n_oor,
+            n_unannotated_ref=n_unann,
         )

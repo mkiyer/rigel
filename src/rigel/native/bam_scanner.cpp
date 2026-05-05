@@ -1666,10 +1666,10 @@ private:
             cal_dict["global_counts"]      = vec_to_ndarray(std::move(gc));
             cal_dict["per_region_counts"]  = vec_to_ndarray2d(
                 std::move(payload.per_region_counts), n_reg,
-                static_cast<size_t>(rigel::calibration::CalibrationPayload::kMaskCard));
+                static_cast<size_t>(rigel::calibration::mask::N_STATES));
             cal_dict["fl_hist"]            = vec_to_ndarray2d(
                 std::move(payload.fl_hist),
-                static_cast<size_t>(rigel::calibration::CalibrationPayload::kMaskCard),
+                static_cast<size_t>(rigel::calibration::mask::N_STATES),
                 static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlBins));
             cal_dict["u_left"]             = vec_to_ndarray(std::move(payload.u_left));
             cal_dict["u_right"]            = vec_to_ndarray(std::move(payload.u_right));
@@ -1678,7 +1678,7 @@ private:
             cal_dict["n_excluded_chimera"] = payload.n_excluded_chimera;
             cal_dict["n_excluded_artifact"]= payload.n_excluded_artifact;
             cal_dict["n_unobserved"]       = payload.n_unobserved;
-            cal_dict["n_oor"]              = payload.n_oor;
+            cal_dict["n_unannotated_ref"]  = payload.n_unannotated_ref;
             result["calibration"] = cal_dict;
         } else {
             result["calibration"] = nb::none();

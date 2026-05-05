@@ -170,7 +170,7 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
         "n_excluded_chimera": 0,
         "n_excluded_artifact": 0,
         "n_unobserved": 0,
-        "n_oor": 0,
+        "n_unannotated_ref": 0,
     }
 
 
@@ -204,10 +204,10 @@ class TestPayloadValidation:
         with pytest.raises(ValueError, match="global_counts"):
             CalibrationScanPayload.from_scan_dict(d)
 
-    def test_n_oor_le_n_observed(self):
+    def test_n_unannotated_ref_le_n_observed(self):
         d = _good_payload_dict(n_observed=10)
-        d["n_oor"] = 99
-        with pytest.raises(ValueError, match="n_oor"):
+        d["n_unannotated_ref"] = 99
+        with pytest.raises(ValueError, match="n_unannotated_ref"):
             CalibrationScanPayload.from_scan_dict(d)
 
     def test_none_dict_raises(self):
@@ -244,7 +244,7 @@ class TestWorkerMergeEquality:
         assert a.n_excluded_chimera == b.n_excluded_chimera
         assert a.n_excluded_artifact == b.n_excluded_artifact
         assert a.n_unobserved == b.n_unobserved
-        assert a.n_oor == b.n_oor
+        assert a.n_unannotated_ref == b.n_unannotated_ref
 # ---------------------------------------------------------------------------
 # 5. Hand-built BAM contract tests against `mini_index`
 #

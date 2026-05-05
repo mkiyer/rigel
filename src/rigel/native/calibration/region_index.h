@@ -7,22 +7,30 @@
  * answer overlap queries in O(log n + k) where n is the number of
  * regions on the queried reference and k is the number of hit regions.
  *
- * The non-overlap invariant is what makes this so cheap — a query
- * never returns the same region twice, so no dedup pass is needed.
- *
- * See ``docs/calibration/m3_implementation_plan.md`` §3.1.
+ * The non-overlap invariant guarantees that a single ``overlap_into``
+ * call returns at most one hit per region, and the returned region
+ * IDs are strictly increasing (regions are stored in start order).
  */
 
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstddef>
 #include <stdexcept>
 #include <vector>
 
 namespace rigel::calibration {
+
+// Public mask layout — single source of truth for the 8-state coding.
+// Used by RegionIndex (region type masks) and CalibrationAccumulator
+// (per-fragment OR'd masks, FL histogram strata).
+namespace mask {
+constexpr uint8_t EXON       = 0b001;
+constexpr uint8_t INTRON     = 0b010;
+constexpr uint8_t INTERGENIC = 0b100;
+constexpr int     N_STATES   = 8;
+}  // namespace mask
 
 class RegionIndex {
 public:
@@ -33,8 +41,7 @@ public:
      *
      * Inputs MUST be sorted by (ref_id, start) with regions per-ref
      * contiguous and non-overlapping. ``type_masks[i]`` is the
-     * pre-computed bit mask for region ``i`` (bit 0 = EXON,
-     * bit 1 = INTRON, bit 2 = INTERGENIC).
+     * pre-computed bit mask for region ``i`` (see ``mask::``).
      */
     void set(const int32_t* ref_ids,
              const int64_t* starts,
@@ -79,24 +86,20 @@ public:
     }
 
     /**
-     * O(log n + k) overlap query. Region indices that overlap
-     * [qstart, qend) on ``ref_id`` are appended into ``out_inline``
-     * up to capacity N, then to ``out_spill``. Returns total count.
-     *
-     * Output is in start order (regions are stored sorted).
+     * O(log n + k) overlap query. Region IDs that overlap [qstart, qend)
+     * on ``ref_id`` are *appended* to ``out`` in strictly increasing
+     * order.  The caller owns ``out`` and is responsible for clearing
+     * (or otherwise managing) it between calls.
      */
-    template <std::size_t N>
-    int32_t overlap_into(int32_t ref_id,
-                         int64_t qstart,
-                         int64_t qend,
-                         std::array<int32_t, N>& out_inline,
-                         std::vector<int32_t>& out_spill,
-                         int32_t already_inline) const
+    void overlap_into(int32_t ref_id,
+                      int64_t qstart,
+                      int64_t qend,
+                      std::vector<int32_t>& out) const
     {
-        if (ref_id < 0 || ref_id >= n_refs_) return 0;
+        if (ref_id < 0 || ref_id >= n_refs_) return;
         const int64_t lo = ref_offsets_[ref_id];
         const int64_t hi = ref_offsets_[ref_id + 1];
-        if (lo == hi || qend <= qstart) return 0;
+        if (lo == hi || qend <= qstart) return;
 
         // Find first region whose start > qstart.  The region just
         // before it is a candidate iff its end > qstart.
@@ -105,19 +108,10 @@ public:
         int64_t i = static_cast<int64_t>(it - sp);
         if (i > lo && ends_[i - 1] > qstart) i = i - 1;
 
-        int32_t n = 0;
-        int32_t inline_pos = already_inline;
         while (i < hi && starts_[i] < qend) {
-            const int32_t rid = static_cast<int32_t>(i);
-            if (inline_pos < static_cast<int32_t>(N)) {
-                out_inline[inline_pos++] = rid;
-            } else {
-                out_spill.push_back(rid);
-            }
-            ++n;
+            out.push_back(static_cast<int32_t>(i));
             ++i;
         }
-        return n;
     }
 
     inline int64_t  start(int32_t rid)     const { return starts_[rid]; }
