@@ -186,7 +186,6 @@ def analyze_library(label: str, library_dir: Path, rigel_subdir: str = "rigel_v0
     pool = {}
     if rigel_summary:
         cal = rigel_summary.get("calibration", {}) or {}
-        em = rigel_summary.get("em_summary", {}) or rigel_summary.get("locus_em", {}) or {}
         # Try to surface useful keys without assuming full schema
         for key in ("pi_pool", "gdna_quality", "gdna_fl_obs", "rna_fl_obs",
                     "global_fl_obs", "category_counts", "ss_inferred",

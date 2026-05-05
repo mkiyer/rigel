@@ -212,17 +212,27 @@ def emit_regions(
                 elif this_is_exon != cur_is_exon:
                     _flush(prev_pos)
                     cur_is_exon = this_is_exon
-                if ep > 0: cur_ep_bp += width
-                if en > 0: cur_en_bp += width
-                if tp > 0: cur_tp_bp += width
-                if tn > 0: cur_tn_bp += width
+                if ep > 0:
+                    cur_ep_bp += width
+                if en > 0:
+                    cur_en_bp += width
+                if tp > 0:
+                    cur_tp_bp += width
+                if tn > 0:
+                    cur_tn_bp += width
                 prev_pos = pos
             # Aggregate all deltas at the same position
-            ep += dep; en += den; tp += dtp; tn += dtn
+            ep += dep
+            en += den
+            tp += dtp
+            tn += dtn
             i += 1
             while i < n_events and events[i][0] == pos:
                 _, dep2, den2, dtp2, dtn2 = events[i]
-                ep += dep2; en += den2; tp += dtp2; tn += dtn2
+                ep += dep2
+                en += den2
+                tp += dtp2
+                tn += dtn2
                 i += 1
 
         # Tail span from last event to L
@@ -235,10 +245,14 @@ def emit_regions(
             elif this_is_exon != cur_is_exon:
                 _flush(prev_pos)
                 cur_is_exon = this_is_exon
-            if ep > 0: cur_ep_bp += width
-            if en > 0: cur_en_bp += width
-            if tp > 0: cur_tp_bp += width
-            if tn > 0: cur_tn_bp += width
+            if ep > 0:
+                cur_ep_bp += width
+            if en > 0:
+                cur_en_bp += width
+            if tp > 0:
+                cur_tp_bp += width
+            if tn > 0:
+                cur_tn_bp += width
             prev_pos = L
         _flush(L)
 

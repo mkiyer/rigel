@@ -277,7 +277,9 @@ def test_diagnostics_total_equals_n_observed():
 
 def test_diagnostics_named_fields_match_mask_codes():
     gc = np.zeros(MASK_N_STATES, dtype=np.int64)
-    gc[0] = 1; gc[MASK_EXON] = 2; gc[MASK_INTRON] = 3
+    gc[0] = 1
+    gc[MASK_EXON] = 2
+    gc[MASK_INTRON] = 3
     gc[MASK_EXON | MASK_INTRON] = 4
     gc[MASK_INTERGENIC] = 5
     gc[MASK_EXON | MASK_INTERGENIC] = 6

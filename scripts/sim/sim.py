@@ -462,7 +462,7 @@ def assign_random_abundances(
 
 def _detect_abundance_format(
     path: str | Path,
-) -> tuple[str, "pd.DataFrame"]:
+) -> tuple[str, object]:
     """Auto-detect file format and return (format_name, dataframe).
 
     Accepts plain-text or gzip-compressed (``.gz``) files.

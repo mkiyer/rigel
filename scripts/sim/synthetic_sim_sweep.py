@@ -78,7 +78,7 @@ import logging
 import sys
 import tempfile
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -87,11 +87,11 @@ import yaml
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "src"))
 
-from rigel.config import (
+from rigel.config import (  # noqa: E402
     EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig,
 )
-from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.pipeline import run_pipeline  # noqa: E402
+from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config-field registry (auto-derived from dataclasses)

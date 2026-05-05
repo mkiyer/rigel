@@ -268,7 +268,7 @@ class TestWorkerMergeEquality:
 #    10  INTERGENIC  [1300, 2000)   mask 0b100
 # ---------------------------------------------------------------------------
 
-import pysam
+import pysam  # noqa: E402
 
 # 8-state mask bit layout (matches accumulator.cpp):
 EXON_BIT = 0b001

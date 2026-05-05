@@ -11,7 +11,6 @@ Usage:
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
@@ -20,7 +19,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
@@ -161,7 +159,7 @@ def fig_scatter_grid(data: dict, out_dir: Path, condition: str | None = None):
         sr, _ = spearmanr(truth_log2, pred_log2)
         pr = np.corrcoef(truth_log2, pred_log2)[0, 1]
 
-        hb = ax.hexbin(
+        ax.hexbin(
             truth_log2, pred_log2,
             gridsize=80, cmap="YlOrRd", mincnt=1,
             norm=mcolors.LogNorm(vmin=1, vmax=5000),
@@ -479,7 +477,7 @@ def fig_gene_scatter(data: dict, out_dir: Path, condition: str | None = None):
         sr, _ = spearmanr(truth_log2, pred_log2)
         pr = np.corrcoef(truth_log2, pred_log2)[0, 1]
 
-        hb = ax.hexbin(
+        ax.hexbin(
             truth_log2, pred_log2,
             gridsize=60, cmap="YlGn", mincnt=1,
             norm=mcolors.LogNorm(vmin=1, vmax=2000),
@@ -535,7 +533,7 @@ def fig_count_scatter(data: dict, out_dir: Path, condition: str | None = None):
         from scipy.stats import spearmanr
         sr, _ = spearmanr(truth_log, pred_log)
 
-        hb = ax.hexbin(
+        ax.hexbin(
             truth_log, pred_log,
             gridsize=60, cmap="YlOrBr", mincnt=1,
             norm=mcolors.LogNorm(vmin=1, vmax=5000),

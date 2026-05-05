@@ -60,7 +60,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import numpy as np
 
 try:
     import yaml
@@ -70,7 +69,6 @@ except ImportError:
 from rigel.calibration import assemble_priors, calibrate
 from rigel.config import (
     BamScanConfig,
-    CalibrationConfig,
     EMConfig,
     FragmentScoringConfig,
     PipelineConfig,
