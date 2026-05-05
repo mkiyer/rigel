@@ -46,9 +46,10 @@ from .config import (
     TranscriptGeometry,
 )
 from .estimator import AbundanceEstimator
-from .frag_length_model import FragmentLengthModel, FragmentLengthModels
+from .frag_length_model import FragmentLengthModels
 from .index import TranscriptIndex
-from .locus import build_multi_loci, compute_locus_priors_from_partitions
+from .locus import build_multi_loci
+from .calibration.locus_prior import assemble_priors
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
 from .locus_partition import partition_and_free
@@ -60,6 +61,7 @@ from .strand_model import StrandModels
 if TYPE_CHECKING:
     from .annotate import AnnotationTable
     from .calibration import CalibrationResult
+    from .calibration.scan_payload import CalibrationScanPayload
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
@@ -376,13 +378,13 @@ def _wire_calibration_regions(
 
 def _setup_geometry_and_estimator(
     index: TranscriptIndex,
-    frag_length_models: FragmentLengthModels,
+    rna_fl,
     em_config: EMConfig,
 ) -> tuple["TranscriptGeometry", AbundanceEstimator]:
     """Compute transcript geometry and create the AbundanceEstimator."""
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
-    if frag_length_models.rna_model.n_observations > 0:
-        effective_lengths = frag_length_models.rna_model.compute_all_transcript_eff_lens(
+    if rna_fl.n_observations > 0:
+        effective_lengths = rna_fl.compute_all_transcript_eff_lens(
             exonic_lengths.astype(np.int64),
         )
     else:
@@ -411,7 +413,8 @@ def _score_fragments(
     buffer: FragmentBuffer,
     index: TranscriptIndex,
     strand_models: StrandModels,
-    frag_length_models: FragmentLengthModels,
+    rna_fl,
+    gdna_fl,
     stats: PipelineStats,
     estimator: AbundanceEstimator,
     scoring: "FragmentScoringConfig",
@@ -421,7 +424,8 @@ def _score_fragments(
     """Build FragmentScorer, scan buffer, and return ScoredFragments."""
     ctx = FragmentScorer.from_models(
         strand_models,
-        frag_length_models,
+        rna_fl,
+        gdna_fl,
         index,
         estimator,
         overhang_log_penalty=scoring.overhang_log_penalty,
@@ -520,10 +524,17 @@ def _run_locus_em_partitioned(
     alpha_rna: np.ndarray,
     em_config: EMConfig,
     *,
+    prior_weight_rna_per_locus: list | None = None,
     emit_locus_stats: bool = False,
     annotations: "AnnotationTable | None" = None,
 ) -> None:
-    """Run batch locus EM from partitioned data with incremental freeing."""
+    """Run batch locus EM from partitioned data with incremental freeing.
+
+    ``prior_weight_rna_per_locus``, when not None, must be a list with
+    one entry per ``multi_locus_id`` carrying a float32 vector of
+    per-component nRNA-suppression weights.  When None, the C++ EM
+    treats every component on equal footing (all-ones).
+    """
     t_to_g = index.t_to_g_arr
     # ``is_synthetic_g`` marks synthetic (gene-neutral) gene rows so they can
     # be excluded from the user-facing ``n_genes`` per locus.
@@ -559,7 +570,8 @@ def _run_locus_em_partitioned(
             "alpha_rna": float(alpha_r),
         }
 
-    def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna):
+    def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna,
+                       batch_prior_weight_rna=None):
         """Pack tuples, call C++, record results."""
         partition_tuples = [
             (
@@ -589,6 +601,7 @@ def _run_locus_em_partitioned(
             em_convergence_delta=em_config.convergence_delta,
             emit_locus_stats=emit_locus_stats,
             emit_assignments=emit_assignments,
+            locus_prior_weight_rna=batch_prior_weight_rna,
         )
 
     # Classify mega vs normal
@@ -617,6 +630,11 @@ def _run_locus_em_partitioned(
             [locus],
             np.array([alpha_gdna[lid]], dtype=np.float64),
             np.array([alpha_rna[lid]], dtype=np.float64),
+            batch_prior_weight_rna=(
+                [prior_weight_rna_per_locus[lid]]
+                if prior_weight_rna_per_locus is not None
+                else None
+            ),
         )
         gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
@@ -664,6 +682,14 @@ def _run_locus_em_partitioned(
             normal_loci,
             normal_ag,
             normal_ar,
+            batch_prior_weight_rna=(
+                [
+                    prior_weight_rna_per_locus[loc.multi_locus_id]
+                    for loc in normal_loci
+                ]
+                if prior_weight_rna_per_locus is not None
+                else None
+            ),
         )
         gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
@@ -709,15 +735,25 @@ def quant_from_buffer(
     frag_length_models: FragmentLengthModels,
     stats: PipelineStats,
     calibration: "CalibrationResult",
+    calibration_payload: "CalibrationScanPayload",
     *,
     em_config: EMConfig | None = None,
     scoring: FragmentScoringConfig | None = None,
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
-    fl_prior_ess: float | None = None,
-) -> AbundanceEstimator:
+    nrna_weight: float = 0.0,    # noqa: ARG001 — reserved; helper is a stub
+    c_base: float = 10.0,
+) -> tuple[AbundanceEstimator, "CalibrationResult"]:
     """Quantify transcripts from buffered fragments via locus-level EM.
+
+    Consumes the v6 :class:`CalibrationResult` produced by
+    :func:`rigel.calibration.calibrate`.  Per-``MultiLocus`` priors are
+    assembled here (after ``build_multi_loci``) via
+    :func:`assemble_priors` and back-filled into the calibration result
+    with :meth:`CalibrationResult.with_priors`; the populated result is
+    returned alongside the estimator so callers (CLI, tests) can read
+    ``alpha_gdna``/``alpha_rna``/dataframes.
 
     Parameters
     ----------
@@ -725,28 +761,38 @@ def quant_from_buffer(
     index : TranscriptIndex
     strand_models : StrandModels
     frag_length_models : FragmentLengthModels
+        Scanner-trained accumulator.  Carries raw histograms used for
+        index-side geometry; the FL distributions consumed by scoring
+        come from ``calibration.fl_models``, NOT this object.
     stats : PipelineStats
     calibration : CalibrationResult
-        Required.  Provides the gDNA fragment-length model used for
-        scoring and the per-locus gDNA Dirichlet prior parameters.
-    em_config : EMConfig or None
-        EM algorithm configuration.  Defaults to ``EMConfig()``.
-    scoring : FragmentScoringConfig or None
-        Scoring penalty configuration.  Defaults to ``FragmentScoringConfig()``.
-    log_every : int
-        Log progress every N fragments (default 1M).
-    annotations : AnnotationTable or None
-        If provided, record per-fragment assignment annotations.
+        v6 calibration result.  Must carry a populated
+        ``fl_models`` field; per-locus priors may be empty (they are
+        filled in here).
+    calibration_payload : CalibrationScanPayload
+        The C++ scanner's payload.  Required by
+        :func:`assemble_priors` for per-region counts and boundary-flux
+        counters.
+    em_config, scoring, log_every, annotations, emit_locus_stats
+        Standard pipeline knobs.
+    nrna_weight : float
+        Per-component nRNA-suppression weight.  Reserved; the M5
+        ``build_prior_weight_rna`` helper currently returns all-ones
+        regardless.  Plumbed through the API so the CLI knob takes
+        effect when the helper is implemented.
+    c_base : float
+        Dirichlet evidence strength for the per-MultiLocus prior.
 
     Returns
     -------
-    AbundanceEstimator
+    (AbundanceEstimator, CalibrationResult)
+        The fitted estimator and the calibration result with priors
+        backfilled (zero-locus priors when no MultiLoci were built).
     """
-    if calibration is None or calibration.gdna_fl_model is None:
+    if calibration is None:
         raise ValueError(
-            "quant_from_buffer() requires a calibrated CalibrationResult "
-            "with a populated gdna_fl_model; got "
-            f"{calibration!r}.  Run the calibration stage before "
+            "quant_from_buffer() requires a v6 CalibrationResult "
+            "(got None).  Run rigel.calibration.calibrate(...) before "
             "locus-level quantification."
         )
     if em_config is None:
@@ -754,10 +800,15 @@ def quant_from_buffer(
     if scoring is None:
         scoring = FragmentScoringConfig()
 
+    # The scorer reads finalized FL distributions directly from
+    # CalibrationResult.fl_models.  No backflow mutation of
+    # frag_length_models.
+    fl_models = calibration.fl_models
+
     # Phase 1: Geometry + estimator
     geometry, estimator = _setup_geometry_and_estimator(
         index,
-        frag_length_models,
+        fl_models.rna,
         em_config,
     )
 
@@ -766,20 +817,10 @@ def quant_from_buffer(
         f"(locus-level EM: mRNA/nRNA/gDNA)"
     )
 
-    # Apply calibrated gDNA fragment-length model for scoring.
-    # Copy to avoid aliasing (calibration may return the intergenic
-    # model object directly).  Re-finalize with global Dirichlet prior
-    # so gDNA and RNA FL models share the same prior baseline.
-    cal_gdna = calibration.gdna_fl_model
-    gdna_copy = FragmentLengthModel(max_size=cal_gdna.max_size)
-    gdna_copy.counts = cal_gdna.counts.copy()
-    gdna_copy._total_weight = cal_gdna._total_weight
-    gdna_copy.finalize(prior_counts=frag_length_models.global_model.counts, prior_ess=fl_prior_ess)
-    frag_length_models.gdna_model = gdna_copy
     logger.info(
-        f"[CAL-FL] gDNA FL model: "
-        f"mean={calibration.gdna_fl_model.mean:.1f}, "
-        f"obs={calibration.gdna_fl_model.n_observations}"
+        f"[CAL-FL] gDNA FL: mean={fl_models.gdna.mean:.1f}, "
+        f"quality={fl_models.gdna_quality} "
+        f"(n_pool={fl_models.n_gdna})"
     )
 
     # Phase 2: Score fragments
@@ -787,7 +828,8 @@ def quant_from_buffer(
         buffer,
         index,
         strand_models,
-        frag_length_models,
+        fl_models.rna,
+        fl_models.gdna,
         stats,
         estimator,
         scoring,
@@ -818,19 +860,30 @@ def quant_from_buffer(
 
         _assign_locus_ids(estimator, multi_loci)
 
+        # v6 calibration: assemble the PriorTable for this batch and
+        # back-fill it into the calibration result.  Pulls global
+        # density posteriors from ``calibration.global_densities`` and
+        # the gDNA FL mean from ``fl_models.gdna``.
+        # NOTE: must run BEFORE ``partition_and_free`` because the
+        # latter nulls out ``em_data`` arrays as it scatters them.
+        prior_table = assemble_priors(
+            multi_loci,
+            em_data,
+            index,
+            calibration_payload,
+            calibration.global_densities,
+            gdna_fl_mean=fl_models.gdna.mean,
+            c_base=c_base,
+        )
+        calibration = calibration.with_priors(prior_table)
+        alpha_gdna = prior_table.alpha_gdna
+        alpha_rna = prior_table.alpha_rna
+        prior_weight_rna_per_locus = list(prior_table.prior_weight_rna)
+
         # Phase 4 (NEW): Fused scatter into per-locus tuples
         # Phase 4 (NEW): Array-by-array scatter + incremental free
         partitions = partition_and_free(em_data, multi_loci)
         del em_data
-
-        # SRD v1 Pass 4: per-locus Dirichlet prior from per-fragment
-        # gDNA posteriors aggregated over the partitioned data.  See
-        # docs/calibration/srd_v1_implementation.md §2.6.
-        alpha_gdna, alpha_rna = compute_locus_priors_from_partitions(
-            partitions,
-            multi_loci,
-            pi_pool=float(calibration.pi_pool),
-        )
 
         # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
         _run_locus_em_partitioned(
@@ -841,6 +894,7 @@ def quant_from_buffer(
             alpha_gdna,
             alpha_rna,
             em_config,
+            prior_weight_rna_per_locus=prior_weight_rna_per_locus,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
         )
@@ -857,7 +911,7 @@ def quant_from_buffer(
         f"contamination rate={estimator.gdna_contamination_rate:.2%}"
     )
 
-    return estimator
+    return estimator, calibration
 
 
 # ---------------------------------------------------------------------------
@@ -912,11 +966,14 @@ def run_pipeline(
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
-    frag_length_models.build_scoring_models()
-    frag_length_models.finalize(prior_ess=config.calibration.fl_prior_ess)
+    # NOTE: v6 calibration (rigel.calibration.calibrate) builds its own
+    # finalised FLModels (RNA + gDNA + global) inside CalibrationResult.
+    # We do NOT call ``frag_length_models.build_scoring_models()`` or
+    # ``.finalize(...)`` here — the scanner-trained accumulator is kept
+    # raw and only consulted for index-side geometry.
 
-    # -- gDNA calibration (SRD v1: single buffer walk, geometric pool) --
-    from .calibration import calibrate_gdna
+    # -- v6 calibration (single FL build, global density posteriors) --
+    from .calibration import calibrate
 
     cal_cfg = config.calibration
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
@@ -927,23 +984,18 @@ def run_pipeline(
         strand_ci_eps,
     )
 
-    calibration = calibrate_gdna(
-        buffer,
-        index,
-        frag_length_models,
-        strand_models.strand_specificity,
-        read1_sense=bool(strand_models.read1_sense),
-        exon_fit_tolerance_bp=cal_cfg.exon_fit_tolerance_bp,
-        fl_prior_ess=cal_cfg.fl_prior_ess,
-        max_iter=cal_cfg.max_iter,
-        tol=cal_cfg.tol,
+    calibration = calibrate(
+        index=index,
+        payload=calibration_payload,
+        scan_trained=frag_length_models,
+        fl_prior_ess=cal_cfg.prior_ess,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(
-        f"[CAL] gDNA calibration (SRD v1): quality={cal_summary['gdna_fl_quality']}, "
-        f"π_pool={cal_summary['pi_pool']:.4f}, "
-        f"n_pool={cal_summary['n_pool']}, "
-        f"SS={cal_summary['strand_specificity']:.3f}"
+        "[CAL] v6 quality=%s  mean_pi_gdna=%.4f  n_multi_loci=%d",
+        cal_summary["fl_models"]["gdna_quality"],
+        float(cal_summary["mean_pi_gdna"]),
+        int(cal_summary["n_multi_loci"]),
     )
 
     # -- Annotation table for second BAM pass (opt-in) --
@@ -959,7 +1011,7 @@ def run_pipeline(
         )
 
     try:
-        estimator = quant_from_buffer(
+        estimator, calibration = quant_from_buffer(
             buffer,
             index,
             strand_models,
@@ -970,8 +1022,10 @@ def run_pipeline(
             log_every=scan.log_every,
             annotations=annotations,
             calibration=calibration,
+            calibration_payload=calibration_payload,
             emit_locus_stats=config.emit_locus_stats,
-            fl_prior_ess=config.calibration.fl_prior_ess,
+            nrna_weight=cal_cfg.nrna_weight,
+            c_base=cal_cfg.c_base,
         )
     finally:
         buffer.cleanup()

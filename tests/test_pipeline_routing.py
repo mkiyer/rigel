@@ -168,7 +168,11 @@ def _scan_em_data(
 ):
     """Build EM data from a buffer using FragmentScorer + FragmentRouter."""
     ctx = FragmentScorer.from_models(
-        strand_models, frag_length_models, index, estimator,
+        strand_models,
+        frag_length_models.rna_model,
+        frag_length_models.gdna_model,
+        index,
+        estimator,
         overhang_log_penalty=overhang_log_penalty,
         mismatch_log_penalty=mismatch_log_penalty,
         gdna_splice_penalties=gdna_splice_penalties,

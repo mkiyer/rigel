@@ -122,7 +122,8 @@ class FragmentScorer:
     @staticmethod
     def from_models(
         strand_models,
-        frag_length_models,
+        rna_fl,
+        gdna_fl,
         index,
         estimator,
         *,
@@ -136,7 +137,12 @@ class FragmentScorer:
         Parameters
         ----------
         strand_models : StrandModels
-        frag_length_models : FragmentLengthModels
+        rna_fl : FragmentLengthModel
+            Finalised RNA fragment-length model (v6: from
+            ``CalibrationResult.fl_models.rna``).
+        gdna_fl : FragmentLengthModel
+            Finalised gDNA fragment-length model (v6: from
+            ``CalibrationResult.fl_models.gdna``).
         index : TranscriptIndex
         estimator : AbundanceEstimator
         overhang_log_penalty : float or None
@@ -150,12 +156,10 @@ class FragmentScorer:
         p_sense = rna_sm._cached_p_sense
         p_antisense = rna_sm._cached_p_antisense
 
-        rna_fl = frag_length_models.rna_model
         fl_log_prob = rna_fl._log_prob  # numpy array or None
         fl_max_size = rna_fl.max_size
         fl_tail_base: float = getattr(rna_fl, "_tail_base", 0.0)
 
-        gdna_fl = frag_length_models.gdna_model
         gdna_fl_log_prob = gdna_fl._log_prob
         gdna_fl_max_size = gdna_fl.max_size
         gdna_fl_tail_base: float = getattr(gdna_fl, "_tail_base", 0.0)

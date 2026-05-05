@@ -196,7 +196,9 @@ def _make_env(index, *, gdna_mean_target: int | None = None):
 
 
 def _scan(buffer, index, sm, fl, estimator, stats):
-    ctx = FragmentScorer.from_models(sm, fl, index, estimator)
+    ctx = FragmentScorer.from_models(
+        sm, fl.rna_model, fl.gdna_model, index, estimator,
+    )
     router = FragmentRouter(ctx, estimator, stats, index, sm)
     return router.scan(buffer, 1_000_000)
 
