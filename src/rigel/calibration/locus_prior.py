@@ -123,6 +123,24 @@ class PriorTable:
     prior_weight_rna: list[np.ndarray]              # float32, [n_loci][n_components_i]
     c_base_value: float
 
+    @classmethod
+    def empty(cls, *, c_base_value: float = C_BASE_DEFAULT) -> "PriorTable":
+        """Return a degenerate prior table with no loci.
+
+        Used as the lazy-backfill seed in the calibration orchestrator:
+        :func:`rigel.calibration.calibrate` returns a
+        :class:`CalibrationResult` with this empty table, and
+        :meth:`CalibrationResult.with_priors` swaps in the real table
+        once the locus graph has been built.
+        """
+        return cls(
+            multi_locus_priors=(),
+            alpha_gdna=np.empty(0, dtype=np.float64),
+            alpha_rna=np.empty(0, dtype=np.float64),
+            prior_weight_rna=[],
+            c_base_value=float(c_base_value),
+        )
+
 
 # ---------------------------------------------------------------------------
 # M5 helper: per-component nRNA-suppression weights (preserved)

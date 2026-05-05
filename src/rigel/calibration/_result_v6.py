@@ -182,8 +182,9 @@ def build_calibration_result(
     payload:          CalibrationScanPayload,
     scan_trained:     FragmentLengthModels,
     global_densities: GlobalDensityTable,
-    prior_table:      PriorTable,
+    prior_table:      PriorTable | None = None,
     fl_prior_ess:     float = POOL_EB_PRIOR_ESS,
+    fl_models:        FLModels | None = None,
 ) -> CalibrationResult:
     """Assemble the immutable v6 calibration result.
 
@@ -191,14 +192,27 @@ def build_calibration_result(
     owns the FL pipeline, the diagnostics submodule owns the named
     breakdown, the locus_prior submodule owns the priors, and this
     function just wires them together.
+
+    ``prior_table`` defaults to :meth:`PriorTable.empty` so callers
+    that have not yet built the locus graph (e.g. the calibration
+    orchestrator) can produce a result and later swap the real table
+    in via :meth:`CalibrationResult.with_priors`.
+
+    ``fl_models`` may be passed by callers that already built the
+    FL models (e.g. to seed ``compute_global_densities`` with the
+    gDNA-FL mean).  When ``None`` (default), this function builds them
+    via :func:`build_fl_models`.
     """
-    fl_models = build_fl_models(
-        global_counts = extract_global_counts(scan_trained),
-        rna_counts    = extract_rna_counts(scan_trained),
-        gdna_counts   = extract_gdna_counts(payload),
-        max_size      = scan_trained.max_size,
-        prior_ess     = fl_prior_ess,
-    )
+    if prior_table is None:
+        prior_table = PriorTable.empty()
+    if fl_models is None:
+        fl_models = build_fl_models(
+            global_counts = extract_global_counts(scan_trained),
+            rna_counts    = extract_rna_counts(scan_trained),
+            gdna_counts   = extract_gdna_counts(payload),
+            max_size      = scan_trained.max_size,
+            prior_ess     = fl_prior_ess,
+        )
     diagnostics = Diagnostics.from_payload(payload)
     return CalibrationResult(
         global_densities=global_densities,

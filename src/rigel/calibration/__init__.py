@@ -19,6 +19,7 @@ from ._kappa import (
     KappaEstimate,
     estimate_kappa,
 )
+from ._orchestrator import calibrate
 from ._result import CalibrationResult, GdnaFlQuality
 from ._result_v6 import (
     CalibrationResult as CalibrationResultV6,
@@ -63,6 +64,8 @@ __all__ = [
     "CalibrationResult",
     "GdnaFlQuality",
     "calibrate_gdna",
+    # M8a — top-level v6 orchestrator
+    "calibrate",
     # M4 — global gDNA densities + κ
     "GlobalDensityTable",
     "GlobalGdnaDensity",

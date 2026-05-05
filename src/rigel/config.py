@@ -152,45 +152,44 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for SRD v1 gDNA calibration.
+    """Configuration for gDNA calibration.
 
-    The pipeline runs ``calibrate_gdna()`` between model finalization
-    and quantification.  It walks the finalized fragment buffer once,
-    categorizes each unique fragment by geometry alone, and fits a
-    convex 1-D mixture (RNA vs gDNA) on the unspliced-incompatible /
-    intronic / intergenic pool with ``RNA_FL`` fixed to the spliced
-    histogram.  The resulting :class:`CalibrationResult` exposes three
-    Empirical-Bayes-shrunk fragment-length models (``rna_fl_model``,
-    ``gdna_fl_model``, ``global_fl_model``) used for downstream
-    fragment scoring, plus a library-wide gDNA pool fraction
-    ``pi_pool`` consumed by the per-locus Dirichlet prior.
+    During the M8 migration this dataclass carries both the v6 fields
+    (consumed by the new :func:`rigel.calibration.calibrate` orchestrator)
+    and the legacy SRD-v1 fields (consumed by the still-wired
+    :func:`rigel.calibration.calibrate_gdna`).  M8c removes the v1 fields.
     """
 
-    #: Tolerance (bp) for the exon-fit geometric test.  An aligned
-    #: unspliced fragment is judged "exon-compatible" if at least one
-    #: candidate transcript's annotated exons cover the read up to this
-    #: many bp of slop, i.e. ``read_length - max(exon_bp) ≤ tol``.
+    # ---- v6 fields (M8a) ---------------------------------------------
+
+    #: Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage
+    #: in :func:`rigel.calibration.calibrate`.  The ``rna`` and ``gdna``
+    #: per-pool FL distributions are shrunk toward the global FL with
+    #: this many pseudo-observations.  Default matches
+    #: :data:`rigel.calibration.fl.POOL_EB_PRIOR_ESS`.
+    prior_ess: float = 1000.0
+
+    #: Per-component nRNA-suppression weight (0 disables nRNA components
+    #: in the prior; 1 treats nRNA on equal footing with mRNA).
+    nrna_weight: float = 0.0
+
+    #: Dirichlet evidence strength for the per-MultiLocus
+    #: ``(α_gdna, α_rna)`` prior assembled by
+    #: :func:`rigel.calibration.assemble_priors`.
+    c_base: float = 10.0
+
+    # ---- v1 fields (deleted in M8c) ----------------------------------
+
+    #: Tolerance (bp) for the SRD-v1 exon-fit geometric test.
     exon_fit_tolerance_bp: int = 0
 
-    #: Effective sample size (ESS) for the global fragment-length prior.
-    #: The global FL histogram is rescaled to this many pseudo-observations
-    #: before being used as a Dirichlet prior on the category-specific FL
-    #: models (``RNA_FL``, ``gDNA_FL``).  Controls how quickly category
-    #: data overrides the prior: with N category observations, the
-    #: category has ``N/(N+ESS)`` influence.  The same ESS shrinks small
-    #: pools to the global FL shape, eliminating the need for a separate
-    #: pool-size gate.
+    #: SRD-v1 effective sample size for the global FL Dirichlet prior.
     fl_prior_ess: float = 500.0
 
-    #: Maximum iterations for the 1-D mixture EM.
-    #: The mid-gDNA-fraction regime (π ≈ 0.5–0.7) converges most
-    #: slowly: the per-step ``|Δπ|`` drops just below ``tol`` only
-    #: around iter 200–400 even when the iterate has effectively
-    #: stabilised. Setting a generous cap (1000) costs <1s of CPU and
-    #: avoids spurious ``gdna_fl_quality=fallback`` classifications.
+    #: Maximum iterations for the SRD-v1 1-D mixture EM.
     max_iter: int = 1000
 
-    #: Convergence tolerance for the 1-D mixture EM.
+    #: Convergence tolerance for the SRD-v1 1-D mixture EM.
     tol: float = 1e-4
 
 
