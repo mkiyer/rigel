@@ -20,6 +20,16 @@ from typing import Any, Mapping
 import numpy as np
 
 
+#: Number of fragment-length histogram bins per mask category.  Mirrors
+#: ``rigel::calibration::CalibrationPayload::kFlBins`` in C++.  Widening
+#: this requires touching both sides.
+FL_HIST_N_BINS = 1024
+
+#: Number of mask categories (3-bit code: EXON|INTRON|INTERGENIC).  Mirrors
+#: ``rigel::calibration::mask::N_STATES`` in C++.
+MASK_N_STATES = 8
+
+
 _ERR_SUFFIX = " Rebuild the index or rerun the scan."
 
 
@@ -43,11 +53,11 @@ def _check_array(name: str, arr: Any, dtype: type, shape: tuple[int, ...]) -> np
 class CalibrationScanPayload:
     """Typed view of the C++ calibration scan output."""
 
-    global_counts: np.ndarray             # shape (8,),       int64
-    per_region_counts: np.ndarray         # shape (R, 8),     int64
-    fl_hist: np.ndarray                   # shape (8, 1024),  int64
-    u_left: np.ndarray                    # shape (R,),       int64
-    u_right: np.ndarray                   # shape (R,),       int64
+    global_counts: np.ndarray             # (MASK_N_STATES,)               int64
+    per_region_counts: np.ndarray         # (R, MASK_N_STATES)              int64
+    fl_hist: np.ndarray                   # (MASK_N_STATES, FL_HIST_N_BINS) int64
+    u_left: np.ndarray                    # (R,)                            int64
+    u_right: np.ndarray                   # (R,)                            int64
     n_observed: int
     n_excluded_multimap: int
     n_excluded_chimera: int
@@ -91,11 +101,11 @@ class CalibrationScanPayload:
             )
         n_regions = int(per_region_counts.shape[0])
 
-        global_counts = _check_array("global_counts", d["global_counts"], np.int64, (8,))
+        global_counts = _check_array("global_counts", d["global_counts"], np.int64, (MASK_N_STATES,))
         per_region_counts = _check_array(
-            "per_region_counts", per_region_counts, np.int64, (n_regions, 8)
+            "per_region_counts", per_region_counts, np.int64, (n_regions, MASK_N_STATES)
         )
-        fl_hist = _check_array("fl_hist", d["fl_hist"], np.int64, (8, 1024))
+        fl_hist = _check_array("fl_hist", d["fl_hist"], np.int64, (MASK_N_STATES, FL_HIST_N_BINS))
         u_left = _check_array("u_left", d["u_left"], np.int64, (n_regions,))
         u_right = _check_array("u_right", d["u_right"], np.int64, (n_regions,))
 
