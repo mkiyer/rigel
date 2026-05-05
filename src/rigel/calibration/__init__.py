@@ -6,6 +6,14 @@ incrementally per ``docs/calibration/calibration_v6_plan.md``.  The v6
 exports below are additive; they will replace the v1 names in M8c.
 """
 
+from ._fl_pool import (
+    POOL_EB_PRIOR_ESS,
+    POOL_QUALITY_GOOD_THRESHOLD,
+    POOL_QUALITY_WEAK_THRESHOLD,
+    PoolFLModels,
+    PoolQuality,
+    compute_pool_fl_models,
+)
 from ._kappa import (
     KAPPA_DEFAULT,
     KAPPA_MAX,
@@ -14,6 +22,12 @@ from ._kappa import (
     estimate_kappa,
 )
 from ._result import CalibrationResult, GdnaFlQuality
+from ._result_v6 import (
+    CalibrationResult as CalibrationResultV6,
+    build_calibration_result,
+    build_multi_locus_prior_df,
+    build_per_locus_gdna_df,
+)
 from ._simple import calibrate_gdna
 from .density_global import (
     GlobalDensityTable,
@@ -68,4 +82,15 @@ __all__ = [
     "FLAG_INTRON_ZERO_LEFF",
     "FLAG_EXON_INTRON_NO_ELIGIBLE",
     "FLAG_PI_CLIPPED",
+    # M7 — pool FL models + CalibrationResult v6
+    "PoolFLModels",
+    "PoolQuality",
+    "POOL_QUALITY_GOOD_THRESHOLD",
+    "POOL_QUALITY_WEAK_THRESHOLD",
+    "POOL_EB_PRIOR_ESS",
+    "compute_pool_fl_models",
+    "CalibrationResultV6",
+    "build_calibration_result",
+    "build_multi_locus_prior_df",
+    "build_per_locus_gdna_df",
 ]
