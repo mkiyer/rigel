@@ -129,9 +129,21 @@ def build_multi_loci(
     # Integer ref codes for fast sort/compare within merge loops.
     # The "ref" column is already categorical; use its codes directly
     # instead of an O(N log N) np.unique sort on 457K string objects.
+    #
+    # NOTE: pandas categorical codes are NOT the canonical resolver/BAM
+    # ref-id space (which is defined by ``index.ref_lengths`` insertion
+    # order via ``index.ref_name_to_id``).  We store both: ``_ref_codes``
+    # is used only for fast intra-loop sorting/comparison; ``Locus.ref_id``
+    # must carry the canonical id so downstream consumers
+    # (``_locus_n_obs.build_t_to_local_locus``, ``estimate_locus_gdna``
+    # via ``RegionIndexPy``) bin against the correct contig.
     ref_cat = index.t_df["ref"].cat
     _ref_names = ref_cat.categories.values
     _ref_codes = ref_cat.codes.values
+    _cat_to_canonical_ref_id = np.array(
+        [index.ref_name_to_id[str(name)] for name in _ref_names],
+        dtype=np.int32,
+    )
 
     multi_loci: list[MultiLocus] = []
     for lid in range(n_comp):
@@ -165,7 +177,12 @@ def build_multi_loci(
         span += prev_e - prev_s
 
         loci_tuple = tuple(
-            Locus(ref=str(_ref_names[rcode]), ref_id=int(rcode), start=s, end=e)
+            Locus(
+                ref=str(_ref_names[rcode]),
+                ref_id=int(_cat_to_canonical_ref_id[rcode]),
+                start=s,
+                end=e,
+            )
             for rcode, s, e in merged
         )
 
