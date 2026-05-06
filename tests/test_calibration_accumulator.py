@@ -505,11 +505,66 @@ class TestObservationPolicy:
         assert p.n_excluded_chimera == 1
         assert p.n_observed == 0
 
-    @pytest.mark.skip(
-        reason="SPLICE_ARTIFACT requires splice_blacklist.feather plumbing; "
-               "covered indirectly by tests/test_splice_blacklist.py and will "
-               "be pinned end-to-end in M9 once the blacklist is wired into "
-               "mini_index."
-    )
-    def test_excluded_artifact(self, mini_index, tmp_path):
-        ...
+    def test_excluded_artifact(self, tmp_path_factory, tmp_path):
+        # Build a single-ref index, then drop a `splice_blacklist.feather`
+        # that targets a fixed (start, end) intron on chr1.  Reload the
+        # index so the C++ resolver picks up the blacklist.  Submit one
+        # spliced fragment whose CIGAR `N` skip exactly matches the
+        # blacklisted intron with short anchors -> the SJ is filtered ->
+        # the fragment is promoted to SPLICE_ARTIFACT and excluded from
+        # calibration via `n_excluded_artifact`.
+        import pandas as pd
+        import pysam
+
+        from rigel.index import SJ_BLACKLIST_FEATHER, TranscriptIndex
+
+        gtf = (
+            'chr1\tt\texon\t100\t200\t.\t+\t.\t'
+            'gene_id "g1"; transcript_id "t1"; gene_name "GA"; '
+            'gene_type "protein_coding"; tag "basic";\n'
+        )
+        base = tmp_path_factory.mktemp("artifact_idx")
+        gtf_path = base / "test.gtf"
+        gtf_path.write_text(gtf)
+        fasta_path = base / "genome.fa"
+        with open(fasta_path, "w") as f:
+            f.write(">chr1\n")
+            seq = "N" * 1000
+            for i in range(0, 1000, 80):
+                f.write(seq[i:i + 80] + "\n")
+        pysam.faidx(str(fasta_path))
+        idx_dir = base / "index"
+        TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
+
+        # Drop a blacklist feather targeting intron (300, 400) on chr1
+        # with large max-anchor thresholds so any short anchor matches.
+        bl_df = pd.DataFrame(
+            {
+                "ref":              ["chr1"],
+                "start":            np.array([300], dtype=np.int32),
+                "end":              np.array([400], dtype=np.int32),
+                "max_anchor_left":  np.array([100], dtype=np.int32),
+                "max_anchor_right": np.array([100], dtype=np.int32),
+            }
+        )
+        bl_df.to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
+
+        idx = TranscriptIndex.load(idx_dir, retain_test_structures=True)
+        ref_lens = [(name, int(L)) for name, L in idx.ref_lengths.items()]
+        chr1_id = idx.resolver.get_ref_to_id()["chr1"]
+
+        # R1: 30M100N20M starting at pos=270 -> exons (270, 300) and
+        # (400, 420), N skip (300, 400) with anchors 30/20 — both <=
+        # max_anchor_left=max_anchor_right=100, so the SJ is filtered.
+        # R2: simple 50M unspliced inside the right exon territory.
+        reads = _make_pair(
+            "art",
+            chr1_id,
+            r1_pos=270,
+            r2_pos=420,
+            r1_cigar=[(0, 30), (3, 100), (0, 20)],
+        )
+        bam = _build_bam(tmp_path, ref_lens, reads)
+        p = _scan(bam, idx)
+        assert p.n_excluded_artifact == 1
+        assert p.n_observed == 0
