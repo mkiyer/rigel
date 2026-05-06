@@ -1,5 +1,8 @@
 # TODO
 
+# Polars migration
+
+Polars is apparently much faster than pandas. Might be ideal for rigel
 
 ## cgranges interval searching
 
