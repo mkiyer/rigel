@@ -294,3 +294,29 @@ class TestNoFragmentLengthModelsMutation:
         # Identity preserved (no slot reassignment).
         assert scan_trained.gdna_model is before_gdna
         assert scan_trained.rna_model is before_rna
+
+
+class TestCalibratePoolQualityThresholds:
+    """``pool_quality_good`` / ``pool_quality_weak`` flow into ``build_fl_models``."""
+
+    def _kwargs(self):
+        return dict(
+            index=_stub_index(_make_region_df()),
+            payload=_payload(n_intron=200, n_intergenic=100),  # gdna n=300
+            scan_trained=_scan_trained(spliced_counts=(250, 300)),  # rna n=550
+        )
+
+    def test_default_thresholds_classify_weak(self):
+        cal = calibrate(**self._kwargs())
+        assert cal.fl_models.gdna_quality == "weak"  # 300 in [200, 5000)
+        assert cal.fl_models.rna_quality == "weak"   # 550 in [200, 5000)
+
+    def test_lowering_good_threshold_promotes_to_good(self):
+        cal = calibrate(**self._kwargs(), pool_quality_good=200)
+        assert cal.fl_models.gdna_quality == "good"
+        assert cal.fl_models.rna_quality == "good"
+
+    def test_raising_weak_threshold_demotes_to_fallback(self):
+        cal = calibrate(**self._kwargs(), pool_quality_weak=10_000)
+        assert cal.fl_models.gdna_quality == "fallback"
+        assert cal.fl_models.rna_quality == "fallback"

@@ -25,7 +25,12 @@ from ._fl_sources import (
 )
 from ._result import CalibrationResult, build_calibration_result
 from .density_global import compute_global_densities
-from .fl import POOL_EB_PRIOR_ESS, build_fl_models
+from .fl import (
+    POOL_EB_PRIOR_ESS,
+    POOL_QUALITY_GOOD_THRESHOLD,
+    POOL_QUALITY_WEAK_THRESHOLD,
+    build_fl_models,
+)
 from .scan_payload import CalibrationScanPayload
 
 if TYPE_CHECKING:
@@ -38,10 +43,12 @@ __all__ = ["calibrate"]
 
 def calibrate(
     *,
-    index:        "TranscriptIndex",
-    payload:      CalibrationScanPayload,
-    scan_trained: "FragmentLengthModels",
-    fl_prior_ess: float = POOL_EB_PRIOR_ESS,
+    index:              "TranscriptIndex",
+    payload:            CalibrationScanPayload,
+    scan_trained:       "FragmentLengthModels",
+    fl_prior_ess:       float = POOL_EB_PRIOR_ESS,
+    pool_quality_good:  int   = POOL_QUALITY_GOOD_THRESHOLD,
+    pool_quality_weak:  int   = POOL_QUALITY_WEAK_THRESHOLD,
 ) -> CalibrationResult:
     """Run the v6 calibration pipeline end-to-end (sans per-locus priors).
 
@@ -62,6 +69,14 @@ def calibrate(
     fl_prior_ess
         Empirical-Bayes evidence strength for the FL Dirichlet
         shrinkage.  Defaults to :data:`POOL_EB_PRIOR_ESS`.
+    pool_quality_good, pool_quality_weak
+        Minimum SPLICED-annotated count (``rna``) and gDNA count
+        required for a pool's per-FL distribution to be flagged
+        ``"good"`` / ``"weak"``.  Below ``pool_quality_weak`` the pool
+        is flagged ``"unusable"`` and downstream code falls back on
+        the global FL.  Defaults to
+        :data:`POOL_QUALITY_GOOD_THRESHOLD` /
+        :data:`POOL_QUALITY_WEAK_THRESHOLD`.
 
     Returns
     -------
@@ -79,11 +94,13 @@ def calibrate(
         )
 
     fl_models = build_fl_models(
-        global_counts = extract_global_counts(scan_trained),
-        rna_counts    = extract_rna_counts(scan_trained),
-        gdna_counts   = extract_gdna_counts(payload),
-        max_size      = scan_trained.max_size,
-        prior_ess     = fl_prior_ess,
+        global_counts  = extract_global_counts(scan_trained),
+        rna_counts     = extract_rna_counts(scan_trained),
+        gdna_counts    = extract_gdna_counts(payload),
+        max_size       = scan_trained.max_size,
+        prior_ess      = fl_prior_ess,
+        good_threshold = pool_quality_good,
+        weak_threshold = pool_quality_weak,
     )
 
     global_densities = compute_global_densities(

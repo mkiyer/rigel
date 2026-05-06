@@ -571,6 +571,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_nrna_weight", "calibration.nrna_weight"),
     _ParamSpec("cal_c_base", "calibration.c_base"),
+    _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
+    _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
     # -- Fan-out: threads → both EM and scan --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.n_scan_threads"),
@@ -1102,6 +1104,26 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Dirichlet evidence strength for the "
         "per-MultiLocus (alpha_gdna, alpha_rna) prior (default: 10.0).",
+    )
+    adv.add_argument(
+        "--cal-quality-good",
+        dest="cal_quality_good",
+        type=int,
+        default=None,
+        help="Minimum SPLICED-annotated count (rna) and gDNA count "
+        "above which a pool's per-FL distribution is flagged 'good' "
+        "(default: 5000). Pools above this threshold are trusted "
+        "without shrinkage toward the global FL.",
+    )
+    adv.add_argument(
+        "--cal-quality-weak",
+        dest="cal_quality_weak",
+        type=int,
+        default=None,
+        help="Minimum SPLICED-annotated count (rna) and gDNA count "
+        "above which a pool's per-FL distribution is flagged 'weak' "
+        "(default: 200). Below this threshold the pool is flagged "
+        "'unusable' and downstream code falls back on the global FL.",
     )
     adv.add_argument(
         "--emit-locus-stats",

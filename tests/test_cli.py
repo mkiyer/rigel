@@ -239,3 +239,13 @@ class TestConfigRoundTrip:
             assert key in spec_dests or key in cli_only, (
                 f"Default key {key!r} not in _PARAM_SPECS or cli_only"
             )
+
+    def test_cal_quality_thresholds_flow_to_config(self):
+        """``--cal-quality-good`` / ``--cal-quality-weak`` reach ``CalibrationConfig``."""
+        from rigel.cli import _build_pipeline_config
+
+        args = _parse_quant("--cal-quality-good", "9999", "--cal-quality-weak", "42")
+        _resolve_quant_args(args, _build_quant_defaults())
+        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        assert cfg.calibration.pool_quality_good == 9999
+        assert cfg.calibration.pool_quality_weak == 42

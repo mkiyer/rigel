@@ -751,6 +751,21 @@ budget < 1s for 5K MultiLoci on a synthetic stress test.
 
 ### M7 — Pool FL models + `CalibrationResult` schema
 
+> **M9.1 amendment (May 2026):** the planned `_fl_pool.py` /
+> `compute_pool_fl_models` / `PoolFLModels` triple was reorganised
+> during implementation into `calibration/fl.py` + `_fl_sources.py`,
+> exporting `build_fl_models` returning `FLModels`.  The split lets the
+> orchestrator extract the per-pool count vectors without coupling the
+> FL model code to `CalibrationScanPayload`.  See
+> `docs/calibration/m8_implementation_plan.md` §"Symbol-name deviations"
+> for the full rationale.  The shipped `CalibrationResult` is much
+> slimmer than the schema printed below: `FLModels` carries the FL
+> triple + quality flags, `Diagnostics` carries the named breakdown,
+> `PriorTable` carries the per-MultiLocus priors, and the dataclass
+> only holds those plus `global_densities` and `n_multi_loci`.  The
+> sub-section "**`CalibrationResult` schema:**" below is the *design
+> intent*; the *shipped* schema is in `src/rigel/calibration/_result.py`.
+
 **Scope:** build the gDNA pool FL model from `payload.fl_hist`; carry the
 scan-trained RNA/global FL models through unchanged; assemble the
 canonical `CalibrationResult` carrier.
@@ -869,6 +884,41 @@ locks).
 **Exit gate:** ≥ 18 new tests green; protected suite green.
 
 ### M8 — `calibrate()` orchestrator + pipeline integration
+
+> **M9.1 amendment (May 2026):** M8 shipped as commits `2fadb1b`
+> (M8a, orchestrator), `f5454e6` (M8b, pipeline switchover), `5f4754f`
+> (M8c, legacy deletion).  The post-shipping reconciliation:
+>
+> 1. **Symbol names**: `compute_pool_fl_models` / `PoolFLModels` →
+>    `build_fl_models` / `FLModels` (per the M7 amendment above).
+> 2. **CLI flags**: shipped as `--cal-prior-ess`, `--cal-nrna-weight`,
+>    `--cal-c-base`, `--cal-quality-good`, `--cal-quality-weak`
+>    (matches the migration table below).  The `--cal-quality-good` /
+>    `--cal-quality-weak` pair was added in commit `<M9.1.a>` after
+>    M8c; the underlying `build_fl_models` already accepted the
+>    keyword arguments, so the M9.1.a diff is just plumbing.
+> 3. **`CalibrationConfig` fields**: shipped as `prior_ess`,
+>    `nrna_weight`, `c_base`, `pool_quality_good`, `pool_quality_weak`
+>    (the plan's `pool_quality_thresholds: tuple[int, int]` was split
+>    into two scalar fields to keep the CLI plumbing trivial — argparse
+>    cannot directly bind a tuple).
+> 4. **`summary.json` keys**: the *shipped* `to_summary_dict()` emits
+>    `global_densities`, `fl_models`, `diagnostics`, `n_multi_loci`,
+>    `c_base`, `mean_pi_gdna`.  The plan's `kappa_diagnostics` is
+>    folded into `global_densities` (one row per region category);
+>    `boundary_flux_gdna_summary` is folded into `diagnostics`.
+> 5. **Deprecation cycle**: rigel is pre-1.0; v1 CLI flags were
+>    deleted outright in M8c rather than emitting deprecation warnings
+>    for one release cycle.
+> 6. **`__init__.py` exports**: superset of the plan — adds
+>    `extract_global_counts`, `extract_rna_counts`, `extract_gdna_counts`
+>    (from `_fl_sources.py`) plus `Quality`, `FLModels`,
+>    `build_fl_models`, `Diagnostics`, `assemble_priors`,
+>    `build_prior_weight_rna`, `build_multi_locus_prior_df`,
+>    `build_per_locus_gdna_df`.  No removals from the planned set.
+>
+> The migration table below describes the *target* surface; the
+> "Shipped" column matches modulo items 1–6 above.
 
 **Scope:** compose M4 + M7 into a top-level `calibrate()` and migrate
 the pipeline off the live SRD-v1 surface.  This is **NOT** a hard cut

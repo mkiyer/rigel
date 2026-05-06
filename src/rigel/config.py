@@ -171,6 +171,16 @@ class CalibrationConfig:
     #: :func:`rigel.calibration.assemble_priors`.
     c_base: float = 10.0
 
+    #: Minimum SPLICED-annotated count (``rna``) and gDNA count required
+    #: for the pool's per-FL distribution to be flagged ``"good"`` /
+    #: ``"weak"`` respectively.  Below ``weak_threshold`` a pool is
+    #: flagged ``"unusable"`` and downstream code falls back on the
+    #: global FL.  Default matches
+    #: :data:`rigel.calibration.fl.POOL_QUALITY_GOOD_THRESHOLD` /
+    #: :data:`rigel.calibration.fl.POOL_QUALITY_WEAK_THRESHOLD`.
+    pool_quality_good: int = 5_000
+    pool_quality_weak: int = 200
+
 
 @dataclass(frozen=True)
 class PipelineConfig:

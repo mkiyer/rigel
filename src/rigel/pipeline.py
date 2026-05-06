@@ -988,6 +988,8 @@ def run_pipeline(
         payload=calibration_payload,
         scan_trained=frag_length_models,
         fl_prior_ess=cal_cfg.prior_ess,
+        pool_quality_good=cal_cfg.pool_quality_good,
+        pool_quality_weak=cal_cfg.pool_quality_weak,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(
