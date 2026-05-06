@@ -148,18 +148,47 @@ class PriorTable:
 
 def build_prior_weight_rna(
     multi_locus: MultiLocus,
-    em_data: ScoredFragments | None = None,  # noqa: ARG001 (reserved for M8)
+    em_data: ScoredFragments | None = None,  # noqa: ARG001 (reserved for future use)
     *,
-    nrna_weight: float = 0.0,  # noqa: ARG001 (reserved for M8)
+    is_synthetic: np.ndarray | None = None,
+    nrna_weight: float = 0.0,
 ) -> np.ndarray:
     """Construct the per-component nRNA-suppression weight vector.
 
-    Returns ``np.ones(n_t + 1, float32)`` — bit-identical to passing
-    ``None`` to the EM.  M8 will swap this for the per-transcript
-    nRNA shadow logic.
+    Components are laid out by the EM as ``[t_0, t_1, ..., t_{n_t-1},
+    gDNA]``.  Synthetic nRNA spans live in the same ``index.t_df``
+    transcript table as real transcripts (one component each), flagged
+    by the ``is_synthetic`` boolean column.  This helper returns a
+    ``float32`` array of length ``n_t + 1`` with real-mRNA entries set
+    to ``1.0``, synthetic-nRNA entries set to ``nrna_weight``, and the
+    trailing gDNA entry set to ``1.0`` (the gDNA component is not
+    affected by ``prior_weight_rna``; the solver routes it through
+    ``alpha_gdna`` / ``gdna_idx``).
+
+    Parameters
+    ----------
+    multi_locus : MultiLocus
+    em_data : ScoredFragments, optional
+        Reserved for future per-fragment weighting.  Unused.
+    is_synthetic : np.ndarray, optional
+        Global ``index.t_df["is_synthetic"]`` boolean column.  When
+        ``None``, every component is treated as mRNA (the legacy M5
+        all-ones behavior — preserves bit-identical output for
+        callers that have not yet plumbed ``nrna_weight``).
+    nrna_weight : float
+        Per-component weight applied to synthetic-nRNA entries.
+        ``0.0`` (default) zeros out the nRNA prior contribution;
+        ``1.0`` puts nRNA on equal footing with mRNA.  Ignored when
+        ``is_synthetic`` is ``None``.
     """
     n_t = int(multi_locus.transcript_indices.shape[0])
-    return np.ones(n_t + 1, dtype=np.float32)
+    weights = np.ones(n_t + 1, dtype=np.float32)
+    if is_synthetic is None:
+        return weights
+    t_idx = multi_locus.transcript_indices
+    synth_mask = np.asarray(is_synthetic, dtype=bool)[t_idx]
+    weights[:n_t] = np.where(synth_mask, np.float32(nrna_weight), np.float32(1.0))
+    return weights
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +379,17 @@ def assemble_priors(
     *,
     gdna_fl_mean: float | None = None,
     c_base: float = C_BASE_DEFAULT,
+    nrna_weight: float = 0.0,
 ) -> PriorTable:
     """Build the full :class:`PriorTable` for the batch EM.
 
     Pure-Python pass; no I/O, no mutation of inputs.
+
+    Parameters
+    ----------
+    nrna_weight : float
+        Per-component weight applied to synthetic-nRNA transcripts in
+        each ``MultiLocus``.  See :func:`build_prior_weight_rna`.
     """
     if gdna_fl_mean is None:
         gdna_fl_mean = global_densities.gdna_fl_mean
@@ -375,6 +411,14 @@ def assemble_priors(
     )
     t_ref = cat_to_ref_id[t_ref_codes]
 
+    # ``is_synthetic`` flags rigel-generated nRNA spans (separate
+    # transcripts in ``index.t_df``, but each its own EM component).
+    # Older indices predate this column; treat absence as "no synthetic
+    # transcripts" so legacy callers still get all-ones weights.
+    if "is_synthetic" in index.t_df.columns:
+        is_synthetic_arr = index.t_df["is_synthetic"].to_numpy(dtype=bool)
+    else:
+        is_synthetic_arr = None
     n_ml = len(multi_loci)
     alpha_gdna = np.zeros(n_ml, dtype=np.float64)
     alpha_rna = np.zeros(n_ml, dtype=np.float64)
@@ -407,7 +451,12 @@ def assemble_priors(
         multi_locus_priors[idx] = ml_prior
         alpha_gdna[idx] = c_base * ml_prior.pi_gdna
         alpha_rna[idx] = c_base * (1.0 - ml_prior.pi_gdna)
-        prior_weight_rna[idx] = build_prior_weight_rna(ml, em_data)
+        prior_weight_rna[idx] = build_prior_weight_rna(
+            ml,
+            em_data,
+            is_synthetic=is_synthetic_arr,
+            nrna_weight=nrna_weight,
+        )
 
     if any(p is None for p in multi_locus_priors):
         missing = [i for i, p in enumerate(multi_locus_priors) if p is None]

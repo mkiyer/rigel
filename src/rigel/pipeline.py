@@ -741,7 +741,7 @@ def quant_from_buffer(
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
-    nrna_weight: float = 0.0,    # noqa: ARG001 — reserved; helper is a stub
+    nrna_weight: float = 0.0,
     c_base: float = 10.0,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
     """Quantify transcripts from buffered fragments via locus-level EM.
@@ -775,10 +775,12 @@ def quant_from_buffer(
     em_config, scoring, log_every, annotations, emit_locus_stats
         Standard pipeline knobs.
     nrna_weight : float
-        Per-component nRNA-suppression weight.  Reserved; the M5
-        ``build_prior_weight_rna`` helper currently returns all-ones
-        regardless.  Plumbed through the API so the CLI knob takes
-        effect when the helper is implemented.
+        Per-component nRNA-suppression weight applied to synthetic
+        nRNA transcripts in each ``MultiLocus``.  ``0.0`` (default)
+        zeros out the nRNA prior contribution; ``1.0`` puts nRNA on
+        equal footing with mRNA.  Threaded through to
+        :func:`assemble_priors` and on to
+        :func:`build_prior_weight_rna`.
     c_base : float
         Dirichlet evidence strength for the per-MultiLocus prior.
 
@@ -873,8 +875,18 @@ def quant_from_buffer(
             calibration.global_densities,
             gdna_fl_mean=fl_models.gdna.mean,
             c_base=c_base,
+            nrna_weight=nrna_weight,
         )
         calibration = calibration.with_priors(prior_table)
+        # Log the prior-derived calibration summary now that the
+        # PriorTable is back-filled (the earlier "[CAL] v6 quality=..."
+        # line ran before assembly and could not include these fields).
+        _post_summary = calibration.to_summary_dict()
+        logger.info(
+            "[CAL] v6 priors  mean_pi_gdna=%.4f  n_multi_loci=%d",
+            float(_post_summary["mean_pi_gdna"]),
+            int(_post_summary["n_multi_loci"]),
+        )
         alpha_gdna = prior_table.alpha_gdna
         alpha_rna = prior_table.alpha_rna
         prior_weight_rna_per_locus = list(prior_table.prior_weight_rna)
@@ -993,10 +1005,8 @@ def run_pipeline(
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(
-        "[CAL] v6 quality=%s  mean_pi_gdna=%.4f  n_multi_loci=%d",
+        "[CAL] v6 quality=%s",
         cal_summary["fl_models"]["gdna_quality"],
-        float(cal_summary["mean_pi_gdna"]),
-        int(cal_summary["n_multi_loci"]),
     )
 
     # -- Annotation table for second BAM pass (opt-in) --
