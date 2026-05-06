@@ -81,6 +81,11 @@ suitable for standard total RNA-seq libraries.
 | `--overhang-alpha` | `0.1` | Per-base overhang penalty α ∈ (0, 1]. Fragment score multiplied by α for each overhang base. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha` | `0.1` | Per-mismatch (NM tag) penalty α ∈ (0, 1]. Score multiplied by α per mismatch. `0` = hard gate, `1` = no penalty. |
 | `--gdna-splice-penalty-unannot` | `0.01` | Multiplier applied to the gDNA candidate score for fragments with unannotated splice junctions. Values close to 0 make gDNA attribution less likely for spliced fragments. |
+| `--cal-prior-ess` | `1000.0` | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage in the calibration orchestrator. Larger values shrink RNA/gDNA fragment-length distributions more aggressively toward the global FL. |
+| `--cal-nrna-weight` | `0.0` | Per-component nRNA-suppression weight in `[0, 1]`. `0` disables nRNA components in the per-MultiLocus prior; `1` treats nRNA on equal footing with mRNA. |
+| `--cal-c-base` | `10.0` | Dirichlet evidence strength for the per-MultiLocus `(alpha_gdna, alpha_rna)` prior assembled by `assemble_priors`. |
+| `--cal-quality-good` | `5000` | Minimum SPLICED-annotated count (rna pool) and gDNA count above which the per-FL distribution is flagged `"good"` and used without shrinkage. |
+| `--cal-quality-weak` | `200` | Minimum SPLICED-annotated count and gDNA count above which the per-FL distribution is flagged `"weak"`. Below this, the pool is `"unusable"` (fallback to global FL). |
 
 ---
 
@@ -117,6 +122,13 @@ pruning_min_posterior: 0.0001
 # Advanced EM
 assignment_min_posterior: 0.01
 em_convergence_delta: 0.000001
+
+# Calibration (v6)
+cal_prior_ess: 1000.0
+cal_nrna_weight: 0.0
+cal_c_base: 10.0
+cal_quality_good: 5000
+cal_quality_weak: 200
 ```
 
 ---
@@ -132,7 +144,7 @@ The `_PARAM_SPECS` registry in `cli.py` maps CLI flag names to config fields.
 | `EMConfig` | EM algorithm: mode, iterations, priors, assignment behavior |
 | `BamScanConfig` | BAM parsing, filtering, buffering, threading |
 | `FragmentScoringConfig` | Overhang, mismatch, gDNA splice penalties, candidate pruning |
-| `CalibrationConfig` | Aggregate-first gDNA calibration EM: convergence and data-gating thresholds |
+| `CalibrationConfig` | v6 calibration orchestrator: per-MultiLocus prior strength, FL-pool quality thresholds, EB shrinkage strength |
 
 ### Internal-only fields (not exposed as CLI flags)
 
@@ -143,11 +155,20 @@ The `_PARAM_SPECS` registry in `cli.py` maps CLI flag names to config fields.
 | `BamScanConfig` | `max_memory_bytes` | 2 GiB | Fragment-buffer memory limit before disk spill |
 | `BamScanConfig` | `log_every` | `1,000,000` | Progress log interval (read-name groups) |
 | `BamScanConfig` | `n_decomp_threads` | `4` | htslib BGZF decompression threads. Set to `0` to disable multi-threaded decompression. Tuned independently from the worker thread count. |
-| `CalibrationConfig` | `max_iterations` | `50` | Max calibration EM iterations |
-| `CalibrationConfig` | `convergence_tol` | `1e-4` | Calibration EM convergence tolerance |
-| `CalibrationConfig` | `density_percentile` | `0.10` | Percentile of density distribution used to seed gDNA initialization |
-| `CalibrationConfig` | `min_gdna_regions` | `100` | Minimum eligible regions to run the calibration EM; below this, algebraic fallback is used |
-| `CalibrationConfig` | `min_fl_ess` | `50` | Minimum effective sample size (Σγ·w) of FL observations needed to build a gDNA fragment-length model |
+
+### `summary.json` calibration schema
+
+The `calibration` section of `summary.json` is built from
+`CalibrationResult.to_summary_dict()` and contains:
+
+| Key | Type | Source | Description |
+|-----|------|--------|-------------|
+| `global_densities` | object | `GlobalDensityTable.to_summary_dict()` | Per-region-category gDNA density (lambda) plus the kappa correction for the gDNA fragment-length effect. |
+| `fl_models` | object | `FLModels.to_summary_dict()` | Per-pool fragment-length models (`rna`, `gdna`, `global`) plus the quality flag (`good` / `weak` / `fallback`) for the rna and gdna pools. |
+| `diagnostics` | object | `Diagnostics.to_summary_dict()` | Named per-region observation counts (intergenic / intron / exon / boundary-flux). |
+| `n_multi_loci` | int | `CalibrationResult.n_multi_loci` | Number of MultiLoci that received a per-component prior. |
+| `c_base` | float | `PriorTable.c_base_value` | Dirichlet evidence strength used to assemble the per-MultiLocus priors. |
+| `mean_pi_gdna` | float | mean of `MultiLocusPrior.pi_gdna` | Library-wide gDNA fraction averaged across MultiLoci. |
 
 ---
 

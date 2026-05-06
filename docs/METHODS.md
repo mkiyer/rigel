@@ -338,50 +338,120 @@ transcripts.
 
 ---
 
-## 10. gDNA prior system
+## 10. gDNA calibration (v6)
 
-> **Note (v0.5.0):** the density-based per-region calibration described
-> in this chapter has been **replaced** by Simple Regional Deconvolution
-> (SRD v1). See `docs/calibration/srd_v1_implementation.md` for the
-> current model, `docs/calibration/srd_v1_results.md` for benchmark
-> validation, and `docs/calibration/srd_v2_plan.md` for the roadmap.
-> The text below is retained as historical context; some referenced
-> code paths (`build_region_table`, `lambda_gdna`, regional density
-> estimators, the strand+density blended estimator) no longer exist
-> in the codebase.
+The gDNA prior is constructed by the calibration subsystem
+(`rigel.calibration`).  Calibration runs once per quant invocation
+and produces both library-wide diagnostics (in `summary.json`) and
+per-MultiLocus priors that are consumed by the per-locus EM.
 
-gDNA is modeled as one merged locus-level component.
+### 10.1 Region partition
 
-### 10.1 Background density
-
-Rigel estimates a global intergenic density from total intergenic fragments and
-the inferred intergenic territory of the reference.
-
-### 10.2 Hierarchy and prior scale
-
-The gDNA prior hierarchy is:
+At index time `rigel index` partitions the genome into 8 disjoint
+mask states using the annotation:
 
 $$
-\mathrm{global} \rightarrow \mathrm{locus}
+\text{state}(b) = (\,\text{exon}^+(b),\;\text{intron}^+(b),\;\text{intergenic}(b),\;\text{exon}^-(b),\;\text{intron}^-(b)\,) \in \{0,1\}^5
 $$
 
-with optional manual override:
+collapsed into a per-base 8-state mask
+(`exon`, `intron`, `exon|intron`, `intergenic`, `exon|intergenic`,
+`intron|intergenic`, `exon|intron|intergenic`, plus the
+all-zero "outside-reference" state).  The partition is persisted in
+the index under `region_df` and is shared with the C++ scanner so
+that every observed fragment can be attributed to one of the 8
+states without an extra pass over the BAM.
 
-- `gdna_kappa_shrink`
+### 10.2 In-place per-region accumulator
 
-The shrinkage pseudo-count controls how many pseudo-observations of
-global density to blend with each locus's local estimate.
+The C++ BAM scanner maintains, in addition to the per-fragment
+buffer, an `accumulator` that tallies:
 
-The per-locus gDNA prior is constructed as $\alpha_{\text{gDNA}} = 1 + \text{gdna\_prior\_scale} \times \text{gdna\_init}$, where `gdna_init` is the EB-estimated gDNA count for the locus. Setting `gdna_prior_scale = 0` disables the EB anchor and uses a flat unit prior.
+- `global_counts[8]` — total fragments per mask state.
+- `per_region_counts[n_regions, 8]` — per-region totals.
+- `fl_hist[8, n_bins]` — fragment-length histogram per mask state.
+- `u_left[n_regions]`, `u_right[n_regions]` — boundary-flux counters
+  used to detect aliasing between intron and intergenic fragments
+  near gene boundaries.
 
-### 10.3 gDNA strand penalty
+These five tensors are the only inputs to calibration.  No second
+pass over the BAM is required.
 
-gDNA contamination is strand-symmetric, so a single gDNA component is used per
-locus. A constant log(0.5) term is added to the per-fragment gDNA likelihood,
-reflecting the a priori expectation that gDNA fragments are equally likely to
-originate from either strand. This effectively halves the gDNA likelihood
-relative to strand-specific components, preventing gDNA from absorbing
-sense-strand fragments that belong to nRNA.
+### 10.3 Pool fragment-length models
+
+Three FL distributions are derived from the accumulator:
+
+- **gDNA pool**: union of mask states `intron`, `exon|intron`,
+  `intergenic`.  All three are unspliced by construction, so genomic
+  span equals fragment length.
+- **RNA pool**: scanner-trained `rna_model` (built from
+  unique-mapping spliced fragments via `_resolve_core` in transcript
+  space — never from `fl_hist[exon-only]`, whose values are genomic
+  spans, not FLs, for spliced fragments).
+- **Global**: scanner-trained `global_model` (all fragments).
+
+Each pool's per-FL Dirichlet is shrunk toward the global FL by an
+empirical-Bayes step with strength `prior_ess` (default 1000):
+
+$$
+\hat{p}_\ell(f) \;=\; \frac{n_\ell(f) + \tfrac{prior\_ess}{n_\ell^{\text{tot}}} \cdot \hat{p}_{\text{global}}(f) \cdot n_\ell^{\text{tot}}}{n_\ell^{\text{tot}} + prior\_ess}
+$$
+
+A pool's quality flag is derived from its raw count:
+
+| n_pool | Quality | Behaviour |
+|--------|---------|-----------|
+| ≥ `--cal-quality-good` (5000) | `"good"` | No shrinkage; pool FL trusted as-is. |
+| ∈ [weak, good) | `"weak"` | EB shrunk toward global with strength `prior_ess`. |
+| < `--cal-quality-weak` (200) | `"fallback"` | Pool FL replaced by global FL. |
+
+### 10.4 Global gDNA densities and κ correction
+
+For each region category $c \in \{$intergenic, intron, exon-near-intron$\}$:
+
+$$
+\hat{\lambda}_c \;=\; \frac{n_c}{L_c}
+$$
+
+where $n_c$ is the gDNA count in category $c$ (intersected with the
+gDNA pool mask) and $L_c$ is the total reference territory of the
+category, both adjusted by the κ correction that accounts for the
+gDNA fragment-length effect on effective territory:
+
+$$
+\kappa \;=\; \mathbb{E}_{\text{gDNA-FL}}[\,L - f + 1\,] \,/\, L \quad \approx \quad 1 - \tfrac{\bar f_{\text{gDNA}}}{L}
+$$
+
+The three $\hat{\lambda}_c$ values plus their κ-adjustments are
+emitted into `summary.json.calibration.global_densities`.
+
+### 10.5 Per-MultiLocus priors
+
+For every MultiLocus (a connected component of mappable
+transcripts), calibration assembles a Dirichlet prior with two
+hyper-parameters:
+
+$$
+(\alpha_{\text{gdna}},\; \alpha_{\text{rna}}) \;\propto\; (\hat{\lambda}_{\text{intergenic}} \cdot \tilde L_{\text{gdna}}^\text{loc},\; \hat{n}_{\text{rna}}^\text{loc})
+$$
+
+renormalised so that $\alpha_{\text{gdna}} + \alpha_{\text{rna}} =
+c_{\text{base}}$ (default 10).  These are then split across the
+$n_t$ transcript components by the locus-level transcript geometry:
+each component receives a per-locus `prior_weight_rna` and (when
+`--cal-nrna-weight > 0`) a matching nRNA prior weight.  The EM
+solver consumes `prior_weight_rna_per_locus` directly and treats
+$\alpha_{\text{gdna}}$ as a regularising prior on the gDNA component.
+
+### 10.6 Knobs and reporting
+
+CLI flags: `--cal-prior-ess`, `--cal-nrna-weight`, `--cal-c-base`,
+`--cal-quality-good`, `--cal-quality-weak` — see [parameters.md](parameters.md).
+
+Reporting: `summary.json.calibration` contains `global_densities`,
+`fl_models`, `diagnostics`, `n_multi_loci`, `c_base`, `mean_pi_gdna`.
+See [MANUAL.md §Calibration](MANUAL.md#calibration) for a worked
+description of each key.
 
 ---
 

@@ -5,6 +5,78 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — v6 calibration redesign
+
+### Headline
+
+Joint mRNA / nRNA / gDNA quantification with an in-place per-region
+accumulator that runs inside the existing C++ BAM scan.  Replaces the
+SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
+
+### Added
+
+- `rigel.calibration.calibrate(*, index, payload, scan_trained,
+  fl_prior_ess, pool_quality_good, pool_quality_weak)` — the new
+  top-level orchestrator.  Takes the in-place accumulator payload from
+  `scan_and_buffer`, builds the three pool fragment-length models,
+  computes the global gDNA densities, and returns a
+  `CalibrationResult` whose `PriorTable` is filled in by the pipeline
+  via `assemble_priors(...)` + `with_priors(...)`.
+- New region partition built at index time (`rigel index`) — 8-state
+  per-base mask (exon × intron × intergenic × strand) persisted in the
+  index under `region_df` and shared with the C++ scanner.
+- New CLI flags: `--cal-prior-ess`, `--cal-nrna-weight`,
+  `--cal-c-base`, `--cal-quality-good`, `--cal-quality-weak`.
+  See [docs/parameters.md](docs/parameters.md) and
+  [docs/MANUAL.md §Calibration](docs/MANUAL.md#calibration).
+- New `summary.json.calibration` schema:
+  `global_densities`, `fl_models`, `diagnostics`, `n_multi_loci`,
+  `c_base`, `mean_pi_gdna`.
+- `docs/calibration/calibration_v6_plan.md` + companion docs
+  (m7/m8/m9 plans).  See [docs/METHODS.md §10](docs/METHODS.md) for
+  the mathematical exposition.
+
+### Changed (Breaking)
+
+- `quant_from_buffer(...)` now takes `calibration_payload` and
+  returns `(estimator, calibration)` (was: `estimator` only).
+- `FragmentScorer.from_models(...)` now takes individual FL models
+  (`rna_fl`, `gdna_fl`) instead of a `FragmentLengthModels` container.
+- `_run_locus_em_partitioned(...)` accepts a new
+  `prior_weight_rna_per_locus` argument.
+- `summary.json.calibration` schema replaced (see Added).  Consumers
+  reading `pi_pool`, `gdna_fl.{mu,sigma,quality}`, or `srd.*` keys
+  must update.
+
+### Removed (Breaking)
+
+- SRD-v1 surface deleted in commit `5f4754f`:
+  `_simple.py`, `_categorize.py`, `_fl_mixture.py`,
+  `_fl_empirical_bayes.py`, the SRD-v1 `CalibrationResult`,
+  `calibrate_gdna(...)`, the v1 `CalibrationConfig` fields
+  (`exon_fit_tolerance_bp`, `fl_prior_ess`, `max_iter`, `tol`),
+  and the v1 CLI flags (`--cal-exon-fit-tolerance-bp`,
+  `--cal-fl-prior-ess`, `--cal-max-iter`, `--cal-tol`).
+- `tests/test_calibration_simple.py`, `tests/test_categorize.py`,
+  `tests/test_gdna.py`, `tests/test_gdna_harmonic_length.py`.
+- v1 deprecation-warning shims were **not** shipped (rigel is
+  pre-1.0; no users depended on a shim contract).
+
+### Internals
+
+- Milestone progression: M1 (region partition) → M2 (index
+  persistence) → M3 (in-place C++ accumulator) → M4 (global gDNA
+  densities + κ) → M5 (EM `prior_weight_rna` ABI + Locus rename)
+  → M6 (per-MultiLocus priors) → M7 (pool FL models +
+  `CalibrationResult` schema) → M8a/b/c (orchestrator + pipeline +
+  legacy deletion) → M9.1 (knob ship + plan reconciliation) →
+  M9.3 (this CHANGELOG + MANUAL + METHODS + parameters refresh).
+- All `tests/golden/*` files regenerated against the v6 calibration
+  output (commit `dca1788`).
+- 1003 tests passing (was 978 pre-M9.1).
+- Plan vs implementation reconciliation logged in
+  [docs/calibration/m9_implementation_plan.md §1](docs/calibration/m9_implementation_plan.md).
+
 ## [0.4.1] - 2026-04-27
 
 ### Changed (Breaking)

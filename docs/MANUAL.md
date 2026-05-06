@@ -332,7 +332,7 @@ Run-level summary. Key sections:
 | `alignment_stats` | Total, mapped, unique, multimapping, duplicate, QC-fail read counts |
 | `fragment_stats` | Genic, intergenic, chimeric counts |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, 95% CI |
-| `calibration` | gDNA calibration summary: density, κ, π, per-ref stats |
+| `calibration` | gDNA / RNA pool fragment-length models, global gDNA densities, per-MultiLocus prior diagnostics, library-wide `mean_pi_gdna`, `n_multi_loci`, `c_base`. See [Calibration](#calibration) below. |
 | `fragment_length` | Per-category summary statistics (mean/std/median/mode/n_obs) and full histograms with trimmed zero bins for QC plotting |
 | `quantification` | n_transcripts, n_genes, n_loci, mRNA/nRNA/gDNA totals and fractions |
 
@@ -419,6 +419,112 @@ is_intergenic = (zf & 0x20) != 0
 is_chimeric   = (zf & 0x40) != 0
 is_mm_dropped = (zf & 0x80) != 0
 ```
+
+---
+
+## Calibration
+
+Calibration is the step that turns the raw BAM scan into the priors
+that the per-locus EM consumes.  It runs once per quant invocation,
+in-process, and writes its results both into the EM (as
+`prior_weight_rna` per MultiLocus and per-component priors) and into
+`summary.json` (under the `calibration` key) for inspection.
+
+### What calibration does
+
+Rigel's likelihood model has three competing fragment origins:
+
+- **mRNA** — spliced, transcribed.
+- **nRNA** — nascent / unspliced (single-exon transcripts and
+  rigel-synthesised intronic spans).
+- **gDNA** — genomic DNA contamination (intergenic + intragenic
+  unspliced reads that originate from gDNA, not pre-mRNA).
+
+The three are not always identifiable from the read alone — a
+fragment that maps inside an intron could be nRNA or gDNA, and a
+short single-exon read could be mRNA, nRNA, or gDNA.  Calibration
+estimates *prior probabilities* for each component on a per-locus
+basis using global summaries that the BAM scan accumulates in a
+single pass (no extra read of the BAM).
+
+The pipeline:
+
+1. **Region partition**: at index time, `rigel index` partitions the
+   genome into 8 disjoint mask states based on annotation
+   (intergenic / intron / exon × strand).  Persisted into the index
+   under `region_df`.
+2. **In-place accumulator** (BAM scan): the C++ scanner attributes
+   every observed fragment to one of the 8 states and records a
+   per-state fragment-length histogram and per-region count totals.
+   No extra pass over the BAM.
+3. **Pool FL models**: build one fragment-length distribution per
+   pool (RNA, gDNA, global) and shrink low-count pools toward the
+   global FL using empirical-Bayes Dirichlet smoothing.  Each pool
+   gets a `Quality` flag (`good` / `weak` / `fallback`) based on its
+   observed count.
+4. **Global gDNA densities**: from the per-region counts, compute
+   library-wide gDNA fragment-density estimates per region category
+   (intergenic / intron / exon-near-intron) and a kappa correction
+   for the gDNA fragment-length effect.
+5. **Per-MultiLocus priors**: for every MultiLocus (a connected
+   component of mappable transcripts), turn the global densities
+   into a per-component Dirichlet prior `(alpha_gdna, alpha_rna)`
+   with strength `c_base`.
+
+### Knobs
+
+All calibration knobs are advanced settings; defaults are tuned for
+standard total-RNA libraries.
+
+| Flag                  | Default | What it controls                                                                                              |
+|-----------------------|---------|---------------------------------------------------------------------------------------------------------------|
+| `--cal-prior-ess`     | `1000`  | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage. Larger ⇒ pool FLs pulled harder toward the global FL. |
+| `--cal-nrna-weight`   | `0.0`   | Per-component nRNA-suppression weight in `[0, 1]`.  `0` disables nRNA components in the per-MultiLocus prior; `1` treats nRNA on equal footing with mRNA. |
+| `--cal-c-base`        | `10.0`  | Dirichlet evidence strength for the per-MultiLocus `(alpha_gdna, alpha_rna)` prior.  Larger ⇒ stronger pull toward the global gDNA fraction; smaller ⇒ EM trusts the per-locus likelihood more. |
+| `--cal-quality-good`  | `5000`  | Pool counts at or above this threshold are flagged `"good"` and used without shrinkage. |
+| `--cal-quality-weak`  | `200`   | Pool counts below this threshold are flagged `"unusable"` and the pool falls back on the global FL.  Counts in `[weak, good)` are flagged `"weak"` and shrunk toward the global FL with strength `--cal-prior-ess`. |
+
+### `summary.json` calibration schema
+
+```jsonc
+{
+  "calibration": {
+    "global_densities": { /* per-region-category lambda + kappa */ },
+    "fl_models": {
+      "rna_quality":    "good" | "weak" | "fallback",
+      "gdna_quality":   "good" | "weak" | "fallback",
+      "rna":            { "mean": ..., "std": ..., "n_obs": ... },
+      "gdna":           { "mean": ..., "std": ..., "n_obs": ... },
+      "global":         { "mean": ..., "std": ..., "n_obs": ... }
+    },
+    "diagnostics": { /* per-region observation counts, boundary flux */ },
+    "n_multi_loci":  <int>,
+    "c_base":        <float>,
+    "mean_pi_gdna":  <float>     // library-wide pi_gdna averaged across MultiLoci
+  }
+}
+```
+
+### When to suspect calibration is misfiring
+
+- `mean_pi_gdna` ≈ 1.0 on a presumed-clean library — calibration
+  has assigned everything to gDNA.  Almost always means the gDNA
+  pool FL is `"fallback"` because `n_obs` was below
+  `--cal-quality-weak`.  Inspect `fl_models.gdna_quality`.
+- `mean_pi_gdna` ≈ 0.0 on a presumed-contaminated library —
+  conversely, the RNA pool FL is too dominant.  Inspect
+  `fl_models.rna_quality` and the per-region counts in `diagnostics`.
+- Heavy mass on nRNA components in `nrna_quant.feather` for a
+  short-fragment library: increase `--cal-nrna-weight` toward `1.0`
+  (rigel will treat nRNA and mRNA components on equal footing rather
+  than down-weighting nRNA in the prior).
+- All four knobs above are *priors*; the EM will override them when
+  the per-locus likelihood is decisive.  If a locus disagrees with
+  calibration, the locus generally wins.
+
+For a more thorough discussion of the calibration model and its
+identifiability limits, see [METHODS.md](METHODS.md) §10 and
+[docs/calibration/calibration_v6_plan.md](calibration/calibration_v6_plan.md).
 
 ---
 
