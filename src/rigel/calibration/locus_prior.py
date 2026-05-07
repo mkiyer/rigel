@@ -28,12 +28,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..frag_length_model import FragmentLengthModel
 from ..locus import Locus, MultiLocus
 from ..scored_fragments import ScoredFragments
 from ._arrays import PayloadArrays, RegionArrays
 from ._locus_n_obs import build_t_to_local_locus, partition_units_to_loci
 from ._region_index_py import RegionIndexPy
-from .density_global import GlobalDensityTable
+from .density_global import GlobalDensityTable, l_eff_contained
 from .density_loco import shrink_to_loco
 from .regions import RegionType
 from .scan_payload import CalibrationScanPayload
@@ -261,7 +262,7 @@ def estimate_locus_gdna(
     region_arrays: RegionArrays,
     payload_arrays: PayloadArrays,
     global_densities: GlobalDensityTable,
-    gdna_fl_mean: float,
+    gdna_fl: FragmentLengthModel,
 ) -> LocusGdnaEstimate:
     """Estimate the gDNA mass and π̂_gdna for one ``Locus``.
 
@@ -280,8 +281,8 @@ def estimate_locus_gdna(
     ends = region_arrays.end[region_ids]
     cl_lo = np.maximum(starts, locus.start)
     cl_hi = np.minimum(ends, locus.end)
-    cl_len = (cl_hi - cl_lo).astype(np.float64)
-    leff = cl_len + (gdna_fl_mean - 1.0)            # l_eff_overlap, vectorized
+    cl_len = (cl_hi - cl_lo).astype(np.int64)
+    leff = l_eff_contained(cl_len, gdna_fl)
 
     fallback_flags = 0
 
@@ -320,7 +321,7 @@ def estimate_locus_gdna(
         leff,
         global_densities.exon_intron.rho,
         global_densities.exon_intron.kappa.value,
-        gdna_fl_mean,
+        float(gdna_fl.mean),
     )
     n_gdna_ei = rho_loco_ei * leff_ei
     if n_eligible_boundaries == 0:
@@ -377,7 +378,7 @@ def assemble_priors(
     payload: CalibrationScanPayload,
     global_densities: GlobalDensityTable,
     *,
-    gdna_fl_mean: float | None = None,
+    gdna_fl: FragmentLengthModel | None = None,
     c_base: float = C_BASE_DEFAULT,
     nrna_weight: float = 0.0,
 ) -> PriorTable:
@@ -387,15 +388,20 @@ def assemble_priors(
 
     Parameters
     ----------
+    gdna_fl : FragmentLengthModel, optional
+        gDNA fragment-length distribution used for the FL-PMF-weighted
+        containment effective length. Defaults to
+        ``global_densities.gdna_fl`` (the model used during global
+        density estimation).
     nrna_weight : float
         Per-component weight applied to synthetic-nRNA transcripts in
         each ``MultiLocus``.  See :func:`build_prior_weight_rna`.
     """
-    if gdna_fl_mean is None:
-        gdna_fl_mean = global_densities.gdna_fl_mean
-    if not (gdna_fl_mean > 0.0):
+    if gdna_fl is None:
+        gdna_fl = global_densities.gdna_fl
+    if not (gdna_fl.mean > 0.0):
         raise ValueError(
-            f"assemble_priors: gdna_fl_mean must be > 0; got {gdna_fl_mean!r}."
+            f"assemble_priors: gdna_fl.mean must be > 0; got {gdna_fl.mean!r}."
         )
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
@@ -437,7 +443,7 @@ def assemble_priors(
                 region_arrays=region_arrays,
                 payload_arrays=payload_arrays,
                 global_densities=global_densities,
-                gdna_fl_mean=gdna_fl_mean,
+                gdna_fl=gdna_fl,
             )
             for j, loc in enumerate(ml.loci)
         )

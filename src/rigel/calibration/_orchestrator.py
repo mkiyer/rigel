@@ -106,7 +106,7 @@ def calibrate(
     global_densities = compute_global_densities(
         index.region_df,
         payload,
-        gdna_fl_mean=float(fl_models.gdna.mean),
+        gdna_fl=fl_models.gdna,
     )
 
     return build_calibration_result(

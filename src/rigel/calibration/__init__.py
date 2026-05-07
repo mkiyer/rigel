@@ -36,7 +36,7 @@ from .density_global import (
     GlobalDensityTable,
     GlobalGdnaDensity,
     compute_global_densities,
-    l_eff_overlap,
+    l_eff_contained,
 )
 from .density_loco import shrink_to_loco
 from .fl import (
@@ -74,7 +74,7 @@ __all__ = [
     "GlobalDensityTable",
     "GlobalGdnaDensity",
     "compute_global_densities",
-    "l_eff_overlap",
+    "l_eff_contained",
     "KappaEstimate",
     "estimate_kappa",
     "KAPPA_DEFAULT",

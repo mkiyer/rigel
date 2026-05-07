@@ -152,7 +152,13 @@ class TestPipelineWithGdna:
     def test_pi_pool_elevated(self, _contaminated):
         pr, _, _ = _contaminated
         summary = pr.calibration.to_summary_dict()
-        assert float(summary["mean_pi_gdna"]) > 0.05
+        # Synthetic genome regions (200-2000bp) are mostly smaller than
+        # the gDNA FL mean (350bp), so contained-L_eff is small or zero
+        # for many regions; pi_pool is biased low on this fixture under
+        # the FL-PMF containment denominator (which is correct on
+        # real-data genomes where intergenic/intron spans ≫ FL).
+        # See docs/calibration/density_eff_length_fix_2026_05.md.
+        assert float(summary["mean_pi_gdna"]) > 0.01
 
     def test_estimator_attributes_gdna(self, _contaminated):
         pr, _, _ = _contaminated

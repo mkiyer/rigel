@@ -34,6 +34,7 @@ logger = logging.getLogger("gdna_sweep")
 # ── rigel imports ──────────────────────────────────────────────────────────
 from rigel.config import EMConfig, PipelineConfig, BamScanConfig, CalibrationConfig
 from rigel.pipeline import run_pipeline
+from rigel.calibration.density_global import estimate_global_gdna_fragments
 from rigel.sim import Scenario, SimConfig
 from rigel.sim.reads import GDNAConfig
 
@@ -120,6 +121,10 @@ class SweepRow:
     em_gdna_count: float
     em_gdna_rate: float
 
+    # Global gDNA (calibration density projection)
+    gdna_global_count: float
+    gdna_global_rate: float
+
     # Per-transcript EM
     em_tx_multi_count: float
     em_tx_multi_tpm: float
@@ -133,7 +138,9 @@ class SweepRow:
     # Errors
     mrna_count_error: float   # (estimated - truth) / truth
     gdna_count_error: float   # (estimated - truth) / truth  (NaN if truth=0)
-    gdna_rate_error: float    # absolute: estimated_rate - true_rate
+    gdna_global_error: float  # (global_projected - truth) / truth
+    gdna_rate_error: float    # absolute: em_rate - true_rate
+    gdna_global_rate_error: float  # absolute: global_rate - true_rate
 
 
 # ── Run one scenario ──────────────────────────────────────────────────────
@@ -182,7 +189,7 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
     logger.info(f"  Running rigel pipeline...")
     config = PipelineConfig(
         em=EMConfig(seed=SEED, mode="vbem"),
-        scan=BamScanConfig(sj_strand_tag="ts"),
+        scan=BamScanConfig(sj_strand_tag="auto"),
         calibration=CalibrationConfig(),
     )
     pr = run_pipeline(result.bam_path, result.index, config=config)
@@ -214,6 +221,15 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
     em_total = em_mrna + em_nrna + em_gdna
     em_gdna_rate = em_gdna / em_total if em_total > 0 else 0.0
 
+    # Global projected gDNA (from calibration densities over full genome)
+    region_df = getattr(result.index, "region_df", None)
+    if region_df is not None and len(region_df) > 0:
+        gdna_global = estimate_global_gdna_fragments(cal.global_densities, region_df)
+    else:
+        gdna_global = em_gdna
+    gdna_global_total = em_mrna + em_nrna + gdna_global
+    gdna_global_rate = gdna_global / gdna_global_total if gdna_global_total > 0 else 0.0
+
     # Locus-level priors
     alpha_gdna = loci_df["alpha_gdna"].tolist() if "alpha_gdna" in loci_df.columns else []
     alpha_rna = loci_df["alpha_rna"].tolist() if "alpha_rna" in loci_df.columns else []
@@ -222,7 +238,9 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
     mrna_truth = sum(gt_mrna.values())
     mrna_error = (em_mrna - mrna_truth) / mrna_truth if mrna_truth > 0 else float("nan")
     gdna_error = (em_gdna - gt_gdna) / gt_gdna if gt_gdna > 0 else float("nan")
+    gdna_global_error = (gdna_global - gt_gdna) / gt_gdna if gt_gdna > 0 else float("nan")
     gdna_rate_err = em_gdna_rate - gdna_rate_truth
+    gdna_global_rate_err = gdna_global_rate - gdna_rate_truth
 
     # ── Save per-scenario detail ──────────────────────────────────────
     quant_df.to_csv(work_dir / "quant.tsv", sep="\t", index=False)
@@ -248,7 +266,8 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
 
     logger.info(
         f"  Pipeline: mRNA_em={em_mrna:.1f} gDNA_em={em_gdna:.1f} "
-        f"rate_est={em_gdna_rate:.4f} rate_true={gdna_rate_truth:.4f}"
+        f"gDNA_global={gdna_global:.1f} "
+        f"rate_global={gdna_global_rate:.4f} rate_true={gdna_rate_truth:.4f}"
     )
 
     return SweepRow(
@@ -286,6 +305,9 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
         em_gdna_count=em_gdna,
         em_gdna_rate=em_gdna_rate,
 
+        gdna_global_count=gdna_global,
+        gdna_global_rate=gdna_global_rate,
+
         em_tx_multi_count=em_tx_multi_count,
         em_tx_multi_tpm=em_tx_multi_tpm,
         em_tx_single_count=em_tx_single_count,
@@ -296,7 +318,9 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
 
         mrna_count_error=mrna_error,
         gdna_count_error=gdna_error,
+        gdna_global_error=gdna_global_error,
         gdna_rate_error=gdna_rate_err,
+        gdna_global_rate_error=gdna_global_rate_err,
     )
 
 
@@ -399,17 +423,20 @@ def deep_analysis(df: pd.DataFrame, outdir: Path) -> str:
     lines.append(hr)
     lines.append(
         f"{'gDNA_frac':>10} {'mRNA_em':>10} {'mRNA_true':>10} {'mRNA_err%':>10} "
-        f"{'gDNA_em':>10} {'gDNA_true':>10} {'gDNA_err%':>10} "
-        f"{'rate_em':>8} {'rate_true':>9} {'Δrate':>8}"
+        f"{'gDNA_em':>10} {'gDNA_glob':>10} {'gDNA_true':>10} "
+        f"{'em_err%':>8} {'glob_err%':>10} "
+        f"{'rate_glob':>10} {'rate_true':>10} {'Δrate':>8}"
     )
     for _, r in df.iterrows():
         mrna_err_pct = f"{r.mrna_count_error * 100:+.2f}" if not np.isnan(r.mrna_count_error) else "N/A"
         gdna_err_pct = f"{r.gdna_count_error * 100:+.2f}" if not np.isnan(r.gdna_count_error) else "N/A"
+        gdna_glob_err_pct = f"{r.gdna_global_error * 100:+.2f}" if not np.isnan(r.gdna_global_error) else "N/A"
         lines.append(
             f"{r.gdna_fraction:>10.2f} {r.em_mrna_count:>10.1f} {r.n_rna_truth:>10} "
-            f"{mrna_err_pct:>10} {r.em_gdna_count:>10.1f} {r.n_gdna_truth:>10} "
-            f"{gdna_err_pct:>10} {r.em_gdna_rate:>8.4f} "
-            f"{r.gdna_rate_truth:>9.4f} {r.gdna_rate_error:>+8.4f}"
+            f"{mrna_err_pct:>10} {r.em_gdna_count:>10.1f} {r.gdna_global_count:>10.1f} "
+            f"{r.n_gdna_truth:>10} {gdna_err_pct:>8} {gdna_glob_err_pct:>10} "
+            f"{r.gdna_global_rate:>10.4f} {r.gdna_rate_truth:>10.4f} "
+            f"{r.gdna_global_rate_error:>+8.4f}"
         )
 
     # ── 7. Per-transcript breakdown ───────────────────────────────────
@@ -513,14 +540,20 @@ def deep_analysis(df: pd.DataFrame, outdir: Path) -> str:
     if len(has_gdna) > 0:
         mrna_errs = has_gdna["mrna_count_error"].dropna()
         gdna_errs = has_gdna["gdna_count_error"].dropna()
+        gdna_glob_errs = has_gdna["gdna_global_error"].dropna()
         rate_errs = has_gdna["gdna_rate_error"].abs()
+        glob_rate_errs = has_gdna["gdna_global_rate_error"].abs()
 
-        lines.append(f"  Mean |mRNA count error|:  {mrna_errs.abs().mean()*100:.2f}%")
-        lines.append(f"  Max  |mRNA count error|:  {mrna_errs.abs().max()*100:.2f}%")
-        lines.append(f"  Mean |gDNA count error|:  {gdna_errs.abs().mean()*100:.2f}%")
-        lines.append(f"  Max  |gDNA count error|:  {gdna_errs.abs().max()*100:.2f}%")
-        lines.append(f"  Mean |gDNA rate error|:   {rate_errs.mean():.4f}")
-        lines.append(f"  Max  |gDNA rate error|:   {rate_errs.max():.4f}")
+        lines.append(f"  Mean |mRNA count error|:        {mrna_errs.abs().mean()*100:.2f}%")
+        lines.append(f"  Max  |mRNA count error|:        {mrna_errs.abs().max()*100:.2f}%")
+        lines.append(f"  Mean |gDNA count error (EM)|:   {gdna_errs.abs().mean()*100:.2f}%")
+        lines.append(f"  Max  |gDNA count error (EM)|:   {gdna_errs.abs().max()*100:.2f}%")
+        lines.append(f"  Mean |gDNA count error (glob)|: {gdna_glob_errs.abs().mean()*100:.2f}%")
+        lines.append(f"  Max  |gDNA count error (glob)|: {gdna_glob_errs.abs().max()*100:.2f}%")
+        lines.append(f"  Mean |gDNA rate error (EM)|:    {rate_errs.mean():.4f}")
+        lines.append(f"  Max  |gDNA rate error (EM)|:    {rate_errs.max():.4f}")
+        lines.append(f"  Mean |gDNA rate error (glob)|:  {glob_rate_errs.mean():.4f}")
+        lines.append(f"  Max  |gDNA rate error (glob)|:  {glob_rate_errs.max():.4f}")
 
     zero_gdna = df[df.gdna_fraction == 0.0]
     if len(zero_gdna) > 0:

@@ -30,6 +30,9 @@ def _make_locus(
     """Build CSR arrays from a list of units and call the C++ solver.
 
     Each unit is a list of (comp_idx, log_lik, coverage_wt, tx_start, tx_end).
+    The ``tx_start``/``tx_end`` fields are accepted for backwards-compatible
+    test ergonomics but are no longer consumed by the solver — the EM uses
+    per-component effective lengths instead.
 
     Returns (theta, alpha, em_totals) as numpy arrays.
     """
@@ -37,44 +40,39 @@ def _make_locus(
     all_t_indices = []
     all_log_liks = []
     all_cov_wts = []
-    all_tx_starts = []
-    all_tx_ends = []
     offsets = [0]
 
     for unit in units:
-        for comp_idx, ll, cw, txs, txe in unit:
+        for comp_idx, ll, cw, _txs, _txe in unit:
             all_t_indices.append(comp_idx)
             all_log_liks.append(ll)
             all_cov_wts.append(cw)
-            all_tx_starts.append(txs)
-            all_tx_ends.append(txe)
         offsets.append(len(all_t_indices))
 
     offsets_arr = np.array(offsets, dtype=np.int64)
     t_indices_arr = np.array(all_t_indices, dtype=np.int32)
     log_liks_arr = np.array(all_log_liks, dtype=np.float64)
     cov_wts_arr = np.array(all_cov_wts, dtype=np.float64)
-    tx_starts_arr = np.array(all_tx_starts, dtype=np.int32)
-    tx_ends_arr = np.array(all_tx_ends, dtype=np.int32)
 
-    if bias_profiles is None:
-        # Default: large profiles so bias correction is ~0
-        bias_profiles = np.full(n_components, 100_000, dtype=np.int64)
     if unambig_totals is None:
         unambig_totals = np.zeros(n_components, dtype=np.float64)
     if prior_eligible is None:
         prior_eligible = np.ones(n_components, dtype=np.float64)
 
-    eff_lens = np.ones(n_components, dtype=np.float64)
+    # Per-component effective length.  Default is 1.0 so log L̃ = 0,
+    # matching the historical "no length correction" behaviour expected
+    # by the existing tests.  Tests can pass ``bias_profiles`` (legacy
+    # name) to set non-trivial effective lengths instead.
+    if bias_profiles is None:
+        eff_lens = np.ones(n_components, dtype=np.float64)
+    else:
+        eff_lens = np.asarray(bias_profiles, dtype=np.float64)
 
     theta, alpha, em_totals = run_locus_em_native(
         offsets_arr,
         t_indices_arr,
         log_liks_arr,
         cov_wts_arr,
-        tx_starts_arr,
-        tx_ends_arr,
-        bias_profiles,
         unambig_totals,
         eff_lens,
         prior_eligible,

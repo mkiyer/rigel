@@ -292,7 +292,12 @@ class AbundanceEstimator:
             (total_gdna_em, locus_mrna, locus_gdna[, winner_tid, winner_post, n_candidates])
         """
         n_transcripts = self.num_transcripts
-        t_lengths = index.t_df["length"].values.astype(np.int64)
+        # Pass per-transcript FL-marginal effective length L̃_t to the
+        # C++ EM.  See effective_length_consistency_2026_05.md for the
+        # derivation; the EM uses log L̃_t per component inside the E-step
+        # (and inside assign_posteriors) instead of any per-fragment
+        # length correction.
+        t_eff_lens = np.ascontiguousarray(self._t_eff_len, dtype=np.float64)
 
         if self._em_posterior_sum is None:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
@@ -310,7 +315,7 @@ class AbundanceEstimator:
                 np.ascontiguousarray(alpha_gdna, dtype=np.float64),
                 np.ascontiguousarray(alpha_rna, dtype=np.float64),
                 self.unambig_counts,
-                t_lengths,
+                t_eff_lens,
                 self.em_counts,
                 self.gdna_locus_counts,
                 self._em_posterior_sum,
@@ -672,7 +677,8 @@ class AbundanceEstimator:
         n_nrna_entities : int, nRNA (is_nrna) transcripts in locus
         n_genes : int
         n_em_fragments : int, ambiguous fragments entering EM
-        mrna : float, mRNA count from locus EM
+        count_unambig : float, unambiguous (splice-confirmed) mRNA fragments
+        mrna : float, total mRNA count (EM + unambig)
         nrna : float, synthetic nRNA count (additive with mrna + gdna)
         gdna : float, gDNA count from locus EM
         total : float, mrna + nrna + gdna
@@ -687,6 +693,7 @@ class AbundanceEstimator:
             "n_nrna_entities",
             "n_genes",
             "n_em_fragments",
+            "count_unambig",
             "mrna",
             "nrna",
             "gdna",
@@ -701,6 +708,7 @@ class AbundanceEstimator:
 
         # Pre-compute per-transcript counts and masks
         t_total = self.t_counts.sum(axis=1)
+        t_unambig = self.unambig_counts.sum(axis=1)
         if index is not None:
             is_nrna = index.t_df["is_nrna"].values
             is_synthetic = index.t_df["is_synthetic"].values
@@ -722,24 +730,28 @@ class AbundanceEstimator:
             #
             # To produce user-facing, non-overlapping columns:
             #   nrna       = sum over synthetic transcripts only
-            #   mrna       = ``rna_total`` - nrna   (annotated only)
+            #   mrna       = ``rna_total`` - nrna + unambig (annotated only)
             #   total      = mrna + nrna + gdna
-            #              = ``rna_total`` + gdna
-            #              = n_em_fragments (modulo discrete rounding)
             # n_nrna_entities: count all nRNA entities (informational)
             syn_in_locus = in_locus & is_synthetic
+            annot_in_locus = in_locus & ~is_synthetic
             nrna = float(t_total[syn_in_locus].sum())
             n_nrna = int((in_locus & is_nrna).sum())
             n_syn = int(syn_in_locus.sum())
             n_annot = int(in_locus.sum()) - n_syn
 
-            rna_total = float(r["rna_total"])  # annotated mRNA + synthetic nRNA
-            mrna = max(rna_total - nrna, 0.0)    # annotated only
+            # Unambiguous counts for annotated transcripts in this locus
+            # (splice-confirmed fragments that bypass EM).
+            unambig_mrna = float(t_unambig[annot_in_locus].sum())
+
+            rna_total = float(r["rna_total"])  # EM: annotated mRNA + synthetic nRNA
+            mrna_em = max(rna_total - nrna, 0.0)    # EM-only annotated mRNA
+            mrna = mrna_em + unambig_mrna            # total mRNA = EM + unambig
             gdna = float(r["gdna"])
-            total = rna_total + gdna                   # \u2248 n_em_fragments
+            total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
             # Per-locus Dirichlet prior fraction computed by
-            # compute_locus_priors(): \u03b3_\u2113 = \u03b1_gDNA / (\u03b1_gDNA + \u03b1_RNA).
+            # compute_locus_priors(): γ_ℓ = α_gDNA / (α_gDNA + α_RNA).
             alpha_g = float(r.get("alpha_gdna", 0.0))
             alpha_r = float(r.get("alpha_rna", 0.0))
             prior_sum = alpha_g + alpha_r
@@ -753,6 +765,7 @@ class AbundanceEstimator:
                     "n_nrna_entities": n_nrna,
                     "n_genes": r["n_genes"],
                     "n_em_fragments": r["n_em_fragments"],
+                    "count_unambig": unambig_mrna,
                     "mrna": mrna,
                     "nrna": nrna,
                     "gdna": gdna,

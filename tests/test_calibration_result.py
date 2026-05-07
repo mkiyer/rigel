@@ -54,7 +54,14 @@ def _kappa_zero() -> KappaEstimate:
     return KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason="")
 
 
-def _gdt(fl_mean: float = 200.0) -> GlobalDensityTable:
+def _delta_fl(length: int, *, max_size: int = 1024):
+    from rigel.frag_length_model import FragmentLengthModel
+    counts = np.zeros(max_size + 1, dtype=np.float64)
+    counts[length] = 10_000.0
+    return FragmentLengthModel.from_counts(counts, max_size=max_size)
+
+
+def _gdt(fl_mean: int = 200) -> GlobalDensityTable:
     return GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
             type="INTERGENIC", rho=0.0, n_fragments=0, eff_length_bp=0.0,
@@ -68,7 +75,7 @@ def _gdt(fl_mean: float = 200.0) -> GlobalDensityTable:
             type="EXON-INTRON", rho=0.0, n_fragments=0, eff_length_bp=0.0,
             n_regions_used=0, kappa=_kappa_zero(),
         ),
-        gdna_fl_mean=fl_mean,
+        gdna_fl=_delta_fl(fl_mean),
     )
 
 

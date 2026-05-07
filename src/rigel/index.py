@@ -117,6 +117,45 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     return ref_lengths
 
 
+def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
+    """Raise ``ValueError`` if two transcripts share an identical exon structure.
+
+    Transcripts are considered duplicates when they have the same reference
+    sequence, strand, and bit-identical sorted ``(start, end)`` exon tuple.
+    Such transcripts are mathematically unidentifiable from any read data
+    and must be resolved upstream (collapsed in the GTF) before indexing.
+
+    Transcripts that share an intron chain but differ in 5'/3' UTR
+    boundaries are *not* duplicates and pass this check.
+    """
+    from collections import defaultdict
+
+    sig_to_tids: dict[tuple, list[str]] = defaultdict(list)
+    for t in transcripts:
+        if not t.exons:
+            continue
+        exon_tuple = tuple(sorted((iv.start, iv.end) for iv in t.exons))
+        key = (t.ref, int(t.strand), exon_tuple)
+        sig_to_tids[key].append(t.t_id or f"<t_index={t.t_index}>")
+
+    duplicates = {k: v for k, v in sig_to_tids.items() if len(v) > 1}
+    if not duplicates:
+        return
+
+    examples = []
+    for (ref, strand, _exons), tids in list(duplicates.items())[:5]:
+        examples.append(f"  ({ref}, strand={strand}): {tids}")
+    n_groups = len(duplicates)
+    n_tx = sum(len(v) for v in duplicates.values())
+    raise ValueError(
+        f"GTF contains {n_groups} group(s) totalling {n_tx} transcript(s) "
+        f"with identical exon coordinates. Such transcripts are "
+        f"mathematically unidentifiable and must be collapsed in the GTF "
+        f"before indexing.\n"
+        f"First {min(5, n_groups)} duplicate group(s):\n" + "\n".join(examples)
+    )
+
+
 def read_transcripts(
     gtf_file: str | Path,
     *,
@@ -128,10 +167,19 @@ def read_transcripts(
     (unique integer per ``g_id``). Transcripts are sorted by
     ``(ref, start, end, strand)`` so that downstream interval generation
     can process them in genomic order.
+
+    Raises
+    ------
+    ValueError
+        If the GTF contains two or more transcripts with identical
+        ``(ref, strand, sorted exon coordinates)``. See
+        :func:`_check_no_duplicate_transcripts`.
     """
     transcripts = Transcript.read_gtf(
         str(gtf_file), parse_mode=gtf_parse_mode,
     )
+
+    _check_no_duplicate_transcripts(transcripts)
 
     # Assign integer indices
     g_id_to_index: dict[str, int] = {}

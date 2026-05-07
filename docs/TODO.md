@@ -1,5 +1,10 @@
 # TODO
 
+
+
+
+
+
 # Polars migration
 
 Polars is apparently much faster than pandas. Might be ideal for rigel
@@ -9,7 +14,6 @@ Polars is apparently much faster than pandas. Might be ideal for rigel
 ### possible to serialize cgranges index? saves time and memory...
 
 ### should we "lazily" build cgranges index if only used during one stage of pipeline? for example, calibration requires cgranges index for mappability but then might not be used again. could lazily build and free, potentially decreasing overall RSS
-
 
 
 

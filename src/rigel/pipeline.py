@@ -578,8 +578,6 @@ def _run_locus_em_partitioned(
                 p.t_indices,
                 p.log_liks,
                 p.coverage_weights,
-                p.tx_starts,
-                p.tx_ends,
                 p.count_cols,
                 p.is_spliced,
                 p.gdna_log_liks,
@@ -873,7 +871,7 @@ def quant_from_buffer(
             index,
             calibration_payload,
             calibration.global_densities,
-            gdna_fl_mean=fl_models.gdna.mean,
+            gdna_fl=fl_models.gdna,
             c_base=c_base,
             nrna_weight=nrna_weight,
         )
@@ -916,10 +914,27 @@ def quant_from_buffer(
     _gdna_em = estimator.gdna_em_count
     stats.n_gdna_em = 0 if (math.isnan(_gdna_em) or math.isinf(_gdna_em)) else int(_gdna_em)
 
+    # Global gDNA estimate from calibration densities (projected over
+    # the full genome, including exonic regions invisible to direct
+    # classification).
+    region_df = getattr(index, "region_df", None)
+    if region_df is not None and len(region_df) > 0 and calibration is not None:
+        from rigel.calibration.density_global import estimate_global_gdna_fragments
+
+        gdna_global = estimate_global_gdna_fragments(
+            calibration.global_densities, region_df
+        )
+    else:
+        gdna_global = float(_gdna_em)
+    stats.n_gdna_global = int(gdna_global) if not (math.isnan(gdna_global) or math.isinf(gdna_global)) else 0
+
+    total_frags = float(estimator.unambig_counts.sum() + estimator.em_counts.sum()) + gdna_global
+    gdna_rate_global = gdna_global / total_frags if total_frags > 0 else 0.0
+
     logger.info(
-        f"[gDNA] total={estimator.gdna_em_count:.0f} "
-        f"(EM={_gdna_em:.0f}), "
-        f"contamination rate={estimator.gdna_contamination_rate:.2%}"
+        f"[gDNA] em_locus={_gdna_em:.0f}, "
+        f"global_projected={gdna_global:.0f}, "
+        f"contamination_rate={gdna_rate_global:.2%}"
     )
 
     return estimator, calibration

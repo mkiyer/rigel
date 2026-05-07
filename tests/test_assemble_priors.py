@@ -34,7 +34,14 @@ def _kappa_zero() -> KappaEstimate:
     return KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason="")
 
 
-def _gdt_zero(fl_mean: float = 200.0) -> GlobalDensityTable:
+def _delta_fl(length: int, *, max_size: int = 1024):
+    from rigel.frag_length_model import FragmentLengthModel
+    counts = np.zeros(max_size + 1, dtype=np.float64)
+    counts[length] = 10_000.0
+    return FragmentLengthModel.from_counts(counts, max_size=max_size)
+
+
+def _gdt_zero(fl_mean: int = 200) -> GlobalDensityTable:
     return GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
             type="INTERGENIC", rho=0.0, n_fragments=0, eff_length_bp=0.0,
@@ -48,7 +55,7 @@ def _gdt_zero(fl_mean: float = 200.0) -> GlobalDensityTable:
             type="EXON-INTRON", rho=0.0, n_fragments=0, eff_length_bp=0.0,
             n_regions_used=0, kappa=_kappa_zero(),
         ),
-        gdna_fl_mean=fl_mean,
+        gdna_fl=_delta_fl(fl_mean),
     )
 
 
@@ -193,15 +200,16 @@ def test_assemble_priors_alpha_scaling():
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
     ml = _ml_single(0, [0], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], locus)
     em = _make_em(np.zeros(10, dtype=np.int32))   # all anchor on transcript 0
-    gdt = _gdt_zero(fl_mean=200.0)
+    gdt = _gdt_zero(fl_mean=200)
 
     pt = assemble_priors(
         multi_loci=[ml], em_data=em, index=index,
         payload=payload, global_densities=gdt,
-        gdna_fl_mean=200.0, c_base=10.0,
+        gdna_fl=_delta_fl(200), c_base=10.0,
     )
     assert isinstance(pt, PriorTable)
-    # n_gdna = ρ_loco · L_eff = (5 / 1199) · 1199 = 5; n_obs = 10 ⇒ pi = 0.5.
+    # n_gdna = ρ_loco · L_eff_contained = 5 (κ=0 ⇒ cancels);
+    # n_obs = 10 ⇒ pi = 0.5.
     assert pt.multi_locus_priors[0].pi_gdna == pytest.approx(0.5)
     assert pt.alpha_gdna[0] == pytest.approx(10.0 * 0.5)
     assert pt.alpha_rna[0] == pytest.approx(10.0 * 0.5)

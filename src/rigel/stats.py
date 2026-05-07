@@ -77,6 +77,7 @@ class PipelineStats:
 
     # --- gDNA contamination ---
     n_gdna_em: int = 0
+    n_gdna_global: int = 0
 
     @property
     def n_intergenic(self) -> int:
@@ -90,8 +91,8 @@ class PipelineStats:
 
     @property
     def n_gdna_total(self) -> int:
-        """Total fragments assigned to gDNA (intergenic + EM)."""
-        return self.n_gdna_unambig + self.n_gdna_em
+        """Total gDNA estimate: calibration-projected global estimate."""
+        return self.n_gdna_global if self.n_gdna_global > 0 else (self.n_gdna_unambig + self.n_gdna_em)
 
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary.

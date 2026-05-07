@@ -1,0 +1,62 @@
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  Synthetic Mini-Genome Simulation Config                   ║
+# ╚═════════════════════════════════════════════════════════════╝
+#
+# 10 conditions: 2 strand × 5 gDNA fractions
+# 1M RNA fragments per condition + oracle BAM
+#
+# Usage:
+#   # First generate genome:
+#   python scripts/sim/generate_synthetic_genome.py -o <outdir>
+#   # Then simulate reads:
+#   python scripts/sim/sim.py --config scripts/sim/configs/synthetic_mini.yaml
+
+genome: PLACEHOLDER  # set by wrapper script
+gtf: PLACEHOLDER     # set by wrapper script
+outdir: PLACEHOLDER  # set by wrapper script
+
+transcript_filter: all
+
+# ── Simulation parameters ─────────────────────────────────────
+simulation:
+  n_rna_fragments: 1_000_000
+  sim_seed: 42
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 1
+
+# ── Abundance model ───────────────────────────────────────────
+abundance:
+  mode: random
+  seed: 42
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5   # Half of transcripts are not expressed
+
+# ── gDNA contamination ────────────────────────────────────────
+gdna:
+  rates: [0.0, 0.1, 0.5, 1.0, 2.0]
+  rate_labels: [none, low, med, equal, high]
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+# ── Strand specificity ───────────────────────────────────────
+# 0.99 = strand-specific, 0.50 = unstranded
+strand_specificities: [0.99, 0.50]
+
+# ── Nascent RNA ───────────────────────────────────────────────
+# No nRNA spike-in for this sweep (testing gDNA/strand only)
+nrna:
+  fracs:
+    - [0.0, 0.0]
+  frac_labels: [none]
+
+# ── Output options ────────────────────────────────────────────
+oracle_bam: true
+verbose: true

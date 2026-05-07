@@ -365,6 +365,8 @@ class FragmentLengthModel:
     def compute_all_transcript_eff_lens(
         self,
         lengths: np.ndarray,
+        *,
+        min_value: float = 1.0,
     ) -> np.ndarray:
         """Vectorized analytical effective length for an array of
         transcript exonic lengths.
@@ -386,11 +388,18 @@ class FragmentLengthModel:
         ----------
         lengths : np.ndarray
             1-D array of transcript exonic (spliced) lengths.
+        min_value : float, default 1.0
+            Lower floor applied to the result. Default ``1.0`` matches
+            salmon's transcript-scoring convention (prevents log(0)
+            for very short transcripts). Pass ``0.0`` when the value
+            is used as a Poisson-rate denominator (gDNA density
+            estimation), where a zero-span region must contribute
+            zero effective length.
 
         Returns
         -------
         np.ndarray
-            float64 array of effective lengths, each ≥ 1.0.
+            float64 array of effective lengths, each ≥ ``min_value``.
         """
         lengths = np.asarray(lengths, dtype=np.int64)
         probs = self._normalized_probs()
@@ -412,9 +421,7 @@ class FragmentLengthModel:
             p_overflow = float(probs[self.max_size])
             eff[overflow_mask] += p_overflow * (lengths[overflow_mask] - self.max_size)
 
-        # Floor at 1.0 (same as salmon: prevents log(0) for very short
-        # transcripts that are shorter than virtually all fragments)
-        np.maximum(eff, 1.0, out=eff)
+        np.maximum(eff, min_value, out=eff)
         return eff
 
     # ------------------------------------------------------------------

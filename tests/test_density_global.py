@@ -1,10 +1,11 @@
 """Tests for ``rigel.calibration.density_global.compute_global_densities``.
 
 Pins the three locked formulas (INTERGENIC, INTRON, EXON-INTRON), the
-overlap geometry $L_{\\mathrm{eff}} = L + \\bar L_{gDNA} - 1$, and the
+FL-PMF-weighted containment effective length
+:math:`\\sum_\\ell h(\\ell)\\,\\max(0, L - \\ell + 1)`, and the
 schema/validation contract.
 
-See ``docs/calibration/m4_implementation_plan.md`` §5.1.
+See ``docs/calibration/density_eff_length_fix_2026_05.md``.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from rigel.calibration.density_global import (
     GlobalDensityTable,
     GlobalGdnaDensity,
     compute_global_densities,
-    l_eff_overlap,
+    l_eff_contained,
 )
 from rigel.calibration.regions import RegionType
 from rigel.calibration.scan_payload import (
@@ -26,11 +27,33 @@ from rigel.calibration.scan_payload import (
     MASK_N_STATES,
     CalibrationScanPayload,
 )
+from rigel.frag_length_model import FragmentLengthModel
 
 
 _MASK_EXON = 0b001
 _MASK_INTRON = 0b010
 _MASK_INTERGENIC = 0b100
+
+
+def _delta_fl(length: int, *, max_size: int = 1024) -> FragmentLengthModel:
+    """FL model with a sharp peak at ``length``.
+
+    The 10_000 counts dominate Laplace smoothing but do not eliminate
+    it; tests use :func:`_oracle_leff` to compute the exact expected
+    L_eff under the same smoothed PMF that the production code sees.
+    """
+    counts = np.zeros(max_size + 1, dtype=np.float64)
+    counts[length] = 10_000.0
+    return FragmentLengthModel.from_counts(counts, max_size=max_size)
+
+
+def _oracle_leff(spans, gdna_fl: FragmentLengthModel) -> np.ndarray:
+    """Ground-truth L_eff using the FL model's own eCDF — the
+    contract test compares ``compute_global_densities`` against this.
+    """
+    return gdna_fl.compute_all_transcript_eff_lens(
+        np.asarray(spans, dtype=np.int64), min_value=0.0
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,24 +125,23 @@ class TestHandCounted:
         d["global_counts"][_MASK_EXON | _MASK_INTRON] = 7    # boundary fragments
 
         payload = _wrap_payload(d)
-        fl_mean = 200.0
-        out = compute_global_densities(df, payload, gdna_fl_mean=fl_mean)
+        fl_mean = 200
+        gdna_fl = _delta_fl(fl_mean)
+        out = compute_global_densities(df, payload, gdna_fl=gdna_fl)
 
-        # INTERGENIC: 50 frags / (1000 + 200 - 1) bp
-        leff_ig = 1000.0 + fl_mean - 1.0
+        leff_ig = float(_oracle_leff([1000], gdna_fl)[0])
         assert out.intergenic.n_fragments == 50
         assert out.intergenic.eff_length_bp == pytest.approx(leff_ig)
         assert out.intergenic.rho == pytest.approx(50.0 / leff_ig)
-        # INTRON: 20 / (1000 + 200 - 1)
-        leff_in = 1000.0 + fl_mean - 1.0
+        leff_in = leff_ig
         assert out.intron.n_fragments == 20
         assert out.intron.eff_length_bp == pytest.approx(leff_in)
         assert out.intron.rho == pytest.approx(20.0 / leff_in)
-        # EXON-INTRON: u_R contributes only because bf_right is True.
-        # Numerator = 7 * 1; denominator = (0 + 1) * 200 = 200.
+        # EXON-INTRON: capture-window geometry uses scalar mean
+        # (unchanged by R1). Numerator = 7 * 1; denominator = 1 * mean.
         assert out.exon_intron.n_fragments == 7
-        assert out.exon_intron.eff_length_bp == pytest.approx(200.0)
-        assert out.exon_intron.rho == pytest.approx(7.0 / 200.0)
+        assert out.exon_intron.eff_length_bp == pytest.approx(float(gdna_fl.mean))
+        assert out.exon_intron.rho == pytest.approx(7.0 / float(gdna_fl.mean))
         assert out.exon_intron.n_regions_used == 1
 
     def test_pure_mrna_library(self):
@@ -140,7 +162,7 @@ class TestHandCounted:
         d["global_counts"][_MASK_EXON] = 100
 
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=350.0)
+        out = compute_global_densities(df, payload, gdna_fl=_delta_fl(350))
         assert out.intergenic.rho == 0.0
         assert out.intron.rho == 0.0
         assert out.exon_intron.rho == 0.0
@@ -163,10 +185,11 @@ class TestHandCounted:
         d["per_region_counts"][1, _MASK_INTRON] = 70
         d["global_counts"][_MASK_INTRON] = 100
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=300.0)
+        gdna_fl = _delta_fl(300)
+        out = compute_global_densities(df, payload, gdna_fl=gdna_fl)
         assert out.intergenic.rho == 0.0
         assert out.intron.n_fragments == 100
-        leff = (1000.0 + 300.0 - 1.0) * 2
+        leff = float(_oracle_leff([1000], gdna_fl)[0]) * 2
         assert out.intron.rho == pytest.approx(100.0 / leff)
         assert out.exon_intron.rho == 0.0
 
@@ -182,7 +205,7 @@ class TestExonIntronEligibility:
         d["u_left"][0] = 99
         d["u_right"][0] = 99
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=200.0)
+        out = compute_global_densities(df, payload, gdna_fl=_delta_fl(200))
         assert out.exon_intron.rho == 0.0
         assert out.exon_intron.n_regions_used == 0
         assert out.exon_intron.eff_length_bp == 0.0
@@ -198,10 +221,11 @@ class TestExonIntronEligibility:
         d["u_left"][0] = 5
         d["u_right"][0] = 999     # ineligible side; must be ignored
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=200.0)
+        gdna_fl = _delta_fl(200)
+        out = compute_global_densities(df, payload, gdna_fl=gdna_fl)
         assert out.exon_intron.n_fragments == 5
-        assert out.exon_intron.eff_length_bp == pytest.approx(200.0)
-        assert out.exon_intron.rho == pytest.approx(5.0 / 200.0)
+        assert out.exon_intron.eff_length_bp == pytest.approx(float(gdna_fl.mean))
+        assert out.exon_intron.rho == pytest.approx(5.0 / float(gdna_fl.mean))
 
 
 class TestEmptyPerType:
@@ -217,26 +241,50 @@ class TestEmptyPerType:
         ])
         d = _empty_payload(2)
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=200.0)
+        out = compute_global_densities(df, payload, gdna_fl=_delta_fl(200))
         assert out.intron.rho == 0.0
         assert out.intron.n_regions_used == 0
         assert out.intron.eff_length_bp == 0.0
 
 
 class TestLeffGeometryLock:
-    """The most important test in this file: pins the overlap formula."""
+    """The most important test in this file: pins the FL-PMF
+    containment formula — ``l_eff_contained`` is a wrapper around
+    :meth:`FragmentLengthModel.compute_all_transcript_eff_lens` with
+    ``min_value=0.0`` (no salmon transcript-eff floor).
+    """
 
-    def test_l_eff_overlap_helper(self):
-        # 100 bp region, FL=350 → 100 + 350 - 1 = 449.
-        assert l_eff_overlap(100.0, 350.0) == pytest.approx(449.0)
-        # vector form
-        spans = np.array([100.0, 200.0, 50.0])
-        out = l_eff_overlap(spans, 350.0)
-        np.testing.assert_allclose(out, np.array([449.0, 549.0, 399.0]))
+    def test_l_eff_contained_matches_fl_model(self):
+        gdna_fl = _delta_fl(200)
+        spans = np.array([1000, 200, 50, 0])
+        out = l_eff_contained(spans, gdna_fl)
+        oracle = _oracle_leff(spans, gdna_fl)
+        np.testing.assert_allclose(out, oracle)
+
+    def test_l_eff_contained_floors_at_zero(self):
+        # Span of 0 must give L_eff == 0 (not the salmon 1.0 floor).
+        gdna_fl = _delta_fl(200)
+        out = l_eff_contained(np.array([0]), gdna_fl)
+        assert out[0] == 0.0
+
+    def test_l_eff_contained_two_point_distribution(self):
+        # Half-and-half FL between 100 and 300; for span L the
+        # expected L_eff is approximately 0.5*(L-99) + 0.5*(L-299).
+        # The exact value (with Laplace smoothing) is the same on both
+        # sides via _oracle_leff; this test pins that the production
+        # path agrees with the FL model's own computation.
+        counts = np.zeros(1025, dtype=np.float64)
+        counts[100] = 5_000.0
+        counts[300] = 5_000.0
+        gdna_fl = FragmentLengthModel.from_counts(counts, max_size=1024)
+        spans = np.array([1000])
+        out = l_eff_contained(spans, gdna_fl)
+        oracle = _oracle_leff(spans, gdna_fl)
+        np.testing.assert_allclose(out, oracle)
 
     def test_pinned_through_orchestrator(self):
         df = _make_region_df([
-            {"ref_name": "chr1", "start": 0, "end": 100,
+            {"ref_name": "chr1", "start": 0, "end": 1000,
              "type": int(RegionType.INTERGENIC),
              "boundary_flux_left": False, "boundary_flux_right": False},
         ])
@@ -244,9 +292,11 @@ class TestLeffGeometryLock:
         d["per_region_counts"][0, _MASK_INTERGENIC] = 10
         d["global_counts"][_MASK_INTERGENIC] = 10
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=350.0)
-        assert out.intergenic.eff_length_bp == pytest.approx(449.0)
-        assert out.intergenic.rho == pytest.approx(10.0 / 449.0)
+        gdna_fl = _delta_fl(200)
+        out = compute_global_densities(df, payload, gdna_fl=gdna_fl)
+        expected = float(_oracle_leff([1000], gdna_fl)[0])
+        assert out.intergenic.eff_length_bp == pytest.approx(expected)
+        assert out.intergenic.rho == pytest.approx(10.0 / expected)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +314,7 @@ class TestValidation:
         d = _empty_payload(2)  # mismatched
         payload = _wrap_payload(d)
         with pytest.raises(ValueError, match="Rebuild the index"):
-            compute_global_densities(df, payload, gdna_fl_mean=200.0)
+            compute_global_densities(df, payload, gdna_fl=_delta_fl(200))
 
     def test_gdna_fl_mean_must_be_positive(self):
         df = _make_region_df([
@@ -274,10 +324,12 @@ class TestValidation:
         ])
         d = _empty_payload(1)
         payload = _wrap_payload(d)
-        with pytest.raises(ValueError, match="gdna_fl_mean"):
-            compute_global_densities(df, payload, gdna_fl_mean=0.0)
-        with pytest.raises(ValueError, match="gdna_fl_mean"):
-            compute_global_densities(df, payload, gdna_fl_mean=-1.0)
+        # Empty FL counts → mean is 0 → error.
+        empty_fl = FragmentLengthModel.from_counts(
+            np.zeros(1025, dtype=np.float64), max_size=1024
+        )
+        with pytest.raises(ValueError, match="gdna_fl.mean"):
+            compute_global_densities(df, payload, gdna_fl=empty_fl)
 
     def test_to_summary_dict_round_trip(self):
         df = _make_region_df([
@@ -289,10 +341,10 @@ class TestValidation:
         d["per_region_counts"][0, _MASK_INTERGENIC] = 5
         d["global_counts"][_MASK_INTERGENIC] = 5
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=200.0)
+        out = compute_global_densities(df, payload, gdna_fl=_delta_fl(200))
         assert isinstance(out, GlobalDensityTable)
         sd = out.to_summary_dict()
-        assert sd["gdna_fl_mean"] == 200.0
+        assert sd["gdna_fl_mean"] == pytest.approx(200.0, rel=2e-2)
         for key in ("INTERGENIC", "INTRON", "EXON-INTRON"):
             block = sd[key]
             for col in (
@@ -309,7 +361,7 @@ class TestValidation:
         ])
         d = _empty_payload(1)
         payload = _wrap_payload(d)
-        out = compute_global_densities(df, payload, gdna_fl_mean=200.0)
+        out = compute_global_densities(df, payload, gdna_fl=_delta_fl(200))
         for d_ in (out.intergenic, out.intron, out.exon_intron):
             assert isinstance(d_, GlobalGdnaDensity)
         assert out.intergenic.type == "INTERGENIC"

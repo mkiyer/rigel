@@ -593,7 +593,7 @@ def profile_stages(
                     index,
                     cal_payload,
                     calibration_obj.global_densities,
-                    gdna_fl_mean=calibration_obj.fl_models.gdna.mean,
+                    gdna_fl=calibration_obj.fl_models.gdna,
                     c_base=cal_cfg.c_base,
                 )
                 alpha_gdna = prior_table.alpha_gdna

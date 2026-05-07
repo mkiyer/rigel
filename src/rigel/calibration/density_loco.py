@@ -23,12 +23,8 @@ this formula at call sites.
 
 from __future__ import annotations
 
-# Re-export l_eff_overlap so callers don't have to import the *_global
-# module just for the L_eff arithmetic.
-from .density_global import l_eff_overlap  # noqa: F401
 
-
-__all__ = ["shrink_to_loco", "l_eff_overlap"]
+__all__ = ["shrink_to_loco"]
 
 
 def shrink_to_loco(

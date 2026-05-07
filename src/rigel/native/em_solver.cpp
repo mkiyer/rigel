@@ -321,41 +321,6 @@ static std::vector<EmEquivClass> build_equiv_classes(
 }
 
 // ================================================================
-// Bias correction (uniform fast-path)
-// ================================================================
-//
-// Applies -log(max(L - frag_len + 1, 1)) to each RNA candidate's
-// log_lik.  The gDNA row (local component == n_t) is skipped —
-// its length correction is baked into the scorer's per-fragment
-// gdna_log_liks under Option B.  Replaces Python
-// _apply_bias_correction_uniform().
-
-static void apply_bias_correction_uniform(
-    double*        log_liks,        // mutated in-place
-    const int32_t* t_indices,
-    const int32_t* tx_starts,
-    const int32_t* tx_ends,
-    const int64_t* profile_lengths, // indexed [0..n_t)
-    int32_t        n_t,
-    size_t         n_candidates)
-{
-    for (size_t i = 0; i < n_candidates; ++i) {
-        if (t_indices[i] >= n_t) continue;  // gDNA row, pre-corrected
-
-        int64_t frag_len = static_cast<int64_t>(tx_ends[i]) -
-                           static_cast<int64_t>(tx_starts[i]);
-        if (frag_len < 0) frag_len = 0;
-        if (frag_len >= MAX_FRAG_LEN) frag_len = MAX_FRAG_LEN - 1;
-
-        int64_t prof_len = profile_lengths[t_indices[i]];
-        int64_t eff_len = prof_len - frag_len + 1;
-        if (eff_len < 1) eff_len = 1;
-
-        log_liks[i] -= std::log(static_cast<double>(eff_len));
-    }
-}
-
-// ================================================================
 // Kahan summation helper for numerical stability
 // ================================================================
 //
@@ -1114,9 +1079,6 @@ run_locus_em_native(
     i32_1d t_indices,
     f64_1d_mut log_liks,        // mutated in-place by bias correction
     f64_1d coverage_wts,
-    i32_1d tx_starts,
-    i32_1d tx_ends,
-    i64_1d bias_profiles,
     // Per-component vectors
     f64_1d unambig_totals_arr,
     f64_1d effective_lens,
@@ -1141,9 +1103,6 @@ run_locus_em_native(
     const int32_t*  ti_ptr   = t_indices.data();
     double*         ll_ptr   = log_liks.data();
     const double*   cw_ptr   = coverage_wts.data();
-    const int32_t*  txs_ptr  = tx_starts.data();
-    const int32_t*  txe_ptr  = tx_ends.data();
-    const int64_t*  bp_ptr   = bias_profiles.data();
     const double*   ut_ptr   = unambig_totals_arr.data();
     const double*   el_ptr   = effective_lens.data();
     const double*   pe_ptr   = prior_eligible.data();
@@ -1151,16 +1110,10 @@ run_locus_em_native(
     // Copy unambig_totals (we need a mutable copy)
     std::vector<double> unambig_totals(ut_ptr, ut_ptr + nc);
 
-    // 1. Apply bias correction (uniform fast-path).
-    // This non-partitioned path predates the Option B gDNA architecture
-    // and is used only by tests / legacy callers. It has no gDNA-row
-    // convention, so every component carries a bias profile: pass
-    // nc as the RNA-component count so no row is skipped.
-    if (n_candidates > 0) {
-        apply_bias_correction_uniform(
-            ll_ptr, ti_ptr, txs_ptr, txe_ptr, bp_ptr,
-            static_cast<int32_t>(nc), n_candidates);
-    }
+    // 1. (No per-fragment bias correction.)  The EM uses
+    //    per-component log L̃_t (passed via ``effective_lens``)
+    //    inside the E-step.  This path is used only by tests /
+    //    legacy callers and does not append a gDNA component.
 
     // 2. Handle empty locus
     if (n_units == 0 || n_candidates == 0) {
@@ -1208,10 +1161,13 @@ run_locus_em_native(
         );
     }
 
-    // 3. Compute log(effective_lengths)
+    // 3. Compute log(effective_lengths) with a floor of 1.0 so that
+    //    very short transcripts cannot blow up log(0) or go negative.
     std::vector<double> log_eff_len(nc);
     for (size_t i = 0; i < nc; ++i) {
-        log_eff_len[i] = std::log(el_ptr[i]);
+        double Le = el_ptr[i];
+        if (!(Le >= 1.0)) Le = 1.0;
+        log_eff_len[i] = std::log(Le);
     }
 
     // 4. Build equivalence classes
@@ -1289,8 +1245,6 @@ struct LocalCandidate {
     int32_t local_comp;
     double  log_lik;
     double  cov_wt;
-    int32_t tx_start;
-    int32_t tx_end;
     uint8_t count_col;
 };
 
@@ -1306,8 +1260,6 @@ struct LocusSubProblem {
     std::vector<int32_t>  t_indices;    // local component indices
     std::vector<double>   log_liks;
     std::vector<double>   coverage_wts;
-    std::vector<int32_t>  tx_starts;
-    std::vector<int32_t>  tx_ends;
     std::vector<uint8_t>  count_cols;
 
     // Per-unit metadata
@@ -1317,7 +1269,7 @@ struct LocusSubProblem {
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   prior;            // [n_components]
-    std::vector<int64_t>  bias_profiles;    // [n_components]
+    std::vector<double>   log_eff_len;      // [n_components] log L̃_t (gDNA: 0)
     std::vector<double>   eligible;         // [n_components]
 
     // Local→global transcript mapping
@@ -1335,6 +1287,7 @@ struct LocusSubProblem {
 static void assign_posteriors(
     const LocusSubProblem& sub,
     const double* theta,
+    const double* log_eff_len,
     int assignment_mode,
     double min_posterior,
     SplitMix64& rng,
@@ -1370,11 +1323,14 @@ static void assign_posteriors(
     int n_units = sub.n_local_units;
     const int32_t* local_to_global = sub.local_to_global_t.data();
 
-    // Effective lengths are all 1.0, so log_eff_len = 0.
-    // log_weights = log(theta + eps)
+    // log_weights[c] = log(theta[c] + eps) - log L̃_c
+    // Subtracting log L̃_c rescales the posterior to depend on the
+    // effective concentration θ/L̃ rather than raw θ, mirroring the
+    // E-step weights used inside SQUAREM.  Must stay in sync with the
+    // E-step formulation in run_squarem(); see invariant I2.
     std::vector<double> log_weights(nc);
     for (int c = 0; c < nc; ++c) {
-        log_weights[c] = std::log(theta[c] + EM_LOG_EPSILON);
+        log_weights[c] = std::log(theta[c] + EM_LOG_EPSILON) - log_eff_len[c];
     }
 
     rna_total = 0.0;
@@ -1743,8 +1699,6 @@ struct PartitionView {
     const int32_t* t_indices;
     const double*  log_liks;
     const double*  coverage_wts;
-    const int32_t* tx_starts;
-    const int32_t* tx_ends;
     const uint8_t* count_cols;
     const uint8_t* is_spliced;
     const double*  gdna_log_liks;
@@ -1771,10 +1725,10 @@ struct PartitionView {
 // candidates within each unit by component index (required by the
 // equivalence-class builder downstream).
 //
-// Under Option B the gDNA row's log-lik is already fully length-
-// corrected by the scorer, so no per-locus gDNA profile is passed:
-// bias_profiles is sized to n_t (RNA only) and the downstream bias
-// correction skips rows whose local component index >= n_t.
+// Populates ``sub.log_eff_len`` from per-transcript effective lengths
+// (``all_t_eff_lens`` is the FL-marginal containment effective length
+// L̃_t computed in Python).  The gDNA component receives log L̃ = 0
+// because its likelihoods are pre-normalized by the scorer (Option B).
 //
 // Candidates are written to pre-allocated output arrays via a write cursor
 // to avoid dynamic allocation in the inner loop. A reusable sort buffer
@@ -1786,7 +1740,7 @@ static void extract_locus_sub_problem_from_partition(
     const PartitionView& pv,
     double alpha_gdna,
     const double*  all_unambig_row_sums,
-    const int64_t* all_t_lengths,
+    const double*  all_t_eff_lens,
     int32_t* local_map, int local_map_size)
 {
     int n_t = pv.n_transcripts;
@@ -1821,8 +1775,6 @@ static void extract_locus_sub_problem_from_partition(
     sub.t_indices.resize(max_out);
     sub.log_liks.resize(max_out);
     sub.coverage_wts.resize(max_out);
-    sub.tx_starts.resize(max_out);
-    sub.tx_ends.resize(max_out);
     sub.count_cols.resize(max_out);
 
     sub.offsets.resize(n_u + 1);
@@ -1861,17 +1813,14 @@ static void extract_locus_sub_problem_from_partition(
             if (local < 0 || local >= nc) continue;
 
             sort_buf[k++] = {local, pv.log_liks[j], pv.coverage_wts[j],
-                             pv.tx_starts[j], pv.tx_ends[j],
                              pv.count_cols[j]};
         }
 
         // Append gDNA candidate (component = n_t, always the largest index).
         // Under Option B the gDNA row carries no fragment-length signal:
-        // its log_lik is fully length-corrected upstream by the scorer,
-        // and apply_bias_correction_uniform skips local components >= n_t.
+        // its log_lik is fully length-corrected upstream by the scorer.
         if (has_gdna) {
-            sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0,
-                             0, 0, 0};
+            sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0, 0};
         }
 
         // Trim to actual count (candidates may have been skipped above)
@@ -1893,8 +1842,6 @@ static void extract_locus_sub_problem_from_partition(
             sub.t_indices[cursor]    = c.local_comp;
             sub.log_liks[cursor]     = c.log_lik;
             sub.coverage_wts[cursor] = c.cov_wt;
-            sub.tx_starts[cursor]    = c.tx_start;
-            sub.tx_ends[cursor]      = c.tx_end;
             sub.count_cols[cursor]   = c.count_col;
             ++cursor;
         }
@@ -1906,8 +1853,6 @@ static void extract_locus_sub_problem_from_partition(
     sub.t_indices.resize(cursor);
     sub.log_liks.resize(cursor);
     sub.coverage_wts.resize(cursor);
-    sub.tx_starts.resize(cursor);
-    sub.tx_ends.resize(cursor);
     sub.count_cols.resize(cursor);
 
     // --- Build per-component arrays ---
@@ -1919,13 +1864,15 @@ static void extract_locus_sub_problem_from_partition(
         sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
     }
 
-    sub.bias_profiles.resize(n_t);
+    sub.log_eff_len.assign(nc, 0.0);
     for (int i = 0; i < n_t; ++i) {
-        sub.bias_profiles[i] = all_t_lengths[t_arr[i]];
+        double Le = all_t_eff_lens[t_arr[i]];
+        if (!(Le >= 1.0)) Le = 1.0;
+        sub.log_eff_len[i] = std::log(Le);
     }
-    // gDNA row has no bias profile: scorer pre-corrects gdna_log_liks
-    // under Option B, and apply_bias_correction_uniform skips rows
-    // whose local component index equals sub.gdna_idx (== n_t).
+    // gDNA component: log L̃ = 0 (likelihoods already pre-normalized
+    // by the scorer under Option B).
+    sub.log_eff_len[sub.gdna_idx] = 0.0;
 
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
 
@@ -1973,7 +1920,7 @@ batch_locus_em_partitioned(
     f64_1d   locus_alpha_rna,
     // Per-transcript globals
     f64_2d   unambig_counts,
-    i64_1d   t_lengths_arr,
+    f64_1d   t_eff_lens_arr,
     // Mutable output accumulators
     f64_2d_mut em_counts_out,
     f64_2d_mut gdna_locus_counts_out,
@@ -2009,13 +1956,11 @@ batch_locus_em_partitioned(
         v.t_indices        = nb::cast<i32_1d>(tup[1]).data();
         v.log_liks         = nb::cast<f64_1d>(tup[2]).data();
         v.coverage_wts     = nb::cast<f64_1d>(tup[3]).data();
-        v.tx_starts        = nb::cast<i32_1d>(tup[4]).data();
-        v.tx_ends          = nb::cast<i32_1d>(tup[5]).data();
-        v.count_cols       = nb::cast<u8_1d>(tup[6]).data();
-        v.is_spliced       = nb::cast<u8_1d>(tup[7]).data();
-        v.gdna_log_liks    = nb::cast<f64_1d>(tup[8]).data();
-        v.locus_t_indices  = nb::cast<i32_1d>(tup[9]).data();
-        v.locus_count_cols = nb::cast<u8_1d>(tup[10]).data();
+        v.count_cols       = nb::cast<u8_1d>(tup[4]).data();
+        v.is_spliced       = nb::cast<u8_1d>(tup[5]).data();
+        v.gdna_log_liks    = nb::cast<f64_1d>(tup[6]).data();
+        v.locus_t_indices  = nb::cast<i32_1d>(tup[7]).data();
+        v.locus_count_cols = nb::cast<u8_1d>(tup[8]).data();
         v.n_units = static_cast<int>(off_arr.shape(0)) - 1;
         v.n_candidates = v.offsets[v.n_units];
 
@@ -2054,7 +1999,7 @@ batch_locus_em_partitioned(
     const double*   ag_ptr = locus_alpha_gdna.data();
     const double*   ar_ptr = locus_alpha_rna.data();
     const double*   uac    = unambig_counts.data();
-    const int64_t*  tl_ptr = t_lengths_arr.data();
+    const double*   tel_ptr = t_eff_lens_arr.data();
 
     double* em_out    = em_counts_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
@@ -2163,7 +2108,7 @@ batch_locus_em_partitioned(
             auto t1 = hrclock::now();
             extract_locus_sub_problem_from_partition(
                 sub, pv, ag_ptr[li],
-                unambig_row_sums.data(), tl_ptr,
+                unambig_row_sums.data(), tel_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
 
@@ -2171,17 +2116,8 @@ batch_locus_em_partitioned(
             size_t n_candidates = sub.t_indices.size();
             int n_local_units = sub.n_local_units;
 
-            // 2. Apply bias correction
-            if (n_candidates > 0) {
-                apply_bias_correction_uniform(
-                    sub.log_liks.data(),
-                    sub.t_indices.data(),
-                    sub.tx_starts.data(),
-                    sub.tx_ends.data(),
-                    sub.bias_profiles.data(),
-                    sub.n_t,
-                    n_candidates);
-            }
+            // 2. (No per-fragment bias correction.)  The EM uses
+            // per-component log L̃_t inside the E-step instead.
             auto t3 = hrclock::now();
 
             // 3. Handle empty sub-problem
@@ -2191,8 +2127,9 @@ batch_locus_em_partitioned(
                 return 0.0;
             }
 
-            // 4. Log effective lengths (all 1.0 → log = 0.0)
-            std::vector<double> log_eff_len(nc, 0.0);
+            // 4. log effective length per component (FL-marginal L̃_t).
+            //    gDNA component already set to 0 by the extractor.
+            const double* log_eff_len_ptr = sub.log_eff_len.data();
 
             // 5. Build equivalence classes
             auto ec_data = build_equiv_classes(
@@ -2218,7 +2155,7 @@ batch_locus_em_partitioned(
 
             // 7. SQUAREM
             EMResult result = run_squarem(
-                ec_data, log_eff_len.data(),
+                ec_data, log_eff_len_ptr,
                 sub.unambig_totals.data(),
                 prior.data(),
                 theta_init.data(),
@@ -2232,6 +2169,7 @@ batch_locus_em_partitioned(
             double locus_rna = 0.0, locus_gdna = 0.0;
             assign_posteriors(
                 sub, result.theta.data(),
+                log_eff_len_ptr,
                 assignment_mode, assignment_min_posterior, locus_rng,
                 em_out, gdna_out,
                 psum_out, nass_out,
@@ -2644,9 +2582,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_indices"),
           nb::arg("log_liks"),
           nb::arg("coverage_wts"),
-          nb::arg("tx_starts"),
-          nb::arg("tx_ends"),
-          nb::arg("bias_profiles"),
           nb::arg("unambig_totals"),
           nb::arg("effective_lens"),
           nb::arg("prior_eligible"),
@@ -2659,7 +2594,9 @@ NB_MODULE(_em_impl, m) {
           nb::arg("prior_weight_rna").none() = nb::none(),
           "Run EM for a single locus sub-problem.\n\n"
           "Takes CSR per-locus data + config, returns (theta, alpha, em_totals).\n"
-          "Replaces the Python EM hot path with a single C++ call.\n\n"
+          "``effective_lens`` is the per-component effective length L̃_c\n"
+          "(FL-marginal containment); the E-step subtracts log L̃_c from\n"
+          "each candidate's log-weight.\n\n"
           "prior_weight_rna: optional float32 ndarray[n_components];\n"
           "  None ⇒ all ones (bit-identical to legacy behaviour).");
 
@@ -2713,7 +2650,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_alpha_gdna"),
           nb::arg("locus_alpha_rna"),
           nb::arg("unambig_counts"),
-          nb::arg("t_lengths"),
+          nb::arg("t_eff_lens"),
           nb::arg("em_counts_out"),
           nb::arg("gdna_locus_counts_out"),
           nb::arg("posterior_sum_out"),
@@ -2731,7 +2668,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("emit_assignments") = false,
           nb::arg("locus_prior_weight_rna").none() = nb::none(),
           "Run locus EM from per-locus partition data.\n\n"
-          "Accepts a list of 11-tuples (one per locus) containing partition\n"
+          "Accepts a list of 9-tuples (one per locus) containing partition\n"
           "arrays, plus per-locus calibration priors (alpha_gdna, alpha_rna).\n"
           "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
           " out_winner_tid, out_winner_post, out_n_candidates).\n"

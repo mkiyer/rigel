@@ -33,19 +33,14 @@ def _run_em(
     all_t_indices: list[int] = []
     all_log_liks: list[float] = []
     all_cov_wts: list[float] = []
-    all_tx_starts: list[int] = []
-    all_tx_ends: list[int] = []
     offsets = [0]
     for unit in units:
-        for comp_idx, ll, cw, txs, txe in unit:
+        for comp_idx, ll, cw, _txs, _txe in unit:
             all_t_indices.append(comp_idx)
             all_log_liks.append(ll)
             all_cov_wts.append(cw)
-            all_tx_starts.append(txs)
-            all_tx_ends.append(txe)
         offsets.append(len(all_t_indices))
 
-    bias_profiles = np.full(n_components, 100_000, dtype=np.int64)
     unambig_totals = np.zeros(n_components, dtype=np.float64)
     prior_eligible = np.ones(n_components, dtype=np.float64)
     eff_lens = np.ones(n_components, dtype=np.float64)
@@ -55,9 +50,6 @@ def _run_em(
         np.asarray(all_t_indices, dtype=np.int32),
         np.asarray(all_log_liks, dtype=np.float64),
         np.asarray(all_cov_wts, dtype=np.float64),
-        np.asarray(all_tx_starts, dtype=np.int32),
-        np.asarray(all_tx_ends, dtype=np.int32),
-        bias_profiles,
         unambig_totals,
         eff_lens,
         prior_eligible,

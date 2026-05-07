@@ -319,15 +319,13 @@ def _run_and_assign(
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)
 
-    # Build the 11-tuples and transcript index lists expected by C++
+    # Build the 9-tuples and transcript index lists expected by C++
     partition_tuples = [
         (
             p.offsets,
             p.t_indices,
             p.log_liks,
             p.coverage_weights,
-            p.tx_starts,
-            p.tx_ends,
             p.count_cols,
             p.is_spliced,
             p.gdna_log_liks,
