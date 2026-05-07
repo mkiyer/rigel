@@ -8,7 +8,7 @@ Modules
 _bam_impl     : BAM scanning, annotation writing, SJ tag detection (htslib)
 _resolve_impl : Fragment overlap resolution against the reference index
 _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
-_em_impl      : Locus-level EM solver, connected components, bias correction
+_em_impl      : Locus-level EM solver, connected components, effective-length normalization
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
 

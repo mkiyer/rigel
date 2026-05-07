@@ -57,8 +57,6 @@ def partition_and_free(
         ("log_liks", scatter_candidates_f64),
         ("coverage_weights", scatter_candidates_f64),
         ("t_indices", scatter_candidates_i32),
-        ("tx_starts", scatter_candidates_i32),
-        ("tx_ends", scatter_candidates_i32),
         ("count_cols", scatter_candidates_u8),
     ]
     cand_results = {}
@@ -106,8 +104,6 @@ def partition_and_free(
             log_liks=cand_results["log_liks"][li],
             count_cols=cand_results["count_cols"][li],
             coverage_weights=cand_results["coverage_weights"][li],
-            tx_starts=cand_results["tx_starts"][li],
-            tx_ends=cand_results["tx_ends"][li],
             is_spliced=unit_results["is_spliced"][li],
             gdna_log_liks=unit_results["gdna_log_liks"][li],
             locus_t_indices=unit_results["locus_t_indices"][li],

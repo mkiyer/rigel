@@ -1,2 +1,2 @@
 locus_id	locus_span_bp	n_transcripts	n_annotated_transcripts	n_nrna_entities	n_genes	n_em_fragments	count_unambig	mrna	nrna	gdna	total	gdna_rate	gdna_prior	alpha_gdna	alpha_rna
-0	1000	2	1	1	1	523	477.0	999.8924557915504	0.10754420844950878	5.570415344198199e-299	1000.0	5.570415344198199e-302	0.0	0.0	10.0
+0	1000	2	1	1	1	523	477.0	999.8815688567923	0.11843114320768132	6.94768396211993e-299	1000.0	6.94768396211993e-302	0.0	0.0	10.0

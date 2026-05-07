@@ -270,7 +270,7 @@ class AbundanceEstimator:
         Parameters
         ----------
         partition_tuples : list[tuple]
-            List of 11-tuples, one per locus, containing partition arrays.
+            List of 9-tuples, one per locus, containing partition arrays.
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
         alpha_gdna : np.ndarray

@@ -81,8 +81,6 @@ def test_build_multi_loci_gdna_span_matches_sum_of_loci(mini_index):
         log_liks=np.zeros(2, dtype=np.float64),
         count_cols=np.zeros(2, dtype=np.uint8),
         coverage_weights=np.ones(2, dtype=np.float64),
-        tx_starts=np.array([100, 100], dtype=np.int32),
-        tx_ends=np.array([200, 200], dtype=np.int32),
         locus_t_indices=np.array([0], dtype=np.int32),
         locus_count_cols=np.array([0], dtype=np.uint8),
         is_spliced=np.zeros(1, dtype=bool),

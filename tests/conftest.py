@@ -239,8 +239,6 @@ def _make_locus_em_data(
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
         coverage_weights=np.ones(n_candidates, dtype=np.float64),
-        tx_starts=np.zeros(n_candidates, dtype=np.int32),
-        tx_ends=np.ones(n_candidates, dtype=np.int32),
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,
         is_spliced=is_spliced,

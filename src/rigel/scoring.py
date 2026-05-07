@@ -114,7 +114,7 @@ class FragmentScorer:
     t_strand_arr: np.ndarray  # int8[n_transcripts]
     t_to_g: np.ndarray  # int32[n_transcripts]
 
-    # Per-transcript lengths for per-fragment effective length correction
+    # Transcript and locus geometry used by RNA/gDNA scoring.
     t_length_arr: np.ndarray  # int32[n_transcripts] — spliced exonic length
     t_span_arr: np.ndarray  # int32[n_transcripts] — genomic span (incl introns)
     t_start_arr: np.ndarray  # int32[n_transcripts] — genomic start coordinate

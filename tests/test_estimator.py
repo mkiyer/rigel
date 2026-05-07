@@ -157,8 +157,6 @@ def _make_em_data(
         log_liks=np.array(flat_lk, dtype=np.float64),
         count_cols=np.array(flat_cc, dtype=np.uint8),
         coverage_weights=np.ones(n_candidates, dtype=np.float64),
-        tx_starts=np.zeros(n_candidates, dtype=np.int32),
-        tx_ends=np.ones(n_candidates, dtype=np.int32),
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,
         is_spliced=np.zeros(n_units, dtype=bool),
@@ -734,6 +732,40 @@ class TestDetailOutput:
 
         df = rc.get_detail_df(index)
         assert set(df["category"]) == {"unspliced", "spliced_annot"}
+
+
+class TestPartitionedEffectiveLength:
+    """Production partitioned EM must consume per-transcript L̃ values."""
+
+    def test_partitioned_em_uses_nontrivial_effective_lengths(self):
+        units = [[0, 1]] * 100
+
+        rc_equal = AbundanceEstimator(
+            2,
+            em_config=EMConfig(seed=42, assignment_mode="fractional"),
+        )
+        rc_equal._t_eff_len = np.ones(2, dtype=np.float64)
+        _run_and_assign(
+            rc_equal,
+            _make_locus_em_data(units, num_transcripts=2),
+            em_iterations=100,
+        )
+        equal_counts = rc_equal.em_counts.sum(axis=1)
+        np.testing.assert_allclose(equal_counts[0], equal_counts[1], rtol=1e-3, atol=1e-3)
+
+        rc_len = AbundanceEstimator(
+            2,
+            em_config=EMConfig(seed=42, assignment_mode="fractional"),
+        )
+        rc_len._t_eff_len = np.array([10.0, 1.0], dtype=np.float64)
+        _run_and_assign(
+            rc_len,
+            _make_locus_em_data(units, num_transcripts=2),
+            em_iterations=100,
+        )
+        length_counts = rc_len.em_counts.sum(axis=1)
+
+        assert length_counts[1] > length_counts[0] * 5.0
 
 
 # =====================================================================

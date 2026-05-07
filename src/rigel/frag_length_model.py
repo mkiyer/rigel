@@ -79,6 +79,8 @@ class FragmentLengthModel:
         else:
             self._total_weight: float = float(self.counts.sum())
         self._log_prob: np.ndarray | None = None
+        self._prob: np.ndarray | None = None
+        self._stats_use_prob: bool = False
         self._finalized: bool = False
 
     @property
@@ -181,6 +183,10 @@ class FragmentLengthModel:
         The overflow bin is treated as having fragment length = max_size.
         Returns 0.0 if no observations.
         """
+        probs = self._stats_probs()
+        if probs is not None:
+            indices = np.arange(self.max_size + 1, dtype=np.float64)
+            return float(np.dot(indices, probs))
         total = self.total_weight
         if total == 0:
             return 0.0
@@ -193,6 +199,12 @@ class FragmentLengthModel:
 
         Returns 0.0 if no observations.
         """
+        probs = self._stats_probs()
+        if probs is not None:
+            indices = np.arange(self.max_size + 1, dtype=np.float64)
+            mu = np.dot(indices, probs)
+            var = np.dot((indices - mu) ** 2, probs)
+            return float(np.sqrt(var))
         total = self.total_weight
         if total == 0:
             return 0.0
@@ -207,6 +219,11 @@ class FragmentLengthModel:
 
         Returns 0.0 if no observations.
         """
+        probs = self._stats_probs()
+        if probs is not None:
+            cumsum = np.cumsum(probs)
+            idx = np.searchsorted(cumsum, 0.5)
+            return float(min(idx, self.max_size))
         total = self.total_weight
         if total == 0:
             return 0.0
@@ -220,9 +237,18 @@ class FragmentLengthModel:
 
         Returns 0 if no observations.
         """
+        probs = self._stats_probs()
+        if probs is not None:
+            return int(np.argmax(probs))
         if self.total_weight == 0:
             return 0
         return int(np.argmax(self.counts))
+
+    def _stats_probs(self) -> np.ndarray | None:
+        """Finalized probability vector for summary statistics, when EB-smoothed."""
+        if self._finalized and self._prob is not None and self._stats_use_prob:
+            return self._prob
+        return None
 
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
@@ -264,6 +290,7 @@ class FragmentLengthModel:
             ``N_cat / (N_cat + prior_ess)`` influence.
         """
         n = self.max_size + 1
+        prior_total = 0.0
         if prior_counts is not None:
             # Dirichlet-Multinomial posterior predictive.
             # Align prior to our bin count (handles mismatched max_size).
@@ -277,14 +304,14 @@ class FragmentLengthModel:
                 ess = min(prior_ess, raw_total)
                 pc *= ess / raw_total
             prior_total = float(pc.sum())
-            self._log_prob = (
-                np.log(self.counts + pc + 1.0)
-                - np.log(self._total_weight + prior_total + n)
-            )
+            prob = (self.counts + pc + 1.0) / (self._total_weight + prior_total + n)
         elif self._total_weight == 0:
-            self._log_prob = np.full(n, -np.log(n), dtype=np.float64)
+            prob = np.full(n, 1.0 / n, dtype=np.float64)
         else:
-            self._log_prob = np.log(self.counts + 1.0) - np.log(self._total_weight + n)
+            prob = (self.counts + 1.0) / (self._total_weight + n)
+        self._prob = np.asarray(prob, dtype=np.float64)
+        self._log_prob = np.log(self._prob)
+        self._stats_use_prob = prior_total > 0.0
         self._tail_base: float = float(self._log_prob[self.max_size])
         self._finalized = True
 
@@ -338,6 +365,8 @@ class FragmentLengthModel:
 
     def _normalized_probs(self) -> np.ndarray:
         """Return Laplace-smoothed probability vector, shape (max_size+1,)."""
+        if self._finalized and self._prob is not None:
+            return self._prob
         total = self.total_weight
         if total == 0:
             n = self.max_size + 1
@@ -412,14 +441,6 @@ class FragmentLengthModel:
         # eff = (L + 1) * sum_{l=1}^{k} P(l) - sum_{l=1}^{k} l*P(l)
         #     = (L + 1) * (CDF[k] - P(0)) - CMOM[k]
         eff = (lengths + 1).astype(np.float64) * (cdf[k] - p0) - cmom[k]
-
-        # Overflow bin: for transcripts longer than max_size, fragments
-        # in the overflow bin can still map.  Same treatment as the
-        # existing compute_exonic_eff_len method.
-        overflow_mask = lengths > self.max_size
-        if overflow_mask.any():
-            p_overflow = float(probs[self.max_size])
-            eff[overflow_mask] += p_overflow * (lengths[overflow_mask] - self.max_size)
 
         np.maximum(eff, min_value, out=eff)
         return eff

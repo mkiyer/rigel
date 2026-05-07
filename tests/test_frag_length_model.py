@@ -3,6 +3,7 @@
 import json
 import math
 
+import numpy as np
 import pytest
 
 from rigel.splice import SpliceType
@@ -150,6 +151,44 @@ class TestFragmentLengthModelLikelihood:
         ll_beyond = m.log_likelihood(200)
         expected = ll_at_max + 100 * math.log(0.99)
         assert ll_beyond == pytest.approx(expected)
+
+
+class TestFragmentLengthModelEffectiveLength:
+    @staticmethod
+    def _oracle_eff_len(probs, length):
+        sizes = np.arange(len(probs), dtype=np.float64)
+        usable = (sizes > 0) & (sizes <= length)
+        return float(np.sum(probs[usable] * (length - sizes[usable] + 1.0)))
+
+    def test_effective_length_uses_finalized_eb_distribution(self):
+        m = FragmentLengthModel(max_size=10)
+        for _ in range(20):
+            m.observe(2)
+        prior = np.zeros(11, dtype=np.float64)
+        prior[8] = 1000.0
+
+        m.finalize(prior_counts=prior, prior_ess=100.0)
+
+        probs = np.exp(m._log_prob)
+        expected = self._oracle_eff_len(probs, length=8)
+        actual = m.compute_all_transcript_eff_lens(np.array([8]), min_value=0.0)[0]
+        assert actual == pytest.approx(expected)
+
+        raw_probs = (m.counts + 1.0) / (m.total_weight + m.max_size + 1)
+        raw_expected = self._oracle_eff_len(raw_probs, length=8)
+        assert actual != pytest.approx(raw_expected)
+        assert m.mean == pytest.approx(float(np.dot(np.arange(11), probs)))
+
+    def test_terminal_bin_is_not_double_counted_for_long_transcripts(self):
+        counts = np.zeros(11, dtype=np.float64)
+        counts[10] = 1000.0
+        m = FragmentLengthModel.from_counts(counts, max_size=10)
+
+        probs = np.exp(m._log_prob)
+        expected = self._oracle_eff_len(probs, length=20)
+        actual = m.compute_all_transcript_eff_lens(np.array([20]), min_value=0.0)[0]
+
+        assert actual == pytest.approx(expected)
 
 
 class TestFragmentLengthModelSerialization:

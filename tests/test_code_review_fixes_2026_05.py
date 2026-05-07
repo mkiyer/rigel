@@ -97,8 +97,6 @@ def test_locus_ref_id_is_canonical_not_categorical(two_ref_index):
         log_liks=np.zeros(2, dtype=np.float64),
         count_cols=np.zeros(2, dtype=np.uint8),
         coverage_weights=np.ones(2, dtype=np.float64),
-        tx_starts=np.array([100, 100], dtype=np.int32),
-        tx_ends=np.array([300, 300], dtype=np.int32),
         locus_t_indices=np.array([0, 1], dtype=np.int32),
         locus_count_cols=np.array([0, 0], dtype=np.uint8),
         is_spliced=np.zeros(2, dtype=bool),

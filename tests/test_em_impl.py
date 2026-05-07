@@ -1,8 +1,8 @@
 """Tests for the C++ EM solver (rigel._em_impl).
 
 Tests run_locus_em_native() directly with synthetic CSR data,
-verifying correctness of bias correction, equivalence-class grouping,
-SQUAREM convergence, OVR prior, and VBEM mode.
+verifying correctness of effective-length normalization,
+equivalence-class grouping, SQUAREM convergence, OVR prior, and VBEM mode.
 """
 
 import numpy as np
@@ -424,15 +424,15 @@ class TestEquivalenceClasses:
         assert abs(theta.sum() - 1.0) < 1e-10
 
 
-class TestBiasCorrection:
-    """Bias correction applied inside the C++ solver."""
+class TestEffectiveLengthNormalization:
+    """Component effective lengths are applied inside the C++ solver."""
 
-    def test_bias_correction_reduces_long_transcript_advantage(self):
+    def test_effective_length_reduces_long_transcript_advantage(self):
         """Longer transcripts have larger effective length → penalty.
 
         Two components with same log-lik but different transcript lengths
         should result in the shorter transcript getting relatively more
-        weight after bias correction, because the longer transcript's
+        weight after normalization, because the longer transcript's
         effective length is larger.
         """
         n_comp = 3
@@ -441,11 +441,7 @@ class TestBiasCorrection:
         unambig = np.array([10.0, 10.0, 0.0])
         eligible = np.array([1.0, 1.0, 0.0])
 
-        # Comp 0 is short (500bp), comp 1 is very long (10000bp).
-        # bias correction: -log(max(L - frag_len + 1, 1))
-        # Comp 0: -log(max(500 - 200 + 1, 1)) = -log(301) ≈ -5.71
-        # Comp 1: -log(max(10000 - 200 + 1, 1)) = -log(9801) ≈ -9.19
-        # So comp 0 gets a LESS negative adjustment → higher posterior
+        # Comp 0 has smaller L̃ than comp 1, so -log(L̃) favors comp 0.
         profiles = np.array([500, 10000, 100000], dtype=np.int64)
 
         theta, alpha, em = _make_locus(

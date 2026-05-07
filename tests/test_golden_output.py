@@ -192,7 +192,8 @@ _GENE_NUMERIC_COLS = [
 ]
 
 _LOCI_NUMERIC_COLS = [
-    "locus_span_bp", "n_em_fragments", "mrna", "nrna", "gdna", "total", "gdna_rate", "gdna_prior",
+    "locus_span_bp", "n_em_fragments", "mrna", "nrna", "gdna", "total", "gdna_rate",
+    "gdna_prior", "count_unambig",
 ]
 
 

@@ -34,8 +34,6 @@ def _make_scored_fragments(n_units, candidates_per_unit, n_transcripts, rng):
         log_liks=rng.standard_normal(n_cand),
         count_cols=rng.integers(0, 8, size=n_cand, dtype=np.uint8),
         coverage_weights=rng.random(n_cand),
-        tx_starts=rng.integers(0, 500, size=n_cand, dtype=np.int32),
-        tx_ends=rng.integers(500, 1000, size=n_cand, dtype=np.int32),
         locus_t_indices=rng.integers(0, n_transcripts, size=n_units, dtype=np.int32),
         locus_count_cols=rng.integers(0, 8, size=n_units, dtype=np.uint8),
         is_spliced=rng.choice([True, False], size=n_units),
@@ -216,8 +214,6 @@ class TestPartitionAndFree:
         orig_t_indices = em_data.t_indices.copy()
         orig_log_liks = em_data.log_liks.copy()
         orig_coverage_weights = em_data.coverage_weights.copy()
-        orig_tx_starts = em_data.tx_starts.copy()
-        orig_tx_ends = em_data.tx_ends.copy()
         orig_count_cols = em_data.count_cols.copy()
         orig_is_spliced = em_data.is_spliced.copy()
         orig_gdna_log_liks = em_data.gdna_log_liks.copy()
@@ -262,12 +258,6 @@ class TestPartitionAndFree:
                 np.testing.assert_array_equal(
                     part.coverage_weights[cand_pos:cand_pos + n_cand],
                     orig_coverage_weights[g_start:g_end])
-                np.testing.assert_array_equal(
-                    part.tx_starts[cand_pos:cand_pos + n_cand],
-                    orig_tx_starts[g_start:g_end])
-                np.testing.assert_array_equal(
-                    part.tx_ends[cand_pos:cand_pos + n_cand],
-                    orig_tx_ends[g_start:g_end])
                 np.testing.assert_array_equal(
                     part.count_cols[cand_pos:cand_pos + n_cand],
                     orig_count_cols[g_start:g_end])
@@ -327,8 +317,6 @@ class TestNoDuplicateCandidatesPerUnit:
             log_liks=rng.standard_normal(n_cand),
             count_cols=rng.integers(0, 4, size=n_cand, dtype=np.uint8),
             coverage_weights=np.ones(n_cand),
-            tx_starts=np.zeros(n_cand, dtype=np.int32),
-            tx_ends=np.full(n_cand, 500, dtype=np.int32),
             locus_t_indices=rng.integers(0, n_transcripts, size=n_units, dtype=np.int32),
             locus_count_cols=np.zeros(n_units, dtype=np.uint8),
             is_spliced=rng.choice([True, False], size=n_units),

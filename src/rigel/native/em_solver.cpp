@@ -2,7 +2,7 @@
  * em_solver.cpp — C++ EM solver for rigel locus-level abundance estimation.
  *
  * Replaces the Python hot path: _em_step, _vbem_step, _build_equiv_classes,
- * _apply_bias_correction_uniform, and the SQUAREM acceleration loop.
+ * component effective-length normalization, and the SQUAREM acceleration loop.
  *
  * Module: rigel._em_impl
  *
@@ -1068,7 +1068,7 @@ static EMResult run_squarem(
 //
 // Takes CSR per-locus data + config, returns (theta, alpha, em_totals).
 // Replaces the entire body of AbundanceEstimator.run_locus_em() from
-// bias correction through EM convergence.
+// component normalization through EM convergence.
 
 static std::tuple<nb::ndarray<nb::numpy, double, nb::ndim<1>>,
                   nb::ndarray<nb::numpy, double, nb::ndim<1>>,
@@ -1077,7 +1077,7 @@ run_locus_em_native(
     // CSR data
     i64_1d offsets,
     i32_1d t_indices,
-    f64_1d_mut log_liks,        // mutated in-place by bias correction
+    f64_1d_mut log_liks,        // per-candidate log-likelihoods
     f64_1d coverage_wts,
     // Per-component vectors
     f64_1d unambig_totals_arr,
@@ -1911,7 +1911,7 @@ static std::tuple<
     nb::object   // out_n_candidates (ndarray or None)
 >
 batch_locus_em_partitioned(
-    // Per-locus partition data (list of 11-tuples)
+    // Per-locus partition data (list of 9-tuples)
     nb::list partition_tuples,
     // Per-locus transcript membership (list of int32[])
     nb::list locus_transcript_indices,

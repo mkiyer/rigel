@@ -254,9 +254,9 @@ class TestCalibrateFLPriorEssPropagates:
     def test_different_ess_yields_different_fl_models(self):
         """``fl_prior_ess`` actually flows to ``build_fl_models``.
 
-        The ``mean`` property reads raw ``counts``, which are unchanged
-        by EB shrinkage; the shrinkage lives in ``_log_prob``.  Compare
-        the smoothed distributions directly.
+        EB shrinkage changes the finalized probability vector used by
+        scoring, summary statistics, and effective-length calculations.
+        Compare the smoothed distributions directly.
         """
         common = dict(
             index=_stub_index(_make_region_df()),

@@ -46,11 +46,6 @@ class ScoredFragments:
         uint8[n_candidates] — internal column index per candidate (0–7).
     coverage_weights : np.ndarray
         float64[n_candidates] — coverage weight per candidate.
-    tx_starts : np.ndarray
-        int32[n_candidates] — 0-based transcript-space start position.
-    tx_ends : np.ndarray
-        int32[n_candidates] — 0-based transcript-space end position
-        (exclusive).
     locus_t_indices : np.ndarray
         int32[n_units] — best transcript index per unit.
     locus_count_cols : np.ndarray
@@ -77,8 +72,6 @@ class ScoredFragments:
     log_liks: np.ndarray
     count_cols: np.ndarray
     coverage_weights: np.ndarray
-    tx_starts: np.ndarray
-    tx_ends: np.ndarray
     locus_t_indices: np.ndarray
     locus_count_cols: np.ndarray
     is_spliced: np.ndarray
@@ -127,8 +120,6 @@ class LocusPartition:
     log_liks: np.ndarray  # float64
     count_cols: np.ndarray  # uint8
     coverage_weights: np.ndarray  # float64
-    tx_starts: np.ndarray  # int32
-    tx_ends: np.ndarray  # int32
 
     # Per-unit arrays
     is_spliced: np.ndarray  # uint8 (bool viewed as uint8 for C++)
