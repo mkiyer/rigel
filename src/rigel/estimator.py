@@ -711,7 +711,15 @@ class AbundanceEstimator:
         gdna : float, gDNA count from locus EM
         total : float, mrna + nrna + gdna
         gdna_rate : float, gdna / total
-        gdna_prior : float, calibration-derived gDNA prior (γ)
+        gdna_prior : float
+            Bayesian-prior redesign (Phase 3) semantics: ``alpha_gdna /
+            max(n_em_fragments, 1)`` — the *rate* of expected gDNA
+            pseudocount per ambiguous EM fragment in the locus. This is
+            a nonnegative rate (NOT bounded ≤ 1); a value of 0 means
+            the global-only prior contributed no gDNA mass to the
+            locus, and large values indicate the prior expects more
+            gDNA than the locus has fragments to absorb (typically
+            sparse loci where the η_g calibration dominates).
         """
         cols = [
             "locus_id",
@@ -778,12 +786,19 @@ class AbundanceEstimator:
             gdna = float(r["gdna"])
             total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
-            # Per-locus Dirichlet prior fraction computed by
-            # compute_locus_priors(): γ_ℓ = α_gDNA / (α_gDNA + α_RNA).
+            # Bayesian-prior redesign Phase 3 semantics: ``gdna_prior``
+            # is the per-EM-fragment rate of expected gDNA pseudocount
+            # (``alpha_gdna / n_em_fragments``). Under Phase 2 the
+            # canonical prior is the global-only η_g, ``alpha_rna`` is
+            # pinned at 0, and the legacy γ = α_g/(α_g+α_r) ratio
+            # collapsed to a constant 1.0 — uninformative. The new
+            # rate exposes the prior's per-fragment strength relative
+            # to the locus's actual EM evidence and is comparable
+            # across loci.
             alpha_g = float(r.get("alpha_gdna", 0.0))
             alpha_r = float(r.get("alpha_rna", 0.0))
-            prior_sum = alpha_g + alpha_r
-            gdna_prior = alpha_g / prior_sum if prior_sum > 0 else 0.0
+            n_em = max(int(r.get("n_em_fragments", 0)), 1)
+            gdna_prior = alpha_g / n_em
             rows.append(
                 {
                     "locus_id": lid,
