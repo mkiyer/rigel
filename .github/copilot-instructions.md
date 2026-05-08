@@ -16,6 +16,12 @@ The concept of a 'gene' is a convenient abstraction for organizing the transcrip
 - Python 3.12+, C++17
 - Dependencies managed via `mamba_env.yaml` (conda-forge + bioconda channels)
 
+### Copilot terminal reliability
+
+- Do not run heredoc/stdin-delimited terminal commands from Copilot (for example `python - <<'PY'`, `cat <<EOF`, or similar). These can leave VS Code/Copilot terminal sessions waiting for input and make the turn appear frozen.
+- For multi-line diagnostics, create a script under `scripts/debug/` with a descriptive name using file-edit tools, then run it normally with `conda activate rigel && python scripts/debug/<script>.py`.
+- Keep terminal commands non-interactive and file-based whenever possible; use `python -c "..."` only for short one-liners.
+
 ## Build
 
 ```bash

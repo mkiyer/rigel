@@ -225,13 +225,13 @@ def test_assemble_multilocus_prior_two_locus_aggregates():
     assert mlp.pi_gdna == pytest.approx(0.3)
 
 
-def test_assemble_priors_alpha_scaling():
-    """alpha_gdna/alpha_rna obey the constant-ESS Phase\u00a04 baseline.
+def test_assemble_priors_global_only_zero_density():
+    """Phase 2: global-only prior is zero when global rho == 0 in every branch.
 
-    §8 of the Bayesian-prior redesign reverted the Phase\u00a05 evidence-scaled
-    ``c_loco`` so the diff for Phases\u00a01\u20133 starts from a clean canvas.
+    The diagnostic ``pi_gdna`` is still populated from the legacy
+    locoregional path for the per-locus dataframe, but it is no longer
+    consumed by alpha_gdna / alpha_rna.
     """
-    # Single intergenic locus, 10 obs, 5 gdna fragments \u21d2 pi = 0.5.
     index = _fake_index(
         region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
         transcripts=[("chr1", 100, 800)],
@@ -239,24 +239,63 @@ def test_assemble_priors_alpha_scaling():
     payload = _make_payload(n_regions=1, counts_intergenic=[5])
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
     ml = _ml_single(0, [0], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], locus)
-    em = _make_em(np.zeros(10, dtype=np.int32))   # all anchor on transcript 0
+    em = _make_em(np.zeros(10, dtype=np.int32))
     gdt = _gdt_zero(fl_mean=200)
 
     pt = assemble_priors(
         multi_loci=[ml], em_data=em, index=index,
         payload=payload, global_densities=gdt,
-        gdna_fl=_delta_fl(200), c_base=10.0,
+        gdna_fl=_delta_fl(200),
     )
     assert isinstance(pt, PriorTable)
-    # n_gdna = \u03c1_loco \u00b7 L_eff_contained = 5 (\u03ba=0 \u21d2 cancels);
-    # n_obs = 10 \u21d2 pi = 0.5.
+    # Diagnostic pi_gdna still computed from the legacy locoregional path.
     assert pt.multi_locus_priors[0].pi_gdna == pytest.approx(0.5)
-    # Phase 1 baseline: alpha_gdna/alpha_rna == c_base * pi (split 50/50 here).
-    assert pt.alpha_gdna[0] == pytest.approx(5.0)
-    assert pt.alpha_rna[0] == pytest.approx(5.0)
-    assert pt.gdna_prior_count[0] == pytest.approx(5.0)
-    assert pt.rna_prior_count[0] == pytest.approx(5.0)
+    # Phase 2 canonical prior: rho == 0 everywhere => eta_g == 0;
+    # alpha_rna pinned at 0.
+    assert pt.alpha_gdna[0] == pytest.approx(0.0)
+    assert pt.alpha_rna[0] == pytest.approx(0.0)
+    assert pt.gdna_prior_count[0] == pytest.approx(0.0)
+    assert pt.rna_prior_count[0] == pytest.approx(0.0)
+    # Eligibility decoupled from prior strength: every unit is unspliced
+    # with finite gdna_log_lik in the fixture, so enable_gdna == 1
+    # even though eta_g == 0.
     assert pt.enable_gdna[0] == 1
+
+
+def test_assemble_priors_global_only_positive_density():
+    """alpha_rna is pinned at 0 even when global gDNA density is positive."""
+    index = _fake_index(
+        region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
+        transcripts=[("chr1", 100, 800)],
+    )
+    payload = _make_payload(n_regions=1, counts_intergenic=[10])
+    locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
+    ml = _ml_single(0, [0], [0] * 10, locus)
+    em = _make_em(np.zeros(10, dtype=np.int32))
+    gdt = GlobalDensityTable(
+        intergenic=GlobalGdnaDensity(
+            type="INTERGENIC", rho=1e-3, n_fragments=10,
+            eff_length_bp=10_000.0, n_regions_used=1, kappa=_kappa_zero(),
+        ),
+        intron=GlobalGdnaDensity(
+            type="INTRON", rho=0.0, n_fragments=0,
+            eff_length_bp=0.0, n_regions_used=0, kappa=_kappa_zero(),
+        ),
+        exon_intron=GlobalGdnaDensity(
+            type="EXON-INTRON", rho=0.0, n_fragments=0,
+            eff_length_bp=0.0, n_regions_used=0, kappa=_kappa_zero(),
+        ),
+        gdna_fl=_delta_fl(200),
+    )
+    pt = assemble_priors(
+        multi_loci=[ml], em_data=em, index=index,
+        payload=payload, global_densities=gdt,
+    )
+    # eta_g must be strictly positive: rho_ig > 0 and L_ig > 0.
+    assert pt.alpha_gdna[0] > 0.0
+    # alpha_rna pinned at 0.
+    assert pt.alpha_rna[0] == pytest.approx(0.0)
+    assert pt.rna_prior_count[0] == pytest.approx(0.0)
 
 
 def test_assemble_priors_prior_weight_rna_shape():
@@ -279,20 +318,3 @@ def test_assemble_priors_prior_weight_rna_shape():
     assert pwr[0].shape == (3,)
     assert pwr[0].dtype == np.float32
     assert np.all(pwr[0] == 1.0)
-
-
-def test_assemble_priors_default_c_base():
-    index = _fake_index(
-        region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
-        transcripts=[("chr1", 100, 800)],
-    )
-    payload = _make_payload(n_regions=1, counts_intergenic=[10])
-    locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
-    ml = _ml_single(0, [0], [0] * 10, locus)
-    em = _make_em(np.zeros(10, dtype=np.int32))
-    pt = assemble_priors(
-        multi_loci=[ml], em_data=em, index=index,
-        payload=payload, global_densities=_gdt_zero(),
-    )
-    # Default c_base ⇒ alpha_gdna + alpha_rna == C_BASE_DEFAULT.
-    assert (pt.alpha_gdna[0] + pt.alpha_rna[0]) == pytest.approx(C_BASE_DEFAULT)

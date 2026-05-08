@@ -21,7 +21,6 @@ import pytest
 from rigel.calibration import calibrate
 from rigel.calibration._result import CalibrationResult
 from rigel.calibration.locus_prior import (
-    C_BASE_DEFAULT,
     LocusGdnaEstimate,
     MultiLocusPrior,
     PriorTable,

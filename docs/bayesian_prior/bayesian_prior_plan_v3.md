@@ -352,16 +352,31 @@ only after Phase 3.
     parameter space but no read is generated.
 - **Acceptance gate** (before regenerating goldens): run a synthetic sweep
   on the Phase 5 regression scenarios (gDNA=0 + nRNA-heavy). Global-only
-  prior must recover those scenarios. If it does not, stop and root-cause —
-  the theory predicts it should, so failure indicates a deeper issue.
+  prior must recover those scenarios *or* fail only for a diagnosed,
+  explicitly documented reason. Do not regenerate goldens while this gate is
+  red. The current Phase 2 diagnostic result is that `alpha_gdna=0` with
+  `enable_gdna=True` restores total RNA in the failing zero-gDNA scenarios,
+  whereas the implemented global-only prior assigns hundreds of expected gDNA
+  counts because global `INTRON` and `EXON-INTRON` densities are contaminated
+  by locus-specific nRNA. This is not a native eligibility bug and not sample
+  assignment noise; it is a density-estimator/source-selection problem.
+- **Phase 3 blocker:** before Phase 4/goldens, add a small diagnostic or test
+  that reproduces the above `current` vs `alpha_gdna=0` contrast. Decide how
+  the production prior should protect against nRNA-contaminated intron and
+  boundary global densities in gDNA-negative or low-gDNA libraries.
 - Regenerate goldens.
 
 ### Phase 4 — Independent-flank prior (production destination)
 
-`global_only` is the correct *foundation*, but it assumes uniform
-contamination across the genome. For capture protocols and CNV-rich regions
-this is wrong. This phase is **not optional for production**; it is the
-shipping default for capture-protocol users.
+`global_only` is the correct *data-partitioning foundation* only when the
+global density branches measure gDNA rather than locus-specific RNA. The Phase
+2 acceptance-gate failure shows that intron and boundary branches can be
+nRNA-contaminated even though they are independent of the target-locus EM
+payload. Phase 4 therefore needs source selection / shrinkage that is robust to
+RNA contamination, not only local CNV or capture non-uniformity. For capture
+protocols and CNV-rich regions this phase is **not optional for production**;
+it is the shipping default for capture-protocol users once it passes the Phase
+3 blocker.
 
 - Add `gdna_prior_source: Literal["global_only", "independent_flank"]` to
   `PipelineConfig` (default still `global_only` until benchmarked).
