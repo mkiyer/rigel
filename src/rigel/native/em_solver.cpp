@@ -823,22 +823,27 @@ static void compute_ovr_prior_and_warm_start(
     }
 
     // --- gDNA warm-start override ---
+    //
+    // Only fire the (alpha_gdna / alpha_rna) ratio override when both
+    // priors carry positive mass; otherwise the ratio is undefined or
+    // would clobber the coverage-derived warm start with a bare
+    // pseudocount value. With ``alpha_rna == 0`` (the asymmetric-prior
+    // default in the Bayesian redesign), the coverage-derived warm start
+    // is the least biased initialization for the gDNA component.
     if (gdna_idx >= 0 && gdna_idx < n_components
-        && eligible[gdna_idx] > 0.0 && alpha_gdna > 0.0)
+        && eligible[gdna_idx] > 0.0
+        && alpha_gdna > 0.0 && alpha_rna > 0.0)
     {
         double total_theta = 0.0;
         for (int i = 0; i < n_components; ++i)
             total_theta += theta_init_out[i];
 
         double others = total_theta - theta_init_out[gdna_idx];
-        double total_alpha = alpha_gdna + alpha_rna;
-        if (others > 0.0 && total_alpha > 0.0 && alpha_rna > 0.0) {
+        if (others > 0.0) {
             theta_init_out[gdna_idx] =
                 (alpha_gdna / alpha_rna) * others;
-        } else {
-            theta_init_out[gdna_idx] =
-                std::max(alpha_gdna, EM_LOG_EPSILON);
         }
+        // else: keep coverage-derived warm start.
     }
 }
 
@@ -1738,7 +1743,7 @@ struct PartitionView {
 static void extract_locus_sub_problem_from_partition(
     LocusSubProblem& sub,
     const PartitionView& pv,
-    double alpha_gdna,
+    bool enable_gdna,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
     int32_t* local_map, int local_map_size)
@@ -1876,8 +1881,11 @@ static void extract_locus_sub_problem_from_partition(
 
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
 
-    // Disable gDNA component when calibration assigns zero gDNA prior.
-    if (alpha_gdna <= 0.0) {
+    // Disable gDNA component when the caller signals it is ineligible.
+    // Eligibility is now an explicit boolean from the Python side
+    // ("any unspliced unit with a finite gDNA likelihood candidate exists
+    // for this locus"); it is no longer inferred from ``alpha_gdna > 0``.
+    if (!enable_gdna) {
         sub.prior[sub.gdna_idx] = 0.0;
     }
 
@@ -1918,6 +1926,11 @@ batch_locus_em_partitioned(
     // Per-locus calibration priors
     f64_1d   locus_alpha_gdna,
     f64_1d   locus_alpha_rna,
+    // Per-locus gDNA component eligibility (1 = enabled, 0 = disabled).
+    // Decoupled from ``locus_alpha_gdna`` per Bayesian-prior redesign
+    // Phase 0: a zero gDNA prior count must not silently disable the
+    // gDNA component when the locus contains gDNA-likelihood candidates.
+    u8_1d    locus_enable_gdna,
     // Per-transcript globals
     f64_2d   unambig_counts,
     f64_1d   t_eff_lens_arr,
@@ -1998,6 +2011,7 @@ batch_locus_em_partitioned(
 
     const double*   ag_ptr = locus_alpha_gdna.data();
     const double*   ar_ptr = locus_alpha_rna.data();
+    const uint8_t*  eg_ptr = locus_enable_gdna.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
 
@@ -2107,7 +2121,7 @@ batch_locus_em_partitioned(
             // 1. Extract sub-problem from partition
             auto t1 = hrclock::now();
             extract_locus_sub_problem_from_partition(
-                sub, pv, ag_ptr[li],
+                sub, pv, eg_ptr[li] != 0,
                 unambig_row_sums.data(), tel_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
@@ -2649,6 +2663,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_transcript_indices"),
           nb::arg("locus_alpha_gdna"),
           nb::arg("locus_alpha_rna"),
+          nb::arg("locus_enable_gdna"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
           nb::arg("em_counts_out"),

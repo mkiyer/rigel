@@ -524,6 +524,7 @@ def _run_locus_em_partitioned(
     em_config: EMConfig,
     *,
     prior_weight_rna_per_locus: list | None = None,
+    enable_gdna: np.ndarray | None = None,
     emit_locus_stats: bool = False,
     annotations: "AnnotationTable | None" = None,
 ) -> None:
@@ -570,7 +571,7 @@ def _run_locus_em_partitioned(
         }
 
     def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna,
-                       batch_prior_weight_rna=None):
+                       batch_prior_weight_rna=None, batch_enable_gdna=None):
         """Pack tuples, call C++, record results."""
         partition_tuples = [
             (
@@ -599,6 +600,7 @@ def _run_locus_em_partitioned(
             emit_locus_stats=emit_locus_stats,
             emit_assignments=emit_assignments,
             locus_prior_weight_rna=batch_prior_weight_rna,
+            enable_gdna=batch_enable_gdna,
         )
 
     # Classify mega vs normal
@@ -630,6 +632,11 @@ def _run_locus_em_partitioned(
             batch_prior_weight_rna=(
                 [prior_weight_rna_per_locus[lid]]
                 if prior_weight_rna_per_locus is not None
+                else None
+            ),
+            batch_enable_gdna=(
+                np.array([enable_gdna[lid]], dtype=np.uint8)
+                if enable_gdna is not None
                 else None
             ),
         )
@@ -687,6 +694,14 @@ def _run_locus_em_partitioned(
                 if prior_weight_rna_per_locus is not None
                 else None
             ),
+            batch_enable_gdna=(
+                np.array(
+                    [enable_gdna[loc.multi_locus_id] for loc in normal_loci],
+                    dtype=np.uint8,
+                )
+                if enable_gdna is not None
+                else None
+            ),
         )
         gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
         total_gdna_em += gdna_em
@@ -740,7 +755,6 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
     nrna_weight: float = 0.0,
-    c_base: float = 10.0,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
     """Quantify transcripts from buffered fragments via locus-level EM.
 
@@ -779,8 +793,6 @@ def quant_from_buffer(
         equal footing with mRNA.  Threaded through to
         :func:`assemble_priors` and on to
         :func:`build_prior_weight_rna`.
-    c_base : float
-        Dirichlet evidence strength for the per-MultiLocus prior.
 
     Returns
     -------
@@ -872,7 +884,6 @@ def quant_from_buffer(
             calibration_payload,
             calibration.global_densities,
             gdna_fl=fl_models.gdna,
-            c_base=c_base,
             nrna_weight=nrna_weight,
         )
         calibration = calibration.with_priors(prior_table)
@@ -888,6 +899,7 @@ def quant_from_buffer(
         alpha_gdna = prior_table.alpha_gdna
         alpha_rna = prior_table.alpha_rna
         prior_weight_rna_per_locus = list(prior_table.prior_weight_rna)
+        enable_gdna_arr = prior_table.enable_gdna
 
         # Phase 4 (NEW): Fused scatter into per-locus tuples
         # Phase 4 (NEW): Array-by-array scatter + incremental free
@@ -904,6 +916,7 @@ def quant_from_buffer(
             alpha_rna,
             em_config,
             prior_weight_rna_per_locus=prior_weight_rna_per_locus,
+            enable_gdna=enable_gdna_arr,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
         )
@@ -1051,7 +1064,6 @@ def run_pipeline(
             calibration_payload=calibration_payload,
             emit_locus_stats=config.emit_locus_stats,
             nrna_weight=cal_cfg.nrna_weight,
-            c_base=cal_cfg.c_base,
         )
     finally:
         buffer.cleanup()

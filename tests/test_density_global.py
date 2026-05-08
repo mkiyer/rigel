@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rigel.calibration._exposure import boundary_crossing_exposure
 from rigel.calibration._kappa import KAPPA_DEFAULT
 from rigel.calibration.density_global import (
     GlobalDensityTable,
@@ -137,11 +138,12 @@ class TestHandCounted:
         assert out.intron.n_fragments == 20
         assert out.intron.eff_length_bp == pytest.approx(leff_in)
         assert out.intron.rho == pytest.approx(20.0 / leff_in)
-        # EXON-INTRON: capture-window geometry uses scalar mean
-        # (unchanged by R1). Numerator = 7 * 1; denominator = 1 * mean.
+        # EXON-INTRON: per-side denominator is B_cross =
+        # Σ h(ℓ) max(ℓ - 1, 0). Numerator = 7 * 1; denominator = 1 * B_cross.
+        b_cross = boundary_crossing_exposure(gdna_fl)
         assert out.exon_intron.n_fragments == 7
-        assert out.exon_intron.eff_length_bp == pytest.approx(float(gdna_fl.mean))
-        assert out.exon_intron.rho == pytest.approx(7.0 / float(gdna_fl.mean))
+        assert out.exon_intron.eff_length_bp == pytest.approx(b_cross)
+        assert out.exon_intron.rho == pytest.approx(7.0 / b_cross)
         assert out.exon_intron.n_regions_used == 1
 
     def test_pure_mrna_library(self):
@@ -223,9 +225,10 @@ class TestExonIntronEligibility:
         payload = _wrap_payload(d)
         gdna_fl = _delta_fl(200)
         out = compute_global_densities(df, payload, gdna_fl=gdna_fl)
+        b_cross = boundary_crossing_exposure(gdna_fl)
         assert out.exon_intron.n_fragments == 5
-        assert out.exon_intron.eff_length_bp == pytest.approx(float(gdna_fl.mean))
-        assert out.exon_intron.rho == pytest.approx(5.0 / float(gdna_fl.mean))
+        assert out.exon_intron.eff_length_bp == pytest.approx(b_cross)
+        assert out.exon_intron.rho == pytest.approx(5.0 / b_cross)
 
 
 class TestEmptyPerType:

@@ -138,14 +138,14 @@ class TestPipelinePristineRna:
         ptable = pr.calibration.prior_table
         # alpha arrays sized to n_multi_loci
         assert ptable.alpha_gdna.shape == ptable.alpha_rna.shape
-        # If any multi-loci were built, c_base * (π_gdna + π_rna) ≈ c_base.
+        # Phase\u00a01 redesign: alpha_rna is non-negative; alpha_gdna is the
+        # canonical asymmetric pseudocount. Eligibility is decoupled
+        # via the uint8 ``enable_gdna`` flag.
         if ptable.alpha_gdna.size > 0:
-            totals = ptable.alpha_gdna + ptable.alpha_rna
-            np.testing.assert_allclose(
-                totals,
-                np.full_like(totals, ptable.c_base_value),
-                rtol=1e-6,
-            )
+            assert (ptable.alpha_rna >= 0).all()
+            assert (ptable.alpha_gdna >= 0).all()
+            assert ptable.enable_gdna.dtype == np.uint8
+            assert ptable.enable_gdna.shape == ptable.alpha_gdna.shape
 
 
 class TestPipelineWithGdna:
@@ -207,7 +207,7 @@ class TestSummaryJsonV6Schema:
         pr, _, _ = _pristine
         summary = pr.calibration.to_summary_dict()
         for key in ("fl_models", "global_densities", "n_multi_loci",
-                    "c_base", "mean_pi_gdna", "diagnostics"):
+                    "mean_pi_gdna", "diagnostics"):
             assert key in summary, f"missing v6 key: {key}"
 
     def test_no_v1_keys(self, _pristine):

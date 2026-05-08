@@ -42,13 +42,19 @@ __all__ = [
 
 _MULTI_LOCUS_COLUMNS: tuple[str, ...] = (
     "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
+    "gdna_prior_count", "rna_prior_count",
 )
 
 _PER_LOCUS_COLUMNS: tuple[str, ...] = (
     "multi_locus_id", "ref", "start", "end", "span",
     "n_obs", "n_gdna",
-    "n_gdna_intergenic", "n_gdna_intron", "n_gdna_exon_intron",
-    "pi_gdna", "n_eligible_boundaries", "fallback_flags",
+    "n_gdna_intergenic", "n_gdna_intron",
+    "n_gdna_boundary_observed", "n_gdna_exon_only",
+    "n_gdna_exon_intron",   # compat aggregate (deprecated, removed in a later release)
+    "pi_gdna",
+    "n_eligible_boundaries", "n_boundary_events",
+    "nrna_active",
+    "fallback_flags",
 )
 
 
@@ -65,6 +71,8 @@ def build_multi_locus_prior_df(
             "n_rna":          [m.n_rna          for m in mlps],
             "pi_gdna":        [m.pi_gdna        for m in mlps],
             "n_loci":         [len(m.per_locus) for m in mlps],
+            "gdna_prior_count": [m.gdna_prior_count for m in mlps],
+            "rna_prior_count":  [m.rna_prior_count  for m in mlps],
         },
         columns=list(_MULTI_LOCUS_COLUMNS),
     )
@@ -81,19 +89,23 @@ def build_per_locus_gdna_df(
         for e in ml.per_locus:
             rows.append(
                 {
-                    "multi_locus_id":        ml.multi_locus_id,
-                    "ref":                   e.locus.ref,
-                    "start":                 e.locus.start,
-                    "end":                   e.locus.end,
-                    "span":                  e.locus.span,
-                    "n_obs":                 e.n_obs,
-                    "n_gdna":                e.n_gdna,
-                    "n_gdna_intergenic":     e.n_gdna_intergenic,
-                    "n_gdna_intron":         e.n_gdna_intron,
-                    "n_gdna_exon_intron":    e.n_gdna_exon_intron,
-                    "pi_gdna":               e.pi_gdna,
-                    "n_eligible_boundaries": e.n_eligible_boundaries,
-                    "fallback_flags":        e.fallback_flags,
+                    "multi_locus_id":            ml.multi_locus_id,
+                    "ref":                       e.locus.ref,
+                    "start":                     e.locus.start,
+                    "end":                       e.locus.end,
+                    "span":                      e.locus.span,
+                    "n_obs":                     e.n_obs,
+                    "n_gdna":                    e.n_gdna,
+                    "n_gdna_intergenic":         e.n_gdna_intergenic,
+                    "n_gdna_intron":             e.n_gdna_intron,
+                    "n_gdna_boundary_observed":  e.n_gdna_boundary_observed,
+                    "n_gdna_exon_only":          e.n_gdna_exon_only,
+                    "n_gdna_exon_intron":        e.n_gdna_exon_intron,
+                    "pi_gdna":                   e.pi_gdna,
+                    "n_eligible_boundaries":     e.n_eligible_boundaries,
+                    "n_boundary_events":         e.n_boundary_events,
+                    "nrna_active":               e.nrna_active,
+                    "fallback_flags":            e.fallback_flags,
                 }
             )
     return pd.DataFrame(rows, columns=list(_PER_LOCUS_COLUMNS))
@@ -168,7 +180,6 @@ class CalibrationResult:
             "fl_models":        self.fl_models.to_summary_dict(),
             "diagnostics":      self.diagnostics.to_summary_dict(),
             "n_multi_loci":     self.n_multi_loci,
-            "c_base":           float(self.prior_table.c_base_value),
             "mean_pi_gdna":     mean_pi,
         }
 

@@ -177,6 +177,25 @@ class FragmentLengthModel:
         return self._total_weight
 
     @property
+    def pmf(self) -> np.ndarray:
+        """Public probability vector, shape ``(max_size + 1,)``.
+
+        Returns the EB-smoothed posterior predictive after
+        :meth:`finalize` (when a Dirichlet prior is supplied), the
+        finalized Laplace-smoothed estimate after a plain ``finalize()``,
+        or a pre-finalize Laplace-smoothed estimate from raw counts. This
+        is the *same* vector used internally by
+        :meth:`compute_all_transcript_eff_lens` and the analytical
+        moment helpers, so consumers that need the underlying PMF (e.g.
+        the calibration boundary-crossing exposure) stay consistent
+        with effective-length math without reaching into private state.
+
+        Always returns a freshly normalized ``float64`` array; do not
+        mutate.
+        """
+        return self._normalized_probs()
+
+    @property
     def mean(self) -> float:
         """Weighted mean fragment length.
 

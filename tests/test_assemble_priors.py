@@ -11,7 +11,6 @@ import pytest
 from rigel.calibration._kappa import KappaEstimate
 from rigel.calibration.density_global import GlobalDensityTable, GlobalGdnaDensity
 from rigel.calibration.locus_prior import (
-    C_BASE_DEFAULT,
     LocusGdnaEstimate,
     PriorTable,
     assemble_multilocus_prior,
@@ -95,6 +94,10 @@ def _fake_index(
         region_df=region_df,
         t_df=t_df,
         ref_name_to_id=ref_name_to_id,
+        # Mirror TranscriptIndex.ref_lengths (insertion-ordered dict aligned
+        # with ref_name_to_id). Use a length larger than any region/transcript
+        # extent so the Phase-4 intergenic flank clamp is a no-op for tests.
+        ref_lengths={name: 1_000_000 for name in refs},
     )
 
 
@@ -121,8 +124,21 @@ def _make_payload(
     )
 
 
-def _make_em(locus_t_indices: np.ndarray) -> SimpleNamespace:
-    return SimpleNamespace(locus_t_indices=locus_t_indices)
+def _make_em(
+    locus_t_indices: np.ndarray,
+    *,
+    n_units: int | None = None,
+) -> SimpleNamespace:
+    if n_units is None:
+        n_units = int(locus_t_indices.size + 32)
+    return SimpleNamespace(
+        locus_t_indices=locus_t_indices,
+        # Phase\u00a02: enable_gdna_for_multilocus consults these directly.
+        # Default: every unit is unspliced with finite gDNA log-lik
+        # \u21d2 enable_gdna == 1 unless the test overrides.
+        is_spliced=np.zeros(n_units, dtype=np.uint8),
+        gdna_log_liks=np.full(n_units, -1.0, dtype=np.float64),
+    )
 
 
 def _ml_single(
@@ -144,54 +160,78 @@ def _ml_single(
 # Tests
 # ---------------------------------------------------------------------------
 
+def _make_estimate(
+    locus: Locus,
+    n_obs: int,
+    *,
+    n_gdna_intergenic: float = 0.0,
+    n_gdna_intron: float = 0.0,
+    n_gdna_boundary_observed: float = 0.0,
+    n_gdna_exon_only: float = 0.0,
+) -> LocusGdnaEstimate:
+    """Test helper: construct a ``LocusGdnaEstimate`` with consistent totals."""
+    n_gdna = (
+        n_gdna_intergenic + n_gdna_intron
+        + n_gdna_boundary_observed + n_gdna_exon_only
+    )
+    pi = (n_gdna / n_obs) if n_obs > 0 else 0.0
+    return LocusGdnaEstimate(
+        locus=locus, n_obs=n_obs,
+        n_gdna_intergenic=n_gdna_intergenic,
+        n_gdna_intron=n_gdna_intron,
+        n_gdna_boundary_observed=n_gdna_boundary_observed,
+        n_gdna_exon_only=n_gdna_exon_only,
+        n_gdna=n_gdna,
+        pi_gdna=min(1.0, max(0.0, pi)),
+        rho_loco=(0.0, 0.0, 0.0), leff_loco=(0.0, 0.0, 0.0),
+        n_eligible_boundaries=0, n_boundary_events=n_gdna_boundary_observed,
+        nrna_active=False,
+        fallback_flags=0,
+    )
+
+
 def test_assemble_multilocus_prior_single_locus_matches_estimate():
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
-    est = LocusGdnaEstimate(
-        locus=locus, n_obs=10,
-        n_gdna_intergenic=3.0, n_gdna_intron=0.0, n_gdna_exon_intron=0.0,
-        n_gdna=3.0, pi_gdna=0.3,
-        rho_loco=(0.0, 0.0, 0.0), leff_loco=(0.0, 0.0, 0.0),
-        n_eligible_boundaries=0, fallback_flags=0,
-    )
+    est = _make_estimate(locus, n_obs=10, n_gdna_intergenic=3.0)
     ml = _ml_single(0, [0], [10], locus)
-    mlp = assemble_multilocus_prior(ml, (est,))
+    mlp = assemble_multilocus_prior(
+        ml, (est,), gdna_prior_count=3.0, rna_prior_count=7.0,
+    )
     assert mlp.n_obs == 10
     assert mlp.n_gdna == pytest.approx(3.0)
     assert mlp.n_rna == pytest.approx(7.0)
     assert mlp.pi_gdna == pytest.approx(0.3)
+    assert mlp.gdna_prior_count == pytest.approx(3.0)
+    assert mlp.rna_prior_count == pytest.approx(7.0)
     assert mlp.per_locus == (est,)
 
 
 def test_assemble_multilocus_prior_two_locus_aggregates():
     loc0 = Locus(ref="chr1", ref_id=0, start=0, end=500)
     loc1 = Locus(ref="chr1", ref_id=0, start=1000, end=1500)
-    est0 = LocusGdnaEstimate(
-        locus=loc0, n_obs=10, n_gdna_intergenic=2.0, n_gdna_intron=0.0,
-        n_gdna_exon_intron=0.0, n_gdna=2.0, pi_gdna=0.2,
-        rho_loco=(0.0,)*3, leff_loco=(0.0,)*3,
-        n_eligible_boundaries=0, fallback_flags=0,
-    )
-    est1 = LocusGdnaEstimate(
-        locus=loc1, n_obs=10, n_gdna_intergenic=4.0, n_gdna_intron=0.0,
-        n_gdna_exon_intron=0.0, n_gdna=4.0, pi_gdna=0.4,
-        rho_loco=(0.0,)*3, leff_loco=(0.0,)*3,
-        n_eligible_boundaries=0, fallback_flags=0,
-    )
+    est0 = _make_estimate(loc0, n_obs=10, n_gdna_intergenic=2.0)
+    est1 = _make_estimate(loc1, n_obs=10, n_gdna_intergenic=4.0)
     ml = MultiLocus(
         multi_locus_id=0,
         transcript_indices=np.array([0, 1], dtype=np.int32),
         unit_indices=np.array([10, 11], dtype=np.int32),
         gdna_span=1000, loci=(loc0, loc1),
     )
-    mlp = assemble_multilocus_prior(ml, (est0, est1))
+    mlp = assemble_multilocus_prior(
+        ml, (est0, est1), gdna_prior_count=6.0, rna_prior_count=14.0,
+    )
     assert mlp.n_obs == 20
     assert mlp.n_gdna == pytest.approx(6.0)
     assert mlp.pi_gdna == pytest.approx(0.3)
 
 
 def test_assemble_priors_alpha_scaling():
-    """alpha_gdna == c_base · pi_gdna; alpha_rna == c_base · (1 - pi_gdna)."""
-    # Single intergenic locus, 10 obs, 5 gdna fragments ⇒ pi = 0.5.
+    """alpha_gdna/alpha_rna obey the constant-ESS Phase\u00a04 baseline.
+
+    §8 of the Bayesian-prior redesign reverted the Phase\u00a05 evidence-scaled
+    ``c_loco`` so the diff for Phases\u00a01\u20133 starts from a clean canvas.
+    """
+    # Single intergenic locus, 10 obs, 5 gdna fragments \u21d2 pi = 0.5.
     index = _fake_index(
         region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
         transcripts=[("chr1", 100, 800)],
@@ -208,12 +248,15 @@ def test_assemble_priors_alpha_scaling():
         gdna_fl=_delta_fl(200), c_base=10.0,
     )
     assert isinstance(pt, PriorTable)
-    # n_gdna = ρ_loco · L_eff_contained = 5 (κ=0 ⇒ cancels);
-    # n_obs = 10 ⇒ pi = 0.5.
+    # n_gdna = \u03c1_loco \u00b7 L_eff_contained = 5 (\u03ba=0 \u21d2 cancels);
+    # n_obs = 10 \u21d2 pi = 0.5.
     assert pt.multi_locus_priors[0].pi_gdna == pytest.approx(0.5)
-    assert pt.alpha_gdna[0] == pytest.approx(10.0 * 0.5)
-    assert pt.alpha_rna[0] == pytest.approx(10.0 * 0.5)
-    assert pt.c_base_value == 10.0
+    # Phase 1 baseline: alpha_gdna/alpha_rna == c_base * pi (split 50/50 here).
+    assert pt.alpha_gdna[0] == pytest.approx(5.0)
+    assert pt.alpha_rna[0] == pytest.approx(5.0)
+    assert pt.gdna_prior_count[0] == pytest.approx(5.0)
+    assert pt.rna_prior_count[0] == pytest.approx(5.0)
+    assert pt.enable_gdna[0] == 1
 
 
 def test_assemble_priors_prior_weight_rna_shape():
@@ -251,5 +294,5 @@ def test_assemble_priors_default_c_base():
         multi_loci=[ml], em_data=em, index=index,
         payload=payload, global_densities=_gdt_zero(),
     )
-    # Default c_base.
-    assert pt.c_base_value == C_BASE_DEFAULT
+    # Default c_base ⇒ alpha_gdna + alpha_rna == C_BASE_DEFAULT.
+    assert (pt.alpha_gdna[0] + pt.alpha_rna[0]) == pytest.approx(C_BASE_DEFAULT)

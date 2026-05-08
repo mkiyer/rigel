@@ -205,23 +205,30 @@ class TestCalibrateWithPriorsRoundtrip:
         loc = Locus(ref="chr1", ref_id=0, start=500, end=1000)
         est = LocusGdnaEstimate(
             locus=loc, n_obs=10,
-            n_gdna_intergenic=1.0, n_gdna_intron=2.0, n_gdna_exon_intron=0.5,
+            n_gdna_intergenic=1.0, n_gdna_intron=2.0,
+            n_gdna_boundary_observed=0.5, n_gdna_exon_only=0.0,
             n_gdna=3.5, pi_gdna=0.35,
             rho_loco=(0.0, 0.0, 0.0),
             leff_loco=(0.0, 0.0, 0.0),
             n_eligible_boundaries=0,
+            n_boundary_events=0.5,
+            nrna_active=False,
             fallback_flags=0,
         )
         mlp = MultiLocusPrior(
             multi_locus_id=0, n_obs=10, n_gdna=3.5, n_rna=6.5,
-            pi_gdna=0.35, per_locus=(est,),
+            pi_gdna=0.35,
+            gdna_prior_count=3.5, rna_prior_count=6.5,
+            per_locus=(est,),
         )
         new_table = PriorTable(
             multi_locus_priors=(mlp,),
             alpha_gdna=np.array([3.5], dtype=np.float64),
             alpha_rna=np.array([6.5], dtype=np.float64),
             prior_weight_rna=[np.ones(2, dtype=np.float32)],
-            c_base_value=C_BASE_DEFAULT,
+            gdna_prior_count=np.array([3.5], dtype=np.float64),
+            rna_prior_count=np.array([6.5], dtype=np.float64),
+            enable_gdna=np.array([1], dtype=np.uint8),
         )
 
         updated = result.with_priors(new_table)
@@ -235,7 +242,7 @@ class TestCalibrateWithPriorsRoundtrip:
 
 class TestPriorTableEmpty:
     def test_empty_invariants(self):
-        """Empty seed has zero-length arrays + default c_base."""
+        """Empty seed has zero-length arrays for every canonical field."""
         t = PriorTable.empty()
         assert t.multi_locus_priors == ()
         assert t.alpha_gdna.dtype == np.float64
@@ -243,11 +250,12 @@ class TestPriorTableEmpty:
         assert len(t.alpha_gdna) == 0
         assert len(t.alpha_rna) == 0
         assert t.prior_weight_rna == []
-        assert t.c_base_value == C_BASE_DEFAULT
-
-    def test_empty_custom_c_base(self):
-        t = PriorTable.empty(c_base_value=42.5)
-        assert t.c_base_value == 42.5
+        assert t.gdna_prior_count.dtype == np.float64
+        assert t.rna_prior_count.dtype == np.float64
+        assert len(t.gdna_prior_count) == 0
+        assert len(t.rna_prior_count) == 0
+        assert t.enable_gdna.dtype == np.uint8
+        assert len(t.enable_gdna) == 0
 
 
 class TestCalibrateFLPriorEssPropagates:

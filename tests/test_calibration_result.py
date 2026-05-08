@@ -37,12 +37,18 @@ from rigel.splice import SpliceType
 
 EXPECTED_MULTI_LOCUS_COLUMNS = [
     "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
+    "gdna_prior_count", "rna_prior_count",
 ]
 EXPECTED_PER_LOCUS_COLUMNS = [
     "multi_locus_id", "ref", "start", "end", "span",
     "n_obs", "n_gdna",
-    "n_gdna_intergenic", "n_gdna_intron", "n_gdna_exon_intron",
-    "pi_gdna", "n_eligible_boundaries", "fallback_flags",
+    "n_gdna_intergenic", "n_gdna_intron",
+    "n_gdna_boundary_observed", "n_gdna_exon_only",
+    "n_gdna_exon_intron",
+    "pi_gdna",
+    "n_eligible_boundaries", "n_boundary_events",
+    "nrna_active",
+    "fallback_flags",
 ]
 
 
@@ -110,17 +116,22 @@ def _make_estimate(
     intergenic: float = 0.0, intron: float = 0.0, exon_intron: float = 0.0,
     flags: int = 0,
 ) -> LocusGdnaEstimate:
+    # Legacy ``exon_intron`` aggregate is split 50/50 across the two new
+    # boundary fields for fixture purposes; tests do not depend on the split.
     return LocusGdnaEstimate(
         locus=Locus(ref=ref, ref_id=0, start=start, end=end),
         n_obs=n_obs,
         n_gdna_intergenic=intergenic,
         n_gdna_intron=intron,
-        n_gdna_exon_intron=exon_intron,
+        n_gdna_boundary_observed=exon_intron,
+        n_gdna_exon_only=0.0,
         n_gdna=n_gdna,
         pi_gdna=(n_gdna / n_obs) if n_obs > 0 else 0.0,
         rho_loco=(0.0, 0.0, 0.0),
         leff_loco=(0.0, 0.0, 0.0),
         n_eligible_boundaries=0,
+        n_boundary_events=exon_intron,
+        nrna_active=False,
         fallback_flags=flags,
     )
 
@@ -128,22 +139,28 @@ def _make_estimate(
 def _mlp(mid: int, ests: tuple[LocusGdnaEstimate, ...]) -> MultiLocusPrior:
     n_obs = sum(e.n_obs for e in ests)
     n_gdna = sum(e.n_gdna for e in ests)
+    pi = (n_gdna / n_obs) if n_obs > 0 else 0.0
     return MultiLocusPrior(
         multi_locus_id=mid, n_obs=n_obs, n_gdna=n_gdna,
         n_rna=max(0.0, n_obs - n_gdna),
-        pi_gdna=(n_gdna / n_obs) if n_obs > 0 else 0.0,
+        pi_gdna=pi,
+        gdna_prior_count=pi * 10.0,
+        rna_prior_count=(1.0 - pi) * 10.0,
         per_locus=ests,
     )
 
 
 def _prior_table(mlps: tuple[MultiLocusPrior, ...]) -> PriorTable:
     n = len(mlps)
+    pi_arr = np.array([m.pi_gdna for m in mlps], dtype=np.float64)
     return PriorTable(
         multi_locus_priors=mlps,
-        alpha_gdna=np.array([m.pi_gdna * 10.0 for m in mlps], dtype=np.float64),
-        alpha_rna=np.array([(1.0 - m.pi_gdna) * 10.0 for m in mlps], dtype=np.float64),
+        alpha_gdna=pi_arr * 10.0,
+        alpha_rna=(1.0 - pi_arr) * 10.0,
         prior_weight_rna=[np.ones(2, dtype=np.float32) for _ in range(n)],
-        c_base_value=10.0,
+        gdna_prior_count=pi_arr * 10.0,
+        rna_prior_count=(1.0 - pi_arr) * 10.0,
+        enable_gdna=np.ones(n, dtype=np.uint8),
     )
 
 
@@ -269,7 +286,7 @@ def test_to_summary_dict_is_json_serialisable():
     )
     blob = json.dumps(res.to_summary_dict())
     for key in ("global_densities", "fl_models", "diagnostics",
-                "n_multi_loci", "c_base", "mean_pi_gdna"):
+                "n_multi_loci", "mean_pi_gdna"):
         assert key in blob
     # No mask integers anywhere in the JSON.
     for forbidden in ("mask_0", "mask_1", "mask_2", "mask_3", "mask_4",
@@ -278,13 +295,7 @@ def test_to_summary_dict_is_json_serialisable():
 
 
 def test_to_summary_dict_mean_pi_gdna_handles_empty_priors():
-    pt = PriorTable(
-        multi_locus_priors=(),
-        alpha_gdna=np.zeros(0, dtype=np.float64),
-        alpha_rna=np.zeros(0, dtype=np.float64),
-        prior_weight_rna=[],
-        c_base_value=10.0,
-    )
+    pt = PriorTable.empty()
     res = build_calibration_result(
         payload=_payload(), scan_trained=_scan_trained(),
         global_densities=_gdt(), prior_table=pt,

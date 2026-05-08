@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from rigel.calibration._arrays import PayloadArrays, RegionArrays
+from rigel.calibration._exposure import boundary_crossing_exposure
 from rigel.calibration._kappa import KappaEstimate
 from rigel.calibration._region_index_py import RegionIndexPy
 from rigel.calibration.density_global import GlobalDensityTable, GlobalGdnaDensity
@@ -189,7 +190,7 @@ def test_intron_zero_count_shrinks_to_global():
 
 def test_exon_only_no_eligible_uses_global():
     # One EXON region [0, 500) with NO eligible boundaries; ρ_global = 0.03.
-    # n_eligible == 0 ⇒ ρ_loco = ρ_global, n_gdna = ρ · L_eff_full.
+    # n_eligible == 0 ⇒ ρ_loco = ρ_global, n_exon_only = ρ · L_eff_full.
     ra, pa, idx, _ = _build_arrays(
         regions=[("chr1", 0, 500, int(RegionType.EXON), False, False)],
         u_left=[0], u_right=[0],
@@ -214,23 +215,26 @@ def test_exon_only_no_eligible_uses_global():
     assert est.n_eligible_boundaries == 0
     assert est.fallback_flags & FLAG_EXON_INTRON_NO_ELIGIBLE
     assert est.rho_loco[2] == pytest.approx(0.03)
-    assert est.n_gdna_exon_intron == pytest.approx(0.03 * leff_full)
+    assert est.n_gdna_boundary_observed == 0.0
+    assert est.n_gdna_exon_only == pytest.approx(0.03 * leff_full)
 
 
 def test_exon_with_both_eligible_boundaries_exact():
-    # EXON region [0, 500) with both boundaries eligible; u_L=10, u_R=15.
-    # κ = 0 ⇒ ρ_loco = (10 + 15) / (2 · 200) = 25 / 400 = 0.0625
-    # n_gdna = 0.0625 · L_eff_contained(500)
+    # EXON region [0, 500) with both boundaries eligible inside the locus;
+    # u_L=10, u_R=15. κ=0 ⇒ ρ_loco = 25 / (2 · B_cross).
+    # Decomposition: n_gdna_boundary_observed = 25 (raw events),
+    # n_gdna_exon_only = ρ_loco · L_eff_contained(500).
     ra, pa, idx, _ = _build_arrays(
         regions=[("chr1", 0, 500, int(RegionType.EXON), True, True)],
         u_left=[10], u_right=[15],
     )
     gdna_fl = _delta_fl(200)
+    b_cross = boundary_crossing_exposure(gdna_fl)
     gdt = GlobalDensityTable(
         intergenic=_gdt().intergenic,
         intron=_gdt().intron,
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=25, eff_length_bp=400.0,
+            type="EXON-INTRON", rho=0.0, n_fragments=25, eff_length_bp=2.0 * b_cross,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
@@ -243,9 +247,16 @@ def test_exon_with_both_eligible_boundaries_exact():
         global_densities=gdt, gdna_fl=gdna_fl,
     )
     leff_full = float(_oracle_leff([500], gdna_fl)[0])
+    expected_rho = 25.0 / (2.0 * b_cross)
     assert est.n_eligible_boundaries == 2
-    assert est.rho_loco[2] == pytest.approx(25.0 / 400.0)
-    assert est.n_gdna_exon_intron == pytest.approx(25.0 / 400.0 * leff_full)
+    assert est.rho_loco[2] == pytest.approx(expected_rho)
+    assert est.n_gdna_boundary_observed == pytest.approx(25.0)
+    assert est.n_gdna_exon_only == pytest.approx(expected_rho * leff_full)
+    # Decomposition invariant.
+    assert est.n_gdna == pytest.approx(
+        est.n_gdna_intergenic + est.n_gdna_intron
+        + est.n_gdna_boundary_observed + est.n_gdna_exon_only
+    )
 
 
 def test_short_locus_contained_leff_semantics():
@@ -293,6 +304,7 @@ def test_all_three_region_types_summed():
         u_left=[0, 7, 0], u_right=[0, 0, 0],
     )
     gdna_fl = _delta_fl(200)
+    b_cross = boundary_crossing_exposure(gdna_fl)
     gdt = GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
             type="INTERGENIC", rho=0.0, n_fragments=5, eff_length_bp=299.0,
@@ -305,7 +317,7 @@ def test_all_three_region_types_summed():
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=7, eff_length_bp=200.0,
+            type="EXON-INTRON", rho=0.0, n_fragments=7, eff_length_bp=b_cross,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
@@ -317,16 +329,23 @@ def test_all_three_region_types_summed():
         region_arrays=ra, payload_arrays=pa,
         global_densities=gdt, gdna_fl=gdna_fl,
     )
-    # κ = 0 ⇒ pure-local densities reproduce input fragments exactly:
-    #   intergenic: n_gdna = 5
-    #   intron:     n_gdna = 10
-    #   exon-intron: ρ = 7/(1·200), L_eff_full = oracle(500, fl)
+    # κ = 0 ⇒ pure-local densities. With proration ratio == 1 (clip == full):
+    #   intergenic: n_mass = 5
+    #   intron:     n_mass = 10
+    #   boundary:   only left side eligible (bf_left=True, bf_right=False),
+    #               but the exon region is [100,600); start=100 lies in
+    #               [0,1000] window ⇒ 1 eligible side. ρ = 7 / (1 · B_cross)
+    #               n_boundary_observed = 7
+    #               n_exon_only = ρ · L_eff_contained(500)
     leff_exon = float(_oracle_leff([500], gdna_fl)[0])
+    expected_rho_b = 7.0 / b_cross
     assert est.n_gdna_intergenic == pytest.approx(5.0)
     assert est.n_gdna_intron == pytest.approx(10.0)
-    assert est.n_gdna_exon_intron == pytest.approx(7.0 / 200.0 * leff_exon)
+    assert est.n_eligible_boundaries == 1
+    assert est.n_gdna_boundary_observed == pytest.approx(7.0)
+    assert est.n_gdna_exon_only == pytest.approx(expected_rho_b * leff_exon)
     assert est.n_gdna == pytest.approx(
-        5.0 + 10.0 + 7.0 / 200.0 * leff_exon
+        5.0 + 10.0 + 7.0 + expected_rho_b * leff_exon
     )
 
 

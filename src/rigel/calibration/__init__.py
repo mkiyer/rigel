@@ -48,18 +48,20 @@ from .fl import (
     build_fl_models,
 )
 from .locus_prior import (
-    C_BASE_DEFAULT,
     FLAG_EXON_INTRON_NO_ELIGIBLE,
     FLAG_INTERGENIC_ZERO_LEFF,
     FLAG_INTRON_ZERO_LEFF,
     FLAG_PI_CLIPPED,
+    ExpectedGdnaPriorParts,
     LocusGdnaEstimate,
     MultiLocusPrior,
     PriorTable,
     assemble_multilocus_prior,
     assemble_priors,
     build_prior_weight_rna,
+    enable_gdna_for_multilocus,
     estimate_locus_gdna,
+    expected_gdna_count_global,
 )
 
 __all__ = [
@@ -88,9 +90,11 @@ __all__ = [
     "MultiLocusPrior",
     "PriorTable",
     "estimate_locus_gdna",
+    "expected_gdna_count_global",
+    "enable_gdna_for_multilocus",
+    "ExpectedGdnaPriorParts",
     "assemble_multilocus_prior",
     "assemble_priors",
-    "C_BASE_DEFAULT",
     "FLAG_INTERGENIC_ZERO_LEFF",
     "FLAG_INTRON_ZERO_LEFF",
     "FLAG_EXON_INTRON_NO_ELIGIBLE",

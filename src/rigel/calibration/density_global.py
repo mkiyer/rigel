@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from ..frag_length_model import FragmentLengthModel
+from ._exposure import boundary_crossing_exposure
 from ._kappa import KappaEstimate, estimate_kappa
 from .regions import RegionType
 from .scan_payload import (
@@ -134,8 +135,10 @@ def compute_global_densities(
     The denominator for INTERGENIC and INTRON is the FL-PMF-weighted
     containment effective length (:func:`l_eff_contained`), matching
     the *contained* fragment numerator emitted by the C++ scanner.
-    The EXON-INTRON denominator is a capture-window geometry that
-    uses the FL mean (:attr:`FragmentLengthModel.mean`).
+    The EXON-INTRON denominator is the per-side boundary-crossing
+    exposure :math:`B_\\text{cross} = \\sum_\\ell h(\\ell)\\,
+    \\max(\\ell - 1, 0)` summed over eligible boundary sides; see
+    :func:`rigel.calibration._exposure.boundary_crossing_exposure`.
     """
     n_regions = len(region_df)
     if payload.per_region_counts.shape[0] != n_regions:
@@ -183,7 +186,7 @@ def compute_global_densities(
         bf_right=region_df["boundary_flux_right"].to_numpy(),
         u_left=payload.u_left,
         u_right=payload.u_right,
-        gdna_fl_mean=float(gdna_fl.mean),
+        b_cross=boundary_crossing_exposure(gdna_fl),
     )
 
     return GlobalDensityTable(
@@ -226,12 +229,18 @@ def _density_exon_intron(
     bf_right: np.ndarray,       # (R,) bool: boundary_flux_right flag
     u_left: np.ndarray,         # (R,) int64: per-region left-edge flux
     u_right: np.ndarray,        # (R,) int64: per-region right-edge flux
-    gdna_fl_mean: float,
+    b_cross: float,             # FL-PMF boundary-crossing exposure per side
 ) -> GlobalGdnaDensity:
     """Capture-aware EXON boundary-flux density.
 
     Per-region count: ``u_L * 1_L + u_R * 1_R``.
-    Per-region effective length: ``(1_L + 1_R) * gdna_fl_mean``.
+    Per-region effective length: ``(1_L + 1_R) * B_cross``, where
+    :math:`B_\\text{cross} = \\sum_\\ell h(\\ell)\\,\\max(\\ell - 1, 0)` is the
+    expected number of *strict* boundary-crossing start positions for a
+    single fragment under the gDNA fragment-length distribution. This
+    replaces the historical ``mean_FL`` factor, which was off by a
+    1 bp shift (a fragment of length :math:`\\ell` has :math:`\\ell - 1`
+    strict boundary-crossing positions, not :math:`\\ell`).
 
     The eligibility filter (``1_L | 1_R`` on EXON rows) ensures that
     terminal exon boundaries (TSS/TES) — where capture probes do not
@@ -244,7 +253,7 @@ def _density_exon_intron(
         u_left * bf_left.astype(np.int64) +
         u_right * bf_right.astype(np.int64)
     ).astype(np.int64)
-    per_region_leff = (sides.astype(np.float64) * gdna_fl_mean)
+    per_region_leff = sides.astype(np.float64) * b_cross
 
     sub_counts = per_region_counts[eligible]
     sub_leff = per_region_leff[eligible]

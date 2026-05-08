@@ -570,7 +570,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- CalibrationConfig (v6) --
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_nrna_weight", "calibration.nrna_weight"),
-    _ParamSpec("cal_c_base", "calibration.c_base"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
     # -- Fan-out: threads → both EM and scan --
@@ -1096,14 +1095,6 @@ def build_parser() -> argparse.ArgumentParser:
         "in [0, 1] (default: 0.0 — nRNA components disabled in the "
         "per-MultiLocus prior).  1.0 treats nRNA on equal footing "
         "with mRNA.",
-    )
-    adv.add_argument(
-        "--cal-c-base",
-        dest="cal_c_base",
-        type=float,
-        default=None,
-        help="Dirichlet evidence strength for the "
-        "per-MultiLocus (alpha_gdna, alpha_rna) prior (default: 10.0).",
     )
     adv.add_argument(
         "--cal-quality-good",

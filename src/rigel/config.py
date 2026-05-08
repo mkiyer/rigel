@@ -166,11 +166,6 @@ class CalibrationConfig:
     #: in the prior; 1 treats nRNA on equal footing with mRNA).
     nrna_weight: float = 0.0
 
-    #: Dirichlet evidence strength for the per-MultiLocus
-    #: ``(α_gdna, α_rna)`` prior assembled by
-    #: :func:`rigel.calibration.assemble_priors`.
-    c_base: float = 10.0
-
     #: Minimum SPLICED-annotated count (``rna``) and gDNA count required
     #: for the pool's per-FL distribution to be flagged ``"good"`` /
     #: ``"weak"`` respectively.  Below ``weak_threshold`` a pool is
