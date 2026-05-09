@@ -138,7 +138,7 @@ def main() -> int:
     # Run the BAM scan
     print("\n[probe] running scan_and_buffer ...")
     payload = scan_and_buffer(args.bam, index,
-                              BamScanConfig(boundary_tolerance=args.K))[-1]
+                              BamScanConfig(splicing_anchor_tolerance=args.K))[-1]
     if payload is None:
         print("ERROR: payload is None")
         return 1

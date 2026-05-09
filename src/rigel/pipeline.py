@@ -234,6 +234,12 @@ def scan_and_buffer(
     nrna_arr = index.t_df["is_synthetic"].values.astype("uint8")
     resolve_ctx.set_nrna_status(nrna_arr.tolist())
 
+    # Splicing-anchor tolerance K (bp): one-sided slack used by both the
+    # SPLICED_IMPLICIT per-intron whole-containment discriminant and the
+    # boundary-flux calibration accumulator. Set on the resolver before
+    # the scanner so all _resolve_core calls see the configured K.
+    resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))
+
     # nRNA parent-index wiring (set_nrna_parent_index) is performed by
     # TranscriptIndex.load() at index-load time, so no need to repeat
     # it here.
@@ -255,7 +261,7 @@ def scan_and_buffer(
     if region_df is not None and len(region_df) > 0:
         _wire_calibration_regions(
             scanner, index, region_df,
-            boundary_tolerance=int(scan.boundary_tolerance),
+            splicing_anchor_tolerance=int(scan.splicing_anchor_tolerance),
         )
 
     # Streaming chunk callback — receives zero-copy dict from C++
@@ -325,7 +331,7 @@ def _wire_calibration_regions(
     index: TranscriptIndex,
     region_df,
     *,
-    boundary_tolerance: int = 0,
+    splicing_anchor_tolerance: int = 0,
 ) -> None:
     """Install the index's region partition into a native BamScanner.
 
@@ -372,7 +378,7 @@ def _wire_calibration_regions(
         np.ascontiguousarray(ends),
         np.ascontiguousarray(type_masks),
         n_refs,
-        int(boundary_tolerance),
+        int(splicing_anchor_tolerance),
     )
 
 
@@ -891,8 +897,8 @@ def quant_from_buffer(
             calibration.global_densities,
             gdna_fl=fl_models.gdna,
             nrna_weight=nrna_weight,
-            boundary_tolerance=int(
-                getattr(calibration_payload, "boundary_tolerance", 0)
+            splicing_anchor_tolerance=int(
+                getattr(calibration_payload, "splicing_anchor_tolerance", 0)
             ),
         )
         calibration = calibration.with_priors(prior_table)

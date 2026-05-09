@@ -107,7 +107,7 @@ def calibrate(
         index.region_df,
         payload,
         gdna_fl=fl_models.gdna,
-        boundary_tolerance=int(getattr(payload, "boundary_tolerance", 0)),
+        splicing_anchor_tolerance=int(getattr(payload, "splicing_anchor_tolerance", 0)),
     )
 
     return build_calibration_result(

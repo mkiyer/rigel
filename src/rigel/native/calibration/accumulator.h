@@ -65,23 +65,23 @@ struct CalibrationPayload {
     // reference than the index was built from.
     int64_t n_unannotated_ref      = 0;
     // Observed fragment with raw region hits whose every aligned-block
-    // overlap was below the boundary-tolerance threshold q(K) = max(K,1)
+    // overlap was below the splicing-anchor-tolerance threshold q(K) = max(K,1)
     // (so no hit contributed a type bit to ``obs_mask``). These
     // fragments still increment ``global_counts[0]``, ``fl_hist[0]``,
     // and ``n_observed`` — this is an auxiliary QC subcounter.
-    // Always zero when boundary_tolerance == 0.
+    // Always zero when splicing_anchor_tolerance == 0.
     int64_t n_below_tolerance      = 0;
 };
 
 class CalibrationAccumulator {
 public:
     explicit CalibrationAccumulator(int64_t n_regions,
-                                    int32_t boundary_tolerance = 0) {
-        if (boundary_tolerance < 0) {
+                                    int32_t splicing_anchor_tolerance = 0) {
+        if (splicing_anchor_tolerance < 0) {
             throw std::invalid_argument(
-                "CalibrationAccumulator: boundary_tolerance must be >= 0");
+                "CalibrationAccumulator: splicing_anchor_tolerance must be >= 0");
         }
-        boundary_tolerance_ = boundary_tolerance;
+        splicing_anchor_tolerance_ = splicing_anchor_tolerance;
         payload_.per_region_counts.assign(
             static_cast<size_t>(n_regions) * mask::N_STATES, 0);
         payload_.fl_hist.assign(
@@ -126,12 +126,12 @@ public:
     CalibrationPayload&       payload()       { return payload_; }
 
     int64_t n_regions() const { return n_regions_; }
-    int32_t boundary_tolerance() const { return boundary_tolerance_; }
+    int32_t splicing_anchor_tolerance() const { return splicing_anchor_tolerance_; }
 
 private:
     CalibrationPayload payload_;
     int64_t n_regions_ = 0;
-    int32_t boundary_tolerance_ = 0;
+    int32_t splicing_anchor_tolerance_ = 0;
 
     // Per-fragment scratch (reused across observe() calls).  After
     // warm-up these never reallocate: clear() keeps capacity.
@@ -139,7 +139,7 @@ private:
     // ``hits_overlap_bp_`` tracks per-fragment exact aligned-block
     // overlap (summed across exon blocks) parallel to ``hits_``; it
     // is used to gate ``obs_mask`` and per-region fan-out on the
-    // boundary-tolerance threshold ``q(K) = max(K, 1)``.
+    // splicing-anchor-tolerance threshold ``q(K) = max(K, 1)``.
     // ``qualified_hits_`` holds the subset of ``hits_`` whose
     // overlap_bp >= q(K) — only these contribute mask bits, per-region
     // counts, and boundary-flux events.  At K=0 (q=1) every hit

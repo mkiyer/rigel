@@ -134,6 +134,11 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),
              nb::arg("cumsum"), nb::arg("lengths"),
              "Build per-transcript exon CSR index for FL computation.")
+        .def("set_splicing_anchor_tolerance",
+             &FragmentResolver::set_splicing_anchor_tolerance,
+             nb::arg("K"),
+             "Set splicing-anchor tolerance K (bp, >= 0) used by the\n"
+             "SPLICED_IMPLICIT per-intron whole-containment discriminant.")
         ;
 
     // --- Expose C++ enum constants as module-level attributes ---
@@ -150,6 +155,8 @@ NB_MODULE(_resolve_impl, m) {
     m.attr("SPLICE_UNSPLICED")       = rigel::SPLICE_UNSPLICED;
     m.attr("SPLICE_SPLICED_UNANNOT") = rigel::SPLICE_SPLICED_UNANNOT;
     m.attr("SPLICE_SPLICED_ANNOT")   = rigel::SPLICE_SPLICED_ANNOT;
+    m.attr("SPLICE_IMPLICIT")        = rigel::SPLICE_IMPLICIT;
+    m.attr("SPLICE_ARTIFACT")        = rigel::SPLICE_ARTIFACT;
 
     // MergeOutcome
     m.attr("MC_INTERSECTION")          = rigel::MC_INTERSECTION;

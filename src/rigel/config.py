@@ -144,7 +144,7 @@ class BamScanConfig:
     Set to 0 to disable multi-threaded decompression.
     """
 
-    boundary_tolerance: int = 3
+    splicing_anchor_tolerance: int = 3
     """Minimum bp clearance K required on each side of an exon-intron
     boundary for a fragment to (a) contribute its EXON|INTRON bit to
     the per-fragment ``obs_mask`` and (b) count as a boundary-crossing
@@ -164,10 +164,10 @@ class BamScanConfig:
     """
 
     def __post_init__(self) -> None:
-        if self.boundary_tolerance < 0:
+        if self.splicing_anchor_tolerance < 0:
             raise ValueError(
-                f"BamScanConfig.boundary_tolerance must be >= 0; "
-                f"got {self.boundary_tolerance}."
+                f"BamScanConfig.splicing_anchor_tolerance must be >= 0; "
+                f"got {self.splicing_anchor_tolerance}."
             )
 
 

@@ -89,13 +89,13 @@ def contained_exposure_clipped(
 
 
 def boundary_crossing_exposure(
-    fl: FragmentLengthModel, *, boundary_tolerance: int = 0
+    fl: FragmentLengthModel, *, splicing_anchor_tolerance: int = 0
 ) -> float:
     """Expected number of fragment start positions that *strictly* cross
     a single boundary, under the gDNA fragment-length distribution.
 
     Returns :math:`B_\\text{cross}(K) = \\sum_\\ell h(\\ell)\\,\\max(\\ell - 2q(K) + 1, 0)`
-    where :math:`q(K) = \\max(K, 1)` and ``K = boundary_tolerance``.
+    where :math:`q(K) = \\max(K, 1)` and ``K = splicing_anchor_tolerance``.
 
     The :math:`q(K) = \\max(K, 1)` term preserves the strict-crossing
     semantics at ``K = 0``: a fragment must still have at least 1 bp on
@@ -114,7 +114,7 @@ def boundary_crossing_exposure(
     fl : FragmentLengthModel
         Finalized FL model. Its ``pmf`` attribute supplies the per-bp
         probability mass.
-    boundary_tolerance : int, optional
+    splicing_anchor_tolerance : int, optional
         Minimum bp clearance ``K`` on each side of a boundary required
         for a fragment to count as a boundary-crossing event. Default 0
         reproduces the pre-2026.05 strict-crossing semantics.
@@ -122,16 +122,16 @@ def boundary_crossing_exposure(
     Raises
     ------
     ValueError
-        If ``boundary_tolerance < 0``.
+        If ``splicing_anchor_tolerance < 0``.
     """
-    if boundary_tolerance < 0:
+    if splicing_anchor_tolerance < 0:
         raise ValueError(
-            f"boundary_crossing_exposure: boundary_tolerance "
-            f"({boundary_tolerance}) must be >= 0"
+            f"boundary_crossing_exposure: splicing_anchor_tolerance "
+            f"({splicing_anchor_tolerance}) must be >= 0"
         )
     pmf = fl.pmf
     ell = np.arange(pmf.size, dtype=np.float64)
-    q = float(max(int(boundary_tolerance), 1))
+    q = float(max(int(splicing_anchor_tolerance), 1))
     val = float((pmf * np.maximum(ell - 2.0 * q + 1.0, 0.0)).sum())
     return val if val > 0.0 else 0.0
 

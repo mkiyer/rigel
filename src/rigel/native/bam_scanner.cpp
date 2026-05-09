@@ -129,6 +129,8 @@ static const char* splice_type_label(int code) {
         case SPLICE_UNSPLICED:       return "unspliced";
         case SPLICE_SPLICED_UNANNOT: return "spliced_unannot";
         case SPLICE_SPLICED_ANNOT:   return "spliced_annot";
+        case SPLICE_IMPLICIT:        return "spliced_implicit";
+        case SPLICE_ARTIFACT:        return "splice_artifact";
         default:                     return "unknown";
     }
 }
@@ -359,8 +361,8 @@ struct WorkerState {
     rigel::calibration::CalibrationAccumulator cal_acc;
 
     WorkerState(int32_t n_transcripts, int64_t n_regions,
-                int32_t boundary_tolerance)
-        : scratch(n_transcripts), cal_acc(n_regions, boundary_tolerance) {}
+                int32_t splicing_anchor_tolerance)
+        : scratch(n_transcripts), cal_acc(n_regions, splicing_anchor_tolerance) {}
 };
 
 // Merge observations
@@ -968,7 +970,7 @@ public:
     // Boundary-tolerance K (bp) used by the calibration accumulator.
     // Configured via set_regions(); applies uniformly to all workers and
     // to the matched ``B_cross`` denominator on the Python side.
-    int32_t boundary_tolerance_ = 0;
+    int32_t splicing_anchor_tolerance_ = 0;
 
     BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
@@ -998,7 +1000,7 @@ public:
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
         nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
         int32_t n_refs,
-        int32_t boundary_tolerance = 0)
+        int32_t splicing_anchor_tolerance = 0)
     {
         const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
         if (static_cast<int64_t>(starts.shape(0)) != n ||
@@ -1014,11 +1016,11 @@ public:
                 "set_regions: regions already set on this BamScanner; "
                 "create a new instance");
         }
-        if (boundary_tolerance < 0) {
+        if (splicing_anchor_tolerance < 0) {
             throw std::invalid_argument(
-                "set_regions: boundary_tolerance must be >= 0");
+                "set_regions: splicing_anchor_tolerance must be >= 0");
         }
-        boundary_tolerance_ = boundary_tolerance;
+        splicing_anchor_tolerance_ = splicing_anchor_tolerance;
         region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
         region_index_->set(ref_ids.data(), starts.data(), ends.data(),
                            type_masks.data(), n, n_refs);
@@ -1060,12 +1062,12 @@ public:
         if (region_index_) {
             cal_acc_merged_ =
                 std::make_unique<rigel::calibration::CalibrationAccumulator>(
-                    n_regions, boundary_tolerance_);
+                    n_regions, splicing_anchor_tolerance_);
         }
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
             auto ws = std::make_unique<WorkerState>(
-                n_transcripts, n_regions, boundary_tolerance_);
+                n_transcripts, n_regions, splicing_anchor_tolerance_);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
             worker_states.push_back(std::move(ws));
@@ -1692,7 +1694,7 @@ private:
             cal_dict["n_unobserved"]       = payload.n_unobserved;
             cal_dict["n_unannotated_ref"]  = payload.n_unannotated_ref;
             cal_dict["n_below_tolerance"]  = payload.n_below_tolerance;
-            cal_dict["boundary_tolerance"] = boundary_tolerance_;
+            cal_dict["splicing_anchor_tolerance"] = splicing_anchor_tolerance_;
             result["calibration"] = cal_dict;
         } else {
             result["calibration"] = nb::none();
@@ -2311,7 +2313,7 @@ NB_MODULE(_bam_impl, m) {
              nb::arg("ends"),
              nb::arg("type_masks"),
              nb::arg("n_refs"),
-             nb::arg("boundary_tolerance") = 0,
+             nb::arg("splicing_anchor_tolerance") = 0,
              "Install the calibration region partition.\n\n"
              "Must be called before scan() to enable calibration\n"
              "observation collection.  All four arrays must be the\n"
@@ -2328,7 +2330,7 @@ NB_MODULE(_bam_impl, m) {
              "    2=INTERGENIC).\n"
              "n_refs : int\n"
              "    Total number of references in the index.\n"
-             "boundary_tolerance : int (default 0)\n"
+             "splicing_anchor_tolerance : int (default 0)\n"
              "    Minimum bp clearance required on each side of an\n"
              "    exon-intron boundary to count a boundary-crossing\n"
              "    event and to qualify a per-region overlap for the\n"

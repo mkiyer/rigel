@@ -250,11 +250,11 @@ def scan_oracle_condition(
     condition: dict[str, object],
     side_index: SideIndex,
     ref_length_bp: int,
-    boundary_tolerance: int,
+    splicing_anchor_tolerance: int,
 ) -> OracleConditionResult:
     condition_name = str(condition["name"])
     bam_path = base / str(condition["oracle_bam"])
-    q = max(int(boundary_tolerance), 1)
+    q = max(int(splicing_anchor_tolerance), 1)
     physical_event_counts_arr = np.zeros(len(SIDE_CLASSES), dtype=np.int64)
     observable_event_counts_arr = np.zeros(len(SIDE_CLASSES), dtype=np.int64)
     event_multiplicity: Counter[int] = Counter()
@@ -495,7 +495,7 @@ def rows_for_output(results: list[OracleConditionResult], side_index: SideIndex)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", type=Path, default=BASE_DEFAULT)
-    parser.add_argument("--boundary-tolerance", type=int, default=0)
+    parser.add_argument("--splicing-anchor-tolerance", type=int, default=0)
     parser.add_argument("--all-ss", action="store_true", help="Include SS=0.50 duplicate conditions")
     parser.add_argument("--conditions", nargs="*", default=None)
     parser.add_argument(
@@ -528,7 +528,7 @@ def main() -> None:
             condition=condition,
             side_index=side_index,
             ref_length_bp=ref_length_bp,
-            boundary_tolerance=args.boundary_tolerance,
+            splicing_anchor_tolerance=args.splicing_anchor_tolerance,
         )
         for condition in conditions
     ]

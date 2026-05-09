@@ -72,15 +72,15 @@ class CalibrationScanPayload:
     n_unobserved: int
     n_unannotated_ref: int
     #: Auxiliary QC counter — observed fragments whose every region hit
-    #: was below the boundary-tolerance threshold ``q(K) = max(K, 1)``
+    #: was below the splicing-anchor-tolerance threshold ``q(K) = max(K, 1)``
     #: and therefore contributed no type bit to ``obs_mask``. Always 0
-    #: when ``boundary_tolerance == 0``. Already included in
+    #: when ``splicing_anchor_tolerance == 0``. Already included in
     #: ``global_counts[0]``, ``fl_hist[0]``, and ``n_observed``; do not
     #: add into balance totals.
     n_below_tolerance: int = 0
     #: Boundary tolerance K (bp) the scanner used. Persisted so analyses
     #: can verify what value calibration was run with.
-    boundary_tolerance: int = 0
+    splicing_anchor_tolerance: int = 0
 
     @classmethod
     def from_scan_dict(
@@ -133,15 +133,15 @@ class CalibrationScanPayload:
         n_unobs = int(d["n_unobserved"])
         n_unann = int(d["n_unannotated_ref"])
         n_below = int(d.get("n_below_tolerance", 0))
-        boundary_tolerance = int(d.get("boundary_tolerance", 0))
+        splicing_anchor_tolerance = int(d.get("splicing_anchor_tolerance", 0))
         if n_below < 0:
             raise ValueError(
                 f"calibration payload: n_below_tolerance ({n_below}) < 0."
                 f"{_ERR_SUFFIX}"
             )
-        if boundary_tolerance < 0:
+        if splicing_anchor_tolerance < 0:
             raise ValueError(
-                f"calibration payload: boundary_tolerance ({boundary_tolerance}) "
+                f"calibration payload: splicing_anchor_tolerance ({splicing_anchor_tolerance}) "
                 f"< 0.{_ERR_SUFFIX}"
             )
 
@@ -196,5 +196,5 @@ class CalibrationScanPayload:
             n_unobserved=n_unobs,
             n_unannotated_ref=n_unann,
             n_below_tolerance=n_below,
-            boundary_tolerance=boundary_tolerance,
+            splicing_anchor_tolerance=splicing_anchor_tolerance,
         )

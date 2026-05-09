@@ -119,7 +119,7 @@ void CalibrationAccumulator::observe(
     // tautology because RegionIndex::overlap_into already only returns
     // hits with overlap >= 1, so qualified_hits_ == hits_ and behavior
     // is bit-identical to the pre-tolerance code path.
-    const int64_t q = static_cast<int64_t>(std::max(boundary_tolerance_, 1));
+    const int64_t q = static_cast<int64_t>(std::max(splicing_anchor_tolerance_, 1));
     uint8_t obs_mask = 0;
     for (size_t k = 0; k < hits_.size(); ++k) {
         if (hits_overlap_bp_[k] >= q) {

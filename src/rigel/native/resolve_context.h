@@ -424,6 +424,12 @@ public:
 // its own scratch. The single-threaded path uses FragmentResolver's
 // internal scratch_ member.
 
+struct GapBlock {
+    int32_t ref_id;
+    int32_t start;
+    int32_t end;
+};
+
 struct ResolverScratch {
     // Per-transcript bp counters (sparse-cleaned)
     std::vector<int32_t> t_exon_bp;
@@ -434,6 +440,11 @@ struct ResolverScratch {
     // cgranges query buffers (reusable per-call)
     int64_t* buf = nullptr;
     int64_t  buf_cap = 0;
+
+    // Reusable scratch for SPLICED_IMPLICIT detection
+    // (per-fragment block sort + PE-gap collection)
+    std::vector<ExonBlock> implicit_blocks;
+    std::vector<GapBlock> implicit_gaps;
 
 
     ResolverScratch() = default;
@@ -547,6 +558,9 @@ public:
     std::vector<int32_t> exon_ends_;       // [total_exons] — genomic end coords
     std::vector<int32_t> exon_cumsum_;     // [total_exons] — cumulative spliced bp before each exon
     std::vector<int32_t> t_length_;        // [n_transcripts] — spliced transcript lengths
+
+    // --- SPLICED_IMPLICIT discriminant tolerance (bp) ---
+    int32_t splicing_anchor_tolerance_ = 0;
 
     // --- Reference name <-> ID ---
     std::unordered_map<std::string, int32_t> ref_to_id_;
@@ -714,6 +728,118 @@ public:
 
     bool has_exon_index() const {
         return !exon_offsets_.empty();
+    }
+
+    // ----------------------------------------------------------------
+    // SPLICED_IMPLICIT detection
+    // ----------------------------------------------------------------
+
+    /// Set the splicing-anchor tolerance K (bp) used for one-sided slack
+    /// in the SPLICED_IMPLICIT per-intron whole-containment discriminant.
+    /// K must be >= 0; default 0 (strict containment).
+    void set_splicing_anchor_tolerance(int32_t K) {
+        if (K < 0) K = 0;
+        splicing_anchor_tolerance_ = K;
+    }
+
+    int32_t splicing_anchor_tolerance() const {
+        return splicing_anchor_tolerance_;
+    }
+
+    /// Test whether transcript ``t`` has any annotated intron whose
+    /// genomic interval is wholly contained in the PE gap
+    /// ``[gap_start, gap_end)`` modulo one-sided slack ``K`` bp.
+    inline bool transcript_has_implicit_intron_in_gap(
+        int32_t t, int32_t gap_start, int32_t gap_end, int32_t K) const
+    {
+        if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return false;
+
+        const int32_t begin = exon_offsets_[t];
+        const int32_t end = exon_offsets_[t + 1];
+        const int32_t n_introns = end - begin - 1;
+        if (n_introns <= 0 || gap_end <= gap_start) return false;
+
+        const int32_t* intron_starts = exon_ends_.data() + begin;
+        const int32_t* intron_ends   = exon_starts_.data() + begin + 1;
+
+        const int64_t min_start = static_cast<int64_t>(gap_start) - K;
+
+        // Lowest intron index whose start >= min_start (i.e. start - gap_start >= -K).
+        const int32_t by_start = static_cast<int32_t>(
+            std::lower_bound(intron_starts, intron_starts + n_introns, min_start)
+            - intron_starts);
+        // Lowest intron index whose end > gap_start (positive overlap with gap).
+        const int32_t by_end = static_cast<int32_t>(
+            std::upper_bound(intron_ends, intron_ends + n_introns, gap_start)
+            - intron_ends);
+
+        const int64_t max_end = static_cast<int64_t>(gap_end) + K;
+        for (int32_t i = std::max(by_start, by_end); i < n_introns; ++i) {
+            const int32_t is = intron_starts[i];
+            if (is >= gap_end) break;        // no positive overlap with later introns
+            const int32_t ie = intron_ends[i];
+            if (static_cast<int64_t>(ie) > max_end) break;
+            if (ie > is) return true;        // all containment/overlap tests hold
+        }
+        return false;
+    }
+
+    /// Decide whether a multi-block fragment exhibits an implicit splice gap:
+    /// any candidate transcript has an annotated intron wholly contained
+    /// in some PE gap (with one-sided K slack on each boundary).
+    bool has_implicit_splice_gap(
+        const std::vector<ExonBlock>& exons,
+        const std::vector<int32_t>& candidate_t,
+        ResolverScratch& scratch) const
+    {
+        if (exons.size() < 2 || candidate_t.empty() || !has_exon_index()) {
+            return false;
+        }
+
+        auto& gaps = scratch.implicit_gaps;
+        gaps.clear();
+
+        auto exon_block_less = [](const ExonBlock& a, const ExonBlock& b) {
+            if (a.ref_id != b.ref_id) return a.ref_id < b.ref_id;
+            if (a.start != b.start) return a.start < b.start;
+            if (a.end != b.end) return a.end < b.end;
+            return a.strand < b.strand;
+        };
+
+        const std::vector<ExonBlock>* ordered = &exons;
+        if (!std::is_sorted(exons.begin(), exons.end(), exon_block_less)) {
+            auto& blocks = scratch.implicit_blocks;
+            blocks.assign(exons.begin(), exons.end());
+            std::sort(blocks.begin(), blocks.end(), exon_block_less);
+            ordered = &blocks;
+        }
+
+        int32_t cur_ref = (*ordered)[0].ref_id;
+        int32_t cur_end = (*ordered)[0].end;
+        for (size_t k = 1; k < ordered->size(); ++k) {
+            const auto& block = (*ordered)[k];
+            if (block.ref_id != cur_ref) {
+                cur_ref = block.ref_id;
+                cur_end = block.end;
+            } else if (block.start > cur_end) {
+                gaps.push_back({cur_ref, cur_end, block.start});
+                cur_end = block.end;
+            } else {
+                cur_end = std::max(cur_end, block.end);
+            }
+        }
+
+        if (gaps.empty()) return false;
+
+        const int32_t K = splicing_anchor_tolerance_;
+        for (int32_t t : candidate_t) {
+            for (const GapBlock& gap : gaps) {
+                if (transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// Map a genomic position to transcript-space offset for FL computation.
@@ -1195,22 +1321,17 @@ public:
             cr.frag_length_map = compute_frag_lengths(exons, introns, cr.t_inds, scratch);
         }
 
-        // --- SRD v2: SPLICED_IMPLICIT detection ---
-        // For multi-block (paired-end gap) fragments, if the gap fully
-        // spans an annotated intron of any candidate transcript, the
-        // projected tx_distance for that transcript will be < genomic_span.
-        // We use this as a "free" implicit-splice detector.  Conservative
-        // ANY-candidate rule: if any candidate shows shortening, classify
-        // as SPLICED_IMPLICIT so the fragment stays out of the gDNA pool.
-        if (cr.splice_type == SPLICE_UNSPLICED && exons.size() >= 2) {
-            int32_t genomic_span = cr.genomic_footprint;
-            for (const auto& kv : cr.frag_length_map) {
-                int32_t fl = kv.second;
-                if (fl > 0 && (genomic_span - fl) > 0) {
-                    cr.splice_type = SPLICE_IMPLICIT;
-                    break;
-                }
-            }
+        // --- SPLICED_IMPLICIT detection ---
+        // For multi-block (paired-end gap) fragments, classify as implicit
+        // splice when any candidate transcript has an annotated intron
+        // wholly contained in some PE gap (with one-sided K-bp slack on
+        // each boundary). Per-intron whole-containment rejects the
+        // false-positive class where a 200 bp slice of a 50 kb intron
+        // overlaps the gap; that is true-gDNA, not implicit splicing.
+        if (cr.splice_type == SPLICE_UNSPLICED &&
+            cr.chimera_type == CHIMERA_NONE &&
+            has_implicit_splice_gap(exons, cr.t_inds, scratch)) {
+            cr.splice_type = SPLICE_IMPLICIT;
         }
 
         // --- Genomic start ---

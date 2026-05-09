@@ -112,7 +112,7 @@ def main() -> int:
     log(f"[probe] {len(region_df):,} regions in partition")
 
     log("[probe] running scan_and_buffer ...")
-    scan_cfg = BamScanConfig(boundary_tolerance=args.K)
+    scan_cfg = BamScanConfig(splicing_anchor_tolerance=args.K)
     _stats, _strand, _fl_models, _buf, payload = scan_and_buffer(
         args.bam, index, scan_cfg,
     )

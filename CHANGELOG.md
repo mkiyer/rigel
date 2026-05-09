@@ -13,9 +13,50 @@ Joint mRNA / nRNA / gDNA quantification with an in-place per-region
 accumulator that runs inside the existing C++ BAM scan.  Replaces the
 SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
 
+### Fixed
+
+- **`SPLICED_IMPLICIT` misclassification of unspliced multi-block
+  fragments**: the C++ `_resolve_core` discriminant previously fired
+  whenever any candidate transcript had *any* annotated intron content
+  inside the fragment outer span — including introns that the CIGAR
+  contradicts by aligning straight through them. True-gDNA fragments
+  whose contiguous PE alignment overlapped an annotated intron region
+  were being promoted to `SPLICED_IMPLICIT`, hard-gated out of the
+  gDNA likelihood and the boundary-flux numerator, and dumped into
+  nRNA. Replaced with a per-intron whole-containment test that fires
+  only when an annotated intron of at least one candidate transcript
+  is wholly contained in a paired-end gap (one-sided slack `K`
+  governed by `splicing_anchor_tolerance`). Required positive
+  intron-gap overlap before applying slack so a large `K` does not
+  classify a nearby-but-disjoint intron as implicit. Implementation
+  uses reusable `ResolverScratch` storage and binary search over the
+  existing per-transcript exon CSR (no new cgranges index). Native
+  ZS BAM tag now emits `spliced_implicit` and `splice_artifact`
+  instead of `unknown` for these splice classes; constants
+  `SPLICE_IMPLICIT` and `SPLICE_ARTIFACT` are exposed from
+  `_resolve_impl`. Goldens were regenerated; the small redistribution
+  shifts mass from nRNA back into mRNA on gDNA/nRNA-contaminated
+  scenarios. New acceptance matrix in `tests/test_implicit_splice.py`
+  covers 14 geometries including K-slack edges, microintrons,
+  long-intron slices, any-candidate semantics, and the chimera and
+  CIGAR-spliced gates.
+
+### Changed (Breaking)
+
+- **Renamed `boundary_tolerance` → `splicing_anchor_tolerance`**: hard
+  rename across CLI flag (`--boundary-tolerance` removed; use
+  `--splicing-anchor-tolerance`), YAML config key,
+  `BamScanConfig` field, calibration payload/result fields,
+  `summary.json` keys, and native bindings. Pre-1.0 project — there
+  is no compatibility shim. The same K parameter now drives both the
+  calibration boundary-flux clearance (preserving the existing
+  `q(K) = max(K, 1)` integer-coordinate rule) and the resolver's
+  per-intron implicit-splice slack (raw K, so `K = 0` means strict
+  containment).
+
 ### Added
 
-- **Boundary tolerance (`--boundary-tolerance K`, default 3 bp)**: the
+- **Boundary tolerance (`--splicing-anchor-tolerance K`, default 3 bp)**: the
   per-fragment region-mask accumulator and the matched
   ``B_cross(K)`` denominator in the global gDNA density estimator now
   require a minimum bp clearance ``K`` on each side of every
@@ -28,7 +69,7 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
   cost of ~1% of true short-overhang exposure for typical 350 bp gDNA
   fragments. Calibration goldens were regenerated; relative shifts in
   per-locus counts are <0.2%. Exposed on `BamScanConfig`,
-  `CalibrationResult.boundary_tolerance`, and
+  `CalibrationResult.splicing_anchor_tolerance`, and
   `CalibrationResult.n_below_tolerance` (count of fragments rejected
   for failing the K-clearance test, separated from
   ``n_unannotated_ref``).

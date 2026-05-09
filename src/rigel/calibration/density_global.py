@@ -127,7 +127,7 @@ def compute_global_densities(
     payload: CalibrationScanPayload,
     *,
     gdna_fl: FragmentLengthModel,
-    boundary_tolerance: int = 0,
+    splicing_anchor_tolerance: int = 0,
 ) -> GlobalDensityTable:
     """Compute the three global gDNA densities + per-type $\\kappa$.
 
@@ -192,7 +192,7 @@ def compute_global_densities(
         u_left=payload.u_left,
         u_right=payload.u_right,
         b_cross=boundary_crossing_exposure(
-            gdna_fl, boundary_tolerance=boundary_tolerance
+            gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
         ),
     )
 

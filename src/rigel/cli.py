@@ -558,7 +558,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
-    _ParamSpec("boundary_tolerance", "scan.boundary_tolerance"),
+    _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
     # -- BamScanConfig: transformed --
     _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
     _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
@@ -1118,8 +1118,8 @@ def build_parser() -> argparse.ArgumentParser:
         "'unusable' and downstream code falls back on the global FL.",
     )
     adv.add_argument(
-        "--boundary-tolerance",
-        dest="boundary_tolerance",
+        "--splicing-anchor-tolerance",
+        dest="splicing_anchor_tolerance",
         type=int,
         default=None,
         help="Minimum bp clearance K required on each side of an "

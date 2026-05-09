@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-09  
 **Author:** Copilot, with diagnosis driven by user investigation  
-**Status:** Revised plan (rev 3) - reviewed against current code; ready for implementation
+**Status:** Revised plan (rev 4) - reviewed against current code; ready for implementation
 
 ---
 
@@ -10,7 +10,7 @@
 
 - **rev 1 (2026-05-09):** initial plan; aggregate `intron_in_gaps` discriminant; new `implicit_splice_tolerance` parameter.
 - **rev 2 (2026-05-09):** per-intron whole-containment discriminant; reused `BamScanConfig.boundary_tolerance`; iterated introns directly from the resolver exon CSR.
-- **rev 3 (2026-05-09, this revision):** fixes several implementation errors in rev 2 and standardizes the single user-facing knob as **splicing anchor tolerance**:
+- **rev 3 (2026-05-09):** fixes several implementation errors in rev 2 and standardizes the single user-facing knob as **splicing anchor tolerance**:
   - canonical CLI flag becomes `--splicing-anchor-tolerance`;
   - canonical config field becomes `BamScanConfig.splicing_anchor_tolerance`;
   - legacy `--boundary-tolerance` / YAML `boundary_tolerance` are compatibility aliases only;
@@ -19,6 +19,17 @@
   - the implicit-splice reference C++ no longer uses an invalid `return;` inside `_resolve_core`, preserves the existing no-chimera behavior, sorts/merges blocks defensively, and requires positive intron-gap overlap before applying K slack;
   - native ZS label for `SPLICE_ARTIFACT` is aligned with Python (`"splice_artifact"`, not `"spliced_artifact"`);
   - summary/config persistence is corrected to the actual `summary.json` structure.
+- **rev 5 (2026-05-09):** drops back-compat for `boundary_tolerance`. The
+  CLI/YAML/config/payload/summary keys are renamed unconditionally to
+  `splicing_anchor_tolerance`. There is no `--boundary-tolerance` alias,
+  no YAML alias, and no read-side fallback for legacy summaries. Tests
+  that referenced the old name are updated.
+
+- **rev 4 (2026-05-09):** tightens the implementation for performance and maintainability:
+  - implicit-splice detection uses reusable `ResolverScratch` buffers and small helper functions instead of a large inline `_resolve_core` block;
+  - transcript introns are queried by binary search over the existing per-transcript exon CSR;
+  - scanner-sorted exon blocks take a no-copy fast path, with defensive copy/sort only for unsorted Python-facing calls;
+  - no new cgranges intron index is planned unless profiling shows the CSR path is a bottleneck.
 
 ---
 
@@ -159,16 +170,11 @@ Canonical public names:
 - Native resolver setter: `set_splicing_anchor_tolerance(K)`
 - Summary/config output key: `splicing_anchor_tolerance`
 
-Compatibility:
-
-- Keep `--boundary-tolerance K` as a deprecated CLI alias that maps to the same
-  destination for one transition period.
-- Accept YAML `boundary_tolerance` as a deprecated alias for
-  `splicing_anchor_tolerance`.
-- If both canonical and legacy names are present, the canonical name wins and a
-  warning is emitted.
-- Internal code should not introduce `implicit_splice_tolerance` or keep two
-  independent K values.
+This is a hard rename. There is no `--boundary-tolerance` alias, no YAML
+alias, and no read-side fallback for old serialized payloads or
+`summary.json` files. All occurrences of `boundary_tolerance` in the
+code base, tests, debug scripts, and docs are updated in one mechanical
+pass.
 
 Important semantic detail: the **implicit-splice** predicate uses raw K, so
 `K = 0` means strict containment. The **calibration boundary-flux** code keeps
@@ -189,11 +195,8 @@ For each fragment with sorted aligned blocks `{[b_s^k, b_e^k)}`:
    `resolve()` / `resolve_fragment()` path should not rely on caller order.
 2. Derive PE gaps between consecutive merged blocks on the same reference:
    `G^j = [B_e^j, B_s^{j+1})` when `B_s^{j+1} > B_e^j`.
-3. Iterate transcript introns directly from the resolver exon CSR:
-   `I_t^i = [exon_ends_[i], exon_starts_[i + 1])`.
-4. Require positive half-open overlap between intron and PE gap before applying
-   tolerance. This prevents a large K from classifying a nearby-but-disjoint
-   intron as implicit.
+3. Query transcript introns directly from the resolver exon CSR (`I_t^i = [exon_ends_[i], exon_starts_[i + 1])`).
+4. Require positive half-open overlap between intron and PE gap before applying tolerance; this prevents a large K from classifying a nearby-but-disjoint intron as implicit.
 5. Apply one-sided boundary slack:
 
    ```text
@@ -203,80 +206,149 @@ For each fragment with sorted aligned blocks `{[b_s^k, b_e^k)}`:
 6. Classify as `SPLICE_IMPLICIT` as soon as any candidate transcript has any
    intron-gap pair satisfying the predicate.
 
-Reference C++ for [src/rigel/native/resolve_context.h](../../src/rigel/native/resolve_context.h):
+### 3.3 Hot-path implementation choice
+
+Use the existing per-transcript exon CSR and binary search. Do **not** add a
+new cgranges intron index for the first implementation.
+
+Rationale:
+
+- `_resolve_core` already knows the candidate transcripts in `cr.t_inds`; a
+  global intron cgranges query would have to rediscover interval hits and then
+  intersect transcript sets back against `cr.t_inds`.
+- The exon CSR is already built at index-load time for every transcript, with
+  exons in genomic order. Consecutive exon ends/starts are monotone intron
+  starts/ends, so `std::lower_bound` / `std::upper_bound` can jump directly to
+  introns near the PE gap.
+- The expected workload is small and local: most paired-end fragments have one
+  unsequenced gap, and each candidate transcript contributes only the introns
+  whose starts/ends fall near that gap.
+- A new cgranges index would add memory, build-time, binding, and scratch-buffer
+  complexity to a path that can be implemented as cache-friendly pointer math
+  over arrays already resident in `FragmentResolver`.
+
+Complexity target for the implicit-splice check:
+
+```text
+O(n_gaps * n_candidate_transcripts * (log n_introns_t + n_local_introns))
+```
+
+not `O(n_gaps * n_candidate_transcripts * n_introns_t)` and not a global
+interval-index query per gap. If profiling later shows this helper is material
+in mega-loci, the fallback design is an optional intron cgranges index keyed by
+intron interval with transcript-set labels; that should be a measured second
+step, not the default design.
+
+Implementation style:
+
+- Add tiny helpers in [src/rigel/native/resolve_context.h](../../src/rigel/native/resolve_context.h), rather than growing `_resolve_core` with another monolithic block.
+- Add reusable scratch vectors to `ResolverScratch`, for example
+  `implicit_blocks` and `implicit_gaps`, so the defensive sort fallback and gap
+  collection do not allocate on every fragment after warm-up.
+- Fast-path the common BAM-scanner input, which is already sorted/merged: only
+  copy and sort into scratch when `std::is_sorted` says the caller supplied
+  unsorted blocks.
+- Keep the helper read-only with respect to candidate sets and exon CSR. It
+  should only return `true` / `false`; the caller alone mutates `cr.splice_type`.
+
+Reference C++ shape for [src/rigel/native/resolve_context.h](../../src/rigel/native/resolve_context.h):
 
 ```cpp
-// --- SRD v2: SPLICED_IMPLICIT detection ---
-// Preserve current behavior for chimeras: today chimeric fragments have no
-// frag_length_map and therefore cannot be promoted to SPLICE_IMPLICIT.
+struct GapBlock {
+  int32_t ref_id;
+  int32_t start;
+  int32_t end;
+};
+
+inline bool transcript_has_implicit_intron_in_gap(
+  int32_t t, int32_t gap_start, int32_t gap_end, int32_t K) const
+{
+  if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return false;
+
+  const int32_t begin = exon_offsets_[t];
+  const int32_t end = exon_offsets_[t + 1];
+  const int32_t n_introns = end - begin - 1;
+  if (n_introns <= 0 || gap_end <= gap_start) return false;
+
+  const int32_t* intron_starts = exon_ends_.data() + begin;
+  const int32_t* intron_ends = exon_starts_.data() + begin + 1;
+
+  const int64_t min_start = static_cast<int64_t>(gap_start) - K;
+  const int64_t max_end = static_cast<int64_t>(gap_end) + K;
+
+  const int32_t by_start = static_cast<int32_t>(
+    std::lower_bound(intron_starts, intron_starts + n_introns, min_start)
+    - intron_starts);
+  const int32_t by_end = static_cast<int32_t>(
+    std::upper_bound(intron_ends, intron_ends + n_introns, gap_start)
+    - intron_ends);
+
+  for (int32_t i = std::max(by_start, by_end); i < n_introns; ++i) {
+    const int32_t is = intron_starts[i];
+    if (is >= gap_end) break;        // no positive overlap with later introns
+    const int32_t ie = intron_ends[i];
+    if (static_cast<int64_t>(ie) > max_end) break;
+    if (ie > is) return true;        // all containment/overlap tests hold
+  }
+  return false;
+}
+
+inline bool has_implicit_splice_gap(
+  const std::vector<ExonBlock>& exons,
+  const std::vector<int32_t>& candidate_t,
+  ResolverScratch& scratch) const
+{
+  if (exons.size() < 2 || candidate_t.empty() || !has_exon_index()) return false;
+
+  auto& gaps = scratch.implicit_gaps;
+  gaps.clear();
+
+  auto exon_block_less = [](const ExonBlock& a, const ExonBlock& b) {
+    if (a.ref_id != b.ref_id) return a.ref_id < b.ref_id;
+    if (a.start != b.start) return a.start < b.start;
+    if (a.end != b.end) return a.end < b.end;
+    return a.strand < b.strand;
+  };
+
+  const std::vector<ExonBlock>* ordered = &exons;
+  if (!std::is_sorted(exons.begin(), exons.end(), exon_block_less)) {
+    auto& blocks = scratch.implicit_blocks;
+    blocks.assign(exons.begin(), exons.end());
+    std::sort(blocks.begin(), blocks.end(), exon_block_less);
+    ordered = &blocks;
+  }
+
+  int32_t cur_ref = (*ordered)[0].ref_id;
+  int32_t cur_end = (*ordered)[0].end;
+  for (size_t k = 1; k < ordered->size(); ++k) {
+    const auto& block = (*ordered)[k];
+    if (block.ref_id != cur_ref) {
+      cur_ref = block.ref_id;
+      cur_end = block.end;
+    } else if (block.start > cur_end) {
+      gaps.push_back({cur_ref, cur_end, block.start});
+      cur_end = block.end;
+    } else {
+      cur_end = std::max(cur_end, block.end);
+    }
+  }
+
+  const int32_t K = splicing_anchor_tolerance_;
+  for (int32_t t : candidate_t) {
+    for (const GapBlock& gap : gaps) {
+      if (transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// In _resolve_core, after cr.t_inds and chimera_type are known:
 if (cr.splice_type == SPLICE_UNSPLICED &&
-    cr.chimera_type == CHIMERA_NONE &&
-    exons.size() >= 2 &&
-    has_exon_index()) {
-
-    std::vector<ExonBlock> blocks = exons;
-    std::sort(blocks.begin(), blocks.end(),
-              [](const ExonBlock& a, const ExonBlock& b) {
-                  if (a.ref_id != b.ref_id) return a.ref_id < b.ref_id;
-                  if (a.start != b.start) return a.start < b.start;
-                  if (a.end != b.end) return a.end < b.end;
-                  return a.strand < b.strand;
-              });
-
-    std::vector<std::pair<int32_t, int32_t>> gaps;
-    gaps.reserve(blocks.size() - 1);
-
-    int32_t cur_ref = blocks[0].ref_id;
-    int32_t cur_e = blocks[0].end;
-    for (size_t k = 1; k < blocks.size(); ++k) {
-        const auto& block = blocks[k];
-        if (block.ref_id != cur_ref) {
-            cur_ref = block.ref_id;
-            cur_e = block.end;
-            continue;
-        }
-        if (block.start > cur_e) {
-            gaps.emplace_back(cur_e, block.start);
-        }
-        cur_e = std::max(cur_e, block.end);
-    }
-
-    bool implicit = false;
-    const int32_t K = splicing_anchor_tolerance_;
-
-    if (!gaps.empty()) {
-        for (int32_t t : cr.t_inds) {
-            if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) continue;
-            const int32_t begin = exon_offsets_[t];
-            const int32_t end = exon_offsets_[t + 1];
-            const int32_t n_ex = end - begin;
-            if (n_ex < 2) continue;
-
-            const int32_t* es = exon_starts_.data() + begin;
-            const int32_t* ee = exon_ends_.data() + begin;
-            for (int32_t i = 0; i + 1 < n_ex; ++i) {
-                const int32_t is = ee[i];
-                const int32_t ie = es[i + 1];
-                if (ie <= is) continue;
-
-                // Half-open no-overlap prune against the gap envelope.
-                if (ie <= gaps.front().first || is >= gaps.back().second) continue;
-
-                for (const auto& gap : gaps) {
-                    const bool positive_overlap = (is < gap.second && ie > gap.first);
-                    if (!positive_overlap) continue;
-                    if ((gap.first - is) <= K && (ie - gap.second) <= K) {
-                        implicit = true;
-                        break;
-                    }
-                }
-                if (implicit) break;
-            }
-            if (implicit) break;
-        }
-    }
-
-    if (implicit) cr.splice_type = SPLICE_IMPLICIT;
+  cr.chimera_type == CHIMERA_NONE &&
+  has_implicit_splice_gap(exons, cr.t_inds, scratch)) {
+  cr.splice_type = SPLICE_IMPLICIT;
 }
 ```
 
@@ -288,8 +360,12 @@ Key corrections relative to rev 2:
 - Require positive intron-gap overlap before applying K slack.
 - Use the resolver's single `splicing_anchor_tolerance_` member, not a separate
   `implicit_splice_tolerance_`.
+- Avoid per-fragment heap churn by putting temporary blocks/gaps in
+  `ResolverScratch`.
+- Avoid scanning all introns in every candidate transcript; use binary search to
+  inspect only introns that can overlap the PE gap and satisfy K slack.
 
-### 3.3 Why per-intron, not aggregate
+### 3.4 Why per-intron, not aggregate
 
 A true gDNA fragment whose 200 bp PE gap overlaps a small slice of a 50 kb
 annotated intron would satisfy an aggregate `intron_in_gap > K` test even though
@@ -297,7 +373,7 @@ no specific intron is contained in the gap. The per-intron rule rejects that
 class because at least one intron boundary is far outside the PE gap. This is
 the empirical false-positive class from the diagnostic.
 
-### 3.4 Why iterate the exon CSR directly
+### 3.5 Why use the exon CSR instead of cgranges
 
 `genomic_to_tx_pos` is correct for fragment-length projection because endpoint
 bases in introns must count toward physical fragment length. It is the wrong
@@ -305,11 +381,23 @@ primitive for deciding which intron intervals lie in which gaps. The exon CSR
 already provides authoritative genomic intron coordinates via consecutive exon
 ends/starts.
 
+The CSR path also keeps the implementation maintainable: no new index file, no
+new native builder, no transcript-set payload for intron intervals, and no new
+thread-safety rules beyond the existing `ResolverScratch` convention. It should
+be faster for the common case because it restricts work to already-known
+candidate transcripts and performs local monotone-array searches.
+
+cgranges remains a reasonable contingency only if profiling shows pathological
+mega-loci spend meaningful time in `has_implicit_splice_gap`. In that case, add
+a measured phase with a global intron cgranges index labelled by transcript-set
+offsets and compare it against the CSR binary-search helper before committing
+the added complexity.
+
 `cr.frag_length_map` remains unchanged. It still represents the projected
 transcript-space fragment length conditional on a spliced interpretation. Only
 the `SPLICE_IMPLICIT` classification changes.
 
-### 3.5 ZS tag completeness
+### 3.6 ZS tag completeness
 
 Update native `splice_type_label` in
 [src/rigel/native/bam_scanner.cpp](../../src/rigel/native/bam_scanner.cpp) to
@@ -382,40 +470,33 @@ Acceptance:
 Changes:
 
 - Rename `BamScanConfig.boundary_tolerance` to
-  `BamScanConfig.splicing_anchor_tolerance` and update validation/docstrings.
-- Add canonical CLI flag `--splicing-anchor-tolerance`.
-- Keep deprecated CLI alias `--boundary-tolerance` without creating a second
-  config field. Prefer a separate argparse dest such as
-  `boundary_tolerance_deprecated` so the code can warn and resolve conflicts.
-- Extend YAML merge logic to translate `boundary_tolerance` to
-  `splicing_anchor_tolerance` with a warning. If both are present, canonical
-  wins.
+  `BamScanConfig.splicing_anchor_tolerance` (validation, docstrings).
+- Rename CLI flag to `--splicing-anchor-tolerance`. **Remove** the old
+  `--boundary-tolerance` flag entirely.
+- Update YAML config loaders to accept only `splicing_anchor_tolerance`.
+  **Remove** any `boundary_tolerance` key handling.
 - Update `_PARAM_SPECS` to map `splicing_anchor_tolerance` to
   `scan.splicing_anchor_tolerance`.
-- Update `summary.json` expectations:
-  - `summary["configuration"]["scan"]["splicing_anchor_tolerance"]` records
-    the canonical resolved value;
-  - `summary["command"]["arguments"]["splicing_anchor_tolerance"]` records
-    the canonical resolved value;
-  - `summary["calibration"]["splicing_anchor_tolerance"]` records the value
-    used by calibration when calibration is present.
-- Rename calibration payload/result fields to `splicing_anchor_tolerance`, with
-  read-side fallback for old native payloads or old serialized summaries that
-  contain `boundary_tolerance`.
-- Rename Python function kwargs used only inside calibration math from
-  `boundary_tolerance` to `splicing_anchor_tolerance`. If any are public enough
-  to care about notebooks/scripts, accept the legacy kwarg with a warning for
-  one transition period.
+- Update `summary.json` keys to `splicing_anchor_tolerance` in
+  `configuration.scan`, `command.arguments`, and `calibration`.
+- Rename calibration payload/result fields to `splicing_anchor_tolerance`
+  with no fallback.
+- Rename Python kwargs throughout calibration math (`density_global`,
+  `_exposure`, `locus_prior`, `_orchestrator`) to
+  `splicing_anchor_tolerance`.
 - Rename native accumulator/scanner variable names and binding docs to
-  `splicing_anchor_tolerance`, while preserving the existing `q(K)=max(K,1)`
-  calibration behavior.
+  `splicing_anchor_tolerance`. Preserve the existing `q(K)=max(K,1)`
+  calibration-side semantic.
+- Update tests, debug scripts, and benchmark configs to use the new name.
 
 Acceptance:
 
-- CLI tests cover canonical flag, deprecated flag, YAML canonical key, YAML
-  deprecated key, and conflict resolution.
+- CLI tests cover the canonical flag and the YAML canonical key.
+- A grep for `boundary_tolerance` (any case) in the code base returns no
+  hits.
 - Summary/config tests assert the canonical key is written.
-- Calibration tests still prove `K = 0` reproduces strict-crossing behavior.
+- Calibration tests still prove `K = 0` reproduces strict-crossing
+  behavior.
 
 ### Commit 3 - Per-intron implicit-splice discriminant
 
@@ -433,6 +514,15 @@ Changes:
   private member unless the class is deliberately refactored.
 - Add `set_splicing_anchor_tolerance(int K)` with `K >= 0` validation and bind it
   in `_resolve_impl`.
+- Add reusable `ResolverScratch` storage for implicit-splice gap detection, such
+  as `implicit_blocks` and `implicit_gaps`, and reserve a small initial capacity
+  in the constructor. These vectors must be cleared and reused per fragment.
+- Implement the implicit-splice geometry as small helpers:
+  `collect_pe_gaps`, `transcript_has_implicit_intron_in_gap`, and
+  `has_implicit_splice_gap`. Keep `_resolve_core` to a short gate plus one
+  setter of `cr.splice_type`.
+- Use binary search over per-transcript intron starts/ends derived from the exon
+  CSR. Do not add a cgranges intron index in this commit.
 - In `scan_and_buffer`, call
   `resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))`
   before `_NativeBamScanner` construction, alongside the existing resolver setup.
@@ -467,6 +557,9 @@ Acceptance:
 
 - Recompile after C++ changes.
 - Focused resolver tests pass.
+- Add a lightweight performance assertion or benchmark note for a synthetic
+  high-candidate locus: the helper should scale with local introns near the gap,
+  not total introns in the locus.
 - Full suite passes after any intentional golden updates.
 - If goldens shift, inspect before regenerating. Expected shifts are fewer
   fragments routed to nRNA in paired-end gDNA contamination scenarios; scenarios
@@ -520,11 +613,7 @@ Hypothesis-framed targets:
 5. **Keeps fragment-length semantics stable.** `frag_length_map` remains the
    outer-endpoint transcript-space projection conditional on a spliced
    interpretation.
-6. **Has bounded cost.** The new work is roughly
-   `n_candidates * n_introns_in_span * n_gaps` for unsliced, non-chimeric
-   multi-block fragments only. Typical paired-end fragments have one gap, and
-   the cheap gap-envelope prune avoids scanning most introns in large
-   transcripts.
+6. **Has bounded cost.** The new work is roughly `n_gaps * n_candidates * (log n_introns_t + n_local_introns)` for unspliced, non-chimeric multi-block fragments only. Typical paired-end fragments have one gap, and the binary-search window avoids scanning all introns in large transcripts.
 
 ---
 
@@ -532,11 +621,13 @@ Hypothesis-framed targets:
 
 1. **Parameter rename blast radius.** `boundary_tolerance` appears in config,
    CLI, pipeline, calibration payloads, density denominators, native scanner
-   bindings, docs, debug scripts, and changelog text. Use a single mechanical
-   search/replace pass plus focused compatibility tests.
-2. **Legacy configs.** Old YAML files with `boundary_tolerance` should keep
-   working with a warning. Old `summary.json` files will still contain the old
-   key; analysis code that reads historical outputs should use fallback logic.
+   bindings, docs, debug scripts, and changelog text. The rename is hard:
+   one mechanical pass plus a final `grep -ri boundary_tolerance src tests
+   scripts docs` that must return zero hits.
+2. **Legacy configs.** Pre-1.0 project; no compatibility window. Users who
+   regenerate runs with old YAMLs containing `boundary_tolerance` will get
+   a clear unknown-key error from the YAML loader. CHANGELOG documents the
+   rename.
 3. **Chimeras.** Current implicit detection effectively skips chimeras because
    `frag_length_map` is only filled for `CHIMERA_NONE`. The new CSR-based code
    must keep that gate explicitly.
@@ -548,6 +639,7 @@ Hypothesis-framed targets:
    be `"splice_artifact"`, matching Python's enum-derived label.
 7. **Session-scoped resolver state in tests.** The new resolver tolerance setter
    mutates resolver state. Tests must isolate or reset it.
+8. **Hot-path regression.** This check runs inside `_resolve_core`, so avoid allocation and global interval queries. Temporary vectors belong in `ResolverScratch`, and the intron lookup should use binary search over the existing exon CSR. Add cgranges only after profiling shows a real regression.
 
 ---
 
@@ -558,11 +650,13 @@ A successful implementation will:
 - add native ZS labels for `spliced_implicit` and `splice_artifact`;
 - expose native `SPLICE_IMPLICIT` and `SPLICE_ARTIFACT` constants from
   `_resolve_impl`;
-- standardize the CLI/config parameter as `splicing_anchor_tolerance` with
-  deprecated `boundary_tolerance` aliases;
+- standardize the CLI/config parameter as `splicing_anchor_tolerance`
+  (hard rename; no `boundary_tolerance` aliases anywhere);
 - pass exactly one resolved K into both the resolver and calibration scanner;
 - replace the implicit-splice discriminant with the per-intron/per-PE-gap
   containment test using raw K slack and positive intron-gap overlap;
+- implement the containment test as reusable scratch-backed helpers using binary
+  search over the existing exon CSR, not a new cgranges intron index;
 - preserve chimeric and CIGAR-spliced classification behavior;
 - add the geometry tests in Section 4 Commit 3;
 - regenerate goldens only after manual inspection of intentional output shifts;
