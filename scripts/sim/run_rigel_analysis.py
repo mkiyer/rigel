@@ -14,7 +14,7 @@ import logging
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -55,6 +55,15 @@ GDNA_FRACS = {
 }
 
 
+@dataclass(frozen=True)
+class CalibrationAcceptanceThresholds:
+    """Post-fix guardrails for the synthetic calibration report."""
+
+    min_rho_ex_over_ig: float = 0.95
+    max_nrna_none_count: float = 10.0
+    max_gdna_to_rna_leak_rate: float = 0.015
+
+
 def parse_condition(cond_name: str) -> dict:
     """Parse condition name into components."""
     parts = cond_name.split("_")
@@ -67,6 +76,43 @@ def parse_condition(cond_name: str) -> dict:
         "strand_specificity": ss_val,
         "gdna_label": gdna_key,
     }
+
+
+def load_manifest(sim_base: Path) -> dict:
+    """Load simulation manifest metadata if available."""
+    manifest_path = sim_base / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    with open(manifest_path) as f:
+        return json.load(f)
+
+
+def condition_manifest_map(manifest: dict) -> dict[str, dict]:
+    """Return condition-name keyed metadata from a simulation manifest."""
+    conditions = manifest.get("conditions", []) if isinstance(manifest, dict) else []
+    return {
+        str(row["name"]): row
+        for row in conditions
+        if isinstance(row, dict) and row.get("name")
+    }
+
+
+def simulated_fragment_length_means(manifest: dict) -> tuple[float, float]:
+    """Return true RNA/gDNA fragment-length means from manifest metadata."""
+    sim = manifest.get("simulation", {}) if isinstance(manifest, dict) else {}
+    gdna = manifest.get("gdna", {}) if isinstance(manifest, dict) else {}
+    return float(sim.get("frag_mean", 250.0)), float(gdna.get("frag_mean", 350.0))
+
+
+def _format_bp(value: float) -> str:
+    """Compact bp value for report prose."""
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _format_rel_err(value: float) -> str:
+    if np.isnan(value):
+        return "n/a"
+    return f"{value:+.3f}"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -186,6 +232,9 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
     """Analyze calibration accuracy across all conditions."""
     lines = []
     hr = "═" * 100
+    manifest = load_manifest(sim_base)
+    condition_meta = condition_manifest_map(manifest)
+    true_rna_fl_mean, true_gdna_fl_mean = simulated_fragment_length_means(manifest)
 
     lines.append(f"\n{hr}")
     lines.append("  CALIBRATION ACCURACY ANALYSIS")
@@ -201,6 +250,7 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
     cal_rows = []
     for cond in conditions:
         info = parse_condition(cond)
+        meta = condition_meta.get(cond, {})
         out_dir = sim_base / cond / "rigel_out"
         if not out_dir.exists():
             continue
@@ -212,8 +262,6 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
         cal = summary.get("calibration", {})
         gd = cal.get("global_densities", {})
         fl = cal.get("fl_models", {})
-        stats = summary.get("alignment_stats", {})
-        frag_stats = summary.get("fragment_stats", {})
 
         rho_ig = gd.get("INTERGENIC", {}).get("rho", 0)
         rho_in = gd.get("INTRON", {}).get("rho", 0)
@@ -223,9 +271,9 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
         n_loci = cal.get("n_multi_loci", 0)
 
         # Compute true gDNA rate
-        n_rna = 1_000_000
         gdna_frac = info["gdna_frac"]
-        n_gdna_true = int(n_rna * gdna_frac)
+        n_rna = int(meta.get("n_rna", 1_000_000))
+        n_gdna_true = int(meta.get("n_gdna", round(n_rna * gdna_frac)))
         n_total_true = n_rna + n_gdna_true
         gdna_rate_true = n_gdna_true / n_total_true if n_total_true > 0 else 0
 
@@ -247,6 +295,7 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
             "n_loci": n_loci,
             "gdna_rate_est": gdna_rate_est,
             "gdna_rate_true": gdna_rate_true,
+            "n_rna_true": n_rna,
             "n_gdna_true": n_gdna_true,
             "intergenic_total": quant_out.get("intergenic_total", 0),
             "gdna_total": quant_out.get("gdna_total", 0),
@@ -271,14 +320,27 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
     lines.append(f"\n\n{'─' * 100}")
     lines.append("  FRAGMENT LENGTH MODELS")
     lines.append(f"{'─' * 100}")
-    lines.append("  Simulated FL: RNA=250bp (mean), gDNA=200bp (mean). Check calibration recovery.\n")
+    lines.append(
+        "  Simulated FL: "
+        f"RNA={_format_bp(true_rna_fl_mean)}bp (mean), "
+        f"gDNA={_format_bp(true_gdna_fl_mean)}bp (mean). "
+        "Check calibration recovery.\n"
+    )
     lines.append(f"  {'Condition':<35} {'FL_rna':>8} {'FL_gdna':>8} {'FL_rna_err':>10} {'FL_gdna_err':>11}")
     for row in cal_rows:
-        rna_err = (row["fl_rna"] - 250.0) / 250.0 if row["fl_rna"] > 0 else float("nan")
-        gdna_err = (row["fl_gdna"] - 200.0) / 200.0 if row["fl_gdna"] > 0 else float("nan")
+        rna_err = (
+            (row["fl_rna"] - true_rna_fl_mean) / true_rna_fl_mean
+            if row["fl_rna"] > 0 and true_rna_fl_mean > 0
+            else float("nan")
+        )
+        gdna_err = (
+            (row["fl_gdna"] - true_gdna_fl_mean) / true_gdna_fl_mean
+            if row["n_gdna_true"] > 0 and row["fl_gdna"] > 0 and true_gdna_fl_mean > 0
+            else float("nan")
+        )
         lines.append(
             f"  {row['condition']:<35} {row['fl_rna']:>8.1f} {row['fl_gdna']:>8.1f} "
-            f"{rna_err:>+10.3f} {gdna_err:>+11.3f}"
+            f"{_format_rel_err(rna_err):>10} {_format_rel_err(gdna_err):>11}"
         )
 
     return "\n".join(lines)
@@ -317,11 +379,6 @@ def analyze_abundance(sim_base: Path, conditions: list[str], truth: pd.DataFrame
             quant[["transcript_id", "count", "count_em", "tpm"]],
             on="transcript_id", how="left"
         ).fillna(0)
-
-        # True counts: mrna_abundance is in TPM-like units from simulation
-        # For comparison, use normalized counts
-        true_tpm = merged["mrna_abundance"]
-        est_tpm = merged["tpm"]
 
         # Correlation on expressed transcripts only
         expressed = merged[merged["mrna_abundance"] > 0]
@@ -475,41 +532,17 @@ def analyze_locus_gdna(sim_base: Path, conditions: list[str]) -> str:
     return "\n".join(lines)
 
 
-# ── Fragment-level Misallocation Analysis ─────────────────────────────────
-
-def analyze_fragment_assignment(sim_base: Path, conditions: list[str]) -> str:
-    """Analyze fragment-level assignment using annotated BAM tags vs oracle truth.
-
-    Oracle BAM read name encodes true origin:
-      - RNA: {tx_id}:{start}-{end}:{strand}:{frag_num}
-      - gDNA: gdna:{region}:{start}-{end}:{strand}:{frag_num}
-
-    Annotated BAM tags:
-      - ZT: assigned transcript_id
-      - ZC: category (unambig, ambig_same_strand, ambig_opp_strand, multimapper, etc.)
-      - ZW: posterior weight
-      - ZG: assigned gene
-    """
+def collect_fragment_assignment_rows(sim_base: Path, conditions: list[str]) -> list[dict]:
+    """Collect fragment-level assignment counts from annotated BAM tags."""
     import pysam
 
-    lines = []
-    hr = "═" * 100
-
-    lines.append(f"\n{hr}")
-    lines.append("  FRAGMENT-LEVEL ASSIGNMENT ANALYSIS")
-    lines.append(hr)
-
-    # Analyze all conditions for overview, deep-dive on select ones
     overview_rows = []
-
     for cond in conditions:
         cond_dir = sim_base / cond
         annotated_bam = cond_dir / "annotated.bam"
 
         if not annotated_bam.exists():
             continue
-
-        info = parse_condition(cond)
 
         # Counters
         correct_tx = 0          # RNA → correct transcript
@@ -588,6 +621,38 @@ def analyze_fragment_assignment(sim_base: Path, conditions: list[str]) -> str:
             "gdna_correct": gdna_correct,
         })
 
+    return overview_rows
+
+
+# ── Fragment-level Misallocation Analysis ─────────────────────────────────
+
+def analyze_fragment_assignment(
+    sim_base: Path,
+    conditions: list[str],
+    overview_rows: list[dict] | None = None,
+) -> str:
+    """Analyze fragment-level assignment using annotated BAM tags vs oracle truth.
+
+    Oracle BAM read name encodes true origin:
+      - RNA: {tx_id}:{start}-{end}:{strand}:{frag_num}
+      - gDNA: gdna:{region}:{start}-{end}:{strand}:{frag_num}
+
+    Annotated BAM tags:
+      - ZT: assigned transcript_id
+      - ZC: category (unambig, ambig_same_strand, ambig_opp_strand, multimapper, etc.)
+      - ZW: posterior weight
+      - ZG: assigned gene
+    """
+    lines = []
+    hr = "═" * 100
+
+    lines.append(f"\n{hr}")
+    lines.append("  FRAGMENT-LEVEL ASSIGNMENT ANALYSIS")
+    lines.append(hr)
+
+    if overview_rows is None:
+        overview_rows = collect_fragment_assignment_rows(sim_base, conditions)
+
     # Print overview table
     lines.append(f"\n{'Condition':<35} {'Total':>8} "
                  f"{'RNA_ok':>8} {'RNA_gene':>9} {'RNA_wrong':>9} {'RNA→gDNA':>9} "
@@ -597,7 +662,6 @@ def analyze_fragment_assignment(sim_base: Path, conditions: list[str]) -> str:
 
     for row in overview_rows:
         total = row["total"]
-        rna_correct_total = row["correct_tx"] + row["correct_gene"]
         overall_correct = row["correct_tx"] + row["correct_gene"] + row["gdna_correct"]
         accuracy = overall_correct / total if total > 0 else 0
 
@@ -636,6 +700,136 @@ def analyze_fragment_assignment(sim_base: Path, conditions: list[str]) -> str:
             lines.append(f"    gDNA ({row['total_gdna']:,} frags):")
             lines.append(f"      Correctly identified: {gdna_precision:.4f} ({row['gdna_correct']:,} frags)")
             lines.append(f"      Leaked to RNA:        {gdna_leak:.4f} ({row['gdna_as_rna']:,} frags)")
+
+    return "\n".join(lines)
+
+
+# ── Post-fix synthetic acceptance checks ──────────────────────────────────
+
+def analyze_postfix_acceptance(
+    sim_base: Path,
+    conditions: list[str],
+    assignment_rows: list[dict] | None = None,
+    thresholds: CalibrationAcceptanceThresholds = CalibrationAcceptanceThresholds(),
+) -> str:
+    """Summarize the cheap regression checks that gate calibration readiness."""
+    manifest = load_manifest(sim_base)
+    condition_meta = condition_manifest_map(manifest)
+    lines = []
+    rows: list[dict] = []
+    hr = "═" * 100
+
+    def add_row(
+        check: str,
+        condition: str,
+        value: str,
+        threshold: str,
+        passed: bool | None,
+    ) -> None:
+        if passed is None:
+            status = "SKIP"
+        else:
+            status = "PASS" if passed else "FAIL"
+        rows.append({
+            "check": check,
+            "condition": condition,
+            "value": value,
+            "threshold": threshold,
+            "status": status,
+        })
+
+    # Boundary-density consistency: the implicit-splice bug mostly showed up as
+    # depressed EXON|INTRON density relative to intergenic gDNA density.
+    for cond in conditions:
+        meta = condition_meta.get(cond, {})
+        info = parse_condition(cond)
+        n_rna = int(meta.get("n_rna", 1_000_000))
+        n_gdna = int(meta.get("n_gdna", round(n_rna * info["gdna_frac"])))
+        if n_gdna <= 0:
+            continue
+
+        summary = load_summary(sim_base / cond / "rigel_out")
+        gd = summary.get("calibration", {}).get("global_densities", {})
+        rho_ig = float(gd.get("INTERGENIC", {}).get("rho", 0.0))
+        rho_ex = float(gd.get("EXON-INTRON", {}).get("rho", 0.0))
+        if rho_ig <= 0:
+            add_row("rho_ex/rho_ig", cond, "n/a", ">= 0.950", None)
+            continue
+        ratio = rho_ex / rho_ig
+        add_row(
+            "rho_ex/rho_ig",
+            cond,
+            f"{ratio:.3f}",
+            f">= {thresholds.min_rho_ex_over_ig:.3f}",
+            ratio >= thresholds.min_rho_ex_over_ig,
+        )
+
+    # nRNA should stay essentially off in synthetic nrna_none conditions after
+    # the implicit-splice false positives stop routing true gDNA into nRNA.
+    for cond in conditions:
+        meta = condition_meta.get(cond, {})
+        nrna_label = str(meta.get("nrna_label", "none" if cond.endswith("_nrna_none") else ""))
+        if nrna_label != "none":
+            continue
+        loci = load_loci(sim_base / cond / "rigel_out")
+        if loci.empty or "nrna" not in loci.columns:
+            add_row("nRNA in nrna_none", cond, "n/a", "<= 10", None)
+            continue
+        total_nrna = float(loci["nrna"].sum())
+        add_row(
+            "nRNA in nrna_none",
+            cond,
+            f"{total_nrna:.0f}",
+            f"<= {thresholds.max_nrna_none_count:.0f}",
+            total_nrna <= thresholds.max_nrna_none_count,
+        )
+
+    # Fragment-level gDNA leak requires annotated BAMs. Keep this bounded but do
+    # not treat unavailable BAMs as a failed calibration run.
+    assignment_rows = assignment_rows or []
+    if assignment_rows:
+        for row in assignment_rows:
+            if row["total_gdna"] <= 0:
+                continue
+            leak_rate = row["gdna_as_rna"] / row["total_gdna"]
+            add_row(
+                "gDNA->RNA leak",
+                row["condition"],
+                f"{leak_rate:.4f}",
+                f"<= {thresholds.max_gdna_to_rna_leak_rate:.4f}",
+                leak_rate <= thresholds.max_gdna_to_rna_leak_rate,
+            )
+    else:
+        add_row("gDNA->RNA leak", "all", "n/a", "annotated BAM required", None)
+
+    lines.append(f"\n{hr}")
+    lines.append("  POST-FIX CALIBRATION ACCEPTANCE CHECKS")
+    lines.append(hr)
+    lines.append(
+        "  These checks pin the implicit-splice fix: boundary density should be "
+        "coherent, nrna_none should stay near zero, and true gDNA should not "
+        "leak substantially into RNA.\n"
+    )
+    lines.append(
+        f"  {'Check':<20} {'Condition':<35} {'Value':>10} "
+        f"{'Threshold':>14} {'Status':>7}"
+    )
+    lines.append("─" * 96)
+    for row in rows:
+        lines.append(
+            f"  {row['check']:<20} {row['condition']:<35} {row['value']:>10} "
+            f"{row['threshold']:>14} {row['status']:>7}"
+        )
+
+    failures = [row for row in rows if row["status"] == "FAIL"]
+    passes = [row for row in rows if row["status"] == "PASS"]
+    lines.append("")
+    if failures:
+        lines.append(f"  FAIL: {len(failures)} acceptance check(s) failed.")
+    elif passes:
+        lines.append(f"  PASS: all {len(passes)} evaluated acceptance checks passed.")
+    else:
+        lines.append("  SKIP: no acceptance checks could be evaluated from available outputs.")
 
     return "\n".join(lines)
 
@@ -699,12 +893,18 @@ def main():
     print(locus_report)
 
     # 3d: Fragment-level (optional, slow)
+    assignment_rows = []
     if not args.skip_frag_analysis:
-        frag_report = analyze_fragment_assignment(sim_base, CONDITIONS)
+        assignment_rows = collect_fragment_assignment_rows(sim_base, CONDITIONS)
+        frag_report = analyze_fragment_assignment(sim_base, CONDITIONS, assignment_rows)
         print(frag_report)
     else:
         frag_report = "\n  [SKIP] Fragment analysis skipped (--skip-frag-analysis)"
         print(frag_report)
+
+    # 3e: Cheap post-fix calibration acceptance checks
+    acceptance_report = analyze_postfix_acceptance(sim_base, CONDITIONS, assignment_rows)
+    print(acceptance_report)
 
     # ── Save full report ──
     report_path = sim_base / "analysis_report.txt"
@@ -716,6 +916,7 @@ def main():
         abundance_report,
         locus_report,
         frag_report,
+        acceptance_report,
     ])
     report_path.write_text(full_report)
     print(f"\n\n  Full report saved to: {report_path}")

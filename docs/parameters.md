@@ -41,6 +41,7 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 | `--include-multimap` / `--no-include-multimap` | yes | Include multimapping reads (detected via `NH` tag or secondary flag) |
 | `--keep-duplicates` / `--no-keep-duplicates` | no | Keep PCR/optical duplicate-marked reads |
 | `--sj-strand-tag TAG [TAG …]` | `auto` | Splice-junction strand BAM tag(s). `auto` detects from the BAM header. Common values: `XS` (STAR, HISAT2), `ts` (minimap2). Multiple tags tried in order. |
+| `--splicing-anchor-tolerance K` | `3` | Shared splice-anchor slack in bp. Used by implicit-splice classification for annotated introns in paired-end gaps and by calibration boundary-flux clearance. |
 
 ### EM algorithm
 
@@ -101,6 +102,7 @@ Unknown keys generate a warning and are ignored.
 include_multimap: true
 keep_duplicates: false
 sj_strand_tag: [auto]          # [XS] for STAR, [ts] for minimap2
+splicing_anchor_tolerance: 3   # shared implicit-splice and boundary-flux slack
 
 # EM algorithm
 prior_pseudocount: 1.0

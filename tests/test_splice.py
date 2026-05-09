@@ -1,5 +1,7 @@
 """Tests for rigel.splice — splice classification enums."""
 
+from pathlib import Path
+
 
 from rigel.splice import (
     ANTISENSE_COLS,
@@ -27,6 +29,27 @@ class TestSpliceType:
     def test_length(self):
         assert len(SpliceType) == 5
         assert NUM_SPLICE_TYPES == 5
+
+    def test_native_constants_match_python_enum(self):
+        import rigel._resolve_impl as native_resolve
+
+        assert native_resolve.SPLICE_UNSPLICED == int(SpliceType.UNSPLICED)
+        assert native_resolve.SPLICE_SPLICED_UNANNOT == int(SpliceType.SPLICED_UNANNOT)
+        assert native_resolve.SPLICE_SPLICED_ANNOT == int(SpliceType.SPLICED_ANNOT)
+        assert native_resolve.SPLICE_IMPLICIT == int(SpliceType.SPLICED_IMPLICIT)
+        assert native_resolve.SPLICE_ARTIFACT == int(SpliceType.SPLICE_ARTIFACT)
+
+    def test_native_bam_splice_labels_cover_extended_codes(self):
+        """The native BAM writer's private ZS label helper must not fall through.
+
+        ``splice_type_label`` is a static C++ helper, so this source-level test is
+        the lightest direct guard that extended splice classes stay labelled in
+        annotated BAM output.
+        """
+        source = Path(__file__).parents[1] / "src/rigel/native/bam_scanner.cpp"
+        text = source.read_text()
+        assert 'case SPLICE_IMPLICIT:        return "spliced_implicit";' in text
+        assert 'case SPLICE_ARTIFACT:        return "splice_artifact";' in text
 
 
 # =====================================================================

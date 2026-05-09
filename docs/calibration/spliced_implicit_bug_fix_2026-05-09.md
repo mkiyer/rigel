@@ -2,7 +2,8 @@
 
 **Date:** 2026-05-09  
 **Author:** Copilot, with diagnosis driven by user investigation  
-**Status:** Revised plan (rev 4) - reviewed against current code; ready for implementation
+**Status:** Implemented and post-fix validated; calibration is green-lighted
+after the regression/reporting guard pass.
 
 ---
 
@@ -19,23 +20,26 @@
   - the implicit-splice reference C++ no longer uses an invalid `return;` inside `_resolve_core`, preserves the existing no-chimera behavior, sorts/merges blocks defensively, and requires positive intron-gap overlap before applying K slack;
   - native ZS label for `SPLICE_ARTIFACT` is aligned with Python (`"splice_artifact"`, not `"spliced_artifact"`);
   - summary/config persistence is corrected to the actual `summary.json` structure.
-- **rev 5 (2026-05-09):** drops back-compat for `boundary_tolerance`. The
-  CLI/YAML/config/payload/summary keys are renamed unconditionally to
-  `splicing_anchor_tolerance`. There is no `--boundary-tolerance` alias,
-  no YAML alias, and no read-side fallback for legacy summaries. Tests
-  that referenced the old name are updated.
-
 - **rev 4 (2026-05-09):** tightens the implementation for performance and maintainability:
   - implicit-splice detection uses reusable `ResolverScratch` buffers and small helper functions instead of a large inline `_resolve_core` block;
   - transcript introns are queried by binary search over the existing per-transcript exon CSR;
   - scanner-sorted exon blocks take a no-copy fast path, with defensive copy/sort only for unsorted Python-facing calls;
   - no new cgranges intron index is planned unless profiling shows the CSR path is a bottleneck.
+- **rev 5 (2026-05-09):** drops back-compat for `boundary_tolerance`. The
+  CLI/YAML/config/payload/summary keys are renamed unconditionally to
+  `splicing_anchor_tolerance`. There is no `--boundary-tolerance` alias,
+  no YAML alias, and no read-side fallback for legacy summaries. Tests
+  that referenced the old name are updated.
+- **rev 6 (2026-05-09):** records post-fix validation and adds grounding
+  checks: manifest-derived fragment-length metadata in the synthetic report,
+  native splice-label regression guards, and synthetic acceptance checks for
+  `rho_ex/rho_ig`, `nrna_none` nRNA mass, and gDNA-to-RNA leak.
 
 ---
 
 ## 1. Summary
 
-The C++ `_resolve_core` function classifies fragments as `SPLICE_IMPLICIT`
+The pre-fix C++ `_resolve_core` function classified fragments as `SPLICE_IMPLICIT`
 (splice junction inferred from a transcript-space projection shorter than the
 genomic span) using a discriminant that **does not distinguish intron content
 inside aligned blocks from intron content inside the unsequenced paired-end
@@ -70,19 +74,42 @@ they are exactly the unspliced boundary-crossing fragments whose absence
 depresses `rho_ex / rho_ig`. This makes the bug a plausible contributor to the
 residual deficit observed in the boundary-tolerance investigation.
 
-The annotated-BAM `ZS` tag also lacks native labels for `SPLICE_IMPLICIT` and
-`SPLICE_ARTIFACT`, which both currently render as `"unknown"` from the C++ BAM
-writer. Python's `_splice_type_label` already handles these through
-`SpliceType(code).name.lower()`.
+The annotated-BAM `ZS` tag also previously lacked native labels for
+`SPLICE_IMPLICIT` and `SPLICE_ARTIFACT`, causing both to render as `"unknown"`
+from the C++ BAM writer. Native and Python labels now agree:
+`"spliced_implicit"` and `"splice_artifact"`.
+
+### 1.1 Post-fix calibration status
+
+The implemented fix changed the dominant boundary-density failure mode from a
+classification bug into ordinary residual model error. In the synthetic
+post-fix report:
+
+| condition family | pre-fix `rho_ex/rho_ig` | post-fix `rho_ex/rho_ig` |
+|---|---:|---:|
+| low gDNA | 0.903 | 0.973 |
+| medium gDNA | 0.922 | 0.984 |
+| equal gDNA | 0.917 | 0.984 |
+| high gDNA | 0.924 | 0.988 |
+
+The high-gDNA, strand-specific `nrna_none` case dropped from 4,836 total nRNA
+assignments to 0, while global gDNA rate estimates stayed close to truth. The
+remaining 1-3% `rho_ex/rho_ig` deficit is no longer treated as a calibration
+blocker. The central conclusion is that the old boundary deficit was mostly an
+implicit-splice misclassification bug, not a density-estimator failure.
+
+The fragment-length report now reads the true simulated FL parameters from
+`manifest.json`; for this synthetic benchmark the true gDNA mean is 350 bp, not
+200 bp. The calibrated gDNA FL mean of about 351.6-351.7 bp is therefore correct.
 
 ---
 
 ## 2. Root cause
 
-### 2.1 The current discriminant
+### 2.1 The pre-fix discriminant
 
 In [src/rigel/native/resolve_context.h](../../src/rigel/native/resolve_context.h),
-the current implicit-splice block is:
+the pre-fix implicit-splice block was:
 
 ```cpp
 // --- SRD v2: SPLICED_IMPLICIT detection ---
