@@ -130,6 +130,18 @@ class CalibrationResult:
     multi_locus_prior_df: pd.DataFrame
     per_locus_gdna_df:    pd.DataFrame
 
+    # Boundary tolerance K (bp) the scanner used. 0 reproduces the
+    # pre-2026.05 strict-crossing semantics. Persisted so analyses
+    # can verify what value calibration was run with.
+    boundary_tolerance: int = 0
+    # Auxiliary QC counter — observed fragments whose every region
+    # hit was below the boundary-tolerance threshold q(K) = max(K, 1).
+    # Always 0 when boundary_tolerance == 0. NOT included in
+    # ``Diagnostics.total()`` because these fragments already increment
+    # ``Diagnostics.n_unannotated`` (mask 0b000) — this counter is the
+    # below-tolerance subset of that bucket.
+    n_below_tolerance: int = 0
+
     # ---- Convenience zero-copy aliases ----
     @property
     def alpha_gdna(self) -> np.ndarray:
@@ -181,6 +193,8 @@ class CalibrationResult:
             "diagnostics":      self.diagnostics.to_summary_dict(),
             "n_multi_loci":     self.n_multi_loci,
             "mean_pi_gdna":     mean_pi,
+            "boundary_tolerance": int(self.boundary_tolerance),
+            "n_below_tolerance": int(self.n_below_tolerance),
         }
 
 
@@ -233,4 +247,6 @@ def build_calibration_result(
         n_multi_loci=len(prior_table.multi_locus_priors),
         multi_locus_prior_df=build_multi_locus_prior_df(prior_table.multi_locus_priors),
         per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
+        boundary_tolerance=int(getattr(payload, "boundary_tolerance", 0)),
+        n_below_tolerance=int(getattr(payload, "n_below_tolerance", 0)),
     )

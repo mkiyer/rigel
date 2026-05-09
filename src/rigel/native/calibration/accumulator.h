@@ -26,6 +26,7 @@
 
 #include <array>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "constants.h"
@@ -63,11 +64,24 @@ struct CalibrationPayload {
     // signal — large values mean the BAM was aligned to a different
     // reference than the index was built from.
     int64_t n_unannotated_ref      = 0;
+    // Observed fragment with raw region hits whose every aligned-block
+    // overlap was below the boundary-tolerance threshold q(K) = max(K,1)
+    // (so no hit contributed a type bit to ``obs_mask``). These
+    // fragments still increment ``global_counts[0]``, ``fl_hist[0]``,
+    // and ``n_observed`` — this is an auxiliary QC subcounter.
+    // Always zero when boundary_tolerance == 0.
+    int64_t n_below_tolerance      = 0;
 };
 
 class CalibrationAccumulator {
 public:
-    explicit CalibrationAccumulator(int64_t n_regions) {
+    explicit CalibrationAccumulator(int64_t n_regions,
+                                    int32_t boundary_tolerance = 0) {
+        if (boundary_tolerance < 0) {
+            throw std::invalid_argument(
+                "CalibrationAccumulator: boundary_tolerance must be >= 0");
+        }
+        boundary_tolerance_ = boundary_tolerance;
         payload_.per_region_counts.assign(
             static_cast<size_t>(n_regions) * mask::N_STATES, 0);
         payload_.fl_hist.assign(
@@ -79,8 +93,12 @@ public:
         n_regions_ = n_regions;
         // Warm reserve to amortize the first ~10 fragments' allocations.
         hits_.reserve(16);
+        hits_overlap_bp_.reserve(16);
         block_hits_.reserve(16);
+        block_overlap_bp_.reserve(16);
         merge_buf_.reserve(16);
+        merge_buf_bp_.reserve(16);
+        qualified_hits_.reserve(16);
     }
 
     /**
@@ -108,16 +126,33 @@ public:
     CalibrationPayload&       payload()       { return payload_; }
 
     int64_t n_regions() const { return n_regions_; }
+    int32_t boundary_tolerance() const { return boundary_tolerance_; }
 
 private:
     CalibrationPayload payload_;
     int64_t n_regions_ = 0;
+    int32_t boundary_tolerance_ = 0;
 
     // Per-fragment scratch (reused across observe() calls).  After
     // warm-up these never reallocate: clear() keeps capacity.
-    std::vector<int32_t> hits_;        // sorted, deduped fragment-scope hits
-    std::vector<int32_t> block_hits_;  // per-exon-block scratch
-    std::vector<int32_t> merge_buf_;   // sorted-merge output buffer
+    //
+    // ``hits_overlap_bp_`` tracks per-fragment exact aligned-block
+    // overlap (summed across exon blocks) parallel to ``hits_``; it
+    // is used to gate ``obs_mask`` and per-region fan-out on the
+    // boundary-tolerance threshold ``q(K) = max(K, 1)``.
+    // ``qualified_hits_`` holds the subset of ``hits_`` whose
+    // overlap_bp >= q(K) — only these contribute mask bits, per-region
+    // counts, and boundary-flux events.  At K=0 (q=1) every hit
+    // returned by ``RegionIndex::overlap_into`` already has overlap
+    // >= 1, so ``qualified_hits_ == hits_`` and behavior collapses to
+    // the pre-tolerance code path bit-for-bit.
+    std::vector<int32_t> hits_;             // sorted, deduped fragment-scope hits
+    std::vector<int64_t> hits_overlap_bp_;  // per-rid summed overlap (parallel to hits_)
+    std::vector<int32_t> block_hits_;       // per-exon-block scratch
+    std::vector<int64_t> block_overlap_bp_; // per-block overlap (parallel to block_hits_)
+    std::vector<int32_t> merge_buf_;        // sorted-merge output buffer (rids)
+    std::vector<int64_t> merge_buf_bp_;     // sorted-merge output buffer (overlap)
+    std::vector<int32_t> qualified_hits_;   // hits_ filtered by overlap >= q(K)
 };
 
 }  // namespace rigel::calibration

@@ -558,6 +558,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
+    _ParamSpec("boundary_tolerance", "scan.boundary_tolerance"),
     # -- BamScanConfig: transformed --
     _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
     _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
@@ -1115,6 +1116,19 @@ def build_parser() -> argparse.ArgumentParser:
         "above which a pool's per-FL distribution is flagged 'weak' "
         "(default: 200). Below this threshold the pool is flagged "
         "'unusable' and downstream code falls back on the global FL.",
+    )
+    adv.add_argument(
+        "--boundary-tolerance",
+        dest="boundary_tolerance",
+        type=int,
+        default=None,
+        help="Minimum bp clearance K required on each side of an "
+        "exon-intron boundary for a fragment to count as a "
+        "boundary-crossing event and to contribute its EXON|INTRON "
+        "bit to the per-fragment region mask (default: 3). Removes "
+        "single-bp alignment artefacts at the cost of ~1%% of true "
+        "short-overhang exposure for typical 350 bp gDNA fragments. "
+        "Set to 0 to reproduce pre-2026.05 strict-crossing semantics.",
     )
     adv.add_argument(
         "--emit-locus-stats",

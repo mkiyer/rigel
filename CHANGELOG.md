@@ -15,6 +15,24 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
 
 ### Added
 
+- **Boundary tolerance (`--boundary-tolerance K`, default 3 bp)**: the
+  per-fragment region-mask accumulator and the matched
+  ``B_cross(K)`` denominator in the global gDNA density estimator now
+  require a minimum bp clearance ``K`` on each side of every
+  exon-intron boundary before counting a fragment as a
+  boundary-crossing event or letting it contribute its EXON|INTRON
+  bit to ``obs_mask``. Internally enforced as ``q(K) = max(K, 1)`` so
+  that ``K = 0`` reproduces the pre-2026.05 strict-crossing semantics
+  bit-for-bit. Default 3 bp removes single-bp alignment artefacts
+  (soft-clip drift, indel slippage near GT-AG splice motifs) at the
+  cost of ~1% of true short-overhang exposure for typical 350 bp gDNA
+  fragments. Calibration goldens were regenerated; relative shifts in
+  per-locus counts are <0.2%. Exposed on `BamScanConfig`,
+  `CalibrationResult.boundary_tolerance`, and
+  `CalibrationResult.n_below_tolerance` (count of fragments rejected
+  for failing the K-clearance test, separated from
+  ``n_unannotated_ref``).
+
 - `rigel.calibration.calibrate(*, index, payload, scan_trained,
   fl_prior_ess, pool_quality_good, pool_quality_weak)` — the new
   top-level orchestrator.  Takes the in-place accumulator payload from

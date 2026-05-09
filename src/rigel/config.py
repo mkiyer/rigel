@@ -144,6 +144,32 @@ class BamScanConfig:
     Set to 0 to disable multi-threaded decompression.
     """
 
+    boundary_tolerance: int = 3
+    """Minimum bp clearance K required on each side of an exon-intron
+    boundary for a fragment to (a) contribute its EXON|INTRON bit to
+    the per-fragment ``obs_mask`` and (b) count as a boundary-crossing
+    event in ``u_left`` / ``u_right``.
+
+    Internally enforced as ``q(K) = max(K, 1)`` so that ``K = 0``
+    reproduces the pre-2026.05 strict-crossing semantics bit-for-bit.
+    The matched ``B_cross(K)`` denominator in the global gDNA density
+    estimator uses the same ``q(K)``; the numerator/denominator must
+    agree or per-locus :math:`\\eta_g` is biased.
+
+    Default 3 bp removes the great majority of single-bp alignment
+    artefacts (soft-clip drift, indel slippage near GT-AG splice
+    motifs) at the cost of ~1% of true short-overhang exposure for
+    typical 350 bp gDNA fragments. Set to 0 to disable the tolerance
+    and reproduce pre-2026.05 calibration outputs exactly.
+    """
+
+    def __post_init__(self) -> None:
+        if self.boundary_tolerance < 0:
+            raise ValueError(
+                f"BamScanConfig.boundary_tolerance must be >= 0; "
+                f"got {self.boundary_tolerance}."
+            )
+
 
 # ======================================================================
 # Top-level pipeline configuration

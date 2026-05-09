@@ -253,7 +253,10 @@ def scan_and_buffer(
     # regions.feather (legacy index, INDEX_FORMAT_VERSION < 3).
     region_df = getattr(index, "region_df", None)
     if region_df is not None and len(region_df) > 0:
-        _wire_calibration_regions(scanner, index, region_df)
+        _wire_calibration_regions(
+            scanner, index, region_df,
+            boundary_tolerance=int(scan.boundary_tolerance),
+        )
 
     # Streaming chunk callback — receives zero-copy dict from C++
     def _on_chunk(raw: dict) -> None:
@@ -321,6 +324,8 @@ def _wire_calibration_regions(
     scanner,
     index: TranscriptIndex,
     region_df,
+    *,
+    boundary_tolerance: int = 0,
 ) -> None:
     """Install the index's region partition into a native BamScanner.
 
@@ -367,6 +372,7 @@ def _wire_calibration_regions(
         np.ascontiguousarray(ends),
         np.ascontiguousarray(type_masks),
         n_refs,
+        int(boundary_tolerance),
     )
 
 
@@ -885,6 +891,9 @@ def quant_from_buffer(
             calibration.global_densities,
             gdna_fl=fl_models.gdna,
             nrna_weight=nrna_weight,
+            boundary_tolerance=int(
+                getattr(calibration_payload, "boundary_tolerance", 0)
+            ),
         )
         calibration = calibration.with_priors(prior_table)
         # Log the prior-derived calibration summary now that the

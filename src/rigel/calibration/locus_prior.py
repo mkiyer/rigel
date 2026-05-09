@@ -401,6 +401,7 @@ def estimate_locus_gdna(
     *,
     intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
     ref_length: int | None = None,
+    boundary_tolerance: int = 0,
 ) -> LocusGdnaEstimate:
     """Estimate the gDNA mass and π̂_gdna for one ``Locus``.
 
@@ -495,7 +496,9 @@ def estimate_locus_gdna(
         fallback_flags |= FLAG_INTRON_ZERO_LEFF
 
     # 5. BOUNDARY (§3.5 step 5).
-    b_cross = boundary_crossing_exposure(gdna_fl)
+    b_cross = boundary_crossing_exposure(
+        gdna_fl, boundary_tolerance=boundary_tolerance
+    )
     rho_b, n_eligible, n_b_observed, l_core_exon, n_exon_only = _boundary_term_prorated(
         exon_in_locus=is_ex,
         region_ids_locus=region_ids,
@@ -585,6 +588,7 @@ def expected_gdna_count_global(
     gdna_fl: FragmentLengthModel,
     *,
     ref_length: int | None = None,  # noqa: ARG001 (reserved; global-only path is unflanked)
+    boundary_tolerance: int = 0,
 ) -> ExpectedGdnaPriorParts:
     """Pure global-only expected gDNA pseudocount for one ``Locus``.
 
@@ -663,7 +667,9 @@ def expected_gdna_count_global(
     else:
         s_ell = 0
 
-    b_cross = boundary_crossing_exposure(gdna_fl)
+    b_cross = boundary_crossing_exposure(
+        gdna_fl, boundary_tolerance=boundary_tolerance
+    )
 
     rho_ig = float(global_densities.intergenic.rho)
     rho_in = float(global_densities.intron.rho)
@@ -759,6 +765,7 @@ def assemble_priors(
     gdna_fl: FragmentLengthModel | None = None,
     nrna_weight: float = 0.0,
     intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
+    boundary_tolerance: int = 0,
 ) -> PriorTable:
     """Build the full :class:`PriorTable` for the batch EM.
 
@@ -864,6 +871,7 @@ def assemble_priors(
                 if ref_lengths_arr is not None
                 and 0 <= loc.ref_id < ref_lengths_arr.size
                 else None,
+                boundary_tolerance=boundary_tolerance,
             )
             for j, loc in enumerate(ml.loci)
         )
@@ -879,6 +887,7 @@ def assemble_priors(
                     region_arrays=region_arrays,
                     global_densities=global_densities,
                     gdna_fl=gdna_fl,
+                    boundary_tolerance=boundary_tolerance,
                 ).total
                 for loc in ml.loci
             )

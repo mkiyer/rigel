@@ -127,6 +127,7 @@ def compute_global_densities(
     payload: CalibrationScanPayload,
     *,
     gdna_fl: FragmentLengthModel,
+    boundary_tolerance: int = 0,
 ) -> GlobalDensityTable:
     """Compute the three global gDNA densities + per-type $\\kappa$.
 
@@ -136,9 +137,13 @@ def compute_global_densities(
     containment effective length (:func:`l_eff_contained`), matching
     the *contained* fragment numerator emitted by the C++ scanner.
     The EXON-INTRON denominator is the per-side boundary-crossing
-    exposure :math:`B_\\text{cross} = \\sum_\\ell h(\\ell)\\,
-    \\max(\\ell - 1, 0)` summed over eligible boundary sides; see
+    exposure :math:`B_\\text{cross}(K) = \\sum_\\ell h(\\ell)\\,
+    \\max(\\ell - 2q(K) + 1, 0)`, with :math:`q(K) = \\max(K, 1)`,
+    summed over eligible boundary sides; see
     :func:`rigel.calibration._exposure.boundary_crossing_exposure`.
+    ``K`` here must equal the boundary tolerance the scanner used
+    when populating ``payload.u_left`` / ``payload.u_right``; the
+    numerator/denominator must agree.
     """
     n_regions = len(region_df)
     if payload.per_region_counts.shape[0] != n_regions:
@@ -186,7 +191,9 @@ def compute_global_densities(
         bf_right=region_df["boundary_flux_right"].to_numpy(),
         u_left=payload.u_left,
         u_right=payload.u_right,
-        b_cross=boundary_crossing_exposure(gdna_fl),
+        b_cross=boundary_crossing_exposure(
+            gdna_fl, boundary_tolerance=boundary_tolerance
+        ),
     )
 
     return GlobalDensityTable(

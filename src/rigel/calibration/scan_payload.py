@@ -71,6 +71,16 @@ class CalibrationScanPayload:
     n_excluded_artifact: int
     n_unobserved: int
     n_unannotated_ref: int
+    #: Auxiliary QC counter — observed fragments whose every region hit
+    #: was below the boundary-tolerance threshold ``q(K) = max(K, 1)``
+    #: and therefore contributed no type bit to ``obs_mask``. Always 0
+    #: when ``boundary_tolerance == 0``. Already included in
+    #: ``global_counts[0]``, ``fl_hist[0]``, and ``n_observed``; do not
+    #: add into balance totals.
+    n_below_tolerance: int = 0
+    #: Boundary tolerance K (bp) the scanner used. Persisted so analyses
+    #: can verify what value calibration was run with.
+    boundary_tolerance: int = 0
 
     @classmethod
     def from_scan_dict(
@@ -122,6 +132,18 @@ class CalibrationScanPayload:
         n_ex_ar = int(d["n_excluded_artifact"])
         n_unobs = int(d["n_unobserved"])
         n_unann = int(d["n_unannotated_ref"])
+        n_below = int(d.get("n_below_tolerance", 0))
+        boundary_tolerance = int(d.get("boundary_tolerance", 0))
+        if n_below < 0:
+            raise ValueError(
+                f"calibration payload: n_below_tolerance ({n_below}) < 0."
+                f"{_ERR_SUFFIX}"
+            )
+        if boundary_tolerance < 0:
+            raise ValueError(
+                f"calibration payload: boundary_tolerance ({boundary_tolerance}) "
+                f"< 0.{_ERR_SUFFIX}"
+            )
 
         # Internal consistency: n_unannotated_ref is a subset of n_observed
         # (it counts observed fragments whose every block fell outside any
@@ -129,6 +151,14 @@ class CalibrationScanPayload:
         if n_unann > n_observed:
             raise ValueError(
                 f"calibration payload: n_unannotated_ref ({n_unann}) > "
+                f"n_observed ({n_observed}).{_ERR_SUFFIX}"
+            )
+        # Internal consistency: n_below_tolerance is also a subset of
+        # n_observed (those fragments still incremented n_observed but
+        # contributed mask 0 because every region hit was sub-tolerance).
+        if n_below > n_observed:
+            raise ValueError(
+                f"calibration payload: n_below_tolerance ({n_below}) > "
                 f"n_observed ({n_observed}).{_ERR_SUFFIX}"
             )
 
@@ -165,4 +195,6 @@ class CalibrationScanPayload:
             n_excluded_artifact=n_ex_ar,
             n_unobserved=n_unobs,
             n_unannotated_ref=n_unann,
+            n_below_tolerance=n_below,
+            boundary_tolerance=boundary_tolerance,
         )
