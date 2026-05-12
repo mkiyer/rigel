@@ -1,11 +1,11 @@
 """Scenario: nRNA double-counting regression test.
 
-A 20 kb genome with two two-exon transcripts:
+A 20 kb genome with two multi-exon transcripts:
 
-  t1   (+)  exons (2000,4000) (8000,10000)  abundance=100  ← positive control
-  t_ctrl (−)  exons (14000,16000) (18000,19000)  abundance=0   ← negative control
+    t1   (+)  eight 500 bp exons across chr1:2000-10000  abundance=100  ← positive control
+    t_ctrl (−)  eight 500 bp exons across chr1:12000-19500  abundance=0   ← negative control
 
-The ~4 kb intron in t1 provides ample intronic signal for nRNA
+The ~4 kb total intronic span in t1 provides ample intronic signal for nRNA
 estimation.  The negative control transcript t_ctrl is on the
 opposite strand, unexpressed, and physically separated.
 
@@ -20,14 +20,11 @@ per-transcript mRNA counts.  After the fix, the EM should
 separate all pools and total RNA (mRNA + nRNA) should be
 perfectly accounted for.
 
-Known limitations:
+Scenario notes:
   - nRNA fragments that fall entirely within exons are physically
     indistinguishable from mRNA — some nRNA→mRNA leakage is expected.
-  - With moderate nRNA and SS < 1.0, anti-sense nRNA reads (from
-    imperfect SS) can be misinterpreted as gDNA signal by the strand
-    model, producing false-positive gDNA estimates.  This only affects
-    low nRNA abundance (30); at higher nRNA (70) the intronic sense
-    signal dominates and separation is perfect.
+    - Imperfect strand specificity still makes the problem harder, so
+        total-RNA tolerances remain broader at SS < 1.0 than at perfect SS.
 
 We therefore check:
   - nRNA NOT double-counted (ratio < 1.50) — the core regression test
@@ -83,21 +80,41 @@ class TestNrnaDoubleCounting:
             seed=SIM_SEED,
             work_dir=tmp_path / "nrna_double_count",
         )
-        # Positive control: two-exon gene on + strand with wide intron.
-        # exon1=2kb, intron=4kb, exon2=2kb → spliced length 4kb, span 8kb
+        # Positive control: multi-exon gene on + strand.
+        # Total exon length is 4 kb, matching the original toy, but multiple
+        # junctions keep annotated spliced observations well represented.
+        # The broad 8 kb span keeps the nRNA/gDNA separation problem active.
         sc.add_gene("g1", "+", [
             {
                 "t_id": "t1",
-                "exons": [(2000, 4000), (8000, 10000)],
+                "exons": [
+                    (2000, 2500),
+                    (3000, 3500),
+                    (4000, 4500),
+                    (5000, 5500),
+                    (6000, 6500),
+                    (7000, 7500),
+                    (8000, 8500),
+                    (9500, 10000),
+                ],
                 "abundance": 100,
             },
         ])
-        # Negative control: two-exon gene on − strand, no expression.
+        # Negative control: multi-exon gene on − strand, no expression.
         # Physically separated from g1.
         sc.add_gene("g_ctrl", "-", [
             {
                 "t_id": "t_ctrl",
-                "exons": [(14000, 16000), (18000, 19000)],
+                "exons": [
+                    (12000, 12500),
+                    (13000, 13500),
+                    (14000, 14500),
+                    (15000, 15500),
+                    (16000, 16500),
+                    (17000, 17500),
+                    (18000, 18500),
+                    (19000, 19500),
+                ],
                 "abundance": 0,
             },
         ])
@@ -117,28 +134,11 @@ class TestNrnaDoubleCounting:
           - Tier 2 (g=20):  moderate — two-way gDNA + RNA separation
           - Tier 3 (g=100): relaxed — extreme gDNA stress test
 
-        Known limitation (xfail): in the gDNA-poor + nRNA-present regime
-        on this *toy* 20 kb genome, the *global* gDNA densities used by
-        the Phase 2 Bayesian prior are dominated by transcriptome-wide
-        nRNA leakage into the intron/boundary branches. The prior then
-        over-allocates gDNA mass and total RNA is under-recovered. This
-        is a calibration limitation (gDNA-vs-nRNA discrimination is
-        outside the prior-assembly scope per the v3 plan §4) and not a
-        bug in :func:`assemble_priors`. These cases are kept as
-        sentinels for the future nRNA-aware calibration phase.
+        The high-nRNA, gDNA-poor cases used to be quarantined because
+        global intron/boundary densities treated nRNA signal as gDNA on
+        this toy genome. Strand-aware calibration should now keep those
+        cases active as routine regression coverage.
         """
-        # The synthetic mini-genome is *not* representative of the
-        # human-scale calibration the global-density model assumes.
-        # When the entire transcriptome is one ~8 kb gene, a moderate
-        # nRNA abundance turns nRNA into the dominant intron/boundary
-        # signal — the prior cannot distinguish that from gDNA without
-        # an nRNA-aware calibrator.
-        if nrna >= 30 and gdna <= 20:
-            pytest.xfail(
-                "Global-only Bayesian prior over-allocates gDNA on toy genomes "
-                "where intron/boundary densities are nRNA-contaminated. "
-                "Requires nRNA-aware calibration (deferred)."
-            )
         bench = build_and_run(
             scenario,
             n_fragments=N_FRAGMENTS,
@@ -231,17 +231,9 @@ class TestNrnaDoubleCounting:
         Before the fix, SS=0.95 would produce ~2× nRNA while SS=0.5
         produced ~1× (the paradoxical strand inversion).
 
-        Known limitation (xfail when ``nrna >= 30``): the Phase 2
-        global-only Bayesian prior over-allocates gDNA on this toy
-        genome (intron/boundary densities are nRNA-contaminated),
-        starving the nRNA component. See ``test_full_sweep``.
+        The high-nRNA cases were formerly quarantined; they now run as
+        active regression tests for the strand-aware calibration path.
         """
-        if nrna >= 30:
-            pytest.xfail(
-                "Global-only Bayesian prior over-allocates gDNA on toy genomes "
-                "where intron/boundary densities are nRNA-contaminated. "
-                "Requires nRNA-aware calibration (deferred)."
-            )
         bench = build_and_run(
             scenario,
             n_fragments=N_FRAGMENTS,
@@ -276,17 +268,9 @@ class TestNrnaDoubleCounting:
         Uses SS=1.0 to avoid the known nRNA→gDNA leakage at imperfect SS,
         isolating the pure nRNA accounting test.
 
-        Known limitation (xfail when ``nrna >= 30``): with the Phase 2
-        global-only Bayesian prior, this toy 20 kb genome leaks nRNA
-        into the *global* intron/boundary densities, so the prior
-        over-allocates gDNA. See ``test_full_sweep``'s docstring.
+        The high-nRNA cases were formerly quarantined; they now run as
+        active total-RNA conservation coverage.
         """
-        if nrna >= 30:
-            pytest.xfail(
-                "Global-only Bayesian prior over-allocates gDNA on toy genomes "
-                "where intron/boundary densities are nRNA-contaminated. "
-                "Requires nRNA-aware calibration (deferred)."
-            )
         bench = build_and_run(
             scenario,
             n_fragments=N_FRAGMENTS,

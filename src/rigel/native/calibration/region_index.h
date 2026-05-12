@@ -47,6 +47,7 @@ public:
              const int64_t* starts,
              const int64_t* ends,
              const uint8_t* type_masks,
+             const uint8_t* strands,
              int64_t n_regions,
              int32_t n_refs)
     {
@@ -58,6 +59,7 @@ public:
         starts_.assign(starts, starts + n_regions);
         ends_.assign(ends, ends + n_regions);
         type_masks_.assign(type_masks, type_masks + n_regions);
+        strands_.assign(strands, strands + n_regions);
         n_refs_ = n_refs;
 
         // Build per-ref CSR offsets.  Inputs are sorted by (ref_id, start),
@@ -117,6 +119,7 @@ public:
     inline int64_t  start(int32_t rid)     const { return starts_[rid]; }
     inline int64_t  end(int32_t rid)       const { return ends_[rid]; }
     inline uint8_t  type_mask(int32_t rid) const { return type_masks_[rid]; }
+    inline uint8_t  strand(int32_t rid)    const { return strands_[rid]; }
     inline int64_t  n_regions()            const { return static_cast<int64_t>(starts_.size()); }
     inline int32_t  n_refs()               const { return n_refs_; }
 
@@ -124,6 +127,7 @@ private:
     std::vector<int64_t> starts_;
     std::vector<int64_t> ends_;
     std::vector<uint8_t> type_masks_;
+    std::vector<uint8_t> strands_;
     std::vector<int64_t> ref_offsets_;   // size = n_refs_ + 1
     int32_t n_refs_ = 0;
 };

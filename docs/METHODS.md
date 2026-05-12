@@ -187,8 +187,8 @@ Rigel also tracks:
 - an exonic diagnostic model trained on all exonic signal
 - an intergenic diagnostic model trained on intergenic fragments
 
-These are reported in `summary.json` but are not used to score gDNA. gDNA is
-always treated as unstranded for scoring.
+These are reported in `summary.json` but are not used for scoring or
+calibration. gDNA is always treated as unstranded for scoring.
 
 ---
 

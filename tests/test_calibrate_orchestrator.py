@@ -106,12 +106,17 @@ def _payload(
     h[MASK_INTERGENIC, 300:400] = max(1, n_intergenic // 100)
     # Mirror n_observed into a benign bin so payload validator passes.
     n_obs = int(gc.sum())
+    intron_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    intron_by_orient[:, 2] = per_region[:, MASK_INTRON]
     return CalibrationScanPayload(
         global_counts=gc,
         per_region_counts=per_region,
         fl_hist=h,
         u_left=np.zeros(n_regions, dtype=np.int64),
         u_right=np.zeros(n_regions, dtype=np.int64),
+        intron_counts_by_orient=intron_by_orient,
+        u_left_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
+        u_right_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
         n_observed=n_obs,
         n_excluded_multimap=0,
         n_excluded_chimera=0,

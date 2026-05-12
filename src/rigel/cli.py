@@ -46,9 +46,7 @@ def index_command(args: argparse.Namespace) -> int:
         sys.exit(f"Error: GTF file not found: {gtf}")
 
     if args.no_mappability and args.alignable_zarr is not None:
-        sys.exit(
-            "Error: --no-mappability and --alignable-zarr are mutually exclusive."
-        )
+        sys.exit("Error: --no-mappability and --alignable-zarr are mutually exclusive.")
     if not args.no_mappability and args.alignable_zarr is None:
         sys.exit(
             "Error: --alignable-zarr PATH is required (use --no-mappability to opt out "
@@ -63,9 +61,7 @@ def index_command(args: argparse.Namespace) -> int:
         write_tsv=not args.no_tsv,
         gtf_parse_mode=args.gtf_parse_mode,
         nrna_tolerance=args.nrna_tolerance,
-        alignable_zarr_path=(
-            Path(args.alignable_zarr) if args.alignable_zarr else None
-        ),
+        alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
         mappability_read_length=args.mappability_read_length,
         splice_blacklist_min_count=args.splice_blacklist_min_count,
     )
@@ -160,7 +156,10 @@ def _build_pipeline_config(
     registry below ``sim_command``.
     """
     from .config import (
-        EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig,
+        EMConfig,
+        PipelineConfig,
+        BamScanConfig,
+        FragmentScoringConfig,
         CalibrationConfig,
     )
 
@@ -359,13 +358,13 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             # observed contamination on libraries with substantial gDNA.
             # ``gdna_em_fraction`` exposes the EM-only portion separately
             # for users who want to disambiguate the two pools.
-            "gdna_fraction": round(
-                (total_gdna + stats.n_intergenic) / total_all, 6
-            ) if total_all > 0 else 0.0,
+            "gdna_fraction": round((total_gdna + stats.n_intergenic) / total_all, 6)
+            if total_all > 0
+            else 0.0,
             "gdna_em_fraction": round(total_gdna / total_all, 6) if total_all > 0 else 0.0,
-            "intergenic_fraction": round(
-                stats.n_intergenic / total_all, 6
-            ) if total_all > 0 else 0.0,
+            "intergenic_fraction": round(stats.n_intergenic / total_all, 6)
+            if total_all > 0
+            else 0.0,
         },
     }
     with open(summary_path, "w") as f:

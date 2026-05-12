@@ -37,6 +37,7 @@ void CalibrationAccumulator::observe(
     int64_t frag_end,
     const ExonBlock* exons,
     int32_t n_exons,
+    int8_t fragment_strand,
     const RegionIndex& regions)
 {
     hits_.clear();
@@ -162,11 +163,22 @@ void CalibrationAccumulator::observe(
         payload_.per_region_counts[
             static_cast<size_t>(rid) * mask::N_STATES
             + static_cast<size_t>(obs_mask)]++;
+        const uint8_t orient_code = orient::classify(regions.strand(rid), fragment_strand);
+        const size_t orient_idx = static_cast<size_t>(rid) * orient::N + orient_code;
+        if (obs_mask == mask::INTRON) {
+            payload_.intron_counts_by_orient[orient_idx]++;
+        }
         if (flux_eligible && (regions.type_mask(rid) & mask::EXON) != 0) {
             const int64_t rs = regions.start(rid);
             const int64_t re = regions.end(rid);
-            if (frag_start + q <= rs && frag_end >= rs + q) payload_.u_left[rid]++;
-            if (frag_start + q <= re && frag_end >= re + q) payload_.u_right[rid]++;
+            if (frag_start + q <= rs && frag_end >= rs + q) {
+                payload_.u_left[rid]++;
+                payload_.u_left_by_orient[orient_idx]++;
+            }
+            if (frag_start + q <= re && frag_end >= re + q) {
+                payload_.u_right[rid]++;
+                payload_.u_right_by_orient[orient_idx]++;
+            }
         }
     }
 }
@@ -196,6 +208,10 @@ void CalibrationAccumulator::merge_from(const CalibrationAccumulator& other) {
     add_into(payload_.fl_hist,           other.payload_.fl_hist);
     add_into(payload_.u_left,            other.payload_.u_left);
     add_into(payload_.u_right,           other.payload_.u_right);
+    add_into(payload_.intron_counts_by_orient,
+             other.payload_.intron_counts_by_orient);
+    add_into(payload_.u_left_by_orient,  other.payload_.u_left_by_orient);
+    add_into(payload_.u_right_by_orient, other.payload_.u_right_by_orient);
     payload_.n_observed          += other.payload_.n_observed;
     payload_.n_excluded_multimap += other.payload_.n_excluded_multimap;
     payload_.n_excluded_chimera  += other.payload_.n_excluded_chimera;

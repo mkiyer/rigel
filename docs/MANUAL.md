@@ -769,6 +769,13 @@ coordinates share one nRNA component.
 Rigel trains the strand model from annotated spliced fragments only. Unstranded
 libraries, or libraries with few informative splice reads, will stay near 0.5.
 
+**How does calibration decide whether to use strand information?**
+Calibration uses strand correction only when the signed strand contrast is
+statistically identifiable at the 99% level and not numerically tiny. Otherwise
+it runs the unstranded count/exposure estimator. The exact rule, including why
+exonic diagnostic strand signal is not used for calibration, is documented in
+[`docs/calibration/strand_mode_decision_2026-05-12.md`](calibration/strand_mode_decision_2026-05-12.md).
+
 **How much memory does Rigel use?**
 The fragment buffer defaults to 2 GiB. Overflow spills to disk under
 `--tmpdir`. Typical paired-end libraries (50–100M read pairs) fit within

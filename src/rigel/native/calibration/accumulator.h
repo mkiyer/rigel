@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "constants.h"
+#include "calibration/orient.h"
 #include "calibration/region_index.h"
 
 namespace rigel::calibration {
@@ -50,6 +51,11 @@ struct CalibrationPayload {
     // but indexed by region_id for O(1) lookup).
     std::vector<int64_t> u_left;
     std::vector<int64_t> u_right;
+
+    // Minimal per-channel orientation counters: shape (n_regions, orient::N).
+    std::vector<int64_t> intron_counts_by_orient;
+    std::vector<int64_t> u_left_by_orient;
+    std::vector<int64_t> u_right_by_orient;
 
     // Counters
     int64_t n_observed             = 0;
@@ -90,6 +96,12 @@ public:
             0);
         payload_.u_left.assign(static_cast<size_t>(n_regions), 0);
         payload_.u_right.assign(static_cast<size_t>(n_regions), 0);
+        payload_.intron_counts_by_orient.assign(
+            static_cast<size_t>(n_regions) * orient::N, 0);
+        payload_.u_left_by_orient.assign(
+            static_cast<size_t>(n_regions) * orient::N, 0);
+        payload_.u_right_by_orient.assign(
+            static_cast<size_t>(n_regions) * orient::N, 0);
         n_regions_ = n_regions;
         // Warm reserve to amortize the first ~10 fragments' allocations.
         hits_.reserve(16);
@@ -112,6 +124,7 @@ public:
                  int64_t frag_end,
                  const ExonBlock* exons,
                  int32_t n_exons,
+                 int8_t fragment_strand,
                  const RegionIndex& regions);
 
     inline void note_multimap()  { ++payload_.n_excluded_multimap; }

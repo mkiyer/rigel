@@ -71,6 +71,9 @@ def _payload(
         fl_hist=h,
         u_left=np.zeros(0, dtype=np.int64),
         u_right=np.zeros(0, dtype=np.int64),
+        intron_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
+        u_left_by_orient=np.zeros((0, 3), dtype=np.int64),
+        u_right_by_orient=np.zeros((0, 3), dtype=np.int64),
         n_observed=n_observed, n_excluded_multimap=0, n_excluded_chimera=0,
         n_excluded_artifact=0, n_unobserved=0, n_unannotated_ref=0,
     )

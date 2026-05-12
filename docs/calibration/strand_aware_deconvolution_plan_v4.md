@@ -1,6 +1,8 @@
 # Strand-Aware SRD Calibration - v4 Plan
 
-Status: design, 2026-05-12. Supersedes
+Status: superseded by
+[strand_aware_deconvolution_plan_v5.md](strand_aware_deconvolution_plan_v5.md),
+2026-05-12. Historical design, 2026-05-12. Supersedes
 [strand_aware_deconvolution_plan_v3.md](strand_aware_deconvolution_plan_v3.md).
 
 v4 keeps the best parts of v3: aggregate raw moments, signed `p_r1_sense`,
@@ -396,7 +398,7 @@ strand_orientation_pvalue
 
 Exit criteria:
 
-- unstranded `p_r1_sense = 0.5` is bit-equivalent to legacy densities;
+- unstranded `p_r1_sense = 0.5` is bit-equivalent to uncorrected count/exposure densities;
 - R1-antisense mirror tests pass by carrying signed `c`;
 - pure-gDNA strand simulations are unbiased after aggregate raw moments;
 - pure-RNA intron/boundary simulations drive the corresponding gDNA density toward zero

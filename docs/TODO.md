@@ -1,72 +1,19 @@
 # TODO
 
-
-## Add new parameters to CLI
-
-
-## 5. Defaults (proposed; subject to sweep)
-
-Superseded for EM prior strength by
-[`docs/bayesian_prior/bayesian_prior_plan.md`](bayesian_prior/bayesian_prior_plan.md).
-Do not implement these local-evidence ESS constants as production prior knobs.
-
-| Constant | Value | Rationale |
-|---|---|---|
-| `MIN_FL_FOR_BOUNDARY` | `2` initially | Avoid truncation bias. Raise only if denominator is truncated consistently. |
-| `INTERGENIC_FLANK_BP` | `5000` | Captures ~1 mean fragment-length of intergenic context per side without dragging neighbouring loci. |
-| `BETA_EVIDENCE` | `1.0` | One real evidence fragment ≈ one prior pseudocount. |
-| `C_LOCO_CAP` | `1000.0` | Saturates at ~100× the legacy `c_base`; loci with thousands of fragments still let likelihoods dominate. |
-| `C_OBS_FRAC` | `1.0` | Caps extra prior ESS by observed EM units in the locus. |
-| `c_base` | `10.0` (unchanged) | Backward-compatible floor for zero-evidence loci. |
-
-A single sweep — `BETA_EVIDENCE ∈ {0.25, 0.5, 1.0, 2.0}` against the synthetic
-suite — fixes Phase 5 defaults empirically.
+## Performance optimization
 
 
+## Locoregional calibration
 
-## Calibration boundary flux
+Currently, calibration collect global information to estimate the gDNA prior for bayesian EM.  This might be improved by incorporating locoregional information, which may reflect copy number changes.
 
-I want you to scrutinize and interrogate how we estimate locoregional gDNA density, and how those density estimations translate to the bayesian prior for the EM.
-
-Our calibration system uses two types of data to compute locoregional gDNA density:
-1) INTRONIC-only unspliced fragments (completely contained within an intron)
-2) EXON-INTRON unspliced fragments (fragments that span exon-intron boundaries)
-
-I am concerned that our gDNA density estimations are not entirely accurate and/or could be improved.
-
-The goal with EXON-INTRON boundary flux is to be able to impute/extrapolate gDNA fragments crossing an exon-intron boundary onto the ambiguous span of the exon. UNSPLICED Fragments that are contained by EXON regions (EXON_ONLY) could be derived from gDNA, nascent RNA, or mature RNA (remember, nascent RNA is by definition unspliced).
-
-We measure "boundary flux" as the number of fragments crossing the exon-intron boundary. This is converted to a density. Are we doing this correctly? Is our effective length formula correct? 
-
-If we have a single boundary position such as the exon region start and a fragment with length l_f, there are (l_f-1) different positions of the fragment that could cross the boundary. How do we compute the resulting density?
-
-Is this correct? for a single fragment:
-boundary_flux_density = 1 / (l_f-1)
-
-Can we store boundary flux as a float? Then we can normalize each boundary-crossing fragment by its length and sum the total density? Is this theoretically right or wrong?
-
-How should we be computing boundary flux and how should we be using it to impute exon gDNA levels?
-
-The other concern is that the EXON-INTRON fragments themselves need to be counted as gDNA fragments, AND the EXON-INTRON fragments need to be used to impute/estimate the EXON-ONLY gDNA counts for that exon. 
+Given a particular Locus (genomic region containing transcripts) this approach would compute gDNA densities from the flanking regions of some genomic distance (how much? 10kb, 100kb? 1Mb?). The locoregional gDNA estimates would shrink to the global estimates using empirical bayes shrinkage and then feed into the bayesian prior for the Locus of interest.
 
 
-*We currently do not include INTERGENIC fragments in locoregional gDNA density estimation*
-INTERGENIC fragments would be wonderful to incorporate but currently we define Locus objects by transcript boundaries. By definition Locus spans do not include intergenic regions. Including any neighboring INTERGENIC regions by improve locoregional gDNA density estimates.
-
-
-Tasks:
-- Understand the calibration code and how it informs the EM
-
-- Understand how we measure boundary flux
-
-- Determine how we should be using boundary flux to estimate EXON-ONLY gDNA
-
-- Determine how we should be computing gDNA density from EXON-INTRON fragments and EXON-ONLY fragments
-
-- Audit how we currently use INTERGENIC fragments to estimate bayesian prior and in the EM
 
 
 ## Rename OVR -> something else
+
 
 
 # Polars migration
@@ -81,27 +28,8 @@ Polars is apparently much faster than pandas. Might be ideal for rigel
 
 
 
-### Hybrid capture support
-
-- If we are running hybrid capture, we need the calibration module to only use "captured" regions to train itself. We need to provide 'on target' and 'off target' regions.
-- Defer for now
 
 
-
-## Locus stats
-
-Enable locus status to be written to the output
-
-
-## Nascent RNA count set to zero? 
-
-Copilot suggseted that synthetic nRNA counts are being set to zero? Is this some kind of gating?
-
-
-### nascent RNA gating?
-
-- formalize nascent RNA gating policy and implement this
-- "gate" nascent RNA only when there are intronic reads. if only exonic reads, nascent RNA component not activated
 
 
 ## Gene counting
@@ -188,13 +116,6 @@ A fraction of splice junctions are "unannotated" in that they don't have exact m
 
 
 
-
-## Evidence-guided Nascent RNA gating
-
-- We could require evidence and gate nascent RNAs
-- Evidence would be fragment within an 'unambiguously intronic' genomic interval
-- In the new model, nascent RNAs are just (synthetic) transcripts. They will be part of the cgranges query results when fragments are mapped to transcripts
-- If after candidate pruning, the only remaining matches are nascent RNAs, then those nascent RNAs now have evidence of existence. Of course, genomic DNA also competes with nascent RNA, but that is a separate problem.
 
 
 

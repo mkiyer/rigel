@@ -96,6 +96,9 @@ def _payload(n_observed: int = 100) -> CalibrationScanPayload:
         fl_hist=h,
         u_left=np.zeros(0, dtype=np.int64),
         u_right=np.zeros(0, dtype=np.int64),
+        intron_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
+        u_left_by_orient=np.zeros((0, 3), dtype=np.int64),
+        u_right_by_orient=np.zeros((0, 3), dtype=np.int64),
         n_observed=int(gc.sum()), n_excluded_multimap=10, n_excluded_chimera=2,
         n_excluded_artifact=1, n_unobserved=5, n_unannotated_ref=0,
     )

@@ -25,6 +25,7 @@ from ._kappa import (
     KappaEstimate,
     estimate_kappa,
 )
+from ._orient import StrandSummary
 from ._orchestrator import calibrate
 from ._result import (
     CalibrationResult,
@@ -82,6 +83,7 @@ __all__ = [
     "KAPPA_DEFAULT",
     "KAPPA_MIN",
     "KAPPA_MAX",
+    "StrandSummary",
     # EM prior_weight_rna helper
     "build_prior_weight_rna",
     # Locoregional shrinkage + per-locus / MultiLocus priors

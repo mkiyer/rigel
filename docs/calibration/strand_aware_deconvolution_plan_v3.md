@@ -1,7 +1,7 @@
 # Strand-Aware SRD Calibration — v3 Plan
 
 Status: superseded by
-[`strand_aware_deconvolution_plan_v4.md`](strand_aware_deconvolution_plan_v4.md),
+[`strand_aware_deconvolution_plan_v5.md`](strand_aware_deconvolution_plan_v5.md),
 2026-05-12. Historical design, 2026-05-11. Supersedes
 [`strand_aware_deconvolution_plan_v2.md`](strand_aware_deconvolution_plan_v2.md).
 

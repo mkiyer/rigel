@@ -202,7 +202,6 @@ class CalibrationConfig:
     pool_quality_good: int = 5_000
     pool_quality_weak: int = 200
 
-
 @dataclass(frozen=True)
 class PipelineConfig:
     """Top-level pipeline configuration composing all sub-configs.

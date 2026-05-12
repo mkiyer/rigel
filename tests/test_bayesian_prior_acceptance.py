@@ -12,11 +12,9 @@ These tests pin the four invariants the Phase 2 redesign must satisfy:
    helper has no ``payload_arrays`` parameter, and perturbing the
    payload's per-region counts must not change ``alpha_gdna``.
 
-Out of scope (deferred to a future nRNA-aware calibration phase): the
-gDNA-vs-nRNA discrimination problem on toy mini-genomes where the
-*global* intron/boundary densities are nRNA-contaminated. See
-``tests/scenarios/test_nrna_double_counting.py`` for the (xfail'd)
-sentinel cases.
+The high-nRNA toy-mini-genome sentinels now live as active regression tests in
+``tests/scenarios/test_nrna_double_counting.py``; this file stays focused on the
+global-prior assembly contract.
 """
 
 from __future__ import annotations
@@ -135,12 +133,23 @@ def _make_payload(
         per_region[:, 0b100] = np.array(counts_intergenic, dtype=np.int64)
     if counts_intron is not None:
         per_region[:, 0b010] = np.array(counts_intron, dtype=np.int64)
+    intron_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    intron_by_orient[:, 2] = per_region[:, 0b010]
+    u_left_arr = np.array(u_left if u_left is not None else [0] * n_regions, dtype=np.int64)
+    u_right_arr = np.array(u_right if u_right is not None else [0] * n_regions, dtype=np.int64)
+    u_left_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    u_right_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    u_left_by_orient[:, 2] = u_left_arr
+    u_right_by_orient[:, 2] = u_right_arr
     return CalibrationScanPayload(
         global_counts=np.zeros(MASK_N_STATES, dtype=np.int64),
         per_region_counts=per_region,
         fl_hist=np.zeros((MASK_N_STATES, FL_HIST_N_BINS), dtype=np.int64),
-        u_left=np.array(u_left if u_left is not None else [0] * n_regions, dtype=np.int64),
-        u_right=np.array(u_right if u_right is not None else [0] * n_regions, dtype=np.int64),
+        u_left=u_left_arr,
+        u_right=u_right_arr,
+        intron_counts_by_orient=intron_by_orient,
+        u_left_by_orient=u_left_by_orient,
+        u_right_by_orient=u_right_by_orient,
         n_observed=0, n_excluded_multimap=0, n_excluded_chimera=0,
         n_excluded_artifact=0, n_unobserved=0, n_unannotated_ref=0,
     )

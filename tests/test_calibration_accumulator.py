@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.scan_payload import CalibrationScanPayload
+from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, ORIENT_UNINF
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.native import BamScanner
 from rigel.pipeline import run_pipeline, scan_and_buffer
@@ -81,33 +82,48 @@ def _basic_region_arrays(index):
     starts = np.zeros(n, dtype=np.int64)
     ends = np.full(n, 100, dtype=np.int64)
     type_masks = np.full(n, 0b100, dtype=np.uint8)  # INTERGENIC bit
-    return ref_ids, starts, ends, type_masks
+    strands = np.zeros(n, dtype=np.uint8)
+    return ref_ids, starts, ends, type_masks, strands
 
 
 class TestSetRegions:
     def test_basic_install(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm = _basic_region_arrays(result.index)
+        ri, s, e, tm, st = _basic_region_arrays(result.index)
+        n_refs = int(ri.max()) + 1
+        scanner.set_regions(ri, s, e, tm, st, n_refs)  # should not raise
+
+    def test_legacy_install_defaults_to_uninformative_strands(self, calib_scenario):
+        _, result = calib_scenario
+        scanner = _make_scanner(result.index)
+        ri, s, e, tm, _st = _basic_region_arrays(result.index)
         n_refs = int(ri.max()) + 1
         scanner.set_regions(ri, s, e, tm, n_refs)  # should not raise
 
     def test_length_mismatch_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm = _basic_region_arrays(result.index)
+        ri, s, e, tm, st = _basic_region_arrays(result.index)
         with pytest.raises(Exception):
             # ends array truncated by one
-            scanner.set_regions(ri, s, e[:-1], tm, int(ri.max()) + 1)
+            scanner.set_regions(ri, s, e[:-1], tm, st, int(ri.max()) + 1)
+
+    def test_strand_length_mismatch_rejected(self, calib_scenario):
+        _, result = calib_scenario
+        scanner = _make_scanner(result.index)
+        ri, s, e, tm, st = _basic_region_arrays(result.index)
+        with pytest.raises(Exception):
+            scanner.set_regions(ri, s, e, tm, st[:-1], int(ri.max()) + 1)
 
     def test_double_set_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm = _basic_region_arrays(result.index)
+        ri, s, e, tm, st = _basic_region_arrays(result.index)
         n_refs = int(ri.max()) + 1
-        scanner.set_regions(ri, s, e, tm, n_refs)
+        scanner.set_regions(ri, s, e, tm, st, n_refs)
         with pytest.raises(Exception):
-            scanner.set_regions(ri, s, e, tm, n_refs)
+            scanner.set_regions(ri, s, e, tm, st, n_refs)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +152,15 @@ class TestPipelinePayload:
         assert payload.per_region_counts.shape == (n_regions, 8)
         assert payload.u_left.shape == (n_regions,)
         assert payload.u_right.shape == (n_regions,)
+        assert payload.intron_counts_by_orient.shape == (n_regions, 3)
+        assert payload.u_left_by_orient.shape == (n_regions, 3)
+        assert payload.u_right_by_orient.shape == (n_regions, 3)
+        np.testing.assert_array_equal(
+            payload.intron_counts_by_orient.sum(axis=1),
+            payload.per_region_counts[:, INTRON_BIT],
+        )
+        np.testing.assert_array_equal(payload.u_left_by_orient.sum(axis=1), payload.u_left)
+        np.testing.assert_array_equal(payload.u_right_by_orient.sum(axis=1), payload.u_right)
 
     def test_run_pipeline_attaches_payload(self, calib_scenario, tmp_path):
         _, result = calib_scenario
@@ -165,6 +190,9 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
         "fl_hist": fl_hist,
         "u_left": np.zeros(n_regions, dtype=np.int64),
         "u_right": np.zeros(n_regions, dtype=np.int64),
+        "intron_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
+        "u_left_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
+        "u_right_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "n_observed": n_observed,
         "n_excluded_multimap": 0,
         "n_excluded_chimera": 0,
@@ -204,6 +232,12 @@ class TestPayloadValidation:
         with pytest.raises(ValueError, match="global_counts"):
             CalibrationScanPayload.from_scan_dict(d)
 
+    def test_orientation_sum_mismatch_raises(self):
+        d = _good_payload_dict(n_regions=2, n_observed=1)
+        d["per_region_counts"][0, INTRON_BIT] = 1
+        with pytest.raises(ValueError, match="intron_counts_by_orient"):
+            CalibrationScanPayload.from_scan_dict(d)
+
     def test_n_unannotated_ref_le_n_observed(self):
         d = _good_payload_dict(n_observed=10)
         d["n_unannotated_ref"] = 99
@@ -239,6 +273,9 @@ class TestWorkerMergeEquality:
         np.testing.assert_array_equal(a.fl_hist, b.fl_hist)
         np.testing.assert_array_equal(a.u_left, b.u_left)
         np.testing.assert_array_equal(a.u_right, b.u_right)
+        np.testing.assert_array_equal(a.intron_counts_by_orient, b.intron_counts_by_orient)
+        np.testing.assert_array_equal(a.u_left_by_orient, b.u_left_by_orient)
+        np.testing.assert_array_equal(a.u_right_by_orient, b.u_right_by_orient)
         assert a.n_observed == b.n_observed
         assert a.n_excluded_multimap == b.n_excluded_multimap
         assert a.n_excluded_chimera == b.n_excluded_chimera
@@ -449,6 +486,52 @@ class TestBoundaryFlux:
         p = self._run(mini_index, tmp_path, r1_pos=110, r2_pos=145)
         assert p.u_left[1] == 0
         assert p.u_right[1] == 0
+
+
+class TestOrientationRouting:
+    """Pin C++ routing of fragment strand into the additive orientation arrays."""
+
+    def _run_pair(self, mini_index, tmp_path, qname, r1_pos, r2_pos, *, neg_fragment=False):
+        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
+        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
+        bam = _build_bam(
+            tmp_path,
+            ref_lens,
+            _make_pair(
+                qname,
+                chr1_id,
+                r1_pos,
+                r2_pos,
+                r1_is_reverse=neg_fragment,
+                r2_is_reverse=not neg_fragment,
+            ),
+        )
+        return _scan(bam, mini_index)
+
+    def test_pos_intron_same_and_opp(self, mini_index, tmp_path):
+        # Region 2 is a POS intron [200, 299).
+        same = self._run_pair(mini_index, tmp_path, "same", 210, 240)
+        opp = self._run_pair(mini_index, tmp_path, "opp", 210, 240, neg_fragment=True)
+        assert same.intron_counts_by_orient[2, ORIENT_SAME] == 1
+        assert same.intron_counts_by_orient[2, ORIENT_OPP] == 0
+        assert opp.intron_counts_by_orient[2, ORIENT_SAME] == 0
+        assert opp.intron_counts_by_orient[2, ORIENT_OPP] == 1
+
+    def test_neg_intron_same_and_opp(self, mini_index, tmp_path):
+        # Region 8 is a NEG intron [1100, 1199).
+        opp = self._run_pair(mini_index, tmp_path, "opp", 1110, 1140)
+        same = self._run_pair(mini_index, tmp_path, "same", 1110, 1140, neg_fragment=True)
+        assert opp.intron_counts_by_orient[8, ORIENT_OPP] == 1
+        assert same.intron_counts_by_orient[8, ORIENT_SAME] == 1
+
+    def test_boundary_flux_routes_by_exon_strand(self, mini_index, tmp_path):
+        # Region 1 is a POS exon; fragment [70,180) crosses its left edge.
+        same = self._run_pair(mini_index, tmp_path, "same", 70, 130)
+        opp = self._run_pair(mini_index, tmp_path, "opp", 70, 130, neg_fragment=True)
+        assert same.u_left_by_orient[1, ORIENT_SAME] == 1
+        assert same.u_left_by_orient[1, ORIENT_UNINF] == 0
+        assert opp.u_left_by_orient[1, ORIENT_OPP] == 1
+        assert opp.u_left_by_orient[1, ORIENT_UNINF] == 0
 
 
 class TestObservationPolicy:

@@ -989,12 +989,46 @@ public:
     //
     // Loads the per-genome region partition (regions.feather) into a
     // per-ref CSR overlap index.  Must be called BEFORE scan() if
-    // calibration observations are required.  The four input arrays
+    // calibration observations are required.  The five input arrays
     // must be of equal length, sorted by (ref_id, start), and
     // per-ref contiguous + non-overlapping.  ``type_masks`` are the
     // pre-computed bit masks (bit 0 = EXON, bit 1 = INTRON,
-    // bit 2 = INTERGENIC).
+    // bit 2 = INTERGENIC), and ``strands`` are RegionStrand codes.
     void set_regions(
+        nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
+        int32_t n_refs,
+        int32_t splicing_anchor_tolerance = 0)
+    {
+        const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
+        if (static_cast<int64_t>(starts.shape(0)) != n ||
+            static_cast<int64_t>(ends.shape(0))    != n ||
+            static_cast<int64_t>(type_masks.shape(0)) != n ||
+            static_cast<int64_t>(strands.shape(0)) != n)
+        {
+            throw std::invalid_argument(
+                "set_regions: ref_ids, starts, ends, type_masks, strands "
+                "must all have the same length");
+        }
+        if (region_index_) {
+            throw std::runtime_error(
+                "set_regions: regions already set on this BamScanner; "
+                "create a new instance");
+        }
+        if (splicing_anchor_tolerance < 0) {
+            throw std::invalid_argument(
+                "set_regions: splicing_anchor_tolerance must be >= 0");
+        }
+        splicing_anchor_tolerance_ = splicing_anchor_tolerance;
+        region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
+        region_index_->set(ref_ids.data(), starts.data(), ends.data(),
+                           type_masks.data(), strands.data(), n, n_refs);
+    }
+
+    void set_regions_legacy(
         nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
@@ -1020,10 +1054,11 @@ public:
             throw std::invalid_argument(
                 "set_regions: splicing_anchor_tolerance must be >= 0");
         }
+        std::vector<uint8_t> strands(static_cast<size_t>(n), STRAND_NONE);
         splicing_anchor_tolerance_ = splicing_anchor_tolerance;
         region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
         region_index_->set(ref_ids.data(), starts.data(), ends.data(),
-                           type_masks.data(), n, n_refs);
+                           type_masks.data(), strands.data(), n, n_refs);
     }
 
     // ----------------------------------------------------------------
@@ -1364,6 +1399,7 @@ private:
         int32_t obs_ref = -1;
         int64_t obs_fs = 0;
         int64_t obs_fe = 0;
+        int8_t obs_fragment_strand = static_cast<int8_t>(STRAND_NONE);
         std::vector<ExonBlock> obs_exons;
 
         // Count ONE fragment per physical molecule (not per hit).
@@ -1443,6 +1479,7 @@ private:
                         obs_ref = frag.exons[0].ref_id;
                         obs_fs = frag.exons.front().start;
                         obs_fe = frag.exons.back().end;
+                        obs_fragment_strand = static_cast<int8_t>(ig_result.exon_strand);
                         obs_exons = frag.exons;
                     }
                 }
@@ -1543,6 +1580,7 @@ private:
                 obs_ref = frag.exons[0].ref_id;
                 obs_fs = frag.exons.front().start;
                 obs_fe = frag.exons.back().end;
+                obs_fragment_strand = static_cast<int8_t>(result.exon_strand);
                 obs_exons = frag.exons;
             }
 
@@ -1596,6 +1634,7 @@ private:
                         obs_splice, obs_ref, obs_fs, obs_fe,
                         obs_exons.data(),
                         static_cast<int32_t>(obs_exons.size()),
+                        obs_fragment_strand,
                         *region_index);
                 }
             } else {
@@ -1687,6 +1726,15 @@ private:
                 static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlBins));
             cal_dict["u_left"]             = vec_to_ndarray(std::move(payload.u_left));
             cal_dict["u_right"]            = vec_to_ndarray(std::move(payload.u_right));
+            cal_dict["intron_counts_by_orient"] = vec_to_ndarray2d(
+                std::move(payload.intron_counts_by_orient), n_reg,
+                static_cast<size_t>(rigel::calibration::orient::N));
+            cal_dict["u_left_by_orient"]   = vec_to_ndarray2d(
+                std::move(payload.u_left_by_orient), n_reg,
+                static_cast<size_t>(rigel::calibration::orient::N));
+            cal_dict["u_right_by_orient"]  = vec_to_ndarray2d(
+                std::move(payload.u_right_by_orient), n_reg,
+                static_cast<size_t>(rigel::calibration::orient::N));
             cal_dict["n_observed"]         = payload.n_observed;
             cal_dict["n_excluded_multimap"]= payload.n_excluded_multimap;
             cal_dict["n_excluded_chimera"] = payload.n_excluded_chimera;
@@ -2307,36 +2355,44 @@ NB_MODULE(_bam_impl, m) {
              "dict\n"
              "    Dict with keys: 'stats', 'strand_observations',\n"
              "    'frag_length_observations'.\n")
-        .def("set_regions", &BamScanner::set_regions,
-             nb::arg("ref_ids"),
-             nb::arg("starts"),
-             nb::arg("ends"),
-             nb::arg("type_masks"),
-             nb::arg("n_refs"),
-             nb::arg("splicing_anchor_tolerance") = 0,
-             "Install the calibration region partition.\n\n"
-             "Must be called before scan() to enable calibration\n"
-             "observation collection.  All four arrays must be the\n"
-             "same length, sorted by (ref_id, start), with regions\n"
-             "per-ref contiguous and non-overlapping.\n\n"
-             "Parameters\n"
-             "----------\n"
-             "ref_ids : ndarray[int32]\n"
-             "ref_id of each region (FragmentResolver numbering).\n"
-             "starts, ends : ndarray[int64]\n"
-             "    0-based half-open region intervals.\n"
-             "type_masks : ndarray[uint8]\n"
-             "    Pre-computed bit masks (bit 0=EXON, 1=INTRON,\n"
-             "    2=INTERGENIC).\n"
-             "n_refs : int\n"
-             "    Total number of references in the index.\n"
-             "splicing_anchor_tolerance : int (default 0)\n"
-             "    Minimum bp clearance required on each side of an\n"
-             "    exon-intron boundary to count a boundary-crossing\n"
-             "    event and to qualify a per-region overlap for the\n"
-             "    fragment's ``obs_mask`` bit. ``q(K) = max(K, 1)``\n"
-             "    is enforced internally so K=0 reproduces the\n"
-             "    pre-2026.05 strict-crossing semantics bit-for-bit.\n")
+          .def("set_regions",
+                 [](BamScanner& self,
+                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
+                     int32_t n_refs,
+                     int32_t splicing_anchor_tolerance) {
+                      self.set_regions(ref_ids, starts, ends, type_masks, strands,
+                                             n_refs, splicing_anchor_tolerance);
+                 },
+                 nb::arg("ref_ids"),
+                 nb::arg("starts"),
+                 nb::arg("ends"),
+                 nb::arg("type_masks"),
+                 nb::arg("strands"),
+                 nb::arg("n_refs"),
+                 nb::arg("splicing_anchor_tolerance") = 0,
+                 "Install the calibration region partition with strand codes.\n")
+          .def("set_regions",
+                 [](BamScanner& self,
+                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
+                     int32_t n_refs,
+                     int32_t splicing_anchor_tolerance) {
+                      self.set_regions_legacy(ref_ids, starts, ends, type_masks,
+                                                      n_refs, splicing_anchor_tolerance);
+                 },
+                 nb::arg("ref_ids"),
+                 nb::arg("starts"),
+                 nb::arg("ends"),
+                 nb::arg("type_masks"),
+                 nb::arg("n_refs"),
+                 nb::arg("splicing_anchor_tolerance") = 0,
+                 "Install calibration regions with all strands set to NONE.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

@@ -113,12 +113,23 @@ def _make_payload(
         per_region[:, 0b100] = np.array(counts_intergenic, dtype=np.int64)
     if counts_intron is not None:
         per_region[:, 0b010] = np.array(counts_intron, dtype=np.int64)
+    intron_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    intron_by_orient[:, 2] = per_region[:, 0b010]
+    u_left_arr = np.array(u_left if u_left is not None else [0] * n_regions, dtype=np.int64)
+    u_right_arr = np.array(u_right if u_right is not None else [0] * n_regions, dtype=np.int64)
+    u_left_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    u_right_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
+    u_left_by_orient[:, 2] = u_left_arr
+    u_right_by_orient[:, 2] = u_right_arr
     return CalibrationScanPayload(
         global_counts=np.zeros(MASK_N_STATES, dtype=np.int64),
         per_region_counts=per_region,
         fl_hist=np.zeros((MASK_N_STATES, FL_HIST_N_BINS), dtype=np.int64),
-        u_left=np.array(u_left if u_left is not None else [0] * n_regions, dtype=np.int64),
-        u_right=np.array(u_right if u_right is not None else [0] * n_regions, dtype=np.int64),
+        u_left=u_left_arr,
+        u_right=u_right_arr,
+        intron_counts_by_orient=intron_by_orient,
+        u_left_by_orient=u_left_by_orient,
+        u_right_by_orient=u_right_by_orient,
         n_observed=0, n_excluded_multimap=0, n_excluded_chimera=0,
         n_excluded_artifact=0, n_unobserved=0, n_unannotated_ref=0,
     )

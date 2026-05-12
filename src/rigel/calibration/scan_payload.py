@@ -36,6 +36,8 @@ MASK_EXON = 0b001        # bit 0
 MASK_INTRON = 0b010      # bit 1
 MASK_INTERGENIC = 0b100  # bit 2
 
+ORIENT_N = 3
+
 
 _ERR_SUFFIX = " Rebuild the index or rerun the scan."
 
@@ -65,6 +67,9 @@ class CalibrationScanPayload:
     fl_hist: np.ndarray                   # (MASK_N_STATES, FL_HIST_N_BINS) int64
     u_left: np.ndarray                    # (R,)                            int64
     u_right: np.ndarray                   # (R,)                            int64
+    intron_counts_by_orient: np.ndarray   # (R, ORIENT_N)                   int64
+    u_left_by_orient: np.ndarray          # (R, ORIENT_N)                   int64
+    u_right_by_orient: np.ndarray         # (R, ORIENT_N)                   int64
     n_observed: int
     n_excluded_multimap: int
     n_excluded_chimera: int
@@ -125,6 +130,18 @@ class CalibrationScanPayload:
         fl_hist = _check_array("fl_hist", d["fl_hist"], np.int64, (MASK_N_STATES, FL_HIST_N_BINS))
         u_left = _check_array("u_left", d["u_left"], np.int64, (n_regions,))
         u_right = _check_array("u_right", d["u_right"], np.int64, (n_regions,))
+        intron_counts_by_orient = _check_array(
+            "intron_counts_by_orient",
+            d["intron_counts_by_orient"],
+            np.int64,
+            (n_regions, ORIENT_N),
+        )
+        u_left_by_orient = _check_array(
+            "u_left_by_orient", d["u_left_by_orient"], np.int64, (n_regions, ORIENT_N)
+        )
+        u_right_by_orient = _check_array(
+            "u_right_by_orient", d["u_right_by_orient"], np.int64, (n_regions, ORIENT_N)
+        )
 
         n_observed = int(d["n_observed"])
         n_ex_mm = int(d["n_excluded_multimap"])
@@ -162,6 +179,25 @@ class CalibrationScanPayload:
                 f"n_observed ({n_observed}).{_ERR_SUFFIX}"
             )
 
+        if not np.array_equal(
+            intron_counts_by_orient.sum(axis=1),
+            per_region_counts[:, MASK_INTRON],
+        ):
+            raise ValueError(
+                "calibration payload: intron_counts_by_orient row sums do not match "
+                f"per_region_counts[:, MASK_INTRON].{_ERR_SUFFIX}"
+            )
+        if not np.array_equal(u_left_by_orient.sum(axis=1), u_left):
+            raise ValueError(
+                "calibration payload: u_left_by_orient row sums do not match u_left."
+                f"{_ERR_SUFFIX}"
+            )
+        if not np.array_equal(u_right_by_orient.sum(axis=1), u_right):
+            raise ValueError(
+                "calibration payload: u_right_by_orient row sums do not match u_right."
+                f"{_ERR_SUFFIX}"
+            )
+
         # global_counts must sum to n_observed.
         gc_sum = int(global_counts.sum())
         if gc_sum != n_observed:
@@ -189,6 +225,9 @@ class CalibrationScanPayload:
             fl_hist=fl_hist,
             u_left=u_left,
             u_right=u_right,
+            intron_counts_by_orient=intron_counts_by_orient,
+            u_left_by_orient=u_left_by_orient,
+            u_right_by_orient=u_right_by_orient,
             n_observed=n_observed,
             n_excluded_multimap=n_ex_mm,
             n_excluded_chimera=n_ex_ch,

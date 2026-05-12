@@ -178,6 +178,59 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         setattr(stats, key, stats_dict.get(key, 0))
 
 
+def _strand_summary_identifiable(
+    strand_summary,
+    *,
+    confidence: float = 0.99,
+) -> bool:
+    from .calibration.density_global import STRAND_CONTRAST_NUMERICAL_FLOOR
+
+    effective_min = max(
+        STRAND_CONTRAST_NUMERICAL_FLOOR,
+        strand_summary.signed_strand_contrast_margin(confidence=confidence),
+    )
+    return abs(strand_summary.signed_strand_contrast) >= effective_min
+
+
+def _calibration_strand_summary(strand_models: StrandModels):
+    """Choose the strand summary used by calibration density correction."""
+    from .calibration._orient import StrandSummary
+
+    return StrandSummary.from_model(strand_models.exonic_spliced)
+
+
+def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
+    """Warn when calibration cannot identify strand from spliced RNA evidence."""
+    from .calibration._orient import StrandSummary
+
+    primary = StrandSummary.from_model(strand_models.exonic_spliced)
+    if _strand_summary_identifiable(primary):
+        return
+
+    logger.warning(
+        "[CAL] Spliced strand model is not identifiable at 99%% confidence "
+        "(n_spliced_obs=%d, p_r1_sense=%.6f, signed_contrast=%.6f, margin_99=%.6f). "
+        "Calibration will use the unstranded count/exposure estimator for channels "
+        "without identifiable strand correction. If this was expected to be a stranded "
+        "RNA-seq library, inspect splice evidence and contamination/nascent-RNA levels.",
+        primary.n_observations,
+        primary.p_r1_sense,
+        primary.signed_strand_contrast,
+        primary.signed_strand_contrast_margin(confidence=0.99),
+    )
+
+    diagnostic = StrandSummary.from_model(strand_models.exonic)
+    if _strand_summary_identifiable(diagnostic):
+        logger.warning(
+            "[CAL] Exonic diagnostic strand signal is identifiable "
+            "(n_exonic_obs=%d, p_r1_sense=%.6f), but it is not used for calibration. "
+            "Unspliced exonic fragments can include gDNA or nascent RNA and are not an "
+            "RNA-pure strand-training source.",
+            diagnostic.n_observations,
+            diagnostic.p_r1_sense,
+        )
+
+
 def scan_and_buffer(
     bam_path: str,
     index: TranscriptIndex,
@@ -219,7 +272,6 @@ def scan_and_buffer(
         max_memory_bytes=scan.max_memory_bytes,
         spill_dir=scan.spill_dir,
     )
-
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 
     # Provide gene strand info for exonic fallback strand model training
@@ -260,7 +312,9 @@ def scan_and_buffer(
     region_df = getattr(index, "region_df", None)
     if region_df is not None and len(region_df) > 0:
         _wire_calibration_regions(
-            scanner, index, region_df,
+            scanner,
+            index,
+            region_df,
             splicing_anchor_tolerance=int(scan.splicing_anchor_tolerance),
         )
 
@@ -357,6 +411,7 @@ def _wire_calibration_regions(
     starts = np.ascontiguousarray(region_df["start"].to_numpy(np.int64))
     ends = np.ascontiguousarray(region_df["end"].to_numpy(np.int64))
     types = region_df["type"].to_numpy(np.uint8)
+    strands = np.ascontiguousarray(region_df["strand"].to_numpy(np.uint8))
     # Bit layout: bit 0 = EXON (type 2), bit 1 = INTRON (type 1),
     # bit 2 = INTERGENIC (type 0).
     type_masks = (np.uint8(1) << (np.uint8(2) - types)).astype(np.uint8)
@@ -370,6 +425,7 @@ def _wire_calibration_regions(
         starts = starts[order]
         ends = ends[order]
         type_masks = type_masks[order]
+        strands = strands[order]
 
     n_refs = max(int(resolver_ref_to_id[name]) for name in resolver_ref_to_id) + 1
     scanner.set_regions(
@@ -377,6 +433,7 @@ def _wire_calibration_regions(
         np.ascontiguousarray(starts),
         np.ascontiguousarray(ends),
         np.ascontiguousarray(type_masks),
+        np.ascontiguousarray(strands),
         n_refs,
         int(splicing_anchor_tolerance),
     )
@@ -582,8 +639,14 @@ def _run_locus_em_partitioned(
             "alpha_rna": float(alpha_r),
         }
 
-    def _call_batch_em(parts, batch_loci, batch_alpha_gdna, batch_alpha_rna,
-                       batch_prior_weight_rna=None, batch_enable_gdna=None):
+    def _call_batch_em(
+        parts,
+        batch_loci,
+        batch_alpha_gdna,
+        batch_alpha_rna,
+        batch_prior_weight_rna=None,
+        batch_enable_gdna=None,
+    ):
         """Pack tuples, call C++, record results."""
         partition_tuples = [
             (
@@ -647,9 +710,7 @@ def _run_locus_em_partitioned(
                 else None
             ),
             batch_enable_gdna=(
-                np.array([enable_gdna[lid]], dtype=np.uint8)
-                if enable_gdna is not None
-                else None
+                np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
             ),
         )
         gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
@@ -699,10 +760,7 @@ def _run_locus_em_partitioned(
             normal_ag,
             normal_ar,
             batch_prior_weight_rna=(
-                [
-                    prior_weight_rna_per_locus[loc.multi_locus_id]
-                    for loc in normal_loci
-                ]
+                [prior_weight_rna_per_locus[loc.multi_locus_id] for loc in normal_loci]
                 if prior_weight_rna_per_locus is not None
                 else None
             ),
@@ -949,12 +1007,12 @@ def quant_from_buffer(
     if region_df is not None and len(region_df) > 0 and calibration is not None:
         from rigel.calibration.density_global import estimate_global_gdna_fragments
 
-        gdna_global = estimate_global_gdna_fragments(
-            calibration.global_densities, region_df
-        )
+        gdna_global = estimate_global_gdna_fragments(calibration.global_densities, region_df)
     else:
         gdna_global = float(_gdna_em)
-    stats.n_gdna_global = int(gdna_global) if not (math.isnan(gdna_global) or math.isinf(gdna_global)) else 0
+    stats.n_gdna_global = (
+        int(gdna_global) if not (math.isnan(gdna_global) or math.isinf(gdna_global)) else 0
+    )
 
     total_frags = float(estimator.unambig_counts.sum() + estimator.em_counts.sum()) + gdna_global
     gdna_rate_global = gdna_global / total_frags if total_frags > 0 else 0.0
@@ -1030,6 +1088,8 @@ def run_pipeline(
     from .calibration import calibrate
 
     cal_cfg = config.calibration
+    strand_summary = _calibration_strand_summary(strand_models)
+    _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
     logger.info(
         "[CAL] Strand trainer: n_spliced_obs=%d  ss_est=%.6f  ε_CI(99%%)=%.4g",
@@ -1045,6 +1105,7 @@ def run_pipeline(
         fl_prior_ess=cal_cfg.prior_ess,
         pool_quality_good=cal_cfg.pool_quality_good,
         pool_quality_weak=cal_cfg.pool_quality_weak,
+        strand_summary=strand_summary,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(
