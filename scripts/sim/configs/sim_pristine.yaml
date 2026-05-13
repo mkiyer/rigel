@@ -3,7 +3,7 @@
 # ╚═════════════════════════════════════════════════════════════╝
 #
 # Usage:
-#   python scripts/sim.py --config scripts/sim_ccle_salmon.yaml
+#   python scripts/sim/simulate_reads.py --config scripts/sim_ccle_salmon.yaml
 
 # ── Inputs ────────────────────────────────────────────────────
 genome: /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/genome_controls.fasta.bgz
@@ -44,9 +44,9 @@ strand_specificities: [0.9]
 
 # ── Nascent RNA spike-in sweep ────────────────────────────────
 nrna:
-  fracs:
-    - [0.0, 0.0]
-  frac_labels: [none]
+  mode: additive_ratio
+  ratios: [0.0]
+  ratio_labels: [none]
 
 # ── Oracle BAM ────────────────────────────────────────────────
 oracle_bam: true

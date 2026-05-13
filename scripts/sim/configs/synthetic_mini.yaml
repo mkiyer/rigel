@@ -7,9 +7,9 @@
 #
 # Usage:
 #   # First generate genome:
-#   python scripts/sim/generate_synthetic_genome.py -o <outdir>
+#   python scripts/sim/simulate_suite.py --reference-only -o <outdir>
 #   # Then simulate reads:
-#   python scripts/sim/sim.py --config scripts/sim/configs/synthetic_mini.yaml
+#   python scripts/sim/simulate_reads.py --config scripts/sim/configs/synthetic_mini.yaml
 
 genome: PLACEHOLDER  # set by wrapper script
 gtf: PLACEHOLDER     # set by wrapper script
@@ -53,9 +53,9 @@ strand_specificities: [0.99, 0.50]
 # ── Nascent RNA ───────────────────────────────────────────────
 # No nRNA spike-in for this sweep (testing gDNA/strand only)
 nrna:
-  fracs:
-    - [0.0, 0.0]
-  frac_labels: [none]
+  mode: additive_ratio
+  ratios: [0.0]
+  ratio_labels: [none]
 
 # ── Output options ────────────────────────────────────────────
 oracle_bam: true

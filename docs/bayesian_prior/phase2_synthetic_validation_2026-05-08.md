@@ -396,6 +396,6 @@ sparse-locus α/n_em ratios reduced).
 - Total: 19 M paired-end fragments analyzed.
 - Tool: `rigel quant` from the Phase 2 build (`pip install -e .` after the
   `c_base` purge + `expected_gdna_count_global` integration).
-- Analysis script: [scripts/sim/run_rigel_analysis.py](scripts/sim/run_rigel_analysis.py).
+- Analysis script: [scripts/sim/evaluate_suite.py](scripts/sim/evaluate_suite.py).
 - Diagnostic script: [scripts/debug/phase2_synth_diagnostics.py](scripts/debug/phase2_synth_diagnostics.py).
 - Raw report: `/Users/mkiyer/Downloads/rigel_runs/sim_synthetic/analysis_report.txt`.

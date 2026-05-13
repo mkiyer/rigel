@@ -20,7 +20,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from .manifest import condition_manifest_map, load_manifest
+from .truth import parse_origin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,21 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("rigel_analysis")
 
-# ── Constants ─────────────────────────────────────────────────────────────
-
-SIM_BASE = Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic")
-CONDITIONS = [
-    "gdna_none_ss_0.99_nrna_none",
-    "gdna_none_ss_0.50_nrna_none",
-    "gdna_low_ss_0.99_nrna_none",
-    "gdna_low_ss_0.50_nrna_none",
-    "gdna_med_ss_0.99_nrna_none",
-    "gdna_med_ss_0.50_nrna_none",
-    "gdna_equal_ss_0.99_nrna_none",
-    "gdna_equal_ss_0.50_nrna_none",
-    "gdna_high_ss_0.99_nrna_none",
-    "gdna_high_ss_0.50_nrna_none",
-]
+DEFAULT_SIM_BASE = Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic")
 
 # gDNA fractions from simulation config
 GDNA_FRACS = {
@@ -70,31 +57,25 @@ def parse_condition(cond_name: str) -> dict:
     # gdna_XXX_ss_YYY_nrna_ZZZ
     gdna_key = f"{parts[0]}_{parts[1]}"
     ss_val = float(parts[3])
+    nrna_label = parts[5] if len(parts) > 5 else "none"
     return {
         "condition": cond_name,
-        "gdna_frac": GDNA_FRACS[gdna_key],
+        "gdna_frac": GDNA_FRACS.get(gdna_key, 0.0),
         "strand_specificity": ss_val,
         "gdna_label": gdna_key,
+        "nrna_label": nrna_label,
     }
 
 
-def load_manifest(sim_base: Path) -> dict:
-    """Load simulation manifest metadata if available."""
-    manifest_path = sim_base / "manifest.json"
-    if not manifest_path.exists():
-        return {}
-    with open(manifest_path) as f:
-        return json.load(f)
-
-
-def condition_manifest_map(manifest: dict) -> dict[str, dict]:
-    """Return condition-name keyed metadata from a simulation manifest."""
-    conditions = manifest.get("conditions", []) if isinstance(manifest, dict) else []
-    return {
-        str(row["name"]): row
-        for row in conditions
-        if isinstance(row, dict) and row.get("name")
-    }
+def discover_conditions(sim_base: Path, selected: list[str] | None = None) -> list[str]:
+    """Return requested conditions or manifest-discovered conditions."""
+    if selected:
+        return selected
+    manifest = load_manifest(sim_base)
+    mapped = condition_manifest_map(manifest)
+    if mapped:
+        return list(mapped)
+    raise ValueError(f"No conditions selected and no manifest conditions found in {sim_base}")
 
 
 def simulated_fragment_length_means(manifest: dict) -> tuple[float, float]:
@@ -186,10 +167,38 @@ def run_quant(sim_base: Path, index_dir: Path, condition: str) -> Path:
 # STEP 3: Analysis functions
 # ══════════════════════════════════════════════════════════════════════════
 
-def load_truth(sim_base: Path) -> pd.DataFrame:
-    """Load ground truth abundances."""
-    truth = pd.read_csv(sim_base / "truth_abundances.tsv", sep="\t")
-    return truth
+def load_truth(sim_base: Path, truth_name: str | None = None) -> pd.DataFrame:
+    """Load a ground-truth abundance table."""
+    manifest = load_manifest(sim_base)
+    if truth_name is None:
+        truth_name = manifest.get("truth_abundances", "truth_abundances.tsv")
+    truth_path = sim_base / truth_name
+    if not truth_path.exists():
+        condition_map = condition_manifest_map(manifest)
+        truth_names = [
+            str(row.get("truth_abundances"))
+            for row in condition_map.values()
+            if row.get("truth_abundances")
+        ]
+        if truth_names:
+            truth_path = sim_base / truth_names[0]
+    return pd.read_csv(truth_path, sep="\t")
+
+
+def load_condition_truth(
+    sim_base: Path,
+    condition: str,
+    condition_meta: dict[str, dict],
+    fallback_truth: pd.DataFrame,
+) -> pd.DataFrame:
+    """Load condition-specific truth, falling back to the supplied table."""
+    truth_name = condition_meta.get(condition, {}).get("truth_abundances")
+    if not truth_name:
+        return fallback_truth
+    truth_path = sim_base / str(truth_name)
+    if not truth_path.exists():
+        return fallback_truth
+    return pd.read_csv(truth_path, sep="\t")
 
 
 def load_quant(out_dir: Path) -> pd.DataFrame:
@@ -251,6 +260,12 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
     for cond in conditions:
         info = parse_condition(cond)
         meta = condition_meta.get(cond, {})
+        if meta:
+            info["gdna_frac"] = float(meta.get("gdna_rate", info["gdna_frac"]))
+            info["strand_specificity"] = float(
+                meta.get("strand_specificity", info["strand_specificity"]),
+            )
+            info["nrna_label"] = str(meta.get("nrna_label", info["nrna_label"]))
         out_dir = sim_base / cond / "rigel_out"
         if not out_dir.exists():
             continue
@@ -352,6 +367,7 @@ def analyze_abundance(sim_base: Path, conditions: list[str], truth: pd.DataFrame
     """Analyze transcript-level abundance accuracy."""
     lines = []
     hr = "═" * 100
+    condition_meta = condition_manifest_map(load_manifest(sim_base))
 
     lines.append(f"\n{hr}")
     lines.append("  TRANSCRIPT ABUNDANCE ACCURACY")
@@ -374,8 +390,9 @@ def analyze_abundance(sim_base: Path, conditions: list[str], truth: pd.DataFrame
             continue
 
         quant = load_quant(out_dir)
+        cond_truth = load_condition_truth(sim_base, cond, condition_meta, truth)
         # Merge with truth
-        merged = truth.merge(
+        merged = cond_truth.merge(
             quant[["transcript_id", "count", "count_em", "tpm"]],
             on="transcript_id", how="left"
         ).fillna(0)
@@ -552,7 +569,13 @@ def collect_fragment_assignment_rows(sim_base: Path, conditions: list[str]) -> l
         gdna_as_rna = 0         # gDNA → assigned to a transcript
         gdna_correct = 0        # gDNA → classified as gDNA/intergenic
         total_rna = 0
+        total_mrna = 0
+        total_nrna = 0
         total_gdna = 0
+        nrna_as_rna = 0
+        nrna_as_gdna = 0
+        mrna_as_gdna = 0
+        mrna_as_nrna = 0
 
         with pysam.AlignmentFile(str(annotated_bam), "rb") as bam:
             for read in bam:
@@ -560,7 +583,7 @@ def collect_fragment_assignment_rows(sim_base: Path, conditions: list[str]) -> l
                     continue
 
                 qname = read.query_name
-                true_is_gdna = qname.startswith("gdna")
+                origin = parse_origin(qname)
 
                 # Get assigned transcript from ZT tag
                 try:
@@ -585,20 +608,32 @@ def collect_fragment_assignment_rows(sim_base: Path, conditions: list[str]) -> l
                 except KeyError:
                     zf = 0
                 is_assigned_gdna = bool(zf & 0x04)
+                is_assigned_nrna = bool(zf & 0x08)
 
-                if true_is_gdna:
+                if origin.kind == "gdna":
                     total_gdna += 1
                     if is_assigned_gdna or category == "intergenic":
                         gdna_correct += 1
                     else:
                         gdna_as_rna += 1
+                elif origin.kind == "nrna":
+                    total_rna += 1
+                    total_nrna += 1
+                    if is_assigned_gdna or category == "intergenic":
+                        rna_as_gdna += 1
+                        nrna_as_gdna += 1
+                    else:
+                        nrna_as_rna += 1
                 else:
                     total_rna += 1
-                    # Parse true transcript from read name
-                    true_tx = qname.split(":")[0]
+                    total_mrna += 1
+                    true_tx = origin.transcript_id or ""
 
                     if is_assigned_gdna or category == "intergenic":
                         rna_as_gdna += 1
+                        mrna_as_gdna += 1
+                    elif is_assigned_nrna:
+                        mrna_as_nrna += 1
                     elif assigned_tx == true_tx:
                         correct_tx += 1
                     elif assigned_gene and true_tx.rsplit(".", 1)[0] == assigned_gene:
@@ -612,11 +647,17 @@ def collect_fragment_assignment_rows(sim_base: Path, conditions: list[str]) -> l
             "condition": cond,
             "total": total,
             "total_rna": total_rna,
+            "total_mrna": total_mrna,
+            "total_nrna": total_nrna,
             "total_gdna": total_gdna,
             "correct_tx": correct_tx,
             "correct_gene": correct_gene,
             "wrong_tx": wrong_tx,
             "rna_as_gdna": rna_as_gdna,
+            "mrna_as_gdna": mrna_as_gdna,
+            "mrna_as_nrna": mrna_as_nrna,
+            "nrna_as_rna": nrna_as_rna,
+            "nrna_as_gdna": nrna_as_gdna,
             "gdna_as_rna": gdna_as_rna,
             "gdna_correct": gdna_correct,
         })
@@ -655,9 +696,9 @@ def analyze_fragment_assignment(
 
     # Print overview table
     lines.append(f"\n{'Condition':<35} {'Total':>8} "
-                 f"{'RNA_ok':>8} {'RNA_gene':>9} {'RNA_wrong':>9} {'RNA→gDNA':>9} "
-                 f"{'gDNA_ok':>8} {'gDNA→RNA':>9} "
-                 f"{'Accuracy':>8}")
+                 f"{'mRNA_ok':>8} {'mRNA_gene':>9} {'mRNA_bad':>9} "
+                 f"{'nRNA→RNA':>9} {'nRNA→gDNA':>10} "
+                 f"{'gDNA_ok':>8} {'gDNA→RNA':>9} {'Accuracy':>8}")
     lines.append("─" * 120)
 
     for row in overview_rows:
@@ -668,7 +709,8 @@ def analyze_fragment_assignment(
         lines.append(
             f"{row['condition']:<35} {total:>8,} "
             f"{row['correct_tx']:>8,} {row['correct_gene']:>9,} "
-            f"{row['wrong_tx']:>9,} {row['rna_as_gdna']:>9,} "
+            f"{row['wrong_tx']:>9,} {row.get('nrna_as_rna', 0):>9,} "
+            f"{row.get('nrna_as_gdna', 0):>10,} "
             f"{row['gdna_correct']:>8,} {row['gdna_as_rna']:>9,} "
             f"{accuracy:>8.4f}"
         )
@@ -684,15 +726,25 @@ def analyze_fragment_assignment(
         cond = row["condition"]
         lines.append(f"\n  {cond}:")
 
-        if row["total_rna"] > 0:
-            rna_precision = row["correct_tx"] / row["total_rna"]
-            gene_precision = (row["correct_tx"] + row["correct_gene"]) / row["total_rna"]
-            rna_misclass = row["rna_as_gdna"] / row["total_rna"]
-            lines.append(f"    RNA ({row['total_rna']:,} frags):")
+        total_mrna = row.get("total_mrna", row["total_rna"])
+        if total_mrna > 0:
+            rna_precision = row["correct_tx"] / total_mrna
+            gene_precision = (row["correct_tx"] + row["correct_gene"]) / total_mrna
+            mrna_as_gdna = row.get("mrna_as_gdna", row["rna_as_gdna"])
+            rna_misclass = mrna_as_gdna / total_mrna
+            lines.append(f"    mRNA ({total_mrna:,} frags):")
             lines.append(f"      Exact transcript: {rna_precision:.4f}")
             lines.append(f"      Correct gene:     {gene_precision:.4f}")
-            lines.append(f"      Misclass as gDNA: {rna_misclass:.4f} ({row['rna_as_gdna']:,} frags)")
-            lines.append(f"      Wrong gene:       {row['wrong_tx'] / row['total_rna']:.4f} ({row['wrong_tx']:,} frags)")
+            lines.append(f"      Misclass as gDNA: {rna_misclass:.4f} ({mrna_as_gdna:,} frags)")
+            lines.append(f"      Wrong gene:       {row['wrong_tx'] / total_mrna:.4f} ({row['wrong_tx']:,} frags)")
+
+        total_nrna = row.get("total_nrna", 0)
+        if total_nrna > 0:
+            nrna_to_rna = row.get("nrna_as_rna", 0) / total_nrna
+            nrna_to_gdna = row.get("nrna_as_gdna", 0) / total_nrna
+            lines.append(f"    nRNA ({total_nrna:,} frags):")
+            lines.append(f"      Routed to RNA-compatible tags:  {nrna_to_rna:.4f} ({row.get('nrna_as_rna', 0):,} frags)")
+            lines.append(f"      Misclass as gDNA/intergenic:    {nrna_to_gdna:.4f} ({row.get('nrna_as_gdna', 0):,} frags)")
 
         if row["total_gdna"] > 0:
             gdna_precision = row["gdna_correct"] / row["total_gdna"]
@@ -743,8 +795,8 @@ def analyze_postfix_acceptance(
     for cond in conditions:
         meta = condition_meta.get(cond, {})
         info = parse_condition(cond)
-        n_rna = int(meta.get("n_rna", 1_000_000))
-        n_gdna = int(meta.get("n_gdna", round(n_rna * info["gdna_frac"])))
+        n_mrna = int(meta.get("n_mrna", meta.get("n_rna", 1_000_000)))
+        n_gdna = int(meta.get("n_gdna", round(n_mrna * info["gdna_frac"])))
         if n_gdna <= 0:
             continue
 
@@ -769,7 +821,7 @@ def analyze_postfix_acceptance(
     for cond in conditions:
         meta = condition_meta.get(cond, {})
         nrna_label = str(meta.get("nrna_label", "none" if cond.endswith("_nrna_none") else ""))
-        if nrna_label != "none":
+        if nrna_label not in {"none", "zero"}:
             continue
         loci = load_loci(sim_base / cond / "rigel_out")
         if loci.empty or "nrna" not in loci.columns:
@@ -840,15 +892,18 @@ def analyze_postfix_acceptance(
 
 def main():
     parser = argparse.ArgumentParser(description="Run rigel analysis on synthetic simulation")
-    parser.add_argument("--sim-base", type=Path, default=SIM_BASE)
+    parser.add_argument("--sim-base", type=Path, default=DEFAULT_SIM_BASE)
     parser.add_argument("--skip-quant", action="store_true",
                         help="Skip quantification, only run analysis")
     parser.add_argument("--skip-frag-analysis", action="store_true",
                         help="Skip fragment-level analysis (slow)")
+    parser.add_argument("--conditions", nargs="*", default=None,
+                        help="Optional subset of condition names to evaluate")
     args = parser.parse_args()
 
     sim_base = args.sim_base
     assert sim_base.exists(), f"Simulation directory not found: {sim_base}"
+    conditions = discover_conditions(sim_base, args.conditions)
 
     print("=" * 100)
     print("  RIGEL SYNTHETIC SIMULATION ANALYSIS")
@@ -866,7 +921,7 @@ def main():
         print("  STEP 2: Running rigel quant on all conditions")
         print(f"{'─' * 100}")
         t0 = time.time()
-        for cond in CONDITIONS:
+        for cond in conditions:
             run_quant(sim_base, index_dir, cond)
         elapsed = time.time() - t0
         print(f"\n  All conditions quantified in {elapsed:.1f}s")
@@ -881,29 +936,29 @@ def main():
     truth = load_truth(sim_base)
 
     # 3a: Calibration
-    cal_report = analyze_calibration(sim_base, CONDITIONS, truth)
+    cal_report = analyze_calibration(sim_base, conditions, truth)
     print(cal_report)
 
     # 3b: Abundance accuracy
-    abundance_report = analyze_abundance(sim_base, CONDITIONS, truth)
+    abundance_report = analyze_abundance(sim_base, conditions, truth)
     print(abundance_report)
 
     # 3c: Locus-level gDNA
-    locus_report = analyze_locus_gdna(sim_base, CONDITIONS)
+    locus_report = analyze_locus_gdna(sim_base, conditions)
     print(locus_report)
 
     # 3d: Fragment-level (optional, slow)
     assignment_rows = []
     if not args.skip_frag_analysis:
-        assignment_rows = collect_fragment_assignment_rows(sim_base, CONDITIONS)
-        frag_report = analyze_fragment_assignment(sim_base, CONDITIONS, assignment_rows)
+        assignment_rows = collect_fragment_assignment_rows(sim_base, conditions)
+        frag_report = analyze_fragment_assignment(sim_base, conditions, assignment_rows)
         print(frag_report)
     else:
         frag_report = "\n  [SKIP] Fragment analysis skipped (--skip-frag-analysis)"
         print(frag_report)
 
     # 3e: Cheap post-fix calibration acceptance checks
-    acceptance_report = analyze_postfix_acceptance(sim_base, CONDITIONS, assignment_rows)
+    acceptance_report = analyze_postfix_acceptance(sim_base, conditions, assignment_rows)
     print(acceptance_report)
 
     # ── Save full report ──

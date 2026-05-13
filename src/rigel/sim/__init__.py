@@ -30,8 +30,15 @@ from .annotation import GeneBuilder
 from .benchmark import BenchmarkResult, TranscriptAccuracy, run_benchmark
 from .oracle_bam import OracleBamSimulator
 from .genome import MutableGenome, reverse_complement
+from .manifest import (
+    condition_dir_name,
+    condition_manifest_map,
+    load_manifest,
+    write_manifest,
+)
 from .reads import GDNAConfig, ReadSimulator, SimConfig
 from .scenario import Scenario, ScenarioResult
+from .truth import Origin, parse_origin
 
 __all__ = [
     "BenchmarkResult",
@@ -39,11 +46,17 @@ __all__ = [
     "GDNAConfig",
     "GeneBuilder",
     "MutableGenome",
+    "Origin",
     "ReadSimulator",
     "ScenarioResult",
     "Scenario",
     "SimConfig",
     "TranscriptAccuracy",
+    "condition_dir_name",
+    "condition_manifest_map",
+    "load_manifest",
+    "parse_origin",
     "reverse_complement",
     "run_benchmark",
+    "write_manifest",
 ]

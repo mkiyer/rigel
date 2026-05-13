@@ -105,7 +105,7 @@ If possible store profiling results in a 'scratch' directory or other location o
 
 ## Simulation
 
-`scripts/synthetic_sim_sweep.py` contains a framework for running synthetic simulations with configurable parameters.
+`scripts/sim/locus_sweep.py` contains a framework for running locus-level synthetic simulations with configurable parameters.
 
 ## Synthetic Benchmark Framework
 
@@ -135,14 +135,14 @@ scripts/benchmark/
 conda activate rigel
 
 # Run a single sweep (output goes to golden/ for comparison)
-python scripts/synthetic_sim_sweep.py \
+python scripts/sim/locus_sweep.py \
   -c scripts/benchmark/configs/<name>.yaml \
   -o scripts/benchmark/golden/<name>
 
 # Run all sweeps
 for cfg in scripts/benchmark/configs/*.yaml; do
   name=$(basename "$cfg" .yaml)
-  python scripts/synthetic_sim_sweep.py -c "$cfg" -o "scripts/benchmark/golden/$name"
+  python scripts/sim/locus_sweep.py -c "$cfg" -o "scripts/benchmark/golden/$name"
 done
 ```
 
@@ -158,7 +158,7 @@ python scripts/benchmark/analyze_deep.py
 
 ### How to Add a New Benchmark Config
 
-Create a YAML file in `scripts/benchmark/configs/`. The sweep framework (`synthetic_sim_sweep.py`) supports these sweepable parameter dimensions:
+Create a YAML file in `scripts/benchmark/configs/`. The sweep framework (`scripts/sim/locus_sweep.py`) supports these sweepable parameter dimensions:
 
 - **Simulation params**: `strand_specificity`, `gdna_fraction`, per-entity `n_rna_fragments`
 - **EM params** (`em_config`): `prior_pseudocount`, `mode` (map/vbem), `convergence_delta`, `max_iterations`

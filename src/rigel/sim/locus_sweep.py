@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""synthetic_sim_sweep.py — Combinatorial simulation sweep for Rigel testing.
+"""Locus-level combinatorial simulation sweep for Rigel testing.
 
 Entities
 --------
@@ -63,10 +63,10 @@ Config structure (YAML)
 
 Usage
 -----
-    python scripts/synthetic_sim_sweep.py -c scripts/nrna_sweep_config.yaml
-    python scripts/synthetic_sim_sweep.py -c config.yaml -o outdir/ -v
-    python scripts/synthetic_sim_sweep.py -c config.yaml --gtf genes.gtf -L 50000
-    python scripts/synthetic_sim_sweep.py -c config.yaml --dry-run
+    python scripts/sim/locus_sweep.py -c scripts/nrna_sweep_config.yaml
+    python scripts/sim/locus_sweep.py -c config.yaml -o outdir/ -v
+    python scripts/sim/locus_sweep.py -c config.yaml --gtf genes.gtf -L 50000
+    python scripts/sim/locus_sweep.py -c config.yaml --dry-run
 """
 
 import argparse
@@ -520,7 +520,7 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels,
         dims.setdefault("gdna_fraction", [0.0])
 
     # Merge params dimensions (params: section takes precedence over
-    # legacy config keys that happen to appear in sweep:)
+    # older config keys that happen to appear in sweep:)
     if param_dims:
         for k, v in param_dims.items():
             dims[k] = v  # overwrite if already in dims from sweep:
@@ -1007,10 +1007,10 @@ Sweep value specifications (YAML):
     sweep:    {start: 0, stop: 100, step: 50} → [0, 50, 100]
 
 Examples:
-  python scripts/synthetic_sim_sweep.py -c scripts/nrna_sweep_config.yaml
-  python scripts/synthetic_sim_sweep.py -c config.yaml -o outdir/ -v
-  python scripts/synthetic_sim_sweep.py -c config.yaml --gtf genes.gtf -L 50000
-  python scripts/synthetic_sim_sweep.py -c config.yaml --dry-run
+    python scripts/sim/locus_sweep.py -c scripts/nrna_sweep_config.yaml
+    python scripts/sim/locus_sweep.py -c config.yaml -o outdir/ -v
+    python scripts/sim/locus_sweep.py -c config.yaml --gtf genes.gtf -L 50000
+    python scripts/sim/locus_sweep.py -c config.yaml --dry-run
 """,
     )
     parser.add_argument("-c", "--config", required=True,

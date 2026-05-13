@@ -45,6 +45,7 @@ import pysam
 
 from ..transcript import Transcript
 from ..types import Strand
+from . import bam as _bam
 from .genome import MutableGenome
 from .reads import GDNAConfig, ReadSimulator, SimConfig
 
@@ -52,168 +53,22 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["OracleBamSimulator"]
 
-# SAM flag bits (SAM spec §1.4.2).
-_FLAG_PAIRED = 0x1
-_FLAG_PROPER_PAIR = 0x2
-_FLAG_REVERSE = 0x10
-_FLAG_MATE_REVERSE = 0x20
-_FLAG_READ1 = 0x40
-_FLAG_READ2 = 0x80
-
-# Base flags shared by all proper paired-end reads.
-_BASE_R1_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ1
-_BASE_R2_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ2
-
-
-# ---------------------------------------------------------------------------
-# Coordinate projection: transcript-space → genomic CIGAR
-# ---------------------------------------------------------------------------
-
-
-def _transcript_to_genomic_blocks(
-    frag_start: int,
-    frag_end: int,
-    transcript: Transcript,
-) -> list[tuple[int, int]]:
-    """Map a transcript-space interval to genomic exon blocks.
-
-    Parameters
-    ----------
-    frag_start, frag_end : int
-        0-based half-open interval on the *spliced* transcript
-        (exon-concatenated, oriented 5′→3′ on the mRNA).
-    transcript : Transcript
-        The transcript whose ``.exons`` are in genomic coordinates
-        (0-based half-open, always sorted ascending regardless of strand).
-
-    Returns
-    -------
-    list of (genomic_start, genomic_end)
-        Genomic blocks (0-based half-open, ascending) that the
-        transcript-space fragment covers.  For a fragment spanning
-        an intron, multiple blocks are returned.
-    """
-    exons = transcript.exons  # sorted ascending by start
-
-    if transcript.strand == Strand.NEG:
-        # For NEG-strand transcripts, the ReadSimulator reverse-
-        # complemented the transcript sequence so that position 0
-        # is the 5′ end of the mRNA (= rightmost genomic exon).
-        # We need to mirror the transcript coordinates before mapping.
-        t_len = sum(e.end - e.start for e in exons)
-        frag_start_orig = t_len - frag_end
-        frag_end_orig = t_len - frag_start
-        frag_start, frag_end = frag_start_orig, frag_end_orig
-
-    blocks: list[tuple[int, int]] = []
-    consumed = 0  # bases consumed from transcript sequence so far
-
-    for exon in exons:
-        exon_len = exon.end - exon.start
-        exon_tx_start = consumed
-        exon_tx_end = consumed + exon_len
-
-        # Does this exon overlap the fragment?
-        overlap_start = max(frag_start, exon_tx_start)
-        overlap_end = min(frag_end, exon_tx_end)
-
-        if overlap_start < overlap_end:
-            # Map back to genomic coordinates
-            offset_in_exon_start = overlap_start - exon_tx_start
-            offset_in_exon_end = overlap_end - exon_tx_start
-            blocks.append((
-                exon.start + offset_in_exon_start,
-                exon.start + offset_in_exon_end,
-            ))
-
-        consumed += exon_len
-        if consumed >= frag_end:
-            break
-
-    return blocks
-
-
-def _premrna_to_genomic_interval(
-    frag_start: int,
-    frag_end: int,
-    transcript: Transcript,
-) -> tuple[int, int]:
-    """Map a pre-mRNA-space interval to genomic coordinates.
-
-    Pre-mRNA space spans the full genomic extent of the transcript
-    (including introns).  For NEG-strand transcripts the ReadSimulator
-    reverse-complemented the pre-mRNA, so we mirror coordinates.
-
-    Returns (genomic_start, genomic_end) — 0-based half-open.
-    """
-    genomic_start = transcript.start
-    premrna_len = transcript.end - transcript.start
-
-    if transcript.strand == Strand.NEG:
-        frag_start_orig = premrna_len - frag_end
-        frag_end_orig = premrna_len - frag_start
-        frag_start, frag_end = frag_start_orig, frag_end_orig
-
-    return (genomic_start + frag_start, genomic_start + frag_end)
-
-
-def _blocks_to_cigar(
-    blocks: list[tuple[int, int]],
-) -> list[tuple[int, int]]:
-    """Convert genomic blocks to a pysam CIGAR tuples list.
-
-    Contiguous aligned blocks produce ``(0, length)`` (BAM_CMATCH).
-    Gaps between blocks produce ``(3, length)`` (BAM_CREF_SKIP / N).
-    """
-    cigar: list[tuple[int, int]] = []
-    for i, (bstart, bend) in enumerate(blocks):
-        if i > 0:
-            prev_end = blocks[i - 1][1]
-            intron_len = bstart - prev_end
-            if intron_len > 0:
-                cigar.append((pysam.CREF_SKIP, intron_len))
-        match_len = bend - bstart
-        if match_len > 0:
-            cigar.append((pysam.CMATCH, match_len))
-    return cigar
-
-
-# ---------------------------------------------------------------------------
-# BAM record construction helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_aligned_segment(
-    header: pysam.AlignmentHeader,
-    query_name: str,
-    query_sequence: str,
-    flag: int,
-    reference_id: int,
-    reference_start: int,
-    cigar: list[tuple[int, int]],
-    mate_reference_id: int,
-    mate_reference_start: int,
-    template_length: int,
-    mapping_quality: int = 255,
-    tags: list | None = None,
-) -> pysam.AlignedSegment:
-    """Build a pysam AlignedSegment with the given attributes."""
-    a = pysam.AlignedSegment(header)
-    a.query_name = query_name
-    a.query_sequence = query_sequence
-    a.flag = flag
-    a.reference_id = reference_id
-    a.reference_start = reference_start
-    a.cigar = cigar
-    a.mapping_quality = mapping_quality
-    a.query_qualities = pysam.qualitystring_to_array("I" * len(query_sequence))
-    a.next_reference_id = mate_reference_id
-    a.next_reference_start = mate_reference_start
-    a.template_length = template_length
-    if tags:
-        a.set_tags(tags)
-    return a
-
+# Backward-compatible private aliases. Public code should import these helpers
+# from rigel.sim.bam.
+_FLAG_PAIRED = _bam.FLAG_PAIRED
+_FLAG_PROPER_PAIR = _bam.FLAG_PROPER_PAIR
+_FLAG_REVERSE = _bam.FLAG_REVERSE
+_FLAG_MATE_REVERSE = _bam.FLAG_MATE_REVERSE
+_FLAG_READ1 = _bam.FLAG_READ1
+_FLAG_READ2 = _bam.FLAG_READ2
+_BASE_R1_FLAG = _bam.BASE_R1_FLAG
+_BASE_R2_FLAG = _bam.BASE_R2_FLAG
+_blocks_to_cigar = _bam.blocks_to_cigar
+_make_aligned_segment = _bam.make_aligned_segment
+_premrna_to_genomic_interval = _bam.premrna_to_genomic_interval
+_take_from_left = _bam.take_from_left
+_take_from_right = _bam.take_from_right
+_transcript_to_genomic_blocks = _bam.transcript_to_genomic_blocks
 
 # ---------------------------------------------------------------------------
 # OracleBamSimulator
@@ -831,35 +686,3 @@ class OracleBamSimulator:
 
         return r1_blocks, r2_blocks
 
-
-def _take_from_left(
-    blocks: list[tuple[int, int]], n_bases: int,
-) -> list[tuple[int, int]]:
-    """Take ``n_bases`` from the left (start) of genomic blocks."""
-    result: list[tuple[int, int]] = []
-    remaining = n_bases
-    for bstart, bend in blocks:
-        blen = bend - bstart
-        if remaining <= 0:
-            break
-        take = min(blen, remaining)
-        result.append((bstart, bstart + take))
-        remaining -= take
-    return result
-
-
-def _take_from_right(
-    blocks: list[tuple[int, int]], n_bases: int,
-) -> list[tuple[int, int]]:
-    """Take ``n_bases`` from the right (end) of genomic blocks."""
-    result: list[tuple[int, int]] = []
-    remaining = n_bases
-    for bstart, bend in reversed(blocks):
-        blen = bend - bstart
-        if remaining <= 0:
-            break
-        take = min(blen, remaining)
-        result.append((bend - take, bend))
-        remaining -= take
-    result.reverse()  # restore ascending order
-    return result

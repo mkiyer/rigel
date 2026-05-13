@@ -521,11 +521,14 @@ def profile_stages(
 
     # ── Stage 2b: gDNA calibration (v6) ─────────────────────
     with Timer("calibration") as t_cal:
+        from rigel.calibration._orient import StrandSummary as _StrandSummary
+        _strand_summary = _StrandSummary.from_model(strand_models.exonic_spliced)
         calibration_obj = calibrate(
             index=index,
             payload=cal_payload,
             scan_trained=frag_length_models,
             fl_prior_ess=cal_cfg.prior_ess,
+            strand_summary=_strand_summary,
         )
     timings.calibration = t_cal.elapsed
     rss_snaps["after_calibration"] = _snap_rss_current()
@@ -594,7 +597,7 @@ def profile_stages(
                     cal_payload,
                     calibration_obj.global_densities,
                     gdna_fl=calibration_obj.fl_models.gdna,
-                    c_base=cal_cfg.c_base,
+                    nrna_weight=cal_cfg.nrna_weight,
                 )
                 alpha_gdna = prior_table.alpha_gdna
                 alpha_rna = prior_table.alpha_rna

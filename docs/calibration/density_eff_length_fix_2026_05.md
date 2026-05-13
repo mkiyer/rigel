@@ -141,7 +141,7 @@ calibration tests that previously passed `gdna_fl_mean=...`.
 - **Unit:** new `tests/test_density_global.py::test_intron_density_unbiased`
   builds 100 identical 1 kbp intron regions, samples 1000 fragments
   from a known $h(\ell)$ via direct simulation, asserts $|\hat\rho/\rho-1| < 0.05$.
-- **Integration:** re-run `scripts/sim/run_rigel_analysis.py` on the
+- **Integration:** re-run `scripts/sim/evaluate_suite.py` on the
   10-condition synthetic sweep. Expected:
   - $\rho_{\text{intron}} / \rho_{\text{intergenic}}$ moves from 0.79 → 1.00 ± 0.02.
   - Global gDNA rate at high contamination stays accurate (intergenic

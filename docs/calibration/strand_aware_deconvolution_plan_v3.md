@@ -575,7 +575,7 @@ simpler path.
 
 ### Synthetic / benchmark
 
-`scripts/synthetic_sim_sweep.py` configs:
+`scripts/sim/locus_sweep.py` configs:
 
 - Stranded, gDNA-poor, nRNA-rich: INTRON `rho` and EXON-INTRON `rho`
   drop toward truth; EXON-INTRON `rho_var` drops vs Phase-1-only

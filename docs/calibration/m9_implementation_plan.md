@@ -61,7 +61,7 @@ gate.  We rerun all of them with HEAD and record the results in
 
 ### 2.1 Synthetic scenarios (fast, local)
 
-Driver: `scripts/sim/synthetic_sim_sweep.py` (already migrated to the
+Driver: `scripts/sim/locus_sweep.py` (already migrated to the
 v6 API).  Configs live in `scripts/benchmark/configs/`.
 
 | Scenario                | Input                                         | Acceptance metric              | Threshold        |
@@ -78,7 +78,7 @@ v6 API).  Configs live in `scripts/benchmark/configs/`.
   `m9_dna20m_50_50.yaml`,
   `m9_ta1_siphon.yaml`,
   `m9_hybcap.yaml`.
-- **M9.2.b** — Run all four with `synthetic_sim_sweep.py`; collect
+- **M9.2.b** — Run all four with `locus_sweep.py`; collect
   outputs into `results/m9_validation/<scenario>/`.
 - **M9.2.c** — Add `scripts/benchmark/m9_validate.py` that loads the
   four output dirs, computes the table above, and prints

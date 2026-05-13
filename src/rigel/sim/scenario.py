@@ -23,7 +23,6 @@ import logging
 import shutil
 import subprocess
 import tempfile
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +36,12 @@ from .annotation import GeneBuilder
 from .genome import MutableGenome
 from .oracle_bam import OracleBamSimulator
 from .reads import GDNAConfig, ReadSimulator, SimConfig
+from .truth import (
+    count_mrna_by_transcript_from_bam,
+    count_mrna_by_transcript_from_fastq,
+    count_origins_from_bam,
+    count_origins_from_fastq,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,22 +107,7 @@ class ScenarioResult:
             Mapping of ``t_id → count`` for each transcript that
             contributed at least one simulated fragment.
         """
-        seen: set[str] = set()
-        with pysam.AlignmentFile(str(self.bam_path),
-                                 "rb", check_sq=False) as bam:
-            for read in bam:
-                # Strip /1 or /2 suffix to get fragment identifier
-                qname = read.query_name
-                if qname not in seen:
-                    seen.add(qname)
-
-        counts: Counter[str] = Counter()
-        for frag_id in seen:
-            # Format: t_id:start-end:strand:idx  (or gdna:..., nrna_*:...)
-            t_id = frag_id.split(":")[0]
-            if t_id != "gdna" and not t_id.startswith("nrna_"):
-                counts[t_id] += 1
-        return dict(counts)
+        return dict(count_mrna_by_transcript_from_bam(self.bam_path))
 
     def ground_truth_gdna_count(self) -> int:
         """Count gDNA fragments from FASTQ read names.
@@ -127,13 +117,7 @@ class ScenarioResult:
         int
             Number of fragments with ``gdna:`` prefix.
         """
-        count = 0
-        with open(self.fastq_r1) as fh:
-            for i, line in enumerate(fh):
-                if i % 4 == 0:
-                    if line.startswith("@gdna:"):
-                        count += 1
-        return count
+        return count_origins_from_fastq(self.fastq_r1)["gdna"]
 
     def ground_truth_nrna_count(self) -> int:
         """Count nascent RNA fragments from FASTQ read names.
@@ -143,13 +127,7 @@ class ScenarioResult:
         int
             Number of fragments with ``nrna_`` prefix.
         """
-        count = 0
-        with open(self.fastq_r1) as fh:
-            for i, line in enumerate(fh):
-                if i % 4 == 0:
-                    if line.startswith("@nrna_"):
-                        count += 1
-        return count
+        return count_origins_from_fastq(self.fastq_r1)["nrna"]
 
     def ground_truth_from_fastq(self) -> dict[str, int]:
         """Parse FASTQ read names to get ground-truth fragment counts.
@@ -164,18 +142,7 @@ class ScenarioResult:
         dict[str, int]
             Mapping of ``t_id → count`` for each transcript.
         """
-        counts: Counter[str] = Counter()
-        with open(self.fastq_r1) as fh:
-            for i, line in enumerate(fh):
-                if i % 4 == 0:  # header line
-                    # Format: @t_id:start-end:strand:idx/1
-                    qname = line[1:].strip()  # drop @
-                    if qname.endswith("/1"):
-                        qname = qname[:-2]
-                    t_id = qname.split(":")[0]
-                    if t_id != "gdna" and not t_id.startswith("nrna_"):
-                        counts[t_id] += 1
-        return dict(counts)
+        return dict(count_mrna_by_transcript_from_fastq(self.fastq_r1))
 
     # -- BAM-based ground truth (oracle mode) ---------------------------------
 
@@ -198,25 +165,15 @@ class ScenarioResult:
         dict[str, int]
             Mapping of ``t_id → count`` for each transcript.
         """
-        counts: Counter[str] = Counter()
-        for qname in self._parse_bam_qnames():
-            t_id = qname.split(":")[0]
-            if t_id != "gdna" and not t_id.startswith("nrna_"):
-                counts[t_id] += 1
-        return dict(counts)
+        return dict(count_mrna_by_transcript_from_bam(self.bam_path))
 
     def ground_truth_gdna_count_from_bam(self) -> int:
         """Count gDNA fragments from BAM read names."""
-        return sum(
-            1 for qn in self._parse_bam_qnames() if qn.startswith("gdna:")
-        )
+        return count_origins_from_bam(self.bam_path)["gdna"]
 
     def ground_truth_nrna_count_from_bam(self) -> int:
         """Count nascent RNA fragments from BAM read names."""
-        return sum(
-            1 for qn in self._parse_bam_qnames()
-            if qn.split(":")[0].startswith("nrna_")
-        )
+        return count_origins_from_bam(self.bam_path)["nrna"]
 
     def ground_truth_auto(self) -> dict[str, int]:
         """Return ground-truth mRNA counts from FASTQ or BAM.

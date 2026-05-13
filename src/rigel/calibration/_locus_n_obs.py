@@ -33,26 +33,21 @@ def build_t_to_local_locus(ml: MultiLocus, t_starts: np.ndarray, t_ref: np.ndarr
 
     ``t_starts`` and ``t_ref`` are global per-transcript arrays
     (``index.t_df["start"].values``, etc.).  The returned array has
-    length ``len(ml.transcript_indices)`` and dtype ``int8``; each
+    length ``len(ml.transcript_indices)`` and dtype ``int32``; each
     entry is the index into ``ml.loci`` containing that transcript's
     start coordinate.
 
-    Returns an empty ``int8[]`` for single-``Locus`` MultiLoci (the
+    Returns an empty ``int32[]`` for single-``Locus`` MultiLoci (the
     fast path of :func:`partition_units_to_loci` does not consult it).
     """
     n_loci = len(ml.loci)
     if n_loci == 1:
-        return np.zeros(0, dtype=np.int8)
-    if n_loci > 127:  # pragma: no cover — defensive; largest GENCODE cluster is 19
-        raise RuntimeError(
-            f"build_t_to_local_locus: MultiLocus {ml.multi_locus_id} has "
-            f"{n_loci} loci; int8 binning supports ≤ 127."
-        )
+        return np.zeros(0, dtype=np.int32)
 
     t_idx = ml.transcript_indices
     ts = t_starts[t_idx]
     tr = t_ref[t_idx]
-    out = np.full(t_idx.size, -1, dtype=np.int8)
+    out = np.full(t_idx.size, -1, dtype=np.int32)
     for j, loc in enumerate(ml.loci):
         m = (tr == loc.ref_id) & (ts >= loc.start) & (ts < loc.end)
         out[m] = j

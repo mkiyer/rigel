@@ -13,7 +13,7 @@ mRNA/nRNA pool sampling.
 
 Usage:
     conda activate rigel
-    python scripts/sim/run_vcap_benchmark.py
+    python scripts/debug/run_vcap_benchmark.py
 """
 from __future__ import annotations
 
@@ -25,13 +25,11 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from scripts.sim.sim import (
+from rigel.sim.whole_genome import (
     GDNASimConfig,
     SimulationParams,
     WholeGenomeSimulator,
-    _spike_in_nrna,
+    apply_nrna_ratio,
     assign_file_abundances,
     load_transcripts,
     write_truth_abundances,
@@ -70,7 +68,7 @@ GDNA_CONFIG = GDNASimConfig(
 # Conditions: list of dicts for clarity
 #   n_rna:  total RNA fragments (used in combined-pool mode)
 #   n_mrna / n_nrna: if both set, pools are sampled independently
-#   nrna_frac_range: abundance-level nRNA spike-in fraction
+#   nrna_ratio: abundance-level additive nRNA:mRNA ratio
 CONDITIONS = [
     {"name": "pristine", "n_rna": 10_000_000, "n_gdna": 0},
     {"name": "gdna",     "n_rna": 10_000_000, "n_gdna": 10_000_000},
@@ -79,7 +77,7 @@ CONDITIONS = [
         "n_mrna": 10_000_000,
         "n_nrna": 5_000_000,
         "n_gdna": 10_000_000,
-        "nrna_frac_range": (0.333, 0.333),
+        "nrna_ratio": 0.5,
     },
 ]
 
@@ -117,7 +115,7 @@ def main() -> int:
         n_mrna = cond.get("n_mrna")
         n_nrna = cond.get("n_nrna")
         n_rna = cond.get("n_rna", (n_mrna or 0) + (n_nrna or 0))
-        nrna_frac_range = cond.get("nrna_frac_range")
+        nrna_ratio = cond.get("nrna_ratio")
         cond_dir = OUTDIR / cond_name
 
         # Display fragment counts
@@ -146,7 +144,7 @@ def main() -> int:
                 "name": cond_name,
                 "n_mrna": n_mrna, "n_nrna": n_nrna,
                 "n_rna": n_rna, "n_gdna": n_gdna,
-                "nrna_frac_range": list(nrna_frac_range) if nrna_frac_range else None,
+                "nrna_ratio": nrna_ratio,
                 "strand_specificity": STRAND_SPECIFICITY,
             })
             continue
@@ -157,9 +155,8 @@ def main() -> int:
             t.abundance = base_mrna
             t.nrna_abundance = 0.0
 
-        # Spike in nRNA if requested
-        if nrna_frac_range is not None:
-            _spike_in_nrna(cond_transcripts, nrna_frac_range, seed=SEED)
+        if nrna_ratio is not None:
+            apply_nrna_ratio(cond_transcripts, float(nrna_ratio))
 
         # Write truth abundances
         truth_path = OUTDIR / f"truth_abundances_{cond_name}.tsv"
@@ -195,7 +192,7 @@ def main() -> int:
             "name": cond_name,
             "n_mrna": n_mrna, "n_nrna": n_nrna,
             "n_rna": n_rna, "n_gdna": n_gdna,
-            "nrna_frac_range": list(nrna_frac_range) if nrna_frac_range else None,
+            "nrna_ratio": nrna_ratio,
             "strand_specificity": STRAND_SPECIFICITY,
             "fastq_r1": str(r1),
             "fastq_r2": str(r2),

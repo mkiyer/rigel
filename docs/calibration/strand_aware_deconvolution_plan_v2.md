@@ -536,7 +536,7 @@ into priors next.
 ### Synthetic / benchmark
 
 Run the standard sweep
-(`scripts/synthetic_sim_sweep.py` configs under `scripts/benchmark/configs/`):
+(`scripts/sim/locus_sweep.py` configs under `scripts/benchmark/configs/`):
 
 - Stranded, gDNA-poor, nRNA-rich: must drop INTRON/EXON-INTRON `rho`
   toward truth.

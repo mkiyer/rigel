@@ -164,7 +164,7 @@ Run the synthetic sim:
 
 ```bash
 rm -rf /Users/mkiyer/Downloads/rigel_runs/sim_synthetic/gdna_*/{rigel_out,annotated.bam}
-python scripts/sim/run_rigel_analysis.py
+python scripts/sim/evaluate_suite.py
 ```
 
 **Acceptance:**

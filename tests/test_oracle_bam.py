@@ -4,13 +4,15 @@ import pysam
 import pytest
 from pathlib import Path
 
+from rigel.sim.bam import (
+    blocks_to_cigar as _blocks_to_cigar,
+    premrna_to_genomic_interval as _premrna_to_genomic_interval,
+    take_from_left as _take_from_left,
+    take_from_right as _take_from_right,
+    transcript_to_genomic_blocks as _transcript_to_genomic_blocks,
+)
 from rigel.sim.oracle_bam import (
     OracleBamSimulator,
-    _blocks_to_cigar,
-    _premrna_to_genomic_interval,
-    _take_from_left,
-    _take_from_right,
-    _transcript_to_genomic_blocks,
 )
 from rigel.sim.genome import MutableGenome
 from rigel.sim.reads import GDNAConfig, ReadSimulator, SimConfig

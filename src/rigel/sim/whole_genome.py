@@ -7,7 +7,7 @@ specificity.  Outputs FASTQ files and optional oracle BAM files.
 
 Abundance model
 ---------------
-Two modes:
+Two abundance sources:
 
 **random** — For each transcript, sample whether it is expressed
 (Bernoulli with probability ``frac_expressed``).  For expressed
@@ -17,11 +17,11 @@ distribution:
     log_total ~ Uniform(log(min), log(max))
     total = exp(log_total)
 
-Then draw a per-transcript nascent RNA fraction:
+Nascent RNA is controlled separately by the ``nrna`` section. The canonical
+benchmark mode is additive:
 
-    nrna_frac ~ Uniform(nrna_frac_min, nrna_frac_max)
-    mRNA = total × (1 − nrna_frac)
-    nRNA = total × nrna_frac
+    mRNA = base abundance
+    nRNA = base abundance × nrna_ratio
 
 Single-exon transcripts always get nRNA = 0.
 
@@ -30,15 +30,17 @@ Single-exon transcripts always get nRNA = 0.
 
 Fragment allocation
 -------------------
-The number of RNA fragments (``n_rna_fragments``) is fixed across
-all conditions.  gDNA fragments are *added on top*:
+In additive-ratio mode, ``n_rna_fragments`` is the mature RNA depth. nRNA and
+gDNA fragments are added on top:
 
-    n_gdna = round(gdna_rate × n_rna_fragments)
-    n_total = n_rna_fragments + n_gdna
+    n_mrna = n_rna_fragments
+    n_nrna = round(n_mrna × nrna_ratio)
+    n_gdna = round(n_mrna × gdna_rate)
+    n_total = n_mrna + n_nrna + n_gdna
 
 Condition grid
 --------------
-Sweeps: ``nrna_fracs × gdna_rates × strand_specificities``.
+Sweeps: ``nrna ratios × gdna_rates × strand_specificities``.
 
 When the abundance file provides explicit nRNA data, the nRNA sweep is
 skipped (single condition using the file's nRNA values).
@@ -47,7 +49,7 @@ Usage
 -----
 ::
 
-    python scripts/sim.py --config scripts/sim_example.yaml
+    python scripts/sim/simulate_reads.py --config scripts/sim/configs/sim_example.yaml
 
 Output
 ------
@@ -64,14 +66,13 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import json
 import logging
 import multiprocessing
 import shutil
 import sys
 import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -89,6 +90,21 @@ except ImportError:
 
 from rigel.transcript import Transcript
 from rigel.types import Strand
+from rigel.sim.bam import (
+    BASE_R1_FLAG as _BASE_R1_FLAG,
+    BASE_R2_FLAG as _BASE_R2_FLAG,
+    FLAG_MATE_REVERSE as _FLAG_MATE_REVERSE,
+    FLAG_REVERSE as _FLAG_REVERSE,
+    blocks_to_cigar as _blocks_to_cigar,
+    make_aligned_segment as _make_bam_record,
+    premrna_to_genomic_interval as _premrna_to_genomic_interval,
+    transcript_to_genomic_blocks as _transcript_to_genomic_blocks,
+)
+from rigel.sim.manifest import (
+    condition_dir_name as _condition_dir_name,
+    gdna_label_for_rate as _gdna_label_for_rate,
+    write_manifest as _write_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,16 +118,6 @@ for _c, _rc in zip(b"ACGTNacgtn", b"TGCANtgcan"):
     _BYTE_COMPLEMENT[_c] = _rc
 
 _FASTQ_BUFFER_SIZE = 100_000
-
-# SAM flag bits
-_FLAG_PAIRED = 0x1
-_FLAG_PROPER_PAIR = 0x2
-_FLAG_REVERSE = 0x10
-_FLAG_MATE_REVERSE = 0x20
-_FLAG_READ1 = 0x40
-_FLAG_READ2 = 0x80
-_BASE_R1_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ1
-_BASE_R2_FLAG = _FLAG_PAIRED | _FLAG_PROPER_PAIR | _FLAG_READ2
 
 
 def reverse_complement(seq: str) -> str:
@@ -262,19 +268,22 @@ class GDNASimConfig:
 class NRNAConfig:
     """Nascent RNA spike-in sweep configuration.
 
-    Each entry in ``fracs`` is a (min, max) range for the per-transcript
-    nRNA fraction.  A separate simulation condition is produced for each
-    entry (crossed with gDNA rates and strand specificities).
+    The only generated sweep mode is ``additive_ratio``. Each entry in
+    ``ratios`` adds nascent RNA independently of mature RNA:
+
+        nrna_abundance = mrna_abundance * ratio
 
     When abundances come from a file that already contains explicit nRNA
-    data, the ``fracs`` sweep is ignored — the file's nRNA values are
+    data, the configured sweep is ignored and the file's nRNA values are
     used as-is in a single nRNA condition.
     """
 
-    fracs: list[tuple[float, float]] = field(
-        default_factory=lambda: [(0.0, 0.5)]
-    )
-    frac_labels: list[str] | None = None
+    mode: str = "additive_ratio"
+    ratios: list[float] = field(default_factory=lambda: [0.0])
+    ratio_ranges: list[tuple[float, float]] | None = None
+    ratio_labels: list[str] | None = None
+    eligible_fraction: float = 1.0
+    seed: int = 42
 
 
 @dataclass
@@ -338,10 +347,35 @@ def parse_yaml_config(path: str | Path) -> SimConfig:
     # nRNA spike-in sweep — top-level "nrna:" section is canonical
     nrna_raw = raw.get("nrna", {})
     nrna = cfg.nrna
-    raw_fracs = nrna_raw.get("fracs", None)
-    if raw_fracs is not None:
-        nrna.fracs = [(float(p[0]), float(p[1])) for p in raw_fracs]
-    nrna.frac_labels = nrna_raw.get("frac_labels", None)
+    nrna.mode = str(nrna_raw.get("mode", "additive_ratio"))
+    if nrna.mode not in {"additive_ratio", "random_fraction"}:
+        raise ValueError("nrna.mode must be 'additive_ratio' or 'random_fraction'")
+    if "fracs" in nrna_raw or "frac_labels" in nrna_raw:
+        raise ValueError("nrna.fracs is no longer supported; use nrna.ratios")
+    raw_ratios = nrna_raw.get("ratios", None)
+    if raw_ratios is not None:
+        nrna.ratios = [float(r) for r in raw_ratios]
+    raw_ratio_ranges = nrna_raw.get("ratio_ranges", None)
+    if raw_ratio_ranges is not None:
+        nrna.ratio_ranges = [
+            (float(pair[0]), float(pair[1])) for pair in raw_ratio_ranges
+        ]
+    nrna.ratio_labels = nrna_raw.get("ratio_labels", None)
+    nrna.eligible_fraction = float(nrna_raw.get("eligible_fraction", 1.0))
+    nrna.seed = int(nrna_raw.get("seed", 42))
+    if not 0.0 <= nrna.eligible_fraction <= 1.0:
+        raise ValueError("nrna.eligible_fraction must be between 0 and 1")
+    if nrna.mode == "additive_ratio":
+        expected_len = len(nrna.ratios)
+    else:
+        if nrna.ratio_ranges is None:
+            raise ValueError("nrna.ratio_ranges is required for mode='random_fraction'")
+        for lo, hi in nrna.ratio_ranges:
+            if lo < 0 or hi < 0 or hi < lo:
+                raise ValueError("nrna.ratio_ranges entries must satisfy 0 <= min <= max")
+        expected_len = len(nrna.ratio_ranges)
+    if nrna.ratio_labels is not None and len(nrna.ratio_labels) != expected_len:
+        raise ValueError("nrna.ratio_labels must match the number of nRNA scenarios")
 
     # gDNA
     gd_raw = raw.get("gdna", {})
@@ -420,8 +454,8 @@ def assign_random_abundances(
     """Assign random total-RNA abundances using log-uniform sampling.
 
     All abundance is assigned to ``t.abundance`` (mRNA).  ``nrna_abundance``
-    is left at zero.  The nRNA spike-in is applied per-condition in
-    ``run_simulation`` via ``_spike_in_nrna``.
+    is left at zero. The additive nRNA ratio is applied per-condition in
+    ``run_simulation`` via ``apply_nrna_ratio``.
 
     1. Bernoulli(frac_expressed) → expressed flag.
     2. For expressed: total_RNA ~ LogUniform(min, max).
@@ -546,45 +580,93 @@ def _load_abundance_map(
     return abund_map, fmt
 
 
-def _spike_in_nrna(
+def apply_nrna_ratio(
     transcripts: list[Transcript],
-    nrna_frac_range: tuple[float, float],
-    seed: int = 42,
+    ratio: float,
 ) -> None:
-    """Add random nRNA as a fraction of each transcript's total abundance.
-
-    For each transcript with abundance > 0:
-        nrna_frac ~ Uniform(nrna_frac_min, nrna_frac_max)
-        nRNA = total × nrna_frac
-        mRNA = total × (1 − nrna_frac)
-
-    Single-exon transcripts always get nRNA = 0.
-    """
-    nrna_frac_min, nrna_frac_max = nrna_frac_range
-    rng = np.random.default_rng(seed)
+    """Set nRNA abundance as an additive ratio of mature RNA abundance."""
     n_spiked = 0
     n_single = 0
 
     for t in transcripts:
-        total = (t.abundance or 0.0) + t.nrna_abundance
-        if total <= 0 or len(t.exons) <= 1:
-            if len(t.exons) <= 1 and total > 0:
-                t.abundance = total
-                t.nrna_abundance = 0.0
-                n_single += 1
+        mrna = t.abundance or 0.0
+        if mrna <= 0:
+            t.nrna_abundance = 0.0
             continue
-        frac = rng.uniform(nrna_frac_min, nrna_frac_max)
-        t.nrna_abundance = total * frac
-        t.abundance = total * (1.0 - frac)
-        n_spiked += 1
+        if len(t.exons) <= 1:
+            t.nrna_abundance = 0.0
+            n_single += 1
+            continue
+        t.nrna_abundance = mrna * ratio
+        if ratio > 0:
+            n_spiked += 1
 
+    total_mrna = sum(t.abundance or 0.0 for t in transcripts)
     total_nrna = sum(t.nrna_abundance for t in transcripts)
     logger.info(
-        "Spiked nRNA: %d transcripts, total nRNA=%.1f "
-        "(frac range [%.2f, %.2f]), %d single-exon zeroed",
-        n_spiked, total_nrna,
-        nrna_frac_min, nrna_frac_max, n_single,
+        "Set additive nRNA ratio: %.3g (%d transcripts, mRNA=%.1f, nRNA=%.1f, "
+        "%d single-exon zeroed)",
+        ratio, n_spiked, total_mrna, total_nrna, n_single,
     )
+
+
+def apply_random_nrna_fraction(
+    transcripts: list[Transcript],
+    ratio_range: tuple[float, float],
+    *,
+    eligible_fraction: float,
+    seed: int,
+) -> float:
+    """Assign nRNA to a random subset of expressed multi-exon transcripts.
+
+    Returns the realized total nRNA:mRNA molecular abundance ratio.
+    """
+    lo, hi = ratio_range
+    if lo < 0 or hi < lo:
+        raise ValueError("ratio_range must satisfy 0 <= min <= max")
+    if not 0.0 <= eligible_fraction <= 1.0:
+        raise ValueError("eligible_fraction must be between 0 and 1")
+
+    rng = np.random.default_rng(seed)
+    n_eligible = 0
+    n_spiked = 0
+    n_single = 0
+
+    for t in transcripts:
+        mrna = t.abundance or 0.0
+        t.nrna_abundance = 0.0
+        if mrna <= 0:
+            continue
+        if len(t.exons) <= 1:
+            n_single += 1
+            continue
+        n_eligible += 1
+        if rng.random() >= eligible_fraction:
+            continue
+        ratio = float(rng.uniform(lo, hi)) if hi > lo else lo
+        t.nrna_abundance = mrna * ratio
+        if ratio > 0:
+            n_spiked += 1
+
+    total_mrna = sum(t.abundance or 0.0 for t in transcripts)
+    total_nrna = sum(t.nrna_abundance for t in transcripts)
+    realized_ratio = total_nrna / total_mrna if total_mrna > 0 else 0.0
+    logger.info(
+        "Set random nRNA fractions: range=[%.3g, %.3g], eligible_fraction=%.3g, "
+        "spiked=%d/%d expressed multi-exon, mRNA=%.1f, nRNA=%.1f, "
+        "realized_ratio=%.4g, %d single-exon zeroed",
+        lo, hi, eligible_fraction, n_spiked, n_eligible,
+        total_mrna, total_nrna, realized_ratio, n_single,
+    )
+    return realized_ratio
+
+
+def total_nrna_to_mrna_ratio(transcripts: list[Transcript]) -> float:
+    """Return total nRNA abundance divided by total mature RNA abundance."""
+    total_mrna = sum(t.abundance or 0.0 for t in transcripts)
+    if total_mrna <= 0:
+        return 0.0
+    return sum(t.nrna_abundance for t in transcripts) / total_mrna
 
 
 def assign_file_abundances(
@@ -602,7 +684,7 @@ def assign_file_abundances(
 
     Returns ``True`` if the file provided explicit nRNA data (sim TSV
     with ``nrna_abundance`` column), ``False`` otherwise.  When the file
-    does not supply nRNA, the caller applies the ``nrna.fracs`` sweep.
+    does not supply nRNA, the caller applies the configured nRNA sweep.
     """
     abund_map, fmt = _load_abundance_map(tsv_path)
     logger.info("Detected abundance format: %s (%d entries)", fmt, len(abund_map))
@@ -1676,104 +1758,6 @@ def _concat_files_binary(srcs: list[Path], dst: Path) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# BAM record helpers
-# ═══════════════════════════════════════════════════════════════════
-
-
-def _transcript_to_genomic_blocks(
-    frag_start: int,
-    frag_end: int,
-    transcript: Transcript,
-) -> list[tuple[int, int]]:
-    """Map transcript-space interval to genomic exon blocks.
-
-    For negative-strand transcripts, mirrors coordinates before
-    mapping (the transcript sequence is reverse-complemented so
-    position 0 is the mRNA 5′ end / rightmost genomic coordinate).
-    """
-    exons = transcript.exons
-    if transcript.strand == Strand.NEG:
-        t_len = sum(e.end - e.start for e in exons)
-        frag_start, frag_end = t_len - frag_end, t_len - frag_start
-
-    blocks: list[tuple[int, int]] = []
-    consumed = 0
-    for exon in exons:
-        exon_len = exon.end - exon.start
-        exon_tx_start = consumed
-        exon_tx_end = consumed + exon_len
-        overlap_start = max(frag_start, exon_tx_start)
-        overlap_end = min(frag_end, exon_tx_end)
-        if overlap_start < overlap_end:
-            offset_start = overlap_start - exon_tx_start
-            offset_end = overlap_end - exon_tx_start
-            blocks.append((exon.start + offset_start, exon.start + offset_end))
-        consumed += exon_len
-        if consumed >= frag_end:
-            break
-    return blocks
-
-
-def _premrna_to_genomic_interval(
-    frag_start: int,
-    frag_end: int,
-    transcript: Transcript,
-) -> tuple[int, int]:
-    """Map pre-mRNA-space interval to genomic coordinates."""
-    premrna_len = transcript.end - transcript.start
-    if transcript.strand == Strand.NEG:
-        frag_start, frag_end = premrna_len - frag_end, premrna_len - frag_start
-    return (transcript.start + frag_start, transcript.start + frag_end)
-
-
-def _blocks_to_cigar(blocks: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Convert genomic blocks to pysam CIGAR tuples."""
-    cigar: list[tuple[int, int]] = []
-    for i, (bstart, bend) in enumerate(blocks):
-        if i > 0:
-            prev_end = blocks[i - 1][1]
-            intron_len = bstart - prev_end
-            if intron_len > 0:
-                cigar.append((pysam.CREF_SKIP, intron_len))
-        match_len = bend - bstart
-        if match_len > 0:
-            cigar.append((pysam.CMATCH, match_len))
-    return cigar
-
-
-def _make_bam_record(
-    header: pysam.AlignmentHeader,
-    query_name: str,
-    query_sequence: str,
-    flag: int,
-    reference_id: int,
-    reference_start: int,
-    cigar: list[tuple[int, int]],
-    mate_reference_id: int,
-    mate_reference_start: int,
-    template_length: int,
-    mapping_quality: int = 255,
-    tags: list | None = None,
-) -> pysam.AlignedSegment:
-    """Build a pysam AlignedSegment."""
-    a = pysam.AlignedSegment(header)
-    a.query_name = query_name
-    a.query_sequence = query_sequence
-    a.flag = flag
-    a.reference_id = reference_id
-    a.reference_start = reference_start
-    a.cigar = cigar
-    a.mapping_quality = mapping_quality
-    a.query_qualities = pysam.qualitystring_to_array("I" * len(query_sequence))
-    a.next_reference_id = mate_reference_id
-    a.next_reference_start = mate_reference_start
-    a.template_length = template_length
-    if tags:
-        a.set_tags(tags)
-    return a
-
-
-# ═══════════════════════════════════════════════════════════════════
 # Condition naming helpers
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1783,47 +1767,59 @@ def condition_dir_name(
     strand_specificity: float,
     nrna_label: str,
 ) -> str:
-    return f"gdna_{gdna_label}_ss_{strand_specificity:.2f}_nrna_{nrna_label}"
+    return _condition_dir_name(gdna_label, strand_specificity, nrna_label)
 
 
 def gdna_label_for_rate(rate: float, labels: list[str] | None, idx: int) -> str:
-    if labels and idx < len(labels):
-        return labels[idx].strip()
-    return f"r{rate:g}"
+    return _gdna_label_for_rate(rate, labels, idx)
 
 
-def nrna_label_for_frac(
-    frac_range: tuple[float, float],
+def nrna_label_for_ratio(
+    ratio: float | tuple[float, float],
     labels: list[str] | None,
     idx: int,
 ) -> str:
     if labels and idx < len(labels):
         return labels[idx].strip()
-    lo, hi = frac_range
-    if lo == hi == 0.0:
+    if isinstance(ratio, tuple):
+        lo, hi = ratio
+        if lo == hi == 0.0:
+            return "none"
+        return f"range_{lo:g}_{hi:g}"
+    if ratio == 0:
         return "none"
-    return f"{lo:.2f}_{hi:.2f}"
+    return f"ratio_{ratio:g}"
 
 
 def _build_nrna_pairs(
     cfg: SimConfig,
     has_file_nrna: bool,
-) -> list[tuple[str, tuple[float, float] | None]]:
+) -> list[tuple[str, str, float | tuple[float, float] | None, int]]:
     """Build nRNA sweep pairs.
 
     When the abundance file supplied explicit nRNA data, returns a
     single entry ``("file", None)`` — no spike-in.  Otherwise returns
-    one entry per ``cfg.nrna.fracs``.
+    one entry per configured additive ratio.
     """
     if has_file_nrna:
-        return [("file", None)]
-    pairs: list[tuple[str, tuple[float, float] | None]] = []
-    for i, frac_range in enumerate(cfg.nrna.fracs):
-        label = nrna_label_for_frac(
-            frac_range, cfg.nrna.frac_labels, i,
-        )
-        pairs.append((label, frac_range))
-    return pairs
+        return [("file", "file", None, 0)]
+
+    mode = cfg.nrna.mode
+    pairs: list[tuple[str, str, float | tuple[float, float] | None, int]] = []
+    if mode == "additive_ratio":
+        for i, ratio in enumerate(cfg.nrna.ratios):
+            label = nrna_label_for_ratio(ratio, cfg.nrna.ratio_labels, i)
+            pairs.append((label, mode, ratio, i))
+        return pairs
+    if mode == "random_fraction":
+        if cfg.nrna.ratio_ranges is None:
+            raise ValueError("nrna.ratio_ranges is required for mode='random_fraction'")
+        for i, ratio_range in enumerate(cfg.nrna.ratio_ranges):
+            label = nrna_label_for_ratio(ratio_range, cfg.nrna.ratio_labels, i)
+            pairs.append((label, mode, ratio_range, i))
+        return pairs
+
+    raise ValueError(f"Unknown nRNA simulation mode: {mode}")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1837,22 +1833,7 @@ def write_manifest(
     conditions: list[dict],
 ) -> None:
     """Write manifest.json summarizing all simulation outputs."""
-    manifest = {
-        "version": 1,
-        "genome": str(Path(cfg.genome).resolve()),
-        "gtf": str(Path(cfg.gtf).resolve()),
-        "transcript_filter": cfg.transcript_filter,
-        "truth_abundances": "truth_abundances.tsv",
-        "simulation": asdict(cfg.simulation),
-        "gdna": asdict(cfg.gdna),
-        "nrna": asdict(cfg.nrna),
-        "strand_specificities": cfg.strand_specificities,
-        "abundance": asdict(cfg.abundance),
-        "conditions": conditions,
-    }
-    path = outdir / "manifest.json"
-    with open(path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    path = _write_manifest(outdir, cfg, conditions)
     logger.info("Wrote manifest to %s", path)
 
 
@@ -1866,7 +1847,7 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
 
     1. Load genome + GTF -> transcripts
     2. Assign base abundances (total RNA) once
-    3. Sweep nrna_fracs x gdna_rates x strand_specificities
+    3. Sweep nRNA settings x gdna_rates x strand_specificities
     4. Write manifest
 
     Returns list of condition dicts (for manifest).
@@ -1926,7 +1907,7 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
     cond_num = 0
     conditions: list[dict] = []
 
-    for nrna_label, nrna_frac_range in nrna_pairs:
+    for nrna_label, nrna_mode, nrna_value, nrna_index in nrna_pairs:
         # Deep-copy transcripts for this nRNA configuration
         cond_transcripts = copy.deepcopy(transcripts)
 
@@ -1938,13 +1919,19 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
             t.nrna_abundance = base_nrna
 
         # Apply nRNA spike-in (skipped when file provided nRNA)
-        nrna_lo = nrna_hi = 0.0
-        if nrna_frac_range is not None:
-            nrna_lo, nrna_hi = nrna_frac_range
-            if nrna_lo > 0.0 or nrna_hi > 0.0:
-                _spike_in_nrna(
-                    cond_transcripts, nrna_frac_range, seed=ab.seed,
-                )
+        nrna_ratio: float | None = None
+        nrna_ratio_range: tuple[float, float] | None = None
+        if nrna_mode == "additive_ratio":
+            nrna_ratio = float(nrna_value or 0.0)
+            apply_nrna_ratio(cond_transcripts, nrna_ratio)
+        elif nrna_mode == "random_fraction":
+            nrna_ratio_range = tuple(nrna_value)  # type: ignore[arg-type]
+            nrna_ratio = apply_random_nrna_fraction(
+                cond_transcripts,
+                nrna_ratio_range,
+                eligible_fraction=cfg.nrna.eligible_fraction,
+                seed=cfg.nrna.seed + nrna_index,
+            )
 
         # Write truth abundances for this nRNA configuration
         truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
@@ -1953,8 +1940,20 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
         for gdna_label, gdna_rate in gdna_pairs:
             for strand_spec in cfg.strand_specificities:
                 cond_num += 1
-                n_rna = sim.n_rna_fragments
-                n_gdna = round(gdna_rate * n_rna)
+                if nrna_mode in {"additive_ratio", "random_fraction"}:
+                    n_mrna = sim.n_rna_fragments
+                    n_nrna = round(n_mrna * float(nrna_ratio or 0.0))
+                    n_rna = n_mrna + n_nrna
+                    n_gdna = round(gdna_rate * n_mrna)
+                    explicit_mrna = n_mrna
+                    explicit_nrna = n_nrna
+                else:
+                    n_mrna = None
+                    n_nrna = None
+                    n_rna = sim.n_rna_fragments
+                    n_gdna = round(gdna_rate * n_rna)
+                    explicit_mrna = None
+                    explicit_nrna = None
 
                 cond_name = condition_dir_name(
                     gdna_label, strand_spec, nrna_label,
@@ -1964,7 +1963,7 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
                 print(
                     f"\n[{cond_num}/{total_conditions}] {cond_name}: "
                     f"RNA={n_rna:,} gDNA={n_gdna:,} SS={strand_spec:.2f} "
-                    f"nRNA=[{nrna_lo:.2f},{nrna_hi:.2f}]",
+                    f"nRNA={nrna_label}",
                     flush=True,
                 )
 
@@ -1974,10 +1973,17 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
                     "gdna_rate": gdna_rate,
                     "strand_specificity": strand_spec,
                     "nrna_label": nrna_label,
-                    "nrna_frac_min": nrna_lo,
-                    "nrna_frac_max": nrna_hi,
+                    "nrna_mode": nrna_mode,
+                    "nrna_ratio": nrna_ratio,
+                    "nrna_ratio_range": nrna_ratio_range,
+                    "nrna_eligible_fraction": (
+                        cfg.nrna.eligible_fraction if nrna_mode == "random_fraction" else None
+                    ),
+                    "n_mrna": n_mrna,
+                    "n_nrna": n_nrna,
                     "n_rna": n_rna,
                     "n_gdna": n_gdna,
+                    "n_total": n_rna + n_gdna,
                     "truth_abundances": truth_name,
                     "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
                     "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
@@ -2000,6 +2006,8 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
                     _, _, bam_path = simulator.simulate_and_write(
                         cond_dir, n_rna, n_gdna,
                         oracle_bam=cfg.oracle_bam, prefix="sim",
+                        n_mrna=explicit_mrna,
+                        n_nrna=explicit_nrna,
                         n_workers=sim.n_workers,
                     )
                     simulator.close()
@@ -2082,7 +2090,13 @@ def main() -> int:
     print(f"  Workers:          {cfg.simulation.n_workers}", flush=True)
     print(f"  gDNA rates:       {cfg.gdna.rates}", flush=True)
     print(f"  Strand specs:     {cfg.strand_specificities}", flush=True)
-    print(f"  nRNA fracs:       {cfg.nrna.fracs}", flush=True)
+    if cfg.nrna.mode == "additive_ratio":
+        print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
+    elif cfg.nrna.mode == "random_fraction":
+        print(f"  nRNA ranges:      {cfg.nrna.ratio_ranges}", flush=True)
+        print(f"  nRNA eligible:    {cfg.nrna.eligible_fraction}", flush=True)
+    else:
+        print("  nRNA:             explicit file values", flush=True)
     print(f"  Transcript filter:{cfg.transcript_filter}", flush=True)
     print(f"  Oracle BAM:       {cfg.oracle_bam}", flush=True)
 

@@ -15,8 +15,8 @@ Output structure:
     genome.fa.fai
     genes.gtf
 
-Usage:
-  python scripts/sim/generate_synthetic_genome.py -o /path/to/output
+Reference generation is normally driven by ``scripts/sim/simulate_suite.py``.
+Use ``simulate_suite.py --reference-only`` for a reference-only debugging run.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ MIN_INTERGENIC_GAP = 10_000
 
 # Exon structure
 MIN_EXONS = 1
-MAX_EXONS = 15
+MAX_EXONS = 10
 MIN_EXON_LEN = 80
 MAX_EXON_LEN = 2000
 MIN_INTRON_LEN = 500
@@ -597,7 +597,7 @@ def main():
     n_multi_exon = sum(1 for tx in all_transcripts if len(tx.exons) > 1)
     n_single_exon = n_transcripts - n_multi_exon
     print(f"\n{'='*60}")
-    print(f"Synthetic genome generated:")
+    print("Synthetic genome generated:")
     print(f"  Genome:       {fasta_path} ({args.genome_length:,} bp)")
     print(f"  Annotation:   {gtf_path}")
     print(f"  Genes:        {len(genes)} ({n_antisense} antisense overlapping)")

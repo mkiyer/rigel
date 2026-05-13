@@ -1,20 +1,16 @@
 """Regression tests for synthetic simulation analysis reporting."""
 
-import importlib.util
 import json
-from pathlib import Path
 
 import pandas as pd
 
-
-_SCRIPT_PATH = Path(__file__).parents[1] / "scripts/sim/run_rigel_analysis.py"
-_SPEC = importlib.util.spec_from_file_location("run_rigel_analysis", _SCRIPT_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-run_rigel_analysis = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(run_rigel_analysis)
-
-analyze_calibration = run_rigel_analysis.analyze_calibration
-analyze_postfix_acceptance = run_rigel_analysis.analyze_postfix_acceptance
+from rigel.sim.analysis import (
+    analyze_calibration,
+    analyze_postfix_acceptance,
+    discover_conditions,
+    load_condition_truth,
+    load_truth,
+)
 
 
 def _write_manifest(sim_base, condition: str, *, n_rna: int = 1_000_000, n_gdna: int = 100_000):
@@ -28,6 +24,8 @@ def _write_manifest(sim_base, condition: str, *, n_rna: int = 1_000_000, n_gdna:
                 "gdna_rate": n_gdna / n_rna,
                 "strand_specificity": 0.99,
                 "nrna_label": "none",
+                "n_mrna": n_rna,
+                "n_nrna": 0,
                 "n_rna": n_rna,
                 "n_gdna": n_gdna,
             }
@@ -86,3 +84,48 @@ def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
     assert "gDNA->RNA leak" in report
     assert "FAIL" not in report
     assert "PASS: all 3 evaluated acceptance checks passed." in report
+
+
+def test_analysis_discovers_conditions_from_manifest(tmp_path):
+    _write_manifest(tmp_path, "gdna_none_ss_1.00_nrna_none")
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["conditions"].append({
+        "name": "gdna_none_ss_1.00_nrna_high",
+        "gdna_label": "none",
+        "gdna_rate": 0.0,
+        "strand_specificity": 1.0,
+        "nrna_label": "high",
+        "n_rna": 150,
+        "n_gdna": 0,
+    })
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+
+    assert discover_conditions(tmp_path) == [
+        "gdna_none_ss_1.00_nrna_none",
+        "gdna_none_ss_1.00_nrna_high",
+    ]
+
+
+def test_analysis_loads_condition_specific_truth(tmp_path):
+    condition = "gdna_none_ss_1.00_nrna_high"
+    _write_manifest(tmp_path, condition)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["truth_abundances"] = "truth_abundances_nrna_none.tsv"
+    manifest["conditions"][0]["truth_abundances"] = "truth_abundances_nrna_high.tsv"
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+
+    base_truth = "transcript_id\tmrna_abundance\nTX1\t10\n"
+    high_truth = "transcript_id\tmrna_abundance\nTX1\t20\n"
+    (tmp_path / "truth_abundances_nrna_none.tsv").write_text(base_truth)
+    (tmp_path / "truth_abundances_nrna_high.tsv").write_text(high_truth)
+
+    fallback = load_truth(tmp_path)
+    loaded = load_condition_truth(
+        tmp_path,
+        condition,
+        {condition: manifest["conditions"][0]},
+        fallback,
+    )
+
+    assert fallback.loc[0, "mrna_abundance"] == 10
+    assert loaded.loc[0, "mrna_abundance"] == 20

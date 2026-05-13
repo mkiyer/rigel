@@ -633,7 +633,7 @@ deconvolution strongly lowers `rho`.
 
 Benchmarks to run after Phase 2:
 
-- `scripts/synthetic_sim_sweep.py` configs:
+- `scripts/sim/locus_sweep.py` configs:
   - stranded gDNA-poor nRNA-rich: INTRON/EXON-INTRON `rho` move toward truth;
   - stranded gDNA-rich nRNA-none: no regression vs golden;
   - unstranded: bit-equivalent.
