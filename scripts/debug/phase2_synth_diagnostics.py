@@ -6,7 +6,7 @@ import pandas as pd
 
 base = Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic")
 
-print("=== Per-locus calibration: alpha_gdna vs realized gdna ===")
+print("=== Per-locus calibration: gdna_prior_count vs realized gdna ===")
 print(f"  {'Condition':<38s}  {'Pearson':>8s}  {'Slope':>7s}  {'Sum(a)/Sum(gdna)':>17s}  {'n':>4s}")
 for cond in [
     "gdna_low_ss_0.99_nrna_none",
@@ -16,24 +16,24 @@ for cond in [
 ]:
     loc = pd.read_feather(base / cond / "rigel_out" / "loci.feather")
     valid = loc[loc["n_em_fragments"] > 100]
-    rho = float(np.corrcoef(valid["alpha_gdna"], valid["gdna"])[0, 1])
-    slope, intercept = np.polyfit(valid["alpha_gdna"], valid["gdna"], 1)
-    s_alpha = float(valid["alpha_gdna"].sum())
+    rho = float(np.corrcoef(valid["gdna_prior_count"], valid["gdna"])[0, 1])
+    slope, intercept = np.polyfit(valid["gdna_prior_count"], valid["gdna"], 1)
+    s_alpha = float(valid["gdna_prior_count"].sum())
     s_gdna = float(valid["gdna"].sum())
     print(f"  {cond:<38s}  {rho:>8.4f}  {slope:>7.3f}  {s_alpha/max(s_gdna,1):>17.3f}  {len(valid):>4d}")
 
 print()
-print("=== Sparse-locus pathology: alpha_gdna > n_em_fragments ===")
+print("=== Sparse-locus pathology: gdna_prior_count > n_em_fragments ===")
 for cond in ["gdna_low_ss_0.99_nrna_none", "gdna_high_ss_0.99_nrna_none"]:
     loc = pd.read_feather(base / cond / "rigel_out" / "loci.feather")
     loc = loc.copy()
-    loc["ratio"] = loc["alpha_gdna"] / loc["n_em_fragments"].clip(lower=1)
+    loc["ratio"] = loc["gdna_prior_count"] / loc["n_em_fragments"].clip(lower=1)
     over = loc[loc["ratio"] > 1.0].sort_values("ratio", ascending=False)
-    print(f"\n  {cond}: {len(over)} loci with alpha_gdna > n_em_fragments")
+    print(f"\n  {cond}: {len(over)} loci with gdna_prior_count > n_em_fragments")
     if len(over):
         print(over[
             ["locus_id", "n_transcripts", "locus_span_bp", "n_em_fragments",
-             "alpha_gdna", "gdna", "mrna", "ratio"]
+             "gdna_prior_count", "gdna", "mrna", "ratio"]
         ].head(8).to_string(index=False))
 
 print()
@@ -66,7 +66,7 @@ for cond in [
     "gdna_high_ss_0.99_nrna_none",
 ]:
     loc = pd.read_feather(base / cond / "rigel_out" / "loci.feather")
-    s_alpha = float(loc["alpha_gdna"].sum())
+    s_alpha = float(loc["gdna_prior_count"].sum())
     s_gdna = float(loc["gdna"].sum())
     label = cond.split("_")[1]
     print(f"  {cond:<38s}  {s_alpha:>10.0f}  {s_gdna:>10.0f}  {s_alpha/max(s_gdna,1):>10.3f}  {true_n[label]:>12d}")
@@ -96,4 +96,4 @@ print()
 print("=== nRNA false positives — which loci? (gdna_high_ss_0.99) ===")
 loc = pd.read_feather(base / "gdna_high_ss_0.99_nrna_none" / "rigel_out" / "loci.feather")
 nrna_loci = loc[loc["nrna"] > 5].nlargest(10, "nrna")
-print(nrna_loci[["locus_id","n_transcripts","n_nrna_entities","n_em_fragments","mrna","nrna","gdna","alpha_gdna"]].to_string(index=False))
+print(nrna_loci[["locus_id","n_transcripts","n_nrna_entities","n_em_fragments","mrna","nrna","gdna","gdna_prior_count"]].to_string(index=False))

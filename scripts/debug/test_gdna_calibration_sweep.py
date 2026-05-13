@@ -113,7 +113,6 @@ class SweepRow:
     # Per-locus prior outputs
     cal_n_multi_loci: int
     cal_mean_pi_gdna: float
-    cal_c_base: float
 
     # EM outputs (locus-level)
     em_mrna_count: float
@@ -132,8 +131,7 @@ class SweepRow:
     em_tx_single_tpm: float
 
     # Locus-level priors
-    locus_alpha_gdna: str     # JSON array
-    locus_alpha_rna: str      # JSON array
+    locus_gdna_prior_count: str     # JSON array
 
     # Errors
     mrna_count_error: float   # (estimated - truth) / truth
@@ -231,8 +229,11 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
     gdna_global_rate = gdna_global / gdna_global_total if gdna_global_total > 0 else 0.0
 
     # Locus-level priors
-    alpha_gdna = loci_df["alpha_gdna"].tolist() if "alpha_gdna" in loci_df.columns else []
-    alpha_rna = loci_df["alpha_rna"].tolist() if "alpha_rna" in loci_df.columns else []
+    gdna_prior_count = (
+        loci_df["gdna_prior_count"].tolist()
+        if "gdna_prior_count" in loci_df.columns
+        else []
+    )
 
     # ── Compute errors ────────────────────────────────────────────────
     mrna_truth = sum(gt_mrna.values())
@@ -298,7 +299,6 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
 
         cal_n_multi_loci=cal.n_multi_loci,
         cal_mean_pi_gdna=cal_summary.get("mean_pi_gdna", 0.0),
-        cal_c_base=cal_summary.get("c_base", 0.0),
 
         em_mrna_count=em_mrna,
         em_nrna_count=em_nrna,
@@ -313,8 +313,7 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
         em_tx_single_count=em_tx_single_count,
         em_tx_single_tpm=em_tx_single_tpm,
 
-        locus_alpha_gdna=json.dumps([float(x) for x in alpha_gdna]),
-        locus_alpha_rna=json.dumps([float(x) for x in alpha_rna]),
+        locus_gdna_prior_count=json.dumps([float(x) for x in gdna_prior_count]),
 
         mrna_count_error=mrna_error,
         gdna_count_error=gdna_error,
@@ -402,20 +401,20 @@ def deep_analysis(df: pd.DataFrame, outdir: Path) -> str:
 
     # ── 5. Per-locus gDNA priors ──────────────────────────────────────
     lines.append(f"\n{hr}")
-    lines.append("5. PER-LOCUS gDNA PRIORS (Bayesian α)")
+    lines.append("5. PER-LOCUS gDNA PRIORS")
     lines.append(hr)
     lines.append(
         f"{'gDNA_frac':>10} {'n_multi_loci':>13} {'mean_π_gdna':>12} "
-        f"{'c_base':>8} {'α_gdna':>40} {'α_rna':>40}"
+        f"{'gdna_prior_count':>40}"
     )
     for _, r in df.iterrows():
         lines.append(
             f"{r.gdna_fraction:>10.2f} {r.cal_n_multi_loci:>13} "
-            f"{r.cal_mean_pi_gdna:>12.6f} {r.cal_c_base:>8.1f} "
-            f"{r.locus_alpha_gdna:>40} {r.locus_alpha_rna:>40}"
+            f"{r.cal_mean_pi_gdna:>12.6f} "
+            f"{r.locus_gdna_prior_count:>40}"
         )
     lines.append("\n  → π_gdna should track true gDNA rate closely.")
-    lines.append("  → α_gdna / (α_gdna + α_rna) should ≈ gDNA rate per locus.")
+    lines.append("  → gdna_prior_count is the expected gDNA pseudocount per locus.")
 
     # ── 6. EM quantification accuracy ─────────────────────────────────
     lines.append(f"\n{hr}")

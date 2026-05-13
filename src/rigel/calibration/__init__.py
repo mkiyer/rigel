@@ -59,7 +59,6 @@ from .locus_prior import (
     PriorTable,
     assemble_multilocus_prior,
     assemble_priors,
-    build_prior_weight_rna,
     enable_gdna_for_multilocus,
     estimate_locus_gdna,
     expected_gdna_count_global,
@@ -84,8 +83,6 @@ __all__ = [
     "KAPPA_MIN",
     "KAPPA_MAX",
     "StrandSummary",
-    # EM prior_weight_rna helper
-    "build_prior_weight_rna",
     # Locoregional shrinkage + per-locus / MultiLocus priors
     "shrink_to_loco",
     "LocusGdnaEstimate",

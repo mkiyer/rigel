@@ -136,16 +136,11 @@ class TestPipelinePristineRna:
     def test_priors_populated_after_quant(self, _pristine):
         pr, _, _ = _pristine
         ptable = pr.calibration.prior_table
-        # alpha arrays sized to n_multi_loci
-        assert ptable.alpha_gdna.shape == ptable.alpha_rna.shape
-        # Phase\u00a01 redesign: alpha_rna is non-negative; alpha_gdna is the
-        # canonical asymmetric pseudocount. Eligibility is decoupled
-        # via the uint8 ``enable_gdna`` flag.
-        if ptable.alpha_gdna.size > 0:
-            assert (ptable.alpha_rna >= 0).all()
-            assert (ptable.alpha_gdna >= 0).all()
+        assert ptable.gdna_prior_count.shape == (len(ptable.multi_locus_priors),)
+        if ptable.gdna_prior_count.size > 0:
+            assert (ptable.gdna_prior_count >= 0).all()
             assert ptable.enable_gdna.dtype == np.uint8
-            assert ptable.enable_gdna.shape == ptable.alpha_gdna.shape
+            assert ptable.enable_gdna.shape == ptable.gdna_prior_count.shape
 
 
 class TestPipelineWithGdna:
@@ -217,31 +212,3 @@ class TestSummaryJsonV6Schema:
         for v1_key in ("pi_pool", "n_pool", "gdna_fl_quality",
                        "strand_specificity"):
             assert v1_key not in summary, f"unexpected v1 key: {v1_key}"
-
-
-class TestPriorWeightRnaPlumbed:
-    """Non-zero ``nrna_weight`` from the CLI flows through to EM.
-
-    The M5 ``build_prior_weight_rna`` helper currently returns all-ones
-    regardless of ``nrna_weight`` — but the plumbing must propagate the
-    value to the EM batch so that future helper implementations take
-    effect without further pipeline edits.
-    """
-
-    def test_nrna_weight_does_not_break(self, tmp_path):
-        sc, sim = _make_scenario(tmp_path, name="nrna_w")
-        try:
-            pr = _run(
-                sim,
-                calibration_cfg=CalibrationConfig(nrna_weight=0.5),
-            )
-            # Pipeline must complete with non-default nrna_weight.
-            assert pr.estimator is not None
-            ptable = pr.calibration.prior_table
-            # All entries are non-None float32 vectors of (n_t + 1).
-            for w in ptable.prior_weight_rna:
-                assert isinstance(w, np.ndarray)
-                assert w.dtype == np.float32
-                assert w.size >= 2
-        finally:
-            sc.cleanup()

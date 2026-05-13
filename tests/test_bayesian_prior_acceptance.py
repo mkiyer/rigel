@@ -2,15 +2,14 @@
 
 These tests pin the four invariants the Phase 2 redesign must satisfy:
 
-1. ``alpha_gdna == sum_loci eta_g(loc)`` from
+1. ``gdna_prior_count == sum_loci eta_g(loc)`` from
    :func:`expected_gdna_count_global` — and *only* that.
-2. ``alpha_rna == 0`` always.
-3. ``enable_gdna`` is computed from per-unit ``is_spliced`` and
+2. ``enable_gdna`` is computed from per-unit ``is_spliced`` and
    ``gdna_log_liks``, **independent of prior strength** — in particular
-   ``alpha_gdna == 0`` does not force ``enable_gdna == 0``.
-4. The global-only prior reads no target-locus payload evidence: the
+    ``gdna_prior_count == 0`` does not force ``enable_gdna == 0``.
+3. The global-only prior reads no target-locus payload evidence: the
    helper has no ``payload_arrays`` parameter, and perturbing the
-   payload's per-region counts must not change ``alpha_gdna``.
+    payload's per-region counts must not change ``gdna_prior_count``.
 
 The high-nRNA toy-mini-genome sentinels now live as active regression tests in
 ``tests/scenarios/test_nrna_double_counting.py``; this file stays focused on the
@@ -214,8 +213,8 @@ class TestPhase2GlobalOnlyContract:
                 f"the global-only prior is payload-free by design."
             )
 
-    def test_alpha_invariant_to_payload_perturbation(self):
-        """Perturbing per-region counts must not change ``alpha_gdna``.
+    def test_prior_invariant_to_payload_perturbation(self):
+        """Perturbing per-region counts must not change ``gdna_prior_count``.
 
         The global-only prior is a function of locus geometry and the
         *global* densities only. Local payload counts feed only the
@@ -245,15 +244,15 @@ class TestPhase2GlobalOnlyContract:
             ),
             global_densities=gdt,
         )
-        assert pt_a.alpha_gdna[0] == pytest.approx(pt_b.alpha_gdna[0])
+        assert pt_a.gdna_prior_count[0] == pytest.approx(pt_b.gdna_prior_count[0])
         # The global-only prior must be strictly positive here
         # (rho_ig > 0 and the locus has intergenic exposure).
-        assert pt_a.alpha_gdna[0] > 0.0
+        assert pt_a.gdna_prior_count[0] > 0.0
 
-    # --- (1) alpha_gdna == sum_loci eta_g(loc) ---------------------------
+    # --- (1) gdna_prior_count == sum_loci eta_g(loc) ---------------------
 
-    def test_alpha_gdna_equals_sum_of_helper(self):
-        """``alpha_gdna`` must equal the helper's per-locus ``total`` summed."""
+    def test_gdna_prior_count_equals_sum_of_helper(self):
+        """``gdna_prior_count`` must equal the helper totals summed."""
         # Two-locus multi-locus: each locus contributes its own eta_g.
         loc0 = Locus(ref="chr1", ref_id=0, start=0, end=1000)
         loc1 = Locus(ref="chr1", ref_id=0, start=2000, end=3500)
@@ -297,42 +296,13 @@ class TestPhase2GlobalOnlyContract:
             ).total
             for loc in ml.loci
         )
-        assert pt.alpha_gdna[0] == pytest.approx(eta_total)
-        assert pt.alpha_gdna[0] > 0.0  # sanity: non-trivial setup
+        assert pt.gdna_prior_count[0] == pytest.approx(eta_total)
+        assert pt.gdna_prior_count[0] > 0.0  # sanity: non-trivial setup
 
-    # --- (2) alpha_rna pinned at 0 ---------------------------------------
-
-    @pytest.mark.parametrize(
-        "rho_ig,rho_in,rho_b",
-        [(0.0, 0.0, 0.0), (1e-3, 0.0, 0.0), (1e-3, 2e-3, 5e-3)],
-        ids=["all_zero", "intergenic_only", "all_branches"],
-    )
-    def test_alpha_rna_always_zero(self, rho_ig, rho_in, rho_b):
-        """``alpha_rna`` is pinned at 0 regardless of global density."""
-        index = _fake_index(
-            region_rows=[
-                ("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False),
-            ],
-            transcripts=[("chr1", 100, 800)],
-        )
-        locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
-        ml = _ml_single(0, [0], [0] * 4, locus)
-        em = _make_em(np.zeros(4, dtype=np.int32))
-        pt = assemble_priors(
-            multi_loci=[ml], em_data=em, index=index,
-            payload=_make_payload(n_regions=1),
-            global_densities=_gdt(
-                rho_ig=rho_ig, rho_in=rho_in, rho_b=rho_b, fl_mean=200,
-            ),
-        )
-        assert pt.alpha_rna[0] == pytest.approx(0.0)
-        assert pt.rna_prior_count[0] == pytest.approx(0.0)
-        assert pt.multi_locus_priors[0].rna_prior_count == pytest.approx(0.0)
-
-    # --- (3) enable_gdna independent of prior strength -------------------
+    # --- (2) enable_gdna independent of prior strength -------------------
 
     def test_enable_gdna_unspliced_unit_with_zero_prior(self):
-        """``alpha_gdna == 0`` does not force ``enable_gdna == 0``.
+        """``gdna_prior_count == 0`` does not force ``enable_gdna == 0``.
 
         The eligibility flag must be driven solely by per-unit
         ``is_spliced`` / ``gdna_log_liks``.
@@ -353,14 +323,14 @@ class TestPhase2GlobalOnlyContract:
             payload=_make_payload(n_regions=1),
             global_densities=_gdt(),
         )
-        assert pt.alpha_gdna[0] == pytest.approx(0.0)
+        assert pt.gdna_prior_count[0] == pytest.approx(0.0)
         assert pt.enable_gdna[0] == 1, (
             "enable_gdna must be 1 when at least one unit is unspliced "
-            "with a finite gDNA log-lik, even if alpha_gdna == 0."
+            "with a finite gDNA log-lik, even if gdna_prior_count == 0."
         )
 
     def test_enable_gdna_all_spliced_with_positive_prior(self):
-        """All-spliced multi-locus is ineligible even when ``alpha_gdna > 0``."""
+        """All-spliced multi-locus is ineligible even with positive prior."""
         index = _fake_index(
             region_rows=[
                 ("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False),
@@ -376,16 +346,16 @@ class TestPhase2GlobalOnlyContract:
             is_spliced=np.ones(n, dtype=np.uint8),
             gdna_log_liks=np.full(n, -1.0, dtype=np.float64),
         )
-        # Positive intergenic density => alpha_gdna > 0.
+        # Positive intergenic density => gdna_prior_count > 0.
         pt = assemble_priors(
             multi_loci=[ml], em_data=em, index=index,
             payload=_make_payload(n_regions=1),
             global_densities=_gdt(rho_ig=1e-3, fl_mean=200),
         )
-        assert pt.alpha_gdna[0] > 0.0
+        assert pt.gdna_prior_count[0] > 0.0
         assert pt.enable_gdna[0] == 0, (
             "enable_gdna must be 0 when no unit is unspliced with a "
-            "finite gDNA log-lik, even if alpha_gdna > 0."
+            "finite gDNA log-lik, even if gdna_prior_count > 0."
         )
 
     def test_enable_gdna_helper_matches_unit_logic(self):
@@ -438,13 +408,12 @@ class TestPhase2PriorTableSchema:
             global_densities=_gdt(rho_ig=1e-3),
         )
         assert isinstance(pt, PriorTable)
-        # Phase 2 schema fields are first-class.
         assert hasattr(pt, "gdna_prior_count")
-        assert hasattr(pt, "rna_prior_count")
         assert hasattr(pt, "enable_gdna")
         assert pt.enable_gdna.dtype == np.uint8
         assert pt.gdna_prior_count.dtype == np.float64
-        assert pt.rna_prior_count.dtype == np.float64
+        assert not hasattr(pt, "rna_prior_count")
+        assert not hasattr(pt, "alpha_rna")
         # And the legacy c_base scalar is gone.
         assert not hasattr(pt, "c_base_value")
 

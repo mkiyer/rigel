@@ -83,8 +83,6 @@ suitable for standard total RNA-seq libraries.
 | `--mismatch-alpha` | `0.1` | Per-mismatch (NM tag) penalty α ∈ (0, 1]. Score multiplied by α per mismatch. `0` = hard gate, `1` = no penalty. |
 | `--gdna-splice-penalty-unannot` | `0.01` | Multiplier applied to the gDNA candidate score for fragments with unannotated splice junctions. Values close to 0 make gDNA attribution less likely for spliced fragments. |
 | `--cal-prior-ess` | `1000.0` | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage in the calibration orchestrator. Larger values shrink RNA/gDNA fragment-length distributions more aggressively toward the global FL. |
-| `--cal-nrna-weight` | `0.0` | Per-component nRNA-suppression weight in `[0, 1]`. `0` disables nRNA components in the per-MultiLocus prior; `1` treats nRNA on equal footing with mRNA. |
-| `--cal-c-base` | `10.0` | Dirichlet evidence strength for the per-MultiLocus `(alpha_gdna, alpha_rna)` prior assembled by `assemble_priors`. |
 | `--cal-quality-good` | `5000` | Minimum SPLICED-annotated count (rna pool) and gDNA count above which the per-FL distribution is flagged `"good"` and used without shrinkage. |
 | `--cal-quality-weak` | `200` | Minimum SPLICED-annotated count and gDNA count above which the per-FL distribution is flagged `"weak"`. Below this, the pool is `"unusable"` (fallback to global FL). |
 
@@ -127,8 +125,6 @@ em_convergence_delta: 0.000001
 
 # Calibration (v6)
 cal_prior_ess: 1000.0
-cal_nrna_weight: 0.0
-cal_c_base: 10.0
 cal_quality_good: 5000
 cal_quality_weak: 200
 ```

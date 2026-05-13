@@ -42,7 +42,7 @@ __all__ = [
 
 _MULTI_LOCUS_COLUMNS: tuple[str, ...] = (
     "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
-    "gdna_prior_count", "rna_prior_count",
+    "gdna_prior_count",
 )
 
 _PER_LOCUS_COLUMNS: tuple[str, ...] = (
@@ -72,7 +72,6 @@ def build_multi_locus_prior_df(
             "pi_gdna":        [m.pi_gdna        for m in mlps],
             "n_loci":         [len(m.per_locus) for m in mlps],
             "gdna_prior_count": [m.gdna_prior_count for m in mlps],
-            "rna_prior_count":  [m.rna_prior_count  for m in mlps],
         },
         columns=list(_MULTI_LOCUS_COLUMNS),
     )
@@ -144,16 +143,8 @@ class CalibrationResult:
 
     # ---- Convenience zero-copy aliases ----
     @property
-    def alpha_gdna(self) -> np.ndarray:
-        return self.prior_table.alpha_gdna
-
-    @property
-    def alpha_rna(self) -> np.ndarray:
-        return self.prior_table.alpha_rna
-
-    @property
-    def prior_weight_rna(self) -> list[np.ndarray]:
-        return self.prior_table.prior_weight_rna
+    def gdna_prior_count(self) -> np.ndarray:
+        return self.prior_table.gdna_prior_count
 
     @property
     def global_fl_mean(self) -> float:

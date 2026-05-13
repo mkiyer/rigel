@@ -426,8 +426,8 @@ is_mm_dropped = (zf & 0x80) != 0
 
 Calibration is the step that turns the raw BAM scan into the priors
 that the per-locus EM consumes.  It runs once per quant invocation,
-in-process, and writes its results both into the EM (as
-`prior_weight_rna` per MultiLocus and per-component priors) and into
+in-process, and writes its results both into the EM (as a per-MultiLocus
+`gdna_prior_count` plus gDNA eligibility flag) and into
 `summary.json` (under the `calibration` key) for inspection.
 
 ### What calibration does
@@ -467,9 +467,9 @@ The pipeline:
    (intergenic / intron / exon-near-intron) and a kappa correction
    for the gDNA fragment-length effect.
 5. **Per-MultiLocus priors**: for every MultiLocus (a connected
-   component of mappable transcripts), turn the global densities
-   into a per-component Dirichlet prior `(alpha_gdna, alpha_rna)`
-   with strength `c_base`.
+  component of mappable transcripts), turn the global densities
+  into a single expected gDNA pseudocount, `gdna_prior_count`.
+  RNA components do not receive a calibration-derived prior budget.
 
 ### Knobs
 
@@ -479,8 +479,6 @@ standard total-RNA libraries.
 | Flag                  | Default | What it controls                                                                                              |
 |-----------------------|---------|---------------------------------------------------------------------------------------------------------------|
 | `--cal-prior-ess`     | `1000`  | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage. Larger ⇒ pool FLs pulled harder toward the global FL. |
-| `--cal-nrna-weight`   | `0.0`   | Per-component nRNA-suppression weight in `[0, 1]`.  `0` disables nRNA components in the per-MultiLocus prior; `1` treats nRNA on equal footing with mRNA. |
-| `--cal-c-base`        | `10.0`  | Dirichlet evidence strength for the per-MultiLocus `(alpha_gdna, alpha_rna)` prior.  Larger ⇒ stronger pull toward the global gDNA fraction; smaller ⇒ EM trusts the per-locus likelihood more. |
 | `--cal-quality-good`  | `5000`  | Pool counts at or above this threshold are flagged `"good"` and used without shrinkage. |
 | `--cal-quality-weak`  | `200`   | Pool counts below this threshold are flagged `"unusable"` and the pool falls back on the global FL.  Counts in `[weak, good)` are flagged `"weak"` and shrunk toward the global FL with strength `--cal-prior-ess`. |
 
@@ -499,7 +497,6 @@ standard total-RNA libraries.
     },
     "diagnostics": { /* per-region observation counts, boundary flux */ },
     "n_multi_loci":  <int>,
-    "c_base":        <float>,
     "mean_pi_gdna":  <float>     // library-wide pi_gdna averaged across MultiLoci
   }
 }
@@ -515,10 +512,10 @@ standard total-RNA libraries.
   conversely, the RNA pool FL is too dominant.  Inspect
   `fl_models.rna_quality` and the per-region counts in `diagnostics`.
 - Heavy mass on nRNA components in `nrna_quant.feather` for a
-  short-fragment library: increase `--cal-nrna-weight` toward `1.0`
-  (rigel will treat nRNA and mRNA components on equal footing rather
-  than down-weighting nRNA in the prior).
-- All four knobs above are *priors*; the EM will override them when
+  short-fragment library generally indicates an mRNA/nRNA/gDNA
+  identifiability limit in that locus. Inspect the locus-level
+  likelihood evidence and gDNA calibration diagnostics.
+- The calibration knobs above are *priors*; the EM will override them when
   the per-locus likelihood is decisive.  If a locus disagrees with
   calibration, the locus generally wins.
 

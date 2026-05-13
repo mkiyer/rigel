@@ -1,16 +1,13 @@
 """Phase 0 (Bayesian-prior redesign): gDNA component eligibility is now an
 explicit per-locus boolean (``locus_enable_gdna``), decoupled from
-``alpha_gdna > 0``.
+``gdna_prior_count > 0``.
 
 These tests pin the new native semantics:
 
-* ``alpha_gdna == 0`` with ``enable_gdna == True`` keeps the gDNA component
+* ``gdna_prior_count == 0`` with ``enable_gdna == True`` keeps the gDNA component
   active (it can absorb posterior mass under the EM likelihood).
 * ``enable_gdna == False`` disables the gDNA component regardless of the
-  ``alpha_gdna`` value.
-* When ``alpha_rna == 0`` (the asymmetric-prior default), the warm-start
-  ratio override does not fire and the coverage-derived warm start is
-  preserved.
+    ``gdna_prior_count`` value.
 
 The tests construct a minimal one-locus partition by hand to avoid the
 calibration / scoring machinery; they exercise the public Python wrapper
@@ -97,16 +94,14 @@ def _make_estimator(n_transcripts: int) -> AbundanceEstimator:
 # ---------------------------------------------------------------------------
 
 class TestEligibilityDecoupling:
-    """``alpha_gdna`` no longer disables the gDNA component."""
+    """``gdna_prior_count`` no longer disables the gDNA component."""
 
-    def test_zero_alpha_gdna_enabled_keeps_gdna_active(self):
-        """``alpha_gdna == 0`` and ``enable_gdna == True`` ⇒ gDNA absorbs mass.
+    def test_zero_gdna_prior_enabled_keeps_gdna_active(self):
+        """``gdna_prior_count == 0`` and ``enable_gdna == True`` ⇒ gDNA absorbs mass.
 
-        Pre-Phase-0 behavior: ``alpha_gdna == 0`` zeroed the gDNA prior in
-        the extractor, leaving the gDNA component permanently off and forcing
-        all posterior mass onto transcripts.
-        Post-Phase-0 behavior: with finite gDNA likelihoods, the gDNA
-        component is eligible and absorbs a non-trivial share of mass.
+        With finite gDNA likelihoods, the gDNA component is eligible and
+        absorbs a non-trivial share of mass even when the calibration prior
+        count is zero.
         """
         n_units = 100
         n_t = 2
@@ -122,8 +117,7 @@ class TestEligibilityDecoupling:
         total_gdna, _rna, _g = rc.run_batch_locus_em_partitioned(
             partition_tuples=[partition],
             locus_transcript_indices=locus_t_lists,
-            alpha_gdna=np.array([0.0], dtype=np.float64),
-            alpha_rna=np.array([0.0], dtype=np.float64),
+            gdna_prior_count=np.array([0.0], dtype=np.float64),
             index=None,
             enable_gdna=np.array([1], dtype=np.uint8),
         )
@@ -135,7 +129,7 @@ class TestEligibilityDecoupling:
         )
 
     def test_disabled_gdna_yields_zero_gdna_mass(self):
-        """``enable_gdna == False`` zeros gDNA mass regardless of alpha_gdna."""
+        """``enable_gdna == False`` zeros gDNA mass regardless of gdna_prior_count."""
         n_units = 50
         n_t = 2
         rc = _make_estimator(n_t)
@@ -150,8 +144,7 @@ class TestEligibilityDecoupling:
         total_gdna, _rna, _g = rc.run_batch_locus_em_partitioned(
             partition_tuples=[partition],
             locus_transcript_indices=locus_t_lists,
-            alpha_gdna=np.array([100.0], dtype=np.float64),  # large prior!
-            alpha_rna=np.array([1.0], dtype=np.float64),
+            gdna_prior_count=np.array([100.0], dtype=np.float64),
             index=None,
             enable_gdna=np.array([0], dtype=np.uint8),
         )
@@ -187,39 +180,34 @@ class TestEligibilityDecoupling:
         rc3 = _make_estimator(n_t)
         locus_t_lists = [np.arange(n_t, dtype=np.int32)]
 
-        # All three with alpha_gdna=0 — pre-Phase-0, all three would have
-        # gDNA disabled. Post-Phase-0, only the unspliced+finite case
-        # produces gDNA assignments.
+        # All three with gdna_prior_count=0. Only the unspliced+finite
+        # case produces gDNA assignments.
         g_spl, _, _ = rc.run_batch_locus_em_partitioned(
             [spliced_part], locus_t_lists,
-            np.zeros(1), np.zeros(1), index=None,
+            np.zeros(1), index=None,
         )
         g_uns, _, _ = rc2.run_batch_locus_em_partitioned(
             [unspliced_part], locus_t_lists,
-            np.zeros(1), np.zeros(1), index=None,
+            np.zeros(1), index=None,
         )
         g_no, _, _ = rc3.run_batch_locus_em_partitioned(
             [nogdna_part], locus_t_lists,
-            np.zeros(1), np.zeros(1), index=None,
+            np.zeros(1), index=None,
         )
 
         assert g_spl == 0.0, "spliced partition has no gDNA candidates"
         assert g_no == 0.0, "non-finite gDNA log-liks ⇒ no gDNA candidates"
         assert g_uns > 0.0, (
             "unspliced+finite gDNA log-lik must enable component "
-            "even when alpha_gdna == 0 (Phase 0 semantics)"
+            "even when gdna_prior_count == 0"
         )
 
 
-class TestWarmStartWithZeroAlphaRna:
-    """``alpha_rna == 0`` no longer triggers the gDNA warm-start override."""
+class TestGdnaPriorCount:
+    """gDNA prior counts are accepted without any RNA-prior companion."""
 
-    def test_zero_alpha_rna_keeps_coverage_warm_start(self):
-        """With ``alpha_rna == 0``, the gDNA warm-start ratio override is
-        skipped. The result is sensitive to the starting point only via
-        EM convergence, but at minimum the call must succeed and produce
-        finite outputs (no NaN from a divide-by-zero ratio).
-        """
+    def test_positive_gdna_prior_produces_finite_outputs(self):
+        """A positive gDNA prior count produces finite, conserved outputs."""
         n_t = 2
         rc = _make_estimator(n_t)
         partition = _make_one_locus_partition(
@@ -230,8 +218,7 @@ class TestWarmStartWithZeroAlphaRna:
         total_gdna, locus_rna, locus_gdna = rc.run_batch_locus_em_partitioned(
             partition_tuples=[partition],
             locus_transcript_indices=locus_t_lists,
-            alpha_gdna=np.array([5.0], dtype=np.float64),  # nonzero prior
-            alpha_rna=np.array([0.0], dtype=np.float64),    # asymmetric default
+            gdna_prior_count=np.array([5.0], dtype=np.float64),
             index=None,
         )
 

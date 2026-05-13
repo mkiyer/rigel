@@ -581,8 +581,7 @@ def profile_stages(
             max_locus_t = max(len(locus.transcript_indices) for locus in loci)
             max_locus_u = max(len(locus.unit_indices) for locus in loci)
 
-            # Assign locus_id to every transcript (required by the
-            # nRNA-fraction prior cascade in the C++ EM).
+            # Assign locus_id to every transcript before EM profiling.
             for locus in loci:
                 for t_idx in locus.transcript_indices:
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
@@ -597,11 +596,9 @@ def profile_stages(
                     cal_payload,
                     calibration_obj.global_densities,
                     gdna_fl=calibration_obj.fl_models.gdna,
-                    nrna_weight=cal_cfg.nrna_weight,
                 )
-                alpha_gdna = prior_table.alpha_gdna
-                alpha_rna = prior_table.alpha_rna
-                prior_weight_rna_per_locus = list(prior_table.prior_weight_rna)
+                gdna_prior_count = prior_table.gdna_prior_count
+                enable_gdna = prior_table.enable_gdna
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
             with Timer("partition") as t_part:
@@ -615,10 +612,9 @@ def profile_stages(
                     partitions,
                     loci,
                     index,
-                    alpha_gdna,
-                    alpha_rna,
+                    gdna_prior_count,
                     em_config,
-                    prior_weight_rna_per_locus=prior_weight_rna_per_locus,
+                    enable_gdna=enable_gdna,
                     emit_locus_stats=True,
                 )
             timings.locus_em = t_em.elapsed

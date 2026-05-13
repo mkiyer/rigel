@@ -168,12 +168,11 @@ def _make_locus_em_data(
     include_gdna=False,
     nrna_log_lik=-2.0,
     gdna_log_lik=0.0,
-    alpha_gdna=1.0,
-    alpha_rna=9.0,
+    gdna_prior_count=1.0,
 ):
-    """Build (ScoredFragments, [Locus], alpha_gdna, alpha_rna, index) for batch EM tests.
+    """Build (ScoredFragments, [Locus], gdna_prior_count, index) for batch EM tests.
 
-    Returns a tuple (em_data, loci, alpha_gdna_arr, alpha_rna_arr, index) suitable for
+    Returns a tuple (em_data, loci, gdna_prior_count_arr, index) suitable for
     ``run_batch_locus_em()``.
 
     Parameters
@@ -187,7 +186,7 @@ def _make_locus_em_data(
         If True, units are marked as unspliced (``is_spliced=False``)
         so the batch C++ adds nRNA shadow candidates.
     include_gdna : bool
-        If True, ``alpha_gdna > 0`` and ``gdna_log_liks`` are finite
+        If True, ``gdna_prior_count > 0`` and ``gdna_log_liks`` are finite
         so the batch C++ adds a gDNA component.
     """
     if num_transcripts is None:
@@ -259,8 +258,9 @@ def _make_locus_em_data(
     )
     loci = [locus]
 
-    alpha_gdna_arr = np.array([alpha_gdna if include_gdna else 0.0], dtype=np.float64)
-    alpha_rna_arr = np.array([alpha_rna], dtype=np.float64)
+    gdna_prior_count_arr = np.array(
+        [gdna_prior_count if include_gdna else 0.0], dtype=np.float64
+    )
 
     index = _MockBatchIndex(n_t)
 
@@ -268,7 +268,7 @@ def _make_locus_em_data(
     if rc is not None:
         _ensure_estimator_geometry(rc)
 
-    return em_data, loci, alpha_gdna_arr, alpha_rna_arr, index
+    return em_data, loci, gdna_prior_count_arr, index
 
 
 class _MockBatchIndex:
@@ -299,18 +299,18 @@ def _ensure_estimator_geometry(rc):
 
 
 def _run_and_assign(
-    rc, em_data, loci=None, index=None, alpha_gdna=None, alpha_rna=None, *, em_iterations=10
+    rc, em_data, loci=None, index=None, gdna_prior_count=None, *, em_iterations=10
 ):
     """Run batch locus EM via the partitioned path. Returns pool_counts dict.
 
-    Accepts either the new tuple form (em_data, loci, alpha_gdna, alpha_rna, index)
+    Accepts either the tuple form (em_data, loci, gdna_prior_count, index)
     separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
     """
     from rigel.locus_partition import partition_and_free
 
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):
-        em_data, loci, alpha_gdna, alpha_rna, index = em_data
+        em_data, loci, gdna_prior_count, index = em_data
 
     _ensure_estimator_geometry(rc)
 
@@ -337,8 +337,7 @@ def _run_and_assign(
     total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
         partition_tuples,
         locus_t_lists,
-        alpha_gdna,
-        alpha_rna,
+        gdna_prior_count,
         index,
         em_iterations=em_iterations,
     )

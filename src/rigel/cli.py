@@ -569,7 +569,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig (v6) --
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
-    _ParamSpec("cal_nrna_weight", "calibration.nrna_weight"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
     # -- Fan-out: threads → both EM and scan --
@@ -1085,16 +1084,6 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: 1000). Larger values shrink RNA/gDNA FL more "
         "aggressively toward the global FL; smaller values let pool "
         "data dominate.",
-    )
-    adv.add_argument(
-        "--cal-nrna-weight",
-        dest="cal_nrna_weight",
-        type=float,
-        default=None,
-        help="Per-component nRNA-suppression weight "
-        "in [0, 1] (default: 0.0 — nRNA components disabled in the "
-        "per-MultiLocus prior).  1.0 treats nRNA on equal footing "
-        "with mRNA.",
     )
     adv.add_argument(
         "--cal-quality-good",

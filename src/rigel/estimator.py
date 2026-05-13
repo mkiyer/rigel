@@ -197,7 +197,7 @@ class AbundanceEstimator:
         self._gdna_em_total = 0.0
 
         # Per-locus results (locus_id, ref, n_transcripts, n_genes,
-        # n_em_fragments, mrna, gdna, alpha_gdna, alpha_rna).
+        # n_em_fragments, mrna, gdna, gdna_prior_count).
         self.locus_results: list[dict] = []
 
         # Per-transcript locus_id assignment (-1 = no locus).
@@ -255,8 +255,7 @@ class AbundanceEstimator:
         self,
         partition_tuples: list,
         locus_transcript_indices: list,
-        alpha_gdna: np.ndarray,
-        alpha_rna: np.ndarray,
+        gdna_prior_count: np.ndarray,
         index,
         *,
         enable_gdna: np.ndarray | None = None,
@@ -264,7 +263,6 @@ class AbundanceEstimator:
         em_convergence_delta: float = 1e-6,
         emit_locus_stats: bool = False,
         emit_assignments: bool = False,
-        locus_prior_weight_rna: list | None = None,
     ) -> tuple[float, np.ndarray, np.ndarray, ...]:
         """Run locus-level EM from pre-partitioned data.
 
@@ -274,15 +272,13 @@ class AbundanceEstimator:
             List of 9-tuples, one per locus, containing partition arrays.
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
-        alpha_gdna : np.ndarray
+        gdna_prior_count : np.ndarray
             float64 — calibration gDNA prior per locus (physical counts).
-        alpha_rna : np.ndarray
-            float64 — calibration RNA prior per locus (physical counts).
         index : TranscriptIndex
             Reference index.
         enable_gdna : np.ndarray, optional
             uint8 array of length ``n_loci``: 1 = gDNA component eligible,
-            0 = disabled. Decoupled from ``alpha_gdna`` per the Bayesian
+            0 = disabled. Decoupled from ``gdna_prior_count`` per the Bayesian
             prior redesign (Phase 0). When ``None`` (default), eligibility
             is computed per locus as "any unspliced unit carries a finite
             gDNA log-likelihood" — the same condition the C++ extractor
@@ -339,8 +335,7 @@ class AbundanceEstimator:
             _batch_locus_em_partitioned(
                 partition_tuples,
                 locus_transcript_indices,
-                np.ascontiguousarray(alpha_gdna, dtype=np.float64),
-                np.ascontiguousarray(alpha_rna, dtype=np.float64),
+                np.ascontiguousarray(gdna_prior_count, dtype=np.float64),
                 enable_gdna,
                 self.unambig_counts,
                 t_eff_lens,
@@ -359,7 +354,6 @@ class AbundanceEstimator:
                 self.em_config.n_threads,
                 emit_locus_stats,
                 emit_assignments,
-                locus_prior_weight_rna,
             )
         )
 
@@ -712,7 +706,7 @@ class AbundanceEstimator:
         total : float, mrna + nrna + gdna
         gdna_rate : float, gdna / total
         gdna_prior : float
-            Bayesian-prior redesign (Phase 3) semantics: ``alpha_gdna /
+            Bayesian-prior redesign semantics: ``gdna_prior_count /
             max(n_em_fragments, 1)`` — the *rate* of expected gDNA
             pseudocount per ambiguous EM fragment in the locus. This is
             a nonnegative rate (NOT bounded ≤ 1); a value of 0 means
@@ -736,8 +730,7 @@ class AbundanceEstimator:
             "total",
             "gdna_rate",
             "gdna_prior",
-            "alpha_gdna",
-            "alpha_rna",
+            "gdna_prior_count",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -786,19 +779,14 @@ class AbundanceEstimator:
             gdna = float(r["gdna"])
             total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
-            # Bayesian-prior redesign Phase 3 semantics: ``gdna_prior``
+            # Bayesian-prior redesign semantics: ``gdna_prior``
             # is the per-EM-fragment rate of expected gDNA pseudocount
-            # (``alpha_gdna / n_em_fragments``). Under Phase 2 the
-            # canonical prior is the global-only η_g, ``alpha_rna`` is
-            # pinned at 0, and the legacy γ = α_g/(α_g+α_r) ratio
-            # collapsed to a constant 1.0 — uninformative. The new
-            # rate exposes the prior's per-fragment strength relative
-            # to the locus's actual EM evidence and is comparable
-            # across loci.
-            alpha_g = float(r.get("alpha_gdna", 0.0))
-            alpha_r = float(r.get("alpha_rna", 0.0))
+            # (``gdna_prior_count / n_em_fragments``). The rate exposes
+            # the prior's per-fragment strength relative to the locus's
+            # actual EM evidence and is comparable across loci.
+            gp_count = float(r.get("gdna_prior_count", 0.0))
             n_em = max(int(r.get("n_em_fragments", 0)), 1)
-            gdna_prior = alpha_g / n_em
+            gdna_prior = gp_count / n_em
             rows.append(
                 {
                     "locus_id": lid,
@@ -815,8 +803,7 @@ class AbundanceEstimator:
                     "total": total,
                     "gdna_rate": rate,
                     "gdna_prior": gdna_prior,
-                    "alpha_gdna": alpha_g,
-                    "alpha_rna": alpha_r,
+                    "gdna_prior_count": gp_count,
                 }
             )
         return pd.DataFrame(rows, columns=cols)

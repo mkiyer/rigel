@@ -16,9 +16,7 @@ and produces:
 * :class:`MultiLocusPrior` — aggregation across the constituent ``Locus``
   intervals of a ``MultiLocus``.
 * :class:`PriorTable` — the full table consumed by the batch EM
-  (``alpha_gdna``, ``alpha_rna``, ``prior_weight_rna``).
-
-The M5 helper :func:`build_prior_weight_rna` is preserved unchanged.
+    (``gdna_prior_count`` and ``enable_gdna``).
 """
 
 from __future__ import annotations
@@ -63,7 +61,6 @@ __all__ = [
     "enable_gdna_for_multilocus",
     "assemble_multilocus_prior",
     "assemble_priors",
-    "build_prior_weight_rna",
 ]
 
 
@@ -139,15 +136,11 @@ class LocusGdnaEstimate:
 class MultiLocusPrior:
     """Per-``MultiLocus`` prior (aggregated across its ``Locus`` intervals).
 
-    Bayesian-prior redesign Phase 1 schema:
-
     * ``gdna_prior_count`` (= :math:`\\eta_g`) is the canonical
-      asymmetric pseudocount the EM consumes through ``alpha_gdna``.
-    * ``rna_prior_count`` (= :math:`\\eta_r`) is the symmetric companion
-      and is wired to ``0`` once Phase 2 lands.
+            asymmetric pseudocount the EM consumes.
     * ``n_obs``/``n_gdna``/``n_rna``/``pi_gdna`` remain as diagnostic
       summaries of the locoregional pipeline; they do not affect the EM
-      prior beyond this transitional phase.
+            prior.
     """
 
     multi_locus_id: int
@@ -156,7 +149,6 @@ class MultiLocusPrior:
     n_rna: float
     pi_gdna: float
     gdna_prior_count: float
-    rna_prior_count: float
     per_locus: tuple[LocusGdnaEstimate, ...]
 
 
@@ -164,19 +156,14 @@ class MultiLocusPrior:
 class PriorTable:
     """The full prior table consumed by the batch EM.
 
-    ``alpha_gdna[i]`` and ``alpha_rna[i]`` correspond to
+    ``gdna_prior_count[i]`` corresponds to
     ``multi_locus_priors[i].multi_locus_id == i`` (priors are stored
     in the same order as the input ``multi_loci`` list, indexed by
     ``multi_locus_id``).
     """
 
     multi_locus_priors: tuple[MultiLocusPrior, ...]
-    alpha_gdna: np.ndarray                          # float64, (n_loci,)
-    alpha_rna: np.ndarray                           # float64, (n_loci,)
-    prior_weight_rna: list[np.ndarray]              # float32, [n_loci][n_components_i]
-    #: Bayesian-prior redesign Phase 1 canonical fields.
     gdna_prior_count: np.ndarray                    # float64, (n_loci,)
-    rna_prior_count: np.ndarray                     # float64, (n_loci,)
     #: ``uint8`` flag forwarded to the native EM as ``locus_enable_gdna``.
     enable_gdna: np.ndarray                         # uint8, (n_loci,)
 
@@ -192,83 +179,9 @@ class PriorTable:
         """
         return cls(
             multi_locus_priors=(),
-            alpha_gdna=np.empty(0, dtype=np.float64),
-            alpha_rna=np.empty(0, dtype=np.float64),
-            prior_weight_rna=[],
             gdna_prior_count=np.empty(0, dtype=np.float64),
-            rna_prior_count=np.empty(0, dtype=np.float64),
             enable_gdna=np.empty(0, dtype=np.uint8),
         )
-
-
-
-# ---------------------------------------------------------------------------
-# M5 helper: per-component nRNA-suppression weights (preserved)
-# ---------------------------------------------------------------------------
-
-def build_prior_weight_rna(
-    multi_locus: MultiLocus,
-    em_data: ScoredFragments | None = None,  # noqa: ARG001 (reserved for future use)
-    *,
-    is_synthetic: np.ndarray | None = None,
-    nrna_weight: float = 0.0,
-) -> np.ndarray:
-    """Construct the per-component RNA-prior allocation weight vector.
-
-    .. note:: **Policy lock (Bayesian-prior redesign Phase 0.5).**
-
-       ``prior_weight_rna`` is an *RNA-prior allocation weight*, not a
-       likelihood term. The native EM uses it only inside
-       ``compute_ovr_prior_and_warm_start`` to distribute a positive
-       ``alpha_rna`` budget across RNA components proportional to
-       coverage × weight. When ``alpha_rna == 0`` (the asymmetric-prior
-       default in the redesign), this allocation path collapses and
-       ``prior_weight_rna`` becomes objective-neutral by construction.
-
-       Do not migrate this weight into the E-step likelihood as a
-       backdoor way to keep nRNA suppression alive under
-       ``alpha_rna == 0`` — that would replace one heuristic prior
-       force with a heuristic likelihood force. nRNA-versus-gDNA
-       arbitration is a separate modeling problem and will be
-       addressed once the gDNA-versus-total-RNA prior foundation is
-       stable. See ``docs/bayesian_prior/bayesian_prior_plan_v3.md``
-       §5 Phase 0.5 and the corresponding test in
-       ``tests/test_prior_weight_rna_policy.py``.
-
-    Components are laid out by the EM as ``[t_0, t_1, ..., t_{n_t-1},
-    gDNA]``.  Synthetic nRNA spans live in the same ``index.t_df``
-    transcript table as real transcripts (one component each), flagged
-    by the ``is_synthetic`` boolean column.  This helper returns a
-    ``float32`` array of length ``n_t + 1`` with real-mRNA entries set
-    to ``1.0``, synthetic-nRNA entries set to ``nrna_weight``, and the
-    trailing gDNA entry set to ``1.0`` (the gDNA component is not
-    affected by ``prior_weight_rna``; the solver routes it through
-    ``alpha_gdna`` / ``gdna_idx``).
-
-    Parameters
-    ----------
-    multi_locus : MultiLocus
-    em_data : ScoredFragments, optional
-        Reserved for future per-fragment weighting.  Unused.
-    is_synthetic : np.ndarray, optional
-        Global ``index.t_df["is_synthetic"]`` boolean column.  When
-        ``None``, every component is treated as mRNA (the legacy M5
-        all-ones behavior — preserves bit-identical output for
-        callers that have not yet plumbed ``nrna_weight``).
-    nrna_weight : float
-        Per-component weight applied to synthetic-nRNA entries.
-        ``0.0`` (default) zeros out the nRNA prior contribution;
-        ``1.0`` puts nRNA on equal footing with mRNA.  Ignored when
-        ``is_synthetic`` is ``None``.
-    """
-    n_t = int(multi_locus.transcript_indices.shape[0])
-    weights = np.ones(n_t + 1, dtype=np.float32)
-    if is_synthetic is None:
-        return weights
-    t_idx = multi_locus.transcript_indices
-    synth_mask = np.asarray(is_synthetic, dtype=bool)[t_idx]
-    weights[:n_t] = np.where(synth_mask, np.float32(nrna_weight), np.float32(1.0))
-    return weights
 
 
 # ---------------------------------------------------------------------------
@@ -818,8 +731,8 @@ def enable_gdna_for_multilocus(
     A multi-locus is gDNA-eligible iff at least one of its EM units is
     *unspliced* and has a finite gDNA log-likelihood. This is the same
     condition the C++ extractor previously inferred from
-    ``alpha_gdna > 0``; under the Bayesian-prior redesign it must be
-    computed explicitly because ``alpha_gdna`` is now a pure
+    ``gdna_prior_count > 0``; under the Bayesian-prior redesign it must be
+    computed explicitly because ``gdna_prior_count`` is now a pure
     pseudocount that may legitimately be zero.
 
     Must be called **before** ``partition_and_free`` because it reads
@@ -841,13 +754,11 @@ def assemble_multilocus_prior(
     per_locus_estimates: tuple[LocusGdnaEstimate, ...],
     *,
     gdna_prior_count: float,
-    rna_prior_count: float,
 ) -> MultiLocusPrior:
     """Aggregate per-``Locus`` estimates into one ``MultiLocusPrior``.
 
-    ``gdna_prior_count`` / ``rna_prior_count`` are the canonical
-    asymmetric Dirichlet pseudocounts the EM consumes (Phase 1
-    schema).
+    ``gdna_prior_count`` is the canonical asymmetric Dirichlet
+    pseudocount the EM consumes.
     """
     n_obs = sum(e.n_obs for e in per_locus_estimates)
     n_gdna = sum(e.n_gdna for e in per_locus_estimates)
@@ -860,7 +771,6 @@ def assemble_multilocus_prior(
         n_rna=float(n_rna),
         pi_gdna=float(min(1.0, max(0.0, pi_raw))),
         gdna_prior_count=float(gdna_prior_count),
-        rna_prior_count=float(rna_prior_count),
         per_locus=per_locus_estimates,
     )
 
@@ -873,7 +783,6 @@ def assemble_priors(
     global_densities: GlobalDensityTable,
     *,
     gdna_fl: FragmentLengthModel | None = None,
-    nrna_weight: float = 0.0,
     intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
     splicing_anchor_tolerance: int = 0,
 ) -> PriorTable:
@@ -881,13 +790,12 @@ def assemble_priors(
 
     Pure-Python pass; no I/O, no mutation of inputs.
 
-    Bayesian-prior redesign Phase\u00a02 semantics:
+        Bayesian-prior redesign semantics:
 
     * The canonical prior is the *global-only* expected gDNA pseudocount
       :math:`\\eta_g(\\ell)` from
-      :func:`expected_gdna_count_global`. ``alpha_gdna`` is set to that
-      count summed across the multi-locus's constituent loci;
-      ``alpha_rna`` is fixed at ``0`` (uninformative RNA prior).
+            :func:`expected_gdna_count_global`, summed across the
+            multi-locus's constituent loci.
     * gDNA component *eligibility* is a separate ``uint8`` flag,
       :func:`enable_gdna_for_multilocus`, computed from per-unit
       ``is_spliced`` and ``gdna_log_liks`` arrays before
@@ -896,7 +804,7 @@ def assemble_priors(
     * The legacy locoregional ``estimate_locus_gdna`` is still called
       to populate the per-locus diagnostic dataframe (``pi_gdna``,
       mass decomposition, fallback flags), but its output is **not**
-      consumed by ``alpha_gdna``/``alpha_rna``.
+            consumed by the EM prior.
 
     Parameters
     ----------
@@ -904,15 +812,11 @@ def assemble_priors(
         gDNA fragment-length distribution used for the FL-PMF-weighted
         containment effective length. Defaults to
         ``global_densities.gdna_fl``.
-    nrna_weight : float
-        Per-component weight applied to synthetic-nRNA transcripts in
-        each ``MultiLocus``.  See :func:`build_prior_weight_rna`.
     intergenic_flank_bp : int
         Padding (bp) added on both sides of each locus when querying
         regions for the *intergenic* density's evidence window in the
-        diagnostic ``estimate_locus_gdna`` pass. The Phase\u00a02 prior
-        itself is unflanked; flank-based priors arrive in Phase\u00a04
-        as ``gdna_prior_source = "independent_flank"``.
+        diagnostic ``estimate_locus_gdna`` pass. The production EM prior
+        itself is unflanked and global-density based.
     """
     if gdna_fl is None:
         gdna_fl = global_densities.gdna_fl
@@ -951,19 +855,10 @@ def assemble_priors(
     )
     t_ref = cat_to_ref_id[t_ref_codes]
 
-    if "is_synthetic" in index.t_df.columns:
-        is_synthetic_arr = index.t_df["is_synthetic"].to_numpy(dtype=bool)
-    else:
-        is_synthetic_arr = None
-
     n_ml = len(multi_loci)
-    alpha_gdna = np.zeros(n_ml, dtype=np.float64)
-    alpha_rna = np.zeros(n_ml, dtype=np.float64)
     gdna_prior_count_arr = np.zeros(n_ml, dtype=np.float64)
-    rna_prior_count_arr = np.zeros(n_ml, dtype=np.float64)
     enable_gdna_arr = np.zeros(n_ml, dtype=np.uint8)
     multi_locus_priors: list[MultiLocusPrior | None] = [None] * n_ml
-    prior_weight_rna: list[np.ndarray | None] = [None] * n_ml
 
     for ml in multi_loci:
         idx = int(ml.multi_locus_id)
@@ -1036,26 +931,15 @@ def assemble_priors(
                 for loc, scratch in zip(ml.loci, loci_scratch, strict=True)
             )
         )
-        eta_r = 0.0
 
         ml_prior = assemble_multilocus_prior(
             ml, per_locus_est,
             gdna_prior_count=eta_g,
-            rna_prior_count=eta_r,
         )
         multi_locus_priors[idx] = ml_prior
         gdna_prior_count_arr[idx] = eta_g
-        rna_prior_count_arr[idx] = eta_r
-        alpha_gdna[idx] = eta_g
-        alpha_rna[idx] = eta_r
         enable_gdna_arr[idx] = np.uint8(
             1 if enable_gdna_for_multilocus(ml, em_data) else 0
-        )
-        prior_weight_rna[idx] = build_prior_weight_rna(
-            ml,
-            em_data,
-            is_synthetic=is_synthetic_arr,
-            nrna_weight=nrna_weight,
         )
 
     if any(p is None for p in multi_locus_priors):
@@ -1067,10 +951,6 @@ def assemble_priors(
 
     return PriorTable(
         multi_locus_priors=tuple(multi_locus_priors),  # type: ignore[arg-type]
-        alpha_gdna=alpha_gdna,
-        alpha_rna=alpha_rna,
-        prior_weight_rna=prior_weight_rna,  # type: ignore[arg-type]
         gdna_prior_count=gdna_prior_count_arr,
-        rna_prior_count=rna_prior_count_arr,
         enable_gdna=enable_gdna_arr,
     )

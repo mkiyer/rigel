@@ -71,7 +71,7 @@ def summarize_loci(cond: str) -> dict[str, float]:
     n_rna = float(condition_meta["n_rna"])
     true_genic_gdna_proxy = max(genic_fragments - n_rna, 0.0)
 
-    alpha = float(loci["alpha_gdna"].sum())
+    alpha = float(loci["gdna_prior_count"].sum())
     gdna = float(loci["gdna"].sum())
     nrna = float(loci["nrna"].sum())
     mrna = float(loci["mrna"].sum())
@@ -230,14 +230,16 @@ def print_bam_comparison(cond: str) -> None:
     ]:
         if col not in merged:
             merged[col] = 0
-    merged["em_minus_alpha"] = merged["gdna"] - merged["alpha_gdna"]
-    merged["oracle_locus_minus_alpha"] = merged["true_gdna_with_locus"] - merged["alpha_gdna"]
-    merged["alpha_rate"] = merged["alpha_gdna"] / merged["n_em_fragments"].clip(lower=1)
+    merged["em_minus_alpha"] = merged["gdna"] - merged["gdna_prior_count"]
+    merged["oracle_locus_minus_alpha"] = (
+        merged["true_gdna_with_locus"] - merged["gdna_prior_count"]
+    )
+    merged["alpha_rate"] = merged["gdna_prior_count"] / merged["n_em_fragments"].clip(lower=1)
 
     print("\n=== Sums merged by locus ===")
     print("  Note: true_gdna_with_locus uses ZL tags; gDNA-assigned reads generally carry ZL=-1.")
     sum_cols = [
-        "alpha_gdna",
+        "gdna_prior_count",
         "gdna",
         "nrna",
         "n_em_fragments",
@@ -254,7 +256,7 @@ def print_bam_comparison(cond: str) -> None:
         "locus_id",
         "n_transcripts",
         "n_em_fragments",
-        "alpha_gdna",
+        "gdna_prior_count",
         "gdna",
         "nrna",
         "mrna",

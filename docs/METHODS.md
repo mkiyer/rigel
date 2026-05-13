@@ -428,28 +428,26 @@ emitted into `summary.json.calibration.global_densities`.
 ### 10.5 Per-MultiLocus priors
 
 For every MultiLocus (a connected component of mappable
-transcripts), calibration assembles a Dirichlet prior with two
-hyper-parameters:
+transcripts), calibration assembles one asymmetric gDNA prior count:
 
 $$
-(\alpha_{\text{gdna}},\; \alpha_{\text{rna}}) \;\propto\; (\hat{\lambda}_{\text{intergenic}} \cdot \tilde L_{\text{gdna}}^\text{loc},\; \hat{n}_{\text{rna}}^\text{loc})
+\eta_g(\ell) = \sum_{r \in \ell} \hat{\rho}_{g,r} \cdot \tilde L_{g,r}
 $$
 
-renormalised so that $\alpha_{\text{gdna}} + \alpha_{\text{rna}} =
-c_{\text{base}}$ (default 10).  These are then split across the
-$n_t$ transcript components by the locus-level transcript geometry:
-each component receives a per-locus `prior_weight_rna` and (when
-`--cal-nrna-weight > 0`) a matching nRNA prior weight.  The EM
-solver consumes `prior_weight_rna_per_locus` directly and treats
-$\alpha_{\text{gdna}}$ as a regularising prior on the gDNA component.
+The EM consumes this value as `gdna_prior_count` on the locus-level gDNA
+component. RNA components have no calibration-derived prior budget: MAP
+uses zero RNA prior mass and VBEM uses its Jeffreys baseline for numerical
+stability. gDNA component eligibility is a separate per-locus flag computed
+from whether any unspliced fragment in the locus has a finite gDNA
+likelihood.
 
 ### 10.6 Knobs and reporting
 
-CLI flags: `--cal-prior-ess`, `--cal-nrna-weight`, `--cal-c-base`,
-`--cal-quality-good`, `--cal-quality-weak` — see [parameters.md](parameters.md).
+CLI flags: `--cal-prior-ess`, `--cal-quality-good`, `--cal-quality-weak` —
+see [parameters.md](parameters.md).
 
 Reporting: `summary.json.calibration` contains `global_densities`,
-`fl_models`, `diagnostics`, `n_multi_loci`, `c_base`, `mean_pi_gdna`.
+`fl_models`, `diagnostics`, `n_multi_loci`, and `mean_pi_gdna`.
 See [MANUAL.md §Calibration](MANUAL.md#calibration) for a worked
 description of each key.
 

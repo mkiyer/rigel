@@ -37,7 +37,7 @@ from rigel.splice import SpliceType
 
 EXPECTED_MULTI_LOCUS_COLUMNS = [
     "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
-    "gdna_prior_count", "rna_prior_count",
+    "gdna_prior_count",
 ]
 EXPECTED_PER_LOCUS_COLUMNS = [
     "multi_locus_id", "ref", "start", "end", "span",
@@ -148,21 +148,16 @@ def _mlp(mid: int, ests: tuple[LocusGdnaEstimate, ...]) -> MultiLocusPrior:
         n_rna=max(0.0, n_obs - n_gdna),
         pi_gdna=pi,
         gdna_prior_count=pi * 10.0,
-        rna_prior_count=(1.0 - pi) * 10.0,
         per_locus=ests,
     )
 
 
 def _prior_table(mlps: tuple[MultiLocusPrior, ...]) -> PriorTable:
     n = len(mlps)
-    pi_arr = np.array([m.pi_gdna for m in mlps], dtype=np.float64)
+    gp_arr = np.array([m.gdna_prior_count for m in mlps], dtype=np.float64)
     return PriorTable(
         multi_locus_priors=mlps,
-        alpha_gdna=pi_arr * 10.0,
-        alpha_rna=(1.0 - pi_arr) * 10.0,
-        prior_weight_rna=[np.ones(2, dtype=np.float32) for _ in range(n)],
-        gdna_prior_count=pi_arr * 10.0,
-        rna_prior_count=(1.0 - pi_arr) * 10.0,
+        gdna_prior_count=gp_arr,
         enable_gdna=np.ones(n, dtype=np.uint8),
     )
 
@@ -204,9 +199,7 @@ def test_convenience_accessors_alias_underlying_objects():
         payload=_payload(), scan_trained=_scan_trained(),
         global_densities=_gdt(), prior_table=pt,
     )
-    assert res.alpha_gdna is pt.alpha_gdna
-    assert res.alpha_rna is pt.alpha_rna
-    assert res.prior_weight_rna is pt.prior_weight_rna
+    assert res.gdna_prior_count is pt.gdna_prior_count
     assert res.global_fl_mean == res.fl_models.global_.mean
     assert res.rna_fl_mean == res.fl_models.rna.mean
     assert res.gdna_fl_mean == res.fl_models.gdna.mean

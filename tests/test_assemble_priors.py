@@ -206,14 +206,13 @@ def test_assemble_multilocus_prior_single_locus_matches_estimate():
     est = _make_estimate(locus, n_obs=10, n_gdna_intergenic=3.0)
     ml = _ml_single(0, [0], [10], locus)
     mlp = assemble_multilocus_prior(
-        ml, (est,), gdna_prior_count=3.0, rna_prior_count=7.0,
+        ml, (est,), gdna_prior_count=3.0,
     )
     assert mlp.n_obs == 10
     assert mlp.n_gdna == pytest.approx(3.0)
     assert mlp.n_rna == pytest.approx(7.0)
     assert mlp.pi_gdna == pytest.approx(0.3)
     assert mlp.gdna_prior_count == pytest.approx(3.0)
-    assert mlp.rna_prior_count == pytest.approx(7.0)
     assert mlp.per_locus == (est,)
 
 
@@ -229,7 +228,7 @@ def test_assemble_multilocus_prior_two_locus_aggregates():
         gdna_span=1000, loci=(loc0, loc1),
     )
     mlp = assemble_multilocus_prior(
-        ml, (est0, est1), gdna_prior_count=6.0, rna_prior_count=14.0,
+        ml, (est0, est1), gdna_prior_count=6.0,
     )
     assert mlp.n_obs == 20
     assert mlp.n_gdna == pytest.approx(6.0)
@@ -241,7 +240,7 @@ def test_assemble_priors_global_only_zero_density():
 
     The diagnostic ``pi_gdna`` is still populated from the legacy
     locoregional path for the per-locus dataframe, but it is no longer
-    consumed by alpha_gdna / alpha_rna.
+    consumed by the EM prior.
     """
     index = _fake_index(
         region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
@@ -261,12 +260,8 @@ def test_assemble_priors_global_only_zero_density():
     assert isinstance(pt, PriorTable)
     # Diagnostic pi_gdna still computed from the legacy locoregional path.
     assert pt.multi_locus_priors[0].pi_gdna == pytest.approx(0.5)
-    # Phase 2 canonical prior: rho == 0 everywhere => eta_g == 0;
-    # alpha_rna pinned at 0.
-    assert pt.alpha_gdna[0] == pytest.approx(0.0)
-    assert pt.alpha_rna[0] == pytest.approx(0.0)
+    # Canonical prior: rho == 0 everywhere => eta_g == 0.
     assert pt.gdna_prior_count[0] == pytest.approx(0.0)
-    assert pt.rna_prior_count[0] == pytest.approx(0.0)
     # Eligibility decoupled from prior strength: every unit is unspliced
     # with finite gdna_log_lik in the fixture, so enable_gdna == 1
     # even though eta_g == 0.
@@ -274,7 +269,7 @@ def test_assemble_priors_global_only_zero_density():
 
 
 def test_assemble_priors_global_only_positive_density():
-    """alpha_rna is pinned at 0 even when global gDNA density is positive."""
+    """gDNA prior count is positive when global gDNA density is positive."""
     index = _fake_index(
         region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
         transcripts=[("chr1", 100, 800)],
@@ -303,29 +298,4 @@ def test_assemble_priors_global_only_positive_density():
         payload=payload, global_densities=gdt,
     )
     # eta_g must be strictly positive: rho_ig > 0 and L_ig > 0.
-    assert pt.alpha_gdna[0] > 0.0
-    # alpha_rna pinned at 0.
-    assert pt.alpha_rna[0] == pytest.approx(0.0)
-    assert pt.rna_prior_count[0] == pytest.approx(0.0)
-
-
-def test_assemble_priors_prior_weight_rna_shape():
-    index = _fake_index(
-        region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
-        transcripts=[("chr1", 100, 800), ("chr1", 200, 900)],
-    )
-    payload = _make_payload(n_regions=1, counts_intergenic=[0])
-    locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
-    ml = _ml_single(0, [0, 1], [0], locus)
-    em = _make_em(np.array([0], dtype=np.int32))
-    pt = assemble_priors(
-        multi_loci=[ml], em_data=em, index=index,
-        payload=payload, global_densities=_gdt_zero(),
-    )
-    pwr = pt.prior_weight_rna
-    assert isinstance(pwr, list)
-    assert len(pwr) == 1
-    # n_t = 2 ⇒ length = 3 (2 transcripts + 1 gDNA).
-    assert pwr[0].shape == (3,)
-    assert pwr[0].dtype == np.float32
-    assert np.all(pwr[0] == 1.0)
+    assert pt.gdna_prior_count[0] > 0.0

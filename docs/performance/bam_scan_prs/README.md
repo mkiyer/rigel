@@ -1,101 +1,99 @@
-# BAM Scan Performance PR Roadmap
+# BAM Scan Performance PR Roadmap (revised)
 
 Date: 2026-05-13
 
-Scope: Convert the VCAP `scan_and_buffer` profiling results into a sequence of
-reviewable performance and memory pull requests.
+This is a rewrite of the original 7-PR roadmap. The original measurements
+are sound, but the order and shape of the PRs needed restructuring:
 
-Workload used for evidence:
+* The s4 → s8 → s12 thread sweep (135.7 s → 204.2 s → 226.9 s) shows that
+  scanning gets *slower* with more workers. Until the queue pathology is
+  fixed, every other measurement is contaminated.
+* Async spill is engineering complexity to work around a buffer that
+  shouldn't exist on the hot path. The right fix is to stream chunks
+  directly from scan to score and demote spill to a back-pressure
+  safety valve.
+* The original PR-03 wraps STL primitives in rigel-specific helpers
+  (`sort_unique`, `intersect_sorted_into`, …). Use STL directly.
+* The original PR-07 forks `build_fragment` into a fast/slow path. That
+  doubles the test surface and creates drift risk. Wait for the resolver
+  scratch-vector pattern to land, then apply the same pattern in place.
 
-- BAM: `/Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam`
-- Index: `/Users/mkiyer/Downloads/rigel_runs/refs/rigel_index`
-- Size: 66.1M BAM records, 31.99M read names, 32.46M buffered fragments
-- Platform: macOS arm64, Apple Silicon M3-class machine
-- Build for native stacks: `RelWithDebInfo`, `RIGEL_PROFILE_NATIVE=ON`
+Workload used for evidence (unchanged from the original roadmap):
+
+* BAM: `/Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam`
+* Index: `/Users/mkiyer/Downloads/rigel_runs/refs/rigel_index`
+* 66.1M BAM records, 31.99M read names, 32.46M buffered fragments
+* macOS arm64, Apple Silicon M3-class machine
+* Native build: `RelWithDebInfo`, `RIGEL_PROFILE_NATIVE=ON`
 
 ## Polars Migration Assessment
 
-Polars is a strong dataframe engine, and it is often much faster than pandas for
-large table transforms. For this specific bottleneck, a broad migration from
-pandas and pyarrow to Polars is not expected to be a major performance win.
+Unchanged from the original roadmap. Polars is not the right tool for
+this bottleneck — the hot frames are native C++ scanning, queue
+synchronisation, htslib tag/CIGAR parsing, resolver allocation, and
+synchronous spill. None of these are pandas-bound. Keep Polars as a
+targeted experiment for offline analysis only.
 
-Reasons:
-
-1. The dominant stage is native C++ BAM scanning, not pandas dataframe work.
-   The hot frames are `BamScanner::process_qname_group_threaded`,
-   `FragmentResolver::_resolve_core`, htslib tag/CIGAR parsing, queue
-   synchronization, and temporary Arrow spill writes.
-2. The scan spill path is not pandas-based. It converts NumPy arrays and Arrow
-   list arrays to Feather/IPC via pyarrow. Polars is Arrow-backed and can read
-   and write IPC/Feather, but it would still serialize the same columnar data and
-   still pay compression/I/O cost unless we change the dataflow.
-3. The measured spill problem is synchronous serialization on the scanner's
-   Python callback path. Replacing `pyarrow.feather.write_feather` with a Polars
-   write does not address the core issue: the scanner is blocked while temporary
-   chunk storage is written.
-4. Several Python bottlenecks in older profiles are NumPy-loop or algorithmic
-   issues, not dataframe expression issues. These should be handled with NumPy,
-   C++, or more direct columnar algorithms.
-
-Recommended stance:
-
-- Do not start with a broad Polars migration for performance.
-- Keep Polars as a targeted experiment for offline benchmark/report analysis or
-  isolated dataframe-heavy preprocessing if a profile shows pandas as the hot
-  path.
-- For BAM scan performance, focus on removing synchronous spill, reducing queue
-  operations, and cutting resolver allocation churn.
-
-## Key Measurements
+## Key Measurements (baseline before any of the new PRs)
 
 | Run | Wall time | Read names/s | Spills | Peak RSS |
 |---|---:|---:|---:|---:|
 | s8 d4, 4GiB spill baseline | 226.6s | 141k | 14 | 9.2GB |
 | s8 d2, 4GiB spill | 200.9s | 159k | 14 | 9.3GB |
 | s8 d8, 4GiB spill | 198.7s | 161k | 14 | 9.4GB |
-| s4 d2, 12GiB no-spill | 135.7s | 236k | 0 | 10.6GB |
+| s4 d2, 12GiB no-spill | **135.7s** | **236k** | 0 | 10.6GB |
 | s8 d2, 12GiB no-spill | 204.2s | 157k | 0 | 11.1GB |
 | s12 d2, 12GiB no-spill | 226.9s | 141k | 0 | 11.5GB |
 
-Interpretation:
+**Three things stand out, and all four PRs below are designed to attack
+exactly one of them each:**
 
-- Spilling is a wall-time-class bottleneck.
-- More htslib decompression threads are not the main lever on this workload.
-- More scan workers currently make the scanner slower once spill is removed,
-  because per-read-name queue synchronization dominates.
-- Resolver work remains CPU-heavy and allocation-heavy in every sample.
+1. **Negative scan-thread scaling.** s8 is 50% slower than s4 at
+   no-spill. Cause: per-read-name queue traffic. → PR 01.
+2. **Allocator churn in the resolver.** Live samples show
+   `unordered_set` / `unordered_map` allocation dominating
+   `_resolve_core`. → PR 02.
+3. **Synchronous Arrow/LZ4 spill blocks the scan callback.** Spill costs
+   ≈ 65 s on the 4 GiB / s8 run. → PR 04.
 
-## Proposed PR Series
+A pile of small per-record inefficiencies (lazy SJ strand parsing,
+duplicated `ambig_strand` computation, FL hash map) accounts for a few
+percent each and ships together as one cosmetic-grade PR. → PR 03.
 
-The PRs below are intended to be developed independently over several turns.
-Each plan includes implementation scope, tests, benchmarks, acceptance criteria,
-and known risks.
+## Revised PR Series
 
-| PR | Title | Main target |
-|---:|---|---|
-| 01 | [Remove synchronous scan spill](pr01_async_spill_and_streaming.md) | Recover wall time lost to Arrow/LZ4 spill blocking the scan callback |
-| 02 | [Batch qname queue work](pr02_batch_qname_queue.md) | Reduce queue mutex/condition-variable traffic and make parallelism useful |
-| 03 | [Rewrite resolver set logic with scratch vectors](pr03_resolver_scratch_vectors.md) | Remove hot `unordered_set`/`unordered_map` allocation churn in `_resolve_core` |
-| 04 | [Use t-aligned fragment-length vectors](pr04_t_aligned_frag_lengths.md) | Remove `compute_frag_lengths` hash-map allocation and lookup |
-| 05 | [Parse SJ strand tags lazily](pr05_lazy_sj_strand_tags.md) | Avoid expensive `bam_aux_get`/aux scanning for unspliced records |
-| 06 | [Store `ambig_strand` in the accumulator](pr06_accumulator_ambig_strand.md) | Remove redundant candidate scans during chunk finalization |
-| 07 | [Add a common-case fragment assembly fast path](pr07_fragment_assembly_fast_path.md) | Avoid maps/sets for ordinary paired-end fragments |
+| Order | PR | Doc | Status |
+|---:|---|---|---|
+| 01 | Batch qname queue work | [pr01_batch_qname_queue.md](pr01_batch_qname_queue.md) | **must land first** — gates downstream measurements |
+| 02 | Resolver scratch vectors | [pr02_resolver_scratch_vectors.md](pr02_resolver_scratch_vectors.md) | broad rewrite, low risk after PR 01 lands |
+| 03 | Small-wins resolver hygiene | [pr03_smallwins_resolver_hygiene.md](pr03_smallwins_resolver_hygiene.md) | three independent micro-cleanups, can land any time |
+| 04 | Streaming scan→score handoff | [pr04_streaming_scan_to_score.md](pr04_streaming_scan_to_score.md) | structural, lands after PR 01–03 stabilise the inner loop |
+| — | Fragment assembly allocator cleanup (deferred) | [pr_deferred_fragment_assembly.md](pr_deferred_fragment_assembly.md) | revisit only if `build_fragment` is still hot after PR 02 |
 
-Suggested implementation order:
+### Why this order
 
-1. PR 06, PR 05, and PR 04 are local, low-risk changes with focused tests.
-2. PR 01 attacks the largest measured wall-time issue and may affect memory
-   behavior, so it should land early but after the easiest invariants are fixed.
-3. PR 02 should follow PR 01 so queue scaling is measured without spill noise.
-4. PR 07 can land before or after PR 02; it is a common-case speed path with a
-   fallback to current behavior.
-5. PR 03 is the broadest native rewrite and should be developed after the
-   smaller changes establish clean regression and benchmark baselines.
+* **PR 01 first.** Every wall-time number on the table above is a function
+  of how queue traffic interacts with the rest of the pipeline. The
+  s4→s8 regression is a 50% scaling cliff; if we leave it in place, every
+  PR that ships after will be measured against a baseline that lies. PR
+  01 is also small (one file change, one new struct).
+* **PR 02 second.** Once queues are not the bottleneck, the resolver is.
+  PR 02 is a focused C++ rewrite of one function with a clear acceptance
+  criterion (no behavior change). Land it before structural changes so
+  the streaming PR (04) doesn't carry resolver risk.
+* **PR 03 anytime.** Three independent micro-changes packaged as one
+  reviewable PR because each is too small to justify its own. Tests are
+  per-change.
+* **PR 04 last.** Streaming touches the public `FragmentBuffer` shape
+  and the scan↔score boundary. Land it on top of a clean inner loop so
+  any wall-time regression is unambiguously attributable to the
+  streaming change.
 
 ## Shared Validation Protocol
 
-Every PR should preserve transcript-level semantics and exact fragment routing
-unless the PR explicitly documents an intentional representation-only change.
+Every PR must preserve transcript-level semantics and exact fragment
+routing unless it explicitly documents an intentional representation-only
+change.
 
 Minimum tests for native scanner changes:
 
@@ -115,14 +113,17 @@ python scripts/profiling/scan_profile.py \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_pr_check \
   --name-prefix pr_check \
-  --n-scan-threads 4 \
+  --n-scan-threads 4 8 12 \
   --n-decomp-threads 2 \
   --chunk-size 1000000 \
   --max-memory-gib 12
 ```
 
-Primary benchmark comparison points:
+The thread sweep is mandatory. Single-thread-count benchmarks hide
+scaling regressions like the one PR 01 fixes.
 
-- `nospill_s4_d2`: 135.7s, 235.6k read names/s, 10.6GB peak RSS
-- `spill_s8_d2`: 200.9s, 159.2k read names/s, 9.3GB peak RSS, 14 spills
-- `nospill_s8_d2`: 204.2s, 156.7k read names/s, 11.1GB peak RSS
+## Baseline comparison points
+
+* `nospill_s4_d2`: 135.7s, 235.6k read names/s, 10.6GB peak RSS
+* `spill_s8_d2`: 200.9s, 159.2k read names/s, 9.3GB peak RSS, 14 spills
+* `nospill_s8_d2`: 204.2s, 156.7k read names/s, 11.1GB peak RSS

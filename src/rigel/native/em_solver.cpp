@@ -737,17 +737,15 @@ static void vbem_step(
 }
 
 // ================================================================
-// Coverage-weighted warm start + unified OVR prior
+// Coverage-weighted warm start + gDNA-only asymmetric prior
 // ================================================================
 
-static void compute_ovr_prior_and_warm_start(
+static void compute_gdna_prior_and_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
     const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
-    double        alpha_gdna,        // calibration gDNA prior (physical count)
-    double        alpha_rna,         // calibration RNA prior (physical count)
+    double        gdna_prior_count,  // calibration gDNA prior (physical count)
     int           gdna_idx,          // index of gDNA component (-1 if none)
-    const float*  prior_weight_rna, // [n_components] per-RNA-component weight; nullptr ⇒ all ones
     double*       prior_out,       // [n_components] output
     double*       theta_init_out,  // [n_components] output
     int           n_components,
@@ -755,9 +753,6 @@ static void compute_ovr_prior_and_warm_start(
 {
     // Initialize theta_init from unambig_totals
     std::copy(unambig_totals, unambig_totals + n_components, theta_init_out);
-
-    // Accumulate coverage totals from all equivalence classes
-    std::vector<double> coverage_totals(static_cast<size_t>(n_components), 0.0);
 
     for (const auto& ec : ec_data) {
         const int n = ec.n;
@@ -778,72 +773,21 @@ static void compute_ovr_prior_and_warm_start(
             for (int j = 0; j < k; ++j) {
                 double share = (wt[i * k + j] * eligible[cidx[j]]) * inv_row_sum;
                 theta_init_out[cidx[j]] += share;
-                coverage_totals[cidx[j]] += share;
             }
         }
     }
 
-    // --- Unified OVR prior: calibration-derived distribution ---
-
-    // Compute total RNA coverage (excluding gDNA and ineligible),
-    // weighted by per-component prior_weight_rna (nullptr ⇒ all ones).
-    double total_rna_coverage = 0.0;
-    int n_rna_eligible = 0;
-    for (int i = 0; i < n_components; ++i) {
-        if (eligible[i] > 0.0 && i != gdna_idx) {
-            const double w = prior_weight_rna
-                ? static_cast<double>(prior_weight_rna[i]) : 1.0;
-            total_rna_coverage += w * coverage_totals[i];
-            ++n_rna_eligible;
-        }
-    }
-
-    // Mode-aware baseline: VBEM needs +0.5 (Jeffreys) to cancel
-    // digamma sparsification bias; MAP has no bias, needs 0.0.
+    // Mode-aware baseline: VBEM uses Jeffreys; MAP has no modeled RNA prior.
     const double baseline = use_vbem ? 0.5 : 0.0;
 
     for (int i = 0; i < n_components; ++i) {
         if (eligible[i] <= 0.0) {
             prior_out[i] = 0.0;
         } else if (i == gdna_idx) {
-            prior_out[i] = baseline + std::max(alpha_gdna, EM_LOG_EPSILON);
-        } else if (total_rna_coverage > 0.0) {
-            const double w = prior_weight_rna
-                ? static_cast<double>(prior_weight_rna[i]) : 1.0;
-            prior_out[i] = baseline + std::max(
-                alpha_rna * w * coverage_totals[i] / total_rna_coverage,
-                EM_LOG_EPSILON);
-        } else if (n_rna_eligible > 0) {
-            // No coverage data — distribute uniformly
-            prior_out[i] = baseline + std::max(alpha_rna / n_rna_eligible,
-                                    EM_LOG_EPSILON);
+            prior_out[i] = baseline + std::max(gdna_prior_count, EM_LOG_EPSILON);
         } else {
             prior_out[i] = baseline;
         }
-    }
-
-    // --- gDNA warm-start override ---
-    //
-    // Only fire the (alpha_gdna / alpha_rna) ratio override when both
-    // priors carry positive mass; otherwise the ratio is undefined or
-    // would clobber the coverage-derived warm start with a bare
-    // pseudocount value. With ``alpha_rna == 0`` (the asymmetric-prior
-    // default in the Bayesian redesign), the coverage-derived warm start
-    // is the least biased initialization for the gDNA component.
-    if (gdna_idx >= 0 && gdna_idx < n_components
-        && eligible[gdna_idx] > 0.0
-        && alpha_gdna > 0.0 && alpha_rna > 0.0)
-    {
-        double total_theta = 0.0;
-        for (int i = 0; i < n_components; ++i)
-            total_theta += theta_init_out[i];
-
-        double others = total_theta - theta_init_out[gdna_idx];
-        if (others > 0.0) {
-            theta_init_out[gdna_idx] =
-                (alpha_gdna / alpha_rna) * others;
-        }
-        // else: keep coverage-derived warm start.
     }
 }
 
@@ -1065,169 +1009,6 @@ static EMResult run_squarem(
 
     return { std::move(theta), std::move(alpha_out), std::move(em_totals),
              completed_iterations };
-}
-
-// ================================================================
-// Top-level entry point: run_locus_em_native()
-// ================================================================
-//
-// Takes CSR per-locus data + config, returns (theta, alpha, em_totals).
-// Replaces the entire body of AbundanceEstimator.run_locus_em() from
-// component normalization through EM convergence.
-
-static std::tuple<nb::ndarray<nb::numpy, double, nb::ndim<1>>,
-                  nb::ndarray<nb::numpy, double, nb::ndim<1>>,
-                  nb::ndarray<nb::numpy, double, nb::ndim<1>>>
-run_locus_em_native(
-    // CSR data
-    i64_1d offsets,
-    i32_1d t_indices,
-    f64_1d_mut log_liks,        // per-candidate log-likelihoods
-    f64_1d coverage_wts,
-    // Per-component vectors
-    f64_1d unambig_totals_arr,
-    f64_1d effective_lens,
-    f64_1d prior_eligible,
-    // Scalar config
-    int    n_components,
-    double alpha_rna,
-    int    max_iterations,
-    double convergence_delta,
-    bool   use_vbem,
-    // Transcript count for prior warm-start
-    int    n_transcripts,
-    // Optional per-component RNA prior weight (None ⇒ all ones)
-    nb::object prior_weight_rna)
-{
-    size_t nc = static_cast<size_t>(n_components);
-    size_t n_candidates = t_indices.shape(0);
-    int n_units = static_cast<int>(offsets.shape(0)) - 1;
-
-    // Get raw pointers
-    const int64_t*  off_ptr  = offsets.data();
-    const int32_t*  ti_ptr   = t_indices.data();
-    double*         ll_ptr   = log_liks.data();
-    const double*   cw_ptr   = coverage_wts.data();
-    const double*   ut_ptr   = unambig_totals_arr.data();
-    const double*   el_ptr   = effective_lens.data();
-    const double*   pe_ptr   = prior_eligible.data();
-
-    // Copy unambig_totals (we need a mutable copy)
-    std::vector<double> unambig_totals(ut_ptr, ut_ptr + nc);
-
-    // 1. (No per-fragment bias correction.)  The EM uses
-    //    per-component log L̃_t (passed via ``effective_lens``)
-    //    inside the E-step.  This path is used only by tests /
-    //    legacy callers and does not append a gDNA component.
-
-    // 2. Handle empty locus
-    if (n_units == 0 || n_candidates == 0) {
-        // Count eligible components for uniform distribution
-        int n_eligible = 0;
-        for (size_t i = 0; i < nc; ++i) {
-            if (pe_ptr[i] > 0.0) ++n_eligible;
-        }
-        double uniform_alpha = (n_eligible > 0)
-            ? std::max(alpha_rna / n_eligible, EM_LOG_EPSILON)
-            : EM_LOG_EPSILON;
-
-        std::vector<double> alpha(nc);
-        double total = 0.0;
-        for (size_t i = 0; i < nc; ++i) {
-            double p = (pe_ptr[i] > 0.0) ? uniform_alpha : 0.0;
-            alpha[i] = unambig_totals[i] + p;
-            total += alpha[i];
-        }
-        std::vector<double> theta(nc);
-        if (total > 0.0) {
-            double inv = 1.0 / total;
-            for (size_t i = 0; i < nc; ++i) theta[i] = alpha[i] * inv;
-        } else {
-            std::copy(alpha.begin(), alpha.end(), theta.begin());
-        }
-        std::vector<double> em_totals(nc, 0.0);
-
-        auto* theta_data = new double[nc];
-        auto* alpha_data = new double[nc];
-        auto* em_data    = new double[nc];
-        std::copy(theta.begin(), theta.end(), theta_data);
-        std::copy(alpha.begin(), alpha.end(), alpha_data);
-        std::copy(em_totals.begin(), em_totals.end(), em_data);
-
-        size_t shape[1] = { nc };
-        nb::capsule theta_owner(theta_data, [](void* p) noexcept { delete[] static_cast<double*>(p); });
-        nb::capsule alpha_owner(alpha_data, [](void* p) noexcept { delete[] static_cast<double*>(p); });
-        nb::capsule em_owner(em_data,       [](void* p) noexcept { delete[] static_cast<double*>(p); });
-
-        return std::make_tuple(
-            nb::ndarray<nb::numpy, double, nb::ndim<1>>(theta_data, 1, shape, std::move(theta_owner)),
-            nb::ndarray<nb::numpy, double, nb::ndim<1>>(alpha_data, 1, shape, std::move(alpha_owner)),
-            nb::ndarray<nb::numpy, double, nb::ndim<1>>(em_data,    1, shape, std::move(em_owner))
-        );
-    }
-
-    // 3. Compute log(effective_lengths) with a floor of 1.0 so that
-    //    very short transcripts cannot blow up log(0) or go negative.
-    std::vector<double> log_eff_len(nc);
-    for (size_t i = 0; i < nc; ++i) {
-        double Le = el_ptr[i];
-        if (!(Le >= 1.0)) Le = 1.0;
-        log_eff_len[i] = std::log(Le);
-    }
-
-    // 4. Build equivalence classes
-    auto ec_data = build_equiv_classes(
-        off_ptr, ti_ptr, ll_ptr, cw_ptr, n_units);
-
-    // 5. Coverage-weighted warm start + unified OVR prior
-    //    (run_locus_em_native: no gDNA component, all budget to RNA)
-    const float* pwr_ptr = nullptr;
-    nb::ndarray<const float, nb::ndim<1>, nb::c_contig> pwr_arr;
-    if (!prior_weight_rna.is_none()) {
-        pwr_arr = nb::cast<nb::ndarray<const float, nb::ndim<1>, nb::c_contig>>(
-            prior_weight_rna);
-        if (static_cast<int>(pwr_arr.shape(0)) != n_components) {
-            throw std::runtime_error(
-                "prior_weight_rna length must equal n_components");
-        }
-        pwr_ptr = pwr_arr.data();
-    }
-    std::vector<double> prior(nc);
-    std::vector<double> theta_init(nc);
-    compute_ovr_prior_and_warm_start(
-        ec_data, unambig_totals.data(), pe_ptr,
-        0.0,               // alpha_gdna = 0 (no gDNA)
-        alpha_rna,          // alpha_rna = total budget
-        -1,                // gdna_idx = -1 (no gDNA)
-        pwr_ptr,
-        prior.data(), theta_init.data(), n_components,
-        use_vbem);
-
-    // 6. Run SQUAREM
-    EMResult result = run_squarem(
-        ec_data, log_eff_len.data(), unambig_totals.data(),
-        prior.data(), theta_init.data(),
-        n_components, max_iterations, convergence_delta,
-        use_vbem);
-
-    // 7. Return as numpy arrays
-    auto* theta_out = new double[nc];
-    auto* alpha_out = new double[nc];
-    auto* em_out    = new double[nc];
-    std::copy(result.theta.begin(), result.theta.end(), theta_out);
-    std::copy(result.alpha.begin(), result.alpha.end(), alpha_out);
-    std::copy(result.em_totals.begin(), result.em_totals.end(), em_out);
-
-    size_t shape[1] = { nc };
-    nb::capsule theta_owner(theta_out, [](void* p) noexcept { delete[] static_cast<double*>(p); });
-    nb::capsule alpha_owner(alpha_out, [](void* p) noexcept { delete[] static_cast<double*>(p); });
-    nb::capsule em_owner(em_out,       [](void* p) noexcept { delete[] static_cast<double*>(p); });
-
-    return std::make_tuple(
-        nb::ndarray<nb::numpy, double, nb::ndim<1>>(theta_out, 1, shape, std::move(theta_owner)),
-        nb::ndarray<nb::numpy, double, nb::ndim<1>>(alpha_out, 1, shape, std::move(alpha_owner)),
-        nb::ndarray<nb::numpy, double, nb::ndim<1>>(em_out,    1, shape, std::move(em_owner))
-    );
 }
 
 // ================================================================
@@ -1716,11 +1497,6 @@ struct PartitionView {
     const int32_t* transcript_indices;
     int n_transcripts;
 
-    // Per-component RNA prior weight (length = n_transcripts + 1 for the
-    // gDNA slot; nullptr ⇒ all ones).  The gDNA entry is ignored by the
-    // solver (it's routed via alpha_gdna), but callers must size the
-    // array to n_components for layout symmetry.
-    const float* prior_weight_rna;
 };
 
 // Extract per-locus sub-problem from a PartitionView.
@@ -1884,7 +1660,7 @@ static void extract_locus_sub_problem_from_partition(
     // Disable gDNA component when the caller signals it is ineligible.
     // Eligibility is now an explicit boolean from the Python side
     // ("any unspliced unit with a finite gDNA likelihood candidate exists
-    // for this locus"); it is no longer inferred from ``alpha_gdna > 0``.
+    // for this locus"); it is no longer inferred from ``gdna_prior_count > 0``.
     if (!enable_gdna) {
         sub.prior[sub.gdna_idx] = 0.0;
     }
@@ -1923,11 +1699,10 @@ batch_locus_em_partitioned(
     nb::list partition_tuples,
     // Per-locus transcript membership (list of int32[])
     nb::list locus_transcript_indices,
-    // Per-locus calibration priors
-    f64_1d   locus_alpha_gdna,
-    f64_1d   locus_alpha_rna,
+    // Per-locus calibration prior
+    f64_1d   locus_gdna_prior_count,
     // Per-locus gDNA component eligibility (1 = enabled, 0 = disabled).
-    // Decoupled from ``locus_alpha_gdna`` per Bayesian-prior redesign
+    // Decoupled from ``locus_gdna_prior_count`` per Bayesian-prior redesign
     // Phase 0: a zero gDNA prior count must not silently disable the
     // gDNA component when the locus contains gDNA-likelihood candidates.
     u8_1d    locus_enable_gdna,
@@ -1950,10 +1725,7 @@ batch_locus_em_partitioned(
     int    n_splice_strand_cols,
     int    n_threads,
     bool   emit_locus_stats,
-    bool   emit_assignments,
-    // Optional per-locus per-component RNA prior weight
-    // (list[ndarray[float32]] | None)
-    nb::object locus_prior_weight_rna)
+    bool   emit_assignments)
 {
     int n_loci = static_cast<int>(nb::len(partition_tuples));
     int N_T = n_transcripts_total;
@@ -1980,37 +1752,9 @@ batch_locus_em_partitioned(
         auto t_arr = nb::cast<i32_1d>(locus_transcript_indices[i]);
         v.transcript_indices = t_arr.data();
         v.n_transcripts = static_cast<int>(t_arr.shape(0));
-        v.prior_weight_rna = nullptr;
     }
 
-    // Optional per-locus prior_weight_rna (list[ndarray[float32]] | None)
-    std::vector<nb::ndarray<const float, nb::ndim<1>, nb::c_contig>> pwr_keepalive;
-    if (!locus_prior_weight_rna.is_none()) {
-        nb::list pwr_list = nb::cast<nb::list>(locus_prior_weight_rna);
-        if (static_cast<int>(nb::len(pwr_list)) != n_loci) {
-            throw std::runtime_error(
-                "locus_prior_weight_rna length must equal n_loci");
-        }
-        pwr_keepalive.reserve(n_loci);
-        for (int i = 0; i < n_loci; ++i) {
-            nb::object item = pwr_list[i];
-            if (item.is_none()) {
-                pwr_keepalive.emplace_back();
-                continue;
-            }
-            auto arr = nb::cast<nb::ndarray<const float, nb::ndim<1>, nb::c_contig>>(item);
-            int expected = views[i].n_transcripts + 1;
-            if (static_cast<int>(arr.shape(0)) != expected) {
-                throw std::runtime_error(
-                    "locus_prior_weight_rna[i] length must equal n_transcripts + 1");
-            }
-            views[i].prior_weight_rna = arr.data();
-            pwr_keepalive.push_back(std::move(arr));
-        }
-    }
-
-    const double*   ag_ptr = locus_alpha_gdna.data();
-    const double*   ar_ptr = locus_alpha_rna.data();
+    const double*   gp_ptr = locus_gdna_prior_count.data();
     const uint8_t*  eg_ptr = locus_enable_gdna.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
@@ -2154,15 +1898,14 @@ batch_locus_em_partitioned(
                 n_local_units);
             auto t4 = hrclock::now();
 
-            // 6. OVR prior + coverage-weighted warm start
+            // 6. gDNA prior + coverage-weighted warm start
             std::vector<double> prior(nc);
             std::vector<double> theta_init(nc);
-            compute_ovr_prior_and_warm_start(
+            compute_gdna_prior_and_warm_start(
                 ec_data,
                 sub.unambig_totals.data(),
                 sub.eligible.data(),
-                ag_ptr[li], ar_ptr[li], sub.gdna_idx,
-                pv.prior_weight_rna,
+                gp_ptr[li], sub.gdna_idx,
                 prior.data(), theta_init.data(), nc,
                 use_vbem);
             auto t5 = hrclock::now();
@@ -2586,33 +2329,8 @@ static nb::tuple connected_components_native(
 
 NB_MODULE(_em_impl, m) {
     m.doc() = "C++ EM solver for rigel locus-level abundance estimation.\n\n"
-              "Provides run_locus_em_native() which replaces the Python EM hot path:\n"
-              "_em_step, _vbem_step, _build_equiv_classes, SQUAREM loop.\n\n"
-              "Also provides batch_locus_em_partitioned() which replaces the entire\n"
-              "per-locus Python for-loop with a single C++ call.";
-
-    m.def("run_locus_em_native", &run_locus_em_native,
-          nb::arg("offsets"),
-          nb::arg("t_indices"),
-          nb::arg("log_liks"),
-          nb::arg("coverage_wts"),
-          nb::arg("unambig_totals"),
-          nb::arg("effective_lens"),
-          nb::arg("prior_eligible"),
-          nb::arg("n_components"),
-          nb::arg("alpha_rna"),
-          nb::arg("max_iterations"),
-          nb::arg("convergence_delta"),
-          nb::arg("use_vbem"),
-          nb::arg("n_transcripts"),
-          nb::arg("prior_weight_rna").none() = nb::none(),
-          "Run EM for a single locus sub-problem.\n\n"
-          "Takes CSR per-locus data + config, returns (theta, alpha, em_totals).\n"
-          "``effective_lens`` is the per-component effective length L̃_c\n"
-          "(FL-marginal containment); the E-step subtracts log L̃_c from\n"
-          "each candidate's log-weight.\n\n"
-          "prior_weight_rna: optional float32 ndarray[n_components];\n"
-          "  None ⇒ all ones (bit-identical to legacy behaviour).");
+              "Provides batch_locus_em_partitioned(), the production locus EM\n"
+              "entry point used by the Python quantification pipeline.";
 
     // ---- Partition scatter functions ----
     m.def("build_partition_offsets", &build_partition_offsets,
@@ -2661,8 +2379,7 @@ NB_MODULE(_em_impl, m) {
     m.def("batch_locus_em_partitioned", &batch_locus_em_partitioned,
           nb::arg("partition_tuples"),
           nb::arg("locus_transcript_indices"),
-          nb::arg("locus_alpha_gdna"),
-          nb::arg("locus_alpha_rna"),
+          nb::arg("locus_gdna_prior_count"),
           nb::arg("locus_enable_gdna"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
@@ -2681,10 +2398,9 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_threads") = 0,
           nb::arg("emit_locus_stats") = false,
           nb::arg("emit_assignments") = false,
-          nb::arg("locus_prior_weight_rna").none() = nb::none(),
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 9-tuples (one per locus) containing partition\n"
-          "arrays, plus per-locus calibration priors (alpha_gdna, alpha_rna).\n"
+          "arrays, plus per-locus gDNA prior counts and eligibility.\n"
           "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
           " out_winner_tid, out_winner_post, out_n_candidates).\n"
           "\n"

@@ -167,11 +167,11 @@ def _extract_results(pr, bench, result):
         if isinstance(lr, dict):
             info[f"locus_{i}_n_transcripts"] = lr.get("n_transcripts", 0)
             info[f"locus_{i}_n_em_fragments"] = lr.get("n_em_fragments", 0)
-            info[f"locus_{i}_alpha_gdna"] = lr.get("alpha_gdna", 0.0)
+            info[f"locus_{i}_gdna_prior_count"] = lr.get("gdna_prior_count", 0.0)
         else:
             info[f"locus_{i}_n_transcripts"] = lr.n_transcripts
             info[f"locus_{i}_n_em_fragments"] = lr.n_em_fragments
-            info[f"locus_{i}_alpha_gdna"] = lr.alpha_gdna
+            info[f"locus_{i}_gdna_prior_count"] = lr.gdna_prior_count
 
     return info
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import numpy as np
@@ -29,8 +29,8 @@ class EMConfig:
     ----------
     seed : int or None
         Random seed for reproducibility.
-    mode : str
-        Algorithm variant: ``"map"`` (default) or ``"vbem"``.
+    mode : {"vbem", "map"}
+        Algorithm variant (default ``"vbem"``).
     iterations : int
         Maximum EM iterations (default 1000).
     convergence_delta : float
@@ -47,7 +47,7 @@ class EMConfig:
     """
 
     seed: int | None = None
-    mode: str = "vbem"
+    mode: Literal["vbem", "map"] = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
     assignment_mode: str = "sample"
@@ -187,10 +187,6 @@ class CalibrationConfig:
     #: this many pseudo-observations.  Default matches
     #: :data:`rigel.calibration.fl.POOL_EB_PRIOR_ESS`.
     prior_ess: float = 1000.0
-
-    #: Per-component nRNA-suppression weight (0 disables nRNA components
-    #: in the prior; 1 treats nRNA on equal footing with mRNA).
-    nrna_weight: float = 0.0
 
     #: Minimum SPLICED-annotated count (``rna``) and gDNA count required
     #: for the pool's per-FL distribution to be flagged ``"good"`` /

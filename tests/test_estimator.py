@@ -783,7 +783,7 @@ class TestGDNAInLocusEM:
             [[0]] * 100,
             num_transcripts=2,
             include_gdna=True,
-            alpha_gdna=5.0,
+            gdna_prior_count=5.0,
             gdna_log_lik=0.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -802,7 +802,7 @@ class TestGDNAInLocusEM:
             num_transcripts=2,
             rc=rc,
             include_gdna=True,
-            alpha_gdna=1.0,
+            gdna_prior_count=1.0,
             gdna_log_lik=-20.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
@@ -819,7 +819,7 @@ class TestGDNAInLocusEM:
             num_transcripts=2,
             include_nrna=True,
             include_gdna=True,
-            alpha_gdna=3.0,
+            gdna_prior_count=3.0,
         )
         pool_counts = _run_and_assign(rc, bundle, em_iterations=10)
         gdna_count = pool_counts["gdna"]

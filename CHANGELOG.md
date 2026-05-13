@@ -84,13 +84,13 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
 - New region partition built at index time (`rigel index`) — 8-state
   per-base mask (exon × intron × intergenic × strand) persisted in the
   index under `region_df` and shared with the C++ scanner.
-- New CLI flags: `--cal-prior-ess`, `--cal-nrna-weight`,
-  `--cal-c-base`, `--cal-quality-good`, `--cal-quality-weak`.
+- New CLI flags: `--cal-prior-ess`, `--cal-quality-good`,
+  `--cal-quality-weak`.
   See [docs/parameters.md](docs/parameters.md) and
   [docs/MANUAL.md §Calibration](docs/MANUAL.md#calibration).
 - New `summary.json.calibration` schema:
   `global_densities`, `fl_models`, `diagnostics`, `n_multi_loci`,
-  `c_base`, `mean_pi_gdna`.
+  `mean_pi_gdna`.
 - `docs/calibration/calibration_v6_plan.md` + companion docs
   (m7/m8/m9 plans).  See [docs/METHODS.md §10](docs/METHODS.md) for
   the mathematical exposition.
@@ -101,8 +101,8 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
   returns `(estimator, calibration)` (was: `estimator` only).
 - `FragmentScorer.from_models(...)` now takes individual FL models
   (`rna_fl`, `gdna_fl`) instead of a `FragmentLengthModels` container.
-- `_run_locus_em_partitioned(...)` accepts a new
-  `prior_weight_rna_per_locus` argument.
+- `_run_locus_em_partitioned(...)` consumes a single per-locus
+  `gdna_prior_count` array plus an explicit `enable_gdna` flag.
 - `summary.json.calibration` schema replaced (see Added).  Consumers
   reading `pi_pool`, `gdna_fl.{mu,sigma,quality}`, or `srd.*` keys
   must update.
@@ -120,19 +120,24 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
   `tests/test_gdna.py`, `tests/test_gdna_harmonic_length.py`.
 - v1 deprecation-warning shims were **not** shipped (rigel is
   pre-1.0; no users depended on a shim contract).
+- Legacy RNA-prior machinery removed: `_em_impl.run_locus_em_native`,
+  `prior_weight_rna`, `build_prior_weight_rna`, calibration
+  `nrna_weight`, `alpha_rna`, `rna_prior_count`, and the obsolete
+  `--cal-nrna-weight` / `--cal-c-base` knobs. The production EM API now
+  uses only `gdna_prior_count` and gDNA eligibility.
 
 ### Internals
 
 - Milestone progression: M1 (region partition) → M2 (index
   persistence) → M3 (in-place C++ accumulator) → M4 (global gDNA
-  densities + κ) → M5 (EM `prior_weight_rna` ABI + Locus rename)
+  densities + κ) → M5 (production batch EM plumbing + Locus rename)
   → M6 (per-MultiLocus priors) → M7 (pool FL models +
   `CalibrationResult` schema) → M8a/b/c (orchestrator + pipeline +
   legacy deletion) → M9.1 (knob ship + plan reconciliation) →
   M9.3 (this CHANGELOG + MANUAL + METHODS + parameters refresh).
 - All `tests/golden/*` files regenerated against the v6 calibration
   output (commit `dca1788`).
-- 1003 tests passing (was 978 pre-M9.1).
+- 1042 tests passing.
 - Plan vs implementation reconciliation logged in
   [docs/calibration/m9_implementation_plan.md §1](docs/calibration/m9_implementation_plan.md).
 

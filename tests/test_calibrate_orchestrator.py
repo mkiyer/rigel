@@ -167,8 +167,7 @@ class TestCalibrateHappyPath:
         )
         # No priors yet
         assert result.n_multi_loci == 0
-        assert len(result.alpha_gdna) == 0
-        assert len(result.alpha_rna) == 0
+        assert len(result.gdna_prior_count) == 0
 
     def test_diagnostics_populated_from_payload(self):
         """``Diagnostics.from_payload`` is called and the result is exposed."""
@@ -222,24 +221,19 @@ class TestCalibrateWithPriorsRoundtrip:
         mlp = MultiLocusPrior(
             multi_locus_id=0, n_obs=10, n_gdna=3.5, n_rna=6.5,
             pi_gdna=0.35,
-            gdna_prior_count=3.5, rna_prior_count=6.5,
+            gdna_prior_count=3.5,
             per_locus=(est,),
         )
         new_table = PriorTable(
             multi_locus_priors=(mlp,),
-            alpha_gdna=np.array([3.5], dtype=np.float64),
-            alpha_rna=np.array([6.5], dtype=np.float64),
-            prior_weight_rna=[np.ones(2, dtype=np.float32)],
             gdna_prior_count=np.array([3.5], dtype=np.float64),
-            rna_prior_count=np.array([6.5], dtype=np.float64),
             enable_gdna=np.array([1], dtype=np.uint8),
         )
 
         updated = result.with_priors(new_table)
         assert updated is not result          # frozen contract
         assert updated.n_multi_loci == 1
-        assert updated.alpha_gdna.tolist() == [3.5]
-        assert updated.alpha_rna.tolist() == [6.5]
+        assert updated.gdna_prior_count.tolist() == [3.5]
         assert len(updated.multi_locus_prior_df) == 1
         assert len(updated.per_locus_gdna_df) == 1
 
@@ -249,15 +243,8 @@ class TestPriorTableEmpty:
         """Empty seed has zero-length arrays for every canonical field."""
         t = PriorTable.empty()
         assert t.multi_locus_priors == ()
-        assert t.alpha_gdna.dtype == np.float64
-        assert t.alpha_rna.dtype == np.float64
-        assert len(t.alpha_gdna) == 0
-        assert len(t.alpha_rna) == 0
-        assert t.prior_weight_rna == []
         assert t.gdna_prior_count.dtype == np.float64
-        assert t.rna_prior_count.dtype == np.float64
         assert len(t.gdna_prior_count) == 0
-        assert len(t.rna_prior_count) == 0
         assert t.enable_gdna.dtype == np.uint8
         assert len(t.enable_gdna) == 0
 

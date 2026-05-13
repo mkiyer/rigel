@@ -236,7 +236,7 @@ def _print_diagnostics(diag, label=""):
             f"n_t={lr['n_transcripts']}, n_genes={lr['n_genes']}, "
             f"n_em_frags={lr['n_em_fragments']}, "
             f"rna_total(mRNA+nRNA)={lr['rna_total']:.1f}, "
-            f"gDNA={lr['gdna']:.1f}, alpha_gdna={lr['alpha_gdna']:.2f}, alpha_rna={lr['alpha_rna']:.2f}"
+            f"gDNA={lr['gdna']:.1f}, gdna_prior_count={lr['gdna_prior_count']:.2f}"
         )
 
     # Error analysis

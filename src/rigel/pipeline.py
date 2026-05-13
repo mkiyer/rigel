@@ -588,22 +588,14 @@ def _run_locus_em_partitioned(
     partitions: dict,
     multi_loci: list,
     index: TranscriptIndex,
-    alpha_gdna: np.ndarray,
-    alpha_rna: np.ndarray,
+    gdna_prior_count: np.ndarray,
     em_config: EMConfig,
     *,
-    prior_weight_rna_per_locus: list | None = None,
     enable_gdna: np.ndarray | None = None,
     emit_locus_stats: bool = False,
     annotations: "AnnotationTable | None" = None,
 ) -> None:
-    """Run batch locus EM from partitioned data with incremental freeing.
-
-    ``prior_weight_rna_per_locus``, when not None, must be a list with
-    one entry per ``multi_locus_id`` carrying a float32 vector of
-    per-component nRNA-suppression weights.  When None, the C++ EM
-    treats every component on equal footing (all-ones).
-    """
+    """Run batch locus EM from partitioned data with incremental freeing."""
     t_to_g = index.t_to_g_arr
     # ``is_synthetic_g`` marks synthetic (gene-neutral) gene rows so they can
     # be excluded from the user-facing ``n_genes`` per locus.
@@ -614,7 +606,7 @@ def _run_locus_em_partitioned(
     n_threads = em_config.n_threads or os.cpu_count() or 1
     emit_assignments = annotations is not None
 
-    def _build_locus_meta(locus, *, rna_total, gdna, alpha_g, alpha_r):
+    def _build_locus_meta(locus, *, rna_total, gdna, gdna_prior):
         gene_set = {
             int(t_to_g[int(t_idx)])
             for t_idx in locus.transcript_indices
@@ -635,16 +627,13 @@ def _run_locus_em_partitioned(
             # per-transcript ``is_synthetic`` flags from the index.
             "rna_total": float(rna_total),
             "gdna": float(gdna),
-            "alpha_gdna": float(alpha_g),
-            "alpha_rna": float(alpha_r),
+            "gdna_prior_count": float(gdna_prior),
         }
 
     def _call_batch_em(
         parts,
         batch_loci,
-        batch_alpha_gdna,
-        batch_alpha_rna,
-        batch_prior_weight_rna=None,
+        batch_gdna_prior_count,
         batch_enable_gdna=None,
     ):
         """Pack tuples, call C++, record results."""
@@ -667,14 +656,12 @@ def _run_locus_em_partitioned(
         return estimator.run_batch_locus_em_partitioned(
             partition_tuples,
             locus_t_lists,
-            batch_alpha_gdna,
-            batch_alpha_rna,
+            batch_gdna_prior_count,
             index,
             em_iterations=em_config.iterations,
             em_convergence_delta=em_config.convergence_delta,
             emit_locus_stats=emit_locus_stats,
             emit_assignments=emit_assignments,
-            locus_prior_weight_rna=batch_prior_weight_rna,
             enable_gdna=batch_enable_gdna,
         )
 
@@ -702,13 +689,7 @@ def _run_locus_em_partitioned(
         em_result = _call_batch_em(
             [part],
             [locus],
-            np.array([alpha_gdna[lid]], dtype=np.float64),
-            np.array([alpha_rna[lid]], dtype=np.float64),
-            batch_prior_weight_rna=(
-                [prior_weight_rna_per_locus[lid]]
-                if prior_weight_rna_per_locus is not None
-                else None
-            ),
+            np.array([gdna_prior_count[lid]], dtype=np.float64),
             batch_enable_gdna=(
                 np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
             ),
@@ -729,8 +710,7 @@ def _run_locus_em_partitioned(
                 locus,
                 rna_total=rna_arr[0],
                 gdna=gdna_arr[0],
-                alpha_g=alpha_gdna[lid],
-                alpha_r=alpha_rna[lid],
+                gdna_prior=gdna_prior_count[lid],
             )
         )
         del part
@@ -748,22 +728,14 @@ def _run_locus_em_partitioned(
         # completes and annotations are written we drop ``normal_parts``
         # to release per-locus arrays before EM downstream phases run.
         normal_parts = [partitions.pop(loc.multi_locus_id) for loc in normal_loci]
-        normal_ag = np.array(
-            [alpha_gdna[loc.multi_locus_id] for loc in normal_loci], dtype=np.float64
-        )
-        normal_ar = np.array(
-            [alpha_rna[loc.multi_locus_id] for loc in normal_loci], dtype=np.float64
+        normal_gp = np.array(
+            [gdna_prior_count[loc.multi_locus_id] for loc in normal_loci],
+            dtype=np.float64,
         )
         em_result = _call_batch_em(
             normal_parts,
             normal_loci,
-            normal_ag,
-            normal_ar,
-            batch_prior_weight_rna=(
-                [prior_weight_rna_per_locus[loc.multi_locus_id] for loc in normal_loci]
-                if prior_weight_rna_per_locus is not None
-                else None
-            ),
+            normal_gp,
             batch_enable_gdna=(
                 np.array(
                     [enable_gdna[loc.multi_locus_id] for loc in normal_loci],
@@ -790,8 +762,7 @@ def _run_locus_em_partitioned(
                     locus,
                     rna_total=rna_arr[i],
                     gdna=gdna_arr[i],
-                    alpha_g=normal_ag[i],
-                    alpha_r=normal_ar[i],
+                    gdna_prior=normal_gp[i],
                 )
             )
         # Release per-locus partition arrays before downstream phases.
@@ -824,7 +795,6 @@ def quant_from_buffer(
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
-    nrna_weight: float = 0.0,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
     """Quantify transcripts from buffered fragments via locus-level EM.
 
@@ -834,7 +804,7 @@ def quant_from_buffer(
     :func:`assemble_priors` and back-filled into the calibration result
     with :meth:`CalibrationResult.with_priors`; the populated result is
     returned alongside the estimator so callers (CLI, tests) can read
-    ``alpha_gdna``/``alpha_rna``/dataframes.
+    ``gdna_prior_count`` and diagnostic dataframes.
 
     Parameters
     ----------
@@ -856,13 +826,6 @@ def quant_from_buffer(
         counters.
     em_config, scoring, log_every, annotations, emit_locus_stats
         Standard pipeline knobs.
-    nrna_weight : float
-        Per-component nRNA-suppression weight applied to synthetic
-        nRNA transcripts in each ``MultiLocus``.  ``0.0`` (default)
-        zeros out the nRNA prior contribution; ``1.0`` puts nRNA on
-        equal footing with mRNA.  Threaded through to
-        :func:`assemble_priors` and on to
-        :func:`build_prior_weight_rna`.
 
     Returns
     -------
@@ -954,7 +917,6 @@ def quant_from_buffer(
             calibration_payload,
             calibration.global_densities,
             gdna_fl=fl_models.gdna,
-            nrna_weight=nrna_weight,
             splicing_anchor_tolerance=int(
                 getattr(calibration_payload, "splicing_anchor_tolerance", 0)
             ),
@@ -969,9 +931,7 @@ def quant_from_buffer(
             float(_post_summary["mean_pi_gdna"]),
             int(_post_summary["n_multi_loci"]),
         )
-        alpha_gdna = prior_table.alpha_gdna
-        alpha_rna = prior_table.alpha_rna
-        prior_weight_rna_per_locus = list(prior_table.prior_weight_rna)
+        gdna_prior_count = prior_table.gdna_prior_count
         enable_gdna_arr = prior_table.enable_gdna
 
         # Phase 4 (NEW): Fused scatter into per-locus tuples
@@ -985,10 +945,8 @@ def quant_from_buffer(
             partitions,
             multi_loci,
             index,
-            alpha_gdna,
-            alpha_rna,
+            gdna_prior_count,
             em_config,
-            prior_weight_rna_per_locus=prior_weight_rna_per_locus,
             enable_gdna=enable_gdna_arr,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
@@ -1139,7 +1097,6 @@ def run_pipeline(
             calibration=calibration,
             calibration_payload=calibration_payload,
             emit_locus_stats=config.emit_locus_stats,
-            nrna_weight=cal_cfg.nrna_weight,
         )
     finally:
         buffer.cleanup()
