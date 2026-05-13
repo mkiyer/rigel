@@ -334,6 +334,7 @@ def scan_and_buffer(
         chunk_size=scan.chunk_size,
         n_workers=n_scan,
         n_decomp_threads=scan.n_decomp_threads,
+        qname_batch_size=scan.qname_batch_size,
     )
 
     # Replay stats

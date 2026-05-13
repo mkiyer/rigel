@@ -558,6 +558,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
+    _ParamSpec("qname_batch_size", "scan.qname_batch_size"),
     # -- BamScanConfig: transformed --
     _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
     _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
@@ -1023,6 +1024,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Directory for temporary buffer spill files when memory "
         "limits are exceeded (default: system temp directory).",
+    )
+    perf_grp.add_argument(
+        "--qname-batch-size",
+        dest="qname_batch_size",
+        type=int,
+        default=None,
+        help="Advanced: read-name groups per native scanner input queue "
+        "item (default: 512). Lower values are useful for queue-boundary "
+        "debugging; larger values may reduce queue overhead at the cost "
+        "of slightly more in-flight memory.",
     )
 
     # -- Advanced scoring / convergence ---------------------------------------

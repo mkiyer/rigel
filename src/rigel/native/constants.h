@@ -15,7 +15,6 @@
 #include <set>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -211,6 +210,11 @@ struct RawResolveResult {
 // Set operations
 // ================================================================
 
+inline void sort_unique(std::vector<int32_t>& v) {
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+}
+
 // Check whether two sorted vectors share at least one element.
 inline bool has_intersection(const std::vector<int32_t>& a,
                              const std::vector<int32_t>& b) {
@@ -227,6 +231,7 @@ inline bool has_intersection(const std::vector<int32_t>& a,
 inline std::vector<int32_t> vec_intersect(const std::vector<int32_t>& a,
                                           const std::vector<int32_t>& b) {
     std::vector<int32_t> out;
+    out.reserve(std::min(a.size(), b.size()));
     std::set_intersection(a.begin(), a.end(), b.begin(), b.end(),
                           std::back_inserter(out));
     return out;
@@ -264,14 +269,21 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
     }
 
     // 3. Union of all sets
-    std::unordered_set<int32_t> all;
-    for (const auto& s : sets)
-        for (int32_t v : s) all.insert(v);
-    if (!all.empty()) {
-        std::vector<int32_t> sorted_union(all.begin(), all.end());
-        std::sort(sorted_union.begin(), sorted_union.end());
-        return {std::move(sorted_union), MC_UNION};
+    std::vector<int32_t> sorted_union;
+    std::vector<int32_t> tmp;
+    for (const auto* s : non_empty) {
+        if (sorted_union.empty()) {
+            sorted_union = *s;
+            continue;
+        }
+        tmp.clear();
+        tmp.reserve(sorted_union.size() + s->size());
+        std::set_union(sorted_union.begin(), sorted_union.end(),
+                       s->begin(), s->end(),
+                       std::back_inserter(tmp));
+        sorted_union.swap(tmp);
     }
+    if (!sorted_union.empty()) return {std::move(sorted_union), MC_UNION};
     return {{}, MC_EMPTY};
 }
 
@@ -310,33 +322,39 @@ inline ChimeraResult detect_chimera(
                                  exon_t_sets[item_idx[j]]))
                 unite(i, j);
 
-    // Group into connected components
-    std::unordered_map<int, std::vector<int>> components;
-    for (int i = 0; i < n; i++)
-        components[find(i)].push_back(i);
-    if (components.size() <= 1) return {CHIMERA_NONE, -1};
+    // Group into connected components with vector-backed root lookup.
+    std::vector<int> roots(n);
+    for (int i = 0; i < n; i++) roots[i] = find(i);
+    std::vector<int> unique_roots = roots;
+    std::sort(unique_roots.begin(), unique_roots.end());
+    unique_roots.erase(std::unique(unique_roots.begin(), unique_roots.end()),
+                       unique_roots.end());
+    if (unique_roots.size() <= 1) return {CHIMERA_NONE, -1};
+
+    std::vector<std::vector<int>> components(unique_roots.size());
+    for (int i = 0; i < n; i++) {
+        auto it = std::lower_bound(unique_roots.begin(), unique_roots.end(), roots[i]);
+        components[static_cast<size_t>(it - unique_roots.begin())].push_back(i);
+    }
 
     // Strand characterisation
-    std::unordered_set<int32_t> unique_strands;
-    for (const auto& [root, members] : components) {
+    std::vector<int32_t> unique_strands;
+    unique_strands.reserve(components.size());
+    for (const auto& members : components) {
         int32_t strand = STRAND_NONE;
         for (int idx : members) strand |= exons[item_idx[idx]].strand;
-        unique_strands.insert(strand);
+        unique_strands.push_back(strand);
     }
+    sort_unique(unique_strands);
     int32_t chimera_type = (unique_strands.size() == 1)
         ? CHIMERA_CIS_STRAND_SAME : CHIMERA_CIS_STRAND_DIFF;
 
     // Minimum gap between components
-    std::vector<std::vector<int>> comp_list;
-    comp_list.reserve(components.size());
-    for (auto& [root, members] : components)
-        comp_list.push_back(std::move(members));
-
     int32_t min_gap = std::numeric_limits<int32_t>::max();
-    for (size_t ci = 0; ci < comp_list.size(); ci++) {
-        for (size_t cj = ci + 1; cj < comp_list.size(); cj++) {
-            for (int bi : comp_list[ci]) {
-                for (int bj : comp_list[cj]) {
+    for (size_t ci = 0; ci < components.size(); ci++) {
+        for (size_t cj = ci + 1; cj < components.size(); cj++) {
+            for (int bi : components[ci]) {
+                for (int bj : components[cj]) {
                     const auto& blki = exons[item_idx[bi]];
                     const auto& blkj = exons[item_idx[bj]];
                     int32_t gap;

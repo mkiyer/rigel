@@ -5,7 +5,7 @@ import textwrap
 import pytest
 from conftest import build_test_index
 
-from rigel.types import ChimeraType, Strand, GenomicInterval
+from rigel.types import ChimeraType, MergeOutcome, Strand, GenomicInterval
 from rigel.splice import SpliceType
 from rigel.resolution import (
     _detect_intrachromosomal_chimera,
@@ -189,6 +189,25 @@ def _exon(ref, start, end, strand=Strand.POS):
     return GenomicInterval(ref, start, end, strand)
 
 
+def _ambiguous_multiexon_gtf(n_transcripts=8):
+    lines = []
+    for t_idx in range(n_transcripts):
+        exon_coords = [
+            (100, 150),
+            (200, 250),
+            (300, 350),
+            (400, 450),
+            (600 + t_idx, 650 + t_idx),
+        ]
+        for start, end in exon_coords:
+            lines.append(
+                f'chr1\ttest\texon\t{start}\t{end}\t.\t+\t.\t'
+                f'gene_id "g1"; transcript_id "t{t_idx}"; '
+                f'gene_name "G1"; gene_type "protein_coding"; tag "basic";'
+            )
+    return "\n".join(lines) + "\n"
+
+
 # GTF for overlap tests: 3 transcripts in one gene
 # 0-based half-open after parse:
 #   t_two_exon: exons (100,200), (350,400)   transcript span (100,400)
@@ -357,6 +376,47 @@ class TestOverlapProfileViaResolve:
         assert result.overlap_bp[tm["t0"]] == (0, 100)
         # t1: exon(300-400) clipped to (300,350)=50bp
         assert result.overlap_bp[tm["t1"]] == (50, 0)
+
+
+def test_ambiguous_multiexon_candidate_snapshot(tmp_path_factory):
+    """Many candidates across many exon blocks resolve by sorted-vector intersection."""
+    idx = build_test_index(
+        tmp_path_factory,
+        _ambiguous_multiexon_gtf(),
+        genome_size=1000,
+        name="ambig_multiexon",
+    )
+    frag = make_fragment(
+        exons=(
+            _exon("chr1", 110, 140),
+            _exon("chr1", 210, 240),
+            _exon("chr1", 310, 340),
+            _exon("chr1", 410, 440),
+        ),
+        introns=(),
+    )
+
+    result = resolve_fragment(frag, idx)
+    assert result is not None
+    by_index = dict(zip(idx.t_df["t_index"], idx.t_df["t_id"]))
+    resolved_ids = {by_index[t] for t in result.t_inds}
+
+    assert resolved_ids == {
+        "t0",
+        "t1",
+        "t2",
+        "t3",
+        "t4",
+        "t5",
+        "t6",
+        "t7",
+        "RIGEL_NRNA_chr1_1_99_657",
+    }
+    assert result.merge_criteria == int(MergeOutcome.UNION)
+    assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
+    assert result.chimera_type == int(ChimeraType.NONE)
+    assert result.read_length == 120
+    assert all(result.overlap_bp[t] == (120, 0) for t in result.t_inds)
 
 
 # =====================================================================

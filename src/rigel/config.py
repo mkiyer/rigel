@@ -121,6 +121,8 @@ class BamScanConfig:
         Log progress every N read-name groups (default 1M).
     chunk_size : int
         Fragments per buffer chunk (default 1M).
+    qname_batch_size : int
+        Read-name groups per native scanner input queue item (default 512).
     max_memory_bytes : int
         Max memory before disk spill (default 4 GiB).
     spill_dir : Path, str, or None
@@ -133,6 +135,7 @@ class BamScanConfig:
     sj_strand_tag: str | tuple[str, ...] = "auto"
     log_every: int = 1_000_000
     chunk_size: int = 1_000_000
+    qname_batch_size: int = 512
     max_memory_bytes: int = 4 * 1024**3
     spill_dir: Path | str | None = None
     n_scan_threads: int = 0
@@ -164,6 +167,11 @@ class BamScanConfig:
     """
 
     def __post_init__(self) -> None:
+        if self.qname_batch_size < 1:
+            raise ValueError(
+                f"BamScanConfig.qname_batch_size must be >= 1; "
+                f"got {self.qname_batch_size}."
+            )
         if self.splicing_anchor_tolerance < 0:
             raise ValueError(
                 f"BamScanConfig.splicing_anchor_tolerance must be >= 0; "

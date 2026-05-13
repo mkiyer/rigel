@@ -2,7 +2,7 @@
  * thread_queue.h — Bounded SPMC work queue for parallel BAM scanning.
  *
  * Provides BoundedQueue<T>: a single-producer multiple-consumer queue
- * with backpressure.  The work-unit type (QnameGroup) is defined in
+ * with backpressure.  The BAM scanner work-unit types are defined in
  * bam_scanner.cpp alongside the other BAM-specific structures.
  */
 

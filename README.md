@@ -255,7 +255,7 @@ the configured assignment mode (`sample` by default).
 | [docs/MANUAL.md](docs/MANUAL.md) | CLI reference, parameter defaults, configuration rules, and output schema |
 | [docs/METHODS.md](docs/METHODS.md) | Algorithmic description of the implemented model and priors |
 | [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
-| [docs/PARAMETERS.md](docs/PARAMETERS.md) | Complete parameter reference with defaults and config dataclass mapping |
+| [docs/parameters.md](docs/parameters.md) | Complete parameter reference with defaults and config dataclass mapping |
 
 ---
 

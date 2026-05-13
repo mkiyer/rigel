@@ -6,6 +6,7 @@ counts, and internally consistent totals.  This catches import/interface
 breakage that component-level unit tests might miss.
 """
 
+import pandas as pd
 import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
@@ -58,6 +59,41 @@ def _run(result, index):
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     return run_pipeline(result.bam_path, index, config=config)
+
+
+def _run_with_batch_size(result, index, qname_batch_size: int):
+    config = PipelineConfig(
+        em=EMConfig(seed=SEED, assignment_mode="fractional"),
+        scan=BamScanConfig(
+            sj_strand_tag="auto",
+            qname_batch_size=qname_batch_size,
+            chunk_size=1000,
+        ),
+    )
+    return run_pipeline(result.bam_path, index, config=config)
+
+
+def _sorted_counts(pr, index):
+    return pr.estimator.get_counts_df(index).sort_values("transcript_id").reset_index(drop=True)
+
+
+def test_qname_batch_size_edges_match(tmp_path):
+    sc, result = _make_scenario(tmp_path, n_fragments=120)
+    index = result.index
+    try:
+        batch_one = _run_with_batch_size(result, index, qname_batch_size=1)
+        batch_huge = _run_with_batch_size(result, index, qname_batch_size=10_000)
+    finally:
+        sc.cleanup()
+
+    pd.testing.assert_frame_equal(
+        _sorted_counts(batch_one, index),
+        _sorted_counts(batch_huge, index),
+        atol=1e-10,
+        rtol=1e-12,
+    )
+    assert batch_one.stats.n_read_names == batch_huge.stats.n_read_names
+    assert batch_one.stats.n_fragments == batch_huge.stats.n_fragments
 
 
 class TestPipelineSmoke:

@@ -17,7 +17,6 @@
 #include <set>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -446,6 +445,16 @@ struct ResolverScratch {
     std::vector<ExonBlock> implicit_blocks;
     std::vector<GapBlock> implicit_gaps;
 
+    // Reusable sorted-vector set-operation buffers for _resolve_core.
+    std::vector<std::vector<int32_t>> exon_t_sets;
+    std::vector<std::vector<int32_t>> transcript_t_sets;
+    std::vector<std::vector<int32_t>> sj_t_sets;
+    std::vector<int32_t> tmp_a;
+    std::vector<int32_t> tmp_b;
+    std::vector<int32_t> tmp_out;
+    std::vector<int32_t> tmp_union;
+    std::vector<int32_t> all_overlap_t;
+    std::vector<int32_t> nrna_t;
 
     ResolverScratch() = default;
 
@@ -470,7 +479,19 @@ struct ResolverScratch {
           t_transcript_bp(std::move(o.t_transcript_bp)),
           t_dirty(std::move(o.t_dirty)),
           dirty_indices(std::move(o.dirty_indices)),
-          buf(o.buf), buf_cap(o.buf_cap)
+          buf(o.buf),
+          buf_cap(o.buf_cap),
+          implicit_blocks(std::move(o.implicit_blocks)),
+          implicit_gaps(std::move(o.implicit_gaps)),
+          exon_t_sets(std::move(o.exon_t_sets)),
+          transcript_t_sets(std::move(o.transcript_t_sets)),
+          sj_t_sets(std::move(o.sj_t_sets)),
+          tmp_a(std::move(o.tmp_a)),
+          tmp_b(std::move(o.tmp_b)),
+          tmp_out(std::move(o.tmp_out)),
+          tmp_union(std::move(o.tmp_union)),
+          all_overlap_t(std::move(o.all_overlap_t)),
+          nrna_t(std::move(o.nrna_t))
     {
         o.buf = nullptr; o.buf_cap = 0;
     }
@@ -482,6 +503,17 @@ struct ResolverScratch {
             t_transcript_bp = std::move(o.t_transcript_bp);
             t_dirty = std::move(o.t_dirty);
             dirty_indices = std::move(o.dirty_indices);
+            implicit_blocks = std::move(o.implicit_blocks);
+            implicit_gaps = std::move(o.implicit_gaps);
+            exon_t_sets = std::move(o.exon_t_sets);
+            transcript_t_sets = std::move(o.transcript_t_sets);
+            sj_t_sets = std::move(o.sj_t_sets);
+            tmp_a = std::move(o.tmp_a);
+            tmp_b = std::move(o.tmp_b);
+            tmp_out = std::move(o.tmp_out);
+            tmp_union = std::move(o.tmp_union);
+            all_overlap_t = std::move(o.all_overlap_t);
+            nrna_t = std::move(o.nrna_t);
             buf = o.buf; buf_cap = o.buf_cap;
             o.buf = nullptr; o.buf_cap = 0;
         }
@@ -502,6 +534,27 @@ struct ResolverScratch {
             t_dirty[t] = 0;
         }
         dirty_indices.clear();
+    }
+
+    void reset_per_fragment() noexcept {
+        for (int32_t t : dirty_indices) {
+            t_exon_bp[t] = 0;
+            t_transcript_bp[t] = 0;
+            t_dirty[t] = 0;
+        }
+        dirty_indices.clear();
+
+        for (auto& v : exon_t_sets) v.clear();
+        for (auto& v : transcript_t_sets) v.clear();
+        sj_t_sets.clear();
+        tmp_a.clear();
+        tmp_b.clear();
+        tmp_out.clear();
+        tmp_union.clear();
+        all_overlap_t.clear();
+        nrna_t.clear();
+        implicit_blocks.clear();
+        implicit_gaps.clear();
     }
 };
 
@@ -948,16 +1001,18 @@ public:
     // SJ map lookup helper
     // ----------------------------------------------------------------
 
-    std::vector<int32_t> sj_lookup(int32_t ref_id, int32_t start,
-                                   int32_t end, int32_t strand) const {
+    void sj_lookup_into(int32_t ref_id, int32_t start,
+                        int32_t end, int32_t strand,
+                        std::vector<int32_t>& out) const {
+        out.clear();
         SJKey key{ref_id, start, end, strand};
         auto it = sj_map_.find(key);
         if (it != sj_map_.end()) {
             auto [off, cnt] = it->second;
-            std::vector<int32_t> out(sj_map_data_.begin() + off,
-                                     sj_map_data_.begin() + off + cnt);
-            std::sort(out.begin(), out.end());
-            return out;
+            out.insert(out.end(), sj_map_data_.begin() + off,
+                       sj_map_data_.begin() + off + cnt);
+            sort_unique(out);
+            return;
         }
         // Strand-agnostic fallback
         if (strand != STRAND_POS && strand != STRAND_NEG) {
@@ -966,23 +1021,27 @@ public:
             auto pi = sj_map_.find(pk);
             auto ni = sj_map_.find(nk);
             if (pi != sj_map_.end() || ni != sj_map_.end()) {
-                std::unordered_set<int32_t> combined;
                 if (pi != sj_map_.end()) {
                     auto [off, cnt] = pi->second;
                     for (int32_t k = 0; k < cnt; k++)
-                        combined.insert(sj_map_data_[off + k]);
+                        out.push_back(sj_map_data_[off + k]);
                 }
                 if (ni != sj_map_.end()) {
                     auto [off, cnt] = ni->second;
                     for (int32_t k = 0; k < cnt; k++)
-                        combined.insert(sj_map_data_[off + k]);
+                        out.push_back(sj_map_data_[off + k]);
                 }
-                std::vector<int32_t> out(combined.begin(), combined.end());
-                std::sort(out.begin(), out.end());
-                return out;
+                sort_unique(out);
+                return;
             }
         }
-        return {};
+    }
+
+    std::vector<int32_t> sj_lookup(int32_t ref_id, int32_t start,
+                                   int32_t end, int32_t strand) const {
+        std::vector<int32_t> out;
+        sj_lookup_into(ref_id, start, end, strand, out);
+        return out;
     }
 
     // ----------------------------------------------------------------
@@ -1011,21 +1070,26 @@ public:
     {
         int n_exons = static_cast<int>(exons.size());
         if (n_exons == 0) return false;
+        scratch.reset_per_fragment();
 
         cr.genomic_footprint = genomic_footprint;
 
         // --- Interchromosomal chimera detection ---
         cr.chimera_type = CHIMERA_NONE;
         cr.chimera_gap = -1;
-        std::unordered_set<int32_t> ref_set;
-        for (const auto& e : exons) ref_set.insert(e.ref_id);
-        bool is_interchromosomal = (ref_set.size() > 1);
+        scratch.tmp_a.clear();
+        scratch.tmp_a.reserve(static_cast<size_t>(n_exons));
+        for (const auto& e : exons) scratch.tmp_a.push_back(e.ref_id);
+        sort_unique(scratch.tmp_a);
+        bool is_interchromosomal = (scratch.tmp_a.size() > 1);
         if (is_interchromosomal) cr.chimera_type = CHIMERA_TRANS;
 
         // --- Query each exon block ---
         int n_introns = static_cast<int>(introns.size());
-        std::vector<std::vector<int32_t>> exon_t_sets(n_exons);
-        std::vector<std::vector<int32_t>> transcript_t_sets(n_exons);
+        auto& exon_t_sets = scratch.exon_t_sets;
+        auto& transcript_t_sets = scratch.transcript_t_sets;
+        exon_t_sets.resize(static_cast<size_t>(n_exons));
+        transcript_t_sets.resize(static_cast<size_t>(n_exons));
         cr.exon_strand = STRAND_NONE;
         cr.read_length = 0;
 
@@ -1041,8 +1105,10 @@ public:
                 continue;
             }
 
-            std::unordered_set<int32_t> block_exon_t;
-            std::unordered_set<int32_t> block_transcript_t;
+            auto& block_exon_t = exon_t_sets[static_cast<size_t>(bi)];
+            auto& block_transcript_t = transcript_t_sets[static_cast<size_t>(bi)];
+            block_exon_t.clear();
+            block_transcript_t.clear();
 
             const char* ref_str = id_to_ref_[eb.ref_id].c_str();
             int64_t n = cr_overlap(cr_, ref_str, bstart, bend,
@@ -1065,7 +1131,7 @@ public:
                     bool any_pos = false, any_neg = false;
                     for (int32_t k = 0; k < cnt; k++) {
                         int32_t ti = t_set_data_[off + k];
-                        block_exon_t.insert(ti);
+                        block_exon_t.push_back(ti);
                         if (bp > 0) {
                             scratch.mark_dirty(ti);
                             scratch.t_exon_bp[ti] += bp;
@@ -1086,7 +1152,7 @@ public:
                     bool any_pos = false, any_neg = false;
                     for (int32_t k = 0; k < cnt; k++) {
                         int32_t ti = t_set_data_[off + k];
-                        block_transcript_t.insert(ti);
+                        block_transcript_t.push_back(ti);
                         if (bp > 0) {
                             scratch.mark_dirty(ti);
                             scratch.t_transcript_bp[ti] += bp;
@@ -1103,12 +1169,8 @@ public:
                 }
             }
 
-            exon_t_sets[bi].assign(block_exon_t.begin(), block_exon_t.end());
-            std::sort(exon_t_sets[bi].begin(), exon_t_sets[bi].end());
-            transcript_t_sets[bi].assign(block_transcript_t.begin(),
-                                         block_transcript_t.end());
-            std::sort(transcript_t_sets[bi].begin(),
-                      transcript_t_sets[bi].end());
+            sort_unique(block_exon_t);
+            sort_unique(block_transcript_t);
         }
 
         // --- Intrachromosomal chimera detection ---
@@ -1133,19 +1195,19 @@ public:
         // strand-aware exon_bp_pos/_neg accumulation (nRNAs must not
         // pollute the calibration overlap counts).
         if (!nrna_parent_.empty()) {
-            std::unordered_set<int32_t> nrna_set;
             auto add_nrna = [&](int32_t ti) {
                 if (ti < 0 ||
                     ti >= static_cast<int32_t>(nrna_parent_.size())) return;
                 int32_t n = nrna_parent_[ti];
-                if (n >= 0 && n != ti) nrna_set.insert(n);
+                if (n >= 0 && n != ti) scratch.nrna_t.push_back(n);
             };
             for (const auto& s : exon_t_sets)
                 for (int32_t ti : s) add_nrna(ti);
             for (const auto& s : transcript_t_sets)
                 for (int32_t ti : s) add_nrna(ti);
 
-            for (int32_t n : nrna_set) {
+            sort_unique(scratch.nrna_t);
+            for (int32_t n : scratch.nrna_t) {
                 // Synthetic nRNAs have exactly one exon by construction;
                 // annotated nascent-equivs are handled via cgranges and
                 // never appear here (their nrna_parent_[ti] == ti was
@@ -1175,19 +1237,21 @@ public:
         }
 
         // --- SJ matching ---
-        std::vector<std::vector<int32_t>> sj_t_sets_vec;
+        auto& sj_t_sets_vec = scratch.sj_t_sets;
         bool has_annotated_sj = false;
         bool has_unannotated_sj = false;
         cr.sj_strand = STRAND_NONE;
 
         for (int ii = 0; ii < n_introns; ii++) {
-            auto sj_t = sj_lookup(introns[ii].ref_id, introns[ii].start,
-                                   introns[ii].end, introns[ii].strand);
+            sj_t_sets_vec.emplace_back();
+            auto& sj_t = sj_t_sets_vec.back();
+            sj_lookup_into(introns[ii].ref_id, introns[ii].start,
+                           introns[ii].end, introns[ii].strand, sj_t);
             if (!sj_t.empty()) {
-                sj_t_sets_vec.push_back(std::move(sj_t));
                 has_annotated_sj = true;
                 cr.sj_strand |= introns[ii].strand;
             } else {
+                sj_t_sets_vec.pop_back();
                 has_unannotated_sj = true;
             }
         }
@@ -1243,11 +1307,16 @@ public:
             }
 
             if (!parts.empty()) {
-                std::unordered_set<int32_t> all;
-                for (const auto& p : parts)
-                    for (int32_t v : p) all.insert(v);
-                cr.t_inds.assign(all.begin(), all.end());
-                std::sort(cr.t_inds.begin(), cr.t_inds.end());
+                cr.t_inds = std::move(parts[0]);
+                for (size_t pi = 1; pi < parts.size(); pi++) {
+                    scratch.tmp_union.clear();
+                    scratch.tmp_union.reserve(cr.t_inds.size() + parts[pi].size());
+                    std::set_union(cr.t_inds.begin(), cr.t_inds.end(),
+                                   parts[pi].begin(), parts[pi].end(),
+                                   std::back_inserter(scratch.tmp_union));
+                    cr.t_inds.assign(scratch.tmp_union.begin(),
+                                     scratch.tmp_union.end());
+                }
                 cr.merge_criteria =
                     (parts.size() == 1) ? best_criteria : MC_UNION;
             }
@@ -1277,17 +1346,20 @@ public:
 
         // --- Overlap profiles (parallel to t_inds) ---
         // Skip when t_inds is empty (intergenic / unresolved).
-        std::unordered_set<int32_t> all_overlap_t;
+        auto& all_overlap_t = scratch.all_overlap_t;
+        all_overlap_t.clear();
         for (const auto& s : exon_t_sets)
-            for (int32_t v : s) all_overlap_t.insert(v);
+            all_overlap_t.insert(all_overlap_t.end(), s.begin(), s.end());
         for (const auto& s : transcript_t_sets)
-            for (int32_t v : s) all_overlap_t.insert(v);
+            all_overlap_t.insert(all_overlap_t.end(), s.begin(), s.end());
+        sort_unique(all_overlap_t);
 
         bool any_overlap = !all_overlap_t.empty() && cr.read_length > 0;
         cr.t_exon_bp.reserve(cr.t_inds.size());
         cr.t_intron_bp.reserve(cr.t_inds.size());
         for (int32_t t : cr.t_inds) {
-            if (any_overlap && all_overlap_t.count(t)) {
+            if (any_overlap && std::binary_search(
+                    all_overlap_t.begin(), all_overlap_t.end(), t)) {
                 cr.t_exon_bp.push_back(scratch.t_exon_bp[t]);
                 cr.t_intron_bp.push_back(
                     std::max(scratch.t_transcript_bp[t] - scratch.t_exon_bp[t], 0));

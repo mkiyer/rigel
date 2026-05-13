@@ -215,6 +215,10 @@ struct QnameGroup {
     int64_t frag_id = 0;
 };
 
+struct QnameBatch {
+    std::vector<QnameGroup> groups;
+};
+
 // ================================================================
 // Model training observation collectors
 // ================================================================
@@ -1078,14 +1082,16 @@ public:
                   const std::vector<int32_t>& t_strand_arr,
                   int64_t chunk_size = 1000000,
                   int n_workers = 1,
-                  int n_decomp_threads = 2)
+                  int n_decomp_threads = 2,
+                  int qname_batch_size = 512)
     {
         if (n_workers < 1) n_workers = 1;
         if (chunk_size < 1) chunk_size = 1;
+        if (qname_batch_size < 1) qname_batch_size = 1;
 
         // Two queues: input (SPMC) and output (MPSC)
-        BoundedQueue<QnameGroup> input_queue(
-            static_cast<size_t>(n_workers * 2));
+        BoundedQueue<QnameBatch> input_queue(
+            static_cast<size_t>(n_workers * 4));
         BoundedQueue<FragmentAccumulator> output_queue(
             static_cast<size_t>(n_workers * 2));
 
@@ -1126,21 +1132,27 @@ public:
                                   region_index]()
             {
                 WorkerState& ws = *worker_states[i];
-                QnameGroup group;
-                while (input_queue.pop(group)) {
-                    process_qname_group_threaded(
-                        group, *ctx, ws, include_multimap, region_index);
-                    // Emit a chunk when accumulator reaches threshold
-                    if (ws.accumulator.get_size() >= chunk_size) {
-                        if (!output_queue.push(std::move(ws.accumulator))) {
-                            break;  // aborted
+                QnameBatch batch;
+                bool output_aborted = false;
+                while (input_queue.pop(batch)) {
+                    for (auto& group : batch.groups) {
+                        process_qname_group_threaded(
+                            group, *ctx, ws, include_multimap, region_index);
+                        // Emit a chunk when accumulator reaches threshold
+                        if (ws.accumulator.get_size() >= chunk_size) {
+                            if (!output_queue.push(std::move(ws.accumulator))) {
+                                output_aborted = true;
+                                break;  // aborted
+                            }
+                            ws.accumulator = FragmentAccumulator();
+                            ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
                         }
-                        ws.accumulator = FragmentAccumulator();
-                        ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
                     }
+                    batch.groups.clear();
+                    if (output_aborted) break;
                 }
                 // Flush remaining fragments
-                if (ws.accumulator.get_size() > 0) {
+                if (!output_aborted && ws.accumulator.get_size() > 0) {
                     output_queue.push(std::move(ws.accumulator));
                 }
             });
@@ -1174,8 +1186,31 @@ public:
                 }
 
                 QnameGroup current_group;
+                QnameBatch current_batch;
+                current_batch.groups.reserve(
+                    static_cast<size_t>(qname_batch_size));
                 std::string current_qname;
                 int64_t frag_id = 0;
+                bool input_aborted = false;
+
+                auto push_group = [&](QnameGroup&& group) -> bool {
+                    current_batch.groups.push_back(std::move(group));
+                    if (static_cast<int>(current_batch.groups.size()) < qname_batch_size) {
+                        return true;
+                    }
+                    if (!input_queue.push(std::move(current_batch))) {
+                        return false;
+                    }
+                    current_batch = QnameBatch{};
+                    current_batch.groups.reserve(
+                        static_cast<size_t>(qname_batch_size));
+                    return true;
+                };
+
+                auto flush_batch = [&]() -> bool {
+                    if (current_batch.groups.empty()) return true;
+                    return input_queue.push(std::move(current_batch));
+                };
 
                 while (sam_read1(fp, hdr, b) >= 0) {
                     stats_.total++;
@@ -1202,7 +1237,8 @@ public:
                     if (!current_group.records.empty() &&
                         current_qname != qname) {
                         current_group.frag_id = frag_id++;
-                        if (!input_queue.push(std::move(current_group))) {
+                        if (!push_group(std::move(current_group))) {
+                            input_aborted = true;
                             break;  // aborted
                         }
                         current_group = QnameGroup{};
@@ -1216,9 +1252,12 @@ public:
                 }
 
                 // Flush last group
-                if (!current_group.records.empty()) {
+                if (!input_aborted && !current_group.records.empty()) {
                     current_group.frag_id = frag_id++;
-                    input_queue.push(std::move(current_group));
+                    input_aborted = !push_group(std::move(current_group));
+                }
+                if (!input_aborted) {
+                    flush_batch();
                 }
 
                 bam_destroy1(b);
@@ -2331,6 +2370,7 @@ NB_MODULE(_bam_impl, m) {
              nb::arg("chunk_size") = 1000000,
              nb::arg("n_workers") = 1,
              nb::arg("n_decomp_threads") = 2,
+             nb::arg("qname_batch_size") = 512,
              "Scan BAM file with streaming chunk output.\n\n"
              "Reads the BAM in a background thread, resolves fragments in\n"
              "worker threads, and streams finalized chunks to a Python\n"
@@ -2349,7 +2389,9 @@ NB_MODULE(_bam_impl, m) {
              "n_workers : int\n"
              "    Number of worker threads (default 1).\n"
              "n_decomp_threads : int\n"
-             "    Number of htslib BGZF decompression threads (default 2).\n\n"
+             "    Number of htslib BGZF decompression threads (default 2).\n"
+             "qname_batch_size : int\n"
+             "    Read-name groups per input queue item (default 512).\n\n"
              "Returns\n"
              "-------\n"
              "dict\n"

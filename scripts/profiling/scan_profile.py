@@ -49,6 +49,7 @@ class ScanRun:
     n_scan_threads: int
     n_decomp_threads: int
     chunk_size: int
+    qname_batch_size: int
     max_memory_bytes: int
     n_bam_records: int
     n_read_names: int
@@ -91,6 +92,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--repeat", type=int, default=1, help="Repeat every configuration")
     parser.add_argument("--chunk-size", type=int, default=1_000_000)
+    parser.add_argument("--qname-batch-size", type=int, default=512)
     parser.add_argument("--max-memory-gib", type=float, default=4.0)
     parser.add_argument("--spill-dir", type=Path, default=None)
     parser.add_argument("--max-frag-length", type=int, default=1000)
@@ -121,11 +123,13 @@ def _run_one(
     timeline = MemoryTimeline(interval_sec=memory_interval_sec)
 
     logger.info(
-        "Starting %s: scan_threads=%d decomp_threads=%d chunk_size=%d max_mem=%.2f GiB",
+        "Starting %s: scan_threads=%d decomp_threads=%d chunk_size=%d "
+        "qname_batch_size=%d max_mem=%.2f GiB",
         name,
         scan_cfg.n_scan_threads,
         scan_cfg.n_decomp_threads,
         scan_cfg.chunk_size,
+        scan_cfg.qname_batch_size,
         scan_cfg.max_memory_bytes / 1024**3,
     )
     timeline.start()
@@ -166,6 +170,7 @@ def _run_one(
         n_scan_threads=scan_cfg.n_scan_threads,
         n_decomp_threads=scan_cfg.n_decomp_threads,
         chunk_size=scan_cfg.chunk_size,
+        qname_batch_size=scan_cfg.qname_batch_size,
         max_memory_bytes=scan_cfg.max_memory_bytes,
         n_bam_records=int(stats_dict["total"]),
         n_read_names=int(stats_dict["n_read_names"]),
@@ -245,6 +250,7 @@ def main() -> int:
                 max_frag_length=args.max_frag_length,
                 sj_strand_tag=sj_tag,
                 chunk_size=args.chunk_size,
+                qname_batch_size=args.qname_batch_size,
                 max_memory_bytes=max_memory_bytes,
                 spill_dir=spill_base,
                 n_scan_threads=scan_threads,

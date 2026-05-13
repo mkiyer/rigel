@@ -78,6 +78,10 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.config is None
 
+    def test_qname_batch_size_default_none(self):
+        args = _parse_quant()
+        assert args.qname_batch_size is None
+
 
 # ---------------------------------------------------------------------------
 # Boolean optional action
@@ -187,6 +191,22 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.sj_strand_tag == ["XS", "ts"]
 
+    def test_yaml_qname_batch_size(self, tmp_path):
+        """YAML can set the advanced scanner queue batch size."""
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("qname_batch_size: 128\n")
+        args = _parse_quant("--config", str(cfg))
+        _resolve_quant_args(args, _build_quant_defaults())
+        assert args.qname_batch_size == 128
+
+    def test_cli_qname_batch_size_overrides_yaml(self, tmp_path):
+        """CLI qname batch size wins over YAML like other parameters."""
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("qname_batch_size: 128\n")
+        args = _parse_quant("--config", str(cfg), "--qname-batch-size", "256")
+        _resolve_quant_args(args, _build_quant_defaults())
+        assert args.qname_batch_size == 256
+
 
 # ---------------------------------------------------------------------------
 # Config round-trip: defaults → resolve → build should match PipelineConfig()
@@ -249,3 +269,12 @@ class TestConfigRoundTrip:
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
         assert cfg.calibration.pool_quality_good == 9999
         assert cfg.calibration.pool_quality_weak == 42
+
+    def test_qname_batch_size_flows_to_config(self):
+        """``--qname-batch-size`` reaches ``BamScanConfig``."""
+        from rigel.cli import _build_pipeline_config
+
+        args = _parse_quant("--qname-batch-size", "256")
+        _resolve_quant_args(args, _build_quant_defaults())
+        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        assert cfg.scan.qname_batch_size == 256

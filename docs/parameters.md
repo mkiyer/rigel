@@ -65,6 +65,7 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 |------|---------|-------------|
 | `--threads N` | `0` | Thread count for BAM scanning and locus EM (these stages run serially). `0` = all available cores, `1` = sequential. |
 | `--tmpdir DIR` | system temp | Directory for fragment-buffer spill files when memory is exceeded. Use a fast local SSD. |
+| `--qname-batch-size N` | `512` | Advanced scanner scheduling knob: read-name groups per native worker-queue item. Lower values are useful for queue-boundary debugging; larger values may reduce queue overhead at the cost of slightly more in-flight memory. |
 | `--seed N` | timestamp | Random seed for reproducibility. Affects post-EM `sample` assignment. |
 
 ---
@@ -110,6 +111,7 @@ em_mode: vbem                  # vbem | map
 
 # Performance
 threads: 0                     # 0 = all available cores
+qname_batch_size: 512          # read-name groups per scanner queue item
 seed: null                     # null = use current timestamp
 tmpdir: null                   # null = system temp directory
 
