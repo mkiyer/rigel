@@ -129,3 +129,61 @@ def test_slow_path_output_dtype_int32():
     parts = partition_units_to_loci(ml, em, t_to_local)
     for arr in parts:
         assert arr.dtype == np.int32
+
+
+def test_vectorized_path_matches_legacy_random():
+    """The vectorized argsort+searchsorted partition must produce
+    bit-identical output (per-bin order) to the legacy
+    ``unit_indices[bins == j]`` mask path.
+    """
+    rng = np.random.default_rng(20260513)
+    n_loci = 100
+    n_units = 10_000
+    bins = rng.integers(0, n_loci, size=n_units, dtype=np.int32)
+    unit_indices = rng.permutation(n_units).astype(np.int32)
+
+    # Reference: legacy mask-per-locus path.
+    expected = tuple(
+        np.ascontiguousarray(unit_indices[bins == j], dtype=np.int32)
+        for j in range(n_loci)
+    )
+
+    # Drive through partition_units_to_loci by constructing a fake ML
+    # whose anchor lookup yields exactly ``bins``.
+    loci = tuple(_make_locus(0, j * 1_000_000, j * 1_000_000 + 500) for j in range(n_loci))
+    transcript_indices = np.arange(n_loci, dtype=np.int32)
+    ml = _make_ml(0, transcript_indices, unit_indices, loci)
+    em = _MiniEM(locus_t_indices=np.zeros(int(unit_indices.max()) + 1, dtype=np.int32))
+    em.locus_t_indices[unit_indices] = transcript_indices[bins]
+    t_starts = np.array([loc.start for loc in loci], dtype=np.int64)
+    t_ref = np.zeros(n_loci, dtype=np.int32)
+    t_to_local = build_t_to_local_locus(ml, t_starts, t_ref)
+    parts = partition_units_to_loci(ml, em, t_to_local)
+
+    assert len(parts) == n_loci
+    for j in range(n_loci):
+        np.testing.assert_array_equal(parts[j], expected[j])
+        assert parts[j].dtype == np.int32
+
+
+def test_int32_supports_more_than_127_loci():
+    """Real-world MultiLoci can contain >127 distinct contiguous Locus
+    intervals (paralog clusters); the bin-id dtype must be int32, not
+    int8.
+    """
+    n_loci = 200
+    loci = tuple(_make_locus(0, j * 1_000_000, j * 1_000_000 + 500) for j in range(n_loci))
+    transcript_indices = np.arange(n_loci, dtype=np.int32)
+    unit_indices = np.arange(n_loci, dtype=np.int32) + 1000
+    ml = _make_ml(0, transcript_indices, unit_indices, loci)
+    em = _MiniEM(locus_t_indices=np.zeros(int(unit_indices.max()) + 1, dtype=np.int32))
+    em.locus_t_indices[unit_indices] = transcript_indices
+    t_starts = np.array([loc.start for loc in loci], dtype=np.int64)
+    t_ref = np.zeros(n_loci, dtype=np.int32)
+    t_to_local = build_t_to_local_locus(ml, t_starts, t_ref)
+    assert t_to_local.dtype == np.int32
+    assert int(t_to_local.max()) == n_loci - 1
+    parts = partition_units_to_loci(ml, em, t_to_local)
+    assert len(parts) == n_loci
+    for j in range(n_loci):
+        assert parts[j].tolist() == [int(unit_indices[j])]

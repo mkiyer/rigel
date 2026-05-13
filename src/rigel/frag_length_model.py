@@ -82,6 +82,10 @@ class FragmentLengthModel:
         self._prob: np.ndarray | None = None
         self._stats_use_prob: bool = False
         self._finalized: bool = False
+        # Lazy cache for _build_eff_len_cache(); populated on first call
+        # after finalize() and invalidated when the model is re-finalized.
+        self._cdf_cache: np.ndarray | None = None
+        self._cmom_cache: np.ndarray | None = None
 
     @property
     def n_observations(self) -> int:
@@ -333,6 +337,9 @@ class FragmentLengthModel:
         self._stats_use_prob = prior_total > 0.0
         self._tail_base: float = float(self._log_prob[self.max_size])
         self._finalized = True
+        # Invalidate eff-len cache so it rebuilds against the new _prob.
+        self._cdf_cache = None
+        self._cmom_cache = None
 
     # ------------------------------------------------------------------
     # Likelihood for Bayesian quantification
@@ -403,11 +410,21 @@ class FragmentLengthModel:
         Returns (cdf, cmom) each of shape (max_size+1,) where:
             cdf[k] = sum_{l=0}^{k} P(l)
             cmom[k] = sum_{l=0}^{k} l * P(l)
+
+        After ``finalize()`` the model is immutable; the cumulative
+        arrays are computed once and memoized.  Pre-finalize callers
+        get a fresh recompute on every call (the histogram may still
+        change).
         """
+        if self._finalized and self._cdf_cache is not None:
+            return self._cdf_cache, self._cmom_cache
         probs = self._normalized_probs()  # shape (max_size+1,)
         cdf = np.cumsum(probs)
         l_vals = np.arange(len(probs), dtype=np.float64)
         cmom = np.cumsum(probs * l_vals)
+        if self._finalized:
+            self._cdf_cache = cdf
+            self._cmom_cache = cmom
         return cdf, cmom
 
     def compute_all_transcript_eff_lens(

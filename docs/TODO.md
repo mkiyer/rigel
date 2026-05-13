@@ -1,5 +1,12 @@
 # TODO
 
+
+## Rigel index with GTF duplicates
+
+GENCODE GTF has duplicates (why?)
+Need option to drop duplicates during index build
+Keep lexicographically smallest transcript id?
+
 ## Performance optimization
 
 

@@ -108,7 +108,18 @@ def partition_units_to_loci(
         )
 
     unit_indices = ml.unit_indices
+    if unit_indices.size == 0:
+        return tuple(np.empty(0, dtype=np.int32) for _ in range(n_loci))
+
+    # Vectorized partition: one stable argsort + searchsorted on the
+    # sorted bin labels, instead of n_loci × O(n_units) boolean masks.
+    # Stable sort preserves intra-bin order, matching the legacy
+    # ``unit_indices[bins == j]`` semantics bit-for-bit.
+    order = np.argsort(bins, kind="stable")
+    sorted_bins = bins[order]
+    sorted_units = np.ascontiguousarray(unit_indices[order], dtype=np.int32)
+    edges = np.searchsorted(sorted_bins, np.arange(n_loci + 1, dtype=sorted_bins.dtype))
     return tuple(
-        np.ascontiguousarray(unit_indices[bins == j], dtype=np.int32)
+        np.ascontiguousarray(sorted_units[edges[j] : edges[j + 1]])
         for j in range(n_loci)
     )

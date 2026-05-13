@@ -236,6 +236,11 @@ endif()
 # RIGEL_PORTABLE: when ON, omit -march=native so wheels run on any machine
 # of the same architecture. CI wheel builds set this; local dev leaves it OFF.
 option(RIGEL_PORTABLE "Build portable wheels (no -march=native)" OFF)
+option(
+  RIGEL_PROFILE_NATIVE
+  "Build native extensions with profiler-friendly symbols/frame pointers and disable LTO"
+  OFF
+)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     if(RIGEL_PORTABLE)
@@ -251,13 +256,25 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     if(TARGET _bam_impl)
         target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
     endif()
+
+    if(RIGEL_PROFILE_NATIVE)
+      foreach(_rigel_native_target
+          _em_impl _scoring_impl _resolve_impl _cgranges_impl _bam_impl)
+        if(TARGET ${_rigel_native_target})
+          target_compile_options(
+            ${_rigel_native_target}
+            PRIVATE -g -fno-omit-frame-pointer
+          )
+        endif()
+      endforeach()
+    endif()
 endif()
 
 # Link-Time Optimization (LTO): enables cross-TU inlining and dead code
 # elimination across compilation units.
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ipo_supported)
-if(ipo_supported)
+if(ipo_supported AND NOT RIGEL_PROFILE_NATIVE)
     set_property(TARGET _em_impl      PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     set_property(TARGET _scoring_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     set_property(TARGET _resolve_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -265,4 +282,6 @@ if(ipo_supported)
     if(TARGET _bam_impl)
         set_property(TARGET _bam_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
+elseif(RIGEL_PROFILE_NATIVE)
+  message(STATUS "Native profiling build: debug symbols/frame pointers enabled; LTO disabled")
 endif()

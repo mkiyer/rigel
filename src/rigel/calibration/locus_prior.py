@@ -390,6 +390,99 @@ def _boundary_term_prorated(
     return rho_loco, n_eligible, n_boundary_observed, l_core_exon, n_exon_only
 
 
+@dataclass(frozen=True, slots=True)
+class _LocusScratch:
+    """Per-Locus shared work between :func:`estimate_locus_gdna` and
+    :func:`expected_gdna_count_global`.
+
+    Computed once by :func:`_compute_locus_scratch` and threaded into
+    both helpers so the per-Locus ``region_index.overlap`` query and
+    FL-aware ``contained_exposure_clipped`` evaluations are not
+    duplicated.  Internal optimisation used by :func:`assemble_priors`;
+    the public helpers retain their original signatures and recompute
+    the scratch on demand when ``_scratch`` is ``None``.
+    """
+
+    pad_lo: int
+    pad_hi: int
+    region_ids: np.ndarray
+    types: np.ndarray
+    starts: np.ndarray
+    ends: np.ndarray
+    bf_l: np.ndarray
+    bf_r: np.ndarray
+    eff_full: np.ndarray
+    eff_clip_core: np.ndarray
+    eff_clip_evidence: np.ndarray
+    is_ig: np.ndarray
+    is_in: np.ndarray
+    is_ex: np.ndarray
+
+
+def _compute_locus_scratch(
+    locus: Locus,
+    region_index: RegionIndexPy,
+    region_arrays: RegionArrays,
+    gdna_fl: FragmentLengthModel,
+    *,
+    intergenic_flank_bp: int,
+    ref_length: int | None,
+) -> _LocusScratch | None:
+    """Build a :class:`_LocusScratch` for this locus.
+
+    Returns ``None`` when the (padded) region overlap is empty so the
+    caller can preserve the legacy "no overlap" behaviour
+    (``estimate_locus_gdna`` raises; ``expected_gdna_count_global``
+    returns a zeroed :class:`ExpectedGdnaPriorParts`).
+    """
+    locus_start = int(locus.start)
+    locus_end = int(locus.end)
+    pad = max(0, int(intergenic_flank_bp))
+    pad_lo = max(0, locus_start - pad)
+    pad_hi = locus_end + pad if ref_length is None else min(int(ref_length), locus_end + pad)
+
+    region_ids = region_index.overlap(locus.ref_id, pad_lo, pad_hi)
+    if region_ids.size == 0:
+        return None
+
+    types = region_arrays.type[region_ids]
+    starts = region_arrays.start[region_ids]
+    ends = region_arrays.end[region_ids]
+    bf_l = region_arrays.bf_left[region_ids]
+    bf_r = region_arrays.bf_right[region_ids]
+
+    eff_full, eff_clip_core = contained_exposure_clipped(
+        starts, ends, locus_start, locus_end, gdna_fl
+    )
+    if pad == 0:
+        eff_clip_evidence = eff_clip_core
+    else:
+        _, eff_clip_evidence = contained_exposure_clipped(
+            starts, ends, pad_lo, pad_hi, gdna_fl
+        )
+
+    is_ig = types == int(RegionType.INTERGENIC)
+    is_in = types == int(RegionType.INTRON)
+    is_ex = types == int(RegionType.EXON)
+
+    return _LocusScratch(
+        pad_lo=pad_lo,
+        pad_hi=pad_hi,
+        region_ids=region_ids,
+        types=types,
+        starts=starts,
+        ends=ends,
+        bf_l=bf_l,
+        bf_r=bf_r,
+        eff_full=eff_full,
+        eff_clip_core=eff_clip_core,
+        eff_clip_evidence=eff_clip_evidence,
+        is_ig=is_ig,
+        is_in=is_in,
+        is_ex=is_ex,
+    )
+
+
 def estimate_locus_gdna(
     locus: Locus,
     n_obs: int,
@@ -402,6 +495,8 @@ def estimate_locus_gdna(
     intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
     ref_length: int | None = None,
     splicing_anchor_tolerance: int = 0,
+    b_cross: float | None = None,
+    _scratch: _LocusScratch | None = None,
 ) -> LocusGdnaEstimate:
     """Estimate the gDNA mass and π̂_gdna for one ``Locus``.
 
@@ -433,37 +528,33 @@ def estimate_locus_gdna(
     # 1. Padded region query (§3.5 step 1). Mass terms always use the
     #    unflanked window; the pad widens only the *intergenic* evidence
     #    branch via ratio_evidence below.
-    pad = max(0, int(intergenic_flank_bp))
-    pad_lo = max(0, locus_start - pad)
-    pad_hi = locus_end + pad if ref_length is None else min(int(ref_length), locus_end + pad)
-    region_ids = region_index.overlap(locus.ref_id, pad_lo, pad_hi)
-    if region_ids.size == 0:
-        raise RuntimeError(
-            f"estimate_locus_gdna: Locus(ref={locus.ref!r}, start={locus_start}, "
-            f"end={locus_end}) overlaps no regions. BAM reference does not "
-            f"match index — rebuild the index or check the BAM header."
+    if _scratch is None:
+        _scratch = _compute_locus_scratch(
+            locus,
+            region_index,
+            region_arrays,
+            gdna_fl,
+            intergenic_flank_bp=intergenic_flank_bp,
+            ref_length=ref_length,
         )
+        if _scratch is None:
+            raise RuntimeError(
+                f"estimate_locus_gdna: Locus(ref={locus.ref!r}, start={locus_start}, "
+                f"end={locus_end}) overlaps no regions. BAM reference does not "
+                f"match index — rebuild the index or check the BAM header."
+            )
 
-    types = region_arrays.type[region_ids]
-    starts = region_arrays.start[region_ids]
-    ends = region_arrays.end[region_ids]
-    bf_l = region_arrays.bf_left[region_ids]
-    bf_r = region_arrays.bf_right[region_ids]
-
-    # 2. FL-aware exposure: full, evidence-clipped, core-clipped (§3.5 step 2).
-    eff_full, eff_clip_core = contained_exposure_clipped(
-        starts, ends, locus_start, locus_end, gdna_fl
-    )
-    if pad == 0:
-        eff_clip_evidence = eff_clip_core
-    else:
-        _, eff_clip_evidence = contained_exposure_clipped(
-            starts, ends, pad_lo, pad_hi, gdna_fl
-        )
-
-    is_ig = types == int(RegionType.INTERGENIC)
-    is_in = types == int(RegionType.INTRON)
-    is_ex = types == int(RegionType.EXON)
+    region_ids = _scratch.region_ids
+    starts = _scratch.starts
+    ends = _scratch.ends
+    bf_l = _scratch.bf_l
+    bf_r = _scratch.bf_r
+    eff_full = _scratch.eff_full
+    eff_clip_core = _scratch.eff_clip_core
+    eff_clip_evidence = _scratch.eff_clip_evidence
+    is_ig = _scratch.is_ig
+    is_in = _scratch.is_in
+    is_ex = _scratch.is_ex
 
     fallback_flags = 0
 
@@ -496,9 +587,10 @@ def estimate_locus_gdna(
         fallback_flags |= FLAG_INTRON_ZERO_LEFF
 
     # 5. BOUNDARY (§3.5 step 5).
-    b_cross = boundary_crossing_exposure(
-        gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
-    )
+    if b_cross is None:
+        b_cross = boundary_crossing_exposure(
+            gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
+        )
     rho_b, n_eligible, n_b_observed, l_core_exon, n_exon_only = _boundary_term_prorated(
         exon_in_locus=is_ex,
         region_ids_locus=region_ids,
@@ -589,6 +681,8 @@ def expected_gdna_count_global(
     *,
     ref_length: int | None = None,  # noqa: ARG001 (reserved; global-only path is unflanked)
     splicing_anchor_tolerance: int = 0,
+    b_cross: float | None = None,
+    _scratch: _LocusScratch | None = None,
 ) -> ExpectedGdnaPriorParts:
     """Pure global-only expected gDNA pseudocount for one ``Locus``.
 
@@ -613,39 +707,55 @@ def expected_gdna_count_global(
     locus_start = int(locus.start)
     locus_end = int(locus.end)
 
-    region_ids = region_index.overlap(locus.ref_id, locus_start, locus_end)
-    if region_ids.size == 0:
-        # No overlapping regions ⇒ no exposure ⇒ η_g = 0. The caller
-        # decides whether this is anomalous (it usually means a BAM
-        # ref/index mismatch, which ``estimate_locus_gdna`` flags
-        # loudly).
-        return ExpectedGdnaPriorParts(
-            total=0.0,
-            intergenic_contained=0.0,
-            intron_contained=0.0,
-            boundary_crossing_expected=0.0,
-            exon_contained_expected=0.0,
-            density_exposure_intergenic=0.0,
-            density_exposure_intron=0.0,
-            density_exposure_boundary=0.0,
+    if _scratch is not None:
+        # Reuse caller's scratch.  The flanked overlap is a superset of
+        # the unflanked overlap; mass terms use ``eff_clip_core`` which
+        # already clips to ``[locus_start, locus_end]`` and is therefore
+        # 0 for any region that does not overlap the unflanked locus.
+        # ``boundary_side_in_window`` likewise tests ``[locus_start,
+        # locus_end]`` and naturally rejects flanked-only regions.
+        starts = _scratch.starts
+        ends = _scratch.ends
+        bf_l = _scratch.bf_l
+        bf_r = _scratch.bf_r
+        eff_clip_core = _scratch.eff_clip_core
+        is_ig = _scratch.is_ig
+        is_in = _scratch.is_in
+        is_ex = _scratch.is_ex
+    else:
+        region_ids = region_index.overlap(locus.ref_id, locus_start, locus_end)
+        if region_ids.size == 0:
+            # No overlapping regions ⇒ no exposure ⇒ η_g = 0. The caller
+            # decides whether this is anomalous (it usually means a BAM
+            # ref/index mismatch, which ``estimate_locus_gdna`` flags
+            # loudly).
+            return ExpectedGdnaPriorParts(
+                total=0.0,
+                intergenic_contained=0.0,
+                intron_contained=0.0,
+                boundary_crossing_expected=0.0,
+                exon_contained_expected=0.0,
+                density_exposure_intergenic=0.0,
+                density_exposure_intron=0.0,
+                density_exposure_boundary=0.0,
+            )
+
+        types = region_arrays.type[region_ids]
+        starts = region_arrays.start[region_ids]
+        ends = region_arrays.end[region_ids]
+        bf_l = region_arrays.bf_left[region_ids]
+        bf_r = region_arrays.bf_right[region_ids]
+
+        # FL-PMF-weighted contained exposure: full + clipped to the locus.
+        # The pure global-only path uses no flank — mass terms always live
+        # inside the unflanked locus interval.
+        _, eff_clip_core = contained_exposure_clipped(
+            starts, ends, locus_start, locus_end, gdna_fl
         )
 
-    types = region_arrays.type[region_ids]
-    starts = region_arrays.start[region_ids]
-    ends = region_arrays.end[region_ids]
-    bf_l = region_arrays.bf_left[region_ids]
-    bf_r = region_arrays.bf_right[region_ids]
-
-    # FL-PMF-weighted contained exposure: full + clipped to the locus.
-    # The pure global-only path uses no flank — mass terms always live
-    # inside the unflanked locus interval.
-    _, eff_clip_core = contained_exposure_clipped(
-        starts, ends, locus_start, locus_end, gdna_fl
-    )
-
-    is_ig = types == int(RegionType.INTERGENIC)
-    is_in = types == int(RegionType.INTRON)
-    is_ex = types == int(RegionType.EXON)
+        is_ig = types == int(RegionType.INTERGENIC)
+        is_in = types == int(RegionType.INTRON)
+        is_ex = types == int(RegionType.EXON)
 
     l_core_ig = float(eff_clip_core[is_ig].sum()) if is_ig.any() else 0.0
     l_core_in = float(eff_clip_core[is_in].sum()) if is_in.any() else 0.0
@@ -669,7 +779,7 @@ def expected_gdna_count_global(
 
     b_cross = boundary_crossing_exposure(
         gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
-    )
+    ) if b_cross is None else float(b_cross)
 
     rho_ig = float(global_densities.intergenic.rho)
     rho_in = float(global_densities.intron.rho)
@@ -815,6 +925,14 @@ def assemble_priors(
     payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
     region_index = RegionIndexPy(arrays=region_arrays)
 
+    # Hoist boundary-crossing exposure out of the per-locus loop:
+    # depends only on (gdna_fl, splicing_anchor_tolerance), both
+    # constant across the multi-loci. Eliminates ~one O(max_size)
+    # numpy reduction per Locus.
+    b_cross = boundary_crossing_exposure(
+        gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
+    )
+
     # Per-ref length lookup for clamping the intergenic flank window
     # (diagnostic path only). Phase\u00a02's canonical prior is unflanked.
     if intergenic_flank_bp > 0:
@@ -857,6 +975,28 @@ def assemble_priors(
         # 1. Per-locus diagnostic (legacy locoregional pi_gdna estimate).
         t_to_local = build_t_to_local_locus(ml, t_starts, t_ref)
         units_per_locus = partition_units_to_loci(ml, em_data, t_to_local)
+        # Pre-compute per-Locus shared scratch (region overlap + FL-aware
+        # contained exposures) once per locus.  Both
+        # ``estimate_locus_gdna`` and ``expected_gdna_count_global``
+        # consume it via the ``_scratch`` kwarg, halving the per-locus
+        # ``region_index.overlap`` and ``contained_exposure_clipped``
+        # calls.  When the locus has no overlapping regions the scratch
+        # is ``None`` and each helper falls back to its legacy path
+        # (raise / zeroed result).
+        loci_scratch = tuple(
+            _compute_locus_scratch(
+                loc,
+                region_index,
+                region_arrays,
+                gdna_fl,
+                intergenic_flank_bp=intergenic_flank_bp,
+                ref_length=int(ref_lengths_arr[loc.ref_id])
+                if ref_lengths_arr is not None
+                and 0 <= loc.ref_id < ref_lengths_arr.size
+                else None,
+            )
+            for loc in ml.loci
+        )
         per_locus_est = tuple(
             estimate_locus_gdna(
                 locus=loc,
@@ -872,8 +1012,10 @@ def assemble_priors(
                 and 0 <= loc.ref_id < ref_lengths_arr.size
                 else None,
                 splicing_anchor_tolerance=splicing_anchor_tolerance,
+                b_cross=b_cross,
+                _scratch=scratch,
             )
-            for j, loc in enumerate(ml.loci)
+            for j, (loc, scratch) in enumerate(zip(ml.loci, loci_scratch, strict=True))
         )
 
         # 2. Canonical Phase\u00a02 prior: η_g summed across constituent
@@ -888,8 +1030,10 @@ def assemble_priors(
                     global_densities=global_densities,
                     gdna_fl=gdna_fl,
                     splicing_anchor_tolerance=splicing_anchor_tolerance,
+                    b_cross=b_cross,
+                    _scratch=scratch,
                 ).total
-                for loc in ml.loci
+                for loc, scratch in zip(ml.loci, loci_scratch, strict=True)
             )
         )
         eta_r = 0.0
