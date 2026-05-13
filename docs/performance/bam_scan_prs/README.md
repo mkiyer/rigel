@@ -8,12 +8,15 @@ are sound, but the order and shape of the PRs needed restructuring:
 * The s4 → s8 → s12 thread sweep (135.7 s → 204.2 s → 226.9 s) shows that
   scanning gets *slower* with more workers. Until the queue pathology is
   fixed, every other measurement is contaminated.
-* Async spill is engineering complexity to work around a buffer that
-  shouldn't exist on the hot path. The right fix is to stream chunks
-  directly from scan to score and demote spill to a back-pressure
-  safety valve.
-* The original PR-03 wraps STL primitives in rigel-specific helpers
-  (`sort_unique`, `intersect_sorted_into`, …). Use STL directly.
+* Direct scan-to-score streaming is not currently a valid single-pass
+  design: scoring depends on finalized strand/FL models and calibration,
+  and those are produced after the scan. The implementable fix is to
+  keep the single-pass architecture but make chunk spill asynchronous so
+  Arrow/LZ4 serialization is removed from the scanner callback path.
+* The resolver rewrite should use standard sorted-vector algorithms and
+  avoid building a new helper layer. The only new primitive worth adding
+  is a tiny `sort_unique` helper; existing allocation-returning hot
+  helpers must be rewritten in place or bypassed.
 * The original PR-07 forks `build_fragment` into a fast/slow path. That
   doubles the test surface and creates drift risk. Wait for the resolver
   scratch-vector pattern to land, then apply the same pattern in place.
@@ -45,8 +48,8 @@ targeted experiment for offline analysis only.
 | s8 d2, 12GiB no-spill | 204.2s | 157k | 0 | 11.1GB |
 | s12 d2, 12GiB no-spill | 226.9s | 141k | 0 | 11.5GB |
 
-**Three things stand out, and all four PRs below are designed to attack
-exactly one of them each:**
+**Three things stand out, and the PRs below attack them without
+conflating unrelated changes:**
 
 1. **Negative scan-thread scaling.** s8 is 50% slower than s4 at
    no-spill. Cause: per-read-name queue traffic. → PR 01.
@@ -54,20 +57,22 @@ exactly one of them each:**
    `unordered_set` / `unordered_map` allocation dominating
    `_resolve_core`. → PR 02.
 3. **Synchronous Arrow/LZ4 spill blocks the scan callback.** Spill costs
-   ≈ 65 s on the 4 GiB / s8 run. → PR 04.
+  ≈ 65 s on the 4 GiB / s8 run. Direct scan-to-score streaming is
+  blocked by calibration/model dependencies, so the practical fix is an
+  asynchronous chunk store. → PR 04.
 
 A pile of small per-record inefficiencies (lazy SJ strand parsing,
 duplicated `ambig_strand` computation, FL hash map) accounts for a few
-percent each and ships together as one cosmetic-grade PR. → PR 03.
+percent each and ships together as one local-hygiene PR. → PR 03.
 
 ## Revised PR Series
 
 | Order | PR | Doc | Status |
 |---:|---|---|---|
 | 01 | Batch qname queue work | [pr01_batch_qname_queue.md](pr01_batch_qname_queue.md) | **must land first** — gates downstream measurements |
-| 02 | Resolver scratch vectors | [pr02_resolver_scratch_vectors.md](pr02_resolver_scratch_vectors.md) | broad rewrite, low risk after PR 01 lands |
-| 03 | Small-wins resolver hygiene | [pr03_smallwins_resolver_hygiene.md](pr03_smallwins_resolver_hygiene.md) | three independent micro-cleanups, can land any time |
-| 04 | Streaming scan→score handoff | [pr04_streaming_scan_to_score.md](pr04_streaming_scan_to_score.md) | structural, lands after PR 01–03 stabilise the inner loop |
+| 02 | Resolver scratch vectors | [pr02_resolver_scratch_vectors.md](pr02_resolver_scratch_vectors.md) | broad but representation-only rewrite after PR 01 lands |
+| 03 | Small-wins resolver hygiene | [pr03_smallwins_resolver_hygiene.md](pr03_smallwins_resolver_hygiene.md) | three local micro-cleanups; easiest after PR 02 because (c) touches resolver state |
+| 04 | Async chunk store for spill | [pr04_async_chunk_store.md](pr04_async_chunk_store.md) | keeps one-pass semantics; removes synchronous spill from scanner callback |
 | — | Fragment assembly allocator cleanup (deferred) | [pr_deferred_fragment_assembly.md](pr_deferred_fragment_assembly.md) | revisit only if `build_fragment` is still hot after PR 02 |
 
 ### Why this order
@@ -80,14 +85,15 @@ percent each and ships together as one cosmetic-grade PR. → PR 03.
 * **PR 02 second.** Once queues are not the bottleneck, the resolver is.
   PR 02 is a focused C++ rewrite of one function with a clear acceptance
   criterion (no behavior change). Land it before structural changes so
-  the streaming PR (04) doesn't carry resolver risk.
-* **PR 03 anytime.** Three independent micro-changes packaged as one
-  reviewable PR because each is too small to justify its own. Tests are
-  per-change.
-* **PR 04 last.** Streaming touches the public `FragmentBuffer` shape
-  and the scan↔score boundary. Land it on top of a clean inner loop so
-  any wall-time regression is unambiguously attributable to the
-  streaming change.
+  PR 04 doesn't carry resolver risk.
+* **PR 03 third.** The changes are small, but sub-change (c) edits
+  `RawResolveResult` and the resolver/accumulator handoff, so it is
+  cleanest after PR 02 has settled the scratch-vector representation.
+* **PR 04 fourth.** The scanner already emits chunks through a Python
+  callback. PR 04 keeps that API and makes `FragmentBuffer` spill
+  asynchronous. This avoids the false promise of direct scan-to-score
+  concurrency while preserving the single-pass training/calibration
+  model.
 
 ## Shared Validation Protocol
 

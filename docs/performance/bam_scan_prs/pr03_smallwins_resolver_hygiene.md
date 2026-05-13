@@ -13,8 +13,8 @@ split into separate PRs.
 
 * **(a)** Store `ambig_strand` on the accumulator instead of recomputing
   it from per-record fields after `finalize_zero_copy`.
-* **(b)** Cheap CIGAR pre-scan before paying for `read_sj_strand`
-  (lazy SJ strand parsing).
+* **(b)** One-pass CIGAR parse before paying for `read_sj_strand`
+  (lazy SJ strand parsing without a duplicate CIGAR scan).
 * **(c)** Replace `std::unordered_map<int32_t, int32_t> frag_lengths`
   with a t-aligned `std::vector<int32_t>`.
 
@@ -22,23 +22,29 @@ split into separate PRs.
 
 ### Motivation
 
-`ambig_strand` is computed per-record during `append`, then recomputed
-after `finalize_zero_copy` from the assembled vectors. The second
-computation is redundant and shows up in samples.
+`ambig_strand` is computed by `_resolve_core` and copied into
+`ResolvedFragment`, then recomputed after `finalize_zero_copy` from the
+assembled vectors. The second computation is redundant and shows up in
+samples.
 
 ### Current Code
 
-* Accumulator: [src/rigel/native/bam_scanner.cpp](../../../src/rigel/native/bam_scanner.cpp) (`FragmentAccumulator`)
+* Accumulator: [src/rigel/native/resolve_context.h](../../../src/rigel/native/resolve_context.h) (`FragmentAccumulator`)
 
 ### Change
 
-Add `std::vector<uint8_t> ambig_strand_;` to `FragmentAccumulator`. Push
-`r.ambig_strand` in `append`. Return it from `finalize_zero_copy`.
-Remove the recomputation block downstream.
+`_resolve_core` already computes `ResolvedFragment::ambig_strand`. Add
+`std::vector<uint8_t> ambig_strand_;` to `FragmentAccumulator`, reserve
+it, push `r.ambig_strand` in `append`, and return it from both
+`finalize` and `finalize_zero_copy`. Keep the `t_strand_arr` parameter
+temporarily if removing it would churn bindings, but stop using it for
+this column.
 
 ### Tests
 
 ```bash
+conda activate rigel
+pip install --no-build-isolation -e .
 pytest tests/test_bam_tag_parsing.py tests/test_strand_model.py \
        tests/test_orient_routing.py -v
 pytest tests/test_golden_output.py -v
@@ -47,8 +53,9 @@ pytest tests/test_golden_output.py -v
 ### Acceptance
 
 * All tests pass; golden outputs unchanged.
-* Recomputation block deleted (verify by `git grep` for the removed
-  function name returning zero matches).
+* Recomputation block deleted from `finalize` and `finalize_zero_copy`.
+  The only remaining `ambig_strand` computation should be in the
+  resolver itself.
 
 ## Sub-change (b): Lazy SJ strand parsing
 
@@ -65,25 +72,28 @@ function pays for tag lookup and string parsing on every record; for the
 
 ### Change
 
-Add a tiny helper:
+Do not add a second CIGAR pass. Parse the CIGAR once with
+`STRAND_NONE`, then read `XS`/`ts` only if `rec.sjs` is non-empty and
+patch the already-built junction entries:
 
 ```cpp
-inline bool cigar_has_ref_skip(const bam1_t* b) noexcept {
-    const uint32_t* cigar = bam_get_cigar(b);
-    const uint32_t  n = b->core.n_cigar;
-    for (uint32_t i = 0; i < n; ++i) {
-        if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) return true;
-    }
-    return false;
+parse_cigar(b, mapped_ref_id, STRAND_NONE, rec.exons, rec.sjs);
+rec.sj_strand = STRAND_NONE;
+if (!rec.sjs.empty()) {
+  rec.sj_strand = read_sj_strand(b, sj_tag_mode);
+  for (auto& sj : rec.sjs) sj.strand = rec.sj_strand;
 }
 ```
 
-Call it before `read_sj_strand`; skip the call when false. The function
-is called inline by the scanner; do not introduce a callback indirection.
+Apply the same pattern in both `parse_bam_record` and the annotated-BAM
+writer path. This avoids both the aux-tag scan on unspliced records and
+the duplicate CIGAR pre-scan.
 
 ### Tests
 
 ```bash
+conda activate rigel
+pip install --no-build-isolation -e .
 pytest tests/test_splice.py tests/test_implicit_splice.py \
        tests/test_strand_model.py -v
 pytest tests/test_golden_output.py -v
@@ -99,10 +109,10 @@ pytest tests/test_golden_output.py -v
 ### Motivation
 
 `RawResolveResult` carries a `std::unordered_map<int32_t, int32_t>
-frag_lengths` keyed by transcript ID. For every fragment, we allocate a
-small hash map, populate it with K entries, then iterate. K is small
-(typically 1–4); a sorted parallel vector aligned to the existing
-`transcripts` field is faster and zero-allocation when reused.
+frag_length_map` keyed by transcript ID. For every fragment, we allocate
+a small hash map, populate it with K entries, then iterate. K is small
+(typically 1–4); a parallel vector aligned to the existing `t_inds`
+field is faster and zero-allocation when reused.
 
 ### Current Code
 
@@ -112,22 +122,26 @@ small hash map, populate it with K entries, then iterate. K is small
 
 ```cpp
 struct RawResolveResult {
-    std::vector<int32_t> transcripts;   // already exists, sorted
-    std::vector<int32_t> frag_lengths;  // NEW: same length, same order
-    // ...
+  std::vector<int32_t> t_inds;        // already exists, sorted
+  std::vector<int32_t> frag_lengths;  // NEW: same length, same order
+  // ...
 };
 ```
 
-Look-ups become `frag_lengths[i]` for the i-th transcript instead of
-`frag_lengths_map[transcripts[i]]`. Update the producer in
-`_resolve_core` to push in lock-step with `transcripts`. Update every
-consumer to index by position.
+Look-ups become `frag_lengths[i]` for the i-th `t_inds` entry instead
+of `frag_length_map[t_inds[i]]`. Update `compute_frag_lengths` into a
+`compute_frag_lengths_aligned(..., cr.t_inds, cr.frag_lengths, scratch)`
+producer, update `ResolvedFragment::from_core` to move the vector
+directly, and update the legacy `resolve()` tuple builder to reconstruct
+the Python dict from `t_inds[i]` / `frag_lengths[i]`.
 
 This sub-change is a representation-only refactor; no semantic change.
 
 ### Tests
 
 ```bash
+conda activate rigel
+pip install --no-build-isolation -e .
 pytest tests/test_resolution.py tests/test_frag_length_model.py \
        tests/test_transcript_space_fl.py tests/test_pipeline_routing.py -v
 pytest tests/test_golden_output.py -v
@@ -136,8 +150,9 @@ pytest tests/test_golden_output.py -v
 ### Acceptance
 
 * All tests pass; golden outputs unchanged.
-* No `unordered_map<int32_t, int32_t>` constructions remain in the
-  resolver hot path (`git grep` audit).
+* No `frag_length_map` field or `unordered_map<int32_t, int32_t>`
+  construction remains in the fragment-length hot path (`git grep`
+  audit). Other resolver maps used for index lookups may remain.
 
 ## Combined Benchmark Plan
 

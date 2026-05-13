@@ -2,9 +2,9 @@
 
 ## Summary
 
-Replace per-fragment `unordered_set<int32_t>` and `unordered_map<int32_t,
-…>` allocations inside `_resolve_core` with thread-local scratch
-`std::vector<int32_t>` buffers, and use STL set algorithms (`std::sort`,
+Replace per-fragment `unordered_set<int32_t>` and allocation-returning
+set helpers inside `_resolve_core` with thread-local scratch
+`std::vector<int32_t>` buffers. Use STL set algorithms (`std::sort`,
 `std::unique`, `std::set_intersection`, `std::set_union`,
 `std::binary_search`) instead of hash containers.
 
@@ -22,40 +22,52 @@ free us from amortised-rehash spikes.
 
 ## Current Code
 
-* Resolver core: [src/rigel/native/resolve.cpp](../../../src/rigel/native/resolve.cpp)
-* Resolve context types: [src/rigel/native/resolve_context.h](../../../src/rigel/native/resolve_context.h)
+* Resolver core and `ResolverScratch`: [src/rigel/native/resolve_context.h](../../../src/rigel/native/resolve_context.h)
+* Existing allocation-returning set helpers: [src/rigel/native/constants.h](../../../src/rigel/native/constants.h)
 
 Hot constructions to replace:
 
 * `std::unordered_set<int32_t>` for per-exon transcript-ID sets, then
   merged across exons.
-* `std::unordered_map<int32_t, int32_t>` for per-fragment FL accumulation
-  (covered separately in PR 03 for the FL case; this PR covers the
-  resolver-side maps).
+* `std::unordered_set<int32_t>` for nRNA parent collection and
+  `all_overlap_t`.
+* `merge_sets(...)` currently returns vectors by value and uses an
+  `unordered_set` for the union branch.
+* `detect_chimera(...)` allocates union-find bookkeeping plus
+  `unordered_map` / `unordered_set` temporaries.
 * Repeated allocation of small temporary vectors for transcript-ID
   intersection / union.
 
 ## Proposed Change
 
-Add a `ResolverScratch` struct, owned by the worker thread (one per
-thread), reset per fragment:
+Extend the existing `ResolverScratch` struct in `resolve_context.h`. It
+is already owned by the worker thread; this PR adds set-operation
+buffers to it and resets those buffers per fragment:
 
 ```cpp
 struct ResolverScratch {
-    std::vector<int32_t> exon_t_set;       // sorted-unique
-    std::vector<int32_t> transcript_t_set; // sorted-unique
+    std::vector<std::vector<int32_t>> exon_t_sets;       // per block, sorted-unique
+    std::vector<std::vector<int32_t>> transcript_t_sets; // per block, sorted-unique
+    std::vector<std::vector<int32_t>> sj_t_sets;         // per intron, sorted-unique
     std::vector<int32_t> tmp_a;
     std::vector<int32_t> tmp_b;
     std::vector<int32_t> tmp_out;
+    std::vector<int32_t> tmp_union;
+    std::vector<int32_t> all_overlap_t;
+    std::vector<int32_t> nrna_t;
 
     void reset_per_fragment() noexcept {
-        exon_t_set.clear();
-        transcript_t_set.clear();
+        for (auto& v : exon_t_sets) v.clear();
+        for (auto& v : transcript_t_sets) v.clear();
+        for (auto& v : sj_t_sets) v.clear();
+        tmp_a.clear(); tmp_b.clear(); tmp_out.clear();
+        tmp_union.clear(); all_overlap_t.clear(); nrna_t.clear();
     }
 };
 ```
 
-Pass `ResolverScratch&` through `_resolve_core` and helpers.
+    `ResolverScratch&` is already passed through `_resolve_core`; keep that
+    ownership model.
 
 Replace hash-set constructions:
 
@@ -89,25 +101,32 @@ inline void sort_unique(std::vector<int32_t>& v) {
 }
 ```
 
-Do **not** add `intersect_sorted_into`, `union_sorted_into`,
-`append_unique_sorted`, `contains_sorted`, `merge_sets_into`,
-`detect_chimera` scratch-aware variants, or any other rigel-specific
-wrappers. STL is sufficient and more idiomatic.
+Do **not** add a broad rigel-specific wrapper layer. STL is sufficient.
+However, do not leave the existing hot helpers untouched: either rewrite
+`merge_sets` / `detect_chimera` in place to avoid hash containers, or
+bypass them from `_resolve_core` with local STL operations. The end
+state should have one implementation of each algorithm, not old and new
+variants that drift.
 
 ## Implementation Steps
 
-1. Add `ResolverScratch` and `sort_unique` to `resolve.cpp` (private,
-   anonymous namespace).
-2. Hold one `ResolverScratch` per worker thread (the existing per-thread
-   resolver state already exists; add this as a member).
+1. Extend the existing `ResolverScratch` in `resolve_context.h` with the
+  reusable set-operation buffers above.
+2. Add `sort_unique` near the resolver hot path as the only new helper.
 3. Walk `_resolve_core` and helpers; replace each `unordered_set<int32_t>`
    construction with `scratch.tmp_X.assign(...) + sort_unique`.
 4. Replace each set-merge / intersect with `std::set_union` /
    `std::set_intersection` writing to a fresh scratch vector.
-5. Replace `unordered_map<int32_t, T>` lookups inside the resolver hot
-   path with parallel sorted-vector + lower_bound lookups, *only* where
-   profiling justifies it. Cold paths can stay.
-6. Call `reset_per_fragment()` at the top of `_resolve_core` (the per-
+5. Replace `ref_set`, `nrna_set`, and `all_overlap_t` with sorted-vector
+   scratch buffers.
+6. Rewrite or bypass the hot `merge_sets` union branch so it no longer
+   constructs an `unordered_set`.
+7. Rewrite `detect_chimera` in place with vector-backed components and
+   sorted unique strand collection; do not create a second chimera
+   algorithm.
+8. Leave index-load maps alone (`SJMap`, blacklist maps, ref lookup).
+   They are not per-fragment allocations.
+9. Call `reset_per_fragment()` at the top of `_resolve_core` (the per-
    fragment `clear()` is implicit in `assign`, but doing it explicitly
    keeps lifetime obvious).
 
@@ -120,7 +139,7 @@ conda activate rigel
 pip install --no-build-isolation -e .
 pytest tests/test_resolution.py tests/test_pipeline_routing.py \
        tests/test_pipeline_smoke.py tests/test_orient_routing.py \
-       tests/test_layout_iter.py -v
+  tests/test_layout_iter.py tests/test_splice_blacklist.py -v
 pytest tests/test_golden_output.py -v
 ```
 
@@ -153,6 +172,9 @@ Compare against `pr01` baseline at the same `s8 d2` setting.
 * `_resolve_core` self-time drops by ≥ 30% on the s8 nospill run.
 * Live sampling no longer shows `unordered_set::insert` /
   `_M_rehash_aux` frames in resolver stacks.
+* `git grep` shows no local `std::unordered_set` construction inside
+  `_resolve_core`, `merge_sets`, or `detect_chimera`. Index-level maps
+  and other cold-path maps may remain.
 * No new heap allocations in steady-state worker loops (verified by
   spot-check with `MallocStackLogging` or instrumented allocator if
   desired; not gating).

@@ -18,11 +18,6 @@ Given a particular Locus (genomic region containing transcripts) this approach w
 
 
 
-
-## Rename OVR -> something else
-
-
-
 # Polars migration
 
 Polars is apparently much faster than pandas. Might be ideal for rigel

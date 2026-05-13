@@ -48,22 +48,30 @@ struct QnameBatch {
   batches.
 
 Defaults: `qname_batch_size = 512`, queue capacity expressed in batches
-(initial guess: 4 × n_workers, tune in benchmark). Keep the batch size
-private; do not expose it to users until benchmarks prove they need it.
+(initial guess: `4 × n_workers`, tune in benchmark). Add it as an
+internal scan parameter with a default, but do not add a CLI flag. Tests
+need to force `qname_batch_size = 1`; normal users should not have to
+think about it.
 
 ## Implementation Steps
 
 1. Add `QnameBatch` next to `QnameGroup` in `bam_scanner.cpp`.
 2. Replace `BoundedQueue<QnameGroup>` with `BoundedQueue<QnameBatch>` in
    `BamScanner::scan`.
-3. Add a small reader helper that appends the current group to an
-   in-progress batch and pushes it when full.
-4. Flush the final partial batch before closing the input queue.
-5. Update workers to drain the batch in a tight inner loop, calling the
+3. Add an optional native `qname_batch_size` argument to
+  `BamScanner::scan(...)` and thread it through `scan_and_buffer`. Add a
+  `BamScanConfig.qname_batch_size: int = 512` field with validation, but
+  no CLI option.
+4. Add a small reader helper that appends the current group to an
+  in-progress batch and pushes it when full. Reserve the reader batch's
+  `groups` vector to `qname_batch_size`.
+5. Flush the final partial batch before closing the input queue.
+6. Update workers to drain the batch in a tight inner loop, calling the
    existing per-group processing without changes.
-6. Reuse the batch's internal `groups` vector (`groups.clear()` after
-   processing) to avoid reallocation.
-7. Keep `frag_id` assignment exactly where it is today.
+7. Do not build a batch-object pool in this PR. A per-batch allocation is
+  fine; the target is eliminating ~32M queue operations, not perfecting
+  vector reuse.
+8. Keep `frag_id` assignment exactly where it is today.
 
 ## Tests
 
@@ -110,6 +118,9 @@ python scripts/profiling/scan_profile.py \
   top of the worker and reader stacks.
 * Peak RSS does not grow by more than `qname_batch_size × n_workers ×
   sizeof(QnameGroup)` (ballpark a few MB).
+* If the 10% scaling target is missed but queue frames disappear, stop
+  and re-profile before broadening the PR. The next bottleneck should be
+  explicit, not guessed.
 
 ## Risks
 
@@ -120,6 +131,9 @@ python scripts/profiling/scan_profile.py \
 * Output chunk latency grows by at most one batch worth of work. With 1M
   fragments per output chunk and 512 groups per batch, this is
   negligible.
+* C++ `std::vector` move semantics do not guarantee reusable capacity
+  after a batch is pushed through the queue. Treat allocation reuse as a
+  later micro-optimization, not part of the core design.
 
 ## Non-Goals
 
