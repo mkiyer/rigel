@@ -152,6 +152,7 @@ public:
     // Build from RawResolveResult (used by resolve_fragment and bam_scanner)
     static ResolvedFragment from_core(RawResolveResult& cr) {
         ResolvedFragment r;
+        size_t n_t = cr.t_inds.size();
         r.t_inds = std::move(cr.t_inds);
         r.ambig_strand = cr.ambig_strand;
         r.splice_type = cr.splice_type;
@@ -169,12 +170,10 @@ public:
         r.exon_bp_neg = cr.exon_bp_neg;
         r.tx_bp_pos = cr.tx_bp_pos;
         r.tx_bp_neg = cr.tx_bp_neg;
-        // Convert frag_length_map to parallel array
-        r.frag_lengths.reserve(r.t_inds.size());
-        for (int32_t t : r.t_inds) {
-            auto it = cr.frag_length_map.find(t);
-            r.frag_lengths.push_back(
-                (it != cr.frag_length_map.end()) ? it->second : -1);
+        if (cr.frag_lengths.size() == n_t) {
+            r.frag_lengths = std::move(cr.frag_lengths);
+        } else {
+            r.frag_lengths.assign(n_t, -1);
         }
         return r;
     }
@@ -189,6 +188,7 @@ public:
     std::vector<uint8_t>  splice_type_;
     std::vector<uint8_t>  exon_strand_;
     std::vector<uint8_t>  sj_strand_;
+    std::vector<uint8_t>  ambig_strand_;
     std::vector<uint16_t> num_hits_;
     std::vector<uint8_t>  merge_criteria_;
     std::vector<uint8_t>  chimera_type_;
@@ -221,6 +221,7 @@ public:
         splice_type_.reserve(n_fragments);
         exon_strand_.reserve(n_fragments);
         sj_strand_.reserve(n_fragments);
+        ambig_strand_.reserve(n_fragments);
         num_hits_.reserve(n_fragments);
         merge_criteria_.reserve(n_fragments);
         chimera_type_.reserve(n_fragments);
@@ -244,6 +245,7 @@ public:
         splice_type_.push_back(static_cast<uint8_t>(r.splice_type));
         exon_strand_.push_back(static_cast<uint8_t>(r.exon_strand));
         sj_strand_.push_back(static_cast<uint8_t>(r.sj_strand));
+        ambig_strand_.push_back(static_cast<uint8_t>(r.ambig_strand));
         num_hits_.push_back(static_cast<uint16_t>(r.num_hits));
         merge_criteria_.push_back(static_cast<uint8_t>(r.merge_criteria));
         chimera_type_.push_back(static_cast<uint8_t>(r.chimera_type));
@@ -274,30 +276,9 @@ public:
     int32_t get_size() const { return size_; }
 
     /// Finalize accumulator → dict of raw bytes (for numpy frombuffer).
-    /// Also computes ambig_strand from transcript strand mapping.
+    /// The transcript strand array is kept for API compatibility.
     nb::dict finalize(const std::vector<int32_t>& t_strand_arr) {
-        int32_t n = size_;
-
-        // Compute ambig_strand per fragment from transcript strand array
-        std::vector<uint8_t> ambig_strand(n, 0);
-        for (int32_t i = 0; i < n; i++) {
-            int32_t start = t_offsets_[i];
-            int32_t end = t_offsets_[i + 1];
-            if (end - start <= 1) continue;  // 0 or 1 transcript: not mixed
-            int32_t first_strand = -999;
-            for (int32_t j = start; j < end; j++) {
-                int32_t t = t_indices_[j];
-                if (t >= 0 && t < static_cast<int32_t>(t_strand_arr.size())) {
-                    int32_t s = t_strand_arr[t];
-                    if (first_strand == -999) {
-                        first_strand = s;
-                    } else if (s != first_strand) {
-                        ambig_strand[i] = 1;
-                        break;
-                    }
-                }
-            }
-        }
+        (void)t_strand_arr;
 
         auto to_bytes = [](const void* data, size_t nbytes) -> nb::bytes {
             if (nbytes == 0)
@@ -329,7 +310,7 @@ public:
             exon_bp_.data(), exon_bp_.size() * sizeof(int32_t));
         result["intron_bp"] = to_bytes(
             intron_bp_.data(), intron_bp_.size() * sizeof(int32_t));
-        result["ambig_strand"] = to_bytes(ambig_strand.data(), ambig_strand.size());
+        result["ambig_strand"] = to_bytes(ambig_strand_.data(), ambig_strand_.size());
         result["frag_id"] = to_bytes(
             frag_id_.data(), frag_id_.size() * sizeof(int64_t));
         result["read_length"] = to_bytes(
@@ -364,27 +345,7 @@ public:
     /// is consumed (left empty) after this call.
     nb::dict finalize_zero_copy(const std::vector<int32_t>& t_strand_arr) {
         int32_t n = size_;
-
-        // Compute ambig_strand (stack-allocated, then moved)
-        std::vector<uint8_t> ambig_strand(n, 0);
-        for (int32_t i = 0; i < n; i++) {
-            int32_t start = t_offsets_[i];
-            int32_t end = t_offsets_[i + 1];
-            if (end - start <= 1) continue;
-            int32_t first_strand = -999;
-            for (int32_t j = start; j < end; j++) {
-                int32_t t = t_indices_[j];
-                if (t >= 0 && t < static_cast<int32_t>(t_strand_arr.size())) {
-                    int32_t s = t_strand_arr[t];
-                    if (first_strand == -999) {
-                        first_strand = s;
-                    } else if (s != first_strand) {
-                        ambig_strand[i] = 1;
-                        break;
-                    }
-                }
-            }
-        }
+        (void)t_strand_arr;
 
         nb::dict result;
         result["splice_type"]       = vec_to_ndarray(std::move(splice_type_));
@@ -398,7 +359,7 @@ public:
         result["frag_lengths"]      = vec_to_ndarray(std::move(frag_lengths_));
         result["exon_bp"]           = vec_to_ndarray(std::move(exon_bp_));
         result["intron_bp"]         = vec_to_ndarray(std::move(intron_bp_));
-        result["ambig_strand"]      = vec_to_ndarray(std::move(ambig_strand));
+        result["ambig_strand"]      = vec_to_ndarray(std::move(ambig_strand_));
         result["frag_id"]           = vec_to_ndarray(std::move(frag_id_));
         result["read_length"]       = vec_to_ndarray(std::move(read_length_));
         result["genomic_footprint"] = vec_to_ndarray(std::move(genomic_footprint_));
@@ -952,23 +913,23 @@ public:
     // Fragment-length computation via transcript-space projection
     // ----------------------------------------------------------------
 
-    /// Thread-safe overload: uses caller-supplied scratch (unused now,
-    /// kept for API compatibility with _resolve_core).
-    std::unordered_map<int32_t, int32_t> compute_frag_lengths(
+    /// Thread-safe fragment-length projection.  Results are aligned to
+    /// t_inds: frag_lengths[i] is the length for t_inds[i], or -1.
+    void compute_frag_lengths_aligned(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& /*introns*/,
         const std::vector<int32_t>& t_inds,
+        std::vector<int32_t>& frag_lengths,
         ResolverScratch& /*scratch*/) const
     {
-        std::unordered_map<int32_t, int32_t> result;
-        if (exons.empty() || t_inds.empty()) return result;
+        frag_lengths.assign(t_inds.size(), -1);
+        if (exons.empty() || t_inds.empty()) return;
 
         // Single exon block: FL is trivially block length (same for all candidates)
         if (exons.size() == 1) {
             int32_t fl = exons[0].end - exons[0].start;
-            if (fl > 0)
-                for (int32_t t : t_inds) result[t] = fl;
-            return result;
+            if (fl > 0) std::fill(frag_lengths.begin(), frag_lengths.end(), fl);
+            return;
         }
 
         // Find outermost genomic positions across all alignment blocks
@@ -979,22 +940,25 @@ public:
             gend = std::max(gend, e.end);
         }
 
-        for (int32_t t : t_inds) {
+        for (size_t i = 0; i < t_inds.size(); i++) {
+            int32_t t = t_inds[i];
             int32_t tx_s = genomic_to_tx_pos(gstart, t);
             int32_t tx_e = genomic_to_tx_pos(gend, t);
             int32_t fl = std::abs(tx_e - tx_s);
-            if (fl > 0) result[t] = fl;
+            if (fl > 0) frag_lengths[i] = fl;
         }
-        return result;
     }
 
     /// Backward-compatible wrapper using internal scratch.
-    std::unordered_map<int32_t, int32_t> compute_frag_lengths(
+    std::vector<int32_t> compute_frag_lengths(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
         const std::vector<int32_t>& t_inds)
     {
-        return compute_frag_lengths(exons, introns, t_inds, scratch_);
+        std::vector<int32_t> frag_lengths;
+        compute_frag_lengths_aligned(exons, introns, t_inds,
+                                     frag_lengths, scratch_);
+        return frag_lengths;
     }
 
     // ----------------------------------------------------------------
@@ -1390,7 +1354,8 @@ public:
 
         // --- Fragment lengths ---
         if (cr.chimera_type == CHIMERA_NONE) {
-            cr.frag_length_map = compute_frag_lengths(exons, introns, cr.t_inds, scratch);
+            compute_frag_lengths_aligned(exons, introns, cr.t_inds,
+                                         cr.frag_lengths, scratch);
         }
 
         // --- SPLICED_IMPLICIT detection ---
@@ -1464,8 +1429,10 @@ public:
         for (int32_t t : cr.t_inds) t_inds_list.append(t);
 
         nb::dict frag_lengths_dict;
-        for (const auto& [k, v] : cr.frag_length_map)
-            frag_lengths_dict[nb::cast(k)] = nb::cast(v);
+        for (size_t i = 0; i < cr.t_inds.size() && i < cr.frag_lengths.size(); i++) {
+            if (cr.frag_lengths[i] > 0)
+                frag_lengths_dict[nb::cast(cr.t_inds[i])] = nb::cast(cr.frag_lengths[i]);
+        }
 
         nb::dict overlap_bp_dict;
         for (size_t i = 0; i < cr.t_inds.size(); i++) {

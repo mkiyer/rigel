@@ -10,11 +10,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -188,8 +188,8 @@ struct RawResolveResult {
     int32_t read_length = 0;
     int32_t chimera_type = CHIMERA_NONE;
     int32_t chimera_gap = -1;
-    std::unordered_map<int32_t, int32_t> frag_length_map;
     // Parallel arrays to t_inds
+    std::vector<int32_t> frag_lengths;
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_intron_bp;
 

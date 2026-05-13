@@ -577,14 +577,16 @@ static ParsedAlignment parse_bam_record(
     uint8_t* hi_aux = bam_aux_get(b, "HI");
     if (hi_aux) rec.hi = bam_aux2i(hi_aux);
 
-    rec.sj_strand = read_sj_strand(b, sj_tag_mode);
-
     // CIGAR → exon blocks + splice junctions
     int32_t mapped_ref_id = (rec.ref_id >= 0 &&
         rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
         ? tid_to_ref_id[rec.ref_id] : -1;
-    parse_cigar(b, mapped_ref_id, rec.sj_strand,
-                rec.exons, rec.sjs);
+    parse_cigar(b, mapped_ref_id, STRAND_NONE, rec.exons, rec.sjs);
+    rec.sj_strand = STRAND_NONE;
+    if (!rec.sjs.empty()) {
+        rec.sj_strand = read_sj_strand(b, sj_tag_mode);
+        for (auto& sj : rec.sjs) sj.strand = rec.sj_strand;
+    }
     rec.ref_id = mapped_ref_id;
 
     // Splice-junction artifact filtering.  Per-read, immediately after
@@ -2190,13 +2192,15 @@ public:
             uint8_t* hi_aux = bam_aux_get(b, "HI");
             if (hi_aux) rec.hi = bam_aux2i(hi_aux);
 
-            rec.sj_strand = read_sj_strand(b, sj_tag_mode_);
-
             int32_t mapped_ref_id = (rec.ref_id >= 0 &&
                 rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
                 ? tid_to_ref_id_[rec.ref_id] : -1;
-            parse_cigar(b, mapped_ref_id, rec.sj_strand,
-                        rec.exons, rec.sjs);
+            parse_cigar(b, mapped_ref_id, STRAND_NONE, rec.exons, rec.sjs);
+            rec.sj_strand = STRAND_NONE;
+            if (!rec.sjs.empty()) {
+                rec.sj_strand = read_sj_strand(b, sj_tag_mode_);
+                for (auto& sj : rec.sjs) sj.strand = rec.sj_strand;
+            }
             rec.ref_id = mapped_ref_id;
 
             // Apply the same splice-junction blacklist filter that the

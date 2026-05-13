@@ -4,8 +4,12 @@ All buffer append tests use C++ ResolvedFragment objects produced by
 FragmentResolver.resolve_fragment(), exercising the real native code path.
 """
 
-import numpy as np
+import threading
 
+import numpy as np
+import pytest
+
+import rigel.buffer as buffer_mod
 from rigel.types import Strand, MergeOutcome, GenomicInterval
 from rigel.splice import SpliceType
 from rigel.resolution import make_fragment, resolve_fragment
@@ -34,6 +38,46 @@ def _resolve(index, exons, introns=()):
 def _exon(ref, start, end, strand=Strand.POS):
     """Shorthand for creating a GenomicInterval."""
     return GenomicInterval(ref, start, end, strand)
+
+
+_CHUNK_ARRAY_FIELDS = (
+    "splice_type",
+    "exon_strand",
+    "sj_strand",
+    "num_hits",
+    "merge_criteria",
+    "chimera_type",
+    "t_offsets",
+    "t_indices",
+    "frag_lengths",
+    "exon_bp",
+    "intron_bp",
+    "ambig_strand",
+    "frag_id",
+    "read_length",
+    "genomic_footprint",
+    "genomic_start",
+    "nm",
+    "exon_bp_pos",
+    "exon_bp_neg",
+    "tx_bp_pos",
+    "tx_bp_neg",
+)
+
+
+def _chunk_payloads(buf):
+    return [
+        (chunk.size, {name: getattr(chunk, name).copy() for name in _CHUNK_ARRAY_FIELDS})
+        for chunk in buf.iter_chunks()
+    ]
+
+
+def _assert_chunk_payloads_equal(left, right):
+    assert len(left) == len(right)
+    for (left_size, left_arrays), (right_size, right_arrays) in zip(left, right):
+        assert left_size == right_size
+        for name in _CHUNK_ARRAY_FIELDS:
+            assert np.array_equal(left_arrays[name], right_arrays[name]), name
 
 
 # =====================================================================
@@ -167,6 +211,25 @@ class TestFragmentAccumulator:
         assert "splice_type" in raw
         assert "t_offsets" in raw
         assert "t_indices" in raw
+
+    def test_finalize_uses_stored_ambig_strand(self, mini_index):
+        from rigel._resolve_impl import FragmentAccumulator
+
+        acc = FragmentAccumulator()
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        assert result.ambig_strand == 0
+        candidate_tids = sorted(result.t_inds)
+        assert len(candidate_tids) >= 2
+
+        fake_strands = [int(Strand.POS)] * len(mini_index.t_to_strand_arr)
+        for idx, tid in enumerate(candidate_tids):
+            fake_strands[tid] = int(Strand.POS if idx % 2 == 0 else Strand.NEG)
+
+        acc.append(result, 0)
+        raw = acc.finalize(fake_strands)
+
+        ambig = np.frombuffer(raw["ambig_strand"], dtype=np.uint8)
+        assert ambig.tolist() == [0]
 
     def test_finalize_multiple(self, mini_index):
         from rigel._resolve_impl import FragmentAccumulator
@@ -476,6 +539,143 @@ class TestDiskSpill:
         for bf in result:
             assert bf.splice_type == int(SpliceType.UNSPLICED)
 
+    def test_forced_spill_matches_in_memory_chunks(self, mini_index, tmp_path):
+        """Forced-spill chunks match the in-memory path exactly."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+
+        in_memory = FragmentBuffer(
+            t_strand_arr=mini_index.t_to_strand_arr,
+            chunk_size=25,
+            max_memory_bytes=0,
+        )
+        spilled = FragmentBuffer(
+            t_strand_arr=mini_index.t_to_strand_arr,
+            chunk_size=25,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        for i in range(75):
+            in_memory.append(r, frag_id=i)
+            spilled.append(r, frag_id=i)
+        in_memory.finalize()
+        spilled.finalize()
+
+        try:
+            assert spilled.n_spilled > 0
+            _assert_chunk_payloads_equal(_chunk_payloads(in_memory), _chunk_payloads(spilled))
+        finally:
+            in_memory.release()
+            spilled.release()
+
+    def test_iter_chunks_consuming_waits_and_deletes_spill(self, mini_index, tmp_path):
+        buf = FragmentBuffer(
+            t_strand_arr=mini_index.t_to_strand_arr,
+            chunk_size=20,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(40):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
+        spill_paths = [
+            c.path if isinstance(c, buffer_mod._PendingSpill) else c
+            for c in buf._chunks
+            if isinstance(c, (buffer_mod._PendingSpill, type(tmp_path)))
+        ]
+        chunks = list(buf.iter_chunks_consuming())
+
+        assert sum(chunk.size for chunk in chunks) == 40
+        assert len(buf._chunks) == 0
+        assert all(not path.exists() for path in spill_paths)
+
+    def test_writer_exception_reaches_next_consumer(self, mini_index, tmp_path, monkeypatch):
+        def fail_spill(chunk, path):
+            raise OSError("synthetic spill failure")
+
+        monkeypatch.setattr(buffer_mod, "_spill_chunk", fail_spill)
+        buf = FragmentBuffer(
+            t_strand_arr=mini_index.t_to_strand_arr,
+            chunk_size=10,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(10):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
+        with pytest.raises(RuntimeError, match="Failed to spill buffer chunk"):
+            list(buf.iter_chunks())
+        with pytest.raises(RuntimeError, match="Failed to spill buffer chunk"):
+            buf.cleanup()
+
+    def test_cleanup_waits_for_pending_spill(self, mini_index, tmp_path, monkeypatch):
+        real_spill = buffer_mod._spill_chunk
+        started = threading.Event()
+        allow_write = threading.Event()
+
+        def slow_spill(chunk, path):
+            started.set()
+            assert allow_write.wait(timeout=5)
+            real_spill(chunk, path)
+
+        monkeypatch.setattr(buffer_mod, "_spill_chunk", slow_spill)
+        buf = FragmentBuffer(
+            t_strand_arr=mini_index.t_to_strand_arr,
+            chunk_size=10,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(10):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
+        assert started.wait(timeout=5)
+        assert buf.summary()["pending_spill_chunks"] == 1
+
+        cleanup_done = threading.Event()
+        cleanup_errors = []
+
+        def run_cleanup():
+            try:
+                buf.cleanup()
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+            finally:
+                cleanup_done.set()
+
+        cleanup_thread = threading.Thread(target=run_cleanup)
+        cleanup_thread.start()
+        assert not cleanup_done.wait(timeout=0.05)
+        allow_write.set()
+        cleanup_thread.join(timeout=5)
+
+        assert cleanup_done.is_set()
+        assert cleanup_errors == []
+        assert [p for p in tmp_path.iterdir() if p.is_dir()] == []
+
+    def test_release_idempotent_with_spills(self, mini_index, tmp_path):
+        buf = FragmentBuffer(
+            t_strand_arr=mini_index.t_to_strand_arr,
+            chunk_size=20,
+            max_memory_bytes=1,
+            spill_dir=tmp_path,
+        )
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        for i in range(40):
+            buf.append(r, frag_id=i)
+        buf.finalize()
+
+        buf.release()
+        buf.release()
+
+        assert buf.n_chunks == 0
+        assert buf.memory_bytes == 0
+        assert [p for p in tmp_path.iterdir() if p.is_dir()] == []
+
     def test_cleanup_removes_files(self, mini_index, tmp_path):
         buf = FragmentBuffer(
             t_strand_arr=mini_index.t_to_strand_arr,
@@ -579,7 +779,8 @@ class TestBufferSummary:
 
         s = buf.summary()
         assert s["total_fragments"] == 100
-        assert s["on_disk_chunks"] > 0
+        assert s["on_disk_chunks"] + s["pending_spill_chunks"] > 0
+        assert s["failed_spill_chunks"] == 0
 
 
 # =====================================================================
