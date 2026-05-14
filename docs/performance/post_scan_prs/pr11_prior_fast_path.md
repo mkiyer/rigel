@@ -1,75 +1,117 @@
-# PR 11: Prior Fast Path And Eligibility Fusion
+# PR 11: Prior Fast Path
 
-**Position in roadmap:** Seventh. Lower priority than scoring/scatter
-because prior assembly is now 4.23 s, but still a clean Python-heavy
-target.
+**Position in roadmap:** Seventh. Lower priority than scoring / scatter
+work because `compute_eb_gdna_priors` is now 4.23 s. Still a clean
+Python-bound target with a clear separation between EM-required outputs
+and diagnostic outputs.
 
 ## Summary
 
-Add a production fast path for gDNA prior assembly that computes only the
-EM-consumed prior count and gDNA eligibility when detailed locoregional
-diagnostics are not requested. Move or fuse gDNA eligibility computation
-so it does not perform a separate Python gather over every multi-locus.
+Add a config-gated fast path that computes only the EM-consumed prior
+outputs (`gdna_prior_count` per multi-locus, `enable_gdna` per
+multi-locus). Skip the per-locus locoregional diagnostic estimates that
+EM does not need. Move `enable_gdna` computation earlier in the
+pipeline so it does not require a second Python gather over the global
+CSR.
 
 ## Motivation
 
-`compute_eb_gdna_priors` improved from 9.5 s to 4.23 s after cleanup, but
-the remaining cost is still visible. cProfile shows time in
-`_compute_locus_scratch`, `estimate_locus_gdna`,
-`contained_exposure_clipped`, `partition_units_to_loci`, and
-`enable_gdna_for_multilocus`.
+cProfile breakdown of the remaining 4.23 s:
 
-The key modeling fact: EM consumes the global `eta_g` prior count and an
-eligibility flag. The locoregional `estimate_locus_gdna` output is useful
-diagnostic material, but it is not needed to run EM.
+| Function | cProfile cumulative |
+|---|---:|
+| `_compute_locus_scratch` | 2.57 s |
+| `estimate_locus_gdna` | 1.30 s |
+| `contained_exposure_clipped` | 1.25 s |
+| `partition_units_to_loci` | 1.09 s |
+| `compute_all_transcript_eff_lens` | 0.99 s |
+| `enable_gdna_for_multilocus` | 0.66 s |
+
+EM consumes the global `eta_g` prior count and the per-multi-locus
+`enable_gdna` flag. The locoregional `estimate_locus_gdna` output is a
+diagnostic; it is *not* on the EM path.
+
+## Sequencing constraint (do not skip)
+
+`enable_gdna_for_multilocus` reads `is_spliced` and `gdna_log_liks`
+from the global CSR. `partition_and_free` consumes those arrays.
+**Eligibility must be computed before scatter**, and PR08's fused
+scatter must not change that ordering.
+
+The fast path proposed here keeps the existing call ordering. The only
+change is that eligibility can be computed by a vectorized native
+helper instead of the current Python gather.
 
 ## Current code
 
-- Prior assembly: [src/rigel/calibration/locus_prior.py](../../../src/rigel/calibration/locus_prior.py)
-- Unit-to-locus partitioning: [src/rigel/calibration/_locus_n_obs.py](../../../src/rigel/calibration/_locus_n_obs.py)
-- Pipeline call site: [src/rigel/pipeline.py](../../../src/rigel/pipeline.py)
-- Calibration result schema: [src/rigel/calibration/_result.py](../../../src/rigel/calibration/_result.py)
+* Prior assembly: [src/rigel/calibration/locus_prior.py](../../../src/rigel/calibration/locus_prior.py)
+  (`assemble_priors`, lines ~778–942; `enable_gdna_for_multilocus`
+  ~line 725).
+* Unit→locus binning: [src/rigel/calibration/_locus_n_obs.py](../../../src/rigel/calibration/_locus_n_obs.py).
+* Pipeline call site: [src/rigel/pipeline.py](../../../src/rigel/pipeline.py).
+* Result schema: [src/rigel/calibration/_result.py](../../../src/rigel/calibration/_result.py)
+  (`PriorTable`).
 
 ## Proposed change
 
-Introduce a config-controlled prior diagnostic mode:
+### Config
+
+Add to `CalibrationConfig` in [src/rigel/config.py](../../../src/rigel/config.py):
 
 ```python
-class CalibrationConfig:
-    emit_prior_diagnostics: bool = True
+emit_prior_diagnostics: bool = True   # default preserves current output
 ```
 
-Default can stay `True` initially to preserve output. The fast path can
-be enabled in benchmarks and later considered as default if output files
-remain satisfactory.
+### Refactor `assemble_priors`
 
-Fast path behavior:
+Split into three functions:
 
-- compute `gdna_prior_count_arr` from global density only,
-- compute `enable_gdna_arr`, preferably during partition/scatter or with
-  a vectorized native helper,
-- populate minimal prior summary fields,
-- skip per-locus locoregional diagnostic estimates unless requested.
+* `_prior_setup(...)` — region arrays, payload arrays, region index,
+  boundary-crossing exposure, transcript refs/starts. Shared by both
+  paths.
+* `_assemble_priors_full(setup) -> PriorTable` — current behaviour.
+* `_assemble_priors_fast(setup) -> PriorTable` — global `eta_g` only;
+  diagnostic fields filled with documented sentinels (`np.nan` for
+  floats; explicit empty arrays for per-locus diagnostics).
+
+`assemble_priors(config, ...)` dispatches based on
+`config.emit_prior_diagnostics`.
+
+### Vectorize `enable_gdna_for_multilocus`
+
+Today this is a Python loop over multi-loci that gathers per-unit
+`is_spliced` and `gdna_log_liks` slices. Move it to a single vectorized
+pass that:
+
+* slices once with `partition_units_to_loci`'s output (already cached
+  if the caller is `assemble_priors`),
+* applies the existing eligibility predicate column-wise.
+
+If the predicate is non-trivial, add a small native helper. Prefer
+NumPy first; reach for native only if NumPy stays > 1 s after PR05's
+profiler shows it.
+
+### PriorTable representation
+
+* Always has `gdna_prior_count` and `enable_gdna` populated.
+* Diagnostic fields use `np.nan` (float) or zero-length arrays (lists)
+  in fast mode. **Do not** fill diagnostic fields with misleading
+  zeros.
+* Output writers must check for the sentinels and either omit the
+  diagnostic columns or write them as nulls. Document the schema
+  change in [docs/MANUAL.md](../../MANUAL.md).
 
 ## Implementation steps
 
-1. Add `emit_prior_diagnostics` or similarly named config field. Keep the
-   default preserving current output.
-2. Split `assemble_priors(...)` into two internal paths:
-   - full diagnostic path: current behavior,
-   - fast EM path: global `eta_g` plus eligibility only.
-3. Factor shared setup out of both paths: `RegionArrays`,
-   `PayloadArrays`, `RegionIndexPy`, `b_cross`, transcript refs/starts.
-4. Implement a vectorized or native `compute_enable_gdna_by_locus(...)`
-   helper that consumes `multi_loci`, `em_data.is_spliced`, and
-   `em_data.gdna_log_liks` once. If PR08 has landed, compute this during
-   fused scatter and return it as partition metadata.
-5. Ensure `CalibrationResult.with_priors(...)` can accept a minimal prior
-   table or a prior table with diagnostic fields marked unavailable.
-6. Update output writers to handle missing diagnostics gracefully when the
-   fast path is enabled.
-7. Add CLI/config visibility only if this mode is user-facing. Otherwise
-   keep it internal for profiling until behavior is settled.
+1. Add `emit_prior_diagnostics` to `CalibrationConfig`. Default
+   `True`.
+2. Extract `_prior_setup`, `_assemble_priors_full`,
+   `_assemble_priors_fast`. Land this refactor as commit A; assert
+   `_assemble_priors_full` is bit-identical to the old function.
+3. Vectorize `enable_gdna_for_multilocus`. Land as commit B.
+4. Update output writers to handle sentinel diagnostic fields.
+5. Add CLI flag only if the team wants this user-facing. Otherwise
+   keep it internal for benchmarking until output policy is settled.
 
 ## Tests
 
@@ -82,19 +124,16 @@ pytest tests/test_pipeline_smoke.py tests/test_golden_output.py -v
 
 Add focused tests:
 
-- Full diagnostic mode produces byte-compatible prior diagnostics with
-  current outputs.
-- Fast mode produces identical `gdna_prior_count` and `enable_gdna` to
-  full mode on synthetic fixtures.
-- Output writing either omits diagnostic-only columns in fast mode or
-  fills them with documented nulls.
+* `_assemble_priors_full` produces byte-identical output to the
+  pre-refactor function on synthetic fixtures.
+* Fast and full modes produce identical `gdna_prior_count` and
+  `enable_gdna` arrays on synthetic fixtures.
+* Output writers handle sentinel diagnostic values without crashing
+  and without writing misleading zeros.
 
 ## Benchmark plan
 
-Run full staged profiles with diagnostics on and off:
-
 ```bash
-conda activate rigel
 python scripts/profiling/profiler.py \
   --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
@@ -102,25 +141,32 @@ python scripts/profiling/profiler.py \
   --stages --threads 8 --memory-interval 250
 ```
 
-Compare `compute_eb_gdna_priors`, output schema, and final quant outputs.
+Compare `compute_eb_gdna_priors` between full and fast modes.
 
 ## Acceptance criteria
 
-- Full diagnostic mode preserves existing golden outputs.
-- Fast mode produces identical EM inputs: `gdna_prior_count` and
-  `enable_gdna` arrays.
-- Fast mode reduces `compute_eb_gdna_priors` by at least 25% on VCAP.
-- The output schema behavior is documented and tested.
+* Default mode (`emit_prior_diagnostics=True`) preserves goldens.
+* Fast mode produces identical EM inputs (`gdna_prior_count`,
+  `enable_gdna`).
+* Fast mode reduces `compute_eb_gdna_priors` by ≥ 50% on VCAP. (4.23 s
+  → ≤ 2.0 s.)
+* Output schema in fast mode is documented and tested.
 
 ## Risks
 
-- Diagnostics are scientifically useful. Do not silently drop them in the
-  default user path without an explicit decision.
-- Prior table schema may assume diagnostic fields exist. Keep the minimal
-  representation explicit rather than using misleading zeros.
+* Diagnostics are scientifically useful. Do not silently drop them in
+  the default user path.
+* PriorTable schema changes can ripple to downstream tools. Sentinel
+  values are explicit; prefer them over the misleading-zero
+  alternative.
+* Vectorizing `enable_gdna_for_multilocus` must respect the
+  pre-`partition_and_free` ordering constraint. Add an assertion in
+  the pipeline that gDNA likelihood arrays are still live when
+  eligibility is computed.
 
 ## Non-goals
 
-- Do not change the prior formula.
-- Do not change EM gDNA eligibility semantics.
-- Do not remove diagnostic functionality.
+* No prior-formula changes.
+* No EM gDNA-eligibility-semantics changes.
+* No removal of diagnostic functionality, only of unconditional
+  computation.

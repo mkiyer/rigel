@@ -8,6 +8,7 @@ ensure immutability after construction.  Compose the sub-configs into
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -119,12 +120,19 @@ class BamScanConfig:
         BAM tag(s) for splice-junction strand (default ``"auto"``).
     log_every : int
         Log progress every N read-name groups (default 1M).
-    chunk_size : int
-        Fragments per buffer chunk (default 1M).
-    qname_batch_size : int
+    total_threads : int
+        Total thread budget available to the scan stage (default 0 = all cores).
+        Rigel reserves ``bgzf_threads`` from this budget for BAM decompression
+        and uses the remainder for scan workers.
+    bgzf_threads : int
+        Requested BGZF decompression threads within the scan thread budget
+        (default 4).
+    fragments_per_chunk : int
+        Buffered fragments per chunk (default 1M).
+    read_name_batch_size : int
         Read-name groups per native scanner input queue item (default 512).
-    max_memory_bytes : int
-        Max memory before disk spill (default 4 GiB).
+    buffer_size_bytes : int
+        Max scan-buffer memory before disk spill (default 4 GiB).
     spill_dir : Path, str, or None
         Directory for spilled buffer chunks (default None).
     """
@@ -134,18 +142,13 @@ class BamScanConfig:
     max_frag_length: int = 1000
     sj_strand_tag: str | tuple[str, ...] = "auto"
     log_every: int = 1_000_000
-    chunk_size: int = 1_000_000
-    qname_batch_size: int = 512
-    max_memory_bytes: int = 4 * 1024**3
+    total_threads: int = 0
+    bgzf_threads: int = 4
+    fragments_per_chunk: int = 1_000_000
+    read_name_batch_size: int = 512
+    buffer_size_bytes: int = 4 * 1024**3
     spill_dir: Path | str | None = None
-    n_scan_threads: int = 0
-    n_decomp_threads: int = 4
-    """Number of htslib BGZF decompression threads (default 4).
-
-    Controls how many threads htslib uses for BAM decompression,
-    independent of the worker threads used for fragment resolution.
-    Set to 0 to disable multi-threaded decompression.
-    """
+    """Scan buffer spill directory (default ``None`` = system temp dir)."""
 
     splicing_anchor_tolerance: int = 3
     """Minimum bp clearance K required on each side of an exon-intron
@@ -167,16 +170,47 @@ class BamScanConfig:
     """
 
     def __post_init__(self) -> None:
-        if self.qname_batch_size < 1:
+        if self.total_threads < 0:
             raise ValueError(
-                f"BamScanConfig.qname_batch_size must be >= 1; "
-                f"got {self.qname_batch_size}."
+                f"BamScanConfig.total_threads must be >= 0; got {self.total_threads}."
+            )
+        if self.bgzf_threads < 0:
+            raise ValueError(
+                f"BamScanConfig.bgzf_threads must be >= 0; got {self.bgzf_threads}."
+            )
+        if self.fragments_per_chunk < 1:
+            raise ValueError(
+                "BamScanConfig.fragments_per_chunk must be >= 1; "
+                f"got {self.fragments_per_chunk}."
+            )
+        if self.read_name_batch_size < 1:
+            raise ValueError(
+                "BamScanConfig.read_name_batch_size must be >= 1; "
+                f"got {self.read_name_batch_size}."
+            )
+        if self.buffer_size_bytes < 0:
+            raise ValueError(
+                "BamScanConfig.buffer_size_bytes must be >= 0; "
+                f"got {self.buffer_size_bytes}."
             )
         if self.splicing_anchor_tolerance < 0:
             raise ValueError(
                 f"BamScanConfig.splicing_anchor_tolerance must be >= 0; "
                 f"got {self.splicing_anchor_tolerance}."
             )
+
+    def resolved_total_threads(self) -> int:
+        """Return the concrete total scan thread budget."""
+        if self.total_threads == 0:
+            return os.cpu_count() or 1
+        return self.total_threads
+
+    def resolved_scan_threads(self) -> tuple[int, int]:
+        """Return ``(scan_worker_threads, bgzf_threads)`` within the budget."""
+        total = self.resolved_total_threads()
+        bgzf = min(self.bgzf_threads, max(total - 1, 0))
+        scan_workers = max(1, total - bgzf)
+        return scan_workers, bgzf
 
 
 # ======================================================================

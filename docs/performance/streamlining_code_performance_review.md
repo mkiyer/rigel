@@ -188,7 +188,7 @@ covered also stale jargon and minor refactors that are bundled into §5.
 
 ### 3.3 Untuned / unverified config knobs
 
-- `BamScanConfig.n_decomp_threads` default 4 — never benchmarked, may be
+- `BamScanConfig.bgzf_threads` default 4 — never benchmarked, may be
   redundant if htslib auto-tunes. Either remove or document the tuning.
 - The mega-locus heuristic (`work ≥ fair_share`) in
   [src/rigel/pipeline.py](src/rigel/pipeline.py) `_run_locus_em_partitioned`
@@ -237,7 +237,7 @@ Ordering combines profile evidence with code-review risk/impact estimates.
 | P1-1 | **Fuse calibration + scoring buffer passes** so chunks are walked once. Requires honoring the fact that calibration must produce gDNA FL model before scoring; could be done by collecting calibration counts during scoring of the *first* in-memory portion, then finalizing. | **~10–15% wall** |
 | P1-2 | **SQUAREM iteration cap tightening** for medium loci that hit 100–200 iters. Investigate convergence criterion (delta vs. ELBO trend) — top-1000 loci own 55% of EM CPU; halving their iter count saves ~10 s wall. | ~3–5% wall |
 | P1-3 | **Promote `_C_BASE_DEFAULT` / `_PI_FLOOR` to `CalibrationConfig`** *or* delete the "promote later" comment and lock them. | Hygiene |
-| P1-4 | **Audit `BamScanConfig.n_decomp_threads`** — benchmark or remove. | Hygiene |
+| P1-4 | **Audit `BamScanConfig.bgzf_threads`** — benchmark or remove. | Hygiene |
 
 ### P2 — Refactor / testability
 

@@ -162,8 +162,8 @@ python scripts/profiling/scan_profile.py \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_pr03 \
   --name-prefix pr03 \
-  --n-scan-threads 8 --n-decomp-threads 2 \
-  --chunk-size 1000000 --max-memory-gib 12
+  --threads 8 --scan-bgzf-threads 2 \
+  --scan-fragments-per-chunk 1000000 --scan-buffer-size 12
 ```
 
 Combined acceptance: ≥ 3% wall-time reduction on `s8 d2 nospill` after

@@ -36,7 +36,7 @@ The key conclusion is a little bracing but useful: wall time improved by more th
 
 The next highest-yield work is:
 
-1. Lower the scan buffer memory cap now that async spill is cheap, and surface `n_decomp_threads` in CLI/config docs.
+1. Lower the scan buffer memory cap now that async spill is cheap, using the canonical `--scan-buffer-size` / `scan_buffer_size` parameter.
 2. Convert scoring/EM likelihood payloads from float64 to float32 or mixed precision where safe.
 3. Fuse or parallelize `partition_and_free` scatter.
 4. Parallelize `StreamingScorer.score_chunk` across chunks.
@@ -46,7 +46,7 @@ The next highest-yield work is:
 
 ## 2. Current Stage Breakdown
 
-Clean staged run, 8 scan/EM threads, current profiler defaults (`n_decomp_threads=4`, `qname_batch_size=512`, 4 GiB buffer cap):
+Clean staged run from before the naming cleanup: 8 native scan workers, 4 BGZF threads, 8 EM threads, 4 GiB scan buffer cap, and read-name batch size 512. Under the new total-budget convention, the same scan worker split is `--threads 12 --scan-bgzf-threads 4`; future profiles should report both the requested total budget and the resolved scan worker count.
 
 | Stage | Current wall | Current % | Initial wall | Speedup | Notes |
 |---|---:|---:|---:|---:|---|
@@ -80,7 +80,7 @@ Peak RSS occurs at about 46.6 s, shortly after scoring/router scan finishes. Thi
 
 ### Scan-only memory-cap sweep
 
-With 8 scan workers and 2 decompression threads, async spill makes lower memory caps nearly free in wall time:
+With 8 native scan workers and 2 BGZF threads (equivalent to `--threads 10 --scan-bgzf-threads 2` under the new total-budget convention), async spill makes lower memory caps nearly free in wall time:
 
 | Buffer cap | Scan wall | Peak RSS | Resident buffer | Spilled chunks | Read names/s |
 |---:|---:|---:|---:|---:|---:|
@@ -111,13 +111,13 @@ The scan PRs worked. Scan-only performance is now about 32 s for the full 66 M-r
 
 At 8 scan workers and a 4 GiB buffer cap:
 
-| `n_decomp_threads` | Scan wall | Peak RSS | Read names/s |
+| `scan_bgzf_threads` | Scan wall | Peak RSS | Read names/s |
 |---:|---:|---:|---:|
 | 2 | **32.11 s** | 9.66 GB | **996 K/s** |
 | 4 | 33.18 s | 9.86 GB | 964 K/s |
 | 8 | 33.69 s | 9.86 GB | 949 K/s |
 
-More BGZF decompression threads do not help on this M3 run. The current Python `BamScanConfig` default is 4, while the native C++ default remains 2, and the main `rigel quant` CLI currently exposes `qname_batch_size` but not `n_decomp_threads`. This should be cleaned up: the parameter should be visible in YAML/CLI/docs, and the default should be chosen intentionally rather than drifting between Python and C++.
+More BGZF decompression threads do not help on this M3 run. The public parameter should be `--scan-bgzf-threads` / `scan_bgzf_threads`, and `--threads` should remain the total budget from which scan workers are derived. The default should be chosen intentionally rather than drifting between Python and C++.
 
 ### Remaining scan interpretation
 
@@ -125,9 +125,9 @@ The scan is no longer obviously decompression-bound. Increasing decompression th
 
 Recommended scan follow-up:
 
-- Surface `scan.n_decomp_threads` as an advanced CLI/YAML parameter, mirroring the earlier `qname_batch_size` decision.
+- Keep `scan_bgzf_threads` visible in CLI/YAML/profiler outputs and derive scan workers from the total `threads` budget.
 - Consider changing the default from 4 to 2 on macOS/arm64, or use an explicit auto policy only after broader data.
-- Add `scan.max_memory_bytes`/`--scan-max-memory-gib` visibility to profile/CLI docs if not already present in the user-facing path.
+- Keep `scan_buffer_size` / `--scan-buffer-size` visible in profile/CLI docs.
 - Run future C++ scan sampling only after the structural memory/scoring items, because scan is no longer the only long pole.
 
 ---
@@ -238,7 +238,7 @@ This ranking balances expected yield, implementation risk, and straightforwardne
 | Item | Expected payoff | Risk | Why now |
 |---|---:|---|---|
 | Lower default scan cap from 4 GiB to 2 GiB, or at least profile full quant at 2 GiB | 1.5-2.5 GB lower RSS on this workload | Low | Scan-only sweep shows no wall penalty; async spill changed the tradeoff |
-| Surface `scan.n_decomp_threads` in CLI/YAML/docs and align Python/C++ defaults | ~1 s scan on this run; better reproducibility | Low | Current default drift is confusing; d2 beats d4/d8 on M3 |
+| Keep `scan_bgzf_threads` visible in CLI/YAML/docs and align Python/C++ defaults | ~1 s scan on this run; better reproducibility | Low | Current default drift is confusing; d2 beats d4/d8 on M3 |
 | Teach the full profiler to accept/report all scan params and `em_data.n_candidates` | measurement quality | Low | Needed to validate memory-cap changes end-to-end |
 
 ### P1: Highest memory payoff
@@ -269,7 +269,7 @@ This ranking balances expected yield, implementation risk, and straightforwardne
 
 ## 10. Suggested Next PR Sequence
 
-1. **PR05: Profiling/config visibility.** Surface `n_decomp_threads`; update profiling harness to accept arbitrary scan params; write `n_candidates`, candidate bytes, partition bytes, and scan config into profile JSON. This is small but prevents blind spots.
+1. **PR05: Profiling/config visibility.** Use the canonical scan parameter names in the profiling harness and write `n_candidates`, candidate bytes, partition bytes, and scan config into profile JSON. This is small but prevents blind spots.
 2. **PR06: Memory cap default and spill validation.** Run full profiles at 4/2/1 GiB once the profiler can set scan params. If 2 GiB remains neutral, change the default or document a recommended production profile.
 3. **PR07: Float32 scoring payload.** Convert scoring output and partition payloads to float32 while preserving double accumulation inside EM where needed. Validate with full golden suite and a VCAP numerical diff.
 4. **PR08: Fused partition scatter.** Replace 11 sequential scatter calls with one native fused scatter, then optionally parallelize across loci.

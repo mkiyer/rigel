@@ -46,11 +46,13 @@ class ScanRun:
     rss_before_mb: float
     rss_after_scan_mb: float
     rss_after_release_mb: float
-    n_scan_threads: int
-    n_decomp_threads: int
-    chunk_size: int
-    qname_batch_size: int
-    max_memory_bytes: int
+    threads: int
+    scan_worker_threads: int
+    scan_bgzf_threads: int
+    requested_scan_bgzf_threads: int
+    scan_fragments_per_chunk: int
+    scan_read_name_batch_size: int
+    scan_buffer_size_bytes: int
     n_bam_records: int
     n_read_names: int
     n_physical_fragments: int
@@ -77,23 +79,23 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--outdir", required=True, type=Path, help="Output directory")
     parser.add_argument("--name-prefix", default="scan", help="Prefix for run names")
     parser.add_argument(
-        "--n-scan-threads",
+        "--threads",
         nargs="+",
         type=int,
         default=[8],
-        help="One or more native scanner worker counts",
+        help="One or more total scan thread budgets",
     )
     parser.add_argument(
-        "--n-decomp-threads",
+        "--scan-bgzf-threads",
         nargs="+",
         type=int,
         default=[4],
-        help="One or more htslib BGZF decompression thread counts",
+        help="One or more BGZF decompression thread counts reserved from --threads",
     )
     parser.add_argument("--repeat", type=int, default=1, help="Repeat every configuration")
-    parser.add_argument("--chunk-size", type=int, default=1_000_000)
-    parser.add_argument("--qname-batch-size", type=int, default=512)
-    parser.add_argument("--max-memory-gib", type=float, default=4.0)
+    parser.add_argument("--scan-fragments-per-chunk", type=int, default=1_000_000)
+    parser.add_argument("--scan-read-name-batch-size", type=int, default=512)
+    parser.add_argument("--scan-buffer-size", type=float, default=4.0)
     parser.add_argument("--spill-dir", type=Path, default=None)
     parser.add_argument("--max-frag-length", type=int, default=1000)
     parser.add_argument("--sj-strand-tag", default="auto")
@@ -122,15 +124,18 @@ def _run_one(
     rss_before = _snap_rss_current()
     timeline = MemoryTimeline(interval_sec=memory_interval_sec)
 
+    scan_workers, bgzf_threads = scan_cfg.resolved_scan_threads()
     logger.info(
-        "Starting %s: scan_threads=%d decomp_threads=%d chunk_size=%d "
-        "qname_batch_size=%d max_mem=%.2f GiB",
+        "Starting %s: threads=%d scan_workers=%d scan_bgzf_threads=%d "
+        "scan_fragments_per_chunk=%d scan_read_name_batch_size=%d "
+        "scan_buffer_size=%.2f GiB",
         name,
-        scan_cfg.n_scan_threads,
-        scan_cfg.n_decomp_threads,
-        scan_cfg.chunk_size,
-        scan_cfg.qname_batch_size,
-        scan_cfg.max_memory_bytes / 1024**3,
+        scan_cfg.resolved_total_threads(),
+        scan_workers,
+        bgzf_threads,
+        scan_cfg.fragments_per_chunk,
+        scan_cfg.read_name_batch_size,
+        scan_cfg.buffer_size_bytes / 1024**3,
     )
     timeline.start()
     t0 = time.perf_counter()
@@ -167,11 +172,13 @@ def _run_one(
         rss_before_mb=rss_before,
         rss_after_scan_mb=rss_after_scan,
         rss_after_release_mb=rss_after_release,
-        n_scan_threads=scan_cfg.n_scan_threads,
-        n_decomp_threads=scan_cfg.n_decomp_threads,
-        chunk_size=scan_cfg.chunk_size,
-        qname_batch_size=scan_cfg.qname_batch_size,
-        max_memory_bytes=scan_cfg.max_memory_bytes,
+        threads=scan_cfg.total_threads,
+        scan_worker_threads=scan_workers,
+        scan_bgzf_threads=bgzf_threads,
+        requested_scan_bgzf_threads=scan_cfg.bgzf_threads,
+        scan_fragments_per_chunk=scan_cfg.fragments_per_chunk,
+        scan_read_name_batch_size=scan_cfg.read_name_batch_size,
+        scan_buffer_size_bytes=scan_cfg.buffer_size_bytes,
         n_bam_records=int(stats_dict["total"]),
         n_read_names=int(stats_dict["n_read_names"]),
         n_physical_fragments=int(stats_dict["n_fragments"]),
@@ -230,16 +237,16 @@ def main() -> int:
         sj_tag = detect_sj_strand_tag(str(args.bam))
         logger.info("Detected splice-junction strand tag: %s", sj_tag)
 
-    max_memory_bytes = int(args.max_memory_gib * 1024**3)
+    scan_buffer_size_bytes = int(args.scan_buffer_size * 1024**3)
     runs: list[ScanRun] = []
     memory_interval_sec = max(args.memory_interval_ms, 1) / 1000.0
 
     for repeat_index in range(args.repeat):
-        for scan_threads, decomp_threads in itertools.product(
-            args.n_scan_threads,
-            args.n_decomp_threads,
+        for threads, bgzf_threads in itertools.product(
+            args.threads,
+            args.scan_bgzf_threads,
         ):
-            suffix = f"s{scan_threads}_d{decomp_threads}"
+            suffix = f"t{threads}_bgzf{bgzf_threads}"
             if args.repeat > 1:
                 suffix = f"{suffix}_r{repeat_index + 1}"
             name = f"{args.name_prefix}_{suffix}"
@@ -249,12 +256,12 @@ def main() -> int:
                 include_multimap=args.include_multimap,
                 max_frag_length=args.max_frag_length,
                 sj_strand_tag=sj_tag,
-                chunk_size=args.chunk_size,
-                qname_batch_size=args.qname_batch_size,
-                max_memory_bytes=max_memory_bytes,
+                total_threads=threads,
+                bgzf_threads=bgzf_threads,
+                fragments_per_chunk=args.scan_fragments_per_chunk,
+                read_name_batch_size=args.scan_read_name_batch_size,
+                buffer_size_bytes=scan_buffer_size_bytes,
                 spill_dir=spill_base,
-                n_scan_threads=scan_threads,
-                n_decomp_threads=decomp_threads,
                 splicing_anchor_tolerance=args.splicing_anchor_tolerance,
             )
             runs.append(

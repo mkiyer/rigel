@@ -61,13 +61,13 @@ def _run(result, index):
     return run_pipeline(result.bam_path, index, config=config)
 
 
-def _run_with_batch_size(result, index, qname_batch_size: int):
+def _run_with_read_name_batch_size(result, index, read_name_batch_size: int):
     config = PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="fractional"),
         scan=BamScanConfig(
             sj_strand_tag="auto",
-            qname_batch_size=qname_batch_size,
-            chunk_size=1000,
+            read_name_batch_size=read_name_batch_size,
+            fragments_per_chunk=1000,
         ),
     )
     return run_pipeline(result.bam_path, index, config=config)
@@ -77,12 +77,14 @@ def _sorted_counts(pr, index):
     return pr.estimator.get_counts_df(index).sort_values("transcript_id").reset_index(drop=True)
 
 
-def test_qname_batch_size_edges_match(tmp_path):
+def test_scan_read_name_batch_size_edges_match(tmp_path):
     sc, result = _make_scenario(tmp_path, n_fragments=120)
     index = result.index
     try:
-        batch_one = _run_with_batch_size(result, index, qname_batch_size=1)
-        batch_huge = _run_with_batch_size(result, index, qname_batch_size=10_000)
+        batch_one = _run_with_read_name_batch_size(result, index, read_name_batch_size=1)
+        batch_huge = _run_with_read_name_batch_size(
+            result, index, read_name_batch_size=10_000,
+        )
     finally:
         sc.cleanup()
 

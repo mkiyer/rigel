@@ -1,120 +1,156 @@
 # PR 09: Parallel Streaming Scorer
 
-**Position in roadmap:** Fifth. Land after PR07/PR08 reduce payload size
-and scatter cost.
+**Position in roadmap:** Fifth. Land after PR07 (smaller payloads) and
+PR08 (cheaper scatter) so the parallel scorer doesn't immediately
+saturate memory bandwidth.
 
 ## Summary
 
-Parallelize `fragment_router_scan` by scoring buffer chunks concurrently
-into per-worker CSR builders, then deterministically merging the chunk
-results into one `ScoredFragments` object.
+Score buffer chunks concurrently into per-worker CSR builders, then
+merge in chunk order into one `ScoredFragments`. Eliminate the
+estimator-shared mutable `unambig_counts` write inside the scoring
+kernel.
 
 ## Motivation
 
-`fragment_router_scan` is 14.72 s, the largest non-scan stage. The
-current `StreamingScorer.score_chunk` path is native but single-threaded
-across chunks.
+`fragment_router_scan` is 14.72 s, the largest non-scan stage.
+Today the loop in
+[src/rigel/scan.py](../../../src/rigel/scan.py) (`FragmentRouter`) is
+single-threaded across chunks: it drains
+`buffer.iter_chunks_consuming()` and calls a single
+`StreamingScorer.score_chunk` instance whose vectors grow monotonically.
 
-Chunks are mostly independent after scan has finalized strand and
-fragment-length models. This makes chunk-level parallelism the clearest
-wall-time opportunity outside scan.
+Chunks are independent in two specific senses that make
+chunk-parallelism legal:
+
+* Strand and FL models are frozen before scoring begins.
+* The scanner already ends chunks at qname-group boundaries (an
+  invariant noted in `scoring.cpp` ~line 1003 — "cross-chunk references
+  not possible"). Every alignment for one molecule lives in one chunk.
+
+What is **not** independent today is `unambig_counts`. The native
+scorer writes deterministic-fragment counts directly into a single
+estimator-owned `f64_2d_mut` array passed through
+[src/rigel/scan.py](../../../src/rigel/scan.py) ~line 129. Any parallel
+design must privatize that array per worker and merge.
 
 ## Current code
 
-- Router driver: [src/rigel/scan.py](../../../src/rigel/scan.py)
-- Native scorer state: [src/rigel/native/scoring.cpp](../../../src/rigel/native/scoring.cpp)
-- Buffer consuming iterator: [src/rigel/buffer.py](../../../src/rigel/buffer.py)
-- Estimator unambiguous counts: [src/rigel/estimator.py](../../../src/rigel/estimator.py)
+* Driver: [src/rigel/scan.py](../../../src/rigel/scan.py)
+  (`FragmentRouter`, lines ~30–150).
+* Native scorer: [src/rigel/native/scoring.cpp](../../../src/rigel/native/scoring.cpp)
+  (`StreamingScorer`, `score_chunk` ~line 1128, `finish` ~line 1157).
+* Buffer iterator: [src/rigel/buffer.py](../../../src/rigel/buffer.py)
+  (`iter_chunks_consuming`).
+* Estimator counts: [src/rigel/estimator.py](../../../src/rigel/estimator.py)
+  (`unambig_counts` ~line 192).
 
-## Design constraints
+## Design
 
-- Output must be deterministic.
-- Multimapper groups must not be split incorrectly. The scan buffer must
-  guarantee all alignments for one molecule share a chunk, or the scorer
-  must carry boundary state between adjacent chunks.
-- Unambiguous count accumulation must not race on shared estimator arrays.
-- Annotation output order must remain stable or be explicitly sorted.
-- Peak RSS must stay bounded; parallel workers cannot all retain huge
-  completed chunk outputs indefinitely.
+Three separable pieces:
 
-## Proposed design
+### A. Privatize unambig counts
 
-Use a two-level builder:
+Change the native scoring entrypoint so it writes into a
+**locally-owned** `unambig_counts` accumulator (one per chunk or per
+worker). The driver sums these into the estimator after the scoring
+phase finishes. This is a prerequisite for any concurrent design and
+also makes the existing serial path easier to reason about.
 
-1. Each worker owns a local native `ChunkScorer` with local output
-   vectors and local unambiguous count arrays.
-2. Python submits chunks from `iter_chunks_consuming()` to a bounded
-   worker pool.
-3. Results are returned with a monotonically increasing `chunk_id`.
-4. A deterministic merge step concatenates chunk outputs by `chunk_id`,
-   fixes CSR offsets, and sums local unambiguous count arrays into the
-   estimator.
+### B. Per-chunk scorer
 
-Keep `NativeFragmentScorer` immutable and shared. Keep per-worker mutable
-state local.
+Refactor `StreamingScorer` into:
 
-## Implementation steps
+* `NativeFragmentScorer` (immutable, shared) — index, models,
+  scoring config. Holds nothing mutable.
+* `ChunkScorer` (per-call) — owns the local output vectors and local
+  `unambig_counts`. Constructed cheaply, destroyed when the chunk's
+  output is consumed.
+* `score_chunk(chunk_arrays) -> ChunkResult` returns a Python tuple
+  of numpy arrays + a chunk_id. No global state mutation.
 
-1. Split `StreamingScorer` internals into:
-   - immutable `NativeFragmentScorer`,
-   - per-output mutable scorer/builder state,
-   - finish method for one chunk or chunk sequence.
-2. Add a native function/class that scores exactly one finalized chunk
-   into local arrays without touching shared estimator counts.
-3. Replace direct writes to `estimator.unambig_counts` with per-worker or
-   per-chunk unambiguous count buffers.
-4. In [src/rigel/scan.py](../../../src/rigel/scan.py), add a parallel path
-   controlled by `n_threads` or a new scoring config field. Default can
-   remain serial until validated.
-5. Use a bounded queue/future pool. Keep at most `2 * n_workers` chunk
-   results in memory.
-6. Merge chunk results in chunk order:
-   - concatenate `t_indices`, payload arrays, and per-unit arrays,
-   - rebuild global `offsets` by adding cumulative candidate counts,
-   - concatenate deterministic and chimeric annotation arrays,
-   - sum unambiguous counts.
-7. Preserve the existing serial path for comparison while the new path is
-   being validated. Remove it later only after confidence is high.
-8. Add profile counters: scoring workers, chunks scored, merge time,
-   max in-flight chunk results.
+### C. Concurrent driver and ordered merge
+
+Python driver:
+
+```python
+in_q  = queue.Queue(maxsize=2 * n_workers)   # chunks awaiting work
+out_q = queue.Queue(maxsize=2 * n_workers)   # completed ChunkResults
+
+# producer: drain buffer.iter_chunks_consuming(), assign monotone chunk_id, push
+# workers: pop chunk, call native scorer, push (chunk_id, result)
+# merger: pop in chunk_id order (heap or expected_id counter), append to global builders
+```
+
+Use `concurrent.futures.ThreadPoolExecutor`. The native call releases
+the GIL, so threads scale.
+
+The global builders are append-only Python lists of per-chunk arrays;
+final assembly concatenates and rebuilds CSR offsets in a single pass
+once all chunks are merged. Concatenation is a reduction step, not a
+per-chunk cost.
 
 ## Multimapper boundary check
 
-Before implementing parallel scoring, add an assertion or test proving
-multimapper groups are not split across chunks. If they can be split,
-there are two options:
+Add an explicit invariant test before parallelization is enabled:
 
-- make the buffer chunker flush only at qname group boundaries, or
-- add a serial boundary reconciliation path for the first/last frag_id of
-  each chunk.
+```python
+def test_chunks_dont_split_qname_groups():
+    # Construct a buffer where chunk size forces a multimapper group near
+    # the boundary, finalize, iterate, assert every frag_id appears in
+    # exactly one chunk.
+```
 
-Do not proceed without this invariant.
+If it ever fails, the buffer chunker (not the scorer) is wrong; fix
+there.
+
+## Implementation steps
+
+1. **Privatize `unambig_counts` (independent commit).** Change the
+   native scorer to fill a local accumulator and return it from
+   `finish()`. Driver sums into the estimator. Keep the rest of the
+   scorer single-threaded for this commit. Validate against goldens.
+2. Split `StreamingScorer` per the A/B refactor above. The per-call
+   `ChunkScorer` should be cheap to construct (no model rebuild); all
+   immutable state stays in `NativeFragmentScorer`.
+3. Bind `score_chunk` as a free function on `NativeFragmentScorer`
+   that returns its own ChunkResult tuple.
+4. Add the parallel driver in `scan.py` behind a config flag
+   (`scoring.n_threads`, default 1 for the first PR landing).
+5. Implement ordered merge using a min-heap keyed by chunk_id.
+6. Concatenate per-chunk arrays in chunk order. Rebuild global CSR
+   offsets by scanning concatenated `count_cols`.
+7. Sum per-chunk `unambig_counts` into the estimator at end.
+8. Bound in-flight memory: cap `out_q` and total queued
+   ChunkResult bytes via PR05's `scoring_csr.candidate_bytes`
+   accounting (or a simpler cap on number of in-flight chunks).
+9. Add profile counters: scoring workers, chunks processed, merge
+   wall, peak in-flight chunk-result bytes.
 
 ## Tests
 
 ```bash
 conda activate rigel
 pip install --no-build-isolation -e .
-pytest tests/test_buffer.py tests/test_pipeline_routing.py tests/test_pipeline_smoke.py -v
-pytest tests/test_golden_output.py -v
+pytest tests/test_buffer.py tests/test_pipeline_routing.py \
+       tests/test_pipeline_smoke.py tests/test_cross_chunk.py -v
 pytest tests/test_em_impl.py tests/test_estimator.py -v
+pytest tests/test_golden_output.py -v
 ```
 
 Add focused tests:
 
-- Serial and parallel scoring produce identical `ScoredFragments` arrays
-  on a multi-chunk fixture.
-- Parallel unambiguous counts match serial counts exactly.
-- Multimapper groups at chunk boundaries are handled or rejected with a
-  clear invariant failure.
-- Annotation rows are deterministic.
+* Privatized `unambig_counts` (commit 1) gives bit-identical estimator
+  totals to the previous shared-write design.
+* `scoring.n_threads = 1` and `n_threads = 4` produce array-identical
+  `ScoredFragments` and identical `unambig_counts`.
+* Multimapper-boundary invariant test (above).
+* Annotation arrays preserve the expected order (sorted by chunk_id,
+  then by within-chunk index).
 
 ## Benchmark plan
 
-Run full profiles at scoring worker counts 1, 2, 4, and 8 if exposed:
-
 ```bash
-conda activate rigel
 python scripts/profiling/profiler.py \
   --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
@@ -122,30 +158,35 @@ python scripts/profiling/profiler.py \
   --stages --threads 8 --memory-interval 250
 ```
 
-Collect clean wall times and peak RSS. Use cProfile only to attribute
-merge overhead.
+Sweep `scoring.n_threads` ∈ {1, 2, 4, 8}. Compare wall, peak RSS, and
+the merge wall reported by the new profile counter.
 
 ## Acceptance criteria
 
-- Golden outputs unchanged.
-- Parallel path produces array-identical `ScoredFragments` to serial on
-  focused tests.
-- `fragment_router_scan` improves by at least 2x on VCAP at 8 threads,
-  with a stretch target of 3-5x.
-- Peak RSS does not grow by more than the configured in-flight chunk
-  result bound.
-- Merge time is reported separately and is not more than 25% of the old
-  router stage.
+* Golden outputs unchanged.
+* Parallel and serial paths produce array-identical `ScoredFragments`
+  and `unambig_counts` on focused tests.
+* `fragment_router_scan` improves by ≥ 2× at `scoring.n_threads = 8`
+  on VCAP. Stretch target: 3×.
+* Peak RSS does not exceed
+  `pre_PR09_peak + max_inflight_chunks × per_chunk_bytes`.
+* Merge wall reported separately and ≤ 25% of pre-PR09
+  `fragment_router_scan` time.
+* Multimapper-boundary invariant test added and passing.
 
 ## Risks
 
-- Shared estimator count races. Avoid by using local count buffers.
-- Memory growth from too many completed chunk outputs. Use bounded
-  in-flight work and ordered merge.
-- Multimapper chunk-boundary semantics. Prove or fix before parallelism.
+* The `unambig_counts` privatization is the largest correctness change
+  in the PR. Land it in commit 1 so any regression is bisectable.
+* Memory growth from queued ChunkResults. Bound the queue and instrument
+  the bound.
+* Determinism. Always merge in chunk_id order. Never let workers append
+  directly to global builders.
 
 ## Non-goals
 
-- Do not change scoring formulas.
-- Do not combine with float32 payload conversion.
-- Do not redesign calibration or scan-to-score streaming in this PR.
+* No scoring-formula changes.
+* No FragmentBuffer-layer changes (PR10 owns those).
+* No fusion of scoring with partitioning. Scoring still feeds an
+  intermediate `ScoredFragments`; fusing further is a separate
+  conversation.

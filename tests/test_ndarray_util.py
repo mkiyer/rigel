@@ -131,7 +131,7 @@ class TestScanAndBufferNdarrayDtypes:
     def _run_scan(self, smoke_scenario):
         sc, result = smoke_scenario
         self.index = result.index
-        scan_config = BamScanConfig(sj_strand_tag="auto", n_scan_threads=1)
+        scan_config = BamScanConfig(sj_strand_tag="auto", total_threads=1)
         (
             self.stats,
             self.strand_models,
@@ -288,7 +288,7 @@ class TestMemorySafety:
     def test_array_survives_dict_deletion(self, smoke_scenario):
         """Numpy arrays from chunk data remain valid after dict deletion."""
         sc, result = smoke_scenario
-        scan_config = BamScanConfig(sj_strand_tag="auto", n_scan_threads=1)
+        scan_config = BamScanConfig(sj_strand_tag="auto", total_threads=1)
         (
             _stats,
             _strand_models,

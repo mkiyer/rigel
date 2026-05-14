@@ -55,10 +55,10 @@ def _make_scenario(tmp_path):
     return sc, sc.build_oracle(n_fragments=N_FRAGS, sim_config=sim_config)
 
 
-def _run_with_chunk_size(result, index, chunk_size):
+def _run_with_fragments_per_chunk(result, index, fragments_per_chunk):
     config = PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="fractional"),
-        scan=BamScanConfig(sj_strand_tag="auto", chunk_size=chunk_size),
+        scan=BamScanConfig(sj_strand_tag="auto", fragments_per_chunk=fragments_per_chunk),
     )
     return run_pipeline(result.bam_path, index, config=config)
 
@@ -71,12 +71,12 @@ class TestCrossChunkRegression:
         self.sc, self.result = _make_scenario(tmp_path)
         self.index = self.result.index
         # Baseline: all fragments in one chunk
-        self.pr_big = _run_with_chunk_size(
-            self.result, self.index, chunk_size=N_FRAGS + 100
+        self.pr_big = _run_with_fragments_per_chunk(
+            self.result, self.index, fragments_per_chunk=N_FRAGS + 100,
         )
         # Test: many tiny chunks (forces chunk-boundary splits)
-        self.pr_tiny = _run_with_chunk_size(
-            self.result, self.index, chunk_size=10
+        self.pr_tiny = _run_with_fragments_per_chunk(
+            self.result, self.index, fragments_per_chunk=10,
         )
         yield
         self.sc.cleanup()

@@ -119,10 +119,10 @@ python scripts/profiling/scan_profile.py \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_pr_check \
   --name-prefix pr_check \
-  --n-scan-threads 4 8 12 \
-  --n-decomp-threads 2 \
-  --chunk-size 1000000 \
-  --max-memory-gib 12
+  --threads 4 8 12 \
+  --scan-bgzf-threads 2 \
+  --scan-fragments-per-chunk 1000000 \
+  --scan-buffer-size 12
 ```
 
 The thread sweep is mandatory. Single-thread-count benchmarks hide

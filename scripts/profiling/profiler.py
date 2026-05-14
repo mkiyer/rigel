@@ -287,13 +287,40 @@ def _build_pipeline_config(
     if rigel_params is not None:
         raw.update(rigel_params.params)
 
+    removed_scan_keys = {
+        "buffer_size": "scan_buffer_size",
+        "chunk_size": "scan_fragments_per_chunk",
+        "max_memory_bytes": "scan_buffer_size",
+        "max_memory_gib": "scan_buffer_size",
+        "n_decomp_threads": "scan_bgzf_threads",
+        "decomp_threads": "scan_bgzf_threads",
+        "n_scan_threads": "threads",
+        "n_threads": "threads",
+        "qname_batch_size": "scan_read_name_batch_size",
+        "scan_decomp_threads": "scan_bgzf_threads",
+        "scan_max_memory_gib": "scan_buffer_size",
+        "scan_qname_batch_size": "scan_read_name_batch_size",
+        "scan_threads": "threads",
+    }
+    removed = sorted(set(raw) & set(removed_scan_keys))
+    if removed:
+        replacements = ", ".join(
+            f"{key!r} -> {removed_scan_keys[key]!r}" for key in removed
+        )
+        raise ValueError(
+            "Removed profiler parameter(s); update to the new scan names: "
+            f"{replacements}"
+        )
+
     em_kw: dict = {}
+    threads = raw.pop("threads", None)
+    if threads is not None:
+        em_kw["n_threads"] = threads
     _EM_ALIASES = {
         "em_convergence_delta": "convergence_delta",
         "em_iterations": "iterations",
         "em_prior_pseudocount": "prior_pseudocount",
         "em_mode": "mode",
-        "n_threads": "n_threads",
     }
     for raw_key, cfg_key in _EM_ALIASES.items():
         if raw_key in raw:
@@ -316,14 +343,40 @@ def _build_pipeline_config(
     if tmpdir is not None:
         from pathlib import Path as _Path
         scan_kw["spill_dir"] = _Path(tmpdir)
-    if "n_threads" in em_kw:
-        scan_kw["n_scan_threads"] = em_kw["n_threads"]
+    if threads is not None:
+        scan_kw["total_threads"] = threads
+    _SCAN_ALIASES = {
+        "scan_bgzf_threads": "bgzf_threads",
+        "scan_fragments_per_chunk": "fragments_per_chunk",
+        "scan_read_name_batch_size": "read_name_batch_size",
+    }
+    for raw_key, cfg_key in _SCAN_ALIASES.items():
+        if raw_key in raw:
+            scan_kw[cfg_key] = raw.pop(raw_key)
+    scan_buffer_size = raw.pop("scan_buffer_size", None)
+    if scan_buffer_size is not None:
+        scan_kw["buffer_size_bytes"] = int(float(scan_buffer_size) * 1024**3)
 
     return PipelineConfig(
         em=EMConfig(**em_kw),
         scan=BamScanConfig(**scan_kw),
         scoring=FragmentScoringConfig(**scoring_kw),
     )
+
+
+def _scan_config_summary(scan: BamScanConfig) -> dict:
+    """Return user-facing scan config values plus the resolved worker split."""
+    scan_workers, bgzf_threads = scan.resolved_scan_threads()
+    return {
+        "threads": scan.total_threads,
+        "resolved_total_threads": scan.resolved_total_threads(),
+        "scan_worker_threads": scan_workers,
+        "scan_bgzf_threads": bgzf_threads,
+        "requested_scan_bgzf_threads": scan.bgzf_threads,
+        "scan_fragments_per_chunk": scan.fragments_per_chunk,
+        "scan_read_name_batch_size": scan.read_name_batch_size,
+        "scan_buffer_size_bytes": scan.buffer_size_bytes,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -413,6 +466,7 @@ class ProfileResult:
 
     # Per-stage RSS memory snapshots (MB) taken at end of each stage
     rss_snapshots: dict = field(default_factory=dict)
+    scan_config: dict = field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -466,6 +520,7 @@ def profile_simple(
         pipeline_stats=stats.to_dict(),
         n_transcripts=index.num_transcripts,
         n_genes=index.num_genes,
+        scan_config=_scan_config_summary(pcfg.scan),
     )
     return result, profiler
 
@@ -669,6 +724,7 @@ def profile_stages(
         max_locus_transcripts=max_locus_t,
         max_locus_units=max_locus_u,
         rss_snapshots=rss_snaps,
+        scan_config=_scan_config_summary(scan_cfg),
     )
     return result, profiler
 
@@ -941,6 +997,7 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
                 },
                 "pipeline_stats": r.pipeline_stats,
                 "rss_snapshots": r.rss_snapshots,
+                "scan_config": r.scan_config,
             }
             for r in results
         ],
@@ -992,8 +1049,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", action="store_true", default=None,
                     help="Verbose logging")
     p.add_argument("--threads", type=int, default=None,
-                    help="Number of threads for parallel locus EM "
-                         "(0=all cores, 1=sequential)")
+                    help="Total thread budget for Rigel. Scan splits this "
+                        "budget between scan workers and --scan-bgzf-threads; "
+                        "locus EM uses the same budget because stages run serially.")
+    p.add_argument("--scan-bgzf-threads", type=int, default=None,
+                    help="BGZF decompression threads reserved from --threads "
+                        "during BAM scan")
+    p.add_argument("--scan-buffer-size", type=float, default=None,
+                    help="Maximum scan buffer size in GiB before disk spill")
+    p.add_argument("--scan-fragments-per-chunk", type=int, default=None,
+                    help="Buffered fragments per native scan chunk")
+    p.add_argument("--scan-read-name-batch-size", type=int, default=None,
+                    help="Read-name groups per native scanner input queue item")
     p.add_argument("--tmpdir", default=None,
                     help="Directory for temporary buffer spill files "
                          "(default: system temp directory)")
@@ -1029,7 +1096,19 @@ def main() -> int:
         cfg.verbose = args.verbose
     if args.threads is not None:
         for hc in cfg.rigel_configs:
-            hc.params["n_threads"] = args.threads
+            hc.params["threads"] = args.threads
+    if args.scan_bgzf_threads is not None:
+        for hc in cfg.rigel_configs:
+            hc.params["scan_bgzf_threads"] = args.scan_bgzf_threads
+    if args.scan_buffer_size is not None:
+        for hc in cfg.rigel_configs:
+            hc.params["scan_buffer_size"] = args.scan_buffer_size
+    if args.scan_fragments_per_chunk is not None:
+        for hc in cfg.rigel_configs:
+            hc.params["scan_fragments_per_chunk"] = args.scan_fragments_per_chunk
+    if args.scan_read_name_batch_size is not None:
+        for hc in cfg.rigel_configs:
+            hc.params["scan_read_name_batch_size"] = args.scan_read_name_batch_size
     if args.tmpdir is not None:
         cfg.tmpdir = args.tmpdir
 

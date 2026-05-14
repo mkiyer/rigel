@@ -268,8 +268,8 @@ def scan_and_buffer(
     frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
     buffer = FragmentBuffer(
         t_strand_arr=index.t_to_strand_arr,
-        chunk_size=scan.chunk_size,
-        max_memory_bytes=scan.max_memory_bytes,
+        chunk_size=scan.fragments_per_chunk,
+        max_memory_bytes=scan.buffer_size_bytes,
         spill_dir=scan.spill_dir,
     )
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
@@ -324,17 +324,23 @@ def scan_and_buffer(
         buffer.inject_chunk(chunk)
 
     # Execute the full BAM scan in C++ with streaming chunk output
-    n_scan = scan.n_scan_threads
-    if n_scan == 0:
-        n_scan = os.cpu_count() or 1
+    n_scan, n_bgzf = scan.resolved_scan_threads()
+    if n_bgzf != scan.bgzf_threads:
+        logger.info(
+            "[scan] Capped BGZF decompression threads from %d to %d to fit "
+            "within total thread budget %d.",
+            scan.bgzf_threads,
+            n_bgzf,
+            scan.resolved_total_threads(),
+        )
     result = scanner.scan(
         bam_path,
         chunk_callback=_on_chunk,
         t_strand_arr=index.t_to_strand_arr.tolist(),
-        chunk_size=scan.chunk_size,
+        chunk_size=scan.fragments_per_chunk,
         n_workers=n_scan,
-        n_decomp_threads=scan.n_decomp_threads,
-        qname_batch_size=scan.qname_batch_size,
+        n_decomp_threads=n_bgzf,
+        qname_batch_size=scan.read_name_batch_size,
     )
 
     # Replay stats

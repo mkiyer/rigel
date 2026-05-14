@@ -1,21 +1,25 @@
-# Post-Scan Performance PR Roadmap
+# Post-Scan Performance PR Roadmap (revised)
 
 Date: 2026-05-13
 
-This roadmap turns the post-PR01-PR04 full profile in
+Context: PR01–PR04 (scan and BAM I/O) landed and reshaped the profile.
+This roadmap turns the resulting full profile in
 [../profile_2026-05-13_vcap_rna20m_gdna20m_post_scan_prs.md](../profile_2026-05-13_vcap_rna20m_gdna20m_post_scan_prs.md)
 into an implementation-ready PR series.
 
-The scan PRs worked: total wall time on the VCAP RNA20M + gDNA20M run is
-now 73.36 s, down from 246.8 s, and `scan_and_buffer` is now 32.78 s,
-down from 200.6 s. The remaining problem is no longer one pathological
-hotspot. It is data movement: large intermediate arrays, global CSR
-lifetime, repeated scatter, and a single-thread scoring pass.
+The pipeline is no longer dominated by a single hotspot. Total wall time
+on the VCAP RNA20M + gDNA20M run is now **73.36 s**, down from 246.8 s.
+The remaining work is data-movement: large intermediate arrays, a global
+CSR with a long lifetime, repeated scatter passes, and a single-thread
+scoring pass.
 
 ## Current baseline
 
-Clean staged profile, 8 scan/EM threads, 4 GiB scan buffer cap,
-`qname_batch_size=512`, current profiler defaults:
+Clean staged profile from before the naming cleanup: 8 native scan workers,
+4 BGZF threads, 8 EM threads, 4 GiB scan buffer cap, and read-name batch
+size 512. Under the new total-budget convention, the same scan worker
+split is `--threads 12 --scan-bgzf-threads 4`; future profiles should
+report both the requested total budget and the resolved scan worker count.
 
 | Stage | Wall | Share |
 |---|---:|---:|
@@ -26,49 +30,79 @@ Clean staged profile, 8 scan/EM threads, 4 GiB scan buffer cap,
 | `compute_eb_gdna_priors` | 4.23 s | 5.8% |
 | `build_loci` | 1.14 s | 1.6% |
 
-Peak RSS is 16.20 GB. RSS rises to 9.81 GB after scan, then to 16.20 GB
-after scoring/router scan, and stays there through cleanup.
+Peak RSS is 16.20 GB, reached after `fragment_router_scan` builds the
+global CSR on top of the scan buffer high-water.
+
+## Verified ground truth before planning
+
+These are facts in the tree at the time of this revision; every PR below
+is calibrated against them.
+
+- The scan parameter vocabulary is canonicalized before this PR series:
+  `threads` is the total budget, `scan_bgzf_threads` reserves BGZF
+  decompression threads from it, `scan_buffer_size` is GiB,
+  `scan_fragments_per_chunk` controls native chunk handoff size, and
+  `scan_read_name_batch_size` controls read-name queue batches.
+- Async spill is already implemented as `_SpillWriter` in
+  [src/rigel/buffer.py](../../../src/rigel/buffer.py). It is a single
+  background thread with a bounded queue. PR04 is *streaming* scan→score,
+  not spill.
+- `partition_and_free` is Python in
+  [src/rigel/locus_partition.py](../../../src/rigel/locus_partition.py);
+  it sequences 1 offsets call + 11 scatter calls into the templated
+  `scatter_candidates_impl<T>` / `scatter_units_impl<T>` in
+  [src/rigel/native/em_solver.cpp](../../../src/rigel/native/em_solver.cpp).
+- `StreamingScorer` writes `unambig_counts` directly into a single
+  estimator-owned `f64_2d_mut` array (shared mutable state). Any
+  parallel scorer must give every worker its own copy and merge.
+- `score_chunk()` consumes 13 buffer columns. `exon_bp_pos`,
+  `exon_bp_neg`, `tx_bp_pos`, `tx_bp_neg` are **not** among them.
+- `enable_gdna_for_multilocus` reads `is_spliced` and `gdna_log_liks`
+  from the global CSR; it must run before `partition_and_free` consumes
+  those arrays.
 
 ## PR series
 
 | Order | PR | Doc | Primary target | Risk |
 |---:|---|---|---|---|
-| 05 | Profiling and scan config visibility | [pr05_profile_and_scan_config_visibility.md](pr05_profile_and_scan_config_visibility.md) | Measurement correctness, visible `n_decomp_threads` | Low |
-| 06 | Scan memory budget policy | [pr06_scan_memory_budget_policy.md](pr06_scan_memory_budget_policy.md) | Lower scan RSS using async spill | Low |
-| 07 | Float32 scored-fragment payloads | [pr07_float32_scored_fragments.md](pr07_float32_scored_fragments.md) | Peak RSS and bandwidth in scoring/scatter/EM | Medium |
-| 08 | Fused partition scatter | [pr08_fused_partition_scatter.md](pr08_fused_partition_scatter.md) | `partition_and_free` wall time and memory traffic | Medium |
-| 09 | Parallel streaming scorer | [pr09_parallel_streaming_scorer.md](pr09_parallel_streaming_scorer.md) | `fragment_router_scan` wall time | Medium-high |
-| 10 | Buffer dtype diet | [pr10_buffer_dtype_diet.md](pr10_buffer_dtype_diet.md) | Scan buffer logical size and spill volume | Medium |
-| 11 | Prior fast path and eligibility fusion | [pr11_prior_fast_path.md](pr11_prior_fast_path.md) | `compute_eb_gdna_priors` and Python gathers | Medium |
-| 12 | EM high-iteration workset | [pr12_em_high_iteration_workset.md](pr12_em_high_iteration_workset.md) | Remaining EM long tail | Research PR |
+| 05 | Scan config & profiler visibility | [pr05_profile_and_scan_config_visibility.md](pr05_profile_and_scan_config_visibility.md) | Make every later measurement reproducible | Low |
+| 06 | Lower default scan memory cap | [pr06_scan_memory_budget_policy.md](pr06_scan_memory_budget_policy.md) | Free RSS reduction (async spill already shipped) | Low |
+| 07 | Float32 scored-fragment payloads | [pr07_float32_scored_fragments.md](pr07_float32_scored_fragments.md) | Peak RSS, scoring/scatter/EM bandwidth | Medium |
+| 08 | Fused partition scatter | [pr08_fused_partition_scatter.md](pr08_fused_partition_scatter.md) | `partition_and_free` wall + memory traffic | Medium |
+| 09 | Parallel streaming scorer | [pr09_parallel_streaming_scorer.md](pr09_parallel_streaming_scorer.md) | `fragment_router_scan` wall | Medium-high |
+| 10 | Buffer column diet | [pr10_buffer_dtype_diet.md](pr10_buffer_dtype_diet.md) | Buffer logical size + spill volume | Medium |
+| 11 | Prior fast path | [pr11_prior_fast_path.md](pr11_prior_fast_path.md) | `compute_eb_gdna_priors` Python tail | Medium |
+| 12 | EM high-iteration workset | [pr12_em_high_iteration_workset.md](pr12_em_high_iteration_workset.md) | Long-tail SQUAREM iterations | Research |
 
 ## Why this order
 
-PR05 comes first because the profiler currently cannot set every scan
-parameter it reports on, and the full profile JSON does not expose enough
-array-cardinality information to prove memory improvements. It is a small
-instrumentation PR that makes every later benchmark more trustworthy.
+**PR05 first** because every later wall-time and RSS claim depends on
+the profiler being able to set the scan parameters it reports on, and
+on the JSON exposing array cardinalities (`n_candidates`, candidate /
+unit byte estimates). It is small, low-risk, and instrumentation-only.
 
-PR06 is next because the scan-only memory sweep already shows a nearly
-free RSS reduction: 4 GiB cap was 32.11 s / 9.66 GB peak, 2 GiB cap was
-31.21 s / 7.88 GB peak, and 1 GiB cap was 31.97 s / 7.07 GB peak.
+**PR06 second** because the scan-only memory sweep already shows lower
+caps are nearly free. Async spill is already in tree; the only thing
+left is to validate end-to-end and change a default.
 
-PR07 and PR08 should land before PR09. Parallel scoring multiplies
-in-flight output pressure; first shrink the payloads and reduce scatter
-bandwidth so the parallel scorer does not simply move the bottleneck to
-memory bandwidth.
+**PR07 before PR09.** Parallel scoring multiplies in-flight CSR
+pressure; halving payload precision first prevents the parallel scorer
+from saturating memory bandwidth.
 
-PR10 can run in parallel with PR07/PR08, but it touches the scan buffer
-ABI and spill serialization, so it should not be bundled with float32 EM
-payload work.
+**PR08 before PR09** for the same reason: the scatter step is also
+bandwidth-bound, and fusing it removes one of the two largest copy
+events in the post-scan pipeline.
 
-PR11 is useful but lower priority: prior assembly improved from 9.5 s to
-4.23 s after cleanup, so it is no longer the largest target. Keep it
-separate because it changes output diagnostics policy.
+**PR10 in parallel with PR07/PR08** if reviewers are available. It is
+isolated to the buffer layer and does not touch the scoring CSR.
+Schedule independently.
 
-PR12 is deliberately a research/measurement PR. EM is already threaded
-and correctness-sensitive; do not change convergence tolerances or solver
-semantics until the high-iteration loci have been characterized.
+**PR11 lower priority** because prior assembly already dropped from
+9.5 s to 4.23 s. The remaining cost is real but small.
+
+**PR12 is investigative.** EM is already threaded and
+correctness-sensitive. Build a workset and a microbenchmark harness
+before changing solver behaviour.
 
 ## Shared validation protocol
 
@@ -91,15 +125,14 @@ pytest tests/test_em_impl.py tests/test_estimator.py -v
 For representation changes, run the full suite before merge:
 
 ```bash
-conda activate rigel
 pytest tests/ -q
 ruff check src/ tests/
 ```
 
-Performance comparison workload:
+Performance comparison workload (PR05 must land first for the flags to
+exist):
 
 ```bash
-conda activate rigel
 python scripts/profiling/profiler.py \
   --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
@@ -107,22 +140,13 @@ python scripts/profiling/profiler.py \
   --stages --threads 8 --memory-interval 250
 ```
 
-Use cProfile only for attribution, not for headline timing:
-
-```bash
-conda activate rigel
-python scripts/profiling/profiler.py \
-  --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
-  --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
-  --outdir /Users/mkiyer/Downloads/rigel_runs/profile_post_scan_pr_check_cprofile \
-  --stages --cprofile --threads 8 --memory-interval 250
-```
+Use cProfile only for attribution, not for headline timing.
 
 ## Non-goals for the series
 
-- Do not change transcript-centric modeling semantics.
-- Do not weaken EM convergence tolerances to make profiles look better.
-- Do not remove diagnostic outputs unless a PR explicitly adds a config
-  switch and tests both modes.
-- Do not fold several memory-layout changes into one large PR. Each
+- No transcript-centric modeling changes.
+- No EM convergence-tolerance loosening.
+- No silent removal of diagnostic outputs. PRs that change diagnostics
+  must be config-gated and test both modes.
+- No bundling of multiple representation changes into one PR. Each
   representation change needs its own golden-output and profile diff.

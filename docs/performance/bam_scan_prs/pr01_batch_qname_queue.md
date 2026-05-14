@@ -47,10 +47,10 @@ struct QnameBatch {
 * Queue type becomes `BoundedQueue<QnameBatch>`; capacity counted in
   batches.
 
-Defaults: `qname_batch_size = 512`, queue capacity expressed in batches
+Defaults: `read_name_batch_size = 512`, queue capacity expressed in batches
 (initial guess: `4 × n_workers`, tune in benchmark). Add it as an
 internal scan parameter with a default, but do not add a CLI flag. Tests
-need to force `qname_batch_size = 1`; normal users should not have to
+need to force `read_name_batch_size = 1`; normal users should not have to
 think about it.
 
 ## Implementation Steps
@@ -60,11 +60,11 @@ think about it.
    `BamScanner::scan`.
 3. Add an optional native `qname_batch_size` argument to
   `BamScanner::scan(...)` and thread it through `scan_and_buffer`. Add a
-  `BamScanConfig.qname_batch_size: int = 512` field with validation, but
+  `BamScanConfig.read_name_batch_size: int = 512` field with validation, but
   no CLI option.
 4. Add a small reader helper that appends the current group to an
   in-progress batch and pushes it when full. Reserve the reader batch's
-  `groups` vector to `qname_batch_size`.
+  `groups` vector to `read_name_batch_size`.
 5. Flush the final partial batch before closing the input queue.
 6. Update workers to drain the batch in a tight inner loop, calling the
    existing per-group processing without changes.
@@ -78,7 +78,7 @@ think about it.
 The existing scanner tests cover the per-group invariants. Force-batch
 edge cases via two new short tests:
 
-* `qname_batch_size = 1` produces output identical to the default size on
+* `read_name_batch_size = 1` produces output identical to the default size on
   a small fixture.
 * A workload smaller than one batch finishes correctly (final-flush path).
 
@@ -101,10 +101,10 @@ python scripts/profiling/scan_profile.py \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_pr01 \
   --name-prefix pr01 \
-  --n-scan-threads 4 8 12 \
-  --n-decomp-threads 2 \
-  --chunk-size 1000000 \
-  --max-memory-gib 12
+  --threads 4 8 12 \
+  --scan-bgzf-threads 2 \
+  --scan-fragments-per-chunk 1000000 \
+  --scan-buffer-size 12
 ```
 
 ## Acceptance Criteria
@@ -116,7 +116,7 @@ python scripts/profiling/scan_profile.py \
   scanner slower.)
 * Live samples show `BoundedQueue::pop` / `push` frames absent from the
   top of the worker and reader stacks.
-* Peak RSS does not grow by more than `qname_batch_size × n_workers ×
+* Peak RSS does not grow by more than `read_name_batch_size × n_workers ×
   sizeof(QnameGroup)` (ballpark a few MB).
 * If the 10% scaling target is missed but queue frames disappear, stop
   and re-profile before broadening the PR. The next bottleneck should be

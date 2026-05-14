@@ -519,7 +519,7 @@ frags/s; peak RSS −3.2 %).
   pre-allocate all accumulator vectors before scanning each chunk, eliminating
   repeated `push_back` reallocation overhead on large chunks.
 
-- **Configurable BGZF decompression threads**: `BamScanConfig.n_decomp_threads`
+- **Configurable BGZF decompression threads**: `BamScanConfig.bgzf_threads`
   (default `4`) controls how many htslib threads decompress the BGZF-compressed
   BAM. Previously hardcoded to 2. Set to `0` to disable multi-threaded
   decompression.

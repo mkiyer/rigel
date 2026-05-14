@@ -558,7 +558,9 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
-    _ParamSpec("qname_batch_size", "scan.qname_batch_size"),
+    _ParamSpec("scan_bgzf_threads", "scan.bgzf_threads"),
+    _ParamSpec("scan_fragments_per_chunk", "scan.fragments_per_chunk"),
+    _ParamSpec("scan_read_name_batch_size", "scan.read_name_batch_size"),
     # -- BamScanConfig: transformed --
     _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
     _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
@@ -572,15 +574,31 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
-    # -- Fan-out: threads → both EM and scan --
+    # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
-    _ParamSpec("threads", "scan.n_scan_threads"),
+    _ParamSpec("threads", "scan.total_threads"),
     # -- BamScanConfig: buffer sizing --
-    _ParamSpec("buffer_size", "scan.max_memory_bytes", "gb_to_bytes"),
+    _ParamSpec("scan_buffer_size", "scan.buffer_size_bytes", "gb_to_bytes"),
     # -- Top-level PipelineConfig --
     _ParamSpec("annotated_bam", "annotated_bam_path"),
     _ParamSpec("emit_locus_stats", "emit_locus_stats"),
 )
+
+
+_REMOVED_QUANT_CONFIG_KEYS: dict[str, str] = {
+    "buffer_size": "scan_buffer_size",
+    "chunk_size": "scan_fragments_per_chunk",
+    "max_memory_bytes": "scan_buffer_size",
+    "max_memory_gib": "scan_buffer_size",
+    "n_decomp_threads": "scan_bgzf_threads",
+    "decomp_threads": "scan_bgzf_threads",
+    "n_scan_threads": "threads",
+    "qname_batch_size": "scan_read_name_batch_size",
+    "scan_decomp_threads": "scan_bgzf_threads",
+    "scan_max_memory_gib": "scan_buffer_size",
+    "scan_qname_batch_size": "scan_read_name_batch_size",
+    "scan_threads": "threads",
+}
 
 
 def _resolve_config_path(cfg: object, path: str) -> object:
@@ -717,6 +735,15 @@ def _resolve_quant_args(
             raw = yaml.safe_load(fh) or {}
         # Normalise: allow hyphens, convert to underscores
         yaml_config = {k.replace("-", "_"): v for k, v in raw.items()}
+        removed = sorted(set(yaml_config) & set(_REMOVED_QUANT_CONFIG_KEYS))
+        if removed:
+            replacements = ", ".join(
+                f"{key!r} -> {_REMOVED_QUANT_CONFIG_KEYS[key]!r}" for key in removed
+            )
+            raise ValueError(
+                "Removed quant config key(s); update to the new scan parameter names: "
+                f"{replacements}"
+            )
         # I/O keys and extra flags are valid in config YAML
         valid_keys = set(defaults) | {"bam_file", "index_dir", "output_dir", "tsv"}
         unknown = set(yaml_config) - valid_keys
@@ -1006,18 +1033,28 @@ def build_parser() -> argparse.ArgumentParser:
         dest="threads",
         type=int,
         default=None,
-        help="Number of threads for BAM scanning and locus EM "
-        "(default: 0 = all available cores). Set to 1 for "
-        "sequential execution.",
+        help="Total thread budget for Rigel (default: 0 = all available "
+        "cores). During BAM scan, this budget is split between scan "
+        "workers and --scan-bgzf-threads; locus EM uses the same budget "
+        "because the stages run serially.",
     )
     perf_grp.add_argument(
-        "--buffer-size",
-        dest="buffer_size",
+        "--scan-bgzf-threads",
+        dest="scan_bgzf_threads",
+        type=int,
+        default=None,
+        help="BGZF decompression threads reserved from --threads during "
+        "BAM scan (default: 4). Set to 0 to disable htslib threaded "
+        "decompression.",
+    )
+    perf_grp.add_argument(
+        "--scan-buffer-size",
+        dest="scan_buffer_size",
         type=float,
         default=None,
-        help="Maximum in-memory buffer size in GiB before chunks are "
-        "spilled to disk (default: 4). Increase if you have ample "
-        "RAM to avoid disk I/O overhead from spilling.",
+        help="Maximum scan buffer size in GiB before chunks are spilled "
+        "to disk (default: 4). Increase if you have ample RAM to reduce "
+        "spill I/O.",
     )
     perf_grp.add_argument(
         "--tmpdir",
@@ -1026,8 +1063,16 @@ def build_parser() -> argparse.ArgumentParser:
         "limits are exceeded (default: system temp directory).",
     )
     perf_grp.add_argument(
-        "--qname-batch-size",
-        dest="qname_batch_size",
+        "--scan-fragments-per-chunk",
+        dest="scan_fragments_per_chunk",
+        type=int,
+        default=None,
+        help="Buffered fragments per scan chunk before the native scanner "
+        "hands data to the Python fragment buffer (default: 1000000).",
+    )
+    perf_grp.add_argument(
+        "--scan-read-name-batch-size",
+        dest="scan_read_name_batch_size",
         type=int,
         default=None,
         help="Advanced: read-name groups per native scanner input queue "

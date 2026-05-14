@@ -1,66 +1,78 @@
-# PR 06: Scan Memory Budget Policy
+# PR 06: Lower Default Scan Memory Cap
 
-**Position in roadmap:** Second. Depends on PR05 profiler/config
-visibility so the full-profile validation can set and report scan memory
-caps directly.
+**Position in roadmap:** Second. Depends on PR05 for full-profile
+sweep flags.
 
 ## Summary
 
-Use the async spill writer from PR04 to reduce scan memory pressure. Run
-full-profile validation at 4 GiB, 2 GiB, and 1 GiB scan caps, then either
-lower the default scan buffer cap to 2 GiB or document it as the preferred
-large-run setting.
+Validate that 2 GiB is the right default scan memory cap on production
+workloads, then change `BamScanConfig.buffer_size_bytes` accordingly.
 
 ## Motivation
 
-The scan-only memory sweep showed that lower buffer caps are now nearly
-free:
+Async spill (`_SpillWriter`) is **already in tree** in
+[src/rigel/buffer.py](../../../src/rigel/buffer.py). The scan-only
+memory sweep already showed the new tradeoff:
 
 | Buffer cap | Scan wall | Peak RSS | Resident buffer | Spilled chunks |
 |---:|---:|---:|---:|---:|
 | 4 GiB | 32.11 s | 9.66 GB | 3.90 GB | 14 |
-| 2 GiB | 31.21 s | 7.88 GB | 2.00 GB | 23 |
-| 1 GiB | 31.97 s | 7.07 GB | 0.94 GB | 28 |
+| 2 GiB | **31.21 s** | 7.88 GB | 2.00 GB | 23 |
+| 1 GiB | 31.97 s | **7.07 GB** | **0.94 GB** | 28 |
 
-The old synchronous spill path made lower caps expensive. The current
-async writer changes the tradeoff. This is the simplest immediate RSS
-reduction available.
+Lower caps are essentially free in scan-only wall time. The remaining
+question is whether more spilled chunks slow `fragment_router_scan`
+when scoring has to read them back. Until PR05 lands, the staged
+profiler cannot vary the cap, so this question is unanswered for the
+*full* pipeline.
 
 ## Current code
 
-- Default scan memory cap: [src/rigel/config.py](../../../src/rigel/config.py)
-- Buffer and async spill lifecycle: [src/rigel/buffer.py](../../../src/rigel/buffer.py)
-- CLI `--buffer-size`: [src/rigel/cli.py](../../../src/rigel/cli.py)
-- Full profiler, after PR05: [scripts/profiling/profiler.py](../../../scripts/profiling/profiler.py)
+* Default: [src/rigel/config.py](../../../src/rigel/config.py)
+  (`BamScanConfig.buffer_size_bytes = 4 * 1024**3`).
+* Spill writer: [src/rigel/buffer.py](../../../src/rigel/buffer.py)
+  (`_SpillWriter`, lines ~454–520; bounded `queue.Queue(maxsize=2)`,
+  one writer thread).
+* CLI override: `--scan-buffer-size` in [src/rigel/cli.py](../../../src/rigel/cli.py).
 
 ## Proposed change
 
-Make the scan memory policy explicit and evidence-based:
+A two-step PR. Step 1 measures, step 2 sets the default.
 
-- Preferred large-run default: 2 GiB if full-profile validation confirms
-  no material wall-time penalty.
-- Keep `--buffer-size` as an override.
-- Add documentation explaining the tradeoff: lower caps spill more chunks
-  but can reduce RSS substantially because spill writes are asynchronous.
-- Add a regression benchmark target that compares 4/2/1 GiB caps.
+### Step 1 — Validate
+
+Run staged full profiles at 4, 2, and 1 GiB caps using PR05's flags.
+Compare:
+
+* total wall time
+* `scan_and_buffer` and `fragment_router_scan`
+* peak RSS
+* spilled chunk count and spill bytes
+* whether `_SpillWriter`'s bounded queue ever blocked the scanner
+
+### Step 2 — Set default
+
+* If 2 GiB stays within 5% wall and saves at least 1 GB peak RSS:
+  change `BamScanConfig.buffer_size_bytes` default to `2 * 1024**3`.
+* If 1 GiB also stays within 5%, **do not** change the default to 1
+  GiB. Lower caps trade allocator-cushion margin for spill volume.
+  Document 1 GiB as an explicit low-memory recommendation in the CLI
+  help and parameter docs but keep the default conservative.
+
+Update CLI help for `--scan-buffer-size` to mention the new default and
+the async-spill-makes-this-cheap framing.
 
 ## Implementation steps
 
-1. Use PR05 profiler flags to run full quant profiles at 4 GiB, 2 GiB,
-   and 1 GiB caps with identical scan/EM thread settings.
-2. Compare full-run wall time, peak RSS, `scan_and_buffer`,
-   `fragment_router_scan`, and spill counts. The full profile matters
-   because scoring must load spilled chunks back from disk.
-3. If 2 GiB is within 5% wall time of 4 GiB and saves at least 1 GB RSS,
-   change `BamScanConfig.max_memory_bytes` default from `4 * 1024**3` to
-   `2 * 1024**3`.
-4. Update CLI help for `--buffer-size` to describe the new default and
-   mention async spill.
-5. Update docs and profile report references that say default 4 GiB.
-6. Add a small unit test that `BamScanConfig()` default matches the
-   documented default.
-7. Add a profiling helper note or script command in
-   [docs/performance](../) for the 4/2/1 GiB comparison.
+1. Run the validation sweep (PR05 flags). Persist the JSON and a short
+   numeric comparison table under `docs/performance/`.
+2. Edit `BamScanConfig.buffer_size_bytes` default per the validation
+   result.
+3. Edit `--scan-buffer-size` help text in `cli.py`.
+4. Update [docs/MANUAL.md](../../MANUAL.md) and
+   [docs/parameters.md](../../parameters.md) if they cite the default.
+5. Add a regression unit test asserting the new default value (so it
+   does not silently drift back).
 
 ## Tests
 
@@ -70,45 +82,43 @@ pytest tests/test_cli.py tests/test_buffer.py tests/test_pipeline_smoke.py -v
 pytest tests/test_golden_output.py -v
 ```
 
-No golden changes are expected. This PR changes memory policy, not
-fragment routing or EM semantics.
+No golden change expected. Memory cap does not change fragment routing.
 
 ## Benchmark plan
 
 After PR05:
 
 ```bash
-conda activate rigel
 for cap in 4 2 1; do
   python scripts/profiling/profiler.py \
     --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
     --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
     --outdir /Users/mkiyer/Downloads/rigel_runs/profile_pr06_${cap}gib \
-    --stages --threads 8 --n-decomp-threads 2 \
-    --max-memory-gib "$cap" --qname-batch-size 512 \
+    --stages --threads 8 --scan-bgzf-threads 2 \
+    --scan-buffer-size "$cap" --scan-read-name-batch-size 512 \
     --memory-interval 250
 done
 ```
 
-Use no-cProfile runs for headline timing.
-
 ## Acceptance criteria
 
-- Full quant at 2 GiB cap is no more than 5% slower than 4 GiB.
-- Full quant at 2 GiB cap reduces peak RSS by at least 1 GB.
-- If 1 GiB is also neutral, document it as an aggressive low-memory
-  setting but do not make it default without broader workload coverage.
-- `--buffer-size` override continues to work.
-- No correctness or golden-output changes.
+* Full-pipeline wall at 2 GiB ≤ 1.05 × wall at 4 GiB.
+* Full-pipeline peak RSS at 2 GiB ≤ peak at 4 GiB − 1 GB.
+* `_SpillWriter` queue does not block the scanner for more than 1% of
+  scan wall time at the new default.
+* `--scan-buffer-size` override continues to work.
+* Default change has a unit test.
 
 ## Risks
 
-- Scan-only results may not predict full quant if reading more spilled
-  chunks slows scoring. That is why full-profile validation is required.
-- More spills can stress slower disks. Keep the override easy to find.
+* Slow disks turn higher spill counts into a wall-time penalty. Keep
+  the override well-documented; do not push to 1 GiB by default.
+* Scoring reading spilled chunks back is sequential disk I/O; if
+  `fragment_router_scan` regresses noticeably at 2 GiB, raise the
+  default back to 4 GiB and document the result instead of forcing the
+  change.
 
 ## Non-goals
 
-- Do not rewrite spill serialization or compression in this PR.
-- Do not change chunk size. Chunk-size tuning should be a separate
-  benchmark if needed.
+* No spill format / compression changes.
+* No `--scan-fragments-per-chunk` tuning. That is a separate benchmark question.

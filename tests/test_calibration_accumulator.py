@@ -134,7 +134,7 @@ class TestSetRegions:
 class TestPipelinePayload:
     def test_scan_returns_payload(self, calib_scenario):
         _, result = calib_scenario
-        scan_cfg = BamScanConfig(sj_strand_tag="auto", n_scan_threads=1)
+        scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
         _stats, _sm, _flm, _buf, payload = scan_and_buffer(
             str(result.bam_path), result.index, scan_cfg,
         )
@@ -259,7 +259,7 @@ class TestWorkerMergeEquality:
         _, result = calib_scenario
 
         def _run(n: int) -> CalibrationScanPayload:
-            cfg = BamScanConfig(sj_strand_tag="auto", n_scan_threads=n)
+            cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n)
             _, _, _, _, p = scan_and_buffer(
                 str(result.bam_path), result.index, cfg,
             )
@@ -399,7 +399,7 @@ def _make_pair(
 
 
 def _scan(bam_path, index, n_threads=1):
-    cfg = BamScanConfig(sj_strand_tag="auto", n_scan_threads=n_threads)
+    cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n_threads)
     _, _, _, _, payload = scan_and_buffer(bam_path, index, cfg)
     return payload
 

@@ -133,10 +133,10 @@ python scripts/profiling/scan_profile.py \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_pr04 \
   --name-prefix pr04 \
-  --n-scan-threads 4 8 \
-  --n-decomp-threads 2 \
-  --chunk-size 1000000 \
-  --max-memory-gib 4
+  --threads 4 8 \
+  --scan-bgzf-threads 2 \
+  --scan-fragments-per-chunk 1000000 \
+  --scan-buffer-size 4
 ```
 
 Compare against:

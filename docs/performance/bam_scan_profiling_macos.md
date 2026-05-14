@@ -66,10 +66,10 @@ python scripts/profiling/scan_profile.py \
   --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap \
-  --n-scan-threads 8 \
-  --n-decomp-threads 4 \
-  --chunk-size 1000000 \
-  --max-memory-gib 4
+  --threads 8 \
+  --scan-bgzf-threads 4 \
+  --scan-fragments-per-chunk 1000000 \
+  --scan-buffer-size 4
 ```
 
 Outputs:
@@ -77,8 +77,8 @@ Outputs:
 ```text
 scan_profile_summary.json
 scan_profile_summary.csv
-scan_s8_d4/scan_result.json
-scan_s8_d4/memory_timeline.csv
+scan_t8_bgzf4/scan_result.json
+scan_t8_bgzf4/memory_timeline.csv
 ```
 
 The important columns are wall time, read-name throughput, buffered-fragment
@@ -87,7 +87,7 @@ throughput, peak RSS, in-memory buffer MB, and spilled chunk count.
 Measured baseline from the profiler-friendly build on 2026-05-13:
 
 ```text
-baseline_s8_d4 wall_time_sec=226.64
+baseline_t8_bgzf4 wall_time_sec=226.64
 read_names_per_sec=141,131
 bam_records_per_sec=291,713
 peak_rss_mb=9,231
@@ -111,16 +111,16 @@ python scripts/profiling/scan_profile.py \
   --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap_sweep \
-  --n-scan-threads 4 8 12 \
-  --n-decomp-threads 2 4 8 \
-  --chunk-size 1000000 \
-  --max-memory-gib 4
+  --threads 4 8 12 \
+  --scan-bgzf-threads 2 4 8 \
+  --scan-fragments-per-chunk 1000000 \
+  --scan-buffer-size 4
 ```
 
 Interpretation:
 
-- improves with more `n_decomp_threads`: decompression/I/O was limiting.
-- improves with more `n_scan_threads`: resolver/worker CPU was limiting.
+- improves with more `scan_bgzf_threads`: decompression/I/O was limiting.
+- improves with more `threads`: resolver/worker CPU was limiting.
 - flat or worse above 8 workers: queue contention, memory bandwidth, or callback
   stall is likely.
 - wall time correlates with spilled chunks: synchronous spill is part of the
@@ -133,17 +133,17 @@ Launch a single scan run under Time Profiler:
 ```bash
 xcrun xctrace record \
   --template 'Time Profiler' \
-  --output /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap/time_s8_d4.trace \
+  --output /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap/time_t8_bgzf4.trace \
   --launch -- \
   /Users/mkiyer/sw/miniforge3/envs/rigel/bin/python scripts/profiling/scan_profile.py \
     --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
     --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
     --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap_xctrace \
     --name-prefix xctrace \
-    --n-scan-threads 8 \
-    --n-decomp-threads 4 \
-    --chunk-size 1000000 \
-    --max-memory-gib 4
+    --threads 8 \
+    --scan-bgzf-threads 4 \
+    --scan-fragments-per-chunk 1000000 \
+    --scan-buffer-size 4
 ```
 
   Use the absolute conda-environment Python executable for `xctrace --launch`.
@@ -162,7 +162,7 @@ Open the `.trace` in Instruments and inspect:
 Expected signatures:
 
 - Reader thread dominated by `sam_read1`, `bgzf_mt_reader`, `libdeflate`, or I/O:
-  tune `n_decomp_threads` and consider htslib/read-ahead changes.
+  tune `scan_bgzf_threads` and consider htslib/read-ahead changes.
 - Worker threads dominated by `_resolve_core`, cgranges interval queries, or
   `pair_multimapper_reads`: optimize resolver internals.
 - Worker threads mostly in `std::condition_variable::wait`: queue starvation or
@@ -177,14 +177,14 @@ File activity is useful if spill or BAM I/O looks suspicious:
 ```bash
 xcrun xctrace record \
   --template 'File Activity' \
-  --output /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap/file_activity_s8_d4.trace \
+  --output /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap/file_activity_t8_bgzf4.trace \
   --launch -- \
   /Users/mkiyer/sw/miniforge3/envs/rigel/bin/python scripts/profiling/scan_profile.py \
     --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
     --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
     --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap_file_activity \
-    --n-scan-threads 8 \
-    --n-decomp-threads 4
+    --threads 8 \
+    --scan-bgzf-threads 4
 ```
 
 System Trace is useful if Time Profiler shows lock/wait-heavy stacks:
@@ -192,14 +192,14 @@ System Trace is useful if Time Profiler shows lock/wait-heavy stacks:
 ```bash
 xcrun xctrace record \
   --template 'System Trace' \
-  --output /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap/system_s8_d4.trace \
+  --output /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap/system_t8_bgzf4.trace \
   --launch -- \
   /Users/mkiyer/sw/miniforge3/envs/rigel/bin/python scripts/profiling/scan_profile.py \
     --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
     --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
     --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_vcap_system \
-    --n-scan-threads 8 \
-    --n-decomp-threads 4
+    --threads 8 \
+    --scan-bgzf-threads 4
 ```
 
 Use System Trace to answer whether workers are runnable but CPU-starved, sleeping
@@ -207,12 +207,12 @@ on queues, or blocked behind the Python callback.
 
 ## First Questions To Answer
 
-1. Does scan wall time improve when `n_decomp_threads` increases from 2 to 4 or
+1. Does scan wall time improve when `scan_bgzf_threads` increases from 2 to 4 or
    8?
 2. Are worker threads spending CPU in `_resolve_core`, or are they sleeping on
    queues?
 3. During Arrow spills, are workers blocked on output queue push?
-4. Does reducing `max_memory_gib` increase wall time strongly? If yes, spill is
+4. Does reducing `scan_buffer_size` increase wall time strongly? If yes, spill is
    blocking the pipeline.
 5. Is one worker thread much hotter than the others? If yes, qname-group work is
    imbalanced, likely due to large multimapper groups.

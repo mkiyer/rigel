@@ -258,9 +258,12 @@ Each named config under `rigel_configs` accepts any `rigel quant` CLI parameter 
 | `mismatch_alpha` | `--mismatch-alpha` | `0.1` | Per-mismatch penalty (0=hard gate, 1=no penalty) |
 | `gdna_splice_penalty_unannot` | `--gdna-splice-penalty-unannot` | `0.01` | gDNA splice penalty for unannotated junctions |
 | `pruning_min_posterior` | `--pruning-min-posterior` | `1e-4` | Min posterior for candidate pruning |
-| `threads` | `--threads` | from global | Thread count (overrides global) |
+| `threads` | `--threads` | from global | Total thread budget (overrides global) |
 | `seed` | `--seed` | from global | Random seed (overrides global) |
-| `buffer_size` | `--buffer-size` | `4` | Buffer size in GiB |
+| `scan_bgzf_threads` | `--scan-bgzf-threads` | `4` | BGZF decompression threads reserved from `threads` during scan |
+| `scan_buffer_size` | `--scan-buffer-size` | `4` | Scan buffer size in GiB |
+| `scan_fragments_per_chunk` | `--scan-fragments-per-chunk` | `1000000` | Buffered fragments per native scan chunk |
+| `scan_read_name_batch_size` | `--scan-read-name-batch-size` | `512` | Read-name groups per native scanner queue item |
 | `include_multimap` | `--include-multimap` | `true` | Include multimappers |
 | `sj_strand_tag` | `--sj-strand-tag` | `auto` | BAM tag for splice junction strand |
 | `annotated_bam` | `--annotated-bam` | none | Write annotated BAM |

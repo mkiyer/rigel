@@ -132,7 +132,9 @@ All flags are described in [Parameters Reference](parameters.md).
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--threads N` | 0 (all cores) | Threads for BAM scan and locus EM |
+| `--threads N` | 0 (all cores) | Total thread budget; scan splits this between workers and BGZF decompression, while EM uses the same budget later |
+| `--scan-bgzf-threads N` | 4 | BGZF/BAM decompression threads reserved from `--threads` during scan |
+| `--scan-buffer-size GB` | 4 | Scan buffer size in GiB before disk spill |
 | `--seed N` | timestamp | Set for reproducibility |
 | `--sj-strand-tag TAG` | `auto` | Use `XS` for STAR/HISAT2, `ts` for minimap2 |
 | `--tmpdir DIR` | system temp | Spill directory for buffer overflow; use local SSD |

@@ -10,6 +10,6 @@ index_dir = sys.argv[2]
 idx = TranscriptIndex.load(index_dir)
 cfg = PipelineConfig(
     em=EMConfig(n_threads=8),
-    scan=BamScanConfig(n_scan_threads=8),
+    scan=BamScanConfig(total_threads=8),
 )
 result = run_pipeline(bam, idx, cfg)

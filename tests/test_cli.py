@@ -2,6 +2,7 @@
 
 import textwrap
 
+import pytest
 
 from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
 
@@ -78,9 +79,17 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.config is None
 
-    def test_qname_batch_size_default_none(self):
+    def test_scan_read_name_batch_size_default_none(self):
         args = _parse_quant()
-        assert args.qname_batch_size is None
+        assert args.scan_read_name_batch_size is None
+
+    def test_scan_bgzf_threads_default_none(self):
+        args = _parse_quant()
+        assert args.scan_bgzf_threads is None
+
+    def test_scan_buffer_size_default_none(self):
+        args = _parse_quant()
+        assert args.scan_buffer_size is None
 
 
 # ---------------------------------------------------------------------------
@@ -191,21 +200,29 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.sj_strand_tag == ["XS", "ts"]
 
-    def test_yaml_qname_batch_size(self, tmp_path):
+    def test_yaml_scan_read_name_batch_size(self, tmp_path):
         """YAML can set the advanced scanner queue batch size."""
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("qname_batch_size: 128\n")
+        cfg.write_text("scan_read_name_batch_size: 128\n")
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.qname_batch_size == 128
+        assert args.scan_read_name_batch_size == 128
 
-    def test_cli_qname_batch_size_overrides_yaml(self, tmp_path):
+    def test_cli_scan_read_name_batch_size_overrides_yaml(self, tmp_path):
         """CLI qname batch size wins over YAML like other parameters."""
         cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("qname_batch_size: 128\n")
-        args = _parse_quant("--config", str(cfg), "--qname-batch-size", "256")
+        cfg.write_text("scan_read_name_batch_size: 128\n")
+        args = _parse_quant("--config", str(cfg), "--scan-read-name-batch-size", "256")
         _resolve_quant_args(args, _build_quant_defaults())
-        assert args.qname_batch_size == 256
+        assert args.scan_read_name_batch_size == 256
+
+    def test_removed_yaml_scan_keys_error(self, tmp_path):
+        """Legacy scan YAML keys force users onto the renamed parameters."""
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("qname_batch_size: 128\nbuffer_size: 2\n")
+        args = _parse_quant("--config", str(cfg))
+        with pytest.raises(ValueError, match="scan_read_name_batch_size"):
+            _resolve_quant_args(args, _build_quant_defaults())
 
 
 # ---------------------------------------------------------------------------
@@ -270,11 +287,35 @@ class TestConfigRoundTrip:
         assert cfg.calibration.pool_quality_good == 9999
         assert cfg.calibration.pool_quality_weak == 42
 
-    def test_qname_batch_size_flows_to_config(self):
-        """``--qname-batch-size`` reaches ``BamScanConfig``."""
+    def test_scan_read_name_batch_size_flows_to_config(self):
+        """``--scan-read-name-batch-size`` reaches ``BamScanConfig``."""
         from rigel.cli import _build_pipeline_config
 
-        args = _parse_quant("--qname-batch-size", "256")
+        args = _parse_quant("--scan-read-name-batch-size", "256")
         _resolve_quant_args(args, _build_quant_defaults())
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.scan.qname_batch_size == 256
+        assert cfg.scan.read_name_batch_size == 256
+
+    def test_scan_performance_flags_flow_to_config(self):
+        """The renamed scan performance flags reach ``BamScanConfig``."""
+        from rigel.cli import _build_pipeline_config
+
+        args = _parse_quant(
+            "--threads", "8",
+            "--scan-bgzf-threads", "2",
+            "--scan-buffer-size", "1.5",
+            "--scan-fragments-per-chunk", "1234",
+        )
+        _resolve_quant_args(args, _build_quant_defaults())
+        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        assert cfg.em.n_threads == 8
+        assert cfg.scan.total_threads == 8
+        assert cfg.scan.bgzf_threads == 2
+        assert cfg.scan.buffer_size_bytes == int(1.5 * 1024**3)
+        assert cfg.scan.fragments_per_chunk == 1234
+
+    def test_removed_cli_scan_flags_are_not_accepted(self):
+        """Legacy scan CLI flags are not registered as aliases."""
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args([*_QUANT_REQ, "--qname-batch-size", "256"])

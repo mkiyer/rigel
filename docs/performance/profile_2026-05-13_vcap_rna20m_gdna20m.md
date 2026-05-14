@@ -62,7 +62,7 @@ Allocator does not return memory to the OS after `partition_and_free` — RSS st
 
 The scan is multi-threaded (3-stage producer / N workers / consumer), bound by:
 
-- **htslib BGZF decompression** — `n_decomp_threads=2` by default; not exposed via the YAML config.
+- **htslib BGZF decompression** — now surfaced as `scan_bgzf_threads` / `--scan-bgzf-threads`.
 - **`FragmentResolver::resolve_core`** — per-worker overlap resolution against the index intervals.
 - **Python-side chunk callback** (`_on_chunk → inject_chunk → _accept_chunk`, 3.5 s cumulative) which finalizes the C++ chunk, computes `memory_bytes`, and triggers spill on overflow.
 - **Spill I/O** — 14 × ~210 MB Arrow IPC writes through `pyarrow.feather.write_feather` (1.5 s wall, but synchronous on the main thread which blocks future chunks from being accepted).
@@ -72,7 +72,7 @@ The scan is multi-threaded (3-stage producer / N workers / consumer), bound by:
 
 Areas of concern flagged by code review:
 
-- `bam_scanner.cpp:1080` defaults `n_workers = 1` and `n_decomp_threads = 2`. The pipeline passes `n_workers = scan.n_scan_threads` (= 8 here) but `n_decomp_threads` is hard-wired to whatever `BamScanConfig` ships with. Worth double-checking the default `n_decomp_threads` for this workload — 2 BGZF threads is often the bottleneck on a fast NVMe.
+- `bam_scanner.cpp:1080` defaults `n_workers = 1` and `n_decomp_threads = 2`. The pipeline now derives `n_workers` from `scan.total_threads - scan.bgzf_threads` and passes the BGZF count from `BamScanConfig.bgzf_threads`. Worth double-checking the default `scan_bgzf_threads` for this workload — 2 BGZF threads is often the bottleneck on a fast NVMe.
 - `inject_chunk` runs on the producer/Python thread holding the GIL; while it's running, no further chunks can be enqueued. Spilling synchronously from this callback can stall the entire scan.
 
 ### 2.2 Fragment router scan (15.1 s, 6.1 %)
@@ -194,7 +194,7 @@ Ordered by **expected wall-time / RSS payoff per implementation cost**. Each ite
 
 | # | Item | Target | Cost |
 |---|---|---|---|
-| **T4.1** | Make `n_decomp_threads` a tunable in `BamScanConfig` and try 4–8 on this workload | likely **−15-30 s** | trivial |
+| **T4.1** | Tune `scan_bgzf_threads` / `BamScanConfig.bgzf_threads` on this workload | likely **−15-30 s** | trivial |
 | **T4.2** | Move spill I/O off the main scanner thread (background spill thread; the producer should never block on `pf.write_feather`) | **−5-10 s** wall | medium |
 | **T4.3** | Defer `BufferedFragment.fragment_classes` until first read (currently called per-chunk in `to_scoring_arrays`) | small but reduces allocation churn | small |
 | **T4.4** | Profile `FragmentResolver::resolve_core` with a dedicated micro-benchmark — confirm whether the resolve hash-map / interval search is the per-thread bottleneck (suggested by the < 4× thread scaling) | informational | medium — needs a focused C++ profile (Instruments / VTune) |
@@ -205,7 +205,7 @@ Ordered by **expected wall-time / RSS payoff per implementation cost**. Each ite
 |---|---|---|---|
 | **T5.1** | Configure jemalloc / mimalloc with aggressive `MALLOC_CONF=background_thread:true,metadata_thp:auto,dirty_decay_ms:1000`. The default macOS allocator is not returning memory to the OS at peak. | reduces *resident* RSS post-quant (memory available to other workloads) | trivial — env var |
 | **T5.2** | After `partition_and_free`, explicitly `gc.collect()` and `ctypes.CDLL("libc")`-style `malloc_trim(0)` on Linux. | small but visible in long-running benchmarks | trivial |
-| **T5.3** | Reduce default `BamScanConfig.max_memory_bytes` from 2 GiB to ≤ 1 GiB to spill earlier; offset by `T4.2` so spilling is no longer a wall-time penalty | −1-2 GB peak RSS | trivial config change once T4.2 lands |
+| **T5.3** | Reduce default `BamScanConfig.buffer_size_bytes` from 2 GiB to ≤ 1 GiB to spill earlier; offset by `T4.2` so spilling is no longer a wall-time penalty | −1-2 GB peak RSS | trivial config change once T4.2 lands |
 
 ---
 
