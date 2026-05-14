@@ -41,7 +41,36 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
   long-intron slices, any-candidate semantics, and the chimera and
   CIGAR-spliced gates.
 
+- **Fast-math-safe multimapper gDNA accumulation**: the native scorer's
+  multimapper gDNA log-sum-exp accumulator no longer uses an infinity
+  sentinel. `_scoring_impl` is compiled with fast-math, so the sentinel could
+  become order-sensitive after gDNA oracle simulation and emit `-inf` gDNA
+  likelihoods for otherwise valid unspliced multimapper units.
+
 ### Changed (Breaking)
+
+- **Float32 scored-fragment payloads**: the native scorer now stores
+  `log_liks`, `coverage_weights`, and `gdna_log_liks` as float32 payload
+  arrays, while native locus EM promotes them back to double for
+  reductions. Removed unused per-candidate `tx_start` / `tx_end` scorer
+  output arrays. On the VCAP RNA20M + gDNA20M profile with the 2 GiB
+  scan cap, peak RSS dropped from 15.60 GB to 12.09 GB; scoring CSR and
+  partition arrays each dropped from 5.99 GiB to 3.94 GiB.
+
+- **Scan buffer field diet**: removed dead scan-buffer/spill/scorer fields
+  (`intron_bp`, `exon_bp_pos`, `exon_bp_neg`, `tx_bp_pos`, `tx_bp_neg`) and
+  narrowed guarded `exon_bp` / `read_length` storage to uint16. Direct
+  `ResolvedFragment` introspection still exposes the diagnostic fields.
+  `frag_lengths` stays int32 after the VCAP profile hit a real 68,466 bp
+  transcript-space fragment length. Against the PR07 VCAP profile, peak RSS
+  dropped from 12.09 GB to 11.63 GB with scoring CSR and partition sizes
+  unchanged at 3.94 GiB each.
+
+- **Scan profiling visibility and memory-cap policy**: staged profiling now
+  records `scan_config`, `buffer_summary`, `scoring_csr`, and partition byte
+  metrics in `profile_summary.json`. The default scan buffer cap is now 2 GiB
+  (`--scan-buffer-size 2`) because async spill makes lower caps cheap while
+  reducing resident memory on large runs.
 
 - **Renamed `boundary_tolerance` → `splicing_anchor_tolerance`**: hard
   rename across CLI flag (`--boundary-tolerance` removed; use

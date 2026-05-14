@@ -261,7 +261,7 @@ Each named config under `rigel_configs` accepts any `rigel quant` CLI parameter 
 | `threads` | `--threads` | from global | Total thread budget (overrides global) |
 | `seed` | `--seed` | from global | Random seed (overrides global) |
 | `scan_bgzf_threads` | `--scan-bgzf-threads` | `4` | BGZF decompression threads reserved from `threads` during scan |
-| `scan_buffer_size` | `--scan-buffer-size` | `4` | Scan buffer size in GiB |
+| `scan_buffer_size` | `--scan-buffer-size` | `2` | Scan buffer size in GiB |
 | `scan_fragments_per_chunk` | `--scan-fragments-per-chunk` | `1000000` | Buffered fragments per native scan chunk |
 | `scan_read_name_batch_size` | `--scan-read-name-batch-size` | `512` | Read-name groups per native scanner queue item |
 | `include_multimap` | `--include-multimap` | `true` | Include multimappers |

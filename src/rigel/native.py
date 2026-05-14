@@ -31,9 +31,11 @@ from ._em_impl import batch_locus_em_partitioned
 from ._em_impl import connected_components
 from ._em_impl import EM_PRIOR_EPSILON
 from ._em_impl import build_partition_offsets
+from ._em_impl import scatter_candidates_f32
 from ._em_impl import scatter_candidates_f64
 from ._em_impl import scatter_candidates_i32
 from ._em_impl import scatter_candidates_u8
+from ._em_impl import scatter_units_f32
 from ._em_impl import scatter_units_f64
 from ._em_impl import scatter_units_i32
 from ._em_impl import scatter_units_i64
@@ -59,9 +61,11 @@ __all__ = [
     "connected_components",
     "EM_PRIOR_EPSILON",
     "build_partition_offsets",
+    "scatter_candidates_f32",
     "scatter_candidates_f64",
     "scatter_candidates_i32",
     "scatter_candidates_u8",
+    "scatter_units_f32",
     "scatter_units_f64",
     "scatter_units_i32",
     "scatter_units_i64",

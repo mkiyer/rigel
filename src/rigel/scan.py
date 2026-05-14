@@ -148,8 +148,6 @@ class FragmentRouter:
             log_liks,
             count_cols,
             coverage_weights,
-            _tx_starts,
-            _tx_ends,
             locus_t_indices,
             locus_count_cols,
             is_spliced_raw,

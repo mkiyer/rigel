@@ -59,6 +59,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 try:
@@ -379,6 +380,87 @@ def _scan_config_summary(scan: BamScanConfig) -> dict:
     }
 
 
+def _array_nbytes(arr: Any) -> int:
+    return int(getattr(arr, "nbytes", 0) or 0)
+
+
+def _bytes_for_attrs(obj: object, attrs: tuple[str, ...]) -> dict[str, int]:
+    return {attr: _array_nbytes(getattr(obj, attr, None)) for attr in attrs}
+
+
+def _scoring_csr_summary(em_data) -> dict:
+    """Return shape and byte metrics for the global scoring CSR."""
+    candidate_attrs = ("log_liks", "coverage_weights", "t_indices", "count_cols")
+    unit_attrs = (
+        "locus_t_indices",
+        "locus_count_cols",
+        "is_spliced",
+        "gdna_log_liks",
+        "frag_ids",
+        "frag_class",
+        "splice_type",
+    )
+    candidate_bytes = _bytes_for_attrs(em_data, candidate_attrs)
+    unit_bytes = _bytes_for_attrs(em_data, unit_attrs)
+    offsets_bytes = _array_nbytes(getattr(em_data, "offsets", None))
+    total_bytes = sum(candidate_bytes.values()) + sum(unit_bytes.values()) + offsets_bytes
+    n_units = int(getattr(em_data, "n_units", 0) or 0)
+    n_candidates = int(getattr(em_data, "n_candidates", 0) or 0)
+    return {
+        "n_units": n_units,
+        "n_candidates": n_candidates,
+        "mean_candidates_per_unit": (n_candidates / n_units) if n_units else 0.0,
+        "candidate_bytes": candidate_bytes,
+        "unit_bytes": unit_bytes,
+        "offsets_bytes": offsets_bytes,
+        "total_bytes": total_bytes,
+    }
+
+
+def _partition_bytes_summary(partitions: dict) -> dict:
+    """Return aggregate byte metrics for per-locus partition arrays."""
+    array_attrs = (
+        "offsets",
+        "t_indices",
+        "log_liks",
+        "count_cols",
+        "coverage_weights",
+        "is_spliced",
+        "gdna_log_liks",
+        "locus_t_indices",
+        "locus_count_cols",
+        "frag_ids",
+        "frag_class",
+        "splice_type",
+    )
+    by_array = {attr: 0 for attr in array_attrs}
+    n_units = 0
+    n_candidates = 0
+    for part in partitions.values():
+        n_units += int(getattr(part, "n_units", 0) or 0)
+        n_candidates += int(getattr(part, "n_candidates", 0) or 0)
+        for attr in array_attrs:
+            by_array[attr] += _array_nbytes(getattr(part, attr, None))
+    total_bytes = sum(by_array.values())
+    return {
+        "n_loci": len(partitions),
+        "n_units": n_units,
+        "n_candidates": n_candidates,
+        "array_bytes": by_array,
+        "total_bytes": total_bytes,
+    }
+
+
+def _buffer_summary(buffer) -> dict:
+    """Return FragmentBuffer summary with stable profiler-facing names."""
+    summary = dict(buffer.summary())
+    summary.setdefault("chunks_finalized", summary.get("n_chunks", 0))
+    summary.setdefault("chunks_spilled", getattr(buffer, "n_spilled", 0))
+    summary.setdefault("chunks_pending_spill_peak", summary.get("pending_spill_chunks", 0))
+    summary.setdefault("memory_bytes_peak", summary.get("memory_bytes", 0))
+    return summary
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Timer helper
 # ═══════════════════════════════════════════════════════════════════
@@ -467,6 +549,10 @@ class ProfileResult:
     # Per-stage RSS memory snapshots (MB) taken at end of each stage
     rss_snapshots: dict = field(default_factory=dict)
     scan_config: dict = field(default_factory=dict)
+    buffer_summary: dict = field(default_factory=dict)
+    scoring_csr: dict = field(default_factory=dict)
+    partition_bytes_total: int = 0
+    partition_bytes: dict = field(default_factory=dict)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -564,6 +650,7 @@ def profile_stages(
         )
     timings.scan_and_buffer = t_scan.elapsed
     rss_snaps["after_scan"] = _snap_rss_current()
+    buffer_profile_summary = _buffer_summary(buffer)
 
     # ── Stage 2: Finalize models ────────────────────────────
     cal_cfg = pcfg.calibration
@@ -618,6 +705,7 @@ def profile_stages(
         )
     timings.fragment_scorer = 0.0  # folded into _score_fragments
     timings.fragment_router_scan = t_route.elapsed
+    scoring_csr_summary = _scoring_csr_summary(em_data)
     rss_snaps["after_router_scan"] = _snap_rss_current()
     rss_snaps["after_buffer_release"] = _snap_rss_current()
 
@@ -625,6 +713,8 @@ def profile_stages(
     n_loci = 0
     max_locus_t = 0
     max_locus_u = 0
+    partition_bytes: dict = {}
+    partition_bytes_total = 0
 
     if em_data.n_units > 0:
         with Timer("build_loci") as t_loci:
@@ -658,8 +748,10 @@ def profile_stages(
 
             with Timer("partition") as t_part:
                 partitions = partition_and_free(em_data, loci)
+                partition_bytes = _partition_bytes_summary(partitions)
                 del em_data
             timings.partition = t_part.elapsed
+            partition_bytes_total = partition_bytes["total_bytes"]
 
             with Timer("locus_em") as t_em:
                 _run_locus_em_partitioned(
@@ -725,6 +817,10 @@ def profile_stages(
         max_locus_units=max_locus_u,
         rss_snapshots=rss_snaps,
         scan_config=_scan_config_summary(scan_cfg),
+        buffer_summary=buffer_profile_summary,
+        scoring_csr=scoring_csr_summary,
+        partition_bytes_total=partition_bytes_total,
+        partition_bytes=partition_bytes,
     )
     return result, profiler
 
@@ -765,6 +861,30 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
         lines.append(f"  RSS after:       {r.rss_after_mb:.0f} MB")
         lines.append(f"  RSS delta:       {r.rss_after_mb - r.rss_before_mb:.0f} MB")
         lines.append("")
+
+        if r.scan_config:
+            scan = r.scan_config
+            lines.append("  Scan Config:")
+            lines.append(
+                f"    threads:              {scan.get('threads')} "
+                f"(resolved {scan.get('resolved_total_threads')})"
+            )
+            lines.append(
+                f"    scan workers / BGZF:  {scan.get('scan_worker_threads')} / "
+                f"{scan.get('scan_bgzf_threads')}"
+            )
+            lines.append(
+                f"    buffer cap:           "
+                f"{scan.get('scan_buffer_size_bytes', 0) / 1024**3:.2f} GiB"
+            )
+            lines.append(
+                f"    fragments/chunk:      {scan.get('scan_fragments_per_chunk'):,}"
+            )
+            lines.append(
+                f"    read-name batch:      {scan.get('scan_read_name_batch_size'):,}"
+            )
+            lines.append("")
+
         lines.append(f"  Fragments:       {r.n_fragments:,}")
         lines.append(f"  Buffered:        {r.n_buffered:,}")
         lines.append(f"  Unique align:    {r.n_unique:,}")
@@ -820,6 +940,46 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
                 lines.append("  RSS Memory Snapshots (MB):")
                 for snap_name, snap_mb in r.rss_snapshots.items():
                     lines.append(f"    {snap_name:<24s} {snap_mb:>8.0f} MB")
+                lines.append("")
+
+            if r.buffer_summary:
+                buf = r.buffer_summary
+                lines.append("  Scan Buffer Summary:")
+                lines.append(
+                    f"    chunks finalized/spilled: "
+                    f"{buf.get('chunks_finalized', 0):,} / {buf.get('chunks_spilled', 0):,}"
+                )
+                lines.append(
+                    f"    memory current/peak:      "
+                    f"{buf.get('memory_bytes', 0) / 1024**2:.1f} / "
+                    f"{buf.get('memory_bytes_peak', 0) / 1024**2:.1f} MB"
+                )
+                lines.append(
+                    f"    pending spill peak:       "
+                    f"{buf.get('chunks_pending_spill_peak', 0):,} chunks"
+                )
+                lines.append("")
+
+            if r.scoring_csr:
+                csr = r.scoring_csr
+                lines.append("  Scoring CSR:")
+                lines.append(f"    units:                  {csr.get('n_units', 0):,}")
+                lines.append(f"    candidates:             {csr.get('n_candidates', 0):,}")
+                lines.append(
+                    f"    mean candidates/unit:    "
+                    f"{csr.get('mean_candidates_per_unit', 0.0):.2f}"
+                )
+                lines.append(
+                    f"    total bytes:             "
+                    f"{csr.get('total_bytes', 0) / 1024**3:.2f} GiB"
+                )
+                lines.append("")
+
+            if r.partition_bytes_total:
+                lines.append(
+                    "  Partition arrays:          "
+                    f"{r.partition_bytes_total / 1024**3:.2f} GiB"
+                )
                 lines.append("")
 
     # Comparison table (if multiple configs)
@@ -998,6 +1158,10 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
                 "pipeline_stats": r.pipeline_stats,
                 "rss_snapshots": r.rss_snapshots,
                 "scan_config": r.scan_config,
+                "buffer_summary": r.buffer_summary,
+                "scoring_csr": r.scoring_csr,
+                "partition_bytes_total": r.partition_bytes_total,
+                "partition_bytes": r.partition_bytes,
             }
             for r in results
         ],
@@ -1056,7 +1220,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="BGZF decompression threads reserved from --threads "
                         "during BAM scan")
     p.add_argument("--scan-buffer-size", type=float, default=None,
-                    help="Maximum scan buffer size in GiB before disk spill")
+                    help="Maximum scan buffer size in GiB before disk spill "
+                        "(default: 2)")
     p.add_argument("--scan-fragments-per-chunk", type=int, default=None,
                     help="Buffered fragments per native scan chunk")
     p.add_argument("--scan-read-name-batch-size", type=int, default=None,

@@ -1053,7 +1053,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Maximum scan buffer size in GiB before chunks are spilled "
-        "to disk (default: 4). Increase if you have ample RAM to reduce "
+        "to disk (default: 2). Increase if you have ample RAM to reduce "
         "spill I/O.",
     )
     perf_grp.add_argument(

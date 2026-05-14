@@ -14,7 +14,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -35,6 +37,21 @@ extern "C" {
 namespace nb = nanobind;
 
 namespace rigel {
+
+static inline uint16_t checked_u16_buffer_value(
+    int32_t value,
+    const char* column,
+    bool zero_if_missing = false)
+{
+    if (value < 0 && zero_if_missing) return 0;
+    if (value < 0 || value > static_cast<int32_t>(std::numeric_limits<uint16_t>::max())) {
+        throw std::runtime_error(
+            std::string("Fragment buffer column '") + column
+            + "' cannot store value " + std::to_string(value)
+            + " as uint16");
+    }
+    return static_cast<uint16_t>(value);
+}
 
 // ================================================================
 // ResolvedFragment — C++ result object exposed to Python
@@ -195,18 +212,12 @@ public:
     std::vector<int32_t>  t_indices_;
     std::vector<int32_t>  t_offsets_;
     std::vector<int32_t>  frag_lengths_;
-    std::vector<int32_t>  exon_bp_;
-    std::vector<int32_t>  intron_bp_;
+    std::vector<uint16_t> exon_bp_;
     std::vector<int64_t>  frag_id_;
-    std::vector<uint32_t> read_length_;
+    std::vector<uint16_t> read_length_;
     std::vector<int32_t>  genomic_footprint_;
     std::vector<int32_t>  genomic_start_;
     std::vector<uint16_t> nm_;
-    // SRD v2: per-fragment strand-aware overlap counts
-    std::vector<int32_t>  exon_bp_pos_;
-    std::vector<int32_t>  exon_bp_neg_;
-    std::vector<int32_t>  tx_bp_pos_;
-    std::vector<int32_t>  tx_bp_neg_;
     int32_t size_ = 0;
 
     FragmentAccumulator() {
@@ -230,15 +241,10 @@ public:
         genomic_footprint_.reserve(n_fragments);
         genomic_start_.reserve(n_fragments);
         nm_.reserve(n_fragments);
-        exon_bp_pos_.reserve(n_fragments);
-        exon_bp_neg_.reserve(n_fragments);
-        tx_bp_pos_.reserve(n_fragments);
-        tx_bp_neg_.reserve(n_fragments);
         t_indices_.reserve(n_candidates);
         t_offsets_.reserve(n_fragments + 1);
         frag_lengths_.reserve(n_candidates);
         exon_bp_.reserve(n_candidates);
-        intron_bp_.reserve(n_candidates);
     }
 
     void append(const ResolvedFragment& r, int64_t frag_id) {
@@ -255,21 +261,18 @@ public:
                           r.t_inds.begin(), r.t_inds.end());
         frag_lengths_.insert(frag_lengths_.end(),
                              r.frag_lengths.begin(), r.frag_lengths.end());
-        exon_bp_.insert(exon_bp_.end(),
-                        r.exon_bp.begin(), r.exon_bp.end());
-        intron_bp_.insert(intron_bp_.end(),
-                          r.intron_bp.begin(), r.intron_bp.end());
+        for (int32_t bp : r.exon_bp) {
+            exon_bp_.push_back(
+                checked_u16_buffer_value(bp, "exon_bp"));
+        }
         t_offsets_.push_back(static_cast<int32_t>(t_indices_.size()));
 
         frag_id_.push_back(frag_id);
-        read_length_.push_back(static_cast<uint32_t>(r.read_length));
+        read_length_.push_back(
+            checked_u16_buffer_value(r.read_length, "read_length"));
         genomic_footprint_.push_back(r.genomic_footprint);
         genomic_start_.push_back(r.genomic_start);
         nm_.push_back(static_cast<uint16_t>(r.nm));
-        exon_bp_pos_.push_back(r.exon_bp_pos);
-        exon_bp_neg_.push_back(r.exon_bp_neg);
-        tx_bp_pos_.push_back(r.tx_bp_pos);
-        tx_bp_neg_.push_back(r.tx_bp_neg);
         size_++;
     }
 
@@ -307,14 +310,12 @@ public:
         result["frag_lengths"] = to_bytes(
             frag_lengths_.data(), frag_lengths_.size() * sizeof(int32_t));
         result["exon_bp"] = to_bytes(
-            exon_bp_.data(), exon_bp_.size() * sizeof(int32_t));
-        result["intron_bp"] = to_bytes(
-            intron_bp_.data(), intron_bp_.size() * sizeof(int32_t));
+            exon_bp_.data(), exon_bp_.size() * sizeof(uint16_t));
         result["ambig_strand"] = to_bytes(ambig_strand_.data(), ambig_strand_.size());
         result["frag_id"] = to_bytes(
             frag_id_.data(), frag_id_.size() * sizeof(int64_t));
         result["read_length"] = to_bytes(
-            read_length_.data(), read_length_.size() * sizeof(uint32_t));
+            read_length_.data(), read_length_.size() * sizeof(uint16_t));
         result["genomic_footprint"] = to_bytes(
             genomic_footprint_.data(),
             genomic_footprint_.size() * sizeof(int32_t));
@@ -323,18 +324,6 @@ public:
             genomic_start_.size() * sizeof(int32_t));
         result["nm"] = to_bytes(
             nm_.data(), nm_.size() * sizeof(uint16_t));
-        result["exon_bp_pos"] = to_bytes(
-            exon_bp_pos_.data(),
-            exon_bp_pos_.size() * sizeof(int32_t));
-        result["exon_bp_neg"] = to_bytes(
-            exon_bp_neg_.data(),
-            exon_bp_neg_.size() * sizeof(int32_t));
-        result["tx_bp_pos"] = to_bytes(
-            tx_bp_pos_.data(),
-            tx_bp_pos_.size() * sizeof(int32_t));
-        result["tx_bp_neg"] = to_bytes(
-            tx_bp_neg_.data(),
-            tx_bp_neg_.size() * sizeof(int32_t));
         result["size"] = nb::cast(size_);
 
         return result;
@@ -358,17 +347,12 @@ public:
         result["t_offsets"]         = vec_to_ndarray(std::move(t_offsets_));
         result["frag_lengths"]      = vec_to_ndarray(std::move(frag_lengths_));
         result["exon_bp"]           = vec_to_ndarray(std::move(exon_bp_));
-        result["intron_bp"]         = vec_to_ndarray(std::move(intron_bp_));
         result["ambig_strand"]      = vec_to_ndarray(std::move(ambig_strand_));
         result["frag_id"]           = vec_to_ndarray(std::move(frag_id_));
         result["read_length"]       = vec_to_ndarray(std::move(read_length_));
         result["genomic_footprint"] = vec_to_ndarray(std::move(genomic_footprint_));
         result["genomic_start"]     = vec_to_ndarray(std::move(genomic_start_));
         result["nm"]                = vec_to_ndarray(std::move(nm_));
-        result["exon_bp_pos"]       = vec_to_ndarray(std::move(exon_bp_pos_));
-        result["exon_bp_neg"]       = vec_to_ndarray(std::move(exon_bp_neg_));
-        result["tx_bp_pos"]         = vec_to_ndarray(std::move(tx_bp_pos_));
-        result["tx_bp_neg"]         = vec_to_ndarray(std::move(tx_bp_neg_));
         result["size"]              = nb::cast(n);
 
         size_ = 0;

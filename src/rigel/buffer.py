@@ -28,6 +28,7 @@ import queue
 import shutil
 import tempfile
 import threading
+import time
 import weakref
 from collections import deque
 from dataclasses import dataclass
@@ -120,10 +121,22 @@ class _FinalizedChunk:
     Per-fragment strand mixing (``ambig_strand``) is cached as a uint8
     array emitted by the native resolver.
 
-    ``frag_id`` is stored as **int64** to accommodate BAM files with
-    more than 2 billion fragments.  ``t_offsets`` is **int32**, which
-    limits the maximum number of candidates per chunk to ~2.1 billion
-    — well above practical chunk sizes.
+        Buffer dtype contract:
+        * ``frag_id`` stays int64 to accommodate BAM files with more than
+            2 billion fragments.
+        * ``t_offsets`` and ``t_indices`` stay int32, limiting a chunk to
+            ~2.1 billion candidate entries.
+        * Per-candidate exon overlap bases are uint16; native append
+            guards reject values above 65535.
+        * Fragment lengths stay int32 because real transcript-space
+            fragments can exceed 65535 on long intron-spanning candidates.
+        * ``read_length`` is uint16 and guarded at native append.
+
+        Dead/stale buffer columns are intentionally not stored here:
+        ``intron_bp`` was never consumed by the scorer, and the SRD v2
+        strand-aware overlap diagnostics (``exon_bp_pos``, ``exon_bp_neg``,
+        ``tx_bp_pos``, ``tx_bp_neg``) are produced on direct resolver
+        results but have no scan-buffer consumer.
     """
 
     splice_type: np.ndarray  # uint8[N]
@@ -134,20 +147,14 @@ class _FinalizedChunk:
     chimera_type: np.ndarray  # uint8[N]
     t_offsets: np.ndarray  # int32[N+1]
     t_indices: np.ndarray  # int32[M_t]
-    frag_lengths: np.ndarray  # int32[M_t]  (parallel to t_indices)
-    exon_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
-    intron_bp: np.ndarray  # int32[M_t]  (parallel to t_indices)
+    frag_lengths: np.ndarray  # int32[M_t]  (parallel to t_indices, -1 = missing)
+    exon_bp: np.ndarray  # uint16[M_t]  (parallel to t_indices)
     ambig_strand: np.ndarray  # uint8[N]
     frag_id: np.ndarray  # int64[N]
-    read_length: np.ndarray  # uint32[N]
+    read_length: np.ndarray  # uint16[N]
     genomic_footprint: np.ndarray  # int32[N]
     genomic_start: np.ndarray  # int32[N]
     nm: np.ndarray  # uint16[N]
-    # SRD v2: per-fragment strand-aware collapsed overlap counts.
-    exon_bp_pos: np.ndarray  # int32[N]
-    exon_bp_neg: np.ndarray  # int32[N]
-    tx_bp_pos: np.ndarray  # int32[N]
-    tx_bp_neg: np.ndarray  # int32[N]
     size: int
     _fragment_classes: np.ndarray | None = None  # cached uint8[N]
 
@@ -191,18 +198,13 @@ class _FinalizedChunk:
             t_offsets=_arr(raw["t_offsets"], np.int32),
             t_indices=_arr(raw["t_indices"], np.int32),
             frag_lengths=_arr(raw["frag_lengths"], np.int32),
-            exon_bp=_arr(raw["exon_bp"], np.int32),
-            intron_bp=_arr(raw["intron_bp"], np.int32),
+            exon_bp=_arr(raw["exon_bp"], np.uint16),
             ambig_strand=_arr(raw["ambig_strand"], np.uint8),
             frag_id=_arr(raw["frag_id"], np.int64),
-            read_length=_arr(raw["read_length"], np.uint32),
+            read_length=_arr(raw["read_length"], np.uint16),
             genomic_footprint=_arr(raw["genomic_footprint"], np.int32),
             genomic_start=_arr(raw["genomic_start"], np.int32),
             nm=_arr(raw["nm"], np.uint16),
-            exon_bp_pos=_arr(raw["exon_bp_pos"], np.int32),
-            exon_bp_neg=_arr(raw["exon_bp_neg"], np.int32),
-            tx_bp_pos=_arr(raw["tx_bp_pos"], np.int32),
-            tx_bp_neg=_arr(raw["tx_bp_neg"], np.int32),
             size=raw["size"] if isinstance(raw["size"], int) else int(raw["size"]),
         )
 
@@ -222,17 +224,12 @@ class _FinalizedChunk:
                 self.t_indices,
                 self.frag_lengths,
                 self.exon_bp,
-                self.intron_bp,
                 self.ambig_strand,
                 self.frag_id,
                 self.read_length,
                 self.genomic_footprint,
                 self.genomic_start,
                 self.nm,
-                self.exon_bp_pos,
-                self.exon_bp_neg,
-                self.tx_bp_pos,
-                self.tx_bp_neg,
             )
         )
 
@@ -280,7 +277,6 @@ class _FinalizedChunk:
             self.t_indices,
             self.frag_lengths,
             self.exon_bp,
-            self.intron_bp,
             self.splice_type,
             self.exon_strand,
             self.fragment_classes,
@@ -302,7 +298,7 @@ class _FinalizedChunk:
             t_inds=self.t_indices[start:end],
             frag_lengths=self.frag_lengths[start:end],
             exon_bp=self.exon_bp[start:end],
-            intron_bp=self.intron_bp[start:end],
+            intron_bp=None,
             ambig_strand=int(self.ambig_strand[i]),
             splice_type=int(self.splice_type[i]),
             exon_strand=int(self.exon_strand[i]),
@@ -340,11 +336,6 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
         chunk.t_offsets,
         chunk.exon_bp,
     )
-    intron_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets,
-        chunk.intron_bp,
-    )
-
     table = pa.table(
         {
             "splice_type": chunk.splice_type,
@@ -356,17 +347,12 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
             "t_inds": t_list,
             "frag_lengths": frag_lengths_list,
             "exon_bp": exon_bp_list,
-            "intron_bp": intron_bp_list,
             "ambig_strand": chunk.ambig_strand,
             "frag_id": chunk.frag_id,
             "read_length": chunk.read_length,
             "genomic_footprint": chunk.genomic_footprint,
             "genomic_start": chunk.genomic_start,
             "nm": chunk.nm,
-            "exon_bp_pos": chunk.exon_bp_pos,
-            "exon_bp_neg": chunk.exon_bp_neg,
-            "tx_bp_pos": chunk.tx_bp_pos,
-            "tx_bp_neg": chunk.tx_bp_neg,
         }
     )
 
@@ -385,13 +371,10 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
 
     # Per-candidate CSR arrays (parallel to t_indices)
     frag_lengths_col = table.column("frag_lengths").combine_chunks()
-    frag_lengths_arr = frag_lengths_col.values.to_numpy().astype(np.int32)
+    frag_lengths_arr = frag_lengths_col.values.to_numpy().astype(np.int32, copy=False)
 
     exon_bp_col = table.column("exon_bp").combine_chunks()
-    exon_bp_arr = exon_bp_col.values.to_numpy().astype(np.int32)
-
-    intron_bp_col = table.column("intron_bp").combine_chunks()
-    intron_bp_arr = intron_bp_col.values.to_numpy().astype(np.int32)
+    exon_bp_arr = exon_bp_col.values.to_numpy().astype(np.uint16, copy=False)
 
     return _FinalizedChunk(
         splice_type=table.column("splice_type").to_numpy().copy(),
@@ -404,10 +387,9 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         t_indices=t_indices,
         frag_lengths=frag_lengths_arr,
         exon_bp=exon_bp_arr,
-        intron_bp=intron_bp_arr,
         ambig_strand=table.column("ambig_strand").to_numpy().copy(),
         frag_id=table.column("frag_id").to_numpy().astype(np.int64),
-        read_length=table.column("read_length").to_numpy().copy(),
+        read_length=table.column("read_length").to_numpy().copy().astype(np.uint16),
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
         genomic_start=(
             table.column("genomic_start").to_numpy().copy()
@@ -415,26 +397,6 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
             else np.full(len(table), -1, dtype=np.int32)
         ),
         nm=table.column("nm").to_numpy().copy().astype(np.uint16),
-        exon_bp_pos=(
-            table.column("exon_bp_pos").to_numpy().copy()
-            if "exon_bp_pos" in table.column_names
-            else np.zeros(len(table), dtype=np.int32)
-        ),
-        exon_bp_neg=(
-            table.column("exon_bp_neg").to_numpy().copy()
-            if "exon_bp_neg" in table.column_names
-            else np.zeros(len(table), dtype=np.int32)
-        ),
-        tx_bp_pos=(
-            table.column("tx_bp_pos").to_numpy().copy()
-            if "tx_bp_pos" in table.column_names
-            else np.zeros(len(table), dtype=np.int32)
-        ),
-        tx_bp_neg=(
-            table.column("tx_bp_neg").to_numpy().copy()
-            if "tx_bp_neg" in table.column_names
-            else np.zeros(len(table), dtype=np.int32)
-        ),
         size=len(table),
     )
 
@@ -572,7 +534,11 @@ class FragmentBuffer:
         self._chunks: deque[_FinalizedChunk | Path | _PendingSpill] = deque()
         self._total_size = 0
         self._memory_bytes = 0
+        self._memory_bytes_peak = 0
         self._n_spilled = 0
+        self._chunks_finalized = 0
+        self._chunks_pending_spill_peak = 0
+        self._spill_submit_wall_sec = 0.0
         self._spill_writer: _SpillWriter | None = None
 
         # Safety net: ensure spill directory is cleaned up even if
@@ -646,6 +612,8 @@ class FragmentBuffer:
         self._raise_completed_spill_errors()
         self._total_size += chunk.size
         self._memory_bytes += chunk.memory_bytes
+        self._memory_bytes_peak = max(self._memory_bytes_peak, self._memory_bytes)
+        self._chunks_finalized += 1
         self._chunks.append(chunk)
 
         # Spill if over memory budget
@@ -676,10 +644,16 @@ class FragmentBuffer:
                     memory_bytes=freed,
                     size=chunk.size,
                 )
+                t_submit = time.perf_counter()
                 self._ensure_spill_writer().submit(chunk, pending)
+                self._spill_submit_wall_sec += time.perf_counter() - t_submit
                 self._chunks[i] = pending
                 self._memory_bytes -= freed
                 self._n_spilled += 1
+                self._chunks_pending_spill_peak = max(
+                    self._chunks_pending_spill_peak,
+                    self._count_pending_spill_chunks(),
+                )
                 logger.info(
                     "Queued spill for chunk %d (%s fragments, %.1f MB) -> %s",
                     i,
@@ -689,6 +663,13 @@ class FragmentBuffer:
                 )
                 return True
         return False
+
+    def _count_pending_spill_chunks(self) -> int:
+        return sum(
+            1
+            for chunk_ref in self._chunks
+            if isinstance(chunk_ref, _PendingSpill) and not chunk_ref.done.is_set()
+        )
 
     def _ensure_spill_writer(self) -> _SpillWriter:
         if self._spill_writer is None:
@@ -855,10 +836,16 @@ class FragmentBuffer:
         return {
             "total_fragments": self.total_fragments,
             "n_chunks": len(self._chunks),
+            "chunks_finalized": self._chunks_finalized,
+            "chunks_spilled": self._n_spilled,
             "in_memory_chunks": n_mem,
             "on_disk_chunks": n_disk,
             "pending_spill_chunks": n_pending,
+            "chunks_pending_spill_peak": self._chunks_pending_spill_peak,
             "failed_spill_chunks": n_failed,
             "memory_bytes": self._memory_bytes,
+            "memory_bytes_peak": self._memory_bytes_peak,
+            "max_memory_bytes": self.max_memory_bytes,
             "memory_mb": round(self._memory_bytes / 1024**2, 1),
+            "spill_submit_wall_sec": self._spill_submit_wall_sec,
         }

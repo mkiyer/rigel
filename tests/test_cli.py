@@ -5,6 +5,7 @@ import textwrap
 import pytest
 
 from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
+from rigel.config import BamScanConfig
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +314,10 @@ class TestConfigRoundTrip:
         assert cfg.scan.bgzf_threads == 2
         assert cfg.scan.buffer_size_bytes == int(1.5 * 1024**3)
         assert cfg.scan.fragments_per_chunk == 1234
+
+    def test_scan_buffer_default_is_two_gib(self):
+        """PR06 lowers the default scan buffer cap to 2 GiB."""
+        assert BamScanConfig().buffer_size_bytes == 2 * 1024**3
 
     def test_removed_cli_scan_flags_are_not_accepted(self):
         """Legacy scan CLI flags are not registered as aliases."""

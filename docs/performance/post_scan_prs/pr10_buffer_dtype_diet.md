@@ -1,153 +1,147 @@
 # PR 10: Buffer Column Diet
 
-**Position in roadmap:** Sixth. Touches the scan-buffer ABI; safe to
-schedule in parallel with PR07/PR08 because it does not touch the
-scoring CSR or partition.
+**Status:** implemented and profiled on the VCAP RNA20M + gDNA20M workload.
 
 ## Summary
 
-Two cleanups, in this order:
+PR10 removes dead scan-buffer/scorer fields and narrows only the buffer
+columns that survived real-data bounds checks.
 
-1. **Drop unused per-fragment columns.** `score_chunk()` consumes 13
-   buffer columns. Four columns — `exon_bp_pos`, `exon_bp_neg`,
-   `tx_bp_pos`, `tx_bp_neg` — are not in that set. If the audit
-   confirms they have no production consumer, remove them from the
-   chunk schema (and the spill format).
-2. **Narrow safe column dtypes.** `frag_lengths`, `exon_bp`,
-   `intron_bp`, `read_length` are all bounded by realistic alignment
-   sizes. Move them from `int32` / `uint32` to `uint16` with explicit
-   overflow guards.
+Implemented changes:
 
-## Motivation
+- Dropped `intron_bp` from the scan buffer, spill format, and native
+  scorer chunk ABI. The scorer accepted it positionally but never read it.
+- Dropped the stale SRD-v2 strand-aware diagnostic columns from the scan
+  buffer and spill format: `exon_bp_pos`, `exon_bp_neg`, `tx_bp_pos`,
+  `tx_bp_neg`.
+- Narrowed `exon_bp` and `read_length` to uint16 with native append guards.
+- Kept `frag_lengths` as int32 after real data produced a transcript-space
+  fragment length of 68,466 bp, above the uint16 limit.
+- Left direct `ResolvedFragment` introspection fields intact, including
+  `intron_bp` and the four strand-aware diagnostics.
 
-The scan buffer logical size is ~6.8 GB on the VCAP run; 3.9 GB stays
-resident at the 4 GiB cap. Lower caps are now cheap (PR06), but the
-buffer itself can shrink. Removing four `int32` columns at ~32 M rows
-saves ~512 MB; narrowing four more by half saves another ~512 MB. Spill
-writes shrink proportionally.
+The scorer chunk ABI is now a 12-tuple:
 
-## Verified ground truth
+```text
+t_offsets, t_indices, frag_lengths, exon_bp, splice_type, exon_strand,
+fragment_classes, frag_id, read_length, genomic_footprint, genomic_start, nm
+```
 
-* `_FinalizedChunk` declares 21 columns in
-  [src/rigel/buffer.py](../../../src/rigel/buffer.py) (~lines 138–152).
-* `score_chunk()` in
-  [src/rigel/native/scoring.cpp](../../../src/rigel/native/scoring.cpp)
-  (~line 1128) takes a 13-tuple: `t_off, t_ind, f_len, e_bp, i_bp,
-  s_type, e_str, fc, f_id, r_len, g_fp, g_sta, nm`.
-* The four `_pos` / `_neg` columns are **not** in that 13-tuple.
-* They are produced by the resolver and stored on the chunk; whether
-  any other consumer exists must be confirmed by `grep` before
-  deletion.
+## Audit Results
 
-## Current code
+| Field | Scope before PR10 | Audit result | PR10 action |
+|---|---|---|---|
+| `tx_start`, `tx_end` | Native scorer outputs removed in PR07 | Full symbol/search audit found no live downstream consumers; stale docs only | Remain removed |
+| `intron_bp` | Per-candidate scan-buffer/spill/scorer ABI column | Positional scorer input, but no reads in scoring arithmetic or router construction | Removed from scan buffer, spill, and scorer ABI |
+| `exon_bp_pos`, `exon_bp_neg` | Per-fragment scan-buffer/spill columns plus direct resolver fields | No production scan-buffer consumer; direct resolver/debug tests still consume public fields | Removed from scan buffer/spill only |
+| `tx_bp_pos`, `tx_bp_neg` | Per-fragment scan-buffer/spill columns plus direct resolver fields | No production scan-buffer consumer; direct resolver/debug tests still consume public fields | Removed from scan buffer/spill only |
+| `frag_lengths` | Per-candidate int32 buffer/scorer field | Attempted uint16 narrowing failed on VCAP at value 68,466 | Kept int32 |
+| `exon_bp` | Per-candidate int32 buffer/scorer field | Bounded by aligned read overlap; native guard covers overflow | Narrowed to uint16 |
+| `read_length` | Per-fragment uint32 buffer/scorer field | Aligned block span; native guard covers overflow | Narrowed to uint16 |
+| `sj_strand`, `merge_criteria` | Per-fragment storage/debug fields | Not hot memory drivers; part of `BufferedFragment` debug/duck-typed surface | Kept |
+| `frag_id` | Per-fragment int64 | Must support large BAMs | Kept int64 |
+| `num_hits`, `nm` | Per-fragment uint16 | Already appropriately narrow | Kept uint16 |
 
-* Buffer schema and spill / load: [src/rigel/buffer.py](../../../src/rigel/buffer.py).
-* Native accumulator: [src/rigel/native/resolve_context.h](../../../src/rigel/native/resolve_context.h).
-* Scoring ABI: [src/rigel/native/scoring.cpp](../../../src/rigel/native/scoring.cpp).
+The removed logical payload on the VCAP run is roughly 1.56 GiB before
+compression and allocator effects: 4 bytes for each of 260.1 M candidate
+`intron_bp` entries, plus 16 bytes for each of 32.0 M buffered fragments
+across the four stale diagnostic columns. The realized RSS improvement is
+smaller because the 2 GiB async spill cap already limits resident chunks.
 
-## Step 1 — Audit and drop unused columns
+## Real-Data Sentinel
 
-1. `grep -rn "exon_bp_pos\|exon_bp_neg\|tx_bp_pos\|tx_bp_neg"` across
-   `src/`, `tests/`, and `scripts/`. Catalogue every consumer.
-2. Classify each consumer: production (kept), test-only (kept or
-   updated), diagnostic (move behind a flag), dead (removed).
-3. If the only consumers are storage / spill / dead-code branches,
-   remove the columns from `_FinalizedChunk`, the native accumulator,
-   the zero-copy finalizer, the spill writer, and the spill loader.
-4. If a real diagnostic consumer exists, gate the columns on
-   `BamScanConfig.emit_strand_diagnostics: bool = False`. Default off.
+The first VCAP PR10 profile intentionally tested the proposed uint16
+`frag_lengths` narrowing. It aborted during native append with:
 
-This is the highest-leverage piece of the PR.
+```text
+Fragment buffer column 'frag_lengths' cannot store value 68466 as uint16
+```
 
-## Step 2 — Narrow safe dtypes
+That was the correct failure mode. PR10 now documents and enforces the
+safer contract: `frag_lengths` remains int32, while `exon_bp` and
+`read_length` are the only newly narrowed columns.
 
-| Field | Current | New | Bound check |
-|---|---:|---:|---|
-| `frag_lengths` | int32 | uint16 | ≤ 65535 (mate-pair span) |
-| `exon_bp` | int32 | uint16 | ≤ 65535 (read length) |
-| `intron_bp` | int32 | uint16 | ≤ 65535 (read footprint) |
-| `read_length` | uint32 | uint16 | ≤ 65535 |
+## Performance Result
 
-Add explicit overflow guards at the *append* boundary in the native
-accumulator. On overflow, raise a clear error naming the column and
-the offending value. Do not silently saturate.
+Comparison against the PR07 VCAP profile at the same command line:
 
-`frag_id` stays `int64`. `num_hits` and `nm` stay `uint16`. Do not touch
-fields that already match their realistic range.
+```bash
+python scripts/profiling/profiler.py \
+  --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
+  --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
+  --outdir /Users/mkiyer/Downloads/rigel_runs/profile_pr10_buffer_dtype_diet \
+  --stages --threads 8 --scan-buffer-size 2 --memory-interval 250
+```
 
-Document the dtype contract in a single comment block at the top of the
-schema in `buffer.py` so future additions follow it.
+| Metric | PR07 | PR10 | Delta |
+|---|---:|---:|---:|
+| Wall time | 89.15 s | 87.58 s | -1.57 s |
+| Peak RSS | 12,086.9 MB | 11,626.2 MB | -460.7 MB |
+| RSS after scan | 7,044.2 MB | 6,260.6 MB | -783.7 MB |
+| RSS after router scan | 11,906.6 MB | 10,686.2 MB | -1,220.4 MB |
+| Scan buffer current | 1,999.5 MB | 1,920.1 MB | -79.4 MB |
+| Scan buffer peak | 2,113.1 MiB | 2,124.4 MiB | +11.3 MiB |
+| Chunks spilled | 23 | 18 | -5 |
+| Scoring CSR bytes | 3.94 GiB | 3.94 GiB | unchanged |
+| Partition bytes | 3.94 GiB | 3.94 GiB | unchanged |
 
-## Implementation steps
+The small scan-buffer peak increase is expected noise around the 2 GiB
+spill cap and different in-memory/spilled chunk mix. The meaningful PR10
+signal is lower RSS after scan/router, lower final peak RSS, and fewer
+spilled chunks with unchanged quantification payload sizes.
 
-1. Audit `_pos` / `_neg` consumers (Step 1).
-2. Land Step 1 as commit A. Validate goldens.
-3. Land Step 2 as commit B. Validate goldens.
-4. Update `_FinalizedChunk.memory_bytes` and `to_scoring_arrays()`.
-5. Update spill writer / loader to match. Document that spill files
-   are version-local (already true in practice).
-6. Update PR05's `scoring_csr.candidate_bytes` keys if applicable.
-7. Update `ChunkPtrs` and nanobind casts in `scoring.cpp`. Promote
-   to `int32` *locally* in scoring arithmetic where signed math
-   matters; leave the storage narrow.
+## Validation
 
-## Tests
+Rebuilt native extensions after C++ edits:
 
 ```bash
 conda activate rigel
 pip install --no-build-isolation -e .
-pytest tests/test_buffer.py tests/test_resolution.py -v
-pytest tests/test_pipeline_smoke.py tests/test_pipeline_routing.py -v
-pytest tests/test_golden_output.py -v
-pytest tests/ -q
 ```
 
-Add focused tests:
-
-* Spill→load round-trip preserves dtypes.
-* Append at the dtype boundary works (e.g. `read_length = 65535`).
-* Append over the boundary raises a clear error naming the column.
-* If Step 1 is gated, both `emit_strand_diagnostics=True` and
-  `=False` paths produce equivalent quant outputs.
-
-## Benchmark plan
-
-After PR05 (for `--scan-buffer-size`):
+Focused checks:
 
 ```bash
-python scripts/profiling/scan_profile.py \
-  --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
-  --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
-  --outdir /Users/mkiyer/Downloads/rigel_runs/scan_profile_pr10_dtype_diet \
-  --name-prefix pr10 --threads 8 --scan-bgzf-threads 2 \
-  --scan-buffer-size 2 --scan-read-name-batch-size 512
+pytest tests/test_buffer.py tests/test_pipeline_routing.py \
+  tests/test_resolution.py tests/test_ndarray_util.py -q
+# 111 passed
 ```
 
-Then full staged. Compare buffer `memory_bytes`, spill count, spill
-read/write time, peak RSS.
+High-level checks:
 
-## Acceptance criteria
+```bash
+pytest tests/test_pipeline_smoke.py tests/test_pipeline_routing.py \
+  tests/test_golden_output.py tests/test_profiler.py -q
+# 37 passed
+```
 
-* Golden outputs unchanged.
-* Buffer `memory_bytes` drops by ≥ 25% on VCAP (Step 1 + Step 2
-  combined).
-* Spill file size drops proportionally.
-* No scan or scoring wall-time regression > 5%.
-* Overflow guards have explicit tests.
-* No `int32` storage remains for fields whose realistic max < 65536.
+Full suite:
 
-## Risks
+```bash
+pytest tests/ -q
+# 1068 passed
+```
 
-* Real datasets may legitimately exceed `uint16` for some unusual
-  column. Guards must produce clear errors, not silent corruption.
-* Removing strand-aware columns may break niche diagnostics. Step 1
-  exists to catch this with the audit.
-* Native / Python dtype drift is the classic silent-corruption source.
-  Type asserts in tests are mandatory.
+During full-suite validation, an order-sensitive routing test exposed a
+separate native scorer bug: the multimapper gDNA log-sum-exp accumulator
+used an infinity sentinel inside `_scoring_impl`, which is compiled with
+fast-math. PR10 replaces that sentinel with an explicit initialized flag.
 
-## Non-goals
+## Final Buffer Dtype Contract
 
-* No `ScoredFragments` payload changes (PR07).
-* No resolver semantics changes.
-* No spill format / compression changes beyond what dtype narrowing
-  forces.
+- `frag_id`: int64.
+- `t_offsets`, `t_indices`, `frag_lengths`, `genomic_footprint`,
+  `genomic_start`: int32.
+- `exon_bp`, `read_length`, `num_hits`, `nm`: uint16.
+- Classification and strand flags: uint8.
+
+The append boundary in `FragmentAccumulator` is the guard point for
+narrowed integer fields. Overflow raises a clear runtime error naming the
+column and offending value; values are never silently saturated.
+
+## Non-Goals
+
+- No scoring CSR or partition payload changes; PR07 already handled those.
+- No direct resolver API cleanup. Public/debug `ResolvedFragment` fields are
+  intentionally retained even when the scan buffer no longer stores them.
+- No spill compatibility promise for older intermediate chunk files.

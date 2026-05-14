@@ -55,22 +55,26 @@ is calibrated against them.
 - `StreamingScorer` writes `unambig_counts` directly into a single
   estimator-owned `f64_2d_mut` array (shared mutable state). Any
   parallel scorer must give every worker its own copy and merge.
-- `score_chunk()` consumes 13 buffer columns. `exon_bp_pos`,
-  `exon_bp_neg`, `tx_bp_pos`, `tx_bp_neg` are **not** among them.
+- `score_chunk()` consumes 12 buffer columns after PR10. `intron_bp`,
+  `exon_bp_pos`, `exon_bp_neg`, `tx_bp_pos`, and `tx_bp_neg` are not part
+  of the scan-buffer/scorer ABI.
 - `enable_gdna_for_multilocus` reads `is_spliced` and `gdna_log_liks`
   from the global CSR; it must run before `partition_and_free` consumes
   those arrays.
 
 ## PR series
 
+Status in this branch: PR05, PR06, PR07, and PR10 are implemented. The table
+below keeps the original ordering for the remaining PR series.
+
 | Order | PR | Doc | Primary target | Risk |
 |---:|---|---|---|---|
-| 05 | Scan config & profiler visibility | [pr05_profile_and_scan_config_visibility.md](pr05_profile_and_scan_config_visibility.md) | Make every later measurement reproducible | Low |
-| 06 | Lower default scan memory cap | [pr06_scan_memory_budget_policy.md](pr06_scan_memory_budget_policy.md) | Free RSS reduction (async spill already shipped) | Low |
-| 07 | Float32 scored-fragment payloads | [pr07_float32_scored_fragments.md](pr07_float32_scored_fragments.md) | Peak RSS, scoring/scatter/EM bandwidth | Medium |
+| 05 | Scan config & profiler visibility | [pr05_profile_and_scan_config_visibility.md](pr05_profile_and_scan_config_visibility.md) | Implemented: reproducible scan config and memory-shape metrics | Low |
+| 06 | Lower default scan memory cap | [pr06_scan_memory_budget_policy.md](pr06_scan_memory_budget_policy.md) | Implemented: default scan cap is now 2 GiB | Low |
+| 07 | Float32 scored-fragment payloads | [pr07_float32_scored_fragments.md](pr07_float32_scored_fragments.md) | Implemented: 3.51 GB lower peak RSS on VCAP | Medium |
 | 08 | Fused partition scatter | [pr08_fused_partition_scatter.md](pr08_fused_partition_scatter.md) | `partition_and_free` wall + memory traffic | Medium |
 | 09 | Parallel streaming scorer | [pr09_parallel_streaming_scorer.md](pr09_parallel_streaming_scorer.md) | `fragment_router_scan` wall | Medium-high |
-| 10 | Buffer column diet | [pr10_buffer_dtype_diet.md](pr10_buffer_dtype_diet.md) | Buffer logical size + spill volume | Medium |
+| 10 | Buffer column diet | [pr10_buffer_dtype_diet.md](pr10_buffer_dtype_diet.md) | Implemented: dead buffer/scorer fields removed; 0.46 GB lower peak RSS vs PR07 | Medium |
 | 11 | Prior fast path | [pr11_prior_fast_path.md](pr11_prior_fast_path.md) | `compute_eb_gdna_priors` Python tail | Medium |
 | 12 | EM high-iteration workset | [pr12_em_high_iteration_workset.md](pr12_em_high_iteration_workset.md) | Long-tail SQUAREM iterations | Research |
 
@@ -129,15 +133,14 @@ pytest tests/ -q
 ruff check src/ tests/
 ```
 
-Performance comparison workload (PR05 must land first for the flags to
-exist):
+Performance comparison workload for the post-PR06 baseline:
 
 ```bash
 python scripts/profiling/profiler.py \
   --bam /Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam \
   --index /Users/mkiyer/Downloads/rigel_runs/refs/rigel_index \
   --outdir /Users/mkiyer/Downloads/rigel_runs/profile_post_scan_pr_check \
-  --stages --threads 8 --memory-interval 250
+  --stages --threads 8 --scan-buffer-size 2 --memory-interval 250
 ```
 
 Use cProfile only for attribution, not for headline timing.

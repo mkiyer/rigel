@@ -41,11 +41,11 @@ class ScoredFragments:
     t_indices : np.ndarray
         int32[n_candidates] — candidate transcript indices.
     log_liks : np.ndarray
-        float64[n_candidates] — log(P_strand × P_insert) per candidate.
+        float32[n_candidates] — log(P_strand × P_insert) per candidate.
     count_cols : np.ndarray
         uint8[n_candidates] — internal column index per candidate (0–7).
     coverage_weights : np.ndarray
-        float64[n_candidates] — coverage weight per candidate.
+        float32[n_candidates] — coverage weight per candidate.
     locus_t_indices : np.ndarray
         int32[n_units] — best transcript index per unit.
     locus_count_cols : np.ndarray
@@ -53,7 +53,7 @@ class ScoredFragments:
     is_spliced : np.ndarray
         bool[n_units] — True if this unit is a spliced fragment.
     gdna_log_liks : np.ndarray
-        float64[n_units] — pre-computed gDNA log-likelihood per unit.
+        float32[n_units] — pre-computed gDNA log-likelihood per unit.
         -inf for spliced units.
     frag_ids : np.ndarray
         int64[n_units] — buffer frag_id for each EM unit.
@@ -117,13 +117,13 @@ class LocusPartition:
 
     # Per-candidate arrays (indexed by offsets)
     t_indices: np.ndarray  # int32 — GLOBAL transcript indices
-    log_liks: np.ndarray  # float64
+    log_liks: np.ndarray  # float32
     count_cols: np.ndarray  # uint8
-    coverage_weights: np.ndarray  # float64
+    coverage_weights: np.ndarray  # float32
 
     # Per-unit arrays
     is_spliced: np.ndarray  # uint8 (bool viewed as uint8 for C++)
-    gdna_log_liks: np.ndarray  # float64
+    gdna_log_liks: np.ndarray  # float32
     locus_t_indices: np.ndarray  # int32
     locus_count_cols: np.ndarray  # uint8
 

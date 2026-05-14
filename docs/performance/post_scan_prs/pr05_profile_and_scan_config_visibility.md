@@ -3,6 +3,10 @@
 **Position in roadmap:** First. Every later PR's measurement claims
 depend on this landing.
 
+**Status:** Implemented in this branch. The profiler now records
+`scan_config`, `buffer_summary`, `scoring_csr`, `partition_bytes_total`,
+and `partition_bytes` in `profile_summary.json`.
+
 ## Summary
 
 Finish scan/profiler visibility on top of the pre-PR05 parameter rename,

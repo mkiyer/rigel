@@ -132,7 +132,7 @@ class BamScanConfig:
     read_name_batch_size : int
         Read-name groups per native scanner input queue item (default 512).
     buffer_size_bytes : int
-        Max scan-buffer memory before disk spill (default 4 GiB).
+        Max scan-buffer memory before disk spill (default 2 GiB).
     spill_dir : Path, str, or None
         Directory for spilled buffer chunks (default None).
     """
@@ -146,7 +146,7 @@ class BamScanConfig:
     bgzf_threads: int = 4
     fragments_per_chunk: int = 1_000_000
     read_name_batch_size: int = 512
-    buffer_size_bytes: int = 4 * 1024**3
+    buffer_size_bytes: int = 2 * 1024**3
     spill_dir: Path | str | None = None
     """Scan buffer spill directory (default ``None`` = system temp dir)."""
 

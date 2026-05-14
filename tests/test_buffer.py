@@ -51,17 +51,12 @@ _CHUNK_ARRAY_FIELDS = (
     "t_indices",
     "frag_lengths",
     "exon_bp",
-    "intron_bp",
     "ambig_strand",
     "frag_id",
     "read_length",
     "genomic_footprint",
     "genomic_start",
     "nm",
-    "exon_bp_pos",
-    "exon_bp_neg",
-    "tx_bp_pos",
-    "tx_bp_neg",
 )
 
 
@@ -247,6 +242,47 @@ class TestFragmentAccumulator:
         raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
         assert raw["size"] == 2
 
+    def test_finalize_buffer_payload_dtypes(self, mini_index):
+        from rigel._resolve_impl import FragmentAccumulator
+
+        acc = FragmentAccumulator()
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        acc.append(result, 0)
+
+        raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
+        assert np.frombuffer(raw["frag_lengths"], dtype=np.int32).dtype == np.int32
+        assert np.frombuffer(raw["exon_bp"], dtype=np.uint16).dtype == np.uint16
+        assert np.frombuffer(raw["read_length"], dtype=np.uint16).dtype == np.uint16
+        assert "intron_bp" not in raw
+        assert "exon_bp_pos" not in raw
+        assert "exon_bp_neg" not in raw
+        assert "tx_bp_pos" not in raw
+        assert "tx_bp_neg" not in raw
+
+    def test_append_read_length_overflow_names_column(self, mini_index):
+        from rigel._resolve_impl import FragmentAccumulator
+
+        result = _resolve(mini_index, [_exon("chr1", 10_000, 10_000 + 65_536)])
+        assert result is not None
+        assert result.read_length == 65_536
+
+        acc = FragmentAccumulator()
+        with pytest.raises(RuntimeError, match="read_length"):
+            acc.append(result, 0)
+
+    def test_append_read_length_uint16_boundary(self, mini_index):
+        from rigel._resolve_impl import FragmentAccumulator
+
+        result = _resolve(mini_index, [_exon("chr1", 10_000, 10_000 + 65_535)])
+        assert result is not None
+        assert result.read_length == 65_535
+
+        acc = FragmentAccumulator()
+        acc.append(result, 0)
+        raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
+        read_length = np.frombuffer(raw["read_length"], dtype=np.uint16)
+        assert read_length.tolist() == [65_535]
+
 
 # =====================================================================
 # FragmentBuffer -- basic accumulation via native path
@@ -363,6 +399,24 @@ class TestFragmentBufferBasic:
 
         bf = list(buf)[0]
         assert bf.nm == 0
+
+    def test_chunk_payload_dtypes(self, mini_index):
+        """Buffer chunks store bounded hot-path payloads as uint16."""
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+
+        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf.append(r)
+        buf.finalize()
+
+        chunk = list(buf.iter_chunks())[0]
+        assert chunk.frag_lengths.dtype == np.int32
+        assert chunk.exon_bp.dtype == np.uint16
+        assert chunk.read_length.dtype == np.uint16
+        assert not hasattr(chunk, "intron_bp")
+        assert not hasattr(chunk, "exon_bp_pos")
+        assert not hasattr(chunk, "exon_bp_neg")
+        assert not hasattr(chunk, "tx_bp_pos")
+        assert not hasattr(chunk, "tx_bp_neg")
 
 
 # =====================================================================
@@ -760,9 +814,13 @@ class TestBufferSummary:
         s = buf.summary()
         assert s["total_fragments"] == 150
         assert s["n_chunks"] == 2
+        assert s["chunks_finalized"] == 2
+        assert s["chunks_spilled"] == 0
         assert s["in_memory_chunks"] == 2
         assert s["on_disk_chunks"] == 0
         assert s["memory_bytes"] > 0
+        assert s["memory_bytes_peak"] >= s["memory_bytes"]
+        assert s["chunks_pending_spill_peak"] == 0
         assert isinstance(s["memory_mb"], float)
 
     def test_summary_with_spill(self, mini_index, tmp_path):
@@ -779,7 +837,11 @@ class TestBufferSummary:
 
         s = buf.summary()
         assert s["total_fragments"] == 100
+        assert s["chunks_finalized"] == 2
+        assert s["chunks_spilled"] > 0
         assert s["on_disk_chunks"] + s["pending_spill_chunks"] > 0
+        assert s["chunks_pending_spill_peak"] > 0
+        assert s["memory_bytes_peak"] > 0
         assert s["failed_spill_chunks"] == 0
 
 

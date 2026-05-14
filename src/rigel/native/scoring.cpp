@@ -52,15 +52,21 @@ static constexpr int SCORED_STACK_CAPACITY = 64;
 //
 // Maintains running (max_v, sum_v) such that the logsumexp of the
 // stream of inputs x_1,..,x_n equals  max_v + log(sum_v).
-// Skips -inf inputs.  Called once per contributing hit in the
-// gDNA per-hit accumulator for multimapper units.
-static inline void lse_update(double& max_v, double& sum_v, double x) {
-    if (!std::isfinite(x)) return;
-    if (x > max_v) {
-        if (std::isfinite(max_v)) sum_v *= std::exp(max_v - x);
-        else                      sum_v = 0.0;
+// Uses an explicit has_v flag instead of an infinity sentinel because
+// this extension is compiled with fast-math.
+static inline void lse_update(
+    double& max_v,
+    double& sum_v,
+    bool& has_v,
+    double x)
+{
+    if (!has_v) {
         max_v = x;
-        sum_v += 1.0;
+        sum_v = 1.0;
+        has_v = true;
+    } else if (x > max_v) {
+        sum_v = sum_v * std::exp(max_v - x) + 1.0;
+        max_v = x;
     } else {
         sum_v += std::exp(x - max_v);
     }
@@ -72,11 +78,11 @@ static inline void lse_update(double& max_v, double& sum_v, double x) {
 
 using i32_1d  = nb::ndarray<const int32_t,  nb::ndim<1>, nb::c_contig>;
 using i8_1d   = nb::ndarray<const int8_t,  nb::ndim<1>, nb::c_contig>;
+using f32_1d  = nb::ndarray<const float,   nb::ndim<1>, nb::c_contig>;
 using f64_1d  = nb::ndarray<const double,  nb::ndim<1>, nb::c_contig>;
 using i64_1d  = nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>;
 using u8_1d   = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>;
 using u16_1d  = nb::ndarray<const uint16_t, nb::ndim<1>, nb::c_contig>;
-using u32_1d  = nb::ndarray<const uint32_t, nb::ndim<1>, nb::c_contig>;
 using f64_mut = nb::ndarray<double, nb::ndim<1>, nb::c_contig>;
 using f64_2d_mut = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
 
@@ -366,13 +372,12 @@ private:
         const int32_t*  t_off;
         const int32_t*  t_ind;
         const int32_t*  f_len;
-        const int32_t*  e_bp;
-        const int32_t*  i_bp;
+        const uint16_t* e_bp;
         const uint8_t*  s_type;
         const uint8_t*  e_str;
         const uint8_t*  fc;
         const int64_t*  f_id;
-        const uint32_t* r_len;
+        const uint16_t* r_len;
         const int32_t*  g_fp;
         const int32_t*  g_sta;
         const uint16_t* nm;
@@ -385,25 +390,22 @@ private:
         double  log_lik;
         int32_t count_col;
         double  coverage_wt;
-        int32_t tx_start, tx_end;
     };
 
     // Growing output vectors + write cursors for single-pass scoring.
     struct FillState {
         // CSR candidate arrays (growing)
         std::vector<int32_t>*  v_ti;
-        std::vector<double>*   v_ll;
+        std::vector<float>*    v_ll;
         std::vector<uint8_t>*  v_ct;
-        std::vector<double>*   v_cw;
-        std::vector<int32_t>*  v_ts;
-        std::vector<int32_t>*  v_te;
+        std::vector<float>*    v_cw;
         // CSR offsets (growing; starts with {0})
         std::vector<int64_t>*  v_offsets;
         // Per-unit metadata (growing)
         std::vector<int32_t>*  v_locus_t;
         std::vector<uint8_t>*  v_locus_ct;
         std::vector<int8_t>*   v_is_spliced;
-        std::vector<double>*   v_gdna_ll;
+        std::vector<float>*    v_gdna_ll;
         std::vector<int64_t>*  v_fid;
         std::vector<int8_t>*   v_fclass;
         std::vector<uint8_t>*  v_stype;
@@ -437,11 +439,12 @@ private:
         //   lse_max + log(lse_sum) - log(nh_gdna).
         double  mm_gdna_lse_max;
         double  mm_gdna_lse_sum;
+        bool    mm_gdna_lse_has;
         int32_t mm_nh_gdna;
 
         FillState()
             : v_ti(nullptr), v_ll(nullptr), v_ct(nullptr),
-              v_cw(nullptr), v_ts(nullptr), v_te(nullptr),
+                            v_cw(nullptr),
               v_offsets(nullptr), v_locus_t(nullptr),
               v_locus_ct(nullptr), v_is_spliced(nullptr),
               v_gdna_ll(nullptr), v_fid(nullptr),
@@ -453,8 +456,9 @@ private:
               mm_fid(-1), mm_n_members(0),
               mm_is_any_spliced(false),
               mm_best_stype(SPLICE_UNSPLICED),
-              mm_gdna_lse_max(-std::numeric_limits<double>::infinity()),
+              mm_gdna_lse_max(0.0),
               mm_gdna_lse_sum(0.0),
+              mm_gdna_lse_has(false),
               mm_nh_gdna(0) {}
 
         void reset_mm_group() {
@@ -463,8 +467,9 @@ private:
             mm_n_members = 0;
             mm_is_any_spliced = false;
             mm_best_stype = SPLICE_UNSPLICED;
-            mm_gdna_lse_max = -std::numeric_limits<double>::infinity();
+            mm_gdna_lse_max = 0.0;
             mm_gdna_lse_sum = 0.0;
+            mm_gdna_lse_has = false;
             mm_nh_gdna = 0;
         }
     };
@@ -537,7 +542,9 @@ private:
                                   + log_nm
                                   - std::log(static_cast<double>(e_h));
                 lse_update(st.mm_gdna_lse_max,
-                           st.mm_gdna_lse_sum, hit_log_ll);
+                           st.mm_gdna_lse_sum,
+                           st.mm_gdna_lse_has,
+                           hit_log_ll);
                 ++st.mm_nh_gdna;
             }
         }
@@ -604,7 +611,7 @@ private:
             auto it = st.mm_merged.find(t_idx);
             if (it == st.mm_merged.end()) {
                 st.mm_merged[t_idx] = {oh, log_lik, ct,
-                                       cov_wt, tx_s, tx_e};
+                                       cov_wt};
             } else {
                 auto& prev = it->second;
                 if (oh < prev.overhang ||
@@ -612,7 +619,7 @@ private:
                      log_lik > prev.log_lik))
                 {
                     prev = {oh, log_lik, ct,
-                            cov_wt, tx_s, tx_e};
+                            cov_wt};
                 }
             }
         }
@@ -657,12 +664,10 @@ private:
                              ? nrna_best : mrna_best;
             if (pool_best - mc.log_lik <= max_ll_delta_) {
                 st.v_ti->push_back(t_idx);
-                st.v_ll->push_back(mc.log_lik);
+                st.v_ll->push_back(static_cast<float>(mc.log_lik));
                 st.v_ct->push_back(
                     static_cast<uint8_t>(mc.count_col));
-                st.v_cw->push_back(mc.coverage_wt);
-                st.v_ts->push_back(mc.tx_start);
-                st.v_te->push_back(mc.tx_end);
+                st.v_cw->push_back(static_cast<float>(mc.coverage_wt));
                 ++st.cand_cur;
                 if (mc.log_lik > best_ll) {
                     best_ll = mc.log_lik;
@@ -691,13 +696,16 @@ private:
             // Emit per-unit gDNA log-lik.  Under Option B the scorer
             // delivers the fully length-corrected scalar; the EM sees
             // no gDNA-specific bias correction downstream.
-            if (!st.mm_is_any_spliced && st.mm_nh_gdna > 0) {
+            if (!st.mm_is_any_spliced &&
+                st.mm_nh_gdna > 0 &&
+                st.mm_gdna_lse_has &&
+                st.mm_gdna_lse_sum > 0.0) {
                 double final_gdna_ll = st.mm_gdna_lse_max
                                      + std::log(st.mm_gdna_lse_sum)
                                      - std::log((double)st.mm_nh_gdna);
-                st.v_gdna_ll->push_back(final_gdna_ll);
+                st.v_gdna_ll->push_back(static_cast<float>(final_gdna_ll));
             } else {
-                st.v_gdna_ll->push_back(NEG_INF);
+                st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
             }
 
             ++st.unit_cur;
@@ -728,13 +736,12 @@ private:
         const int32_t*  t_off  = cp.t_off;
         const int32_t*  t_ind  = cp.t_ind;
         const int32_t*  f_len  = cp.f_len;
-        const int32_t*  e_bp   = cp.e_bp;
-        const int32_t*  i_bp   = cp.i_bp;
+        const uint16_t* e_bp   = cp.e_bp;
         const uint8_t*  s_type = cp.s_type;
         const uint8_t*  e_str  = cp.e_str;
         const uint8_t*  fc     = cp.fc;
         const int64_t*  f_id   = cp.f_id;
-        const uint32_t* r_len  = cp.r_len;
+        const uint16_t* r_len  = cp.r_len;
         const int32_t*  g_fp   = cp.g_fp;
         const int32_t*  g_sta  = cp.g_sta;
         const uint16_t* nm_arr = cp.nm;
@@ -841,7 +848,7 @@ private:
             if (n_cand > 0) {
                 // ===== mRNA scoring =====
                 struct MrnaScored {
-                    int32_t t_idx, oh, ct, tx_s, tx_e;
+                    int32_t t_idx, oh, ct;
                     double  log_lik, cov_wt;
                 };
                 MrnaScored m_stack[SCORED_STACK_CAPACITY];
@@ -905,8 +912,7 @@ private:
                         }
                     }
 
-                    m_scored[m_n++] = {t_idx, oh, ct, tx_s,
-                                       tx_e, log_lik, cov_wt};
+                    m_scored[m_n++] = {t_idx, oh, ct, log_lik, cov_wt};
                 }
 
                 // Pool-separated likelihood pruning
@@ -927,12 +933,10 @@ private:
                                      ? nrna_best : mrna_best;
                     if (pool_best - s.log_lik <= max_ll_delta_) {
                         st.v_ti->push_back(s.t_idx);
-                        st.v_ll->push_back(s.log_lik);
+                        st.v_ll->push_back(static_cast<float>(s.log_lik));
                         st.v_ct->push_back(
                             static_cast<uint8_t>(s.ct));
-                        st.v_cw->push_back(s.cov_wt);
-                        st.v_ts->push_back(s.tx_s);
-                        st.v_te->push_back(s.tx_e);
+                        st.v_cw->push_back(static_cast<float>(s.cov_wt));
                         ++st.cand_cur;
                         if (s.log_lik > best_ll) {
                             best_ll = s.log_lik;
@@ -972,11 +976,11 @@ private:
                     if (e_h < 1) e_h = 1;
                     double gdna_fl =
                         gdna_frag_len_log_lik(genomic_footprint);
-                    st.v_gdna_ll->push_back(
-                        gdna_fl + gdna_log_sp + LOG_HALF + log_nm
-                      - std::log(static_cast<double>(e_h)));
+                    double gdna_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm
+                                   - std::log(static_cast<double>(e_h));
+                    st.v_gdna_ll->push_back(static_cast<float>(gdna_ll));
                 } else {
-                    st.v_gdna_ll->push_back(NEG_INF);
+                    st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
                 }
 
                 ++st.unit_cur;
@@ -1012,15 +1016,13 @@ class StreamingScorer {
     // Growing output vectors (heap-allocated, capsule-transferred)
     std::vector<int64_t>*  v_offsets_;
     std::vector<int32_t>*  v_ti_;
-    std::vector<double>*   v_ll_;
+    std::vector<float>*    v_ll_;
     std::vector<uint8_t>*  v_ct_;
-    std::vector<double>*   v_cw_;
-    std::vector<int32_t>*  v_ts_;
-    std::vector<int32_t>*  v_te_;
+    std::vector<float>*    v_cw_;
     std::vector<int32_t>*  v_lt_;
     std::vector<uint8_t>*  v_lct_;
     std::vector<int8_t>*   v_isp_;
-    std::vector<double>*   v_gll_;
+    std::vector<float>*    v_gll_;
     std::vector<int64_t>*  v_fid_;
     std::vector<int8_t>*   v_fc_;
     std::vector<uint8_t>*  v_st_;
@@ -1055,15 +1057,13 @@ public:
         v_offsets_->push_back(0);
 
         v_ti_  = new std::vector<int32_t>();
-        v_ll_  = new std::vector<double>();
+        v_ll_  = new std::vector<float>();
         v_ct_  = new std::vector<uint8_t>();
-        v_cw_  = new std::vector<double>();
-        v_ts_  = new std::vector<int32_t>();
-        v_te_  = new std::vector<int32_t>();
+        v_cw_  = new std::vector<float>();
         v_lt_  = new std::vector<int32_t>();
         v_lct_ = new std::vector<uint8_t>();
         v_isp_ = new std::vector<int8_t>();
-        v_gll_ = new std::vector<double>();
+        v_gll_ = new std::vector<float>();
         v_fid_ = new std::vector<int64_t>();
         v_fc_  = new std::vector<int8_t>();
         v_st_  = new std::vector<uint8_t>();
@@ -1079,8 +1079,6 @@ public:
         st_.v_ll         = v_ll_;
         st_.v_ct         = v_ct_;
         st_.v_cw         = v_cw_;
-        st_.v_ts         = v_ts_;
-        st_.v_te         = v_te_;
         st_.v_locus_t    = v_lt_;
         st_.v_locus_ct   = v_lct_;
         st_.v_is_spliced = v_isp_;
@@ -1106,8 +1104,6 @@ public:
         delete v_ll_;
         delete v_ct_;
         delete v_cw_;
-        delete v_ts_;
-        delete v_te_;
         delete v_lt_;
         delete v_lct_;
         delete v_isp_;
@@ -1134,18 +1130,17 @@ public:
         cp.t_off  = nb::cast<i32_1d>(chunk_arrays[0]).data();
         cp.t_ind  = nb::cast<i32_1d>(chunk_arrays[1]).data();
         cp.f_len  = nb::cast<i32_1d>(chunk_arrays[2]).data();
-        cp.e_bp   = nb::cast<i32_1d>(chunk_arrays[3]).data();
-        cp.i_bp   = nb::cast<i32_1d>(chunk_arrays[4]).data();
-        cp.s_type = nb::cast<u8_1d>(chunk_arrays[5]).data();
-        cp.e_str  = nb::cast<u8_1d>(chunk_arrays[6]).data();
-        cp.fc     = nb::cast<u8_1d>(chunk_arrays[7]).data();
-        cp.f_id   = nb::cast<i64_1d>(chunk_arrays[8]).data();
-        cp.r_len  = nb::cast<u32_1d>(chunk_arrays[9]).data();
-        cp.g_fp   = nb::cast<i32_1d>(chunk_arrays[10]).data();
-        cp.g_sta  = nb::cast<i32_1d>(chunk_arrays[11]).data();
-        cp.nm     = nb::cast<u16_1d>(chunk_arrays[12]).data();
+        cp.e_bp   = nb::cast<u16_1d>(chunk_arrays[3]).data();
+        cp.s_type = nb::cast<u8_1d>(chunk_arrays[4]).data();
+        cp.e_str  = nb::cast<u8_1d>(chunk_arrays[5]).data();
+        cp.fc     = nb::cast<u8_1d>(chunk_arrays[6]).data();
+        cp.f_id   = nb::cast<i64_1d>(chunk_arrays[7]).data();
+        cp.r_len  = nb::cast<u16_1d>(chunk_arrays[8]).data();
+        cp.g_fp   = nb::cast<i32_1d>(chunk_arrays[9]).data();
+        cp.g_sta  = nb::cast<i32_1d>(chunk_arrays[10]).data();
+        cp.nm     = nb::cast<u16_1d>(chunk_arrays[11]).data();
         cp.N      = static_cast<int>(
-            nb::cast<u8_1d>(chunk_arrays[5]).shape(0));
+            nb::cast<u8_1d>(chunk_arrays[4]).shape(0));
 
         scorer_.score_chunk_impl(
             cp, gdna_log_sp_, st_,
@@ -1176,8 +1171,6 @@ public:
             vec_to_ndarray(v_ll_),
             vec_to_ndarray(v_ct_),
             vec_to_ndarray(v_cw_),
-            vec_to_ndarray(v_ts_),
-            vec_to_ndarray(v_te_),
             vec_to_ndarray(v_lt_),
             vec_to_ndarray(v_lct_),
             vec_to_ndarray(v_isp_),
@@ -1202,7 +1195,6 @@ public:
         v_offsets_ = nullptr;
         v_ti_ = nullptr;  v_ll_ = nullptr;
         v_ct_ = nullptr;  v_cw_ = nullptr;
-        v_ts_ = nullptr;  v_te_ = nullptr;
         v_lt_ = nullptr;  v_lct_ = nullptr;
         v_isp_ = nullptr; v_gll_ = nullptr;
         v_fid_ = nullptr;

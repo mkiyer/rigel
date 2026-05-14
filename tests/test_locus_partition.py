@@ -7,9 +7,11 @@ from rigel.locus import Locus, MultiLocus
 from rigel.locus_partition import partition_and_free
 from rigel.native import (
     build_partition_offsets,
+    scatter_candidates_f32,
     scatter_candidates_f64,
     scatter_candidates_i32,
     scatter_candidates_u8,
+    scatter_units_f32,
     scatter_units_f64,
     scatter_units_i32,
     scatter_units_u8,
@@ -31,13 +33,13 @@ def _make_scored_fragments(n_units, candidates_per_unit, n_transcripts, rng):
     return ScoredFragments(
         offsets=offsets,
         t_indices=rng.integers(0, n_transcripts, size=n_cand, dtype=np.int32),
-        log_liks=rng.standard_normal(n_cand),
+        log_liks=rng.standard_normal(n_cand).astype(np.float32),
         count_cols=rng.integers(0, 8, size=n_cand, dtype=np.uint8),
-        coverage_weights=rng.random(n_cand),
+        coverage_weights=rng.random(n_cand).astype(np.float32),
         locus_t_indices=rng.integers(0, n_transcripts, size=n_units, dtype=np.int32),
         locus_count_cols=rng.integers(0, 8, size=n_units, dtype=np.uint8),
         is_spliced=rng.choice([True, False], size=n_units),
-        gdna_log_liks=rng.standard_normal(n_units),
+        gdna_log_liks=rng.standard_normal(n_units).astype(np.float32),
         frag_ids=np.arange(n_units, dtype=np.int64),
         frag_class=np.zeros(n_units, dtype=np.int8),
         splice_type=np.zeros(n_units, dtype=np.uint8),
@@ -137,6 +139,25 @@ class TestScatterCandidates:
         # Locus 1: unit 1 → data[3:6]
         np.testing.assert_array_equal(result[1], data[3:6])
 
+    def test_round_trip_f32(self):
+        """float32 candidate scatter preserves dtype and values."""
+        rng = np.random.default_rng(43)
+        g_offsets = np.array([0, 3, 6, 10], dtype=np.int64)
+        data = rng.standard_normal(10).astype(np.float32)
+
+        locus_units = [
+            np.array([0, 2], dtype=np.int32),
+            np.array([1], dtype=np.int32),
+        ]
+        p_offsets = build_partition_offsets(g_offsets, locus_units, 2)
+
+        result = scatter_candidates_f32(data, g_offsets, locus_units, p_offsets, 2)
+
+        assert result[0].dtype == np.float32
+        assert result[1].dtype == np.float32
+        np.testing.assert_array_equal(result[0], np.concatenate([data[0:3], data[6:10]]))
+        np.testing.assert_array_equal(result[1], data[3:6])
+
     def test_round_trip_i32(self):
         """int32 scatter preserves exact values."""
         g_offsets = np.array([0, 2, 5], dtype=np.int64)
@@ -172,6 +193,20 @@ class TestScatterUnits:
         ]
 
         result = scatter_units_f64(data, locus_units, 2)
+        np.testing.assert_array_equal(result[0], [1.0, 4.0, 5.0])
+        np.testing.assert_array_equal(result[1], [2.0, 3.0])
+
+    def test_round_trip_f32(self):
+        """float32 unit scatter preserves dtype and values."""
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float32)
+        locus_units = [
+            np.array([0, 3, 4], dtype=np.int32),
+            np.array([1, 2], dtype=np.int32),
+        ]
+
+        result = scatter_units_f32(data, locus_units, 2)
+        assert result[0].dtype == np.float32
+        assert result[1].dtype == np.float32
         np.testing.assert_array_equal(result[0], [1.0, 4.0, 5.0])
         np.testing.assert_array_equal(result[1], [2.0, 3.0])
 
@@ -233,6 +268,9 @@ class TestPartitionAndFree:
             part = partitions[li]
             assert part.locus_id == li
             assert part.n_units == len(locus.unit_indices)
+            assert part.log_liks.dtype == np.float32
+            assert part.coverage_weights.dtype == np.float32
+            assert part.gdna_log_liks.dtype == np.float32
 
             # Verify per-unit arrays
             for k, u in enumerate(locus.unit_indices):
@@ -316,11 +354,11 @@ class TestNoDuplicateCandidatesPerUnit:
             t_indices=t_indices,
             log_liks=rng.standard_normal(n_cand),
             count_cols=rng.integers(0, 4, size=n_cand, dtype=np.uint8),
-            coverage_weights=np.ones(n_cand),
+            coverage_weights=np.ones(n_cand, dtype=np.float32),
             locus_t_indices=rng.integers(0, n_transcripts, size=n_units, dtype=np.int32),
             locus_count_cols=np.zeros(n_units, dtype=np.uint8),
             is_spliced=rng.choice([True, False], size=n_units),
-            gdna_log_liks=rng.standard_normal(n_units),
+            gdna_log_liks=rng.standard_normal(n_units).astype(np.float32),
             frag_ids=np.arange(n_units, dtype=np.int64),
             frag_class=np.zeros(n_units, dtype=np.int8),
             splice_type=np.zeros(n_units, dtype=np.uint8),

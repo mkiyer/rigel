@@ -18,6 +18,7 @@
 #include <cstring>
 #include <memory>
 #include <numeric>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -132,6 +133,56 @@ using u8_1d  = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>;
 using f64_1d_mut = nb::ndarray<double, nb::ndim<1>, nb::c_contig>;
 using f64_2d_mut = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
 using f64_2d     = nb::ndarray<const double, nb::ndim<2>, nb::c_contig>;
+
+enum class FloatPayloadDType : uint8_t {
+    F32,
+    F64,
+};
+
+static inline double read_float_payload(
+    const void* ptr,
+    FloatPayloadDType dtype,
+    int64_t index)
+{
+    if (dtype == FloatPayloadDType::F32) {
+        return static_cast<double>(static_cast<const float*>(ptr)[index]);
+    }
+    return static_cast<const double*>(ptr)[index];
+}
+
+static inline void set_float_payload(
+    nb::handle obj,
+    const void*& ptr,
+    FloatPayloadDType& dtype,
+    const char* name)
+{
+    nb::object arr_obj = nb::borrow<nb::object>(obj);
+    nb::object dtype_obj = arr_obj.attr("dtype");
+    std::string kind = nb::cast<std::string>(dtype_obj.attr("kind"));
+    int itemsize = nb::cast<int>(dtype_obj.attr("itemsize"));
+
+    if (kind != "f") {
+        throw std::runtime_error(
+            std::string("Expected floating-point array for ") + name);
+    }
+
+    if (itemsize == 4) {
+        auto arr = nb::cast<f32_1d>(obj);
+        ptr = static_cast<const void*>(arr.data());
+        dtype = FloatPayloadDType::F32;
+        return;
+    }
+
+    if (itemsize == 8) {
+        auto arr = nb::cast<f64_1d>(obj);
+        ptr = static_cast<const void*>(arr.data());
+        dtype = FloatPayloadDType::F64;
+        return;
+    }
+
+    throw std::runtime_error(
+        std::string("Expected float32 or float64 array for ") + name);
+}
 
 // ================================================================
 // digamma — self-contained asymptotic series implementation
@@ -1483,11 +1534,14 @@ struct PartitionView {
     // Per-locus CSR data (contiguous, 0-indexed)
     const int64_t* offsets;
     const int32_t* t_indices;
-    const double*  log_liks;
-    const double*  coverage_wts;
+    const void*    log_liks;
+    FloatPayloadDType log_liks_dtype;
+    const void*    coverage_wts;
+    FloatPayloadDType coverage_wts_dtype;
     const uint8_t* count_cols;
     const uint8_t* is_spliced;
-    const double*  gdna_log_liks;
+    const void*    gdna_log_liks;
+    FloatPayloadDType gdna_log_liks_dtype;
     const int32_t* locus_t_indices;
     const uint8_t* locus_count_cols;
     int     n_units;
@@ -1579,7 +1633,8 @@ static void extract_locus_sub_problem_from_partition(
 
         // Determine if this unit gets a gDNA candidate
         bool is_spliced = (pv.is_spliced[ui] != 0);
-        double gdna_ll = pv.gdna_log_liks[ui];
+        double gdna_ll = read_float_payload(
+            pv.gdna_log_liks, pv.gdna_log_liks_dtype, ui);
         bool has_gdna = (!is_spliced && std::isfinite(gdna_ll));
         int width_out = width_in + (has_gdna ? 1 : 0);
 
@@ -1593,8 +1648,11 @@ static void extract_locus_sub_problem_from_partition(
             int32_t local = local_map[global_t];
             if (local < 0 || local >= nc) continue;
 
-            sort_buf[k++] = {local, pv.log_liks[j], pv.coverage_wts[j],
-                             pv.count_cols[j]};
+            double log_lik = read_float_payload(
+                pv.log_liks, pv.log_liks_dtype, j);
+            double coverage_wt = read_float_payload(
+                pv.coverage_wts, pv.coverage_wts_dtype, j);
+            sort_buf[k++] = {local, log_lik, coverage_wt, pv.count_cols[j]};
         }
 
         // Append gDNA candidate (component = n_t, always the largest index).
@@ -1739,11 +1797,13 @@ batch_locus_em_partitioned(
         auto off_arr = nb::cast<i64_1d>(tup[0]);
         v.offsets          = off_arr.data();
         v.t_indices        = nb::cast<i32_1d>(tup[1]).data();
-        v.log_liks         = nb::cast<f64_1d>(tup[2]).data();
-        v.coverage_wts     = nb::cast<f64_1d>(tup[3]).data();
+        set_float_payload(tup[2], v.log_liks, v.log_liks_dtype, "log_liks");
+        set_float_payload(
+            tup[3], v.coverage_wts, v.coverage_wts_dtype, "coverage_weights");
         v.count_cols       = nb::cast<u8_1d>(tup[4]).data();
         v.is_spliced       = nb::cast<u8_1d>(tup[5]).data();
-        v.gdna_log_liks    = nb::cast<f64_1d>(tup[6]).data();
+        set_float_payload(
+            tup[6], v.gdna_log_liks, v.gdna_log_liks_dtype, "gdna_log_liks");
         v.locus_t_indices  = nb::cast<i32_1d>(tup[7]).data();
         v.locus_count_cols = nb::cast<u8_1d>(tup[8]).data();
         v.n_units = static_cast<int>(off_arr.shape(0)) - 1;
@@ -2345,6 +2405,12 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_units"), nb::arg("partition_offsets"),
           nb::arg("n_loci"),
           "Scatter per-candidate float64 array into per-locus arrays.");
+    m.def("scatter_candidates_f32",
+          &scatter_candidates_impl<float>,
+          nb::arg("global_arr"), nb::arg("g_offsets"),
+          nb::arg("locus_units"), nb::arg("partition_offsets"),
+          nb::arg("n_loci"),
+          "Scatter per-candidate float32 array into per-locus arrays.");
     m.def("scatter_candidates_i32",
           &scatter_candidates_impl<int32_t>,
           nb::arg("global_arr"), nb::arg("g_offsets"),
@@ -2362,6 +2428,10 @@ NB_MODULE(_em_impl, m) {
           &scatter_units_impl<double>,
           nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
           "Scatter per-unit float64 array into per-locus arrays.");
+        m.def("scatter_units_f32",
+            &scatter_units_impl<float>,
+            nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
+            "Scatter per-unit float32 array into per-locus arrays.");
     m.def("scatter_units_i32",
           &scatter_units_impl<int32_t>,
           nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),

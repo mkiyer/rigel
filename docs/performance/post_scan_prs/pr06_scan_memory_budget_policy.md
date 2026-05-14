@@ -3,10 +3,22 @@
 **Position in roadmap:** Second. Depends on PR05 for full-profile
 sweep flags.
 
+**Status:** Implemented in this branch. `BamScanConfig.buffer_size_bytes`
+now defaults to `2 * 1024**3`, `--scan-buffer-size` documents default 2,
+and the staged profiler reports buffer/spill metrics needed for future
+full-profile cap sweeps.
+
+Validation results are published in
+[../pr06_scan_memory_cap_sweep_2026-05-13.md](../pr06_scan_memory_cap_sweep_2026-05-13.md).
+The 2 GiB cap reduced after-scan RSS by 1.83 GB with no material wall
+penalty. Full-process peak RSS fell by 0.45 GB because the peak is now
+dominated by the scoring CSR/partition plateau, which PR07 and PR08 target.
+
 ## Summary
 
-Validate that 2 GiB is the right default scan memory cap on production
-workloads, then change `BamScanConfig.buffer_size_bytes` accordingly.
+Use 2 GiB as the default scan memory cap. Keep `--scan-buffer-size` as
+the explicit override for machines where a larger resident scan buffer
+is desirable.
 
 ## Motivation
 
@@ -29,7 +41,7 @@ profiler cannot vary the cap, so this question is unanswered for the
 ## Current code
 
 * Default: [src/rigel/config.py](../../../src/rigel/config.py)
-  (`BamScanConfig.buffer_size_bytes = 4 * 1024**3`).
+  (`BamScanConfig.buffer_size_bytes = 2 * 1024**3`).
 * Spill writer: [src/rigel/buffer.py](../../../src/rigel/buffer.py)
   (`_SpillWriter`, lines ~454–520; bounded `queue.Queue(maxsize=2)`,
   one writer thread).

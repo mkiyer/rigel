@@ -95,7 +95,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repeat", type=int, default=1, help="Repeat every configuration")
     parser.add_argument("--scan-fragments-per-chunk", type=int, default=1_000_000)
     parser.add_argument("--scan-read-name-batch-size", type=int, default=512)
-    parser.add_argument("--scan-buffer-size", type=float, default=4.0)
+    parser.add_argument("--scan-buffer-size", type=float, default=2.0)
     parser.add_argument("--spill-dir", type=Path, default=None)
     parser.add_argument("--max-frag-length", type=int, default=1000)
     parser.add_argument("--sj-strand-tag", default="auto")

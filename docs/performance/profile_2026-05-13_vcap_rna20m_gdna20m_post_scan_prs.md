@@ -88,7 +88,7 @@ With 8 native scan workers and 2 BGZF threads (equivalent to `--threads 10 --sca
 | 2 GiB | **31.21 s** | 7.88 GB | 2.00 GB | 23 | **1.025 M/s** |
 | 1 GiB | 31.97 s | **7.07 GB** | **0.94 GB** | 28 | 1.001 M/s |
 
-This is the most straightforward memory lever now available. Lowering the default scan buffer cap from 4 GiB to 2 GiB should reduce scan RSS by roughly 1.8 GB on this workload with no observed scan penalty. A 1 GiB cap saves another ~0.8 GB and still shows no meaningful wall penalty in scan-only mode. A full-profile confirmation is still needed because the staged profiler currently does not expose scan memory/decompression parameters.
+This is the most straightforward memory lever now available. Lowering the default scan buffer cap from 4 GiB to 2 GiB should reduce scan RSS by roughly 1.8 GB on this workload with no observed scan penalty. A 1 GiB cap saves another ~0.8 GB and still shows no meaningful wall penalty in scan-only mode. PR05 now exposes scan memory/decompression parameters in the staged profiler, so future full-profile cap sweeps can be run directly from CLI flags.
 
 ### Why memory remains high
 

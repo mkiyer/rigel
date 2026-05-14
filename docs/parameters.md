@@ -65,7 +65,7 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 |------|---------|-------------|
 | `--threads N` | `0` | Total thread budget available to Rigel. During BAM scan, Rigel reserves `--scan-bgzf-threads` from this budget for BAM decompression and uses the remainder for scan workers. Locus EM uses the same budget because scan and EM run serially. `0` = all available cores, `1` = sequential. |
 | `--scan-bgzf-threads N` | `4` | BGZF/BAM decompression threads reserved from `--threads` during the scan phase. Set to `0` to disable htslib threaded decompression. If the requested value would consume the full thread budget, Rigel caps it so at least one scan worker remains. |
-| `--scan-buffer-size GB` | `4` | Maximum scan buffer size in GiB before finalized chunks are spilled to disk. Increase if you have ample RAM and want to reduce spill I/O. |
+| `--scan-buffer-size GB` | `2` | Maximum scan buffer size in GiB before finalized chunks are spilled to disk. Increase if you have ample RAM and want to reduce spill I/O. |
 | `--scan-fragments-per-chunk N` | `1000000` | Buffered fragments per native scan chunk before data is handed to the Python fragment buffer. Larger chunks reduce handoff overhead but increase transient memory. |
 | `--scan-read-name-batch-size N` | `512` | Advanced scanner scheduling knob: read-name groups per native worker-queue item. Lower values are useful for queue-boundary debugging; larger values may reduce queue overhead at the cost of slightly more in-flight memory. |
 | `--tmpdir DIR` | system temp | Directory for fragment-buffer spill files when memory is exceeded. Use a fast local SSD. |
@@ -115,7 +115,7 @@ em_mode: vbem                  # vbem | map
 # Performance
 threads: 0                          # total thread budget; 0 = all available cores
 scan_bgzf_threads: 4                # BGZF decompression threads within that budget
-scan_buffer_size: 4                 # GiB before scan-buffer spill
+scan_buffer_size: 2                 # GiB before scan-buffer spill
 scan_fragments_per_chunk: 1000000   # buffered fragments per native scan chunk
 scan_read_name_batch_size: 512      # read-name groups per scanner queue item
 seed: null                     # null = use current timestamp
@@ -161,7 +161,7 @@ The `_PARAM_SPECS` registry in `cli.py` maps CLI flag names to config fields.
 | `BamScanConfig` | `bgzf_threads` | `4` | BGZF decompression threads reserved from the scan budget |
 | `BamScanConfig` | `fragments_per_chunk` | `1,000,000` | Buffered fragments per native scan chunk |
 | `BamScanConfig` | `read_name_batch_size` | `512` | Read-name groups per native scanner queue item |
-| `BamScanConfig` | `buffer_size_bytes` | 4 GiB | Scan-buffer memory limit before disk spill |
+| `BamScanConfig` | `buffer_size_bytes` | 2 GiB | Scan-buffer memory limit before disk spill |
 | `BamScanConfig` | `log_every` | `1,000,000` | Progress log interval (read-name groups) |
 
 ### `summary.json` calibration schema

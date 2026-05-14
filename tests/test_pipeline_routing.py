@@ -55,7 +55,7 @@ class _Chunk:
         self.fragment_classes = np.array(fragment_classes, dtype=np.uint8)
         self.frag_id = np.array(frag_ids, dtype=np.int64)
         self.read_length = np.array(
-            [bf.read_length for bf in bfs], dtype=np.uint32)
+            [bf.read_length for bf in bfs], dtype=np.uint16)
         self.genomic_footprint = np.array(
             [bf.genomic_footprint for bf in bfs], dtype=np.int32)
         self.genomic_start = np.array(
@@ -68,7 +68,6 @@ class _Chunk:
         flat_t = []
         flat_fl = []
         flat_exon = []
-        flat_intron = []
         for bf in bfs:
             n_cand = len(bf.t_inds)
             flat_t.extend(bf.t_inds)
@@ -77,14 +76,12 @@ class _Chunk:
             else:
                 flat_fl.extend([200] * n_cand)
             flat_exon.extend(bf.exon_bp)
-            flat_intron.extend(bf.intron_bp)
             offsets.append(len(flat_t))
 
         self.t_offsets = np.array(offsets, dtype=np.int32)
         self.t_indices = np.array(flat_t, dtype=np.int32)
         self.frag_lengths = np.array(flat_fl, dtype=np.int32)
-        self.exon_bp = np.array(flat_exon, dtype=np.int32)
-        self.intron_bp = np.array(flat_intron, dtype=np.int32)
+        self.exon_bp = np.array(flat_exon, dtype=np.uint16)
 
     def __getitem__(self, idx):
         return self._bfs[idx]
@@ -94,13 +91,12 @@ class _Chunk:
             np.ascontiguousarray(self.t_offsets, dtype=np.int32),
             np.ascontiguousarray(self.t_indices, dtype=np.int32),
             np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
-            np.ascontiguousarray(self.exon_bp, dtype=np.int32),
-            np.ascontiguousarray(self.intron_bp, dtype=np.int32),
+            np.ascontiguousarray(self.exon_bp, dtype=np.uint16),
             np.ascontiguousarray(self.splice_type, dtype=np.uint8),
             np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
             np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
             np.ascontiguousarray(self.frag_id, dtype=np.int64),
-            np.ascontiguousarray(self.read_length, dtype=np.uint32),
+            np.ascontiguousarray(self.read_length, dtype=np.uint16),
             np.ascontiguousarray(self.genomic_footprint, dtype=np.int32),
             np.ascontiguousarray(self.genomic_start, dtype=np.int32),
             np.ascontiguousarray(self.nm, dtype=np.uint16),

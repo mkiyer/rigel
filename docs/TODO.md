@@ -1,6 +1,14 @@
 # TODO
 
 
+
+## Remove 'coverage_weights'?
+
+Not used as prior anymore
+Used as warm start
+But does it do anything?
+
+
 ## Rigel index with GTF duplicates
 
 GENCODE GTF has duplicates (why?)

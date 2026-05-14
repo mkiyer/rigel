@@ -16,10 +16,14 @@ Also tests the Python consumers that ingest these arrays:
 import numpy as np
 import pytest
 
-from rigel.config import BamScanConfig, EMConfig, PipelineConfig
+from rigel.calibration import calibrate
+from rigel.calibration._orient import StrandSummary
+from rigel.config import BamScanConfig, EMConfig, FragmentScoringConfig, PipelineConfig
 from rigel.pipeline import (
     _replay_fraglen_observations,
     _replay_strand_observations,
+    _score_fragments,
+    _setup_geometry_and_estimator,
     run_pipeline,
     scan_and_buffer,
 )
@@ -137,7 +141,7 @@ class TestScanAndBufferNdarrayDtypes:
             self.strand_models,
             self.frag_length_models,
             self.buffer,
-            _self_cal,
+            self._cal_payload,
         ) = scan_and_buffer(
             str(result.bam_path),
             self.index,
@@ -166,6 +170,37 @@ class TestScanAndBufferNdarrayDtypes:
             assert isinstance(chunk.t_indices, np.ndarray)
             assert isinstance(chunk.frag_lengths, np.ndarray)
             assert isinstance(chunk.splice_type, np.ndarray)
+
+    def test_streaming_scorer_payloads_are_float32(self):
+        """Production scoring stores likelihood payloads as float32."""
+        self.strand_models.finalize()
+        calibration = calibrate(
+            index=self.index,
+            payload=self._cal_payload,
+            scan_trained=self.frag_length_models,
+            fl_prior_ess=50.0,
+            strand_summary=StrandSummary.from_model(self.strand_models.exonic_spliced),
+        )
+        _geometry, estimator = _setup_geometry_and_estimator(
+            self.index,
+            calibration.fl_models.rna,
+            EMConfig(seed=SEED),
+        )
+        em_data = _score_fragments(
+            self.buffer,
+            self.index,
+            self.strand_models,
+            calibration.fl_models.rna,
+            calibration.fl_models.gdna,
+            self.stats,
+            estimator,
+            FragmentScoringConfig(),
+            log_every=1_000_000,
+            annotations=None,
+        )
+        assert em_data.log_liks.dtype == np.float32
+        assert em_data.coverage_weights.dtype == np.float32
+        assert em_data.gdna_log_liks.dtype == np.float32
 
 
 # =====================================================================
