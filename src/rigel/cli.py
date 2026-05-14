@@ -951,7 +951,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="annotated_bam",
         default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
-        "(ZT, ZG, ZI, ZJ, ZP, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
+        "(ZT, ZG, ZR, ZI, ZJ, ZF, ZW, ZC, ZH, ZN, ZS, ZL, ZB) to this path. "
         "Requires a second pass over the BAM.",
     )
     io_grp.add_argument(
