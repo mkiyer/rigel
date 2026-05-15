@@ -1821,16 +1821,16 @@ batch_locus_em_partitioned(
         v.n_transcripts = static_cast<int>(t_arr.shape(0));
     }
 
+    if (static_cast<int>(locus_gdna_eff_lens.shape(0)) != n_loci) {
+        throw std::runtime_error(
+            "batch_locus_em_partitioned: locus_gdna_eff_lens length must equal n_loci");
+    }
+
     const double*   gp_ptr = locus_gdna_prior_count.data();
     const uint8_t*  eg_ptr = locus_enable_gdna.data();
     const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
-
-    if (static_cast<int>(locus_gdna_eff_lens.shape(0)) != n_loci) {
-        throw std::runtime_error(
-            "batch_locus_em_partitioned: locus_gdna_eff_lens length must equal n_loci");
-    }
 
     double* em_out    = em_counts_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
