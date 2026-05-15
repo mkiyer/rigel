@@ -596,6 +596,7 @@ def _run_locus_em_partitioned(
     multi_loci: list,
     index: TranscriptIndex,
     gdna_prior_count: np.ndarray,
+    gdna_eff_len: np.ndarray,
     em_config: EMConfig,
     *,
     enable_gdna: np.ndarray | None = None,
@@ -613,7 +614,7 @@ def _run_locus_em_partitioned(
     n_threads = em_config.n_threads or os.cpu_count() or 1
     emit_assignments = annotations is not None
 
-    def _build_locus_meta(locus, *, rna_total, gdna, gdna_prior):
+    def _build_locus_meta(locus, *, rna_total, gdna, gdna_prior, gdna_leff):
         gene_set = {
             int(t_to_g[int(t_idx)])
             for t_idx in locus.transcript_indices
@@ -635,12 +636,15 @@ def _run_locus_em_partitioned(
             "rna_total": float(rna_total),
             "gdna": float(gdna),
             "gdna_prior_count": float(gdna_prior),
+            "gdna_eff_len": float(gdna_leff),
+            "gdna_eff_len_per_bp": float(gdna_leff) / max(float(locus.gdna_span), 1.0),
         }
 
     def _call_batch_em(
         parts,
         batch_loci,
         batch_gdna_prior_count,
+        batch_gdna_eff_len,
         batch_enable_gdna=None,
     ):
         """Pack tuples, call C++, record results."""
@@ -665,6 +669,7 @@ def _run_locus_em_partitioned(
             locus_t_lists,
             batch_gdna_prior_count,
             index,
+            gdna_eff_len=batch_gdna_eff_len,
             em_iterations=em_config.iterations,
             em_convergence_delta=em_config.convergence_delta,
             emit_locus_stats=emit_locus_stats,
@@ -697,6 +702,7 @@ def _run_locus_em_partitioned(
             [part],
             [locus],
             np.array([gdna_prior_count[lid]], dtype=np.float64),
+            np.array([gdna_eff_len[lid]], dtype=np.float64),
             batch_enable_gdna=(
                 np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
             ),
@@ -718,6 +724,7 @@ def _run_locus_em_partitioned(
                 rna_total=rna_arr[0],
                 gdna=gdna_arr[0],
                 gdna_prior=gdna_prior_count[lid],
+                gdna_leff=gdna_eff_len[lid],
             )
         )
         del part
@@ -739,10 +746,15 @@ def _run_locus_em_partitioned(
             [gdna_prior_count[loc.multi_locus_id] for loc in normal_loci],
             dtype=np.float64,
         )
+        normal_gdna_eff_len = np.array(
+            [gdna_eff_len[loc.multi_locus_id] for loc in normal_loci],
+            dtype=np.float64,
+        )
         em_result = _call_batch_em(
             normal_parts,
             normal_loci,
             normal_gp,
+            normal_gdna_eff_len,
             batch_enable_gdna=(
                 np.array(
                     [enable_gdna[loc.multi_locus_id] for loc in normal_loci],
@@ -770,6 +782,7 @@ def _run_locus_em_partitioned(
                     rna_total=rna_arr[i],
                     gdna=gdna_arr[i],
                     gdna_prior=normal_gp[i],
+                    gdna_leff=normal_gdna_eff_len[i],
                 )
             )
         # Release per-locus partition arrays before downstream phases.
@@ -939,6 +952,7 @@ def quant_from_buffer(
             int(_post_summary["n_multi_loci"]),
         )
         gdna_prior_count = prior_table.gdna_prior_count
+        gdna_eff_len = prior_table.gdna_eff_len
         enable_gdna_arr = prior_table.enable_gdna
 
         # Phase 4 (NEW): Fused scatter into per-locus tuples
@@ -953,6 +967,7 @@ def quant_from_buffer(
             multi_loci,
             index,
             gdna_prior_count,
+            gdna_eff_len,
             em_config,
             enable_gdna=enable_gdna_arr,
             emit_locus_stats=emit_locus_stats,

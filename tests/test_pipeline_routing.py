@@ -48,18 +48,13 @@ class _Chunk:
         n = len(bfs)
 
         # Per-fragment columnar arrays
-        self.splice_type = np.array(
-            [bf.splice_type for bf in bfs], dtype=np.uint8)
-        self.exon_strand = np.array(
-            [bf.exon_strand for bf in bfs], dtype=np.uint8)
+        self.splice_type = np.array([bf.splice_type for bf in bfs], dtype=np.uint8)
+        self.exon_strand = np.array([bf.exon_strand for bf in bfs], dtype=np.uint8)
         self.fragment_classes = np.array(fragment_classes, dtype=np.uint8)
         self.frag_id = np.array(frag_ids, dtype=np.int64)
-        self.read_length = np.array(
-            [bf.read_length for bf in bfs], dtype=np.uint16)
-        self.genomic_footprint = np.array(
-            [bf.genomic_footprint for bf in bfs], dtype=np.int32)
-        self.genomic_start = np.array(
-            [bf.genomic_start for bf in bfs], dtype=np.int32)
+        self.read_length = np.array([bf.read_length for bf in bfs], dtype=np.uint16)
+        self.genomic_footprint = np.array([bf.genomic_footprint for bf in bfs], dtype=np.int32)
+        self.genomic_start = np.array([bf.genomic_start for bf in bfs], dtype=np.int32)
         self.nm = np.array([bf.nm for bf in bfs], dtype=np.uint16)
         self.size = n
 
@@ -119,20 +114,23 @@ class _Buffer:
 class _Index:
     def __init__(self, t_to_g, t_to_strand, g_to_strand):
         import pandas as pd
+
         self.t_to_g_arr = np.array(t_to_g, dtype=np.int64)
         self.t_to_strand_arr = np.array(t_to_strand, dtype=np.int8)
         self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int8)
         self.num_transcripts = len(t_to_g)
         self.num_genes = len(g_to_strand)
-        self.t_df = pd.DataFrame({
-            "t_id": [f"t{i}" for i in range(self.num_transcripts)],
-            "ref": ["chr1"] * self.num_transcripts,
-            "start": np.zeros(self.num_transcripts, dtype=np.int32),
-            "end": np.full(self.num_transcripts, 10000, dtype=np.int32),
-            "length": np.full(self.num_transcripts, 1000, dtype=np.int32),
-            "is_nrna": np.zeros(self.num_transcripts, dtype=bool),
-            "is_synthetic": np.zeros(self.num_transcripts, dtype=bool),
-        })
+        self.t_df = pd.DataFrame(
+            {
+                "t_id": [f"t{i}" for i in range(self.num_transcripts)],
+                "ref": ["chr1"] * self.num_transcripts,
+                "start": np.zeros(self.num_transcripts, dtype=np.int32),
+                "end": np.full(self.num_transcripts, 10000, dtype=np.int32),
+                "length": np.full(self.num_transcripts, 1000, dtype=np.int32),
+                "is_nrna": np.zeros(self.num_transcripts, dtype=bool),
+                "is_synthetic": np.zeros(self.num_transcripts, dtype=bool),
+            }
+        )
 
     def get_exon_intervals(self, t_idx):
         return None
@@ -151,16 +149,24 @@ def _make_env(index):
     strand_models.finalize()
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
-    estimator = AbundanceEstimator(index.num_transcripts,
-                                  em_config=EMConfig(seed=1))
+    estimator = AbundanceEstimator(index.num_transcripts, em_config=EMConfig(seed=1))
     stats = PipelineStats()
     return strand_models, frag_length_models, estimator, stats
 
 
 def _scan_em_data(
-    buffer, index, strand_models, frag_length_models, estimator, stats,
-    log_every=1_000_000, *, gdna_splice_penalties=None,
-    overhang_log_penalty=None, mismatch_log_penalty=None, annotations=None,
+    buffer,
+    index,
+    strand_models,
+    frag_length_models,
+    estimator,
+    stats,
+    log_every=1_000_000,
+    *,
+    gdna_splice_penalties=None,
+    overhang_log_penalty=None,
+    mismatch_log_penalty=None,
+    annotations=None,
 ):
     """Build EM data from a buffer using FragmentScorer + FragmentRouter."""
     ctx = FragmentScorer.from_models(
@@ -174,7 +180,11 @@ def _scan_em_data(
         gdna_splice_penalties=gdna_splice_penalties,
     )
     builder = FragmentRouter(
-        ctx, estimator, stats, index, strand_models,
+        ctx,
+        estimator,
+        stats,
+        index,
+        strand_models,
         annotations=annotations,
     )
     return builder.scan(buffer, log_every)
@@ -291,6 +301,64 @@ def test_multimapper_unspliced_adds_nrna_shadows():
     assert em.gdna_log_liks[0] > -np.inf
 
 
+def test_multimapper_gdna_likelihood_normalizes_by_full_nh():
+    """Identical gDNA-eligible MM hits should collapse to one scalar.
+
+    The scorer emits ``logsumexp(hit_scores) - log(nh_gdna)`` for the full
+    multimapping group. If two hits have identical gDNA scores, the emitted
+    scalar must match the one-hit case rather than gaining ``log(2)`` mass.
+    """
+    index = _Index(
+        t_to_g=[0, 1],
+        t_to_strand=[int(Strand.POS), int(Strand.POS)],
+        g_to_strand=[int(Strand.POS), int(Strand.POS)],
+    )
+
+    def scan_for(bfs, frag_ids):
+        strand_models, frag_length_models, estimator, stats = _make_env(index)
+        chunk = _Chunk(
+            bfs=bfs,
+            fragment_classes=[FRAG_MULTIMAPPER] * len(bfs),
+            frag_ids=frag_ids,
+        )
+        return _scan_em_data(
+            _Buffer([chunk]),
+            index,
+            strand_models,
+            frag_length_models,
+            estimator,
+            stats,
+        )
+
+    hit0 = _BF(
+        t_inds=np.array([0], dtype=np.int32),
+        splice_type=int(SpliceType.UNSPLICED),
+        exon_strand=int(Strand.POS),
+        frag_lengths=np.array([200], dtype=np.int32),
+        exon_bp=np.array([90], dtype=np.int16),
+        intron_bp=np.array([10], dtype=np.int16),
+        read_length=100,
+        genomic_footprint=200,
+    )
+    hit1 = _BF(
+        t_inds=np.array([1], dtype=np.int32),
+        splice_type=int(SpliceType.UNSPLICED),
+        exon_strand=int(Strand.POS),
+        frag_lengths=np.array([200], dtype=np.int32),
+        exon_bp=np.array([90], dtype=np.int16),
+        intron_bp=np.array([10], dtype=np.int16),
+        read_length=100,
+        genomic_footprint=200,
+    )
+
+    one_hit = scan_for([hit0], [21])
+    two_hits = scan_for([hit0, hit1], [22, 22])
+
+    assert one_hit.n_units == 1
+    assert two_hits.n_units == 1
+    assert two_hits.gdna_log_liks[0] == pytest.approx(one_hit.gdna_log_liks[0])
+
+
 def test_route_counters_are_exclusive_per_unit():
     index = _Index(
         t_to_g=[0, 0, 1],
@@ -301,22 +369,64 @@ def test_route_counters_are_exclusive_per_unit():
 
     bfs = [
         # Deterministic unique: FRAG_UNAMBIG + SPLICED_ANNOT
-        _BF(np.array([0], dtype=np.int32), int(SpliceType.SPLICED_ANNOT), int(Strand.POS), np.array([200], dtype=np.int32),
-            np.array([100], dtype=np.int16), np.array([0], dtype=np.int16), 100),
+        _BF(
+            np.array([0], dtype=np.int32),
+            int(SpliceType.SPLICED_ANNOT),
+            int(Strand.POS),
+            np.array([200], dtype=np.int32),
+            np.array([100], dtype=np.int16),
+            np.array([0], dtype=np.int16),
+            100,
+        ),
         # Unique routed to EM: FRAG_UNAMBIG + UNSPLICED
-        _BF(np.array([0], dtype=np.int32), int(SpliceType.UNSPLICED), int(Strand.POS), np.array([200], dtype=np.int32),
-            np.array([100], dtype=np.int16), np.array([0], dtype=np.int16), 100),
+        _BF(
+            np.array([0], dtype=np.int32),
+            int(SpliceType.UNSPLICED),
+            int(Strand.POS),
+            np.array([200], dtype=np.int32),
+            np.array([100], dtype=np.int16),
+            np.array([0], dtype=np.int16),
+            100,
+        ),
         # Isoform ambiguous
-        _BF(np.array([0, 1], dtype=np.int32), int(SpliceType.UNSPLICED), int(Strand.POS), np.array([200, 200], dtype=np.int32),
-            np.array([95, 90], dtype=np.int16), np.array([5, 10], dtype=np.int16), 100),
+        _BF(
+            np.array([0, 1], dtype=np.int32),
+            int(SpliceType.UNSPLICED),
+            int(Strand.POS),
+            np.array([200, 200], dtype=np.int32),
+            np.array([95, 90], dtype=np.int16),
+            np.array([5, 10], dtype=np.int16),
+            100,
+        ),
         # Gene ambiguous
-        _BF(np.array([0, 2], dtype=np.int32), int(SpliceType.UNSPLICED), int(Strand.POS), np.array([200, 200], dtype=np.int32),
-            np.array([90, 85], dtype=np.int16), np.array([10, 15], dtype=np.int16), 100),
+        _BF(
+            np.array([0, 2], dtype=np.int32),
+            int(SpliceType.UNSPLICED),
+            int(Strand.POS),
+            np.array([200, 200], dtype=np.int32),
+            np.array([90, 85], dtype=np.int16),
+            np.array([10, 15], dtype=np.int16),
+            100,
+        ),
         # Multimapper group (2 hits, same frag_id)
-        _BF(np.array([0], dtype=np.int32), int(SpliceType.UNSPLICED), int(Strand.POS), np.array([200], dtype=np.int32),
-            np.array([95], dtype=np.int16), np.array([5], dtype=np.int16), 100),
-        _BF(np.array([2], dtype=np.int32), int(SpliceType.UNSPLICED), int(Strand.POS), np.array([200], dtype=np.int32),
-            np.array([90], dtype=np.int16), np.array([10], dtype=np.int16), 100),
+        _BF(
+            np.array([0], dtype=np.int32),
+            int(SpliceType.UNSPLICED),
+            int(Strand.POS),
+            np.array([200], dtype=np.int32),
+            np.array([95], dtype=np.int16),
+            np.array([5], dtype=np.int16),
+            100,
+        ),
+        _BF(
+            np.array([2], dtype=np.int32),
+            int(SpliceType.UNSPLICED),
+            int(Strand.POS),
+            np.array([200], dtype=np.int32),
+            np.array([90], dtype=np.int16),
+            np.array([10], dtype=np.int16),
+            100,
+        ),
     ]
 
     chunk = _Chunk(
@@ -369,6 +479,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
     The NM penalty should make t0 score significantly higher than t1.
     """
     import math
+
     index = _Index(
         t_to_g=[0, 1],
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
@@ -382,7 +493,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         splice_type=int(SpliceType.UNSPLICED),
         exon_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
-            exon_bp=np.array([100], dtype=np.int16),
+        exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
         read_length=100,
         nm=0,
@@ -393,7 +504,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         splice_type=int(SpliceType.UNSPLICED),
         exon_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
-            exon_bp=np.array([100], dtype=np.int16),
+        exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
         read_length=100,
         nm=4,
@@ -407,8 +518,13 @@ def test_nm_penalty_discriminates_multimapper_hits():
     buffer = _Buffer([chunk])
 
     em = _scan_em_data(
-        buffer, index, strand_models, frag_length_models,
-        estimator, stats, log_every=1_000_000,
+        buffer,
+        index,
+        strand_models,
+        frag_length_models,
+        estimator,
+        stats,
+        log_every=1_000_000,
     )
 
     assert em.n_units == 1
@@ -423,7 +539,8 @@ def test_nm_penalty_discriminates_multimapper_hits():
     # 4 mismatches → Δ ≈ -9.2
     assert mRNA_ll[t0_idx] > mRNA_ll[t1_idx]
     assert mRNA_ll[t0_idx] - mRNA_ll[t1_idx] == pytest.approx(
-        -4 * math.log(0.1), abs=0.01,
+        -4 * math.log(0.1),
+        abs=0.01,
     )
 
 
@@ -445,7 +562,7 @@ def test_nm_penalty_zero_when_disabled():
         splice_type=int(SpliceType.UNSPLICED),
         exon_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
-            exon_bp=np.array([100], dtype=np.int16),
+        exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
         read_length=100,
         nm=0,
@@ -455,7 +572,7 @@ def test_nm_penalty_zero_when_disabled():
         splice_type=int(SpliceType.UNSPLICED),
         exon_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
-            exon_bp=np.array([100], dtype=np.int16),
+        exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
         read_length=100,
         nm=5,
@@ -463,19 +580,30 @@ def test_nm_penalty_zero_when_disabled():
 
     # Run with mismatch_alpha=1.0 (disabled)
     import math
+
     mismatch_lp = math.log(1.0)  # = 0.0
 
     chunk_a = _Chunk(bfs=[bf_nm0], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
     chunk_b = _Chunk(bfs=[bf_nm5], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
 
     em_a = _scan_em_data(
-        _Buffer([chunk_a]), index, strand_models, frag_length_models,
-        estimator_a, stats_a, log_every=1_000_000,
+        _Buffer([chunk_a]),
+        index,
+        strand_models,
+        frag_length_models,
+        estimator_a,
+        stats_a,
+        log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,
     )
     em_b = _scan_em_data(
-        _Buffer([chunk_b]), index, strand_models, frag_length_models,
-        estimator_b, stats_b, log_every=1_000_000,
+        _Buffer([chunk_b]),
+        index,
+        strand_models,
+        frag_length_models,
+        estimator_b,
+        stats_b,
+        log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,
     )
 

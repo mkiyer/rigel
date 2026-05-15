@@ -48,25 +48,43 @@ def _make_region_df() -> pd.DataFrame:
     """Three regions on chr1: intergenic / exon / intron tiling [0, 2000)."""
     rows = [
         {
-            "ref_name": "chr1", "start": 0, "end": 500,
-            "type": int(RegionType.INTERGENIC), "strand": 0,
-            "tx_pos_bp": 0, "tx_neg_bp": 0,
-            "exon_pos_bp": 0, "exon_neg_bp": 0,
-            "boundary_flux_left": False, "boundary_flux_right": False,
+            "ref_name": "chr1",
+            "start": 0,
+            "end": 500,
+            "type": int(RegionType.INTERGENIC),
+            "strand": 0,
+            "tx_pos_bp": 0,
+            "tx_neg_bp": 0,
+            "exon_pos_bp": 0,
+            "exon_neg_bp": 0,
+            "boundary_flux_left": False,
+            "boundary_flux_right": False,
         },
         {
-            "ref_name": "chr1", "start": 500, "end": 1000,
-            "type": int(RegionType.EXON), "strand": 1,
-            "tx_pos_bp": 500, "tx_neg_bp": 0,
-            "exon_pos_bp": 500, "exon_neg_bp": 0,
-            "boundary_flux_left": True, "boundary_flux_right": True,
+            "ref_name": "chr1",
+            "start": 500,
+            "end": 1000,
+            "type": int(RegionType.EXON),
+            "strand": 1,
+            "tx_pos_bp": 500,
+            "tx_neg_bp": 0,
+            "exon_pos_bp": 500,
+            "exon_neg_bp": 0,
+            "boundary_flux_left": True,
+            "boundary_flux_right": True,
         },
         {
-            "ref_name": "chr1", "start": 1000, "end": 2000,
-            "type": int(RegionType.INTRON), "strand": 1,
-            "tx_pos_bp": 1000, "tx_neg_bp": 0,
-            "exon_pos_bp": 0, "exon_neg_bp": 0,
-            "boundary_flux_left": False, "boundary_flux_right": False,
+            "ref_name": "chr1",
+            "start": 1000,
+            "end": 2000,
+            "type": int(RegionType.INTRON),
+            "strand": 1,
+            "tx_pos_bp": 1000,
+            "tx_neg_bp": 0,
+            "exon_pos_bp": 0,
+            "exon_neg_bp": 0,
+            "boundary_flux_left": False,
+            "boundary_flux_right": False,
         },
     ]
     df = pd.DataFrame(rows)
@@ -94,15 +112,15 @@ def _payload(
     n_regions = 3
     gc = np.zeros(MASK_N_STATES, dtype=np.int64)
     gc[MASK_INTERGENIC] = n_intergenic
-    gc[MASK_INTRON]     = n_intron
-    gc[MASK_EXON]       = n_exon
+    gc[MASK_INTRON] = n_intron
+    gc[MASK_EXON] = n_exon
     per_region = np.zeros((n_regions, MASK_N_STATES), dtype=np.int64)
     per_region[0, MASK_INTERGENIC] = n_intergenic
-    per_region[1, MASK_EXON]       = n_exon
-    per_region[2, MASK_INTRON]     = n_intron
+    per_region[1, MASK_EXON] = n_exon
+    per_region[2, MASK_INTRON] = n_intron
     h = np.zeros((MASK_N_STATES, FL_HIST_N_BINS), dtype=np.int64)
     # gDNA pool (intron + intergenic) clusters at FL ≈ 350
-    h[MASK_INTRON,     300:400] = max(1, n_intron     // 100)
+    h[MASK_INTRON, 300:400] = max(1, n_intron // 100)
     h[MASK_INTERGENIC, 300:400] = max(1, n_intergenic // 100)
     # Mirror n_observed into a benign bin so payload validator passes.
     n_obs = int(gc.sum())
@@ -207,10 +225,14 @@ class TestCalibrateWithPriorsRoundtrip:
         # Build a tiny PriorTable with one MultiLocus.
         loc = Locus(ref="chr1", ref_id=0, start=500, end=1000)
         est = LocusGdnaEstimate(
-            locus=loc, n_obs=10,
-            n_gdna_intergenic=1.0, n_gdna_intron=2.0,
-            n_gdna_boundary_observed=0.5, n_gdna_exon_only=0.0,
-            n_gdna=3.5, pi_gdna=0.35,
+            locus=loc,
+            n_obs=10,
+            n_gdna_intergenic=1.0,
+            n_gdna_intron=2.0,
+            n_gdna_boundary_observed=0.5,
+            n_gdna_exon_only=0.0,
+            n_gdna=3.5,
+            pi_gdna=0.35,
             rho_loco=(0.0, 0.0, 0.0),
             leff_loco=(0.0, 0.0, 0.0),
             n_eligible_boundaries=0,
@@ -219,7 +241,10 @@ class TestCalibrateWithPriorsRoundtrip:
             fallback_flags=0,
         )
         mlp = MultiLocusPrior(
-            multi_locus_id=0, n_obs=10, n_gdna=3.5, n_rna=6.5,
+            multi_locus_id=0,
+            n_obs=10,
+            n_gdna=3.5,
+            n_rna=6.5,
             pi_gdna=0.35,
             gdna_prior_count=3.5,
             per_locus=(est,),
@@ -227,11 +252,12 @@ class TestCalibrateWithPriorsRoundtrip:
         new_table = PriorTable(
             multi_locus_priors=(mlp,),
             gdna_prior_count=np.array([3.5], dtype=np.float64),
+            gdna_eff_len=np.array([1000.0], dtype=np.float64),
             enable_gdna=np.array([1], dtype=np.uint8),
         )
 
         updated = result.with_priors(new_table)
-        assert updated is not result          # frozen contract
+        assert updated is not result  # frozen contract
         assert updated.n_multi_loci == 1
         assert updated.gdna_prior_count.tolist() == [3.5]
         assert len(updated.multi_locus_prior_df) == 1
@@ -308,7 +334,7 @@ class TestCalibratePoolQualityThresholds:
     def test_default_thresholds_classify_weak(self):
         cal = calibrate(**self._kwargs())
         assert cal.fl_models.gdna_quality == "weak"  # 300 in [200, 5000)
-        assert cal.fl_models.rna_quality == "weak"   # 550 in [200, 5000)
+        assert cal.fl_models.rna_quality == "weak"  # 550 in [200, 5000)
 
     def test_lowering_good_threshold_promotes_to_good(self):
         cal = calibrate(**self._kwargs(), pool_quality_good=200)

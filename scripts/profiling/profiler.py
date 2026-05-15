@@ -42,6 +42,7 @@ Output
         memory_timeline.csv    — RSS samples over time
         profile_<name>.prof    — cProfile data (if --cprofile)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -206,7 +207,10 @@ def _snap_rss_current() -> float:
             count = ctypes.c_uint32(ctypes.sizeof(info) // 4)
             task = _mach_libc.mach_task_self()
             ret = _mach_libc.task_info(
-                task, _MACH_TASK_BASIC_INFO, ctypes.byref(info), ctypes.byref(count),
+                task,
+                _MACH_TASK_BASIC_INFO,
+                ctypes.byref(info),
+                ctypes.byref(count),
             )
             if ret == 0:
                 return info.resident_size / (1024 * 1024)
@@ -305,12 +309,9 @@ def _build_pipeline_config(
     }
     removed = sorted(set(raw) & set(removed_scan_keys))
     if removed:
-        replacements = ", ".join(
-            f"{key!r} -> {removed_scan_keys[key]!r}" for key in removed
-        )
+        replacements = ", ".join(f"{key!r} -> {removed_scan_keys[key]!r}" for key in removed)
         raise ValueError(
-            "Removed profiler parameter(s); update to the new scan names: "
-            f"{replacements}"
+            f"Removed profiler parameter(s); update to the new scan names: {replacements}"
         )
 
     em_kw: dict = {}
@@ -343,6 +344,7 @@ def _build_pipeline_config(
     scan_kw: dict = {"sj_strand_tag": "auto", "include_multimap": True}
     if tmpdir is not None:
         from pathlib import Path as _Path
+
         scan_kw["spill_dir"] = _Path(tmpdir)
     if threads is not None:
         scan_kw["total_threads"] = threads
@@ -635,6 +637,7 @@ def profile_stages(
     scan_cfg = pcfg.scan
     if scan_cfg.sj_strand_tag == "auto":
         from dataclasses import replace as _replace
+
         detected = detect_sj_strand_tag(bam_path)
         scan_cfg = _replace(scan_cfg, sj_strand_tag=detected)
 
@@ -645,8 +648,8 @@ def profile_stages(
     if profiler:
         profiler.enable()
     with Timer("scan_and_buffer") as t_scan:
-        stats, strand_models, frag_length_models, buffer, cal_payload = (
-            scan_and_buffer(bam_path, index, scan_cfg)
+        stats, strand_models, frag_length_models, buffer, cal_payload = scan_and_buffer(
+            bam_path, index, scan_cfg
         )
     timings.scan_and_buffer = t_scan.elapsed
     rss_snaps["after_scan"] = _snap_rss_current()
@@ -664,6 +667,7 @@ def profile_stages(
     # ── Stage 2b: gDNA calibration (v6) ─────────────────────
     with Timer("calibration") as t_cal:
         from rigel.calibration._orient import StrandSummary as _StrandSummary
+
         _strand_summary = _StrandSummary.from_model(strand_models.exonic_spliced)
         calibration_obj = calibrate(
             index=index,
@@ -683,7 +687,9 @@ def profile_stages(
     # 3a: Geometry + estimator (single helper in current pipeline)
     with Timer("compute_geometry") as t_geom:
         geometry, estimator = _setup_geometry_and_estimator(
-            index, calibration_obj.fl_models.rna, em_config,
+            index,
+            calibration_obj.fl_models.rna,
+            em_config,
         )
     timings.compute_geometry = t_geom.elapsed
     timings.create_estimator = 0.0  # folded into _setup_geometry_and_estimator
@@ -743,6 +749,7 @@ def profile_stages(
                     gdna_fl=calibration_obj.fl_models.gdna,
                 )
                 gdna_prior_count = prior_table.gdna_prior_count
+                gdna_eff_len = prior_table.gdna_eff_len
                 enable_gdna = prior_table.enable_gdna
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
@@ -760,6 +767,7 @@ def profile_stages(
                     loci,
                     index,
                     gdna_prior_count,
+                    gdna_eff_len,
                     em_config,
                     enable_gdna=enable_gdna,
                     emit_locus_stats=True,
@@ -782,15 +790,20 @@ def profile_stages(
     rss_snaps["after_cleanup"] = _snap_rss_current()
 
     timings.quant_from_buffer = (
-        timings.compute_geometry + timings.fragment_router_scan
-        + timings.build_loci + timings.partition
-        + timings.compute_eb_gdna_priors + timings.locus_em
+        timings.compute_geometry
+        + timings.fragment_router_scan
+        + timings.build_loci
+        + timings.partition
+        + timings.compute_eb_gdna_priors
+        + timings.locus_em
     )
 
     rss_after = _get_rss_mb()
     total_wall = (
-        timings.scan_and_buffer + timings.finalize_models
-        + timings.calibration + timings.quant_from_buffer
+        timings.scan_and_buffer
+        + timings.finalize_models
+        + timings.calibration
+        + timings.quant_from_buffer
     )
 
     result = ProfileResult(
@@ -877,12 +890,8 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
                 f"    buffer cap:           "
                 f"{scan.get('scan_buffer_size_bytes', 0) / 1024**3:.2f} GiB"
             )
-            lines.append(
-                f"    fragments/chunk:      {scan.get('scan_fragments_per_chunk'):,}"
-            )
-            lines.append(
-                f"    read-name batch:      {scan.get('scan_read_name_batch_size'):,}"
-            )
+            lines.append(f"    fragments/chunk:      {scan.get('scan_fragments_per_chunk'):,}")
+            lines.append(f"    read-name batch:      {scan.get('scan_read_name_batch_size'):,}")
             lines.append("")
 
         lines.append(f"  Fragments:       {r.n_fragments:,}")
@@ -910,7 +919,7 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
             total = sum(t for _, t in stages)
             lines.append("  Stage Breakdown:")
             lines.append(f"  {'Stage':<24s} {'Time':>8s}  {'%':>6s}  Bar")
-            lines.append(f"  {'-'*24} {'-'*8}  {'-'*6}  {'-'*40}")
+            lines.append(f"  {'-' * 24} {'-' * 8}  {'-' * 6}  {'-' * 40}")
             for name, dur in stages:
                 pct = dur / total * 100 if total > 0 else 0
                 bar = _format_bar(pct)
@@ -966,19 +975,16 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
                 lines.append(f"    units:                  {csr.get('n_units', 0):,}")
                 lines.append(f"    candidates:             {csr.get('n_candidates', 0):,}")
                 lines.append(
-                    f"    mean candidates/unit:    "
-                    f"{csr.get('mean_candidates_per_unit', 0.0):.2f}"
+                    f"    mean candidates/unit:    {csr.get('mean_candidates_per_unit', 0.0):.2f}"
                 )
                 lines.append(
-                    f"    total bytes:             "
-                    f"{csr.get('total_bytes', 0) / 1024**3:.2f} GiB"
+                    f"    total bytes:             {csr.get('total_bytes', 0) / 1024**3:.2f} GiB"
                 )
                 lines.append("")
 
             if r.partition_bytes_total:
                 lines.append(
-                    "  Partition arrays:          "
-                    f"{r.partition_bytes_total / 1024**3:.2f} GiB"
+                    f"  Partition arrays:          {r.partition_bytes_total / 1024**3:.2f} GiB"
                 )
                 lines.append("")
 
@@ -987,9 +993,11 @@ def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
         lines.append("=" * 72)
         lines.append("COMPARISON")
         lines.append("=" * 72)
-        lines.append(f"  {'Config':<20s} {'Wall (s)':>10s} {'RSS (MB)':>10s} "
-                      f"{'Frags':>12s} {'Throughput':>15s}")
-        lines.append(f"  {'-'*20} {'-'*10} {'-'*10} {'-'*12} {'-'*15}")
+        lines.append(
+            f"  {'Config':<20s} {'Wall (s)':>10s} {'RSS (MB)':>10s} "
+            f"{'Frags':>12s} {'Throughput':>15s}"
+        )
+        lines.append(f"  {'-' * 20} {'-' * 10} {'-' * 10} {'-' * 12} {'-' * 15}")
         for r in results:
             lines.append(
                 f"  {r.config_name:<20s} {r.wall_time_sec:10.2f} "
@@ -1009,18 +1017,18 @@ def format_cprofile(profiler: cProfile.Profile, top_n: int = 60) -> str:
     ps = pstats.Stats(profiler, stream=s_cum)
     ps.sort_stats("cumulative")
     ps.print_stats(top_n)
-    lines.append(f"{'='*72}")
+    lines.append(f"{'=' * 72}")
     lines.append(f"Top {top_n} by cumulative time")
-    lines.append(f"{'='*72}")
+    lines.append(f"{'=' * 72}")
     lines.append(s_cum.getvalue())
 
     s_tot = io.StringIO()
     ps2 = pstats.Stats(profiler, stream=s_tot)
     ps2.sort_stats("tottime")
     ps2.print_stats(top_n)
-    lines.append(f"{'='*72}")
+    lines.append(f"{'=' * 72}")
     lines.append(f"Top {top_n} by self time")
-    lines.append(f"{'='*72}")
+    lines.append(f"{'=' * 72}")
     lines.append(s_tot.getvalue())
 
     total_calls = sum(v[0] for v in ps.stats.values())
@@ -1052,19 +1060,22 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
     t0 = time.perf_counter()
     index = TranscriptIndex.load(str(index_dir))
     index_load_time = time.perf_counter() - t0
-    print(f"  {index.num_transcripts:,} transcripts, "
-          f"{index.num_genes:,} genes ({index_load_time:.1f}s)", flush=True)
+    print(
+        f"  {index.num_transcripts:,} transcripts, "
+        f"{index.num_genes:,} genes ({index_load_time:.1f}s)",
+        flush=True,
+    )
 
     results: list[ProfileResult] = []
     all_profilers: dict[str, cProfile.Profile] = {}
 
     for hc in cfg.rigel_configs:
-        print(f"\n{'='*72}", flush=True)
+        print(f"\n{'=' * 72}", flush=True)
         print(f"Profiling: {hc.name}", flush=True)
         print(f"  BAM: {Path(bam_path).name}", flush=True)
         if hc.params:
             print(f"  Params: {hc.params}", flush=True)
-        print(f"{'='*72}\n", flush=True)
+        print(f"{'=' * 72}\n", flush=True)
 
         # Start memory timeline
         mem_interval = cfg.memory_sample_interval_ms / 1000.0
@@ -1074,12 +1085,20 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
         try:
             if cfg.stages:
                 result, profiler = profile_stages(
-                    bam_path, index, hc.name, hc, cfg.enable_cprofile,
+                    bam_path,
+                    index,
+                    hc.name,
+                    hc,
+                    cfg.enable_cprofile,
                     tmpdir=cfg.tmpdir,
                 )
             else:
                 result, profiler = profile_simple(
-                    bam_path, index, hc.name, hc, cfg.enable_cprofile,
+                    bam_path,
+                    index,
+                    hc.name,
+                    hc,
+                    cfg.enable_cprofile,
                     tmpdir=cfg.tmpdir,
                 )
         finally:
@@ -1108,9 +1127,9 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
 
     # Append cProfile output
     for name, profiler in all_profilers.items():
-        report_txt += f"\n\n{'='*72}\n"
+        report_txt += f"\n\n{'=' * 72}\n"
         report_txt += f"cProfile: {name}\n"
-        report_txt += f"{'='*72}\n"
+        report_txt += f"{'=' * 72}\n"
         report_txt += format_cprofile(profiler, cfg.cprofile_top_n)
         # Save .prof file
         prof_path = outdir / f"profile_{name}.prof"
@@ -1151,10 +1170,7 @@ def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
                 "throughput_frags_per_sec": r.throughput_frags_per_sec,
                 "n_transcripts": r.n_transcripts,
                 "n_genes": r.n_genes,
-                "stages": {
-                    k: v for k, v in asdict(r.stages).items()
-                    if k != "locus_stats"
-                },
+                "stages": {k: v for k, v in asdict(r.stages).items() if k != "locus_stats"},
                 "pipeline_stats": r.pipeline_stats,
                 "rss_snapshots": r.rss_snapshots,
                 "scan_config": r.scan_config,
@@ -1204,31 +1220,59 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--bam", help="Name-sorted BAM file (overrides YAML)")
     p.add_argument("--index", help="rigel index directory (overrides YAML)")
     p.add_argument("--outdir", help="Output directory (overrides YAML)")
-    p.add_argument("--stages", action="store_true", default=None,
-                    help="Enable per-stage timing decomposition")
-    p.add_argument("--cprofile", action="store_true", default=None,
-                    help="Enable cProfile function-level profiling")
-    p.add_argument("--memory-interval", type=int, default=None,
-                    help="RSS sampling interval in ms (default: 100)")
-    p.add_argument("--verbose", action="store_true", default=None,
-                    help="Verbose logging")
-    p.add_argument("--threads", type=int, default=None,
-                    help="Total thread budget for Rigel. Scan splits this "
-                        "budget between scan workers and --scan-bgzf-threads; "
-                        "locus EM uses the same budget because stages run serially.")
-    p.add_argument("--scan-bgzf-threads", type=int, default=None,
-                    help="BGZF decompression threads reserved from --threads "
-                        "during BAM scan")
-    p.add_argument("--scan-buffer-size", type=float, default=None,
-                    help="Maximum scan buffer size in GiB before disk spill "
-                        "(default: 2)")
-    p.add_argument("--scan-fragments-per-chunk", type=int, default=None,
-                    help="Buffered fragments per native scan chunk")
-    p.add_argument("--scan-read-name-batch-size", type=int, default=None,
-                    help="Read-name groups per native scanner input queue item")
-    p.add_argument("--tmpdir", default=None,
-                    help="Directory for temporary buffer spill files "
-                         "(default: system temp directory)")
+    p.add_argument(
+        "--stages", action="store_true", default=None, help="Enable per-stage timing decomposition"
+    )
+    p.add_argument(
+        "--cprofile",
+        action="store_true",
+        default=None,
+        help="Enable cProfile function-level profiling",
+    )
+    p.add_argument(
+        "--memory-interval",
+        type=int,
+        default=None,
+        help="RSS sampling interval in ms (default: 100)",
+    )
+    p.add_argument("--verbose", action="store_true", default=None, help="Verbose logging")
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Total thread budget for Rigel. Scan splits this "
+        "budget between scan workers and --scan-bgzf-threads; "
+        "locus EM uses the same budget because stages run serially.",
+    )
+    p.add_argument(
+        "--scan-bgzf-threads",
+        type=int,
+        default=None,
+        help="BGZF decompression threads reserved from --threads during BAM scan",
+    )
+    p.add_argument(
+        "--scan-buffer-size",
+        type=float,
+        default=None,
+        help="Maximum scan buffer size in GiB before disk spill (default: 2)",
+    )
+    p.add_argument(
+        "--scan-fragments-per-chunk",
+        type=int,
+        default=None,
+        help="Buffered fragments per native scan chunk",
+    )
+    p.add_argument(
+        "--scan-read-name-batch-size",
+        type=int,
+        default=None,
+        help="Read-name groups per native scanner input queue item",
+    )
+    p.add_argument(
+        "--tmpdir",
+        default=None,
+        help="Directory for temporary buffer spill files (default: system temp directory)",
+    )
     return p
 
 

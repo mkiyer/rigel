@@ -41,9 +41,8 @@ with the following decisions:
 - Accepted: add `gdna_eff_len` diagnostics to `loci.feather` and summary
    aggregate statistics under `summary.json`, not to `quant.feather` or
    `gene_quant.feather`.
-- Accepted as independent cleanup: retire the deprecated
-   `n_gdna_exon_intron` compatibility aggregate in a separate commit after the
-   effective-length series is green.
+- Accepted cleanup: retire the deprecated `n_gdna_exon_intron` compatibility
+   aggregate after the effective-length behavior is validated.
 
 ## Decision
 
@@ -594,15 +593,9 @@ Recommended implementation sequence:
    scalar regression and the locus-15-style behavioral regression.
 5. Add `loci.feather`, `summary.json`, and optional `locus_stats.feather`
    diagnostics.
-6. Independently retire the deprecated `n_gdna_exon_intron` compatibility
-   aggregate.
-
-The `n_gdna_exon_intron` cleanup is intentionally last and independent. It
-touches `LocusGdnaEstimate.n_gdna_exon_intron`, `_result.py` column emission,
-and a small number of tests. The canonical fields are already
-`n_gdna_boundary_observed` and `n_gdna_exon_only`, so this is a good cleanup,
-but it should not be mixed into the core effective-length behavior patch if it
-makes review harder.
+6. Retire the deprecated `n_gdna_exon_intron` compatibility aggregate after the
+   core effective-length tests are green. The canonical fields are
+   `n_gdna_boundary_observed` and `n_gdna_exon_only`.
 
 ## Expected Effects And Risks
 

@@ -13,6 +13,8 @@ locoregional gDNA prior. Three primitives:
 * :func:`boundary_side_in_window` — boolean per-region flags marking
   whether each region's left and right boundaries lie inside a query
   window. Used to localize boundary events to a Locus.
+* :func:`gdna_eff_len_for_loci` — FL-marginal overlap effective length
+    for the per-``MultiLocus`` gDNA EM component.
 
 Owning these in one module keeps numerator/denominator geometry consistent
 across :mod:`density_global` and :mod:`locus_prior`. See
@@ -20,6 +22,8 @@ across :mod:`density_global` and :mod:`locus_prior`. See
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 
@@ -30,7 +34,103 @@ __all__ = [
     "contained_exposure_clipped",
     "boundary_crossing_exposure",
     "boundary_side_in_window",
+    "gdna_eff_len_for_loci",
 ]
+
+
+def _ref_length_for_locus(
+    ref_lengths: Mapping[str | int, int] | Sequence[int],
+    locus,
+) -> int:
+    """Return reference length for a Locus-like object."""
+    if isinstance(ref_lengths, Mapping):
+        if locus.ref in ref_lengths:
+            return int(ref_lengths[locus.ref])
+        if locus.ref_id in ref_lengths:
+            return int(ref_lengths[locus.ref_id])
+        raise KeyError(f"Reference length missing for ref={locus.ref!r}, ref_id={locus.ref_id!r}.")
+
+    ref_id = int(locus.ref_id)
+    if ref_id < 0 or ref_id >= len(ref_lengths):
+        raise KeyError(f"Reference id {ref_id} out of bounds for ref_lengths.")
+    return int(ref_lengths[ref_id])
+
+
+def gdna_eff_len_for_loci(
+    loci: tuple | list,
+    ref_lengths: Mapping[str | int, int] | Sequence[int],
+    fl: FragmentLengthModel,
+    *,
+    min_value: float = 1.0,
+) -> float:
+    """FL-marginal gDNA overlap effective length for a ``MultiLocus``.
+
+    Counts the fragment start positions whose length-``ell`` genomic
+    interval overlaps any interval in ``loci`` and averages that count over
+    the gDNA fragment-length PMF. For one half-open interval ``[a, b)`` away
+    from contig ends, the valid start window is ``[a - ell + 1, b)`` and the
+    count is ``(b - a) + ell - 1``.
+
+    Multi-interval loci are handled exactly by merging expanded start windows
+    per reference for each fragment length, avoiding double-counts when one
+    start position overlaps multiple nearby locus intervals.
+    """
+    if min_value < 0.0:
+        raise ValueError(f"gdna_eff_len_for_loci: min_value must be >= 0, got {min_value}.")
+    if not loci:
+        return float(min_value)
+
+    pmf = fl.pmf
+    positive_ell = np.flatnonzero(pmf[1:] > 0.0) + 1
+    if positive_ell.size == 0:
+        return float(min_value)
+
+    # Fast path: one interval whose expanded start window never clips against
+    # contig boundaries for any observed fragment length.
+    if len(loci) == 1:
+        locus = loci[0]
+        span = max(int(locus.end) - int(locus.start), 0)
+        ref_len = _ref_length_for_locus(ref_lengths, locus)
+        max_ell = int(positive_ell[-1])
+        if int(locus.start) - max_ell + 1 >= 0 and int(locus.end) <= ref_len - max_ell + 1:
+            probs = pmf[positive_ell]
+            positive_mass = float(probs.sum())
+            positive_mean = float(np.dot(positive_ell.astype(np.float64), probs))
+            eff = float(span) * positive_mass + positive_mean - positive_mass
+            return max(eff, float(min_value))
+
+    total = 0.0
+    for ell in positive_ell:
+        ell_i = int(ell)
+        by_ref: dict[int | str, list[tuple[int, int]]] = {}
+        for locus in loci:
+            ref_len = _ref_length_for_locus(ref_lengths, locus)
+            valid_hi = ref_len - ell_i + 1
+            if valid_hi <= 0:
+                continue
+            lo = max(int(locus.start) - ell_i + 1, 0)
+            hi = min(int(locus.end), valid_hi)
+            if hi <= lo:
+                continue
+            ref_key = int(locus.ref_id) if hasattr(locus, "ref_id") else locus.ref
+            by_ref.setdefault(ref_key, []).append((lo, hi))
+
+        n_valid = 0
+        for windows in by_ref.values():
+            windows.sort()
+            cur_lo, cur_hi = windows[0]
+            for lo, hi in windows[1:]:
+                if lo <= cur_hi:
+                    if hi > cur_hi:
+                        cur_hi = hi
+                else:
+                    n_valid += cur_hi - cur_lo
+                    cur_lo, cur_hi = lo, hi
+            n_valid += cur_hi - cur_lo
+
+        total += float(pmf[ell_i]) * float(n_valid)
+
+    return max(total, float(min_value))
 
 
 def contained_exposure_clipped(
@@ -76,8 +176,7 @@ def contained_exposure_clipped(
     ends = np.asarray(ends, dtype=np.int64)
     if starts.shape != ends.shape:
         raise ValueError(
-            f"contained_exposure_clipped: starts.shape {starts.shape} != "
-            f"ends.shape {ends.shape}"
+            f"contained_exposure_clipped: starts.shape {starts.shape} != ends.shape {ends.shape}"
         )
     spans_full = np.maximum(ends - starts, 0)
     clip_starts = np.maximum(starts, np.int64(clip_lo))
@@ -160,8 +259,7 @@ def boundary_side_in_window(
     ends = np.asarray(ends, dtype=np.int64)
     if starts.shape != ends.shape:
         raise ValueError(
-            f"boundary_side_in_window: starts.shape {starts.shape} != "
-            f"ends.shape {ends.shape}"
+            f"boundary_side_in_window: starts.shape {starts.shape} != ends.shape {ends.shape}"
         )
     lo = np.int64(clip_lo)
     hi = np.int64(clip_hi)

@@ -258,6 +258,17 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     total_rna = total_mrna + total_nrna
     total_all = total_rna + total_gdna + stats.n_intergenic
 
+    def _locus_series_summary(column: str) -> dict[str, float]:
+        if column not in loci_df.columns or loci_df.empty:
+            return {"min": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
+        values = loci_df[column]
+        return {
+            "min": round(float(values.min()), 6),
+            "median": round(float(values.median()), 6),
+            "p95": round(float(values.quantile(0.95)), 6),
+            "max": round(float(values.max()), 6),
+        }
+
     from . import __version__
 
     # Strand model summary (exonic_spliced only)
@@ -334,6 +345,10 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
         },
         "calibration": cal_dict,
+        "gdna_eff_len": {
+            "value": _locus_series_summary("gdna_eff_len"),
+            "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
+        },
         "fragment_length": fl_dict,
         "quantification": {
             "n_transcripts": index.num_transcripts,

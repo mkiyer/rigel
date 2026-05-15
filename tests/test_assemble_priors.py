@@ -29,12 +29,14 @@ from rigel.locus import Locus, MultiLocus
 # Fakes
 # ---------------------------------------------------------------------------
 
+
 def _kappa_zero() -> KappaEstimate:
     return KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason="")
 
 
 def _delta_fl(length: int, *, max_size: int = 1024):
     from rigel.frag_length_model import FragmentLengthModel
+
     counts = np.zeros(max_size + 1, dtype=np.float64)
     counts[length] = 10_000.0
     return FragmentLengthModel.from_counts(counts, max_size=max_size)
@@ -43,16 +45,28 @@ def _delta_fl(length: int, *, max_size: int = 1024):
 def _gdt_zero(fl_mean: int = 200) -> GlobalDensityTable:
     return GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa_zero(),
+            type="INTERGENIC",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         intron=GlobalGdnaDensity(
-            type="INTRON", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa_zero(),
+            type="INTRON",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa_zero(),
+            type="EXON-INTRON",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         gdna_fl=_delta_fl(fl_mean),
     )
@@ -60,7 +74,7 @@ def _gdt_zero(fl_mean: int = 200) -> GlobalDensityTable:
 
 def _fake_index(
     region_rows: list[tuple[str, int, int, int, bool, bool]],
-    transcripts: list[tuple[str, int, int]],   # (ref, start, end)
+    transcripts: list[tuple[str, int, int]],  # (ref, start, end)
 ):
     """Build a SimpleNamespace mimicking the bits of TranscriptIndex
     that ``assemble_priors`` reads."""
@@ -130,8 +144,12 @@ def _make_payload(
         intron_counts_by_orient=intron_by_orient,
         u_left_by_orient=u_left_by_orient,
         u_right_by_orient=u_right_by_orient,
-        n_observed=0, n_excluded_multimap=0, n_excluded_chimera=0,
-        n_excluded_artifact=0, n_unobserved=0, n_unannotated_ref=0,
+        n_observed=0,
+        n_excluded_multimap=0,
+        n_excluded_chimera=0,
+        n_excluded_artifact=0,
+        n_unobserved=0,
+        n_unannotated_ref=0,
     )
 
 
@@ -171,6 +189,7 @@ def _ml_single(
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def _make_estimate(
     locus: Locus,
     n_obs: int,
@@ -181,21 +200,21 @@ def _make_estimate(
     n_gdna_exon_only: float = 0.0,
 ) -> LocusGdnaEstimate:
     """Test helper: construct a ``LocusGdnaEstimate`` with consistent totals."""
-    n_gdna = (
-        n_gdna_intergenic + n_gdna_intron
-        + n_gdna_boundary_observed + n_gdna_exon_only
-    )
+    n_gdna = n_gdna_intergenic + n_gdna_intron + n_gdna_boundary_observed + n_gdna_exon_only
     pi = (n_gdna / n_obs) if n_obs > 0 else 0.0
     return LocusGdnaEstimate(
-        locus=locus, n_obs=n_obs,
+        locus=locus,
+        n_obs=n_obs,
         n_gdna_intergenic=n_gdna_intergenic,
         n_gdna_intron=n_gdna_intron,
         n_gdna_boundary_observed=n_gdna_boundary_observed,
         n_gdna_exon_only=n_gdna_exon_only,
         n_gdna=n_gdna,
         pi_gdna=min(1.0, max(0.0, pi)),
-        rho_loco=(0.0, 0.0, 0.0), leff_loco=(0.0, 0.0, 0.0),
-        n_eligible_boundaries=0, n_boundary_events=n_gdna_boundary_observed,
+        rho_loco=(0.0, 0.0, 0.0),
+        leff_loco=(0.0, 0.0, 0.0),
+        n_eligible_boundaries=0,
+        n_boundary_events=n_gdna_boundary_observed,
         nrna_active=False,
         fallback_flags=0,
     )
@@ -206,7 +225,9 @@ def test_assemble_multilocus_prior_single_locus_matches_estimate():
     est = _make_estimate(locus, n_obs=10, n_gdna_intergenic=3.0)
     ml = _ml_single(0, [0], [10], locus)
     mlp = assemble_multilocus_prior(
-        ml, (est,), gdna_prior_count=3.0,
+        ml,
+        (est,),
+        gdna_prior_count=3.0,
     )
     assert mlp.n_obs == 10
     assert mlp.n_gdna == pytest.approx(3.0)
@@ -225,10 +246,13 @@ def test_assemble_multilocus_prior_two_locus_aggregates():
         multi_locus_id=0,
         transcript_indices=np.array([0, 1], dtype=np.int32),
         unit_indices=np.array([10, 11], dtype=np.int32),
-        gdna_span=1000, loci=(loc0, loc1),
+        gdna_span=1000,
+        loci=(loc0, loc1),
     )
     mlp = assemble_multilocus_prior(
-        ml, (est0, est1), gdna_prior_count=6.0,
+        ml,
+        (est0, est1),
+        gdna_prior_count=6.0,
     )
     assert mlp.n_obs == 20
     assert mlp.n_gdna == pytest.approx(6.0)
@@ -253,8 +277,11 @@ def test_assemble_priors_global_only_zero_density():
     gdt = _gdt_zero(fl_mean=200)
 
     pt = assemble_priors(
-        multi_loci=[ml], em_data=em, index=index,
-        payload=payload, global_densities=gdt,
+        multi_loci=[ml],
+        em_data=em,
+        index=index,
+        payload=payload,
+        global_densities=gdt,
         gdna_fl=_delta_fl(200),
     )
     assert isinstance(pt, PriorTable)
@@ -262,6 +289,8 @@ def test_assemble_priors_global_only_zero_density():
     assert pt.multi_locus_priors[0].pi_gdna == pytest.approx(0.5)
     # Canonical prior: rho == 0 everywhere => eta_g == 0.
     assert pt.gdna_prior_count[0] == pytest.approx(0.0)
+    assert pt.gdna_eff_len.shape == (1,)
+    assert pt.gdna_eff_len[0] >= 1.0
     # Eligibility decoupled from prior strength: every unit is unspliced
     # with finite gdna_log_lik in the fixture, so enable_gdna == 1
     # even though eta_g == 0.
@@ -280,22 +309,38 @@ def test_assemble_priors_global_only_positive_density():
     em = _make_em(np.zeros(10, dtype=np.int32))
     gdt = GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=1e-3, n_fragments=10,
-            eff_length_bp=10_000.0, n_regions_used=1, kappa=_kappa_zero(),
+            type="INTERGENIC",
+            rho=1e-3,
+            n_fragments=10,
+            eff_length_bp=10_000.0,
+            n_regions_used=1,
+            kappa=_kappa_zero(),
         ),
         intron=GlobalGdnaDensity(
-            type="INTRON", rho=0.0, n_fragments=0,
-            eff_length_bp=0.0, n_regions_used=0, kappa=_kappa_zero(),
+            type="INTRON",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=0,
-            eff_length_bp=0.0, n_regions_used=0, kappa=_kappa_zero(),
+            type="EXON-INTRON",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         gdna_fl=_delta_fl(200),
     )
     pt = assemble_priors(
-        multi_loci=[ml], em_data=em, index=index,
-        payload=payload, global_densities=gdt,
+        multi_loci=[ml],
+        em_data=em,
+        index=index,
+        payload=payload,
+        global_densities=gdt,
     )
     # eta_g must be strictly positive: rho_ig > 0 and L_ig > 0.
     assert pt.gdna_prior_count[0] > 0.0
+    assert pt.gdna_eff_len[0] >= 1.0

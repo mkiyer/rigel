@@ -36,17 +36,29 @@ from rigel.splice import SpliceType
 
 
 EXPECTED_MULTI_LOCUS_COLUMNS = [
-    "multi_locus_id", "n_obs", "n_gdna", "n_rna", "pi_gdna", "n_loci",
+    "multi_locus_id",
+    "n_obs",
+    "n_gdna",
+    "n_rna",
+    "pi_gdna",
+    "n_loci",
     "gdna_prior_count",
 ]
 EXPECTED_PER_LOCUS_COLUMNS = [
-    "multi_locus_id", "ref", "start", "end", "span",
-    "n_obs", "n_gdna",
-    "n_gdna_intergenic", "n_gdna_intron",
-    "n_gdna_boundary_observed", "n_gdna_exon_only",
-    "n_gdna_exon_intron",
+    "multi_locus_id",
+    "ref",
+    "start",
+    "end",
+    "span",
+    "n_obs",
+    "n_gdna",
+    "n_gdna_intergenic",
+    "n_gdna_intron",
+    "n_gdna_boundary_observed",
+    "n_gdna_exon_only",
     "pi_gdna",
-    "n_eligible_boundaries", "n_boundary_events",
+    "n_eligible_boundaries",
+    "n_boundary_events",
     "nrna_active",
     "fallback_flags",
 ]
@@ -56,12 +68,14 @@ EXPECTED_PER_LOCUS_COLUMNS = [
 # Fakes
 # ---------------------------------------------------------------------------
 
+
 def _kappa_zero() -> KappaEstimate:
     return KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason="")
 
 
 def _delta_fl(length: int, *, max_size: int = 1024):
     from rigel.frag_length_model import FragmentLengthModel
+
     counts = np.zeros(max_size + 1, dtype=np.float64)
     counts[length] = 10_000.0
     return FragmentLengthModel.from_counts(counts, max_size=max_size)
@@ -70,16 +84,28 @@ def _delta_fl(length: int, *, max_size: int = 1024):
 def _gdt(fl_mean: int = 200) -> GlobalDensityTable:
     return GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa_zero(),
+            type="INTERGENIC",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         intron=GlobalGdnaDensity(
-            type="INTRON", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa_zero(),
+            type="INTRON",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa_zero(),
+            type="EXON-INTRON",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa_zero(),
         ),
         gdna_fl=_delta_fl(fl_mean),
     )
@@ -87,7 +113,7 @@ def _gdt(fl_mean: int = 200) -> GlobalDensityTable:
 
 def _payload(n_observed: int = 100) -> CalibrationScanPayload:
     gc = np.zeros(MASK_N_STATES, dtype=np.int64)
-    gc[MASK_EXON] = n_observed   # all healthy exonic
+    gc[MASK_EXON] = n_observed  # all healthy exonic
     h = np.zeros((MASK_N_STATES, FL_HIST_N_BINS), dtype=np.int64)
     h[MASK_INTRON, 200:300] = 100  # 10k gDNA-pool fragments
     return CalibrationScanPayload(
@@ -99,8 +125,12 @@ def _payload(n_observed: int = 100) -> CalibrationScanPayload:
         intron_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
         u_left_by_orient=np.zeros((0, 3), dtype=np.int64),
         u_right_by_orient=np.zeros((0, 3), dtype=np.int64),
-        n_observed=int(gc.sum()), n_excluded_multimap=10, n_excluded_chimera=2,
-        n_excluded_artifact=1, n_unobserved=5, n_unannotated_ref=0,
+        n_observed=int(gc.sum()),
+        n_excluded_multimap=10,
+        n_excluded_chimera=2,
+        n_excluded_artifact=1,
+        n_unobserved=5,
+        n_unannotated_ref=0,
     )
 
 
@@ -115,8 +145,15 @@ def _scan_trained() -> FragmentLengthModels:
 
 
 def _make_estimate(
-    ref: str, start: int, end: int, *, n_obs: int, n_gdna: float,
-    intergenic: float = 0.0, intron: float = 0.0, exon_intron: float = 0.0,
+    ref: str,
+    start: int,
+    end: int,
+    *,
+    n_obs: int,
+    n_gdna: float,
+    intergenic: float = 0.0,
+    intron: float = 0.0,
+    exon_intron: float = 0.0,
     flags: int = 0,
 ) -> LocusGdnaEstimate:
     # Legacy ``exon_intron`` aggregate is split 50/50 across the two new
@@ -144,7 +181,9 @@ def _mlp(mid: int, ests: tuple[LocusGdnaEstimate, ...]) -> MultiLocusPrior:
     n_gdna = sum(e.n_gdna for e in ests)
     pi = (n_gdna / n_obs) if n_obs > 0 else 0.0
     return MultiLocusPrior(
-        multi_locus_id=mid, n_obs=n_obs, n_gdna=n_gdna,
+        multi_locus_id=mid,
+        n_obs=n_obs,
+        n_gdna=n_gdna,
         n_rna=max(0.0, n_obs - n_gdna),
         pi_gdna=pi,
         gdna_prior_count=pi * 10.0,
@@ -158,6 +197,7 @@ def _prior_table(mlps: tuple[MultiLocusPrior, ...]) -> PriorTable:
     return PriorTable(
         multi_locus_priors=mlps,
         gdna_prior_count=gp_arr,
+        gdna_eff_len=np.ones(n, dtype=np.float64),
         enable_gdna=np.ones(n, dtype=np.uint8),
     )
 
@@ -166,12 +206,15 @@ def _prior_table(mlps: tuple[MultiLocusPrior, ...]) -> PriorTable:
 # 1. Builder + roundtrip
 # ---------------------------------------------------------------------------
 
+
 def test_build_calibration_result_basic():
     est = _make_estimate("chr1", 0, 1000, n_obs=10, n_gdna=3.0, intergenic=3.0)
     pt = _prior_table((_mlp(0, (est,)),))
     res = build_calibration_result(
-        payload=_payload(), scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt,
+        payload=_payload(),
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt,
     )
     assert isinstance(res, CalibrationResult)
     assert isinstance(res.fl_models, FLModels)
@@ -182,8 +225,10 @@ def test_build_calibration_result_basic():
 def test_calibration_result_is_frozen():
     pt = _prior_table((_mlp(0, (_make_estimate("chr1", 0, 1, n_obs=1, n_gdna=0.0),)),))
     res = build_calibration_result(
-        payload=_payload(), scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt,
+        payload=_payload(),
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         res.n_multi_loci = 99  # type: ignore[misc]
@@ -193,11 +238,14 @@ def test_calibration_result_is_frozen():
 # 2. Convenience accessors (zero-copy / identity)
 # ---------------------------------------------------------------------------
 
+
 def test_convenience_accessors_alias_underlying_objects():
     pt = _prior_table((_mlp(0, (_make_estimate("chr1", 0, 1, n_obs=1, n_gdna=0.0),)),))
     res = build_calibration_result(
-        payload=_payload(), scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt,
+        payload=_payload(),
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt,
     )
     assert res.gdna_prior_count is pt.gdna_prior_count
     assert res.global_fl_mean == res.fl_models.global_.mean
@@ -209,12 +257,15 @@ def test_convenience_accessors_alias_underlying_objects():
 # 3. with_priors → new instance + dataframe rebuild
 # ---------------------------------------------------------------------------
 
+
 def test_with_priors_returns_new_instance_and_rebuilds_dfs():
     est0 = _make_estimate("chr1", 0, 1000, n_obs=10, n_gdna=2.0, intergenic=2.0)
     pt0 = _prior_table((_mlp(0, (est0,)),))
     res0 = build_calibration_result(
-        payload=_payload(), scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt0,
+        payload=_payload(),
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt0,
     )
     est1a = _make_estimate("chr2", 0, 500, n_obs=20, n_gdna=5.0, intergenic=5.0)
     est1b = _make_estimate("chr2", 1000, 1500, n_obs=5, n_gdna=1.0, intron=1.0)
@@ -230,6 +281,7 @@ def test_with_priors_returns_new_instance_and_rebuilds_dfs():
 # ---------------------------------------------------------------------------
 # 4. Diagnostic dataframes — locked schemas
 # ---------------------------------------------------------------------------
+
 
 def test_multi_locus_prior_df_schema_and_content():
     est = _make_estimate("chr1", 0, 1000, n_obs=10, n_gdna=3.0, intergenic=3.0)
@@ -263,12 +315,15 @@ def test_dataframes_handle_empty_input():
 # 5. Diagnostics accountability + summary serialisation
 # ---------------------------------------------------------------------------
 
+
 def test_diagnostics_total_matches_payload_n_observed():
     payload = _payload(n_observed=42)
     pt = _prior_table((_mlp(0, (_make_estimate("chr1", 0, 1, n_obs=1, n_gdna=0.0),)),))
     res = build_calibration_result(
-        payload=payload, scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt,
+        payload=payload,
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt,
     )
     assert res.diagnostics.total() == payload.n_observed
 
@@ -277,24 +332,35 @@ def test_to_summary_dict_is_json_serialisable():
     est = _make_estimate("chr1", 0, 1000, n_obs=10, n_gdna=3.0, intergenic=3.0)
     pt = _prior_table((_mlp(0, (est,)),))
     res = build_calibration_result(
-        payload=_payload(), scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt,
+        payload=_payload(),
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt,
     )
     blob = json.dumps(res.to_summary_dict())
-    for key in ("global_densities", "fl_models", "diagnostics",
-                "n_multi_loci", "mean_pi_gdna"):
+    for key in ("global_densities", "fl_models", "diagnostics", "n_multi_loci", "mean_pi_gdna"):
         assert key in blob
     # No mask integers anywhere in the JSON.
-    for forbidden in ("mask_0", "mask_1", "mask_2", "mask_3", "mask_4",
-                      "mask_5", "mask_6", "mask_7"):
+    for forbidden in (
+        "mask_0",
+        "mask_1",
+        "mask_2",
+        "mask_3",
+        "mask_4",
+        "mask_5",
+        "mask_6",
+        "mask_7",
+    ):
         assert forbidden not in blob
 
 
 def test_to_summary_dict_mean_pi_gdna_handles_empty_priors():
     pt = PriorTable.empty()
     res = build_calibration_result(
-        payload=_payload(), scan_trained=_scan_trained(),
-        global_densities=_gdt(), prior_table=pt,
+        payload=_payload(),
+        scan_trained=_scan_trained(),
+        global_densities=_gdt(),
+        prior_table=pt,
     )
     s = res.to_summary_dict()
     assert s["mean_pi_gdna"] == 0.0

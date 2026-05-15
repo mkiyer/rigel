@@ -1,3 +1,3 @@
 transcript_id	gene_id	gene_name	effective_length	locus_id	nrna_id	is_basic	is_mane	is_nrna	count	count_unambig	count_em	count_spliced	nrna_parent_count	tpm	tpm_total_rna	posterior_mean
-t1	g1	g1	311.1880548829714	0	RIGEL_NRNA_golden_zero_1_500_1500	True	False	False	999.8449181856519	477.0	522.8449181856519	477.0	0.11970487858837199	1000000.0	999945.1190545385	0.9997034827503832
+t1	g1	g1	311.1880548829714	0	RIGEL_NRNA_golden_zero_1_500_1500	True	False	False	999.8525903070125	477.0	522.8525903070125	477.0	0.119706519179428	1000000.0	999945.1187235182	0.9997181515276138
 t_zero	g_zero	g_zero	311.1880548829714	-1	RIGEL_NRNA_golden_zero_2_3000_4000	True	False	False	0.0	0.0	0.0	0.0	0.0	0.0	0.0	

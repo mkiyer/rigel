@@ -52,12 +52,14 @@ def run_scale(base_estimator, index, em_data, multi_loci, prior_table, scale: fl
     _assign_locus_ids(estimator, multi_loci)
     partitions = partition_and_free(copy_scored_fragments(em_data), multi_loci)
     gdna_prior = np.ascontiguousarray(prior_table.gdna_prior_count * float(scale), dtype=np.float64)
+    gdna_eff_len = np.ascontiguousarray(prior_table.gdna_eff_len, dtype=np.float64)
     _run_locus_em_partitioned(
         estimator,
         partitions,
         multi_loci,
         index,
         gdna_prior,
+        gdna_eff_len,
         em_config,
         enable_gdna=prior_table.enable_gdna,
         emit_locus_stats=False,
@@ -98,7 +100,9 @@ def main() -> None:
         args.condition,
     )
     del calibration
-    rows = [run_scale(base_estimator, index, em_data, multi_loci, prior_table, s) for s in args.scales]
+    rows = [
+        run_scale(base_estimator, index, em_data, multi_loci, prior_table, s) for s in args.scales
+    ]
     out_dir = args.out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     out = pd.DataFrame(rows)

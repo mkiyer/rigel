@@ -82,6 +82,8 @@ struct LocusProfile {
     int squarem_iterations = 0;
     int estep_threads_used = 0;
     bool is_mega_locus = false;
+    double gdna_eff_len = 1.0;
+    double gdna_log_eff_len = 0.0;
 
     // Sub-phase wall times in microseconds
     double extract_us = 0.0;
@@ -1106,7 +1108,7 @@ struct LocusSubProblem {
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   prior;            // [n_components]
-    std::vector<double>   log_eff_len;      // [n_components] log L̃_t (gDNA: 0)
+    std::vector<double>   log_eff_len;      // [n_components] log L̃ per component
     std::vector<double>   eligible;         // [n_components]
 
     // Local→global transcript mapping
@@ -1562,8 +1564,7 @@ struct PartitionView {
 //
 // Populates ``sub.log_eff_len`` from per-transcript effective lengths
 // (``all_t_eff_lens`` is the FL-marginal containment effective length
-// L̃_t computed in Python).  The gDNA component receives log L̃ = 0
-// because its likelihoods are pre-normalized by the scorer (Option B).
+// L̃_t computed in Python) and the per-locus gDNA overlap effective length.
 //
 // Candidates are written to pre-allocated output arrays via a write cursor
 // to avoid dynamic allocation in the inner loop. A reusable sort buffer
@@ -1574,6 +1575,7 @@ static void extract_locus_sub_problem_from_partition(
     LocusSubProblem& sub,
     const PartitionView& pv,
     bool enable_gdna,
+    double gdna_eff_len,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
     int32_t* local_map, int local_map_size)
@@ -1656,8 +1658,8 @@ static void extract_locus_sub_problem_from_partition(
         }
 
         // Append gDNA candidate (component = n_t, always the largest index).
-        // Under Option B the gDNA row carries no fragment-length signal:
-        // its log_lik is fully length-corrected upstream by the scorer.
+        // The scorer supplies log h_G(ell_f) and non-length terms; the EM
+        // applies the per-locus -log L̃_gDNA component correction.
         if (has_gdna) {
             sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0, 0};
         }
@@ -1709,9 +1711,12 @@ static void extract_locus_sub_problem_from_partition(
         if (!(Le >= 1.0)) Le = 1.0;
         sub.log_eff_len[i] = std::log(Le);
     }
-    // gDNA component: log L̃ = 0 (likelihoods already pre-normalized
-    // by the scorer under Option B).
-    sub.log_eff_len[sub.gdna_idx] = 0.0;
+    // gDNA component: FL-marginal overlap effective length for this
+    // MultiLocus. The scorer contributes log h_G(ell_f); the EM applies
+    // -log L̃_gDNA here, matching the RNA component contract.
+    double GLe = gdna_eff_len;
+    if (!(GLe >= 1.0)) GLe = 1.0;
+    sub.log_eff_len[sub.gdna_idx] = std::log(GLe);
 
     sub.prior.assign(nc, EM_PRIOR_EPSILON);
 
@@ -1764,6 +1769,8 @@ batch_locus_em_partitioned(
     // Phase 0: a zero gDNA prior count must not silently disable the
     // gDNA component when the locus contains gDNA-likelihood candidates.
     u8_1d    locus_enable_gdna,
+    // Per-locus FL-marginal overlap effective length for the gDNA component.
+    f64_1d   locus_gdna_eff_lens,
     // Per-transcript globals
     f64_2d   unambig_counts,
     f64_1d   t_eff_lens_arr,
@@ -1816,8 +1823,14 @@ batch_locus_em_partitioned(
 
     const double*   gp_ptr = locus_gdna_prior_count.data();
     const uint8_t*  eg_ptr = locus_enable_gdna.data();
+    const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
+
+    if (static_cast<int>(locus_gdna_eff_lens.shape(0)) != n_loci) {
+        throw std::runtime_error(
+            "batch_locus_em_partitioned: locus_gdna_eff_lens length must equal n_loci");
+    }
 
     double* em_out    = em_counts_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
@@ -1926,6 +1939,7 @@ batch_locus_em_partitioned(
             auto t1 = hrclock::now();
             extract_locus_sub_problem_from_partition(
                 sub, pv, eg_ptr[li] != 0,
+                gel_ptr[li],
                 unambig_row_sums.data(), tel_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
@@ -1945,8 +1959,7 @@ batch_locus_em_partitioned(
                 return 0.0;
             }
 
-            // 4. log effective length per component (FL-marginal L̃_t).
-            //    gDNA component already set to 0 by the extractor.
+            // 4. log effective length per component (RNA L̃_t plus gDNA L̃_M).
             const double* log_eff_len_ptr = sub.log_eff_len.data();
 
             // 5. Build equivalence classes
@@ -2012,6 +2025,8 @@ batch_locus_em_partitioned(
                 prof.squarem_iterations = result.squarem_iterations;
                 prof.estep_threads_used = estep_thr;
                 prof.is_mega_locus = mega;
+                prof.gdna_eff_len = gel_ptr[li] >= 1.0 ? gel_ptr[li] : 1.0;
+                prof.gdna_log_eff_len = std::log(prof.gdna_eff_len);
 
                 int64_t total_elems = 0;
                 int max_k = 0, max_n = 0;
@@ -2136,6 +2151,8 @@ batch_locus_em_partitioned(
             d["squarem_iterations"] = p.squarem_iterations;
             d["estep_threads_used"] = p.estep_threads_used;
             d["is_mega_locus"] = p.is_mega_locus;
+            d["gdna_eff_len"] = p.gdna_eff_len;
+            d["gdna_log_eff_len"] = p.gdna_log_eff_len;
             d["digamma_calls_per_estep"] = p.digamma_calls_per_estep;
             d["extract_us"] = p.extract_us;
             d["bias_us"] = p.bias_us;
@@ -2451,6 +2468,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_transcript_indices"),
           nb::arg("locus_gdna_prior_count"),
           nb::arg("locus_enable_gdna"),
+          nb::arg("locus_gdna_eff_lens"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
           nb::arg("em_counts_out"),

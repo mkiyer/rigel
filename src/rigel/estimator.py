@@ -69,7 +69,9 @@ def _gene_locus_ids(
     return g_locus_id
 
 
-def _tpm(counts: np.ndarray, eff_len: np.ndarray, denom_counts: np.ndarray | None = None) -> np.ndarray:
+def _tpm(
+    counts: np.ndarray, eff_len: np.ndarray, denom_counts: np.ndarray | None = None
+) -> np.ndarray:
     """Transcripts per million from count + effective-length arrays.
 
     If ``denom_counts`` is provided, TPM is normalized by the rpk sum of
@@ -258,6 +260,7 @@ class AbundanceEstimator:
         gdna_prior_count: np.ndarray,
         index,
         *,
+        gdna_eff_len: np.ndarray | None = None,
         enable_gdna: np.ndarray | None = None,
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
@@ -276,6 +279,10 @@ class AbundanceEstimator:
             float64 — calibration gDNA prior per locus (physical counts).
         index : TranscriptIndex
             Reference index.
+        gdna_eff_len : np.ndarray, optional
+            float64 array of length ``n_loci``: FL-marginal overlap
+            effective length for each locus's gDNA component. When ``None``,
+            defaults to ones for wrapper-level test compatibility.
         enable_gdna : np.ndarray, optional
             uint8 array of length ``n_loci``: 1 = gDNA component eligible,
             0 = disabled. Decoupled from ``gdna_prior_count`` per the Bayesian
@@ -302,6 +309,14 @@ class AbundanceEstimator:
         # (and inside assign_posteriors) instead of any per-fragment
         # length correction.
         t_eff_lens = np.ascontiguousarray(self._t_eff_len, dtype=np.float64)
+        n_loci = len(partition_tuples)
+
+        if gdna_eff_len is None:
+            gdna_eff_len = np.ones(n_loci, dtype=np.float64)
+        else:
+            gdna_eff_len = np.ascontiguousarray(gdna_eff_len, dtype=np.float64)
+            if gdna_eff_len.shape[0] != n_loci:
+                raise ValueError(f"gdna_eff_len length {gdna_eff_len.shape[0]} != n_loci {n_loci}.")
 
         if self._em_posterior_sum is None:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
@@ -316,7 +331,6 @@ class AbundanceEstimator:
         # ``has_gdna = !is_spliced && isfinite(gdna_log_lik)`` rule the C++
         # extractor uses when deciding which units get a gDNA candidate.
         if enable_gdna is None:
-            n_loci = len(partition_tuples)
             enable_gdna = np.zeros(n_loci, dtype=np.uint8)
             for li, tup in enumerate(partition_tuples):
                 is_spliced = tup[5]
@@ -330,31 +344,37 @@ class AbundanceEstimator:
         else:
             enable_gdna = np.ascontiguousarray(enable_gdna, dtype=np.uint8)
 
-        total_gdna_em, locus_mrna, locus_gdna, locus_stats_raw, \
-            out_winner_tid, out_winner_post, out_n_candidates = (
-            _batch_locus_em_partitioned(
-                partition_tuples,
-                locus_transcript_indices,
-                np.ascontiguousarray(gdna_prior_count, dtype=np.float64),
-                enable_gdna,
-                self.unambig_counts,
-                t_eff_lens,
-                self.em_counts,
-                self.gdna_locus_counts,
-                self._em_posterior_sum,
-                self._em_n_assigned,
-                em_iterations,
-                em_convergence_delta,
-                self.em_config.mode == "vbem",
-                assignment_mode_int,
-                self.em_config.assignment_min_posterior,
-                rng_seed,
-                n_transcripts,
-                NUM_SPLICE_STRAND_COLS,
-                self.em_config.n_threads,
-                emit_locus_stats,
-                emit_assignments,
-            )
+        (
+            total_gdna_em,
+            locus_mrna,
+            locus_gdna,
+            locus_stats_raw,
+            out_winner_tid,
+            out_winner_post,
+            out_n_candidates,
+        ) = _batch_locus_em_partitioned(
+            partition_tuples,
+            locus_transcript_indices,
+            np.ascontiguousarray(gdna_prior_count, dtype=np.float64),
+            enable_gdna,
+            gdna_eff_len,
+            self.unambig_counts,
+            t_eff_lens,
+            self.em_counts,
+            self.gdna_locus_counts,
+            self._em_posterior_sum,
+            self._em_n_assigned,
+            em_iterations,
+            em_convergence_delta,
+            self.em_config.mode == "vbem",
+            assignment_mode_int,
+            self.em_config.assignment_min_posterior,
+            rng_seed,
+            n_transcripts,
+            NUM_SPLICE_STRAND_COLS,
+            self.em_config.n_threads,
+            emit_locus_stats,
+            emit_assignments,
         )
 
         if emit_locus_stats:
@@ -527,9 +547,7 @@ class AbundanceEstimator:
         g_total = _aggregate_to_gene(t_to_g, n_genes, total)
         count_spliced = g_total[:, list(SPLICED_COLS)].sum(axis=1)
 
-        count_em = _aggregate_to_gene(
-            t_to_g, n_genes, self.em_counts.sum(axis=1) * annotated_mask
-        )
+        count_em = _aggregate_to_gene(t_to_g, n_genes, self.em_counts.sum(axis=1) * annotated_mask)
 
         # Gene effective length: abundance-weighted mean of transcript
         # effective lengths.  For genes with zero counts, use the
@@ -547,9 +565,7 @@ class AbundanceEstimator:
 
         # Gene-level locus_id: assign the locus of the transcript with
         # the highest count.
-        g_locus_id = _gene_locus_ids(
-            t_to_g, n_genes, self.locus_id_per_transcript, t_counts_all
-        )
+        g_locus_id = _gene_locus_ids(t_to_g, n_genes, self.locus_id_per_transcript, t_counts_all)
 
         # n_transcripts (annotated only, excluding synthetics)
         n_annotated = _aggregate_to_gene(t_to_g, n_genes, annotated_mask).astype(int)
@@ -621,11 +637,19 @@ class AbundanceEstimator:
         mask = is_nrna
 
         if not mask.any():
-            return pd.DataFrame(columns=[
-                "nrna_id", "effective_length",
-                "locus_id", "is_synthetic", "n_contributing_transcripts",
-                "count", "n_mrna", "mrna_count", "tpm",
-            ])
+            return pd.DataFrame(
+                columns=[
+                    "nrna_id",
+                    "effective_length",
+                    "locus_id",
+                    "is_synthetic",
+                    "n_contributing_transcripts",
+                    "count",
+                    "n_mrna",
+                    "mrna_count",
+                    "tpm",
+                ]
+            )
 
         t_total = self.t_counts.sum(axis=1)
 
@@ -635,7 +659,9 @@ class AbundanceEstimator:
         # slice for nRNA-entity rows.
         nrna_t_idx = t_df["nrna_t_index"].values
         n_mrna_per_parent, children_count_per_parent = _nrna_children_counts(
-            nrna_t_idx, t_total, n_transcripts=len(t_df),
+            nrna_t_idx,
+            t_total,
+            n_transcripts=len(t_df),
         )
 
         idx = np.where(mask)[0]
@@ -714,6 +740,11 @@ class AbundanceEstimator:
             locus, and large values indicate the prior expects more
             gDNA than the locus has fragments to absorb (typically
             sparse loci where the η_g calibration dominates).
+        gdna_eff_len : float
+            FL-marginal overlap effective length for the locus gDNA
+            component.
+        gdna_eff_len_per_bp : float
+            ``gdna_eff_len / locus_span_bp`` diagnostic ratio.
         """
         cols = [
             "locus_id",
@@ -731,6 +762,8 @@ class AbundanceEstimator:
             "gdna_rate",
             "gdna_prior",
             "gdna_prior_count",
+            "gdna_eff_len",
+            "gdna_eff_len_per_bp",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -774,8 +807,8 @@ class AbundanceEstimator:
             unambig_mrna = float(t_unambig[annot_in_locus].sum())
 
             rna_total = float(r["rna_total"])  # EM: annotated mRNA + synthetic nRNA
-            mrna_em = max(rna_total - nrna, 0.0)    # EM-only annotated mRNA
-            mrna = mrna_em + unambig_mrna            # total mRNA = EM + unambig
+            mrna_em = max(rna_total - nrna, 0.0)  # EM-only annotated mRNA
+            mrna = mrna_em + unambig_mrna  # total mRNA = EM + unambig
             gdna = float(r["gdna"])
             total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
@@ -785,6 +818,8 @@ class AbundanceEstimator:
             # the prior's per-fragment strength relative to the locus's
             # actual EM evidence and is comparable across loci.
             gp_count = float(r.get("gdna_prior_count", 0.0))
+            gdna_eff_len = float(r.get("gdna_eff_len", 1.0))
+            gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
             n_em = max(int(r.get("n_em_fragments", 0)), 1)
             gdna_prior = gp_count / n_em
             rows.append(
@@ -804,6 +839,8 @@ class AbundanceEstimator:
                     "gdna_rate": rate,
                     "gdna_prior": gdna_prior,
                     "gdna_prior_count": gp_count,
+                    "gdna_eff_len": gdna_eff_len,
+                    "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
                 }
             )
         return pd.DataFrame(rows, columns=cols)

@@ -30,6 +30,7 @@ from rigel.locus import Locus
 # Builders
 # ---------------------------------------------------------------------------
 
+
 def _delta_fl(length: int, *, max_size: int = 1024) -> FragmentLengthModel:
     """FL model peaked at ``length`` (Laplace smoothing remains, so use
     :func:`_oracle_leff` for the exact expected denominator)."""
@@ -40,9 +41,7 @@ def _delta_fl(length: int, *, max_size: int = 1024) -> FragmentLengthModel:
 
 def _oracle_leff(spans, gdna_fl: FragmentLengthModel) -> np.ndarray:
     """Ground-truth FL-PMF-weighted containment L_eff (no salmon floor)."""
-    return gdna_fl.compute_all_transcript_eff_lens(
-        np.asarray(spans, dtype=np.int64), min_value=0.0
-    )
+    return gdna_fl.compute_all_transcript_eff_lens(np.asarray(spans, dtype=np.int64), min_value=0.0)
 
 
 def _kappa(value: float = 100.0) -> KappaEstimate:
@@ -57,16 +56,28 @@ def _gdt(
 ) -> GlobalDensityTable:
     return GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=rho_ig, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa(),
+            type="INTERGENIC",
+            rho=rho_ig,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa(),
         ),
         intron=GlobalGdnaDensity(
-            type="INTRON", rho=rho_in, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa(),
+            type="INTRON",
+            rho=rho_in,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa(),
         ),
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=rho_ei, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=_kappa(),
+            type="EXON-INTRON",
+            rho=rho_ei,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=_kappa(),
         ),
         gdna_fl=_delta_fl(fl_mean),
     )
@@ -139,6 +150,7 @@ def _build_arrays(
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_single_intergenic_locus_exact_count():
     # One intergenic region [0, 1000); 50 fragments; FL mean 200.
     # κ = 0 ⇒ ρ_loco = 50 / L_eff_contained = exact local density.
@@ -151,21 +163,32 @@ def test_single_intergenic_locus_exact_count():
     # Force κ → 0 via a bespoke kappa
     gdt = GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=0.0, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=0, kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
+            type="INTERGENIC",
+            rho=0.0,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=0,
+            kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
-        intron=gdt.intron, exon_intron=gdt.exon_intron, gdna_fl=gdna_fl,
+        intron=gdt.intron,
+        exon_intron=gdt.exon_intron,
+        gdna_fl=gdna_fl,
     )
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=50, region_index=idx,
-        region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=gdna_fl,
+        locus=locus,
+        n_obs=50,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
     )
     leff_full = float(_oracle_leff([1000], gdna_fl)[0])
     assert est.n_gdna_intergenic == pytest.approx(50.0)
     assert est.n_gdna_intron == 0.0
-    assert est.n_gdna_exon_intron == 0.0
+    assert est.n_gdna_boundary_observed == 0.0
+    assert est.n_gdna_exon_only == 0.0
     assert est.n_gdna == pytest.approx(50.0)
     assert est.leff_loco[0] == pytest.approx(leff_full)
     assert est.pi_gdna == pytest.approx(1.0)
@@ -182,16 +205,25 @@ def test_intron_zero_count_shrinks_to_global():
     gdt = GlobalDensityTable(
         intergenic=_gdt().intergenic,
         intron=GlobalGdnaDensity(
-            type="INTRON", rho=0.05, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=10, kappa=_kappa(100.0),
+            type="INTRON",
+            rho=0.05,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=10,
+            kappa=_kappa(100.0),
         ),
-        exon_intron=_gdt().exon_intron, gdna_fl=gdna_fl,
+        exon_intron=_gdt().exon_intron,
+        gdna_fl=gdna_fl,
     )
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=10, region_index=idx,
-        region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=gdna_fl,
+        locus=locus,
+        n_obs=10,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
     )
     leff = float(_oracle_leff([1000], gdna_fl)[0])
     expected_rho = (0 + 100 * 0.05) / (leff + 100.0)
@@ -204,23 +236,32 @@ def test_exon_only_no_eligible_uses_global():
     # n_eligible == 0 ⇒ ρ_loco = ρ_global, n_exon_only = ρ · L_eff_full.
     ra, pa, idx, _ = _build_arrays(
         regions=[("chr1", 0, 500, int(RegionType.EXON), False, False)],
-        u_left=[0], u_right=[0],
+        u_left=[0],
+        u_right=[0],
     )
     gdna_fl = _delta_fl(200)
     gdt = GlobalDensityTable(
         intergenic=_gdt().intergenic,
         intron=_gdt().intron,
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.03, n_fragments=0, eff_length_bp=0.0,
-            n_regions_used=10, kappa=_kappa(50.0),
+            type="EXON-INTRON",
+            rho=0.03,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=10,
+            kappa=_kappa(50.0),
         ),
         gdna_fl=gdna_fl,
     )
     locus = Locus(ref="chr1", ref_id=0, start=0, end=500)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=100, region_index=idx,
-        region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=gdna_fl,
+        locus=locus,
+        n_obs=100,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
     )
     leff_full = float(_oracle_leff([500], gdna_fl)[0])
     assert est.n_eligible_boundaries == 0
@@ -237,7 +278,8 @@ def test_exon_with_both_eligible_boundaries_exact():
     # n_gdna_exon_only = ρ_loco · L_eff_contained(500).
     ra, pa, idx, _ = _build_arrays(
         regions=[("chr1", 0, 500, int(RegionType.EXON), True, True)],
-        u_left=[10], u_right=[15],
+        u_left=[10],
+        u_right=[15],
     )
     gdna_fl = _delta_fl(200)
     b_cross = boundary_crossing_exposure(gdna_fl)
@@ -245,7 +287,10 @@ def test_exon_with_both_eligible_boundaries_exact():
         intergenic=_gdt().intergenic,
         intron=_gdt().intron,
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=25, eff_length_bp=2.0 * b_cross,
+            type="EXON-INTRON",
+            rho=0.0,
+            n_fragments=25,
+            eff_length_bp=2.0 * b_cross,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
@@ -253,9 +298,13 @@ def test_exon_with_both_eligible_boundaries_exact():
     )
     locus = Locus(ref="chr1", ref_id=0, start=0, end=500)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=100, region_index=idx,
-        region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=gdna_fl,
+        locus=locus,
+        n_obs=100,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
     )
     leff_full = float(_oracle_leff([500], gdna_fl)[0])
     expected_rho = 25.0 / (2.0 * b_cross)
@@ -265,8 +314,10 @@ def test_exon_with_both_eligible_boundaries_exact():
     assert est.n_gdna_exon_only == pytest.approx(expected_rho * leff_full)
     # Decomposition invariant.
     assert est.n_gdna == pytest.approx(
-        est.n_gdna_intergenic + est.n_gdna_intron
-        + est.n_gdna_boundary_observed + est.n_gdna_exon_only
+        est.n_gdna_intergenic
+        + est.n_gdna_intron
+        + est.n_gdna_boundary_observed
+        + est.n_gdna_exon_only
     )
 
 
@@ -290,9 +341,13 @@ def test_short_locus_contained_leff_semantics():
     gdt = _gdt(rho_ig=0.05, fl_mean=200)
     locus = Locus(ref="chr1", ref_id=0, start=0, end=50)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=10, region_index=idx,
-        region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=gdna_fl,
+        locus=locus,
+        n_obs=10,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
     )
     expected_leff = float(_oracle_leff([50], gdna_fl)[0])
     assert est.leff_loco[0] == pytest.approx(expected_leff)
@@ -312,23 +367,33 @@ def test_all_three_region_types_summed():
         ],
         counts_intergenic=[5, 0, 0],
         counts_intron=[0, 0, 10],
-        u_left=[0, 7, 0], u_right=[0, 0, 0],
+        u_left=[0, 7, 0],
+        u_right=[0, 0, 0],
     )
     gdna_fl = _delta_fl(200)
     b_cross = boundary_crossing_exposure(gdna_fl)
     gdt = GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=0.0, n_fragments=5, eff_length_bp=299.0,
+            type="INTERGENIC",
+            rho=0.0,
+            n_fragments=5,
+            eff_length_bp=299.0,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
         intron=GlobalGdnaDensity(
-            type="INTRON", rho=0.0, n_fragments=10, eff_length_bp=599.0,
+            type="INTRON",
+            rho=0.0,
+            n_fragments=10,
+            eff_length_bp=599.0,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
         exon_intron=GlobalGdnaDensity(
-            type="EXON-INTRON", rho=0.0, n_fragments=7, eff_length_bp=b_cross,
+            type="EXON-INTRON",
+            rho=0.0,
+            n_fragments=7,
+            eff_length_bp=b_cross,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
@@ -336,9 +401,13 @@ def test_all_three_region_types_summed():
     )
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=22, region_index=idx,
-        region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=gdna_fl,
+        locus=locus,
+        n_obs=22,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
     )
     # κ = 0 ⇒ pure-local densities. With proration ratio == 1 (clip == full):
     #   intergenic: n_mass = 5
@@ -355,9 +424,7 @@ def test_all_three_region_types_summed():
     assert est.n_eligible_boundaries == 1
     assert est.n_gdna_boundary_observed == pytest.approx(7.0)
     assert est.n_gdna_exon_only == pytest.approx(expected_rho_b * leff_exon)
-    assert est.n_gdna == pytest.approx(
-        5.0 + 10.0 + 7.0 + expected_rho_b * leff_exon
-    )
+    assert est.n_gdna == pytest.approx(5.0 + 10.0 + 7.0 + expected_rho_b * leff_exon)
 
 
 def test_pi_clipped_when_overestimate():
@@ -368,17 +435,26 @@ def test_pi_clipped_when_overestimate():
     )
     gdt = GlobalDensityTable(
         intergenic=GlobalGdnaDensity(
-            type="INTERGENIC", rho=0.0, n_fragments=1000, eff_length_bp=1199.0,
+            type="INTERGENIC",
+            rho=0.0,
+            n_fragments=1000,
+            eff_length_bp=1199.0,
             n_regions_used=1,
             kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
         ),
-        intron=_gdt().intron, exon_intron=_gdt().exon_intron, gdna_fl=_delta_fl(200),
+        intron=_gdt().intron,
+        exon_intron=_gdt().exon_intron,
+        gdna_fl=_delta_fl(200),
     )
     locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
     est = estimate_locus_gdna(
-        locus=locus, n_obs=50,  # only 50 observed but predicted = 1000
-        region_index=idx, region_arrays=ra, payload_arrays=pa,
-        global_densities=gdt, gdna_fl=_delta_fl(200),
+        locus=locus,
+        n_obs=50,  # only 50 observed but predicted = 1000
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=_delta_fl(200),
     )
     assert est.pi_gdna == pytest.approx(1.0)
     assert est.fallback_flags & FLAG_PI_CLIPPED
@@ -394,7 +470,11 @@ def test_no_region_overlap_raises():
     locus = Locus(ref="chrX", ref_id=99, start=0, end=1000)
     with pytest.raises(RuntimeError, match="overlaps no regions"):
         estimate_locus_gdna(
-            locus=locus, n_obs=10, region_index=idx,
-            region_arrays=ra, payload_arrays=pa,
-            global_densities=gdt, gdna_fl=_delta_fl(200),
+            locus=locus,
+            n_obs=10,
+            region_index=idx,
+            region_arrays=ra,
+            payload_arrays=pa,
+            global_densities=gdt,
+            gdna_fl=_delta_fl(200),
         )

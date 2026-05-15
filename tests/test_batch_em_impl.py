@@ -67,9 +67,7 @@ def test_enabled_gdna_component_absorbs_likelihood_mass_without_prior_count():
     n_units = 80
     est = _estimator(2, mode="map")
     total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
-        partition_tuples=[
-            _partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=0.0)
-        ],
+        partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=0.0)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
@@ -79,6 +77,33 @@ def test_enabled_gdna_component_absorbs_likelihood_mass_without_prior_count():
     assert total_gdna > 0.8 * n_units
     assert locus_gdna[0] == pytest.approx(total_gdna)
     assert locus_rna[0] + locus_gdna[0] == pytest.approx(n_units)
+
+
+def test_gdna_effective_length_downweights_gdna_component():
+    n_units = 100
+    partition = _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0)
+
+    est_short = _estimator(1, mode="map")
+    _total_short, _rna_short, gdna_short = est_short.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([1.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    est_long = _estimator(1, mode="map")
+    _total_long, _rna_long, gdna_long = est_long.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([100.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    assert gdna_long[0] < gdna_short[0]
 
 
 def test_assignment_outputs_follow_partition_units():

@@ -174,7 +174,6 @@ class NativeFragmentScorer {
     // --- Copied index arrays ---
     std::vector<int8_t>  t_strand_;   // int8[n_transcripts]
     std::vector<int32_t> t_length_;   // spliced exonic length
-    std::vector<int32_t> t_span_;     // genomic span (incl introns)
     std::vector<int32_t> t_start_;    // genomic start coordinate
     std::vector<uint8_t> t_is_nrna_;  // uint8[n_transcripts] — 1=nRNA, 0=mRNA
 
@@ -189,13 +188,6 @@ class NativeFragmentScorer {
     int32_t gdna_fl_max_size_;
     double  gdna_fl_tail_base_;
     bool    has_gdna_fl_lut_;
-
-    // --- gDNA length-correction flank (mean gDNA fragment length) ---
-    // Added to each hit's t_span to form the local gDNA sampling
-    // window L_h = t_span[t_h] + gdna_flank.  Together with the
-    // fragment footprint this defines e_h = max(L_h - gfp + 1, 1),
-    // the per-hit effective length for the uniform-position gDNA prior.
-    int32_t gdna_flank_;
 
     // --- Exon data in CSR layout for genomic→transcript mapping ---
     std::vector<int32_t> exon_offsets_;  // [n_transcripts + 1]
@@ -274,10 +266,8 @@ public:
         nb::object gdna_fl_log_prob_obj,
         int32_t gdna_fl_max_size,
         double  gdna_fl_tail_base,
-        int32_t gdna_flank,
         i8_1d   t_strand_arr,
         i32_1d  t_length_arr,
-        i32_1d  t_span_arr,
         i32_1d  t_start_arr,
         i32_1d  exon_offsets_arr,
         i32_1d  exon_starts_arr,
@@ -296,7 +286,6 @@ public:
         gdna_fl_max_size_(gdna_fl_max_size),
         gdna_fl_tail_base_(gdna_fl_tail_base),
         has_gdna_fl_lut_(false),
-        gdna_flank_(gdna_flank),
         max_ll_delta_(pruning_max_ll_delta)
     {
         // Copy index arrays
@@ -308,10 +297,6 @@ public:
         {
             const auto* p = t_length_arr.data();
             t_length_.assign(p, p + n_transcripts_);
-        }
-        {
-            const auto* p = t_span_arr.data();
-            t_span_.assign(p, p + n_transcripts_);
         }
         {
             const auto* p = t_start_arr.data();
@@ -433,9 +418,8 @@ private:
         bool    mm_is_any_spliced;
         int     mm_best_stype;
 
-        // Option B harmonic-mean gDNA length correction: online
-        // logsumexp of per-hit log-liks with per-hit length term
-        // baked in.  The emitted gdna_log_lik at flush time is
+        // Online logsumexp of per-hit gDNA log-liks. The emitted
+        // gdna_log_lik at flush time is
         //   lse_max + log(lse_sum) - log(nh_gdna).
         double  mm_gdna_lse_max;
         double  mm_gdna_lse_sum;
@@ -516,37 +500,24 @@ private:
             st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
         }
 
-        // gDNA per-hit contribution (Option B harmonic-mean length
-        // correction).  Only truly-unspliced hits enter the gDNA
-        // hypothesis.  SRD v2: this gate also excludes the new
-        // SPLICE_IMPLICIT and SPLICE_ARTIFACT classes (any non-zero
-        // splice_type is held out of gDNA).  We anchor the local
-        // sampling window L_h on this hit's first candidate transcript
-        // span (t_span_[t_h] + gdna_flank), bake in the per-hit
-        // log-lik -log(e_h), and accumulate via online logsumexp.
+        // gDNA per-hit contribution. Only truly-unspliced hits enter the
+        // gDNA hypothesis. SRD v2: this gate also excludes SPLICE_IMPLICIT
+        // and SPLICE_ARTIFACT classes (any non-zero splice_type is held out
+        // of gDNA). Effective-length normalization is component-level in the
+        // EM; the scorer emits log h_G(ell_f) plus non-length score terms.
         // At flush time:
         //    gdna_log_lik = lse_max + log(lse_sum) - log(nh_gdna)
-        // which equals  log((1/NH) * sum_h exp(log p_h^gDNA - log e_h)).
+        // which equals  log((1/NH) * sum_h exp(log p_h^gDNA)).
         if (stype == SPLICE_UNSPLICED && n_cand > 0)
         {
             int32_t gfp_val  = cp.g_fp[row];
-            int32_t anchor_t = cp.t_ind[start];
-            if (anchor_t >= 0 && anchor_t < n_transcripts_) {
-                int64_t L_h = static_cast<int64_t>(t_span_[anchor_t])
-                            + gdna_flank_;
-                int64_t e_h = L_h - static_cast<int64_t>(gfp_val) + 1;
-                if (e_h < 1) e_h = 1;
-
-                double gdna_fl    = gdna_frag_len_log_lik(gfp_val);
-                double hit_log_ll = gdna_fl + gdna_log_sp + LOG_HALF
-                                  + log_nm
-                                  - std::log(static_cast<double>(e_h));
-                lse_update(st.mm_gdna_lse_max,
-                           st.mm_gdna_lse_sum,
-                           st.mm_gdna_lse_has,
-                           hit_log_ll);
-                ++st.mm_nh_gdna;
-            }
+            double gdna_fl    = gdna_frag_len_log_lik(gfp_val);
+            double hit_log_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
+            lse_update(st.mm_gdna_lse_max,
+                       st.mm_gdna_lse_sum,
+                       st.mm_gdna_lse_has,
+                       hit_log_ll);
+            ++st.mm_nh_gdna;
         }
 
         // Track member count for NH bookkeeping
@@ -693,9 +664,8 @@ private:
             st.v_is_spliced->push_back(
                 st.mm_is_any_spliced ? 1 : 0);
 
-            // Emit per-unit gDNA log-lik.  Under Option B the scorer
-            // delivers the fully length-corrected scalar; the EM sees
-            // no gDNA-specific bias correction downstream.
+            // Emit one per-unit gDNA log-lik over the full MM group.
+            // The EM applies the per-locus gDNA effective length.
             if (!st.mm_is_any_spliced &&
                 st.mm_nh_gdna > 0 &&
                 st.mm_gdna_lse_has &&
@@ -965,19 +935,12 @@ private:
                 st.v_is_spliced->push_back(
                     is_spl ? 1 : 0);
 
-                // Non-MM path (NH=1 or ambig-same-strand): Option B
-                // reduces to a single-term expression using best_t as
-                // the anchor transcript.
+                // Non-MM path (NH=1 or ambig-same-strand): single-term gDNA
+                // expression. EM applies per-locus gDNA effective length.
                 if (!is_spl && best_t >= 0) {
-                    int64_t L = static_cast<int64_t>(t_span_[best_t])
-                              + gdna_flank_;
-                    int64_t e_h = L - static_cast<int64_t>(
-                                          genomic_footprint) + 1;
-                    if (e_h < 1) e_h = 1;
                     double gdna_fl =
                         gdna_frag_len_log_lik(genomic_footprint);
-                    double gdna_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm
-                                   - std::log(static_cast<double>(e_h));
+                    double gdna_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
                     st.v_gdna_ll->push_back(static_cast<float>(gdna_ll));
                 } else {
                     st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
@@ -1224,8 +1187,8 @@ NB_MODULE(_scoring_impl, m) {
         .def(nb::init<
                  double, double, bool, double, double,
                  nb::object, int32_t, double,
-                 nb::object, int32_t, double, int32_t,
-                 i8_1d, i32_1d, i32_1d, i32_1d,
+                 nb::object, int32_t, double,
+                 i8_1d, i32_1d, i32_1d,
                  i32_1d, i32_1d, i32_1d, i32_1d,
                  u8_1d, double>(),
              nb::arg("log_p_sense"),
@@ -1239,10 +1202,8 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("gdna_fl_log_prob").none(),
              nb::arg("gdna_fl_max_size"),
              nb::arg("gdna_fl_tail_base"),
-             nb::arg("gdna_flank"),
              nb::arg("t_strand_arr"),
              nb::arg("t_length_arr"),
-             nb::arg("t_span_arr"),
              nb::arg("t_start_arr"),
              nb::arg("exon_offsets"),
              nb::arg("exon_starts"),

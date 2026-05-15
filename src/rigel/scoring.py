@@ -114,9 +114,8 @@ class FragmentScorer:
     t_strand_arr: np.ndarray  # int8[n_transcripts]
     t_to_g: np.ndarray  # int32[n_transcripts]
 
-    # Transcript and locus geometry used by RNA/gDNA scoring.
+    # Transcript geometry used by RNA scoring.
     t_length_arr: np.ndarray  # int32[n_transcripts] — spliced exonic length
-    t_span_arr: np.ndarray  # int32[n_transcripts] — genomic span (incl introns)
     t_start_arr: np.ndarray  # int32[n_transcripts] — genomic start coordinate
 
     @staticmethod
@@ -163,16 +162,8 @@ class FragmentScorer:
         gdna_fl_log_prob = gdna_fl._log_prob
         gdna_fl_max_size = gdna_fl.max_size
         gdna_fl_tail_base: float = getattr(gdna_fl, "_tail_base", 0.0)
-        # Mean gDNA fragment length — used as the flank added to each
-        # hit's transcript span to form the local sampling window in
-        # the Option B harmonic-mean length correction.  Returns 0
-        # when the gDNA model is empty (FragmentLengthModel.mean is
-        # safe on zero-weight histograms).
-        gdna_flank: int = int(gdna_fl.mean)
-
-        # Per-transcript length arrays for per-fragment effective length
+        # Per-transcript geometry arrays for RNA scoring.
         t_length_arr = index.t_df["length"].values.astype(np.int32)
-        t_span_arr = (index.t_df["end"].values - index.t_df["start"].values).astype(np.int32)
         t_start_arr = index.t_df["start"].values.astype(np.int32)
 
         # Build per-transcript exon CSR arrays for coverage-weight
@@ -204,7 +195,6 @@ class FragmentScorer:
             t_strand_arr=index.t_to_strand_arr,
             t_to_g=index.t_to_g_arr,
             t_length_arr=t_length_arr,
-            t_span_arr=t_span_arr,
             t_start_arr=t_start_arr,
         )
 
@@ -235,10 +225,8 @@ class FragmentScorer:
             gdna_fl_log_prob=ctx.gdna_fl_log_prob,
             gdna_fl_max_size=int(ctx.gdna_fl_max_size),
             gdna_fl_tail_base=float(ctx.gdna_fl_tail_base),
-            gdna_flank=int(gdna_flank),
             t_strand_arr=np.ascontiguousarray(ctx.t_strand_arr, dtype=np.int8),
             t_length_arr=np.ascontiguousarray(ctx.t_length_arr, dtype=np.int32),
-            t_span_arr=np.ascontiguousarray(ctx.t_span_arr, dtype=np.int32),
             t_start_arr=np.ascontiguousarray(ctx.t_start_arr, dtype=np.int32),
             exon_offsets=np.ascontiguousarray(exon_offsets, dtype=np.int32),
             exon_starts=np.ascontiguousarray(exon_starts, dtype=np.int32),
