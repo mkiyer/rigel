@@ -174,7 +174,6 @@ class NativeFragmentScorer {
     // --- Copied index arrays ---
     std::vector<int8_t>  t_strand_;   // int8[n_transcripts]
     std::vector<int32_t> t_length_;   // spliced exonic length
-    std::vector<int32_t> t_start_;    // genomic start coordinate
     std::vector<uint8_t> t_is_nrna_;  // uint8[n_transcripts] — 1=nRNA, 0=mRNA
 
     // --- Pool-separated likelihood pruning ---
@@ -268,7 +267,6 @@ public:
         double  gdna_fl_tail_base,
         i8_1d   t_strand_arr,
         i32_1d  t_length_arr,
-        i32_1d  t_start_arr,
         i32_1d  exon_offsets_arr,
         i32_1d  exon_starts_arr,
         i32_1d  exon_ends_arr,
@@ -297,10 +295,6 @@ public:
         {
             const auto* p = t_length_arr.data();
             t_length_.assign(p, p + n_transcripts_);
-        }
-        {
-            const auto* p = t_start_arr.data();
-            t_start_.assign(p, p + n_transcripts_);
         }
         {
             const auto* p = t_is_nrna_arr.data();
@@ -1188,7 +1182,7 @@ NB_MODULE(_scoring_impl, m) {
                  double, double, bool, double, double,
                  nb::object, int32_t, double,
                  nb::object, int32_t, double,
-                 i8_1d, i32_1d, i32_1d,
+                 i8_1d, i32_1d,
                  i32_1d, i32_1d, i32_1d, i32_1d,
                  u8_1d, double>(),
              nb::arg("log_p_sense"),
@@ -1204,7 +1198,6 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("gdna_fl_tail_base"),
              nb::arg("t_strand_arr"),
              nb::arg("t_length_arr"),
-             nb::arg("t_start_arr"),
              nb::arg("exon_offsets"),
              nb::arg("exon_starts"),
              nb::arg("exon_ends"),

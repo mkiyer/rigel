@@ -239,9 +239,8 @@ remain comparable.
 | `nrna_active` | True when the multi-locus contains a synthetic-nRNA component. |
 | `fallback_flags` | Bit flags explaining global fallback behavior. |
 
-Keep a compatibility output column `n_gdna_exon_intron` for one release as
-`n_gdna_boundary_observed + n_gdna_exon_only`, while adding the two explicit
-new columns. Internally, prefer the split fields.
+The old compatibility aggregate `n_gdna_exon_intron` has been retired. Use the
+explicit split fields `n_gdna_boundary_observed` and `n_gdna_exon_only`.
 
 ### 3.3 Boundary accumulator
 
@@ -307,7 +306,7 @@ mass and exon-only imputed exposure.
 | `tests/test_exposure.py` (new) | `contained_exposure_clipped` invariants: clip = full → ratio 1; clip ⊂ full → ratio = clipped_eff / full_eff; clip = ∅ → 0. `boundary_crossing_exposure` and `boundary_side_in_window` edge cases. |
 | `tests/test_density_global.py` (update) | Boundary density: raw count divided by `n_sides × Σ h(ℓ)(ℓ−1)`. |
 | `tests/test_per_locus_gdna_mass.py` (update) | New decomposition fields validated to sum to `n_gdna`; flanking intergenic evidence does not add mass outside the EM locus. |
-| `tests/test_calibration_result.py` / golden outputs | New per-locus diagnostic columns plus temporary compatibility aggregate. |
+| `tests/test_calibration_result.py` / golden outputs | Per-locus diagnostic columns using the split boundary/exon-only fields. |
 | `tests/test_pipeline_integration_v6.py` | Update the invariant from `alpha_gdna + alpha_rna == c_base` to `== c_loco` / recorded ESS. |
 | `tests/test_em_prior_weight.py` | Should pass unchanged (no API change to `build_prior_weight_rna`). |
 | Synthetic-sim suite | Re-run after Phase 2, Phase 3, Phase 5; compare gDNA recovery and π̂_gdna calibration vs current baseline. |
@@ -352,9 +351,9 @@ suite — fixes Phase 5 defaults empirically.
 - **Boundary units drift.** Raw counts, weighted HT sums, and densities have
    different units. Preserve raw counts as the mass/evidence quantity and keep
    HT weighted sums optional.
-- **Schema/API churn.** The per-locus diagnostic schema changes. Keep a
-   temporary aggregate `n_gdna_exon_intron` column while adding the split
-   fields, then remove it in a later cleanup if desired.
+- **Schema/API churn.** The per-locus diagnostic schema changed to the split
+   `n_gdna_boundary_observed` and `n_gdna_exon_only` fields; the old
+   `n_gdna_exon_intron` aggregate has been removed.
 - **C++ ABI change if HT is added.** Optional HT arrays require native
    payload/schema updates and recompilation. The default denominator fix avoids
    this risk.

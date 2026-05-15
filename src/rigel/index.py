@@ -729,19 +729,6 @@ def build_index_artifacts(
     return iv_df, region_df
 
 
-def build_region_table(*args, **kwargs):  # pragma: no cover - removed in v0.5.0
-    """Removed in v0.5.0. Calibration no longer uses a regional partition.
-
-    Kept as a stub solely so any external import raises a clear error
-    instead of an opaque ``AttributeError`` at module-load time.
-    """
-    raise NotImplementedError(
-        "build_region_table was removed in rigel v0.5.0; SRD calibration "
-        "operates directly on FragmentBuffer columns and does not require "
-        "a regional partition. See docs/calibration/srd_v1_implementation.md."
-    )
-
-
 # ---------------------------------------------------------------------------
 # TranscriptIndex — unified index class
 # ---------------------------------------------------------------------------

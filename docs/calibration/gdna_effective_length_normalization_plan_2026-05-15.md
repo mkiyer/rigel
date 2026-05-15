@@ -41,8 +41,8 @@ with the following decisions:
 - Accepted: add `gdna_eff_len` diagnostics to `loci.feather` and summary
    aggregate statistics under `summary.json`, not to `quant.feather` or
    `gene_quant.feather`.
-- Accepted cleanup: retire the deprecated `n_gdna_exon_intron` compatibility
-   aggregate after the effective-length behavior is validated.
+- Accepted cleanup: the deprecated `n_gdna_exon_intron` compatibility aggregate
+   is retired; use `n_gdna_boundary_observed` and `n_gdna_exon_only`.
 
 ## Decision
 
@@ -463,7 +463,7 @@ is in `scoring.cpp`, the `NativeFragmentScorer` nanobind constructor,
 Keeping a no-op `gdna_flank` would invite accidental reintroduction of the old
 model.
 
-Dead code to remove in the same patch series:
+Dead code removed in the same patch series:
 
 - `src/rigel/native/scoring.cpp`: `t_span_`, `t_span_arr` constructor
    parameter, its assignment/copy block, and `nb::arg("t_span_arr")`.
@@ -474,8 +474,8 @@ Dead code to remove in the same patch series:
    `NativeFragmentScorer`.
 - `src/rigel/scoring.py`: `gdna_flank` derivation and pass-through.
 
-This removal is safe because RNA coordinate mapping uses `t_length_`,
-`t_start_`, and exon CSR arrays; no non-gDNA scoring path reads `t_span_`.
+This removal is safe because RNA coordinate mapping uses `t_length_` and exon
+CSR arrays; no non-gDNA scoring path reads `t_span_`.
 
 After any C++ edit, rebuild with:
 
@@ -593,9 +593,8 @@ Recommended implementation sequence:
    scalar regression and the locus-15-style behavioral regression.
 5. Add `loci.feather`, `summary.json`, and optional `locus_stats.feather`
    diagnostics.
-6. Retire the deprecated `n_gdna_exon_intron` compatibility aggregate after the
-   core effective-length tests are green. The canonical fields are
-   `n_gdna_boundary_observed` and `n_gdna_exon_only`.
+6. Retire the deprecated `n_gdna_exon_intron` compatibility aggregate. The
+   canonical fields are `n_gdna_boundary_observed` and `n_gdna_exon_only`.
 
 ## Expected Effects And Risks
 

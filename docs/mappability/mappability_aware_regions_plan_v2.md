@@ -321,8 +321,8 @@ Build order inside `TranscriptIndex.build()`:
      - Log: `Mappable: N_in input → N_clean clean → N_kept kept
        (≥{L}bp), covering X.X Mb`.
 
-`build_region_table` is not touched.  The mappable BED's only effect on
-disk is the new feather file.
+The core index artifact builder is not touched. The mappable BED's only effect
+on disk is the new feather file.
 
 ---
 

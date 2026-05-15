@@ -116,7 +116,6 @@ class FragmentScorer:
 
     # Transcript geometry used by RNA scoring.
     t_length_arr: np.ndarray  # int32[n_transcripts] — spliced exonic length
-    t_start_arr: np.ndarray  # int32[n_transcripts] — genomic start coordinate
 
     @staticmethod
     def from_models(
@@ -164,7 +163,6 @@ class FragmentScorer:
         gdna_fl_tail_base: float = getattr(gdna_fl, "_tail_base", 0.0)
         # Per-transcript geometry arrays for RNA scoring.
         t_length_arr = index.t_df["length"].values.astype(np.int32)
-        t_start_arr = index.t_df["start"].values.astype(np.int32)
 
         # Build per-transcript exon CSR arrays for coverage-weight
         # and genomic→transcript coordinate mapping. This replaces
@@ -195,7 +193,6 @@ class FragmentScorer:
             t_strand_arr=index.t_to_strand_arr,
             t_to_g=index.t_to_g_arr,
             t_length_arr=t_length_arr,
-            t_start_arr=t_start_arr,
         )
 
         # Build native C++ scoring context for hot-path acceleration.
@@ -227,7 +224,6 @@ class FragmentScorer:
             gdna_fl_tail_base=float(ctx.gdna_fl_tail_base),
             t_strand_arr=np.ascontiguousarray(ctx.t_strand_arr, dtype=np.int8),
             t_length_arr=np.ascontiguousarray(ctx.t_length_arr, dtype=np.int32),
-            t_start_arr=np.ascontiguousarray(ctx.t_start_arr, dtype=np.int32),
             exon_offsets=np.ascontiguousarray(exon_offsets, dtype=np.int32),
             exon_starts=np.ascontiguousarray(exon_starts, dtype=np.int32),
             exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
