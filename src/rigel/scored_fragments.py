@@ -11,7 +11,7 @@ Pure dataclasses with no logic.  These are shared between scan.py
   EM path.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -61,6 +61,11 @@ class ScoredFragments:
         int8[n_units] — fragment class code per unit.
     splice_type : np.ndarray
         uint8[n_units] — SpliceType enum value per unit.
+    genomic_midpoint : np.ndarray
+        int64[n_units] — genomic midpoint of the unit's gDNA-bearing
+        alignment, or ``INT64_MIN`` when undefined (spliced, no genomic
+        hit, or no gDNA hypothesis). Used by regional gDNA exposure
+        weighting.
     n_units : int
         Number of ambiguous units.
     n_candidates : int
@@ -79,8 +84,11 @@ class ScoredFragments:
     frag_ids: np.ndarray
     frag_class: np.ndarray
     splice_type: np.ndarray
-    n_units: int
-    n_candidates: int
+    genomic_midpoint: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=np.int64)
+    )
+    n_units: int = 0
+    n_candidates: int = 0
 
 
 # Note: the locus / multi-locus types have been moved to :mod:`rigel.locus`

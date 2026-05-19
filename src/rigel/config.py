@@ -240,6 +240,12 @@ class CalibrationConfig:
     pool_quality_good: int = 5_000
     pool_quality_weak: int = 200
 
+    #: Enable the regional gDNA exposure model (per-region ``A_r`` weights
+    #: applied to per-unit gDNA log-likelihoods and per-locus gDNA effective
+    #: length).  Set to ``False`` to fall back on a uniform exposure (the
+    #: pre-v3 behaviour); equivalent to the CLI flag ``--regional-exposure off``.
+    regional_exposure_enabled: bool = True
+
 @dataclass(frozen=True)
 class PipelineConfig:
     """Top-level pipeline configuration composing all sub-configs.

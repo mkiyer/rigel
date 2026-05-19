@@ -764,6 +764,9 @@ class AbundanceEstimator:
             "gdna_prior_count",
             "gdna_eff_len",
             "gdna_eff_len_per_bp",
+            "gdna_eff_len_unweighted",
+            "gdna_eff_len_weight_ratio",
+            "gdna_prior_count_regional",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -820,6 +823,9 @@ class AbundanceEstimator:
             gp_count = float(r.get("gdna_prior_count", 0.0))
             gdna_eff_len = float(r.get("gdna_eff_len", 1.0))
             gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
+            gdna_eff_len_unweighted = float(r.get("gdna_eff_len_unweighted", gdna_eff_len))
+            gdna_eff_len_weight_ratio = float(r.get("gdna_eff_len_weight_ratio", 1.0))
+            gdna_prior_count_regional = float(r.get("gdna_prior_count_regional", gp_count))
             n_em = max(int(r.get("n_em_fragments", 0)), 1)
             gdna_prior = gp_count / n_em
             rows.append(
@@ -841,6 +847,9 @@ class AbundanceEstimator:
                     "gdna_prior_count": gp_count,
                     "gdna_eff_len": gdna_eff_len,
                     "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
+                    "gdna_eff_len_unweighted": gdna_eff_len_unweighted,
+                    "gdna_eff_len_weight_ratio": gdna_eff_len_weight_ratio,
+                    "gdna_prior_count_regional": gdna_prior_count_regional,
                 }
             )
         return pd.DataFrame(rows, columns=cols)

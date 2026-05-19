@@ -344,3 +344,75 @@ def test_assemble_priors_global_only_positive_density():
     # eta_g must be strictly positive: rho_ig > 0 and L_ig > 0.
     assert pt.gdna_prior_count[0] > 0.0
     assert pt.gdna_eff_len[0] >= 1.0
+
+
+def test_assemble_priors_uniform_regional_exposure_matches_baseline():
+    """With uniform regional exposure (default), weighted ≡ unweighted L_g."""
+    index = _fake_index(
+        region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
+        transcripts=[("chr1", 100, 800)],
+    )
+    payload = _make_payload(n_regions=1, counts_intergenic=[5])
+    locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
+    ml = _ml_single(0, [0], list(range(10)), locus)
+    em = _make_em(np.zeros(10, dtype=np.int32))
+    gdt = _gdt_zero(fl_mean=200)
+
+    pt = assemble_priors(
+        multi_loci=[ml],
+        em_data=em,
+        index=index,
+        payload=payload,
+        global_densities=gdt,
+        gdna_fl=_delta_fl(200),
+    )
+    assert pt.gdna_eff_len_unweighted.shape == (1,)
+    assert pt.gdna_prior_count_regional.shape == (1,)
+    assert pt.gdna_eff_len[0] == pytest.approx(pt.gdna_eff_len_unweighted[0])
+    assert np.isfinite(pt.gdna_prior_count_regional[0])
+
+
+def test_assemble_priors_regional_exposure_attenuates_weighted_l_g():
+    """An explicit regional exposure with sub-unit weights must shrink
+    ``gdna_eff_len`` strictly below the unweighted baseline."""
+    from rigel.calibration._arrays import RegionArrays
+    from rigel.calibration._regional_exposure import RegionalGdnaExposure
+
+    index = _fake_index(
+        region_rows=[("chr1", 0, 1000, int(RegionType.INTERGENIC), False, False)],
+        transcripts=[("chr1", 100, 800)],
+    )
+    payload = _make_payload(n_regions=1, counts_intergenic=[5])
+    locus = Locus(ref="chr1", ref_id=0, start=0, end=1000)
+    ml = _ml_single(0, [0], list(range(10)), locus)
+    em = _make_em(np.zeros(10, dtype=np.int32))
+    gdt = _gdt_zero(fl_mean=200)
+    region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    weights = np.array([0.1], dtype=np.float64)
+    regional = RegionalGdnaExposure(
+        rho_hat=np.array([1e-4]),
+        log_weight=np.log(weights),
+        weight=weights,
+        mode="regional",
+        rho_ref=1e-3,
+        n_at_floor=0,
+        per_class={},
+        ref_offsets=region_arrays.ref_offsets.copy(),
+        ref_id=region_arrays.ref_id.copy(),
+        start=region_arrays.start.copy(),
+        end=region_arrays.end.copy(),
+    )
+    pt = assemble_priors(
+        multi_loci=[ml],
+        em_data=em,
+        index=index,
+        payload=payload,
+        global_densities=gdt,
+        gdna_fl=_delta_fl(200),
+        regional_exposure=regional,
+    )
+    # Weight 0.1 attenuates weighted L_g below unweighted.
+    assert pt.gdna_eff_len[0] < pt.gdna_eff_len_unweighted[0]
+    # gdna_prior_count (canonical eta_g) unchanged by regional weighting.
+    assert pt.gdna_prior_count[0] == pytest.approx(0.0)  # gdt has rho=0
+

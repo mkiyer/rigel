@@ -21,6 +21,7 @@ and produces:
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -35,9 +36,11 @@ from ._exposure import (
     boundary_side_in_window,
     contained_exposure_clipped,
     gdna_eff_len_for_loci,
+    weighted_gdna_eff_len_for_loci,
 )
 from ._locus_n_obs import build_t_to_local_locus, partition_units_to_loci
 from ._region_index_py import RegionIndexPy
+from ._regional_exposure import RegionalGdnaExposure
 from .density_global import GlobalDensityTable
 from .density_loco import shrink_to_loco
 from .regions import RegionType
@@ -158,6 +161,18 @@ class PriorTable:
     gdna_eff_len: np.ndarray  # float64, (n_loci,)
     #: ``uint8`` flag forwarded to the native EM as ``locus_enable_gdna``.
     enable_gdna: np.ndarray  # uint8, (n_loci,)
+    #: Diagnostic: FL-PMF-weighted contained exposure with *no* regional
+    #: weighting (the v6 baseline). Bit-exact equal to ``gdna_eff_len``
+    #: when ``regional_exposure`` is uniform.
+    gdna_eff_len_unweighted: np.ndarray = dataclasses.field(
+        default_factory=lambda: np.empty(0, dtype=np.float64)
+    )
+    #: Diagnostic: expected gDNA pseudocount under the per-region
+    #: regional density field (rho_hat). Never consumed by the EM;
+    #: emitted in ``loci.feather`` for QC.
+    gdna_prior_count_regional: np.ndarray = dataclasses.field(
+        default_factory=lambda: np.empty(0, dtype=np.float64)
+    )
 
     @classmethod
     def empty(cls) -> "PriorTable":
@@ -174,6 +189,8 @@ class PriorTable:
             gdna_prior_count=np.empty(0, dtype=np.float64),
             gdna_eff_len=np.empty(0, dtype=np.float64),
             enable_gdna=np.empty(0, dtype=np.uint8),
+            gdna_eff_len_unweighted=np.empty(0, dtype=np.float64),
+            gdna_prior_count_regional=np.empty(0, dtype=np.float64),
         )
 
 
@@ -709,6 +726,44 @@ def expected_gdna_count_global(
     )
 
 
+def _expected_gdna_count_regional_diag(
+    locus: Locus,
+    scratch: _LocusScratch | None,
+    regional_exposure: RegionalGdnaExposure,
+    b_cross: float,
+) -> float:
+    """Diagnostic expected gDNA count under the per-region rho_hat field.
+
+    Mirrors :func:`expected_gdna_count_global` but replaces the three
+    global densities with the per-region ``rho_hat[r]`` field from the
+    regional exposure model. Used purely for ``loci.feather`` QC; never
+    fed back into the EM prior.
+    """
+    if scratch is None:
+        return 0.0
+    rho_hat = regional_exposure.rho_hat[scratch.region_ids]
+    contained = float(np.dot(rho_hat, scratch.eff_clip_core))
+
+    if scratch.is_ex.any():
+        ex_mask = scratch.is_ex
+        rho_ex = rho_hat[ex_mask]
+        bf_l_ex = scratch.bf_l[ex_mask]
+        bf_r_ex = scratch.bf_r[ex_mask]
+        starts_ex = scratch.starts[ex_mask]
+        ends_ex = scratch.ends[ex_mask]
+        in_left, in_right = boundary_side_in_window(
+            starts_ex, ends_ex, int(locus.start), int(locus.end)
+        )
+        sides = (bf_l_ex & in_left).astype(np.float64) + (bf_r_ex & in_right).astype(
+            np.float64
+        )
+        boundary = float(np.dot(sides, rho_ex)) * float(b_cross)
+    else:
+        boundary = 0.0
+
+    return contained + boundary
+
+
 def enable_gdna_for_multilocus(
     ml: MultiLocus,
     em_data: ScoredFragments,
@@ -773,6 +828,7 @@ def assemble_priors(
     gdna_fl: FragmentLengthModel | None = None,
     intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
     splicing_anchor_tolerance: int = 0,
+    regional_exposure: RegionalGdnaExposure | None = None,
 ) -> PriorTable:
     """Build the full :class:`PriorTable` for the batch EM.
 
@@ -815,6 +871,9 @@ def assemble_priors(
     payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
     region_index = RegionIndexPy(arrays=region_arrays)
 
+    if regional_exposure is None:
+        regional_exposure = RegionalGdnaExposure.uniform(region_arrays)
+
     # Hoist boundary-crossing exposure out of the per-locus loop:
     # depends only on (gdna_fl, splicing_anchor_tolerance), both
     # constant across the multi-loci. Eliminates ~one O(max_size)
@@ -841,6 +900,8 @@ def assemble_priors(
     n_ml = len(multi_loci)
     gdna_prior_count_arr = np.zeros(n_ml, dtype=np.float64)
     gdna_eff_len_arr = np.ones(n_ml, dtype=np.float64)
+    gdna_eff_len_unweighted_arr = np.ones(n_ml, dtype=np.float64)
+    gdna_prior_count_regional_arr = np.zeros(n_ml, dtype=np.float64)
     enable_gdna_arr = np.zeros(n_ml, dtype=np.uint8)
     multi_locus_priors: list[MultiLocusPrior | None] = [None] * n_ml
 
@@ -919,11 +980,30 @@ def assemble_priors(
         )
         multi_locus_priors[idx] = ml_prior
         gdna_prior_count_arr[idx] = eta_g
-        gdna_eff_len_arr[idx] = gdna_eff_len_for_loci(
+        unweighted_eff_len = gdna_eff_len_for_loci(
             ml.loci,
             ref_lengths_arr,
             gdna_fl,
             min_value=1.0,
+        )
+        gdna_eff_len_unweighted_arr[idx] = unweighted_eff_len
+        gdna_eff_len_arr[idx] = weighted_gdna_eff_len_for_loci(
+            ml.loci,
+            ref_lengths_arr,
+            gdna_fl,
+            regional_exposure,
+            min_value=1.0,
+        )
+        gdna_prior_count_regional_arr[idx] = float(
+            sum(
+                _expected_gdna_count_regional_diag(
+                    loc,
+                    scratch,
+                    regional_exposure,
+                    b_cross,
+                )
+                for loc, scratch in zip(ml.loci, loci_scratch, strict=True)
+            )
         )
         enable_gdna_arr[idx] = np.uint8(1 if enable_gdna_for_multilocus(ml, em_data) else 0)
 
@@ -939,4 +1019,6 @@ def assemble_priors(
         gdna_prior_count=gdna_prior_count_arr,
         gdna_eff_len=gdna_eff_len_arr,
         enable_gdna=enable_gdna_arr,
+        gdna_eff_len_unweighted=gdna_eff_len_unweighted_arr,
+        gdna_prior_count_regional=gdna_prior_count_regional_arr,
     )

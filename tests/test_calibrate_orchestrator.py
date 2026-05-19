@@ -99,7 +99,7 @@ def _make_region_df() -> pd.DataFrame:
 
 def _stub_index(region_df: pd.DataFrame | None = None) -> SimpleNamespace:
     """Tiny TranscriptIndex stand-in carrying only ``region_df``."""
-    return SimpleNamespace(region_df=region_df)
+    return SimpleNamespace(region_df=region_df, ref_name_to_id={"chr1": 0})
 
 
 def _payload(

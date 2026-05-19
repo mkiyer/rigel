@@ -1,0 +1,16 @@
+{
+  "bam": "/Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/annotated.bam",
+  "record_counts": {
+    "fragments_counted": 32218601,
+    "gdna_false_rna": 3331662,
+    "read2_skipped": 32218601,
+    "records_seen": 66113219,
+    "secondary_skipped": 1568372,
+    "supplementary_skipped": 107645
+  },
+  "source_map": {
+    "C6EL5ANXX": "rna",
+    "H7MFFDSXY": "gdna"
+  },
+  "window_size": 10000
+}

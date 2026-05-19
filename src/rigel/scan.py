@@ -166,6 +166,7 @@ class FragmentRouter:
             n_gated,
             n_chim,
             n_mm,
+            genomic_midpoint,
         ) = result
 
         stats.deterministic_unambig_units += int(n_det)
@@ -221,6 +222,7 @@ class FragmentRouter:
             frag_ids=frag_ids,
             frag_class=frag_classes,
             splice_type=splice_types,
+            genomic_midpoint=genomic_midpoint,
             n_units=int(len(offsets) - 1),
             n_candidates=int(len(t_indices)),
         )

@@ -23,7 +23,9 @@ from ._fl_sources import (
     extract_global_counts,
     extract_rna_counts,
 )
+from ._arrays import PayloadArrays, RegionArrays
 from ._orient import StrandSummary
+from ._regional_exposure import RegionalGdnaExposure
 from ._result import CalibrationResult, build_calibration_result
 from .density_global import compute_global_densities
 from .fl import (
@@ -51,6 +53,7 @@ def calibrate(
     pool_quality_good: int = POOL_QUALITY_GOOD_THRESHOLD,
     pool_quality_weak: int = POOL_QUALITY_WEAK_THRESHOLD,
     strand_summary: StrandSummary | None = None,
+    regional_exposure_enabled: bool = True,
 ) -> CalibrationResult:
     """Run the v6 calibration pipeline end-to-end (sans per-locus priors).
 
@@ -117,10 +120,23 @@ def calibrate(
         strand_summary=strand_summary,
     )
 
+    region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
+    regional_exposure = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        global_densities,
+        fl_models.gdna,
+        strand_summary=strand_summary,
+        splicing_anchor_tolerance=int(getattr(payload, "splicing_anchor_tolerance", 0)),
+        enabled=regional_exposure_enabled,
+    )
+
     return build_calibration_result(
         payload=payload,
         scan_trained=scan_trained,
         global_densities=global_densities,
         fl_models=fl_models,
         fl_prior_ess=fl_prior_ess,
+        regional_exposure=regional_exposure,
     )

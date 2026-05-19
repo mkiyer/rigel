@@ -47,6 +47,7 @@ class RegionArrays:
     start: np.ndarray         # int64, (R,)
     end: np.ndarray           # int64, (R,)
     type: np.ndarray          # uint8, (R,)
+    strand: np.ndarray        # uint8, (R,) — RegionStrand bitflag
     bf_left: np.ndarray       # bool,  (R,)
     bf_right: np.ndarray      # bool,  (R,)
     ref_offsets: np.ndarray   # int32, (n_refs + 1,)
@@ -78,6 +79,10 @@ class RegionArrays:
         start = region_df["start"].to_numpy().astype(np.int64, copy=False)[order]
         end = region_df["end"].to_numpy().astype(np.int64, copy=False)[order]
         type_ = region_df["type"].to_numpy().astype(np.uint8, copy=False)[order]
+        if "strand" in region_df.columns:
+            strand = region_df["strand"].to_numpy().astype(np.uint8, copy=False)[order]
+        else:
+            strand = np.zeros(n_regions, dtype=np.uint8)
         bf_left = region_df["boundary_flux_left"].to_numpy().astype(bool, copy=False)[order]
         bf_right = region_df["boundary_flux_right"].to_numpy().astype(bool, copy=False)[order]
 
@@ -95,6 +100,7 @@ class RegionArrays:
             start=start,
             end=end,
             type=type_,
+            strand=strand,
             bf_left=bf_left,
             bf_right=bf_right,
             ref_offsets=ref_offsets,
@@ -117,6 +123,9 @@ class PayloadArrays:
     intron_per_region: np.ndarray      # int64, (R,)
     u_left: np.ndarray                 # int64, (R,)
     u_right: np.ndarray                # int64, (R,)
+    intron_by_orient: np.ndarray       # int64, (R, ORIENT_N)
+    u_left_by_orient: np.ndarray       # int64, (R, ORIENT_N)
+    u_right_by_orient: np.ndarray      # int64, (R, ORIENT_N)
 
     @classmethod
     def from_payload(
@@ -134,4 +143,7 @@ class PayloadArrays:
             ),
             u_left=np.ascontiguousarray(payload.u_left[order]),
             u_right=np.ascontiguousarray(payload.u_right[order]),
+            intron_by_orient=np.ascontiguousarray(payload.intron_counts_by_orient[order]),
+            u_left_by_orient=np.ascontiguousarray(payload.u_left_by_orient[order]),
+            u_right_by_orient=np.ascontiguousarray(payload.u_right_by_orient[order]),
         )

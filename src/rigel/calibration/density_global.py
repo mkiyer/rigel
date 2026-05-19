@@ -266,6 +266,20 @@ def _strand_identifiable_rows(strands: np.ndarray) -> np.ndarray:
     return (strands == int(RegionStrand.POS)) | (strands == int(RegionStrand.NEG))
 
 
+def strand_correction_usable(strand_summary: StrandSummary) -> bool:
+    """Return True if the strand-correction contrast is large enough to use.
+
+    Shared gate used both by :func:`compute_global_densities` and the
+    regional-exposure builder so the two paths cannot drift apart.
+    """
+    ssc = strand_summary.signed_strand_contrast
+    margin = max(
+        STRAND_CONTRAST_NUMERICAL_FLOOR,
+        strand_summary.signed_strand_contrast_margin(confidence=0.99),
+    )
+    return abs(ssc) >= margin and abs(ssc) > 0.0
+
+
 def _channel_intergenic(
     *,
     region_mask: np.ndarray,
@@ -392,14 +406,7 @@ def _compute_density(
     informative = rows.strand_identifiable & positive_exposure
     informative_exposure = float(exposure[informative].sum())
     signed_strand_contrast = strand_summary.signed_strand_contrast
-    effective_min_contrast = max(
-        STRAND_CONTRAST_NUMERICAL_FLOOR,
-        strand_summary.signed_strand_contrast_margin(confidence=0.99),
-    )
-    has_usable_contrast = (
-        abs(signed_strand_contrast) >= effective_min_contrast
-        and abs(signed_strand_contrast) > 0.0
-    )
+    has_usable_contrast = strand_correction_usable(strand_summary)
     strand_active = bool(has_usable_contrast and informative_exposure > 0.0)
 
     if strand_active:

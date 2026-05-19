@@ -22,6 +22,10 @@ from ._fl_sources import (
     extract_global_counts,
     extract_rna_counts,
 )
+from ._regional_exposure import (
+    RegionalGdnaExposure,
+    RegionalWeightApplicationStats,
+)
 from .density_global import GlobalDensityTable
 from .fl import POOL_EB_PRIOR_ESS, FLModels, build_fl_models
 from .locus_prior import LocusGdnaEstimate, MultiLocusPrior, PriorTable
@@ -153,6 +157,15 @@ class CalibrationResult:
     # below-tolerance subset of that bucket.
     n_below_tolerance: int = 0
 
+    # Regional exposure model (v3). ``None`` means it was not built
+    # (pre-regional-exposure callers); the pipeline treats this as
+    # ``RegionalGdnaExposure.uniform(...)`` semantically.
+    regional_exposure: RegionalGdnaExposure | None = None
+    # Filled in by the pipeline after applying per-unit weights to
+    # em_data via :meth:`with_regional_weighting_stats`. ``None``
+    # until that step runs.
+    regional_weighting_stats: RegionalWeightApplicationStats | None = None
+
     # ---- Convenience zero-copy aliases ----
     @property
     def gdna_prior_count(self) -> np.ndarray:
@@ -184,6 +197,11 @@ class CalibrationResult:
             per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
         )
 
+    def with_regional_weighting_stats(
+        self, stats: RegionalWeightApplicationStats
+    ) -> "CalibrationResult":
+        return dataclasses.replace(self, regional_weighting_stats=stats)
+
     def to_summary_dict(self) -> dict[str, object]:
         mean_pi = (
             float(np.mean([m.pi_gdna for m in self.prior_table.multi_locus_priors]))
@@ -198,6 +216,16 @@ class CalibrationResult:
             "mean_pi_gdna": mean_pi,
             "splicing_anchor_tolerance": int(self.splicing_anchor_tolerance),
             "n_below_tolerance": int(self.n_below_tolerance),
+            "regional_exposure": (
+                self.regional_exposure.to_summary_dict()
+                if self.regional_exposure is not None
+                else None
+            ),
+            "regional_weighting_stats": (
+                self.regional_weighting_stats.to_dict()
+                if self.regional_weighting_stats is not None
+                else None
+            ),
         }
 
 
@@ -214,6 +242,7 @@ def build_calibration_result(
     prior_table: PriorTable | None = None,
     fl_prior_ess: float = POOL_EB_PRIOR_ESS,
     fl_models: FLModels | None = None,
+    regional_exposure: RegionalGdnaExposure | None = None,
 ) -> CalibrationResult:
     """Assemble the immutable v6 calibration result.
 
@@ -253,4 +282,5 @@ def build_calibration_result(
         per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
         splicing_anchor_tolerance=int(getattr(payload, "splicing_anchor_tolerance", 0)),
         n_below_tolerance=int(getattr(payload, "n_below_tolerance", 0)),
+        regional_exposure=regional_exposure,
     )

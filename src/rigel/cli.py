@@ -589,6 +589,11 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
+    _ParamSpec(
+        "regional_exposure",
+        "calibration.regional_exposure_enabled",
+        "regional_exposure",
+    ),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -646,6 +651,8 @@ def _config_to_cli(val: object, transform: str) -> object:
         return str(val) if val else None
     if transform == "gb_to_bytes":
         return val / (1024**3)  # bytes → GiB for CLI display
+    if transform == "regional_exposure":
+        return "auto" if val else "off"
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -676,6 +683,17 @@ def _cli_to_config(val: object, transform: str) -> object:
         return Path(val) if val else None
     if transform == "gb_to_bytes":
         return int(val * 1024**3)  # GiB → bytes
+    if transform == "regional_exposure":
+        if isinstance(val, bool):
+            return val
+        s = str(val).lower()
+        if s == "auto":
+            return True
+        if s == "off":
+            return False
+        raise ValueError(
+            f"--regional-exposure expects 'auto' or 'off', got {val!r}"
+        )
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -1175,6 +1193,18 @@ def build_parser() -> argparse.ArgumentParser:
         "above which a pool's per-FL distribution is flagged 'weak' "
         "(default: 200). Below this threshold the pool is flagged "
         "'unusable' and downstream code falls back on the global FL.",
+    )
+    adv.add_argument(
+        "--regional-exposure",
+        dest="regional_exposure",
+        choices=("auto", "off"),
+        default=None,
+        help="Enable ('auto', default) or disable ('off') the regional "
+        "gDNA exposure model. When enabled, per-region exposure weights "
+        "A_r attenuate per-unit gDNA log-likelihoods and per-locus gDNA "
+        "effective length, suppressing gDNA mass in regions with no "
+        "evidence of gDNA fragments (e.g. hybrid-capture off-target). "
+        "Use 'off' to reproduce the pre-v3 uniform-exposure behaviour.",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",

@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -385,6 +386,7 @@ private:
         std::vector<uint8_t>*  v_locus_ct;
         std::vector<int8_t>*   v_is_spliced;
         std::vector<float>*    v_gdna_ll;
+        std::vector<int64_t>*  v_gmid;  // genomic midpoint per unit; INT64_MIN sentinel
         std::vector<int64_t>*  v_fid;
         std::vector<int8_t>*   v_fclass;
         std::vector<uint8_t>*  v_stype;
@@ -419,13 +421,16 @@ private:
         double  mm_gdna_lse_sum;
         bool    mm_gdna_lse_has;
         int32_t mm_nh_gdna;
+        // First valid unspliced (genomic-midpoint, gDNA-bearing) hit
+        // observed in the current MM group. INT64_MIN means none.
+        int64_t mm_gmid_first;
 
         FillState()
             : v_ti(nullptr), v_ll(nullptr), v_ct(nullptr),
                             v_cw(nullptr),
               v_offsets(nullptr), v_locus_t(nullptr),
               v_locus_ct(nullptr), v_is_spliced(nullptr),
-              v_gdna_ll(nullptr), v_fid(nullptr),
+              v_gdna_ll(nullptr), v_gmid(nullptr), v_fid(nullptr),
               v_fclass(nullptr), v_stype(nullptr),
               v_det_ti(nullptr), v_det_fid(nullptr),
               v_chim_fid(nullptr), v_chim_stype(nullptr),
@@ -437,7 +442,8 @@ private:
               mm_gdna_lse_max(0.0),
               mm_gdna_lse_sum(0.0),
               mm_gdna_lse_has(false),
-              mm_nh_gdna(0) {}
+              mm_nh_gdna(0),
+              mm_gmid_first(std::numeric_limits<int64_t>::min()) {}
 
         void reset_mm_group() {
             mm_merged.clear();  // reuses hash bucket allocation
@@ -449,6 +455,7 @@ private:
             mm_gdna_lse_sum = 0.0;
             mm_gdna_lse_has = false;
             mm_nh_gdna = 0;
+            mm_gmid_first = std::numeric_limits<int64_t>::min();
         }
     };
 
@@ -512,6 +519,16 @@ private:
                        st.mm_gdna_lse_has,
                        hit_log_ll);
             ++st.mm_nh_gdna;
+
+            // Track the first valid (has_genomic + has gDNA hypothesis)
+            // midpoint observed in this MM group for regional weighting.
+            if (has_genomic &&
+                st.mm_gmid_first ==
+                    std::numeric_limits<int64_t>::min()) {
+                st.mm_gmid_first =
+                    static_cast<int64_t>(genomic_start_val)
+                    + static_cast<int64_t>(gfp_val) / 2;
+            }
         }
 
         // Track member count for NH bookkeeping
@@ -668,8 +685,11 @@ private:
                                      + std::log(st.mm_gdna_lse_sum)
                                      - std::log((double)st.mm_nh_gdna);
                 st.v_gdna_ll->push_back(static_cast<float>(final_gdna_ll));
+                st.v_gmid->push_back(st.mm_gmid_first);
             } else {
                 st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
+                st.v_gmid->push_back(
+                    std::numeric_limits<int64_t>::min());
             }
 
             ++st.unit_cur;
@@ -936,8 +956,18 @@ private:
                         gdna_frag_len_log_lik(genomic_footprint);
                     double gdna_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
                     st.v_gdna_ll->push_back(static_cast<float>(gdna_ll));
+                    if (has_genomic) {
+                        st.v_gmid->push_back(
+                            static_cast<int64_t>(genomic_start)
+                            + static_cast<int64_t>(genomic_footprint) / 2);
+                    } else {
+                        st.v_gmid->push_back(
+                            std::numeric_limits<int64_t>::min());
+                    }
                 } else {
                     st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
+                    st.v_gmid->push_back(
+                        std::numeric_limits<int64_t>::min());
                 }
 
                 ++st.unit_cur;
@@ -980,6 +1010,7 @@ class StreamingScorer {
     std::vector<uint8_t>*  v_lct_;
     std::vector<int8_t>*   v_isp_;
     std::vector<float>*    v_gll_;
+    std::vector<int64_t>*  v_gmid_;
     std::vector<int64_t>*  v_fid_;
     std::vector<int8_t>*   v_fc_;
     std::vector<uint8_t>*  v_st_;
@@ -1021,6 +1052,7 @@ public:
         v_lct_ = new std::vector<uint8_t>();
         v_isp_ = new std::vector<int8_t>();
         v_gll_ = new std::vector<float>();
+        v_gmid_ = new std::vector<int64_t>();
         v_fid_ = new std::vector<int64_t>();
         v_fc_  = new std::vector<int8_t>();
         v_st_  = new std::vector<uint8_t>();
@@ -1040,6 +1072,7 @@ public:
         st_.v_locus_ct   = v_lct_;
         st_.v_is_spliced = v_isp_;
         st_.v_gdna_ll    = v_gll_;
+        st_.v_gmid       = v_gmid_;
         st_.v_fid        = v_fid_;
         st_.v_fclass     = v_fc_;
         st_.v_stype      = v_st_;
@@ -1065,6 +1098,7 @@ public:
         delete v_lct_;
         delete v_isp_;
         delete v_gll_;
+        delete v_gmid_;
         delete v_fid_;
         delete v_fc_;
         delete v_st_;
@@ -1145,7 +1179,8 @@ public:
             stat_em_ao_,
             stat_gated_,
             stat_chim_,
-            stat_mm_
+            stat_mm_,
+            vec_to_ndarray(v_gmid_)
         );
 
         // Null out pointers — capsules now own the memory
@@ -1154,6 +1189,7 @@ public:
         v_ct_ = nullptr;  v_cw_ = nullptr;
         v_lt_ = nullptr;  v_lct_ = nullptr;
         v_isp_ = nullptr; v_gll_ = nullptr;
+        v_gmid_ = nullptr;
         v_fid_ = nullptr;
         v_fc_ = nullptr;  v_st_ = nullptr;
         v_dti_ = nullptr; v_dfid_ = nullptr;

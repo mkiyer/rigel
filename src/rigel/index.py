@@ -750,6 +750,7 @@ class TranscriptIndex:
         self.g_df: pd.DataFrame | None = None
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
+        self.t_to_ref_arr: np.ndarray | None = None
         self.g_to_strand_arr: np.ndarray | None = None
 
         # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
@@ -1113,6 +1114,17 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
         self.g_to_strand_arr = self.g_df["strand"].values
+
+        # Per-transcript canonical reference id (matches index.ref_name_to_id
+        # / BAM tid space, not pandas categorical codes).  Used by the
+        # regional-exposure per-unit weight applier and any other code path
+        # that needs ref ids without re-mapping categorical codes.
+        _ref_cat = self.t_df["ref"].cat
+        _cat_to_canonical_ref = np.array(
+            [self.ref_name_to_id[str(name)] for name in _ref_cat.categories],
+            dtype=np.int32,
+        )
+        self.t_to_ref_arr = _cat_to_canonical_ref[_ref_cat.codes.values.astype(np.int64, copy=False)]
 
         # -- region partition (calibration) -----------------------------------
         logger.debug("Reading regions")
