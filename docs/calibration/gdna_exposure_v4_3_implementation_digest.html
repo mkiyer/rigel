@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>gDNA Regional Exposure v4.3 Implementation Digest</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.45; margin: 2rem; max-width: 980px; }
+    h1, h2 { line-height: 1.2; }
+    code { background: #f4f4f4; padding: 0.1rem 0.25rem; border-radius: 3px; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 0.45rem 0.6rem; vertical-align: top; }
+    th { background: #f7f7f7; text-align: left; }
+    .ok { color: #166534; font-weight: 600; }
+    .issue { color: #991b1b; font-weight: 600; }
+    .open { color: #92400e; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>gDNA Regional Exposure v4.3 Implementation Digest</h1>
+  <p><strong>Date:</strong> 2026-05-19</p>
+  <p><strong>Goal:</strong> implement the denominator-only regional exposure model from
+    <code>docs/calibration/gdna_exposure_plan_v4.3.md</code>.</p>
+
+  <h2>Running Status</h2>
+  <table>
+    <thead>
+      <tr><th>Step</th><th>Status</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Code map</td>
+        <td class="ok">Complete</td>
+        <td>
+          Existing regional exposure still uses per-class shrinkage, per-class reference
+          quantiles, per-class signal attenuation, and a global max of class references.
+          The pipeline also still applies per-unit gDNA numerator weights through
+          <code>_apply_unit_gdna_weights</code>.
+        </td>
+      </tr>
+      <tr>
+        <td>Implementation</td>
+        <td class="ok">Core code complete</td>
+        <td>
+          Implemented the global exposure field, shared footprint weights,
+          EM/output transcript length split, gDNA EM prior rescaling, and
+          removed production numerator mutation.
+        </td>
+      </tr>
+      <tr>
+        <td>Validation</td>
+        <td class="ok">Complete</td>
+        <td>
+          <code>pytest tests/test_regional_exposure.py tests/test_weighted_eff_len.py
+          tests/test_assemble_priors.py tests/test_calibration_result.py
+          tests/test_calibrate_orchestrator.py tests/test_estimator.py -q</code>
+          passed: 100 tests. The full suite passed after refreshing intentional golden
+          outputs: <code>1097 passed</code>. Project-wide Ruff also passed.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Successful Details</h2>
+  <ul>
+    <li>No native EM ABI change appears necessary: C++ already accepts transcript effective lengths, gDNA effective lengths, and gDNA prior counts as arrays.</li>
+    <li>The existing <code>RegionalGdnaExposure.weighted_length_on_ref</code> primitive can support footprint-average exposure weights.</li>
+    <li>The existing index exon CSR can support mRNA exon-block footprints.</li>
+    <li><code>RegionalGdnaExposure.build</code> now computes one global <code>rho_global</code>, one global <code>kappa_global</code>, one global <code>rho_ref</code>, and one exposure field.</li>
+    <li><code>AbundanceEstimator</code> now stores raw public transcript lengths separately from EM transcript lengths.</li>
+    <li><code>PriorTable</code> now carries both raw <code>gdna_prior_count</code> and EM-rescaled <code>gdna_prior_count_em</code>.</li>
+    <li>The production call to <code>_apply_unit_gdna_weights</code> has been removed; regional exposure is denominator-only.</li>
+  </ul>
+
+  <h2>Problems And Issues</h2>
+  <ul>
+    <li class="issue">The old implementation's <code>rho_ref_per_class</code>, <code>signal_per_class</code>, and numerator mutation paths must be removed from production behavior.</li>
+    <li class="ok">The old class-reference and class-signal fields have been removed from production exposure construction.</li>
+    <li class="issue">Existing tests expect <code>gdna_prior_count_regional</code>; v4.3 replaces that with <code>gdna_prior_count_em</code> and exposure-weight diagnostics, so tests need updates.</li>
+    <li class="ok">Focused tests have been updated for <code>gdna_prior_count_em</code>, <code>gdna_em_exposure_weight</code>, and transcript EM length diagnostics.</li>
+    <li class="ok">Ruff passed on all touched source and test files.</li>
+    <li class="ok">Full-suite run before golden refresh had 4 failures in <code>tests/test_golden_output.py</code>; the differences were transcript count shifts in gDNA/combined scenarios, consistent with the intentional denominator-only regional exposure change. After <code>--update-golden</code>, the golden suite and full suite passed.</li>
+  </ul>
+
+  <h2>Open Questions Not Resolved Ahead Of Time</h2>
+  <ul>
+    <li class="open">Whether exact fragment-midpoint integration for gDNA denominators will be needed after the simpler footprint-average model passes or fails VCaP gates.</li>
+    <li class="open">Whether the three gDNA evidence channels are sufficiently calibrated onto one common global field in real hybrid-capture data.</li>
+  </ul>
+
+  <h2>Change Log</h2>
+  <ol>
+    <li>Created this digest before code edits.</li>
+    <li>Refactored <code>_regional_exposure.py</code> to remove class-specific exposure normalization.</li>
+    <li>Added <code>footprint_exposure_weight</code> and <code>transcript_exposure_weights</code> in <code>_exposure.py</code>.</li>
+    <li>Split public and EM transcript effective lengths in <code>config.py</code>, <code>pipeline.py</code>, and <code>estimator.py</code>.</li>
+    <li>Changed <code>assemble_priors</code> to compute gDNA EM length as raw length times footprint exposure weight, and to rescale the EM gDNA prior accordingly.</li>
+    <li>Removed production numerator weighting from <code>quant_from_buffer</code>.</li>
+    <li>Updated focused tests and confirmed 100 focused tests pass.</li>
+    <li>Ran Ruff on touched files; all checks passed.</li>
+    <li>Ran the full test suite before refreshing goldens; 1093 tests passed and 4 golden-output comparisons failed as expected.</li>
+    <li>Refreshed golden outputs through <code>pytest tests/test_golden_output.py --update-golden -q</code>; the harness saved files and skipped by design.</li>
+    <li>Confirmed <code>tests/test_golden_output.py -q</code> passes: 21 tests.</li>
+    <li>Confirmed <code>pytest tests/ -q</code> passes: 1097 tests.</li>
+    <li>Confirmed <code>ruff check src/ tests/</code> passes.</li>
+    <li>Cleaned stale comments that still described production numerator weighting; reran Ruff on those source files successfully.</li>
+  </ol>
+</body>
+</html>

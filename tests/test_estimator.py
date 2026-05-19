@@ -9,7 +9,7 @@ from rigel.splice import (
     SpliceType,
     SpliceStrandCol,
 )
-from rigel.config import EMConfig
+from rigel.config import EMConfig, TranscriptGeometry
 from rigel.estimator import AbundanceEstimator
 from rigel.scored_fragments import ScoredFragments
 
@@ -574,6 +574,8 @@ class TestCountsOutput:
             "gene_id",
             "gene_name",
             "effective_length",
+            "em_effective_length",
+            "em_exposure_weight",
             "locus_id",
             "nrna_id",
             "is_basic",
@@ -589,6 +591,22 @@ class TestCountsOutput:
             "posterior_mean",
         ]
         assert list(df.columns) == expected_cols
+
+    def test_counts_df_keeps_raw_and_em_effective_lengths_separate(self):
+        index = _make_index()
+        geometry = TranscriptGeometry(
+            effective_lengths=np.array([100.0, 200.0, 300.0]),
+            exonic_lengths=np.array([100.0, 200.0, 300.0]),
+            t_to_g=index.t_to_g_arr,
+            transcript_spans=np.array([500.0, 500.0, 500.0]),
+            effective_lengths_em=np.array([50.0, 100.0, 300.0]),
+        )
+        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42), geometry=geometry)
+
+        df = rc.get_counts_df(index)
+        assert df.loc[0, "effective_length"] == pytest.approx(100.0)
+        assert df.loc[0, "em_effective_length"] == pytest.approx(50.0)
+        assert df.loc[0, "em_exposure_weight"] == pytest.approx(0.5)
 
     def test_get_gene_counts_df_columns(self):
         index = _make_index()

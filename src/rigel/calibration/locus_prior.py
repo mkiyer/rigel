@@ -35,8 +35,8 @@ from ._exposure import (
     boundary_crossing_exposure,
     boundary_side_in_window,
     contained_exposure_clipped,
+    footprint_exposure_weight,
     gdna_eff_len_for_loci,
-    weighted_gdna_eff_len_for_loci,
 )
 from ._locus_n_obs import build_t_to_local_locus, partition_units_to_loci
 from ._region_index_py import RegionIndexPy
@@ -157,8 +157,9 @@ class PriorTable:
     """
 
     multi_locus_priors: tuple[MultiLocusPrior, ...]
-    gdna_prior_count: np.ndarray  # float64, (n_loci,)
-    gdna_eff_len: np.ndarray  # float64, (n_loci,)
+    gdna_prior_count: np.ndarray  # float64, (n_loci,), raw diagnostic eta_g
+    gdna_prior_count_em: np.ndarray  # float64, (n_loci,), eta_g passed to EM
+    gdna_eff_len: np.ndarray  # float64, (n_loci,), EM denominator
     #: ``uint8`` flag forwarded to the native EM as ``locus_enable_gdna``.
     enable_gdna: np.ndarray  # uint8, (n_loci,)
     #: Diagnostic: FL-PMF-weighted contained exposure with *no* regional
@@ -167,10 +168,9 @@ class PriorTable:
     gdna_eff_len_unweighted: np.ndarray = dataclasses.field(
         default_factory=lambda: np.empty(0, dtype=np.float64)
     )
-    #: Diagnostic: expected gDNA pseudocount under the per-region
-    #: regional density field (rho_hat). Never consumed by the EM;
-    #: emitted in ``loci.feather`` for QC.
-    gdna_prior_count_regional: np.ndarray = dataclasses.field(
+    #: Diagnostic: footprint exposure multiplier used to convert raw gDNA
+    #: opportunity into the EM denominator.
+    gdna_em_exposure_weight: np.ndarray = dataclasses.field(
         default_factory=lambda: np.empty(0, dtype=np.float64)
     )
 
@@ -187,10 +187,11 @@ class PriorTable:
         return cls(
             multi_locus_priors=(),
             gdna_prior_count=np.empty(0, dtype=np.float64),
+            gdna_prior_count_em=np.empty(0, dtype=np.float64),
             gdna_eff_len=np.empty(0, dtype=np.float64),
             enable_gdna=np.empty(0, dtype=np.uint8),
             gdna_eff_len_unweighted=np.empty(0, dtype=np.float64),
-            gdna_prior_count_regional=np.empty(0, dtype=np.float64),
+            gdna_em_exposure_weight=np.empty(0, dtype=np.float64),
         )
 
 
@@ -899,9 +900,10 @@ def assemble_priors(
 
     n_ml = len(multi_loci)
     gdna_prior_count_arr = np.zeros(n_ml, dtype=np.float64)
+    gdna_prior_count_em_arr = np.zeros(n_ml, dtype=np.float64)
     gdna_eff_len_arr = np.ones(n_ml, dtype=np.float64)
     gdna_eff_len_unweighted_arr = np.ones(n_ml, dtype=np.float64)
-    gdna_prior_count_regional_arr = np.zeros(n_ml, dtype=np.float64)
+    gdna_em_exposure_weight_arr = np.ones(n_ml, dtype=np.float64)
     enable_gdna_arr = np.zeros(n_ml, dtype=np.uint8)
     multi_locus_priors: list[MultiLocusPrior | None] = [None] * n_ml
 
@@ -986,25 +988,20 @@ def assemble_priors(
             gdna_fl,
             min_value=1.0,
         )
-        gdna_eff_len_unweighted_arr[idx] = unweighted_eff_len
-        gdna_eff_len_arr[idx] = weighted_gdna_eff_len_for_loci(
-            ml.loci,
-            ref_lengths_arr,
-            gdna_fl,
+        gdna_weight = footprint_exposure_weight(
+            [(int(loc.ref_id), int(loc.start), int(loc.end)) for loc in ml.loci],
             regional_exposure,
-            min_value=1.0,
         )
-        gdna_prior_count_regional_arr[idx] = float(
-            sum(
-                _expected_gdna_count_regional_diag(
-                    loc,
-                    scratch,
-                    regional_exposure,
-                    b_cross,
-                )
-                for loc, scratch in zip(ml.loci, loci_scratch, strict=True)
-            )
+        gdna_eff_len = max(float(unweighted_eff_len) * float(gdna_weight), 1.0)
+        gdna_prior_count_em = (
+            eta_g * gdna_eff_len / float(unweighted_eff_len)
+            if float(unweighted_eff_len) > 0.0
+            else eta_g
         )
+        gdna_eff_len_unweighted_arr[idx] = unweighted_eff_len
+        gdna_eff_len_arr[idx] = gdna_eff_len
+        gdna_prior_count_em_arr[idx] = gdna_prior_count_em
+        gdna_em_exposure_weight_arr[idx] = gdna_weight
         enable_gdna_arr[idx] = np.uint8(1 if enable_gdna_for_multilocus(ml, em_data) else 0)
 
     if any(p is None for p in multi_locus_priors):
@@ -1017,8 +1014,9 @@ def assemble_priors(
     return PriorTable(
         multi_locus_priors=tuple(multi_locus_priors),  # type: ignore[arg-type]
         gdna_prior_count=gdna_prior_count_arr,
+        gdna_prior_count_em=gdna_prior_count_em_arr,
         gdna_eff_len=gdna_eff_len_arr,
         enable_gdna=enable_gdna_arr,
         gdna_eff_len_unweighted=gdna_eff_len_unweighted_arr,
-        gdna_prior_count_regional=gdna_prior_count_regional_arr,
+        gdna_em_exposure_weight=gdna_em_exposure_weight_arr,
     )

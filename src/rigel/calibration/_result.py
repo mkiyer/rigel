@@ -157,19 +157,22 @@ class CalibrationResult:
     # below-tolerance subset of that bucket.
     n_below_tolerance: int = 0
 
-    # Regional exposure model (v3). ``None`` means it was not built
+    # Regional exposure model. ``None`` means it was not built
     # (pre-regional-exposure callers); the pipeline treats this as
     # ``RegionalGdnaExposure.uniform(...)`` semantically.
     regional_exposure: RegionalGdnaExposure | None = None
-    # Filled in by the pipeline after applying per-unit weights to
-    # em_data via :meth:`with_regional_weighting_stats`. ``None``
-    # until that step runs.
+    # Legacy numerator-weighting stats. v4.3 denominator-only regional
+    # exposure leaves this as ``None`` in production.
     regional_weighting_stats: RegionalWeightApplicationStats | None = None
 
     # ---- Convenience zero-copy aliases ----
     @property
     def gdna_prior_count(self) -> np.ndarray:
         return self.prior_table.gdna_prior_count
+
+    @property
+    def gdna_prior_count_em(self) -> np.ndarray:
+        return self.prior_table.gdna_prior_count_em
 
     @property
     def gdna_eff_len(self) -> np.ndarray:

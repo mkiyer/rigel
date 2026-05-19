@@ -87,7 +87,11 @@ def _apply_unit_gdna_weights(
     exposure: "RegionalGdnaExposure",
     index: TranscriptIndex,
 ) -> "RegionalWeightApplicationStats":
-    """Apply ``log A_r`` to each unit's gDNA log-likelihood in place.
+    """Legacy helper for applying ``log A_r`` to gDNA likelihoods.
+
+    v4.3 production regional exposure is denominator-only and does not call
+    this helper. It is retained temporarily to avoid schema/native cleanup in
+    the same change.
 
     Units with finite ``gdna_log_liks`` and a valid genomic midpoint get
     ``log A_r`` added at their midpoint.  Units whose candidate transcripts
@@ -532,6 +536,7 @@ def _setup_geometry_and_estimator(
     index: TranscriptIndex,
     rna_fl,
     em_config: EMConfig,
+    regional_exposure: "RegionalGdnaExposure | None" = None,
 ) -> tuple["TranscriptGeometry", AbundanceEstimator]:
     """Compute transcript geometry and create the AbundanceEstimator."""
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
@@ -542,6 +547,13 @@ def _setup_geometry_and_estimator(
     else:
         effective_lengths = np.maximum(exonic_lengths - _DEFAULT_MEAN_FRAG + 1.0, 1.0)
 
+    effective_lengths_em = None
+    if regional_exposure is not None:
+        from .calibration._exposure import transcript_exposure_weights
+
+        exposure_weights = transcript_exposure_weights(index, regional_exposure)
+        effective_lengths_em = np.maximum(effective_lengths * exposure_weights, 1.0)
+
     transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
 
     geometry = TranscriptGeometry(
@@ -549,6 +561,7 @@ def _setup_geometry_and_estimator(
         exonic_lengths=exonic_lengths,
         t_to_g=index.t_to_g_arr,
         transcript_spans=transcript_spans,
+        effective_lengths_em=effective_lengths_em,
     )
 
     estimator = AbundanceEstimator(
@@ -672,7 +685,7 @@ def _run_locus_em_partitioned(
     partitions: dict,
     multi_loci: list,
     index: TranscriptIndex,
-    gdna_prior_count: np.ndarray,
+    gdna_prior_count_em: np.ndarray,
     gdna_eff_len: np.ndarray,
     em_config: EMConfig,
     *,
@@ -680,7 +693,8 @@ def _run_locus_em_partitioned(
     emit_locus_stats: bool = False,
     annotations: "AnnotationTable | None" = None,
     gdna_eff_len_unweighted: np.ndarray | None = None,
-    gdna_prior_count_regional: np.ndarray | None = None,
+    gdna_prior_count_raw: np.ndarray | None = None,
+    gdna_em_exposure_weight: np.ndarray | None = None,
 ) -> None:
     """Run batch locus EM from partitioned data with incremental freeing."""
     t_to_g = index.t_to_g_arr
@@ -698,10 +712,11 @@ def _run_locus_em_partitioned(
         *,
         rna_total,
         gdna,
-        gdna_prior,
+        gdna_prior_em,
         gdna_leff,
         gdna_leff_unweighted=None,
-        gdna_prior_regional=None,
+        gdna_prior_raw=None,
+        gdna_weight=None,
     ):
         gene_set = {
             int(t_to_g[int(t_idx)])
@@ -714,9 +729,9 @@ def _run_locus_em_partitioned(
         else:
             gdna_leff_unw_f = float(gdna_leff_unweighted)
         weight_ratio = gdna_leff_f / gdna_leff_unw_f if gdna_leff_unw_f > 0.0 else 1.0
-        gdna_prior_reg_f = (
-            float(gdna_prior) if gdna_prior_regional is None else float(gdna_prior_regional)
-        )
+        gdna_prior_em_f = float(gdna_prior_em)
+        gdna_prior_raw_f = gdna_prior_em_f if gdna_prior_raw is None else float(gdna_prior_raw)
+        gdna_weight_f = weight_ratio if gdna_weight is None else float(gdna_weight)
         return {
             "locus_id": locus.multi_locus_id,
             "locus_span_bp": locus.gdna_span,
@@ -732,12 +747,13 @@ def _run_locus_em_partitioned(
             # per-transcript ``is_synthetic`` flags from the index.
             "rna_total": float(rna_total),
             "gdna": float(gdna),
-            "gdna_prior_count": float(gdna_prior),
+            "gdna_prior_count": gdna_prior_raw_f,
+            "gdna_prior_count_em": gdna_prior_em_f,
             "gdna_eff_len": gdna_leff_f,
             "gdna_eff_len_per_bp": gdna_leff_f / max(float(locus.gdna_span), 1.0),
             "gdna_eff_len_unweighted": gdna_leff_unw_f,
             "gdna_eff_len_weight_ratio": float(weight_ratio),
-            "gdna_prior_count_regional": gdna_prior_reg_f,
+            "gdna_em_exposure_weight": gdna_weight_f,
         }
 
     def _call_batch_em(
@@ -801,7 +817,7 @@ def _run_locus_em_partitioned(
         em_result = _call_batch_em(
             [part],
             [locus],
-            np.array([gdna_prior_count[lid]], dtype=np.float64),
+            np.array([gdna_prior_count_em[lid]], dtype=np.float64),
             np.array([gdna_eff_len[lid]], dtype=np.float64),
             batch_enable_gdna=(
                 np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
@@ -823,16 +839,21 @@ def _run_locus_em_partitioned(
                 locus,
                 rna_total=rna_arr[0],
                 gdna=gdna_arr[0],
-                gdna_prior=gdna_prior_count[lid],
+                gdna_prior_em=gdna_prior_count_em[lid],
                 gdna_leff=gdna_eff_len[lid],
                 gdna_leff_unweighted=(
                     gdna_eff_len_unweighted[lid]
                     if gdna_eff_len_unweighted is not None
                     else None
                 ),
-                gdna_prior_regional=(
-                    gdna_prior_count_regional[lid]
-                    if gdna_prior_count_regional is not None
+                gdna_prior_raw=(
+                    gdna_prior_count_raw[lid]
+                    if gdna_prior_count_raw is not None
+                    else None
+                ),
+                gdna_weight=(
+                    gdna_em_exposure_weight[lid]
+                    if gdna_em_exposure_weight is not None
                     else None
                 ),
             )
@@ -853,7 +874,7 @@ def _run_locus_em_partitioned(
         # to release per-locus arrays before EM downstream phases run.
         normal_parts = [partitions.pop(loc.multi_locus_id) for loc in normal_loci]
         normal_gp = np.array(
-            [gdna_prior_count[loc.multi_locus_id] for loc in normal_loci],
+            [gdna_prior_count_em[loc.multi_locus_id] for loc in normal_loci],
             dtype=np.float64,
         )
         normal_gdna_eff_len = np.array(
@@ -892,16 +913,21 @@ def _run_locus_em_partitioned(
                     locus,
                     rna_total=rna_arr[i],
                     gdna=gdna_arr[i],
-                    gdna_prior=normal_gp[i],
+                    gdna_prior_em=normal_gp[i],
                     gdna_leff=normal_gdna_eff_len[i],
                     gdna_leff_unweighted=(
                         gdna_eff_len_unweighted[lid]
                         if gdna_eff_len_unweighted is not None
                         else None
                     ),
-                    gdna_prior_regional=(
-                        gdna_prior_count_regional[lid]
-                        if gdna_prior_count_regional is not None
+                    gdna_prior_raw=(
+                        gdna_prior_count_raw[lid]
+                        if gdna_prior_count_raw is not None
+                        else None
+                    ),
+                    gdna_weight=(
+                        gdna_em_exposure_weight[lid]
+                        if gdna_em_exposure_weight is not None
                         else None
                     ),
                 )
@@ -995,6 +1021,7 @@ def quant_from_buffer(
         index,
         fl_models.rna,
         em_config,
+        calibration.regional_exposure,
     )
 
     logger.info(
@@ -1065,15 +1092,8 @@ def quant_from_buffer(
         )
         calibration = calibration.with_priors(prior_table)
 
-        # Regional gDNA exposure: attenuate per-unit gDNA log-likelihoods
-        # using the per-region weight ``log A_r`` at the unit midpoint.
-        # Must run after ``assemble_priors`` (single owner of the global
-        # ``gdna_log_liks`` array) and before ``partition_and_free``.
-        if calibration.regional_exposure is not None:
-            weight_stats = _apply_unit_gdna_weights(
-                em_data, calibration.regional_exposure, index
-            )
-            calibration = calibration.with_regional_weighting_stats(weight_stats)
+        # v4.3 regional exposure is denominator-only. Do not mutate per-unit
+        # gDNA log-likelihoods with numerator weights.
         # Log the prior-derived calibration summary now that the
         # PriorTable is back-filled (the earlier "[CAL] v6 quality=..."
         # line ran before assembly and could not include these fields).
@@ -1083,7 +1103,7 @@ def quant_from_buffer(
             float(_post_summary["mean_pi_gdna"]),
             int(_post_summary["n_multi_loci"]),
         )
-        gdna_prior_count = prior_table.gdna_prior_count
+        gdna_prior_count_em = prior_table.gdna_prior_count_em
         gdna_eff_len = prior_table.gdna_eff_len
         enable_gdna_arr = prior_table.enable_gdna
 
@@ -1098,14 +1118,15 @@ def quant_from_buffer(
             partitions,
             multi_loci,
             index,
-            gdna_prior_count,
+            gdna_prior_count_em,
             gdna_eff_len,
             em_config,
             enable_gdna=enable_gdna_arr,
             emit_locus_stats=emit_locus_stats,
             annotations=annotations,
             gdna_eff_len_unweighted=prior_table.gdna_eff_len_unweighted,
-            gdna_prior_count_regional=prior_table.gdna_prior_count_regional,
+            gdna_prior_count_raw=prior_table.gdna_prior_count,
+            gdna_em_exposure_weight=prior_table.gdna_em_exposure_weight,
         )
     else:
         logger.info("[SKIP] No ambiguous fragments for EM")

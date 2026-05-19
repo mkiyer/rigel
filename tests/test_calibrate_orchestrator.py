@@ -252,6 +252,7 @@ class TestCalibrateWithPriorsRoundtrip:
         new_table = PriorTable(
             multi_locus_priors=(mlp,),
             gdna_prior_count=np.array([3.5], dtype=np.float64),
+            gdna_prior_count_em=np.array([3.5], dtype=np.float64),
             gdna_eff_len=np.array([1000.0], dtype=np.float64),
             enable_gdna=np.array([1], dtype=np.uint8),
         )
@@ -260,6 +261,7 @@ class TestCalibrateWithPriorsRoundtrip:
         assert updated is not result  # frozen contract
         assert updated.n_multi_loci == 1
         assert updated.gdna_prior_count.tolist() == [3.5]
+        assert updated.gdna_prior_count_em.tolist() == [3.5]
         assert len(updated.multi_locus_prior_df) == 1
         assert len(updated.per_locus_gdna_df) == 1
 
@@ -271,6 +273,8 @@ class TestPriorTableEmpty:
         assert t.multi_locus_priors == ()
         assert t.gdna_prior_count.dtype == np.float64
         assert len(t.gdna_prior_count) == 0
+        assert t.gdna_prior_count_em.dtype == np.float64
+        assert len(t.gdna_prior_count_em) == 0
         assert t.enable_gdna.dtype == np.uint8
         assert len(t.enable_gdna) == 0
 

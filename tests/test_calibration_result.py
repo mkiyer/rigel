@@ -197,6 +197,7 @@ def _prior_table(mlps: tuple[MultiLocusPrior, ...]) -> PriorTable:
     return PriorTable(
         multi_locus_priors=mlps,
         gdna_prior_count=gp_arr,
+        gdna_prior_count_em=gp_arr.copy(),
         gdna_eff_len=np.ones(n, dtype=np.float64),
         enable_gdna=np.ones(n, dtype=np.uint8),
     )

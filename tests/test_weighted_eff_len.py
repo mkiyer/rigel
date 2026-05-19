@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from rigel.calibration._arrays import RegionArrays
 from rigel.calibration._exposure import (
+    footprint_exposure_weight,
     gdna_eff_len_for_loci,
+    transcript_exposure_weights,
     weighted_gdna_eff_len_for_loci,
 )
 from rigel.calibration._regional_exposure import RegionalGdnaExposure
@@ -126,3 +130,45 @@ def test_overlapping_intervals_no_double_count():
     a = weighted_gdna_eff_len_for_loci((locus_a, locus_b), ref_lengths, fl, exp)
     b = weighted_gdna_eff_len_for_loci((locus_merged,), ref_lengths, fl, exp)
     assert a == pytest.approx(b, rel=1e-12)
+
+
+def test_footprint_exposure_weight_merges_overlapping_blocks():
+    region_arrays = _three_region_arrays(span=1000)
+    exp = _exposure_with_weights(region_arrays, np.array([1.0, 0.5, 1.0]))
+    weight = footprint_exposure_weight(
+        [(0, 0, 1500), (0, 1000, 2000)],
+        exp,
+    )
+    assert weight == pytest.approx(0.75)
+
+
+def test_transcript_exposure_weights_use_nrna_span_and_mrna_exons():
+    region_arrays = _three_region_arrays(span=1000)
+    exp = _exposure_with_weights(region_arrays, np.array([1.0, 0.5, 1.0]))
+
+    t_df = pd.DataFrame(
+        {
+            "is_nrna": [False, True],
+            "start": np.array([0, 0], dtype=np.int64),
+            "end": np.array([2000, 2000], dtype=np.int64),
+        }
+    )
+
+    def build_exon_csr():
+        return (
+            np.array([0, 2, 3], dtype=np.int32),
+            np.array([0, 1000, 0], dtype=np.int32),
+            np.array([500, 1500, 2000], dtype=np.int32),
+            np.array([0, 500, 0], dtype=np.int32),
+        )
+
+    index = SimpleNamespace(
+        num_transcripts=2,
+        t_df=t_df,
+        t_to_ref_arr=np.array([0, 0], dtype=np.int32),
+        build_exon_csr=build_exon_csr,
+    )
+
+    weights = transcript_exposure_weights(index, exp)
+    assert weights[0] == pytest.approx(0.75)
+    assert weights[1] == pytest.approx(0.75)

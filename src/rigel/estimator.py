@@ -181,15 +181,23 @@ class AbundanceEstimator:
             self._t_to_g = np.asarray(geometry.t_to_g, dtype=np.int32)
             self._transcript_spans = np.asarray(geometry.transcript_spans, dtype=np.float64)
             self._exonic_lengths = np.asarray(geometry.exonic_lengths, dtype=np.float64)
-            self._t_eff_len = np.maximum(
+            self._t_eff_len_output = np.maximum(
                 np.asarray(geometry.effective_lengths, dtype=np.float64),
                 1.0,
             )
+            if geometry.effective_lengths_em is None:
+                self._t_eff_len_em = self._t_eff_len_output
+            else:
+                self._t_eff_len_em = np.maximum(
+                    np.asarray(geometry.effective_lengths_em, dtype=np.float64),
+                    1.0,
+                )
         else:
             self._t_to_g = None
             self._transcript_spans = None
             self._exonic_lengths = None
-            self._t_eff_len = np.ones(num_transcripts, dtype=np.float64)
+            self._t_eff_len_output = np.ones(num_transcripts, dtype=np.float64)
+            self._t_eff_len_em = self._t_eff_len_output
 
         self.unambig_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         self.em_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
@@ -220,7 +228,23 @@ class AbundanceEstimator:
     @property
     def effective_lengths(self) -> np.ndarray:
         """Per-transcript effective lengths (read-only)."""
-        return self._t_eff_len
+        return self._t_eff_len_output
+
+    @property
+    def _t_eff_len(self) -> np.ndarray:
+        """Backward-compatible alias for raw public effective lengths."""
+        return self._t_eff_len_output
+
+    @_t_eff_len.setter
+    def _t_eff_len(self, value: np.ndarray) -> None:
+        arr = np.maximum(np.asarray(value, dtype=np.float64), 1.0)
+        self._t_eff_len_output = arr
+        self._t_eff_len_em = arr
+
+    @property
+    def em_effective_lengths(self) -> np.ndarray:
+        """Per-transcript EM effective lengths (read-only)."""
+        return self._t_eff_len_em
 
     @property
     def gdna_em_count(self) -> float:
@@ -308,7 +332,7 @@ class AbundanceEstimator:
         # derivation; the EM uses log L̃_t per component inside the E-step
         # (and inside assign_posteriors) instead of any per-fragment
         # length correction.
-        t_eff_lens = np.ascontiguousarray(self._t_eff_len, dtype=np.float64)
+        t_eff_lens = np.ascontiguousarray(self._t_eff_len_em, dtype=np.float64)
         n_loci = len(partition_tuples)
 
         if gdna_eff_len is None:
@@ -462,7 +486,10 @@ class AbundanceEstimator:
         #   - ``tpm_total_rna`` — annotated-only numerator, but normalized over
         #     annotated + synthetic so values are directly comparable to the
         #     nrna_quant TPM column.
-        eff = self._t_eff_len
+        eff = self._t_eff_len_output
+        em_eff = self._t_eff_len_em
+        with np.errstate(divide="ignore", invalid="ignore"):
+            em_exposure_weight = np.where(eff > 0.0, em_eff / eff, 1.0)
         tpm = _tpm(count, eff)
         tpm_total_rna = _tpm(count, eff, denom_counts=t_total)
 
@@ -490,6 +517,8 @@ class AbundanceEstimator:
                 "gene_id": index.t_df["g_id"].values,
                 "gene_name": index.t_df["g_name"].values,
                 "effective_length": eff,
+                "em_effective_length": em_eff,
+                "em_exposure_weight": em_exposure_weight,
                 "locus_id": self.locus_id_per_transcript,
                 "nrna_id": nrna_id,
                 "is_basic": index.t_df["is_basic"].values,
@@ -552,7 +581,7 @@ class AbundanceEstimator:
         # Gene effective length: abundance-weighted mean of transcript
         # effective lengths.  For genes with zero counts, use the
         # unweighted mean of transcript effective lengths.
-        t_eff = self._t_eff_len
+        t_eff = self._t_eff_len_output
         t_counts_flat = total.sum(axis=1)
         g_eff_num = _aggregate_to_gene(t_to_g, n_genes, t_counts_flat * t_eff)
         g_eff_den = _aggregate_to_gene(t_to_g, n_genes, t_counts_flat)
@@ -666,7 +695,10 @@ class AbundanceEstimator:
 
         idx = np.where(mask)[0]
         counts = t_total[idx]
-        eff = self._t_eff_len[idx]
+        eff = self._t_eff_len_output[idx]
+        em_eff = self._t_eff_len_em[idx]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            em_exposure_weight = np.where(eff > 0.0, em_eff / eff, 1.0)
         n_contrib = t_df["nrna_n_contributors"].values[idx]
         n_mrna_children = n_mrna_per_parent[idx]
         mrna_children_count = children_count_per_parent[idx]
@@ -678,6 +710,8 @@ class AbundanceEstimator:
         idx = idx[has_children]
         counts = counts[has_children]
         eff = eff[has_children]
+        em_eff = em_eff[has_children]
+        em_exposure_weight = em_exposure_weight[has_children]
         n_contrib = n_contrib[has_children]
         n_mrna_children = n_mrna_children[has_children]
         mrna_children_count = mrna_children_count[has_children]
@@ -687,13 +721,15 @@ class AbundanceEstimator:
         # (The _tpm helper normalizes within a single array; here the
         # denominator is an alternate full-pool rpk sum, so compute inline.)
         rpk = counts / np.maximum(eff, 1.0)
-        total_rpk = float((t_total / np.maximum(self._t_eff_len, 1.0)).sum())
+        total_rpk = float((t_total / np.maximum(self._t_eff_len_output, 1.0)).sum())
         tpm = (rpk / total_rpk * 1e6) if total_rpk > 0 else np.zeros_like(rpk)
 
         df = pd.DataFrame(
             {
                 "nrna_id": t_df["t_id"].values[idx],
                 "effective_length": eff,
+                "em_effective_length": em_eff,
+                "em_exposure_weight": em_exposure_weight,
                 "locus_id": self.locus_id_per_transcript[idx],
                 "is_synthetic": is_synthetic[idx],
                 "n_contributing_transcripts": n_contrib,
@@ -762,11 +798,12 @@ class AbundanceEstimator:
             "gdna_rate",
             "gdna_prior",
             "gdna_prior_count",
+            "gdna_prior_count_em",
             "gdna_eff_len",
             "gdna_eff_len_per_bp",
             "gdna_eff_len_unweighted",
             "gdna_eff_len_weight_ratio",
-            "gdna_prior_count_regional",
+            "gdna_em_exposure_weight",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -821,13 +858,14 @@ class AbundanceEstimator:
             # the prior's per-fragment strength relative to the locus's
             # actual EM evidence and is comparable across loci.
             gp_count = float(r.get("gdna_prior_count", 0.0))
+            gp_count_em = float(r.get("gdna_prior_count_em", gp_count))
             gdna_eff_len = float(r.get("gdna_eff_len", 1.0))
             gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
             gdna_eff_len_unweighted = float(r.get("gdna_eff_len_unweighted", gdna_eff_len))
             gdna_eff_len_weight_ratio = float(r.get("gdna_eff_len_weight_ratio", 1.0))
-            gdna_prior_count_regional = float(r.get("gdna_prior_count_regional", gp_count))
+            gdna_em_exposure_weight = float(r.get("gdna_em_exposure_weight", gdna_eff_len_weight_ratio))
             n_em = max(int(r.get("n_em_fragments", 0)), 1)
-            gdna_prior = gp_count / n_em
+            gdna_prior = gp_count_em / n_em
             rows.append(
                 {
                     "locus_id": lid,
@@ -845,11 +883,12 @@ class AbundanceEstimator:
                     "gdna_rate": rate,
                     "gdna_prior": gdna_prior,
                     "gdna_prior_count": gp_count,
+                    "gdna_prior_count_em": gp_count_em,
                     "gdna_eff_len": gdna_eff_len,
                     "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
                     "gdna_eff_len_unweighted": gdna_eff_len_unweighted,
                     "gdna_eff_len_weight_ratio": gdna_eff_len_weight_ratio,
-                    "gdna_prior_count_regional": gdna_prior_count_regional,
+                    "gdna_em_exposure_weight": gdna_em_exposure_weight,
                 }
             )
         return pd.DataFrame(rows, columns=cols)

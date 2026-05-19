@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 from collections import Counter, defaultdict
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -464,7 +465,9 @@ def write_report(args: argparse.Namespace, scan: dict[str, Any], rows: dict[str,
     if not source_lines:
         source_lines = ["- No explicit source flowcells were provided; sources are reported as `unknown`." ]
 
-    text = f"""# VCaP RNA/gDNA Real Mix Pool Confusion - 2026-05-15
+    report_date = date.today().isoformat()
+
+    text = f"""# VCaP RNA/gDNA Real Mix Pool Confusion - {report_date}
 
 BAM: `{args.bam}`
 

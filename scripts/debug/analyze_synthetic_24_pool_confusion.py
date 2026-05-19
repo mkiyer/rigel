@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -573,6 +574,35 @@ def calibration_focus_rows(condition_df: pd.DataFrame) -> list[dict[str, str]]:
     return rows
 
 
+def aggregate_confusion_rows(condition_df: pd.DataFrame) -> list[dict[str, str]]:
+    rows = []
+    groups = [
+        ("all 24", condition_df),
+        ("ss=0.50", condition_df[condition_df["strand_specificity"] < 0.75]),
+        ("ss=0.99", condition_df[condition_df["strand_specificity"] > 0.75]),
+    ]
+    for label, group in groups:
+        if group.empty:
+            continue
+        for true_pool in ["mrna", "nrna", "gdna"]:
+            truth_total = int(group[f"truth_{true_pool}"].sum())
+            if truth_total <= 0:
+                continue
+            rows.append(
+                {
+                    "group": label,
+                    "true": true_pool,
+                    "pred_mrna": fmt_count(group[f"{true_pool}_to_mrna"].sum()),
+                    "pred_nrna": fmt_count(group[f"{true_pool}_to_nrna"].sum()),
+                    "pred_gdna": fmt_count(group[f"{true_pool}_to_gdna"].sum()),
+                    "rate_mrna": pct(safe_div(group[f"{true_pool}_to_mrna"].sum(), truth_total)),
+                    "rate_nrna": pct(safe_div(group[f"{true_pool}_to_nrna"].sum(), truth_total)),
+                    "rate_gdna": pct(safe_div(group[f"{true_pool}_to_gdna"].sum(), truth_total)),
+                }
+            )
+    return rows
+
+
 def write_report(
     *,
     report_path: Path,
@@ -650,8 +680,10 @@ def write_report(
     calibration_rows = calibration_focus_rows(condition_df)
     zero_high_error_rows = zc_error_report_rows(zc_df, "gdna_zero_ss_0.99_nrna_high")
     high_gdna_error_rows = zc_error_report_rows(zc_df, "gdna_high_ss_0.99_nrna_high")
+    aggregate_rows = aggregate_confusion_rows(condition_df)
+    report_date = date.today().isoformat()
 
-    report = f"""# Synthetic 24 Pool Confusion Report - 2026-05-15
+    report = f"""# Synthetic 24 Pool Confusion Report - {report_date}
 
 Base directory: `{base}`
 
@@ -691,6 +723,21 @@ to gDNA. In the stranded run, this falls to
 {pct(zero_gdna_high_unstranded.nrna_to_nrna_rate)} to
 {pct(zero_gdna_high_stranded.nrna_to_nrna_rate)}. Strand information is being used, but
 genic unspliced evidence remains partially gDNA-like.
+
+## Aggregate 3x3 Pool Confusion
+
+These are hard winner assignments from `ZF` tags. Rates are row-normalized by true pool.
+
+{markdown_table(aggregate_rows, [
+        ("Group", "group"),
+        ("True", "true"),
+        ("Pred mRNA", "pred_mrna"),
+        ("Pred nRNA", "pred_nrna"),
+        ("Pred gDNA", "pred_gdna"),
+        ("mRNA rate", "rate_mrna"),
+        ("nRNA rate", "rate_nrna"),
+        ("gDNA rate", "rate_gdna"),
+    ])}
 
 ## Per-Scenario Pool Confusion
 

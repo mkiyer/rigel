@@ -1,11 +1,13 @@
 """rigel.calibration._regional_exposure — per-region gDNA exposure weights.
 
 Hybrid-capture gDNA is not uniformly exposed across the genome. This
-module learns a per-region relative gDNA exposure weight ``A_r in (0, 1]``
-from the conservative calibration evidence already collected by v6 and
-provides vectorized lookups for downstream scorers.
+module learns one globally normalized per-region relative exposure field
+``A_r in (0, 1]`` from the conservative calibration evidence already
+collected by v6 and provides lookup/integration helpers for EM
+denominators.
 
-See ``docs/calibration/gdna_exposure_plan_v3.md`` for the full design.
+See ``docs/calibration/gdna_exposure_plan_v4.3.md`` for the current
+denominator-only design.
 """
 
 from __future__ import annotations
@@ -17,10 +19,10 @@ import numpy as np
 
 from ._arrays import PayloadArrays, RegionArrays
 from ._exposure import boundary_crossing_exposure
+from ._kappa import estimate_kappa
 from ._orient import ORIENT_OPP, ORIENT_SAME, StrandSummary
 from .density_global import (
     GlobalDensityTable,
-    GlobalGdnaDensity,
     _gdna_count_moment,
     _strand_identifiable_rows,
     l_eff_contained,
@@ -100,6 +102,12 @@ class RegionalGdnaExposure:
     rho_ref: float
     n_at_floor: int
     per_class: dict[str, dict[str, float]] = field(default_factory=dict)
+    rho_global: float = 0.0
+    kappa_global: float = 0.0
+    kappa_fallback_used: bool = False
+    kappa_fallback_reason: str = ""
+    observed_log_spread: float = 0.0
+    null_log_spread: float = 0.0
 
     ref_offsets: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int32))
     ref_id: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int32))
@@ -122,6 +130,12 @@ class RegionalGdnaExposure:
             rho_ref=0.0,
             n_at_floor=0,
             per_class={},
+            rho_global=0.0,
+            kappa_global=0.0,
+            kappa_fallback_used=False,
+            kappa_fallback_reason="",
+            observed_log_spread=0.0,
+            null_log_spread=0.0,
             ref_offsets=np.asarray(region_arrays.ref_offsets, dtype=np.int32).copy(),
             ref_id=np.asarray(region_arrays.ref_id, dtype=np.int32).copy(),
             start=np.asarray(region_arrays.start, dtype=np.int64).copy(),
@@ -219,85 +233,48 @@ class RegionalGdnaExposure:
             ex_corrected = ex_raw
         Y[is_exon] = ex_corrected[is_exon]
 
-        # Per-class rho_global + kappa.
-        class_density: dict[str, GlobalGdnaDensity] = {
-            _CLASS_INTERGENIC: global_densities.intergenic,
-            _CLASS_INTRON: global_densities.intron,
-            _CLASS_EXON: global_densities.exon_intron,
-        }
         class_mask = {
             _CLASS_INTERGENIC: is_intergenic,
             _CLASS_INTRON: is_intron,
             _CLASS_EXON: is_exon,
         }
 
-        # EB-shrunk per-region rho_hat.
-        rho_hat = np.zeros(R, dtype=np.float64)
-        per_class_summary: dict[str, dict[str, float]] = {}
-        signal_per_class: dict[str, float] = {}
-        rho_ref_per_class: dict[str, float] = {}
-        for cname in _CLASS_ORDER:
-            d = class_density[cname]
-            mask = class_mask[cname]
-            if not mask.any():
-                per_class_summary[cname] = _empty_class_summary(d)
-                signal_per_class[cname] = 0.0
-                rho_ref_per_class[cname] = float(d.rho)
-                continue
-            rho_global = float(d.rho)
-            kappa = float(d.kappa.value)
-            Yc = Y[mask]
-            Ec = E[mask]
-            denom = Ec + kappa
-            with np.errstate(invalid="ignore", divide="ignore"):
-                rho_c = np.where(denom > 0.0, (Yc + kappa * rho_global) / denom, rho_global)
-            rho_hat[mask] = rho_c
+        valid = E > 0.0
+        if not valid.any():
+            out = cls.uniform(region_arrays)
+            return cls(
+                rho_hat=np.zeros(R, dtype=np.float64),
+                log_weight=out.log_weight,
+                weight=out.weight,
+                mode="uniform",
+                rho_ref=0.0,
+                n_at_floor=0,
+                per_class=_summarize_region_types(class_mask, np.zeros(R), E, Y, 0.0),
+                ref_offsets=out.ref_offsets,
+                ref_id=out.ref_id,
+                start=out.start,
+                end=out.end,
+            )
 
-            # Class reference (weighted Q95).
-            rho_ref_c = _weighted_quantile(rho_c, Ec, REFERENCE_QUANTILE, fallback=rho_global)
-            rho_ref_per_class[cname] = float(rho_ref_c)
+        total_E = float(E[valid].sum())
+        total_Y = float(Y[valid].sum())
+        rho_global = total_Y / total_E if total_E > 0.0 else 0.0
+        kappa_est = estimate_kappa(Y[valid], E[valid], rho_global)
+        kappa = float(kappa_est.value)
 
-            # Auto-uniform signal.
-            if rho_global <= 0.0 or Ec.sum() <= 0.0:
-                obs_spread = 0.0
-                null_spread = 0.0
-                signal = 0.0
-                q05 = q50 = q95 = float(rho_global)
-            else:
-                log_floor = float(np.log(rho_global)) - LOG_RHO_CLIP_NATS
-                log_rho = np.log(np.maximum(rho_c, max(np.exp(log_floor), np.exp(LOG_RHO_FLOOR))))
-                q50_log = _weighted_quantile(log_rho, Ec, 0.5, fallback=float(np.log(rho_global)))
-                q95_log = _weighted_quantile(log_rho, Ec, 0.95, fallback=float(np.log(rho_global)))
-                obs_spread = float(max(q95_log - q50_log, 0.0))
-                # Delta-method null variance.
-                with np.errstate(invalid="ignore", divide="ignore"):
-                    var_log = Ec / (rho_global * (Ec + kappa) ** 2)
-                w_total = float(Ec.sum())
-                sigma2 = float((var_log * Ec).sum() / w_total) if w_total > 0.0 else 0.0
-                null_spread = Z_Q95 * float(np.sqrt(max(sigma2, 0.0)))
-                signal = float(
-                    np.clip(
-                        (obs_spread - null_spread) / max(obs_spread, SPREAD_EPS), 0.0, 1.0
-                    )
-                )
-                q05 = float(_weighted_quantile(rho_c, Ec, 0.05, fallback=rho_global))
-                q50 = float(_weighted_quantile(rho_c, Ec, 0.50, fallback=rho_global))
-                q95 = float(_weighted_quantile(rho_c, Ec, 0.95, fallback=rho_global))
-            signal_per_class[cname] = signal
-            per_class_summary[cname] = {
-                "rho_global": float(rho_global),
-                "rho_q05": q05,
-                "rho_q50": q50,
-                "rho_q95": q95,
-                "rho_ref_class": float(rho_ref_c),
-                "observed_log_spread": float(obs_spread),
-                "null_log_spread": float(null_spread),
-                "signal": float(signal),
-                "kappa": float(kappa),
-                "n_regions": int(mask.sum()),
-            }
+        rho_hat = np.full(R, rho_global, dtype=np.float64)
+        denom = E[valid] + kappa
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rho_hat[valid] = np.where(
+                denom > 0.0,
+                (Y[valid] + kappa * rho_global) / denom,
+                rho_global,
+            )
 
-        rho_ref = max(rho_ref_per_class.values()) if rho_ref_per_class else 0.0
+        per_class_summary = _summarize_region_types(class_mask, rho_hat, E, Y, rho_global)
+        rho_ref = _weighted_quantile(
+            rho_hat[valid], E[valid], REFERENCE_QUANTILE, fallback=rho_global
+        )
         if rho_ref <= 0.0:
             out = cls.uniform(region_arrays)
             return cls(
@@ -308,15 +285,30 @@ class RegionalGdnaExposure:
                 rho_ref=0.0,
                 n_at_floor=0,
                 per_class=per_class_summary,
+                rho_global=float(rho_global),
+                kappa_global=float(kappa),
+                kappa_fallback_used=bool(kappa_est.fallback_used),
+                kappa_fallback_reason=str(kappa_est.fallback_reason),
                 ref_offsets=out.ref_offsets,
                 ref_id=out.ref_id,
                 start=out.start,
                 end=out.end,
             )
 
-        # If every class signal is zero, no attenuation: return uniform but
-        # preserve the diagnostic per_class summary.
-        if all(s <= 0.0 for s in signal_per_class.values()):
+        log_floor = float(np.log(rho_global)) - LOG_RHO_CLIP_NATS if rho_global > 0.0 else LOG_RHO_FLOOR
+        log_min = max(float(np.exp(log_floor)), float(np.exp(LOG_RHO_FLOOR)))
+        log_rho = np.log(np.maximum(rho_hat[valid], log_min))
+        log_fallback = float(np.log(max(rho_global, np.exp(LOG_RHO_FLOOR))))
+        q50_log = _weighted_quantile(log_rho, E[valid], 0.5, fallback=log_fallback)
+        q95_log = _weighted_quantile(log_rho, E[valid], 0.95, fallback=log_fallback)
+        obs_spread = float(max(q95_log - q50_log, 0.0))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            var_log = E[valid] / (rho_global * (E[valid] + kappa) ** 2)
+        w_total = float(E[valid].sum())
+        sigma2 = float((var_log * E[valid]).sum() / w_total) if w_total > 0.0 else 0.0
+        null_spread = Z_Q95 * float(np.sqrt(max(sigma2, 0.0)))
+
+        if obs_spread <= null_spread + SPREAD_EPS:
             out = cls.uniform(region_arrays)
             return cls(
                 rho_hat=rho_hat,
@@ -326,27 +318,24 @@ class RegionalGdnaExposure:
                 rho_ref=float(rho_ref),
                 n_at_floor=0,
                 per_class=per_class_summary,
+                rho_global=float(rho_global),
+                kappa_global=float(kappa),
+                kappa_fallback_used=bool(kappa_est.fallback_used),
+                kappa_fallback_reason=str(kappa_est.fallback_reason),
+                observed_log_spread=float(obs_spread),
+                null_log_spread=float(null_spread),
                 ref_offsets=out.ref_offsets,
                 ref_id=out.ref_id,
                 start=out.start,
                 end=out.end,
             )
 
-        # Per-class signal-attenuated log A_r.
         log_rho_ref = float(np.log(rho_ref))
         log_weight = np.zeros(R, dtype=np.float64)
-        for cname in _CLASS_ORDER:
-            mask = class_mask[cname]
-            if not mask.any():
-                continue
-            signal = signal_per_class[cname]
-            if signal <= 0.0:
-                continue
-            rho_c = rho_hat[mask]
-            with np.errstate(invalid="ignore", divide="ignore"):
-                raw = np.where(rho_c > 0.0, np.log(rho_c) - log_rho_ref, LOG_A_FLOOR)
-            raw = np.minimum(raw, 0.0)
-            log_weight[mask] = np.maximum(signal * raw, LOG_A_FLOOR)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            raw = np.where(rho_hat[valid] > 0.0, np.log(rho_hat[valid]) - log_rho_ref, LOG_A_FLOOR)
+        raw = np.minimum(raw, 0.0)
+        log_weight[valid] = np.maximum(raw, LOG_A_FLOOR)
         log_weight = np.maximum(log_weight, LOG_A_FLOOR)
         n_at_floor = int(np.sum(log_weight <= LOG_A_FLOOR + 1e-15))
         weight = np.exp(log_weight)
@@ -359,6 +348,12 @@ class RegionalGdnaExposure:
             rho_ref=float(rho_ref),
             n_at_floor=n_at_floor,
             per_class=per_class_summary,
+            rho_global=float(rho_global),
+            kappa_global=float(kappa),
+            kappa_fallback_used=bool(kappa_est.fallback_used),
+            kappa_fallback_reason=str(kappa_est.fallback_reason),
+            observed_log_spread=float(obs_spread),
+            null_log_spread=float(null_spread),
             ref_offsets=np.asarray(region_arrays.ref_offsets, dtype=np.int32).copy(),
             ref_id=np.asarray(region_arrays.ref_id, dtype=np.int32).copy(),
             start=np.asarray(region_arrays.start, dtype=np.int64).copy(),
@@ -472,7 +467,13 @@ class RegionalGdnaExposure:
     def to_summary_dict(self) -> dict:
         return {
             "mode": self.mode,
+            "rho_global": float(self.rho_global),
             "rho_ref": float(self.rho_ref),
+            "kappa_global": float(self.kappa_global),
+            "kappa_fallback_used": bool(self.kappa_fallback_used),
+            "kappa_fallback_reason": self.kappa_fallback_reason,
+            "observed_log_spread": float(self.observed_log_spread),
+            "null_log_spread": float(self.null_log_spread),
             "n_regions": int(self.rho_hat.size),
             "n_at_floor": int(self.n_at_floor),
             "log_a_floor": float(LOG_A_FLOOR),
@@ -518,17 +519,44 @@ def _weighted_quantile(
     return float(v[idx])
 
 
-def _empty_class_summary(d: GlobalGdnaDensity) -> dict[str, float]:
-    rho = float(d.rho)
-    return {
-        "rho_global": rho,
-        "rho_q05": rho,
-        "rho_q50": rho,
-        "rho_q95": rho,
-        "rho_ref_class": rho,
-        "observed_log_spread": 0.0,
-        "null_log_spread": 0.0,
-        "signal": 0.0,
-        "kappa": float(d.kappa.value),
-        "n_regions": 0,
-    }
+def _summarize_region_types(
+    class_mask: dict[str, np.ndarray],
+    rho_hat: np.ndarray,
+    E: np.ndarray,
+    Y: np.ndarray,
+    rho_global: float,
+) -> dict[str, dict[str, float]]:
+    """Diagnostic summaries by region type.
+
+    Region type is used to measure evidence and opportunity, but not to
+    normalize the exposure field. These summaries are QC only.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for cname in _CLASS_ORDER:
+        mask = class_mask[cname]
+        n_regions = int(mask.sum())
+        if n_regions == 0:
+            out[cname] = {
+                "rho_global": float(rho_global),
+                "rho_q05": float(rho_global),
+                "rho_q50": float(rho_global),
+                "rho_q95": float(rho_global),
+                "n_regions": 0.0,
+                "n_regions_with_exposure": 0.0,
+                "evidence_count": 0.0,
+                "opportunity": 0.0,
+            }
+            continue
+        weights = E[mask]
+        rho_c = rho_hat[mask]
+        out[cname] = {
+            "rho_global": float(rho_global),
+            "rho_q05": float(_weighted_quantile(rho_c, weights, 0.05, fallback=rho_global)),
+            "rho_q50": float(_weighted_quantile(rho_c, weights, 0.50, fallback=rho_global)),
+            "rho_q95": float(_weighted_quantile(rho_c, weights, 0.95, fallback=rho_global)),
+            "n_regions": float(n_regions),
+            "n_regions_with_exposure": float(np.sum(weights > 0.0)),
+            "evidence_count": float(Y[mask].sum()),
+            "opportunity": float(weights.sum()),
+        }
+    return out

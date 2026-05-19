@@ -240,10 +240,10 @@ class CalibrationConfig:
     pool_quality_good: int = 5_000
     pool_quality_weak: int = 200
 
-    #: Enable the regional gDNA exposure model (per-region ``A_r`` weights
-    #: applied to per-unit gDNA log-likelihoods and per-locus gDNA effective
-    #: length).  Set to ``False`` to fall back on a uniform exposure (the
-    #: pre-v3 behaviour); equivalent to the CLI flag ``--regional-exposure off``.
+    #: Enable the regional exposure model. Per-region ``A_r`` weights are
+    #: applied to EM effective-length denominators, not per-fragment numerator
+    #: likelihoods. Set to ``False`` to fall back on uniform exposure;
+    #: equivalent to the CLI flag ``--regional-exposure off``.
     regional_exposure_enabled: bool = True
 
 @dataclass(frozen=True)
@@ -291,6 +291,9 @@ class TranscriptGeometry:
     ----------
     effective_lengths : np.ndarray
         float64[n_transcripts] — effective transcript lengths.
+    effective_lengths_em : np.ndarray, optional
+        float64[n_transcripts] — EM-only effective transcript lengths. When
+        omitted, EM uses ``effective_lengths``.
     exonic_lengths : np.ndarray
         float64[n_transcripts] — spliced exonic lengths.
     t_to_g : np.ndarray
@@ -303,3 +306,4 @@ class TranscriptGeometry:
     exonic_lengths: np.ndarray
     t_to_g: np.ndarray
     transcript_spans: np.ndarray
+    effective_lengths_em: np.ndarray | None = None

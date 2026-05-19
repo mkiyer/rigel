@@ -151,9 +151,9 @@ def test_equal_density_input_signal_zero():
     )
     assert exp.mode == "uniform"
     assert np.allclose(exp.weight, 1.0)
-    # Per-class diagnostic should still be populated.
+    # Region-type diagnostic should still be populated, but it is QC-only.
     assert "INTERGENIC" in exp.per_class
-    assert exp.per_class["INTERGENIC"]["signal"] == 0.0
+    assert exp.observed_log_spread <= exp.null_log_spread + 1e-12
 
 
 def test_bimodal_density_input_attenuates_low_regions():

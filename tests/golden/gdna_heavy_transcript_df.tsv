@@ -1,3 +1,3 @@
-transcript_id	gene_id	gene_name	effective_length	locus_id	nrna_id	is_basic	is_mane	is_nrna	count	count_unambig	count_em	count_spliced	nrna_parent_count	tpm	tpm_total_rna	posterior_mean
-t1	g1	g1	229.35932033982738	0	RIGEL_NRNA_golden_gdna_hi_1_500_1500	True	False	False	26.103812829770455	16.0	10.103812829770456	16.0	0.5556858392778311	771919.0867771968	763373.6371328218	0.6464270573935111
-t2	g2	g2	229.35932033982738	1	RIGEL_NRNA_golden_gdna_hi_2_4000_5000	True	False	False	7.7129605560973005	4.0	3.7129605560973	4.0	0.4167626879094784	228080.9132228031	225555.96728977023	0.6800836840402986
+transcript_id	gene_id	gene_name	effective_length	em_effective_length	em_exposure_weight	locus_id	nrna_id	is_basic	is_mane	is_nrna	count	count_unambig	count_em	count_spliced	nrna_parent_count	tpm	tpm_total_rna	posterior_mean
+t1	g1	g1	229.35932033982738	229.35932033982738	1.0	0	RIGEL_NRNA_golden_gdna_hi_1_500_1500	True	False	False	26.079912367676254	16.0	10.079912367676256	16.0	0.5566677498412672	771903.3882397702	763337.2002285041	0.645090579207429
+t2	g2	g2	229.35932033982738	229.35932033982738	1.0	1	RIGEL_NRNA_golden_gdna_hi_2_4000_5000	True	False	False	7.706585742078452	4.0	3.7065857420784516	4.0	0.4173145150268106	228096.61176022963	225565.31251884843	0.6801119247484032

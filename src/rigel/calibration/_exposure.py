@@ -38,9 +38,112 @@ __all__ = [
     "contained_exposure_clipped",
     "boundary_crossing_exposure",
     "boundary_side_in_window",
+    "footprint_exposure_weight",
+    "transcript_exposure_weights",
     "gdna_eff_len_for_loci",
     "weighted_gdna_eff_len_for_loci",
 ]
+
+
+def _merged_blocks(
+    blocks: Sequence[tuple[int, int, int]],
+) -> list[tuple[int, int, int]]:
+    """Return non-overlapping ``(ref_id, start, end)`` blocks."""
+    valid_blocks = [
+        (int(ref_id), int(start), int(end))
+        for ref_id, start, end in blocks
+        if int(end) > int(start)
+    ]
+    if not valid_blocks:
+        return []
+    valid_blocks.sort()
+    merged: list[tuple[int, int, int]] = []
+    cur_ref, cur_start, cur_end = valid_blocks[0]
+    for ref_id, start, end in valid_blocks[1:]:
+        if ref_id == cur_ref and start <= cur_end:
+            if end > cur_end:
+                cur_end = end
+        else:
+            merged.append((cur_ref, cur_start, cur_end))
+            cur_ref, cur_start, cur_end = ref_id, start, end
+    merged.append((cur_ref, cur_start, cur_end))
+    return merged
+
+
+def footprint_exposure_weight(
+    blocks: Sequence[tuple[int, int, int]],
+    exposure: "RegionalGdnaExposure",
+    *,
+    min_weight: float = 1.0e-4,
+) -> float:
+    """Return bp-weighted mean exposure over a component footprint.
+
+    ``blocks`` are half-open genomic intervals as ``(ref_id, start, end)``.
+    Overlapping blocks on the same reference are merged before integration so
+    locus footprints and exon blocks are not double-counted.
+    """
+    if min_weight < 0.0:
+        raise ValueError(f"footprint_exposure_weight: min_weight must be >= 0, got {min_weight}.")
+    merged = _merged_blocks(blocks)
+    if not merged:
+        return 1.0
+    raw_bp = float(sum(end - start for _, start, end in merged))
+    if raw_bp <= 0.0:
+        return 1.0
+    if exposure.mode == "uniform":
+        return 1.0
+    weighted_bp = sum(
+        exposure.weighted_length_on_ref(ref_id, start, end)
+        for ref_id, start, end in merged
+    )
+    weight = float(weighted_bp) / raw_bp
+    return float(np.clip(weight, min_weight, 1.0))
+
+
+def transcript_exposure_weights(
+    index,
+    exposure: "RegionalGdnaExposure",
+    *,
+    min_weight: float = 1.0e-4,
+) -> np.ndarray:
+    """Return per-transcript EM exposure weights.
+
+    nRNA rows use the unspliced genomic span. Other transcript rows use exon
+    blocks, which skips introns for mature mRNA components.
+    """
+    n_t = int(index.num_transcripts)
+    weights = np.ones(n_t, dtype=np.float64)
+    if exposure.mode == "uniform" or n_t == 0:
+        return weights
+    if getattr(index, "t_to_ref_arr", None) is None:
+        raise RuntimeError("TranscriptIndex.t_to_ref_arr not populated")
+
+    is_nrna = index.t_df["is_nrna"].to_numpy(dtype=bool)
+    starts = index.t_df["start"].to_numpy(dtype=np.int64)
+    ends = index.t_df["end"].to_numpy(dtype=np.int64)
+    ref_ids = np.asarray(index.t_to_ref_arr, dtype=np.int32)
+    exon_offsets, exon_starts, exon_ends, _ = index.build_exon_csr()
+
+    for t_idx in range(n_t):
+        ref_id = int(ref_ids[t_idx])
+        if is_nrna[t_idx]:
+            blocks = [(ref_id, int(starts[t_idx]), int(ends[t_idx]))]
+        else:
+            lo = int(exon_offsets[t_idx])
+            hi = int(exon_offsets[t_idx + 1])
+            if hi > lo:
+                blocks = [
+                    (ref_id, int(exon_starts[pos]), int(exon_ends[pos]))
+                    for pos in range(lo, hi)
+                ]
+            else:
+                blocks = [(ref_id, int(starts[t_idx]), int(ends[t_idx]))]
+        weights[t_idx] = footprint_exposure_weight(
+            blocks,
+            exposure,
+            min_weight=min_weight,
+        )
+    return weights
 
 
 def _ref_length_for_locus(

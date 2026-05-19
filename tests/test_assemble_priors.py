@@ -367,9 +367,11 @@ def test_assemble_priors_uniform_regional_exposure_matches_baseline():
         gdna_fl=_delta_fl(200),
     )
     assert pt.gdna_eff_len_unweighted.shape == (1,)
-    assert pt.gdna_prior_count_regional.shape == (1,)
+    assert pt.gdna_prior_count_em.shape == (1,)
+    assert pt.gdna_em_exposure_weight.shape == (1,)
     assert pt.gdna_eff_len[0] == pytest.approx(pt.gdna_eff_len_unweighted[0])
-    assert np.isfinite(pt.gdna_prior_count_regional[0])
+    assert pt.gdna_prior_count_em[0] == pytest.approx(pt.gdna_prior_count[0])
+    assert pt.gdna_em_exposure_weight[0] == pytest.approx(1.0)
 
 
 def test_assemble_priors_regional_exposure_attenuates_weighted_l_g():
@@ -413,6 +415,8 @@ def test_assemble_priors_regional_exposure_attenuates_weighted_l_g():
     )
     # Weight 0.1 attenuates weighted L_g below unweighted.
     assert pt.gdna_eff_len[0] < pt.gdna_eff_len_unweighted[0]
+    assert pt.gdna_em_exposure_weight[0] == pytest.approx(0.1)
     # gdna_prior_count (canonical eta_g) unchanged by regional weighting.
     assert pt.gdna_prior_count[0] == pytest.approx(0.0)  # gdt has rho=0
+    assert pt.gdna_prior_count_em[0] == pytest.approx(0.0)
 

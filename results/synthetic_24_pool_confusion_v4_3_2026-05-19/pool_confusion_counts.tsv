@@ -1,0 +1,385 @@
+condition	true_pool	pred_pool	count	row_fraction	overall_fraction	mean_winner_posterior
+gdna_zero_ss_0.50_nrna_zero	mrna	mrna	988868	0.988868	0.988868	0.6945988314926704
+gdna_zero_ss_0.50_nrna_zero	mrna	nrna	11132	0.011132	0.011132	0.9264632635745693
+gdna_zero_ss_0.50_nrna_zero	mrna	gdna	0	0.0	0.0	
+gdna_zero_ss_0.50_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_zero_ss_0.50_nrna_zero	nrna	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	nrna	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	nrna	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	nrna	unresolved	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	gdna	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	gdna	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	gdna	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	gdna	unresolved	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	unresolved	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	unresolved	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	unresolved	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	mrna	mrna	988867	0.988867	0.988867	0.6986292363335056
+gdna_zero_ss_0.99_nrna_zero	mrna	nrna	11133	0.011133	0.011133	0.9279558492633202
+gdna_zero_ss_0.99_nrna_zero	mrna	gdna	0	0.0	0.0	
+gdna_zero_ss_0.99_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_zero_ss_0.99_nrna_zero	nrna	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	nrna	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	nrna	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	nrna	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	gdna	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	gdna	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	gdna	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	gdna	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	unresolved	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	unresolved	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	unresolved	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_low_ss_0.50_nrna_zero	mrna	mrna	986141	0.986141	0.7889128	0.6989981982300623
+gdna_low_ss_0.50_nrna_zero	mrna	nrna	11031	0.011031	0.0088248	0.9194749497455017
+gdna_low_ss_0.50_nrna_zero	mrna	gdna	2828	0.002828	0.0022624	0.18240037068159515
+gdna_low_ss_0.50_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_low_ss_0.50_nrna_zero	nrna	mrna	0		0.0	
+gdna_low_ss_0.50_nrna_zero	nrna	nrna	0		0.0	
+gdna_low_ss_0.50_nrna_zero	nrna	gdna	0		0.0	
+gdna_low_ss_0.50_nrna_zero	nrna	unresolved	0		0.0	
+gdna_low_ss_0.50_nrna_zero	gdna	mrna	2137	0.008548	0.0017096	0.6731631900600054
+gdna_low_ss_0.50_nrna_zero	gdna	nrna	76	0.000304	6.08e-05	0.8166745155069389
+gdna_low_ss_0.50_nrna_zero	gdna	gdna	247764	0.991056	0.1982112	0.998689714635713
+gdna_low_ss_0.50_nrna_zero	gdna	unresolved	23	9.2e-05	1.84e-05	0.0
+gdna_low_ss_0.50_nrna_zero	unresolved	mrna	0		0.0	
+gdna_low_ss_0.50_nrna_zero	unresolved	nrna	0		0.0	
+gdna_low_ss_0.50_nrna_zero	unresolved	gdna	0		0.0	
+gdna_low_ss_0.50_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_low_ss_0.99_nrna_zero	mrna	mrna	986610	0.98661	0.789288	0.7084650278080528
+gdna_low_ss_0.99_nrna_zero	mrna	nrna	11063	0.011063	0.0088504	0.9222550915493049
+gdna_low_ss_0.99_nrna_zero	mrna	gdna	2327	0.002327	0.0018616	0.22761201281716859
+gdna_low_ss_0.99_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_low_ss_0.99_nrna_zero	nrna	mrna	0		0.0	
+gdna_low_ss_0.99_nrna_zero	nrna	nrna	0		0.0	
+gdna_low_ss_0.99_nrna_zero	nrna	gdna	0		0.0	
+gdna_low_ss_0.99_nrna_zero	nrna	unresolved	0		0.0	
+gdna_low_ss_0.99_nrna_zero	gdna	mrna	1700	0.0068	0.00136	0.6462951741405927
+gdna_low_ss_0.99_nrna_zero	gdna	nrna	63	0.000252	5.04e-05	0.6464055929303406
+gdna_low_ss_0.99_nrna_zero	gdna	gdna	248214	0.992856	0.1985712	0.998697964911678
+gdna_low_ss_0.99_nrna_zero	gdna	unresolved	23	9.2e-05	1.84e-05	0.0
+gdna_low_ss_0.99_nrna_zero	unresolved	mrna	0		0.0	
+gdna_low_ss_0.99_nrna_zero	unresolved	nrna	0		0.0	
+gdna_low_ss_0.99_nrna_zero	unresolved	gdna	0		0.0	
+gdna_low_ss_0.99_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_med_ss_0.50_nrna_zero	mrna	mrna	977742	0.977742	0.488871	0.696464958637996
+gdna_med_ss_0.50_nrna_zero	mrna	nrna	10629	0.010629	0.0053145	0.9326558247842445
+gdna_med_ss_0.50_nrna_zero	mrna	gdna	11629	0.011629	0.0058145	0.20133372350477444
+gdna_med_ss_0.50_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_med_ss_0.50_nrna_zero	nrna	mrna	0		0.0	
+gdna_med_ss_0.50_nrna_zero	nrna	nrna	0		0.0	
+gdna_med_ss_0.50_nrna_zero	nrna	gdna	0		0.0	
+gdna_med_ss_0.50_nrna_zero	nrna	unresolved	0		0.0	
+gdna_med_ss_0.50_nrna_zero	gdna	mrna	6817	0.006817	0.0034085	0.6475104937206659
+gdna_med_ss_0.50_nrna_zero	gdna	nrna	256	0.000256	0.000128	0.7929475045530125
+gdna_med_ss_0.50_nrna_zero	gdna	gdna	992799	0.992799	0.4963995	0.9987271625060719
+gdna_med_ss_0.50_nrna_zero	gdna	unresolved	128	0.000128	6.4e-05	0.0
+gdna_med_ss_0.50_nrna_zero	unresolved	mrna	0		0.0	
+gdna_med_ss_0.50_nrna_zero	unresolved	nrna	0		0.0	
+gdna_med_ss_0.50_nrna_zero	unresolved	gdna	0		0.0	
+gdna_med_ss_0.50_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_med_ss_0.99_nrna_zero	mrna	mrna	981149	0.981149	0.4905745	0.7080183009327888
+gdna_med_ss_0.99_nrna_zero	mrna	nrna	10838	0.010838	0.005419	0.9335857062828443
+gdna_med_ss_0.99_nrna_zero	mrna	gdna	8013	0.008013	0.0040065	0.2617506858552544
+gdna_med_ss_0.99_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_med_ss_0.99_nrna_zero	nrna	mrna	0		0.0	
+gdna_med_ss_0.99_nrna_zero	nrna	nrna	0		0.0	
+gdna_med_ss_0.99_nrna_zero	nrna	gdna	0		0.0	
+gdna_med_ss_0.99_nrna_zero	nrna	unresolved	0		0.0	
+gdna_med_ss_0.99_nrna_zero	gdna	mrna	4975	0.004975	0.0024875	0.6188194274773176
+gdna_med_ss_0.99_nrna_zero	gdna	nrna	190	0.00019	9.5e-05	0.7140975996655853
+gdna_med_ss_0.99_nrna_zero	gdna	gdna	994707	0.994707	0.4973535	0.998778438473452
+gdna_med_ss_0.99_nrna_zero	gdna	unresolved	128	0.000128	6.4e-05	0.0
+gdna_med_ss_0.99_nrna_zero	unresolved	mrna	0		0.0	
+gdna_med_ss_0.99_nrna_zero	unresolved	nrna	0		0.0	
+gdna_med_ss_0.99_nrna_zero	unresolved	gdna	0		0.0	
+gdna_med_ss_0.99_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_high_ss_0.50_nrna_zero	mrna	mrna	966306	0.966306	0.322102	0.687468097135378
+gdna_high_ss_0.50_nrna_zero	mrna	nrna	10260	0.01026	0.00342	0.8609753569337534
+gdna_high_ss_0.50_nrna_zero	mrna	gdna	23434	0.023434	0.007811333333333333	0.21564833492385121
+gdna_high_ss_0.50_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_high_ss_0.50_nrna_zero	nrna	mrna	0		0.0	
+gdna_high_ss_0.50_nrna_zero	nrna	nrna	0		0.0	
+gdna_high_ss_0.50_nrna_zero	nrna	gdna	0		0.0	
+gdna_high_ss_0.50_nrna_zero	nrna	unresolved	0		0.0	
+gdna_high_ss_0.50_nrna_zero	gdna	mrna	11844	0.005922	0.003948	0.6212965108593249
+gdna_high_ss_0.50_nrna_zero	gdna	nrna	437	0.0002185	0.00014566666666666667	0.7149248400967338
+gdna_high_ss_0.50_nrna_zero	gdna	gdna	1987517	0.9937585	0.6625056666666667	0.9987493569201082
+gdna_high_ss_0.50_nrna_zero	gdna	unresolved	202	0.000101	6.733333333333333e-05	0.0
+gdna_high_ss_0.50_nrna_zero	unresolved	mrna	0		0.0	
+gdna_high_ss_0.50_nrna_zero	unresolved	nrna	0		0.0	
+gdna_high_ss_0.50_nrna_zero	unresolved	gdna	0		0.0	
+gdna_high_ss_0.50_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_high_ss_0.99_nrna_zero	mrna	mrna	974404	0.974404	0.32480133333333333	0.7051327641330422
+gdna_high_ss_0.99_nrna_zero	mrna	nrna	10553	0.010553	0.0035176666666666668	0.881580298330088
+gdna_high_ss_0.99_nrna_zero	mrna	gdna	15043	0.015043	0.005014333333333333	0.2842070409693906
+gdna_high_ss_0.99_nrna_zero	mrna	unresolved	0	0.0	0.0	
+gdna_high_ss_0.99_nrna_zero	nrna	mrna	0		0.0	
+gdna_high_ss_0.99_nrna_zero	nrna	nrna	0		0.0	
+gdna_high_ss_0.99_nrna_zero	nrna	gdna	0		0.0	
+gdna_high_ss_0.99_nrna_zero	nrna	unresolved	0		0.0	
+gdna_high_ss_0.99_nrna_zero	gdna	mrna	8477	0.0042385	0.002825666666666667	0.592139817102034
+gdna_high_ss_0.99_nrna_zero	gdna	nrna	281	0.0001405	9.366666666666666e-05	0.6510803556745852
+gdna_high_ss_0.99_nrna_zero	gdna	gdna	1991040	0.99552	0.66368	0.9988982069741178
+gdna_high_ss_0.99_nrna_zero	gdna	unresolved	202	0.000101	6.733333333333333e-05	0.0
+gdna_high_ss_0.99_nrna_zero	unresolved	mrna	0		0.0	
+gdna_high_ss_0.99_nrna_zero	unresolved	nrna	0		0.0	
+gdna_high_ss_0.99_nrna_zero	unresolved	gdna	0		0.0	
+gdna_high_ss_0.99_nrna_zero	unresolved	unresolved	0		0.0	
+gdna_zero_ss_0.50_nrna_low	mrna	mrna	973340	0.97334	0.9188859025301602	0.6675620830721365
+gdna_zero_ss_0.50_nrna_low	mrna	nrna	10734	0.010734	0.010133479850575071	0.8853054048488472
+gdna_zero_ss_0.50_nrna_low	mrna	gdna	15926	0.015926	0.015035010257150976	0.062024296763521815
+gdna_zero_ss_0.50_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_zero_ss_0.50_nrna_low	nrna	mrna	10638	0.1795109768650546	0.010042850628881834	0.6107513958296361
+gdna_zero_ss_0.50_nrna_low	nrna	nrna	0	0.0	0.0	
+gdna_zero_ss_0.50_nrna_low	nrna	gdna	48616	0.8203709016047653	0.04589614835248348	0.9917143906725049
+gdna_zero_ss_0.50_nrna_low	nrna	unresolved	7	0.00011812153018005096	6.608380748465203e-06	0.0
+gdna_zero_ss_0.50_nrna_low	gdna	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_low	gdna	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_low	gdna	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_low	gdna	unresolved	0		0.0	
+gdna_zero_ss_0.50_nrna_low	unresolved	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_low	unresolved	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_low	unresolved	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_low	unresolved	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_low	mrna	mrna	982600	0.9826	0.927627846205987	0.6995059476816992
+gdna_zero_ss_0.99_nrna_low	mrna	nrna	16631	0.016631	0.015700568603960685	0.6091498825153099
+gdna_zero_ss_0.99_nrna_low	mrna	gdna	769	0.000769	0.0007259778279385345	0.1709767876832379
+gdna_zero_ss_0.99_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_zero_ss_0.99_nrna_low	nrna	mrna	10500	0.17718229527007645	0.009912571122697805	0.6187249942751868
+gdna_zero_ss_0.99_nrna_low	nrna	nrna	45566	0.768903663454886	0.043016782454937924	0.4622891084133048
+gdna_zero_ss_0.99_nrna_low	nrna	gdna	3188	0.05379591974485749	0.0030096454037295815	0.3145028247721166
+gdna_zero_ss_0.99_nrna_low	nrna	unresolved	7	0.00011812153018005096	6.608380748465203e-06	0.0
+gdna_zero_ss_0.99_nrna_low	gdna	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_low	gdna	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_low	gdna	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_low	gdna	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_low	unresolved	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_low	unresolved	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_low	unresolved	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_low	unresolved	unresolved	0		0.0	
+gdna_low_ss_0.50_nrna_low	mrna	mrna	977895	0.977895	0.7469060790781975	0.6896991554264591
+gdna_low_ss_0.50_nrna_low	mrna	nrna	13464	0.013464	0.010283663837844402	0.7446469633061293
+gdna_low_ss_0.50_nrna_low	mrna	gdna	8641	0.008641	0.006599906359388999	0.17407071385308437
+gdna_low_ss_0.50_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_low_ss_0.50_nrna_low	nrna	mrna	10421	0.17584920942947302	0.007959451935099266	0.625328659748455
+gdna_low_ss_0.50_nrna_low	nrna	nrna	29694	0.5010715310237762	0.022679969845584645	0.3612493044109489
+gdna_low_ss_0.50_nrna_low	nrna	gdna	19141	0.32299488702519363	0.014619697676781025	0.6183939126740716
+gdna_low_ss_0.50_nrna_low	nrna	unresolved	5	8.437252155717925e-05	3.818948246377155e-06	0.0
+gdna_low_ss_0.50_nrna_low	gdna	mrna	1892	0.007568	0.0014450900164291154	0.6414954433489363
+gdna_low_ss_0.50_nrna_low	gdna	nrna	1068	0.004272	0.0008157273454261603	0.3214742087284696
+gdna_low_ss_0.50_nrna_low	gdna	gdna	247019	0.988076	0.18867055537436767	0.9972241731828616
+gdna_low_ss_0.50_nrna_low	gdna	unresolved	21	8.4e-05	1.603958263478405e-05	0.0
+gdna_low_ss_0.50_nrna_low	unresolved	mrna	0		0.0	
+gdna_low_ss_0.50_nrna_low	unresolved	nrna	0		0.0	
+gdna_low_ss_0.50_nrna_low	unresolved	gdna	0		0.0	
+gdna_low_ss_0.50_nrna_low	unresolved	unresolved	0		0.0	
+gdna_low_ss_0.99_nrna_low	mrna	mrna	980998	0.980998	0.7492761183598992	0.6962899876294064
+gdna_low_ss_0.99_nrna_low	mrna	nrna	15887	0.015887	0.012134326158038772	0.658268161696392
+gdna_low_ss_0.99_nrna_low	mrna	gdna	3115	0.003115	0.0023792047574929674	0.23352583337449626
+gdna_low_ss_0.99_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_low_ss_0.99_nrna_low	nrna	mrna	10151	0.17129309326538533	0.0077532287297949	0.6134205077811613
+gdna_low_ss_0.99_nrna_low	nrna	nrna	42110	0.7105853765545637	0.0321631821309884	0.46241451026243696
+gdna_low_ss_0.99_nrna_low	nrna	gdna	6995	0.11803715765849378	0.00534270859668164	0.4185540674778874
+gdna_low_ss_0.99_nrna_low	nrna	unresolved	5	8.437252155717925e-05	3.818948246377155e-06	0.0
+gdna_low_ss_0.99_nrna_low	gdna	mrna	1555	0.00622	0.001187692904623295	0.6222954433303554
+gdna_low_ss_0.99_nrna_low	gdna	nrna	1567	0.006268	0.0011968583804146003	0.38515479569564065
+gdna_low_ss_0.99_nrna_low	gdna	gdna	246857	0.987428	0.18854682145118506	0.9965635841576492
+gdna_low_ss_0.99_nrna_low	gdna	unresolved	21	8.4e-05	1.603958263478405e-05	0.0
+gdna_low_ss_0.99_nrna_low	unresolved	mrna	0		0.0	
+gdna_low_ss_0.99_nrna_low	unresolved	nrna	0		0.0	
+gdna_low_ss_0.99_nrna_low	unresolved	gdna	0		0.0	
+gdna_low_ss_0.99_nrna_low	unresolved	unresolved	0		0.0	
+gdna_med_ss_0.50_nrna_low	mrna	mrna	969508	0.969508	0.4708038466226476	0.6800580167800473
+gdna_med_ss_0.50_nrna_low	mrna	nrna	12857	0.012857	0.006243501916464208	0.69845558095192
+gdna_med_ss_0.50_nrna_low	mrna	gdna	17635	0.017635	0.008563751753663086	0.19555357045868715
+gdna_med_ss_0.50_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_med_ss_0.50_nrna_low	nrna	mrna	10685	0.18030407856769207	0.0051887546066283	0.5909364882386806
+gdna_med_ss_0.50_nrna_low	nrna	nrna	23806	0.40171444963804187	0.0115604578535698	0.33035434087244525
+gdna_med_ss_0.50_nrna_low	nrna	gdna	24760	0.41781272675115166	0.012023730843249108	0.6698581232106304
+gdna_med_ss_0.50_nrna_low	nrna	unresolved	10	0.0001687450431143585	4.856111002927749e-06	0.0
+gdna_med_ss_0.50_nrna_low	gdna	mrna	6408	0.006408	0.003111795930676102	0.6258241018299572
+gdna_med_ss_0.50_nrna_low	gdna	nrna	2801	0.002801	0.0013601966919200626	0.29645730902283574
+gdna_med_ss_0.50_nrna_low	gdna	gdna	990708	0.990708	0.48109880194885446	0.9975188893742541
+gdna_med_ss_0.50_nrna_low	gdna	unresolved	83	8.3e-05	4.030572132430032e-05	0.0
+gdna_med_ss_0.50_nrna_low	unresolved	mrna	0		0.0	
+gdna_med_ss_0.50_nrna_low	unresolved	nrna	0		0.0	
+gdna_med_ss_0.50_nrna_low	unresolved	gdna	0		0.0	
+gdna_med_ss_0.50_nrna_low	unresolved	unresolved	0		0.0	
+gdna_med_ss_0.99_nrna_low	mrna	mrna	976249	0.976249	0.4740773510497212	0.6909908123520728
+gdna_med_ss_0.99_nrna_low	mrna	nrna	14523	0.014523	0.007052530009551971	0.6479416505107146
+gdna_med_ss_0.99_nrna_low	mrna	gdna	9228	0.009228	0.004481219233501727	0.26690836421655684
+gdna_med_ss_0.99_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_med_ss_0.99_nrna_low	nrna	mrna	10401	0.1755117193432443	0.005050841054145152	0.5976343826028965
+gdna_med_ss_0.99_nrna_low	nrna	nrna	35011	0.5907932704476806	0.017001730232350343	0.4496100601432117
+gdna_med_ss_0.99_nrna_low	nrna	gdna	13839	0.23352626516596076	0.006720372016951712	0.540357874196142
+gdna_med_ss_0.99_nrna_low	nrna	unresolved	10	0.0001687450431143585	4.856111002927749e-06	0.0
+gdna_med_ss_0.99_nrna_low	gdna	mrna	4809	0.004809	0.0023353037813079545	0.6010657360991837
+gdna_med_ss_0.99_nrna_low	gdna	nrna	3295	0.003295	0.0016000885754646934	0.36105554790768846
+gdna_med_ss_0.99_nrna_low	gdna	gdna	991813	0.991813	0.481635402214678	0.9975115229834843
+gdna_med_ss_0.99_nrna_low	gdna	unresolved	83	8.3e-05	4.030572132430032e-05	0.0
+gdna_med_ss_0.99_nrna_low	unresolved	mrna	0		0.0	
+gdna_med_ss_0.99_nrna_low	unresolved	nrna	0		0.0	
+gdna_med_ss_0.99_nrna_low	unresolved	gdna	0		0.0	
+gdna_med_ss_0.99_nrna_low	unresolved	unresolved	0		0.0	
+gdna_high_ss_0.50_nrna_low	mrna	mrna	957915	0.957915	0.3131197370868324	0.6868188558624058
+gdna_high_ss_0.50_nrna_low	mrna	nrna	11944	0.011944	0.003904210853536197	0.7341022776294442
+gdna_high_ss_0.50_nrna_low	mrna	gdna	30141	0.030141	0.009852379381818026	0.21196087233317806
+gdna_high_ss_0.50_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_high_ss_0.50_nrna_low	nrna	mrna	10226	0.172558681088743	0.0033426373231966807	0.613948263730668
+gdna_high_ss_0.50_nrna_low	nrna	nrna	17841	0.30105803142032705	0.005831800555755132	0.2691545151751936
+gdna_high_ss_0.50_nrna_low	nrna	gdna	31185	0.526231416952127	0.01019363826754239	0.7205782442655148
+gdna_high_ss_0.50_nrna_low	nrna	unresolved	9	0.00015187053880292266	2.9418869458996796e-06	0.0
+gdna_high_ss_0.50_nrna_low	gdna	mrna	11219	0.0056095	0.003667225516227612	0.6211163728383448
+gdna_high_ss_0.50_nrna_low	gdna	nrna	3637	0.0018185	0.0011888492024707928	0.27821312430510614
+gdna_high_ss_0.50_nrna_low	gdna	gdna	1984910	0.992455	0.6488200908650815	0.9977835312088277
+gdna_high_ss_0.50_nrna_low	gdna	unresolved	234	0.000117	7.648906059339168e-05	0.0
+gdna_high_ss_0.50_nrna_low	unresolved	mrna	0		0.0	
+gdna_high_ss_0.50_nrna_low	unresolved	nrna	0		0.0	
+gdna_high_ss_0.50_nrna_low	unresolved	gdna	0		0.0	
+gdna_high_ss_0.50_nrna_low	unresolved	unresolved	0		0.0	
+gdna_high_ss_0.99_nrna_low	mrna	mrna	970128	0.970128	0.3171118776724183	0.704536165687167
+gdna_high_ss_0.99_nrna_low	mrna	nrna	13425	0.013425	0.004388314694300356	0.7053377948021533
+gdna_high_ss_0.99_nrna_low	mrna	gdna	16447	0.016447	0.005376134955468004	0.2738589456256436
+gdna_high_ss_0.99_nrna_low	mrna	unresolved	0	0.0	0.0	
+gdna_high_ss_0.99_nrna_low	nrna	mrna	10079	0.17007812895496194	0.003294586503080319	0.6242855461378078
+gdna_high_ss_0.99_nrna_low	nrna	nrna	29246	0.4935117530922529	0.00955982506886467	0.3940023265425927
+gdna_high_ss_0.99_nrna_low	nrna	gdna	19927	0.3362582474139822	0.006513664574549213	0.6219258822859924
+gdna_high_ss_0.99_nrna_low	nrna	unresolved	9	0.00015187053880292266	2.9418869458996796e-06	0.0
+gdna_high_ss_0.99_nrna_low	gdna	mrna	8228	0.004114	0.0026895384212069517	0.5992224583240189
+gdna_high_ss_0.99_nrna_low	gdna	nrna	4283	0.0021415	0.0014000113099209253	0.32637478942810416
+gdna_high_ss_0.99_nrna_low	gdna	gdna	1987255	0.9936275	0.649586615852652	0.997996473509681
+gdna_high_ss_0.99_nrna_low	gdna	unresolved	234	0.000117	7.648906059339168e-05	0.0
+gdna_high_ss_0.99_nrna_low	unresolved	mrna	0		0.0	
+gdna_high_ss_0.99_nrna_low	unresolved	nrna	0		0.0	
+gdna_high_ss_0.99_nrna_low	unresolved	gdna	0		0.0	
+gdna_high_ss_0.99_nrna_low	unresolved	unresolved	0		0.0	
+gdna_zero_ss_0.50_nrna_high	mrna	mrna	917970	0.91797	0.7194770688580867	0.6607153863165165
+gdna_zero_ss_0.50_nrna_high	mrna	nrna	9218	0.009218	0.007224789067980264	0.727303875542136
+gdna_zero_ss_0.50_nrna_high	mrna	gdna	72812	0.072812	0.05706783918613355	0.17321919793698629
+gdna_zero_ss_0.50_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_zero_ss_0.50_nrna_high	nrna	mrna	43926	0.15921851496094386	0.03442786771535052	0.6241241196771401
+gdna_zero_ss_0.50_nrna_high	nrna	nrna	0	0.0	0.0	
+gdna_zero_ss_0.50_nrna_high	nrna	gdna	231897	0.8405567537198471	0.18175384145122797	0.9768729779714682
+gdna_zero_ss_0.50_nrna_high	nrna	unresolved	62	0.00022473131920909073	4.859372122095643e-05	0.0
+gdna_zero_ss_0.50_nrna_high	gdna	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_high	gdna	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_high	gdna	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_high	gdna	unresolved	0		0.0	
+gdna_zero_ss_0.50_nrna_high	unresolved	mrna	0		0.0	
+gdna_zero_ss_0.50_nrna_high	unresolved	nrna	0		0.0	
+gdna_zero_ss_0.50_nrna_high	unresolved	gdna	0		0.0	
+gdna_zero_ss_0.50_nrna_high	unresolved	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_high	mrna	mrna	926643	0.926643	0.7262747034411409	0.6678597230809469
+gdna_zero_ss_0.99_nrna_high	mrna	nrna	69484	0.069484	0.054459453634144145	0.20529426606850767
+gdna_zero_ss_0.99_nrna_high	mrna	gdna	3873	0.003873	0.003035540036915553	0.23104607845780895
+gdna_zero_ss_0.99_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_zero_ss_0.99_nrna_high	nrna	mrna	44091	0.1598165902459358	0.03455718971537403	0.6107414630870833
+gdna_zero_ss_0.99_nrna_high	nrna	nrna	217453	0.7882016057415228	0.17043307194613935	0.6302997429538189
+gdna_zero_ss_0.99_nrna_high	nrna	gdna	14279	0.051757072693332365	0.011191447505065111	0.32745913690919676
+gdna_zero_ss_0.99_nrna_high	nrna	unresolved	62	0.00022473131920909073	4.859372122095643e-05	0.0
+gdna_zero_ss_0.99_nrna_high	gdna	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_high	gdna	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_high	gdna	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_high	gdna	unresolved	0		0.0	
+gdna_zero_ss_0.99_nrna_high	unresolved	mrna	0		0.0	
+gdna_zero_ss_0.99_nrna_high	unresolved	nrna	0		0.0	
+gdna_zero_ss_0.99_nrna_high	unresolved	gdna	0		0.0	
+gdna_zero_ss_0.99_nrna_high	unresolved	unresolved	0		0.0	
+gdna_low_ss_0.50_nrna_high	mrna	mrna	929979	0.929979	0.6094686034661851	0.6523648753980231
+gdna_low_ss_0.50_nrna_high	mrna	nrna	22996	0.022996	0.015070598374058334	0.38653387769913033
+gdna_low_ss_0.50_nrna_high	mrna	gdna	47025	0.047025	0.03081818092451266	0.16844657373942876
+gdna_low_ss_0.50_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_low_ss_0.50_nrna_high	nrna	mrna	45797	0.16600032622288272	0.03001340205847754	0.6204921619749113
+gdna_low_ss_0.50_nrna_high	nrna	nrna	85126	0.3085561012740816	0.05578795256523263	0.31691211424508026
+gdna_low_ss_0.50_nrna_high	nrna	gdna	144910	0.5252550881707958	0.09496783833644082	0.7112499741673496
+gdna_low_ss_0.50_nrna_high	nrna	unresolved	52	0.00018848433223988257	3.407858390376732e-05	0.0
+gdna_low_ss_0.50_nrna_high	gdna	mrna	1475	0.0059	0.0009666521395780154	0.5801272032517245
+gdna_low_ss_0.50_nrna_high	gdna	nrna	952	0.003808	0.0006239002283920479	0.27191245498648303
+gdna_low_ss_0.50_nrna_high	gdna	gdna	247552	0.990208	0.16223503081818091	0.996700423301042
+gdna_low_ss_0.50_nrna_high	gdna	unresolved	21	8.4e-05	1.376250503805988e-05	0.0
+gdna_low_ss_0.50_nrna_high	unresolved	mrna	0		0.0	
+gdna_low_ss_0.50_nrna_high	unresolved	nrna	0		0.0	
+gdna_low_ss_0.50_nrna_high	unresolved	gdna	0		0.0	
+gdna_low_ss_0.50_nrna_high	unresolved	unresolved	0		0.0	
+gdna_low_ss_0.99_nrna_high	mrna	mrna	946610	0.94661	0.6203678520989458	0.6667142827158957
+gdna_low_ss_0.99_nrna_high	mrna	nrna	47649	0.047649	0.03122712393135787	0.2520482687268402
+gdna_low_ss_0.99_nrna_high	mrna	gdna	5741	0.005741	0.0037624067344524652	0.24776870471699025
+gdna_low_ss_0.99_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_low_ss_0.99_nrna_high	nrna	mrna	45867	0.1662540551316672	0.030059277075271073	0.6251366761848024
+gdna_low_ss_0.99_nrna_high	nrna	nrna	208872	0.7570980662232452	0.13688580725284016	0.5633632071078534
+gdna_low_ss_0.99_nrna_high	nrna	gdna	21094	0.07645939431284775	0.013824108632039768	0.3588849059850468
+gdna_low_ss_0.99_nrna_high	nrna	unresolved	52	0.00018848433223988257	3.407858390376732e-05	0.0
+gdna_low_ss_0.99_nrna_high	gdna	mrna	1489	0.005956	0.000975827142936722	0.5910726920285627
+gdna_low_ss_0.99_nrna_high	gdna	nrna	2914	0.011656	0.0019097114133764996	0.45751438067021716
+gdna_low_ss_0.99_nrna_high	gdna	gdna	245576	0.982304	0.16094004462983777	0.9954946182138061
+gdna_low_ss_0.99_nrna_high	gdna	unresolved	21	8.4e-05	1.376250503805988e-05	0.0
+gdna_low_ss_0.99_nrna_high	unresolved	mrna	0		0.0	
+gdna_low_ss_0.99_nrna_high	unresolved	nrna	0		0.0	
+gdna_low_ss_0.99_nrna_high	unresolved	gdna	0		0.0	
+gdna_low_ss_0.99_nrna_high	unresolved	unresolved	0		0.0	
+gdna_med_ss_0.50_nrna_high	mrna	mrna	928969	0.928969	0.4081792357698214	0.6517327759328178
+gdna_med_ss_0.50_nrna_high	mrna	nrna	28643	0.028643	0.012585433798280669	0.33933080414550904
+gdna_med_ss_0.50_nrna_high	mrna	gdna	42388	0.042388	0.01862484264363094	0.19762222509752708
+gdna_med_ss_0.50_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_med_ss_0.50_nrna_high	nrna	mrna	45475	0.1648331732424742	0.01998123806782856	0.6187230842223841
+gdna_med_ss_0.50_nrna_high	nrna	nrna	115017	0.4169019700237418	0.0505372635260569	0.4229135581811967
+gdna_med_ss_0.50_nrna_high	nrna	gdna	115342	0.418079997100241	0.05068006511752571	0.6445411057153
+gdna_med_ss_0.50_nrna_high	nrna	unresolved	51	0.00018485963354296174	2.2408865122798384e-05	0.0
+gdna_med_ss_0.50_nrna_high	gdna	mrna	5258	0.005258	0.0023103100552092923	0.5633838743291307
+gdna_med_ss_0.50_nrna_high	gdna	nrna	4839	0.004839	0.002126205849592576	0.3569367369765843
+gdna_med_ss_0.50_nrna_high	gdna	gdna	989768	0.989768	0.43489367872278256	0.9965960447912948
+gdna_med_ss_0.50_nrna_high	gdna	unresolved	135	0.000135	5.931758414858396e-05	0.0
+gdna_med_ss_0.50_nrna_high	unresolved	mrna	0		0.0	
+gdna_med_ss_0.50_nrna_high	unresolved	nrna	0		0.0	
+gdna_med_ss_0.50_nrna_high	unresolved	gdna	0		0.0	
+gdna_med_ss_0.50_nrna_high	unresolved	unresolved	0		0.0	
+gdna_med_ss_0.99_nrna_high	mrna	mrna	940792	0.940792	0.41337413797270073	0.6706317887211836
+gdna_med_ss_0.99_nrna_high	mrna	nrna	48084	0.048084	0.021127605305188972	0.2510056722040605
+gdna_med_ss_0.99_nrna_high	mrna	gdna	11124	0.011124	0.0048877689338433184	0.26904057792338676
+gdna_med_ss_0.99_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_med_ss_0.99_nrna_high	nrna	mrna	45296	0.16418435217572538	0.01990258734514266	0.6260781519931277
+gdna_med_ss_0.99_nrna_high	nrna	nrna	195585	0.7089366946372583	0.0859379977459318	0.5599183319399252
+gdna_med_ss_0.99_nrna_high	nrna	gdna	34953	0.12669409355347336	0.015357981620336704	0.3970951125652919
+gdna_med_ss_0.99_nrna_high	nrna	unresolved	51	0.00018485963354296174	2.2408865122798384e-05	0.0
+gdna_med_ss_0.99_nrna_high	gdna	mrna	4498	0.004498	0.0019763740259283753	0.561151644341704
+gdna_med_ss_0.99_nrna_high	gdna	nrna	8110	0.00811	0.0035634489440371547	0.44213129116495575
+gdna_med_ss_0.99_nrna_high	gdna	gdna	987257	0.987257	0.4337903716576189	0.9962621627884619
+gdna_med_ss_0.99_nrna_high	gdna	unresolved	135	0.000135	5.931758414858396e-05	0.0
+gdna_med_ss_0.99_nrna_high	unresolved	mrna	0		0.0	
+gdna_med_ss_0.99_nrna_high	unresolved	nrna	0		0.0	
+gdna_med_ss_0.99_nrna_high	unresolved	gdna	0		0.0	
+gdna_med_ss_0.99_nrna_high	unresolved	unresolved	0		0.0	
+gdna_high_ss_0.50_nrna_high	mrna	mrna	922591	0.922591	0.2816310706877683	0.6470324316538376
+gdna_high_ss_0.50_nrna_high	mrna	nrna	27729	0.027729	0.008464582853183186	0.3380106925081566
+gdna_high_ss_0.50_nrna_high	mrna	gdna	49680	0.04968	0.01516536752663784	0.22001543350998784
+gdna_high_ss_0.50_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_high_ss_0.50_nrna_high	nrna	mrna	45082	0.16340866665458434	0.013761777351769065	0.6081227593998053
+gdna_high_ss_0.50_nrna_high	nrna	nrna	108929	0.39483480435688784	0.03325177776387144	0.4026626448761705
+gdna_high_ss_0.50_nrna_high	nrna	gdna	121822	0.44156804465628796	0.03718750810849587	0.6552920407294041
+gdna_high_ss_0.50_nrna_high	nrna	unresolved	52	0.00018848433223988257	1.5873573095514646e-05	0.0
+gdna_high_ss_0.50_nrna_high	gdna	mrna	9943	0.0049715	0.003035210332475041	0.566038465965661
+gdna_high_ss_0.50_nrna_high	gdna	nrna	8754	0.004377	0.0026722549784256775	0.3337737789937385
+gdna_high_ss_0.50_nrna_high	gdna	gdna	1981080	0.99054	0.60474650361658	0.9967621699870189
+gdna_high_ss_0.50_nrna_high	gdna	unresolved	223	0.0001115	6.807320769807243e-05	0.0
+gdna_high_ss_0.50_nrna_high	unresolved	mrna	0		0.0	
+gdna_high_ss_0.50_nrna_high	unresolved	nrna	0		0.0	
+gdna_high_ss_0.50_nrna_high	unresolved	gdna	0		0.0	
+gdna_high_ss_0.50_nrna_high	unresolved	unresolved	0		0.0	
+gdna_high_ss_0.99_nrna_high	mrna	mrna	937091	0.937091	0.2860573554932484	0.6605100735281202
+gdna_high_ss_0.99_nrna_high	mrna	nrna	44424	0.044424	0.01356091559990659	0.2602281007272673
+gdna_high_ss_0.99_nrna_high	mrna	gdna	18485	0.018485	0.00564274997443439	0.27473641175545965
+gdna_high_ss_0.99_nrna_high	mrna	unresolved	0	0.0	0.0	
+gdna_high_ss_0.99_nrna_high	nrna	mrna	45015	0.16316581184189063	0.013741324863357536	0.6150443827552988
+gdna_high_ss_0.99_nrna_high	nrna	nrna	181848	0.659144208637657	0.05551110615909899	0.5022740235331273
+gdna_high_ss_0.99_nrna_high	nrna	gdna	48970	0.17750149518821248	0.014948632201679852	0.44149472091865416
+gdna_high_ss_0.99_nrna_high	nrna	unresolved	52	0.00018848433223988257	1.5873573095514646e-05	0.0
+gdna_high_ss_0.99_nrna_high	gdna	mrna	7792	0.003896	0.0023785938761586565	0.5543470019231994
+gdna_high_ss_0.99_nrna_high	gdna	nrna	12688	0.006344	0.003873151835305574	0.39731645063834187
+gdna_high_ss_0.99_nrna_high	gdna	gdna	1979297	0.9896485	0.6042022232160165	0.9966385433995383
+gdna_high_ss_0.99_nrna_high	gdna	unresolved	223	0.0001115	6.807320769807243e-05	0.0
+gdna_high_ss_0.99_nrna_high	unresolved	mrna	0		0.0	
+gdna_high_ss_0.99_nrna_high	unresolved	nrna	0		0.0	
+gdna_high_ss_0.99_nrna_high	unresolved	gdna	0		0.0	
+gdna_high_ss_0.99_nrna_high	unresolved	unresolved	0		0.0	
