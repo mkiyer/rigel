@@ -1,6 +1,11 @@
 # TODO
 
 
+## hybrid capture simulator
+
+We have an extensive code base for simulation in place in the 'src/sim' folder within Rigel. To support hybrid capture simulation, the simulator needs additional inputs. 1) It needs to accept a BED file with capture targets. It needs to support simple single block BED format column 1 = ref, column 2 = start, column 3 = end, OR the BED12 format in case we have exon-exon spanning probes (splice junction spanning probes) in which case a single probe has multiple genomic capture intervals. 2) We need to specify an overall enrichment ratio (e.g. 1000X) that conveys how much enrichment the capture probes provide. This is the global on-target versus off-target probability ratio. 3) We need to define the probability landscape for sampling reads. Instead of sampling reads uniformly, we need to sample them according to a genome
+
+
 ## gdna capture weighting
 
 I'm just thinking out loud here.

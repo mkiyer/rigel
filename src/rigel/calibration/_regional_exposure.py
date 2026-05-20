@@ -103,7 +103,8 @@ class RegionalGdnaExposure:
     n_at_floor: int
     per_class: dict[str, dict[str, float]] = field(default_factory=dict)
     rho_global: float = 0.0
-    kappa_global: float = 0.0
+    kappa_alpha_global: float = 0.0
+    kappa_opportunity_bp: float = 0.0
     kappa_fallback_used: bool = False
     kappa_fallback_reason: str = ""
     observed_log_spread: float = 0.0
@@ -131,7 +132,8 @@ class RegionalGdnaExposure:
             n_at_floor=0,
             per_class={},
             rho_global=0.0,
-            kappa_global=0.0,
+            kappa_alpha_global=0.0,
+            kappa_opportunity_bp=0.0,
             kappa_fallback_used=False,
             kappa_fallback_reason="",
             observed_log_spread=0.0,
@@ -260,14 +262,15 @@ class RegionalGdnaExposure:
         total_Y = float(Y[valid].sum())
         rho_global = total_Y / total_E if total_E > 0.0 else 0.0
         kappa_est = estimate_kappa(Y[valid], E[valid], rho_global)
-        kappa = float(kappa_est.value)
+        kappa_alpha = float(kappa_est.value)
+        kappa_opportunity = kappa_alpha / rho_global if rho_global > 0.0 else 0.0
 
         rho_hat = np.full(R, rho_global, dtype=np.float64)
-        denom = E[valid] + kappa
+        denom = E[valid] + kappa_opportunity
         with np.errstate(invalid="ignore", divide="ignore"):
             rho_hat[valid] = np.where(
                 denom > 0.0,
-                (Y[valid] + kappa * rho_global) / denom,
+                (Y[valid] + kappa_opportunity * rho_global) / denom,
                 rho_global,
             )
 
@@ -286,7 +289,8 @@ class RegionalGdnaExposure:
                 n_at_floor=0,
                 per_class=per_class_summary,
                 rho_global=float(rho_global),
-                kappa_global=float(kappa),
+                kappa_alpha_global=float(kappa_alpha),
+                kappa_opportunity_bp=float(kappa_opportunity),
                 kappa_fallback_used=bool(kappa_est.fallback_used),
                 kappa_fallback_reason=str(kappa_est.fallback_reason),
                 ref_offsets=out.ref_offsets,
@@ -303,7 +307,7 @@ class RegionalGdnaExposure:
         q95_log = _weighted_quantile(log_rho, E[valid], 0.95, fallback=log_fallback)
         obs_spread = float(max(q95_log - q50_log, 0.0))
         with np.errstate(invalid="ignore", divide="ignore"):
-            var_log = E[valid] / (rho_global * (E[valid] + kappa) ** 2)
+            var_log = E[valid] / (rho_global * (E[valid] + kappa_opportunity) ** 2)
         w_total = float(E[valid].sum())
         sigma2 = float((var_log * E[valid]).sum() / w_total) if w_total > 0.0 else 0.0
         null_spread = Z_Q95 * float(np.sqrt(max(sigma2, 0.0)))
@@ -319,7 +323,8 @@ class RegionalGdnaExposure:
                 n_at_floor=0,
                 per_class=per_class_summary,
                 rho_global=float(rho_global),
-                kappa_global=float(kappa),
+                kappa_alpha_global=float(kappa_alpha),
+                kappa_opportunity_bp=float(kappa_opportunity),
                 kappa_fallback_used=bool(kappa_est.fallback_used),
                 kappa_fallback_reason=str(kappa_est.fallback_reason),
                 observed_log_spread=float(obs_spread),
@@ -349,7 +354,8 @@ class RegionalGdnaExposure:
             n_at_floor=n_at_floor,
             per_class=per_class_summary,
             rho_global=float(rho_global),
-            kappa_global=float(kappa),
+            kappa_alpha_global=float(kappa_alpha),
+            kappa_opportunity_bp=float(kappa_opportunity),
             kappa_fallback_used=bool(kappa_est.fallback_used),
             kappa_fallback_reason=str(kappa_est.fallback_reason),
             observed_log_spread=float(obs_spread),
@@ -469,7 +475,8 @@ class RegionalGdnaExposure:
             "mode": self.mode,
             "rho_global": float(self.rho_global),
             "rho_ref": float(self.rho_ref),
-            "kappa_global": float(self.kappa_global),
+            "kappa_alpha_global": float(self.kappa_alpha_global),
+            "kappa_opportunity_bp": float(self.kappa_opportunity_bp),
             "kappa_fallback_used": bool(self.kappa_fallback_used),
             "kappa_fallback_reason": self.kappa_fallback_reason,
             "observed_log_spread": float(self.observed_log_spread),

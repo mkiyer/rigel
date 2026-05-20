@@ -1,0 +1,12 @@
+{
+  "bam": "/Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/kappa_units_fix/annotated.bam",
+  "record_counts": {
+    "fragments_counted": 32218601,
+    "records_seen": 66113219,
+    "records_skipped": 33894618
+  },
+  "source_map": {
+    "C6EL5ANXX": "rna",
+    "H7MFFDSXY": "gdna"
+  }
+}

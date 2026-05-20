@@ -13,7 +13,7 @@ from rigel.calibration._regional_exposure import (
     RegionalGdnaExposure,
     _weighted_quantile,
 )
-from rigel.calibration.density_global import GlobalDensityTable, GlobalGdnaDensity
+from rigel.calibration.density_global import DensityType, GlobalDensityTable, GlobalGdnaDensity
 from rigel.calibration.regions import RegionStrand, RegionType
 from rigel.calibration.scan_payload import (
     FL_HIST_N_BINS,
@@ -72,7 +72,9 @@ def _empty_payload(R: int) -> CalibrationScanPayload:
     )
 
 
-def _density(rho: float, kappa: float = 1.0, label: str = "INTERGENIC") -> GlobalGdnaDensity:
+def _density(
+    rho: float, kappa: float = 1.0, label: DensityType = "INTERGENIC"
+) -> GlobalGdnaDensity:
     return GlobalGdnaDensity(
         type=label,
         rho=rho,
@@ -154,6 +156,52 @@ def test_equal_density_input_signal_zero():
     # Region-type diagnostic should still be populated, but it is QC-only.
     assert "INTERGENIC" in exp.per_class
     assert exp.observed_log_spread <= exp.null_log_spread + 1e-12
+
+
+def test_kappa_alpha_is_converted_to_opportunity_length(monkeypatch):
+    """NB alpha must be converted to bp-equivalent opportunity before shrinkage."""
+    span = 1000
+    n_regions = 5
+    df = pd.DataFrame(
+        {
+            "ref_name": ["chr1"] * n_regions,
+            "start": [i * span for i in range(n_regions)],
+            "end": [(i + 1) * span for i in range(n_regions)],
+            "type": [int(RegionType.INTERGENIC)] * n_regions,
+            "strand": [int(RegionStrand.NONE)] * n_regions,
+            "boundary_flux_left": [False] * n_regions,
+            "boundary_flux_right": [False] * n_regions,
+        }
+    )
+    payload = _empty_payload(n_regions)
+    payload.per_region_counts[:, MASK_INTERGENIC] = [0, 0, 0, 0, 5]
+    region_arrays, payload_arrays = _build_arrays(df, payload)
+
+    def _fixed_alpha(counts: np.ndarray, eff_lengths: np.ndarray, rho_hat: float) -> KappaEstimate:
+        return KappaEstimate(
+            value=1.0,
+            n_regions=int(counts.size),
+            fallback_used=False,
+            fallback_reason="",
+        )
+
+    monkeypatch.setattr("rigel.calibration._regional_exposure.estimate_kappa", _fixed_alpha)
+
+    exp = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        _density_table(rho_ig=1e-3, kappa=1.0),
+        _fl_delta(ell=1, max_size=20),
+    )
+
+    assert exp.rho_global == pytest.approx(1e-3, rel=1e-3)
+    assert exp.kappa_alpha_global == pytest.approx(1.0)
+    assert exp.kappa_opportunity_bp == pytest.approx(1.0 / exp.rho_global)
+    assert exp.rho_hat[0] == pytest.approx(0.5 * exp.rho_global)
+    summary = exp.to_summary_dict()
+    assert summary["kappa_alpha_global"] == pytest.approx(1.0)
+    assert summary["kappa_opportunity_bp"] == pytest.approx(1.0 / exp.rho_global)
+    assert "kappa_global" not in summary
 
 
 def test_bimodal_density_input_attenuates_low_regions():
