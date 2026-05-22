@@ -168,6 +168,12 @@ void CalibrationAccumulator::observe(
         if (obs_mask == mask::INTRON) {
             payload_.intron_counts_by_orient[orient_idx]++;
         }
+        if (flux_eligible && obs_mask == mask::EXON &&
+            (regions.type_mask(rid) & mask::EXON) != 0 &&
+            frag_start >= regions.start(rid) &&
+            frag_end <= regions.end(rid)) {
+            payload_.exon_contained_counts_by_orient[orient_idx]++;
+        }
         if (flux_eligible && (regions.type_mask(rid) & mask::EXON) != 0) {
             const int64_t rs = regions.start(rid);
             const int64_t re = regions.end(rid);
@@ -210,6 +216,8 @@ void CalibrationAccumulator::merge_from(const CalibrationAccumulator& other) {
     add_into(payload_.u_right,           other.payload_.u_right);
     add_into(payload_.intron_counts_by_orient,
              other.payload_.intron_counts_by_orient);
+    add_into(payload_.exon_contained_counts_by_orient,
+             other.payload_.exon_contained_counts_by_orient);
     add_into(payload_.u_left_by_orient,  other.payload_.u_left_by_orient);
     add_into(payload_.u_right_by_orient, other.payload_.u_right_by_orient);
     payload_.n_observed          += other.payload_.n_observed;

@@ -1,0 +1,14 @@
+{
+  "bam": "/Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/exon_strand_deconv_v1/annotated.bam",
+  "record_counts": {
+    "fragments_counted": 32218601,
+    "read2_skipped": 32218601,
+    "records_seen": 66113219,
+    "secondary_skipped": 1568372,
+    "supplementary_skipped": 107645
+  },
+  "source_map": {
+    "C6EL5ANXX": "rna",
+    "H7MFFDSXY": "gdna"
+  }
+}

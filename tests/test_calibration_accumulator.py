@@ -16,8 +16,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from rigel.calibration._arrays import PayloadArrays, RegionArrays
 from rigel.calibration.scan_payload import CalibrationScanPayload
 from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, ORIENT_UNINF
+from rigel.calibration.regions import RegionStrand, RegionType
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.native import BamScanner
 from rigel.pipeline import run_pipeline, scan_and_buffer
@@ -153,6 +155,7 @@ class TestPipelinePayload:
         assert payload.u_left.shape == (n_regions,)
         assert payload.u_right.shape == (n_regions,)
         assert payload.intron_counts_by_orient.shape == (n_regions, 3)
+        assert payload.exon_contained_counts_by_orient.shape == (n_regions, 3)
         assert payload.u_left_by_orient.shape == (n_regions, 3)
         assert payload.u_right_by_orient.shape == (n_regions, 3)
         np.testing.assert_array_equal(
@@ -191,6 +194,7 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
         "u_left": np.zeros(n_regions, dtype=np.int64),
         "u_right": np.zeros(n_regions, dtype=np.int64),
         "intron_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
+        "exon_contained_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "u_left_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "u_right_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "n_observed": n_observed,
@@ -238,6 +242,20 @@ class TestPayloadValidation:
         with pytest.raises(ValueError, match="intron_counts_by_orient"):
             CalibrationScanPayload.from_scan_dict(d)
 
+    def test_exon_contained_subset_violation_raises(self):
+        d = _good_payload_dict(n_regions=2, n_observed=1)
+        d["per_region_counts"][0, EXON_BIT] = 1
+        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 2
+        with pytest.raises(ValueError, match="exon_contained_counts_by_orient"):
+            CalibrationScanPayload.from_scan_dict(d)
+
+    def test_exon_contained_strict_subset_is_valid(self):
+        d = _good_payload_dict(n_regions=2, n_observed=2)
+        d["per_region_counts"][0, EXON_BIT] = 2
+        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 1
+        p = CalibrationScanPayload.from_scan_dict(d, n_total=2)
+        assert p.exon_contained_counts_by_orient[0, ORIENT_SAME] == 1
+
     def test_n_unannotated_ref_le_n_observed(self):
         d = _good_payload_dict(n_observed=10)
         d["n_unannotated_ref"] = 99
@@ -274,6 +292,10 @@ class TestWorkerMergeEquality:
         np.testing.assert_array_equal(a.u_left, b.u_left)
         np.testing.assert_array_equal(a.u_right, b.u_right)
         np.testing.assert_array_equal(a.intron_counts_by_orient, b.intron_counts_by_orient)
+        np.testing.assert_array_equal(
+            a.exon_contained_counts_by_orient,
+            b.exon_contained_counts_by_orient,
+        )
         np.testing.assert_array_equal(a.u_left_by_orient, b.u_left_by_orient)
         np.testing.assert_array_equal(a.u_right_by_orient, b.u_right_by_orient)
         assert a.n_observed == b.n_observed
@@ -282,6 +304,42 @@ class TestWorkerMergeEquality:
         assert a.n_excluded_artifact == b.n_excluded_artifact
         assert a.n_unobserved == b.n_unobserved
         assert a.n_unannotated_ref == b.n_unannotated_ref
+
+
+class TestPayloadArrayOrdering:
+    def test_exon_contained_counts_follow_region_sort_order(self):
+        df = np.array(
+            [
+                ("chr1", 200, 300, int(RegionType.EXON), int(RegionStrand.POS)),
+                ("chr1", 0, 100, int(RegionType.EXON), int(RegionStrand.POS)),
+                ("chr1", 100, 200, int(RegionType.EXON), int(RegionStrand.POS)),
+            ],
+            dtype=[
+                ("ref_name", "O"),
+                ("start", "i8"),
+                ("end", "i8"),
+                ("type", "u1"),
+                ("strand", "u1"),
+            ],
+        )
+        import pandas as pd
+
+        region_df = pd.DataFrame.from_records(df)
+        region_df["boundary_flux_left"] = False
+        region_df["boundary_flux_right"] = False
+        region_arrays = RegionArrays.from_region_df(region_df, {"chr1": 0})
+
+        d = _good_payload_dict(n_regions=3, n_observed=0)
+        d["per_region_counts"][:, EXON_BIT] = [30, 10, 20]
+        d["exon_contained_counts_by_orient"][:, ORIENT_SAME] = [30, 10, 20]
+        payload = CalibrationScanPayload.from_scan_dict(d, n_total=0)
+        payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
+
+        np.testing.assert_array_equal(region_arrays.order, np.array([1, 2, 0]))
+        np.testing.assert_array_equal(
+            payload_arrays.exon_contained_by_orient[:, ORIENT_SAME],
+            np.array([10, 20, 30]),
+        )
 # ---------------------------------------------------------------------------
 # 5. Hand-built BAM contract tests against `mini_index`
 #
@@ -467,6 +525,7 @@ class TestBoundaryFlux:
         p = self._run(mini_index, tmp_path, r1_pos=70, r2_pos=130)
         assert p.u_left[1] == 1
         assert p.u_right[1] == 0
+        assert p.exon_contained_counts_by_orient[1].sum() == 0
 
     def test_right_straddle_only(self, mini_index, tmp_path):
         # Fragment [180,250) straddles right edge (200) of EXON region 1
@@ -474,6 +533,7 @@ class TestBoundaryFlux:
         p = self._run(mini_index, tmp_path, r1_pos=180, r2_pos=200)
         assert p.u_left[1] == 0
         assert p.u_right[1] == 1
+        assert p.exon_contained_counts_by_orient[1].sum() == 0
 
     def test_full_span_both_flags(self, mini_index, tmp_path):
         # Fragment [70,250) straddles BOTH edges of EXON region 1.
@@ -486,6 +546,58 @@ class TestBoundaryFlux:
         p = self._run(mini_index, tmp_path, r1_pos=110, r2_pos=145)
         assert p.u_left[1] == 0
         assert p.u_right[1] == 0
+        assert p.exon_contained_counts_by_orient[1, ORIENT_SAME] == 1
+
+
+class TestExonContainedRouting:
+    """Pin the EXON-contained orientation stream added for strand deconvolution."""
+
+    def _run_pair(self, mini_index, tmp_path, qname, r1_pos, r2_pos, *, neg_fragment=False):
+        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
+        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
+        bam = _build_bam(
+            tmp_path,
+            ref_lens,
+            _make_pair(
+                qname,
+                chr1_id,
+                r1_pos,
+                r2_pos,
+                r1_is_reverse=neg_fragment,
+                r2_is_reverse=not neg_fragment,
+            ),
+        )
+        return _scan(bam, mini_index)
+
+    def test_pos_exon_contained_same_and_opp(self, mini_index, tmp_path):
+        same = self._run_pair(mini_index, tmp_path, "same", 110, 145)
+        opp = self._run_pair(mini_index, tmp_path, "opp", 110, 145, neg_fragment=True)
+        assert same.exon_contained_counts_by_orient[1, ORIENT_SAME] == 1
+        assert same.exon_contained_counts_by_orient[1, ORIENT_OPP] == 0
+        assert opp.exon_contained_counts_by_orient[1, ORIENT_SAME] == 0
+        assert opp.exon_contained_counts_by_orient[1, ORIENT_OPP] == 1
+
+    def test_half_open_region_end_is_contained_not_boundary(self, mini_index, tmp_path):
+        p = self._run_pair(mini_index, tmp_path, "edge", 150, 150)
+        assert p.global_counts[EXON_BIT] == 1
+        assert p.exon_contained_counts_by_orient[1, ORIENT_SAME] == 1
+        assert p.u_left[1] == 0
+        assert p.u_right[1] == 0
+
+    def test_spliced_exon_only_fragment_not_contained(self, mini_index, tmp_path):
+        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
+        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
+        reads = _make_pair(
+            "spliced",
+            chr1_id,
+            r1_pos=150,
+            r2_pos=330,
+            r1_cigar=[(0, 25), (3, 124), (0, 25)],
+        )
+        bam = _build_bam(tmp_path, ref_lens, reads)
+        p = _scan(bam, mini_index)
+        assert p.global_counts[EXON_BIT] == 1
+        assert int(p.exon_contained_counts_by_orient.sum()) == 0
 
 
 class TestOrientationRouting:

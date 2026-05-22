@@ -1770,6 +1770,9 @@ private:
             cal_dict["intron_counts_by_orient"] = vec_to_ndarray2d(
                 std::move(payload.intron_counts_by_orient), n_reg,
                 static_cast<size_t>(rigel::calibration::orient::N));
+            cal_dict["exon_contained_counts_by_orient"] = vec_to_ndarray2d(
+                std::move(payload.exon_contained_counts_by_orient), n_reg,
+                static_cast<size_t>(rigel::calibration::orient::N));
             cal_dict["u_left_by_orient"]   = vec_to_ndarray2d(
                 std::move(payload.u_left_by_orient), n_reg,
                 static_cast<size_t>(rigel::calibration::orient::N));

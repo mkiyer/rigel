@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>EXON Strand Deconvolution Implementation Log v1</title>
+  <style>
+    :root { color-scheme: light dark; --border: #9aa4b2; --muted: #5b6472; --panel: rgba(127,127,127,0.08); --accent: #2f6f9f; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.48; margin: 2rem auto; max-width: 1080px; padding: 0 1rem 3rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin-bottom: 0.25rem; }
+    .meta { color: var(--muted); margin-top: 0; }
+    .entry { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid var(--border); padding: 0.5rem; vertical-align: top; }
+    th { text-align: left; background: var(--panel); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ok { color: #287a3e; font-weight: 650; }
+    .warn { color: #a45f00; font-weight: 650; }
+    .open { color: var(--accent); font-weight: 650; }
+  </style>
+</head>
+<body>
+  <h1>EXON Strand Deconvolution Implementation Log v1</h1>
+  <p class="meta">Started: 2026-05-20. Scope: phased implementation of EXON-contained strand deconvolution plus boundary-flux reconciliation.</p>
+
+  <section class="entry">
+    <h2>Phase 0: Setup And Guardrails</h2>
+    <p><span class="ok">Started.</span> Worktree was checked before implementation. Pre-existing unrelated changes were present in <code>.github/copilot-instructions.md</code>, <code>docs/TODO.md</code>, a deleted calibration digest, one benchmark note, and one debug script. These are not part of this implementation and will be left untouched.</p>
+    <p><span class="open">Question:</span> None blocking at phase start. The implementation will proceed in small phases with rebuild/test gates after native changes.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Phase 1: Payload Surface</h2>
+    <p><span class="ok">Completed.</span> Added <code>exon_contained_counts_by_orient</code> to the native calibration payload, worker merge, Python export dict, <code>CalibrationScanPayload</code>, and sorted <code>PayloadArrays</code>.</p>
+    <p><span class="ok">Counting rule implemented.</span> Native counting is restricted to unique non-artifact observations that reach <code>observe()</code>, are unspliced, have <code>obs_mask == EXON</code>, hit an EXON region, and have exact half-open containment <code>[frag_start, frag_end) <= [region_start, region_end)</code>.</p>
+    <p><span class="warn">Issue encountered.</span> The new schema touched several direct test payload constructors. These were updated with zero-filled EXON-contained arrays so existing tests keep their old semantics.</p>
+    <p><span class="ok">Verification.</span> Native rebuild passed with <code>conda activate rigel &amp;&amp; pip install --no-build-isolation -e .</code>. Phase gate passed: <code>pytest tests/test_calibration_accumulator.py -v</code> reported 37 passed.</p>
+    <p><span class="open">Open question.</span> None for Phase 1. The payload contract is now available for global density implementation.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Phase 2: Global Density</h2>
+    <p><span class="ok">Completed.</span> Added the global <code>EXON-CONTAINED</code> density channel and a precision-weighted <code>EXON-COMPOSITE</code> projection density.</p>
+    <p><span class="ok">Theory implemented.</span> The composite uses <code>strand_power = signed_strand_contrast^2</code>, converts kappa alpha to bp opportunity with <code>beta = alpha / rho</code>, and fuses boundary/contained evidence through <code>E * beta / (E + beta)</code> precision.</p>
+    <p><span class="warn">Design guardrail.</span> EXON-contained evidence contributes only when strand correction is active and strand-identifiable rows are present. Unstranded and AMBIG-only EXON-contained rows remain diagnostic and the composite falls back to boundary flux.</p>
+    <p><span class="ok">Verification.</span> <code>pytest tests/test_density_global.py -v</code> passed with 27 tests, including pure RNA, pure gDNA, unstranded fallback, AMBIG fallback, and kappa-capped precision fusion cases.</p>
+    <p><span class="open">Open question.</span> None for Phase 2. Regional exposure can now consume the composite EXON projection density.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Phase 3: Regional Exposure</h2>
+    <p><span class="ok">Completed.</span> Regional exposure now builds EXON rows from separate boundary and EXON-contained evidence streams, then combines them through the same kappa-capped precision model used by the global composite.</p>
+    <p><span class="ok">Bias guardrail implemented.</span> EXON-contained signed moments are carried through shrinkage and final per-row rates are floored afterward, with <code>n_negative_rho_floored</code> recorded in the exposure summary.</p>
+    <p><span class="ok">Diagnostics expanded.</span> <code>per_class</code> now includes <code>EXON-INTRON</code>, <code>EXON-CONTAINED</code>, and <code>EXON-COMPOSITE</code> summaries so boundary-only, contained-only, and actual composite evidence can be audited separately.</p>
+    <p><span class="ok">Verification.</span> <code>pytest tests/test_regional_exposure.py -v</code> passed with 17 tests, including contained-only EXON exposure, unstranded fallback, and negative signed-moment flooring.</p>
+    <p><span class="open">Open question.</span> None for Phase 3. The remaining implementation is locus-prior fusion and final focused regression testing.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Phase 4: Locus Prior Fusion</h2>
+    <p><span class="ok">Completed.</span> Added locoregional EXON-contained strand evidence and fused it with the existing boundary branch for diagnostic per-locus gDNA estimates.</p>
+    <p><span class="ok">Canonical prior preserved.</span> <code>expected_gdna_count_global()</code> remains payload-free. Boundary-crossing expected counts still use <code>global_densities.exon_intron.rho</code>; EXON-contained projection now uses <code>global_densities.exon_composite.rho</code>.</p>
+    <p><span class="ok">Diagnostics added.</span> Per-locus estimates now carry nested <code>ExonGdnaDiagnostics</code> with boundary rate, contained rate, fused rate, precision weights, and contained evidence counters. Existing EM-facing arrays remain unchanged.</p>
+    <p><span class="warn">Issue encountered.</span> Existing exact-count tests use <code>kappa=0</code>, which makes the precision formula evaluate to zero. Added explicit boundary-only and contained-only fallbacks so exact local modes preserve legacy behavior when one branch is inactive.</p>
+    <p><span class="ok">Verification.</span> <code>pytest tests/test_per_locus_gdna_mass.py -v</code> passed with 10 tests. <code>pytest tests/test_assemble_priors.py tests/test_locus_prior_fused.py tests/test_bayesian_prior_acceptance.py -v</code> passed with 18 tests.</p>
+    <p><span class="open">Open question.</span> None blocking. A combined focused suite and lint pass remain before considering this phase complete.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Final Focused Verification</h2>
+    <p><span class="ok">Completed.</span> Combined focused regression suite passed: <code>pytest tests/test_calibration_accumulator.py tests/test_density_global.py tests/test_regional_exposure.py tests/test_per_locus_gdna_mass.py tests/test_assemble_priors.py tests/test_locus_prior_fused.py tests/test_bayesian_prior_acceptance.py tests/test_calibration_result.py tests/test_calibrate_orchestrator.py -v</code> reported 129 passed.</p>
+    <p><span class="ok">Lint and editor checks.</span> <code>ruff check</code> passed on the edited Python implementation and test files. VS Code diagnostics reported no errors for the edited Python source files. <code>git diff --check</code> reported no whitespace errors.</p>
+    <p><span class="warn">Worktree note.</span> The worktree still includes unrelated pre-existing changes in repository docs/debug files; these were not modified or reverted as part of this implementation.</p>
+    <p><span class="open">Open question.</span> No code blocker remains for this phased implementation. Larger-scale benchmark validation is the natural next confidence step.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Phase 0: Exact Denominator Trial And Rollback</h2>
+    <p><span class="ok">Completed.</span> The exact FL-aware denominator trial was implemented and measured on VCAP, then removed after it did not materially change the FLG2 mega-locus exposure denominator. Production is back to the scalar rule: <code>gdna_eff_len_for_loci(...) * footprint_exposure_weight(...)</code>.</p>
+    <p><span class="ok">Cleanup.</span> Removed exact-denominator production wiring, exact/scalar schema columns, and the unused <code>weighted_gdna_eff_len_for_loci(...)</code> helper/tests. Retained the existing scalar diagnostics <code>gdna_eff_len_unweighted</code>, <code>gdna_eff_len_weight_ratio</code>, and <code>gdna_em_exposure_weight</code>, which are sufficient for the cap-at-1 audit.</p>
+    <p><span class="ok">Verification.</span> <code>ruff check src/rigel/calibration/_exposure.py src/rigel/calibration/locus_prior.py src/rigel/pipeline.py src/rigel/estimator.py tests/test_assemble_priors.py tests/test_weighted_eff_len.py</code> passed. Focused tests passed: <code>pytest tests/test_weighted_eff_len.py tests/test_assemble_priors.py tests/test_bayesian_prior_acceptance.py -v</code> reported 20 passed.</p>
+    <table>
+      <thead><tr><th>VCAP locus 3 metric</th><th>Scalar run</th><th>Exact trial</th><th>Interpretation</th></tr></thead>
+      <tbody>
+        <tr><td><code>gdna_eff_len_unweighted</code></td><td>353,762,179</td><td>353,762,179</td><td>Raw FL-marginal opportunity unchanged.</td></tr>
+        <tr><td><code>gdna_eff_len</code></td><td>92,407,095</td><td>92,459,136</td><td>Exact midpoint integration was only 1.000563x scalar.</td></tr>
+        <tr><td><code>gdna_em_exposure_weight</code></td><td>0.261212</td><td>0.261360</td><td>The exposure multiplier remains far too high for the desired kb-scale opportunity.</td></tr>
+        <tr><td><code>gdna_prior_count_em</code></td><td>259,499</td><td>259,645</td><td>Prior scales consistently with the exact denominator.</td></tr>
+      </tbody>
+    </table>
+    <p><span class="warn">Finding.</span> Exact geometry does not close the 92M exposure gap. The exact denominator was slightly larger than the scalar denominator because the FL-expanded midpoint opportunity sampled a little more high-exposure sequence outside the raw footprint.</p>
+    <p><span class="open">Key question.</span> The next failure surface is the exposure field itself, especially the normalization/capping that leaves the mega-locus average exposure near 0.261 instead of a kb-scale ratio.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Phase 4+: Cap-At-1 Exposure Diagnostics</h2>
+    <p><span class="ok">Completed diagnostic pass.</span> Added <code>scripts/debug/diagnose_cap_at_1_exposure.py</code>, which reruns native scan plus calibration only, reconstructs the saved VCAP locus-3 footprint, and evaluates current/global high-quantile/class-aware/max/soft exposure normalizers without rerunning EM.</p>
+    <p><span class="ok">Outputs.</span> Published <code>docs/benchmarks/vcap_locus3_cap_at_1_diagnostics_2026-05-21.md</code> plus TSVs under <code>results/vcap_cap_at_1_diagnostics_2026-05-21/</code>.</p>
+    <table>
+      <thead><tr><th>Normalizer</th><th>Mean exposure</th><th><code>L_gDNA</code></th><th>Finding</th></tr></thead>
+      <tbody>
+        <tr><td>Current global Q95</td><td>0.261213</td><td>92,407,283</td><td>Matches saved scalar denominator; <code>A==1</code> covers 11.10% of footprint and contributes 42.51% of denominator.</td></tr>
+        <tr><td>Global Q99.9</td><td>0.026853</td><td>9,499,710</td><td>High-tail global reference substantially reduces the denominator but still leaves multi-megabase opportunity.</td></tr>
+        <tr><td>Class-aware Q99.9</td><td>0.015386</td><td>5,442,962</td><td>Close to the FLG2 mRNA break-even scale, but only justified under a channel-bias normalization assumption.</td></tr>
+        <tr><td>Within-locus Q99.9</td><td>0.014838</td><td>5,249,150</td><td>Similar scale to class-aware Q99.9 for FLG2; changes the identifying assumption from sample-level to locus-level.</td></tr>
+        <tr><td>Global max</td><td>0.000118</td><td>41,737</td><td>Useful lower bound only; likely over-normalizes by pushing almost all footprint bases to the exposure floor.</td></tr>
+        <tr><td>Within-locus max</td><td>0.000138</td><td>48,911</td><td>Same qualitative behavior as global max for FLG2; likely too aggressive.</td></tr>
+      </tbody>
+    </table>
+    <p><span class="warn">Finding.</span> The 92M denominator is not just hard-cap saturation. Saturated regions are important, but broad moderately high exposure in the <code>[0.1,1)</code> bin contributes slightly more than the saturated bin. A soft cap at the same global Q95 reference still gives a 65.1M denominator, so the reference scale itself is the primary lever.</p>
+    <p><span class="open">Next question.</span> A production candidate should be selected by an explicit identifying assumption about exposure scale. Class-aware high-tail normalization, global high-tail normalization, and within-locus high-tail normalization now have comparable diagnostic numbers for FLG2 and need validation against ordinary loci and full confusion matrices before changing EM-facing denominators.</p>
+  </section>
+</body>
+</html>

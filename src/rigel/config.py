@@ -246,6 +246,17 @@ class CalibrationConfig:
     #: equivalent to the CLI flag ``--regional-exposure off``.
     regional_exposure_enabled: bool = True
 
+    #: Weighted quantile of regional ``rho_hat`` used as the fully exposed
+    #: reference scale for ``A_r = min(rho_hat / rho_ref, 1)``.
+    regional_exposure_reference_quantile: float = 0.95
+
+    def __post_init__(self) -> None:
+        if not (0.0 < self.regional_exposure_reference_quantile <= 1.0):
+            raise ValueError(
+                "CalibrationConfig.regional_exposure_reference_quantile must be in (0, 1]; "
+                f"got {self.regional_exposure_reference_quantile}."
+            )
+
 @dataclass(frozen=True)
 class PipelineConfig:
     """Top-level pipeline configuration composing all sub-configs.

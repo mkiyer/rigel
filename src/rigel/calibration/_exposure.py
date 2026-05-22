@@ -1,7 +1,7 @@
 """rigel.calibration._exposure — FL-aware geometric exposure primitives.
 
 Single owner of the *fragment-length-aware geometry* used by the v6
-locoregional gDNA prior. Three primitives:
+locoregional gDNA prior. Core helpers:
 
 * :func:`contained_exposure_clipped` — per-region full and clipped
   contained-fragment effective lengths, sharing the salmon-style
@@ -13,6 +13,8 @@ locoregional gDNA prior. Three primitives:
 * :func:`boundary_side_in_window` — boolean per-region flags marking
   whether each region's left and right boundaries lie inside a query
   window. Used to localize boundary events to a Locus.
+* :func:`footprint_exposure_weight` — scalar bp-weighted exposure over a
+    merged component footprint, used to attenuate the gDNA EM denominator.
 * :func:`gdna_eff_len_for_loci` — FL-marginal overlap effective length
     for the per-``MultiLocus`` gDNA EM component.
 
@@ -41,7 +43,6 @@ __all__ = [
     "footprint_exposure_weight",
     "transcript_exposure_weights",
     "gdna_eff_len_for_loci",
-    "weighted_gdna_eff_len_for_loci",
 ]
 
 
@@ -237,77 +238,6 @@ def gdna_eff_len_for_loci(
             n_valid += cur_hi - cur_lo
 
         total += float(pmf[ell_i]) * float(n_valid)
-
-    return max(total, float(min_value))
-
-
-def weighted_gdna_eff_len_for_loci(
-    loci: tuple | list,
-    ref_lengths: Mapping[str | int, int] | Sequence[int],
-    fl: FragmentLengthModel,
-    exposure: "RegionalGdnaExposure",
-    *,
-    min_value: float = 1.0,
-) -> float:
-    """Regional-exposure-weighted analogue of :func:`gdna_eff_len_for_loci`.
-
-    Computes :math:`\\sum_\\ell h(\\ell) \\sum_w \\int A(x)\\,dx`, where ``w``
-    ranges over the merged per-reference midpoint windows for fragment
-    length ``\\ell`` and ``A(x)`` is the per-region exposure weight from
-    ``exposure``. The midpoint of a length-``\\ell`` fragment starting at
-    position ``s`` is ``s + \\ell // 2``; the merged start window
-    ``[lo, hi)`` therefore maps to the midpoint window
-    ``[lo + \\ell // 2, hi + \\ell // 2)``.
-
-    For ``exposure.mode == "uniform"`` this delegates to the unweighted
-    function and is bit-exact equal.
-    """
-    if min_value < 0.0:
-        raise ValueError(
-            f"weighted_gdna_eff_len_for_loci: min_value must be >= 0, got {min_value}."
-        )
-    if exposure.mode == "uniform":
-        return gdna_eff_len_for_loci(loci, ref_lengths, fl, min_value=min_value)
-    if not loci:
-        return float(min_value)
-
-    pmf = fl.pmf
-    positive_ell = np.flatnonzero(pmf[1:] > 0.0) + 1
-    if positive_ell.size == 0:
-        return float(min_value)
-
-    total = 0.0
-    for ell in positive_ell:
-        ell_i = int(ell)
-        half = ell_i // 2
-        by_ref: dict[int, list[tuple[int, int]]] = {}
-        for locus in loci:
-            ref_len = _ref_length_for_locus(ref_lengths, locus)
-            valid_hi = ref_len - ell_i + 1
-            if valid_hi <= 0:
-                continue
-            lo = max(int(locus.start) - ell_i + 1, 0)
-            hi = min(int(locus.end), valid_hi)
-            if hi <= lo:
-                continue
-            ref_id = int(locus.ref_id)
-            by_ref.setdefault(ref_id, []).append((lo, hi))
-
-        for ref_id, windows in by_ref.items():
-            windows.sort()
-            cur_lo, cur_hi = windows[0]
-            for lo, hi in windows[1:]:
-                if lo <= cur_hi:
-                    if hi > cur_hi:
-                        cur_hi = hi
-                else:
-                    total += float(pmf[ell_i]) * exposure.weighted_length_on_ref(
-                        ref_id, cur_lo + half, cur_hi + half
-                    )
-                    cur_lo, cur_hi = lo, hi
-            total += float(pmf[ell_i]) * exposure.weighted_length_on_ref(
-                ref_id, cur_lo + half, cur_hi + half
-            )
 
     return max(total, float(min_value))
 

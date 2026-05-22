@@ -1089,6 +1089,7 @@ def quant_from_buffer(
                 getattr(calibration_payload, "splicing_anchor_tolerance", 0)
             ),
             regional_exposure=calibration.regional_exposure,
+            strand_summary=_calibration_strand_summary(strand_models),
         )
         calibration = calibration.with_priors(prior_table)
 
@@ -1242,6 +1243,7 @@ def run_pipeline(
         pool_quality_weak=cal_cfg.pool_quality_weak,
         strand_summary=strand_summary,
         regional_exposure_enabled=cal_cfg.regional_exposure_enabled,
+        regional_exposure_reference_quantile=cal_cfg.regional_exposure_reference_quantile,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

@@ -147,6 +147,7 @@ def _make_payload(
         u_left=u_left_arr,
         u_right=u_right_arr,
         intron_counts_by_orient=intron_by_orient,
+        exon_contained_counts_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
         u_left_by_orient=u_left_by_orient,
         u_right_by_orient=u_right_by_orient,
         n_observed=0, n_excluded_multimap=0, n_excluded_chimera=0,

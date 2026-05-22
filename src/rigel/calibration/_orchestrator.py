@@ -54,6 +54,7 @@ def calibrate(
     pool_quality_weak: int = POOL_QUALITY_WEAK_THRESHOLD,
     strand_summary: StrandSummary | None = None,
     regional_exposure_enabled: bool = True,
+    regional_exposure_reference_quantile: float = 0.95,
 ) -> CalibrationResult:
     """Run the v6 calibration pipeline end-to-end (sans per-locus priors).
 
@@ -130,6 +131,7 @@ def calibrate(
         strand_summary=strand_summary,
         splicing_anchor_tolerance=int(getattr(payload, "splicing_anchor_tolerance", 0)),
         enabled=regional_exposure_enabled,
+        reference_quantile=regional_exposure_reference_quantile,
     )
 
     return build_calibration_result(

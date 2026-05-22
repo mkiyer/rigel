@@ -34,10 +34,14 @@ from ._result import (
     build_per_locus_gdna_df,
 )
 from .density_global import (
+    ExonCompositeDensity,
     GlobalDensityTable,
     GlobalGdnaDensity,
     compute_global_densities,
+    kappa_opportunity_bp,
     l_eff_contained,
+    precision_opportunity,
+    strand_reliability_power,
 )
 from .density_loco import shrink_to_loco
 from .fl import (
@@ -75,8 +79,12 @@ __all__ = [
     # Global gDNA densities + κ
     "GlobalDensityTable",
     "GlobalGdnaDensity",
+    "ExonCompositeDensity",
     "compute_global_densities",
     "l_eff_contained",
+    "kappa_opportunity_bp",
+    "precision_opportunity",
+    "strand_reliability_power",
     "KappaEstimate",
     "estimate_kappa",
     "KAPPA_DEFAULT",

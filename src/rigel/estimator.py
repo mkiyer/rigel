@@ -863,7 +863,9 @@ class AbundanceEstimator:
             gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
             gdna_eff_len_unweighted = float(r.get("gdna_eff_len_unweighted", gdna_eff_len))
             gdna_eff_len_weight_ratio = float(r.get("gdna_eff_len_weight_ratio", 1.0))
-            gdna_em_exposure_weight = float(r.get("gdna_em_exposure_weight", gdna_eff_len_weight_ratio))
+            gdna_em_exposure_weight = float(
+                r.get("gdna_em_exposure_weight", gdna_eff_len_weight_ratio)
+            )
             n_em = max(int(r.get("n_em_fragments", 0)), 1)
             gdna_prior = gp_count_em / n_em
             rows.append(

@@ -68,6 +68,7 @@ class CalibrationScanPayload:
     u_left: np.ndarray                    # (R,)                            int64
     u_right: np.ndarray                   # (R,)                            int64
     intron_counts_by_orient: np.ndarray   # (R, ORIENT_N)                   int64
+    exon_contained_counts_by_orient: np.ndarray  # (R, ORIENT_N)            int64
     u_left_by_orient: np.ndarray          # (R, ORIENT_N)                   int64
     u_right_by_orient: np.ndarray         # (R, ORIENT_N)                   int64
     n_observed: int
@@ -136,6 +137,12 @@ class CalibrationScanPayload:
             np.int64,
             (n_regions, ORIENT_N),
         )
+        exon_contained_counts_by_orient = _check_array(
+            "exon_contained_counts_by_orient",
+            d["exon_contained_counts_by_orient"],
+            np.int64,
+            (n_regions, ORIENT_N),
+        )
         u_left_by_orient = _check_array(
             "u_left_by_orient", d["u_left_by_orient"], np.int64, (n_regions, ORIENT_N)
         )
@@ -187,6 +194,14 @@ class CalibrationScanPayload:
                 "calibration payload: intron_counts_by_orient row sums do not match "
                 f"per_region_counts[:, MASK_INTRON].{_ERR_SUFFIX}"
             )
+        exon_contained_sums = exon_contained_counts_by_orient.sum(axis=1)
+        if np.any(exon_contained_sums > per_region_counts[:, MASK_EXON]):
+            raise ValueError(
+                "calibration payload: exon_contained_counts_by_orient row sums exceed "
+                "per_region_counts[:, MASK_EXON]. Strict inequality is expected when "
+                "spliced or non-contained EXON-only fragments are present; exceeding "
+                f"the EXON mask count indicates a scanner counter bug.{_ERR_SUFFIX}"
+            )
         if not np.array_equal(u_left_by_orient.sum(axis=1), u_left):
             raise ValueError(
                 "calibration payload: u_left_by_orient row sums do not match u_left."
@@ -226,6 +241,7 @@ class CalibrationScanPayload:
             u_left=u_left,
             u_right=u_right,
             intron_counts_by_orient=intron_counts_by_orient,
+            exon_contained_counts_by_orient=exon_contained_counts_by_orient,
             u_left_by_orient=u_left_by_orient,
             u_right_by_orient=u_right_by_orient,
             n_observed=n_observed,

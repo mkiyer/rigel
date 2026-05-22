@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>EXON Strand Deconvolution Audit Log v1</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --border: #9aa4b2;
+      --muted: #5b6472;
+      --panel: rgba(127, 127, 127, 0.08);
+      --accent: #2f6f9f;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.48;
+      margin: 2rem auto;
+      max-width: 1080px;
+      padding: 0 1rem 3rem;
+    }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin-bottom: 0.25rem; }
+    .meta { color: var(--muted); margin-top: 0; }
+    .entry, .finding, .decision {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1rem 0;
+    }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid var(--border); padding: 0.5rem; vertical-align: top; }
+    th { text-align: left; background: var(--panel); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .tag { color: var(--accent); font-weight: 650; }
+  </style>
+</head>
+<body>
+  <h1>EXON Strand Deconvolution Audit Log v1</h1>
+  <p class="meta">Date: 2026-05-20. Scope: calibration scanner payload, global densities, regional exposure, locus priors, and tests relevant to using strand-specific EXON-contained evidence with existing EXON-INTRON boundary flux.</p>
+
+  <section class="entry">
+    <h2>Audit Entry 1: Existing Strand-Aware Calibration Surface</h2>
+    <p><span class="tag">Files:</span> <code>src/rigel/calibration/density_global.py</code>, <code>src/rigel/calibration/_orient.py</code>, <code>src/rigel/pipeline.py</code>, <code>tests/test_density_global.py</code>.</p>
+    <p>The calibration pipeline already has a reusable strand deconvolution implementation. <code>StrandSummary</code> stores <code>p_r1_sense</code>, <code>signed_strand_contrast</code>, and observation count. The calibration strand summary is trained from <code>strand_models.exonic_spliced</code>, which is the right RNA-pure source. The correction gate is <code>strand_correction_usable()</code>, using a 99 percent normal-approximation margin plus the numerical floor <code>1e-3</code>.</p>
+    <p>The core correction is <code>_gdna_count_moment(same, opp, signed_strand_contrast)</code>, which estimates gDNA counts as <code>total - (same - opp) / contrast</code>. This is already used for INTRON and EXON-INTRON channels. Existing tests pin unstranded fallback, perfect stranded pure-RNA zeroing, pure-gDNA symmetry, read-1 antisense mirror invariance, aggregate-before-final-clip behavior, ambiguous-row handling, and boundary orientation routing.</p>
+    <p><span class="tag">Implication:</span> The feature should reuse this correction path. The new work is not a new strand model; it is a new EXON-contained observation channel and a fusion layer.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Audit Entry 2: Scanner Payload and Native Accumulator</h2>
+    <p><span class="tag">Files:</span> <code>src/rigel/native/calibration/accumulator.h</code>, <code>src/rigel/native/calibration/accumulator.cpp</code>, <code>src/rigel/native/calibration/orient.h</code>, <code>src/rigel/native/bam_scanner.cpp</code>, <code>src/rigel/calibration/scan_payload.py</code>, <code>tests/test_calibration_accumulator.py</code>.</p>
+    <p>The native accumulator currently emits <code>per_region_counts</code>, <code>u_left</code>, <code>u_right</code>, <code>intron_counts_by_orient</code>, <code>u_left_by_orient</code>, and <code>u_right_by_orient</code>. Orientation codes are consistent across C++ and Python: SAME=0, OPP=1, UNINF=2.</p>
+    <p>Boundary flux is computed for unspliced fragments touching EXON regions. It uses the observed fragment span <code>[frag_start, frag_end)</code> and a tolerance-derived clearance <code>q = max(K, 1)</code>. Counters are recorded independently of boundary eligibility flags; eligibility is applied later in density code. This is a good design and should be preserved.</p>
+    <p>The missing payload is an EXON-contained orientation table. <code>per_region_counts[:, MASK_EXON]</code> is not usable because it includes mature mRNA, spliced genomic spans, and all EXON-only fragments without orientation-resolved strand correction. A new counter must be gated more narrowly: unique mapper, non-chimeric, non-artifact, unspliced, EXON-only mask, and fully contained in one EXON region by observed fragment span.</p>
+    <p><span class="tag">Implication:</span> Add <code>exon_contained_counts_by_orient</code> as a subset counter. It should not be required to sum to <code>per_region_counts[:, MASK_EXON]</code>; the correct validation is shape/dtype plus row-sum less than or equal to that EXON-only row count.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Audit Entry 3: Region Partition Semantics</h2>
+    <p><span class="tag">Files:</span> <code>src/rigel/calibration/regions.py</code>, <code>src/rigel/native/calibration/region_index.h</code>, <code>tests/test_region_partition.py</code>.</p>
+    <p>The region table tiles references with INTERGENIC, INTRON, and EXON rows. EXON wins wherever any-strand exon coverage exists. Region strand is a bitwise flag: NONE, POS, NEG, or AMBIG. For EXON rows, the strand is derived from exon overlap only; for INTRON rows, it is derived from transcript-span overlap.</p>
+    <p>Boundary eligibility flags identify internal exon edges, not terminal TSS/TES sides. Single-exon transcripts therefore produce EXON rows with no boundary flux eligibility. This is exactly where EXON-contained strand deconvolution can add useful evidence in stranded libraries.</p>
+    <p><span class="tag">Implication:</span> EXON-contained evidence can only be trusted on POS or NEG rows. AMBIG rows should remain boundary-only unless a later model learns separate strand mixture geometry.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Audit Entry 4: Global Density Computation</h2>
+    <p><span class="tag">Files:</span> <code>src/rigel/calibration/density_global.py</code>, <code>tests/test_density_global.py</code>.</p>
+    <p>The global density layer reduces the region table and payload into three densities: INTERGENIC, INTRON, and EXON-INTRON. INTERGENIC and INTRON use FL-weighted contained opportunity <code>l_eff_contained()</code>. EXON-INTRON uses boundary-crossing opportunity <code>boundary_crossing_exposure()</code> multiplied by eligible boundary sides.</p>
+    <p>Current EXON-region gDNA projection uses EXON-INTRON boundary density for all exonic contained opportunity. This is the current behavior the requested feature should augment rather than delete.</p>
+    <p><span class="tag">Implication:</span> The global density schema needs a fourth raw channel, EXON-CONTAINED, plus a reconciled EXON composite density used for exonic projection. Boundary-specific diagnostics should remain visible.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Audit Entry 5: Regional Exposure Builder</h2>
+    <p><span class="tag">Files:</span> <code>src/rigel/calibration/_regional_exposure.py</code>, <code>tests/test_regional_exposure.py</code>.</p>
+    <p>The regional exposure builder constructs a single relative gDNA exposure field <code>A_r</code>. Today its EXON rows are driven by boundary evidence only: <code>Y</code> from strand-corrected boundary counters and <code>E</code> from boundary opportunity. The model then estimates a global rate, applies NB/Gamma-Poisson shrinkage, and converts per-region <code>rho_hat</code> into weights.</p>
+    <p>This is the most natural place to fuse per-region boundary and EXON-contained evidence, because it already works in count/opportunity space and already has strand-aware correction helpers. It also already converts NB alpha into a bp-equivalent opportunity length, avoiding the kappa-units bug documented on 2026-05-19.</p>
+    <p><span class="tag">Implication:</span> For EXON rows, build composite evidence <code>Y_ex = Y_boundary + w_ss * Y_contained</code> and <code>E_ex = E_boundary + w_ss * E_contained</code>, where <code>w_ss</code> is zero when strand correction is unusable and otherwise scales with squared strand contrast.</p>
+  </section>
+
+  <section class="entry">
+    <h2>Audit Entry 6: Locus Prior and EM Handoff</h2>
+    <p><span class="tag">Files:</span> <code>src/rigel/calibration/locus_prior.py</code>, <code>src/rigel/pipeline.py</code>, <code>tests/test_per_locus_gdna_mass.py</code>, <code>tests/test_assemble_priors.py</code>, <code>tests/test_bayesian_prior_acceptance.py</code>.</p>
+    <p>The diagnostic locoregional path estimates intergenic, intron, boundary-observed, and exon-only-imputed mass. The canonical EM prior remains global-only: <code>expected_gdna_count_global()</code> accepts no payload and must not use local counts. Tests explicitly pin that contract.</p>
+    <p>The production EM prior count is scaled into <code>gdna_prior_count_em</code> using regional exposure-adjusted <code>gdna_eff_len</code>. Per-unit numerator weighting is retained as a legacy helper but is not called in production v4.3.</p>
+    <p><span class="tag">Implication:</span> Add local EXON-contained counts only to diagnostic locoregional estimates and regional exposure. The canonical prior should consume the global EXON composite density, preserving the no-local-payload contract.</p>
+  </section>
+
+  <section class="finding">
+    <h2>Key Findings</h2>
+    <table>
+      <thead>
+        <tr><th>Finding</th><th>Impact</th><th>Required action</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>No EXON-contained orientation payload exists.</td>
+          <td>The Python strand deconvolution code cannot be applied to fully contained EXON fragments yet.</td>
+          <td>Add a native subset counter and thread it through <code>CalibrationScanPayload</code> and <code>PayloadArrays</code>.</td>
+        </tr>
+        <tr>
+          <td>EXON-only FL histogram must remain excluded from the gDNA FL pool.</td>
+          <td>Adding EXON-only to FL training would reintroduce the spliced-genomic-span and mature-RNA contamination traps.</td>
+          <td>Use the new counter for density inference only; leave <code>extract_gdna_counts()</code> unchanged.</td>
+        </tr>
+        <tr>
+          <td>Boundary flux remains necessary.</td>
+          <td>Unstranded libraries and ambiguous-strand EXON rows cannot use contained strand deconvolution.</td>
+          <td>Use boundary-only fallback whenever strand contrast is unidentifiable or contained rows are not strand-informative.</td>
+        </tr>
+        <tr>
+          <td>Evidence should be fused in count/opportunity space with precision safeguards.</td>
+          <td>A naive average of densities ignores denominators, while raw opportunity alone can overtrust a giant but noisy EXON-contained channel.</td>
+          <td>Scale contained evidence by strand reliability and kappa-capped precision opportunity, then combine <code>Y</code> and <code>E</code> before shrinkage where possible.</td>
+        </tr>
+        <tr>
+          <td>The canonical prior is global-only by design.</td>
+          <td>Letting local EXON-contained counts directly change <code>gdna_prior_count</code> would break existing Bayesian-prior invariants.</td>
+          <td>Use local counts for diagnostics and exposure learning; use global composite density for canonical exonic prior projection.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="decision">
+    <h2>Design Decisions Recorded During Audit</h2>
+    <ol>
+      <li>Add EXON-contained as an orientation-resolved subset counter, not as a new mask state.</li>
+      <li>Gate EXON-contained evidence on <code>splice_type == SPLICE_UNSPLICED</code>, <code>obs_mask == mask::EXON</code>, EXON region type, and exact containment <code>frag_start &gt;= region_start</code> and <code>frag_end &lt;= region_end</code>.</li>
+      <li>Do not add EXON-contained counts to the gDNA FL model in phase 1.</li>
+      <li>Set contained strand reliability to zero unless <code>strand_correction_usable()</code> passes and the region strand is POS or NEG.</li>
+      <li>Use <code>signed_strand_contrast ** 2</code> as the first implementation of strand reliability, then combine it with kappa-capped precision opportunity rather than treating it as a complete inverse-variance weight.</li>
+      <li>Preserve boundary-specific diagnostics and add EXON composite diagnostics rather than overwriting <code>EXON-INTRON</code>.</li>
+    </ol>
+  </section>
+
+  <section class="entry">
+    <h2>Open Questions For Implementation Review</h2>
+    <ul>
+      <li>Whether EXON-contained exact containment should eventually require additional boundary clearance. The v1 plan keeps exact containment because it matches <code>l_eff_contained()</code>.</li>
+      <li>Whether the first strand reliability factor <code>contrast ** 2</code> should later be replaced by a full delta-method variance estimate using same/opp/total counts. The v1 choice is simple, monotonic, and is now paired with kappa-capped precision opportunity.</li>
+      <li>Whether to write <code>per_locus_gdna_df</code> as an explicit output artifact. It currently lives inside <code>CalibrationResult</code>; the implementation can add diagnostics without changing CLI outputs, or add a new output in a later PR.</li>
+    </ul>
+  </section>
+
+  <section class="entry">
+    <h2>Audit Entry 7: External Critique Evaluation Addendum</h2>
+    <p><span class="tag">Date:</span> 2026-05-20. A second-pass critique was evaluated against the code paths audited above, and the markdown plan was revised accordingly.</p>
+    <table>
+      <thead>
+        <tr><th>Critique point</th><th>Disposition</th><th>Plan update</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AMBIG EXON rows may be exactly the dense loci motivating the feature.</td>
+          <td>Adopted as a v1 limitation, not solved in v1.</td>
+          <td>The plan now requires POS/NEG versus AMBIG opportunity diagnostics and calls out per-strand AMBIG sub-regions or payloads as follow-up work.</td>
+        </tr>
+        <tr>
+          <td><code>contrast ** 2</code> is not a full inverse-variance weight.</td>
+          <td>Adopted with qualification.</td>
+          <td>The plan now treats <code>contrast ** 2</code> as strand reliability only and adds kappa-capped precision opportunity for evidence fusion.</td>
+        </tr>
+        <tr>
+          <td>Clip-before-sum row moments bias EXON-contained evidence upward.</td>
+          <td>Adopted.</td>
+          <td>The plan now avoids new EXON-contained clip-before-shrink behavior and floors final rates instead.</td>
+        </tr>
+        <tr>
+          <td>Opportunity-only fusion lets giant EXONs dominate sparse contained evidence.</td>
+          <td>Adopted.</td>
+          <td>Composite and regional fusion now use precision opportunity <code>E * beta / (E + beta)</code>, with <code>beta = alpha / rho</code>.</td>
+        </tr>
+        <tr>
+          <td>Canonical prior projection would silently shift boundary terms.</td>
+          <td>Adopted.</td>
+          <td>The plan now keeps boundary-crossing expected counts on <code>exon_intron.rho</code> and applies <code>exon_composite.rho</code> only to EXON-contained projection.</td>
+        </tr>
+        <tr>
+          <td>Half-open containment edge needs explicit tests.</td>
+          <td>Adopted.</td>
+          <td>The plan now pins <code>frag_end == region.end</code> as contained and not a right-boundary crossing at <code>q=1</code>.</td>
+        </tr>
+        <tr>
+          <td>Use <code>int32_t</code> for memory.</td>
+          <td>Not adopted for v1.</td>
+          <td>The plan keeps <code>int64_t</code> for schema consistency and overflow safety, but records the memory cost and leaves <code>int32_t</code> as a separate migration if needed.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

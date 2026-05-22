@@ -123,6 +123,7 @@ def _payload(n_observed: int = 100) -> CalibrationScanPayload:
         u_left=np.zeros(0, dtype=np.int64),
         u_right=np.zeros(0, dtype=np.int64),
         intron_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
+        exon_contained_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
         u_left_by_orient=np.zeros((0, 3), dtype=np.int64),
         u_right_by_orient=np.zeros((0, 3), dtype=np.int64),
         n_observed=int(gc.sum()),

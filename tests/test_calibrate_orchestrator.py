@@ -133,6 +133,7 @@ def _payload(
         u_left=np.zeros(n_regions, dtype=np.int64),
         u_right=np.zeros(n_regions, dtype=np.int64),
         intron_counts_by_orient=intron_by_orient,
+        exon_contained_counts_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
         u_left_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
         u_right_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
         n_observed=n_obs,

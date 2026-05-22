@@ -8,7 +8,7 @@ import pytest
 
 from rigel.calibration._arrays import PayloadArrays, RegionArrays
 from rigel.calibration._kappa import KappaEstimate
-from rigel.calibration._orient import ORIENT_OPP, StrandSummary
+from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, StrandSummary
 from rigel.calibration._regional_exposure import (
     RegionalGdnaExposure,
     _weighted_quantile,
@@ -18,6 +18,7 @@ from rigel.calibration.regions import RegionStrand, RegionType
 from rigel.calibration.scan_payload import (
     FL_HIST_N_BINS,
     MASK_INTERGENIC,
+    MASK_EXON,
     MASK_N_STATES,
     ORIENT_N,
     CalibrationScanPayload,
@@ -61,6 +62,7 @@ def _empty_payload(R: int) -> CalibrationScanPayload:
         u_left=np.zeros(R, dtype=np.int64),
         u_right=np.zeros(R, dtype=np.int64),
         intron_counts_by_orient=np.zeros((R, ORIENT_N), dtype=np.int64),
+        exon_contained_counts_by_orient=np.zeros((R, ORIENT_N), dtype=np.int64),
         u_left_by_orient=np.zeros((R, ORIENT_N), dtype=np.int64),
         u_right_by_orient=np.zeros((R, ORIENT_N), dtype=np.int64),
         n_observed=0,
@@ -89,6 +91,7 @@ def _density_table(
     rho_ig: float = 1e-6,
     rho_in: float = 1e-6,
     rho_ex: float = 1e-6,
+    rho_ex_contained: float | None = None,
     kappa: float = 1.0,
 ) -> GlobalDensityTable:
     fl = _fl_delta()
@@ -97,6 +100,25 @@ def _density_table(
         intron=_density(rho_in, kappa, "INTRON"),
         exon_intron=_density(rho_ex, kappa, "EXON-INTRON"),
         gdna_fl=fl,
+        exon_contained=_density(
+            rho_ex if rho_ex_contained is None else rho_ex_contained,
+            kappa,
+            "EXON-CONTAINED",
+        ),
+    )
+
+
+def _region_df_exons(n_regions: int = 5, span: int = 10_000) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ref_name": ["chr1"] * n_regions,
+            "start": [i * span for i in range(n_regions)],
+            "end": [(i + 1) * span for i in range(n_regions)],
+            "type": [int(RegionType.EXON)] * n_regions,
+            "strand": [int(RegionStrand.POS)] * n_regions,
+            "boundary_flux_left": [False] * n_regions,
+            "boundary_flux_right": [False] * n_regions,
+        }
     )
 
 
@@ -226,6 +248,133 @@ def test_bimodal_density_input_attenuates_low_regions():
         assert exp.weight[0] >= exp.weight[1]
         assert exp.weight[0] >= exp.weight[2]
         assert exp.weight[1] < 1.0
+
+
+def test_reference_quantile_is_configurable(monkeypatch):
+    """The reference scale should use the caller-selected weighted quantile."""
+    df = _region_df_three_intergenic(span=10_000)
+    payload = _empty_payload(3)
+    payload.per_region_counts[:, MASK_INTERGENIC] = [0, 100, 1000]
+    region_arrays, payload_arrays = _build_arrays(df, payload)
+
+    def _fixed_alpha(counts: np.ndarray, eff_lengths: np.ndarray, rho_hat: float) -> KappaEstimate:
+        return KappaEstimate(
+            value=0.01,
+            n_regions=int(counts.size),
+            fallback_used=False,
+            fallback_reason="",
+        )
+
+    monkeypatch.setattr("rigel.calibration._regional_exposure.estimate_kappa", _fixed_alpha)
+
+    exp_q50 = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        _density_table(rho_ig=1e-3, kappa=0.01),
+        _fl_delta(ell=1, max_size=20),
+        reference_quantile=0.50,
+    )
+    exp_q999 = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        _density_table(rho_ig=1e-3, kappa=0.01),
+        _fl_delta(ell=1, max_size=20),
+        reference_quantile=0.999,
+    )
+
+    assert exp_q50.mode == "regional"
+    assert exp_q999.mode == "regional"
+    assert exp_q999.rho_ref > exp_q50.rho_ref
+    assert exp_q999.weight[1] < exp_q50.weight[1]
+    assert exp_q999.to_summary_dict()["reference_quantile"] == pytest.approx(0.999)
+
+
+def test_exon_contained_evidence_can_drive_regional_exposure_without_boundary(monkeypatch):
+    """EXON rows with no boundary sides can now contribute via strand-contained evidence."""
+    df = _region_df_exons(n_regions=5, span=10_000)
+    payload = _empty_payload(5)
+    payload.per_region_counts[:, MASK_EXON] = [1000, 0, 0, 0, 0]
+    payload.exon_contained_counts_by_orient[0, ORIENT_SAME] = 500
+    payload.exon_contained_counts_by_orient[0, ORIENT_OPP] = 500
+    region_arrays, payload_arrays = _build_arrays(df, payload)
+
+    def _fixed_alpha(counts: np.ndarray, eff_lengths: np.ndarray, rho_hat: float) -> KappaEstimate:
+        return KappaEstimate(
+            value=0.1,
+            n_regions=int(counts.size),
+            fallback_used=False,
+            fallback_reason="",
+        )
+
+    monkeypatch.setattr("rigel.calibration._regional_exposure.estimate_kappa", _fixed_alpha)
+
+    exp = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        _density_table(rho_ex=1e-4, rho_ex_contained=1e-4, kappa=0.1),
+        _fl_delta(ell=100),
+        strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=10_000),
+    )
+
+    assert exp.per_class["EXON-INTRON"]["opportunity"] == 0.0
+    assert exp.per_class["EXON-CONTAINED"]["opportunity"] > 0.0
+    assert exp.per_class["EXON-COMPOSITE"]["opportunity"] > 0.0
+    assert exp.rho_hat[0] > exp.rho_hat[1]
+    if exp.mode == "regional":
+        assert exp.weight[0] >= exp.weight[1]
+
+
+def test_unstranded_exon_contained_rows_remain_boundary_only():
+    df = _region_df_exons(n_regions=5, span=10_000)
+    payload = _empty_payload(5)
+    payload.per_region_counts[:, MASK_EXON] = [1000, 0, 0, 0, 0]
+    payload.exon_contained_counts_by_orient[0, ORIENT_SAME] = 1000
+    region_arrays, payload_arrays = _build_arrays(df, payload)
+
+    exp = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        _density_table(rho_ex=1e-4, rho_ex_contained=1e-4),
+        _fl_delta(ell=100),
+        strand_summary=StrandSummary.uninformative(),
+    )
+
+    assert exp.mode == "uniform"
+    assert np.allclose(exp.rho_hat, 0.0)
+    assert exp.per_class["EXON-CONTAINED"]["evidence_count"] == 0.0
+    assert exp.per_class["EXON-CONTAINED"]["opportunity"] > 0.0
+    assert exp.per_class["EXON-COMPOSITE"]["opportunity"] == 0.0
+
+
+def test_exon_contained_negative_signed_moments_are_floored_after_shrinkage(monkeypatch):
+    df = _region_df_exons(n_regions=5, span=10_000)
+    payload = _empty_payload(5)
+    payload.per_region_counts[:, MASK_EXON] = [100, 100, 100, 100, 100]
+    payload.exon_contained_counts_by_orient[:, ORIENT_SAME] = 100
+    region_arrays, payload_arrays = _build_arrays(df, payload)
+
+    def _fixed_alpha(counts: np.ndarray, eff_lengths: np.ndarray, rho_hat: float) -> KappaEstimate:
+        return KappaEstimate(
+            value=0.1,
+            n_regions=int(counts.size),
+            fallback_used=False,
+            fallback_reason="",
+        )
+
+    monkeypatch.setattr("rigel.calibration._regional_exposure.estimate_kappa", _fixed_alpha)
+
+    exp = RegionalGdnaExposure.build(
+        region_arrays,
+        payload_arrays,
+        _density_table(rho_ex=1e-4, rho_ex_contained=1e-4, kappa=0.1),
+        _fl_delta(ell=100),
+        strand_summary=StrandSummary(p_r1_sense=0.9, n_observations=10_000),
+    )
+
+    assert exp.n_negative_rho_floored == 5
+    assert np.all(exp.rho_hat == 0.0)
+    assert exp.per_class["EXON-CONTAINED"]["evidence_count"] < 0.0
+    assert exp.to_summary_dict()["n_negative_rho_floored"] == 5
 
 
 def test_vector_lookup_matches_per_region_log_weights():

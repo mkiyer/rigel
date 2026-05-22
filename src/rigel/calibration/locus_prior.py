@@ -41,7 +41,16 @@ from ._exposure import (
 from ._locus_n_obs import build_t_to_local_locus, partition_units_to_loci
 from ._region_index_py import RegionIndexPy
 from ._regional_exposure import RegionalGdnaExposure
-from .density_global import GlobalDensityTable
+from ._orient import ORIENT_OPP, ORIENT_SAME, StrandSummary
+from .density_global import (
+    GlobalDensityTable,
+    _gdna_count_moment,
+    _strand_identifiable_rows,
+    kappa_opportunity_bp,
+    precision_opportunity,
+    strand_reliability_power,
+    strand_correction_usable,
+)
 from .density_loco import shrink_to_loco
 from .regions import RegionType
 from .scan_payload import CalibrationScanPayload
@@ -57,6 +66,7 @@ __all__ = [
     "FLAG_EXON_INTRON_NO_ELIGIBLE",
     "FLAG_PI_CLIPPED",
     "ExpectedGdnaPriorParts",
+    "ExonGdnaDiagnostics",
     "LocusGdnaEstimate",
     "MultiLocusPrior",
     "PriorTable",
@@ -88,6 +98,19 @@ FLAG_PI_CLIPPED = 1 << 3
 # ---------------------------------------------------------------------------
 # Result schemas
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ExonGdnaDiagnostics:
+    """EXON branch diagnostics for locoregional gDNA estimates."""
+
+    rho_exon_boundary: float = 0.0
+    rho_exon_contained: float = 0.0
+    rho_exon_composite: float = 0.0
+    exon_boundary_precision: float = 0.0
+    exon_contained_precision: float = 0.0
+    n_exon_contained_observed: float = 0.0
+    n_exon_contained_estimated: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +147,7 @@ class LocusGdnaEstimate:
     n_boundary_events: float  # raw observed boundary count in locus
     nrna_active: bool  # set in Phase 6; False here
     fallback_flags: int  # bitmask of FLAG_*
+    exon_gdna: ExonGdnaDiagnostics = dataclasses.field(default_factory=ExonGdnaDiagnostics)
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,6 +335,68 @@ def _boundary_term_prorated(
     return rho_loco, n_eligible, n_boundary_observed, l_core_exon, n_exon_only
 
 
+def _shrink_to_loco_signed(
+    n_loco: float,
+    leff_loco: float,
+    rho_global: float,
+    kappa: float,
+) -> float:
+    if not (leff_loco >= 0.0 and rho_global >= 0.0 and kappa >= 0.0):
+        raise ValueError(
+            f"_shrink_to_loco_signed: non-count inputs must be finite and non-negative; "
+            f"leff_loco={leff_loco!r}, rho_global={rho_global!r}, kappa={kappa!r}."
+        )
+    denom = leff_loco + kappa
+    if denom <= 0.0:
+        return rho_global
+    return (n_loco + kappa * rho_global) / denom
+
+
+def _exon_contained_term_prorated(
+    *,
+    exon_in_locus: np.ndarray,
+    region_ids_locus: np.ndarray,
+    strands_locus: np.ndarray,
+    counts_by_orient: np.ndarray,
+    eff_full: np.ndarray,
+    eff_clip_core: np.ndarray,
+    strand_summary: StrandSummary | None,
+    rho_global: float,
+    kappa: float,
+) -> tuple[float, float, float, float, float, bool]:
+    """Strand-deconvolved EXON-contained locoregional contribution."""
+    if not exon_in_locus.any():
+        return rho_global, 0.0, 0.0, 0.0, 0.0, False
+
+    l_core_exon = float(eff_clip_core[exon_in_locus].sum())
+    if strand_summary is None or not strand_correction_usable(strand_summary):
+        return rho_global, l_core_exon, 0.0, 0.0, rho_global * l_core_exon, False
+
+    identifiable = _strand_identifiable_rows(strands_locus)
+    active = exon_in_locus & identifiable & (eff_clip_core > 0.0)
+    if not active.any():
+        return rho_global, l_core_exon, 0.0, 0.0, rho_global * l_core_exon, False
+
+    rids = region_ids_locus[active]
+    same = counts_by_orient[rids, ORIENT_SAME]
+    opp = counts_by_orient[rids, ORIENT_OPP]
+    corrected = _gdna_count_moment(
+        same,
+        opp,
+        signed_strand_contrast=float(strand_summary.signed_strand_contrast),
+    )
+    eff_full_t = eff_full[active]
+    eff_core_t = eff_clip_core[active]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio_core = np.where(eff_full_t > 0.0, eff_core_t / eff_full_t, 0.0)
+    n_evidence = float((corrected * ratio_core).sum())
+    l_evidence = float(eff_core_t.sum())
+    rho_signed = _shrink_to_loco_signed(n_evidence, l_evidence, rho_global, kappa)
+    rho_loco = max(float(rho_signed), 0.0)
+    n_mass = rho_loco * l_core_exon
+    return rho_loco, l_core_exon, l_evidence, n_evidence, n_mass, True
+
+
 @dataclass(frozen=True, slots=True)
 class _LocusScratch:
     """Per-Locus shared work between :func:`estimate_locus_gdna` and
@@ -328,6 +414,7 @@ class _LocusScratch:
     pad_hi: int
     region_ids: np.ndarray
     types: np.ndarray
+    strands: np.ndarray
     starts: np.ndarray
     ends: np.ndarray
     bf_l: np.ndarray
@@ -367,6 +454,7 @@ def _compute_locus_scratch(
         return None
 
     types = region_arrays.type[region_ids]
+    strands = region_arrays.strand[region_ids]
     starts = region_arrays.start[region_ids]
     ends = region_arrays.end[region_ids]
     bf_l = region_arrays.bf_left[region_ids]
@@ -389,6 +477,7 @@ def _compute_locus_scratch(
         pad_hi=pad_hi,
         region_ids=region_ids,
         types=types,
+        strands=strands,
         starts=starts,
         ends=ends,
         bf_l=bf_l,
@@ -415,6 +504,7 @@ def estimate_locus_gdna(
     ref_length: int | None = None,
     splicing_anchor_tolerance: int = 0,
     b_cross: float | None = None,
+    strand_summary: StrandSummary | None = None,
     _scratch: _LocusScratch | None = None,
 ) -> LocusGdnaEstimate:
     """Estimate the gDNA mass and π̂_gdna for one ``Locus``.
@@ -464,6 +554,7 @@ def estimate_locus_gdna(
             )
 
     region_ids = _scratch.region_ids
+    strands = _scratch.strands
     starts = _scratch.starts
     ends = _scratch.ends
     bf_l = _scratch.bf_l
@@ -510,7 +601,7 @@ def estimate_locus_gdna(
         b_cross = boundary_crossing_exposure(
             gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
         )
-    rho_b, n_eligible, n_b_observed, l_core_exon, n_exon_only = _boundary_term_prorated(
+    rho_b, n_eligible, n_b_observed, l_core_exon, _ = _boundary_term_prorated(
         exon_in_locus=is_ex,
         region_ids_locus=region_ids,
         starts_locus=starts,
@@ -528,6 +619,66 @@ def estimate_locus_gdna(
     )
     if n_eligible == 0:
         fallback_flags |= FLAG_EXON_INTRON_NO_ELIGIBLE
+
+    exon_contained_density = global_densities.exon_contained
+    exon_composite = global_densities.exon_composite
+    assert exon_contained_density is not None and exon_composite is not None
+    (
+        rho_c,
+        _,
+        l_contained_evidence,
+        n_contained_evidence,
+        n_contained_estimated,
+        contained_active,
+    ) = _exon_contained_term_prorated(
+        exon_in_locus=is_ex,
+        region_ids_locus=region_ids,
+        strands_locus=strands,
+        counts_by_orient=payload_arrays.exon_contained_by_orient,
+        eff_full=eff_full,
+        eff_clip_core=eff_clip_core,
+        strand_summary=strand_summary,
+        rho_global=exon_contained_density.rho,
+        kappa=exon_contained_density.kappa.value,
+    )
+
+    boundary_opportunity = float(n_eligible) * float(b_cross)
+    beta_boundary = kappa_opportunity_bp(
+        global_densities.exon_intron.kappa,
+        global_densities.exon_intron.rho,
+    )
+    beta_contained = kappa_opportunity_bp(
+        exon_contained_density.kappa,
+        exon_contained_density.rho,
+    )
+    strand_power = (
+        strand_reliability_power(strand_summary) if strand_summary is not None else 0.0
+    )
+    w_b = float(precision_opportunity(boundary_opportunity, beta_boundary))
+    w_c = 0.0
+    if contained_active:
+        w_c = float(strand_power) * float(
+            precision_opportunity(l_contained_evidence, beta_contained)
+        )
+    if w_c == 0.0 and boundary_opportunity > 0.0:
+        rho_exon = float(rho_b)
+    elif w_b == 0.0 and contained_active:
+        rho_exon = float(rho_c)
+    elif (w_b + w_c) > 0.0:
+        rho_exon = (w_b * float(rho_b) + w_c * float(rho_c)) / (w_b + w_c)
+    else:
+        rho_exon = float(exon_composite.rho)
+
+    n_exon_only = float(rho_exon) * float(l_core_exon)
+    exon_gdna = ExonGdnaDiagnostics(
+        rho_exon_boundary=float(rho_b),
+        rho_exon_contained=float(rho_c),
+        rho_exon_composite=float(rho_exon),
+        exon_boundary_precision=float(w_b),
+        exon_contained_precision=float(w_c),
+        n_exon_contained_observed=float(n_contained_evidence),
+        n_exon_contained_estimated=float(n_contained_estimated),
+    )
 
     # 6. Total + decomposition invariant.
     n_gdna_total = n_mass_ig + n_mass_in + n_b_observed + n_exon_only
@@ -550,12 +701,13 @@ def estimate_locus_gdna(
         n_gdna_exon_only=float(n_exon_only),
         n_gdna=float(n_gdna_total),
         pi_gdna=pi_gdna,
-        rho_loco=(float(rho_ig), float(rho_in), float(rho_b)),
+        rho_loco=(float(rho_ig), float(rho_in), float(rho_exon)),
         leff_loco=(float(l_core_ig), float(l_core_in), float(l_core_exon)),
         n_eligible_boundaries=int(n_eligible),
         n_boundary_events=float(n_b_observed),
         nrna_active=False,
         fallback_flags=int(fallback_flags),
+        exon_gdna=exon_gdna,
     )
 
 
@@ -702,11 +854,14 @@ def expected_gdna_count_global(
     rho_ig = float(global_densities.intergenic.rho)
     rho_in = float(global_densities.intron.rho)
     rho_b = float(global_densities.exon_intron.rho)
+    exon_composite = global_densities.exon_composite
+    assert exon_composite is not None
+    rho_exon_contained = float(exon_composite.rho)
 
     intergenic_contained = rho_ig * l_core_ig
     intron_contained = rho_in * l_core_in
     boundary_crossing_expected = rho_b * float(s_ell) * b_cross
-    exon_contained_expected = rho_b * l_core_ex
+    exon_contained_expected = rho_exon_contained * l_core_ex
 
     total = (
         intergenic_contained
@@ -830,6 +985,7 @@ def assemble_priors(
     intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
     splicing_anchor_tolerance: int = 0,
     regional_exposure: RegionalGdnaExposure | None = None,
+    strand_summary: StrandSummary | None = None,
 ) -> PriorTable:
     """Build the full :class:`PriorTable` for the batch EM.
 
@@ -951,6 +1107,7 @@ def assemble_priors(
                 else None,
                 splicing_anchor_tolerance=splicing_anchor_tolerance,
                 b_cross=b_cross,
+                strand_summary=strand_summary,
                 _scratch=scratch,
             )
             for j, (loc, scratch) in enumerate(zip(ml.loci, loci_scratch, strict=True))
@@ -988,17 +1145,20 @@ def assemble_priors(
             gdna_fl,
             min_value=1.0,
         )
-        gdna_weight = footprint_exposure_weight(
-            [(int(loc.ref_id), int(loc.start), int(loc.end)) for loc in ml.loci],
-            regional_exposure,
+        unweighted_eff_len_f = float(unweighted_eff_len)
+        gdna_weight = float(
+            footprint_exposure_weight(
+                [(int(loc.ref_id), int(loc.start), int(loc.end)) for loc in ml.loci],
+                regional_exposure,
+            )
         )
-        gdna_eff_len = max(float(unweighted_eff_len) * float(gdna_weight), 1.0)
+        gdna_eff_len = max(unweighted_eff_len_f * gdna_weight, 1.0)
         gdna_prior_count_em = (
-            eta_g * gdna_eff_len / float(unweighted_eff_len)
-            if float(unweighted_eff_len) > 0.0
+            eta_g * gdna_eff_len / unweighted_eff_len_f
+            if unweighted_eff_len_f > 0.0
             else eta_g
         )
-        gdna_eff_len_unweighted_arr[idx] = unweighted_eff_len
+        gdna_eff_len_unweighted_arr[idx] = unweighted_eff_len_f
         gdna_eff_len_arr[idx] = gdna_eff_len
         gdna_prior_count_em_arr[idx] = gdna_prior_count_em
         gdna_em_exposure_weight_arr[idx] = gdna_weight

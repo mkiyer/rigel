@@ -15,13 +15,16 @@ import pandas as pd
 import pytest
 
 from rigel.calibration._exposure import boundary_crossing_exposure
-from rigel.calibration._kappa import KAPPA_DEFAULT
+from rigel.calibration._kappa import KAPPA_DEFAULT, KappaEstimate
 from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, ORIENT_UNINF, StrandSummary
 from rigel.calibration.density_global import (
+    ExonCompositeDensity,
     GlobalDensityTable,
     GlobalGdnaDensity,
     compute_global_densities,
+    kappa_opportunity_bp,
     l_eff_contained,
+    precision_opportunity,
 )
 from rigel.calibration.regions import RegionStrand, RegionType
 from rigel.calibration.scan_payload import (
@@ -80,6 +83,7 @@ def _empty_payload(n_regions: int) -> dict:
         "u_left": np.zeros(n_regions, dtype=np.int64),
         "u_right": np.zeros(n_regions, dtype=np.int64),
         "intron_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
+        "exon_contained_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "u_left_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "u_right_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
         "n_observed": 0,
@@ -614,6 +618,185 @@ class TestStrandAwareDensity:
         assert out.exon_intron.n_fragments_estimated == 0.0
 
 
+class TestExonContainedDensity:
+    def test_perfect_stranded_pure_rna_exon_contained_zeroes_density(self):
+        df = _make_region_df(
+            [
+                {
+                    "ref_name": "chr1",
+                    "start": 0,
+                    "end": 1000,
+                    "type": int(RegionType.EXON),
+                    "strand": int(RegionStrand.POS),
+                    "boundary_flux_left": False,
+                    "boundary_flux_right": False,
+                },
+            ]
+        )
+        d = _empty_payload(1)
+        d["per_region_counts"][0, _MASK_EXON] = 100
+        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 100
+        d["global_counts"][_MASK_EXON] = 100
+        payload = _wrap_payload(d)
+
+        out = compute_global_densities(
+            df,
+            payload,
+            gdna_fl=_delta_fl(300),
+            strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=1000),
+        )
+
+        assert out.exon_contained is not None
+        assert out.exon_composite is not None
+        assert out.exon_contained.strand_active
+        assert out.exon_contained.rho == pytest.approx(0.0, abs=1.0e-15)
+        assert out.exon_composite.rho == pytest.approx(0.0, abs=1.0e-15)
+        assert out.exon_composite.contained_precision > 0.0
+
+    def test_perfect_stranded_pure_gdna_exon_contained_matches_uncorrected(self):
+        df = _make_region_df(
+            [
+                {
+                    "ref_name": "chr1",
+                    "start": 0,
+                    "end": 1000,
+                    "type": int(RegionType.EXON),
+                    "strand": int(RegionStrand.POS),
+                    "boundary_flux_left": False,
+                    "boundary_flux_right": False,
+                },
+            ]
+        )
+        d = _empty_payload(1)
+        d["per_region_counts"][0, _MASK_EXON] = 100
+        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 50
+        d["exon_contained_counts_by_orient"][0, ORIENT_OPP] = 50
+        d["global_counts"][_MASK_EXON] = 100
+        payload = _wrap_payload(d)
+        gdna_fl = _delta_fl(300)
+
+        out = compute_global_densities(
+            df,
+            payload,
+            gdna_fl=gdna_fl,
+            strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=1000),
+        )
+
+        leff = float(_oracle_leff([1000], gdna_fl)[0])
+        assert out.exon_contained is not None
+        assert out.exon_composite is not None
+        assert out.exon_contained.rho == pytest.approx(100.0 / leff)
+        assert out.exon_contained.rho_uncorrected == pytest.approx(100.0 / leff)
+        assert out.exon_composite.rho == pytest.approx(out.exon_contained.rho)
+
+    def test_unstranded_exon_contained_diagnostics_fall_back_to_boundary(self):
+        df = _make_region_df(
+            [
+                {
+                    "ref_name": "chr1",
+                    "start": 0,
+                    "end": 1000,
+                    "type": int(RegionType.EXON),
+                    "strand": int(RegionStrand.POS),
+                    "boundary_flux_left": True,
+                    "boundary_flux_right": False,
+                },
+            ]
+        )
+        d = _empty_payload(1)
+        d["per_region_counts"][0, _MASK_EXON] = 100
+        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 100
+        d["u_left"][0] = 5
+        d["global_counts"][_MASK_EXON] = 100
+        d["global_counts"][_MASK_EXON | _MASK_INTRON] = 5
+        payload = _wrap_payload(d)
+        gdna_fl = _delta_fl(300)
+
+        out = compute_global_densities(
+            df,
+            payload,
+            gdna_fl=gdna_fl,
+            strand_summary=StrandSummary.uninformative(),
+        )
+
+        assert out.exon_contained is not None
+        assert out.exon_composite is not None
+        assert not out.exon_contained.strand_active
+        assert out.exon_contained.rho_uncorrected > 0.0
+        assert out.exon_composite.contained_precision == 0.0
+        assert out.exon_composite.rho == pytest.approx(out.exon_intron.rho)
+
+    def test_ambiguous_exon_rows_do_not_activate_contained_power(self):
+        df = _make_region_df(
+            [
+                {
+                    "ref_name": "chr1",
+                    "start": 0,
+                    "end": 1000,
+                    "type": int(RegionType.EXON),
+                    "strand": int(RegionStrand.AMBIG),
+                    "boundary_flux_left": True,
+                    "boundary_flux_right": False,
+                },
+            ]
+        )
+        d = _empty_payload(1)
+        d["per_region_counts"][0, _MASK_EXON] = 100
+        d["exon_contained_counts_by_orient"][0, ORIENT_UNINF] = 100
+        d["u_left"][0] = 5
+        d["global_counts"][_MASK_EXON] = 100
+        d["global_counts"][_MASK_EXON | _MASK_INTRON] = 5
+        payload = _wrap_payload(d)
+
+        out = compute_global_densities(
+            df,
+            payload,
+            gdna_fl=_delta_fl(300),
+            strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=1000),
+        )
+
+        assert out.exon_contained is not None
+        assert out.exon_composite is not None
+        assert not out.exon_contained.strand_active
+        assert out.exon_composite.contained_precision == 0.0
+        assert out.exon_composite.rho == pytest.approx(out.exon_intron.rho)
+
+    def test_composite_uses_kappa_capped_precision_not_raw_opportunity(self):
+        boundary = GlobalGdnaDensity(
+            type="EXON-INTRON",
+            rho=0.1,
+            n_fragments=1,
+            eff_length_bp=10.0,
+            n_regions_used=1,
+            kappa=KappaEstimate(value=10.0, n_regions=10, fallback_used=False, fallback_reason=""),
+        )
+        contained = GlobalGdnaDensity(
+            type="EXON-CONTAINED",
+            rho=1.0,
+            n_fragments=10,
+            eff_length_bp=10_000.0,
+            n_regions_used=1,
+            kappa=KappaEstimate(value=1.0, n_regions=10, fallback_used=False, fallback_reason=""),
+            strand_active=True,
+        )
+
+        composite = ExonCompositeDensity.from_components(
+            boundary,
+            contained,
+            strand_power=0.25,
+        )
+
+        expected_boundary_precision = precision_opportunity(10.0, kappa_opportunity_bp(boundary.kappa, boundary.rho))
+        expected_contained_precision = 0.25 * precision_opportunity(
+            10_000.0,
+            kappa_opportunity_bp(contained.kappa, contained.rho),
+        )
+        assert composite.boundary_precision == pytest.approx(expected_boundary_precision)
+        assert composite.contained_precision == pytest.approx(expected_contained_precision)
+        assert composite.contained_precision < composite.boundary_precision
+        assert composite.rho < 0.2
+
+
 class TestEmptyPerType:
     def test_no_intron_regions(self):
         """Single-exon-genome: no INTRON rows at all → intron.rho == 0."""
@@ -769,7 +952,7 @@ class TestValidation:
         assert isinstance(out, GlobalDensityTable)
         sd = out.to_summary_dict()
         assert sd["gdna_fl_mean"] == pytest.approx(200.0, rel=2e-2)
-        for key in ("INTERGENIC", "INTRON", "EXON-INTRON"):
+        for key in ("INTERGENIC", "INTRON", "EXON-INTRON", "EXON-CONTAINED"):
             block = sd[key]
             for col in (
                 "rho",
@@ -790,6 +973,18 @@ class TestValidation:
                 "kappa_reason",
             ):
                 assert col in block, f"{key} missing {col}"
+        composite = sd["EXON-COMPOSITE"]
+        for col in (
+            "rho",
+            "boundary_rho",
+            "contained_rho",
+            "boundary_precision",
+            "contained_precision",
+            "strand_power",
+            "contained_active",
+            "precision_model",
+        ):
+            assert col in composite, f"EXON-COMPOSITE missing {col}"
 
     def test_returns_globalgdnadensity_per_type(self):
         df = _make_region_df(
@@ -807,8 +1002,12 @@ class TestValidation:
         d = _empty_payload(1)
         payload = _wrap_payload(d)
         out = compute_global_densities(df, payload, gdna_fl=_delta_fl(200))
-        for d_ in (out.intergenic, out.intron, out.exon_intron):
+        assert out.exon_contained is not None
+        assert out.exon_composite is not None
+        for d_ in (out.intergenic, out.intron, out.exon_intron, out.exon_contained):
             assert isinstance(d_, GlobalGdnaDensity)
         assert out.intergenic.type == "INTERGENIC"
         assert out.intron.type == "INTRON"
         assert out.exon_intron.type == "EXON-INTRON"
+        assert out.exon_contained.type == "EXON-CONTAINED"
+        assert isinstance(out.exon_composite, ExonCompositeDensity)

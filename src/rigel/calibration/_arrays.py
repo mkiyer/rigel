@@ -124,6 +124,7 @@ class PayloadArrays:
     u_left: np.ndarray                 # int64, (R,)
     u_right: np.ndarray                # int64, (R,)
     intron_by_orient: np.ndarray       # int64, (R, ORIENT_N)
+    exon_contained_by_orient: np.ndarray  # int64, (R, ORIENT_N)
     u_left_by_orient: np.ndarray       # int64, (R, ORIENT_N)
     u_right_by_orient: np.ndarray      # int64, (R, ORIENT_N)
 
@@ -144,6 +145,9 @@ class PayloadArrays:
             u_left=np.ascontiguousarray(payload.u_left[order]),
             u_right=np.ascontiguousarray(payload.u_right[order]),
             intron_by_orient=np.ascontiguousarray(payload.intron_counts_by_orient[order]),
+            exon_contained_by_orient=np.ascontiguousarray(
+                payload.exon_contained_counts_by_orient[order]
+            ),
             u_left_by_orient=np.ascontiguousarray(payload.u_left_by_orient[order]),
             u_right_by_orient=np.ascontiguousarray(payload.u_right_by_orient[order]),
         )

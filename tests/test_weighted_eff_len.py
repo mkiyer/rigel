@@ -1,4 +1,4 @@
-"""Tests for weighted_gdna_eff_len_for_loci."""
+"""Tests for exposure weighting and gDNA effective-length helpers."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from rigel.calibration._exposure import (
     footprint_exposure_weight,
     gdna_eff_len_for_loci,
     transcript_exposure_weights,
-    weighted_gdna_eff_len_for_loci,
 )
 from rigel.calibration._regional_exposure import RegionalGdnaExposure
 from rigel.calibration.regions import RegionStrand, RegionType
@@ -60,75 +59,33 @@ def _exposure_with_weights(region_arrays: RegionArrays, weights: np.ndarray) -> 
     )
 
 
-def test_uniform_fast_path_bit_exact():
-    region_arrays = _three_region_arrays()
-    exp = RegionalGdnaExposure.uniform(region_arrays)
+def test_gdna_eff_len_single_interval_formula():
     fl = _fl_delta(ell=80)
     locus = Locus(ref="chr1", ref_id=0, start=500, end=1500)
     ref_lengths = {0: 100_000}
-    a = gdna_eff_len_for_loci((locus,), ref_lengths, fl)
-    b = weighted_gdna_eff_len_for_loci((locus,), ref_lengths, fl, exp)
-    assert a == b
-
-
-def test_all_unit_weights_equals_unweighted():
-    region_arrays = _three_region_arrays()
-    exp = _exposure_with_weights(region_arrays, np.array([1.0, 1.0, 1.0]))
-    fl = _fl_delta(ell=80)
-    locus = Locus(ref="chr1", ref_id=0, start=500, end=1500)
-    ref_lengths = {0: 100_000}
-    a = gdna_eff_len_for_loci((locus,), ref_lengths, fl)
-    b = weighted_gdna_eff_len_for_loci((locus,), ref_lengths, fl, exp)
-    assert b == pytest.approx(a, rel=1e-12)
-
-
-def test_two_state_geometry():
-    """Locus spans regions [0,1000) (weight 1.0) and [1000,2000) (weight 0.01)."""
-    region_arrays = _three_region_arrays(span=1000)
-    weights = np.array([1.0, 0.01, 1.0])
-    exp = _exposure_with_weights(region_arrays, weights)
-    # Use a tiny FL so midpoint offset is 0 — clean geometry.
-    fl = FragmentLengthModel(max_size=10)
-    for _ in range(1000):
-        fl.observe(1)
-    fl.finalize()
-    locus = Locus(ref="chr1", ref_id=0, start=0, end=2000)
-    ref_lengths = {0: 100_000}
-    # Reference: the unweighted result is the FL-marginal count of valid
-    # start positions inside [start, end). Weighted should be smaller by
-    # exactly the per-region weight ratio.
-    unweighted = gdna_eff_len_for_loci((locus,), ref_lengths, fl)
-    result = weighted_gdna_eff_len_for_loci((locus,), ref_lengths, fl, exp)
-    # For ell=1 (half=0) the midpoint window equals the start window which
-    # equals [0, 2000): 1000 bp at weight 1.0 + 1000 bp at weight 0.01.
-    # Allow for small leak in the PMF.
-    expected_ratio = (1000 * 1.0 + 1000 * 0.01) / 2000.0
-    assert result / unweighted == pytest.approx(expected_ratio, rel=0.01)
-
-
-def test_min_value_floor():
-    region_arrays = _three_region_arrays()
-    exp = _exposure_with_weights(region_arrays, np.array([0.001, 0.001, 0.001]))
-    fl = _fl_delta(ell=80)
-    locus = Locus(ref="chr1", ref_id=0, start=500, end=550)  # tiny locus
-    ref_lengths = {0: 100_000}
-    result = weighted_gdna_eff_len_for_loci(
-        (locus,), ref_lengths, fl, exp, min_value=5.0
+    positive_ell = np.flatnonzero(fl.pmf[1:] > 0.0) + 1
+    probs = fl.pmf[positive_ell]
+    expected = 1000.0 * float(probs.sum()) + float(np.dot(positive_ell, probs)) - float(
+        probs.sum()
     )
-    assert result >= 5.0
+    assert gdna_eff_len_for_loci((locus,), ref_lengths, fl) == pytest.approx(expected)
 
 
-def test_overlapping_intervals_no_double_count():
-    """Two overlapping Locus intervals merge to one weighted window."""
-    region_arrays = _three_region_arrays(span=1000)
-    exp = _exposure_with_weights(region_arrays, np.array([1.0, 1.0, 1.0]))
+def test_gdna_eff_len_min_value_floor():
+    fl = _fl_delta(ell=80)
+    ref_lengths = {0: 100_000}
+    assert gdna_eff_len_for_loci((), ref_lengths, fl, min_value=5.0) == pytest.approx(5.0)
+
+
+def test_gdna_eff_len_overlapping_intervals_no_double_count():
+    """Two overlapping Locus intervals merge to one unweighted start window."""
     fl = _fl_delta(ell=80)
     ref_lengths = {0: 100_000}
     locus_a = Locus(ref="chr1", ref_id=0, start=500, end=1500)
     locus_b = Locus(ref="chr1", ref_id=0, start=1000, end=2000)
     locus_merged = Locus(ref="chr1", ref_id=0, start=500, end=2000)
-    a = weighted_gdna_eff_len_for_loci((locus_a, locus_b), ref_lengths, fl, exp)
-    b = weighted_gdna_eff_len_for_loci((locus_merged,), ref_lengths, fl, exp)
+    a = gdna_eff_len_for_loci((locus_a, locus_b), ref_lengths, fl)
+    b = gdna_eff_len_for_loci((locus_merged,), ref_lengths, fl)
     assert a == pytest.approx(b, rel=1e-12)
 
 

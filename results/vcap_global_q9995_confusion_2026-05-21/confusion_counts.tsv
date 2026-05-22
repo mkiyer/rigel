@@ -1,0 +1,7 @@
+true_source	predicted_pool	count
+gdna	rna	2928428
+gdna	gdna	15003787
+gdna	unresolved	296462
+rna	rna	13410077
+rna	gdna	455500
+rna	unresolved	124347

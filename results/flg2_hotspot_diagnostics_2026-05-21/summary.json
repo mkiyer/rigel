@@ -1,0 +1,14 @@
+{
+  "bam": "/Users/mkiyer/Downloads/rigel_runs/vcap_rna20m_gdna20m/exon_strand_deconv_v1/annotated.bam",
+  "records": {
+    "broad_fragments": 11007,
+    "nonrepresentative_skipped": 33894618,
+    "records_seen": 66113219,
+    "window_fragments": 4699
+  },
+  "window": {
+    "chrom": "chr1",
+    "end": 152360000,
+    "start_1based": 152350001
+  }
+}

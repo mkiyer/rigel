@@ -10,13 +10,19 @@ from rigel.calibration._arrays import PayloadArrays, RegionArrays
 from rigel.calibration._exposure import boundary_crossing_exposure
 from rigel.calibration._kappa import KappaEstimate
 from rigel.calibration._region_index_py import RegionIndexPy
-from rigel.calibration.density_global import GlobalDensityTable, GlobalGdnaDensity
+from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, StrandSummary
+from rigel.calibration.density_global import (
+    ExonCompositeDensity,
+    GlobalDensityTable,
+    GlobalGdnaDensity,
+)
 from rigel.calibration.locus_prior import (
     FLAG_EXON_INTRON_NO_ELIGIBLE,
     FLAG_PI_CLIPPED,
     estimate_locus_gdna,
+    expected_gdna_count_global,
 )
-from rigel.calibration.regions import RegionType
+from rigel.calibration.regions import RegionStrand, RegionType
 from rigel.calibration.scan_payload import (
     FL_HIST_N_BINS,
     MASK_N_STATES,
@@ -89,6 +95,9 @@ def _build_arrays(
     counts_intron: list[int] | None = None,
     u_left: list[int] | None = None,
     u_right: list[int] | None = None,
+    strands: list[int] | None = None,
+    exon_contained_same: list[int] | None = None,
+    exon_contained_opp: list[int] | None = None,
 ):
     """regions: list of (ref, start, end, type, bf_left, bf_right)."""
     n = len(regions)
@@ -99,7 +108,10 @@ def _build_arrays(
             "start": np.array([r[1] for r in regions], dtype=np.int64),
             "end": np.array([r[2] for r in regions], dtype=np.int64),
             "type": np.array([r[3] for r in regions], dtype=np.uint8),
-            "strand": np.zeros(n, dtype=np.uint8),
+            "strand": np.array(
+                strands if strands is not None else [int(RegionStrand.NONE)] * n,
+                dtype=np.uint8,
+            ),
             "tx_pos_bp": np.zeros(n, dtype=np.int64),
             "tx_neg_bp": np.zeros(n, dtype=np.int64),
             "exon_pos_bp": np.zeros(n, dtype=np.int64),
@@ -125,6 +137,17 @@ def _build_arrays(
     u_right_by_orient = np.zeros((n, 3), dtype=np.int64)
     u_left_by_orient[:, 2] = u_left_arr
     u_right_by_orient[:, 2] = u_right_arr
+    exon_contained_by_orient = np.zeros((n, 3), dtype=np.int64)
+    if exon_contained_same is not None:
+        exon_contained_by_orient[:, ORIENT_SAME] = np.array(
+            exon_contained_same,
+            dtype=np.int64,
+        )
+    if exon_contained_opp is not None:
+        exon_contained_by_orient[:, ORIENT_OPP] = np.array(
+            exon_contained_opp,
+            dtype=np.int64,
+        )
     payload = CalibrationScanPayload(
         global_counts=np.zeros(MASK_N_STATES, dtype=np.int64),
         per_region_counts=per_region,
@@ -132,6 +155,7 @@ def _build_arrays(
         u_left=u_left_arr,
         u_right=u_right_arr,
         intron_counts_by_orient=intron_by_orient,
+        exon_contained_counts_by_orient=exon_contained_by_orient,
         u_left_by_orient=u_left_by_orient,
         u_right_by_orient=u_right_by_orient,
         n_observed=0,
@@ -318,6 +342,109 @@ def test_exon_with_both_eligible_boundaries_exact():
         + est.n_gdna_intron
         + est.n_gdna_boundary_observed
         + est.n_gdna_exon_only
+    )
+
+
+def test_exon_contained_only_strand_evidence_can_replace_boundary_fallback():
+    ra, pa, idx, _ = _build_arrays(
+        regions=[("chr1", 0, 500, int(RegionType.EXON), False, False)],
+        strands=[int(RegionStrand.POS)],
+        exon_contained_same=[50],
+        exon_contained_opp=[50],
+    )
+    gdna_fl = _delta_fl(200)
+    gdt = GlobalDensityTable(
+        intergenic=_gdt().intergenic,
+        intron=_gdt().intron,
+        exon_intron=_gdt().exon_intron,
+        gdna_fl=gdna_fl,
+        exon_contained=GlobalGdnaDensity(
+            type="EXON-CONTAINED",
+            rho=0.0,
+            n_fragments=100,
+            eff_length_bp=0.0,
+            n_regions_used=1,
+            kappa=KappaEstimate(value=0.0, n_regions=1, fallback_used=False, fallback_reason=""),
+        ),
+    )
+    locus = Locus(ref="chr1", ref_id=0, start=0, end=500)
+
+    est = estimate_locus_gdna(
+        locus=locus,
+        n_obs=100,
+        region_index=idx,
+        region_arrays=ra,
+        payload_arrays=pa,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
+        strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=1000),
+    )
+
+    leff_full = float(_oracle_leff([500], gdna_fl)[0])
+    expected_rho = 100.0 / leff_full
+    assert est.n_eligible_boundaries == 0
+    assert est.fallback_flags & FLAG_EXON_INTRON_NO_ELIGIBLE
+    assert est.n_gdna_boundary_observed == 0.0
+    assert est.rho_loco[2] == pytest.approx(expected_rho)
+    assert est.n_gdna_exon_only == pytest.approx(100.0)
+    assert est.exon_gdna.rho_exon_boundary == pytest.approx(0.0)
+    assert est.exon_gdna.rho_exon_contained == pytest.approx(expected_rho)
+    assert est.exon_gdna.n_exon_contained_observed == pytest.approx(100.0)
+
+
+def test_global_prior_keeps_boundary_density_but_uses_composite_for_contained_exon():
+    ra, _, idx, _ = _build_arrays(
+        regions=[("chr1", 0, 500, int(RegionType.EXON), True, True)],
+    )
+    gdna_fl = _delta_fl(200)
+    b_cross = boundary_crossing_exposure(gdna_fl)
+    gdt = GlobalDensityTable(
+        intergenic=_gdt().intergenic,
+        intron=_gdt().intron,
+        exon_intron=GlobalGdnaDensity(
+            type="EXON-INTRON",
+            rho=0.01,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=1,
+            kappa=_kappa(),
+        ),
+        gdna_fl=gdna_fl,
+        exon_contained=GlobalGdnaDensity(
+            type="EXON-CONTAINED",
+            rho=0.1,
+            n_fragments=0,
+            eff_length_bp=0.0,
+            n_regions_used=1,
+            kappa=_kappa(),
+            strand_active=True,
+        ),
+        exon_composite=ExonCompositeDensity(
+            rho=0.1,
+            boundary_rho=0.01,
+            contained_rho=0.1,
+            boundary_precision=0.0,
+            contained_precision=1.0,
+            strand_power=1.0,
+            contained_active=True,
+        ),
+    )
+    locus = Locus(ref="chr1", ref_id=0, start=0, end=500)
+
+    parts = expected_gdna_count_global(
+        locus=locus,
+        region_index=idx,
+        region_arrays=ra,
+        global_densities=gdt,
+        gdna_fl=gdna_fl,
+        b_cross=b_cross,
+    )
+
+    leff_full = float(_oracle_leff([500], gdna_fl)[0])
+    assert parts.boundary_crossing_expected == pytest.approx(0.01 * 2.0 * b_cross)
+    assert parts.exon_contained_expected == pytest.approx(0.1 * leff_full)
+    assert parts.total == pytest.approx(
+        parts.boundary_crossing_expected + parts.exon_contained_expected
     )
 
 

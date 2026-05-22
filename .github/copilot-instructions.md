@@ -6,15 +6,12 @@
 
 The concept of a 'gene' is a convenient abstraction for organizing the transcriptome, but it is not a fundamental biological entity. The 'rigel' tool *must* be designed to handle the complexities and ambiguities that arise from this abstraction, especially when dealing with complex loci with many overlapping transcripts.
 
-- The tool must operate at the transcript level, not the gene level. Grouping of transcripts into genes is sometimes arbitrary and can lead to issues when transcripts overlap multiple genes or when genes have complex splicing patterns.
-- We output gene-level summaries for user convenience, but the core quantification and EM modeling should be transcript-centric. This allows for more accurate handling of multimappers and complex loci.
+- Internal inference uses transcripts and transcript-derived states as the model units for quantification, scoring, prior construction, locus construction, and EM. Gene-level summaries are strictly for output convenience after inference; they do not influence any internal operations, including transcript grouping, scoring, prior construction, locus construction, or EM state construction.
 
 
 ## Environment
 
-- **Always** activate the conda environment before running any command: `conda activate rigel`
-- Python 3.12+, C++17
-- Dependencies managed via `mamba_env.yaml` (conda-forge + bioconda channels)
+For ordinary shell commands, run inside the `rigel` conda environment with `conda activate rigel && <command>`. Use build, test, benchmark, or profiling steps only when that task is requested or the edited files require it.
 
 ### Copilot terminal reliability
 
@@ -24,22 +21,19 @@ The concept of a 'gene' is a convenient abstraction for organizing the transcrip
 
 ## Build
 
-```bash
-# After ANY C++ change in src/rigel/native/, you MUST recompile:
-conda activate rigel && pip install --no-build-isolation -e .
-```
+After editing `.cpp`, `.h`, or `CMakeLists.txt` files under `src/rigel/native/`:
 
-Do not skip recompilation after editing `.cpp`, `.h`, or `CMakeLists.txt` files.
+1. Recompile with `conda activate rigel && pip install --no-build-isolation -e .`.
+2. Do not continue testing native changes until this build step succeeds.
 
 ## Testing
 
-```bash
-conda activate rigel
-pytest tests/ -v                          # all tests
-pytest tests/test_em_impl.py -v           # single file
-pytest tests/test_em_impl.py::test_name   # single test
-pytest tests/ --update-golden             # regenerate golden outputs after intentional changes
-```
+Use the smallest test command that covers the task:
+
+1. All tests: `conda activate rigel && pytest tests/ -v`
+2. Single file: `conda activate rigel && pytest tests/test_em_impl.py -v`
+3. Single test: `conda activate rigel && pytest tests/test_em_impl.py::test_name`
+4. Intentional golden updates: `conda activate rigel && pytest tests/ --update-golden`
 
 - Known pre-existing failure: `tests/test_calibration.py::TestStrandLLR::test_biased_toward_ss_favors_rna` — unrelated to scoring/EM.
 - Golden output regression files live in `tests/golden/`.
@@ -47,7 +41,7 @@ pytest tests/ --update-golden             # regenerate golden outputs after inte
 ### Test Failure Investigation
 
 - When a test fails, DO NOT reconfigure the test or change tolerances to make the test pass.
-- Consider a test failure as a sentinel event with critical information that alludes to a larger problem with the code or methodology. 
+- Consider a test failure as a sentinel event with critical information that alludes to a larger problem with the code or methodology.
 - Conduct analysis to understand WHY the test failed, determine the precise root cause of the failure, and evaluate possible solutions
 - If the explanation and fix for the failed test is not clear, you should propose a plan for further investigation.
 

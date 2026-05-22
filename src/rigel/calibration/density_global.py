@@ -36,7 +36,7 @@ from .scan_payload import (
 
 # (mask constants are imported from scan_payload — single source of truth)
 
-DensityType = Literal["INTERGENIC", "INTRON", "EXON-INTRON"]
+DensityType = Literal["INTERGENIC", "INTRON", "EXON-INTRON", "EXON-CONTAINED"]
 
 _ERR_SUFFIX = " Rebuild the index or rerun the scan."
 STRAND_CONTRAST_NUMERICAL_FLOOR = 1.0e-3
@@ -109,6 +109,37 @@ class GlobalDensityTable:
     intron: GlobalGdnaDensity
     exon_intron: GlobalGdnaDensity
     gdna_fl: FragmentLengthModel  # the model used to weight L_eff
+    exon_contained: GlobalGdnaDensity | None = None
+    exon_composite: ExonCompositeDensity | None = None
+
+    def __post_init__(self) -> None:
+        if self.exon_contained is None:
+            object.__setattr__(
+                self,
+                "exon_contained",
+                GlobalGdnaDensity(
+                    type="EXON-CONTAINED",
+                    rho=0.0,
+                    n_fragments=0,
+                    eff_length_bp=0.0,
+                    n_regions_used=0,
+                    kappa=self.exon_intron.kappa,
+                    n_fragments_estimated=0.0,
+                    n_rows_eligible=0,
+                ),
+            )
+        if self.exon_composite is None:
+            exon_contained = self.exon_contained
+            assert exon_contained is not None
+            object.__setattr__(
+                self,
+                "exon_composite",
+                ExonCompositeDensity.from_components(
+                    self.exon_intron,
+                    exon_contained,
+                    strand_power=0.0,
+                ),
+            )
 
     @property
     def gdna_fl_mean(self) -> float:
@@ -118,11 +149,87 @@ class GlobalDensityTable:
 
     def to_summary_dict(self) -> dict[str, dict[str, float | int | bool | str]]:
         """Flatten to a JSON-serializable nested dict for ``summary.json``."""
+        exon_contained = self.exon_contained
+        exon_composite = self.exon_composite
+        assert exon_contained is not None and exon_composite is not None
         return {
             "gdna_fl_mean": self.gdna_fl_mean,  # type: ignore[dict-item]
             "INTERGENIC": _density_to_dict(self.intergenic),
             "INTRON": _density_to_dict(self.intron),
             "EXON-INTRON": _density_to_dict(self.exon_intron),
+            "EXON-CONTAINED": _density_to_dict(exon_contained),
+            "EXON-COMPOSITE": exon_composite.to_summary_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ExonCompositeDensity:
+    """Precision-weighted EXON projection density.
+
+    ``EXON-INTRON`` remains the boundary-crossing density. This composite
+    is used only when projecting contained EXON opportunity.
+    """
+
+    rho: float
+    boundary_rho: float
+    contained_rho: float
+    boundary_precision: float
+    contained_precision: float
+    strand_power: float
+    contained_active: bool
+    precision_model: str = "kappa_capped_opportunity"
+
+    @classmethod
+    def from_components(
+        cls,
+        boundary: GlobalGdnaDensity,
+        contained: GlobalGdnaDensity,
+        *,
+        strand_power: float,
+    ) -> "ExonCompositeDensity":
+        boundary_beta = kappa_opportunity_bp(boundary.kappa, boundary.rho)
+        contained_beta = kappa_opportunity_bp(contained.kappa, contained.rho)
+        boundary_precision = precision_opportunity(
+            boundary.eff_length_bp,
+            boundary_beta,
+        )
+        contained_precision = 0.0
+        contained_active = bool(contained.strand_active and strand_power > 0.0)
+        if contained_active:
+            contained_precision = float(strand_power) * precision_opportunity(
+                contained.eff_length_bp,
+                contained_beta,
+            )
+        denom = boundary_precision + contained_precision
+        if denom > 0.0:
+            rho = (
+                boundary.rho * boundary_precision
+                + contained.rho * contained_precision
+            ) / denom
+        elif contained_active:
+            rho = contained.rho
+        else:
+            rho = boundary.rho
+        return cls(
+            rho=float(rho),
+            boundary_rho=float(boundary.rho),
+            contained_rho=float(contained.rho),
+            boundary_precision=float(boundary_precision),
+            contained_precision=float(contained_precision),
+            strand_power=float(strand_power),
+            contained_active=contained_active,
+        )
+
+    def to_summary_dict(self) -> dict[str, float | bool | str]:
+        return {
+            "rho": self.rho,
+            "boundary_rho": self.boundary_rho,
+            "contained_rho": self.contained_rho,
+            "boundary_precision": self.boundary_precision,
+            "contained_precision": self.contained_precision,
+            "strand_power": self.strand_power,
+            "contained_active": self.contained_active,
+            "precision_model": self.precision_model,
         }
 
 
@@ -145,6 +252,38 @@ def _density_to_dict(d: GlobalGdnaDensity) -> dict[str, float | int | bool | str
         "kappa_fallback": d.kappa.fallback_used,
         "kappa_reason": d.kappa.fallback_reason,
     }
+
+
+def strand_reliability_power(strand_summary: StrandSummary) -> float:
+    """Reliability scalar for strand-deconvolved contained evidence."""
+    if not strand_correction_usable(strand_summary):
+        return 0.0
+    ssc = float(strand_summary.signed_strand_contrast)
+    return float(ssc * ssc)
+
+
+def kappa_opportunity_bp(kappa: KappaEstimate, rho: float) -> float:
+    """Convert NB/Gamma alpha to bp-equivalent shrinkage opportunity."""
+    alpha = float(kappa.value)
+    if alpha <= 0.0:
+        return 0.0
+    if rho <= 0.0:
+        return float("inf")
+    return alpha / float(rho)
+
+
+def precision_opportunity(eff_length_bp: float | np.ndarray, beta_bp: float) -> float | np.ndarray:
+    """Kappa-capped opportunity used as an evidence precision proxy."""
+    E = np.asarray(eff_length_bp, dtype=np.float64)
+    if beta_bp == float("inf"):
+        out = np.where(E > 0.0, E, 0.0)
+    elif beta_bp <= 0.0:
+        out = np.zeros_like(E, dtype=np.float64)
+    else:
+        out = np.where(E > 0.0, E * beta_bp / (E + beta_bp), 0.0)
+    if np.ndim(eff_length_bp) == 0:
+        return float(out)
+    return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,12 +386,28 @@ def compute_global_densities(
         ),
         strand_summary=strand_summary,
     )
+    exon_contained = _compute_density(
+        _channel_exon_contained(
+            region_mask=(types == int(RegionType.EXON)),
+            counts_by_orient=payload.exon_contained_counts_by_orient,
+            leff=leff,
+            strands=strands,
+        ),
+        strand_summary=strand_summary,
+    )
+    exon_composite = ExonCompositeDensity.from_components(
+        exon_intron,
+        exon_contained,
+        strand_power=strand_reliability_power(strand_summary),
+    )
 
     return GlobalDensityTable(
         intergenic=intergenic,
         intron=intron,
         exon_intron=exon_intron,
         gdna_fl=gdna_fl,
+        exon_contained=exon_contained,
+        exon_composite=exon_composite,
     )
 
 
@@ -380,6 +535,28 @@ def _channel_exon_intron(
     )
 
 
+def _channel_exon_contained(
+    *,
+    region_mask: np.ndarray,
+    counts_by_orient: np.ndarray,
+    leff: np.ndarray,
+    strands: np.ndarray,
+) -> _ChannelRows:
+    same = counts_by_orient[:, ORIENT_SAME]
+    opp = counts_by_orient[:, ORIENT_OPP]
+    uninf = counts_by_orient[:, ORIENT_UNINF]
+    observed = same + opp + uninf
+    return _ChannelRows(
+        type_label="EXON-CONTAINED",
+        n_observed=observed[region_mask].astype(np.int64, copy=False),
+        n_same=same[region_mask].astype(np.int64, copy=False),
+        n_opp=opp[region_mask].astype(np.int64, copy=False),
+        n_uninf=uninf[region_mask].astype(np.int64, copy=False),
+        exposure=leff[region_mask].astype(np.float64, copy=False),
+        strand_identifiable=_strand_identifiable_rows(strands)[region_mask],
+    )
+
+
 def _gdna_count_moment(
     n_same: np.ndarray,
     n_opp: np.ndarray,
@@ -492,6 +669,8 @@ def estimate_global_gdna_fragments(
     n_gdna_in = global_densities.intron.rho * float(leff[in_mask].sum())
 
     ex_mask = types == int(RegionType.EXON)
-    n_gdna_ex = global_densities.exon_intron.rho * float(leff[ex_mask].sum())
+    exon_composite = global_densities.exon_composite
+    assert exon_composite is not None
+    n_gdna_ex = exon_composite.rho * float(leff[ex_mask].sum())
 
     return n_gdna_ig + n_gdna_in + n_gdna_ex

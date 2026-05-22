@@ -54,6 +54,7 @@ struct CalibrationPayload {
 
     // Minimal per-channel orientation counters: shape (n_regions, orient::N).
     std::vector<int64_t> intron_counts_by_orient;
+    std::vector<int64_t> exon_contained_counts_by_orient;
     std::vector<int64_t> u_left_by_orient;
     std::vector<int64_t> u_right_by_orient;
 
@@ -97,6 +98,8 @@ public:
         payload_.u_left.assign(static_cast<size_t>(n_regions), 0);
         payload_.u_right.assign(static_cast<size_t>(n_regions), 0);
         payload_.intron_counts_by_orient.assign(
+            static_cast<size_t>(n_regions) * orient::N, 0);
+        payload_.exon_contained_counts_by_orient.assign(
             static_cast<size_t>(n_regions) * orient::N, 0);
         payload_.u_left_by_orient.assign(
             static_cast<size_t>(n_regions) * orient::N, 0);

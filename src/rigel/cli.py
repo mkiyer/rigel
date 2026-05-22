@@ -594,6 +594,10 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
         "calibration.regional_exposure_enabled",
         "regional_exposure",
     ),
+    _ParamSpec(
+        "regional_exposure_reference_quantile",
+        "calibration.regional_exposure_reference_quantile",
+    ),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1205,6 +1209,16 @@ def build_parser() -> argparse.ArgumentParser:
         "effective length, suppressing gDNA mass in regions with no "
         "evidence of gDNA fragments (e.g. hybrid-capture off-target). "
         "Use 'off' to reproduce the pre-v3 uniform-exposure behaviour.",
+    )
+    adv.add_argument(
+        "--regional-exposure-reference-quantile",
+        dest="regional_exposure_reference_quantile",
+        type=float,
+        default=None,
+        help="Weighted quantile of regional rho_hat used as the fully exposed "
+        "reference scale for A_r = min(rho_hat / rho_ref, 1) when regional "
+        "exposure is enabled (default: 0.95). Higher values make the exposure "
+        "field sparser and shrink gDNA denominators in weakly exposed regions.",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",
