@@ -5,7 +5,84 @@
 
 I have an idea that is an offshoot of your "5. Coverage-shape coherence priors" -- during the 
 
+
+## Phase 4
+
+### Build and finalize FL models
+
+- Generate mini-genomes
+- Generate arbitrary transcripts over mini genomes
+- Generate simulated fragments with different RNA and gDNA FL distributions. try multiple combinations of fragment lengths, including where the RNA FL is much greater than gDNA FL and vice versa. RNA FL >> gDNA FL and RNA FL << gDNA_FL. Try when they are equal.
+   - Set RNA and DNA FL profile
+   - ex. RNA FL mean 150, stdev 20. DNA FL mean 70, stdev 20
+   - Simulate fragments over mini genome
+   - Run rigel
+   - Measure RNA and gDNA FL estimates, measure error
+- Determine if FL estimation is accurate in simulation
+
+### region density estimation
+
+Each region has 'contained' and 'boundary crossing' fractional counts.
+
+For intergenic and intronic 'contained' fragments:
+
+gdna_density_contained = contained_fragments / (region_eff_len)
+
+- contained_fragments: the fully contained fragments in the region
+- region_eff_len: gDNA FL corrected region size. i believe we have methods for this. it's not simply subtracting the mean. we need to use the gDNA FL distribution and compute the fragment sizes and fragment starts that will fit in the region. the region length matters. we should have this code implemented already for general purpose use for RNA transcripts etc.
+
+This gives us an initial INTERGENIC and INTRONIC density estimate for fully-contained fragments. This can form our initial gDNA global density estimate.
+
+However, using intergenic and intronic regions to estimate gDNA density *FAILS* when we have hybrid capture data, because fragments will be concentrated on exons. This is where we will utilize 1) strand-specific data and 2) boundary-crossing fragment data.
+
+**We do need to implement mappability-corrected length for gDNA estimation, because a substantial fraction of the genome is not mappable and should not be used in the denominator for gDNA density estimation (gDNA density will be underestimated until we correct for mappability)** We have the opportunity to incorporate mappability data from the 'alignable' tool (a tool that I built) as part of the rigel index build. Are there any relics of this still present in the rigel index code? This was implemented at one time but might have been removed. This can be re-implemented in a future enhancement. For now, we will get the nuts and bolts of gDNA estimation working.
+
+The first step for gDNA estimation is standard gDNA estimation for intergenic and intronic regions. Any fragments in these regions are going to gDNA enriched and mature RNA-depleted.
+
+Now, when we do gDNA estimation, we need to model the *variance* of fragment distribution on the positive and negative strand. Biology mandates that gDNA is double-stranded and our mean is absolutely cemented and fixed at 50/50 positive/negative stranded. However, in my investigation of real data, the variance around the mean was not binomially distributed. There was real overdispersion. Modeling the strand variance will be important and something we will need to incorporate downstream. If variance is very overdispersed, we could see large strand asymmetry (for example, 10 total fragments, 8 sense, 2 antisense) and still have it be reasonably probable to expect it from gDNA. This needs to make it into the EM somehow -- perhaps by increasing the gDNA bayesian prior pseudocount or as a  regularizer (M-step?). 
+
+
+
+## Remove boundary_kind instrumentation
+
+This is likely not going to be used
+
+
 ## gDNA -> RNA failures
+
+
+## coarse and fine variable name refactoring
+
+Regarding variable names, I discourage names that involve "coarse" and "fine" region terminology. Discussing coarse and fine regions is solely for the purpose of planning. Once we implement this, regions are just regions and don't explicitly need to be labeled "fine" regions.
+
+
+## gDNA FL hist
+
+We have implemented Phase 0, Phase 1, and Phase 2 of our fine region migratino plan. We are preparing for Phase 3 and have created a planning document (attached) for Phase 3. I'd like you to review the document and help me improve it. There are a lot of good things there. I'm not quite convinced that the 'boundary_kind' fields are needed, and not quite convinced about exactly which 'boundary_kind' fields we should try to retain. I do agree that we need to decide which fragments we will use for gDNA FL estimation. That is crucial. Intergenic contained (signature 0x0) are useful for gDNA FL. Pure intronic contained (0x4, 0x8, 0xC) should go to gDNA FL. Then, we need to include boundary-crossing fragments. Let's look at how to include boundary-crossing INTERGENIC and INTRONIC fragments with the new system. Given a boundary-crossing fragment, we would only want to accumulate the INTERGENIC/INTRONIC portion of the fragment. For example a 100bp fragment overlaps an exon (right boundary, 98bp) and an intron (left boundary, 2bp). This is an exon-intron boundary crossing fragment. When we accumulate the fragment weight 2/100 on the intronic LEFT boundary, we would add this as a weighted FL estimate to the INTRON gDNA FL estimation. The intronic gDNA FL estimate will be weighted by 0.02. I would say it would be reasonable to maintain the following FL histograms for gDNA FL estimation:
+
+- INTERGENIC contained
+- INTERGENIC boundary-crossing
+- INTRONIC contained
+- INTRONIC boundary-crossing
+
+Granted we will likely aggregate these gDNA FL histograms into one, but it makes a lot diagnostic sense to keep them separated during accumulation to make sure the FL hists are similar/compatible and how much they are being contaminated.
+
+We can maintain the other FL hists:
+- EXON contained
+- EXON boundary-crossing
+
+Initially we will not use the exon FL hists for gDNA FL estimation. There is a possibility that if we partition regions into 'expressed' (RNA+) and 'not expressed' (RNA-), we could then utilize fragments in the 'not expressed' regions, which should be relatively pure DNA. This was a previous strategy. But we might not need to do this because we tend to get many fragments in the intergenic/intronic contained and boundary-crossing categories. This is a future endeavor.
+
+So I think the next step is to refine the plan for gDNA FL estimation as above. Evaluate my design above. What's your critique? Is this is a good design. Improve the implementation and Phase 3 to gather FL histograms appropriately.
+
+What are the implementation steps ahead of us?
+
+What interfaces and design decisions do I need to make to utilize our new region partition and fractional accumulation in downstream code. What are the downstream consumers besides the FL model.
+
+
+
+Re: subtleties to nail down 1) Yes! gDNA FL pools are unspliced fragments only. 2) Agree that gDNA FL pools collapse pos + neg strand (DNA is unstranded). 3) there are lots of 'ambiguous' signatures that involve exons + introns. these are impure regions that do not give us a clear signal. Now, we have the opportunity to separate out the ambiguity further. INTERGENIC is trivial (0x0). INTRON "pure" (intron_neg=0x4, intron_pos=0x8). INTRON "ambig" would be just intron_pos+intron_neg=0xC. This concept translates to exon regions too: EXON "pure"  (exon_neg = 0x1 and exon_pos=0x2) and EXON "ambig" (exon_pos+exon_neg=0x3). The rest of the signatures are "mixed" because they have overlapping EXON and INTRONs. While I may have suggested that we consolidate our categories, having thought this through, I think it is going to be helpful to 
+
 
 
 

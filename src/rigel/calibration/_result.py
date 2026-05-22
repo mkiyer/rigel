@@ -134,7 +134,7 @@ def build_per_locus_gdna_df(
 class CalibrationResult:
     """Immutable v6 calibration result."""
 
-    global_densities: GlobalDensityTable  # M4
+    global_densities: GlobalDensityTable | None
     fl_models: FLModels  # M7 — sole finalized FL surface
     prior_table: PriorTable  # M6
 
@@ -145,17 +145,11 @@ class CalibrationResult:
     multi_locus_prior_df: pd.DataFrame
     per_locus_gdna_df: pd.DataFrame
 
-    # Boundary tolerance K (bp) the scanner used. 0 reproduces the
-    # pre-2026.05 strict-crossing semantics. Persisted so analyses
-    # can verify what value calibration was run with.
-    splicing_anchor_tolerance: int = 0
-    # Auxiliary QC counter — observed fragments whose every region
-    # hit was below the splicing-anchor-tolerance threshold q(K) = max(K, 1).
-    # Always 0 when splicing_anchor_tolerance == 0. NOT included in
-    # ``Diagnostics.total()`` because these fragments already increment
-    # ``Diagnostics.n_unannotated`` (mask 0b000) — this counter is the
-    # below-tolerance subset of that bucket.
-    n_below_tolerance: int = 0
+    # Resolver-side splicing-anchor tolerance K (bp). Persisted so
+    # downstream analyses can verify what value the *resolver* was
+    # configured with; calibration no longer interprets this value
+    # under the fractional cutover.
+    resolver_splicing_anchor_tolerance: int = 0
 
     # Regional exposure model. ``None`` means it was not built
     # (pre-regional-exposure callers); the pipeline treats this as
@@ -191,13 +185,12 @@ class CalibrationResult:
         return float(self.fl_models.gdna.mean)
 
     # ---- Mutator-style helper (frozen-safe) ----
-    def with_priors(self, prior_table: PriorTable) -> "CalibrationResult":
-        return dataclasses.replace(
-            self,
-            prior_table=prior_table,
-            n_multi_loci=len(prior_table.multi_locus_priors),
-            multi_locus_prior_df=build_multi_locus_prior_df(prior_table.multi_locus_priors),
-            per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
+    def with_priors(self, prior_table: PriorTable) -> "CalibrationResult":  # noqa: ARG002
+        from .errors import FractionalCutoverPending
+
+        raise FractionalCutoverPending(
+            "CalibrationResult.with_priors: prior assembly consumes the "
+            "fractional prior pipeline which has not yet landed."
         )
 
     def with_regional_weighting_stats(
@@ -212,13 +205,16 @@ class CalibrationResult:
             else 0.0
         )
         return {
-            "global_densities": self.global_densities.to_summary_dict(),
+            "global_densities": (
+                self.global_densities.to_summary_dict()
+                if self.global_densities is not None
+                else None
+            ),
             "fl_models": self.fl_models.to_summary_dict(),
             "diagnostics": self.diagnostics.to_summary_dict(),
             "n_multi_loci": self.n_multi_loci,
             "mean_pi_gdna": mean_pi,
-            "splicing_anchor_tolerance": int(self.splicing_anchor_tolerance),
-            "n_below_tolerance": int(self.n_below_tolerance),
+            "resolver_splicing_anchor_tolerance": int(self.resolver_splicing_anchor_tolerance),
             "regional_exposure": (
                 self.regional_exposure.to_summary_dict()
                 if self.regional_exposure is not None
@@ -241,11 +237,13 @@ def build_calibration_result(
     *,
     payload: CalibrationScanPayload,
     scan_trained: FragmentLengthModels,
-    global_densities: GlobalDensityTable,
+    global_densities: GlobalDensityTable | None = None,
     prior_table: PriorTable | None = None,
     fl_prior_ess: float = POOL_EB_PRIOR_ESS,
     fl_models: FLModels | None = None,
     regional_exposure: RegionalGdnaExposure | None = None,
+    resolver_splicing_anchor_tolerance: int = 0,
+    region_signature: np.ndarray | None = None,
 ) -> CalibrationResult:
     """Assemble the immutable v6 calibration result.
 
@@ -274,7 +272,7 @@ def build_calibration_result(
             max_size=scan_trained.max_size,
             prior_ess=fl_prior_ess,
         )
-    diagnostics = Diagnostics.from_payload(payload)
+    diagnostics = Diagnostics.from_payload(payload, signature=region_signature)
     return CalibrationResult(
         global_densities=global_densities,
         fl_models=fl_models,
@@ -283,7 +281,6 @@ def build_calibration_result(
         n_multi_loci=len(prior_table.multi_locus_priors),
         multi_locus_prior_df=build_multi_locus_prior_df(prior_table.multi_locus_priors),
         per_locus_gdna_df=build_per_locus_gdna_df(prior_table.multi_locus_priors),
-        splicing_anchor_tolerance=int(getattr(payload, "splicing_anchor_tolerance", 0)),
-        n_below_tolerance=int(getattr(payload, "n_below_tolerance", 0)),
+        resolver_splicing_anchor_tolerance=int(resolver_splicing_anchor_tolerance),
         regional_exposure=regional_exposure,
     )

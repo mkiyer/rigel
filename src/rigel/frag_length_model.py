@@ -41,6 +41,11 @@ _TAIL_DECAY_LP: float = math.log(0.99)
 #: between standalone and production usage.
 DEFAULT_MAX_FRAG_SIZE: int = 1000
 
+# One pseudo-observation spread across the full FL support is enough to keep
+# unseen lengths finite without pulling short libraries toward the midpoint of
+# the histogram.
+_UNSEEN_FL_SMOOTHING_ESS: float = 1.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,11 +189,9 @@ class FragmentLengthModel:
     def pmf(self) -> np.ndarray:
         """Public probability vector, shape ``(max_size + 1,)``.
 
-        Returns the EB-smoothed posterior predictive after
-        :meth:`finalize` (when a Dirichlet prior is supplied), the
-        finalized Laplace-smoothed estimate after a plain ``finalize()``,
-        or a pre-finalize Laplace-smoothed estimate from raw counts. This
-        is the *same* vector used internally by
+        Returns the finalized posterior predictive after :meth:`finalize`,
+        or a pre-finalize smoothed estimate from raw counts. This is the
+        *same* vector used internally by
         :meth:`compute_all_transcript_eff_lens` and the analytical
         moment helpers, so consumers that need the underlying PMF (e.g.
         the calibration boundary-crossing exposure) stay consistent
@@ -268,7 +271,7 @@ class FragmentLengthModel:
         return int(np.argmax(self.counts))
 
     def _stats_probs(self) -> np.ndarray | None:
-        """Finalized probability vector for summary statistics, when EB-smoothed."""
+        """Finalized probability vector for summary statistics, when informative."""
         if self._finalized and self._prob is not None and self._stats_use_prob:
             return self._prob
         return None
@@ -297,7 +300,10 @@ class FragmentLengthModel:
             FL histogram).  When provided, the log-probability table
             becomes the posterior predictive of a Dirichlet-Multinomial:
 
-                p[k] = (count[k] + prior[k] + 1) / (N + N_prior + K)
+                p[k] = (count[k] + prior[k] + α) / (N + N_prior + A)
+
+            where ``A`` is one total pseudo-observation spread uniformly
+            across all bins and ``α = A / K``.
 
             This shrinks the estimate toward the prior when
             category-specific data is sparse.  With zero category
@@ -313,6 +319,8 @@ class FragmentLengthModel:
             ``N_cat / (N_cat + prior_ess)`` influence.
         """
         n = self.max_size + 1
+        smoothing_total = _UNSEEN_FL_SMOOTHING_ESS
+        smoothing_per_bin = smoothing_total / n
         prior_total = 0.0
         if prior_counts is not None:
             # Dirichlet-Multinomial posterior predictive.
@@ -327,14 +335,16 @@ class FragmentLengthModel:
                 ess = min(prior_ess, raw_total)
                 pc *= ess / raw_total
             prior_total = float(pc.sum())
-            prob = (self.counts + pc + 1.0) / (self._total_weight + prior_total + n)
+            prob = (self.counts + pc + smoothing_per_bin) / (
+                self._total_weight + prior_total + smoothing_total
+            )
         elif self._total_weight == 0:
             prob = np.full(n, 1.0 / n, dtype=np.float64)
         else:
-            prob = (self.counts + 1.0) / (self._total_weight + n)
+            prob = (self.counts + smoothing_per_bin) / (self._total_weight + smoothing_total)
         self._prob = np.asarray(prob, dtype=np.float64)
         self._log_prob = np.log(self._prob)
-        self._stats_use_prob = prior_total > 0.0
+        self._stats_use_prob = self._total_weight > 0.0 or prior_total > 0.0
         self._tail_base: float = float(self._log_prob[self.max_size])
         self._finalized = True
         # Invalidate eff-len cache so it rebuilds against the new _prob.
@@ -348,9 +358,9 @@ class FragmentLengthModel:
     def log_likelihood(self, frag_length: int) -> float:
         """Log-probability of a fragment length under the learned distribution.
 
-        Uses add-one (Laplace) smoothing to avoid -inf for unseen sizes.
-        Fragment lengths beyond ``max_size`` receive exponential tail
-        decay: ``log_prob[max_size] + (frag_length − max_size) × _TAIL_DECAY_LP``.
+        Uses a small symmetric reserve to avoid -inf for unseen sizes.
+        Fragment lengths beyond ``max_size`` receive exponential tail decay:
+        ``log_prob[max_size] + (frag_length − max_size) × _TAIL_DECAY_LP``.
 
         Parameters
         ----------
@@ -371,8 +381,10 @@ class FragmentLengthModel:
                 if total == 0:
                     base = -math.log(self.max_size + 1)
                 else:
+                    smoothing_per_bin = _UNSEEN_FL_SMOOTHING_ESS / (self.max_size + 1)
                     base = float(
-                        np.log(self.counts[self.max_size] + 1.0) - np.log(total + self.max_size + 1)
+                        np.log(self.counts[self.max_size] + smoothing_per_bin)
+                        - np.log(total + _UNSEEN_FL_SMOOTHING_ESS)
                     )
             return base + (frag_length - self.max_size) * _TAIL_DECAY_LP
 
@@ -382,22 +394,26 @@ class FragmentLengthModel:
         total = self._total_weight
         if total == 0:
             return -math.log(self.max_size + 1)
-        # Laplace smoothing
-        return float(np.log(self.counts[idx] + 1.0) - np.log(total + self.max_size + 1))
+        smoothing_per_bin = _UNSEEN_FL_SMOOTHING_ESS / (self.max_size + 1)
+        return float(
+            np.log(self.counts[idx] + smoothing_per_bin) - np.log(total + _UNSEEN_FL_SMOOTHING_ESS)
+        )
 
     # ------------------------------------------------------------------
     # eCDF-based effective length computation
     # ------------------------------------------------------------------
 
     def _normalized_probs(self) -> np.ndarray:
-        """Return Laplace-smoothed probability vector, shape (max_size+1,)."""
+        """Return the smoothed probability vector, shape (max_size+1,)."""
         if self._finalized and self._prob is not None:
             return self._prob
         total = self.total_weight
         if total == 0:
             n = self.max_size + 1
             return np.full(n, 1.0 / n, dtype=np.float64)
-        return (self.counts + 1.0) / (total + self.max_size + 1)
+        n = self.max_size + 1
+        smoothing_per_bin = _UNSEEN_FL_SMOOTHING_ESS / n
+        return (self.counts + smoothing_per_bin) / (total + _UNSEEN_FL_SMOOTHING_ESS)
 
     # ------------------------------------------------------------------
     # Analytical transcript effective length (salmon-style eCDF)
@@ -560,8 +576,8 @@ class FragmentLengthModels:
         category-specific data is sparse while still allowing FL to
         discriminate when category data is abundant.
 
-        Diagnostic models (global, per-category) are
-        finalized with standard Laplace smoothing.
+        Diagnostic models (global, per-category) are finalized with the
+        same small unseen-bin reserve used by the scoring models.
 
         Parameters
         ----------

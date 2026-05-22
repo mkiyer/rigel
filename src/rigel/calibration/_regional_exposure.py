@@ -1,13 +1,12 @@
-"""rigel.calibration._regional_exposure — per-region gDNA exposure weights.
+"""rigel.calibration._regional_exposure \u2014 fail-fast stub (fractional cutover).
 
-Hybrid-capture gDNA is not uniformly exposed across the genome. This
-module learns one globally normalized per-region relative exposure field
-``A_r in (0, 1]`` from the conservative calibration evidence already
-collected by v6 and provides lookup/integration helpers for EM
-denominators.
-
-See ``docs/calibration/gdna_exposure_plan_v4.3.md`` for the current
-denominator-only design.
+The legacy regional gDNA exposure estimator consumed the integer
+per-region count matrix and the orientation channel split that the
+fractional accumulator no longer emits. Until the fractional
+replacement lands :meth:`RegionalGdnaExposure.build` raises
+:class:`FractionalCutoverPending`. ``RegionalGdnaExposure.uniform`` is
+preserved because the orchestrator still uses it as a degenerate
+default while the prior pipeline is stubbed.
 """
 
 from __future__ import annotations
@@ -17,69 +16,28 @@ from typing import Literal
 
 import numpy as np
 
-from ._arrays import PayloadArrays, RegionArrays
-from ._exposure import boundary_crossing_exposure
-from ._kappa import estimate_kappa
-from ._orient import ORIENT_OPP, ORIENT_SAME, StrandSummary
-from .density_global import (
-    GlobalDensityTable,
-    _gdna_count_moment,
-    _strand_identifiable_rows,
-    kappa_opportunity_bp,
-    l_eff_contained,
-    precision_opportunity,
-    strand_reliability_power,
-    strand_correction_usable,
-)
-from ..frag_length_model import FragmentLengthModel
-from .regions import RegionType
+from ._arrays import RegionArrays
+from .errors import FractionalCutoverPending
+
 
 __all__ = [
     "ExposureMode",
-    "RegionalGdnaExposure",
     "RegionalWeightApplicationStats",
-    "LOG_A_FLOOR",
-    "LOG_RHO_CLIP_NATS",
+    "RegionalGdnaExposure",
     "REFERENCE_QUANTILE",
 ]
 
-ExposureMode = Literal["uniform", "regional"]
 
-REFERENCE_QUANTILE = 0.95
-LOG_A_FLOOR = float(np.log(1.0e-4))
-LOG_RHO_FLOOR = float(np.log(np.finfo(np.float64).tiny))
-LOG_RHO_CLIP_NATS = 8.0
-SPREAD_EPS = 1.0e-12
-Z_Q95 = 1.6448536269514722
+ExposureMode = Literal["uniform", "kappa_eb"]
 
-_CLASS_INTERGENIC = "INTERGENIC"
-_CLASS_INTRON = "INTRON"
-_CLASS_EXON_BOUNDARY = "EXON-INTRON"
-_CLASS_EXON_CONTAINED = "EXON-CONTAINED"
-_CLASS_EXON_COMPOSITE = "EXON-COMPOSITE"
-_CLASS_ORDER = (
-    _CLASS_INTERGENIC,
-    _CLASS_INTRON,
-    _CLASS_EXON_BOUNDARY,
-    _CLASS_EXON_CONTAINED,
-    _CLASS_EXON_COMPOSITE,
-)
-_INT64_MIN = np.iinfo(np.int64).min
-
-
-# ---------------------------------------------------------------------------
-# Dataclasses
-# ---------------------------------------------------------------------------
+#: Default reference quantile for the ``A_r = exp(...)`` normalisation
+#: anchor. Kept here so legacy summary writers compile.
+REFERENCE_QUANTILE: float = 0.95
 
 
 @dataclass(frozen=True, slots=True)
 class RegionalWeightApplicationStats:
-    """Per-call counters for `_apply_unit_gdna_weights`.
-
-    Emitted in ``summary.json["regional_exposure"]["application"]`` so the
-    user can audit how many units actually received a weight versus how
-    many were skipped for each documented reason.
-    """
+    """Per-call counters for the regional weight application step."""
 
     n_units_seen: int = 0
     n_units_weighted: int = 0
@@ -101,9 +59,9 @@ class RegionalWeightApplicationStats:
 class RegionalGdnaExposure:
     """Per-region gDNA exposure weight ``A_r`` and lookup table.
 
-    Arrays are aligned to ``RegionArrays`` sorted (ref_id, start) order.
-    The region geometry is copied here so the lookup does not need to
-    materialize a separate ``RegionIndexPy``.
+    Dataclass shape preserved across the fractional cutover so that
+    ``CalibrationResult`` and ``summary.json`` writers keep compiling.
+    Only :meth:`uniform` is implemented; :meth:`build` raises.
     """
 
     rho_hat: np.ndarray
@@ -127,8 +85,6 @@ class RegionalGdnaExposure:
     ref_id: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int32))
     start: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
     end: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
-
-    # -- constructors ------------------------------------------------------
 
     @classmethod
     def uniform(cls, region_arrays: RegionArrays) -> "RegionalGdnaExposure":
@@ -160,573 +116,34 @@ class RegionalGdnaExposure:
         )
 
     @classmethod
-    def build(
-        cls,
-        region_arrays: RegionArrays,
-        payload_arrays: PayloadArrays,
-        global_densities: GlobalDensityTable,
-        gdna_fl: FragmentLengthModel,
-        *,
-        strand_summary: StrandSummary | None = None,
-        splicing_anchor_tolerance: int = 0,
-        enabled: bool = True,
-        reference_quantile: float = REFERENCE_QUANTILE,
-    ) -> "RegionalGdnaExposure":
-        """Build regional exposure or return uniform when disabled."""
-        reference_quantile = float(reference_quantile)
-        if not (0.0 < reference_quantile <= 1.0):
-            raise ValueError(
-                "RegionalGdnaExposure reference_quantile must be in (0, 1]; "
-                f"got {reference_quantile}."
-            )
-        if not enabled:
-            return cls.uniform(region_arrays)
-
-        R = int(region_arrays.start.size)
-        if R == 0:
-            return cls.uniform(region_arrays)
-
-        # Per-region exposure E_r and conservative count Y_r per class.
-        spans = (region_arrays.end - region_arrays.start).astype(np.int64, copy=False)
-        b_cross = boundary_crossing_exposure(
-            gdna_fl, splicing_anchor_tolerance=int(splicing_anchor_tolerance)
+    def build(cls, *_args: object, **_kwargs: object) -> "RegionalGdnaExposure":
+        """Removed under the fractional cutover. Raises :class:`FractionalCutoverPending`."""
+        raise FractionalCutoverPending(
+            "RegionalGdnaExposure.build: regional gDNA exposure consumes the "
+            "integer per-region count matrix and orientation channels that "
+            "the fractional accumulator no longer emits. The replacement "
+            "fractional exposure pipeline has not yet landed."
         )
 
-        type_arr = region_arrays.type
-        is_intergenic = type_arr == int(RegionType.INTERGENIC)
-        is_intron = type_arr == int(RegionType.INTRON)
-        is_exon = type_arr == int(RegionType.EXON)
+    def to_summary_dict(self) -> dict[str, object]:
+        """Minimal summary block consumed by ``CalibrationResult.to_summary_dict``.
 
-        E = np.zeros(R, dtype=np.float64)
-        # Intergenic + intron containment.
-        ig_in_mask = is_intergenic | is_intron
-        if ig_in_mask.any():
-            E[ig_in_mask] = l_eff_contained(spans[ig_in_mask], gdna_fl)
-        # Exon boundary flux (eligibility filter: any side that is allowed
-        # to contribute to boundary crossing).
-        bf_left = region_arrays.bf_left.astype(bool, copy=False)
-        bf_right = region_arrays.bf_right.astype(bool, copy=False)
-        eligible_left = (is_exon & bf_left).astype(np.int64)
-        eligible_right = (is_exon & bf_right).astype(np.int64)
-        sides = eligible_left + eligible_right
-        E_ex_boundary = np.zeros(R, dtype=np.float64)
-        if b_cross > 0.0 and is_exon.any():
-            E_ex_boundary[is_exon] = sides[is_exon].astype(np.float64) * b_cross
-            E[is_exon] = E_ex_boundary[is_exon]
-
-        # Strand-corrected count moments per channel.
-        Y = np.zeros(R, dtype=np.float64)
-        Y[is_intergenic] = payload_arrays.intergenic_per_region[is_intergenic].astype(
-            np.float64, copy=False
-        )
-
-        # Set up strand-correction once.
-        strand_active = (
-            strand_summary is not None and strand_correction_usable(strand_summary)
-        )
-        ssc = (
-            float(strand_summary.signed_strand_contrast) if strand_summary is not None else 0.0
-        )
-        identifiable = _strand_identifiable_rows(region_arrays.strand)
-
-        # Intron.
-        in_raw = payload_arrays.intron_by_orient.sum(axis=1).astype(np.float64, copy=False)
-        if strand_active:
-            same = payload_arrays.intron_by_orient[:, ORIENT_SAME]
-            opp = payload_arrays.intron_by_orient[:, ORIENT_OPP]
-            corrected = _gdna_count_moment(same, opp, signed_strand_contrast=ssc)
-            in_corrected = np.where(identifiable, np.maximum(corrected, 0.0), in_raw)
-        else:
-            in_corrected = in_raw
-        Y[is_intron] = in_corrected[is_intron]
-
-        # Exon boundary (raw is per-region: u_left * 1_L + u_right * 1_R).
-        ul = payload_arrays.u_left_by_orient
-        ur = payload_arrays.u_right_by_orient
-        ex_raw = (
-            eligible_left * ul.sum(axis=1) + eligible_right * ur.sum(axis=1)
-        ).astype(np.float64, copy=False)
-        if strand_active:
-            same_ex = (
-                eligible_left * ul[:, ORIENT_SAME] + eligible_right * ur[:, ORIENT_SAME]
-            )
-            opp_ex = (
-                eligible_left * ul[:, ORIENT_OPP] + eligible_right * ur[:, ORIENT_OPP]
-            )
-            corrected_ex = _gdna_count_moment(same_ex, opp_ex, signed_strand_contrast=ssc)
-            ex_corrected = np.where(identifiable, np.maximum(corrected_ex, 0.0), ex_raw)
-        else:
-            ex_corrected = ex_raw
-
-        # Exon contained strand-deconvolution. This channel is used only
-        # when region strand and library strand information are identifiable.
-        ex_contained_raw_opportunity = np.zeros(R, dtype=np.float64)
-        if is_exon.any():
-            ex_contained_raw_opportunity[is_exon] = l_eff_contained(
-                spans[is_exon],
-                gdna_fl,
-            )
-        ec = payload_arrays.exon_contained_by_orient
-        ec_same = ec[:, ORIENT_SAME]
-        ec_opp = ec[:, ORIENT_OPP]
-        ec_active_rows = is_exon & identifiable & strand_active
-        if strand_active:
-            ec_corrected = _gdna_count_moment(ec_same, ec_opp, signed_strand_contrast=ssc)
-            ec_moment = np.where(ec_active_rows, ec_corrected, 0.0)
-        else:
-            ec_moment = np.zeros(R, dtype=np.float64)
-
-        exon_contained_density = global_densities.exon_contained
-        assert exon_contained_density is not None
-        beta_boundary = kappa_opportunity_bp(
-            global_densities.exon_intron.kappa,
-            global_densities.exon_intron.rho,
-        )
-        beta_contained = kappa_opportunity_bp(
-            exon_contained_density.kappa,
-            exon_contained_density.rho,
-        )
-        strand_power = strand_reliability_power(
-            strand_summary if strand_summary is not None else StrandSummary.uninformative()
-        )
-        P_boundary = np.asarray(
-            precision_opportunity(E_ex_boundary, beta_boundary),
-            dtype=np.float64,
-        )
-        P_contained = strand_power * np.asarray(
-            precision_opportunity(ex_contained_raw_opportunity, beta_contained),
-            dtype=np.float64,
-        )
-        P_contained = np.where(ec_active_rows, P_contained, 0.0)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            scale_boundary = np.where(E_ex_boundary > 0.0, P_boundary / E_ex_boundary, 0.0)
-            scale_contained = np.where(
-                ex_contained_raw_opportunity > 0.0,
-                P_contained / ex_contained_raw_opportunity,
-                0.0,
-            )
-        Y_ex_composite = scale_boundary * ex_corrected + scale_contained * ec_moment
-        E_ex_composite = P_boundary + P_contained
-        Y[is_exon] = Y_ex_composite[is_exon]
-        E[is_exon] = E_ex_composite[is_exon]
-
-        class_mask = {
-            _CLASS_INTERGENIC: is_intergenic,
-            _CLASS_INTRON: is_intron,
-            _CLASS_EXON_COMPOSITE: is_exon,
-        }
-
-        valid = E > 0.0
-        if not valid.any():
-            out = cls.uniform(region_arrays)
-            return cls(
-                rho_hat=np.zeros(R, dtype=np.float64),
-                log_weight=out.log_weight,
-                weight=out.weight,
-                mode="uniform",
-                rho_ref=0.0,
-                reference_quantile=reference_quantile,
-                n_at_floor=0,
-                per_class=_build_per_class_summary(
-                    class_mask,
-                    np.zeros(R),
-                    E,
-                    Y,
-                    0.0,
-                    is_exon=is_exon,
-                    boundary_E=E_ex_boundary,
-                    boundary_Y=ex_corrected,
-                    contained_E=ex_contained_raw_opportunity,
-                    contained_Y=ec_moment,
-                ),
-                ref_offsets=out.ref_offsets,
-                ref_id=out.ref_id,
-                start=out.start,
-                end=out.end,
-            )
-
-        total_E = float(E[valid].sum())
-        total_Y = float(Y[valid].sum())
-        rho_global = max(total_Y / total_E, 0.0) if total_E > 0.0 else 0.0
-        kappa_est = estimate_kappa(np.maximum(Y[valid], 0.0), E[valid], rho_global)
-        kappa_alpha = float(kappa_est.value)
-        kappa_opportunity = kappa_alpha / rho_global if rho_global > 0.0 else 0.0
-
-        rho_hat = np.full(R, rho_global, dtype=np.float64)
-        denom = E[valid] + kappa_opportunity
-        with np.errstate(invalid="ignore", divide="ignore"):
-            rho_signed = np.where(
-                denom > 0.0,
-                (Y[valid] + kappa_opportunity * rho_global) / denom,
-                rho_global,
-            )
-        n_negative_rho_floored = int(np.sum(rho_signed < 0.0))
-        rho_hat[valid] = np.maximum(rho_signed, 0.0)
-
-        per_class_summary = _build_per_class_summary(
-            class_mask,
-            rho_hat,
-            E,
-            Y,
-            rho_global,
-            is_exon=is_exon,
-            boundary_E=E_ex_boundary,
-            boundary_Y=ex_corrected,
-            contained_E=ex_contained_raw_opportunity,
-            contained_Y=ec_moment,
-        )
-        rho_ref = _weighted_quantile(rho_hat[valid], E[valid], reference_quantile, fallback=rho_global)
-        if rho_ref <= 0.0:
-            out = cls.uniform(region_arrays)
-            return cls(
-                rho_hat=rho_hat,
-                log_weight=out.log_weight,
-                weight=out.weight,
-                mode="uniform",
-                rho_ref=0.0,
-                reference_quantile=reference_quantile,
-                n_at_floor=0,
-                per_class=per_class_summary,
-                rho_global=float(rho_global),
-                kappa_alpha_global=float(kappa_alpha),
-                kappa_opportunity_bp=float(kappa_opportunity),
-                kappa_fallback_used=bool(kappa_est.fallback_used),
-                kappa_fallback_reason=str(kappa_est.fallback_reason),
-                n_negative_rho_floored=int(n_negative_rho_floored),
-                ref_offsets=out.ref_offsets,
-                ref_id=out.ref_id,
-                start=out.start,
-                end=out.end,
-            )
-
-        log_floor = float(np.log(rho_global)) - LOG_RHO_CLIP_NATS if rho_global > 0.0 else LOG_RHO_FLOOR
-        log_min = max(float(np.exp(log_floor)), float(np.exp(LOG_RHO_FLOOR)))
-        log_rho = np.log(np.maximum(rho_hat[valid], log_min))
-        log_fallback = float(np.log(max(rho_global, np.exp(LOG_RHO_FLOOR))))
-        q50_log = _weighted_quantile(log_rho, E[valid], 0.5, fallback=log_fallback)
-        q95_log = _weighted_quantile(log_rho, E[valid], 0.95, fallback=log_fallback)
-        obs_spread = float(max(q95_log - q50_log, 0.0))
-        with np.errstate(invalid="ignore", divide="ignore"):
-            var_log = E[valid] / (rho_global * (E[valid] + kappa_opportunity) ** 2)
-        w_total = float(E[valid].sum())
-        sigma2 = float((var_log * E[valid]).sum() / w_total) if w_total > 0.0 else 0.0
-        null_spread = Z_Q95 * float(np.sqrt(max(sigma2, 0.0)))
-
-        if obs_spread <= null_spread + SPREAD_EPS:
-            out = cls.uniform(region_arrays)
-            return cls(
-                rho_hat=rho_hat,
-                log_weight=out.log_weight,
-                weight=out.weight,
-                mode="uniform",
-                rho_ref=float(rho_ref),
-                reference_quantile=reference_quantile,
-                n_at_floor=0,
-                per_class=per_class_summary,
-                rho_global=float(rho_global),
-                kappa_alpha_global=float(kappa_alpha),
-                kappa_opportunity_bp=float(kappa_opportunity),
-                kappa_fallback_used=bool(kappa_est.fallback_used),
-                kappa_fallback_reason=str(kappa_est.fallback_reason),
-                observed_log_spread=float(obs_spread),
-                null_log_spread=float(null_spread),
-                n_negative_rho_floored=int(n_negative_rho_floored),
-                ref_offsets=out.ref_offsets,
-                ref_id=out.ref_id,
-                start=out.start,
-                end=out.end,
-            )
-
-        log_rho_ref = float(np.log(rho_ref))
-        log_weight = np.zeros(R, dtype=np.float64)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            raw = np.where(rho_hat[valid] > 0.0, np.log(rho_hat[valid]) - log_rho_ref, LOG_A_FLOOR)
-        raw = np.minimum(raw, 0.0)
-        log_weight[valid] = np.maximum(raw, LOG_A_FLOOR)
-        log_weight = np.maximum(log_weight, LOG_A_FLOOR)
-        n_at_floor = int(np.sum(log_weight <= LOG_A_FLOOR + 1e-15))
-        weight = np.exp(log_weight)
-
-        return cls(
-            rho_hat=rho_hat,
-            log_weight=log_weight,
-            weight=weight,
-            mode="regional",
-            rho_ref=float(rho_ref),
-            reference_quantile=reference_quantile,
-            n_at_floor=n_at_floor,
-            per_class=per_class_summary,
-            rho_global=float(rho_global),
-            kappa_alpha_global=float(kappa_alpha),
-            kappa_opportunity_bp=float(kappa_opportunity),
-            kappa_fallback_used=bool(kappa_est.fallback_used),
-            kappa_fallback_reason=str(kappa_est.fallback_reason),
-            observed_log_spread=float(obs_spread),
-            null_log_spread=float(null_spread),
-            n_negative_rho_floored=int(n_negative_rho_floored),
-            ref_offsets=np.asarray(region_arrays.ref_offsets, dtype=np.int32).copy(),
-            ref_id=np.asarray(region_arrays.ref_id, dtype=np.int32).copy(),
-            start=np.asarray(region_arrays.start, dtype=np.int64).copy(),
-            end=np.asarray(region_arrays.end, dtype=np.int64).copy(),
-        )
-
-    # -- lookup -------------------------------------------------------------
-
-    def log_weights_for_positions(
-        self,
-        ref_ids: np.ndarray,
-        positions: np.ndarray,
-    ) -> np.ndarray:
-        """Vectorized ``log A(ref, pos)``; uniform mode returns zeros."""
-        N = int(ref_ids.size)
-        out = np.zeros(N, dtype=np.float64)
-        if self.mode == "uniform" or N == 0:
-            return out
-        ref_ids = np.asarray(ref_ids, dtype=np.int32)
-        positions = np.asarray(positions, dtype=np.int64)
-        n_refs = int(self.ref_offsets.size - 1) if self.ref_offsets.size else 0
-        order = np.argsort(ref_ids, kind="stable")
-        ref_sorted = ref_ids[order]
-        pos_sorted = positions[order]
-        # Group boundaries by ref id.
-        unique_refs, group_starts = np.unique(ref_sorted, return_index=True)
-        group_ends = np.r_[group_starts[1:], N]
-        for ref, g0, g1 in zip(unique_refs.tolist(), group_starts.tolist(), group_ends.tolist()):
-            if ref < 0 or ref >= n_refs:
-                continue  # leave at identity
-            r_lo = int(self.ref_offsets[ref])
-            r_hi = int(self.ref_offsets[ref + 1])
-            if r_hi <= r_lo:
-                continue
-            ref_starts = self.start[r_lo:r_hi]
-            ref_ends = self.end[r_lo:r_hi]
-            qpos = pos_sorted[g0:g1]
-            # searchsorted: rightmost start <= pos.
-            idx = np.searchsorted(ref_starts, qpos, side="right") - 1
-            valid = idx >= 0
-            if not valid.any():
-                continue
-            hit = valid.copy()
-            hit_idx = np.where(valid, idx, 0)
-            hit &= qpos < ref_ends[hit_idx]
-            if not hit.any():
-                continue
-            local = hit_idx[hit] + r_lo
-            out_slice = np.zeros(qpos.size, dtype=np.float64)
-            out_slice[hit] = self.log_weight[local]
-            out[order[g0:g1]] = out_slice
-        return out
-
-    def weighted_length_on_ref(self, ref_id: int, start: int, end: int) -> float:
-        """Integral of ``A(x)`` over ``[start, end)`` on ``ref_id``.
-
-        Region partitions are gap-free by construction for any contig that
-        has at least one region. A gap inside ``[start, end)`` therefore
-        indicates a corrupted ``RegionArrays`` and raises ``RuntimeError``.
-        Contigs with zero regions (e.g., FASTA reference absent from the
-        GTF) return identity exposure ``end - start``.
+        Under the cutover the orchestrator only emits a uniform exposure
+        field, so the summary records the mode + bookkeeping only.
         """
-        if end <= start:
-            return 0.0
-        if self.mode == "uniform":
-            return float(end - start)
-        n_refs = int(self.ref_offsets.size - 1) if self.ref_offsets.size else 0
-        if ref_id < 0 or ref_id >= n_refs:
-            return float(end - start)
-        r_lo = int(self.ref_offsets[ref_id])
-        r_hi = int(self.ref_offsets[ref_id + 1])
-        if r_hi <= r_lo:
-            return float(end - start)
-        ref_starts = self.start[r_lo:r_hi]
-        ref_ends = self.end[r_lo:r_hi]
-        # First region containing/after `start`.
-        i = int(np.searchsorted(ref_starts, start, side="right") - 1)
-        if i < 0:
-            i = 0
-        total = 0.0
-        cursor = int(start)
-        end_int = int(end)
-        while cursor < end_int and i < ref_starts.size:
-            rs = int(ref_starts[i])
-            re = int(ref_ends[i])
-            if rs > cursor:
-                # Gap detected inside a covered contig: data invariant
-                # violation, surface it loudly rather than silently
-                # weighting at 1.0.
-                raise RuntimeError(
-                    f"RegionalGdnaExposure: gap-free invariant violated on "
-                    f"ref_id={ref_id}: cursor={cursor} < region_start={rs} "
-                    f"(query=[{start}, {end}))."
-                )
-            seg_end = min(re, end_int)
-            seg_start = max(rs, cursor)
-            if seg_end > seg_start:
-                total += float(seg_end - seg_start) * float(self.weight[r_lo + i])
-            cursor = re
-            i += 1
-        if cursor < end_int:
-            # Query extends past the last region; treat the tail as identity
-            # (this is the "contig has regions but query spills beyond end"
-            # case — most likely a coordinate-clipping bug upstream, but
-            # behaviorally equivalent to no information).
-            total += float(end_int - cursor)
-        return total
-
-    # -- summary -----------------------------------------------------------
-
-    def to_summary_dict(self) -> dict:
         return {
-            "mode": self.mode,
-            "rho_global": float(self.rho_global),
+            "mode": str(self.mode),
+            "n_regions": int(self.weight.size),
             "rho_ref": float(self.rho_ref),
+            "rho_global": float(self.rho_global),
             "reference_quantile": float(self.reference_quantile),
-            "kappa_alpha_global": float(self.kappa_alpha_global),
+            "n_at_floor": int(self.n_at_floor),
+            "n_negative_rho_floored": int(self.n_negative_rho_floored),
             "kappa_opportunity_bp": float(self.kappa_opportunity_bp),
+            "kappa_alpha_global": float(self.kappa_alpha_global),
             "kappa_fallback_used": bool(self.kappa_fallback_used),
-            "kappa_fallback_reason": self.kappa_fallback_reason,
+            "kappa_fallback_reason": str(self.kappa_fallback_reason),
             "observed_log_spread": float(self.observed_log_spread),
             "null_log_spread": float(self.null_log_spread),
-            "n_negative_rho_floored": int(self.n_negative_rho_floored),
-            "n_regions": int(self.rho_hat.size),
-            "n_at_floor": int(self.n_at_floor),
-            "log_a_floor": float(LOG_A_FLOOR),
-            "per_class": {
-                cname: {k: float(v) for k, v in summary.items()}
-                for cname, summary in self.per_class.items()
-            },
+            "per_class": dict(self.per_class),
         }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _weighted_quantile(
-    values: np.ndarray,
-    weights: np.ndarray,
-    q: float,
-    *,
-    fallback: float,
-) -> float:
-    """Lower-step weighted quantile.
-
-    Returns the smallest value whose cumulative weight reaches ``q * total``.
-    Falls back to ``fallback`` when total weight is zero.
-    """
-    v = np.asarray(values, dtype=np.float64).ravel()
-    w = np.asarray(weights, dtype=np.float64).ravel()
-    keep = np.isfinite(v) & (w > 0.0)
-    if not keep.any():
-        return float(fallback)
-    v = v[keep]
-    w = w[keep]
-    order = np.argsort(v, kind="stable")
-    v = v[order]
-    w = w[order]
-    cw = np.cumsum(w)
-    target = q * cw[-1]
-    idx = int(np.searchsorted(cw, target, side="left"))
-    if idx >= v.size:
-        idx = v.size - 1
-    return float(v[idx])
-
-
-def _summarize_region_types(
-    class_mask: dict[str, np.ndarray],
-    rho_hat: np.ndarray,
-    E: np.ndarray,
-    Y: np.ndarray,
-    rho_global: float,
-) -> dict[str, dict[str, float]]:
-    """Diagnostic summaries by region type.
-
-    Region type is used to measure evidence and opportunity, but not to
-    normalize the exposure field. These summaries are QC only.
-    """
-    out: dict[str, dict[str, float]] = {}
-    for cname in _CLASS_ORDER:
-        if cname not in class_mask:
-            continue
-        mask = class_mask[cname]
-        out[cname] = _summarize_one_region_type(cname, mask, rho_hat, E, Y, rho_global)
-    return out
-
-
-def _build_per_class_summary(
-    class_mask: dict[str, np.ndarray],
-    rho_hat: np.ndarray,
-    E: np.ndarray,
-    Y: np.ndarray,
-    rho_global: float,
-    *,
-    is_exon: np.ndarray,
-    boundary_E: np.ndarray,
-    boundary_Y: np.ndarray,
-    contained_E: np.ndarray,
-    contained_Y: np.ndarray,
-) -> dict[str, dict[str, float]]:
-    out = _summarize_region_types(class_mask, rho_hat, E, Y, rho_global)
-
-    rho_boundary = _diagnostic_rho(boundary_E, boundary_Y, rho_global)
-    out[_CLASS_EXON_BOUNDARY] = _summarize_one_region_type(
-        _CLASS_EXON_BOUNDARY,
-        is_exon,
-        rho_boundary,
-        boundary_E,
-        boundary_Y,
-        rho_global,
-    )
-
-    rho_contained = _diagnostic_rho(contained_E, contained_Y, rho_global)
-    out[_CLASS_EXON_CONTAINED] = _summarize_one_region_type(
-        _CLASS_EXON_CONTAINED,
-        is_exon,
-        rho_contained,
-        contained_E,
-        contained_Y,
-        rho_global,
-    )
-    return out
-
-
-def _diagnostic_rho(E: np.ndarray, Y: np.ndarray, rho_global: float) -> np.ndarray:
-    rho = np.full(E.shape, float(rho_global), dtype=np.float64)
-    valid = E > 0.0
-    with np.errstate(invalid="ignore", divide="ignore"):
-        rho[valid] = np.maximum(Y[valid] / E[valid], 0.0)
-    return rho
-
-
-def _summarize_one_region_type(
-    cname: str,
-    mask: np.ndarray,
-    rho_hat: np.ndarray,
-    E: np.ndarray,
-    Y: np.ndarray,
-    rho_global: float,
-) -> dict[str, float]:
-    n_regions = int(mask.sum())
-    if n_regions == 0:
-        return {
-            "rho_global": float(rho_global),
-            "rho_q05": float(rho_global),
-            "rho_q50": float(rho_global),
-            "rho_q95": float(rho_global),
-            "n_regions": 0.0,
-            "n_regions_with_exposure": 0.0,
-            "evidence_count": 0.0,
-            "opportunity": 0.0,
-        }
-    weights = E[mask]
-    rho_c = rho_hat[mask]
-    return {
-        "rho_global": float(rho_global),
-        "rho_q05": float(_weighted_quantile(rho_c, weights, 0.05, fallback=rho_global)),
-        "rho_q50": float(_weighted_quantile(rho_c, weights, 0.50, fallback=rho_global)),
-        "rho_q95": float(_weighted_quantile(rho_c, weights, 0.95, fallback=rho_global)),
-        "n_regions": float(n_regions),
-        "n_regions_with_exposure": float(np.sum(weights > 0.0)),
-        "evidence_count": float(Y[mask].sum()),
-        "opportunity": float(weights.sum()),
-    }

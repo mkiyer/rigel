@@ -7,9 +7,10 @@ locoregional gDNA prior. Core helpers:
   contained-fragment effective lengths, sharing the salmon-style
   eCDF cache in :class:`FragmentLengthModel`. Used by the locus
   proration `ratio_r = eff_clip_r / eff_full_r`.
-* :func:`boundary_crossing_exposure` — :math:`B_\\text{cross} =
-  \\sum_\\ell h(\\ell)\\,\\max(\\ell - 1, 0)`, the per-side opportunity
-  space for a fragment to *strictly* cross a single boundary.
+* :func:`fractional_boundary_side_exposure` — FL-PMF-weighted per-side
+  exposure on a vector of region lengths (one side of one boundary per
+  region; replaces the legacy ``boundary_crossing_exposure`` scalar).
+
 * :func:`boundary_side_in_window` — boolean per-region flags marking
   whether each region's left and right boundaries lie inside a query
   window. Used to localize boundary events to a Locus.
@@ -38,7 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover - import only for type hints
 
 __all__ = [
     "contained_exposure_clipped",
-    "boundary_crossing_exposure",
+    "fractional_boundary_side_exposure",
     "boundary_side_in_window",
     "footprint_exposure_weight",
     "transcript_exposure_weights",
@@ -94,8 +95,7 @@ def footprint_exposure_weight(
     if exposure.mode == "uniform":
         return 1.0
     weighted_bp = sum(
-        exposure.weighted_length_on_ref(ref_id, start, end)
-        for ref_id, start, end in merged
+        exposure.weighted_length_on_ref(ref_id, start, end) for ref_id, start, end in merged
     )
     weight = float(weighted_bp) / raw_bp
     return float(np.clip(weight, min_weight, 1.0))
@@ -134,8 +134,7 @@ def transcript_exposure_weights(
             hi = int(exon_offsets[t_idx + 1])
             if hi > lo:
                 blocks = [
-                    (ref_id, int(exon_starts[pos]), int(exon_ends[pos]))
-                    for pos in range(lo, hi)
+                    (ref_id, int(exon_starts[pos]), int(exon_ends[pos])) for pos in range(lo, hi)
                 ]
             else:
                 blocks = [(ref_id, int(starts[t_idx]), int(ends[t_idx]))]
@@ -296,52 +295,52 @@ def contained_exposure_clipped(
     return eff_full, eff_clip
 
 
-def boundary_crossing_exposure(
-    fl: FragmentLengthModel, *, splicing_anchor_tolerance: int = 0
-) -> float:
-    """Expected number of fragment start positions that *strictly* cross
-    a single boundary, under the gDNA fragment-length distribution.
+def fractional_boundary_side_exposure(
+    lengths_bp: np.ndarray,
+    gdna_fl: FragmentLengthModel,
+) -> np.ndarray:
+    """FL-PMF-weighted per-side boundary exposure for a vector of region lengths.
 
-    Returns :math:`B_\\text{cross}(K) = \\sum_\\ell h(\\ell)\\,\\max(\\ell - 2q(K) + 1, 0)`
-    where :math:`q(K) = \\max(K, 1)` and ``K = splicing_anchor_tolerance``.
+    For each region length :math:`S_r`, returns
 
-    The :math:`q(K) = \\max(K, 1)` term preserves the strict-crossing
-    semantics at ``K = 0``: a fragment must still have at least 1 bp on
-    each side of the boundary, yielding :math:`B_\\text{cross}(0) = E[L] - 1`
-    (when :math:`L \\ge 1` almost surely). At ``K \\geq 1`` the formula
-    extends to "at least K bp on each side," matching the scanner-side
-    qualification predicate in
-    :class:`rigel.calibration::CalibrationAccumulator`.
+    .. math::
 
-    Returns ``0.0`` if the sum underflows (degenerate PMF concentrated
-    at :math:`\\ell \\le 2q(K) - 1`); callers must treat a zero exposure
-    as "no boundary information available" and fall back accordingly.
+        E^{side}_r = \\sum_\\ell h(\\ell)\\,\\min((\\ell - 1)/2, S_r/2),
+
+    the expected mass emitted to one side of one region boundary under
+    the fractional accumulator routing rule. Large regions reduce to
+    ``(E[FL] - 1) / 2``; regions shorter than the fragment length cap at
+    ``S_r / 2`` because fully spanned regions split mass across both sides.
 
     Parameters
     ----------
-    fl : FragmentLengthModel
-        Finalized FL model. Its ``pmf`` attribute supplies the per-bp
-        probability mass.
-    splicing_anchor_tolerance : int, optional
-        Minimum bp clearance ``K`` on each side of a boundary required
-        for a fragment to count as a boundary-crossing event. Default 0
-        reproduces the pre-2026.05 strict-crossing semantics.
+    lengths_bp : np.ndarray
+        Per-region span lengths (bp), shape ``(R,)``.
+    gdna_fl : FragmentLengthModel
+        Finalized gDNA fragment-length model.
 
-    Raises
-    ------
-    ValueError
-        If ``splicing_anchor_tolerance < 0``.
+    Returns
+    -------
+    np.ndarray
+        ``float64`` per-region exposures, shape ``(R,)``. Entries are
+        clipped at 0.
     """
-    if splicing_anchor_tolerance < 0:
-        raise ValueError(
-            f"boundary_crossing_exposure: splicing_anchor_tolerance "
-            f"({splicing_anchor_tolerance}) must be >= 0"
-        )
-    pmf = fl.pmf
-    ell = np.arange(pmf.size, dtype=np.float64)
-    q = float(max(int(splicing_anchor_tolerance), 1))
-    val = float((pmf * np.maximum(ell - 2.0 * q + 1.0, 0.0)).sum())
-    return val if val > 0.0 else 0.0
+    lengths = np.maximum(np.asarray(lengths_bp, dtype=np.int64), 0)
+    pmf = np.asarray(gdna_fl.pmf, dtype=np.float64)
+    if pmf.size == 0:
+        return np.zeros(lengths.shape, dtype=np.float64)
+
+    ell_minus_one = np.maximum(np.arange(pmf.size, dtype=np.float64) - 1.0, 0.0)
+    positive_mass = pmf.copy()
+    positive_mass[0] = 0.0
+    cdf = np.cumsum(positive_mass)
+    first_moment = np.cumsum(positive_mass * ell_minus_one)
+    total_mass = float(cdf[-1])
+
+    threshold = np.minimum(lengths + 1, pmf.size - 1)
+    low_moment = first_moment[threshold]
+    tail_mass = total_mass - cdf[threshold]
+    return 0.5 * (low_moment + lengths.astype(np.float64, copy=False) * tail_mass)
 
 
 def boundary_side_in_window(

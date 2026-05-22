@@ -1,62 +1,24 @@
-"""Per-locus and per-MultiLocus priors for the EM solver.
+"""rigel.calibration.locus_prior \u2014 fail-fast stubs (fractional cutover).
 
-This module is the assembly point of the v6 calibration prior pipeline.
-It consumes:
+The integer 8-mask per-locus prior assembler is removed during the
+fractional cutover. Dataclasses (``LocusGdnaEstimate``,
+``MultiLocusPrior``, ``PriorTable``, ``ExpectedGdnaPriorParts``,
+``ExonGdnaDiagnostics``) and their fallback bitflags are preserved so
+result-serialization code and tests compile. Entry-point functions
+raise :class:`FractionalCutoverPending`.
 
-* :class:`GlobalDensityTable` from :mod:`rigel.calibration.density_global`
-  (M4),
-* :class:`CalibrationScanPayload` from :mod:`rigel.calibration.scan_payload`
-  (M3),
-* the :class:`MultiLocus` / :class:`Locus` graph from :mod:`rigel.locus`
-  (M5),
-
-and produces:
-
-* :class:`LocusGdnaEstimate` — per-``Locus`` gDNA mass estimate.
-* :class:`MultiLocusPrior` — aggregation across the constituent ``Locus``
-  intervals of a ``MultiLocus``.
-* :class:`PriorTable` — the full table consumed by the batch EM
-    (``gdna_prior_count``, ``enable_gdna``, and ``gdna_eff_len``).
+``PriorTable.empty()`` is retained because the orchestrator uses it as
+the lazy-backfill seed in :class:`CalibrationResult`.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..frag_length_model import FragmentLengthModel
-from ..locus import Locus, MultiLocus
-from ..scored_fragments import ScoredFragments
-from ._arrays import PayloadArrays, RegionArrays
-from ._exposure import (
-    boundary_crossing_exposure,
-    boundary_side_in_window,
-    contained_exposure_clipped,
-    footprint_exposure_weight,
-    gdna_eff_len_for_loci,
-)
-from ._locus_n_obs import build_t_to_local_locus, partition_units_to_loci
-from ._region_index_py import RegionIndexPy
-from ._regional_exposure import RegionalGdnaExposure
-from ._orient import ORIENT_OPP, ORIENT_SAME, StrandSummary
-from .density_global import (
-    GlobalDensityTable,
-    _gdna_count_moment,
-    _strand_identifiable_rows,
-    kappa_opportunity_bp,
-    precision_opportunity,
-    strand_reliability_power,
-    strand_correction_usable,
-)
-from .density_loco import shrink_to_loco
-from .regions import RegionType
-from .scan_payload import CalibrationScanPayload
-
-if TYPE_CHECKING:
-    from ..index import TranscriptIndex
+from .errors import FractionalCutoverPending
 
 
 __all__ = [
@@ -82,13 +44,8 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-#: Phase 4 default: bp added to both sides of the intergenic-density
-#: query window. Mass terms still use the unflanked locus interval; the
-#: flank only widens the *evidence* window for the intergenic branch.
-#: Phase 4 ships this at 5_000 (Phase 3 shipped 0).
 INTERGENIC_FLANK_BP_DEFAULT = 5_000
 
-#: Bitmask flags recorded on :class:`LocusGdnaEstimate.fallback_flags`.
 FLAG_INTERGENIC_ZERO_LEFF = 1 << 0
 FLAG_INTRON_ZERO_LEFF = 1 << 1
 FLAG_EXON_INTRON_NO_ELIGIBLE = 1 << 2
@@ -115,51 +72,30 @@ class ExonGdnaDiagnostics:
 
 @dataclass(frozen=True, slots=True)
 class LocusGdnaEstimate:
-    """Per-``Locus`` gDNA mass estimate.
+    """Per-``Locus`` gDNA mass estimate (shape preserved across cutover)."""
 
-    The ``n_gdna_*`` mass fields exactly partition ``n_gdna``:
-
-    * ``n_gdna_intergenic`` — local intergenic density × core-locus
-      intergenic exposure (typically 0 for transcript-defined loci).
-    * ``n_gdna_intron`` — local intron density × core-locus intron exposure.
-    * ``n_gdna_boundary_observed`` — *observed* boundary-crossing fragment
-      count restricted to eligible sides inside the locus.
-    * ``n_gdna_exon_only`` — local boundary density × core-locus
-      exon-contained exposure, the imputed exon-contained gDNA mass that
-      does not enter the C++ scanner's boundary-flux numerator.
-
-    All four describe the same EM-unit population as ``n_obs``, so
-    ``pi_gdna = n_gdna / n_obs`` is arithmetically consistent with the
-    fragments that downstream EM will route.
-    """
-
-    locus: Locus
+    # ``locus`` is typed as object to avoid a load-time import of
+    # ``rigel.locus`` from the calibration package.
+    locus: object
     n_obs: int
     n_gdna_intergenic: float
     n_gdna_intron: float
     n_gdna_boundary_observed: float
     n_gdna_exon_only: float
     n_gdna: float
-    pi_gdna: float  # clipped to [0, 1]
-    rho_loco: tuple[float, float, float]  # (intergenic, intron, boundary)
-    leff_loco: tuple[float, float, float]  # (L_core_ig, L_core_in, L_core_exon)
-    n_eligible_boundaries: int  # eligible sides inside locus
-    n_boundary_events: float  # raw observed boundary count in locus
-    nrna_active: bool  # set in Phase 6; False here
-    fallback_flags: int  # bitmask of FLAG_*
+    pi_gdna: float
+    rho_loco: tuple[float, float, float]
+    leff_loco: tuple[float, float, float]
+    n_eligible_boundaries: int
+    n_boundary_events: float
+    nrna_active: bool
+    fallback_flags: int
     exon_gdna: ExonGdnaDiagnostics = dataclasses.field(default_factory=ExonGdnaDiagnostics)
 
 
 @dataclass(frozen=True, slots=True)
 class MultiLocusPrior:
-    """Per-``MultiLocus`` prior (aggregated across its ``Locus`` intervals).
-
-    * ``gdna_prior_count`` (= :math:`\\eta_g`) is the canonical
-            asymmetric pseudocount the EM consumes.
-    * ``n_obs``/``n_gdna``/``n_rna``/``pi_gdna`` remain as diagnostic
-      summaries of the locoregional pipeline; they do not affect the EM
-            prior.
-    """
+    """Per-``MultiLocus`` prior aggregation."""
 
     multi_locus_id: int
     n_obs: int
@@ -172,42 +108,22 @@ class MultiLocusPrior:
 
 @dataclass(frozen=True, slots=True)
 class PriorTable:
-    """The full prior table consumed by the batch EM.
-
-    ``gdna_prior_count[i]`` corresponds to
-    ``multi_locus_priors[i].multi_locus_id == i`` (priors are stored
-    in the same order as the input ``multi_loci`` list, indexed by
-    ``multi_locus_id``).
-    """
+    """The full prior table consumed by the batch EM."""
 
     multi_locus_priors: tuple[MultiLocusPrior, ...]
-    gdna_prior_count: np.ndarray  # float64, (n_loci,), raw diagnostic eta_g
-    gdna_prior_count_em: np.ndarray  # float64, (n_loci,), eta_g passed to EM
-    gdna_eff_len: np.ndarray  # float64, (n_loci,), EM denominator
-    #: ``uint8`` flag forwarded to the native EM as ``locus_enable_gdna``.
-    enable_gdna: np.ndarray  # uint8, (n_loci,)
-    #: Diagnostic: FL-PMF-weighted contained exposure with *no* regional
-    #: weighting (the v6 baseline). Bit-exact equal to ``gdna_eff_len``
-    #: when ``regional_exposure`` is uniform.
+    gdna_prior_count: np.ndarray
+    gdna_prior_count_em: np.ndarray
+    gdna_eff_len: np.ndarray
+    enable_gdna: np.ndarray
     gdna_eff_len_unweighted: np.ndarray = dataclasses.field(
         default_factory=lambda: np.empty(0, dtype=np.float64)
     )
-    #: Diagnostic: footprint exposure multiplier used to convert raw gDNA
-    #: opportunity into the EM denominator.
     gdna_em_exposure_weight: np.ndarray = dataclasses.field(
         default_factory=lambda: np.empty(0, dtype=np.float64)
     )
 
     @classmethod
     def empty(cls) -> "PriorTable":
-        """Return a degenerate prior table with no loci.
-
-        Used as the lazy-backfill seed in the calibration orchestrator:
-        :func:`rigel.calibration.calibrate` returns a
-        :class:`CalibrationResult` with this empty table, and
-        :meth:`CalibrationResult.with_priors` swaps in the real table
-        once the locus graph has been built.
-        """
         return cls(
             multi_locus_priors=(),
             gdna_prior_count=np.empty(0, dtype=np.float64),
@@ -219,964 +135,57 @@ class PriorTable:
         )
 
 
-# ---------------------------------------------------------------------------
-# Per-Locus core
-# ---------------------------------------------------------------------------
-
-
-def _density_term_prorated(
-    *,
-    type_in_locus: np.ndarray,  # (R',) bool: regions in locus of this type
-    region_ids_locus: np.ndarray,  # (R',) sorted-position region IDs in locus
-    full_count_col: np.ndarray,  # (R,) per-region count (whole-region, payload)
-    eff_full: np.ndarray,  # (R',) full-region FL-weighted exposure
-    eff_clip_evidence: np.ndarray,  # (R',) evidence-window clipped exposure
-    eff_clip_core: np.ndarray,  # (R',) core-locus clipped exposure
-    rho_global: float,
-    kappa: float,
-) -> tuple[float, float, float, float, float]:
-    """Prorated INTERGENIC / INTRON locus contribution.
-
-    Returns ``(rho_loco, l_core, l_evidence, n_evidence, n_mass)`` where:
-
-    * ``n_evidence`` and ``l_evidence`` parameterise the locoregional
-      shrinkage — both use the (possibly flank-padded) evidence window.
-    * ``n_mass = rho_loco * l_core`` is the predicted mass that lives
-      *inside* the EM-unit window (``[locus.start, locus.end]``), keeping
-      ``π_gdna`` arithmetic consistent with ``n_obs``.
-
-    Per-region count proration: the C++ scanner emits one whole-region
-    contained count per region; multiplying by
-    ``ratio_r = eff_clip_r / eff_full_r`` gives the FL-aware fraction of
-    that count attributable to the clipped window without double-counting
-    fragments whose start position lies outside the window.
-    """
-    if not type_in_locus.any():
-        return rho_global, 0.0, 0.0, 0.0, 0.0
-    rids = region_ids_locus[type_in_locus]
-    full_counts = full_count_col[rids].astype(np.float64)
-    eff_full_t = eff_full[type_in_locus]
-    eff_evidence_t = eff_clip_evidence[type_in_locus]
-    eff_core_t = eff_clip_core[type_in_locus]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ratio_evidence = np.where(eff_full_t > 0.0, eff_evidence_t / eff_full_t, 0.0)
-    n_evidence = float((full_counts * ratio_evidence).sum())
-    l_evidence = float(eff_evidence_t.sum())
-    l_core = float(eff_core_t.sum())
-    rho_loco = shrink_to_loco(n_evidence, l_evidence, rho_global, kappa)
-    n_mass = rho_loco * l_core
-    return rho_loco, l_core, l_evidence, n_evidence, n_mass
-
-
-def _boundary_term_prorated(
-    *,
-    exon_in_locus: np.ndarray,  # (R',) bool: type == EXON for in-locus regions
-    region_ids_locus: np.ndarray,  # (R',) sorted-position region IDs in locus
-    starts_locus: np.ndarray,  # (R',) region starts (sorted-position)
-    ends_locus: np.ndarray,  # (R',) region ends
-    bf_left_locus: np.ndarray,  # (R',) eligibility flag (any region type)
-    bf_right_locus: np.ndarray,  # (R',) eligibility flag
-    u_left: np.ndarray,  # (R,) per-region left-edge flux (payload)
-    u_right: np.ndarray,  # (R,) per-region right-edge flux
-    eff_clip_core: np.ndarray,  # (R',) core-locus clipped exposure
-    locus_start: int,
-    locus_end: int,
-    b_cross: float,
-    rho_global: float,
-    kappa: float,
-) -> tuple[float, int, float, float, float]:
-    """Boundary branch (Issues 1+2+3).
-
-    Eligible boundary sides are those that (a) are flagged
-    ``boundary_flux_*`` on an EXON region (capture-tile eligibility from
-    the index) and (b) lie inside the locus interval. The boundary
-    density is
-
-        rho_boundary = N_crossing_in_locus
-                       / (n_eligible_sides_in_locus * B_cross)
-
-    Returns ``(rho_loco, n_eligible_in_locus, n_boundary_observed,
-    l_core_exon_contained, n_exon_only_mass)``. The two predicted-mass
-    fields are kept disjoint: ``n_boundary_observed`` is a raw fragment
-    count and ``n_exon_only_mass = rho * l_core_exon`` predicts the
-    *contained* exonic gDNA mass that the boundary-flux numerator does
-    not see.
-    """
-    if not exon_in_locus.any():
-        return rho_global, 0, 0.0, 0.0, 0.0
-
-    rids_exon = region_ids_locus[exon_in_locus]
-    starts_exon = starts_locus[exon_in_locus]
-    ends_exon = ends_locus[exon_in_locus]
-    bf_l_exon = bf_left_locus[exon_in_locus]
-    bf_r_exon = bf_right_locus[exon_in_locus]
-
-    # Restrict to boundary sides that are eligible *and* inside the locus.
-    in_left, in_right = boundary_side_in_window(starts_exon, ends_exon, locus_start, locus_end)
-    elig_left = bf_l_exon & in_left
-    elig_right = bf_r_exon & in_right
-
-    n_eligible = int(elig_left.sum() + elig_right.sum())
-    l_core_exon = float(eff_clip_core[exon_in_locus].sum())
-
-    if n_eligible == 0:
-        # No local boundary evidence: shrink to global density and
-        # impute exon-contained mass from it.
-        n_exon_only = rho_global * l_core_exon
-        return rho_global, 0, 0.0, l_core_exon, n_exon_only
-
-    n_boundary_observed = float(
-        (u_left[rids_exon] * elig_left.astype(np.int64)).sum()
-        + (u_right[rids_exon] * elig_right.astype(np.int64)).sum()
-    )
-    denom = float(n_eligible) * b_cross
-    rho_loco = shrink_to_loco(n_boundary_observed, denom, rho_global, kappa)
-    n_exon_only = rho_loco * l_core_exon
-    return rho_loco, n_eligible, n_boundary_observed, l_core_exon, n_exon_only
-
-
-def _shrink_to_loco_signed(
-    n_loco: float,
-    leff_loco: float,
-    rho_global: float,
-    kappa: float,
-) -> float:
-    if not (leff_loco >= 0.0 and rho_global >= 0.0 and kappa >= 0.0):
-        raise ValueError(
-            f"_shrink_to_loco_signed: non-count inputs must be finite and non-negative; "
-            f"leff_loco={leff_loco!r}, rho_global={rho_global!r}, kappa={kappa!r}."
-        )
-    denom = leff_loco + kappa
-    if denom <= 0.0:
-        return rho_global
-    return (n_loco + kappa * rho_global) / denom
-
-
-def _exon_contained_term_prorated(
-    *,
-    exon_in_locus: np.ndarray,
-    region_ids_locus: np.ndarray,
-    strands_locus: np.ndarray,
-    counts_by_orient: np.ndarray,
-    eff_full: np.ndarray,
-    eff_clip_core: np.ndarray,
-    strand_summary: StrandSummary | None,
-    rho_global: float,
-    kappa: float,
-) -> tuple[float, float, float, float, float, bool]:
-    """Strand-deconvolved EXON-contained locoregional contribution."""
-    if not exon_in_locus.any():
-        return rho_global, 0.0, 0.0, 0.0, 0.0, False
-
-    l_core_exon = float(eff_clip_core[exon_in_locus].sum())
-    if strand_summary is None or not strand_correction_usable(strand_summary):
-        return rho_global, l_core_exon, 0.0, 0.0, rho_global * l_core_exon, False
-
-    identifiable = _strand_identifiable_rows(strands_locus)
-    active = exon_in_locus & identifiable & (eff_clip_core > 0.0)
-    if not active.any():
-        return rho_global, l_core_exon, 0.0, 0.0, rho_global * l_core_exon, False
-
-    rids = region_ids_locus[active]
-    same = counts_by_orient[rids, ORIENT_SAME]
-    opp = counts_by_orient[rids, ORIENT_OPP]
-    corrected = _gdna_count_moment(
-        same,
-        opp,
-        signed_strand_contrast=float(strand_summary.signed_strand_contrast),
-    )
-    eff_full_t = eff_full[active]
-    eff_core_t = eff_clip_core[active]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ratio_core = np.where(eff_full_t > 0.0, eff_core_t / eff_full_t, 0.0)
-    n_evidence = float((corrected * ratio_core).sum())
-    l_evidence = float(eff_core_t.sum())
-    rho_signed = _shrink_to_loco_signed(n_evidence, l_evidence, rho_global, kappa)
-    rho_loco = max(float(rho_signed), 0.0)
-    n_mass = rho_loco * l_core_exon
-    return rho_loco, l_core_exon, l_evidence, n_evidence, n_mass, True
-
-
-@dataclass(frozen=True, slots=True)
-class _LocusScratch:
-    """Per-Locus shared work between :func:`estimate_locus_gdna` and
-    :func:`expected_gdna_count_global`.
-
-    Computed once by :func:`_compute_locus_scratch` and threaded into
-    both helpers so the per-Locus ``region_index.overlap`` query and
-    FL-aware ``contained_exposure_clipped`` evaluations are not
-    duplicated.  Internal optimisation used by :func:`assemble_priors`;
-    the public helpers retain their original signatures and recompute
-    the scratch on demand when ``_scratch`` is ``None``.
-    """
-
-    pad_lo: int
-    pad_hi: int
-    region_ids: np.ndarray
-    types: np.ndarray
-    strands: np.ndarray
-    starts: np.ndarray
-    ends: np.ndarray
-    bf_l: np.ndarray
-    bf_r: np.ndarray
-    eff_full: np.ndarray
-    eff_clip_core: np.ndarray
-    eff_clip_evidence: np.ndarray
-    is_ig: np.ndarray
-    is_in: np.ndarray
-    is_ex: np.ndarray
-
-
-def _compute_locus_scratch(
-    locus: Locus,
-    region_index: RegionIndexPy,
-    region_arrays: RegionArrays,
-    gdna_fl: FragmentLengthModel,
-    *,
-    intergenic_flank_bp: int,
-    ref_length: int | None,
-) -> _LocusScratch | None:
-    """Build a :class:`_LocusScratch` for this locus.
-
-    Returns ``None`` when the (padded) region overlap is empty so the
-    caller can preserve the legacy "no overlap" behaviour
-    (``estimate_locus_gdna`` raises; ``expected_gdna_count_global``
-    returns a zeroed :class:`ExpectedGdnaPriorParts`).
-    """
-    locus_start = int(locus.start)
-    locus_end = int(locus.end)
-    pad = max(0, int(intergenic_flank_bp))
-    pad_lo = max(0, locus_start - pad)
-    pad_hi = locus_end + pad if ref_length is None else min(int(ref_length), locus_end + pad)
-
-    region_ids = region_index.overlap(locus.ref_id, pad_lo, pad_hi)
-    if region_ids.size == 0:
-        return None
-
-    types = region_arrays.type[region_ids]
-    strands = region_arrays.strand[region_ids]
-    starts = region_arrays.start[region_ids]
-    ends = region_arrays.end[region_ids]
-    bf_l = region_arrays.bf_left[region_ids]
-    bf_r = region_arrays.bf_right[region_ids]
-
-    eff_full, eff_clip_core = contained_exposure_clipped(
-        starts, ends, locus_start, locus_end, gdna_fl
-    )
-    if pad == 0:
-        eff_clip_evidence = eff_clip_core
-    else:
-        _, eff_clip_evidence = contained_exposure_clipped(starts, ends, pad_lo, pad_hi, gdna_fl)
-
-    is_ig = types == int(RegionType.INTERGENIC)
-    is_in = types == int(RegionType.INTRON)
-    is_ex = types == int(RegionType.EXON)
-
-    return _LocusScratch(
-        pad_lo=pad_lo,
-        pad_hi=pad_hi,
-        region_ids=region_ids,
-        types=types,
-        strands=strands,
-        starts=starts,
-        ends=ends,
-        bf_l=bf_l,
-        bf_r=bf_r,
-        eff_full=eff_full,
-        eff_clip_core=eff_clip_core,
-        eff_clip_evidence=eff_clip_evidence,
-        is_ig=is_ig,
-        is_in=is_in,
-        is_ex=is_ex,
-    )
-
-
-def estimate_locus_gdna(
-    locus: Locus,
-    n_obs: int,
-    region_index: RegionIndexPy,
-    region_arrays: RegionArrays,
-    payload_arrays: PayloadArrays,
-    global_densities: GlobalDensityTable,
-    gdna_fl: FragmentLengthModel,
-    *,
-    intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
-    ref_length: int | None = None,
-    splicing_anchor_tolerance: int = 0,
-    b_cross: float | None = None,
-    strand_summary: StrandSummary | None = None,
-    _scratch: _LocusScratch | None = None,
-) -> LocusGdnaEstimate:
-    """Estimate the gDNA mass and π̂_gdna for one ``Locus``.
-
-    Implements §3.5 of
-    ``docs/calibration/locoregional_gdna_redesign_2026-05-07.md``:
-
-    1. Single padded query against ``region_index``.
-    2. Two FL-aware exposure vectors per region: core (mass) and
-       evidence (intergenic flank).
-    3. Four-term decomposition (intergenic, intron,
-       boundary-observed, exon-only-imputed) that exactly sums to
-       ``n_gdna``.
-
-    Parameters
-    ----------
-    intergenic_flank_bp : int
-        Phase 4 padding added on both sides of the locus for the
-        *intergenic* density's evidence window. Mass terms always use
-        the unflanked locus interval. Defaults to 0 (no flank); raise
-        in Phase 4.
-    ref_length : int, optional
-        Reference contig length used to clamp the padded window. When
-        ``None`` (or when ``intergenic_flank_bp == 0``) no clamp is
-        applied beyond the natural ``max(0, ...)`` lower bound.
-    """
-    locus_start = int(locus.start)
-    locus_end = int(locus.end)
-
-    # 1. Padded region query (§3.5 step 1). Mass terms always use the
-    #    unflanked window; the pad widens only the *intergenic* evidence
-    #    branch via ratio_evidence below.
-    if _scratch is None:
-        _scratch = _compute_locus_scratch(
-            locus,
-            region_index,
-            region_arrays,
-            gdna_fl,
-            intergenic_flank_bp=intergenic_flank_bp,
-            ref_length=ref_length,
-        )
-        if _scratch is None:
-            raise RuntimeError(
-                f"estimate_locus_gdna: Locus(ref={locus.ref!r}, start={locus_start}, "
-                f"end={locus_end}) overlaps no regions. BAM reference does not "
-                f"match index — rebuild the index or check the BAM header."
-            )
-
-    region_ids = _scratch.region_ids
-    strands = _scratch.strands
-    starts = _scratch.starts
-    ends = _scratch.ends
-    bf_l = _scratch.bf_l
-    bf_r = _scratch.bf_r
-    eff_full = _scratch.eff_full
-    eff_clip_core = _scratch.eff_clip_core
-    eff_clip_evidence = _scratch.eff_clip_evidence
-    is_ig = _scratch.is_ig
-    is_in = _scratch.is_in
-    is_ex = _scratch.is_ex
-
-    fallback_flags = 0
-
-    # 3. INTERGENIC (§3.5 step 3).
-    rho_ig, l_core_ig, _, n_ev_ig, n_mass_ig = _density_term_prorated(
-        type_in_locus=is_ig,
-        region_ids_locus=region_ids,
-        full_count_col=payload_arrays.intergenic_per_region,
-        eff_full=eff_full,
-        eff_clip_evidence=eff_clip_evidence,
-        eff_clip_core=eff_clip_core,
-        rho_global=global_densities.intergenic.rho,
-        kappa=global_densities.intergenic.kappa.value,
-    )
-    if l_core_ig <= 0.0:
-        fallback_flags |= FLAG_INTERGENIC_ZERO_LEFF
-
-    # 4. INTRON (§3.5 step 4); evidence == core (no flank for intron).
-    rho_in, l_core_in, _, n_ev_in, n_mass_in = _density_term_prorated(
-        type_in_locus=is_in,
-        region_ids_locus=region_ids,
-        full_count_col=payload_arrays.intron_per_region,
-        eff_full=eff_full,
-        eff_clip_evidence=eff_clip_core,  # no flank for intron
-        eff_clip_core=eff_clip_core,
-        rho_global=global_densities.intron.rho,
-        kappa=global_densities.intron.kappa.value,
-    )
-    if l_core_in <= 0.0:
-        fallback_flags |= FLAG_INTRON_ZERO_LEFF
-
-    # 5. BOUNDARY (§3.5 step 5).
-    if b_cross is None:
-        b_cross = boundary_crossing_exposure(
-            gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
-        )
-    rho_b, n_eligible, n_b_observed, l_core_exon, _ = _boundary_term_prorated(
-        exon_in_locus=is_ex,
-        region_ids_locus=region_ids,
-        starts_locus=starts,
-        ends_locus=ends,
-        bf_left_locus=bf_l,
-        bf_right_locus=bf_r,
-        u_left=payload_arrays.u_left,
-        u_right=payload_arrays.u_right,
-        eff_clip_core=eff_clip_core,
-        locus_start=locus_start,
-        locus_end=locus_end,
-        b_cross=b_cross,
-        rho_global=global_densities.exon_intron.rho,
-        kappa=global_densities.exon_intron.kappa.value,
-    )
-    if n_eligible == 0:
-        fallback_flags |= FLAG_EXON_INTRON_NO_ELIGIBLE
-
-    exon_contained_density = global_densities.exon_contained
-    exon_composite = global_densities.exon_composite
-    assert exon_contained_density is not None and exon_composite is not None
-    (
-        rho_c,
-        _,
-        l_contained_evidence,
-        n_contained_evidence,
-        n_contained_estimated,
-        contained_active,
-    ) = _exon_contained_term_prorated(
-        exon_in_locus=is_ex,
-        region_ids_locus=region_ids,
-        strands_locus=strands,
-        counts_by_orient=payload_arrays.exon_contained_by_orient,
-        eff_full=eff_full,
-        eff_clip_core=eff_clip_core,
-        strand_summary=strand_summary,
-        rho_global=exon_contained_density.rho,
-        kappa=exon_contained_density.kappa.value,
-    )
-
-    boundary_opportunity = float(n_eligible) * float(b_cross)
-    beta_boundary = kappa_opportunity_bp(
-        global_densities.exon_intron.kappa,
-        global_densities.exon_intron.rho,
-    )
-    beta_contained = kappa_opportunity_bp(
-        exon_contained_density.kappa,
-        exon_contained_density.rho,
-    )
-    strand_power = (
-        strand_reliability_power(strand_summary) if strand_summary is not None else 0.0
-    )
-    w_b = float(precision_opportunity(boundary_opportunity, beta_boundary))
-    w_c = 0.0
-    if contained_active:
-        w_c = float(strand_power) * float(
-            precision_opportunity(l_contained_evidence, beta_contained)
-        )
-    if w_c == 0.0 and boundary_opportunity > 0.0:
-        rho_exon = float(rho_b)
-    elif w_b == 0.0 and contained_active:
-        rho_exon = float(rho_c)
-    elif (w_b + w_c) > 0.0:
-        rho_exon = (w_b * float(rho_b) + w_c * float(rho_c)) / (w_b + w_c)
-    else:
-        rho_exon = float(exon_composite.rho)
-
-    n_exon_only = float(rho_exon) * float(l_core_exon)
-    exon_gdna = ExonGdnaDiagnostics(
-        rho_exon_boundary=float(rho_b),
-        rho_exon_contained=float(rho_c),
-        rho_exon_composite=float(rho_exon),
-        exon_boundary_precision=float(w_b),
-        exon_contained_precision=float(w_c),
-        n_exon_contained_observed=float(n_contained_evidence),
-        n_exon_contained_estimated=float(n_contained_estimated),
-    )
-
-    # 6. Total + decomposition invariant.
-    n_gdna_total = n_mass_ig + n_mass_in + n_b_observed + n_exon_only
-
-    # 7. π̂ with zero-n_obs safeguard (§3.5 step 7).
-    if n_obs <= 0:
-        pi_gdna = 0.0
-    else:
-        pi_unclipped = n_gdna_total / n_obs
-        if pi_unclipped > 1.0:
-            fallback_flags |= FLAG_PI_CLIPPED
-        pi_gdna = float(min(1.0, max(0.0, pi_unclipped)))
-
-    return LocusGdnaEstimate(
-        locus=locus,
-        n_obs=int(n_obs),
-        n_gdna_intergenic=float(n_mass_ig),
-        n_gdna_intron=float(n_mass_in),
-        n_gdna_boundary_observed=float(n_b_observed),
-        n_gdna_exon_only=float(n_exon_only),
-        n_gdna=float(n_gdna_total),
-        pi_gdna=pi_gdna,
-        rho_loco=(float(rho_ig), float(rho_in), float(rho_exon)),
-        leff_loco=(float(l_core_ig), float(l_core_in), float(l_core_exon)),
-        n_eligible_boundaries=int(n_eligible),
-        n_boundary_events=float(n_b_observed),
-        nrna_active=False,
-        fallback_flags=int(fallback_flags),
-        exon_gdna=exon_gdna,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Bayesian-prior redesign Phase 2: global-only η_g(ℓ) helper
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class ExpectedGdnaPriorParts:
-    """Decomposition of the global-only expected gDNA pseudocount η_g(ℓ).
-
-    Implements §2 of ``docs/bayesian_prior/bayesian_prior_plan_v3.md``:
-
-    .. math::
-
-        \\eta_g(\\ell) = \\rho^{ig} L^{ig}_\\ell
-                       + \\rho^{in} L^{in}_\\ell
-                       + \\rho^{b} ( s_\\ell B_{\\text{cross}} + L^{ex}_\\ell ).
-
-    All four mass terms are *expected* counts under the relevant global
-    density. None of them depend on locus-local fragment observations,
-    making the resulting ``total`` a function of ``C_ℓ`` only.
-    """
+    """Decomposition of the global-only expected gDNA pseudocount."""
 
     total: float
     intergenic_contained: float
     intron_contained: float
     boundary_crossing_expected: float
     exon_contained_expected: float
-    #: Density-estimation exposures consumed by the LOO trigger denominator.
     density_exposure_intergenic: float
     density_exposure_intron: float
     density_exposure_boundary: float
 
 
-def expected_gdna_count_global(
-    locus: Locus,
-    region_index: RegionIndexPy,
-    region_arrays: RegionArrays,
-    global_densities: GlobalDensityTable,
-    gdna_fl: FragmentLengthModel,
-    *,
-    ref_length: int | None = None,  # noqa: ARG001 (reserved; global-only path is unflanked)
-    splicing_anchor_tolerance: int = 0,
-    b_cross: float | None = None,
-    _scratch: _LocusScratch | None = None,
-) -> ExpectedGdnaPriorParts:
-    """Pure global-only expected gDNA pseudocount for one ``Locus``.
-
-    The function projects the *global* gDNA densities onto the locus's
-    own FL-aware exposure. It is the v3 plan §2 prior formula and has
-    **no dependency on per-locus fragment observations** (no
-    ``payload_arrays`` argument). This is enforced at the type level so
-    that local counts cannot leak into the ordinary global-only prior.
-
-    Returns
-    -------
-    ExpectedGdnaPriorParts
-        ``total`` is the canonical η_g(ℓ); the four mass-component
-        fields and three density-exposure fields are exposed for
-        diagnostics and the leave-one-locus-out wrapper.
-    """
-    if not (gdna_fl.mean > 0.0):
-        raise ValueError(
-            f"expected_gdna_count_global: gdna_fl.mean must be > 0; got {gdna_fl.mean!r}."
-        )
-
-    locus_start = int(locus.start)
-    locus_end = int(locus.end)
-
-    if _scratch is not None:
-        # Reuse caller's scratch.  The flanked overlap is a superset of
-        # the unflanked overlap; mass terms use ``eff_clip_core`` which
-        # already clips to ``[locus_start, locus_end]`` and is therefore
-        # 0 for any region that does not overlap the unflanked locus.
-        # ``boundary_side_in_window`` likewise tests ``[locus_start,
-        # locus_end]`` and naturally rejects flanked-only regions.
-        starts = _scratch.starts
-        ends = _scratch.ends
-        bf_l = _scratch.bf_l
-        bf_r = _scratch.bf_r
-        eff_clip_core = _scratch.eff_clip_core
-        is_ig = _scratch.is_ig
-        is_in = _scratch.is_in
-        is_ex = _scratch.is_ex
-    else:
-        region_ids = region_index.overlap(locus.ref_id, locus_start, locus_end)
-        if region_ids.size == 0:
-            # No overlapping regions ⇒ no exposure ⇒ η_g = 0. The caller
-            # decides whether this is anomalous (it usually means a BAM
-            # ref/index mismatch, which ``estimate_locus_gdna`` flags
-            # loudly).
-            return ExpectedGdnaPriorParts(
-                total=0.0,
-                intergenic_contained=0.0,
-                intron_contained=0.0,
-                boundary_crossing_expected=0.0,
-                exon_contained_expected=0.0,
-                density_exposure_intergenic=0.0,
-                density_exposure_intron=0.0,
-                density_exposure_boundary=0.0,
-            )
-
-        types = region_arrays.type[region_ids]
-        starts = region_arrays.start[region_ids]
-        ends = region_arrays.end[region_ids]
-        bf_l = region_arrays.bf_left[region_ids]
-        bf_r = region_arrays.bf_right[region_ids]
-
-        # FL-PMF-weighted contained exposure: full + clipped to the locus.
-        # The pure global-only path uses no flank — mass terms always live
-        # inside the unflanked locus interval.
-        _, eff_clip_core = contained_exposure_clipped(starts, ends, locus_start, locus_end, gdna_fl)
-
-        is_ig = types == int(RegionType.INTERGENIC)
-        is_in = types == int(RegionType.INTRON)
-        is_ex = types == int(RegionType.EXON)
-
-    l_core_ig = float(eff_clip_core[is_ig].sum()) if is_ig.any() else 0.0
-    l_core_in = float(eff_clip_core[is_in].sum()) if is_in.any() else 0.0
-    l_core_ex = float(eff_clip_core[is_ex].sum()) if is_ex.any() else 0.0
-
-    # Boundary expected count: ρ_b · (s_ℓ · B_cross + L^ex_ℓ).
-    # s_ℓ counts eligible boundary sides whose crossing point lies
-    # inside the locus interval. Eligibility flags come from the
-    # capture-tile annotation in the index (``bf_left``/``bf_right``).
-    if is_ex.any():
-        starts_ex = starts[is_ex]
-        ends_ex = ends[is_ex]
-        bf_l_ex = bf_l[is_ex]
-        bf_r_ex = bf_r[is_ex]
-        in_left, in_right = boundary_side_in_window(starts_ex, ends_ex, locus_start, locus_end)
-        s_ell = int((bf_l_ex & in_left).sum() + (bf_r_ex & in_right).sum())
-    else:
-        s_ell = 0
-
-    b_cross = (
-        boundary_crossing_exposure(gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance)
-        if b_cross is None
-        else float(b_cross)
-    )
-
-    rho_ig = float(global_densities.intergenic.rho)
-    rho_in = float(global_densities.intron.rho)
-    rho_b = float(global_densities.exon_intron.rho)
-    exon_composite = global_densities.exon_composite
-    assert exon_composite is not None
-    rho_exon_contained = float(exon_composite.rho)
-
-    intergenic_contained = rho_ig * l_core_ig
-    intron_contained = rho_in * l_core_in
-    boundary_crossing_expected = rho_b * float(s_ell) * b_cross
-    exon_contained_expected = rho_exon_contained * l_core_ex
-
-    total = (
-        intergenic_contained
-        + intron_contained
-        + boundary_crossing_expected
-        + exon_contained_expected
-    )
-
-    return ExpectedGdnaPriorParts(
-        total=float(total),
-        intergenic_contained=float(intergenic_contained),
-        intron_contained=float(intron_contained),
-        boundary_crossing_expected=float(boundary_crossing_expected),
-        exon_contained_expected=float(exon_contained_expected),
-        density_exposure_intergenic=float(l_core_ig),
-        density_exposure_intron=float(l_core_in),
-        density_exposure_boundary=float(s_ell) * b_cross,
-    )
-
-
-def _expected_gdna_count_regional_diag(
-    locus: Locus,
-    scratch: _LocusScratch | None,
-    regional_exposure: RegionalGdnaExposure,
-    b_cross: float,
-) -> float:
-    """Diagnostic expected gDNA count under the per-region rho_hat field.
-
-    Mirrors :func:`expected_gdna_count_global` but replaces the three
-    global densities with the per-region ``rho_hat[r]`` field from the
-    regional exposure model. Used purely for ``loci.feather`` QC; never
-    fed back into the EM prior.
-    """
-    if scratch is None:
-        return 0.0
-    rho_hat = regional_exposure.rho_hat[scratch.region_ids]
-    contained = float(np.dot(rho_hat, scratch.eff_clip_core))
-
-    if scratch.is_ex.any():
-        ex_mask = scratch.is_ex
-        rho_ex = rho_hat[ex_mask]
-        bf_l_ex = scratch.bf_l[ex_mask]
-        bf_r_ex = scratch.bf_r[ex_mask]
-        starts_ex = scratch.starts[ex_mask]
-        ends_ex = scratch.ends[ex_mask]
-        in_left, in_right = boundary_side_in_window(
-            starts_ex, ends_ex, int(locus.start), int(locus.end)
-        )
-        sides = (bf_l_ex & in_left).astype(np.float64) + (bf_r_ex & in_right).astype(
-            np.float64
-        )
-        boundary = float(np.dot(sides, rho_ex)) * float(b_cross)
-    else:
-        boundary = 0.0
-
-    return contained + boundary
-
-
-def enable_gdna_for_multilocus(
-    ml: MultiLocus,
-    em_data: ScoredFragments,
-) -> bool:
-    """Decouples gDNA component eligibility from prior strength.
-
-    A multi-locus is gDNA-eligible iff at least one of its EM units is
-    *unspliced* and has a finite gDNA log-likelihood. This is the same
-    condition the C++ extractor previously inferred from
-    ``gdna_prior_count > 0``; under the Bayesian-prior redesign it must be
-    computed explicitly because ``gdna_prior_count`` is now a pure
-    pseudocount that may legitimately be zero.
-
-    Must be called **before** ``partition_and_free`` because it reads
-    the global per-unit ``is_spliced`` and ``gdna_log_liks`` arrays.
-    """
-    units = ml.unit_indices
-    if units.size == 0:
-        return False
-    spliced = np.asarray(em_data.is_spliced[units], dtype=bool)
-    return bool(np.any((~spliced) & np.isfinite(em_data.gdna_log_liks[units])))
-
-
 # ---------------------------------------------------------------------------
-# MultiLocus aggregation + orchestrator
+# Fail-fast entry points
 # ---------------------------------------------------------------------------
 
 
-def assemble_multilocus_prior(
-    ml: MultiLocus,
-    per_locus_estimates: tuple[LocusGdnaEstimate, ...],
-    *,
-    gdna_prior_count: float,
-) -> MultiLocusPrior:
-    """Aggregate per-``Locus`` estimates into one ``MultiLocusPrior``.
-
-    ``gdna_prior_count`` is the canonical asymmetric Dirichlet
-    pseudocount the EM consumes.
-    """
-    n_obs = sum(e.n_obs for e in per_locus_estimates)
-    n_gdna = sum(e.n_gdna for e in per_locus_estimates)
-    n_rna = max(0.0, n_obs - n_gdna)
-    pi_raw = (n_gdna / n_obs) if n_obs > 0 else 0.0
-    return MultiLocusPrior(
-        multi_locus_id=int(ml.multi_locus_id),
-        n_obs=int(n_obs),
-        n_gdna=float(n_gdna),
-        n_rna=float(n_rna),
-        pi_gdna=float(min(1.0, max(0.0, pi_raw))),
-        gdna_prior_count=float(gdna_prior_count),
-        per_locus=per_locus_estimates,
+def estimate_locus_gdna(*_args: object, **_kwargs: object) -> LocusGdnaEstimate:
+    raise FractionalCutoverPending(
+        "estimate_locus_gdna: per-locus gDNA estimation consumes the "
+        "integer 8-mask payload and is removed during the fractional cutover."
     )
 
 
-def assemble_priors(
-    multi_loci: list[MultiLocus],
-    em_data: ScoredFragments,
-    index: "TranscriptIndex",
-    payload: CalibrationScanPayload,
-    global_densities: GlobalDensityTable,
-    *,
-    gdna_fl: FragmentLengthModel | None = None,
-    intergenic_flank_bp: int = INTERGENIC_FLANK_BP_DEFAULT,
-    splicing_anchor_tolerance: int = 0,
-    regional_exposure: RegionalGdnaExposure | None = None,
-    strand_summary: StrandSummary | None = None,
-) -> PriorTable:
-    """Build the full :class:`PriorTable` for the batch EM.
-
-    Pure-Python pass; no I/O, no mutation of inputs.
-
-        Bayesian-prior redesign semantics:
-
-    * The canonical prior is the *global-only* expected gDNA pseudocount
-      :math:`\\eta_g(\\ell)` from
-            :func:`expected_gdna_count_global`, summed across the
-            multi-locus's constituent loci.
-    * gDNA component *eligibility* is a separate ``uint8`` flag,
-      :func:`enable_gdna_for_multilocus`, computed from per-unit
-      ``is_spliced`` and ``gdna_log_liks`` arrays before
-      ``partition_and_free`` consumes them. This decouples eligibility
-      from prior strength (Phase\u00a00 native ABI change).
-    * The legacy locoregional ``estimate_locus_gdna`` is still called
-      to populate the per-locus diagnostic dataframe (``pi_gdna``,
-      mass decomposition, fallback flags), but its output is **not**
-            consumed by the EM prior.
-
-    Parameters
-    ----------
-    gdna_fl : FragmentLengthModel, optional
-        gDNA fragment-length distribution used for the FL-PMF-weighted
-        containment effective length. Defaults to
-        ``global_densities.gdna_fl``.
-    intergenic_flank_bp : int
-        Padding (bp) added on both sides of each locus when querying
-        regions for the *intergenic* density's evidence window in the
-        diagnostic ``estimate_locus_gdna`` pass. The production EM prior
-        itself is unflanked and global-density based.
-    """
-    if gdna_fl is None:
-        gdna_fl = global_densities.gdna_fl
-    if not (gdna_fl.mean > 0.0):
-        raise ValueError(f"assemble_priors: gdna_fl.mean must be > 0; got {gdna_fl.mean!r}.")
-
-    region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
-    payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
-    region_index = RegionIndexPy(arrays=region_arrays)
-
-    if regional_exposure is None:
-        regional_exposure = RegionalGdnaExposure.uniform(region_arrays)
-
-    # Hoist boundary-crossing exposure out of the per-locus loop:
-    # depends only on (gdna_fl, splicing_anchor_tolerance), both
-    # constant across the multi-loci. Eliminates ~one O(max_size)
-    # numpy reduction per Locus.
-    b_cross = boundary_crossing_exposure(
-        gdna_fl, splicing_anchor_tolerance=splicing_anchor_tolerance
+def expected_gdna_count_global(*_args: object, **_kwargs: object) -> ExpectedGdnaPriorParts:
+    raise FractionalCutoverPending(
+        "expected_gdna_count_global: global-only gDNA pseudocount consumes "
+        "the legacy GlobalDensityTable and is removed during the fractional "
+        "cutover."
     )
 
-    # Per-ref length lookup for clamping the intergenic flank window and
-    # computing gDNA overlap effective lengths. Phase 2's canonical prior is
-    # unflanked, but the EM gDNA likelihood normalizer still needs contig
-    # clipping for every multi-locus.
-    ref_lengths_arr = np.asarray(list(index.ref_lengths.values()), dtype=np.int64)
 
-    # Hoist per-transcript columns once (slow path only consults these).
-    t_starts = index.t_df["start"].values
-    t_ref_codes = index.t_df["ref"].cat.codes.values
-    cat_to_ref_id = np.array(
-        [index.ref_name_to_id[str(name)] for name in index.t_df["ref"].cat.categories],
-        dtype=np.int32,
+def enable_gdna_for_multilocus(*_args: object, **_kwargs: object) -> bool:
+    raise FractionalCutoverPending(
+        "enable_gdna_for_multilocus: gDNA eligibility flag construction is "
+        "gated on the fractional prior pipeline."
     )
-    t_ref = cat_to_ref_id[t_ref_codes]
 
-    n_ml = len(multi_loci)
-    gdna_prior_count_arr = np.zeros(n_ml, dtype=np.float64)
-    gdna_prior_count_em_arr = np.zeros(n_ml, dtype=np.float64)
-    gdna_eff_len_arr = np.ones(n_ml, dtype=np.float64)
-    gdna_eff_len_unweighted_arr = np.ones(n_ml, dtype=np.float64)
-    gdna_em_exposure_weight_arr = np.ones(n_ml, dtype=np.float64)
-    enable_gdna_arr = np.zeros(n_ml, dtype=np.uint8)
-    multi_locus_priors: list[MultiLocusPrior | None] = [None] * n_ml
 
-    for ml in multi_loci:
-        idx = int(ml.multi_locus_id)
-        if multi_locus_priors[idx] is not None:
-            raise RuntimeError(f"assemble_priors: duplicate multi_locus_id={idx} in multi_loci.")
+def assemble_multilocus_prior(*_args: object, **_kwargs: object) -> MultiLocusPrior:
+    raise FractionalCutoverPending(
+        "assemble_multilocus_prior: integer prior aggregation is removed "
+        "during the fractional cutover."
+    )
 
-        # 1. Per-locus diagnostic (legacy locoregional pi_gdna estimate).
-        t_to_local = build_t_to_local_locus(ml, t_starts, t_ref)
-        units_per_locus = partition_units_to_loci(ml, em_data, t_to_local)
-        # Pre-compute per-Locus shared scratch (region overlap + FL-aware
-        # contained exposures) once per locus.  Both
-        # ``estimate_locus_gdna`` and ``expected_gdna_count_global``
-        # consume it via the ``_scratch`` kwarg, halving the per-locus
-        # ``region_index.overlap`` and ``contained_exposure_clipped``
-        # calls.  When the locus has no overlapping regions the scratch
-        # is ``None`` and each helper falls back to its legacy path
-        # (raise / zeroed result).
-        loci_scratch = tuple(
-            _compute_locus_scratch(
-                loc,
-                region_index,
-                region_arrays,
-                gdna_fl,
-                intergenic_flank_bp=intergenic_flank_bp,
-                ref_length=int(ref_lengths_arr[loc.ref_id])
-                if 0 <= loc.ref_id < ref_lengths_arr.size
-                else None,
-            )
-            for loc in ml.loci
-        )
-        per_locus_est = tuple(
-            estimate_locus_gdna(
-                locus=loc,
-                n_obs=int(units_per_locus[j].size),
-                region_index=region_index,
-                region_arrays=region_arrays,
-                payload_arrays=payload_arrays,
-                global_densities=global_densities,
-                gdna_fl=gdna_fl,
-                intergenic_flank_bp=intergenic_flank_bp,
-                ref_length=int(ref_lengths_arr[loc.ref_id])
-                if 0 <= loc.ref_id < ref_lengths_arr.size
-                else None,
-                splicing_anchor_tolerance=splicing_anchor_tolerance,
-                b_cross=b_cross,
-                strand_summary=strand_summary,
-                _scratch=scratch,
-            )
-            for j, (loc, scratch) in enumerate(zip(ml.loci, loci_scratch, strict=True))
-        )
 
-        # 2. Canonical Phase\u00a02 prior: η_g summed across constituent
-        #    loci; α_rna fixed at 0; eligibility from the unit-level
-        #    helper (independent of prior strength).
-        eta_g = float(
-            sum(
-                expected_gdna_count_global(
-                    locus=loc,
-                    region_index=region_index,
-                    region_arrays=region_arrays,
-                    global_densities=global_densities,
-                    gdna_fl=gdna_fl,
-                    splicing_anchor_tolerance=splicing_anchor_tolerance,
-                    b_cross=b_cross,
-                    _scratch=scratch,
-                ).total
-                for loc, scratch in zip(ml.loci, loci_scratch, strict=True)
-            )
-        )
-
-        ml_prior = assemble_multilocus_prior(
-            ml,
-            per_locus_est,
-            gdna_prior_count=eta_g,
-        )
-        multi_locus_priors[idx] = ml_prior
-        gdna_prior_count_arr[idx] = eta_g
-        unweighted_eff_len = gdna_eff_len_for_loci(
-            ml.loci,
-            ref_lengths_arr,
-            gdna_fl,
-            min_value=1.0,
-        )
-        unweighted_eff_len_f = float(unweighted_eff_len)
-        gdna_weight = float(
-            footprint_exposure_weight(
-                [(int(loc.ref_id), int(loc.start), int(loc.end)) for loc in ml.loci],
-                regional_exposure,
-            )
-        )
-        gdna_eff_len = max(unweighted_eff_len_f * gdna_weight, 1.0)
-        gdna_prior_count_em = (
-            eta_g * gdna_eff_len / unweighted_eff_len_f
-            if unweighted_eff_len_f > 0.0
-            else eta_g
-        )
-        gdna_eff_len_unweighted_arr[idx] = unweighted_eff_len_f
-        gdna_eff_len_arr[idx] = gdna_eff_len
-        gdna_prior_count_em_arr[idx] = gdna_prior_count_em
-        gdna_em_exposure_weight_arr[idx] = gdna_weight
-        enable_gdna_arr[idx] = np.uint8(1 if enable_gdna_for_multilocus(ml, em_data) else 0)
-
-    if any(p is None for p in multi_locus_priors):
-        missing = [i for i, p in enumerate(multi_locus_priors) if p is None]
-        raise RuntimeError(
-            f"assemble_priors: multi_loci list does not cover multi_locus_ids "
-            f"{missing}. Caller must pass exactly one MultiLocus per id 0..n-1."
-        )
-
-    return PriorTable(
-        multi_locus_priors=tuple(multi_locus_priors),  # type: ignore[arg-type]
-        gdna_prior_count=gdna_prior_count_arr,
-        gdna_prior_count_em=gdna_prior_count_em_arr,
-        gdna_eff_len=gdna_eff_len_arr,
-        enable_gdna=enable_gdna_arr,
-        gdna_eff_len_unweighted=gdna_eff_len_unweighted_arr,
-        gdna_em_exposure_weight=gdna_em_exposure_weight_arr,
+def assemble_priors(*_args: object, **_kwargs: object) -> PriorTable:
+    raise FractionalCutoverPending(
+        "assemble_priors: the full integer prior pipeline is removed during "
+        "the fractional cutover. The replacement fractional prior pipeline "
+        "has not yet landed."
     )

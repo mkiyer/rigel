@@ -76,6 +76,7 @@ def quant_command(args: argparse.Namespace) -> int:
     """
     from .index import TranscriptIndex
     from .pipeline import run_pipeline
+    from .calibration.errors import FractionalCutoverPending
 
     # -- Resolve parameters: CLI > YAML > hardcoded defaults --
     _resolve_quant_args(args, _build_quant_defaults())
@@ -121,12 +122,41 @@ def quant_command(args: argparse.Namespace) -> int:
 
     # -- Build pipeline config + run --
     pipeline_config = _build_pipeline_config(args, seed, sj_strand_tag)
-    result = run_pipeline(bam_path, index, config=pipeline_config)
+    try:
+        result = run_pipeline(bam_path, index, config=pipeline_config)
+    except FractionalCutoverPending as exc:
+        # Calibration completed but the fractional prior pipeline is
+        # pending. Persist whatever summary information is available
+        # (best-effort) and exit cleanly with EX_USAGE (64).
+        _write_partial_calibration_summary(output_dir, exc)
+        logging.error("%s", exc)
+        return 64
 
     # -- Write outputs --
     _write_quant_outputs(result, index, output_dir, args)
 
     return 0
+
+
+def _write_partial_calibration_summary(output_dir: Path, exc: Exception) -> None:
+    """Persist a minimal ``summary.json`` after a FractionalCutoverPending.
+
+    Calibration may already have produced its summary block; harvest it
+    from the exception when available, otherwise write a stub. Failures
+    here are non-fatal (the user already received the explanatory
+    error message via logging).
+    """
+    import json
+
+    payload: dict[str, object] = {
+        "status": "fractional_cutover_pending",
+        "message": str(exc),
+        "calibration": getattr(exc, "calibration_summary", None),
+    }
+    try:
+        (output_dir / "summary.json").write_text(json.dumps(payload, indent=2))
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -695,9 +725,7 @@ def _cli_to_config(val: object, transform: str) -> object:
             return True
         if s == "off":
             return False
-        raise ValueError(
-            f"--regional-exposure expects 'auto' or 'off', got {val!r}"
-        )
+        raise ValueError(f"--regional-exposure expects 'auto' or 'off', got {val!r}")
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -1195,8 +1223,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Minimum SPLICED-annotated count (rna) and gDNA count "
         "above which a pool's per-FL distribution is flagged 'weak' "
-        "(default: 200). Below this threshold the pool is flagged "
-        "'unusable' and downstream code falls back on the global FL.",
+        "(default: 1). Below this threshold the pool is flagged "
+        "'fallback' and downstream code falls back on the global FL.",
     )
     adv.add_argument(
         "--regional-exposure",
@@ -1225,13 +1253,10 @@ def build_parser() -> argparse.ArgumentParser:
         dest="splicing_anchor_tolerance",
         type=int,
         default=None,
-        help="Minimum bp clearance K required on each side of an "
-        "exon-intron boundary for a fragment to count as a "
-        "boundary-crossing event and to contribute its EXON|INTRON "
-        "bit to the per-fragment region mask (default: 3). Removes "
-        "single-bp alignment artefacts at the cost of ~1%% of true "
-        "short-overhang exposure for typical 350 bp gDNA fragments. "
-        "Set to 0 to reproduce pre-2026.05 strict-crossing semantics.",
+        help="Resolver-side splicing-anchor tolerance K (bp). Used only "
+        "for implicit-splice resolution slack around annotated introns; "
+        "the fractional calibration accumulator does not interpret this "
+        "value. Default: 3.",
     )
     adv.add_argument(
         "--emit-locus-stats",

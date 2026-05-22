@@ -1,12 +1,13 @@
-"""rigel.calibration._arrays — Pre-flattened views of region_df + payload.
+"""rigel.calibration._arrays \u2014 sorted region + payload views.
 
-The locus-prior assembly pass touches the region table once per locus.
-Materializing ``region_df["start"].to_numpy()`` per call dominates
-runtime on indexes with millions of regions, so we flatten the five
-hot columns once at :func:`assemble_priors` entry and pass the
-resulting frozen views around.
+Pre-flattens region columns and the fractional ``region_counts`` matrix
+into per-reference CSR sorted order so the locus-prior assembly pass
+(Phase 4) can index both array families with one sorted-position index.
 
-See ``docs/calibration/m6_implementation_plan.md`` §3.2.
+``RegionArrays`` carries the structural columns plus the per-region
+transcript-strand class. ``PayloadArrays`` is a thin sorted view of the
+12-channel ``region_counts`` matrix plus the unspliced channel
+projections used by hot consumers.
 """
 
 from __future__ import annotations
@@ -17,10 +18,16 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from .scan_payload import (
-    MASK_INTERGENIC,
-    MASK_INTRON,
-    CalibrationScanPayload,
+from .fractional_evidence import transcript_strand_class
+from .scan_payload import CalibrationScanPayload
+from .signature import (
+    CHANNEL_STRAND_NEG,
+    CHANNEL_STRAND_POS,
+    COMPARTMENT_BOUNDARY_LEFT,
+    COMPARTMENT_BOUNDARY_RIGHT,
+    COMPARTMENT_CONTAINED,
+    SPLICE_UNSPLICED,
+    channel_index,
 )
 
 
@@ -32,26 +39,19 @@ class RegionArrays:
     """Pre-flattened, per-reference-CSR view of the region table.
 
     Rows are sorted by ``(ref_id, start)`` so each ref's rows are
-    contiguous and ascending.  ``ref_offsets`` is the per-ref CSR
-    boundary array; the slice ``[ref_offsets[r]:ref_offsets[r+1]]``
-    is sorted by ``start`` (and, by the M2 invariant, by ``end`` too —
-    regions are non-overlapping within a reference).
-
-    The ``order`` attribute is the permutation taking the original
-    ``region_df`` row order to this sorted order, so payload columns
-    (which live in original ``region_id`` order) can be reordered
-    consistently via :meth:`PayloadArrays.from_payload`.
+    contiguous and ascending. ``ref_offsets`` is the per-ref CSR
+    boundary array; the slice ``[ref_offsets[r]:ref_offsets[r+1]]`` is
+    sorted by ``start`` (and by ``end`` too \u2014 regions are
+    non-overlapping within a reference).
     """
 
-    ref_id: np.ndarray        # int32, (R,)
-    start: np.ndarray         # int64, (R,)
-    end: np.ndarray           # int64, (R,)
-    type: np.ndarray          # uint8, (R,)
-    strand: np.ndarray        # uint8, (R,) — RegionStrand bitflag
-    bf_left: np.ndarray       # bool,  (R,)
-    bf_right: np.ndarray      # bool,  (R,)
-    ref_offsets: np.ndarray   # int32, (n_refs + 1,)
-    order: np.ndarray         # int64, (R,)  — region_df_row_order[i] in sorted slot i
+    ref_id: np.ndarray  # int32, (R,)
+    start: np.ndarray  # int64, (R,)
+    end: np.ndarray  # int64, (R,)
+    signature: np.ndarray  # uint8, (R,) \u2014 fine-region signature
+    ts_class: np.ndarray  # int8,  (R,) \u2014 TS_NONE/TS_POS/TS_NEG/TS_AMBIG
+    ref_offsets: np.ndarray  # int32, (n_refs + 1,)
+    order: np.ndarray  # int64, (R,)
     n_refs: int
 
     @classmethod
@@ -60,6 +60,12 @@ class RegionArrays:
         region_df: pd.DataFrame,
         ref_name_to_id: Mapping[str, int],
     ) -> "RegionArrays":
+        if "signature" not in region_df.columns:
+            raise ValueError(
+                "RegionArrays.from_region_df: region_df is missing the "
+                "'signature' column. Rebuild the index against the "
+                "fractional accumulator schema."
+            )
         n_refs = len(ref_name_to_id)
         n_regions = len(region_df)
 
@@ -73,25 +79,19 @@ class RegionArrays:
             )
         ref_id = ref_id.astype(np.int32, copy=False)
 
-        # Sort by (ref_id, start) so each ref's rows are contiguous + sorted.
         order = np.lexsort((region_df["start"].to_numpy(), ref_id))
         ref_id = ref_id[order]
         start = region_df["start"].to_numpy().astype(np.int64, copy=False)[order]
         end = region_df["end"].to_numpy().astype(np.int64, copy=False)[order]
-        type_ = region_df["type"].to_numpy().astype(np.uint8, copy=False)[order]
-        if "strand" in region_df.columns:
-            strand = region_df["strand"].to_numpy().astype(np.uint8, copy=False)[order]
-        else:
-            strand = np.zeros(n_regions, dtype=np.uint8)
-        bf_left = region_df["boundary_flux_left"].to_numpy().astype(bool, copy=False)[order]
-        bf_right = region_df["boundary_flux_right"].to_numpy().astype(bool, copy=False)[order]
+        signature = region_df["signature"].to_numpy().astype(np.uint8, copy=False)[order]
+        ts_class = transcript_strand_class(signature)
 
         counts = np.bincount(ref_id, minlength=n_refs).astype(np.int32, copy=False)
         ref_offsets = np.empty(n_refs + 1, dtype=np.int32)
         ref_offsets[0] = 0
         np.cumsum(counts, out=ref_offsets[1:])
         if int(ref_offsets[-1]) != n_regions:
-            raise RuntimeError(  # pragma: no cover — invariant guard
+            raise RuntimeError(  # pragma: no cover \u2014 invariant guard
                 "RegionArrays.from_region_df: ref_offsets sum mismatch."
             )
 
@@ -99,10 +99,8 @@ class RegionArrays:
             ref_id=ref_id,
             start=start,
             end=end,
-            type=type_,
-            strand=strand,
-            bf_left=bf_left,
-            bf_right=bf_right,
+            signature=signature,
+            ts_class=ts_class,
             ref_offsets=ref_offsets,
             order=order,
             n_refs=n_refs,
@@ -111,22 +109,25 @@ class RegionArrays:
 
 @dataclass(frozen=True, slots=True)
 class PayloadArrays:
-    """Pre-flattened per-region count / flux columns, sorted to match
-    :class:`RegionArrays`.
+    """Sorted view of the fractional ``region_counts`` matrix.
 
-    The four columns are reordered via ``RegionArrays.order`` so that
-    a single sorted-position index from :class:`RegionIndexPy` can
-    safely index into both array families.
+    Rows are reordered by ``RegionArrays.order`` so a single sorted
+    position index can address both array families. The unspliced
+    per-channel projections are materialised once for hot consumers.
     """
 
-    intergenic_per_region: np.ndarray  # int64, (R,)
-    intron_per_region: np.ndarray      # int64, (R,)
-    u_left: np.ndarray                 # int64, (R,)
-    u_right: np.ndarray                # int64, (R,)
-    intron_by_orient: np.ndarray       # int64, (R, ORIENT_N)
-    exon_contained_by_orient: np.ndarray  # int64, (R, ORIENT_N)
-    u_left_by_orient: np.ndarray       # int64, (R, ORIENT_N)
-    u_right_by_orient: np.ndarray      # int64, (R, ORIENT_N)
+    region_counts_sorted: np.ndarray  # float32[R, 12]
+
+    contained_unspliced_pos: np.ndarray  # float32[R]
+    contained_unspliced_neg: np.ndarray  # float32[R]
+    boundary_left_unspliced_pos: np.ndarray  # float32[R]
+    boundary_left_unspliced_neg: np.ndarray  # float32[R]
+    boundary_right_unspliced_pos: np.ndarray  # float32[R]
+    boundary_right_unspliced_neg: np.ndarray  # float32[R]
+
+    contained_unspliced_total: np.ndarray  # float32[R]
+    boundary_left_unspliced_total: np.ndarray  # float32[R]
+    boundary_right_unspliced_total: np.ndarray  # float32[R]
 
     @classmethod
     def from_payload(
@@ -135,19 +136,31 @@ class PayloadArrays:
         region_arrays: RegionArrays,
     ) -> "PayloadArrays":
         order = region_arrays.order
+        rc = np.ascontiguousarray(payload.region_counts[order, :])
+
+        c_u_p = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
+        c_u_n = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_NEG)
+        bl_u_p = channel_index(COMPARTMENT_BOUNDARY_LEFT, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
+        bl_u_n = channel_index(COMPARTMENT_BOUNDARY_LEFT, SPLICE_UNSPLICED, CHANNEL_STRAND_NEG)
+        br_u_p = channel_index(COMPARTMENT_BOUNDARY_RIGHT, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
+        br_u_n = channel_index(COMPARTMENT_BOUNDARY_RIGHT, SPLICE_UNSPLICED, CHANNEL_STRAND_NEG)
+
+        contained_pos = rc[:, c_u_p]
+        contained_neg = rc[:, c_u_n]
+        bl_pos = rc[:, bl_u_p]
+        bl_neg = rc[:, bl_u_n]
+        br_pos = rc[:, br_u_p]
+        br_neg = rc[:, br_u_n]
+
         return cls(
-            intergenic_per_region=np.ascontiguousarray(
-                payload.per_region_counts[:, MASK_INTERGENIC][order]
-            ),
-            intron_per_region=np.ascontiguousarray(
-                payload.per_region_counts[:, MASK_INTRON][order]
-            ),
-            u_left=np.ascontiguousarray(payload.u_left[order]),
-            u_right=np.ascontiguousarray(payload.u_right[order]),
-            intron_by_orient=np.ascontiguousarray(payload.intron_counts_by_orient[order]),
-            exon_contained_by_orient=np.ascontiguousarray(
-                payload.exon_contained_counts_by_orient[order]
-            ),
-            u_left_by_orient=np.ascontiguousarray(payload.u_left_by_orient[order]),
-            u_right_by_orient=np.ascontiguousarray(payload.u_right_by_orient[order]),
+            region_counts_sorted=rc,
+            contained_unspliced_pos=contained_pos,
+            contained_unspliced_neg=contained_neg,
+            boundary_left_unspliced_pos=bl_pos,
+            boundary_left_unspliced_neg=bl_neg,
+            boundary_right_unspliced_pos=br_pos,
+            boundary_right_unspliced_neg=br_neg,
+            contained_unspliced_total=contained_pos + contained_neg,
+            boundary_left_unspliced_total=bl_pos + bl_neg,
+            boundary_right_unspliced_total=br_pos + br_neg,
         )

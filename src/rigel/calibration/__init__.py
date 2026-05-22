@@ -25,7 +25,6 @@ from ._kappa import (
     KappaEstimate,
     estimate_kappa,
 )
-from ._orient import StrandSummary
 from ._orchestrator import calibrate
 from ._result import (
     CalibrationResult,
@@ -37,12 +36,12 @@ from .density_global import (
     ExonCompositeDensity,
     GlobalDensityTable,
     GlobalGdnaDensity,
+    StrandBalanceEstimate,
     compute_global_densities,
-    kappa_opportunity_bp,
+    estimate_strand_balance,
     l_eff_contained,
-    precision_opportunity,
-    strand_reliability_power,
 )
+from .strand_summary import StrandSummary
 from .density_loco import shrink_to_loco
 from .fl import (
     POOL_EB_PRIOR_ESS,
@@ -80,11 +79,10 @@ __all__ = [
     "GlobalDensityTable",
     "GlobalGdnaDensity",
     "ExonCompositeDensity",
+    "StrandBalanceEstimate",
     "compute_global_densities",
+    "estimate_strand_balance",
     "l_eff_contained",
-    "kappa_opportunity_bp",
-    "precision_opportunity",
-    "strand_reliability_power",
     "KappaEstimate",
     "estimate_kappa",
     "KAPPA_DEFAULT",

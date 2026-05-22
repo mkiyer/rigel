@@ -1,6 +1,0 @@
-region_id	start_1based	end	type	strand	tx_pos_bp	tx_neg_bp	exon_pos_bp	exon_neg_bp	boundary_left	boundary_right
-38391	152348735	152357647	2	-	8913	8913	0	8913	True	True
-38392	152357648	152358746	1	?	1099	1099	0	0	False	False
-38393	152358747	152358906	2	-	160	160	0	160	True	True
-38394	152358907	152359955	1	?	1049	1049	0	0	False	False
-38395	152359956	152360006	2	-	51	51	0	51	True	True

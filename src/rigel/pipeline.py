@@ -11,10 +11,10 @@ resolve each against the reference index, train strand and fragment-length
 models from unique-mapper fragments, and buffer all resolved fragments into
 a memory-efficient columnar buffer (``FragmentBuffer``).
 
-**Quantification** (``quant_from_buffer``): Iterate the buffer once
-to assign unambig counts, build CSR EM data (via ``scan.FragmentRouter``),
-construct loci (via ``locus.build_multi_loci``), compute Empirical Bayes gDNA
-priors, and run per-locus EM with ``2*n_t + 1`` components.
+**Quantification** (``quant_from_buffer``): currently fails fast after
+calibration while the Phase 4 fractional density and per-locus prior
+pipeline is being developed. The scorer / locus-EM helpers below remain
+as the Phase 4 re-entry points.
 
 Scoring functions live in ``scoring.py``.  Locus construction and EM
 initialization live in ``locus.py``.  The CSR builder lives in
@@ -24,7 +24,6 @@ initialization live in ``locus.py``.  The CSR builder lives in
 from __future__ import annotations
 
 import logging
-import math
 import os
 from dataclasses import dataclass, replace as _replace
 from typing import TYPE_CHECKING
@@ -47,11 +46,8 @@ from .config import (
 from .estimator import AbundanceEstimator
 from .frag_length_model import FragmentLengthModels
 from .index import TranscriptIndex
-from .locus import build_multi_loci
-from .calibration.locus_prior import assemble_priors
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
-from .locus_partition import partition_and_free
 from .scan import FragmentRouter
 from .scoring import FragmentScorer
 from .stats import PipelineStats
@@ -140,9 +136,7 @@ def _apply_unit_gdna_weights(
         log_w = exposure.log_weights_for_positions(
             unit_min_ref[mask], em_data.genomic_midpoint[mask]
         )
-        em_data.gdna_log_liks[mask] += log_w.astype(
-            em_data.gdna_log_liks.dtype, copy=False
-        )
+        em_data.gdna_log_liks[mask] += log_w.astype(em_data.gdna_log_liks.dtype, copy=False)
 
     return RegionalWeightApplicationStats(
         n_units_seen=n_units,
@@ -264,7 +258,7 @@ def _strand_summary_identifiable(
     *,
     confidence: float = 0.99,
 ) -> bool:
-    from .calibration.density_global import STRAND_CONTRAST_NUMERICAL_FLOOR
+    from .calibration.strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR
 
     effective_min = max(
         STRAND_CONTRAST_NUMERICAL_FLOOR,
@@ -275,14 +269,14 @@ def _strand_summary_identifiable(
 
 def _calibration_strand_summary(strand_models: StrandModels):
     """Choose the strand summary used by calibration density correction."""
-    from .calibration._orient import StrandSummary
+    from .calibration.strand_summary import StrandSummary
 
     return StrandSummary.from_model(strand_models.exonic_spliced)
 
 
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
     """Warn when calibration cannot identify strand from spliced RNA evidence."""
-    from .calibration._orient import StrandSummary
+    from .calibration.strand_summary import StrandSummary
 
     primary = StrandSummary.from_model(strand_models.exonic_spliced)
     if _strand_summary_identifiable(primary):
@@ -367,10 +361,10 @@ def scan_and_buffer(
     nrna_arr = index.t_df["is_synthetic"].values.astype("uint8")
     resolve_ctx.set_nrna_status(nrna_arr.tolist())
 
-    # Splicing-anchor tolerance K (bp): one-sided slack used by both the
-    # SPLICED_IMPLICIT per-intron whole-containment discriminant and the
-    # boundary-flux calibration accumulator. Set on the resolver before
-    # the scanner so all _resolve_core calls see the configured K.
+    # Splicing-anchor tolerance K (bp): resolver-only one-sided slack used
+    # by the SPLICED_IMPLICIT per-intron whole-containment discriminant.
+    # The fractional calibration accumulator records raw compartment mass
+    # directly and does not consume this tolerance.
     resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))
 
     # nRNA parent-index wiring (set_nrna_parent_index) is performed by
@@ -386,17 +380,15 @@ def scan_and_buffer(
         include_multimap=scan.include_multimap,
     )
 
-    # Calibration region wiring (M3): install the per-genome region
-    # partition into the scanner so per-fragment 8-state observations
-    # are collected during the scan.  Skipped when the index has no
-    # regions.feather (legacy index, INDEX_FORMAT_VERSION < 3).
+    # Calibration region wiring: install the per-genome fine-region
+    # partition into the scanner so fractional per-region evidence is
+    # collected during the scan.
     region_df = getattr(index, "region_df", None)
     if region_df is not None and len(region_df) > 0:
         _wire_calibration_regions(
             scanner,
             index,
             region_df,
-            splicing_anchor_tolerance=int(scan.splicing_anchor_tolerance),
         )
 
     # Streaming chunk callback — receives zero-copy dict from C++
@@ -472,32 +464,44 @@ def _wire_calibration_regions(
     scanner,
     index: TranscriptIndex,
     region_df,
-    *,
-    splicing_anchor_tolerance: int = 0,
 ) -> None:
     """Install the index's region partition into a native BamScanner.
 
-    Translates ``ref_name`` to the resolver's internal ref_id (the same
-    numbering the BAM scanner uses for ``ExonBlock.ref_id``).  Regions
-    on references unknown to the resolver are dropped — the resolver
-    only registers refs that have transcripts, so dropped regions are
-    on intergenic-only chromosomes whose BAM fragments map with
-    ``ref_id == -1`` and would never overlap any region anyway.
+    Translates ``ref_name`` to the index's canonical reference ids. This
+    mapping matches ``index.ref_name_to_id`` / BAM tid space and includes
+    references that have no transcripts, which the resolver-local map may
+    omit.
     """
-    resolver_ref_to_id = index.resolver.get_ref_to_id()
+    ref_name_to_id = index.ref_name_to_id
     region_ref_names = region_df["ref_name"].astype(str).to_numpy()
     ref_ids = np.fromiter(
-        (resolver_ref_to_id.get(name, -1) for name in region_ref_names),
+        (ref_name_to_id.get(name, -1) for name in region_ref_names),
         dtype=np.int32,
         count=len(region_ref_names),
     )
     keep = ref_ids >= 0
     if not keep.all():
+        dropped_refs = sorted(set(region_ref_names[~keep].tolist()))
+        logger.warning(
+            "[scan] Dropping %d calibration regions on %d references absent "
+            "from index.ref_name_to_id: %s",
+            int((~keep).sum()),
+            len(dropped_refs),
+            ", ".join(dropped_refs[:10]) + ("..." if len(dropped_refs) > 10 else ""),
+        )
         ref_ids = ref_ids[keep]
         region_df = region_df.loc[keep]
+    if len(region_df) == 0:
+        logger.warning("[scan] No calibration regions remain after reference-id filtering.")
+        return
 
     starts = np.ascontiguousarray(region_df["start"].to_numpy(np.int64))
     ends = np.ascontiguousarray(region_df["end"].to_numpy(np.int64))
+    signatures = np.ascontiguousarray(region_df["signature"].to_numpy(np.uint8))
+    left_signatures = np.ascontiguousarray(region_df["left_signature"].to_numpy(np.uint8))
+    right_signatures = np.ascontiguousarray(region_df["right_signature"].to_numpy(np.uint8))
+    boundary_kind_left = np.ascontiguousarray(region_df["boundary_kind_left"].to_numpy(np.uint8))
+    boundary_kind_right = np.ascontiguousarray(region_df["boundary_kind_right"].to_numpy(np.uint8))
     types = region_df["type"].to_numpy(np.uint8)
     strands = np.ascontiguousarray(region_df["strand"].to_numpy(np.uint8))
     # Bit layout: bit 0 = EXON (type 2), bit 1 = INTRON (type 1),
@@ -512,18 +516,27 @@ def _wire_calibration_regions(
         ref_ids = ref_ids[order]
         starts = starts[order]
         ends = ends[order]
+        signatures = signatures[order]
+        left_signatures = left_signatures[order]
+        right_signatures = right_signatures[order]
+        boundary_kind_left = boundary_kind_left[order]
+        boundary_kind_right = boundary_kind_right[order]
         type_masks = type_masks[order]
         strands = strands[order]
 
-    n_refs = max(int(resolver_ref_to_id[name]) for name in resolver_ref_to_id) + 1
+    n_refs = len(ref_name_to_id)
     scanner.set_regions(
         np.ascontiguousarray(ref_ids),
         np.ascontiguousarray(starts),
         np.ascontiguousarray(ends),
+        np.ascontiguousarray(signatures),
+        np.ascontiguousarray(left_signatures),
+        np.ascontiguousarray(right_signatures),
+        np.ascontiguousarray(boundary_kind_left),
+        np.ascontiguousarray(boundary_kind_right),
         np.ascontiguousarray(type_masks),
         np.ascontiguousarray(strands),
         n_refs,
-        int(splicing_anchor_tolerance),
     )
 
 
@@ -842,19 +855,13 @@ def _run_locus_em_partitioned(
                 gdna_prior_em=gdna_prior_count_em[lid],
                 gdna_leff=gdna_eff_len[lid],
                 gdna_leff_unweighted=(
-                    gdna_eff_len_unweighted[lid]
-                    if gdna_eff_len_unweighted is not None
-                    else None
+                    gdna_eff_len_unweighted[lid] if gdna_eff_len_unweighted is not None else None
                 ),
                 gdna_prior_raw=(
-                    gdna_prior_count_raw[lid]
-                    if gdna_prior_count_raw is not None
-                    else None
+                    gdna_prior_count_raw[lid] if gdna_prior_count_raw is not None else None
                 ),
                 gdna_weight=(
-                    gdna_em_exposure_weight[lid]
-                    if gdna_em_exposure_weight is not None
-                    else None
+                    gdna_em_exposure_weight[lid] if gdna_em_exposure_weight is not None else None
                 ),
             )
         )
@@ -921,9 +928,7 @@ def _run_locus_em_partitioned(
                         else None
                     ),
                     gdna_prior_raw=(
-                        gdna_prior_count_raw[lid]
-                        if gdna_prior_count_raw is not None
-                        else None
+                        gdna_prior_count_raw[lid] if gdna_prior_count_raw is not None else None
                     ),
                     gdna_weight=(
                         gdna_em_exposure_weight[lid]
@@ -963,42 +968,25 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Quantify transcripts from buffered fragments via locus-level EM.
+    """Fail fast at the Phase 4 density/prior boundary.
 
-    Consumes the v6 :class:`CalibrationResult` produced by
-    :func:`rigel.calibration.calibrate`.  Per-``MultiLocus`` priors are
-    assembled here (after ``build_multi_loci``) via
-    :func:`assemble_priors` and back-filled into the calibration result
-    with :meth:`CalibrationResult.with_priors`; the populated result is
-    returned alongside the estimator so callers (CLI, tests) can read
-    ``gdna_prior_count`` and diagnostic dataframes.
+    The scan and calibration stages are complete when this function is
+    called. Locus-level scoring, prior assembly, and EM are intentionally
+    blocked until the fractional density estimator lands. The raised
+    :class:`FractionalCutoverPending` carries ``calibration.to_summary_dict()``
+    so the CLI can still persist useful diagnostics.
 
     Parameters
     ----------
-    buffer : FragmentBuffer
-    index : TranscriptIndex
-    strand_models : StrandModels
-    frag_length_models : FragmentLengthModels
-        Scanner-trained accumulator.  Carries raw histograms used for
-        index-side geometry; the FL distributions consumed by scoring
-        come from ``calibration.fl_models``, NOT this object.
-    stats : PipelineStats
     calibration : CalibrationResult
-        v6 calibration result.  Must carry a populated
-        ``fl_models`` field; per-locus priors may be empty (they are
-        filled in here).
-    calibration_payload : CalibrationScanPayload
-        The C++ scanner's payload.  Required by
-        :func:`assemble_priors` for per-region counts and boundary-flux
-        counters.
-    em_config, scoring, log_every, annotations, emit_locus_stats
-        Standard pipeline knobs.
+        Fractional calibration result. Must carry a populated ``fl_models``
+        and diagnostics block.
+    Other parameters
+        Retained for API stability and Phase 4 re-entry.
 
     Returns
     -------
-    (AbundanceEstimator, CalibrationResult)
-        The fitted estimator and the calibration result with priors
-        backfilled (zero-locus priors when no MultiLoci were built).
+    Never returns until Phase 4 replaces the fail-fast boundary.
     """
     if calibration is None:
         raise ValueError(
@@ -1006,160 +994,15 @@ def quant_from_buffer(
             "(got None).  Run rigel.calibration.calibrate(...) before "
             "locus-level quantification."
         )
-    if em_config is None:
-        em_config = EMConfig()
-    if scoring is None:
-        scoring = FragmentScoringConfig()
 
-    # The scorer reads finalized FL distributions directly from
-    # CalibrationResult.fl_models.  No backflow mutation of
-    # frag_length_models.
-    fl_models = calibration.fl_models
+    # Fractional cutover: per-locus prior assembly + locus EM depend on
+    # the Phase 4 fractional density estimator. Until that lands, we
+    # refuse to proceed past calibration. The CLI catches this and
+    # writes ``summary.json`` from the (already complete) calibration
+    # result before exiting.
+    from .calibration.errors import FractionalCutoverPending
 
-    # Phase 1: Geometry + estimator
-    geometry, estimator = _setup_geometry_and_estimator(
-        index,
-        fl_models.rna,
-        em_config,
-        calibration.regional_exposure,
-    )
-
-    logger.info(
-        f"[START] Quantifying {buffer.total_fragments:,} buffered fragments "
-        f"(locus-level EM: mRNA/nRNA/gDNA)"
-    )
-
-    logger.info(
-        f"[CAL-FL] gDNA FL: mean={fl_models.gdna.mean:.1f}, "
-        f"quality={fl_models.gdna_quality} "
-        f"(n_pool={fl_models.n_gdna})"
-    )
-
-    # Phase 2: Score fragments
-    em_data = _score_fragments(
-        buffer,
-        index,
-        strand_models,
-        fl_models.rna,
-        fl_models.gdna,
-        stats,
-        estimator,
-        scoring,
-        log_every,
-        annotations,
-    )
-
-    logger.info(
-        f"[DONE] Scan: {stats.deterministic_unambig_units:,} unique, "
-        f"{em_data.n_units:,} ambiguous units "
-        f"({em_data.n_candidates:,} RNA candidates)"
-    )
-
-    # Phase 3: Locus construction, priors, and EM
-    if em_data.n_units > 0:
-        multi_loci = build_multi_loci(em_data, index)
-
-        if multi_loci:
-            max_locus_t = max(len(loc.transcript_indices) for loc in multi_loci)
-            max_locus_u = max(len(loc.unit_indices) for loc in multi_loci)
-        else:
-            max_locus_t = max_locus_u = 0
-
-        logger.info(
-            f"[LOCI] {len(multi_loci)} loci from {em_data.n_units:,} units "
-            f"(largest: {max_locus_t} transcripts, {max_locus_u} units)"
-        )
-
-        _assign_locus_ids(estimator, multi_loci)
-
-        # v6 calibration: assemble the PriorTable for this batch and
-        # back-fill it into the calibration result.  Pulls global
-        # density posteriors from ``calibration.global_densities`` and
-        # the gDNA FL mean from ``fl_models.gdna``.
-        # NOTE: must run BEFORE ``partition_and_free`` because the
-        # latter nulls out ``em_data`` arrays as it scatters them.
-        prior_table = assemble_priors(
-            multi_loci,
-            em_data,
-            index,
-            calibration_payload,
-            calibration.global_densities,
-            gdna_fl=fl_models.gdna,
-            splicing_anchor_tolerance=int(
-                getattr(calibration_payload, "splicing_anchor_tolerance", 0)
-            ),
-            regional_exposure=calibration.regional_exposure,
-            strand_summary=_calibration_strand_summary(strand_models),
-        )
-        calibration = calibration.with_priors(prior_table)
-
-        # v4.3 regional exposure is denominator-only. Do not mutate per-unit
-        # gDNA log-likelihoods with numerator weights.
-        # Log the prior-derived calibration summary now that the
-        # PriorTable is back-filled (the earlier "[CAL] v6 quality=..."
-        # line ran before assembly and could not include these fields).
-        _post_summary = calibration.to_summary_dict()
-        logger.info(
-            "[CAL] v6 priors  mean_pi_gdna=%.4f  n_multi_loci=%d",
-            float(_post_summary["mean_pi_gdna"]),
-            int(_post_summary["n_multi_loci"]),
-        )
-        gdna_prior_count_em = prior_table.gdna_prior_count_em
-        gdna_eff_len = prior_table.gdna_eff_len
-        enable_gdna_arr = prior_table.enable_gdna
-
-        # Phase 4 (NEW): Fused scatter into per-locus tuples
-        # Phase 4 (NEW): Array-by-array scatter + incremental free
-        partitions = partition_and_free(em_data, multi_loci)
-        del em_data
-
-        # Phase 5 (NEW): Streaming locus EM with incremental partition freeing
-        _run_locus_em_partitioned(
-            estimator,
-            partitions,
-            multi_loci,
-            index,
-            gdna_prior_count_em,
-            gdna_eff_len,
-            em_config,
-            enable_gdna=enable_gdna_arr,
-            emit_locus_stats=emit_locus_stats,
-            annotations=annotations,
-            gdna_eff_len_unweighted=prior_table.gdna_eff_len_unweighted,
-            gdna_prior_count_raw=prior_table.gdna_prior_count,
-            gdna_em_exposure_weight=prior_table.gdna_em_exposure_weight,
-        )
-    else:
-        logger.info("[SKIP] No ambiguous fragments for EM")
-        del em_data
-
-    _gdna_em = estimator.gdna_em_count
-    stats.n_gdna_em = 0 if (math.isnan(_gdna_em) or math.isinf(_gdna_em)) else int(_gdna_em)
-
-    # Global gDNA estimate from calibration densities (projected over
-    # the full genome, including exonic regions invisible to direct
-    # classification).
-    region_df = getattr(index, "region_df", None)
-    if region_df is not None and len(region_df) > 0 and calibration is not None:
-        from rigel.calibration.density_global import estimate_global_gdna_fragments
-
-        gdna_global = estimate_global_gdna_fragments(calibration.global_densities, region_df)
-    else:
-        gdna_global = float(_gdna_em)
-    stats.n_gdna_global = (
-        int(gdna_global) if not (math.isnan(gdna_global) or math.isinf(gdna_global)) else 0
-    )
-
-    total_frags = float(estimator.unambig_counts.sum() + estimator.em_counts.sum()) + gdna_global
-    gdna_rate_global = gdna_global / total_frags if total_frags > 0 else 0.0
-
-    logger.info(
-        f"[gDNA] em_locus={_gdna_em:.0f}, "
-        f"global_projected={gdna_global:.0f}, "
-        f"contamination_rate={gdna_rate_global:.2%}"
-    )
-
-    return estimator, calibration
+    raise FractionalCutoverPending(calibration_summary=calibration.to_summary_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -1244,6 +1087,9 @@ def run_pipeline(
         strand_summary=strand_summary,
         regional_exposure_enabled=cal_cfg.regional_exposure_enabled,
         regional_exposure_reference_quantile=cal_cfg.regional_exposure_reference_quantile,
+        resolver_splicing_anchor_tolerance=int(
+            calibration_payload.resolver_splicing_anchor_tolerance
+        ),
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

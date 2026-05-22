@@ -70,12 +70,15 @@ MANIFEST_JSON = "manifest.json"
 #:   3 — adds regions.feather (calibration partition); ref_lengths.feather
 #:        is now mandatory at load time and used to validate the region
 #:        partition.
-INDEX_FORMAT_VERSION = 3
+#:   4 — regions.feather stores fine-region signatures plus derived coarse
+#:        bridge columns for calibration consumers.
+INDEX_FORMAT_VERSION = 4
 
 
 def _rigel_version() -> str:
     try:
         from . import __version__  # type: ignore[attr-defined]
+
         return str(__version__)
     except Exception:  # pragma: no cover
         return "unknown"
@@ -97,6 +100,7 @@ def load_manifest(index_dir: str | Path) -> dict | None:
 # Build helpers (public for testability)
 # ---------------------------------------------------------------------------
 
+
 def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     """Read reference names and lengths from a FASTA file.
 
@@ -110,10 +114,7 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     """
     fasta_file = str(fasta_file)
     with pysam.FastaFile(fasta_file) as fh:
-        ref_lengths = {
-            fh.references[i]: fh.lengths[i]
-            for i in range(fh.nreferences)
-        }
+        ref_lengths = {fh.references[i]: fh.lengths[i] for i in range(fh.nreferences)}
     return ref_lengths
 
 
@@ -176,7 +177,8 @@ def read_transcripts(
         :func:`_check_no_duplicate_transcripts`.
     """
     transcripts = Transcript.read_gtf(
-        str(gtf_file), parse_mode=gtf_parse_mode,
+        str(gtf_file),
+        parse_mode=gtf_parse_mode,
     )
 
     _check_no_duplicate_transcripts(transcripts)
@@ -195,7 +197,6 @@ def read_transcripts(
 def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     """Convert a list of Transcript objects to a pandas DataFrame."""
     return pd.DataFrame(t.to_dict() for t in transcripts)
-
 
 
 # -- Tolerance-based nRNA merging (unified architecture) ----------------------
@@ -344,8 +345,8 @@ def create_nrna_transcripts(
 
     # -- Step 4: Detect annotated equivalents ---------------------------------
     # Build single-exon lookup: (ref, strand) → sorted list of (start, end, t)
-    se_by_loc: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = (
-        collections.defaultdict(list)
+    se_by_loc: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = collections.defaultdict(
+        list
     )
     for t in transcripts:
         if len(t.exons) == 1:
@@ -410,8 +411,7 @@ def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
     record. The resulting DataFrame is sorted by (ref, start, end, strand).
     """
     rows = [
-        AnnotatedInterval(t.ref, start, end, t.strand,
-                    IntervalType.SJ, t.t_index)
+        AnnotatedInterval(t.ref, start, end, t.strand, IntervalType.SJ, t.t_index)
         for t in transcripts
         for start, end in t.introns()
     ]
@@ -457,12 +457,8 @@ def write_bed12(
             thick_end = ref_end
             rgb = "0"
             block_count = len(t.exons)
-            block_sizes = ",".join(
-                str(e.end - e.start) for e in t.exons
-            )
-            block_starts = ",".join(
-                str(e.start - ref_start) for e in t.exons
-            )
+            block_sizes = ",".join(str(e.end - e.start) for e in t.exons)
+            block_starts = ",".join(str(e.start - ref_start) for e in t.exons)
             fh.write(
                 f"{ref}\t{ref_start}\t{ref_end}\t{name}\t"
                 f"{score}\t{strand}\t{thick_start}\t{thick_end}\t"
@@ -511,12 +507,12 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
         return
     # Exons
     for e in t.exons:
-        yield AnnotatedInterval(t.ref, e.start, e.end, t.strand,
-                          IntervalType.EXON, t.t_index)
+        yield AnnotatedInterval(t.ref, e.start, e.end, t.strand, IntervalType.EXON, t.t_index)
     # One transcript span (replaces per-gap INTRON intervals)
     if t.exons:
-        yield AnnotatedInterval(t.ref, t.exons[0].start, t.exons[-1].end,
-                          t.strand, IntervalType.TRANSCRIPT, t.t_index)
+        yield AnnotatedInterval(
+            t.ref, t.exons[0].start, t.exons[-1].end, t.strand, IntervalType.TRANSCRIPT, t.t_index
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,6 +521,7 @@ class _IntergenicSpan:
 
     Half-open coordinates ``[start, end)``.
     """
+
     start: int
     end: int
 
@@ -537,6 +534,7 @@ class _GenicSpan:
     is strand-agnostic and excludes synthetic nRNAs (which are
     constructed downstream of the layout sweep).
     """
+
     start: int
     end: int
     transcripts: tuple = field(default_factory=tuple)
@@ -626,8 +624,7 @@ def _group_transcripts_by_ref(
     for t in transcripts:
         if t.ref not in ref_lengths:
             raise ValueError(
-                f"Transcript {t.t_id} has reference '{t.ref}' "
-                f"not found in the FASTA index"
+                f"Transcript {t.t_id} has reference '{t.ref}' not found in the FASTA index"
             )
         ref_transcripts[t.ref].append(t)
     return ref_transcripts
@@ -678,53 +675,28 @@ def build_index_artifacts(
 
       - intervals_df: columns of :class:`AnnotatedInterval`, sorted by
         ``(ref, start, end, strand)``.
-      - regions_df: columns of :class:`rigel.calibration.regions.RegionRecord`,
-        with ``region_id`` assigned globally in genomic order
+            - regions_df: v4 fine-region schema from
+                :func:`rigel.calibration.regions.build_fine_region_table`, with
+                ``region_id`` assigned globally in genomic order
         (matching ``ref_lengths`` iteration order, then start).
 
     Transcripts must be sorted by ``(ref, start, end)``.
     """
-    from .calibration.regions import emit_regions, RegionRecord
+    from .calibration.regions import build_fine_region_table
 
     ref_transcripts = _group_transcripts_by_ref(transcripts, ref_lengths)
 
     intervals: list[AnnotatedInterval] = []
-    regions: list[RegionRecord] = []
 
     for ref, ref_length in ref_lengths.items():
-        layout_for_intervals = list(_iter_reference_layout(
-            ref_length, ref_transcripts.get(ref, [])
-        ))
+        layout_for_intervals = list(
+            _iter_reference_layout(ref_length, ref_transcripts.get(ref, []))
+        )
         intervals.extend(_emit_genomic_intervals(ref, iter(layout_for_intervals)))
-        regions.extend(emit_regions(ref, iter(layout_for_intervals)))
 
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
     iv_df = pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
-
-    # Assign region_id globally, in genomic order (ref_lengths iteration
-    # order, then start).  Within a single reference the layout sweep
-    # already emits regions in start order.
-    if regions:
-        regions = [r._replace(region_id=i) for i, r in enumerate(regions)]
-    region_df = pd.DataFrame(regions, columns=RegionRecord._fields)
-
-    # Coerce dtypes to the locked schema.
-    if not region_df.empty:
-        region_df = region_df.astype({
-            "region_id": np.int64,
-            "start": np.int64,
-            "end": np.int64,
-            "type": np.uint8,
-            "strand": np.uint8,
-            "tx_pos_bp": np.int64,
-            "tx_neg_bp": np.int64,
-            "exon_pos_bp": np.int64,
-            "exon_neg_bp": np.int64,
-            "boundary_flux_left": np.bool_,
-            "boundary_flux_right": np.bool_,
-        })
-        # ref_name is left as pandas' default string dtype.
-        region_df["ref_name"] = region_df["ref_name"].astype("string")
+    region_df = build_fine_region_table(transcripts, ref_lengths)
 
     return iv_df, region_df
 
@@ -732,6 +704,7 @@ def build_index_artifacts(
 # ---------------------------------------------------------------------------
 # TranscriptIndex — unified index class
 # ---------------------------------------------------------------------------
+
 
 class TranscriptIndex:
     """In-memory reference index for fast transcript/gene overlap queries.
@@ -856,9 +829,7 @@ class TranscriptIndex:
         ref_lengths = load_reference_lengths(fasta_file)
         logger.info(f"[DONE] Read {len(ref_lengths)} references")
 
-        df = pd.DataFrame(
-            list(ref_lengths.items()), columns=["ref", "length"]
-        )
+        df = pd.DataFrame(list(ref_lengths.items()), columns=["ref", "length"])
         df.to_feather(output_dir / REF_LENGTHS_FEATHER, **feather_kwargs)
         if write_tsv:
             df.to_csv(output_dir / REF_LENGTHS_TSV, sep="\t", index=False)
@@ -866,14 +837,15 @@ class TranscriptIndex:
         # -- Transcripts ------------------------------------------------------
         logger.info(f"[START] Reading transcripts from {gtf_file}")
         transcripts = read_transcripts(
-            gtf_file, gtf_parse_mode=gtf_parse_mode,
+            gtf_file,
+            gtf_parse_mode=gtf_parse_mode,
         )
         logger.info(f"[DONE] Read {len(transcripts)} transcripts")
 
         # -- Synthetic nRNA transcripts ---------------------------------------
         logger.info("[START] Creating synthetic nRNA transcripts")
-        synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = (
-            create_nrna_transcripts(transcripts, tolerance=nrna_tolerance)
+        synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = create_nrna_transcripts(
+            transcripts, tolerance=nrna_tolerance
         )
         # Synthetic transcripts are gene-neutral (see create_nrna_transcripts
         # docstring). Each synthetic gets its OWN dedicated g_index — we do
@@ -902,20 +874,15 @@ class TranscriptIndex:
 
         # Set nrna_t_index on every multi-exon annotated transcript
         for me_tidx, span_key in t_to_span_key.items():
-            transcripts[me_tidx].nrna_t_index = span_to_nrna_t_index.get(
-                span_key, -1
-            )
+            transcripts[me_tidx].nrna_t_index = span_to_nrna_t_index.get(span_key, -1)
 
         transcripts.extend(synthetics)
         logger.info(
-            f"[DONE] {len(synthetics)} synthetics added, "
-            f"{len(transcripts)} total transcripts"
+            f"[DONE] {len(synthetics)} synthetics added, {len(transcripts)} total transcripts"
         )
 
         # Partition: annotated-only list for region table and splice junctions
-        annotated_transcripts = [
-            t for t in transcripts if not t.is_synthetic
-        ]
+        annotated_transcripts = [t for t in transcripts if not t.is_synthetic]
 
         t_df = transcripts_to_dataframe(transcripts)
         t_df.to_feather(output_dir / TRANSCRIPTS_FEATHER, **feather_kwargs)
@@ -934,9 +901,7 @@ class TranscriptIndex:
         # -- Genomic intervals + region partition ----------------------------
         logger.info("[START] Building genomic intervals + region partition")
         iv_df, region_df = build_index_artifacts(transcripts, ref_lengths)
-        logger.info(
-            f"[DONE] {len(iv_df)} genomic intervals, {len(region_df)} regions"
-        )
+        logger.info(f"[DONE] {len(iv_df)} genomic intervals, {len(region_df)} regions")
 
         iv_df.to_feather(output_dir / INTERVALS_FEATHER, **feather_kwargs)
         if write_tsv:
@@ -987,8 +952,7 @@ class TranscriptIndex:
         used by the EM aggregation kernels.
         """
         g_df = (
-            t_df
-            .groupby("g_index", sort=True)
+            t_df.groupby("g_index", sort=True)
             .agg(
                 ref=("ref", "first"),
                 start=("start", "min"),
@@ -1053,24 +1017,21 @@ class TranscriptIndex:
             load_regions,
             validate_against_ref_lengths,
         )
+
         ref_lengths_path = os.path.join(index_dir, REF_LENGTHS_FEATHER)
         if not os.path.exists(ref_lengths_path):
             raise RuntimeError(
-                f"Index at {index_dir} is missing {REF_LENGTHS_FEATHER}. "
-                f"Rebuild the index."
+                f"Index at {index_dir} is missing {REF_LENGTHS_FEATHER}. Rebuild the index."
             )
         self.ref_lengths = load_ref_lengths(ref_lengths_path)
         self.ref_names = list(self.ref_lengths.keys())
         self.ref_name_to_id = {name: i for i, name in enumerate(self.ref_names)}
 
         # -- transcripts ------------------------------------------------------
-        self.t_df = pd.read_feather(
-            os.path.join(index_dir, TRANSCRIPTS_FEATHER)
-        )
+        self.t_df = pd.read_feather(os.path.join(index_dir, TRANSCRIPTS_FEATHER))
         if "t_index" not in self.t_df.columns:
             raise ValueError(
-                f"Invalid index in {index_dir}: missing 't_index' column "
-                f"in {TRANSCRIPTS_FEATHER}"
+                f"Invalid index in {index_dir}: missing 't_index' column in {TRANSCRIPTS_FEATHER}"
             )
         if not (self.t_df.index == self.t_df["t_index"]).all():
             raise ValueError(
@@ -1100,10 +1061,7 @@ class TranscriptIndex:
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)
         if "g_index" not in self.g_df.columns:
-            raise ValueError(
-                f"Invalid derived gene table in {index_dir}: missing "
-                f"'g_index' column"
-            )
+            raise ValueError(f"Invalid derived gene table in {index_dir}: missing 'g_index' column")
         if not (self.g_df.index == self.g_df["g_index"]).all():
             raise ValueError(
                 f"Invalid index in {index_dir}: derived gene table row index "
@@ -1124,7 +1082,9 @@ class TranscriptIndex:
             [self.ref_name_to_id[str(name)] for name in _ref_cat.categories],
             dtype=np.int32,
         )
-        self.t_to_ref_arr = _cat_to_canonical_ref[_ref_cat.codes.values.astype(np.int64, copy=False)]
+        self.t_to_ref_arr = _cat_to_canonical_ref[
+            _ref_cat.codes.values.astype(np.int64, copy=False)
+        ]
 
         # -- region partition (calibration) -----------------------------------
         logger.debug("Reading regions")
@@ -1139,9 +1099,7 @@ class TranscriptIndex:
 
         # -- interval index (unified cgranges) ---------------------------------
         logger.debug("Reading intervals")
-        iv_df = pd.read_feather(
-            os.path.join(index_dir, INTERVALS_FEATHER)
-        )
+        iv_df = pd.read_feather(os.path.join(index_dir, INTERVALS_FEATHER))
 
         # -- collapsed interval index -----------------------------------------
         # Group rows by (ref, start, end, interval_type) and merge
@@ -1277,9 +1235,7 @@ class TranscriptIndex:
 
         # -- splice junction indexes ------------------------------------------
         logger.debug("Reading splice junctions")
-        sj_df = pd.read_feather(
-            os.path.join(index_dir, SJ_FEATHER)
-        )
+        sj_df = pd.read_feather(os.path.join(index_dir, SJ_FEATHER))
 
         # Extract raw numpy arrays once
         _sj_refs = sj_df["ref"].values
@@ -1326,16 +1282,15 @@ class TranscriptIndex:
         for i in range(len(_sj_gs_list)):
             s = _sj_gs_list[i]
             e = _sj_ge_list[i]
-            key = (_sj_rf_list[s], _sj_st_list[s],
-                   _sj_en_list[s], _sj_sd_list[s])
+            key = (_sj_rf_list[s], _sj_st_list[s], _sj_en_list[s], _sj_sd_list[s])
             sj_map[key] = frozenset(_sj_ti_list[s:e])
         self.sj_map = sj_map
 
-        logger.debug(f"Splice junctions: {len(self.sj_map)} unique, "
-                     f"{len(sj_df)} total")
+        logger.debug(f"Splice junctions: {len(self.sj_map)} unique, {len(sj_df)} total")
 
         # -- C++ FragmentResolver (native fragment resolution) ------------------
         from .native import FragmentResolver
+
         ctx = FragmentResolver()
 
         # 1. Overlap index from collapsed data
@@ -1399,9 +1354,7 @@ class TranscriptIndex:
                 bl_df["max_anchor_left"].astype(np.int32).tolist(),
                 bl_df["max_anchor_right"].astype(np.int32).tolist(),
             )
-            logger.info(
-                f"Splice artifact blacklist: {len(bl_df):,} junctions active"
-            )
+            logger.info(f"Splice artifact blacklist: {len(bl_df):,} junctions active")
 
         # 3. Per-transcript exon CSR for transcript-space FL computation
         n_t = len(self.t_to_g_arr)
@@ -1463,7 +1416,8 @@ class TranscriptIndex:
     # -- query methods --------------------------------------------------------
 
     def query(
-        self, exon: GenomicInterval,
+        self,
+        exon: GenomicInterval,
     ) -> list[tuple[int, int, int, frozenset[int]]]:
         """Query the collapsed interval index with an aligned exon block.
 
@@ -1490,12 +1444,14 @@ class TranscriptIndex:
             )
         hits: list[tuple[int, int, int, frozenset[int]]] = []
         for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
-            hits.append((
-                h_start,
-                h_end,
-                self._iv_type[label],
-                self._iv_t_set[label],
-            ))
+            hits.append(
+                (
+                    h_start,
+                    h_end,
+                    self._iv_type[label],
+                    self._iv_t_set[label],
+                )
+            )
         return hits
 
     def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
@@ -1610,7 +1566,11 @@ class TranscriptIndex:
         nrna_t_idx = int(self.t_df.index[nrna_mask][0])
 
         # Find all transcripts whose nrna_t_index points here
-        nrna_col = self.t_df["nrna_t_index"].values if "nrna_t_index" in self.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        nrna_col = (
+            self.t_df["nrna_t_index"].values
+            if "nrna_t_index" in self.t_df.columns
+            else np.full(len(t_ids), -1, dtype=int)
+        )
         contrib_mask = nrna_col == nrna_t_idx
         return sorted(t_ids[contrib_mask].tolist())
 
@@ -1635,7 +1595,11 @@ class TranscriptIndex:
             return []
         nrna_t_idx = int(self.t_df.index[nrna_mask][0])
 
-        nrna_col = self.t_df["nrna_t_index"].values if "nrna_t_index" in self.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        nrna_col = (
+            self.t_df["nrna_t_index"].values
+            if "nrna_t_index" in self.t_df.columns
+            else np.full(len(t_ids), -1, dtype=int)
+        )
         contrib_mask = nrna_col == nrna_t_idx
         g_ids = self.t_df["g_id"].values[contrib_mask]
         g_names = self.t_df["g_name"].values[contrib_mask]
@@ -1662,11 +1626,14 @@ class TranscriptIndex:
         if not gene_mask.any():
             return []
 
-        nrna_col = self.t_df["nrna_t_index"].values if "nrna_t_index" in self.t_df.columns else np.full(len(t_ids), -1, dtype=int)
+        nrna_col = (
+            self.t_df["nrna_t_index"].values
+            if "nrna_t_index" in self.t_df.columns
+            else np.full(len(t_ids), -1, dtype=int)
+        )
         nrna_t_indices = nrna_col[gene_mask]
         valid = nrna_t_indices >= 0
         if not valid.any():
             return []
         unique_nrna_idx = sorted(set(nrna_t_indices[valid].tolist()))
         return sorted(t_ids[unique_nrna_idx].tolist())
-

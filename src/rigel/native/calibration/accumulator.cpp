@@ -1,12 +1,19 @@
 /**
- * accumulator.cpp — out-of-line bodies for CalibrationAccumulator.
+ * accumulator.cpp - Out-of-line bodies for fractional CalibrationAccumulator.
  *
- * The dedup strategy relies on the M2 invariant: each ``overlap_into``
- * call returns strictly increasing region IDs.  Across exon blocks
- * the per-block lists may overlap (a spliced fragment whose two
- * exons both touch the same boundary exon region), so we sorted-merge
- * each new block list into a persistent fragment-scope ``hits_``
- * vector with a two-pointer pass that skips duplicates.
+ * Per-fragment fractional mass routing:
+ *   1. Compute total_aligned_bp across exon blocks.
+ *   2. Gate strand-ambiguous fragments to n_excluded_strand_ambig.
+ *   3. Compute fl_idx once per fragment (unspliced only).
+ *   4. For each block, query region overlaps; for each (block, region)
+ *      pair, compute overlap_bp, w = overlap_bp / total_aligned_bp,
+ *      classify compartment from fragment-vs-region bounds, and add
+ *      w to region_counts and the appropriate channel/signature/FL pool.
+ *
+ * The fully-spanned case (cross_left && cross_right) splits w in half
+ * between BOUNDARY_LEFT and BOUNDARY_RIGHT region_counts channels but
+ * adds the total w to the BOUNDARY FL pool exactly once (left/right
+ * map to the same pool).
  */
 
 #include "calibration/accumulator.h"
@@ -18,9 +25,6 @@ namespace rigel::calibration {
 
 namespace {
 
-// Compute exact aligned-block overlap of [blk_start, blk_end) with the
-// region [region_start, region_end). Returns >= 1 because RegionIndex
-// only returns hits with positive overlap on at least one block.
 inline int64_t block_region_overlap(int64_t blk_start, int64_t blk_end,
                                     int64_t region_start, int64_t region_end) {
     const int64_t lo = std::max<int64_t>(blk_start, region_start);
@@ -40,9 +44,59 @@ void CalibrationAccumulator::observe(
     int8_t fragment_strand,
     const RegionIndex& regions)
 {
-    hits_.clear();
-    hits_overlap_bp_.clear();
-    qualified_hits_.clear();
+    // Strand gate: ambiguous/unknown strand is not routable into the
+    // strand-resolved 12-channel layout. Count and return.
+    int strand_idx;
+    if (fragment_strand == STRAND_POS) {
+        strand_idx = region_signature::kChannelStrandPos;
+    } else if (fragment_strand == STRAND_NEG) {
+        strand_idx = region_signature::kChannelStrandNeg;
+    } else {
+        ++payload_.n_excluded_strand_ambig;
+        return;
+    }
+
+    // Total aligned base pairs (sum of M/D/=/X spans, per block).
+    int64_t total_aligned_bp = 0;
+    for (int32_t e = 0; e < n_exons; ++e) {
+        const ExonBlock& blk = exons[e];
+        const int64_t len = static_cast<int64_t>(blk.end) -
+                            static_cast<int64_t>(blk.start);
+        if (len > 0) total_aligned_bp += len;
+    }
+    if (total_aligned_bp <= 0) {
+        ++payload_.n_unobserved;
+        return;
+    }
+
+    // From here on the fragment counts as observed.
+    ++payload_.n_observed;
+
+    const int splice_idx = (splice_type == SPLICE_UNSPLICED)
+                               ? region_signature::kSpliceUnspliced
+                               : region_signature::kSpliceSpliced;
+
+    // FL eligibility (unspliced only; strand-collapsed in pools).
+    int32_t fl_idx = -1;
+    if (splice_idx == region_signature::kSpliceUnspliced) {
+        const int64_t fl_raw = frag_end - frag_start;
+        if (fl_raw >= 0 && fl_raw < CalibrationPayload::kFlBins) {
+            fl_idx = static_cast<int32_t>(fl_raw);
+        } else if (fl_raw >= CalibrationPayload::kFlBins) {
+            // Clip to last bin so very long fragments still contribute
+            // mass to the FL pool (consistent with the legacy cap).
+            fl_idx = CalibrationPayload::kFlBins - 1;
+        } else {
+            // fl_raw < 0 should not happen for well-formed unspliced
+            // fragments, but count it for audit and skip FL contribution.
+            ++payload_.n_fl_unavailable;
+        }
+    }
+
+    const double inv_total =
+        1.0 / static_cast<double>(total_aligned_bp);
+
+    bool any_region_hit = false;
 
     for (int32_t e = 0; e < n_exons; ++e) {
         const ExonBlock& blk = exons[e];
@@ -53,139 +107,89 @@ void CalibrationAccumulator::observe(
                              static_cast<int64_t>(blk.end),
                              block_hits_);
         if (block_hits_.empty()) continue;
+        any_region_hit = true;
 
-        // Compute exact per-region overlap_bp for this block.
-        block_overlap_bp_.clear();
-        block_overlap_bp_.reserve(block_hits_.size());
         for (int32_t rid : block_hits_) {
-            block_overlap_bp_.push_back(block_region_overlap(
-                static_cast<int64_t>(blk.start),
-                static_cast<int64_t>(blk.end),
-                regions.start(rid),
-                regions.end(rid)));
-        }
-
-        if (hits_.empty()) {
-            // Fast path: first non-empty block — adopt its hits wholesale.
-            hits_.swap(block_hits_);
-            hits_overlap_bp_.swap(block_overlap_bp_);
-            continue;
-        }
-
-        // Sorted-merge block_hits_ into hits_, summing per-region
-        // overlap_bp where the same region appears in both lists
-        // (e.g. a spliced fragment whose two exons both touch the
-        // same boundary region).
-        merge_buf_.clear();
-        merge_buf_bp_.clear();
-        size_t i = 0;
-        size_t j = 0;
-        const size_t na = hits_.size();
-        const size_t nb = block_hits_.size();
-        while (i < na && j < nb) {
-            const int32_t a = hits_[i];
-            const int32_t b = block_hits_[j];
-            if (a < b) {
-                merge_buf_.push_back(a);
-                merge_buf_bp_.push_back(hits_overlap_bp_[i]);
-                ++i;
-            } else if (a > b) {
-                merge_buf_.push_back(b);
-                merge_buf_bp_.push_back(block_overlap_bp_[j]);
-                ++j;
-            } else {
-                merge_buf_.push_back(a);
-                merge_buf_bp_.push_back(hits_overlap_bp_[i] + block_overlap_bp_[j]);
-                ++i;
-                ++j;
-            }
-        }
-        while (i < na) {
-            merge_buf_.push_back(hits_[i]);
-            merge_buf_bp_.push_back(hits_overlap_bp_[i]);
-            ++i;
-        }
-        while (j < nb) {
-            merge_buf_.push_back(block_hits_[j]);
-            merge_buf_bp_.push_back(block_overlap_bp_[j]);
-            ++j;
-        }
-        hits_.swap(merge_buf_);
-        hits_overlap_bp_.swap(merge_buf_bp_);
-    }
-
-    // Boundary-tolerance qualification: a hit contributes its type bit
-    // (and gets per-region / boundary-flux fan-out) only if its exact
-    // aligned-block overlap is >= q = max(K, 1). At K=0 this is a
-    // tautology because RegionIndex::overlap_into already only returns
-    // hits with overlap >= 1, so qualified_hits_ == hits_ and behavior
-    // is bit-identical to the pre-tolerance code path.
-    const int64_t q = static_cast<int64_t>(std::max(splicing_anchor_tolerance_, 1));
-    uint8_t obs_mask = 0;
-    for (size_t k = 0; k < hits_.size(); ++k) {
-        if (hits_overlap_bp_[k] >= q) {
-            qualified_hits_.push_back(hits_[k]);
-            obs_mask |= regions.type_mask(hits_[k]);
-        }
-    }
-
-    // Always: bump global mask counter, FL histogram, n_observed.
-    payload_.global_counts[obs_mask]++;
-    const int64_t fl_raw = frag_end - frag_start;
-    int64_t fl_idx = fl_raw < 0 ? 0 : fl_raw;
-    if (fl_idx >= CalibrationPayload::kFlBins) {
-        fl_idx = CalibrationPayload::kFlBins - 1;
-    }
-    payload_.fl_hist[static_cast<size_t>(obs_mask) * CalibrationPayload::kFlBins
-                     + static_cast<size_t>(fl_idx)]++;
-    payload_.n_observed++;
-
-    if (obs_mask == 0) {
-        // Split: raw hits existed but all sub-tolerance => below-tolerance;
-        // otherwise (no raw hits at all, or all hits had type_mask 0) =>
-        // unannotated_ref. At K=0 (q=1) every hit is qualified, so the
-        // first branch can never fire and the legacy semantics hold.
-        if (!hits_.empty() && qualified_hits_.empty()) {
-            payload_.n_below_tolerance++;
-        } else {
-            payload_.n_unannotated_ref++;
-        }
-        return;
-    }
-
-    // Per-region count fan-out and (for unspliced single-ref fragments)
-    // boundary-flux fan-out.  Only qualified hits participate.  The
-    // boundary-flux endpoint predicate uses ``frag_start + q <= b &&
-    // frag_end >= b + q`` which collapses to the strict ``< b && > b``
-    // crossing predicate at K=0 (q=1) on integer half-open coordinates.
-    const bool flux_eligible = (splice_type == SPLICE_UNSPLICED);
-    for (int32_t rid : qualified_hits_) {
-        payload_.per_region_counts[
-            static_cast<size_t>(rid) * mask::N_STATES
-            + static_cast<size_t>(obs_mask)]++;
-        const uint8_t orient_code = orient::classify(regions.strand(rid), fragment_strand);
-        const size_t orient_idx = static_cast<size_t>(rid) * orient::N + orient_code;
-        if (obs_mask == mask::INTRON) {
-            payload_.intron_counts_by_orient[orient_idx]++;
-        }
-        if (flux_eligible && obs_mask == mask::EXON &&
-            (regions.type_mask(rid) & mask::EXON) != 0 &&
-            frag_start >= regions.start(rid) &&
-            frag_end <= regions.end(rid)) {
-            payload_.exon_contained_counts_by_orient[orient_idx]++;
-        }
-        if (flux_eligible && (regions.type_mask(rid) & mask::EXON) != 0) {
             const int64_t rs = regions.start(rid);
             const int64_t re = regions.end(rid);
-            if (frag_start + q <= rs && frag_end >= rs + q) {
-                payload_.u_left[rid]++;
-                payload_.u_left_by_orient[orient_idx]++;
-            }
-            if (frag_start + q <= re && frag_end >= re + q) {
-                payload_.u_right[rid]++;
-                payload_.u_right_by_orient[orient_idx]++;
+            const int64_t overlap_bp = block_region_overlap(
+                static_cast<int64_t>(blk.start),
+                static_cast<int64_t>(blk.end),
+                rs, re);
+            if (overlap_bp <= 0) continue;
+
+            const double w = static_cast<double>(overlap_bp) * inv_total;
+
+            // Fragment-vs-region boundary classification (per fragment,
+            // not per block; spliced fragments use end-to-end extent).
+            const bool cross_left  = frag_start < rs;
+            const bool cross_right = frag_end   > re;
+
+            const std::uint8_t sig = regions.signature(rid);
+            const size_t reg_base =
+                static_cast<size_t>(rid) * CalibrationPayload::kChannels;
+
+            auto add_channel = [&](int compartment, double mass) {
+                const int ch = region_signature::channel_index(
+                    compartment, splice_idx, strand_idx);
+                payload_.region_counts[reg_base + static_cast<size_t>(ch)] +=
+                    static_cast<float>(mass);
+                payload_.channel_mass[static_cast<size_t>(ch)] += mass;
+                payload_.signature_mass[static_cast<size_t>(sig)] += mass;
+
+                if (fl_idx >= 0) {
+                    const int pool = region_signature::fl_pool_index(
+                        sig, compartment);
+                    payload_.fl_pool_mass[
+                        static_cast<size_t>(pool) *
+                            CalibrationPayload::kFlBins +
+                        static_cast<size_t>(fl_idx)] += mass;
+                    payload_.fl_pool_total[static_cast<size_t>(pool)] += mass;
+                }
+            };
+
+            if (cross_left && cross_right) {
+                // Fully spans the region: split region_counts mass
+                // 50/50 between BOUNDARY_LEFT and BOUNDARY_RIGHT.
+                // FL pool: left and right boundary slots collapse to
+                // the same pool, so add total w exactly once via the
+                // left compartment to avoid double-counting.
+                const double half = 0.5 * w;
+                const int ch_l = region_signature::channel_index(
+                    region_signature::kCompartmentBoundaryLeft,
+                    splice_idx, strand_idx);
+                const int ch_r = region_signature::channel_index(
+                    region_signature::kCompartmentBoundaryRight,
+                    splice_idx, strand_idx);
+                payload_.region_counts[reg_base + static_cast<size_t>(ch_l)] +=
+                    static_cast<float>(half);
+                payload_.region_counts[reg_base + static_cast<size_t>(ch_r)] +=
+                    static_cast<float>(half);
+                payload_.channel_mass[static_cast<size_t>(ch_l)] += half;
+                payload_.channel_mass[static_cast<size_t>(ch_r)] += half;
+                payload_.signature_mass[static_cast<size_t>(sig)] += w;
+
+                if (fl_idx >= 0) {
+                    const int pool = region_signature::fl_pool_index(
+                        sig, region_signature::kCompartmentBoundaryLeft);
+                    payload_.fl_pool_mass[
+                        static_cast<size_t>(pool) *
+                            CalibrationPayload::kFlBins +
+                        static_cast<size_t>(fl_idx)] += w;
+                    payload_.fl_pool_total[static_cast<size_t>(pool)] += w;
+                }
+            } else if (cross_left) {
+                add_channel(region_signature::kCompartmentBoundaryLeft, w);
+            } else if (cross_right) {
+                add_channel(region_signature::kCompartmentBoundaryRight, w);
+            } else {
+                add_channel(region_signature::kCompartmentContained, w);
             }
         }
+    }
+
+    if (!any_region_hit) {
+        ++payload_.n_unannotated_ref;
     }
 }
 
@@ -209,24 +213,19 @@ void CalibrationAccumulator::merge_from(const CalibrationAccumulator& other) {
         throw std::runtime_error(
             "CalibrationAccumulator::merge_from: n_regions mismatch");
     }
-    add_into(payload_.global_counts,     other.payload_.global_counts);
-    add_into(payload_.per_region_counts, other.payload_.per_region_counts);
-    add_into(payload_.fl_hist,           other.payload_.fl_hist);
-    add_into(payload_.u_left,            other.payload_.u_left);
-    add_into(payload_.u_right,           other.payload_.u_right);
-    add_into(payload_.intron_counts_by_orient,
-             other.payload_.intron_counts_by_orient);
-    add_into(payload_.exon_contained_counts_by_orient,
-             other.payload_.exon_contained_counts_by_orient);
-    add_into(payload_.u_left_by_orient,  other.payload_.u_left_by_orient);
-    add_into(payload_.u_right_by_orient, other.payload_.u_right_by_orient);
-    payload_.n_observed          += other.payload_.n_observed;
-    payload_.n_excluded_multimap += other.payload_.n_excluded_multimap;
-    payload_.n_excluded_chimera  += other.payload_.n_excluded_chimera;
-    payload_.n_excluded_artifact += other.payload_.n_excluded_artifact;
-    payload_.n_unobserved        += other.payload_.n_unobserved;
-    payload_.n_unannotated_ref   += other.payload_.n_unannotated_ref;
-    payload_.n_below_tolerance   += other.payload_.n_below_tolerance;
+    add_into(payload_.region_counts,    other.payload_.region_counts);
+    add_into(payload_.channel_mass,     other.payload_.channel_mass);
+    add_into(payload_.signature_mass,   other.payload_.signature_mass);
+    add_into(payload_.fl_pool_mass,     other.payload_.fl_pool_mass);
+    add_into(payload_.fl_pool_total,    other.payload_.fl_pool_total);
+    payload_.n_observed              += other.payload_.n_observed;
+    payload_.n_excluded_multimap     += other.payload_.n_excluded_multimap;
+    payload_.n_excluded_chimera      += other.payload_.n_excluded_chimera;
+    payload_.n_excluded_artifact     += other.payload_.n_excluded_artifact;
+    payload_.n_excluded_strand_ambig += other.payload_.n_excluded_strand_ambig;
+    payload_.n_unobserved            += other.payload_.n_unobserved;
+    payload_.n_unannotated_ref       += other.payload_.n_unannotated_ref;
+    payload_.n_fl_unavailable        += other.payload_.n_fl_unavailable;
 }
 
 }  // namespace rigel::calibration

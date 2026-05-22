@@ -26,13 +26,18 @@ from rigel.calibration.locus_prior import (
     PriorTable,
 )
 from rigel.calibration.regions import RegionType
-from rigel.calibration.scan_payload import (
-    FL_HIST_N_BINS,
-    MASK_EXON,
-    MASK_INTERGENIC,
-    MASK_INTRON,
-    MASK_N_STATES,
-    CalibrationScanPayload,
+from rigel.calibration.scan_payload import FL_HIST_N_BINS, CalibrationScanPayload
+from rigel.calibration.signature import (
+    CHANNEL_STRAND_POS,
+    COMPARTMENT_CONTAINED,
+    FL_POOL_INTERGENIC_CONTAINED,
+    FL_POOL_INTRONIC_CONTAINED,
+    N_CHANNELS,
+    N_FL_POOLS,
+    N_SIGNATURES,
+    SPLICE_UNSPLICED,
+    channel_index,
+    pack_signature,
 )
 from rigel.frag_length_model import FragmentLengthModels
 from rigel.locus import Locus
@@ -59,6 +64,7 @@ def _make_region_df() -> pd.DataFrame:
             "exon_neg_bp": 0,
             "boundary_flux_left": False,
             "boundary_flux_right": False,
+            "signature": pack_signature(),
         },
         {
             "ref_name": "chr1",
@@ -72,6 +78,7 @@ def _make_region_df() -> pd.DataFrame:
             "exon_neg_bp": 0,
             "boundary_flux_left": True,
             "boundary_flux_right": True,
+            "signature": pack_signature(exon_pos=True),
         },
         {
             "ref_name": "chr1",
@@ -85,6 +92,7 @@ def _make_region_df() -> pd.DataFrame:
             "exon_neg_bp": 0,
             "boundary_flux_left": False,
             "boundary_flux_right": False,
+            "signature": pack_signature(intron_pos=True),
         },
     ]
     df = pd.DataFrame(rows)
@@ -93,6 +101,7 @@ def _make_region_df() -> pd.DataFrame:
         df[c] = df[c].astype(np.int64)
     df["type"] = df["type"].astype(np.uint8)
     df["strand"] = df["strand"].astype(np.uint8)
+    df["signature"] = df["signature"].astype(np.uint8)
     df.index = df["region_id"].to_numpy()
     return df
 
@@ -110,39 +119,56 @@ def _payload(
 ) -> CalibrationScanPayload:
     """Synthetic payload with hand-set FL histogram + per-region counts."""
     n_regions = 3
-    gc = np.zeros(MASK_N_STATES, dtype=np.int64)
-    gc[MASK_INTERGENIC] = n_intergenic
-    gc[MASK_INTRON] = n_intron
-    gc[MASK_EXON] = n_exon
-    per_region = np.zeros((n_regions, MASK_N_STATES), dtype=np.int64)
-    per_region[0, MASK_INTERGENIC] = n_intergenic
-    per_region[1, MASK_EXON] = n_exon
-    per_region[2, MASK_INTRON] = n_intron
-    h = np.zeros((MASK_N_STATES, FL_HIST_N_BINS), dtype=np.int64)
-    # gDNA pool (intron + intergenic) clusters at FL ≈ 350
-    h[MASK_INTRON, 300:400] = max(1, n_intron // 100)
-    h[MASK_INTERGENIC, 300:400] = max(1, n_intergenic // 100)
-    # Mirror n_observed into a benign bin so payload validator passes.
-    n_obs = int(gc.sum())
-    intron_by_orient = np.zeros((n_regions, 3), dtype=np.int64)
-    intron_by_orient[:, 2] = per_region[:, MASK_INTRON]
+    region_counts = np.zeros((n_regions, N_CHANNELS), dtype=np.float32)
+    contained_pos = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
+    region_counts[0, contained_pos] = n_intergenic
+    region_counts[1, contained_pos] = n_exon
+    region_counts[2, contained_pos] = n_intron
+
+    signature_mass = np.zeros(N_SIGNATURES, dtype=np.float64)
+    signature_mass[pack_signature()] = n_intergenic
+    signature_mass[pack_signature(exon_pos=True)] = n_exon
+    signature_mass[pack_signature(intron_pos=True)] = n_intron
+
+    fl_pool_mass = np.zeros((N_FL_POOLS, FL_HIST_N_BINS), dtype=np.float64)
+    _spread_fl_mass(fl_pool_mass, FL_POOL_INTERGENIC_CONTAINED, n_intergenic)
+    _spread_fl_mass(fl_pool_mass, FL_POOL_INTRONIC_CONTAINED, n_intron)
+
+    n_obs = int(n_intergenic + n_intron + n_exon)
     return CalibrationScanPayload(
-        global_counts=gc,
-        per_region_counts=per_region,
-        fl_hist=h,
-        u_left=np.zeros(n_regions, dtype=np.int64),
-        u_right=np.zeros(n_regions, dtype=np.int64),
-        intron_counts_by_orient=intron_by_orient,
-        exon_contained_counts_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
-        u_left_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
-        u_right_by_orient=np.zeros((n_regions, 3), dtype=np.int64),
+        region_counts=region_counts,
+        channel_mass=region_counts.sum(axis=0, dtype=np.float64),
+        signature_mass=signature_mass,
+        fl_pool_mass=fl_pool_mass,
+        fl_pool_total=fl_pool_mass.sum(axis=1),
         n_observed=n_obs,
         n_excluded_multimap=0,
         n_excluded_chimera=0,
         n_excluded_artifact=0,
+        n_excluded_strand_ambig=0,
         n_unobserved=0,
         n_unannotated_ref=0,
+        n_fl_unavailable=0,
+        resolver_splicing_anchor_tolerance=0,
+        n_regions=n_regions,
     )
+
+
+def _spread_fl_mass(
+    fl_pool_mass: np.ndarray,
+    pool_idx: int,
+    total: int,
+    *,
+    lo: int = 300,
+    hi: int = 400,
+) -> None:
+    if total <= 0:
+        return
+    width = hi - lo
+    base, rem = divmod(int(total), width)
+    fl_pool_mass[pool_idx, lo:hi] = base
+    if rem:
+        fl_pool_mass[pool_idx, lo : lo + rem] += 1.0
 
 
 def _scan_trained(
@@ -180,10 +206,11 @@ class TestCalibrateHappyPath:
         assert result.fl_models.global_.mean > 0.0
         assert result.fl_models.rna.mean > 0.0
         assert result.fl_models.gdna.mean > 0.0
-        # Densities
-        assert result.global_densities.gdna_fl_mean == pytest.approx(
-            float(result.fl_models.gdna.mean)
-        )
+        assert result.global_densities is not None
+        assert result.global_densities.intergenic.n_fragments == pytest.approx(100.0)
+        assert result.global_densities.intron.n_fragments == pytest.approx(200.0)
+        assert result.global_densities.strand_balance is not None
+        assert result.regional_exposure is not None
         # No priors yet
         assert result.n_multi_loci == 0
         assert len(result.gdna_prior_count) == 0
@@ -195,12 +222,10 @@ class TestCalibrateHappyPath:
             payload=_payload(),
             scan_trained=_scan_trained(),
         )
-        # All three single-bit diagnostic counters are exposed.
         d = result.diagnostics
-        assert d.n_intergenic_only == 100
-        assert d.n_intron_only == 200
-        # n_exon_only is the Diagnostics field for MASK_EXON.
-        assert d.n_exon_only == 50
+        assert d.mass_by_coarse_class["INTERGENIC"] == 100
+        assert d.mass_by_coarse_class["INTRON"] == 200
+        assert d.mass_by_coarse_class["EXON"] == 50
 
 
 class TestCalibrateLegacyIndexRejection:
@@ -293,11 +318,12 @@ class TestCalibrateFLPriorEssPropagates:
             payload=_payload(n_intron=50, n_intergenic=20),
             scan_trained=_scan_trained(),
         )
-        weak = calibrate(**common, fl_prior_ess=10.0)
+        weak = calibrate(**common, fl_prior_ess=1.0)
         strong = calibrate(**common, fl_prior_ess=10_000.0)
-        # Strong shrinkage pulls the gdna posterior mass toward the
-        # global distribution; weak shrinkage keeps it close to the raw
-        # gdna pool.  The smoothed log-prob vectors must differ.
+        # ``prior_ess`` is now a maximum: values above the adaptive cap
+        # collapse to the same evidence-derived strength, but values below
+        # the cap still reduce shrinkage. The smoothed log-prob vectors must
+        # differ when the caller supplies a genuinely smaller cap.
         assert not np.allclose(
             weak.fl_models.gdna._log_prob,
             strong.fl_models.gdna._log_prob,
@@ -338,8 +364,8 @@ class TestCalibratePoolQualityThresholds:
 
     def test_default_thresholds_classify_weak(self):
         cal = calibrate(**self._kwargs())
-        assert cal.fl_models.gdna_quality == "weak"  # 300 in [200, 5000)
-        assert cal.fl_models.rna_quality == "weak"  # 550 in [200, 5000)
+        assert cal.fl_models.gdna_quality == "weak"  # 300 in [1, 5000)
+        assert cal.fl_models.rna_quality == "weak"  # 550 in [1, 5000)
 
     def test_lowering_good_threshold_promotes_to_good(self):
         cal = calibrate(**self._kwargs(), pool_quality_good=200)

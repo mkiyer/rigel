@@ -18,13 +18,24 @@ from rigel.calibration.fl import (
     POOL_QUALITY_WEAK_THRESHOLD,
     build_fl_models,
 )
-from rigel.calibration.scan_payload import (
-    FL_HIST_N_BINS,
-    MASK_EXON,
-    MASK_INTERGENIC,
-    MASK_INTRON,
-    MASK_N_STATES,
-    CalibrationScanPayload,
+from rigel.calibration.scan_payload import FL_HIST_N_BINS, CalibrationScanPayload
+from rigel.calibration.signature import (
+    CHANNEL_STRAND_NEG,
+    CHANNEL_STRAND_POS,
+    COMPARTMENT_BOUNDARY_LEFT,
+    COMPARTMENT_CONTAINED,
+    FL_POOL_EXONIC_CONTAINED,
+    FL_POOL_INTERGENIC_BOUNDARY,
+    FL_POOL_INTERGENIC_CONTAINED,
+    FL_POOL_INTRONIC_BOUNDARY,
+    FL_POOL_INTRONIC_CONTAINED,
+    N_CHANNELS,
+    N_FL_POOLS,
+    N_SIGNATURES,
+    SPLICE_SPLICED,
+    SPLICE_UNSPLICED,
+    channel_index,
+    pack_signature,
 )
 from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
 from rigel.splice import SpliceType
@@ -40,9 +51,9 @@ assert FL_HIST_N_BINS >= N_BINS
 
 
 def _peaked(center: int, total: int) -> np.ndarray:
-    """Sharp Gaussian-ish FL histogram centred at ``center`` summing to ``total``."""
+    """Sharp Gaussian-ish FL histogram centered at ``center`` summing to ``total``."""
     x = np.arange(N_BINS)
-    raw = np.exp(-((x - center) ** 2) / (2 * 30.0 ** 2))
+    raw = np.exp(-((x - center) ** 2) / (2 * 30.0**2))
     raw /= raw.sum()
     counts = np.round(raw * total).astype(np.int64)
     diff = total - int(counts.sum())
@@ -50,44 +61,65 @@ def _peaked(center: int, total: int) -> np.ndarray:
     return counts
 
 
+def _pmf_mean(pmf: np.ndarray) -> float:
+    return float(np.dot(np.arange(pmf.size, dtype=np.float64), pmf))
+
+
 def _payload(
-    fl_hist_rows: dict[int, np.ndarray] | None = None,
-    global_counts: np.ndarray | None = None,
+    fl_pool_rows: dict[int, np.ndarray] | None = None,
+    channel_mass: np.ndarray | None = None,
+    signature_mass: np.ndarray | None = None,
+    n_observed: int | None = None,
 ) -> CalibrationScanPayload:
-    h = np.zeros((MASK_N_STATES, FL_HIST_N_BINS), dtype=np.int64)
-    if fl_hist_rows is not None:
-        for mask, vals in fl_hist_rows.items():
-            v = np.asarray(vals, dtype=np.int64)
-            h[mask, : v.size] = v
-    gc = (
-        np.asarray(global_counts, dtype=np.int64)
-        if global_counts is not None
-        else np.zeros(MASK_N_STATES, dtype=np.int64)
+    fl_pool_mass = np.zeros((N_FL_POOLS, FL_HIST_N_BINS), dtype=np.float64)
+    if fl_pool_rows is not None:
+        for pool_idx, vals in fl_pool_rows.items():
+            values = np.asarray(vals, dtype=np.float64)
+            fl_pool_mass[pool_idx, : values.size] = values
+
+    channel = (
+        np.asarray(channel_mass, dtype=np.float64)
+        if channel_mass is not None
+        else np.zeros(N_CHANNELS, dtype=np.float64)
     )
-    n_observed = int(gc.sum())
+    signature = (
+        np.asarray(signature_mass, dtype=np.float64)
+        if signature_mass is not None
+        else np.zeros(N_SIGNATURES, dtype=np.float64)
+    )
+    if n_observed is None:
+        n_observed = int(max(channel.sum(), signature.sum(), fl_pool_mass.sum()))
+
     return CalibrationScanPayload(
-        global_counts=gc,
-        per_region_counts=np.zeros((0, MASK_N_STATES), dtype=np.int64),
-        fl_hist=h,
-        u_left=np.zeros(0, dtype=np.int64),
-        u_right=np.zeros(0, dtype=np.int64),
-        intron_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
-        exon_contained_counts_by_orient=np.zeros((0, 3), dtype=np.int64),
-        u_left_by_orient=np.zeros((0, 3), dtype=np.int64),
-        u_right_by_orient=np.zeros((0, 3), dtype=np.int64),
-        n_observed=n_observed, n_excluded_multimap=0, n_excluded_chimera=0,
-        n_excluded_artifact=0, n_unobserved=0, n_unannotated_ref=0,
+        region_counts=np.zeros((0, N_CHANNELS), dtype=np.float32),
+        channel_mass=channel,
+        signature_mass=signature,
+        fl_pool_mass=fl_pool_mass,
+        fl_pool_total=fl_pool_mass.sum(axis=1),
+        n_observed=n_observed,
+        n_excluded_multimap=0,
+        n_excluded_chimera=0,
+        n_excluded_artifact=0,
+        n_excluded_strand_ambig=0,
+        n_unobserved=0,
+        n_unannotated_ref=0,
+        n_fl_unavailable=0,
+        resolver_splicing_anchor_tolerance=0,
+        n_regions=0,
     )
 
 
-def _scan_trained(global_hist: np.ndarray, spliced_hist: np.ndarray | None = None) -> FragmentLengthModels:
+def _scan_trained(
+    global_hist: np.ndarray,
+    spliced_hist: np.ndarray | None = None,
+) -> FragmentLengthModels:
     flm = FragmentLengthModels(max_size=MAX_SIZE)
     flm.global_model.counts[: global_hist.size] = global_hist.astype(np.float64)
     flm.global_model._total_weight = float(global_hist.sum())
     if spliced_hist is not None:
-        sm = flm.category_models[SpliceType.SPLICED_ANNOT]
-        sm.counts[: spliced_hist.size] = spliced_hist.astype(np.float64)
-        sm._total_weight = float(spliced_hist.sum())
+        spliced_model = flm.category_models[SpliceType.SPLICED_ANNOT]
+        spliced_model.counts[: spliced_hist.size] = spliced_hist.astype(np.float64)
+        spliced_model._total_weight = float(spliced_hist.sum())
     return flm
 
 
@@ -95,49 +127,50 @@ def _scan_trained(global_hist: np.ndarray, spliced_hist: np.ndarray | None = Non
 # Source extractors
 # ---------------------------------------------------------------------------
 
-def test_extract_global_counts_returns_int64_view_of_global_model():
-    g = _peaked(300, 12_345)
-    scan = _scan_trained(g)
+
+def test_extract_global_counts_returns_float64_view_of_global_model():
+    global_hist = _peaked(300, 12_345)
+    scan = _scan_trained(global_hist)
     out = extract_global_counts(scan)
-    assert out.dtype == np.int64
+    assert out.dtype == np.float64
     assert out.sum() == 12_345
 
 
 def test_extract_rna_counts_pulls_from_spliced_annot_bin():
-    g = _peaked(300, 50_000)
-    s = _peaked(250, 7_777)
-    scan = _scan_trained(g, spliced_hist=s)
+    global_hist = _peaked(300, 50_000)
+    spliced_hist = _peaked(250, 7_777)
+    scan = _scan_trained(global_hist, spliced_hist=spliced_hist)
     out = extract_rna_counts(scan)
-    assert out.dtype == np.int64
+    assert out.dtype == np.float64
     assert out.sum() == 7_777
 
 
-def test_extract_gdna_counts_sums_only_unspliced_pool_masks():
-    """Mask 0b001 (EXON_ONLY) MUST NOT contribute — spliced-genomic-span trap."""
-    payload = _payload({
-        MASK_EXON:                       np.array([1_000_000]),  # ignored
-        MASK_INTRON:                     np.array([1000]),
-        MASK_EXON | MASK_INTRON:         np.array([2000]),
-        MASK_INTERGENIC:                 np.array([3000]),
-        MASK_EXON | MASK_INTERGENIC:     np.array([100]),       # ignored
-        MASK_INTRON | MASK_INTERGENIC:   np.array([100]),       # ignored
-        MASK_EXON | MASK_INTRON | MASK_INTERGENIC: np.array([100]),  # ignored
-    })
+def test_extract_gdna_counts_sums_only_intergenic_and_intronic_fl_pools():
+    payload = _payload(
+        {
+            FL_POOL_EXONIC_CONTAINED: np.array([1_000_000]),
+            FL_POOL_INTRONIC_CONTAINED: np.array([1000]),
+            FL_POOL_INTRONIC_BOUNDARY: np.array([2000]),
+            FL_POOL_INTERGENIC_CONTAINED: np.array([3000]),
+            FL_POOL_INTERGENIC_BOUNDARY: np.array([4000]),
+        }
+    )
     out = extract_gdna_counts(payload)
-    assert out.dtype == np.int64
-    assert int(out.sum()) == 1000 + 2000 + 3000
+    assert out.dtype == np.float64
+    assert int(out.sum()) == 1000 + 2000 + 3000 + 4000
 
 
 # ---------------------------------------------------------------------------
-# build_fl_models — quality classifier branches
+# build_fl_models - quality classifier branches
 # ---------------------------------------------------------------------------
+
 
 def test_good_branch_pure_empirical():
-    n_g = POOL_QUALITY_GOOD_THRESHOLD + 100
+    n_good = POOL_QUALITY_GOOD_THRESHOLD + 100
     fl = build_fl_models(
         global_counts=_peaked(300, 50_000),
-        rna_counts=_peaked(280, n_g),
-        gdna_counts=_peaked(180, n_g),
+        rna_counts=_peaked(280, n_good),
+        gdna_counts=_peaked(180, n_good),
         max_size=MAX_SIZE,
     )
     assert fl.rna_quality == "good"
@@ -146,13 +179,26 @@ def test_good_branch_pure_empirical():
     assert abs(fl.gdna.mean - 180.0) < 5.0
 
 
+def test_good_branch_scoring_pmf_stays_empirical_for_short_fl():
+    fl = build_fl_models(
+        global_counts=_peaked(300, 50_000),
+        rna_counts=_peaked(70, 6_000),
+        gdna_counts=_peaked(70, 6_000),
+        max_size=MAX_SIZE,
+    )
+    assert fl.rna_quality == "good"
+    assert fl.gdna_quality == "good"
+    assert abs(_pmf_mean(fl.rna.pmf) - 70.0) < 3.0
+    assert abs(_pmf_mean(fl.gdna.pmf) - 70.0) < 3.0
+
+
 def test_weak_branch_eb_borrows_from_global():
-    n_g = (POOL_QUALITY_GOOD_THRESHOLD + POOL_QUALITY_WEAK_THRESHOLD) // 2
+    n_weak = (POOL_QUALITY_GOOD_THRESHOLD + POOL_QUALITY_WEAK_THRESHOLD) // 2
     global_counts = _peaked(400, 50_000)
     fl_weak = build_fl_models(
         global_counts=global_counts,
-        rna_counts=_peaked(180, n_g),
-        gdna_counts=_peaked(180, n_g),
+        rna_counts=_peaked(180, n_weak),
+        gdna_counts=_peaked(180, n_weak),
         max_size=MAX_SIZE,
     )
     fl_good = build_fl_models(
@@ -163,23 +209,35 @@ def test_weak_branch_eb_borrows_from_global():
     )
     assert fl_weak.rna_quality == "weak"
     assert fl_weak.gdna_quality == "weak"
-    # Under EB, the weak pool borrows mass from global (peak at 400),
-    # giving strictly higher likelihood there than the pure-empirical good fit.
     assert fl_weak.rna.log_likelihood(400) > fl_good.rna.log_likelihood(400)
     assert fl_weak.gdna.log_likelihood(400) > fl_good.gdna.log_likelihood(400)
 
 
-def test_fallback_branch_identity_shares_global():
-    n = POOL_QUALITY_WEAK_THRESHOLD - 1
+def test_low_nonzero_pool_builds_weak_model_without_erasing_channel_signal():
     fl = build_fl_models(
         global_counts=_peaked(300, 50_000),
-        rna_counts=_peaked(180, n),
-        gdna_counts=_peaked(180, n),
+        rna_counts=_peaked(70, 50),
+        gdna_counts=_peaked(70, 50),
+        max_size=MAX_SIZE,
+    )
+    assert fl.rna_quality == "weak"
+    assert fl.gdna_quality == "weak"
+    assert fl.rna is not fl.global_
+    assert fl.gdna is not fl.global_
+    assert abs(fl.rna.mean - 70.0) < 35.0
+    assert abs(fl.gdna.mean - 70.0) < 35.0
+
+
+def test_fallback_branch_identity_shares_global():
+    n_fallback = POOL_QUALITY_WEAK_THRESHOLD - 1
+    fl = build_fl_models(
+        global_counts=_peaked(300, 50_000),
+        rna_counts=_peaked(180, n_fallback),
+        gdna_counts=_peaked(180, n_fallback),
         max_size=MAX_SIZE,
     )
     assert fl.rna_quality == "fallback"
     assert fl.gdna_quality == "fallback"
-    # Identity-share — no recomputation.
     assert fl.rna is fl.global_
     assert fl.gdna is fl.global_
 
@@ -201,15 +259,14 @@ def test_empty_pools_fall_back():
 # Single-policy invariants
 # ---------------------------------------------------------------------------
 
+
 def test_eb_symmetry_rna_and_gdna():
-    """The single EB policy must produce IDENTICAL rna and gdna models when
-    fed identical raw counts.  This is the structural guard against
-    accidental policy divergence."""
     global_counts = _peaked(400, 50_000)
-    pool = _peaked(180, 1500)   # weak branch for both
+    pool = _peaked(180, 1500)
     fl = build_fl_models(
         global_counts=global_counts,
-        rna_counts=pool, gdna_counts=pool,
+        rna_counts=pool,
+        gdna_counts=pool,
         max_size=MAX_SIZE,
     )
     assert fl.rna_quality == fl.gdna_quality == "weak"
@@ -220,10 +277,6 @@ def test_eb_symmetry_rna_and_gdna():
 
 
 def test_global_is_unconditional_anchor_no_prior():
-    """``global_`` is finalized with NO prior (it IS the prior).
-    Verify by feeding only global counts: rna/gdna fall back, but the
-    fallback ``is global_`` and global mean equals the empirical mean.
-    """
     fl = build_fl_models(
         global_counts=_peaked(300, 100_000),
         rna_counts=np.zeros(N_BINS, dtype=np.int64),
@@ -236,18 +289,19 @@ def test_global_is_unconditional_anchor_no_prior():
 
 
 # ---------------------------------------------------------------------------
-# EXON_ONLY isolation: counted, not modelled
+# EXONIC isolation: counted, not modeled as gDNA
 # ---------------------------------------------------------------------------
 
-def test_exon_only_does_not_affect_gdna_model_via_extractor():
-    """One million EXON_ONLY observations in the gDNA-pool histogram
-    column must NOT shift any FL-bin log-likelihood of ``gdna``."""
+
+def test_exonic_fl_pool_does_not_affect_gdna_model_via_extractor():
     intron_only = _peaked(180, 10_000)
-    payload_clean = _payload({MASK_INTRON: intron_only})
-    payload_with_exon = _payload({
-        MASK_INTRON: intron_only,
-        MASK_EXON:   _peaked(800, 1_000_000),
-    })
+    payload_clean = _payload({FL_POOL_INTRONIC_CONTAINED: intron_only})
+    payload_with_exon = _payload(
+        {
+            FL_POOL_INTRONIC_CONTAINED: intron_only,
+            FL_POOL_EXONIC_CONTAINED: _peaked(800, 1_000_000),
+        }
+    )
     scan = _scan_trained(_peaked(300, 50_000))
 
     fl_clean = build_fl_models(
@@ -268,41 +322,58 @@ def test_exon_only_does_not_affect_gdna_model_via_extractor():
 
 
 # ---------------------------------------------------------------------------
-# Diagnostics — accountability + no mask-int leakage
+# Diagnostics - accountability + no mask-int leakage
 # ---------------------------------------------------------------------------
 
-def test_diagnostics_total_equals_n_observed():
-    gc = np.array([7, 11, 13, 17, 19, 23, 29, 31], dtype=np.int64)
-    payload = _payload(global_counts=gc)
+
+def test_diagnostics_total_equals_n_observed_when_no_exclusions():
+    payload = _payload(n_observed=31)
     diag = Diagnostics.from_payload(payload)
-    assert diag.total() == int(gc.sum())
+    assert diag.total() == 31
     assert diag.total() == payload.n_observed
 
 
-def test_diagnostics_named_fields_match_mask_codes():
-    gc = np.zeros(MASK_N_STATES, dtype=np.int64)
-    gc[0] = 1
-    gc[MASK_EXON] = 2
-    gc[MASK_INTRON] = 3
-    gc[MASK_EXON | MASK_INTRON] = 4
-    gc[MASK_INTERGENIC] = 5
-    gc[MASK_EXON | MASK_INTERGENIC] = 6
-    gc[MASK_INTRON | MASK_INTERGENIC] = 7
-    gc[MASK_EXON | MASK_INTRON | MASK_INTERGENIC] = 8
-    diag = Diagnostics.from_payload(_payload(global_counts=gc))
-    assert diag.n_unannotated == 1
-    assert diag.n_exon_only == 2
-    assert diag.n_intron_only == 3
-    assert diag.n_exon_intron == 4
-    assert diag.n_intergenic_only == 5
-    assert diag.n_exon_intergenic == 6
-    assert diag.n_intron_intergenic == 7
-    assert diag.n_exon_intron_intergenic == 8
+def test_diagnostics_named_fields_are_human_readable():
+    channel = np.zeros(N_CHANNELS, dtype=np.float64)
+    channel[channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)] = 2
+    channel[channel_index(COMPARTMENT_BOUNDARY_LEFT, SPLICE_SPLICED, CHANNEL_STRAND_NEG)] = 3
+
+    signature = np.zeros(N_SIGNATURES, dtype=np.float64)
+    signature[0] = 5
+    signature[pack_signature(intron_pos=True)] = 7
+    signature[pack_signature(exon_neg=True)] = 11
+
+    payload = _payload(
+        fl_pool_rows={
+            FL_POOL_INTERGENIC_CONTAINED: np.array([4]),
+            FL_POOL_INTRONIC_BOUNDARY: np.array([6]),
+        },
+        channel_mass=channel,
+        signature_mass=signature,
+    )
+    diag = Diagnostics.from_payload(payload)
+    summary = diag.to_summary_dict()
+
+    assert diag.mass_by_compartment["CONTAINED"] == 2
+    assert diag.mass_by_compartment["BOUNDARY_LEFT"] == 3
+    assert diag.mass_by_splice["UNSPLICED"] == 2
+    assert diag.mass_by_splice["SPLICED"] == 3
+    assert diag.mass_by_strand["POS"] == 2
+    assert diag.mass_by_strand["NEG"] == 3
+    assert diag.mass_by_coarse_class["INTERGENIC"] == 5
+    assert diag.mass_by_coarse_class["INTRON"] == 7
+    assert diag.mass_by_coarse_class["EXON"] == 11
+    assert summary["fl_pool_total"]["INTERGENIC_CONTAINED"] == 4
+    assert summary["fl_pool_total"]["INTRONIC_BOUNDARY"] == 6
 
 
 def test_summary_dicts_contain_no_mask_int_keys():
-    """Regression guard: no public surface may name mask integers."""
-    diag = Diagnostics.from_payload(_payload(global_counts=np.ones(MASK_N_STATES, dtype=np.int64)))
+    diag = Diagnostics.from_payload(
+        _payload(
+            channel_mass=np.ones(N_CHANNELS, dtype=np.float64),
+            signature_mass=np.ones(N_SIGNATURES, dtype=np.float64),
+        )
+    )
     fl = build_fl_models(
         global_counts=_peaked(300, 10_000),
         rna_counts=_peaked(280, 5000),
@@ -310,14 +381,23 @@ def test_summary_dicts_contain_no_mask_int_keys():
         max_size=MAX_SIZE,
     )
     blob = json.dumps(diag.to_summary_dict()) + json.dumps(fl.to_summary_dict())
-    for forbidden in ("mask_0", "mask_1", "mask_2", "mask_3", "mask_4",
-                      "mask_5", "mask_6", "mask_7"):
+    for forbidden in (
+        "mask_0",
+        "mask_1",
+        "mask_2",
+        "mask_3",
+        "mask_4",
+        "mask_5",
+        "mask_6",
+        "mask_7",
+    ):
         assert forbidden not in blob
 
 
 # ---------------------------------------------------------------------------
 # Frozen contract + finalized models
 # ---------------------------------------------------------------------------
+
 
 def test_fl_models_is_frozen():
     fl = build_fl_models(
@@ -337,8 +417,7 @@ def test_returned_models_are_finalized_and_callable():
         gdna_counts=_peaked(180, 5000),
         max_size=MAX_SIZE,
     )
-    for m in (fl.global_, fl.rna, fl.gdna):
-        assert isinstance(m, FragmentLengthModel)
-        # log_likelihood must answer without raising on any in-range FL.
-        _ = m.log_likelihood(180)
-        _ = m.log_likelihood(800)
+    for model in (fl.global_, fl.rna, fl.gdna):
+        assert isinstance(model, FragmentLengthModel)
+        _ = model.log_likelihood(180)
+        _ = model.log_likelihood(800)

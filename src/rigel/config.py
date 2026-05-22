@@ -151,47 +151,35 @@ class BamScanConfig:
     """Scan buffer spill directory (default ``None`` = system temp dir)."""
 
     splicing_anchor_tolerance: int = 3
-    """Minimum bp clearance K required on each side of an exon-intron
-    boundary for a fragment to (a) contribute its EXON|INTRON bit to
-    the per-fragment ``obs_mask`` and (b) count as a boundary-crossing
-    event in ``u_left`` / ``u_right``.
+    """Resolver-side splicing-anchor tolerance ``K`` (bp).
 
-    Internally enforced as ``q(K) = max(K, 1)`` so that ``K = 0``
-    reproduces the pre-2026.05 strict-crossing semantics bit-for-bit.
-    The matched ``B_cross(K)`` denominator in the global gDNA density
-    estimator uses the same ``q(K)``; the numerator/denominator must
-    agree or per-locus :math:`\\eta_g` is biased.
+    Used only by implicit-splice resolution: a paired-end genomic gap
+    can be treated as containing an annotated intron when the intron is
+    supported with this many bp of one-sided slack.
 
-    Default 3 bp removes the great majority of single-bp alignment
-    artefacts (soft-clip drift, indel slippage near GT-AG splice
-    motifs) at the cost of ~1% of true short-overhang exposure for
-    typical 350 bp gDNA fragments. Set to 0 to disable the tolerance
-    and reproduce pre-2026.05 calibration outputs exactly.
+    Under the fractional cutover the calibration accumulator no longer
+    interprets this value \u2014 compartment / splice / strand are
+    recorded directly into 12 fractional channels per region. The
+    field is preserved here so the resolver can still be tuned
+    independently. Default 3 bp matches the pre-cutover behaviour.
     """
 
     def __post_init__(self) -> None:
         if self.total_threads < 0:
-            raise ValueError(
-                f"BamScanConfig.total_threads must be >= 0; got {self.total_threads}."
-            )
+            raise ValueError(f"BamScanConfig.total_threads must be >= 0; got {self.total_threads}.")
         if self.bgzf_threads < 0:
-            raise ValueError(
-                f"BamScanConfig.bgzf_threads must be >= 0; got {self.bgzf_threads}."
-            )
+            raise ValueError(f"BamScanConfig.bgzf_threads must be >= 0; got {self.bgzf_threads}.")
         if self.fragments_per_chunk < 1:
             raise ValueError(
-                "BamScanConfig.fragments_per_chunk must be >= 1; "
-                f"got {self.fragments_per_chunk}."
+                f"BamScanConfig.fragments_per_chunk must be >= 1; got {self.fragments_per_chunk}."
             )
         if self.read_name_batch_size < 1:
             raise ValueError(
-                "BamScanConfig.read_name_batch_size must be >= 1; "
-                f"got {self.read_name_batch_size}."
+                f"BamScanConfig.read_name_batch_size must be >= 1; got {self.read_name_batch_size}."
             )
         if self.buffer_size_bytes < 0:
             raise ValueError(
-                "BamScanConfig.buffer_size_bytes must be >= 0; "
-                f"got {self.buffer_size_bytes}."
+                f"BamScanConfig.buffer_size_bytes must be >= 0; got {self.buffer_size_bytes}."
             )
         if self.splicing_anchor_tolerance < 0:
             raise ValueError(
@@ -223,22 +211,25 @@ class CalibrationConfig:
     """Configuration for the v6 gDNA calibration orchestrator
     (:func:`rigel.calibration.calibrate`)."""
 
-    #: Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage
-    #: in :func:`rigel.calibration.calibrate`.  The ``rna`` and ``gdna``
-    #: per-pool FL distributions are shrunk toward the global FL with
-    #: this many pseudo-observations.  Default matches
+    #: Maximum Empirical-Bayes evidence strength for FL shrinkage in
+    #: :func:`rigel.calibration.calibrate`. The ``rna`` and ``gdna``
+    #: per-pool FL distributions are shrunk toward the global FL, but
+    #: the effective prior strength is capped from the pool's own
+    #: evidence so sparse channel-specific signal is not erased. Default matches
     #: :data:`rigel.calibration.fl.POOL_EB_PRIOR_ESS`.
     prior_ess: float = 1000.0
 
     #: Minimum SPLICED-annotated count (``rna``) and gDNA count required
     #: for the pool's per-FL distribution to be flagged ``"good"`` /
-    #: ``"weak"`` respectively.  Below ``weak_threshold`` a pool is
-    #: flagged ``"unusable"`` and downstream code falls back on the
-    #: global FL.  Default matches
+    #: ``"weak"`` respectively. Below ``weak_threshold`` a pool is
+    #: flagged ``"fallback"`` and downstream code falls back on the
+    #: global FL. By default, any non-empty pool can contribute a weak
+    #: adaptive model; set this higher to require more evidence before leaving
+    #: the global fallback. Default matches
     #: :data:`rigel.calibration.fl.POOL_QUALITY_GOOD_THRESHOLD` /
     #: :data:`rigel.calibration.fl.POOL_QUALITY_WEAK_THRESHOLD`.
     pool_quality_good: int = 5_000
-    pool_quality_weak: int = 200
+    pool_quality_weak: int = 1
 
     #: Enable the regional exposure model. Per-region ``A_r`` weights are
     #: applied to EM effective-length denominators, not per-fragment numerator
@@ -256,6 +247,7 @@ class CalibrationConfig:
                 "CalibrationConfig.regional_exposure_reference_quantile must be in (0, 1]; "
                 f"got {self.regional_exposure_reference_quantile}."
             )
+
 
 @dataclass(frozen=True)
 class PipelineConfig:

@@ -20,6 +20,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "calibration/region_signature.h"
+
 namespace rigel::calibration {
 
 // Public mask layout — single source of truth for the 8-state coding.
@@ -34,18 +36,28 @@ constexpr int     N_STATES   = 8;
 
 class RegionIndex {
 public:
+    static constexpr uint8_t kSignatureSentinel = 0xFF;
+    static constexpr uint8_t kMaxBoundaryKind = 5;
+
     RegionIndex() = default;
 
     /**
      * Single setup call. Arrays are copied into private buffers.
      *
      * Inputs MUST be sorted by (ref_id, start) with regions per-ref
-     * contiguous and non-overlapping. ``type_masks[i]`` is the
-     * pre-computed bit mask for region ``i`` (see ``mask::``).
+         * contiguous and non-overlapping. Fine signatures and boundary
+         * metadata are carried for the fractional accumulator migration;
+         * ``type_masks`` and ``strands`` remain the Phase 2 bridge used by
+         * the integer accumulator.
      */
     void set(const int32_t* ref_ids,
              const int64_t* starts,
              const int64_t* ends,
+             const uint8_t* signatures,
+             const uint8_t* left_signatures,
+             const uint8_t* right_signatures,
+             const uint8_t* boundary_kind_left,
+             const uint8_t* boundary_kind_right,
              const uint8_t* type_masks,
              const uint8_t* strands,
              int64_t n_regions,
@@ -58,6 +70,11 @@ public:
 
         starts_.assign(starts, starts + n_regions);
         ends_.assign(ends, ends + n_regions);
+    signatures_.assign(signatures, signatures + n_regions);
+    left_signatures_.assign(left_signatures, left_signatures + n_regions);
+    right_signatures_.assign(right_signatures, right_signatures + n_regions);
+    boundary_kind_left_.assign(boundary_kind_left, boundary_kind_left + n_regions);
+    boundary_kind_right_.assign(boundary_kind_right, boundary_kind_right + n_regions);
         type_masks_.assign(type_masks, type_masks + n_regions);
         strands_.assign(strands, strands + n_regions);
         n_refs_ = n_refs;
@@ -75,6 +92,34 @@ public:
             if (r < cur_ref) {
                 throw std::invalid_argument(
                     "RegionIndex::set: regions not sorted by ref_id");
+            }
+            if (ends[i] <= starts[i]) {
+                throw std::invalid_argument(
+                    "RegionIndex::set: region end must be greater than start");
+            }
+            if (i > 0 && r == ref_ids[i - 1]) {
+                if (starts[i] < starts[i - 1]) {
+                    throw std::invalid_argument(
+                        "RegionIndex::set: regions not sorted by start within ref");
+                }
+                if (starts[i] < ends[i - 1]) {
+                    throw std::invalid_argument(
+                        "RegionIndex::set: regions overlap within ref");
+                }
+            }
+            if (!valid_signature(signatures[i])) {
+                throw std::invalid_argument(
+                    "RegionIndex::set: signature out of range");
+            }
+            if (!valid_neighbor_signature(left_signatures[i]) ||
+                !valid_neighbor_signature(right_signatures[i])) {
+                throw std::invalid_argument(
+                    "RegionIndex::set: neighbor signature out of range");
+            }
+            if (boundary_kind_left[i] > kMaxBoundaryKind ||
+                boundary_kind_right[i] > kMaxBoundaryKind) {
+                throw std::invalid_argument(
+                    "RegionIndex::set: boundary kind out of range");
             }
             while (cur_ref < r) {
                 ref_offsets_[cur_ref + 1] = i;
@@ -118,14 +163,32 @@ public:
 
     inline int64_t  start(int32_t rid)     const { return starts_[rid]; }
     inline int64_t  end(int32_t rid)       const { return ends_[rid]; }
+    inline uint8_t  signature(int32_t rid) const { return signatures_[rid]; }
+    inline uint8_t  left_signature(int32_t rid) const { return left_signatures_[rid]; }
+    inline uint8_t  right_signature(int32_t rid) const { return right_signatures_[rid]; }
+    inline uint8_t  boundary_kind_left(int32_t rid) const { return boundary_kind_left_[rid]; }
+    inline uint8_t  boundary_kind_right(int32_t rid) const { return boundary_kind_right_[rid]; }
     inline uint8_t  type_mask(int32_t rid) const { return type_masks_[rid]; }
     inline uint8_t  strand(int32_t rid)    const { return strands_[rid]; }
     inline int64_t  n_regions()            const { return static_cast<int64_t>(starts_.size()); }
     inline int32_t  n_refs()               const { return n_refs_; }
 
 private:
+    static constexpr bool valid_signature(uint8_t value) {
+        return value < region_signature::kNSignatures;
+    }
+
+    static constexpr bool valid_neighbor_signature(uint8_t value) {
+        return valid_signature(value) || value == kSignatureSentinel;
+    }
+
     std::vector<int64_t> starts_;
     std::vector<int64_t> ends_;
+    std::vector<uint8_t> signatures_;
+    std::vector<uint8_t> left_signatures_;
+    std::vector<uint8_t> right_signatures_;
+    std::vector<uint8_t> boundary_kind_left_;
+    std::vector<uint8_t> boundary_kind_right_;
     std::vector<uint8_t> type_masks_;
     std::vector<uint8_t> strands_;
     std::vector<int64_t> ref_offsets_;   // size = n_refs_ + 1

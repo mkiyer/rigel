@@ -19,7 +19,7 @@ import pytest
 from rigel.calibration._arrays import PayloadArrays, RegionArrays
 from rigel.calibration.scan_payload import CalibrationScanPayload
 from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, ORIENT_UNINF
-from rigel.calibration.regions import RegionStrand, RegionType
+from rigel.calibration.regions import BoundaryKind, RegionStrand, RegionType, SIGNATURE_SENTINEL
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.native import BamScanner
 from rigel.pipeline import run_pipeline, scan_and_buffer
@@ -58,8 +58,13 @@ def calib_scenario(tmp_path):
         ],
     )
     sim_config = SimConfig(
-        frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-        read_length=100, strand_specificity=1.0, seed=SEED,
+        frag_mean=200,
+        frag_std=30,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=1.0,
+        seed=SEED,
     )
     result = sc.build_oracle(n_fragments=500, sim_config=sim_config)
     yield sc, result
@@ -76,56 +81,73 @@ def _make_scanner(index):
 
 
 def _basic_region_arrays(index):
-    """Build a minimal valid (ref_ids, starts, ends, type_masks) input."""
+    """Build a minimal valid Phase 2 ``set_regions`` argument bundle."""
     resolver_map = index.resolver.get_ref_to_id()
     # One INTERGENIC region [0, 100) on every known ref.
     ref_ids = np.array(sorted(resolver_map.values()), dtype=np.int32)
     n = ref_ids.size
     starts = np.zeros(n, dtype=np.int64)
     ends = np.full(n, 100, dtype=np.int64)
+    signatures = np.zeros(n, dtype=np.uint8)
+    left_signatures = np.full(n, SIGNATURE_SENTINEL, dtype=np.uint8)
+    right_signatures = np.full(n, SIGNATURE_SENTINEL, dtype=np.uint8)
+    boundary_kind_left = np.full(n, int(BoundaryKind.NONE), dtype=np.uint8)
+    boundary_kind_right = np.full(n, int(BoundaryKind.NONE), dtype=np.uint8)
     type_masks = np.full(n, 0b100, dtype=np.uint8)  # INTERGENIC bit
     strands = np.zeros(n, dtype=np.uint8)
-    return ref_ids, starts, ends, type_masks, strands
+    return (
+        ref_ids,
+        starts,
+        ends,
+        signatures,
+        left_signatures,
+        right_signatures,
+        boundary_kind_left,
+        boundary_kind_right,
+        type_masks,
+        strands,
+    )
 
 
 class TestSetRegions:
     def test_basic_install(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm, st = _basic_region_arrays(result.index)
+        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
         n_refs = int(ri.max()) + 1
-        scanner.set_regions(ri, s, e, tm, st, n_refs)  # should not raise
+        scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st, n_refs)  # should not raise
 
-    def test_legacy_install_defaults_to_uninformative_strands(self, calib_scenario):
+    def test_legacy_install_overload_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm, _st = _basic_region_arrays(result.index)
+        ri, s, e, _sig, _ls, _rs, _bkl, _bkr, tm, _st = _basic_region_arrays(result.index)
         n_refs = int(ri.max()) + 1
-        scanner.set_regions(ri, s, e, tm, n_refs)  # should not raise
+        with pytest.raises(TypeError):
+            scanner.set_regions(ri, s, e, tm, n_refs)
 
     def test_length_mismatch_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm, st = _basic_region_arrays(result.index)
+        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
         with pytest.raises(Exception):
             # ends array truncated by one
-            scanner.set_regions(ri, s, e[:-1], tm, st, int(ri.max()) + 1)
+            scanner.set_regions(ri, s, e[:-1], sig, ls, rs, bkl, bkr, tm, st, int(ri.max()) + 1)
 
     def test_strand_length_mismatch_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm, st = _basic_region_arrays(result.index)
+        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
         with pytest.raises(Exception):
-            scanner.set_regions(ri, s, e, tm, st[:-1], int(ri.max()) + 1)
+            scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st[:-1], int(ri.max()) + 1)
 
     def test_double_set_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, tm, st = _basic_region_arrays(result.index)
+        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
         n_refs = int(ri.max()) + 1
-        scanner.set_regions(ri, s, e, tm, st, n_refs)
+        scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st, n_refs)
         with pytest.raises(Exception):
-            scanner.set_regions(ri, s, e, tm, st, n_refs)
+            scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st, n_refs)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +160,9 @@ class TestPipelinePayload:
         _, result = calib_scenario
         scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
         _stats, _sm, _flm, _buf, payload = scan_and_buffer(
-            str(result.bam_path), result.index, scan_cfg,
+            str(result.bam_path),
+            result.index,
+            scan_cfg,
         )
         assert payload is not None
         # global_counts sums to n_observed by validator construction
@@ -279,7 +303,9 @@ class TestWorkerMergeEquality:
         def _run(n: int) -> CalibrationScanPayload:
             cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n)
             _, _, _, _, p = scan_and_buffer(
-                str(result.bam_path), result.index, cfg,
+                str(result.bam_path),
+                result.index,
+                cfg,
             )
             return p
 
@@ -340,6 +366,8 @@ class TestPayloadArrayOrdering:
             payload_arrays.exon_contained_by_orient[:, ORIENT_SAME],
             np.array([10, 20, 30]),
         )
+
+
 # ---------------------------------------------------------------------------
 # 5. Hand-built BAM contract tests against `mini_index`
 #
@@ -386,10 +414,18 @@ def _build_bam(tmp_path, ref_lengths, reads):
 
 
 def _make_pair(
-    qname, ref_id, r1_pos, r2_pos, *,
-    r1_cigar=None, r2_cigar=None,
-    r1_is_reverse=False, r2_is_reverse=True,
-    r2_ref_id=None, nh=1, extra_tags=None,
+    qname,
+    ref_id,
+    r1_pos,
+    r2_pos,
+    *,
+    r1_cigar=None,
+    r2_cigar=None,
+    r1_is_reverse=False,
+    r2_is_reverse=True,
+    r2_ref_id=None,
+    nh=1,
+    extra_tags=None,
 ):
     """Construct an FR-oriented paired-end read.
 
@@ -514,7 +550,8 @@ class TestBoundaryFlux:
         ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
         chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
         bam = _build_bam(
-            tmp_path, ref_lens,
+            tmp_path,
+            ref_lens,
             _make_pair("frag", chr1_id, r1_pos, r2_pos),
         )
         return _scan(bam, mini_index)
@@ -665,11 +702,12 @@ class TestObservationPolicy:
         # — a trans-chromosomal pair that resolves only as chimeric.
         import pysam
         from rigel.index import TranscriptIndex
+
         gtf = (
-            'chr1\tt\texon\t100\t200\t.\t+\t.\t'
+            "chr1\tt\texon\t100\t200\t.\t+\t.\t"
             'gene_id "g1"; transcript_id "t1"; gene_name "GA"; '
             'gene_type "protein_coding"; tag "basic";\n'
-            'chr2\tt\texon\t100\t200\t.\t+\t.\t'
+            "chr2\tt\texon\t100\t200\t.\t+\t.\t"
             'gene_id "g2"; transcript_id "t2"; gene_name "GB"; '
             'gene_type "protein_coding"; tag "basic";\n'
         )
@@ -682,7 +720,7 @@ class TestObservationPolicy:
                 f.write(f">{ref}\n")
                 seq = "N" * L
                 for i in range(0, L, 80):
-                    f.write(seq[i:i + 80] + "\n")
+                    f.write(seq[i : i + 80] + "\n")
         pysam.faidx(str(fasta_path))
         idx_dir = base / "index"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
@@ -692,7 +730,10 @@ class TestObservationPolicy:
         ref_to_id = idx.resolver.get_ref_to_id()
         chr1_id, chr2_id = ref_to_id["chr1"], ref_to_id["chr2"]
         reads = _make_pair(
-            "chim", chr1_id, 120, 130,
+            "chim",
+            chr1_id,
+            120,
+            130,
             r2_ref_id=chr2_id,
         )
         bam = _build_bam(tmp_path, ref_lens, reads)
@@ -714,7 +755,7 @@ class TestObservationPolicy:
         from rigel.index import SJ_BLACKLIST_FEATHER, TranscriptIndex
 
         gtf = (
-            'chr1\tt\texon\t100\t200\t.\t+\t.\t'
+            "chr1\tt\texon\t100\t200\t.\t+\t.\t"
             'gene_id "g1"; transcript_id "t1"; gene_name "GA"; '
             'gene_type "protein_coding"; tag "basic";\n'
         )
@@ -726,7 +767,7 @@ class TestObservationPolicy:
             f.write(">chr1\n")
             seq = "N" * 1000
             for i in range(0, 1000, 80):
-                f.write(seq[i:i + 80] + "\n")
+                f.write(seq[i : i + 80] + "\n")
         pysam.faidx(str(fasta_path))
         idx_dir = base / "index"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
@@ -735,10 +776,10 @@ class TestObservationPolicy:
         # with large max-anchor thresholds so any short anchor matches.
         bl_df = pd.DataFrame(
             {
-                "ref":              ["chr1"],
-                "start":            np.array([300], dtype=np.int32),
-                "end":              np.array([400], dtype=np.int32),
-                "max_anchor_left":  np.array([100], dtype=np.int32),
+                "ref": ["chr1"],
+                "start": np.array([300], dtype=np.int32),
+                "end": np.array([400], dtype=np.int32),
+                "max_anchor_left": np.array([100], dtype=np.int32),
                 "max_anchor_right": np.array([100], dtype=np.int32),
             }
         )

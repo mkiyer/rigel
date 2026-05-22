@@ -1,225 +1,197 @@
-"""Tests for ``rigel.calibration.regions.emit_regions`` and the
-``regions.feather`` artifact produced by ``build_index_artifacts``.
-
-Schema and semantics are locked in
-``docs/calibration/calibration_v6_plan.md`` §2.2.
-"""
+"""Tests for the v4 fine-grained calibration region builder."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
+from rigel.calibration import signature as sig
 from rigel.calibration.regions import (
-    RegionStrand,
+    BoundaryKind,
     RegionType,
-    emit_regions,
+    build_fine_region_table,
+    classify_boundary_kind,
+    validate_against_ref_lengths,
 )
-from rigel.index import (
-    _iter_reference_layout,
-    build_index_artifacts,
-)
+from rigel.index import build_genomic_intervals, build_index_artifacts
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
 
-def _mk_tx(t_idx: int, ref: str, strand: Strand, exons: list[tuple[int, int]],
-           is_synthetic: bool = False) -> Transcript:
+def _mk_tx(
+    t_index: int,
+    ref: str,
+    strand: Strand,
+    exons: list[tuple[int, int]],
+    is_synthetic: bool = False,
+) -> Transcript:
     return Transcript(
         ref=ref,
         strand=strand,
-        exons=[Interval(s, e) for s, e in exons],
-        t_id=f"t{t_idx}",
-        g_id=f"g{t_idx}",
-        t_index=t_idx,
-        g_index=t_idx,
+        exons=[Interval(start, end) for start, end in exons],
+        t_id=f"t{t_index}",
+        g_id=f"g{t_index}",
+        t_index=t_index,
+        g_index=t_index,
         is_synthetic=is_synthetic,
     )
 
 
-def _regions(ref_length, transcripts, ref="chr1"):
-    layout = _iter_reference_layout(ref_length, transcripts)
-    return list(emit_regions(ref, layout))
+def _regions(
+    ref_length: int,
+    transcripts: list[Transcript],
+    *,
+    ref: str = "chr1",
+) -> pd.DataFrame:
+    return build_fine_region_table(transcripts, {ref: ref_length})
 
 
 def test_empty_reference_one_intergenic_region():
-    regs = _regions(1000, [])
-    assert len(regs) == 1
-    r = regs[0]
-    assert r.type == RegionType.INTERGENIC
-    assert (r.start, r.end) == (0, 1000)
-    assert r.strand == RegionStrand.NONE
-    assert r.tx_pos_bp == r.tx_neg_bp == 0
-    assert r.exon_pos_bp == r.exon_neg_bp == 0
-    assert r.boundary_flux_left is False and r.boundary_flux_right is False
+    region_df = _regions(1000, [])
+
+    assert region_df["signature"].tolist() == [0x0]
+    assert region_df.loc[0, "type"] == int(RegionType.INTERGENIC)
+    assert (region_df.loc[0, "start"], region_df.loc[0, "end"]) == (0, 1000)
+    assert region_df.loc[0, "left_signature"] == 0xFF
+    assert region_df.loc[0, "right_signature"] == 0xFF
+    assert region_df.loc[0, "boundary_kind_left"] == int(BoundaryKind.NONE)
+    assert region_df.loc[0, "boundary_kind_right"] == int(BoundaryKind.NONE)
 
 
-def test_single_exon_transcript_no_boundary_flux():
-    """Single-exon (+) transcript: one EXON region, both bf flags False."""
-    t = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
-    regs = _regions(1000, [t])
-    # Expect: INTERGENIC[0,100), EXON[100,200), INTERGENIC[200,1000)
-    assert [r.type for r in regs] == [
-        RegionType.INTERGENIC, RegionType.EXON, RegionType.INTERGENIC,
+def test_single_exon_transcript_emits_exon_signature_with_flanks():
+    transcript = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
+    region_df = _regions(1000, [transcript])
+
+    assert region_df["signature"].tolist() == [0x0, 0x2, 0x0]
+    assert list(zip(region_df["start"], region_df["end"], strict=True)) == [
+        (0, 100),
+        (100, 200),
+        (200, 1000),
     ]
-    exon = regs[1]
-    assert (exon.start, exon.end) == (100, 200)
-    assert exon.strand == RegionStrand.POS
-    assert exon.exon_pos_bp == 100 and exon.exon_neg_bp == 0
-    assert exon.tx_pos_bp == 100 and exon.tx_neg_bp == 0
-    assert exon.boundary_flux_left is False
-    assert exon.boundary_flux_right is False
+    assert bool(region_df.loc[1, "exon_pos"])
+    assert region_df.loc[1, "strand"] == sig.coarse_strand_from_signature(0x2)
+    assert bool(region_df.loc[1, "boundary_flux_left"])
+    assert bool(region_df.loc[1, "boundary_flux_right"])
 
 
-def test_two_exon_transcript_internal_boundaries_flagged():
-    """Two-exon (+) transcript: EXON[0] has bfr=True; EXON[1] has bfl=True."""
-    t = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)])
-    regs = _regions(1000, [t])
-    # Within genic span [100,400): EXON[100,200), INTRON[200,300), EXON[300,400)
-    types = [r.type for r in regs]
-    assert types == [
-        RegionType.INTERGENIC, RegionType.EXON, RegionType.INTRON,
-        RegionType.EXON, RegionType.INTERGENIC,
+def test_two_exon_transcript_emits_exon_intron_exon():
+    transcript = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)])
+    region_df = _regions(1000, [transcript])
+
+    assert region_df["signature"].tolist() == [0x0, 0x2, 0x8, 0x2, 0x0]
+    assert list(zip(region_df["start"], region_df["end"], strict=True)) == [
+        (0, 100),
+        (100, 200),
+        (200, 300),
+        (300, 400),
+        (400, 1000),
     ]
-    e1, intron, e2 = regs[1], regs[2], regs[3]
-    assert (e1.boundary_flux_left, e1.boundary_flux_right) == (False, True)
-    assert (e2.boundary_flux_left, e2.boundary_flux_right) == (True, False)
-    assert (intron.boundary_flux_left, intron.boundary_flux_right) == (False, False)
-    assert intron.strand == RegionStrand.POS
-    assert intron.tx_pos_bp == 100 and intron.exon_pos_bp == 0
+    assert region_df.loc[2, "type"] == int(RegionType.INTRON)
+    assert region_df.loc[1, "boundary_kind_right"] == int(BoundaryKind.EXON_INTRON)
+    assert region_df.loc[2, "boundary_kind_left"] == int(BoundaryKind.EXON_INTRON)
 
 
-def test_three_exon_transcript_middle_exon_both_flagged():
-    """Three-exon (+) transcript: middle EXON has both bf flags True."""
-    t = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400), (500, 600)])
-    regs = _regions(1000, [t])
-    types = [r.type for r in regs]
-    assert types == [
-        RegionType.INTERGENIC,
-        RegionType.EXON, RegionType.INTRON, RegionType.EXON, RegionType.INTRON, RegionType.EXON,
-        RegionType.INTERGENIC,
-    ]
-    middle = regs[3]
-    assert (middle.start, middle.end) == (300, 400)
-    assert middle.boundary_flux_left is True
-    assert middle.boundary_flux_right is True
-    # Terminal exons keep one flag False (the TSS / TES side).
-    assert regs[1].boundary_flux_left is False  # TSS
-    assert regs[5].boundary_flux_right is False  # TES
+def test_overlapping_same_strand_exons_merge_identical_signature_runs():
+    first = _mk_tx(0, "chr1", Strand.POS, [(100, 250)])
+    second = _mk_tx(1, "chr1", Strand.POS, [(150, 300)])
+    region_df = _regions(1000, [first, second])
+
+    assert region_df["signature"].tolist() == [0x0, 0x2, 0x0]
+    assert tuple(region_df.loc[1, ["start", "end"]]) == (100, 300)
 
 
-def test_overlapping_strands_in_exon_marks_ambig():
-    """Overlapping (+)-exon and (-)-exon at same coords → strand=AMBIG, both bp counted."""
-    tp = _mk_tx(0, "chr1", Strand.POS, [(100, 300)])
-    tn = _mk_tx(1, "chr1", Strand.NEG, [(100, 300)])
-    regs = _regions(1000, [tp, tn])
-    exon = next(r for r in regs if r.type == RegionType.EXON)
-    assert exon.strand == RegionStrand.AMBIG
-    assert exon.exon_pos_bp == 200
-    assert exon.exon_neg_bp == 200
-    assert exon.tx_pos_bp == 200
-    assert exon.tx_neg_bp == 200
+def test_overlapping_opposite_strand_exons_emit_ambiguous_exon_signature():
+    pos_tx = _mk_tx(0, "chr1", Strand.POS, [(100, 300)])
+    neg_tx = _mk_tx(1, "chr1", Strand.NEG, [(100, 300)])
+    region_df = _regions(1000, [pos_tx, neg_tx])
+
+    assert region_df["signature"].tolist() == [0x0, 0x3, 0x0]
+    assert region_df.loc[1, "strand"] == sig.coarse_strand_from_signature(0x3)
 
 
-def test_exon_wins_over_intron_at_overlap():
-    """Where one transcript's exon overlaps another's intron, EXON wins."""
-    t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (400, 500)])  # intron 200-400
-    t2 = _mk_tx(1, "chr1", Strand.POS, [(250, 350)])               # inside the intron
-    regs = _regions(1000, sorted([t1, t2], key=lambda x: (x.start, x.end)))
-    # Genic span [100,500). Within it:
-    #   EXON[100,200) (t1.exon0)
-    #   INTRON[200,250) (t1 intron, t2 not yet)
-    #   EXON[250,350) (t2.exon)
-    #   INTRON[350,400) (t1 intron only)
-    #   EXON[400,500) (t1.exon1)
-    types = [r.type for r in regs if r.type != RegionType.INTERGENIC]
-    assert types == [
-        RegionType.EXON, RegionType.INTRON, RegionType.EXON,
-        RegionType.INTRON, RegionType.EXON,
-    ]
+def test_opposite_strand_exon_intron_overlap_sets_both_bits():
+    pos_exon = _mk_tx(0, "chr1", Strand.POS, [(250, 350)])
+    neg_intron = _mk_tx(1, "chr1", Strand.NEG, [(100, 200), (400, 500)])
+    region_df = _regions(1000, [pos_exon, neg_intron])
+
+    assert 0x6 in region_df["signature"].tolist()
+    overlap = region_df[region_df["signature"] == 0x6].iloc[0]
+    assert (overlap["start"], overlap["end"]) == (250, 350)
+    assert overlap["type"] == int(RegionType.EXON)
+
+
+def test_same_strand_exon_intron_overlap_sets_both_bits():
+    intron_tx = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (400, 500)])
+    exon_tx = _mk_tx(1, "chr1", Strand.POS, [(250, 350)])
+    region_df = _regions(1000, [intron_tx, exon_tx])
+
+    assert 0xA in region_df["signature"].tolist()
+    overlap = region_df[region_df["signature"] == 0xA].iloc[0]
+    assert (overlap["start"], overlap["end"]) == (250, 350)
+    assert overlap["strand"] == sig.coarse_strand_from_signature(0xA)
 
 
 def test_synthetic_transcripts_excluded_from_regions():
-    """Synthetics must not contribute to exon or transcript bp counts."""
     real = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
-    syn = _mk_tx(1, "chr1", Strand.POS, [(150, 800)], is_synthetic=True)
-    regs = _regions(1000, sorted([real, syn], key=lambda x: (x.start, x.end)))
-    # The synthetic must not extend the genic span beyond [100,200).
-    exon_regs = [r for r in regs if r.type == RegionType.EXON]
-    assert len(exon_regs) == 1
-    assert (exon_regs[0].start, exon_regs[0].end) == (100, 200)
-    assert exon_regs[0].exon_pos_bp == 100   # only `real` counted
+    synthetic = _mk_tx(1, "chr1", Strand.POS, [(150, 800)], is_synthetic=True)
+    region_df = _regions(1000, [real, synthetic])
 
-
-def test_region_partition_tiles_reference_exactly():
-    """Regions must tile [0, ref_length) with no gaps, no overlaps."""
-    txs = [
-        _mk_tx(0, "chr1", Strand.POS, [(100, 200), (400, 500)]),
-        _mk_tx(1, "chr1", Strand.NEG, [(800, 900)]),
-    ]
-    regs = _regions(2000, sorted(txs, key=lambda x: (x.start, x.end)))
-    cursor = 0
-    for r in regs:
-        assert r.start == cursor
-        cursor = r.end
-    assert cursor == 2000
+    assert region_df["signature"].tolist() == [0x0, 0x2, 0x0]
+    assert tuple(region_df.loc[1, ["start", "end"]]) == (100, 200)
 
 
 def test_build_index_artifacts_schema_and_region_id():
-    """End-to-end: build_index_artifacts produces a region_df with locked dtypes
-    and a globally monotonic region_id."""
-    txs = [
+    transcripts = [
         _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)]),
         _mk_tx(1, "chr2", Strand.NEG, [(50, 150)]),
     ]
-    iv_df, region_df = build_index_artifacts(txs, {"chr1": 1000, "chr2": 500})
+    _, region_df = build_index_artifacts(transcripts, {"chr1": 1000, "chr2": 500})
 
-    # dtypes
     assert region_df["region_id"].dtype == np.int64
     assert region_df["start"].dtype == np.int64
     assert region_df["end"].dtype == np.int64
+    assert region_df["length"].dtype == np.int64
+    assert region_df["signature"].dtype == np.uint8
     assert region_df["type"].dtype == np.uint8
     assert region_df["strand"].dtype == np.uint8
-    assert region_df["tx_pos_bp"].dtype == np.int64
-    assert region_df["exon_pos_bp"].dtype == np.int64
     assert region_df["boundary_flux_left"].dtype == np.bool_
-    assert region_df["boundary_flux_right"].dtype == np.bool_
-    # ref_name is StringDtype, not object
+    assert region_df["left_signature"].dtype == np.uint8
+    assert region_df["boundary_kind_left"].dtype == np.uint8
     assert isinstance(region_df["ref_name"].dtype, pd.StringDtype)
-
-    # region_id is 0..N-1 and matches DataFrame row order
-    assert list(region_df["region_id"]) == list(range(len(region_df)))
-
-    # Tiling per ref
-    for ref, ref_len in [("chr1", 1000), ("chr2", 500)]:
-        sub = region_df[region_df["ref_name"] == ref].sort_values("start")
-        cursor = 0
-        for _, row in sub.iterrows():
-            assert row["start"] == cursor
-            cursor = row["end"]
-        assert cursor == ref_len
+    assert "tx_pos_bp" not in region_df.columns
+    assert "exon_pos_bp" not in region_df.columns
+    assert region_df["region_id"].tolist() == list(range(len(region_df)))
+    validate_against_ref_lengths(region_df, {"chr1": 1000, "chr2": 500})
 
 
-def test_build_index_artifacts_intervals_unchanged_by_refactor(tmp_path_factory):
-    """``intervals.feather`` must be byte-identical to the legacy generator output.
+def test_neighbor_signatures_and_boundary_kinds_match_adjacent_rows():
+    transcript = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)])
+    region_df = _regions(1000, [transcript])
 
-    Verified by comparing ``build_index_artifacts(...)[0]`` against
-    ``build_genomic_intervals(...)`` on the same inputs.
-    """
-    from rigel.index import build_genomic_intervals
+    signatures = region_df["signature"].tolist()
+    for row_index, row in region_df.iterrows():
+        expected_left = 0xFF if row_index == 0 else signatures[row_index - 1]
+        expected_right = 0xFF if row_index == len(region_df) - 1 else signatures[row_index + 1]
+        assert row["left_signature"] == expected_left
+        assert row["right_signature"] == expected_right
+        assert row["boundary_kind_left"] == classify_boundary_kind(expected_left, row["signature"])
+        assert row["boundary_kind_right"] == classify_boundary_kind(
+            row["signature"], expected_right
+        )
 
-    txs = [
+
+def test_build_index_artifacts_intervals_unchanged_by_refactor():
+    transcripts = [
         _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)]),
         _mk_tx(1, "chr1", Strand.POS, [(150, 350)]),
         _mk_tx(2, "chr1", Strand.NEG, [(700, 900)]),
         _mk_tx(3, "chr2", Strand.POS, [(50, 150)]),
-        # Synthetic: must NOT change intervals.feather.
         _mk_tx(4, "chr1", Strand.POS, [(120, 880)], is_synthetic=True),
     ]
-    txs.sort(key=lambda t: (t.ref, t.start, t.end))
+    transcripts.sort(key=lambda transcript: (transcript.ref, transcript.start, transcript.end))
     ref_lengths = {"chr1": 1500, "chr2": 500}
 
-    iv_new, _ = build_index_artifacts(txs, ref_lengths)
-    iv_legacy = build_genomic_intervals(txs, ref_lengths)
+    intervals_new, _ = build_index_artifacts(transcripts, ref_lengths)
+    intervals_legacy = build_genomic_intervals(transcripts, ref_lengths)
 
-    pd.testing.assert_frame_equal(iv_new, iv_legacy)
+    pd.testing.assert_frame_equal(intervals_new, intervals_legacy)

@@ -49,6 +49,13 @@ SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
 
 ### Changed (Breaking)
 
+- **Fine-grained calibration region index schema**: `regions.feather`
+  is bumped to `INDEX_FORMAT_VERSION = 4` and now persists a 4-bit
+  fine signature (`intron_pos`, `intron_neg`, `exon_pos`, `exon_neg`)
+  per region, plus adjacent-signature and boundary-kind metadata. Old
+  indexes fail to load with an explicit rebuild message. Rebuild with
+  `rigel index --fasta ... --gtf ...`.
+
 - **Float32 scored-fragment payloads**: the native scorer now stores
   `log_liks`, `coverage_weights`, and `gdna_log_liks` as float32 payload
   arrays, while native locus EM promotes them back to double for

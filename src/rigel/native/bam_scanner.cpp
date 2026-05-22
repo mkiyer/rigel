@@ -47,6 +47,7 @@
 #include "thread_queue.h"
 #include "ndarray_util.h"
 #include "calibration/accumulator.h"
+#include "calibration/region_signature.h"
 
 namespace nb = nanobind;
 using namespace rigel;
@@ -364,9 +365,8 @@ struct WorkerState {
     FragLenObservations fraglen_obs;
     rigel::calibration::CalibrationAccumulator cal_acc;
 
-    WorkerState(int32_t n_transcripts, int64_t n_regions,
-                int32_t splicing_anchor_tolerance)
-        : scratch(n_transcripts), cal_acc(n_regions, splicing_anchor_tolerance) {}
+    WorkerState(int32_t n_transcripts, int64_t n_regions)
+        : scratch(n_transcripts), cal_acc(n_regions) {}
 };
 
 // Merge observations
@@ -973,10 +973,6 @@ public:
     std::unique_ptr<rigel::calibration::RegionIndex> region_index_;
     // Calibration accumulator (built from per-worker merges in scan()).
     std::unique_ptr<rigel::calibration::CalibrationAccumulator> cal_acc_merged_;
-    // Boundary-tolerance K (bp) used by the calibration accumulator.
-    // Configured via set_regions(); applies uniformly to all workers and
-    // to the matched ``B_cross`` denominator on the Python side.
-    int32_t splicing_anchor_tolerance_ = 0;
 
     BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
@@ -997,26 +993,37 @@ public:
     // per-ref CSR overlap index.  Must be called BEFORE scan() if
     // calibration observations are required.  The five input arrays
     // must be of equal length, sorted by (ref_id, start), and
-    // per-ref contiguous + non-overlapping.  ``type_masks`` are the
-    // pre-computed bit masks (bit 0 = EXON, bit 1 = INTRON,
-    // bit 2 = INTERGENIC), and ``strands`` are RegionStrand codes.
+    // per-ref contiguous + non-overlapping.  Fine signatures and neighbor
+    // boundary metadata are carried for the Phase 3 fractional accumulator;
+    // ``type_masks`` and ``strands`` remain coarse bridge columns surfaced
+    // for downstream Python consumers; the fractional accumulator itself
+    // routes mass purely from the fine signature.
     void set_regions(
         nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> signatures,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> left_signatures,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> right_signatures,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_left,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_right,
         nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
         nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
-        int32_t n_refs,
-        int32_t splicing_anchor_tolerance = 0)
+        int32_t n_refs)
     {
         const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
         if (static_cast<int64_t>(starts.shape(0)) != n ||
             static_cast<int64_t>(ends.shape(0))    != n ||
+            static_cast<int64_t>(signatures.shape(0)) != n ||
+            static_cast<int64_t>(left_signatures.shape(0)) != n ||
+            static_cast<int64_t>(right_signatures.shape(0)) != n ||
+            static_cast<int64_t>(boundary_kind_left.shape(0)) != n ||
+            static_cast<int64_t>(boundary_kind_right.shape(0)) != n ||
             static_cast<int64_t>(type_masks.shape(0)) != n ||
             static_cast<int64_t>(strands.shape(0)) != n)
         {
             throw std::invalid_argument(
-                "set_regions: ref_ids, starts, ends, type_masks, strands "
+                "set_regions: region metadata arrays "
                 "must all have the same length");
         }
         if (region_index_) {
@@ -1024,46 +1031,13 @@ public:
                 "set_regions: regions already set on this BamScanner; "
                 "create a new instance");
         }
-        if (splicing_anchor_tolerance < 0) {
-            throw std::invalid_argument(
-                "set_regions: splicing_anchor_tolerance must be >= 0");
-        }
-        splicing_anchor_tolerance_ = splicing_anchor_tolerance;
         region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
         region_index_->set(ref_ids.data(), starts.data(), ends.data(),
-                           type_masks.data(), strands.data(), n, n_refs);
-    }
-
-    void set_regions_legacy(
-        nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
-        int32_t n_refs,
-        int32_t splicing_anchor_tolerance = 0)
-    {
-        const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
-        if (static_cast<int64_t>(starts.shape(0)) != n ||
-            static_cast<int64_t>(ends.shape(0))    != n ||
-            static_cast<int64_t>(type_masks.shape(0)) != n)
-        {
-            throw std::invalid_argument(
-                "set_regions: ref_ids, starts, ends, type_masks "
-                "must all have the same length");
-        }
-        if (region_index_) {
-            throw std::runtime_error(
-                "set_regions: regions already set on this BamScanner; "
-                "create a new instance");
-        }
-        if (splicing_anchor_tolerance < 0) {
-            throw std::invalid_argument(
-                "set_regions: splicing_anchor_tolerance must be >= 0");
-        }
-        std::vector<uint8_t> strands(static_cast<size_t>(n), STRAND_NONE);
-        splicing_anchor_tolerance_ = splicing_anchor_tolerance;
-        region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
-        region_index_->set(ref_ids.data(), starts.data(), ends.data(),
+                           signatures.data(),
+                           left_signatures.data(),
+                           right_signatures.data(),
+                           boundary_kind_left.data(),
+                           boundary_kind_right.data(),
                            type_masks.data(), strands.data(), n, n_refs);
     }
 
@@ -1105,12 +1079,12 @@ public:
         if (region_index_) {
             cal_acc_merged_ =
                 std::make_unique<rigel::calibration::CalibrationAccumulator>(
-                    n_regions, splicing_anchor_tolerance_);
+                    n_regions);
         }
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
             auto ws = std::make_unique<WorkerState>(
-                n_transcripts, n_regions, splicing_anchor_tolerance_);
+                n_transcripts, n_regions);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
             worker_states.push_back(std::move(ws));
@@ -1747,46 +1721,42 @@ private:
         fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
         result["frag_length_observations"] = fraglen_dict;
 
-        // Calibration payload (optional — present iff set_regions() was called).
+        // Calibration payload (optional - present iff set_regions() was called).
         if (cal_acc_merged_) {
             auto& payload = cal_acc_merged_->payload();
             const size_t n_reg =
                 static_cast<size_t>(cal_acc_merged_->n_regions());
             nb::dict cal_dict;
-            // Copy the fixed-size global counts to a heap vector for capsule
-            // ownership (std::array can't be moved into capsule cleanly).
-            std::vector<int64_t> gc(payload.global_counts.begin(),
-                                    payload.global_counts.end());
-            cal_dict["global_counts"]      = vec_to_ndarray(std::move(gc));
-            cal_dict["per_region_counts"]  = vec_to_ndarray2d(
-                std::move(payload.per_region_counts), n_reg,
-                static_cast<size_t>(rigel::calibration::mask::N_STATES));
-            cal_dict["fl_hist"]            = vec_to_ndarray2d(
-                std::move(payload.fl_hist),
-                static_cast<size_t>(rigel::calibration::mask::N_STATES),
+            cal_dict["region_counts"] = vec_to_ndarray2d(
+                std::move(payload.region_counts), n_reg,
+                static_cast<size_t>(rigel::calibration::CalibrationPayload::kChannels));
+            // Channel/signature global marginals (copy fixed-size arrays
+            // into heap vectors for capsule ownership).
+            std::vector<double> ch_mass(payload.channel_mass.begin(),
+                                        payload.channel_mass.end());
+            cal_dict["channel_mass"] = vec_to_ndarray(std::move(ch_mass));
+            std::vector<double> sig_mass(payload.signature_mass.begin(),
+                                         payload.signature_mass.end());
+            cal_dict["signature_mass"] = vec_to_ndarray(std::move(sig_mass));
+            // FL pools: (6, kFlBins) row-major.
+            cal_dict["fl_pool_mass"] = vec_to_ndarray2d(
+                std::move(payload.fl_pool_mass),
+                static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlPools),
                 static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlBins));
-            cal_dict["u_left"]             = vec_to_ndarray(std::move(payload.u_left));
-            cal_dict["u_right"]            = vec_to_ndarray(std::move(payload.u_right));
-            cal_dict["intron_counts_by_orient"] = vec_to_ndarray2d(
-                std::move(payload.intron_counts_by_orient), n_reg,
-                static_cast<size_t>(rigel::calibration::orient::N));
-            cal_dict["exon_contained_counts_by_orient"] = vec_to_ndarray2d(
-                std::move(payload.exon_contained_counts_by_orient), n_reg,
-                static_cast<size_t>(rigel::calibration::orient::N));
-            cal_dict["u_left_by_orient"]   = vec_to_ndarray2d(
-                std::move(payload.u_left_by_orient), n_reg,
-                static_cast<size_t>(rigel::calibration::orient::N));
-            cal_dict["u_right_by_orient"]  = vec_to_ndarray2d(
-                std::move(payload.u_right_by_orient), n_reg,
-                static_cast<size_t>(rigel::calibration::orient::N));
-            cal_dict["n_observed"]         = payload.n_observed;
-            cal_dict["n_excluded_multimap"]= payload.n_excluded_multimap;
-            cal_dict["n_excluded_chimera"] = payload.n_excluded_chimera;
-            cal_dict["n_excluded_artifact"]= payload.n_excluded_artifact;
-            cal_dict["n_unobserved"]       = payload.n_unobserved;
-            cal_dict["n_unannotated_ref"]  = payload.n_unannotated_ref;
-            cal_dict["n_below_tolerance"]  = payload.n_below_tolerance;
-            cal_dict["splicing_anchor_tolerance"] = splicing_anchor_tolerance_;
+            std::vector<double> pool_total(payload.fl_pool_total.begin(),
+                                           payload.fl_pool_total.end());
+            cal_dict["fl_pool_total"] = vec_to_ndarray(std::move(pool_total));
+            cal_dict["n_observed"]                 = payload.n_observed;
+            cal_dict["n_excluded_multimap"]        = payload.n_excluded_multimap;
+            cal_dict["n_excluded_chimera"]         = payload.n_excluded_chimera;
+            cal_dict["n_excluded_artifact"]        = payload.n_excluded_artifact;
+            cal_dict["n_excluded_strand_ambig"]    = payload.n_excluded_strand_ambig;
+            cal_dict["n_unobserved"]               = payload.n_unobserved;
+            cal_dict["n_unannotated_ref"]          = payload.n_unannotated_ref;
+            cal_dict["n_fl_unavailable"]           = payload.n_fl_unavailable;
+            cal_dict["resolver_splicing_anchor_tolerance"] =
+                ctx_->splicing_anchor_tolerance();
+            cal_dict["n_regions"] = static_cast<int64_t>(n_reg);
             result["calibration"] = cal_dict;
         } else {
             result["calibration"] = nb::none();
@@ -2351,6 +2321,113 @@ NB_MODULE(_bam_impl, m) {
               "Provides BamScanner (pass 1: BAM → resolve → buffer) and\n"
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
+    namespace rs = rigel::calibration::region_signature;
+    m.attr("REGION_SIG_INTRON_POS") = rs::kBitIntronPos;
+    m.attr("REGION_SIG_INTRON_NEG") = rs::kBitIntronNeg;
+    m.attr("REGION_SIG_EXON_POS") = rs::kBitExonPos;
+    m.attr("REGION_SIG_EXON_NEG") = rs::kBitExonNeg;
+    m.attr("REGION_SIG_N_STATES") = rs::kNSignatures;
+    m.attr("REGION_CHAN_CONTAINED") = rs::kCompartmentContained;
+    m.attr("REGION_CHAN_BOUNDARY_LEFT") = rs::kCompartmentBoundaryLeft;
+    m.attr("REGION_CHAN_BOUNDARY_RIGHT") = rs::kCompartmentBoundaryRight;
+    m.attr("REGION_N_CHANNELS") = rs::kNChannels;
+    m.def("region_pack_signature",
+          [](bool intron_pos, bool intron_neg, bool exon_pos, bool exon_neg) {
+              return rs::pack_signature(intron_pos, intron_neg, exon_pos, exon_neg);
+          },
+          nb::arg("intron_pos") = false,
+          nb::arg("intron_neg") = false,
+          nb::arg("exon_pos") = false,
+          nb::arg("exon_neg") = false,
+          "Pack fine-region flags into the canonical 4-bit signature.");
+    m.def("region_coarse_type_from_signature",
+          [](int signature) {
+              return rs::coarse_type_from_signature(static_cast<std::uint8_t>(signature));
+          },
+          nb::arg("signature"),
+          "Derive the coarse region type from a fine-region signature.");
+    m.def("region_coarse_strand_from_signature",
+          [](int signature) {
+              return rs::coarse_strand_from_signature(static_cast<std::uint8_t>(signature));
+          },
+          nb::arg("signature"),
+          "Derive the coarse region strand from a fine-region signature.");
+    m.def("region_channel_index", &rs::channel_index,
+          nb::arg("compartment"),
+          nb::arg("splice_idx"),
+          nb::arg("strand_idx"),
+          "Pack compartment, splice, and strand indices into a 12-channel index.");
+
+    nb::class_<rigel::calibration::RegionIndex>(m, "RegionIndex")
+        .def(nb::init<>())
+        .def("set",
+             [](rigel::calibration::RegionIndex& self,
+                nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
+                nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+                nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> signatures,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> left_signatures,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> right_signatures,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_left,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_right,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
+                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
+                int32_t n_refs) {
+                 const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
+                 if (static_cast<int64_t>(starts.shape(0)) != n ||
+                     static_cast<int64_t>(ends.shape(0)) != n ||
+                     static_cast<int64_t>(signatures.shape(0)) != n ||
+                     static_cast<int64_t>(left_signatures.shape(0)) != n ||
+                     static_cast<int64_t>(right_signatures.shape(0)) != n ||
+                     static_cast<int64_t>(boundary_kind_left.shape(0)) != n ||
+                     static_cast<int64_t>(boundary_kind_right.shape(0)) != n ||
+                     static_cast<int64_t>(type_masks.shape(0)) != n ||
+                     static_cast<int64_t>(strands.shape(0)) != n) {
+                     throw std::invalid_argument(
+                         "RegionIndex.set: region metadata arrays must all have the same length");
+                 }
+                 self.set(ref_ids.data(), starts.data(), ends.data(),
+                          signatures.data(), left_signatures.data(), right_signatures.data(),
+                          boundary_kind_left.data(), boundary_kind_right.data(),
+                          type_masks.data(), strands.data(), n, n_refs);
+             },
+             nb::arg("ref_ids"),
+             nb::arg("starts"),
+             nb::arg("ends"),
+             nb::arg("signatures"),
+             nb::arg("left_signatures"),
+             nb::arg("right_signatures"),
+             nb::arg("boundary_kind_left"),
+             nb::arg("boundary_kind_right"),
+             nb::arg("type_masks"),
+             nb::arg("strands"),
+             nb::arg("n_refs"),
+             "Install a sorted per-reference calibration region partition.")
+        .def("overlap", [](const rigel::calibration::RegionIndex& self,
+                           int32_t ref_id,
+                           int64_t start,
+                           int64_t end) {
+                std::vector<int32_t> out;
+                self.overlap_into(ref_id, start, end, out);
+                return out;
+             },
+             nb::arg("ref_id"),
+             nb::arg("start"),
+             nb::arg("end"),
+             "Return region ids overlapping [start, end) on ref_id.")
+        .def("start", &rigel::calibration::RegionIndex::start, nb::arg("rid"))
+        .def("end", &rigel::calibration::RegionIndex::end, nb::arg("rid"))
+        .def("signature", &rigel::calibration::RegionIndex::signature, nb::arg("rid"))
+        .def("left_signature", &rigel::calibration::RegionIndex::left_signature, nb::arg("rid"))
+        .def("right_signature", &rigel::calibration::RegionIndex::right_signature, nb::arg("rid"))
+        .def("boundary_kind_left", &rigel::calibration::RegionIndex::boundary_kind_left, nb::arg("rid"))
+        .def("boundary_kind_right", &rigel::calibration::RegionIndex::boundary_kind_right, nb::arg("rid"))
+        .def("type_mask", &rigel::calibration::RegionIndex::type_mask, nb::arg("rid"))
+        .def("strand", &rigel::calibration::RegionIndex::strand, nb::arg("rid"))
+        .def("n_regions", &rigel::calibration::RegionIndex::n_regions)
+        .def("n_refs", &rigel::calibration::RegionIndex::n_refs)
+        ;
+
     nb::class_<BamScanner>(m, "BamScanner")
         .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
              nb::arg("ctx"),
@@ -2409,39 +2486,35 @@ NB_MODULE(_bam_impl, m) {
                      nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> signatures,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> left_signatures,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> right_signatures,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_left,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_right,
                      nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
                      nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
-                     int32_t n_refs,
-                     int32_t splicing_anchor_tolerance) {
-                      self.set_regions(ref_ids, starts, ends, type_masks, strands,
-                                             n_refs, splicing_anchor_tolerance);
+                     int32_t n_refs) {
+                      self.set_regions(ref_ids, starts, ends,
+                                       signatures,
+                                       left_signatures,
+                                       right_signatures,
+                                       boundary_kind_left,
+                                       boundary_kind_right,
+                                       type_masks, strands,
+                                       n_refs);
                  },
                  nb::arg("ref_ids"),
                  nb::arg("starts"),
                  nb::arg("ends"),
+                 nb::arg("signatures"),
+                 nb::arg("left_signatures"),
+                 nb::arg("right_signatures"),
+                 nb::arg("boundary_kind_left"),
+                 nb::arg("boundary_kind_right"),
                  nb::arg("type_masks"),
                  nb::arg("strands"),
                  nb::arg("n_refs"),
-                 nb::arg("splicing_anchor_tolerance") = 0,
-                 "Install the calibration region partition with strand codes.\n")
-          .def("set_regions",
-                 [](BamScanner& self,
-                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
-                     int32_t n_refs,
-                     int32_t splicing_anchor_tolerance) {
-                      self.set_regions_legacy(ref_ids, starts, ends, type_masks,
-                                                      n_refs, splicing_anchor_tolerance);
-                 },
-                 nb::arg("ref_ids"),
-                 nb::arg("starts"),
-                 nb::arg("ends"),
-                 nb::arg("type_masks"),
-                 nb::arg("n_refs"),
-                 nb::arg("splicing_anchor_tolerance") = 0,
-                 "Install calibration regions with all strands set to NONE.\n")
+                 "Install the calibration region partition with fine metadata and strand codes.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

@@ -1,25 +1,41 @@
 /**
- * accumulator.h — Per-worker calibration observation accumulator.
+ * accumulator.h - Per-worker fractional calibration observation accumulator.
+ *
+ * Phase 3 fractional cutover. The accumulator routes per-fragment
+ * fractional mass into:
+ *   - region_counts[R, 12]    : float32, the 12-channel signal
+ *     (compartment x splice x strand) per fine region.
+ *   - fl_pool_mass[6, 1024]   : float64, six named FL pools keyed by
+ *     (coarse_class_of_region, contained|boundary). Unspliced, strand-
+ *     collapsed. gDNA FL aggregate is the sum of the four non-EXON pools.
+ *   - channel_mass[12]        : float64, global per-channel mass.
+ *   - signature_mass[16]      : float64, global per-signature mass.
+ *   - counters                : observed, excluded_*, unobserved, etc.
  *
  * The hot path (``observe()``) is allocation-free after warm-up: it
- * uses two reusable scratch ``std::vector<int32_t>`` buffers (per-block
- * hits + persistent fragment-scope hits) whose ``clear()`` retains
- * capacity.  Per-fragment hit counts are O(10), so working set stays
- * well within L1.
+ * reuses scratch vectors for region hits and per-block overlap. The
+ * one-fragment-one-unit invariant holds exactly: total mass added to
+ * region_counts for any single observed fragment is 1.0 (modulo
+ * float32 rounding) when total_aligned_bp > 0.
  *
- * M3 invariants this code relies on:
- *   1. Regions are per-ref non-overlapping (M2): each ``overlap_into``
- *      call returns strictly increasing region IDs with no internal
- *      duplicates.
- *   2. Per-fragment hit counts are O(10).
- *   3. The scanner gates non-observable fragments (multimappers,
- *      chimeras, splice artifacts) before calling ``observe()``.
- *   4. ``payload.fl_hist`` records ``frag_end - frag_start`` (genomic
- *      span, not fragment length); see calibration plan §M7 for the
- *      consumer-side semantics.
+ * Compartment routing (per region within a fragment):
+ *   - cross_left  = (frag_start < region.start)
+ *   - cross_right = (frag_end   > region.end)
+ *   - both true   -> fully spans; split w in half between BOUNDARY_LEFT
+ *                    and BOUNDARY_RIGHT
+ *   - cross_left  -> BOUNDARY_LEFT  (mass = w)
+ *   - cross_right -> BOUNDARY_RIGHT (mass = w)
+ *   - neither     -> CONTAINED      (mass = w)
  *
- * Mask layout (single source of truth lives in ``region_index.h``):
- *   bit 0 = EXON, bit 1 = INTRON, bit 2 = INTERGENIC.
+ * FL routing (only for unspliced fragments with fl_idx >= 0):
+ *   - compartment determines contained vs boundary pool slot
+ *   - region signature determines coarse class (INTERGENIC/INTRON/EXON)
+ *   - mass is strand-collapsed before adding to fl_pool_mass
+ *   - boundary_left and boundary_right both feed the same boundary pool
+ *
+ * splicing_anchor_tolerance is intentionally absent: in Phase 3 K is
+ * resolver-only (implicit-splice slack). The accumulator does not gate
+ * boundary mass by overlap thresholds.
  */
 
 #pragma once
@@ -30,96 +46,69 @@
 #include <vector>
 
 #include "constants.h"
-#include "calibration/orient.h"
 #include "calibration/region_index.h"
+#include "calibration/region_signature.h"
 
 namespace rigel::calibration {
 
 struct CalibrationPayload {
-    static constexpr int32_t kFlBins = 1024;
+    static constexpr int32_t kFlBins   = 1024;
+    static constexpr int32_t kChannels = region_signature::kNChannels;       // 12
+    static constexpr int32_t kSigs     = region_signature::kNSignatures;     // 16
+    static constexpr int32_t kFlPools  = region_signature::kNFlPools;        // 6
 
-    // Global per-mask counters (size mask::N_STATES).
-    std::array<int64_t, mask::N_STATES> global_counts {};
+    // Per-region per-channel fractional mass: shape (n_regions, 12) row-major.
+    std::vector<float> region_counts;
 
-    // Per-region per-mask counts: shape (n_regions, mask::N_STATES) row-major.
-    std::vector<int64_t> per_region_counts;
+    // Global per-channel and per-signature mass (sums over regions and FL).
+    std::array<double, kChannels> channel_mass {};
+    std::array<double, kSigs>     signature_mass {};
 
-    // Per-mask FL histogram: shape (mask::N_STATES, kFlBins) row-major.
-    std::vector<int64_t> fl_hist;
-
-    // Boundary-flux counters (only EXON regions get nonzero values,
-    // but indexed by region_id for O(1) lookup).
-    std::vector<int64_t> u_left;
-    std::vector<int64_t> u_right;
-
-    // Minimal per-channel orientation counters: shape (n_regions, orient::N).
-    std::vector<int64_t> intron_counts_by_orient;
-    std::vector<int64_t> exon_contained_counts_by_orient;
-    std::vector<int64_t> u_left_by_orient;
-    std::vector<int64_t> u_right_by_orient;
+    // Six named FL pools, float64. Unspliced, strand-collapsed.
+    // Layout: row pool, column fl_idx. Index = pool * kFlBins + fl_idx.
+    std::vector<double>             fl_pool_mass;       // size = 6 * 1024
+    std::array<double, kFlPools>    fl_pool_total {};
 
     // Counters
-    int64_t n_observed             = 0;
-    int64_t n_excluded_multimap    = 0;
-    int64_t n_excluded_chimera     = 0;
-    int64_t n_excluded_artifact    = 0;
-    int64_t n_unobserved           = 0;  // non-mm group, no eligible hit
-    // Observed fragment whose every block fell outside any region.
-    // Under the M2 tiling invariant this is only possible for
-    // alignments to references the calibration partition didn't cover
-    // (e.g. decoys / contigs / index-mismatched BAMs).  Useful as a QC
-    // signal — large values mean the BAM was aligned to a different
-    // reference than the index was built from.
-    int64_t n_unannotated_ref      = 0;
-    // Observed fragment with raw region hits whose every aligned-block
-    // overlap was below the splicing-anchor-tolerance threshold q(K) = max(K,1)
-    // (so no hit contributed a type bit to ``obs_mask``). These
-    // fragments still increment ``global_counts[0]``, ``fl_hist[0]``,
-    // and ``n_observed`` — this is an auxiliary QC subcounter.
-    // Always zero when splicing_anchor_tolerance == 0.
-    int64_t n_below_tolerance      = 0;
+    int64_t n_observed                 = 0;
+    int64_t n_excluded_multimap        = 0;
+    int64_t n_excluded_chimera         = 0;
+    int64_t n_excluded_artifact        = 0;
+    int64_t n_excluded_strand_ambig    = 0;
+    int64_t n_unobserved               = 0;
+    int64_t n_unannotated_ref          = 0;  // observed but no region hits
+    int64_t n_fl_unavailable           = 0;  // unspliced observed w/ fl_idx out of range
 };
 
 class CalibrationAccumulator {
 public:
-    explicit CalibrationAccumulator(int64_t n_regions,
-                                    int32_t splicing_anchor_tolerance = 0) {
-        if (splicing_anchor_tolerance < 0) {
+    explicit CalibrationAccumulator(int64_t n_regions) {
+        if (n_regions < 0) {
             throw std::invalid_argument(
-                "CalibrationAccumulator: splicing_anchor_tolerance must be >= 0");
+                "CalibrationAccumulator: n_regions must be >= 0");
         }
-        splicing_anchor_tolerance_ = splicing_anchor_tolerance;
-        payload_.per_region_counts.assign(
-            static_cast<size_t>(n_regions) * mask::N_STATES, 0);
-        payload_.fl_hist.assign(
-            static_cast<size_t>(mask::N_STATES) *
-                CalibrationPayload::kFlBins,
-            0);
-        payload_.u_left.assign(static_cast<size_t>(n_regions), 0);
-        payload_.u_right.assign(static_cast<size_t>(n_regions), 0);
-        payload_.intron_counts_by_orient.assign(
-            static_cast<size_t>(n_regions) * orient::N, 0);
-        payload_.exon_contained_counts_by_orient.assign(
-            static_cast<size_t>(n_regions) * orient::N, 0);
-        payload_.u_left_by_orient.assign(
-            static_cast<size_t>(n_regions) * orient::N, 0);
-        payload_.u_right_by_orient.assign(
-            static_cast<size_t>(n_regions) * orient::N, 0);
         n_regions_ = n_regions;
+        payload_.region_counts.assign(
+            static_cast<size_t>(n_regions) * CalibrationPayload::kChannels, 0.0f);
+        payload_.fl_pool_mass.assign(
+            static_cast<size_t>(CalibrationPayload::kFlPools) *
+                CalibrationPayload::kFlBins,
+            0.0);
         // Warm reserve to amortize the first ~10 fragments' allocations.
-        hits_.reserve(16);
-        hits_overlap_bp_.reserve(16);
         block_hits_.reserve(16);
-        block_overlap_bp_.reserve(16);
-        merge_buf_.reserve(16);
-        merge_buf_bp_.reserve(16);
-        qualified_hits_.reserve(16);
     }
 
     /**
      * Hot-path observation. ``exons`` is the chosen fragment's
-     * R1∪R2 exon blocks (sorted, single-ref). The caller must have
+     * R1UR2 exon blocks (sorted, single-ref). The caller must have
      * gated on: unique mapper, non-chimeric, non-artifact splice.
+     *
+     * The accumulator increments ``n_observed`` for every accepted
+     * fragment (even if no region overlaps). Fragments whose every
+     * block falls outside any region increment ``n_unannotated_ref``.
+     * Fragments whose ``fragment_strand`` is neither STRAND_POS nor
+     * STRAND_NEG are routed to ``n_excluded_strand_ambig`` and emit no
+     * mass.
      */
     void observe(int8_t splice_type,
                  int32_t ref_id,
@@ -130,10 +119,11 @@ public:
                  int8_t fragment_strand,
                  const RegionIndex& regions);
 
-    inline void note_multimap()  { ++payload_.n_excluded_multimap; }
-    inline void note_chimera()   { ++payload_.n_excluded_chimera;  }
-    inline void note_artifact()  { ++payload_.n_excluded_artifact; }
-    inline void note_unobserved(){ ++payload_.n_unobserved;        }
+    inline void note_multimap()        { ++payload_.n_excluded_multimap; }
+    inline void note_chimera()         { ++payload_.n_excluded_chimera;  }
+    inline void note_artifact()        { ++payload_.n_excluded_artifact; }
+    inline void note_unobserved()      { ++payload_.n_unobserved;        }
+    inline void note_strand_ambig()    { ++payload_.n_excluded_strand_ambig; }
 
     /// Worker merge: element-wise additive into *this.
     void merge_from(const CalibrationAccumulator& other);
@@ -142,33 +132,13 @@ public:
     CalibrationPayload&       payload()       { return payload_; }
 
     int64_t n_regions() const { return n_regions_; }
-    int32_t splicing_anchor_tolerance() const { return splicing_anchor_tolerance_; }
 
 private:
     CalibrationPayload payload_;
     int64_t n_regions_ = 0;
-    int32_t splicing_anchor_tolerance_ = 0;
 
-    // Per-fragment scratch (reused across observe() calls).  After
-    // warm-up these never reallocate: clear() keeps capacity.
-    //
-    // ``hits_overlap_bp_`` tracks per-fragment exact aligned-block
-    // overlap (summed across exon blocks) parallel to ``hits_``; it
-    // is used to gate ``obs_mask`` and per-region fan-out on the
-    // splicing-anchor-tolerance threshold ``q(K) = max(K, 1)``.
-    // ``qualified_hits_`` holds the subset of ``hits_`` whose
-    // overlap_bp >= q(K) — only these contribute mask bits, per-region
-    // counts, and boundary-flux events.  At K=0 (q=1) every hit
-    // returned by ``RegionIndex::overlap_into`` already has overlap
-    // >= 1, so ``qualified_hits_ == hits_`` and behavior collapses to
-    // the pre-tolerance code path bit-for-bit.
-    std::vector<int32_t> hits_;             // sorted, deduped fragment-scope hits
-    std::vector<int64_t> hits_overlap_bp_;  // per-rid summed overlap (parallel to hits_)
-    std::vector<int32_t> block_hits_;       // per-exon-block scratch
-    std::vector<int64_t> block_overlap_bp_; // per-block overlap (parallel to block_hits_)
-    std::vector<int32_t> merge_buf_;        // sorted-merge output buffer (rids)
-    std::vector<int64_t> merge_buf_bp_;     // sorted-merge output buffer (overlap)
-    std::vector<int32_t> qualified_hits_;   // hits_ filtered by overlap >= q(K)
+    // Per-block scratch (reused across observe() calls).
+    std::vector<int32_t> block_hits_;
 };
 
 }  // namespace rigel::calibration

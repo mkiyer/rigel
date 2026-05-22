@@ -8,6 +8,7 @@ import pytest
 
 from rigel.index import (
     TranscriptIndex,
+    build_index_artifacts,
     INDEX_FORMAT_VERSION,
     INTERVALS_FEATHER,
     MANIFEST_JSON,
@@ -25,31 +26,20 @@ def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
     t_df.to_feather(idx_dir / TRANSCRIPTS_FEATHER)
 
     # Manifest with current format_version (load() refuses anything else).
-    (idx_dir / MANIFEST_JSON).write_text(json.dumps({
-        "format_version": INDEX_FORMAT_VERSION,
-        "rigel_version": "test",
-    }))
-
-    # ref_lengths.feather: a single 1000-bp chr1.
-    pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(
-        idx_dir / REF_LENGTHS_FEATHER
+    (idx_dir / MANIFEST_JSON).write_text(
+        json.dumps(
+            {
+                "format_version": INDEX_FORMAT_VERSION,
+                "rigel_version": "test",
+            }
+        )
     )
 
-    # regions.feather: a single INTERGENIC region tiling chr1.
-    rdf = pd.DataFrame({
-        "region_id": [0],
-        "ref_name": pd.array(["chr1"], dtype="string"),
-        "start": [0],
-        "end": [1000],
-        "type": [0],          # INTERGENIC
-        "strand": [0],        # NONE
-        "tx_pos_bp": [0],
-        "tx_neg_bp": [0],
-        "exon_pos_bp": [0],
-        "exon_neg_bp": [0],
-        "boundary_flux_left": [False],
-        "boundary_flux_right": [False],
-    })
+    # ref_lengths.feather: a single 1000-bp chr1.
+    pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(idx_dir / REF_LENGTHS_FEATHER)
+
+    # regions.feather: a single v4 INTERGENIC region tiling chr1.
+    _, rdf = build_index_artifacts([], {"chr1": 1000})
     rdf.to_feather(idx_dir / REGIONS_FEATHER)
 
     iv_df = pd.DataFrame(
@@ -127,6 +117,3 @@ def test_load_raises_when_t_index_missing(tmp_path: Path):
 
     with pytest.raises(ValueError, match="missing 't_index'"):
         TranscriptIndex.load(idx_dir)
-
-
-
