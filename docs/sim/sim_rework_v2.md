@@ -212,9 +212,8 @@ Script naming rules:
 | `rigel.sim.benchmark` | Small scenario accuracy summaries. Uses shared truth parsing where needed. |
 | `rigel.sim.truth` | Read-name parsing, `Origin` dataclass, truth abundance TSV I/O, fragment-origin aggregation from FASTQ/BAM. |
 | `rigel.sim.manifest` | Manifest dataclasses, condition records, condition naming, manifest read/write, condition discovery. |
-| `rigel.sim.abundance` | Random abundance assignment, abundance-file loaders, truth writing, additive nRNA ratio assignment. |
-| `rigel.sim.config` | Config dataclasses and YAML parsing for simulation, gDNA, nRNA, and suite profiles. |
-| `rigel.sim.whole_genome` | `WholeGenomeSimulator`, genome cache, FASTQ buffers, shard helpers, high-throughput read generation. |
+| `rigel.sim.capture` | Hybrid-capture probe parsing, capture-aware partition functions, and sparse weighted start sampling. |
+| `rigel.sim.whole_genome` | `WholeGenomeSimulator`, whole-genome config/YAML parsing, abundance assignment, genome cache, FASTQ buffers, shard helpers, and high-throughput read generation. |
 | `rigel.sim.synthetic_genome` | Synthetic mini-genome generator currently implemented in `generate_synthetic_genome.py`. |
 | `rigel.sim.suite` | Condition grid orchestration, smoke/full profiles, deterministic seed derivation, manifest writing. |
 | `rigel.sim.analysis` | Manifest-driven calibration, abundance, fragment-origin, and acceptance report generation. |
@@ -423,16 +422,15 @@ Exit criteria:
 
 ### Phase 2: Move whole-genome implementation into the package
 
-1. Create `rigel.sim.config` and move simulation, gDNA, nRNA, suite, and YAML
-   parsing dataclasses into it.
-2. Create `rigel.sim.abundance` and move random abundance assignment,
-   abundance-file loaders, abundance format detection, and truth abundance I/O.
-3. Create `rigel.sim.whole_genome` and move `WholeGenomeSimulator`, genome
+1. Keep whole-genome config/YAML parsing and abundance assignment inside
+   `rigel.sim.whole_genome`; thin `rigel.sim.config` / `rigel.sim.abundance`
+   wrapper modules were deleted during production cleanup.
+2. Create `rigel.sim.whole_genome` and move `WholeGenomeSimulator`, genome
    cache, FASTQ buffers, gzip writers, batch extraction helpers, and shard
    helpers into it.
-4. Replace `scripts/sim/sim.py` with `scripts/sim/simulate_reads.py`, a thin
+3. Replace `scripts/sim/sim.py` with `scripts/sim/simulate_reads.py`, a thin
    CLI wrapper around `rigel.sim.whole_genome`.
-5. Delete `scripts/sim/sim.py` after `simulate_reads.py` imports the package
+4. Delete `scripts/sim/sim.py` after `simulate_reads.py` imports the package
    implementation directly.
 
 Exit criteria:
@@ -446,9 +444,9 @@ Exit criteria:
 
 ### Phase 3: Implement additive nRNA ratios
 
-1. Add `apply_nrna_ratio(transcripts, ratio)` to `rigel.sim.abundance`.
+1. Add `apply_nrna_ratio(transcripts, ratio)` to `rigel.sim.whole_genome`.
 2. Add `NRNAConfig.mode`, `ratios`, and `ratio_labels` handling to
-   `rigel.sim.config`.
+   `rigel.sim.whole_genome`.
 3. Reject `nrna.fracs` / `nrna.frac_labels` configs with a migration error.
 4. Update suite orchestration to compute explicit `n_mrna`, `n_nrna`, and
    `n_gdna` counts.

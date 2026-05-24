@@ -8,6 +8,148 @@ I have an idea that is an offshoot of your "5. Coverage-shape coherence priors" 
 
 ## Phase 4
 
+
+### rna-seq data types
+
+we essential have four types of rna-seq data: 
+1) hybrid capture versus no hybrid capture and 
+2) unstranded vs strand-specific -> this gives us four cases that we need to handle: 
+a) unstranded, no hybrid capture, 
+b) unstranded, hybrid capture (hardest), 
+c) strand-specific no hybrid capture (easiest), and 
+d) strand-specific hybrid capture (easy). 
+
+Our biggest challenge is designing a set of solutions that we will work each one of the four cases (actually, we can omit unstranded hybrid capture for now because it is rare in real data). So we need to think through the special cases here.
+
+#### no hybrid capture
+
+Your above plan will likely work well for this case. The contained and boundary crossing fragments can be combined into a unified region fragment count and modeled that way
+
+#### hybrid capture
+
+with hybrid capture data, intergenic and intronic regions are depleted. certain exons are highly enriched. other exons are depleted as well (capture only targets certain transcripts, not all transcripts).
+
+for hybrid capture, combining boundary-crossing with contained fragments can dilute our signal substantially, because we combined intergenic (depleted) and intronic (depleted) with exon-intergenic (potentially enriched) and exon-intron (potentially enriched). 
+
+we need an alternative solution for hybrid capture.
+
+I'm happy to start with our most important use case, develop it to fruition, and expand from there. But I don't want our architecture to become too specific so that we can't generalize to the other types of rna-seq data. I want rigel to be able to handle all types of rna-seq
+
+Can you help me with the overarching plan here?
+
+
+#### strand-specific hybrid capture
+
+this is the most important mode and the most pressing. this is the one we need to start with.
+
+we need to handle all types of strand-specific data because some library prep techniques create different patterns of read 1 and read 2 (sense/antisense vs antisense/sense)
+
+strand-specific data is orthogonal evidence for gDNA vs RNA. we have a global strand model that predicts the strand-specificity of the library. SS = strand specificity which ranges from 0.0 to 1.0. 
+- SS = 0.0 means read 1 is 'sense' and read 2 is 'antisense'
+- SS = 0.5 is unstranded data (no strand specific information)
+- SS = 1.0 means read 1 is 'antisense' and read 2 is 'sense' (most common)
+
+We can easily measure the SS variable from the spliced RNA reads in the library and have an extremely reliable measure of SS. for the sake of describing the approach I am going to refer to SS > 0.99 as highly strand-specific (this is what we commonly see). 
+
+We need to build a gDNA strand balance model for strand-specific data. We need 'training data' to train the model. Training data must come from gDNA.
+
+We can use the following sources of training:
+- intergenic (depleted in hybrid capture, sparse)
+- intronic (depleted in hybrid capture, sparse)
+- exon-intergenic (some enriched in hybrid capture)
+- exon-intron (some will be enriched in hybrid capture)
+- ***exons with no RNA expression*** how do we assume that an exon has no RNA expression? if we know we have strand-specific data, we can immediately assume that if the number of antisense counts is greater than the numebr of sense counts, the exon is not expressed.. (there is no RNA). Or more generalized, we can come up with a way of use the antisense vs sense breakdown in the exon to determine if the exon is 'expressed' (has RNA) or 'not expressed' (no RNA). we have spliced fragment counts for exons too, so that can be another piece of evidence.
+
+Other key aspects.
+- training regions cannot have 'ambiguous' strand. They must have either 'pos' or 'neg' strand.
+
+If we have our set of training regions, then we want to figure out how overdispersed gDNA fragments with respect to strand. gDNA is biological double-stranded and has a concrete fixed mean of 0.50. That is fact. But the overdispersion must be estimated.
+
+We want our model to be able to deconvolute exons that have mixture of gDNA and RNA fragments. We are deconvoluting just the unspliced reads (the spliced reads are pure RNA already).  We want to build a model that can answer the deconvolution question:
+
+"Given that we see `n_ss` counts on the sense strand and `n_as` counts on the antisense strand in this region, how many of the counts can be attributed to gDNA? How many to RNA? Then the next level question is, with 95% (or 99%, or 99.9%) probability, how many counts can be attributed to gDNA?
+
+I am thinking that the variance is dependent on the mean as well, so I am not sure we should model this by strand fraction alone. It's almost like we want to plot log(n_antisense) (x axis) vs log(n_sense) (y axis) and do regression, but that is a simplistic solution. In the past I was doing quantile regression, because I wanted to estimate gDNA with a 95% or 99% confidence. I am not sure that is the best way.
+
+
+If we iterate through every training regions, we can gather the data for our model. 
+
+- total fragments = contained + boundary left + boundary right
+- of the total fragments, how many are 'sense' (same strand as exon or intron) versus 'antisense' (opposite strand as exon or intron)
+- total frags = sense frags + antisense frags
+
+can you help me develop this modeling procedure further?
+
+The framing is: Given a region *what is the minimum number of RNA molecules I can assert with 95% confidence?*
+
+
+Here is some initial work on this. I want you to start from scratch though and derive from first principles.
+
+My intuition is that we can likely model the RNA strand distribution as Binomial safely (we likely do not need beta binomial for RNA). We can test this by iterating through regions and using the spliced fractional counts (pos and neg strand) and estimate the RNA dispersion
+
+
+### 1. Conservative DNA subtraction (intuitive)
+
+Rather than subtracting the *expected* DNA sense counts, subtract the **upper tail** of what DNA could plausibly produce.
+
+Ask: given `n_DNA` DNA molecules, what is the 99th percentile of sense-strand counts under the DNA beta-binomial?
+
+> k_DNA_max = BetaBin\_quantile(0.99; n\_DNA, μ=0.5, φ\_D)
+
+Then your conservative RNA sense count is:
+
+> k_RNA_conservative = max(0, k_observed − k_DNA_max)
+
+And conservative n_RNA estimate:
+
+> n_RNA_conservative = k_RNA_conservative / 0.99
+
+You're essentially giving DNA every benefit of the doubt — assuming it ran hot — and only calling what's left over RNA.
+
+### 2. Bayesian posterior credible interval (principled)
+
+In the full mixture model, the posterior distribution over n_RNA given the data is:
+
+> P(n\_RNA | k, n) ∝ P(k | n, n\_RNA) × P(n\_RNA)
+
+where P(k | n, n_RNA) is the likelihood of observing k=800 given that n_RNA molecules are RNA and n − n_RNA are DNA, integrated over both beta-binomial sampling processes.
+
+You compute this posterior numerically — it's just a sum over all plausible values of n_RNA from 0 to 1000 — and report the **5th percentile** as your lower credible bound.
+
+---
+
+## The Uncertainty Has Two Sources
+
+This is the key subtlety — the width of your credible interval comes from two places:
+
+**Sampling noise**: Even if you knew exactly n_RNA, the beta-binomials produce stochastic counts. More overdispersion in the DNA component means wider uncertainty.
+
+**Component ambiguity**: Some molecules genuinely can't be assigned — if the DNA and RNA beta-binomials overlap near, say, 60/40 splits, those molecules are inherently uncertain.
+
+The credible interval properly propagates both.
+
+---
+
+## Practical Consequence
+
+For an 800/200 example, the separation between μ_DNA=0.5 and μ_RNA=0.99 is large, and n=1000 is substantial. In that regime, the posterior on n_RNA will be fairly tight, and the 5th percentile won't be far below the mean estimate. But for a region with n=50 and a 35/15 split, the credible interval will be wide — correctly reflecting that you can't confidently deconvolute with sparse data.
+
+This gives you a natural **per-region quality filter**: regions where the lower credible bound on n_RNA is near zero get flagged as "ambiguous," while regions where even the conservative bound is large get called confidently RNA-enriched.
+
+
+
+
+
+
+### splicing anchor tolerance
+
+fragment overlaps regions
+when overhang into a region is tiny <=3bp, clip
+avoids tiny overlaps due to misalignment
+need to reduce total read length so mass is conserved
+
+
+
 ### Build and finalize FL models
 
 - Generate mini-genomes
@@ -20,16 +162,64 @@ I have an idea that is an offshoot of your "5. Coverage-shape coherence priors" 
    - Measure RNA and gDNA FL estimates, measure error
 - Determine if FL estimation is accurate in simulation
 
+
 ### region density estimation
 
 Each region has 'contained' and 'boundary crossing' fractional counts.
 
-For intergenic and intronic 'contained' fragments:
+Estimating the 'contained' fragment density is simple:
 
-gdna_density_contained = contained_fragments / (region_eff_len)
+density_contained = contained_fragments / (region_eff_len)
 
 - contained_fragments: the fully contained fragments in the region
-- region_eff_len: gDNA FL corrected region size. i believe we have methods for this. it's not simply subtracting the mean. we need to use the gDNA FL distribution and compute the fragment sizes and fragment starts that will fit in the region. the region length matters. we should have this code implemented already for general purpose use for RNA transcripts etc.
+- region_eff_len: FL corrected region size. But which FL distribution do we use? we have mixture of gDNA and RNA.
+
+gdna_density_contained = gdna_contained_fragments / (region_eff_len using the gDNA FL dist)
+
+rna_density_contained = rna_contained_fragments / (region_eff_len using the RNA FL dist)
+
+Next, I want to *model* the density rather than just compute it for each region.
+
+Let's start with INTERGENIC regions. We need to build a model that can predict: 
+
+number of fragments ~ region size
+
+Or probably should model:
+
+log(num fragments) ~ log(region size)
+
+This is a density model right? Because density = num_fragments / region_size
+
+But if we try to build a model of this across all regions, we can learn the pattern of density.
+
+How do we model this? 
+
+log(num fragments) ~ log(region size)
+
+My thought is quantile regression so that we can then have a model that we can query:
+
+Given a region of size L bp, what's the 95th percentile number of fragments I would expect to see?
+
+What are other ways of modeling this? 
+
+I want to build this model for INTERGENIC contained fragments and also for INTRONIC contained fragments (intron is mixture of nascent RNA and DNA). For EXONs which are a mixture of gDNA nascent RNA and mature RNA, we can then predict RNA density
+
+- given exon region of size L bp, how many are gDNA (95th percentile)?
+- subtract that amount
+- whatever is left is RNA
+
+Can you audit the current code. Help me design and plan this kind of model. This will work for unstranded data.
+
+We still need to incorporate boundary crossing fragments into the model
+
+
+
+For INTERGENIC regions, we use the gDNA FL distribution because we assume INTERGENIC ~ gDNA. For INTRONIC regions we assume are highly gDNA enriched we can also assume the gDNA FL distribution for now.
+
+We need a generic effective length estimation system. Given the total region length (region_end - region_start) and a FL distribution, we should be able to estimate the effective region length. I want to make sure our methodology for this is extremely stable and robust. I believe it is but audit this and report your audit. Do we need to refactor or rename this? I believe we have this in place I just want it to be clean, concise, elegant code that is named appropriate, algorithmically correct, and easily interpretable.
+
+
+
 
 This gives us an initial INTERGENIC and INTRONIC density estimate for fully-contained fragments. This can form our initial gDNA global density estimate.
 
@@ -37,9 +227,22 @@ However, using intergenic and intronic regions to estimate gDNA density *FAILS* 
 
 **We do need to implement mappability-corrected length for gDNA estimation, because a substantial fraction of the genome is not mappable and should not be used in the denominator for gDNA density estimation (gDNA density will be underestimated until we correct for mappability)** We have the opportunity to incorporate mappability data from the 'alignable' tool (a tool that I built) as part of the rigel index build. Are there any relics of this still present in the rigel index code? This was implemented at one time but might have been removed. This can be re-implemented in a future enhancement. For now, we will get the nuts and bolts of gDNA estimation working.
 
-The first step for gDNA estimation is standard gDNA estimation for intergenic and intronic regions. Any fragments in these regions are going to gDNA enriched and mature RNA-depleted.
+The first step for gDNA estimation is standard density estimation for intergenic and intronic regions. Any fragments in these regions are going to gDNA enriched and mature RNA-depleted.
 
-Now, when we do gDNA estimation, we need to model the *variance* of fragment distribution on the positive and negative strand. Biology mandates that gDNA is double-stranded and our mean is absolutely cemented and fixed at 50/50 positive/negative stranded. However, in my investigation of real data, the variance around the mean was not binomially distributed. There was real overdispersion. Modeling the strand variance will be important and something we will need to incorporate downstream. If variance is very overdispersed, we could see large strand asymmetry (for example, 10 total fragments, 8 sense, 2 antisense) and still have it be reasonably probable to expect it from gDNA. This needs to make it into the EM somehow -- perhaps by increasing the gDNA bayesian prior pseudocount or as a  regularizer (M-step?). 
+
+### density modeling
+
+
+
+### gDNA vs RNA 
+
+When we iterate over regions we can compute the density of the contained fragments.
+
+
+
+### region strand data
+
+When we do gDNA estimation, we need to model the *variance* of fragment distribution on the positive and negative strand. Biology mandates that gDNA is double-stranded and our mean is absolutely cemented and fixed at 50/50 positive/negative stranded. However, in my investigation of real data, the variance around the mean was not binomially distributed. There was real overdispersion. Modeling the strand variance will be important and something we will need to incorporate downstream. If variance is very overdispersed, we could see large strand asymmetry (for example, 10 total fragments, 8 sense, 2 antisense) and still have it be reasonably probable to expect it from gDNA. This needs to make it into the EM somehow -- perhaps by increasing the gDNA bayesian prior pseudocount or as a  regularizer (M-step?). 
 
 
 
@@ -243,7 +446,35 @@ Splicing anchor tolerance logic needs to be examined in the setting of our new f
 
 ## hybrid capture simulator
 
-We have an extensive code base for simulation in place in the 'src/sim' folder within Rigel. To support hybrid capture simulation, the simulator needs additional inputs. 1) It needs to accept a BED file with capture targets. It needs to support simple single block BED format column 1 = ref, column 2 = start, column 3 = end, OR the BED12 format in case we have exon-exon spanning probes (splice junction spanning probes) in which case a single probe has multiple genomic capture intervals. 2) We need to specify an overall enrichment ratio (e.g. 1000X) that conveys how much enrichment the capture probes provide. This is the global on-target versus off-target probability ratio. 3) We need to define the probability landscape for sampling reads. Instead of sampling reads uniformly, we need to sample them according to a genome
+We have an extensive code base for simulation in place in the 'src/sim' folder within Rigel. To support hybrid capture simulation, the simulator needs additional inputs.
+
+1) The inputs are 'probes' which can be provided in transcript coordinates (transcript_id, start, end) or genomic coordinates (BED12 format in case probes span multiple exons and involve multiple genomic intervals). 
+
+2) Hybrid capture changes the probability landscape for sampling reads. The current model samples uniformly along a transcript (or the genome). A capture model changes this to a non-uniform probability landscape.
+
+We need a simple and straightforward probe-binding hybridization energy model to create a probability distribution. The energy is related to the number of overlapping (hybridized) bases along the probe. Can you research how this model should work? A simple idea linear in the number of overlapping bases between a fragment and the probe. 
+
+Here's a worked example:
+
+Given transcript T with length 2000bp. It has 3 probes at (200,320), (500,620), and (1500,1620).
+
+- A 200bp fragment at (1000,1200) overlaps no probes and gets no hybridization energy. It is effectively off target
+- A 200bp fragment at (1310,1510) overlaps a probe by 10bp and gets +10 energy. 
+- A 200bp framgent at (1480,1680) completely overlaps the probe and gets full +120 energy.
+
+Can you research how to implement this? Ultimately, we need to create a probability landscape along a transcript that we can sample from. Sampling from regions that overlap probes will be much more likely than sampling from regions that do not overlap probes. Probability needs to be relative to the overall transcript abundance (relative to other transcripts).
+
+Transcript probes "project" onto the genome. A transcript probe may cross an exon-exon junction and be "spliced" such that its genomic project is split into multiple genomic intervals.
+
+When we sample gDNA (for simulating gDNA), the gDNA sampling must use a similar energy model, but when probes are split, the potential binding energy is much lower, so the RNA transcripts have a big advantage compared to when the transcript probe is on a single genomic span.
+
+We need the hybrid capture simulator to have the following properties:
+1) simple (not too complicated)
+2) easily implemented
+3) roughly biologically accurate (doesn't need to be perfect.. just "good enough")
+4) extremely good performance -- we don't want to be waiting hours to simulate reads. this needs to be blazingly fast.
+
+
 
 
 ## gdna capture weighting

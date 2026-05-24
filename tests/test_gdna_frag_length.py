@@ -103,13 +103,15 @@ class TestFromCounts:
         assert model.mode == 250
 
     def test_statistics(self):
-        """Mean, std, median, mode are computed correctly."""
+        """Finalized statistics use the same posterior predictive PMF as scoring."""
         counts = np.zeros(501, dtype=np.float64)
         counts[200] = 100.0
         counts[300] = 100.0
         model = FragmentLengthModel.from_counts(counts)
         assert model.mean == pytest.approx(250.0)
-        assert model.median == pytest.approx(200.0)
+        probs = np.exp(model._log_prob)
+        expected_median = float(np.searchsorted(np.cumsum(probs), 0.5))
+        assert model.median == pytest.approx(expected_median)
         assert model.mode in (200, 300)
 
     def test_from_counts_matches_normal_training(self):

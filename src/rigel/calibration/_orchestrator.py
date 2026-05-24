@@ -1,10 +1,4 @@
-"""rigel.calibration._orchestrator \u2014 top-level ``calibrate(...)``.
-
-Under the fractional cutover this function builds the FL models, the
-initial contained-region global gDNA density estimates, and a uniform
-regional exposure scaffold. Downstream prior assembly is still a stub
-that raises :class:`FractionalCutoverPending` (see ``locus_prior.py``).
-"""
+"""Top-level calibration orchestrator."""
 
 from __future__ import annotations
 
@@ -15,7 +9,6 @@ from ._fl_sources import (
     extract_global_counts,
     extract_rna_counts,
 )
-from ._regional_exposure import RegionalGdnaExposure
 from ._result import CalibrationResult, build_calibration_result
 from .fl import (
     POOL_EB_PRIOR_ESS,
@@ -42,27 +35,10 @@ def calibrate(
     fl_prior_ess: float = POOL_EB_PRIOR_ESS,
     pool_quality_good: int = POOL_QUALITY_GOOD_THRESHOLD,
     pool_quality_weak: int = POOL_QUALITY_WEAK_THRESHOLD,
-    strand_summary: StrandSummary | None = None,  # noqa: ARG001 \u2014 reserved
-    regional_exposure_enabled: bool = True,  # noqa: ARG001 \u2014 reserved
-    regional_exposure_reference_quantile: float = 0.95,  # noqa: ARG001
-    resolver_splicing_anchor_tolerance: int = 0,
+    strand_summary: StrandSummary | None = None,  # noqa: ARG001 - reserved for Phase 3
+    rna_lower_confidence: float = 0.95,  # noqa: ARG001 - accepted for Phase 2/3 plumbing
 ) -> CalibrationResult:
-    """Run the fractional-era calibration pipeline.
-
-    During the cutover this is intentionally limited to:
-
-    1. Validating the index carries a ``region_df`` (still needed for
-       region geometry in downstream stages).
-    2. Building the FL models from the fractional payload + scanner-trained
-       global model.
-    3. Estimating contained intergenic/intronic global gDNA density and
-       strand variance diagnostics.
-    4. Returning a :class:`CalibrationResult` with an empty prior table.
-
-    The CLI is expected to consume the FL models and the diagnostics
-    block from the result, then fail fast on any attempt to assemble
-    priors (``with_priors``) or run the EM stage.
-    """
+    """Run the calibration stages that are live before locus EM."""
     if index.region_df is None:
         raise RuntimeError(
             "Index has no region table. Rebuild the index "
@@ -80,11 +56,7 @@ def calibrate(
         weak_threshold=pool_quality_weak,
     )
 
-    # Build a degenerate uniform regional exposure off the sorted region
-    # arrays so result-consumers that introspect ``regional_exposure``
-    # see a well-formed (R,)-shape object instead of None. Cheap and
-    # documented as the cutover-default behaviour.
-    from ._arrays import PayloadArrays, RegionArrays  # local import: avoid load-time cycle
+    from ._arrays import PayloadArrays, RegionArrays
     from .density_global import compute_global_densities
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
@@ -94,7 +66,6 @@ def calibrate(
         payload_arrays,
         gdna_fl=fl_models.gdna,
     )
-    regional_exposure = RegionalGdnaExposure.uniform(region_arrays)
 
     return build_calibration_result(
         payload=payload,
@@ -102,7 +73,5 @@ def calibrate(
         global_densities=global_densities,
         fl_models=fl_models,
         fl_prior_ess=fl_prior_ess,
-        regional_exposure=regional_exposure,
-        resolver_splicing_anchor_tolerance=int(resolver_splicing_anchor_tolerance),
         region_signature=region_arrays.signature,
     )

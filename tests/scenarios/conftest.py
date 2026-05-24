@@ -11,7 +11,7 @@ import logging
 
 from rigel.config import EMConfig, PipelineConfig, BamScanConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, SimConfig, run_benchmark
+from rigel.sim import GDNAConfig, ReadSimConfig, run_benchmark
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ PIPELINE_SEED = 42
 
 
 def sim_config(*, strand_specificity: float = 1.0, seed: int = SIM_SEED):
-    """Standard SimConfig used across all scenarios."""
-    return SimConfig(
+    """Standard ReadSimConfig used across all scenarios."""
+    return ReadSimConfig(
         frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
         read_length=100, strand_specificity=strand_specificity, seed=seed,
     )

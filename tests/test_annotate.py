@@ -234,10 +234,10 @@ class TestAnnotatedBamIntegration:
         """run_pipeline with annotated_bam_path writes a valid BAM."""
         import pysam
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -315,11 +315,11 @@ class TestAnnotatedBamIntegration:
 
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
         """Pipeline counts are identical with and without annotation."""
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -365,11 +365,11 @@ class TestAnnotatedBamIntegration:
         """
         import pysam
         from collections import Counter
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -445,11 +445,11 @@ class TestAnnotatedBamIntegration:
         """
         import pysam
         from collections import Counter
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -559,11 +559,11 @@ class TestAnnotatedBamIntegration:
         This scenario has no blacklist loaded, so every ZB should be 0.
         """
         import pysam
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -608,12 +608,12 @@ class TestAnnotatedBamIntegration:
         """
         import pandas as pd
         import pysam
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.index import TranscriptIndex, SJ_BLACKLIST_FEATHER
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -676,11 +676,11 @@ class TestAnnotatedBamIntegration:
         record and verify the output preserves it verbatim without tags.
         """
         import pysam
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -741,11 +741,11 @@ class TestAnnotatedBamIntegration:
         ``chimeric`` strings in ZC).
         """
         import pysam
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -787,11 +787,11 @@ class TestAnnotatedBamIntegration:
         is_intergenic) and ZC=".".
         """
         import pysam
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -876,11 +876,11 @@ class TestAnnotatedBamIntegration:
         """
         import pysam
         from collections import defaultdict
-        from rigel.sim import SimConfig
+        from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
-        sim_config = SimConfig(
+        sim_config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
             read_length=100, strand_specificity=1.0, seed=42,
         )

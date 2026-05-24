@@ -23,7 +23,7 @@ from rigel.calibration.regions import BoundaryKind, RegionStrand, RegionType, SI
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.native import BamScanner
 from rigel.pipeline import run_pipeline, scan_and_buffer
-from rigel.sim import Scenario, SimConfig
+from rigel.sim import Scenario, ReadSimConfig
 
 SEED = 42
 
@@ -57,7 +57,7 @@ def calib_scenario(tmp_path):
             {"t_id": "t3", "exons": [(2500, 2700), (3000, 3200)], "abundance": 50},
         ],
     )
-    sim_config = SimConfig(
+    sim_config = ReadSimConfig(
         frag_mean=200,
         frag_std=30,
         frag_min=80,

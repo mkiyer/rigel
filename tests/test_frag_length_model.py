@@ -100,15 +100,14 @@ class TestFragmentLengthModelLikelihood:
     def test_log_likelihood_with_data(self):
         m = FragmentLengthModel(max_size=100)
         m.observe(50, weight=9.0)
-        # count[50] = 9, total = 9, laplace: log((9+1)/(9+101)) = log(10/110)
-        expected = math.log(10.0 / 110.0)
+        # One total pseudo-observation is spread across all bins.
+        expected = math.log((9.0 + 1.0 / 101.0) / 10.0)
         assert m.log_likelihood(50) == pytest.approx(expected)
 
     def test_log_likelihood_unseen_size(self):
         m = FragmentLengthModel(max_size=100)
         m.observe(50, weight=9.0)
-        # count[30] = 0, total = 9, laplace: log((0+1)/(9+101)) = log(1/110)
-        expected = math.log(1.0 / 110.0)
+        expected = math.log((1.0 / 101.0) / 10.0)
         assert m.log_likelihood(30) == pytest.approx(expected)
 
     def test_log_likelihood_is_negative(self):

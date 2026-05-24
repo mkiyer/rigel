@@ -2,8 +2,7 @@
 
 import pytest
 
-from rigel.sim.abundance import apply_random_nrna_fraction
-from rigel.sim.config import parse_yaml_config
+from rigel.sim.whole_genome import apply_random_nrna_fraction, parse_yaml_config
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 

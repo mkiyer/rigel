@@ -40,7 +40,7 @@ import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, SimConfig
+from rigel.sim import GDNAConfig, Scenario, ReadSimConfig
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -62,15 +62,15 @@ RTOL = 1e-12
 ATOL = 1e-10
 
 # Standard simulation configs
-_SIM_SS100 = SimConfig(
+_SIM_SS100 = ReadSimConfig(
     frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
     read_length=100, strand_specificity=1.0, seed=SEED,
 )
-_SIM_SS90 = SimConfig(
+_SIM_SS90 = ReadSimConfig(
     frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
     read_length=100, strand_specificity=0.9, seed=SEED,
 )
-_SIM_SS65 = SimConfig(
+_SIM_SS65 = ReadSimConfig(
     frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
     read_length=100, strand_specificity=0.65, seed=SEED,
 )

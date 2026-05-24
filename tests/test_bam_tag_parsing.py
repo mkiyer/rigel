@@ -272,7 +272,7 @@ class TestXSTagTypeVariants:
 
         Returns (bam_path, index) ready for pipeline run.
         """
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
 
         scenario = Scenario(
             "xs_tag_test",
@@ -291,7 +291,7 @@ class TestXSTagTypeVariants:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -399,7 +399,7 @@ class TestTsTagFlipping:
     @staticmethod
     def _build_scenario_with_ts(tmp_path, type_code: str = "A"):
         """Build scenario, then rewrite XS→ts tags."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
 
         scenario = Scenario(
             "ts_tag_test",
@@ -418,7 +418,7 @@ class TestTsTagFlipping:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -500,7 +500,7 @@ class TestMissingAndInvalidTags:
     @staticmethod
     def _build_scenario_without_xs(tmp_path):
         """Build scenario, then strip all XS/ts tags."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
 
         scenario = Scenario(
             "no_tags_test",
@@ -519,7 +519,7 @@ class TestMissingAndInvalidTags:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -562,7 +562,7 @@ class TestMissingAndInvalidTags:
 
     def test_sj_mode_none_ignores_tags(self, tmp_path):
         """sj_strand_tag='none' → ignore all strand tags."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
@@ -583,7 +583,7 @@ class TestMissingAndInvalidTags:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -602,7 +602,7 @@ class TestMissingAndInvalidTags:
 
     def test_invalid_xs_value_treated_as_none(self, tmp_path):
         """XS tag with value '.' or '*' → STRAND_NONE (not crash)."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
@@ -623,7 +623,7 @@ class TestMissingAndInvalidTags:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -664,7 +664,7 @@ class TestOracleBamXSType:
 
     def test_oracle_bam_writes_xs_type_a(self, tmp_path):
         """Oracle BAM should write XS as type 'A', not 'Z'."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
 
         scenario = Scenario(
             "oracle_xs_type",
@@ -683,7 +683,7 @@ class TestOracleBamXSType:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -723,7 +723,7 @@ class TestIntegerTags:
     @staticmethod
     def _build_and_check_nh(tmp_path, nh_value: int, nh_type: str):
         """Build BAM with specific NH type code, verify scanner reads it."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
@@ -744,7 +744,7 @@ class TestIntegerTags:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )
@@ -795,7 +795,7 @@ class TestSJTagPriority:
     @staticmethod
     def _build_with_both_tags(tmp_path, xs_strand: str, ts_strand: str):
         """Build BAM with both XS and ts tags set to different values."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
 
         scenario = Scenario(
             "both_tags_test",
@@ -814,7 +814,7 @@ class TestSJTagPriority:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -867,7 +867,7 @@ class TestSJTagPriority:
     def test_fallback_to_second_tag(self, tmp_path):
         """With sj_strand_tag='XS,ts' and XS removed, scanner
         falls back to ts (second priority) and still gets observations."""
-        from rigel.sim import Scenario, SimConfig
+        from rigel.sim import Scenario, ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
@@ -889,7 +889,7 @@ class TestSJTagPriority:
                 }
             ],
         )
-        sc = SimConfig(
+        sc = ReadSimConfig(
             frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
             read_length=100, strand_specificity=0.95, seed=42,
         )

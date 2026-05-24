@@ -23,7 +23,7 @@ import pysam
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, SimConfig
+from rigel.sim import GDNAConfig, Scenario, ReadSimConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ CONFIGS = [
 
 
 def _sim_config(*, strand_specificity: float = 0.9, seed: int = SIM_SEED):
-    return SimConfig(
+    return ReadSimConfig(
         frag_mean=200,
         frag_std=30,
         frag_min=80,

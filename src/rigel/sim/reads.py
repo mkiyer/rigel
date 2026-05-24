@@ -34,7 +34,7 @@ TruSeq Stranded) using the R1-antisense convention:
 
 Strand specificity
 ------------------
-The ``strand_specificity`` parameter in ``SimConfig`` controls the
+The ``strand_specificity`` parameter in ``ReadSimConfig`` controls the
 fraction of RNA fragments that preserve correct read orientation.
 At 1.0, all reads are perfectly stranded.  At 0.5, reads have
 no strand information (50/50 chance of correct orientation).
@@ -50,18 +50,19 @@ import numpy as np
 
 from ..types import Strand
 from ..transcript import Transcript
+from .capture import CaptureConfig, CaptureSampler
 from .genome import MutableGenome, reverse_complement
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SimConfig", "GDNAConfig", "ReadSimulator"]
+__all__ = ["ReadSimConfig", "GDNAConfig", "ReadSimulator"]
 
 # DNA bases for error injection
 _DNA_BASES = np.array(list("ACGT"), dtype="<U1")
 
 
 @dataclass
-class SimConfig:
+class ReadSimConfig:
     """Configuration for the read simulator.
 
     Attributes
@@ -168,7 +169,7 @@ class ReadSimulator:
         The genome from which transcript sequences are extracted.
     transcripts : list[Transcript]
         Transcript annotations with exon coordinates and abundance.
-    config : SimConfig or None
+    config : ReadSimConfig or None
         Simulation parameters. ``None`` uses defaults.
     gdna_config : GDNAConfig or None
         gDNA contamination config. ``None`` disables gDNA simulation.
@@ -182,11 +183,12 @@ class ReadSimulator:
         self,
         genome: MutableGenome,
         transcripts: list[Transcript],
-        config: SimConfig | None = None,
+        config: ReadSimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
+        capture_config: CaptureConfig | None = None,
     ):
         self.genome = genome
-        self.config = config or SimConfig()
+        self.config = config or ReadSimConfig()
         self.gdna_config = gdna_config
         self._rng = np.random.default_rng(self.config.seed)
 
@@ -239,6 +241,12 @@ class ReadSimulator:
             and gdna_config.strand_kappa > 0
         ):
             self._init_strand_regions(gdna_config.strand_kappa)
+
+        self.capture = CaptureSampler.from_config(
+            capture_config,
+            transcripts,
+            {self.genome.name: len(self.genome)},
+        )
 
     def _init_strand_regions(self, kappa: float) -> None:
         """Build annotation-derived region partition and per-region strand bias.
@@ -345,12 +353,10 @@ class ReadSimulator:
         to ``abundance × spliced_effective_length``, regardless of how
         much nascent RNA is present.
         """
-        weights = np.array(
-            [
-                max(0, tlen - frag_length + 1) * (t.abundance or 0)
-                for tlen, t in zip(self._t_lengths, self.transcripts)
-            ]
+        eff = self.capture.partition_array(
+            "mrna", range(len(self.transcripts)), np.array(self._t_lengths), frag_length,
         )
+        weights = eff * np.array([t.abundance or 0 for t in self.transcripts])
         total = weights.sum()
         if total == 0:
             # Every transcript is shorter than frag_length — uniform
@@ -371,12 +377,10 @@ class ReadSimulator:
         small ``nrna_abundance`` can still produce a substantial fraction
         of reads.
         """
-        weights = np.array(
-            [
-                max(0, plen - frag_length + 1) * t.nrna_abundance
-                for plen, t in zip(self._premrna_lengths, self.transcripts)
-            ]
+        eff = self.capture.partition_array(
+            "nrna", range(len(self.transcripts)), np.array(self._premrna_lengths), frag_length,
         )
+        weights = eff * np.array([t.nrna_abundance for t in self.transcripts])
         total = weights.sum()
         if total == 0:
             return np.ones(len(self.transcripts)) / len(self.transcripts)
@@ -413,7 +417,9 @@ class ReadSimulator:
             return
 
         # Sample fragment start positions (on the mRNA/transcript)
-        frag_starts = rng.integers(0, eff_len, size=count)
+        frag_starts = self.capture.sample_starts(
+            "mrna", t_idx, t_len, frag_len, count, rng,
+        )
 
         # Pre-compute strand-flip mask for imperfect strandedness.
         # When strand_specificity < 1.0, some fragments get R1↔R2
@@ -478,7 +484,9 @@ class ReadSimulator:
         if eff_len <= 0:
             return
 
-        frag_starts = rng.integers(0, eff_len, size=count)
+        frag_starts = self.capture.sample_starts(
+            "nrna", t_idx, premrna_len, frag_len, count, rng,
+        )
 
         ss = self.config.strand_specificity
         if ss < 1.0:
@@ -533,7 +541,9 @@ class ReadSimulator:
         rng = self._rng
         quals = "I" * read_len
 
-        frag_starts = rng.integers(0, eff_len, size=count)
+        frag_starts = self.capture.sample_starts(
+            "gdna", self.genome.name, genome_len, frag_len, count, rng,
+        )
 
         # Strand assignment: with or without Beta overdispersion
         if self._region_boundaries is not None:
@@ -599,22 +609,28 @@ class ReadSimulator:
         mean_frag = int(self.config.frag_mean)
 
         # Mature RNA weight: abundance × spliced effective length
-        mrna_weight = sum(
-            (t.abundance or 0) * max(0, tlen - mean_frag + 1)
-            for t, tlen in zip(self.transcripts, self._t_lengths)
+        mrna_eff = self.capture.partition_array(
+            "mrna", range(len(self.transcripts)), np.array(self._t_lengths), mean_frag,
+        )
+        mrna_weight = float(
+            np.sum(mrna_eff * np.array([t.abundance or 0 for t in self.transcripts]))
         )
 
         # Nascent RNA weight: nrna_abundance × pre-mRNA effective length
-        nrna_weight = sum(
-            t.nrna_abundance * max(0, plen - mean_frag + 1)
-            for t, plen in zip(self.transcripts, self._premrna_lengths)
+        nrna_eff = self.capture.partition_array(
+            "nrna", range(len(self.transcripts)), np.array(self._premrna_lengths), mean_frag,
+        )
+        nrna_weight = float(
+            np.sum(nrna_eff * np.array([t.nrna_abundance for t in self.transcripts]))
         )
 
         # gDNA weight: gdna_abundance × genome effective length
         if self.gdna_config is not None:
             gc = self.gdna_config
             gdna_mean_frag = int(gc.frag_mean)
-            genome_eff_len = max(0, len(self.genome) - gdna_mean_frag + 1)
+            genome_eff_len = self.capture.partition(
+                "gdna", self.genome.name, len(self.genome), gdna_mean_frag,
+            )
             gdna_weight = gc.abundance * genome_eff_len
         else:
             gdna_weight = 0.0
@@ -638,13 +654,17 @@ class ReadSimulator:
         """
         mean_frag = int(self.config.frag_mean)
 
-        mrna_weight = sum(
-            (t.abundance or 0) * max(0, tlen - mean_frag + 1)
-            for t, tlen in zip(self.transcripts, self._t_lengths)
+        mrna_eff = self.capture.partition_array(
+            "mrna", range(len(self.transcripts)), np.array(self._t_lengths), mean_frag,
         )
-        nrna_weight = sum(
-            t.nrna_abundance * max(0, plen - mean_frag + 1)
-            for t, plen in zip(self.transcripts, self._premrna_lengths)
+        nrna_eff = self.capture.partition_array(
+            "nrna", range(len(self.transcripts)), np.array(self._premrna_lengths), mean_frag,
+        )
+        mrna_weight = float(
+            np.sum(mrna_eff * np.array([t.abundance or 0 for t in self.transcripts]))
+        )
+        nrna_weight = float(
+            np.sum(nrna_eff * np.array([t.nrna_abundance for t in self.transcripts]))
         )
 
         total = mrna_weight + nrna_weight

@@ -321,10 +321,16 @@ denominators. The surviving index knobs (<code>alignable_zarr_path</code>,
 <code>mappability_read_length</code>) feed the splice-junction artifact blacklist;
 the manifest still records <code>mappability: null</code> and no per-region
 alignable-base table is loaded.</p>
+<p>Full-suite validation exposed three stale FL-policy tests that still
+expected add-one-per-bin smoothing or raw-count median semantics. Refreshed
+those expectations to the one-total-pseudo-observation scoring PMF and
+finalized-statistics contract.</p>
 <table>
 <tr><th>Check</th><th>Result</th></tr>
-<tr><td><code>ruff check src/rigel/calibration/density_global.py src/rigel/calibration/_orchestrator.py src/rigel/calibration/__init__.py tests/test_fractional_density_global.py tests/test_calibrate_orchestrator.py tests/conftest.py</code></td><td>All checks passed</td></tr>
+<tr><td><code>ruff check src/ tests/</code></td><td>All checks passed</td></tr>
 <tr><td><code>pytest tests/test_fractional_density_global.py tests/test_calibrate_orchestrator.py tests/test_fl_models.py -v</code></td><td>31 passed, 1 skipped</td></tr>
+<tr><td><code>pytest tests/test_frag_length_model.py tests/test_gdna_frag_length.py -v</code></td><td>49 passed</td></tr>
+<tr><td><code>pytest tests/ -q --no-header</code></td><td>750 passed, 258 skipped</td></tr>
 </table>
 </div>
 

@@ -45,30 +45,25 @@ import pysam
 
 from ..transcript import Transcript
 from ..types import Strand
-from . import bam as _bam
+from .bam import (
+    BASE_R1_FLAG,
+    BASE_R2_FLAG,
+    FLAG_MATE_REVERSE,
+    FLAG_REVERSE,
+    blocks_to_cigar,
+    make_aligned_segment,
+    premrna_to_genomic_interval,
+    take_from_left,
+    take_from_right,
+    transcript_to_genomic_blocks,
+)
+from .capture import CaptureConfig
 from .genome import MutableGenome
-from .reads import GDNAConfig, ReadSimulator, SimConfig
+from .reads import GDNAConfig, ReadSimulator, ReadSimConfig
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["OracleBamSimulator"]
-
-# Backward-compatible private aliases. Public code should import these helpers
-# from rigel.sim.bam.
-_FLAG_PAIRED = _bam.FLAG_PAIRED
-_FLAG_PROPER_PAIR = _bam.FLAG_PROPER_PAIR
-_FLAG_REVERSE = _bam.FLAG_REVERSE
-_FLAG_MATE_REVERSE = _bam.FLAG_MATE_REVERSE
-_FLAG_READ1 = _bam.FLAG_READ1
-_FLAG_READ2 = _bam.FLAG_READ2
-_BASE_R1_FLAG = _bam.BASE_R1_FLAG
-_BASE_R2_FLAG = _bam.BASE_R2_FLAG
-_blocks_to_cigar = _bam.blocks_to_cigar
-_make_aligned_segment = _bam.make_aligned_segment
-_premrna_to_genomic_interval = _bam.premrna_to_genomic_interval
-_take_from_left = _bam.take_from_left
-_take_from_right = _bam.take_from_right
-_transcript_to_genomic_blocks = _bam.transcript_to_genomic_blocks
 
 # ---------------------------------------------------------------------------
 # OracleBamSimulator
@@ -91,7 +86,7 @@ class OracleBamSimulator:
     transcripts : list[Transcript]
         Transcript annotations with exon coordinates and abundance.
         Exon coordinates are relative to the genome/region.
-    config : SimConfig or None
+    config : ReadSimConfig or None
         Simulation parameters (fragment size, read length, etc.).
     gdna_config : GDNAConfig or None
         gDNA contamination parameters. ``None`` disables gDNA.
@@ -104,19 +99,24 @@ class OracleBamSimulator:
         self,
         genome: MutableGenome,
         transcripts: list[Transcript],
-        config: SimConfig | None = None,
+        config: ReadSimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
+        capture_config: CaptureConfig | None = None,
         ref_name: str = "ref",
     ):
         self.genome = genome
         self.transcripts = transcripts
-        self.config = config or SimConfig()
+        self.config = config or ReadSimConfig()
         self.gdna_config = gdna_config
         self.ref_name = ref_name
 
         # Internal ReadSimulator for fragment selection logic
         self._sim = ReadSimulator(
-            genome, transcripts, config=self.config, gdna_config=gdna_config,
+            genome,
+            transcripts,
+            config=self.config,
+            gdna_config=gdna_config,
+            capture_config=capture_config,
         )
 
         # Pre-compute transcript lengths and pre-mRNA lengths
@@ -254,7 +254,9 @@ class OracleBamSimulator:
                 if eff_len <= 0:
                     continue
 
-                frag_starts = rng.integers(0, eff_len, size=int(t_count))
+                frag_starts = sim.capture.sample_starts(
+                    "mrna", int(t_idx), t_len, int(frag_len), int(t_count), rng,
+                )
 
                 # Strand-flip mask
                 ss = cfg.strand_specificity
@@ -270,7 +272,7 @@ class OracleBamSimulator:
                     frag_end = frag_start + int(frag_len)
 
                     # Project to genomic coordinates
-                    blocks = _transcript_to_genomic_blocks(frag_start, frag_end, t)
+                    blocks = transcript_to_genomic_blocks(frag_start, frag_end, t)
                     if not blocks:
                         continue
 
@@ -333,7 +335,9 @@ class OracleBamSimulator:
                 if eff_len <= 0:
                     continue
 
-                frag_starts = rng.integers(0, eff_len, size=int(t_count))
+                frag_starts = sim.capture.sample_starts(
+                    "nrna", int(t_idx), premrna_len, int(frag_len), int(t_count), rng,
+                )
 
                 ss = cfg.strand_specificity
                 if ss < 1.0:
@@ -347,7 +351,7 @@ class OracleBamSimulator:
                     frag_start = int(frag_starts[i])
                     frag_end = frag_start + int(frag_len)
 
-                    gstart, gend = _premrna_to_genomic_interval(
+                    gstart, gend = premrna_to_genomic_interval(
                         frag_start, frag_end, t,
                     )
                     blocks = [(gstart, gend)]
@@ -398,7 +402,9 @@ class OracleBamSimulator:
                 continue
 
             rl = min(read_len, int(frag_len))
-            frag_starts = rng.integers(0, eff_len, size=int(frag_count))
+            frag_starts = sim.capture.sample_starts(
+                "gdna", self.genome.name, genome_len, int(frag_len), int(frag_count), rng,
+            )
             strands = rng.integers(0, 2, size=int(frag_count))  # 0=+, 1=-
 
             for i in range(int(frag_count)):
@@ -495,8 +501,8 @@ class OracleBamSimulator:
         r2_seq = "".join(self.genome[bs:be] for bs, be in r2_blocks)
 
         # CIGAR
-        r1_cigar = _blocks_to_cigar(r1_blocks)
-        r2_cigar = _blocks_to_cigar(r2_blocks)
+        r1_cigar = blocks_to_cigar(r1_blocks)
+        r2_cigar = blocks_to_cigar(r2_blocks)
 
         # Positions
         r1_pos = r1_blocks[0][0]
@@ -514,20 +520,20 @@ class OracleBamSimulator:
             tags.append(("XS", xs_strand, "A"))
 
         # Build R1 flags
-        r1_flag = _BASE_R1_FLAG
+        r1_flag = BASE_R1_FLAG
         if r1_is_reverse:
-            r1_flag |= _FLAG_REVERSE
+            r1_flag |= FLAG_REVERSE
         if r2_is_reverse:
-            r1_flag |= _FLAG_MATE_REVERSE
+            r1_flag |= FLAG_MATE_REVERSE
 
         # Build R2 flags
-        r2_flag = _BASE_R2_FLAG
+        r2_flag = BASE_R2_FLAG
         if r2_is_reverse:
-            r2_flag |= _FLAG_REVERSE
+            r2_flag |= FLAG_REVERSE
         if r1_is_reverse:
-            r2_flag |= _FLAG_MATE_REVERSE
+            r2_flag |= FLAG_MATE_REVERSE
 
-        r1_rec = _make_aligned_segment(
+        r1_rec = make_aligned_segment(
             header=header,
             query_name=rname,
             query_sequence=r1_seq,
@@ -547,7 +553,7 @@ class OracleBamSimulator:
             xs_strand = "+" if transcript.strand == Strand.POS else "-"
             r2_tags.append(("XS", xs_strand, "A"))
 
-        r2_rec = _make_aligned_segment(
+        r2_rec = make_aligned_segment(
             header=header,
             query_name=rname,
             query_sequence=r2_seq,
@@ -612,22 +618,22 @@ class OracleBamSimulator:
         tlen = gend - gstart
 
         # R1 flags
-        r1_flag = _BASE_R1_FLAG
+        r1_flag = BASE_R1_FLAG
         if r1_is_reverse:
-            r1_flag |= _FLAG_REVERSE
+            r1_flag |= FLAG_REVERSE
         if r2_is_reverse:
-            r1_flag |= _FLAG_MATE_REVERSE
+            r1_flag |= FLAG_MATE_REVERSE
 
         # R2 flags
-        r2_flag = _BASE_R2_FLAG
+        r2_flag = BASE_R2_FLAG
         if r2_is_reverse:
-            r2_flag |= _FLAG_REVERSE
+            r2_flag |= FLAG_REVERSE
         if r1_is_reverse:
-            r2_flag |= _FLAG_MATE_REVERSE
+            r2_flag |= FLAG_MATE_REVERSE
 
         tags: list[tuple] = [("NH", 1)]
 
-        r1_rec = _make_aligned_segment(
+        r1_rec = make_aligned_segment(
             header=header,
             query_name=rname,
             query_sequence=r1_seq,
@@ -641,7 +647,7 @@ class OracleBamSimulator:
             tags=tags,
         )
 
-        r2_rec = _make_aligned_segment(
+        r2_rec = make_aligned_segment(
             header=header,
             query_name=rname,
             query_sequence=r2_seq,
@@ -677,12 +683,12 @@ class OracleBamSimulator:
         """
         if neg_strand_tx:
             # NEG strand: 5' end is rightmost, 3' end is leftmost
-            r1_blocks = _take_from_left(blocks, read_len)
-            r2_blocks = _take_from_right(blocks, read_len)
+            r1_blocks = take_from_left(blocks, read_len)
+            r2_blocks = take_from_right(blocks, read_len)
         else:
             # POS strand: 5' end is leftmost, 3' end is rightmost
-            r2_blocks = _take_from_left(blocks, read_len)
-            r1_blocks = _take_from_right(blocks, read_len)
+            r2_blocks = take_from_left(blocks, read_len)
+            r1_blocks = take_from_right(blocks, read_len)
 
         return r1_blocks, r2_blocks
 

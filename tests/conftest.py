@@ -39,20 +39,16 @@ def pytest_addoption(parser):
 # new 12-channel payload + StrandSummary + fractional_boundary_side_exposure.
 # Tracked in docs/fineregions/python_cutover_implementation_log.html (Step 13).
 collect_ignore = [
-    "test_assemble_priors.py",
     "test_bayesian_prior_acceptance.py",
     "test_calibration_accumulator.py",
     "test_calibration_result.py",
     "test_density_global.py",
     "test_exposure.py",
-    "test_locus_prior_fused.py",
     "test_ndarray_util.py",
     "test_per_locus_gdna_mass.py",
-    "test_regional_exposure.py",
     # Tests below construct legacy region_df / scan tuples that the
     # fractional cutover reshaped. Skipped until rewritten in Step 13.
     "test_pipeline_wiring.py",
-    "test_weighted_eff_len.py",
     # External profiling script (scripts/profiling/profiler.py) still
     # imports from the deleted _orient module. Re-enable once the
     # profiler is ported to strand_summary.StrandSummary.
@@ -60,23 +56,23 @@ collect_ignore = [
 ]
 
 
-# Any test that drives ``run_pipeline`` past calibration trips
-# FractionalCutoverPending while the Phase 4 prior estimator is stubbed.
-# Convert that exception into a pytest skip so the rest of the suite can
-# still run and be a useful regression signal. Handle both setup and call
-# phases (many integration tests do the heavy lifting in a class fixture).
-def _maybe_skip_cutover(outcome):
-    from rigel.calibration.errors import FractionalCutoverPending
+# Any test that drives ``run_pipeline`` past calibration trips the Phase 6
+# locus-EM boundary. Convert only that sentinel NotImplementedError into a
+# pytest skip so the rest of the suite remains a useful regression signal.
+# Handle both setup and call phases (many integration tests do the heavy
+# lifting in a class fixture).
+def _maybe_skip_phase6_boundary(outcome):
     from _pytest.outcomes import Skipped
 
     try:
         outcome.get_result()
-    except FractionalCutoverPending:
+    except NotImplementedError as exc:
+        if str(exc) != "rigel quant: locus EM lands in Phase 6":
+            return
         outcome.force_exception(
             Skipped(
-                "fractional cutover pending \u2014 Phase 4 prior pipeline "
-                "not yet implemented; see "
-                "docs/fineregions/python_cutover_implementation_log.html"
+                "locus EM lands in Phase 6; see "
+                "docs/fineregions/strand_model_impl_plan_v5.md"
             )
         )
     except BaseException:
@@ -86,13 +82,13 @@ def _maybe_skip_cutover(outcome):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_setup(item):
     outcome = yield
-    _maybe_skip_cutover(outcome)
+    _maybe_skip_phase6_boundary(outcome)
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
     outcome = yield
-    _maybe_skip_cutover(outcome)
+    _maybe_skip_phase6_boundary(outcome)
 
 
 # ---------------------------------------------------------------------------

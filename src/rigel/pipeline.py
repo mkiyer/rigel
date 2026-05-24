@@ -56,10 +56,6 @@ from .strand_model import StrandModels
 if TYPE_CHECKING:
     from .annotate import AnnotationTable
     from .calibration import CalibrationResult
-    from .calibration._regional_exposure import (
-        RegionalGdnaExposure,
-        RegionalWeightApplicationStats,
-    )
     from .calibration.scan_payload import CalibrationScanPayload
     from .scored_fragments import ScoredFragments
 
@@ -71,80 +67,6 @@ _ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
 #: Fallback mean fragment length when no observations are available.
 _DEFAULT_MEAN_FRAG: float = 200.0
-
-
-# ---------------------------------------------------------------------------
-# Regional gDNA exposure: per-unit weight application
-# ---------------------------------------------------------------------------
-
-
-def _apply_unit_gdna_weights(
-    em_data: "ScoredFragments",
-    exposure: "RegionalGdnaExposure",
-    index: TranscriptIndex,
-) -> "RegionalWeightApplicationStats":
-    """Legacy helper for applying ``log A_r`` to gDNA likelihoods.
-
-    v4.3 production regional exposure is denominator-only and does not call
-    this helper. It is retained temporarily to avoid schema/native cleanup in
-    the same change.
-
-    Units with finite ``gdna_log_liks`` and a valid genomic midpoint get
-    ``log A_r`` added at their midpoint.  Units whose candidate transcripts
-    span multiple references are skipped (left at ``A=1``) and counted as
-    ``n_units_cross_ref_skipped``.  In uniform-exposure mode this is a
-    no-op besides bookkeeping.
-    """
-    from .calibration._regional_exposure import RegionalWeightApplicationStats
-
-    n_units = int(em_data.n_units)
-    if exposure.mode == "uniform" or n_units == 0:
-        return RegionalWeightApplicationStats(n_units_seen=n_units)
-
-    # Invariant guard (R6): every EM unit must have >=1 candidate.
-    # ``np.*.reduceat`` silently misbehaves on empty groups.
-    assert (np.diff(em_data.offsets) > 0).all(), "empty EM unit detected"
-
-    finite = np.isfinite(em_data.gdna_log_liks)
-    n_no_gdna = int((~finite).sum())
-
-    int64_min = np.iinfo(np.int64).min
-    has_mid = em_data.genomic_midpoint != int64_min
-    n_missing_mid = int((finite & ~has_mid).sum())
-
-    base_mask = finite & has_mid
-
-    if not base_mask.any():
-        return RegionalWeightApplicationStats(
-            n_units_seen=n_units,
-            n_units_no_gdna=n_no_gdna,
-            n_units_missing_midpoint=n_missing_mid,
-        )
-
-    if index.t_to_ref_arr is None:
-        raise RuntimeError("TranscriptIndex.t_to_ref_arr not populated")
-    candidate_refs = index.t_to_ref_arr[em_data.t_indices]
-    unit_starts = em_data.offsets[:-1]
-    unit_min_ref = np.minimum.reduceat(candidate_refs, unit_starts)
-    unit_max_ref = np.maximum.reduceat(candidate_refs, unit_starts)
-    same_ref = unit_min_ref == unit_max_ref
-    n_cross_ref = int((base_mask & ~same_ref).sum())
-
-    mask = base_mask & same_ref
-    n_weighted = int(mask.sum())
-    if n_weighted > 0:
-        log_w = exposure.log_weights_for_positions(
-            unit_min_ref[mask], em_data.genomic_midpoint[mask]
-        )
-        em_data.gdna_log_liks[mask] += log_w.astype(em_data.gdna_log_liks.dtype, copy=False)
-
-    return RegionalWeightApplicationStats(
-        n_units_seen=n_units,
-        n_units_weighted=n_weighted,
-        n_units_no_gdna=n_no_gdna,
-        n_units_missing_midpoint=n_missing_mid,
-        n_units_cross_ref_skipped=n_cross_ref,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -549,7 +471,6 @@ def _setup_geometry_and_estimator(
     index: TranscriptIndex,
     rna_fl,
     em_config: EMConfig,
-    regional_exposure: "RegionalGdnaExposure | None" = None,
 ) -> tuple["TranscriptGeometry", AbundanceEstimator]:
     """Compute transcript geometry and create the AbundanceEstimator."""
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
@@ -560,13 +481,6 @@ def _setup_geometry_and_estimator(
     else:
         effective_lengths = np.maximum(exonic_lengths - _DEFAULT_MEAN_FRAG + 1.0, 1.0)
 
-    effective_lengths_em = None
-    if regional_exposure is not None:
-        from .calibration._exposure import transcript_exposure_weights
-
-        exposure_weights = transcript_exposure_weights(index, regional_exposure)
-        effective_lengths_em = np.maximum(effective_lengths * exposure_weights, 1.0)
-
     transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
 
     geometry = TranscriptGeometry(
@@ -574,7 +488,7 @@ def _setup_geometry_and_estimator(
         exonic_lengths=exonic_lengths,
         t_to_g=index.t_to_g_arr,
         transcript_spans=transcript_spans,
-        effective_lengths_em=effective_lengths_em,
+        effective_lengths_em=None,
     )
 
     estimator = AbundanceEstimator(
@@ -968,13 +882,11 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Fail fast at the Phase 4 density/prior boundary.
+    """Fail fast at the Phase 6 locus-EM boundary.
 
     The scan and calibration stages are complete when this function is
     called. Locus-level scoring, prior assembly, and EM are intentionally
-    blocked until the fractional density estimator lands. The raised
-    :class:`FractionalCutoverPending` carries ``calibration.to_summary_dict()``
-    so the CLI can still persist useful diagnostics.
+    blocked until the Phase 6 wiring lands.
 
     Parameters
     ----------
@@ -986,7 +898,7 @@ def quant_from_buffer(
 
     Returns
     -------
-    Never returns until Phase 4 replaces the fail-fast boundary.
+    Never returns until Phase 6 replaces the fail-fast boundary.
     """
     if calibration is None:
         raise ValueError(
@@ -995,14 +907,7 @@ def quant_from_buffer(
             "locus-level quantification."
         )
 
-    # Fractional cutover: per-locus prior assembly + locus EM depend on
-    # the Phase 4 fractional density estimator. Until that lands, we
-    # refuse to proceed past calibration. The CLI catches this and
-    # writes ``summary.json`` from the (already complete) calibration
-    # result before exiting.
-    from .calibration.errors import FractionalCutoverPending
-
-    raise FractionalCutoverPending(calibration_summary=calibration.to_summary_dict())
+    raise NotImplementedError("rigel quant: locus EM lands in Phase 6")
 
 
 # ---------------------------------------------------------------------------
@@ -1085,11 +990,6 @@ def run_pipeline(
         pool_quality_good=cal_cfg.pool_quality_good,
         pool_quality_weak=cal_cfg.pool_quality_weak,
         strand_summary=strand_summary,
-        regional_exposure_enabled=cal_cfg.regional_exposure_enabled,
-        regional_exposure_reference_quantile=cal_cfg.regional_exposure_reference_quantile,
-        resolver_splicing_anchor_tolerance=int(
-            calibration_payload.resolver_splicing_anchor_tolerance
-        ),
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

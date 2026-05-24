@@ -15,7 +15,7 @@ from rigel.sim.oracle_bam import (
     OracleBamSimulator,
 )
 from rigel.sim.genome import MutableGenome
-from rigel.sim.reads import GDNAConfig, ReadSimulator, SimConfig
+from rigel.sim.reads import GDNAConfig, ReadSimulator, ReadSimConfig
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
@@ -231,7 +231,7 @@ class TestOracleBamSimulatorBasic:
 
     def test_write_bam_creates_file(self, simple_setup, tmp_path):
         genome, transcripts = simple_setup
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -245,7 +245,7 @@ class TestOracleBamSimulatorBasic:
     def test_bam_is_valid(self, simple_setup, tmp_path):
         """BAM should be readable by pysam with proper paired-end records."""
         genome, transcripts = simple_setup
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -264,7 +264,7 @@ class TestOracleBamSimulatorBasic:
     def test_paired_end_flags(self, simple_setup, tmp_path):
         """All records should have proper paired-end flags."""
         genome, transcripts = simple_setup
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -290,7 +290,7 @@ class TestOracleBamSimulatorBasic:
     def test_name_sorted(self, simple_setup, tmp_path):
         """Default output should be name-sorted."""
         genome, transcripts = simple_setup
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -309,7 +309,7 @@ class TestOracleBamSimulatorBasic:
     def test_spliced_reads_have_xs_tag(self, simple_setup, tmp_path):
         """Spliced mRNA reads should have the XS tag."""
         genome, transcripts = simple_setup
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -339,7 +339,7 @@ class TestOracleBamSimulatorBasic:
     def test_read_name_format(self, simple_setup, tmp_path):
         """Read names should encode ground truth."""
         genome, transcripts = simple_setup
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -370,7 +370,7 @@ class TestOracleBamSimulatorWithGDNA:
                 t_id="tx1", g_id="g1",
             ),
         ]
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -398,7 +398,7 @@ class TestOracleBamSimulatorWithGDNA:
                 [(100, 300)], t_id="tx1", g_id="g1",
             ),
         ]
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, seed=42,
         )
@@ -433,7 +433,7 @@ class TestOracleBamSimulatorWithNRNA:
         # Set nRNA abundance
         transcripts[0].nrna_abundance = 200.0
 
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -461,7 +461,7 @@ class TestOracleBamSimulatorStrandSpecificity:
         transcripts = [
             _make_pos_transcript([(100, 400)], t_id="tx1", g_id="g1"),
         ]
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=350,
             read_length=100, strand_specificity=1.0, seed=42,
         )
@@ -484,7 +484,7 @@ class TestOracleBamSimulatorStrandSpecificity:
         transcripts = [
             _make_pos_transcript([(100, 400)], t_id="tx1", g_id="g1"),
         ]
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=350,
             read_length=100, strand_specificity=0.5, seed=42,
         )
@@ -519,7 +519,7 @@ class TestDirectBamCoordSorted:
         transcripts = [
             _make_pos_transcript([(100, 400)], t_id="tx1", g_id="g1"),
         ]
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=50, frag_max=350,
             read_length=100, seed=42,
         )
@@ -557,7 +557,7 @@ class TestOracleBamTruthCounts:
             ),
         ]
         n_frags = 500
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=30, frag_min=50, frag_max=500,
             read_length=100, strand_specificity=1.0, seed=42,
         )

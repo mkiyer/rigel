@@ -1,0 +1,61 @@
+# Hybrid-capture random mini-genome suite: 500 kb, 10 genes, 1-5 isoforms/gene.
+#
+# Usage:
+#   python scripts/sim/simulate_suite.py \
+#     --config scripts/sim/configs/hybrid_capture_500kb.yaml
+#
+# Override outdir from the CLI for production runs:
+#   python scripts/sim/simulate_suite.py \
+#     --config scripts/sim/configs/hybrid_capture_500kb.yaml \
+#     --outdir /scratch/$USER/rigel_sim/hybrid_capture_500kb
+
+suite:
+  outdir: /tmp/rigel_sim/hybrid_capture_500kb
+  genome_length: 500000
+  n_genes: 10
+  min_isoforms: 1
+  max_isoforms: 5
+  target_transcripts: null
+  antisense_fraction: 0.0
+  seed: 20260523
+  profile: smoke
+  conditions: null
+
+simulation:
+  n_rna_fragments: 100000
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 50
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 1
+
+abundance:
+  seed: 20260524
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+gdna:
+  rates: [0.0, 1.0]
+  rate_labels: [none, high]
+  frag_mean: 150
+  frag_std: 50
+  frag_min: 50
+  frag_max: 300
+
+strand_specificities: [0.99, 0.50]
+
+nrna:
+  ratios: [0.0]
+  ratio_labels: [none]
+
+capture:
+  fraction: 0.5
+  probe_length: 120
+  probe_density: 1.0
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1

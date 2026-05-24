@@ -22,7 +22,7 @@ from rigel.config import (
     PipelineConfig,
 )
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark
+from rigel.sim import GDNAConfig, Scenario, ReadSimConfig, run_benchmark
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ TRANSCRIPT_ABUNDANCE = 100.0  # Dominant transcript
 
 
 def _sim_config(*, strand_specificity: float = 1.0, seed: int = SIM_SEED):
-    return SimConfig(
+    return ReadSimConfig(
         frag_mean=200,
         frag_std=30,
         frag_min=80,

@@ -334,31 +334,49 @@ def generate_genes(
     genome_length: int,
     n_genes: int,
     seed: int,
+    *,
+    min_isoforms: int = MIN_ISOFORMS,
+    max_isoforms: int = MAX_ISOFORMS,
+    target_transcripts: int | None = TARGET_TRANSCRIPTS,
+    antisense_overlap_frac: float = ANTISENSE_OVERLAP_FRAC,
 ) -> list[GeneDef]:
     """Generate gene definitions with isoforms.
 
-    Produces approximately n_genes genes with a total of ~250 transcripts.
+    Produces approximately ``n_genes`` genes. When ``target_transcripts`` is
+    provided, isoform counts use the historical exponential-like distribution
+    scaled to that target. When it is ``None``, each gene gets a uniform random
+    isoform count in ``[min_isoforms, max_isoforms]``.
     Some genes get antisense overlapping partners.
     """
+    if n_genes <= 0:
+        raise ValueError("n_genes must be > 0")
+    if min_isoforms <= 0:
+        raise ValueError("min_isoforms must be > 0")
+    if max_isoforms < min_isoforms:
+        raise ValueError("max_isoforms must be >= min_isoforms")
+    if not 0.0 <= antisense_overlap_frac <= 1.0:
+        raise ValueError("antisense_overlap_frac must be between 0 and 1")
     rng = np.random.default_rng(seed)
     genes: list[GeneDef] = []
 
-    # Decide isoform counts per gene to hit ~250 total transcripts
-    # Use a distribution that varies from 1-10
-    isoform_counts = []
-    while sum(isoform_counts) < TARGET_TRANSCRIPTS:
-        # Draw from a shifted geometric-like distribution
-        n_iso = min(MAX_ISOFORMS, max(MIN_ISOFORMS, int(rng.exponential(5.0)) + 1))
-        isoform_counts.append(n_iso)
-
-    # Trim to n_genes
-    if len(isoform_counts) > n_genes:
-        isoform_counts = isoform_counts[:n_genes]
+    # Decide isoform counts per gene.
+    if target_transcripts is None:
+        isoform_counts = rng.integers(
+            min_isoforms, max_isoforms + 1, size=n_genes,
+        ).astype(int).tolist()
+    else:
+        # Draw from the original shifted exponential-like distribution, but
+        # scale it to the requested target and always emit n_genes primary genes.
+        scale = max(1.0, float(target_transcripts) / float(n_genes))
+        isoform_counts = [
+            min(max_isoforms, max(min_isoforms, int(rng.exponential(scale)) + 1))
+            for _ in range(n_genes)
+        ]
 
     actual_n_genes = len(isoform_counts)
 
     # Decide which genes get antisense partners
-    n_antisense = int(actual_n_genes * ANTISENSE_OVERLAP_FRAC)
+    n_antisense = int(actual_n_genes * antisense_overlap_frac)
     antisense_indices = set(rng.choice(actual_n_genes, size=n_antisense, replace=False))
 
     # Place genes along the genome
@@ -544,6 +562,28 @@ def main():
         help=f"Number of genes (default: {N_GENES})"
     )
     parser.add_argument(
+        "--min-isoforms", type=int, default=MIN_ISOFORMS,
+        help=f"Minimum transcript isoforms per primary gene (default: {MIN_ISOFORMS})"
+    )
+    parser.add_argument(
+        "--max-isoforms", type=int, default=MAX_ISOFORMS,
+        help=f"Maximum transcript isoforms per primary gene (default: {MAX_ISOFORMS})"
+    )
+    parser.add_argument(
+        "--target-transcripts", type=int, default=TARGET_TRANSCRIPTS,
+        help=(
+            f"Approximate target transcript count for isoform sampling "
+            f"(default: {TARGET_TRANSCRIPTS}; use 0 for uniform min/max sampling)"
+        )
+    )
+    parser.add_argument(
+        "--antisense-fraction", type=float, default=ANTISENSE_OVERLAP_FRAC,
+        help=(
+            "Fraction of primary genes with an antisense overlapping partner "
+            f"(default: {ANTISENSE_OVERLAP_FRAC})"
+        )
+    )
+    parser.add_argument(
         "--seed", type=int, default=SEED,
         help=f"Random seed (default: {SEED})"
     )
@@ -566,7 +606,16 @@ def main():
                 args.genome_length, args.n_genes, args.seed)
 
     # 1. Generate gene structure
-    genes = generate_genes(args.genome_length, args.n_genes, args.seed)
+    target_transcripts = args.target_transcripts if args.target_transcripts > 0 else None
+    genes = generate_genes(
+        args.genome_length,
+        args.n_genes,
+        args.seed,
+        min_isoforms=args.min_isoforms,
+        max_isoforms=args.max_isoforms,
+        target_transcripts=target_transcripts,
+        antisense_overlap_frac=args.antisense_fraction,
+    )
     n_transcripts = sum(len(g.transcripts) for g in genes)
     n_antisense = sum(1 for g in genes if g.gene_name.endswith("as"))
     logger.info("Generated %d genes (%d antisense) with %d transcripts",

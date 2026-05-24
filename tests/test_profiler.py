@@ -5,7 +5,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from rigel.sim import Scenario, SimConfig
+from rigel.sim import Scenario, ReadSimConfig
 
 
 def _load_profiler_module():
@@ -48,7 +48,7 @@ def test_staged_profile_writes_memory_shape_metrics(tmp_path):
             {"t_id": "t3", "exons": [(2500, 2700), (3000, 3200)], "abundance": 50},
         ],
     )
-    sim_config = SimConfig(
+    sim_config = ReadSimConfig(
         frag_mean=200,
         frag_std=30,
         frag_min=80,

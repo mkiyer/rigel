@@ -3,6 +3,9 @@
 Date: 2026-05-22
 Status: planning document
 Prerequisites: Phase 0-3 region partition, native fractional accumulator, Python payload cutover
+Companion plan: `rnaseq_mode_aware_gdna_density_plan.md` covers the
+mode-aware density architecture across no-capture, hybrid-capture,
+unstranded, and strand-specific RNA-seq libraries.
 
 ## 1. Purpose
 

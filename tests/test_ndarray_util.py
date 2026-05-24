@@ -27,7 +27,7 @@ from rigel.pipeline import (
     run_pipeline,
     scan_and_buffer,
 )
-from rigel.sim import Scenario, SimConfig
+from rigel.sim import Scenario, ReadSimConfig
 from rigel.strand_model import StrandModel, StrandModels
 from rigel.frag_length_model import FragmentLengthModels
 
@@ -63,7 +63,7 @@ def smoke_scenario(tmp_path):
             {"t_id": "t3", "exons": [(2500, 2700), (3000, 3200)], "abundance": 50},
         ],
     )
-    sim_config = SimConfig(
+    sim_config = ReadSimConfig(
         frag_mean=200,
         frag_std=30,
         frag_min=80,

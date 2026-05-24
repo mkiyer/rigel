@@ -47,6 +47,7 @@ def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) 
         "simulation": _jsonable(getattr(config, "simulation", {})),
         "gdna": _jsonable(getattr(config, "gdna", {})),
         "nrna": _jsonable(getattr(config, "nrna", {})),
+        "capture": _jsonable(getattr(config, "capture", {})),
         "abundance": _jsonable(getattr(config, "abundance", {})),
         "truth_abundances": "truth_abundances.tsv",
         "conditions": _jsonable(conditions),

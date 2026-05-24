@@ -3,7 +3,7 @@
 # ╚═════════════════════════════════════════════════════════════╝
 #
 # Usage:
-#   python scripts/sim/simulate_reads.py --config scripts/sim_example.yaml
+#   python scripts/sim/simulate_reads.py --config scripts/sim/configs/sim_example.yaml
 #
 # CLI flags (--genome, --gtf, --outdir, --n-rna, --no-oracle) override YAML.
 
@@ -32,6 +32,7 @@ simulation:
 
   read_length: 150
   error_rate: 0.0       # Per-base substitution rate (0 = perfect)
+  n_workers: 1
 
 # ── Abundance model ───────────────────────────────────────────
 abundance:
@@ -86,6 +87,16 @@ nrna:
   mode: additive_ratio
   ratios: [0.0, 0.1, 0.5, 1.0]
   ratio_labels: [none, low, med, high]
+
+# ── Hybrid capture ───────────────────────────────────────────
+# Set probes to a transcript-coordinate TSV or BED12 file to enable capture.
+capture:
+  probes: null
+  probe_format: auto
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
 
 # ── Oracle BAM ────────────────────────────────────────────────
 # Generate oracle BAM (perfectly aligned) for each condition.

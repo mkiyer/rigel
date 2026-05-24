@@ -57,6 +57,15 @@ nrna:
   ratios: [0.0]
   ratio_labels: [none]
 
+# ── Hybrid capture ───────────────────────────────────────────
+capture:
+  probes: null
+  probe_format: auto
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+
 # ── Output options ────────────────────────────────────────────
 oracle_bam: true
 verbose: true

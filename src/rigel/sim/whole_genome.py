@@ -91,26 +91,24 @@ except ImportError:
 from rigel.transcript import Transcript
 from rigel.types import Strand
 from rigel.sim.bam import (
-    BASE_R1_FLAG as _BASE_R1_FLAG,
-    BASE_R2_FLAG as _BASE_R2_FLAG,
-    FLAG_MATE_REVERSE as _FLAG_MATE_REVERSE,
-    FLAG_REVERSE as _FLAG_REVERSE,
-    blocks_to_cigar as _blocks_to_cigar,
-    make_aligned_segment as _make_bam_record,
-    premrna_to_genomic_interval as _premrna_to_genomic_interval,
-    transcript_to_genomic_blocks as _transcript_to_genomic_blocks,
+    BASE_R1_FLAG,
+    BASE_R2_FLAG,
+    FLAG_MATE_REVERSE,
+    FLAG_REVERSE,
+    blocks_to_cigar,
+    make_aligned_segment,
+    premrna_to_genomic_interval,
+    transcript_to_genomic_blocks,
 )
+from rigel.sim.capture import CaptureConfig, CaptureSampler
+from rigel.sim.genome import reverse_complement
 from rigel.sim.manifest import (
-    condition_dir_name as _condition_dir_name,
-    gdna_label_for_rate as _gdna_label_for_rate,
-    write_manifest as _write_manifest,
+    condition_dir_name,
+    gdna_label_for_rate,
+    write_manifest as write_manifest_file,
 )
 
 logger = logging.getLogger(__name__)
-
-# ── Constants ───────────────────────────────────────────────────────
-
-_DNA_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 
 # Byte-level complement table for vectorized reverse-complement
 _BYTE_COMPLEMENT = np.zeros(256, dtype=np.uint8)
@@ -118,11 +116,6 @@ for _c, _rc in zip(b"ACGTNacgtn", b"TGCANtgcan"):
     _BYTE_COMPLEMENT[_c] = _rc
 
 _FASTQ_BUFFER_SIZE = 100_000
-
-
-def reverse_complement(seq: str) -> str:
-    """Return the reverse complement of a DNA sequence."""
-    return seq.translate(_DNA_COMPLEMENT)[::-1]
 
 
 def _seq_to_bytes(seq: str) -> np.ndarray:
@@ -287,7 +280,7 @@ class NRNAConfig:
 
 
 @dataclass
-class SimConfig:
+class WholeGenomeSimConfig:
     """Top-level simulation configuration."""
 
     genome: str = ""
@@ -299,6 +292,7 @@ class SimConfig:
     abundance: AbundanceConfig = field(default_factory=AbundanceConfig)
     gdna: GDNASimConfig = field(default_factory=GDNASimConfig)
     nrna: NRNAConfig = field(default_factory=NRNAConfig)
+    capture: CaptureConfig = field(default_factory=CaptureConfig)
     strand_specificities: list[float] = field(
         default_factory=lambda: [1.0]
     )
@@ -307,15 +301,15 @@ class SimConfig:
     verbose: bool = True
 
 
-def parse_yaml_config(path: str | Path) -> SimConfig:
-    """Parse a YAML config file into a SimConfig."""
+def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
+    """Parse a YAML config file into a WholeGenomeSimConfig."""
     if yaml is None:
         raise ImportError("PyYAML is required: pip install pyyaml")
 
     with open(path) as f:
         raw = yaml.safe_load(f)
 
-    cfg = SimConfig()
+    cfg = WholeGenomeSimConfig()
     cfg.genome = raw.get("genome", "")
     cfg.gtf = raw.get("gtf", "")
     cfg.outdir = raw.get("outdir", "sim_output")
@@ -386,6 +380,16 @@ def parse_yaml_config(path: str | Path) -> SimConfig:
     gd.frag_std = float(gd_raw.get("frag_std", 100.0))
     gd.frag_min = int(gd_raw.get("frag_min", 100))
     gd.frag_max = int(gd_raw.get("frag_max", 1000))
+
+    # Hybrid capture
+    cap_raw = raw.get("capture", {}) or {}
+    cap = cfg.capture
+    cap.probes = cap_raw.get("probes", None)
+    cap.probe_format = str(cap_raw.get("probe_format", cap_raw.get("format", "auto")))
+    cap.off_target_weight = float(cap_raw.get("off_target_weight", 1.0))
+    cap.binding_per_base = float(cap_raw.get("binding_per_base", 10.0))
+    cap.gdna_split_penalty = float(cap_raw.get("gdna_split_penalty", 0.2))
+    cap.min_overlap = int(cap_raw.get("min_overlap", 1))
 
     # Strand specificities
     cfg.strand_specificities = [
@@ -819,6 +823,7 @@ class WholeGenomeSimulator:
         *,
         strand_specificity: float = 1.0,
         seed: int | None = None,
+        capture_config: CaptureConfig | None = None,
     ):
         self.fasta = pysam.FastaFile(str(fasta_path))
         self.transcripts = transcripts
@@ -890,6 +895,11 @@ class WholeGenomeSimulator:
         self._ref_name_to_id: dict[str, int] = {
             name: i for i, name in enumerate(self._ref_names)
         }
+        self.capture = CaptureSampler.from_config(
+            capture_config,
+            transcripts,
+            dict(zip(self._ref_names, self._ref_lengths)),
+        )
         self._bam_header = pysam.AlignmentHeader.from_dict({
             "HD": {"VN": "1.6", "SO": "unsorted", "GO": "query"},
             "SQ": [
@@ -1005,6 +1015,8 @@ class WholeGenomeSimulator:
         n_frags: int,
         abundances: np.ndarray,
         lengths: np.ndarray,
+        *,
+        space: str,
     ) -> dict[int, dict[int, int]]:
         """Sample fragment counts from a single abundance/length pool.
 
@@ -1021,7 +1033,7 @@ class WholeGenomeSimulator:
 
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
-            eff = np.maximum(0, lengths - fl + 1)
+            eff = self.capture.partition_array(space, range(len(abundances)), lengths, fl)
             weights = abundances * eff
             total_w = weights.sum()
             if total_w <= 0:
@@ -1054,10 +1066,10 @@ class WholeGenomeSimulator:
         # Separate-pool mode: precise fragment-level control
         if n_mrna is not None and n_nrna is not None:
             mrna_counts = self._accumulate_pool(
-                n_mrna, self._mrna_abund, self._t_lengths,
+                n_mrna, self._mrna_abund, self._t_lengths, space="mrna",
             )
             nrna_counts = self._accumulate_pool(
-                n_nrna, self._nrna_abund, self._premrna_lengths,
+                n_nrna, self._nrna_abund, self._premrna_lengths, space="nrna",
             )
             return mrna_counts, nrna_counts
 
@@ -1077,8 +1089,8 @@ class WholeGenomeSimulator:
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
 
-            mrna_eff = np.maximum(0, self._t_lengths - fl + 1)
-            nrna_eff = np.maximum(0, self._premrna_lengths - fl + 1)
+            mrna_eff = self.capture.partition_array("mrna", range(N), self._t_lengths, fl)
+            nrna_eff = self.capture.partition_array("nrna", range(N), self._premrna_lengths, fl)
             weights = np.concatenate([
                 self._mrna_abund * mrna_eff,
                 self._nrna_abund * nrna_eff,
@@ -1142,7 +1154,10 @@ class WholeGenomeSimulator:
             if eff_len <= 0:
                 continue
 
-            frag_starts = rng.integers(0, eff_len, size=count)
+            capture_space = "nrna" if is_nrna else "mrna"
+            frag_starts = self.capture.sample_starts(
+                capture_space, t_idx, seq_len, frag_len, count, rng,
+            )
             flip_mask = rng.random(count) >= ss if ss < 1.0 else None
             quals = self._get_quals(read_len)
 
@@ -1212,14 +1227,14 @@ class WholeGenomeSimulator:
             flipped = flip_mask is not None and flip_mask[i]
 
             r2_t_end = min(frag_start + read_len, frag_end)
-            r2_blocks = _transcript_to_genomic_blocks(frag_start, r2_t_end, t)
+            r2_blocks = transcript_to_genomic_blocks(frag_start, r2_t_end, t)
             r1_t_start = max(frag_end - read_len, frag_start)
-            r1_blocks = _transcript_to_genomic_blocks(r1_t_start, frag_end, t)
+            r1_blocks = transcript_to_genomic_blocks(r1_t_start, frag_end, t)
             if not r2_blocks or not r1_blocks:
                 continue
 
-            r2_cigar = _blocks_to_cigar(r2_blocks)
-            r1_cigar = _blocks_to_cigar(r1_blocks)
+            r2_cigar = blocks_to_cigar(r2_blocks)
+            r1_cigar = blocks_to_cigar(r1_blocks)
             r2_start = r2_blocks[0][0]
             r1_start = r1_blocks[0][0]
 
@@ -1239,15 +1254,15 @@ class WholeGenomeSimulator:
                 xs_strand = "-" if t.strand == Strand.NEG else "+"
                 tags = [("NH", 1), ("XS", xs_strand)]
 
-            r1_flag = _BASE_R1_FLAG
-            r2_flag = _BASE_R2_FLAG
+            r1_flag = BASE_R1_FLAG
+            r2_flag = BASE_R2_FLAG
             if r1_is_rev:
-                r1_flag |= _FLAG_REVERSE
+                r1_flag |= FLAG_REVERSE
             if r2_is_rev:
-                r1_flag |= _FLAG_MATE_REVERSE
-                r2_flag |= _FLAG_REVERSE
+                r1_flag |= FLAG_MATE_REVERSE
+                r2_flag |= FLAG_REVERSE
             if r1_is_rev:
-                r2_flag |= _FLAG_MATE_REVERSE
+                r2_flag |= FLAG_MATE_REVERSE
 
             r1_tlen = tlen if r1_start <= r2_start else -tlen
             r2_tlen = -r1_tlen
@@ -1255,11 +1270,11 @@ class WholeGenomeSimulator:
             r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
             r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
 
-            bam_fh.write(_make_bam_record(
+            bam_fh.write(make_aligned_segment(
                 self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
                 r1_start, r1_cigar, ref_id, r2_start, r1_tlen, tags=tags,
             ))
-            bam_fh.write(_make_bam_record(
+            bam_fh.write(make_aligned_segment(
                 self._bam_header, qnames[i], r2_seq_str, r2_flag, ref_id,
                 r2_start, r2_cigar, ref_id, r1_start, r2_tlen, tags=tags,
             ))
@@ -1282,7 +1297,7 @@ class WholeGenomeSimulator:
             frag_end = frag_start + frag_len
             flipped = flip_mask is not None and flip_mask[i]
 
-            g_start, g_end = _premrna_to_genomic_interval(frag_start, frag_end, t)
+            g_start, g_end = premrna_to_genomic_interval(frag_start, frag_end, t)
             r2_g_start = g_start
             r2_g_end = min(g_start + read_len, g_end)
             r1_g_end = g_end
@@ -1297,15 +1312,15 @@ class WholeGenomeSimulator:
 
             tlen = g_end - g_start
 
-            r1_flag = _BASE_R1_FLAG
-            r2_flag = _BASE_R2_FLAG
+            r1_flag = BASE_R1_FLAG
+            r2_flag = BASE_R2_FLAG
             if r1_is_rev:
-                r1_flag |= _FLAG_REVERSE
+                r1_flag |= FLAG_REVERSE
             if r2_is_rev:
-                r1_flag |= _FLAG_MATE_REVERSE
-                r2_flag |= _FLAG_REVERSE
+                r1_flag |= FLAG_MATE_REVERSE
+                r2_flag |= FLAG_REVERSE
             if r1_is_rev:
-                r2_flag |= _FLAG_MATE_REVERSE
+                r2_flag |= FLAG_MATE_REVERSE
 
             r1_tlen = tlen if r1_g_start <= r2_g_start else -tlen
             r2_tlen = -r1_tlen
@@ -1316,12 +1331,12 @@ class WholeGenomeSimulator:
             r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
             r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
 
-            bam_fh.write(_make_bam_record(
+            bam_fh.write(make_aligned_segment(
                 self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
                 r1_g_start, [(pysam.CMATCH, r1_read_len)],
                 ref_id, r2_g_start, r1_tlen, tags=self._nh1_tags,
             ))
-            bam_fh.write(_make_bam_record(
+            bam_fh.write(make_aligned_segment(
                 self._bam_header, qnames[i], r2_seq_str, r2_flag, ref_id,
                 r2_g_start, [(pysam.CMATCH, r2_read_len)],
                 ref_id, r1_g_start, r2_tlen, tags=self._nh1_tags,
@@ -1340,12 +1355,16 @@ class WholeGenomeSimulator:
         rng = self._rng
         frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
         unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
-        gdna_ref_lengths_arr = np.array(self._gdna_ref_lengths, dtype=np.float64)
-
         counts: dict[tuple[int, int], int] = {}
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
-            chrom_eff = np.maximum(0, gdna_ref_lengths_arr - fl + 1)
+            chrom_eff = np.array(
+                [
+                    self.capture.partition("gdna", ref, ref_len, fl)
+                    for ref, ref_len in zip(self._gdna_refs, self._gdna_ref_lengths)
+                ],
+                dtype=np.float64,
+            )
             total_eff = chrom_eff.sum()
             if total_eff <= 0:
                 continue
@@ -1384,7 +1403,7 @@ class WholeGenomeSimulator:
         read_len = min(self.sim_params.read_length, fl)
         quals = self._get_quals(read_len)
 
-        starts = rng.integers(0, eff_len, size=count)
+        starts = self.capture.sample_starts("gdna", ref, chrom_len, fl, count, rng)
         chrom_strands = rng.integers(0, 2, size=count)
 
         r2_seqs, r1_seqs = _batch_extract_reads(chrom_bytes, starts, fl, read_len)
@@ -1417,14 +1436,14 @@ class WholeGenomeSimulator:
                 end = start + fl
                 is_neg = bool(chrom_strands[j])
 
-                r1_flag = _BASE_R1_FLAG
-                r2_flag = _BASE_R2_FLAG
+                r1_flag = BASE_R1_FLAG
+                r2_flag = BASE_R2_FLAG
                 if is_neg:
-                    r1_flag |= _FLAG_REVERSE
-                    r2_flag |= _FLAG_MATE_REVERSE
+                    r1_flag |= FLAG_REVERSE
+                    r2_flag |= FLAG_MATE_REVERSE
                 else:
-                    r1_flag |= _FLAG_MATE_REVERSE
-                    r2_flag |= _FLAG_REVERSE
+                    r1_flag |= FLAG_MATE_REVERSE
+                    r2_flag |= FLAG_REVERSE
 
                 tlen = end - start
                 r2_start_pos = start
@@ -1435,14 +1454,14 @@ class WholeGenomeSimulator:
                 r1_seq_str = r1_seqs[j].tobytes().decode("ascii")
                 r2_seq_str = r2_seqs[j].tobytes().decode("ascii")
 
-                bam_fh.write(_make_bam_record(
+                bam_fh.write(make_aligned_segment(
                     self._bam_header, qnames[j], r1_seq_str,
                     r1_flag, ref_id, r1_start_pos,
                     [(pysam.CMATCH, read_len)],
                     ref_id, r2_start_pos, r1_tlen,
                     tags=self._nh1_tags,
                 ))
-                bam_fh.write(_make_bam_record(
+                bam_fh.write(make_aligned_segment(
                     self._bam_header, qnames[j], r2_seq_str,
                     r2_flag, ref_id, r2_start_pos,
                     [(pysam.CMATCH, read_len)],
@@ -1757,23 +1776,6 @@ def _concat_files_binary(srcs: list[Path], dst: Path) -> None:
                 shutil.copyfileobj(f, out, length=4 * 1024 * 1024)
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Condition naming helpers
-# ═══════════════════════════════════════════════════════════════════
-
-
-def condition_dir_name(
-    gdna_label: str,
-    strand_specificity: float,
-    nrna_label: str,
-) -> str:
-    return _condition_dir_name(gdna_label, strand_specificity, nrna_label)
-
-
-def gdna_label_for_rate(rate: float, labels: list[str] | None, idx: int) -> str:
-    return _gdna_label_for_rate(rate, labels, idx)
-
-
 def nrna_label_for_ratio(
     ratio: float | tuple[float, float],
     labels: list[str] | None,
@@ -1792,7 +1794,7 @@ def nrna_label_for_ratio(
 
 
 def _build_nrna_pairs(
-    cfg: SimConfig,
+    cfg: WholeGenomeSimConfig,
     has_file_nrna: bool,
 ) -> list[tuple[str, str, float | tuple[float, float] | None, int]]:
     """Build nRNA sweep pairs.
@@ -1829,11 +1831,11 @@ def _build_nrna_pairs(
 
 def write_manifest(
     outdir: Path,
-    cfg: SimConfig,
+    cfg: WholeGenomeSimConfig,
     conditions: list[dict],
 ) -> None:
     """Write manifest.json summarizing all simulation outputs."""
-    path = _write_manifest(outdir, cfg, conditions)
+    path = write_manifest_file(outdir, cfg, conditions)
     logger.info("Wrote manifest to %s", path)
 
 
@@ -1842,7 +1844,7 @@ def write_manifest(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def run_simulation(cfg: SimConfig) -> list[dict]:
+def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     """Run full simulation.
 
     1. Load genome + GTF -> transcripts
@@ -2002,6 +2004,7 @@ def run_simulation(cfg: SimConfig) -> list[dict]:
                     simulator = WholeGenomeSimulator(
                         genome_path, cond_transcripts, sim, cfg.gdna,
                         strand_specificity=strand_spec,
+                        capture_config=cfg.capture,
                     )
                     _, _, bam_path = simulator.simulate_and_write(
                         cond_dir, n_rna, n_gdna,

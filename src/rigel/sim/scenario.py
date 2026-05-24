@@ -33,9 +33,10 @@ from ..transcript import Transcript
 from ..types import Strand
 
 from .annotation import GeneBuilder
+from .capture import CaptureConfig
 from .genome import MutableGenome
 from .oracle_bam import OracleBamSimulator
-from .reads import GDNAConfig, ReadSimulator, SimConfig
+from .reads import GDNAConfig, ReadSimulator, ReadSimConfig
 from .truth import (
     count_mrna_by_transcript_from_bam,
     count_mrna_by_transcript_from_fastq,
@@ -225,10 +226,12 @@ class Scenario:
         work_dir: Path | None = None,
         ref_name: str | None = None,
         gdna_config: GDNAConfig | None = None,
+        capture_config: CaptureConfig | None = None,
     ):
         self.name = name
         self.seed = seed
         self.gdna_config = gdna_config
+        self.capture_config = capture_config
         self._owns_workdir = work_dir is None
 
         if work_dir is None:
@@ -260,8 +263,9 @@ class Scenario:
     def build(
         self,
         n_fragments: int = 1000,
-        sim_config: SimConfig | None = None,
+        sim_config: ReadSimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
+        capture_config: CaptureConfig | None = None,
         nrna_abundance: float = 0.0,
     ) -> ScenarioResult:
         """Execute the full simulation pipeline.
@@ -277,7 +281,7 @@ class Scenario:
         ----------
         n_fragments : int
             Number of fragments to simulate.
-        sim_config : SimConfig or None
+        sim_config : ReadSimConfig or None
             Read simulation config. None uses defaults with same seed.
         gdna_config : GDNAConfig or None
             gDNA contamination config.  If None, falls back to the
@@ -306,6 +310,9 @@ class Scenario:
 
         # Resolve gDNA config: build() param overrides constructor
         effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
+        effective_capture = (
+            capture_config if capture_config is not None else self.capture_config
+        )
 
         # 1. Genome FASTA
         logger.info(f"[{self.name}] Writing genome FASTA...")
@@ -328,12 +335,13 @@ class Scenario:
 
         # 3. Simulate reads
         if sim_config is None:
-            sim_config = SimConfig(seed=self.seed)
+            sim_config = ReadSimConfig(seed=self.seed)
         # Clamp frag_max to genome/transcript length
         sim = ReadSimulator(
             self.genome, transcripts,
             config=sim_config,
             gdna_config=effective_gdna,
+            capture_config=effective_capture,
         )
         logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
         r1_path, r2_path = sim.write_fastq(wdir, n_fragments)
@@ -366,8 +374,9 @@ class Scenario:
     def build_oracle(
         self,
         n_fragments: int = 1000,
-        sim_config: SimConfig | None = None,
+        sim_config: ReadSimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
+        capture_config: CaptureConfig | None = None,
         nrna_abundance: float = 0.0,
         n_rna_fragments: int | None = None,
         gdna_fraction: float | None = None,
@@ -389,7 +398,7 @@ class Scenario:
         n_fragments : int
             Number of fragments to simulate (mode a: fixed total).
             Ignored when *n_rna_fragments* is set.
-        sim_config : SimConfig or None
+        sim_config : ReadSimConfig or None
             Read simulation config. None uses defaults with same seed.
         gdna_config : GDNAConfig or None
             gDNA contamination config.  If None, falls back to the
@@ -412,6 +421,9 @@ class Scenario:
         """
         wdir = self.work_dir
         effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
+        effective_capture = (
+            capture_config if capture_config is not None else self.capture_config
+        )
 
         # 1. Genome FASTA
         fasta_path = self.genome.write_fasta(wdir)
@@ -428,11 +440,12 @@ class Scenario:
 
         # 3. Oracle BAM (perfect alignments, no FASTQ or alignment step)
         if sim_config is None:
-            sim_config = SimConfig(seed=self.seed)
+            sim_config = ReadSimConfig(seed=self.seed)
         oracle = OracleBamSimulator(
             self.genome, transcripts,
             config=sim_config,
             gdna_config=effective_gdna,
+            capture_config=effective_capture,
             ref_name=self.ref_name,
         )
         bam_path = wdir / f"{self.name}_oracle.bam"

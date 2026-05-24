@@ -2,9 +2,10 @@
 
 import pytest
 
-from rigel.sim.genome import MutableGenome, reverse_complement
 from rigel.sim.annotation import GeneBuilder
-from rigel.sim.reads import ReadSimulator, SimConfig
+from rigel.sim.genome import MutableGenome, reverse_complement
+from rigel.sim.reads import ReadSimulator, ReadSimConfig
+from rigel.sim.synthetic_genome import generate_genes
 from rigel.transcript import Transcript
 from rigel.types import Strand, Interval
 
@@ -104,6 +105,21 @@ class TestReverseComplement:
 # =====================================================================
 # GeneBuilder
 # =====================================================================
+
+
+def test_generate_genes_respects_isoform_bounds_and_antisense_fraction():
+    genes = generate_genes(
+        500_000,
+        10,
+        13,
+        min_isoforms=1,
+        max_isoforms=5,
+        target_transcripts=None,
+        antisense_overlap_frac=0.0,
+    )
+
+    assert len(genes) == 10
+    assert all(1 <= len(gene.transcripts) <= 5 for gene in genes)
 
 
 class TestGeneBuilder:
@@ -321,7 +337,7 @@ class TestReadSimulator:
             {"t_id": "t1", "exons": exons, "abundance": abundance},
         ])
         transcripts = builder.get_transcripts()
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=250, frag_std=50, frag_min=100,
             frag_max=700, read_length=100, error_rate=0.0, seed=seed,
         )
@@ -392,7 +408,7 @@ class TestReadSimulator:
             {"t_id": "t1", "exons": [(200, 1200)]},
         ])
         transcripts = builder.get_transcripts()
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=20, frag_min=100,
             frag_max=500, read_length=100,
             error_rate=0.5,  # Very high error rate
@@ -413,7 +429,7 @@ class TestReadSimulator:
             {"t_id": "t1", "exons": [(200, 600), (1000, 1400)]},
         ])
         transcripts = builder.get_transcripts()
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=200, frag_std=50, frag_min=100,
             frag_max=700, read_length=100, seed=42,
         )
@@ -434,7 +450,7 @@ class TestReadSimulator:
             {"t_id": "t_low", "exons": [(1500, 1900)], "abundance": 1},
         ])
         transcripts = builder.get_transcripts()
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=150, frag_std=30, frag_min=50,
             frag_max=350, read_length=100, seed=42,
         )
@@ -469,7 +485,7 @@ class TestReadSimulator:
         for t in transcripts:
             t.nrna_abundance = 50.0
 
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=250, frag_std=50, frag_min=100,
             frag_max=700, read_length=100, seed=42,
         )
@@ -492,7 +508,7 @@ class TestReadSimulator:
         for t in transcripts:
             t.nrna_abundance = 100.0
 
-        config = SimConfig(
+        config = ReadSimConfig(
             frag_mean=250, frag_std=50, frag_min=100,
             frag_max=700, read_length=100, seed=42,
         )

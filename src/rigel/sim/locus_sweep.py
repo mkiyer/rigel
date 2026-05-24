@@ -91,7 +91,7 @@ from rigel.config import (  # noqa: E402
     EMConfig, PipelineConfig, BamScanConfig, FragmentScoringConfig,
 )
 from rigel.pipeline import run_pipeline  # noqa: E402
-from rigel.sim import GDNAConfig, Scenario, SimConfig, run_benchmark  # noqa: E402
+from rigel.sim import GDNAConfig, Scenario, ReadSimConfig, run_benchmark  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config-field registry (auto-derived from dataclasses)
@@ -758,7 +758,7 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                         strand_kappa=gdna_sk,
                     )
 
-                sim_cfg = SimConfig(
+                sim_cfg = ReadSimConfig(
                     frag_mean=rna_frag_params.get("frag_mean", 200),
                     frag_std=rna_frag_params.get("frag_std", 30),
                     frag_min=rna_frag_params.get("frag_min", 80),

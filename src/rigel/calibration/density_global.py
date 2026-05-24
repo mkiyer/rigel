@@ -1,11 +1,4 @@
-"""Global gDNA density estimates for the fractional calibration path.
-
-Phase 4 starts with the conservative gDNA-enriched compartments:
-contained, unspliced fragments in intergenic regions and intron-only
-regions. Counts come from the 12-channel fractional accumulator; the
-denominator is the FL-PMF weighted number of valid fragment starts in
-each region.
-"""
+"""Global gDNA density estimates for the calibration path."""
 
 from __future__ import annotations
 
@@ -16,7 +9,6 @@ import numpy as np
 
 from ..frag_length_model import FragmentLengthModel
 from ._arrays import PayloadArrays, RegionArrays
-from ._kappa import KAPPA_DEFAULT, KappaEstimate, estimate_kappa
 from .fractional_evidence import is_intergenic, is_intron_only
 from .strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR
 
@@ -25,7 +17,6 @@ __all__ = [
     "DensityType",
     "GlobalGdnaDensity",
     "GlobalDensityTable",
-    "ExonCompositeDensity",
     "StrandBalanceEstimate",
     "compute_global_densities",
     "estimate_strand_balance",
@@ -55,14 +46,13 @@ def l_eff_contained(
 
 @dataclass(frozen=True, slots=True)
 class GlobalGdnaDensity:
-    """One density estimate for one category."""
+    """One density estimate for one global calibration category."""
 
     type: DensityType
     rho: float
     n_fragments: float
     eff_length_bp: float
     n_regions_used: int
-    kappa: KappaEstimate
     n_fragments_estimated: float | None = None
     n_rows_eligible: int | None = None
     strand_active: bool = False
@@ -90,49 +80,12 @@ class GlobalGdnaDensity:
             "n_fragments_estimated": float(self.n_fragments_estimated),
             "n_rows_eligible": int(self.n_rows_eligible),
             "rho_uncorrected": float(self.rho_uncorrected),
-            "kappa": {
-                "value": float(self.kappa.value),
-                "n_regions": int(self.kappa.n_regions),
-                "fallback_used": bool(self.kappa.fallback_used),
-                "fallback_reason": str(self.kappa.fallback_reason),
-            },
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ExonCompositeDensity:
-    """Precision-weighted EXON projection density placeholder."""
-
-    rho: float
-    boundary_rho: float
-    contained_rho: float
-    boundary_precision: float
-    contained_precision: float
-    strand_power: float
-    contained_active: bool
-    precision_model: str = "kappa_capped_opportunity"
-
-    def to_summary_dict(self) -> dict[str, float | bool | str]:
-        return {
-            "rho": self.rho,
-            "boundary_rho": self.boundary_rho,
-            "contained_rho": self.contained_rho,
-            "boundary_precision": self.boundary_precision,
-            "contained_precision": self.contained_precision,
-            "strand_power": self.strand_power,
-            "contained_active": self.contained_active,
-            "precision_model": self.precision_model,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class StrandBalanceEstimate:
-    """Symmetric beta-binomial strand overdispersion estimate for gDNA.
-
-    The mean is fixed at 0.5; only the concentration ``kappa`` is estimated.
-    Larger ``kappa`` approaches independent binomial 50/50 sampling, while
-    smaller values permit stronger local strand imbalance.
-    """
+    """Symmetric beta-binomial strand overdispersion estimate for gDNA."""
 
     kappa: float
     n_regions: int
@@ -185,7 +138,6 @@ class GlobalDensityTable:
     exon_intron: GlobalGdnaDensity
     gdna_fl: FragmentLengthModel
     exon_contained: GlobalGdnaDensity | None = None
-    exon_composite: ExonCompositeDensity | None = None
     strand_balance: StrandBalanceEstimate | None = None
 
     @property
@@ -385,7 +337,6 @@ def _contained_density_for_mask(
         n_fragments=n_fragments,
         eff_length_bp=eff_total,
         n_regions_used=int(eligible.sum()),
-        kappa=estimate_kappa(counts, eff, rho),
         n_rows_eligible=int(candidate.sum()),
     )
 
@@ -401,12 +352,6 @@ def _empty_density(
         n_fragments=0.0,
         eff_length_bp=0.0,
         n_regions_used=0,
-        kappa=KappaEstimate(
-            value=KAPPA_DEFAULT,
-            n_regions=0,
-            fallback_used=True,
-            fallback_reason="no eligible effective length",
-        ),
         n_rows_eligible=n_rows_eligible,
     )
 

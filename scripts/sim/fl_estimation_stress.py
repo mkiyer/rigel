@@ -32,7 +32,7 @@ import pysam
 from rigel.calibration import calibrate
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
-from rigel.sim import GDNAConfig, Scenario, SimConfig
+from rigel.sim import GDNAConfig, Scenario, ReadSimConfig
 from rigel.sim.truth import parse_origin
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -261,7 +261,7 @@ def _run_case(
         genome_length=genome_length,
     )
 
-    sim_config = SimConfig(
+    sim_config = ReadSimConfig(
         frag_mean=case.rna_mean,
         frag_std=case.rna_std,
         frag_min=_frag_min(case.rna_mean, case.rna_std, lower_floor=30),

@@ -23,6 +23,7 @@ simulation:
   frag_max: 1000
   read_length: 101
   error_rate: 0.0
+  n_workers: 1
 
 # ── Abundance model ───────────────────────────────────────────
 abundance:
@@ -47,6 +48,15 @@ nrna:
   mode: additive_ratio
   ratios: [0.0]
   ratio_labels: [none]
+
+# ── Hybrid capture ───────────────────────────────────────────
+capture:
+  probes: null
+  probe_format: auto
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
 
 # ── Oracle BAM ────────────────────────────────────────────────
 oracle_bam: true

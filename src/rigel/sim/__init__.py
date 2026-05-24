@@ -8,7 +8,7 @@ genome
 annotation
     ``GeneBuilder`` — gene/transcript annotation with splice-motif injection.
 reads
-    ``ReadSimulator``, ``SimConfig`` — paired-end FASTQ generation.
+    ``ReadSimulator``, ``ReadSimConfig`` — paired-end FASTQ generation.
 scenario
     ``Scenario``, ``ScenarioResult`` — end-to-end orchestration
     (genome → GTF → FASTQ → BAM → TranscriptIndex).
@@ -28,6 +28,7 @@ Quick Start
 
 from .annotation import GeneBuilder
 from .benchmark import BenchmarkResult, TranscriptAccuracy, run_benchmark
+from .capture import CaptureConfig, CaptureSampler, WeightedInterval
 from .oracle_bam import OracleBamSimulator
 from .genome import MutableGenome, reverse_complement
 from .manifest import (
@@ -36,12 +37,14 @@ from .manifest import (
     load_manifest,
     write_manifest,
 )
-from .reads import GDNAConfig, ReadSimulator, SimConfig
+from .reads import GDNAConfig, ReadSimulator, ReadSimConfig
 from .scenario import Scenario, ScenarioResult
 from .truth import Origin, parse_origin
 
 __all__ = [
     "BenchmarkResult",
+    "CaptureConfig",
+    "CaptureSampler",
     "OracleBamSimulator",
     "GDNAConfig",
     "GeneBuilder",
@@ -50,8 +53,9 @@ __all__ = [
     "ReadSimulator",
     "ScenarioResult",
     "Scenario",
-    "SimConfig",
+    "ReadSimConfig",
     "TranscriptAccuracy",
+    "WeightedInterval",
     "condition_dir_name",
     "condition_manifest_map",
     "load_manifest",

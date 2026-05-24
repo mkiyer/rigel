@@ -11,7 +11,7 @@ import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import Scenario, SimConfig
+from rigel.sim import Scenario, ReadSimConfig
 
 SEED = 42
 
@@ -41,7 +41,7 @@ def _make_scenario(tmp_path, *, n_fragments=500):
             {"t_id": "t3", "exons": [(2500, 2700), (3000, 3200)], "abundance": 50},
         ],
     )
-    sim_config = SimConfig(
+    sim_config = ReadSimConfig(
         frag_mean=200,
         frag_std=30,
         frag_min=80,

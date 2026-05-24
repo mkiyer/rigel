@@ -24,20 +24,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from rigel.calibration.density_global import estimate_global_gdna_fragments
+from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
+from rigel.pipeline import run_pipeline
+from rigel.sim import Scenario, ReadSimConfig
+from rigel.sim.reads import GDNAConfig
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-7s %(name)s — %(message)s",
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("gdna_sweep")
-
-# ── rigel imports ──────────────────────────────────────────────────────────
-from rigel.config import EMConfig, PipelineConfig, BamScanConfig, CalibrationConfig
-from rigel.pipeline import run_pipeline
-from rigel.calibration.density_global import estimate_global_gdna_fragments
-from rigel.sim import Scenario, SimConfig
-from rigel.sim.reads import GDNAConfig
-
 
 # ── Sweep configuration ───────────────────────────────────────────────────
 
@@ -60,7 +58,7 @@ SINGLE_EXON_TRANSCRIPT = {
     "nrna_abundance": 0.0,
 }
 
-SIM_CONFIG = SimConfig(
+SIM_CONFIG = ReadSimConfig(
     frag_mean=250.0,
     frag_std=50.0,
     frag_min=100,
@@ -184,7 +182,7 @@ def run_one(gdna_frac: float, outdir: Path) -> SweepRow:
     )
 
     # Run pipeline
-    logger.info(f"  Running rigel pipeline...")
+    logger.info("  Running rigel pipeline...")
     config = PipelineConfig(
         em=EMConfig(seed=SEED, mode="vbem"),
         scan=BamScanConfig(sj_strand_tag="auto"),
@@ -557,7 +555,7 @@ def deep_analysis(df: pd.DataFrame, outdir: Path) -> str:
     zero_gdna = df[df.gdna_fraction == 0.0]
     if len(zero_gdna) > 0:
         r0 = zero_gdna.iloc[0]
-        lines.append(f"\n  Zero-gDNA baseline:")
+        lines.append("\n  Zero-gDNA baseline:")
         lines.append(f"    mRNA EM count: {r0.em_mrna_count:.1f} (truth: {r0.n_rna_truth})")
         lines.append(f"    gDNA EM count: {r0.em_gdna_count:.1f} (truth: 0)")
         lines.append(f"    Phantom gDNA rate: {r0.em_gdna_rate:.6f}")

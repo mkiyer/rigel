@@ -76,7 +76,6 @@ def quant_command(args: argparse.Namespace) -> int:
     """
     from .index import TranscriptIndex
     from .pipeline import run_pipeline
-    from .calibration.errors import FractionalCutoverPending
 
     # -- Resolve parameters: CLI > YAML > hardcoded defaults --
     _resolve_quant_args(args, _build_quant_defaults())
@@ -122,41 +121,12 @@ def quant_command(args: argparse.Namespace) -> int:
 
     # -- Build pipeline config + run --
     pipeline_config = _build_pipeline_config(args, seed, sj_strand_tag)
-    try:
-        result = run_pipeline(bam_path, index, config=pipeline_config)
-    except FractionalCutoverPending as exc:
-        # Calibration completed but the fractional prior pipeline is
-        # pending. Persist whatever summary information is available
-        # (best-effort) and exit cleanly with EX_USAGE (64).
-        _write_partial_calibration_summary(output_dir, exc)
-        logging.error("%s", exc)
-        return 64
+    result = run_pipeline(bam_path, index, config=pipeline_config)
 
     # -- Write outputs --
     _write_quant_outputs(result, index, output_dir, args)
 
     return 0
-
-
-def _write_partial_calibration_summary(output_dir: Path, exc: Exception) -> None:
-    """Persist a minimal ``summary.json`` after a FractionalCutoverPending.
-
-    Calibration may already have produced its summary block; harvest it
-    from the exception when available, otherwise write a stub. Failures
-    here are non-fatal (the user already received the explanatory
-    error message via logging).
-    """
-    import json
-
-    payload: dict[str, object] = {
-        "status": "fractional_cutover_pending",
-        "message": str(exc),
-        "calibration": getattr(exc, "calibration_summary", None),
-    }
-    try:
-        (output_dir / "summary.json").write_text(json.dumps(payload, indent=2))
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +451,7 @@ def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None
 def sim_command(args: argparse.Namespace) -> int:
     """Run the ``rigel sim`` subcommand."""
     import yaml
-    from .sim import Scenario, SimConfig
+    from .sim import Scenario, ReadSimConfig
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -494,7 +464,7 @@ def sim_command(args: argparse.Namespace) -> int:
     seed = cfg.get("seed", args.seed)
     ref_name = cfg.get("ref_name", "chr1")
 
-    sim_config = SimConfig(
+    sim_config = ReadSimConfig(
         **{
             k: cfg[k]
             for k in (
@@ -619,15 +589,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
-    _ParamSpec(
-        "regional_exposure",
-        "calibration.regional_exposure_enabled",
-        "regional_exposure",
-    ),
-    _ParamSpec(
-        "regional_exposure_reference_quantile",
-        "calibration.regional_exposure_reference_quantile",
-    ),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -685,8 +646,6 @@ def _config_to_cli(val: object, transform: str) -> object:
         return str(val) if val else None
     if transform == "gb_to_bytes":
         return val / (1024**3)  # bytes → GiB for CLI display
-    if transform == "regional_exposure":
-        return "auto" if val else "off"
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -717,15 +676,6 @@ def _cli_to_config(val: object, transform: str) -> object:
         return Path(val) if val else None
     if transform == "gb_to_bytes":
         return int(val * 1024**3)  # GiB → bytes
-    if transform == "regional_exposure":
-        if isinstance(val, bool):
-            return val
-        s = str(val).lower()
-        if s == "auto":
-            return True
-        if s == "off":
-            return False
-        raise ValueError(f"--regional-exposure expects 'auto' or 'off', got {val!r}")
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -1225,28 +1175,6 @@ def build_parser() -> argparse.ArgumentParser:
         "above which a pool's per-FL distribution is flagged 'weak' "
         "(default: 1). Below this threshold the pool is flagged "
         "'fallback' and downstream code falls back on the global FL.",
-    )
-    adv.add_argument(
-        "--regional-exposure",
-        dest="regional_exposure",
-        choices=("auto", "off"),
-        default=None,
-        help="Enable ('auto', default) or disable ('off') the regional "
-        "gDNA exposure model. When enabled, per-region exposure weights "
-        "A_r attenuate per-unit gDNA log-likelihoods and per-locus gDNA "
-        "effective length, suppressing gDNA mass in regions with no "
-        "evidence of gDNA fragments (e.g. hybrid-capture off-target). "
-        "Use 'off' to reproduce the pre-v3 uniform-exposure behaviour.",
-    )
-    adv.add_argument(
-        "--regional-exposure-reference-quantile",
-        dest="regional_exposure_reference_quantile",
-        type=float,
-        default=None,
-        help="Weighted quantile of regional rho_hat used as the fully exposed "
-        "reference scale for A_r = min(rho_hat / rho_ref, 1) when regional "
-        "exposure is enabled (default: 0.95). Higher values make the exposure "
-        "field sparser and shrink gDNA denominators in weakly exposed regions.",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",
