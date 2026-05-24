@@ -490,6 +490,8 @@ class OracleBamSimulator:
         r1_blocks, r2_blocks = self._split_fragment_blocks(
             blocks, read_len, neg_tx,
         )
+        if flipped:
+            r1_blocks, r2_blocks = r2_blocks, r1_blocks
 
         # Build sequences
         # BAM SEQ is stored in forward-reference orientation: it must match

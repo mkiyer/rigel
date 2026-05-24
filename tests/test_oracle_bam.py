@@ -15,6 +15,7 @@ from rigel.sim.oracle_bam import (
     OracleBamSimulator,
 )
 from rigel.sim.genome import MutableGenome
+from rigel.sim.whole_genome import GDNASimConfig, SimulationParams, WholeGenomeSimulator
 from rigel.sim.reads import GDNAConfig, ReadSimulator, ReadSimConfig
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
@@ -59,6 +60,18 @@ def _make_neg_transcript(exons: list[tuple[int, int]], t_id="t2", g_id="g2") -> 
     )
     t.compute_length()
     return t
+
+
+def _reference_sequence_for_record(read: pysam.AlignedSegment, fasta: pysam.FastaFile) -> str:
+    ref_pos = read.reference_start
+    parts = []
+    for op, length in read.cigartuples or []:
+        if op in (0, 7, 8):
+            parts.append(fasta.fetch(read.reference_name, ref_pos, ref_pos + length).upper())
+            ref_pos += length
+        elif op in (2, 3):
+            ref_pos += length
+    return "".join(parts)
 
 
 # =====================================================================
@@ -509,6 +522,91 @@ class TestOracleBamSimulatorStrandSpecificity:
         # At 0.5 specificity, roughly 50% should be each way
         ratio = r1_reverse / total
         assert 0.2 < ratio < 0.8, f"Expected ~50% reverse for R1, got {ratio:.2f}"
+
+    def test_flipped_read_ends_swap_alignment_blocks(self, tmp_path):
+        """With strand_specificity=0.0, R1 should align to the R2 end of a POS tx."""
+        genome = MutableGenome(length=2000, seed=42, name="ref")
+        transcripts = [
+            _make_pos_transcript([(100, 600)], t_id="tx1", g_id="g1"),
+        ]
+        config = ReadSimConfig(
+            frag_mean=200, frag_std=1, frag_min=200, frag_max=200,
+            read_length=80, strand_specificity=0.0, seed=42,
+        )
+        sim = OracleBamSimulator(
+            genome, transcripts, config=config, ref_name="ref",
+        )
+        bam_path = tmp_path / "test.bam"
+        sim.write_bam(bam_path, n_fragments=20)
+
+        with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+            pairs = {}
+            for read in bam.fetch(until_eof=True):
+                pairs.setdefault(read.query_name, {})[1 if read.is_read1 else 2] = read
+
+        for pair in pairs.values():
+            r1 = pair[1]
+            r2 = pair[2]
+            assert not r1.is_reverse
+            assert r2.is_reverse
+            assert r1.reference_start < r2.reference_start
+
+
+class TestWholeGenomeOracleBamOrientation:
+    """Regression tests for the vectorized whole-genome oracle BAM writer."""
+
+    def test_bam_seq_matches_reference_for_reverse_flipped_and_gdna_reads(self, tmp_path):
+        genome = MutableGenome(length=3000, seed=7, name="ref")
+        transcripts = [
+            _make_pos_transcript([(200, 500), (700, 1000)], t_id="tx_pos", g_id="g_pos"),
+            _make_neg_transcript([(1400, 1700), (1900, 2200)], t_id="tx_neg", g_id="g_neg"),
+        ]
+        for transcript in transcripts:
+            transcript.nrna_abundance = 100.0
+
+        fasta_path = genome.write_fasta(tmp_path)
+        sim = WholeGenomeSimulator(
+            fasta_path,
+            transcripts,
+            SimulationParams(
+                sim_seed=19,
+                frag_mean=120,
+                frag_std=1,
+                frag_min=120,
+                frag_max=120,
+                read_length=50,
+                error_rate=0.0,
+            ),
+            GDNASimConfig(frag_mean=120, frag_std=1, frag_min=120, frag_max=120),
+            strand_specificity=0.5,
+            seed=19,
+        )
+        try:
+            _, _, bam_path = sim.simulate_and_write(
+                tmp_path / "out",
+                n_rna=0,
+                n_mrna=80,
+                n_nrna=80,
+                n_gdna=80,
+                oracle_bam=True,
+                n_workers=1,
+            )
+        finally:
+            sim.close()
+
+        assert bam_path is not None
+        seen_categories = set()
+        with pysam.FastaFile(str(fasta_path)) as fasta, pysam.AlignmentFile(str(bam_path), "rb") as bam:
+            for read in bam.fetch(until_eof=True):
+                if read.query_name.startswith("gdna:"):
+                    seen_categories.add("gdna")
+                elif read.query_name.startswith("nrna_"):
+                    seen_categories.add("nrna")
+                else:
+                    seen_categories.add("mrna")
+                assert read.query_sequence == _reference_sequence_for_record(read, fasta)
+
+        assert seen_categories == {"mrna", "nrna", "gdna"}
 
 
 class TestDirectBamCoordSorted:

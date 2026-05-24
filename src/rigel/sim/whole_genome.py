@@ -151,6 +151,13 @@ def _batch_extract_reads(
     return r2_seqs, r1_seqs
 
 
+def _bam_seq_from_fastq_bytes(seq: np.ndarray, is_reverse: bool) -> str:
+    """Return the SAM/BAM stored SEQ for a FASTQ-oriented read sequence."""
+    if is_reverse:
+        seq = _BYTE_COMPLEMENT[seq[::-1]]
+    return seq.tobytes().decode("ascii")
+
+
 def _open_gzip_write(path: Path, threads: int = 4):
     """Open a gzip file for text writing, using pgzip if available."""
     if pgzip is not None:
@@ -1233,17 +1240,18 @@ class WholeGenomeSimulator:
             if not r2_blocks or not r1_blocks:
                 continue
 
-            r2_cigar = blocks_to_cigar(r2_blocks)
-            r1_cigar = blocks_to_cigar(r1_blocks)
-            r2_start = r2_blocks[0][0]
-            r1_start = r1_blocks[0][0]
-
             if t.strand == Strand.POS:
                 r2_is_rev, r1_is_rev = False, True
             else:
                 r2_is_rev, r1_is_rev = True, False
             if flipped:
                 r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
+                r1_blocks, r2_blocks = r2_blocks, r1_blocks
+
+            r2_cigar = blocks_to_cigar(r2_blocks)
+            r1_cigar = blocks_to_cigar(r1_blocks)
+            r2_start = r2_blocks[0][0]
+            r1_start = r1_blocks[0][0]
 
             leftmost = min(r1_blocks[0][0], r2_blocks[0][0])
             rightmost = max(r1_blocks[-1][1], r2_blocks[-1][1])
@@ -1267,8 +1275,8 @@ class WholeGenomeSimulator:
             r1_tlen = tlen if r1_start <= r2_start else -tlen
             r2_tlen = -r1_tlen
 
-            r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
-            r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
+            r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[i], r1_is_rev)
+            r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[i], r2_is_rev)
 
             bam_fh.write(make_aligned_segment(
                 self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
@@ -1298,17 +1306,22 @@ class WholeGenomeSimulator:
             flipped = flip_mask is not None and flip_mask[i]
 
             g_start, g_end = premrna_to_genomic_interval(frag_start, frag_end, t)
-            r2_g_start = g_start
-            r2_g_end = min(g_start + read_len, g_end)
-            r1_g_end = g_end
-            r1_g_start = max(g_end - read_len, g_start)
-
             if t.strand == Strand.POS:
+                r2_g_start = g_start
+                r2_g_end = min(g_start + read_len, g_end)
+                r1_g_start = max(g_end - read_len, g_start)
+                r1_g_end = g_end
                 r2_is_rev, r1_is_rev = False, True
             else:
+                r1_g_start = g_start
+                r1_g_end = min(g_start + read_len, g_end)
+                r2_g_start = max(g_end - read_len, g_start)
+                r2_g_end = g_end
                 r2_is_rev, r1_is_rev = True, False
             if flipped:
                 r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
+                r1_g_start, r2_g_start = r2_g_start, r1_g_start
+                r1_g_end, r2_g_end = r2_g_end, r1_g_end
 
             tlen = g_end - g_start
 
@@ -1328,8 +1341,8 @@ class WholeGenomeSimulator:
             r1_read_len = r1_g_end - r1_g_start
             r2_read_len = r2_g_end - r2_g_start
 
-            r1_seq_str = r1_seqs[i].tobytes().decode("ascii")
-            r2_seq_str = r2_seqs[i].tobytes().decode("ascii")
+            r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[i], r1_is_rev)
+            r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[i], r2_is_rev)
 
             bam_fh.write(make_aligned_segment(
                 self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
@@ -1436,23 +1449,33 @@ class WholeGenomeSimulator:
                 end = start + fl
                 is_neg = bool(chrom_strands[j])
 
+                if is_neg:
+                    r1_is_rev = False
+                    r2_is_rev = True
+                    r1_start_pos = start
+                    r2_start_pos = end - read_len
+                else:
+                    r1_is_rev = True
+                    r2_is_rev = False
+                    r1_start_pos = end - read_len
+                    r2_start_pos = start
+
                 r1_flag = BASE_R1_FLAG
                 r2_flag = BASE_R2_FLAG
-                if is_neg:
+                if r1_is_rev:
                     r1_flag |= FLAG_REVERSE
-                    r2_flag |= FLAG_MATE_REVERSE
-                else:
+                if r2_is_rev:
                     r1_flag |= FLAG_MATE_REVERSE
                     r2_flag |= FLAG_REVERSE
+                if r1_is_rev:
+                    r2_flag |= FLAG_MATE_REVERSE
 
                 tlen = end - start
-                r2_start_pos = start
-                r1_start_pos = end - read_len
                 r1_tlen = tlen if r1_start_pos <= r2_start_pos else -tlen
                 r2_tlen = -r1_tlen
 
-                r1_seq_str = r1_seqs[j].tobytes().decode("ascii")
-                r2_seq_str = r2_seqs[j].tobytes().decode("ascii")
+                r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[j], r1_is_rev)
+                r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[j], r2_is_rev)
 
                 bam_fh.write(make_aligned_segment(
                     self._bam_header, qnames[j], r1_seq_str,
