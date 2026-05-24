@@ -231,6 +231,20 @@ class CalibrationConfig:
     pool_quality_good: int = 5_000
     pool_quality_weak: int = 1
 
+    #: Posterior confidence level for the per-region RNA lower bound
+    #: ``P(R >= rna_lower_count | data) >= rna_lower_confidence``. The same
+    #: value controls the dual exon self-training screen via
+    #: ``P(R > 0 | data, kappa_d_seed) <= 1 - rna_lower_confidence``. This is
+    #: the single statistical knob exposed by v5 strand deconvolution.
+    rna_lower_confidence: float = 0.95
+
+    def __post_init__(self) -> None:
+        if not (0.5 <= self.rna_lower_confidence < 1.0):
+            raise ValueError(
+                "CalibrationConfig.rna_lower_confidence must be in [0.5, 1.0); "
+                f"got {self.rna_lower_confidence}."
+            )
+
 
 @dataclass(frozen=True)
 class PipelineConfig:

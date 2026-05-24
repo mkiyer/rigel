@@ -990,6 +990,7 @@ def run_pipeline(
         pool_quality_good=cal_cfg.pool_quality_good,
         pool_quality_weak=cal_cfg.pool_quality_weak,
         strand_summary=strand_summary,
+        rna_lower_confidence=cal_cfg.rna_lower_confidence,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

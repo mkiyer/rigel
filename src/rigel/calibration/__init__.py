@@ -8,6 +8,7 @@ from ._fl_sources import (
 )
 from ._orchestrator import calibrate
 from ._result import CalibrationResult, build_calibration_result
+from .exposure import RegionExposure
 from .density_global import (
     GlobalDensityTable,
     GlobalGdnaDensity,
@@ -30,6 +31,7 @@ __all__ = [
     "calibrate",
     "CalibrationResult",
     "build_calibration_result",
+    "RegionExposure",
     "GlobalDensityTable",
     "GlobalGdnaDensity",
     "StrandBalanceEstimate",

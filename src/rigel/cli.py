@@ -589,6 +589,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
+    _ParamSpec("rna_lower_confidence", "calibration.rna_lower_confidence"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1175,6 +1176,17 @@ def build_parser() -> argparse.ArgumentParser:
         "above which a pool's per-FL distribution is flagged 'weak' "
         "(default: 1). Below this threshold the pool is flagged "
         "'fallback' and downstream code falls back on the global FL.",
+    )
+    adv.add_argument(
+        "--rna-lower-confidence",
+        dest="rna_lower_confidence",
+        type=float,
+        default=None,
+        help="Posterior confidence level for the per-region RNA lower bound "
+        "P(R >= rna_lower_count | data) >= rna_lower_confidence. The same "
+        "value drives the exon self-training screen used to refit the gDNA "
+        "strand-balance concentration kappa_d. Must be in [0.5, 1.0); "
+        "default: 0.95.",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",
