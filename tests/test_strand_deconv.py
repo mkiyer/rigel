@@ -33,6 +33,7 @@ from rigel.calibration.strand_deconv import (
     deconvolve_regions_by_strand,
     estimate_kappa_d,
     screen_no_rna_exons,
+    strand_log_likelihood_d_grid,
 )
 from rigel.calibration.strand_summary import StrandSummary
 
@@ -267,6 +268,31 @@ def test_exact_and_normal_agree_at_boundary():
     assert abs(r_hat_e - r_hat_n) < 0.05 * n
     assert abs(sd_e - sd_n) < 0.20 * max(sd_n, 1.0)
     assert abs(r_lower_e - r_lower_n) < 0.10 * n
+
+
+def test_strand_log_likelihood_reproduces_exact_posterior_with_uniform_prior():
+    n = 30
+    k_sense = 23
+    kappa = 7.0
+    p = 0.9
+    d_grid = np.arange(n + 1, dtype=np.int64)
+
+    log_like_d = strand_log_likelihood_d_grid(
+        k_sense,
+        n,
+        d_grid,
+        kappa_d=kappa,
+        p_r1_sense=p,
+    )
+    finite = np.isfinite(log_like_d)
+    probs_d = np.zeros_like(log_like_d, dtype=np.float64)
+    m = float(np.max(log_like_d[finite]))
+    probs_d[finite] = np.exp(log_like_d[finite] - m)
+    probs_d /= probs_d.sum()
+
+    posterior_r = _exact_posterior_R(k_sense, n, kappa_d=kappa, p_r1_sense=p)
+
+    np.testing.assert_allclose(probs_d[::-1], posterior_r, atol=1e-12)
 
 
 # ---------------------------------------------------------------------------

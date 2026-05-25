@@ -20,6 +20,8 @@ from .scan_payload import CalibrationScanPayload
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only.
     from .density_model import DensityEvidence
     from .exposure import RegionExposure
+    from .integration import FusedRegionGdnaEvidence
+    from .prior import PriorTable
     from .strand_deconv import RegionGdnaEstimate
 
 
@@ -40,6 +42,8 @@ class CalibrationResult:
     diagnostics: Diagnostics
     region_gdna: "RegionGdnaEstimate"
     region_exposure: "RegionExposure"
+    fused_region_gdna: "FusedRegionGdnaEvidence | None" = None
+    prior_table: "PriorTable | None" = None
     n_multi_loci: int = 0
     rna_lower_confidence: float = 0.95
 
@@ -66,6 +70,14 @@ class CalibrationResult:
             "n_multi_loci": int(self.n_multi_loci),
             "strand_deconv": _strand_deconv_summary(self.region_gdna),
             "region_exposure": self.region_exposure.to_summary_dict(),
+            "fused_region_gdna": (
+                self.fused_region_gdna.to_summary_dict()
+                if self.fused_region_gdna is not None
+                else None
+            ),
+            "prior_table": (
+                self.prior_table.to_summary_dict() if self.prior_table is not None else None
+            ),
         }
 
 
@@ -103,6 +115,8 @@ def build_calibration_result(
     region_signature=None,
     region_gdna: "RegionGdnaEstimate | None" = None,
     region_exposure: "RegionExposure | None" = None,
+    fused_region_gdna: "FusedRegionGdnaEvidence | None" = None,
+    prior_table: "PriorTable | None" = None,
     rna_lower_confidence: float = 0.95,
 ) -> CalibrationResult:
     """Assemble the calibration result without legacy prior scaffolding."""
@@ -128,5 +142,7 @@ def build_calibration_result(
         n_multi_loci=0,
         region_gdna=region_gdna,
         region_exposure=region_exposure,
+        fused_region_gdna=fused_region_gdna,
+        prior_table=prior_table,
         rna_lower_confidence=float(rna_lower_confidence),
     )

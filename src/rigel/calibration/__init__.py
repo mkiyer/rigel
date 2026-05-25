@@ -9,8 +9,15 @@ from ._fl_sources import (
 )
 from ._orchestrator import calibrate
 from ._result import CalibrationResult, build_calibration_result
-from .density_model import DensityEvidence, GammaRatePrior, fit_density_evidence
+from .density_model import (
+    DensityEvidence,
+    GammaRatePrior,
+    density_logpmf_grid,
+    fit_density_evidence,
+)
 from .exposure import RegionExposure
+from .integration import FusedRegionGdnaEvidence, fuse_density_and_strand
+from .prior import PriorTable, assemble_priors
 from .strand_balance import StrandBalanceEstimate, estimate_strand_balance
 from .fl import (
     POOL_EB_PRIOR_ESS,
@@ -29,7 +36,12 @@ __all__ = [
     "RegionExposure",
     "DensityEvidence",
     "GammaRatePrior",
+    "density_logpmf_grid",
     "fit_density_evidence",
+    "FusedRegionGdnaEvidence",
+    "fuse_density_and_strand",
+    "PriorTable",
+    "assemble_priors",
     "StrandBalanceEstimate",
     "estimate_strand_balance",
     "l_eff_contained",

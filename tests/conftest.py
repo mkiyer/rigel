@@ -45,49 +45,11 @@ collect_ignore = [
     "test_density_global.py",
     "test_ndarray_util.py",
     "test_per_locus_gdna_mass.py",
-    # Tests below construct legacy region_df / scan tuples that the
-    # fractional cutover reshaped. Skipped until rewritten in Step 13.
-    "test_pipeline_wiring.py",
     # External profiling script (scripts/profiling/profiler.py) still
     # imports from the deleted _orient module. Re-enable once the
     # profiler is ported to strand_summary.StrandSummary.
     "test_profiler.py",
 ]
-
-
-# Any test that drives ``run_pipeline`` past calibration trips the Phase 6
-# locus-EM boundary. Convert only that sentinel NotImplementedError into a
-# pytest skip so the rest of the suite remains a useful regression signal.
-# Handle both setup and call phases (many integration tests do the heavy
-# lifting in a class fixture).
-def _maybe_skip_phase6_boundary(outcome):
-    from _pytest.outcomes import Skipped
-
-    try:
-        outcome.get_result()
-    except NotImplementedError as exc:
-        if str(exc) != "rigel quant: locus EM lands in Phase 6":
-            return
-        outcome.force_exception(
-            Skipped(
-                "locus EM lands in Phase 6; see "
-                "docs/fineregions/strand_model_impl_plan_v5.md"
-            )
-        )
-    except BaseException:
-        return
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_setup(item):
-    outcome = yield
-    _maybe_skip_phase6_boundary(outcome)
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item):
-    outcome = yield
-    _maybe_skip_phase6_boundary(outcome)
 
 
 # ---------------------------------------------------------------------------

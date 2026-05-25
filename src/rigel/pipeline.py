@@ -11,10 +11,9 @@ resolve each against the reference index, train strand and fragment-length
 models from unique-mapper fragments, and buffer all resolved fragments into
 a memory-efficient columnar buffer (``FragmentBuffer``).
 
-**Quantification** (``quant_from_buffer``): currently fails fast after
-calibration while the Phase 4 fractional density and per-locus prior
-pipeline is being developed. The scorer / locus-EM helpers below remain
-as the Phase 4 re-entry points.
+**Quantification** (``quant_from_buffer``): score buffered fragments,
+construct MultiLoci, assemble fused regional gDNA priors, partition the CSR
+data, and run locus-level native EM.
 
 Scoring functions live in ``scoring.py``.  Locus construction and EM
 initialization live in ``locus.py``.  The CSR builder lives in
@@ -882,32 +881,92 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Fail fast at the Phase 6 locus-EM boundary.
-
-    The scan and calibration stages are complete when this function is
-    called. Locus-level scoring, prior assembly, and EM are intentionally
-    blocked until the Phase 6 wiring lands.
-
-    Parameters
-    ----------
-    calibration : CalibrationResult
-        Fractional calibration result. Must carry a populated ``fl_models``
-        and diagnostics block.
-    Other parameters
-        Retained for API stability and Phase 4 re-entry.
-
-    Returns
-    -------
-    Never returns until Phase 6 replaces the fail-fast boundary.
-    """
+    """Quantify buffered fragments with fused calibration priors and locus EM."""
     if calibration is None:
         raise ValueError(
             "quant_from_buffer() requires a v6 CalibrationResult "
             "(got None).  Run rigel.calibration.calibrate(...) before "
             "locus-level quantification."
         )
+    if calibration.fused_region_gdna is None:
+        raise ValueError(
+            "quant_from_buffer() requires calibration.fused_region_gdna. "
+            "Run the current rigel.calibration.calibrate(...) before quantification."
+        )
+    if index.region_df is None:
+        raise RuntimeError(
+            "Index has no region table. Rebuild the index "
+            "(rigel index --fasta ... --gtf ...). Older indexes are not supported."
+        )
 
-    raise NotImplementedError("rigel quant: locus EM lands in Phase 6")
+    from .calibration.prior import assemble_priors
+    from .locus import build_multi_loci
+    from .locus_partition import partition_and_free
+
+    em_config = em_config or EMConfig()
+    scoring_cfg = scoring or FragmentScoringConfig()
+
+    _geometry, estimator = _setup_geometry_and_estimator(
+        index,
+        calibration.fl_models.rna,
+        em_config,
+    )
+
+    em_data = _score_fragments(
+        buffer,
+        index,
+        strand_models,
+        calibration.fl_models.rna,
+        calibration.fl_models.gdna,
+        stats,
+        estimator,
+        scoring_cfg,
+        log_every,
+        annotations,
+    )
+
+    multi_loci = build_multi_loci(em_data, index)
+    _assign_locus_ids(estimator, multi_loci)
+
+    prior_table = assemble_priors(
+        multi_loci=multi_loci,
+        em_data=em_data,
+        index=index,
+        calibration=calibration,
+    )
+
+    if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
+        calibration = _replace(
+            calibration,
+            prior_table=prior_table,
+            n_multi_loci=len(multi_loci),
+        )
+        return estimator, calibration
+
+    partitions = partition_and_free(em_data, multi_loci)
+
+    _run_locus_em_partitioned(
+        estimator,
+        partitions,
+        multi_loci,
+        index,
+        gdna_prior_count_em=prior_table.gdna_prior_count_em,
+        gdna_eff_len=prior_table.gdna_eff_len,
+        enable_gdna=prior_table.enable_gdna,
+        gdna_eff_len_unweighted=prior_table.gdna_eff_len_unweighted,
+        gdna_prior_count_raw=prior_table.gdna_expected_count,
+        gdna_em_exposure_weight=prior_table.gdna_em_exposure_weight,
+        em_config=em_config,
+        annotations=annotations,
+        emit_locus_stats=emit_locus_stats,
+    )
+
+    calibration = _replace(
+        calibration,
+        prior_table=prior_table,
+        n_multi_loci=len(multi_loci),
+    )
+    return estimator, calibration
 
 
 # ---------------------------------------------------------------------------

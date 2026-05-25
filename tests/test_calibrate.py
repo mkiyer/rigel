@@ -123,6 +123,8 @@ def test_calibrate_populates_region_gdna_and_uniform_exposure():
     assert result.region_exposure.mode == "density"
     assert result.region_exposure.A_r.shape == result.region_gdna.n_total.shape
     assert result.density_evidence is not None
+    assert result.fused_region_gdna is not None
+    assert result.fused_region_gdna.mean_count.shape == result.region_gdna.n_total.shape
     np.testing.assert_array_equal(
         result.region_exposure.A_r,
         result.density_evidence.relative_exposure.astype(np.float32),
@@ -155,11 +157,13 @@ def test_calibrate_summary_has_strand_deconv_and_uniform_exposure_blocks():
     assert exposure["n_regions"] == 7
     assert "density_evidence" in summary
     assert "priors" in summary["density_evidence"]
+    assert summary["fused_region_gdna"] is not None
+    assert summary["fused_region_gdna"]["n_regions"] == 7
+    assert summary["prior_table"] is None
 
     for forbidden in (
         "regional_exposure",
         "regional_weighting_stats",
-        "prior_table",
         "multi_locus_prior_df",
         "per_locus_gdna_df",
     ):

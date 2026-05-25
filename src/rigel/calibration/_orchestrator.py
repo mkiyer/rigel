@@ -59,13 +59,11 @@ def calibrate(
         )
     if density_min_eff_length < 0.0:
         raise ValueError(
-            "calibrate: density_min_eff_length must be >= 0; "
-            f"got {density_min_eff_length}."
+            f"calibrate: density_min_eff_length must be >= 0; got {density_min_eff_length}."
         )
     if density_max_exposure is not None and not (density_max_exposure > 0.0):
         raise ValueError(
-            "calibrate: density_max_exposure must be None or > 0; "
-            f"got {density_max_exposure}."
+            f"calibrate: density_max_exposure must be None or > 0; got {density_max_exposure}."
         )
     if index.region_df is None:
         raise RuntimeError(
@@ -87,6 +85,7 @@ def calibrate(
     from ._arrays import PayloadArrays, RegionArrays
     from .density_model import fit_density_evidence
     from .density_observation import build_density_observation
+    from .integration import fuse_density_and_strand
     from .region_count_ledger import build_region_count_ledger
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
@@ -121,6 +120,16 @@ def calibrate(
         kappa_d_n_exon_self_training=kappa_d.n_exon_self_training,
         kappa_d_fallback_used=kappa_d.fallback_used,
     )
+    fused_region_gdna = fuse_density_and_strand(
+        region_arrays=region_arrays,
+        ledger=ledger,
+        density_observation=observation,
+        density_evidence=density_evidence,
+        strand_counts=strand_counts,
+        strand_summary=strand_summary,
+        kappa_d=kappa_d.kappa,
+        confidence=rna_lower_confidence,
+    )
     region_exposure = RegionExposure.from_density(
         density_evidence,
         max_exposure=density_max_exposure,
@@ -135,5 +144,6 @@ def calibrate(
         region_signature=region_arrays.signature,
         region_gdna=region_gdna,
         region_exposure=region_exposure,
+        fused_region_gdna=fused_region_gdna,
         rna_lower_confidence=rna_lower_confidence,
     )

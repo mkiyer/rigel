@@ -81,6 +81,7 @@ class WeightedInterval:
     start: int
     end: int
     scale: float = 1.0
+    probe_group: int = 0
 
     @property
     def length(self) -> int:
@@ -108,7 +109,8 @@ class CaptureSampler:
             dtype=np.int64,
         )
         self._premrna_lengths = np.array(
-            [int(t.end - t.start) for t in transcripts], dtype=np.int64,
+            [int(t.end - t.start) for t in transcripts],
+            dtype=np.int64,
         )
         self._tx_id_to_index = {
             str(t.t_id): idx for idx, t in enumerate(transcripts) if t.t_id is not None
@@ -121,10 +123,9 @@ class CaptureSampler:
         self._mrna_intervals: dict[int, list[WeightedInterval]] = defaultdict(list)
         self._nrna_intervals: dict[int, list[WeightedInterval]] = defaultdict(list)
         self._gdna_intervals: dict[str, list[WeightedInterval]] = defaultdict(list)
+        self._next_probe_group = 1
 
-        self._mass_cache: dict[
-            tuple[str, int | str, int, int], tuple[np.ndarray, np.ndarray]
-        ] = {}
+        self._mass_cache: dict[tuple[str, int | str, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
     @classmethod
     def disabled(
@@ -134,7 +135,10 @@ class CaptureSampler:
     ) -> "CaptureSampler":
         """Return a disabled sampler with uniform sampling semantics."""
         return cls(
-            CaptureConfig(), transcripts, ref_lengths or {}, enabled=False,
+            CaptureConfig(),
+            transcripts,
+            ref_lengths or {},
+            enabled=False,
         )
 
     @classmethod
@@ -232,7 +236,10 @@ class CaptureSampler:
         n_baseline = int(baseline_mask.sum())
         if n_baseline > 0:
             starts[baseline_mask] = rng.integers(
-                0, eff_len, size=n_baseline, dtype=np.int64,
+                0,
+                eff_len,
+                size=n_baseline,
+                dtype=np.int64,
             )
 
         extra_positions = np.where(~baseline_mask)[0]
@@ -240,7 +247,9 @@ class CaptureSampler:
             return starts
 
         starts[extra_positions] = rng.choice(
-            extra_starts, size=len(extra_positions), p=raw_weights / raw_total,
+            extra_starts,
+            size=len(extra_positions),
+            p=raw_weights / raw_total,
         )
 
         return starts
@@ -257,12 +266,15 @@ class CaptureSampler:
         eff_len = int(seq_len) - int(frag_len) + 1
         if eff_len <= 0 or frag_start < 0 or frag_start >= eff_len:
             return 0.0
-        score = 0.0
+        group_scores: dict[int, float] = {}
         frag_end = frag_start + frag_len
         for interval in self._get_intervals(space, key):
             overlap = min(frag_end, interval.end) - max(frag_start, interval.start)
             if overlap >= self.config.min_overlap:
-                score = max(score, interval.scale * overlap)
+                group_scores[interval.probe_group] = (
+                    group_scores.get(interval.probe_group, 0.0) + interval.scale * overlap
+                )
+        score = max(group_scores.values(), default=0.0)
         return self.config.off_target_weight + self.config.binding_per_base * score
 
     # -- Probe loading -----------------------------------------------------
@@ -294,7 +306,11 @@ class CaptureSampler:
                 start_text = fields[header["start"]]
                 end_text = fields[header["end"]]
             self._add_transcript_probe(
-                transcript_id, int(start_text), int(end_text), path, row_number,
+                transcript_id,
+                int(start_text),
+                int(end_text),
+                path,
+                row_number,
             )
             n_loaded += 1
         logger.info("Loaded %d transcript-coordinate capture probes from %s", n_loaded, path)
@@ -345,13 +361,13 @@ class CaptureSampler:
                 f"[{start}, {end}) outside transcript length {tx_len}"
             )
 
-        self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0))
-
+        probe_group = self._new_probe_group()
+        self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0, probe_group))
         transcript = self.transcripts[t_idx]
         blocks = transcript_to_genomic_blocks(start, end, transcript)
         split_scale = self._split_scale(blocks)
-        self._add_gdna_blocks(str(transcript.ref), blocks, split_scale)
-        self._add_nrna_blocks(t_idx, blocks, split_scale)
+        self._add_gdna_blocks(str(transcript.ref), blocks, split_scale, probe_group)
+        self._add_nrna_blocks(t_idx, blocks, split_scale, probe_group)
 
     def _add_bed12_probe(
         self,
@@ -360,7 +376,8 @@ class CaptureSampler:
         blocks: list[tuple[int, int]],
     ) -> None:
         split_scale = self._split_scale(blocks)
-        self._add_gdna_blocks(ref, blocks, split_scale)
+        probe_group = self._new_probe_group()
+        self._add_gdna_blocks(ref, blocks, split_scale, probe_group)
 
         for t_idx in self._tx_by_ref.get(ref, []):
             transcript = self.transcripts[t_idx]
@@ -370,20 +387,21 @@ class CaptureSampler:
             if projected is None:
                 continue
             for start, end in _merge_intervals(projected):
-                self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0))
-            self._add_nrna_blocks(t_idx, blocks, split_scale)
+                self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0, probe_group))
+            self._add_nrna_blocks(t_idx, blocks, split_scale, probe_group)
 
     def _add_gdna_blocks(
         self,
         ref: str,
         blocks: Sequence[tuple[int, int]],
         scale: float,
+        probe_group: int,
     ) -> None:
         ref_len = self.ref_lengths.get(ref)
         if ref_len is None:
             return
         for start, end in blocks:
-            interval = _clip_interval(start, end, ref_len, scale)
+            interval = _clip_interval(start, end, ref_len, scale, probe_group)
             if interval is not None:
                 self._gdna_intervals[ref].append(interval)
 
@@ -392,6 +410,7 @@ class CaptureSampler:
         t_idx: int,
         blocks: Sequence[tuple[int, int]],
         scale: float,
+        probe_group: int,
     ) -> None:
         transcript = self.transcripts[t_idx]
         seq_len = int(self._premrna_lengths[t_idx])
@@ -399,9 +418,14 @@ class CaptureSampler:
             mapped = _genomic_block_to_premrna_interval(transcript, start, end)
             if mapped is None:
                 continue
-            interval = _clip_interval(mapped[0], mapped[1], seq_len, scale)
+            interval = _clip_interval(mapped[0], mapped[1], seq_len, scale, probe_group)
             if interval is not None:
                 self._nrna_intervals[t_idx].append(interval)
+
+    def _new_probe_group(self) -> int:
+        group = self._next_probe_group
+        self._next_probe_group += 1
+        return group
 
     def _split_scale(self, blocks: Sequence[tuple[int, int]]) -> float:
         if len(blocks) <= 1:
@@ -434,6 +458,7 @@ class CaptureSampler:
 
         start_chunks: list[np.ndarray] = []
         weight_chunks: list[np.ndarray] = []
+        group_chunks: list[np.ndarray] = []
         for interval in self._get_intervals(space, key):
             starts, weights = self._local_overlap_weights(seq_len, frag_len, interval)
             if len(starts) == 0:
@@ -443,6 +468,9 @@ class CaptureSampler:
             if np.any(keep):
                 start_chunks.append(starts[keep])
                 weight_chunks.append(scaled_weights[keep])
+                group_chunks.append(
+                    np.full(int(np.sum(keep)), interval.probe_group, dtype=np.int64),
+                )
 
         if not start_chunks:
             empty_starts = np.empty(0, dtype=np.int64)
@@ -452,14 +480,30 @@ class CaptureSampler:
 
         all_starts = np.concatenate(start_chunks)
         all_weights = np.concatenate(weight_chunks)
-        order = np.argsort(all_starts)
+        all_groups = np.concatenate(group_chunks)
+
+        order = np.lexsort((all_groups, all_starts))
         sorted_starts = all_starts[order]
+        sorted_groups = all_groups[order]
         sorted_weights = all_weights[order]
-        group_starts = np.flatnonzero(
-            np.r_[True, sorted_starts[1:] != sorted_starts[:-1]],
+        start_probe_group_starts = np.flatnonzero(
+            np.r_[
+                True,
+                (sorted_starts[1:] != sorted_starts[:-1])
+                | (sorted_groups[1:] != sorted_groups[:-1]),
+            ],
         )
-        starts = sorted_starts[group_starts]
-        weights = np.maximum.reduceat(sorted_weights, group_starts)
+        probe_starts = sorted_starts[start_probe_group_starts]
+        probe_weights = np.add.reduceat(sorted_weights, start_probe_group_starts)
+
+        order = np.argsort(probe_starts)
+        sorted_probe_starts = probe_starts[order]
+        sorted_probe_weights = probe_weights[order]
+        start_group_starts = np.flatnonzero(
+            np.r_[True, sorted_probe_starts[1:] != sorted_probe_starts[:-1]],
+        )
+        starts = sorted_probe_starts[start_group_starts]
+        weights = np.maximum.reduceat(sorted_probe_weights, start_group_starts)
 
         self._mass_cache[cache_key] = (starts, weights)
         return starts, weights
@@ -479,7 +523,8 @@ class CaptureSampler:
             return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float64)
         starts = np.arange(lo, hi, dtype=np.int64)
         overlaps = np.minimum(starts + int(frag_len), interval.end) - np.maximum(
-            starts, interval.start,
+            starts,
+            interval.start,
         )
         if self.config.min_overlap > 1:
             overlaps = np.where(overlaps >= self.config.min_overlap, overlaps, 0)
@@ -502,9 +547,7 @@ def _read_probe_lines(path: Path) -> list[str]:
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt") as handle:
         return [
-            line.strip()
-            for line in handle
-            if line.strip() and not line.lstrip().startswith("#")
+            line.strip() for line in handle if line.strip() and not line.lstrip().startswith("#")
         ]
 
 
@@ -572,12 +615,18 @@ def _parse_bed_list(text: str) -> list[int]:
     return [int(part) for part in text.rstrip(",").split(",") if part]
 
 
-def _clip_interval(start: int, end: int, length: int, scale: float) -> WeightedInterval | None:
+def _clip_interval(
+    start: int,
+    end: int,
+    length: int,
+    scale: float,
+    probe_group: int,
+) -> WeightedInterval | None:
     start = max(0, int(start))
     end = min(int(length), int(end))
     if end <= start or scale <= 0:
         return None
-    return WeightedInterval(start, end, float(scale))
+    return WeightedInterval(start, end, float(scale), int(probe_group))
 
 
 def _merge_intervals(intervals: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -644,5 +693,7 @@ def _genomic_block_to_premrna_interval(
         return None
     if transcript.strand == Strand.NEG:
         premrna_len = transcript.end - transcript.start
-        return premrna_len - (block_end - transcript.start), premrna_len - (block_start - transcript.start)
+        return premrna_len - (block_end - transcript.start), premrna_len - (
+            block_start - transcript.start
+        )
     return block_start - transcript.start, block_end - transcript.start

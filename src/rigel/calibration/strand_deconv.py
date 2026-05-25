@@ -67,6 +67,7 @@ __all__ = [
     "KappaDEstimate",
     "build_strand_region_counts",
     "deconvolve_regions_by_strand",
+    "strand_log_likelihood_d_grid",
     "screen_no_rna_exons",
     "estimate_kappa_d",
 ]
@@ -256,6 +257,64 @@ def _log_beta_binom_pmf(k: np.ndarray, n: int, alpha: float, beta: float) -> np.
     return log_c + betaln(k + alpha, n - k + beta) - betaln(alpha, beta)
 
 
+def strand_log_likelihood_d_grid(
+    k_sense_obs: int,
+    n_total: int,
+    d_grid: np.ndarray,
+    *,
+    kappa_d: float,
+    p_r1_sense: float,
+) -> np.ndarray:
+    """Return ``log L_strand(K | D=d, N)`` for integer ``d_grid``.
+
+    ``D`` is the gDNA count and ``R = N - D`` is the RNA count. RNA sense
+    observations follow ``Binom(R, p_r1_sense)`` and gDNA sense observations
+    follow the symmetric beta-binomial strand-balance model parameterized by
+    ``kappa_d``.
+    """
+    n = int(n_total)
+    if n < 0:
+        raise ValueError(f"strand_log_likelihood_d_grid: n_total must be >= 0; got {n}")
+    if not np.isfinite(kappa_d) or kappa_d <= 0.0:
+        raise ValueError(
+            f"strand_log_likelihood_d_grid: kappa_d must be finite and positive; got {kappa_d!r}"
+        )
+    if not np.isfinite(p_r1_sense) or not 0.0 <= float(p_r1_sense) <= 1.0:
+        raise ValueError(
+            "strand_log_likelihood_d_grid: p_r1_sense must be finite and in [0, 1]; "
+            f"got {p_r1_sense!r}"
+        )
+
+    k_obs = int(max(0, min(n, int(k_sense_obs))))
+    d_arr = np.rint(np.asarray(d_grid, dtype=np.float64)).astype(np.int64)
+    out = np.full(d_arr.shape, -np.inf, dtype=np.float64)
+    a = float(kappa_d) / 2.0
+
+    for pos, d_raw in np.ndenumerate(d_arr):
+        d = int(d_raw)
+        if d < 0 or d > n:
+            continue
+        r = n - d
+        j_lo = max(0, k_obs - d)
+        j_hi = min(r, k_obs)
+        if j_lo > j_hi:
+            continue
+        js = np.arange(j_lo, j_hi + 1)
+        terms = _log_binom_pmf(js, r, float(p_r1_sense)) + _log_beta_binom_pmf(
+            k_obs - js,
+            d,
+            a,
+            a,
+        )
+        finite_terms = terms[np.isfinite(terms)]
+        if finite_terms.size == 0:
+            continue
+        m = float(np.max(finite_terms))
+        out[pos] = m + np.log(np.sum(np.exp(finite_terms - m)))
+
+    return out
+
+
 def _exact_posterior_R(
     k_sense_obs: int,
     n: int,
@@ -276,25 +335,15 @@ def _exact_posterior_R(
         # Snap out-of-range observed counts (can occur from float rounding).
         k_sense_obs = int(max(0, min(n, k_sense_obs)))
 
-    a = float(kappa_d) / 2.0
-    log_post = np.full(n + 1, -np.inf, dtype=np.float64)
-
-    for r in range(n + 1):
-        d = n - r
-        j_lo = max(0, k_sense_obs - d)
-        j_hi = min(r, k_sense_obs)
-        if j_lo > j_hi:
-            continue
-        js = np.arange(j_lo, j_hi + 1)
-        log_bin = _log_binom_pmf(js, r, p_r1_sense)
-        log_bb = _log_beta_binom_pmf(k_sense_obs - js, d, a, a)
-        terms = log_bin + log_bb
-        term_finite = np.isfinite(terms)
-        if not np.any(term_finite):
-            continue
-        finite_terms = terms[term_finite]
-        m = float(np.max(finite_terms))
-        log_post[r] = m + np.log(np.sum(np.exp(finite_terms - m)))
+    r_grid = np.arange(n + 1, dtype=np.int64)
+    d_for_r = n - r_grid
+    log_post = strand_log_likelihood_d_grid(
+        k_sense_obs,
+        n,
+        d_for_r,
+        kappa_d=kappa_d,
+        p_r1_sense=p_r1_sense,
+    )
 
     finite = np.isfinite(log_post)
     if not np.any(finite):

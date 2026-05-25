@@ -45,6 +45,7 @@ __all__ = [
     "GammaRatePrior",
     "InsufficientAnchors",
     "compute_beta_cap",
+    "density_logpmf_grid",
     "fit_density_evidence",
     "fit_gamma_prior",
     "select_rho_ref",
@@ -174,6 +175,13 @@ class DensityEvidence:
     priors: dict[str, GammaRatePrior]
     rho_ref: float
     rho_ref_source: str
+    alpha_post: np.ndarray | None = None
+    beta_post: np.ndarray | None = None
+    contained_leff: np.ndarray | None = None
+    boundary_count: np.ndarray | None = None
+    variance_unbounded: np.ndarray | None = None
+    tail_probability: np.ndarray | None = None
+    expected_tail_count: np.ndarray | None = None
 
     def to_summary_dict(self) -> dict[str, object]:
         """Return a compact JSON-safe summary of stored evidence arrays."""
@@ -208,6 +216,14 @@ class DensityEvidence:
             "upper_unbounded": _summary_stats(
                 self.upper_unbounded, include_min=False, include_mean=False
             ),
+            "tail_probability": _summary_stats(
+                self.tail_probability if self.tail_probability is not None else np.zeros(0),
+                include_min=False,
+            ),
+            "expected_tail_count": _summary_stats(
+                self.expected_tail_count if self.expected_tail_count is not None else np.zeros(0),
+                include_min=False,
+            ),
         }
 
 
@@ -235,6 +251,57 @@ def compute_beta_cap(rho: float) -> float:
     if rho_f <= 0.0 or not np.isfinite(rho_f):
         return float("inf")
     return float(DENSITY_PRIOR_MAX_PRECISION / rho_f)
+
+
+def density_logpmf_grid(
+    evidence: DensityEvidence,
+    region_idx: int,
+    d_grid: np.ndarray,
+) -> np.ndarray:
+    """Return ``log P_density(D=d)`` for one region and integer ``d_grid``.
+
+    The density model is a Gamma-rate posterior predictive distribution over
+    contained gDNA counts, shifted by the observed boundary-compatible count.
+    Boundary counts can be fractional because calibration accumulates fractional
+    evidence; for the integer fusion grid we evaluate the nearest contained-count
+    support point after subtracting the boundary shift.
+    """
+    idx = int(region_idx)
+    grid = np.asarray(d_grid, dtype=np.float64)
+
+    if idx < 0 or idx >= np.asarray(evidence.mean_unbounded).size:
+        raise IndexError(
+            f"density_logpmf_grid: region_idx {idx} out of bounds for "
+            f"{np.asarray(evidence.mean_unbounded).size} regions."
+        )
+
+    alpha_arr = evidence.alpha_post
+    beta_arr = evidence.beta_post
+    leff_arr = evidence.contained_leff
+    boundary_arr = evidence.boundary_count
+    if alpha_arr is None or beta_arr is None or leff_arr is None or boundary_arr is None:
+        center = int(round(float(np.asarray(evidence.mean_unbounded, dtype=np.float64)[idx])))
+        return np.where(np.rint(grid).astype(np.int64) == center, 0.0, -np.inf)
+
+    alpha = float(np.asarray(alpha_arr, dtype=np.float64)[idx])
+    beta = float(np.asarray(beta_arr, dtype=np.float64)[idx])
+    leff = float(np.asarray(leff_arr, dtype=np.float64)[idx])
+    boundary = float(np.asarray(boundary_arr, dtype=np.float64)[idx])
+
+    if leff <= 0.0 or alpha <= 0.0 or beta <= 0.0 or not np.isfinite(alpha + beta + leff):
+        center = 0 if alpha <= 0.0 else int(round(boundary))
+        return np.where(np.rint(grid).astype(np.int64) == center, 0.0, -np.inf)
+
+    contained_grid = np.rint(grid - boundary).astype(np.int64)
+    out = np.full(grid.shape, -np.inf, dtype=np.float64)
+    valid = contained_grid >= 0
+    if not np.any(valid):
+        return out
+
+    p_nb = beta / (beta + leff)
+    p_nb = float(np.clip(p_nb, np.finfo(np.float64).tiny, 1.0))
+    out[valid] = nbinom.logpmf(contained_grid[valid], alpha, p_nb)
+    return np.nan_to_num(out, nan=-np.inf, posinf=-np.inf, neginf=-np.inf)
 
 
 def fit_gamma_prior(
@@ -371,7 +438,14 @@ def fit_density_evidence(
     priors = _fit_anchor_priors(observation, min_eff_length=float(min_eff_length))
     rho_ref, rho_ref_source = select_rho_ref(priors)
     if rho_ref <= 0.0 or not np.isfinite(rho_ref):
-        return _deterministic_zero_evidence(observation, confidence=conf)
+        sparse_intergenic = _sparse_intergenic_prior(
+            observation,
+            min_eff_length=float(min_eff_length),
+        )
+        if sparse_intergenic is None:
+            return _deterministic_zero_evidence(observation, confidence=conf)
+        priors = {"INTERGENIC": sparse_intergenic}
+        rho_ref, rho_ref_source = select_rho_ref(priors)
 
     alpha_prior, beta_prior, prior_family, fallback_depth = _assign_region_priors(
         observation,
@@ -415,6 +489,13 @@ def fit_density_evidence(
         priors=dict(priors),
         rho_ref=float(rho_ref),
         rho_ref_source=rho_ref_source,
+        alpha_post=np.asarray(diag.alpha_post, dtype=np.float64),
+        beta_post=np.asarray(diag.beta_post, dtype=np.float64),
+        contained_leff=np.asarray(contained_leff, dtype=np.float64),
+        boundary_count=np.asarray(boundary_count, dtype=np.float64),
+        variance_unbounded=np.asarray(diag.variance_unbounded, dtype=np.float64),
+        tail_probability=np.asarray(diag.tail_probability, dtype=np.float64),
+        expected_tail_count=np.asarray(diag.expected_tail_count, dtype=np.float64),
     )
 
 
@@ -443,6 +524,53 @@ def _fit_anchor_priors(
         except InsufficientAnchors:
             continue
     return priors
+
+
+def _sparse_intergenic_prior(
+    observation: DensityObservation,
+    *,
+    min_eff_length: float,
+) -> GammaRatePrior | None:
+    counts = np.asarray(observation.contained_count, dtype=np.float64)
+    leff = np.asarray(observation.contained_leff, dtype=np.float64)
+    mask = (
+        np.asarray(observation.anchor_intergenic, dtype=bool)
+        & np.isfinite(counts)
+        & np.isfinite(leff)
+        & (leff >= float(min_eff_length))
+    )
+    if not np.any(mask):
+        return None
+    n_fragments = float(np.sum(counts[mask]))
+    eff_length = float(np.sum(leff[mask]))
+    if n_fragments <= 0.0 or eff_length <= 0.0:
+        return None
+
+    rho = float(n_fragments / eff_length)
+    alpha = float(DENSITY_FALLBACK_PRIOR_ALPHA)
+    beta = float(alpha / max(rho, _RHO_EPS))
+    return GammaRatePrior(
+        family="INTERGENIC_SPARSE",
+        alpha=alpha,
+        beta=beta,
+        mean_density=rho,
+        phi=float(1.0 / alpha),
+        beta_raw=beta,
+        beta_cap=float("inf"),
+        cap_applied=False,
+        n_regions=int(np.sum(mask)),
+        n_fragments=n_fragments,
+        eff_length=eff_length,
+        residual_sum=0.0,
+        poisson_variance_sum=n_fragments,
+        extra_variance_basis_sum=0.0,
+        trim_upper=0.0,
+        n_trimmed=0,
+        trimmed_mu_fraction=0.0,
+        fallback_depth=1,
+        fit_status="sparse_intergenic_fallback",
+        pearson_chi2_trimmed=0.0,
+    )
 
 
 def _assign_region_priors(
@@ -523,14 +651,13 @@ def _deterministic_zero_evidence(
 ) -> DensityEvidence:
     counts = np.asarray(observation.contained_count, dtype=np.float64)
     boundary = np.asarray(observation.boundary_count, dtype=np.float64)
-    observed = counts + boundary
-    R = int(observed.size)
+    R = int(counts.size)
     flags = np.full(R, FLAG_FALLBACK_USED | FLAG_PRIOR_DOMINATED, dtype=np.uint8)
     return DensityEvidence(
         rho_post=np.zeros(R, dtype=np.float64),
         relative_exposure=np.ones(R, dtype=np.float64),
-        mean_unbounded=np.asarray(observed, dtype=np.float64),
-        upper_unbounded=np.asarray(observed, dtype=np.float64),
+        mean_unbounded=np.zeros(R, dtype=np.float64),
+        upper_unbounded=np.zeros(R, dtype=np.float64),
         prior_family=np.full(R, PRIOR_FAMILY_DETERMINISTIC_ZERO, dtype=np.uint8),
         fallback_depth=np.full(R, 3, dtype=np.uint8),
         flags=flags,
@@ -538,6 +665,13 @@ def _deterministic_zero_evidence(
         priors={},
         rho_ref=0.0,
         rho_ref_source="ZERO",
+        alpha_post=np.zeros(R, dtype=np.float64),
+        beta_post=np.ones(R, dtype=np.float64),
+        contained_leff=np.asarray(observation.contained_leff, dtype=np.float64),
+        boundary_count=np.asarray(boundary, dtype=np.float64),
+        variance_unbounded=np.zeros(R, dtype=np.float64),
+        tail_probability=np.zeros(R, dtype=np.float64),
+        expected_tail_count=np.zeros(R, dtype=np.float64),
     )
 
 
@@ -597,7 +731,9 @@ def _compute_predictive_diagnostics(
         np.maximum(observed_total, _STAT_EPS),
         out=np.zeros_like(mean_unbounded),
     )
-    variance = mean_c * (1.0 + np.divide(L_c, beta_post, out=np.zeros_like(L_c), where=beta_post > 0.0))
+    variance = mean_c * (
+        1.0 + np.divide(L_c, beta_post, out=np.zeros_like(L_c), where=beta_post > 0.0)
+    )
     cv = np.divide(
         np.sqrt(np.maximum(variance, 0.0)),
         np.maximum(mean_c, _STAT_EPS),
@@ -639,7 +775,7 @@ def _compute_predictive_diagnostics(
 def _prior_ok(prior: GammaRatePrior | None) -> bool:
     return (
         prior is not None
-        and prior.fit_status == "ok"
+        and prior.fit_status in {"ok", "sparse_intergenic_fallback"}
         and prior.mean_density > 0.0
         and prior.alpha > 0.0
         and prior.beta > 0.0

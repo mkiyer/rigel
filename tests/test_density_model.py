@@ -20,7 +20,9 @@ from rigel.calibration.density_model import (
     PRIOR_FAMILY_ALL,
     PRIOR_FAMILY_DETERMINISTIC_ZERO,
     PRIOR_FAMILY_FALLBACK_BROAD,
+    DensityEvidence,
     compute_beta_cap,
+    density_logpmf_grid,
     fit_density_evidence,
     fit_gamma_prior,
     select_rho_ref,
@@ -44,7 +46,11 @@ def _obs(
 ) -> DensityObservation:
     C = np.asarray(contained, dtype=np.float32)
     Lc = np.asarray(contained_leff, dtype=np.float64)
-    B = np.zeros_like(C, dtype=np.float32) if boundary is None else np.asarray(boundary, dtype=np.float32)
+    B = (
+        np.zeros_like(C, dtype=np.float32)
+        if boundary is None
+        else np.asarray(boundary, dtype=np.float32)
+    )
     Lb = (
         np.zeros_like(Lc, dtype=np.float64)
         if boundary_leff is None
@@ -229,9 +235,7 @@ def test_select_rho_ref_priority_order() -> None:
     intron = _prior("INTRON", 0.03, alpha=30.0)
     all_prior = _prior("ALL", 0.02, alpha=40.0)
 
-    assert select_rho_ref({"ALL": all_prior, "INTERGENIC": inter}) == pytest.approx(
-        (0.02, "ALL")
-    )
+    assert select_rho_ref({"ALL": all_prior, "INTERGENIC": inter}) == pytest.approx((0.02, "ALL"))
 
     rho, source = select_rho_ref(
         {"ALL": _prior("ALL", 0.02, status="failed"), "INTERGENIC": inter, "INTRON": intron}
@@ -266,6 +270,55 @@ def test_deterministic_zero_density_branch() -> None:
     assert np.all(evidence.prior_family == PRIOR_FAMILY_DETERMINISTIC_ZERO)
     assert np.all((evidence.flags & (FLAG_FALLBACK_USED | FLAG_PRIOR_DOMINATED)) != 0)
     assert evidence.to_summary_dict()["rho_ref_source"] == "ZERO"
+
+
+def test_deterministic_zero_branch_does_not_force_boundary_mass() -> None:
+    observation = _obs(
+        np.zeros(25, dtype=np.float32),
+        np.full(25, 1000.0, dtype=np.float64),
+        boundary=np.full(25, 10.0, dtype=np.float32),
+        boundary_leff=np.full(25, 500.0, dtype=np.float64),
+    )
+
+    evidence = fit_density_evidence(observation)
+
+    assert evidence.rho_ref_source == "ZERO"
+    np.testing.assert_array_equal(evidence.mean_unbounded, np.zeros(25, dtype=np.float64))
+    np.testing.assert_array_equal(evidence.upper_unbounded, np.zeros(25, dtype=np.float64))
+    logpmf = density_logpmf_grid(evidence, 0, np.array([0, 10], dtype=np.int64))
+    np.testing.assert_array_equal(logpmf, np.array([0.0, -np.inf]))
+
+
+def test_sparse_intergenic_evidence_gets_broad_empirical_prior() -> None:
+    intergenic = np.array([True] * 5 + [False] * 20, dtype=bool)
+    observation = _obs(
+        np.array([10.0] * 5 + [0.0] * 20, dtype=np.float32),
+        np.full(25, 1000.0, dtype=np.float64),
+        intergenic=intergenic,
+    )
+
+    evidence = fit_density_evidence(observation)
+
+    assert evidence.rho_ref > 0.0
+    assert evidence.rho_ref_source == "WEIGHTED_FAMILIES"
+    assert evidence.priors["INTERGENIC"].fit_status == "sparse_intergenic_fallback"
+    assert np.any(evidence.upper_unbounded > 0.0)
+
+
+def test_sparse_intron_only_evidence_stays_deterministic_zero() -> None:
+    intergenic = np.zeros(25, dtype=bool)
+    intron = np.array([True] * 5 + [False] * 20, dtype=bool)
+    observation = _obs(
+        np.array([10.0] * 5 + [0.0] * 20, dtype=np.float32),
+        np.full(25, 1000.0, dtype=np.float64),
+        intergenic=intergenic,
+        intron=intron,
+    )
+
+    evidence = fit_density_evidence(observation)
+
+    assert evidence.rho_ref_source == "ZERO"
+    np.testing.assert_array_equal(evidence.mean_unbounded, np.zeros(25, dtype=np.float64))
 
 
 def test_local_update_zero_boundary_leaves_posterior_equal_prior() -> None:
@@ -315,6 +368,39 @@ def test_nb_predictive_mean_and_ppf_match_scipy() -> None:
     assert diag.mean_c[0] == pytest.approx(mean_c)
     assert diag.p_nb[0] == pytest.approx(p_nb)
     assert diag.upper_unbounded[0] == pytest.approx(3.0 + nbinom.ppf(0.95, alpha_post, p_nb))
+
+
+def test_density_logpmf_grid_matches_shifted_scipy_nb() -> None:
+    alpha_post = 5.0
+    beta_post = 17.0
+    contained_leff = 20.0
+    boundary_count = 3.0
+    p_nb = beta_post / (beta_post + contained_leff)
+    evidence = DensityEvidence(
+        rho_post=np.array([alpha_post / beta_post], dtype=np.float64),
+        relative_exposure=np.ones(1, dtype=np.float64),
+        mean_unbounded=np.array([boundary_count + alpha_post / beta_post * contained_leff]),
+        upper_unbounded=np.array([boundary_count + nbinom.ppf(0.95, alpha_post, p_nb)]),
+        prior_family=np.array([PRIOR_FAMILY_ALL], dtype=np.uint8),
+        fallback_depth=np.zeros(1, dtype=np.uint8),
+        flags=np.zeros(1, dtype=np.uint8),
+        confidence=0.95,
+        priors={},
+        rho_ref=alpha_post / beta_post,
+        rho_ref_source="ALL",
+        alpha_post=np.array([alpha_post], dtype=np.float64),
+        beta_post=np.array([beta_post], dtype=np.float64),
+        contained_leff=np.array([contained_leff], dtype=np.float64),
+        boundary_count=np.array([boundary_count], dtype=np.float64),
+        variance_unbounded=np.array([alpha_post * (1.0 - p_nb) / (p_nb * p_nb)]),
+        tail_probability=np.zeros(1, dtype=np.float64),
+        expected_tail_count=np.zeros(1, dtype=np.float64),
+    )
+    d_grid = np.array([3, 4, 5, 8], dtype=np.int64)
+
+    logpmf = density_logpmf_grid(evidence, 0, d_grid)
+
+    np.testing.assert_allclose(logpmf, nbinom.logpmf(d_grid - 3, alpha_post, p_nb))
 
 
 def test_fractional_count_convention_floors_contained_for_sf_only() -> None:

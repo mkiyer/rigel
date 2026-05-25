@@ -37,12 +37,7 @@ def _transcript(
 
 def test_transcript_probe_weights_match_overlap_example(tmp_path):
     probes = tmp_path / "probes.tsv"
-    probes.write_text(
-        "transcript_id\tstart\tend\n"
-        "T\t200\t320\n"
-        "T\t500\t620\n"
-        "T\t1500\t1620\n"
-    )
+    probes.write_text("transcript_id\tstart\tend\nT\t200\t320\nT\t500\t620\nT\t1500\t1620\n")
     transcript = _transcript("T", [(0, 2000)])
     sampler = CaptureSampler.from_config(
         CaptureConfig(
@@ -120,11 +115,7 @@ def test_capture_partition_increases_targeted_transcript_weight(tmp_path):
 
 def test_overlapping_probes_do_not_stack_capture_strength(tmp_path):
     probes = tmp_path / "overlap.tsv"
-    probes.write_text(
-        "transcript_id\tstart\tend\n"
-        "T\t100\t220\n"
-        "T\t140\t260\n"
-    )
+    probes.write_text("transcript_id\tstart\tend\nT\t100\t220\nT\t140\t260\n")
     transcript = _transcript("T", [(0, 300)])
     sampler = CaptureSampler.from_config(
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
@@ -145,11 +136,7 @@ def test_overlapping_probes_do_not_stack_capture_strength(tmp_path):
 
 def test_duplicate_isoform_probes_do_not_stack_gdna_strength(tmp_path):
     probes = tmp_path / "duplicate.tsv"
-    probes.write_text(
-        "transcript_id\tstart\tend\n"
-        "T1\t20\t140\n"
-        "T2\t20\t140\n"
-    )
+    probes.write_text("transcript_id\tstart\tend\nT1\t20\t140\nT2\t20\t140\n")
     transcripts = [
         _transcript("T1", [(100, 300)]),
         _transcript("T2", [(100, 300)]),

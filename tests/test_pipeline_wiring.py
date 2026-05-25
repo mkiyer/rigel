@@ -7,6 +7,11 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+from rigel.calibration._result import CalibrationResult
+from rigel.calibration.exposure import RegionExposure
+from rigel.calibration.integration import FusedRegionGdnaEvidence
+from rigel.locus import Locus, MultiLocus
+import rigel.pipeline as pipeline
 from rigel.calibration.regions import BoundaryKind, RegionStrand, RegionType, SIGNATURE_SENTINEL
 from rigel.pipeline import _wire_calibration_regions
 
@@ -59,7 +64,6 @@ def test_wire_calibration_regions_uses_index_ref_ids_not_resolver_map():
         type_masks,
         strands,
         n_refs,
-        splicing_anchor_tolerance,
     ) = scanner.calls[0]
     np.testing.assert_array_equal(ref_ids, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(starts, np.array([0, 0], dtype=np.int64))
@@ -76,7 +80,6 @@ def test_wire_calibration_regions_uses_index_ref_ids_not_resolver_map():
     np.testing.assert_array_equal(type_masks, np.array([0b100, 0b001], dtype=np.uint8))
     np.testing.assert_array_equal(strands, np.array([0, 1], dtype=np.uint8))
     assert n_refs == 2
-    assert splicing_anchor_tolerance == 0
 
 
 def test_wire_calibration_regions_drops_unknown_refs(caplog):
@@ -98,7 +101,6 @@ def test_wire_calibration_regions_drops_unknown_refs(caplog):
         type_masks,
         strands,
         n_refs,
-        _k,
     ) = scanner.calls[0]
     np.testing.assert_array_equal(ref_ids, np.array([0], dtype=np.int32))
     np.testing.assert_array_equal(starts, np.array([0], dtype=np.int64))
@@ -112,3 +114,106 @@ def test_wire_calibration_regions_drops_unknown_refs(caplog):
     np.testing.assert_array_equal(strands, np.array([0], dtype=np.uint8))
     assert n_refs == 1
     assert "Dropping 1 calibration regions" in caplog.text
+
+
+def _empty_fused() -> FusedRegionGdnaEvidence:
+    zeros = np.zeros(0, dtype=np.float32)
+    return FusedRegionGdnaEvidence(
+        mean_count=zeros,
+        upper_count=zeros,
+        variance_count=zeros,
+        rna_lower_count=zeros,
+        observed_compatible_count=zeros,
+        density_weight=zeros,
+        strand_weight=zeros,
+        density_applicable=np.zeros(0, dtype=bool),
+        strand_applicable=np.zeros(0, dtype=bool),
+        tail_probability=zeros,
+        expected_tail_count=zeros,
+        flags=np.zeros(0, dtype=np.uint8),
+    )
+
+
+def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
+    calls: list[str] = []
+    estimator = SimpleNamespace(
+        locus_id_per_transcript=np.full(1, -1, dtype=np.int32),
+        locus_results=[],
+        _gdna_em_total=0.0,
+    )
+    em_data = SimpleNamespace(n_units=1)
+    locus = MultiLocus(
+        multi_locus_id=0,
+        transcript_indices=np.array([0], dtype=np.int32),
+        unit_indices=np.array([0], dtype=np.int32),
+        gdna_span=100,
+        loci=(Locus(ref="chr1", ref_id=0, start=0, end=100),),
+    )
+    prior_table = SimpleNamespace(
+        gdna_prior_count_em=np.array([1.0], dtype=np.float64),
+        gdna_eff_len=np.array([100.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+        gdna_eff_len_unweighted=np.array([100.0], dtype=np.float64),
+        gdna_expected_count=np.array([1.0], dtype=np.float64),
+        gdna_em_exposure_weight=np.array([1.0], dtype=np.float64),
+    )
+    calibration = CalibrationResult(
+        density_evidence=SimpleNamespace(),
+        fl_models=SimpleNamespace(rna=SimpleNamespace(), gdna=SimpleNamespace()),
+        diagnostics=SimpleNamespace(),
+        region_gdna=SimpleNamespace(),
+        region_exposure=RegionExposure.uniform(0),
+        fused_region_gdna=_empty_fused(),
+    )
+    index = SimpleNamespace(region_df=pd.DataFrame({"region_id": []}), ref_name_to_id={})
+
+    monkeypatch.setattr(
+        pipeline,
+        "_setup_geometry_and_estimator",
+        lambda *_args, **_kwargs: (object(), estimator),
+    )
+
+    def fake_score(*_args, **_kwargs):
+        calls.append("score")
+        return em_data
+
+    monkeypatch.setattr(pipeline, "_score_fragments", fake_score)
+
+    import rigel.calibration.prior as prior_mod
+    import rigel.locus as locus_mod
+    import rigel.locus_partition as partition_mod
+
+    def fake_build_multi_loci(*_args, **_kwargs):
+        calls.append("build_multi_loci")
+        return [locus]
+
+    def fake_assemble_priors(*_args, **_kwargs):
+        calls.append("assemble_priors")
+        return prior_table
+
+    def fake_partition_and_free(*_args, **_kwargs):
+        calls.append("partition")
+        return {0: object()}
+
+    def fake_run_em(*_args, **_kwargs):
+        calls.append("run_em")
+
+    monkeypatch.setattr(locus_mod, "build_multi_loci", fake_build_multi_loci)
+    monkeypatch.setattr(prior_mod, "assemble_priors", fake_assemble_priors)
+    monkeypatch.setattr(partition_mod, "partition_and_free", fake_partition_and_free)
+    monkeypatch.setattr(pipeline, "_run_locus_em_partitioned", fake_run_em)
+
+    _estimator, out_calibration = pipeline.quant_from_buffer(
+        buffer=SimpleNamespace(),
+        index=index,
+        strand_models=SimpleNamespace(),
+        frag_length_models=SimpleNamespace(),
+        stats=SimpleNamespace(),
+        calibration=calibration,
+        calibration_payload=SimpleNamespace(),
+    )
+
+    assert calls == ["score", "build_multi_loci", "assemble_priors", "partition", "run_em"]
+    assert estimator.locus_id_per_transcript[0] == 0
+    assert out_calibration.prior_table is prior_table
+    assert out_calibration.n_multi_loci == 1

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Calibration Fusion Implementation Log</title>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.45; margin: 2rem; max-width: 980px; }
+    h1, h2 { line-height: 1.15; }
+    code { background: #f3f4f6; padding: 0.1rem 0.25rem; border-radius: 3px; }
+    .entry { border-top: 1px solid #d1d5db; padding-top: 1rem; margin-top: 1rem; }
+    .status { font-weight: 700; }
+    .note { color: #374151; }
+  </style>
+</head>
+<body>
+  <h1>Calibration Fusion Implementation Log</h1>
+  <p class="note">Running log for implementing <code>docs/calibration/calibration_fusion_impl_plan_v2.md</code>.</p>
+
+  <section class="entry">
+    <h2>2026-05-25: Start Implementation</h2>
+    <p><span class="status">Scope:</span> Begin PR-shaped implementation of the v2 plan: public density likelihood, public strand likelihood, fused regional gDNA evidence, prior allocation, and pipeline wiring.</p>
+    <p><span class="status">Initial observations:</span> The orchestrator already constructs the needed regional context in one place: <code>RegionArrays</code>, <code>PayloadArrays</code>, <code>RegionCountLedger</code>, <code>DensityObservation</code>, <code>DensityEvidence</code>, <code>StrandRegionCounts</code>, <code>RegionGdnaEstimate</code>, and <code>RegionExposure</code>.</p>
+    <p><span class="status">Implementation decision:</span> Start with density and strand public likelihood APIs, then add the fusion product to <code>CalibrationResult</code>. Prior allocation and pipeline removal of the Phase 6 boundary will follow after this base is testable.</p>
+    <p><span class="status">Deviation:</span> None yet.</p>
+    <p><span class="status">Unexpected issues:</span> None yet.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Density, Strand, And Fusion Slice</h2>
+    <p><span class="status">Implemented:</span> Added public density predictive fields to <code>DensityEvidence</code> and exposed <code>density_logpmf_grid(...)</code>. Added <code>strand_log_likelihood_d_grid(...)</code> and refactored <code>_exact_posterior_R</code> to call it.</p>
+    <p><span class="status">Implemented:</span> Added <code>calibration/integration.py</code> with <code>FusedRegionGdnaEvidence</code>, exact bounded fusion for small regions, neutral strand zero-vector handling, approximate large-region fusion, and explicit <code>FUSED_BOUNDARY_FALLBACK</code> diagnostics.</p>
+    <p><span class="status">Implemented:</span> Wired <code>calibrate()</code> to produce <code>fused_region_gdna</code> and extended <code>CalibrationResult.to_summary_dict()</code> with compact fusion summaries.</p>
+    <p><span class="status">Tests:</span> <code>conda activate rigel &amp;&amp; pytest tests/test_density_model.py tests/test_strand_deconv.py tests/test_calibration_integration.py -v</code> passed: 40 passed.</p>
+    <p><span class="status">Deviation:</span> The large-count path uses precision-weighted normal fusion plus a bounded scalar mode check, rather than a pure Hessian-based Laplace implementation. This avoids the boundary Hessian instability called out in the plan while preserving exact fallback near bounds.</p>
+    <p><span class="status">Unexpected issues:</span> Test setup initially used an outdated <code>StrandSummary</code> constructor shape; fixed to the live two-field schema. A Python bool negation warning in the strand applicability mask was also fixed.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Prior Allocation Slice</h2>
+    <p><span class="status">Implemented:</span> Added <code>calibration/prior.py</code> with <code>PriorTable</code>, <code>assemble_priors(...)</code>, geometry-based conservation-aware count allocation, denominator construction through <code>gdna_eff_len_for_loci</code> and <code>bp_weighted_mean_exposure_over_blocks</code>, and explicit gDNA eligibility from EM unit data.</p>
+    <p><span class="status">Implemented:</span> Added diagnostics for regions touching multiple MultiLoci, partial footprint coverage, diagnostic midpoint availability, allocation mode, fallback codes, and unallocated regional mass.</p>
+    <p><span class="status">Tests:</span> <code>conda activate rigel &amp;&amp; pytest tests/test_calibration_integration.py tests/test_calibration_prior.py -v</code> passed: 9 passed.</p>
+    <p><span class="status">Deviation:</span> Midpoint lookup is not implemented yet because the MVP allocator does not depend on it. The table records valid midpoint-bearing unit counts for diagnostics, which keeps the path open for a later allocator comparison.</p>
+    <p><span class="status">Unexpected issues:</span> None in this slice.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Pipeline Wiring Slice</h2>
+    <p><span class="status">Implemented:</span> Replaced the <code>quant_from_buffer</code> Phase 6 <code>NotImplementedError</code> with the live sequence: setup estimator, score fragments, build MultiLoci, assign locus ids, assemble priors, partition CSR data, run partitioned locus EM, and attach <code>PriorTable</code> to the returned calibration result.</p>
+    <p><span class="status">Implemented:</span> Re-enabled <code>tests/test_pipeline_wiring.py</code>, updated scanner-region expectations to the current native signature, and removed the pytest hook that converted the old Phase 6 sentinel into skips.</p>
+    <p><span class="status">Tests:</span> <code>conda activate rigel &amp;&amp; pytest tests/test_pipeline_wiring.py -v</code> passed: 3 passed.</p>
+    <p><span class="status">Deviation:</span> The focused pipeline test monkeypatches heavy scoring, partitioning, and EM stages. It validates orchestration order and arguments, not a full BAM-to-quant run.</p>
+    <p><span class="status">Unexpected issues:</span> The active scanner wiring helper already used the current <code>set_regions</code> arity; the ignored test still expected the older extra tolerance argument and needed updating.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Targeted Runnable Validation</h2>
+    <p><span class="status">Tests:</span> <code>conda activate rigel &amp;&amp; pytest tests/test_density_model.py tests/test_strand_deconv.py tests/test_calibration_integration.py tests/test_calibration_prior.py tests/test_calibrate.py tests/test_pipeline_wiring.py tests/test_pipeline_smoke.py -v</code> passed: 61 passed.</p>
+    <p><span class="status">Result:</span> The restored path is runnable through the smoke-test BAM scenario, including calibration, scoring, MultiLocus construction, fused-prior assembly, partitioning, native locus EM, and output DataFrame generation.</p>
+    <p><span class="status">Deviation:</span> Full golden-output validation has not yet been run at this log entry.</p>
+    <p><span class="status">Unexpected issues:</span> None in the targeted runnable validation.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Scenario Debugging And Model Corrections</h2>
+    <p><span class="status">Implemented:</span> Added an evidence gate to prior assembly: a MultiLocus must have both finite gDNA candidates and positive fused regional upper mass before native EM may enable gDNA. This prevents zero-evidence loci from exploiting the native EM log floor.</p>
+    <p><span class="status">Implemented:</span> Corrected the deterministic-zero density branch so no-fitted-prior regions have zero mean, zero upper bound, zero predictive variance, and a point mass at <code>D=0</code>. Boundary-compatible observations are no longer interpreted as forced gDNA when the reference density is zero.</p>
+    <p><span class="status">Implemented:</span> Added a sparse intergenic fallback prior for small simulations with positive intergenic contained evidence but too few anchor regions for the robust Gamma fit. Sparse intron-only evidence remains deterministic zero because it can be nRNA.</p>
+    <p><span class="status">Implemented:</span> Fixed the large-count approximate fusion path so zero-variance density evidence remains degenerate instead of falling into a boundary approximation. This removed a false 1900-count gDNA prior in a single-exon no-splice debug case.</p>
+    <p><span class="status">Diagnostics:</span> Added <code>scripts/debug/debug_fusion_scenario.py</code> for file-based inspection of fused evidence, prior allocation, loci, and transcript counts in selected synthetic scenarios.</p>
+    <p><span class="status">Tests:</span> Added regressions covering deterministic-zero boundary handling, sparse intergenic fallback, sparse intron-only zero fallback, zero-upper gDNA disablement, and large-count deterministic-zero fusion.</p>
+    <p><span class="status">Validation:</span> <code>conda activate rigel &amp;&amp; pytest tests/scenarios tests/scenarios_aligned -v</code> passed: 176 passed.</p>
+    <p><span class="status">Deviation:</span> The v2 plan described deterministic-zero fallback, but did not spell out the sparse intergenic fallback. This was added because small synthetic runs can contain real intergenic gDNA anchors while still falling below the robust fit region threshold.</p>
+    <p><span class="status">Unexpected issues:</span> The previous zero-density fallback was using boundary-compatible mass as local gDNA evidence; that fixed true-gDNA toy cases but created false gDNA in no-gDNA nRNA cases. The sparse intergenic fallback preserves true-gDNA recovery without reopening intronic nRNA leakage.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Capture Weighting Repair</h2>
+    <p><span class="status">Implemented:</span> Fixed hybrid-capture sparse weighting so split blocks from one junction-spanning probe are summed within that probe, while distinct probes still use the best single-probe score and do not stack.</p>
+    <p><span class="status">Tests:</span> <code>conda activate rigel &amp;&amp; pytest tests/test_sim_capture.py -v</code> passed: 10 passed.</p>
+    <p><span class="status">Deviation:</span> This repair is outside the calibration fusion plan, but it was required to make the pre-existing capture tests green before final full-suite validation.</p>
+    <p><span class="status">Unexpected issues:</span> The old implementation preserved the non-stacking rule but lost probe identity after splitting a transcript or BED12 probe into genomic/pre-mRNA blocks, so it took the best split block instead of the best whole probe.</p>
+  </section>
+
+  <section class="entry">
+    <h2>2026-05-25: Final Validation</h2>
+    <p><span class="status">Golden outputs:</span> Regenerated golden baselines after the intentional fusion behavior changes, then verified with <code>conda activate rigel &amp;&amp; pytest tests/test_golden_output.py -v</code>: 21 passed.</p>
+    <p><span class="status">Lint:</span> <code>conda activate rigel &amp;&amp; ruff check ...</code> and <code>ruff format --check ...</code> passed for the edited Python files after formatting.</p>
+    <p><span class="status">Full suite:</span> <code>conda activate rigel &amp;&amp; pytest tests/ -q</code> passed: 1060 passed.</p>
+    <p><span class="status">Deviation:</span> The first full-suite run used <code>-v</code> but produced too much output for the tool to retrieve cleanly. The suite was rerun with <code>-q</code> for a retrievable final result.</p>
+    <p><span class="status">Unexpected issues:</span> None remaining in the enabled test suite.</p>
+  </section>
+</body>
+</html>
