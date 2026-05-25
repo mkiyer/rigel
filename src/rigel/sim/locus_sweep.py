@@ -892,15 +892,19 @@ def run_sweep(config, output_dir, *, gtf_path=None,
 
                 cal = pr.calibration
                 if cal is not None:
-                    # v6 CalibrationResult: fl_models, global_densities,
-                    # prior_table, diagnostics.
+                    # v4 CalibrationResult: fl_models, density_evidence,
+                    # region_gdna, region_exposure, diagnostics.
                     summary = cal.to_summary_dict()
                     cal_ss = float(pr.strand_models.strand_specificity)
                     row["cal_kappa_est"] = round(cal_ss, 4)
                     row["cal_kappa_err"] = ""
-                    row["cal_density_est"] = (
-                        f"{cal.global_densities.intergenic.lambda_gdna:.4e}"
+                    intergenic_prior = cal.density_evidence.priors.get("INTERGENIC")
+                    cal_intergenic_density = (
+                        float(intergenic_prior.mean_density)
+                        if intergenic_prior is not None
+                        else 0.0
                     )
+                    row["cal_density_est"] = f"{cal_intergenic_density:.4e}"
 
                     cal_fl = cal.fl_models.gdna
                     row["cal_gdna_fl_true_mean"] = gdna_true_mean
@@ -924,10 +928,10 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     row["cal_n_regions"] = n_ml
 
                     logger.info(
-                        "Calibration v6: SS=%.3f, λ_G=%.2e, "
+                        "Calibration v4: SS=%.3f, ρ_intergenic=%.2e, "
                         "mean π_gDNA=%.3f, n_multi_loci=%d",
                         cal_ss,
-                        cal.global_densities.intergenic.lambda_gdna,
+                        cal_intergenic_density,
                         mean_pi, n_ml,
                     )
                 else:

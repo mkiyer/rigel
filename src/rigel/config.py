@@ -238,11 +238,46 @@ class CalibrationConfig:
     #: the single statistical knob exposed by v5 strand deconvolution.
     rna_lower_confidence: float = 0.95
 
+    #: Posterior confidence level for the gDNA density-prior upper bound
+    #: ``upper_unbounded = B_tot + nbinom.ppf(confidence, alpha_post, p_nb)``
+    #: produced by :func:`rigel.calibration.density_model.fit_density_evidence`.
+    #: Must lie in ``[0.5, 1.0)``.
+    gdna_density_confidence: float = 0.95
+
+    #: Minimum effective length (bp under the gDNA fragment-length model)
+    #: required for a region to enter the background gDNA density prior fit.
+    #: Regions below this threshold are flagged ineligible for prior fitting
+    #: but still receive per-region posteriors via the depth-2 fallback.
+    density_min_eff_length: float = 1.0
+
+    #: Optional upper clip on the per-region relative-exposure ``A_r``
+    #: produced by :meth:`rigel.calibration.exposure.RegionExposure.from_density`.
+    #: ``None`` (default) leaves ``A_r`` unclipped so density-derived exposure
+    #: can exceed 1. A positive float caps ``A_r`` via ``np.minimum``.
+    density_max_exposure: float | None = None
+
     def __post_init__(self) -> None:
         if not (0.5 <= self.rna_lower_confidence < 1.0):
             raise ValueError(
                 "CalibrationConfig.rna_lower_confidence must be in [0.5, 1.0); "
                 f"got {self.rna_lower_confidence}."
+            )
+        if not (0.5 <= self.gdna_density_confidence < 1.0):
+            raise ValueError(
+                "CalibrationConfig.gdna_density_confidence must be in [0.5, 1.0); "
+                f"got {self.gdna_density_confidence}."
+            )
+        if self.density_min_eff_length < 0.0:
+            raise ValueError(
+                "CalibrationConfig.density_min_eff_length must be >= 0; "
+                f"got {self.density_min_eff_length}."
+            )
+        if self.density_max_exposure is not None and not (
+            self.density_max_exposure > 0.0
+        ):
+            raise ValueError(
+                "CalibrationConfig.density_max_exposure must be None or > 0; "
+                f"got {self.density_max_exposure}."
             )
 
 

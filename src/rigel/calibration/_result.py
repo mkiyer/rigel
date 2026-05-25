@@ -14,11 +14,11 @@ from ._fl_sources import (
     extract_global_counts,
     extract_rna_counts,
 )
-from .density_global import GlobalDensityTable
 from .fl import POOL_EB_PRIOR_ESS, FLModels, build_fl_models
 from .scan_payload import CalibrationScanPayload
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only.
+    from .density_model import DensityEvidence
     from .exposure import RegionExposure
     from .strand_deconv import RegionGdnaEstimate
 
@@ -30,11 +30,12 @@ __all__ = ["CalibrationResult", "build_calibration_result"]
 class CalibrationResult:
     """Calibration hand-off produced before locus-level EM.
 
-    Phase 4 populates strand-deconvolved per-region gDNA counts and a uniform
-    region-exposure surface. Locus prior assembly consumes these in Phase 5.
+    Carries strand-deconvolved per-region gDNA counts, the per-region density
+    evidence, and the consumer-side region-exposure surface. Locus prior
+    assembly consumes these in downstream phases.
     """
 
-    global_densities: GlobalDensityTable | None
+    density_evidence: "DensityEvidence"
     fl_models: FLModels
     diagnostics: Diagnostics
     region_gdna: "RegionGdnaEstimate"
@@ -59,11 +60,7 @@ class CalibrationResult:
             "calibration_config": {
                 "rna_lower_confidence": float(self.rna_lower_confidence),
             },
-            "global_densities": (
-                self.global_densities.to_summary_dict()
-                if self.global_densities is not None
-                else None
-            ),
+            "density_evidence": self.density_evidence.to_summary_dict(),
             "fl_models": self.fl_models.to_summary_dict(),
             "diagnostics": self.diagnostics.to_summary_dict(),
             "n_multi_loci": int(self.n_multi_loci),
@@ -100,7 +97,7 @@ def build_calibration_result(
     *,
     payload: CalibrationScanPayload,
     scan_trained: FragmentLengthModels,
-    global_densities: GlobalDensityTable | None = None,
+    density_evidence: "DensityEvidence | None" = None,
     fl_prior_ess: float = POOL_EB_PRIOR_ESS,
     fl_models: FLModels | None = None,
     region_signature=None,
@@ -110,9 +107,11 @@ def build_calibration_result(
 ) -> CalibrationResult:
     """Assemble the calibration result without legacy prior scaffolding."""
     if region_gdna is None:
-        raise ValueError("build_calibration_result: region_gdna is required in Phase 4.")
+        raise ValueError("build_calibration_result: region_gdna is required.")
     if region_exposure is None:
-        raise ValueError("build_calibration_result: region_exposure is required in Phase 4.")
+        raise ValueError("build_calibration_result: region_exposure is required.")
+    if density_evidence is None:
+        raise ValueError("build_calibration_result: density_evidence is required.")
     if fl_models is None:
         fl_models = build_fl_models(
             global_counts=extract_global_counts(scan_trained),
@@ -123,7 +122,7 @@ def build_calibration_result(
         )
     diagnostics = Diagnostics.from_payload(payload, signature=region_signature)
     return CalibrationResult(
-        global_densities=global_densities,
+        density_evidence=density_evidence,
         fl_models=fl_models,
         diagnostics=diagnostics,
         n_multi_loci=0,

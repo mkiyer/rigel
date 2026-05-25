@@ -275,12 +275,19 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
             continue
 
         cal = summary.get("calibration", {})
-        gd = cal.get("global_densities", {})
+        density_priors = cal.get("density_evidence", {}).get("priors", {}) or {}
         fl = cal.get("fl_models", {})
 
-        rho_ig = gd.get("INTERGENIC", {}).get("rho", 0)
-        rho_in = gd.get("INTRON", {}).get("rho", 0)
-        rho_ex = gd.get("EXON-INTRON", {}).get("rho", 0)
+        def _prior_mean(name: str) -> float:
+            prior = density_priors.get(name) or {}
+            try:
+                return float(prior.get("mean_density", 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+
+        rho_ig = _prior_mean("INTERGENIC")
+        rho_in = _prior_mean("INTRON")
+        rho_ex = 0.0  # v4: EXON-INTRON density family removed
         fl_rna = fl.get("rna_fl_mean", 0)
         fl_gdna = fl.get("gdna_fl_mean", 0)
         n_loci = cal.get("n_multi_loci", 0)
@@ -801,20 +808,11 @@ def analyze_postfix_acceptance(
             continue
 
         summary = load_summary(sim_base / cond / "rigel_out")
-        gd = summary.get("calibration", {}).get("global_densities", {})
-        rho_ig = float(gd.get("INTERGENIC", {}).get("rho", 0.0))
-        rho_ex = float(gd.get("EXON-INTRON", {}).get("rho", 0.0))
-        if rho_ig <= 0:
-            add_row("rho_ex/rho_ig", cond, "n/a", ">= 0.950", None)
-            continue
-        ratio = rho_ex / rho_ig
-        add_row(
-            "rho_ex/rho_ig",
-            cond,
-            f"{ratio:.3f}",
-            f">= {thresholds.min_rho_ex_over_ig:.3f}",
-            ratio >= thresholds.min_rho_ex_over_ig,
-        )
+        # v4: EXON-INTRON density family removed; the implicit-splice probe
+        # used to compare exon-vs-intergenic, but the new density model only
+        # fits INTERGENIC/INTRON anchors. Surface a stable "n/a" row.
+        _ = summary
+        add_row("rho_ex/rho_ig", cond, "n/a (v4)", ">= 0.950", None)
 
     # nRNA should stay essentially off in synthetic nrna_none conditions after
     # the implicit-splice false positives stop routing true gDNA into nRNA.

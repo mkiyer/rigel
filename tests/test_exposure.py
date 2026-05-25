@@ -1,238 +1,161 @@
-"""Tests for :mod:`rigel.calibration._exposure`."""
+"""Phase 5 tests for :class:`rigel.calibration.exposure.RegionExposure`.
+
+Covers the uniform constructor, the density constructor, ineligibility
+wiring, ``max_exposure`` clipping, and the summary dict (including the new
+``A_p99`` field added in Phase 5).
+
+The detailed eligibility / flag handling of ``from_density`` is also
+exercised in
+:mod:`tests.test_region_exposure_from_density`; this file keeps the
+contractual tests close to the class for editor navigation.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from rigel.calibration._exposure import (
-    boundary_crossing_exposure,
-    boundary_side_in_window,
-    contained_exposure_clipped,
+from rigel.calibration.density_model import (
+    FLAG_LOW_BOUNDARY_OPPORTUNITY,
+    DensityEvidence,
 )
-from rigel.frag_length_model import FragmentLengthModel
+from rigel.calibration.exposure import RegionExposure
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-def _fl_uniform(
-    lo: int, hi: int, max_size: int = 1000, weight_per_bin: float = 1e6
-) -> FragmentLengthModel:
-    """Finalized FL model uniform over fragment lengths ``[lo, hi]`` (inclusive).
-
-    Uses a large ``weight_per_bin`` so Laplace smoothing in
-    ``_normalized_probs`` (counts+1)/(total+K) is numerically negligible —
-    this keeps tests sensitive to the actual model semantics rather than to
-    smoothing artifacts.
-    """
-    counts = np.zeros(max_size + 1, dtype=np.float64)
-    counts[lo : hi + 1] = weight_per_bin
-    fl = FragmentLengthModel.from_counts(counts, max_size=max_size)
-    fl.finalize()
-    return fl
-
-
-def _fl_delta(ell: int, max_size: int = 1000, weight: float = 1e9) -> FragmentLengthModel:
-    """Finalized FL model with all mass at exactly ``ell``."""
-    counts = np.zeros(max_size + 1, dtype=np.float64)
-    counts[ell] = weight
-    fl = FragmentLengthModel.from_counts(counts, max_size=max_size)
-    fl.finalize()
-    return fl
+def _make_evidence(
+    *,
+    relative_exposure: np.ndarray,
+    rho_post: np.ndarray,
+    flags: np.ndarray,
+    rho_ref: float = 0.04,
+) -> DensityEvidence:
+    R = int(relative_exposure.size)
+    return DensityEvidence(
+        rho_post=np.asarray(rho_post, dtype=np.float64),
+        relative_exposure=np.asarray(relative_exposure, dtype=np.float64),
+        mean_unbounded=np.zeros(R, dtype=np.float64),
+        upper_unbounded=np.zeros(R, dtype=np.float64),
+        prior_family=np.zeros(R, dtype=np.uint8),
+        fallback_depth=np.zeros(R, dtype=np.uint8),
+        flags=np.asarray(flags, dtype=np.uint8),
+        confidence=0.95,
+        priors={},
+        rho_ref=float(rho_ref),
+        rho_ref_source="INTERGENIC",
+    )
 
 
-# ---------------------------------------------------------------------------
-# contained_exposure_clipped
-# ---------------------------------------------------------------------------
+class TestUniformConstructor:
+    def test_shapes_and_dtypes(self) -> None:
+        exposure = RegionExposure.uniform(5)
+        assert exposure.mode == "uniform"
+        assert exposure.A_r.dtype == np.float32
+        assert exposure.rho_r.dtype == np.float32
+        assert exposure.flags.dtype == np.uint8
+        np.testing.assert_array_equal(exposure.A_r, np.ones(5, dtype=np.float32))
+        np.testing.assert_array_equal(exposure.rho_r, np.zeros(5, dtype=np.float32))
+        assert exposure.eligible.dtype == bool
+        assert exposure.eligible.all()
+        assert exposure.rho_ref == 0.0
+        assert exposure.reference_quantile == 0.0
 
-class TestContainedExposureClipped:
-    def test_clip_equals_full_returns_identical_arrays(self):
-        fl = _fl_uniform(50, 200)
-        starts = np.array([100, 500, 1000], dtype=np.int64)
-        ends = np.array([400, 800, 2000], dtype=np.int64)
-        eff_full, eff_clip = contained_exposure_clipped(
-            starts, ends, clip_lo=0, clip_hi=10_000, fl=fl
+    def test_zero_regions(self) -> None:
+        exposure = RegionExposure.uniform(0)
+        assert exposure.A_r.size == 0
+        assert exposure.eligible.size == 0
+
+    def test_negative_R_raises(self) -> None:
+        with pytest.raises(ValueError):
+            RegionExposure.uniform(-1)
+
+
+class TestFromDensity:
+    def test_alignment(self) -> None:
+        rel = np.array([0.4, 1.2, 2.0], dtype=np.float64)
+        rho = np.array([0.016, 0.048, 0.080], dtype=np.float64)
+        ev = _make_evidence(
+            relative_exposure=rel,
+            rho_post=rho,
+            flags=np.zeros(3, dtype=np.uint8),
         )
-        np.testing.assert_array_equal(eff_full, eff_clip)
-        # All spans positive, FL valid → all eff values positive.
-        assert np.all(eff_full > 0.0)
+        exposure = RegionExposure.from_density(ev)
+        assert exposure.mode == "density"
+        np.testing.assert_array_equal(exposure.A_r, rel.astype(np.float32))
+        np.testing.assert_array_equal(exposure.rho_r, rho.astype(np.float32))
+        assert exposure.rho_ref == pytest.approx(0.04)
 
-    def test_clip_strictly_inside_full_yields_smaller_eff(self):
-        fl = _fl_uniform(50, 200)
-        starts = np.array([0], dtype=np.int64)
-        ends = np.array([1000], dtype=np.int64)
-        eff_full, eff_clip = contained_exposure_clipped(
-            starts, ends, clip_lo=200, clip_hi=600, fl=fl
+    def test_ineligibility_preserves_A_r(self) -> None:
+        rel = np.array([0.5, 2.0], dtype=np.float64)
+        flags = np.array(
+            [0, FLAG_LOW_BOUNDARY_OPPORTUNITY], dtype=np.uint8
         )
-        assert eff_clip[0] < eff_full[0]
-        assert eff_clip[0] > 0.0
-
-    def test_empty_clip_window_yields_zero_clipped_exposure(self):
-        fl = _fl_uniform(50, 200)
-        starts = np.array([100, 500], dtype=np.int64)
-        ends = np.array([400, 800], dtype=np.int64)
-        # clip_lo > clip_hi for one region, disjoint window for both
-        eff_full, eff_clip = contained_exposure_clipped(
-            starts, ends, clip_lo=900, clip_hi=950, fl=fl
+        ev = _make_evidence(
+            relative_exposure=rel,
+            rho_post=np.array([0.02, 0.08], dtype=np.float64),
+            flags=flags,
         )
-        assert np.all(eff_full > 0.0)
-        np.testing.assert_array_equal(eff_clip, np.zeros(2, dtype=np.float64))
+        exposure = RegionExposure.from_density(ev)
+        assert exposure.eligible.tolist() == [True, False]
+        # Ineligible row keeps posterior A_r — no overwrite to 1.0.
+        np.testing.assert_array_equal(exposure.A_r, rel.astype(np.float32))
 
-    def test_zero_span_region_has_zero_exposure(self):
-        fl = _fl_uniform(50, 200)
-        starts = np.array([100, 200], dtype=np.int64)
-        ends = np.array([100, 250], dtype=np.int64)  # first is empty
-        eff_full, eff_clip = contained_exposure_clipped(
-            starts, ends, clip_lo=0, clip_hi=10_000, fl=fl
+    def test_max_exposure_clips(self) -> None:
+        rel = np.array([0.5, 1.5, 3.0], dtype=np.float64)
+        ev = _make_evidence(
+            relative_exposure=rel,
+            rho_post=np.array([0.02, 0.06, 0.12], dtype=np.float64),
+            flags=np.zeros(3, dtype=np.uint8),
         )
-        assert eff_full[0] == 0.0
-        assert eff_clip[0] == 0.0
-        assert eff_full[1] > 0.0
-
-    def test_ratio_is_monotonic_in_clip_width(self):
-        fl = _fl_uniform(50, 200)
-        starts = np.array([0], dtype=np.int64)
-        ends = np.array([1000], dtype=np.int64)
-        widths = [100, 300, 600, 1000]
-        ratios = []
-        for w in widths:
-            _, eff_clip = contained_exposure_clipped(
-                starts, ends, clip_lo=0, clip_hi=w, fl=fl
-            )
-            ratios.append(eff_clip[0])
-        # eff_clip monotonically increases as the clip window grows.
-        for a, b in zip(ratios, ratios[1:]):
-            assert a <= b
-
-    def test_shape_mismatch_raises(self):
-        fl = _fl_uniform(50, 200)
-        with pytest.raises(ValueError, match="shape"):
-            contained_exposure_clipped(
-                np.array([0, 100]), np.array([200]), 0, 1000, fl
-            )
-
-    def test_empty_input_returns_empty(self):
-        fl = _fl_uniform(50, 200)
-        eff_full, eff_clip = contained_exposure_clipped(
-            np.array([], dtype=np.int64),
-            np.array([], dtype=np.int64),
-            0, 1000, fl,
+        exposure = RegionExposure.from_density(ev, max_exposure=1.5)
+        np.testing.assert_array_equal(
+            exposure.A_r,
+            np.array([0.5, 1.5, 1.5], dtype=np.float32),
         )
-        assert eff_full.shape == (0,)
-        assert eff_clip.shape == (0,)
 
-
-# ---------------------------------------------------------------------------
-# boundary_crossing_exposure
-# ---------------------------------------------------------------------------
-
-class TestBoundaryCrossingExposure:
-    def test_delta_at_ell_yields_ell_minus_one(self):
-        # Pure delta PMF at ℓ=100: B_cross = ℓ - 1 = 99.
-        fl = _fl_delta(100, max_size=1000)
-        b = boundary_crossing_exposure(fl)
-        assert b == pytest.approx(99.0, rel=1e-5)
-
-    def test_uniform_pmf_equals_mean_minus_one_for_min_ell_ge_1(self):
-        fl = _fl_uniform(50, 200)
-        b = boundary_crossing_exposure(fl)
-        # All mass at ℓ ≥ 50, so max(ℓ-1, 0) == ℓ - 1 for the entire support.
-        # Hence B_cross == E[ℓ] - 1. Tolerance accounts for the small mass
-        # that Laplace smoothing leaks to bins outside [50, 200].
-        assert b == pytest.approx(fl.mean - 1.0, rel=1e-3)
-
-    def test_clamps_at_zero_when_pmf_concentrated_at_short_lengths(self):
-        # PMF over ℓ ∈ {0, 1}: max(ℓ - 1, 0) == 0 everywhere → B_cross == 0.
-        counts = np.zeros(11, dtype=np.float64)
-        counts[0] = 5.0
-        counts[1] = 5.0
-        fl = FragmentLengthModel.from_counts(counts, max_size=10)
-        fl.finalize()
-        # Laplace smoothing puts a tiny bit of mass at ℓ ≥ 2, so the raw sum
-        # is positive but small. The contract is "≥ 0"; here it should be
-        # strictly positive due to smoothing tail.
-        b = boundary_crossing_exposure(fl)
-        assert b >= 0.0
-
-    def test_post_finalize_uses_smoothed_pmf(self):
-        # finalize() with a Dirichlet prior should change pmf and thus B_cross.
-        counts = np.zeros(101, dtype=np.float64)
-        counts[50] = 1.0
-        fl_unfin = FragmentLengthModel.from_counts(counts, max_size=100)
-        b_unfin = boundary_crossing_exposure(fl_unfin)
-        fl_fin = FragmentLengthModel.from_counts(counts, max_size=100)
-        prior = np.ones(101, dtype=np.float64)
-        fl_fin.finalize(prior_counts=prior, prior_ess=10.0)
-        b_fin = boundary_crossing_exposure(fl_fin)
-        # Smoothing pulls mass toward the uniform prior → different value.
-        assert b_unfin != b_fin
-
-
-# ---------------------------------------------------------------------------
-# boundary_side_in_window
-# ---------------------------------------------------------------------------
-
-class TestBoundarySideInWindow:
-    def test_basic_inclusion(self):
-        starts = np.array([100, 200, 300, 400], dtype=np.int64)
-        ends = np.array([150, 250, 350, 450], dtype=np.int64)
-        left_in, right_in = boundary_side_in_window(
-            starts, ends, clip_lo=200, clip_hi=350
+    def test_max_exposure_invalid(self) -> None:
+        ev = _make_evidence(
+            relative_exposure=np.ones(1, dtype=np.float64),
+            rho_post=np.zeros(1, dtype=np.float64),
+            flags=np.zeros(1, dtype=np.uint8),
         )
-        np.testing.assert_array_equal(left_in, [False, True, True, False])
-        np.testing.assert_array_equal(right_in, [False, True, True, False])
+        with pytest.raises(ValueError):
+            RegionExposure.from_density(ev, max_exposure=0.0)
+        with pytest.raises(ValueError):
+            RegionExposure.from_density(ev, max_exposure=-1.0)
+        with pytest.raises(ValueError):
+            RegionExposure.from_density(ev, max_exposure=float("nan"))
 
-    def test_inclusive_endpoints(self):
-        starts = np.array([100, 200], dtype=np.int64)
-        ends = np.array([150, 350], dtype=np.int64)
-        left_in, right_in = boundary_side_in_window(
-            starts, ends, clip_lo=100, clip_hi=350
+
+class TestSummaryDict:
+    def test_uniform_summary(self) -> None:
+        summary = RegionExposure.uniform(4).to_summary_dict()
+        assert summary["mode"] == "uniform"
+        assert summary["n_regions"] == 4
+        assert summary["n_regions_eligible"] == 4
+        assert summary["A_min"] == 1.0
+        assert summary["A_mean"] == 1.0
+        assert summary["A_p99"] == 1.0
+        assert summary["A_max"] == 1.0
+
+    def test_density_summary_includes_p99(self) -> None:
+        rel = np.linspace(0.1, 3.0, 100, dtype=np.float64)
+        ev = _make_evidence(
+            relative_exposure=rel,
+            rho_post=rel * 0.04,
+            flags=np.zeros(100, dtype=np.uint8),
         )
-        # 100 sits at clip_lo (inclusive); 350 sits at clip_hi (inclusive).
-        np.testing.assert_array_equal(left_in, [True, True])
-        np.testing.assert_array_equal(right_in, [True, True])
-
-    def test_left_and_right_can_disagree(self):
-        # Region [100, 500): start outside window, end inside.
-        starts = np.array([100], dtype=np.int64)
-        ends = np.array([500], dtype=np.int64)
-        left_in, right_in = boundary_side_in_window(
-            starts, ends, clip_lo=400, clip_hi=600
+        summary = RegionExposure.from_density(ev).to_summary_dict()
+        assert summary["mode"] == "density"
+        assert summary["A_min"] == pytest.approx(0.1, abs=1e-6)
+        assert summary["A_max"] == pytest.approx(3.0, abs=1e-6)
+        # p99 lies between mean and max for an evenly spaced grid.
+        assert summary["A_mean"] < summary["A_p99"] <= summary["A_max"]
+        # p99 of linspace(0.1, 3.0, 100) is the 99th-percentile sample.
+        assert summary["A_p99"] == pytest.approx(
+            float(np.quantile(rel, 0.99)), abs=1e-6
         )
-        np.testing.assert_array_equal(left_in, [False])
-        np.testing.assert_array_equal(right_in, [True])
 
-    def test_shape_mismatch_raises(self):
-        with pytest.raises(ValueError, match="shape"):
-            boundary_side_in_window(
-                np.array([0, 100]), np.array([50]), 0, 1000
-            )
-
-    def test_empty_input_returns_empty(self):
-        left_in, right_in = boundary_side_in_window(
-            np.array([], dtype=np.int64),
-            np.array([], dtype=np.int64),
-            0, 1000,
-        )
-        assert left_in.shape == (0,)
-        assert right_in.shape == (0,)
-        assert left_in.dtype == np.bool_
-        assert right_in.dtype == np.bool_
-
-
-# ---------------------------------------------------------------------------
-# Cross-cutting: pmf accessor on FragmentLengthModel
-# ---------------------------------------------------------------------------
-
-class TestFragmentLengthModelPmf:
-    def test_pmf_sums_to_one(self):
-        fl = _fl_uniform(50, 200)
-        pmf = fl.pmf
-        assert pmf.shape == (1001,)
-        assert pmf.sum() == pytest.approx(1.0, abs=1e-12)
-
-    def test_pmf_matches_internal_normalized_probs(self):
-        fl = _fl_uniform(50, 200)
-        np.testing.assert_array_equal(fl.pmf, fl._normalized_probs())
+    def test_zero_region_summary(self) -> None:
+        summary = RegionExposure.uniform(0).to_summary_dict()
+        assert summary["n_regions"] == 0
+        assert summary["A_p99"] == 1.0

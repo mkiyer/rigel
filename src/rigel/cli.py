@@ -590,6 +590,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
     _ParamSpec("rna_lower_confidence", "calibration.rna_lower_confidence"),
+    _ParamSpec("gdna_density_confidence", "calibration.gdna_density_confidence"),
+    _ParamSpec("density_max_exposure", "calibration.density_max_exposure"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1187,6 +1189,25 @@ def build_parser() -> argparse.ArgumentParser:
         "value drives the exon self-training screen used to refit the gDNA "
         "strand-balance concentration kappa_d. Must be in [0.5, 1.0); "
         "default: 0.95.",
+    )
+    adv.add_argument(
+        "--gdna-density-confidence",
+        dest="gdna_density_confidence",
+        type=float,
+        default=None,
+        help="Posterior confidence level for the gDNA density-prior upper "
+        "bound emitted by the v4 fine-region density model. Must be in "
+        "[0.5, 1.0); default: 0.95.",
+    )
+    adv.add_argument(
+        "--density-max-exposure",
+        dest="density_max_exposure",
+        type=float,
+        default=None,
+        help="Optional upper clip on the per-region relative-exposure A_r "
+        "produced by RegionExposure.from_density. Density-derived A_r may "
+        "exceed 1 by design; set this flag (>0) to cap A_r via "
+        "np.minimum. Default: unset (no clip).",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",

@@ -991,6 +991,9 @@ def run_pipeline(
         pool_quality_weak=cal_cfg.pool_quality_weak,
         strand_summary=strand_summary,
         rna_lower_confidence=cal_cfg.rna_lower_confidence,
+        gdna_density_confidence=cal_cfg.gdna_density_confidence,
+        density_min_eff_length=cal_cfg.density_min_eff_length,
+        density_max_exposure=cal_cfg.density_max_exposure,
     )
     cal_summary = calibration.to_summary_dict()
     logger.info(

@@ -37,12 +37,19 @@ def _write_manifest(sim_base, condition: str, *, n_rna: int = 1_000_000, n_gdna:
 def _write_summary(sim_base, condition: str, *, rho_ex: float = 0.0985):
     out_dir = sim_base / condition / "rigel_out"
     out_dir.mkdir(parents=True)
+    _ = rho_ex  # v4: EXON-INTRON family removed; kept as kwarg for callers.
     summary = {
         "calibration": {
-            "global_densities": {
-                "INTERGENIC": {"rho": 0.1000},
-                "INTRON": {"rho": 0.1005},
-                "EXON-INTRON": {"rho": rho_ex},
+            "density_evidence": {
+                "confidence": 0.95,
+                "n_regions": 0,
+                "rho_ref": 0.1003,
+                "rho_ref_source": "ALL",
+                "priors": {
+                    "INTERGENIC": {"family": "INTERGENIC", "mean_density": 0.1000},
+                    "INTRON": {"family": "INTRON", "mean_density": 0.1005},
+                    "ALL": {"family": "ALL", "mean_density": 0.1003},
+                },
             },
             "fl_models": {"rna_fl_mean": 257.0, "gdna_fl_mean": 351.7},
             "n_multi_loci": 51,
@@ -83,7 +90,7 @@ def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
     assert "nRNA in nrna_none" in report
     assert "gDNA->RNA leak" in report
     assert "FAIL" not in report
-    assert "PASS: all 3 evaluated acceptance checks passed." in report
+    assert "PASS: all 2 evaluated acceptance checks passed." in report
 
 
 def test_analysis_discovers_conditions_from_manifest(tmp_path):

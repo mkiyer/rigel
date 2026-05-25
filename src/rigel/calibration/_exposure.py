@@ -16,7 +16,23 @@ __all__ = [
     "contained_exposure_clipped",
     "fractional_boundary_side_exposure",
     "gdna_eff_len_for_loci",
+    "l_eff_contained",
 ]
+
+
+def l_eff_contained(
+    spans_bp: np.ndarray,
+    gdna_fl: FragmentLengthModel,
+) -> np.ndarray:
+    """FL-PMF-weighted contained effective length, in bp.
+
+    Moved here from ``calibration.density_global`` in v4 Phase 0
+    (``docs/fineregions/density_model_impl_plan_v4.md`` §4).
+    """
+    return gdna_fl.compute_all_transcript_eff_lens(
+        np.asarray(spans_bp, dtype=np.int64),
+        min_value=0.0,
+    )
 
 
 def _merged_blocks(
@@ -57,6 +73,11 @@ def bp_weighted_mean_exposure_over_blocks(
     ``RegionExposure`` object with ``mode`` and ``A_r`` attributes. Keeping
     this helper independent of that future class lets Phase 1 retain only the
     stable geometry code.
+
+    The returned weight is the bp-weighted mean of ``exposure.A_r`` over the
+    merged blocks, floored at ``min_weight``. It is **not** clipped above 1:
+    density-derived ``A_r`` may exceed 1, and clipping would silently
+    truncate high-exposure regions.
     """
     if min_weight < 0.0:
         raise ValueError(
@@ -74,6 +95,7 @@ def bp_weighted_mean_exposure_over_blocks(
     if getattr(exposure, "mode", "uniform") == "uniform":
         return 1.0
 
+    # A_r may exceed 1 when constructed from density evidence.
     weights = np.asarray(getattr(exposure, "A_r"), dtype=np.float64)
     if weights.shape != region_arrays.start.shape:
         raise ValueError(
@@ -100,7 +122,7 @@ def bp_weighted_mean_exposure_over_blocks(
             if overlap > 0:
                 weighted_bp += float(overlap) * float(weights[idx])
 
-    return float(np.clip(weighted_bp / raw_bp, min_weight, 1.0))
+    return float(max(weighted_bp / raw_bp, min_weight))
 
 
 def _ref_length_for_locus(

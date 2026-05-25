@@ -1,6 +1,7 @@
 """Rigel gDNA calibration public surface."""
 
 from ._diagnostics import Diagnostics
+from ._exposure import l_eff_contained
 from ._fl_sources import (
     extract_gdna_counts,
     extract_global_counts,
@@ -8,15 +9,9 @@ from ._fl_sources import (
 )
 from ._orchestrator import calibrate
 from ._result import CalibrationResult, build_calibration_result
+from .density_model import DensityEvidence, GammaRatePrior, fit_density_evidence
 from .exposure import RegionExposure
-from .density_global import (
-    GlobalDensityTable,
-    GlobalGdnaDensity,
-    StrandBalanceEstimate,
-    compute_global_densities,
-    estimate_strand_balance,
-    l_eff_contained,
-)
+from .strand_balance import StrandBalanceEstimate, estimate_strand_balance
 from .fl import (
     POOL_EB_PRIOR_ESS,
     POOL_QUALITY_GOOD_THRESHOLD,
@@ -32,10 +27,10 @@ __all__ = [
     "CalibrationResult",
     "build_calibration_result",
     "RegionExposure",
-    "GlobalDensityTable",
-    "GlobalGdnaDensity",
+    "DensityEvidence",
+    "GammaRatePrior",
+    "fit_density_evidence",
     "StrandBalanceEstimate",
-    "compute_global_densities",
     "estimate_strand_balance",
     "l_eff_contained",
     "StrandSummary",

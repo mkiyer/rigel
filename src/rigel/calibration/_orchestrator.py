@@ -43,11 +43,29 @@ def calibrate(
     pool_quality_weak: int = POOL_QUALITY_WEAK_THRESHOLD,
     strand_summary: StrandSummary | None = None,
     rna_lower_confidence: float = 0.95,
+    gdna_density_confidence: float = 0.95,
+    density_min_eff_length: float = 1.0,
+    density_max_exposure: float | None = None,
 ) -> CalibrationResult:
     """Run the calibration stages that are live before locus EM."""
     if not (0.5 <= rna_lower_confidence < 1.0):
         raise ValueError(
             f"calibrate: rna_lower_confidence must be in [0.5, 1.0); got {rna_lower_confidence}."
+        )
+    if not (0.5 <= gdna_density_confidence < 1.0):
+        raise ValueError(
+            "calibrate: gdna_density_confidence must be in [0.5, 1.0); "
+            f"got {gdna_density_confidence}."
+        )
+    if density_min_eff_length < 0.0:
+        raise ValueError(
+            "calibrate: density_min_eff_length must be >= 0; "
+            f"got {density_min_eff_length}."
+        )
+    if density_max_exposure is not None and not (density_max_exposure > 0.0):
+        raise ValueError(
+            "calibrate: density_max_exposure must be None or > 0; "
+            f"got {density_max_exposure}."
         )
     if index.region_df is None:
         raise RuntimeError(
@@ -67,14 +85,18 @@ def calibrate(
     )
 
     from ._arrays import PayloadArrays, RegionArrays
-    from .density_global import compute_global_densities
+    from .density_model import fit_density_evidence
+    from .density_observation import build_density_observation
+    from .region_count_ledger import build_region_count_ledger
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
-    global_densities = compute_global_densities(
-        region_arrays,
-        payload_arrays,
-        gdna_fl=fl_models.gdna,
+    ledger = build_region_count_ledger(payload_arrays)
+    observation = build_density_observation(region_arrays, ledger, fl_models.gdna)
+    density_evidence = fit_density_evidence(
+        observation,
+        confidence=float(gdna_density_confidence),
+        min_eff_length=float(density_min_eff_length),
     )
     if strand_summary is None:
         strand_summary = StrandSummary.uninformative()
@@ -99,12 +121,15 @@ def calibrate(
         kappa_d_n_exon_self_training=kappa_d.n_exon_self_training,
         kappa_d_fallback_used=kappa_d.fallback_used,
     )
-    region_exposure = RegionExposure.uniform(R=int(region_gdna.n_total.size))
+    region_exposure = RegionExposure.from_density(
+        density_evidence,
+        max_exposure=density_max_exposure,
+    )
 
     return build_calibration_result(
         payload=payload,
         scan_trained=scan_trained,
-        global_densities=global_densities,
+        density_evidence=density_evidence,
         fl_models=fl_models,
         fl_prior_ess=fl_prior_ess,
         region_signature=region_arrays.signature,

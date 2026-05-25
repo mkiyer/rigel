@@ -120,9 +120,13 @@ def test_calibrate_populates_region_gdna_and_uniform_exposure():
     assert result.region_gdna.kappa_d_n_seed_regions == 4
     assert result.region_gdna.kappa_d_n_exon_self_training >= 1
 
-    assert result.region_exposure.mode == "uniform"
+    assert result.region_exposure.mode == "density"
     assert result.region_exposure.A_r.shape == result.region_gdna.n_total.shape
-    assert np.all(result.region_exposure.A_r == 1.0)
+    assert result.density_evidence is not None
+    np.testing.assert_array_equal(
+        result.region_exposure.A_r,
+        result.density_evidence.relative_exposure.astype(np.float32),
+    )
 
 
 def test_calibrate_summary_has_strand_deconv_and_uniform_exposure_blocks():
@@ -147,11 +151,10 @@ def test_calibrate_summary_has_strand_deconv_and_uniform_exposure_blocks():
     assert strand["n_regions_eligible"] > 0
 
     exposure = summary["region_exposure"]
-    assert exposure["mode"] == "uniform"
+    assert exposure["mode"] == "density"
     assert exposure["n_regions"] == 7
-    assert exposure["A_min"] == pytest.approx(1.0)
-    assert exposure["A_mean"] == pytest.approx(1.0)
-    assert exposure["A_max"] == pytest.approx(1.0)
+    assert "density_evidence" in summary
+    assert "priors" in summary["density_evidence"]
 
     for forbidden in (
         "regional_exposure",

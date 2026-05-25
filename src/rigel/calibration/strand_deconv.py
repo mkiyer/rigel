@@ -31,7 +31,7 @@ from scipy.special import betaln, gammaln
 from scipy.stats import norm
 
 from ._arrays import PayloadArrays, RegionArrays
-from .density_global import (
+from .strand_balance import (
     StrandBalanceEstimate,
     estimate_strand_balance,
 )

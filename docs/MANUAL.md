@@ -483,6 +483,9 @@ standard total-RNA libraries.
 | `--cal-prior-ess`     | `1000`  | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage. Larger ⇒ pool FLs pulled harder toward the global FL. |
 | `--cal-quality-good`  | `5000`  | Pool counts at or above this threshold are flagged `"good"` and used without shrinkage. |
 | `--cal-quality-weak`  | `200`   | Pool counts below this threshold are flagged `"unusable"` and the pool falls back on the global FL.  Counts in `[weak, good)` are flagged `"weak"` and shrunk toward the global FL with strength `--cal-prior-ess`. |
+| `--rna-lower-confidence` | `0.95` | Posterior confidence level used for the per-region RNA lower bound and for the exon self-training screen that refits the gDNA strand-balance concentration `kappa_d`. Must lie in `[0.5, 1.0)`. |
+| `--gdna-density-confidence` | `0.95` | Posterior confidence level for the gDNA density-prior upper bound emitted by the v4 fine-region density model (`upper_unbounded = B_tot + nbinom.ppf(confidence, alpha_post, p_nb)`). Must lie in `[0.5, 1.0)`. |
+| `--density-max-exposure` | unset | Optional upper clip on the per-region relative-exposure `A_r` produced by `RegionExposure.from_density`. `A_r` is density-derived in v4 and may exceed 1 on regions with above-reference gDNA density; this is intentional. Set a positive value to cap `A_r` via `np.minimum` for downstream consumers that prefer a bounded surface. |
 
 ### `summary.json` calibration schema
 

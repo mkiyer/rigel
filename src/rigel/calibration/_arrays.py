@@ -125,10 +125,6 @@ class PayloadArrays:
     boundary_right_unspliced_pos: np.ndarray  # float32[R]
     boundary_right_unspliced_neg: np.ndarray  # float32[R]
 
-    contained_unspliced_total: np.ndarray  # float32[R]
-    boundary_left_unspliced_total: np.ndarray  # float32[R]
-    boundary_right_unspliced_total: np.ndarray  # float32[R]
-
     @classmethod
     def from_payload(
         cls,
@@ -160,7 +156,4 @@ class PayloadArrays:
             boundary_left_unspliced_neg=bl_neg,
             boundary_right_unspliced_pos=br_pos,
             boundary_right_unspliced_neg=br_neg,
-            contained_unspliced_total=contained_pos + contained_neg,
-            boundary_left_unspliced_total=bl_pos + bl_neg,
-            boundary_right_unspliced_total=br_pos + br_neg,
         )

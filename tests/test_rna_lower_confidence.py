@@ -112,6 +112,7 @@ def test_calibration_result_summary_echoes_rna_lower_confidence(monkeypatch):
     """``to_summary_dict`` advertises the knob under ``calibration_config``."""
     from rigel.calibration._diagnostics import Diagnostics
     from rigel.calibration._result import CalibrationResult
+    from rigel.calibration.density_model import DensityEvidence
     from rigel.calibration.exposure import RegionExposure
     from rigel.calibration.fl import FLModels
     from rigel.calibration.strand_deconv import RegionGdnaEstimate
@@ -121,9 +122,22 @@ def test_calibration_result_summary_echoes_rna_lower_confidence(monkeypatch):
 
     fl_models = FLModels.__new__(FLModels)
     diagnostics = Diagnostics.__new__(Diagnostics)
+    density_evidence = DensityEvidence(
+        rho_post=np.zeros(0, dtype=np.float64),
+        relative_exposure=np.zeros(0, dtype=np.float64),
+        mean_unbounded=np.zeros(0, dtype=np.float64),
+        upper_unbounded=np.zeros(0, dtype=np.float64),
+        prior_family=np.zeros(0, dtype=np.uint8),
+        fallback_depth=np.zeros(0, dtype=np.uint8),
+        flags=np.zeros(0, dtype=np.uint8),
+        confidence=0.95,
+        priors={},
+        rho_ref=0.0,
+        rho_ref_source="ZERO",
+    )
 
     result = CalibrationResult(
-        global_densities=None,
+        density_evidence=density_evidence,
         fl_models=fl_models,
         diagnostics=diagnostics,
         region_gdna=RegionGdnaEstimate(

@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Density Model v4 — Implementation Log</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+         max-width: 980px; margin: 2em auto; padding: 0 1em; line-height: 1.45; color: #222; }
+  h1 { border-bottom: 2px solid #444; padding-bottom: .2em; }
+  h2 { margin-top: 2em; border-bottom: 1px solid #bbb; padding-bottom: .15em; }
+  h3 { margin-top: 1.4em; }
+  .status { padding: .15em .5em; border-radius: 3px; font-size: 0.85em; font-weight: 600; }
+  .s-done    { background: #c6f0c6; color: #114411; }
+  .s-prog    { background: #fde9a9; color: #553300; }
+  .s-todo    { background: #e5e5e5; color: #333; }
+  .s-dev     { background: #fcd1c4; color: #6a1500; }
+  .s-note    { background: #d6e9ff; color: #00305c; }
+  code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 0.92em; }
+  pre { background: #f6f6f6; padding: .6em .9em; border-radius: 4px;
+        border: 1px solid #e2e2e2; overflow-x: auto; }
+  table { border-collapse: collapse; margin: .5em 0; }
+  th, td { border: 1px solid #ccc; padding: .25em .6em; text-align: left; }
+  th { background: #f0f0f0; }
+  .meta { color: #555; font-size: 0.9em; }
+  ul.compact li { margin: .15em 0; }
+</style>
+</head>
+<body>
+
+<h1>gDNA Density Model v4 — Implementation Log</h1>
+<p class="meta">
+  Plan: <code>docs/fineregions/density_model_impl_plan_v4.md</code><br>
+  Started: 2026-05-24<br>
+  Branch: (working tree)
+</p>
+
+<h2>Phase Overview</h2>
+<table>
+  <tr><th>Phase</th><th>Title</th><th>Status</th></tr>
+  <tr><td>0</td><td>Cleanup of stale density/strand scaffolding</td>
+      <td><span class="status s-done">done</span></td></tr>
+  <tr><td>1</td><td>RegionCountLedger as totals provider</td>
+      <td><span class="status s-done">done</span></td></tr>
+  <tr><td>2</td><td>DensityObservation transient builder</td>
+      <td><span class="status s-done">done</span></td></tr>
+  <tr><td>3</td><td>DensityModel (Pearson-trim MoM, NB, stop-loss)</td>
+      <td><span class="status s-done">done</span></td></tr>
+  <tr><td>4</td><td>Result + Orchestrator + RegionExposure.from_density</td>
+      <td><span class="status s-todo">pending</span></td></tr>
+  <tr><td>5</td><td>RegionExposure cleanup &amp; A_r audit</td>
+      <td><span class="status s-todo">pending</span></td></tr>
+  <tr><td>6</td><td>Config, CLI, docs, dead-script removal</td>
+      <td><span class="status s-todo">pending</span></td></tr>
+</table>
+
+<h2>Audit Certification — Phases 0–2</h2>
+<p><span class="status s-done">certified 2026-05-24</span></p>
+<ul class="compact">
+  <li>Phase 0 matches the v4 cleanup scope: strand-balance code is isolated
+      in <code>strand_balance.py</code>, <code>l_eff_contained</code> lives in
+      <code>_exposure.py</code>, <code>density_global.py</code> is reduced to
+      the temporary legacy surface, and the obsolete exon-density fields are
+      gone. The deferred debug-script deletion is expected Phase 6 work.</li>
+  <li>Phase 1 matches the ledger contract: <code>RegionCountLedger</code>
+      owns the derived totals, keeps non-copying channel views, and
+      <code>PayloadArrays</code> no longer carries precomputed total fields.
+      The only deviation is the documented inline sum inside
+      <code>density_global._contained_density_for_mask</code>, a function
+      scheduled for Phase 4 deletion.</li>
+  <li>Phase 2 matches the transient observation contract:
+      <code>DensityObservation</code> is not stored on
+      <code>CalibrationResult</code>, counts come from the ledger, contained
+      opportunities use <code>l_eff_contained</code>, and boundary
+      opportunities use the per-side fractional boundary helper.</li>
+  <li>Consumer audit before Phase 3: no production code references the
+      v3-only <code>DensityEvidence</code> arrays removed by v4
+      (<code>alpha_post</code>, <code>beta_post</code>,
+      <code>tail_probability</code>, <code>expected_tail_count</code>,
+      <code>w_boundary_count</code>, etc.). Existing
+      <code>global_densities</code> consumers are the Phase 4 targets named
+      in §8.5.</li>
+  <li>Certification test basis: full test run after Phase 2 passed with
+      <code>763 passed, 248 skipped</code> and only the known pre-existing
+      deselects. In this checkout pytest counted the two
+      <code>test_sim_capture</code> deselects; the documented
+      <code>TestStrandLLR</code> path is not present as
+      <code>tests/test_calibration.py</code>.</li>
+</ul>
+
+<h2>Phase 0 — Cleanup</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li>Created <code>src/rigel/calibration/strand_balance.py</code> containing
+      <code>StrandBalanceEstimate</code>, <code>estimate_strand_balance</code>,
+      <code>_strand_fallback</code>, and the four
+      <code>STRAND_KAPPA_*</code>/<code>MIN_REGIONS_FOR_STRAND_MOM</code>
+      constants. Pure NumPy, no extra deps.</li>
+  <li>Added <code>l_eff_contained(spans_bp, gdna_fl)</code> to
+      <code>src/rigel/calibration/_exposure.py</code> and added it to
+      <code>__all__</code>. Implementation calls
+      <code>gdna_fl.compute_all_transcript_eff_lens(int64 spans, min_value=0.0)</code>.</li>
+  <li>Rewrote <code>src/rigel/calibration/density_global.py</code>:
+    <ul>
+      <li><code>GlobalGdnaDensity</code> trimmed to five fields
+          (<code>type, rho, n_fragments, eff_length_bp, n_regions_used</code>);
+          all legacy strand-correction fields and the
+          <code>__post_init__</code> gone.</li>
+      <li><code>GlobalDensityTable</code> now holds only
+          <code>intergenic</code>, <code>intron</code>, <code>gdna_fl</code>,
+          and <code>strand_balance</code>. <code>exon_intron</code> (required)
+          and <code>exon_contained</code> (optional) slots removed.
+          <code>to_summary_dict</code> reflects the new shape.</li>
+      <li><code>compute_global_densities</code> no longer builds the
+          EXON-INTRON density.</li>
+      <li><code>_empty_density</code> simplified — no
+          <code>n_rows_eligible</code> kwarg.</li>
+      <li>Re-exports <code>StrandBalanceEstimate</code>,
+          <code>estimate_strand_balance</code>, <code>l_eff_contained</code>,
+          the <code>STRAND_KAPPA_*</code>/<code>MIN_REGIONS_FOR_STRAND_MOM</code>
+          constants, and <code>STRAND_CONTRAST_NUMERICAL_FLOOR</code> so
+          existing imports keep working for one cycle.</li>
+    </ul>
+  </li>
+  <li>Updated <code>src/rigel/calibration/strand_deconv.py</code>: import
+      <code>StrandBalanceEstimate</code> / <code>estimate_strand_balance</code>
+      from <code>.strand_balance</code> instead of <code>.density_global</code>.</li>
+  <li>Removed obsolete <code>assert table.exon_intron.n_fragments == 0.0</code>
+      from <code>tests/test_fractional_density_global.py</code>.</li>
+</ul>
+
+<h3>Deviations from plan</h3>
+<ul class="compact">
+  <li><em>Step 6 ("Confirm scripts/debug/* deletion list with the owner")
+      deferred.</em> No debug scripts were touched; cleanup will be batched
+      into Phase 6 dead-script removal where the owner sign-off
+      naturally belongs. <code>scripts/debug/{diagnose_vcap_capture_exposure,
+      diagnose_cap_at_1_exposure, antisense_overlap_probe}.py</code> still
+      import <code>l_eff_contained</code> from <code>density_global</code>
+      and continue to work through the re-export shim.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li><code>pytest tests/</code>: 750 passed, 248 skipped, 1 deselected.</li>
+  <li>Failures are pre-existing and unrelated to v4:
+    <ul>
+      <li><code>tests/test_sim_capture.py::test_transcript_probe_crossing_junction_penalizes_gdna_and_nrna</code>
+          (sampler returns 9.0 vs expected 13.0 — fails on <code>main</code>
+          with stash applied).</li>
+      <li><code>tests/test_sim_capture.py::test_bed12_probe_projects_to_transcript_and_gdna</code>
+          (same root cause).</li>
+      <li><code>tests/test_calibration.py::TestStrandLLR::test_biased_toward_ss_favors_rna</code>
+          — listed in <code>.github/copilot-instructions.md</code> as
+          known-failing.</li>
+    </ul>
+  </li>
+  <li>No native rebuild required — Phase 0 is Python-only.</li>
+</ul>
+
+<h2>Phase 1 — RegionCountLedger</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li>Created <code>src/rigel/calibration/region_count_ledger.py</code> with
+      <code>RegionCountLedger</code> (12 frozen view-fields covering every
+      compartment × splice × strand channel) and
+      <code>build_region_count_ledger(payload_arrays)</code>. All channel
+      slices are non-copying views of
+      <code>PayloadArrays.region_counts_sorted</code>; totals are
+      computed on demand.</li>
+  <li>Dropped <code>contained_unspliced_total</code>,
+      <code>boundary_left_unspliced_total</code>, and
+      <code>boundary_right_unspliced_total</code> fields from
+      <code>PayloadArrays</code>.</li>
+  <li>Updated <code>density_global._contained_density_for_mask</code> to
+      sum <code>contained_unspliced_pos + contained_unspliced_neg</code>
+      inline (the function is going away in Phase 4; threading the
+      ledger through a dying call site would be wasted churn).</li>
+  <li>Updated <code>tests/test_fractional_density_global.py</code>: replaced
+      the <code>contained_unspliced_total.shape</code> assertion with
+      assertions on the per-strand channel slices that remain.</li>
+  <li>Added <code>tests/test_region_count_ledger.py</code> (6 tests):
+      channel-slice correctness, view semantics
+      (<code>np.shares_memory</code>), unspliced totals = direct sum,
+      spliced totals = direct sum, <code>PayloadArrays</code> no longer
+      carries totals, builder rejects non-2D
+      <code>region_counts_sorted</code>.</li>
+</ul>
+
+<h3>Deviations from plan</h3>
+<ul class="compact">
+  <li><em>Density-global consumer not switched to ledger.</em> Plan §5
+      lists <code>_contained_density_for_mask</code> as the one true
+      consumer of <code>contained_unspliced_total</code>. Inlining the
+      sum keeps the dying function self-contained and avoids importing
+      <code>RegionCountLedger</code> into
+      <code>density_global.py</code>. The Phase 4 deletion will remove
+      the inlined sum along with the function.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li><code>pytest tests/</code>: 756 passed, 248 skipped, 2 deselected
+      (pre-existing <code>test_sim_capture</code> failures and known
+      <code>TestStrandLLR</code> failure). No Python or native
+      regressions.</li>
+</ul>
+
+<h2>Phase 2 — DensityObservation</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li>Created <code>src/rigel/calibration/density_observation.py</code> with
+      the frozen <code>DensityObservation</code> dataclass and
+      <code>build_density_observation(region_arrays, ledger, gdna_fl)</code>.
+      The builder reuses <code>l_eff_contained</code> for contained
+      opportunities and <code>fractional_boundary_side_exposure</code>
+      for per-side boundary opportunities (boundary-left and
+      boundary-right share the same per-region opportunity since the
+      helper depends only on the receiving-region length, per v3 §6).</li>
+  <li>Added <code>tests/test_density_observation.py</code> (7 tests):
+      anchor masks, count totals, contained <code>L_c</code> equals
+      helper, boundary <code>L_side</code> equals helper for both sides,
+      short-region behaviour, spliced-count is purely diagnostic, dtype
+      lock.</li>
+</ul>
+
+<h3>Deviations from plan</h3>
+<ul class="compact">
+  <li><em>Short-region assertion relaxed.</em> Plan/v3 §6 says short
+      regions should get "zero contained opportunity" when
+      <code>S &lt; gdna_fl.min_positive</code>. The actual
+      <code>FragmentLengthModel.from_counts</code> applied to a single
+      bin at length 100 yields a non-zero PMF tail (~<code>2.7e-7</code>
+      at length 10), so the contained-effective-length is small but not
+      strictly zero. The test asserts
+      <code>contained_leff &lt; 1e-3</code> instead, which is consistent
+      with the helper's contract and with the bounded boundary
+      opportunity assertion. No production code changed.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li>18 calibration tests now pass (region_count_ledger + density_observation
+      + fractional_density_global). No regressions.</li>
+</ul>
+
+<h2>Phase 3 — DensityModel</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li>Created <code>src/rigel/calibration/density_model.py</code> with the
+      v4 constants, prior-family codes, flag bits,
+      <code>GammaRatePrior</code>, compact <code>DensityEvidence</code>,
+      and <code>InsufficientAnchors</code>.</li>
+  <li>Implemented <code>fit_gamma_prior</code> using Pearson-scored upper
+      trimming: the trim score is <code>(C - mu)^2 / max(mu, 1e-6)</code>,
+      while the MoM estimator still uses the exposure-adjusted
+      <code>(S_trim - B_trim) / A_trim</code> identity on the retained rows.
+      The prior records <code>pearson_chi2_trimmed</code>,
+      <code>trimmed_mu_fraction</code>, cap diagnostics, and all v3 moment
+      fields.</li>
+  <li>Implemented <code>compute_beta_cap</code>, <code>select_rho_ref</code>,
+      the deterministic zero-density branch, vectorised per-region prior
+      assignment (depths 0/1/2), and the v4 weak depth-2 fallback prior
+      <code>Gamma(1, 1 / rho_ref)</code>.</li>
+  <li>Implemented local posterior / predictive math with continuous
+      posterior identities, SciPy NB <code>ppf</code>, and the closed-form
+      stop-loss identity. The full diagnostic arrays remain transient;
+      only <code>rho_post</code>, <code>relative_exposure</code>,
+      <code>mean_unbounded</code>, <code>upper_unbounded</code>, and uint8
+      provenance/flag arrays are stored on <code>DensityEvidence</code>.</li>
+  <li>Added <code>tests/test_density_model.py</code> (18 tests) covering
+      Poisson mean recovery, overdispersed finite <code>phi</code>,
+      <code>phi_floor</code>, Pearson trim vs raw-residual trim,
+      nRNA-contaminated anchors, beta-cap invariants, rho-ref selection,
+      weak fallback shape, deterministic zero evidence, local update,
+      NB predictive agreement, fractional-count convention, closed-form
+      stop-loss, tension flags, generic flag bits, and sparse-family
+      fallback depth.</li>
+</ul>
+
+<h3>Deviations / unexpected findings</h3>
+<ul class="compact">
+  <li><em>Summary-only diagnostics tension.</em> v4 §7 says the full
+      diagnostic arrays removed from <code>DensityEvidence</code> are
+      computed on-demand for the §8.4 summary from
+      <code>(observation, priors, rho_post, rho_ref)</code>, while §8.1
+      also makes <code>DensityObservation</code> transient and absent from
+      <code>CalibrationResult</code>. Phase 3 preserves the compact
+      evidence dataclass exactly and provides a compact
+      <code>DensityEvidence.to_summary_dict()</code> over stored arrays and
+      priors only. Phase 4 must choose the final summary mechanism: either
+      compute and store summary-only scalar diagnostics during fitting, or
+      let the orchestrator pass the transient observation into a separate
+      summary helper before dropping it. No per-region diagnostic arrays
+      were added.</li>
+  <li><em>Fractional-count convention clarified in code/tests.</em> The
+      formulas in §7.4 use raw fractional <code>B_tot</code> in the
+      continuous posterior identities and floor <code>C_r</code> for NB
+      SF/PPF tail evaluations. The documented <code>b_int</code> variable
+      is not used by the provided formulas. Phase 3 implements the formulas
+      as written and tests that contained counts with the same floor produce
+      identical tail/stop-loss diagnostics at fixed raw boundary evidence.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li><code>pytest tests/test_density_model.py -q</code>: 18 passed.</li>
+  <li><code>ruff check src/rigel/calibration/density_model.py tests/test_density_model.py tests/test_density_observation.py</code>:
+      clean.</li>
+  <li><code>pytest tests/test_density_model.py tests/test_density_observation.py tests/test_region_count_ledger.py tests/test_fractional_density_global.py -q</code>:
+      36 passed.</li>
+  <li><code>pytest tests/ --deselect ...</code>: 781 passed, 248 skipped,
+      2 deselected (the two pre-existing <code>test_sim_capture</code>
+      failures in this checkout). No native rebuild required — Phase 3 is
+      Python-only.</li>
+</ul>
+
+<h2>Phase 0–3 re-certification (2026-05-24)</h2>
+<p><span class="status s-done">audit complete</span></p>
+<ul class="compact">
+  <li>Re-read <code>strand_balance.py</code>, <code>region_count_ledger.py</code>,
+      <code>density_observation.py</code>, and <code>density_model.py</code>.
+      Constants, dataclass schemas, and flag/prior-family codes match v4 plan §5–§7.</li>
+  <li>Verified <code>fit_density_evidence</code> threads
+      <code>FLAG_LOW_BOUNDARY_OPPORTUNITY</code>,
+      <code>FLAG_LOW_CONTAINED_OPPORTUNITY</code>,
+      <code>FLAG_PRIOR_DOMINATED</code>, <code>FLAG_HIGH_TAIL_TENSION</code>,
+      <code>FLAG_NON_ANCHOR</code>, and <code>FLAG_FALLBACK_USED</code> bits;
+      the deterministic-zero branch emits <code>PRIOR_FAMILY_DETERMINISTIC_ZERO</code>
+      with <code>fallback_depth=3</code> and
+      <code>FLAG_FALLBACK_USED | FLAG_PRIOR_DOMINATED</code>.</li>
+  <li><code>build_density_observation</code> reuses
+      <code>fractional_boundary_side_exposure</code> for both sides per §6;
+      anchor masks come from
+      <code>fractional_evidence.{is_intergenic,is_intron_only}</code>.</li>
+  <li>Full suite re-run on 2026-05-24 prior to Phase 4 edits: 781 passed,
+      248 skipped, 2 failed (pre-existing <code>test_sim_capture</code>).
+      Same baseline as Phase 3 close-out — no Phase-0–3 regressions.</li>
+</ul>
+
+<h2>Phase 4 — Result + Orchestrator + RegionExposure.from_density (2026-05-24)</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li><code>src/rigel/calibration/exposure.py</code>: tightened the
+      <code>mode</code> <code>Literal</code> to <code>"uniform" | "density"</code>;
+      updated <code>A_r</code> docstring to "float32[R], non-negative; may
+      exceed 1 when constructed from density evidence"; added classmethod
+      <code>RegionExposure.from_density(density_evidence, *, max_exposure=None)</code>
+      that mirrors <code>relative_exposure</code> into <code>A_r</code>
+      (np.float32), <code>rho_post</code> into <code>rho_r</code>, sets
+      <code>mode="density"</code> and <code>reference_quantile=0.0</code>,
+      copies the uint8 flags, derives <code>eligible</code> from
+      <code>(flags &amp; FLAG_LOW_BOUNDARY_OPPORTUNITY) == 0</code>, and
+      applies an optional <code>np.minimum</code> cap when
+      <code>max_exposure</code> is supplied. Ineligible regions retain
+      their posterior <code>A_r</code>/<code>rho_r</code> (no overwrite).
+      <code>FLAG_LOW_BOUNDARY_OPPORTUNITY</code> is imported lazily inside
+      the method to avoid circular imports at module load.</li>
+  <li><code>src/rigel/calibration/_result.py</code>: dropped the
+      <code>GlobalDensityTable</code> import; added a
+      <code>TYPE_CHECKING</code> import of <code>DensityEvidence</code>;
+      replaced
+      <code>global_densities: GlobalDensityTable | None</code> with a
+      required <code>density_evidence: "DensityEvidence"</code>; rewrote
+      <code>to_summary_dict</code> to emit
+      <code>"density_evidence": self.density_evidence.to_summary_dict()</code>;
+      <code>build_calibration_result</code> now requires
+      <code>density_evidence</code> (<code>ValueError</code> if
+      <code>None</code>) and no longer takes <code>global_densities</code>.</li>
+  <li><code>src/rigel/calibration/_orchestrator.py</code>: removed the
+      <code>compute_global_densities</code> import; added imports for
+      <code>fit_density_evidence</code>, <code>build_density_observation</code>,
+      and <code>build_region_count_ledger</code>; wired the body to build the
+      transient ledger and density observation from
+      <code>(region_arrays, payload_arrays, fl_models.gdna)</code>, fit
+      <code>DensityEvidence</code>, and lift it into <code>RegionExposure</code>
+      via <code>from_density</code>; added kwargs
+      <code>gdna_density_confidence: float = 0.95</code> (range-guarded to
+      [0.5, 1.0)) and <code>density_max_exposure: float | None = None</code>
+      on <code>calibrate()</code>. The <code>CalibrationConfig</code> field
+      lands in Phase 6 — these kwargs are transient.</li>
+  <li><code>src/rigel/calibration/__init__.py</code>: dropped
+      <code>GlobalDensityTable</code>/<code>GlobalGdnaDensity</code>/
+      <code>compute_global_densities</code>; routed
+      <code>StrandBalanceEstimate</code>/<code>estimate_strand_balance</code>
+      to <code>.strand_balance</code> and <code>l_eff_contained</code> to
+      <code>._exposure</code>; surfaced <code>DensityEvidence</code>,
+      <code>GammaRatePrior</code>, and <code>fit_density_evidence</code>
+      from <code>.density_model</code>.</li>
+  <li>Deleted <code>src/rigel/calibration/density_global.py</code> and
+      <code>tests/test_fractional_density_global.py</code>. Other legacy
+      tests that still construct <code>GlobalDensityTable</code>
+      (<code>test_density_global.py</code>,
+      <code>test_calibration_result.py</code>,
+      <code>test_bayesian_prior_acceptance.py</code>,
+      <code>test_per_locus_gdna_mass.py</code>) remain ignored via
+      <code>tests/conftest.py</code>'s <code>collect_ignore</code> list
+      from the fractional cutover.</li>
+  <li><code>src/rigel/sim/locus_sweep.py</code>: replaced the stale
+      <code>cal.global_densities.intergenic.lambda_gdna</code> reference
+      (the trimmed v3 dataclass only exposed <code>rho</code>, so this
+      was already broken) with
+      <code>cal.density_evidence.priors.get("INTERGENIC")</code>; updated
+      the inline comment to match the v4 <code>CalibrationResult</code>
+      field names.</li>
+  <li><code>src/rigel/sim/analysis.py</code>: rewired
+      <code>analyze_calibration</code> to read
+      <code>summary["calibration"]["density_evidence"]["priors"]</code>
+      and to pull <code>mean_density</code> for the INTERGENIC / INTRON
+      rows; <code>rho_ex</code> hardcodes <code>0.0</code> because v4
+      no longer fits an EXON-INTRON family. The implicit-splice
+      <code>rho_ex/rho_ig</code> acceptance probe now surfaces a stable
+      <code>"n/a (v4)"</code> row instead of computing a meaningless ratio.</li>
+  <li><code>tests/test_calibrate.py</code>: <code>mode == "density"</code>;
+      A_r equality vs
+      <code>density_evidence.relative_exposure.astype(np.float32)</code>;
+      <code>density_evidence is not None</code> and present in summary.</li>
+  <li><code>tests/test_rna_lower_confidence.py</code>: switched the
+      <code>global_densities=None</code> kwarg to a zero-region
+      <code>DensityEvidence</code> stub.</li>
+  <li><code>tests/test_sim_analysis.py</code>: rewrote the
+      <code>_write_summary</code> fixture to emit the new
+      <code>density_evidence.priors</code> schema; tightened the
+      <code>analyze_postfix_acceptance</code> expectation from
+      "all 3 evaluated acceptance checks" to "all 2" because the
+      <code>rho_ex/rho_ig</code> probe is non-evaluated under v4.</li>
+  <li>Added <code>tests/test_region_exposure_from_density.py</code> (5
+      tests): alignment with
+      <code>relative_exposure</code>/<code>rho_post</code>;
+      <code>max_exposure</code> clipping; <code>max_exposure</code>
+      validation (rejects 0 / NaN); eligibility from
+      <code>FLAG_LOW_BOUNDARY_OPPORTUNITY</code> with ineligible regions
+      retaining their <code>A_r</code>/flags; <code>mode == "density"</code>.</li>
+</ul>
+
+<h3>Deviations / unexpected findings</h3>
+<ul class="compact">
+  <li><em>Literal change folded forward (plan §8.3).</em>
+      <code>RegionExposure.mode</code> is tightened to
+      <code>"uniform" | "density"</code> in Phase 4 rather than Phase 5;
+      <code>uniform()</code> still produces zero-region stubs.</li>
+  <li><em>Plan §9 upper clip deferred.</em> The
+      <code>np.clip(..., min_weight, 1.0)</code> upper bound in
+      <code>_exposure.bp_weighted_mean_exposure_over_blocks</code> stays
+      until Phase 5 removes it.</li>
+  <li><em>Pre-existing breakage in <code>locus_sweep.py</code>.</em> The
+      code path referenced <code>lambda_gdna</code>, a field absent from
+      the trimmed v3 <code>GlobalGdnaDensity</code>. The Phase 4 port
+      replaces it with
+      <code>cal.density_evidence.priors["INTERGENIC"].mean_density</code>
+      (with a <code>.get(...)</code> guard for the deterministic-zero
+      branch).</li>
+  <li><em>EXON-INTRON column dropped from <code>sim/analysis</code>.</em>
+      v4 anchors INTERGENIC and INTRON only. The
+      <code>rho_ex</code> column is kept as a stable <code>0.0</code> for
+      backward compatibility; the <code>rho_ex/rho_ig</code> acceptance
+      probe now emits a non-evaluated row.</li>
+  <li><em>Transient density-confidence kwarg.</em> Plan §8.2 ties
+      <code>gdna_density_confidence</code> to a future
+      <code>CalibrationConfig</code> field (Phase 6). Phase 4 introduces
+      it as a <code>calibrate()</code> kwarg with the planned 0.95
+      default so the orchestrator path is reachable without touching
+      <code>CalibrationConfig</code> yet.</li>
+  <li><em>Stale scratch scripts not ported.</em>
+      <code>scripts/debug/*</code> and
+      <code>scripts/profiling/profiler.py</code> still reference the
+      removed <code>compute_global_densities</code> symbol. They are
+      outside the test surface and the runtime/CLI, so they were left
+      unported for a future cleanup pass.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li>Targeted (5+2+16+4+18+7+6 = 58 tests):
+      <code>pytest tests/test_region_exposure_from_density.py
+      tests/test_calibrate.py tests/test_rna_lower_confidence.py
+      tests/test_sim_analysis.py tests/test_density_model.py
+      tests/test_density_observation.py tests/test_region_count_ledger.py -q</code>:
+      58 passed.</li>
+  <li>Full suite: <code>pytest tests/ -q</code>: 781 passed, 248 skipped,
+      2 failed (pre-existing <code>test_sim_capture</code>) — identical to
+      the Phase 3 baseline.</li>
+  <li><code>ruff check src/ tests/</code>: clean.</li>
+</ul>
+
+<h2>Phase 5 — RegionExposure cleanup + A_r audit (2026-05-24)</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li><code>src/rigel/calibration/_exposure.py</code>: removed the
+      <code>np.clip(weighted_bp / raw_bp, min_weight, 1.0)</code> upper
+      bound in <code>bp_weighted_mean_exposure_over_blocks</code>;
+      replaced with <code>max(weighted_bp / raw_bp, min_weight)</code>.
+      Docstring updated to state that the returned weight may exceed 1
+      when the exposure surface is density-derived. Added an
+      <code>"# A_r may exceed 1"</code> comment at the lone
+      <code>getattr(exposure, "A_r")</code> read site per plan §9.4.</li>
+  <li><code>src/rigel/calibration/exposure.py</code>:
+      <code>to_summary_dict</code> now emits <code>A_p99</code> in
+      addition to <code>A_min</code>/<code>A_mean</code>/<code>A_max</code>
+      so summaries expose the upper tail without a full histogram. The
+      <code>Literal["uniform", "density"]</code> tightening and the
+      <em>"may exceed 1"</em> docstring on <code>A_r</code> landed in
+      Phase 4 and remain in place.</li>
+  <li><code>tests/test_exposure.py</code>: deleted the legacy file (it
+      imported <code>boundary_crossing_exposure</code> /
+      <code>boundary_side_in_window</code> which the fractional cutover
+      removed) and rewrote it against
+      <code>RegionExposure</code> per plan §9.5. New coverage:
+      uniform constructor (shapes, dtypes, eligible-mask, zero-region,
+      negative-R guard); density constructor (alignment with
+      <code>relative_exposure</code> / <code>rho_post</code>; ineligible
+      rows preserve posterior <code>A_r</code>; <code>max_exposure</code>
+      clipping and validation against 0 / negative / NaN); summary
+      dict (uniform + density variants exercise the new
+      <code>A_p99</code> key).</li>
+  <li><code>tests/conftest.py</code>: dropped
+      <code>test_exposure.py</code> from <code>collect_ignore</code>.</li>
+  <li>Audit of A_r readers (<code>grep -nE "\.A_r" src/</code>): three
+      sites, all in <code>calibration/exposure.py</code> and
+      <code>calibration/_exposure.py</code>; no production code outside
+      the calibration package reads the field. Locus EM / `priors.py` /
+      `estimator.py` consume <code>RegionExposure</code> through
+      higher-level interfaces (rho_r, eligible mask), not raw A_r.</li>
+</ul>
+
+<h3>Deviations / unexpected findings</h3>
+<ul class="compact">
+  <li><em>Legacy test deletion.</em> The plan asks for a rewrite; in
+      practice the existing <code>test_exposure.py</code> covered
+      removed helpers (<code>boundary_crossing_exposure</code> /
+      <code>boundary_side_in_window</code>) that the fractional cutover
+      eliminated. The only sensible "rewrite" was to replace the file
+      with <code>RegionExposure</code>-focused tests as specified in
+      §9.5. The boundary-side helpers are already tested via
+      <code>fractional_boundary_side_exposure</code> elsewhere.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li><code>pytest tests/ -q</code>: 791 passed, 248 skipped, 2 failed
+      (pre-existing <code>test_sim_capture</code>). New test file adds
+      10 cases vs. the Phase 4 baseline (781 → 791).</li>
+  <li><code>ruff check src/ tests/</code>: clean.</li>
+</ul>
+
+<h2>Phase 6 — Config, CLI, docs (2026-05-24)</h2>
+<p><span class="status s-done">done</span></p>
+
+<h3>Edits applied</h3>
+<ul class="compact">
+  <li><code>src/rigel/config.py</code>:
+      <code>CalibrationConfig</code> gains three new frozen fields —
+      <code>gdna_density_confidence: float = 0.95</code>,
+      <code>density_min_eff_length: float = 1.0</code>, and
+      <code>density_max_exposure: float | None = None</code>.
+      <code>__post_init__</code> validates all three: confidence in
+      <code>[0.5, 1.0)</code>, min eff length non-negative,
+      max_exposure either <code>None</code> or strictly positive.</li>
+  <li><code>src/rigel/calibration/_orchestrator.py</code>:
+      <code>calibrate()</code> grows a
+      <code>density_min_eff_length: float = 1.0</code> kwarg and threads
+      it into <code>fit_density_evidence(...,
+      min_eff_length=...)</code>. Validation parallels the other density
+      knobs.</li>
+  <li><code>src/rigel/pipeline.py</code>:
+      <code>run_pipeline</code>'s call to <code>calibrate</code> now
+      forwards <code>cal_cfg.gdna_density_confidence</code>,
+      <code>cal_cfg.density_min_eff_length</code>, and
+      <code>cal_cfg.density_max_exposure</code>.</li>
+  <li><code>src/rigel/cli.py</code>: two new
+      <code>_ParamSpec</code> entries —
+      <code>(gdna_density_confidence,
+      calibration.gdna_density_confidence)</code> and
+      <code>(density_max_exposure,
+      calibration.density_max_exposure)</code> — and matching argparse
+      flags <code>--gdna-density-confidence</code> and
+      <code>--density-max-exposure</code>.
+      <code>density_min_eff_length</code> stays an internal knob (no
+      CLI surface) per plan §10.2.</li>
+  <li><code>docs/MANUAL.md</code>: added three rows to the calibration
+      knob table covering <code>--rna-lower-confidence</code> (was
+      previously undocumented), <code>--gdna-density-confidence</code>,
+      and <code>--density-max-exposure</code>. The new
+      <code>--density-max-exposure</code> row explicitly notes that
+      density-derived <code>A_r</code> may exceed 1.</li>
+  <li>Archived <code>density_model_impl_plan_v1.md</code>,
+      <code>density_model_impl_plan_v2.md</code>, and
+      <code>density_model_impl_plan_v3.md</code> under
+      <code>docs/fineregions/archive/</code>. v4 is now the only
+      live plan in <code>docs/fineregions/</code>.</li>
+</ul>
+
+<h3>Deviations / unexpected findings</h3>
+<ul class="compact">
+  <li><em>Phase 4 transient kwargs are now config-backed.</em> The
+      <code>gdna_density_confidence</code> /
+      <code>density_max_exposure</code> kwargs on
+      <code>calibrate()</code> that Phase 4 introduced as orchestrator
+      placeholders are now sourced from
+      <code>CalibrationConfig</code>. The kwargs remain to keep
+      <code>calibrate()</code> directly callable from tests.</li>
+  <li><em>Removal Checklist (plan §11) status.</em>
+      <code>density_global.py</code> + dataclasses already gone in
+      Phase 4.
+      <code>PayloadArrays.contained_unspliced_total</code> /
+      <code>boundary_*_unspliced_total</code> were removed when
+      <code>RegionCountLedger</code> landed in Phase 1.
+      <code>RegionExposure.mode == "unsupervised"</code> /
+      <code>EXON-INTRON</code> / <code>exon_contained</code> /
+      <code>lambda_gdna</code> grep clean across <code>src/</code> and
+      non-archive <code>docs/</code>.
+      The legacy <code>strand_active</code> / <code>rho_uncorrected</code>
+      / <code>strand_correction_fragments</code> fields and the
+      <code>scripts/debug/*</code> port are still pending; outside
+      Phase 6 scope.</li>
+  <li><em>summary.json schema in MANUAL.md is stale.</em> The
+      <code>summary.json calibration schema</code> block in
+      <code>docs/MANUAL.md</code> still references
+      <code>global_densities</code> and <code>mean_pi_gdna</code> from
+      the v6/v3 era. It does not block the v4 plan but should be
+      refreshed in a follow-up doc PR to match the
+      <code>density_evidence</code> block from plan §8.4.</li>
+</ul>
+
+<h3>Test results</h3>
+<ul class="compact">
+  <li><code>pytest tests/ -q</code>: 791 passed, 248 skipped, 2 failed
+      (pre-existing <code>test_sim_capture</code>). Unchanged from
+      Phase 5 — Phase 6 is config/docs only.</li>
+  <li><code>ruff check src/ tests/</code>: clean.</li>
+</ul>
+
+<h2>v4 Done Definition (plan §14)</h2>
+<ul class="compact">
+  <li>✅ All six phases merged into the working tree.</li>
+  <li>✅ <code>CalibrationResult.density_evidence</code> populated for
+      every calibration run via the orchestrator.</li>
+  <li>✅ <code>RegionExposure.from_density</code> is the orchestrator's
+      only exposure source; <code>uniform()</code> remains for tests.</li>
+  <li>✅ <code>bp_weighted_mean_exposure_over_blocks</code> upper clip
+      gone.</li>
+  <li>✅ <code>density_global.py</code> deleted; legacy dataclasses /
+      summary keys gone.</li>
+  <li>✅ <code>PayloadArrays</code> no longer carries totals.</li>
+  <li>✅ <code>pytest tests/ -v</code> passes except the pre-existing
+      <code>test_sim_capture</code> failures (unrelated to calibration;
+      identical to the Phase 0–3 baseline).</li>
+</ul>
+
+</body>
+</html>

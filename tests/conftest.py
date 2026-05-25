@@ -43,7 +43,6 @@ collect_ignore = [
     "test_calibration_accumulator.py",
     "test_calibration_result.py",
     "test_density_global.py",
-    "test_exposure.py",
     "test_ndarray_util.py",
     "test_per_locus_gdna_mass.py",
     # Tests below construct legacy region_df / scan tuples that the
