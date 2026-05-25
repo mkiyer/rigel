@@ -6,6 +6,129 @@
 I have an idea that is an offshoot of your "5. Coverage-shape coherence priors" -- during the 
 
 
+### density model
+
+We are working on calibration and have a roadmap (attached). We need to focus on building a density model that handles both hybrid capture data and non-hybrid capture data. The concept of the problem is well formulated. Goals of calibration are to estimate the amount of gDNA (numerator) and the 'exposure' (denominator). Estimating gDNA requires clever use of 'contained' and 'boundary' fragments in order to respect exposure differences. Hybrid capture changes the exposure itself. Keeping contained and boundary counts separate is a wonderful way to isolate hybrid capture from non-capture behavior. The goal of the density model is to be able to estimate gDNA counts given the data in a region R (a region has spliced pos/neg counts, unspliced boundary pos/neg counts, and contained counts). We need to define our 'training' regions from which we can build models. Our models need to predict gDNA counts given the region size (region end - region start), the boundary flux going into the region, and 'global' gDNA evidence. We can model 'global' gDNA using intergenic and intronic regions, this model must take into account hybrid capture data because intergenic/intronic regions are depleted relative to exons. Hence the need to model gdna counts as well as apparent exposure. 
+
+
+### gdna density model
+
+Given a region, estimate gDNA counts (with a user specified upper confidence e.g. 95% or 99%)
+
+Model should predict gDNA counts in a region ~ region raw length, region exposure weight, boundary flux gdna evidence, global gdna evidence, and upper tail conf level (e.g. 95% or 99%)
+
+
+### intergenic and intronic 'contained' evidence
+
+Intergenic regions and intronic regions can be assumed to be gDNA dominant. The 'contained' region counts within intronic and intergenic regions are typically NOT captured by hybrid capture probes. They are typically part of hybrid capture exposure and must be weighted accordingly (we can let the data drive exposure weights).
+
+We need to build a model from all intergenic/intronic regions using the contained fragment evidence
+
+
+### intergenic and intronic 'boundary' evidence
+
+This is reliable gDNA evidence that is usable in hybrid capture and non hybrid capture cases. With hybrid capture, the boundary flux will be enriched. When we don't have hybrid capture, boundary flux data will be sparse (but still usable).
+
+For each intergenic/intronic region, we have two boundaries (left and right). Each boundary has fractional counts or flux. These can be assumed to be gDNA counts.
+
+Boundary crossing fragments will have the FL distribution of gDNA, so a single boundary has the length of gDNA fragment length distribution. However the boundary exposure also depends on the size of the region, so the gDNA FL distribution must be clipped to region size and integrated/marginalized using our existing algorithmics and functions.
+
+We need to build a model from ALL exon-intron and exon-intergenic boundaries. We model:
+
+boundary crossing flux ~ boundary eff length (gDNA FL distribution clipped by region size)
+
+### effect of hybrid capture
+
+Hybrid capture rna-seq targets transcripts (except for panels that have negative control probes, which are typically a very small number). The challenge here is that hybrid capture uses probes to target certain regions. It is never the case that all exons are targeted (that is exceedingly hard) and so the boundary flux gdna density model will be expected to be a bimodal combination of off-target boundaries with roughly the intergenic/intronic global off-target gdna density and 'on-target' boundaries which will start to approximate the on-target exon density. 
+
+Exon regions can thus be divided into expressed x targeted
+1) expressed AND targeted (on-target)
+2) expressed AND off-target
+3) not expressed, targeted
+4) not expressed, not targeted
+
+We can start by building 1) the global intergenic/intronic 'contained' gdna density model and 2) the boundary intron-exon/intergenic-exon boundary crossing model.
+
+We can identify exon group 4 (not expressed, not targeted) by comparing the 'contained' exon counts against the intergenic/intronic gDNA model. "Could we have observed this many contained exon counts by sampling from the intergenic/intronic gdna distribution?". If yes, then we can say the exon is 'not expressed, not targeted'. 
+
+In a 2nd pass these off-target not-expressed exon can be INCLUDED in the global gDNA density model.
+
+Unsupervised learning of hybrid capture means that we still need to partition boundaries into 'on-target' and 'off-target' boundaries.
+
+We should then partition boundaries into 'on-target' and 'off-target'. An easy way is just to compare a boundary density against the global intergenic/intronic gdna density. "Could we have observed this many boundary counts by sampling from the intergenic/intronic gdna distribution"? 
+
+We can then build an on-target boundary flux model from "on-target" boundaries. 
+
+We then have a rough estimate of hybrid capture enrichment by comparing "on-target" boundaries against "off-target" boundaries. 
+
+Finally, we can identify exon group 3 (not expressed, targeted) using our on-target boundary model "if we impute exon counts from boundary counts, could we have observed this many exon counts from the on-target boundary density"?
+
+If we want to, we can then incorporate these "on-target, not expressed" exons into a more robust on-target gdna density model.
+
+We need a simple, elegant procedure to accomplish these tasks. 
+
+Finally, we need exposure weights. In otherwords, we need to factor in the enrichment between 'on-target' and 'off-target' regions into the bayesian prior for EM
+
+OR we need a brilliant idea for handling the denominator for the gDNA component. Our EM normalizes transcripts by effective length and we need some sort of normalization for the gdna component as well, or a competing solution.
+
+
+Here is my current solution:
+
+This is exactly the kind of problem where principled Bayesian statistics shines. Your instinct to use the boundary flux as independent evidence to predict contained density is the key. It allows us to build a mathematically rigorous model that completely avoids hard classification (e.g., binning exons into groups 1-4) or manual heuristics.
+
+The fundamental invariant we can exploit is **geometry**: for any region $r$, the expected number of unspliced fragments is strictly proportional to its effective length opportunity ($L_{eff}$).
+
+By treating the regional density $\lambda_r$ as a continuous latent variable, we can solve this using an **Empirical Bayes Shrinkage Model (Poisson-Gamma Conjugacy)**. This provides a single, elegant framework that dynamically adapts to hybrid capture targeting.
+
+### The Formulation: Empirical Bayes Shrinkage Density Model
+
+#### 1. The Global Background Prior (Empirical Bayes)
+First, we use pure intergenic and deep intronic regions to learn the global "off-target" background distribution.
+Let $N_r = N_{contained} + N_{boundary}$ and $L_r = L_{c} + L_{b}$.
+We fit a global Gamma prior to the density of these background regions using maximum likelihood:
+$$ \lambda \sim \text{Gamma}(\alpha_0, \beta_0) $$
+- **$\mathbb{E}[\lambda_{off}] = \alpha_0 / \beta_0$** represents the base gDNA density across the whole genome.
+- In hybrid capture, $\alpha_0/\beta_0$ will naturally be very low due to off-target depletion.
+
+#### 2. Local Exposure Inference (The Shrinkage Posterior)
+For *any* fine region $r$ (including exons), the boundary flux $N_b$ acts as our independent targeting evidence. 
+Since $N_b \sim \text{Poisson}(\lambda_r L_b)$, applying Bayes rule updates our prior, yielding the **exact local density posterior**:
+$$ \lambda_r | N_b \sim \text{Gamma}(\alpha_0 + N_b, \beta_0 + L_b) $$
+
+This is where the magic happens:
+- **Off-target regions (Sparsity):** $N_b \approx 0$. Because local evidence is weak, density smoothly shrinks to the global background ($\alpha_0 / \beta_0$).
+- **On-target regions (Enrichment):** $N_b \gg \alpha_0$. The prior is overwhelmed, and the density confidently snaps to the empirical local exposure ($N_b / L_b$).
+
+#### 3. Predicting Contained gDNA (The Numerator & Upper Tail)
+We marginalize this Gamma posterior over the containment opportunity $L_c$ to get the predictive distribution for contained gDNA. Mathematically, Poisson-Gamma conjugacy resolves cleanly to a **Negative Binomial distribution**:
+$$ N_{c}^{\text{gDNA}} \sim \text{NegativeBinomial}\left(r = \alpha_0 + N_b,\ p = \frac{\beta_0 + L_b}{\beta_0 + L_b + L_c}\right) $$
+
+- **Expected gDNA:** $\mathbb{E}[N_c^{\text{gDNA}}] = \frac{\alpha_0 + N_b}{\beta_0 + L_b} L_c$
+- **The Conservative Upper Bound:** We simply query the exact quantile function of this Negative Binomial distribution (e.g., `scipy.stats.nbinom.ppf(0.99, r, p)`). This elegantly and naturally propagates both *sampling noise* and *exposure uncertainty*!
+
+#### 4. The Exposure Denominator (For EM)
+You asked for a brilliant idea for handling the EM normalization denominator for the gDNA component. The EM needs an exposure weight $A_r$. 
+This weight dynamically falls out as the ratio of expected local density to global background density:
+$$ A_r = \frac{\mathbb{E}[\lambda_r]}{\mathbb{E}[\lambda_{off}]} = \left( \frac{\alpha_0 + N_b}{\beta_0 + L_b} \right) \frac{\beta_0}{\alpha_0} $$
+This perfectly represents the true fold-enrichment (or depletion) of every individual region. 
+
+---
+
+### How this resolves your 4 Exon Groups without heuristics
+Because this operates on a continuous Gamma posterior, it eliminates the need to do "2nd passes" or hard, brittle partitioning of targets.
+1. **Expressed + Targeted:** Huge $N_b \rightarrow$ Posterior $\lambda$ is high $\rightarrow$ Predicts high gDNA. But the true $N_c$ (containing mature RNA) will still vastly exceed the 99th percentile bound.
+2. **Expressed + Off-target:** Low $N_b \rightarrow$ Posterior $\lambda$ shrinks to low background. True $N_c$ is high. Massive excess goes to RNA.
+3. **Not expressed + Targeted:** Huge $N_b \rightarrow$ Posterior $\lambda$ is high. True $N_c$ perfectly matches the Negative Binomial prediction. ZERO excess for RNA.
+4. **Not expressed + Off-target:** Low $N_b \rightarrow$ Shrinks to background. $N_c$ is low. ZERO excess for RNA.
+
+### Robustness to Nascent RNA
+Wait, if a region has extreme *nascent RNA* expression, won't nascent RNA cross the boundary and inflate $N_b$? 
+**Yes—and that is actually a feature.** Because nascent RNA shares the exact same geometric invariant ($L_c / L_b$) of unspliced gDNA, inflating $\lambda_r$ causes the model to conservatively subtract *both* gDNA and nascent RNA together automatically as the "unspliced background." The remainder ($N_c - k_{\text{max}}$) will securely and purely represent **mature RNA**, fully protecting your EM transcript abundance vectors from intronic/nascent noise.
+
+This framework gives you everything you asked for: mathematically pristine, no magic numbers, robust to hybrid capture, and a native way to surface continuous exposure weights to the EM.
+
+
+
 ## Phase 4
 
 
