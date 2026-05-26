@@ -271,3 +271,49 @@ Deviations from plan:
 Issues encountered:
 
 - The audit reinforces the same open modeling issue from Checkpoint 2: current calibration adds explicit extra prior count only to gDNA, while RNA has no matched calibrated prior gravity at the projection layer.
+
+### 2026-05-26 Design Checkpoint - Grouped RNA/gDNA Prior v2
+
+Progress:
+
+- Published `docs/prior/prior_redesign_v2.md` as the implementation plan for calibration-derived grouped RNA/gDNA priors.
+- Synthesized the Claude and Gemini prior-redesign proposals against the live `RegionCalibration` -> `PriorTable` -> native EM path.
+- Adopted the core group-prior design: calibration acts on the aggregate `gDNA` vs `sum RNA` simplex boundary, while the EM remains responsible for within-RNA transcript partitioning.
+- Specified additive pseudocount semantics (`alpha_gdna_add`, `alpha_rna_add`) rather than standard Dirichlet `alpha - 1` concentration notation, so calibration expected counts remain non-negative pseudo-fragment masses.
+- Added a phased implementation plan covering regional `mu_rna`, paired prior projection, native grouped MAP/VBEM updates, SQUAREM integration, output diagnostics, and benchmark tuning.
+
+Deviations from attached proposals:
+
+- Rejected gene-level RNA groups as a production inference primitive because Rigel internal inference must remain transcript-first; any future multi-group extension must use transcript-derived or region-derived groups.
+- Did not assume SQUAREM is automatically unaffected by the grouped projection; the plan requires grouped fixed-point steps, convergence guards, and benchmark validation.
+- Separated calibration prior strength from gDNA operating-point bias so sensitivity can be tuned without changing total prior budget.
+
+Issues encountered:
+
+- The main implementation risk is native EM surgery: the grouped prior must be applied inside every MAP/VBEM step, not only as initialization or a per-component prior vector.
+- `mu_rna` must be surfaced carefully from region-level calibration evidence so it protects RNA without manufacturing expression in background regions.
+
+### 2026-05-26 Design Checkpoint - Grouped RNA/gDNA Prior v3
+
+Progress:
+
+- Published `docs/prior/prior_redesign_v3.md` as the implementation-ready successor to the v2 plan after review.
+- Accepted the core review findings that v2's raw `m_g + m_r` budget was too hot, that `mu_rna` must not include spliced fragments, and that SQUAREM/grouped-prior behavior needs explicit instrumentation and fallback criteria.
+- Reframed the design around mass-conserving unspliced prior deconvolution: per region, `prior_gdna_unspliced + prior_rna_unspliced = prior_unspliced_total`, with spliced fragments excluded from prior pseudocount mass.
+- Replaced the v2 spliced-plus-residual `mu_rna` concept with a new `PriorMassDeconvolution` contract carrying unspliced total, gDNA mean, RNA mean, method, precision, and flags.
+- Specified a bounded prior budget with weaker-side balance, one-sided edge support, and a hard max count so calibration cannot inject raw expression-scale pseudocounts into highly expressed loci.
+- Revised gDNA availability semantics: remove `enable_gdna` as a Python/calibration policy input in the final path, derive native `has_gdna_candidate` structurally, and zero both prior sides when no gDNA candidate exists.
+- Preserved the user's non-negotiable all-RNA aggregate requirement: annotated mRNA and synthetic nRNA remain one RNA group; nRNA siphon benchmarks are diagnostic, not a trigger to split RNA groups.
+
+Deviations from v2:
+
+- v3 does not add a general `mu_rna` count to `RegionCalibration`; it adds unspliced-only paired prior masses.
+- v3 does not use raw `m_g + m_r` as the default prior budget and does not allow spliced evidence to become RNA prior pseudocount mass.
+- v3 no longer treats `enable_gdna` as a required Python-side prior-table field. Native may keep a temporary compatibility input during ABI migration, but production semantics should be derived from actual gDNA likelihood candidates.
+- v3 rejects the reviewed suggestion to split mature RNA and nRNA as a follow-up path; future fixes should improve regional deconvolution and operating-point defaults while keeping one aggregate RNA group.
+
+Issues encountered:
+
+- The key implementation risk shifts from inventing `mu_rna` to maintaining exact unspliced mass conservation through region deconvolution, geometry allocation, and locus prior budgeting.
+- Strand-uninformative data remain intentionally hard: unspliced nascent-like mass may enter the gDNA prior because strand balance cannot distinguish it from gDNA. This needs explicit benchmark reporting rather than hidden correction.
+- Native SQUAREM currently needs careful inspection before implementing acceptance-rate metrics; v3 requires at least step/clamp/nonfinite/fallback diagnostics even if a full line-search acceptance counter is not yet present.

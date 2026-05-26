@@ -1,5 +1,86 @@
 # TODO
 
+
+
+## Unimodel (noncapture) vs Bimodal (Capture) gDNA model
+
+We now had a four-state model capturing the 4 combinations of (expressed true/false) and (capture true/false). This appears to be quite elegant and may be capable of what we need.
+
+We have a strong biological foundation for seeding this model with (expressed=false, captured=false) regions that are intergenic/intronic and can further support this with strand-specific data to corroborate our "background" seed regions.
+
+We still have a fundamental question -- is this hybrid capture data? Or is it non-capture data? We don't know the answer to this question and hope to learn from the data.
+
+There are two approaches:
+
+1) The "who cares" approach? 
+
+Accurate prior estimation is the primary goal of calibration. If this can be done without explicitly modeling hybrid capture, then we don't need the complexity of a "two state" model.
+
+The premise is that "capture" amplifies certain regions and depletes others, hybrid capture can fail to enrich targets or produce modest enrichment. Thus, hybrid capture is not binary a the whole-library level or even at the per-probe level. Some probes work well on some targets. Other probes do not work well at all. Our goal should be to learn the amplification/depletion patterns. It doesn't really matter what the library prep was. What matters is accurately modeling gDNA vs RNA in the observed data. Non-capture data assumes "uniform". Modeling "capture" data allows for non-uniformity (enrichment of some regions, depletion of others).  
+
+This stance makes no assumptions and allows flexibility. It does not assume uniformity.
+
+2) The "explicit capture model" approach.
+
+This approach tries to answer the question "is this hybrid capture data or not?" and then model appropriately. If it is hybrid capture data, we need to define two states, 'captured', and 'not captured'. There is a global capture ratio and local capture ratios. If it is not hybrid capture data, we can assume uniformity. 
+
+If we adopt this as our goal, our method critically lacks a "positive control". We need a strategy to "seed" captured regions.
+
+My proposal would be to first estimate gDNA levels across all regions. We have our "background" regions that are not captured. We would then suppose that under a hybrid capture environment, at least some targets will be enriched. We would identify the regions with the highest levels of gDNA and assign them 'capture' state. Then allow our iterative algorithm to assign the remaining regions either 'capture' or 'no capture' status. We aren't doing this 'capture=true' seeding now. Do we need to? 
+
+--------
+
+In summary - we are at a crossroads in terms of how to set up our new calibration system. Either we adopt a 1) "model allows for flexible, non-uniform enrichment patterns across regions" approach tha accommodate capture and non-capture data, or 2) "detect capture mode first, and model it as two states" approach.
+
+I need guidance on what to do.. and then advice on how to do it.
+
+
+### Guidance: How v6 Resolves the Crossroads
+
+You do not need to make a hard binary choice between **Approach 1 (flexible, non-uniform enrichment)** and **Approach 2 (explicit capture mode pre-detection)**.
+
+The architecture laid out in **New Calibration Plan v6** already synthesizes both ideas into a single framework. It acts as a continuous, self-gating model that naturally behaves like Approach 1 when capture is absent or weak, and smoothly unfolds into Approach 2 when strong capture enrichment is present.
+
+#### Why this Unified Approach Beats a Discrete Switch
+
+1. **Avoids Brittle Thresholds & Manual Seeding:** Explicitly detecting the library type upfront or hard-seeding "captured" regions based on top gDNA counts introduces arbitrary thresholds. This creates failure modes when capture enrichment is modest, highly variable across probes, or non-uniform at a whole-library level.
+2. **Natural State Collapse:** By introducing an internal tracking parameter called `capture_enrichment_target`, the distinction between captured and off-target states organically collapses if the data is uniform (non-capture). If `capture_enrichment_target == 1.0`, the expected densities for both states are identical, reducing the model down to a uniform density assumption without changing code paths.
+3. **No Seeding Needed for Capture:** You do not need to manually seed `capture=true` regions. The combination of structural background anchors (`state_log_prior` and `background.seed_mask`) along with regional boundary sweeps provides enough mathematical asymmetry for the EM iterations to organically separate enriched regions from background regions.
+
+---
+
+### Advice: How to Implement It
+
+To execute this unified strategy successfully under the v6 plan, implement the calibration loop using an adaptive parameter tracking framework:
+
+#### 1. Initialization and Collapse Gating
+
+* Initialize `capture_enrichment_target = 1.0` at the start of the calibration loop.
+* Keep this variable strictly as an internal stabilizer, never exposing it as a user-facing knob.
+
+#### 2. The Anchor-and-Sweep E-Step
+
+Instead of seeding positive captured regions, use structural annotation priors and localized boundary signals to let enrichment bubble up naturally:
+
+* **The Background Anchor:** Seed *only* the baseline background using `background.seed_mask` (identifying intergenic/intronic regions with no expression). Apply this as a soft prior boost in the `state_log_prior` for the first 1–2 passes rather than a permanent hard label clamp.
+* **The Boundary Sweep Drive:** Let the local boundary-to-contained predictions and the sequential forward/reverse boundary scans propagate regional excess gDNA evidence into adjacent intervals. Heavily enriched captured regions will exhibit large boundary-imputed gDNA counts that deviate strongly from the low off-target background density `rho_off`.
+* **Log Bayes Factors:** Assemble the `logBF_gdna_density` and `logBF_capture` terms into the state log tensor. On pass 0 (where `capture_enrichment_target` is exactly `1.0`), the log Bayes factor between captured and off-target density evaluates to zero, meaning the model starts by treating everything uniformly.
+
+#### 3. The Adaptive M-Step Refit
+
+* **Posterior Aggregation:** At the end of each pass, compute the total captured posterior weight across all regions (`p_gdna_only_capture + p_expressed_capture`).
+* **Target Updating:** If there is strong, widespread posterior evidence of regional enrichment, update `capture_enrichment_target` from the captured-weighted gDNA density relative to `rho_off`.
+* **Damping and Floors:** Apply a strict floor of `capture_enrichment_target >= 1.0` so it can never mistakenly model a "negative capture" depletion. Use a fixed internal damping scalar (such as `eta = 0.5`) to smooth the update across passes and prevent numerical oscillation:
+
+$$\theta_{next} = (1 - \eta) \cdot \theta_{current} + \eta \cdot \hat{\theta}$$
+
+
+
+By configuring the loop this way, non-capture libraries will keep `capture_enrichment_target` pinned at or near `1.0`, keeping the states collapsed and fulfilling the uniform assumption. For hybrid capture libraries, strong boundary signals will pull the target upward, automatically activating the bimodal behavior without requiring any upfront classification or risky manual positive seeding.
+
+
+
+
 ## Capture affect on RNA expression
 
 Hybrid capture panels are designed intentionally to enrich certain transcripts and deplete others. We understand that capture completely alters TPM! That is the point! You are interpreting this as a "failure", but it is the reason we design capture panels in the first place. Stop trying to measure capture results against the non-capture baseline. That is silly and leads to wasted effort trying to make capture vs non-capture data comparable. It's not! We fundamentally change the RNA landscape by capturing certain transcripts but not others. This creates a new baseline.. one which is fundamentally altered relative to non-capture data. Accept this and move on.
