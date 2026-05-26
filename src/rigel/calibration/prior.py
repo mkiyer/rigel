@@ -1,4 +1,4 @@
-"""Projection of fused regional gDNA evidence onto MultiLocus EM inputs."""
+"""Projection of v6 regional calibration evidence onto MultiLocus EM inputs."""
 
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ COUNT_ALLOC_MIDPOINT: int = 2
 COUNT_ALLOC_SPAN: int = 3
 
 _INT64_MIN: int = -(2**63)
-_GDNA_ENABLE_UPPER_EPS: float = 1.0e-6
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +81,7 @@ def assemble_priors(
     index: "TranscriptIndex",
     calibration: "CalibrationResult",
 ) -> PriorTable:
-    """Assemble gDNA prior counts, denominators, and eligibility for EM."""
+    """Assemble gDNA prior counts, denominators, and native EM eligibility."""
     n_loci = len(multi_loci)
     if n_loci == 0:
         return _empty_prior_table()
@@ -90,13 +89,15 @@ def assemble_priors(
         raise RuntimeError(
             "assemble_priors: index has no region table. Rebuild the index with current rigel."
         )
-    if calibration.fused_region_gdna is None:
-        raise ValueError("assemble_priors: calibration.fused_region_gdna is required.")
+    region_calibration = getattr(calibration, "region_calibration", None)
+    if region_calibration is None:
+        raise ValueError("assemble_priors: calibration.region_calibration is required.")
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
-    fused = calibration.fused_region_gdna
-    if np.asarray(fused.mean_count).shape != region_arrays.start.shape:
-        raise ValueError("assemble_priors: fused region evidence is not aligned to index regions.")
+    region_mean = np.asarray(region_calibration.mu_gdna, dtype=np.float64)
+    region_upper = np.asarray(region_calibration.upper_gdna, dtype=np.float64)
+    if region_mean.shape != region_arrays.start.shape or region_upper.shape != region_arrays.start.shape:
+        raise ValueError("assemble_priors: RegionCalibration arrays are not aligned to index regions.")
 
     gdna_expected = np.zeros(n_loci, dtype=np.float64)
     gdna_upper = np.zeros(n_loci, dtype=np.float64)
@@ -107,8 +108,8 @@ def assemble_priors(
     unallocated_expected, unallocated_upper = _allocate_counts_by_geometry(
         region_arrays=region_arrays,
         multi_loci=multi_loci,
-        fused_mean=np.asarray(fused.mean_count, dtype=np.float64),
-        fused_upper=np.asarray(fused.upper_count, dtype=np.float64),
+        region_mean=region_mean,
+        region_upper=region_upper,
         gdna_expected=gdna_expected,
         gdna_upper=gdna_upper,
         n_regions_touched=n_regions_touched,
@@ -129,7 +130,7 @@ def assemble_priors(
         weight = bp_weighted_mean_exposure_over_blocks(
             blocks=[(loc.ref_id, loc.start, loc.end) for loc in locus.loci],
             region_arrays=region_arrays,
-            exposure=calibration.region_exposure,
+            exposure=region_calibration,
         )
         gdna_eff_len_unweighted[lid] = float(unweighted)
         gdna_em_exposure_weight[lid] = float(weight)
@@ -139,8 +140,7 @@ def assemble_priors(
         [enable_gdna_for_multilocus(locus, em_data) for locus in multi_loci],
         dtype=bool,
     )
-    evidence_enable = gdna_upper > _GDNA_ENABLE_UPPER_EPS
-    enable_gdna = (candidate_enable & evidence_enable).astype(np.uint8)
+    enable_gdna = candidate_enable.astype(np.uint8)
     n_units_used_for_diagnostics = np.array(
         [_count_diagnostic_units(locus, em_data) for locus in multi_loci],
         dtype=np.int64,
@@ -182,8 +182,8 @@ def _allocate_counts_by_geometry(
     *,
     region_arrays: RegionArrays,
     multi_loci: list["MultiLocus"],
-    fused_mean: np.ndarray,
-    fused_upper: np.ndarray,
+    region_mean: np.ndarray,
+    region_upper: np.ndarray,
     gdna_expected: np.ndarray,
     gdna_upper: np.ndarray,
     n_regions_touched: np.ndarray,
@@ -209,8 +209,8 @@ def _allocate_counts_by_geometry(
         lo = int(region_arrays.ref_offsets[ref_id])
         hi = int(region_arrays.ref_offsets[ref_id + 1])
         if not blocks:
-            unallocated_expected += float(np.sum(fused_mean[lo:hi]))
-            unallocated_upper += float(np.sum(fused_upper[lo:hi]))
+            unallocated_expected += float(np.sum(region_mean[lo:hi]))
+            unallocated_upper += float(np.sum(region_upper[lo:hi]))
             continue
 
         block_starts = np.array([b[0] for b in blocks], dtype=np.int64)
@@ -233,16 +233,16 @@ def _allocate_counts_by_geometry(
 
             raw_total = float(sum(raw_by_locus.values()))
             if raw_total <= 0.0:
-                unallocated_expected += float(fused_mean[region_idx])
-                unallocated_upper += float(fused_upper[region_idx])
+                unallocated_expected += float(region_mean[region_idx])
+                unallocated_upper += float(region_upper[region_idx])
                 continue
 
             touches_multiple = len(raw_by_locus) > 1
             partial_coverage = raw_total < 1.0 - 1.0e-9
             for lid, raw_share in raw_by_locus.items():
                 share = float(raw_share / raw_total)
-                expected_share = share * float(fused_mean[region_idx])
-                upper_share = share * float(fused_upper[region_idx])
+                expected_share = share * float(region_mean[region_idx])
+                upper_share = share * float(region_upper[region_idx])
                 gdna_expected[lid] += expected_share
                 gdna_upper[lid] += upper_share
                 n_regions_touched[lid] += 1

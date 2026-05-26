@@ -1,4 +1,4 @@
-"""Top-level calibration orchestrator."""
+"""Top-level calibration orchestrator for the v6 clean cutover."""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ from .fl import (
     build_fl_models,
 )
 from .scan_payload import CalibrationScanPayload
-from .exposure import RegionExposure
 from .strand_deconv import (
+    build_compartment_strand_counts,
     build_strand_region_counts,
-    deconvolve_regions_by_strand,
+    deconvolve_compartments_by_strand,
     estimate_kappa_d,
 )
-from .strand_summary import StrandSummary
+from .strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR, StrandSummary
 
 if TYPE_CHECKING:
     from ..frag_length_model import FragmentLengthModels
@@ -31,6 +31,18 @@ if TYPE_CHECKING:
 
 
 __all__ = ["calibrate"]
+
+
+def _strand_summary_identifiable(
+    strand_summary: StrandSummary,
+    *,
+    confidence: float = 0.99,
+) -> bool:
+    effective_min = max(
+        STRAND_CONTRAST_NUMERICAL_FLOOR,
+        strand_summary.signed_strand_contrast_margin(confidence=confidence),
+    )
+    return abs(strand_summary.signed_strand_contrast) >= effective_min
 
 
 def calibrate(
@@ -45,9 +57,10 @@ def calibrate(
     rna_lower_confidence: float = 0.95,
     gdna_density_confidence: float = 0.95,
     density_min_eff_length: float = 1.0,
-    density_max_exposure: float | None = None,
+    background_trim_fraction: float = 0.01,
+    max_calibration_passes: int = 5,
 ) -> CalibrationResult:
-    """Run the calibration stages that are live before locus EM."""
+    """Run the v6 calibration stages that feed locus EM."""
     if not (0.5 <= rna_lower_confidence < 1.0):
         raise ValueError(
             f"calibrate: rna_lower_confidence must be in [0.5, 1.0); got {rna_lower_confidence}."
@@ -61,9 +74,15 @@ def calibrate(
         raise ValueError(
             f"calibrate: density_min_eff_length must be >= 0; got {density_min_eff_length}."
         )
-    if density_max_exposure is not None and not (density_max_exposure > 0.0):
+    if not (0.0 <= float(background_trim_fraction) < 1.0):
         raise ValueError(
-            f"calibrate: density_max_exposure must be None or > 0; got {density_max_exposure}."
+            "calibrate: background_trim_fraction must be in [0, 1); "
+            f"got {background_trim_fraction}."
+        )
+    if int(max_calibration_passes) < 1:
+        raise ValueError(
+            "calibrate: max_calibration_passes must be >= 1; "
+            f"got {max_calibration_passes}."
         )
     if index.region_df is None:
         raise RuntimeError(
@@ -83,22 +102,20 @@ def calibrate(
     )
 
     from ._arrays import PayloadArrays, RegionArrays
-    from .density_model import fit_density_evidence
+    from .background_model import fit_background_model
+    from .boundaries import build_boundary_table
+    from .calibration_iteration import run_calibration_iteration
     from .density_observation import build_density_observation
-    from .integration import fuse_density_and_strand
     from .region_count_ledger import build_region_count_ledger
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
     ledger = build_region_count_ledger(payload_arrays)
     observation = build_density_observation(region_arrays, ledger, fl_models.gdna)
-    density_evidence = fit_density_evidence(
-        observation,
-        confidence=float(gdna_density_confidence),
-        min_eff_length=float(density_min_eff_length),
-    )
+
     if strand_summary is None:
         strand_summary = StrandSummary.uninformative()
+    strand_usable = _strand_summary_identifiable(strand_summary)
 
     strand_counts = build_strand_region_counts(
         region_arrays,
@@ -112,38 +129,46 @@ def calibrate(
         strand_summary,
         rna_lower_confidence=rna_lower_confidence,
     )
-    region_gdna = deconvolve_regions_by_strand(
-        strand_counts,
+    compartment_counts = build_compartment_strand_counts(
+        region_arrays,
+        payload_arrays,
+        p_r1_sense=strand_summary.p_r1_sense,
+    )
+    strand_channels = deconvolve_compartments_by_strand(
+        compartment_counts,
         kappa_d=kappa_d.kappa,
         rna_lower_confidence=rna_lower_confidence,
-        kappa_d_n_seed_regions=kappa_d.n_seed_regions,
-        kappa_d_n_exon_self_training=kappa_d.n_exon_self_training,
-        kappa_d_fallback_used=kappa_d.fallback_used,
     )
-    fused_region_gdna = fuse_density_and_strand(
-        region_arrays=region_arrays,
-        ledger=ledger,
-        density_observation=observation,
-        density_evidence=density_evidence,
-        strand_counts=strand_counts,
-        strand_summary=strand_summary,
-        kappa_d=kappa_d.kappa,
-        confidence=rna_lower_confidence,
+    calibration_strand_channels = strand_channels if strand_usable else None
+
+    background = fit_background_model(
+        observation,
+        calibration_strand_channels,
+        top_t_fraction=float(background_trim_fraction),
+        min_eff_length=float(density_min_eff_length),
     )
-    region_exposure = RegionExposure.from_density(
-        density_evidence,
-        max_exposure=density_max_exposure,
+    boundaries = build_boundary_table(
+        region_arrays,
+        ledger,
+        observation.boundary_left_leff,
+    )
+    region_calibration = run_calibration_iteration(
+        region_arrays,
+        observation,
+        boundaries,
+        background,
+        strand_channels=calibration_strand_channels,
+        max_calibration_passes=int(max_calibration_passes),
+        confidence=float(gdna_density_confidence),
     )
 
     return build_calibration_result(
         payload=payload,
         scan_trained=scan_trained,
-        density_evidence=density_evidence,
         fl_models=fl_models,
         fl_prior_ess=fl_prior_ess,
         region_signature=region_arrays.signature,
-        region_gdna=region_gdna,
-        region_exposure=region_exposure,
-        fused_region_gdna=fused_region_gdna,
+        region_calibration=region_calibration,
+        strand_channels=strand_channels,
         rna_lower_confidence=rna_lower_confidence,
     )

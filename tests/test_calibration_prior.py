@@ -1,4 +1,4 @@
-"""Tests for fused regional prior allocation onto MultiLocus EM inputs."""
+"""Tests for RegionCalibration prior allocation onto MultiLocus EM inputs."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.exposure import RegionExposure
-from rigel.calibration.integration import FusedRegionGdnaEvidence
+from rigel.calibration.calibration_iteration import RegionCalibration
 from rigel.calibration.prior import (
     COUNT_ALLOC_GEOMETRY,
     assemble_priors,
@@ -41,30 +40,40 @@ def _index(region_rows: list[tuple[int, int]]) -> SimpleNamespace:
     )
 
 
-def _fused(mean: list[float], upper: list[float] | None = None) -> FusedRegionGdnaEvidence:
+def _region_calibration(
+    mean: list[float],
+    upper: list[float] | None = None,
+    exposure: list[float] | None = None,
+) -> RegionCalibration:
     mean_arr = np.asarray(mean, dtype=np.float32)
     upper_arr = np.asarray(upper if upper is not None else mean, dtype=np.float32)
-    zeros = np.zeros(mean_arr.size, dtype=np.float32)
-    return FusedRegionGdnaEvidence(
-        mean_count=mean_arr,
-        upper_count=upper_arr,
-        variance_count=zeros.copy(),
-        rna_lower_count=zeros.copy(),
-        observed_compatible_count=mean_arr.copy(),
-        density_weight=np.ones(mean_arr.size, dtype=np.float32),
-        strand_weight=zeros.copy(),
-        density_applicable=np.ones(mean_arr.size, dtype=bool),
-        strand_applicable=np.zeros(mean_arr.size, dtype=bool),
-        tail_probability=zeros.copy(),
-        expected_tail_count=zeros.copy(),
-        flags=np.zeros(mean_arr.size, dtype=np.uint8),
+    exposure_arr = np.asarray(
+        exposure if exposure is not None else np.ones(mean_arr.size, dtype=np.float32),
+        dtype=np.float32,
+    )
+    region_count = int(mean_arr.size)
+    p_states = np.zeros((region_count, 4), dtype=np.float32)
+    p_states[:, 0] = 1.0
+    return RegionCalibration(
+        p_states=p_states,
+        mu_gdna=mean_arr,
+        upper_gdna=upper_arr,
+        rna_lower=np.zeros(region_count, dtype=np.float32),
+        A_r=exposure_arr,
+        gamma_r=exposure_arr.copy(),
+        rho_off=0.01,
+        kappa_d=None,
+        capture_enrichment_target=1.0,
+        n_passes=1,
+        converged=True,
+        flags=np.zeros(region_count, dtype=np.uint16),
+        pass_diagnostics=(),
     )
 
 
-def _calibration(fused: FusedRegionGdnaEvidence) -> SimpleNamespace:
+def _calibration(region_calibration: RegionCalibration) -> SimpleNamespace:
     return SimpleNamespace(
-        fused_region_gdna=fused,
-        region_exposure=RegionExposure.uniform(int(fused.mean_count.size)),
+        region_calibration=region_calibration,
         fl_models=SimpleNamespace(gdna=_delta_fl(50)),
     )
 
@@ -104,7 +113,7 @@ def test_geometry_allocation_conserves_mass_for_disjoint_loci() -> None:
         multi_loci=loci,
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([10.0, 20.0], [12.0, 24.0])),
+        calibration=_calibration(_region_calibration([10.0, 20.0], [12.0, 24.0])),
     )
 
     np.testing.assert_allclose(priors.gdna_expected_count, np.array([10.0, 20.0]))
@@ -123,7 +132,7 @@ def test_geometry_allocation_reports_regions_touching_multiple_loci() -> None:
         multi_loci=loci,
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([10.0])),
+        calibration=_calibration(_region_calibration([10.0])),
     )
 
     np.testing.assert_allclose(priors.gdna_expected_count, np.array([5.0, 5.0]))
@@ -140,7 +149,7 @@ def test_geometry_allocation_reports_partial_coverage_mass() -> None:
         multi_loci=loci,
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([10.0])),
+        calibration=_calibration(_region_calibration([10.0])),
     )
 
     assert priors.gdna_expected_count[0] == pytest.approx(10.0)
@@ -156,7 +165,7 @@ def test_zero_expected_prior_with_positive_upper_still_enables_gdna() -> None:
         multi_loci=[locus],
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([0.0], [2.0])),
+        calibration=_calibration(_region_calibration([0.0], [2.0])),
     )
 
     assert priors.gdna_prior_count_em[0] == pytest.approx(0.0)
@@ -164,7 +173,7 @@ def test_zero_expected_prior_with_positive_upper_still_enables_gdna() -> None:
     assert enable_gdna_for_multilocus(locus, em_data) is True
 
 
-def test_zero_upper_bound_disables_gdna_even_with_candidate() -> None:
+def test_zero_upper_bound_keeps_native_gdna_eligible_with_candidate() -> None:
     index = _index([(0, 100)])
     locus = _ml(0, 0, 100, [0, 1])
     em_data = _em_data(is_spliced=[True, False], gdna_log_liks=[-np.inf, -1.0])
@@ -173,12 +182,12 @@ def test_zero_upper_bound_disables_gdna_even_with_candidate() -> None:
         multi_loci=[locus],
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([0.0], [0.0])),
+        calibration=_calibration(_region_calibration([0.0], [0.0])),
     )
 
     assert priors.gdna_prior_count_em[0] == pytest.approx(0.0)
     assert priors.gdna_upper_count[0] == pytest.approx(0.0)
-    assert priors.enable_gdna[0] == 0
+    assert priors.enable_gdna[0] == 1
     assert enable_gdna_for_multilocus(locus, em_data) is True
 
 
@@ -191,7 +200,7 @@ def test_all_spliced_locus_is_ineligible_even_with_positive_prior() -> None:
         multi_loci=[locus],
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([10.0])),
+        calibration=_calibration(_region_calibration([10.0])),
     )
 
     assert priors.gdna_prior_count_em[0] > 0.0
@@ -207,8 +216,26 @@ def test_uniform_exposure_keeps_weighted_denominator_equal_to_unweighted() -> No
         multi_loci=[locus],
         em_data=em_data,
         index=index,
-        calibration=_calibration(_fused([10.0])),
+        calibration=_calibration(_region_calibration([10.0])),
     )
 
     assert priors.gdna_eff_len[0] == pytest.approx(priors.gdna_eff_len_unweighted[0])
     assert priors.gdna_em_exposure_weight[0] == pytest.approx(1.0)
+
+
+def test_region_calibration_exposure_weights_denominator() -> None:
+    index = _index([(0, 100)])
+    locus = _ml(0, 0, 100, [0])
+    em_data = _em_data(is_spliced=[False], gdna_log_liks=[-1.0])
+
+    priors = assemble_priors(
+        multi_loci=[locus],
+        em_data=em_data,
+        index=index,
+        calibration=_calibration(_region_calibration([10.0], exposure=[2.5])),
+    )
+
+    assert priors.gdna_eff_len[0] == pytest.approx(
+        priors.gdna_eff_len_unweighted[0] * 2.5
+    )
+    assert priors.gdna_em_exposure_weight[0] == pytest.approx(2.5)

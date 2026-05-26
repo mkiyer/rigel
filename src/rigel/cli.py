@@ -591,7 +591,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
     _ParamSpec("rna_lower_confidence", "calibration.rna_lower_confidence"),
     _ParamSpec("gdna_density_confidence", "calibration.gdna_density_confidence"),
-    _ParamSpec("density_max_exposure", "calibration.density_max_exposure"),
+    _ParamSpec("background_trim_fraction", "calibration.background_trim_fraction"),
+    _ParamSpec("max_calibration_passes", "calibration.max_calibration_passes"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1195,19 +1196,26 @@ def build_parser() -> argparse.ArgumentParser:
         dest="gdna_density_confidence",
         type=float,
         default=None,
-        help="Posterior confidence level for the gDNA density-prior upper "
-        "bound emitted by the v4 fine-region density model. Must be in "
+        help="Posterior confidence level for regional gDNA upper bounds "
+        "emitted by the v6 calibration path. Must be in "
         "[0.5, 1.0); default: 0.95.",
     )
     adv.add_argument(
-        "--density-max-exposure",
-        dest="density_max_exposure",
+        "--background-trim-fraction",
+        dest="background_trim_fraction",
         type=float,
         default=None,
-        help="Optional upper clip on the per-region relative-exposure A_r "
-        "produced by RegionExposure.from_density. Density-derived A_r may "
-        "exceed 1 by design; set this flag (>0) to cap A_r via "
-        "np.minimum. Default: unset (no clip).",
+        help="Fraction of initial background-like seed regions with the highest "
+        "contained gDNA-compatible density to exclude from the v6 off-target "
+        "background fit. Must be in [0, 1); default: 0.01.",
+    )
+    adv.add_argument(
+        "--max-calibration-passes",
+        dest="max_calibration_passes",
+        type=int,
+        default=None,
+        help="Maximum number of v6 four-state calibration passes before "
+        "accepting the latest regional posterior tensor. Default: 5.",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",

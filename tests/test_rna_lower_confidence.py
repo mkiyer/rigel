@@ -110,50 +110,74 @@ def test_param_spec_registers_rna_lower_confidence():
 
 def test_calibration_result_summary_echoes_rna_lower_confidence(monkeypatch):
     """``to_summary_dict`` advertises the knob under ``calibration_config``."""
+    from rigel.calibration.background_model import BackgroundModel
+    from rigel.calibration.boundary_model import BoundaryLocalPosterior
+    from rigel.calibration.boundary_sweep import BoundarySweepResult
+    from rigel.calibration.calibration_iteration import RegionCalibration
     from rigel.calibration._diagnostics import Diagnostics
     from rigel.calibration._result import CalibrationResult
-    from rigel.calibration.density_model import DensityEvidence
-    from rigel.calibration.exposure import RegionExposure
     from rigel.calibration.fl import FLModels
-    from rigel.calibration.strand_deconv import RegionGdnaEstimate
 
     monkeypatch.setattr(FLModels, "to_summary_dict", lambda self: {}, raising=True)
     monkeypatch.setattr(Diagnostics, "to_summary_dict", lambda self: {}, raising=True)
 
     fl_models = FLModels.__new__(FLModels)
     diagnostics = Diagnostics.__new__(Diagnostics)
-    density_evidence = DensityEvidence(
-        rho_post=np.zeros(0, dtype=np.float64),
-        relative_exposure=np.zeros(0, dtype=np.float64),
-        mean_unbounded=np.zeros(0, dtype=np.float64),
-        upper_unbounded=np.zeros(0, dtype=np.float64),
-        prior_family=np.zeros(0, dtype=np.uint8),
-        fallback_depth=np.zeros(0, dtype=np.uint8),
-        flags=np.zeros(0, dtype=np.uint8),
-        confidence=0.95,
-        priors={},
-        rho_ref=0.0,
-        rho_ref_source="ZERO",
+    region_calibration = RegionCalibration(
+        p_states=np.zeros((0, 4), dtype=np.float32),
+        mu_gdna=np.zeros(0, dtype=np.float32),
+        upper_gdna=np.zeros(0, dtype=np.float32),
+        rna_lower=np.zeros(0, dtype=np.float32),
+        A_r=np.zeros(0, dtype=np.float32),
+        gamma_r=np.zeros(0, dtype=np.float32),
+        rho_off=0.0,
+        kappa_d=None,
+        capture_enrichment_target=1.0,
+        n_passes=1,
+        converged=True,
+        flags=np.zeros(0, dtype=np.uint16),
+        pass_diagnostics=(),
+    )
+    background = BackgroundModel(
+        rho_off_alpha=1.0,
+        rho_off_beta=1.0,
+        rho_off_mean=1.0,
+        seed_mask=np.zeros(0, dtype=bool),
+        top_t_exclusion_mask=np.zeros(0, dtype=bool),
+        n_seed_regions=0,
+        n_fragments=0.0,
+        eff_length=0.0,
+        fit_status="prior_only",
+        flags=np.zeros(0, dtype=np.uint16),
+    )
+    local = BoundaryLocalPosterior(
+        alpha_excess=np.zeros(0, dtype=np.float64),
+        beta_excess=np.zeros(0, dtype=np.float64),
+        mu_local=np.zeros(0, dtype=np.float32),
+        upper_local=np.zeros(0, dtype=np.float32),
+        flags=np.zeros(0, dtype=np.uint16),
+    )
+    sweep = BoundarySweepResult(
+        alpha_excess=np.zeros(0, dtype=np.float64),
+        beta_excess=np.zeros(0, dtype=np.float64),
+        forward_alpha_excess=np.zeros(0, dtype=np.float64),
+        forward_beta_excess=np.zeros(0, dtype=np.float64),
+        reverse_alpha_excess=np.zeros(0, dtype=np.float64),
+        reverse_beta_excess=np.zeros(0, dtype=np.float64),
+        mu_sweep=np.zeros(0, dtype=np.float32),
+        upper_sweep=np.zeros(0, dtype=np.float32),
+        transfer_weight=np.zeros(0, dtype=np.float64),
+        flags=np.zeros(0, dtype=np.uint16),
     )
 
     result = CalibrationResult(
-        density_evidence=density_evidence,
         fl_models=fl_models,
         diagnostics=diagnostics,
-        region_gdna=RegionGdnaEstimate(
-            n_total=np.zeros(0, dtype=np.float32),
-            mean_count=np.zeros(0, dtype=np.float32),
-            upper_count=np.zeros(0, dtype=np.float32),
-            rna_lower_count=np.zeros(0, dtype=np.float32),
-            precision=np.zeros(0, dtype=np.float32),
-            flags=np.zeros(0, dtype=np.uint8),
-            kappa_d=2.0,
-            kappa_d_n_seed_regions=0,
-            kappa_d_n_exon_self_training=0,
-            p_r1_sense=0.5,
-            rna_lower_confidence=0.97,
-        ),
-        region_exposure=RegionExposure.uniform(0),
+        region_calibration=region_calibration,
+        strand_channels=None,
+        background_model=background,
+        boundary_local=local,
+        boundary_sweep=sweep,
         rna_lower_confidence=0.97,
     )
     summary = result.to_summary_dict()

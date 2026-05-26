@@ -238,23 +238,23 @@ class CalibrationConfig:
     #: the single statistical knob exposed by v5 strand deconvolution.
     rna_lower_confidence: float = 0.95
 
-    #: Posterior confidence level for the gDNA density-prior upper bound
-    #: ``upper_unbounded = B_tot + nbinom.ppf(confidence, alpha_post, p_nb)``
-    #: produced by :func:`rigel.calibration.density_model.fit_density_evidence`.
+    #: Posterior confidence level for regional gDNA upper bounds produced by
+    #: the v6 boundary/local/sweep predictors and ``RegionCalibration``.
     #: Must lie in ``[0.5, 1.0)``.
     gdna_density_confidence: float = 0.95
 
     #: Minimum effective length (bp under the gDNA fragment-length model)
-    #: required for a region to enter the background gDNA density prior fit.
-    #: Regions below this threshold are flagged ineligible for prior fitting
-    #: but still receive per-region posteriors via the depth-2 fallback.
+    #: required for a region to enter the v6 off-target background seed fit.
     density_min_eff_length: float = 1.0
 
-    #: Optional upper clip on the per-region relative-exposure ``A_r``
-    #: produced by :meth:`rigel.calibration.exposure.RegionExposure.from_density`.
-    #: ``None`` (default) leaves ``A_r`` unclipped so density-derived exposure
-    #: can exceed 1. A positive float caps ``A_r`` via ``np.minimum``.
-    density_max_exposure: float | None = None
+    #: Fraction of initial background-like seed regions with the highest
+    #: contained gDNA-compatible density to exclude from the off-target
+    #: background fit.
+    background_trim_fraction: float = 0.01
+
+    #: Maximum number of v6 four-state calibration passes before accepting the
+    #: latest posterior state tensor.
+    max_calibration_passes: int = 5
 
     def __post_init__(self) -> None:
         if not (0.5 <= self.rna_lower_confidence < 1.0):
@@ -272,12 +272,15 @@ class CalibrationConfig:
                 "CalibrationConfig.density_min_eff_length must be >= 0; "
                 f"got {self.density_min_eff_length}."
             )
-        if self.density_max_exposure is not None and not (
-            self.density_max_exposure > 0.0
-        ):
+        if not (0.0 <= self.background_trim_fraction < 1.0):
             raise ValueError(
-                "CalibrationConfig.density_max_exposure must be None or > 0; "
-                f"got {self.density_max_exposure}."
+                "CalibrationConfig.background_trim_fraction must be in [0, 1); "
+                f"got {self.background_trim_fraction}."
+            )
+        if self.max_calibration_passes < 1:
+            raise ValueError(
+                "CalibrationConfig.max_calibration_passes must be >= 1; "
+                f"got {self.max_calibration_passes}."
             )
 
 

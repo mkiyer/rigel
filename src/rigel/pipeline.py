@@ -881,17 +881,17 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Quantify buffered fragments with fused calibration priors and locus EM."""
+    """Quantify buffered fragments with RegionCalibration priors and locus EM."""
     if calibration is None:
         raise ValueError(
             "quant_from_buffer() requires a v6 CalibrationResult "
             "(got None).  Run rigel.calibration.calibrate(...) before "
             "locus-level quantification."
         )
-    if calibration.fused_region_gdna is None:
+    if getattr(calibration, "region_calibration", None) is None:
         raise ValueError(
-            "quant_from_buffer() requires calibration.fused_region_gdna. "
-            "Run the current rigel.calibration.calibrate(...) before quantification."
+            "quant_from_buffer() requires calibration.region_calibration. "
+            "Run rigel.calibration.calibrate(...) before quantification."
         )
     if index.region_df is None:
         raise RuntimeError(
@@ -1052,12 +1052,26 @@ def run_pipeline(
         rna_lower_confidence=cal_cfg.rna_lower_confidence,
         gdna_density_confidence=cal_cfg.gdna_density_confidence,
         density_min_eff_length=cal_cfg.density_min_eff_length,
-        density_max_exposure=cal_cfg.density_max_exposure,
+        background_trim_fraction=cal_cfg.background_trim_fraction,
+        max_calibration_passes=cal_cfg.max_calibration_passes,
     )
     cal_summary = calibration.to_summary_dict()
+    rc_summary = cal_summary["region_calibration"]
     logger.info(
         "[CAL] v6 quality=%s",
         cal_summary["fl_models"]["gdna_quality"],
+    )
+    logger.info(
+        "[CAL] rho_off=%.6g passes=%d converged=%s",
+        rc_summary["rho_off"],
+        rc_summary["n_passes"],
+        rc_summary["converged"],
+    )
+    logger.info(
+        "[CAL] A_r mean/p99/max=%.4g/%.4g/%.4g",
+        rc_summary["A_r"]["mean"],
+        rc_summary["A_r"]["p99"],
+        rc_summary["A_r"]["max"],
     )
 
     # -- Annotation table for second BAM pass (opt-in) --

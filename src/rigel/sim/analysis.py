@@ -275,6 +275,7 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
             continue
 
         cal = summary.get("calibration", {})
+        region_calibration = cal.get("region_calibration", {}) or {}
         density_priors = cal.get("density_evidence", {}).get("priors", {}) or {}
         fl = cal.get("fl_models", {})
 
@@ -285,8 +286,13 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
             except (TypeError, ValueError):
                 return 0.0
 
-        rho_ig = _prior_mean("INTERGENIC")
-        rho_in = _prior_mean("INTRON")
+        rho_off = region_calibration.get("rho_off")
+        if rho_off is not None:
+            rho_ig = float(rho_off)
+            rho_in = float(rho_off)
+        else:
+            rho_ig = _prior_mean("INTERGENIC")
+            rho_in = _prior_mean("INTRON")
         rho_ex = 0.0  # v4: EXON-INTRON density family removed
         fl_rna = fl.get("rna_fl_mean", 0)
         fl_gdna = fl.get("gdna_fl_mean", 0)

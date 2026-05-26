@@ -69,10 +69,9 @@ def bp_weighted_mean_exposure_over_blocks(
 ) -> float:
     """Return bp-weighted mean ``A_r`` over merged genomic blocks.
 
-    ``exposure`` is intentionally structural here: Phase 7 supplies a
-    ``RegionExposure`` object with ``mode`` and ``A_r`` attributes. Keeping
-    this helper independent of that future class lets Phase 1 retain only the
-    stable geometry code.
+    ``exposure`` is intentionally structural here: any object with an ``A_r``
+    attribute can provide regional exposure weights. Objects with
+    ``mode == "uniform"`` are treated as an explicit all-ones shortcut.
 
     The returned weight is the bp-weighted mean of ``exposure.A_r`` over the
     merged blocks, floored at ``min_weight``. It is **not** clipped above 1:
@@ -92,7 +91,7 @@ def bp_weighted_mean_exposure_over_blocks(
     raw_bp = float(sum(end - start for _, start, end in merged))
     if raw_bp <= 0.0:
         return 1.0
-    if getattr(exposure, "mode", "uniform") == "uniform":
+    if getattr(exposure, "mode", None) == "uniform":
         return 1.0
 
     # A_r may exceed 1 when constructed from density evidence.

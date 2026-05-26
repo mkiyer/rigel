@@ -892,18 +892,12 @@ def run_sweep(config, output_dir, *, gtf_path=None,
 
                 cal = pr.calibration
                 if cal is not None:
-                    # v4 CalibrationResult: fl_models, density_evidence,
-                    # region_gdna, region_exposure, diagnostics.
                     summary = cal.to_summary_dict()
                     cal_ss = float(pr.strand_models.strand_specificity)
                     row["cal_kappa_est"] = round(cal_ss, 4)
                     row["cal_kappa_err"] = ""
-                    intergenic_prior = cal.density_evidence.priors.get("INTERGENIC")
-                    cal_intergenic_density = (
-                        float(intergenic_prior.mean_density)
-                        if intergenic_prior is not None
-                        else 0.0
-                    )
+                    region_summary = summary.get("region_calibration", {})
+                    cal_intergenic_density = float(region_summary.get("rho_off", 0.0))
                     row["cal_density_est"] = f"{cal_intergenic_density:.4e}"
 
                     cal_fl = cal.fl_models.gdna

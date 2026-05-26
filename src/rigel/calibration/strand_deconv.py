@@ -49,6 +49,7 @@ from .signature import (
     COMPARTMENT_BOUNDARY_RIGHT,
     COMPARTMENT_CONTAINED,
     SPLICE_SPLICED,
+    SPLICE_UNSPLICED,
     channel_index,
 )
 from .strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR, StrandSummary
@@ -63,10 +64,14 @@ __all__ = [
     "FLAG_APPROX_NORMAL",
     "FLAG_EXON_SELF_TRAIN",
     "StrandRegionCounts",
+    "CompartmentStrandCounts",
     "RegionGdnaEstimate",
+    "RegionGdnaChannelEstimate",
     "KappaDEstimate",
     "build_strand_region_counts",
+    "build_compartment_strand_counts",
     "deconvolve_regions_by_strand",
+    "deconvolve_compartments_by_strand",
     "strand_log_likelihood_d_grid",
     "screen_no_rna_exons",
     "estimate_kappa_d",
@@ -118,6 +123,26 @@ class StrandRegionCounts:
 
 
 @dataclass(frozen=True, slots=True)
+class CompartmentStrandCounts:
+    """Per-region strand-folded unspliced counts by region compartment."""
+
+    contained_sense: np.ndarray  # float32[R]
+    contained_antisense: np.ndarray  # float32[R]
+    contained_total: np.ndarray  # float32[R]
+
+    boundary_left_sense: np.ndarray  # float32[R]
+    boundary_left_antisense: np.ndarray  # float32[R]
+    boundary_left_total: np.ndarray  # float32[R]
+
+    boundary_right_sense: np.ndarray  # float32[R]
+    boundary_right_antisense: np.ndarray  # float32[R]
+    boundary_right_total: np.ndarray  # float32[R]
+
+    eligible: np.ndarray  # bool[R]
+    p_r1_sense: float
+
+
+@dataclass(frozen=True, slots=True)
 class RegionGdnaEstimate:
     """Per-region gDNA fragment-count posterior summary."""
 
@@ -130,6 +155,31 @@ class RegionGdnaEstimate:
     kappa_d: float
     kappa_d_n_seed_regions: int
     kappa_d_n_exon_self_training: int
+    p_r1_sense: float
+    rna_lower_confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class RegionGdnaChannelEstimate:
+    """Compartment-aware per-region gDNA/RNA deconvolution summary."""
+
+    contained_mean: np.ndarray  # float32[R]
+    contained_upper: np.ndarray
+    contained_rna_lower: np.ndarray
+    contained_precision: np.ndarray
+
+    boundary_left_mean: np.ndarray  # float32[R]
+    boundary_left_upper: np.ndarray
+    boundary_left_rna_lower: np.ndarray
+    boundary_left_precision: np.ndarray
+
+    boundary_right_mean: np.ndarray  # float32[R]
+    boundary_right_upper: np.ndarray
+    boundary_right_rna_lower: np.ndarray
+    boundary_right_precision: np.ndarray
+
+    flags: np.ndarray  # uint16[R], union of compartment flags
+    kappa_d: float
     p_r1_sense: float
     rna_lower_confidence: float
 
@@ -183,6 +233,54 @@ def _aggregate_pos_neg_all_compartments(
     return pos, neg
 
 
+def _fold_pos_neg_by_transcript_strand(
+    pos: np.ndarray,
+    neg: np.ndarray,
+    transcript_strand_class: np.ndarray,
+    *,
+    preserve_ineligible_total: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Fold absolute POS/NEG channels into transcript-relative counts."""
+    pos_arr = np.asarray(pos, dtype=np.float64)
+    neg_arr = np.asarray(neg, dtype=np.float64)
+    ts = np.asarray(transcript_strand_class)
+    if pos_arr.shape != neg_arr.shape or pos_arr.shape != ts.shape:
+        raise ValueError(
+            "_fold_pos_neg_by_transcript_strand: pos, neg, and ts_class shapes must match; "
+            f"got {pos_arr.shape}, {neg_arr.shape}, and {ts.shape}."
+        )
+
+    k_sense = np.zeros(pos_arr.shape, dtype=np.float32)
+    k_antisense = np.zeros(pos_arr.shape, dtype=np.float32)
+    is_pos = ts == TS_POS
+    is_neg = ts == TS_NEG
+    k_sense[is_pos] = pos_arr[is_pos].astype(np.float32, copy=False)
+    k_antisense[is_pos] = neg_arr[is_pos].astype(np.float32, copy=False)
+    k_sense[is_neg] = neg_arr[is_neg].astype(np.float32, copy=False)
+    k_antisense[is_neg] = pos_arr[is_neg].astype(np.float32, copy=False)
+    if preserve_ineligible_total:
+        n_total = (pos_arr + neg_arr).astype(np.float32, copy=False)
+    else:
+        n_total = (k_sense + k_antisense).astype(np.float32, copy=False)
+    eligible = (is_pos | is_neg).astype(bool, copy=False)
+    return k_sense, k_antisense, n_total, eligible
+
+
+def _compartment_pos_neg(
+    payload_arrays: PayloadArrays,
+    compartment: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return POS/NEG unspliced mass for one compartment."""
+    rc = payload_arrays.region_counts_sorted
+    pos = rc[:, channel_index(compartment, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)].astype(
+        np.float64, copy=False
+    )
+    neg = rc[:, channel_index(compartment, SPLICE_UNSPLICED, CHANNEL_STRAND_NEG)].astype(
+        np.float64, copy=False
+    )
+    return pos, neg
+
+
 def build_strand_region_counts(
     region_arrays: RegionArrays,
     payload_arrays: PayloadArrays,
@@ -196,25 +294,66 @@ def build_strand_region_counts(
         )
 
     pos, neg = _aggregate_pos_neg_all_compartments(payload_arrays)
-    ts = np.asarray(region_arrays.ts_class)
-
-    k_sense = np.zeros(pos.shape, dtype=np.float32)
-    k_antisense = np.zeros(pos.shape, dtype=np.float32)
-
-    is_pos = ts == TS_POS
-    is_neg = ts == TS_NEG
-    k_sense[is_pos] = pos[is_pos].astype(np.float32, copy=False)
-    k_antisense[is_pos] = neg[is_pos].astype(np.float32, copy=False)
-    k_sense[is_neg] = neg[is_neg].astype(np.float32, copy=False)
-    k_antisense[is_neg] = pos[is_neg].astype(np.float32, copy=False)
-
-    n_total = (k_sense + k_antisense).astype(np.float32, copy=False)
-    eligible = (is_pos | is_neg) & (n_total > 0.0)
+    k_sense, k_antisense, n_total, strand_eligible = _fold_pos_neg_by_transcript_strand(
+        pos, neg, region_arrays.ts_class
+    )
+    eligible = strand_eligible & (n_total > 0.0)
 
     return StrandRegionCounts(
         k_sense=k_sense,
         k_antisense=k_antisense,
         n_total=n_total,
+        eligible=eligible.astype(bool, copy=False),
+        p_r1_sense=float(p_r1_sense),
+    )
+
+
+def build_compartment_strand_counts(
+    region_arrays: RegionArrays,
+    payload_arrays: PayloadArrays,
+    *,
+    p_r1_sense: float,
+) -> CompartmentStrandCounts:
+    """Fold unspliced POS/NEG counts by contained/left-boundary/right-boundary slots."""
+    if not 0.0 <= float(p_r1_sense) <= 1.0:
+        raise ValueError(
+            "build_compartment_strand_counts: p_r1_sense must be in [0, 1]; "
+            f"got {p_r1_sense!r}"
+        )
+
+    contained_pos, contained_neg = _compartment_pos_neg(payload_arrays, COMPARTMENT_CONTAINED)
+    left_pos, left_neg = _compartment_pos_neg(payload_arrays, COMPARTMENT_BOUNDARY_LEFT)
+    right_pos, right_neg = _compartment_pos_neg(payload_arrays, COMPARTMENT_BOUNDARY_RIGHT)
+
+    contained_sense, contained_anti, contained_total, eligible = _fold_pos_neg_by_transcript_strand(
+        contained_pos,
+        contained_neg,
+        region_arrays.ts_class,
+        preserve_ineligible_total=True,
+    )
+    left_sense, left_anti, left_total, _ = _fold_pos_neg_by_transcript_strand(
+        left_pos,
+        left_neg,
+        region_arrays.ts_class,
+        preserve_ineligible_total=True,
+    )
+    right_sense, right_anti, right_total, _ = _fold_pos_neg_by_transcript_strand(
+        right_pos,
+        right_neg,
+        region_arrays.ts_class,
+        preserve_ineligible_total=True,
+    )
+
+    return CompartmentStrandCounts(
+        contained_sense=contained_sense,
+        contained_antisense=contained_anti,
+        contained_total=contained_total,
+        boundary_left_sense=left_sense,
+        boundary_left_antisense=left_anti,
+        boundary_left_total=left_total,
+        boundary_right_sense=right_sense,
+        boundary_right_antisense=right_anti,
+        boundary_right_total=right_total,
         eligible=eligible.astype(bool, copy=False),
         p_r1_sense=float(p_r1_sense),
     )
@@ -535,6 +674,84 @@ def deconvolve_regions_by_strand(
         kappa_d_n_seed_regions=int(kappa_d_n_seed_regions),
         kappa_d_n_exon_self_training=int(kappa_d_n_exon_self_training),
         p_r1_sense=p_r1_sense,
+        rna_lower_confidence=float(rna_lower_confidence),
+    )
+
+
+def _single_compartment_estimate(
+    counts: CompartmentStrandCounts,
+    *,
+    k_sense: np.ndarray,
+    k_antisense: np.ndarray,
+    n_total: np.ndarray,
+    kappa_d: float,
+    rna_lower_confidence: float,
+) -> RegionGdnaEstimate:
+    return deconvolve_regions_by_strand(
+        StrandRegionCounts(
+            k_sense=k_sense.astype(np.float32, copy=False),
+            k_antisense=k_antisense.astype(np.float32, copy=False),
+            n_total=n_total.astype(np.float32, copy=False),
+            eligible=(counts.eligible & (n_total > 0.0)).astype(bool, copy=False),
+            p_r1_sense=counts.p_r1_sense,
+        ),
+        kappa_d=kappa_d,
+        rna_lower_confidence=rna_lower_confidence,
+    )
+
+
+def deconvolve_compartments_by_strand(
+    counts: CompartmentStrandCounts,
+    *,
+    kappa_d: float,
+    rna_lower_confidence: float,
+) -> RegionGdnaChannelEstimate:
+    """Run the strand deconvolution independently for each unspliced compartment."""
+    contained = _single_compartment_estimate(
+        counts,
+        k_sense=counts.contained_sense,
+        k_antisense=counts.contained_antisense,
+        n_total=counts.contained_total,
+        kappa_d=kappa_d,
+        rna_lower_confidence=rna_lower_confidence,
+    )
+    boundary_left = _single_compartment_estimate(
+        counts,
+        k_sense=counts.boundary_left_sense,
+        k_antisense=counts.boundary_left_antisense,
+        n_total=counts.boundary_left_total,
+        kappa_d=kappa_d,
+        rna_lower_confidence=rna_lower_confidence,
+    )
+    boundary_right = _single_compartment_estimate(
+        counts,
+        k_sense=counts.boundary_right_sense,
+        k_antisense=counts.boundary_right_antisense,
+        n_total=counts.boundary_right_total,
+        kappa_d=kappa_d,
+        rna_lower_confidence=rna_lower_confidence,
+    )
+    flags = (
+        contained.flags.astype(np.uint16)
+        | boundary_left.flags.astype(np.uint16)
+        | boundary_right.flags.astype(np.uint16)
+    )
+    return RegionGdnaChannelEstimate(
+        contained_mean=contained.mean_count,
+        contained_upper=contained.upper_count,
+        contained_rna_lower=contained.rna_lower_count,
+        contained_precision=contained.precision,
+        boundary_left_mean=boundary_left.mean_count,
+        boundary_left_upper=boundary_left.upper_count,
+        boundary_left_rna_lower=boundary_left.rna_lower_count,
+        boundary_left_precision=boundary_left.precision,
+        boundary_right_mean=boundary_right.mean_count,
+        boundary_right_upper=boundary_right.upper_count,
+        boundary_right_rna_lower=boundary_right.rna_lower_count,
+        boundary_right_precision=boundary_right.precision,
+        flags=flags,
+        kappa_d=float(kappa_d),
+        p_r1_sense=float(counts.p_r1_sense),
         rna_lower_confidence=float(rna_lower_confidence),
     )
 

@@ -17,7 +17,8 @@ the implementation to v3 §6:
   share the same per-region opportunity.
 * ``anchor_intergenic`` / ``anchor_intron`` use the
   ``fractional_evidence`` predicates; ``is_anchor`` is their union.
-* ``spliced_count`` is a diagnostic only — never consumed by the model.
+* ``spliced_count`` is diagnostic-only for the v5 density model. The additive
+    v6 four-state tensor consumes it separately as expression evidence.
 """
 
 from __future__ import annotations

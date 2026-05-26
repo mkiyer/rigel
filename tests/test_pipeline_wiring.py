@@ -8,8 +8,6 @@ import numpy as np
 import pandas as pd
 
 from rigel.calibration._result import CalibrationResult
-from rigel.calibration.exposure import RegionExposure
-from rigel.calibration.integration import FusedRegionGdnaEvidence
 from rigel.locus import Locus, MultiLocus
 import rigel.pipeline as pipeline
 from rigel.calibration.regions import BoundaryKind, RegionStrand, RegionType, SIGNATURE_SENTINEL
@@ -116,24 +114,6 @@ def test_wire_calibration_regions_drops_unknown_refs(caplog):
     assert "Dropping 1 calibration regions" in caplog.text
 
 
-def _empty_fused() -> FusedRegionGdnaEvidence:
-    zeros = np.zeros(0, dtype=np.float32)
-    return FusedRegionGdnaEvidence(
-        mean_count=zeros,
-        upper_count=zeros,
-        variance_count=zeros,
-        rna_lower_count=zeros,
-        observed_compatible_count=zeros,
-        density_weight=zeros,
-        strand_weight=zeros,
-        density_applicable=np.zeros(0, dtype=bool),
-        strand_applicable=np.zeros(0, dtype=bool),
-        tail_probability=zeros,
-        expected_tail_count=zeros,
-        flags=np.zeros(0, dtype=np.uint8),
-    )
-
-
 def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
     calls: list[str] = []
     estimator = SimpleNamespace(
@@ -158,12 +138,13 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
         gdna_em_exposure_weight=np.array([1.0], dtype=np.float64),
     )
     calibration = CalibrationResult(
-        density_evidence=SimpleNamespace(),
         fl_models=SimpleNamespace(rna=SimpleNamespace(), gdna=SimpleNamespace()),
         diagnostics=SimpleNamespace(),
-        region_gdna=SimpleNamespace(),
-        region_exposure=RegionExposure.uniform(0),
-        fused_region_gdna=_empty_fused(),
+        region_calibration=SimpleNamespace(),
+        strand_channels=None,
+        background_model=SimpleNamespace(),
+        boundary_local=SimpleNamespace(),
+        boundary_sweep=SimpleNamespace(),
     )
     index = SimpleNamespace(region_df=pd.DataFrame({"region_id": []}), ref_name_to_id={})
 

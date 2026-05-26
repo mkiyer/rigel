@@ -21,9 +21,9 @@ v6 keeps the v5 direction: four expression x capture state probabilities, region
 | C6 tensor should use log Bayes factors, not posteriors | Accept | Rename likelihood terms to `logBF_*` and keep `state_log_prior` as the only prior term. |
 | C7 `BoundaryTable` needs exactness contract | Accept | Specify exact region-boundary mapping and add `validate_boundary_table()` for tests. |
 | C8 `A_r` units need pinning | Accept | Define `A_r` as unitless density multiplier with invariants. |
-| C9 smooth gDNA vs boolean `enable_gdna` tension | Accept in principle | v6 path should keep gDNA smooth and enabled by default. Keep compatibility shims while migrating. |
+| C9 smooth gDNA vs boolean `enable_gdna` tension | Accept in principle | v6 path keeps gDNA smooth. Native `enable_gdna` remains only a technical likelihood-eligibility bit, not calibration posterior gating. |
 | C10 `kappa_d` should be one library scalar | Accept | Compartment posteriors share one `kappa_d`. No per-compartment kappa in v6. |
-| C11 Phase IV migration risk | Accept | Add v6 behind a feature flag initially and derive compatibility fields until benchmarks pass. |
+| C11 Phase IV migration risk | Superseded by clean-cutover directive | Do not add a v6 feature flag. Phase IV replaces the old density/fusion/exposure contract with `RegionCalibration` as the only live calibration path. |
 | C12 minor items | Mixed | Accept opt-in region debug and strand helper reuse. Defer mappability hook and extra aliases unless touched by implementation. |
 
 The guiding rule: fix known mathematical hazards now; do not build broad frameworks, alternative shrinkers, optional BED paths, or native boundary storage until benchmark evidence forces the issue.
@@ -417,8 +417,8 @@ The four-state model needs weak anchors. Use `region_arrays.signature` and early
 
 Principles:
 
-- Intergenic regions: prior favors `background` and `gdna_only_capture` over expressed states.
-- Intron-only regions: prior favors `background`, but less strongly than intergenic if strand-RNA evidence exists.
+- Intergenic regions: prior favors `background`; `gdna_only_capture` remains possible but is not annotation-favored without boundary/density evidence.
+- Intron-only regions: prior favors `background`, but expression penalties are weaker than intergenic because nascent RNA can be real when strand-RNA evidence exists.
 - Exonic regions: weakly informative or flat prior unless spliced/strand evidence is present.
 - `background.seed_mask`: add a soft `background` prior boost for the first 1-2 passes.
 
@@ -548,9 +548,7 @@ Default `max_calibration_passes = 5`.
 
 Use `RegionCalibration.mu_gdna` and `RegionCalibration.upper_gdna` for regional gDNA prior mass.
 
-Boundary evidence and smooth priors should not be converted into brittle per-locus on/off decisions. The v6 path should run with a gDNA component enabled by default unless the user explicitly disables gDNA at the config level.
-
-During migration, existing compatibility fields may still carry an `enable_gdna` column, but it should be derived conservatively and should not drive the v6 conceptual model.
+Boundary evidence and smooth priors should not be converted into brittle per-locus on/off decisions. The native EM still receives an `enable_gdna` array, but under v6 that array means only that the locus contains at least one unspliced unit with finite gDNA likelihood. It must not depend on posterior evidence thresholds such as `upper_gdna > eps`.
 
 ### 7.2 Denominator
 
@@ -568,14 +566,14 @@ gdna_eff_len_corrected = raw_locus_gdna_eff_len * sum_r(bp_r * A_r) / sum_r(bp_r
 
 The FL-convolved exposure integral remains deferred until benchmarks demand it.
 
-### 7.3 Migration safety
+### 7.3 Clean cutover
 
-Do not break current quantification while v6 is being built.
+Phase IV is a clean replacement, not a migration gate.
 
-- Add `RegionCalibration` as a new field on `CalibrationResult`.
-- Derive old compatibility fields from `RegionCalibration` only after the v6 path is ready.
-- Gate downstream use behind an internal config flag at first, for example `use_v6_calibration`.
-- Do not update existing golden outputs until the benchmark suite demonstrates improvement.
+- Make `RegionCalibration` the required calibration handoff on `CalibrationResult`.
+- Remove the old live result fields: `density_evidence`, `region_gdna`, `region_exposure`, and `fused_region_gdna`.
+- Do not add `use_v6_calibration` or an equivalent flag.
+- Update goldens and downstream tests intentionally after the new path is wired and smoke-tested.
 
 ---
 
@@ -642,15 +640,16 @@ Verification:
 Scope:
 
 - rewire [_orchestrator.py](src/rigel/calibration/_orchestrator.py) to produce `RegionCalibration`;
-- update [exposure.py](src/rigel/calibration/exposure.py) to build exposure from `RegionCalibration.A_r`;
+- remove `RegionExposure` from the live calibration/result contract and use `RegionCalibration.A_r` directly;
 - update [prior.py](src/rigel/calibration/prior.py) to consume `mu_gdna`, `upper_gdna`, and `A_r`;
-- update [pipeline.py](src/rigel/pipeline.py) behind `use_v6_calibration`;
-- keep compatibility fields until benchmarks pass.
+- update [pipeline.py](src/rigel/pipeline.py) to require `RegionCalibration`;
+- remove old density/fusion/exposure result state from live downstream code.
 
 Verification:
 
-- Existing golden outputs unchanged when `use_v6_calibration=False`.
-- v6-on outputs are deterministic and get their own temporary tests.
+- New outputs are deterministic under the clean-cutover path.
+- Prior assembly no longer requires `fused_region_gdna` or `RegionExposure`.
+- Native gDNA eligibility depends only on finite unspliced gDNA likelihood, not calibration posterior thresholds.
 - Region debug output is opt-in only.
 
 ### Phase V - Benchmarks and defaults
@@ -659,16 +658,16 @@ Scope:
 
 - emit post-capture truth from simulation: transcript abundances and FL distributions after capture;
 - benchmark unstranded/non-capture, unstranded/capture, stranded/non-capture, stranded/capture;
-- compare v6-off and v6-on;
+- compare the clean-cutover implementation against truth and prior release baselines;
 - tune internal defaults only when benchmark evidence demands it;
-- decide whether to make v6 the default.
+- decide whether further model refinements are needed.
 
 Verification:
 
 - No regression in non-capture data.
 - Stranded capture high-gDNA improves gDNA-to-RNA leakage.
 - Unstranded capture reports appropriate uncertainty.
-- Existing goldens update only after benchmark acceptance.
+- Goldens are updated intentionally after cutover smoke tests and benchmark acceptance.
 
 ---
 
@@ -730,7 +729,6 @@ Expose only:
 gdna_density_confidence     existing confidence concept; keep old name for now
 background_trim_fraction    one robustness control
 max_calibration_passes      safety cap
-use_v6_calibration          temporary internal/advanced migration flag
 ```
 
 Do not expose transfer-weight constants, damping, capture shrinkage hyperparameters, or tensor penalties until benchmarks prove they need tuning.
@@ -778,7 +776,7 @@ Regions + boundaries
 -> [R,4] log Bayes factor tensor with annotation priors
 -> damped calibration loop
 -> RegionCalibration
--> compatibility-gated downstream wiring
+-> clean downstream cutover
 ```
 
 This stays lightweight: no new C++, no probe BED, no native boundary storage, no separate transfer-weight framework, no hard zero mode, and no broad user knob surface. The plan is now implementation-ready enough to start Phase I while leaving the larger modeling choices to benchmarks.

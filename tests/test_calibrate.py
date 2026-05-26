@@ -105,7 +105,7 @@ def _index():
     return SimpleNamespace(region_df=_region_df(), ref_name_to_id={"chr1": 0})
 
 
-def test_calibrate_populates_region_gdna_and_uniform_exposure():
+def test_calibrate_populates_region_calibration_and_diagnostics():
     result = calibrate(
         index=_index(),
         payload=_payload(),
@@ -114,24 +114,26 @@ def test_calibrate_populates_region_gdna_and_uniform_exposure():
         rna_lower_confidence=0.97,
     )
 
-    assert result.region_gdna.n_total.shape == (7,)
-    assert result.region_gdna.p_r1_sense == pytest.approx(0.95)
-    assert result.region_gdna.rna_lower_confidence == pytest.approx(0.97)
-    assert result.region_gdna.kappa_d_n_seed_regions == 4
-    assert result.region_gdna.kappa_d_n_exon_self_training >= 1
+    rc = result.region_calibration
+    assert rc.p_states.shape == (7, 4)
+    np.testing.assert_allclose(rc.p_states.sum(axis=1), 1.0, rtol=1e-6, atol=1e-6)
+    assert rc.mu_gdna.shape == (7,)
+    assert rc.upper_gdna.shape == (7,)
+    assert rc.A_r.shape == (7,)
+    assert np.all(rc.upper_gdna >= rc.mu_gdna)
+    assert result.strand_channels is not None
+    assert result.strand_channels.contained_mean.shape == (7,)
+    assert result.strand_channels.p_r1_sense == pytest.approx(0.95)
+    assert result.strand_channels.rna_lower_confidence == pytest.approx(0.97)
+    assert result.background_model.seed_mask.shape == (7,)
+    assert result.boundary_local.alpha_excess.shape == (7,)
+    assert result.boundary_sweep.mu_sweep.shape == (7,)
 
-    assert result.region_exposure.mode == "density"
-    assert result.region_exposure.A_r.shape == result.region_gdna.n_total.shape
-    assert result.density_evidence is not None
-    assert result.fused_region_gdna is not None
-    assert result.fused_region_gdna.mean_count.shape == result.region_gdna.n_total.shape
-    np.testing.assert_array_equal(
-        result.region_exposure.A_r,
-        result.density_evidence.relative_exposure.astype(np.float32),
-    )
+    for old_field in ("region_gdna", "region_exposure", "density_evidence", "fused_region_gdna"):
+        assert not hasattr(result, old_field)
 
 
-def test_calibrate_summary_has_strand_deconv_and_uniform_exposure_blocks():
+def test_calibrate_summary_has_region_calibration_blocks():
     result = calibrate(
         index=_index(),
         payload=_payload(),
@@ -143,25 +145,27 @@ def test_calibrate_summary_has_strand_deconv_and_uniform_exposure_blocks():
     summary = result.to_summary_dict()
     assert summary["calibration_config"] == {"rna_lower_confidence": 0.95}
 
-    strand = summary["strand_deconv"]
+    strand = summary["strand_channels"]
     assert strand["rna_lower_confidence"] == pytest.approx(0.95)
     assert strand["p_r1_sense"] == pytest.approx(0.95)
-    assert strand["kappa_d_n_seed_regions"] == 4
-    assert strand["kappa_d_n_exon_self_training"] >= 1
-    assert strand["kappa_d_fallback_used"] is False
     assert strand["n_regions"] == 7
-    assert strand["n_regions_eligible"] > 0
+    assert "contained_mean" in strand
 
-    exposure = summary["region_exposure"]
-    assert exposure["mode"] == "density"
-    assert exposure["n_regions"] == 7
-    assert "density_evidence" in summary
-    assert "priors" in summary["density_evidence"]
-    assert summary["fused_region_gdna"] is not None
-    assert summary["fused_region_gdna"]["n_regions"] == 7
+    region_cal = summary["region_calibration"]
+    assert region_cal["n_regions"] == 7
+    assert region_cal["n_passes"] >= 1
+    assert "state_mass" in region_cal
+    assert "A_r" in region_cal
+    assert summary["background_model"]["n_regions"] == 7
+    assert summary["boundary_local"]["n_regions"] == 7
+    assert summary["boundary_sweep"]["n_regions"] == 7
     assert summary["prior_table"] is None
 
     for forbidden in (
+        "density_evidence",
+        "region_exposure",
+        "fused_region_gdna",
+        "strand_deconv",
         "regional_exposure",
         "regional_weighting_stats",
         "multi_locus_prior_df",
