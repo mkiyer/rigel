@@ -16,9 +16,17 @@ __all__ = [
 ]
 
 
-def condition_dir_name(gdna_label: str, strand_specificity: float, nrna_label: str) -> str:
+def condition_dir_name(
+    gdna_label: str,
+    strand_specificity: float,
+    nrna_label: str,
+    capture_label: str | None = None,
+) -> str:
     """Return the standard synthetic-suite condition directory name."""
-    return f"gdna_{gdna_label}_ss_{strand_specificity:.2f}_nrna_{nrna_label}"
+    name = f"gdna_{gdna_label}_ss_{strand_specificity:.2f}_nrna_{nrna_label}"
+    if capture_label is not None:
+        name = f"{name}_capture_{capture_label}"
+    return name
 
 
 def gdna_label_for_rate(rate: float, labels: list[str] | None, index: int) -> str:
@@ -48,6 +56,7 @@ def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) 
         "gdna": _jsonable(getattr(config, "gdna", {})),
         "nrna": _jsonable(getattr(config, "nrna", {})),
         "capture": _jsonable(getattr(config, "capture", {})),
+        "capture_configs": _jsonable(getattr(config, "capture_configs", [])),
         "abundance": _jsonable(getattr(config, "abundance", {})),
         "truth_abundances": "truth_abundances.tsv",
         "conditions": _jsonable(conditions),

@@ -17,7 +17,7 @@ from __future__ import annotations
 import gzip
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CaptureConfig",
+    "CaptureScenario",
     "CaptureSampler",
     "WeightedInterval",
 ]
@@ -72,6 +73,14 @@ class CaptureConfig:
     binding_per_base: float = 10.0
     gdna_split_penalty: float = 0.2
     min_overlap: int = 1
+
+
+@dataclass
+class CaptureScenario:
+    """One labeled hybrid-capture setting in a simulation condition grid."""
+
+    label: str = "default"
+    config: CaptureConfig = field(default_factory=CaptureConfig)
 
 
 @dataclass(frozen=True, slots=True)

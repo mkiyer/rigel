@@ -1,9 +1,322 @@
 # TODO
 
+## Capture affect on RNA expression
 
-## BAM scan pileup
+Hybrid capture panels are designed intentionally to enrich certain transcripts and deplete others. We understand that capture completely alters TPM! That is the point! You are interpreting this as a "failure", but it is the reason we design capture panels in the first place. Stop trying to measure capture results against the non-capture baseline. That is silly and leads to wasted effort trying to make capture vs non-capture data comparable. It's not! We fundamentally change the RNA landscape by capturing certain transcripts but not others. This creates a new baseline.. one which is fundamentally altered relative to non-capture data. Accept this and move on.
 
-I have an idea that is an offshoot of your "5. Coverage-shape coherence priors" -- during the 
+
+## Learning 'on-target' vs 'off-target', and learning 'expressed' vs 'not-expressed'
+
+You are right -- we need to 'learn' which regions are captured versus not captured. I'm still not giving into providing an BED file of targeted regions. This is because a lot of publicly available data obscure their library prep protocol and it is very hard to obtain targeted regions files. There are lots of capture panels. If we can learn captured regions, the tool will be self sufficient. We should strive for this.
+
+Our regions can be divided into 4 groups based on expressed x targeted:
+
+1) expressed AND captured (on-target) - the goal of our model is to be able to deconvolute gDNA vs RNA in these regions. Our 'boundary' evidence can predict gDNA density in these regions. Strand-specific evidence allows us to deconvolute these regions.
+- many exons
+
+2) expressed AND off-target - will be substantially depleted relative to targeted regions, very low expression and very low gDNA. gDNA at the off-target background level.
+- some exons (NO panels target the full transcriptome!)
+
+3) not expressed, targeted - this is our signal for on-target gDNA. boundary evidence is valid too. we need to learn which genes are not expressed in order to fully take advantage of this signal.
+- negative control regions within intergenic/introns
+- some exons
+
+4) not expressed, not targeted - off-target background signal
+- intergenic/intronic
+- some exons
+
+
+### Algorithm design
+
+I believe we are going to need an iterative (at least two steps, maybe more) algorithm. The algorithm needs to assign each region likelihood of being 'expressed' (>0 RNA fragments) and likelihood of being 'captured' (targeted by hybrid capture probes).
+
+ This is challenging, because neither 'expressed' nor 'captured' is binary. A solution that attempts to assign binary flags (expressed true/false, captured true/false) to each region will struggly, because expression is a spectrum. "Capture" manifests as a spectrum of enrichment (some probes amplify better than others. The real data will exhibit a very non-binary behavior. Highly expressed regions that are NOT captured might be at higher levels than lowly expressed regions that ARE captured. Tough problem!
+ 
+I still think we can design an optimization that will get us close, or the very least, get us to a point where our gDNA estimations become reasonably accurate (we still have the EM downstream!)
+
+What if we have the goal of assigning each region two state flags each with numeric weights/likelihoods/probabilities:
+
+- expression true/false, with expression weight/prob/likelihood
+- capture true/false, with capture weight/prob/likelihood
+
+How do we set this up?
+
+### Algorithm overview: learn capture enrichment, partition regions into 'captured' vs 'off-target' with per-region enrichment factors.
+
+Whether a region is captured is a latent variable. This is more than binary, because capture causes continuous enrichment and is not a just a binary change. But partitioning the regions this way allows us to compute global and per-region enrichment factors.
+
+Each region gets two latent flags:
+- is_expressed (true/false)
+- is_captured (true/false)
+
+And each region gets two factors:
+- expression (not sure whether this is a weight/prob/likelihood)
+- capture (weight? prob? likelihood?)
+
+We need to initialize each region as 'off-target', 'on-target', or 'unknown' (to be solved).
+
+
+#### Initialization
+
+We need to initialize the latent states and seed the algorithm.
+
+All regions start as:
+- is_expressed = unknown
+- is_captured = unknown
+- expression_weight = 0.0
+- capture_weight = 0.0
+
+
+1) Strand deconvolution model - initialization
+
+***if we have strand-specific data, we run the strand deconvolution procedure to initialize region states! if we don't have strand-specific data, skip this step.***
+
+Run our strand deconvolution model.
+
+- For each region, answer the question, "is this region compatible with gDNA only?". We have this infrastructure in place, with gDNA upper bound prediction.
+
+- Use the strand deconvolution results to initialize the 'is_expressed' flag to true/false based on the sense/antisense strand balance.
+
+- The deconvoluted gDNA fragment counts for each region become a key density measure that can help to resolve capture vs off-target latent state. We don't have enough information yet to assign 'is_captured' but this is the beginning.
+
+
+2) Spliced fragment evidence - initialization
+
+Regions with spliced fragment boundary flux should be assigned 'is_expressed = true' category. This is definite RNA evidence
+
+3) Background density (off-target / not captured AND not expressed) evidence - initialization
+
+We need some initial seed measure of background region levels. These are regions with (is_expressed=false, is_captured=false). This is an initialization.. these may change if we have an iterative/optimizer.
+
+- Build background density model from 'contained' fragments within intergenic/intronic regions. The code already does this.
+- *NEW* Use strand-deconvoluted counts rather than total counts. When we have a reliable strand-specific model, we will deconvolute intergenic/intronic regions (in addition to other regions). We should use only the fragments that can be explained by gDNA as our 'background' level. We should set 'is_expressed=true' for regions that have nonzero RNA levels as predicted by strand-specificity.
+
+*NEW* If strand-specific data is robust and available:
+- Regions will be assigned 'is_expressed true/false' by the strand deconvolution model, and so we can *exclude regions identified as 'expressed' by the strand model*. Strand deconvolution may identify certain intergenic/intronic regions as 'expressed'.
+
+
+- As an additional robustness precaution, we may want to clip the top 1% (or some percent, configurable parameter) of intronic/intergenic regions because of false positive cases:
+   - Unannotated transcripts that live in intergenic/intronic space
+   - Negative control capture probes deliberately placed in intergenic/intronic space to measure baseline gDNA
+   - Highly expressed nascent RNA in intronic regions
+   - The strand deconvolution 
+
+- The viable background regions can be assigned `is_expressed=false` and `is_captured=false`. Background levels can be computed.
+
+
+3) Boundary models - initialization
+
+- Build 'boundary' gDNA density model from 'boundary' crossing fragment counts. 
+
+- The boundary model must be initially built from 'background' regions, where background means `(is_expressed== False) AND (is_captured==FALSE)`. 
+
+- For each intron/intergenic to exon boundary we can independently measure the ratio of between the 'boundary' density and the associated 'contained' density. Boundary density versus contained density (can do for matched regions or look at boundary density versus contained density globally). This gives us many independent observations of what the 'capture' ratio might look like for on-target captured regions versus off-target regions.
+
+- Looking at boundary density distribution versus contained density distribution gives us an initial measure of 'capture enrichment' for *each specific boundary* which projects into its neighbor exon. Yes this is a sparse highly variable observation but a valuable independent observations that gives us a picture. We find out how much gDNA lives in boundary flux (and by inference, within exons) versus within intergenic/intronic regions. This is essential information for understanding the capture profile of the library.
+
+- If we have our contained model from background regions, we should be able to ask the question, "how likely would it be to observe this boundary density from the background density distribution"? The boundaries that are unlikely to be observed from the contained background model can be set to `is_captured = true`. 
+
+
+4) Initial seed models
+
+For regions that are initialized (not set to 'unknown'), we can seed our iteration.
+
+
+5) Second pass / Iteration
+
+In steps 1-4 we build initial models and assign initial latent states. 
+
+Then we iterate over the regions. We have our models.
+
+For each region:
+
+- deconvolute total counts into DNA and RNA components
+   - strand method: deconvolve using strand model into DNA and RNA components (will be done if possible)
+   - boundary flux method: use boundary flux to impute/infer gDNA portion. *New* could use ratio of unspliced to spliced boundary flux to deconvolve total counts into DNA and RNA components. Or *New* could infer/impute spliced boundary flux onto exon and use a lower bound for RNA counts (prevent RNA siphon to gDNA).
+
+- update `is_expressed` state if RNA evidence
+
+- update `is_captured` state: determine likelihood of observing gDNA counts from `is_captured=false` model versus observing from `is_captured=true` model. assign state to more likely model. save likelihood ratio or probability.
+
+
+
+
+
+
+
+## Boundary evidence is mathematically neutered under capture
+
+The intended idea was: off-target regions shrink to the global background, while on-target regions with large boundary flux overwhelm the prior and snap to local exposure.
+
+Learning a background gdna density model from intergenic/intronic *contained* regions is a first start. For capture, this is the 'off-target' distribution.
+
+Learning gdna density from intergenic/intronic *boundary* regions is *critical*!!! For capture, this is as close to the 'on-target' distribution that we can come without additional information (strand-specific data, or knowledge of which exons are 'expressed' and 'not expressed' or knowledge which exons are captured and not captured).
+
+How did we arrive at a magic number heuristic prior precision cap of "400". This is ridiculous, arbitrary, and inappropriate. How are we deriving this? 
+
+This is catastrophic. We build an elegant system, and then *SPLAT!* just throw the number 400 at it as though this is going to work!? This is embarrassing. This is CRITICAL issue number one.
+
+
+#### Open questions:
+
+The plan is strong. Re: open questions and unresolved issues. Q1) In general regions are "fine" enough that it is reasonable fair to weight each region's exposure weight by its size, so bp-weighted its a good first approximation. Keep bp mean for now and integrate as PR8 as benchmarks demand. Q2) I think we managed to show that consolidating a single exposure weight parameter in the denominator (functioning as an effective length modulator) is theoretically correct. The document you referred to has been superseded. Locus denominator should be sufficient. Q3) I am not sure how many passes are needed. The assumption that intergenic/intronic regions are pure background is reasonable, but there *are* exceptions. We can have robustness tweaks such as the "top 1% clip" parameter we introduced.. but multiple passes allow the algorithm to learn from the data rather than the initial assumptions or heuristics to improve robustness. The ultimate answer: try everything! keep what works. Q4) boundary fragment count data will be zero-inflated, sparse data. When we have non-capture (no hybrid capture), boundaries will be extremely sparse. With hybrid capture, we will get a solid signal from a subset of boundaries, but many/most will remain sparse/zero-inflated. The answer -- we need to implement and try, and see what works! Q5) Agree that capture effectively modifies the FL distribution! That is a known property of capture (tiny fragments can't be captured as well). This models biology and is correct tool behavior. Remember the simulation framework starts from a set of parameters but after capture, the original sim parameters aren't the ground truth anymore! This applies to gDNA FL and it applies to RNA abundances. The captured abundances are the ground truth and the captured FL is the ground truth. These are the values to benchmark against, not the pre-capture values. Q6) Strand model and density model are synergistic. When we have strand-specific data, we should use it if we can. So yes, run strand deconvolution first (if we have strand specific data). Use it to help select our initial seed regions that are ~gDNA only (no RNA). If we have unstranded data, we would still use the density model to predict ~gDNA only regions. The difference is that strand-specific data can find ~gDNA only regions that are CAPTURED as well as not captured. It grows our pool of 'not expressed' regions! This enhances our ability to find captured regions, even when we don't have boundary flux evidence to guide us. Q7) Agree we do not want an RNA exposure model. Yes, additional diagnostics are potentially useful. Q8) Unstranded capture is the most difficult scenario. We need to implement and see how well it works. There is some hope. Q9) The exposure weight A_r is per-region. All of the involved regions can contribute. I don't see a 'double counting problem' yet. I think this is a minor issue. Q10) The goal of iteration would be to allow the algorithm to reassign regions, including negative control probe capture regions, high nascent RNA introns, or unannotated transcripts. Then the 'S_off' becomes more pure. This was why I had in mind with iteration.
+
+
+#### v3 response
+
+#### v3 "3 pool model" revisions
+
+The "new_cal_plan_v3.md" proposes "three seed pools". The concept of 3 seed pools is not entirely correct. Firstly, we should not label pools "A", "B', "C" because it creates a layer of abstraction that becomes obscure. Here are my comments about the pools:
+
+1) "Background" pool (not expressed, not captured) formerly pool A. 
+- seeds rho_off
+- initialized with (intergenic + intron regions)
+- AND no spliced mass
+- AND no strand-RNA evidence (requires SS library)
+- AND not in top T% by contained density (top-T clip)
+
+2) "gDNA only capture" pool (not expressed, captured) formerly pool B.
+- seeds gamma_r and validates capture detection
+- no spliced mass
+- ***when we have strand-specific data:***
+   - strand deconvolve -> (kappa-d strand-balance test passes) -> identify regions consistent with pure gDNA at confidence c
+   - resulting deconvoluted gDNA density > rho_off
+- ***even when we do not have strand-specific data:***
+   - zero spliced boundary mass (no evidence of RNA)
+   - nonzero unspliced boundary mass (evidence of gDNA)
+   - we must use our gDNA boundary inference model. This model must predict 'contained' mass (with an upper tail/confidence) based on boundary mass.
+   - imputed gDNA mass/density > rho_off
+
+3) "on-target expressed" (expressed and captured)
+- previous version stated "*** never used to fit any parameter ***". This is wrong.
+- ***when we have strand-specific data***
+   - we can still strand deconvolve and estimate gDNA safely and robustly EVEN IN THE PRESENCE OF RNA
+   - resulting deconvoluted gdna density > rho_off
+- ***when we do not have strand-specific data***
+   - we cannot seed algorithm with these regions
+
+4) "off-target expressed" (expressed, off-target)
+- previous version states "this is not a pool". Wrong. This is a pool. 
+- evidence of RNA expression (>0 spliced mass)
+- gdna density ~ rho_off
+- ***when we have strand-specific data***
+   - we can still strand deconvolve and estimate off-target gDNA safely and robustly EVEN IN THE PRESENCE OF RNA
+   - resulting deconvoluted gdna density ~ rho_off
+- ***when we do not have strand-specific data***
+   - we cannot seed algorithm with these regions
+
+
+#### importance of boundary imputation model
+
+We ***must*** build a model that allows us to deconvolve gDNA within exons from boundary crossing fragments. This model is the ONLY solution for unstranded data. The model remains criticially essential as a companion to strand-specificity even when we have strand-specific data.
+
+
+#### imputation of 'internal' exon gDNA
+
+Consider this example:
+Transcripts
+- T1+ (1000, 2000), (5000,6000), (10000,15000)
+- T2+ (1000, 11000) (one giant exon)
+
+Currently 'T2' swallows T1 and creates massive ambiguities. Can we still solve this? With strand-specific data, yes. With unstranded data, there is still an approach:
+
+Algorithm concept.
+- Sweep left-to-right (1st pass) then right-to-left (2nd pass)
+- For each region, tabulate gDNA and RNA mass (deconvolved)
+
+Run-through:
+- estimate "background" from intergenic/intronic
+- first region (1000,2000). look at left unspliced boundary (intergenic-exon). the left unspliced boundary mass is the initial gDNA estimate. Store for region.
+- next region (2000,11000). boundary at 2000 is 'exon-exon', but in our sweep we store gdna imputation in neighbor exon. bring in this imputed value from the left.
+- next region is (2000,5000). this region is 'exon+, intron+' so ambiguous. the (1000,2000) exon has spliced mass and unspliced mass. The unspliced / (unspliced+spliced) ratio at the RIGHT boundary carries over into the next region (2000,5000). 
+- next (5000,6000) which is 'exon+'. the gDNA projection/imputation from (2000,5000) carries over through unspliced mass into (5000,6000).
+
+Does this make sense?
+
+After sweeping left-to-right, we would sweep right-to-left and process those boundaries.
+
+
+### v5 plan
+
+This new calibration plan (v4) is an **exceptional leaps in statistical rigor**. Rather than adding complex heuristics, it correctly identifies that we must treat the biological crossed factors (Expression × Capture) as a continuous joint-latent field. It replaces rigid classification rules with a robust probability model.
+
+The plan is scientifically pristine, but implementing a joint state-space latent model with sequential boundary message-passing sweeps is a highly ambitious engineering challenge. If not structured carefully, it runs the risk of introducing a massive, slow, and hard-to-test codebase.
+
+Below is a meticulous evaluation, proposed behavioral refinements, and a phased execution layout designed to keep the final code **clean, concise, and elegant**.
+
+#### Section 6 boundary sweep methods
+
+Regions are non-overlapping consecutive genomic intervals. 
+We previously discussed an optimization of region storage as 'contained' (nodes) and 'boundary' (edges). This mostly affects code elegance more than true functionality but might be a healthy thing to implement ahead of the boundary sweep method. You can reference 'docs/edgecentric/edge_centric_model.md' but design this yourself. 
+
+I am not sure we need a generalized "graph" data structure, but I do agree that the idea of separating 'boundaries' from the 'contained' portion of exons is potentially more efficient. I agree that structures for 'nodes' and 'edges' might work well, where traversal goes region contained -> boundary -> contained -> boundary, etc. An efficient data structure would be helpful. Adjacency can be represented as a 1d contiguous array. A forward-backward pass can be written in beautifully vectorized NumPy using the plethora of tools available in numpy/scipy. Efficiency can be improved later but this should be screaming fast.
+
+
+#### Section 7.2 Consolidating state likelihood evaluator
+
+To keep the joint 4-state posterior inference clean and readable, we can express the likelihood calculations as a compact, unified Log-Likelihood Tensor:
+
+# Array dimensions: [R regions, S states (background, gdna_only_cap, expressed_cap, expressed_offtarget)]
+log_likelihoods = np.zeros((n_regions, 4), dtype=np.float32)
+
+Rather than writing extensive class-specific branching statements, we construct orthogonal likelihood penalty terms and add them together across the tensor axes:
+
+1. Spliced / RNA evidence term: Evaluated as a monotonic step function or `1−cdf` constraint that penalizes the states which forbid RNA (background, gdna_only_capture).
+2. Imputed gDNA density term: Evaluated as a Negative Binomial log-pmf given regional exposure.
+3. Strand contrast term: Multiplied on top of the states.
+This tensor formulation allows the E-step (Expectation update) to collapse down to a single elegant normalized call:
+
+p_states = np.exp(log_likelihoods - logsumexp(log_likelihoods, axis=1, keepdims=True))
+
+
+
+
+
+---
+
+## 2. Refining the Phased Implementation Playbook
+
+The proposed 8-phase breakdown is logical, but several phases are highly coupled. We should group them into **4 tightly targeted development phases** to avoid writing dead code that cannot be tested end-to-end.
+
+```mermaid
+graph TD
+    P1[Phase I: Compartment Strand & Background] -->|Exposes rho_off & kappa_d| P2[Phase II: Boundary Imputation & Sweeps]
+    P2 -->|Provides lambda_side| P3[Phase III: 4-State EM Solver]
+    P3 -->|Outputs RegionCalibration| P4[Phase IV: Downstream EM Wiring]
+    P4 -->|Enables full run| Benchmark[Phase V: Benchmark & Calibration Refit]
+```
+
+### Phase I: Compartment-Aware Strand & Background Model (Phases 0, 1 & 2)
+*   **Action:** Extend strand_deconv.py to support compartment-specific estimates (`contained`, `boundary_left`, `boundary_right`).
+*   **Action:** Create `background_model.py` and implement the robust Gamma-Poisson backdrop solver ($\rho_{\text{off}}$) with the top-$T$ exclusion window.
+*   **Verification Gate:** Write `tests/test_background_model.py`. Verify that in an unstranded capture sample, $\rho_{\text{off}}$ shrinks reliably to target background levels while ignoring expressed target regions.
+
+### Phase II: Boundary Imputation & Contiguous Sweeps (Phases 3 & 4)
+*   **Action:** Create `boundary_model.py` to fit the boundary-to-contained Negative Binomial predictions with local target-enrichment shrinkage ($\gamma_r \to \Gamma_{\text{global}}$).
+*   **Action:** Create `boundary_sweep.py` implementing the fast, vectorized 1D message sweeps along the sorted coordinate ledger blocks.
+*   **Verification Gate:** Mock the T1/T2 "giant exon" situation. Confirm that the forward/backward pass propagates density information from the outer boundaries into the center of the giant exon with mathematically sound uncertainty decay.
+
+### Phase III: The Core Joint-State Solver (Phases 5 & 7)
+*   **Action:** Implement `latent_states.py` around the 4-state probability model, solving the EM expectation and maximization loop.
+*   **Action:** Wire these steps into our _orchestrator.py flow, producing the unified `RegionCalibration` result struct.
+*   **Verification Gate:** Write a synthetic test mocking four categories of regions. Assert that expression probabilities ($\eta_r$) and target capture status ($\gamma_r$) converge onto the true simulated states within $\le 5$ iterations.
+
+### Phase IV: Conduit Wiring & Golden Regression (Phases 6 & 8)
+*   **Action:** Replace the `NotImplementedError` in `pipeline.py::quant_from_buffer`.
+*   **Action:** Feed `RegionCalibration.mu_gdna` and `RegionCalibration.A_r` directly into the `PriorTable` allocator and downstream C++ EM execution.
+*   **Verification Gate:** Run `pytest test_golden_output.py --update-golden` and execute the benchmark status suite to review post-capture truth recoveries.
+
+---
+
+## 3. Code Aesthetics & Maintainability Guidelines
+
+To make this codebase look like a world-class, elegantly written package:
+
+*   **Rule of Statelessness:** All models (Background, Boundary, Latent States) should be written as stateless functions or immutable dataclasses. Never carry transient EM convergence arrays or database state inside the mathematical primitives.
+*   **Rule of Explicit Vectorization:** Never use a `for` loop over regions inside any computational loop. All likelihood calculations, Gamma updates, and Negative Binomial quantiles must be evaluated over full NumPy arrays and vectorized (scipy.special or other function)
+*   **Rule of Clear Diagnostic Transparency:** Regional flags (`flags`) must be constructed bitwise (`FUSED_EXACT`, `FUSED_APPROX`, `FUSED_FALLBACK`) and returned with the final table. No diagnostic metrics should be black-boxed.
+
+
 
 
 ### density model
@@ -128,8 +441,6 @@ Wait, if a region has extreme *nascent RNA* expression, won't nascent RNA cross 
 This framework gives you everything you asked for: mathematically pristine, no magic numbers, robust to hybrid capture, and a native way to surface continuous exposure weights to the EM.
 
 
-
-## Phase 4
 
 
 ### rna-seq data types

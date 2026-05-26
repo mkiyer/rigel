@@ -52,10 +52,14 @@ nrna:
   ratio_labels: [none]
 
 capture:
-  fraction: 0.5
   probe_length: 120
-  probe_density: 1.0
+  probe_density: 0.5
   off_target_weight: 1.0
   binding_per_base: 10.0
   gdna_split_penalty: 0.2
   min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5

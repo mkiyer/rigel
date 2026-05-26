@@ -11,7 +11,12 @@ from rigel.sim.whole_genome import (
     WholeGenomeSimulator,
     parse_yaml_config,
 )
-from rigel.sim.suite import design_capture_probe_intervals, write_random_capture_probes
+from rigel.sim.manifest import condition_dir_name
+from rigel.sim.suite import (
+    capture_paired_condition_seed,
+    design_capture_probe_intervals,
+    write_random_capture_probes,
+)
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
@@ -174,6 +179,44 @@ def test_parse_yaml_capture_config(tmp_path):
     assert cfg.capture.binding_per_base == pytest.approx(7.0)
     assert cfg.capture.gdna_split_penalty == pytest.approx(0.15)
     assert cfg.capture.min_overlap == 4
+
+
+def test_parse_yaml_capture_config_sweep(tmp_path):
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("T1\t10\t130\n")
+    config = tmp_path / "sim.yaml"
+    config.write_text(
+        f"genome: genome.fa\n"
+        f"gtf: annotation.gtf\n"
+        f"capture:\n"
+        f"  off_target_weight: 0.5\n"
+        f"  configs:\n"
+        f"    - label: off\n"
+        f"      enabled: false\n"
+        f"    - label: on\n"
+        f"      probes: {probes}\n"
+        f"      format: transcript\n"
+        f"      binding_per_base: 7\n"
+    )
+
+    cfg = parse_yaml_config(config)
+
+    assert [scenario.label for scenario in cfg.capture_configs] == ["off", "on"]
+    assert cfg.capture_configs[0].config.probes is None
+    assert cfg.capture_configs[1].config.probes == str(probes)
+    assert cfg.capture_configs[1].config.probe_format == "transcript"
+    assert cfg.capture_configs[1].config.off_target_weight == pytest.approx(0.5)
+    assert cfg.capture_configs[1].config.binding_per_base == pytest.approx(7.0)
+
+
+def test_capture_sweep_uses_paired_condition_seed():
+    seed = capture_paired_condition_seed(42, "none", 0.99, "none")
+
+    assert seed == capture_paired_condition_seed(42, "none", 0.99, "none")
+    assert seed != capture_paired_condition_seed(42, "high", 0.99, "none")
+    assert condition_dir_name("none", 0.99, "none", "off") != condition_dir_name(
+        "none", 0.99, "none", "on",
+    )
 
 
 def test_whole_genome_simulator_uses_capture_partition_for_assignment(tmp_path):

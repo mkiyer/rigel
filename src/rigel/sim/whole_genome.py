@@ -100,7 +100,7 @@ from rigel.sim.bam import (
     premrna_to_genomic_interval,
     transcript_to_genomic_blocks,
 )
-from rigel.sim.capture import CaptureConfig, CaptureSampler
+from rigel.sim.capture import CaptureConfig, CaptureScenario, CaptureSampler
 from rigel.sim.genome import reverse_complement
 from rigel.sim.manifest import (
     condition_dir_name,
@@ -300,12 +300,93 @@ class WholeGenomeSimConfig:
     gdna: GDNASimConfig = field(default_factory=GDNASimConfig)
     nrna: NRNAConfig = field(default_factory=NRNAConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
+    capture_configs: list[CaptureScenario] = field(default_factory=list)
     strand_specificities: list[float] = field(
         default_factory=lambda: [1.0]
     )
 
     oracle_bam: bool = True
     verbose: bool = True
+
+
+def _capture_config_from_mapping(
+    raw: dict,
+    defaults: dict | None = None,
+    *,
+    label: str = "capture",
+    require_probes_when_enabled: bool = False,
+) -> CaptureConfig:
+    """Build a CaptureConfig from a YAML mapping plus optional defaults."""
+    merged = dict(defaults or {})
+    merged.update(raw)
+    enabled = bool(merged.get("enabled", True))
+    if not enabled:
+        return CaptureConfig()
+
+    probes = merged.get("probes", None)
+    if not probes:
+        if require_probes_when_enabled and raw.get("enabled") is True:
+            raise ValueError(f"capture config '{label}' is enabled but has no probes")
+        return CaptureConfig()
+
+    return CaptureConfig(
+        probes=str(probes),
+        probe_format=str(merged.get("probe_format", merged.get("format", "auto"))),
+        off_target_weight=float(merged.get("off_target_weight", 1.0)),
+        binding_per_base=float(merged.get("binding_per_base", 10.0)),
+        gdna_split_penalty=float(merged.get("gdna_split_penalty", 0.2)),
+        min_overlap=int(merged.get("min_overlap", 1)),
+    )
+
+
+def _capture_label_text(value: object) -> str:
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return str(value)
+
+
+def _capture_scenarios_from_mapping(raw: dict) -> list[CaptureScenario]:
+    """Parse capture.configs/capture.scenarios from a YAML mapping."""
+    raw_configs = raw.get("configs", raw.get("scenarios"))
+    if raw_configs is None:
+        return []
+    if not isinstance(raw_configs, list) or not raw_configs:
+        raise ValueError("capture.configs must be a non-empty list")
+
+    defaults = {
+        key: value
+        for key, value in raw.items()
+        if key not in {"configs", "scenarios"}
+    }
+    scenarios: list[CaptureScenario] = []
+    seen_labels: set[str] = set()
+    for index, item in enumerate(raw_configs, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("each capture.configs entry must be a mapping")
+        label = _capture_label_text(item.get("label", item.get("name", f"c{index}")))
+        if not label:
+            raise ValueError("capture config labels must be non-empty")
+        if label in seen_labels:
+            raise ValueError(f"duplicate capture config label: {label}")
+        seen_labels.add(label)
+        scenarios.append(CaptureScenario(
+            label=label,
+            config=_capture_config_from_mapping(
+                item,
+                defaults,
+                label=label,
+                require_probes_when_enabled=True,
+            ),
+        ))
+    return scenarios
+
+
+def _capture_grid(cfg: WholeGenomeSimConfig) -> tuple[list[CaptureScenario], bool]:
+    """Return capture scenarios and whether condition names should include labels."""
+    if cfg.capture_configs:
+        return cfg.capture_configs, True
+    label = "on" if cfg.capture.probes else "off"
+    return [CaptureScenario(label=label, config=cfg.capture)], False
 
 
 def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
@@ -390,13 +471,13 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 
     # Hybrid capture
     cap_raw = raw.get("capture", {}) or {}
-    cap = cfg.capture
-    cap.probes = cap_raw.get("probes", None)
-    cap.probe_format = str(cap_raw.get("probe_format", cap_raw.get("format", "auto")))
-    cap.off_target_weight = float(cap_raw.get("off_target_weight", 1.0))
-    cap.binding_per_base = float(cap_raw.get("binding_per_base", 10.0))
-    cap.gdna_split_penalty = float(cap_raw.get("gdna_split_penalty", 0.2))
-    cap.min_overlap = int(cap_raw.get("min_overlap", 1))
+    if not isinstance(cap_raw, dict):
+        raise ValueError("capture must be a YAML mapping")
+    cfg.capture_configs = _capture_scenarios_from_mapping(cap_raw)
+    if cfg.capture_configs:
+        cfg.capture = cfg.capture_configs[0].config
+    else:
+        cfg.capture = _capture_config_from_mapping(cap_raw)
 
     # Strand specificities
     cfg.strand_specificities = [
@@ -1916,7 +1997,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         (t.abundance or 0.0, t.nrna_abundance) for t in transcripts
     ]
 
-    # 3. Build condition grid: nrna × gdna × strand_specificities
+    # 3. Build condition grid: nrna × gdna × strand_specificities × capture
     sim = cfg.simulation
 
     gdna_pairs: list[tuple[str, float]] = []
@@ -1925,9 +2006,13 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         gdna_pairs.append((label, rate))
 
     nrna_pairs = _build_nrna_pairs(cfg, has_file_nrna)
+    capture_scenarios, include_capture_in_names = _capture_grid(cfg)
 
     total_conditions = (
-        len(nrna_pairs) * len(gdna_pairs) * len(cfg.strand_specificities)
+        len(nrna_pairs)
+        * len(gdna_pairs)
+        * len(cfg.strand_specificities)
+        * len(capture_scenarios)
     )
     cond_num = 0
     conditions: list[dict] = []
@@ -1964,86 +2049,96 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
 
         for gdna_label, gdna_rate in gdna_pairs:
             for strand_spec in cfg.strand_specificities:
-                cond_num += 1
-                if nrna_mode in {"additive_ratio", "random_fraction"}:
-                    n_mrna = sim.n_rna_fragments
-                    n_nrna = round(n_mrna * float(nrna_ratio or 0.0))
-                    n_rna = n_mrna + n_nrna
-                    n_gdna = round(gdna_rate * n_mrna)
-                    explicit_mrna = n_mrna
-                    explicit_nrna = n_nrna
-                else:
-                    n_mrna = None
-                    n_nrna = None
-                    n_rna = sim.n_rna_fragments
-                    n_gdna = round(gdna_rate * n_rna)
-                    explicit_mrna = None
-                    explicit_nrna = None
-
-                cond_name = condition_dir_name(
-                    gdna_label, strand_spec, nrna_label,
-                )
-                cond_dir = outdir / cond_name
-
-                print(
-                    f"\n[{cond_num}/{total_conditions}] {cond_name}: "
-                    f"RNA={n_rna:,} gDNA={n_gdna:,} SS={strand_spec:.2f} "
-                    f"nRNA={nrna_label}",
-                    flush=True,
-                )
-
-                cond_entry: dict = {
-                    "name": cond_name,
-                    "gdna_label": gdna_label,
-                    "gdna_rate": gdna_rate,
-                    "strand_specificity": strand_spec,
-                    "nrna_label": nrna_label,
-                    "nrna_mode": nrna_mode,
-                    "nrna_ratio": nrna_ratio,
-                    "nrna_ratio_range": nrna_ratio_range,
-                    "nrna_eligible_fraction": (
-                        cfg.nrna.eligible_fraction if nrna_mode == "random_fraction" else None
-                    ),
-                    "n_mrna": n_mrna,
-                    "n_nrna": n_nrna,
-                    "n_rna": n_rna,
-                    "n_gdna": n_gdna,
-                    "n_total": n_rna + n_gdna,
-                    "truth_abundances": truth_name,
-                    "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
-                    "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
-                }
-
-                # Check if already done
-                if (cond_dir / "sim_R1.fq.gz").exists():
-                    print("  Output exists, skipping", flush=True)
-                    cond_entry["oracle_bam"] = (
-                        f"{cond_name}/sim_oracle.bam" if cfg.oracle_bam
-                        else None
+                for capture_scenario in capture_scenarios:
+                    capture_label = (
+                        capture_scenario.label if include_capture_in_names else None
                     )
-                else:
-                    print("  Simulating...", end="", flush=True)
-                    t0 = time.monotonic()
-                    simulator = WholeGenomeSimulator(
-                        genome_path, cond_transcripts, sim, cfg.gdna,
-                        strand_specificity=strand_spec,
-                        capture_config=cfg.capture,
-                    )
-                    _, _, bam_path = simulator.simulate_and_write(
-                        cond_dir, n_rna, n_gdna,
-                        oracle_bam=cfg.oracle_bam, prefix="sim",
-                        n_mrna=explicit_mrna,
-                        n_nrna=explicit_nrna,
-                        n_workers=sim.n_workers,
-                    )
-                    simulator.close()
-                    cond_entry["oracle_bam"] = (
-                        f"{cond_name}/sim_oracle.bam" if bam_path
-                        else None
-                    )
-                    print(f" done ({time.monotonic() - t0:.1f}s)", flush=True)
+                    capture_enabled = bool(capture_scenario.config.probes)
 
-                conditions.append(cond_entry)
+                    cond_num += 1
+                    if nrna_mode in {"additive_ratio", "random_fraction"}:
+                        n_mrna = sim.n_rna_fragments
+                        n_nrna = round(n_mrna * float(nrna_ratio or 0.0))
+                        n_rna = n_mrna + n_nrna
+                        n_gdna = round(gdna_rate * n_mrna)
+                        explicit_mrna = n_mrna
+                        explicit_nrna = n_nrna
+                    else:
+                        n_mrna = None
+                        n_nrna = None
+                        n_rna = sim.n_rna_fragments
+                        n_gdna = round(gdna_rate * n_rna)
+                        explicit_mrna = None
+                        explicit_nrna = None
+
+                    cond_name = condition_dir_name(
+                        gdna_label, strand_spec, nrna_label, capture_label,
+                    )
+                    cond_dir = outdir / cond_name
+
+                    print(
+                        f"\n[{cond_num}/{total_conditions}] {cond_name}: "
+                        f"RNA={n_rna:,} gDNA={n_gdna:,} SS={strand_spec:.2f} "
+                        f"nRNA={nrna_label} capture={capture_scenario.label}",
+                        flush=True,
+                    )
+
+                    cond_entry: dict = {
+                        "name": cond_name,
+                        "gdna_label": gdna_label,
+                        "gdna_rate": gdna_rate,
+                        "strand_specificity": strand_spec,
+                        "nrna_label": nrna_label,
+                        "nrna_mode": nrna_mode,
+                        "nrna_ratio": nrna_ratio,
+                        "nrna_ratio_range": nrna_ratio_range,
+                        "nrna_eligible_fraction": (
+                            cfg.nrna.eligible_fraction
+                            if nrna_mode == "random_fraction" else None
+                        ),
+                        "capture_label": capture_scenario.label,
+                        "capture_enabled": capture_enabled,
+                        "capture_config": capture_scenario.config,
+                        "n_mrna": n_mrna,
+                        "n_nrna": n_nrna,
+                        "n_rna": n_rna,
+                        "n_gdna": n_gdna,
+                        "n_total": n_rna + n_gdna,
+                        "truth_abundances": truth_name,
+                        "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
+                        "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
+                    }
+
+                    # Check if already done
+                    if (cond_dir / "sim_R1.fq.gz").exists():
+                        print("  Output exists, skipping", flush=True)
+                        cond_entry["oracle_bam"] = (
+                            f"{cond_name}/sim_oracle.bam" if cfg.oracle_bam
+                            else None
+                        )
+                    else:
+                        print("  Simulating...", end="", flush=True)
+                        t0 = time.monotonic()
+                        simulator = WholeGenomeSimulator(
+                            genome_path, cond_transcripts, sim, cfg.gdna,
+                            strand_specificity=strand_spec,
+                            capture_config=capture_scenario.config,
+                        )
+                        _, _, bam_path = simulator.simulate_and_write(
+                            cond_dir, n_rna, n_gdna,
+                            oracle_bam=cfg.oracle_bam, prefix="sim",
+                            n_mrna=explicit_mrna,
+                            n_nrna=explicit_nrna,
+                            n_workers=sim.n_workers,
+                        )
+                        simulator.close()
+                        cond_entry["oracle_bam"] = (
+                            f"{cond_name}/sim_oracle.bam" if bam_path
+                            else None
+                        )
+                        print(f" done ({time.monotonic() - t0:.1f}s)", flush=True)
+
+                    conditions.append(cond_entry)
     # 4. Write manifest
     write_manifest(outdir, cfg, conditions)
 

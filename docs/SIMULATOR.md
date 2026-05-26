@@ -46,14 +46,17 @@ Main outputs:
 │   ├── genome.fa
 │   ├── genome.fa.fai
 │   ├── genes.gtf
-│   └── capture_probes.tsv        # only when generated capture is enabled
+│   └── capture_probes_<label>.tsv  # only when generated capture configs are enabled
 ├── truth_abundances_nrna_<label>.tsv
 ├── manifest.json
-└── gdna_<label>_ss_<value>_nrna_<label>/
+└── gdna_<label>_ss_<value>_nrna_<label>[_capture_<label>]/
     ├── sim_R1.fq.gz
     ├── sim_R2.fq.gz
     └── sim_oracle.bam
 ```
+
+The `_capture_<label>` suffix is added only when a config uses a capture sweep.
+Legacy single-capture configs keep the older condition names.
 
 The default condition grid is controlled by `--profile`:
 
@@ -123,6 +126,14 @@ Generated probes are written to:
 <outdir>/reference/capture_probes.tsv
 ```
 
+When you configure more than one capture setting, each enabled setting gets a
+label-specific probe file:
+
+```text
+<outdir>/reference/capture_probes_on.tsv
+<outdir>/reference/capture_probes_dense.tsv
+```
+
 The file is a tab-separated transcript-coordinate table:
 
 ```text
@@ -159,10 +170,66 @@ Examples:
 - Transcript length `1319`, probe length `120`, density `1.0`: 10 probes, centered with slack distributed as gaps.
 - Transcript length `1200`, probe length `120`, density `0.5`: 5 probes.
 
+To simulate both uncaptured and captured reads for the same synthetic reference,
+use `capture.configs`. Each entry becomes another condition-grid dimension:
+
+```yaml
+capture:
+  probe_length: 120
+  probe_density: 1.0
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5
+```
+
+This creates condition directories such as:
+
+```text
+gdna_none_ss_0.99_nrna_none_capture_off/
+gdna_none_ss_0.99_nrna_none_capture_on/
+```
+
+Capture configs are paired for head-to-head comparisons: the transcript
+abundance draw and expressed/unexpressed transcript set are shared across all
+capture labels in the run. For the random mini-genome suite, capture labels also
+share the same simulation seed within each fixed nRNA/gDNA/strand condition;
+only the capture weighting changes between `capture_off` and `capture_on`.
+
+You can add more capture configs by adding more entries. Values inside an entry
+override the defaults above it:
+
+```yaml
+capture:
+  probe_length: 120
+  off_target_weight: 1.0
+  configs:
+    - label: off
+      enabled: false
+    - label: weak
+      fraction: 0.5
+      binding_per_base: 3.0
+    - label: strong
+      fraction: 0.5
+      binding_per_base: 15.0
+    - label: dense
+      fraction: 0.5
+      probe_density: 1.0
+      binding_per_base: 10.0
+```
+
+Use short, path-safe labels because they become part of the condition directory
+name and the manifest `capture_label` field.
+
 Checked-in generated-capture suite configs:
 
-- `scripts/sim/configs/hybrid_capture_500kb.yaml`: 500 kb genome, 10 genes, 1-5 isoforms per gene, 50% transcript capture.
-- `scripts/sim/configs/hybrid_capture_5mb.yaml`: 5 Mb genome, 100 genes, 1-5 isoforms per gene, 50% transcript capture.
+- `scripts/sim/configs/hybrid_capture_500kb.yaml`: 500 kb genome, 10 genes, 1-5 isoforms per gene, capture off/on with 50% transcript capture in the `on` config.
+- `scripts/sim/configs/hybrid_capture_5mb.yaml`: 5 Mb genome, 100 genes, 1-5 isoforms per gene, capture off/on with 50% transcript capture in the `on` config.
 
 ## Existing FASTA/GTF Workflow
 
@@ -217,7 +284,8 @@ oracle_bam: true
 verbose: true
 ```
 
-To use a custom hybrid-capture probe file in this workflow, add a `capture` block:
+To use a single custom hybrid-capture probe file in this workflow, add a
+`capture` block:
 
 ```yaml
 capture:
@@ -228,6 +296,32 @@ capture:
   gdna_split_penalty: 0.2
   min_overlap: 1
 ```
+
+To compare capture off versus one or more capture probe sets in the same run,
+use `capture.configs`:
+
+```yaml
+capture:
+  probe_format: transcript
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: panel_a
+      probes: /path/to/panel_a_probes.tsv
+    - label: panel_b
+      probes: /path/to/panel_b_probes.bed
+      probe_format: bed12
+      binding_per_base: 15.0
+```
+
+Each capture config is crossed with every nRNA, gDNA, and strand-specificity
+setting. The labels become condition suffixes, for example
+`gdna_high_ss_0.99_nrna_none_capture_panel_a`. Defaults under `capture:` apply to
+all entries unless an entry overrides them.
 
 Supported probe formats:
 

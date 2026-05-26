@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from rigel.sim.capture import CaptureConfig
+from rigel.sim.capture import CaptureConfig, CaptureScenario
 from rigel.sim.synthetic_genome import (
     ANTISENSE_OVERLAP_FRAC,
     GENOME_LENGTH,
@@ -72,6 +72,17 @@ def stable_seed(base_seed: int, *parts: object) -> int:
     text = "\0".join([str(base_seed), *(str(part) for part in parts)])
     digest = hashlib.blake2b(text.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big") & 0xFFFF_FFFF
+
+
+def capture_paired_condition_seed(
+    base_seed: int,
+    gdna_label: str,
+    strand_specificity: float,
+    nrna_label: str,
+) -> int:
+    """Seed shared by capture variants for the same non-capture condition."""
+    seed_name = condition_dir_name(gdna_label, strand_specificity, nrna_label)
+    return stable_seed(base_seed, seed_name)
 
 
 def _parse_csv_floats(text: str) -> list[float]:
@@ -175,6 +186,8 @@ def _load_suite_config(path: Path) -> dict[str, object]:
     put("capture", "binding_per_base", "capture_binding_per_base")
     put("capture", "gdna_split_penalty", "capture_gdna_split_penalty")
     put("capture", "min_overlap", "capture_min_overlap")
+    put("capture", "configs", "capture_configs")
+    put("capture", "scenarios", "capture_configs")
 
     return values
 
@@ -188,6 +201,84 @@ class CaptureProbeDesignResult:
     n_eligible: int
     n_captured: int
     n_probes: int
+
+
+@dataclass(frozen=True)
+class SuiteCaptureSpec:
+    """Generated-probe capture setting before probe files exist."""
+
+    label: str
+    fraction: float
+    probe_length: int
+    probe_density: float
+    off_target_weight: float
+    binding_per_base: float
+    gdna_split_penalty: float
+    min_overlap: int
+
+    @property
+    def enabled(self) -> bool:
+        return self.fraction > 0.0 and self.probe_density > 0.0
+
+
+def _capture_label(raw: dict, index: int) -> str:
+    value = raw.get("label", raw.get("name", f"c{index}"))
+    label = "on" if value is True else "off" if value is False else str(value)
+    if not label or "/" in label:
+        raise ValueError("capture config labels must be non-empty path-safe strings")
+    return label
+
+
+def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpec], bool]:
+    """Return generated-capture specs and whether names should include labels."""
+    raw_configs = getattr(args, "capture_configs", None)
+
+    def from_mapping(raw: dict, index: int) -> SuiteCaptureSpec:
+        if not isinstance(raw, dict):
+            raise ValueError("each capture.configs entry must be a mapping")
+        label = _capture_label(raw, index)
+        enabled = bool(raw.get("enabled", True))
+        fraction = float(raw.get("fraction", raw.get("capture_fraction", args.capture_fraction)))
+        if not enabled:
+            fraction = 0.0
+        spec = SuiteCaptureSpec(
+            label=label,
+            fraction=fraction,
+            probe_length=int(raw.get("probe_length", args.probe_length)),
+            probe_density=float(raw.get("probe_density", args.probe_density)),
+            off_target_weight=float(
+                raw.get("off_target_weight", args.capture_off_target_weight)
+            ),
+            binding_per_base=float(
+                raw.get("binding_per_base", args.capture_binding_per_base)
+            ),
+            gdna_split_penalty=float(
+                raw.get("gdna_split_penalty", args.capture_gdna_split_penalty)
+            ),
+            min_overlap=int(raw.get("min_overlap", args.capture_min_overlap)),
+        )
+        if not 0.0 <= spec.fraction <= 1.0:
+            raise ValueError(f"capture config '{label}' fraction must be between 0 and 1")
+        if spec.probe_length <= 0:
+            raise ValueError(f"capture config '{label}' probe_length must be > 0")
+        if not 0.0 <= spec.probe_density <= 1.0:
+            raise ValueError(f"capture config '{label}' probe_density must be between 0 and 1")
+        return spec
+
+    if raw_configs is None:
+        label = (
+            "on" if args.capture_fraction > 0.0 and args.probe_density > 0.0
+            else "off"
+        )
+        return [from_mapping({"label": label}, 1)], False
+    if not isinstance(raw_configs, list) or not raw_configs:
+        raise ValueError("capture.configs must be a non-empty list")
+
+    specs = [from_mapping(raw, index) for index, raw in enumerate(raw_configs, start=1)]
+    labels = [spec.label for spec in specs]
+    if len(set(labels)) != len(labels):
+        raise ValueError("capture config labels must be unique")
+    return specs, True
 
 
 def design_capture_probe_intervals(
@@ -447,6 +538,7 @@ def main():
     if len(gdna_labels) != len(gdna_rates):
         raise ValueError("gDNA labels must have the same length as gDNA rates")
     selected_conditions = set(args.conditions or [])
+    capture_specs, include_capture_in_names = _suite_capture_specs(args)
 
     # ══════════════════════════════════════════════════════════════════════
     # Step 1: Generate synthetic genome
@@ -502,37 +594,55 @@ def main():
             print("  Isoforms/gene: n/a")
 
     transcripts: list[Transcript] | None = None
-    capture_result: CaptureProbeDesignResult | None = None
-    capture_config = CaptureConfig()
-    if args.capture_fraction > 0.0 and args.probe_density > 0.0:
+    capture_scenarios: list[CaptureScenario] = []
+    if any(spec.enabled for spec in capture_specs):
         print(f"\n  Loading transcripts from {gtf_path} for capture probe design...")
         transcripts = load_transcripts(gtf_path)
-        probe_path = ref_dir / "capture_probes.tsv"
-        capture_result = write_random_capture_probes(
-            transcripts,
-            probe_path,
-            capture_fraction=args.capture_fraction,
-            probe_length=args.probe_length,
-            probe_density=args.probe_density,
-            seed=stable_seed(args.seed, "capture", args.capture_fraction, args.probe_length,
-                             args.probe_density),
-        )
-        if capture_result.n_probes > 0:
-            capture_config = CaptureConfig(
-                probes=str(probe_path),
-                probe_format="transcript",
-                off_target_weight=args.capture_off_target_weight,
-                binding_per_base=args.capture_binding_per_base,
-                gdna_split_penalty=args.capture_gdna_split_penalty,
-                min_overlap=args.capture_min_overlap,
+
+    for spec in capture_specs:
+        capture_config = CaptureConfig()
+        if spec.enabled and transcripts is not None:
+            probe_path = (
+                ref_dir / f"capture_probes_{spec.label}.tsv"
+                if include_capture_in_names else ref_dir / "capture_probes.tsv"
             )
-            print(
-                f"  Capture probes: {probe_path} "
-                f"({capture_result.n_probes:,} probes across "
-                f"{capture_result.n_captured:,}/{capture_result.n_eligible:,} eligible transcripts)"
+            capture_result = write_random_capture_probes(
+                transcripts,
+                probe_path,
+                capture_fraction=spec.fraction,
+                probe_length=spec.probe_length,
+                probe_density=spec.probe_density,
+                seed=stable_seed(
+                    args.seed, "capture", spec.fraction, spec.probe_length,
+                    spec.probe_density,
+                ),
             )
+            if capture_result.n_probes > 0:
+                capture_config = CaptureConfig(
+                    probes=str(probe_path),
+                    probe_format="transcript",
+                    off_target_weight=spec.off_target_weight,
+                    binding_per_base=spec.binding_per_base,
+                    gdna_split_penalty=spec.gdna_split_penalty,
+                    min_overlap=spec.min_overlap,
+                )
+                print(
+                    f"  Capture {spec.label}: {probe_path} "
+                    f"({capture_result.n_probes:,} probes across "
+                    f"{capture_result.n_captured:,}/{capture_result.n_eligible:,} "
+                    "eligible transcripts)"
+                )
+            else:
+                print(
+                    f"  Capture {spec.label} requested but no eligible probes were "
+                    "generated; disabled"
+                )
         else:
-            print("  Capture requested but no eligible probes were generated; capture disabled")
+            print(
+                f"  Capture {spec.label}: disabled"
+                if include_capture_in_names else "  Capture: disabled"
+            )
+        capture_scenarios.append(CaptureScenario(label=spec.label, config=capture_config))
 
     if args.reference_only:
         print(f"\nReference generated at {ref_dir}")
@@ -588,7 +698,13 @@ def main():
             ratios=nrna_ratios,
             ratio_labels=nrna_labels,
         ),
-        capture=capture_config,
+        capture=(
+            capture_scenarios[0].config
+            if capture_scenarios else CaptureConfig()
+        ),
+        capture_configs=(
+            capture_scenarios if include_capture_in_names else []
+        ),
         strand_specificities=strand_specs,
         oracle_bam=True,
     )
@@ -601,15 +717,27 @@ def main():
 
     n_expressed = sum(1 for t in transcripts if (t.abundance or 0) > 0)
     print(f"  Expressed: {n_expressed}/{len(transcripts)} transcripts")
-    if cfg.capture.probes:
+    if include_capture_in_names:
+        labels = ", ".join(
+            f"{scenario.label}={'on' if scenario.config.probes else 'off'}"
+            for scenario in capture_scenarios
+        )
+        print(f"  Capture configs: {labels}")
+    elif cfg.capture.probes:
         print(f"  Hybrid capture: {cfg.capture.probes}")
 
     # Run conditions
     all_condition_names = [
-        condition_dir_name(gdna_label, strand_spec, nrna_label)
+        condition_dir_name(
+            gdna_label,
+            strand_spec,
+            nrna_label,
+            capture_scenario.label if include_capture_in_names else None,
+        )
         for nrna_label in nrna_labels
         for gdna_label in gdna_labels
         for strand_spec in strand_specs
+        for capture_scenario in capture_scenarios
     ]
     unknown_conditions = selected_conditions.difference(all_condition_names)
     if unknown_conditions:
@@ -632,73 +760,84 @@ def main():
         for i, gdna_rate in enumerate(gdna_rates):
             gdna_label = gdna_labels[i]
             for strand_spec in strand_specs:
-                n_mrna = n_rna
-                n_nrna = round(n_mrna * nrna_ratio)
-                n_rna_total = n_mrna + n_nrna
-                n_gdna = round(gdna_rate * n_mrna)
-
-                cond_name = condition_dir_name(gdna_label, strand_spec, nrna_label)
-                if selected_conditions and cond_name not in selected_conditions:
-                    continue
-                cond_num += 1
-                condition_seed = stable_seed(args.seed, cond_name)
-                cond_dir = outdir / cond_name
-
-                print(
-                    f"\n  [{cond_num}/{total_conditions}] {cond_name}: "
-                    f"mRNA={n_mrna:,} nRNA={n_nrna:,} gDNA={n_gdna:,} "
-                    f"SS={strand_spec:.2f}",
-                    flush=True,
-                )
-
-                cond_entry = {
-                    "name": cond_name,
-                    "gdna_label": gdna_label,
-                    "gdna_rate": gdna_rate,
-                    "strand_specificity": strand_spec,
-                    "nrna_label": nrna_label,
-                    "nrna_mode": "additive_ratio",
-                    "nrna_ratio": nrna_ratio,
-                    "n_mrna": n_mrna,
-                    "n_nrna": n_nrna,
-                    "n_rna": n_rna_total,
-                    "n_gdna": n_gdna,
-                    "n_total": n_rna_total + n_gdna,
-                    "seed": condition_seed,
-                    "truth_abundances": truth_name,
-                    "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
-                    "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
-                }
-
-                # Check if already done
-                if (cond_dir / "sim_R1.fq.gz").exists() and args.skip_existing:
-                    print("    Output exists, skipping", flush=True)
-                    cond_entry["oracle_bam"] = f"{cond_name}/sim_oracle.bam"
-                else:
-                    print("    Simulating...", end="", flush=True)
-                    t_cond = time.monotonic()
-                    cond_sim = copy.deepcopy(cfg.simulation)
-                    cond_sim.sim_seed = condition_seed
-                    simulator = WholeGenomeSimulator(
-                        fasta_path, cond_transcripts, cond_sim, cfg.gdna,
-                        strand_specificity=strand_spec,
-                        capture_config=cfg.capture,
+                for capture_scenario in capture_scenarios:
+                    n_mrna = n_rna
+                    n_nrna = round(n_mrna * nrna_ratio)
+                    n_rna_total = n_mrna + n_nrna
+                    n_gdna = round(gdna_rate * n_mrna)
+                    capture_label = (
+                        capture_scenario.label if include_capture_in_names else None
                     )
-                    _, _, bam_path = simulator.simulate_and_write(
-                        cond_dir, n_rna_total, n_gdna,
-                        oracle_bam=True, prefix="sim",
-                        n_mrna=n_mrna,
-                        n_nrna=n_nrna,
-                        n_workers=cond_sim.n_workers,
-                    )
-                    simulator.close()
-                    cond_entry["oracle_bam"] = (
-                        f"{cond_name}/sim_oracle.bam" if bam_path else None
-                    )
-                    elapsed_cond = time.monotonic() - t_cond
-                    print(f" done ({elapsed_cond:.1f}s)", flush=True)
 
-                conditions.append(cond_entry)
+                    cond_name = condition_dir_name(
+                        gdna_label, strand_spec, nrna_label, capture_label,
+                    )
+                    if selected_conditions and cond_name not in selected_conditions:
+                        continue
+                    cond_num += 1
+                    condition_seed = capture_paired_condition_seed(
+                        args.seed, gdna_label, strand_spec, nrna_label,
+                    )
+                    cond_dir = outdir / cond_name
+
+                    print(
+                        f"\n  [{cond_num}/{total_conditions}] {cond_name}: "
+                        f"mRNA={n_mrna:,} nRNA={n_nrna:,} gDNA={n_gdna:,} "
+                        f"SS={strand_spec:.2f} capture={capture_scenario.label}",
+                        flush=True,
+                    )
+
+                    cond_entry = {
+                        "name": cond_name,
+                        "gdna_label": gdna_label,
+                        "gdna_rate": gdna_rate,
+                        "strand_specificity": strand_spec,
+                        "nrna_label": nrna_label,
+                        "nrna_mode": "additive_ratio",
+                        "nrna_ratio": nrna_ratio,
+                        "capture_label": capture_scenario.label,
+                        "capture_enabled": bool(capture_scenario.config.probes),
+                        "capture_config": capture_scenario.config,
+                        "n_mrna": n_mrna,
+                        "n_nrna": n_nrna,
+                        "n_rna": n_rna_total,
+                        "n_gdna": n_gdna,
+                        "n_total": n_rna_total + n_gdna,
+                        "seed": condition_seed,
+                        "truth_abundances": truth_name,
+                        "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
+                        "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
+                    }
+
+                    # Check if already done
+                    if (cond_dir / "sim_R1.fq.gz").exists() and args.skip_existing:
+                        print("    Output exists, skipping", flush=True)
+                        cond_entry["oracle_bam"] = f"{cond_name}/sim_oracle.bam"
+                    else:
+                        print("    Simulating...", end="", flush=True)
+                        t_cond = time.monotonic()
+                        cond_sim = copy.deepcopy(cfg.simulation)
+                        cond_sim.sim_seed = condition_seed
+                        simulator = WholeGenomeSimulator(
+                            fasta_path, cond_transcripts, cond_sim, cfg.gdna,
+                            strand_specificity=strand_spec,
+                            capture_config=capture_scenario.config,
+                        )
+                        _, _, bam_path = simulator.simulate_and_write(
+                            cond_dir, n_rna_total, n_gdna,
+                            oracle_bam=True, prefix="sim",
+                            n_mrna=n_mrna,
+                            n_nrna=n_nrna,
+                            n_workers=cond_sim.n_workers,
+                        )
+                        simulator.close()
+                        cond_entry["oracle_bam"] = (
+                            f"{cond_name}/sim_oracle.bam" if bam_path else None
+                        )
+                        elapsed_cond = time.monotonic() - t_cond
+                        print(f" done ({elapsed_cond:.1f}s)", flush=True)
+
+                    conditions.append(cond_entry)
 
     # Write manifest
     write_manifest(outdir, cfg, conditions)
