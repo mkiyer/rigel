@@ -80,10 +80,10 @@ def load_region_diagnostics(sim_base: Path) -> pd.DataFrame:
     for condition in CONDITIONS:
         path = sim_base / "diagnostics" / condition / "per_region_calibration_truth.tsv"
         table = pd.read_csv(path, sep="\t")
-        state_gdna = table["prior_total"] * (
-            table["p_state_background"] + table["p_state_gdna_only_capture"]
+        state_unexpressed = table["prior_total"] * (
+            table["p_state_unexpressed_offtarget"] + table["p_state_unexpressed_capture"]
         )
-        state_rna = table["prior_total"] * (
+        state_expressed = table["prior_total"] * (
             table["p_state_expressed_capture"] + table["p_state_expressed_offtarget"]
         )
         table = table.assign(
@@ -91,8 +91,8 @@ def load_region_diagnostics(sim_base: Path) -> pd.DataFrame:
             capture_label="on" if condition.endswith("capture_on") else "off",
             strand_label="ss0.99" if "ss_0.99" in condition else "ss0.50",
             gdna_label="high" if condition.startswith("gdna_high") else "none",
-            state_implied_gdna=state_gdna,
-            state_implied_rna=state_rna,
+            state_implied_unexpressed_mass=state_unexpressed,
+            state_implied_expressed_mass=state_expressed,
             probe_exon=table["has_probe_overlap"].astype(bool) & (table["region_type"] == "exon"),
             expressed_state=table["state_name"].isin(
                 ["expressed_capture", "expressed_offtarget"]
@@ -162,23 +162,25 @@ def summarize_regional_truth(regions: pd.DataFrame) -> pd.DataFrame:
         true_gdna = float(group["true_gdna_mass"].sum())
         true_rna = float(group["true_rna_mass"].sum())
         prior_gdna = float(group["prior_gdna"].sum())
-        state_gdna = float(group["state_implied_gdna"].sum())
+        state_unexpressed = float(group["state_implied_unexpressed_mass"].sum())
         probe_true_gdna = float(group.loc[probe_exon, "true_gdna_mass"].sum())
         probe_prior_gdna = float(group.loc[probe_exon, "prior_gdna"].sum())
-        probe_state_gdna = float(group.loc[probe_exon, "state_implied_gdna"].sum())
+        probe_state_unexpressed = float(
+            group.loc[probe_exon, "state_implied_unexpressed_mass"].sum()
+        )
         rows.append(
             {
                 "condition": condition,
                 "true_gdna": true_gdna,
                 "true_rna": true_rna,
                 "prior_mass_gdna": prior_gdna,
-                "state_implied_gdna": state_gdna,
+                "state_implied_unexpressed_mass": state_unexpressed,
                 "prior_mass_gdna_error": prior_gdna - true_gdna,
-                "state_gdna_error": state_gdna - true_gdna,
+                "state_unexpressed_minus_true_gdna": state_unexpressed - true_gdna,
                 "gdna_in_expressed_states": float(group.loc[expressed, "true_gdna_mass"].sum()),
                 "probe_exon_true_gdna": probe_true_gdna,
                 "probe_exon_prior_gdna": probe_prior_gdna,
-                "probe_exon_state_gdna": probe_state_gdna,
+                "probe_exon_state_unexpressed_mass": probe_state_unexpressed,
             }
         )
     return pd.DataFrame(rows)

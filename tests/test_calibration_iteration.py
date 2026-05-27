@@ -20,10 +20,10 @@ from rigel.calibration.calibration_iteration import (
 from rigel.calibration.density_observation import DensityObservation
 from rigel.calibration.fractional_evidence import transcript_strand_class
 from rigel.calibration.latent_states import (
-    STATE_BACKGROUND,
     STATE_EXPRESSED_CAPTURE,
     STATE_EXPRESSED_OFFTARGET,
-    STATE_GDNA_ONLY_CAPTURE,
+    STATE_UNEXPRESSED_CAPTURE,
+    STATE_UNEXPRESSED_OFFTARGET,
 )
 from rigel.calibration.signature import pack_signature
 from rigel.calibration.strand_deconv import RegionGdnaChannelEstimate
@@ -136,8 +136,8 @@ def test_calibration_e_step_identifies_four_archetypes() -> None:
 
     dominant = np.argmax(result.p_states, axis=1).tolist()
     assert dominant == [
-        STATE_BACKGROUND,
-        STATE_GDNA_ONLY_CAPTURE,
+        STATE_UNEXPRESSED_OFFTARGET,
+        STATE_UNEXPRESSED_CAPTURE,
         STATE_EXPRESSED_OFFTARGET,
         STATE_EXPRESSED_CAPTURE,
     ]
@@ -170,8 +170,8 @@ def test_calibration_iteration_converges_with_fixed_scalar_parameters() -> None:
     np.testing.assert_allclose(calibration.p_states.sum(axis=1), 1.0, rtol=1.0e-6, atol=1.0e-6)
     dominant = np.argmax(calibration.p_states, axis=1).tolist()
     assert dominant == [
-        STATE_BACKGROUND,
-        STATE_GDNA_ONLY_CAPTURE,
+        STATE_UNEXPRESSED_OFFTARGET,
+        STATE_UNEXPRESSED_CAPTURE,
         STATE_EXPRESSED_OFFTARGET,
         STATE_EXPRESSED_CAPTURE,
     ]

@@ -34,7 +34,6 @@ from rigel.pipeline import (
 )
 from rigel.scoring import FragmentScorer, GDNA_SPLICE_PENALTIES, LOG_HALF, LOG_SAFE_FLOOR
 from rigel.sim import ReadSimConfig, Scenario, run_benchmark
-from rigel.splice import SPLICE_UNSPLICED, SpliceType
 from rigel.types import Strand
 
 SIM_SEED = 42
@@ -470,8 +469,8 @@ def print_region_audit(index, payload, calibration, target_regions):
                 "local_mu": float(local.mu_local[rid]),
                 "sweep_alpha_excess": float(sweep.alpha_excess[rid]),
                 "sweep_mu": float(sweep.mu_sweep[rid]),
-                "p_background": float(rc.p_states[rid, 0]),
-                "p_gdna_only_capture": float(rc.p_states[rid, 1]),
+                "p_unexpressed_offtarget": float(rc.p_states[rid, 0]),
+                "p_unexpressed_capture": float(rc.p_states[rid, 1]),
                 "p_expressed_capture": float(rc.p_states[rid, 2]),
                 "p_expressed_offtarget": float(rc.p_states[rid, 3]),
                 "strand_contained_mean": float(strand.contained_mean[rid]) if strand is not None else float("nan"),
@@ -582,10 +581,8 @@ def main() -> None:
 
     global_midpoint = em_data.genomic_midpoint.copy()
     global_offsets = em_data.offsets.copy()
-    global_t_indices = em_data.t_indices.copy()
     global_log_liks = em_data.log_liks.copy()
     global_gdna_liks = em_data.gdna_log_liks.copy()
-    global_frag_ids = em_data.frag_ids.copy()
     print(
         "global raw score sanity:",
         {

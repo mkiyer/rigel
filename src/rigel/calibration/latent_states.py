@@ -14,8 +14,8 @@ from .fractional_evidence import is_intergenic, is_intron_only
 from .strand_deconv import RegionGdnaChannelEstimate
 
 __all__ = [
-    "STATE_BACKGROUND",
-    "STATE_GDNA_ONLY_CAPTURE",
+    "STATE_UNEXPRESSED_OFFTARGET",
+    "STATE_UNEXPRESSED_CAPTURE",
     "STATE_EXPRESSED_CAPTURE",
     "STATE_EXPRESSED_OFFTARGET",
     "N_STATES",
@@ -32,8 +32,8 @@ __all__ = [
     "build_state_tensor",
 ]
 
-STATE_BACKGROUND: int = 0
-STATE_GDNA_ONLY_CAPTURE: int = 1
+STATE_UNEXPRESSED_OFFTARGET: int = 0
+STATE_UNEXPRESSED_CAPTURE: int = 1
 STATE_EXPRESSED_CAPTURE: int = 2
 STATE_EXPRESSED_OFFTARGET: int = 3
 N_STATES: int = 4
@@ -41,8 +41,8 @@ N_STATES: int = 4
 STATE_IS_EXPRESSED: np.ndarray = np.array([False, False, True, True], dtype=bool)
 STATE_IS_CAPTURED: np.ndarray = np.array([False, True, True, False], dtype=bool)
 STATE_NAMES: tuple[str, ...] = (
-    "background",
-    "gdna_only_capture",
+    "unexpressed_offtarget",
+    "unexpressed_capture",
     "expressed_capture",
     "expressed_offtarget",
 )
@@ -83,7 +83,7 @@ def build_state_log_prior(
     pass_index: int = 0,
     background_boost: float = 1.0,
 ) -> np.ndarray:
-    """Return annotation-derived state log priors with an early background boost."""
+    """Return annotation-derived state log priors with an early off-target boost."""
     signatures = np.asarray(region_arrays.signature)
     region_count = int(signatures.shape[0])
     _validate_background(background, region_count)
@@ -98,19 +98,19 @@ def build_state_log_prior(
     intergenic = is_intergenic(signatures)
     intron_only = is_intron_only(signatures)
 
-    state_log_prior[intergenic, STATE_BACKGROUND] = 1.0
-    state_log_prior[intergenic, STATE_GDNA_ONLY_CAPTURE] = 0.0
+    state_log_prior[intergenic, STATE_UNEXPRESSED_OFFTARGET] = 1.0
+    state_log_prior[intergenic, STATE_UNEXPRESSED_CAPTURE] = 0.0
     state_log_prior[intergenic, STATE_EXPRESSED_CAPTURE] = -2.0
     state_log_prior[intergenic, STATE_EXPRESSED_OFFTARGET] = -2.0
 
-    state_log_prior[intron_only, STATE_BACKGROUND] = 0.75
-    state_log_prior[intron_only, STATE_GDNA_ONLY_CAPTURE] = 0.0
+    state_log_prior[intron_only, STATE_UNEXPRESSED_OFFTARGET] = 0.75
+    state_log_prior[intron_only, STATE_UNEXPRESSED_CAPTURE] = 0.0
     state_log_prior[intron_only, STATE_EXPRESSED_CAPTURE] = -1.0
     state_log_prior[intron_only, STATE_EXPRESSED_OFFTARGET] = -1.0
 
     if int(pass_index) < 2 and boost > 0.0:
         seed_mask = np.asarray(background.seed_mask, dtype=bool)
-        state_log_prior[seed_mask, STATE_BACKGROUND] += boost
+        state_log_prior[seed_mask, STATE_UNEXPRESSED_OFFTARGET] += boost
 
     return state_log_prior
 

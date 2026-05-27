@@ -19,8 +19,8 @@ from .boundary_sweep import BoundarySweepResult, run_boundary_sweep
 from .density_observation import DensityObservation
 from .latent_states import (
     N_STATES,
-    STATE_BACKGROUND,
-    STATE_GDNA_ONLY_CAPTURE,
+    STATE_UNEXPRESSED_CAPTURE,
+    STATE_UNEXPRESSED_OFFTARGET,
     STATE_IS_CAPTURED,
     STATE_IS_EXPRESSED,
     build_logbf_capture,
@@ -204,12 +204,12 @@ class RegionCalibration:
         object.__setattr__(self, "pass_diagnostics", diagnostics)
 
     @property
-    def p_background(self) -> np.ndarray:
-        return self.p_states[:, STATE_BACKGROUND]
+    def p_unexpressed_offtarget(self) -> np.ndarray:
+        return self.p_states[:, STATE_UNEXPRESSED_OFFTARGET]
 
     @property
-    def p_gdna_only_capture(self) -> np.ndarray:
-        return self.p_states[:, STATE_GDNA_ONLY_CAPTURE]
+    def p_unexpressed_capture(self) -> np.ndarray:
+        return self.p_states[:, STATE_UNEXPRESSED_CAPTURE]
 
     @property
     def p_expressed_capture(self) -> np.ndarray:
@@ -569,9 +569,15 @@ def calibration_m_step(
             "background.seed_mask must match region count; "
             f"got {seed_mask.shape}, expected {(region_count,)}."
         )
-    background_weight = states[:, STATE_BACKGROUND] * seed_mask.astype(np.float64)
-    weighted_fragments = float(np.sum(background_weight * gdna_count, dtype=np.float64))
-    weighted_eff_length = float(np.sum(background_weight * contained_leff, dtype=np.float64))
+    unexpressed_offtarget_weight = (
+        states[:, STATE_UNEXPRESSED_OFFTARGET] * seed_mask.astype(np.float64)
+    )
+    weighted_fragments = float(
+        np.sum(unexpressed_offtarget_weight * gdna_count, dtype=np.float64)
+    )
+    weighted_eff_length = float(
+        np.sum(unexpressed_offtarget_weight * contained_leff, dtype=np.float64)
+    )
     alpha_hat = float(alpha_floor) + weighted_fragments
     beta_hat = float(beta_floor) + weighted_eff_length
     eta = float(damping)
@@ -580,7 +586,7 @@ def calibration_m_step(
     beta_next = max(beta_next, np.finfo(np.float64).tiny)
     rho_next = alpha_next / beta_next
 
-    n_seed_regions = int(np.count_nonzero((background_weight > 0.0) & seed_mask))
+    n_seed_regions = int(np.count_nonzero((unexpressed_offtarget_weight > 0.0) & seed_mask))
     if n_seed_regions == 0 or weighted_eff_length <= 0.0:
         fit_status = "prior_only"
     elif background.fit_status == "ok":
@@ -698,8 +704,8 @@ def run_calibration_iteration(
                 "converged": bool(converged),
                 "n_regions_expressed": int(np.count_nonzero(step.p_expressed > 0.5)),
                 "n_regions_captured": int(np.count_nonzero(step.p_captured > 0.5)),
-                "n_regions_background": int(
-                    np.count_nonzero(step.p_states[:, STATE_BACKGROUND] > 0.5)
+                "n_regions_unexpressed_offtarget": int(
+                    np.count_nonzero(step.p_states[:, STATE_UNEXPRESSED_OFFTARGET] > 0.5)
                 ),
             }
         )

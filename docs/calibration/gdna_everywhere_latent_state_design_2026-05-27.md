@@ -8,9 +8,9 @@ region and every state. The four states should stratify regions by two orthogona
 - RNA expression: unexpressed vs expressed.
 - Capture exposure: off-target vs capture-enriched.
 
-Under this interpretation, the current state names are misleading:
+Under this interpretation, the state names have been refactored from the old source-label wording:
 
-| Current label | Better semantic label | Meaning |
+| Previous label | Current label | Meaning |
 | --- | --- | --- |
 | `background` | `unexpressed_offtarget` | no RNA expression signal, off-target density |
 | `gdna_only_capture` | `unexpressed_capture` | no RNA expression signal, capture-enriched density |
@@ -114,8 +114,8 @@ expressed_offtarget
 expressed_capture
 ```
 
-The old `gdna_only_capture` name should be retired from diagnostics because it implies source purity
-that is false.
+The old `gdna_only_capture` name is retired from diagnostics because it implies source purity that is
+false.
 
 ### 2. Make `PriorMassDeconvolution` The Source-Split Contract
 
@@ -185,7 +185,7 @@ Every region report should expose:
 p_expressed
 p_captured
 prior_mass_gdna_fraction
-state_implied_gdna_fraction
+state_implied_unexpressed_fraction
 state_mass_disagreement
 source_split_method
 source_split_precision

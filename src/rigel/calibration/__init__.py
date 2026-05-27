@@ -30,10 +30,10 @@ from ._orchestrator import calibrate
 from ._result import CalibrationResult, build_calibration_result
 from .latent_states import (
     N_STATES,
-    STATE_BACKGROUND,
+    STATE_UNEXPRESSED_OFFTARGET,
     STATE_EXPRESSED_CAPTURE,
     STATE_EXPRESSED_OFFTARGET,
-    STATE_GDNA_ONLY_CAPTURE,
+    STATE_UNEXPRESSED_CAPTURE,
     STATE_IS_CAPTURED,
     STATE_IS_EXPRESSED,
     STATE_NAMES,
@@ -85,8 +85,8 @@ __all__ = [
     "calibration_e_step",
     "calibration_m_step",
     "run_calibration_iteration",
-    "STATE_BACKGROUND",
-    "STATE_GDNA_ONLY_CAPTURE",
+    "STATE_UNEXPRESSED_OFFTARGET",
+    "STATE_UNEXPRESSED_CAPTURE",
     "STATE_EXPRESSED_CAPTURE",
     "STATE_EXPRESSED_OFFTARGET",
     "N_STATES",

@@ -79,15 +79,20 @@ def load_region_table(sim_base: Path, condition: str) -> pd.DataFrame:
             "capture_label": "on" if condition.endswith("capture_on") else "off",
             "strand_label": "ss0.99" if "ss_0.99" in condition else "ss0.50",
             "gdna_label": "high" if condition.startswith("gdna_high") else "none",
-            "state_implied_gdna": table["prior_total"]
-            * (table["p_state_background"] + table["p_state_gdna_only_capture"]),
-            "state_implied_rna": table["prior_total"]
+            "state_implied_unexpressed_mass": table["prior_total"]
+            * (
+                table["p_state_unexpressed_offtarget"]
+                + table["p_state_unexpressed_capture"]
+            ),
+            "state_implied_expressed_mass": table["prior_total"]
             * (table["p_state_expressed_capture"] + table["p_state_expressed_offtarget"]),
             "mixed_truth": (table["true_gdna_mass"] > 0.0) & (table["true_rna_mass"] > 0.0),
             "expressed_state": table["state_name"].isin(
                 ["expressed_capture", "expressed_offtarget"]
             ),
-            "gdna_state": table["state_name"].isin(["background", "gdna_only_capture"]),
+            "unexpressed_state": table["state_name"].isin(
+                ["unexpressed_offtarget", "unexpressed_capture"]
+            ),
             "probe_exon": table["has_probe_overlap"].astype(bool)
             & (table["region_type"] == "exon"),
         }
@@ -101,7 +106,7 @@ def summarize_conditions(table: pd.DataFrame) -> pd.DataFrame:
         true_gdna_total = float(group["true_gdna_mass"].sum())
         true_rna_total = float(group["true_rna_mass"].sum())
         prior_gdna_total = float(group["prior_gdna"].sum())
-        state_implied_gdna_total = float(group["state_implied_gdna"].sum())
+        state_implied_unexpressed_total = float(group["state_implied_unexpressed_mass"].sum())
         expressed = group["expressed_state"]
         mixed = group["mixed_truth"]
         probe_exon = group["probe_exon"]
@@ -111,9 +116,11 @@ def summarize_conditions(table: pd.DataFrame) -> pd.DataFrame:
                 "true_gdna_total": true_gdna_total,
                 "true_rna_total": true_rna_total,
                 "prior_gdna_total": prior_gdna_total,
-                "state_implied_gdna_total": state_implied_gdna_total,
+                "state_implied_unexpressed_total": state_implied_unexpressed_total,
                 "prior_gdna_error": prior_gdna_total - true_gdna_total,
-                "state_implied_gdna_error": state_implied_gdna_total - true_gdna_total,
+                "state_unexpressed_minus_true_gdna": (
+                    state_implied_unexpressed_total - true_gdna_total
+                ),
                 "true_gdna_in_expressed_states": float(group.loc[expressed, "true_gdna_mass"].sum()),
                 "fraction_gdna_in_expressed_states": float(
                     safe_div(group.loc[expressed, "true_gdna_mass"].sum(), true_gdna_total)
@@ -126,8 +133,8 @@ def summarize_conditions(table: pd.DataFrame) -> pd.DataFrame:
                 "probe_exon_true_gdna": float(group.loc[probe_exon, "true_gdna_mass"].sum()),
                 "probe_exon_true_rna": float(group.loc[probe_exon, "true_rna_mass"].sum()),
                 "probe_exon_prior_gdna": float(group.loc[probe_exon, "prior_gdna"].sum()),
-                "probe_exon_state_implied_gdna": float(
-                    group.loc[probe_exon, "state_implied_gdna"].sum()
+                "probe_exon_state_implied_unexpressed_mass": float(
+                    group.loc[probe_exon, "state_implied_unexpressed_mass"].sum()
                 ),
                 "probe_exon_p_expressed_weighted": weighted_mean(
                     group.loc[probe_exon, "p_expressed"],
@@ -150,8 +157,8 @@ def summarize_state_groups(table: pd.DataFrame) -> pd.DataFrame:
         "true_rna_mass",
         "prior_gdna",
         "prior_rna",
-        "state_implied_gdna",
-        "state_implied_rna",
+        "state_implied_unexpressed_mass",
+        "state_implied_expressed_mass",
         "observed_compatible_count",
         "spliced_count",
     ]
@@ -161,9 +168,9 @@ def summarize_state_groups(table: pd.DataFrame) -> pd.DataFrame:
         out["true_gdna_mass"] + out["true_rna_mass"],
     )
     out["prior_gdna_fraction"] = safe_div(out["prior_gdna"], out["prior_gdna"] + out["prior_rna"])
-    out["state_implied_gdna_fraction"] = safe_div(
-        out["state_implied_gdna"],
-        out["state_implied_gdna"] + out["state_implied_rna"],
+    out["state_implied_unexpressed_fraction"] = safe_div(
+        out["state_implied_unexpressed_mass"],
+        out["state_implied_unexpressed_mass"] + out["state_implied_expressed_mass"],
     )
     return out.sort_values(["condition", "true_gdna_mass"], ascending=[True, False])
 
@@ -185,11 +192,11 @@ def write_report(summary: pd.DataFrame, state_groups: pd.DataFrame, out_dir: Pat
                 str(row["condition"]),
                 fmt_count(row["true_gdna_total"]),
                 fmt_count(row["prior_gdna_total"]),
-                fmt_count(row["state_implied_gdna_total"]),
+                fmt_count(row["state_implied_unexpressed_total"]),
                 fmt_pct(row["fraction_gdna_in_expressed_states"]),
                 fmt_count(row["probe_exon_true_gdna"]),
                 fmt_count(row["probe_exon_prior_gdna"]),
-                fmt_count(row["probe_exon_state_implied_gdna"]),
+                fmt_count(row["probe_exon_state_implied_unexpressed_mass"]),
                 fmt_float(row["probe_exon_p_expressed_weighted"], 3),
                 fmt_float(row["probe_exon_p_captured_weighted"], 3),
                 fmt_count(row["probe_exon_spliced_count"]),
@@ -217,8 +224,8 @@ def write_report(summary: pd.DataFrame, state_groups: pd.DataFrame, out_dir: Pat
                 fmt_pct(row["true_gdna_fraction"]),
                 fmt_count(row["prior_gdna"]),
                 fmt_pct(row["prior_gdna_fraction"]),
-                fmt_count(row["state_implied_gdna"]),
-                fmt_pct(row["state_implied_gdna_fraction"]),
+                fmt_count(row["state_implied_unexpressed_mass"]),
+                fmt_pct(row["state_implied_unexpressed_fraction"]),
                 fmt_count(row["spliced_count"]),
             ]
         )
@@ -232,11 +239,11 @@ def write_report(summary: pd.DataFrame, state_groups: pd.DataFrame, out_dir: Pat
                 "Condition",
                 "True gDNA",
                 "Prior gDNA",
-                "State-implied gDNA",
+                "State-implied unexpressed mass",
                 "gDNA in expressed states",
                 "Probe-exon true gDNA",
                 "Probe-exon prior gDNA",
-                "Probe-exon state gDNA",
+                "Probe-exon state unexpr",
                 "Probe-exon p_expr",
                 "Probe-exon p_cap",
                 "Probe-exon spliced",
@@ -257,8 +264,8 @@ def write_report(summary: pd.DataFrame, state_groups: pd.DataFrame, out_dir: Pat
                 "True gDNA frac",
                 "Prior gDNA",
                 "Prior gDNA frac",
-                "State-implied gDNA",
-                "State gDNA frac",
+                "State-implied unexpr",
+                "State unexpr frac",
                 "Spliced count",
             ],
             focus_rows,
@@ -272,7 +279,7 @@ def write_report(summary: pd.DataFrame, state_groups: pd.DataFrame, out_dir: Pat
         "does not include a mixed expressed-plus-gDNA state. Spliced/RNA-lower evidence "
         "pushes mixed exonic regions into expressed states, while the capture/density "
         "factors decide capture/offtarget status. The mass split must therefore come "
-        "from `prior_mass`, not from `state_name` or `p_state_background + p_state_gdna_only_capture`."
+        "from `prior_mass`, not from `state_name` or the unexpressed-state probability."
     )
     (out_dir / "latent_state_label_audit.md").write_text("\n".join(lines) + "\n")
 

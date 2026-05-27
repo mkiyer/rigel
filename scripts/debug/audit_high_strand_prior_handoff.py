@@ -16,8 +16,8 @@ CONDITIONS = (
 )
 
 STATE_COLUMNS = (
-    "p_state_background",
-    "p_state_gdna_only_capture",
+    "p_state_unexpressed_offtarget",
+    "p_state_unexpressed_capture",
     "p_state_expressed_capture",
     "p_state_expressed_offtarget",
 )
@@ -56,17 +56,27 @@ def load_region_table(sim_base: Path, condition: str) -> pd.DataFrame:
         raise ValueError(f"{path} missing state columns: {missing}")
     states = table.loc[:, STATE_COLUMNS].to_numpy(dtype=np.float64)
     weight = entropy_weight(states)
-    q_gdna_state = states[:, 0] + states[:, 1]
-    q_rna_state = states[:, 2] + states[:, 3]
-    q_total = q_gdna_state + q_rna_state
-    q_gdna_state = np.divide(q_gdna_state, q_total, out=np.zeros_like(q_gdna_state), where=q_total > 0.0)
-    q_rna_state = np.divide(q_rna_state, q_total, out=np.zeros_like(q_rna_state), where=q_total > 0.0)
+    q_unexpressed_state = states[:, 0] + states[:, 1]
+    q_expressed_state = states[:, 2] + states[:, 3]
+    q_total = q_unexpressed_state + q_expressed_state
+    q_unexpressed_state = np.divide(
+        q_unexpressed_state,
+        q_total,
+        out=np.zeros_like(q_unexpressed_state),
+        where=q_total > 0.0,
+    )
+    q_expressed_state = np.divide(
+        q_expressed_state,
+        q_total,
+        out=np.zeros_like(q_expressed_state),
+        where=q_total > 0.0,
+    )
     unspliced = table["prior_total"].to_numpy(dtype=np.float64)
     diagnostics = pd.DataFrame(
         {
             "entropy_weight": weight,
-            "state_split_gdna_mass": unspliced * weight * q_gdna_state,
-            "state_split_rna_mass": unspliced * weight * q_rna_state,
+            "state_split_unexpressed_mass": unspliced * weight * q_unexpressed_state,
+            "state_split_expressed_mass": unspliced * weight * q_expressed_state,
             "strand_split_gdna_mass": table["prior_gdna"].to_numpy(dtype=np.float64) * weight,
             "strand_split_rna_mass": table["prior_rna"].to_numpy(dtype=np.float64) * weight,
             "probe_bin": np.where(table["has_probe_overlap"], "probe_overlap", "no_probe"),
@@ -78,8 +88,8 @@ def load_region_table(sim_base: Path, condition: str) -> pd.DataFrame:
             "condition": condition,
         }
     )
-    diagnostics["discarded_strand_gdna_mass"] = (
-        diagnostics["strand_split_gdna_mass"] - diagnostics["state_split_gdna_mass"]
+    diagnostics["prior_gdna_minus_state_unexpressed_mass"] = (
+        diagnostics["strand_split_gdna_mass"] - diagnostics["state_split_unexpressed_mass"]
     )
     return pd.concat([table, diagnostics], axis=1).copy()
 
@@ -93,9 +103,9 @@ def summarize_regions(table: pd.DataFrame) -> pd.DataFrame:
         "prior_rna",
         "strand_split_gdna_mass",
         "strand_split_rna_mass",
-        "state_split_gdna_mass",
-        "state_split_rna_mass",
-        "discarded_strand_gdna_mass",
+        "state_split_unexpressed_mass",
+        "state_split_expressed_mass",
+        "prior_gdna_minus_state_unexpressed_mass",
         "observed_compatible_count",
         "true_gdna_assigned_rna_major",
         "true_gdna_assigned_gdna_major",
@@ -104,15 +114,15 @@ def summarize_regions(table: pd.DataFrame) -> pd.DataFrame:
     ]
     grouped = table.groupby(keys, dropna=False)[cols].sum().reset_index()
     grouped.insert(0, "n_regions", table.groupby(keys, dropna=False).size().to_numpy())
-    grouped["state_vs_strand_gdna_ratio"] = safe_div(
-        grouped["state_split_gdna_mass"], grouped["strand_split_gdna_mass"]
+    grouped["state_unexpressed_vs_strand_gdna_ratio"] = safe_div(
+        grouped["state_split_unexpressed_mass"], grouped["strand_split_gdna_mass"]
     )
     grouped["gdna_to_rna_major_rate"] = safe_div(
         grouped["true_gdna_assigned_rna_major"],
         grouped["true_gdna_assigned_rna_major"] + grouped["true_gdna_assigned_gdna_major"],
     )
     return grouped.sort_values(
-        ["discarded_strand_gdna_mass", "true_gdna_mass"], ascending=False
+        ["prior_gdna_minus_state_unexpressed_mass", "true_gdna_mass"], ascending=False
     )
 
 
@@ -201,7 +211,7 @@ def main() -> None:
     lines.append("")
     lines.append(markdown_table(locus_summary, 10))
     lines.append("")
-    lines.append("## Region State Split vs Strand Split")
+    lines.append("## Region Unexpressed-State Split vs Strand Split")
     lines.append("")
     lines.append(markdown_table(region_summary, 16))
     lines.append("")
@@ -209,8 +219,8 @@ def main() -> None:
     lines.append("")
     lines.append(
         "`strand_split_gdna_mass` is what the strand-aware calibration prior mass says after "
-        "the same entropy weight used by adaptive priors. `state_split_gdna_mass` is what "
-        "the current adaptive prior code reconstructs from latent state probabilities."
+        "the same entropy weight used by adaptive priors. `state_split_unexpressed_mass` is "
+        "the obsolete source proxy reconstructed from unexpressed latent-state probabilities."
     )
     (out_dir / "summary.md").write_text("\n".join(lines) + "\n")
     print(f"[audit] Wrote {out_dir}")

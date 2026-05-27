@@ -12,10 +12,10 @@ from rigel.calibration.density_observation import DensityObservation
 from rigel.calibration.fractional_evidence import transcript_strand_class
 from rigel.calibration.latent_states import (
     N_STATES,
-    STATE_BACKGROUND,
     STATE_EXPRESSED_CAPTURE,
     STATE_EXPRESSED_OFFTARGET,
-    STATE_GDNA_ONLY_CAPTURE,
+    STATE_UNEXPRESSED_CAPTURE,
+    STATE_UNEXPRESSED_OFFTARGET,
     build_logbf_capture,
     build_logbf_expression,
     build_logbf_gdna_density,
@@ -132,7 +132,7 @@ def _strand_channels(rna_lower: list[float]) -> RegionGdnaChannelEstimate:
     )
 
 
-def test_state_log_prior_favors_background_for_intergenic_and_intronic_regions() -> None:
+def test_state_log_prior_favors_unexpressed_offtarget_for_intergenic_and_intronic_regions() -> None:
     region_arrays = _region_arrays(
         [pack_signature(), pack_signature(intron_pos=True), pack_signature(exon_pos=True)]
     )
@@ -141,16 +141,16 @@ def test_state_log_prior_favors_background_for_intergenic_and_intronic_regions()
     prior = build_state_log_prior(region_arrays, background, pass_index=0)
 
     assert prior.shape == (3, N_STATES)
-    assert prior[0, STATE_BACKGROUND] == pytest.approx(2.0)
-    assert prior[0, STATE_GDNA_ONLY_CAPTURE] == pytest.approx(0.0)
+    assert prior[0, STATE_UNEXPRESSED_OFFTARGET] == pytest.approx(2.0)
+    assert prior[0, STATE_UNEXPRESSED_CAPTURE] == pytest.approx(0.0)
     assert prior[0, STATE_EXPRESSED_CAPTURE] == pytest.approx(-2.0)
     assert prior[0, STATE_EXPRESSED_OFFTARGET] == pytest.approx(-2.0)
-    assert prior[1, STATE_BACKGROUND] == pytest.approx(0.75)
+    assert prior[1, STATE_UNEXPRESSED_OFFTARGET] == pytest.approx(0.75)
     assert prior[1, STATE_EXPRESSED_OFFTARGET] == pytest.approx(-1.0)
     np.testing.assert_allclose(prior[2], 0.0)
 
     late_prior = build_state_log_prior(region_arrays, background, pass_index=2)
-    assert late_prior[0, STATE_BACKGROUND] == pytest.approx(1.0)
+    assert late_prior[0, STATE_UNEXPRESSED_OFFTARGET] == pytest.approx(1.0)
 
 
 def test_likelihood_terms_have_expected_direction() -> None:
@@ -171,9 +171,9 @@ def test_likelihood_terms_have_expected_direction() -> None:
 def test_strand_summary_penalizes_not_expressed_states_when_rna_lower_bound_exists() -> None:
     logbf = build_logbf_strand(_strand_channels([0.0, 5.0]), 2)
 
-    assert logbf[0, STATE_BACKGROUND] == pytest.approx(0.0)
-    assert logbf[1, STATE_BACKGROUND] < 0.0
-    assert logbf[1, STATE_GDNA_ONLY_CAPTURE] < 0.0
+    assert logbf[0, STATE_UNEXPRESSED_OFFTARGET] == pytest.approx(0.0)
+    assert logbf[1, STATE_UNEXPRESSED_OFFTARGET] < 0.0
+    assert logbf[1, STATE_UNEXPRESSED_CAPTURE] < 0.0
     assert logbf[1, STATE_EXPRESSED_CAPTURE] == pytest.approx(0.0)
     assert logbf[1, STATE_EXPRESSED_OFFTARGET] == pytest.approx(0.0)
 

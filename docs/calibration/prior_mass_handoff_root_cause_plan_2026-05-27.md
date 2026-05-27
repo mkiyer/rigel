@@ -26,7 +26,8 @@ Generated report:
 Key files:
 
 - `snapshot_metrics.tsv`: baseline state split vs all-region prior mass vs capture-gated prior mass.
-- `regional_truth_vs_signals.tsv`: oracle regional truth vs `prior_mass` vs state-implied gDNA.
+- `regional_truth_vs_signals.tsv`: oracle regional truth vs `prior_mass` vs state-implied
+  unexpressed mass.
 - `locus_prior_summary.tsv`: locus-level prior strength and EM outcomes for all snapshots.
 - `capture_off_transcript_regression_focus.tsv`: transcript-level source of the high-SS capture-off
   all-region regression.
@@ -35,19 +36,19 @@ Key files:
 
 ### 1. Latent state labels are not gDNA/RNA mass labels
 
-The four-state model has `background`, `gdna_only_capture`, `expressed_capture`, and
-`expressed_offtarget`. It has no mixed expressed-plus-gDNA state. Therefore, a region can be labeled
-`expressed_capture` while containing large gDNA mass.
+The four-state model now has `unexpressed_offtarget`, `unexpressed_capture`,
+`expressed_capture`, and `expressed_offtarget`. It has no mixed expressed-plus-gDNA state.
+Therefore, a region can be labeled `expressed_capture` while containing large gDNA mass.
 
 Observed in high-gDNA SS0.99 capture-on:
 
 - True regional gDNA: 100,000
 - `prior_mass` gDNA: 98,698
-- State-implied gDNA: 5,809
+- State-implied unexpressed mass: 5,809
 - gDNA in expressed states: 93,748
 - Probe-overlap exon true gDNA: 93,146
 - Probe-overlap exon `prior_mass` gDNA: 92,315
-- Probe-overlap exon state-implied gDNA: 1.45
+- Probe-overlap exon state-implied unexpressed mass: 1.45
 
 This proves the state-derived mass split is the wrong abstraction. The adaptive prior must consume
 the deconvolved prior mass directly.
@@ -63,11 +64,11 @@ probe exons.
 
 - True regional gDNA: 100,000
 - `prior_mass` gDNA: 2,834
-- State-implied gDNA: 6,400
+- State-implied unexpressed mass: 6,400
 - gDNA in expressed states: 93,244
 - Probe-overlap exon true gDNA: 93,126
 - Probe-overlap exon `prior_mass` gDNA: 130
-- Probe-overlap exon state-implied gDNA: 7.77
+- Probe-overlap exon state-implied unexpressed mass: 7.77
 
 This is not fixable by choosing a different handoff. The calibration layer is failing to deconvolve
 captured expressed unstranded RNA/gDNA mixtures. The downstream prior can only propagate the wrong
