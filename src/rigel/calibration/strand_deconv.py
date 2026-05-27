@@ -13,7 +13,7 @@ This module is a self-contained math layer:
   contrast ``p_r1_sense`` and the gDNA strand-balance overdispersion
   ``kappa_d``.
 * ``screen_no_rna_exons`` identifies exon regions whose strand pattern
-  is consistent with pure gDNA at confidence ``rna_lower_confidence``.
+    is consistent with pure gDNA at the fixed internal confidence level.
 * ``estimate_kappa_d`` produces a refit of ``kappa_d`` using high-purity
   seed regions (intergenic + intron-only) plus self-trained no-RNA
   exons.
@@ -99,6 +99,8 @@ FLAG_KAPPA_FALLBACK: int = 1 << 2
 FLAG_APPROX_NORMAL: int = 1 << 3
 FLAG_EXON_SELF_TRAIN: int = 1 << 4
 
+_INTERNAL_RNA_LOWER_CI: float = 0.95
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -156,7 +158,7 @@ class RegionGdnaEstimate:
     kappa_d_n_seed_regions: int
     kappa_d_n_exon_self_training: int
     p_r1_sense: float
-    rna_lower_confidence: float
+    internal_rna_lower_ci: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,7 +183,7 @@ class RegionGdnaChannelEstimate:
     flags: np.ndarray  # uint16[R], union of compartment flags
     kappa_d: float
     p_r1_sense: float
-    rna_lower_confidence: float
+    internal_rna_lower_ci: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,7 +504,7 @@ def _exact_posterior_R(
 def _summarize_exact(
     posterior: np.ndarray,
     *,
-    rna_lower_confidence: float,
+    internal_rna_lower_ci: float,
     n_int: int,
 ) -> tuple[float, float, float, float]:
     """Return (mean_R, R_lower_count, R_upper_count, sd_R) from a discrete PMF.
@@ -517,12 +519,12 @@ def _summarize_exact(
 
     # Lower bound on R at confidence c: largest L s.t. P(R >= L) >= c.
     surv = np.cumsum(posterior[::-1])[::-1]  # surv[L] = P(R >= L)
-    L_candidates = np.where(surv >= rna_lower_confidence)[0]
+    L_candidates = np.where(surv >= internal_rna_lower_ci)[0]
     r_lower = float(L_candidates.max()) if L_candidates.size > 0 else 0.0
 
     # Upper bound on R at confidence c: smallest U s.t. P(R <= U) >= c.
     cdf = np.cumsum(posterior)
-    U_candidates = np.where(cdf >= rna_lower_confidence)[0]
+    U_candidates = np.where(cdf >= internal_rna_lower_ci)[0]
     r_upper = float(U_candidates.min()) if U_candidates.size > 0 else float(n_int)
 
     return mean_r, r_lower, r_upper, sd_r
@@ -534,7 +536,7 @@ def _summarize_normal(
     *,
     kappa_d: float,
     p_r1_sense: float,
-    rna_lower_confidence: float,
+    internal_rna_lower_ci: float,
 ) -> tuple[float, float, float, float]:
     """Normal-approximation summary of the posterior over R given (k_sense, n).
 
@@ -560,7 +562,7 @@ def _summarize_normal(
     var_r = var_k / (delta * delta)
     sd_r = float(np.sqrt(var_r))
 
-    z = float(norm.ppf(float(rna_lower_confidence)))
+    z = float(norm.ppf(float(internal_rna_lower_ci)))
     r_lower = float(np.clip(r_hat - z * sd_r, 0.0, n))
     r_upper = float(np.clip(r_hat + z * sd_r, 0.0, n))
     return r_hat, r_lower, r_upper, sd_r
@@ -575,17 +577,11 @@ def deconvolve_regions_by_strand(
     counts: StrandRegionCounts,
     *,
     kappa_d: float,
-    rna_lower_confidence: float,
     kappa_d_n_seed_regions: int = 0,
     kappa_d_n_exon_self_training: int = 0,
     kappa_d_fallback_used: bool = False,
 ) -> RegionGdnaEstimate:
     """Per-region gDNA fragment-count posterior given ``kappa_d`` and ``p_r1_sense``."""
-    if not 0.5 <= float(rna_lower_confidence) < 1.0:
-        raise ValueError(
-            "deconvolve_regions_by_strand: rna_lower_confidence must be in [0.5, 1.0); "
-            f"got {rna_lower_confidence!r}"
-        )
     if not np.isfinite(kappa_d) or kappa_d <= 0.0:
         raise ValueError(
             f"deconvolve_regions_by_strand: kappa_d must be finite and positive; got {kappa_d!r}"
@@ -636,7 +632,9 @@ def deconvolve_regions_by_strand(
         if n_int <= MAX_EXACT_POSTERIOR_N:
             posterior = _exact_posterior_R(k_int, n_int, kappa_d=kappa_d, p_r1_sense=p_r1_sense)
             r_hat, r_lower, r_upper, sd_r = _summarize_exact(
-                posterior, rna_lower_confidence=rna_lower_confidence, n_int=n_int
+                posterior,
+                internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
+                n_int=n_int,
             )
         else:
             flags[i] |= FLAG_APPROX_NORMAL
@@ -645,7 +643,7 @@ def deconvolve_regions_by_strand(
                 float(n_total[i]),
                 kappa_d=kappa_d,
                 p_r1_sense=p_r1_sense,
-                rna_lower_confidence=rna_lower_confidence,
+                internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
             )
 
         n_val = float(n_total[i])
@@ -674,7 +672,7 @@ def deconvolve_regions_by_strand(
         kappa_d_n_seed_regions=int(kappa_d_n_seed_regions),
         kappa_d_n_exon_self_training=int(kappa_d_n_exon_self_training),
         p_r1_sense=p_r1_sense,
-        rna_lower_confidence=float(rna_lower_confidence),
+        internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
     )
 
 
@@ -685,7 +683,6 @@ def _single_compartment_estimate(
     k_antisense: np.ndarray,
     n_total: np.ndarray,
     kappa_d: float,
-    rna_lower_confidence: float,
 ) -> RegionGdnaEstimate:
     return deconvolve_regions_by_strand(
         StrandRegionCounts(
@@ -696,7 +693,6 @@ def _single_compartment_estimate(
             p_r1_sense=counts.p_r1_sense,
         ),
         kappa_d=kappa_d,
-        rna_lower_confidence=rna_lower_confidence,
     )
 
 
@@ -704,7 +700,6 @@ def deconvolve_compartments_by_strand(
     counts: CompartmentStrandCounts,
     *,
     kappa_d: float,
-    rna_lower_confidence: float,
 ) -> RegionGdnaChannelEstimate:
     """Run the strand deconvolution independently for each unspliced compartment."""
     contained = _single_compartment_estimate(
@@ -713,7 +708,6 @@ def deconvolve_compartments_by_strand(
         k_antisense=counts.contained_antisense,
         n_total=counts.contained_total,
         kappa_d=kappa_d,
-        rna_lower_confidence=rna_lower_confidence,
     )
     boundary_left = _single_compartment_estimate(
         counts,
@@ -721,7 +715,6 @@ def deconvolve_compartments_by_strand(
         k_antisense=counts.boundary_left_antisense,
         n_total=counts.boundary_left_total,
         kappa_d=kappa_d,
-        rna_lower_confidence=rna_lower_confidence,
     )
     boundary_right = _single_compartment_estimate(
         counts,
@@ -729,7 +722,6 @@ def deconvolve_compartments_by_strand(
         k_antisense=counts.boundary_right_antisense,
         n_total=counts.boundary_right_total,
         kappa_d=kappa_d,
-        rna_lower_confidence=rna_lower_confidence,
     )
     flags = (
         contained.flags.astype(np.uint16)
@@ -752,7 +744,7 @@ def deconvolve_compartments_by_strand(
         flags=flags,
         kappa_d=float(kappa_d),
         p_r1_sense=float(counts.p_r1_sense),
-        rna_lower_confidence=float(rna_lower_confidence),
+        internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
     )
 
 
@@ -782,8 +774,6 @@ def screen_no_rna_exons(
     region_arrays: RegionArrays,
     payload_arrays: PayloadArrays,
     kappa_d_seed: float,
-    *,
-    rna_lower_confidence: float,
 ) -> np.ndarray:
     """Identify exon regions consistent with pure gDNA at the seed ``kappa_d``.
 
@@ -795,7 +785,7 @@ def screen_no_rna_exons(
       * the region has no SPLICE_SPLICED mass;
       * the two-sided BetaBinomial p-value of ``k_sense`` under the pure-gDNA
         null ``k_sense ~ BB(n, kappa_d/2, kappa_d/2)`` exceeds the threshold
-        ``1 - rna_lower_confidence`` (i.e., the observation is not rejected
+        ``1 - _INTERNAL_RNA_LOWER_CI`` (i.e., the observation is not rejected
         as inconsistent with H₀: R = 0 at the requested confidence level).
 
     The original Phase 3 plan phrased the test as
@@ -808,12 +798,6 @@ def screen_no_rna_exons(
 
     Returns a boolean mask over the sorted region table.
     """
-    if not 0.5 <= float(rna_lower_confidence) < 1.0:
-        raise ValueError(
-            "screen_no_rna_exons: rna_lower_confidence must be in [0.5, 1.0); "
-            f"got {rna_lower_confidence!r}"
-        )
-
     p_r1_sense = float(counts.p_r1_sense)
     if not np.isfinite(p_r1_sense) or not 0.0 <= p_r1_sense <= 1.0:
         raise ValueError(
@@ -838,7 +822,7 @@ def screen_no_rna_exons(
             f"screen_no_rna_exons: kappa_d_seed must be finite and positive; got {kappa_d_seed!r}"
         )
     alpha = float(kappa_d_seed) / 2.0
-    threshold = 1.0 - float(rna_lower_confidence)
+    threshold = 1.0 - _INTERNAL_RNA_LOWER_CI
 
     idxs = np.where(candidate)[0]
     for i in idxs:
@@ -921,8 +905,6 @@ def estimate_kappa_d(
     payload_arrays: PayloadArrays,
     counts: StrandRegionCounts,
     strand_summary: StrandSummary,
-    *,
-    rna_lower_confidence: float,
 ) -> KappaDEstimate:
     """Estimate the gDNA strand-balance overdispersion ``kappa_d``.
 
@@ -967,7 +949,6 @@ def estimate_kappa_d(
         region_arrays,
         payload_arrays,
         seed_estimate.kappa,
-        rna_lower_confidence=rna_lower_confidence,
     )
     n_exons = int(accepted_exons.sum())
 

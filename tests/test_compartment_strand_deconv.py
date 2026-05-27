@@ -113,11 +113,7 @@ def test_deconvolve_compartments_is_conservative_for_ineligible_regions() -> Non
     region_arrays, payload_arrays = _build_arrays()
     counts = build_compartment_strand_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
 
-    estimates = deconvolve_compartments_by_strand(
-        counts,
-        kappa_d=10.0,
-        rna_lower_confidence=0.95,
-    )
+    estimates = deconvolve_compartments_by_strand(counts, kappa_d=10.0)
 
     assert estimates.contained_mean[2] == pytest.approx(24.0)
     assert estimates.contained_rna_lower[2] == pytest.approx(0.0)
@@ -130,11 +126,7 @@ def test_compartment_deconvolution_tracks_channels_independently() -> None:
     region_arrays, payload_arrays = _build_arrays()
     counts = build_compartment_strand_counts(region_arrays, payload_arrays, p_r1_sense=1.0)
 
-    estimates = deconvolve_compartments_by_strand(
-        counts,
-        kappa_d=1.0e4,
-        rna_lower_confidence=0.50,
-    )
+    estimates = deconvolve_compartments_by_strand(counts, kappa_d=1.0e4)
 
     assert estimates.contained_mean[0] < estimates.boundary_left_mean[0] + 100.0
     assert estimates.boundary_right_mean[0] <= counts.boundary_right_total[0]

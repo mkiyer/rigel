@@ -61,29 +61,15 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
-    aggregate_prior_strength: float = 3.0
-    aggregate_prior_edge_count: float = 1000.0
-    aggregate_prior_max_count: float = 3000.0
-    gdna_prior_logit_bias: float = -6.0
+    rna_call_bias: float = 0.5
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
-        for name in (
-            "aggregate_prior_strength",
-            "aggregate_prior_edge_count",
-            "aggregate_prior_max_count",
-        ):
-            value = float(getattr(self, name))
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(f"EMConfig.{name} must be finite and >= 0; got {value!r}.")
-        if not math.isfinite(float(self.gdna_prior_logit_bias)):
-            raise ValueError(
-                "EMConfig.gdna_prior_logit_bias must be finite; "
-                f"got {self.gdna_prior_logit_bias!r}."
-            )
+        if not (0.0 < float(self.rna_call_bias) < 1.0):
+            raise ValueError(f"EMConfig.rna_call_bias must be in (0, 1); got {self.rna_call_bias}.")
 
 
 # ======================================================================
@@ -248,18 +234,6 @@ class CalibrationConfig:
     pool_quality_good: int = 5_000
     pool_quality_weak: int = 1
 
-    #: Posterior confidence level for the per-region RNA lower bound
-    #: ``P(R >= rna_lower_count | data) >= rna_lower_confidence``. The same
-    #: value controls the dual exon self-training screen via
-    #: ``P(R > 0 | data, kappa_d_seed) <= 1 - rna_lower_confidence``. This is
-    #: the single statistical knob exposed by v5 strand deconvolution.
-    rna_lower_confidence: float = 0.95
-
-    #: Posterior confidence level for regional gDNA upper bounds produced by
-    #: the v6 boundary/local/sweep predictors and ``RegionCalibration``.
-    #: Must lie in ``[0.5, 1.0)``.
-    gdna_density_confidence: float = 0.95
-
     #: Minimum effective length (bp under the gDNA fragment-length model)
     #: required for a region to enter the v6 off-target background seed fit.
     density_min_eff_length: float = 1.0
@@ -274,16 +248,6 @@ class CalibrationConfig:
     max_calibration_passes: int = 5
 
     def __post_init__(self) -> None:
-        if not (0.5 <= self.rna_lower_confidence < 1.0):
-            raise ValueError(
-                "CalibrationConfig.rna_lower_confidence must be in [0.5, 1.0); "
-                f"got {self.rna_lower_confidence}."
-            )
-        if not (0.5 <= self.gdna_density_confidence < 1.0):
-            raise ValueError(
-                "CalibrationConfig.gdna_density_confidence must be in [0.5, 1.0); "
-                f"got {self.gdna_density_confidence}."
-            )
         if self.density_min_eff_length < 0.0:
             raise ValueError(
                 "CalibrationConfig.density_min_eff_length must be >= 0; "

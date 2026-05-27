@@ -244,7 +244,7 @@ def test_prior_mass_deconvolution_uses_compartment_strand_means_when_available()
         flags=np.zeros(1, dtype=np.uint16),
         kappa_d=10.0,
         p_r1_sense=0.95,
-        rna_lower_confidence=0.95,
+        internal_rna_lower_ci=0.95,
     )
 
     prior_mass = build_prior_mass_deconvolution(

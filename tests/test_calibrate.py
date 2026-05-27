@@ -111,7 +111,6 @@ def test_calibrate_populates_region_calibration_and_diagnostics():
         payload=_payload(),
         scan_trained=_scan_trained(),
         strand_summary=StrandSummary(p_r1_sense=0.95, n_observations=10_000),
-        rna_lower_confidence=0.97,
     )
 
     rc = result.region_calibration
@@ -124,7 +123,7 @@ def test_calibrate_populates_region_calibration_and_diagnostics():
     assert result.strand_channels is not None
     assert result.strand_channels.contained_mean.shape == (7,)
     assert result.strand_channels.p_r1_sense == pytest.approx(0.95)
-    assert result.strand_channels.rna_lower_confidence == pytest.approx(0.97)
+    assert result.strand_channels.internal_rna_lower_ci == pytest.approx(0.95)
     assert result.background_model.seed_mask.shape == (7,)
     assert result.boundary_local.alpha_excess.shape == (7,)
     assert result.boundary_sweep.mu_sweep.shape == (7,)
@@ -139,14 +138,12 @@ def test_calibrate_summary_has_region_calibration_blocks():
         payload=_payload(),
         scan_trained=_scan_trained(),
         strand_summary=StrandSummary(p_r1_sense=0.95, n_observations=10_000),
-        rna_lower_confidence=0.95,
     )
 
     summary = result.to_summary_dict()
-    assert summary["calibration_config"] == {"rna_lower_confidence": 0.95}
 
     strand = summary["strand_channels"]
-    assert strand["rna_lower_confidence"] == pytest.approx(0.95)
+    assert strand["internal_rna_lower_ci"] == pytest.approx(0.95)
     assert strand["p_r1_sense"] == pytest.approx(0.95)
     assert strand["n_regions"] == 7
     assert "contained_mean" in strand

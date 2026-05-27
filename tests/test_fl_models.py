@@ -14,6 +14,7 @@ from rigel.calibration._fl_sources import (
     extract_rna_counts,
 )
 from rigel.calibration.fl import (
+    POOL_SCORING_PRIOR_ESS,
     POOL_QUALITY_GOOD_THRESHOLD,
     POOL_QUALITY_WEAK_THRESHOLD,
     build_fl_models,
@@ -274,6 +275,60 @@ def test_eb_symmetry_rna_and_gdna():
     rna_ll = np.array([fl.rna.log_likelihood(int(x)) for x in grid])
     gdna_ll = np.array([fl.gdna.log_likelihood(int(x)) for x in grid])
     np.testing.assert_array_equal(rna_ll, gdna_ll)
+
+
+def test_scoring_surfaces_are_neutral_when_gdna_fallback():
+    global_counts = _peaked(200, 50_000)
+    rna_counts = _peaked(280, 39)
+    gdna_counts = np.zeros(N_BINS, dtype=np.int64)
+
+    fl = build_fl_models(
+        global_counts=global_counts,
+        rna_counts=rna_counts,
+        gdna_counts=gdna_counts,
+        max_size=MAX_SIZE,
+    )
+
+    assert fl.rna_quality == "weak"
+    assert fl.gdna_quality == "fallback"
+    assert fl.rna_fl_reliability == pytest.approx(39.0 / (39.0 + POOL_SCORING_PRIOR_ESS))
+    assert fl.gdna_fl_reliability == 0.0
+    assert fl.fl_contrast_weight == 0.0
+    np.testing.assert_allclose(fl.rna_scoring.pmf, fl.global_.pmf, rtol=0.0, atol=1e-15)
+    np.testing.assert_allclose(fl.gdna_scoring.pmf, fl.global_.pmf, rtol=0.0, atol=1e-15)
+
+
+def test_scoring_surfaces_use_joint_contrast_reliability():
+    global_counts = _peaked(250, 50_000)
+    rna_counts = _peaked(100, 50)
+    gdna_counts = _peaked(400, 10_000)
+
+    fl = build_fl_models(
+        global_counts=global_counts,
+        rna_counts=rna_counts,
+        gdna_counts=gdna_counts,
+        max_size=MAX_SIZE,
+    )
+
+    rna_rel = float(rna_counts.sum()) / (float(rna_counts.sum()) + POOL_SCORING_PRIOR_ESS)
+    gdna_rel = float(gdna_counts.sum()) / (float(gdna_counts.sum()) + POOL_SCORING_PRIOR_ESS)
+    expected_weight = min(rna_rel, gdna_rel)
+    assert fl.fl_contrast_weight == pytest.approx(expected_weight)
+
+    global_pmf = fl.global_.pmf
+    rna_emp = rna_counts.astype(np.float64) / float(rna_counts.sum())
+    gdna_emp = gdna_counts.astype(np.float64) / float(gdna_counts.sum())
+    expected_rna = expected_weight * rna_emp + (1.0 - expected_weight) * global_pmf
+    expected_gdna = expected_weight * gdna_emp + (1.0 - expected_weight) * global_pmf
+    expected_rna /= expected_rna.sum()
+    expected_gdna /= expected_gdna.sum()
+
+    np.testing.assert_allclose(fl.rna_scoring.pmf, expected_rna, rtol=1e-12, atol=1e-15)
+    np.testing.assert_allclose(fl.gdna_scoring.pmf, expected_gdna, rtol=1e-12, atol=1e-15)
+    assert fl.rna_scoring.mean > 100.0
+    assert fl.rna_scoring.mean < fl.global_.mean
+    assert fl.gdna_scoring.mean > fl.global_.mean
+    assert fl.gdna_scoring.mean < 400.0
 
 
 def test_global_is_unconditional_anchor_no_prior():

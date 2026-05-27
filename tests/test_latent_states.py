@@ -128,7 +128,7 @@ def _strand_channels(rna_lower: list[float]) -> RegionGdnaChannelEstimate:
         flags=np.zeros(region_count, dtype=np.uint16),
         kappa_d=10.0,
         p_r1_sense=0.95,
-        rna_lower_confidence=0.95,
+        internal_rna_lower_ci=0.95,
     )
 
 

@@ -138,6 +138,53 @@ class FragmentLengthModel:
         model.finalize()
         return model
 
+    @classmethod
+    def from_pmf(
+        cls,
+        pmf,
+        max_size: int | None = None,
+    ) -> "FragmentLengthModel":
+        """Create a finalized model from an already-normalized PMF.
+
+        This is intended for calibrated scoring surfaces whose probabilities
+        have already been regularized and normalized upstream. Unlike
+        :meth:`from_counts`, it does not add an extra unseen-bin reserve.
+        """
+        prob_in = np.asarray(pmf, dtype=np.float64)
+        if prob_in.ndim != 1:
+            raise ValueError("FragmentLengthModel.from_pmf: pmf must be one-dimensional.")
+        if max_size is None:
+            max_size = len(prob_in) - 1
+        if max_size < 0:
+            raise ValueError(f"FragmentLengthModel.from_pmf: max_size must be >= 0; got {max_size}.")
+        if np.any(~np.isfinite(prob_in)) or np.any(prob_in < 0.0):
+            raise ValueError("FragmentLengthModel.from_pmf: pmf must be finite and non-negative.")
+
+        prob = np.zeros(max_size + 1, dtype=np.float64)
+        n = min(len(prob_in), max_size + 1)
+        prob[:n] = prob_in[:n]
+        if len(prob_in) > max_size + 1:
+            prob[max_size] += float(np.sum(prob_in[max_size + 1 :], dtype=np.float64))
+        total = float(np.sum(prob, dtype=np.float64))
+        if total <= 0.0:
+            raise ValueError("FragmentLengthModel.from_pmf: pmf total mass must be > 0.")
+
+        tiny = np.finfo(np.float64).tiny
+        prob = np.maximum(prob / total, tiny)
+        prob /= float(np.sum(prob, dtype=np.float64))
+
+        model = cls(max_size=max_size)
+        model.counts[:] = prob
+        model._total_weight = 1.0
+        model._prob = prob
+        model._log_prob = np.log(prob)
+        model._stats_use_prob = True
+        model._tail_base = float(model._log_prob[model.max_size])
+        model._finalized = True
+        model._cdf_cache = None
+        model._cmom_cache = None
+        return model
+
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Acceptance tests for the v3 grouped RNA/gDNA prior contract."""
+"""Acceptance tests for the adaptive v5/v6 grouped prior contract."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rigel.calibration.adaptive_prior import PRIOR_STRUCTURAL_GATED
 from rigel.calibration.calibration_iteration import (
     PRIOR_MASS_METHOD_DENSITY,
     PriorMassDeconvolution,
@@ -41,19 +42,17 @@ def _index() -> SimpleNamespace:
     )
 
 
-def _region_calibration(*, gdna: float, rna: float) -> RegionCalibration:
-    total = np.array([gdna + rna], dtype=np.float32)
-    gdna_arr = np.array([gdna], dtype=np.float32)
-    rna_arr = np.array([rna], dtype=np.float32)
+def _region_calibration(*, unspliced: float, p_state: list[float]) -> RegionCalibration:
+    total = np.array([unspliced], dtype=np.float32)
     return RegionCalibration(
-        p_states=np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
-        mu_gdna=gdna_arr.copy(),
-        upper_gdna=gdna_arr.copy(),
+        p_states=np.array([p_state], dtype=np.float32),
+        mu_gdna=total.copy(),
+        upper_gdna=total.copy(),
         rna_lower=np.zeros(1, dtype=np.float32),
         prior_mass=PriorMassDeconvolution(
             unspliced_total=total,
-            gdna_unspliced_mean=gdna_arr,
-            rna_unspliced_mean=rna_arr,
+            gdna_unspliced_mean=total.copy(),
+            rna_unspliced_mean=np.zeros(1, dtype=np.float32),
             method=np.array([PRIOR_MASS_METHOD_DENSITY], dtype=np.uint8),
             precision=np.zeros(1, dtype=np.float32),
             flags=np.zeros(1, dtype=np.uint16),
@@ -95,39 +94,47 @@ def _multi_locus(unit_indices: list[int]) -> MultiLocus:
     )
 
 
-def test_grouped_prior_table_exposes_paired_mass_and_bounded_alpha() -> None:
+def test_adaptive_prior_table_exposes_paired_mass_and_summary() -> None:
     priors = assemble_priors(
         multi_loci=[_multi_locus([0])],
         em_data=_em_data(is_spliced=[False], gdna_log_liks=[-1.0]),
         index=_index(),
-        calibration=_calibration(_region_calibration(gdna=5.0, rna=1000.0)),
+        calibration=_calibration(
+            _region_calibration(unspliced=100.0, p_state=[0.25, 0.0, 0.75, 0.0])
+        ),
         em_config=EMConfig(),
     )
 
     assert isinstance(priors, PriorTable)
-    assert priors.gdna_expected_count[0] == pytest.approx(5.0)
-    assert priors.rna_expected_count[0] == pytest.approx(1000.0)
-    assert priors.prior_unspliced_total[0] == pytest.approx(1005.0)
-    assert priors.alpha_gdna_add[0] == pytest.approx(priors.gdna_prior_count_em[0])
+    assert priors.prior_unspliced_total[0] == pytest.approx(100.0)
+    assert priors.alpha_gdna_add[0] > 0.0
     assert priors.alpha_rna_add[0] > priors.alpha_gdna_add[0]
-    assert priors.prior_budget[0] <= EMConfig().aggregate_prior_max_count
-    assert priors.prior_mass_conservation_error[0] == pytest.approx(0.0)
+    assert priors.prior_ess_final[0] == pytest.approx(
+        priors.alpha_gdna_add[0] + priors.alpha_rna_add[0]
+    )
+    summary = priors.to_summary_dict()
+    assert summary["name"] == "entropy_dirichlet_v5_v6"
+    assert summary["rna_call_bias"] == pytest.approx(0.5)
+    assert summary["n_loci_with_prior_mass"] == 1
 
 
-def test_strength_zero_preserves_projected_mass_but_disables_em_alpha() -> None:
-    priors = assemble_priors(
+def test_rna_call_bias_shifts_split_without_changing_ess() -> None:
+    kwargs = dict(
         multi_loci=[_multi_locus([0])],
         em_data=_em_data(is_spliced=[False], gdna_log_liks=[-1.0]),
         index=_index(),
-        calibration=_calibration(_region_calibration(gdna=10.0, rna=20.0)),
-        em_config=EMConfig(aggregate_prior_strength=0.0),
+        calibration=_calibration(
+            _region_calibration(unspliced=100.0, p_state=[0.5, 0.0, 0.5, 0.0])
+        ),
     )
 
-    assert priors.gdna_expected_count[0] == pytest.approx(10.0)
-    assert priors.rna_expected_count[0] == pytest.approx(20.0)
-    assert priors.alpha_gdna_add[0] == pytest.approx(0.0)
-    assert priors.alpha_rna_add[0] == pytest.approx(0.0)
-    assert priors.gdna_prior_count_em[0] == pytest.approx(0.0)
+    conservative = assemble_priors(**kwargs, em_config=EMConfig(rna_call_bias=0.25))
+    liberal = assemble_priors(**kwargs, em_config=EMConfig(rna_call_bias=0.75))
+
+    assert conservative.prior_ess_final[0] == pytest.approx(liberal.prior_ess_final[0])
+    assert conservative.prior_rna_share_final[0] < conservative.prior_rna_share_v5[0]
+    assert liberal.prior_rna_share_final[0] > liberal.prior_rna_share_v5[0]
+    assert conservative.alpha_rna_add[0] < liberal.alpha_rna_add[0]
 
 
 def test_enable_gdna_helper_is_structural_diagnostic_only() -> None:
@@ -137,7 +144,9 @@ def test_enable_gdna_helper_is_structural_diagnostic_only() -> None:
         multi_loci=[locus],
         em_data=em_data,
         index=_index(),
-        calibration=_calibration(_region_calibration(gdna=0.0, rna=30.0)),
+        calibration=_calibration(
+            _region_calibration(unspliced=30.0, p_state=[0.0, 0.0, 1.0, 0.0])
+        ),
         em_config=EMConfig(),
     )
 
@@ -154,12 +163,15 @@ def test_all_spliced_locus_reports_no_structural_gdna_candidate() -> None:
         multi_loci=[locus],
         em_data=em_data,
         index=_index(),
-        calibration=_calibration(_region_calibration(gdna=20.0, rna=0.0)),
+        calibration=_calibration(
+            _region_calibration(unspliced=20.0, p_state=[1.0, 0.0, 0.0, 0.0])
+        ),
         em_config=EMConfig(),
     )
 
     assert enable_gdna_for_multilocus(locus, em_data) is False
     assert priors.enable_gdna[0] == 0
-    assert priors.gdna_expected_count[0] > 0.0
+    assert priors.prior_n_local_gdna[0] > 0.0
     assert priors.alpha_gdna_add[0] == pytest.approx(0.0)
     assert priors.alpha_rna_add[0] == pytest.approx(0.0)
+    assert (priors.prior_flags[0] & PRIOR_STRUCTURAL_GATED) != 0

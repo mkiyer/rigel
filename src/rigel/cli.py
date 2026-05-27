@@ -280,8 +280,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
 
     # Calibration section
     cal_dict = None
+    prior_policy = None
     if result.calibration is not None:
         cal_dict = result.calibration.to_summary_dict()
+        prior_table = getattr(result.calibration, "prior_table", None)
+        if prior_table is not None:
+            prior_policy = prior_table.to_summary_dict()
 
     # Command section — record CLI arguments
     cmd_params: dict = {
@@ -345,6 +349,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
         },
         "calibration": cal_dict,
+        "prior_policy": prior_policy,
         "gdna_eff_len": {
             "value": _locus_series_summary("gdna_eff_len"),
             "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
@@ -403,6 +408,7 @@ def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None
     from . import __version__
 
     data: dict = {}
+    quant: dict = {}
 
     # I/O paths (resolved to absolute)
     for key in ("bam_file", "index_dir", "output_dir"):
@@ -423,7 +429,9 @@ def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None
             val = str(val)
         elif isinstance(val, tuple):
             val = list(val)
-        data[dest] = val
+        quant[dest] = val
+
+    data["quant"] = quant
 
     # Extra flags not in _PARAM_SPECS
     data["tsv"] = bool(getattr(args, "tsv", False))
@@ -570,6 +578,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("assignment_mode", "em.assignment_mode"),
     _ParamSpec("assignment_min_posterior", "em.assignment_min_posterior"),
     _ParamSpec("em_mode", "em.mode"),
+    _ParamSpec("rna_call_bias", "em.rna_call_bias"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
@@ -589,8 +598,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
-    _ParamSpec("rna_lower_confidence", "calibration.rna_lower_confidence"),
-    _ParamSpec("gdna_density_confidence", "calibration.gdna_density_confidence"),
     _ParamSpec("background_trim_fraction", "calibration.background_trim_fraction"),
     _ParamSpec("max_calibration_passes", "calibration.max_calibration_passes"),
     # -- Fan-out: total threads → both EM and scan budgets --
@@ -618,6 +625,18 @@ _REMOVED_QUANT_CONFIG_KEYS: dict[str, str] = {
     "scan_qname_batch_size": "scan_read_name_batch_size",
     "scan_threads": "threads",
 }
+
+_REMOVED_PRIOR_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "rna_confidence",
+        "rna_lower_confidence",
+        "gdna_density_confidence",
+        "aggregate_prior_strength",
+        "aggregate_prior_edge_count",
+        "aggregate_prior_max_count",
+        "gdna_prior_logit_bias",
+    }
+)
 
 
 def _resolve_config_path(cfg: object, path: str) -> object:
@@ -753,7 +772,14 @@ def _resolve_quant_args(
         with open(config_path) as fh:
             raw = yaml.safe_load(fh) or {}
         # Normalise: allow hyphens, convert to underscores
-        yaml_config = {k.replace("-", "_"): v for k, v in raw.items()}
+        raw_normalized = {k.replace("-", "_"): v for k, v in raw.items()}
+        quant_block = raw_normalized.pop("quant", None)
+        yaml_config = {}
+        if quant_block is not None:
+            if not isinstance(quant_block, dict):
+                raise ValueError("quant config block must be a mapping.")
+            yaml_config.update({str(k).replace("-", "_"): v for k, v in quant_block.items()})
+        yaml_config.update(raw_normalized)
         removed = sorted(set(yaml_config) & set(_REMOVED_QUANT_CONFIG_KEYS))
         if removed:
             replacements = ", ".join(
@@ -762,6 +788,14 @@ def _resolve_quant_args(
             raise ValueError(
                 "Removed quant config key(s); update to the new scan parameter names: "
                 f"{replacements}"
+            )
+        removed_prior = sorted(set(yaml_config) & _REMOVED_PRIOR_CONFIG_KEYS)
+        if removed_prior:
+            names = ", ".join(repr(name) for name in removed_prior)
+            raise ValueError(
+                f"Configuration option(s) {names} were removed in adaptive prior v5. "
+                "The grouped EM prior is now parameter-free. "
+                "See docs/prior/adaptive_prior_v5.md."
             )
         # I/O keys and extra flags are valid in config YAML
         valid_keys = set(defaults) | {"bam_file", "index_dir", "output_dir", "tsv"}
@@ -1118,6 +1152,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Convergence threshold for EM parameter updates (default: 1e-6).",
     )
     adv.add_argument(
+        "--rna-call-bias",
+        dest="rna_call_bias",
+        type=float,
+        default=None,
+        help="Operational sensitivity/specificity dial for the unspliced "
+        "gDNA-vs-RNA prior split. Range (0, 1). Default 0.5 is the "
+        "unbiased v5 prior; values below 0.5 favor gDNA assignment and "
+        "values above 0.5 favor RNA assignment.",
+    )
+    adv.add_argument(
         "--overhang-alpha",
         dest="overhang_alpha",
         type=float,
@@ -1179,26 +1223,6 @@ def build_parser() -> argparse.ArgumentParser:
         "above which a pool's per-FL distribution is flagged 'weak' "
         "(default: 1). Below this threshold the pool is flagged "
         "'fallback' and downstream code falls back on the global FL.",
-    )
-    adv.add_argument(
-        "--rna-lower-confidence",
-        dest="rna_lower_confidence",
-        type=float,
-        default=None,
-        help="Posterior confidence level for the per-region RNA lower bound "
-        "P(R >= rna_lower_count | data) >= rna_lower_confidence. The same "
-        "value drives the exon self-training screen used to refit the gDNA "
-        "strand-balance concentration kappa_d. Must be in [0.5, 1.0); "
-        "default: 0.95.",
-    )
-    adv.add_argument(
-        "--gdna-density-confidence",
-        dest="gdna_density_confidence",
-        type=float,
-        default=None,
-        help="Posterior confidence level for regional gDNA upper bounds "
-        "emitted by the v6 calibration path. Must be in "
-        "[0.5, 1.0); default: 0.95.",
     )
     adv.add_argument(
         "--background-trim-fraction",

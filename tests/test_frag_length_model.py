@@ -189,6 +189,20 @@ class TestFragmentLengthModelEffectiveLength:
 
         assert actual == pytest.approx(expected)
 
+    def test_from_pmf_preserves_scoring_distribution(self):
+        pmf = np.zeros(11, dtype=np.float64)
+        pmf[2] = 0.25
+        pmf[8] = 0.75
+
+        m = FragmentLengthModel.from_pmf(pmf, max_size=10)
+
+        np.testing.assert_allclose(m.pmf, pmf, rtol=0.0, atol=1e-15)
+        assert m.log_likelihood(2) == pytest.approx(math.log(0.25))
+        assert m.log_likelihood(8) == pytest.approx(math.log(0.75))
+        expected = self._oracle_eff_len(pmf, length=8)
+        actual = m.compute_all_transcript_eff_lens(np.array([8]), min_value=0.0)[0]
+        assert actual == pytest.approx(expected)
+
 
 class TestFragmentLengthModelSerialization:
     def test_to_dict_structure(self):

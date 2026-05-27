@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 
 __all__ = ["calibrate"]
 
+_INTERNAL_GDNA_DENSITY_CI: float = 0.95
+
 
 def _strand_summary_identifiable(
     strand_summary: StrandSummary,
@@ -54,22 +56,11 @@ def calibrate(
     pool_quality_good: int = POOL_QUALITY_GOOD_THRESHOLD,
     pool_quality_weak: int = POOL_QUALITY_WEAK_THRESHOLD,
     strand_summary: StrandSummary | None = None,
-    rna_lower_confidence: float = 0.95,
-    gdna_density_confidence: float = 0.95,
     density_min_eff_length: float = 1.0,
     background_trim_fraction: float = 0.01,
     max_calibration_passes: int = 5,
 ) -> CalibrationResult:
     """Run the v6 calibration stages that feed locus EM."""
-    if not (0.5 <= rna_lower_confidence < 1.0):
-        raise ValueError(
-            f"calibrate: rna_lower_confidence must be in [0.5, 1.0); got {rna_lower_confidence}."
-        )
-    if not (0.5 <= gdna_density_confidence < 1.0):
-        raise ValueError(
-            "calibrate: gdna_density_confidence must be in [0.5, 1.0); "
-            f"got {gdna_density_confidence}."
-        )
     if density_min_eff_length < 0.0:
         raise ValueError(
             f"calibrate: density_min_eff_length must be >= 0; got {density_min_eff_length}."
@@ -127,7 +118,6 @@ def calibrate(
         payload_arrays,
         strand_counts,
         strand_summary,
-        rna_lower_confidence=rna_lower_confidence,
     )
     compartment_counts = build_compartment_strand_counts(
         region_arrays,
@@ -137,7 +127,6 @@ def calibrate(
     strand_channels = deconvolve_compartments_by_strand(
         compartment_counts,
         kappa_d=kappa_d.kappa,
-        rna_lower_confidence=rna_lower_confidence,
     )
     calibration_strand_channels = strand_channels if strand_usable else None
 
@@ -159,7 +148,7 @@ def calibrate(
         background,
         strand_channels=calibration_strand_channels,
         max_calibration_passes=int(max_calibration_passes),
-        confidence=float(gdna_density_confidence),
+        confidence=_INTERNAL_GDNA_DENSITY_CI,
     )
 
     return build_calibration_result(
@@ -170,5 +159,4 @@ def calibrate(
         region_signature=region_arrays.signature,
         region_calibration=region_calibration,
         strand_channels=strand_channels,
-        rna_lower_confidence=rna_lower_confidence,
     )

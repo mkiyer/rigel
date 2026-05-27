@@ -163,7 +163,7 @@ def test_protocol_symmetry():
         pack_signature(exon_pos=True), pos=60.0, neg=40.0
     )
     counts_sense = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.9)
-    est_sense = deconvolve_regions_by_strand(counts_sense, kappa_d=10.0, rna_lower_confidence=0.95)
+    est_sense = deconvolve_regions_by_strand(counts_sense, kappa_d=10.0)
 
     # For the antisense protocol the SAME molecules produce reflected reads:
     # POS and NEG channel counts swap.
@@ -171,7 +171,7 @@ def test_protocol_symmetry():
         pack_signature(exon_pos=True), pos=40.0, neg=60.0
     )
     counts_anti = build_strand_region_counts(region_arrays2, payload_arrays2, p_r1_sense=0.1)
-    est_anti = deconvolve_regions_by_strand(counts_anti, kappa_d=10.0, rna_lower_confidence=0.95)
+    est_anti = deconvolve_regions_by_strand(counts_anti, kappa_d=10.0)
 
     assert est_sense.mean_count[0] == pytest.approx(est_anti.mean_count[0], abs=1e-3)
     assert est_sense.rna_lower_count[0] == pytest.approx(est_anti.rna_lower_count[0], abs=1.0)
@@ -188,7 +188,7 @@ def test_near_unstranded_is_conservative():
         pack_signature(exon_pos=True), pos=60.0, neg=40.0
     )
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.5)
-    est = deconvolve_regions_by_strand(counts, kappa_d=10.0, rna_lower_confidence=0.95)
+    est = deconvolve_regions_by_strand(counts, kappa_d=10.0)
 
     assert (est.flags[0] & FLAG_NEAR_UNSTRANDED) != 0
     assert est.rna_lower_count[0] == 0.0
@@ -203,7 +203,7 @@ def test_exact_posterior_handles_perfect_strand_specificity():
     )
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=1.0)
 
-    est = deconvolve_regions_by_strand(counts, kappa_d=1.0e4, rna_lower_confidence=0.95)
+    est = deconvolve_regions_by_strand(counts, kappa_d=1.0e4)
 
     assert np.isfinite(est.mean_count[0])
     assert np.isfinite(est.rna_lower_count[0])
@@ -217,26 +217,11 @@ def test_fractional_exact_outputs_are_clamped_to_n_total():
     region_arrays, payload_arrays = _single_region(pack_signature(exon_pos=True), pos=1.6, neg=0.0)
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.99)
 
-    est = deconvolve_regions_by_strand(counts, kappa_d=1.0e6, rna_lower_confidence=0.50)
+    est = deconvolve_regions_by_strand(counts, kappa_d=1.0e6)
 
     assert 0.0 <= est.mean_count[0] <= est.n_total[0]
     assert 0.0 <= est.upper_count[0] <= est.n_total[0]
     assert 0.0 <= est.rna_lower_count[0] <= est.n_total[0]
-
-
-def test_rna_lower_confidence_monotone_in_bound():
-    region_arrays, payload_arrays = _single_region(
-        pack_signature(exon_pos=True), pos=80.0, neg=20.0
-    )
-    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
-
-    bounds = [
-        deconvolve_regions_by_strand(counts, kappa_d=5.0, rna_lower_confidence=c).rna_lower_count[0]
-        for c in (0.50, 0.80, 0.95, 0.99)
-    ]
-    # As we demand higher confidence the lower bound on R must not increase.
-    for a, b in zip(bounds, bounds[1:]):
-        assert b <= a + 1e-6, f"non-monotone bound: {bounds}"
 
 
 def test_exact_and_normal_agree_at_boundary():
@@ -255,14 +240,14 @@ def test_exact_and_normal_agree_at_boundary():
 
     posterior = _exact_posterior_R(k_sense, n, kappa_d=kappa, p_r1_sense=p)
     r_hat_e, r_lower_e, _r_upper_e, sd_e = _summarize_exact(
-        posterior, rna_lower_confidence=0.95, n_int=n
+        posterior, internal_rna_lower_ci=0.95, n_int=n
     )
     r_hat_n, r_lower_n, _r_upper_n, sd_n = _summarize_normal(
         float(k_sense),
         float(n),
         kappa_d=kappa,
         p_r1_sense=p,
-        rna_lower_confidence=0.95,
+        internal_rna_lower_ci=0.95,
     )
 
     assert abs(r_hat_e - r_hat_n) < 0.05 * n
@@ -307,18 +292,14 @@ def test_exon_screen_accepts_balanced_no_spliced_exon():
         pack_signature(exon_pos=True), pos=100.0, neg=100.0
     )
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
-    accepted = screen_no_rna_exons(
-        counts, region_arrays, payload_arrays, kappa_d_seed=1.0e4, rna_lower_confidence=0.95
-    )
+    accepted = screen_no_rna_exons(counts, region_arrays, payload_arrays, kappa_d_seed=1.0e4)
     assert bool(accepted[0])
 
 
 def test_exon_screen_rejects_clear_rna_exon():
     region_arrays, payload_arrays = _single_region(pack_signature(exon_pos=True), pos=95.0, neg=5.0)
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
-    accepted = screen_no_rna_exons(
-        counts, region_arrays, payload_arrays, kappa_d_seed=10.0, rna_lower_confidence=0.95
-    )
+    accepted = screen_no_rna_exons(counts, region_arrays, payload_arrays, kappa_d_seed=10.0)
     assert not bool(accepted[0])
 
 
@@ -330,9 +311,7 @@ def test_exon_screen_rejects_spliced_exon():
         spliced_pos=5.0,
     )
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
-    accepted = screen_no_rna_exons(
-        counts, region_arrays, payload_arrays, kappa_d_seed=10.0, rna_lower_confidence=0.95
-    )
+    accepted = screen_no_rna_exons(counts, region_arrays, payload_arrays, kappa_d_seed=10.0)
     assert not bool(accepted[0])
 
 
@@ -341,9 +320,7 @@ def test_exon_screen_requires_both_strand_channels():
         pack_signature(exon_pos=True), pos=100.0, neg=0.0
     )
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
-    accepted = screen_no_rna_exons(
-        counts, region_arrays, payload_arrays, kappa_d_seed=10.0, rna_lower_confidence=0.95
-    )
+    accepted = screen_no_rna_exons(counts, region_arrays, payload_arrays, kappa_d_seed=10.0)
     assert not bool(accepted[0])
 
 
@@ -403,13 +380,7 @@ def test_kappa_refit_uses_accepted_exons():
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
     summary = StrandSummary(p_r1_sense=0.95, n_observations=10_000)
 
-    est = estimate_kappa_d(
-        region_arrays,
-        payload_arrays,
-        counts,
-        summary,
-        rna_lower_confidence=0.95,
-    )
+    est = estimate_kappa_d(region_arrays, payload_arrays, counts, summary)
     assert est.n_seed_regions == 4
     assert est.n_exon_self_training >= 1
     # Refit balance.n_regions should reflect seeds + accepted exons.
@@ -421,13 +392,7 @@ def test_kappa_soft_fallback_is_not_reported_as_uniform_fallback():
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
     summary = StrandSummary(p_r1_sense=0.95, n_observations=10_000)
 
-    est = estimate_kappa_d(
-        region_arrays,
-        payload_arrays,
-        counts,
-        summary,
-        rna_lower_confidence=0.95,
-    )
+    est = estimate_kappa_d(region_arrays, payload_arrays, counts, summary)
 
     assert est.balance.fallback_used
     assert est.balance.fallback_reason == "residual variance <= binomial expectation"
@@ -454,13 +419,7 @@ def test_kappa_hard_fallback_skips_exon_self_training_even_with_exons():
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
     summary = StrandSummary(p_r1_sense=0.95, n_observations=10_000)
 
-    est = estimate_kappa_d(
-        region_arrays,
-        payload_arrays,
-        counts,
-        summary,
-        rna_lower_confidence=0.95,
-    )
+    est = estimate_kappa_d(region_arrays, payload_arrays, counts, summary)
 
     assert est.fallback_used
     assert est.kappa == pytest.approx(DNA_STRAND_UNIFORM_PRIOR)
@@ -483,13 +442,7 @@ def test_kappa_fallback_when_unidentifiable():
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
     summary = StrandSummary(p_r1_sense=0.95, n_observations=10_000)
 
-    est = estimate_kappa_d(
-        region_arrays,
-        payload_arrays,
-        counts,
-        summary,
-        rna_lower_confidence=0.95,
-    )
+    est = estimate_kappa_d(region_arrays, payload_arrays, counts, summary)
     assert est.fallback_used
     assert est.kappa == pytest.approx(DNA_STRAND_UNIFORM_PRIOR)
     assert est.n_exon_self_training == 0
@@ -502,7 +455,6 @@ def test_kappa_fallback_when_unidentifiable():
     deconv = deconvolve_regions_by_strand(
         counts2,
         kappa_d=est.kappa,
-        rna_lower_confidence=0.95,
         kappa_d_fallback_used=True,
     )
     assert (deconv.flags[0] & FLAG_KAPPA_FALLBACK) != 0
@@ -519,7 +471,6 @@ def test_estimate_kappa_requires_matching_strand_summary():
             payload_arrays,
             counts,
             summary,
-            rna_lower_confidence=0.95,
         )
 
 
@@ -533,7 +484,7 @@ def test_ineligible_regions_carry_zero_estimates():
         pack_signature(exon_pos=True, exon_neg=True), pos=50.0, neg=50.0
     )  # TS_AMBIG -> ineligible
     counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.9)
-    est = deconvolve_regions_by_strand(counts, kappa_d=5.0, rna_lower_confidence=0.95)
+    est = deconvolve_regions_by_strand(counts, kappa_d=5.0)
     assert (est.flags[0] & FLAG_INELIGIBLE) != 0
     assert est.rna_lower_count[0] == 0.0
     assert est.precision[0] == 0.0

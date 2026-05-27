@@ -1,4 +1,4 @@
-"""Tests for RegionCalibration prior allocation onto MultiLocus EM inputs."""
+"""Tests for adaptive prior projection onto MultiLocus EM inputs."""
 
 from __future__ import annotations
 
@@ -8,18 +8,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rigel.calibration.adaptive_prior import PRIOR_STRUCTURAL_GATED
 from rigel.calibration.calibration_iteration import (
     PRIOR_MASS_METHOD_DENSITY,
     PriorMassDeconvolution,
     RegionCalibration,
 )
-from rigel.calibration.prior import (
-    COUNT_ALLOC_GEOMETRY,
-    _compute_grouped_prior_counts,
-    assemble_priors,
-    enable_gdna_for_multilocus,
-)
-from rigel.config import EMConfig
+from rigel.calibration.prior import assemble_priors, enable_gdna_for_multilocus
 from rigel.frag_length_model import FragmentLengthModel
 from rigel.locus import Locus, MultiLocus
 
@@ -47,27 +42,28 @@ def _index(region_rows: list[tuple[int, int]]) -> SimpleNamespace:
 
 
 def _region_calibration(
-    mean: list[float],
-    upper: list[float] | None = None,
+    unspliced_total: list[float],
+    *,
+    p_states: np.ndarray | None = None,
     exposure: list[float] | None = None,
 ) -> RegionCalibration:
-    mean_arr = np.asarray(mean, dtype=np.float32)
-    upper_arr = np.asarray(upper if upper is not None else mean, dtype=np.float32)
+    unspliced = np.asarray(unspliced_total, dtype=np.float32)
+    region_count = int(unspliced.size)
+    if p_states is None:
+        p_states = np.zeros((region_count, 4), dtype=np.float32)
+        p_states[:, 0] = 1.0
     exposure_arr = np.asarray(
-        exposure if exposure is not None else np.ones(mean_arr.size, dtype=np.float32),
+        exposure if exposure is not None else np.ones(region_count, dtype=np.float32),
         dtype=np.float32,
     )
-    region_count = int(mean_arr.size)
-    p_states = np.zeros((region_count, 4), dtype=np.float32)
-    p_states[:, 0] = 1.0
     return RegionCalibration(
-        p_states=p_states,
-        mu_gdna=mean_arr,
-        upper_gdna=upper_arr,
+        p_states=np.asarray(p_states, dtype=np.float32),
+        mu_gdna=unspliced.copy(),
+        upper_gdna=unspliced.copy(),
         rna_lower=np.zeros(region_count, dtype=np.float32),
         prior_mass=PriorMassDeconvolution(
-            unspliced_total=mean_arr.copy(),
-            gdna_unspliced_mean=mean_arr.copy(),
+            unspliced_total=unspliced,
+            gdna_unspliced_mean=unspliced.copy(),
             rna_unspliced_mean=np.zeros(region_count, dtype=np.float32),
             method=np.full(region_count, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8),
             precision=np.zeros(region_count, dtype=np.float32),
@@ -127,15 +123,15 @@ def test_geometry_allocation_conserves_mass_for_disjoint_loci() -> None:
         multi_loci=loci,
         em_data=em_data,
         index=index,
-        calibration=_calibration(_region_calibration([10.0, 20.0], [12.0, 24.0])),
+        calibration=_calibration(_region_calibration([10.0, 20.0])),
     )
 
-    np.testing.assert_allclose(priors.gdna_expected_count, np.array([10.0, 20.0]))
-    np.testing.assert_allclose(priors.gdna_upper_count, np.array([12.0, 24.0]))
-    assert priors.unallocated_expected_count == pytest.approx(0.0)
-    assert np.sum(priors.gdna_expected_count) == pytest.approx(30.0)
-    assert np.sum(priors.gdna_prior_count_em) <= 2.0 * EMConfig().aggregate_prior_max_count
-    np.testing.assert_array_equal(priors.count_allocation_mode, np.full(2, COUNT_ALLOC_GEOMETRY))
+    np.testing.assert_allclose(priors.prior_n_local_gdna, np.array([10.0, 20.0]))
+    np.testing.assert_allclose(priors.alpha_gdna_add, np.array([10.0, 20.0]))
+    np.testing.assert_allclose(priors.alpha_rna_add, np.zeros(2))
+    assert priors.unallocated_unspliced_count == pytest.approx(0.0)
+    assert priors.global_n_gdna == pytest.approx(30.0)
+    np.testing.assert_array_equal(priors.n_regions_touched, np.array([1, 1], dtype=np.int32))
 
 
 def test_geometry_allocation_reports_regions_touching_multiple_loci() -> None:
@@ -150,28 +146,28 @@ def test_geometry_allocation_reports_regions_touching_multiple_loci() -> None:
         calibration=_calibration(_region_calibration([10.0])),
     )
 
-    np.testing.assert_allclose(priors.gdna_expected_count, np.array([5.0, 5.0]))
+    np.testing.assert_allclose(priors.prior_n_local_gdna, np.array([5.0, 5.0]))
     np.testing.assert_allclose(priors.multi_locus_region_mass, np.array([5.0, 5.0]))
-    assert np.sum(priors.gdna_expected_count) == pytest.approx(10.0)
+    assert np.sum(priors.alpha_gdna_add) == pytest.approx(10.0)
 
 
 def test_geometry_allocation_reports_partial_coverage_mass() -> None:
     index = _index([(0, 100)])
-    loci = [_ml(0, 0, 50, [0])]
+    locus = _ml(0, 0, 50, [0])
     em_data = _em_data(is_spliced=[False], gdna_log_liks=[-1.0])
 
     priors = assemble_priors(
-        multi_loci=loci,
+        multi_loci=[locus],
         em_data=em_data,
         index=index,
         calibration=_calibration(_region_calibration([10.0])),
     )
 
-    assert priors.gdna_expected_count[0] == pytest.approx(10.0)
+    assert priors.prior_n_local_gdna[0] == pytest.approx(10.0)
     assert priors.partial_coverage_region_mass[0] == pytest.approx(10.0)
 
 
-def test_zero_expected_prior_with_positive_upper_still_enables_gdna() -> None:
+def test_zero_unspliced_mass_keeps_native_gdna_eligible_with_candidate() -> None:
     index = _index([(0, 100)])
     locus = _ml(0, 0, 100, [0, 1])
     em_data = _em_data(is_spliced=[True, False], gdna_log_liks=[-np.inf, -1.0])
@@ -180,33 +176,16 @@ def test_zero_expected_prior_with_positive_upper_still_enables_gdna() -> None:
         multi_loci=[locus],
         em_data=em_data,
         index=index,
-        calibration=_calibration(_region_calibration([0.0], [2.0])),
+        calibration=_calibration(_region_calibration([0.0])),
     )
 
-    assert priors.gdna_prior_count_em[0] == pytest.approx(0.0)
+    assert priors.alpha_gdna_add[0] == pytest.approx(0.0)
+    assert priors.alpha_rna_add[0] == pytest.approx(0.0)
     assert priors.enable_gdna[0] == 1
     assert enable_gdna_for_multilocus(locus, em_data) is True
 
 
-def test_zero_upper_bound_keeps_native_gdna_eligible_with_candidate() -> None:
-    index = _index([(0, 100)])
-    locus = _ml(0, 0, 100, [0, 1])
-    em_data = _em_data(is_spliced=[True, False], gdna_log_liks=[-np.inf, -1.0])
-
-    priors = assemble_priors(
-        multi_loci=[locus],
-        em_data=em_data,
-        index=index,
-        calibration=_calibration(_region_calibration([0.0], [0.0])),
-    )
-
-    assert priors.gdna_prior_count_em[0] == pytest.approx(0.0)
-    assert priors.gdna_upper_count[0] == pytest.approx(0.0)
-    assert priors.enable_gdna[0] == 1
-    assert enable_gdna_for_multilocus(locus, em_data) is True
-
-
-def test_all_spliced_locus_is_ineligible_even_with_positive_prior() -> None:
+def test_all_spliced_locus_is_structurally_gated_even_with_positive_prior() -> None:
     index = _index([(0, 100)])
     locus = _ml(0, 0, 100, [0, 1])
     em_data = _em_data(is_spliced=[True, True], gdna_log_liks=[-1.0, -2.0])
@@ -218,10 +197,10 @@ def test_all_spliced_locus_is_ineligible_even_with_positive_prior() -> None:
         calibration=_calibration(_region_calibration([10.0])),
     )
 
-    assert priors.gdna_expected_count[0] > 0.0
-    assert priors.gdna_prior_count_em[0] == pytest.approx(0.0)
+    assert priors.prior_n_local_gdna[0] > 0.0
+    assert priors.alpha_gdna_add[0] == pytest.approx(0.0)
     assert priors.alpha_rna_add[0] == pytest.approx(0.0)
-    assert priors.prior_budget[0] == pytest.approx(0.0)
+    assert (priors.prior_flags[0] & PRIOR_STRUCTURAL_GATED) != 0
     assert priors.enable_gdna[0] == 0
 
 
@@ -257,51 +236,3 @@ def test_region_calibration_exposure_weights_denominator() -> None:
         priors.gdna_eff_len_unweighted[0] * 2.5
     )
     assert priors.gdna_em_exposure_weight[0] == pytest.approx(2.5)
-
-
-def test_grouped_prior_budget_is_bounded_for_highly_expressed_locus() -> None:
-    rna_expected = 100_000.0
-    result = _compute_grouped_prior_counts(
-        gdna_expected=np.array([5.0], dtype=np.float64),
-        rna_expected=np.array([rna_expected], dtype=np.float64),
-        em_config=EMConfig(),
-    )
-
-    assert result.budget[0] <= EMConfig().aggregate_prior_max_count
-    assert result.budget[0] < rna_expected
-    assert result.alpha_gdna_add[0] == pytest.approx(
-        result.budget[0] * result.gdna_share_biased[0]
-    )
-    assert result.alpha_rna_add[0] == pytest.approx(
-        result.budget[0] * (1.0 - result.gdna_share_biased[0])
-    )
-
-
-def test_grouped_prior_edge_budget_preserves_one_sided_rna_evidence() -> None:
-    result = _compute_grouped_prior_counts(
-        gdna_expected=np.array([0.0], dtype=np.float64),
-        rna_expected=np.array([1000.0], dtype=np.float64),
-        em_config=EMConfig(),
-    )
-
-    assert result.budget_raw[0] == pytest.approx(EMConfig().aggregate_prior_edge_count)
-    assert result.budget[0] == pytest.approx(
-        min(
-            EMConfig().aggregate_prior_edge_count * EMConfig().aggregate_prior_strength,
-            EMConfig().aggregate_prior_max_count,
-        )
-    )
-    assert result.alpha_gdna_add[0] == pytest.approx(0.0)
-    assert result.alpha_rna_add[0] == pytest.approx(result.budget[0])
-
-
-def test_grouped_prior_strength_zero_disables_paired_prior_budget() -> None:
-    result = _compute_grouped_prior_counts(
-        gdna_expected=np.array([10.0], dtype=np.float64),
-        rna_expected=np.array([20.0], dtype=np.float64),
-        em_config=EMConfig(aggregate_prior_strength=0.0),
-    )
-
-    assert result.budget[0] == pytest.approx(0.0)
-    assert result.alpha_gdna_add[0] == pytest.approx(0.0)
-    assert result.alpha_rna_add[0] == pytest.approx(0.0)

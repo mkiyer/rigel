@@ -781,15 +781,6 @@ class AbundanceEstimator:
         gdna : float, gDNA count from locus EM
         total : float, mrna + nrna + gdna
         gdna_rate : float, gdna / total
-        gdna_prior : float
-            Bayesian-prior redesign semantics: ``gdna_prior_count /
-            max(n_em_fragments, 1)`` — the *rate* of expected gDNA
-            pseudocount per ambiguous EM fragment in the locus. This is
-            a nonnegative rate (NOT bounded ≤ 1); a value of 0 means
-            the global-only prior contributed no gDNA mass to the
-            locus, and large values indicate the prior expects more
-            gDNA than the locus has fragments to absorb (typically
-            sparse loci where the η_g calibration dominates).
         gdna_eff_len : float
             FL-marginal overlap effective length for the locus gDNA
             component.
@@ -810,18 +801,23 @@ class AbundanceEstimator:
             "gdna",
             "total",
             "gdna_rate",
-            "gdna_prior",
-            "gdna_prior_count",
-            "gdna_prior_count_em",
-            "rna_expected_count",
-            "prior_unspliced_total",
             "alpha_gdna_add",
             "alpha_rna_add",
-            "prior_budget_raw",
-            "prior_budget",
-            "prior_gdna_share_raw",
-            "prior_gdna_share_biased",
-            "gdna_prior_density",
+            "prior_unspliced_total",
+            "prior_locus_weight",
+            "prior_shrink_weight",
+            "prior_n_local_gdna",
+            "prior_n_local_rna",
+            "prior_n_other_gdna",
+            "prior_n_other_rna",
+            "prior_ess_final",
+            "prior_rna_share_v5",
+            "prior_rna_share_final",
+            "prior_flags",
+            "enable_gdna",
+            "n_regions_touched",
+            "multi_locus_region_mass",
+            "partial_coverage_region_mass",
             "gdna_eff_len",
             "gdna_eff_len_per_bp",
             "gdna_eff_len_unweighted",
@@ -875,22 +871,23 @@ class AbundanceEstimator:
             gdna = float(r["gdna"])
             total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
-            # Bayesian-prior redesign semantics: ``gdna_prior``
-            # is the per-EM-fragment rate of expected gDNA pseudocount
-            # (``gdna_prior_count / n_em_fragments``). The rate exposes
-            # the prior's per-fragment strength relative to the locus's
-            # actual EM evidence and is comparable across loci.
-            gp_count = float(r.get("gdna_prior_count", 0.0))
-            gp_count_em = float(r.get("gdna_prior_count_em", gp_count))
-            rna_expected_count = float(r.get("rna_expected_count", 0.0))
-            prior_unspliced_total = float(r.get("prior_unspliced_total", 0.0))
-            alpha_gdna_add = float(r.get("alpha_gdna_add", gp_count_em))
+            alpha_gdna_add = float(r.get("alpha_gdna_add", 0.0))
             alpha_rna_add = float(r.get("alpha_rna_add", 0.0))
-            prior_budget_raw = float(r.get("prior_budget_raw", 0.0))
-            prior_budget = float(r.get("prior_budget", 0.0))
-            prior_gdna_share_raw = float(r.get("prior_gdna_share_raw", 0.0))
-            prior_gdna_share_biased = float(r.get("prior_gdna_share_biased", 0.0))
-            gdna_prior_density = float(r.get("gdna_prior_density", 0.0))
+            prior_unspliced_total = float(r.get("prior_unspliced_total", 0.0))
+            prior_locus_weight = float(r.get("prior_locus_weight", 0.0))
+            prior_shrink_weight = float(r.get("prior_shrink_weight", 0.0))
+            prior_n_local_gdna = float(r.get("prior_n_local_gdna", 0.0))
+            prior_n_local_rna = float(r.get("prior_n_local_rna", 0.0))
+            prior_n_other_gdna = float(r.get("prior_n_other_gdna", 0.0))
+            prior_n_other_rna = float(r.get("prior_n_other_rna", 0.0))
+            prior_ess_final = float(r.get("prior_ess_final", alpha_gdna_add + alpha_rna_add))
+            prior_rna_share_v5 = float(r.get("prior_rna_share_v5", 0.0))
+            prior_rna_share_final = float(r.get("prior_rna_share_final", 0.0))
+            prior_flags = int(r.get("prior_flags", 0))
+            enable_gdna = int(r.get("enable_gdna", 0))
+            n_regions_touched = int(r.get("n_regions_touched", 0))
+            multi_locus_region_mass = float(r.get("multi_locus_region_mass", 0.0))
+            partial_coverage_region_mass = float(r.get("partial_coverage_region_mass", 0.0))
             gdna_eff_len = float(r.get("gdna_eff_len", 1.0))
             gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
             gdna_eff_len_unweighted = float(r.get("gdna_eff_len_unweighted", gdna_eff_len))
@@ -898,8 +895,6 @@ class AbundanceEstimator:
             gdna_em_exposure_weight = float(
                 r.get("gdna_em_exposure_weight", gdna_eff_len_weight_ratio)
             )
-            n_em = max(int(r.get("n_em_fragments", 0)), 1)
-            gdna_prior = gp_count_em / n_em
             rows.append(
                 {
                     "locus_id": lid,
@@ -915,18 +910,23 @@ class AbundanceEstimator:
                     "gdna": gdna,
                     "total": total,
                     "gdna_rate": rate,
-                    "gdna_prior": gdna_prior,
-                    "gdna_prior_count": gp_count,
-                    "gdna_prior_count_em": gp_count_em,
-                    "rna_expected_count": rna_expected_count,
-                    "prior_unspliced_total": prior_unspliced_total,
                     "alpha_gdna_add": alpha_gdna_add,
                     "alpha_rna_add": alpha_rna_add,
-                    "prior_budget_raw": prior_budget_raw,
-                    "prior_budget": prior_budget,
-                    "prior_gdna_share_raw": prior_gdna_share_raw,
-                    "prior_gdna_share_biased": prior_gdna_share_biased,
-                    "gdna_prior_density": gdna_prior_density,
+                    "prior_unspliced_total": prior_unspliced_total,
+                    "prior_locus_weight": prior_locus_weight,
+                    "prior_shrink_weight": prior_shrink_weight,
+                    "prior_n_local_gdna": prior_n_local_gdna,
+                    "prior_n_local_rna": prior_n_local_rna,
+                    "prior_n_other_gdna": prior_n_other_gdna,
+                    "prior_n_other_rna": prior_n_other_rna,
+                    "prior_ess_final": prior_ess_final,
+                    "prior_rna_share_v5": prior_rna_share_v5,
+                    "prior_rna_share_final": prior_rna_share_final,
+                    "prior_flags": prior_flags,
+                    "enable_gdna": enable_gdna,
+                    "n_regions_touched": n_regions_touched,
+                    "multi_locus_region_mass": multi_locus_region_mass,
+                    "partial_coverage_region_mass": partial_coverage_region_mass,
                     "gdna_eff_len": gdna_eff_len,
                     "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
                     "gdna_eff_len_unweighted": gdna_eff_len_unweighted,

@@ -48,7 +48,6 @@ class CalibrationResult:
     boundary_sweep: "BoundarySweepResult"
     prior_table: "PriorTable | None" = None
     n_multi_loci: int = 0
-    rna_lower_confidence: float = 0.95
 
     @property
     def global_fl_mean(self) -> float:
@@ -64,9 +63,6 @@ class CalibrationResult:
 
     def to_summary_dict(self) -> dict[str, object]:
         return {
-            "calibration_config": {
-                "rna_lower_confidence": float(self.rna_lower_confidence),
-            },
             "fl_models": self.fl_models.to_summary_dict(),
             "diagnostics": self.diagnostics.to_summary_dict(),
             "n_multi_loci": int(self.n_multi_loci),
@@ -94,7 +90,6 @@ def build_calibration_result(
     fl_models: FLModels | None = None,
     region_signature=None,
     prior_table: "PriorTable | None" = None,
-    rna_lower_confidence: float = 0.95,
 ) -> CalibrationResult:
     """Assemble the v6 calibration result around ``RegionCalibration``."""
     if region_calibration is None:
@@ -130,7 +125,6 @@ def build_calibration_result(
         boundary_sweep=boundary_sweep,
         prior_table=prior_table,
         n_multi_loci=0,
-        rna_lower_confidence=float(rna_lower_confidence),
     )
 
 
@@ -240,7 +234,7 @@ def _strand_channels_summary(
     contained = np.asarray(strand_channels.contained_mean)
     return {
         "n_regions": int(contained.size),
-        "rna_lower_confidence": float(strand_channels.rna_lower_confidence),
+        "internal_rna_lower_ci": float(strand_channels.internal_rna_lower_ci),
         "p_r1_sense": float(strand_channels.p_r1_sense),
         "kappa_d": float(strand_channels.kappa_d),
         "contained_mean": _summary_stats(strand_channels.contained_mean),

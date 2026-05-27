@@ -167,11 +167,9 @@ def test_to_summary_dict_is_json_serialisable() -> None:
         scan_trained=_scan_trained(),
         region_calibration=_region_calibration(),
         region_signature=np.zeros(1, dtype=np.uint8),
-        rna_lower_confidence=0.97,
     )
 
     summary = result.to_summary_dict()
-    assert summary["calibration_config"] == {"rna_lower_confidence": 0.97}
     assert summary["region_calibration"]["n_regions"] == 1
     assert summary["background_model"]["n_regions"] == 1
     assert summary["boundary_local"]["n_regions"] == 1

@@ -92,6 +92,10 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.scan_buffer_size is None
 
+    def test_rna_call_bias_default_none(self):
+        args = _parse_quant()
+        assert args.rna_call_bias is None
+
 
 # ---------------------------------------------------------------------------
 # Boolean optional action
@@ -149,6 +153,20 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.em_iterations == 500
         assert args.include_multimap is False
+
+    def test_quant_yaml_block_overrides_default(self, tmp_path):
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text(
+            textwrap.dedent("""\
+            quant:
+              em_iterations: 500
+              rna_call_bias: 0.25
+        """)
+        )
+        args = _parse_quant("--config", str(cfg))
+        _resolve_quant_args(args, _build_quant_defaults())
+        assert args.em_iterations == 500
+        assert args.rna_call_bias == pytest.approx(0.25)
 
     def test_cli_overrides_yaml(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
@@ -225,6 +243,19 @@ class TestResolveQuant:
         with pytest.raises(ValueError, match="scan_read_name_batch_size"):
             _resolve_quant_args(args, _build_quant_defaults())
 
+    def test_removed_yaml_prior_keys_error(self, tmp_path):
+        """Legacy adaptive-prior YAML keys report the v5 migration path."""
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text(
+            textwrap.dedent("""\
+            quant:
+              aggregate_prior_strength: 0.0
+        """)
+        )
+        args = _parse_quant("--config", str(cfg))
+        with pytest.raises(ValueError, match="adaptive prior v5"):
+            _resolve_quant_args(args, _build_quant_defaults())
+
 
 # ---------------------------------------------------------------------------
 # Config round-trip: defaults → resolve → build should match PipelineConfig()
@@ -287,6 +318,15 @@ class TestConfigRoundTrip:
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
         assert cfg.calibration.pool_quality_good == 9999
         assert cfg.calibration.pool_quality_weak == 42
+
+    def test_rna_call_bias_flows_to_config(self):
+        """``--rna-call-bias`` reaches ``EMConfig``."""
+        from rigel.cli import _build_pipeline_config
+
+        args = _parse_quant("--rna-call-bias", "0.25")
+        _resolve_quant_args(args, _build_quant_defaults())
+        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        assert cfg.em.rna_call_bias == pytest.approx(0.25)
 
     def test_scan_read_name_batch_size_flows_to_config(self):
         """``--scan-read-name-batch-size`` reaches ``BamScanConfig``."""
