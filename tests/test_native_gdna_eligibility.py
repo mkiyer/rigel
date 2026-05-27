@@ -1,13 +1,11 @@
-"""Phase 0 (Bayesian-prior redesign): gDNA component eligibility is now an
-explicit per-locus boolean (``locus_enable_gdna``), decoupled from
-``gdna_prior_count > 0``.
+"""Grouped prior redesign: native gDNA availability is structural.
 
 These tests pin the new native semantics:
 
-* ``gdna_prior_count == 0`` with ``enable_gdna == True`` keeps the gDNA component
-  active (it can absorb posterior mass under the EM likelihood).
-* ``enable_gdna == False`` disables the gDNA component regardless of the
-    ``gdna_prior_count`` value.
+* ``gdna_prior_count == 0`` with finite unspliced gDNA candidates keeps the
+    gDNA component active.
+* A compatibility ``enable_gdna`` array no longer acts as a modeling gate;
+    native derives candidate availability from the partition itself.
 
 The tests construct a minimal one-locus partition by hand to avoid the
 calibration / scoring machinery; they exercise the public Python wrapper
@@ -128,8 +126,8 @@ class TestEligibilityDecoupling:
             f"enable_gdna=True; got total_gdna={total_gdna} of {n_units} units"
         )
 
-    def test_disabled_gdna_yields_zero_gdna_mass(self):
-        """``enable_gdna == False`` zeros gDNA mass regardless of gdna_prior_count."""
+    def test_compat_enable_false_does_not_disable_structural_candidate(self):
+        """A compatibility ``enable_gdna=False`` input is ignored by native v3."""
         n_units = 50
         n_t = 2
         rc = _make_estimator(n_t)
@@ -149,8 +147,9 @@ class TestEligibilityDecoupling:
             enable_gdna=np.array([0], dtype=np.uint8),
         )
 
-        assert total_gdna == 0.0, (
-            f"expected zero gDNA mass with enable_gdna=False; got {total_gdna}"
+        assert total_gdna > 0.5 * n_units, (
+            "native should derive gDNA availability from finite unspliced candidates, "
+            f"not the compatibility enable_gdna array; got total_gdna={total_gdna}"
         )
 
     def test_default_enable_gdna_inferred_from_partition(self):

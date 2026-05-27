@@ -160,10 +160,27 @@ def _region_calibration_summary(region_calibration: "RegionCalibration") -> dict
         "mu_gdna": _summary_stats(region_calibration.mu_gdna),
         "upper_gdna": _summary_stats(region_calibration.upper_gdna),
         "rna_lower": _summary_stats(region_calibration.rna_lower),
+        "prior_mass": _prior_mass_summary(region_calibration.prior_mass),
         "A_r": _summary_stats(region_calibration.A_r),
         "gamma_r": _summary_stats(region_calibration.gamma_r),
         "flag_histogram": _uint_histogram(region_calibration.flags),
         "pass_diagnostics": _json_safe(region_calibration.pass_diagnostics),
+    }
+
+
+def _prior_mass_summary(prior_mass) -> dict[str, object]:
+    return {
+        "unspliced_total": _summary_stats(prior_mass.unspliced_total),
+        "gdna_unspliced_mean": _summary_stats(prior_mass.gdna_unspliced_mean),
+        "rna_unspliced_mean": _summary_stats(prior_mass.rna_unspliced_mean),
+        "max_abs_mass_conservation_error": float(
+            np.max(prior_mass.mass_conservation_error())
+        )
+        if prior_mass.unspliced_total.size
+        else 0.0,
+        "method_histogram": _uint_histogram(prior_mass.method),
+        "precision": _summary_stats(prior_mass.precision),
+        "flag_histogram": _uint_histogram(prior_mass.flags),
     }
 
 

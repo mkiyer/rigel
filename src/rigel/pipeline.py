@@ -612,6 +612,7 @@ def _run_locus_em_partitioned(
     multi_loci: list,
     index: TranscriptIndex,
     gdna_prior_count_em: np.ndarray,
+    rna_prior_count_em: np.ndarray,
     gdna_eff_len: np.ndarray,
     em_config: EMConfig,
     *,
@@ -620,6 +621,13 @@ def _run_locus_em_partitioned(
     annotations: "AnnotationTable | None" = None,
     gdna_eff_len_unweighted: np.ndarray | None = None,
     gdna_prior_count_raw: np.ndarray | None = None,
+    rna_prior_count_raw: np.ndarray | None = None,
+    prior_unspliced_total: np.ndarray | None = None,
+    prior_budget_raw: np.ndarray | None = None,
+    prior_budget: np.ndarray | None = None,
+    prior_gdna_share_raw: np.ndarray | None = None,
+    prior_gdna_share_biased: np.ndarray | None = None,
+    gdna_prior_density: np.ndarray | None = None,
     gdna_em_exposure_weight: np.ndarray | None = None,
 ) -> None:
     """Run batch locus EM from partitioned data with incremental freeing."""
@@ -639,9 +647,17 @@ def _run_locus_em_partitioned(
         rna_total,
         gdna,
         gdna_prior_em,
+        rna_prior_em,
         gdna_leff,
         gdna_leff_unweighted=None,
         gdna_prior_raw=None,
+        rna_prior_raw=None,
+        unspliced_total=None,
+        budget_raw=None,
+        budget=None,
+        share_raw=None,
+        share_biased=None,
+        prior_density=None,
         gdna_weight=None,
     ):
         gene_set = {
@@ -656,7 +672,9 @@ def _run_locus_em_partitioned(
             gdna_leff_unw_f = float(gdna_leff_unweighted)
         weight_ratio = gdna_leff_f / gdna_leff_unw_f if gdna_leff_unw_f > 0.0 else 1.0
         gdna_prior_em_f = float(gdna_prior_em)
+        rna_prior_em_f = float(rna_prior_em)
         gdna_prior_raw_f = gdna_prior_em_f if gdna_prior_raw is None else float(gdna_prior_raw)
+        rna_prior_raw_f = rna_prior_em_f if rna_prior_raw is None else float(rna_prior_raw)
         gdna_weight_f = weight_ratio if gdna_weight is None else float(gdna_weight)
         return {
             "locus_id": locus.multi_locus_id,
@@ -675,6 +693,15 @@ def _run_locus_em_partitioned(
             "gdna": float(gdna),
             "gdna_prior_count": gdna_prior_raw_f,
             "gdna_prior_count_em": gdna_prior_em_f,
+            "rna_expected_count": rna_prior_raw_f,
+            "prior_unspliced_total": 0.0 if unspliced_total is None else float(unspliced_total),
+            "alpha_gdna_add": gdna_prior_em_f,
+            "alpha_rna_add": rna_prior_em_f,
+            "prior_budget_raw": 0.0 if budget_raw is None else float(budget_raw),
+            "prior_budget": 0.0 if budget is None else float(budget),
+            "prior_gdna_share_raw": 0.0 if share_raw is None else float(share_raw),
+            "prior_gdna_share_biased": 0.0 if share_biased is None else float(share_biased),
+            "gdna_prior_density": 0.0 if prior_density is None else float(prior_density),
             "gdna_eff_len": gdna_leff_f,
             "gdna_eff_len_per_bp": gdna_leff_f / max(float(locus.gdna_span), 1.0),
             "gdna_eff_len_unweighted": gdna_leff_unw_f,
@@ -686,6 +713,7 @@ def _run_locus_em_partitioned(
         parts,
         batch_loci,
         batch_gdna_prior_count,
+        batch_rna_prior_count,
         batch_gdna_eff_len,
         batch_enable_gdna=None,
     ):
@@ -711,6 +739,7 @@ def _run_locus_em_partitioned(
             locus_t_lists,
             batch_gdna_prior_count,
             index,
+            rna_prior_count=batch_rna_prior_count,
             gdna_eff_len=batch_gdna_eff_len,
             em_iterations=em_config.iterations,
             em_convergence_delta=em_config.convergence_delta,
@@ -744,6 +773,7 @@ def _run_locus_em_partitioned(
             [part],
             [locus],
             np.array([gdna_prior_count_em[lid]], dtype=np.float64),
+            np.array([rna_prior_count_em[lid]], dtype=np.float64),
             np.array([gdna_eff_len[lid]], dtype=np.float64),
             batch_enable_gdna=(
                 np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
@@ -766,12 +796,32 @@ def _run_locus_em_partitioned(
                 rna_total=rna_arr[0],
                 gdna=gdna_arr[0],
                 gdna_prior_em=gdna_prior_count_em[lid],
+                rna_prior_em=rna_prior_count_em[lid],
                 gdna_leff=gdna_eff_len[lid],
                 gdna_leff_unweighted=(
                     gdna_eff_len_unweighted[lid] if gdna_eff_len_unweighted is not None else None
                 ),
                 gdna_prior_raw=(
                     gdna_prior_count_raw[lid] if gdna_prior_count_raw is not None else None
+                ),
+                rna_prior_raw=(
+                    rna_prior_count_raw[lid] if rna_prior_count_raw is not None else None
+                ),
+                unspliced_total=(
+                    prior_unspliced_total[lid] if prior_unspliced_total is not None else None
+                ),
+                budget_raw=prior_budget_raw[lid] if prior_budget_raw is not None else None,
+                budget=prior_budget[lid] if prior_budget is not None else None,
+                share_raw=(
+                    prior_gdna_share_raw[lid] if prior_gdna_share_raw is not None else None
+                ),
+                share_biased=(
+                    prior_gdna_share_biased[lid]
+                    if prior_gdna_share_biased is not None
+                    else None
+                ),
+                prior_density=(
+                    gdna_prior_density[lid] if gdna_prior_density is not None else None
                 ),
                 gdna_weight=(
                     gdna_em_exposure_weight[lid] if gdna_em_exposure_weight is not None else None
@@ -797,6 +847,10 @@ def _run_locus_em_partitioned(
             [gdna_prior_count_em[loc.multi_locus_id] for loc in normal_loci],
             dtype=np.float64,
         )
+        normal_rp = np.array(
+            [rna_prior_count_em[loc.multi_locus_id] for loc in normal_loci],
+            dtype=np.float64,
+        )
         normal_gdna_eff_len = np.array(
             [gdna_eff_len[loc.multi_locus_id] for loc in normal_loci],
             dtype=np.float64,
@@ -805,6 +859,7 @@ def _run_locus_em_partitioned(
             normal_parts,
             normal_loci,
             normal_gp,
+            normal_rp,
             normal_gdna_eff_len,
             batch_enable_gdna=(
                 np.array(
@@ -834,6 +889,7 @@ def _run_locus_em_partitioned(
                     rna_total=rna_arr[i],
                     gdna=gdna_arr[i],
                     gdna_prior_em=normal_gp[i],
+                    rna_prior_em=normal_rp[i],
                     gdna_leff=normal_gdna_eff_len[i],
                     gdna_leff_unweighted=(
                         gdna_eff_len_unweighted[lid]
@@ -842,6 +898,25 @@ def _run_locus_em_partitioned(
                     ),
                     gdna_prior_raw=(
                         gdna_prior_count_raw[lid] if gdna_prior_count_raw is not None else None
+                    ),
+                    rna_prior_raw=(
+                        rna_prior_count_raw[lid] if rna_prior_count_raw is not None else None
+                    ),
+                    unspliced_total=(
+                        prior_unspliced_total[lid] if prior_unspliced_total is not None else None
+                    ),
+                    budget_raw=prior_budget_raw[lid] if prior_budget_raw is not None else None,
+                    budget=prior_budget[lid] if prior_budget is not None else None,
+                    share_raw=(
+                        prior_gdna_share_raw[lid] if prior_gdna_share_raw is not None else None
+                    ),
+                    share_biased=(
+                        prior_gdna_share_biased[lid]
+                        if prior_gdna_share_biased is not None
+                        else None
+                    ),
+                    prior_density=(
+                        gdna_prior_density[lid] if gdna_prior_density is not None else None
                     ),
                     gdna_weight=(
                         gdna_em_exposure_weight[lid]
@@ -933,6 +1008,7 @@ def quant_from_buffer(
         em_data=em_data,
         index=index,
         calibration=calibration,
+        em_config=em_config,
     )
 
     if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
@@ -951,10 +1027,18 @@ def quant_from_buffer(
         multi_loci,
         index,
         gdna_prior_count_em=prior_table.gdna_prior_count_em,
+        rna_prior_count_em=prior_table.alpha_rna_add,
         gdna_eff_len=prior_table.gdna_eff_len,
         enable_gdna=prior_table.enable_gdna,
         gdna_eff_len_unweighted=prior_table.gdna_eff_len_unweighted,
         gdna_prior_count_raw=prior_table.gdna_expected_count,
+        rna_prior_count_raw=prior_table.rna_expected_count,
+        prior_unspliced_total=prior_table.prior_unspliced_total,
+        prior_budget_raw=prior_table.prior_budget_raw,
+        prior_budget=prior_table.prior_budget,
+        prior_gdna_share_raw=prior_table.prior_gdna_share_raw,
+        prior_gdna_share_biased=prior_table.prior_gdna_share_biased,
+        gdna_prior_density=prior_table.gdna_prior_density,
         gdna_em_exposure_weight=prior_table.gdna_em_exposure_weight,
         em_config=em_config,
         annotations=annotations,

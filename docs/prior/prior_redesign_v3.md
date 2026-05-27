@@ -306,22 +306,23 @@ balanced_budget = 2 * min(m_g, m_r)
 edge_budget     = min(m, aggregate_prior_edge_count)
 budget_raw      = max(balanced_budget, edge_budget)
 budget_raw      = min(budget_raw, aggregate_prior_max_count)
-budget          = aggregate_prior_strength * budget_raw
+budget          = min(aggregate_prior_strength * budget_raw,
+                      aggregate_prior_max_count)
 ```
 
-Default internal values for the first implementation:
+Default internal values after Phase 5 sentinel tuning:
 
 ```text
-aggregate_prior_strength = 1.0
-aggregate_prior_edge_count = 5.0
-aggregate_prior_max_count = 10.0
+aggregate_prior_strength = 3.0
+aggregate_prior_edge_count = 1000.0
+aggregate_prior_max_count = 3000.0
 ```
 
 Rationale:
 
 - `2 * min(m_g, m_r)` follows the review's weaker-side constraint for mixed loci.
 - `edge_budget` preserves useful one-sided priors when deconvolution says nearly all unspliced mass is RNA or nearly all is gDNA.
-- `aggregate_prior_max_count` prevents calibration from injecting hundreds or thousands of pseudo-fragments into expressed loci.
+- `aggregate_prior_max_count` prevents calibration from injecting raw expression-scale pseudo-fragments into highly expressed loci.
 - `aggregate_prior_strength` remains a smooth trust knob around this bounded scale.
 
 Benchmark alternatives in Phase 5:
@@ -345,7 +346,7 @@ w = sigmoid(logit(clamp(w_raw, eps, 1 - eps)) + gdna_prior_logit_bias)
 Default:
 
 ```text
-gdna_prior_logit_bias = 0.0
+gdna_prior_logit_bias = -6.0
 ```
 
 Practical benchmark range:
@@ -359,6 +360,16 @@ Interpretation:
 - Positive values increase gDNA odds.
 - Negative values decrease gDNA odds.
 - Extreme `w_raw` values remain hard to move, which is desirable when deconvolution is confident.
+
+Implementation note:
+
+- The originally proposed starting point (`strength=1`, `edge_count=5`,
+    `max_count=10`, `bias=0`) was too weak in Phase 5 zero-gDNA sentinels:
+    structurally available gDNA siphoned RNA mass in pure mRNA, single-exon,
+    wide-intron, and nRNA-double-counting baselines.
+- The tuned defaults above intentionally provide strong one-sided RNA
+    counter-prior mass and a conservative gDNA log-odds bias while preserving
+    true-gDNA recovery in the measured sentinel subset.
 
 The final prior masses are:
 
@@ -581,10 +592,10 @@ If grouped SQUAREM acceptance collapses or fallback is common, use plain grouped
 Initial internal config fields:
 
 ```python
-aggregate_prior_strength: float = 1.0
-aggregate_prior_edge_count: float = 5.0
-aggregate_prior_max_count: float = 10.0
-gdna_prior_logit_bias: float = 0.0
+aggregate_prior_strength: float = 3.0
+aggregate_prior_edge_count: float = 1000.0
+aggregate_prior_max_count: float = 3000.0
+gdna_prior_logit_bias: float = -6.0
 ```
 
 Validation:

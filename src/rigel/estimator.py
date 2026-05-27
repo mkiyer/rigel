@@ -284,6 +284,7 @@ class AbundanceEstimator:
         gdna_prior_count: np.ndarray,
         index,
         *,
+        rna_prior_count: np.ndarray | None = None,
         gdna_eff_len: np.ndarray | None = None,
         enable_gdna: np.ndarray | None = None,
         em_iterations: int = 1000,
@@ -300,7 +301,10 @@ class AbundanceEstimator:
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
         gdna_prior_count : np.ndarray
-            float64 — calibration gDNA prior per locus (physical counts).
+            float64 — additive aggregate gDNA alpha per locus.
+        rna_prior_count : np.ndarray, optional
+            float64 — additive aggregate RNA alpha per locus. Defaults to zeros
+            for wrapper-level compatibility.
         index : TranscriptIndex
             Reference index.
         gdna_eff_len : np.ndarray, optional
@@ -342,6 +346,15 @@ class AbundanceEstimator:
             if gdna_eff_len.shape[0] != n_loci:
                 raise ValueError(f"gdna_eff_len length {gdna_eff_len.shape[0]} != n_loci {n_loci}.")
 
+        if rna_prior_count is None:
+            rna_prior_count = np.zeros(n_loci, dtype=np.float64)
+        else:
+            rna_prior_count = np.ascontiguousarray(rna_prior_count, dtype=np.float64)
+            if rna_prior_count.shape[0] != n_loci:
+                raise ValueError(
+                    f"rna_prior_count length {rna_prior_count.shape[0]} != n_loci {n_loci}."
+                )
+
         if self._em_posterior_sum is None:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
@@ -380,6 +393,7 @@ class AbundanceEstimator:
             partition_tuples,
             locus_transcript_indices,
             np.ascontiguousarray(gdna_prior_count, dtype=np.float64),
+            rna_prior_count,
             enable_gdna,
             gdna_eff_len,
             self.unambig_counts,
@@ -799,6 +813,15 @@ class AbundanceEstimator:
             "gdna_prior",
             "gdna_prior_count",
             "gdna_prior_count_em",
+            "rna_expected_count",
+            "prior_unspliced_total",
+            "alpha_gdna_add",
+            "alpha_rna_add",
+            "prior_budget_raw",
+            "prior_budget",
+            "prior_gdna_share_raw",
+            "prior_gdna_share_biased",
+            "gdna_prior_density",
             "gdna_eff_len",
             "gdna_eff_len_per_bp",
             "gdna_eff_len_unweighted",
@@ -859,6 +882,15 @@ class AbundanceEstimator:
             # actual EM evidence and is comparable across loci.
             gp_count = float(r.get("gdna_prior_count", 0.0))
             gp_count_em = float(r.get("gdna_prior_count_em", gp_count))
+            rna_expected_count = float(r.get("rna_expected_count", 0.0))
+            prior_unspliced_total = float(r.get("prior_unspliced_total", 0.0))
+            alpha_gdna_add = float(r.get("alpha_gdna_add", gp_count_em))
+            alpha_rna_add = float(r.get("alpha_rna_add", 0.0))
+            prior_budget_raw = float(r.get("prior_budget_raw", 0.0))
+            prior_budget = float(r.get("prior_budget", 0.0))
+            prior_gdna_share_raw = float(r.get("prior_gdna_share_raw", 0.0))
+            prior_gdna_share_biased = float(r.get("prior_gdna_share_biased", 0.0))
+            gdna_prior_density = float(r.get("gdna_prior_density", 0.0))
             gdna_eff_len = float(r.get("gdna_eff_len", 1.0))
             gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
             gdna_eff_len_unweighted = float(r.get("gdna_eff_len_unweighted", gdna_eff_len))
@@ -886,6 +918,15 @@ class AbundanceEstimator:
                     "gdna_prior": gdna_prior,
                     "gdna_prior_count": gp_count,
                     "gdna_prior_count_em": gp_count_em,
+                    "rna_expected_count": rna_expected_count,
+                    "prior_unspliced_total": prior_unspliced_total,
+                    "alpha_gdna_add": alpha_gdna_add,
+                    "alpha_rna_add": alpha_rna_add,
+                    "prior_budget_raw": prior_budget_raw,
+                    "prior_budget": prior_budget,
+                    "prior_gdna_share_raw": prior_gdna_share_raw,
+                    "prior_gdna_share_biased": prior_gdna_share_biased,
+                    "gdna_prior_density": gdna_prior_density,
                     "gdna_eff_len": gdna_eff_len,
                     "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
                     "gdna_eff_len_unweighted": gdna_eff_len_unweighted,

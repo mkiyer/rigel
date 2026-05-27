@@ -61,12 +61,29 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
+    aggregate_prior_strength: float = 3.0
+    aggregate_prior_edge_count: float = 1000.0
+    aggregate_prior_max_count: float = 3000.0
+    gdna_prior_logit_bias: float = -6.0
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
+        for name in (
+            "aggregate_prior_strength",
+            "aggregate_prior_edge_count",
+            "aggregate_prior_max_count",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"EMConfig.{name} must be finite and >= 0; got {value!r}.")
+        if not math.isfinite(float(self.gdna_prior_logit_bias)):
+            raise ValueError(
+                "EMConfig.gdna_prior_logit_bias must be finite; "
+                f"got {self.gdna_prior_logit_bias!r}."
+            )
 
 
 # ======================================================================

@@ -94,11 +94,24 @@ def _sweep() -> BoundarySweepResult:
 
 
 def _region_calibration() -> RegionCalibration:
+    from rigel.calibration.calibration_iteration import (
+        PRIOR_MASS_METHOD_DENSITY,
+        PriorMassDeconvolution,
+    )
+
     return RegionCalibration(
         p_states=np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
         mu_gdna=np.zeros(1, dtype=np.float32),
         upper_gdna=np.zeros(1, dtype=np.float32),
         rna_lower=np.zeros(1, dtype=np.float32),
+        prior_mass=PriorMassDeconvolution(
+            unspliced_total=np.zeros(1, dtype=np.float32),
+            gdna_unspliced_mean=np.zeros(1, dtype=np.float32),
+            rna_unspliced_mean=np.zeros(1, dtype=np.float32),
+            method=np.full(1, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8),
+            precision=np.zeros(1, dtype=np.float32),
+            flags=np.zeros(1, dtype=np.uint16),
+        ),
         A_r=np.ones(1, dtype=np.float32),
         gamma_r=np.ones(1, dtype=np.float32),
         rho_off=0.01,

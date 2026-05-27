@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..config import EMConfig
 from ._arrays import RegionArrays
 from ._exposure import bp_weighted_mean_exposure_over_blocks, gdna_eff_len_for_loci
 
@@ -21,7 +22,9 @@ __all__ = [
     "COUNT_ALLOC_GEOMETRY",
     "COUNT_ALLOC_MIDPOINT",
     "COUNT_ALLOC_SPAN",
+    "GroupedPriorCounts",
     "PriorTable",
+    "_compute_grouped_prior_counts",
     "assemble_priors",
     "enable_gdna_for_multilocus",
 ]
@@ -32,6 +35,19 @@ COUNT_ALLOC_MIDPOINT: int = 2
 COUNT_ALLOC_SPAN: int = 3
 
 _INT64_MIN: int = -(2**63)
+_EPS: float = 1.0e-12
+
+
+@dataclass(frozen=True, slots=True)
+class GroupedPriorCounts:
+    """Paired additive grouped-prior counts and budget diagnostics."""
+
+    alpha_gdna_add: np.ndarray
+    alpha_rna_add: np.ndarray
+    budget_raw: np.ndarray
+    budget: np.ndarray
+    gdna_share_raw: np.ndarray
+    gdna_share_biased: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +56,17 @@ class PriorTable:
 
     gdna_prior_count_em: np.ndarray
     gdna_expected_count: np.ndarray
+    rna_expected_count: np.ndarray
+    prior_unspliced_total: np.ndarray
+    alpha_gdna_add: np.ndarray
+    alpha_rna_add: np.ndarray
+    prior_budget_raw: np.ndarray
+    prior_budget: np.ndarray
+    prior_gdna_share_raw: np.ndarray
+    prior_gdna_share_biased: np.ndarray
+    prior_mass_conservation_error: np.ndarray
+    prior_allocated_fraction: np.ndarray
+    gdna_prior_density: np.ndarray
     gdna_upper_count: np.ndarray
     gdna_eff_len: np.ndarray
     gdna_eff_len_unweighted: np.ndarray
@@ -52,6 +79,8 @@ class PriorTable:
     multi_locus_region_mass: np.ndarray
     partial_coverage_region_mass: np.ndarray
     unallocated_expected_count: float = 0.0
+    unallocated_rna_expected_count: float = 0.0
+    unallocated_unspliced_count: float = 0.0
     unallocated_upper_count: float = 0.0
 
     def to_summary_dict(self) -> dict[str, object]:
@@ -60,11 +89,22 @@ class PriorTable:
             "n_loci": int(self.gdna_prior_count_em.size),
             "sum_gdna_prior_count_em": float(np.sum(self.gdna_prior_count_em)),
             "sum_gdna_expected_count": float(np.sum(self.gdna_expected_count)),
+            "sum_rna_expected_count": float(np.sum(self.rna_expected_count)),
+            "sum_prior_unspliced_total": float(np.sum(self.prior_unspliced_total)),
+            "sum_alpha_gdna_add": float(np.sum(self.alpha_gdna_add)),
+            "sum_alpha_rna_add": float(np.sum(self.alpha_rna_add)),
             "sum_gdna_upper_count": float(np.sum(self.gdna_upper_count)),
             "unallocated_expected_count": float(self.unallocated_expected_count),
+            "unallocated_rna_expected_count": float(self.unallocated_rna_expected_count),
+            "unallocated_unspliced_count": float(self.unallocated_unspliced_count),
             "unallocated_upper_count": float(self.unallocated_upper_count),
             "n_loci_enable_gdna_true": int(np.sum(self.enable_gdna != 0)),
             "n_regions_touched": _summary_stats(self.n_regions_touched),
+            "prior_budget": _summary_stats(self.prior_budget),
+            "prior_gdna_share_biased": _summary_stats(self.prior_gdna_share_biased),
+            "prior_mass_conservation_error": _summary_stats(self.prior_mass_conservation_error),
+            "prior_allocated_fraction": _summary_stats(self.prior_allocated_fraction),
+            "gdna_prior_density": _summary_stats(self.gdna_prior_density),
             "gdna_eff_len": _summary_stats(self.gdna_eff_len),
             "gdna_em_exposure_weight": _summary_stats(self.gdna_em_exposure_weight),
             "multi_locus_region_mass": _summary_stats(self.multi_locus_region_mass),
@@ -74,14 +114,68 @@ class PriorTable:
         }
 
 
+def _compute_grouped_prior_counts(
+    *,
+    gdna_expected: np.ndarray,
+    rna_expected: np.ndarray,
+    em_config: EMConfig,
+) -> GroupedPriorCounts:
+    """Compute bounded paired additive pseudocounts from projected mass."""
+    gdna = np.maximum(np.asarray(gdna_expected, dtype=np.float64), 0.0)
+    rna = np.maximum(np.asarray(rna_expected, dtype=np.float64), 0.0)
+    if gdna.shape != rna.shape:
+        raise ValueError(
+            "_compute_grouped_prior_counts: gdna_expected and rna_expected shapes must match; "
+            f"got {gdna.shape} and {rna.shape}."
+        )
+
+    total = gdna + rna
+    share_raw = np.divide(gdna, total, out=np.zeros_like(gdna), where=total > _EPS)
+
+    balanced_budget = 2.0 * np.minimum(gdna, rna)
+    edge_budget = np.minimum(total, float(em_config.aggregate_prior_edge_count))
+    budget_raw = np.maximum(balanced_budget, edge_budget)
+    budget_raw = np.where(total > _EPS, budget_raw, 0.0)
+    budget_raw = np.minimum(budget_raw, float(em_config.aggregate_prior_max_count))
+    budget = float(em_config.aggregate_prior_strength) * budget_raw
+    budget = np.minimum(budget, float(em_config.aggregate_prior_max_count))
+
+    eps = 1.0e-15
+    clipped = np.clip(share_raw, eps, 1.0 - eps)
+    logits = np.log(clipped) - np.log1p(-clipped) + float(em_config.gdna_prior_logit_bias)
+    share_biased = np.empty_like(logits)
+    pos = logits >= 0.0
+    share_biased[pos] = 1.0 / (1.0 + np.exp(-logits[pos]))
+    exp_logits = np.exp(logits[~pos])
+    share_biased[~pos] = exp_logits / (1.0 + exp_logits)
+    share_biased = np.where(total > _EPS, share_biased, 0.0)
+
+    alpha_gdna = budget * share_biased
+    alpha_rna = budget * (1.0 - share_biased)
+    alpha_gdna = np.where(budget > 0.0, alpha_gdna, 0.0)
+    alpha_rna = np.where(budget > 0.0, alpha_rna, 0.0)
+
+    return GroupedPriorCounts(
+        alpha_gdna_add=alpha_gdna.astype(np.float64, copy=False),
+        alpha_rna_add=alpha_rna.astype(np.float64, copy=False),
+        budget_raw=budget_raw.astype(np.float64, copy=False),
+        budget=budget.astype(np.float64, copy=False),
+        gdna_share_raw=share_raw.astype(np.float64, copy=False),
+        gdna_share_biased=share_biased.astype(np.float64, copy=False),
+    )
+
+
 def assemble_priors(
     *,
     multi_loci: list["MultiLocus"],
     em_data: "ScoredFragments",
     index: "TranscriptIndex",
     calibration: "CalibrationResult",
+    em_config: EMConfig | None = None,
 ) -> PriorTable:
     """Assemble gDNA prior counts, denominators, and native EM eligibility."""
+    if em_config is None:
+        em_config = EMConfig()
     n_loci = len(multi_loci)
     if n_loci == 0:
         return _empty_prior_table()
@@ -94,27 +188,54 @@ def assemble_priors(
         raise ValueError("assemble_priors: calibration.region_calibration is required.")
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
-    region_mean = np.asarray(region_calibration.mu_gdna, dtype=np.float64)
+    prior_mass = getattr(region_calibration, "prior_mass", None)
+    if prior_mass is None:
+        raise ValueError("assemble_priors: calibration.region_calibration.prior_mass is required.")
+    region_mean = np.asarray(prior_mass.gdna_unspliced_mean, dtype=np.float64)
+    region_rna = np.asarray(prior_mass.rna_unspliced_mean, dtype=np.float64)
+    region_unspliced = np.asarray(prior_mass.unspliced_total, dtype=np.float64)
     region_upper = np.asarray(region_calibration.upper_gdna, dtype=np.float64)
-    if region_mean.shape != region_arrays.start.shape or region_upper.shape != region_arrays.start.shape:
+    if (
+        region_mean.shape != region_arrays.start.shape
+        or region_rna.shape != region_arrays.start.shape
+        or region_unspliced.shape != region_arrays.start.shape
+        or region_upper.shape != region_arrays.start.shape
+    ):
         raise ValueError("assemble_priors: RegionCalibration arrays are not aligned to index regions.")
 
     gdna_expected = np.zeros(n_loci, dtype=np.float64)
+    rna_expected = np.zeros(n_loci, dtype=np.float64)
+    prior_unspliced_total = np.zeros(n_loci, dtype=np.float64)
     gdna_upper = np.zeros(n_loci, dtype=np.float64)
     n_regions_touched = np.zeros(n_loci, dtype=np.int32)
     multi_locus_region_mass = np.zeros(n_loci, dtype=np.float64)
     partial_coverage_region_mass = np.zeros(n_loci, dtype=np.float64)
 
-    unallocated_expected, unallocated_upper = _allocate_counts_by_geometry(
+    (
+        unallocated_expected,
+        unallocated_upper,
+        unallocated_rna,
+        unallocated_unspliced,
+    ) = _allocate_counts_by_geometry(
         region_arrays=region_arrays,
         multi_loci=multi_loci,
         region_mean=region_mean,
+        region_rna=region_rna,
+        region_unspliced=region_unspliced,
         region_upper=region_upper,
         gdna_expected=gdna_expected,
+        rna_expected=rna_expected,
+        prior_unspliced_total=prior_unspliced_total,
         gdna_upper=gdna_upper,
         n_regions_touched=n_regions_touched,
         multi_locus_region_mass=multi_locus_region_mass,
         partial_coverage_region_mass=partial_coverage_region_mass,
+    )
+
+    grouped = _compute_grouped_prior_counts(
+        gdna_expected=gdna_expected,
+        rna_expected=rna_expected,
+        em_config=em_config,
     )
 
     gdna_eff_len_unweighted = np.zeros(n_loci, dtype=np.float64)
@@ -141,14 +262,59 @@ def assemble_priors(
         dtype=bool,
     )
     enable_gdna = candidate_enable.astype(np.uint8)
+    alpha_gdna_add = np.where(candidate_enable, grouped.alpha_gdna_add, 0.0).astype(
+        np.float64,
+        copy=False,
+    )
+    alpha_rna_add = np.where(candidate_enable, grouped.alpha_rna_add, 0.0).astype(
+        np.float64,
+        copy=False,
+    )
+    prior_budget_raw = np.where(candidate_enable, grouped.budget_raw, 0.0).astype(
+        np.float64,
+        copy=False,
+    )
+    prior_budget = np.where(candidate_enable, grouped.budget, 0.0).astype(
+        np.float64,
+        copy=False,
+    )
+    prior_gdna_share_biased = np.where(candidate_enable, grouped.gdna_share_biased, 0.0).astype(
+        np.float64,
+        copy=False,
+    )
     n_units_used_for_diagnostics = np.array(
         [_count_diagnostic_units(locus, em_data) for locus in multi_loci],
         dtype=np.int64,
     )
+    prior_mass_conservation_error = np.abs(
+        gdna_expected + rna_expected - prior_unspliced_total
+    ).astype(np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        prior_allocated_fraction = np.where(
+            prior_unspliced_total > 0.0,
+            (gdna_expected + rna_expected) / prior_unspliced_total,
+            1.0,
+        )
+        gdna_prior_density = np.where(
+            gdna_eff_len > 0.0,
+            alpha_gdna_add / gdna_eff_len,
+            0.0,
+        )
 
     return PriorTable(
-        gdna_prior_count_em=gdna_expected.copy(),
+        gdna_prior_count_em=alpha_gdna_add.copy(),
         gdna_expected_count=gdna_expected,
+        rna_expected_count=rna_expected,
+        prior_unspliced_total=prior_unspliced_total,
+        alpha_gdna_add=alpha_gdna_add,
+        alpha_rna_add=alpha_rna_add,
+        prior_budget_raw=prior_budget_raw,
+        prior_budget=prior_budget,
+        prior_gdna_share_raw=grouped.gdna_share_raw,
+        prior_gdna_share_biased=prior_gdna_share_biased,
+        prior_mass_conservation_error=prior_mass_conservation_error,
+        prior_allocated_fraction=prior_allocated_fraction.astype(np.float64, copy=False),
+        gdna_prior_density=gdna_prior_density.astype(np.float64, copy=False),
         gdna_upper_count=gdna_upper,
         gdna_eff_len=gdna_eff_len,
         gdna_eff_len_unweighted=gdna_eff_len_unweighted,
@@ -161,6 +327,8 @@ def assemble_priors(
         multi_locus_region_mass=multi_locus_region_mass,
         partial_coverage_region_mass=partial_coverage_region_mass,
         unallocated_expected_count=float(unallocated_expected),
+        unallocated_rna_expected_count=float(unallocated_rna),
+        unallocated_unspliced_count=float(unallocated_unspliced),
         unallocated_upper_count=float(unallocated_upper),
     )
 
@@ -183,13 +351,17 @@ def _allocate_counts_by_geometry(
     region_arrays: RegionArrays,
     multi_loci: list["MultiLocus"],
     region_mean: np.ndarray,
+    region_rna: np.ndarray,
+    region_unspliced: np.ndarray,
     region_upper: np.ndarray,
     gdna_expected: np.ndarray,
+    rna_expected: np.ndarray,
+    prior_unspliced_total: np.ndarray,
     gdna_upper: np.ndarray,
     n_regions_touched: np.ndarray,
     multi_locus_region_mass: np.ndarray,
     partial_coverage_region_mass: np.ndarray,
-) -> tuple[float, float]:
+) -> tuple[float, float, float, float]:
     blocks_by_ref: dict[int, list[tuple[int, int, int]]] = {}
     for locus in multi_loci:
         lid = int(locus.multi_locus_id)
@@ -204,6 +376,8 @@ def _allocate_counts_by_geometry(
 
     unallocated_expected = 0.0
     unallocated_upper = 0.0
+    unallocated_rna = 0.0
+    unallocated_unspliced = 0.0
     for ref_id in range(region_arrays.n_refs):
         blocks = blocks_by_ref.get(ref_id)
         lo = int(region_arrays.ref_offsets[ref_id])
@@ -211,6 +385,8 @@ def _allocate_counts_by_geometry(
         if not blocks:
             unallocated_expected += float(np.sum(region_mean[lo:hi]))
             unallocated_upper += float(np.sum(region_upper[lo:hi]))
+            unallocated_rna += float(np.sum(region_rna[lo:hi]))
+            unallocated_unspliced += float(np.sum(region_unspliced[lo:hi]))
             continue
 
         block_starts = np.array([b[0] for b in blocks], dtype=np.int64)
@@ -235,6 +411,8 @@ def _allocate_counts_by_geometry(
             if raw_total <= 0.0:
                 unallocated_expected += float(region_mean[region_idx])
                 unallocated_upper += float(region_upper[region_idx])
+                unallocated_rna += float(region_rna[region_idx])
+                unallocated_unspliced += float(region_unspliced[region_idx])
                 continue
 
             touches_multiple = len(raw_by_locus) > 1
@@ -242,8 +420,12 @@ def _allocate_counts_by_geometry(
             for lid, raw_share in raw_by_locus.items():
                 share = float(raw_share / raw_total)
                 expected_share = share * float(region_mean[region_idx])
+                rna_share = share * float(region_rna[region_idx])
+                unspliced_share = share * float(region_unspliced[region_idx])
                 upper_share = share * float(region_upper[region_idx])
                 gdna_expected[lid] += expected_share
+                rna_expected[lid] += rna_share
+                prior_unspliced_total[lid] += unspliced_share
                 gdna_upper[lid] += upper_share
                 n_regions_touched[lid] += 1
                 if touches_multiple:
@@ -251,7 +433,7 @@ def _allocate_counts_by_geometry(
                 if partial_coverage:
                     partial_coverage_region_mass[lid] += expected_share
 
-    return unallocated_expected, unallocated_upper
+    return unallocated_expected, unallocated_upper, unallocated_rna, unallocated_unspliced
 
 
 def _count_diagnostic_units(locus: "MultiLocus", em_data: "ScoredFragments") -> int:
@@ -270,6 +452,17 @@ def _empty_prior_table() -> PriorTable:
     return PriorTable(
         gdna_prior_count_em=np.zeros(0, dtype=np.float64),
         gdna_expected_count=np.zeros(0, dtype=np.float64),
+        rna_expected_count=np.zeros(0, dtype=np.float64),
+        prior_unspliced_total=np.zeros(0, dtype=np.float64),
+        alpha_gdna_add=np.zeros(0, dtype=np.float64),
+        alpha_rna_add=np.zeros(0, dtype=np.float64),
+        prior_budget_raw=np.zeros(0, dtype=np.float64),
+        prior_budget=np.zeros(0, dtype=np.float64),
+        prior_gdna_share_raw=np.zeros(0, dtype=np.float64),
+        prior_gdna_share_biased=np.zeros(0, dtype=np.float64),
+        prior_mass_conservation_error=np.zeros(0, dtype=np.float64),
+        prior_allocated_fraction=np.zeros(0, dtype=np.float64),
+        gdna_prior_density=np.zeros(0, dtype=np.float64),
         gdna_upper_count=np.zeros(0, dtype=np.float64),
         gdna_eff_len=np.zeros(0, dtype=np.float64),
         gdna_eff_len_unweighted=np.zeros(0, dtype=np.float64),

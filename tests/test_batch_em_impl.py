@@ -106,6 +106,54 @@ def test_gdna_effective_length_downweights_gdna_component():
     assert gdna_long[0] < gdna_short[0]
 
 
+def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
+    n_units = 100
+    partition = _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0)
+
+    est_unprior = _estimator(1, mode="map")
+    _total_unprior, _rna_unprior, gdna_unprior = est_unprior.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        rna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([1.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    est_rna = _estimator(1, mode="map")
+    _total_rna, _rna_rna, gdna_rna = est_rna.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        rna_prior_count=np.array([10.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([1.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    assert gdna_rna[0] < gdna_unprior[0]
+
+
+def test_grouped_priors_inactive_without_structural_gdna_candidate():
+    n_units = 40
+    est = _estimator(1, mode="map")
+    total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
+        partition_tuples=[
+            _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0, is_spliced=True)
+        ],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([100.0], dtype=np.float64),
+        rna_prior_count=np.array([100.0], dtype=np.float64),
+        index=None,
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    assert total_gdna == pytest.approx(0.0)
+    assert locus_gdna[0] == pytest.approx(0.0)
+    assert locus_rna[0] == pytest.approx(n_units)
+
+
 def test_assignment_outputs_follow_partition_units():
     n_units = 5
     est = _estimator(2, mode="map")

@@ -113,7 +113,11 @@ def test_calibration_result_summary_echoes_rna_lower_confidence(monkeypatch):
     from rigel.calibration.background_model import BackgroundModel
     from rigel.calibration.boundary_model import BoundaryLocalPosterior
     from rigel.calibration.boundary_sweep import BoundarySweepResult
-    from rigel.calibration.calibration_iteration import RegionCalibration
+    from rigel.calibration.calibration_iteration import (
+        PRIOR_MASS_METHOD_DENSITY,
+        PriorMassDeconvolution,
+        RegionCalibration,
+    )
     from rigel.calibration._diagnostics import Diagnostics
     from rigel.calibration._result import CalibrationResult
     from rigel.calibration.fl import FLModels
@@ -128,6 +132,14 @@ def test_calibration_result_summary_echoes_rna_lower_confidence(monkeypatch):
         mu_gdna=np.zeros(0, dtype=np.float32),
         upper_gdna=np.zeros(0, dtype=np.float32),
         rna_lower=np.zeros(0, dtype=np.float32),
+        prior_mass=PriorMassDeconvolution(
+            unspliced_total=np.zeros(0, dtype=np.float32),
+            gdna_unspliced_mean=np.zeros(0, dtype=np.float32),
+            rna_unspliced_mean=np.zeros(0, dtype=np.float32),
+            method=np.full(0, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8),
+            precision=np.zeros(0, dtype=np.float32),
+            flags=np.zeros(0, dtype=np.uint16),
+        ),
         A_r=np.zeros(0, dtype=np.float32),
         gamma_r=np.zeros(0, dtype=np.float32),
         rho_off=0.0,

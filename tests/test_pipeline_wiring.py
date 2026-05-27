@@ -131,10 +131,18 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
     )
     prior_table = SimpleNamespace(
         gdna_prior_count_em=np.array([1.0], dtype=np.float64),
+        alpha_rna_add=np.array([2.0], dtype=np.float64),
         gdna_eff_len=np.array([100.0], dtype=np.float64),
         enable_gdna=np.array([1], dtype=np.uint8),
         gdna_eff_len_unweighted=np.array([100.0], dtype=np.float64),
         gdna_expected_count=np.array([1.0], dtype=np.float64),
+        rna_expected_count=np.array([2.0], dtype=np.float64),
+        prior_unspliced_total=np.array([3.0], dtype=np.float64),
+        prior_budget_raw=np.array([3.0], dtype=np.float64),
+        prior_budget=np.array([3.0], dtype=np.float64),
+        prior_gdna_share_raw=np.array([1.0 / 3.0], dtype=np.float64),
+        prior_gdna_share_biased=np.array([1.0 / 3.0], dtype=np.float64),
+        gdna_prior_density=np.array([0.01], dtype=np.float64),
         gdna_em_exposure_weight=np.array([1.0], dtype=np.float64),
     )
     calibration = CalibrationResult(

@@ -82,6 +82,12 @@ struct LocusProfile {
     int squarem_iterations = 0;
     int estep_threads_used = 0;
     bool is_mega_locus = false;
+    double squarem_step_scale_mean = 0.0;
+    double squarem_step_scale_max = 0.0;
+    int squarem_extrapolation_clamp_count = 0;
+    int squarem_nonfinite_count = 0;
+    bool squarem_grouped_fallback_used = false;
+    int squarem_grouped_stabilization_fail_count = 0;
     double gdna_eff_len = 1.0;
     double gdna_log_eff_len = 0.0;
 
@@ -687,19 +693,86 @@ static void parallel_estep(
 }
 
 // ================================================================
+// Grouped RNA/gDNA prior update
+// ================================================================
+
+struct AggregatePrior {
+    double alpha_gdna_add = 0.0;
+    double alpha_rna_add = 0.0;
+    int    gdna_idx = -1;
+    bool   has_gdna_candidate = false;
+};
+
+static inline double nonnegative_finite(double x) {
+    return (std::isfinite(x) && x > 0.0) ? x : 0.0;
+}
+
+static void apply_grouped_prior_update(
+    const double* raw_counts,
+    const double* carried_state,
+    const AggregatePrior& aggregate_prior,
+    double* out_counts,
+    int n_components)
+{
+    const int gdna_idx = aggregate_prior.gdna_idx;
+    const bool has_gdna = aggregate_prior.has_gdna_candidate
+        && gdna_idx >= 0 && gdna_idx < n_components;
+
+    double n_rna = 0.0;
+    double carried_rna = 0.0;
+    for (int i = 0; i < n_components; ++i) {
+        if (i == gdna_idx) continue;
+        n_rna += nonnegative_finite(raw_counts[i]);
+        if (carried_state != nullptr) {
+            carried_rna += nonnegative_finite(carried_state[i]);
+        }
+    }
+
+    double a_g = has_gdna ? nonnegative_finite(aggregate_prior.alpha_gdna_add) : 0.0;
+    double a_r = has_gdna ? nonnegative_finite(aggregate_prior.alpha_rna_add) : 0.0;
+    if (n_rna <= EM_LOG_EPSILON && carried_rna <= EM_LOG_EPSILON) {
+        a_r = 0.0;
+    }
+
+    const double n_gdna = has_gdna ? nonnegative_finite(raw_counts[gdna_idx]) : 0.0;
+    const double G = n_gdna + a_g;
+    const double R = n_rna + a_r;
+
+    std::fill(out_counts, out_counts + n_components, 0.0);
+    if (has_gdna) {
+        out_counts[gdna_idx] = G;
+    }
+
+    if (n_rna > EM_LOG_EPSILON) {
+        const double inv = 1.0 / n_rna;
+        for (int i = 0; i < n_components; ++i) {
+            if (i == gdna_idx) continue;
+            out_counts[i] = R * nonnegative_finite(raw_counts[i]) * inv;
+        }
+    } else if (carried_rna > EM_LOG_EPSILON && carried_state != nullptr) {
+        const double inv = 1.0 / carried_rna;
+        for (int i = 0; i < n_components; ++i) {
+            if (i == gdna_idx) continue;
+            out_counts[i] = R * nonnegative_finite(carried_state[i]) * inv;
+        }
+    }
+}
+
+// ================================================================
 // MAP-EM step: theta → theta_new
 // ================================================================
 //
-// Plain MAP-EM with per-component Dirichlet prior.
-// gDNA strand symmetry is enforced via per-fragment log(0.5) in the likelihood
-// (added at scoring time), so no M-step coupling is needed.
+// Grouped MAP-EM with additive aggregate RNA/gDNA pseudocounts. The
+// calibration prior constrains only the aggregate gDNA-vs-RNA split; RNA
+// pseudocount mass is dynamically distributed in proportion to current RNA
+// evidence, so no transcript receives a fixed floor.
 
 static void map_em_step(
     const double* theta,
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unambig_totals,
-    const double* prior,
+    const AggregatePrior& aggregate_prior,
     double*       em_totals,    // zeroed then accumulated
     double*       theta_new,    // output: normalized
     int           n_components,
@@ -725,10 +798,15 @@ static void map_em_step(
         }
     }
 
-    // Plain MAP-EM: theta_new = (unambig + em + prior)
+    // Grouped MAP-EM: raw counts first, then aggregate prior projection.
+    std::vector<double> raw_counts(static_cast<size_t>(n_components));
     double total = 0.0;
     for (int i = 0; i < n_components; ++i) {
-        theta_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
+        raw_counts[i] = unambig_totals[i] + em_totals[i];
+    }
+    apply_grouped_prior_update(
+        raw_counts.data(), theta, aggregate_prior, theta_new, n_components);
+    for (int i = 0; i < n_components; ++i) {
         total += theta_new[i];
     }
 
@@ -749,7 +827,7 @@ static void vbem_step(
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unambig_totals,
-    const double* prior,
+    const AggregatePrior& aggregate_prior,
     double*       em_totals,
     double*       alpha_new,
     int           n_components,
@@ -783,29 +861,29 @@ static void vbem_step(
         }
     }
 
-    // M-step: alpha_new = unambig_totals + em_totals + prior (unnormalized)
+    // M-step: grouped count-space update (unnormalized alpha-like mass).
+    std::vector<double> raw_counts(static_cast<size_t>(n_components));
     for (int i = 0; i < n_components; ++i) {
-        alpha_new[i] = unambig_totals[i] + em_totals[i] + prior[i];
+        raw_counts[i] = unambig_totals[i] + em_totals[i];
     }
+    apply_grouped_prior_update(
+        raw_counts.data(), alpha, aggregate_prior, alpha_new, n_components);
 }
 
 // ================================================================
-// Coverage-weighted warm start + gDNA-only asymmetric prior
+// Coverage-weighted warm start + grouped aggregate prior projection
 // ================================================================
 
-static void compute_gdna_prior_and_warm_start(
+static void compute_grouped_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
-    const double* eligible,    // [n_components] 1.0 if eligible, 0.0 otherwise
-    double        gdna_prior_count,  // calibration gDNA prior (physical count)
-    int           gdna_idx,          // index of gDNA component (-1 if none)
-    double*       prior_out,       // [n_components] output
-    double*       theta_init_out,  // [n_components] output
-    int           n_components,
-    bool          use_vbem)
+    const AggregatePrior& aggregate_prior,
+    double*       warm_counts_out,
+    int           n_components)
 {
     // Initialize theta_init from unambig_totals
-    std::copy(unambig_totals, unambig_totals + n_components, theta_init_out);
+    std::vector<double> warm_raw(static_cast<size_t>(n_components));
+    std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
 
     for (const auto& ec : ec_data) {
         const int n = ec.n;
@@ -814,34 +892,23 @@ static void compute_gdna_prior_and_warm_start(
         const double* wt = ec.wt_flat.data();
 
         for (int i = 0; i < n; ++i) {
-            // Mask weights by eligibility, normalize row
+            // Normalize coverage weights within the actual candidate set.
             double row_sum = 0.0;
             for (int j = 0; j < k; ++j) {
-                double w = wt[i * k + j] * eligible[cidx[j]];
+                double w = wt[i * k + j];
                 row_sum += w;
             }
             if (row_sum == 0.0) row_sum = 1.0;
             double inv_row_sum = 1.0 / row_sum;
 
             for (int j = 0; j < k; ++j) {
-                double share = (wt[i * k + j] * eligible[cidx[j]]) * inv_row_sum;
-                theta_init_out[cidx[j]] += share;
+                double share = wt[i * k + j] * inv_row_sum;
+                warm_raw[cidx[j]] += share;
             }
         }
     }
-
-    // Mode-aware baseline: VBEM uses Jeffreys; MAP has no modeled RNA prior.
-    const double baseline = use_vbem ? 0.5 : 0.0;
-
-    for (int i = 0; i < n_components; ++i) {
-        if (eligible[i] <= 0.0) {
-            prior_out[i] = 0.0;
-        } else if (i == gdna_idx) {
-            prior_out[i] = baseline + std::max(gdna_prior_count, EM_LOG_EPSILON);
-        } else {
-            prior_out[i] = baseline;
-        }
-    }
+    apply_grouped_prior_update(
+        warm_raw.data(), nullptr, aggregate_prior, warm_counts_out, n_components);
 }
 
 // ================================================================
@@ -853,14 +920,20 @@ struct EMResult {
     std::vector<double> alpha;
     std::vector<double> em_totals;
     int squarem_iterations = 0;  // number of SQUAREM iterations completed
+    double squarem_step_scale_mean = 0.0;
+    double squarem_step_scale_max = 0.0;
+    int squarem_extrapolation_clamp_count = 0;
+    int squarem_nonfinite_count = 0;
+    bool squarem_grouped_fallback_used = false;
+    int squarem_grouped_stabilization_fail_count = 0;
 };
 
 static EMResult run_squarem(
     const std::vector<EmEquivClass>& ec_data,
     const double* log_eff_len,
     const double* unambig_totals,
-    double*       prior,
-    const double* theta_init,
+    const AggregatePrior& aggregate_prior,
+    const double* init_counts,
     int           n_components,
     int           max_iterations,
     double        convergence_delta,
@@ -885,22 +958,28 @@ static EMResult run_squarem(
     std::vector<double> theta(nc);
     std::vector<double> alpha_out(nc);
     int completed_iterations = 0;
+    double step_scale_sum = 0.0;
+    double step_scale_max = 0.0;
+    int step_scale_count = 0;
+    int clamp_count = 0;
+    int nonfinite_count = 0;
+    int stabilization_fail_count = 0;
 
     if (use_vbem) {
         // ---- VBEM with SQUAREM acceleration ----
         // state = Dirichlet parameters alpha
         for (size_t i = 0; i < nc; ++i) {
-            state0[i] = theta_init[i] + prior[i];  // initial alpha
+            state0[i] = std::max(init_counts[i], VBEM_SQUAREM_PRIOR_FLOOR);
         }
 
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two plain VBEM steps
             vbem_step(state0.data(), ec_data, log_eff_len,
-                      unambig_totals, prior, em_totals.data(),
+                      unambig_totals, aggregate_prior, em_totals.data(),
                       state1.data(), n_components, estep_threads, pool);
 
             vbem_step(state1.data(), ec_data, log_eff_len,
-                      unambig_totals, prior, em_totals.data(),
+                      unambig_totals, aggregate_prior, em_totals.data(),
                       state2.data(), n_components, estep_threads, pool);
 
             // SQUAREM extrapolation
@@ -916,29 +995,46 @@ static EMResult run_squarem(
                 std::copy(state2.begin(), state2.end(), state_extrap.begin());
             } else {
                 double step = std::max(-srv / sv2, 1.0);
+                if (!std::isfinite(step)) {
+                    step = 1.0;
+                    ++nonfinite_count;
+                }
+                step_scale_sum += step;
+                step_scale_max = std::max(step_scale_max, step);
+                ++step_scale_count;
                 for (size_t i = 0; i < nc; ++i) {
                     state_extrap[i] = state0[i] + 2.0 * step * r_vec[i]
                                     + step * step * v_vec[i];
-                    // Clamp to prior floor: prevents SQUAREM extrapolation
+                    // Clamp to numerical floor: prevents SQUAREM extrapolation
                     // from creating negative or near-zero alpha values.
-                    double floor_i = std::max(prior[i], VBEM_SQUAREM_PRIOR_FLOOR);
-                    if (state_extrap[i] < floor_i)
+                    double floor_i = VBEM_SQUAREM_PRIOR_FLOOR;
+                    if (!std::isfinite(state_extrap[i])) {
                         state_extrap[i] = floor_i;
+                        ++nonfinite_count;
+                    } else if (state_extrap[i] < floor_i) {
+                        state_extrap[i] = floor_i;
+                        ++clamp_count;
+                    }
                 }
             }
 
             // Stabilisation step
             vbem_step(state_extrap.data(), ec_data, log_eff_len,
-                      unambig_totals, prior, em_totals.data(),
+                      unambig_totals, aggregate_prior, em_totals.data(),
                       state_new.data(), n_components, estep_threads, pool);
 
             // Floor-clamp + convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
             for (size_t i = 0; i < nc; ++i) {
                 // Clamp stabilisation output to prior floor.
-                double floor_i = std::max(prior[i], VBEM_SQUAREM_PRIOR_FLOOR);
-                if (state_new[i] < floor_i) {
+                double floor_i = VBEM_SQUAREM_PRIOR_FLOOR;
+                if (!std::isfinite(state_new[i])) {
                     state_new[i] = floor_i;
+                    ++nonfinite_count;
+                    ++stabilization_fail_count;
+                } else if (state_new[i] < floor_i) {
+                    state_new[i] = floor_i;
+                    ++clamp_count;
                 }
                 sum_old += state0[i];
                 sum_new += state_new[i];
@@ -980,7 +1076,7 @@ static EMResult run_squarem(
         // state = normalized theta
         double total = 0.0;
         for (size_t i = 0; i < nc; ++i) {
-            state0[i] = theta_init[i] + prior[i];
+            state0[i] = nonnegative_finite(init_counts[i]);
             total += state0[i];
         }
         if (total > 0.0) {
@@ -991,12 +1087,12 @@ static EMResult run_squarem(
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two EM steps
             map_em_step(state0.data(), ec_data, log_eff_len,
-                        unambig_totals, prior, em_totals.data(),
+                        unambig_totals, aggregate_prior, em_totals.data(),
                         state1.data(), n_components,
                         estep_threads, pool);
 
             map_em_step(state1.data(), ec_data, log_eff_len,
-                        unambig_totals, prior, em_totals.data(),
+                        unambig_totals, aggregate_prior, em_totals.data(),
                         state2.data(), n_components,
                         estep_threads, pool);
 
@@ -1013,11 +1109,24 @@ static EMResult run_squarem(
                 std::copy(state2.begin(), state2.end(), state_extrap.begin());
             } else {
                 double alpha_step = std::max(-srv / sv2, 1.0);
+                if (!std::isfinite(alpha_step)) {
+                    alpha_step = 1.0;
+                    ++nonfinite_count;
+                }
+                step_scale_sum += alpha_step;
+                step_scale_max = std::max(step_scale_max, alpha_step);
+                ++step_scale_count;
                 for (size_t i = 0; i < nc; ++i) {
                     state_extrap[i] = state0[i]
                         + 2.0 * alpha_step * r_vec[i]
                         + alpha_step * alpha_step * v_vec[i];
-                    if (state_extrap[i] < 0.0) state_extrap[i] = 0.0;
+                    if (!std::isfinite(state_extrap[i])) {
+                        state_extrap[i] = 0.0;
+                        ++nonfinite_count;
+                    } else if (state_extrap[i] < 0.0) {
+                        state_extrap[i] = 0.0;
+                        ++clamp_count;
+                    }
                 }
                 double s = 0.0;
                 for (size_t i = 0; i < nc; ++i) s += state_extrap[i];
@@ -1032,9 +1141,17 @@ static EMResult run_squarem(
 
             // Stabilisation step
             map_em_step(state_extrap.data(), ec_data, log_eff_len,
-                        unambig_totals, prior, em_totals.data(),
+                        unambig_totals, aggregate_prior, em_totals.data(),
                         state_new.data(), n_components,
                         estep_threads, pool);
+
+            for (size_t i = 0; i < nc; ++i) {
+                if (!std::isfinite(state_new[i])) {
+                    state_new[i] = 0.0;
+                    ++nonfinite_count;
+                    ++stabilization_fail_count;
+                }
+            }
 
             // Convergence
             double delta = 0.0;
@@ -1054,14 +1171,25 @@ static EMResult run_squarem(
         // theta = state0 (converged normalized theta)
         std::copy(state0.begin(), state0.end(), theta.begin());
 
-        // alpha_out = unambig_totals + em_totals + prior
-        for (size_t i = 0; i < nc; ++i) {
-            alpha_out[i] = unambig_totals[i] + em_totals[i] + prior[i];
-        }
+        // alpha_out is diagnostic only for MAP mode; compute final grouped
+        // count-space update from the latest E-step accumulators.
+        std::vector<double> raw_counts(nc, 0.0);
+        for (size_t i = 0; i < nc; ++i) raw_counts[i] = unambig_totals[i] + em_totals[i];
+        apply_grouped_prior_update(
+            raw_counts.data(), theta.data(), aggregate_prior, alpha_out.data(), n_components);
     }
 
-    return { std::move(theta), std::move(alpha_out), std::move(em_totals),
-             completed_iterations };
+    EMResult out{ std::move(theta), std::move(alpha_out), std::move(em_totals),
+                  completed_iterations };
+    out.squarem_step_scale_mean = step_scale_count > 0
+        ? step_scale_sum / static_cast<double>(step_scale_count)
+        : 0.0;
+    out.squarem_step_scale_max = step_scale_max;
+    out.squarem_extrapolation_clamp_count = clamp_count;
+    out.squarem_nonfinite_count = nonfinite_count;
+    out.squarem_grouped_fallback_used = false;
+    out.squarem_grouped_stabilization_fail_count = stabilization_fail_count;
+    return out;
 }
 
 // ================================================================
@@ -1093,6 +1221,7 @@ struct LocusSubProblem {
     int n_components;  // n_t + 1
     int gdna_idx;      // = n_t     (single gDNA component)
     int n_local_units;
+    bool has_gdna_candidate = false;
 
     // Local CSR
     std::vector<int64_t>  offsets;      // [n_local_units + 1]
@@ -1107,9 +1236,7 @@ struct LocusSubProblem {
 
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
-    std::vector<double>   prior;            // [n_components]
     std::vector<double>   log_eff_len;      // [n_components] log L̃ per component
-    std::vector<double>   eligible;         // [n_components]
 
     // Local→global transcript mapping
     std::vector<int32_t>  local_to_global_t; // [n_t]
@@ -1574,7 +1701,6 @@ struct PartitionView {
 static void extract_locus_sub_problem_from_partition(
     LocusSubProblem& sub,
     const PartitionView& pv,
-    bool enable_gdna,
     double gdna_eff_len,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
@@ -1588,6 +1714,7 @@ static void extract_locus_sub_problem_from_partition(
     sub.n_local_units = n_u;
     sub.n_components = n_t + 1;
     sub.gdna_idx = n_t;
+    sub.has_gdna_candidate = false;
     int nc = sub.n_components;
 
     // --- Build global→local mapping ---
@@ -1662,6 +1789,7 @@ static void extract_locus_sub_problem_from_partition(
         // applies the per-locus -log L̃_gDNA component correction.
         if (has_gdna) {
             sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0, 0};
+            sub.has_gdna_candidate = true;
         }
 
         // Trim to actual count (candidates may have been skipped above)
@@ -1718,25 +1846,6 @@ static void extract_locus_sub_problem_from_partition(
     if (!(GLe >= 1.0)) GLe = 1.0;
     sub.log_eff_len[sub.gdna_idx] = std::log(GLe);
 
-    sub.prior.assign(nc, EM_PRIOR_EPSILON);
-
-    // Disable gDNA component when the caller signals it is ineligible.
-    // Eligibility is now an explicit boolean from the Python side
-    // ("any unspliced unit with a finite gDNA likelihood candidate exists
-    // for this locus"); it is no longer inferred from ``gdna_prior_count > 0``.
-    if (!enable_gdna) {
-        sub.prior[sub.gdna_idx] = 0.0;
-    }
-
-    for (int c = 0; c < nc; ++c) {
-        if (sub.prior[c] == 0.0) sub.unambig_totals[c] = 0.0;
-    }
-
-    sub.eligible.resize(nc);
-    for (int c = 0; c < nc; ++c) {
-        sub.eligible[c] = (sub.prior[c] > 0.0) ? 1.0 : 0.0;
-    }
-
     // Clean up local_map scratch for next call
     for (int i = 0; i < n_t; ++i) {
         int gt = t_arr[i];
@@ -1762,12 +1871,11 @@ batch_locus_em_partitioned(
     nb::list partition_tuples,
     // Per-locus transcript membership (list of int32[])
     nb::list locus_transcript_indices,
-    // Per-locus calibration prior
+    // Per-locus grouped additive calibration priors
     f64_1d   locus_gdna_prior_count,
-    // Per-locus gDNA component eligibility (1 = enabled, 0 = disabled).
-    // Decoupled from ``locus_gdna_prior_count`` per Bayesian-prior redesign
-    // Phase 0: a zero gDNA prior count must not silently disable the
-    // gDNA component when the locus contains gDNA-likelihood candidates.
+    f64_1d   locus_rna_prior_count,
+    // Temporary compatibility input. Production availability is derived
+    // structurally from per-unit gDNA candidates during sub-problem extraction.
     u8_1d    locus_enable_gdna,
     // Per-locus FL-marginal overlap effective length for the gDNA component.
     f64_1d   locus_gdna_eff_lens,
@@ -1825,9 +1933,17 @@ batch_locus_em_partitioned(
         throw std::runtime_error(
             "batch_locus_em_partitioned: locus_gdna_eff_lens length must equal n_loci");
     }
+    if (static_cast<int>(locus_gdna_prior_count.shape(0)) != n_loci) {
+        throw std::runtime_error(
+            "batch_locus_em_partitioned: locus_gdna_prior_count length must equal n_loci");
+    }
+    if (static_cast<int>(locus_rna_prior_count.shape(0)) != n_loci) {
+        throw std::runtime_error(
+            "batch_locus_em_partitioned: locus_rna_prior_count length must equal n_loci");
+    }
 
     const double*   gp_ptr = locus_gdna_prior_count.data();
-    const uint8_t*  eg_ptr = locus_enable_gdna.data();
+    const double*   rp_ptr = locus_rna_prior_count.data();
     const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
@@ -1938,7 +2054,7 @@ batch_locus_em_partitioned(
             // 1. Extract sub-problem from partition
             auto t1 = hrclock::now();
             extract_locus_sub_problem_from_partition(
-                sub, pv, eg_ptr[li] != 0,
+                sub, pv,
                 gel_ptr[li],
                 unambig_row_sums.data(), tel_ptr,
                 local_map_vec.data(), local_map_size);
@@ -1971,24 +2087,27 @@ batch_locus_em_partitioned(
                 n_local_units);
             auto t4 = hrclock::now();
 
-            // 6. gDNA prior + coverage-weighted warm start
-            std::vector<double> prior(nc);
-            std::vector<double> theta_init(nc);
-            compute_gdna_prior_and_warm_start(
+            // 6. Grouped aggregate prior + coverage-weighted warm start.
+            AggregatePrior aggregate_prior{
+                nonnegative_finite(gp_ptr[li]),
+                nonnegative_finite(rp_ptr[li]),
+                sub.gdna_idx,
+                sub.has_gdna_candidate,
+            };
+            std::vector<double> init_counts(nc);
+            compute_grouped_warm_start(
                 ec_data,
                 sub.unambig_totals.data(),
-                sub.eligible.data(),
-                gp_ptr[li], sub.gdna_idx,
-                prior.data(), theta_init.data(), nc,
-                use_vbem);
+                aggregate_prior,
+                init_counts.data(), nc);
             auto t5 = hrclock::now();
 
             // 7. SQUAREM
             EMResult result = run_squarem(
                 ec_data, log_eff_len_ptr,
                 sub.unambig_totals.data(),
-                prior.data(),
-                theta_init.data(),
+                aggregate_prior,
+                init_counts.data(),
                 nc, max_iterations, convergence_delta,
                 use_vbem,
                 estep_thr, pool);
@@ -2025,6 +2144,13 @@ batch_locus_em_partitioned(
                 prof.squarem_iterations = result.squarem_iterations;
                 prof.estep_threads_used = estep_thr;
                 prof.is_mega_locus = mega;
+                prof.squarem_step_scale_mean = result.squarem_step_scale_mean;
+                prof.squarem_step_scale_max = result.squarem_step_scale_max;
+                prof.squarem_extrapolation_clamp_count = result.squarem_extrapolation_clamp_count;
+                prof.squarem_nonfinite_count = result.squarem_nonfinite_count;
+                prof.squarem_grouped_fallback_used = result.squarem_grouped_fallback_used;
+                prof.squarem_grouped_stabilization_fail_count =
+                    result.squarem_grouped_stabilization_fail_count;
                 prof.gdna_eff_len = gel_ptr[li] >= 1.0 ? gel_ptr[li] : 1.0;
                 prof.gdna_log_eff_len = std::log(prof.gdna_eff_len);
 
@@ -2151,6 +2277,13 @@ batch_locus_em_partitioned(
             d["squarem_iterations"] = p.squarem_iterations;
             d["estep_threads_used"] = p.estep_threads_used;
             d["is_mega_locus"] = p.is_mega_locus;
+            d["squarem_step_scale_mean"] = p.squarem_step_scale_mean;
+            d["squarem_step_scale_max"] = p.squarem_step_scale_max;
+            d["squarem_extrapolation_clamp_count"] = p.squarem_extrapolation_clamp_count;
+            d["squarem_nonfinite_count"] = p.squarem_nonfinite_count;
+            d["squarem_grouped_fallback_used"] = p.squarem_grouped_fallback_used;
+            d["squarem_grouped_stabilization_fail_count"] =
+                p.squarem_grouped_stabilization_fail_count;
             d["gdna_eff_len"] = p.gdna_eff_len;
             d["gdna_log_eff_len"] = p.gdna_log_eff_len;
             d["digamma_calls_per_estep"] = p.digamma_calls_per_estep;
@@ -2467,6 +2600,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("partition_tuples"),
           nb::arg("locus_transcript_indices"),
           nb::arg("locus_gdna_prior_count"),
+          nb::arg("locus_rna_prior_count"),
           nb::arg("locus_enable_gdna"),
           nb::arg("locus_gdna_eff_lens"),
           nb::arg("unambig_counts"),

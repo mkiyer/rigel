@@ -39,8 +39,12 @@ __all__ = [
     "FLAG_BOUNDARY_SPARSE",
     "FLAG_EXPRESSED_UNCERTAIN",
     "FLAG_EXACT_STRAND_POSTERIOR",
+    "PRIOR_MASS_METHOD_DENSITY",
+    "PRIOR_MASS_METHOD_STRAND",
+    "PriorMassDeconvolution",
     "RegionCalibration",
     "CalibrationStepResult",
+    "build_prior_mass_deconvolution",
     "calibration_e_step",
     "calibration_m_step",
     "run_calibration_iteration",
@@ -52,8 +56,64 @@ FLAG_BOUNDARY_SPARSE: int = 1 << 2
 FLAG_EXPRESSED_UNCERTAIN: int = 1 << 3
 FLAG_EXACT_STRAND_POSTERIOR: int = 1 << 4
 
+PRIOR_MASS_METHOD_DENSITY: int = 1
+PRIOR_MASS_METHOD_STRAND: int = 2
+
 _EPS: float = 1.0e-12
 _MAX_EXPOSURE_VALUE: float = 1.0e30
+
+
+@dataclass(frozen=True, slots=True)
+class PriorMassDeconvolution:
+    """Mass-conserving unspliced RNA/gDNA prior evidence per region."""
+
+    unspliced_total: np.ndarray
+    gdna_unspliced_mean: np.ndarray
+    rna_unspliced_mean: np.ndarray
+    method: np.ndarray
+    precision: np.ndarray
+    flags: np.ndarray
+
+    def __post_init__(self) -> None:
+        total = np.asarray(self.unspliced_total, dtype=np.float32)
+        region_count = int(total.shape[0])
+        if total.ndim != 1:
+            raise ValueError(f"unspliced_total must be 1D; got shape {total.shape}.")
+        object.__setattr__(self, "unspliced_total", total)
+
+        for field_name in ("gdna_unspliced_mean", "rna_unspliced_mean", "precision"):
+            values = _as_float32_vector(field_name, getattr(self, field_name), region_count)
+            object.__setattr__(self, field_name, values)
+
+        method = np.asarray(self.method, dtype=np.uint8)
+        if method.shape != (region_count,):
+            raise ValueError(f"method must have shape ({region_count},); got {method.shape}.")
+        object.__setattr__(self, "method", method)
+
+        flags = np.asarray(self.flags, dtype=np.uint16)
+        if flags.shape != (region_count,):
+            raise ValueError(f"flags must have shape ({region_count},); got {flags.shape}.")
+        object.__setattr__(self, "flags", flags)
+
+        if np.any(total < 0.0):
+            raise ValueError("unspliced_total must be non-negative.")
+        if np.any(self.gdna_unspliced_mean < 0.0) or np.any(self.rna_unspliced_mean < 0.0):
+            raise ValueError("prior mass means must be non-negative.")
+        if not np.all(np.isfinite(self.precision)) or np.any(self.precision < 0.0):
+            raise ValueError("precision must be finite and non-negative.")
+        if not np.allclose(
+            self.gdna_unspliced_mean + self.rna_unspliced_mean,
+            total,
+            rtol=1.0e-5,
+            atol=1.0e-5,
+        ):
+            raise ValueError("prior mass must conserve unspliced_total per region.")
+
+    def mass_conservation_error(self) -> np.ndarray:
+        """Return per-region absolute conservation residual."""
+        return np.abs(
+            self.gdna_unspliced_mean + self.rna_unspliced_mean - self.unspliced_total
+        ).astype(np.float32, copy=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +124,7 @@ class RegionCalibration:
     mu_gdna: np.ndarray
     upper_gdna: np.ndarray
     rna_lower: np.ndarray
+    prior_mass: PriorMassDeconvolution
     A_r: np.ndarray
     gamma_r: np.ndarray
     rho_off: float
@@ -97,6 +158,22 @@ class RegionCalibration:
             raise ValueError("upper_gdna must be >= mu_gdna within tolerance.")
         if np.any(self.rna_lower < 0.0):
             raise ValueError("rna_lower must be non-negative.")
+        prior_mass = self.prior_mass
+        if not isinstance(prior_mass, PriorMassDeconvolution):
+            prior_mass = PriorMassDeconvolution(
+                unspliced_total=getattr(prior_mass, "unspliced_total"),
+                gdna_unspliced_mean=getattr(prior_mass, "gdna_unspliced_mean"),
+                rna_unspliced_mean=getattr(prior_mass, "rna_unspliced_mean"),
+                method=getattr(prior_mass, "method"),
+                precision=getattr(prior_mass, "precision"),
+                flags=getattr(prior_mass, "flags"),
+            )
+        if prior_mass.unspliced_total.shape != (region_count,):
+            raise ValueError(
+                "prior_mass arrays must match p_states region count; "
+                f"got {prior_mass.unspliced_total.shape}, expected {(region_count,)}."
+            )
+        object.__setattr__(self, "prior_mass", prior_mass)
         for field_name in ("A_r", "gamma_r"):
             values = np.asarray(getattr(self, field_name), dtype=np.float32)
             if not np.all(np.isfinite(values)) or np.any(values < 0.0):
@@ -159,6 +236,7 @@ class CalibrationStepResult:
     mu_gdna: np.ndarray
     upper_gdna: np.ndarray
     rna_lower: np.ndarray
+    prior_mass: PriorMassDeconvolution
     A_r: np.ndarray
     gamma_r: np.ndarray
     flags: np.ndarray
@@ -234,6 +312,65 @@ def _safe_exposure(numerator: np.ndarray, denominator: np.ndarray) -> np.ndarray
     ratio = np.nan_to_num(ratio, nan=0.0, posinf=_MAX_EXPOSURE_VALUE, neginf=0.0)
     ratio = np.clip(ratio, 0.0, _MAX_EXPOSURE_VALUE)
     return ratio.astype(np.float32)
+
+
+def build_prior_mass_deconvolution(
+    observation: DensityObservation,
+    *,
+    mu_gdna: np.ndarray,
+    strand_channels: RegionGdnaChannelEstimate | None,
+) -> PriorMassDeconvolution:
+    """Build mass-conserving unspliced RNA/gDNA prior evidence per region."""
+    unspliced_total = _as_float64_vector(
+        "observation.observed_compatible_count",
+        observation.observed_compatible_count,
+        int(np.asarray(observation.observed_compatible_count).shape[0]),
+    )
+    region_count = int(unspliced_total.shape[0])
+    density_mu = _as_float64_vector("mu_gdna", mu_gdna, region_count)
+
+    method = np.full(region_count, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8)
+    precision = np.zeros(region_count, dtype=np.float32)
+    flags = np.zeros(region_count, dtype=np.uint16)
+
+    if strand_channels is None:
+        gdna = density_mu.copy()
+    else:
+        contained = _as_float64_vector(
+            "strand_channels.contained_mean", strand_channels.contained_mean, region_count
+        )
+        left = _as_float64_vector(
+            "strand_channels.boundary_left_mean", strand_channels.boundary_left_mean, region_count
+        )
+        right = _as_float64_vector(
+            "strand_channels.boundary_right_mean", strand_channels.boundary_right_mean, region_count
+        )
+        gdna = contained + left + right
+        method.fill(PRIOR_MASS_METHOD_STRAND)
+        precision = np.maximum.reduce(
+            [
+                np.asarray(strand_channels.contained_precision, dtype=np.float32),
+                np.asarray(strand_channels.boundary_left_precision, dtype=np.float32),
+                np.asarray(strand_channels.boundary_right_precision, dtype=np.float32),
+            ]
+        ).astype(np.float32, copy=False)
+        flags = np.asarray(strand_channels.flags, dtype=np.uint16).copy()
+
+    gdna = np.clip(np.nan_to_num(gdna, nan=0.0, posinf=0.0, neginf=0.0), 0.0, unspliced_total)
+    # Preserve exact conservation after float32 conversion by deriving RNA from
+    # the float32 total and gDNA arrays.
+    total32 = unspliced_total.astype(np.float32)
+    gdna32 = gdna.astype(np.float32)
+    rna32 = np.maximum(total32 - gdna32, 0.0).astype(np.float32)
+
+    return PriorMassDeconvolution(
+        unspliced_total=total32,
+        gdna_unspliced_mean=gdna32,
+        rna_unspliced_mean=rna32,
+        method=method,
+        precision=precision,
+        flags=flags,
+    )
 
 
 def _derive_region_flags(
@@ -355,6 +492,12 @@ def calibration_e_step(
             0.0,
         ).astype(np.float32)
 
+    prior_mass = build_prior_mass_deconvolution(
+        observation,
+        mu_gdna=mu_gdna,
+        strand_channels=strand_channels,
+    )
+
     denominator = np.maximum(float(background.rho_off_mean), 0.0) * np.maximum(contained_leff, 0.0)
     exposure = _safe_exposure(mu_gdna, denominator)
     captured_exposure = _safe_exposure(captured_mu, denominator)
@@ -366,6 +509,7 @@ def calibration_e_step(
         mu_gdna=mu_gdna,
         upper_gdna=upper_gdna,
         rna_lower=rna_lower,
+        prior_mass=prior_mass,
         A_r=exposure,
         gamma_r=captured_exposure,
         flags=flags,
@@ -583,6 +727,7 @@ def run_calibration_iteration(
         mu_gdna=last_step.mu_gdna,
         upper_gdna=last_step.upper_gdna,
         rna_lower=last_step.rna_lower,
+        prior_mass=last_step.prior_mass,
         A_r=last_step.A_r,
         gamma_r=last_step.gamma_r,
         rho_off=float(current_background.rho_off_mean),
