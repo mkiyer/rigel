@@ -51,7 +51,7 @@ The PR therefore has two linked responsibilities:
 1. compute `P(data | H1)` with beta-binomial RNA uncertainty and symmetric beta-binomial gDNA strand balance;
 2. compute `E[D | data, H1]` under that same slab likelihood before multiplying by `P(H1 | data)`.
 
-Using `sigmoid(log_bf) * old_binomial_slab_mean` is not acceptable, because the posterior model for the slab mean would not match the Bayes factor. If backward compatibility requires keeping a legacy binomial helper, give the new beta-binomial slab helper a distinct name and make `PriorMassDeconvolution` consume the new slab mean.
+Using `sigmoid(log_bf) * old_binomial_slab_mean` is not acceptable, because the posterior model for the slab mean would not match the Bayes factor. Remove the old point-binomial source-mass path rather than preserving it behind defaults.
 
 Audit these existing code paths while implementing the PR:
 
@@ -61,7 +61,7 @@ Audit these existing code paths while implementing the PR:
 - `deconvolve_regions_by_strand()` and `deconvolve_compartments_by_strand()`;
 - `calibration/integration.py` call sites that combine density and strand likelihoods.
 
-Any call site that contributes source mass or posterior gDNA summaries should either pass the RNA minor-rate posterior or explicitly document why it remains a legacy point-binomial approximation.
+Any call site that contributes source mass or posterior gDNA summaries must pass the RNA minor-rate posterior and use the beta-binomial mixed-model likelihood.
 
 ## Step 1: expose minor-rate posterior from `StrandModel`
 
@@ -100,7 +100,7 @@ minor_rate_posterior_beta
 
 ## Step 2: extend `StrandSummary`
 
-Add frozen dataclass fields with backward-compatible defaults:
+Add frozen dataclass fields:
 
 ```python
 n_same: int = 0
@@ -112,6 +112,8 @@ minor_rate_beta: float = 1.0
 Validation rules:
 
 - counts are non-negative integers;
+- `n_same + n_opposite == n_observations`;
+- when `n_observations > 0`, `p_r1_sense == n_same / n_observations`;
 - alpha and beta are finite and positive;
 - when counts are present, `minor_rate_alpha == min(n_same, n_opposite) + 1` and `minor_rate_beta == max(n_same, n_opposite) + 1` unless the summary was explicitly built as uninformative;
 - `uninformative()` returns `p_r1_sense=0.5`, `n_observations=0`, `n_same=0`, `n_opposite=0`, `minor_rate_alpha=1.0`, `minor_rate_beta=1.0`.
@@ -183,7 +185,7 @@ boundary_left_slab_gdna_mean: np.ndarray
 boundary_right_slab_gdna_mean: np.ndarray
 ```
 
-Prefer updating the existing mean fields if all current consumers expect strand-derived gDNA posterior means. Add explicit fields only if another call site still needs the old point-binomial posterior for diagnostics.
+Update the existing mean fields because current consumers expect strand-derived gDNA posterior means. Do not preserve old point-binomial posterior fields for diagnostics.
 
 Keep these arrays shape `(R,)`, finite, and clipped to valid ranges in `__post_init__` if a post-init exists. If no post-init exists for `RegionGdnaChannelEstimate`, add a small private validator used by `deconvolve_compartments_by_strand()` before construction.
 
@@ -256,12 +258,7 @@ slab_post = np.exp(log_l - logsumexp(log_l))
 slab_gdna_mean = float(np.sum(d_grid * slab_post))
 ```
 
-Implementation choices:
-
-- Option A: add `minor_rate_alpha` and `minor_rate_beta` keyword-only parameters to `strand_log_likelihood_d_grid()` and preserve the old binomial behavior only when they are omitted.
-- Option B: add a new helper such as `strand_log_likelihood_d_grid_minor_beta_binom()` and use it for PR01 reliability/source mass.
-
-Prefer Option B if it makes the audit safer. Whichever option is chosen, exact slab marginal likelihood and exact slab posterior mean must use the same likelihood array.
+Implementation choice: add a beta-binomial helper such as `strand_log_likelihood_d_grid_minor_beta_binom()` and remove the point-binomial source-mass helper. Exact slab marginal likelihood and exact slab posterior mean must use the same likelihood array.
 
 Approximate path for large `n`:
 
@@ -337,7 +334,7 @@ def deconvolve_regions_by_strand(
     counts: StrandRegionCounts,
     *,
     kappa_d: float,
-    strand_summary: StrandSummary | None = None,
+    strand_summary: StrandSummary,
     ...
 ) -> RegionGdnaEstimate: ...
 
@@ -345,18 +342,18 @@ def deconvolve_compartments_by_strand(
     counts: CompartmentStrandCounts,
     *,
     kappa_d: float,
-    strand_summary: StrandSummary | None = None,
+    strand_summary: StrandSummary,
 ) -> RegionGdnaChannelEstimate: ...
 ```
 
-If `strand_summary is None`, synthesize a concentrated beta posterior from `counts.p_r1_sense` only for backward-compatible legacy callers, and set a diagnostic flag indicating point-estimate fallback. Production calibration in `_orchestrator.py` must pass the real `StrandSummary`.
+Production calibration in `_orchestrator.py` must pass the real `StrandSummary`. Deconvolution should reject mismatched or missing strand summaries.
 
 For `deconvolve_regions_by_strand()`, either:
 
 - return reliability in `RegionGdnaEstimate`; or
 - keep `RegionGdnaEstimate` unchanged for public compatibility but ensure the compartment wrapper computes both reliability and slab means from the new beta-binomial slab helper.
 
-Prefer the second option for a narrow PR if it avoids churn. The hard requirement is that `RegionGdnaChannelEstimate` fields consumed by `build_prior_mass_deconvolution()` use the beta-binomial RNA slab mean, not the old point-binomial slab mean.
+The hard requirement is that `RegionGdnaChannelEstimate` fields consumed by `build_prior_mass_deconvolution()` use the beta-binomial RNA slab mean, not the old point-binomial slab mean.
 
 ## Step 8: weight source mass in `build_prior_mass_deconvolution()`
 
@@ -377,7 +374,7 @@ right_gdna = strand_channels.boundary_right_reliability * strand_channels.bounda
 gdna = contained_gdna + left_gdna + right_gdna
 ```
 
-Here `contained_mean` and boundary means must be `E[D | data, H1]` under the beta-binomial RNA mixed model from Step 5. If explicit `*_slab_gdna_mean` fields were added, use those fields instead of the legacy means.
+Here `contained_mean` and boundary means must be `E[D | data, H1]` under the beta-binomial RNA mixed model from Step 5.
 
 Precision should reflect both posterior sharpness and source reliability:
 

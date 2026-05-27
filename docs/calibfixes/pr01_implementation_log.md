@@ -12,20 +12,20 @@ Implement `pr01_continuous_strand_reliability.md`: continuous strand reliability
 - `_orchestrator.calibrate()` currently calls `deconvolve_compartments_by_strand(compartment_counts, kappa_d=...)` without passing `StrandSummary`; PR01 must thread the strand posterior through this call.
 - `RegionGdnaChannelEstimate` currently has only compartment mean/upper/RNA-lower/precision arrays. PR01 needs compartment reliability and log-Bayes-factor arrays, plus clear semantics that means consumed by prior mass are slab means under the beta-binomial RNA mixed model.
 - Added `StrandModel.n_minor`, `n_major`, `minor_rate_posterior_alpha`, and `minor_rate_posterior_beta`; `to_dict()` now reports these diagnostics.
-- Extended `StrandSummary` with same/opposite counts and minor-rate posterior parameters. For backward compatibility with existing tests and call sites that construct `StrandSummary(p_r1_sense=..., n_observations=...)`, the summary infers same/opposite counts from `p_r1_sense` and `n_observations` when explicit counts are absent.
-- Added a new beta-binomial mixed-model strand likelihood helper, leaving the legacy `strand_log_likelihood_d_grid()` intact for existing point-binomial callers.
+- Extended `StrandSummary` with same/opposite counts and minor-rate posterior parameters. Cleanup pass made counts explicit: `n_same + n_opposite` must equal `n_observations`, and `p_r1_sense` must match `n_same / n_observations` when observations are present.
+- Added a beta-binomial mixed-model strand likelihood helper and removed the legacy point-binomial `strand_log_likelihood_d_grid()` source-mass path. The density/strand fusion module now uses the beta-binomial helper too.
 - Added exact and large-count approximate beta-binomial slab summaries. The exact path computes `log_p_mixed` and slab `E[D | data, H1]` from the same likelihood array; the approximate path uses beta-binomial RNA variance and a `log_ndtr()`-based Normal interval probability helper.
-- Added `RegionGdnaChannelEstimate` reliability/log-BF arrays with backward-compatible defaults, and threaded `StrandSummary` through `_orchestrator.calibrate()` into `deconvolve_compartments_by_strand()`.
+- Added required `RegionGdnaChannelEstimate` reliability/log-BF arrays, and threaded `StrandSummary` through `_orchestrator.calibrate()` into `deconvolve_compartments_by_strand()`.
 - Updated `build_prior_mass_deconvolution()` so strand-derived prior source mass and precision are multiplied by the compartment reliability weights.
 - Added compact reliability diagnostics to `CalibrationResult.to_summary_dict()`.
 - Added focused tests for beta-binomial mixed likelihood convolution, slab mean/log likelihood consistency, smooth reliability, near-unstranded gating, reliability-weighted prior mass, and `StrandSummary` posterior fields.
 - Tightened `StrandSummary` validation so explicit minor-rate posterior parameters must match the same/opposite counts when observations are present.
 - Added additional focused tests for pure RNA low reliability, strong mixed high reliability, small training-set uncertainty, large-count approximate reliability, and deep-tail Normal interval probabilities.
+- Cleanup pass removed optional `strand_summary=None` deconvolution/calibration support, optional reliability defaults, unused reliability dataclasses, and tests that exercised the deleted point-binomial posterior helpers.
 
 ## Deviations from the plan
 
-- Backward-compatible `StrandSummary` construction is more permissive than the strict PR recipe: older call sites can omit `n_same`/`n_opposite`, and the dataclass infers them. This keeps the implementation focused and avoids a repo-wide constructor churn.
-- The legacy point-binomial `strand_log_likelihood_d_grid()` remains in place because `calibration/integration.py` and existing tests still call it. PR01 production source mass uses the new beta-binomial helper instead. A later cleanup can migrate or rename legacy fusion callers if desired.
+- No backward-compatible PR01 path remains. Callers must provide an explicit `StrandSummary`, reliability arrays are required on `RegionGdnaChannelEstimate`, and all strand likelihoods that contribute source/posterior summaries use beta-binomial RNA uncertainty.
 - The clean `tests/scenarios/test_nrna_double_counting.py::TestNrnaDoubleCounting::test_full_sweep[g0_n0_s90]` scenario now shows a small false-gDNA posterior under continuous reliability (about 1-1.25% in debug runs). This is the expected replacement for the old hard source decision, not an nRNA double-counting regression, so the imperfect-strand clean mRNA tolerance was widened from 20 to 30 fragments while keeping perfect-strand clean tolerance unchanged.
 
 ## Validation log
@@ -40,3 +40,8 @@ Implement `pr01_continuous_strand_reliability.md`: continuous strand reliability
 - `conda activate rigel && pytest tests/test_golden_output.py -q` -> 21 passed.
 - `conda activate rigel && pytest tests/ -q` -> 1176 passed.
 - `conda activate rigel && git diff --check` -> passed.
+- Cleanup validation: `conda activate rigel && ruff check src/rigel/strand_model.py src/rigel/calibration/strand_summary.py src/rigel/calibration/strand_deconv.py src/rigel/calibration/integration.py src/rigel/calibration/calibration_iteration.py src/rigel/calibration/_orchestrator.py src/rigel/calibration/_result.py tests/test_strand_summary.py tests/test_strand_deconv.py tests/test_compartment_strand_deconv.py tests/test_calibration_iteration.py tests/test_calibration_integration.py tests/test_calibrate.py tests/test_background_model.py tests/test_boundary_model.py tests/test_latent_states.py tests/scenarios/test_nrna_double_counting.py` -> passed.
+- Cleanup focused tests: `conda activate rigel && pytest tests/test_strand_summary.py tests/test_strand_deconv.py tests/test_compartment_strand_deconv.py tests/test_calibration_iteration.py tests/test_calibration_integration.py tests/test_calibrate.py tests/test_background_model.py tests/test_boundary_model.py tests/test_latent_states.py tests/scenarios/test_nrna_double_counting.py::TestNrnaDoubleCounting::test_full_sweep -q` -> 83 passed.
+- Cleanup full suite: `conda activate rigel && pytest tests/ -q` -> 1176 passed.
+- Final cleanup lint: `conda activate rigel && ruff check src/rigel/strand_model.py src/rigel/calibration/strand_summary.py src/rigel/calibration/strand_deconv.py src/rigel/calibration/integration.py src/rigel/calibration/calibration_iteration.py src/rigel/calibration/_orchestrator.py src/rigel/calibration/_result.py tests/test_strand_summary.py tests/test_strand_deconv.py tests/test_compartment_strand_deconv.py tests/test_calibration_iteration.py tests/test_calibration_integration.py tests/test_calibrate.py tests/test_background_model.py tests/test_boundary_model.py tests/test_latent_states.py tests/scenarios/test_nrna_double_counting.py` -> passed.
+- Final cleanup whitespace: `conda activate rigel && git diff --check` -> passed.

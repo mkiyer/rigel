@@ -11,7 +11,14 @@ from scipy.special import logsumexp
 from scipy.stats import truncnorm
 
 from .density_model import density_logpmf_grid
-from .strand_deconv import MAX_EXACT_POSTERIOR_N, strand_log_likelihood_d_grid
+from .strand_deconv import (
+    MAX_EXACT_POSTERIOR_N,
+    _approx_log_likelihood_minor_beta_binom,
+    _minor_count_from_folded,
+    _posterior_weights_from_log,
+    _uniform_grid_log_weights,
+    strand_log_likelihood_d_grid_minor_beta_binom,
+)
 from .strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only.
@@ -112,7 +119,7 @@ def fuse_density_and_strand(
     if not np.isfinite(kappa_d) or kappa_d <= 0.0:
         raise ValueError(f"fuse_density_and_strand: kappa_d must be positive; got {kappa_d!r}.")
 
-    _ = ledger, strand_summary
+    _ = ledger
     observed = np.asarray(density_observation.observed_compatible_count, dtype=np.float64)
     n_regions = int(observed.size)
     if np.asarray(region_arrays.start).size != n_regions:
@@ -133,6 +140,11 @@ def fuse_density_and_strand(
     flags[tail_probability > 0.0] |= np.uint8(FUSED_DENSITY_TAIL)
 
     p_r1_sense = float(strand_counts.p_r1_sense)
+    if not np.isclose(float(strand_summary.p_r1_sense), p_r1_sense, rtol=0.0, atol=1e-12):
+        raise ValueError(
+            "fuse_density_and_strand: strand_summary.p_r1_sense must match strand_counts; "
+            f"got {strand_summary.p_r1_sense!r} vs {p_r1_sense!r}."
+        )
     near_unstranded = abs(p_r1_sense - 0.5) < STRAND_CONTRAST_NUMERICAL_FLOOR
     strand_eligible = np.asarray(strand_counts.eligible, dtype=bool) & (not near_unstranded)
 
@@ -158,6 +170,7 @@ def fuse_density_and_strand(
                 use_strand=use_strand,
                 kappa_d=float(kappa_d),
                 p_r1_sense=p_r1_sense,
+                strand_summary=strand_summary,
                 confidence=conf,
             )
         else:
@@ -170,6 +183,7 @@ def fuse_density_and_strand(
                 use_strand=use_strand,
                 kappa_d=float(kappa_d),
                 p_r1_sense=p_r1_sense,
+                strand_summary=strand_summary,
                 confidence=conf,
             )
 
@@ -207,17 +221,19 @@ def _fuse_exact_region(
     use_strand: bool,
     kappa_d: float,
     p_r1_sense: float,
+    strand_summary: "StrandSummary",
     confidence: float,
 ) -> tuple[float, float, float, float, float, int]:
     d_grid = np.arange(n_observed + 1, dtype=np.int64)
     log_density = density_logpmf_grid(density_evidence, region_idx, d_grid)
     if use_strand:
-        log_strand = strand_log_likelihood_d_grid(
+        log_strand = _strand_beta_binom_log_likelihood_d_grid(
             k_sense,
             n_strand,
             d_grid,
             kappa_d=kappa_d,
             p_r1_sense=p_r1_sense,
+            strand_summary=strand_summary,
         )
         base_flag = FUSED_EXACT | FUSED_STRAND_USED
         density_w = strand_w = 0.5
@@ -245,6 +261,7 @@ def _fuse_approx_region(
     use_strand: bool,
     kappa_d: float,
     p_r1_sense: float,
+    strand_summary: "StrandSummary",
     confidence: float,
 ) -> tuple[float, float, float, float, float, int]:
     density_mean, density_var = _density_normal_params(density_evidence, region_idx, n_observed)
@@ -263,6 +280,7 @@ def _fuse_approx_region(
             n_observed,
             kappa_d=kappa_d,
             p_r1_sense=p_r1_sense,
+            strand_summary=strand_summary,
         )
         strand_tau = 1.0 / max(strand_var, _MIN_VARIANCE)
 
@@ -285,6 +303,7 @@ def _fuse_approx_region(
         n_strand,
         kappa_d,
         p_r1_sense,
+        strand_summary,
     )
 
     if d_hat < 5.0 or d_hat > float(n_observed - 5):
@@ -298,6 +317,7 @@ def _fuse_approx_region(
                 use_strand=use_strand,
                 kappa_d=kappa_d,
                 p_r1_sense=p_r1_sense,
+                strand_summary=strand_summary,
                 confidence=confidence,
             )
             return (*exact[:5], exact[5] | FUSED_BOUNDARY_FALLBACK)
@@ -310,6 +330,7 @@ def _fuse_approx_region(
             use_strand=use_strand,
             kappa_d=kappa_d,
             p_r1_sense=p_r1_sense,
+            strand_summary=strand_summary,
             confidence=confidence,
             upper=d_hat > float(n_observed / 2),
         )
@@ -375,6 +396,7 @@ def _bounded_mode(
     n_strand: int,
     kappa_d: float,
     p_r1_sense: float,
+    strand_summary: "StrandSummary",
 ) -> float:
     if not np.isfinite(loc) or not np.isfinite(sigma) or sigma <= 0.0:
         return float(np.clip(loc, 0.0, n_observed))
@@ -383,12 +405,13 @@ def _bounded_mode(
         d_int = np.array([int(round(float(np.clip(d_value, 0.0, n_observed))))])
         log_density = density_logpmf_grid(density_evidence, region_idx, d_int)[0]
         if use_strand:
-            log_strand = strand_log_likelihood_d_grid(
+            log_strand = _strand_beta_binom_log_likelihood_d_grid(
                 k_sense,
                 n_strand,
                 d_int,
                 kappa_d=kappa_d,
                 p_r1_sense=p_r1_sense,
+                strand_summary=strand_summary,
             )[0]
         else:
             log_strand = 0.0
@@ -414,6 +437,7 @@ def _boundary_window_posterior(
     use_strand: bool,
     kappa_d: float,
     p_r1_sense: float,
+    strand_summary: "StrandSummary",
     confidence: float,
     upper: bool,
 ) -> tuple[float, float, float, int]:
@@ -423,12 +447,13 @@ def _boundary_window_posterior(
         d_grid = np.arange(0, min(n_observed, _BOUNDARY_WINDOW) + 1, dtype=np.int64)
     log_density = density_logpmf_grid(density_evidence, region_idx, d_grid)
     if use_strand:
-        log_strand = strand_log_likelihood_d_grid(
+        log_strand = _strand_beta_binom_log_likelihood_d_grid(
             k_sense,
             n_strand,
             d_grid,
             kappa_d=kappa_d,
             p_r1_sense=p_r1_sense,
+            strand_summary=strand_summary,
         )
         flag = FUSED_BOUNDARY_FALLBACK | FUSED_STRAND_USED
     else:
@@ -464,6 +489,26 @@ def _summarize_grid_posterior(
     return mean, float(d_grid[q_idx]), max(var, 0.0)
 
 
+def _strand_beta_binom_log_likelihood_d_grid(
+    k_sense: int,
+    n_strand: int,
+    d_grid: np.ndarray,
+    *,
+    kappa_d: float,
+    p_r1_sense: float,
+    strand_summary: "StrandSummary",
+) -> np.ndarray:
+    k_minor = _minor_count_from_folded(k_sense, n_strand, p_r1_sense)
+    return strand_log_likelihood_d_grid_minor_beta_binom(
+        k_minor,
+        n_strand,
+        d_grid,
+        kappa_d=kappa_d,
+        minor_rate_alpha=float(strand_summary.minor_rate_alpha),
+        minor_rate_beta=float(strand_summary.minor_rate_beta),
+    )
+
+
 def _density_normal_params(
     evidence: "DensityEvidence",
     region_idx: int,
@@ -490,23 +535,27 @@ def _strand_normal_params(
     *,
     kappa_d: float,
     p_r1_sense: float,
+    strand_summary: "StrandSummary",
 ) -> tuple[float, float]:
-    delta = float(p_r1_sense) - 0.5
-    if abs(delta) < STRAND_CONTRAST_NUMERICAL_FLOOR:
+    if abs(float(p_r1_sense) - 0.5) < STRAND_CONTRAST_NUMERICAL_FLOOR:
         return float(n_observed), float(max(n_observed, 1))
 
-    r_hat = (float(k_sense) - 0.5 * float(n_strand)) / delta
-    r_hat = float(np.clip(r_hat, 0.0, n_strand))
-    d_hat = float(np.clip(float(n_strand) - r_hat, 0.0, n_observed))
-
-    var_rna = r_hat * float(p_r1_sense) * (1.0 - float(p_r1_sense))
-    if 1.0 + kappa_d > 0.0:
-        var_dna = 0.25 * d_hat * (d_hat + kappa_d) / (1.0 + kappa_d)
-    else:
-        var_dna = 0.0
-    var_k = max(var_rna + var_dna, _MIN_VARIANCE)
-    var_d = var_k / (delta * delta)
-    return d_hat, float(max(var_d, _MIN_VARIANCE))
+    d_grid = np.unique(np.rint(np.linspace(0, n_observed, 257)).astype(np.int64))
+    k_minor = _minor_count_from_folded(k_sense, n_strand, p_r1_sense)
+    log_likelihood = _approx_log_likelihood_minor_beta_binom(
+        k_minor,
+        n_strand,
+        d_grid,
+        kappa_d=kappa_d,
+        minor_rate_alpha=float(strand_summary.minor_rate_alpha),
+        minor_rate_beta=float(strand_summary.minor_rate_beta),
+    )
+    log_prior = _uniform_grid_log_weights(d_grid, n_observed)
+    posterior = _posterior_weights_from_log(log_likelihood + log_prior)
+    d_float = d_grid.astype(np.float64, copy=False)
+    mean = float(np.sum(d_float * posterior, dtype=np.float64))
+    variance = float(np.sum(((d_float - mean) ** 2) * posterior, dtype=np.float64))
+    return float(np.clip(mean, 0.0, n_observed)), float(max(variance, _MIN_VARIANCE))
 
 
 def _density_weight(density_tau: float, strand_tau: float) -> float:

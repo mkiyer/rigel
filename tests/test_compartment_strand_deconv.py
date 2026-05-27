@@ -26,6 +26,17 @@ from rigel.calibration.strand_deconv import (
     build_compartment_strand_counts,
     deconvolve_compartments_by_strand,
 )
+from rigel.calibration.strand_summary import StrandSummary
+
+
+def _strand_summary(p_r1_sense: float, n_observations: int) -> StrandSummary:
+    n_same = int(round(float(p_r1_sense) * int(n_observations)))
+    return StrandSummary(
+        p_r1_sense=float(p_r1_sense),
+        n_observations=int(n_observations),
+        n_same=n_same,
+        n_opposite=int(n_observations) - n_same,
+    )
 
 
 def _payload(region_counts: np.ndarray, signatures: np.ndarray) -> CalibrationScanPayload:
@@ -113,7 +124,11 @@ def test_deconvolve_compartments_is_conservative_for_ineligible_regions() -> Non
     region_arrays, payload_arrays = _build_arrays()
     counts = build_compartment_strand_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
 
-    estimates = deconvolve_compartments_by_strand(counts, kappa_d=10.0)
+    estimates = deconvolve_compartments_by_strand(
+        counts,
+        kappa_d=10.0,
+        strand_summary=_strand_summary(0.95, 10_000),
+    )
 
     assert estimates.contained_mean[2] == pytest.approx(24.0)
     assert estimates.contained_rna_lower[2] == pytest.approx(0.0)
@@ -126,7 +141,11 @@ def test_compartment_deconvolution_tracks_channels_independently() -> None:
     region_arrays, payload_arrays = _build_arrays()
     counts = build_compartment_strand_counts(region_arrays, payload_arrays, p_r1_sense=1.0)
 
-    estimates = deconvolve_compartments_by_strand(counts, kappa_d=1.0e4)
+    estimates = deconvolve_compartments_by_strand(
+        counts,
+        kappa_d=1.0e4,
+        strand_summary=_strand_summary(1.0, 10_000),
+    )
 
     assert estimates.contained_mean[0] < estimates.boundary_left_mean[0] + 100.0
     assert estimates.boundary_right_mean[0] <= counts.boundary_right_total[0]

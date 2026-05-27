@@ -67,7 +67,6 @@ __all__ = [
     "FLAG_RELIABILITY_APPROX",
     "StrandRegionCounts",
     "CompartmentStrandCounts",
-    "StrandReliabilityEstimate",
     "RegionGdnaEstimate",
     "RegionGdnaChannelEstimate",
     "KappaDEstimate",
@@ -75,7 +74,6 @@ __all__ = [
     "build_compartment_strand_counts",
     "deconvolve_regions_by_strand",
     "deconvolve_compartments_by_strand",
-    "strand_log_likelihood_d_grid",
     "strand_log_likelihood_d_grid_minor_beta_binom",
     "screen_no_rna_exons",
     "estimate_kappa_d",
@@ -165,25 +163,11 @@ class RegionGdnaEstimate:
     kappa_d_n_exon_self_training: int
     p_r1_sense: float
     internal_rna_lower_ci: float
-    reliability: np.ndarray | None = None
-    log_bayes_factor: np.ndarray | None = None
-    log_p_all_rna: np.ndarray | None = None
-    log_p_mixed: np.ndarray | None = None
-    k_minor: np.ndarray | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class StrandReliabilityEstimate:
-    """Per-region exact reliability for strand-derived gDNA evidence."""
-
     reliability: np.ndarray
     log_bayes_factor: np.ndarray
     log_p_all_rna: np.ndarray
     log_p_mixed: np.ndarray
-    slab_gdna_mean: np.ndarray
     k_minor: np.ndarray
-    n_total: np.ndarray
-    flags: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,12 +193,12 @@ class RegionGdnaChannelEstimate:
     kappa_d: float
     p_r1_sense: float
     internal_rna_lower_ci: float
-    contained_reliability: np.ndarray | None = None
-    contained_log_bayes_factor: np.ndarray | None = None
-    boundary_left_reliability: np.ndarray | None = None
-    boundary_left_log_bayes_factor: np.ndarray | None = None
-    boundary_right_reliability: np.ndarray | None = None
-    boundary_right_log_bayes_factor: np.ndarray | None = None
+    contained_reliability: np.ndarray
+    contained_log_bayes_factor: np.ndarray
+    boundary_left_reliability: np.ndarray
+    boundary_left_log_bayes_factor: np.ndarray
+    boundary_right_reliability: np.ndarray
+    boundary_right_log_bayes_factor: np.ndarray
 
     def __post_init__(self) -> None:
         contained = np.asarray(self.contained_mean, dtype=np.float32)
@@ -243,7 +227,7 @@ class RegionGdnaChannelEstimate:
             "boundary_left_reliability",
             "boundary_right_reliability",
         ):
-            values = _optional_float32_vector(field_name, getattr(self, field_name), region_count, 1.0)
+            values = _as_float32_vector(field_name, getattr(self, field_name), region_count)
             values = np.clip(np.nan_to_num(values, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
             object.__setattr__(self, field_name, values.astype(np.float32, copy=False))
 
@@ -252,7 +236,7 @@ class RegionGdnaChannelEstimate:
             "boundary_left_log_bayes_factor",
             "boundary_right_log_bayes_factor",
         ):
-            values = _optional_float32_vector(field_name, getattr(self, field_name), region_count, 0.0)
+            values = _as_float32_vector(field_name, getattr(self, field_name), region_count)
             values = np.nan_to_num(values, nan=0.0, posinf=np.inf, neginf=-np.inf)
             object.__setattr__(self, field_name, values.astype(np.float32, copy=False))
 
@@ -289,17 +273,6 @@ def _as_float32_vector(name: str, values: np.ndarray, region_count: int) -> np.n
     if array.shape != (region_count,):
         raise ValueError(f"{name} must have shape ({region_count},); got {array.shape}.")
     return array
-
-
-def _optional_float32_vector(
-    name: str,
-    values: np.ndarray | None,
-    region_count: int,
-    default_value: float,
-) -> np.ndarray:
-    if values is None:
-        return np.full(region_count, float(default_value), dtype=np.float32)
-    return _as_float32_vector(name, values, region_count)
 
 
 # ---------------------------------------------------------------------------
@@ -465,21 +438,6 @@ def _round_n(n_total: float) -> int:
     return max(0, int(round(float(n_total))))
 
 
-def _log_binom_pmf(j: np.ndarray, n: int, p: float) -> np.ndarray:
-    """Log PMF of Binomial(n, p) at integer points ``j`` (vectorised)."""
-    if not np.isfinite(p) or not 0.0 <= float(p) <= 1.0:
-        raise ValueError(f"_log_binom_pmf: p must be finite and in [0, 1]; got {p!r}")
-    j_arr = np.asarray(j)
-    if n <= 0:
-        return np.where(j_arr == 0, 0.0, -np.inf)
-    if p == 0.0:
-        return np.where(j_arr == 0, 0.0, -np.inf)
-    if p == 1.0:
-        return np.where(j_arr == n, 0.0, -np.inf)
-    log_c = gammaln(n + 1) - gammaln(j_arr + 1) - gammaln(n - j_arr + 1)
-    return log_c + j_arr * np.log(p) + (n - j_arr) * np.log1p(-p)
-
-
 def _log_beta_binom_pmf(k: np.ndarray, n: int, alpha: float, beta: float) -> np.ndarray:
     """Log PMF of BetaBinomial(n, alpha, beta) at integer points ``k``."""
     if not np.isfinite(alpha) or alpha <= 0.0:
@@ -593,109 +551,6 @@ def strand_log_likelihood_d_grid_minor_beta_binom(
         out[pos] = float(logsumexp(terms))
 
     return out
-
-
-def strand_log_likelihood_d_grid(
-    k_sense_obs: int,
-    n_total: int,
-    d_grid: np.ndarray,
-    *,
-    kappa_d: float,
-    p_r1_sense: float,
-) -> np.ndarray:
-    """Return ``log L_strand(K | D=d, N)`` for integer ``d_grid``.
-
-    ``D`` is the gDNA count and ``R = N - D`` is the RNA count. RNA sense
-    observations follow ``Binom(R, p_r1_sense)`` and gDNA sense observations
-    follow the symmetric beta-binomial strand-balance model parameterized by
-    ``kappa_d``.
-    """
-    n = int(n_total)
-    if n < 0:
-        raise ValueError(f"strand_log_likelihood_d_grid: n_total must be >= 0; got {n}")
-    if not np.isfinite(kappa_d) or kappa_d <= 0.0:
-        raise ValueError(
-            f"strand_log_likelihood_d_grid: kappa_d must be finite and positive; got {kappa_d!r}"
-        )
-    if not np.isfinite(p_r1_sense) or not 0.0 <= float(p_r1_sense) <= 1.0:
-        raise ValueError(
-            "strand_log_likelihood_d_grid: p_r1_sense must be finite and in [0, 1]; "
-            f"got {p_r1_sense!r}"
-        )
-
-    k_obs = int(max(0, min(n, int(k_sense_obs))))
-    d_arr = np.rint(np.asarray(d_grid, dtype=np.float64)).astype(np.int64)
-    out = np.full(d_arr.shape, -np.inf, dtype=np.float64)
-    a = float(kappa_d) / 2.0
-
-    for pos, d_raw in np.ndenumerate(d_arr):
-        d = int(d_raw)
-        if d < 0 or d > n:
-            continue
-        r = n - d
-        j_lo = max(0, k_obs - d)
-        j_hi = min(r, k_obs)
-        if j_lo > j_hi:
-            continue
-        js = np.arange(j_lo, j_hi + 1)
-        terms = _log_binom_pmf(js, r, float(p_r1_sense)) + _log_beta_binom_pmf(
-            k_obs - js,
-            d,
-            a,
-            a,
-        )
-        finite_terms = terms[np.isfinite(terms)]
-        if finite_terms.size == 0:
-            continue
-        m = float(np.max(finite_terms))
-        out[pos] = m + np.log(np.sum(np.exp(finite_terms - m)))
-
-    return out
-
-
-def _exact_posterior_R(
-    k_sense_obs: int,
-    n: int,
-    *,
-    kappa_d: float,
-    p_r1_sense: float,
-) -> np.ndarray:
-    """Exact posterior PMF over R ∈ {0,...,n} with uniform prior on R.
-
-    Likelihood:
-        P(k_sense | R=r, D=n-r)
-          = sum_{j=max(0, k_sense-(n-r))..min(r, k_sense)}
-              Binom(j | r, p_r1_sense) * BB(k_sense-j | n-r, kappa_d/2, kappa_d/2)
-    """
-    if n < 0:
-        raise ValueError(f"_exact_posterior_R: n must be >= 0; got {n}")
-    if k_sense_obs < 0 or k_sense_obs > n:
-        # Snap out-of-range observed counts (can occur from float rounding).
-        k_sense_obs = int(max(0, min(n, k_sense_obs)))
-
-    r_grid = np.arange(n + 1, dtype=np.int64)
-    d_for_r = n - r_grid
-    log_post = strand_log_likelihood_d_grid(
-        k_sense_obs,
-        n,
-        d_for_r,
-        kappa_d=kappa_d,
-        p_r1_sense=p_r1_sense,
-    )
-
-    finite = np.isfinite(log_post)
-    if not np.any(finite):
-        # Degenerate (should not happen). Return a flat prior.
-        out = np.ones(n + 1, dtype=np.float64) / float(n + 1)
-        return out
-    m = float(np.max(log_post[finite]))
-    post = np.exp(log_post - m)
-    post[~finite] = 0.0
-    z = float(post.sum())
-    if z <= 0.0:
-        out = np.ones(n + 1, dtype=np.float64) / float(n + 1)
-        return out
-    return post / z
 
 
 def _uniform_grid_log_weights(d_grid: np.ndarray, n: int) -> np.ndarray:
@@ -835,87 +690,26 @@ def _strand_beta_binom_slab_summary(
     return log_p_all_rna, log_p_mixed, mean_d, d_upper, r_lower, sd_d, k_minor, flags
 
 
-def _summarize_exact(
-    posterior: np.ndarray,
-    *,
-    internal_rna_lower_ci: float,
-    n_int: int,
-) -> tuple[float, float, float, float]:
-    """Return (mean_R, R_lower_count, R_upper_count, sd_R) from a discrete PMF.
-
-    ``R_lower_count`` = largest integer L with P(R >= L) >= c.
-    ``R_upper_count`` = smallest integer U with P(R <= U) >= c.
-    """
-    r_grid = np.arange(n_int + 1, dtype=np.float64)
-    mean_r = float(np.sum(r_grid * posterior))
-    var_r = float(np.sum((r_grid - mean_r) ** 2 * posterior))
-    sd_r = float(np.sqrt(max(var_r, 0.0)))
-
-    # Lower bound on R at confidence c: largest L s.t. P(R >= L) >= c.
-    surv = np.cumsum(posterior[::-1])[::-1]  # surv[L] = P(R >= L)
-    L_candidates = np.where(surv >= internal_rna_lower_ci)[0]
-    r_lower = float(L_candidates.max()) if L_candidates.size > 0 else 0.0
-
-    # Upper bound on R at confidence c: smallest U s.t. P(R <= U) >= c.
-    cdf = np.cumsum(posterior)
-    U_candidates = np.where(cdf >= internal_rna_lower_ci)[0]
-    r_upper = float(U_candidates.min()) if U_candidates.size > 0 else float(n_int)
-
-    return mean_r, r_lower, r_upper, sd_r
-
-
-def _summarize_normal(
-    k_sense: float,
-    n: float,
-    *,
-    kappa_d: float,
-    p_r1_sense: float,
-    internal_rna_lower_ci: float,
-) -> tuple[float, float, float, float]:
-    """Normal-approximation summary of the posterior over R given (k_sense, n).
-
-    Treats R as continuous on [0, n] and linearises k_sense ≈ mu(R) with
-    mu(R) = 0.5 n + R (p − 0.5). Variance is evaluated at R̂ to avoid
-    needing to invert the heteroscedastic relationship.
-    """
-    delta = float(p_r1_sense) - 0.5
-    if abs(delta) < STRAND_CONTRAST_NUMERICAL_FLOOR:
-        # Identifiability guard — caller has already set FLAG_NEAR_UNSTRANDED.
-        return 0.0, 0.0, float(n), 0.0
-
-    r_hat = (k_sense - 0.5 * n) / delta
-    r_hat = float(np.clip(r_hat, 0.0, n))
-    d_hat = float(max(0.0, n - r_hat))
-
-    var_rna = r_hat * p_r1_sense * (1.0 - p_r1_sense)
-    if 1.0 + kappa_d > 0.0:
-        var_dna = 0.25 * d_hat * (d_hat + kappa_d) / (1.0 + kappa_d)
-    else:
-        var_dna = 0.0
-    var_k = max(var_rna + var_dna, 0.0)
-    var_r = var_k / (delta * delta)
-    sd_r = float(np.sqrt(var_r))
-
-    z = float(norm.ppf(float(internal_rna_lower_ci)))
-    r_lower = float(np.clip(r_hat - z * sd_r, 0.0, n))
-    r_upper = float(np.clip(r_hat + z * sd_r, 0.0, n))
-    return r_hat, r_lower, r_upper, sd_r
-
-
 # ---------------------------------------------------------------------------
 # Deconvolution
 # ---------------------------------------------------------------------------
 
 
-def _deconvolve_regions_by_strand_beta_binom(
+def deconvolve_regions_by_strand(
     counts: StrandRegionCounts,
     *,
     kappa_d: float,
     strand_summary: StrandSummary,
-    kappa_d_n_seed_regions: int,
-    kappa_d_n_exon_self_training: int,
-    kappa_d_fallback_used: bool,
+    kappa_d_n_seed_regions: int = 0,
+    kappa_d_n_exon_self_training: int = 0,
+    kappa_d_fallback_used: bool = False,
 ) -> RegionGdnaEstimate:
+    """Per-region source-aware gDNA slab summary and strand reliability."""
+    if not np.isfinite(kappa_d) or kappa_d <= 0.0:
+        raise ValueError(
+            f"deconvolve_regions_by_strand: kappa_d must be finite and positive; got {kappa_d!r}"
+        )
+
     R = int(counts.k_sense.shape[0])
     n_total = counts.n_total.astype(np.float32, copy=True)
     mean_count = np.zeros(R, dtype=np.float32)
@@ -934,6 +728,11 @@ def _deconvolve_regions_by_strand_beta_binom(
         raise ValueError(
             "deconvolve_regions_by_strand: counts.p_r1_sense must be finite and in [0, 1]; "
             f"got {counts.p_r1_sense!r}"
+        )
+    if not np.isclose(float(strand_summary.p_r1_sense), p_r1_sense, rtol=0.0, atol=1e-12):
+        raise ValueError(
+            "deconvolve_regions_by_strand: strand_summary.p_r1_sense must match counts; "
+            f"got {strand_summary.p_r1_sense!r} vs {p_r1_sense!r}."
         )
     near_unstranded = abs(p_r1_sense - 0.5) < STRAND_CONTRAST_NUMERICAL_FLOOR
     eligible = np.asarray(counts.eligible, dtype=bool)
@@ -1022,119 +821,6 @@ def _deconvolve_regions_by_strand_beta_binom(
     )
 
 
-def deconvolve_regions_by_strand(
-    counts: StrandRegionCounts,
-    *,
-    kappa_d: float,
-    kappa_d_n_seed_regions: int = 0,
-    kappa_d_n_exon_self_training: int = 0,
-    kappa_d_fallback_used: bool = False,
-    strand_summary: StrandSummary | None = None,
-) -> RegionGdnaEstimate:
-    """Per-region gDNA fragment-count posterior given ``kappa_d`` and ``p_r1_sense``."""
-    if not np.isfinite(kappa_d) or kappa_d <= 0.0:
-        raise ValueError(
-            f"deconvolve_regions_by_strand: kappa_d must be finite and positive; got {kappa_d!r}"
-        )
-    if strand_summary is not None:
-        return _deconvolve_regions_by_strand_beta_binom(
-            counts,
-            kappa_d=kappa_d,
-            strand_summary=strand_summary,
-            kappa_d_n_seed_regions=kappa_d_n_seed_regions,
-            kappa_d_n_exon_self_training=kappa_d_n_exon_self_training,
-            kappa_d_fallback_used=kappa_d_fallback_used,
-        )
-
-    R = int(counts.k_sense.shape[0])
-    n_total = counts.n_total.astype(np.float32, copy=True)
-    mean_count = np.zeros(R, dtype=np.float32)
-    upper_count = np.zeros(R, dtype=np.float32)
-    rna_lower_count = np.zeros(R, dtype=np.float32)
-    precision = np.zeros(R, dtype=np.float32)
-    flags = np.zeros(R, dtype=np.uint8)
-
-    p_r1_sense = float(counts.p_r1_sense)
-    if not np.isfinite(p_r1_sense) or not 0.0 <= p_r1_sense <= 1.0:
-        raise ValueError(
-            "deconvolve_regions_by_strand: counts.p_r1_sense must be finite and in [0, 1]; "
-            f"got {counts.p_r1_sense!r}"
-        )
-    near_unstranded = abs(p_r1_sense - 0.5) < STRAND_CONTRAST_NUMERICAL_FLOOR
-
-    eligible = np.asarray(counts.eligible, dtype=bool)
-
-    for i in range(R):
-        if not eligible[i] or n_total[i] <= 0.0:
-            flags[i] |= FLAG_INELIGIBLE
-            mean_count[i] = n_total[i]
-            upper_count[i] = n_total[i]
-            rna_lower_count[i] = 0.0
-            precision[i] = 0.0
-            if kappa_d_fallback_used:
-                flags[i] |= FLAG_KAPPA_FALLBACK
-            continue
-
-        if near_unstranded:
-            flags[i] |= FLAG_NEAR_UNSTRANDED
-            mean_count[i] = n_total[i]
-            upper_count[i] = n_total[i]
-            rna_lower_count[i] = 0.0
-            precision[i] = 0.0
-            if kappa_d_fallback_used:
-                flags[i] |= FLAG_KAPPA_FALLBACK
-            continue
-
-        n_int = _round_n(float(n_total[i]))
-        k_int = int(max(0, min(n_int, round(float(counts.k_sense[i])))))
-
-        if n_int <= MAX_EXACT_POSTERIOR_N:
-            posterior = _exact_posterior_R(k_int, n_int, kappa_d=kappa_d, p_r1_sense=p_r1_sense)
-            r_hat, r_lower, r_upper, sd_r = _summarize_exact(
-                posterior,
-                internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
-                n_int=n_int,
-            )
-        else:
-            flags[i] |= FLAG_APPROX_NORMAL
-            r_hat, r_lower, r_upper, sd_r = _summarize_normal(
-                float(counts.k_sense[i]),
-                float(n_total[i]),
-                kappa_d=kappa_d,
-                p_r1_sense=p_r1_sense,
-                internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
-            )
-
-        n_val = float(n_total[i])
-        r_hat_out = float(np.clip(r_hat, 0.0, n_val))
-        r_lower_out = float(np.clip(r_lower, 0.0, n_val))
-        mean_count[i] = n_val - r_hat_out
-        upper_count[i] = n_val - r_lower_out
-        rna_lower_count[i] = r_lower_out
-        # Precision in [0, 1]: 1 ⇔ posterior SD is zero, 0 ⇔ SD ≥ n/2.
-        if n_val > 0.0:
-            precision[i] = float(max(0.0, min(1.0, 1.0 - 2.0 * sd_r / n_val)))
-        else:
-            precision[i] = 0.0
-
-        if kappa_d_fallback_used:
-            flags[i] |= FLAG_KAPPA_FALLBACK
-
-    return RegionGdnaEstimate(
-        n_total=n_total,
-        mean_count=mean_count,
-        upper_count=upper_count,
-        rna_lower_count=rna_lower_count,
-        precision=precision,
-        flags=flags,
-        kappa_d=float(kappa_d),
-        kappa_d_n_seed_regions=int(kappa_d_n_seed_regions),
-        kappa_d_n_exon_self_training=int(kappa_d_n_exon_self_training),
-        p_r1_sense=p_r1_sense,
-        internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
-    )
-
-
 def _single_compartment_estimate(
     counts: CompartmentStrandCounts,
     *,
@@ -1142,7 +828,7 @@ def _single_compartment_estimate(
     k_antisense: np.ndarray,
     n_total: np.ndarray,
     kappa_d: float,
-    strand_summary: StrandSummary | None,
+    strand_summary: StrandSummary,
 ) -> RegionGdnaEstimate:
     return deconvolve_regions_by_strand(
         StrandRegionCounts(
@@ -1157,23 +843,11 @@ def _single_compartment_estimate(
     )
 
 
-def _estimate_reliability_or_default(estimate: RegionGdnaEstimate, default: float) -> np.ndarray:
-    if estimate.reliability is None:
-        return np.full(estimate.mean_count.shape, float(default), dtype=np.float32)
-    return np.asarray(estimate.reliability, dtype=np.float32)
-
-
-def _estimate_logbf_or_default(estimate: RegionGdnaEstimate) -> np.ndarray:
-    if estimate.log_bayes_factor is None:
-        return np.zeros(estimate.mean_count.shape, dtype=np.float32)
-    return np.asarray(estimate.log_bayes_factor, dtype=np.float32)
-
-
 def deconvolve_compartments_by_strand(
     counts: CompartmentStrandCounts,
     *,
     kappa_d: float,
-    strand_summary: StrandSummary | None = None,
+    strand_summary: StrandSummary,
 ) -> RegionGdnaChannelEstimate:
     """Run the strand deconvolution independently for each unspliced compartment."""
     contained = _single_compartment_estimate(
@@ -1222,12 +896,12 @@ def deconvolve_compartments_by_strand(
         kappa_d=float(kappa_d),
         p_r1_sense=float(counts.p_r1_sense),
         internal_rna_lower_ci=_INTERNAL_RNA_LOWER_CI,
-        contained_reliability=_estimate_reliability_or_default(contained, 1.0),
-        contained_log_bayes_factor=_estimate_logbf_or_default(contained),
-        boundary_left_reliability=_estimate_reliability_or_default(boundary_left, 1.0),
-        boundary_left_log_bayes_factor=_estimate_logbf_or_default(boundary_left),
-        boundary_right_reliability=_estimate_reliability_or_default(boundary_right, 1.0),
-        boundary_right_log_bayes_factor=_estimate_logbf_or_default(boundary_right),
+        contained_reliability=contained.reliability,
+        contained_log_bayes_factor=contained.log_bayes_factor,
+        boundary_left_reliability=boundary_left.reliability,
+        boundary_left_log_bayes_factor=boundary_left.log_bayes_factor,
+        boundary_right_reliability=boundary_right.reliability,
+        boundary_right_log_bayes_factor=boundary_right.log_bayes_factor,
     )
 
 

@@ -245,6 +245,12 @@ def test_prior_mass_deconvolution_uses_compartment_strand_means_when_available()
         kappa_d=10.0,
         p_r1_sense=0.95,
         internal_rna_lower_ci=0.95,
+        contained_reliability=np.ones(1, dtype=np.float32),
+        contained_log_bayes_factor=np.zeros(1, dtype=np.float32),
+        boundary_left_reliability=np.ones(1, dtype=np.float32),
+        boundary_left_log_bayes_factor=np.zeros(1, dtype=np.float32),
+        boundary_right_reliability=np.ones(1, dtype=np.float32),
+        boundary_right_log_bayes_factor=np.zeros(1, dtype=np.float32),
     )
 
     prior_mass = build_prior_mass_deconvolution(
@@ -295,6 +301,11 @@ def test_prior_mass_deconvolution_weights_strand_means_by_reliability() -> None:
         p_r1_sense=0.95,
         internal_rna_lower_ci=0.95,
         contained_reliability=np.array([0.25], dtype=np.float32),
+        contained_log_bayes_factor=np.zeros(1, dtype=np.float32),
+        boundary_left_reliability=np.zeros(1, dtype=np.float32),
+        boundary_left_log_bayes_factor=np.zeros(1, dtype=np.float32),
+        boundary_right_reliability=np.zeros(1, dtype=np.float32),
+        boundary_right_log_bayes_factor=np.zeros(1, dtype=np.float32),
     )
 
     prior_mass = build_prior_mass_deconvolution(
@@ -345,6 +356,11 @@ def test_prior_mass_deconvolution_zero_reliability_blocks_strand_gdna() -> None:
         p_r1_sense=0.95,
         internal_rna_lower_ci=0.95,
         contained_reliability=np.array([0.0], dtype=np.float32),
+        contained_log_bayes_factor=np.zeros(1, dtype=np.float32),
+        boundary_left_reliability=np.zeros(1, dtype=np.float32),
+        boundary_left_log_bayes_factor=np.zeros(1, dtype=np.float32),
+        boundary_right_reliability=np.zeros(1, dtype=np.float32),
+        boundary_right_log_bayes_factor=np.zeros(1, dtype=np.float32),
     )
 
     prior_mass = build_prior_mass_deconvolution(

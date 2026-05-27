@@ -10,7 +10,7 @@ This directory breaks the v5 design into implementation-ready PR recipes. The go
 |---|---|
 | Latent states are strata | `unexpressed_offtarget`, `unexpressed_capture`, `expressed_capture`, and `expressed_offtarget` must never be consumed as RNA/gDNA source labels. |
 | Source mass is explicit | EM priors consume `PriorMassDeconvolution.gdna_unspliced_mean` and `.rna_unspliced_mean`. |
-| Exposure is opportunity times enrichment | `A_r` is built from capture geometry/opportunity and learned enrichment, never from raw local abundance ratios. |
+| Exposure is source-reliable opportunity | `A_r` is built from source-reliable gDNA/background ratios, never from latent capture states or raw local read depth. |
 | RNA prior is grouped | Do not add transcript-level pseudocount floors in Python or native EM. |
 | Uncertainty travels | Source reliability, capture exposure identifiability, and ESS strength must be emitted in diagnostics. |
 
@@ -37,9 +37,9 @@ Every behavior-changing PR must be evaluated across the four RNA-seq strata:
 | Strand-specific | Capture | PR 1 expectation | PR 2 expectation | Deferred? |
 |---|---:|---|---|---|
 | yes | no | improve or maintain source split | `A_r = 1` non-regression | no |
-| yes | yes | improve source reliability | local EB exposure active when panel/opportunity is available | no |
+| yes | yes | improve source reliability | one-class local exposure rises only with source-reliable gDNA excess | no |
 | no | no | strand reliability inactive | `A_r = 1` non-regression | no |
-| no | yes | strand reliability inactive | exposure can be estimated, but source split is not fully solved | yes, source split deferred |
+| no | yes | strand reliability inactive | exposure remains neutral until a strand-free source split exists | yes, source split deferred |
 
 The existing eight-condition hybrid-capture synthetic suite remains the acceptance gate after PR 1 + PR 2. PR 3 has a stricter gate: no material regression in any non-target stratum and no new transcript-collapse pattern.
 

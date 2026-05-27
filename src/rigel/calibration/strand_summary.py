@@ -50,15 +50,18 @@ class StrandSummary:
             raise ValueError(
                 f"StrandSummary.n_opposite must be >= 0; got {self.n_opposite!r}."
             )
-        if n_observations > 0 and n_same == 0 and n_opposite == 0:
-            n_same = int(round(p_r1_sense * n_observations))
-            n_same = max(0, min(n_observations, n_same))
-            n_opposite = n_observations - n_same
-        elif n_same + n_opposite != n_observations:
+        if n_same + n_opposite != n_observations:
             raise ValueError(
                 "StrandSummary.n_same + n_opposite must equal n_observations; "
                 f"got {n_same} + {n_opposite} != {n_observations}."
             )
+        if n_observations > 0:
+            observed_p = n_same / n_observations
+            if not math.isclose(p_r1_sense, observed_p, rel_tol=0.0, abs_tol=1e-12):
+                raise ValueError(
+                    "StrandSummary.p_r1_sense must equal n_same / n_observations; "
+                    f"got {p_r1_sense!r}, expected {observed_p!r}."
+                )
         alpha = float(self.minor_rate_alpha)
         beta = float(self.minor_rate_beta)
         if n_observations > 0 and alpha == 1.0 and beta == 1.0:

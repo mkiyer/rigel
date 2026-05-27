@@ -1,239 +1,350 @@
-# PR 2: Empirical-Bayes Local Capture Exposure
+# PR 2: One-Class Source-Reliable Capture Exposure
 
 ## Goal
 
-Replace the current `A_r = mu_gdna / off_target_expectation` ratio with capture exposure built from physical capture opportunity and learned local enrichment. The model should allow strongly captured probe neighborhoods to have high gDNA exposure, weakly captured neighborhoods to shrink toward the panel mean, and no-capture data to return `A_r = 1` exactly.
+Fix `A_r` by estimating local capture exposure from source-reliable gDNA mass, not from latent calibration states. PR02 should work for both ordinary RNA-seq and hybrid-capture RNA-seq without requiring any external BED or probe file.
 
-This PR depends on PR 1. Source-reliable gDNA mass and reliability weights must be available before local exposure is fit.
-
-## Non-goals
-
-- Do not use latent capture states as RNA/gDNA source labels.
-- Do not learn exposure from raw local observed counts alone.
-- Do not add fixed `A_r` caps, fixed source pseudocounts, or ratio guards that become hidden model assumptions.
-- Do not solve unstranded capture-on source splitting. This PR can estimate exposure there, but source mass remains limited by available evidence.
-- Do not make production calibration depend on `rigel.sim` internals without an explicit extraction or adapter.
-
-## Files to edit
-
-| File | Purpose of edit |
-|---|---|
-| `src/rigel/config.py` | Add optional capture-panel calibration configuration. |
-| `src/rigel/cli.py` | Add CLI/config-file plumbing for the optional capture-panel fields. |
-| `src/rigel/calibration/capture_exposure.py` | New EB exposure model and diagnostics. |
-| `src/rigel/calibration/_exposure.py` | FL-aware capture-opportunity helpers. |
-| `src/rigel/calibration/calibration_iteration.py` | Call the exposure fit and stop deriving `A_r` from `mu_gdna`. |
-| `src/rigel/calibration/prior.py` | Continue consuming `region_calibration.A_r`, now backed by EB exposure, for gDNA EM effective length. |
-| `src/rigel/calibration/_result.py` | Include compact capture-exposure diagnostics in `summary.json`. |
-| `src/rigel/sim/capture.py` or new shared panel module | Reuse or extract probe parsing/overlap semantics for production opportunity calculation. |
-| `scripts/benchmarking/runner.py` | Pass simulation capture probe files to `rigel quant` when a benchmark condition has a panel. |
-| `tests/test_capture_exposure.py` | Unit tests for opportunity and EB shrinkage. |
-| `tests/test_per_locus_gdna_mass.py` | Integration test that gDNA effective length uses EB `A_r`. |
-
-## Configuration contract
-
-Add optional fields to `CalibrationConfig`:
-
-```python
-capture_probes: str | Path | None = None
-capture_probe_format: Literal["auto", "transcript", "transcript_tsv", "bed12"] = "auto"
-capture_gdna_split_penalty: float = 0.2
-capture_min_overlap: int = 1
-```
-
-Do not add `binding_per_base` as a model parameter for calibration exposure. The EB model learns enrichment strength. The panel geometry should contribute a normalized opportunity `c_r` in `[0, 1]`, not a fixed capture strength.
-
-Validation:
-
-- `capture_probes is None` disables panel opportunity and returns neutral exposure.
-- path fields are converted to strings in `PipelineConfig.to_dict()`.
-- split penalty is finite and non-negative.
-- min overlap is an integer >= 1.
-
-Add CLI flags under `rigel quant`:
+The first implementation should be deliberately simple:
 
 ```text
---capture-probes PATH
---capture-probe-format {auto,transcript,transcript_tsv,bed12}
---capture-gdna-split-penalty FLOAT
---capture-min-overlap INT
+unit exposure = source-reliable gDNA mass / off-target gDNA expectation
+A_r           = 1 + local target weight * positive unit excess exposure
 ```
 
-Add `_ParamSpec` mappings so YAML config files can set these under `calibration`.
+No panel file, no seed hyperparameters, and no mandatory captured/off-panel mixture model are needed to fix the current bug.
 
-## New module: `capture_exposure.py`
+## What Is Broken Today
+
+The root failure is in `calibration_iteration.py`:
+
+```text
+mu_gdna = p_captured * captured_mu + (1 - p_captured) * off_target_mu
+A_r     = mu_gdna / (rho_off * contained_leff)
+gamma_r = captured_mu / (rho_off * contained_leff)
+```
+
+This is wrong because `p_captured` is a latent stratum posterior, not a gDNA source posterior. The four latent states describe expression/capture context:
+
+```text
+unexpressed_offtarget
+unexpressed_capture
+expressed_capture
+expressed_offtarget
+```
+
+They do not say whether the molecules are RNA or gDNA. When expressed captured RNA pushes a region toward a capture stratum, the current code can turn that into higher `mu_gdna`, then into higher `A_r`, then into larger gDNA EM effective length. That is a source/exposure feedback loop built on the wrong variable.
+
+The concrete fixes are:
+
+1. Stop deriving `A_r` from latent-state-weighted `mu_gdna`.
+2. Stop using density fallback `mu_gdna` as exposure evidence when no source-reliable channel exists.
+3. Estimate exposure only from PR01 source-reliable gDNA mass.
+4. Pool exposure at MultiLocus/gene scale, not fine-region scale.
+5. Keep `A_r = 1` anywhere source exposure is not identifiable.
+
+Everything else is secondary.
+
+## Parent Contracts
+
+This PR keeps the v5 invariants:
+
+- latent states are expression/capture strata, not RNA/gDNA source labels;
+- source mass is explicit and comes from `PriorMassDeconvolution.gdna_unspliced_mean` only when that mass is source-reliable;
+- `A_r` is a sampling-opportunity multiplier, not a local abundance ratio from latent states;
+- RNA prior mass remains grouped, with no transcript-level RNA floor;
+- reliability and exposure diagnostics must travel with the fitted exposure.
+
+## Design Decisions
+
+### No external panel files
+
+Remove all external BED/probe concepts from PR02 production behavior. Do not add these config fields or CLI flags:
+
+```text
+capture_probes
+capture_probe_format
+capture_gdna_split_penalty
+capture_min_overlap
+capture_validation_panel
+capture_validation_panel_format
+```
+
+Benchmark comparison against a synthetic truth panel belongs in benchmarking analysis, not in `rigel quant` calibration input.
+
+### No seed hyperparameters
+
+Do not add seed thresholds such as:
+
+```text
+capture_seed_quantile
+capture_seed_min_excess
+capture_seed_min_enrichment
+capture_min_unit_opportunity
+```
+
+Those knobs are symptoms of the two-class design trying to discover a panel before it has a stable exposure estimator. PR02 should not need to seed captured loci. It should estimate a continuous exposure weight for each unit from source-reliable gDNA/background ratios.
+
+### No `ann` variable name
+
+Use `target_weight` for the annotation-derived surface:
+
+```text
+T_{r,c} = target_weight for region r, compartment c
+```
+
+`T` does not mean "captured" and does not predict the panel. It only says this compartment is targetable enough for local capture exposure to matter. Annotation is a proxy for targetability; source-reliable gDNA decides exposure.
+
+### One-class before two-class
+
+Use a one-class exposure model in PR02. A true two-class captured/off-panel mixture is not required for the root fix.
+
+A two-class model answers: "which loci belong to an inferred panel?"
+
+PR02 only needs to answer: "given source-reliable gDNA mass, how much larger is local gDNA sampling opportunity than the off-target background?"
+
+Those are different problems. The second one is enough to repair `A_r` and works naturally for both capture and non-capture samples:
+
+- non-capture RNA-seq: source-reliable gDNA tracks background, so `A_r ~= 1`;
+- capture RNA-seq with gDNA: target units have source-reliable gDNA excess, so `A_r > 1`;
+- RNA-rich regions with no source-reliable gDNA: `A_r = 1`;
+- unstranded capture-on: source split is still deferred, so PR02 should not invent exposure from density states.
+
+A two-class model can be revisited later if benchmarks show that continuous one-class weights are too noisy or need stronger target-panel reporting. It should not block the root fix.
+
+## Configuration Contract
+
+Keep production configuration minimal:
+
+```python
+capture_exposure_mode: Literal["auto", "off"] = "auto"
+```
+
+Meanings:
+
+- `auto`: compute source-reliable one-class exposure where the source channel is identifiable; otherwise return neutral `A_r = 1`.
+- `off`: force neutral `A_r = 1`.
+
+CLI flags:
+
+```text
+--capture-exposure-mode {auto,off}
+```
+
+No other PR02 tuning knobs are required.
+
+## Exposure Unit
+
+Fit exposure at a locus-level unit `u`:
+
+1. MultiLocus if the region/locus machinery already groups transcripts into a shared EM neighborhood;
+2. otherwise isolated annotated gene;
+3. otherwise no capture unit.
+
+Fine regions are observations, not exposure units. A fine region can be noisy or RNA-dominated. A locus/gene unit has enough source-reliable mass for a stable background-normalized ratio.
+
+Each region maps to one exposure unit for PR02. Regions with no unit get neutral exposure.
+
+## Target Weight
+
+Use `T_{r,c}` as a deterministic targetability weight in `[0, 1]`:
+
+```text
+contained exon compartment:       T_{r,contained} = 1 for targetable exonic unit regions
+boundary compartments:            T_{r,boundary} in [0, 1] when boundary evidence belongs to the unit
+intronic/intergenic compartments: T_{r,c} = 0 unless boundary-compatible with the unit
+```
+
+This is not a prediction that the region was captured. It only gates where local capture exposure is allowed to modify gDNA effective length.
+
+For the first implementation, `T` can be simple:
+
+- contained exonic parts of a MultiLocus/gene unit get `1`;
+- boundary evidence adjacent to that unit contributes to fitting the unit exposure;
+- unrelated intronic/intergenic regions get `0` for region-level `A_r`.
+
+## Evidence Aggregation
+
+For each region `r`, compartment `c`, and unit `u`:
+
+```text
+B_{r,c} = rho_off * leff_{r,c}                  # off-target gDNA expectation
+G_{r,c} = source-reliable gDNA mean from PR01   # not latent density fallback
+T_{r,c} = target_weight
+```
+
+Aggregate to unit `u`:
+
+```text
+B_u = sum_{r,c in u} T_{r,c} * B_{r,c}
+G_u = sum_{r,c in u} T_{r,c} * G_{r,c}
+```
+
+Then compute the one-class excess exposure:
+
+```text
+lambda_u_raw = G_u / B_u
+
+theta_u = max(lambda_u_raw - 1, 0)
+lambda_u = 1 + theta_u
+```
+
+If `B_u <= 0`, if the unit has no source-reliable gDNA channel, or if `capture_exposure_mode == "off"`:
+
+```text
+theta_u = 0
+lambda_u = 1
+```
+
+There is no seed set and no fitted captured class.
+
+## Source-Reliable Means Only
+
+This point is critical. `G_{r,c}` must come from PR01 source reliability, not from latent density fallback.
+
+Allowed evidence:
+
+- stranded source deconvolution means weighted by PR01 reliability;
+- boundary source means when PR01 marks them source-informative;
+- future strand-free FL/boundary source split, once implemented.
+
+Disallowed evidence:
+
+- `p_captured`;
+- `p_unexpressed_capture`;
+- `p_expressed_capture`;
+- `sweep.mu_sweep` by itself;
+- `mu_gdna` when it was derived from latent-state mixing;
+- raw observed count excess in RNA-rich exons.
+
+This is why PR02 does not solve unstranded capture-on source splitting. Without a source-reliable `G`, exposure must stay neutral.
+
+## Region Exposure
+
+Build region exposure from the unit ratio:
+
+```text
+A_r = 1 + T_{r,contained} * theta_{unit(r)}
+gamma_r = A_r
+```
+
+Boundary compartments contribute to fitting `theta_u`, but the region-level `A_r` used for EM gDNA effective length should initially use contained target weight only. This keeps the first implementation easy to reason about.
+
+No unit, no target weight, or no source reliability gives:
+
+```text
+A_r = 1
+gamma_r = 1
+```
+
+## One-Class Versus Two-Class
+
+Do not implement a captured/off-panel mixture in PR02 unless the one-class model fails benchmarks.
+
+The one-class model is enough because the current failure is not panel classification. The current failure is that exposure is being estimated from the wrong object. Once `A_r` is a source-reliable background ratio, non-capture samples naturally return neutral exposure.
+
+A two-class model adds complexity and new failure modes:
+
+- it needs seeding or sparse-mixture initialization;
+- it can hallucinate a captured class in ordinary RNA-seq if residuals are structured;
+- it introduces extra diagnostics before the basic exposure ratio is proven;
+- it answers panel discovery, not the minimum `A_r` repair.
+
+Panel discovery should be a report derived from the continuous one-class exposures, not an internal state that determines `A_r`.
+
+## Learned Panel Output
+
+Still emit a diagnostic file:
+
+```text
+inferred_capture_panel.bed
++ inferred_capture_panel.tsv
+```
+
+This output is derived after exposure fitting. It must not feed back into calibration.
+
+Recommended TSV columns:
+
+```text
+unit_id
+unit_name
+unit_kind
+chrom
+start
+end
+strand
+B_u
+G_u
+lambda_u
+theta_u
+source_reliability_mass
+n_regions
+```
+
+For the BED score, use a deterministic continuous score such as:
+
+```text
+score = scaled log1p(theta_u) with zero score when theta_u = 0
+```
+
+No threshold is needed for correctness. The report can include all units with scores, or only units with `theta_u > 0` if we want a compact BED.
+
+## New Module: `capture_exposure.py`
 
 Add flags:
 
 ```python
-CAPTURE_EXPOSURE_NO_PANEL = np.uint16(0x1)
-CAPTURE_EXPOSURE_NO_OPPORTUNITY = np.uint16(0x2)
-CAPTURE_EXPOSURE_WEAK_GLOBAL = np.uint16(0x4)
-CAPTURE_EXPOSURE_WEAK_LOCAL = np.uint16(0x8)
-CAPTURE_EXPOSURE_SOURCE_UNRELIABLE = np.uint16(0x10)
+CAPTURE_EXPOSURE_DISABLED = np.uint16(0x1)
+CAPTURE_EXPOSURE_NO_UNIT = np.uint16(0x2)
+CAPTURE_EXPOSURE_NO_TARGET_WEIGHT = np.uint16(0x4)
+CAPTURE_EXPOSURE_NO_SOURCE_RELIABILITY = np.uint16(0x8)
+CAPTURE_EXPOSURE_NO_BACKGROUND = np.uint16(0x10)
+CAPTURE_EXPOSURE_NEUTRAL = np.uint16(0x20)
 ```
 
 Add dataclasses:
 
 ```python
 @dataclass(frozen=True, slots=True)
-class CaptureOpportunity:
-    contained: np.ndarray              # float32[R], in [0, 1]
-    boundary_left: np.ndarray          # float32[R], in [0, 1]
-    boundary_right: np.ndarray         # float32[R], in [0, 1]
-    unit_id: np.ndarray                # int32[R], -1 when no unit
+class CaptureUnitMap:
+    unit_id: np.ndarray                    # int32[R], -1 when no unit
     unit_names: tuple[str, ...]
-    unit_opportunity: np.ndarray       # float64[U]
+    unit_kind: np.ndarray                  # uint8[U], multilocus/gene/etc.
+    contained_target_weight: np.ndarray    # float32[R], in [0, 1]
+    boundary_left_target_weight: np.ndarray
+    boundary_right_target_weight: np.ndarray
 
 @dataclass(frozen=True, slots=True)
 class CaptureExposureFit:
-    A_r: np.ndarray                    # float32[R]
-    gamma_r: np.ndarray                # float32[R], captured-only opportunity multiplier for diagnostics
-    region_theta: np.ndarray           # float32[R]
-    region_opportunity: np.ndarray     # float32[R]
-    unit_theta_post: np.ndarray        # float64[U]
-    unit_lambda_post: np.ndarray       # float64[U]
-    unit_X: np.ndarray                 # float64[U]
-    unit_O: np.ndarray                 # float64[U]
-    unit_reliability_mass: np.ndarray  # float64[U]
-    global_theta_mean: float
-    global_alpha: float
-    global_beta: float
-    flags: np.ndarray                  # uint16[R]
-    unit_flags: np.ndarray             # uint16[U]
+    A_r: np.ndarray                        # float32[R]
+    gamma_r: np.ndarray                    # float32[R]
+    region_theta: np.ndarray               # float32[R]
+    region_target_weight: np.ndarray       # float32[R]
+    unit_theta: np.ndarray                 # float64[U]
+    unit_lambda: np.ndarray                # float64[U]
+    unit_background: np.ndarray            # float64[U], B_u
+    unit_gdna_source: np.ndarray           # float64[U], G_u
+    unit_source_reliability_mass: np.ndarray
+    flags: np.ndarray                      # uint16[R]
+    unit_flags: np.ndarray                 # uint16[U]
 ```
 
-Add `to_summary_dict()` or a private summary helper reporting:
+Summary diagnostics:
 
 ```text
-global_theta_mean
-global_alpha
-global_beta
 n_units
-n_units_weak_local
-n_regions_no_panel
-n_regions_no_opportunity
-A_r summary stats
-region_opportunity summary stats
-unit_lambda_post summary stats
-unit_X and unit_O summary stats
+n_units_neutral
+n_units_no_source_reliability
+n_units_exposure_gt_1
+A_r summary
+unit_lambda summary
+unit_background summary
+unit_gdna_source summary
+source_reliability_mass summary
 ```
 
-## Opportunity calculation contract
+## Integration Recipe
 
-Capture opportunity is geometric and FL-aware. For each region/compartment, compute:
-
-```text
-c_{r,c} = E_{fragment length} E_{legal start in compartment window} best_probe_overlap_fraction(start, length)
-```
-
-where `best_probe_overlap_fraction` is in `[0, 1]` and uses non-stacking semantics: overlapping probes do not add; take the best single probe group contribution. For BED12 split probes, use `capture_gdna_split_penalty` for genomic/pre-mRNA blocks exactly as simulation does.
-
-No counts enter this calculation.
-
-Implementation recipe:
-
-1. Extract the reusable panel parser/landscape logic from `src/rigel/sim/capture.py` into a production-safe helper, for example `src/rigel/capture_panel.py`, or add a narrow adapter that imports only pure parsing/interval utilities.
-2. Keep `CaptureSampler` simulation behavior unchanged; update it to use the shared parser if extraction is chosen.
-3. In `_exposure.py`, add helpers:
-
-```python
-def build_capture_opportunity(
-    *,
-    region_arrays: RegionArrays,
-    boundaries: BoundaryTable,
-    fl_model: FragmentLengthModel,
-    panel: CapturePanel | None,
-) -> CaptureOpportunity: ...
-```
-
-4. Use the gDNA FL model for gDNA exposure opportunity. Do not use RNA FL for `A_r`.
-5. For no panel, return arrays of zeros, `unit_id=-1`, `unit_names=()`, and set no-panel flags later.
-6. For regions overlapping multiple probe groups, choose the dominant unit by total opportunity for the first implementation. Store total opportunity as the non-stacking best-overlap value. A later PR can support fractional multi-unit attribution if needed.
-
-## EB model contract
-
-For each region and compartment:
-
-```text
-e_{r,c} = rho_off * leff_{r,c}
-c_{r,c} = capture opportunity in [0, 1]
-D_{r,c} = source-reliable gDNA mean from PR 1
-w_{r,c} = source reliability from PR 1
-```
-
-Aggregate to exposure unit `u`:
-
-```text
-O_u = sum_{r,c in u} w_{r,c} * e_{r,c} * c_{r,c}
-X_u = sum_{r,c in u} w_{r,c} * max(D_{r,c} - e_{r,c}, 0)
-```
-
-Then:
-
-```text
-theta_u = lambda_u - 1
-theta_u >= 0
-X_u | theta_u ~ Poisson(O_u * theta_u)
-theta_u ~ Gamma(a_global, b_global)
-theta_u_post = (a_global + X_u) / (b_global + O_u)
-A_r = 1 + sum_c c_{r,c} * theta_{unit(r)}_post
-```
-
-For the region-level `A_r`, use contained opportunity as the primary multiplier for EM gDNA effective length. Keep boundary opportunities in the fit, not in the region multiplier, unless `_exposure.py` already has a clear region-level boundary-aware exposure convention. Record the chosen convention in the docstring.
-
-## Estimating the global prior
-
-Use source-reliable units only:
-
-```text
-eligible_global = unit_O > 0 and unit_reliability_mass > 0
-```
-
-Compute panel mean:
-
-```text
-theta_panel = max(sum(unit_X) / sum(unit_O), 0)
-```
-
-When at least three eligible units exist, use method of moments on unit rates:
-
-```text
-theta_hat_u = unit_X / unit_O
-poisson_var_u = theta_panel / unit_O
-between_var = weighted_var(theta_hat_u, weights=unit_O)
-tau2 = max(between_var - weighted_mean(poisson_var_u, weights=unit_O), 0)
-```
-
-If `theta_panel > 0` and `tau2 > 0`:
-
-```text
-a_global = theta_panel^2 / tau2
-b_global = theta_panel / tau2
-```
-
-Otherwise use a broad exponential prior centered on the panel mean:
-
-```text
-a_global = 1
-b_global = 1 / max(theta_panel, eps)
-```
-
-Set `CAPTURE_EXPOSURE_WEAK_GLOBAL` in this fallback path. `eps` is only a numerical guard such as `1e-12`; it is not an exposure pseudocount.
-
-If there is no panel or no opportunity, return neutral exposure:
-
-```text
-A_r = 1
-gamma_r = 1
-region_theta = 0
-```
-
-and set `CAPTURE_EXPOSURE_NO_PANEL` or `CAPTURE_EXPOSURE_NO_OPPORTUNITY`.
-
-## Integration into `calibration_iteration.py`
-
-Current code derives:
+Current code derives exposure after `prior_mass` is built:
 
 ```python
 denominator = rho_off * contained_leff
@@ -241,112 +352,104 @@ exposure = _safe_exposure(mu_gdna, denominator)
 captured_exposure = _safe_exposure(captured_mu, denominator)
 ```
 
-Replace this with:
-
-1. Build or accept `CaptureOpportunity` before/inside `calibration_e_step()`.
-2. Call `fit_capture_exposure()` after `prior_mass` is built, because the fit needs source-reliable mass.
-3. Set `A_r = capture_fit.A_r` and `gamma_r = capture_fit.gamma_r`.
-4. Store the fit on `CalibrationStepResult` and final `RegionCalibration` as `capture_exposure`.
-5. Keep `_safe_exposure()` only if another call site needs it; otherwise delete it in a cleanup commit.
-
-Suggested signature changes:
+Replace that with:
 
 ```python
-def calibration_e_step(..., capture_opportunity: CaptureOpportunity | None = None, ...) -> CalibrationStepResult:
+capture_fit = fit_capture_exposure(
+    observation=observation,
+    background=background,
+    prior_mass=prior_mass,
+    strand_channels=strand_channels,
+    unit_map=capture_unit_map,
+    mode=config.capture_exposure_mode,
+)
+
+A_r = capture_fit.A_r
+gamma_r = capture_fit.gamma_r
 ```
 
-```python
-def run_calibration_iteration(..., capture_opportunity: CaptureOpportunity | None = None, ...) -> RegionCalibration:
-```
+Important implementation details:
 
-`calibrate()` in `_orchestrator.py` should build `capture_opportunity` once after `observation` and `boundaries` are available, then pass it into the iteration loop.
+1. Build `CaptureUnitMap` once after `region_arrays`, loci, and boundaries are available.
+2. Call `fit_capture_exposure()` after `build_prior_mass_deconvolution()`.
+3. Inside `fit_capture_exposure()`, ignore `PriorMassDeconvolution` rows whose method/source does not represent source-reliable evidence.
+4. Keep `PriorMassDeconvolution` itself unchanged unless PR02 needs clearer method flags.
+5. Store `capture_fit` on `CalibrationStepResult` and final `RegionCalibration` for diagnostics.
+6. Delete `_safe_exposure()` if no other call site remains.
 
-## Integration into `prior.py`
+`prior.py` can keep consuming `region_calibration.A_r` via `bp_weighted_mean_exposure_over_blocks()`. The key change is the provenance of `A_r`.
 
-`assemble_priors()` already uses:
+## Files To Edit
 
-```python
-bp_weighted_mean_exposure_over_blocks(..., exposure=region_calibration)
-```
-
-Keep that API stable if possible. It should now read `region_calibration.A_r`, whose source is EB exposure. Add diagnostics to `PriorTable.to_summary_dict()` so reviewers can see:
-
-```text
-gdna_em_exposure_weight summary
-capture_exposure_active boolean
-capture_exposure_global_weak boolean
-```
-
-Do not multiply gDNA effective length by any latent-state source probability.
-
-## Benchmark runner plumbing
-
-The synthetic suite manifest already records capture configuration for each condition. Update `scripts/benchmarking/runner.py` so a condition with `capture_config.probes` passes:
-
-```text
---capture-probes <probe path>
---capture-probe-format <format>
---capture-gdna-split-penalty <value>
---capture-min-overlap <value>
-```
-
-If the condition is capture-off, pass no capture flags. This is important: PR 2 should be disabled by absence of panel/opportunity, not by condition-name parsing.
+| File | Purpose |
+|---|---|
+| `src/rigel/config.py` | Add `capture_exposure_mode` only. |
+| `src/rigel/cli.py` | Add `--capture-exposure-mode {auto,off}`. |
+| `src/rigel/calibration/capture_exposure.py` | New unit mapping, one-class exposure fit, diagnostics, learned panel writer helpers. |
+| `src/rigel/calibration/calibration_iteration.py` | Replace latent-state ratio exposure with `fit_capture_exposure()`. |
+| `src/rigel/calibration/_orchestrator.py` | Build/pass `CaptureUnitMap`. |
+| `src/rigel/calibration/_result.py` | Add compact capture-exposure diagnostics. |
+| `src/rigel/pipeline.py` or output writer | Emit `inferred_capture_panel.bed` and TSV diagnostics. |
+| `src/rigel/calibration/prior.py` | Keep consuming `A_r` only as exposure. |
+| `scripts/benchmarking/runner.py` | Do not pass probe files to `rigel quant`. |
+| `tests/test_capture_exposure.py` | Unit tests for one-class ratios and source-reliability gating. |
+| `tests/test_per_locus_gdna_mass.py` | Verify `A_r` affects gDNA effective length as exposure only. |
 
 ## Tests
 
-### `tests/test_capture_exposure.py`
+Add focused tests for:
 
-Add tests for:
+1. ordinary capture-off sample: `G_u ~= B_u` gives `A_r ~= 1`;
+2. no source-reliable channel: `A_r == 1` even if latent capture probability is high;
+3. expressed captured RNA with no PR01 gDNA source evidence does not inflate `A_r`;
+4. strong source-reliable local gDNA excess gives `lambda_u = G_u / B_u`;
+5. negative/local depleted ratios are floored at neutral exposure, not below `1`;
+6. boundary source evidence contributes to unit `G_u` and `B_u` but does not create independent units;
+7. fine-region splitting does not change unit exposure when summed to the same locus;
+8. `capture_exposure_mode="off"` returns all-one exposure;
+9. `prior.py` multiplies gDNA effective length by the new one-class `A_r`;
+10. learned panel BED/TSV is derived from `theta_u` and does not affect `A_r`.
 
-1. No panel: all opportunity arrays are zero, `A_r == 1`, `gamma_r == 1`, and no-panel flags are set.
-2. Panel with no overlapping regions: `A_r == 1`, no-opportunity flags are set.
-3. No source-reliable excess: positive opportunity but `D <= e` gives local `X_u == 0`; posterior shrinks to the global prior and does not inflate no-gDNA regions.
-4. Strong local enrichment: one unit with large `X_u` and `O_u` has `lambda_u_post` near `1 + X_u/O_u`.
-5. Weak local enrichment: tiny `O_u` stays close to `1 + a_global/b_global`.
-6. Boundary evidence contributes to `unit_X` and `unit_O` when boundary opportunity and reliability are positive.
-7. Overlapping probes do not stack: opportunity is based on the best single probe group.
-8. Split BED12 probe uses `capture_gdna_split_penalty` for genomic opportunity.
-9. Very large supported enrichment returns a large finite `A_r`; there is no arbitrary maximum cap.
-
-### Existing tests to update
-
-- Update any `RegionCalibration` or `CalibrationStepResult` constructors in tests to include `capture_exposure` if the dataclass gains a required field. Prefer defaulting it to `None` for compatibility where possible.
-- Update summary tests to assert a compact capture-exposure block exists.
-- Update CLI/config tests for the new quant flags.
-
-## Validation commands
+## Validation Commands
 
 ```bash
-conda activate rigel && ruff check src/rigel/config.py src/rigel/cli.py src/rigel/calibration src/rigel/sim/capture.py scripts/benchmarking tests/test_capture_exposure.py tests/test_per_locus_gdna_mass.py
+conda activate rigel && ruff check src/rigel/config.py src/rigel/cli.py src/rigel/calibration tests/test_capture_exposure.py tests/test_per_locus_gdna_mass.py
 conda activate rigel && pytest tests/test_capture_exposure.py tests/test_per_locus_gdna_mass.py tests/test_calibration_iteration.py tests/test_cli.py -v
 ```
 
-Run broader calibration and pipeline tests before merge:
+Broader checks before merge:
 
 ```bash
 conda activate rigel && pytest tests/test_calibrate.py tests/test_calibration_result.py tests/test_pipeline_wiring.py tests/test_golden_output.py -v
 ```
 
-Golden outputs should be updated only if the changed diagnostics or quantification are intentional and explained in the PR.
+Golden outputs should be updated only when changed diagnostics or quantification are intentional and explained.
 
-## Benchmark gate
+## Benchmark Gate
 
-After PR 1 + PR 2, rerun the eight-condition hybrid-capture suite with capture probes passed to `rigel quant` for capture-on conditions.
+After PR01 + PR02, rerun the hybrid-capture suite without providing probe files as calibration inputs.
 
 Required outcomes:
 
-- capture-off conditions: `A_r` summary should be exactly or effectively `1`; mRNA MARD does not regress beyond 5 percent relative;
-- no-gDNA capture-on: low source-reliable excess should not produce large local exposure;
-- high-gDNA stranded capture-on: learned local exposure rises in probe-overlapping units and gDNA fraction moves toward truth;
-- high-gDNA unstranded capture-on: no material regression, but full repair remains deferred to FL-plus-boundary source splitting;
-- summary diagnostics report local/global weak flags instead of hiding fallbacks.
+- capture-off conditions: `A_r` remains effectively `1` except for source-reliable local gDNA excess;
+- no-gDNA capture-on: RNA depth does not inflate exposure;
+- high-gDNA stranded capture-on: target loci with source-reliable excess get elevated `A_r`;
+- high-gDNA capture-off: no broad false exposure inflation;
+- unstranded capture-on: no material regression; source split remains deferred;
+- learned panel diagnostics recover known synthetic captured genes/loci when compared externally by benchmark analysis.
 
-## Review checklist
+If these fail because one-class ratios are too noisy, then design a follow-up two-class or shrinkage model using the observed failure mode. Do not preemptively add seed knobs.
 
+## Review Checklist
+
+- [ ] No external BED/probe input remains in PR02 production calibration.
+- [ ] No seed hyperparameters were introduced.
+- [ ] No `ann` variable naming remains; use `target_weight`/`T`.
 - [ ] `A_r` no longer comes from `mu_gdna / denominator`.
-- [ ] No fixed exposure cap or count pseudocount was introduced.
-- [ ] No panel/no opportunity returns neutral `A_r = 1`.
-- [ ] Local enrichment shrinks to a learned global prior.
-- [ ] Boundary evidence is included in the EB fit.
-- [ ] `prior.py` consumes EB `A_r` only as exposure, not source mass.
-- [ ] Benchmark runner passes capture probes for capture-on synthetic conditions.
+- [ ] `A_r` no longer uses latent capture-state probabilities.
+- [ ] Density fallback source mass does not fit exposure.
+- [ ] Exposure unit is MultiLocus/gene, not fine region.
+- [ ] Off-target/no-source units return neutral `A_r = 1`.
+- [ ] Boundary source evidence contributes to unit exposure fitting.
+- [ ] `prior.py` consumes `A_r` only as exposure, not source mass.
+- [ ] Learned panel output is diagnostic only and does not affect calibration.

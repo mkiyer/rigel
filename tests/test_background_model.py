@@ -73,6 +73,12 @@ def _strand_channels(
         kappa_d=10.0,
         p_r1_sense=0.95,
         internal_rna_lower_ci=0.95,
+        contained_reliability=np.ones_like(mean, dtype=np.float32),
+        contained_log_bayes_factor=zeros.copy(),
+        boundary_left_reliability=np.ones_like(mean, dtype=np.float32),
+        boundary_left_log_bayes_factor=zeros.copy(),
+        boundary_right_reliability=np.ones_like(mean, dtype=np.float32),
+        boundary_right_log_bayes_factor=zeros.copy(),
     )
 
 

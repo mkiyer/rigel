@@ -105,12 +105,16 @@ def _index():
     return SimpleNamespace(region_df=_region_df(), ref_name_to_id={"chr1": 0})
 
 
+def _strand_summary() -> StrandSummary:
+    return StrandSummary(p_r1_sense=0.95, n_observations=10_000, n_same=9500, n_opposite=500)
+
+
 def test_calibrate_populates_region_calibration_and_diagnostics():
     result = calibrate(
         index=_index(),
         payload=_payload(),
         scan_trained=_scan_trained(),
-        strand_summary=StrandSummary(p_r1_sense=0.95, n_observations=10_000),
+        strand_summary=_strand_summary(),
     )
 
     rc = result.region_calibration
@@ -137,7 +141,7 @@ def test_calibrate_summary_has_region_calibration_blocks():
         index=_index(),
         payload=_payload(),
         scan_trained=_scan_trained(),
-        strand_summary=StrandSummary(p_r1_sense=0.95, n_observations=10_000),
+        strand_summary=_strand_summary(),
     )
 
     summary = result.to_summary_dict()

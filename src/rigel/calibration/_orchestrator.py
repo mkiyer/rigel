@@ -57,7 +57,7 @@ def calibrate(
     fl_scoring_prior_ess: float = POOL_SCORING_PRIOR_ESS,
     pool_quality_good: int = POOL_QUALITY_GOOD_THRESHOLD,
     pool_quality_weak: int = POOL_QUALITY_WEAK_THRESHOLD,
-    strand_summary: StrandSummary | None = None,
+    strand_summary: StrandSummary,
     density_min_eff_length: float = 1.0,
     background_trim_fraction: float = 0.01,
     max_calibration_passes: int = 5,
@@ -107,8 +107,6 @@ def calibrate(
     ledger = build_region_count_ledger(payload_arrays)
     observation = build_density_observation(region_arrays, ledger, fl_models.gdna)
 
-    if strand_summary is None:
-        strand_summary = StrandSummary.uninformative()
     strand_usable = _strand_summary_identifiable(strand_summary)
 
     strand_counts = build_strand_region_counts(

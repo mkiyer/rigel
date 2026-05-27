@@ -34,6 +34,19 @@ from rigel.calibration.strand_deconv import build_strand_region_counts
 from rigel.calibration.strand_summary import StrandSummary
 
 
+def _strand_summary(p_r1_sense: float, n_observations: int) -> StrandSummary:
+    if n_observations == 0:
+        return StrandSummary.uninformative()
+    n_same = int(round(float(p_r1_sense) * int(n_observations)))
+    assert n_same / int(n_observations) == pytest.approx(float(p_r1_sense), abs=1e-12)
+    return StrandSummary(
+        p_r1_sense=float(p_r1_sense),
+        n_observations=int(n_observations),
+        n_same=n_same,
+        n_opposite=int(n_observations) - n_same,
+    )
+
+
 def _single_region_inputs(
     signature: int,
     *,
@@ -134,7 +147,7 @@ def test_neutral_strand_fusion_equals_bounded_density_posterior() -> None:
         pack_signature(),
         pos=10.0,
         neg=0.0,
-        p_r1_sense=0.95,
+        p_r1_sense=0.5,
     )
     evidence = _density_evidence(alpha=4.0, beta=100.0, leff=1000.0)
     d_grid = np.arange(11, dtype=np.int64)
@@ -174,7 +187,7 @@ def test_strand_evidence_can_overcome_high_density_prior_in_pure_rna_region() ->
         density_observation=observation,
         density_evidence=evidence,
         strand_counts=strand_counts,
-        strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=1000),
+        strand_summary=_strand_summary(1.0, 1000),
         kappa_d=1.0e6,
         confidence=0.95,
     )
@@ -200,7 +213,7 @@ def test_large_count_boundary_mode_sets_boundary_fallback_without_nan() -> None:
         density_observation=observation,
         density_evidence=evidence,
         strand_counts=strand_counts,
-        strand_summary=StrandSummary(p_r1_sense=1.0, n_observations=1000),
+        strand_summary=_strand_summary(1.0, 1000),
         kappa_d=1.0e6,
         confidence=0.95,
     )
@@ -246,7 +259,7 @@ def test_large_count_deterministic_zero_density_stays_zero() -> None:
         density_observation=observation,
         density_evidence=evidence,
         strand_counts=strand_counts,
-        strand_summary=StrandSummary(p_r1_sense=0.5, n_observations=0),
+        strand_summary=StrandSummary.uninformative(),
         kappa_d=2.0,
         confidence=0.95,
     )
