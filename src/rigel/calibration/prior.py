@@ -155,6 +155,8 @@ def assemble_priors(
         multi_loci=multi_loci,
         p_states=np.asarray(region_calibration.p_states, dtype=np.float64),
         unspliced_total=np.asarray(prior_mass.unspliced_total, dtype=np.float64),
+        gdna_unspliced_mean=np.asarray(prior_mass.gdna_unspliced_mean, dtype=np.float64),
+        rna_unspliced_mean=np.asarray(prior_mass.rna_unspliced_mean, dtype=np.float64),
         has_gdna_candidate=has_gdna_candidate,
         rna_call_bias=float(em_config.rna_call_bias),
         max_ess=MAX_ESS,

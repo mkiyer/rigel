@@ -42,8 +42,22 @@ def _index() -> SimpleNamespace:
     )
 
 
-def _region_calibration(*, unspliced: float, p_state: list[float]) -> RegionCalibration:
+def _region_calibration(
+    *,
+    unspliced: float,
+    p_state: list[float],
+    gdna_unspliced: float | None = None,
+    rna_unspliced: float | None = None,
+) -> RegionCalibration:
     total = np.array([unspliced], dtype=np.float32)
+    gdna = np.array(
+        [unspliced if gdna_unspliced is None else gdna_unspliced],
+        dtype=np.float32,
+    )
+    rna = np.array(
+        [0.0 if rna_unspliced is None else rna_unspliced],
+        dtype=np.float32,
+    )
     return RegionCalibration(
         p_states=np.array([p_state], dtype=np.float32),
         mu_gdna=total.copy(),
@@ -51,8 +65,8 @@ def _region_calibration(*, unspliced: float, p_state: list[float]) -> RegionCali
         rna_lower=np.zeros(1, dtype=np.float32),
         prior_mass=PriorMassDeconvolution(
             unspliced_total=total,
-            gdna_unspliced_mean=total.copy(),
-            rna_unspliced_mean=np.zeros(1, dtype=np.float32),
+            gdna_unspliced_mean=gdna,
+            rna_unspliced_mean=rna,
             method=np.array([PRIOR_MASS_METHOD_DENSITY], dtype=np.uint8),
             precision=np.zeros(1, dtype=np.float32),
             flags=np.zeros(1, dtype=np.uint16),
@@ -100,7 +114,12 @@ def test_adaptive_prior_table_exposes_paired_mass_and_summary() -> None:
         em_data=_em_data(is_spliced=[False], gdna_log_liks=[-1.0]),
         index=_index(),
         calibration=_calibration(
-            _region_calibration(unspliced=100.0, p_state=[0.25, 0.0, 0.75, 0.0])
+            _region_calibration(
+                unspliced=100.0,
+                p_state=[0.25, 0.0, 0.75, 0.0],
+                gdna_unspliced=25.0,
+                rna_unspliced=75.0,
+            )
         ),
         em_config=EMConfig(),
     )
@@ -124,7 +143,12 @@ def test_rna_call_bias_shifts_split_without_changing_ess() -> None:
         em_data=_em_data(is_spliced=[False], gdna_log_liks=[-1.0]),
         index=_index(),
         calibration=_calibration(
-            _region_calibration(unspliced=100.0, p_state=[0.5, 0.0, 0.5, 0.0])
+            _region_calibration(
+                unspliced=100.0,
+                p_state=[0.5, 0.0, 0.5, 0.0],
+                gdna_unspliced=50.0,
+                rna_unspliced=50.0,
+            )
         ),
     )
 
@@ -145,7 +169,12 @@ def test_enable_gdna_helper_is_structural_diagnostic_only() -> None:
         em_data=em_data,
         index=_index(),
         calibration=_calibration(
-            _region_calibration(unspliced=30.0, p_state=[0.0, 0.0, 1.0, 0.0])
+            _region_calibration(
+                unspliced=30.0,
+                p_state=[0.0, 0.0, 1.0, 0.0],
+                gdna_unspliced=0.0,
+                rna_unspliced=30.0,
+            )
         ),
         em_config=EMConfig(),
     )

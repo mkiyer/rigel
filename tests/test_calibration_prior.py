@@ -45,6 +45,8 @@ def _region_calibration(
     unspliced_total: list[float],
     *,
     p_states: np.ndarray | None = None,
+    gdna_unspliced: list[float] | None = None,
+    rna_unspliced: list[float] | None = None,
     exposure: list[float] | None = None,
 ) -> RegionCalibration:
     unspliced = np.asarray(unspliced_total, dtype=np.float32)
@@ -56,6 +58,14 @@ def _region_calibration(
         exposure if exposure is not None else np.ones(region_count, dtype=np.float32),
         dtype=np.float32,
     )
+    gdna_prior = np.asarray(
+        gdna_unspliced if gdna_unspliced is not None else unspliced,
+        dtype=np.float32,
+    )
+    rna_prior = np.asarray(
+        rna_unspliced if rna_unspliced is not None else np.zeros(region_count, dtype=np.float32),
+        dtype=np.float32,
+    )
     return RegionCalibration(
         p_states=np.asarray(p_states, dtype=np.float32),
         mu_gdna=unspliced.copy(),
@@ -63,8 +73,8 @@ def _region_calibration(
         rna_lower=np.zeros(region_count, dtype=np.float32),
         prior_mass=PriorMassDeconvolution(
             unspliced_total=unspliced,
-            gdna_unspliced_mean=unspliced.copy(),
-            rna_unspliced_mean=np.zeros(region_count, dtype=np.float32),
+            gdna_unspliced_mean=gdna_prior,
+            rna_unspliced_mean=rna_prior,
             method=np.full(region_count, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8),
             precision=np.zeros(region_count, dtype=np.float32),
             flags=np.zeros(region_count, dtype=np.uint16),
@@ -132,6 +142,32 @@ def test_geometry_allocation_conserves_mass_for_disjoint_loci() -> None:
     assert priors.unallocated_unspliced_count == pytest.approx(0.0)
     assert priors.global_n_gdna == pytest.approx(30.0)
     np.testing.assert_array_equal(priors.n_regions_touched, np.array([1, 1], dtype=np.int32))
+
+
+def test_assemble_priors_uses_prior_mass_split_not_latent_state_split() -> None:
+    index = _index([(0, 100)])
+    locus = _ml(0, 0, 100, [0])
+    em_data = _em_data(is_spliced=[False], gdna_log_liks=[-1.0])
+    p_states = np.array([[0.0, 0.0, 1.0, 0.0]], dtype=np.float32)
+
+    priors = assemble_priors(
+        multi_loci=[locus],
+        em_data=em_data,
+        index=index,
+        calibration=_calibration(
+            _region_calibration(
+                [100.0],
+                p_states=p_states,
+                gdna_unspliced=[60.0],
+                rna_unspliced=[40.0],
+            )
+        ),
+    )
+
+    assert priors.prior_n_local_gdna[0] == pytest.approx(60.0)
+    assert priors.prior_n_local_rna[0] == pytest.approx(40.0)
+    assert priors.alpha_gdna_add[0] == pytest.approx(60.0)
+    assert priors.alpha_rna_add[0] == pytest.approx(40.0)
 
 
 def test_geometry_allocation_reports_regions_touching_multiple_loci() -> None:

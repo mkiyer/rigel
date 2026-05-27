@@ -116,6 +116,108 @@ def _format_rel_err(value: float) -> str:
     return f"{value:+.3f}"
 
 
+def _as_float(value: object, default: float = float("nan")) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_div(numerator: float, denominator: float) -> float:
+    if denominator == 0 or not np.isfinite(denominator):
+        return float("nan")
+    return numerator / denominator
+
+
+def _relative_error(estimated: float, truth: float) -> float:
+    return _safe_div(estimated - truth, truth)
+
+
+def _nested(data: dict | None, *keys: str, default: object = None) -> object:
+    current: object = data or {}
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return default
+        current = current[key]
+    return current
+
+
+def _stat(summary: object, key: str, default: float = float("nan")) -> float:
+    if not isinstance(summary, dict):
+        return default
+    return _as_float(summary.get(key), default)
+
+
+def _fmt_float(value: object, digits: int = 3) -> str:
+    number = _as_float(value)
+    if not np.isfinite(number):
+        return "n/a"
+    return f"{number:.{digits}f}"
+
+
+def _fmt_count(value: object) -> str:
+    number = _as_float(value)
+    if not np.isfinite(number):
+        return "n/a"
+    return f"{number:,.0f}"
+
+
+def _fmt_delta(value: object) -> str:
+    number = _as_float(value)
+    if not np.isfinite(number):
+        return "n/a"
+    return f"{number:+,.0f}"
+
+
+def _fmt_pct(value: object, digits: int = 2) -> str:
+    number = _as_float(value)
+    if not np.isfinite(number):
+        return "n/a"
+    return f"{100.0 * number:.{digits}f}%"
+
+
+def _fmt_bool(value: object) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "n/a"
+
+
+def _fmt_text(value: object, default: str = "none") -> str:
+    if value is None:
+        return default
+    if isinstance(value, float) and np.isnan(value):
+        return default
+    text = str(value)
+    return default if text.lower() in {"", "nan", "none"} else text
+
+
+def _markdown_table(headers: list[str], rows: list[list[object]]) -> str:
+    if not rows:
+        return "_No rows available._"
+    lines = ["| " + " | ".join(headers) + " |"]
+    lines.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(str(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
+def _condition_truth_fl_mean(
+    truth_summary: dict,
+    kind: str,
+    fallback: float,
+    *,
+    has_fragments: bool,
+) -> float:
+    stats = (truth_summary.get("fragment_lengths", {}) or {}).get(kind, {})
+    if isinstance(stats, dict) and stats.get("mean") is not None:
+        return float(stats["mean"])
+    return fallback if has_fragments else float("nan")
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 1: Build rigel index
 # ══════════════════════════════════════════════════════════════════════════
@@ -919,6 +1021,539 @@ def analyze_postfix_acceptance(
     return "\n".join(lines)
 
 
+# ── Detailed per-condition report ────────────────────────────────────────
+
+def _abundance_diagnostics(
+    sim_base: Path,
+    condition: str,
+    condition_meta: dict[str, dict],
+    fallback_truth: pd.DataFrame,
+) -> tuple[dict[str, float], list[dict[str, object]]]:
+    out_dir = sim_base / condition / "rigel_out"
+    if not out_dir.exists():
+        return {}, []
+    try:
+        quant = load_quant(out_dir)
+    except FileNotFoundError:
+        return {}, []
+    cond_truth = load_condition_truth(sim_base, condition, condition_meta, fallback_truth)
+    if "transcript_id" not in cond_truth.columns or "transcript_id" not in quant.columns:
+        return {}, []
+
+    quant_cols = [col for col in ("transcript_id", "count", "count_em", "tpm") if col in quant]
+    if "count" not in quant_cols:
+        return {}, []
+    merged = cond_truth.merge(quant[quant_cols], on="transcript_id", how="left").fillna(0)
+    true = merged["mrna_abundance"].astype(float)
+    estimated = merged["count"].astype(float)
+    expressed = true > 0
+    unexpressed = ~expressed
+    error = estimated - true
+    abs_error = error.abs()
+
+    metrics = {
+        "n_transcripts": float(len(merged)),
+        "n_expressed": float(expressed.sum()),
+        "n_unexpressed": float(unexpressed.sum()),
+        "mRNA_count_true": float(true.sum()),
+        "mRNA_count_est": float(estimated.sum()),
+        "mRNA_count_abs_error_total": float(abs_error.sum()),
+        "mRNA_count_mae": float(abs_error.mean()) if len(abs_error) else float("nan"),
+        "false_positive_transcripts_gt5": float((estimated[unexpressed] > 5).sum()),
+        "false_positive_count_total": float(estimated[unexpressed].sum()),
+        "false_negative_transcripts_lt1": float((estimated[expressed] < 1).sum()),
+    }
+    if expressed.any():
+        rel_error = abs_error[expressed] / (true[expressed] + 1e-9)
+        metrics["mRNA_count_mard"] = float(rel_error.mean())
+        metrics["mRNA_count_medard"] = float(rel_error.median())
+        if true[expressed].nunique() > 1 and estimated[expressed].nunique() > 1:
+            metrics["mRNA_count_spearman"] = float(
+                true[expressed].corr(estimated[expressed], method="spearman")
+            )
+        else:
+            metrics["mRNA_count_spearman"] = float("nan")
+    else:
+        metrics["mRNA_count_mard"] = float("nan")
+        metrics["mRNA_count_medard"] = float("nan")
+        metrics["mRNA_count_spearman"] = float("nan")
+
+    detail_cols = [
+        col
+        for col in ("transcript_id", "gene_id", "mrna_abundance", "count", "tpm")
+        if col in merged
+    ]
+    merged = merged.assign(abs_error=abs_error, signed_error=error)
+    top_errors = (
+        merged.nlargest(5, "abs_error")[[*detail_cols, "signed_error", "abs_error"]]
+        .to_dict("records")
+    )
+    return metrics, top_errors
+
+
+def _pool_rows(row: dict[str, object]) -> list[list[str]]:
+    pools = [
+        ("mRNA", row["true_mrna"], row["est_mrna"]),
+        ("nRNA", row["true_nrna"], row["est_nrna"]),
+        ("RNA total", row["true_rna"], row["est_rna"]),
+        ("gDNA genic EM", float("nan"), row["est_gdna_genic"]),
+        ("gDNA intergenic", float("nan"), row["est_intergenic"]),
+        ("gDNA total", row["true_gdna"], row["est_gdna_total"]),
+        ("All fragments", row["true_total"], row["est_total"]),
+    ]
+    rows = []
+    for label, truth, estimated in pools:
+        truth_value = _as_float(truth)
+        estimated_value = _as_float(estimated)
+        delta = estimated_value - truth_value if np.isfinite(truth_value) else float("nan")
+        rel = _relative_error(estimated_value, truth_value)
+        rows.append([
+            label,
+            _fmt_count(truth_value),
+            _fmt_count(estimated_value),
+            _fmt_delta(delta),
+            _fmt_pct(rel) if np.isfinite(rel) else "n/a",
+        ])
+    return rows
+
+
+def _collect_condition_metrics(
+    sim_base: Path,
+    conditions: list[str],
+    assignment_rows: list[dict] | None,
+) -> tuple[pd.DataFrame, dict[str, dict[str, object]]]:
+    manifest = load_manifest(sim_base)
+    condition_meta = condition_manifest_map(manifest)
+    fallback_truth = load_truth(sim_base)
+    default_rna_fl_mean, default_gdna_fl_mean = simulated_fragment_length_means(manifest)
+    assignment_by_condition = {
+        row["condition"]: row for row in (assignment_rows or []) if "condition" in row
+    }
+
+    rows: list[dict[str, object]] = []
+    details: dict[str, dict[str, object]] = {}
+    for condition in conditions:
+        meta = condition_meta.get(condition, {})
+        info = parse_condition(condition)
+        gdna_label = str(meta.get("gdna_label", info["gdna_label"]))
+        capture_label = str(meta.get("capture_label", "none"))
+        strand_specificity = float(meta.get("strand_specificity", info["strand_specificity"]))
+        capture_config = meta.get("capture_config", {}) or {}
+        capture_probe_panel = meta.get("capture_probe_panel")
+        if not capture_probe_panel:
+            capture_probe_panel = (
+                meta.get("capture_probe_bed")
+                or meta.get("capture_probe_tsv")
+                or capture_config.get("probes")
+                if isinstance(capture_config, dict)
+                else None
+            )
+        capture_probe_source = meta.get("capture_probe_source")
+        if capture_probe_source is None and capture_probe_panel:
+            capture_probe_source = (
+                "generated"
+                if meta.get("capture_probe_bed") or meta.get("capture_probe_tsv")
+                else "provided"
+            )
+
+        out_dir = sim_base / condition / "rigel_out"
+        summary = load_summary(out_dir)
+        quant = summary.get("quantification", {}) if summary else {}
+        cal = summary.get("calibration", {}) if summary else {}
+        region = cal.get("region_calibration", {}) if isinstance(cal, dict) else {}
+        diagnostics = cal.get("diagnostics", {}) if isinstance(cal, dict) else {}
+        fl_models = cal.get("fl_models", {}) if isinstance(cal, dict) else {}
+        background = cal.get("background_model", {}) if isinstance(cal, dict) else {}
+        boundary_local = cal.get("boundary_local", {}) if isinstance(cal, dict) else {}
+        boundary_sweep = cal.get("boundary_sweep", {}) if isinstance(cal, dict) else {}
+        strand_channels = cal.get("strand_channels") or {}
+        prior_table = cal.get("prior_table") or summary.get("prior_policy", {}) or {}
+
+        true_mrna = float(meta.get("n_mrna", meta.get("n_rna", 0)))
+        true_nrna = float(meta.get("n_nrna", 0))
+        true_rna = float(meta.get("n_rna", true_mrna + true_nrna))
+        true_gdna = float(meta.get("n_gdna", 0))
+        true_total = float(meta.get("n_total", true_rna + true_gdna))
+
+        est_mrna = _as_float(quant.get("mrna_total"))
+        est_nrna = _as_float(quant.get("nrna_total"))
+        est_gdna_genic = _as_float(quant.get("gdna_total"))
+        est_intergenic = _as_float(quant.get("intergenic_total"), 0.0)
+        est_rna = est_mrna + est_nrna
+        est_gdna_total = est_gdna_genic + est_intergenic
+        est_total = est_rna + est_gdna_total
+
+        truth_summary = _load_condition_truth_summary(sim_base, meta)
+        truth_rna_fl_mean = _condition_truth_fl_mean(
+            truth_summary,
+            "mrna",
+            default_rna_fl_mean,
+            has_fragments=true_mrna > 0,
+        )
+        truth_gdna_fl_mean = _condition_truth_fl_mean(
+            truth_summary,
+            "gdna",
+            default_gdna_fl_mean,
+            has_fragments=true_gdna > 0,
+        )
+
+        assignment = assignment_by_condition.get(condition, {})
+        total_mrna_assign = float(assignment.get("total_mrna", 0))
+        total_gdna_assign = float(assignment.get("total_gdna", 0))
+        gdna_as_rna = float(assignment.get("gdna_as_rna", 0))
+        mrna_as_gdna = float(assignment.get("mrna_as_gdna", 0))
+        wrong_tx = float(assignment.get("wrong_tx", 0))
+        correct_tx = float(assignment.get("correct_tx", 0))
+        correct_gene = float(assignment.get("correct_gene", 0))
+
+        abundance_metrics, top_errors = _abundance_diagnostics(
+            sim_base,
+            condition,
+            condition_meta,
+            fallback_truth,
+        )
+
+        row = {
+            "condition": condition,
+            "gdna_label": gdna_label,
+            "strand_specificity": strand_specificity,
+            "capture_label": capture_label,
+            "capture_enabled": bool(meta.get("capture_enabled", False)),
+            "capture_probe_source": capture_probe_source,
+            "capture_probe_panel": capture_probe_panel,
+            "true_mrna": true_mrna,
+            "true_nrna": true_nrna,
+            "true_rna": true_rna,
+            "true_gdna": true_gdna,
+            "true_total": true_total,
+            "true_gdna_fraction": _safe_div(true_gdna, true_total),
+            "est_mrna": est_mrna,
+            "est_nrna": est_nrna,
+            "est_rna": est_rna,
+            "est_gdna_genic": est_gdna_genic,
+            "est_intergenic": est_intergenic,
+            "est_gdna_total": est_gdna_total,
+            "est_total": est_total,
+            "est_gdna_fraction": _safe_div(est_gdna_total, est_total),
+            "rna_delta": est_rna - true_rna,
+            "gdna_delta": est_gdna_total - true_gdna,
+            "gdna_fraction_delta": _safe_div(est_gdna_total, est_total)
+            - _safe_div(true_gdna, true_total),
+            "truth_rna_fl_mean": truth_rna_fl_mean,
+            "truth_gdna_fl_mean": truth_gdna_fl_mean,
+            "est_rna_fl_mean": _as_float(fl_models.get("rna_fl_mean")),
+            "est_gdna_fl_mean": _as_float(fl_models.get("gdna_fl_mean")),
+            "calibration_n_observed": _as_float(diagnostics.get("n_observed")),
+            "calibration_n_excluded_multimap": _as_float(
+                diagnostics.get("n_excluded_multimap")
+            ),
+            "rho_off": _as_float(region.get("rho_off")),
+            "kappa_d": _as_float(region.get("kappa_d")),
+            "region_n_passes": _as_float(region.get("n_passes")),
+            "region_converged": region.get("converged"),
+            "region_n_regions": _as_float(region.get("n_regions")),
+            "capture_enrichment_target": _as_float(region.get("capture_enrichment_target")),
+            "p_captured_p50": _stat(region.get("p_captured"), "p50"),
+            "p_captured_p95": _stat(region.get("p_captured"), "p95"),
+            "mu_gdna_p50": _stat(region.get("mu_gdna"), "p50"),
+            "mu_gdna_p95": _stat(region.get("mu_gdna"), "p95"),
+            "upper_gdna_p95": _stat(region.get("upper_gdna"), "p95"),
+            "gamma_r_p50": _stat(region.get("gamma_r"), "p50"),
+            "gamma_r_p95": _stat(region.get("gamma_r"), "p95"),
+            "background_rho_off_mean": _as_float(background.get("rho_off_mean")),
+            "background_fit_status": background.get("fit_status"),
+            "background_n_seed_regions": _as_float(background.get("n_seed_regions")),
+            "boundary_local_regions_with_evidence": _as_float(
+                boundary_local.get("n_regions_with_evidence")
+            ),
+            "boundary_sweep_regions_with_evidence": _as_float(
+                boundary_sweep.get("n_regions_with_swept_evidence")
+            ),
+            "strand_model_est": _as_float(_nested(summary, "strand_model", "strand_specificity")),
+            "strand_protocol": _nested(summary, "strand_model", "protocol"),
+            "strand_channel_kappa_d": _as_float(strand_channels.get("kappa_d")),
+            "fragment_total": _as_float(_nested(summary, "fragment_stats", "total")),
+            "fragment_intergenic": _as_float(_nested(summary, "fragment_stats", "intergenic")),
+            "fragment_chimeric": _as_float(_nested(summary, "fragment_stats", "chimeric")),
+            "n_loci": _as_float(quant.get("n_loci")),
+            "gdna_to_rna_rate": _safe_div(gdna_as_rna, total_gdna_assign),
+            "mrna_to_gdna_rate": _safe_div(mrna_as_gdna, total_mrna_assign),
+            "mrna_exact_rate": _safe_div(correct_tx, total_mrna_assign),
+            "mrna_gene_rate": _safe_div(correct_tx + correct_gene, total_mrna_assign),
+            "mrna_wrong_gene_rate": _safe_div(wrong_tx, total_mrna_assign),
+            "gdna_as_rna": gdna_as_rna,
+            "mrna_as_gdna": mrna_as_gdna,
+            "prior_global_gdna": _as_float(_nested(prior_table, "global_counts", "gdna")),
+            "prior_global_rna": _as_float(_nested(prior_table, "global_counts", "rna")),
+            **abundance_metrics,
+        }
+        rows.append(row)
+        details[condition] = {
+            "summary": summary,
+            "meta": meta,
+            "truth_summary": truth_summary,
+            "assignment": assignment,
+            "top_errors": top_errors,
+        }
+
+    return pd.DataFrame(rows), details
+
+
+def build_condition_report(
+    sim_base: Path,
+    conditions: list[str],
+    assignment_rows: list[dict] | None = None,
+) -> tuple[str, pd.DataFrame]:
+    metrics, details = _collect_condition_metrics(sim_base, conditions, assignment_rows)
+    lines: list[str] = []
+    lines.append("# Rigel Synthetic Capture Suite Condition Report")
+    lines.append("")
+    lines.append(f"Base folder: `{sim_base}`")
+    lines.append(f"Conditions evaluated: `{len(conditions)}`")
+    lines.append("")
+    lines.append(
+        "Primary criterion here is pool-level deconvolution: total estimated gDNA "
+        "is Rigel genic gDNA plus intergenic fragments, compared with the simulator "
+        "post-capture truth for each condition."
+    )
+
+    overview_rows = []
+    for _, row in metrics.iterrows():
+        overview_rows.append([
+            row["condition"],
+            row["gdna_label"],
+            _fmt_float(row["strand_specificity"], 2),
+            row["capture_label"],
+            _fmt_pct(row["true_gdna_fraction"]),
+            _fmt_pct(row["est_gdna_fraction"]),
+            _fmt_delta(row["gdna_delta"]),
+            _fmt_delta(row["rna_delta"]),
+            _fmt_pct(row["gdna_to_rna_rate"]),
+            _fmt_pct(row["mrna_to_gdna_rate"]),
+            _fmt_bool(row["region_converged"]),
+        ])
+    lines.append("\n## Pool Deconvolution Overview")
+    lines.append(_markdown_table([
+        "Condition",
+        "gDNA",
+        "SS",
+        "Capture",
+        "True gDNA",
+        "Rigel gDNA",
+        "gDNA delta",
+        "RNA delta",
+        "gDNA->RNA",
+        "mRNA->gDNA",
+        "Cal converged",
+    ], overview_rows))
+
+    calibration_rows = []
+    for _, row in metrics.iterrows():
+        rna_fl_err = _relative_error(row["est_rna_fl_mean"], row["truth_rna_fl_mean"])
+        gdna_fl_err = _relative_error(row["est_gdna_fl_mean"], row["truth_gdna_fl_mean"])
+        calibration_rows.append([
+            row["condition"],
+            _fmt_float(row["rho_off"], 6),
+            _fmt_float(row["kappa_d"], 3),
+            _fmt_float(row["background_rho_off_mean"], 6),
+            str(row["background_fit_status"]),
+            _fmt_count(row["background_n_seed_regions"]),
+            _fmt_float(row["est_rna_fl_mean"], 1),
+            _fmt_pct(rna_fl_err),
+            _fmt_float(row["est_gdna_fl_mean"], 1),
+            _fmt_pct(gdna_fl_err),
+            _fmt_float(row["p_captured_p95"], 3),
+            _fmt_float(row["gamma_r_p95"], 3),
+        ])
+    lines.append("\n## Calibration Diagnostics Overview")
+    lines.append(_markdown_table([
+        "Condition",
+        "rho_off",
+        "kappa_d",
+        "bg rho",
+        "bg fit",
+        "seed regions",
+        "RNA FL",
+        "RNA FL err",
+        "gDNA FL",
+        "gDNA FL err",
+        "p_captured p95",
+        "gamma_r p95",
+    ], calibration_rows))
+
+    for _, row in metrics.iterrows():
+        condition = str(row["condition"])
+        detail = details.get(condition, {})
+        meta = detail.get("meta", {})
+        assignment = detail.get("assignment", {})
+        summary = detail.get("summary", {})
+        cal = summary.get("calibration", {}) if isinstance(summary, dict) else {}
+        diagnostics = cal.get("diagnostics", {}) if isinstance(cal, dict) else {}
+        coarse = diagnostics.get("mass_by_coarse_class", {}) if isinstance(diagnostics, dict) else {}
+        fl_pool = diagnostics.get("fl_pool_total", {}) if isinstance(diagnostics, dict) else {}
+        state_mass = _nested(cal, "region_calibration", "state_mass", default={})
+
+        lines.append(f"\n## {condition}")
+        lines.append("")
+        lines.append(_markdown_table(["Field", "Value"], [
+            ["gDNA label", row["gdna_label"]],
+            ["strand specificity truth", _fmt_float(row["strand_specificity"], 2)],
+            ["strand specificity estimated", _fmt_float(row["strand_model_est"], 3)],
+            ["strand protocol", row["strand_protocol"]],
+            ["capture label", row["capture_label"]],
+            ["capture enabled", _fmt_bool(row["capture_enabled"])],
+            ["capture source", _fmt_text(row["capture_probe_source"])],
+            ["capture panel", _fmt_text(row["capture_probe_panel"])],
+            ["Rigel output", str(sim_base / condition / "rigel_out")],
+        ]))
+
+        lines.append("\n### Pool Deconvolution")
+        lines.append(_markdown_table(
+            ["Pool", "Truth", "Rigel estimate", "Delta", "Relative delta"],
+            _pool_rows(row.to_dict()),
+        ))
+        lines.append("")
+        lines.append(
+            f"True gDNA fraction: `{_fmt_pct(row['true_gdna_fraction'])}`; "
+            f"Rigel gDNA fraction: `{_fmt_pct(row['est_gdna_fraction'])}`. "
+            f"Genic EM gDNA: `{_fmt_count(row['est_gdna_genic'])}`; "
+            f"intergenic gDNA: `{_fmt_count(row['est_intergenic'])}`."
+        )
+
+        lines.append("\n### Calibration")
+        lines.append(_markdown_table(["Metric", "Value"], [
+            ["calibration observed fragments", _fmt_count(row["calibration_n_observed"])],
+            ["excluded multimappers", _fmt_count(row["calibration_n_excluded_multimap"])],
+            ["region count", _fmt_count(row["region_n_regions"])],
+            ["rho_off", _fmt_float(row["rho_off"], 8)],
+            ["kappa_d", _fmt_float(row["kappa_d"], 3)],
+            ["passes", _fmt_count(row["region_n_passes"])],
+            ["converged", _fmt_bool(row["region_converged"])],
+            ["capture enrichment target", _fmt_float(row["capture_enrichment_target"], 3)],
+            ["p_captured p50 / p95", f"{_fmt_float(row['p_captured_p50'])} / {_fmt_float(row['p_captured_p95'])}"],
+            ["mu_gdna p50 / p95", f"{_fmt_float(row['mu_gdna_p50'])} / {_fmt_float(row['mu_gdna_p95'])}"],
+            ["upper_gdna p95", _fmt_float(row["upper_gdna_p95"])],
+            ["gamma_r p50 / p95", f"{_fmt_float(row['gamma_r_p50'])} / {_fmt_float(row['gamma_r_p95'])}"],
+            ["background fit", row["background_fit_status"]],
+            ["background rho mean", _fmt_float(row["background_rho_off_mean"], 8)],
+            ["background seed regions", _fmt_count(row["background_n_seed_regions"])],
+            ["boundary local evidence regions", _fmt_count(row["boundary_local_regions_with_evidence"])],
+            ["boundary sweep evidence regions", _fmt_count(row["boundary_sweep_regions_with_evidence"])],
+            ["prior global gDNA / RNA", f"{_fmt_count(row['prior_global_gdna'])} / {_fmt_count(row['prior_global_rna'])}"],
+        ]))
+
+        lines.append("\n### Fragment Length Calibration")
+        lines.append(_markdown_table(["Pool", "Truth mean", "Rigel mean", "Relative error"], [
+            [
+                "RNA",
+                _fmt_float(row["truth_rna_fl_mean"], 1),
+                _fmt_float(row["est_rna_fl_mean"], 1),
+                _fmt_pct(_relative_error(row["est_rna_fl_mean"], row["truth_rna_fl_mean"])),
+            ],
+            [
+                "gDNA",
+                _fmt_float(row["truth_gdna_fl_mean"], 1),
+                _fmt_float(row["est_gdna_fl_mean"], 1),
+                _fmt_pct(_relative_error(row["est_gdna_fl_mean"], row["truth_gdna_fl_mean"])),
+            ],
+        ]))
+
+        lines.append("\n### Calibration Payload Mix")
+        lines.append(_markdown_table(["Payload field", "Value"], [
+            ["coarse INTERGENIC mass", _fmt_count(_as_float(coarse.get("INTERGENIC")))],
+            ["coarse INTRON mass", _fmt_count(_as_float(coarse.get("INTRON")))],
+            ["coarse EXON mass", _fmt_count(_as_float(coarse.get("EXON")))],
+            ["FL pool global", _fmt_count(_as_float(fl_pool.get("GLOBAL")))],
+            ["FL pool RNA", _fmt_count(_as_float(fl_pool.get("RNA")))],
+            ["FL pool gDNA", _fmt_count(_as_float(fl_pool.get("GDNA")))],
+        ]))
+
+        if isinstance(state_mass, dict) and state_mass:
+            state_rows = []
+            for name, values in state_mass.items():
+                if isinstance(values, dict):
+                    state_rows.append([
+                        name,
+                        _fmt_float(values.get("sum"), 2),
+                        _fmt_float(values.get("mean"), 4),
+                    ])
+            lines.append("\n### Region Latent State Mass")
+            lines.append(_markdown_table(["State", "Sum", "Mean"], state_rows))
+
+        lines.append("\n### Fragment Assignment Diagnostics")
+        if assignment:
+            lines.append(_markdown_table(["Metric", "Value"], [
+                ["mRNA exact transcript", _fmt_pct(row["mrna_exact_rate"])],
+                ["mRNA correct gene", _fmt_pct(row["mrna_gene_rate"])],
+                ["mRNA wrong gene", _fmt_pct(row["mrna_wrong_gene_rate"])],
+                ["mRNA routed to gDNA", f"{_fmt_pct(row['mrna_to_gdna_rate'])} ({_fmt_count(row['mrna_as_gdna'])})"],
+                ["gDNA routed to RNA", f"{_fmt_pct(row['gdna_to_rna_rate'])} ({_fmt_count(row['gdna_as_rna'])})"],
+                ["total mRNA fragments checked", _fmt_count(assignment.get("total_mrna"))],
+                ["total gDNA fragments checked", _fmt_count(assignment.get("total_gdna"))],
+            ]))
+        else:
+            lines.append("_Annotated BAM fragment diagnostics were not available._")
+
+        lines.append("\n### Transcript Count Accuracy")
+        lines.append(_markdown_table(["Metric", "Value"], [
+            ["expressed transcripts", _fmt_count(row.get("n_expressed"))],
+            ["unexpressed transcripts", _fmt_count(row.get("n_unexpressed"))],
+            ["mRNA count Spearman", _fmt_float(row.get("mRNA_count_spearman"), 4)],
+            ["mRNA count MARD", _fmt_pct(row.get("mRNA_count_mard"))],
+            ["mRNA count median ARD", _fmt_pct(row.get("mRNA_count_medard"))],
+            ["total absolute count error", _fmt_count(row.get("mRNA_count_abs_error_total"))],
+            ["false-positive transcripts >5 frags", _fmt_count(row.get("false_positive_transcripts_gt5"))],
+            ["false-positive fragment total", _fmt_count(row.get("false_positive_count_total"))],
+            ["false-negative expressed tx <1 frag", _fmt_count(row.get("false_negative_transcripts_lt1"))],
+        ]))
+
+        top_errors = detail.get("top_errors", [])
+        if top_errors:
+            top_rows = []
+            for item in top_errors:
+                top_rows.append([
+                    item.get("transcript_id", ""),
+                    item.get("gene_id", ""),
+                    _fmt_count(item.get("mrna_abundance")),
+                    _fmt_count(item.get("count")),
+                    _fmt_delta(item.get("signed_error")),
+                    _fmt_count(item.get("abs_error")),
+                ])
+            lines.append("\nTop transcript count errors:")
+            lines.append(_markdown_table([
+                "Transcript",
+                "Gene",
+                "Truth",
+                "Rigel",
+                "Delta",
+                "Abs error",
+            ], top_rows))
+
+        lines.append("\n### Run Files")
+        lines.append(_markdown_table(["Artifact", "Path"], [
+            ["summary", str(sim_base / condition / "rigel_out" / "summary.json")],
+            ["quant", str(sim_base / condition / "rigel_out" / "quant.feather")],
+            ["loci", str(sim_base / condition / "rigel_out" / "loci.feather")],
+            ["truth", str(sim_base / str(meta.get("truth_abundances", "")))],
+            ["truth summary", str(sim_base / str(meta.get("truth_summary", "")))],
+        ]))
+
+    return "\n".join(lines) + "\n", metrics
+
+
+def write_condition_report(
+    sim_base: Path,
+    conditions: list[str],
+    assignment_rows: list[dict] | None = None,
+) -> tuple[Path, Path]:
+    report, metrics = build_condition_report(sim_base, conditions, assignment_rows)
+    report_path = sim_base / "condition_report.md"
+    metrics_path = sim_base / "condition_metrics.tsv"
+    report_path.write_text(report)
+    metrics.to_csv(metrics_path, sep="\t", index=False)
+    return report_path, metrics_path
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════
@@ -994,6 +1629,13 @@ def main():
     acceptance_report = analyze_postfix_acceptance(sim_base, conditions, assignment_rows)
     print(acceptance_report)
 
+    # 3f: Detailed per-condition Markdown report
+    condition_report_path, condition_metrics_path = write_condition_report(
+        sim_base,
+        conditions,
+        assignment_rows,
+    )
+
     # ── Save full report ──
     report_path = sim_base / "analysis_report.txt"
     full_report = "\n".join([
@@ -1005,9 +1647,13 @@ def main():
         locus_report,
         frag_report,
         acceptance_report,
+        f"\nDetailed per-condition report: {condition_report_path}",
+        f"Per-condition metrics TSV: {condition_metrics_path}",
     ])
     report_path.write_text(full_report)
     print(f"\n\n  Full report saved to: {report_path}")
+    print(f"  Detailed condition report saved to: {condition_report_path}")
+    print(f"  Condition metrics TSV saved to: {condition_metrics_path}")
     print("=" * 100)
 
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ._arrays import RegionArrays
-from .latent_states import N_STATES, STATE_IS_EXPRESSED
+from .latent_states import N_STATES
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only.
     from ..locus import MultiLocus
@@ -40,7 +40,7 @@ _PROB_TOL: float = 1.0e-8
 
 @dataclass(frozen=True, slots=True)
 class AdaptivePriorResult:
-    """Outputs of the v5 entropy-Dirichlet prior plus the v6 split dial."""
+    """Outputs of the entropy-weighted prior-mass projection."""
 
     alpha_gdna_add: np.ndarray
     alpha_rna_add: np.ndarray
@@ -77,6 +77,8 @@ def compute_adaptive_prior(
     multi_loci: list["MultiLocus"],
     p_states: np.ndarray,
     unspliced_total: np.ndarray,
+    gdna_unspliced_mean: np.ndarray,
+    rna_unspliced_mean: np.ndarray,
     has_gdna_candidate: np.ndarray,
     rna_call_bias: float = 0.5,
     max_ess: float = MAX_ESS,
@@ -88,29 +90,30 @@ def compute_adaptive_prior(
     """
     n_loci = len(multi_loci)
     _validate_locus_ids(multi_loci, n_loci)
-    p, unspliced, has_candidate, bias, cap_max = _validate_inputs(
+    (
+        p,
+        unspliced,
+        gdna_unspliced,
+        rna_unspliced,
+        has_candidate,
+        bias,
+        cap_max,
+    ) = _validate_inputs(
         region_arrays=region_arrays,
         n_loci=n_loci,
         p_states=p_states,
         unspliced_total=unspliced_total,
+        gdna_unspliced_mean=gdna_unspliced_mean,
+        rna_unspliced_mean=rna_unspliced_mean,
         has_gdna_candidate=has_gdna_candidate,
         rna_call_bias=rna_call_bias,
         max_ess=max_ess,
     )
 
     region_weight = _entropy_weight(p)
-    rna_mask = np.asarray(STATE_IS_EXPRESSED, dtype=bool)
-    gdna_mask = ~rna_mask
-
-    q_gdna = np.sum(p[:, gdna_mask], axis=1, dtype=np.float64)
-    q_rna = np.sum(p[:, rna_mask], axis=1, dtype=np.float64)
-    q_total = q_gdna + q_rna
-    q_gdna = np.divide(q_gdna, q_total, out=np.zeros_like(q_gdna), where=q_total > 0.0)
-    q_rna = np.divide(q_rna, q_total, out=np.zeros_like(q_rna), where=q_total > 0.0)
-
     weighted_unspliced = unspliced * region_weight
-    n_gdna_region = weighted_unspliced * q_gdna
-    n_rna_region = weighted_unspliced * q_rna
+    n_gdna_region = gdna_unspliced * region_weight
+    n_rna_region = rna_unspliced * region_weight
 
     projection = _project_to_loci(
         region_arrays=region_arrays,
@@ -232,10 +235,20 @@ def _validate_inputs(
     n_loci: int,
     p_states: np.ndarray,
     unspliced_total: np.ndarray,
+    gdna_unspliced_mean: np.ndarray,
+    rna_unspliced_mean: np.ndarray,
     has_gdna_candidate: np.ndarray,
     rna_call_bias: float,
     max_ess: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    float,
+    float,
+]:
     n_regions = int(region_arrays.start.shape[0])
     p = np.asarray(p_states, dtype=np.float64)
     if p.shape != (n_regions, N_STATES):
@@ -260,6 +273,21 @@ def _validate_inputs(
     if np.any(unspliced < 0.0):
         raise ValueError("unspliced_total must be nonnegative.")
 
+    gdna_unspliced = _validate_region_mass(
+        "gdna_unspliced_mean",
+        gdna_unspliced_mean,
+        n_regions,
+    )
+    rna_unspliced = _validate_region_mass(
+        "rna_unspliced_mean",
+        rna_unspliced_mean,
+        n_regions,
+    )
+    if not np.allclose(gdna_unspliced + rna_unspliced, unspliced, rtol=1.0e-5, atol=1.0e-5):
+        raise ValueError(
+            "gdna_unspliced_mean + rna_unspliced_mean must conserve unspliced_total."
+        )
+
     has_candidate = np.asarray(has_gdna_candidate, dtype=bool)
     if has_candidate.shape != (n_loci,):
         raise ValueError(
@@ -274,7 +302,18 @@ def _validate_inputs(
     if not math.isfinite(cap_max) or cap_max <= 0.0:
         raise ValueError(f"max_ess must be finite and > 0; got {max_ess!r}.")
 
-    return p, unspliced, has_candidate, bias, cap_max
+    return p, unspliced, gdna_unspliced, rna_unspliced, has_candidate, bias, cap_max
+
+
+def _validate_region_mass(name: str, values: np.ndarray, n_regions: int) -> np.ndarray:
+    array = np.asarray(values, dtype=np.float64)
+    if array.shape != (n_regions,):
+        raise ValueError(f"{name} must have shape ({n_regions},); got {array.shape}.")
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must contain only finite values.")
+    if np.any(array < 0.0):
+        raise ValueError(f"{name} must be nonnegative.")
+    return array
 
 
 def _entropy_weight(p_states: np.ndarray) -> np.ndarray:

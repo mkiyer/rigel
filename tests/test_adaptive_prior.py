@@ -63,20 +63,45 @@ def _compute(
     unspliced: list[float],
     loci: list[MultiLocus],
     has_gdna: list[bool] | None = None,
+    gdna_unspliced: list[float] | None = None,
+    rna_unspliced: list[float] | None = None,
     rna_call_bias: float = 0.5,
     max_ess: float = MAX_ESS,
 ):
     if has_gdna is None:
         has_gdna = [True] * len(loci)
+    if gdna_unspliced is None or rna_unspliced is None:
+        gdna_unspliced, rna_unspliced = _legacy_test_mass_split(p_states, unspliced)
     return compute_adaptive_prior(
         region_arrays=_region_arrays(regions),
         multi_loci=loci,
         p_states=np.asarray(p_states, dtype=np.float64),
         unspliced_total=np.asarray(unspliced, dtype=np.float64),
+        gdna_unspliced_mean=np.asarray(gdna_unspliced, dtype=np.float64),
+        rna_unspliced_mean=np.asarray(rna_unspliced, dtype=np.float64),
         has_gdna_candidate=np.asarray(has_gdna, dtype=bool),
         rna_call_bias=rna_call_bias,
         max_ess=max_ess,
     )
+
+
+def _legacy_test_mass_split(
+    p_states: list[list[float]], unspliced: list[float]
+) -> tuple[list[float], list[float]]:
+    states = np.asarray(p_states, dtype=np.float64)
+    total = np.asarray(unspliced, dtype=np.float64)
+    state_gdna_share = states[:, 0] + states[:, 1]
+    state_rna_share = states[:, 2] + states[:, 3]
+    state_total = state_gdna_share + state_rna_share
+    gdna_share = np.divide(
+        state_gdna_share,
+        state_total,
+        out=np.zeros_like(state_gdna_share),
+        where=state_total > 0.0,
+    )
+    gdna = total * gdna_share
+    rna = total - gdna
+    return gdna.tolist(), rna.tolist()
 
 
 def test_entropy_weight_boundaries_and_monotonicity() -> None:
@@ -110,6 +135,20 @@ def test_regional_pseudocount_boundaries() -> None:
         result.n_local,
         np.array([[0.0, 0.0], [0.0, 0.0], [0.0, 20.0], [30.0, 0.0]]),
     )
+
+
+def test_explicit_mass_split_overrides_latent_state_rna_gdna_split() -> None:
+    result = _compute(
+        regions=[(0, 100)],
+        p_states=[RNA_STATE],
+        unspliced=[100.0],
+        gdna_unspliced=[60.0],
+        rna_unspliced=[40.0],
+        loci=[_multi_locus(0, 0, 100)],
+    )
+
+    np.testing.assert_allclose(result.n_local, np.array([[60.0, 40.0]]))
+    np.testing.assert_allclose([result.alpha_gdna_add[0], result.alpha_rna_add[0]], [60.0, 40.0])
 
 
 def test_geometry_disjoint_regions_allocate_to_matching_loci() -> None:
