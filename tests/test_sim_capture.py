@@ -1,5 +1,7 @@
 """Tests for hybrid-capture simulation weighting."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from rigel.sim.capture import CaptureConfig, CaptureSampler
@@ -13,7 +15,11 @@ from rigel.sim.whole_genome import (
 )
 from rigel.sim.manifest import condition_dir_name
 from rigel.sim.suite import (
+    SuiteCaptureSpec,
+    _load_suite_config,
+    _suite_capture_specs,
     capture_paired_condition_seed,
+    capture_probe_group_key,
     design_capture_probe_intervals,
     write_random_capture_probes,
 )
@@ -27,17 +33,35 @@ def _transcript(
     *,
     strand: Strand = Strand.POS,
     abundance: float = 100.0,
+    gene_id: str | None = None,
 ) -> Transcript:
     transcript = Transcript(
         ref="chr1",
         strand=strand,
         exons=[Interval(start, end) for start, end in exons],
         t_id=transcript_id,
-        g_id=f"g_{transcript_id}",
+        g_id=gene_id or f"g_{transcript_id}",
         abundance=abundance,
     )
     transcript.compute_length()
     return transcript
+
+
+def _suite_capture_args(**overrides) -> SimpleNamespace:
+    values = {
+        "capture_configs": None,
+        "capture_fraction": 0.0,
+        "capture_probes": None,
+        "capture_probe_format": "auto",
+        "probe_length": 120,
+        "probe_density": 1.0,
+        "capture_off_target_weight": 1.0,
+        "capture_binding_per_base": 10.0,
+        "capture_gdna_split_penalty": 0.2,
+        "capture_min_overlap": 1,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def test_transcript_probe_weights_match_overlap_example(tmp_path):
@@ -209,6 +233,57 @@ def test_parse_yaml_capture_config_sweep(tmp_path):
     assert cfg.capture_configs[1].config.binding_per_base == pytest.approx(7.0)
 
 
+def test_suite_capture_config_accepts_top_level_external_bed_panel(tmp_path):
+    probes = tmp_path / "panel.bed"
+    probes.write_text("chr1\t10\t130\tprobe1\t0\t+\t10\t130\t0\t1\t120\t0\n")
+    config = tmp_path / "suite.yaml"
+    config.write_text(
+        f"capture:\n"
+        f"  probes: {probes}\n"
+        f"  format: bed12\n"
+        f"  binding_per_base: 7\n"
+    )
+
+    values = _load_suite_config(config)
+    specs, include_capture_in_names = _suite_capture_specs(_suite_capture_args(**values))
+
+    assert include_capture_in_names is False
+    assert len(specs) == 1
+    assert specs[0].label == "on"
+    assert specs[0].enabled
+    assert specs[0].uses_provided_probes
+    assert not specs[0].generates_probes
+    assert specs[0].probes == str(probes)
+    assert specs[0].probe_format == "bed12"
+    assert specs[0].binding_per_base == pytest.approx(7.0)
+
+
+def test_suite_capture_config_can_mix_off_generated_and_external_panels(tmp_path):
+    probes = tmp_path / "panel.bed"
+    probes.write_text("chr1\t10\t130\tprobe1\t0\t+\t10\t130\t0\t1\t120\t0\n")
+    args = _suite_capture_args(
+        capture_fraction=0.25,
+        capture_configs=[
+            {"label": "off", "enabled": False},
+            {"label": "generated", "fraction": 0.5},
+            {"label": "panel", "probes": str(probes), "format": "bed12"},
+        ],
+    )
+
+    specs, include_capture_in_names = _suite_capture_specs(args)
+
+    assert include_capture_in_names
+    assert [spec.label for spec in specs] == ["off", "generated", "panel"]
+    assert not specs[0].enabled
+    assert specs[1].generates_probes
+    assert not specs[1].uses_provided_probes
+    assert specs[1].fraction == pytest.approx(0.5)
+    assert specs[2].uses_provided_probes
+    assert not specs[2].generates_probes
+    assert specs[2].probes == str(probes)
+    assert specs[2].probe_format == "bed12"
+
+
 def test_capture_sweep_uses_paired_condition_seed():
     seed = capture_paired_condition_seed(42, "none", 0.99, "none")
 
@@ -289,6 +364,8 @@ def test_random_mini_genome_probe_writer_targets_only_captured_transcripts(tmp_p
     assert result.n_transcripts == 3
     assert result.n_eligible == 2
     assert result.n_captured == 2
+    assert result.n_eligible_genes == 2
+    assert result.n_captured_genes == 2
     assert result.n_probes == 7
     assert {row[0] for row in rows} == {"T1", "T2"}
 
@@ -298,3 +375,130 @@ def test_random_mini_genome_probe_writer_targets_only_captured_transcripts(tmp_p
     for intervals in by_transcript.values():
         assert all(end - start == 120 for start, end in intervals)
         assert all(left[1] <= right[0] for left, right in zip(intervals, intervals[1:]))
+
+
+def test_random_probe_writer_outputs_bed12_for_junction_spanning_probe(tmp_path):
+    transcripts = [_transcript("T", [(100, 200), (400, 500)])]
+    probes = tmp_path / "capture_probes.tsv"
+    bed = tmp_path / "capture_probes.bed"
+
+    result = write_random_capture_probes(
+        transcripts,
+        probes,
+        capture_fraction=1.0,
+        probe_length=120,
+        probe_density=1.0,
+        seed=7,
+        bed_path=bed,
+    )
+
+    assert result.bed_path == bed
+    fields = bed.read_text().strip().split("\t")
+    assert fields[:6] == ["chr1", "140", "460", "T:probe_1", "0", "+"]
+    assert fields[9] == "2"
+    assert fields[10] == "60,60"
+    assert fields[11] == "0,260"
+
+
+def test_random_probe_writer_masks_shared_isoform_sequence_by_abundance(tmp_path):
+    transcripts = [
+        _transcript("LOW", [(100, 200), (300, 400)], abundance=10.0, gene_id="G"),
+        _transcript("HIGH", [(100, 200), (300, 400)], abundance=1000.0, gene_id="G"),
+    ]
+    probes = tmp_path / "capture_probes.tsv"
+    bed = tmp_path / "capture_probes.bed"
+
+    result = write_random_capture_probes(
+        transcripts,
+        probes,
+        capture_fraction=1.0,
+        probe_length=100,
+        probe_density=1.0,
+        seed=7,
+        bed_path=bed,
+    )
+
+    rows = [line.split("\t") for line in probes.read_text().splitlines()[1:]]
+    assert result.n_captured == 2
+    assert result.n_eligible_genes == 1
+    assert result.n_captured_genes == 1
+    assert result.n_probes == 2
+    assert {row[0] for row in rows} == {"HIGH"}
+
+    sampler = CaptureSampler.from_config(
+        CaptureConfig(probes=str(bed), probe_format="bed12", binding_per_base=1.0),
+        transcripts,
+        {"chr1": 1000},
+    )
+
+    assert sampler.fragment_weight("mrna", 0, 200, 0, 100) > 1.0
+    assert sampler.fragment_weight("mrna", 1, 200, 0, 100) > 1.0
+
+
+def test_random_probe_writer_selects_capture_pool_by_gene(tmp_path):
+    transcripts = [
+        _transcript("GA.1", [(0, 240)], gene_id="GA"),
+        _transcript("GA.2", [(500, 740)], gene_id="GA"),
+        _transcript("GB.1", [(1000, 1240)], gene_id="GB"),
+        _transcript("GB.2", [(1500, 1740)], gene_id="GB"),
+    ]
+    probes = tmp_path / "capture_probes.tsv"
+
+    result = write_random_capture_probes(
+        transcripts,
+        probes,
+        capture_fraction=0.5,
+        probe_length=120,
+        probe_density=1.0,
+        seed=7,
+    )
+
+    rows = [line.split("\t") for line in probes.read_text().splitlines()[1:]]
+    row_genes = {row[0].split(".")[0] for row in rows}
+    expected_by_gene = {
+        "GA": {"GA.1", "GA.2"},
+        "GB": {"GB.1", "GB.2"},
+    }
+
+    assert result.n_eligible == 4
+    assert result.n_captured == 2
+    assert result.n_eligible_genes == 2
+    assert result.n_captured_genes == 1
+    assert len(row_genes) == 1
+    assert {row[0] for row in rows} == expected_by_gene[next(iter(row_genes))]
+
+
+def test_capture_probe_group_key_ignores_binding_energy_not_geometry():
+    base = SuiteCaptureSpec(
+        label="weak",
+        fraction=0.5,
+        probe_length=120,
+        probe_density=1.0,
+        off_target_weight=1.0,
+        binding_per_base=5.0,
+        gdna_split_penalty=0.2,
+        min_overlap=1,
+    )
+    stronger = SuiteCaptureSpec(
+        label="strong",
+        fraction=0.5,
+        probe_length=120,
+        probe_density=1.0,
+        off_target_weight=1.0,
+        binding_per_base=50.0,
+        gdna_split_penalty=0.2,
+        min_overlap=1,
+    )
+    sparser = SuiteCaptureSpec(
+        label="sparse",
+        fraction=0.5,
+        probe_length=120,
+        probe_density=0.5,
+        off_target_weight=1.0,
+        binding_per_base=5.0,
+        gdna_split_penalty=0.2,
+        min_overlap=1,
+    )
+
+    assert capture_probe_group_key(base) == capture_probe_group_key(stronger)
+    assert capture_probe_group_key(base) != capture_probe_group_key(sparser)

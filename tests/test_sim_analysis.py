@@ -73,6 +73,27 @@ def test_calibration_report_uses_manifest_fragment_lengths(tmp_path):
     assert "+0.758" not in report
 
 
+def test_calibration_report_uses_condition_fl_truth_when_available(tmp_path):
+    condition = "gdna_low_ss_0.99_nrna_none"
+    _write_manifest(tmp_path, condition)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest["conditions"][0]["truth_summary"] = f"{condition}/truth_summary.json"
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    (tmp_path / condition).mkdir()
+    (tmp_path / condition / "truth_summary.json").write_text(json.dumps({
+        "fragment_lengths": {
+            "mrna": {"n": 10, "mean": 260.0},
+            "gdna": {"n": 10, "mean": 300.0},
+        }
+    }))
+    _write_summary(tmp_path, condition)
+
+    report = analyze_calibration(tmp_path, [condition], pd.DataFrame())
+
+    assert "+0.172" in report
+    assert "+0.005" not in report
+
+
 def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
     condition = "gdna_high_ss_0.99_nrna_none"
     _write_manifest(tmp_path, condition, n_gdna=2_000_000)

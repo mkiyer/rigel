@@ -25,6 +25,7 @@ import numpy as np
 import yaml
 
 from rigel.sim.capture import CaptureConfig, CaptureScenario
+from rigel.sim.bam import transcript_to_genomic_blocks
 from rigel.sim.synthetic_genome import (
     ANTISENSE_OVERLAP_FRAC,
     GENOME_LENGTH,
@@ -41,6 +42,7 @@ from rigel.sim.synthetic_genome import (
     write_gtf,
 )
 from rigel.sim.manifest import condition_dir_name
+from rigel.sim.truth import write_post_capture_truth
 from rigel.sim.whole_genome import (
     AbundanceConfig,
     GDNASimConfig,
@@ -55,6 +57,7 @@ from rigel.sim.whole_genome import (
     write_manifest,
 )
 from rigel.transcript import Transcript
+from rigel.types import Strand
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +137,12 @@ def _load_suite_config(path: Path) -> dict[str, object]:
         if section is not None and isinstance(raw.get(section), dict):
             section_map = raw[section]
             if source_key in section_map:
-                values[dest_key] = section_map[source_key]
+                value = section_map[source_key]
+                values[dest_key] = Path(value) if dest_key == "outdir" else value
                 return
         if source_key in raw:
-            values[dest_key] = raw[source_key]
+            value = raw[source_key]
+            values[dest_key] = Path(value) if dest_key == "outdir" else value
 
     for key in (
         "outdir",
@@ -180,6 +185,9 @@ def _load_suite_config(path: Path) -> dict[str, object]:
 
     put("capture", "fraction", "capture_fraction")
     put("capture", "capture_fraction")
+    put("capture", "probes", "capture_probes")
+    put("capture", "probe_format", "capture_probe_format")
+    put("capture", "format", "capture_probe_format")
     put("capture", "probe_length")
     put("capture", "probe_density")
     put("capture", "off_target_weight", "capture_off_target_weight")
@@ -201,11 +209,23 @@ class CaptureProbeDesignResult:
     n_eligible: int
     n_captured: int
     n_probes: int
+    bed_path: Path | None = None
+    n_eligible_genes: int = 0
+    n_captured_genes: int = 0
+
+
+@dataclass(frozen=True)
+class DesignedGenomicProbe:
+    """Generated probe projected into genomic BED12 block coordinates."""
+
+    ref: str
+    strand: Strand
+    blocks: tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
 class SuiteCaptureSpec:
-    """Generated-probe capture setting before probe files exist."""
+    """Capture setting for either provided panels or generated probes."""
 
     label: str
     fraction: float
@@ -215,10 +235,71 @@ class SuiteCaptureSpec:
     binding_per_base: float
     gdna_split_penalty: float
     min_overlap: int
+    probes: str | None = None
+    probe_format: str = "auto"
 
     @property
     def enabled(self) -> bool:
-        return self.fraction > 0.0 and self.probe_density > 0.0
+        return self.uses_provided_probes or self.generates_probes
+
+    @property
+    def uses_provided_probes(self) -> bool:
+        return bool(self.probes)
+
+    @property
+    def generates_probes(self) -> bool:
+        return not self.uses_provided_probes and self.fraction > 0.0 and self.probe_density > 0.0
+
+
+CaptureProbeGroupKey = tuple[float, int, float]
+
+
+def _probe_float_key(value: float) -> float:
+    return round(float(value), 12)
+
+
+def capture_probe_group_key(spec: SuiteCaptureSpec) -> CaptureProbeGroupKey:
+    """Return the probe-geometry key shared by compatible capture scenarios."""
+    return (
+        _probe_float_key(spec.fraction),
+        int(spec.probe_length),
+        _probe_float_key(spec.probe_density),
+    )
+
+
+def _float_slug(value: float) -> str:
+    return f"{value:.12g}".replace("-", "m").replace(".", "p")
+
+
+def _capture_probe_group_slug(key: CaptureProbeGroupKey) -> str:
+    fraction, probe_length, probe_density = key
+    return f"f{_float_slug(fraction)}_len{probe_length}_den{_float_slug(probe_density)}"
+
+
+def _capture_probe_group_path(
+    ref_dir: Path,
+    key: CaptureProbeGroupKey,
+    *,
+    include_capture_in_names: bool,
+) -> Path:
+    if not include_capture_in_names:
+        return ref_dir / "capture_probes.tsv"
+    return ref_dir / f"capture_probes_{_capture_probe_group_slug(key)}.tsv"
+
+
+def _provided_probe_kind(probes: str, probe_format: str) -> str:
+    """Best-effort manifest classification for a provided capture panel."""
+    fmt = probe_format.lower().replace("-", "_")
+    if fmt in {"bed", "bed12"}:
+        return "bed"
+    if fmt in {"transcript", "transcript_tsv", "tsv"}:
+        return "transcript"
+    suffix = Path(probes).suffix.lower()
+    if suffix in {".bed", ".bed12"}:
+        return "bed"
+    if suffix in {".tsv", ".txt"}:
+        return "transcript"
+    return "unknown"
 
 
 def _capture_label(raw: dict, index: int) -> str:
@@ -239,8 +320,13 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
         label = _capture_label(raw, index)
         enabled = bool(raw.get("enabled", True))
         fraction = float(raw.get("fraction", raw.get("capture_fraction", args.capture_fraction)))
+        probes = raw.get("probes", args.capture_probes)
+        probe_format = str(
+            raw.get("probe_format", raw.get("format", args.capture_probe_format))
+        )
         if not enabled:
             fraction = 0.0
+            probes = None
         spec = SuiteCaptureSpec(
             label=label,
             fraction=fraction,
@@ -256,6 +342,8 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
                 raw.get("gdna_split_penalty", args.capture_gdna_split_penalty)
             ),
             min_overlap=int(raw.get("min_overlap", args.capture_min_overlap)),
+            probes=str(probes) if probes else None,
+            probe_format=probe_format,
         )
         if not 0.0 <= spec.fraction <= 1.0:
             raise ValueError(f"capture config '{label}' fraction must be between 0 and 1")
@@ -267,7 +355,7 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
 
     if raw_configs is None:
         label = (
-            "on" if args.capture_fraction > 0.0 and args.probe_density > 0.0
+            "on" if args.capture_probes or (args.capture_fraction > 0.0 and args.probe_density > 0.0)
             else "off"
         )
         return [from_mapping({"label": label}, 1)], False
@@ -315,6 +403,181 @@ def design_capture_probe_intervals(
     return intervals
 
 
+def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    ordered = sorted(intervals)
+    if not ordered:
+        return []
+    merged = [ordered[0]]
+    for start, end in ordered[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _subtract_masked_intervals(
+    transcript_length: int,
+    masked_intervals: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    open_intervals: list[tuple[int, int]] = []
+    cursor = 0
+    for start, end in _merge_intervals(masked_intervals):
+        start = max(0, min(int(transcript_length), int(start)))
+        end = max(0, min(int(transcript_length), int(end)))
+        if end <= start:
+            continue
+        if cursor < start:
+            open_intervals.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < transcript_length:
+        open_intervals.append((cursor, int(transcript_length)))
+    return open_intervals
+
+
+def _project_genomic_block_to_transcript(
+    transcript: Transcript,
+    block_start: int,
+    block_end: int,
+) -> list[tuple[int, int]] | None:
+    tx_len = int(transcript.length or transcript.compute_length())
+    consumed = 0
+    projected: list[tuple[int, int]] = []
+    mapped_bp = 0
+
+    for exon in transcript.exons:
+        exon_len = exon.end - exon.start
+        overlap_start = max(block_start, exon.start)
+        overlap_end = min(block_end, exon.end)
+        if overlap_start < overlap_end:
+            tx_start = consumed + (overlap_start - exon.start)
+            tx_end = consumed + (overlap_end - exon.start)
+            if transcript.strand == Strand.NEG:
+                tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
+            projected.append((tx_start, tx_end))
+            mapped_bp += overlap_end - overlap_start
+        consumed += exon_len
+
+    if mapped_bp != block_end - block_start:
+        return None
+    return sorted(projected)
+
+
+def _project_genomic_probe_to_transcript(
+    transcript: Transcript,
+    probe: DesignedGenomicProbe,
+) -> list[tuple[int, int]]:
+    if transcript.ref != probe.ref or transcript.strand != probe.strand:
+        return []
+    projected: list[tuple[int, int]] = []
+    for start, end in probe.blocks:
+        intervals = _project_genomic_block_to_transcript(transcript, start, end)
+        if intervals is None:
+            return []
+        projected.extend(intervals)
+    return projected
+
+
+def _masked_probe_intervals(
+    transcript: Transcript,
+    existing_probes: list[DesignedGenomicProbe],
+) -> list[tuple[int, int]]:
+    masked: list[tuple[int, int]] = []
+    for probe in existing_probes:
+        masked.extend(_project_genomic_probe_to_transcript(transcript, probe))
+    return _merge_intervals(masked)
+
+
+def design_capture_probe_intervals_in_open_regions(
+    transcript_length: int,
+    probe_length: int,
+    probe_density: float,
+    masked_intervals: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Tile probes only in unmasked transcript-space intervals.
+
+    Existing genomic probes are treated as already covering their projected
+    transcript coordinates.  The requested density is therefore a soft target:
+    fragmented open space can make the realized design sparser than requested.
+    """
+    if not masked_intervals:
+        return design_capture_probe_intervals(
+            transcript_length,
+            probe_length=probe_length,
+            probe_density=probe_density,
+        )
+
+    open_intervals = _subtract_masked_intervals(transcript_length, masked_intervals)
+    candidates: list[tuple[int, int]] = []
+    max_probes = 0
+    for open_start, open_end in open_intervals:
+        open_len = open_end - open_start
+        max_probes += open_len // probe_length
+        for start, end in design_capture_probe_intervals(
+            open_len,
+            probe_length=probe_length,
+            probe_density=1.0,
+        ):
+            candidates.append((open_start + start, open_start + end))
+
+    if max_probes <= 0 or not candidates:
+        return []
+    n_probes = int(np.floor(max_probes * probe_density))
+    n_probes = min(len(candidates), max(1, n_probes))
+    if n_probes >= len(candidates):
+        return candidates
+
+    step = len(candidates) / n_probes
+    selected_indices = [int((i + 0.5) * step) for i in range(n_probes)]
+    return [candidates[index] for index in selected_indices]
+
+
+def _bed12_row_from_blocks(
+    ref: str,
+    strand: Strand,
+    name: str,
+    blocks: list[tuple[int, int]],
+) -> str | None:
+    if not blocks:
+        return None
+    chrom_start = min(block_start for block_start, _ in blocks)
+    chrom_end = max(block_end for _, block_end in blocks)
+    block_sizes = [block_end - block_start for block_start, block_end in blocks]
+    block_starts = [block_start - chrom_start for block_start, _ in blocks]
+    return "\t".join([
+        str(ref),
+        str(chrom_start),
+        str(chrom_end),
+        name,
+        "0",
+        strand.to_str(),
+        str(chrom_start),
+        str(chrom_end),
+        "0",
+        str(len(blocks)),
+        ",".join(str(size) for size in block_sizes),
+        ",".join(str(offset) for offset in block_starts),
+    ])
+
+
+def _bed12_row_for_probe(
+    transcript: Transcript,
+    start: int,
+    end: int,
+    probe_index: int,
+) -> str | None:
+    if transcript.ref is None or transcript.t_id is None:
+        return None
+    blocks = transcript_to_genomic_blocks(start, end, transcript)
+    return _bed12_row_from_blocks(
+        str(transcript.ref),
+        transcript.strand,
+        f"{transcript.t_id}:probe_{probe_index}",
+        blocks,
+    )
+
+
 def write_random_capture_probes(
     transcripts: list[Transcript],
     path: Path,
@@ -323,43 +586,110 @@ def write_random_capture_probes(
     probe_length: int = 120,
     probe_density: float = 1.0,
     seed: int = 42,
+    bed_path: Path | None = None,
 ) -> CaptureProbeDesignResult:
-    """Select captured transcripts and write transcript-coordinate probe TSV."""
+    """Select captured gene groups and write transcript-coordinate TSV plus BED12."""
     if not 0.0 <= capture_fraction <= 1.0:
         raise ValueError("capture_fraction must be between 0 and 1")
     if probe_length <= 0:
         raise ValueError("probe_length must be > 0")
     if not 0.0 <= probe_density <= 1.0:
         raise ValueError("probe_density must be between 0 and 1")
+    bed_path = bed_path or path.with_suffix(".bed")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    bed_path.parent.mkdir(parents=True, exist_ok=True)
 
     eligible: list[tuple[int, Transcript, int]] = []
     for idx, transcript in enumerate(transcripts):
         length = int(transcript.length or transcript.compute_length())
-        if length >= probe_length and transcript.t_id is not None:
+        if length >= probe_length and transcript.t_id is not None and transcript.ref is not None:
             eligible.append((idx, transcript, length))
+
+    eligible_by_gene: dict[str, list[tuple[int, Transcript, int]]] = {}
+    for item in eligible:
+        idx, transcript, _ = item
+        gene_key = str(transcript.g_id or transcript.t_id or idx)
+        eligible_by_gene.setdefault(gene_key, []).append(item)
+    eligible_genes = list(eligible_by_gene)
 
     if capture_fraction <= 0.0 or probe_density <= 0.0 or not eligible:
         path.write_text("transcript_id\tstart\tend\n")
-        return CaptureProbeDesignResult(path, len(transcripts), len(eligible), 0, 0)
+        bed_path.write_text("")
+        return CaptureProbeDesignResult(
+            path,
+            len(transcripts),
+            len(eligible),
+            0,
+            0,
+            bed_path,
+            len(eligible_genes),
+            0,
+        )
 
-    n_captured = int(np.floor(len(eligible) * capture_fraction))
-    n_captured = min(len(eligible), max(1, n_captured))
+    n_captured_genes = int(np.floor(len(eligible_genes) * capture_fraction))
+    n_captured_genes = min(len(eligible_genes), max(1, n_captured_genes))
     rng = np.random.default_rng(seed)
-    selected_positions = set(rng.choice(len(eligible), size=n_captured, replace=False))
+    selected_positions = set(rng.choice(len(eligible_genes), size=n_captured_genes, replace=False))
+    selected_gene_keys = {
+        gene_key for pos, gene_key in enumerate(eligible_genes) if pos in selected_positions
+    }
+    selected = [
+        item
+        for gene_key in eligible_genes
+        if gene_key in selected_gene_keys
+        for item in eligible_by_gene[gene_key]
+    ]
+    selected.sort(
+        key=lambda item: (
+            -float(item[1].abundance or 0.0),
+            str(item[1].t_id),
+            item[0],
+        ),
+    )
 
     n_probes = 0
-    with open(path, "w") as handle:
+    existing_probes: list[DesignedGenomicProbe] = []
+    with open(path, "w") as handle, open(bed_path, "w") as bed_handle:
         handle.write("transcript_id\tstart\tend\n")
-        for pos, (_, transcript, length) in enumerate(eligible):
-            if pos not in selected_positions:
-                continue
-            for start, end in design_capture_probe_intervals(
-                length, probe_length=probe_length, probe_density=probe_density,
+        for _, transcript, length in selected:
+            masked = _masked_probe_intervals(transcript, existing_probes)
+            for start, end in design_capture_probe_intervals_in_open_regions(
+                length,
+                probe_length=probe_length,
+                probe_density=probe_density,
+                masked_intervals=masked,
             ):
-                handle.write(f"{transcript.t_id}\t{start}\t{end}\n")
+                blocks = transcript_to_genomic_blocks(start, end, transcript)
+                if not blocks or transcript.ref is None:
+                    continue
                 n_probes += 1
+                probe_name = f"{transcript.t_id}:probe_{n_probes}"
+                bed_row = _bed12_row_from_blocks(
+                    str(transcript.ref),
+                    transcript.strand,
+                    probe_name,
+                    blocks,
+                )
+                if bed_row is None:
+                    continue
+                handle.write(f"{transcript.t_id}\t{start}\t{end}\n")
+                bed_handle.write(f"{bed_row}\n")
+                existing_probes.append(DesignedGenomicProbe(
+                    str(transcript.ref),
+                    transcript.strand,
+                    tuple(blocks),
+                ))
 
-    return CaptureProbeDesignResult(path, len(transcripts), len(eligible), n_captured, n_probes)
+    return CaptureProbeDesignResult(
+        path,
+        len(transcripts),
+        len(eligible),
+        len(selected),
+        n_probes,
+        bed_path,
+        len(eligible_genes),
+        n_captured_genes,
+    )
 
 
 def main():
@@ -436,7 +766,15 @@ def main():
     parser.add_argument("--strand-specificities", type=str, default=None)
     parser.add_argument(
         "--capture-fraction", type=float, default=0.0,
-        help="Fraction of eligible transcripts to target with generated probes (default: 0.0)"
+        help="Fraction of eligible genes to target with generated probes (default: 0.0)"
+    )
+    parser.add_argument(
+        "--capture-probes", type=str, default=None,
+        help="Provided capture probe panel path; skips generated probe design when set"
+    )
+    parser.add_argument(
+        "--capture-probe-format", type=str, default="auto",
+        help="Provided capture probe format: auto, transcript, or bed12 (default: auto)"
     )
     parser.add_argument(
         "--probe-length", type=int, default=120,
@@ -539,6 +877,16 @@ def main():
         raise ValueError("gDNA labels must have the same length as gDNA rates")
     selected_conditions = set(args.conditions or [])
     capture_specs, include_capture_in_names = _suite_capture_specs(args)
+    abundance_config = AbundanceConfig(
+        mode="random",
+        seed=(
+            args.abundance_seed if args.abundance_seed is not None
+            else stable_seed(args.seed, "abundance")
+        ),
+        min=args.abundance_min,
+        max=args.abundance_max,
+        frac_expressed=args.frac_expressed,
+    )
 
     # ══════════════════════════════════════════════════════════════════════
     # Step 1: Generate synthetic genome
@@ -595,42 +943,95 @@ def main():
 
     transcripts: list[Transcript] | None = None
     capture_scenarios: list[CaptureScenario] = []
-    if any(spec.enabled for spec in capture_specs):
+    abundances_assigned = False
+    if any(spec.generates_probes for spec in capture_specs):
         print(f"\n  Loading transcripts from {gtf_path} for capture probe design...")
         transcripts = load_transcripts(gtf_path)
+        assign_random_abundances(transcripts, abundance_config)
+        abundances_assigned = True
 
+    capture_probe_results: dict[CaptureProbeGroupKey, CaptureProbeDesignResult] = {}
+    capture_probe_groups: dict[CaptureProbeGroupKey, list[SuiteCaptureSpec]] = {}
+    for spec in capture_specs:
+        if spec.generates_probes:
+            capture_probe_groups.setdefault(capture_probe_group_key(spec), []).append(spec)
+
+    for group_key, group_specs in capture_probe_groups.items():
+        if transcripts is None:
+            continue
+        probe_path = _capture_probe_group_path(
+            ref_dir,
+            group_key,
+            include_capture_in_names=include_capture_in_names,
+        )
+        bed_path = probe_path.with_suffix(".bed")
+        capture_probe_results[group_key] = write_random_capture_probes(
+            transcripts,
+            probe_path,
+            capture_fraction=group_key[0],
+            probe_length=group_key[1],
+            probe_density=group_key[2],
+            seed=stable_seed(args.seed, "capture", *group_key),
+            bed_path=bed_path,
+        )
+        labels = ", ".join(spec.label for spec in group_specs)
+        result = capture_probe_results[group_key]
+        if result.n_probes > 0:
+            print(
+                f"  Capture probe set {_capture_probe_group_slug(group_key)}: "
+                f"{result.path} + {result.bed_path} "
+                f"({result.n_probes:,} probes across "
+                f"{result.n_captured_genes:,}/{result.n_eligible_genes:,} eligible genes, "
+                f"{result.n_captured:,}/{result.n_eligible:,} eligible transcripts; "
+                f"scenarios: {labels})"
+            )
+
+    capture_probe_tsv_by_label: dict[str, str] = {}
+    capture_probe_bed_by_label: dict[str, str] = {}
+    capture_probe_panel_by_label: dict[str, str] = {}
+    capture_probe_source_by_label: dict[str, str] = {}
     for spec in capture_specs:
         capture_config = CaptureConfig()
-        if spec.enabled and transcripts is not None:
-            probe_path = (
-                ref_dir / f"capture_probes_{spec.label}.tsv"
-                if include_capture_in_names else ref_dir / "capture_probes.tsv"
+        if spec.uses_provided_probes and spec.probes is not None:
+            capture_config = CaptureConfig(
+                probes=spec.probes,
+                probe_format=spec.probe_format,
+                off_target_weight=spec.off_target_weight,
+                binding_per_base=spec.binding_per_base,
+                gdna_split_penalty=spec.gdna_split_penalty,
+                min_overlap=spec.min_overlap,
             )
-            capture_result = write_random_capture_probes(
-                transcripts,
-                probe_path,
-                capture_fraction=spec.fraction,
-                probe_length=spec.probe_length,
-                probe_density=spec.probe_density,
-                seed=stable_seed(
-                    args.seed, "capture", spec.fraction, spec.probe_length,
-                    spec.probe_density,
-                ),
+            capture_probe_panel_by_label[spec.label] = spec.probes
+            capture_probe_source_by_label[spec.label] = "provided"
+            probe_kind = _provided_probe_kind(spec.probes, spec.probe_format)
+            if probe_kind == "bed":
+                capture_probe_bed_by_label[spec.label] = spec.probes
+            elif probe_kind == "transcript":
+                capture_probe_tsv_by_label[spec.label] = spec.probes
+            print(
+                f"  Capture {spec.label}: using provided probe panel "
+                f"{spec.probes} ({spec.probe_format})"
             )
-            if capture_result.n_probes > 0:
+        elif spec.generates_probes and transcripts is not None:
+            capture_result = capture_probe_results.get(capture_probe_group_key(spec))
+            if capture_result is not None and capture_result.n_probes > 0:
+                capture_probe_tsv_by_label[spec.label] = str(capture_result.path)
+                if capture_result.bed_path is not None:
+                    capture_probe_bed_by_label[spec.label] = str(capture_result.bed_path)
+                    capture_probe_panel_by_label[spec.label] = str(capture_result.bed_path)
+                else:
+                    capture_probe_panel_by_label[spec.label] = str(capture_result.path)
+                capture_probe_source_by_label[spec.label] = "generated"
                 capture_config = CaptureConfig(
-                    probes=str(probe_path),
-                    probe_format="transcript",
+                    probes=str(capture_result.bed_path),
+                    probe_format="bed12",
                     off_target_weight=spec.off_target_weight,
                     binding_per_base=spec.binding_per_base,
                     gdna_split_penalty=spec.gdna_split_penalty,
                     min_overlap=spec.min_overlap,
                 )
                 print(
-                    f"  Capture {spec.label}: {probe_path} "
-                    f"({capture_result.n_probes:,} probes across "
-                    f"{capture_result.n_captured:,}/{capture_result.n_eligible:,} "
-                    "eligible transcripts)"
+                    f"  Capture {spec.label}: using {capture_result.bed_path}"
                 )
             else:
                 print(
@@ -675,16 +1076,7 @@ def main():
             error_rate=args.error_rate,
             n_workers=args.n_workers,
         ),
-        abundance=AbundanceConfig(
-            mode="random",
-            seed=(
-                args.abundance_seed if args.abundance_seed is not None
-                else stable_seed(args.seed, "abundance")
-            ),
-            min=args.abundance_min,
-            max=args.abundance_max,
-            frac_expressed=args.frac_expressed,
-        ),
+        abundance=abundance_config,
         gdna=GDNASimConfig(
             rates=gdna_rates,
             rate_labels=gdna_labels,
@@ -713,7 +1105,9 @@ def main():
     if transcripts is None:
         print(f"\n  Loading transcripts from {gtf_path}...")
         transcripts = load_transcripts(gtf_path)
-    assign_random_abundances(transcripts, cfg.abundance)
+    if not abundances_assigned:
+        assign_random_abundances(transcripts, cfg.abundance)
+        abundances_assigned = True
 
     n_expressed = sum(1 for t in transcripts if (t.abundance or 0) > 0)
     print(f"  Expressed: {n_expressed}/{len(transcripts)} transcripts")
@@ -752,8 +1146,8 @@ def main():
     for nrna_ratio, nrna_label in zip(nrna_ratios, nrna_labels):
         cond_transcripts = copy.deepcopy(transcripts)
         apply_nrna_ratio(cond_transcripts, nrna_ratio)
-        truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
-        truth_path = outdir / truth_name
+        molecular_truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
+        truth_path = outdir / molecular_truth_name
         write_truth_abundances(cond_transcripts, truth_path)
         print(f"  Truth abundances ({nrna_label}): {truth_path}")
 
@@ -779,6 +1173,9 @@ def main():
                         args.seed, gdna_label, strand_spec, nrna_label,
                     )
                     cond_dir = outdir / cond_name
+                    truth_abundances_name = f"{cond_name}/truth_abundances.tsv"
+                    truth_fl_name = f"{cond_name}/truth_fragment_lengths.tsv"
+                    truth_summary_name = f"{cond_name}/truth_summary.json"
 
                     print(
                         f"\n  [{cond_num}/{total_conditions}] {cond_name}: "
@@ -798,13 +1195,32 @@ def main():
                         "capture_label": capture_scenario.label,
                         "capture_enabled": bool(capture_scenario.config.probes),
                         "capture_config": capture_scenario.config,
+                        "capture_probe_source": capture_probe_source_by_label.get(
+                            capture_scenario.label,
+                        ),
+                        "capture_probe_panel": capture_probe_panel_by_label.get(
+                            capture_scenario.label,
+                        ),
+                        "capture_probe_tsv": capture_probe_tsv_by_label.get(
+                            capture_scenario.label,
+                        ),
+                        "capture_probe_bed": capture_probe_bed_by_label.get(
+                            capture_scenario.label,
+                        ),
                         "n_mrna": n_mrna,
                         "n_nrna": n_nrna,
                         "n_rna": n_rna_total,
                         "n_gdna": n_gdna,
                         "n_total": n_rna_total + n_gdna,
                         "seed": condition_seed,
-                        "truth_abundances": truth_name,
+                        "truth_kind": "post_capture_empirical",
+                        "pre_capture_abundances": molecular_truth_name,
+                        "post_capture_abundances": truth_abundances_name,
+                        "post_capture_fragment_lengths": truth_fl_name,
+                        "molecular_truth_abundances": molecular_truth_name,
+                        "truth_abundances": truth_abundances_name,
+                        "truth_fragment_lengths": truth_fl_name,
+                        "truth_summary": truth_summary_name,
                         "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
                         "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
                     }
@@ -836,6 +1252,22 @@ def main():
                         )
                         elapsed_cond = time.monotonic() - t_cond
                         print(f" done ({elapsed_cond:.1f}s)", flush=True)
+
+                    bam_source = cond_dir / "sim_oracle.bam"
+                    truth_summary = write_post_capture_truth(
+                        cond_transcripts,
+                        outdir / truth_abundances_name,
+                        outdir / truth_fl_name,
+                        outdir / truth_summary_name,
+                        bam_path=bam_source if bam_source.exists() else None,
+                        fastq_path=cond_dir / "sim_R1.fq.gz",
+                        condition=cond_name,
+                        molecular_truth=molecular_truth_name,
+                    )
+                    origin_counts = truth_summary["origin_counts"]
+                    cond_entry["n_mrna_observed"] = int(origin_counts.get("mrna", 0))
+                    cond_entry["n_nrna_observed"] = int(origin_counts.get("nrna", 0))
+                    cond_entry["n_gdna_observed"] = int(origin_counts.get("gdna", 0))
 
                     conditions.append(cond_entry)
 

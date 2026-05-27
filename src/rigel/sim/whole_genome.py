@@ -107,6 +107,7 @@ from rigel.sim.manifest import (
     gdna_label_for_rate,
     write_manifest as write_manifest_file,
 )
+from rigel.sim.truth import write_post_capture_truth
 
 logger = logging.getLogger(__name__)
 
@@ -2044,8 +2045,8 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
             )
 
         # Write truth abundances for this nRNA configuration
-        truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
-        write_truth_abundances(cond_transcripts, outdir / truth_name)
+        molecular_truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
+        write_truth_abundances(cond_transcripts, outdir / molecular_truth_name)
 
         for gdna_label, gdna_rate in gdna_pairs:
             for strand_spec in cfg.strand_specificities:
@@ -2075,6 +2076,9 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
                         gdna_label, strand_spec, nrna_label, capture_label,
                     )
                     cond_dir = outdir / cond_name
+                    truth_abundances_name = f"{cond_name}/truth_abundances.tsv"
+                    truth_fl_name = f"{cond_name}/truth_fragment_lengths.tsv"
+                    truth_summary_name = f"{cond_name}/truth_summary.json"
 
                     print(
                         f"\n[{cond_num}/{total_conditions}] {cond_name}: "
@@ -2104,7 +2108,14 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
                         "n_rna": n_rna,
                         "n_gdna": n_gdna,
                         "n_total": n_rna + n_gdna,
-                        "truth_abundances": truth_name,
+                        "truth_kind": "post_capture_empirical",
+                        "pre_capture_abundances": molecular_truth_name,
+                        "post_capture_abundances": truth_abundances_name,
+                        "post_capture_fragment_lengths": truth_fl_name,
+                        "molecular_truth_abundances": molecular_truth_name,
+                        "truth_abundances": truth_abundances_name,
+                        "truth_fragment_lengths": truth_fl_name,
+                        "truth_summary": truth_summary_name,
                         "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
                         "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
                     }
@@ -2137,6 +2148,22 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
                             else None
                         )
                         print(f" done ({time.monotonic() - t0:.1f}s)", flush=True)
+
+                    bam_source = cond_dir / "sim_oracle.bam"
+                    truth_summary = write_post_capture_truth(
+                        cond_transcripts,
+                        outdir / truth_abundances_name,
+                        outdir / truth_fl_name,
+                        outdir / truth_summary_name,
+                        bam_path=bam_source if bam_source.exists() else None,
+                        fastq_path=cond_dir / "sim_R1.fq.gz",
+                        condition=cond_name,
+                        molecular_truth=molecular_truth_name,
+                    )
+                    origin_counts = truth_summary["origin_counts"]
+                    cond_entry["n_mrna_observed"] = int(origin_counts.get("mrna", 0))
+                    cond_entry["n_nrna_observed"] = int(origin_counts.get("nrna", 0))
+                    cond_entry["n_gdna_observed"] = int(origin_counts.get("gdna", 0))
 
                     conditions.append(cond_entry)
     # 4. Write manifest

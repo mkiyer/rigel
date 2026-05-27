@@ -85,6 +85,26 @@ def simulated_fragment_length_means(manifest: dict) -> tuple[float, float]:
     return float(sim.get("frag_mean", 250.0)), float(gdna.get("frag_mean", 350.0))
 
 
+def _load_condition_truth_summary(sim_base: Path, meta: dict) -> dict:
+    summary_name = meta.get("truth_summary")
+    if not summary_name:
+        return {}
+    summary_path = Path(str(summary_name))
+    if not summary_path.is_absolute():
+        summary_path = sim_base / summary_path
+    if not summary_path.exists():
+        return {}
+    with open(summary_path) as handle:
+        return json.load(handle)
+
+
+def _truth_fl_mean(summary: dict, kind: str, fallback: float) -> float:
+    fragment_lengths = summary.get("fragment_lengths", {}) if summary else {}
+    stats = fragment_lengths.get(kind, {}) if isinstance(fragment_lengths, dict) else {}
+    mean = stats.get("mean") if isinstance(stats, dict) else None
+    return float(mean) if mean is not None else fallback
+
+
 def _format_bp(value: float) -> str:
     """Compact bp value for report prose."""
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
@@ -304,6 +324,9 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
         n_gdna_true = int(meta.get("n_gdna", round(n_rna * gdna_frac)))
         n_total_true = n_rna + n_gdna_true
         gdna_rate_true = n_gdna_true / n_total_true if n_total_true > 0 else 0
+        truth_summary = _load_condition_truth_summary(sim_base, meta)
+        truth_rna_fl_mean = _truth_fl_mean(truth_summary, "mrna", true_rna_fl_mean)
+        truth_gdna_fl_mean = _truth_fl_mean(truth_summary, "gdna", true_gdna_fl_mean)
 
         # Estimated gDNA rate from quantification output
         quant_out = summary.get("quantification", {})
@@ -325,6 +348,8 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
             "gdna_rate_true": gdna_rate_true,
             "n_rna_true": n_rna,
             "n_gdna_true": n_gdna_true,
+            "truth_rna_fl_mean": truth_rna_fl_mean,
+            "truth_gdna_fl_mean": truth_gdna_fl_mean,
             "intergenic_total": quant_out.get("intergenic_total", 0),
             "gdna_total": quant_out.get("gdna_total", 0),
             "mrna_total": quant_out.get("mrna_total", 0),
@@ -349,21 +374,25 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
     lines.append("  FRAGMENT LENGTH MODELS")
     lines.append(f"{'─' * 100}")
     lines.append(
-        "  Simulated FL: "
+        "  Default simulated FL: "
         f"RNA={_format_bp(true_rna_fl_mean)}bp (mean), "
         f"gDNA={_format_bp(true_gdna_fl_mean)}bp (mean). "
-        "Check calibration recovery.\n"
+        "Condition truth_summary files override these means when available.\n"
     )
     lines.append(f"  {'Condition':<35} {'FL_rna':>8} {'FL_gdna':>8} {'FL_rna_err':>10} {'FL_gdna_err':>11}")
     for row in cal_rows:
         rna_err = (
-            (row["fl_rna"] - true_rna_fl_mean) / true_rna_fl_mean
-            if row["fl_rna"] > 0 and true_rna_fl_mean > 0
+            (row["fl_rna"] - row["truth_rna_fl_mean"]) / row["truth_rna_fl_mean"]
+            if row["fl_rna"] > 0 and row["truth_rna_fl_mean"] > 0
             else float("nan")
         )
         gdna_err = (
-            (row["fl_gdna"] - true_gdna_fl_mean) / true_gdna_fl_mean
-            if row["n_gdna_true"] > 0 and row["fl_gdna"] > 0 and true_gdna_fl_mean > 0
+            (row["fl_gdna"] - row["truth_gdna_fl_mean"]) / row["truth_gdna_fl_mean"]
+            if (
+                row["n_gdna_true"] > 0
+                and row["fl_gdna"] > 0
+                and row["truth_gdna_fl_mean"] > 0
+            )
             else float("nan")
         )
         lines.append(

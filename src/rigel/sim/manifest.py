@@ -50,6 +50,11 @@ def _jsonable(value: Any) -> Any:
 
 def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) -> Path:
     """Write a simulation manifest and return its path."""
+    truth_abundances = "truth_abundances.tsv"
+    for condition in conditions:
+        if condition.get("truth_abundances"):
+            truth_abundances = str(condition["truth_abundances"])
+            break
     manifest = {
         "version": 1,
         "simulation": _jsonable(getattr(config, "simulation", {})),
@@ -58,7 +63,7 @@ def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) 
         "capture": _jsonable(getattr(config, "capture", {})),
         "capture_configs": _jsonable(getattr(config, "capture_configs", [])),
         "abundance": _jsonable(getattr(config, "abundance", {})),
-        "truth_abundances": "truth_abundances.tsv",
+        "truth_abundances": truth_abundances,
         "conditions": _jsonable(conditions),
     }
     for key in ("genome", "gtf", "transcript_filter", "strand_specificities"):

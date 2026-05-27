@@ -24,6 +24,66 @@ Transcript-coordinate probes are projected back to genomic blocks using the
 transcript exon map. BED12 probes are projected onto any compatible transcript
 whose exons fully contain the probe blocks.
 
+When `scripts/sim/simulate_suite.py` generates random capture probes, it writes
+both files:
+
+- `reference/capture_probes_<group>.tsv` for transcript-design provenance.
+- `reference/capture_probes_<group>.bed` for simulator input and genomic BED12
+   inspection. Probes spanning exon-exon junctions are represented as multi-block
+   BED12 records.
+
+Generated probe design remains transcript-targeted, but the generated BED12 is
+the capture model input. A probe designed against one isoform can therefore
+enrich every compatible transcript that contains the same genomic probe blocks.
+
+The suite can also use a provided probe panel directly. Supplying `probes:` on a
+capture scenario bypasses random probe generation for that scenario and passes
+the panel straight to the capture sampler:
+
+```yaml
+capture:
+   configs:
+      - label: off
+         enabled: false
+      - label: panel
+         probes: /path/to/probes.bed
+         format: bed12
+         binding_per_base: 10.0
+```
+
+If `capture.probes` is supplied without a `capture.configs` list, the suite runs
+a single capture-on scenario using that panel. Provided panels may be BED12 or
+transcript-coordinate TSV; use `format: bed12`, `format: transcript`, or leave
+`format: auto` for detection.
+
+The random generated-probe designer uses a deterministic greedy heuristic:
+
+1. Group eligible transcripts by gene.
+2. Randomly select captured gene groups using `capture_fraction`; every eligible
+   isoform in a selected gene enters the captured design pool, and every isoform
+   in an unselected gene stays out of that pool.
+3. Sort selected transcripts by mature-RNA molecular abundance, high to low.
+4. Before designing probes for each transcript, project already-generated
+    genomic probes back onto that transcript and mask those transcript-space
+    intervals.
+5. Tile new probes only in the remaining open transcript-space intervals.
+
+The requested probe density is a soft target under masking. Shared exons or
+short open intervals can make the realized number of new probes lower than the
+nominal tiling density for a selected transcript.
+
+Probe design uses the pre-capture mature-RNA molecular abundances assigned by
+the suite abundance model. Post-capture abundances are not known until reads are
+sampled through the full capture landscape.
+
+Within a suite, generated probe sets are shared across compatible capture
+scenarios. The probe-set key is the geometry of the design: capture fraction,
+probe length, and probe density. Runtime weighting parameters such as
+`binding_per_base`, `off_target_weight`, `gdna_split_penalty`, and `min_overlap`
+reuse the same probe file so binding-energy sweeps remain head-to-head
+comparable. Changing probe density, length, or captured-gene fraction
+creates a separate probe set.
+
 ## Weight Model
 
 For a fragment start `s` with fragment interval `[s, s + L)`, the sampling
@@ -101,6 +161,23 @@ capture:
 ```
 
 These settings are recorded in `manifest.json` under the `capture` key.
+For generated probe suites, each condition also records `capture_probe_tsv` and
+`capture_probe_bed` paths. The `capture_config.probes` field points to the BED12
+file used by the simulator.
+
+Each condition records both pre-capture and post-capture truth artifacts:
+
+- `pre_capture_abundances` points to the molecular abundance table used before
+   capture sampling.
+- `post_capture_abundances` points to the empirical observed-fragment abundance
+   table after capture sampling.
+- `post_capture_fragment_lengths` points to the empirical post-capture fragment
+   length distribution.
+
+The post-capture abundance table includes explicit `pre_capture_*` molecular
+columns and `post_capture_*` observed-fragment columns. Legacy-compatible
+`mrna_abundance`, `nrna_abundance`, and `total_rna` columns contain the
+post-capture observed fragment counts used for evaluation.
 
 ## Current Scope
 
