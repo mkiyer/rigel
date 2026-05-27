@@ -233,7 +233,14 @@ def _strand_channels_summary(
 ) -> dict[str, object] | None:
     if strand_channels is None:
         return None
+    from .strand_deconv import (
+        FLAG_LOW_STRAND_RELIABILITY,
+        FLAG_NEAR_UNSTRANDED,
+        FLAG_RELIABILITY_APPROX,
+    )
+
     contained = np.asarray(strand_channels.contained_mean)
+    flags = np.asarray(strand_channels.flags, dtype=np.uint16)
     return {
         "n_regions": int(contained.size),
         "internal_rna_lower_ci": float(strand_channels.internal_rna_lower_ci),
@@ -247,7 +254,24 @@ def _strand_channels_summary(
         "boundary_left_rna_lower": _summary_stats(strand_channels.boundary_left_rna_lower),
         "boundary_right_mean": _summary_stats(strand_channels.boundary_right_mean),
         "boundary_right_rna_lower": _summary_stats(strand_channels.boundary_right_rna_lower),
-        "flag_histogram": _uint_histogram(strand_channels.flags),
+        "contained_reliability": _summary_stats(strand_channels.contained_reliability),
+        "contained_log_bayes_factor": _summary_stats(strand_channels.contained_log_bayes_factor),
+        "boundary_left_reliability": _summary_stats(strand_channels.boundary_left_reliability),
+        "boundary_left_log_bayes_factor": _summary_stats(
+            strand_channels.boundary_left_log_bayes_factor
+        ),
+        "boundary_right_reliability": _summary_stats(strand_channels.boundary_right_reliability),
+        "boundary_right_log_bayes_factor": _summary_stats(
+            strand_channels.boundary_right_log_bayes_factor
+        ),
+        "n_regions_low_reliability": int(
+            np.count_nonzero((flags & FLAG_LOW_STRAND_RELIABILITY) != 0)
+        ),
+        "n_regions_approx_reliability": int(
+            np.count_nonzero((flags & FLAG_RELIABILITY_APPROX) != 0)
+        ),
+        "n_regions_near_unstranded": int(np.count_nonzero((flags & FLAG_NEAR_UNSTRANDED) != 0)),
+        "flag_histogram": _uint_histogram(flags),
     }
 
 

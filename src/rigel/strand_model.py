@@ -138,6 +138,16 @@ class StrandModel:
         return self.pos_neg + self.neg_pos
 
     @property
+    def n_minor(self) -> int:
+        """Minor-orientation observations relative to the learned protocol."""
+        return min(self.n_same, self.n_opposite)
+
+    @property
+    def n_major(self) -> int:
+        """Major-orientation observations relative to the learned protocol."""
+        return max(self.n_same, self.n_opposite)
+
+    @property
     def n_observations(self) -> int:
         """Total qualified observations."""
         return self.n_same + self.n_opposite
@@ -178,6 +188,16 @@ class StrandModel:
     def read1_sense(self) -> bool:
         """True if read 1 is predominantly sense (R1-sense protocol)."""
         return self.p_r1_sense >= 0.5
+
+    @property
+    def minor_rate_posterior_alpha(self) -> float:
+        """Beta posterior alpha for the RNA minor-orientation rate."""
+        return float(self.n_minor + 1)
+
+    @property
+    def minor_rate_posterior_beta(self) -> float:
+        """Beta posterior beta for the RNA minor-orientation rate."""
+        return float(self.n_major + 1)
 
     def posterior_variance(self) -> float:
         """Variance of p_r1_sense using binomial variance."""
@@ -294,9 +314,13 @@ class StrandModel:
                 "neg_neg": int(self.neg_neg),
                 "n_same": int(self.n_same),
                 "n_opposite": int(self.n_opposite),
+                "n_minor": int(self.n_minor),
+                "n_major": int(self.n_major),
             },
             "estimate": {
                 "variance": float(round(self.posterior_variance(), 10)),
+                "minor_rate_posterior_alpha": float(self.minor_rate_posterior_alpha),
+                "minor_rate_posterior_beta": float(self.minor_rate_posterior_beta),
             },
             "probabilities": {
                 "p_r1_sense": float(round(self.p_r1_sense, 6)),

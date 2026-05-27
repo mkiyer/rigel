@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.special import betaln, gammaln, logsumexp
 
 from rigel.calibration._arrays import PayloadArrays, RegionArrays
 from rigel.calibration.scan_payload import FL_HIST_N_BINS, CalibrationScanPayload
@@ -25,8 +26,10 @@ from rigel.calibration.strand_deconv import (
     FLAG_INELIGIBLE,
     FLAG_KAPPA_FALLBACK,
     FLAG_NEAR_UNSTRANDED,
+    FLAG_RELIABILITY_APPROX,
     MAX_EXACT_POSTERIOR_N,
     _exact_posterior_R,
+    _log_normal_interval_prob,
     _summarize_exact,
     _summarize_normal,
     build_strand_region_counts,
@@ -34,6 +37,7 @@ from rigel.calibration.strand_deconv import (
     estimate_kappa_d,
     screen_no_rna_exons,
     strand_log_likelihood_d_grid,
+    strand_log_likelihood_d_grid_minor_beta_binom,
 )
 from rigel.calibration.strand_summary import StrandSummary
 
@@ -278,6 +282,178 @@ def test_strand_log_likelihood_reproduces_exact_posterior_with_uniform_prior():
     posterior_r = _exact_posterior_R(k_sense, n, kappa_d=kappa, p_r1_sense=p)
 
     np.testing.assert_allclose(probs_d[::-1], posterior_r, atol=1e-12)
+
+
+def _manual_log_beta_binom(k: np.ndarray, n: int, alpha: float, beta: float) -> np.ndarray:
+    k_arr = np.asarray(k, dtype=np.float64)
+    if n <= 0:
+        return np.where(k_arr == 0, 0.0, -np.inf)
+    log_c = gammaln(n + 1) - gammaln(k_arr + 1) - gammaln(n - k_arr + 1)
+    return log_c + betaln(k_arr + alpha, n - k_arr + beta) - betaln(alpha, beta)
+
+
+def test_minor_beta_binom_mixed_likelihood_matches_direct_convolution():
+    n = 20
+    k_minor = 4
+    d_grid = np.array([0, 3, 8, 20], dtype=np.int64)
+    kappa = 9.0
+    alpha_q = 2.0
+    beta_q = 80.0
+
+    observed = strand_log_likelihood_d_grid_minor_beta_binom(
+        k_minor,
+        n,
+        d_grid,
+        kappa_d=kappa,
+        minor_rate_alpha=alpha_q,
+        minor_rate_beta=beta_q,
+    )
+
+    expected = []
+    dna_alpha = kappa / 2.0
+    for d in d_grid:
+        r = n - int(d)
+        j_lo = max(0, k_minor - int(d))
+        j_hi = min(r, k_minor)
+        js = np.arange(j_lo, j_hi + 1)
+        terms = _manual_log_beta_binom(js, r, alpha_q, beta_q) + _manual_log_beta_binom(
+            k_minor - js,
+            int(d),
+            dna_alpha,
+            dna_alpha,
+        )
+        expected.append(float(logsumexp(terms)))
+
+    np.testing.assert_allclose(observed, expected, atol=1e-12)
+
+
+def test_beta_binom_slab_mean_uses_same_likelihood_as_log_p_mixed():
+    region_arrays, payload_arrays = _single_region(
+        pack_signature(exon_pos=True), pos=24.0, neg=6.0
+    )
+    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
+    summary = StrandSummary(p_r1_sense=0.95, n_observations=1000)
+    kappa = 12.0
+
+    estimate = deconvolve_regions_by_strand(counts, kappa_d=kappa, strand_summary=summary)
+
+    n = 30
+    k_minor = 6
+    d_grid = np.arange(n + 1, dtype=np.int64)
+    log_l = strand_log_likelihood_d_grid_minor_beta_binom(
+        k_minor,
+        n,
+        d_grid,
+        kappa_d=kappa,
+        minor_rate_alpha=summary.minor_rate_alpha,
+        minor_rate_beta=summary.minor_rate_beta,
+    )
+    log_norm = float(logsumexp(log_l))
+    posterior = np.exp(log_l - log_norm)
+    expected_mean = float(np.sum(d_grid * posterior))
+    expected_log_p_mixed = log_norm - np.log(n + 1)
+
+    assert estimate.mean_count[0] == pytest.approx(expected_mean, abs=1e-5)
+    assert estimate.log_p_mixed is not None
+    assert estimate.log_p_mixed[0] == pytest.approx(expected_log_p_mixed, abs=1e-5)
+
+
+def test_reliability_is_vectorized_continuous_and_not_thresholded():
+    summary = StrandSummary(p_r1_sense=0.95, n_observations=1000)
+    weights = []
+    for k_minor in range(1, 8):
+        region_arrays, payload_arrays = _single_region(
+            pack_signature(exon_pos=True), pos=50.0 - k_minor, neg=float(k_minor)
+        )
+        counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.95)
+        estimate = deconvolve_regions_by_strand(counts, kappa_d=20.0, strand_summary=summary)
+        assert estimate.reliability is not None
+        weights.append(float(estimate.reliability[0]))
+
+    assert all(0.0 < weight < 1.0 for weight in weights)
+    assert all(next_weight >= weight for weight, next_weight in zip(weights, weights[1:]))
+    assert max(np.diff(weights)) < 0.75
+
+
+def test_near_unstranded_beta_binom_reliability_is_inactive():
+    region_arrays, payload_arrays = _single_region(
+        pack_signature(exon_pos=True), pos=25.0, neg=25.0
+    )
+    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.5001)
+    summary = StrandSummary(p_r1_sense=0.5001, n_observations=1000)
+
+    estimate = deconvolve_regions_by_strand(counts, kappa_d=10.0, strand_summary=summary)
+
+    assert estimate.reliability is not None
+    assert estimate.reliability[0] == pytest.approx(0.0)
+    assert (estimate.flags[0] & FLAG_NEAR_UNSTRANDED) != 0
+
+
+def test_pure_rna_beta_binom_reliability_is_low():
+    region_arrays, payload_arrays = _single_region(
+        pack_signature(exon_pos=True), pos=99.0, neg=1.0
+    )
+    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.99)
+    summary = StrandSummary(p_r1_sense=0.99, n_observations=10_000)
+
+    estimate = deconvolve_regions_by_strand(counts, kappa_d=20.0, strand_summary=summary)
+
+    assert estimate.reliability is not None
+    assert 0.0 < estimate.reliability[0] < 0.1
+
+
+def test_strong_mixed_beta_binom_reliability_is_high():
+    region_arrays, payload_arrays = _single_region(
+        pack_signature(exon_pos=True), pos=50.0, neg=50.0
+    )
+    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.99)
+    summary = StrandSummary(p_r1_sense=0.99, n_observations=10_000)
+
+    estimate = deconvolve_regions_by_strand(counts, kappa_d=100.0, strand_summary=summary)
+
+    assert estimate.reliability is not None
+    assert estimate.reliability[0] > 0.99
+
+
+def test_small_strand_training_set_lowers_reliability():
+    region_arrays, payload_arrays = _single_region(
+        pack_signature(exon_pos=True), pos=70.0, neg=30.0
+    )
+    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.99)
+    loose_summary = StrandSummary(p_r1_sense=1.0, n_observations=2)
+    tight_summary = StrandSummary(p_r1_sense=0.99, n_observations=10_000)
+
+    loose = deconvolve_regions_by_strand(counts, kappa_d=50.0, strand_summary=loose_summary)
+    tight = deconvolve_regions_by_strand(counts, kappa_d=50.0, strand_summary=tight_summary)
+
+    assert loose.reliability is not None
+    assert tight.reliability is not None
+    assert loose.reliability[0] < tight.reliability[0]
+
+
+def test_large_count_beta_binom_reliability_uses_approximation():
+    region_arrays, payload_arrays = _single_region(
+        pack_signature(exon_pos=True), pos=180.0, neg=70.0
+    )
+    counts = build_strand_region_counts(region_arrays, payload_arrays, p_r1_sense=0.99)
+    summary = StrandSummary(p_r1_sense=0.99, n_observations=10_000)
+
+    estimate = deconvolve_regions_by_strand(counts, kappa_d=50.0, strand_summary=summary)
+
+    assert counts.n_total[0] > MAX_EXACT_POSTERIOR_N
+    assert estimate.reliability is not None
+    assert np.isfinite(estimate.reliability[0])
+    assert (estimate.flags[0] & FLAG_RELIABILITY_APPROX) != 0
+
+
+def test_log_normal_interval_prob_remains_finite_in_deep_tails():
+    log_probs = _log_normal_interval_prob(
+        np.array([-9.0, 8.0], dtype=np.float64),
+        np.array([-8.0, 9.0], dtype=np.float64),
+    )
+
+    assert np.all(np.isfinite(log_probs))
+    assert np.all(log_probs < 0.0)
 
 
 # ---------------------------------------------------------------------------

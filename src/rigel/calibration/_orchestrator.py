@@ -130,6 +130,7 @@ def calibrate(
     strand_channels = deconvolve_compartments_by_strand(
         compartment_counts,
         kappa_d=kappa_d.kappa,
+        strand_summary=strand_summary,
     )
     calibration_strand_channels = strand_channels if strand_usable else None
 

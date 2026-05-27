@@ -345,13 +345,35 @@ def build_prior_mass_deconvolution(
         right = _as_float64_vector(
             "strand_channels.boundary_right_mean", strand_channels.boundary_right_mean, region_count
         )
-        gdna = contained + left + right
+        contained_reliability = _as_float64_vector(
+            "strand_channels.contained_reliability",
+            strand_channels.contained_reliability,
+            region_count,
+        )
+        left_reliability = _as_float64_vector(
+            "strand_channels.boundary_left_reliability",
+            strand_channels.boundary_left_reliability,
+            region_count,
+        )
+        right_reliability = _as_float64_vector(
+            "strand_channels.boundary_right_reliability",
+            strand_channels.boundary_right_reliability,
+            region_count,
+        )
+        gdna = (
+            contained * np.clip(contained_reliability, 0.0, 1.0)
+            + left * np.clip(left_reliability, 0.0, 1.0)
+            + right * np.clip(right_reliability, 0.0, 1.0)
+        )
         method.fill(PRIOR_MASS_METHOD_STRAND)
         precision = np.maximum.reduce(
             [
-                np.asarray(strand_channels.contained_precision, dtype=np.float32),
-                np.asarray(strand_channels.boundary_left_precision, dtype=np.float32),
-                np.asarray(strand_channels.boundary_right_precision, dtype=np.float32),
+                np.asarray(strand_channels.contained_precision, dtype=np.float32)
+                * np.asarray(strand_channels.contained_reliability, dtype=np.float32),
+                np.asarray(strand_channels.boundary_left_precision, dtype=np.float32)
+                * np.asarray(strand_channels.boundary_left_reliability, dtype=np.float32),
+                np.asarray(strand_channels.boundary_right_precision, dtype=np.float32)
+                * np.asarray(strand_channels.boundary_right_reliability, dtype=np.float32),
             ]
         ).astype(np.float32, copy=False)
         flags = np.asarray(strand_channels.flags, dtype=np.uint16).copy()

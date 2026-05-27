@@ -215,7 +215,10 @@ class TestNrnaDoubleCounting:
 
         # ----- mRNA accuracy (clean conditions only) -----
         if gdna == 0 and nrna == 0:
-            assert_transcript_accuracy(bench, max_abs_diff=20)
+            # PR01's continuous strand reliability leaves a small, nonzero
+            # false-gDNA posterior in imperfect-strand clean data instead of
+            # hard-rejecting ambiguous contained-exon strand imbalance.
+            assert_transcript_accuracy(bench, max_abs_diff=30 if ss < 0.99 else 20)
 
     # -----------------------------------------------------------------
     # Focused: nRNA pool accuracy across strand specificities
