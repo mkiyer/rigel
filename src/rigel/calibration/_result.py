@@ -14,7 +14,7 @@ from ._fl_sources import (
     extract_global_counts,
     extract_rna_counts,
 )
-from .fl import POOL_EB_PRIOR_ESS, FLModels, build_fl_models
+from .fl import POOL_EB_PRIOR_ESS, POOL_SCORING_PRIOR_ESS, FLModels, build_fl_models
 from .scan_payload import CalibrationScanPayload
 
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only.
@@ -87,6 +87,7 @@ def build_calibration_result(
     boundary_local: "BoundaryLocalPosterior | None" = None,
     boundary_sweep: "BoundarySweepResult | None" = None,
     fl_prior_ess: float = POOL_EB_PRIOR_ESS,
+    fl_scoring_prior_ess: float = POOL_SCORING_PRIOR_ESS,
     fl_models: FLModels | None = None,
     region_signature=None,
     prior_table: "PriorTable | None" = None,
@@ -113,6 +114,7 @@ def build_calibration_result(
             gdna_counts=extract_gdna_counts(payload),
             max_size=scan_trained.max_size,
             prior_ess=fl_prior_ess,
+            scoring_prior_ess=fl_scoring_prior_ess,
         )
     diagnostics = Diagnostics.from_payload(payload, signature=region_signature)
     return CalibrationResult(

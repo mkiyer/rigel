@@ -666,7 +666,7 @@ def profile_stages(
 
     # ── Stage 2b: gDNA calibration (v6) ─────────────────────
     with Timer("calibration") as t_cal:
-        from rigel.calibration._orient import StrandSummary as _StrandSummary
+        from rigel.calibration.strand_summary import StrandSummary as _StrandSummary
 
         _strand_summary = _StrandSummary.from_model(strand_models.exonic_spliced)
         calibration_obj = calibrate(
@@ -674,6 +674,7 @@ def profile_stages(
             payload=cal_payload,
             scan_trained=frag_length_models,
             fl_prior_ess=cal_cfg.prior_ess,
+            fl_scoring_prior_ess=cal_cfg.fl_scoring_prior_ess,
             strand_summary=_strand_summary,
         )
     timings.calibration = t_cal.elapsed
@@ -688,7 +689,7 @@ def profile_stages(
     with Timer("compute_geometry") as t_geom:
         geometry, estimator = _setup_geometry_and_estimator(
             index,
-            calibration_obj.fl_models.rna,
+            calibration_obj.fl_models.rna_scoring,
             em_config,
         )
     timings.compute_geometry = t_geom.elapsed
@@ -701,8 +702,8 @@ def profile_stages(
             buffer,
             index,
             strand_models,
-            calibration_obj.fl_models.rna,
-            calibration_obj.fl_models.gdna,
+            calibration_obj.fl_models.rna_scoring,
+            calibration_obj.fl_models.gdna_scoring,
             stats,
             estimator,
             scoring,
@@ -741,14 +742,14 @@ def profile_stages(
             # (the latter nulls em_data arrays as it scatters).
             with Timer("compute_eb_gdna_priors") as t_gdna:
                 prior_table = assemble_priors(
-                    loci,
-                    em_data,
-                    index,
-                    cal_payload,
-                    calibration_obj.global_densities,
-                    gdna_fl=calibration_obj.fl_models.gdna,
+                    multi_loci=loci,
+                    em_data=em_data,
+                    index=index,
+                    calibration=calibration_obj,
+                    em_config=em_config,
                 )
-                gdna_prior_count = prior_table.gdna_prior_count
+                alpha_gdna_add = prior_table.alpha_gdna_add
+                alpha_rna_add = prior_table.alpha_rna_add
                 gdna_eff_len = prior_table.gdna_eff_len
                 enable_gdna = prior_table.enable_gdna
             timings.compute_eb_gdna_priors = t_gdna.elapsed
@@ -766,7 +767,8 @@ def profile_stages(
                     partitions,
                     loci,
                     index,
-                    gdna_prior_count,
+                    alpha_gdna_add,
+                    alpha_rna_add,
                     gdna_eff_len,
                     em_config,
                     enable_gdna=enable_gdna,

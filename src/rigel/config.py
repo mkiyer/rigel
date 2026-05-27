@@ -222,6 +222,14 @@ class CalibrationConfig:
     #: :data:`rigel.calibration.fl.POOL_EB_PRIOR_ESS`.
     prior_ess: float = 1000.0
 
+    #: Effective sample size used for joint RNA-vs-gDNA fragment-length
+    #: contrast reliability in EM scoring. Larger values require more support
+    #: in both RNA and gDNA FL pools before class-specific FL differences are
+    #: trusted; ``0`` disables weak-pool contrast damping while preserving
+    #: fallback neutrality. Default matches
+    #: :data:`rigel.calibration.fl.POOL_SCORING_PRIOR_ESS`.
+    fl_scoring_prior_ess: float = 200.0
+
     #: Minimum SPLICED-annotated count (``rna``) and gDNA count required
     #: for the pool's per-FL distribution to be flagged ``"good"`` /
     #: ``"weak"`` respectively. Below ``weak_threshold`` a pool is
@@ -248,6 +256,26 @@ class CalibrationConfig:
     max_calibration_passes: int = 5
 
     def __post_init__(self) -> None:
+        if self.prior_ess < 0.0:
+            raise ValueError(
+                "CalibrationConfig.prior_ess must be >= 0; "
+                f"got {self.prior_ess}."
+            )
+        if self.fl_scoring_prior_ess < 0.0:
+            raise ValueError(
+                "CalibrationConfig.fl_scoring_prior_ess must be >= 0; "
+                f"got {self.fl_scoring_prior_ess}."
+            )
+        if self.pool_quality_good < 0:
+            raise ValueError(
+                "CalibrationConfig.pool_quality_good must be >= 0; "
+                f"got {self.pool_quality_good}."
+            )
+        if self.pool_quality_weak < 0:
+            raise ValueError(
+                "CalibrationConfig.pool_quality_weak must be >= 0; "
+                f"got {self.pool_quality_weak}."
+            )
         if self.density_min_eff_length < 0.0:
             raise ValueError(
                 "CalibrationConfig.density_min_eff_length must be >= 0; "

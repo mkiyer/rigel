@@ -31,28 +31,6 @@ def pytest_addoption(parser):
 
 
 # ---------------------------------------------------------------------------
-# Fractional cutover — tests pending rewrite (Step 13)
-# ---------------------------------------------------------------------------
-# These modules assert against legacy bitmask payloads, _orient helpers, or
-# the boundary_crossing_exposure API that the fractional cutover removed.
-# They are skipped at collection time until they are rewritten against the
-# new 12-channel payload + StrandSummary + fractional_boundary_side_exposure.
-# Tracked in docs/fineregions/python_cutover_implementation_log.html (Step 13).
-collect_ignore = [
-    "test_bayesian_prior_acceptance.py",
-    "test_calibration_accumulator.py",
-    "test_calibration_result.py",
-    "test_density_global.py",
-    "test_ndarray_util.py",
-    "test_per_locus_gdna_mass.py",
-    # External profiling script (scripts/profiling/profiler.py) still
-    # imports from the deleted _orient module. Re-enable once the
-    # profiler is ported to strand_summary.StrandSummary.
-    "test_profiler.py",
-]
-
-
-# ---------------------------------------------------------------------------
 # Minimal GTF content (GENCODE-style, 1-based inclusive coordinates)
 # ---------------------------------------------------------------------------
 # Two genes on chr1, one on + and one on - strand.

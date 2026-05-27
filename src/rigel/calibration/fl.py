@@ -9,10 +9,9 @@
     ``gdna`` toward ``global_`` with a shared maximum ``prior_ess`` and
     an evidence-adaptive cap. ``global_`` is the unconditional anchor
     (no prior).
-* **Product.**  :class:`FLModels` carries three finalized
-  :class:`FragmentLengthModel` instances + per-pool quality flags +
-  raw-count totals.  This is the only finalized FL surface downstream
-  code (EM scorer, ``summary.json``) sees.
+* **Product.**  :class:`FLModels` carries raw diagnostic/calibration
+    distributions plus contrast-regularized scoring distributions for EM.
+    Downstream code must choose the surface that matches its statistical role.
 
 Producers (BAM scanner + calibration C++ accumulator) emit raw
 ``int64`` count vectors and stop there.  ``build_fl_models`` consumes
@@ -71,11 +70,7 @@ _SCORING_PMF_FLOOR: float = 1e-300
 
 @dataclass(frozen=True, slots=True)
 class FLModels:
-    """The three finalized FL distributions of v6 calibration.
-
-    Sole product of the calibration FL pipeline; sole input the EM
-    scorer needs.
-    """
+    """Finalized FL distributions and score-side contrast surfaces."""
 
     global_: FragmentLengthModel  # unconditional anchor (no prior)
     rna: FragmentLengthModel  # SPLICED, EB-shrunk to global_

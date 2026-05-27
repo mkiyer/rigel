@@ -606,8 +606,10 @@ separate scoring surfaces:
 - `FLModels.rna_scoring` and `FLModels.gdna_scoring` are the EM scoring models.
 - `FLModels.rna_fl_reliability`, `gdna_fl_reliability`, and
    `fl_contrast_weight` expose the joint contrast diagnostics.
-- `POOL_SCORING_PRIOR_ESS = 200.0` defines the score-side prior effective sample
-   size for the reliability calculation.
+- `POOL_SCORING_PRIOR_ESS = 200.0` defines the default score-side prior
+   effective sample size for the reliability calculation. It is exposed as
+   `CalibrationConfig.fl_scoring_prior_ess`, CLI flag
+   `--cal-fl-scoring-prior-ess`, and YAML key `cal_fl_scoring_prior_ess`.
 
 The scoring reliability is:
 

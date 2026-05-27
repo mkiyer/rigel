@@ -331,6 +331,34 @@ def test_scoring_surfaces_use_joint_contrast_reliability():
     assert fl.gdna_scoring.mean < 400.0
 
 
+def test_scoring_prior_ess_parameter_controls_contrast_weight():
+    global_counts = _peaked(250, 50_000)
+    rna_counts = _peaked(100, 50)
+    gdna_counts = _peaked(400, 10_000)
+
+    weakly_damped = build_fl_models(
+        global_counts=global_counts,
+        rna_counts=rna_counts,
+        gdna_counts=gdna_counts,
+        max_size=MAX_SIZE,
+        scoring_prior_ess=50.0,
+    )
+    strongly_damped = build_fl_models(
+        global_counts=global_counts,
+        rna_counts=rna_counts,
+        gdna_counts=gdna_counts,
+        max_size=MAX_SIZE,
+        scoring_prior_ess=500.0,
+    )
+
+    assert weakly_damped.fl_contrast_weight == pytest.approx(0.5)
+    assert strongly_damped.fl_contrast_weight == pytest.approx(50.0 / 550.0)
+    assert weakly_damped.fl_contrast_weight > strongly_damped.fl_contrast_weight
+    assert abs(weakly_damped.rna_scoring.mean - weakly_damped.global_.mean) > abs(
+        strongly_damped.rna_scoring.mean - strongly_damped.global_.mean
+    )
+
+
 def test_global_is_unconditional_anchor_no_prior():
     fl = build_fl_models(
         global_counts=_peaked(300, 100_000),

@@ -56,6 +56,7 @@ from .strand_deconv import (
 )
 from .fl import (
     POOL_EB_PRIOR_ESS,
+    POOL_SCORING_PRIOR_ESS,
     POOL_QUALITY_GOOD_THRESHOLD,
     POOL_QUALITY_WEAK_THRESHOLD,
     FLModels,
@@ -115,6 +116,7 @@ __all__ = [
     "POOL_QUALITY_GOOD_THRESHOLD",
     "POOL_QUALITY_WEAK_THRESHOLD",
     "POOL_EB_PRIOR_ESS",
+    "POOL_SCORING_PRIOR_ESS",
     "build_fl_models",
     "Diagnostics",
     "extract_global_counts",

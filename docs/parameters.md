@@ -47,7 +47,6 @@ Resolution order: **explicit CLI flag → YAML config file → built-in default*
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--prior-pseudocount` | `1.0` | Total OVR prior budget C (virtual fragments). Distributed as γ×C to gDNA and (1−γ)×C coverage-weighted across RNA components. Increase to strengthen priors in low-count loci. |
 | `--em-iterations` | `1000` | Maximum EM iterations. `0` = skip EM entirely (unambiguous fragments only). |
 | `--assignment-mode` | `sample` | Post-EM fragment assignment mode: `sample` (draw from posterior distribution, default), `fractional` (preserve EM weights), `map` (assign to argmax component). |
 | `--em-mode` | `vbem` | EM algorithm variant: `vbem` (Variational Bayes EM, default) or `map` (MAP-EM). |
@@ -87,8 +86,9 @@ suitable for standard total RNA-seq libraries.
 | `--mismatch-alpha` | `0.1` | Per-mismatch (NM tag) penalty α ∈ (0, 1]. Score multiplied by α per mismatch. `0` = hard gate, `1` = no penalty. |
 | `--gdna-splice-penalty-unannot` | `0.01` | Multiplier applied to the gDNA candidate score for fragments with unannotated splice junctions. Values close to 0 make gDNA attribution less likely for spliced fragments. |
 | `--cal-prior-ess` | `1000.0` | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage in the calibration orchestrator. Larger values shrink RNA/gDNA fragment-length distributions more aggressively toward the global FL. |
+| `--cal-fl-scoring-prior-ess` | `200.0` | Effective sample size for joint RNA-vs-gDNA fragment-length contrast reliability during EM scoring. Larger values require more support in both FL pools before class-specific FL differences affect posterior odds; `0` disables weak-pool contrast damping while preserving fallback neutrality. |
 | `--cal-quality-good` | `5000` | Minimum SPLICED-annotated count (rna pool) and gDNA count above which the per-FL distribution is flagged `"good"` and used without shrinkage. |
-| `--cal-quality-weak` | `200` | Minimum SPLICED-annotated count and gDNA count above which the per-FL distribution is flagged `"weak"`. Below this, the pool is `"unusable"` (fallback to global FL). |
+| `--cal-quality-weak` | `1` | Minimum SPLICED-annotated count and gDNA count above which the per-FL distribution is flagged `"weak"`. Below this, the pool is `"fallback"` and the raw pool model identity-shares the global FL. |
 
 ---
 
@@ -107,7 +107,6 @@ sj_strand_tag: [auto]          # [XS] for STAR, [ts] for minimap2
 splicing_anchor_tolerance: 3   # shared implicit-splice and boundary-flux slack
 
 # EM algorithm
-prior_pseudocount: 1.0
 em_iterations: 1000
 assignment_mode: sample        # sample | fractional | map
 em_mode: vbem                  # vbem | map
@@ -133,8 +132,9 @@ em_convergence_delta: 0.000001
 
 # Calibration (v6)
 cal_prior_ess: 1000.0
+cal_fl_scoring_prior_ess: 200.0
 cal_quality_good: 5000
-cal_quality_weak: 200
+cal_quality_weak: 1
 ```
 
 ---
@@ -150,7 +150,7 @@ The `_PARAM_SPECS` registry in `cli.py` maps CLI flag names to config fields.
 | `EMConfig` | EM algorithm: mode, iterations, priors, assignment behavior |
 | `BamScanConfig` | BAM parsing, filtering, buffering, threading |
 | `FragmentScoringConfig` | Overhang, mismatch, gDNA splice penalties, candidate pruning |
-| `CalibrationConfig` | v6 calibration orchestrator: per-MultiLocus prior strength, FL-pool quality thresholds, EB shrinkage strength |
+| `CalibrationConfig` | v6 calibration orchestrator: FL-pool quality thresholds, FL shrinkage/scoring reliability, regional gDNA density calibration |
 
 ### Selected `BamScanConfig` fields
 
@@ -171,12 +171,15 @@ The `calibration` section of `summary.json` is built from
 
 | Key | Type | Source | Description |
 |-----|------|--------|-------------|
-| `global_densities` | object | `GlobalDensityTable.to_summary_dict()` | Per-region-category gDNA density (lambda) plus the kappa correction for the gDNA fragment-length effect. |
-| `fl_models` | object | `FLModels.to_summary_dict()` | Per-pool fragment-length models (`rna`, `gdna`, `global`) plus the quality flag (`good` / `weak` / `fallback`) for the rna and gdna pools. |
+| `fl_models` | object | `FLModels.to_summary_dict()` | Per-pool raw fragment-length models (`rna`, `gdna`, `global`), score-side FL surfaces, quality flags, support totals, and RNA-vs-gDNA FL contrast reliability diagnostics. |
 | `diagnostics` | object | `Diagnostics.to_summary_dict()` | Named per-region observation counts (intergenic / intron / exon / boundary-flux). |
 | `n_multi_loci` | int | `CalibrationResult.n_multi_loci` | Number of MultiLoci that received a per-component prior. |
-| `c_base` | float | `PriorTable.c_base_value` | Dirichlet evidence strength used to assemble the per-MultiLocus priors. |
-| `mean_pi_gdna` | float | mean of `MultiLocusPrior.pi_gdna` | Library-wide gDNA fraction averaged across MultiLoci. |
+| `region_calibration` | object | `RegionCalibration` summary | Regional four-state posterior calibration, including state mass summaries, `rho_off`, `A_r`, pass count, and convergence status. |
+| `background_model` | object | `BackgroundModel` summary | Off-target background model diagnostics used by regional calibration. |
+| `boundary_local` | object | `BoundaryLocalPosterior` summary | Local boundary-excess posterior diagnostics. |
+| `boundary_sweep` | object | `BoundarySweepResult` summary | Boundary-transfer sweep diagnostics. |
+| `strand_channels` | object or null | `RegionGdnaChannelEstimate` summary | Strand-aware contained/boundary gDNA channel estimates when strand contrast is identifiable. |
+| `prior_table` | object or null | `PriorTable.to_summary_dict()` | Adaptive grouped RNA/gDNA EM prior diagnostics populated after quantification. |
 
 ---
 

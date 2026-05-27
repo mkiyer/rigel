@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import calibrate
-from rigel.calibration._orient import StrandSummary
+from rigel.calibration.strand_summary import StrandSummary
 from rigel.config import BamScanConfig, EMConfig, FragmentScoringConfig, PipelineConfig
 from rigel.pipeline import (
     _replay_fraglen_observations,
@@ -183,15 +183,15 @@ class TestScanAndBufferNdarrayDtypes:
         )
         _geometry, estimator = _setup_geometry_and_estimator(
             self.index,
-            calibration.fl_models.rna,
+            calibration.fl_models.rna_scoring,
             EMConfig(seed=SEED),
         )
         em_data = _score_fragments(
             self.buffer,
             self.index,
             self.strand_models,
-            calibration.fl_models.rna,
-            calibration.fl_models.gdna,
+            calibration.fl_models.rna_scoring,
+            calibration.fl_models.gdna_scoring,
             self.stats,
             estimator,
             FragmentScoringConfig(),

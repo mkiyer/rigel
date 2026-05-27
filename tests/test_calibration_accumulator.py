@@ -1,48 +1,42 @@
-"""Tests for the M3 calibration accumulator path (C++ + Python).
-
-Covers:
-
-* ``BamScanner.set_regions`` binding contract
-* End-to-end pipeline payload attachment
-* ``CalibrationScanPayload.from_scan_dict`` validation (shape, dtype,
-  balance assertion)
-* Worker-merge equality (1 vs 4 workers)
-
-See ``docs/calibration/m3_implementation_plan.md`` §5.
-"""
+"""Current calibration scan payload and region-install contract tests."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from rigel.calibration._arrays import PayloadArrays, RegionArrays
-from rigel.calibration.scan_payload import CalibrationScanPayload
-from rigel.calibration._orient import ORIENT_OPP, ORIENT_SAME, ORIENT_UNINF
 from rigel.calibration.regions import BoundaryKind, RegionStrand, RegionType, SIGNATURE_SENTINEL
+from rigel.calibration.scan_payload import FL_HIST_N_BINS, CalibrationScanPayload
+from rigel.calibration.signature import (
+    CHANNEL_STRAND_POS,
+    COMPARTMENT_CONTAINED,
+    FL_POOL_INTERGENIC_CONTAINED,
+    N_CHANNELS,
+    N_FL_POOLS,
+    N_SIGNATURES,
+    SPLICE_UNSPLICED,
+    channel_index,
+    pack_signature,
+)
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.native import BamScanner
 from rigel.pipeline import run_pipeline, scan_and_buffer
-from rigel.sim import Scenario, ReadSimConfig
+from rigel.sim import ReadSimConfig, Scenario
+
 
 SEED = 42
 
 
-# ---------------------------------------------------------------------------
-# Fixture: small oracle scenario for end-to-end + worker-merge tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def calib_scenario(tmp_path):
-    """Mini oracle scenario; enough genes/reads to populate calibration."""
-    sc = Scenario(
+    """Mini oracle scenario with enough alignments to populate calibration payloads."""
+    scenario = Scenario(
         "calib_acc_test",
         genome_length=5000,
         seed=SEED,
         work_dir=tmp_path / "calib_acc",
     )
-    sc.add_gene(
+    scenario.add_gene(
         "g1",
         "+",
         [
@@ -50,7 +44,7 @@ def calib_scenario(tmp_path):
             {"t_id": "t2", "exons": [(200, 400), (900, 1100)], "abundance": 20},
         ],
     )
-    sc.add_gene(
+    scenario.add_gene(
         "g2",
         "-",
         [
@@ -66,35 +60,29 @@ def calib_scenario(tmp_path):
         strand_specificity=1.0,
         seed=SEED,
     )
-    result = sc.build_oracle(n_fragments=500, sim_config=sim_config)
-    yield sc, result
-    sc.cleanup()
-
-
-# ---------------------------------------------------------------------------
-# 1. set_regions binding contract
-# ---------------------------------------------------------------------------
+    result = scenario.build_oracle(n_fragments=500, sim_config=sim_config)
+    yield scenario, result
+    scenario.cleanup()
 
 
 def _make_scanner(index):
     return BamScanner(index.resolver, "XS", True, False)
 
 
-def _basic_region_arrays(index):
-    """Build a minimal valid Phase 2 ``set_regions`` argument bundle."""
+def _basic_region_arrays(index) -> tuple[np.ndarray, ...]:
+    """Build a minimal valid ``BamScanner.set_regions`` argument bundle."""
     resolver_map = index.resolver.get_ref_to_id()
-    # One INTERGENIC region [0, 100) on every known ref.
     ref_ids = np.array(sorted(resolver_map.values()), dtype=np.int32)
-    n = ref_ids.size
-    starts = np.zeros(n, dtype=np.int64)
-    ends = np.full(n, 100, dtype=np.int64)
-    signatures = np.zeros(n, dtype=np.uint8)
-    left_signatures = np.full(n, SIGNATURE_SENTINEL, dtype=np.uint8)
-    right_signatures = np.full(n, SIGNATURE_SENTINEL, dtype=np.uint8)
-    boundary_kind_left = np.full(n, int(BoundaryKind.NONE), dtype=np.uint8)
-    boundary_kind_right = np.full(n, int(BoundaryKind.NONE), dtype=np.uint8)
-    type_masks = np.full(n, 0b100, dtype=np.uint8)  # INTERGENIC bit
-    strands = np.zeros(n, dtype=np.uint8)
+    n_regions = ref_ids.size
+    starts = np.zeros(n_regions, dtype=np.int64)
+    ends = np.full(n_regions, 100, dtype=np.int64)
+    signatures = np.full(n_regions, pack_signature(), dtype=np.uint8)
+    left_signatures = np.full(n_regions, SIGNATURE_SENTINEL, dtype=np.uint8)
+    right_signatures = np.full(n_regions, SIGNATURE_SENTINEL, dtype=np.uint8)
+    boundary_kind_left = np.full(n_regions, int(BoundaryKind.NONE), dtype=np.uint8)
+    boundary_kind_right = np.full(n_regions, int(BoundaryKind.NONE), dtype=np.uint8)
+    type_masks = np.full(n_regions, int(RegionType.INTERGENIC), dtype=np.uint8)
+    strands = np.full(n_regions, int(RegionStrand.NONE), dtype=np.uint8)
     return (
         ref_ids,
         starts,
@@ -113,694 +101,165 @@ class TestSetRegions:
     def test_basic_install(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
-        n_refs = int(ri.max()) + 1
-        scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st, n_refs)  # should not raise
+        arrays = _basic_region_arrays(result.index)
+        n_refs = int(arrays[0].max()) + 1
+
+        scanner.set_regions(*arrays, n_refs)
 
     def test_legacy_install_overload_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, _sig, _ls, _rs, _bkl, _bkr, tm, _st = _basic_region_arrays(result.index)
-        n_refs = int(ri.max()) + 1
+        ref_ids, starts, ends, *_rest = _basic_region_arrays(result.index)
+        n_refs = int(ref_ids.max()) + 1
+
         with pytest.raises(TypeError):
-            scanner.set_regions(ri, s, e, tm, n_refs)
+            scanner.set_regions(ref_ids, starts, ends, np.zeros_like(ref_ids, dtype=np.uint8), n_refs)
 
     def test_length_mismatch_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
-        with pytest.raises(Exception):
-            # ends array truncated by one
-            scanner.set_regions(ri, s, e[:-1], sig, ls, rs, bkl, bkr, tm, st, int(ri.max()) + 1)
+        arrays = list(_basic_region_arrays(result.index))
+        n_refs = int(arrays[0].max()) + 1
+        arrays[2] = arrays[2][:-1]
 
-    def test_strand_length_mismatch_rejected(self, calib_scenario):
-        _, result = calib_scenario
-        scanner = _make_scanner(result.index)
-        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
         with pytest.raises(Exception):
-            scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st[:-1], int(ri.max()) + 1)
+            scanner.set_regions(*arrays, n_refs)
 
     def test_double_set_rejected(self, calib_scenario):
         _, result = calib_scenario
         scanner = _make_scanner(result.index)
-        ri, s, e, sig, ls, rs, bkl, bkr, tm, st = _basic_region_arrays(result.index)
-        n_refs = int(ri.max()) + 1
-        scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st, n_refs)
+        arrays = _basic_region_arrays(result.index)
+        n_refs = int(arrays[0].max()) + 1
+
+        scanner.set_regions(*arrays, n_refs)
         with pytest.raises(Exception):
-            scanner.set_regions(ri, s, e, sig, ls, rs, bkl, bkr, tm, st, n_refs)
-
-
-# ---------------------------------------------------------------------------
-# 2. Pipeline end-to-end payload attachment + balance
-# ---------------------------------------------------------------------------
+            scanner.set_regions(*arrays, n_refs)
 
 
 class TestPipelinePayload:
-    def test_scan_returns_payload(self, calib_scenario):
+    def test_scan_returns_fractional_payload(self, calib_scenario):
         _, result = calib_scenario
         scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
-        _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+        stats, _sm, _flm, _buf, payload = scan_and_buffer(
             str(result.bam_path),
             result.index,
             scan_cfg,
         )
-        assert payload is not None
-        # global_counts sums to n_observed by validator construction
-        assert int(payload.global_counts.sum()) == payload.n_observed
-        # at least some EXON-only observations on a clean strand-1 sim
-        EXON_ONLY = 0b001
-        assert payload.global_counts[EXON_ONLY] > 0
-        # FL histogram has shape (8, 1024) and sums to <= n_observed
-        assert payload.fl_hist.shape == (8, 1024)
-        assert int(payload.fl_hist.sum()) == payload.n_observed
-        # per-region rows == n_regions
-        n_regions = len(result.index.region_df)
-        assert payload.per_region_counts.shape == (n_regions, 8)
-        assert payload.u_left.shape == (n_regions,)
-        assert payload.u_right.shape == (n_regions,)
-        assert payload.intron_counts_by_orient.shape == (n_regions, 3)
-        assert payload.exon_contained_counts_by_orient.shape == (n_regions, 3)
-        assert payload.u_left_by_orient.shape == (n_regions, 3)
-        assert payload.u_right_by_orient.shape == (n_regions, 3)
-        np.testing.assert_array_equal(
-            payload.intron_counts_by_orient.sum(axis=1),
-            payload.per_region_counts[:, INTRON_BIT],
-        )
-        np.testing.assert_array_equal(payload.u_left_by_orient.sum(axis=1), payload.u_left)
-        np.testing.assert_array_equal(payload.u_right_by_orient.sum(axis=1), payload.u_right)
 
-    def test_run_pipeline_attaches_payload(self, calib_scenario, tmp_path):
+        assert payload is not None
+        assert payload.n_observed == stats.n_fragments
+        assert payload.region_counts.shape == (len(result.index.region_df), N_CHANNELS)
+        assert payload.channel_mass.shape == (N_CHANNELS,)
+        assert payload.signature_mass.shape == (N_SIGNATURES,)
+        assert payload.fl_pool_mass.shape == (N_FL_POOLS, FL_HIST_N_BINS)
+        assert payload.fl_pool_total.shape == (N_FL_POOLS,)
+        assert payload.region_counts.dtype == np.float32
+        assert payload.channel_mass.dtype == np.float64
+
+        region_total = float(payload.region_counts.sum(dtype=np.float64))
+        assert region_total == pytest.approx(payload.channel_mass.sum())
+        assert region_total == pytest.approx(payload.signature_mass.sum())
+        np.testing.assert_allclose(payload.fl_pool_mass.sum(axis=1), payload.fl_pool_total)
+        assert payload.fl_pool_total.sum() <= payload.n_observed
+
+    def test_run_pipeline_attaches_payload(self, calib_scenario):
         _, result = calib_scenario
         config = PipelineConfig(
             em=EMConfig(seed=SEED),
-            scan=BamScanConfig(sj_strand_tag="auto"),
+            scan=BamScanConfig(sj_strand_tag="auto", total_threads=1),
         )
-        pr = run_pipeline(str(result.bam_path), result.index, config)
-        assert pr.calibration_payload is not None
-        assert pr.calibration_payload.n_observed > 0
+        pipeline_result = run_pipeline(str(result.bam_path), result.index, config)
 
+        assert pipeline_result.calibration_payload is not None
+        assert pipeline_result.calibration_payload.n_observed > 0
 
-# ---------------------------------------------------------------------------
-# 3. Payload validation (shape, dtype, balance)
-# ---------------------------------------------------------------------------
+    def test_worker_merge_preserves_payload_mass(self, calib_scenario):
+        _, result = calib_scenario
+        payloads = []
+        for n_threads in (1, 4):
+            scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n_threads)
+            _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+                str(result.bam_path),
+                result.index,
+                scan_cfg,
+            )
+            payloads.append(payload)
+
+        one, four = payloads
+        np.testing.assert_allclose(one.region_counts, four.region_counts, rtol=0.0, atol=1.0e-6)
+        np.testing.assert_allclose(one.channel_mass, four.channel_mass, rtol=0.0, atol=1.0e-6)
+        np.testing.assert_allclose(one.signature_mass, four.signature_mass, rtol=0.0, atol=1.0e-6)
+        np.testing.assert_allclose(one.fl_pool_mass, four.fl_pool_mass, rtol=0.0, atol=1.0e-6)
+        assert one.n_observed == four.n_observed
 
 
 def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
-    """A schema-correct, internally consistent calibration dict."""
-    global_counts = np.zeros(8, dtype=np.int64)
-    global_counts[1] = n_observed  # all EXON_ONLY
-    fl_hist = np.zeros((8, 1024), dtype=np.int64)
-    fl_hist[1, 200] = n_observed
+    region_counts = np.zeros((n_regions, N_CHANNELS), dtype=np.float32)
+    contained_pos = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
+    region_counts[0, contained_pos] = float(n_observed)
+    channel_mass = region_counts.sum(axis=0, dtype=np.float64)
+    signature_mass = np.zeros(N_SIGNATURES, dtype=np.float64)
+    signature_mass[pack_signature()] = float(n_observed)
+    fl_pool_mass = np.zeros((N_FL_POOLS, FL_HIST_N_BINS), dtype=np.float64)
+    fl_pool_mass[FL_POOL_INTERGENIC_CONTAINED, 200] = float(n_observed)
     return {
-        "global_counts": global_counts,
-        "per_region_counts": np.zeros((n_regions, 8), dtype=np.int64),
-        "fl_hist": fl_hist,
-        "u_left": np.zeros(n_regions, dtype=np.int64),
-        "u_right": np.zeros(n_regions, dtype=np.int64),
-        "intron_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
-        "exon_contained_counts_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
-        "u_left_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
-        "u_right_by_orient": np.zeros((n_regions, 3), dtype=np.int64),
+        "n_regions": n_regions,
+        "region_counts": region_counts,
+        "channel_mass": channel_mass,
+        "signature_mass": signature_mass,
+        "fl_pool_mass": fl_pool_mass,
+        "fl_pool_total": fl_pool_mass.sum(axis=1),
         "n_observed": n_observed,
         "n_excluded_multimap": 0,
         "n_excluded_chimera": 0,
         "n_excluded_artifact": 0,
+        "n_excluded_strand_ambig": 0,
         "n_unobserved": 0,
         "n_unannotated_ref": 0,
+        "n_fl_unavailable": 0,
+        "resolver_splicing_anchor_tolerance": 0,
     }
 
 
 class TestPayloadValidation:
     def test_good_dict_round_trips(self):
-        d = _good_payload_dict()
-        p = CalibrationScanPayload.from_scan_dict(d, n_total=10)
-        assert p.n_observed == 10
+        payload = CalibrationScanPayload.from_scan_dict(_good_payload_dict(), n_total=10)
+
+        assert payload.n_observed == 10
+        assert payload.region_counts.shape == (3, N_CHANNELS)
 
     def test_balance_violation_raises(self):
-        d = _good_payload_dict(n_observed=10)
-        # Pretend total was 15 (5 unaccounted)
         with pytest.raises(ValueError, match="balance assertion failed"):
-            CalibrationScanPayload.from_scan_dict(d, n_total=15)
+            CalibrationScanPayload.from_scan_dict(_good_payload_dict(n_observed=10), n_total=15)
 
     def test_dtype_mismatch_raises(self):
-        d = _good_payload_dict()
-        d["global_counts"] = d["global_counts"].astype(np.int32)
+        payload_dict = _good_payload_dict()
+        payload_dict["region_counts"] = payload_dict["region_counts"].astype(np.float64)
+
         with pytest.raises(ValueError, match="dtype"):
-            CalibrationScanPayload.from_scan_dict(d)
+            CalibrationScanPayload.from_scan_dict(payload_dict)
 
     def test_shape_mismatch_raises(self):
-        d = _good_payload_dict()
-        d["fl_hist"] = np.zeros((8, 512), dtype=np.int64)
+        payload_dict = _good_payload_dict()
+        payload_dict["fl_pool_mass"] = np.zeros((N_FL_POOLS, 512), dtype=np.float64)
+
         with pytest.raises(ValueError, match="shape"):
-            CalibrationScanPayload.from_scan_dict(d)
+            CalibrationScanPayload.from_scan_dict(payload_dict)
 
-    def test_global_counts_must_sum_to_n_observed(self):
-        d = _good_payload_dict(n_observed=10)
-        d["n_observed"] = 5  # tampered
-        with pytest.raises(ValueError, match="global_counts"):
-            CalibrationScanPayload.from_scan_dict(d)
+    def test_channel_mass_mismatch_raises(self):
+        payload_dict = _good_payload_dict()
+        payload_dict["channel_mass"][0] += 1.0
 
-    def test_orientation_sum_mismatch_raises(self):
-        d = _good_payload_dict(n_regions=2, n_observed=1)
-        d["per_region_counts"][0, INTRON_BIT] = 1
-        with pytest.raises(ValueError, match="intron_counts_by_orient"):
-            CalibrationScanPayload.from_scan_dict(d)
+        with pytest.raises(ValueError, match="channel_mass"):
+            CalibrationScanPayload.from_scan_dict(payload_dict)
 
-    def test_exon_contained_subset_violation_raises(self):
-        d = _good_payload_dict(n_regions=2, n_observed=1)
-        d["per_region_counts"][0, EXON_BIT] = 1
-        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 2
-        with pytest.raises(ValueError, match="exon_contained_counts_by_orient"):
-            CalibrationScanPayload.from_scan_dict(d)
+    def test_fl_pool_total_mismatch_raises(self):
+        payload_dict = _good_payload_dict()
+        payload_dict["fl_pool_total"][0] += 1.0
 
-    def test_exon_contained_strict_subset_is_valid(self):
-        d = _good_payload_dict(n_regions=2, n_observed=2)
-        d["per_region_counts"][0, EXON_BIT] = 2
-        d["exon_contained_counts_by_orient"][0, ORIENT_SAME] = 1
-        p = CalibrationScanPayload.from_scan_dict(d, n_total=2)
-        assert p.exon_contained_counts_by_orient[0, ORIENT_SAME] == 1
+        with pytest.raises(ValueError, match="fl_pool_mass"):
+            CalibrationScanPayload.from_scan_dict(payload_dict)
 
-    def test_n_unannotated_ref_le_n_observed(self):
-        d = _good_payload_dict(n_observed=10)
-        d["n_unannotated_ref"] = 99
-        with pytest.raises(ValueError, match="n_unannotated_ref"):
-            CalibrationScanPayload.from_scan_dict(d)
-
-    def test_none_dict_raises(self):
-        with pytest.raises(ValueError, match="set_regions"):
+    def test_none_payload_raises_helpful_error(self):
+        with pytest.raises(ValueError, match="scanner returned None"):
             CalibrationScanPayload.from_scan_dict(None)
-
-
-# ---------------------------------------------------------------------------
-# 4. Worker-merge equality (1 vs N workers must be byte-identical)
-# ---------------------------------------------------------------------------
-
-
-class TestWorkerMergeEquality:
-    def test_one_vs_four_workers_identical(self, calib_scenario):
-        _, result = calib_scenario
-
-        def _run(n: int) -> CalibrationScanPayload:
-            cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n)
-            _, _, _, _, p = scan_and_buffer(
-                str(result.bam_path),
-                result.index,
-                cfg,
-            )
-            return p
-
-        a = _run(1)
-        b = _run(4)
-        assert a is not None and b is not None
-        np.testing.assert_array_equal(a.global_counts, b.global_counts)
-        np.testing.assert_array_equal(a.per_region_counts, b.per_region_counts)
-        np.testing.assert_array_equal(a.fl_hist, b.fl_hist)
-        np.testing.assert_array_equal(a.u_left, b.u_left)
-        np.testing.assert_array_equal(a.u_right, b.u_right)
-        np.testing.assert_array_equal(a.intron_counts_by_orient, b.intron_counts_by_orient)
-        np.testing.assert_array_equal(
-            a.exon_contained_counts_by_orient,
-            b.exon_contained_counts_by_orient,
-        )
-        np.testing.assert_array_equal(a.u_left_by_orient, b.u_left_by_orient)
-        np.testing.assert_array_equal(a.u_right_by_orient, b.u_right_by_orient)
-        assert a.n_observed == b.n_observed
-        assert a.n_excluded_multimap == b.n_excluded_multimap
-        assert a.n_excluded_chimera == b.n_excluded_chimera
-        assert a.n_excluded_artifact == b.n_excluded_artifact
-        assert a.n_unobserved == b.n_unobserved
-        assert a.n_unannotated_ref == b.n_unannotated_ref
-
-
-class TestPayloadArrayOrdering:
-    def test_exon_contained_counts_follow_region_sort_order(self):
-        df = np.array(
-            [
-                ("chr1", 200, 300, int(RegionType.EXON), int(RegionStrand.POS)),
-                ("chr1", 0, 100, int(RegionType.EXON), int(RegionStrand.POS)),
-                ("chr1", 100, 200, int(RegionType.EXON), int(RegionStrand.POS)),
-            ],
-            dtype=[
-                ("ref_name", "O"),
-                ("start", "i8"),
-                ("end", "i8"),
-                ("type", "u1"),
-                ("strand", "u1"),
-            ],
-        )
-        import pandas as pd
-
-        region_df = pd.DataFrame.from_records(df)
-        region_df["boundary_flux_left"] = False
-        region_df["boundary_flux_right"] = False
-        region_arrays = RegionArrays.from_region_df(region_df, {"chr1": 0})
-
-        d = _good_payload_dict(n_regions=3, n_observed=0)
-        d["per_region_counts"][:, EXON_BIT] = [30, 10, 20]
-        d["exon_contained_counts_by_orient"][:, ORIENT_SAME] = [30, 10, 20]
-        payload = CalibrationScanPayload.from_scan_dict(d, n_total=0)
-        payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
-
-        np.testing.assert_array_equal(region_arrays.order, np.array([1, 2, 0]))
-        np.testing.assert_array_equal(
-            payload_arrays.exon_contained_by_orient[:, ORIENT_SAME],
-            np.array([10, 20, 30]),
-        )
-
-
-# ---------------------------------------------------------------------------
-# 5. Hand-built BAM contract tests against `mini_index`
-#
-# These exercise the mask-correctness, boundary-flux, and observation-policy
-# contracts that the M3 plan exit gate calls out but that the macro-level
-# fixtures above cannot pin in isolation.
-#
-# `mini_index` (see conftest) lays chr1 (length 2000) out as the per-ref
-# tile below.  Region indices 0..10 follow the canonical sort order:
-#
-#     0  INTERGENIC  [   0,   99)   mask 0b100
-#     1  EXON        [  99,  200)   mask 0b001    flux: left=False, right=True
-#     2  INTRON      [ 200,  299)   mask 0b010
-#     3  EXON        [ 299,  400)   mask 0b001    flux: left=True,  right=True
-#     4  INTRON      [ 400,  499)   mask 0b010
-#     5  EXON        [ 499,  600)   mask 0b001    flux: left=True,  right=False
-#     6  INTERGENIC  [ 600,  999)   mask 0b100
-#     7  EXON        [ 999, 1100)   mask 0b001    flux: left=False, right=True
-#     8  INTRON      [1100, 1199)   mask 0b010
-#     9  EXON        [1199, 1300)   mask 0b001    flux: left=True,  right=False
-#    10  INTERGENIC  [1300, 2000)   mask 0b100
-# ---------------------------------------------------------------------------
-
-import pysam  # noqa: E402
-
-# 8-state mask bit layout (matches accumulator.cpp):
-EXON_BIT = 0b001
-INTRON_BIT = 0b010
-INTERGENIC_BIT = 0b100
-
-
-def _build_bam(tmp_path, ref_lengths, reads):
-    """Write a query-name-sorted BAM containing `reads` and return its path."""
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": ref, "LN": L} for ref, L in ref_lengths],
-    }
-    bam_path = str(tmp_path / "hand.bam")
-    with pysam.AlignmentFile(bam_path, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam_path, bam_path)
-    return bam_path
-
-
-def _make_pair(
-    qname,
-    ref_id,
-    r1_pos,
-    r2_pos,
-    *,
-    r1_cigar=None,
-    r2_cigar=None,
-    r1_is_reverse=False,
-    r2_is_reverse=True,
-    r2_ref_id=None,
-    nh=1,
-    extra_tags=None,
-):
-    """Construct an FR-oriented paired-end read.
-
-    Defaults: 50 bp R1 forward, 50 bp R2 reverse, both unspliced.  Pass
-    ``r2_ref_id`` to make a chimeric pair.
-    """
-    if r1_cigar is None:
-        r1_cigar = [(0, 50)]
-    if r2_cigar is None:
-        r2_cigar = [(0, 50)]
-    if r2_ref_id is None:
-        r2_ref_id = ref_id
-
-    seq_len_r1 = sum(n for op, n in r1_cigar if op in (0, 1, 4))
-    seq_len_r2 = sum(n for op, n in r2_cigar if op in (0, 1, 4))
-
-    def _ref_span(cigar):
-        return sum(n for op, n in cigar if op in (0, 2, 3, 7, 8))
-
-    r1 = pysam.AlignedSegment()
-    r1.query_name = qname
-    r1.reference_id = ref_id
-    r1.reference_start = r1_pos
-    r1.mapping_quality = 60
-    flag1 = 0x1 | 0x2 | 0x40
-    if r1_is_reverse:
-        flag1 |= 0x10
-    if r2_is_reverse:
-        flag1 |= 0x20
-    r1.flag = flag1
-    r1.cigar = r1_cigar
-    r1.query_sequence = "A" * seq_len_r1
-    r1.query_qualities = pysam.qualitystring_to_array("I" * seq_len_r1)
-    r1.next_reference_id = r2_ref_id
-    r1.next_reference_start = r2_pos
-    tlen = (r2_pos + _ref_span(r2_cigar)) - r1_pos if r2_ref_id == ref_id else 0
-    r1.template_length = tlen
-
-    r2 = pysam.AlignedSegment()
-    r2.query_name = qname
-    r2.reference_id = r2_ref_id
-    r2.reference_start = r2_pos
-    r2.mapping_quality = 60
-    flag2 = 0x1 | 0x2 | 0x80
-    if r2_is_reverse:
-        flag2 |= 0x10
-    if r1_is_reverse:
-        flag2 |= 0x20
-    r2.flag = flag2
-    r2.cigar = r2_cigar
-    r2.query_sequence = "A" * seq_len_r2
-    r2.query_qualities = pysam.qualitystring_to_array("I" * seq_len_r2)
-    r2.next_reference_id = ref_id
-    r2.next_reference_start = r1_pos
-    r2.template_length = -tlen
-
-    tags1 = [("NH", nh)]
-    tags2 = [("NH", nh)]
-    if extra_tags:
-        tags1.extend(extra_tags)
-        tags2.extend(extra_tags)
-    r1.set_tags(tags1)
-    r2.set_tags(tags2)
-    return [r1, r2]
-
-
-def _scan(bam_path, index, n_threads=1):
-    cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n_threads)
-    _, _, _, _, payload = scan_and_buffer(bam_path, index, cfg)
-    return payload
-
-
-class TestMaskCorrectness:
-    """One unspliced fragment per intended mask → exactly one global_counts bin."""
-
-    def _run_single(self, mini_index, tmp_path, r1_pos, r2_pos):
-        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
-        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
-        reads = _make_pair("frag", chr1_id, r1_pos, r2_pos)
-        bam = _build_bam(tmp_path, ref_lens, reads)
-        return _scan(bam, mini_index)
-
-    def test_exon_only(self, mini_index, tmp_path):
-        # R1 [110,160), R2 [145,195) — both inside EXON [99,200).
-        p = self._run_single(mini_index, tmp_path, r1_pos=110, r2_pos=145)
-        assert p.global_counts[EXON_BIT] == 1
-        assert int(p.global_counts.sum()) == 1
-
-    def test_intron_only(self, mini_index, tmp_path):
-        # Both mates inside INTRON [200,299).  R1 [210,260), R2 [240,290).
-        p = self._run_single(mini_index, tmp_path, r1_pos=210, r2_pos=240)
-        assert p.global_counts[INTRON_BIT] == 1
-        assert int(p.global_counts.sum()) == 1
-
-    def test_intergenic_only(self, mini_index, tmp_path):
-        # Both mates inside INTERGENIC [600,999).  R1 [650,700), R2 [700,750).
-        p = self._run_single(mini_index, tmp_path, r1_pos=650, r2_pos=700)
-        assert p.global_counts[INTERGENIC_BIT] == 1
-        assert int(p.global_counts.sum()) == 1
-
-    def test_exon_intron_straddle(self, mini_index, tmp_path):
-        # Fragment overlaps EXON [99,200) and INTRON [200,299).
-        # R1 [180,230) crosses 200; R2 [240,290) inside INTRON.
-        p = self._run_single(mini_index, tmp_path, r1_pos=180, r2_pos=240)
-        assert p.global_counts[EXON_BIT | INTRON_BIT] == 1
-        assert int(p.global_counts.sum()) == 1
-
-    def test_intergenic_exon_straddle(self, mini_index, tmp_path):
-        # Fragment overlaps INTERGENIC [0,99) and EXON [99,200).
-        # R1 [70,120) crosses 99; R2 [130,180) inside EXON.
-        p = self._run_single(mini_index, tmp_path, r1_pos=70, r2_pos=130)
-        assert p.global_counts[INTERGENIC_BIT | EXON_BIT] == 1
-        assert int(p.global_counts.sum()) == 1
-
-
-class TestBoundaryFlux:
-    """Pass-D contract: an unspliced exon-touching fragment that crosses
-    region edge `s` (resp. `e`) must increment u_left[r] (resp. u_right[r])
-    exactly once for that exon region `r`."""
-
-    def _run(self, mini_index, tmp_path, r1_pos, r2_pos):
-        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
-        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
-        bam = _build_bam(
-            tmp_path,
-            ref_lens,
-            _make_pair("frag", chr1_id, r1_pos, r2_pos),
-        )
-        return _scan(bam, mini_index)
-
-    def test_left_straddle_only(self, mini_index, tmp_path):
-        # Fragment [70,180) straddles left edge (99) of EXON region 1
-        # but does not reach its right edge (200).
-        p = self._run(mini_index, tmp_path, r1_pos=70, r2_pos=130)
-        assert p.u_left[1] == 1
-        assert p.u_right[1] == 0
-        assert p.exon_contained_counts_by_orient[1].sum() == 0
-
-    def test_right_straddle_only(self, mini_index, tmp_path):
-        # Fragment [180,250) straddles right edge (200) of EXON region 1
-        # but does not reach its left edge (99).
-        p = self._run(mini_index, tmp_path, r1_pos=180, r2_pos=200)
-        assert p.u_left[1] == 0
-        assert p.u_right[1] == 1
-        assert p.exon_contained_counts_by_orient[1].sum() == 0
-
-    def test_full_span_both_flags(self, mini_index, tmp_path):
-        # Fragment [70,250) straddles BOTH edges of EXON region 1.
-        p = self._run(mini_index, tmp_path, r1_pos=70, r2_pos=200)
-        assert p.u_left[1] == 1
-        assert p.u_right[1] == 1
-
-    def test_interior_fragment_no_flux(self, mini_index, tmp_path):
-        # Fragment fully inside EXON region 1 → no flux.
-        p = self._run(mini_index, tmp_path, r1_pos=110, r2_pos=145)
-        assert p.u_left[1] == 0
-        assert p.u_right[1] == 0
-        assert p.exon_contained_counts_by_orient[1, ORIENT_SAME] == 1
-
-
-class TestExonContainedRouting:
-    """Pin the EXON-contained orientation stream added for strand deconvolution."""
-
-    def _run_pair(self, mini_index, tmp_path, qname, r1_pos, r2_pos, *, neg_fragment=False):
-        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
-        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
-        bam = _build_bam(
-            tmp_path,
-            ref_lens,
-            _make_pair(
-                qname,
-                chr1_id,
-                r1_pos,
-                r2_pos,
-                r1_is_reverse=neg_fragment,
-                r2_is_reverse=not neg_fragment,
-            ),
-        )
-        return _scan(bam, mini_index)
-
-    def test_pos_exon_contained_same_and_opp(self, mini_index, tmp_path):
-        same = self._run_pair(mini_index, tmp_path, "same", 110, 145)
-        opp = self._run_pair(mini_index, tmp_path, "opp", 110, 145, neg_fragment=True)
-        assert same.exon_contained_counts_by_orient[1, ORIENT_SAME] == 1
-        assert same.exon_contained_counts_by_orient[1, ORIENT_OPP] == 0
-        assert opp.exon_contained_counts_by_orient[1, ORIENT_SAME] == 0
-        assert opp.exon_contained_counts_by_orient[1, ORIENT_OPP] == 1
-
-    def test_half_open_region_end_is_contained_not_boundary(self, mini_index, tmp_path):
-        p = self._run_pair(mini_index, tmp_path, "edge", 150, 150)
-        assert p.global_counts[EXON_BIT] == 1
-        assert p.exon_contained_counts_by_orient[1, ORIENT_SAME] == 1
-        assert p.u_left[1] == 0
-        assert p.u_right[1] == 0
-
-    def test_spliced_exon_only_fragment_not_contained(self, mini_index, tmp_path):
-        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
-        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
-        reads = _make_pair(
-            "spliced",
-            chr1_id,
-            r1_pos=150,
-            r2_pos=330,
-            r1_cigar=[(0, 25), (3, 124), (0, 25)],
-        )
-        bam = _build_bam(tmp_path, ref_lens, reads)
-        p = _scan(bam, mini_index)
-        assert p.global_counts[EXON_BIT] == 1
-        assert int(p.exon_contained_counts_by_orient.sum()) == 0
-
-
-class TestOrientationRouting:
-    """Pin C++ routing of fragment strand into the additive orientation arrays."""
-
-    def _run_pair(self, mini_index, tmp_path, qname, r1_pos, r2_pos, *, neg_fragment=False):
-        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
-        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
-        bam = _build_bam(
-            tmp_path,
-            ref_lens,
-            _make_pair(
-                qname,
-                chr1_id,
-                r1_pos,
-                r2_pos,
-                r1_is_reverse=neg_fragment,
-                r2_is_reverse=not neg_fragment,
-            ),
-        )
-        return _scan(bam, mini_index)
-
-    def test_pos_intron_same_and_opp(self, mini_index, tmp_path):
-        # Region 2 is a POS intron [200, 299).
-        same = self._run_pair(mini_index, tmp_path, "same", 210, 240)
-        opp = self._run_pair(mini_index, tmp_path, "opp", 210, 240, neg_fragment=True)
-        assert same.intron_counts_by_orient[2, ORIENT_SAME] == 1
-        assert same.intron_counts_by_orient[2, ORIENT_OPP] == 0
-        assert opp.intron_counts_by_orient[2, ORIENT_SAME] == 0
-        assert opp.intron_counts_by_orient[2, ORIENT_OPP] == 1
-
-    def test_neg_intron_same_and_opp(self, mini_index, tmp_path):
-        # Region 8 is a NEG intron [1100, 1199).
-        opp = self._run_pair(mini_index, tmp_path, "opp", 1110, 1140)
-        same = self._run_pair(mini_index, tmp_path, "same", 1110, 1140, neg_fragment=True)
-        assert opp.intron_counts_by_orient[8, ORIENT_OPP] == 1
-        assert same.intron_counts_by_orient[8, ORIENT_SAME] == 1
-
-    def test_boundary_flux_routes_by_exon_strand(self, mini_index, tmp_path):
-        # Region 1 is a POS exon; fragment [70,180) crosses its left edge.
-        same = self._run_pair(mini_index, tmp_path, "same", 70, 130)
-        opp = self._run_pair(mini_index, tmp_path, "opp", 70, 130, neg_fragment=True)
-        assert same.u_left_by_orient[1, ORIENT_SAME] == 1
-        assert same.u_left_by_orient[1, ORIENT_UNINF] == 0
-        assert opp.u_left_by_orient[1, ORIENT_OPP] == 1
-        assert opp.u_left_by_orient[1, ORIENT_UNINF] == 0
-
-
-class TestObservationPolicy:
-    """Pin the per-class scan-time exclusion counters."""
-
-    def test_excluded_multimap(self, mini_index, tmp_path):
-        # NH=2 → multimapper.  Counted at early dispatch, never reaches observe().
-        ref_lens = [(name, int(L)) for name, L in mini_index.ref_lengths.items()]
-        chr1_id = mini_index.resolver.get_ref_to_id()["chr1"]
-        reads = _make_pair("mm", chr1_id, 110, 145, nh=2)
-        bam = _build_bam(tmp_path, ref_lens, reads)
-        p = _scan(bam, mini_index)
-        assert p.n_excluded_multimap == 1
-        assert p.n_observed == 0
-
-    def test_excluded_chimera(self, tmp_path_factory, tmp_path):
-        # Build a 2-ref index (chr1 + chr2 each with a transcript) so the
-        # resolver knows both refs.  Then place R1 on chr1 and R2 on chr2
-        # — a trans-chromosomal pair that resolves only as chimeric.
-        import pysam
-        from rigel.index import TranscriptIndex
-
-        gtf = (
-            "chr1\tt\texon\t100\t200\t.\t+\t.\t"
-            'gene_id "g1"; transcript_id "t1"; gene_name "GA"; '
-            'gene_type "protein_coding"; tag "basic";\n'
-            "chr2\tt\texon\t100\t200\t.\t+\t.\t"
-            'gene_id "g2"; transcript_id "t2"; gene_name "GB"; '
-            'gene_type "protein_coding"; tag "basic";\n'
-        )
-        base = tmp_path_factory.mktemp("chim_idx")
-        gtf_path = base / "test.gtf"
-        gtf_path.write_text(gtf)
-        fasta_path = base / "genome.fa"
-        with open(fasta_path, "w") as f:
-            for ref, L in [("chr1", 1000), ("chr2", 1000)]:
-                f.write(f">{ref}\n")
-                seq = "N" * L
-                for i in range(0, L, 80):
-                    f.write(seq[i : i + 80] + "\n")
-        pysam.faidx(str(fasta_path))
-        idx_dir = base / "index"
-        TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-        idx = TranscriptIndex.load(idx_dir, retain_test_structures=True)
-
-        ref_lens = [(name, int(L)) for name, L in idx.ref_lengths.items()]
-        ref_to_id = idx.resolver.get_ref_to_id()
-        chr1_id, chr2_id = ref_to_id["chr1"], ref_to_id["chr2"]
-        reads = _make_pair(
-            "chim",
-            chr1_id,
-            120,
-            130,
-            r2_ref_id=chr2_id,
-        )
-        bam = _build_bam(tmp_path, ref_lens, reads)
-        p = _scan(bam, idx)
-        assert p.n_excluded_chimera == 1
-        assert p.n_observed == 0
-
-    def test_excluded_artifact(self, tmp_path_factory, tmp_path):
-        # Build a single-ref index, then drop a `splice_blacklist.feather`
-        # that targets a fixed (start, end) intron on chr1.  Reload the
-        # index so the C++ resolver picks up the blacklist.  Submit one
-        # spliced fragment whose CIGAR `N` skip exactly matches the
-        # blacklisted intron with short anchors -> the SJ is filtered ->
-        # the fragment is promoted to SPLICE_ARTIFACT and excluded from
-        # calibration via `n_excluded_artifact`.
-        import pandas as pd
-        import pysam
-
-        from rigel.index import SJ_BLACKLIST_FEATHER, TranscriptIndex
-
-        gtf = (
-            "chr1\tt\texon\t100\t200\t.\t+\t.\t"
-            'gene_id "g1"; transcript_id "t1"; gene_name "GA"; '
-            'gene_type "protein_coding"; tag "basic";\n'
-        )
-        base = tmp_path_factory.mktemp("artifact_idx")
-        gtf_path = base / "test.gtf"
-        gtf_path.write_text(gtf)
-        fasta_path = base / "genome.fa"
-        with open(fasta_path, "w") as f:
-            f.write(">chr1\n")
-            seq = "N" * 1000
-            for i in range(0, 1000, 80):
-                f.write(seq[i : i + 80] + "\n")
-        pysam.faidx(str(fasta_path))
-        idx_dir = base / "index"
-        TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-
-        # Drop a blacklist feather targeting intron (300, 400) on chr1
-        # with large max-anchor thresholds so any short anchor matches.
-        bl_df = pd.DataFrame(
-            {
-                "ref": ["chr1"],
-                "start": np.array([300], dtype=np.int32),
-                "end": np.array([400], dtype=np.int32),
-                "max_anchor_left": np.array([100], dtype=np.int32),
-                "max_anchor_right": np.array([100], dtype=np.int32),
-            }
-        )
-        bl_df.to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
-
-        idx = TranscriptIndex.load(idx_dir, retain_test_structures=True)
-        ref_lens = [(name, int(L)) for name, L in idx.ref_lengths.items()]
-        chr1_id = idx.resolver.get_ref_to_id()["chr1"]
-
-        # R1: 30M100N20M starting at pos=270 -> exons (270, 300) and
-        # (400, 420), N skip (300, 400) with anchors 30/20 — both <=
-        # max_anchor_left=max_anchor_right=100, so the SJ is filtered.
-        # R2: simple 50M unspliced inside the right exon territory.
-        reads = _make_pair(
-            "art",
-            chr1_id,
-            r1_pos=270,
-            r2_pos=420,
-            r1_cigar=[(0, 30), (3, 100), (0, 20)],
-        )
-        bam = _build_bam(tmp_path, ref_lens, reads)
-        p = _scan(bam, idx)
-        assert p.n_excluded_artifact == 1
-        assert p.n_observed == 0

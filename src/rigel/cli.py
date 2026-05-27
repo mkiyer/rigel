@@ -596,6 +596,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig (v6) --
     _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
+    _ParamSpec("cal_fl_scoring_prior_ess", "calibration.fl_scoring_prior_ess"),
     _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
     _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
     _ParamSpec("background_trim_fraction", "calibration.background_trim_fraction"),
@@ -1203,6 +1204,17 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: 1000). Larger values shrink RNA/gDNA FL more "
         "aggressively toward the global FL; smaller values let pool "
         "data dominate.",
+    )
+    adv.add_argument(
+        "--cal-fl-scoring-prior-ess",
+        dest="cal_fl_scoring_prior_ess",
+        type=float,
+        default=None,
+        help="Effective sample size for joint RNA-vs-gDNA FL contrast "
+        "reliability during EM scoring (default: 200). Larger values "
+        "require more support in both FL pools before class-specific "
+        "fragment-length differences affect posterior odds; 0 disables "
+        "weak-pool contrast damping while preserving fallback neutrality.",
     )
     adv.add_argument(
         "--cal-quality-good",

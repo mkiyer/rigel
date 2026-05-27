@@ -1199,6 +1199,7 @@ def run_pipeline(
         payload=calibration_payload,
         scan_trained=frag_length_models,
         fl_prior_ess=cal_cfg.prior_ess,
+        fl_scoring_prior_ess=cal_cfg.fl_scoring_prior_ess,
         pool_quality_good=cal_cfg.pool_quality_good,
         pool_quality_weak=cal_cfg.pool_quality_weak,
         strand_summary=strand_summary,
