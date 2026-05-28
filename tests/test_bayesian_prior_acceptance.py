@@ -9,10 +9,12 @@ import pandas as pd
 import pytest
 
 from rigel.calibration.adaptive_prior import PRIOR_STRUCTURAL_GATED
+from rigel.calibration.background_model import BackgroundModel
 from rigel.calibration.calibration_iteration import (
-    PRIOR_MASS_METHOD_DENSITY,
-    PriorMassDeconvolution,
+    METHOD_STRAND,
+    BackgroundDensity,
     RegionCalibration,
+    RegionUnsplicedMass,
 )
 from rigel.calibration.prior import PriorTable, assemble_priors, enable_gdna_for_multilocus
 from rigel.config import EMConfig
@@ -63,16 +65,31 @@ def _region_calibration(
         mu_gdna=total.copy(),
         upper_gdna=total.copy(),
         rna_lower=np.zeros(1, dtype=np.float32),
-        prior_mass=PriorMassDeconvolution(
-            unspliced_total=total,
-            gdna_unspliced_mean=gdna,
-            rna_unspliced_mean=rna,
-            method=np.array([PRIOR_MASS_METHOD_DENSITY], dtype=np.uint8),
+        region_unspliced_mass=RegionUnsplicedMass(
+            total_mass=total.astype(np.float64),
+            gdna_mass=gdna.astype(np.float64),
+            rna_mass=rna.astype(np.float64),
+            region_size_bp=np.array([100.0], dtype=np.float64),
+            unspliced_counts=np.array([max(int(round(unspliced)), 0)], dtype=np.uint64),
+            method=np.array([METHOD_STRAND], dtype=np.uint8),
             precision=np.zeros(1, dtype=np.float32),
             flags=np.zeros(1, dtype=np.uint16),
         ),
+        background_density=BackgroundDensity.from_bootstrap(
+            BackgroundModel(
+                rho_off_alpha=1.0,
+                rho_off_beta=99.0,
+                rho_off_mean=0.01,
+                seed_mask=np.ones(1, dtype=bool),
+                top_t_exclusion_mask=np.zeros(1, dtype=bool),
+                n_seed_regions=1,
+                n_fragments=1.0,
+                eff_length=100.0,
+                fit_status="ok",
+                flags=np.zeros(1, dtype=np.uint16),
+            )
+        ),
         A_r=np.ones(1, dtype=np.float32),
-        rho_off=0.01,
         kappa_d=None,
         n_passes=1,
         converged=True,

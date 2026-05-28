@@ -428,9 +428,9 @@ def prepare_region_table(
     table["mu_gdna"] = calibration.mu_gdna
     table["upper_gdna"] = calibration.upper_gdna
     table["rna_lower"] = calibration.rna_lower
-    table["prior_total"] = calibration.prior_mass.unspliced_total
-    table["prior_gdna"] = calibration.prior_mass.gdna_unspliced_mean
-    table["prior_rna"] = calibration.prior_mass.rna_unspliced_mean
+    table["prior_total"] = calibration.region_unspliced_mass.total_mass
+    table["prior_gdna"] = calibration.region_unspliced_mass.gdna_mass
+    table["prior_rna"] = calibration.region_unspliced_mass.rna_mass
     table["estimated_gdna_fraction"] = safe_div(table["prior_gdna"], table["prior_total"])
     table["A_r"] = calibration.A_r
     table["gamma_r"] = calibration.gamma_r

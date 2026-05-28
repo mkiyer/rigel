@@ -61,6 +61,6 @@ for bias in (0.5, 0.9, 0.99, 0.9999):
     print("\nRegion p_states and prior mass:")
     rc = pr.calibration.region_calibration
     print(rc.p_states)
-    print(rc.prior_mass.unspliced_total)
+    print(rc.region_unspliced_mass.total_mass)
 print("region df:")
 print(result.index.region_df[["region_id", "ref_name", "start", "end", "signature"]].to_string(index=False))

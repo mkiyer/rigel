@@ -87,13 +87,13 @@ def compute_adaptive_prior(
     region_arrays: RegionArrays,
     multi_loci: list["MultiLocus"],
     p_states: np.ndarray,
-    unspliced_total: np.ndarray,
-    gdna_unspliced_mean: np.ndarray,
-    rna_unspliced_mean: np.ndarray,
+    total_mass: np.ndarray,
+    gdna_mass: np.ndarray,
+    rna_mass: np.ndarray,
     has_gdna_candidate: np.ndarray,
+    locus_ess: np.ndarray,
     rna_call_bias: float = 0.5,
     max_ess: float = MAX_ESS,
-    locus_ess: np.ndarray | None = None,
     locus_ess_floor: float = LOCUS_ESS_FLOOR,
     locus_ess_ceil: float = LOCUS_ESS_CEIL,
 ) -> AdaptivePriorResult:
@@ -116,9 +116,9 @@ def compute_adaptive_prior(
         region_arrays=region_arrays,
         n_loci=n_loci,
         p_states=p_states,
-        unspliced_total=unspliced_total,
-        gdna_unspliced_mean=gdna_unspliced_mean,
-        rna_unspliced_mean=rna_unspliced_mean,
+        total_mass=total_mass,
+        gdna_mass=gdna_mass,
+        rna_mass=rna_mass,
         has_gdna_candidate=has_gdna_candidate,
         rna_call_bias=rna_call_bias,
         max_ess=max_ess,
@@ -206,34 +206,33 @@ def compute_adaptive_prior(
         where=ess_final > 0.0,
     )
 
-    # PR 03: scale the prior concentration by a per-locus ESS shrink ramp if
-    # the caller supplied integer unspliced counts projected to loci. This
-    # weakens the prior in loci with insufficient evidence rather than
-    # propagating a fully-confident mass estimate.
-    if locus_ess is not None:
-        ess_arr = np.asarray(locus_ess, dtype=np.float64)
-        if ess_arr.shape != (n_loci,):
-            raise ValueError(
-                f"locus_ess must have shape ({n_loci},); got {ess_arr.shape}."
-            )
-        if not np.all(np.isfinite(ess_arr)) or np.any(ess_arr < 0.0):
-            raise ValueError("locus_ess must be finite and non-negative.")
-        floor = float(locus_ess_floor)
-        ceil = float(locus_ess_ceil)
-        if not (np.isfinite(floor) and np.isfinite(ceil)) or ceil <= floor:
-            raise ValueError(
-                f"locus_ess_floor < locus_ess_ceil required; got {floor}, {ceil}."
-            )
-        shrink = np.clip((ess_arr - floor) / (ceil - floor), 0.0, 1.0)
-        alpha_gdna = alpha_gdna * shrink
-        alpha_rna = alpha_rna * shrink
-        ess_final = alpha_gdna + alpha_rna
-        rna_share_final = np.divide(
-            alpha_rna,
-            ess_final,
-            out=np.zeros_like(ess_final),
-            where=ess_final > 0.0,
+    # Scale the prior concentration by a per-locus ESS shrink ramp. The caller
+    # supplies ``locus_ess`` (typically integer unspliced counts projected to
+    # loci); this weakens the prior in loci with insufficient evidence rather
+    # than propagating a fully-confident mass estimate.
+    ess_arr = np.asarray(locus_ess, dtype=np.float64)
+    if ess_arr.shape != (n_loci,):
+        raise ValueError(
+            f"locus_ess must have shape ({n_loci},); got {ess_arr.shape}."
         )
+    if not np.all(np.isfinite(ess_arr)) or np.any(ess_arr < 0.0):
+        raise ValueError("locus_ess must be finite and non-negative.")
+    floor = float(locus_ess_floor)
+    ceil = float(locus_ess_ceil)
+    if not (np.isfinite(floor) and np.isfinite(ceil)) or ceil <= floor:
+        raise ValueError(
+            f"locus_ess_floor < locus_ess_ceil required; got {floor}, {ceil}."
+        )
+    shrink = np.clip((ess_arr - floor) / (ceil - floor), 0.0, 1.0)
+    alpha_gdna = alpha_gdna * shrink
+    alpha_rna = alpha_rna * shrink
+    ess_final = alpha_gdna + alpha_rna
+    rna_share_final = np.divide(
+        alpha_rna,
+        ess_final,
+        out=np.zeros_like(ess_final),
+        where=ess_final > 0.0,
+    )
 
     flags = np.zeros(n_loci, dtype=np.uint16)
     flags |= np.where(~has_mass, PRIOR_NO_UNSPLICED_MASS, np.uint16(0)).astype(np.uint16)
@@ -301,9 +300,9 @@ def _validate_inputs(
     region_arrays: RegionArrays,
     n_loci: int,
     p_states: np.ndarray,
-    unspliced_total: np.ndarray,
-    gdna_unspliced_mean: np.ndarray,
-    rna_unspliced_mean: np.ndarray,
+    total_mass: np.ndarray,
+    gdna_mass: np.ndarray,
+    rna_mass: np.ndarray,
     has_gdna_candidate: np.ndarray,
     rna_call_bias: float,
     max_ess: float,
@@ -330,30 +329,20 @@ def _validate_inputs(
         raise ValueError("every p_states row must have positive probability mass.")
     p = np.divide(p, row_sum[:, None], out=np.zeros_like(p), where=row_sum[:, None] > 0.0)
 
-    unspliced = np.asarray(unspliced_total, dtype=np.float64)
+    unspliced = np.asarray(total_mass, dtype=np.float64)
     if unspliced.shape != (n_regions,):
         raise ValueError(
-            f"unspliced_total must have shape ({n_regions},); got {unspliced.shape}."
+            f"total_mass must have shape ({n_regions},); got {unspliced.shape}."
         )
     if not np.all(np.isfinite(unspliced)):
-        raise ValueError("unspliced_total must contain only finite values.")
+        raise ValueError("total_mass must contain only finite values.")
     if np.any(unspliced < 0.0):
-        raise ValueError("unspliced_total must be nonnegative.")
+        raise ValueError("total_mass must be nonnegative.")
 
-    gdna_unspliced = _validate_region_mass(
-        "gdna_unspliced_mean",
-        gdna_unspliced_mean,
-        n_regions,
-    )
-    rna_unspliced = _validate_region_mass(
-        "rna_unspliced_mean",
-        rna_unspliced_mean,
-        n_regions,
-    )
+    gdna_unspliced = _validate_region_mass("gdna_mass", gdna_mass, n_regions)
+    rna_unspliced = _validate_region_mass("rna_mass", rna_mass, n_regions)
     if not np.allclose(gdna_unspliced + rna_unspliced, unspliced, rtol=1.0e-5, atol=1.0e-5):
-        raise ValueError(
-            "gdna_unspliced_mean + rna_unspliced_mean must conserve unspliced_total."
-        )
+        raise ValueError("gdna_mass + rna_mass must conserve total_mass.")
 
     has_candidate = np.asarray(has_gdna_candidate, dtype=bool)
     if has_candidate.shape != (n_loci,):

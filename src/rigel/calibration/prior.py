@@ -141,10 +141,7 @@ def assemble_priors(
     region_calibration = getattr(calibration, "region_calibration", None)
     if region_calibration is None:
         raise ValueError("assemble_priors: calibration.region_calibration is required.")
-
-    prior_mass = getattr(region_calibration, "prior_mass", None)
-    if prior_mass is None:
-        raise ValueError("assemble_priors: calibration.region_calibration.prior_mass is required.")
+    region_unspliced_mass = region_calibration.region_unspliced_mass
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     has_gdna_candidate = np.array(
@@ -152,32 +149,25 @@ def assemble_priors(
         dtype=bool,
     )
 
-    # PR 03: if the new RegionUnsplicedMass is available on the calibration,
-    # project its integer ``unspliced_counts`` to per-locus ESS and pass it to
-    # the adaptive prior so loci with few unspliced fragments get
-    # correspondingly weaker priors.
-    locus_ess: np.ndarray | None = None
-    region_unspliced_mass = getattr(region_calibration, "region_unspliced_mass", None)
-    if region_unspliced_mass is not None:
-        locus_ess = project_region_array_to_loci(
-            region_arrays=region_arrays,
-            multi_loci=multi_loci,
-            region_array=np.asarray(
-                region_unspliced_mass.unspliced_counts, dtype=np.float64
-            ),
-        )
+    # Project the per-region integer ``unspliced_counts`` to per-locus ESS so
+    # the adaptive prior can shrink loci with few unspliced fragments.
+    locus_ess = project_region_array_to_loci(
+        region_arrays=region_arrays,
+        multi_loci=multi_loci,
+        region_array=np.asarray(region_unspliced_mass.unspliced_counts, dtype=np.float64),
+    )
 
     adaptive = compute_adaptive_prior(
         region_arrays=region_arrays,
         multi_loci=multi_loci,
         p_states=np.asarray(region_calibration.p_states, dtype=np.float64),
-        unspliced_total=np.asarray(prior_mass.unspliced_total, dtype=np.float64),
-        gdna_unspliced_mean=np.asarray(prior_mass.gdna_unspliced_mean, dtype=np.float64),
-        rna_unspliced_mean=np.asarray(prior_mass.rna_unspliced_mean, dtype=np.float64),
+        total_mass=np.asarray(region_unspliced_mass.total_mass, dtype=np.float64),
+        gdna_mass=np.asarray(region_unspliced_mass.gdna_mass, dtype=np.float64),
+        rna_mass=np.asarray(region_unspliced_mass.rna_mass, dtype=np.float64),
         has_gdna_candidate=has_gdna_candidate,
+        locus_ess=locus_ess,
         rna_call_bias=float(em_config.rna_call_bias),
         max_ess=MAX_ESS,
-        locus_ess=locus_ess,
     )
 
     gdna_eff_len_unweighted = np.zeros(n_loci, dtype=np.float64)

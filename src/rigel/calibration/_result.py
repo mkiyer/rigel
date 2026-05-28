@@ -143,34 +143,26 @@ def _region_calibration_summary(region_calibration: "RegionCalibration") -> dict
     }
     return {
         "n_regions": int(states.shape[0]),
-        "rho_off": float(region_calibration.rho_off),
         "kappa_d": (
             None if region_calibration.kappa_d is None else float(region_calibration.kappa_d)
         ),
         "n_passes": int(region_calibration.n_passes),
         "converged": bool(region_calibration.converged),
+        "rho_off": float(region_calibration.rho_off),
         "state_mass": state_mass,
         "p_unexpressed": _summary_stats(region_calibration.p_unexpressed),
         "p_expressed": _summary_stats(region_calibration.p_expressed),
         "mu_gdna": _summary_stats(region_calibration.mu_gdna),
         "upper_gdna": _summary_stats(region_calibration.upper_gdna),
         "rna_lower": _summary_stats(region_calibration.rna_lower),
-        "prior_mass": _prior_mass_summary(region_calibration.prior_mass),
         "A_r": _summary_stats(region_calibration.A_r),
         "flag_histogram": _uint_histogram(region_calibration.flags),
         "pass_diagnostics": _json_safe(region_calibration.pass_diagnostics),
-        # PR 03: surface the new RegionUnsplicedMass / BackgroundDensity when
-        # the calibration produced them (orchestrator wires unspliced_counts
-        # through run_calibration_iteration).
-        "region_unspliced_mass": (
-            _region_unspliced_mass_summary(region_calibration.region_unspliced_mass)
-            if region_calibration.region_unspliced_mass is not None
-            else None
+        "region_unspliced_mass": _region_unspliced_mass_summary(
+            region_calibration.region_unspliced_mass
         ),
-        "background_density": (
-            _background_density_summary(region_calibration.background_density)
-            if region_calibration.background_density is not None
-            else None
+        "background_density": _background_density_summary(
+            region_calibration.background_density
         ),
     }
 
@@ -208,22 +200,6 @@ def _background_density_summary(bg_density) -> dict[str, object]:
         "n_regions_in_pool": int(bg_density.n_regions_in_pool),
         "method_histogram": list(bg_density.method_histogram),
         "fit_status": str(bg_density.fit_status),
-    }
-
-
-def _prior_mass_summary(prior_mass) -> dict[str, object]:
-    return {
-        "unspliced_total": _summary_stats(prior_mass.unspliced_total),
-        "gdna_unspliced_mean": _summary_stats(prior_mass.gdna_unspliced_mean),
-        "rna_unspliced_mean": _summary_stats(prior_mass.rna_unspliced_mean),
-        "max_abs_mass_conservation_error": float(
-            np.max(prior_mass.mass_conservation_error())
-        )
-        if prior_mass.unspliced_total.size
-        else 0.0,
-        "method_histogram": _uint_histogram(prior_mass.method),
-        "precision": _summary_stats(prior_mass.precision),
-        "flag_histogram": _uint_histogram(prior_mass.flags),
     }
 
 

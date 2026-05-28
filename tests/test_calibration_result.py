@@ -97,8 +97,9 @@ def _sweep() -> BoundarySweepResult:
 
 def _region_calibration() -> RegionCalibration:
     from rigel.calibration.calibration_iteration import (
-        PRIOR_MASS_METHOD_DENSITY,
-        PriorMassDeconvolution,
+        METHOD_STRAND,
+        BackgroundDensity,
+        RegionUnsplicedMass,
     )
 
     return RegionCalibration(
@@ -106,16 +107,18 @@ def _region_calibration() -> RegionCalibration:
         mu_gdna=np.zeros(1, dtype=np.float32),
         upper_gdna=np.zeros(1, dtype=np.float32),
         rna_lower=np.zeros(1, dtype=np.float32),
-        prior_mass=PriorMassDeconvolution(
-            unspliced_total=np.zeros(1, dtype=np.float32),
-            gdna_unspliced_mean=np.zeros(1, dtype=np.float32),
-            rna_unspliced_mean=np.zeros(1, dtype=np.float32),
-            method=np.full(1, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8),
+        region_unspliced_mass=RegionUnsplicedMass(
+            total_mass=np.zeros(1, dtype=np.float64),
+            gdna_mass=np.zeros(1, dtype=np.float64),
+            rna_mass=np.zeros(1, dtype=np.float64),
+            region_size_bp=np.full(1, 100.0, dtype=np.float64),
+            unspliced_counts=np.zeros(1, dtype=np.uint64),
+            method=np.full(1, METHOD_STRAND, dtype=np.uint8),
             precision=np.zeros(1, dtype=np.float32),
             flags=np.zeros(1, dtype=np.uint16),
         ),
+        background_density=BackgroundDensity.from_bootstrap(_background()),
         A_r=np.ones(1, dtype=np.float32),
-        rho_off=0.01,
         kappa_d=None,
         n_passes=1,
         converged=True,

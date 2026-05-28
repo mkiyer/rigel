@@ -9,10 +9,12 @@ import pandas as pd
 import pytest
 
 from rigel.calibration.adaptive_prior import PRIOR_STRUCTURAL_GATED
+from rigel.calibration.background_model import BackgroundModel
 from rigel.calibration.calibration_iteration import (
-    PRIOR_MASS_METHOD_DENSITY,
-    PriorMassDeconvolution,
+    METHOD_STRAND,
+    BackgroundDensity,
     RegionCalibration,
+    RegionUnsplicedMass,
 )
 from rigel.calibration.prior import assemble_priors, enable_gdna_for_multilocus
 from rigel.frag_length_model import FragmentLengthModel
@@ -71,16 +73,31 @@ def _region_calibration(
         mu_gdna=unspliced.copy(),
         upper_gdna=unspliced.copy(),
         rna_lower=np.zeros(region_count, dtype=np.float32),
-        prior_mass=PriorMassDeconvolution(
-            unspliced_total=unspliced,
-            gdna_unspliced_mean=gdna_prior,
-            rna_unspliced_mean=rna_prior,
-            method=np.full(region_count, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8),
+        region_unspliced_mass=RegionUnsplicedMass(
+            total_mass=unspliced.astype(np.float64),
+            gdna_mass=gdna_prior.astype(np.float64),
+            rna_mass=rna_prior.astype(np.float64),
+            region_size_bp=np.full(region_count, 100.0, dtype=np.float64),
+            unspliced_counts=np.full(region_count, 1000, dtype=np.uint64),
+            method=np.full(region_count, METHOD_STRAND, dtype=np.uint8),
             precision=np.zeros(region_count, dtype=np.float32),
             flags=np.zeros(region_count, dtype=np.uint16),
         ),
+        background_density=BackgroundDensity.from_bootstrap(
+            BackgroundModel(
+                rho_off_alpha=1.0,
+                rho_off_beta=99.0,
+                rho_off_mean=0.01,
+                seed_mask=np.ones(region_count, dtype=bool),
+                top_t_exclusion_mask=np.zeros(region_count, dtype=bool),
+                n_seed_regions=region_count,
+                n_fragments=1.0,
+                eff_length=100.0,
+                fit_status="ok",
+                flags=np.zeros(region_count, dtype=np.uint16),
+            )
+        ),
         A_r=exposure_arr,
-        rho_off=0.01,
         kappa_d=None,
         n_passes=1,
         converged=True,

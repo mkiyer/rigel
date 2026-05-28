@@ -38,18 +38,15 @@ __all__ = [
     "FLAG_EXACT_STRAND_POSTERIOR",
     "FLAG_M_IMPUTED_FROM_BACKGROUND",
     "FLAG_M_CLIPPED_TO_TOTAL",
-    "PRIOR_MASS_METHOD_DENSITY",
-    "PRIOR_MASS_METHOD_STRAND",
     "METHOD_STRAND",
     "METHOD_BOUNDARY",
     "METHOD_BACKGROUND_FALLBACK",
-    "PriorMassDeconvolution",
     "RegionUnsplicedMass",
     "BackgroundDensity",
     "RegionCalibration",
     "CalibrationStepResult",
-    "build_prior_mass_deconvolution",
     "build_region_unspliced_mass",
+    "estimate_background_density",
     "calibration_e_step",
     "calibration_m_step",
     "run_calibration_iteration",
@@ -61,12 +58,9 @@ FLAG_BOUNDARY_SPARSE: int = 1 << 2
 FLAG_EXPRESSED_UNCERTAIN: int = 1 << 3
 FLAG_EXACT_STRAND_POSTERIOR: int = 1 << 4
 
-# PR 03: per-region flags on the new RegionUnsplicedMass.
+# PR 03: per-region flags on RegionUnsplicedMass.
 FLAG_M_IMPUTED_FROM_BACKGROUND: int = 1 << 0
 FLAG_M_CLIPPED_TO_TOTAL: int = 1 << 1
-
-PRIOR_MASS_METHOD_DENSITY: int = 1
-PRIOR_MASS_METHOD_STRAND: int = 2
 
 # PR 03: three-tier M_r method constants.
 METHOD_STRAND: int = 1
@@ -80,66 +74,13 @@ _EPS: float = 1.0e-12
 
 
 @dataclass(frozen=True, slots=True)
-class PriorMassDeconvolution:
-    """Mass-conserving unspliced RNA/gDNA prior evidence per region."""
-
-    unspliced_total: np.ndarray
-    gdna_unspliced_mean: np.ndarray
-    rna_unspliced_mean: np.ndarray
-    method: np.ndarray
-    precision: np.ndarray
-    flags: np.ndarray
-
-    def __post_init__(self) -> None:
-        total = np.asarray(self.unspliced_total, dtype=np.float32)
-        region_count = int(total.shape[0])
-        if total.ndim != 1:
-            raise ValueError(f"unspliced_total must be 1D; got shape {total.shape}.")
-        object.__setattr__(self, "unspliced_total", total)
-
-        for field_name in ("gdna_unspliced_mean", "rna_unspliced_mean", "precision"):
-            values = _as_float32_vector(field_name, getattr(self, field_name), region_count)
-            object.__setattr__(self, field_name, values)
-
-        method = np.asarray(self.method, dtype=np.uint8)
-        if method.shape != (region_count,):
-            raise ValueError(f"method must have shape ({region_count},); got {method.shape}.")
-        object.__setattr__(self, "method", method)
-
-        flags = np.asarray(self.flags, dtype=np.uint16)
-        if flags.shape != (region_count,):
-            raise ValueError(f"flags must have shape ({region_count},); got {flags.shape}.")
-        object.__setattr__(self, "flags", flags)
-
-        if np.any(total < 0.0):
-            raise ValueError("unspliced_total must be non-negative.")
-        if np.any(self.gdna_unspliced_mean < 0.0) or np.any(self.rna_unspliced_mean < 0.0):
-            raise ValueError("prior mass means must be non-negative.")
-        if not np.all(np.isfinite(self.precision)) or np.any(self.precision < 0.0):
-            raise ValueError("precision must be finite and non-negative.")
-        if not np.allclose(
-            self.gdna_unspliced_mean + self.rna_unspliced_mean,
-            total,
-            rtol=1.0e-5,
-            atol=1.0e-5,
-        ):
-            raise ValueError("prior mass must conserve unspliced_total per region.")
-
-    def mass_conservation_error(self) -> np.ndarray:
-        """Return per-region absolute conservation residual."""
-        return np.abs(
-            self.gdna_unspliced_mean + self.rna_unspliced_mean - self.unspliced_total
-        ).astype(np.float32, copy=False)
-
-
-@dataclass(frozen=True, slots=True)
 class RegionUnsplicedMass:
-    """Mass-conserving unspliced decomposition per region (PR 03).
+    """Mass-conserving unspliced decomposition per region.
 
-    Replaces ``PriorMassDeconvolution``. All primary mass tensors are
-    ``float64`` so that ``gdna_mass + rna_mass == total_mass`` is an exact
-    identity (no tolerance). The three-tier ``M_r`` hierarchy
-    (METHOD_STRAND / METHOD_BOUNDARY / METHOD_BACKGROUND_FALLBACK) writes
+    All primary mass tensors are ``float64`` so that
+    ``gdna_mass + rna_mass == total_mass`` is an exact identity (no
+    tolerance). The three-tier ``M_r`` hierarchy (``METHOD_STRAND`` /
+    ``METHOD_BOUNDARY`` / ``METHOD_BACKGROUND_FALLBACK``) writes
     ``method[r]`` to record which tier owned the estimate.
     """
 
@@ -312,9 +253,9 @@ class RegionCalibration:
     mu_gdna: np.ndarray
     upper_gdna: np.ndarray
     rna_lower: np.ndarray
-    prior_mass: PriorMassDeconvolution
+    region_unspliced_mass: RegionUnsplicedMass
+    background_density: BackgroundDensity
     A_r: np.ndarray
-    rho_off: float
     kappa_d: float | None
     n_passes: int
     converged: bool
@@ -323,12 +264,6 @@ class RegionCalibration:
     background_model: BackgroundModel | None = None
     boundary_local: BoundaryLocalPosterior | None = None
     boundary_sweep: BoundarySweepResult | None = None
-    # PR 03 bridge fields (populated when calibration_e_step receives the
-    # required unspliced_counts / background_density inputs). The legacy
-    # ``prior_mass`` / ``rho_off`` fields are retained for one cycle until
-    # consumers (prior.py, _result.py) cut over to the new types.
-    region_unspliced_mass: RegionUnsplicedMass | None = None
-    background_density: BackgroundDensity | None = None
 
     def __post_init__(self) -> None:
         p_states = np.asarray(self.p_states, dtype=np.float32)
@@ -350,22 +285,24 @@ class RegionCalibration:
             raise ValueError("upper_gdna must be >= mu_gdna within tolerance.")
         if np.any(self.rna_lower < 0.0):
             raise ValueError("rna_lower must be non-negative.")
-        prior_mass = self.prior_mass
-        if not isinstance(prior_mass, PriorMassDeconvolution):
-            prior_mass = PriorMassDeconvolution(
-                unspliced_total=getattr(prior_mass, "unspliced_total"),
-                gdna_unspliced_mean=getattr(prior_mass, "gdna_unspliced_mean"),
-                rna_unspliced_mean=getattr(prior_mass, "rna_unspliced_mean"),
-                method=getattr(prior_mass, "method"),
-                precision=getattr(prior_mass, "precision"),
-                flags=getattr(prior_mass, "flags"),
+
+        if not isinstance(self.region_unspliced_mass, RegionUnsplicedMass):
+            raise TypeError(
+                "region_unspliced_mass must be a RegionUnsplicedMass; "
+                f"got {type(self.region_unspliced_mass).__name__}."
             )
-        if prior_mass.unspliced_total.shape != (region_count,):
+        if self.region_unspliced_mass.total_mass.shape != (region_count,):
             raise ValueError(
-                "prior_mass arrays must match p_states region count; "
-                f"got {prior_mass.unspliced_total.shape}, expected {(region_count,)}."
+                "region_unspliced_mass arrays must match p_states region count; "
+                f"got {self.region_unspliced_mass.total_mass.shape}, "
+                f"expected {(region_count,)}."
             )
-        object.__setattr__(self, "prior_mass", prior_mass)
+        if not isinstance(self.background_density, BackgroundDensity):
+            raise TypeError(
+                "background_density must be a BackgroundDensity; "
+                f"got {type(self.background_density).__name__}."
+            )
+
         exposure_values = np.asarray(self.A_r, dtype=np.float32)
         if not np.all(np.isfinite(exposure_values)) or np.any(exposure_values < 0.0):
             raise ValueError("A_r must be finite and non-negative.")
@@ -375,8 +312,6 @@ class RegionCalibration:
             raise ValueError(f"flags must have shape ({region_count},); got {flags.shape}.")
         object.__setattr__(self, "flags", flags)
 
-        if not np.isfinite(self.rho_off) or float(self.rho_off) < 0.0:
-            raise ValueError(f"rho_off must be finite and non-negative; got {self.rho_off!r}.")
         if self.kappa_d is not None and (
             not np.isfinite(self.kappa_d) or float(self.kappa_d) <= 0.0
         ):
@@ -385,6 +320,11 @@ class RegionCalibration:
             raise ValueError(f"n_passes must be >= 1; got {self.n_passes!r}.")
         diagnostics = tuple(dict(item) for item in self.pass_diagnostics)
         object.__setattr__(self, "pass_diagnostics", diagnostics)
+
+    @property
+    def rho_off(self) -> float:
+        """Library-wide gDNA density (mean of ``background_density``)."""
+        return float(self.background_density.rho0_mean)
 
     @property
     def p_unexpressed(self) -> np.ndarray:
@@ -403,16 +343,13 @@ class CalibrationStepResult:
     mu_gdna: np.ndarray
     upper_gdna: np.ndarray
     rna_lower: np.ndarray
-    prior_mass: PriorMassDeconvolution
+    region_unspliced_mass: RegionUnsplicedMass
     A_r: np.ndarray
     flags: np.ndarray
     local_posterior: BoundaryLocalPosterior
     sweep: BoundarySweepResult
     log_tensor: np.ndarray
     sum_log_evidence: float
-    # PR 03 bridge field (populated when build_region_unspliced_mass inputs are
-    # available; None otherwise).
-    region_unspliced_mass: RegionUnsplicedMass | None = None
 
     @property
     def p_unexpressed(self) -> np.ndarray:
@@ -674,87 +611,6 @@ def build_region_unspliced_mass(
     )
 
 
-def build_prior_mass_deconvolution(
-    observation: DensityObservation,
-    *,
-    mu_gdna: np.ndarray,
-    strand_channels: RegionGdnaChannelEstimate | None,
-) -> PriorMassDeconvolution:
-    """Build mass-conserving unspliced RNA/gDNA prior evidence per region."""
-    unspliced_total = _as_float64_vector(
-        "observation.observed_compatible_count",
-        observation.observed_compatible_count,
-        int(np.asarray(observation.observed_compatible_count).shape[0]),
-    )
-    region_count = int(unspliced_total.shape[0])
-    density_mu = _as_float64_vector("mu_gdna", mu_gdna, region_count)
-
-    method = np.full(region_count, PRIOR_MASS_METHOD_DENSITY, dtype=np.uint8)
-    precision = np.zeros(region_count, dtype=np.float32)
-    flags = np.zeros(region_count, dtype=np.uint16)
-
-    if strand_channels is None:
-        gdna = density_mu.copy()
-    else:
-        contained = _as_float64_vector(
-            "strand_channels.contained_mean", strand_channels.contained_mean, region_count
-        )
-        left = _as_float64_vector(
-            "strand_channels.boundary_left_mean", strand_channels.boundary_left_mean, region_count
-        )
-        right = _as_float64_vector(
-            "strand_channels.boundary_right_mean", strand_channels.boundary_right_mean, region_count
-        )
-        contained_reliability = _as_float64_vector(
-            "strand_channels.contained_reliability",
-            strand_channels.contained_reliability,
-            region_count,
-        )
-        left_reliability = _as_float64_vector(
-            "strand_channels.boundary_left_reliability",
-            strand_channels.boundary_left_reliability,
-            region_count,
-        )
-        right_reliability = _as_float64_vector(
-            "strand_channels.boundary_right_reliability",
-            strand_channels.boundary_right_reliability,
-            region_count,
-        )
-        gdna = (
-            contained * np.clip(contained_reliability, 0.0, 1.0)
-            + left * np.clip(left_reliability, 0.0, 1.0)
-            + right * np.clip(right_reliability, 0.0, 1.0)
-        )
-        method.fill(PRIOR_MASS_METHOD_STRAND)
-        precision = np.maximum.reduce(
-            [
-                np.asarray(strand_channels.contained_precision, dtype=np.float32)
-                * np.asarray(strand_channels.contained_reliability, dtype=np.float32),
-                np.asarray(strand_channels.boundary_left_precision, dtype=np.float32)
-                * np.asarray(strand_channels.boundary_left_reliability, dtype=np.float32),
-                np.asarray(strand_channels.boundary_right_precision, dtype=np.float32)
-                * np.asarray(strand_channels.boundary_right_reliability, dtype=np.float32),
-            ]
-        ).astype(np.float32, copy=False)
-        flags = np.asarray(strand_channels.flags, dtype=np.uint16).copy()
-
-    gdna = np.clip(np.nan_to_num(gdna, nan=0.0, posinf=0.0, neginf=0.0), 0.0, unspliced_total)
-    # Preserve exact conservation after float32 conversion by deriving RNA from
-    # the float32 total and gDNA arrays.
-    total32 = unspliced_total.astype(np.float32)
-    gdna32 = gdna.astype(np.float32)
-    rna32 = np.maximum(total32 - gdna32, 0.0).astype(np.float32)
-
-    return PriorMassDeconvolution(
-        unspliced_total=total32,
-        gdna_unspliced_mean=gdna32,
-        rna_unspliced_mean=rna32,
-        method=method,
-        precision=precision,
-        flags=flags,
-    )
-
-
 # ---------------------------------------------------------------------------
 # PR 03: Robust geomean + Huber rho0 estimator (Section 6.3-6.7)
 # ---------------------------------------------------------------------------
@@ -799,8 +655,8 @@ def estimate_background_density(
     On an empty pool the previous ``BackgroundDensity`` is carried unchanged
     (``fit_status="fallback_bootstrap"``).
     """
-    if not 0.0 < damping <= 1.0:
-        raise ValueError(f"damping must be in (0, 1]; got {damping!r}.")
+    if not np.isfinite(damping) or not 0.0 <= float(damping) <= 1.0:
+        raise ValueError(f"damping must be finite and in [0, 1]; got {damping!r}.")
     if huber_k <= 0.0 or not np.isfinite(huber_k):
         raise ValueError(f"huber_k must be a positive finite float; got {huber_k!r}.")
     if alpha_floor <= 0.0 or beta_floor <= 0.0:
@@ -975,8 +831,8 @@ def calibration_e_step(
     confidence: float = 0.95,
     background_boost: float = 1.0,
     transfer_weight: np.ndarray | None = None,
-    unspliced_counts: np.ndarray | None = None,
-    background_density: BackgroundDensity | None = None,
+    unspliced_counts: np.ndarray,
+    background_density: BackgroundDensity,
 ) -> CalibrationStepResult:
     """Run one two-state expression calibration E-step."""
     region_count = _validate_region_inputs(
@@ -1051,31 +907,15 @@ def calibration_e_step(
             0.0,
         ).astype(np.float32)
 
-    prior_mass = build_prior_mass_deconvolution(
+    prior_mass = build_region_unspliced_mass(
         observation,
-        mu_gdna=mu_gdna,
+        region_size_bp=region_arrays.region_size_bp,
+        unspliced_counts=unspliced_counts,
         strand_channels=strand_channels,
+        local_posterior=local_posterior,
+        sweep=sweep,
+        background_density=background_density,
     )
-
-    # PR 03 bridge: build the new RegionUnsplicedMass when the caller supplied
-    # the required inputs. ``background_density`` defaults to a from_bootstrap()
-    # wrap of the BackgroundModel if the caller did not supply one.
-    region_unspliced_mass: RegionUnsplicedMass | None = None
-    if unspliced_counts is not None:
-        bg_density = (
-            background_density
-            if background_density is not None
-            else BackgroundDensity.from_bootstrap(background)
-        )
-        region_unspliced_mass = build_region_unspliced_mass(
-            observation,
-            region_size_bp=region_arrays.region_size_bp,
-            unspliced_counts=unspliced_counts,
-            strand_channels=strand_channels,
-            local_posterior=local_posterior,
-            sweep=sweep,
-            background_density=bg_density,
-        )
 
     exposure = np.ones(region_count, dtype=np.float32)
     flags = _derive_region_flags(p_states, local_posterior, strand_channels)
@@ -1086,14 +926,13 @@ def calibration_e_step(
         mu_gdna=mu_gdna,
         upper_gdna=upper_gdna,
         rna_lower=rna_lower,
-        prior_mass=prior_mass,
+        region_unspliced_mass=prior_mass,
         A_r=exposure,
         flags=flags,
         local_posterior=local_posterior,
         sweep=sweep,
         log_tensor=log_tensor,
         sum_log_evidence=sum_log_evidence,
-        region_unspliced_mass=region_unspliced_mass,
     )
 
 
@@ -1200,7 +1039,7 @@ def run_calibration_iteration(
     damping: float = 0.5,
     confidence: float = 0.95,
     background_boost: float = 1.0,
-    unspliced_counts: np.ndarray | None = None,
+    unspliced_counts: np.ndarray,
 ) -> RegionCalibration:
     """Run the two-state expression calibration loop."""
     if int(max_calibration_passes) < 1:
@@ -1215,13 +1054,9 @@ def run_calibration_iteration(
 
     current_background = background
     current_kappa = float(strand_channels.kappa_d) if strand_channels is not None else None
-    # PR 03 bridge: when unspliced_counts are supplied, also maintain a
-    # BackgroundDensity across iterations and refit it via
-    # estimate_background_density(). The legacy BackgroundModel refit still
-    # drives p_state convergence to preserve existing behavior.
-    current_density: BackgroundDensity | None = (
-        BackgroundDensity.from_bootstrap(background) if unspliced_counts is not None else None
-    )
+    # Bootstrap the BackgroundDensity from the incoming BackgroundModel and
+    # refit it in lock-step with the BackgroundModel each pass.
+    current_density: BackgroundDensity = BackgroundDensity.from_bootstrap(background)
     previous_p_states: np.ndarray | None = None
     previous_rho: float | None = None
     diagnostics: list[dict[str, object]] = []
@@ -1279,13 +1114,12 @@ def run_calibration_iteration(
             strand_channels,
             damping=damping,
         )
-        if current_density is not None and step.region_unspliced_mass is not None:
-            current_density = estimate_background_density(
-                step.region_unspliced_mass,
-                step.p_unexpressed.astype(np.float64),
-                previous=current_density,
-                damping=damping,
-            )
+        current_density = estimate_background_density(
+            step.region_unspliced_mass,
+            step.p_unexpressed.astype(np.float64),
+            previous=current_density,
+            damping=damping,
+        )
 
     if last_step is None:  # pragma: no cover - max_calibration_passes guard prevents this.
         raise RuntimeError("run_calibration_iteration: no calibration pass was executed.")
@@ -1295,9 +1129,9 @@ def run_calibration_iteration(
         mu_gdna=last_step.mu_gdna,
         upper_gdna=last_step.upper_gdna,
         rna_lower=last_step.rna_lower,
-        prior_mass=last_step.prior_mass,
+        region_unspliced_mass=last_step.region_unspliced_mass,
+        background_density=current_density,
         A_r=last_step.A_r,
-        rho_off=float(current_background.rho_off_mean),
         kappa_d=current_kappa,
         n_passes=len(diagnostics),
         converged=bool(converged),
@@ -1306,6 +1140,4 @@ def run_calibration_iteration(
         background_model=current_background,
         boundary_local=last_step.local_posterior,
         boundary_sweep=last_step.sweep,
-        region_unspliced_mass=last_step.region_unspliced_mass,
-        background_density=current_density,
     )

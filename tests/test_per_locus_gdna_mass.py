@@ -13,7 +13,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.calibration_iteration import PriorMassDeconvolution, RegionCalibration
+from rigel.calibration.background_model import BackgroundModel
+from rigel.calibration.calibration_iteration import (
+    METHOD_STRAND,
+    BackgroundDensity,
+    RegionCalibration,
+    RegionUnsplicedMass,
+)
 from rigel.calibration.latent_states import N_STATES, STATE_IS_EXPRESSED
 from rigel.calibration.prior import assemble_priors, enable_gdna_for_multilocus
 from rigel.calibration.signature import pack_signature
@@ -65,26 +71,43 @@ def _region_calibration(
     else:
         gdna_mean = np.zeros(len(unspliced), dtype=np.float32)
         rna_mean = unspliced.copy()
-    prior_mass = PriorMassDeconvolution(
-        unspliced_total=unspliced,
-        gdna_unspliced_mean=gdna_mean,
-        rna_unspliced_mean=rna_mean,
-        method=np.ones(len(unspliced), dtype=np.uint8),
-        precision=np.ones(len(unspliced), dtype=np.float32),
-        flags=np.zeros(len(unspliced), dtype=np.uint16),
+    region_count = len(unspliced)
+    region_unspliced_mass = RegionUnsplicedMass(
+        total_mass=unspliced.astype(np.float64),
+        gdna_mass=gdna_mean.astype(np.float64),
+        rna_mass=rna_mean.astype(np.float64),
+        region_size_bp=np.full(region_count, 100.0, dtype=np.float64),
+        unspliced_counts=np.full(region_count, 1000, dtype=np.uint64),
+        method=np.full(region_count, METHOD_STRAND, dtype=np.uint8),
+        precision=np.ones(region_count, dtype=np.float32),
+        flags=np.zeros(region_count, dtype=np.uint16),
+    )
+    background_density = BackgroundDensity.from_bootstrap(
+        BackgroundModel(
+            rho_off_alpha=1.0,
+            rho_off_beta=99.0,
+            rho_off_mean=0.01,
+            seed_mask=np.ones(region_count, dtype=bool),
+            top_t_exclusion_mask=np.zeros(region_count, dtype=bool),
+            n_seed_regions=region_count,
+            n_fragments=1.0,
+            eff_length=100.0,
+            fit_status="ok",
+            flags=np.zeros(region_count, dtype=np.uint16),
+        )
     )
     return RegionCalibration(
         p_states=p,
-        mu_gdna=prior_mass.gdna_unspliced_mean,
-        upper_gdna=prior_mass.gdna_unspliced_mean,
-        rna_lower=prior_mass.rna_unspliced_mean,
-        prior_mass=prior_mass,
+        mu_gdna=region_unspliced_mass.gdna_mass.astype(np.float32),
+        upper_gdna=region_unspliced_mass.gdna_mass.astype(np.float32),
+        rna_lower=region_unspliced_mass.rna_mass.astype(np.float32),
+        region_unspliced_mass=region_unspliced_mass,
+        background_density=background_density,
         A_r=np.asarray(exposure, dtype=np.float32),
-        rho_off=0.0,
         kappa_d=None,
         n_passes=1,
         converged=True,
-        flags=np.zeros(len(unspliced), dtype=np.uint16),
+        flags=np.zeros(region_count, dtype=np.uint16),
         pass_diagnostics=(),
     )
 
@@ -232,12 +255,14 @@ def test_assemble_priors_applies_region_exposure_to_gdna_eff_len() -> None:
 
 
 def test_region_calibration_rejects_prior_mass_that_does_not_conserve_unspliced() -> None:
-    with pytest.raises(ValueError, match="conserve"):
-        PriorMassDeconvolution(
-            unspliced_total=np.array([10.0], dtype=np.float32),
-            gdna_unspliced_mean=np.array([4.0], dtype=np.float32),
-            rna_unspliced_mean=np.array([7.0], dtype=np.float32),
-            method=np.ones(1, dtype=np.uint8),
+    with pytest.raises(ValueError, match="exactly"):
+        RegionUnsplicedMass(
+            total_mass=np.array([10.0], dtype=np.float64),
+            gdna_mass=np.array([4.0], dtype=np.float64),
+            rna_mass=np.array([5.0], dtype=np.float64),
+            region_size_bp=np.array([100.0], dtype=np.float64),
+            unspliced_counts=np.array([10], dtype=np.uint64),
+            method=np.full(1, METHOD_STRAND, dtype=np.uint8),
             precision=np.ones(1, dtype=np.float32),
             flags=np.zeros(1, dtype=np.uint16),
         )

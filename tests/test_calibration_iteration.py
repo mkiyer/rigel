@@ -10,10 +10,8 @@ from rigel.calibration.boundaries import BoundaryTable
 from rigel.calibration.boundary_model import BoundaryLocalPosterior
 from rigel.calibration.calibration_iteration import (
     FLAG_BOUNDARY_SPARSE,
-    PRIOR_MASS_METHOD_DENSITY,
-    PRIOR_MASS_METHOD_STRAND,
+    BackgroundDensity,
     RegionCalibration,
-    build_prior_mass_deconvolution,
     calibration_e_step,
     run_calibration_iteration,
 )
@@ -124,13 +122,16 @@ def _local_posterior() -> BoundaryLocalPosterior:
 
 
 def test_calibration_e_step_filters_expression_archetypes() -> None:
+    background = _background()
     result = calibration_e_step(
         _region_arrays(),
         _observation(),
         _boundaries(),
-        _background(),
+        background,
         local_posterior=_local_posterior(),
         transfer_weight=np.zeros(5, dtype=np.float64),
+        unspliced_counts=np.array([0, 30, 0, 30], dtype=np.uint64),
+        background_density=BackgroundDensity.from_bootstrap(background),
     )
 
     dominant = np.argmax(result.p_states, axis=1).tolist()
@@ -158,6 +159,7 @@ def test_calibration_iteration_converges_with_fixed_scalar_parameters() -> None:
         transfer_weight=np.zeros(5, dtype=np.float64),
         max_calibration_passes=5,
         damping=0.0,
+        unspliced_counts=np.array([0, 30, 0, 30], dtype=np.uint64),
     )
 
     assert isinstance(calibration, RegionCalibration)
@@ -177,195 +179,3 @@ def test_calibration_iteration_converges_with_fixed_scalar_parameters() -> None:
     np.testing.assert_allclose(calibration.A_r, np.ones(4, dtype=np.float32))
 
 
-def test_prior_mass_deconvolution_excludes_spliced_mass_in_density_fallback() -> None:
-    observation = DensityObservation(
-        contained_count=np.array([10.0], dtype=np.float32),
-        boundary_left_count=np.array([20.0], dtype=np.float32),
-        boundary_right_count=np.array([30.0], dtype=np.float32),
-        boundary_count=np.array([50.0], dtype=np.float32),
-        observed_compatible_count=np.array([60.0], dtype=np.float32),
-        contained_leff=np.array([100.0], dtype=np.float64),
-        boundary_left_leff=np.array([10.0], dtype=np.float64),
-        boundary_right_leff=np.array([10.0], dtype=np.float64),
-        boundary_leff=np.array([20.0], dtype=np.float64),
-        anchor_intergenic=np.array([False]),
-        anchor_intron=np.array([False]),
-        is_anchor=np.array([False]),
-        spliced_count=np.array([999.0], dtype=np.float32),
-        region_length=np.array([100.0], dtype=np.float64),
-    )
-
-    prior_mass = build_prior_mass_deconvolution(
-        observation,
-        mu_gdna=np.array([12.0], dtype=np.float32),
-        strand_channels=None,
-    )
-
-    np.testing.assert_allclose(prior_mass.unspliced_total, [60.0])
-    np.testing.assert_allclose(prior_mass.gdna_unspliced_mean, [12.0])
-    np.testing.assert_allclose(prior_mass.rna_unspliced_mean, [48.0])
-    assert prior_mass.method.tolist() == [PRIOR_MASS_METHOD_DENSITY]
-    assert float(prior_mass.mass_conservation_error()[0]) == 0.0
-
-
-def test_prior_mass_deconvolution_uses_compartment_strand_means_when_available() -> None:
-    observation = DensityObservation(
-        contained_count=np.array([10.0], dtype=np.float32),
-        boundary_left_count=np.array([20.0], dtype=np.float32),
-        boundary_right_count=np.array([30.0], dtype=np.float32),
-        boundary_count=np.array([50.0], dtype=np.float32),
-        observed_compatible_count=np.array([60.0], dtype=np.float32),
-        contained_leff=np.array([100.0], dtype=np.float64),
-        boundary_left_leff=np.array([10.0], dtype=np.float64),
-        boundary_right_leff=np.array([10.0], dtype=np.float64),
-        boundary_leff=np.array([20.0], dtype=np.float64),
-        anchor_intergenic=np.array([False]),
-        anchor_intron=np.array([False]),
-        is_anchor=np.array([False]),
-        spliced_count=np.array([999.0], dtype=np.float32),
-        region_length=np.array([100.0], dtype=np.float64),
-    )
-    strand_channels = RegionGdnaChannelEstimate(
-        contained_mean=np.array([1.0], dtype=np.float32),
-        contained_upper=np.array([2.0], dtype=np.float32),
-        contained_rna_lower=np.array([8.0], dtype=np.float32),
-        contained_precision=np.array([1.0], dtype=np.float32),
-        boundary_left_mean=np.array([2.0], dtype=np.float32),
-        boundary_left_upper=np.array([3.0], dtype=np.float32),
-        boundary_left_rna_lower=np.array([17.0], dtype=np.float32),
-        boundary_left_precision=np.array([1.0], dtype=np.float32),
-        boundary_right_mean=np.array([3.0], dtype=np.float32),
-        boundary_right_upper=np.array([4.0], dtype=np.float32),
-        boundary_right_rna_lower=np.array([26.0], dtype=np.float32),
-        boundary_right_precision=np.array([1.0], dtype=np.float32),
-        flags=np.zeros(1, dtype=np.uint16),
-        kappa_d=10.0,
-        p_r1_sense=0.95,
-        internal_rna_lower_ci=0.95,
-        contained_reliability=np.ones(1, dtype=np.float32),
-        contained_log_bayes_factor=np.zeros(1, dtype=np.float32),
-        boundary_left_reliability=np.ones(1, dtype=np.float32),
-        boundary_left_log_bayes_factor=np.zeros(1, dtype=np.float32),
-        boundary_right_reliability=np.ones(1, dtype=np.float32),
-        boundary_right_log_bayes_factor=np.zeros(1, dtype=np.float32),
-    )
-
-    prior_mass = build_prior_mass_deconvolution(
-        observation,
-        mu_gdna=np.array([99.0], dtype=np.float32),
-        strand_channels=strand_channels,
-    )
-
-    np.testing.assert_allclose(prior_mass.unspliced_total, [60.0])
-    np.testing.assert_allclose(prior_mass.gdna_unspliced_mean, [6.0])
-    np.testing.assert_allclose(prior_mass.rna_unspliced_mean, [54.0])
-    assert prior_mass.method.tolist() == [PRIOR_MASS_METHOD_STRAND]
-    assert float(prior_mass.mass_conservation_error()[0]) == 0.0
-
-
-def test_prior_mass_deconvolution_weights_strand_means_by_reliability() -> None:
-    observation = DensityObservation(
-        contained_count=np.array([100.0], dtype=np.float32),
-        boundary_left_count=np.array([0.0], dtype=np.float32),
-        boundary_right_count=np.array([0.0], dtype=np.float32),
-        boundary_count=np.array([0.0], dtype=np.float32),
-        observed_compatible_count=np.array([100.0], dtype=np.float32),
-        contained_leff=np.array([100.0], dtype=np.float64),
-        boundary_left_leff=np.array([0.0], dtype=np.float64),
-        boundary_right_leff=np.array([0.0], dtype=np.float64),
-        boundary_leff=np.array([0.0], dtype=np.float64),
-        anchor_intergenic=np.array([False]),
-        anchor_intron=np.array([False]),
-        is_anchor=np.array([False]),
-        spliced_count=np.array([0.0], dtype=np.float32),
-        region_length=np.array([100.0], dtype=np.float64),
-    )
-    strand_channels = RegionGdnaChannelEstimate(
-        contained_mean=np.array([80.0], dtype=np.float32),
-        contained_upper=np.array([90.0], dtype=np.float32),
-        contained_rna_lower=np.array([10.0], dtype=np.float32),
-        contained_precision=np.array([0.8], dtype=np.float32),
-        boundary_left_mean=np.array([0.0], dtype=np.float32),
-        boundary_left_upper=np.array([0.0], dtype=np.float32),
-        boundary_left_rna_lower=np.array([0.0], dtype=np.float32),
-        boundary_left_precision=np.array([0.0], dtype=np.float32),
-        boundary_right_mean=np.array([0.0], dtype=np.float32),
-        boundary_right_upper=np.array([0.0], dtype=np.float32),
-        boundary_right_rna_lower=np.array([0.0], dtype=np.float32),
-        boundary_right_precision=np.array([0.0], dtype=np.float32),
-        flags=np.zeros(1, dtype=np.uint16),
-        kappa_d=10.0,
-        p_r1_sense=0.95,
-        internal_rna_lower_ci=0.95,
-        contained_reliability=np.array([0.25], dtype=np.float32),
-        contained_log_bayes_factor=np.zeros(1, dtype=np.float32),
-        boundary_left_reliability=np.zeros(1, dtype=np.float32),
-        boundary_left_log_bayes_factor=np.zeros(1, dtype=np.float32),
-        boundary_right_reliability=np.zeros(1, dtype=np.float32),
-        boundary_right_log_bayes_factor=np.zeros(1, dtype=np.float32),
-    )
-
-    prior_mass = build_prior_mass_deconvolution(
-        observation,
-        mu_gdna=np.array([100.0], dtype=np.float32),
-        strand_channels=strand_channels,
-    )
-
-    np.testing.assert_allclose(prior_mass.unspliced_total, [100.0])
-    np.testing.assert_allclose(prior_mass.gdna_unspliced_mean, [20.0])
-    np.testing.assert_allclose(prior_mass.rna_unspliced_mean, [80.0])
-    np.testing.assert_allclose(prior_mass.precision, [0.2])
-    assert float(prior_mass.mass_conservation_error()[0]) == 0.0
-
-
-def test_prior_mass_deconvolution_zero_reliability_blocks_strand_gdna() -> None:
-    observation = DensityObservation(
-        contained_count=np.array([50.0], dtype=np.float32),
-        boundary_left_count=np.array([0.0], dtype=np.float32),
-        boundary_right_count=np.array([0.0], dtype=np.float32),
-        boundary_count=np.array([0.0], dtype=np.float32),
-        observed_compatible_count=np.array([50.0], dtype=np.float32),
-        contained_leff=np.array([100.0], dtype=np.float64),
-        boundary_left_leff=np.array([0.0], dtype=np.float64),
-        boundary_right_leff=np.array([0.0], dtype=np.float64),
-        boundary_leff=np.array([0.0], dtype=np.float64),
-        anchor_intergenic=np.array([False]),
-        anchor_intron=np.array([False]),
-        is_anchor=np.array([False]),
-        spliced_count=np.array([0.0], dtype=np.float32),
-        region_length=np.array([100.0], dtype=np.float64),
-    )
-    strand_channels = RegionGdnaChannelEstimate(
-        contained_mean=np.array([50.0], dtype=np.float32),
-        contained_upper=np.array([50.0], dtype=np.float32),
-        contained_rna_lower=np.array([0.0], dtype=np.float32),
-        contained_precision=np.array([1.0], dtype=np.float32),
-        boundary_left_mean=np.array([0.0], dtype=np.float32),
-        boundary_left_upper=np.array([0.0], dtype=np.float32),
-        boundary_left_rna_lower=np.array([0.0], dtype=np.float32),
-        boundary_left_precision=np.array([0.0], dtype=np.float32),
-        boundary_right_mean=np.array([0.0], dtype=np.float32),
-        boundary_right_upper=np.array([0.0], dtype=np.float32),
-        boundary_right_rna_lower=np.array([0.0], dtype=np.float32),
-        boundary_right_precision=np.array([0.0], dtype=np.float32),
-        flags=np.zeros(1, dtype=np.uint16),
-        kappa_d=10.0,
-        p_r1_sense=0.95,
-        internal_rna_lower_ci=0.95,
-        contained_reliability=np.array([0.0], dtype=np.float32),
-        contained_log_bayes_factor=np.zeros(1, dtype=np.float32),
-        boundary_left_reliability=np.zeros(1, dtype=np.float32),
-        boundary_left_log_bayes_factor=np.zeros(1, dtype=np.float32),
-        boundary_right_reliability=np.zeros(1, dtype=np.float32),
-        boundary_right_log_bayes_factor=np.zeros(1, dtype=np.float32),
-    )
-
-    prior_mass = build_prior_mass_deconvolution(
-        observation,
-        mu_gdna=np.array([50.0], dtype=np.float32),
-        strand_channels=strand_channels,
-    )
-
-    np.testing.assert_allclose(prior_mass.gdna_unspliced_mean, [0.0])
-    np.testing.assert_allclose(prior_mass.rna_unspliced_mean, [50.0])
-    np.testing.assert_allclose(prior_mass.precision, [0.0])

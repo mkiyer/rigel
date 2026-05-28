@@ -5,6 +5,7 @@ import pytest
 
 from rigel.calibration._arrays import RegionArrays
 from rigel.calibration.adaptive_prior import (
+    LOCUS_ESS_CEIL,
     MAX_ESS,
     PRIOR_BIAS_APPLIED,
     PRIOR_ESS_CAPPED,
@@ -68,19 +69,25 @@ def _compute(
     rna_unspliced: list[float] | None = None,
     rna_call_bias: float = 0.5,
     max_ess: float = MAX_ESS,
+    locus_ess: list[float] | None = None,
 ):
     if has_gdna is None:
         has_gdna = [True] * len(loci)
     if gdna_unspliced is None or rna_unspliced is None:
         gdna_unspliced, rna_unspliced = _legacy_test_mass_split(p_states, unspliced)
+    if locus_ess is None:
+        # Default to a value >= LOCUS_ESS_CEIL so the ESS shrink ramp is
+        # inactive (shrink = 1.0) and existing assertions hold unchanged.
+        locus_ess = [LOCUS_ESS_CEIL] * len(loci)
     return compute_adaptive_prior(
         region_arrays=_region_arrays(regions),
         multi_loci=loci,
         p_states=np.asarray(p_states, dtype=np.float64),
-        unspliced_total=np.asarray(unspliced, dtype=np.float64),
-        gdna_unspliced_mean=np.asarray(gdna_unspliced, dtype=np.float64),
-        rna_unspliced_mean=np.asarray(rna_unspliced, dtype=np.float64),
+        total_mass=np.asarray(unspliced, dtype=np.float64),
+        gdna_mass=np.asarray(gdna_unspliced, dtype=np.float64),
+        rna_mass=np.asarray(rna_unspliced, dtype=np.float64),
         has_gdna_candidate=np.asarray(has_gdna, dtype=bool),
+        locus_ess=np.asarray(locus_ess, dtype=np.float64),
         rna_call_bias=rna_call_bias,
         max_ess=max_ess,
     )
@@ -444,11 +451,11 @@ def test_17_locus_ess_shrink_attenuates_low_evidence_locus() -> None:
         region_arrays=region_arrays,
         multi_loci=loci,
         p_states=np.asarray(p_states, dtype=np.float64),
-        unspliced_total=np.asarray(unspliced, dtype=np.float64),
-        gdna_unspliced_mean=np.asarray(
+        total_mass=np.asarray(unspliced, dtype=np.float64),
+        gdna_mass=np.asarray(
             _legacy_test_mass_split(p_states, unspliced)[0], dtype=np.float64
         ),
-        rna_unspliced_mean=np.asarray(
+        rna_mass=np.asarray(
             _legacy_test_mass_split(p_states, unspliced)[1], dtype=np.float64
         ),
         has_gdna_candidate=np.array([True, True], dtype=bool),
@@ -481,9 +488,9 @@ def test_17b_locus_ess_validation() -> None:
             region_arrays=region_arrays,
             multi_loci=loci,
             p_states=np.asarray(p_states, dtype=np.float64),
-            unspliced_total=np.asarray(unspliced, dtype=np.float64),
-            gdna_unspliced_mean=np.asarray(gdna, dtype=np.float64),
-            rna_unspliced_mean=np.asarray(rna, dtype=np.float64),
+            total_mass=np.asarray(unspliced, dtype=np.float64),
+            gdna_mass=np.asarray(gdna, dtype=np.float64),
+            rna_mass=np.asarray(rna, dtype=np.float64),
             has_gdna_candidate=np.array([True], dtype=bool),
             locus_ess=np.array([1.0, 2.0], dtype=np.float64),
         )
@@ -493,9 +500,9 @@ def test_17b_locus_ess_validation() -> None:
             region_arrays=region_arrays,
             multi_loci=loci,
             p_states=np.asarray(p_states, dtype=np.float64),
-            unspliced_total=np.asarray(unspliced, dtype=np.float64),
-            gdna_unspliced_mean=np.asarray(gdna, dtype=np.float64),
-            rna_unspliced_mean=np.asarray(rna, dtype=np.float64),
+            total_mass=np.asarray(unspliced, dtype=np.float64),
+            gdna_mass=np.asarray(gdna, dtype=np.float64),
+            rna_mass=np.asarray(rna, dtype=np.float64),
             has_gdna_candidate=np.array([True], dtype=bool),
             locus_ess=np.array([-1.0], dtype=np.float64),
         )
@@ -505,9 +512,9 @@ def test_17b_locus_ess_validation() -> None:
             region_arrays=region_arrays,
             multi_loci=loci,
             p_states=np.asarray(p_states, dtype=np.float64),
-            unspliced_total=np.asarray(unspliced, dtype=np.float64),
-            gdna_unspliced_mean=np.asarray(gdna, dtype=np.float64),
-            rna_unspliced_mean=np.asarray(rna, dtype=np.float64),
+            total_mass=np.asarray(unspliced, dtype=np.float64),
+            gdna_mass=np.asarray(gdna, dtype=np.float64),
+            rna_mass=np.asarray(rna, dtype=np.float64),
             has_gdna_candidate=np.array([True], dtype=bool),
             locus_ess=np.array([1.0], dtype=np.float64),
             locus_ess_floor=10.0,
