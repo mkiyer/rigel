@@ -69,6 +69,14 @@ struct CalibrationPayload {
     std::vector<double>             fl_pool_mass;       // size = 6 * 1024
     std::array<double, kFlPools>    fl_pool_total {};
 
+    // Per-region physical fragment support counts, partitioned by the
+    // fragment's splice class. A fragment is counted at most once per
+    // region (compartment-agnostic), and only when it contributes
+    // positive overlap mass to that region. These are the effective
+    // sample sizes consumed by the EB exposure model.
+    std::vector<std::uint64_t> region_unspliced_support;  // size = n_regions
+    std::vector<std::uint64_t> region_spliced_support;    // size = n_regions
+
     // Counters
     int64_t n_observed                 = 0;
     int64_t n_excluded_multimap        = 0;
@@ -94,8 +102,13 @@ public:
             static_cast<size_t>(CalibrationPayload::kFlPools) *
                 CalibrationPayload::kFlBins,
             0.0);
+        payload_.region_unspliced_support.assign(
+            static_cast<size_t>(n_regions), 0);
+        payload_.region_spliced_support.assign(
+            static_cast<size_t>(n_regions), 0);
         // Warm reserve to amortize the first ~10 fragments' allocations.
         block_hits_.reserve(16);
+        touched_regions_.reserve(16);
     }
 
     /**
@@ -139,6 +152,10 @@ private:
 
     // Per-block scratch (reused across observe() calls).
     std::vector<int32_t> block_hits_;
+    // Per-fragment scratch: region IDs that received positive overlap
+    // mass from any block of the current fragment. Sorted+uniqued at
+    // end of observe() to drive the per-region support increment.
+    std::vector<int32_t> touched_regions_;
 };
 
 }  // namespace rigel::calibration

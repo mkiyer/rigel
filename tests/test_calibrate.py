@@ -78,6 +78,8 @@ def _payload() -> CalibrationScanPayload:
         signature_mass=signature_mass,
         fl_pool_mass=fl_pool_mass,
         fl_pool_total=fl_pool_mass.sum(axis=1),
+        region_unspliced_support=np.zeros(len(region_df), dtype=np.uint64),
+        region_spliced_support=np.zeros(len(region_df), dtype=np.uint64),
         n_observed=n_observed,
         n_excluded_multimap=0,
         n_excluded_chimera=0,
@@ -118,7 +120,7 @@ def test_calibrate_populates_region_calibration_and_diagnostics():
     )
 
     rc = result.region_calibration
-    assert rc.p_states.shape == (7, 4)
+    assert rc.p_states.shape == (7, 2)
     np.testing.assert_allclose(rc.p_states.sum(axis=1), 1.0, rtol=1e-6, atol=1e-6)
     assert rc.mu_gdna.shape == (7,)
     assert rc.upper_gdna.shape == (7,)
@@ -157,6 +159,10 @@ def test_calibrate_summary_has_region_calibration_blocks():
     assert region_cal["n_passes"] >= 1
     assert "state_mass" in region_cal
     assert "A_r" in region_cal
+    assert "p_unexpressed" in region_cal
+    assert "p_expressed" in region_cal
+    assert "p_captured" not in region_cal
+    assert "gamma_r" not in region_cal
     assert summary["background_model"]["n_regions"] == 7
     assert summary["boundary_local"]["n_regions"] == 7
     assert summary["boundary_sweep"]["n_regions"] == 7

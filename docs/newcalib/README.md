@@ -104,6 +104,12 @@ model learns how much regional exposure variance exists in the library. Non-capt
 learn low variance and shrink hard toward 1.0. Capture libraries should learn high variance and let
 supported regions move far away from 1.0.
 
+The planned production shrinkage family is a log-normal random-effects model: estimate regional
+`log(raw_ratio_r)`, learn the library-wide exposure variance, and shrink the regional log ratio
+toward `log(1.0) = 0` according to support-derived observation variance. A Gamma-Poisson posterior
+mean can remain a diagnostic during validation, but PR 04 should ship one production exposure model,
+not parallel capture-specific modes.
+
 ### 4. Downstream EM Usage
 
 Exposure increases sampling visibility. In the initial production model, exposure is represented as
@@ -123,7 +129,7 @@ model with a tested equivalent contract.
 
 ## PR Sequence
 
-1. [PR 01 - Two-State Calibration Teardown](pr01_two_state_calibration.md)
+1. [PR 01 - Two-State Calibration Teardown](pr01_v2.md)
 2. [PR 02 - Native Observation Support and Boundary Payload](pr02_native_support_and_boundaries.md)
 3. [PR 03 - Regional gDNA Mass Contract](pr03_region_gdna_mass.md)
 4. [PR 04 - EB Exposure Factor Model](pr04_eb_exposure_model.md)
@@ -142,7 +148,8 @@ final behavior until `omega_r` is produced by the new calibration path.
 - Boundary-local posterior and left/right boundary sweep, after detaching them from capture states.
 - Mass-conserving `PriorMassDeconvolution`, renamed or reshaped around the new `RegionGdnaMass`
   contract.
-- Grouped adaptive priors in native EM, after updating their entropy calculation for two states.
+- Grouped adaptive priors in native EM, after replacing entropy with a directional
+  `p_unexpressed` soft gate.
 
 ## What We Delete or Replace
 

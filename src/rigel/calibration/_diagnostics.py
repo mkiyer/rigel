@@ -57,6 +57,15 @@ class Diagnostics:
     # ---- FL pool totals ----------------------------------------------------
     fl_pool_total: Mapping[str, float]  # 6 named pools
 
+    # ---- per-region physical support summaries -----------------------------
+    total_unspliced_support: int
+    total_spliced_support: int
+    n_regions_zero_unspliced_support: int
+    n_regions_zero_spliced_support: int
+    n_regions: int
+    unspliced_support_pct: Mapping[str, float]  # p50/p90/p99 over support>0
+    spliced_support_pct: Mapping[str, float]    # p50/p90/p99 over support>0
+
     def total(self) -> int:
         """Sum of all fragment-level exclusion + observation counters."""
         return (
@@ -85,6 +94,13 @@ class Diagnostics:
             "mass_by_strand": {k: float(v) for k, v in self.mass_by_strand.items()},
             "mass_by_signature": [float(v) for v in self.mass_by_signature],
             "fl_pool_total": {k: float(v) for k, v in self.fl_pool_total.items()},
+            "total_unspliced_support": int(self.total_unspliced_support),
+            "total_spliced_support": int(self.total_spliced_support),
+            "n_regions_zero_unspliced_support": int(self.n_regions_zero_unspliced_support),
+            "n_regions_zero_spliced_support": int(self.n_regions_zero_spliced_support),
+            "n_regions": int(self.n_regions),
+            "unspliced_support_pct": {k: float(v) for k, v in self.unspliced_support_pct.items()},
+            "spliced_support_pct": {k: float(v) for k, v in self.spliced_support_pct.items()},
         }
 
     @classmethod
@@ -147,6 +163,20 @@ class Diagnostics:
             FL_POOL_NAMES[i]: float(payload.fl_pool_total[i]) for i in range(len(FL_POOL_NAMES))
         }
 
+        def _pct(support: np.ndarray) -> dict[str, float]:
+            nz = support[support > 0]
+            if nz.size == 0:
+                return {"p50": 0.0, "p90": 0.0, "p99": 0.0}
+            qs = np.percentile(nz.astype(np.float64), [50.0, 90.0, 99.0])
+            return {"p50": float(qs[0]), "p90": float(qs[1]), "p99": float(qs[2])}
+
+        u_sup = payload.region_unspliced_support
+        s_sup = payload.region_spliced_support
+        total_u = int(u_sup.sum(dtype=np.uint64)) if u_sup.size else 0
+        total_s = int(s_sup.sum(dtype=np.uint64)) if s_sup.size else 0
+        n_zero_u = int((u_sup == 0).sum()) if u_sup.size else 0
+        n_zero_s = int((s_sup == 0).sum()) if s_sup.size else 0
+
         return cls(
             n_observed=int(payload.n_observed),
             n_excluded_multimap=int(payload.n_excluded_multimap),
@@ -163,4 +193,11 @@ class Diagnostics:
             mass_by_strand=strand_totals,
             mass_by_signature=sig_mass,
             fl_pool_total=fl_pool_total,
+            total_unspliced_support=total_u,
+            total_spliced_support=total_s,
+            n_regions_zero_unspliced_support=n_zero_u,
+            n_regions_zero_spliced_support=n_zero_s,
+            n_regions=int(payload.n_regions),
+            unspliced_support_pct=_pct(u_sup),
+            spliced_support_pct=_pct(s_sup),
         )

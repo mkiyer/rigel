@@ -17,6 +17,7 @@ from .adaptive_prior import (
     PRIOR_NO_UNSPLICED_MASS,
     PRIOR_STRUCTURAL_GATED,
     compute_adaptive_prior,
+    project_region_array_to_loci,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only.
@@ -65,7 +66,7 @@ class PriorTable:
     global_n_rna: float = 0.0
     unallocated_unspliced_count: float = 0.0
     unallocated_weighted_unspliced_count: float = 0.0
-    prior_policy_name: str = "entropy_dirichlet_v5_v6"
+    prior_policy_name: str = "p_unexpressed_soft_gate_interim_no_exposure_gating"
     prior_max_ess: float = MAX_ESS
     rna_call_bias: float = 0.5
 
@@ -150,6 +151,22 @@ def assemble_priors(
         [enable_gdna_for_multilocus(locus, em_data) for locus in multi_loci],
         dtype=bool,
     )
+
+    # PR 03: if the new RegionUnsplicedMass is available on the calibration,
+    # project its integer ``unspliced_counts`` to per-locus ESS and pass it to
+    # the adaptive prior so loci with few unspliced fragments get
+    # correspondingly weaker priors.
+    locus_ess: np.ndarray | None = None
+    region_unspliced_mass = getattr(region_calibration, "region_unspliced_mass", None)
+    if region_unspliced_mass is not None:
+        locus_ess = project_region_array_to_loci(
+            region_arrays=region_arrays,
+            multi_loci=multi_loci,
+            region_array=np.asarray(
+                region_unspliced_mass.unspliced_counts, dtype=np.float64
+            ),
+        )
+
     adaptive = compute_adaptive_prior(
         region_arrays=region_arrays,
         multi_loci=multi_loci,
@@ -160,6 +177,7 @@ def assemble_priors(
         has_gdna_candidate=has_gdna_candidate,
         rna_call_bias=float(em_config.rna_call_bias),
         max_ess=MAX_ESS,
+        locus_ess=locus_ess,
     )
 
     gdna_eff_len_unweighted = np.zeros(n_loci, dtype=np.float64)

@@ -1730,6 +1730,10 @@ private:
             cal_dict["region_counts"] = vec_to_ndarray2d(
                 std::move(payload.region_counts), n_reg,
                 static_cast<size_t>(rigel::calibration::CalibrationPayload::kChannels));
+            cal_dict["region_unspliced_support"] =
+                vec_to_ndarray(std::move(payload.region_unspliced_support));
+            cal_dict["region_spliced_support"] =
+                vec_to_ndarray(std::move(payload.region_spliced_support));
             // Channel/signature global marginals (copy fixed-size arrays
             // into heap vectors for capsule ownership).
             std::vector<double> ch_mass(payload.channel_mass.begin(),

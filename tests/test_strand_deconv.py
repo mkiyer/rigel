@@ -84,6 +84,8 @@ def _build_arrays(
         signature_mass=signature_mass,
         fl_pool_mass=fl_pool_mass,
         fl_pool_total=fl_pool_mass.sum(axis=1),
+        region_unspliced_support=np.zeros(n_regions, dtype=np.uint64),
+        region_spliced_support=np.zeros(n_regions, dtype=np.uint64),
         n_observed=int(region_counts.sum(dtype=np.float64)),
         n_excluded_multimap=0,
         n_excluded_chimera=0,

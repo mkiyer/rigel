@@ -45,9 +45,9 @@ def _check_array(name: str, arr: Any, dtype: type, shape: tuple[int, ...]) -> np
         )
     if not arr.flags.c_contiguous:
         raise ValueError(f"calibration payload: {name!r} is not C-contiguous.{_ERR_SUFFIX}")
-    if arr.size and not np.all(np.isfinite(arr)):
+    if arr.size and arr.dtype.kind == "f" and not np.all(np.isfinite(arr)):
         raise ValueError(f"calibration payload: {name!r} contains non-finite values.{_ERR_SUFFIX}")
-    if arr.size and np.any(arr < 0):
+    if arr.size and arr.dtype.kind in "fi" and np.any(arr < 0):
         raise ValueError(f"calibration payload: {name!r} contains negative values.{_ERR_SUFFIX}")
     return arr
 
@@ -61,6 +61,8 @@ class CalibrationScanPayload:
     signature_mass: np.ndarray  # float64[16]
     fl_pool_mass: np.ndarray  # float64[6, 1024]
     fl_pool_total: np.ndarray  # float64[6]
+    region_unspliced_support: np.ndarray  # uint64[R]
+    region_spliced_support: np.ndarray  # uint64[R]
 
     n_observed: int
     n_excluded_multimap: int
@@ -105,6 +107,18 @@ class CalibrationScanPayload:
             "fl_pool_mass", d["fl_pool_mass"], np.float64, (N_FL_POOLS, FL_HIST_N_BINS)
         )
         fl_pool_total = _check_array("fl_pool_total", d["fl_pool_total"], np.float64, (N_FL_POOLS,))
+        region_unspliced_support = _check_array(
+            "region_unspliced_support",
+            d["region_unspliced_support"],
+            np.uint64,
+            (n_regions,),
+        )
+        region_spliced_support = _check_array(
+            "region_spliced_support",
+            d["region_spliced_support"],
+            np.uint64,
+            (n_regions,),
+        )
 
         n_observed = int(d["n_observed"])
         n_ex_mm = int(d["n_excluded_multimap"])
@@ -190,6 +204,75 @@ class CalibrationScanPayload:
                 f"n_observed = {fl_upper}.{_ERR_SUFFIX}"
             )
 
+        # Per-region support invariants. Both vectors are integer counts of
+        # distinct fragments touching each region, partitioned by splice
+        # class. No single fragment can contribute more than once per
+        # region, so the maximum per-region support is bounded by
+        # n_observed.
+        n_obs_u64 = np.uint64(max(n_observed, 0))
+        if region_unspliced_support.size and int(region_unspliced_support.max()) > n_observed:
+            raise ValueError(
+                "calibration payload: region_unspliced_support contains a value "
+                f"> n_observed ({n_observed}).{_ERR_SUFFIX}"
+            )
+        if region_spliced_support.size and int(region_spliced_support.max()) > n_observed:
+            raise ValueError(
+                "calibration payload: region_spliced_support contains a value "
+                f"> n_observed ({n_observed}).{_ERR_SUFFIX}"
+            )
+        del n_obs_u64
+
+        # Per-region invariant: positive fractional mass implies positive
+        # support, partitioned by splice class. The two vectors are added
+        # in the same gate as fractional mass in the native accumulator,
+        # so this is exact (no float tolerance needed beyond the float32
+        # rounding floor of region_counts).
+        if n_regions > 0:
+            from .signature import (
+                CHANNEL_STRAND_NEG,
+                CHANNEL_STRAND_POS,
+                COMPARTMENT_BOUNDARY_LEFT,
+                COMPARTMENT_BOUNDARY_RIGHT,
+                COMPARTMENT_CONTAINED,
+                SPLICE_SPLICED,
+                SPLICE_UNSPLICED,
+            )
+
+            comps = (
+                COMPARTMENT_CONTAINED,
+                COMPARTMENT_BOUNDARY_LEFT,
+                COMPARTMENT_BOUNDARY_RIGHT,
+            )
+            strands = (CHANNEL_STRAND_POS, CHANNEL_STRAND_NEG)
+
+            def _splice_mass(splice: int) -> np.ndarray:
+                idxs = [channel_index(c, splice, s) for c in comps for s in strands]
+                return region_counts[:, idxs].sum(axis=1, dtype=np.float64)
+
+            float32_eps = np.finfo(np.float32).eps
+            u_mass = _splice_mass(SPLICE_UNSPLICED)
+            s_mass = _splice_mass(SPLICE_SPLICED)
+            u_thresh = float32_eps * max(float(u_mass.sum()), 1.0)
+            s_thresh = float32_eps * max(float(s_mass.sum()), 1.0)
+            bad_u = (region_unspliced_support == 0) & (u_mass > u_thresh)
+            bad_s = (region_spliced_support == 0) & (s_mass > s_thresh)
+            if bool(bad_u.any()):
+                idx = int(np.argmax(bad_u))
+                raise ValueError(
+                    "calibration payload: region "
+                    f"{idx} has unspliced fractional mass {float(u_mass[idx])} > 0 "
+                    "but region_unspliced_support == 0. Support and mass "
+                    f"must agree per region.{_ERR_SUFFIX}"
+                )
+            if bool(bad_s.any()):
+                idx = int(np.argmax(bad_s))
+                raise ValueError(
+                    "calibration payload: region "
+                    f"{idx} has spliced fractional mass {float(s_mass[idx])} > 0 "
+                    "but region_spliced_support == 0. Support and mass "
+                    f"must agree per region.{_ERR_SUFFIX}"
+                )
+
         if n_total is not None:
             accounted = n_observed + n_ex_mm + n_ex_ch + n_ex_ar + n_ex_sa + n_unobs
             if accounted != int(n_total):
@@ -209,6 +292,8 @@ class CalibrationScanPayload:
             signature_mass=signature_mass,
             fl_pool_mass=fl_pool_mass,
             fl_pool_total=fl_pool_total,
+            region_unspliced_support=region_unspliced_support,
+            region_spliced_support=region_spliced_support,
             n_observed=n_observed,
             n_excluded_multimap=n_ex_mm,
             n_excluded_chimera=n_ex_ch,

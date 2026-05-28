@@ -1,4 +1,4 @@
-"""Entropy-weighted grouped EM priors for the adaptive v5/v6 cutover."""
+"""Expression-filtered grouped EM priors for the adaptive cutover."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ._arrays import RegionArrays
-from .latent_states import N_STATES
+from .latent_states import N_STATES, STATE_UNEXPRESSED
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only.
     from ..locus import MultiLocus
@@ -18,17 +18,28 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only.
 __all__ = [
     "EPS_MASS",
     "MAX_ESS",
+    "LOCUS_ESS_FLOOR",
+    "LOCUS_ESS_CEIL",
     "PRIOR_BIAS_APPLIED",
     "PRIOR_ESS_CAPPED",
     "PRIOR_NO_UNSPLICED_MASS",
     "PRIOR_STRUCTURAL_GATED",
     "AdaptivePriorResult",
     "compute_adaptive_prior",
+    "project_region_array_to_loci",
 ]
 
 
 MAX_ESS: float = 3000.0
 EPS_MASS: float = 1.0e-12
+
+# PR 03: ESS shrink ramp for prior concentration scaling. When ``locus_ess`` is
+# supplied to ``compute_adaptive_prior``, the additive Dirichlet concentration
+# for each locus is multiplied by
+#   shrink(ess) = clip((ess - LOCUS_ESS_FLOOR) / (LOCUS_ESS_CEIL - LOCUS_ESS_FLOOR), 0, 1)
+# so loci with few unspliced fragments get correspondingly weaker priors.
+LOCUS_ESS_FLOOR: float = 1.0
+LOCUS_ESS_CEIL: float = 50.0
 
 PRIOR_NO_UNSPLICED_MASS: np.uint16 = np.uint16(0x1)
 PRIOR_STRUCTURAL_GATED: np.uint16 = np.uint16(0x2)
@@ -40,7 +51,7 @@ _PROB_TOL: float = 1.0e-8
 
 @dataclass(frozen=True, slots=True)
 class AdaptivePriorResult:
-    """Outputs of the entropy-weighted prior-mass projection."""
+    """Outputs of the expression-filtered prior-mass projection."""
 
     alpha_gdna_add: np.ndarray
     alpha_rna_add: np.ndarray
@@ -82,6 +93,9 @@ def compute_adaptive_prior(
     has_gdna_candidate: np.ndarray,
     rna_call_bias: float = 0.5,
     max_ess: float = MAX_ESS,
+    locus_ess: np.ndarray | None = None,
+    locus_ess_floor: float = LOCUS_ESS_FLOOR,
+    locus_ess_ceil: float = LOCUS_ESS_CEIL,
 ) -> AdaptivePriorResult:
     """Compute v5/v6 grouped additive priors for every MultiLocus.
 
@@ -110,7 +124,7 @@ def compute_adaptive_prior(
         max_ess=max_ess,
     )
 
-    region_weight = _entropy_weight(p)
+    region_weight = _unexpressed_weight(p)
     weighted_unspliced = unspliced * region_weight
     n_gdna_region = gdna_unspliced * region_weight
     n_rna_region = rna_unspliced * region_weight
@@ -139,7 +153,7 @@ def compute_adaptive_prior(
         where=locus_unspliced > EPS_MASS,
     )
     locus_weight = np.clip(locus_weight, 0.0, 1.0)
-    shrink_weight = 1.0 - locus_weight
+    shrink_weight = np.zeros_like(locus_weight)
 
     global_counts = np.array(
         [float(np.sum(n_local_gdna, dtype=np.float64)), float(np.sum(n_local_rna, dtype=np.float64))],
@@ -148,8 +162,8 @@ def compute_adaptive_prior(
     n_other_gdna = np.maximum(global_counts[0] - n_local_gdna, 0.0)
     n_other_rna = np.maximum(global_counts[1] - n_local_rna, 0.0)
 
-    alpha_gdna = n_local_gdna + shrink_weight * n_other_gdna
-    alpha_rna = n_local_rna + shrink_weight * n_other_rna
+    alpha_gdna = n_local_gdna.copy()
+    alpha_rna = n_local_rna.copy()
 
     total_before_cap = alpha_gdna + alpha_rna
     cap = np.minimum(locus_unspliced, cap_max)
@@ -192,6 +206,35 @@ def compute_adaptive_prior(
         where=ess_final > 0.0,
     )
 
+    # PR 03: scale the prior concentration by a per-locus ESS shrink ramp if
+    # the caller supplied integer unspliced counts projected to loci. This
+    # weakens the prior in loci with insufficient evidence rather than
+    # propagating a fully-confident mass estimate.
+    if locus_ess is not None:
+        ess_arr = np.asarray(locus_ess, dtype=np.float64)
+        if ess_arr.shape != (n_loci,):
+            raise ValueError(
+                f"locus_ess must have shape ({n_loci},); got {ess_arr.shape}."
+            )
+        if not np.all(np.isfinite(ess_arr)) or np.any(ess_arr < 0.0):
+            raise ValueError("locus_ess must be finite and non-negative.")
+        floor = float(locus_ess_floor)
+        ceil = float(locus_ess_ceil)
+        if not (np.isfinite(floor) and np.isfinite(ceil)) or ceil <= floor:
+            raise ValueError(
+                f"locus_ess_floor < locus_ess_ceil required; got {floor}, {ceil}."
+            )
+        shrink = np.clip((ess_arr - floor) / (ceil - floor), 0.0, 1.0)
+        alpha_gdna = alpha_gdna * shrink
+        alpha_rna = alpha_rna * shrink
+        ess_final = alpha_gdna + alpha_rna
+        rna_share_final = np.divide(
+            alpha_rna,
+            ess_final,
+            out=np.zeros_like(ess_final),
+            where=ess_final > 0.0,
+        )
+
     flags = np.zeros(n_loci, dtype=np.uint16)
     flags |= np.where(~has_mass, PRIOR_NO_UNSPLICED_MASS, np.uint16(0)).astype(np.uint16)
     flags |= np.where(~has_candidate, PRIOR_STRUCTURAL_GATED, np.uint16(0)).astype(np.uint16)
@@ -221,6 +264,30 @@ def compute_adaptive_prior(
         ess_final=ess_final.astype(np.float64, copy=False),
         flags=flags,
     )
+
+
+def project_region_array_to_loci(
+    *,
+    region_arrays: RegionArrays,
+    multi_loci: list["MultiLocus"],
+    region_array: np.ndarray,
+) -> np.ndarray:
+    """Project a per-region float array to per-locus sums via overlap-weighted shares.
+
+    Mirrors the overlap-weighting used internally by ``compute_adaptive_prior``.
+    Useful for projecting integer ``unspliced_counts`` to loci for use as the
+    ``locus_ess`` argument.
+    """
+    n_loci = len(multi_loci)
+    _validate_locus_ids(multi_loci, n_loci)
+    proj = _project_to_loci(
+        region_arrays=region_arrays,
+        multi_loci=multi_loci,
+        n_loci=n_loci,
+        region_values={"v": np.asarray(region_array, dtype=np.float64)},
+        diagnostic_mass_key="v",
+    )
+    return proj.values["v"].astype(np.float64, copy=False)
 
 
 def _validate_locus_ids(multi_loci: list["MultiLocus"], n_loci: int) -> None:
@@ -316,14 +383,10 @@ def _validate_region_mass(name: str, values: np.ndarray, n_regions: int) -> np.n
     return array
 
 
-def _entropy_weight(p_states: np.ndarray) -> np.ndarray:
-    p = np.asarray(p_states, dtype=np.float64)
-    xlogx = np.zeros_like(p)
-    positive = p > 0.0
-    xlogx[positive] = p[positive] * np.log(p[positive])
-    entropy = -np.sum(xlogx, axis=1, dtype=np.float64)
-    weight = 1.0 - entropy / math.log(float(N_STATES))
-    return np.clip(weight, 0.0, 1.0)
+def _unexpressed_weight(p_states: np.ndarray) -> np.ndarray:
+    """Return the directional soft gate for prior mass placement."""
+    probabilities = np.asarray(p_states, dtype=np.float64)
+    return np.clip(probabilities[:, STATE_UNEXPRESSED], 0.0, 1.0)
 
 
 def _apply_rna_call_bias(rna_share: np.ndarray, rna_call_bias: float) -> np.ndarray:

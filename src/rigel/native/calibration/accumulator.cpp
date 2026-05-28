@@ -97,6 +97,7 @@ void CalibrationAccumulator::observe(
         1.0 / static_cast<double>(total_aligned_bp);
 
     bool any_region_hit = false;
+    touched_regions_.clear();
 
     for (int32_t e = 0; e < n_exons; ++e) {
         const ExonBlock& blk = exons[e];
@@ -117,6 +118,11 @@ void CalibrationAccumulator::observe(
                 static_cast<int64_t>(blk.end),
                 rs, re);
             if (overlap_bp <= 0) continue;
+
+            // Record this region as touched by the current fragment.
+            // Duplicates (multi-block fragments hitting the same region)
+            // are reduced to a single support increment below.
+            touched_regions_.push_back(rid);
 
             const double w = static_cast<double>(overlap_bp) * inv_total;
 
@@ -191,6 +197,21 @@ void CalibrationAccumulator::observe(
     if (!any_region_hit) {
         ++payload_.n_unannotated_ref;
     }
+
+    // Per-region support: increment exactly once per unique region the
+    // current fragment touched. Compartment-agnostic (contained, left,
+    // right, and fully-spanning all contribute one increment per region).
+    if (!touched_regions_.empty()) {
+        std::sort(touched_regions_.begin(), touched_regions_.end());
+        auto last = std::unique(touched_regions_.begin(),
+                                touched_regions_.end());
+        auto& support = (splice_idx == region_signature::kSpliceUnspliced)
+                            ? payload_.region_unspliced_support
+                            : payload_.region_spliced_support;
+        for (auto it = touched_regions_.begin(); it != last; ++it) {
+            ++support[static_cast<size_t>(*it)];
+        }
+    }
 }
 
 namespace {
@@ -218,6 +239,10 @@ void CalibrationAccumulator::merge_from(const CalibrationAccumulator& other) {
     add_into(payload_.signature_mass,   other.payload_.signature_mass);
     add_into(payload_.fl_pool_mass,     other.payload_.fl_pool_mass);
     add_into(payload_.fl_pool_total,    other.payload_.fl_pool_total);
+    add_into(payload_.region_unspliced_support,
+             other.payload_.region_unspliced_support);
+    add_into(payload_.region_spliced_support,
+             other.payload_.region_spliced_support);
     payload_.n_observed              += other.payload_.n_observed;
     payload_.n_excluded_multimap     += other.payload_.n_excluded_multimap;
     payload_.n_excluded_chimera      += other.payload_.n_excluded_chimera;

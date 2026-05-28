@@ -72,10 +72,8 @@ def _region_calibration(
             flags=np.zeros(1, dtype=np.uint16),
         ),
         A_r=np.ones(1, dtype=np.float32),
-        gamma_r=np.ones(1, dtype=np.float32),
         rho_off=0.01,
         kappa_d=None,
-        capture_enrichment_target=1.0,
         n_passes=1,
         converged=True,
         flags=np.zeros(1, dtype=np.uint16),
@@ -116,7 +114,7 @@ def test_adaptive_prior_table_exposes_paired_mass_and_summary() -> None:
         calibration=_calibration(
             _region_calibration(
                 unspliced=100.0,
-                p_state=[0.25, 0.0, 0.75, 0.0],
+                p_state=[0.25, 0.75],
                 gdna_unspliced=25.0,
                 rna_unspliced=75.0,
             )
@@ -132,7 +130,7 @@ def test_adaptive_prior_table_exposes_paired_mass_and_summary() -> None:
         priors.alpha_gdna_add[0] + priors.alpha_rna_add[0]
     )
     summary = priors.to_summary_dict()
-    assert summary["name"] == "entropy_dirichlet_v5_v6"
+    assert summary["name"] == "p_unexpressed_soft_gate_interim_no_exposure_gating"
     assert summary["rna_call_bias"] == pytest.approx(0.5)
     assert summary["n_loci_with_prior_mass"] == 1
 
@@ -145,7 +143,7 @@ def test_rna_call_bias_shifts_split_without_changing_ess() -> None:
         calibration=_calibration(
             _region_calibration(
                 unspliced=100.0,
-                p_state=[0.5, 0.0, 0.5, 0.0],
+                p_state=[0.5, 0.5],
                 gdna_unspliced=50.0,
                 rna_unspliced=50.0,
             )
@@ -171,7 +169,7 @@ def test_enable_gdna_helper_is_structural_diagnostic_only() -> None:
         calibration=_calibration(
             _region_calibration(
                 unspliced=30.0,
-                p_state=[0.0, 0.0, 1.0, 0.0],
+                p_state=[0.0, 1.0],
                 gdna_unspliced=0.0,
                 rna_unspliced=30.0,
             )
@@ -182,7 +180,8 @@ def test_enable_gdna_helper_is_structural_diagnostic_only() -> None:
     assert enable_gdna_for_multilocus(locus, em_data) is True
     assert priors.enable_gdna[0] == 1
     assert priors.alpha_gdna_add[0] == pytest.approx(0.0)
-    assert priors.alpha_rna_add[0] > 0.0
+    assert priors.alpha_rna_add[0] == pytest.approx(0.0)
+    assert priors.prior_region_weight[0] == pytest.approx(0.0)
 
 
 def test_all_spliced_locus_reports_no_structural_gdna_candidate() -> None:
@@ -193,7 +192,7 @@ def test_all_spliced_locus_reports_no_structural_gdna_candidate() -> None:
         em_data=em_data,
         index=_index(),
         calibration=_calibration(
-            _region_calibration(unspliced=20.0, p_state=[1.0, 0.0, 0.0, 0.0])
+            _region_calibration(unspliced=20.0, p_state=[1.0, 0.0])
         ),
         em_config=EMConfig(),
     )

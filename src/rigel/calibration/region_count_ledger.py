@@ -58,6 +58,12 @@ class RegionCountLedger:
     boundary_right_spliced_pos: np.ndarray
     boundary_right_spliced_neg: np.ndarray
 
+    # Per-region physical fragment support, partitioned by splice class.
+    # Views over the sorted support vectors on the underlying
+    # ``PayloadArrays``; integer ESS for the EB exposure model.
+    unspliced_support: np.ndarray  # uint64[R]
+    spliced_support: np.ndarray    # uint64[R]
+
     # --- Unspliced totals --------------------------------------------------
 
     def contained_unspliced_total(self) -> np.ndarray:
@@ -133,4 +139,6 @@ def build_region_count_ledger(payload_arrays: PayloadArrays) -> RegionCountLedge
         boundary_right_spliced_neg=col(
             COMPARTMENT_BOUNDARY_RIGHT, SPLICE_SPLICED, CHANNEL_STRAND_NEG
         ),
+        unspliced_support=payload_arrays.region_unspliced_support_sorted,
+        spliced_support=payload_arrays.region_spliced_support_sorted,
     )

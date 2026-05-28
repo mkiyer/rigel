@@ -1,5 +1,8 @@
 # PR 01 - Two-State Calibration Teardown
 
+Superseded for implementation by [PR 01 v2](pr01_v2.md). This file is retained as the first-pass
+scope note.
+
 ## Goal
 
 Replace the current four-state `(expressed yes/no) x (captured yes/no)` tensor with a two-state

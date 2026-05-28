@@ -1,4 +1,4 @@
-"""Tests for Phase III four-state calibration iteration."""
+"""Tests for two-state calibration iteration."""
 
 from __future__ import annotations
 
@@ -20,10 +20,8 @@ from rigel.calibration.calibration_iteration import (
 from rigel.calibration.density_observation import DensityObservation
 from rigel.calibration.fractional_evidence import transcript_strand_class
 from rigel.calibration.latent_states import (
-    STATE_EXPRESSED_CAPTURE,
-    STATE_EXPRESSED_OFFTARGET,
-    STATE_UNEXPRESSED_CAPTURE,
-    STATE_UNEXPRESSED_OFFTARGET,
+    STATE_EXPRESSED,
+    STATE_UNEXPRESSED,
 )
 from rigel.calibration.signature import pack_signature
 from rigel.calibration.strand_deconv import RegionGdnaChannelEstimate
@@ -46,6 +44,7 @@ def _region_arrays() -> RegionArrays:
         end=starts + 100,
         signature=signatures,
         ts_class=transcript_strand_class(signatures),
+        region_size_bp=np.full(4, 100.0, dtype=np.float64),
         ref_offsets=np.array([0, 4], dtype=np.int32),
         order=np.arange(4, dtype=np.int64),
         n_refs=1,
@@ -124,7 +123,7 @@ def _local_posterior() -> BoundaryLocalPosterior:
     )
 
 
-def test_calibration_e_step_identifies_four_archetypes() -> None:
+def test_calibration_e_step_filters_expression_archetypes() -> None:
     result = calibration_e_step(
         _region_arrays(),
         _observation(),
@@ -136,17 +135,16 @@ def test_calibration_e_step_identifies_four_archetypes() -> None:
 
     dominant = np.argmax(result.p_states, axis=1).tolist()
     assert dominant == [
-        STATE_UNEXPRESSED_OFFTARGET,
-        STATE_UNEXPRESSED_CAPTURE,
-        STATE_EXPRESSED_OFFTARGET,
-        STATE_EXPRESSED_CAPTURE,
+        STATE_UNEXPRESSED,
+        STATE_UNEXPRESSED,
+        STATE_EXPRESSED,
+        STATE_EXPRESSED,
     ]
     np.testing.assert_allclose(result.p_states.sum(axis=1), 1.0, rtol=1.0e-6, atol=1.0e-6)
+    np.testing.assert_allclose(result.mu_gdna, np.full(4, 10.0, dtype=np.float32))
     assert np.all(result.mu_gdna >= 0.0)
     assert np.all(result.upper_gdna >= result.mu_gdna)
-    assert np.all(np.isfinite(result.A_r))
-    assert np.all(result.A_r >= 0.0)
-    assert np.all(np.isfinite(result.gamma_r))
+    np.testing.assert_allclose(result.A_r, np.ones(4, dtype=np.float32))
     assert (result.flags[0] & FLAG_BOUNDARY_SPARSE) != 0
 
 
@@ -170,14 +168,13 @@ def test_calibration_iteration_converges_with_fixed_scalar_parameters() -> None:
     np.testing.assert_allclose(calibration.p_states.sum(axis=1), 1.0, rtol=1.0e-6, atol=1.0e-6)
     dominant = np.argmax(calibration.p_states, axis=1).tolist()
     assert dominant == [
-        STATE_UNEXPRESSED_OFFTARGET,
-        STATE_UNEXPRESSED_CAPTURE,
-        STATE_EXPRESSED_OFFTARGET,
-        STATE_EXPRESSED_CAPTURE,
+        STATE_UNEXPRESSED,
+        STATE_UNEXPRESSED,
+        STATE_EXPRESSED,
+        STATE_EXPRESSED,
     ]
     assert np.all(calibration.upper_gdna >= calibration.mu_gdna)
-    assert np.all(np.isfinite(calibration.A_r))
-    assert np.all(calibration.A_r >= 0.0)
+    np.testing.assert_allclose(calibration.A_r, np.ones(4, dtype=np.float32))
 
 
 def test_prior_mass_deconvolution_excludes_spliced_mass_in_density_fallback() -> None:

@@ -23,9 +23,9 @@ from rigel.locus import Locus, MultiLocus
 from rigel.scored_fragments import ScoredFragments
 
 
-GDNA_STATE = [1.0, 0.0, 0.0, 0.0]
-RNA_STATE = [0.0, 0.0, 1.0, 0.0]
-UNIFORM_STATE = [0.25, 0.25, 0.25, 0.25]
+GDNA_STATE = [1.0, 0.0]
+RNA_STATE = [0.0, 1.0]
+UNIFORM_STATE = [0.5, 0.5]
 
 
 def _region_df() -> pd.DataFrame:
@@ -80,10 +80,8 @@ def _region_calibration(
         rna_lower=prior_mass.rna_unspliced_mean,
         prior_mass=prior_mass,
         A_r=np.asarray(exposure, dtype=np.float32),
-        gamma_r=np.ones(len(unspliced), dtype=np.float32),
         rho_off=0.0,
         kappa_d=None,
-        capture_enrichment_target=1.0,
         n_passes=1,
         converged=True,
         flags=np.zeros(len(unspliced), dtype=np.uint16),
@@ -173,11 +171,11 @@ def test_assemble_priors_projects_region_state_mass_to_matching_loci() -> None:
         em_config=EMConfig(rna_call_bias=0.5),
     )
 
-    np.testing.assert_allclose(prior_table.prior_n_local_gdna, [10.0, 0.0, 0.0])
-    np.testing.assert_allclose(prior_table.prior_n_local_rna, [0.0, 20.0, 0.0])
+    np.testing.assert_allclose(prior_table.prior_n_local_gdna, [10.0, 0.0, 7.5])
+    np.testing.assert_allclose(prior_table.prior_n_local_rna, [0.0, 0.0, 7.5])
     np.testing.assert_allclose(prior_table.prior_unspliced_total, [10.0, 20.0, 30.0])
     assert prior_table.alpha_gdna_add[0] == pytest.approx(10.0)
-    assert prior_table.alpha_rna_add[1] == pytest.approx(20.0)
+    assert prior_table.alpha_rna_add[1] == pytest.approx(0.0)
     assert prior_table.enable_gdna.tolist() == [1, 1, 1]
     assert prior_table.n_units_used_for_diagnostics.tolist() == [1, 1, 1]
 
@@ -246,6 +244,6 @@ def test_region_calibration_rejects_prior_mass_that_does_not_conserve_unspliced(
 
 
 def test_region_calibration_state_rows_must_match_latent_state_count() -> None:
-    assert N_STATES == 4
+    assert N_STATES == 2
     with pytest.raises(ValueError, match="p_states"):
         _region_calibration([[1.0, 0.0, 0.0]], [1.0])

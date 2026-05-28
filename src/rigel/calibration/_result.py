@@ -36,7 +36,7 @@ class CalibrationResult:
     The production calibration contract is now :class:`RegionCalibration`.
     Legacy density/fusion/exposure fields are intentionally absent; downstream
     prior assembly consumes ``region_calibration.mu_gdna``, ``upper_gdna``, and
-    ``A_r`` directly.
+    interim uniform ``A_r`` directly.
     """
 
     fl_models: FLModels
@@ -147,20 +147,67 @@ def _region_calibration_summary(region_calibration: "RegionCalibration") -> dict
         "kappa_d": (
             None if region_calibration.kappa_d is None else float(region_calibration.kappa_d)
         ),
-        "capture_enrichment_target": float(region_calibration.capture_enrichment_target),
         "n_passes": int(region_calibration.n_passes),
         "converged": bool(region_calibration.converged),
         "state_mass": state_mass,
+        "p_unexpressed": _summary_stats(region_calibration.p_unexpressed),
         "p_expressed": _summary_stats(region_calibration.p_expressed),
-        "p_captured": _summary_stats(region_calibration.p_captured),
         "mu_gdna": _summary_stats(region_calibration.mu_gdna),
         "upper_gdna": _summary_stats(region_calibration.upper_gdna),
         "rna_lower": _summary_stats(region_calibration.rna_lower),
         "prior_mass": _prior_mass_summary(region_calibration.prior_mass),
         "A_r": _summary_stats(region_calibration.A_r),
-        "gamma_r": _summary_stats(region_calibration.gamma_r),
         "flag_histogram": _uint_histogram(region_calibration.flags),
         "pass_diagnostics": _json_safe(region_calibration.pass_diagnostics),
+        # PR 03: surface the new RegionUnsplicedMass / BackgroundDensity when
+        # the calibration produced them (orchestrator wires unspliced_counts
+        # through run_calibration_iteration).
+        "region_unspliced_mass": (
+            _region_unspliced_mass_summary(region_calibration.region_unspliced_mass)
+            if region_calibration.region_unspliced_mass is not None
+            else None
+        ),
+        "background_density": (
+            _background_density_summary(region_calibration.background_density)
+            if region_calibration.background_density is not None
+            else None
+        ),
+    }
+
+
+def _region_unspliced_mass_summary(rum) -> dict[str, object]:
+    total = np.asarray(rum.total_mass, dtype=np.float64)
+    gdna = np.asarray(rum.gdna_mass, dtype=np.float64)
+    rna = np.asarray(rum.rna_mass, dtype=np.float64)
+    conservation_err = (
+        float(np.max(np.abs(gdna + rna - total))) if total.size else 0.0
+    )
+    return {
+        "n_regions": int(total.size),
+        "total_mass": _summary_stats(total),
+        "gdna_mass": _summary_stats(gdna),
+        "rna_mass": _summary_stats(rna),
+        "region_size_bp": _summary_stats(np.asarray(rum.region_size_bp, dtype=np.float64)),
+        "precision": _summary_stats(np.asarray(rum.precision, dtype=np.float64)),
+        "unspliced_counts": _summary_stats(
+            np.asarray(rum.unspliced_counts, dtype=np.float64)
+        ),
+        "method_histogram": _uint_histogram(np.asarray(rum.method, dtype=np.uint8)),
+        "flag_histogram": _uint_histogram(np.asarray(rum.flags, dtype=np.uint16)),
+        "max_abs_mass_conservation_error": conservation_err,
+    }
+
+
+def _background_density_summary(bg_density) -> dict[str, object]:
+    return {
+        "rho0_mean": float(bg_density.rho0_mean),
+        "alpha0": float(bg_density.alpha0),
+        "beta0": float(bg_density.beta0),
+        "log_dispersion": float(bg_density.log_dispersion),
+        "n_effective_regions": float(bg_density.n_effective_regions),
+        "n_regions_in_pool": int(bg_density.n_regions_in_pool),
+        "method_histogram": list(bg_density.method_histogram),
+        "fit_status": str(bg_density.fit_status),
     }
 
 

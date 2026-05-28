@@ -1,6 +1,17 @@
 # TODO
 
 
+- 2026-05-28: Second targeted run exposed an implementation issue: the old low-confidence global
+  pool fallback could leak priors into confidently expressed loci when `p_unexpressed = 0`. PR 01
+  now treats `p_unexpressed` as an eligibility gate and uses weighted local prior mass only;
+  global-pool shrink blending is disabled until a future confidence model is introduced.
+- 2026-05-28: Validation after the local-mass gate change passed: targeted PR 01 suite reported
+  54 passed; pipeline smoke reported 13 passed; broader calibration sweep reported 72 passed;
+  Ruff passed on touched Python files.
+
+
+
+
 ## Calibration redesign around the concept of exposure.
 
 Strand deconvolution is working well and setting our prior reasonably well.

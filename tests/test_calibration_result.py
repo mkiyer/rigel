@@ -30,6 +30,8 @@ def _payload() -> CalibrationScanPayload:
         signature_mass=signature_mass,
         fl_pool_mass=fl_pool_mass,
         fl_pool_total=fl_pool_mass.sum(axis=1),
+        region_unspliced_support=np.zeros(1, dtype=np.uint64),
+        region_spliced_support=np.zeros(1, dtype=np.uint64),
         n_observed=0,
         n_excluded_multimap=0,
         n_excluded_chimera=0,
@@ -100,7 +102,7 @@ def _region_calibration() -> RegionCalibration:
     )
 
     return RegionCalibration(
-        p_states=np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+        p_states=np.array([[1.0, 0.0]], dtype=np.float32),
         mu_gdna=np.zeros(1, dtype=np.float32),
         upper_gdna=np.zeros(1, dtype=np.float32),
         rna_lower=np.zeros(1, dtype=np.float32),
@@ -113,10 +115,8 @@ def _region_calibration() -> RegionCalibration:
             flags=np.zeros(1, dtype=np.uint16),
         ),
         A_r=np.ones(1, dtype=np.float32),
-        gamma_r=np.ones(1, dtype=np.float32),
         rho_off=0.01,
         kappa_d=None,
-        capture_enrichment_target=1.0,
         n_passes=1,
         converged=True,
         flags=np.zeros(1, dtype=np.uint16),
@@ -137,7 +137,7 @@ def test_build_calibration_result_basic() -> None:
 
     assert isinstance(result, CalibrationResult)
     assert isinstance(result.diagnostics, Diagnostics)
-    assert result.region_calibration.p_states.shape == (1, 4)
+    assert result.region_calibration.p_states.shape == (1, 2)
     assert result.background_model.rho_off_mean == pytest.approx(0.01)
     assert not hasattr(result, "density_evidence")
     assert not hasattr(result, "region_gdna")

@@ -97,6 +97,8 @@ def _payload(
         signature_mass=signature,
         fl_pool_mass=fl_pool_mass,
         fl_pool_total=fl_pool_mass.sum(axis=1),
+        region_unspliced_support=np.zeros(0, dtype=np.uint64),
+        region_spliced_support=np.zeros(0, dtype=np.uint64),
         n_observed=n_observed,
         n_excluded_multimap=0,
         n_excluded_chimera=0,

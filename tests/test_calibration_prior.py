@@ -52,7 +52,7 @@ def _region_calibration(
     unspliced = np.asarray(unspliced_total, dtype=np.float32)
     region_count = int(unspliced.size)
     if p_states is None:
-        p_states = np.zeros((region_count, 4), dtype=np.float32)
+        p_states = np.zeros((region_count, 2), dtype=np.float32)
         p_states[:, 0] = 1.0
     exposure_arr = np.asarray(
         exposure if exposure is not None else np.ones(region_count, dtype=np.float32),
@@ -80,10 +80,8 @@ def _region_calibration(
             flags=np.zeros(region_count, dtype=np.uint16),
         ),
         A_r=exposure_arr,
-        gamma_r=exposure_arr.copy(),
         rho_off=0.01,
         kappa_d=None,
-        capture_enrichment_target=1.0,
         n_passes=1,
         converged=True,
         flags=np.zeros(region_count, dtype=np.uint16),
@@ -148,7 +146,7 @@ def test_assemble_priors_uses_prior_mass_split_not_latent_state_split() -> None:
     index = _index([(0, 100)])
     locus = _ml(0, 0, 100, [0])
     em_data = _em_data(is_spliced=[False], gdna_log_liks=[-1.0])
-    p_states = np.array([[0.0, 0.0, 1.0, 0.0]], dtype=np.float32)
+    p_states = np.array([[1.0, 0.0]], dtype=np.float32)
 
     priors = assemble_priors(
         multi_loci=[locus],

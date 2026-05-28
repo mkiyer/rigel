@@ -15,10 +15,10 @@ from rigel.calibration.adaptive_prior import (
 from rigel.locus import Locus, MultiLocus
 
 
-GDNA_STATE = [1.0, 0.0, 0.0, 0.0]
-RNA_STATE = [0.0, 0.0, 1.0, 0.0]
-UNIFORM_STATE = [0.25, 0.25, 0.25, 0.25]
-INTERIOR_STATE = [0.5, 0.0, 0.5, 0.0]
+GDNA_STATE = [1.0, 0.0]
+RNA_STATE = [0.0, 1.0]
+UNIFORM_STATE = [0.5, 0.5]
+INTERIOR_STATE = [0.5, 0.5]
 
 
 def _region_arrays(regions: list[tuple[int, int] | tuple[int, int, int]]) -> RegionArrays:
@@ -40,6 +40,7 @@ def _region_arrays(regions: list[tuple[int, int] | tuple[int, int, int]]) -> Reg
         end=ends,
         signature=np.zeros(ref_ids.size, dtype=np.uint8),
         ts_class=np.zeros(ref_ids.size, dtype=np.int8),
+        region_size_bp=(ends - starts).astype(np.float64, copy=False),
         ref_offsets=ref_offsets,
         order=order.astype(np.int64, copy=False),
         n_refs=n_refs,
@@ -90,8 +91,8 @@ def _legacy_test_mass_split(
 ) -> tuple[list[float], list[float]]:
     states = np.asarray(p_states, dtype=np.float64)
     total = np.asarray(unspliced, dtype=np.float64)
-    state_gdna_share = states[:, 0] + states[:, 1]
-    state_rna_share = states[:, 2] + states[:, 3]
+    state_gdna_share = states[:, 0]
+    state_rna_share = states[:, 1]
     state_total = state_gdna_share + state_rna_share
     gdna_share = np.divide(
         state_gdna_share,
@@ -104,18 +105,19 @@ def _legacy_test_mass_split(
     return gdna.tolist(), rna.tolist()
 
 
-def test_entropy_weight_boundaries_and_monotonicity() -> None:
+def test_unexpressed_soft_gate_boundaries_and_monotonicity() -> None:
     result = _compute(
-        regions=[(0, 10), (10, 20), (20, 30)],
-        p_states=[GDNA_STATE, [0.7, 0.1, 0.1, 0.1], UNIFORM_STATE],
-        unspliced=[1.0, 1.0, 1.0],
+        regions=[(0, 10), (10, 20), (20, 30), (30, 40)],
+        p_states=[GDNA_STATE, [0.8, 0.2], UNIFORM_STATE, RNA_STATE],
+        unspliced=[1.0, 1.0, 1.0, 1.0],
         loci=[],
         has_gdna=[],
     )
 
     assert result.region_weight[0] == pytest.approx(1.0)
-    assert 0.0 < result.region_weight[1] < 1.0
-    assert result.region_weight[2] == pytest.approx(0.0)
+    assert result.region_weight[1] == pytest.approx(0.8)
+    assert result.region_weight[2] == pytest.approx(0.5)
+    assert result.region_weight[3] == pytest.approx(0.0)
 
 
 def test_regional_pseudocount_boundaries() -> None:
@@ -133,14 +135,14 @@ def test_regional_pseudocount_boundaries() -> None:
 
     np.testing.assert_allclose(
         result.n_local,
-        np.array([[0.0, 0.0], [0.0, 0.0], [0.0, 20.0], [30.0, 0.0]]),
+        np.array([[0.0, 0.0], [2.5, 2.5], [0.0, 0.0], [30.0, 0.0]]),
     )
 
 
 def test_explicit_mass_split_overrides_latent_state_rna_gdna_split() -> None:
     result = _compute(
         regions=[(0, 100)],
-        p_states=[RNA_STATE],
+        p_states=[GDNA_STATE],
         unspliced=[100.0],
         gdna_unspliced=[60.0],
         rna_unspliced=[40.0],
@@ -154,8 +156,10 @@ def test_explicit_mass_split_overrides_latent_state_rna_gdna_split() -> None:
 def test_geometry_disjoint_regions_allocate_to_matching_loci() -> None:
     result = _compute(
         regions=[(0, 100), (100, 200)],
-        p_states=[GDNA_STATE, RNA_STATE],
+        p_states=[GDNA_STATE, GDNA_STATE],
         unspliced=[10.0, 20.0],
+        gdna_unspliced=[10.0, 0.0],
+        rna_unspliced=[0.0, 20.0],
         loci=[_multi_locus(0, 0, 100), _multi_locus(1, 100, 200)],
     )
 
@@ -179,8 +183,10 @@ def test_geometry_split_region_allocates_proportionally() -> None:
 def test_global_minus_local_is_componentwise_nonnegative() -> None:
     result = _compute(
         regions=[(0, 100), (100, 200), (200, 300)],
-        p_states=[GDNA_STATE, RNA_STATE, INTERIOR_STATE],
+        p_states=[GDNA_STATE, GDNA_STATE, INTERIOR_STATE],
         unspliced=[10.0, 20.0, 40.0],
+        gdna_unspliced=[10.0, 0.0, 20.0],
+        rna_unspliced=[0.0, 20.0, 20.0],
         loci=[_multi_locus(0, 0, 100), _multi_locus(1, 100, 200), _multi_locus(2, 200, 300)],
     )
 
@@ -190,8 +196,10 @@ def test_global_minus_local_is_componentwise_nonnegative() -> None:
 def test_confident_locus_ignores_global_pool() -> None:
     result = _compute(
         regions=[(0, 100), (100, 200)],
-        p_states=[RNA_STATE, GDNA_STATE],
+        p_states=[GDNA_STATE, GDNA_STATE],
         unspliced=[10.0, 20.0],
+        gdna_unspliced=[0.0, 20.0],
+        rna_unspliced=[10.0, 0.0],
         loci=[_multi_locus(0, 0, 100), _multi_locus(1, 100, 200)],
     )
 
@@ -200,7 +208,7 @@ def test_confident_locus_ignores_global_pool() -> None:
     np.testing.assert_allclose(result.alpha_rna_add[0], 10.0)
 
 
-def test_ambiguous_locus_adopts_global_pool_direction() -> None:
+def test_ambiguous_locus_uses_local_soft_gate_without_global_fallback() -> None:
     result = _compute(
         regions=[(0, 100), (100, 200)],
         p_states=[UNIFORM_STATE, GDNA_STATE],
@@ -208,21 +216,24 @@ def test_ambiguous_locus_adopts_global_pool_direction() -> None:
         loci=[_multi_locus(0, 0, 100), _multi_locus(1, 100, 200)],
     )
 
-    assert result.locus_weight[0] == pytest.approx(0.0)
-    np.testing.assert_allclose(result.alpha_gdna_add[0], 5.0)
-    np.testing.assert_allclose(result.alpha_rna_add[0], 0.0)
+    assert result.locus_weight[0] == pytest.approx(0.5)
+    assert result.shrink_weight[0] == pytest.approx(0.0)
+    np.testing.assert_allclose(result.alpha_gdna_add[0], 2.5)
+    np.testing.assert_allclose(result.alpha_rna_add[0], 2.5)
 
 
 def test_cap_rescales_to_locus_unspliced_and_preserves_direction() -> None:
     result = _compute(
         regions=[(0, 100), (100, 200), (200, 300)],
-        p_states=[UNIFORM_STATE, GDNA_STATE, RNA_STATE],
-        unspliced=[10.0, 100.0, 100.0],
+        p_states=[UNIFORM_STATE, GDNA_STATE, GDNA_STATE],
+        unspliced=[10_000.0, 100.0, 100.0],
+        gdna_unspliced=[5_000.0, 100.0, 0.0],
+        rna_unspliced=[5_000.0, 0.0, 100.0],
         loci=[_multi_locus(0, 0, 100), _multi_locus(1, 100, 200), _multi_locus(2, 200, 300)],
     )
 
-    assert result.ess_final[0] == pytest.approx(10.0)
-    np.testing.assert_allclose([result.alpha_gdna_add[0], result.alpha_rna_add[0]], [5.0, 5.0])
+    assert result.ess_final[0] == pytest.approx(MAX_ESS)
+    np.testing.assert_allclose([result.alpha_gdna_add[0], result.alpha_rna_add[0]], [1500.0, 1500.0])
     assert int(result.flags[0] & PRIOR_ESS_CAPPED) != 0
 
 
@@ -257,14 +268,18 @@ def test_locus_order_shuffle_preserves_id_indexed_outputs() -> None:
     loci = [_multi_locus(0, 0, 100), _multi_locus(1, 100, 200)]
     forward = _compute(
         regions=[(0, 100), (100, 200)],
-        p_states=[GDNA_STATE, RNA_STATE],
+        p_states=[GDNA_STATE, GDNA_STATE],
         unspliced=[10.0, 20.0],
+        gdna_unspliced=[10.0, 0.0],
+        rna_unspliced=[0.0, 20.0],
         loci=loci,
     )
     shuffled = _compute(
         regions=[(0, 100), (100, 200)],
-        p_states=[GDNA_STATE, RNA_STATE],
+        p_states=[GDNA_STATE, GDNA_STATE],
         unspliced=[10.0, 20.0],
+        gdna_unspliced=[10.0, 0.0],
+        rna_unspliced=[0.0, 20.0],
         loci=list(reversed(loci)),
     )
 
@@ -395,4 +410,106 @@ def test_invalid_rna_call_bias_is_rejected() -> None:
             unspliced=[100.0],
             loci=[_multi_locus(0, 0, 100)],
             rna_call_bias=1.0,
+        )
+
+
+# ---------------------------------------------------------------------------
+# PR 03 Test 17 — locus_ess shrink ramp attenuates prior in low-evidence loci.
+# ---------------------------------------------------------------------------
+
+
+def test_17_locus_ess_shrink_attenuates_low_evidence_locus() -> None:
+    """Two loci with identical mass but different locus_ess get different priors.
+
+    The shrink ramp ``(ess - floor) / (ceil - floor)`` clipped to ``[0, 1]``
+    multiplies the additive concentration. A locus at ``ess == floor`` collapses
+    to zero prior; a locus at ``ess == ceil`` keeps full strength.
+    """
+    regions = [(0, 100), (100, 200)]
+    p_states = [INTERIOR_STATE, INTERIOR_STATE]
+    unspliced = [80.0, 80.0]
+    loci = [_multi_locus(0, 0, 100), _multi_locus(1, 100, 200)]
+
+    base = _compute(
+        regions=regions, p_states=p_states, unspliced=unspliced, loci=loci
+    )
+    # Baseline: identical priors on both loci.
+    assert base.alpha_gdna_add[0] == pytest.approx(base.alpha_gdna_add[1])
+    assert base.alpha_rna_add[0] == pytest.approx(base.alpha_rna_add[1])
+
+    # Now supply asymmetric locus_ess: locus 0 has full evidence (ess=ceil),
+    # locus 1 has minimum evidence (ess=floor).
+    region_arrays = _region_arrays(regions)
+    shrunk = compute_adaptive_prior(
+        region_arrays=region_arrays,
+        multi_loci=loci,
+        p_states=np.asarray(p_states, dtype=np.float64),
+        unspliced_total=np.asarray(unspliced, dtype=np.float64),
+        gdna_unspliced_mean=np.asarray(
+            _legacy_test_mass_split(p_states, unspliced)[0], dtype=np.float64
+        ),
+        rna_unspliced_mean=np.asarray(
+            _legacy_test_mass_split(p_states, unspliced)[1], dtype=np.float64
+        ),
+        has_gdna_candidate=np.array([True, True], dtype=bool),
+        locus_ess=np.array([50.0, 1.0], dtype=np.float64),
+        locus_ess_floor=1.0,
+        locus_ess_ceil=50.0,
+    )
+
+    # Locus 0 (ess=ceil) keeps full strength.
+    assert shrunk.alpha_gdna_add[0] == pytest.approx(base.alpha_gdna_add[0])
+    assert shrunk.alpha_rna_add[0] == pytest.approx(base.alpha_rna_add[0])
+    # Locus 1 (ess=floor) collapses to zero.
+    assert shrunk.alpha_gdna_add[1] == pytest.approx(0.0)
+    assert shrunk.alpha_rna_add[1] == pytest.approx(0.0)
+    # ess_final tracks the post-shrink concentration.
+    assert shrunk.ess_final[1] == pytest.approx(0.0)
+
+
+def test_17b_locus_ess_validation() -> None:
+    """``locus_ess`` shape/value validation."""
+    regions = [(0, 100)]
+    p_states = [INTERIOR_STATE]
+    unspliced = [10.0]
+    loci = [_multi_locus(0, 0, 100)]
+    gdna, rna = _legacy_test_mass_split(p_states, unspliced)
+    region_arrays = _region_arrays(regions)
+
+    with pytest.raises(ValueError, match="locus_ess must have shape"):
+        compute_adaptive_prior(
+            region_arrays=region_arrays,
+            multi_loci=loci,
+            p_states=np.asarray(p_states, dtype=np.float64),
+            unspliced_total=np.asarray(unspliced, dtype=np.float64),
+            gdna_unspliced_mean=np.asarray(gdna, dtype=np.float64),
+            rna_unspliced_mean=np.asarray(rna, dtype=np.float64),
+            has_gdna_candidate=np.array([True], dtype=bool),
+            locus_ess=np.array([1.0, 2.0], dtype=np.float64),
+        )
+
+    with pytest.raises(ValueError, match="locus_ess must be finite"):
+        compute_adaptive_prior(
+            region_arrays=region_arrays,
+            multi_loci=loci,
+            p_states=np.asarray(p_states, dtype=np.float64),
+            unspliced_total=np.asarray(unspliced, dtype=np.float64),
+            gdna_unspliced_mean=np.asarray(gdna, dtype=np.float64),
+            rna_unspliced_mean=np.asarray(rna, dtype=np.float64),
+            has_gdna_candidate=np.array([True], dtype=bool),
+            locus_ess=np.array([-1.0], dtype=np.float64),
+        )
+
+    with pytest.raises(ValueError, match="locus_ess_floor"):
+        compute_adaptive_prior(
+            region_arrays=region_arrays,
+            multi_loci=loci,
+            p_states=np.asarray(p_states, dtype=np.float64),
+            unspliced_total=np.asarray(unspliced, dtype=np.float64),
+            gdna_unspliced_mean=np.asarray(gdna, dtype=np.float64),
+            rna_unspliced_mean=np.asarray(rna, dtype=np.float64),
+            has_gdna_candidate=np.array([True], dtype=bool),
+            locus_ess=np.array([1.0], dtype=np.float64),
+            locus_ess_floor=10.0,
+            locus_ess_ceil=5.0,
         )

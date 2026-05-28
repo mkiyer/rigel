@@ -50,6 +50,7 @@ class RegionArrays:
     end: np.ndarray  # int64, (R,)
     signature: np.ndarray  # uint8, (R,) \u2014 fine-region signature
     ts_class: np.ndarray  # int8,  (R,) \u2014 TS_NONE/TS_POS/TS_NEG/TS_AMBIG
+    region_size_bp: np.ndarray  # float64, (R,) - end - start in bp (PR 03)
     ref_offsets: np.ndarray  # int32, (n_refs + 1,)
     order: np.ndarray  # int64, (R,)
     n_refs: int
@@ -101,6 +102,7 @@ class RegionArrays:
             end=end,
             signature=signature,
             ts_class=ts_class,
+            region_size_bp=(end - start).astype(np.float64, copy=False),
             ref_offsets=ref_offsets,
             order=order,
             n_refs=n_refs,
@@ -118,6 +120,10 @@ class PayloadArrays:
 
     region_counts_sorted: np.ndarray  # float32[R, 12]
 
+    # Per-region physical fragment support, sorted by RegionArrays.order.
+    region_unspliced_support_sorted: np.ndarray  # uint64[R]
+    region_spliced_support_sorted: np.ndarray  # uint64[R]
+
     contained_unspliced_pos: np.ndarray  # float32[R]
     contained_unspliced_neg: np.ndarray  # float32[R]
     boundary_left_unspliced_pos: np.ndarray  # float32[R]
@@ -133,6 +139,8 @@ class PayloadArrays:
     ) -> "PayloadArrays":
         order = region_arrays.order
         rc = np.ascontiguousarray(payload.region_counts[order, :])
+        u_sup = np.ascontiguousarray(payload.region_unspliced_support[order])
+        s_sup = np.ascontiguousarray(payload.region_spliced_support[order])
 
         c_u_p = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
         c_u_n = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_NEG)
@@ -150,6 +158,8 @@ class PayloadArrays:
 
         return cls(
             region_counts_sorted=rc,
+            region_unspliced_support_sorted=u_sup,
+            region_spliced_support_sorted=s_sup,
             contained_unspliced_pos=contained_pos,
             contained_unspliced_neg=contained_neg,
             boundary_left_unspliced_pos=bl_pos,

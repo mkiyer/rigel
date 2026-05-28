@@ -202,6 +202,9 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
     signature_mass[pack_signature()] = float(n_observed)
     fl_pool_mass = np.zeros((N_FL_POOLS, FL_HIST_N_BINS), dtype=np.float64)
     fl_pool_mass[FL_POOL_INTERGENIC_CONTAINED, 200] = float(n_observed)
+    region_unspliced_support = np.zeros(n_regions, dtype=np.uint64)
+    region_unspliced_support[0] = np.uint64(n_observed)
+    region_spliced_support = np.zeros(n_regions, dtype=np.uint64)
     return {
         "n_regions": n_regions,
         "region_counts": region_counts,
@@ -209,6 +212,8 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
         "signature_mass": signature_mass,
         "fl_pool_mass": fl_pool_mass,
         "fl_pool_total": fl_pool_mass.sum(axis=1),
+        "region_unspliced_support": region_unspliced_support,
+        "region_spliced_support": region_spliced_support,
         "n_observed": n_observed,
         "n_excluded_multimap": 0,
         "n_excluded_chimera": 0,
@@ -263,3 +268,151 @@ class TestPayloadValidation:
     def test_none_payload_raises_helpful_error(self):
         with pytest.raises(ValueError, match="scanner returned None"):
             CalibrationScanPayload.from_scan_dict(None)
+
+    def test_support_dtype_mismatch_raises(self):
+        payload_dict = _good_payload_dict()
+        payload_dict["region_unspliced_support"] = payload_dict[
+            "region_unspliced_support"
+        ].astype(np.int64)
+
+        with pytest.raises(ValueError, match="region_unspliced_support"):
+            CalibrationScanPayload.from_scan_dict(payload_dict)
+
+    def test_support_shape_mismatch_raises(self):
+        payload_dict = _good_payload_dict(n_regions=3)
+        payload_dict["region_spliced_support"] = np.zeros(2, dtype=np.uint64)
+
+        with pytest.raises(ValueError, match="region_spliced_support"):
+            CalibrationScanPayload.from_scan_dict(payload_dict)
+
+    def test_support_exceeds_n_observed_raises(self):
+        payload_dict = _good_payload_dict(n_observed=10)
+        payload_dict["region_unspliced_support"][0] = np.uint64(11)
+
+        with pytest.raises(ValueError, match="region_unspliced_support contains a value"):
+            CalibrationScanPayload.from_scan_dict(payload_dict)
+
+    def test_positive_mass_zero_support_raises(self):
+        # Region 1 has positive unspliced fractional mass but zero support;
+        # the per-region invariant must trip.
+        payload_dict = _good_payload_dict(n_observed=10)
+        contained_pos = channel_index(
+            COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS
+        )
+        payload_dict["region_counts"][1, contained_pos] = np.float32(1.0)
+        payload_dict["channel_mass"] = payload_dict["region_counts"].sum(
+            axis=0, dtype=np.float64
+        )
+        payload_dict["signature_mass"][pack_signature()] += 1.0
+        # Bump n_observed/total so the cap and mass-balance checks still pass.
+        payload_dict["n_observed"] = 11
+
+        with pytest.raises(
+            ValueError,
+            match="region_unspliced_support == 0",
+        ):
+            CalibrationScanPayload.from_scan_dict(payload_dict, n_total=11)
+
+
+class TestSupportPayload:
+    """Per-region physical support contracts on the live scan payload."""
+
+    def test_shapes_and_dtype(self, calib_scenario):
+        _, result = calib_scenario
+        scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
+        _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+            str(result.bam_path), result.index, scan_cfg,
+        )
+        n_regions = len(result.index.region_df)
+        assert payload.region_unspliced_support.shape == (n_regions,)
+        assert payload.region_spliced_support.shape == (n_regions,)
+        assert payload.region_unspliced_support.dtype == np.uint64
+        assert payload.region_spliced_support.dtype == np.uint64
+
+    def test_support_bounded_by_n_observed(self, calib_scenario):
+        _, result = calib_scenario
+        scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
+        _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+            str(result.bam_path), result.index, scan_cfg,
+        )
+        if payload.region_unspliced_support.size:
+            assert int(payload.region_unspliced_support.max()) <= payload.n_observed
+        if payload.region_spliced_support.size:
+            assert int(payload.region_spliced_support.max()) <= payload.n_observed
+
+    def test_positive_mass_implies_positive_support(self, calib_scenario):
+        """Region-level invariant: any region with positive unspliced (resp.
+        spliced) fractional mass must have positive unspliced (resp.
+        spliced) support, and vice versa. This is checked inside
+        ``from_scan_dict`` already; here we assert the live scan satisfies
+        it without raising."""
+        _, result = calib_scenario
+        scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
+        _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+            str(result.bam_path), result.index, scan_cfg,
+        )
+        from rigel.calibration.signature import (
+            CHANNEL_STRAND_NEG,
+            COMPARTMENT_BOUNDARY_LEFT,
+            COMPARTMENT_BOUNDARY_RIGHT,
+            SPLICE_SPLICED,
+        )
+
+        comps = (
+            COMPARTMENT_CONTAINED,
+            COMPARTMENT_BOUNDARY_LEFT,
+            COMPARTMENT_BOUNDARY_RIGHT,
+        )
+        strands = (CHANNEL_STRAND_POS, CHANNEL_STRAND_NEG)
+
+        def _splice_mass(splice: int) -> np.ndarray:
+            cols = [channel_index(c, splice, s) for c in comps for s in strands]
+            return payload.region_counts[:, cols].sum(axis=1, dtype=np.float64)
+
+        u_mass = _splice_mass(SPLICE_UNSPLICED)
+        s_mass = _splice_mass(SPLICE_SPLICED)
+        assert np.all((payload.region_unspliced_support > 0) | (u_mass == 0.0))
+        assert np.all((payload.region_spliced_support > 0) | (s_mass == 0.0))
+        assert np.all((payload.region_unspliced_support == 0) | (u_mass > 0.0))
+        assert np.all((payload.region_spliced_support == 0) | (s_mass > 0.0))
+
+    def test_worker_merge_preserves_support(self, calib_scenario):
+        _, result = calib_scenario
+        payloads = []
+        for n_threads in (1, 4):
+            scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=n_threads)
+            _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+                str(result.bam_path), result.index, scan_cfg,
+            )
+            payloads.append(payload)
+        one, four = payloads
+        np.testing.assert_array_equal(
+            one.region_unspliced_support, four.region_unspliced_support
+        )
+        np.testing.assert_array_equal(
+            one.region_spliced_support, four.region_spliced_support
+        )
+
+    def test_sorted_view_round_trips(self, calib_scenario):
+        """PayloadArrays reorders support vectors by RegionArrays.order;
+        the inverse permutation must recover the native payload vector."""
+        from rigel.calibration._arrays import PayloadArrays, RegionArrays
+
+        _, result = calib_scenario
+        scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
+        _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+            str(result.bam_path), result.index, scan_cfg,
+        )
+        region_arrays = RegionArrays.from_region_df(
+            result.index.region_df, result.index.ref_name_to_id
+        )
+        payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
+        inv = np.argsort(region_arrays.order)
+        np.testing.assert_array_equal(
+            payload_arrays.region_unspliced_support_sorted[inv],
+            payload.region_unspliced_support,
+        )
+        np.testing.assert_array_equal(
+            payload_arrays.region_spliced_support_sorted[inv],
+            payload.region_spliced_support,
+        )

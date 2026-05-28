@@ -151,6 +151,9 @@ def calibrate(
         strand_channels=calibration_strand_channels,
         max_calibration_passes=int(max_calibration_passes),
         confidence=_INTERNAL_GDNA_DENSITY_CI,
+        # PR 03: feed integer unspliced counts to enable RegionUnsplicedMass /
+        # BackgroundDensity construction inside the calibration loop.
+        unspliced_counts=ledger.unspliced_support,
     )
 
     return build_calibration_result(
