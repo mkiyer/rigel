@@ -258,16 +258,19 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     total_rna = total_mrna + total_nrna
     total_all = total_rna + total_gdna + stats.n_intergenic
 
-    def _locus_series_summary(column: str) -> dict[str, float]:
-        if column not in loci_df.columns or loci_df.empty:
+    def _df_series_summary(df, column: str) -> dict[str, float]:
+        if column not in df.columns or df.empty:
             return {"min": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
-        values = loci_df[column]
+        values = df[column]
         return {
             "min": round(float(values.min()), 6),
             "median": round(float(values.median()), 6),
             "p95": round(float(values.quantile(0.95)), 6),
             "max": round(float(values.max()), 6),
         }
+
+    def _locus_series_summary(column: str) -> dict[str, float]:
+        return _df_series_summary(loci_df, column)
 
     from . import __version__
 
@@ -351,8 +354,16 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "calibration": cal_dict,
         "prior_policy": prior_policy,
         "gdna_eff_len": {
-            "value": _locus_series_summary("gdna_eff_len"),
+            "em": _locus_series_summary("gdna_eff_len_em"),
+            "unweighted": _locus_series_summary("gdna_eff_len_unweighted"),
             "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
+        },
+        "em_exposure": {
+            "transcript_factor": _df_series_summary(quant_df, "em_exposure_factor"),
+            "gdna_factor": _locus_series_summary("gdna_exposure_factor"),
+            "gdna_eff_len_adjustment_ratio": _locus_series_summary(
+                "gdna_eff_len_adjustment_ratio"
+            ),
         },
         "fragment_length": fl_dict,
         "quantification": {

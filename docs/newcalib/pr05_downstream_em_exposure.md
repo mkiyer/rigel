@@ -1,5 +1,8 @@
 # PR 05 - Downstream EM Exposure Normalization
 
+> Superseded by [pr05_impl_plan_v3.md](pr05_impl_plan_v3.md). This note captures the older
+> gDNA-only denominator-normalization proposal and should not be used for implementation.
+
 ## Goal
 
 Fix the downstream sign and aggregation of exposure factors in locus EM.

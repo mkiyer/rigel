@@ -41,7 +41,13 @@ from .latent_states import (
     build_state_tensor,
     normalize_state_log_tensor,
 )
-from .prior import PriorTable, assemble_priors
+from .prior import (
+    ComponentExposureTable,
+    EMInputTable,
+    PriorTable,
+    assemble_em_inputs,
+    assemble_priors,
+)
 from .strand_balance import StrandBalanceEstimate, estimate_strand_balance
 from .strand_deconv import (
     CompartmentStrandCounts,
@@ -96,6 +102,9 @@ __all__ = [
     "build_compartment_strand_counts",
     "deconvolve_compartments_by_strand",
     "PriorTable",
+    "ComponentExposureTable",
+    "EMInputTable",
+    "assemble_em_inputs",
     "assemble_priors",
     "StrandBalanceEstimate",
     "estimate_strand_balance",

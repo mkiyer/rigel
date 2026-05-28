@@ -16,6 +16,7 @@ from rigel.calibration.calibration_iteration import (
     RegionCalibration,
     RegionUnsplicedMass,
 )
+from rigel.calibration.exposure import RegionExposure
 from rigel.calibration.prior import PriorTable, assemble_priors, enable_gdna_for_multilocus
 from rigel.config import EMConfig
 from rigel.frag_length_model import FragmentLengthModel
@@ -26,6 +27,26 @@ def _delta_fl(length: int, *, max_size: int = 512) -> FragmentLengthModel:
     counts = np.zeros(max_size + 1, dtype=np.float64)
     counts[length] = 10_000.0
     return FragmentLengthModel.from_counts(counts, max_size=max_size)
+
+
+def _region_exposure() -> RegionExposure:
+    omega = np.ones(1, dtype=np.float64)
+    return RegionExposure(
+        omega=omega,
+        log_omega=np.log(omega),
+        raw_ratio=omega,
+        log_raw_ratio=np.log(omega),
+        shrink_weight=np.zeros(1, dtype=np.float64),
+        v_obs=np.ones(1, dtype=np.float64),
+        lambda_global=np.ones(1, dtype=np.float64),
+        rho0=0.01,
+        tau2=0.0,
+        tau2_hat=0.0,
+        support_count=np.ones(1, dtype=np.uint64),
+        tau2_pool_size=0,
+        tau2_method="bootstrap_neutral",
+        flags=np.zeros(1, dtype=np.uint16),
+    )
 
 
 def _index() -> SimpleNamespace:
@@ -89,7 +110,7 @@ def _region_calibration(
                 flags=np.zeros(1, dtype=np.uint16),
             )
         ),
-        A_r=np.ones(1, dtype=np.float32),
+        region_exposure=_region_exposure(),
         kappa_d=None,
         n_passes=1,
         converged=True,

@@ -116,10 +116,15 @@ def test_wire_calibration_regions_drops_unknown_refs(caplog):
 
 def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
     calls: list[str] = []
+
+    def set_em_effective_lengths(_effective_lengths, _exposure_factor):
+        calls.append("set_em_effective_lengths")
+
     estimator = SimpleNamespace(
         locus_id_per_transcript=np.full(1, -1, dtype=np.int32),
         locus_results=[],
         _gdna_em_total=0.0,
+        set_em_effective_lengths=set_em_effective_lengths,
     )
     em_data = SimpleNamespace(n_units=1)
     locus = MultiLocus(
@@ -132,9 +137,11 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
     prior_table = SimpleNamespace(
         alpha_gdna_add=np.array([1.0], dtype=np.float64),
         alpha_rna_add=np.array([2.0], dtype=np.float64),
-        gdna_eff_len=np.array([100.0], dtype=np.float64),
+        gdna_eff_len_em=np.array([100.0], dtype=np.float64),
         enable_gdna=np.array([1], dtype=np.uint8),
         gdna_eff_len_unweighted=np.array([100.0], dtype=np.float64),
+        gdna_exposure_factor=np.array([1.0], dtype=np.float64),
+        gdna_eff_len_adjustment_ratio=np.array([1.0], dtype=np.float64),
         prior_unspliced_total=np.array([3.0], dtype=np.float64),
         prior_locus_weight=np.array([1.0], dtype=np.float64),
         prior_shrink_weight=np.array([0.0], dtype=np.float64),
@@ -149,7 +156,13 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
         n_regions_touched=np.array([1], dtype=np.int32),
         multi_locus_region_mass=np.array([0.0], dtype=np.float64),
         partial_coverage_region_mass=np.array([0.0], dtype=np.float64),
-        gdna_em_exposure_weight=np.array([1.0], dtype=np.float64),
+    )
+    em_inputs = SimpleNamespace(
+        prior=prior_table,
+        exposure=SimpleNamespace(
+            transcript_eff_len_em=np.array([100.0], dtype=np.float64),
+            transcript_exposure_factor=np.array([1.0], dtype=np.float64),
+        ),
     )
     calibration = CalibrationResult(
         fl_models=SimpleNamespace(
@@ -170,7 +183,10 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "_setup_geometry_and_estimator",
-        lambda *_args, **_kwargs: (object(), estimator),
+        lambda *_args, **_kwargs: (
+            SimpleNamespace(effective_lengths=np.array([100.0], dtype=np.float64)),
+            estimator,
+        ),
     )
 
     def fake_score(*_args, **_kwargs):
@@ -187,9 +203,9 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
         calls.append("build_multi_loci")
         return [locus]
 
-    def fake_assemble_priors(*_args, **_kwargs):
-        calls.append("assemble_priors")
-        return prior_table
+    def fake_assemble_em_inputs(*_args, **_kwargs):
+        calls.append("assemble_em_inputs")
+        return em_inputs
 
     def fake_partition_and_free(*_args, **_kwargs):
         calls.append("partition")
@@ -199,7 +215,7 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
         calls.append("run_em")
 
     monkeypatch.setattr(locus_mod, "build_multi_loci", fake_build_multi_loci)
-    monkeypatch.setattr(prior_mod, "assemble_priors", fake_assemble_priors)
+    monkeypatch.setattr(prior_mod, "assemble_em_inputs", fake_assemble_em_inputs)
     monkeypatch.setattr(partition_mod, "partition_and_free", fake_partition_and_free)
     monkeypatch.setattr(pipeline, "_run_locus_em_partitioned", fake_run_em)
 
@@ -213,7 +229,14 @@ def test_quant_from_buffer_wires_scoring_priors_partition_and_em(monkeypatch):
         calibration_payload=SimpleNamespace(),
     )
 
-    assert calls == ["score", "build_multi_loci", "assemble_priors", "partition", "run_em"]
+    assert calls == [
+        "score",
+        "build_multi_loci",
+        "assemble_em_inputs",
+        "set_em_effective_lengths",
+        "partition",
+        "run_em",
+    ]
     assert estimator.locus_id_per_transcript[0] == 0
     assert out_calibration.prior_table is prior_table
     assert out_calibration.n_multi_loci == 1

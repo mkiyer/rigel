@@ -124,7 +124,7 @@ def test_calibrate_populates_region_calibration_and_diagnostics():
     np.testing.assert_allclose(rc.p_states.sum(axis=1), 1.0, rtol=1e-6, atol=1e-6)
     assert rc.mu_gdna.shape == (7,)
     assert rc.upper_gdna.shape == (7,)
-    assert rc.A_r.shape == (7,)
+    assert rc.region_exposure.omega.shape == (7,)
     assert np.all(rc.upper_gdna >= rc.mu_gdna)
     assert result.strand_channels is not None
     assert result.strand_channels.contained_mean.shape == (7,)
@@ -158,7 +158,8 @@ def test_calibrate_summary_has_region_calibration_blocks():
     assert region_cal["n_regions"] == 7
     assert region_cal["n_passes"] >= 1
     assert "state_mass" in region_cal
-    assert "A_r" in region_cal
+    assert "region_exposure" in region_cal
+    assert "A_r" not in region_cal
     assert "p_unexpressed" in region_cal
     assert "p_expressed" in region_cal
     assert "p_captured" not in region_cal

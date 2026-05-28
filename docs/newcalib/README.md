@@ -42,9 +42,9 @@ The current production path already has useful pieces, but the contracts are mix
   the boundary-to-contained gDNA projection used when strand information is absent or weak.
 - `src/rigel/native/calibration/accumulator.cpp` accumulates fractional per-region mass, but it
   does not currently expose the number of physical fragment observations supporting each region.
-- `src/rigel/calibration/prior.py` currently multiplies gDNA effective length by the regional
-  exposure average. Because native EM subtracts `log(gdna_eff_len)`, this has the wrong sign for
-  enriched regions.
+- `src/rigel/calibration/prior.py` now assembles adaptive prior mass and component exposure inputs
+  separately. Exposure is projected onto transcript and gDNA EM effective lengths after the prior
+  mass split.
 
 ## New Production Contracts
 
@@ -112,28 +112,29 @@ not parallel capture-specific modes.
 
 ### 4. Downstream EM Usage
 
-Exposure increases sampling visibility. In the initial production model, exposure is represented as
-a denominator adjustment only:
+Exposure is sequence visibility, not a gDNA-only property. Hybrid-capture baits and other regional
+sampling distortions do not know whether the molecule is genomic or transcriptomic, so downstream EM
+must apply the same regional exposure surface to every overlapping component.
+
+PR 05 represents exposure as component-level opportunity scaling:
 
 ```text
-gdna_eff_len_em = gdna_eff_len_unweighted / omega_locus
+component_exposure_factor = bp_weighted_average(omega_r over component blocks)
+eff_len_em = max(unweighted_eff_len * component_exposure_factor, 1.0)
 ```
 
-Do not multiply the effective length by exposure. Native EM applies `-log(gdna_eff_len)` to the gDNA
-component, so multiplying by `omega_locus` penalizes exactly the high-exposure regions where gDNA
-should be most competitive.
-
-Do not stack a denominator adjustment and a per-fragment `+log(omega)` adjustment in the same PR. If
-we later want a fully normalized local-exposure likelihood, that must replace the denominator-only
-model with a tested equivalent contract.
+This applies to annotated transcripts, synthetic nRNA transcripts, and locus gDNA components. The
+adaptive prior mass split remains exposure-free and continues to use the calibrated gDNA/RNA mass
+contract. If a future PR moves exposure into fragment-local likelihoods, it must replace this
+component-denominator contract with a tested equivalent formulation rather than stacking both models.
 
 ## PR Sequence
 
 1. [PR 01 - Two-State Calibration Teardown](pr01_v2.md)
 2. [PR 02 - Native Observation Support and Boundary Payload](pr02_native_support_and_boundaries.md)
 3. [PR 03 - Regional gDNA Mass Contract](pr03_region_gdna_mass.md)
-4. [PR 04 - EB Exposure Factor Model](pr04_eb_exposure_model.md)
-5. [PR 05 - Downstream EM Exposure Normalization](pr05_downstream_em_exposure.md)
+4. [PR 04 - EB Exposure Factor Model](pr04_impl_plan_v2.md)
+5. [PR 05 - Fair Component Exposure for EM](pr05_impl_plan_v3.md)
 6. [PR 06 - Validation and Benchmarks](pr06_validation_and_benchmarks.md)
 
 The sequence is intentionally staged so every PR has a local acceptance test. The native support
@@ -156,7 +157,7 @@ final behavior until `omega_r` is produced by the new calibration path.
 - Four-state latent constants and all capture-state posterior fields.
 - `build_logbf_capture` and capture-specific density log Bayes factors.
 - `p_captured`, `gamma_r`, and `capture_enrichment_target` from production outputs.
-- Effective-length multiplication by exposure.
+- gDNA-only exposure weighting or `gdna_eff_len / omega` denominator adjustments.
 - Python-side transitional boundary construction once the native boundary payload is available.
 
 ## Acceptance Shape
@@ -168,5 +169,5 @@ A successful rebuild should show:
   regions can fall below 1.0.
 - Low-support regions: raw ratios are visibly shrunk toward 1.0.
 - High-support regions: raw ratios largely survive shrinkage.
-- Locus EM: enriched gDNA regions are no longer suppressed by inflated effective length.
+- Locus EM: regional exposure is applied fairly to every overlapping RNA and gDNA component.
 - No reliance on gene-level constructs inside calibration, priors, locus construction, scoring, or EM.

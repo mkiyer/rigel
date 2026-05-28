@@ -20,6 +20,7 @@ from rigel.calibration.calibration_iteration import (
     RegionCalibration,
     RegionUnsplicedMass,
 )
+from rigel.calibration.exposure import RegionExposure
 from rigel.calibration.latent_states import N_STATES, STATE_IS_EXPRESSED
 from rigel.calibration.prior import assemble_priors, enable_gdna_for_multilocus
 from rigel.calibration.signature import pack_signature
@@ -50,6 +51,27 @@ def _delta_fl(length: int = 50) -> FragmentLengthModel:
     counts = np.zeros(128, dtype=np.float64)
     counts[length] = 1000.0
     return FragmentLengthModel.from_counts(counts, max_size=127)
+
+
+def _region_exposure(omega: list[float]) -> RegionExposure:
+    values = np.asarray(omega, dtype=np.float64)
+    raw = np.maximum(values, np.finfo(np.float64).tiny)
+    return RegionExposure(
+        omega=values,
+        log_omega=np.log(values),
+        raw_ratio=raw,
+        log_raw_ratio=np.log(raw),
+        shrink_weight=np.ones(values.shape, dtype=np.float64),
+        v_obs=np.ones(values.shape, dtype=np.float64),
+        lambda_global=np.ones(values.shape, dtype=np.float64),
+        rho0=0.01,
+        tau2=1.0,
+        tau2_hat=1.0,
+        support_count=np.full(values.shape, 1000, dtype=np.uint64),
+        tau2_pool_size=int(values.size),
+        tau2_method="moment",
+        flags=np.zeros(values.shape, dtype=np.uint16),
+    )
 
 
 def _region_calibration(
@@ -103,7 +125,7 @@ def _region_calibration(
         rna_lower=region_unspliced_mass.rna_mass.astype(np.float32),
         region_unspliced_mass=region_unspliced_mass,
         background_density=background_density,
-        A_r=np.asarray(exposure, dtype=np.float32),
+        region_exposure=_region_exposure(exposure),
         kappa_d=None,
         n_passes=1,
         converged=True,
@@ -247,10 +269,13 @@ def test_assemble_priors_applies_region_exposure_to_gdna_eff_len() -> None:
         calibration=calibration,
     )
 
-    np.testing.assert_allclose(prior_table.gdna_em_exposure_weight, [0.25, 0.5, 2.0])
+    np.testing.assert_allclose(prior_table.gdna_exposure_factor, [0.25, 0.5, 2.0])
     np.testing.assert_allclose(
-        prior_table.gdna_eff_len,
-        np.maximum(prior_table.gdna_eff_len_unweighted * prior_table.gdna_em_exposure_weight, 1.0),
+        prior_table.gdna_eff_len_em,
+        np.maximum(
+            prior_table.gdna_eff_len_unweighted * prior_table.gdna_exposure_factor,
+            1.0,
+        ),
     )
 
 

@@ -42,9 +42,11 @@ smallest benchmark set that can detect the known failure modes.
 
 ### Downstream EM
 
-- `gdna_eff_len_em = gdna_eff_len_unweighted / omega_locus`.
-- Native EM receives the adjusted denominator.
-- Enriched gDNA loci become more competitive, not less.
+- `eff_len_em = max(unweighted_eff_len * component_exposure_factor, 1.0)` for transcripts and
+  locus gDNA.
+- Native EM receives the adjusted transcript and gDNA denominators.
+- Uniform exposure scaling across RNA and gDNA preserves local posterior competition.
+- Non-uniform exposure shifts competition only through component-specific sequence visibility.
 
 ## Integration Tests
 
@@ -62,7 +64,7 @@ The capture cases should assert relative behavior rather than exact counts:
 
 - on-target `omega_r` above off-target `omega_r`,
 - high-support on-target regions shrink less than low-support on-target regions,
-- gDNA posterior increases after the denominator sign fix,
+- uniform component exposure does not change RNA/gDNA competition,
 - mRNA/nRNA siphoning does not worsen in the no-gDNA sentinel.
 
 ## Golden Output Strategy

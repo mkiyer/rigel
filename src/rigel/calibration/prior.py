@@ -9,7 +9,11 @@ import numpy as np
 
 from ..config import EMConfig
 from ._arrays import RegionArrays
-from ._exposure import bp_weighted_mean_exposure_over_blocks, gdna_eff_len_for_loci
+from ._exposure import (
+    MIN_EXPOSURE_FACTOR,
+    component_bp_weighted_exposure,
+    gdna_eff_len_for_loci,
+)
 from .adaptive_prior import (
     MAX_ESS,
     PRIOR_BIAS_APPLIED,
@@ -28,12 +32,37 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only.
 
 
 __all__ = [
+    "ComponentExposureTable",
+    "EMInputTable",
     "PriorTable",
+    "assemble_em_inputs",
     "assemble_priors",
+    "compute_component_exposure_table",
     "enable_gdna_for_multilocus",
 ]
 
 _INT64_MIN: int = -(2**63)
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentExposureTable:
+    """Per-component exposure factors and EM effective lengths."""
+
+    transcript_eff_len_unweighted: np.ndarray
+    transcript_exposure_factor: np.ndarray
+    transcript_eff_len_em: np.ndarray
+    gdna_eff_len_unweighted: np.ndarray
+    gdna_exposure_factor: np.ndarray
+    gdna_eff_len_em: np.ndarray
+    gdna_eff_len_adjustment_ratio: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class EMInputTable:
+    """All Python-side EM inputs derived from calibration."""
+
+    prior: "PriorTable"
+    exposure: ComponentExposureTable
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,9 +71,10 @@ class PriorTable:
 
     alpha_gdna_add: np.ndarray
     alpha_rna_add: np.ndarray
-    gdna_eff_len: np.ndarray
+    gdna_eff_len_em: np.ndarray
     gdna_eff_len_unweighted: np.ndarray
-    gdna_em_exposure_weight: np.ndarray
+    gdna_exposure_factor: np.ndarray
+    gdna_eff_len_adjustment_ratio: np.ndarray
     enable_gdna: np.ndarray
     prior_locus_weight: np.ndarray
     prior_shrink_weight: np.ndarray
@@ -109,8 +139,12 @@ class PriorTable:
             ),
             "flag_histogram": _prior_flag_histogram(self.prior_flags),
             "n_regions_touched": _summary_stats(self.n_regions_touched),
-            "gdna_eff_len": _summary_stats(self.gdna_eff_len),
-            "gdna_em_exposure_weight": _summary_stats(self.gdna_em_exposure_weight),
+            "gdna_eff_len_em": _summary_stats(self.gdna_eff_len_em),
+            "gdna_eff_len_unweighted": _summary_stats(self.gdna_eff_len_unweighted),
+            "gdna_exposure_factor": _summary_stats(self.gdna_exposure_factor),
+            "gdna_eff_len_adjustment_ratio": _summary_stats(
+                self.gdna_eff_len_adjustment_ratio
+            ),
             "multi_locus_region_mass": _summary_stats(self.multi_locus_region_mass),
             "partial_coverage_region_mass": _summary_stats(self.partial_coverage_region_mass),
             "unallocated_unspliced_count": float(self.unallocated_unspliced_count),
@@ -120,27 +154,32 @@ class PriorTable:
         }
 
 
-def assemble_priors(
+def assemble_em_inputs(
     *,
     multi_loci: list["MultiLocus"],
     em_data: "ScoredFragments",
     index: "TranscriptIndex",
     calibration: "CalibrationResult",
+    transcript_eff_len_unweighted: np.ndarray | None = None,
     em_config: EMConfig | None = None,
-) -> PriorTable:
-    """Assemble adaptive grouped priors, denominators, and native EM eligibility."""
+) -> EMInputTable:
+    """Assemble adaptive grouped priors, component exposure, and EM denominators."""
     if em_config is None:
         em_config = EMConfig()
     n_loci = len(multi_loci)
     if n_loci == 0:
-        return _empty_prior_table(float(em_config.rna_call_bias))
+        exposure = _empty_component_exposure_table(transcript_eff_len_unweighted)
+        return EMInputTable(
+            prior=_empty_prior_table(float(em_config.rna_call_bias)),
+            exposure=exposure,
+        )
     if index.region_df is None:
         raise RuntimeError(
-            "assemble_priors: index has no region table. Rebuild the index with current rigel."
+            "assemble_em_inputs: index has no region table. Rebuild the index with current rigel."
         )
     region_calibration = getattr(calibration, "region_calibration", None)
     if region_calibration is None:
-        raise ValueError("assemble_priors: calibration.region_calibration is required.")
+        raise ValueError("assemble_em_inputs: calibration.region_calibration is required.")
     region_unspliced_mass = region_calibration.region_unspliced_mass
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
@@ -170,36 +209,27 @@ def assemble_priors(
         max_ess=MAX_ESS,
     )
 
-    gdna_eff_len_unweighted = np.zeros(n_loci, dtype=np.float64)
-    gdna_eff_len = np.zeros(n_loci, dtype=np.float64)
-    gdna_em_exposure_weight = np.ones(n_loci, dtype=np.float64)
-    for locus in multi_loci:
-        locus_id = int(locus.multi_locus_id)
-        unweighted = gdna_eff_len_for_loci(
-            locus.loci,
-            index.ref_lengths,
-            calibration.fl_models.gdna,
-        )
-        exposure_weight = bp_weighted_mean_exposure_over_blocks(
-            blocks=[(loc.ref_id, loc.start, loc.end) for loc in locus.loci],
-            region_arrays=region_arrays,
-            exposure=region_calibration,
-        )
-        gdna_eff_len_unweighted[locus_id] = float(unweighted)
-        gdna_em_exposure_weight[locus_id] = float(exposure_weight)
-        gdna_eff_len[locus_id] = float(max(float(unweighted) * float(exposure_weight), 1.0))
+    exposure = compute_component_exposure_table(
+        multi_loci=multi_loci,
+        index=index,
+        region_arrays=region_arrays,
+        region_exposure=region_calibration.region_exposure,
+        gdna_fl=calibration.fl_models.gdna,
+        transcript_eff_len_unweighted=transcript_eff_len_unweighted,
+    )
 
     n_units_used_for_diagnostics = np.array(
         [_count_diagnostic_units(locus, em_data) for locus in multi_loci],
         dtype=np.int64,
     )
 
-    return PriorTable(
+    prior = PriorTable(
         alpha_gdna_add=adaptive.alpha_gdna_add,
         alpha_rna_add=adaptive.alpha_rna_add,
-        gdna_eff_len=gdna_eff_len,
-        gdna_eff_len_unweighted=gdna_eff_len_unweighted,
-        gdna_em_exposure_weight=gdna_em_exposure_weight,
+        gdna_eff_len_em=exposure.gdna_eff_len_em,
+        gdna_eff_len_unweighted=exposure.gdna_eff_len_unweighted,
+        gdna_exposure_factor=exposure.gdna_exposure_factor,
+        gdna_eff_len_adjustment_ratio=exposure.gdna_eff_len_adjustment_ratio,
         enable_gdna=has_gdna_candidate.astype(np.uint8),
         prior_locus_weight=adaptive.locus_weight,
         prior_shrink_weight=adaptive.shrink_weight,
@@ -222,6 +252,203 @@ def assemble_priors(
         unallocated_unspliced_count=float(adaptive.unallocated_unspliced),
         unallocated_weighted_unspliced_count=float(adaptive.unallocated_weighted_unspliced),
         rna_call_bias=float(em_config.rna_call_bias),
+    )
+    return EMInputTable(prior=prior, exposure=exposure)
+
+
+def assemble_priors(
+    *,
+    multi_loci: list["MultiLocus"],
+    em_data: "ScoredFragments",
+    index: "TranscriptIndex",
+    calibration: "CalibrationResult",
+    em_config: EMConfig | None = None,
+) -> PriorTable:
+    """Assemble adaptive grouped priors, denominators, and native EM eligibility."""
+    return assemble_em_inputs(
+        multi_loci=multi_loci,
+        em_data=em_data,
+        index=index,
+        calibration=calibration,
+        transcript_eff_len_unweighted=None,
+        em_config=em_config,
+    ).prior
+
+
+def compute_component_exposure_table(
+    *,
+    multi_loci: list["MultiLocus"],
+    index: "TranscriptIndex",
+    region_arrays: RegionArrays,
+    region_exposure,
+    gdna_fl,
+    transcript_eff_len_unweighted: np.ndarray | None = None,
+) -> ComponentExposureTable:
+    """Convert region exposure into transcript and gDNA EM effective lengths."""
+    n_loci = len(multi_loci)
+    omega = np.asarray(region_exposure.omega, dtype=np.float64)
+
+    gdna_ref_ids, gdna_starts, gdna_ends, gdna_component_ids = _gdna_blocks_from_loci(
+        multi_loci
+    )
+    gdna_weighted = component_bp_weighted_exposure(
+        block_ref_ids=gdna_ref_ids,
+        block_starts=gdna_starts,
+        block_ends=gdna_ends,
+        component_ids=gdna_component_ids,
+        n_components=n_loci,
+        region_arrays=region_arrays,
+        omega=omega,
+        strict_coverage=True,
+        min_exposure_factor=MIN_EXPOSURE_FACTOR,
+    )
+
+    gdna_eff_len_unweighted = np.zeros(n_loci, dtype=np.float64)
+    for locus in multi_loci:
+        locus_id = int(locus.multi_locus_id)
+        gdna_eff_len_unweighted[locus_id] = float(
+            gdna_eff_len_for_loci(
+                locus.loci,
+                index.ref_lengths,
+                gdna_fl,
+            )
+        )
+    gdna_exposure_factor = gdna_weighted.exposure_factor
+    gdna_eff_len_em = np.maximum(gdna_eff_len_unweighted * gdna_exposure_factor, 1.0)
+    gdna_eff_len_adjustment_ratio = np.divide(
+        gdna_eff_len_em,
+        gdna_eff_len_unweighted,
+        out=np.ones(n_loci, dtype=np.float64),
+        where=gdna_eff_len_unweighted > 0.0,
+    )
+
+    if transcript_eff_len_unweighted is None:
+        transcript_eff_len_unweighted_arr = np.zeros(0, dtype=np.float64)
+        transcript_exposure_factor = np.zeros(0, dtype=np.float64)
+        transcript_eff_len_em = np.zeros(0, dtype=np.float64)
+    else:
+        transcript_eff_len_unweighted_arr = np.asarray(
+            transcript_eff_len_unweighted,
+            dtype=np.float64,
+        )
+        if not np.all(np.isfinite(transcript_eff_len_unweighted_arr)):
+            raise ValueError("transcript effective lengths must be finite.")
+        tx_ref_ids, tx_starts, tx_ends, tx_component_ids = _transcript_blocks_from_index(
+            index,
+            int(transcript_eff_len_unweighted_arr.size),
+        )
+        transcript_weighted = component_bp_weighted_exposure(
+            block_ref_ids=tx_ref_ids,
+            block_starts=tx_starts,
+            block_ends=tx_ends,
+            component_ids=tx_component_ids,
+            n_components=int(transcript_eff_len_unweighted_arr.size),
+            region_arrays=region_arrays,
+            omega=omega,
+            strict_coverage=True,
+            min_exposure_factor=MIN_EXPOSURE_FACTOR,
+        )
+        transcript_exposure_factor = transcript_weighted.exposure_factor
+        transcript_eff_len_em = np.maximum(
+            transcript_eff_len_unweighted_arr * transcript_exposure_factor,
+            1.0,
+        )
+
+    return ComponentExposureTable(
+        transcript_eff_len_unweighted=transcript_eff_len_unweighted_arr,
+        transcript_exposure_factor=transcript_exposure_factor,
+        transcript_eff_len_em=transcript_eff_len_em,
+        gdna_eff_len_unweighted=gdna_eff_len_unweighted,
+        gdna_exposure_factor=gdna_exposure_factor,
+        gdna_eff_len_em=gdna_eff_len_em,
+        gdna_eff_len_adjustment_ratio=gdna_eff_len_adjustment_ratio,
+    )
+
+
+def _gdna_blocks_from_loci(
+    multi_loci: list["MultiLocus"],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ref_ids: list[int] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    component_ids: list[int] = []
+    for locus in multi_loci:
+        component_id = int(locus.multi_locus_id)
+        for sub_locus in locus.loci:
+            ref_ids.append(int(sub_locus.ref_id))
+            starts.append(int(sub_locus.start))
+            ends.append(int(sub_locus.end))
+            component_ids.append(component_id)
+    return (
+        np.asarray(ref_ids, dtype=np.int32),
+        np.asarray(starts, dtype=np.int64),
+        np.asarray(ends, dtype=np.int64),
+        np.asarray(component_ids, dtype=np.int64),
+    )
+
+
+def _transcript_blocks_from_index(
+    index: "TranscriptIndex",
+    n_transcripts: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if not hasattr(index, "build_exon_csr"):
+        raise RuntimeError(
+            "compute_component_exposure_table requires TranscriptIndex.build_exon_csr()."
+        )
+    offsets, starts, ends, _cumsum_before = index.build_exon_csr()
+    offsets = np.asarray(offsets, dtype=np.int64)
+    starts = np.asarray(starts, dtype=np.int64)
+    ends = np.asarray(ends, dtype=np.int64)
+    if offsets.size != n_transcripts + 1:
+        raise ValueError(
+            "transcript exon CSR offsets do not match transcript effective length count."
+        )
+    if not hasattr(index, "t_to_ref_arr"):
+        raise RuntimeError("compute_component_exposure_table requires index.t_to_ref_arr.")
+    t_ref_ids = np.asarray(index.t_to_ref_arr, dtype=np.int32)
+    if t_ref_ids.size != n_transcripts:
+        raise ValueError("index.t_to_ref_arr does not match transcript count.")
+
+    n_blocks = int(offsets[-1])
+    if n_blocks == 0:
+        return (
+            np.zeros(0, dtype=np.int32),
+            np.zeros(0, dtype=np.int64),
+            np.zeros(0, dtype=np.int64),
+            np.zeros(0, dtype=np.int64),
+        )
+    counts = np.diff(offsets)
+    component_ids = np.repeat(np.arange(n_transcripts, dtype=np.int64), counts)
+    ref_ids = t_ref_ids[component_ids]
+    return (
+        np.asarray(ref_ids, dtype=np.int32),
+        starts.astype(np.int64, copy=False),
+        ends.astype(np.int64, copy=False),
+        component_ids.astype(np.int64, copy=False),
+    )
+
+
+def _empty_component_exposure_table(
+    transcript_eff_len_unweighted: np.ndarray | None,
+) -> ComponentExposureTable:
+    if transcript_eff_len_unweighted is None:
+        transcript_eff_len_unweighted_arr = np.zeros(0, dtype=np.float64)
+    else:
+        transcript_eff_len_unweighted_arr = np.asarray(
+            transcript_eff_len_unweighted,
+            dtype=np.float64,
+        )
+    return ComponentExposureTable(
+        transcript_eff_len_unweighted=transcript_eff_len_unweighted_arr,
+        transcript_exposure_factor=np.ones(
+            transcript_eff_len_unweighted_arr.shape,
+            dtype=np.float64,
+        ),
+        transcript_eff_len_em=np.maximum(transcript_eff_len_unweighted_arr, 1.0),
+        gdna_eff_len_unweighted=np.zeros(0, dtype=np.float64),
+        gdna_exposure_factor=np.zeros(0, dtype=np.float64),
+        gdna_eff_len_em=np.zeros(0, dtype=np.float64),
+        gdna_eff_len_adjustment_ratio=np.zeros(0, dtype=np.float64),
     )
 
 
@@ -254,9 +481,10 @@ def _empty_prior_table(rna_call_bias: float = 0.5) -> PriorTable:
     return PriorTable(
         alpha_gdna_add=np.zeros(0, dtype=np.float64),
         alpha_rna_add=np.zeros(0, dtype=np.float64),
-        gdna_eff_len=np.zeros(0, dtype=np.float64),
+        gdna_eff_len_em=np.zeros(0, dtype=np.float64),
         gdna_eff_len_unweighted=np.zeros(0, dtype=np.float64),
-        gdna_em_exposure_weight=np.zeros(0, dtype=np.float64),
+        gdna_exposure_factor=np.zeros(0, dtype=np.float64),
+        gdna_eff_len_adjustment_ratio=np.zeros(0, dtype=np.float64),
         enable_gdna=np.zeros(0, dtype=np.uint8),
         prior_locus_weight=np.zeros(0, dtype=np.float64),
         prior_shrink_weight=np.zeros(0, dtype=np.float64),

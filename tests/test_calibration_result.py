@@ -14,6 +14,7 @@ from rigel.calibration.background_model import BackgroundModel
 from rigel.calibration.boundary_model import BoundaryLocalPosterior
 from rigel.calibration.boundary_sweep import BoundarySweepResult
 from rigel.calibration.calibration_iteration import RegionCalibration
+from rigel.calibration.exposure import estimate_region_exposure
 from rigel.calibration.scan_payload import FL_HIST_N_BINS, CalibrationScanPayload
 from rigel.calibration.signature import N_CHANNELS, N_FL_POOLS, N_SIGNATURES
 from rigel.frag_length_model import FragmentLengthModels
@@ -102,23 +103,29 @@ def _region_calibration() -> RegionCalibration:
         RegionUnsplicedMass,
     )
 
+    region_unspliced_mass = RegionUnsplicedMass(
+        total_mass=np.zeros(1, dtype=np.float64),
+        gdna_mass=np.zeros(1, dtype=np.float64),
+        rna_mass=np.zeros(1, dtype=np.float64),
+        region_size_bp=np.full(1, 100.0, dtype=np.float64),
+        unspliced_counts=np.zeros(1, dtype=np.uint64),
+        method=np.full(1, METHOD_STRAND, dtype=np.uint8),
+        precision=np.zeros(1, dtype=np.float32),
+        flags=np.zeros(1, dtype=np.uint16),
+    )
+    background_density = BackgroundDensity.from_bootstrap(_background())
     return RegionCalibration(
         p_states=np.array([[1.0, 0.0]], dtype=np.float32),
         mu_gdna=np.zeros(1, dtype=np.float32),
         upper_gdna=np.zeros(1, dtype=np.float32),
         rna_lower=np.zeros(1, dtype=np.float32),
-        region_unspliced_mass=RegionUnsplicedMass(
-            total_mass=np.zeros(1, dtype=np.float64),
-            gdna_mass=np.zeros(1, dtype=np.float64),
-            rna_mass=np.zeros(1, dtype=np.float64),
-            region_size_bp=np.full(1, 100.0, dtype=np.float64),
-            unspliced_counts=np.zeros(1, dtype=np.uint64),
-            method=np.full(1, METHOD_STRAND, dtype=np.uint8),
-            precision=np.zeros(1, dtype=np.float32),
-            flags=np.zeros(1, dtype=np.uint16),
+        region_unspliced_mass=region_unspliced_mass,
+        background_density=background_density,
+        region_exposure=estimate_region_exposure(
+            region_unspliced_mass,
+            background_density,
+            np.array([1.0], dtype=np.float64),
         ),
-        background_density=BackgroundDensity.from_bootstrap(_background()),
-        A_r=np.ones(1, dtype=np.float32),
         kappa_d=None,
         n_passes=1,
         converged=True,
@@ -174,6 +181,8 @@ def test_to_summary_dict_is_json_serialisable() -> None:
 
     summary = result.to_summary_dict()
     assert summary["region_calibration"]["n_regions"] == 1
+    assert "region_exposure" in summary["region_calibration"]
+    assert "A_r" not in summary["region_calibration"]
     assert summary["background_model"]["n_regions"] == 1
     assert summary["boundary_local"]["n_regions"] == 1
     assert summary["boundary_sweep"]["n_regions"] == 1

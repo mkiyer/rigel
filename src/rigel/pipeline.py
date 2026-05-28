@@ -613,7 +613,7 @@ def _run_locus_em_partitioned(
     index: TranscriptIndex,
     alpha_gdna_add: np.ndarray,
     alpha_rna_add: np.ndarray,
-    gdna_eff_len: np.ndarray,
+    gdna_eff_len_em: np.ndarray,
     em_config: EMConfig,
     *,
     enable_gdna: np.ndarray | None = None,
@@ -634,7 +634,8 @@ def _run_locus_em_partitioned(
     n_regions_touched: np.ndarray | None = None,
     multi_locus_region_mass: np.ndarray | None = None,
     partial_coverage_region_mass: np.ndarray | None = None,
-    gdna_em_exposure_weight: np.ndarray | None = None,
+    gdna_exposure_factor: np.ndarray | None = None,
+    gdna_eff_len_adjustment_ratio: np.ndarray | None = None,
 ) -> None:
     """Run batch locus EM from partitioned data with incremental freeing."""
     t_to_g = index.t_to_g_arr
@@ -656,6 +657,8 @@ def _run_locus_em_partitioned(
         alpha_rna,
         gdna_leff,
         gdna_leff_unweighted=None,
+        gdna_factor=None,
+        gdna_adjustment_ratio=None,
         unspliced_total=None,
         locus_weight=None,
         shrink_weight=None,
@@ -671,7 +674,6 @@ def _run_locus_em_partitioned(
         n_regions_touched_value=None,
         multi_region_mass=None,
         partial_region_mass=None,
-        gdna_weight=None,
     ):
         gene_set = {
             int(t_to_g[int(t_idx)])
@@ -683,10 +685,15 @@ def _run_locus_em_partitioned(
             gdna_leff_unw_f = gdna_leff_f
         else:
             gdna_leff_unw_f = float(gdna_leff_unweighted)
-        weight_ratio = gdna_leff_f / gdna_leff_unw_f if gdna_leff_unw_f > 0.0 else 1.0
+        adjustment_ratio = (
+            gdna_leff_f / gdna_leff_unw_f if gdna_leff_unw_f > 0.0 else 1.0
+        )
         alpha_gdna_f = float(alpha_gdna)
         alpha_rna_f = float(alpha_rna)
-        gdna_weight_f = weight_ratio if gdna_weight is None else float(gdna_weight)
+        gdna_factor_f = adjustment_ratio if gdna_factor is None else float(gdna_factor)
+        gdna_adjustment_f = (
+            adjustment_ratio if gdna_adjustment_ratio is None else float(gdna_adjustment_ratio)
+        )
         return {
             "locus_id": locus.multi_locus_id,
             "locus_span_bp": locus.gdna_span,
@@ -725,11 +732,11 @@ def _run_locus_em_partitioned(
             "partial_coverage_region_mass": 0.0
             if partial_region_mass is None
             else float(partial_region_mass),
-            "gdna_eff_len": gdna_leff_f,
+            "gdna_eff_len_em": gdna_leff_f,
             "gdna_eff_len_per_bp": gdna_leff_f / max(float(locus.gdna_span), 1.0),
             "gdna_eff_len_unweighted": gdna_leff_unw_f,
-            "gdna_eff_len_weight_ratio": float(weight_ratio),
-            "gdna_em_exposure_weight": gdna_weight_f,
+            "gdna_exposure_factor": gdna_factor_f,
+            "gdna_eff_len_adjustment_ratio": gdna_adjustment_f,
         }
 
     def _call_batch_em(
@@ -797,7 +804,7 @@ def _run_locus_em_partitioned(
             [locus],
             np.array([alpha_gdna_add[lid]], dtype=np.float64),
             np.array([alpha_rna_add[lid]], dtype=np.float64),
-            np.array([gdna_eff_len[lid]], dtype=np.float64),
+            np.array([gdna_eff_len_em[lid]], dtype=np.float64),
             batch_enable_gdna=(
                 np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
             ),
@@ -820,9 +827,17 @@ def _run_locus_em_partitioned(
                 gdna=gdna_arr[0],
                 alpha_gdna=alpha_gdna_add[lid],
                 alpha_rna=alpha_rna_add[lid],
-                gdna_leff=gdna_eff_len[lid],
+                gdna_leff=gdna_eff_len_em[lid],
                 gdna_leff_unweighted=(
                     gdna_eff_len_unweighted[lid] if gdna_eff_len_unweighted is not None else None
+                ),
+                gdna_factor=(
+                    gdna_exposure_factor[lid] if gdna_exposure_factor is not None else None
+                ),
+                gdna_adjustment_ratio=(
+                    gdna_eff_len_adjustment_ratio[lid]
+                    if gdna_eff_len_adjustment_ratio is not None
+                    else None
                 ),
                 unspliced_total=(
                     prior_unspliced_total[lid] if prior_unspliced_total is not None else None
@@ -865,9 +880,6 @@ def _run_locus_em_partitioned(
                     if partial_coverage_region_mass is not None
                     else None
                 ),
-                gdna_weight=(
-                    gdna_em_exposure_weight[lid] if gdna_em_exposure_weight is not None else None
-                ),
             )
         )
         del part
@@ -894,7 +906,7 @@ def _run_locus_em_partitioned(
             dtype=np.float64,
         )
         normal_gdna_eff_len = np.array(
-            [gdna_eff_len[loc.multi_locus_id] for loc in normal_loci],
+            [gdna_eff_len_em[loc.multi_locus_id] for loc in normal_loci],
             dtype=np.float64,
         )
         em_result = _call_batch_em(
@@ -938,6 +950,14 @@ def _run_locus_em_partitioned(
                         if gdna_eff_len_unweighted is not None
                         else None
                     ),
+                    gdna_factor=(
+                        gdna_exposure_factor[lid] if gdna_exposure_factor is not None else None
+                    ),
+                    gdna_adjustment_ratio=(
+                        gdna_eff_len_adjustment_ratio[lid]
+                        if gdna_eff_len_adjustment_ratio is not None
+                        else None
+                    ),
                     unspliced_total=(
                         prior_unspliced_total[lid] if prior_unspliced_total is not None else None
                     ),
@@ -979,11 +999,6 @@ def _run_locus_em_partitioned(
                     partial_region_mass=(
                         partial_coverage_region_mass[lid]
                         if partial_coverage_region_mass is not None
-                        else None
-                    ),
-                    gdna_weight=(
-                        gdna_em_exposure_weight[lid]
-                        if gdna_em_exposure_weight is not None
                         else None
                     ),
                 )
@@ -1037,14 +1052,14 @@ def quant_from_buffer(
             "(rigel index --fasta ... --gtf ...). Older indexes are not supported."
         )
 
-    from .calibration.prior import assemble_priors
+    from .calibration.prior import assemble_em_inputs
     from .locus import build_multi_loci
     from .locus_partition import partition_and_free
 
     em_config = em_config or EMConfig()
     scoring_cfg = scoring or FragmentScoringConfig()
 
-    _geometry, estimator = _setup_geometry_and_estimator(
+    geometry, estimator = _setup_geometry_and_estimator(
         index,
         calibration.fl_models.rna_scoring,
         em_config,
@@ -1066,12 +1081,18 @@ def quant_from_buffer(
     multi_loci = build_multi_loci(em_data, index)
     _assign_locus_ids(estimator, multi_loci)
 
-    prior_table = assemble_priors(
+    em_inputs = assemble_em_inputs(
         multi_loci=multi_loci,
         em_data=em_data,
         index=index,
         calibration=calibration,
+        transcript_eff_len_unweighted=geometry.effective_lengths,
         em_config=em_config,
+    )
+    prior_table = em_inputs.prior
+    estimator.set_em_effective_lengths(
+        em_inputs.exposure.transcript_eff_len_em,
+        em_inputs.exposure.transcript_exposure_factor,
     )
 
     if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
@@ -1091,9 +1112,11 @@ def quant_from_buffer(
         index,
         alpha_gdna_add=prior_table.alpha_gdna_add,
         alpha_rna_add=prior_table.alpha_rna_add,
-        gdna_eff_len=prior_table.gdna_eff_len,
+        gdna_eff_len_em=prior_table.gdna_eff_len_em,
         enable_gdna=prior_table.enable_gdna,
         gdna_eff_len_unweighted=prior_table.gdna_eff_len_unweighted,
+        gdna_exposure_factor=prior_table.gdna_exposure_factor,
+        gdna_eff_len_adjustment_ratio=prior_table.gdna_eff_len_adjustment_ratio,
         prior_unspliced_total=prior_table.prior_unspliced_total,
         prior_locus_weight=prior_table.prior_locus_weight,
         prior_shrink_weight=prior_table.prior_shrink_weight,
@@ -1108,7 +1131,6 @@ def quant_from_buffer(
         n_regions_touched=prior_table.n_regions_touched,
         multi_locus_region_mass=prior_table.multi_locus_region_mass,
         partial_coverage_region_mass=prior_table.partial_coverage_region_mass,
-        gdna_em_exposure_weight=prior_table.gdna_em_exposure_weight,
         em_config=em_config,
         annotations=annotations,
         emit_locus_stats=emit_locus_stats,
@@ -1219,11 +1241,16 @@ def run_pipeline(
         rc_summary["n_passes"],
         rc_summary["converged"],
     )
+    exposure_summary = rc_summary["region_exposure"]
+    omega_summary = exposure_summary["omega"]
     logger.info(
-        "[CAL] A_r mean/p99/max=%.4g/%.4g/%.4g",
-        rc_summary["A_r"]["mean"],
-        rc_summary["A_r"]["p99"],
-        rc_summary["A_r"]["max"],
+        "[CAL] exposure omega mean/p99/max=%.4g/%.4g/%.4g tau2=%.4g pool=%d method=%s",
+        omega_summary["mean"],
+        omega_summary["p99"],
+        omega_summary["max"],
+        exposure_summary["tau2"],
+        exposure_summary["tau2_pool_size"],
+        exposure_summary["tau2_method"],
     )
 
     # -- Annotation table for second BAM pass (opt-in) --

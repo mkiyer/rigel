@@ -18,6 +18,7 @@ from .boundary_model import (
 )
 from .boundary_sweep import BoundarySweepResult, run_boundary_sweep
 from .density_observation import DensityObservation
+from .exposure import RegionExposure, estimate_region_exposure
 from .latent_states import (
     N_STATES,
     STATE_EXPRESSED,
@@ -255,7 +256,7 @@ class RegionCalibration:
     rna_lower: np.ndarray
     region_unspliced_mass: RegionUnsplicedMass
     background_density: BackgroundDensity
-    A_r: np.ndarray
+    region_exposure: RegionExposure
     kappa_d: float | None
     n_passes: int
     converged: bool
@@ -275,7 +276,7 @@ class RegionCalibration:
             raise ValueError("p_states rows must sum to 1 within tolerance.")
         object.__setattr__(self, "p_states", p_states)
 
-        for field_name in ("mu_gdna", "upper_gdna", "rna_lower", "A_r"):
+        for field_name in ("mu_gdna", "upper_gdna", "rna_lower"):
             values = _as_float32_vector(field_name, getattr(self, field_name), region_count)
             object.__setattr__(self, field_name, values)
 
@@ -302,10 +303,16 @@ class RegionCalibration:
                 "background_density must be a BackgroundDensity; "
                 f"got {type(self.background_density).__name__}."
             )
-
-        exposure_values = np.asarray(self.A_r, dtype=np.float32)
-        if not np.all(np.isfinite(exposure_values)) or np.any(exposure_values < 0.0):
-            raise ValueError("A_r must be finite and non-negative.")
+        if not isinstance(self.region_exposure, RegionExposure):
+            raise TypeError(
+                "region_exposure must be a RegionExposure; "
+                f"got {type(self.region_exposure).__name__}."
+            )
+        if self.region_exposure.omega.shape != (region_count,):
+            raise ValueError(
+                "region_exposure arrays must match p_states region count; "
+                f"got {self.region_exposure.omega.shape}, expected {(region_count,)}."
+            )
 
         flags = np.asarray(self.flags, dtype=np.uint16)
         if flags.shape != (region_count,):
@@ -344,7 +351,7 @@ class CalibrationStepResult:
     upper_gdna: np.ndarray
     rna_lower: np.ndarray
     region_unspliced_mass: RegionUnsplicedMass
-    A_r: np.ndarray
+    region_exposure: RegionExposure
     flags: np.ndarray
     local_posterior: BoundaryLocalPosterior
     sweep: BoundarySweepResult
@@ -833,6 +840,7 @@ def calibration_e_step(
     transfer_weight: np.ndarray | None = None,
     unspliced_counts: np.ndarray,
     background_density: BackgroundDensity,
+    previous_region_exposure: RegionExposure | None = None,
 ) -> CalibrationStepResult:
     """Run one two-state expression calibration E-step."""
     region_count = _validate_region_inputs(
@@ -917,7 +925,12 @@ def calibration_e_step(
         background_density=background_density,
     )
 
-    exposure = np.ones(region_count, dtype=np.float32)
+    region_exposure = estimate_region_exposure(
+        prior_mass,
+        background_density,
+        p_states[:, STATE_UNEXPRESSED].astype(np.float64),
+        previous=previous_region_exposure,
+    )
     flags = _derive_region_flags(p_states, local_posterior, strand_channels)
     sum_log_evidence = float(np.sum(logsumexp(log_tensor, axis=1), dtype=np.float64))
 
@@ -927,7 +940,7 @@ def calibration_e_step(
         upper_gdna=upper_gdna,
         rna_lower=rna_lower,
         region_unspliced_mass=prior_mass,
-        A_r=exposure,
+        region_exposure=region_exposure,
         flags=flags,
         local_posterior=local_posterior,
         sweep=sweep,
@@ -1057,6 +1070,7 @@ def run_calibration_iteration(
     # Bootstrap the BackgroundDensity from the incoming BackgroundModel and
     # refit it in lock-step with the BackgroundModel each pass.
     current_density: BackgroundDensity = BackgroundDensity.from_bootstrap(background)
+    previous_region_exposure: RegionExposure | None = None
     previous_p_states: np.ndarray | None = None
     previous_rho: float | None = None
     diagnostics: list[dict[str, object]] = []
@@ -1077,12 +1091,23 @@ def run_calibration_iteration(
             transfer_weight=transfer_weight,
             unspliced_counts=unspliced_counts,
             background_density=current_density,
+            previous_region_exposure=previous_region_exposure,
         )
         if previous_p_states is None:
             max_state_shift = float("inf")
         else:
             max_state_shift = float(np.max(np.abs(step.p_states - previous_p_states)))
         rho_shift = _relative_change(current_background.rho_off_mean, previous_rho)
+        if previous_region_exposure is None or previous_region_exposure.tau2_method not in {
+            "moment",
+            "moment_damped",
+        }:
+            exposure_tau2_shift = float("inf")
+        else:
+            exposure_tau2_shift = _relative_change(
+                step.region_exposure.tau2,
+                previous_region_exposure.tau2,
+            )
         converged = bool(
             previous_p_states is not None
             and max_state_shift < float(p_tol)
@@ -1096,6 +1121,11 @@ def run_calibration_iteration(
                 "relative_rho_shift": float(rho_shift),
                 "kappa_d": current_kappa,
                 "sum_log_evidence": float(step.sum_log_evidence),
+                "exposure_tau2": float(step.region_exposure.tau2),
+                "exposure_tau2_hat": float(step.region_exposure.tau2_hat),
+                "exposure_relative_tau2_shift": float(exposure_tau2_shift),
+                "exposure_tau2_method": str(step.region_exposure.tau2_method),
+                "exposure_tau2_pool_size": int(step.region_exposure.tau2_pool_size),
                 "converged": bool(converged),
                 "n_regions_expressed": int(np.count_nonzero(step.p_expressed > 0.5)),
                 "n_regions_unexpressed": int(np.count_nonzero(step.p_unexpressed > 0.5)),
@@ -1106,6 +1136,7 @@ def run_calibration_iteration(
             break
 
         previous_p_states = step.p_states.copy()
+        previous_region_exposure = step.region_exposure
         previous_rho = float(current_background.rho_off_mean)
         current_background, current_kappa = calibration_m_step(
             observation,
@@ -1131,7 +1162,7 @@ def run_calibration_iteration(
         rna_lower=last_step.rna_lower,
         region_unspliced_mass=last_step.region_unspliced_mass,
         background_density=current_density,
-        A_r=last_step.A_r,
+        region_exposure=last_step.region_exposure,
         kappa_d=current_kappa,
         n_passes=len(diagnostics),
         converged=bool(converged),

@@ -106,6 +106,38 @@ def test_gdna_effective_length_downweights_gdna_component():
     assert gdna_long[0] < gdna_short[0]
 
 
+def test_uniform_component_exposure_scaling_preserves_rna_gdna_competition():
+    n_units = 100
+    partition = _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0)
+
+    est_base = _estimator(1, mode="map")
+    _total_base, rna_base, gdna_base = est_base.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([1.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    est_scaled = _estimator(1, mode="map")
+    est_scaled.set_em_effective_lengths(
+        np.array([7.0], dtype=np.float64),
+        np.array([7.0], dtype=np.float64),
+    )
+    _total_scaled, rna_scaled, gdna_scaled = est_scaled.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([7.0], dtype=np.float64),
+        enable_gdna=np.array([1], dtype=np.uint8),
+    )
+
+    assert gdna_scaled[0] == pytest.approx(gdna_base[0], abs=1e-6)
+    assert rna_scaled[0] == pytest.approx(rna_base[0], abs=1e-6)
+
+
 def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
     n_units = 100
     partition = _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0)

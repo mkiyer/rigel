@@ -179,10 +179,11 @@ def _golden_exists(scenario_name):
 
 # Columns to compare with bit-exact precision
 _TRANSCRIPT_NUMERIC_COLS = [
-    "effective_length",
+    "effective_length", "em_effective_length", "em_exposure_factor",
     "count", "count_unambig", "count_em", "count_spliced",
     "nrna_parent_count",
-    "tpm", "tpm_total_rna", "posterior_mean",
+    "tpm", "tpm_total_rna", "tpm_em_exposure", "tpm_total_rna_em_exposure",
+    "posterior_mean",
 ]
 
 _GENE_NUMERIC_COLS = [
@@ -194,6 +195,8 @@ _GENE_NUMERIC_COLS = [
 _LOCI_NUMERIC_COLS = [
     "locus_span_bp", "n_em_fragments", "mrna", "nrna", "gdna", "total", "gdna_rate",
     "alpha_gdna_add", "alpha_rna_add", "prior_ess_final", "count_unambig",
+    "gdna_eff_len_em", "gdna_eff_len_per_bp", "gdna_eff_len_unweighted",
+    "gdna_exposure_factor", "gdna_eff_len_adjustment_ratio",
 ]
 
 

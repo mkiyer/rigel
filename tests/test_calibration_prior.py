@@ -16,6 +16,7 @@ from rigel.calibration.calibration_iteration import (
     RegionCalibration,
     RegionUnsplicedMass,
 )
+from rigel.calibration.exposure import RegionExposure
 from rigel.calibration.prior import assemble_priors, enable_gdna_for_multilocus
 from rigel.frag_length_model import FragmentLengthModel
 from rigel.locus import Locus, MultiLocus
@@ -25,6 +26,27 @@ def _delta_fl(length: int, *, max_size: int = 512) -> FragmentLengthModel:
     counts = np.zeros(max_size + 1, dtype=np.float64)
     counts[length] = 10_000.0
     return FragmentLengthModel.from_counts(counts, max_size=max_size)
+
+
+def _region_exposure(omega: np.ndarray) -> RegionExposure:
+    values = np.asarray(omega, dtype=np.float64)
+    raw = np.maximum(values, np.finfo(np.float64).tiny)
+    return RegionExposure(
+        omega=values,
+        log_omega=np.log(values),
+        raw_ratio=raw,
+        log_raw_ratio=np.log(raw),
+        shrink_weight=np.ones(values.shape, dtype=np.float64),
+        v_obs=np.ones(values.shape, dtype=np.float64),
+        lambda_global=np.ones(values.shape, dtype=np.float64),
+        rho0=0.01,
+        tau2=1.0,
+        tau2_hat=1.0,
+        support_count=np.full(values.shape, 1000, dtype=np.uint64),
+        tau2_pool_size=int(values.size),
+        tau2_method="moment",
+        flags=np.zeros(values.shape, dtype=np.uint16),
+    )
 
 
 def _index(region_rows: list[tuple[int, int]]) -> SimpleNamespace:
@@ -97,7 +119,7 @@ def _region_calibration(
                 flags=np.zeros(region_count, dtype=np.uint16),
             )
         ),
-        A_r=exposure_arr,
+        region_exposure=_region_exposure(exposure_arr),
         kappa_d=None,
         n_passes=1,
         converged=True,
@@ -267,11 +289,12 @@ def test_uniform_exposure_keeps_weighted_denominator_equal_to_unweighted() -> No
         calibration=_calibration(_region_calibration([10.0])),
     )
 
-    assert priors.gdna_eff_len[0] == pytest.approx(priors.gdna_eff_len_unweighted[0])
-    assert priors.gdna_em_exposure_weight[0] == pytest.approx(1.0)
+    assert priors.gdna_eff_len_em[0] == pytest.approx(priors.gdna_eff_len_unweighted[0])
+    assert priors.gdna_exposure_factor[0] == pytest.approx(1.0)
+    assert priors.gdna_eff_len_adjustment_ratio[0] == pytest.approx(1.0)
 
 
-def test_region_calibration_exposure_weights_denominator() -> None:
+def test_region_calibration_exposure_scales_gdna_em_denominator() -> None:
     index = _index([(0, 100)])
     locus = _ml(0, 0, 100, [0])
     em_data = _em_data(is_spliced=[False], gdna_log_liks=[-1.0])
@@ -283,7 +306,10 @@ def test_region_calibration_exposure_weights_denominator() -> None:
         calibration=_calibration(_region_calibration([10.0], exposure=[2.5])),
     )
 
-    assert priors.gdna_eff_len[0] == pytest.approx(
-        priors.gdna_eff_len_unweighted[0] * 2.5
+    assert priors.gdna_exposure_factor[0] == pytest.approx(2.5)
+    assert priors.gdna_eff_len_em[0] == pytest.approx(
+        max(priors.gdna_eff_len_unweighted[0] * 2.5, 1.0)
     )
-    assert priors.gdna_em_exposure_weight[0] == pytest.approx(2.5)
+    assert priors.gdna_eff_len_adjustment_ratio[0] == pytest.approx(
+        priors.gdna_eff_len_em[0] / priors.gdna_eff_len_unweighted[0]
+    )

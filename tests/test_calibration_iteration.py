@@ -22,7 +22,6 @@ from rigel.calibration.latent_states import (
     STATE_UNEXPRESSED,
 )
 from rigel.calibration.signature import pack_signature
-from rigel.calibration.strand_deconv import RegionGdnaChannelEstimate
 
 
 def _region_arrays() -> RegionArrays:
@@ -145,7 +144,8 @@ def test_calibration_e_step_filters_expression_archetypes() -> None:
     np.testing.assert_allclose(result.mu_gdna, np.full(4, 10.0, dtype=np.float32))
     assert np.all(result.mu_gdna >= 0.0)
     assert np.all(result.upper_gdna >= result.mu_gdna)
-    np.testing.assert_allclose(result.A_r, np.ones(4, dtype=np.float32))
+    np.testing.assert_allclose(result.region_exposure.omega, np.ones(4, dtype=np.float64))
+    assert result.region_exposure.tau2_method == "bootstrap_neutral"
     assert (result.flags[0] & FLAG_BOUNDARY_SPARSE) != 0
 
 
@@ -167,6 +167,7 @@ def test_calibration_iteration_converges_with_fixed_scalar_parameters() -> None:
     assert calibration.n_passes == 2
     assert len(calibration.pass_diagnostics) == calibration.n_passes
     assert calibration.pass_diagnostics[-1]["converged"] is True
+    assert "exposure_tau2" in calibration.pass_diagnostics[-1]
     np.testing.assert_allclose(calibration.p_states.sum(axis=1), 1.0, rtol=1.0e-6, atol=1.0e-6)
     dominant = np.argmax(calibration.p_states, axis=1).tolist()
     assert dominant == [
@@ -176,6 +177,12 @@ def test_calibration_iteration_converges_with_fixed_scalar_parameters() -> None:
         STATE_EXPRESSED,
     ]
     assert np.all(calibration.upper_gdna >= calibration.mu_gdna)
-    np.testing.assert_allclose(calibration.A_r, np.ones(4, dtype=np.float32))
+    assert calibration.region_exposure.omega.shape == (4,)
+    assert calibration.region_exposure.tau2_method in {
+        "bootstrap_neutral",
+        "no_pool_neutral",
+        "moment",
+        "moment_damped",
+    }
 
 

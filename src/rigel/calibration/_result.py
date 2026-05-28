@@ -34,9 +34,9 @@ class CalibrationResult:
     """Calibration handoff produced before locus-level EM.
 
     The production calibration contract is now :class:`RegionCalibration`.
-    Legacy density/fusion/exposure fields are intentionally absent; downstream
-    prior assembly consumes ``region_calibration.mu_gdna``, ``upper_gdna``, and
-    interim uniform ``A_r`` directly.
+    Legacy density/fusion fields are intentionally absent. PR 04 exposes
+    ``region_calibration.region_exposure`` and PR 05 projects it onto
+    source-agnostic component EM effective lengths.
     """
 
     fl_models: FLModels
@@ -155,7 +155,7 @@ def _region_calibration_summary(region_calibration: "RegionCalibration") -> dict
         "mu_gdna": _summary_stats(region_calibration.mu_gdna),
         "upper_gdna": _summary_stats(region_calibration.upper_gdna),
         "rna_lower": _summary_stats(region_calibration.rna_lower),
-        "A_r": _summary_stats(region_calibration.A_r),
+        "region_exposure": _region_exposure_summary(region_calibration.region_exposure),
         "flag_histogram": _uint_histogram(region_calibration.flags),
         "pass_diagnostics": _json_safe(region_calibration.pass_diagnostics),
         "region_unspliced_mass": _region_unspliced_mass_summary(
@@ -200,6 +200,26 @@ def _background_density_summary(bg_density) -> dict[str, object]:
         "n_regions_in_pool": int(bg_density.n_regions_in_pool),
         "method_histogram": list(bg_density.method_histogram),
         "fit_status": str(bg_density.fit_status),
+    }
+
+
+def _region_exposure_summary(exposure) -> dict[str, object]:
+    return {
+        "n_regions": int(np.asarray(exposure.omega).size),
+        "rho0": float(exposure.rho0),
+        "tau2": float(exposure.tau2),
+        "tau2_hat": float(exposure.tau2_hat),
+        "tau2_method": str(exposure.tau2_method),
+        "tau2_pool_size": int(exposure.tau2_pool_size),
+        "omega": _summary_stats(exposure.omega),
+        "log_omega": _summary_stats(exposure.log_omega),
+        "raw_ratio": _summary_stats(exposure.raw_ratio),
+        "log_raw_ratio": _summary_stats(exposure.log_raw_ratio),
+        "shrink_weight": _summary_stats(exposure.shrink_weight),
+        "v_obs": _summary_stats(exposure.v_obs),
+        "lambda_global": _summary_stats(exposure.lambda_global),
+        "support_count": _summary_stats(np.asarray(exposure.support_count, dtype=np.float64)),
+        "flag_histogram": _uint_histogram(exposure.flags),
     }
 
 

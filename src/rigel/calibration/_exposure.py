@@ -3,21 +3,43 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
-from ..frag_length_model import FragmentLengthModel
 from ._arrays import RegionArrays
+from ..frag_length_model import FragmentLengthModel
+
+
+MIN_EXPOSURE_FACTOR: float = 1.0e-4
+REGION_EXPOSURE_ZERO_WIDTH: np.uint16 = np.uint16(0x1)
+REGION_EXPOSURE_UNCOVERED: np.uint16 = np.uint16(0x2)
+REGION_EXPOSURE_FLOORED: np.uint16 = np.uint16(0x4)
 
 
 __all__ = [
+    "MIN_EXPOSURE_FACTOR",
+    "REGION_EXPOSURE_FLOORED",
+    "REGION_EXPOSURE_UNCOVERED",
+    "REGION_EXPOSURE_ZERO_WIDTH",
+    "RegionWeightedExposure",
     "_merged_blocks",
-    "bp_weighted_mean_exposure_over_blocks",
+    "component_bp_weighted_exposure",
     "contained_exposure_clipped",
     "fractional_boundary_side_exposure",
     "gdna_eff_len_for_loci",
     "l_eff_contained",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class RegionWeightedExposure:
+    """Bp-weighted component exposure over calibration regions."""
+
+    exposure_factor: np.ndarray
+    covered_bp: np.ndarray
+    weighted_bp: np.ndarray
+    flags: np.ndarray
 
 
 def l_eff_contained(
@@ -60,70 +82,6 @@ def _merged_blocks(
     return merged
 
 
-def bp_weighted_mean_exposure_over_blocks(
-    blocks: Sequence[tuple[int, int, int]],
-    region_arrays: RegionArrays,
-    exposure,
-    *,
-    min_weight: float = 1.0e-4,
-) -> float:
-    """Return bp-weighted mean ``A_r`` over merged genomic blocks.
-
-    ``exposure`` is intentionally structural here: any object with an ``A_r``
-    attribute can provide regional exposure weights. Objects with
-    ``mode == "uniform"`` are treated as an explicit all-ones shortcut.
-
-    The returned weight is the bp-weighted mean of ``exposure.A_r`` over the
-    merged blocks, floored at ``min_weight``. It is **not** clipped above 1:
-    density-derived ``A_r`` may exceed 1, and clipping would silently
-    truncate high-exposure regions.
-    """
-    if min_weight < 0.0:
-        raise ValueError(
-            "bp_weighted_mean_exposure_over_blocks: "
-            f"min_weight must be >= 0, got {min_weight}."
-        )
-
-    merged = _merged_blocks(blocks)
-    if not merged:
-        return 1.0
-
-    raw_bp = float(sum(end - start for _, start, end in merged))
-    if raw_bp <= 0.0:
-        return 1.0
-    if getattr(exposure, "mode", None) == "uniform":
-        return 1.0
-
-    # A_r may exceed 1 when constructed from density evidence.
-    weights = np.asarray(getattr(exposure, "A_r"), dtype=np.float64)
-    if weights.shape != region_arrays.start.shape:
-        raise ValueError(
-            "bp_weighted_mean_exposure_over_blocks: exposure.A_r shape "
-            f"{weights.shape} != region shape {region_arrays.start.shape}."
-        )
-
-    weighted_bp = 0.0
-    for ref_id, block_start, block_end in merged:
-        if ref_id < 0 or ref_id >= region_arrays.n_refs:
-            continue
-        lo = int(region_arrays.ref_offsets[ref_id])
-        hi = int(region_arrays.ref_offsets[ref_id + 1])
-        starts = region_arrays.start[lo:hi]
-        ends = region_arrays.end[lo:hi]
-        local_lo = int(np.searchsorted(ends, block_start, side="right"))
-        local_hi = int(np.searchsorted(starts, block_end, side="left"))
-        for local_idx in range(local_lo, local_hi):
-            idx = lo + local_idx
-            overlap = min(int(region_arrays.end[idx]), block_end) - max(
-                int(region_arrays.start[idx]),
-                block_start,
-            )
-            if overlap > 0:
-                weighted_bp += float(overlap) * float(weights[idx])
-
-    return float(max(weighted_bp / raw_bp, min_weight))
-
-
 def _ref_length_for_locus(
     ref_lengths: Mapping[str | int, int] | Sequence[int],
     locus,
@@ -140,6 +98,155 @@ def _ref_length_for_locus(
     if ref_id < 0 or ref_id >= len(ref_lengths):
         raise KeyError(f"Reference id {ref_id} out of bounds for ref_lengths.")
     return int(ref_lengths[ref_id])
+
+
+def component_bp_weighted_exposure(
+    *,
+    block_ref_ids: np.ndarray,
+    block_starts: np.ndarray,
+    block_ends: np.ndarray,
+    component_ids: np.ndarray,
+    n_components: int,
+    region_arrays: RegionArrays,
+    omega: np.ndarray,
+    strict_coverage: bool = True,
+    min_exposure_factor: float = MIN_EXPOSURE_FACTOR,
+) -> RegionWeightedExposure:
+    """Compute bp-weighted exposure factors for arbitrary component blocks.
+
+    ``omega`` is supplied in region-table order. ``RegionArrays`` stores sorted
+    region geometry, so this helper reorders ``omega`` with ``region_arrays.order``
+    before sweeping overlaps.
+    """
+    n_comp = int(n_components)
+    if n_comp < 0:
+        raise ValueError(f"n_components must be non-negative, got {n_components!r}.")
+
+    min_factor = float(min_exposure_factor)
+    if not np.isfinite(min_factor) or min_factor <= 0.0:
+        raise ValueError(
+            f"min_exposure_factor must be finite and positive, got {min_exposure_factor!r}."
+        )
+
+    ref_ids = np.asarray(block_ref_ids, dtype=np.int32)
+    starts = np.asarray(block_starts, dtype=np.int64)
+    ends = np.asarray(block_ends, dtype=np.int64)
+    comp_ids = np.asarray(component_ids, dtype=np.int64)
+    if not (ref_ids.shape == starts.shape == ends.shape == comp_ids.shape):
+        raise ValueError("block_ref_ids, block_starts, block_ends, and component_ids must align.")
+
+    omega_arr = np.asarray(omega, dtype=np.float64)
+    if omega_arr.shape != region_arrays.start.shape:
+        raise ValueError(
+            f"omega shape {omega_arr.shape} does not match regions {region_arrays.start.shape}."
+        )
+    if not np.all(np.isfinite(omega_arr)) or np.any(omega_arr <= 0.0):
+        raise ValueError("omega must contain only finite positive values.")
+    omega_sorted_raw = omega_arr[region_arrays.order]
+    omega_floored = omega_sorted_raw < min_factor
+    omega_sorted = np.maximum(omega_sorted_raw, min_factor)
+
+    covered_bp = np.zeros(n_comp, dtype=np.float64)
+    weighted_bp = np.zeros(n_comp, dtype=np.float64)
+    total_bp = np.zeros(n_comp, dtype=np.float64)
+    uncovered_bp = np.zeros(n_comp, dtype=np.float64)
+    flags = np.zeros(n_comp, dtype=np.uint16)
+
+    if ref_ids.size == 0 or n_comp == 0:
+        return RegionWeightedExposure(
+            exposure_factor=np.ones(n_comp, dtype=np.float64),
+            covered_bp=covered_bp,
+            weighted_bp=weighted_bp,
+            flags=flags,
+        )
+
+    valid_width = ends - starts
+    if np.any(valid_width <= 0):
+        raise ValueError("component blocks must have end > start.")
+    if np.any(ref_ids < 0) or np.any(ref_ids >= int(region_arrays.n_refs)):
+        raise ValueError("component block ref ids are out of bounds for RegionArrays.")
+    if np.any(comp_ids < 0) or np.any(comp_ids >= n_comp):
+        raise ValueError("component_ids are out of bounds for n_components.")
+
+    order = np.lexsort((comp_ids, ends, starts, ref_ids))
+    ref_ids = ref_ids[order]
+    starts = starts[order]
+    ends = ends[order]
+    comp_ids = comp_ids[order]
+
+    for ref_id, block_start, block_end, comp_id in zip(ref_ids, starts, ends, comp_ids):
+        ref = int(ref_id)
+        comp = int(comp_id)
+        start = int(block_start)
+        end = int(block_end)
+        width = float(end - start)
+        total_bp[comp] += width
+
+        ref_lo = int(region_arrays.ref_offsets[ref])
+        ref_hi = int(region_arrays.ref_offsets[ref + 1])
+        if ref_hi <= ref_lo:
+            uncovered_bp[comp] += width
+            continue
+
+        local_starts = region_arrays.start[ref_lo:ref_hi]
+        local_ends = region_arrays.end[ref_lo:ref_hi]
+        first = ref_lo + int(np.searchsorted(local_ends, start, side="right"))
+        last = ref_lo + int(np.searchsorted(local_starts, end, side="left"))
+        if last <= first:
+            uncovered_bp[comp] += width
+            continue
+
+        region_starts = region_arrays.start[first:last]
+        region_ends = region_arrays.end[first:last]
+        overlap = np.minimum(region_ends, end) - np.maximum(region_starts, start)
+        overlap = np.maximum(overlap, 0)
+        covered = float(np.sum(overlap, dtype=np.float64))
+        if covered <= 0.0:
+            uncovered_bp[comp] += width
+            continue
+
+        covered_bp[comp] += covered
+        weighted_bp[comp] += float(
+            np.dot(overlap.astype(np.float64, copy=False), omega_sorted[first:last])
+        )
+        if np.any((overlap > 0) & omega_floored[first:last]):
+            flags[comp] |= REGION_EXPOSURE_FLOORED
+        if covered < width:
+            uncovered_bp[comp] += width - covered
+
+    uncovered = uncovered_bp > 1.0e-9
+    if np.any(uncovered):
+        flags[uncovered] |= REGION_EXPOSURE_UNCOVERED
+        if strict_coverage:
+            n_bad = int(np.count_nonzero(uncovered))
+            worst = float(np.max(uncovered_bp[uncovered]))
+            raise ValueError(
+                "component_bp_weighted_exposure: region table does not cover "
+                f"{n_bad} component(s); max uncovered bp={worst:.0f}."
+            )
+        covered_bp += uncovered_bp
+        weighted_bp += uncovered_bp
+
+    zero = total_bp <= 0.0
+    flags[zero] |= REGION_EXPOSURE_ZERO_WIDTH
+    factor = np.divide(
+        weighted_bp,
+        covered_bp,
+        out=np.ones(n_comp, dtype=np.float64),
+        where=covered_bp > 0.0,
+    )
+    floored = factor < min_factor
+    flags[floored] |= REGION_EXPOSURE_FLOORED
+    factor = np.maximum(factor, min_factor)
+    if not np.all(np.isfinite(factor)):
+        raise ValueError("component exposure factors must be finite after aggregation.")
+
+    return RegionWeightedExposure(
+        exposure_factor=factor.astype(np.float64, copy=False),
+        covered_bp=covered_bp.astype(np.float64, copy=False),
+        weighted_bp=weighted_bp.astype(np.float64, copy=False),
+        flags=flags,
+    )
 
 
 def gdna_eff_len_for_loci(

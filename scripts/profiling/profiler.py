@@ -68,7 +68,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from rigel.calibration import assemble_priors, calibrate
+from rigel.calibration import assemble_em_inputs, calibrate
 from rigel.config import (
     BamScanConfig,
     EMConfig,
@@ -738,19 +738,25 @@ def profile_stages(
                 for t_idx in locus.transcript_indices:
                     estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
 
-            # Assemble v6 PriorTable BEFORE partition_and_free
+            # Assemble v6 EM inputs BEFORE partition_and_free
             # (the latter nulls em_data arrays as it scatters).
             with Timer("compute_eb_gdna_priors") as t_gdna:
-                prior_table = assemble_priors(
+                em_inputs = assemble_em_inputs(
                     multi_loci=loci,
                     em_data=em_data,
                     index=index,
                     calibration=calibration_obj,
+                    transcript_eff_len_unweighted=geometry.effective_lengths,
                     em_config=em_config,
+                )
+                prior_table = em_inputs.prior
+                estimator.set_em_effective_lengths(
+                    em_inputs.exposure.transcript_eff_len_em,
+                    em_inputs.exposure.transcript_exposure_factor,
                 )
                 alpha_gdna_add = prior_table.alpha_gdna_add
                 alpha_rna_add = prior_table.alpha_rna_add
-                gdna_eff_len = prior_table.gdna_eff_len
+                gdna_eff_len = prior_table.gdna_eff_len_em
                 enable_gdna = prior_table.enable_gdna
             timings.compute_eb_gdna_priors = t_gdna.elapsed
 
