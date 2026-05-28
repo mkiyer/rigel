@@ -431,6 +431,7 @@ def build_region_unspliced_mass(
     local_posterior: BoundaryLocalPosterior,
     sweep: BoundarySweepResult,
     background_density: BackgroundDensity,
+    force_zero_gdna: bool = False,
 ) -> RegionUnsplicedMass:
     """Three-tier M_r hierarchy (Section 4 of PR03 plan v3).
 
@@ -466,6 +467,19 @@ def build_region_unspliced_mass(
     method = np.full(region_count, METHOD_BACKGROUND_FALLBACK, dtype=np.uint8)
     flags = np.zeros(region_count, dtype=np.uint16)
     tier1_gdna_raw = np.zeros(region_count, dtype=np.float64)
+
+    if bool(force_zero_gdna):
+        flags |= np.uint16(FLAG_M_IMPUTED_FROM_BACKGROUND)
+        return RegionUnsplicedMass(
+            total_mass=total,
+            gdna_mass=gdna,
+            rna_mass=total - gdna,
+            region_size_bp=region_bp,
+            unspliced_counts=counts,
+            method=method,
+            precision=precision,
+            flags=flags,
+        )
 
     # ---- Tier 1: strand deconvolution ----
     tier1_mask = np.zeros(region_count, dtype=bool)
@@ -841,6 +855,7 @@ def calibration_e_step(
     unspliced_counts: np.ndarray,
     background_density: BackgroundDensity,
     previous_region_exposure: RegionExposure | None = None,
+    force_zero_gdna_mass: bool = False,
 ) -> CalibrationStepResult:
     """Run one two-state expression calibration E-step."""
     region_count = _validate_region_inputs(
@@ -923,6 +938,7 @@ def calibration_e_step(
         local_posterior=local_posterior,
         sweep=sweep,
         background_density=background_density,
+        force_zero_gdna=force_zero_gdna_mass,
     )
 
     region_exposure = estimate_region_exposure(
@@ -1053,6 +1069,7 @@ def run_calibration_iteration(
     confidence: float = 0.95,
     background_boost: float = 1.0,
     unspliced_counts: np.ndarray,
+    force_zero_gdna_mass: bool = False,
 ) -> RegionCalibration:
     """Run the two-state expression calibration loop."""
     if int(max_calibration_passes) < 1:
@@ -1092,6 +1109,7 @@ def run_calibration_iteration(
             unspliced_counts=unspliced_counts,
             background_density=current_density,
             previous_region_exposure=previous_region_exposure,
+            force_zero_gdna_mass=force_zero_gdna_mass,
         )
         if previous_p_states is None:
             max_state_shift = float("inf")

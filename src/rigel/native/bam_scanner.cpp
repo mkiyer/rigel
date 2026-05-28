@@ -1730,6 +1730,18 @@ private:
             cal_dict["region_counts"] = vec_to_ndarray2d(
                 std::move(payload.region_counts), n_reg,
                 static_cast<size_t>(rigel::calibration::CalibrationPayload::kChannels));
+            cal_dict["region_contained_unspliced_support"] =
+                vec_to_ndarray(std::move(payload.region_contained_unspliced_support));
+            cal_dict["region_boundary_left_unspliced_support"] =
+                vec_to_ndarray(std::move(payload.region_boundary_left_unspliced_support));
+            cal_dict["region_boundary_right_unspliced_support"] =
+                vec_to_ndarray(std::move(payload.region_boundary_right_unspliced_support));
+            cal_dict["region_contained_spliced_support"] =
+                vec_to_ndarray(std::move(payload.region_contained_spliced_support));
+            cal_dict["region_boundary_left_spliced_support"] =
+                vec_to_ndarray(std::move(payload.region_boundary_left_spliced_support));
+            cal_dict["region_boundary_right_spliced_support"] =
+                vec_to_ndarray(std::move(payload.region_boundary_right_spliced_support));
             cal_dict["region_unspliced_support"] =
                 vec_to_ndarray(std::move(payload.region_unspliced_support));
             cal_dict["region_spliced_support"] =

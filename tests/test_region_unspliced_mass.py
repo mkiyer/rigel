@@ -329,7 +329,6 @@ def test_02_tier1_strand_uses_reliability_weighted_sum() -> None:
 
 def test_03_tier2_boundary_imputation() -> None:
     """Case 3: no strand contrast but boundary excess > 0 -> METHOD_BOUNDARY."""
-    n = 1
     mass = build_region_unspliced_mass(
         _obs([100.0]),
         region_size_bp=np.asarray([1000.0], dtype=np.float64),
@@ -385,6 +384,31 @@ def test_04b_tier3_background_clips_to_total_when_dense() -> None:
     assert mass.gdna_mass[0] == 5.0
     assert mass.rna_mass[0] == 0.0
     assert mass.flags[0] & FLAG_M_CLIPPED_TO_TOTAL
+    assert mass.flags[0] & FLAG_M_IMPUTED_FROM_BACKGROUND
+
+
+def test_04c_force_zero_gdna_overrides_strand_and_boundary_evidence() -> None:
+    """Deterministic-zero density evidence keeps prior mass at D=0."""
+    n = 1
+    mass = build_region_unspliced_mass(
+        _obs([100.0]),
+        region_size_bp=np.asarray([1000.0], dtype=np.float64),
+        unspliced_counts=np.asarray([50], dtype=np.uint64),
+        strand_channels=_strand(
+            n=n,
+            contained_mean=[80.0],
+            contained_reliability=[1.0],
+            contained_precision=[1.0],
+        ),
+        local_posterior=_local(alpha=[10.0], beta=[10.0]),
+        sweep=_sweep([75.0]),
+        background_density=_bd(rho0=0.05),
+        force_zero_gdna=True,
+    )
+    assert mass.method.tolist() == [METHOD_BACKGROUND_FALLBACK]
+    assert mass.gdna_mass[0] == 0.0
+    assert mass.rna_mass[0] == 100.0
+    assert mass.precision[0] == 0.0
     assert mass.flags[0] & FLAG_M_IMPUTED_FROM_BACKGROUND
 
 

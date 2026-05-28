@@ -202,9 +202,9 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
     signature_mass[pack_signature()] = float(n_observed)
     fl_pool_mass = np.zeros((N_FL_POOLS, FL_HIST_N_BINS), dtype=np.float64)
     fl_pool_mass[FL_POOL_INTERGENIC_CONTAINED, 200] = float(n_observed)
-    region_unspliced_support = np.zeros(n_regions, dtype=np.uint64)
-    region_unspliced_support[0] = np.uint64(n_observed)
-    region_spliced_support = np.zeros(n_regions, dtype=np.uint64)
+    region_unspliced_support = np.zeros(n_regions, dtype=np.uint32)
+    region_unspliced_support[0] = np.uint32(n_observed)
+    region_spliced_support = np.zeros(n_regions, dtype=np.uint32)
     return {
         "n_regions": n_regions,
         "region_counts": region_counts,
@@ -212,8 +212,17 @@ def _good_payload_dict(n_regions: int = 3, n_observed: int = 10) -> dict:
         "signature_mass": signature_mass,
         "fl_pool_mass": fl_pool_mass,
         "fl_pool_total": fl_pool_mass.sum(axis=1),
-        "region_unspliced_support": region_unspliced_support,
-        "region_spliced_support": region_spliced_support,
+        "region_contained_unspliced_support": region_unspliced_support,
+        "region_boundary_left_unspliced_support": np.zeros(n_regions, dtype=np.uint32),
+        "region_boundary_right_unspliced_support": np.zeros(n_regions, dtype=np.uint32),
+        "region_contained_spliced_support": region_spliced_support,
+        "region_boundary_left_spliced_support": np.zeros(n_regions, dtype=np.uint32),
+        "region_boundary_right_spliced_support": np.zeros(n_regions, dtype=np.uint32),
+        # Aggregate: one increment per (region, fragment, splice) — same
+        # value as contained_*_support for this synthetic payload where
+        # no fragment crosses a boundary.
+        "region_unspliced_support": region_unspliced_support.astype(np.uint64),
+        "region_spliced_support": region_spliced_support.astype(np.uint64),
         "n_observed": n_observed,
         "n_excluded_multimap": 0,
         "n_excluded_chimera": 0,
@@ -271,30 +280,33 @@ class TestPayloadValidation:
 
     def test_support_dtype_mismatch_raises(self):
         payload_dict = _good_payload_dict()
-        payload_dict["region_unspliced_support"] = payload_dict[
-            "region_unspliced_support"
+        payload_dict["region_contained_unspliced_support"] = payload_dict[
+            "region_contained_unspliced_support"
         ].astype(np.int64)
 
-        with pytest.raises(ValueError, match="region_unspliced_support"):
+        with pytest.raises(ValueError, match="region_contained_unspliced_support"):
             CalibrationScanPayload.from_scan_dict(payload_dict)
 
     def test_support_shape_mismatch_raises(self):
         payload_dict = _good_payload_dict(n_regions=3)
-        payload_dict["region_spliced_support"] = np.zeros(2, dtype=np.uint64)
+        payload_dict["region_contained_spliced_support"] = np.zeros(2, dtype=np.uint32)
 
-        with pytest.raises(ValueError, match="region_spliced_support"):
+        with pytest.raises(ValueError, match="region_contained_spliced_support"):
             CalibrationScanPayload.from_scan_dict(payload_dict)
 
     def test_support_exceeds_n_observed_raises(self):
         payload_dict = _good_payload_dict(n_observed=10)
-        payload_dict["region_unspliced_support"][0] = np.uint64(11)
+        payload_dict["region_contained_unspliced_support"][0] = np.uint32(11)
 
-        with pytest.raises(ValueError, match="region_unspliced_support contains a value"):
+        with pytest.raises(
+            ValueError,
+            match="region_contained_unspliced_support contains a value",
+        ):
             CalibrationScanPayload.from_scan_dict(payload_dict)
 
     def test_positive_mass_zero_support_raises(self):
-        # Region 1 has positive unspliced fractional mass but zero support;
-        # the per-region invariant must trip.
+        # Region 1 has positive contained-unspliced fractional mass but zero
+        # contained-unspliced support; the per-compartment invariant must trip.
         payload_dict = _good_payload_dict(n_observed=10)
         contained_pos = channel_index(
             COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS
@@ -309,13 +321,23 @@ class TestPayloadValidation:
 
         with pytest.raises(
             ValueError,
-            match="region_unspliced_support == 0",
+            match="region_contained_unspliced_support == 0",
         ):
             CalibrationScanPayload.from_scan_dict(payload_dict, n_total=11)
 
 
 class TestSupportPayload:
-    """Per-region physical support contracts on the live scan payload."""
+    """Per-region per-compartment physical support contracts on the live scan payload."""
+
+    _SUPPORT_FIELDS = (
+        "region_contained_unspliced_support",
+        "region_boundary_left_unspliced_support",
+        "region_boundary_right_unspliced_support",
+        "region_contained_spliced_support",
+        "region_boundary_left_spliced_support",
+        "region_boundary_right_spliced_support",
+    )
+    _AGG_FIELDS = ("region_unspliced_support", "region_spliced_support")
 
     def test_shapes_and_dtype(self, calib_scenario):
         _, result = calib_scenario
@@ -324,10 +346,14 @@ class TestSupportPayload:
             str(result.bam_path), result.index, scan_cfg,
         )
         n_regions = len(result.index.region_df)
-        assert payload.region_unspliced_support.shape == (n_regions,)
-        assert payload.region_spliced_support.shape == (n_regions,)
-        assert payload.region_unspliced_support.dtype == np.uint64
-        assert payload.region_spliced_support.dtype == np.uint64
+        for field in self._SUPPORT_FIELDS:
+            arr = getattr(payload, field)
+            assert arr.shape == (n_regions,), field
+            assert arr.dtype == np.uint32, field
+        for field in self._AGG_FIELDS:
+            arr = getattr(payload, field)
+            assert arr.shape == (n_regions,), field
+            assert arr.dtype == np.uint64, field
 
     def test_support_bounded_by_n_observed(self, calib_scenario):
         _, result = calib_scenario
@@ -335,17 +361,20 @@ class TestSupportPayload:
         _stats, _sm, _flm, _buf, payload = scan_and_buffer(
             str(result.bam_path), result.index, scan_cfg,
         )
-        if payload.region_unspliced_support.size:
-            assert int(payload.region_unspliced_support.max()) <= payload.n_observed
-        if payload.region_spliced_support.size:
-            assert int(payload.region_spliced_support.max()) <= payload.n_observed
+        for field in self._SUPPORT_FIELDS:
+            arr = getattr(payload, field)
+            if arr.size:
+                assert int(arr.max()) <= payload.n_observed, field
+        for field in self._AGG_FIELDS:
+            arr = getattr(payload, field)
+            if arr.size:
+                assert int(arr.max()) <= payload.n_observed, field
 
     def test_positive_mass_implies_positive_support(self, calib_scenario):
-        """Region-level invariant: any region with positive unspliced (resp.
-        spliced) fractional mass must have positive unspliced (resp.
-        spliced) support, and vice versa. This is checked inside
-        ``from_scan_dict`` already; here we assert the live scan satisfies
-        it without raising."""
+        """Per-(region, compartment, splice) invariant: positive fractional
+        mass in a (compartment, splice) cell iff positive support in the
+        matching support cell. Live-scan version of the static check in
+        ``CalibrationScanPayload.from_scan_dict``."""
         _, result = calib_scenario
         scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
         _stats, _sm, _flm, _buf, payload = scan_and_buffer(
@@ -358,23 +387,31 @@ class TestSupportPayload:
             SPLICE_SPLICED,
         )
 
-        comps = (
-            COMPARTMENT_CONTAINED,
-            COMPARTMENT_BOUNDARY_LEFT,
-            COMPARTMENT_BOUNDARY_RIGHT,
-        )
         strands = (CHANNEL_STRAND_POS, CHANNEL_STRAND_NEG)
 
-        def _splice_mass(splice: int) -> np.ndarray:
-            cols = [channel_index(c, splice, s) for c in comps for s in strands]
+        def _cell_mass(compartment: int, splice: int) -> np.ndarray:
+            cols = [channel_index(compartment, splice, s) for s in strands]
             return payload.region_counts[:, cols].sum(axis=1, dtype=np.float64)
 
-        u_mass = _splice_mass(SPLICE_UNSPLICED)
-        s_mass = _splice_mass(SPLICE_SPLICED)
-        assert np.all((payload.region_unspliced_support > 0) | (u_mass == 0.0))
-        assert np.all((payload.region_spliced_support > 0) | (s_mass == 0.0))
-        assert np.all((payload.region_unspliced_support == 0) | (u_mass > 0.0))
-        assert np.all((payload.region_spliced_support == 0) | (s_mass > 0.0))
+        cells = (
+            (COMPARTMENT_CONTAINED, SPLICE_UNSPLICED,
+             "region_contained_unspliced_support"),
+            (COMPARTMENT_BOUNDARY_LEFT, SPLICE_UNSPLICED,
+             "region_boundary_left_unspliced_support"),
+            (COMPARTMENT_BOUNDARY_RIGHT, SPLICE_UNSPLICED,
+             "region_boundary_right_unspliced_support"),
+            (COMPARTMENT_CONTAINED, SPLICE_SPLICED,
+             "region_contained_spliced_support"),
+            (COMPARTMENT_BOUNDARY_LEFT, SPLICE_SPLICED,
+             "region_boundary_left_spliced_support"),
+            (COMPARTMENT_BOUNDARY_RIGHT, SPLICE_SPLICED,
+             "region_boundary_right_spliced_support"),
+        )
+        for compartment, splice, field in cells:
+            mass = _cell_mass(compartment, splice)
+            support = getattr(payload, field)
+            assert np.all((support > 0) | (mass == 0.0)), field
+            assert np.all((support == 0) | (mass > 0.0)), field
 
     def test_worker_merge_preserves_support(self, calib_scenario):
         _, result = calib_scenario
@@ -386,16 +423,19 @@ class TestSupportPayload:
             )
             payloads.append(payload)
         one, four = payloads
-        np.testing.assert_array_equal(
-            one.region_unspliced_support, four.region_unspliced_support
-        )
-        np.testing.assert_array_equal(
-            one.region_spliced_support, four.region_spliced_support
-        )
+        for field in self._SUPPORT_FIELDS:
+            np.testing.assert_array_equal(
+                getattr(one, field), getattr(four, field), err_msg=field,
+            )
+        for field in self._AGG_FIELDS:
+            np.testing.assert_array_equal(
+                getattr(one, field), getattr(four, field), err_msg=field,
+            )
 
     def test_sorted_view_round_trips(self, calib_scenario):
-        """PayloadArrays reorders support vectors by RegionArrays.order;
-        the inverse permutation must recover the native payload vector."""
+        """PayloadArrays reorders the per-compartment support vectors by
+        ``RegionArrays.order``; the inverse permutation must recover the
+        native payload vector for each of the six fields."""
         from rigel.calibration._arrays import PayloadArrays, RegionArrays
 
         _, result = calib_scenario
@@ -408,11 +448,46 @@ class TestSupportPayload:
         )
         payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
         inv = np.argsort(region_arrays.order)
-        np.testing.assert_array_equal(
-            payload_arrays.region_unspliced_support_sorted[inv],
-            payload.region_unspliced_support,
+        for field in self._SUPPORT_FIELDS:
+            sorted_arr = getattr(payload_arrays, f"{field}_sorted")
+            np.testing.assert_array_equal(
+                sorted_arr[inv], getattr(payload, field), err_msg=field,
+            )
+        for field in self._AGG_FIELDS:
+            sorted_arr = getattr(payload_arrays, f"{field}_sorted")
+            np.testing.assert_array_equal(
+                sorted_arr[inv], getattr(payload, field), err_msg=field,
+            )
+
+    def test_compartment_sum_bounds_aggregate(self, calib_scenario):
+        """Per-region invariant for spanning-fragment double counting:
+
+            aggregate <= contained + left + right <= 2 * aggregate
+
+        The lower bound: the aggregate counts each unique (region,
+        fragment) once; the per-compartment sum counts the same fragment
+        in 1 or 2 compartment cells. The upper bound: a fragment hits at
+        most two compartments of a region (the only way to score in two
+        is to fully span, hitting left AND right). The difference
+        (sum - aggregate) is exactly the count of fragments fully
+        spanning each region per splice class.
+        """
+        _, result = calib_scenario
+        scan_cfg = BamScanConfig(sj_strand_tag="auto", total_threads=1)
+        _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+            str(result.bam_path), result.index, scan_cfg,
         )
-        np.testing.assert_array_equal(
-            payload_arrays.region_spliced_support_sorted[inv],
-            payload.region_spliced_support,
+        u_sum = (
+            payload.region_contained_unspliced_support.astype(np.uint64)
+            + payload.region_boundary_left_unspliced_support.astype(np.uint64)
+            + payload.region_boundary_right_unspliced_support.astype(np.uint64)
         )
+        s_sum = (
+            payload.region_contained_spliced_support.astype(np.uint64)
+            + payload.region_boundary_left_spliced_support.astype(np.uint64)
+            + payload.region_boundary_right_spliced_support.astype(np.uint64)
+        )
+        assert np.all(u_sum >= payload.region_unspliced_support)
+        assert np.all(s_sum >= payload.region_spliced_support)
+        assert np.all(u_sum <= 2 * payload.region_unspliced_support.astype(np.uint64))
+        assert np.all(s_sum <= 2 * payload.region_spliced_support.astype(np.uint64))

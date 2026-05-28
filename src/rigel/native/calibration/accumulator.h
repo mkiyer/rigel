@@ -69,11 +69,33 @@ struct CalibrationPayload {
     std::vector<double>             fl_pool_mass;       // size = 6 * 1024
     std::array<double, kFlPools>    fl_pool_total {};
 
-    // Per-region physical fragment support counts, partitioned by the
-    // fragment's splice class. A fragment is counted at most once per
-    // region (compartment-agnostic), and only when it contributes
-    // positive overlap mass to that region. These are the effective
-    // sample sizes consumed by the EB exposure model.
+    // Per-region per-compartment physical fragment support counts,
+    // partitioned by splice class. A fragment is counted at most once
+    // per (region, compartment) cell, and only when it contributes
+    // positive overlap mass to that compartment of that region. A
+    // fragment that fully spans a region (extends past both boundaries)
+    // increments BOTH the left and right boundary counters for that
+    // region. These are the discrete sample-size denominators consumed
+    // by the FMA fusion engine (PR 07).
+    //
+    // Width is uint32_t: per-region per-compartment counts cannot
+    // realistically approach 2^32 (bounded by coverage * region_length
+    // / fragment_length). merge_from() asserts no overflow.
+    std::vector<std::uint32_t> region_contained_unspliced_support;       // size = n_regions
+    std::vector<std::uint32_t> region_boundary_left_unspliced_support;   // size = n_regions
+    std::vector<std::uint32_t> region_boundary_right_unspliced_support;  // size = n_regions
+    std::vector<std::uint32_t> region_contained_spliced_support;         // size = n_regions
+    std::vector<std::uint32_t> region_boundary_left_spliced_support;     // size = n_regions
+    std::vector<std::uint32_t> region_boundary_right_spliced_support;    // size = n_regions
+
+    // Per-region aggregate physical fragment support, partitioned only
+    // by splice class. A fragment is counted at most once per region
+    // regardless of how many compartments it touches (i.e., a fragment
+    // fully spanning a region contributes one increment here, but two
+    // increments to the per-compartment counters above). These remain
+    // the canonical "distinct fragments touching this region" effective
+    // sample sizes consumed by the EB exposure / density model; the
+    // FMA fusion engine consumes the per-compartment counters instead.
     std::vector<std::uint64_t> region_unspliced_support;  // size = n_regions
     std::vector<std::uint64_t> region_spliced_support;    // size = n_regions
 
@@ -102,12 +124,20 @@ public:
             static_cast<size_t>(CalibrationPayload::kFlPools) *
                 CalibrationPayload::kFlBins,
             0.0);
-        payload_.region_unspliced_support.assign(
-            static_cast<size_t>(n_regions), 0);
-        payload_.region_spliced_support.assign(
-            static_cast<size_t>(n_regions), 0);
+        const size_t n = static_cast<size_t>(n_regions);
+        payload_.region_contained_unspliced_support.assign(n, 0);
+        payload_.region_boundary_left_unspliced_support.assign(n, 0);
+        payload_.region_boundary_right_unspliced_support.assign(n, 0);
+        payload_.region_contained_spliced_support.assign(n, 0);
+        payload_.region_boundary_left_spliced_support.assign(n, 0);
+        payload_.region_boundary_right_spliced_support.assign(n, 0);
+        payload_.region_unspliced_support.assign(n, 0);
+        payload_.region_spliced_support.assign(n, 0);
         // Warm reserve to amortize the first ~10 fragments' allocations.
         block_hits_.reserve(16);
+        touched_contained_.reserve(16);
+        touched_left_.reserve(8);
+        touched_right_.reserve(8);
         touched_regions_.reserve(16);
     }
 
@@ -153,8 +183,17 @@ private:
     // Per-block scratch (reused across observe() calls).
     std::vector<int32_t> block_hits_;
     // Per-fragment scratch: region IDs that received positive overlap
-    // mass from any block of the current fragment. Sorted+uniqued at
-    // end of observe() to drive the per-region support increment.
+    // mass from any block of the current fragment, partitioned by
+    // compartment. Sorted+uniqued at end of observe() to drive the
+    // per-region per-compartment support increment. A fragment that
+    // fully spans a region appears in both touched_left_ and
+    // touched_right_.
+    std::vector<int32_t> touched_contained_;
+    std::vector<int32_t> touched_left_;
+    std::vector<int32_t> touched_right_;
+    // Per-fragment scratch: union of all touched regions across
+    // compartments (each region appears at most once). Drives the
+    // per-region aggregate support increment.
     std::vector<int32_t> touched_regions_;
 };
 

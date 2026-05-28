@@ -120,9 +120,19 @@ class PayloadArrays:
 
     region_counts_sorted: np.ndarray  # float32[R, 12]
 
-    # Per-region physical fragment support, sorted by RegionArrays.order.
+    # Per-region per-compartment physical fragment support counts,
+    # sorted by RegionArrays.order. uint32 (saturates well above the
+    # depth a single compartment can attract).
+    region_contained_unspliced_support_sorted: np.ndarray       # uint32[R]
+    region_boundary_left_unspliced_support_sorted: np.ndarray   # uint32[R]
+    region_boundary_right_unspliced_support_sorted: np.ndarray  # uint32[R]
+    region_contained_spliced_support_sorted: np.ndarray         # uint32[R]
+    region_boundary_left_spliced_support_sorted: np.ndarray     # uint32[R]
+    region_boundary_right_spliced_support_sorted: np.ndarray    # uint32[R]
+    # Per-region aggregate fragment support, sorted by RegionArrays.order.
+    # Distinct fragments per region per splice class.
     region_unspliced_support_sorted: np.ndarray  # uint64[R]
-    region_spliced_support_sorted: np.ndarray  # uint64[R]
+    region_spliced_support_sorted: np.ndarray    # uint64[R]
 
     contained_unspliced_pos: np.ndarray  # float32[R]
     contained_unspliced_neg: np.ndarray  # float32[R]
@@ -139,8 +149,18 @@ class PayloadArrays:
     ) -> "PayloadArrays":
         order = region_arrays.order
         rc = np.ascontiguousarray(payload.region_counts[order, :])
-        u_sup = np.ascontiguousarray(payload.region_unspliced_support[order])
-        s_sup = np.ascontiguousarray(payload.region_spliced_support[order])
+
+        def _sort(arr: np.ndarray) -> np.ndarray:
+            return np.ascontiguousarray(arr[order])
+
+        c_u_sup  = _sort(payload.region_contained_unspliced_support)
+        bl_u_sup = _sort(payload.region_boundary_left_unspliced_support)
+        br_u_sup = _sort(payload.region_boundary_right_unspliced_support)
+        c_s_sup  = _sort(payload.region_contained_spliced_support)
+        bl_s_sup = _sort(payload.region_boundary_left_spliced_support)
+        br_s_sup = _sort(payload.region_boundary_right_spliced_support)
+        u_sup    = _sort(payload.region_unspliced_support)
+        s_sup    = _sort(payload.region_spliced_support)
 
         c_u_p = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_POS)
         c_u_n = channel_index(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED, CHANNEL_STRAND_NEG)
@@ -158,6 +178,12 @@ class PayloadArrays:
 
         return cls(
             region_counts_sorted=rc,
+            region_contained_unspliced_support_sorted=c_u_sup,
+            region_boundary_left_unspliced_support_sorted=bl_u_sup,
+            region_boundary_right_unspliced_support_sorted=br_u_sup,
+            region_contained_spliced_support_sorted=c_s_sup,
+            region_boundary_left_spliced_support_sorted=bl_s_sup,
+            region_boundary_right_spliced_support_sorted=br_s_sup,
             region_unspliced_support_sorted=u_sup,
             region_spliced_support_sorted=s_sup,
             contained_unspliced_pos=contained_pos,

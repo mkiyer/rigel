@@ -58,11 +58,47 @@ class RegionCountLedger:
     boundary_right_spliced_pos: np.ndarray
     boundary_right_spliced_neg: np.ndarray
 
-    # Per-region physical fragment support, partitioned by splice class.
-    # Views over the sorted support vectors on the underlying
-    # ``PayloadArrays``; integer ESS for the EB exposure model.
+    # Per-region per-compartment physical fragment support counts,
+    # partitioned by splice class. Views over the sorted support
+    # vectors on the underlying ``PayloadArrays``. uint32. These are
+    # the discrete sample-size denominators consumed by the FMA
+    # fusion engine.
+    contained_unspliced_support: np.ndarray       # uint32[R]
+    boundary_left_unspliced_support: np.ndarray   # uint32[R]
+    boundary_right_unspliced_support: np.ndarray  # uint32[R]
+    contained_spliced_support: np.ndarray         # uint32[R]
+    boundary_left_spliced_support: np.ndarray     # uint32[R]
+    boundary_right_spliced_support: np.ndarray    # uint32[R]
+
+    # Per-region aggregate physical fragment support: distinct fragments
+    # touching each region, partitioned by splice class. Views over the
+    # sorted aggregate vectors on the underlying ``PayloadArrays``;
+    # integer ESS for the EB exposure / density model. A fragment
+    # fully spanning a region contributes one increment here but two
+    # increments to the per-compartment counters above.
     unspliced_support: np.ndarray  # uint64[R]
     spliced_support: np.ndarray    # uint64[R]
+
+    def unspliced_compartment_sum(self) -> np.ndarray:
+        """Per-region sum of unspliced support across all three
+        compartments. NOT equal to ``unspliced_support`` when any
+        fragments fully span their region (those increment both the
+        left and right boundary cells). Useful as the per-compartment
+        sample-size aggregate for FMA-style consumers.
+        """
+        out = self.contained_unspliced_support.astype(np.uint64, copy=True)
+        out += self.boundary_left_unspliced_support.astype(np.uint64, copy=False)
+        out += self.boundary_right_unspliced_support.astype(np.uint64, copy=False)
+        return out
+
+    def spliced_compartment_sum(self) -> np.ndarray:
+        """Per-region sum of spliced support across all three compartments.
+        See ``unspliced_compartment_sum`` for the spanning-fragment caveat.
+        """
+        out = self.contained_spliced_support.astype(np.uint64, copy=True)
+        out += self.boundary_left_spliced_support.astype(np.uint64, copy=False)
+        out += self.boundary_right_spliced_support.astype(np.uint64, copy=False)
+        return out
 
     # --- Unspliced totals --------------------------------------------------
 
@@ -139,6 +175,12 @@ def build_region_count_ledger(payload_arrays: PayloadArrays) -> RegionCountLedge
         boundary_right_spliced_neg=col(
             COMPARTMENT_BOUNDARY_RIGHT, SPLICE_SPLICED, CHANNEL_STRAND_NEG
         ),
+        contained_unspliced_support=payload_arrays.region_contained_unspliced_support_sorted,
+        boundary_left_unspliced_support=payload_arrays.region_boundary_left_unspliced_support_sorted,
+        boundary_right_unspliced_support=payload_arrays.region_boundary_right_unspliced_support_sorted,
+        contained_spliced_support=payload_arrays.region_contained_spliced_support_sorted,
+        boundary_left_spliced_support=payload_arrays.region_boundary_left_spliced_support_sorted,
+        boundary_right_spliced_support=payload_arrays.region_boundary_right_spliced_support_sorted,
         unspliced_support=payload_arrays.region_unspliced_support_sorted,
         spliced_support=payload_arrays.region_spliced_support_sorted,
     )

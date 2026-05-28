@@ -99,6 +99,7 @@ def calibrate(
     from .background_model import fit_background_model
     from .boundaries import build_boundary_table
     from .calibration_iteration import run_calibration_iteration
+    from .density_model import fit_density_evidence
     from .density_observation import build_density_observation
     from .region_count_ledger import build_region_count_ledger
 
@@ -106,6 +107,12 @@ def calibrate(
     payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
     ledger = build_region_count_ledger(payload_arrays)
     observation = build_density_observation(region_arrays, ledger, fl_models.gdna)
+    density_evidence = fit_density_evidence(
+        observation,
+        confidence=_INTERNAL_GDNA_DENSITY_CI,
+        min_eff_length=float(density_min_eff_length),
+    )
+    force_zero_gdna_mass = density_evidence.rho_ref_source == "ZERO"
 
     strand_usable = _strand_summary_identifiable(strand_summary)
 
@@ -154,6 +161,7 @@ def calibrate(
         # PR 03: feed integer unspliced counts to enable RegionUnsplicedMass /
         # BackgroundDensity construction inside the calibration loop.
         unspliced_counts=ledger.unspliced_support,
+        force_zero_gdna_mass=force_zero_gdna_mass,
     )
 
     return build_calibration_result(

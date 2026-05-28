@@ -97,6 +97,9 @@ void CalibrationAccumulator::observe(
         1.0 / static_cast<double>(total_aligned_bp);
 
     bool any_region_hit = false;
+    touched_contained_.clear();
+    touched_left_.clear();
+    touched_right_.clear();
     touched_regions_.clear();
 
     for (int32_t e = 0; e < n_exons; ++e) {
@@ -119,17 +122,33 @@ void CalibrationAccumulator::observe(
                 rs, re);
             if (overlap_bp <= 0) continue;
 
-            // Record this region as touched by the current fragment.
-            // Duplicates (multi-block fragments hitting the same region)
-            // are reduced to a single support increment below.
-            touched_regions_.push_back(rid);
-
             const double w = static_cast<double>(overlap_bp) * inv_total;
 
             // Fragment-vs-region boundary classification (per fragment,
             // not per block; spliced fragments use end-to-end extent).
             const bool cross_left  = frag_start < rs;
             const bool cross_right = frag_end   > re;
+
+            // Per-region per-compartment support: record this region
+            // in the touched_* vector(s) matching its compartment. A
+            // fully-spanning fragment hits BOTH left and right.
+            // Duplicates from multi-block hits to the same region are
+            // collapsed by sort+unique below.
+            if (cross_left && cross_right) {
+                touched_left_.push_back(rid);
+                touched_right_.push_back(rid);
+            } else if (cross_left) {
+                touched_left_.push_back(rid);
+            } else if (cross_right) {
+                touched_right_.push_back(rid);
+            } else {
+                touched_contained_.push_back(rid);
+            }
+            // Per-region aggregate support: record the region exactly
+            // once per fragment, regardless of compartment. Duplicates
+            // from multi-block hits and from a fragment spanning both
+            // boundaries collapse via sort+unique below.
+            touched_regions_.push_back(rid);
 
             const std::uint8_t sig = regions.signature(rid);
             const size_t reg_base =
@@ -198,18 +217,40 @@ void CalibrationAccumulator::observe(
         ++payload_.n_unannotated_ref;
     }
 
-    // Per-region support: increment exactly once per unique region the
-    // current fragment touched. Compartment-agnostic (contained, left,
-    // right, and fully-spanning all contribute one increment per region).
+    // Per-region per-compartment support: increment exactly once per
+    // unique region within each compartment the current fragment
+    // touched. A fragment fully spanning a region increments both the
+    // left and right boundary support for that region.
+    auto bump = [](std::vector<int32_t>& touched,
+                   std::vector<std::uint32_t>& support) {
+        if (touched.empty()) return;
+        std::sort(touched.begin(), touched.end());
+        auto last = std::unique(touched.begin(), touched.end());
+        for (auto it = touched.begin(); it != last; ++it) {
+            ++support[static_cast<size_t>(*it)];
+        }
+    };
+    if (splice_idx == region_signature::kSpliceUnspliced) {
+        bump(touched_contained_, payload_.region_contained_unspliced_support);
+        bump(touched_left_,      payload_.region_boundary_left_unspliced_support);
+        bump(touched_right_,     payload_.region_boundary_right_unspliced_support);
+    } else {
+        bump(touched_contained_, payload_.region_contained_spliced_support);
+        bump(touched_left_,      payload_.region_boundary_left_spliced_support);
+        bump(touched_right_,     payload_.region_boundary_right_spliced_support);
+    }
+
+    // Per-region aggregate support: increment exactly once per unique
+    // region the current fragment touched (compartment-agnostic).
     if (!touched_regions_.empty()) {
         std::sort(touched_regions_.begin(), touched_regions_.end());
-        auto last = std::unique(touched_regions_.begin(),
-                                touched_regions_.end());
-        auto& support = (splice_idx == region_signature::kSpliceUnspliced)
-                            ? payload_.region_unspliced_support
-                            : payload_.region_spliced_support;
+        auto last = std::unique(touched_regions_.begin(), touched_regions_.end());
+        auto& support_agg =
+            (splice_idx == region_signature::kSpliceUnspliced)
+                ? payload_.region_unspliced_support
+                : payload_.region_spliced_support;
         for (auto it = touched_regions_.begin(); it != last; ++it) {
-            ++support[static_cast<size_t>(*it)];
+            ++support_agg[static_cast<size_t>(*it)];
         }
     }
 }
@@ -239,6 +280,18 @@ void CalibrationAccumulator::merge_from(const CalibrationAccumulator& other) {
     add_into(payload_.signature_mass,   other.payload_.signature_mass);
     add_into(payload_.fl_pool_mass,     other.payload_.fl_pool_mass);
     add_into(payload_.fl_pool_total,    other.payload_.fl_pool_total);
+    add_into(payload_.region_contained_unspliced_support,
+             other.payload_.region_contained_unspliced_support);
+    add_into(payload_.region_boundary_left_unspliced_support,
+             other.payload_.region_boundary_left_unspliced_support);
+    add_into(payload_.region_boundary_right_unspliced_support,
+             other.payload_.region_boundary_right_unspliced_support);
+    add_into(payload_.region_contained_spliced_support,
+             other.payload_.region_contained_spliced_support);
+    add_into(payload_.region_boundary_left_spliced_support,
+             other.payload_.region_boundary_left_spliced_support);
+    add_into(payload_.region_boundary_right_spliced_support,
+             other.payload_.region_boundary_right_spliced_support);
     add_into(payload_.region_unspliced_support,
              other.payload_.region_unspliced_support);
     add_into(payload_.region_spliced_support,

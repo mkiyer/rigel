@@ -136,6 +136,7 @@ component-denominator contract with a tested equivalent formulation rather than 
 4. [PR 04 - EB Exposure Factor Model](pr04_impl_plan_v2.md)
 5. [PR 05 - Fair Component Exposure for EM](pr05_impl_plan_v3.md)
 6. [PR 06 - Validation and Benchmarks](pr06_validation_and_benchmarks.md)
+7. [PR 07 - Strand and Density Evidence Integration](pr07_strand_density_integration.md)
 
 The sequence is intentionally staged so every PR has a local acceptance test. The native support
 payload can land before the calibration math changes. The downstream sign fix can be tested with a

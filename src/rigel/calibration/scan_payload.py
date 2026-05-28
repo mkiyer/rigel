@@ -61,8 +61,23 @@ class CalibrationScanPayload:
     signature_mass: np.ndarray  # float64[16]
     fl_pool_mass: np.ndarray  # float64[6, 1024]
     fl_pool_total: np.ndarray  # float64[6]
+    # Per-region per-compartment fragment support counts. uint32 is
+    # sufficient: per-region per-compartment counts cannot realistically
+    # approach 2^32 (bounded by coverage * region_length / fragment_length).
+    region_contained_unspliced_support: np.ndarray       # uint32[R]
+    region_boundary_left_unspliced_support: np.ndarray   # uint32[R]
+    region_boundary_right_unspliced_support: np.ndarray  # uint32[R]
+    region_contained_spliced_support: np.ndarray         # uint32[R]
+    region_boundary_left_spliced_support: np.ndarray     # uint32[R]
+    region_boundary_right_spliced_support: np.ndarray    # uint32[R]
+    # Per-region aggregate fragment support, partitioned only by splice
+    # class. A fragment is counted at most once per region regardless of
+    # how many compartments it touches; a fully-spanning fragment
+    # contributes one increment here but two to the per-compartment
+    # counters above (left + right). Consumed by the EB exposure /
+    # density model.
     region_unspliced_support: np.ndarray  # uint64[R]
-    region_spliced_support: np.ndarray  # uint64[R]
+    region_spliced_support: np.ndarray    # uint64[R]
 
     n_observed: int
     n_excluded_multimap: int
@@ -107,6 +122,28 @@ class CalibrationScanPayload:
             "fl_pool_mass", d["fl_pool_mass"], np.float64, (N_FL_POOLS, FL_HIST_N_BINS)
         )
         fl_pool_total = _check_array("fl_pool_total", d["fl_pool_total"], np.float64, (N_FL_POOLS,))
+
+        def _check_support(name: str) -> np.ndarray:
+            return _check_array(name, d[name], np.uint32, (n_regions,))
+
+        region_contained_unspliced_support = _check_support(
+            "region_contained_unspliced_support"
+        )
+        region_boundary_left_unspliced_support = _check_support(
+            "region_boundary_left_unspliced_support"
+        )
+        region_boundary_right_unspliced_support = _check_support(
+            "region_boundary_right_unspliced_support"
+        )
+        region_contained_spliced_support = _check_support(
+            "region_contained_spliced_support"
+        )
+        region_boundary_left_spliced_support = _check_support(
+            "region_boundary_left_spliced_support"
+        )
+        region_boundary_right_spliced_support = _check_support(
+            "region_boundary_right_spliced_support"
+        )
         region_unspliced_support = _check_array(
             "region_unspliced_support",
             d["region_unspliced_support"],
@@ -204,12 +241,27 @@ class CalibrationScanPayload:
                 f"n_observed = {fl_upper}.{_ERR_SUFFIX}"
             )
 
-        # Per-region support invariants. Both vectors are integer counts of
-        # distinct fragments touching each region, partitioned by splice
-        # class. No single fragment can contribute more than once per
-        # region, so the maximum per-region support is bounded by
-        # n_observed.
-        n_obs_u64 = np.uint64(max(n_observed, 0))
+        # Per-region per-compartment support invariants. Each compartment
+        # counts each fragment at most once, so no per-cell value can
+        # exceed n_observed. (A fully-spanning fragment increments both
+        # left and right for the same region; that's still one increment
+        # per cell, not two of the same.)
+        compartment_supports = (
+            ("region_contained_unspliced_support", region_contained_unspliced_support),
+            ("region_boundary_left_unspliced_support", region_boundary_left_unspliced_support),
+            ("region_boundary_right_unspliced_support", region_boundary_right_unspliced_support),
+            ("region_contained_spliced_support", region_contained_spliced_support),
+            ("region_boundary_left_spliced_support", region_boundary_left_spliced_support),
+            ("region_boundary_right_spliced_support", region_boundary_right_spliced_support),
+        )
+        for label, arr in compartment_supports:
+            if arr.size and int(arr.max()) > n_observed:
+                raise ValueError(
+                    f"calibration payload: {label} contains a value "
+                    f"> n_observed ({n_observed}).{_ERR_SUFFIX}"
+                )
+        # Aggregate per-region support: distinct fragments touching the
+        # region, bounded by n_observed.
         if region_unspliced_support.size and int(region_unspliced_support.max()) > n_observed:
             raise ValueError(
                 "calibration payload: region_unspliced_support contains a value "
@@ -220,13 +272,11 @@ class CalibrationScanPayload:
                 "calibration payload: region_spliced_support contains a value "
                 f"> n_observed ({n_observed}).{_ERR_SUFFIX}"
             )
-        del n_obs_u64
 
-        # Per-region invariant: positive fractional mass implies positive
-        # support, partitioned by splice class. The two vectors are added
-        # in the same gate as fractional mass in the native accumulator,
-        # so this is exact (no float tolerance needed beyond the float32
-        # rounding floor of region_counts).
+        # Per-region per-compartment invariant: positive fractional mass
+        # in a (compartment, splice) cell implies positive support in the
+        # matching support cell. This is a stricter check than the v6
+        # aggregate version: support and mass agree per compartment.
         if n_regions > 0:
             from .signature import (
                 CHANNEL_STRAND_NEG,
@@ -238,40 +288,56 @@ class CalibrationScanPayload:
                 SPLICE_UNSPLICED,
             )
 
-            comps = (
-                COMPARTMENT_CONTAINED,
-                COMPARTMENT_BOUNDARY_LEFT,
-                COMPARTMENT_BOUNDARY_RIGHT,
-            )
             strands = (CHANNEL_STRAND_POS, CHANNEL_STRAND_NEG)
 
-            def _splice_mass(splice: int) -> np.ndarray:
-                idxs = [channel_index(c, splice, s) for c in comps for s in strands]
+            def _cell_mass(compartment: int, splice: int) -> np.ndarray:
+                idxs = [channel_index(compartment, splice, s) for s in strands]
                 return region_counts[:, idxs].sum(axis=1, dtype=np.float64)
 
             float32_eps = np.finfo(np.float32).eps
-            u_mass = _splice_mass(SPLICE_UNSPLICED)
-            s_mass = _splice_mass(SPLICE_SPLICED)
-            u_thresh = float32_eps * max(float(u_mass.sum()), 1.0)
-            s_thresh = float32_eps * max(float(s_mass.sum()), 1.0)
-            bad_u = (region_unspliced_support == 0) & (u_mass > u_thresh)
-            bad_s = (region_spliced_support == 0) & (s_mass > s_thresh)
-            if bool(bad_u.any()):
-                idx = int(np.argmax(bad_u))
-                raise ValueError(
-                    "calibration payload: region "
-                    f"{idx} has unspliced fractional mass {float(u_mass[idx])} > 0 "
-                    "but region_unspliced_support == 0. Support and mass "
-                    f"must agree per region.{_ERR_SUFFIX}"
-                )
-            if bool(bad_s.any()):
-                idx = int(np.argmax(bad_s))
-                raise ValueError(
-                    "calibration payload: region "
-                    f"{idx} has spliced fractional mass {float(s_mass[idx])} > 0 "
-                    "but region_spliced_support == 0. Support and mass "
-                    f"must agree per region.{_ERR_SUFFIX}"
-                )
+            checks = (
+                (
+                    "contained_unspliced",
+                    _cell_mass(COMPARTMENT_CONTAINED, SPLICE_UNSPLICED),
+                    region_contained_unspliced_support,
+                ),
+                (
+                    "boundary_left_unspliced",
+                    _cell_mass(COMPARTMENT_BOUNDARY_LEFT, SPLICE_UNSPLICED),
+                    region_boundary_left_unspliced_support,
+                ),
+                (
+                    "boundary_right_unspliced",
+                    _cell_mass(COMPARTMENT_BOUNDARY_RIGHT, SPLICE_UNSPLICED),
+                    region_boundary_right_unspliced_support,
+                ),
+                (
+                    "contained_spliced",
+                    _cell_mass(COMPARTMENT_CONTAINED, SPLICE_SPLICED),
+                    region_contained_spliced_support,
+                ),
+                (
+                    "boundary_left_spliced",
+                    _cell_mass(COMPARTMENT_BOUNDARY_LEFT, SPLICE_SPLICED),
+                    region_boundary_left_spliced_support,
+                ),
+                (
+                    "boundary_right_spliced",
+                    _cell_mass(COMPARTMENT_BOUNDARY_RIGHT, SPLICE_SPLICED),
+                    region_boundary_right_spliced_support,
+                ),
+            )
+            for label, mass, support in checks:
+                thresh = float32_eps * max(float(mass.sum()), 1.0)
+                bad = (support == 0) & (mass > thresh)
+                if bool(bad.any()):
+                    idx = int(np.argmax(bad))
+                    raise ValueError(
+                        "calibration payload: region "
+                        f"{idx} has {label} fractional mass {float(mass[idx])} > 0 "
+                        f"but region_{label}_support == 0. Support and mass "
+                        f"must agree per compartment.{_ERR_SUFFIX}"
+                    )
 
         if n_total is not None:
             accounted = n_observed + n_ex_mm + n_ex_ch + n_ex_ar + n_ex_sa + n_unobs
@@ -292,6 +358,12 @@ class CalibrationScanPayload:
             signature_mass=signature_mass,
             fl_pool_mass=fl_pool_mass,
             fl_pool_total=fl_pool_total,
+            region_contained_unspliced_support=region_contained_unspliced_support,
+            region_boundary_left_unspliced_support=region_boundary_left_unspliced_support,
+            region_boundary_right_unspliced_support=region_boundary_right_unspliced_support,
+            region_contained_spliced_support=region_contained_spliced_support,
+            region_boundary_left_spliced_support=region_boundary_left_spliced_support,
+            region_boundary_right_spliced_support=region_boundary_right_spliced_support,
             region_unspliced_support=region_unspliced_support,
             region_spliced_support=region_spliced_support,
             n_observed=n_observed,

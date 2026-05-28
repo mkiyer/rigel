@@ -63,6 +63,7 @@ DENSITY_FALLBACK_PRIOR_ALPHA: float = 1.0
 
 # Opportunity / information thresholds.
 DENSITY_MIN_EFF_LENGTH: float = 1.0
+DENSITY_INFO_VAR_FLOOR: float = 1.0e-12
 DENSITY_MIN_BOUNDARY_OPPORTUNITY: float = 1.0
 DENSITY_MIN_BOUNDARY_INFO: float = 0.05
 DENSITY_MIN_PRIOR_REGIONS: int = 20
@@ -182,6 +183,8 @@ class DensityEvidence:
     variance_unbounded: np.ndarray | None = None
     tail_probability: np.ndarray | None = None
     expected_tail_count: np.ndarray | None = None
+    information: np.ndarray | None = None
+    applicable: np.ndarray | None = None
 
     def to_summary_dict(self) -> dict[str, object]:
         """Return a compact JSON-safe summary of stored evidence arrays."""
@@ -496,7 +499,22 @@ def fit_density_evidence(
         variance_unbounded=np.asarray(diag.variance_unbounded, dtype=np.float64),
         tail_probability=np.asarray(diag.tail_probability, dtype=np.float64),
         expected_tail_count=np.asarray(diag.expected_tail_count, dtype=np.float64),
+        information=_density_information(diag.variance_unbounded),
+        applicable=np.asarray(contained_leff >= float(min_eff_length), dtype=bool),
     )
+
+
+def _density_information(variance_unbounded: np.ndarray) -> np.ndarray:
+    """Per-region density precision: 1 / max(variance, var_floor).
+
+    Zero variance (deterministic prior or empty opportunity) yields zero
+    information, signalling to the fusion engine that this region's density
+    channel carries no usable evidence.
+    """
+    var = np.asarray(variance_unbounded, dtype=np.float64)
+    info = np.zeros_like(var)
+    np.divide(1.0, var, out=info, where=var > DENSITY_INFO_VAR_FLOOR)
+    return info
 
 
 def _fit_anchor_priors(
@@ -672,6 +690,8 @@ def _deterministic_zero_evidence(
         variance_unbounded=np.zeros(R, dtype=np.float64),
         tail_probability=np.zeros(R, dtype=np.float64),
         expected_tail_count=np.zeros(R, dtype=np.float64),
+        information=np.zeros(R, dtype=np.float64),
+        applicable=np.zeros(R, dtype=bool),
     )
 
 

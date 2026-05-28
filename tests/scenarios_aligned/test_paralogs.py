@@ -133,11 +133,6 @@ class TestParalogMultimapping:
             total = t1.observed + t2.observed
             if total > 10:
                 tol = 0.30 if gdna > 0 else 0.20
-                if gdna > 0 and abs(t1.observed - t2.observed) >= total * tol + 5:
-                    pytest.xfail(
-                        "PR05 component-level exposure can break identical-paralog symmetry "
-                        "under gDNA contamination; fragment-local exposure is needed."
-                    )
                 assert abs(t1.observed - t2.observed) < total * tol + 5
         finally:
             sc.cleanup()

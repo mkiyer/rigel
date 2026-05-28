@@ -33,6 +33,7 @@ _METHOD_BOUNDARY: int = 2
 _METHOD_BACKGROUND_FALLBACK: int = 3
 _REAL_TAU2_METHODS: frozenset[str] = frozenset({"moment", "moment_damped"})
 _TINY: float = np.finfo(np.float64).tiny
+_MIN_EXPOSURE_POOL_P_UNEXPRESSED: float = 0.80
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +231,7 @@ def estimate_region_exposure(
         ((method == np.uint8(_METHOD_STRAND)) | (method == np.uint8(_METHOD_BOUNDARY)))
         & (region_bp >= 1.0)
         & positive_support
+        & (p_unx >= _MIN_EXPOSURE_POOL_P_UNEXPRESSED)
     )
     weights = precision * support_float * p_unx
     weights = np.where(pool_mask, weights, 0.0)
@@ -272,10 +274,10 @@ def estimate_region_exposure(
     else:
         shrink_weight = tau2 / (tau2 + v_obs)
     shrink_weight = np.asarray(shrink_weight, dtype=np.float64)
-    shrink_weight[tier3_mask] = 0.0
+    shrink_weight[~active_pool] = 0.0
 
     log_omega_unclipped = shrink_weight * log_raw_ratio
-    log_omega_unclipped[tier3_mask] = 0.0
+    log_omega_unclipped[~active_pool] = 0.0
     log_floor = float(np.log(omega_floor))
     log_ceiling = float(np.log(omega_ceiling))
     clipped_low = log_omega_unclipped < log_floor

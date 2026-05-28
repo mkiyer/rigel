@@ -173,6 +173,22 @@ def test_method_of_moments_shrinks_pool_rows_and_neutralizes_tier3() -> None:
     assert (exposure.flags[2] & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0
 
 
+def test_exposure_pool_requires_high_p_unexpressed() -> None:
+    exposure = estimate_region_exposure(
+        _mass(),
+        _density(),
+        np.array([0.01, 0.50, 1.00], dtype=np.float64),
+    )
+
+    assert exposure.tau2_method == "no_pool_neutral"
+    assert exposure.tau2_pool_size == 0
+    np.testing.assert_allclose(exposure.omega, np.ones(3))
+    np.testing.assert_allclose(exposure.shrink_weight, np.zeros(3))
+    assert exposure.raw_ratio[1] > 1.0
+    assert (exposure.flags[0] & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0
+    assert (exposure.flags[1] & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0
+
+
 def test_tau2_damping_uses_previous_real_fit() -> None:
     undamped = estimate_region_exposure(
         _mass(),

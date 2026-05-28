@@ -99,11 +99,6 @@ class TestAntisenseIntronicOverlap:
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
         # Allow some T2 leak at low SS
         max_t2 = 5 if ss >= 0.9 else 20
-        if ss < 0.9 and t2.observed > max_t2:
-            pytest.xfail(
-                "PR05 component-level exposure averages broad nRNA/gDNA spans; "
-                "fragment-local exposure is needed to restore this low-SS sentinel."
-            )
         assert t2.observed <= max_t2, (
             f"T2 mRNA leak: {t2.observed:.0f} at SS={ss} (limit={max_t2})"
         )
@@ -174,11 +169,6 @@ class TestAntisenseIntronicMultiIsoform:
         assert_accountability(bench)
         assert_negative_control(bench, strand_specificity=0.9)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        if t2.observed > 10:
-            pytest.xfail(
-                "PR05 component-level exposure averages broad nRNA/gDNA spans; "
-                "fragment-local exposure is needed to restore this antisense sentinel."
-            )
         assert t2.observed <= 10, (
             f"T2 mRNA leak: {t2.observed:.0f} at SS=0.9 (limit=10)"
         )
