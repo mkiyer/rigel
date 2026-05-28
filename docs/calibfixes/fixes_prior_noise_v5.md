@@ -17,7 +17,7 @@ These invariants are not negotiable.
 |---|---|
 | Latent states are strata | `unexpressed_offtarget`, `unexpressed_capture`, `expressed_capture`, and `expressed_offtarget` describe expression/capture context, not RNA/gDNA source. |
 | Source mass is explicit | EM source priors consume `PriorMassDeconvolution.gdna_unspliced_mean` and `.rna_unspliced_mean`, never latent-state source proxies. |
-| Exposure is source-reliable local opportunity | `A_r` is a sampling-opportunity multiplier derived from source-reliable gDNA/background ratios, not a latent-state ratio. |
+| Exposure is source-reliable local opportunity | `A_r` is an EM gDNA effective-length multiplier derived from source-reliable gDNA/background ratios; enriched regions have `A_r < 1`. |
 | RNA prior is grouped | The adaptive prior can constrain aggregate RNA-vs-gDNA mass, but it must not add transcript-level pseudocounts. |
 | Uncertainty must travel | Source reliability, exposure identifiability, and prior strength must be diagnosed and propagated instead of hidden behind thresholds. |
 
@@ -49,10 +49,10 @@ The fourth stratum is intentionally not solved by this document. In unstranded c
 v4's single global enrichment model,
 
 ```text
-A_r = 1 + T_r * (lambda - 1)
+lambda > 1 means locally enriched gDNA sampling
 ```
 
-is principled but too rigid for real capture data. Capture efficiency varies by target sequence, local composition, accessibility, and alignment context. A single global `lambda` can understate gDNA exposure at strongly captured targets and overstate it at weak targets.
+was directionally right about local enrichment but wrong if wired as `A_r > 1`. The native EM subtracts `log(gdna_eff_len)`, and `prior.py` multiplies baseline gDNA effective length by `A_r`. Therefore enriched gDNA sampling must lower `A_r`, not raise it.
 
 The immediate bug is more basic: current code derives `A_r` from latent-state-weighted `mu_gdna`. Latent capture states are not source labels. PR02 should first replace that with local exposure weights computed from PR01 source-reliable gDNA mass against the off-target background.
 
@@ -87,20 +87,19 @@ Then compute a one-class local exposure ratio:
 
 ```text
 lambda_u_raw = G_u / B_u
-theta_u = max(lambda_u_raw - 1, 0)
-lambda_u = 1 + theta_u
+lambda_u = max(lambda_u_raw, 1)  only when pooled source evidence beats background
 ```
 
 Build region exposure:
 
 ```text
-A_r = 1 + T_{r,contained} * theta_u
+A_r = 1 / lambda_u
 ```
 
 This works for unknown panels without seeding a captured class:
 
 - non-capture samples have `G_u ~= B_u`, so `A_r ~= 1`;
-- captured targets with source-reliable gDNA excess have `G_u > B_u`, so `A_r > 1`;
+- captured targets with source-reliable gDNA excess have `G_u > B_u`, so `A_r < 1`;
 - RNA-rich regions without source-reliable gDNA evidence stay neutral;
 - no arbitrary count constant and no maximum exposure cap are introduced.
 
@@ -139,7 +138,7 @@ This keeps capture exposure tied to source-reliable gDNA/background ratios rathe
 
 1. No unit or no source-reliable evidence gives `A_r = 1` exactly.
 2. High latent capture probability without PR01 source evidence does not inflate `A_r`.
-3. Strong source-reliable local gDNA excess gives `lambda_u = G_u / B_u`.
+3. Strong source-reliable local gDNA excess gives `lambda_u = G_u / B_u` and `A_r = 1 / lambda_u`.
 4. Local depleted ratios are floored at neutral exposure, not below `1`.
 5. Boundary source evidence contributes to `G_u` and `B_u` with the correct target weight.
 6. Fine-region splitting does not change unit exposure after aggregation.
@@ -315,8 +314,8 @@ This is important scientifically, but it is not a calibration-prior repair and s
 
 - Build locus/gene capture units and target weights.
 - Aggregate source-reliable gDNA mass and off-target background by unit.
-- Fit one-class exposure ratios `lambda_u = G_u / B_u`, floored at neutral exposure.
-- Build `A_r = 1 + T_{r,contained} * max(lambda_u - 1, 0)`.
+- Fit one-class exposure ratios `lambda_u = G_u / B_u`, activated only by pooled source evidence over background.
+- Build `A_r = 1 / lambda_u` for targetable regions and `A_r = 1` elsewhere.
 - Emit exposure diagnostics and `inferred_capture_panel.bed`/TSV from the fitted ratios.
 
 ### PR 3: ESS policy sweep
@@ -347,7 +346,7 @@ Deferred PRs:
 | No latent source labels | adaptive prior and exposure code never uses latent state names as RNA/gDNA source labels. |
 | No arbitrary exposure constants | no fixed `A_R_SOURCE_PRIOR_COUNT` or `A_R_MAX` replacement appears in the exposure model. |
 | Smooth source reliability | strand source confidence is continuous and exact at low depth. |
-| Local exposure weights | capture exposure comes from source-reliable local gDNA/background ratios and stays neutral without source evidence. |
+| Local exposure weights | capture exposure lowers gDNA effective length only from pooled source-reliable local gDNA/background ratios and stays neutral without source evidence. |
 
 ### Existing eight-condition suite
 

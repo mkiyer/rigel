@@ -9,7 +9,7 @@ Evaluate whether the adaptive grouped prior should have a larger effective sampl
 Do not start this PR until both are merged or available on the branch:
 
 1. PR 1 continuous strand reliability.
-2. PR 2 empirical-Bayes capture exposure.
+2. PR 2 source-reliable capture exposure.
 
 The ESS policy should use their diagnostics. Increasing ESS before source reliability and exposure identifiability are fixed can amplify prior noise.
 

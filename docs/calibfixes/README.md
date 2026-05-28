@@ -10,14 +10,14 @@ This directory breaks the v5 design into implementation-ready PR recipes. The go
 |---|---|
 | Latent states are strata | `unexpressed_offtarget`, `unexpressed_capture`, `expressed_capture`, and `expressed_offtarget` must never be consumed as RNA/gDNA source labels. |
 | Source mass is explicit | EM priors consume `PriorMassDeconvolution.gdna_unspliced_mean` and `.rna_unspliced_mean`. |
-| Exposure is source-reliable opportunity | `A_r` is built from source-reliable gDNA/background ratios, never from latent capture states or raw local read depth. |
+| Exposure is source-reliable opportunity | `A_r` is an EM effective-length multiplier from source-reliable gDNA/background ratios; enriched regions have `A_r < 1`. |
 | RNA prior is grouped | Do not add transcript-level pseudocount floors in Python or native EM. |
 | Uncertainty travels | Source reliability, capture exposure identifiability, and ESS strength must be emitted in diagnostics. |
 
 ## Merge order
 
 1. [pr01_continuous_strand_reliability.md](pr01_continuous_strand_reliability.md)
-2. [pr02_empirical_bayes_capture_exposure.md](pr02_empirical_bayes_capture_exposure.md)
+2. [pr02_capture_exposure_v3.md](pr02_capture_exposure_v3.md)
 3. [pr03_ess_policy_sweep.md](pr03_ess_policy_sweep.md)
 4. [pr04_simulator_overdispersion.md](pr04_simulator_overdispersion.md)
 
@@ -37,7 +37,7 @@ Every behavior-changing PR must be evaluated across the four RNA-seq strata:
 | Strand-specific | Capture | PR 1 expectation | PR 2 expectation | Deferred? |
 |---|---:|---|---|---|
 | yes | no | improve or maintain source split | `A_r = 1` non-regression | no |
-| yes | yes | improve source reliability | one-class local exposure rises only with source-reliable gDNA excess | no |
+| yes | yes | improve source reliability | one-class local exposure lowers `A_r` only with pooled source-reliable gDNA excess | no |
 | no | no | strand reliability inactive | `A_r = 1` non-regression | no |
 | no | yes | strand reliability inactive | exposure remains neutral until a strand-free source split exists | yes, source split deferred |
 

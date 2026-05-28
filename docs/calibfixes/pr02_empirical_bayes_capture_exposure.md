@@ -1,5 +1,8 @@
 # PR 2: One-Class Source-Reliable Capture Exposure
 
+> **Superseded by** `pr02_capture_exposure_v3.md`. This file is retained as
+> the v1/v2 planning trail and should not be implemented directly.
+
 ## Goal
 
 Fix `A_r` by estimating local capture exposure from source-reliable gDNA mass, not from latent calibration states. PR02 should work for both ordinary RNA-seq and hybrid-capture RNA-seq without requiring any external BED or probe file.

@@ -1,6 +1,98 @@
 # TODO
 
 
+## Calibration redesign around the concept of exposure.
+
+Strand deconvolution is working well and setting our prior reasonably well.
+
+Another component of handling hybrid capture data is related to handling 'exposure'. During the EM, we normalize counts by the "effective length" (opportunity) that they were derived from. Capture enriches certain regions and depletes others. Our normalization therefore needs more than just 'effective length'. It needs another factor that accounts for capture depth.
+
+*What is the goal of learning exposure factors?*
+
+Consider a 100kb locus where probes are capturing only 2kb. The probes enrich fragments in the 2kb captured regions and depletes fragments in the 98kb not-captured regions.
+
+If we do not use exposure factors, we would normalize our gDNA mass by 100kb in the EM. This would not compete with RNA transcripts which are much shorter. gDNA gets penalized and siphons away.
+
+So, we must use exposure factors to handle hybrid capture data. Our would would be to normalize our gDNA mass by exposure-weighted factors. 
+
+*How do we implement exposure weights?*
+
+We are implementing exposure weighting as a modulation to effective length (effective length x exposure factor). It can be implemented as a likelihood factor or as a normalization factor.
+
+*What is the challenge or danger of using exposure factors?*
+
+The problem is circularity. We aren't incorporating *new* dimensions of information. However, I am not sure that this is a huge problem. Let me explain.
+
+gDNA is already overdispersed. There are regions that are not accessible where we see lower density regardless of the approach. There patterns of gDNA fragment densities that we do not fully model or fully understand. IF we build in exposure factors, we are building in a system that says, "sequencing is not 'fair' some regions have a higher exposure than others". Hybrid capture is just the explicit version of this, but patterns like this are evidence anyway. Mappability is another cause (we plan to control for mappability in a different way, but it reduces the exposure of that region).
+
+So, we need a simple straightforward method for this. 
+
+Our calibration algorithm already estimates gDNA mass in every region. 
+
+- total gDNA mass is the sum of gDNA mass across regions
+- total effective length is the sum of the effective lengths of the regions.
+- we can compute either a 'global' (entire sample) or 'locus-level' (just the locus/multilocus) gdna density using these terms
+- we can also estimate the gdna density in each region
+- comparing each region to the 'global' density should give us a ratio that tells us how enriched the region is.
+
+Now one of the problems is that regions are noisy. Many regions are small. Regional estimates can fluctuate wildly. 
+
+Our regional densities need to be SHRUNK using EB. What do we shrink to? And how strongly do we shrink? Captured regions are often small (exons are small). Data could be sparse. WE need a gentle pull to the 'center' that makes regions behave. We don't need strong gravity that pulls everything to the center.
+
+What should the center be? In my mind, the center could easily become the global average density of ALL regions. With that paradigm, 'exposure' weights for 'off-target' regions will be BELOW the global average, and exposure weights for 'on-target' regions will be ABOVE the global average. I expect the profile to be highly skewed. Some capture panels target just a handful of regions and induce huge amplification (>1000X). Exposures in those regions, if measured as the EB-shrunk (region density / global density) ratio, can be huge.
+
+In non-capture datasets, our hope is that our system keeps the exposure factors fairly tight around 1.0 (uniform), but I believe we *CAN* afford to let regions dictate their exposure to some extent.
+
+In capture datasets, we hope that our system allows regions to fluctuate wildly in their exposures! The off-target regions may very well go below average. The on-target regions could be ~1000X relative to average.
+
+The *strength* of our EB shrinkage will matter a lot. We need to learn how strong to be. A gdna density distribution with high variance suggests we have capture data. A well-behaved distribution suggests that we do not have capture data.
+
+Can you help me design a per-region exposure factor that shrinks to global? Shrinkage must be related to sparsity.
+
+Remember each region typically has mass coming from two boundaries and from contained fragments. Is our 'prior gdna mass' being computed from the boundary and contained fragment mass? If so, the 'gdna prior mass' should be usable for exposure factor computation. At that point, the 'gdna prior mass' should represent our estimate for that region.
+
+Examples:
+- 10bp region with 2 fragments. gdna density 0.2
+- 100bp region with 20 fragments. gdna density 0.2
+- 100bp region with 200 fragments. gdna density 0.2
+- 100kb region with 20 fragments. gdna density 0.0002
+- global density (from other regions) is 0.001
+
+All three of these regions have ratio (0.2/0.01)=20. How should be set up a shrinkage algorithm. It might need to be based on fragments alone? Region with a small number of fragments need to shrink to global 0.001. Regions with large number of fragments can let their own data dictate. So that's the shrinkage factor? Hard to set a global "ESS" for shrinkage.. that seems brittle and difficult. Let's think about it.
+
+If we are using the boundary fragments and the contained fragments to compute gdna prior mass, what's our effective length?
+
+- boundaries: fragments crossing the boundary. The distribution of lengths is the gDNA FL distribution, limited by the region length.
+- contained. the entire fragment must fit in the region.
+
+Our fractional accumulator system slices and dices fragments across boundaries. So our region effective length ends up being the region size. I think that's our normalizing factor. But, you have to remember that tiny regions can still have contributions from many different fragments! Even if the contribution from any individual fragment is tiny.
+
+Example, region with start/stop (a, b). A fragment with length L. What fragments overlap? Well, that's from (a-L+1) to (b-1).
+So effectively, (b-1) - (a-L+1) = b - 1 - a + L - 1 = (b-a) + (L-2). If the region itself (b-a) is tiny (ex. 10bp), we chop up fragments in the region and the total mass will be small, but we could still have thousands of fragments contributing based on the opportunity `(b-a) + (L-2)`. You'll have to check my math. So even the smallest region (1bp) still has "(b-a) =1" so effectively `(L-1)` fragment start sites can overlap the region.
+
+Perhaps one of our problems with shrinkage and statistical power is that our BAM scan phase and accumulator phase (native C++) might not be accumulating the number of fragment observations that contribute to the accumulated score. That number matters because it tells us how strongly to shrink to global density.
+
+If we add this to our accumulator, we need to be careful because a single fragment can overlap many regions, and a single fragment can overlap both boundaries of a single region. So our method should count each fragment once and only once. So any fragment that contributes to boundary counts or contained counts should be counted. Then and only then we will have discrete data that will help us shrink to global.
+
+So what are the next steps forward?
+
+1. Audit the concept of exposure factors purely from a theoretical standpoint, without looking at any code. What should change. Is this the direction we should pursue? What other ideas or concepts should we consider?
+
+2. Deeply interrogate the current code. What is happening now? What would need to change? This exposure factor method requires a robust estimate of gdna mass in each region. gdna mass is estimated either by strand deconvolution (when we have strand specific data) or by projecting boundary crossing fragments onto the regions (works with any data). Do we have a reliable gdna mass estimator in place? 
+
+3. Deeply interrogate the fractional accumulator code (native). What needs to change? Are we accumulating a discrete number of fragment support for each region? How challenging would it be to instrument this?
+
+4. Consider moving 'boundary' code to native. Our calibration uses the fractional accumulator data and splits it into 'boundary' structs and 'region' structs which is the more elegant representation. We discussed moving this into the native code itself, so that the accumulator builds 'boundary' and 'region' accumulation as a naturally distinct set. This isn't required, but if we are working on native code, it might be a good time to move to a region/boundary accumulator as planned. Not essential.
+
+5. Audit the downstream code that uses exposure factors. Is this implemented correctly? Once we compute exposure factors, how should they be used downstream? The current plan is that they operate as a normalizer in the denominator, similar to effective length. An intergenic off-target region with 0.1X the global density should have LESS exposure than an on-target region with 10X global density. I don't think we are implementing this correctly at present. We need a PR for the downstream use of exposure factors.
+
+6. We may need to think bigger picture about changing our calibration system (again). Right now we have four latent states that are combinations of (expressed yes/no) x (captured yes/no). This poses a classification task. Certainly, we still definitely need the 'expressed yes/no' latent state and we need to correctly model it! An algorithm to seed and iterate and solve the latent 'expressed yes/no' is at the heart of our algorithm. When this solving happens, we can then use the 'unexpressed' regions to estimate our gDNA density profiles (boundary gdna profile and contained gdna profile). This is utterly necessary for all types of rna-seq. But.. now that we are deriving a new idea around 'capture' as an enrichment that changes exposure.. and more globally acknowledge that rna-seq has inherently biased exposure that could be modeled this way even without the presence of capture, we may not need the capture yes/no state anymore. It's hard to know if we can make this work correctly without modeling capture. The biggest open question is whether we need to explicitly model capture as a bimodal distribution (classify regions as captured or not captured) or whether our concept of exposure factors, etc is effective at modeling how capture affects and transforms the data. This is the hardest question.
+
+The reason to move forward with the above system is that it is simpler. It is elegant. It works with all types of data. It does not care whether we have capture or not. It just models. This is why I think it is worth pursuing first. A capture classification strategy has the additional burden of having to first decide "is this a capture library or not?" and then try to classify regions. That is hard because there are so many variables.. individual probes. Some experments don't work well. Some capture panels just target a tiny handful of genes leading to a huge class imbalance (most transcripts off-target). Putting it all together, it strikes me as complex and fraught with problems.
+
+I think we can be confident that this idea has a good chance of working and that we can instrument it to behave elegantly.
+
+
 
 ## Unimodel (noncapture) vs Bimodal (Capture) gDNA model
 

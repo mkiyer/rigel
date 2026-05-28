@@ -25,7 +25,7 @@ gdna_unspliced_mean + rna_unspliced_mean = unspliced_total
 |---|---|
 | `src/rigel/calibration/fl.py` and `_fl_sources.py` | Build or expose captured-gDNA FL training pools. |
 | `src/rigel/calibration/density_observation.py` | Provide per-compartment counts/effective lengths needed for a strand-free mixture. |
-| `src/rigel/calibration/capture_exposure.py` | Reuse opportunity and EB exposure from PR 2. |
+| `src/rigel/calibration/capture_exposure.py` | Reuse target weights and source-reliable exposure diagnostics from PR 2. |
 | `src/rigel/calibration/unstranded_source_split.py` | New module for FL plus boundary regional source split. |
 | `src/rigel/calibration/calibration_iteration.py` | Use strand-free source split when strand reliability is inactive and capture opportunity is present. |
 | `tests/test_unstranded_capture_source_split.py` | Unit tests for model behavior. |
