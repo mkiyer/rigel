@@ -133,6 +133,16 @@ likelihood is sharply asymmetric, making strand a strong discriminator
 `LLR_strand` because BB-gDNA at $\rho_d^{\text{BB}} > 0$ has enough
 variance mass at moderate asymmetry to absorb it.
 
+> **Strand-ambiguous regions skip this term (added 2026-05-29; see
+> [`../acc_caljointmodel/00_implementation_plan.md`](../acc_caljointmodel/00_implementation_plan.md)
+> §4 D7).** `LLR_strand` is evaluated only where a region's transcript strand
+> is defined (single-strand, or intergenic where the arbitrary sense is
+> neutral). For **strand-ambiguous** regions (overlapping `+` and `−`
+> transcripts) `k_plus` has no meaning, so `LLR_strand = 0` and `π_g` is
+> updated from the count channel alone, supplemented by the boundary-density
+> sweep + global fallback (D7). The substrate flags these via `ts_class`;
+> §3.2/§6 get a full rewrite in Phase 8.
+
 ### 3.3 Combining channels into per-region $\pi_r^{(g)}$
 
 ```python

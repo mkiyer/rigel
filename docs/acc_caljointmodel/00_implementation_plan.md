@@ -126,6 +126,13 @@ tests are red; substrate tests are green. End-to-end green returns at PR 6.
    bridge via recovered `assemble_multilocus_prior` (§4 D3, §5).
 5. **Boundary "½ half-split" (doc 01 §7, doc 03 §4) is abandoned** in
    favor of the side-attribution model (§4 D1).
+6. **Strand-ambiguous regions need a non-strand path.** Docs 01 §4.3 and
+   03 §3.2 evaluate a per-region strand BB log-BF using `κ_rna[r]`, implicitly
+   assuming every region has a defined sense. **AMBIG regions (both strands)
+   have none** — the strand channel is unusable there. §4 D7 specifies the
+   replacement (exclude from strand; impute by density-sweep + global
+   fallback). Docs 01/03 get an AMBIG caveat now (one paragraph each) and a
+   full §-rewrite in Phase 8.
 
 ---
 
@@ -269,6 +276,55 @@ The Phase-7 synthetic baseline is regenerated from a pre-burn SHA
 
 ### D6 — Phase 0 is its own PR ✓ (agreed) — PR 0 below.
 
+### D7 — Strand-ambiguous regions: density-sweep imputation, not strand deconvolution (2026-05-29)
+
+**The distinction (locked).** A region's 4-bit signature gives a *strand class*
+that the calibrator must route on. NONE and AMBIG both lack a single transcript
+strand but are **not** interchangeable:
+
+- **NONE** (signature `0x0`): no transcript. gDNA-only expectation, unstranded.
+  An arbitrary sense assignment is **safe** (neutral evidence). Included in
+  both the density and strand models.
+- **POS / NEG** (only `+` or only `−` strand bits): single-strand. Sense is
+  well-defined → full count + strand + spliced deconvolution.
+- **AMBIG** (both `+` and `−` strand bits — overlapping opposite-strand
+  transcripts): every read is simultaneously *sense* for one transcript and
+  *antisense* for the other, so **no valid sense split exists** and the strand
+  channel is **unusable**. An arbitrary convention here would be **wrong** (it
+  would manufacture a phantom strand signal). This is a genuine class, not an
+  edge case — paralogs and nested/antisense genes produce it.
+
+**Consequence — how AMBIG regions are deconvolved.** They are **excluded** from
+(a) the D2 strand-balance fit (already specified) and (b) the E-step strand
+log-BF. Their strand-agnostic density (`n_unspliced` / `n_spliced` / mass)
+stays valid and is deconvolved by:
+
+1. **Count / density channel** (NB) wherever exposure `ω_r` is identifiable.
+2. **Boundary-sweep imputation** — propagate gDNA-density evidence from
+   neighbouring strand-**decodable** regions/boundaries into AMBIG territory: a
+   sequential **left→right and right→left sweep** from known/valid anchors,
+   transferring evidence across each boundary with a reliability-weighted decay
+   (recovered `boundary_sweep.py`, §5).
+3. **Global fallback** — regions the sweep cannot reach fall back to the
+   library-global gDNA density (a Gamma posterior; recovered
+   `background_model.py` *mechanism*, §5).
+
+**Where it lands:** **PR 4** (the region E-step routes by strand class; the
+sweep + global fallback impute AMBIG and very-low-evidence regions). The work
+is sizeable enough that PR 4 may split into PR 4a (decodable-region E-step +
+exposure) and PR 4b (ambiguous sweep imputation) — decide at PR 4 kickoff.
+
+**Magic-number caution (Q6).** The burnt sweep/background code concentrates
+cliffs: `confidence_floor = 0.6` (`boundary_sweep.py`), `top_t_fraction = 0.01`
+(the clip-top-X% seed in `background_model.py`), `damping = 0.5`,
+`mu_floor = 0.05`. We recover the **mechanism** and **scrub the cliffs** — the
+boundary transfer weight becomes evidence/overdispersion-based, the global
+density a proper Gamma posterior with **no percentile clip**. Every surviving
+constant is discussed at PR 4 kickoff before coding. **This also resolves the
+deferred Q2 "clip-top-X%" thread** (PR01 §7): the principled answer to outlier
+robustness is sweep imputation + a global Gamma posterior, not a percentile
+cliff.
+
 ---
 
 ## 5. Recovered-Code Map (harvest, don't reinvent)
@@ -292,14 +348,24 @@ files; a few mature pieces are M-series **dangling blobs** (read via
 | Closed-form Gamma-Poisson exposure (G4) | — (`exposure.py` is log-normal EB, NOT this) | WRITE FRESH per doc 03 §4 |
 | `region_eff_len = L−FL+1`, gDNA/RNA FL | **LIVE** `frag_length_model.py::compute_all_transcript_eff_lens`, `FragmentLengthModels` | CALL DIRECTLY |
 | RNA strand beta posterior + library mode | **LIVE** `strand_model.py` (`n_same/n_opposite/minor_rate_*`) | CALL DIRECTLY |
-| Test scaffolds | `test_exposure.py`, `test_strand_deconv.py` (count/PMF tests), `test_strand_model.py`, `test_per_locus_gdna_mass.py`, `test_boundary_model.py` @ fc96902 | REUSE selectively |
+| Boundary-sweep imputation for AMBIG regions (D7) | `boundary_sweep.py @ fc96902` (`_forward_scan`/`_reverse_scan` L↔R propagation, `run_boundary_sweep`) | RECOVER MECHANISM; scrub `confidence_floor=0.6` + transfer pseudocounts → evidence/overdispersion-based weight |
+| Global gDNA-density fallback (D7) | `background_model.py @ fc96902` (`BackgroundModel` Gamma posterior `rho_off`) | RECOVER MECHANISM; **drop** `top_t_fraction=0.01` clip, `damping=0.5`, `mu_floor=0.05` → proper Gamma posterior, no percentile cliff |
+| Excess→contained-gDNA predictor (D7) | `boundary_model.py @ fc96902` (`predict_contained_gdna_from_excess`) | EXTRACT (the closed-form predictor only) |
+| Test scaffolds | `test_exposure.py`, `test_strand_deconv.py` (count/PMF tests), `test_strand_model.py`, `test_per_locus_gdna_mass.py`, `test_boundary_model.py`, `test_boundary_sweep.py` @ fc96902 | REUSE selectively |
 
 **AVOID (the burned cliffs — do not resurrect):** `integration.py`
 (fusion), `calibration_iteration.py` (two-state E/M density staging),
 `density_model.py`, `adaptive_prior.py` (except `_project_to_loci`),
-`latent_states.py`, `background_model.py`, `density_observation.py`,
-`boundary_sweep.py`, `exposure.py` (log-normal EB shrinkage),
+`latent_states.py`, `exposure.py` (log-normal EB shrinkage),
 `strand_deconv.py` reliability/screen half. These concentrate ~390 tunables.
+
+> **Reclassified for D7 (2026-05-29):** `boundary_sweep.py`,
+> `background_model.py`, `boundary_model.py`, and `density_observation.py`
+> were previously on the pure-AVOID list, but the **sweep + global-fallback
+> mechanism** they implement is exactly what D7 needs for strand-ambiguous
+> regions. We **recover the mechanism and scrub the cliffs** (see the D7 rows
+> above). The *cliffs* in those files remain forbidden; only the structural
+> propagation/posterior math is harvested.
 
 **Adapter strategy.** The recovered exposure/boundary/prior code is built
 on `RegionArrays`/`PayloadArrays`/`BoundaryTable`. Rather than rewrite it,
@@ -351,9 +417,16 @@ git cat-file -p 3e7c406ab430735d95b28421a9b178b80f0d4d98     # _kappa.py NB MoM
   signature {exon_pos, exon_neg, intron_pos, intron_neg}; a region is a
   maximal interval of constant signature, and a region and its neighbours
   always differ in signature (adjacent equal-signature segments are
-  merged). Boundaries sit at signature transitions. Intergenic = signature
-  0 = strand NONE, included in both the density and strand models (NONE
-  regions get an arbitrary fixed sense/antisense split in the strand model).
+  merged). Boundaries sit at signature transitions.
+- **Strand class — NONE ≠ AMBIG (locked, §4 D7).** Derived from a region's
+  signature: **NONE** (signature 0, intergenic) has no transcript — unstranded
+  gDNA, so an arbitrary sense is **safe**; it stays in both density and strand
+  models. **POS/NEG** (one strand) have a well-defined sense. **AMBIG** (both
+  `+` and `−` bits — overlapping opposite-strand transcripts) has **no valid
+  sense**: it is excluded from strand deconvolution and recovered by density +
+  boundary-sweep imputation + global fallback. Never conflate NONE (no strand)
+  with AMBIG (both strands) — an arbitrary sense for AMBIG manufactures phantom
+  strand signal.
 - **Harvest before writing.** For any new component with a §5 entry, start
   from the recovered source; justify deviations.
 
@@ -398,12 +471,20 @@ state the previous PR actually produced. PR 0's doc is written now.
   (n_sense, n_antisense) from regions + boundary sides (§4 D2); harvest
   `_fold_pos_neg_by_transcript_strand` + `_log_beta_binom_pmf` + the
   `strand_balance.py` MoM skeleton (generalized mean). Produces
-  `kappa_rna`, `rho_r_bb` with count-based uncertainty.
-- **PR 4 — Calibrator core.** E-step deconvolution (doc 03 §3): NB count
-  LLR + BB strand LLR (using PR 3's model) → `π_g` → soft masses (G2/G3),
-  applied to the 3 substrate views; closed-form Gamma-Poisson exposure
-  (G4, doc 03 §4, written fresh). Boundary side-attribution per §4 D1.
-  Tests: paralog/hybrid-capture sanity, mass conservation, vectorized==scalar.
+  `kappa_rna`, `rho_r_bb` with count-based uncertainty. **Excludes AMBIG
+  regions/sides** (no valid sense, §4 D7); NONE included as neutral.
+- **PR 4 — Calibrator core.** E-step deconvolution (doc 03 §3) **routed by
+  strand class (§4 D7)**: strand-decodable regions (POS/NEG/NONE) use NB count
+  LLR + BB strand LLR (PR 3's model) → `π_g` → soft masses (G2/G3) on the 3
+  substrate views; closed-form Gamma-Poisson exposure (G4, doc 03 §4, fresh);
+  boundary side-attribution per §4 D1. **AMBIG regions skip the strand LLR**
+  and are imputed by the recovered **boundary sweep** (L↔R density propagation
+  from decodable anchors) + **global-density fallback** (recover
+  `boundary_sweep.py`/`background_model.py`/`boundary_model.py` *mechanism*,
+  scrub cliffs — §5, §4 D7). May split into **PR 4a** (decodable E-step +
+  exposure) and **PR 4b** (ambiguous sweep imputation) — decide at kickoff.
+  Tests: paralog/hybrid-capture sanity, AMBIG-overlap-locus imputation, mass
+  conservation, vectorized==scalar.
 - **PR 5 — M-step + outer loop.** `rho_0`, `eps_s` (closed forms);
   `phi`, `rho_d_bb`, `rho_r_bb` (1-D Newton + moment warm start);
   `pi_g_prior` update; outer loop with the mass-change monotonicity
@@ -437,6 +518,8 @@ state the previous PR actually produced. PR 0's doc is written now.
 | 3 | Recovered strand code drags in cliff constants | Harvest only the named functions; magic-number scrub on entry |
 | 4 | FL-free three-leg paralog rescue weaker than FL-bearing v5 | PR 7 paralog regression must verify; fallbacks in doc 02 §2.5 |
 | 4 | Boundary side strand undefined for non-genic side (D1 sub-decision) | Default neutral `kappa_d=0.5` strand LLR; confirm at PR 4 kickoff |
+| 4 | AMBIG sweep imputation drags back the burnt cliffs (`confidence_floor`, top-X% clip, `damping`, `mu_floor`) | Recover mechanism only; scrub every cliff; each surviving constant discussed at PR 4 kickoff (§4 D7) |
+| 4 | Strand-class routing missed → AMBIG silently oriented (phantom strand signal, the v5-style paralog pathology) | `ts_class` carries the 4-way distinction from PR 1/2; substrate test asserts AMBIG flagged; PR 3/4 key strand use off `ts_class` |
 | 5 | Mass-change increases between iterations (EM violation) | `CalibrationConvergenceError`; never silently continue |
 | 6 | Per-transcript→per-locus aggregation loses resolution paralogs need | If paralog fails, escalate to per-transcript EM API (C++ change) |
 | 7 | armis2 regression, no clear cause | `scripts/debug/dump_calibration_state.py` (PR 5) |

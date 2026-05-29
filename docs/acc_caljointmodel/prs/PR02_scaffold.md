@@ -266,11 +266,24 @@ class CalibrationSubstrate:
      fractional side mass), orienting `k_plus` by **region `r`'s** `ts_class`.
 4. `L_eff = region_arrays.region_size_bp`; `ts_class = region_arrays.ts_class`.
 
-**Strand orientation (Q2).** `sense` uses `ts_class[r]`: `+` → `ch0`/`ch2`,
-`−` → `ch1`/`ch3`. For `TS_NONE` / `TS_AMBIG` regions there is no defined
-sense; per Q2 we assign a **fixed arbitrary** convention (sense = `strand+`).
-This is harmless: such regions carry `κ_rna ≈ 0.5` / neutral strand evidence
-downstream, so the choice cannot manufacture RNA. (Not a tunable.)
+**Strand orientation — NONE vs AMBIG (important; see [§4 D7](../00_implementation_plan.md)).**
+`sense` uses `ts_class[r]`: `TS_POS` → `ch0`/`ch2`, `TS_NEG` → `ch1`/`ch3`.
+The two zero-sense classes are **not** equivalent:
+
+- **`TS_NONE`** (intergenic, no transcript): gDNA is unstranded, so a fixed
+  arbitrary choice (sense = `strand+`) is **safe** — neutral evidence, cannot
+  manufacture RNA. NONE stays in the strand model (per Q2).
+- **`TS_AMBIG`** (overlapping transcripts on **both** strands): every read is
+  sense for one transcript and antisense for the other — **no valid sense
+  split exists.** An arbitrary convention here is *wrong*. AMBIG's `k_plus` is
+  a non-meaningful placeholder; it is **excluded** from the strand-balance fit
+  (PR 3) and the E-step strand log-BF (PR 4). AMBIG regions are deconvolved by
+  the count/density channel + boundary-sweep imputation + global fallback
+  (D7). The strand-agnostic `n_unspliced`/`n_spliced`/`mass_*` remain valid.
+
+`ts_class` carries the full 4-way distinction so downstream routes correctly.
+PR 2 only computes the views and flags AMBIG via `ts_class` (no AMBIG-specific
+inference yet). Not a tunable.
 
 ## II.4 — T3: `CalibrationConfig` reconciliation
 

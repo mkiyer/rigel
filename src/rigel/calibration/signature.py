@@ -59,6 +59,17 @@ class RegionStrand(IntFlag):
 # Transcript-strand class for a region's signature (signed int8 encoding used
 # by :class:`rigel.calibration.region_arrays.RegionArrays`). TS_NEG is -1 so a
 # region's "sense" channel can be selected by the sign.
+#
+# NONE and AMBIG both lack a single transcript strand but are NOT
+# interchangeable for the strand channel:
+#   * TS_NONE  — no transcript (intergenic). gDNA is unstranded, so an arbitrary
+#                sense assignment is SAFE (neutral). Stays in the strand model.
+#   * TS_AMBIG — transcripts on BOTH strands (overlapping opposite-strand
+#                annotations). Every read is sense for one and antisense for the
+#                other, so there is NO valid sense split. AMBIG regions are
+#                EXCLUDED from strand deconvolution and recovered by density +
+#                boundary-sweep imputation + global fallback
+#                (see docs/acc_caljointmodel/00_implementation_plan.md §4 D7).
 TS_NONE: int = 0
 TS_POS: int = 1
 TS_NEG: int = -1

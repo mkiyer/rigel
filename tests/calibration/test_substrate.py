@@ -10,8 +10,16 @@ from _synthetic import make_synthetic_payload
 
 from rigel.calibration.errors import CalibrationSubstrateError
 from rigel.calibration.region_arrays import RegionArrays
-from rigel.calibration.signature import TS_NEG, TS_NONE, TS_POS
+from rigel.calibration.signature import (
+    BIT_EXON_NEG,
+    BIT_EXON_POS,
+    TS_AMBIG,
+    TS_NEG,
+    TS_NONE,
+    TS_POS,
+)
 from rigel.calibration.substrate import CalibrationSubstrate
+from rigel.scan_payload import AccumulatorPayload
 
 
 def test_contained_reductions():
@@ -67,6 +75,43 @@ def test_shared_flux_used_by_both_neighbours():
     payload, ra = make_synthetic_payload()
     sub = CalibrationSubstrate.from_payload(payload, ra)
     assert sub.right.n_unspliced[0] == sub.left.n_unspliced[1] == 5
+
+
+def test_ambiguous_region_is_flagged_not_silently_oriented():
+    # A region with transcripts on BOTH strands (AMBIG) has no valid sense.
+    # The substrate must flag it via ts_class (== TS_AMBIG, distinct from
+    # TS_NONE) so downstream excludes it from strand inference. The
+    # strand-agnostic counts/mass stay valid; only k_plus is a placeholder.
+    region_contained = np.array([[5, 8, 0, 0]], dtype=np.uint32)
+    payload = AccumulatorPayload(
+        boundaries=np.array([0, 300], dtype=np.int64),
+        ref_pos_offsets=np.array([0, 2], dtype=np.int64),
+        ref_region_offsets=np.array([0, 1], dtype=np.int64),
+        ref_boundary_offsets=np.array([0, 2], dtype=np.int64),
+        region_contained=region_contained,
+        boundary_mass_left=np.zeros((2, 4), dtype=np.float32),
+        boundary_mass_right=np.zeros((2, 4), dtype=np.float32),
+        boundary_flux=np.zeros((2, 4), dtype=np.uint32),
+        n_refs=1,
+    )
+    region_df = pd.DataFrame(
+        {
+            "region_id": np.array([0], dtype=np.int64),
+            "ref_name": pd.array(["chr1"], dtype="string"),
+            "start": np.array([0], dtype=np.int64),
+            "end": np.array([300], dtype=np.int64),
+            "length": np.array([300], dtype=np.int64),
+            "signature": np.array([BIT_EXON_POS | BIT_EXON_NEG], dtype=np.uint8),
+        }
+    )
+    ra = RegionArrays.from_region_df(region_df, {"chr1": 0})
+    sub = CalibrationSubstrate.from_payload(payload, ra)
+
+    # Flagged as AMBIG (NOT collapsed into POS/NONE).
+    assert sub.ts_class[0] == TS_AMBIG
+    assert sub.ts_class[0] != TS_NONE
+    # Strand-agnostic density stays valid and usable for AMBIG.
+    assert sub.contained.n_unspliced[0] == 13
 
 
 def test_misaligned_payload_raises():

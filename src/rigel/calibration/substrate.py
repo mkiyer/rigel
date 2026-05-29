@@ -18,6 +18,25 @@ equals the integer count; for the boundary views the counts come from the
 shared integer ``flux`` and the mass from the fractional ``mass_left`` /
 ``mass_right`` (the D1 side-attribution; see
 ``00_implementation_plan.md`` §4 D1).
+
+**Strand decodability (NONE vs AMBIG — important).** ``k_plus`` orients the
+strand channel to the region's transcript strand (``ts_class``). It is
+well-defined only for single-strand regions:
+
+* ``TS_POS`` / ``TS_NEG`` — sense is ``strand+`` / ``strand−`` respectively.
+* ``TS_NONE`` (intergenic, no transcript) — gDNA is unstranded, so an
+  arbitrary fixed choice (sense = ``strand+``) is **safe**; the strand channel
+  contributes ~no net evidence.
+* ``TS_AMBIG`` (overlapping transcripts on **both** strands) — every read is
+  sense for one transcript and antisense for the other, so **no valid sense
+  split exists**. ``k_plus`` for these regions is a non-meaningful placeholder
+  and **must not feed strand inference**. AMBIG regions are excluded from the
+  strand-balance fit (PR 3) and from the E-step strand log-BF (PR 4); they are
+  deconvolved by the count/density channel + the boundary-sweep imputation +
+  global fallback (see ``00_implementation_plan.md`` §4 D7). ``ts_class``
+  carries this 4-way distinction so downstream can route correctly; the
+  strand-agnostic ``n_unspliced`` / ``n_spliced`` / ``mass_*`` remain valid
+  for AMBIG.
 """
 
 from __future__ import annotations
@@ -39,8 +58,11 @@ def _reduce_counts(
     c = counts4.astype(np.int64, copy=False)
     n_unspliced = c[:, 0] + c[:, 1]
     n_spliced = c[:, 2] + c[:, 3]
-    # k_plus = sense-strand count among unspliced; sense = strand+ unless the
-    # region's transcript strand is −. NONE/AMBIG use the fixed strand+ choice.
+    # k_plus = sense-strand count among unspliced. sense = strand+ for TS_POS,
+    # strand− for TS_NEG. TS_NONE uses strand+ (arbitrary, safe — gDNA is
+    # unstranded). TS_AMBIG also falls here but its value is a non-meaningful
+    # placeholder: AMBIG has no valid sense and is excluded from strand
+    # inference downstream (keyed off ts_class; see module docstring / D7).
     k_plus = np.where(sense_is_pos, c[:, 0], c[:, 1])
     return n_unspliced, n_spliced, k_plus
 
@@ -89,6 +111,9 @@ class CalibrationSubstrate:
         r = region_arrays.n_regions
 
         ts_class = np.ascontiguousarray(region_arrays.ts_class, dtype=np.int8)
+        # Orientation for the strand channel. TS_NEG → sense is strand−; all
+        # others (POS, NONE-arbitrary, AMBIG-placeholder) → strand+. AMBIG's
+        # value is excluded downstream via ts_class (see module docstring).
         sense_is_pos = ts_class != TS_NEG
 
         # Contained view: integer counts; mass equals the count.

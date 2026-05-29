@@ -216,6 +216,19 @@ $$
 
 with the per-region soft-allocation E-step computing the expected split (§6).
 
+> **Strand-ambiguous regions (added 2026-05-29; see
+> [`../acc_caljointmodel/00_implementation_plan.md`](../acc_caljointmodel/00_implementation_plan.md)
+> §4 D7).** This strand factor assumes the region has a single transcript
+> strand, so that "sense" is defined. A region with overlapping transcripts on
+> **both** strands (signature with both `+` and `−` bits) has **no valid sense
+> split** — every read is sense for one transcript and antisense for the other
+> — and the strand factor is **omitted** for it. Such regions are deconvolved
+> by the count channel + a boundary-density sweep + a global gDNA-density
+> fallback (D7). Intergenic (no transcript) regions are different: gDNA is
+> unstranded, so an arbitrary sense is harmless and the strand factor stays
+> (contributing ~zero log-evidence). This paragraph is the interim contract;
+> §4.3/§7 get a full rewrite in Phase 8.
+
 ### 4.4 Splice channel (already covered in §3)
 
 The spliced count contributes mass $(1 - \epsilon_s) n_r^{\text{s}}$ directly to $M_r^{(d)}$. There is no Bayes step; the spliced count is a sufficient statistic that is added at the end of the unspliced-channel deconvolution.
