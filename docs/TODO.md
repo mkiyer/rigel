@@ -1,15 +1,8 @@
 # TODO
 
+## Native fractional accumulator rework
 
-- 2026-05-28: Second targeted run exposed an implementation issue: the old low-confidence global
-  pool fallback could leak priors into confidently expressed loci when `p_unexpressed = 0`. PR 01
-  now treats `p_unexpressed` as an eligibility gate and uses weighted local prior mass only;
-  global-pool shrink blending is disabled until a future confidence model is introduced.
-- 2026-05-28: Validation after the local-mass gate change passed: targeted PR 01 suite reported
-  54 passed; pipeline smoke reported 13 passed; broader calibration sweep reported 72 passed;
-  Ruff passed on touched Python files.
-
-
+I think we need to enhance our native fractional accumulator prior to tackling this new calibration system. The goal is to make the accumulator more efficient by separating 'regions' into 'regions' and 'boundaries'. Currently, a Region has a 1) left boundary, 2) a right boundary, and 3) contained fragments. Under the new model, 'regions' would store the 'contained' fragment data, and 'boundaries' would store boundary data. If we partition a reference chromosome into N regions numbered {0..N}, a Region at index 'i' would have Boundary structures at index 'i' (left boundary) and index 'i+1' (right boundary). Region structs would store part of the data, and Boundary structs would store boundary data. This would be a rewrite of the fractional accumulator and the calibration model would inherit this new structure. Currently, the calibration system constructs separate Region and Boundary objects from the fractional accumulator data. This is redundant work. The native accumulator should build these structures during the initial pass. It should be straightforward, because a reference chromosome can be broken up into non-overlapping regions, and each region has two boundaries. The number of boundaries equals the number of regions + 1. The leftmost boundary of a chromosome is empty/null and the rightmost boundary of a reference chrom is also empty/null. All other boundaries are shared by two regions. ----- What is stored in the 'Boundary' structures? Each boundary still needs to track two masses from left and right. Fractional Mass is broken down into: spliced_pos, spliced_neg, unspliced_pos, unspliced_neg (4 float32 per side x 2 (left and right) = 8 float32). Boundaries also store the total flux in discrete fragments (uint32) *once* per boundary. The total integer fragment flux (uint32) is broken down into spliced_pos, spliced_neg, unspliced_pos, unspliced_neg (uint32 x 4). So boundaries store BOTH fractional (float32) mass broken down into left/right, AND integer count 'flux' (not broken down by left/right). ----- What is stored in the 'Region' structures? Regions need to store contained counts. Contained counts are not fractional by definition, because the entire fragment is contained in the region. Only fragments that span multiple regions are divided into fractional counts and will appear as boundary mass, not contained mass. So regions can store (spliced_pos, spliced_neg, unspliced_pos, unspliced_neg) as float32 x 4 or as uint32 x 4. ------ Potential bug or inconsistency: What about fragments with many aligned blocks? We sequence paired-end fragments and this can manifest as multiple aligned blocks per fragment. WE need to audit the fractional accumulator. Are we accumulating "per block" or "per fragment"? This is challenging. For fragments longer then 2 x read_length, there is intervening portion in the middle of the fragment that is not sequenced, but is still implicit. This can result in implicit splice junctions (two aligned blocks of fragment are on different exons, but the splice junction is not explicitly sequenced and identified). Our fractional accumulator needs to operate at a "per-fragment" level to be fair. Fragments may be made of multiple aligned blocks. IF we accumulate "aligned blocks", we need to ensure that we normalize correctly. We might have 3 aligned blocks with lengths 50, 100, 150, with total sequenced length 300bp, but the fragment length may have been 500bp. The fair solution is to normalize by the fragment length (each base gets 1/500 share) but this requires knowing fragment length (we often don't know this). So the next best thing to do is normalize by sum of sizes of the aligned blocks. So we would normalize 1/300 in the example. So that changes the Region struct. Regions may to store both fractional and integer values: (spliced_pos, spliced_neg, unspliced_pos, unspliced_neg) as float32 and ALSO as uint32. The integer fragment counts are incremented ---- What about fragments with multiple aligned blocks but no spliced? Should this be accumulated as boundary flux? Which boundaries? We can only accumulate boundaries that are observed/implied by the aligned blocks we can see. If a fragment aligns to multiple "regions", it is by definition not contained, and so the best we can do is accumulate it at the boundaries. Here's the example. Transcript with exons (1000,2000), (5000,6000), (9000,15000). Fragment with two aligned blocks at (1800, 1950) and (5050,5200) -- 300bp of aligned blocks involving two different exons (and hence two regions). Is this a 'contained' fragment? NO! It is actually an example of boundary crossing fragment because it cannot by definition be contained in a single region. So it would increment the LEFT boundary mass at position 2000 and it would increment the RIGHT boundary mass at boundary position 5000. The fragment is implicitly spliced, so the pos=2000 boundary would get the LEFT spliced_pos (assuming + strand) +150/300 = 0.5. And then the pos=5000 boundary would get the RIGHT spliced_pos +150/300 = +0.5. This should make sense. ----- This implies that REGIONS only need to store truly contained fragments and can accumulate integers (uint32). Boundaries need to store fractional left/right mass AND total integer flux. The total integer counts are essential to knowing the number of fragment observations (sample size) in discrete counts which is the 'statistical power' present at that boundary leading to the fractional mass computed there. ---- In summary, we need a native accumulator rework. The Region / Boundary split is intuitive and improves efficiency. A region at index 'i' has left boundary at index 'i' and right boundary at index 'i+1'. Accumulation can still be performed efficiently. We also need an audit of how we accumulate fragments. This likely need to be formalized and made strict. The contracts and plan is designed above. 
 
 
 ## Calibration redesign around the concept of exposure.
@@ -102,84 +95,6 @@ So what are the next steps forward?
 The reason to move forward with the above system is that it is simpler. It is elegant. It works with all types of data. It does not care whether we have capture or not. It just models. This is why I think it is worth pursuing first. A capture classification strategy has the additional burden of having to first decide "is this a capture library or not?" and then try to classify regions. That is hard because there are so many variables.. individual probes. Some experments don't work well. Some capture panels just target a tiny handful of genes leading to a huge class imbalance (most transcripts off-target). Putting it all together, it strikes me as complex and fraught with problems.
 
 I think we can be confident that this idea has a good chance of working and that we can instrument it to behave elegantly.
-
-
-
-## Unimodel (noncapture) vs Bimodal (Capture) gDNA model
-
-We now had a four-state model capturing the 4 combinations of (expressed true/false) and (capture true/false). This appears to be quite elegant and may be capable of what we need.
-
-We have a strong biological foundation for seeding this model with (expressed=false, captured=false) regions that are intergenic/intronic and can further support this with strand-specific data to corroborate our "background" seed regions.
-
-We still have a fundamental question -- is this hybrid capture data? Or is it non-capture data? We don't know the answer to this question and hope to learn from the data.
-
-There are two approaches:
-
-1) The "who cares" approach? 
-
-Accurate prior estimation is the primary goal of calibration. If this can be done without explicitly modeling hybrid capture, then we don't need the complexity of a "two state" model.
-
-The premise is that "capture" amplifies certain regions and depletes others, hybrid capture can fail to enrich targets or produce modest enrichment. Thus, hybrid capture is not binary a the whole-library level or even at the per-probe level. Some probes work well on some targets. Other probes do not work well at all. Our goal should be to learn the amplification/depletion patterns. It doesn't really matter what the library prep was. What matters is accurately modeling gDNA vs RNA in the observed data. Non-capture data assumes "uniform". Modeling "capture" data allows for non-uniformity (enrichment of some regions, depletion of others).  
-
-This stance makes no assumptions and allows flexibility. It does not assume uniformity.
-
-2) The "explicit capture model" approach.
-
-This approach tries to answer the question "is this hybrid capture data or not?" and then model appropriately. If it is hybrid capture data, we need to define two states, 'captured', and 'not captured'. There is a global capture ratio and local capture ratios. If it is not hybrid capture data, we can assume uniformity. 
-
-If we adopt this as our goal, our method critically lacks a "positive control". We need a strategy to "seed" captured regions.
-
-My proposal would be to first estimate gDNA levels across all regions. We have our "background" regions that are not captured. We would then suppose that under a hybrid capture environment, at least some targets will be enriched. We would identify the regions with the highest levels of gDNA and assign them 'capture' state. Then allow our iterative algorithm to assign the remaining regions either 'capture' or 'no capture' status. We aren't doing this 'capture=true' seeding now. Do we need to? 
-
---------
-
-In summary - we are at a crossroads in terms of how to set up our new calibration system. Either we adopt a 1) "model allows for flexible, non-uniform enrichment patterns across regions" approach tha accommodate capture and non-capture data, or 2) "detect capture mode first, and model it as two states" approach.
-
-I need guidance on what to do.. and then advice on how to do it.
-
-
-### Guidance: How v6 Resolves the Crossroads
-
-You do not need to make a hard binary choice between **Approach 1 (flexible, non-uniform enrichment)** and **Approach 2 (explicit capture mode pre-detection)**.
-
-The architecture laid out in **New Calibration Plan v6** already synthesizes both ideas into a single framework. It acts as a continuous, self-gating model that naturally behaves like Approach 1 when capture is absent or weak, and smoothly unfolds into Approach 2 when strong capture enrichment is present.
-
-#### Why this Unified Approach Beats a Discrete Switch
-
-1. **Avoids Brittle Thresholds & Manual Seeding:** Explicitly detecting the library type upfront or hard-seeding "captured" regions based on top gDNA counts introduces arbitrary thresholds. This creates failure modes when capture enrichment is modest, highly variable across probes, or non-uniform at a whole-library level.
-2. **Natural State Collapse:** By introducing an internal tracking parameter called `capture_enrichment_target`, the distinction between captured and off-target states organically collapses if the data is uniform (non-capture). If `capture_enrichment_target == 1.0`, the expected densities for both states are identical, reducing the model down to a uniform density assumption without changing code paths.
-3. **No Seeding Needed for Capture:** You do not need to manually seed `capture=true` regions. The combination of structural background anchors (`state_log_prior` and `background.seed_mask`) along with regional boundary sweeps provides enough mathematical asymmetry for the EM iterations to organically separate enriched regions from background regions.
-
----
-
-### Advice: How to Implement It
-
-To execute this unified strategy successfully under the v6 plan, implement the calibration loop using an adaptive parameter tracking framework:
-
-#### 1. Initialization and Collapse Gating
-
-* Initialize `capture_enrichment_target = 1.0` at the start of the calibration loop.
-* Keep this variable strictly as an internal stabilizer, never exposing it as a user-facing knob.
-
-#### 2. The Anchor-and-Sweep E-Step
-
-Instead of seeding positive captured regions, use structural annotation priors and localized boundary signals to let enrichment bubble up naturally:
-
-* **The Background Anchor:** Seed *only* the baseline background using `background.seed_mask` (identifying intergenic/intronic regions with no expression). Apply this as a soft prior boost in the `state_log_prior` for the first 1–2 passes rather than a permanent hard label clamp.
-* **The Boundary Sweep Drive:** Let the local boundary-to-contained predictions and the sequential forward/reverse boundary scans propagate regional excess gDNA evidence into adjacent intervals. Heavily enriched captured regions will exhibit large boundary-imputed gDNA counts that deviate strongly from the low off-target background density `rho_off`.
-* **Log Bayes Factors:** Assemble the `logBF_gdna_density` and `logBF_capture` terms into the state log tensor. On pass 0 (where `capture_enrichment_target` is exactly `1.0`), the log Bayes factor between captured and off-target density evaluates to zero, meaning the model starts by treating everything uniformly.
-
-#### 3. The Adaptive M-Step Refit
-
-* **Posterior Aggregation:** At the end of each pass, compute the total captured posterior weight across all regions (`p_gdna_only_capture + p_expressed_capture`).
-* **Target Updating:** If there is strong, widespread posterior evidence of regional enrichment, update `capture_enrichment_target` from the captured-weighted gDNA density relative to `rho_off`.
-* **Damping and Floors:** Apply a strict floor of `capture_enrichment_target >= 1.0` so it can never mistakenly model a "negative capture" depletion. Use a fixed internal damping scalar (such as `eta = 0.5`) to smooth the update across passes and prevent numerical oscillation:
-
-$$\theta_{next} = (1 - \eta) \cdot \theta_{current} + \eta \cdot \hat{\theta}$$
-
-
-
-By configuring the loop this way, non-capture libraries will keep `capture_enrichment_target` pinned at or near `1.0`, keeping the states collapsed and fulfilling the uniform assumption. For hybrid capture libraries, strong boundary signals will pull the target upward, automatically activating the bimodal behavior without requiring any upfront classification or risky manual positive seeding.
 
 
 
