@@ -198,7 +198,7 @@ def _background_density_summary(bg_density) -> dict[str, object]:
         "log_dispersion": float(bg_density.log_dispersion),
         "n_effective_regions": float(bg_density.n_effective_regions),
         "n_regions_in_pool": int(bg_density.n_regions_in_pool),
-        "method_histogram": list(bg_density.method_histogram),
+        "info_histogram": list(bg_density.info_histogram),
         "fit_status": str(bg_density.fit_status),
     }
 

@@ -22,7 +22,6 @@ from rigel.calibration.calibration_iteration import (
 )
 from rigel.calibration.exposure import (
     FLAG_EXPOSURE_BOOTSTRAP_NEUTRAL,
-    FLAG_EXPOSURE_IMPUTED_TIER3,
     FLAG_EXPOSURE_NOT_TAU2_POOL,
     FLAG_EXPOSURE_NO_SUPPORT,
     RegionExposure,
@@ -53,7 +52,7 @@ def _density(*, fit_status: str = "converged") -> BackgroundDensity:
         log_dispersion=float(np.log(10.0)),
         n_effective_regions=3.0,
         n_regions_in_pool=2,
-        method_histogram=(2, 0, 1),
+        info_histogram=(2, 0),
         fit_status=fit_status,
     )
 
@@ -131,8 +130,8 @@ def test_no_pool_density_is_exposure_neutral_but_keeps_raw_diagnostics() -> None
         log_dispersion=float(np.log(10.0)),
         n_effective_regions=0.0,
         n_regions_in_pool=0,
-        method_histogram=(0, 0, 3),
-        fit_status="fallback_bootstrap",
+        info_histogram=(0, 0),
+        fit_status="prior_only",
     )
 
     exposure = estimate_region_exposure(
@@ -141,7 +140,8 @@ def test_no_pool_density_is_exposure_neutral_but_keeps_raw_diagnostics() -> None
                 METHOD_BACKGROUND_FALLBACK,
                 METHOD_BACKGROUND_FALLBACK,
                 METHOD_BACKGROUND_FALLBACK,
-            ]
+            ],
+            precision=[0.0, 0.0, 0.0],
         ),
         density,
         np.ones(3, dtype=np.float64),
@@ -150,13 +150,12 @@ def test_no_pool_density_is_exposure_neutral_but_keeps_raw_diagnostics() -> None
     assert exposure.tau2_method == "no_pool_neutral"
     np.testing.assert_allclose(exposure.omega, np.ones(3))
     assert exposure.raw_ratio[2] > 1.0
-    assert np.all((exposure.flags & FLAG_EXPOSURE_IMPUTED_TIER3) != 0)
     assert np.all((exposure.flags & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0)
 
 
 def test_method_of_moments_shrinks_pool_rows_and_neutralizes_tier3() -> None:
     exposure = estimate_region_exposure(
-        _mass(),
+        _mass(gdna=[9.0, 49.0, 100.0], precision=[1.0, 1.0, 0.0]),
         _density(),
         np.ones(3, dtype=np.float64),
     )
@@ -164,29 +163,13 @@ def test_method_of_moments_shrinks_pool_rows_and_neutralizes_tier3() -> None:
     assert exposure.tau2_method == "moment"
     assert exposure.tau2_pool_size == 2
     assert exposure.tau2 > 0.0
-    assert exposure.omega[0] == pytest.approx(1.0)
+    assert 1.0 < exposure.omega[0] < exposure.raw_ratio[0]
     assert 1.0 < exposure.omega[1] < exposure.raw_ratio[1]
+    assert exposure.shrink_weight[0] > 0.0
     assert exposure.shrink_weight[1] > 0.0
     assert exposure.omega[2] == pytest.approx(1.0)
     assert exposure.shrink_weight[2] == pytest.approx(0.0)
-    assert (exposure.flags[2] & FLAG_EXPOSURE_IMPUTED_TIER3) != 0
     assert (exposure.flags[2] & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0
-
-
-def test_exposure_pool_requires_high_p_unexpressed() -> None:
-    exposure = estimate_region_exposure(
-        _mass(),
-        _density(),
-        np.array([0.01, 0.50, 1.00], dtype=np.float64),
-    )
-
-    assert exposure.tau2_method == "no_pool_neutral"
-    assert exposure.tau2_pool_size == 0
-    np.testing.assert_allclose(exposure.omega, np.ones(3))
-    np.testing.assert_allclose(exposure.shrink_weight, np.zeros(3))
-    assert exposure.raw_ratio[1] > 1.0
-    assert (exposure.flags[0] & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0
-    assert (exposure.flags[1] & FLAG_EXPOSURE_NOT_TAU2_POOL) != 0
 
 
 def test_tau2_damping_uses_previous_real_fit() -> None:

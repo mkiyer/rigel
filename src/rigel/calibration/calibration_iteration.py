@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, TYPE_CHECKING
 
 import numpy as np
 from scipy.special import logsumexp
@@ -31,6 +31,9 @@ from .latent_states import (
 )
 from .strand_deconv import RegionGdnaChannelEstimate
 
+if TYPE_CHECKING:
+    from .fusion import FusedRegionGdnaEvidence  # noqa: F401
+
 __all__ = [
     "FLAG_STATE_AMBIGUOUS",
     "FLAG_STRAND_UNINFORMATIVE",
@@ -47,6 +50,7 @@ __all__ = [
     "RegionCalibration",
     "CalibrationStepResult",
     "build_region_unspliced_mass",
+    "build_region_unspliced_mass_from_fused",
     "estimate_background_density",
     "calibration_e_step",
     "calibration_m_step",
@@ -101,6 +105,14 @@ class RegionUnsplicedMass:
                                    #             METHOD_BACKGROUND_FALLBACK
     precision: np.ndarray          # float64[R]  estimator reliability (M-step weight)
     flags: np.ndarray              # uint16[R]   diagnostic bits
+
+    # PR 07 v2 (Phase 5): per-channel Fisher information. Required from
+    # Phase 5 onward; the background and exposure refits use these as the
+    # continuous pool weights. When constructed via the legacy tier-ladder
+    # builder these default to ``precision`` (density channel) and zeros
+    # (strand channel), preserving the prior pool semantics.
+    density_information: np.ndarray | None = None  # float64[R]  Fisher info from density
+    strand_information: np.ndarray | None = None   # float64[R]  Fisher info from strand
 
     def __post_init__(self) -> None:
         total = np.ascontiguousarray(np.asarray(self.total_mass, dtype=np.float64))
@@ -160,6 +172,37 @@ class RegionUnsplicedMass:
         if not np.all(np.isfinite(self.precision)) or np.any(self.precision < 0.0):
             raise ValueError("precision must be finite and non-negative.")
 
+        # PR 07 v2: required per-channel Fisher information vectors.
+        # When not supplied, fall back to ``precision`` for the density
+        # channel and zeros for the strand channel — keeps legacy
+        # tier-ladder builders and existing tests producing valid masses
+        # whose pool eligibility (info > 0) matches the old precision > 0
+        # criterion.
+        precision_arr = np.asarray(self.precision, dtype=np.float64)
+        if self.density_information is None:
+            density_info = precision_arr.copy()
+        else:
+            density_info = np.ascontiguousarray(
+                np.asarray(self.density_information, dtype=np.float64)
+            )
+        if self.strand_information is None:
+            strand_info = np.zeros(region_count, dtype=np.float64)
+        else:
+            strand_info = np.ascontiguousarray(
+                np.asarray(self.strand_information, dtype=np.float64)
+            )
+        for opt_name, arr in (
+            ("density_information", density_info),
+            ("strand_information", strand_info),
+        ):
+            if arr.shape != (region_count,):
+                raise ValueError(
+                    f"{opt_name} must have shape ({region_count},); got {arr.shape}."
+                )
+            if not np.all(np.isfinite(arr)) or np.any(arr < 0.0):
+                raise ValueError(f"{opt_name} must be finite and non-negative.")
+            object.__setattr__(self, opt_name, arr)
+
 
 @dataclass(frozen=True, slots=True)
 class BackgroundDensity:
@@ -176,7 +219,7 @@ class BackgroundDensity:
     log_dispersion: float       # weighted sigma-equivalent of log(rho_hat_r), in nats
     n_effective_regions: float  # Sum of weights over pool
     n_regions_in_pool: int      # raw pool size
-    method_histogram: tuple     # (n_tier1, n_tier2, n_tier3_excluded)
+    info_histogram: tuple       # (n_density_used, n_strand_used)
     fit_status: str             # see Section 6.6 of PR03 plan
 
     _VALID_STATUSES: ClassVar[tuple[str, ...]] = (
@@ -211,11 +254,11 @@ class BackgroundDensity:
             raise ValueError(
                 f"n_regions_in_pool must be >= 0; got {self.n_regions_in_pool!r}."
             )
-        hist = tuple(int(x) for x in self.method_histogram)
-        if len(hist) != 3 or any(x < 0 for x in hist):
+        hist = tuple(int(x) for x in self.info_histogram)
+        if len(hist) != 2 or any(x < 0 for x in hist):
             raise ValueError(
-                "method_histogram must be a 3-tuple of non-negative ints; "
-                f"got {self.method_histogram!r}."
+                "info_histogram must be a 2-tuple of non-negative ints; "
+                f"got {self.info_histogram!r}."
             )
         status = str(self.fit_status)
         if status not in self._VALID_STATUSES:
@@ -228,7 +271,7 @@ class BackgroundDensity:
         object.__setattr__(self, "log_dispersion", log_disp)
         object.__setattr__(self, "n_effective_regions", n_eff)
         object.__setattr__(self, "n_regions_in_pool", n_pool)
-        object.__setattr__(self, "method_histogram", hist)
+        object.__setattr__(self, "info_histogram", hist)
         object.__setattr__(self, "fit_status", status)
 
     @classmethod
@@ -241,7 +284,7 @@ class BackgroundDensity:
             log_dispersion=float(np.log(10.0)),
             n_effective_regions=0.0,
             n_regions_in_pool=0,
-            method_histogram=(0, 0, 0),
+            info_histogram=(0, 0),
             fit_status="fallback_bootstrap",
         )
 
@@ -632,6 +675,53 @@ def build_region_unspliced_mass(
     )
 
 
+def build_region_unspliced_mass_from_fused(
+    fused,  # FusedRegionGdnaEvidence — typed via import to avoid cycle
+    *,
+    region_size_bp: np.ndarray,
+    unspliced_counts: np.ndarray,
+) -> RegionUnsplicedMass:
+    """Wrap a ``FusedRegionGdnaEvidence`` into the calibration mass schema.
+
+    PR 07 v2 Phase 4 builder: every per-region ``gdna_mass`` comes directly
+    from ``fused.gdna_mass`` (closed-form FMA). The legacy tier-ladder fields
+    are populated as transition shims: ``method`` is uniformly ``METHOD_STRAND``
+    (a value bookkeeping for downstream code that still inspects it), and
+    ``precision`` is the total fused Fisher information
+    ``density_information + strand_information``. ``flags`` carries the fused
+    diagnostic bits cast to uint16.
+    """
+    total = np.asarray(fused.total_mass, dtype=np.float64)
+    region_count = int(total.shape[0])
+    region_bp = _as_float64_vector("region_size_bp", region_size_bp, region_count)
+    counts = np.ascontiguousarray(np.asarray(unspliced_counts, dtype=np.uint64))
+    if counts.shape != (region_count,):
+        raise ValueError(
+            f"unspliced_counts must have shape ({region_count},); got {counts.shape}."
+        )
+
+    gdna = np.ascontiguousarray(np.asarray(fused.gdna_mass, dtype=np.float64))
+    rna = total - gdna  # exact in float64 because fused clips D_hat to [0, T].
+    density_info = np.asarray(fused.density_information, dtype=np.float64)
+    strand_info = np.asarray(fused.strand_information, dtype=np.float64)
+    precision = density_info + strand_info
+    method = np.full(region_count, METHOD_STRAND, dtype=np.uint8)
+    flags = np.asarray(fused.flags, dtype=np.uint16).astype(np.uint16, copy=True)
+
+    return RegionUnsplicedMass(
+        total_mass=total,
+        gdna_mass=gdna,
+        rna_mass=rna,
+        region_size_bp=region_bp,
+        unspliced_counts=counts,
+        method=method,
+        precision=precision,
+        flags=flags,
+        density_information=density_info,
+        strand_information=strand_info,
+    )
+
+
 # ---------------------------------------------------------------------------
 # PR 03: Robust geomean + Huber rho0 estimator (Section 6.3-6.7)
 # ---------------------------------------------------------------------------
@@ -698,8 +788,9 @@ def estimate_background_density(
     gdna = np.asarray(region_unspliced_mass.gdna_mass, dtype=np.float64)
     region_bp = np.asarray(region_unspliced_mass.region_size_bp, dtype=np.float64)
     counts = np.asarray(region_unspliced_mass.unspliced_counts, dtype=np.uint64)
-    method = np.asarray(region_unspliced_mass.method, dtype=np.uint8)
-    precision = np.asarray(region_unspliced_mass.precision, dtype=np.float64)
+    density_info = np.asarray(region_unspliced_mass.density_information, dtype=np.float64)
+    strand_info = np.asarray(region_unspliced_mass.strand_information, dtype=np.float64)
+    fused_info = density_info + strand_info
 
     region_count = int(gdna.shape[0])
     p_unx = np.asarray(p_unexpressed, dtype=np.float64)
@@ -708,13 +799,12 @@ def estimate_background_density(
             f"p_unexpressed must have shape ({region_count},); got {p_unx.shape}."
         )
 
-    n_strand = int(np.count_nonzero(method == METHOD_STRAND))
-    n_boundary = int(np.count_nonzero(method == METHOD_BOUNDARY))
-    n_background = int(np.count_nonzero(method == METHOD_BACKGROUND_FALLBACK))
-    method_histogram = (n_strand, n_boundary, n_background)
+    n_density_used = int(np.count_nonzero(density_info > 0.0))
+    n_strand_used = int(np.count_nonzero(strand_info > 0.0))
+    info_histogram = (n_density_used, n_strand_used)
 
     pool_mask = (
-        ((method == METHOD_STRAND) | (method == METHOD_BOUNDARY))
+        (fused_info > 0.0)
         & (counts >= np.uint64(1))
         & (region_bp >= 1.0)
     )
@@ -730,7 +820,7 @@ def estimate_background_density(
             log_dispersion=float(previous.log_dispersion),
             n_effective_regions=0.0,
             n_regions_in_pool=0,
-            method_histogram=method_histogram,
+            info_histogram=info_histogram,
             fit_status="fallback_bootstrap",
         )
 
@@ -741,7 +831,7 @@ def estimate_background_density(
     rho_hat = np.maximum(rho_hat, rho_floor)
     log_rho_hat = np.log(rho_hat)
 
-    weights = precision * counts.astype(np.float64) * p_unx
+    weights = fused_info * p_unx
     weights = np.where(pool_mask, weights, 0.0)
     weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
     weights = np.maximum(weights, 0.0)
@@ -755,7 +845,7 @@ def estimate_background_density(
             log_dispersion=float(previous.log_dispersion),
             n_effective_regions=0.0,
             n_regions_in_pool=n_in_pool,
-            method_histogram=method_histogram,
+            info_histogram=info_histogram,
             fit_status="fallback_bootstrap",
         )
 
@@ -812,7 +902,7 @@ def estimate_background_density(
         log_dispersion=float(log_dispersion),
         n_effective_regions=float(w_sum),
         n_regions_in_pool=n_in_pool,
-        method_histogram=method_histogram,
+        info_histogram=info_histogram,
         fit_status=fit_status,
     )
 
@@ -855,7 +945,7 @@ def calibration_e_step(
     unspliced_counts: np.ndarray,
     background_density: BackgroundDensity,
     previous_region_exposure: RegionExposure | None = None,
-    force_zero_gdna_mass: bool = False,
+    fused: "FusedRegionGdnaEvidence | None" = None,
 ) -> CalibrationStepResult:
     """Run one two-state expression calibration E-step."""
     region_count = _validate_region_inputs(
@@ -938,7 +1028,10 @@ def calibration_e_step(
         local_posterior=local_posterior,
         sweep=sweep,
         background_density=background_density,
-        force_zero_gdna=force_zero_gdna_mass,
+    ) if fused is None else build_region_unspliced_mass_from_fused(
+        fused,
+        region_size_bp=region_arrays.region_size_bp,
+        unspliced_counts=unspliced_counts,
     )
 
     region_exposure = estimate_region_exposure(
@@ -969,12 +1062,11 @@ def calibration_m_step(
     observation: DensityObservation,
     background: BackgroundModel,
     p_states: np.ndarray,
-    strand_channels: RegionGdnaChannelEstimate | None = None,
     *,
     damping: float = 0.5,
     alpha_floor: float = 1.0,
     beta_floor: float = 1.0,
-) -> tuple[BackgroundModel, float | None]:
+) -> BackgroundModel:
     """Refit scalar calibration parameters from state posteriors."""
     if not np.isfinite(damping) or not 0.0 <= float(damping) <= 1.0:
         raise ValueError(f"damping must be finite and in [0, 1]; got {damping!r}.")
@@ -990,16 +1082,9 @@ def calibration_m_step(
     contained_leff = _as_float64_vector(
         "observation.contained_leff", observation.contained_leff, region_count
     )
-    if strand_channels is None:
-        gdna_count = _as_float64_vector(
-            "observation.contained_count", observation.contained_count, region_count
-        )
-        kappa_d = None
-    else:
-        gdna_count = _as_float64_vector(
-            "strand_channels.contained_mean", strand_channels.contained_mean, region_count
-        )
-        kappa_d = float(strand_channels.kappa_d)
+    gdna_count = _as_float64_vector(
+        "observation.contained_count", observation.contained_count, region_count
+    )
 
     seed_mask = np.asarray(background.seed_mask, dtype=bool)
     if seed_mask.shape != (region_count,):
@@ -1043,7 +1128,7 @@ def calibration_m_step(
         flags=np.asarray(background.flags, dtype=np.uint16).copy(),
     )
 
-    return next_background, kappa_d
+    return next_background
 
 
 def _relative_change(current_value: float, previous_value: float | None) -> float:
@@ -1069,7 +1154,7 @@ def run_calibration_iteration(
     confidence: float = 0.95,
     background_boost: float = 1.0,
     unspliced_counts: np.ndarray,
-    force_zero_gdna_mass: bool = False,
+    fused: "FusedRegionGdnaEvidence | None" = None,
 ) -> RegionCalibration:
     """Run the two-state expression calibration loop."""
     if int(max_calibration_passes) < 1:
@@ -1109,7 +1194,7 @@ def run_calibration_iteration(
             unspliced_counts=unspliced_counts,
             background_density=current_density,
             previous_region_exposure=previous_region_exposure,
-            force_zero_gdna_mass=force_zero_gdna_mass,
+            fused=fused,
         )
         if previous_p_states is None:
             max_state_shift = float("inf")
@@ -1156,11 +1241,10 @@ def run_calibration_iteration(
         previous_p_states = step.p_states.copy()
         previous_region_exposure = step.region_exposure
         previous_rho = float(current_background.rho_off_mean)
-        current_background, current_kappa = calibration_m_step(
+        current_background = calibration_m_step(
             observation,
             current_background,
             step.p_states,
-            strand_channels,
             damping=damping,
         )
         current_density = estimate_background_density(

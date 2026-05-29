@@ -24,7 +24,7 @@ from .strand_deconv import (
     deconvolve_compartments_by_strand,
     estimate_kappa_d,
 )
-from .strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR, StrandSummary
+from .strand_summary import StrandSummary
 
 if TYPE_CHECKING:
     from ..frag_length_model import FragmentLengthModels
@@ -34,18 +34,6 @@ if TYPE_CHECKING:
 __all__ = ["calibrate"]
 
 _INTERNAL_GDNA_DENSITY_CI: float = 0.95
-
-
-def _strand_summary_identifiable(
-    strand_summary: StrandSummary,
-    *,
-    confidence: float = 0.99,
-) -> bool:
-    effective_min = max(
-        STRAND_CONTRAST_NUMERICAL_FLOOR,
-        strand_summary.signed_strand_contrast_margin(confidence=confidence),
-    )
-    return abs(strand_summary.signed_strand_contrast) >= effective_min
 
 
 def calibrate(
@@ -101,7 +89,9 @@ def calibrate(
     from .calibration_iteration import run_calibration_iteration
     from .density_model import fit_density_evidence
     from .density_observation import build_density_observation
+    from .fusion import fuse_density_and_strand
     from .region_count_ledger import build_region_count_ledger
+    from .strand_evidence import build_strand_gdna_evidence
 
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     payload_arrays = PayloadArrays.from_payload(payload, region_arrays)
@@ -112,9 +102,6 @@ def calibrate(
         confidence=_INTERNAL_GDNA_DENSITY_CI,
         min_eff_length=float(density_min_eff_length),
     )
-    force_zero_gdna_mass = density_evidence.rho_ref_source == "ZERO"
-
-    strand_usable = _strand_summary_identifiable(strand_summary)
 
     strand_counts = build_strand_region_counts(
         region_arrays,
@@ -137,11 +124,28 @@ def calibrate(
         kappa_d=kappa_d.kappa,
         strand_summary=strand_summary,
     )
-    calibration_strand_channels = strand_channels if strand_usable else None
+
+    # PR 07 v2 Phase 4: assemble per-region density+strand evidence and fuse
+    # them via the closed-form FMA. This replaces the tier-ladder M_r picker.
+    # ``strand_channels`` is now passed through unconditionally; the structural
+    # FMA eligibility (annotation-only) lives inside ``StrandGdnaEvidence``.
+    strand_evidence = build_strand_gdna_evidence(
+        strand_counts=strand_counts,
+        strand_summary=strand_summary,
+        ledger=ledger,
+        ts_class=region_arrays.ts_class,
+    )
+    fused = fuse_density_and_strand(
+        density_evidence=density_evidence,
+        strand_evidence=strand_evidence,
+        n_contained=ledger.contained_unspliced_support,
+        n_left=ledger.boundary_left_unspliced_support,
+        n_right=ledger.boundary_right_unspliced_support,
+    )
 
     background = fit_background_model(
         observation,
-        calibration_strand_channels,
+        strand_channels,
         top_t_fraction=float(background_trim_fraction),
         min_eff_length=float(density_min_eff_length),
     )
@@ -155,13 +159,11 @@ def calibrate(
         observation,
         boundaries,
         background,
-        strand_channels=calibration_strand_channels,
+        strand_channels=strand_channels,
         max_calibration_passes=int(max_calibration_passes),
         confidence=_INTERNAL_GDNA_DENSITY_CI,
-        # PR 03: feed integer unspliced counts to enable RegionUnsplicedMass /
-        # BackgroundDensity construction inside the calibration loop.
         unspliced_counts=ledger.unspliced_support,
-        force_zero_gdna_mass=force_zero_gdna_mass,
+        fused=fused,
     )
 
     return build_calibration_result(

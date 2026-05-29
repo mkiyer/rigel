@@ -12,7 +12,6 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only.
 
 __all__ = [
     "FLAG_EXPOSURE_BOOTSTRAP_NEUTRAL",
-    "FLAG_EXPOSURE_IMPUTED_TIER3",
     "FLAG_EXPOSURE_NOT_TAU2_POOL",
     "FLAG_EXPOSURE_NO_SUPPORT",
     "FLAG_EXPOSURE_NUMERIC_CEILING",
@@ -23,17 +22,14 @@ __all__ = [
 
 FLAG_EXPOSURE_NO_SUPPORT: int = 1 << 0
 FLAG_EXPOSURE_NOT_TAU2_POOL: int = 1 << 1
-FLAG_EXPOSURE_IMPUTED_TIER3: int = 1 << 2
 FLAG_EXPOSURE_NUMERIC_FLOOR: int = 1 << 3
 FLAG_EXPOSURE_NUMERIC_CEILING: int = 1 << 4
 FLAG_EXPOSURE_BOOTSTRAP_NEUTRAL: int = 1 << 5
 
-_METHOD_STRAND: int = 1
-_METHOD_BOUNDARY: int = 2
-_METHOD_BACKGROUND_FALLBACK: int = 3
 _REAL_TAU2_METHODS: frozenset[str] = frozenset({"moment", "moment_damped"})
 _TINY: float = np.finfo(np.float64).tiny
-_MIN_EXPOSURE_POOL_P_UNEXPRESSED: float = 0.80
+# MAD-to-sigma consistency factor for a Gaussian reference.
+_MAD_TO_SIGMA: float = 1.4826
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +147,6 @@ def estimate_region_exposure(
     previous: RegionExposure | None = None,
     alpha_floor: float = 1.0,
     tau2_damping: float = 0.5,
-    winsorize_k: float = 4.0,
     no_support_v_obs: float = 1.0e6,
     omega_floor: float = 1.0e-6,
     omega_ceiling: float = 1.0e6,
@@ -160,7 +155,6 @@ def estimate_region_exposure(
     _validate_scalar_params(
         alpha_floor=alpha_floor,
         tau2_damping=tau2_damping,
-        winsorize_k=winsorize_k,
         no_support_v_obs=no_support_v_obs,
         omega_floor=omega_floor,
         omega_ceiling=omega_ceiling,
@@ -173,19 +167,22 @@ def estimate_region_exposure(
         region_unspliced_mass.region_size_bp,
         region_count,
     )
-    precision = _as_float64_array(
-        "region_unspliced_mass.precision",
-        region_unspliced_mass.precision,
+    density_info = _as_float64_array(
+        "region_unspliced_mass.density_information",
+        region_unspliced_mass.density_information,
         region_count,
     )
+    strand_info = _as_float64_array(
+        "region_unspliced_mass.strand_information",
+        region_unspliced_mass.strand_information,
+        region_count,
+    )
+    fused_info = density_info + strand_info
     support = np.ascontiguousarray(
         np.asarray(region_unspliced_mass.unspliced_counts, dtype=np.uint64)
     )
     if support.shape != (region_count,):
         raise ValueError(f"unspliced_counts must have shape ({region_count},); got {support.shape}.")
-    method = np.ascontiguousarray(np.asarray(region_unspliced_mass.method, dtype=np.uint8))
-    if method.shape != (region_count,):
-        raise ValueError(f"method must have shape ({region_count},); got {method.shape}.")
     p_unx = _as_float64_array("p_unexpressed", p_unexpressed, region_count)
     if not np.all(np.isfinite(p_unx)):
         raise ValueError("p_unexpressed must be finite.")
@@ -211,8 +208,6 @@ def estimate_region_exposure(
 
     flags = np.zeros(region_count, dtype=np.uint16)
     flags[~positive_support] |= np.uint16(FLAG_EXPOSURE_NO_SUPPORT)
-    tier3_mask = method == np.uint8(_METHOD_BACKGROUND_FALLBACK)
-    flags[tier3_mask] |= np.uint16(FLAG_EXPOSURE_IMPUTED_TIER3)
 
     if _is_bootstrap_density(background_density):
         flags |= np.uint16(FLAG_EXPOSURE_BOOTSTRAP_NEUTRAL | FLAG_EXPOSURE_NOT_TAU2_POOL)
@@ -228,12 +223,11 @@ def estimate_region_exposure(
         )
 
     pool_mask = (
-        ((method == np.uint8(_METHOD_STRAND)) | (method == np.uint8(_METHOD_BOUNDARY)))
+        (fused_info > 0.0)
         & (region_bp >= 1.0)
         & positive_support
-        & (p_unx >= _MIN_EXPOSURE_POOL_P_UNEXPRESSED)
     )
-    weights = precision * support_float * p_unx
+    weights = fused_info * p_unx
     weights = np.where(pool_mask, weights, 0.0)
     weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
     weights = np.maximum(weights, 0.0)
@@ -253,12 +247,16 @@ def estimate_region_exposure(
             tau2_method="no_pool_neutral",
         )
 
-    dispersion = max(float(background_density.log_dispersion), _TINY)
-    clip_radius = float(winsorize_k) * dispersion
-    y_fit = np.clip(log_raw_ratio, -clip_radius, clip_radius)
-    empirical_var = _weighted_mean(y_fit * y_fit, weights)
+    # Robust scale: weighted MAD of log_raw_ratio centered at 0.
+    # Under the null (region is gDNA-only), E[log_raw_ratio] = 0, so the
+    # location is known a priori and MAD around 0 estimates dispersion
+    # without an empirical mean that itself inflates under contamination.
+    # Outlier regions (residual paralog RNA leaking into gdna_mass) get
+    # truncated by the median instead of dominating a squared-residual sum.
+    weighted_mad = _weighted_median_abs(log_raw_ratio, weights)
+    robust_sigma = _MAD_TO_SIGMA * weighted_mad
     mean_v_obs = _weighted_mean(v_obs, weights)
-    tau2_hat = max(empirical_var - mean_v_obs, 0.0)
+    tau2_hat = max(robust_sigma * robust_sigma - mean_v_obs, 0.0)
 
     if previous is not None and previous.tau2_method in _REAL_TAU2_METHODS:
         tau2 = (1.0 - float(tau2_damping)) * float(previous.tau2) + float(
@@ -272,7 +270,14 @@ def estimate_region_exposure(
     if tau2 <= 0.0:
         shrink_weight = np.zeros(region_count, dtype=np.float64)
     else:
-        shrink_weight = tau2 / (tau2 + v_obs)
+        # Per-region shrinkage toward omega=1. Scale by p_unx so that a region
+        # only receives a background-derived exposure correction in proportion
+        # to its probability of being background. RNA-expressed regions
+        # (low p_unx) have inflated log_raw_ratio from RNA leakage into
+        # gdna_mass; without the p_unx factor their tiny v_obs (large support)
+        # would drive shrink_weight to 1 and the per-region omega would
+        # absorb the contamination ratio directly.
+        shrink_weight = p_unx * tau2 / (tau2 + v_obs)
     shrink_weight = np.asarray(shrink_weight, dtype=np.float64)
     shrink_weight[~active_pool] = 0.0
 
@@ -339,11 +344,11 @@ def _neutral_exposure(
 
 
 def _is_bootstrap_density(background_density: "BackgroundDensity") -> bool:
-    method_histogram = tuple(int(x) for x in getattr(background_density, "method_histogram", ()))
+    info_histogram = tuple(int(x) for x in getattr(background_density, "info_histogram", ()))
     return (
         str(background_density.fit_status) == "fallback_bootstrap"
         and int(background_density.n_regions_in_pool) == 0
-        and sum(method_histogram) == 0
+        and sum(info_histogram) == 0
     )
 
 
@@ -352,6 +357,26 @@ def _weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
     if w_sum <= 0.0:
         return 0.0
     return float(np.sum(np.asarray(values, dtype=np.float64) * weights, dtype=np.float64) / w_sum)
+
+
+def _weighted_median_abs(values: np.ndarray, weights: np.ndarray) -> float:
+    """Weighted median of ``|values|`` (MAD with center fixed at 0)."""
+    w = np.asarray(weights, dtype=np.float64)
+    mask = w > 0.0
+    if not np.any(mask):
+        return 0.0
+    abs_dev = np.abs(np.asarray(values, dtype=np.float64)[mask])
+    w_active = w[mask]
+    order = np.argsort(abs_dev, kind="stable")
+    abs_sorted = abs_dev[order]
+    w_sorted = w_active[order]
+    cum = np.cumsum(w_sorted, dtype=np.float64)
+    total = float(cum[-1])
+    if total <= 0.0:
+        return 0.0
+    idx = int(np.searchsorted(cum, 0.5 * total, side="left"))
+    idx = min(idx, abs_sorted.size - 1)
+    return float(abs_sorted[idx])
 
 
 def _as_float64_array(
@@ -371,7 +396,6 @@ def _validate_scalar_params(
     *,
     alpha_floor: float,
     tau2_damping: float,
-    winsorize_k: float,
     no_support_v_obs: float,
     omega_floor: float,
     omega_ceiling: float,
@@ -380,8 +404,6 @@ def _validate_scalar_params(
         raise ValueError(f"alpha_floor must be finite and > 0; got {alpha_floor!r}.")
     if not np.isfinite(tau2_damping) or not 0.0 <= float(tau2_damping) <= 1.0:
         raise ValueError(f"tau2_damping must be finite and in [0, 1]; got {tau2_damping!r}.")
-    if not np.isfinite(winsorize_k) or float(winsorize_k) <= 0.0:
-        raise ValueError(f"winsorize_k must be finite and > 0; got {winsorize_k!r}.")
     if not np.isfinite(no_support_v_obs) or float(no_support_v_obs) <= 0.0:
         raise ValueError(
             f"no_support_v_obs must be finite and > 0; got {no_support_v_obs!r}."

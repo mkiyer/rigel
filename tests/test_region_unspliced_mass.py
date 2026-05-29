@@ -102,7 +102,7 @@ def test_16_dtypes_match_plan_contract() -> None:
         log_dispersion=np.log(2.0),
         n_effective_regions=10.0,
         n_regions_in_pool=5,
-        method_histogram=(3, 2, 0),
+        info_histogram=(3, 2),
         fit_status="converged",
     )
     assert isinstance(bg.rho0_mean, float)
@@ -126,7 +126,7 @@ def test_18_no_capture_latent_fields() -> None:
         log_dispersion=0.5,
         n_effective_regions=0.0,
         n_regions_in_pool=0,
-        method_histogram=(0, 0, 0),
+        info_histogram=(0, 0),
         fit_status="fallback_bootstrap",
     )
     for name in forbidden:
@@ -159,7 +159,7 @@ def test_13_bootstrap_handoff() -> None:
     assert bg.beta0 == pytest.approx(model.rho_off_beta)
     assert bg.n_effective_regions == 0.0
     assert bg.n_regions_in_pool == 0
-    assert bg.method_histogram == (0, 0, 0)
+    assert bg.info_histogram == (0, 0)
     assert bg.fit_status == "fallback_bootstrap"
     assert bg.log_dispersion > 0.0
 
@@ -197,7 +197,7 @@ def test_post_init_background_density_rejects_bad_status() -> None:
             log_dispersion=0.1,
             n_effective_regions=0.0,
             n_regions_in_pool=0,
-            method_histogram=(0, 0, 0),
+            info_histogram=(0, 0),
             fit_status="weird",
         )
 
@@ -235,7 +235,7 @@ def _bd(rho0: float = 0.01) -> BackgroundDensity:
         log_dispersion=0.5,
         n_effective_regions=0.0,
         n_regions_in_pool=0,
-        method_histogram=(0, 0, 0),
+        info_histogram=(0, 0),
         fit_status="fallback_bootstrap",
     )
 
@@ -514,7 +514,7 @@ def _bd_prev(
         log_dispersion=0.5,
         n_effective_regions=10.0,
         n_regions_in_pool=10,
-        method_histogram=(5, 3, 2),
+        info_histogram=(5, 3),
         fit_status="iterating",
     )
 
@@ -533,14 +533,24 @@ def _mass_from(
     t = np.asarray(total if total is not None else [v * 2 + 1.0 for v in gdna], dtype=np.float64)
     g = np.minimum(g, t)
     r = t - g
+    method_arr = np.asarray(method, dtype=np.uint8)
+    if precision is None:
+        # Default: precision=1.0 for STRAND/BOUNDARY rows, 0.0 for
+        # BACKGROUND_FALLBACK rows. This mirrors the legacy builder semantics so
+        # tier3 regions are naturally excluded from the new info-weighted pool.
+        precision_arr = np.where(
+            method_arr == np.uint8(METHOD_BACKGROUND_FALLBACK), 0.0, 1.0
+        ).astype(np.float64)
+    else:
+        precision_arr = np.asarray(precision, dtype=np.float64)
     return RegionUnsplicedMass(
         total_mass=t,
         gdna_mass=g,
         rna_mass=r,
         region_size_bp=np.asarray(region_bp, dtype=np.float64),
         unspliced_counts=np.asarray(counts, dtype=np.uint64),
-        method=np.asarray(method, dtype=np.uint8),
-        precision=np.asarray(precision if precision is not None else [1.0] * len(gdna), dtype=np.float64),
+        method=method_arr,
+        precision=precision_arr,
         flags=np.asarray(flags or [0] * len(gdna), dtype=np.uint16),
     )
 
@@ -567,7 +577,7 @@ def test_07_empty_pool_carries_previous_unchanged() -> None:
     assert bg.alpha0 == pytest.approx(prev.alpha0)
     assert bg.beta0 == pytest.approx(prev.beta0)
     assert bg.log_dispersion == pytest.approx(prev.log_dispersion)
-    assert bg.method_histogram == (0, 0, 2)
+    assert bg.info_histogram == (0, 0)
 
 
 def test_08_zero_count_regions_excluded_from_pool() -> None:
@@ -703,7 +713,7 @@ def test_15_fit_status_prior_only_after_bootstrap() -> None:
         log_dispersion=float(np.log(10.0)),
         n_effective_regions=0.0,
         n_regions_in_pool=0,
-        method_histogram=(0, 0, 0),
+        info_histogram=(0, 0),
         fit_status="fallback_bootstrap",
     )
     mass = _mass_from(
@@ -719,12 +729,12 @@ def test_15_fit_status_prior_only_after_bootstrap() -> None:
 
 
 def test_method_histogram_counts_all_regions() -> None:
-    """The histogram reports total method counts, not just pool members."""
+    """The info_histogram reports per-channel pool counts."""
     prev = _bd_prev(rho0=0.01)
     mass = _mass_from(
         gdna=[5.0, 6.0, 7.0, 8.0],
         region_bp=[1000.0] * 4,
-        counts=[0, 5, 3, 2],  # first dropped from pool, others stay
+        counts=[0, 5, 3, 2],  # first dropped from pool by counts, last by precision=0
         method=[
             METHOD_STRAND,
             METHOD_STRAND,
@@ -733,13 +743,16 @@ def test_method_histogram_counts_all_regions() -> None:
         ],
     )
     bg = estimate_background_density(mass, p_unexpressed=np.full(4, 1.0), previous=prev)
-    assert bg.method_histogram == (2, 1, 1)
+    # All four regions have density_information > 0 except the BACKGROUND_FALLBACK
+    # row (precision=0 by builder default). Three density-channel uses, zero
+    # strand-channel uses under the legacy auto-populate.
+    assert bg.info_histogram == (3, 0)
     # Pool excludes counts==0 strand region and the background-fallback region.
     assert bg.n_regions_in_pool == 2
 
 
 def test_n_effective_regions_equals_weight_sum() -> None:
-    """n_effective_regions == sum of pool weights (precision * counts * p_unx)."""
+    """n_effective_regions == sum of pool weights (info * p_unx)."""
     prev = _bd_prev(rho0=0.01)
     mass = _mass_from(
         gdna=[5.0, 10.0],
@@ -750,5 +763,5 @@ def test_n_effective_regions_equals_weight_sum() -> None:
     )
     p_unx = np.asarray([0.8, 0.2])
     bg = estimate_background_density(mass, p_unexpressed=p_unx, previous=prev)
-    expected = 0.5 * 4.0 * 0.8 + 1.0 * 6.0 * 0.2
+    expected = 0.5 * 0.8 + 1.0 * 0.2
     assert bg.n_effective_regions == pytest.approx(expected)
