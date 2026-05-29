@@ -81,22 +81,22 @@ class Accumulator:
     Region i is bordered by boundaries i (left) and i+1 (right).
     boundaries[0] and boundaries[N] are terminal.
 
-    `region_edges` is a sorted int64 array of length N+1 giving the
-    edge positions in genomic coordinates:
-        regions[i] = [region_edges[i], region_edges[i+1])
-        boundaries[i] is positioned at region_edges[i]
+    `boundary_positions` is a sorted int64 array of length N+1 giving the
+    boundary positions in genomic coordinates:
+        regions[i]    = [boundary_positions[i], boundary_positions[i+1])
+        boundaries[i] is positioned at boundary_positions[i]
     Regions are contiguous on the reference; intronic gaps are
     represented as their own regions.
     """
 
-    region_edges: np.ndarray  # int64[N+1], strictly increasing
+    boundary_positions: np.ndarray  # int64[N+1], strictly increasing
     regions: list[Region] = field(default_factory=list)
     boundaries: list[Boundary] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        n = len(self.region_edges) - 1
+        n = len(self.boundary_positions) - 1
         if n < 0:
-            raise ValueError("region_edges must have length >= 1")
+            raise ValueError("boundary_positions must have length >= 1")
         if not self.regions:
             self.regions = [Region() for _ in range(n)]
         if not self.boundaries:
@@ -110,10 +110,10 @@ class Accumulator:
 
     def region_of_pos(self, pos: int) -> int:
         """Return the region index containing `pos`, or -1 if outside."""
-        edges = self.region_edges
-        if pos < edges[0] or pos >= edges[-1]:
+        b = self.boundary_positions
+        if pos < b[0] or pos >= b[-1]:
             return -1
-        idx = int(np.searchsorted(edges, pos, side="right")) - 1
+        idx = int(np.searchsorted(b, pos, side="right")) - 1
         return idx
 
     def left_boundary_of(self, region_idx: int) -> int:
@@ -150,14 +150,14 @@ class Accumulator:
         for blk_start, blk_end in blocks:
             if blk_end <= blk_start:
                 continue
-            s = max(int(blk_start), int(self.region_edges[0]))
-            e = min(int(blk_end), int(self.region_edges[-1]))
+            s = max(int(blk_start), int(self.boundary_positions[0]))
+            e = min(int(blk_end), int(self.boundary_positions[-1]))
             if e <= s:
                 continue
             cur = s
             r = self.region_of_pos(cur)
             while cur < e and r != -1 and r < self.n_regions:
-                region_end = int(self.region_edges[r + 1])
+                region_end = int(self.boundary_positions[r + 1])
                 slice_end = min(e, region_end)
                 slices.append((r, cur, slice_end))
                 cur = slice_end

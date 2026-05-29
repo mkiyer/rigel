@@ -281,14 +281,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Fragment length: full histograms + summary statistics per category
     fl_dict = flm.to_dict()
 
-    # Calibration section
+    # Calibration section — Phase A burndown: no v5 summary dict.
     cal_dict = None
     prior_policy = None
-    if result.calibration is not None:
-        cal_dict = result.calibration.to_summary_dict()
-        prior_table = getattr(result.calibration, "prior_table", None)
-        if prior_table is not None:
-            prior_policy = prior_table.to_summary_dict()
 
     # Command section — record CLI arguments
     cmd_params: dict = {
@@ -605,13 +600,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
-    # -- CalibrationConfig (v6) --
-    _ParamSpec("cal_prior_ess", "calibration.prior_ess"),
-    _ParamSpec("cal_fl_scoring_prior_ess", "calibration.fl_scoring_prior_ess"),
-    _ParamSpec("cal_quality_good", "calibration.pool_quality_good"),
-    _ParamSpec("cal_quality_weak", "calibration.pool_quality_weak"),
-    _ParamSpec("background_trim_fraction", "calibration.background_trim_fraction"),
-    _ParamSpec("max_calibration_passes", "calibration.max_calibration_passes"),
+    # -- CalibrationConfig: (Phase A burndown — no sweepable knobs yet) --
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1204,65 +1193,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum posterior threshold for candidate pruning "
         "(default: 1e-4). Lower values keep more candidates "
         "(conservative). Set to 0 to disable pruning entirely.",
-    )
-    adv.add_argument(
-        "--cal-prior-ess",
-        dest="cal_prior_ess",
-        type=float,
-        default=None,
-        help="Empirical-Bayes evidence strength for "
-        "the FL-Dirichlet shrinkage in the calibration orchestrator "
-        "(default: 1000). Larger values shrink RNA/gDNA FL more "
-        "aggressively toward the global FL; smaller values let pool "
-        "data dominate.",
-    )
-    adv.add_argument(
-        "--cal-fl-scoring-prior-ess",
-        dest="cal_fl_scoring_prior_ess",
-        type=float,
-        default=None,
-        help="Effective sample size for joint RNA-vs-gDNA FL contrast "
-        "reliability during EM scoring (default: 200). Larger values "
-        "require more support in both FL pools before class-specific "
-        "fragment-length differences affect posterior odds; 0 disables "
-        "weak-pool contrast damping while preserving fallback neutrality.",
-    )
-    adv.add_argument(
-        "--cal-quality-good",
-        dest="cal_quality_good",
-        type=int,
-        default=None,
-        help="Minimum SPLICED-annotated count (rna) and gDNA count "
-        "above which a pool's per-FL distribution is flagged 'good' "
-        "(default: 5000). Pools above this threshold are trusted "
-        "without shrinkage toward the global FL.",
-    )
-    adv.add_argument(
-        "--cal-quality-weak",
-        dest="cal_quality_weak",
-        type=int,
-        default=None,
-        help="Minimum SPLICED-annotated count (rna) and gDNA count "
-        "above which a pool's per-FL distribution is flagged 'weak' "
-        "(default: 1). Below this threshold the pool is flagged "
-        "'fallback' and downstream code falls back on the global FL.",
-    )
-    adv.add_argument(
-        "--background-trim-fraction",
-        dest="background_trim_fraction",
-        type=float,
-        default=None,
-        help="Fraction of initial background-like seed regions with the highest "
-        "contained gDNA-compatible density to exclude from the v6 off-target "
-        "background fit. Must be in [0, 1); default: 0.01.",
-    )
-    adv.add_argument(
-        "--max-calibration-passes",
-        dest="max_calibration_passes",
-        type=int,
-        default=None,
-        help="Maximum number of v6 four-state calibration passes before "
-        "accepting the latest regional posterior tensor. Default: 5.",
     )
     adv.add_argument(
         "--splicing-anchor-tolerance",

@@ -675,14 +675,14 @@ def build_index_artifacts(
 
       - intervals_df: columns of :class:`AnnotatedInterval`, sorted by
         ``(ref, start, end, strand)``.
-            - regions_df: v4 fine-region schema from
-                :func:`rigel.calibration.regions.build_fine_region_table`, with
+            - regions_df: region partition schema from
+                :func:`rigel.calibration.regions.build_region_partition`, with
                 ``region_id`` assigned globally in genomic order
         (matching ``ref_lengths`` iteration order, then start).
 
     Transcripts must be sorted by ``(ref, start, end)``.
     """
-    from .calibration.regions import build_fine_region_table
+    from .calibration.regions import build_region_partition
 
     ref_transcripts = _group_transcripts_by_ref(transcripts, ref_lengths)
 
@@ -696,7 +696,7 @@ def build_index_artifacts(
 
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
     iv_df = pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
-    region_df = build_fine_region_table(transcripts, ref_lengths)
+    region_df = build_region_partition(transcripts, ref_lengths)
 
     return iv_df, region_df
 

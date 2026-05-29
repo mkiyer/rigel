@@ -26,9 +26,9 @@ from rigel.calibration import (
 ## 2. Substrate (native)
 
 > **Status (2026-05-29):** the calibrator's substrate is the
-> `AccumulatorPayload` produced by accumulator v2 — see
+> `AccumulatorPayload` produced by the fractional accumulator — see
 > [`../accumulator/00_design.md`](../accumulator/00_design.md).
-> Accumulator v2 lands **before** calibration v6 Phase 3; until then,
+> Fractional accumulator lands **before** calibration v6 Phase 3; until then,
 > the field names below describe the *target* schema. The
 > "extension" framing in the original draft is obsolete: regions and
 > boundaries are first-class native objects, not a side-table on top
@@ -60,7 +60,7 @@ struct CalibrationAggregates {
 ```
 
 No FL histograms — see
-[`00_overview.md`](00_overview.md) §1 and the accumulator v2 design
+[`00_overview.md`](00_overview.md) §1 and the fractional accumulator design
 ([`../accumulator/audit_phase1.md`](../accumulator/audit_phase1.md)
 decision #6).
 

@@ -1,15 +1,15 @@
-# Accumulator v2 — Phase 1 Audit Memo
+# Fractional Accumulator — Phase 1 Audit Memo
 
 Date: 2026-05-29
 Scope: gate artifact for Phase 1 of
 [`01_implementation.md`](01_implementation.md). Documents the **exact
 current behavior** of the native calibration accumulator and the
-Python-layer boundary derivation, locks the v2 spec, and identifies
+Python-layer boundary derivation, locks the accumulator spec, and identifies
 any legacy bugs that must be fixed before the Phase 5 parity gate.
 
 **Bottom line.** Legacy code is correct. **No bugs identified, no
 legacy fixes required.** Phase 1 proceeds with Python reference +
-xfail spec tests only. The v2 work is a *substrate extension* (adds
+xfail spec tests only. This rewrite is a *substrate extension* (adds
 per-boundary flux + per-boundary FL histograms) and a *storage
 reshape* (region-keyed boundary slots → boundary-keyed) on top of
 already-correct mass accounting.
@@ -45,7 +45,7 @@ Tests inventoried: `tests/test_boundaries.py` (will be `tests/test_boundary_mode
 
 Sum-of-deposits per fragment = $\sum_\text{blocks} \sum_\text{regions overlapping block} (\text{overlap\_bp} / L) = L / L = 1.0$.
 
-**No bug.** The v2 reference implementation must reproduce this
+**No bug.** The reference implementation must reproduce this
 exactly.
 
 ---
@@ -72,9 +72,9 @@ $p$'s aggregate "evidence" is reconstructed by
 `region_counts[R_a, BOUNDARY_RIGHT, ...]` with
 `region_counts[R_b, BOUNDARY_LEFT, ...]` into one record.
 
-**v2 mapping.** The legacy `boundary_right_*` of $R_a$ = v2
+**Mapping.** The legacy `boundary_right_*` of $R_a$ =
 `boundary[p].mass_left_*` (block was on the *left* of the boundary).
-The legacy `boundary_left_*` of $R_b$ = v2 `boundary[p].mass_right_*`
+The legacy `boundary_left_*` of $R_b$ = `boundary[p].mass_right_*`
 (block was on the *right* of the boundary). This sign-flip is the
 single most important mapping; the parity test in Phase 4 must apply
 it exactly.
@@ -96,7 +96,7 @@ edges). Behavior:
 
 Where `w = overlap_bp_of_block_in_R / total_aligned_bp_of_fragment`.
 
-**v2 reproduction.** In v2 §4.5.4, this case is handled by
+**Reproduction.** In §4.5.4 of the design, this case is handled by
 "decompose the straddling block into per-region slices and apply
 the §4.3 rule as if they were adjacent block-fragments with no
 inter-block gap." For a single block straddling exactly one whole
@@ -106,21 +106,21 @@ region $R$:
 - Middle slice (in $R$) contributes $\ell_R/L$ to both $R$.left_boundary.mass_right AND $R$.right_boundary.mass_left.
 - Right slice (in $R_{next}$) contributes $\ell_{next}/L$ to $R_{next}$.left_boundary.mass_right.
 
-**Important compatibility note.** This v2 attribution is *different*
+**Important compatibility note.** This attribution is *different*
 from the legacy "w/2 of $R$'s block-overlap-mass goes to each of
-$R$'s left/right boundary slots". Under v2, the middle slice of
+$R$'s left/right boundary slots". Under the new accumulator, the middle slice of
 length $\ell_R$ deposits *all* $\ell_R/L$ on each side (not $\ell_R/(2L)$),
 because both sides have observed evidence. The legacy w/2 was a
-heuristic for the "I don't know which side to credit" problem; v2
+heuristic for the "I don't know which side to credit" problem; the new accumulator
 resolves the ambiguity by crediting both sides fully whenever the
 block actually straddles a boundary.
 
-**Implication for Phase 5 parity gate.** The legacy and v2 outputs
+**Implication for Phase 5 parity gate.** The legacy and new outputs
 will *not* match bit-for-bit in any locus that contains a
 fully-spans-region fragment. The Phase 5 parity test must (a)
 identify all loci where fully-spanning fragments occur, (b) exclude
 those boundary slots from the equality assertion or (c) apply a
-custom comparator that reproduces the legacy w/2 from v2's full-credit
+custom comparator that reproduces the legacy half-credit from the new accumulator's full-credit
 deposits. Decision deferred to Phase 4.
 
 Likelihood of impact: **low** — fully-spans-region requires
@@ -145,7 +145,7 @@ The `splice_type` parameter is passed once per fragment from
 `bam_scanner.cpp` line 1648, set upstream by the resolver based on
 whether any junction in the fragment is recognized as spliced.
 
-**v2 reproduction.** Design doc §4.3 sketched per-junction splice
+**Reproduction.** Design doc §4.3 sketched per-junction splice
 flags. **Phase 1 decision: inherit the legacy per-fragment flag.**
 Per-junction would require the resolver to expose per-junction
 classifications, which is a separate refactor outside this scope.
@@ -170,7 +170,7 @@ The strand_idx is set once per fragment and used for all per-block
 deposits. Strand-ambiguous fragments are dropped (not routed to
 either +/- channel).
 
-**v2 reproduction.** Match exactly: per-fragment strand sign,
+**Reproduction.** Match exactly: per-fragment strand sign,
 ambiguous → drop.
 
 ---
@@ -183,10 +183,10 @@ support counters per (region, compartment). This guarantees a
 region is counted **at most once per compartment per fragment**,
 even if multiple blocks of the fragment touch the same region.
 
-**v2 reproduction.** The v2 `Region.contained_*_*` counter is
+**Reproduction.** The `Region.contained_*_*` counter is
 incremented exactly once per fragment classified as "contained"
-(by `+= 1`). The v2 `Boundary.flux_*_*` counter is incremented at
-most once per boundary per fragment (§4.4 flux dedup). The v2 fl
+(by `+= 1`). The `Boundary.flux_*_*` counter is incremented at
+most once per boundary per fragment (§4.4 flux dedup). The fl
 histograms are incremented at most once per region/boundary per
 fragment (§5).
 
@@ -197,24 +197,24 @@ fragment (§5).
 Legacy 12 channels: 3 compartments × 2 splice × 2 strands.
 - channel index = `compartment * 4 + splice * 2 + strand` (verify in `region_signature.h`).
 
-v2 4 region channels: spl×strand (compartment fixed to CONTAINED).
-v2 16 boundary mass channels: side × spl × strand × 2 (left/right side).
-v2 4 boundary flux channels: spl×strand.
+New: 4 region channels: spl×strand (compartment fixed to CONTAINED).
+New: 16 boundary mass channels: side × spl × strand × 2 (left/right side).
+New: 4 boundary flux channels: spl×strand.
 
-Mapping table (legacy → v2):
+Mapping table (legacy → new):
 
-| Legacy slot | v2 slot |
+| Legacy slot | New slot |
 |---|---|
-| `region_counts[r, CONTAINED, spl, strand]` | `regions[r].contained_{spl}_{strand} += w` (but v2 stores integer count, not float mass; equivalence holds because for contained fragments $\sum w = 1$) |
+| `region_counts[r, CONTAINED, spl, strand]` | `regions[r].contained_{spl}_{strand} += w` (but the new accumulator stores integer count, not float mass; equivalence holds because for contained fragments $\sum w = 1$) |
 | `region_counts[r, BOUNDARY_RIGHT, spl, strand]` | `boundaries[right_of_r].mass_left_{spl}_{strand}` |
 | `region_counts[r, BOUNDARY_LEFT, spl, strand]` | `boundaries[left_of_r].mass_right_{spl}_{strand}` |
 
-The integer-vs-float region storage is the **second** known v2/legacy
+The integer-vs-float region storage is the **second** known new-vs-legacy
 divergence (the first being the fully-spans-region behavior, §4
 above). For a fully-contained fragment, $\sum_\text{regions overlapped by any block}
 w = 1$ — but the regions overlapped by a contained fragment are *all
 the same single region*, so the legacy float adds $w_1 + w_2 + \ldots = 1$
-to one slot. v2's `+= 1` is therefore exactly equivalent. **No
+to one slot. The new `+= 1` is therefore exactly equivalent. **No
 divergence in practice** for contained fragments.
 
 ---
@@ -256,7 +256,7 @@ produced.
    [`frag_length_model.py`](../../src/rigel/frag_length_model.py))
    per-fragment at full resolution; that path is unaffected.
 7. **Fully-spans-region.** Decompose block into per-region slices;
-   apply §4.3 rule to consecutive slices. Accept that v2 and legacy
+   apply §4.3 rule to consecutive slices. Accept that new and legacy
    diverge in this rare case; Phase 5 parity test will exclude or
    custom-compare these boundaries.
 8. **Strand-ambiguous, chimeric, multimap fragments.** All dropped
@@ -273,6 +273,6 @@ produced.
 - [ ] 11 xfail spec tests
       (`tests/native/test_accumulator_spec.py`).
 - [ ] Update [`00_design.md`](00_design.md) §4.3 to drop the per-junction splice framing.
-- [ ] `pytest tests/ -v` confirms legacy tests still green and v2 tests xfail.
+- [ ] `pytest tests/ -v` confirms legacy tests still green and new spec tests xfail.
 
 No legacy code changes required.

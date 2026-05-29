@@ -15,21 +15,12 @@ _cgranges_impl: Interval overlap queries (vendored cgranges)
 # -- BAM scanning ----------------------------------------------------------
 from ._bam_impl import BamScanner
 from ._bam_impl import BamAnnotationWriter
-from ._bam_impl import RegionIndex
 from ._bam_impl import detect_sj_strand_tag
-from ._bam_impl import REGION_CHAN_BOUNDARY_LEFT
-from ._bam_impl import REGION_CHAN_BOUNDARY_RIGHT
-from ._bam_impl import REGION_CHAN_CONTAINED
-from ._bam_impl import REGION_N_CHANNELS
-from ._bam_impl import REGION_SIG_EXON_NEG
-from ._bam_impl import REGION_SIG_EXON_POS
-from ._bam_impl import REGION_SIG_INTRON_NEG
-from ._bam_impl import REGION_SIG_INTRON_POS
-from ._bam_impl import REGION_SIG_N_STATES
-from ._bam_impl import region_channel_index
-from ._bam_impl import region_coarse_strand_from_signature
-from ._bam_impl import region_coarse_type_from_signature
-from ._bam_impl import region_pack_signature
+
+# -- Fractional accumulator -------------------------------------------------
+from ._accumulator import Accumulator
+from ._bam_impl import ACCUMULATOR_N_CHANNELS
+from ._bam_impl import accumulator_channel_idx
 
 # -- Fragment resolution ----------------------------------------------------
 from ._resolve_impl import FragmentResolver
@@ -62,21 +53,11 @@ __all__ = [
     # BAM
     "BamScanner",
     "BamAnnotationWriter",
-    "RegionIndex",
     "detect_sj_strand_tag",
-    "REGION_CHAN_BOUNDARY_LEFT",
-    "REGION_CHAN_BOUNDARY_RIGHT",
-    "REGION_CHAN_CONTAINED",
-    "REGION_N_CHANNELS",
-    "REGION_SIG_EXON_NEG",
-    "REGION_SIG_EXON_POS",
-    "REGION_SIG_INTRON_NEG",
-    "REGION_SIG_INTRON_POS",
-    "REGION_SIG_N_STATES",
-    "region_channel_index",
-    "region_coarse_strand_from_signature",
-    "region_coarse_type_from_signature",
-    "region_pack_signature",
+    # Fractional accumulator
+    "Accumulator",
+    "ACCUMULATOR_N_CHANNELS",
+    "accumulator_channel_idx",
     # Resolution
     "FragmentResolver",
     "FragmentAccumulator",

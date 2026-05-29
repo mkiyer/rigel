@@ -35,7 +35,10 @@
 #include <vector>
 
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
 #include <htslib/hts.h>
@@ -47,7 +50,6 @@
 #include "thread_queue.h"
 #include "ndarray_util.h"
 #include "calibration/accumulator.h"
-#include "calibration/region_signature.h"
 
 namespace nb = nanobind;
 using namespace rigel;
@@ -363,10 +365,13 @@ struct WorkerState {
     BamScanStats stats;
     StrandObservations strand_obs;
     FragLenObservations fraglen_obs;
-    rigel::calibration::CalibrationAccumulator cal_acc;
+    // Per-worker fractional accumulator (one Accumulator per ref). Owned
+    // here so worker threads never touch the shared template. Null when no
+    // region partition was provided.
+    std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set;
 
-    WorkerState(int32_t n_transcripts, int64_t n_regions)
-        : scratch(n_transcripts), cal_acc(n_regions) {}
+    WorkerState(int32_t n_transcripts, int64_t /*n_regions*/)
+        : scratch(n_transcripts) {}
 };
 
 // Merge observations
@@ -970,9 +975,11 @@ public:
     FragLenObservations fraglen_obs_;
 
     // Calibration region partition (set via set_regions; optional).
-    std::unique_ptr<rigel::calibration::RegionIndex> region_index_;
-    // Calibration accumulator (built from per-worker merges in scan()).
-    std::unique_ptr<rigel::calibration::CalibrationAccumulator> cal_acc_merged_;
+    // One Accumulator per BAM reference; deposits happen into a per-worker
+    // copy during scan(), then are merged back here.
+    std::vector<int64_t> boundary_positions_;
+    std::vector<int64_t> ref_pos_offsets_;
+    std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
 
     BamScanner(FragmentResolver& ctx,
                const std::string& sj_tag_spec,
@@ -989,56 +996,50 @@ public:
     // Calibration region setup
     // ----------------------------------------------------------------
     //
-    // Loads the per-genome region partition (regions.feather) into a
-    // per-ref CSR overlap index.  Must be called BEFORE scan() if
-    // calibration observations are required.  The five input arrays
-    // must be of equal length, sorted by (ref_id, start), and
-    // per-ref contiguous + non-overlapping.  Fine signatures and neighbor
-    // boundary metadata are carried for the Phase 3 fractional accumulator;
-    // ``type_masks`` and ``strands`` remain coarse bridge columns surfaced
-    // for downstream Python consumers; the fractional accumulator itself
-    // routes mass purely from the fine signature.
+    // Install the per-reference region partition used by the fractional
+    // accumulator. Must be called BEFORE scan() if calibration evidence
+    // is required; without it the calibration payload comes back empty.
+    //
+    // Inputs:
+    //   boundary_positions: flat int64[B_pos_total], concatenated sorted
+    //                       boundary positions for all references.
+    //   ref_pos_offsets:    int64[n_refs + 1] offsets into boundary_positions.
+    //                       ref f spans boundary_positions[
+    //                         ref_pos_offsets[f] .. ref_pos_offsets[f+1]).
+    //                       A ref with offsets[f+1] == offsets[f] has no
+    //                       partition and accepts no deposits.
+    //   n_refs:             number of references (must match
+    //                       ctx_->ref_to_id_ + 1).
     void set_regions(
-        nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> signatures,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> left_signatures,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> right_signatures,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_left,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_right,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_positions,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_pos_offsets,
         int32_t n_refs)
     {
-        const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
-        if (static_cast<int64_t>(starts.shape(0)) != n ||
-            static_cast<int64_t>(ends.shape(0))    != n ||
-            static_cast<int64_t>(signatures.shape(0)) != n ||
-            static_cast<int64_t>(left_signatures.shape(0)) != n ||
-            static_cast<int64_t>(right_signatures.shape(0)) != n ||
-            static_cast<int64_t>(boundary_kind_left.shape(0)) != n ||
-            static_cast<int64_t>(boundary_kind_right.shape(0)) != n ||
-            static_cast<int64_t>(type_masks.shape(0)) != n ||
-            static_cast<int64_t>(strands.shape(0)) != n)
-        {
+        if (n_refs < 0) {
             throw std::invalid_argument(
-                "set_regions: region metadata arrays "
-                "must all have the same length");
+                "set_regions: n_refs must be non-negative");
         }
-        if (region_index_) {
+        const std::size_t n_off = ref_pos_offsets.shape(0);
+        if (n_off != static_cast<std::size_t>(n_refs) + 1) {
+            throw std::invalid_argument(
+                "set_regions: ref_pos_offsets must have length n_refs + 1");
+        }
+        if (acc_set_) {
             throw std::runtime_error(
                 "set_regions: regions already set on this BamScanner; "
                 "create a new instance");
         }
-        region_index_ = std::make_unique<rigel::calibration::RegionIndex>();
-        region_index_->set(ref_ids.data(), starts.data(), ends.data(),
-                           signatures.data(),
-                           left_signatures.data(),
-                           right_signatures.data(),
-                           boundary_kind_left.data(),
-                           boundary_kind_right.data(),
-                           type_masks.data(), strands.data(), n, n_refs);
+        boundary_positions_.assign(
+            boundary_positions.data(),
+            boundary_positions.data() + boundary_positions.shape(0));
+        ref_pos_offsets_.assign(
+            ref_pos_offsets.data(),
+            ref_pos_offsets.data() + n_off);
+        acc_set_ = std::make_unique<rigel::accumulator::AccumulatorSet>(
+            boundary_positions_.data(),
+            boundary_positions_.size(),
+            ref_pos_offsets_.data(),
+            static_cast<std::size_t>(n_refs));
     }
 
     // ----------------------------------------------------------------
@@ -1074,27 +1075,26 @@ public:
         // Per-worker state (local to scan — not a class member)
         std::vector<std::unique_ptr<WorkerState>> worker_states;
         worker_states.reserve(n_workers);
-        const int64_t n_regions =
-            region_index_ ? region_index_->n_regions() : 0;
-        if (region_index_) {
-            cal_acc_merged_ =
-                std::make_unique<rigel::calibration::CalibrationAccumulator>(
-                    n_regions);
-        }
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
-            auto ws = std::make_unique<WorkerState>(
-                n_transcripts, n_regions);
+            auto ws = std::make_unique<WorkerState>(n_transcripts, 0);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+            // Per-worker fractional accumulator: same partition as the
+            // shared template, locally writable so workers don't contend.
+            if (acc_set_) {
+                ws->acc_set = std::make_unique<rigel::accumulator::AccumulatorSet>(
+                    boundary_positions_.data(),
+                    boundary_positions_.size(),
+                    ref_pos_offsets_.data(),
+                    static_cast<std::size_t>(acc_set_->n_refs()));
+            }
             worker_states.push_back(std::move(ws));
         }
 
         // Capture read-only config
         bool include_multimap = include_multimap_;
         FragmentResolver* ctx = ctx_;
-        const rigel::calibration::RegionIndex* region_index =
-            region_index_.get();
 
         // ---- Launch worker threads ----
         // Workers pop from input_queue, process groups, accumulate, and
@@ -1104,8 +1104,7 @@ public:
         for (int i = 0; i < n_workers; i++) {
             workers.emplace_back([&input_queue, &output_queue,
                                   &worker_states, ctx, i,
-                                  include_multimap, chunk_size,
-                                  region_index]()
+                                  include_multimap, chunk_size]()
             {
                 WorkerState& ws = *worker_states[i];
                 QnameBatch batch;
@@ -1113,7 +1112,7 @@ public:
                 while (input_queue.pop(batch)) {
                     for (auto& group : batch.groups) {
                         process_qname_group_threaded(
-                            group, *ctx, ws, include_multimap, region_index);
+                            group, *ctx, ws, include_multimap);
                         // Emit a chunk when accumulator reaches threshold
                         if (ws.accumulator.get_size() >= chunk_size) {
                             if (!output_queue.push(std::move(ws.accumulator))) {
@@ -1246,14 +1245,14 @@ public:
                 // Wait for workers to finish, then close output queue
                 for (auto& w : workers) w.join();
 
-                // Merge worker results (stats, strand, fraglen)
+                // Merge worker results (stats, strand, fraglen, accumulator)
                 for (auto& ws_ptr : worker_states) {
                     WorkerState& ws = *ws_ptr;
                     stats_.merge_from(ws.stats);
                     merge_strand_obs(strand_obs_, ws.strand_obs);
                     merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
-                    if (region_index_) {
-                        cal_acc_merged_->merge_from(ws.cal_acc);
+                    if (acc_set_ && ws.acc_set) {
+                        acc_set_->merge_from(*ws.acc_set);
                     }
                 }
 
@@ -1317,8 +1316,7 @@ private:
         QnameGroup& group,
         FragmentResolver& ctx,
         WorkerState& ws,
-        bool include_multimap,
-        const rigel::calibration::RegionIndex* region_index)
+        bool include_multimap)
     {
         if (group.records.empty()) return;
 
@@ -1346,7 +1344,6 @@ private:
 
         if (is_multimap) {
             stats.multimapping++;
-            if (region_index != nullptr) ws.cal_acc.note_multimap();
             if (!include_multimap) return;
         } else {
             stats.unique++;
@@ -1405,19 +1402,11 @@ private:
         bool any_hit_chimeric = false;
         int32_t worst_chimera_type = CHIMERA_NONE;
 
-        // Calibration observation tracking (unique mappers only).
-        // Captures the chosen fragment for the end-of-function
-        // observation site.  See docs/calibration/m3_implementation_plan.md
-        // §3.5.
-        bool obs_set = false;
-        int8_t obs_splice = 0;
-        int32_t obs_ref = -1;
-        int64_t obs_fs = 0;
-        int64_t obs_fe = 0;
-        int8_t obs_fragment_strand = static_cast<int8_t>(STRAND_NONE);
-        std::vector<ExonBlock> obs_exons;
-
         // Count ONE fragment per physical molecule (not per hit).
+        // (Phase A burndown 2026-05-29: per-fragment calibration
+        // observation capture removed; rebuilt against the new
+        // fractional-accumulator binding in Phase B — see
+        // docs/acc_caljointmodel/00_implementation_plan.md.)
         stats.n_fragments++;
 
         for (const auto& [r1_reads, r2_reads] : all_hits) {
@@ -1486,17 +1475,6 @@ private:
                     ig_result.num_hits = num_hits;
                     ig_result.nm = frag.nm;
                     accumulator.append(ig_result, frag_id);
-
-                    // Calibration: capture intergenic-resolved fragment.
-                    if (region_index != nullptr && !obs_set) {
-                        obs_set = true;
-                        obs_splice = static_cast<int8_t>(cr.splice_type);
-                        obs_ref = frag.exons[0].ref_id;
-                        obs_fs = frag.exons.front().start;
-                        obs_fe = frag.exons.back().end;
-                        obs_fragment_strand = static_cast<int8_t>(ig_result.exon_strand);
-                        obs_exons = frag.exons;
-                    }
                 }
 
                 continue;
@@ -1574,6 +1552,34 @@ private:
                 } else {
                     stats.n_frag_length_ambiguous++;
                 }
+
+                // Fractional accumulator deposit: unique-mapper non-chimeric
+                // resolved fragments only. Skip ambiguous strand
+                // (docs/acc_caljointmodel §6).
+                if (ws.acc_set &&
+                    !frag.exons.empty() &&
+                    (result.exon_strand == STRAND_POS ||
+                     result.exon_strand == STRAND_NEG))
+                {
+                    const int32_t ref_id = frag.exons.front().ref_id;
+                    if (ref_id >= 0 &&
+                        static_cast<std::size_t>(ref_id) < ws.acc_set->n_refs())
+                    {
+                        // Promote int32 exon coords → int64 for the
+                        // accumulator deposit ABI.
+                        const std::size_t n_blk = frag.exons.size();
+                        std::vector<int64_t> bs(n_blk), be(n_blk);
+                        for (std::size_t k = 0; k < n_blk; ++k) {
+                            bs[k] = static_cast<int64_t>(frag.exons[k].start);
+                            be[k] = static_cast<int64_t>(frag.exons[k].end);
+                        }
+                        const bool spliced = frag.has_introns();
+                        const bool strand_pos =
+                            (result.exon_strand == STRAND_POS);
+                        ws.acc_set->at(ref_id).deposit(
+                            bs.data(), be.data(), n_blk, spliced, strand_pos);
+                    }
+                }
             }
 
             // Region accumulation for resolved (non-chimeric) fragments.
@@ -1585,19 +1591,6 @@ private:
             // numerator high by a factor of NH relative to E_i.
 
             accumulator.append(result, frag_id);
-
-            // Calibration: capture chosen non-chimeric resolved hit
-            // (unique mappers only — multimappers were note_multimap'd
-            // at the early dispatch).
-            if (region_index != nullptr && is_unique_mapper && !obs_set) {
-                obs_set = true;
-                obs_splice = static_cast<int8_t>(result.splice_type);
-                obs_ref = frag.exons[0].ref_id;
-                obs_fs = frag.exons.front().start;
-                obs_fe = frag.exons.back().end;
-                obs_fragment_strand = static_cast<int8_t>(result.exon_strand);
-                obs_exons = frag.exons;
-            }
 
             if (!is_unique_mapper) {
                 n_buffered_mm++;
@@ -1633,32 +1626,6 @@ private:
         if (n_buffered_mm > 0) {
             stats.n_multimapper_groups++;
             stats.n_multimapper_alignments += n_buffered_mm;
-        }
-
-        // Calibration observation site (single point per molecule).
-        // Multimappers were already counted at the early dispatch.
-        // See docs/calibration/m3_implementation_plan.md §3.5.
-        if (region_index != nullptr && !is_multimap) {
-            if (any_hit_chimeric && !any_non_chimeric_resolved) {
-                ws.cal_acc.note_chimera();
-            } else if (obs_set) {
-                if (obs_splice == SPLICE_ARTIFACT) {
-                    ws.cal_acc.note_artifact();
-                } else {
-                    ws.cal_acc.observe(
-                        obs_splice, obs_ref, obs_fs, obs_fe,
-                        obs_exons.data(),
-                        static_cast<int32_t>(obs_exons.size()),
-                        obs_fragment_strand,
-                        *region_index);
-                }
-            } else {
-                // Reached the end of a non-mm qname group with nothing
-                // to observe (e.g., the only hit had empty exons or
-                // _resolve_core returned false outright).  Counted
-                // separately so the balance assertion stays exact.
-                ws.cal_acc.note_unobserved();
-            }
         }
     }
 
@@ -1721,59 +1688,100 @@ private:
         fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
         result["frag_length_observations"] = fraglen_dict;
 
-        // Calibration payload (optional - present iff set_regions() was called).
-        if (cal_acc_merged_) {
-            auto& payload = cal_acc_merged_->payload();
-            const size_t n_reg =
-                static_cast<size_t>(cal_acc_merged_->n_regions());
-            nb::dict cal_dict;
-            cal_dict["region_counts"] = vec_to_ndarray2d(
-                std::move(payload.region_counts), n_reg,
-                static_cast<size_t>(rigel::calibration::CalibrationPayload::kChannels));
-            cal_dict["region_contained_unspliced_support"] =
-                vec_to_ndarray(std::move(payload.region_contained_unspliced_support));
-            cal_dict["region_boundary_left_unspliced_support"] =
-                vec_to_ndarray(std::move(payload.region_boundary_left_unspliced_support));
-            cal_dict["region_boundary_right_unspliced_support"] =
-                vec_to_ndarray(std::move(payload.region_boundary_right_unspliced_support));
-            cal_dict["region_contained_spliced_support"] =
-                vec_to_ndarray(std::move(payload.region_contained_spliced_support));
-            cal_dict["region_boundary_left_spliced_support"] =
-                vec_to_ndarray(std::move(payload.region_boundary_left_spliced_support));
-            cal_dict["region_boundary_right_spliced_support"] =
-                vec_to_ndarray(std::move(payload.region_boundary_right_spliced_support));
-            cal_dict["region_unspliced_support"] =
-                vec_to_ndarray(std::move(payload.region_unspliced_support));
-            cal_dict["region_spliced_support"] =
-                vec_to_ndarray(std::move(payload.region_spliced_support));
-            // Channel/signature global marginals (copy fixed-size arrays
-            // into heap vectors for capsule ownership).
-            std::vector<double> ch_mass(payload.channel_mass.begin(),
-                                        payload.channel_mass.end());
-            cal_dict["channel_mass"] = vec_to_ndarray(std::move(ch_mass));
-            std::vector<double> sig_mass(payload.signature_mass.begin(),
-                                         payload.signature_mass.end());
-            cal_dict["signature_mass"] = vec_to_ndarray(std::move(sig_mass));
-            // FL pools: (6, kFlBins) row-major.
-            cal_dict["fl_pool_mass"] = vec_to_ndarray2d(
-                std::move(payload.fl_pool_mass),
-                static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlPools),
-                static_cast<size_t>(rigel::calibration::CalibrationPayload::kFlBins));
-            std::vector<double> pool_total(payload.fl_pool_total.begin(),
-                                           payload.fl_pool_total.end());
-            cal_dict["fl_pool_total"] = vec_to_ndarray(std::move(pool_total));
-            cal_dict["n_observed"]                 = payload.n_observed;
-            cal_dict["n_excluded_multimap"]        = payload.n_excluded_multimap;
-            cal_dict["n_excluded_chimera"]         = payload.n_excluded_chimera;
-            cal_dict["n_excluded_artifact"]        = payload.n_excluded_artifact;
-            cal_dict["n_excluded_strand_ambig"]    = payload.n_excluded_strand_ambig;
-            cal_dict["n_unobserved"]               = payload.n_unobserved;
-            cal_dict["n_unannotated_ref"]          = payload.n_unannotated_ref;
-            cal_dict["n_fl_unavailable"]           = payload.n_fl_unavailable;
-            cal_dict["resolver_splicing_anchor_tolerance"] =
-                ctx_->splicing_anchor_tolerance();
-            cal_dict["n_regions"] = static_cast<int64_t>(n_reg);
-            result["calibration"] = cal_dict;
+        // Fractional-accumulator calibration payload. Zero-copy ndarray
+        // views over the merged AccumulatorSet's per-ref buffers; the
+        // capsule keeps `acc_set_` alive for the lifetime of the views.
+        if (acc_set_) {
+            using rigel::accumulator::Accumulator;
+            using rigel::accumulator::Boundary;
+            using rigel::accumulator::Region;
+            using rigel::accumulator::kNChannels;
+
+            const std::size_t n_refs = acc_set_->n_refs();
+
+            // Per-ref offset arrays.
+            std::vector<int64_t> ref_region_offsets(n_refs + 1, 0);
+            std::vector<int64_t> ref_boundary_offsets(n_refs + 1, 0);
+            for (std::size_t f = 0; f < n_refs; ++f) {
+                const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+                ref_region_offsets[f + 1] =
+                    ref_region_offsets[f] + static_cast<int64_t>(a.n_regions());
+                ref_boundary_offsets[f + 1] =
+                    ref_boundary_offsets[f] +
+                    static_cast<int64_t>(a.n_boundaries());
+            }
+            const std::size_t R_total =
+                static_cast<std::size_t>(ref_region_offsets.back());
+            const std::size_t B_total =
+                static_cast<std::size_t>(ref_boundary_offsets.back());
+
+            // Concatenate per-ref buffers into flat owning vectors so the
+            // Python side gets contiguous arrays without depending on the
+            // AccumulatorSet's internal storage layout.
+            auto region_contained = std::make_unique<std::vector<uint32_t>>(
+                R_total * kNChannels, 0u);
+            auto boundary_mass_left = std::make_unique<std::vector<float>>(
+                B_total * kNChannels, 0.0f);
+            auto boundary_mass_right = std::make_unique<std::vector<float>>(
+                B_total * kNChannels, 0.0f);
+            auto boundary_flux = std::make_unique<std::vector<uint32_t>>(
+                B_total * kNChannels, 0u);
+
+            for (std::size_t f = 0; f < n_refs; ++f) {
+                const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+                const Region* rs = a.regions_data();
+                const Boundary* bs = a.boundaries_data();
+                const std::size_t r_off =
+                    static_cast<std::size_t>(ref_region_offsets[f]);
+                const std::size_t b_off =
+                    static_cast<std::size_t>(ref_boundary_offsets[f]);
+                for (std::size_t i = 0; i < a.n_regions(); ++i) {
+                    for (std::size_t c = 0; c < kNChannels; ++c) {
+                        (*region_contained)[(r_off + i) * kNChannels + c] =
+                            rs[i].contained[c];
+                    }
+                }
+                for (std::size_t i = 0; i < a.n_boundaries(); ++i) {
+                    for (std::size_t c = 0; c < kNChannels; ++c) {
+                        (*boundary_mass_left)[(b_off + i) * kNChannels + c] =
+                            bs[i].mass_left[c];
+                        (*boundary_mass_right)[(b_off + i) * kNChannels + c] =
+                            bs[i].mass_right[c];
+                        (*boundary_flux)[(b_off + i) * kNChannels + c] =
+                            bs[i].flux[c];
+                    }
+                }
+            }
+
+            nb::dict cal;
+            // Echo the partition back (positions + per-ref pos offsets).
+            {
+                auto buf = std::make_unique<std::vector<int64_t>>(
+                    boundary_positions_);
+                cal["boundaries"] = vec_to_ndarray(std::move(*buf));
+            }
+            {
+                auto buf = std::make_unique<std::vector<int64_t>>(
+                    ref_pos_offsets_);
+                cal["ref_pos_offsets"] = vec_to_ndarray(std::move(*buf));
+            }
+            cal["ref_region_offsets"] =
+                vec_to_ndarray(std::move(ref_region_offsets));
+            cal["ref_boundary_offsets"] =
+                vec_to_ndarray(std::move(ref_boundary_offsets));
+
+            // 2-D views via shape reinterpretation. vec_to_ndarray returns
+            // 1-D; reshape on the Python side.
+            cal["region_contained"] = vec_to_ndarray(std::move(*region_contained));
+            cal["boundary_mass_left"] =
+                vec_to_ndarray(std::move(*boundary_mass_left));
+            cal["boundary_mass_right"] =
+                vec_to_ndarray(std::move(*boundary_mass_right));
+            cal["boundary_flux"] = vec_to_ndarray(std::move(*boundary_flux));
+            cal["n_channels"] = static_cast<int>(kNChannels);
+            cal["n_refs"] = static_cast<int>(n_refs);
+
+            result["calibration"] = cal;
         } else {
             result["calibration"] = nb::none();
         }
@@ -2337,112 +2345,128 @@ NB_MODULE(_bam_impl, m) {
               "Provides BamScanner (pass 1: BAM → resolve → buffer) and\n"
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
-    namespace rs = rigel::calibration::region_signature;
-    m.attr("REGION_SIG_INTRON_POS") = rs::kBitIntronPos;
-    m.attr("REGION_SIG_INTRON_NEG") = rs::kBitIntronNeg;
-    m.attr("REGION_SIG_EXON_POS") = rs::kBitExonPos;
-    m.attr("REGION_SIG_EXON_NEG") = rs::kBitExonNeg;
-    m.attr("REGION_SIG_N_STATES") = rs::kNSignatures;
-    m.attr("REGION_CHAN_CONTAINED") = rs::kCompartmentContained;
-    m.attr("REGION_CHAN_BOUNDARY_LEFT") = rs::kCompartmentBoundaryLeft;
-    m.attr("REGION_CHAN_BOUNDARY_RIGHT") = rs::kCompartmentBoundaryRight;
-    m.attr("REGION_N_CHANNELS") = rs::kNChannels;
-    m.def("region_pack_signature",
-          [](bool intron_pos, bool intron_neg, bool exon_pos, bool exon_neg) {
-              return rs::pack_signature(intron_pos, intron_neg, exon_pos, exon_neg);
-          },
-          nb::arg("intron_pos") = false,
-          nb::arg("intron_neg") = false,
-          nb::arg("exon_pos") = false,
-          nb::arg("exon_neg") = false,
-          "Pack fine-region flags into the canonical 4-bit signature.");
-    m.def("region_coarse_type_from_signature",
-          [](int signature) {
-              return rs::coarse_type_from_signature(static_cast<std::uint8_t>(signature));
-          },
-          nb::arg("signature"),
-          "Derive the coarse region type from a fine-region signature.");
-    m.def("region_coarse_strand_from_signature",
-          [](int signature) {
-              return rs::coarse_strand_from_signature(static_cast<std::uint8_t>(signature));
-          },
-          nb::arg("signature"),
-          "Derive the coarse region strand from a fine-region signature.");
-    m.def("region_channel_index", &rs::channel_index,
-          nb::arg("compartment"),
-          nb::arg("splice_idx"),
-          nb::arg("strand_idx"),
-          "Pack compartment, splice, and strand indices into a 12-channel index.");
-
-    nb::class_<rigel::calibration::RegionIndex>(m, "RegionIndex")
-        .def(nb::init<>())
-        .def("set",
-             [](rigel::calibration::RegionIndex& self,
-                nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
-                nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
-                nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> signatures,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> left_signatures,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> right_signatures,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_left,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_right,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
-                nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
-                int32_t n_refs) {
-                 const int64_t n = static_cast<int64_t>(ref_ids.shape(0));
-                 if (static_cast<int64_t>(starts.shape(0)) != n ||
-                     static_cast<int64_t>(ends.shape(0)) != n ||
-                     static_cast<int64_t>(signatures.shape(0)) != n ||
-                     static_cast<int64_t>(left_signatures.shape(0)) != n ||
-                     static_cast<int64_t>(right_signatures.shape(0)) != n ||
-                     static_cast<int64_t>(boundary_kind_left.shape(0)) != n ||
-                     static_cast<int64_t>(boundary_kind_right.shape(0)) != n ||
-                     static_cast<int64_t>(type_masks.shape(0)) != n ||
-                     static_cast<int64_t>(strands.shape(0)) != n) {
-                     throw std::invalid_argument(
-                         "RegionIndex.set: region metadata arrays must all have the same length");
-                 }
-                 self.set(ref_ids.data(), starts.data(), ends.data(),
-                          signatures.data(), left_signatures.data(), right_signatures.data(),
-                          boundary_kind_left.data(), boundary_kind_right.data(),
-                          type_masks.data(), strands.data(), n, n_refs);
-             },
-             nb::arg("ref_ids"),
-             nb::arg("starts"),
-             nb::arg("ends"),
-             nb::arg("signatures"),
-             nb::arg("left_signatures"),
-             nb::arg("right_signatures"),
-             nb::arg("boundary_kind_left"),
-             nb::arg("boundary_kind_right"),
-             nb::arg("type_masks"),
-             nb::arg("strands"),
-             nb::arg("n_refs"),
-             "Install a sorted per-reference calibration region partition.")
-        .def("overlap", [](const rigel::calibration::RegionIndex& self,
-                           int32_t ref_id,
-                           int64_t start,
-                           int64_t end) {
-                std::vector<int32_t> out;
-                self.overlap_into(ref_id, start, end, out);
-                return out;
-             },
-             nb::arg("ref_id"),
-             nb::arg("start"),
-             nb::arg("end"),
-             "Return region ids overlapping [start, end) on ref_id.")
-        .def("start", &rigel::calibration::RegionIndex::start, nb::arg("rid"))
-        .def("end", &rigel::calibration::RegionIndex::end, nb::arg("rid"))
-        .def("signature", &rigel::calibration::RegionIndex::signature, nb::arg("rid"))
-        .def("left_signature", &rigel::calibration::RegionIndex::left_signature, nb::arg("rid"))
-        .def("right_signature", &rigel::calibration::RegionIndex::right_signature, nb::arg("rid"))
-        .def("boundary_kind_left", &rigel::calibration::RegionIndex::boundary_kind_left, nb::arg("rid"))
-        .def("boundary_kind_right", &rigel::calibration::RegionIndex::boundary_kind_right, nb::arg("rid"))
-        .def("type_mask", &rigel::calibration::RegionIndex::type_mask, nb::arg("rid"))
-        .def("strand", &rigel::calibration::RegionIndex::strand, nb::arg("rid"))
-        .def("n_regions", &rigel::calibration::RegionIndex::n_regions)
-        .def("n_refs", &rigel::calibration::RegionIndex::n_refs)
-        ;
+    // ----------------------------------------------------------------
+    // Fractional Accumulator (docs/accumulator/00_design.md)
+    // ----------------------------------------------------------------
+    //
+    // Single-reference accumulator: N regions, N+1 boundaries.
+    // Region storage:   uint32[N,4]              contained
+    // Boundary storage: float32[N+1,4] mass_left, float32[N+1,4] mass_right,
+    //                   uint32[N+1,4] flux
+    // Channel encoding: ch = (spliced?2:0) + (strand_pos?0:1)
+    {
+        using rigel::accumulator::Accumulator;
+        nb::class_<Accumulator>(m, "Accumulator")
+            .def("__init__",
+                 [](Accumulator* self,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> positions) {
+                     std::vector<int64_t> p(
+                         positions.data(),
+                         positions.data() + positions.shape(0));
+                     new (self) Accumulator(std::move(p));
+                 },
+                 nb::arg("boundary_positions"))
+            .def_prop_ro("n_regions",
+                 [](const Accumulator& a) { return a.n_regions(); })
+            .def_prop_ro("n_boundaries",
+                 [](const Accumulator& a) { return a.n_boundaries(); })
+            .def_prop_ro("boundary_positions",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     return nb::ndarray<nb::numpy, const int64_t, nb::ndim<1>>(
+                         self.boundary_positions(),
+                         {self.n_boundary_positions()},
+                         self_h).cast();
+                 })
+            // region contained counts: shape (N, 4), uint32
+            .def_prop_ro("regions_contained",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const size_t n = self.n_regions();
+                     auto* base = reinterpret_cast<uint32_t*>(
+                         self.regions_data());
+                     return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
+                         base,
+                         {n, rigel::accumulator::kNChannels},
+                         self_h).cast();
+                 })
+            // boundary mass_left:  shape (N+1, 4), float32
+            .def_prop_ro("boundaries_mass_left",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const size_t n = self.n_boundaries();
+                     auto* base = self.boundaries_data();
+                     // Stride: one Boundary == 48 bytes == 12 float32s
+                     constexpr int64_t row_stride =
+                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
+                                              / sizeof(float));
+                     return nb::ndarray<nb::numpy, float, nb::ndim<2>>(
+                         &base[0].mass_left[0],
+                         {n, rigel::accumulator::kNChannels},
+                         self_h,
+                         {row_stride, int64_t{1}}).cast();
+                 })
+            // boundary mass_right: shape (N+1, 4), float32
+            .def_prop_ro("boundaries_mass_right",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const size_t n = self.n_boundaries();
+                     auto* base = self.boundaries_data();
+                     constexpr int64_t row_stride =
+                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
+                                              / sizeof(float));
+                     return nb::ndarray<nb::numpy, float, nb::ndim<2>>(
+                         &base[0].mass_right[0],
+                         {n, rigel::accumulator::kNChannels},
+                         self_h,
+                         {row_stride, int64_t{1}}).cast();
+                 })
+            // boundary flux: shape (N+1, 4), uint32
+            .def_prop_ro("boundaries_flux",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const size_t n = self.n_boundaries();
+                     auto* base = self.boundaries_data();
+                     constexpr int64_t row_stride =
+                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
+                                              / sizeof(uint32_t));
+                     return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
+                         &base[0].flux[0],
+                         {n, rigel::accumulator::kNChannels},
+                         self_h,
+                         {row_stride, int64_t{1}}).cast();
+                 })
+            .def("region_of_pos",
+                 [](const Accumulator& a, int64_t pos) {
+                     return a.region_of_pos(pos);
+                 },
+                 nb::arg("pos"))
+            .def("deposit",
+                 [](Accumulator& a,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+                    bool spliced,
+                    bool strand_pos) {
+                     if (starts.shape(0) != ends.shape(0)) {
+                         throw std::invalid_argument(
+                             "deposit: starts and ends must have same length");
+                     }
+                     a.deposit(starts.data(), ends.data(),
+                               static_cast<size_t>(starts.shape(0)),
+                               spliced, strand_pos);
+                 },
+                 nb::arg("block_starts"),
+                 nb::arg("block_ends"),
+                 nb::arg("spliced"),
+                 nb::arg("strand_pos"));
+        m.attr("ACCUMULATOR_N_CHANNELS") =
+            static_cast<int>(rigel::accumulator::kNChannels);
+        m.def("accumulator_channel_idx",
+              [](bool spliced, bool strand_pos) {
+                  return rigel::accumulator::channel_idx(spliced, strand_pos);
+              },
+              nb::arg("spliced"), nb::arg("strand_pos"));
+    }
 
     nb::class_<BamScanner>(m, "BamScanner")
         .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
@@ -2499,38 +2523,22 @@ NB_MODULE(_bam_impl, m) {
              "    'frag_length_observations'.\n")
           .def("set_regions",
                  [](BamScanner& self,
-                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> ref_ids,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> signatures,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> left_signatures,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> right_signatures,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_left,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> boundary_kind_right,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> type_masks,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> strands,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_positions,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_pos_offsets,
                      int32_t n_refs) {
-                      self.set_regions(ref_ids, starts, ends,
-                                       signatures,
-                                       left_signatures,
-                                       right_signatures,
-                                       boundary_kind_left,
-                                       boundary_kind_right,
-                                       type_masks, strands,
-                                       n_refs);
+                      self.set_regions(boundary_positions, ref_pos_offsets, n_refs);
                  },
-                 nb::arg("ref_ids"),
-                 nb::arg("starts"),
-                 nb::arg("ends"),
-                 nb::arg("signatures"),
-                 nb::arg("left_signatures"),
-                 nb::arg("right_signatures"),
-                 nb::arg("boundary_kind_left"),
-                 nb::arg("boundary_kind_right"),
-                 nb::arg("type_masks"),
-                 nb::arg("strands"),
+                 nb::arg("boundary_positions"),
+                 nb::arg("ref_pos_offsets"),
                  nb::arg("n_refs"),
-                 "Install the calibration region partition with fine metadata and strand codes.\n")
+                 "Install the fractional-accumulator region partition.\n\n"
+                 "boundary_positions : int64[B_pos_total]\n"
+                 "    Flat sorted boundary positions for all references.\n"
+                 "ref_pos_offsets : int64[n_refs + 1]\n"
+                 "    Per-ref offsets into boundary_positions; ref f spans\n"
+                 "    boundary_positions[ref_pos_offsets[f]:ref_pos_offsets[f+1]].\n"
+                 "n_refs : int\n"
+                 "    Number of references (matches FragmentResolver).\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

@@ -1,4 +1,4 @@
-# Accumulator v2 — Region/Boundary Split Design
+# Fractional Accumulator — Region/Boundary Split Design
 
 Status: design proposal. Drives a native rewrite of the fractional
 accumulator. Calibration v6 ([`../caljointmodel/`](../caljointmodel/))
@@ -25,7 +25,7 @@ inherits the new substrate.
 4. **Build the calibration substrate in the scan.** The python
    `BoundaryTable` derivation in
    [`../../src/rigel/calibration/boundaries.py`](../../src/rigel/calibration/boundaries.py)
-   becomes unnecessary; the native accumulator emits the v2 layout
+   becomes unnecessary; the native accumulator emits the new layout
    directly.
 
 ## 2. Current behavior audit
@@ -61,7 +61,7 @@ Existing C++ comments suggest per-fragment but several call sites in
 `accumulator.cpp` iterate aligned blocks and call deposit helpers
 once per block — risk of double-counting when a block-iteration loop
 is not gated by a per-fragment "already-touched" set. This audit is
-**part of the implementation work**, not a precondition; v2 makes
+**part of the implementation work**, not a precondition; the new accumulator makes
 per-fragment semantics explicit at the API level so the bug surface
 shrinks.
 
@@ -69,7 +69,7 @@ shrinks.
 
 When a fragment is longer than its containing region, today's
 accumulator deposits `w/2` into each of that region's left and right
-boundary slots. In v2 this becomes natural: the fragment crosses
+boundary slots. In the new accumulator this becomes natural: the fragment crosses
 both the region's left and right boundaries, so it is a normal
 two-boundary-event fragment with no special case.
 
@@ -140,7 +140,7 @@ existing `RegionArrays.ref_offsets`.
 At $N = 200{,}000$ regions across $\sim 25$ references:
 - Regions: 16 × $N$ = **3.2 MB**
 - Boundaries: 48 × ($N$ + 25) ≈ **9.6 MB**
-- **Total v2: ~13 MB.** An order of magnitude smaller than the
+- **Total: ~13 MB.** An order of magnitude smaller than the
   legacy `RegionCountLedger` + FL histograms (which were ~75 MB
   before the FL deferral). FL is now consumed exclusively by the
   downstream EM scorer per-fragment at the existing point of use.
@@ -155,7 +155,7 @@ spliced flag (set by the upstream resolver based on whether any
 junction in the fragment is recognized as spliced). The strand and
 spliced flag are per-fragment; they apply to every deposit the
 fragment makes. Per-junction splice classification is **out of
-scope** for accumulator v2 — see Phase 1 audit memo decision #2.
+scope** for fractional accumulator — see Phase 1 audit memo decision #2.
 
 ### 4.1 Decide: contained vs crossing
 
@@ -336,7 +336,7 @@ stable.
 
 ## 6. Mass conservation invariants
 
-> **Important.** v2 mass conservation is **per-block-side**, not
+> **Important.** Mass conservation is **per-block-side**, not
 > per-fragment. Each (block, boundary-side) interaction deposits its
 > share of mass exactly once. A middle block of a K≥3-block fragment
 > contributes to *two* boundaries (mass_right of its left-side
@@ -474,18 +474,18 @@ Per-fragment deposit tests in `tests/native/test_accumulator.py`:
 Plus golden tests preserved against today's `RegionCountLedger`
 behavior on existing scenario BAMs — `test_accumulator_matches_legacy.py`
 runs both accumulators on the same fragment stream and asserts that
-the v2 boundary view, when projected back to region-keyed slots,
+the boundary view, when projected back to region-keyed slots,
 matches the legacy `boundary_left`/`boundary_right` to bit-exact.
 
 ## 10. Risk register
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Hidden per-block double-counts in legacy `accumulator.cpp` discovered during §8 audit | Medium | Medium | Fix before v2 cutover; document each bug fixed in CHANGELOG |
+| Hidden per-block double-counts in legacy `accumulator.cpp` discovered during §8 audit | Medium | Medium | Fix during the rewrite; document each bug fixed in CHANGELOG |
 | Boundary index math off-by-one across reference seams | Low | High | Property tests over multi-reference synthetic fixtures |
 | Memory pressure on very large reference sets (high $N$) | Low | Low | Memory is smaller than today's layout; bounded |
 | Downstream `boundaries.py` consumers have hidden dependencies on the validator | Low | Low | Audit `validate_boundary_table` callsites before deletion |
-| Implicit-splice classification (which inter-block gaps are "spliced") inconsistent with legacy | Medium | Medium | Reuse the existing classifier code path; do not reinvent in v2 |
+| Implicit-splice classification (which inter-block gaps are "spliced") inconsistent with legacy | Medium | Medium | Reuse the existing classifier code path; do not reinvent here |
 
 ## 11. Open questions deferred to implementation
 
@@ -495,7 +495,7 @@ matches the legacy `boundary_left`/`boundary_right` to bit-exact.
    in the deposit function or in a pre-processing step.
 2. **Implicit-splice detection.** Currently inferred from CIGAR N or
    from inter-block-gap-crosses-annotated-junction. The accumulator
-   v2 inherits this — no new rule.
+   This design inherits this — no new rule.
 3. **Strand assignment for ambiguous fragments.** Inherits today's
    logic from `bam_scanner.cpp`.
 4. **Soft-clip handling.** Soft-clipped bases excluded from $\ell_k$

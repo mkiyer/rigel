@@ -1,200 +1,137 @@
 /**
- * accumulator.h - Per-worker fractional calibration observation accumulator.
+ * accumulator.h — Fractional accumulator (per-reference region/boundary split).
  *
- * Phase 3 fractional cutover. The accumulator routes per-fragment
- * fractional mass into:
- *   - region_counts[R, 12]    : float32, the 12-channel signal
- *     (compartment x splice x strand) per fine region.
- *   - fl_pool_mass[6, 1024]   : float64, six named FL pools keyed by
- *     (coarse_class_of_region, contained|boundary). Unspliced, strand-
- *     collapsed. gDNA FL aggregate is the sum of the four non-EXON pools.
- *   - channel_mass[12]        : float64, global per-channel mass.
- *   - signature_mass[16]      : float64, global per-signature mass.
- *   - counters                : observed, excluded_*, unobserved, etc.
+ * Canonical spec: docs/accumulator/00_design.md
+ * Python reference: tests/native/_accumulator_reference.py
  *
- * The hot path (``observe()``) is allocation-free after warm-up: it
- * reuses scratch vectors for region hits and per-block overlap. The
- * one-fragment-one-unit invariant holds exactly: total mass added to
- * region_counts for any single observed fragment is 1.0 (modulo
- * float32 rounding) when total_aligned_bp > 0.
+ * One Accumulator describes ONE reference. Construction takes the sorted
+ * boundary-position array of length N+1 (int64 genomic coordinates), giving
+ * N contiguous regions and N+1 boundaries:
  *
- * Compartment routing (per region within a fragment):
- *   - cross_left  = (frag_start < region.start)
- *   - cross_right = (frag_end   > region.end)
- *   - both true   -> fully spans; split w in half between BOUNDARY_LEFT
- *                    and BOUNDARY_RIGHT
- *   - cross_left  -> BOUNDARY_LEFT  (mass = w)
- *   - cross_right -> BOUNDARY_RIGHT (mass = w)
- *   - neither     -> CONTAINED      (mass = w)
+ *     regions[i]    = [boundaries[i], boundaries[i+1])
+ *     boundaries[i] is positioned at the i-th coordinate
  *
- * FL routing (only for unspliced fragments with fl_idx >= 0):
- *   - compartment determines contained vs boundary pool slot
- *   - region signature determines coarse class (INTERGENIC/INTRON/EXON)
- *   - mass is strand-collapsed before adding to fl_pool_mass
- *   - boundary_left and boundary_right both feed the same boundary pool
+ * Storage:
+ *   Region:   uint32[4] contained                                  (16 B)
+ *   Boundary: float32[4] mass_left, float32[4] mass_right,
+ *             uint32[4]  flux                                       (48 B)
  *
- * splicing_anchor_tolerance is intentionally absent: in Phase 3 K is
- * resolver-only (implicit-splice slack). The accumulator does not gate
- * boundary mass by overlap thresholds.
+ * Channel encoding (4 channels):
+ *   ch = (spliced ? 2 : 0) + (strand_pos ? 0 : 1)
+ *
+ * The native implementation must match the Python reference byte-for-byte.
  */
-
 #pragma once
 
-#include <array>
+#include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <vector>
 
-#include "constants.h"
-#include "calibration/region_index.h"
-#include "calibration/region_signature.h"
+namespace rigel::accumulator {
 
-namespace rigel::calibration {
+inline constexpr std::size_t kNChannels = 4;
 
-struct CalibrationPayload {
-    static constexpr int32_t kFlBins   = 1024;
-    static constexpr int32_t kChannels = region_signature::kNChannels;       // 12
-    static constexpr int32_t kSigs     = region_signature::kNSignatures;     // 16
-    static constexpr int32_t kFlPools  = region_signature::kNFlPools;        // 6
+inline int channel_idx(bool spliced, bool strand_pos) noexcept {
+    return (spliced ? 2 : 0) + (strand_pos ? 0 : 1);
+}
 
-    // Per-region per-channel fractional mass: shape (n_regions, 12) row-major.
-    std::vector<float> region_counts;
-
-    // Global per-channel and per-signature mass (sums over regions and FL).
-    std::array<double, kChannels> channel_mass {};
-    std::array<double, kSigs>     signature_mass {};
-
-    // Six named FL pools, float64. Unspliced, strand-collapsed.
-    // Layout: row pool, column fl_idx. Index = pool * kFlBins + fl_idx.
-    std::vector<double>             fl_pool_mass;       // size = 6 * 1024
-    std::array<double, kFlPools>    fl_pool_total {};
-
-    // Per-region per-compartment physical fragment support counts,
-    // partitioned by splice class. A fragment is counted at most once
-    // per (region, compartment) cell, and only when it contributes
-    // positive overlap mass to that compartment of that region. A
-    // fragment that fully spans a region (extends past both boundaries)
-    // increments BOTH the left and right boundary counters for that
-    // region. These are the discrete sample-size denominators consumed
-    // by the FMA fusion engine (PR 07).
-    //
-    // Width is uint32_t: per-region per-compartment counts cannot
-    // realistically approach 2^32 (bounded by coverage * region_length
-    // / fragment_length). merge_from() asserts no overflow.
-    std::vector<std::uint32_t> region_contained_unspliced_support;       // size = n_regions
-    std::vector<std::uint32_t> region_boundary_left_unspliced_support;   // size = n_regions
-    std::vector<std::uint32_t> region_boundary_right_unspliced_support;  // size = n_regions
-    std::vector<std::uint32_t> region_contained_spliced_support;         // size = n_regions
-    std::vector<std::uint32_t> region_boundary_left_spliced_support;     // size = n_regions
-    std::vector<std::uint32_t> region_boundary_right_spliced_support;    // size = n_regions
-
-    // Per-region aggregate physical fragment support, partitioned only
-    // by splice class. A fragment is counted at most once per region
-    // regardless of how many compartments it touches (i.e., a fragment
-    // fully spanning a region contributes one increment here, but two
-    // increments to the per-compartment counters above). These remain
-    // the canonical "distinct fragments touching this region" effective
-    // sample sizes consumed by the EB exposure / density model; the
-    // FMA fusion engine consumes the per-compartment counters instead.
-    std::vector<std::uint64_t> region_unspliced_support;  // size = n_regions
-    std::vector<std::uint64_t> region_spliced_support;    // size = n_regions
-
-    // Counters
-    int64_t n_observed                 = 0;
-    int64_t n_excluded_multimap        = 0;
-    int64_t n_excluded_chimera         = 0;
-    int64_t n_excluded_artifact        = 0;
-    int64_t n_excluded_strand_ambig    = 0;
-    int64_t n_unobserved               = 0;
-    int64_t n_unannotated_ref          = 0;  // observed but no region hits
-    int64_t n_fl_unavailable           = 0;  // unspliced observed w/ fl_idx out of range
+struct Region {
+    std::uint32_t contained[kNChannels];  // 16 B
 };
+static_assert(sizeof(Region) == 16, "Region must be 16 bytes");
 
-class CalibrationAccumulator {
+struct Boundary {
+    float          mass_left[kNChannels];   // 16 B
+    float          mass_right[kNChannels];  // 16 B
+    std::uint32_t  flux[kNChannels];        // 16 B
+};
+static_assert(sizeof(Boundary) == 48, "Boundary must be 48 bytes");
+
+class Accumulator {
 public:
-    explicit CalibrationAccumulator(int64_t n_regions) {
-        if (n_regions < 0) {
-            throw std::invalid_argument(
-                "CalibrationAccumulator: n_regions must be >= 0");
-        }
-        n_regions_ = n_regions;
-        payload_.region_counts.assign(
-            static_cast<size_t>(n_regions) * CalibrationPayload::kChannels, 0.0f);
-        payload_.fl_pool_mass.assign(
-            static_cast<size_t>(CalibrationPayload::kFlPools) *
-                CalibrationPayload::kFlBins,
-            0.0);
-        const size_t n = static_cast<size_t>(n_regions);
-        payload_.region_contained_unspliced_support.assign(n, 0);
-        payload_.region_boundary_left_unspliced_support.assign(n, 0);
-        payload_.region_boundary_right_unspliced_support.assign(n, 0);
-        payload_.region_contained_spliced_support.assign(n, 0);
-        payload_.region_boundary_left_spliced_support.assign(n, 0);
-        payload_.region_boundary_right_spliced_support.assign(n, 0);
-        payload_.region_unspliced_support.assign(n, 0);
-        payload_.region_spliced_support.assign(n, 0);
-        // Warm reserve to amortize the first ~10 fragments' allocations.
-        block_hits_.reserve(16);
-        touched_contained_.reserve(16);
-        touched_left_.reserve(8);
-        touched_right_.reserve(8);
-        touched_regions_.reserve(16);
+    /// Construct with a sorted, strictly increasing array of boundary
+    /// positions. `boundaries` is moved into the accumulator. Length must
+    /// be >= 1; n_regions is `boundaries.size() - 1`.
+    explicit Accumulator(std::vector<std::int64_t> boundaries);
+
+    std::size_t n_regions()    const noexcept { return regions_.size(); }
+    std::size_t n_boundaries() const noexcept { return boundaries_.size(); }
+
+    const std::int64_t* boundary_positions() const noexcept {
+        return boundary_positions_.data();
+    }
+    std::size_t n_boundary_positions() const noexcept {
+        return boundary_positions_.size();
     }
 
-    /**
-     * Hot-path observation. ``exons`` is the chosen fragment's
-     * R1UR2 exon blocks (sorted, single-ref). The caller must have
-     * gated on: unique mapper, non-chimeric, non-artifact splice.
-     *
-     * The accumulator increments ``n_observed`` for every accepted
-     * fragment (even if no region overlaps). Fragments whose every
-     * block falls outside any region increment ``n_unannotated_ref``.
-     * Fragments whose ``fragment_strand`` is neither STRAND_POS nor
-     * STRAND_NEG are routed to ``n_excluded_strand_ambig`` and emit no
-     * mass.
-     */
-    void observe(int8_t splice_type,
-                 int32_t ref_id,
-                 int64_t frag_start,
-                 int64_t frag_end,
-                 const ExonBlock* exons,
-                 int32_t n_exons,
-                 int8_t fragment_strand,
-                 const RegionIndex& regions);
+    Region*         regions_data()        noexcept { return regions_.data(); }
+    Boundary*       boundaries_data()     noexcept { return boundaries_.data(); }
+    const Region*   regions_data()   const noexcept { return regions_.data(); }
+    const Boundary* boundaries_data()const noexcept { return boundaries_.data(); }
 
-    inline void note_multimap()        { ++payload_.n_excluded_multimap; }
-    inline void note_chimera()         { ++payload_.n_excluded_chimera;  }
-    inline void note_artifact()        { ++payload_.n_excluded_artifact; }
-    inline void note_unobserved()      { ++payload_.n_unobserved;        }
-    inline void note_strand_ambig()    { ++payload_.n_excluded_strand_ambig; }
+    /// Region index containing `pos`, or -1 if `pos` is outside
+    /// [boundaries.front(), boundaries.back()).
+    std::int64_t region_of_pos(std::int64_t pos) const noexcept;
 
-    /// Worker merge: element-wise additive into *this.
-    void merge_from(const CalibrationAccumulator& other);
+    /// Deposit a single fragment's evidence per docs/accumulator/00_design.md.
+    /// `block_starts`/`block_ends` have length `n_blocks`. Empty / fully
+    /// out-of-range fragments are no-ops.
+    void deposit(const std::int64_t* block_starts,
+                 const std::int64_t* block_ends,
+                 std::size_t n_blocks,
+                 bool spliced,
+                 bool strand_pos);
 
-    const CalibrationPayload& payload() const { return payload_; }
-    CalibrationPayload&       payload()       { return payload_; }
-
-    int64_t n_regions() const { return n_regions_; }
+    /// Element-wise sum of `other` into this accumulator. Requires identical
+    /// boundary positions (asserts at start). Used to merge per-worker
+    /// accumulators after a parallel scan.
+    void merge_from(const Accumulator& other);
 
 private:
-    CalibrationPayload payload_;
-    int64_t n_regions_ = 0;
-
-    // Per-block scratch (reused across observe() calls).
-    std::vector<int32_t> block_hits_;
-    // Per-fragment scratch: region IDs that received positive overlap
-    // mass from any block of the current fragment, partitioned by
-    // compartment. Sorted+uniqued at end of observe() to drive the
-    // per-region per-compartment support increment. A fragment that
-    // fully spans a region appears in both touched_left_ and
-    // touched_right_.
-    std::vector<int32_t> touched_contained_;
-    std::vector<int32_t> touched_left_;
-    std::vector<int32_t> touched_right_;
-    // Per-fragment scratch: union of all touched regions across
-    // compartments (each region appears at most once). Drives the
-    // per-region aggregate support increment.
-    std::vector<int32_t> touched_regions_;
+    std::vector<std::int64_t> boundary_positions_;  // size = n_regions + 1
+    std::vector<Region>       regions_;             // size = n_regions
+    std::vector<Boundary>     boundaries_;          // size = n_regions + 1
 };
 
-}  // namespace rigel::calibration
+// ============================================================================
+// AccumulatorSet — one Accumulator per reference, flat shared partition.
+// ============================================================================
+//
+// Inputs:
+//   - `boundary_positions`: flat int64 array of size B_pos_total holding the
+//     concatenated boundary positions for all references.
+//   - `ref_pos_offsets`: int64 array of size n_refs + 1; the boundary
+//     positions for reference f live in
+//         boundary_positions[ref_pos_offsets[f] .. ref_pos_offsets[f+1])
+//     and define n_regions_f = (ref_pos_offsets[f+1] - ref_pos_offsets[f]) - 1.
+//   - References with fewer than 2 positions (n_regions == 0) are valid and
+//     produce an empty Accumulator with no regions/boundaries.
+//
+// Total counts:
+//   R_total      = sum over refs of n_regions_f
+//   B_obj_total  = sum over refs of (n_regions_f + 1) = R_total + n_refs
+//                  for refs with >=1 region (refs with 0 regions contribute 0).
+//
+class AccumulatorSet {
+public:
+    AccumulatorSet(const std::int64_t* boundary_positions,
+                   std::size_t n_positions,
+                   const std::int64_t* ref_pos_offsets,
+                   std::size_t n_refs);
+
+    /// Number of references managed.
+    std::size_t n_refs() const noexcept { return accs_.size(); }
+
+    /// Reference accumulator at index `ref_id` (0-based).
+    Accumulator&       at(std::int32_t ref_id);
+    const Accumulator& at(std::int32_t ref_id) const;
+
+    /// Element-wise merge of `other` into `this`. Requires the per-ref
+    /// boundary positions to match exactly.
+    void merge_from(const AccumulatorSet& other);
+
+private:
+    std::vector<Accumulator> accs_;
+};
+
+}  // namespace rigel::accumulator

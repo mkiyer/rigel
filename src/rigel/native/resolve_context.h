@@ -879,13 +879,6 @@ public:
         return cumsum[ei] + (genomic_pos - starts[ei]);
     }
 
-    // --- Region partition index (REMOVED in v0.5.0) ---
-    // SRD calibration does not use a regional partition. The accessors
-    // below remain only as no-op stubs to keep any forgotten C++ caller
-    // compiling cleanly; they should not be invoked.
-    bool has_region_index() const { return false; }
-    int32_t n_regions() const { return 0; }
-
     nb::dict get_ref_to_id() const {
         nb::dict d;
         for (const auto& [k, v] : ref_to_id_)

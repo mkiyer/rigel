@@ -65,7 +65,7 @@ def partition_exon_intron_exon() -> Accumulator:
     Four boundaries at positions 1000, 2000, 5000, 6000.
     """
     edges = np.array([1000, 2000, 5000, 6000], dtype=np.int64)
-    return Accumulator(region_edges=edges)
+    return Accumulator(boundary_positions=edges)
 
 
 def partition_three_adjacent_exons() -> Accumulator:
@@ -73,7 +73,7 @@ def partition_three_adjacent_exons() -> Accumulator:
     Four boundaries at 0, 100, 200, 400.
     """
     edges = np.array([0, 100, 200, 400], dtype=np.int64)
-    return Accumulator(region_edges=edges)
+    return Accumulator(boundary_positions=edges)
 
 
 # --- T1: contained single block ---------------------------------------------
@@ -96,7 +96,19 @@ def test_t1_contained_single_block_reference():
 
 @XFAIL_NATIVE
 def test_t1_contained_single_block_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([1000, 2000, 5000, 6000], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(blocks=[(1100, 1200)], spliced=False, strand_pos=True)
+    ch = channel_idx(spliced=False, strand_pos=True)
+    assert acc.regions[0].contained[ch] == 1
+    assert acc.regions[0].contained.sum() == 1
+    assert acc.regions[1].contained.sum() == 0
+    assert acc.regions[2].contained.sum() == 0
+    for b in acc.boundaries:
+        assert b.mass_left.sum() == 0.0
+        assert b.mass_right.sum() == 0.0
+        assert b.flux.sum() == 0
+    assert acc.total_mass_deposited() == pytest.approx(1.0)
 
 
 # --- T2: contained, multi-block spliced -------------------------------------
@@ -127,7 +139,23 @@ def test_t2_contained_multi_block_spliced_reference():
 
 @XFAIL_NATIVE
 def test_t2_contained_multi_block_spliced_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([1000, 2000, 5000, 6000], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(5100, 5200), (5400, 5500)],
+        spliced=True,
+        strand_pos=True,
+    )
+    ch = channel_idx(spliced=True, strand_pos=True)
+    assert acc.regions[2].contained[ch] == 1
+    assert acc.regions[2].contained.sum() == 1
+    assert acc.regions[0].contained.sum() == 0
+    assert acc.regions[1].contained.sum() == 0
+    for b in acc.boundaries:
+        assert b.flux.sum() == 0
+        assert b.mass_left.sum() == 0.0
+        assert b.mass_right.sum() == 0.0
+    assert acc.total_mass_deposited() == pytest.approx(1.0)
 
 
 # --- T3: two blocks adjacent regions ----------------------------------------
@@ -166,7 +194,26 @@ def test_t3_two_block_adjacent_regions_reference():
 
 @XFAIL_NATIVE
 def test_t3_two_block_adjacent_regions_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 100, 200, 400], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(50, 100), (100, 180)],
+        spliced=True,
+        strand_pos=True,
+    )
+    ch = channel_idx(spliced=True, strand_pos=True)
+    L = 130.0
+    b = acc.boundaries[1]
+    assert b.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
+    assert b.mass_right[ch] == pytest.approx(80.0 / L, abs=1e-6)
+    assert b.flux[ch] == 1
+    for i in (0, 2, 3):
+        assert acc.boundaries[i].mass_left.sum() == 0.0
+        assert acc.boundaries[i].mass_right.sum() == 0.0
+        assert acc.boundaries[i].flux.sum() == 0
+    for r in acc.regions:
+        assert r.contained.sum() == 0
+    assert acc.total_mass_deposited() == pytest.approx(1.0)
 
 
 # --- T4: two blocks non-adjacent regions (user-verified §4.5.1) -------------
@@ -224,7 +271,32 @@ def test_t4_two_block_non_adjacent_regions_reference():
 
 @XFAIL_NATIVE
 def test_t4_two_block_non_adjacent_regions_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([1000, 2000, 5000, 6000], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(1800, 1950), (5050, 5950)],
+        spliced=True,
+        strand_pos=True,
+    )
+    ch = channel_idx(spliced=True, strand_pos=True)
+    L = 1050.0
+    b1 = acc.boundaries[1]
+    b2 = acc.boundaries[2]
+    assert b1.mass_left[ch] == pytest.approx(150.0 / L, abs=1e-6)
+    assert b1.mass_right[ch] == 0.0
+    assert b1.flux[ch] == 1
+    assert b2.mass_right[ch] == pytest.approx(900.0 / L, abs=1e-6)
+    assert b2.mass_left[ch] == 0.0
+    assert b2.flux[ch] == 1
+    assert acc.boundaries[0].mass_left.sum() == 0.0
+    assert acc.boundaries[0].mass_right.sum() == 0.0
+    assert acc.boundaries[0].flux.sum() == 0
+    assert acc.boundaries[3].mass_left.sum() == 0.0
+    assert acc.boundaries[3].mass_right.sum() == 0.0
+    assert acc.boundaries[3].flux.sum() == 0
+    for r in acc.regions:
+        assert r.contained.sum() == 0
+    assert acc.total_mass_deposited() == pytest.approx(1.0, abs=1e-6)
 
 
 # --- T5: three blocks all adjacent (user-verified §4.5.2) -------------------
@@ -275,7 +347,28 @@ def test_t5_three_block_all_adjacent_reference():
 
 @XFAIL_NATIVE
 def test_t5_three_block_all_adjacent_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 100, 200, 400], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(0, 100), (100, 180), (200, 320)],
+        spliced=True,
+        strand_pos=True,
+    )
+    ch = channel_idx(spliced=True, strand_pos=True)
+    L = 300.0
+    b1 = acc.boundaries[1]
+    b2 = acc.boundaries[2]
+    assert b1.mass_left[ch] == pytest.approx(100.0 / L, abs=1e-6)
+    assert b1.mass_right[ch] == pytest.approx(80.0 / L, abs=1e-6)
+    assert b1.flux[ch] == 1
+    assert b2.mass_left[ch] == pytest.approx(80.0 / L, abs=1e-6)
+    assert b2.mass_right[ch] == pytest.approx(120.0 / L, abs=1e-6)
+    assert b2.flux[ch] == 1
+    assert acc.boundaries[0].mass_left.sum() == 0.0
+    assert acc.boundaries[3].mass_right.sum() == 0.0
+    for r in acc.regions:
+        assert r.contained.sum() == 0
+    assert acc.total_mass_deposited() == pytest.approx(1.0 + 80.0 / L, abs=1e-6)
 
 
 # --- T6: fully spans region -------------------------------------------------
@@ -307,7 +400,7 @@ def test_t6_fully_spans_region_reference():
     divergence note.
     """
     edges = np.array([0, 100, 200, 300], dtype=np.int64)
-    acc = Accumulator(region_edges=edges)
+    acc = Accumulator(boundary_positions=edges)
     acc.deposit(
         blocks=[(50, 250)],
         spliced=False,
@@ -330,7 +423,26 @@ def test_t6_fully_spans_region_reference():
 
 @XFAIL_NATIVE
 def test_t6_fully_spans_region_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 100, 200, 300], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(50, 250)],
+        spliced=False,
+        strand_pos=True,
+    )
+    ch = channel_idx(spliced=False, strand_pos=True)
+    L = 200.0
+    b1 = acc.boundaries[1]
+    b2 = acc.boundaries[2]
+    assert b1.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
+    assert b1.mass_right[ch] == pytest.approx(100.0 / L, abs=1e-6)
+    assert b1.flux[ch] == 1
+    assert b2.mass_left[ch] == pytest.approx(100.0 / L, abs=1e-6)
+    assert b2.mass_right[ch] == pytest.approx(50.0 / L, abs=1e-6)
+    assert b2.flux[ch] == 1
+    for r in acc.regions:
+        assert r.contained.sum() == 0
+    assert acc.total_mass_deposited() == pytest.approx(1.5, abs=1e-6)
 
 
 # --- T7: mass conservation over random contained fragments ------------------
@@ -341,7 +453,7 @@ def test_t7_mass_conservation_random_reference():
     per fragment. Total mass deposited must equal exactly 1000.
     """
     edges = np.array([0, 1000, 2000, 3000, 4000], dtype=np.int64)
-    acc = Accumulator(region_edges=edges)
+    acc = Accumulator(boundary_positions=edges)
     rng = np.random.default_rng(42)
     n = 1000
     for _ in range(n):
@@ -362,7 +474,24 @@ def test_t7_mass_conservation_random_reference():
 
 @XFAIL_NATIVE
 def test_t7_mass_conservation_random_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 1000, 2000, 3000, 4000], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    rng = np.random.default_rng(42)
+    n = 1000
+    for _ in range(n):
+        r = rng.integers(0, 4)
+        region_start = int(edges[r])
+        region_end = int(edges[r + 1])
+        length = int(rng.integers(50, 200))
+        max_start = region_end - length
+        start = int(rng.integers(region_start, max_start))
+        end = start + length
+        acc.deposit(
+            blocks=[(start, end)],
+            spliced=bool(rng.integers(0, 2)),
+            strand_pos=bool(rng.integers(0, 2)),
+        )
+    assert acc.total_mass_deposited() == pytest.approx(float(n), abs=1e-3)
 
 
 # --- T8: flux dedup on adjacent-region two-block fragment -------------------
@@ -386,7 +515,17 @@ def test_t8_flux_dedup_adjacent_regions_reference():
 
 @XFAIL_NATIVE
 def test_t8_flux_dedup_adjacent_regions_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 100, 200, 400], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(50, 100), (100, 180)],
+        spliced=False,
+        strand_pos=True,
+    )
+    ch = channel_idx(spliced=False, strand_pos=True)
+    assert acc.boundaries[1].flux[ch] == 1
+    for i in (0, 2, 3):
+        assert acc.boundaries[i].flux.sum() == 0
 
 
 # --- T10: negative strand attribution ---------------------------------------
@@ -413,7 +552,22 @@ def test_t10_negative_strand_attribution_reference():
 
 @XFAIL_NATIVE
 def test_t10_negative_strand_attribution_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 100, 200, 400], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(
+        blocks=[(50, 100), (100, 180)],
+        spliced=True,
+        strand_pos=False,
+    )
+    ch_neg = channel_idx(spliced=True, strand_pos=False)
+    ch_pos = channel_idx(spliced=True, strand_pos=True)
+    b = acc.boundaries[1]
+    assert b.flux[ch_neg] == 1
+    assert b.flux[ch_pos] == 0
+    assert b.mass_left[ch_neg] > 0.0
+    assert b.mass_left[ch_pos] == 0.0
+    assert b.mass_right[ch_neg] > 0.0
+    assert b.mass_right[ch_pos] == 0.0
 
 
 # --- T11: spliced flag attribution across channels --------------------------
@@ -438,4 +592,15 @@ def test_t11_spliced_flag_attribution_reference():
 
 @XFAIL_NATIVE
 def test_t11_spliced_flag_attribution_native():
-    raise AssertionError("native impl not landed")
+    edges = np.array([0, 100, 200, 400], dtype=np.int64)
+    acc = NativeAccumulator(boundary_positions=edges)
+    acc.deposit(blocks=[(110, 190)], spliced=True, strand_pos=True)
+    acc.deposit(blocks=[(110, 190)], spliced=False, strand_pos=True)
+    ch_spl_pos = channel_idx(spliced=True, strand_pos=True)
+    ch_unspl_pos = channel_idx(spliced=False, strand_pos=True)
+    assert acc.regions[1].contained[ch_spl_pos] == 1
+    assert acc.regions[1].contained[ch_unspl_pos] == 1
+    ch_spl_neg = channel_idx(spliced=True, strand_pos=False)
+    ch_unspl_neg = channel_idx(spliced=False, strand_pos=False)
+    assert acc.regions[1].contained[ch_spl_neg] == 0
+    assert acc.regions[1].contained[ch_unspl_neg] == 0

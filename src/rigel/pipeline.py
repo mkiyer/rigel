@@ -55,7 +55,6 @@ from .strand_model import StrandModels
 if TYPE_CHECKING:
     from .annotate import AnnotationTable
     from .calibration import CalibrationResult
-    from .calibration.scan_payload import CalibrationScanPayload
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
@@ -362,21 +361,14 @@ def scan_and_buffer(
     strand_models.log_summary()
     frag_length_models.log_summary()
 
-    # Calibration payload (optional — present iff regions were wired)
-    cal_dict = result.get("calibration") if isinstance(result, dict) else None
-    if cal_dict is None:
-        calibration_payload = None
-    else:
-        from .calibration.scan_payload import CalibrationScanPayload
+    # Calibration payload — Phase B: build the AccumulatorPayload from
+    # the C++ scanner's fractional-accumulator results.
+    from .scan_payload import AccumulatorPayload
 
-        # Balance basis: n_read_names is the count of non-empty qname
-        # groups, which is exactly the number of times the calibration
-        # dispatch site fires (multimappers are noted before the early
-        # return; non-multimappers reach the end-of-function policy).
-        calibration_payload = CalibrationScanPayload.from_scan_dict(
-            cal_dict,
-            n_total=stats.n_read_names,
-        )
+    if result.get("calibration") is not None:
+        calibration_payload = AccumulatorPayload.from_scan_result(result)
+    else:
+        calibration_payload = None
 
     return stats, strand_models, frag_length_models, buffer, calibration_payload
 
@@ -388,75 +380,20 @@ def _wire_calibration_regions(
 ) -> None:
     """Install the index's region partition into a native BamScanner.
 
-    Translates ``ref_name`` to the index's canonical reference ids. This
-    mapping matches ``index.ref_name_to_id`` / BAM tid space and includes
-    references that have no transcripts, which the resolver-local map may
-    omit.
+    Uses :func:`rigel.calibration.regions.build_region_partition_arrays`
+    to flatten the per-reference region partition into the
+    ``(boundary_positions, ref_pos_offsets, n_refs)`` ABI expected by
+    ``BamScanner.set_regions``. The partition is built from
+    ``index.region_df`` and ordered to match ``index.ref_names`` (which
+    in turn matches the resolver's reference-id space).
     """
-    ref_name_to_id = index.ref_name_to_id
-    region_ref_names = region_df["ref_name"].astype(str).to_numpy()
-    ref_ids = np.fromiter(
-        (ref_name_to_id.get(name, -1) for name in region_ref_names),
-        dtype=np.int32,
-        count=len(region_ref_names),
-    )
-    keep = ref_ids >= 0
-    if not keep.all():
-        dropped_refs = sorted(set(region_ref_names[~keep].tolist()))
-        logger.warning(
-            "[scan] Dropping %d calibration regions on %d references absent "
-            "from index.ref_name_to_id: %s",
-            int((~keep).sum()),
-            len(dropped_refs),
-            ", ".join(dropped_refs[:10]) + ("..." if len(dropped_refs) > 10 else ""),
-        )
-        ref_ids = ref_ids[keep]
-        region_df = region_df.loc[keep]
-    if len(region_df) == 0:
-        logger.warning("[scan] No calibration regions remain after reference-id filtering.")
-        return
+    from .calibration.regions import build_region_partition_arrays
 
-    starts = np.ascontiguousarray(region_df["start"].to_numpy(np.int64))
-    ends = np.ascontiguousarray(region_df["end"].to_numpy(np.int64))
-    signatures = np.ascontiguousarray(region_df["signature"].to_numpy(np.uint8))
-    left_signatures = np.ascontiguousarray(region_df["left_signature"].to_numpy(np.uint8))
-    right_signatures = np.ascontiguousarray(region_df["right_signature"].to_numpy(np.uint8))
-    boundary_kind_left = np.ascontiguousarray(region_df["boundary_kind_left"].to_numpy(np.uint8))
-    boundary_kind_right = np.ascontiguousarray(region_df["boundary_kind_right"].to_numpy(np.uint8))
-    types = region_df["type"].to_numpy(np.uint8)
-    strands = np.ascontiguousarray(region_df["strand"].to_numpy(np.uint8))
-    # Bit layout: bit 0 = EXON (type 2), bit 1 = INTRON (type 1),
-    # bit 2 = INTERGENIC (type 0).
-    type_masks = (np.uint8(1) << (np.uint8(2) - types)).astype(np.uint8)
-
-    # set_regions requires sorted (ref_id, start) order.  region_df is
-    # already in genomic order per ref but ref iteration order may not
-    # match resolver IDs — re-sort to be safe.
-    order = np.lexsort((starts, ref_ids))
-    if not np.all(order == np.arange(len(order))):
-        ref_ids = ref_ids[order]
-        starts = starts[order]
-        ends = ends[order]
-        signatures = signatures[order]
-        left_signatures = left_signatures[order]
-        right_signatures = right_signatures[order]
-        boundary_kind_left = boundary_kind_left[order]
-        boundary_kind_right = boundary_kind_right[order]
-        type_masks = type_masks[order]
-        strands = strands[order]
-
-    n_refs = len(ref_name_to_id)
+    boundary_positions, ref_pos_offsets = build_region_partition_arrays(index)
+    n_refs = len(index.ref_names)
     scanner.set_regions(
-        np.ascontiguousarray(ref_ids),
-        np.ascontiguousarray(starts),
-        np.ascontiguousarray(ends),
-        np.ascontiguousarray(signatures),
-        np.ascontiguousarray(left_signatures),
-        np.ascontiguousarray(right_signatures),
-        np.ascontiguousarray(boundary_kind_left),
-        np.ascontiguousarray(boundary_kind_right),
-        np.ascontiguousarray(type_masks),
-        np.ascontiguousarray(strands),
+        np.ascontiguousarray(boundary_positions, dtype=np.int64),
+        np.ascontiguousarray(ref_pos_offsets, dtype=np.int64),
         n_refs,
     )
 
@@ -1026,7 +963,7 @@ def quant_from_buffer(
     frag_length_models: FragmentLengthModels,
     stats: PipelineStats,
     calibration: "CalibrationResult",
-    calibration_payload: "CalibrationScanPayload",
+    calibration_payload: "object",
     *,
     em_config: EMConfig | None = None,
     scoring: FragmentScoringConfig | None = None,
@@ -1034,114 +971,17 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Quantify buffered fragments with RegionCalibration priors and locus EM."""
-    if calibration is None:
-        raise ValueError(
-            "quant_from_buffer() requires a v6 CalibrationResult "
-            "(got None).  Run rigel.calibration.calibrate(...) before "
-            "locus-level quantification."
-        )
-    if getattr(calibration, "region_calibration", None) is None:
-        raise ValueError(
-            "quant_from_buffer() requires calibration.region_calibration. "
-            "Run rigel.calibration.calibrate(...) before quantification."
-        )
-    if index.region_df is None:
-        raise RuntimeError(
-            "Index has no region table. Rebuild the index "
-            "(rigel index --fasta ... --gtf ...). Older indexes are not supported."
-        )
+    """Quantify buffered fragments with locus EM.
 
-    from .calibration.prior import assemble_em_inputs
-    from .locus import build_multi_loci
-    from .locus_partition import partition_and_free
-
-    em_config = em_config or EMConfig()
-    scoring_cfg = scoring or FragmentScoringConfig()
-
-    geometry, estimator = _setup_geometry_and_estimator(
-        index,
-        calibration.fl_models.rna_scoring,
-        em_config,
+    Phase A burndown (2026-05-29): the v5 calibration-consumer wiring has
+    been removed. The new locus-prior consumer lands in Phase E — see
+    ``docs/acc_caljointmodel/00_implementation_plan.md``.
+    """
+    raise NotImplementedError(
+        "quant_from_buffer is stubbed during the Phase A burndown. "
+        "The new locus-prior consumer (assemble_em_inputs replacement) "
+        "lands in Phase E — see docs/acc_caljointmodel/00_implementation_plan.md."
     )
-
-    em_data = _score_fragments(
-        buffer,
-        index,
-        strand_models,
-        calibration.fl_models.rna_scoring,
-        calibration.fl_models.gdna_scoring,
-        stats,
-        estimator,
-        scoring_cfg,
-        log_every,
-        annotations,
-    )
-
-    multi_loci = build_multi_loci(em_data, index)
-    _assign_locus_ids(estimator, multi_loci)
-
-    em_inputs = assemble_em_inputs(
-        multi_loci=multi_loci,
-        em_data=em_data,
-        index=index,
-        calibration=calibration,
-        transcript_eff_len_unweighted=geometry.effective_lengths,
-        em_config=em_config,
-    )
-    prior_table = em_inputs.prior
-    estimator.set_em_effective_lengths(
-        em_inputs.exposure.transcript_eff_len_em,
-        em_inputs.exposure.transcript_exposure_factor,
-    )
-
-    if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
-        calibration = _replace(
-            calibration,
-            prior_table=prior_table,
-            n_multi_loci=len(multi_loci),
-        )
-        return estimator, calibration
-
-    partitions = partition_and_free(em_data, multi_loci)
-
-    _run_locus_em_partitioned(
-        estimator,
-        partitions,
-        multi_loci,
-        index,
-        alpha_gdna_add=prior_table.alpha_gdna_add,
-        alpha_rna_add=prior_table.alpha_rna_add,
-        gdna_eff_len_em=prior_table.gdna_eff_len_em,
-        enable_gdna=prior_table.enable_gdna,
-        gdna_eff_len_unweighted=prior_table.gdna_eff_len_unweighted,
-        gdna_exposure_factor=prior_table.gdna_exposure_factor,
-        gdna_eff_len_adjustment_ratio=prior_table.gdna_eff_len_adjustment_ratio,
-        prior_unspliced_total=prior_table.prior_unspliced_total,
-        prior_locus_weight=prior_table.prior_locus_weight,
-        prior_shrink_weight=prior_table.prior_shrink_weight,
-        prior_n_local_gdna=prior_table.prior_n_local_gdna,
-        prior_n_local_rna=prior_table.prior_n_local_rna,
-        prior_n_other_gdna=prior_table.prior_n_other_gdna,
-        prior_n_other_rna=prior_table.prior_n_other_rna,
-        prior_ess_final=prior_table.prior_ess_final,
-        prior_rna_share_v5=prior_table.prior_rna_share_v5,
-        prior_rna_share_final=prior_table.prior_rna_share_final,
-        prior_flags=prior_table.prior_flags,
-        n_regions_touched=prior_table.n_regions_touched,
-        multi_locus_region_mass=prior_table.multi_locus_region_mass,
-        partial_coverage_region_mass=prior_table.partial_coverage_region_mass,
-        em_config=em_config,
-        annotations=annotations,
-        emit_locus_stats=emit_locus_stats,
-    )
-
-    calibration = _replace(
-        calibration,
-        prior_table=prior_table,
-        n_multi_loci=len(multi_loci),
-    )
-    return estimator, calibration
 
 
 # ---------------------------------------------------------------------------
@@ -1202,11 +1042,12 @@ def run_pipeline(
     # ``.finalize(...)`` here — the scanner-trained accumulator is kept
     # raw and only consulted for index-side geometry.
 
-    # -- v6 calibration (single FL build, global density posteriors) --
+    # -- Calibration (Phase A burndown stub) --
+    # The v5 surface has been removed. The new joint fractional-accumulator
+    # + calibration-v6 orchestrator lands in Phase D — see
+    # docs/acc_caljointmodel/00_implementation_plan.md.
     from .calibration import calibrate
 
-    cal_cfg = config.calibration
-    strand_summary = _calibration_strand_summary(strand_models)
     _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
     logger.info(
@@ -1216,94 +1057,11 @@ def run_pipeline(
         strand_ci_eps,
     )
 
-    calibration = calibrate(
-        index=index,
-        payload=calibration_payload,
-        scan_trained=frag_length_models,
-        fl_prior_ess=cal_cfg.prior_ess,
-        fl_scoring_prior_ess=cal_cfg.fl_scoring_prior_ess,
-        pool_quality_good=cal_cfg.pool_quality_good,
-        pool_quality_weak=cal_cfg.pool_quality_weak,
-        strand_summary=strand_summary,
-        density_min_eff_length=cal_cfg.density_min_eff_length,
-        background_trim_fraction=cal_cfg.background_trim_fraction,
-        max_calibration_passes=cal_cfg.max_calibration_passes,
-    )
-    cal_summary = calibration.to_summary_dict()
-    rc_summary = cal_summary["region_calibration"]
-    logger.info(
-        "[CAL] v6 quality=%s",
-        cal_summary["fl_models"]["gdna_quality"],
-    )
-    logger.info(
-        "[CAL] rho_off=%.6g passes=%d converged=%s",
-        rc_summary["rho_off"],
-        rc_summary["n_passes"],
-        rc_summary["converged"],
-    )
-    exposure_summary = rc_summary["region_exposure"]
-    omega_summary = exposure_summary["omega"]
-    logger.info(
-        "[CAL] exposure omega mean/p99/max=%.4g/%.4g/%.4g tau2=%.4g pool=%d method=%s",
-        omega_summary["mean"],
-        omega_summary["p99"],
-        omega_summary["max"],
-        exposure_summary["tau2"],
-        exposure_summary["tau2_pool_size"],
-        exposure_summary["tau2_method"],
-    )
-
-    # -- Annotation table for second BAM pass (opt-in) --
-    annotations = None
-    if config.annotated_bam_path is not None:
-        from .annotate import AnnotationTable
-
-        annotations = AnnotationTable.create(
-            capacity=max(
-                buffer.total_fragments + _ANNOTATION_TABLE_PADDING,
-                _ANNOTATION_TABLE_MIN_CAPACITY,
-            )
-        )
-
     try:
-        estimator, calibration = quant_from_buffer(
-            buffer,
-            index,
-            strand_models,
-            frag_length_models,
-            stats,
-            em_config=config.em,
-            scoring=config.scoring,
-            log_every=scan.log_every,
-            annotations=annotations,
-            calibration=calibration,
-            calibration_payload=calibration_payload,
-            emit_locus_stats=config.emit_locus_stats,
-        )
+        calibration = calibrate()  # raises NotImplementedError during Phase A
     finally:
         buffer.cleanup()
 
-    # -- Second BAM pass: write annotated BAM (opt-in) --
-    if config.annotated_bam_path is not None and annotations is not None:
-        from .annotate import write_annotated_bam
-
-        write_annotated_bam(
-            bam_path,
-            str(config.annotated_bam_path),
-            annotations,
-            index,
-            skip_duplicates=scan.skip_duplicates,
-            include_multimap=scan.include_multimap,
-            sj_strand_tag=scan.sj_strand_tag,
-            locus_id_per_transcript=estimator.locus_id_per_transcript,
-        )
-
-    return PipelineResult(
-        stats=stats,
-        strand_models=strand_models,
-        frag_length_models=frag_length_models,
-        estimator=estimator,
-        pipeline_config=config,
-        calibration=calibration,
-        calibration_payload=calibration_payload,
-    )
+    # The remainder of run_pipeline is unreachable until Phase D lands the
+    # new calibrate() and Phase E lands the new quant_from_buffer().
+    raise AssertionError("unreachable: Phase A burndown stub aborts above")

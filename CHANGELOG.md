@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — v6 calibration redesign
 
+### 2026-05-29 — Calibration v5 burn-down (Phase A)
+
+Removed the v5 calibration module surface (~30 source files, ~32 test
+files) ahead of the joint fractional-accumulator + calibration-v6
+rewrite. `rigel.calibration` now exposes only `CalibrationConfig`,
+`CalibrationResult` (placeholder), and `calibrate` (stub that raises
+`NotImplementedError`). `rigel quant` therefore aborts at the calibration
+step until Phase D lands the new orchestrator.
+
+Replacement plan and phase gates: see
+[`docs/acc_caljointmodel/00_implementation_plan.md`](docs/acc_caljointmodel/00_implementation_plan.md).
+Salvageable FL code preserved at
+`archive/calibration_legacy_2026_05/src/rigel/calibration/`.
+
 ### Headline
 
 Joint mRNA / nRNA / gDNA quantification with an in-place per-region

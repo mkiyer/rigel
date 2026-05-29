@@ -1,309 +1,249 @@
 /**
- * accumulator.cpp - Out-of-line bodies for fractional CalibrationAccumulator.
+ * accumulator.cpp — Fractional accumulator implementation.
  *
- * Per-fragment fractional mass routing:
- *   1. Compute total_aligned_bp across exon blocks.
- *   2. Gate strand-ambiguous fragments to n_excluded_strand_ambig.
- *   3. Compute fl_idx once per fragment (unspliced only).
- *   4. For each block, query region overlaps; for each (block, region)
- *      pair, compute overlap_bp, w = overlap_bp / total_aligned_bp,
- *      classify compartment from fragment-vs-region bounds, and add
- *      w to region_counts and the appropriate channel/signature/FL pool.
+ * Spec: docs/accumulator/00_design.md
+ * Python reference: tests/native/_accumulator_reference.py
  *
- * The fully-spanned case (cross_left && cross_right) splits w in half
- * between BOUNDARY_LEFT and BOUNDARY_RIGHT region_counts channels but
- * adds the total w to the BOUNDARY FL pool exactly once (left/right
- * map to the same pool).
+ * Must match the Python reference byte-for-byte (float32 masses,
+ * uint32 counts).
  */
-
-#include "calibration/accumulator.h"
+#include "accumulator.h"
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
+#include <utility>
 
-namespace rigel::calibration {
+namespace rigel::accumulator {
 
 namespace {
 
-inline int64_t block_region_overlap(int64_t blk_start, int64_t blk_end,
-                                    int64_t region_start, int64_t region_end) {
-    const int64_t lo = std::max<int64_t>(blk_start, region_start);
-    const int64_t hi = std::min<int64_t>(blk_end, region_end);
-    return hi > lo ? (hi - lo) : 0;
-}
+// Per-slice scratch entry: (region_idx, start, end).
+struct Slice {
+    std::int64_t region_idx;
+    std::int64_t start;
+    std::int64_t end;
+};
 
-}  // namespace
+}  // anonymous namespace
 
-void CalibrationAccumulator::observe(
-    int8_t splice_type,
-    int32_t /*ref_id*/,
-    int64_t frag_start,
-    int64_t frag_end,
-    const ExonBlock* exons,
-    int32_t n_exons,
-    int8_t fragment_strand,
-    const RegionIndex& regions)
+Accumulator::Accumulator(std::vector<std::int64_t> boundaries)
+    : boundary_positions_(std::move(boundaries))
 {
-    // Strand gate: ambiguous/unknown strand is not routable into the
-    // strand-resolved 12-channel layout. Count and return.
-    int strand_idx;
-    if (fragment_strand == STRAND_POS) {
-        strand_idx = region_signature::kChannelStrandPos;
-    } else if (fragment_strand == STRAND_NEG) {
-        strand_idx = region_signature::kChannelStrandNeg;
-    } else {
-        ++payload_.n_excluded_strand_ambig;
+    // An empty position array is permitted and yields a no-op accumulator
+    // (n_regions == 0, n_boundaries == 0). This lets AccumulatorSet allocate
+    // a placeholder for references that have no annotated partition.
+    if (boundary_positions_.empty()) {
+        regions_.clear();
+        boundaries_.clear();
+        return;
+    }
+    // Strict monotonicity check.
+    for (std::size_t i = 1; i < boundary_positions_.size(); ++i) {
+        if (boundary_positions_[i] <= boundary_positions_[i - 1]) {
+            throw std::invalid_argument(
+                "Accumulator: boundaries must be strictly increasing");
+        }
+    }
+    const std::size_t n = boundary_positions_.size() - 1;
+    regions_.assign(n, Region{});
+    boundaries_.assign(n + 1, Boundary{});
+    // POD zero-init via value-init in assign above; be explicit for clarity.
+    if (n > 0) std::memset(regions_.data(), 0, n * sizeof(Region));
+    std::memset(boundaries_.data(), 0, (n + 1) * sizeof(Boundary));
+}
+
+std::int64_t Accumulator::region_of_pos(std::int64_t pos) const noexcept {
+    if (boundary_positions_.size() < 2) return -1;
+    const std::int64_t lo = boundary_positions_.front();
+    const std::int64_t hi = boundary_positions_.back();
+    if (pos < lo || pos >= hi) return -1;
+    // np.searchsorted(boundaries, pos, side='right') - 1
+    auto it = std::upper_bound(boundary_positions_.begin(),
+                               boundary_positions_.end(), pos);
+    return static_cast<std::int64_t>(
+               std::distance(boundary_positions_.begin(), it)) - 1;
+}
+
+void Accumulator::deposit(const std::int64_t* block_starts,
+                          const std::int64_t* block_ends,
+                          std::size_t n_blocks,
+                          bool spliced,
+                          bool strand_pos)
+{
+    if (n_blocks == 0 || regions_.empty()) return;
+
+    const int ch = channel_idx(spliced, strand_pos);
+    const std::int64_t edge_lo = boundary_positions_.front();
+    const std::int64_t edge_hi = boundary_positions_.back();
+
+    // 1. Expand each block into per-region slices.
+    //    Worst case: each block straddles every region. Reserve a small
+    //    initial capacity; vector growth amortizes.
+    std::vector<Slice> slices;
+    slices.reserve(n_blocks * 2);
+
+    for (std::size_t b = 0; b < n_blocks; ++b) {
+        std::int64_t blk_start = block_starts[b];
+        std::int64_t blk_end   = block_ends[b];
+        if (blk_end <= blk_start) continue;
+        std::int64_t s = std::max(blk_start, edge_lo);
+        std::int64_t e = std::min(blk_end,   edge_hi);
+        if (e <= s) continue;
+        std::int64_t cur = s;
+        std::int64_t r = region_of_pos(cur);
+        while (cur < e && r != -1 &&
+               r < static_cast<std::int64_t>(regions_.size()))
+        {
+            const std::int64_t region_end = boundary_positions_[r + 1];
+            const std::int64_t slice_end  = std::min(e, region_end);
+            slices.push_back(Slice{r, cur, slice_end});
+            cur = slice_end;
+            ++r;
+        }
+    }
+
+    if (slices.empty()) return;
+
+    // 2. Compute L = sum of slice lengths.
+    std::int64_t L = 0;
+    for (const auto& sl : slices) {
+        L += (sl.end - sl.start);
+    }
+    if (L <= 0) return;
+    const double inv_L = 1.0 / static_cast<double>(L);
+
+    // 3. Single-region (all slices in same region) → contained.
+    bool all_same = true;
+    const std::int64_t r0 = slices.front().region_idx;
+    for (std::size_t i = 1; i < slices.size(); ++i) {
+        if (slices[i].region_idx != r0) { all_same = false; break; }
+    }
+    if (all_same) {
+        regions_[static_cast<std::size_t>(r0)].contained[ch] += 1u;
         return;
     }
 
-    // Total aligned base pairs (sum of M/D/=/X spans, per block).
-    int64_t total_aligned_bp = 0;
-    for (int32_t e = 0; e < n_exons; ++e) {
-        const ExonBlock& blk = exons[e];
-        const int64_t len = static_cast<int64_t>(blk.end) -
-                            static_cast<int64_t>(blk.start);
-        if (len > 0) total_aligned_bp += len;
+    // 4. Crossing path: for each consecutive slice pair, deposit on the
+    //    boundary between r_left's right-boundary and r_right's left-
+    //    boundary (these are the same boundary iff adjacent; different
+    //    iff non-adjacent).
+    //
+    //    Collect touched boundary indices into a small scratch vector
+    //    and dedupe before incrementing flux.
+    std::vector<std::int64_t> touched;
+    touched.reserve(slices.size() * 2);
+
+    for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
+        const Slice& a = slices[i];
+        const Slice& b = slices[i + 1];
+        const std::int64_t len_left  = a.end - a.start;
+        const std::int64_t len_right = b.end - b.start;
+        const std::int64_t b_out = a.region_idx + 1;  // right boundary of r_left
+        const std::int64_t b_in  = b.region_idx;      // left  boundary of r_right
+
+        boundaries_[static_cast<std::size_t>(b_out)].mass_left[ch] +=
+            static_cast<float>(static_cast<double>(len_left) * inv_L);
+        boundaries_[static_cast<std::size_t>(b_in)].mass_right[ch] +=
+            static_cast<float>(static_cast<double>(len_right) * inv_L);
+
+        touched.push_back(b_out);
+        touched.push_back(b_in);
     }
-    if (total_aligned_bp <= 0) {
-        ++payload_.n_unobserved;
-        return;
+
+    // Dedupe touched and increment flux.
+    std::sort(touched.begin(), touched.end());
+    touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
+    for (std::int64_t b : touched) {
+        boundaries_[static_cast<std::size_t>(b)].flux[ch] += 1u;
     }
+}
 
-    // From here on the fragment counts as observed.
-    ++payload_.n_observed;
-
-    const int splice_idx = (splice_type == SPLICE_UNSPLICED)
-                               ? region_signature::kSpliceUnspliced
-                               : region_signature::kSpliceSpliced;
-
-    // FL eligibility (unspliced only; strand-collapsed in pools).
-    int32_t fl_idx = -1;
-    if (splice_idx == region_signature::kSpliceUnspliced) {
-        const int64_t fl_raw = frag_end - frag_start;
-        if (fl_raw >= 0 && fl_raw < CalibrationPayload::kFlBins) {
-            fl_idx = static_cast<int32_t>(fl_raw);
-        } else if (fl_raw >= CalibrationPayload::kFlBins) {
-            // Clip to last bin so very long fragments still contribute
-            // mass to the FL pool (consistent with the legacy cap).
-            fl_idx = CalibrationPayload::kFlBins - 1;
-        } else {
-            // fl_raw < 0 should not happen for well-formed unspliced
-            // fragments, but count it for audit and skip FL contribution.
-            ++payload_.n_fl_unavailable;
+void Accumulator::merge_from(const Accumulator& other) {
+    if (boundary_positions_.size() != other.boundary_positions_.size() ||
+        !std::equal(boundary_positions_.begin(), boundary_positions_.end(),
+                    other.boundary_positions_.begin()))
+    {
+        throw std::invalid_argument(
+            "Accumulator::merge_from: boundary positions differ");
+    }
+    const std::size_t n_r = regions_.size();
+    const std::size_t n_b = boundaries_.size();
+    for (std::size_t i = 0; i < n_r; ++i) {
+        for (std::size_t c = 0; c < kNChannels; ++c) {
+            regions_[i].contained[c] += other.regions_[i].contained[c];
         }
     }
-
-    const double inv_total =
-        1.0 / static_cast<double>(total_aligned_bp);
-
-    bool any_region_hit = false;
-    touched_contained_.clear();
-    touched_left_.clear();
-    touched_right_.clear();
-    touched_regions_.clear();
-
-    for (int32_t e = 0; e < n_exons; ++e) {
-        const ExonBlock& blk = exons[e];
-
-        block_hits_.clear();
-        regions.overlap_into(blk.ref_id,
-                             static_cast<int64_t>(blk.start),
-                             static_cast<int64_t>(blk.end),
-                             block_hits_);
-        if (block_hits_.empty()) continue;
-        any_region_hit = true;
-
-        for (int32_t rid : block_hits_) {
-            const int64_t rs = regions.start(rid);
-            const int64_t re = regions.end(rid);
-            const int64_t overlap_bp = block_region_overlap(
-                static_cast<int64_t>(blk.start),
-                static_cast<int64_t>(blk.end),
-                rs, re);
-            if (overlap_bp <= 0) continue;
-
-            const double w = static_cast<double>(overlap_bp) * inv_total;
-
-            // Fragment-vs-region boundary classification (per fragment,
-            // not per block; spliced fragments use end-to-end extent).
-            const bool cross_left  = frag_start < rs;
-            const bool cross_right = frag_end   > re;
-
-            // Per-region per-compartment support: record this region
-            // in the touched_* vector(s) matching its compartment. A
-            // fully-spanning fragment hits BOTH left and right.
-            // Duplicates from multi-block hits to the same region are
-            // collapsed by sort+unique below.
-            if (cross_left && cross_right) {
-                touched_left_.push_back(rid);
-                touched_right_.push_back(rid);
-            } else if (cross_left) {
-                touched_left_.push_back(rid);
-            } else if (cross_right) {
-                touched_right_.push_back(rid);
-            } else {
-                touched_contained_.push_back(rid);
-            }
-            // Per-region aggregate support: record the region exactly
-            // once per fragment, regardless of compartment. Duplicates
-            // from multi-block hits and from a fragment spanning both
-            // boundaries collapse via sort+unique below.
-            touched_regions_.push_back(rid);
-
-            const std::uint8_t sig = regions.signature(rid);
-            const size_t reg_base =
-                static_cast<size_t>(rid) * CalibrationPayload::kChannels;
-
-            auto add_channel = [&](int compartment, double mass) {
-                const int ch = region_signature::channel_index(
-                    compartment, splice_idx, strand_idx);
-                payload_.region_counts[reg_base + static_cast<size_t>(ch)] +=
-                    static_cast<float>(mass);
-                payload_.channel_mass[static_cast<size_t>(ch)] += mass;
-                payload_.signature_mass[static_cast<size_t>(sig)] += mass;
-
-                if (fl_idx >= 0) {
-                    const int pool = region_signature::fl_pool_index(
-                        sig, compartment);
-                    payload_.fl_pool_mass[
-                        static_cast<size_t>(pool) *
-                            CalibrationPayload::kFlBins +
-                        static_cast<size_t>(fl_idx)] += mass;
-                    payload_.fl_pool_total[static_cast<size_t>(pool)] += mass;
-                }
-            };
-
-            if (cross_left && cross_right) {
-                // Fully spans the region: split region_counts mass
-                // 50/50 between BOUNDARY_LEFT and BOUNDARY_RIGHT.
-                // FL pool: left and right boundary slots collapse to
-                // the same pool, so add total w exactly once via the
-                // left compartment to avoid double-counting.
-                const double half = 0.5 * w;
-                const int ch_l = region_signature::channel_index(
-                    region_signature::kCompartmentBoundaryLeft,
-                    splice_idx, strand_idx);
-                const int ch_r = region_signature::channel_index(
-                    region_signature::kCompartmentBoundaryRight,
-                    splice_idx, strand_idx);
-                payload_.region_counts[reg_base + static_cast<size_t>(ch_l)] +=
-                    static_cast<float>(half);
-                payload_.region_counts[reg_base + static_cast<size_t>(ch_r)] +=
-                    static_cast<float>(half);
-                payload_.channel_mass[static_cast<size_t>(ch_l)] += half;
-                payload_.channel_mass[static_cast<size_t>(ch_r)] += half;
-                payload_.signature_mass[static_cast<size_t>(sig)] += w;
-
-                if (fl_idx >= 0) {
-                    const int pool = region_signature::fl_pool_index(
-                        sig, region_signature::kCompartmentBoundaryLeft);
-                    payload_.fl_pool_mass[
-                        static_cast<size_t>(pool) *
-                            CalibrationPayload::kFlBins +
-                        static_cast<size_t>(fl_idx)] += w;
-                    payload_.fl_pool_total[static_cast<size_t>(pool)] += w;
-                }
-            } else if (cross_left) {
-                add_channel(region_signature::kCompartmentBoundaryLeft, w);
-            } else if (cross_right) {
-                add_channel(region_signature::kCompartmentBoundaryRight, w);
-            } else {
-                add_channel(region_signature::kCompartmentContained, w);
-            }
-        }
-    }
-
-    if (!any_region_hit) {
-        ++payload_.n_unannotated_ref;
-    }
-
-    // Per-region per-compartment support: increment exactly once per
-    // unique region within each compartment the current fragment
-    // touched. A fragment fully spanning a region increments both the
-    // left and right boundary support for that region.
-    auto bump = [](std::vector<int32_t>& touched,
-                   std::vector<std::uint32_t>& support) {
-        if (touched.empty()) return;
-        std::sort(touched.begin(), touched.end());
-        auto last = std::unique(touched.begin(), touched.end());
-        for (auto it = touched.begin(); it != last; ++it) {
-            ++support[static_cast<size_t>(*it)];
-        }
-    };
-    if (splice_idx == region_signature::kSpliceUnspliced) {
-        bump(touched_contained_, payload_.region_contained_unspliced_support);
-        bump(touched_left_,      payload_.region_boundary_left_unspliced_support);
-        bump(touched_right_,     payload_.region_boundary_right_unspliced_support);
-    } else {
-        bump(touched_contained_, payload_.region_contained_spliced_support);
-        bump(touched_left_,      payload_.region_boundary_left_spliced_support);
-        bump(touched_right_,     payload_.region_boundary_right_spliced_support);
-    }
-
-    // Per-region aggregate support: increment exactly once per unique
-    // region the current fragment touched (compartment-agnostic).
-    if (!touched_regions_.empty()) {
-        std::sort(touched_regions_.begin(), touched_regions_.end());
-        auto last = std::unique(touched_regions_.begin(), touched_regions_.end());
-        auto& support_agg =
-            (splice_idx == region_signature::kSpliceUnspliced)
-                ? payload_.region_unspliced_support
-                : payload_.region_spliced_support;
-        for (auto it = touched_regions_.begin(); it != last; ++it) {
-            ++support_agg[static_cast<size_t>(*it)];
+    for (std::size_t i = 0; i < n_b; ++i) {
+        for (std::size_t c = 0; c < kNChannels; ++c) {
+            boundaries_[i].mass_left[c]  += other.boundaries_[i].mass_left[c];
+            boundaries_[i].mass_right[c] += other.boundaries_[i].mass_right[c];
+            boundaries_[i].flux[c]       += other.boundaries_[i].flux[c];
         }
     }
 }
 
-namespace {
+// ============================================================================
+// AccumulatorSet
+// ============================================================================
 
-template <typename T>
-inline void add_into(std::vector<T>& dst, const std::vector<T>& src) {
-    const size_t n = dst.size();
-    for (size_t i = 0; i < n; ++i) dst[i] += src[i];
-}
-
-template <typename T, std::size_t N>
-inline void add_into(std::array<T, N>& dst, const std::array<T, N>& src) {
-    for (std::size_t i = 0; i < N; ++i) dst[i] += src[i];
-}
-
-}  // namespace
-
-void CalibrationAccumulator::merge_from(const CalibrationAccumulator& other) {
-    if (other.n_regions_ != n_regions_) {
-        throw std::runtime_error(
-            "CalibrationAccumulator::merge_from: n_regions mismatch");
+AccumulatorSet::AccumulatorSet(const std::int64_t* boundary_positions,
+                               std::size_t n_positions,
+                               const std::int64_t* ref_pos_offsets,
+                               std::size_t n_refs)
+{
+    accs_.reserve(n_refs);
+    for (std::size_t f = 0; f < n_refs; ++f) {
+        const std::int64_t lo = ref_pos_offsets[f];
+        const std::int64_t hi = ref_pos_offsets[f + 1];
+        if (lo < 0 || hi < lo ||
+            static_cast<std::size_t>(hi) > n_positions)
+        {
+            throw std::invalid_argument(
+                "AccumulatorSet: ref_pos_offsets out of range");
+        }
+        // hi - lo == 0 yields an empty (no-op) Accumulator placeholder for
+        // references with no annotated partition.
+        std::vector<std::int64_t> slice(
+            boundary_positions + lo, boundary_positions + hi);
+        accs_.emplace_back(std::move(slice));
     }
-    add_into(payload_.region_counts,    other.payload_.region_counts);
-    add_into(payload_.channel_mass,     other.payload_.channel_mass);
-    add_into(payload_.signature_mass,   other.payload_.signature_mass);
-    add_into(payload_.fl_pool_mass,     other.payload_.fl_pool_mass);
-    add_into(payload_.fl_pool_total,    other.payload_.fl_pool_total);
-    add_into(payload_.region_contained_unspliced_support,
-             other.payload_.region_contained_unspliced_support);
-    add_into(payload_.region_boundary_left_unspliced_support,
-             other.payload_.region_boundary_left_unspliced_support);
-    add_into(payload_.region_boundary_right_unspliced_support,
-             other.payload_.region_boundary_right_unspliced_support);
-    add_into(payload_.region_contained_spliced_support,
-             other.payload_.region_contained_spliced_support);
-    add_into(payload_.region_boundary_left_spliced_support,
-             other.payload_.region_boundary_left_spliced_support);
-    add_into(payload_.region_boundary_right_spliced_support,
-             other.payload_.region_boundary_right_spliced_support);
-    add_into(payload_.region_unspliced_support,
-             other.payload_.region_unspliced_support);
-    add_into(payload_.region_spliced_support,
-             other.payload_.region_spliced_support);
-    payload_.n_observed              += other.payload_.n_observed;
-    payload_.n_excluded_multimap     += other.payload_.n_excluded_multimap;
-    payload_.n_excluded_chimera      += other.payload_.n_excluded_chimera;
-    payload_.n_excluded_artifact     += other.payload_.n_excluded_artifact;
-    payload_.n_excluded_strand_ambig += other.payload_.n_excluded_strand_ambig;
-    payload_.n_unobserved            += other.payload_.n_unobserved;
-    payload_.n_unannotated_ref       += other.payload_.n_unannotated_ref;
-    payload_.n_fl_unavailable        += other.payload_.n_fl_unavailable;
+    // Validate one beyond-end offset.
+    if (n_refs > 0 &&
+        static_cast<std::size_t>(ref_pos_offsets[n_refs]) != n_positions)
+    {
+        throw std::invalid_argument(
+            "AccumulatorSet: ref_pos_offsets[n_refs] must equal n_positions");
+    }
+    (void)n_positions;  // unused when n_refs == 0
 }
 
-}  // namespace rigel::calibration
+Accumulator& AccumulatorSet::at(std::int32_t ref_id) {
+    if (ref_id < 0 ||
+        static_cast<std::size_t>(ref_id) >= accs_.size())
+    {
+        throw std::out_of_range("AccumulatorSet::at: ref_id out of range");
+    }
+    return accs_[static_cast<std::size_t>(ref_id)];
+}
+
+const Accumulator& AccumulatorSet::at(std::int32_t ref_id) const {
+    if (ref_id < 0 ||
+        static_cast<std::size_t>(ref_id) >= accs_.size())
+    {
+        throw std::out_of_range("AccumulatorSet::at: ref_id out of range");
+    }
+    return accs_[static_cast<std::size_t>(ref_id)];
+}
+
+void AccumulatorSet::merge_from(const AccumulatorSet& other) {
+    if (accs_.size() != other.accs_.size()) {
+        throw std::invalid_argument(
+            "AccumulatorSet::merge_from: n_refs differs");
+    }
+    for (std::size_t f = 0; f < accs_.size(); ++f) {
+        accs_[f].merge_from(other.accs_[f]);
+    }
+}
+
+}  // namespace rigel::accumulator

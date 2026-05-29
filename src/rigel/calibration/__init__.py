@@ -1,124 +1,41 @@
-"""Rigel gDNA calibration public surface."""
+"""Rigel calibration — Phase A burndown stub.
 
-from ._diagnostics import Diagnostics
-from ._exposure import l_eff_contained
-from .background_model import BackgroundModel, fit_background_model
-from .boundaries import BoundaryTable, build_boundary_table, validate_boundary_table
-from .boundary_model import (
-    BoundaryLocalPosterior,
-    build_boundary_local_posterior,
-    predict_contained_gdna_from_excess,
-)
-from .boundary_sweep import (
-    BoundarySweepResult,
-    compute_boundary_transfer_weight,
-    run_boundary_sweep,
-)
-from .calibration_iteration import (
-    CalibrationStepResult,
-    RegionCalibration,
-    calibration_e_step,
-    calibration_m_step,
-    run_calibration_iteration,
-)
-from ._fl_sources import (
-    extract_gdna_counts,
-    extract_global_counts,
-    extract_rna_counts,
-)
-from ._orchestrator import calibrate
-from ._result import CalibrationResult, build_calibration_result
-from .latent_states import (
-    N_STATES,
-    STATE_EXPRESSED,
-    STATE_IS_EXPRESSED,
-    STATE_UNEXPRESSED,
-    STATE_NAMES,
-    build_logbf_expression,
-    build_logbf_strand,
-    build_state_log_prior,
-    build_state_log_tensor,
-    build_state_tensor,
-    normalize_state_log_tensor,
-)
-from .prior import (
-    ComponentExposureTable,
-    EMInputTable,
-    PriorTable,
-    assemble_em_inputs,
-    assemble_priors,
-)
-from .strand_balance import StrandBalanceEstimate, estimate_strand_balance
-from .strand_deconv import (
-    CompartmentStrandCounts,
-    RegionGdnaChannelEstimate,
-    build_compartment_strand_counts,
-    deconvolve_compartments_by_strand,
-)
-from .fl import (
-    POOL_EB_PRIOR_ESS,
-    POOL_SCORING_PRIOR_ESS,
-    POOL_QUALITY_GOOD_THRESHOLD,
-    POOL_QUALITY_WEAK_THRESHOLD,
-    FLModels,
-    Quality,
-    build_fl_models,
-)
-from .strand_summary import StrandSummary
+The v5 calibration surface was burned down on 2026-05-29 to make room for
+the joint fractional-accumulator + calibration-v6 rewrite. See
+``docs/acc_caljointmodel/00_implementation_plan.md`` for the phase plan.
 
-__all__ = [
-    "calibrate",
-    "CalibrationResult",
-    "build_calibration_result",
-    "BoundaryTable",
-    "build_boundary_table",
-    "validate_boundary_table",
-    "BackgroundModel",
-    "fit_background_model",
-    "BoundaryLocalPosterior",
-    "build_boundary_local_posterior",
-    "predict_contained_gdna_from_excess",
-    "BoundarySweepResult",
-    "compute_boundary_transfer_weight",
-    "run_boundary_sweep",
-    "RegionCalibration",
-    "CalibrationStepResult",
-    "calibration_e_step",
-    "calibration_m_step",
-    "run_calibration_iteration",
-    "STATE_UNEXPRESSED",
-    "STATE_EXPRESSED",
-    "N_STATES",
-    "STATE_IS_EXPRESSED",
-    "STATE_NAMES",
-    "build_state_log_prior",
-    "build_logbf_expression",
-    "build_logbf_strand",
-    "build_state_log_tensor",
-    "normalize_state_log_tensor",
-    "build_state_tensor",
-    "CompartmentStrandCounts",
-    "RegionGdnaChannelEstimate",
-    "build_compartment_strand_counts",
-    "deconvolve_compartments_by_strand",
-    "PriorTable",
-    "ComponentExposureTable",
-    "EMInputTable",
-    "assemble_em_inputs",
-    "assemble_priors",
-    "StrandBalanceEstimate",
-    "estimate_strand_balance",
-    "l_eff_contained",
-    "StrandSummary",
-    "FLModels",
-    "Quality",
-    "POOL_QUALITY_GOOD_THRESHOLD",
-    "POOL_QUALITY_WEAK_THRESHOLD",
-    "POOL_EB_PRIOR_ESS",
-    "POOL_SCORING_PRIOR_ESS",
-    "build_fl_models",
-    "Diagnostics",
-    "extract_global_counts",
-    "extract_rna_counts",
-    "extract_gdna_counts",
-]
+Only three names remain public until Phase D lands the new calibrator:
+
+- ``CalibrationConfig`` — sourced from :mod:`rigel.config`.
+- ``CalibrationResult`` — empty placeholder; full schema lands in Phase D
+  (see ``docs/caljointmodel/04_outputs.md``).
+- ``calibrate`` — stub that raises :class:`NotImplementedError`.
+
+``rigel quant`` therefore aborts at the calibration step until Phase D.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..config import CalibrationConfig
+
+__all__ = ["CalibrationConfig", "CalibrationResult", "calibrate"]
+
+
+@dataclass(frozen=True)
+class CalibrationResult:
+    """Placeholder for the Phase-D calibration output.
+
+    The full schema (state tensors, log-evidence ledger, exposure tables,
+    FL models, etc.) is defined in ``docs/caljointmodel/04_outputs.md``
+    and will be implemented in Phase D.
+    """
+
+
+def calibrate(*args, **kwargs) -> CalibrationResult:  # pragma: no cover
+    raise NotImplementedError(
+        "rigel.calibration.calibrate is stubbed during the Phase A burndown. "
+        "The replacement (joint fractional-accumulator + calibration-v6) "
+        "lands in Phase D — see docs/acc_caljointmodel/00_implementation_plan.md."
+    )

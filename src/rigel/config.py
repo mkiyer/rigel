@@ -211,85 +211,48 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for the v6 gDNA calibration orchestrator
-    (:func:`rigel.calibration.calibrate`)."""
+    """Configuration for the joint fractional-accumulator + calibration
+    orchestrator (:func:`rigel.calibration.calibrate`).
 
-    #: Maximum Empirical-Bayes evidence strength for FL shrinkage in
-    #: :func:`rigel.calibration.calibrate`. The ``rna`` and ``gdna``
-    #: per-pool FL distributions are shrunk toward the global FL, but
-    #: the effective prior strength is capped from the pool's own
-    #: evidence so sparse channel-specific signal is not erased. Default matches
-    #: :data:`rigel.calibration.fl.POOL_EB_PRIOR_ESS`.
-    prior_ess: float = 1000.0
+    Schema follows ``docs/caljointmodel/04_outputs.md`` §3. The Phase A
+    burndown (2026-05-29) reduced this to the four control knobs that
+    survive in the new design; legacy v5 fields are gone.
+    """
 
-    #: Effective sample size used for joint RNA-vs-gDNA fragment-length
-    #: contrast reliability in EM scoring. Larger values require more support
-    #: in both RNA and gDNA FL pools before class-specific FL differences are
-    #: trusted; ``0`` disables weak-pool contrast damping while preserving
-    #: fallback neutrality. Default matches
-    #: :data:`rigel.calibration.fl.POOL_SCORING_PRIOR_ESS`.
-    fl_scoring_prior_ess: float = 200.0
+    #: Maximum number of outer EM passes over the joint accumulator.
+    max_outer_iterations: int = 50
 
-    #: Minimum SPLICED-annotated count (``rna``) and gDNA count required
-    #: for the pool's per-FL distribution to be flagged ``"good"`` /
-    #: ``"weak"`` respectively. Below ``weak_threshold`` a pool is
-    #: flagged ``"fallback"`` and downstream code falls back on the
-    #: global FL. By default, any non-empty pool can contribute a weak
-    #: adaptive model; set this higher to require more evidence before leaving
-    #: the global fallback. Default matches
-    #: :data:`rigel.calibration.fl.POOL_QUALITY_GOOD_THRESHOLD` /
-    #: :data:`rigel.calibration.fl.POOL_QUALITY_WEAK_THRESHOLD`.
-    pool_quality_good: int = 5_000
-    pool_quality_weak: int = 1
+    #: Relative-mass convergence tolerance for the outer EM.
+    mass_rel_tol: float = 1.0e-4
 
-    #: Minimum effective length (bp under the gDNA fragment-length model)
-    #: required for a region to enter the v6 off-target background seed fit.
-    density_min_eff_length: float = 1.0
+    #: Floor on per-region foreground mass φ used to keep log-evidence
+    #: numerically well-behaved.
+    phi_floor: float = 1.0e-9
 
-    #: Fraction of initial background-like seed regions with the highest
-    #: contained gDNA-compatible density to exclude from the off-target
-    #: background fit.
-    background_trim_fraction: float = 0.01
-
-    #: Maximum number of v6 four-state calibration passes before accepting the
-    #: latest posterior state tensor.
-    max_calibration_passes: int = 5
+    #: Multiplier on the genome-coordinate boundary split tolerance for
+    #: the accumulator fine-region builder.
+    boundary_split_factor: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.prior_ess < 0.0:
+        if self.max_outer_iterations < 1:
             raise ValueError(
-                "CalibrationConfig.prior_ess must be >= 0; "
-                f"got {self.prior_ess}."
+                "CalibrationConfig.max_outer_iterations must be >= 1; "
+                f"got {self.max_outer_iterations}."
             )
-        if self.fl_scoring_prior_ess < 0.0:
+        if self.mass_rel_tol <= 0.0:
             raise ValueError(
-                "CalibrationConfig.fl_scoring_prior_ess must be >= 0; "
-                f"got {self.fl_scoring_prior_ess}."
+                "CalibrationConfig.mass_rel_tol must be > 0; "
+                f"got {self.mass_rel_tol}."
             )
-        if self.pool_quality_good < 0:
+        if self.phi_floor <= 0.0:
             raise ValueError(
-                "CalibrationConfig.pool_quality_good must be >= 0; "
-                f"got {self.pool_quality_good}."
+                "CalibrationConfig.phi_floor must be > 0; "
+                f"got {self.phi_floor}."
             )
-        if self.pool_quality_weak < 0:
+        if self.boundary_split_factor <= 0.0:
             raise ValueError(
-                "CalibrationConfig.pool_quality_weak must be >= 0; "
-                f"got {self.pool_quality_weak}."
-            )
-        if self.density_min_eff_length < 0.0:
-            raise ValueError(
-                "CalibrationConfig.density_min_eff_length must be >= 0; "
-                f"got {self.density_min_eff_length}."
-            )
-        if not (0.0 <= self.background_trim_fraction < 1.0):
-            raise ValueError(
-                "CalibrationConfig.background_trim_fraction must be in [0, 1); "
-                f"got {self.background_trim_fraction}."
-            )
-        if self.max_calibration_passes < 1:
-            raise ValueError(
-                "CalibrationConfig.max_calibration_passes must be >= 1; "
-                f"got {self.max_calibration_passes}."
+                "CalibrationConfig.boundary_split_factor must be > 0; "
+                f"got {self.boundary_split_factor}."
             )
 
 

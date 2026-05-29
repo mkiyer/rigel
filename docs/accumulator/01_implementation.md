@@ -1,4 +1,4 @@
-# Accumulator v2 — Phased Implementation Plan
+# Fractional Accumulator — Phased Implementation Plan
 
 Companion to [`00_design.md`](00_design.md). This document is the
 step-by-step playbook. Each phase has explicit file lists,
@@ -17,18 +17,20 @@ previous phase's acceptance gate is green and is reviewed.**
   signs off.
 - **No premature deletions.** Legacy code (`RegionCountLedger`
   boundary fields, [`boundaries.py`](../../src/rigel/calibration/boundaries.py))
-  remains compiled-and-callable through Phase 6. Deletion happens
-  only in Phase 7.
+  remains compiled-and-callable through Phase 3. Cutover
+  (Phase 4) replaces the legacy accumulator in place; downstream
+  consumers migrate in the same phase. Dead-code deletion happens
+  in Phase 5.
 - **FL is not accumulated.** Per audit_phase1.md decision #6, the
-  v2 substrate does not collect per-region or per-boundary FL
+  the substrate does not collect per-region or per-boundary FL
   histograms. FL stays in the downstream EM scorer
   ([`scoring.py`](../../src/rigel/scoring.py),
   [`frag_length_model.py`](../../src/rigel/frag_length_model.py))
   where it can be applied per-fragment without binning.
 - **Naming.** Old type: `RegionCountLedger`. New type:
   `Accumulator`. Old Python adapter: `RegionCountsPayload`
-  (whatever it's called today). New: `AccumulatorPayload`. The two
-  coexist until Phase 7.
+  (whatever it's called today). New: `AccumulatorPayload`. The
+  legacy types are removed entirely during Phase 4 cutover.
 
 ---
 
@@ -38,7 +40,7 @@ previous phase's acceptance gate is green and is reviewed.**
 semantics in `src/rigel/native/accumulator.cpp` and
 `bam_scanner.cpp`. Fix any per-block double-counting bugs found
 **inside the legacy implementation** so the parity gate in Phase 5
-compares two correct accumulators. Lock the v2 spec by writing the
+compares two correct accumulators. Lock the accumulator spec by writing the
 reference test corpus.
 
 ### 1.1 Code review tasks (read-only)
@@ -76,7 +78,7 @@ Required sections:
    the `w/2` split rule (see [`00_design.md`](00_design.md) §2.3).
 4. **Spliced-flag attribution.** State exactly when a fragment is
    marked spliced vs unspliced in the boundary deposit. Compare to
-   the v2 spec (per-junction-event spliced flag).
+   the spec (per-junction-event spliced flag).
 5. **Strand attribution.** State how strand $s \in \{+, -\}$ is set
    per fragment.
 6. **Found bugs.** Enumerate any discrepancies between the
@@ -88,12 +90,12 @@ Required sections:
 
 If §1.2.6 surfaces bugs, fix them **inside the legacy
 `accumulator.cpp`** with their own commits and tests in this phase
-(not v2). The point is to make the parity gate in Phase 5 meaningful.
+(not the new accumulator). The point is to make the parity gate in Phase 5 meaningful.
 
-### 1.4 Lock the v2 spec via reference test corpus
+### 1.4 Lock the accumulator spec via reference test corpus
 
 Create `tests/native/test_accumulator_spec.py` with **expected
-outputs only** (the v2 implementation does not exist yet; tests are
+outputs only** (the native implementation does not exist yet; tests are
 xfail-marked until Phase 2 lands). Each test is a tiny synthetic
 fragment list paired with the expected `AccumulatorPayload`
 contents, computed by hand or by a Python reference implementation
@@ -125,7 +127,7 @@ implementation will be tested against this Python reference.
 - [ ] All bugs found in §1.2.6 either fixed (with tests) or filed as deferred (with justification).
 - [ ] `tests/native/test_accumulator_spec.py` exists with all 11 tests, currently `pytest.mark.xfail(reason="accumulator not yet implemented")`.
 - [ ] `tests/native/_accumulator_reference.py` is a working Python implementation.
-- [ ] `pytest tests/ -v` passes (legacy tests still green; v2 tests xfail).
+- [ ] `pytest tests/ -v` passes (legacy tests still green; new spec tests xfail).
 
 ### 1.6 Rollback
 
@@ -295,154 +297,129 @@ Revert the nanobind binding block in `bam_scanner.cpp` and remove
 
 ---
 
-## Phase 4 — Wire v2 into `bam_scanner.cpp` (dual-write)
+## Phase 4 — In-place cutover
 
-**Goal.** While scanning a BAM, deposit each fragment into **both**
-the legacy `RegionCountLedger` and the new `Accumulator`. Emit
-both payloads. No downstream consumer changes yet.
+**Goal.** Replace the legacy `RegionCountLedger` boundary path with
+the new `Accumulator`. This is a single atomic cutover: the legacy
+deposit call is removed in the same commit (or PR) that migrates
+every downstream consumer. Before starting, snapshot the
+pre-cutover golden outputs for the Phase 5 regression gate.
 
-### 4.1 Files modified
+### 4.1 Snapshot pre-cutover golden (read-only)
 
-- `src/rigel/native/bam_scanner.cpp` — in the per-fragment finalize
-  block, after calling the legacy deposit, call
-  `accumulator_.deposit(fe)`. Wrap the v2 call in a runtime
-  on/off flag (env var `RIGEL_ACCUMULATOR=1` default-on for
-  developer builds; flip the default after Phase 5 parity passes).
-- `src/rigel/scan.py` — surface the `AccumulatorPayload` alongside
-  whatever payload `scan_and_buffer` already returns.
+Before any code change:
 
-### 4.2 Tests added
-
-`tests/test_dual_write_parity.py`:
-
-- Run the scanner on one scenario BAM with both accumulators enabled.
-- Project the v2 boundary view back to region-keyed `boundary_left` /
-  `boundary_right` channels using the indexing in
-  [`00_design.md`](00_design.md) §3.1.
-- Assert the projection equals the legacy `RegionCountLedger`'s
-  boundary slots within float32 tolerance (`abs_tol = 1e-5`).
-- Assert contained channels match exactly (integer compare).
-
-### 4.3 Acceptance gate
-
-- [ ] Build succeeds.
-- [ ] `pytest tests/test_dual_write_parity.py -v` passes on at least
-      3 scenario BAMs (`tests/scenarios_aligned/`).
-- [ ] No regression in any existing test.
-- [ ] Scan-time overhead measured: report `time pytest tests/test_pipeline_smoke.py` before and after.
-
-### 4.4 Rollback
-
-Flip `RIGEL_ACCUMULATOR=0`. The legacy path is fully intact.
-
----
-
-## Phase 5 — Parity gate against real data
-
-**Goal.** Run the full benchmark suite with dual-write enabled and
-prove the v2 substrate matches legacy on real-scale BAMs. This is
-the single critical-path gate of the project.
-
-### 5.1 Tasks
-
-1. Run `python -m scripts.benchmarking run -c
-   scripts/benchmarking/configs/default.yaml --dry-run` first to
-   confirm conditions are discoverable.
-2. Re-run rigel on 3 representative conditions:
+1. Build the **current `main`** binary (legacy accumulator still
+   live).
+2. Run rigel on 3 representative conditions:
    - `gdna_none_ss_1.00_nrna_none`
    - `gdna_high_ss_0.50_nrna_rand`
    - `gdna_low_ss_0.90_nrna_none`
-   Use the new dual-write build. Output goes to
-   `runs/<condition>/rigel/accumulator_phase5/`.
-3. Compare to the existing golden `runs/<condition>/rigel/default/`
-   transcript-level quant.feather. Allowed: floating-point noise at
-   ~1e-6 relative tolerance.
+3. Save the resulting transcript-level `quant.feather` files to
+   `runs/<condition>/rigel/precutover_golden/`. These are the
+   reference for Phase 5.
 
-### 5.2 Diagnostics (`scripts/debug/accumulator_parity.py`)
+### 4.2 Consumer audit (read-only)
 
-A new script that:
-- Loads both `AccumulatorPayload` and the legacy `RegionCountLedger`
-  payload from a single dual-write scan.
-- Computes per-boundary, per-region, per-channel diffs.
-- Reports the top-N divergent boundaries with synthetic-context
-  metadata (which transcripts overlap, what the locus shape is).
+Run `grep_search` for these symbols and enumerate every callsite
+that needs migration:
 
-### 5.3 Acceptance gate
-
-- [ ] All 3 conditions match golden quant.feather within 1e-6 relative tolerance for `mrna_abundance`.
-- [ ] Per-boundary parity report shows zero diffs above 1e-5 absolute.
-- [ ] If any diff exceeds threshold: do NOT proceed. Root-cause first.
-       Most likely culprits: implicit-splice classification mismatch
-       (§4.3 spliced flag), or fully-spans-region attribution
-       (§4.5.4). File a bug, fix in Phase 2, return here.
-
-### 5.4 Rollback
-
-If the gate fails and the cause is structural (i.e. the v2 design
-itself is wrong), pause and re-open the design phase. Otherwise:
-fix in the appropriate phase and re-run.
-
----
-
-## Phase 6 — Consumer migration
-
-**Goal.** Switch every downstream consumer from `RegionCountLedger`
-+ `BoundaryTable` to `AccumulatorPayload`. Legacy code still
-compiled but no longer read.
-
-### 6.1 Consumers to migrate (audit before starting)
-
-Run `grep_search` for these symbols and migrate each callsite:
-
-1. `BoundaryTable` — primary consumer in
-   `src/rigel/calibration/`.
+1. `BoundaryTable` — primary consumer in `src/rigel/calibration/`.
 2. `build_boundary_table`, `validate_boundary_table` — from
    `src/rigel/calibration/boundaries.py`.
 3. `RegionCountLedger` boundary-slot reads (anything reading
    `boundary_left_*` or `boundary_right_*` off the ledger).
 4. `compute_locus_priors_from_partitions` — confirm whether it reads
    from boundary table or directly from ledger.
-5. Any test fixtures that construct synthetic `BoundaryTable`s
-   (they get replaced with synthetic `AccumulatorPayload`s; reuse
-   the Python reference impl from Phase 1).
+5. Test fixtures that construct synthetic `BoundaryTable`s — they
+   get rebuilt against synthetic `AccumulatorPayload`s using the
+   Python reference impl from Phase 1.
 
-### 6.2 Files modified (expected list — confirm via grep before edits)
+### 4.3 Files modified
 
-- `src/rigel/calibration/_simple.py`
-- `src/rigel/calibration/_categorize.py`
-- `src/rigel/locus.py` (if it reads boundary fields)
-- `src/rigel/priors.py` (if it reads boundary fields)
-- Test fixtures: `tests/test_boundary_model.py`, `tests/test_boundary_sweep.py`
+- `src/rigel/native/bam_scanner.cpp` — replace the legacy
+  `RegionCountLedger` deposit with `accumulator_.deposit(fe)`. No
+  feature flag, no dual-write — the legacy call is removed.
+- `src/rigel/scan.py` — replace the legacy payload surface with
+  `AccumulatorPayload`.
+- `src/rigel/calibration/_simple.py`, `_categorize.py`,
+  `src/rigel/locus.py`, `src/rigel/priors.py` — switch reads to
+  `AccumulatorPayload`. Exact set to confirm via §4.2 grep.
+- Test fixtures (`tests/test_boundary_model.py`,
+  `tests/test_boundary_sweep.py`, `tests/test_region_count_ledger.py`,
+  etc.) — update to the new substrate.
 
-### 6.3 Strategy
+### 4.4 Strategy
 
-One commit per consumer migration. Each commit:
-1. Switches one consumer from `BoundaryTable` to
-   `AccumulatorPayload`.
-2. Updates that consumer's tests.
-3. Runs full `pytest tests/ -v` to confirm no other consumer broke.
+A single PR with these commits, in order:
 
-### 6.4 Acceptance gate
+1. Replace deposit call in `bam_scanner.cpp`. Build must still
+   succeed; the legacy `BoundaryTable` consumers will fail at this
+   point until commit 2 lands.
+2. Migrate each consumer in sequence, smallest-blast-radius first.
+3. After every commit, run `pytest tests/ -v`; partial failures are
+   expected mid-PR, but the final commit must restore green.
 
-- [ ] No remaining import of `boundaries.py` outside `boundaries.py` itself.
-- [ ] No remaining read of `RegionCountLedger.boundary_left_*` or `.boundary_right_*` fields.
+### 4.5 Acceptance gate
+
+- [ ] Pre-cutover golden snapshots saved to
+      `runs/<condition>/rigel/precutover_golden/`.
+- [ ] Build succeeds.
+- [ ] No remaining read of `RegionCountLedger.boundary_left_*` or
+      `.boundary_right_*` fields.
 - [ ] Full `pytest tests/ -v` passes.
-- [ ] Re-run Phase 5 parity gate: still passes (consumer migration must not regress numerics).
 
-### 6.5 Rollback
+### 4.6 Rollback
 
-Revert the offending consumer-migration commit. The parallel dual-write
-infrastructure means the legacy path is still alive and callable.
+Revert the cutover PR. The pre-cutover snapshot path remains.
 
 ---
 
-## Phase 7 — Legacy deletion
+## Phase 5 — Regression gate against pre-cutover golden
 
-**Goal.** Remove the legacy boundary path. The legacy contained
-counts may stay if `RegionCountLedger` still serves other purposes;
-otherwise, delete the whole ledger.
+**Goal.** Re-run rigel on the 3 representative conditions with the
+post-cutover binary and confirm transcript-level outputs match the
+Phase 4.1 snapshot. This is the single critical-path correctness
+gate of the project.
 
-### 7.1 Files deleted
+### 5.1 Tasks
+
+1. Re-run rigel on the same 3 conditions used in §4.1. Output goes
+   to `runs/<condition>/rigel/accumulator_cutover/`.
+2. Diff transcript-level `quant.feather` against
+   `runs/<condition>/rigel/precutover_golden/`.
+3. Allowed numerical noise: ~1e-6 relative tolerance on
+   `mrna_abundance`. Larger discrepancies must be root-caused.
+
+### 5.2 Diagnostics (`scripts/debug/accumulator_parity.py`)
+
+Optional helper for root-causing divergences. Loads an
+`AccumulatorPayload` and the saved legacy `RegionCountLedger`-style
+projection (kept as a one-off serialization captured in §4.1) and
+reports per-boundary, per-region, per-channel diffs.
+
+### 5.3 Acceptance gate
+
+- [ ] All 3 conditions match the pre-cutover golden within 1e-6
+      relative tolerance on `mrna_abundance`.
+- [ ] If any diff exceeds threshold: revert Phase 4 and root-cause
+      first. Most likely culprits: implicit-splice classification
+      mismatch ([`00_design.md`](00_design.md) §4.3 spliced flag), or
+      fully-spans-region attribution (§4.5.4).
+
+### 5.4 Rollback
+
+Revert Phase 4 PR.
+
+---
+
+## Phase 6 — Dead-code deletion
+
+**Goal.** Remove the legacy boundary path and any now-orphaned
+helpers. The contained counts may stay if `RegionCountLedger` still
+serves other purposes; otherwise, delete the whole ledger.
+
+### 6.1 Files deleted
 
 - `src/rigel/calibration/boundaries.py`
 - `tests/test_boundary_model.py`, `tests/test_boundary_sweep.py`
@@ -450,17 +427,14 @@ otherwise, delete the whole ledger.
   still valuable).
 - `RegionCountLedger::boundary_left_*` / `::boundary_right_*` fields
   in `src/rigel/native/region_count_ledger.h`.
-- Dual-write call in `bam_scanner.cpp` (delete the legacy deposit
-  call; keep only the v2 deposit).
-- `RIGEL_ACCUMULATOR` env-var flag.
 
-### 7.2 Files modified
+### 6.2 Files modified
 
 - `src/rigel/native/region_count_ledger.cpp` — strip boundary
   accounting helpers.
 - `tests/test_region_count_ledger.py` — strip boundary tests.
 
-### 7.3 Documentation updates
+### 6.3 Documentation updates
 
 - `CLAUDE.md` — update the "Python Module Roles" table: remove
   `boundaries.py` row, update `scan_payload.py` description.
@@ -469,58 +443,38 @@ otherwise, delete the whole ledger.
   "Status (2026-05-29)" pending banner; mark substrate as live.
 - `CHANGELOG.md` — entry for the rewrite.
 
-### 7.4 Acceptance gate
+### 6.4 Acceptance gate
 
 - [ ] Full `pytest tests/ -v` passes.
 - [ ] `ruff check src/ tests/` clean.
-- [ ] Benchmark re-run on 3 conditions still matches golden.
+- [ ] Phase 5 regression gate re-run still passes.
 - [ ] No grep hits for `BoundaryTable`, `boundaries.py`,
       `boundary_left_`, `boundary_right_`.
 
-### 7.5 Rollback
+### 6.5 Rollback
 
-Revert the deletion commit if any test surface lights up. The
-dual-write deletion is the most likely source of regression.
+Revert the deletion commit if any test surface lights up.
 
 ---
 
-## Phase 8 — Calibration v6 substrate hookup
+## Phase 7 — Calibration v6 substrate hookup
 
 **Goal.** Re-open [`../caljointmodel/`](../caljointmodel/) and wire
 the calibrator to consume `AccumulatorPayload` directly per docs
-01–03. This phase is *out of scope* for the accumulator v2 plan
-itself but is the immediate downstream consumer; flag it here so
-the v2 work doesn't drift away from its purpose.
+01–03. This phase is *out of scope* for the fractional accumulator
+plan itself but is the immediate downstream consumer; flag it here
+so the rewrite doesn't drift away from its purpose.
 
-### 8.1 Trigger
+### 7.1 Trigger
 
-Phase 7 acceptance gate green.
+Phase 6 acceptance gate green.
 
-### 8.2 First task
+### 7.2 First task
 
 Read [`../caljointmodel/05_implementation_plan.md`](../caljointmodel/05_implementation_plan.md)
 Phase 3 ("substrate adapter") and re-scope: the substrate is now
 the live `AccumulatorPayload`, not an extension. Update that doc to
-mark it as completed-by-accumulator-v2.
-
----
-
-## Phase 9 — Cleanup & perf check
-
-**Goal.** Final polish. Optional perf measurements to confirm v2 is
-no slower than legacy (it should be slightly faster: no
-mass-mirroring across two regions).
-
-### 9.1 Tasks
-
-- Profile a full scan with `scripts/profiler.py` on the largest
-  available scenario BAM.
-- Report wall-clock and memory delta vs the Phase 5 measurement.
-
-### 9.2 Acceptance gate
-
-- [ ] Scan-time within ±5% of legacy baseline.
-- [ ] Peak RSS within ±10% of legacy baseline.
+mark it as completed-by-accumulator-rewrite.
 
 ---
 
@@ -531,12 +485,10 @@ mass-mirroring across two regions).
 | 1 | Audit memo skipped | Required artifact at gate |
 | 2 | Fully-spans-region case is subtle | Pre-decomposition helper + dedicated test T6 |
 | 3 | Nanobind lifetime bugs | Explicit owner-reference + GC test |
-| 4 | Dual-write doubles scan time | Profile in 4.3 gate; if >2× slowdown, redesign |
-| 5 | Numerical divergence on real data | Diagnostics script + per-boundary report |
-| 6 | Hidden consumer found mid-migration | Grep-driven audit before any edits |
-| 7 | Deletion regresses unrelated tests | Revert commit; tests are rebuildable |
-| 8 | Out of scope | Documented as future work |
-| 9 | Perf regression | Profile then optimize |
+| 4 | Mid-PR build/test breakage during cutover | Single PR, ordered commits, final commit restores green |
+| 5 | Numerical divergence vs pre-cutover golden | Diagnostics script + per-boundary report; revert Phase 4 if structural |
+| 6 | Deletion regresses unrelated tests | Revert commit; tests are rebuildable |
+| 7 | Out of scope | Documented as future work |
 
 ---
 
@@ -544,33 +496,31 @@ mass-mirroring across two regions).
 
 | File | P1 | P2 | P3 | P4 | P5 | P6 | P7 |
 |---|---|---|---|---|---|---|---|
-| `accumulator.{h,cpp}` (legacy) | read+fix | — | — | — | — | — | delete boundary fields |
-| `accumulator.{h,cpp}` | — | **add** | — | — | — | — | — |
-| `bam_scanner.cpp` | read | edit (CMake) | edit (binding) | edit (dual-write) | — | — | edit (drop legacy call) |
+| `accumulator.{h,cpp}` (legacy) | read+fix | **replace** | — | — | — | delete residual boundary fields | — |
+| `bam_scanner.cpp` | read | edit (CMake) | edit (binding) | edit (replace deposit call) | — | — | — |
 | `scan.py` | — | — | — | edit | — | — | — |
 | `scan_payload.py` | — | — | **add** | edit | — | — | — |
 | `native.py` | — | — | edit | — | — | — | — |
-| `calibration/boundaries.py` | read | — | — | — | — | — | **delete** |
-| `calibration/_simple.py` | read | — | — | — | — | edit | — |
-| `calibration/_categorize.py` | read | — | — | — | — | edit | — |
-| `locus.py` | read | — | — | — | — | edit if needed | — |
-| `priors.py` | read | — | — | — | — | edit if needed | — |
+| `calibration/boundaries.py` | read | — | — | — | — | **delete** | — |
+| `calibration/_simple.py` | read | — | — | edit | — | — | — |
+| `calibration/_categorize.py` | read | — | — | edit | — | — | — |
+| `locus.py` | read | — | — | edit if needed | — | — | — |
+| `priors.py` | read | — | — | edit if needed | — | — | — |
 | `tests/native/test_accumulator_spec.py` | **add (xfail)** | unxfail | — | — | — | — | — |
 | `tests/native/_accumulator_reference.py` | **add** | — | — | — | — | — | — |
 | `tests/test_accumulator_payload.py` | — | — | **add** | — | — | — | — |
-| `tests/test_dual_write_parity.py` | — | — | — | **add** | — | — | delete |
-| `tests/test_boundary_model.py` | read | — | — | — | — | rewrite or — | delete |
-| `tests/test_boundary_sweep.py` | read | — | — | — | — | rewrite or — | delete |
-| `scripts/debug/accumulator_parity.py` | — | — | — | — | **add** | — | — |
+| `tests/test_boundary_model.py` | read | — | — | rewrite for new payload | — | delete | — |
+| `tests/test_boundary_sweep.py` | read | — | — | rewrite for new payload | — | delete | — |
+| `scripts/debug/accumulator_parity.py` | — | — | — | — | optional **add** | — | — |
 | `docs/accumulator/audit_phase1.md` | **add** | — | — | — | — | — | — |
-| `docs/caljointmodel/04_interface_contract.md` | — | — | — | — | — | — | edit (drop banner) |
-| `CLAUDE.md` | — | — | — | — | — | — | edit |
-| `.github/copilot-instructions.md` | — | — | — | — | — | — | edit |
-| `CHANGELOG.md` | — | — | — | — | — | — | edit |
+| `docs/caljointmodel/04_interface_contract.md` | — | — | — | — | — | edit (drop banner) | — |
+| `CLAUDE.md` | — | — | — | — | — | edit | — |
+| `.github/copilot-instructions.md` | — | — | — | — | — | edit | — |
+| `CHANGELOG.md` | — | — | — | — | — | edit | — |
 
 ---
 
 ## Sign-off
 
-This plan covers Phase 1 through Phase 9. Approval to begin Phase
+This plan covers Phase 1 through Phase 7. Approval to begin Phase
 1 = approval of the plan. Each phase gate is its own checkpoint.
