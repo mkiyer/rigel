@@ -890,56 +890,21 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     float(gdna_sk) if gdna_sk is not None else "")
                 row["cal_kappa_true"] = cal_kappa_true
 
-                cal = pr.calibration
-                if cal is not None:
-                    summary = cal.to_summary_dict()
-                    cal_ss = float(pr.strand_models.strand_specificity)
-                    row["cal_kappa_est"] = round(cal_ss, 4)
-                    row["cal_kappa_err"] = ""
-                    region_summary = summary.get("region_calibration", {})
-                    cal_intergenic_density = float(region_summary.get("rho_off", 0.0))
-                    row["cal_density_est"] = f"{cal_intergenic_density:.4e}"
-
-                    cal_fl = cal.fl_models.gdna
-                    row["cal_gdna_fl_true_mean"] = gdna_true_mean
-                    row["cal_gdna_fl_true_std"] = gdna_true_std
-                    if cal_fl is not None and cal_fl.n_observations > 0:
-                        row["cal_gdna_fl_est_mean"] = round(cal_fl.mean, 2)
-                        row["cal_gdna_fl_est_std"] = round(cal_fl.std, 2)
-                        row["cal_gdna_fl_mean_err"] = round(
-                            cal_fl.mean - gdna_true_mean, 2)
-                    else:
-                        row["cal_gdna_fl_est_mean"] = ""
-                        row["cal_gdna_fl_est_std"] = ""
-                        row["cal_gdna_fl_mean_err"] = ""
-
-                    mean_pi = float(summary["mean_pi_gdna"])
-                    n_ml = int(summary["n_multi_loci"])
-                    row["cal_n_seed"] = f"π̄_g={mean_pi:.3f}"
-                    row["cal_n_iterations"] = ""
-                    row["cal_converged"] = ""
-                    row["cal_mean_weight"] = round(mean_pi, 4)
-                    row["cal_n_regions"] = n_ml
-
-                    logger.info(
-                        "Calibration v4: SS=%.3f, ρ_intergenic=%.2e, "
-                        "mean π_gDNA=%.3f, n_multi_loci=%d",
-                        cal_ss,
-                        cal_intergenic_density,
-                        mean_pi, n_ml,
-                    )
-                else:
-                    for col in ("cal_kappa_est", "cal_kappa_err",
-                                "cal_density_est",
-                                "cal_gdna_fl_true_mean",
-                                "cal_gdna_fl_est_mean",
-                                "cal_gdna_fl_mean_err",
-                                "cal_gdna_fl_true_std",
-                                "cal_gdna_fl_est_std",
-                                "cal_n_seed", "cal_n_iterations",
-                                "cal_converged", "cal_mean_weight",
-                                "cal_n_regions"):
-                        row[col] = ""
+                # Calibration report deferred to PR 8: the v6 calibrator
+                # (rigel.calibration.calibrate) is not yet wired end-to-end
+                # (see docs/acc_caljointmodel/), so pr.calibration carries no
+                # summary. Only the FL truth columns are populated here.
+                row["cal_gdna_fl_true_mean"] = gdna_true_mean
+                row["cal_gdna_fl_true_std"] = gdna_true_std
+                for col in ("cal_kappa_est", "cal_kappa_err",
+                            "cal_density_est",
+                            "cal_gdna_fl_est_mean",
+                            "cal_gdna_fl_mean_err",
+                            "cal_gdna_fl_est_std",
+                            "cal_n_seed", "cal_n_iterations",
+                            "cal_converged", "cal_mean_weight",
+                            "cal_n_regions"):
+                    row[col] = ""
 
                 writer.writerow(row)
                 tsvfile.flush()

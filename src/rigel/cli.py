@@ -1158,9 +1158,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Operational sensitivity/specificity dial for the unspliced "
-        "gDNA-vs-RNA prior split. Range (0, 1). Default 0.5 is the "
-        "unbiased v5 prior; values below 0.5 favor gDNA assignment and "
-        "values above 0.5 favor RNA assignment.",
+        "gDNA-vs-RNA prior split. Range (0, 1). Default 0.5 is unbiased; "
+        "values below 0.5 favor gDNA assignment and values above 0.5 "
+        "favor RNA assignment.",
     )
     adv.add_argument(
         "--overhang-alpha",

@@ -12,8 +12,10 @@ models from unique-mapper fragments, and buffer all resolved fragments into
 a memory-efficient columnar buffer (``FragmentBuffer``).
 
 **Quantification** (``quant_from_buffer``): score buffered fragments,
-construct MultiLoci, assemble fused regional gDNA priors, partition the CSR
-data, and run locus-level native EM.
+construct MultiLoci, calibrate gDNA/RNA contamination, assemble per-locus
+Dirichlet priors, partition the CSR data, and run locus-level native EM.
+(The v6 calibrator + locus-prior consumer are pending — see
+``docs/acc_caljointmodel/``.)
 
 Scoring functions live in ``scoring.py``.  Locus construction and EM
 initialization live in ``locus.py``.  The CSR builder lives in
@@ -23,7 +25,6 @@ initialization live in ``locus.py``.  The CSR builder lives in
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, replace as _replace
 from typing import TYPE_CHECKING
 
@@ -82,7 +83,7 @@ class PipelineResult:
     estimator: AbundanceEstimator
     pipeline_config: "PipelineConfig" = None
     calibration: "CalibrationResult" = None
-    calibration_payload: "object" = None  # CalibrationScanPayload | None
+    calibration_payload: "object" = None  # AccumulatorPayload | None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -187,13 +188,6 @@ def _strand_summary_identifiable(
     return abs(strand_summary.signed_strand_contrast) >= effective_min
 
 
-def _calibration_strand_summary(strand_models: StrandModels):
-    """Choose the strand summary used by calibration density correction."""
-    from .calibration.strand_summary import StrandSummary
-
-    return StrandSummary.from_model(strand_models.exonic_spliced)
-
-
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
     """Warn when calibration cannot identify strand from spliced RNA evidence."""
     from .calibration.strand_summary import StrandSummary
@@ -235,7 +229,7 @@ def scan_and_buffer(
     StrandModels,
     FragmentLengthModels,
     FragmentBuffer,
-    "object",  # CalibrationScanPayload | None
+    "object",  # AccumulatorPayload | None
 ]:
     """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
 
@@ -543,419 +537,6 @@ def _populate_em_annotations(
     )
 
 
-def _run_locus_em_partitioned(
-    estimator: AbundanceEstimator,
-    partitions: dict,
-    multi_loci: list,
-    index: TranscriptIndex,
-    alpha_gdna_add: np.ndarray,
-    alpha_rna_add: np.ndarray,
-    gdna_eff_len_em: np.ndarray,
-    em_config: EMConfig,
-    *,
-    enable_gdna: np.ndarray | None = None,
-    emit_locus_stats: bool = False,
-    annotations: "AnnotationTable | None" = None,
-    gdna_eff_len_unweighted: np.ndarray | None = None,
-    prior_unspliced_total: np.ndarray | None = None,
-    prior_locus_weight: np.ndarray | None = None,
-    prior_shrink_weight: np.ndarray | None = None,
-    prior_n_local_gdna: np.ndarray | None = None,
-    prior_n_local_rna: np.ndarray | None = None,
-    prior_n_other_gdna: np.ndarray | None = None,
-    prior_n_other_rna: np.ndarray | None = None,
-    prior_ess_final: np.ndarray | None = None,
-    prior_rna_share_v5: np.ndarray | None = None,
-    prior_rna_share_final: np.ndarray | None = None,
-    prior_flags: np.ndarray | None = None,
-    n_regions_touched: np.ndarray | None = None,
-    multi_locus_region_mass: np.ndarray | None = None,
-    partial_coverage_region_mass: np.ndarray | None = None,
-    gdna_exposure_factor: np.ndarray | None = None,
-    gdna_eff_len_adjustment_ratio: np.ndarray | None = None,
-) -> None:
-    """Run batch locus EM from partitioned data with incremental freeing."""
-    t_to_g = index.t_to_g_arr
-    # ``is_synthetic_g`` marks synthetic (gene-neutral) gene rows so they can
-    # be excluded from the user-facing ``n_genes`` per locus.
-    if "is_synthetic" in index.g_df.columns:
-        is_synthetic_g = index.g_df["is_synthetic"].to_numpy()
-    else:
-        is_synthetic_g = np.zeros(len(index.g_df), dtype=bool)
-    n_threads = em_config.n_threads or os.cpu_count() or 1
-    emit_assignments = annotations is not None
-
-    def _build_locus_meta(
-        locus,
-        *,
-        rna_total,
-        gdna,
-        alpha_gdna,
-        alpha_rna,
-        gdna_leff,
-        gdna_leff_unweighted=None,
-        gdna_factor=None,
-        gdna_adjustment_ratio=None,
-        unspliced_total=None,
-        locus_weight=None,
-        shrink_weight=None,
-        n_local_gdna=None,
-        n_local_rna=None,
-        n_other_gdna=None,
-        n_other_rna=None,
-        ess_final=None,
-        rna_share_v5=None,
-        rna_share_final=None,
-        flags=None,
-        enable_gdna_value=None,
-        n_regions_touched_value=None,
-        multi_region_mass=None,
-        partial_region_mass=None,
-    ):
-        gene_set = {
-            int(t_to_g[int(t_idx)])
-            for t_idx in locus.transcript_indices
-            if not is_synthetic_g[int(t_to_g[int(t_idx)])]
-        }
-        gdna_leff_f = float(gdna_leff)
-        if gdna_leff_unweighted is None:
-            gdna_leff_unw_f = gdna_leff_f
-        else:
-            gdna_leff_unw_f = float(gdna_leff_unweighted)
-        adjustment_ratio = (
-            gdna_leff_f / gdna_leff_unw_f if gdna_leff_unw_f > 0.0 else 1.0
-        )
-        alpha_gdna_f = float(alpha_gdna)
-        alpha_rna_f = float(alpha_rna)
-        gdna_factor_f = adjustment_ratio if gdna_factor is None else float(gdna_factor)
-        gdna_adjustment_f = (
-            adjustment_ratio if gdna_adjustment_ratio is None else float(gdna_adjustment_ratio)
-        )
-        return {
-            "locus_id": locus.multi_locus_id,
-            "locus_span_bp": locus.gdna_span,
-            "n_transcripts": len(locus.transcript_indices),
-            "n_genes": len(gene_set),
-            "n_em_fragments": len(locus.unit_indices),
-            # ``rna_total`` = sum of posterior mass assigned to every
-            # non-gDNA component in the locus. The C++ EM treats annotated
-            # mRNA and synthetic nRNA transcripts identically, so this
-            # value is NOT mRNA alone — it is (annotated mRNA + synthetic
-            # nRNA), i.e. total RNA. The annotated vs synthetic split is
-            # done downstream in ``AbundanceEstimator.get_loci_df`` using
-            # per-transcript ``is_synthetic`` flags from the index.
-            "rna_total": float(rna_total),
-            "gdna": float(gdna),
-            "alpha_gdna_add": alpha_gdna_f,
-            "alpha_rna_add": alpha_rna_f,
-            "prior_unspliced_total": 0.0 if unspliced_total is None else float(unspliced_total),
-            "prior_locus_weight": 0.0 if locus_weight is None else float(locus_weight),
-            "prior_shrink_weight": 0.0 if shrink_weight is None else float(shrink_weight),
-            "prior_n_local_gdna": 0.0 if n_local_gdna is None else float(n_local_gdna),
-            "prior_n_local_rna": 0.0 if n_local_rna is None else float(n_local_rna),
-            "prior_n_other_gdna": 0.0 if n_other_gdna is None else float(n_other_gdna),
-            "prior_n_other_rna": 0.0 if n_other_rna is None else float(n_other_rna),
-            "prior_ess_final": 0.0 if ess_final is None else float(ess_final),
-            "prior_rna_share_v5": 0.0 if rna_share_v5 is None else float(rna_share_v5),
-            "prior_rna_share_final": 0.0 if rna_share_final is None else float(rna_share_final),
-            "prior_flags": 0 if flags is None else int(flags),
-            "enable_gdna": 0 if enable_gdna_value is None else int(enable_gdna_value),
-            "n_regions_touched": 0
-            if n_regions_touched_value is None
-            else int(n_regions_touched_value),
-            "multi_locus_region_mass": 0.0
-            if multi_region_mass is None
-            else float(multi_region_mass),
-            "partial_coverage_region_mass": 0.0
-            if partial_region_mass is None
-            else float(partial_region_mass),
-            "gdna_eff_len_em": gdna_leff_f,
-            "gdna_eff_len_per_bp": gdna_leff_f / max(float(locus.gdna_span), 1.0),
-            "gdna_eff_len_unweighted": gdna_leff_unw_f,
-            "gdna_exposure_factor": gdna_factor_f,
-            "gdna_eff_len_adjustment_ratio": gdna_adjustment_f,
-        }
-
-    def _call_batch_em(
-        parts,
-        batch_loci,
-        batch_alpha_gdna,
-        batch_alpha_rna,
-        batch_gdna_eff_len,
-        batch_enable_gdna=None,
-    ):
-        """Pack tuples, call C++, record results."""
-        partition_tuples = [
-            (
-                p.offsets,
-                p.t_indices,
-                p.log_liks,
-                p.coverage_weights,
-                p.count_cols,
-                p.is_spliced,
-                p.gdna_log_liks,
-                p.locus_t_indices,
-                p.locus_count_cols,
-            )
-            for p in parts
-        ]
-        locus_t_lists = [loc.transcript_indices for loc in batch_loci]
-
-        return estimator.run_batch_locus_em_partitioned(
-            partition_tuples,
-            locus_t_lists,
-            batch_alpha_gdna,
-            index,
-            rna_prior_count=batch_alpha_rna,
-            gdna_eff_len=batch_gdna_eff_len,
-            em_iterations=em_config.iterations,
-            em_convergence_delta=em_config.convergence_delta,
-            emit_locus_stats=emit_locus_stats,
-            emit_assignments=emit_assignments,
-            enable_gdna=batch_enable_gdna,
-        )
-
-    # Classify mega vs normal
-    locus_work = {
-        loc.multi_locus_id: len(loc.transcript_indices) * partitions[loc.multi_locus_id].n_units
-        for loc in multi_loci
-    }
-    total_work = sum(locus_work.values())
-    fair_share = total_work // n_threads if n_threads > 1 else total_work + 1
-
-    mega_loci = sorted(
-        [loc for loc in multi_loci if locus_work[loc.multi_locus_id] >= fair_share],
-        key=lambda loc: locus_work[loc.multi_locus_id],
-        reverse=True,
-    )
-    mega_ids = {loc.multi_locus_id for loc in mega_loci}
-
-    total_gdna_em = 0.0
-
-    # Phase A: Mega-loci (one at a time, free after each)
-    for locus in mega_loci:
-        part = partitions.pop(locus.multi_locus_id)
-        lid = locus.multi_locus_id
-        em_result = _call_batch_em(
-            [part],
-            [locus],
-            np.array([alpha_gdna_add[lid]], dtype=np.float64),
-            np.array([alpha_rna_add[lid]], dtype=np.float64),
-            np.array([gdna_eff_len_em[lid]], dtype=np.float64),
-            batch_enable_gdna=(
-                np.array([enable_gdna[lid]], dtype=np.uint8) if enable_gdna is not None else None
-            ),
-        )
-        gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
-        total_gdna_em += gdna_em
-        if annotations is not None and len(em_result) > 3:
-            _populate_em_annotations(
-                [part],
-                em_result[3],
-                em_result[4],
-                em_result[5],
-                annotations,
-                index,
-            )
-        estimator.locus_results.append(
-            _build_locus_meta(
-                locus,
-                rna_total=rna_arr[0],
-                gdna=gdna_arr[0],
-                alpha_gdna=alpha_gdna_add[lid],
-                alpha_rna=alpha_rna_add[lid],
-                gdna_leff=gdna_eff_len_em[lid],
-                gdna_leff_unweighted=(
-                    gdna_eff_len_unweighted[lid] if gdna_eff_len_unweighted is not None else None
-                ),
-                gdna_factor=(
-                    gdna_exposure_factor[lid] if gdna_exposure_factor is not None else None
-                ),
-                gdna_adjustment_ratio=(
-                    gdna_eff_len_adjustment_ratio[lid]
-                    if gdna_eff_len_adjustment_ratio is not None
-                    else None
-                ),
-                unspliced_total=(
-                    prior_unspliced_total[lid] if prior_unspliced_total is not None else None
-                ),
-                locus_weight=prior_locus_weight[lid] if prior_locus_weight is not None else None,
-                shrink_weight=(
-                    prior_shrink_weight[lid] if prior_shrink_weight is not None else None
-                ),
-                n_local_gdna=(
-                    prior_n_local_gdna[lid] if prior_n_local_gdna is not None else None
-                ),
-                n_local_rna=(
-                    prior_n_local_rna[lid] if prior_n_local_rna is not None else None
-                ),
-                n_other_gdna=(
-                    prior_n_other_gdna[lid] if prior_n_other_gdna is not None else None
-                ),
-                n_other_rna=(
-                    prior_n_other_rna[lid] if prior_n_other_rna is not None else None
-                ),
-                ess_final=prior_ess_final[lid] if prior_ess_final is not None else None,
-                rna_share_v5=(
-                    prior_rna_share_v5[lid] if prior_rna_share_v5 is not None else None
-                ),
-                rna_share_final=(
-                    prior_rna_share_final[lid] if prior_rna_share_final is not None else None
-                ),
-                flags=prior_flags[lid] if prior_flags is not None else None,
-                enable_gdna_value=enable_gdna[lid] if enable_gdna is not None else None,
-                n_regions_touched_value=(
-                    n_regions_touched[lid] if n_regions_touched is not None else None
-                ),
-                multi_region_mass=(
-                    multi_locus_region_mass[lid]
-                    if multi_locus_region_mass is not None
-                    else None
-                ),
-                partial_region_mass=(
-                    partial_coverage_region_mass[lid]
-                    if partial_coverage_region_mass is not None
-                    else None
-                ),
-            )
-        )
-        del part
-        logger.debug(
-            f"[MEGA] Locus {locus.multi_locus_id}: "
-            f"{len(locus.transcript_indices)} transcripts, "
-            f"{len(locus.unit_indices)} units"
-        )
-
-    # Phase B: Normal loci (one batched call)
-    normal_loci = [loc for loc in multi_loci if loc.multi_locus_id not in mega_ids]
-    if normal_loci:
-        # Pop partitions out of the dict so the only references during
-        # the batched C++ call live in ``normal_parts``.  After the call
-        # completes and annotations are written we drop ``normal_parts``
-        # to release per-locus arrays before EM downstream phases run.
-        normal_parts = [partitions.pop(loc.multi_locus_id) for loc in normal_loci]
-        normal_gp = np.array(
-            [alpha_gdna_add[loc.multi_locus_id] for loc in normal_loci],
-            dtype=np.float64,
-        )
-        normal_rp = np.array(
-            [alpha_rna_add[loc.multi_locus_id] for loc in normal_loci],
-            dtype=np.float64,
-        )
-        normal_gdna_eff_len = np.array(
-            [gdna_eff_len_em[loc.multi_locus_id] for loc in normal_loci],
-            dtype=np.float64,
-        )
-        em_result = _call_batch_em(
-            normal_parts,
-            normal_loci,
-            normal_gp,
-            normal_rp,
-            normal_gdna_eff_len,
-            batch_enable_gdna=(
-                np.array(
-                    [enable_gdna[loc.multi_locus_id] for loc in normal_loci],
-                    dtype=np.uint8,
-                )
-                if enable_gdna is not None
-                else None
-            ),
-        )
-        gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
-        total_gdna_em += gdna_em
-        if annotations is not None and len(em_result) > 3:
-            _populate_em_annotations(
-                normal_parts,
-                em_result[3],
-                em_result[4],
-                em_result[5],
-                annotations,
-                index,
-            )
-        for i, locus in enumerate(normal_loci):
-            lid = locus.multi_locus_id
-            estimator.locus_results.append(
-                _build_locus_meta(
-                    locus,
-                    rna_total=rna_arr[i],
-                    gdna=gdna_arr[i],
-                    alpha_gdna=normal_gp[i],
-                    alpha_rna=normal_rp[i],
-                    gdna_leff=normal_gdna_eff_len[i],
-                    gdna_leff_unweighted=(
-                        gdna_eff_len_unweighted[lid]
-                        if gdna_eff_len_unweighted is not None
-                        else None
-                    ),
-                    gdna_factor=(
-                        gdna_exposure_factor[lid] if gdna_exposure_factor is not None else None
-                    ),
-                    gdna_adjustment_ratio=(
-                        gdna_eff_len_adjustment_ratio[lid]
-                        if gdna_eff_len_adjustment_ratio is not None
-                        else None
-                    ),
-                    unspliced_total=(
-                        prior_unspliced_total[lid] if prior_unspliced_total is not None else None
-                    ),
-                    locus_weight=(
-                        prior_locus_weight[lid] if prior_locus_weight is not None else None
-                    ),
-                    shrink_weight=(
-                        prior_shrink_weight[lid] if prior_shrink_weight is not None else None
-                    ),
-                    n_local_gdna=(
-                        prior_n_local_gdna[lid] if prior_n_local_gdna is not None else None
-                    ),
-                    n_local_rna=(
-                        prior_n_local_rna[lid] if prior_n_local_rna is not None else None
-                    ),
-                    n_other_gdna=(
-                        prior_n_other_gdna[lid] if prior_n_other_gdna is not None else None
-                    ),
-                    n_other_rna=(
-                        prior_n_other_rna[lid] if prior_n_other_rna is not None else None
-                    ),
-                    ess_final=prior_ess_final[lid] if prior_ess_final is not None else None,
-                    rna_share_v5=(
-                        prior_rna_share_v5[lid] if prior_rna_share_v5 is not None else None
-                    ),
-                    rna_share_final=(
-                        prior_rna_share_final[lid] if prior_rna_share_final is not None else None
-                    ),
-                    flags=prior_flags[lid] if prior_flags is not None else None,
-                    enable_gdna_value=enable_gdna[lid] if enable_gdna is not None else None,
-                    n_regions_touched_value=(
-                        n_regions_touched[lid] if n_regions_touched is not None else None
-                    ),
-                    multi_region_mass=(
-                        multi_locus_region_mass[lid]
-                        if multi_locus_region_mass is not None
-                        else None
-                    ),
-                    partial_region_mass=(
-                        partial_coverage_region_mass[lid]
-                        if partial_coverage_region_mass is not None
-                        else None
-                    ),
-                )
-            )
-        # Release per-locus partition arrays before downstream phases.
-        del normal_parts, em_result
-
-    del partitions
-
-    estimator._gdna_em_total = total_gdna_em
-
-    n_total_units = sum(len(loc.unit_indices) for loc in multi_loci)
-    logger.info(
-        f"[DONE] Per-locus EM (partitioned): {len(multi_loci)} loci "
-        f"({len(mega_loci)} mega), "
-        f"{n_total_units:,} ambiguous fragments, "
-        f"gDNA EM={total_gdna_em:.0f}"
-    )
-
-
 def quant_from_buffer(
     buffer: FragmentBuffer,
     index: TranscriptIndex,
@@ -973,14 +554,15 @@ def quant_from_buffer(
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
     """Quantify buffered fragments with locus EM.
 
-    Phase A burndown (2026-05-29): the v5 calibration-consumer wiring has
-    been removed. The new locus-prior consumer lands in Phase E — see
+    The v5 calibration-consumer wiring was removed in the burn-down; the
+    new locus-prior consumer (and the payload → calibrate → priors → EM
+    wiring) lands in PR 6 — see
     ``docs/acc_caljointmodel/00_implementation_plan.md``.
     """
     raise NotImplementedError(
-        "quant_from_buffer is stubbed during the Phase A burndown. "
-        "The new locus-prior consumer (assemble_em_inputs replacement) "
-        "lands in Phase E — see docs/acc_caljointmodel/00_implementation_plan.md."
+        "quant_from_buffer is stubbed during the calibration-v6 rebuild. "
+        "The new locus-prior consumer (rigel.calibration.priors.assemble_priors) "
+        "lands in PR 6 — see docs/acc_caljointmodel/00_implementation_plan.md."
     )
 
 
@@ -1058,10 +640,11 @@ def run_pipeline(
     )
 
     try:
-        calibration = calibrate()  # raises NotImplementedError during Phase A
+        calibrate()  # raises NotImplementedError during the v6 rebuild
     finally:
         buffer.cleanup()
 
-    # The remainder of run_pipeline is unreachable until Phase D lands the
-    # new calibrate() and Phase E lands the new quant_from_buffer().
-    raise AssertionError("unreachable: Phase A burndown stub aborts above")
+    # The remainder of run_pipeline is unreachable until the v6 calibrator is
+    # wired end-to-end (PR 6 rebuilds quant_from_buffer). PR 1 rewires this
+    # call to calibrate(substrate, strand_model, config).
+    raise AssertionError("unreachable: calibration-v6 stub aborts above")

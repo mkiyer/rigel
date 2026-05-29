@@ -1,924 +1,439 @@
 # Accumulator + Calibrator — Consolidated Implementation Plan
 
-**Date:** 2026-05-29
-**Status:** Ready for implementation. Supersedes
-[`../accumulator/01_implementation.md`](../accumulator/01_implementation.md)
-and [`../caljointmodel/05_implementation_plan.md`](../caljointmodel/05_implementation_plan.md).
+**Date:** 2026-05-29 (rev. 3 — decisions resolved + recovered-code map + PR series)
+**Status:** Ready to begin **PR 0**. Decisions D1–D6 resolved (§4).
 
-This document merges the fractional-accumulator rewrite and the
-calibration-v6 (jointmodel) rebuild into one phased plan. The two
-efforts share a substrate (`AccumulatorPayload`) and were drafted
-separately; running them sequentially under a single plan removes
-double-work, dropped overlaps, and ambiguous handoffs.
+This is the single authoritative roadmap. It supersedes the *phase plans*
+of [`../accumulator/01_implementation.md`](../accumulator/01_implementation.md)
+and [`../caljointmodel/05_implementation_plan.md`](../caljointmodel/05_implementation_plan.md),
+and consolidates the fractional-accumulator rewrite + calibration-v6
+("jointmodel") into one plan.
 
-## 0. Document scope and cross-references
+The work is organized as a **series of PRs** (§7). Each PR has its own
+detailed implementation doc under [`prs/`](prs/) that we critique and
+implement individually. This master plan owns the cross-PR contract:
+state, decisions, the recovered-code map, and the PR sequence.
 
-This file replaces the *phase plans* of the two predecessor docs. It
-does **not** restate the design specs. Authoritative specs live in:
-
-| Topic | Authoritative doc |
-|---|---|
-| Fractional accumulator data structures, deposit algorithm, mass conservation invariants | [`../accumulator/00_design.md`](../accumulator/00_design.md) |
-| Legacy accumulator audit (no bugs; locked decisions) | [`../accumulator/audit_phase1.md`](../accumulator/audit_phase1.md) |
-| Calibration goals (G2/G3/G4), substrate, principles | [`../caljointmodel/00_overview.md`](../caljointmodel/00_overview.md) |
-| Generative model (NB count, BB strand, deterministic spliced RNA, Gamma exposure) | [`../caljointmodel/01_generative_model.md`](../caljointmodel/01_generative_model.md) |
-| Why the legacy calibration must be burned | [`../caljointmodel/02_failure_audit.md`](../caljointmodel/02_failure_audit.md) |
-| Inference algorithm (E-step, M-step, closed forms, Newton) | [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) |
-| Public API (`CalibrationConfig`, `CalibrationResult`, locus prior pseudocount formulas) | [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) |
-| Validation plan (unit, synthetic, scenario, armis2) | [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) |
-
-Any conflict between this plan and a spec doc is resolved by
-updating the spec doc, not by deviating in implementation.
-
-## 1. State at start of plan
-
-- **Phase 1 (audit + spec) of the accumulator: DONE.** Memo at
-  [`../accumulator/audit_phase1.md`](../accumulator/audit_phase1.md);
-  Python reference at `tests/native/_accumulator_reference.py`; 10
-  spec tests under `tests/native/test_accumulator_spec.py`.
-- **Phase 2 (native rewrite) of the accumulator: DONE.** New
-  `src/rigel/native/calibration/accumulator.{h,cpp}` per spec §3, §7.1.
-- **Phase 3 (nanobind binding + Python wrapper) of the accumulator:
-  DONE.** Exposed as `rigel.native.Accumulator` with zero-copy
-  ndarray views; thin Python wrapper at `src/rigel/_accumulator.py`
-  provides dataclass-style indexed access (`acc.regions[i].contained[ch]`,
-  `acc.boundaries[i].mass_left[ch]`, etc.).
-- **20/20 spec tests pass** (`pytest tests/native/`).
-- **Calibration v5 partially severed.** `bam_scanner.cpp` no longer
-  references `CalibrationAccumulator`/`CalibrationPayload`. The
-  scanner still emits `result["calibration"] = None`. Python
-  calibration-v5 modules (`_arrays.py`, `_diagnostics.py`,
-  `_orchestrator.py`, `scan_payload.py`, `fractional_evidence.py`,
-  `region_count_ledger.py`, `signature.py`, `_simple.py`,
-  `_categorize.py`, etc.) and their tests are still in the tree but
-  expected to be import-broken — to be removed in Phase A below.
-- **`docs/accumulator/01_implementation.md` and
-  `docs/caljointmodel/05_implementation_plan.md` are superseded by
-  this document** (they may stay in the tree for history).
-
-## 2. Cross-cutting conventions
-
-- **Build between every phase.** `pip install --no-build-isolation -e .`
-  must succeed before any test command runs. Phases B and D
-  recompile the native module; Phases A, C, E–G are Python-only.
-- **One PR per phase.** Each phase ends at a checkpoint with its own
-  acceptance gate. The next phase begins only after the previous
-  gate is green.
-- **No premature deletions.** Do not delete a file outside the
-  current phase's file-touch matrix.
-- **No heredoc in terminal.** Per workspace convention. Multi-line
-  diagnostics go in `scripts/debug/`.
-- **Calibration is goal-directed.** Every line of new calibration
-  code must trace to G2, G3, or G4
-  ([`../caljointmodel/00_overview.md`](../caljointmodel/00_overview.md) §1).
-- **Sufficient statistics, not fragments.** Calibration is $O(R)$
-  scalar algebra over `AccumulatorPayload` views. Per-fragment
-  iteration in calibration is a bug.
-- **FL is not a calibration channel.** FL stays in the downstream
-  EM scorer
-  ([`scoring.py`](../../src/rigel/scoring.py),
-  [`frag_length_model.py`](../../src/rigel/frag_length_model.py))
-  and is consumed per-fragment. See
-  [`../accumulator/audit_phase1.md`](../accumulator/audit_phase1.md)
-  decision #6 and
-  [`../caljointmodel/00_overview.md`](../caljointmodel/00_overview.md) §1.
+> **Rev. 3 deltas.** (1) Your D1–D6 answers are now locked into §4 — most
+> importantly the boundary model (left/right are *asymmetric, separately
+> deconvolved* observations that **share one integer flux**; the doc's
+> "½ half-split" is **abandoned**) and the strand-balance model
+> (beta-binomial on **integer** sense/antisense counts from regions *and*
+> boundary sides). (2) A new **Recovered-Code Map** (§5): the hardest
+> pieces are recoverable from pre-burn git (`fc96902` + dangling blobs) —
+> we harvest the mechanically-sound math and leave the cliff-ridden
+> heuristics dead. (3) Phases → a 9-PR series (§7).
 
 ---
 
-## 3. Phase overview
+## 1. Authoritative cross-references
 
-```
-Phase A — Burn legacy calibration       (Python-only deletion, ~1 PR)
-Phase B — Wire accumulator into scanner (C++ + Python substrate, ~1 PR)
-Phase C — Calibrator scaffold           (Public types, validation, ~1 PR)
-Phase D — Calibrator implementation     (E-step, M-step, outer loop, 3 sub-PRs)
-Phase E — Integrate                     (Locus prior consumer rewrite)
-Phase F — Validate                      (Synthetic, scenario, armis2)
-Phase G — Cleanup                       (Goldens, ruff, docs, postmortem)
-```
+This file owns the **roadmap**; the design docs own the **model**.
 
-| Phase | Touches | Build needed | Output |
-|---|---|---|---|
-| A | Python only | no | Clean slate; `rigel quant` runs through a stub |
-| B | C++ + Python | **yes** | Native scanner emits `AccumulatorPayload` |
-| C | Python only | no | Public `CalibrationConfig` / `CalibrationResult`; stub `calibrate()` |
-| D | Python only | no | Working calibrator; aborts at locus prior consumer |
-| E | Python only | no | End-to-end `rigel quant` runs on a scenario BAM |
-| F | Python + benchmarks | no | Synthetic + scenario + armis2 validated |
-| G | Mechanical | no | Goldens regenerated; docs updated |
-
----
-
-## 4. Phase A — Burn legacy calibration
-
-**Goal.** Excise every line of calibration-v5 from the live tree so
-Phases B–E build cleanly on top of a known-empty slate. The
-fractional accumulator (live in `rigel.native.Accumulator`) is *not*
-yet wired into the scanner — that is Phase B. During Phase A the
-scanner continues to emit `result["calibration"] = None`.
-
-### A.1 Archive salvageable algorithms
-
-Move to `archive/calibration_legacy_2026_05/` (preserving relative
-paths under `src/rigel/calibration/...`). These algorithms may be
-useful as references for downstream EM work later:
-
-| File | Why archive |
-|---|---|
-| `src/rigel/calibration/_fl_empirical_bayes.py` | EB Dirichlet smoothing pattern |
-| `src/rigel/calibration/_fl_mixture.py` | Closed-form FL mixture EM |
-| `src/rigel/calibration/fl.py` | Public FL surface |
-| `src/rigel/calibration/_simple.py` | SRD gDNA FL recovery |
-
-Use `git mv` (not plain `mv`) so history is preserved. Write
-`archive/calibration_legacy_2026_05/README.md` with the SHA, the
-ARCHIVE-vs-DELETE distinction, and a no-resurrection warning citing
-this plan.
-
-### A.2 Delete everything else under `src/rigel/calibration/`
-
-Per [`../caljointmodel/02_failure_audit.md`](../caljointmodel/02_failure_audit.md)
-§4. Concrete delete list (final):
-
-```
-src/rigel/calibration/_arrays.py
-src/rigel/calibration/_categorize.py
-src/rigel/calibration/_diagnostics.py
-src/rigel/calibration/_orchestrator.py
-src/rigel/calibration/_result.py
-src/rigel/calibration/accumulator_view.py
-src/rigel/calibration/adaptive_prior.py
-src/rigel/calibration/background_model.py
-src/rigel/calibration/bootstrap.py
-src/rigel/calibration/boundaries.py
-src/rigel/calibration/boundary_model.py
-src/rigel/calibration/boundary_sweep.py
-src/rigel/calibration/compartment_strand_deconv.py
-src/rigel/calibration/coverage_weight.py
-src/rigel/calibration/density_global.py
-src/rigel/calibration/density_model.py
-src/rigel/calibration/density_observation.py
-src/rigel/calibration/exposure.py
-src/rigel/calibration/fractional_evidence.py
-src/rigel/calibration/fusion.py
-src/rigel/calibration/latent_states.py
-src/rigel/calibration/locus_partition.py    # only if not consumed by locus.py — verify
-src/rigel/calibration/prior.py
-src/rigel/calibration/region_count_ledger.py
-src/rigel/calibration/region_partition.py   # only if not consumed by locus.py — verify
-src/rigel/calibration/regions.py
-src/rigel/calibration/scan_payload.py
-src/rigel/calibration/signature.py
-src/rigel/calibration/strand_deconv.py
-```
-
-Also delete `src/rigel/native/calibration/region_signature.h` and
-`src/rigel/native/calibration/region_index.h` if no remaining caller
-needs them. The new accumulator does not. Verify via grep before
-deleting.
-
-### A.3 Delete dependent tests
-
-```
-tests/test_adaptive_prior.py
-tests/test_background_model.py
-tests/test_bayesian_prior_acceptance.py
-tests/test_boundaries.py
-tests/test_boundary_model.py
-tests/test_boundary_sweep.py
-tests/test_calibrate.py
-tests/test_calibration_accumulator.py
-tests/test_calibration_integration.py
-tests/test_calibration_iteration.py
-tests/test_calibration_prior.py
-tests/test_calibration_result.py
-tests/test_compartment_strand_deconv.py
-tests/test_coverage_weight.py
-tests/test_density_global.py
-tests/test_density_model.py
-tests/test_density_observation.py
-tests/test_exposure.py
-tests/test_fl_eff_len_cache.py
-tests/test_fl_models.py
-tests/test_latent_states.py
-tests/test_locus_partition.py
-tests/test_region_count_ledger.py
-tests/test_region_index_native.py
-tests/test_region_partition.py
-tests/test_region_persist.py
-tests/test_region_unspliced_mass.py
-```
-
-Plus any `tests/test_strand_*` that reference deleted modules
-(case-by-case grep).
-
-**Keep.** `tests/native/test_accumulator_spec.py` (the new
-substrate's spec), `tests/test_pipeline_smoke.py` (Phase E will fix
-it up), all non-calibration tests (`test_em_impl.py`, etc.).
-
-### A.4 Add the stub module
-
-Create `src/rigel/calibration/_stub.py`:
-
-```python
-from __future__ import annotations
-from dataclasses import dataclass, field
-import numpy as np
-
-@dataclass(frozen=True, slots=True)
-class CalibrationConfig:
-    max_outer_iterations: int = 25
-    mass_rel_tol: float = 1e-4
-    phi_floor: float = 1e-6
-    boundary_split_factor: float = 0.5
-
-@dataclass(frozen=True, slots=True)
-class CalibrationResult:
-    # All zero / empty placeholders matching the Phase C schema.
-    n_regions: int = 0
-    converged: bool = False
-    n_iterations: int = 0
-    # ... (all fields from doc 04 §5, defaulted to zeros / np.array([]))
-
-def calibrate(*_args, **_kwargs) -> CalibrationResult:
-    raise NotImplementedError(
-        "Calibration burn-down; see docs/acc_caljointmodel/ and "
-        "docs/caljointmodel/. Implementation lands in Phase C/D."
-    )
-```
-
-Rewrite `src/rigel/calibration/__init__.py` to re-export exactly
-those three symbols and nothing else.
-
-### A.5 Excise call sites
-
-Files to touch:
-
-- **`src/rigel/pipeline.py`** — strip the entire legacy calibration
-  block (~150 lines) from `quant_from_buffer`. Replace with a
-  single call to `calibrate(...)` that will raise until Phase D.
-  (The pipeline does not reach the calibration call in current main
-  because the scanner emits `result["calibration"] = None`; this
-  edit makes the intent explicit.)
-- **`src/rigel/estimator.py`** — drop calibration imports. The EM
-  no longer reads anything from a `CalibrationResult` directly; it
-  receives priors from the locus-prior consumer (whose Phase A stub
-  raises `NotImplementedError`).
-- **`src/rigel/locus.py::compute_locus_priors_from_partitions`** —
-  replace body with `raise NotImplementedError("Locus prior consumer
-  lands in Phase E.")`. Preserve signature.
-- **`src/rigel/config.py`** — delete all legacy calibration
-  sub-configs. Replace with the single stub `calibration:
-  CalibrationConfig` field on `PipelineConfig`
-  ([`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) §8).
-- **`src/rigel/cli.py`** — strip calibration-related CLI flags
-  (everything that referenced the v5 sub-configs).
-- **`src/rigel/native/bam_scanner.cpp`** — remove the now-dead
-  `obs_set` / `obs_splice` / `obs_ref` / `obs_fs` / `obs_fe` /
-  `obs_fragment_strand` / `obs_exons` capture locals from the
-  fragment-finalize block (they were only used by the deleted
-  `cal_acc.observe(...)` call). Keep `set_regions(...)` and
-  `RegionIndex` for now — Phase B replaces them with the
-  accumulator's `region_edges` API.
-
-### A.6 CHANGELOG
-
-```
-2026-05-29: Calibration v5 burn-down. Replacement is the joint
-fractional-accumulator + calibration-v6 rewrite per
-docs/acc_caljointmodel/.
-```
-
-### A.7 Acceptance gate
-
-- [ ] `python -c "import rigel"` succeeds.
-- [ ] `pytest --collect-only tests/` exits clean (no import errors).
-- [ ] `pytest tests/native/` → 20 passed (accumulator spec still green).
-- [ ] `git grep -nE 'background_model|fusion|latent_states|boundary_sweep|strand_deconv|adaptive_prior|p_unexpressed|fit_status|fused_soft_label|fractional_evidence|RegionCountLedger' src/` returns zero hits.
-- [ ] `wc -l src/rigel/calibration/*.py` is ≤ 200 lines (stub + `__init__` only).
-- [ ] `rigel quant ...` on a scenario BAM scans successfully and aborts at the calibration stub with `NotImplementedError`.
-
-### A.8 Rollback
-
-Revert the Phase A PR.
-
----
-
-## 5. Phase B — Wire accumulator into the scanner
-
-**Goal.** Make `BamScanner` build per-reference `Accumulator`
-instances during the BAM scan and emit the resulting
-`AccumulatorPayload` as `result["calibration"]`. After Phase B the
-substrate is real (no longer `None`) and Phase C can build on it.
-
-This phase combines the original accumulator-plan Phase 4 (cutover)
-with the original caljointmodel Phase 3.1 (native substrate). The
-substrate emitted matches the schema in
-[`../accumulator/00_design.md`](../accumulator/00_design.md) §7.3,
-not the older "extension" framing in
-[`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) §2.
-
-### B.1 Native: per-reference accumulator collection
-
-In `src/rigel/native/calibration/accumulator.{h,cpp}` add (or extend
-an existing helper) a small wrapper that owns one `Accumulator` per
-reference and supports thread-safe merging:
-
-```cpp
-class AccumulatorSet {
- public:
-  // Construct one Accumulator per reference from a flat edge layout:
-  //   edges      : int64[E]   sorted edges across all refs, contiguous per ref
-  //   ref_offsets: int64[F+1] first edge of each ref (ref f uses
-  //                            edges[ref_offsets[f] .. ref_offsets[f+1]))
-  AccumulatorSet(const int64_t* edges, size_t n_edges,
-                 const int64_t* ref_offsets, size_t n_refs);
-
-  Accumulator& at(int32_t ref_id);
-  const Accumulator& at(int32_t ref_id) const;
-  size_t n_refs() const noexcept;
-
-  // Element-wise sum of another AccumulatorSet into this one
-  // (per-reference, per-Region / per-Boundary).
-  // Used to merge per-worker AccumulatorSets after the scan.
-  void merge_from(const AccumulatorSet& other);
-};
-```
-
-`merge_from` requires identical edges (asserts at start). It does
-element-wise `+=` on the `Region.contained[c]` / `Boundary.mass_*[c]`
-/ `Boundary.flux[c]` channels.
-
-### B.2 Native: scanner integration
-
-In `src/rigel/native/bam_scanner.cpp`:
-
-1. Replace `BamScanner::set_regions(...)`'s 9-array signature with
-   a 3-array `set_region_edges(edges, ref_offsets, n_refs)`. Keep
-   the old `RegionIndex` if some other path still needs it; if not,
-   delete it (and `region_index.h`, `region_signature.h`) here.
-2. `WorkerState` holds `std::unique_ptr<AccumulatorSet> acc_set` (one
-   per worker, sized from the partition at scan start).
-3. At the fragment observation site (currently the dead `obs_set`
-   block — removed in Phase A.5), call:
-
-   ```cpp
-   if (acc_set && !is_multimap &&
-       any_non_chimeric_resolved && obs_blocks_valid) {
-       Accumulator& acc = acc_set->at(obs_ref);
-       acc.deposit(block_starts, block_ends, n_blocks,
-                   spliced /* per-fragment */,
-                   strand_pos /* per-fragment */);
-   }
-   ```
-
-   `block_starts`/`block_ends` come from the resolved fragment's
-   `exons` member; `spliced` is the per-fragment splice flag
-   (per audit memo §5); `strand_pos` from `obs_fragment_strand`
-   (`STRAND_POS` → true, `STRAND_NEG` → false; ambiguous → return
-   early per audit memo §6).
-4. After scan, merge per-worker `acc_set` into a `merged_acc_set` on
-   the `BamScanner`.
-5. In `BamScanner::build_result()`, populate
-   `result["calibration"]` with the schema from B.3 (zero-copy
-   ndarray views over the merged accumulator's buffers, owned by
-   capsules tied to a Python-side owner that keeps the merged
-   accumulator alive).
-
-### B.3 Native: nanobind binding for the payload
-
-Expose an `AccumulatorPayload` view via the existing `_bam_impl`
-module. Per-reference layout:
-
-```python
-result["calibration"] = {
-    # Topology
-    "ref_region_offsets":   np.ndarray,  # int64[F+1]
-    "ref_boundary_offsets": np.ndarray,  # int64[F+1]
-    "region_edges":         np.ndarray,  # int64[sum(n_edges_per_ref)]
-
-    # Region-keyed: shape (N_total, 4)  uint32
-    # Channels: 0=unspl_pos, 1=unspl_neg, 2=spl_pos, 3=spl_neg
-    "region_contained":     np.ndarray,
-
-    # Boundary-keyed: shape (B_total, 4)  channels same as above
-    "boundary_mass_left":   np.ndarray,  # float32
-    "boundary_mass_right":  np.ndarray,  # float32
-    "boundary_flux":        np.ndarray,  # uint32
-}
-```
-
-This is the **only** schema the Python side must consume. The
-column-per-channel `int8` style of the old `RegionCountLedger` is
-gone.
-
-### B.4 Python adapter: `AccumulatorPayload`
-
-Create `src/rigel/scan_payload.py` (resurrected fresh; the legacy
-version was deleted in Phase A):
-
-```python
-@dataclass(frozen=True, slots=True)
-class AccumulatorPayload:
-    """View over the native accumulator's per-reference buffers.
-
-    Channel encoding (axis -1, size 4):
-      0 = unspliced, sense
-      1 = unspliced, antisense
-      2 = spliced,   sense
-      3 = spliced,   antisense
-    """
-    ref_region_offsets:   np.ndarray  # int64[F+1]
-    ref_boundary_offsets: np.ndarray  # int64[F+1]
-    region_edges:         np.ndarray  # int64[E]
-
-    region_contained:     np.ndarray  # uint32[N_total, 4]
-    boundary_mass_left:   np.ndarray  # float32[B_total, 4]
-    boundary_mass_right:  np.ndarray  # float32[B_total, 4]
-    boundary_flux:        np.ndarray  # uint32[B_total, 4]
-
-    @classmethod
-    def from_scan_result(cls, scan_result: dict) -> "AccumulatorPayload":
-        cal = scan_result["calibration"]
-        if cal is None:
-            raise ValueError(
-                "scan_result['calibration'] is None; "
-                "BamScanner.set_region_edges(...) was not called."
-            )
-        return cls(**{k: cal[k] for k in cls.__annotations__})
-```
-
-### B.5 Pipeline integration
-
-In `src/rigel/pipeline.py`:
-
-1. Add `build_region_partition_from_index(index)` helper returning
-   `(edges, ref_offsets)` arrays from the existing reference index.
-   The partition design lives elsewhere (mirrors today's
-   `RegionArrays`/`region_partition.py` logic — those modules were
-   deleted in Phase A, so the partition-builder needs to live in
-   `index.py` going forward). Use whatever per-reference region
-   layout the calibrator needs (exonic vs intronic vs intergenic
-   regions per the existing partition scheme).
-2. Before scan: call `scanner.set_region_edges(edges, ref_offsets, n_refs)`.
-3. After scan: `payload = AccumulatorPayload.from_scan_result(result)`.
-4. Pass `payload` to the calibration stub (which still raises in
-   Phase B; Phase D fills it in).
-
-### B.6 Tests
-
-- `tests/test_scanner_accumulator_integration.py` — build a tiny
-  synthetic name-sorted BAM (or reuse an existing scenario BAM); run
-  the full scan with a hand-crafted region partition; assert the
-  resulting `AccumulatorPayload` matches a reference computed by
-  running `tests/native/_accumulator_reference.Accumulator.deposit(...)`
-  on the same fragment stream. ~10 fragments, 2 regions, easy to
-  verify by hand.
-- `tests/test_accumulator_payload.py` — payload-level invariants:
-  shape, dtype, contiguity, length consistency
-  (`region_contained.shape[0] == ref_region_offsets[-1]` etc.); GC
-  test (numpy views keep underlying C++ buffers alive).
-- `tests/native/test_accumulator_spec.py` — still 20 passing.
-
-### B.7 Acceptance gate
-
-- [ ] Native build succeeds (`pip install --no-build-isolation -e .`).
-- [ ] `pytest tests/native/` → 20 passed.
-- [ ] `pytest tests/test_scanner_accumulator_integration.py -v` passes.
-- [ ] `pytest tests/test_accumulator_payload.py -v` passes.
-- [ ] `pytest --collect-only tests/` clean.
-- [ ] `rigel quant ...` reaches the calibration stub with a
-      non-None payload; aborts on `NotImplementedError`.
-- [ ] No remaining grep hits for legacy region/signature symbols in
-      `src/`.
-
-### B.8 Rollback
-
-Revert the Phase B PR. The accumulator spec tests still pass (the
-new module is standalone).
-
----
-
-## 6. Phase C — Calibrator scaffold
-
-**Goal.** Land the real `CalibrationConfig` and `CalibrationResult`
-types, the substrate-validation layer, and a placeholder
-`calibrate(...)` that returns zero-mass / unit-exposure. No
-inference yet. After Phase C the pipeline runs through calibration
-and aborts at the Phase E locus-prior consumer.
-
-### C.1 Module surface
-
-Per [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) §1:
-
-```
-src/rigel/calibration/calibrate.py       # new (single file)
-src/rigel/calibration/__init__.py        # re-export CalibrationConfig, CalibrationResult, calibrate
-```
-
-Delete `src/rigel/calibration/_stub.py` (Phase A's placeholder).
-
-### C.2 Calibration substrate adapter
-
-The calibrator consumes a **per-substrate-set view** of the
-`AccumulatorPayload`. Per
-[`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) §2,
-the calibrator runs three times — once on contained regions, once on
-left boundaries, once on right boundaries — sharing the global
-hyperparameters.
-
-Add to `src/rigel/scan_payload.py`:
-
-```python
-@dataclass(frozen=True, slots=True)
-class CalibrationSubstrate:
-    """Per-substrate-set view (contained, left, or right).
-
-    All arrays length |S|. Channel reductions of the
-    AccumulatorPayload follow:
-        n_unspl[s] = region_contained[s, 0] + region_contained[s, 1]
-                   (or boundary_flux[s, 0] + boundary_flux[s, 1] for boundary sets)
-        n_spliced[s] = region_contained[s, 2] + region_contained[s, 3]
-        k_plus[s]    = region_contained[s, 0]   (or boundary_flux[s, 0])
-    """
-    n_unspl:   np.ndarray  # int64[|S|]
-    n_spliced: np.ndarray
-    k_plus:    np.ndarray
-    L_eff:     np.ndarray  # float64
-    kappa_rna: np.ndarray  # float64; from StrandModel.p_r1_sense
-    # ... plus topology fields to project boundary masses back to regions
-```
-
-Note the boundary substrates expose **`flux`** as the count signal
-(not mass) — per accumulator design §6 the boundary `mass_*` fields
-are per-block-side weights, not per-fragment counts. The integer
-`flux` field is the correct per-fragment-event tally for the
-calibrator's NB / BB likelihoods. Boundary mass channels feed only
-into the final per-region exposure aggregation
-(§4 of [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md)).
-
-> **Open: confirm at Phase C kickoff** that `flux` is the right
-> count signal for the boundary substrate's NB likelihood. If
-> per-block-side mass is preferred for some reason, the calibrator's
-> count likelihood needs to switch to a continuous-mass analog.
-> Decision goes in [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) §2.
-
-### C.3 Public types
-
-Per [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) §3, §5:
-
-- `CalibrationConfig` — 4 fields, all numeric, no decision thresholds.
-- `CalibrationResult` — per-region mass arrays (G2), boundary mass
-  arrays (G3), exposure posterior (G4), 5 library hyperparameters,
-  convergence diagnostics, provenance.
-- `__post_init__` invariants per §5.1.
-
-### C.4 Exceptions
-
-```python
-class CalibrationSubstrateError(ValueError): ...
-class CalibrationConvergenceError(RuntimeError): ...
-```
-
-### C.5 Placeholder `calibrate()`
-
-```python
-def calibrate(substrate, strand_model, config=CalibrationConfig()):
-    _validate_substrate(substrate, strand_model)  # raises CalibrationSubstrateError
-    R = substrate.n_regions
-    return CalibrationResult(
-        mass_g_contained=np.zeros(R), mass_d_contained=np.zeros(R),
-        mass_g_left=np.zeros(R),  mass_d_left=np.zeros(R),
-        mass_g_right=np.zeros(R), mass_d_right=np.zeros(R),
-        omega=np.ones(R),
-        log_omega_var=np.full(R, config.phi_floor),
-        rho_0=0.001, phi=0.1,
-        rho_d_bb=0.01, rho_r_bb=0.01, eps_s=1e-3,
-        n_iterations=0, converged=False,
-        mass_change_history=np.zeros(0),
-        n_regions=R, config=config,
-    )
-```
-
-### C.6 Tests
-
-`tests/calibration/`:
-- `test_config_defaults.py` — defaults match doc 04 §3.
-- `test_result_invariants.py` — each `__post_init__` check fires.
-- `test_substrate_invariants.py` — each invariant violation in
-  doc 04 §4.1 raises `CalibrationSubstrateError`.
-
-### C.7 Acceptance gate
-
-- [ ] `pytest tests/calibration/ -v` passes.
-- [ ] `pytest tests/native/` still 20 passed.
-- [ ] `rigel quant ...` runs through calibration returning the
-      placeholder; aborts at the locus prior `NotImplementedError`
-      from Phase A.5.
-
-### C.8 Rollback
-
-Revert Phase C PR. Phase A's `_stub.py` returns.
-
----
-
-## 7. Phase D — Calibrator implementation
-
-**Goal.** Replace the placeholder `calibrate()` with the real
-inference per [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md).
-
-Three sub-phases, each independently committable.
-
-### D1 — Per-region E-step (G2/G3 unified deconvolution)
-
-Implements [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) §3.
-
-- `_per_region_estep(substrate_set, pi_g_prior, rho_d_bb, rho_r_bb,
-  kappa_rna, eps_s, omega, rho_0, L_eff, phi, M_d_unspl_prev) ->
-  (M_g, M_d, k_plus_g_hat, k_plus_d_hat)`. Vectorized over `|S|`.
-  `kappa_d = 0.5` is a module-level constant.
-- `_boundary_half_split(M_g_L, M_g_R, ref_offsets) ->
-  M_g_boundary_contribution`. Symmetric split per
-  [`../caljointmodel/01_generative_model.md`](../caljointmodel/01_generative_model.md) §7.
-
-Tests in `tests/calibration/test_g2_g3_deconvolution.py`:
-- Recover known $\pi_r^{(g)}$ within 5% for regions with ≥ 20 fragments.
-- **Hybrid-capture sanity** (captured exon + depleted flank).
-- **Paralog sanity** (126/26 strand split → $M_r^{(d, \text{cont})} < 10$;
-  risk-flagged; see audit memo §2.5).
-- Mass conservation: $M_r^{(g)} + M_r^{(d)} =$ total count to $10^{-9}$.
-- Vectorized output matches scalar reference on 1000 random regions.
-
-### D2 — G4 closed-form exposure posterior
-
-Implements [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) §4.
-
-- `_update_exposure(M_g_tot, rho_0, L_eff, phi) -> (omega, log_omega_var)`.
-
-Tests in `tests/calibration/test_g4_exposure.py`:
-- Recover known $\omega_r$ within 10% for regions with ≥ 10 expected gDNA fragments.
-- Empty region: $\omega = 1$, $\log\sigma^2 = \phi$.
-- Variance scales as $1/(1/\phi + M)$.
-
-### D3 — Global M-step + outer loop
-
-Implements [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) §5, §1.
-
-- `_m_step_rho_0`, `_m_step_eps_s` — closed forms.
-- `_m_step_phi`, `_m_step_rho_d_bb`, `_m_step_rho_r_bb` —
-  `scipy.optimize.minimize_scalar` with moment-estimator warm start.
-- `_update_pi_g_prior`.
-- `calibrate(...)` outer loop per [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) §1.
-
-Tests:
-- `tests/calibration/test_m_step.py` — each M-step recovers its
-  truth within tolerance (per
-  [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §1.3).
-- `tests/calibration/test_outer_loop.py` — mass-change monotone
-  decreasing; convergence in ≤ 25 iterations.
-- `tests/calibration/test_e2e_synthetic.py` —
-  $R = 1000$ synthetic substrate; recover hyperparameters and per-region
-  exposure within tolerances from
-  [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §2.
-
-### Phase D acceptance gate
-
-- [ ] All `tests/calibration/test_g2_g3_*`, `test_g4_*`,
-      `test_m_step*`, `test_outer_loop*`, `test_e2e_synthetic*` pass.
-- [ ] Magic-number audit on `calibrate.py`: ≤ 8 numeric literals
-      (per [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) §8).
-- [ ] Mass-change diagnostic monotone-decreasing on every synthetic run.
-- [ ] `rigel quant ...` runs through calibration successfully;
-      still aborts at the locus prior consumer.
-
-### Phase D rollback
-
-Revert per-sub-phase. D1 must land before D3 (D3 calls D1).
-
----
-
-## 8. Phase E — Integrate
-
-**Goal.** Wire `CalibrationResult` into the locus-prior consumer so
-the pipeline runs end-to-end.
-
-### E.1 Rewrite `compute_locus_priors_from_partitions`
-
-Per [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) §6:
-
-```python
-def compute_locus_priors_from_partitions(
-    locus_partitions, region_arrays, calibration, *, kappa
-) -> LocusPriors: ...
-```
-
-Implement the §6.2 pseudocount formulas verbatim:
-
-$$
-\alpha_t^{(d)} = \kappa \sum_{r \in r(t)} \phi_{t,r} w_r \bigl[M_r^{(d, \text{cont})} + \tfrac{1}{2}(M_r^{(d,L)} + M_r^{(d,R)})\bigr]
-$$
-$$
-\alpha_t^{(g)} = \kappa \sum_{r \in r(t)} \phi_{t,r} w_r \hat{\omega}_r \rho_0 L_{t,r}^{\text{eff}}
-$$
-
-Delete the Phase A `NotImplementedError` stub.
-
-### E.2 Tests
-
-`tests/calibration/test_locus_prior_consumer.py`:
-- `test_pseudocount_formula_exact` — matches §6.2 formulas to $10^{-10}$.
-- `test_mass_conservation_invariant` — §6.3 invariant holds.
-- `test_symmetric_paralog_locus_symmetric_pseudocount`.
-- `test_empty_region_only_gdna_prior_contribution`.
-
-### E.3 Smoke
-
-- `pytest tests/test_pipeline_smoke.py` — `rigel quant` on a minimal
-  scenario BAM produces a non-empty `quant.feather`.
-
-### E.4 Acceptance gate
-
-- [ ] All `tests/calibration/test_locus_prior_consumer.py` pass.
-- [ ] `pytest tests/test_pipeline_smoke.py` passes.
-- [ ] `rigel quant` runs end-to-end on at least one scenario BAM.
-- [ ] No `NotImplementedError` raises from any calibration / locus
-      prior path on the smoke BAM.
-
----
-
-## 9. Phase F — Validate
-
-**Goal.** Per
-[`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md):
-prove the rebuild fixes the paralog and hybrid-capture cases without
-regressing on standard sweeps.
-
-### F.1 Layer 3 — Scenario tests
-
-- **Paralog** — `tests/scenarios_aligned/test_paralogs.py`. Expected
-  $t_1 \approx t_2 \approx 500$
-  ([`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §3.1).
-- **Hybrid-capture** — new scenario per
-  [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §3.2.
-
-### F.2 Layer 4 — Synthetic benchmark sweeps
-
-Per [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §4.
-
-Run `scripts/benchmark/configs/locus_simple_*.yaml` on the
-post-rebuild binary, compare against a clean snapshot of the
-pre-burn baseline (capture this snapshot at the **start** of Phase A
-into `scratch/preburn/` so Phase F has a comparison point).
-
-Acceptance:
-- mRNA recovery: median relative error < 0.15.
-- nRNA siphon reduced from baseline ~37% to < 20% worst case.
-- gDNA recovery at low contamination: relative error < 1.3×.
-
-### F.3 Layer 4 — Armis2 real-data smoke
-
-Per [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §5.
-
-Conditions:
-- `gdna_none_ss_1.00_nrna_none`
-- `gdna_none_ss_0.50_nrna_rand`
-- `gdna_high_ss_1.00_nrna_none`
-- `gdna_high_ss_0.50_nrna_rand`
-
-Acceptance per §5.3.
-
-### F.4 Numerical-stability stress
-
-`tests/calibration/test_numerical_stability.py` per
-[`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §6.
-
-### F.5 Acceptance gate
-
-- [ ] Paralog test passes naturally (no tolerance loosening).
-- [ ] Hybrid-capture scenario test passes.
-- [ ] Synthetic sweeps acceptance thresholds met (or any regression
-      root-caused and documented).
-- [ ] Armis2 corner conditions acceptance per §5.3.
-- [ ] All `CalibrationResult` fields finite across all runs.
-- [ ] Mass-change history monotone in every run.
-
-### F.6 Validation report
-
-Write `docs/acc_caljointmodel/validation_report.md` per
-[`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) §7.
-
----
-
-## 10. Phase G — Cleanup
-
-**Goal.** Mechanical: regenerate goldens, ruff, audit, doc updates.
-
-### G.1 Tasks
-
-1. Regenerate `tests/golden/*` with `pytest tests/ --update-golden`.
-2. `ruff check src/ tests/` and `ruff format src/ tests/`.
-3. Magic-number audit across the whole calibration module: ≤ 8
-   literals, each annotated with a comment citing the relevant spec
-   doc.
-4. Update `CLAUDE.md` and `.github/copilot-instructions.md`:
-   - "Python Module Roles" table: remove deleted v5 modules, add
-     `scan_payload.py` (AccumulatorPayload), `calibrate.py`.
-   - Architecture section: reflect the substrate (per-ref
-     `AccumulatorPayload`) and the calibrator's three-substrate-set
-     loop.
-5. Update `docs/accumulator/00_design.md` §7.3: replace the stale
-   `region_fl_hist` / `boundary_fl_hist` fields in the
-   `AccumulatorPayload` example with the schema actually shipped in
-   Phase B (no FL).
-6. Mark `docs/accumulator/01_implementation.md` and
-   `docs/caljointmodel/05_implementation_plan.md` as superseded by
-   this document (front-matter banner; do not delete — they retain
-   historical context).
-7. Write `docs/acc_caljointmodel/postmortem.md` with what worked,
-   what didn't, and what to do differently next time.
-8. Archive retention decision for `archive/calibration_legacy_2026_05/`.
-   Recommendation: keep until the next minor release.
-
-### G.2 Acceptance gate
-
-- [ ] `pytest tests/` all green.
-- [ ] `ruff check src/ tests/` clean.
-- [ ] Magic-number audit ≤ 8, each annotated.
-- [ ] Docs updated.
-
----
-
-## 11. File-touch matrix
-
-Rows = files; columns = phases. `**X**` = create; `X` = edit;
-`del` = delete; `mv` = move/rename.
-
-| File | A | B | C | D | E | F | G |
-|---|---|---|---|---|---|---|---|
-| `src/rigel/native/calibration/accumulator.{h,cpp}` | — | edit (`AccumulatorSet` + thread-safe merge) | — | — | — | — | — |
-| `src/rigel/native/bam_scanner.cpp` | strip dead `obs_*` locals | replace `set_regions` → `set_region_edges`; deposit at fragment site; emit payload | — | — | — | — | — |
-| `src/rigel/native.py` | — | re-export `AccumulatorPayload` symbols (if any new) | — | — | — | — | — |
-| `src/rigel/_accumulator.py` | — | possibly extend with payload helpers | — | — | — | — | — |
-| `src/rigel/scan_payload.py` | del (legacy) | **add** (`AccumulatorPayload`, `CalibrationSubstrate`) | extend | — | — | — | — |
-| `src/rigel/calibration/_stub.py` | **add** | — | del | — | — | — | — |
-| `src/rigel/calibration/calibrate.py` | — | — | **add** (placeholder) | edit (real impl, 3 sub-PRs) | — | — | — |
-| `src/rigel/calibration/__init__.py` | rewrite to re-export 3 stub symbols | — | rewrite to re-export real types | — | — | — | — |
-| `src/rigel/calibration/*.py` (everything else under v5) | **del** | — | — | — | — | — | — |
-| `src/rigel/native/calibration/region_index.h`, `region_signature.h` | conditionally del (grep first) | conditionally del | — | — | — | — | — |
-| `src/rigel/pipeline.py` | strip v5 block; call stub | wire `AccumulatorPayload` build into scan | wire substrate into `calibrate(...)` | — | wire `CalibrationResult` into locus prior | — | — |
-| `src/rigel/estimator.py` | drop calibration imports | — | — | — | — | — | — |
-| `src/rigel/locus.py::compute_locus_priors_from_partitions` | replace with `NotImplementedError` stub | — | — | — | rewrite per doc 04 §6 | — | — |
-| `src/rigel/config.py` | strip v5 sub-configs; add stub `CalibrationConfig` | — | replace stub with real `CalibrationConfig` | — | — | — | — |
-| `src/rigel/cli.py` | strip v5 flags | — | — | — | — | — | — |
-| `src/rigel/index.py` | — | add `build_region_partition` helper (edges, ref_offsets) | — | — | — | — | — |
-| `archive/calibration_legacy_2026_05/` | **mv** salvageable files here | — | — | — | — | — | — |
-| `tests/test_*.py` (v5 tests) | **del** ~28 files | — | — | — | — | — | — |
-| `tests/native/test_accumulator_spec.py` | — | — | — | — | — | — | — |
-| `tests/test_scanner_accumulator_integration.py` | — | **add** | — | — | — | — | — |
-| `tests/test_accumulator_payload.py` | — | **add** | — | — | — | — | — |
-| `tests/calibration/test_config_defaults.py` | — | — | **add** | — | — | — | — |
-| `tests/calibration/test_result_invariants.py` | — | — | **add** | — | — | — | — |
-| `tests/calibration/test_substrate_invariants.py` | — | — | **add** | — | — | — | — |
-| `tests/calibration/test_g2_g3_deconvolution.py` | — | — | — | **add** (D1) | — | — | — |
-| `tests/calibration/test_g4_exposure.py` | — | — | — | **add** (D2) | — | — | — |
-| `tests/calibration/test_m_step.py`, `test_outer_loop.py`, `test_e2e_synthetic.py` | — | — | — | **add** (D3) | — | — | — |
-| `tests/calibration/test_locus_prior_consumer.py` | — | — | — | — | **add** | — | — |
-| `tests/calibration/test_numerical_stability.py` | — | — | — | — | — | **add** | — |
-| `tests/scenarios_aligned/test_hybrid_capture.py` | — | — | — | — | — | **add** | — |
-| `tests/scenarios_aligned/test_paralogs.py` | — | — | — | — | — | edit (expected outputs) | — |
-| `tests/test_pipeline_smoke.py` | — | — | — | — | edit | — | — |
-| `tests/golden/*` | — | — | — | — | — | — | regenerate |
-| `CHANGELOG.md` | edit | — | — | — | — | — | edit |
-| `CLAUDE.md` | — | — | — | — | — | — | edit |
-| `.github/copilot-instructions.md` | — | — | — | — | — | — | edit |
-| `docs/accumulator/00_design.md` | — | — | — | — | — | — | edit (§7.3 schema) |
-| `docs/accumulator/01_implementation.md` | — | — | — | — | — | — | mark superseded |
-| `docs/caljointmodel/05_implementation_plan.md` | — | — | — | — | — | — | mark superseded |
-| `docs/caljointmodel/04_interface_contract.md` | — | — | — | — | — | — | drop "Status (2026-05-29)" pending banner |
-| `docs/acc_caljointmodel/validation_report.md` | — | — | — | — | — | **add** | — |
-| `docs/acc_caljointmodel/postmortem.md` | — | — | — | — | — | — | **add** |
-
----
-
-## 12. Risk register
-
-| Phase | Top risk | Mitigation |
+| Topic | Authoritative doc | Reconciliation note |
 |---|---|---|
-| A | Hidden cross-module import couples a "deleted" module to something live | Run `pytest --collect-only` after every deletion batch; fix imports as they surface |
-| A | The pre-burn synthetic baseline snapshot is forgotten until Phase F needs it | Capture it as the **first** action of Phase A, before any deletion |
-| B | Per-worker `AccumulatorSet` merge has data race on the shared buffer | Worker-local sets are merged only after all workers join; same pattern as `stats_.merge_from` |
-| B | The region partition builder doesn't exist after Phase A deleted `region_partition.py` | Re-implement minimally in `index.py` per Phase B.5; spec lives in this doc |
-| C | Boundary substrate's count signal: `flux` vs `mass`? | Open question flagged in C.2; resolve at Phase C kickoff and lock the decision in doc 04 §2 |
-| D1 | Three-leg paralog rescue empirically weaker than the prior FL-bearing design | Phase F paralog regression must verify. If it fails: (a) reintroduce FL only for paralog-flagged regions, (b) tighten BB priors, (c) document partial regression. See [`../caljointmodel/02_failure_audit.md`](../caljointmodel/02_failure_audit.md) §2.5 |
-| D3 | Per-region BB strand likelihood unstable at very small $\rho_d^{\text{BB}}$ | `scipy.betabinom.logpmf` handles the limit; `_BB_FLOOR` Newton bound prevents drift |
-| D3 | Mass-change diagnostic increases between iterations (EM violation) | Indicates bug. Raise `CalibrationConvergenceError`; do not silently continue |
-| E | Locus prior pseudocount underflows or overflows on extreme regions | Consumer unit tests cover extreme-mass cases; clip $\alpha_t \in [\alpha_{\min}, \alpha_{\max}]$ |
-| F | Regression in armis2 sweeps with no clear root cause | `scripts/debug/dump_calibration_state.py` (write in Phase D) is the debugger |
+| Accumulator structures, deposit algorithm, mass conservation | [`../accumulator/00_design.md`](../accumulator/00_design.md) | §7.3 example still lists stale `*_fl_hist`; shipped schema has no FL. Fix Phase 8. |
+| Goals G2/G3/G4, substrate, principles | [`../caljointmodel/00_overview.md`](../caljointmodel/00_overview.md) | §5 keep/delete file list obsolete. |
+| Generative model (NB count, BB strand, deterministic spliced RNA, Gamma exposure) | [`../caljointmodel/01_generative_model.md`](../caljointmodel/01_generative_model.md) | Current — **except** §7 boundary "½ half-split" is superseded by the side-attribution model (§4 D1). |
+| Failure audit (why v5 burned) | [`../caljointmodel/02_failure_audit.md`](../caljointmodel/02_failure_audit.md) | Historical; §4/§5 burn lists already executed (with residue, §2.3). |
+| Inference (E-step, M-step, closed forms, Newton) | [`../caljointmodel/03_inference.md`](../caljointmodel/03_inference.md) | Current — **except** §4 boundary "½ half-split" superseded (§4 D1); §3.2 `kappa_rna` source clarified (§4 D2). |
+| Public API + pseudocount formulas | [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md) | §2 substrate framing obsolete (→ `AccumulatorPayload`); §6 consumer signature references types that must be (re)built (§5). |
+| Validation plan | [`../caljointmodel/06_validation_plan.md`](../caljointmodel/06_validation_plan.md) | Current. |
+
+Conflicts are resolved by **updating the spec doc** (Phase 8), not by
+silent deviation. Known conflicts are tracked in §3/§4.
 
 ---
 
-## 13. Sign-off
+## 2. Ground-truth state of the tree
 
-Approval to begin **Phase A** = approval of this consolidation. Each
-phase gate is its own checkpoint and is mergeable as a standalone
-PR. No phase begins until the previous gate is green.
+> Anchored at `4124276 phase b`; line numbers drift — re-grep before editing.
+
+### 2.1 DONE — accumulator substrate (keep, do not touch)
+
+- Native [`accumulator.{h,cpp}`](../../src/rigel/native/calibration/accumulator.h):
+  `Region` (uint32[4] contained), `Boundary` (float32[4] mass_left/right
+  + uint32[4] flux), `Accumulator`, `AccumulatorSet` (per-ref, thread-safe
+  merge). Channel `ch = (spliced?2:0) + (strand_pos?0:1)`.
+- Scanner (Phase B): `set_regions`, fractional deposit of non-multimap
+  fragments, post-scan merge, `result["calibration"]` payload. No dead
+  v5 native code remains.
+- [`scan_payload.py`](../../src/rigel/scan_payload.py) `AccumulatorPayload`;
+  [`_accumulator.py`](../../src/rigel/_accumulator.py) façade;
+  [`calibration/regions.py`](../../src/rigel/calibration/regions.py)
+  region partition (built at index time → `regions.feather`; wired into
+  the scan by `pipeline.py::_wire_calibration_regions`).
+- Green: `tests/native/test_accumulator_spec.py` (20),
+  `test_accumulator_payload.py`, `test_scanner_accumulator_integration.py`.
+
+### 2.2 DONE — Phase-A burn skeleton (keep)
+
+- [`calibration/__init__.py`](../../src/rigel/calibration/__init__.py):
+  re-exports `CalibrationConfig` (from `config.py`), empty placeholder
+  `CalibrationResult`, `calibrate()` → `NotImplementedError`.
+- [`config.py::CalibrationConfig`](../../src/rigel/config.py#L212): the 4
+  new knobs only; no v5 fields.
+- [`calibration/strand_summary.py`](../../src/rigel/calibration/strand_summary.py)
+  `StrandSummary` (library-global). CLI v5 flags removed.
+
+### 2.3 RESIDUE — incomplete burn (PR 0 deletes all of this)
+
+Reachable only after the `calibrate()` abort, so pure dead weight:
+
+| Residue | Anchor | Action |
+|---|---|---|
+| v5 locus-prior EM driver | `pipeline.py::_run_locus_em_partitioned` (~546–956) | DELETE |
+| 11 `prior_*` params + plumbing | `pipeline.py::_build_locus_meta` (~588–677) | DELETE |
+| 11 `prior_*` output columns | `estimator.py::get_loci_df` (~844–854, 914–924, 953–963) | DELETE |
+| dead `_calibration_strand_summary` | `pipeline.py` (~190–194) | DELETE |
+| stale docstrings (`fl_models`, `assemble_priors`, `CalibrationScanPayload`) | `scoring.py:140,143`; `locus.py:12`; `pipeline.py:13–20,85,238` | REWRITE |
+| stale doc ref `04_outputs.md` (nonexistent) | `config.py:217`, `calibration/__init__.py:11` | REWRITE → `04_interface_contract.md` |
+| 3 legacy CLI tests | `tests/test_cli.py:312–337` | DELETE |
+| legacy golden col `prior_ess_final` | `tests/test_golden_output.py:197` | REWRITE |
+| old-schema `summary.json` consumers | `sim/locus_sweep.py:893–926`, `sim/analysis.py` | STUB (rewrite in Phase 8) |
+| old-schema calibration test | `tests/test_sim_analysis.py:42–67` | STUB/DELETE |
+| loci goldens with `prior_*` cols | `tests/golden/*_loci_df.{feather,tsv}` (21×2) | REGEN (Phase 8) |
+
+### 2.4 MISSING — remaining work
+
+Calibrator (E/M/exposure/outer loop); `CalibrationSubstrate` adapter; real
+`CalibrationResult`; strand-balance model; per-region strand annotation;
+exposure-weighted per-transcript lengths + locus-prior consumer; non-stub
+`quant_from_buffer`. Most of this is **recoverable** — see §5.
+
+### 2.5 Test reality
+
+`pytest -x` dies at the first end-to-end test with the `calibrate()`
+`NotImplementedError`. Every `run_pipeline` test is red; the 3 `test_cli.py`
+tests are red; substrate tests are green. End-to-end green returns at PR 6.
+
+---
+
+## 3. Reality reconciliation (design docs vs code)
+
+1. **Substrate is `AccumulatorPayload`** (4-channel region/boundary
+   matrices), not doc 04 §2's `CalibrationAggregates`. Sufficient stats
+   are channel reductions (§4 D1/D2).
+2. **No per-region `kappa_rna`** in the live global `StrandModel` → §4 D2
+   builds it from integer substrate counts.
+3. **No `φ_{t,r}` allocator / `RegionArrays` in the live tree** — the
+   codebase `LocusPartition` is an unrelated CSR scatter. But the
+   allocator + effective-length math **exist in pre-burn git** (§5) and
+   are recovered in PR 6.
+4. **EM prior API is per-locus aggregate scalars**
+   ([estimator.py:308](../../src/rigel/estimator.py#L308)
+   `gdna_prior_count`/`rna_prior_count`), doc 04 §6 is per-transcript →
+   bridge via recovered `assemble_multilocus_prior` (§4 D3, §5).
+5. **Boundary "½ half-split" (doc 01 §7, doc 03 §4) is abandoned** in
+   favor of the side-attribution model (§4 D1).
+
+---
+
+## 4. Resolved decisions (D1–D6)
+
+### D1 — Boundaries: separate, asymmetric, flux-shared (the "half-split" is gone)
+
+**Why boundaries are first-class.** Boundaries — especially exon↔intron
+boundaries — are where hybrid-capture enrichment is measured: gDNA splashes
+out of captured exons into flanking sequence as boundary-crossing fragments.
+So boundaries are deconvolved as their **own** sufficient-statistic set,
+never merged into regions.
+
+**Definitions (locked).** A boundary at index `b` sits between two regions:
+- **left side** ↔ region `b-1` (the region to its left);
+- **right side** ↔ region `b` (the region to its right).
+
+The accumulator already stores, per boundary per channel:
+- `mass_left` = fractional block-side mass contributed by blocks in the
+  **left** region (`b-1`); `mass_right` = same for the **right** region (`b`).
+  These two are **disjoint, asymmetric observations** and are
+  **deconvolved separately** (an exon side and an intron side have very
+  different gDNA/RNA composition).
+- `flux` = **one shared integer** count of fragment-events crossing the
+  boundary. Integer counts drive Bayesian shrinkage / statistical power;
+  fractional mass drives density. **We use both.**
+
+**What replaces the "half-split."** The design docs aggregated boundary
+gDNA mass into a region as `½(M_g_L + M_g_R)`. That is **wrong** — the
+accumulator already partitions mass by side. A region `r` instead receives
+the *natural* side-attributed boundary contributions:
+
+```
+region r  ←  boundary[r].mass_right   (r is the right region of boundary r)
+          +  boundary[r+1].mass_left  (r is the left region of boundary r+1)
+```
+
+(Doc 01 §7 / doc 03 §4 updated accordingly in Phase 8.)
+
+**Likelihood coupling (the precise model).** Per boundary side:
+- **Count / strand** use the **shared integer `flux`** (per channel),
+  oriented to that side's region strand → NB count LLR + BB strand LLR
+  → a per-side gDNA mixing proportion `π_g`. (Statistical power.)
+- **Mass / density**: that side's fractional `mass_*` is the magnitude
+  deconvolved by `π_g` into gDNA/RNA mass attributed to the adjacent
+  region. (Density.)
+
+**Recovered support.** The deleted [`boundaries.py @ fc96902`](#) already
+implements this exact left/right model: `BoundaryTable` with
+`left_region_*`/`right_region_*` counts, per-side boundary effective
+length, and `left_region_index()`/`right_region_index()`. We adapt it to
+read `AccumulatorPayload` instead of the old ledger (§5).
+
+> **Remaining sub-decision (pin at PR 4 kickoff, not blocking now):** the
+> exact form when a side's adjacent region is strand-ambiguous or
+> non-genic (no defined RNA strand). Proposed default: such a side
+> contributes to the count/density channels but its strand LLR falls back
+> to neutral (`kappa_d = 0.5`), so it cannot manufacture RNA. Confirm at PR 4.
+
+### D2 — Strand-balance model: beta-binomial on integer counts from regions **and** boundary sides
+
+`kappa_rna` is the RNA strand mean; `rho_r_bb` is its beta-binomial
+overdispersion. **Both are fit from integer (n_sense, n_antisense)
+counts**, never fractions (0.9 from 9/1 and from 90/10 carry very
+different statistical power; the fraction discards it).
+
+**Observation extraction (locked).**
+- **Regions:** every strand-**unambiguous** region with >0 contained
+  spliced fragments contributes one `(n_spliced_sense, n_spliced_antisense)`
+  pair, oriented relative to the region strand (and the library mode).
+  From the substrate: spliced channels are `ch2` (spliced+`strand_pos`)
+  and `ch3` (spliced+`strand_neg`); orient by region strand (flip for `−`).
+- **Boundaries:** every boundary side whose adjacent region is
+  strand-unambiguous contributes a `(n_spliced_sense, n_spliced_antisense)`
+  pair from the boundary's **integer flux** spliced channels, oriented to
+  *that side's* region strand. A side adjacent to an ambiguous region is
+  skipped. (The left and right sides orient the *same* shared flux to
+  *different* region strands — hence "per side.")
+
+Pool all region + boundary-side integer pairs → fit a beta-binomial:
+mean `kappa_rna` and overdispersion `rho_r_bb`, with count-based
+uncertainty for a proper likelihood.
+
+**New finding / task.** This needs **per-region strand annotation**
+(`+ / − / ambiguous`), which the *current* minimal `regions.py` dropped.
+It is recoverable: `regions.py @ fc96902` (signatures) +
+`_arrays.py::transcript_strand_class` (`ts_class`). PR 1 restores region
+strand/signature annotation; PR 3 builds the strand-balance model.
+
+**Recovered support.** `strand_deconv.py @ fc96902`:
+`_fold_pos_neg_by_transcript_strand` (the exact integer
+sense/antisense constructor), `build_compartment_strand_counts`
+(per region + boundary-side triples), `_log_beta_binom_pmf` (vectorized
+integer BB log-PMF). `strand_balance.py @ fc96902` (symmetric BB
+Method-of-Moments) is the skeleton — generalize its fixed-0.5 mean to a
+fitted RNA mean. The live `StrandModel` supplies the library mode. **Avoid**
+the `strand_deconv.py` reliability/screen half (log-BF cliffs, flag bits).
+
+### D3 — Per-transcript exposure-weighted lengths → per-locus prior (recover, don't reinvent)
+
+The bridge from calibration outputs to EM priors is **largely recoverable**
+pre-burn code. The concept:
+
+- Region effective length `region_eff_len = L − FL + 1`; a boundary is a
+  point with `boundary_eff_len = FL` (spliced → RNA FL; unspliced → a
+  gDNA/RNA mixture: gDNA fraction with gDNA FL, RNA fraction with RNA FL).
+- Each region and boundary has an **exposure factor** (G4). Multiply
+  effective length × exposure factor.
+- **gDNA (per locus):** sweep regions/boundaries left→right, summing
+  `exposure × eff_len`.
+- **Per transcript:** collect the regions and the exon-compatible
+  boundaries overlapping the transcript; sweep and sum `exposure × eff_len`
+  → each transcript's exposure-weighted effective length → its Dirichlet
+  pseudocounts. Aggregate per-transcript α to **per-locus**
+  `gdna_prior_count` / `rna_prior_count` for the existing EM API.
+
+**Recovered support (the crown jewels).**
+- [`_exposure.py @ fc96902`](#) — `component_bp_weighted_exposure` (the
+  per-transcript overlap sweep that bp-weights the region exposure array →
+  exposure factor), `contained_exposure_clipped` (`L−FL+1`),
+  `gdna_eff_len_for_loci`, `fractional_boundary_side_exposure`
+  (boundary `eff_len = FL` via FL CDF). REUSE-AS-IS; depends only on the
+  **live** `frag_length_model.py`.
+- `prior.py::compute_component_exposure_table @ fc96902` — per-transcript
+  `eff_len × exposure_factor`. REUSE.
+- `adaptive_prior.py::_project_to_loci @ fc96902` — clean region→locus
+  overlap-share allocator (locus-level φ). EXTRACT only.
+- `locus_prior.py::assemble_multilocus_prior` (M-series blob) — clean
+  per-locus → per-MultiLocus aggregation (`n_rna = max(0, n_obs − n_gdna)`).
+  REUSE-AS-IS shape. **Avoid** its density/fusion terms.
+
+### D4 — Pre-burn baseline & archived code are in-repo
+
+Pre-burn snapshots live in git history; FL + calibration algorithms are
+recoverable. We harvest via `git show <sha>:<path>` (cheat-sheet in §5).
+The Phase-7 synthetic baseline is regenerated from a pre-burn SHA
+(candidate: `fc96902 new calib system implemented`) into `scratch/preburn/`
+**before** PR 0 lands.
+
+### D5 — Locus-prior consumer: `assemble_priors` in `calibration/priors.py` ✓ (agreed)
+
+### D6 — Phase 0 is its own PR ✓ (agreed) — PR 0 below.
+
+---
+
+## 5. Recovered-Code Map (harvest, don't reinvent)
+
+**Source commit: `fc96902` ("new calib system implemented")** for v6-draft
+files; a few mature pieces are M-series **dangling blobs** (read via
+`git cat-file -p <blob>`). All confirmed present.
+
+| Need | Recover from | Verdict |
+|---|---|---|
+| Boundary↔region side model + per-side eff-len (D1) | `boundaries.py @ fc96902` (326 LoC) | REUSE (adapt to `AccumulatorPayload`) |
+| Region/payload CSR containers + region strand class (D2) | `_arrays.py @ fc96902` (`RegionArrays.from_region_df`, `PayloadArrays`, `transcript_strand_class`) | REUSE (adapt `from_payload` to `AccumulatorPayload`) |
+| Region partition signatures / strand annotation (D2) | `regions.py @ fc96902` (679 LoC; `classify_boundary_kind`, 4-bit signatures) | REUSE-WITH-CLEANUP |
+| Integer sense/antisense constructor + BB log-PMF (D2) | `strand_deconv.py @ fc96902` → `_fold_pos_neg_by_transcript_strand`, `build_compartment_strand_counts`, `_log_beta_binom_pmf` | HARVEST functions; AVOID reliability/screen half |
+| Beta-binomial MoM skeleton (D2) | `strand_balance.py @ fc96902` (196 LoC, symmetric mean-0.5) | REUSE-WITH-CLEANUP (generalize mean for RNA) |
+| Per-transcript exposure-weighted eff-len (D3) ★ | `_exposure.py @ fc96902` (359 LoC) | REUSE-AS-IS |
+| Per-component exposure table (D3) | `prior.py::compute_component_exposure_table @ fc96902` | REUSE (this function only) |
+| Region→locus overlap allocator (D3) | `adaptive_prior.py::_project_to_loci @ fc96902` (~lines 390–478) | EXTRACT only |
+| Per-locus → per-MultiLocus prior aggregation (D3) | `locus_prior.py::assemble_multilocus_prior` (blob `f7dc103b`) | REUSE-AS-IS shape |
+| NB count overdispersion MoM (if needed) | `_kappa.py` (blob `3e7c406a`, 101 LoC) | REUSE-AS-IS |
+| Closed-form Gamma-Poisson exposure (G4) | — (`exposure.py` is log-normal EB, NOT this) | WRITE FRESH per doc 03 §4 |
+| `region_eff_len = L−FL+1`, gDNA/RNA FL | **LIVE** `frag_length_model.py::compute_all_transcript_eff_lens`, `FragmentLengthModels` | CALL DIRECTLY |
+| RNA strand beta posterior + library mode | **LIVE** `strand_model.py` (`n_same/n_opposite/minor_rate_*`) | CALL DIRECTLY |
+| Test scaffolds | `test_exposure.py`, `test_strand_deconv.py` (count/PMF tests), `test_strand_model.py`, `test_per_locus_gdna_mass.py`, `test_boundary_model.py` @ fc96902 | REUSE selectively |
+
+**AVOID (the burned cliffs — do not resurrect):** `integration.py`
+(fusion), `calibration_iteration.py` (two-state E/M density staging),
+`density_model.py`, `adaptive_prior.py` (except `_project_to_loci`),
+`latent_states.py`, `background_model.py`, `density_observation.py`,
+`boundary_sweep.py`, `exposure.py` (log-normal EB shrinkage),
+`strand_deconv.py` reliability/screen half. These concentrate ~390 tunables.
+
+**Adapter strategy.** The recovered exposure/boundary/prior code is built
+on `RegionArrays`/`PayloadArrays`/`BoundaryTable`. Rather than rewrite it,
+PR 1 builds a thin **`AccumulatorPayload` → RegionArrays/PayloadArrays/
+BoundaryTable** adapter, so the recovered math runs largely unchanged.
+
+**Harvest cheat-sheet.**
+```bash
+git show fc96902:src/rigel/calibration/_exposure.py          # φ overlap allocator + eff-len  ★
+git show fc96902:src/rigel/calibration/boundaries.py         # per-boundary side model        ★
+git show fc96902:src/rigel/calibration/_arrays.py            # RegionArrays/PayloadArrays
+git show fc96902:src/rigel/calibration/strand_balance.py     # BB MoM skeleton
+git show fc96902:src/rigel/calibration/strand_deconv.py      # fold + BB log-PMF (harvest fns)
+git show fc96902:src/rigel/calibration/prior.py              # compute_component_exposure_table
+git show fc96902:src/rigel/calibration/adaptive_prior.py     # _project_to_loci (extract)
+git cat-file -p f7dc103b85f18a961c6d6f1d4d1f9f0afd7ebd79     # mature locus_prior.py (structure)
+git cat-file -p 3e7c406ab430735d95b28421a9b178b80f0d4d98     # _kappa.py NB MoM
+```
+
+---
+
+## 6. Cross-cutting conventions
+
+- **One PR per item in §7**; each ends at its acceptance gate. Next PR
+  starts only after the previous gate is green.
+- **Build between C++-touching PRs** (`pip install --no-build-isolation -e .`).
+  Only PR 6 may touch C++, and only if D3's per-locus aggregation proves
+  insufficient (default: no C++ change).
+- **No deletion outside the current PR's file list.**
+- **No heredocs in the terminal** (workspace convention); multi-line
+  diagnostics in `scripts/debug/`.
+- **Goal-directed:** every calibrator line traces to G2/G3/G4.
+- **Sufficient statistics, not fragments**; per-fragment iteration in the
+  calibrator is a bug.
+- **FL is not a calibration channel** — it stays per-fragment in the EM
+  scorer (`scoring.py`, `frag_length_model.py`). (FL *is* used for
+  effective lengths in the prior consumer — that's not a calibration
+  channel.)
+- **≤ 8 numeric literals** in the calibrator core, each annotated with the
+  spec it derives from (doc 03 §8). Recovered code must be scrubbed of
+  cliff constants on the way in.
+- **Harvest before writing.** For any new component with a §5 entry, start
+  from the recovered source; justify deviations.
+
+---
+
+## 7. The PR series
+
+| PR | Title | Touches | Build | Doc |
+|---|---|---|---|---|
+| **0** | Burn the residue *(Step 1)* | Python | no | [`prs/PR00_burn_residue.md`](prs/PR00_burn_residue.md) |
+| **1** | Reorganize + substrate adapters *(Step 2)* | Python | no | `prs/PR01_reorganize.md` (next) |
+| **2** | Calibrator scaffold (types, validation, placeholder) | Python | no | `prs/PR02_scaffold.md` |
+| **3** | Strand-balance model (D2) | Python | no | `prs/PR03_strand_balance.md` |
+| **4** | Calibrator core: E-step (G2/G3) + exposure (G4) | Python | no | `prs/PR04_estep_exposure.md` |
+| **5** | M-step + outer loop (working calibrator) | Python | no | `prs/PR05_mstep_outer.md` |
+| **6** | Integrate: exposure-weighted lengths + locus prior (D3) + `quant_from_buffer` | Python (±C++) | maybe | `prs/PR06_integrate.md` |
+| **7** | Validate (paralog, hybrid-capture, sweeps, armis2) | Python | no | `prs/PR07_validate.md` |
+| **8** | Final cleanup (goldens, ruff, docs, postmortem) | mechanical | no | `prs/PR08_cleanup.md` |
+
+PR docs are written **just-in-time** (one ahead) so each reflects the
+state the previous PR actually produced. PR 0's doc is written now.
+
+### PR-by-PR intent (detail lives in each `prs/` doc)
+
+- **PR 0 — Burn the residue.** Delete every §2.3 remnant; fix stale
+  docstrings/doc-refs; capture the pre-burn baseline (D4). No behavior
+  change; pipeline still aborts at `calibrate()` but nothing dead hangs
+  off it. See [`prs/PR00_burn_residue.md`](prs/PR00_burn_residue.md).
+- **PR 1 — Reorganize + substrate adapters.** Target package layout
+  (`substrate.py`, `result.py`, `calibrate.py`, `priors.py` skeletons);
+  recover the `AccumulatorPayload → RegionArrays/PayloadArrays/BoundaryTable`
+  adapter (from `_arrays.py`/`boundaries.py`); restore **region
+  strand/signature annotation** (D2 prerequisite, from `regions.py @ fc96902`);
+  wire `calibrate(substrate, strand_model, config)` with real args (still
+  raising); index-alignment guard (calibration array order == `region_df`).
+- **PR 2 — Calibrator scaffold.** Real `CalibrationConfig` (reconcile
+  `phi_floor` 1e-9 vs doc 03 1e-6), `CalibrationResult` (doc 04 §5 +
+  `__post_init__`), `CalibrationSubstrate` (3 views: contained / left /
+  right; channel reductions per §4 D1/D2; boundary→region projection),
+  exceptions, placeholder `calibrate` returning zero-mass/unit-exposure.
+- **PR 3 — Strand-balance model.** Beta-binomial on integer
+  (n_sense, n_antisense) from regions + boundary sides (§4 D2); harvest
+  `_fold_pos_neg_by_transcript_strand` + `_log_beta_binom_pmf` + the
+  `strand_balance.py` MoM skeleton (generalized mean). Produces
+  `kappa_rna`, `rho_r_bb` with count-based uncertainty.
+- **PR 4 — Calibrator core.** E-step deconvolution (doc 03 §3): NB count
+  LLR + BB strand LLR (using PR 3's model) → `π_g` → soft masses (G2/G3),
+  applied to the 3 substrate views; closed-form Gamma-Poisson exposure
+  (G4, doc 03 §4, written fresh). Boundary side-attribution per §4 D1.
+  Tests: paralog/hybrid-capture sanity, mass conservation, vectorized==scalar.
+- **PR 5 — M-step + outer loop.** `rho_0`, `eps_s` (closed forms);
+  `phi`, `rho_d_bb`, `rho_r_bb` (1-D Newton + moment warm start);
+  `pi_g_prior` update; outer loop with the mass-change monotonicity
+  sentinel (`CalibrationConvergenceError`). Synthetic E2E recovery.
+  Write `scripts/debug/dump_calibration_state.py`.
+- **PR 6 — Integrate.** Recover `_exposure.py` + `compute_component_exposure_table`
+  + `_project_to_loci` + `assemble_multilocus_prior` (§5); build the
+  region↔transcript overlap sweep; implement `assemble_priors`
+  (doc 04 §6); aggregate per-transcript α → per-locus prior counts (D3);
+  rewrite `quant_from_buffer` to wire payload → calibrate → priors → EM;
+  end-to-end smoke green.
+- **PR 7 — Validate.** Paralog (t1≈t2≈500, natural pass), new
+  hybrid-capture scenario, synthetic sweeps vs the PR-0 pre-burn baseline,
+  armis2 corners, numerical-stability stress. Watch the FL-free paralog
+  risk flag (doc 02 §2.5). Write `validation_report.md`.
+- **PR 8 — Final cleanup.** Regenerate goldens; ruff; magic-number audit
+  (≤ 8); rewrite sim calibration reports to the v6 schema; reconcile the
+  spec docs (§1/§3/§4 conflicts); update `CLAUDE.md` +
+  `.github/copilot-instructions.md`; postmortem; archive retention.
+
+---
+
+## 8. Risk register
+
+| PR | Risk | Mitigation |
+|---|---|---|
+| 0 | A "dead" block has a hidden live caller | `git grep` each symbol; `pytest --collect-only` after each deletion batch |
+| 0 | Pre-burn baseline window already lost | Snapshot from `fc96902` via `git worktree` before PR 0 lands (D4) |
+| 1 | Recovered adapter (`AccumulatorPayload`→RegionArrays/Boundary) mis-maps indices across ref seams | Index-alignment guard + boundary-projection property test |
+| 1 | Region strand annotation regressed when minimal `regions.py` was created | Recover signature/strand logic from `regions.py @ fc96902`; test against synthetic +/−/overlap geometry |
+| 3 | Recovered strand code drags in cliff constants | Harvest only the named functions; magic-number scrub on entry |
+| 4 | FL-free three-leg paralog rescue weaker than FL-bearing v5 | PR 7 paralog regression must verify; fallbacks in doc 02 §2.5 |
+| 4 | Boundary side strand undefined for non-genic side (D1 sub-decision) | Default neutral `kappa_d=0.5` strand LLR; confirm at PR 4 kickoff |
+| 5 | Mass-change increases between iterations (EM violation) | `CalibrationConvergenceError`; never silently continue |
+| 6 | Per-transcript→per-locus aggregation loses resolution paralogs need | If paralog fails, escalate to per-transcript EM API (C++ change) |
+| 7 | armis2 regression, no clear cause | `scripts/debug/dump_calibration_state.py` (PR 5) |
+| 8 | Golden regen masks a real regression | Regenerate only after PR 7 sign-off; diff for unexpected non-`prior_*` changes |
+
+---
+
+## 9. Sign-off
+
+Decisions D1–D6 are resolved (§4). **Next action: critique
+[`prs/PR00_burn_residue.md`](prs/PR00_burn_residue.md), then implement
+PR 0.** Each PR is a standalone, reviewable unit; its doc is written one
+ahead and critiqued before implementation.

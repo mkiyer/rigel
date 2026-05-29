@@ -136,11 +136,9 @@ class FragmentScorer:
         ----------
         strand_models : StrandModels
         rna_fl : FragmentLengthModel
-            Finalised RNA fragment-length scoring model (v6: from
-            ``CalibrationResult.fl_models.rna_scoring``).
+            Finalised RNA fragment-length scoring model.
         gdna_fl : FragmentLengthModel
-            Finalised gDNA fragment-length scoring model (v6: from
-            ``CalibrationResult.fl_models.gdna_scoring``).
+            Finalised gDNA fragment-length scoring model.
         index : TranscriptIndex
         estimator : AbundanceEstimator
         overhang_log_penalty : float or None

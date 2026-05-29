@@ -841,17 +841,6 @@ class AbundanceEstimator:
             "gdna_rate",
             "alpha_gdna_add",
             "alpha_rna_add",
-            "prior_unspliced_total",
-            "prior_locus_weight",
-            "prior_shrink_weight",
-            "prior_n_local_gdna",
-            "prior_n_local_rna",
-            "prior_n_other_gdna",
-            "prior_n_other_rna",
-            "prior_ess_final",
-            "prior_rna_share_v5",
-            "prior_rna_share_final",
-            "prior_flags",
             "enable_gdna",
             "n_regions_touched",
             "multi_locus_region_mass",
@@ -911,17 +900,6 @@ class AbundanceEstimator:
             rate = gdna / total if total > 0 else 0.0
             alpha_gdna_add = float(r.get("alpha_gdna_add", 0.0))
             alpha_rna_add = float(r.get("alpha_rna_add", 0.0))
-            prior_unspliced_total = float(r.get("prior_unspliced_total", 0.0))
-            prior_locus_weight = float(r.get("prior_locus_weight", 0.0))
-            prior_shrink_weight = float(r.get("prior_shrink_weight", 0.0))
-            prior_n_local_gdna = float(r.get("prior_n_local_gdna", 0.0))
-            prior_n_local_rna = float(r.get("prior_n_local_rna", 0.0))
-            prior_n_other_gdna = float(r.get("prior_n_other_gdna", 0.0))
-            prior_n_other_rna = float(r.get("prior_n_other_rna", 0.0))
-            prior_ess_final = float(r.get("prior_ess_final", alpha_gdna_add + alpha_rna_add))
-            prior_rna_share_v5 = float(r.get("prior_rna_share_v5", 0.0))
-            prior_rna_share_final = float(r.get("prior_rna_share_final", 0.0))
-            prior_flags = int(r.get("prior_flags", 0))
             enable_gdna = int(r.get("enable_gdna", 0))
             n_regions_touched = int(r.get("n_regions_touched", 0))
             multi_locus_region_mass = float(r.get("multi_locus_region_mass", 0.0))
@@ -950,17 +928,6 @@ class AbundanceEstimator:
                     "gdna_rate": rate,
                     "alpha_gdna_add": alpha_gdna_add,
                     "alpha_rna_add": alpha_rna_add,
-                    "prior_unspliced_total": prior_unspliced_total,
-                    "prior_locus_weight": prior_locus_weight,
-                    "prior_shrink_weight": prior_shrink_weight,
-                    "prior_n_local_gdna": prior_n_local_gdna,
-                    "prior_n_local_rna": prior_n_local_rna,
-                    "prior_n_other_gdna": prior_n_other_gdna,
-                    "prior_n_other_rna": prior_n_other_rna,
-                    "prior_ess_final": prior_ess_final,
-                    "prior_rna_share_v5": prior_rna_share_v5,
-                    "prior_rna_share_final": prior_rna_share_final,
-                    "prior_flags": prior_flags,
                     "enable_gdna": enable_gdna,
                     "n_regions_touched": n_regions_touched,
                     "multi_locus_region_mass": multi_locus_region_mass,

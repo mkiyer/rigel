@@ -21,6 +21,21 @@ Replacement plan and phase gates: see
 Salvageable FL code preserved at
 `archive/calibration_legacy_2026_05/src/rigel/calibration/`.
 
+### 2026-05-29 — Calibration v5 burn-down completed (PR 0)
+
+Removed the residual v5 prior machinery the Phase-A burn left wired into
+live code (unreachable behind the `calibrate()` stub):
+`pipeline._run_locus_em_partitioned` (the v5 locus-prior EM driver) and
+its `prior_*` plumbing, the 11 `prior_*` columns in
+`estimator.get_loci_df`, the dead `_calibration_strand_summary` helper,
+and the 3 legacy `--cal-*` CLI tests. Fixed stale docstrings / doc
+references (`CalibrationResult.fl_models`, `assemble_priors`,
+`CalibrationScanPayload`, `04_outputs.md` → `04_interface_contract.md`).
+Stubbed the `sim/locus_sweep.py` calibration report (the full v6 rewrite
+of `sim/analysis.py` + `tests/test_sim_analysis.py` is deferred to PR 8).
+No behavior change — `rigel quant` still aborts at the `calibrate()`
+stub, but nothing dead hangs off it.
+
 ### Headline
 
 Joint mRNA / nRNA / gDNA quantification with an in-place per-region

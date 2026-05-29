@@ -8,8 +8,8 @@
 * :func:`build_multi_loci` — connected-component partitioning of
   transcripts producing per-component :class:`MultiLocus` records.
 
-Per-locus EM Dirichlet priors live in
-:func:`rigel.calibration.assemble_priors`.
+Per-locus EM Dirichlet priors are assembled by ``rigel.calibration.priors``
+(lands in PR 6 of the calibration-v6 rebuild; see ``docs/acc_caljointmodel/``).
 """
 
 from __future__ import annotations

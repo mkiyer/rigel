@@ -214,8 +214,8 @@ class CalibrationConfig:
     """Configuration for the joint fractional-accumulator + calibration
     orchestrator (:func:`rigel.calibration.calibrate`).
 
-    Schema follows ``docs/caljointmodel/04_outputs.md`` §3. The Phase A
-    burndown (2026-05-29) reduced this to the four control knobs that
+    Schema follows ``docs/caljointmodel/04_interface_contract.md`` §3. The
+    calibration-v5 burn-down reduced this to the four control knobs that
     survive in the new design; legacy v5 fields are gone.
     """
 

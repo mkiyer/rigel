@@ -309,33 +309,6 @@ class TestConfigRoundTrip:
                 f"Default key {key!r} not in _PARAM_SPECS or cli_only"
             )
 
-    def test_cal_quality_thresholds_flow_to_config(self):
-        """``--cal-quality-good`` / ``--cal-quality-weak`` reach ``CalibrationConfig``."""
-        from rigel.cli import _build_pipeline_config
-
-        args = _parse_quant("--cal-quality-good", "9999", "--cal-quality-weak", "42")
-        _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.calibration.pool_quality_good == 9999
-        assert cfg.calibration.pool_quality_weak == 42
-
-    def test_cal_fl_scoring_prior_ess_flows_to_config(self):
-        """``--cal-fl-scoring-prior-ess`` reaches ``CalibrationConfig``."""
-        from rigel.cli import _build_pipeline_config
-
-        args = _parse_quant("--cal-fl-scoring-prior-ess", "321.5")
-        _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.calibration.fl_scoring_prior_ess == pytest.approx(321.5)
-
-    def test_yaml_cal_fl_scoring_prior_ess(self, tmp_path):
-        """YAML can set the FL scoring contrast prior ESS."""
-        cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("cal_fl_scoring_prior_ess: 123.0\n")
-        args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
-        assert args.cal_fl_scoring_prior_ess == pytest.approx(123.0)
-
     def test_rna_call_bias_flows_to_config(self):
         """``--rna-call-bias`` reaches ``EMConfig``."""
         from rigel.cli import _build_pipeline_config
