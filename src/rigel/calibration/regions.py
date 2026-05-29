@@ -1,22 +1,24 @@
 """rigel.calibration.regions — Per-reference region partition.
 
-This module defines the per-reference region partition consumed by the
-fractional accumulator. The genome is tiled per-reference into maximal
-intervals whose exon/intron annotation state is constant across the
-interval; the accumulator then deposits per-fragment evidence into these
-regions (and the boundaries between them) without distinguishing strand
-or splicing classes at partition time.
+The genome is tiled per-reference into *regions*: maximal intervals over
+which the 4-bit annotation :mod:`signature <rigel.calibration.signature>`
+(exon/intron × strand) is constant. By construction **a region and each of
+its neighbours have different signatures** — adjacent segments with identical
+signatures are merged — so the boundaries between regions sit exactly at
+signature transitions. The accumulator deposits per-fragment evidence into
+these regions and the boundaries between them.
 
 Public API
 ----------
-- ``build_region_partition(transcripts, ref_lengths)`` — event-sweep
-  builder that returns a typed DataFrame with one row per region.
-- ``build_region_partition_arrays(index)`` — flatten the partition to
-  the ``(boundary_positions, ref_pos_offsets)`` ABI expected by
+- ``build_region_partition(transcripts, ref_lengths)`` — event-sweep builder
+  returning a typed DataFrame with one row per region (carrying its
+  ``signature``).
+- ``build_region_partition_arrays(index)`` — flatten the partition to the
+  ``(boundary_positions, ref_pos_offsets)`` ABI expected by
   :py:meth:`rigel.native.BamScanner.set_regions`.
 - ``load_regions(path)`` — read ``regions.feather`` and coerce dtypes.
 - ``validate_against_ref_lengths(region_df, ref_lengths)`` — enforce the
-  partition invariants (tiling, ordering, non-negative lengths).
+  partition invariants (tiling, ordering, signature range, neighbour-differs).
 - ``load_ref_lengths(path)`` — read ``ref_lengths.feather`` into an
   insertion-ordered dict keyed by reference name.
 """
@@ -31,48 +33,114 @@ import pandas as pd
 
 from ..transcript import Transcript
 from ..types import Strand
+from .signature import (
+    BIT_EXON_NEG,
+    BIT_EXON_POS,
+    BIT_INTRON_NEG,
+    BIT_INTRON_POS,
+    N_SIGNATURES,
+    pack_signature,
+)
 
 
-REGION_COLUMNS = ["region_id", "ref_name", "start", "end", "length"]
+REGION_COLUMNS = ["region_id", "ref_name", "start", "end", "length", "signature"]
 
 REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "region_id": np.int64,
     "start": np.int64,
     "end": np.int64,
     "length": np.int64,
+    "signature": np.uint8,
 }
 
 
 # ---------------------------------------------------------------------------
-# Builder
+# Builder (event sweep with adjacent-equal-signature merge)
 # ---------------------------------------------------------------------------
 
 
-def _collect_breakpoints(
-    transcripts: list[Transcript],
+def _add_interval_events(
+    events: list[tuple[int, int, int]],
+    *,
     ref_name: str,
     ref_length: int,
-) -> np.ndarray:
-    """Return sorted unique breakpoints for a reference, clipped to [0, L]."""
-    breakpoints: list[int] = [0, int(ref_length)]
-    for tx in transcripts:
-        if tx.is_synthetic or not tx.exons:
-            continue
-        if str(tx.ref) != ref_name:
-            continue
-        if tx.strand not in (Strand.POS, Strand.NEG):
-            continue
-        for exon in tx.exons:
-            breakpoints.append(int(exon.start))
-            breakpoints.append(int(exon.end))
-        for intron_start, intron_end in tx.introns():
-            breakpoints.append(int(intron_start))
-            breakpoints.append(int(intron_end))
+    transcript_id: str | None,
+    start: int,
+    end: int,
+    bit: int,
+) -> None:
+    """Append +1/-1 delta events for one validated half-open interval."""
+    start = int(start)
+    end = int(end)
+    if end <= start:
+        return
+    if start < 0 or end > ref_length:
+        label = transcript_id if transcript_id is not None else "<unknown>"
+        raise ValueError(
+            f"Transcript {label} has interval [{start}, {end}) outside "
+            f"reference {ref_name!r} length {ref_length}."
+        )
+    events.append((start, bit, +1))
+    events.append((end, bit, -1))
 
-    pts = np.asarray(breakpoints, dtype=np.int64)
-    np.clip(pts, 0, int(ref_length), out=pts)
-    pts = np.unique(pts)
-    return pts
+
+def _build_reference_rows(
+    ref_name: str,
+    ref_length: int,
+    events: list[tuple[int, int, int]],
+) -> list[dict[str, object]]:
+    """Sweep one reference's events into merged constant-signature segments."""
+    if ref_length < 0:
+        raise ValueError(f"Reference {ref_name!r} has negative length {ref_length}.")
+    if ref_length == 0:
+        return []
+
+    events.sort(key=lambda event: event[0])
+    rows: list[dict[str, object]] = []
+    counts = {BIT_INTRON_POS: 0, BIT_INTRON_NEG: 0, BIT_EXON_POS: 0, BIT_EXON_NEG: 0}
+    previous_position = 0
+    event_index = 0
+    n_events = len(events)
+
+    def emit_segment(segment_start: int, segment_end: int) -> None:
+        if segment_end <= segment_start:
+            return
+        signature = pack_signature(
+            intron_pos=counts[BIT_INTRON_POS] > 0,
+            intron_neg=counts[BIT_INTRON_NEG] > 0,
+            exon_pos=counts[BIT_EXON_POS] > 0,
+            exon_neg=counts[BIT_EXON_NEG] > 0,
+        )
+        # Merge: extend the previous region when it abuts and shares a signature
+        # (this is what enforces the neighbour-differs invariant).
+        if rows and rows[-1]["end"] == segment_start and rows[-1]["signature"] == signature:
+            rows[-1]["end"] = segment_end
+            rows[-1]["length"] = segment_end - int(rows[-1]["start"])
+            return
+        rows.append(
+            {
+                "region_id": -1,
+                "ref_name": ref_name,
+                "start": segment_start,
+                "end": segment_end,
+                "length": segment_end - segment_start,
+                "signature": signature,
+            }
+        )
+
+    while event_index < n_events:
+        position = events[event_index][0]
+        if position > previous_position:
+            emit_segment(previous_position, position)
+            previous_position = position
+        while event_index < n_events and events[event_index][0] == position:
+            _, bit, delta = events[event_index]
+            counts[bit] += delta
+            event_index += 1
+
+    if ref_length > previous_position:
+        emit_segment(previous_position, ref_length)
+    return rows
 
 
 def build_region_partition(
@@ -81,65 +149,75 @@ def build_region_partition(
 ) -> pd.DataFrame:
     """Build the per-reference region partition.
 
-    For each reference, the partition tiles ``[0, ref_length)`` with
-    non-overlapping intervals whose endpoints are the union of exon and
-    intron boundaries from non-synthetic transcripts on that reference.
+    For each reference, exon and intron interval events from non-synthetic
+    transcripts are swept into maximal constant-signature segments; adjacent
+    segments with identical signatures are merged. ``region_id`` is assigned
+    globally in genomic order (``ref_lengths`` iteration order, then start).
     References with zero length contribute no rows.
     """
-    normalized_ref_lengths = {
-        str(name): int(length) for name, length in ref_lengths.items()
+    normalized_ref_lengths = {str(name): int(length) for name, length in ref_lengths.items()}
+
+    events_by_ref: dict[str, list[tuple[int, int, int]]] = {
+        ref_name: [] for ref_name in normalized_ref_lengths
     }
 
     for tx in transcripts:
         if tx.is_synthetic or not tx.exons:
             continue
-        if str(tx.ref) not in normalized_ref_lengths:
+        ref_name = str(tx.ref)
+        if ref_name not in normalized_ref_lengths:
             raise ValueError(
-                f"Transcript {tx.t_id} has reference {tx.ref!r} "
-                "not found in ref_lengths."
+                f"Transcript {tx.t_id} has reference {tx.ref!r} not found in ref_lengths."
+            )
+        if tx.strand == Strand.POS:
+            exon_bit, intron_bit = BIT_EXON_POS, BIT_INTRON_POS
+        elif tx.strand == Strand.NEG:
+            exon_bit, intron_bit = BIT_EXON_NEG, BIT_INTRON_NEG
+        else:
+            continue
+
+        ref_length = normalized_ref_lengths[ref_name]
+        events = events_by_ref[ref_name]
+        for exon in tx.exons:
+            _add_interval_events(
+                events,
+                ref_name=ref_name,
+                ref_length=ref_length,
+                transcript_id=tx.t_id,
+                start=int(exon.start),
+                end=int(exon.end),
+                bit=exon_bit,
+            )
+        for intron_start, intron_end in tx.introns():
+            _add_interval_events(
+                events,
+                ref_name=ref_name,
+                ref_length=ref_length,
+                transcript_id=tx.t_id,
+                start=int(intron_start),
+                end=int(intron_end),
+                bit=intron_bit,
             )
 
-    rows_ref: list[str] = []
-    rows_start: list[int] = []
-    rows_end: list[int] = []
-
+    rows: list[dict[str, object]] = []
     for ref_name, ref_length in normalized_ref_lengths.items():
-        if ref_length <= 0:
-            continue
-        pts = _collect_breakpoints(transcripts, ref_name, ref_length)
-        for i in range(len(pts) - 1):
-            start = int(pts[i])
-            end = int(pts[i + 1])
-            if end <= start:
-                continue
-            rows_ref.append(ref_name)
-            rows_start.append(start)
-            rows_end.append(end)
+        rows.extend(_build_reference_rows(ref_name, ref_length, events_by_ref[ref_name]))
 
-    if not rows_ref:
+    if not rows:
         return _coerce_region_dtypes(pd.DataFrame(columns=REGION_COLUMNS))
 
-    starts = np.asarray(rows_start, dtype=np.int64)
-    ends = np.asarray(rows_end, dtype=np.int64)
-    frame = pd.DataFrame(
-        {
-            "region_id": np.arange(len(rows_ref), dtype=np.int64),
-            "ref_name": pd.array(rows_ref, dtype="string"),
-            "start": starts,
-            "end": ends,
-            "length": ends - starts,
-        }
-    )
-    return _coerce_region_dtypes(frame)
+    for region_id, row in enumerate(rows):
+        row["region_id"] = region_id
+    return _coerce_region_dtypes(pd.DataFrame(rows, columns=REGION_COLUMNS))
 
 
 def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray]:
     """Flatten the index's region partition into BamScanner.set_regions arrays.
 
     For each reference ``f`` in ``index.ref_names``, the boundary positions
-    are the sorted unique set ``[r0.start, r0.end, r1.end, ...]`` of the
-    per-ref region rows (which tile the reference contiguously).
-    References with zero regions contribute zero positions.
+    are the sorted set ``[r0.start, r0.end, r1.end, ...]`` of the per-ref
+    region rows (which tile the reference contiguously). References with zero
+    regions contribute zero positions.
 
     Returns
     -------
@@ -173,9 +251,7 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray]:
         offsets[i + 1] = offsets[i] + positions.shape[0]
 
     boundaries = (
-        np.concatenate(per_ref_positions)
-        if per_ref_positions
-        else np.empty(0, dtype=np.int64)
+        np.concatenate(per_ref_positions) if per_ref_positions else np.empty(0, dtype=np.int64)
     )
     return boundaries, offsets
 
@@ -189,9 +265,7 @@ def _coerce_region_dtypes(region_df: pd.DataFrame) -> pd.DataFrame:
     region_df = region_df.copy()
     for column in REGION_COLUMNS:
         if column not in region_df.columns:
-            region_df[column] = pd.Series(
-                dtype="string" if column == "ref_name" else object
-            )
+            region_df[column] = pd.Series(dtype="string" if column == "ref_name" else object)
     region_df = region_df.loc[:, REGION_COLUMNS]
     for column, dtype in REGION_COLUMN_DTYPES.items():
         if region_df[column].dtype != dtype:
@@ -201,23 +275,26 @@ def _coerce_region_dtypes(region_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _missing_schema_error(path: str | Path, missing: set[str]) -> ValueError:
+    if "signature" in missing:
+        return ValueError(
+            f"regions.feather at {path} is missing 'signature' (pre-signature index). "
+            "Rebuild the index (rigel index --fasta ... --gtf ...)."
+        )
     return ValueError(
         f"regions.feather at {path} is missing required columns: "
-        f"{sorted(missing)}. Rebuild the index "
-        "(rigel index --fasta ... --gtf ...)."
+        f"{sorted(missing)}. Rebuild the index (rigel index --fasta ... --gtf ...)."
     )
 
 
 def load_regions(path: str | Path) -> pd.DataFrame:
     """Read ``regions.feather`` and coerce dtypes to the partition schema.
 
-    The returned DataFrame has its row index reset to ``region_id``
-    (which is itself ``0..N-1``). Raises :class:`ValueError` if the file
-    is missing required columns.
+    The returned DataFrame has its row index reset to ``region_id`` (which is
+    itself ``0..N-1``). Raises :class:`ValueError` if required columns are
+    missing.
     """
     df = pd.read_feather(str(path))
-    required = set(REGION_COLUMNS)
-    missing = required - set(df.columns)
+    missing = set(REGION_COLUMNS) - set(df.columns)
     if missing:
         raise _missing_schema_error(path, missing)
     df = df.loc[:, list(REGION_COLUMNS)]
@@ -235,9 +312,11 @@ def validate_against_ref_lengths(
 
     1. ``region_id`` column equals row index.
     2. All region lengths are positive and match ``end - start``.
-    3. Every ``ref_name`` exists in ``ref_lengths``.
-    4. Per-reference: regions are sorted by start, non-overlapping, and
-       cover ``[0, ref_lengths[ref])`` with no gaps.
+    3. Every ``signature`` is a valid 4-bit value.
+    4. Every ``ref_name`` exists in ``ref_lengths``.
+    5. Per-reference: regions are sorted by start, non-overlapping, cover
+       ``[0, ref_lengths[ref])`` with no gaps, and **no two adjacent regions
+       share a signature** (the merge invariant).
     """
     missing = set(REGION_COLUMNS) - set(region_df.columns)
     if missing:
@@ -245,8 +324,7 @@ def validate_against_ref_lengths(
 
     if not (region_df.index.to_numpy() == region_df["region_id"].to_numpy()).all():
         raise ValueError(
-            "regions.feather: row index does not match 'region_id' column. "
-            "Rebuild the index."
+            "regions.feather: row index does not match 'region_id' column. Rebuild the index."
         )
 
     lengths = region_df["end"].to_numpy() - region_df["start"].to_numpy()
@@ -262,6 +340,14 @@ def validate_against_ref_lengths(
         raise ValueError(
             f"regions.feather: region {bad} has length {int(stored_lengths[bad])}, "
             f"expected {int(lengths[bad])}. Rebuild the index."
+        )
+
+    signatures = region_df["signature"].to_numpy(np.uint8, copy=False)
+    if (signatures >= N_SIGNATURES).any():
+        bad = int(np.flatnonzero(signatures >= N_SIGNATURES)[0])
+        raise ValueError(
+            f"regions.feather: region {bad} has invalid signature "
+            f"{int(signatures[bad])}. Rebuild the index."
         )
 
     refs_in_table = set(region_df["ref_name"].unique().tolist())
@@ -305,6 +391,15 @@ def validate_against_ref_lengths(
                 f"regions.feather: reference '{ref}' has a gap or overlap "
                 f"between region ending at {int(ends[mismatch_index])} and region "
                 f"starting at {int(starts[mismatch_index + 1])}. Rebuild the index."
+            )
+
+        ref_signatures = sub["signature"].to_numpy(np.uint8, copy=False)
+        if len(ref_signatures) > 1 and (ref_signatures[:-1] == ref_signatures[1:]).any():
+            same = int(np.flatnonzero(ref_signatures[:-1] == ref_signatures[1:])[0])
+            raise ValueError(
+                f"regions.feather: reference '{ref}' has adjacent regions with the "
+                f"same signature at rows {int(sub.index[same])} and "
+                f"{int(sub.index[same + 1])} (should have been merged). Rebuild the index."
             )
 
 

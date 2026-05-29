@@ -1,5 +1,138 @@
 # TODO
 
+## PR1 Decisions
+
+### Q1 — Region partition granularity (the big one)
+
+A genome and a transcript annotation file (GTF) are required to define a region partitioning.
+
+From the genome and GTF, we can define regions.
+
+The definition of Regions requires a 4-bit signature:
+- exon_pos (exonic, positive strand)
+- exon_neg (exonic, negative strand)
+- intron_pos (intronic, positive strand)
+- intron_neg (intronic, negative strand)
+
+Every position in the genome can be assigned a 4-bit signature. A region is a non-overlapping genomic interval where every position has the exact same signature.
+
+Region definition:
+1) A non-overlapping genomic interval
+2) 'signature' (4-bit) is constant over all bases in the interval
+3) A region and its neighbors MUST have different signatures!
+
+In otherwords, adjacent regions with identical signatures MUST be merged!
+
+Therefore, I agree with your recommendation that adjacent regions with identical signatures must be merged.
+
+### Q2 - Intergenic handling
+
+Intergenic regions should be included in BOTH the *density* and *strand* models. They are important sources of data for both models.
+
+How do we use intergenic regions that lack a strand class? (strand is NONE).
+
+For intergenic regions, we arbitrarily (randomly) assign 'sense' and 'antisense' strands. This is fair and works. One caveat: intergenic regions may contain unannotated transcripts. An unannotated transcript has no reference annotation and the strand is unknown. 
+
+We do want to consider ways that we can avoid training our strand model in intergenic regions with a clear strand imbalance, but this is largely unavoidable. Outliers are expected to a certain extent and are part of the issue of overdispersion. Unannotated transcription can lurk everywhere and is a source of overdispersion in both annotated regions (due to antisense transcripts that is not annotated) and unannotated regions alike. We just have to acknowledge this and make our tool robust enough to not 'break'. This was the motivation for clipping the top X% of outlier density and potentially the top X% of clearly imbalanced strand in the first pass where we SEED the calibration EM. That way calibration doesn't start with a misconception of 'expressed' versus 'unexpresed'. Our new system must have robustness mechanisms in place to handle this as well.
+
+### Question Q3 - Index schema bnump
+
+Yes we can change the region schema and force rebuild with no consequences. No need for any backwards compatibility anywhere!
+
+### Q4 -- yes, that is okay
+### Q5 -- agree
+### Q6 -- 
+
+I want the code clean, concise, and organized. It shouldn't blow up into >25 modules with >90 magic number heuristics. This is essential.
+
+If you are introducing a new magic number or heuristic or parameter, you MUST pause, clarify, and discuss. You can't forge on alone and produce a massive spaghetti code fest, or we will be right back where we started, burning everything to the ground and rebuilding again. Please be meticulous this time.
+
+
+
+
+
+## PR0 Decisions
+
+### Decision D1) 
+
+ou need to give me a much more clear summary of this decision. Show how the plan uses boundary count signal. Define 'half-split' (this is obscure I have no idea what this means). Here is my understanding. We intentional keep boundaries separate from regions because boundaries are critical to measuring hybrid capture enrichment (exon-intron boundaries in particular). Boundary mass is split between "left" and "right". The "left" mass corresponds to the region to the left (if boundary is at index 'b', left region is 'b-1'). The "right" mass corresponds to the region to the right (if boundary is at index 'b', region to the right is at index 'b'). The left and right boundary masses are disjoint and partitioned for a reason. They are treated as asymmetric observations. They are deconvolved separately. The left and right boundary mass SHARES a common integer 'flux', or total fragments. This is critical as the number of integer fragments is important for bayesian shrinkage and statistical power. The fractional mass is important for density calculations. We need both. Please specify exactly what decisions we need to make here. ----- 
+
+
+
+
+### Decision D2) what is 'kappa_rna'? 
+
+#### Strand balance model
+
+I assume this is the beta-binomial overdispersion parameter for the strand balance model? Here is how we estimate this -- we gather observations from Regions AND from Boundaries (both are informative). For every Region with >0 contained spliced fragments, we convert the raw observations into 'sense' and 'antisense' observations relative to the region strand (regions with ambiguous strand are excluded) and relative to the rna-seq library mode. Extract for each region the value for  `n_spliced_sense` sense counts and `n_spliced_antisense` antisense counts. This is the discrete strand balance data for a single Region. Now for Boundaries. You'll need to iterate over Boundary objects that are not strand-ambiguous. Remember a boundary has two sides (left and right). The left side corresponds to the left adjacent region. The right side corresponds to the right adjacent region. If the left region is ambiguous, the left side of the boundary is ambiguous (ambiguous means +/- strand transcripts overlap). If the right region is ambiguous (+/- strands overlapping), we cannot use the right boundary mass. Each boundary stores raw spliced counts on each strand. For each side of the valid boundary (left and right), extract `n_spliced_antisense` and `n_spliced_sense` counts for the boundary. This is your RNA strand balance data from the boundary. 
+
+------- 
+
+Hope that makes sense and you understand how to extract observations from REgions and Boundaries and can build the strand balance model that way. 
+
+---------
+
+We need to build a strand balance model with discrete integer counts, not fractions, so that the statistical power of the measurement and uncertainty can be modeled.
+
+If we have 10 fragments with 9 sense and 1 antisense, our strand balance is 0.9.
+
+If we have 100 fragments with 90 sense and 10 antisense, our strand balance is 0.9. 
+
+Having 100 observations is much more reliable than 10 observations.
+
+Our model needs to be trained accordingly with integer sense / antisense observations across regions and boundaries to be able to infer expected sense/antisense counts with defined uncertainty, so that we can model and develop a proper likelihood function.
+
+We cannot train this with fractional strand balance (e.g. 0.50, 0.56) because 0.56 could be derived from a tiny or a huge number of fragments. I hope that makes sense. 
+
+-----------
+
+### Decision D3) per-transcript to per-locus prior bridge
+
+This code may have been deleted as part of our 'burn'. However, the code should be largely usable! I recommend that you grab it from github and use it if possible. I can explain the concept. 
+
+Calibration provides:
+- Regional/Boundary deconvolution into gDNA + RNA components
+- Regional/Boundary exposure factors
+
+Region of length `L` base pairs (bp) has effective length dependent on the fragment length distribution `FL`:
+- `region_eff_len` = `L - FL + 1`
+
+A boundary is a single 'point'. The effective length of a boundary is equal to the fragment length distribution.
+
+Boundary effective length can be interpreted differently for spliced/unspliced fragments:
+- spliced fragments using the RNA FL distribution, with effective length of the RNA FL distribution
+- unspliced fragments are a mixture of gDNA and RNA fragments, the gDNA fraction with gDNA FL and the RNA fraction with RNA FL
+
+Each Region should have an exposure factor
+Each Boundary should have an exposure factor
+
+Region effective length is multiplied by region exposure factor
+Boundary effective length multiplied by boundary exposure factor.
+
+For a Locus, doing this for gDNA is easy. We just sweep across the regions from left to write, computing the effective length multiplied by the exposure factor for each region and each boundary.
+
+A Locus has transcripts and we also need to compute exposure-weighted lengths for the transcripts.
+
+- We need to collect the regions and boundaries that overlap the transcript
+- We then sweep over the regions and a subset of the boundaries that are compatible with the transcript exons. For each compatible region and boundary we compute the exposure factor multiplied by the effective length and sum these. 
+- Each transcript has its own exposure weighted effective length 
+
+-----------------
+
+### Decision D4) 
+
+We have already pushed snapshots of the pre-burn github repo and these are already stored in our repo. You can peruse and grab useful bits of code from the github repo at any time. We burned everything down but there are still LOTS of useful code pieces in the repo.
+
+The fragment length distribution code lives in archived source and could be recovered from there if needed.
+
+I encourage you to explore the archived or deleted code as you implement and harness helpful pieces wherever you can. No need to reinvent the wheel and introduce new bugs. Always good to have a sense of the previous implementation as well to guide you, and you can likely improve upon it!
+
+### Decision 5) Agree
+
+### Decision 6) Yes Phase 0 is its own PR.
+
+
+
 ## Native fractional accumulator rework
 
 I think we need to enhance our native fractional accumulator prior to tackling this new calibration system. The goal is to make the accumulator more efficient by separating 'regions' into 'regions' and 'boundaries'. Currently, a Region has a 1) left boundary, 2) a right boundary, and 3) contained fragments. Under the new model, 'regions' would store the 'contained' fragment data, and 'boundaries' would store boundary data. If we partition a reference chromosome into N regions numbered {0..N}, a Region at index 'i' would have Boundary structures at index 'i' (left boundary) and index 'i+1' (right boundary). Region structs would store part of the data, and Boundary structs would store boundary data. This would be a rewrite of the fractional accumulator and the calibration model would inherit this new structure. Currently, the calibration system constructs separate Region and Boundary objects from the fractional accumulator data. This is redundant work. The native accumulator should build these structures during the initial pass. It should be straightforward, because a reference chromosome can be broken up into non-overlapping regions, and each region has two boundaries. The number of boundaries equals the number of regions + 1. The leftmost boundary of a chromosome is empty/null and the rightmost boundary of a reference chrom is also empty/null. All other boundaries are shared by two regions. ----- What is stored in the 'Boundary' structures? Each boundary still needs to track two masses from left and right. Fractional Mass is broken down into: spliced_pos, spliced_neg, unspliced_pos, unspliced_neg (4 float32 per side x 2 (left and right) = 8 float32). Boundaries also store the total flux in discrete fragments (uint32) *once* per boundary. The total integer fragment flux (uint32) is broken down into spliced_pos, spliced_neg, unspliced_pos, unspliced_neg (uint32 x 4). So boundaries store BOTH fractional (float32) mass broken down into left/right, AND integer count 'flux' (not broken down by left/right). ----- What is stored in the 'Region' structures? Regions need to store contained counts. Contained counts are not fractional by definition, because the entire fragment is contained in the region. Only fragments that span multiple regions are divided into fractional counts and will appear as boundary mass, not contained mass. So regions can store (spliced_pos, spliced_neg, unspliced_pos, unspliced_neg) as float32 x 4 or as uint32 x 4. ------ Potential bug or inconsistency: What about fragments with many aligned blocks? We sequence paired-end fragments and this can manifest as multiple aligned blocks per fragment. WE need to audit the fractional accumulator. Are we accumulating "per block" or "per fragment"? This is challenging. For fragments longer then 2 x read_length, there is intervening portion in the middle of the fragment that is not sequenced, but is still implicit. This can result in implicit splice junctions (two aligned blocks of fragment are on different exons, but the splice junction is not explicitly sequenced and identified). Our fractional accumulator needs to operate at a "per-fragment" level to be fair. Fragments may be made of multiple aligned blocks. IF we accumulate "aligned blocks", we need to ensure that we normalize correctly. We might have 3 aligned blocks with lengths 50, 100, 150, with total sequenced length 300bp, but the fragment length may have been 500bp. The fair solution is to normalize by the fragment length (each base gets 1/500 share) but this requires knowing fragment length (we often don't know this). So the next best thing to do is normalize by sum of sizes of the aligned blocks. So we would normalize 1/300 in the example. So that changes the Region struct. Regions may to store both fractional and integer values: (spliced_pos, spliced_neg, unspliced_pos, unspliced_neg) as float32 and ALSO as uint32. The integer fragment counts are incremented ---- What about fragments with multiple aligned blocks but no spliced? Should this be accumulated as boundary flux? Which boundaries? We can only accumulate boundaries that are observed/implied by the aligned blocks we can see. If a fragment aligns to multiple "regions", it is by definition not contained, and so the best we can do is accumulate it at the boundaries. Here's the example. Transcript with exons (1000,2000), (5000,6000), (9000,15000). Fragment with two aligned blocks at (1800, 1950) and (5050,5200) -- 300bp of aligned blocks involving two different exons (and hence two regions). Is this a 'contained' fragment? NO! It is actually an example of boundary crossing fragment because it cannot by definition be contained in a single region. So it would increment the LEFT boundary mass at position 2000 and it would increment the RIGHT boundary mass at boundary position 5000. The fragment is implicitly spliced, so the pos=2000 boundary would get the LEFT spliced_pos (assuming + strand) +150/300 = 0.5. And then the pos=5000 boundary would get the RIGHT spliced_pos +150/300 = +0.5. This should make sense. ----- This implies that REGIONS only need to store truly contained fragments and can accumulate integers (uint32). Boundaries need to store fractional left/right mass AND total integer flux. The total integer counts are essential to knowing the number of fragment observations (sample size) in discrete counts which is the 'statistical power' present at that boundary leading to the fractional mass computed there. ---- In summary, we need a native accumulator rework. The Region / Boundary split is intuitive and improves efficiency. A region at index 'i' has left boundary at index 'i' and right boundary at index 'i+1'. Accumulation can still be performed efficiently. We also need an audit of how we accumulate fragments. This likely need to be formalized and made strict. The contracts and plan is designed above. 

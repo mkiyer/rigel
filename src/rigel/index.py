@@ -70,9 +70,12 @@ MANIFEST_JSON = "manifest.json"
 #:   3 — adds regions.feather (calibration partition); ref_lengths.feather
 #:        is now mandatory at load time and used to validate the region
 #:        partition.
-#:   4 — regions.feather stores fine-region signatures plus derived coarse
+#:   4 — regions.feather stored fine-region signatures plus derived coarse
 #:        bridge columns for calibration consumers.
-INDEX_FORMAT_VERSION = 4
+#:   5 — calibration-v6: regions.feather is the minimal merged-signature
+#:        partition [region_id, ref_name, start, end, length, signature];
+#:        the derived coarse class is recomputed on load from `signature`.
+INDEX_FORMAT_VERSION = 5
 
 
 def _rigel_version() -> str:

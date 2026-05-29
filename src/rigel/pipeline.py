@@ -392,6 +392,36 @@ def _wire_calibration_regions(
     )
 
 
+def _check_region_payload_alignment(region_arrays, payload) -> None:
+    """Verify the region geometry lines up 1:1 with the accumulator payload.
+
+    The calibration arrays are ref-major and must address the payload's
+    region/boundary tables with a single index, so the region count and the
+    per-reference ``ref_region_offsets`` must agree exactly. Raises
+    :class:`~rigel.calibration.errors.CalibrationSubstrateError` on mismatch.
+    """
+    from .calibration.errors import CalibrationSubstrateError
+
+    if payload is None:
+        raise CalibrationSubstrateError(
+            "calibration payload is None; BamScanner.set_regions was not called."
+        )
+    if region_arrays.n_regions != payload.r_total:
+        raise CalibrationSubstrateError(
+            f"region geometry has {region_arrays.n_regions} regions but the accumulator "
+            f"payload has {payload.r_total}; the region order differs from "
+            f"index.region_df. Rebuild the index."
+        )
+    expected = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
+    actual = np.asarray(payload.ref_region_offsets, dtype=np.int64)
+    if not np.array_equal(expected, actual):
+        raise CalibrationSubstrateError(
+            "region geometry per-reference offsets do not match the payload "
+            "ref_region_offsets; the accumulator region order differs from "
+            "index.region_df. Rebuild the index."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Quantify from buffer (locus-level EM, no global EM)
 # ---------------------------------------------------------------------------
@@ -624,11 +654,14 @@ def run_pipeline(
     # ``.finalize(...)`` here — the scanner-trained accumulator is kept
     # raw and only consulted for index-side geometry.
 
-    # -- Calibration (Phase A burndown stub) --
-    # The v5 surface has been removed. The new joint fractional-accumulator
-    # + calibration-v6 orchestrator lands in Phase D — see
+    # -- Calibration (calibration-v6) --
+    # Build the region geometry, verify it lines up 1:1 with the accumulator
+    # payload, then hand both (plus the trained strand model) to the
+    # calibrator. The calibrator body is a skeleton during the rebuild
+    # (raises NotImplementedError); PR 2–PR 5 fill it in. See
     # docs/acc_caljointmodel/00_implementation_plan.md.
     from .calibration import calibrate
+    from .calibration.region_arrays import RegionArrays
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
@@ -639,12 +672,19 @@ def run_pipeline(
         strand_ci_eps,
     )
 
+    region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    _check_region_payload_alignment(region_arrays, calibration_payload)
+
     try:
-        calibrate()  # raises NotImplementedError during the v6 rebuild
+        calibrate(
+            payload=calibration_payload,
+            region_arrays=region_arrays,
+            strand_model=strand_models,
+            config=config.calibration,
+        )
     finally:
         buffer.cleanup()
 
     # The remainder of run_pipeline is unreachable until the v6 calibrator is
-    # wired end-to-end (PR 6 rebuilds quant_from_buffer). PR 1 rewires this
-    # call to calibrate(substrate, strand_model, config).
+    # wired end-to-end (PR 6 rebuilds quant_from_buffer).
     raise AssertionError("unreachable: calibration-v6 stub aborts above")

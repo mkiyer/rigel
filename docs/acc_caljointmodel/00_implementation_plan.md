@@ -341,6 +341,19 @@ git cat-file -p 3e7c406ab430735d95b28421a9b178b80f0d4d98     # _kappa.py NB MoM
 - **≤ 8 numeric literals** in the calibrator core, each annotated with the
   spec it derives from (doc 03 §8). Recovered code must be scrubbed of
   cliff constants on the way in.
+- **Pause-and-discuss rule (hard).** Before introducing *any* new magic
+  number, heuristic, or tunable parameter, STOP and discuss with the user
+  — do not forge ahead. The legacy system was burned for ~91 magic numbers
+  / ~25 cliffs; the goal is to not repeat that. Prefer fitted
+  overdispersion (NB `φ`, Beta-Binomial `ρ`) over outlier-clipping cliffs
+  for robustness. Keep the module count low (≤ 25).
+- **Region definition (locked).** Every genome position carries a 4-bit
+  signature {exon_pos, exon_neg, intron_pos, intron_neg}; a region is a
+  maximal interval of constant signature, and a region and its neighbours
+  always differ in signature (adjacent equal-signature segments are
+  merged). Boundaries sit at signature transitions. Intergenic = signature
+  0 = strand NONE, included in both the density and strand models (NONE
+  regions get an arbitrary fixed sense/antisense split in the strand model).
 - **Harvest before writing.** For any new component with a §5 entry, start
   from the recovered source; justify deviations.
 
