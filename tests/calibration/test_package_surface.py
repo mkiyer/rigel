@@ -1,4 +1,4 @@
-"""Public surface of rigel.calibration — names present, skeletons raise."""
+"""Public surface of rigel.calibration."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ EXPECTED_NAMES = [
     "CalibrationConfig",
     "CalibrationResult",
     "CalibrationSubstrate",
+    "SubstrateView",
     "CalibrationSubstrateError",
     "CalibrationConvergenceError",
     "calibrate",
@@ -28,15 +29,7 @@ def test_error_types():
     assert issubclass(cal.CalibrationConvergenceError, RuntimeError)
 
 
-def test_calibration_result_instantiable():
-    # Empty placeholder dataclass; the real schema lands in PR 2.
-    assert cal.CalibrationResult() is not None
-
-
-def test_skeletons_raise_not_implemented():
-    with pytest.raises(NotImplementedError):
-        cal.calibrate(payload=None, region_arrays=None, strand_model=None, config=None)
+def test_assemble_priors_still_stubbed():
+    # The locus-prior bridge lands in PR 6; everything else is implemented.
     with pytest.raises(NotImplementedError):
         cal.assemble_priors()
-    with pytest.raises(NotImplementedError):
-        cal.CalibrationSubstrate.from_payload(None, None)

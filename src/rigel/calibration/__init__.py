@@ -20,12 +20,13 @@ from .calibrate import calibrate
 from .errors import CalibrationConvergenceError, CalibrationSubstrateError
 from .priors import assemble_priors
 from .result import CalibrationResult
-from .substrate import CalibrationSubstrate
+from .substrate import CalibrationSubstrate, SubstrateView
 
 __all__ = [
     "CalibrationConfig",
     "CalibrationResult",
     "CalibrationSubstrate",
+    "SubstrateView",
     "CalibrationSubstrateError",
     "CalibrationConvergenceError",
     "calibrate",

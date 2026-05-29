@@ -1,5 +1,30 @@
 # TODO
 
+## PR2 Decisions
+
+### 1) phi_floor
+
+I am not sure how to set this! This is a numerical floor, so you'll need to explore the numerical stability landscape and determine the proper floor
+
+### 2) max_outer_iterations
+
+I am not sure how to set this! Hopefully, this will converge in a few iterations. We will have to study this after the implementation is complete
+
+### 3) boundary_split_factor
+
+Agree, remove!
+
+### 4) placeholder = no gDNA
+
+If there is zero gDNA mass everywhere, then we the only sensible exposure factor is 1.0. There is no data to train with and 'uniform' is the only reasonable choice.
+
+### 5) CalibrationResult.__post_init__
+
+This seems okay. This is an implementation detail, not really a theory or algorithm design. I entrust you to produce a clear, concise, elegant implementation!
+
+
+
+
 ## PR1 Decisions
 
 ### Q1 — Region partition granularity (the big one)

@@ -3,10 +3,11 @@
 **Parent plan:** [`../00_implementation_plan.md`](../00_implementation_plan.md) §7 (PR 2).
 **Type:** Python-only (no index rebuild, no C++).
 **Build required:** no.
-**Status:** Draft for critique. Introduces **0 new calibrator tunables**;
-net **−1** config knob (removes the obsolete `boundary_split_factor`). Open
-magic-number reconciliations are collected in §II.7 for your decision before
-coding (per the pause-and-discuss rule).
+**Status:** Implemented on branch `pr2-scaffold`. Decisions resolved (§II.7);
+`phi_floor` determined empirically (§II.10). Introduces **0 new calibrator
+tunables**; net **−1** config knob (removed the obsolete
+`boundary_split_factor`). The three doc-03-§7 *initialization* values used by
+the placeholder are noted in §II.10.
 
 PR 2 turns the skeletons from PR 1 into the real **data contract** of the
 calibrator: the output schema (`CalibrationResult`), the adapter that turns
@@ -278,12 +279,12 @@ from the spec, and one field is now obsolete. **These are existing-constant
 reconciliations, not new tunables — but they are magic-number changes, so they
 are listed for your decision in §II.7 and applied only once you confirm.**
 
-| Field | Current code | Spec (doc 03 §8 / 04 §3) | Proposed |
+| Field | Current code | Spec (doc 03 §8 / 04 §3) | **Resolved** |
 |---|---|---|---|
-| `max_outer_iterations` | 50 | 25 | **25** |
+| `max_outer_iterations` | 50 | 25 | **25** (provisional; PR 5/7 study) |
 | `mass_rel_tol` | 1e-4 | 1e-4 | unchanged |
-| `phi_floor` | 1e-9 | 1e-6 | **1e-6** |
-| `boundary_split_factor` | 1.0 | 0.5 | **remove** (D1 kills the half-split) |
+| `phi_floor` | 1e-9 | 1e-6 | **1e-8** (empirical, §II.10) |
+| `boundary_split_factor` | 1.0 | 0.5 | **removed** (D1 kills the half-split) |
 
 Removing `boundary_split_factor` requires updating its `__post_init__` guard
 and any reference (none outside config after D1).
@@ -360,24 +361,22 @@ but only **after** `calibrate()` has run and produced a valid result — no
 - `test_package_surface.py` — extend for `SubstrateView`; `calibrate` no
   longer raises `NotImplementedError`.
 
-## II.7 Open decisions (magic numbers — pause & discuss)
+## II.7 Resolved decisions (your critique, 2026-05-29)
 
-Per the hard rule, nothing below is coded until you confirm:
-
-1. **`phi_floor` 1e-9 → 1e-6?** The spec (doc 03 §8 `_PHI_FLOOR`, doc 04 §3)
-   says `1e-6`; the live code has an unexplained `1e-9`. Proposed: adopt the
-   spec `1e-6`.
-2. **`max_outer_iterations` 50 → 25?** Spec says 25 (converges in 3–10).
-   Proposed: 25.
-3. **Remove `boundary_split_factor`?** D1 abandoned the half-split, so this
-   knob is dead. Proposed: remove it from `CalibrationConfig`. (Confirm you do
-   not want to keep a side-attribution weight knob instead — the D1 model has
-   none.)
-4. **Placeholder semantics = "no gDNA" (all-RNA, ω=1).** Confirm this is the
-   intended reading of the plan's "zero-mass/unit-exposure" (zero *gDNA* mass,
-   not zero total mass — the latter would violate conservation).
-5. **`CalibrationResult.__post_init__` intrinsic-only** (conservation checked
-   in `calibrate`/tests, not the dataclass). Confirm.
+1. **`phi_floor` → 1e-8.** "Not sure — explore the numerical-stability
+   landscape and determine the proper floor." Done; see §II.10. The floor is
+   the smallest φ at which every `1/φ` channel is still accurate: empirically
+   1e-8 (1000× margin above the 1e-11 precision cliff).
+2. **`max_outer_iterations` → 25 (provisional).** "Not sure — study after the
+   implementation is complete." Kept at the spec's documented cap; the PR 5/7
+   convergence study validates/tunes it. It is a backstop, not a tuned value.
+3. **Remove `boundary_split_factor`.** Agreed — removed (no replacement knob;
+   the D1 side-attribution has none).
+4. **Placeholder = "no gDNA", ω=1.** "If there is zero gDNA mass everywhere,
+   the only sensible exposure factor is 1.0 — there is no data to train with
+   and 'uniform' is the only reasonable choice." Implemented exactly: `M_g≡0`,
+   `M_d` = full mass, `ω≡1`.
+5. **`__post_init__` intrinsic-only.** Approved as an implementation detail.
 
 ## II.8 Acceptance gate
 
@@ -397,3 +396,58 @@ Per the hard rule, nothing below is coded until you confirm:
 
 Revert the PR. `calibrate()` returns to the PR 1 `NotImplementedError` stub;
 no schema persisted to disk, so nothing else changes.
+
+## II.10 Execution notes (implemented 2026-05-29)
+
+Implemented on branch `pr2-scaffold`.
+
+**`phi_floor` exploration → 1e-8.** `scripts/debug/phi_floor_exploration.py`
+sweeps `r = 1/φ` over `[1, 1e15]` and characterizes every `1/φ`-dependent
+quantity:
+
+| φ | NB-vs-Poisson max\|Δlogpmf\| | Newton term rel.err | verdict |
+|---|---|---|---|
+| 1e-6 | 5.0e-1 (real signal) | 1.0e-9 | safe (over-conservative) |
+| 1e-8 | 5.0e-3 | 2.7e-7 | **safe — chosen** |
+| 1e-10 | 1.4e-4 | 1.8e-5 | safe, near edge |
+| 1e-11 | 8.9e-2 ← jumps up | 2.7e-4 | **precision cliff** |
+
+The NB count channel converges to its Poisson limit accurately down to
+φ≈1e-10 and the Newton gradient to φ≈1e-8; precision noise dominates at
+φ≤1e-11. Data retention (`1/φ + M` resolving `M`) holds to ~1e-15 (not
+binding). **1e-8** is the smallest safe value: <1e-6 relative error in every
+channel, ~1000× margin to the cliff, and below any dispersion real data
+resolves. (It is a *numerical-precision floor* — an allowed magic-number
+category — not a modeling knob.)
+
+**Initialization constants introduced (doc 03 §7).** The placeholder is an
+"iteration-0" result, so it reports the doc 03 §7 *initial* hyperparameters:
+`rho_0`/`phi` are data-driven (`initial_hyperparameters()`, reused as the
+PR 5 outer-loop warm start), and three init-table dispersions are named
+constants in `calibrate.py`: `_RHO_D_BB_INIT = 0.01`, `_RHO_R_BB_INIT = 0.01`,
+`_EPS_S_INIT = 1e-3`. These are spec initialization values (not fitted
+tunables); **PR 5's M-step owns them definitively** and may relocate them.
+Flagged here per the pause-and-discuss rule.
+
+**Other notes.**
+- `run_pipeline` now logs the doc 04 §10 completion line and stops at the PR 6
+  `quant_from_buffer` `NotImplementedError` (was the PR 1 `AssertionError`).
+- Test fixtures: a second `conftest.py` under `tests/calibration/` collided
+  with the existing `from conftest import …` pattern (pytest names every
+  `conftest.py` the module `conftest`), breaking unrelated collection. The
+  shared synthetic payload moved to a uniquely-named `tests/calibration/_synthetic.py`
+  helper (a plain function, not a fixture).
+
+### Acceptance gate — results
+
+- `pytest --collect-only tests/` → **912 collected**, clean.
+- `tests/calibration/` → **45 passed** (27 PR 1 + 18 new), incl. the
+  real-scan substrate-conservation test.
+- `calibrate(...)` returns a schema-valid `CalibrationResult`; placeholder is
+  `M_g≡0`, `ω≡1`, `M_d` = substrate totals.
+- Full suite: **248 failures, every one `NotImplementedError`** — now from the
+  post-calibrate `run_pipeline`/PR 6 boundary (`pipeline.py`), reached *after*
+  `calibrate()` returns. Same mode/count as PR 1; **+21 passing**; no new
+  modes (no `AssertionError`).
+- `ruff check src/ tests/` clean.
+- Magic-number budget: **0 new tunables**, net **−1** config knob.

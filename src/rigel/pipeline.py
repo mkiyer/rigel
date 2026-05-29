@@ -676,7 +676,7 @@ def run_pipeline(
     _check_region_payload_alignment(region_arrays, calibration_payload)
 
     try:
-        calibrate(
+        calibration = calibrate(
             payload=calibration_payload,
             region_arrays=region_arrays,
             strand_model=strand_models,
@@ -685,6 +685,22 @@ def run_pipeline(
     finally:
         buffer.cleanup()
 
-    # The remainder of run_pipeline is unreachable until the v6 calibrator is
-    # wired end-to-end (PR 6 rebuilds quant_from_buffer).
-    raise AssertionError("unreachable: calibration-v6 stub aborts above")
+    logger.info(
+        "calibration: R=%d iters=%d converged=%s rho_0=%.4g phi=%.4g "
+        "rho_d_BB=%.4g rho_r_BB=%.4g eps_s=%.4g",
+        calibration.n_regions,
+        calibration.n_iterations,
+        calibration.converged,
+        calibration.rho_0,
+        calibration.phi,
+        calibration.rho_d_bb,
+        calibration.rho_r_bb,
+        calibration.eps_s,
+    )
+
+    # payload → calibrate → priors → EM (quant_from_buffer) is rewritten in PR 6;
+    # until then the pipeline stops here, after calibration has produced a result.
+    raise NotImplementedError(
+        "run_pipeline post-calibration wiring (quant_from_buffer) lands in PR 6 — "
+        "see docs/acc_caljointmodel/00_implementation_plan.md."
+    )

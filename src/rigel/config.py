@@ -214,24 +214,31 @@ class CalibrationConfig:
     """Configuration for the joint fractional-accumulator + calibration
     orchestrator (:func:`rigel.calibration.calibrate`).
 
-    Schema follows ``docs/caljointmodel/04_interface_contract.md`` §3. The
-    calibration-v5 burn-down reduced this to the four control knobs that
-    survive in the new design; legacy v5 fields are gone.
+    Schema follows ``docs/caljointmodel/04_interface_contract.md`` §3 and
+    ``03_inference.md`` §8. Three control knobs; none is a decision threshold.
+    The D1 boundary side-attribution removed the old ``boundary_split_factor``
+    (the "½ half-split" knob): the accumulator already partitions boundary
+    mass by side, so there is no split fraction to set.
     """
 
-    #: Maximum number of outer EM passes over the joint accumulator.
-    max_outer_iterations: int = 50
+    #: Hard cap on outer EM iterations. Typical convergence in 3–10
+    #: (doc 03 §8 ``_MAX_OUTER``). Provisional pending the PR 5/7 convergence
+    #: study; it is a backstop, not a tuned value.
+    max_outer_iterations: int = 25
 
-    #: Relative-mass convergence tolerance for the outer EM.
+    #: Relative max-region mass-change termination criterion (doc 03 §8
+    #: ``_TOL_MASS``).
     mass_rel_tol: float = 1.0e-4
 
-    #: Floor on per-region foreground mass φ used to keep log-evidence
-    #: numerically well-behaved.
-    phi_floor: float = 1.0e-9
-
-    #: Multiplier on the genome-coordinate boundary split tolerance for
-    #: the accumulator fine-region builder.
-    boundary_split_factor: float = 1.0
+    #: Numerical floor on the NB dispersion φ (the Newton M-step searches
+    #: ``(phi_floor, 100)``). φ enters only as ``1/φ``; this floor keeps every
+    #: ``1/φ`` channel accurate. Empirically (scripts/debug/phi_floor_exploration.py)
+    #: the NB count channel converges to its Poisson limit accurately down to
+    #: φ≈1e-10 and the Newton gradient to φ≈1e-8, with precision noise taking
+    #: over at φ≤1e-11. 1e-8 is the smallest safe value: ~1000× margin to the
+    #: cliff, <1e-6 relative error in every channel, and below any dispersion
+    #: real data resolves (φ<1e-6 is already Poisson-indistinguishable).
+    phi_floor: float = 1.0e-8
 
     def __post_init__(self) -> None:
         if self.max_outer_iterations < 1:
@@ -241,19 +248,10 @@ class CalibrationConfig:
             )
         if self.mass_rel_tol <= 0.0:
             raise ValueError(
-                "CalibrationConfig.mass_rel_tol must be > 0; "
-                f"got {self.mass_rel_tol}."
+                f"CalibrationConfig.mass_rel_tol must be > 0; got {self.mass_rel_tol}."
             )
         if self.phi_floor <= 0.0:
-            raise ValueError(
-                "CalibrationConfig.phi_floor must be > 0; "
-                f"got {self.phi_floor}."
-            )
-        if self.boundary_split_factor <= 0.0:
-            raise ValueError(
-                "CalibrationConfig.boundary_split_factor must be > 0; "
-                f"got {self.boundary_split_factor}."
-            )
+            raise ValueError(f"CalibrationConfig.phi_floor must be > 0; got {self.phi_floor}.")
 
 
 @dataclass(frozen=True)
