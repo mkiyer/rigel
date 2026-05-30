@@ -72,7 +72,7 @@ def genomic_to_transcript_pos(
 
 
 def score_gdna_standalone(
-    exon_strand: int,
+    align_strand: int,
     splice_type: int,
     frag_length: int,
     frag_length_models,

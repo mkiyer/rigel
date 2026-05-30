@@ -392,8 +392,9 @@ git cat-file -p 3e7c406ab430735d95b28421a9b178b80f0d4d98     # _kappa.py NB MoM
 - **One PR per item in §7**; each ends at its acceptance gate. Next PR
   starts only after the previous gate is green.
 - **Build between C++-touching PRs** (`pip install --no-build-isolation -e .`).
-  Only PR 6 may touch C++, and only if D3's per-locus aggregation proves
-  insufficient (default: no C++ change).
+  C++-touching PRs: **PR 2.5** (accumulator strand & spliced-flux correction)
+  and possibly **PR 6** (only if D3's per-locus aggregation proves
+  insufficient). All other PRs are Python-only.
 - **No deletion outside the current PR's file list.**
 - **No heredocs in the terminal** (workspace convention); multi-line
   diagnostics in `scripts/debug/`.
@@ -439,6 +440,7 @@ git cat-file -p 3e7c406ab430735d95b28421a9b178b80f0d4d98     # _kappa.py NB MoM
 | **0** | Burn the residue *(Step 1)* | Python | no | [`prs/PR00_burn_residue.md`](prs/PR00_burn_residue.md) |
 | **1** | Reorganize + substrate adapters *(Step 2)* | Python | no | `prs/PR01_reorganize.md` (next) |
 | **2** | Calibrator scaffold (types, validation, placeholder) | Python | no | `prs/PR02_scaffold.md` |
+| **2.5** | Accumulator strand & spliced-flux correction (D2/D7) | **C++**+Py | **yes** | `prs/PR025_accumulator_strand_flux.md` |
 | **3** | Strand-balance model (D2) | Python | no | `prs/PR03_strand_balance.md` |
 | **4** | Calibrator core: E-step (G2/G3) + exposure (G4) | Python | no | `prs/PR04_estep_exposure.md` |
 | **5** | M-step + outer loop (working calibrator) | Python | no | `prs/PR05_mstep_outer.md` |
@@ -467,6 +469,14 @@ state the previous PR actually produced. PR 0's doc is written now.
   `__post_init__`), `CalibrationSubstrate` (3 views: contained / left /
   right; channel reductions per §4 D1/D2; boundary→region projection),
   exceptions, placeholder `calibrate` returning zero-mass/unit-exposure.
+- **PR 2.5 — Accumulator strand & spliced-flux correction (C++).** Rename
+  `exon_strand` → `align_strand`; orient spliced fragments at deposit
+  (`sense = align_strand == sj_strand`) so the spliced channels are
+  motif-relative sense/antisense (valid in AMBIG, D7); make boundary flux
+  **per-side** (`flux_left`/`flux_right`) so intron-skipping spliced reads do
+  not create false exon-intron flux (D2); rework the substrate to expose raw
+  genome-strand counts (orient downstream). Build + payload-schema change; no
+  on-disk index change. See [`prs/PR025_accumulator_strand_flux.md`](prs/PR025_accumulator_strand_flux.md).
 - **PR 3 — Strand-balance model.** Beta-binomial on integer
   (n_sense, n_antisense) from regions + boundary sides (§4 D2); harvest
   `_fold_pos_neg_by_transcript_strand` + `_log_beta_binom_pmf` + the

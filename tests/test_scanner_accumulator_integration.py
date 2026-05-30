@@ -92,7 +92,8 @@ class TestScannerAccumulatorIntegration:
         # Either contained counts, boundary mass, or flux must be non-zero.
         total = (
             int(payload.region_contained.sum())
-            + int(payload.boundary_flux.sum())
+            + int(payload.boundary_flux_left.sum())
+            + int(payload.boundary_flux_right.sum())
             + float(payload.boundary_mass_left.sum())
             + float(payload.boundary_mass_right.sum())
         )

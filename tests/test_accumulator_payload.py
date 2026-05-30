@@ -46,7 +46,8 @@ def _toy_calibration_dict(
         "region_contained": np.zeros(r_total * N_CHANNELS, dtype=np.uint32),
         "boundary_mass_left": np.zeros(b_total * N_CHANNELS, dtype=np.float32),
         "boundary_mass_right": np.zeros(b_total * N_CHANNELS, dtype=np.float32),
-        "boundary_flux": np.zeros(b_total * N_CHANNELS, dtype=np.uint32),
+        "boundary_flux_left": np.zeros(b_total * N_CHANNELS, dtype=np.uint32),
+        "boundary_flux_right": np.zeros(b_total * N_CHANNELS, dtype=np.uint32),
         "n_channels": N_CHANNELS,
         "n_refs": n_refs,
     }
@@ -64,11 +65,13 @@ class TestAccumulatorPayloadFromScanResult:
         assert payload.region_contained.shape == (3, N_CHANNELS)
         assert payload.boundary_mass_left.shape == (4, N_CHANNELS)
         assert payload.boundary_mass_right.shape == (4, N_CHANNELS)
-        assert payload.boundary_flux.shape == (4, N_CHANNELS)
+        assert payload.boundary_flux_left.shape == (4, N_CHANNELS)
+        assert payload.boundary_flux_right.shape == (4, N_CHANNELS)
         assert payload.region_contained.dtype == np.uint32
         assert payload.boundary_mass_left.dtype == np.float32
         assert payload.boundary_mass_right.dtype == np.float32
-        assert payload.boundary_flux.dtype == np.uint32
+        assert payload.boundary_flux_left.dtype == np.uint32
+        assert payload.boundary_flux_right.dtype == np.uint32
 
     def test_multi_ref_mixed_zero(self):
         # ref0: 2 regions, ref1: empty, ref2: 1 region.
@@ -78,15 +81,9 @@ class TestAccumulatorPayloadFromScanResult:
         assert payload.n_refs == 3
         assert payload.r_total == 3  # 2 + 0 + 1
         assert payload.b_obj_total == 5  # 3 + 0 + 2
-        np.testing.assert_array_equal(
-            payload.ref_pos_offsets, [0, 3, 3, 5]
-        )
-        np.testing.assert_array_equal(
-            payload.ref_region_offsets, [0, 2, 2, 3]
-        )
-        np.testing.assert_array_equal(
-            payload.ref_boundary_offsets, [0, 3, 3, 5]
-        )
+        np.testing.assert_array_equal(payload.ref_pos_offsets, [0, 3, 3, 5])
+        np.testing.assert_array_equal(payload.ref_region_offsets, [0, 2, 2, 3])
+        np.testing.assert_array_equal(payload.ref_boundary_offsets, [0, 3, 3, 5])
 
     def test_all_refs_empty(self):
         cal = _toy_calibration_dict([[], [], []])
@@ -106,7 +103,8 @@ class TestAccumulatorPayloadFromScanResult:
             payload.region_contained,
             payload.boundary_mass_left,
             payload.boundary_mass_right,
-            payload.boundary_flux,
+            payload.boundary_flux_left,
+            payload.boundary_flux_right,
         ):
             assert arr.flags["C_CONTIGUOUS"]
 

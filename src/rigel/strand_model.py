@@ -13,11 +13,11 @@ direction as the gene (R1-sense) or the *opposite* direction (R1-antisense).
 
 The model stores a single Beta posterior over:
 
-    p_r1_sense = P(exon_strand == tx_strand)
+    p_r1_sense = P(align_strand == tx_strand)
 
 and provides:
 
-* ``strand_likelihood(exon_strand, tx_strand)`` for Bayesian quantification
+* ``strand_likelihood(align_strand, tx_strand)`` for Bayesian quantification
 * ``to_dict()`` / ``write_json()`` for human-readable output including
   derived protocol flags for downstream tools.
 """
@@ -43,7 +43,7 @@ class StrandModel:
     """Strand model learned from high-quality spliced reads.
 
     Accumulates a 2×2 contingency table of alignment strand
-    (``exon_strand``) × SJ reference strand (``sj_strand``) from
+    (``align_strand``) × SJ reference strand (``sj_strand``) from
     qualified spliced fragments.  Probabilities are pure MLE
     from these counts, with a safe fallback to 0.5 when no
     observations are available.
@@ -74,18 +74,18 @@ class StrandModel:
     # Training
     # ------------------------------------------------------------------
 
-    def observe(self, exon_strand: Strand, sj_strand: Strand) -> None:
+    def observe(self, align_strand: Strand, sj_strand: Strand) -> None:
         """Record one strand observation.
 
         Parameters
         ----------
-        exon_strand : Strand
+        align_strand : Strand
             Combined alignment strand of the fragment's exon blocks
             (POS or NEG after R2 flip; ≈ read 1 alignment strand).
         sj_strand : Strand
             Annotated SJ reference strand from the XS tag (POS or NEG).
         """
-        if exon_strand == Strand.POS:
+        if align_strand == Strand.POS:
             if sj_strand == Strand.POS:
                 self.pos_pos += 1
             else:
@@ -98,21 +98,21 @@ class StrandModel:
 
     def observe_batch(
         self,
-        exon_strands: "np.ndarray",
+        align_strands: "np.ndarray",
         sj_strands: "np.ndarray",
     ) -> None:
         """Record a batch of strand observations (vectorized).
 
         Parameters
         ----------
-        exon_strands : np.ndarray
+        align_strands : np.ndarray
             Integer array of exon strand values (1=POS, 2=NEG).
         sj_strands : np.ndarray
             Integer array of SJ strand values (1=POS, 2=NEG).
         """
         import numpy as _np
 
-        exon = _np.asarray(exon_strands)
+        exon = _np.asarray(align_strands)
         sj = _np.asarray(sj_strands)
         e_pos = exon == 1  # Strand.POS
         e_neg = ~e_pos
@@ -272,25 +272,25 @@ class StrandModel:
         self._cached_p_antisense = 1.0 - self._cached_p_sense
         self._finalized = True
 
-    def strand_likelihood(self, exon_strand: int, tx_strand: int) -> float:
-        """Strand likelihood: P(exon_strand | fragment from tx_strand).
+    def strand_likelihood(self, align_strand: int, tx_strand: int) -> float:
+        """Strand likelihood: P(align_strand | fragment from tx_strand).
 
         Used during Bayesian quantification to weight candidate genes.
         Accepts int strand values (``Strand`` is an IntEnum so can be
         passed directly).
 
-        * If ``exon_strand == tx_strand`` → ``p_r1_sense``
-        * If ``exon_strand != tx_strand`` → ``1 - p_r1_sense``
+        * If ``align_strand == tx_strand`` → ``p_r1_sense``
+        * If ``align_strand != tx_strand`` → ``1 - p_r1_sense``
         * If either is NONE/AMBIGUOUS (not 1 or 2) → 0.5 (uninformative)
 
         Must be called after :meth:`finalize`.
         """
         # 1=POS, 2=NEG are the only informative values
-        if exon_strand != 1 and exon_strand != 2:
+        if align_strand != 1 and align_strand != 2:
             return 0.5
         if tx_strand != 1 and tx_strand != 2:
             return 0.5
-        if exon_strand == tx_strand:
+        if align_strand == tx_strand:
             return self._cached_p_sense
         return self._cached_p_antisense
 

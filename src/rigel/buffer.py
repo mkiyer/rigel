@@ -73,7 +73,7 @@ class BufferedFragment:
     t_inds: np.ndarray
     ambig_strand: int
     splice_type: int
-    exon_strand: int
+    align_strand: int
     sj_strand: int
     frag_lengths: np.ndarray
     num_hits: int
@@ -100,7 +100,7 @@ class BufferedFragment:
         return (
             self.splice_type == SpliceType.SPLICED_ANNOT
             and self.is_same_strand
-            and self.exon_strand in (Strand.POS, Strand.NEG)
+            and self.align_strand in (Strand.POS, Strand.NEG)
             and self.sj_strand in (Strand.POS, Strand.NEG)
         )
 
@@ -140,7 +140,7 @@ class _FinalizedChunk:
     """
 
     splice_type: np.ndarray  # uint8[N]
-    exon_strand: np.ndarray  # uint8[N]
+    align_strand: np.ndarray  # uint8[N]
     sj_strand: np.ndarray  # uint8[N]
     num_hits: np.ndarray  # uint16[N]
     merge_criteria: np.ndarray  # uint8[N]
@@ -190,7 +190,7 @@ class _FinalizedChunk:
 
         return cls(
             splice_type=_arr(raw["splice_type"], np.uint8),
-            exon_strand=_arr(raw["exon_strand"], np.uint8),
+            align_strand=_arr(raw["align_strand"], np.uint8),
             sj_strand=_arr(raw["sj_strand"], np.uint8),
             num_hits=_arr(raw["num_hits"], np.uint16),
             merge_criteria=_arr(raw["merge_criteria"], np.uint8),
@@ -215,7 +215,7 @@ class _FinalizedChunk:
             a.nbytes
             for a in (
                 self.splice_type,
-                self.exon_strand,
+                self.align_strand,
                 self.sj_strand,
                 self.num_hits,
                 self.merge_criteria,
@@ -278,7 +278,7 @@ class _FinalizedChunk:
             self.frag_lengths,
             self.exon_bp,
             self.splice_type,
-            self.exon_strand,
+            self.align_strand,
             self.fragment_classes,
             self.frag_id,
             self.read_length,
@@ -301,7 +301,7 @@ class _FinalizedChunk:
             intron_bp=None,
             ambig_strand=int(self.ambig_strand[i]),
             splice_type=int(self.splice_type[i]),
-            exon_strand=int(self.exon_strand[i]),
+            align_strand=int(self.align_strand[i]),
             sj_strand=int(self.sj_strand[i]),
             num_hits=int(self.num_hits[i]),
             merge_criteria=int(self.merge_criteria[i]),
@@ -339,7 +339,7 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
     table = pa.table(
         {
             "splice_type": chunk.splice_type,
-            "exon_strand": chunk.exon_strand,
+            "align_strand": chunk.align_strand,
             "sj_strand": chunk.sj_strand,
             "num_hits": chunk.num_hits,
             "merge_criteria": chunk.merge_criteria,
@@ -378,7 +378,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
 
     return _FinalizedChunk(
         splice_type=table.column("splice_type").to_numpy().copy(),
-        exon_strand=table.column("exon_strand").to_numpy().copy(),
+        align_strand=table.column("align_strand").to_numpy().copy(),
         sj_strand=table.column("sj_strand").to_numpy().copy(),
         num_hits=table.column("num_hits").to_numpy().copy(),
         merge_criteria=table.column("merge_criteria").to_numpy().copy(),

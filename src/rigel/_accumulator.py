@@ -2,8 +2,8 @@
 
 The native class (``rigel._bam_impl.Accumulator``) exposes the raw
 storage as 2-D numpy views: ``regions_contained`` (N,4 uint32),
-``boundaries_mass_left/right`` (N+1, 4 float32), ``boundaries_flux``
-(N+1, 4 uint32).
+``boundaries_mass_left/right`` (N+1, 4 float32),
+``boundaries_flux_left/right`` (N+1, 4 uint32 — per-side flux).
 
 The spec tests in ``tests/native/test_accumulator_spec.py`` expect
 dataclass-style indexed access (``acc.regions[i].contained[ch]``,
@@ -33,19 +33,21 @@ class _RegionRow:
 
 
 class _BoundaryRow:
-    """View over one boundary's per-channel mass and flux."""
+    """View over one boundary's per-channel mass and per-side flux."""
 
-    __slots__ = ("mass_left", "mass_right", "flux")
+    __slots__ = ("mass_left", "mass_right", "flux_left", "flux_right")
 
     def __init__(
         self,
         mass_left_row: np.ndarray,
         mass_right_row: np.ndarray,
-        flux_row: np.ndarray,
+        flux_left_row: np.ndarray,
+        flux_right_row: np.ndarray,
     ) -> None:
         self.mass_left = mass_left_row
         self.mass_right = mass_right_row
-        self.flux = flux_row
+        self.flux_left = flux_left_row
+        self.flux_right = flux_right_row
 
 
 class _RegionList:
@@ -71,19 +73,20 @@ class _RegionList:
 class _BoundaryList:
     """Sequence-like view over Accumulator's boundaries."""
 
-    __slots__ = ("_owner", "_ml", "_mr", "_fl")
+    __slots__ = ("_owner", "_ml", "_mr", "_fl_l", "_fl_r")
 
     def __init__(self, owner: "Accumulator") -> None:
         self._owner = owner
         self._ml = owner._native.boundaries_mass_left
         self._mr = owner._native.boundaries_mass_right
-        self._fl = owner._native.boundaries_flux
+        self._fl_l = owner._native.boundaries_flux_left
+        self._fl_r = owner._native.boundaries_flux_right
 
     def __len__(self) -> int:
         return self._ml.shape[0]
 
     def __getitem__(self, i: int) -> _BoundaryRow:
-        return _BoundaryRow(self._ml[i], self._mr[i], self._fl[i])
+        return _BoundaryRow(self._ml[i], self._mr[i], self._fl_l[i], self._fl_r[i])
 
     def __iter__(self):
         for i in range(len(self)):
@@ -104,7 +107,7 @@ class Accumulator:
 
     Then deposit fragments:
 
-        acc.deposit(blocks=[(50, 100), (100, 180)], spliced=False, strand_pos=True)
+        acc.deposit(blocks=[(50, 100), (100, 180)], spliced=False, primary=True)
     """
 
     __slots__ = ("_native", "regions", "boundaries")
@@ -140,7 +143,7 @@ class Accumulator:
         self,
         blocks: list[tuple[int, int]],
         spliced: bool,
-        strand_pos: bool,
+        primary: bool,
     ) -> None:
         if not blocks:
             return
@@ -149,7 +152,7 @@ class Accumulator:
         for i, (s, e) in enumerate(blocks):
             starts[i] = s
             ends[i] = e
-        self._native.deposit(starts, ends, bool(spliced), bool(strand_pos))
+        self._native.deposit(starts, ends, bool(spliced), bool(primary))
 
     def total_mass_deposited(self) -> float:
         total = 0.0

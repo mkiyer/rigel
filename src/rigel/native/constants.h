@@ -180,7 +180,7 @@ struct RawResolveResult {
     std::vector<int32_t> t_inds;
     int32_t ambig_strand = 0;
     int32_t splice_type = 0;
-    int32_t exon_strand = 0;
+    int32_t align_strand = 0;
     int32_t sj_strand = 0;
     int32_t genomic_footprint = -1;
     int32_t genomic_start = -1;

@@ -14,10 +14,23 @@
  * Storage:
  *   Region:   uint32[4] contained                                  (16 B)
  *   Boundary: float32[4] mass_left, float32[4] mass_right,
- *             uint32[4]  flux                                       (48 B)
+ *             uint32[4]  flux_left, uint32[4] flux_right            (64 B)
  *
- * Channel encoding (4 channels):
- *   ch = (spliced ? 2 : 0) + (strand_pos ? 0 : 1)
+ * Channel encoding (4 channels):  ch = (spliced ? 2 : 0) + (primary ? 0 : 1)
+ *   ch0 = unspliced & primary    ch1 = unspliced & !primary
+ *   ch2 = spliced   & primary    ch3 = spliced   & !primary
+ * where the scanner sets `primary` to:
+ *   unspliced: read aligned to the '+' genome strand (genome strand);
+ *   spliced:   read is SENSE to its splice-motif strand
+ *              (align_strand == sj_strand) — transcript-relative.
+ * So ch0/ch1 are unspliced genome +/−; ch2/ch3 are spliced sense/antisense.
+ * The accumulator is channel-agnostic — the scanner assigns `primary`.
+ *
+ * Boundary flux is PER SIDE: `flux_left[ch]` / `flux_right[ch]` count
+ * fragment-events touching the left / right side of the boundary. An
+ * unspliced contiguous crossing credits both sides of its one boundary; a
+ * spliced intron-skip credits one side of each flanking boundary (so no false
+ * exon-intron flux). Mass (`mass_left`/`mass_right`) is per side as before.
  *
  * The native implementation must match the Python reference byte-for-byte.
  */
@@ -31,8 +44,8 @@ namespace rigel::accumulator {
 
 inline constexpr std::size_t kNChannels = 4;
 
-inline int channel_idx(bool spliced, bool strand_pos) noexcept {
-    return (spliced ? 2 : 0) + (strand_pos ? 0 : 1);
+inline int channel_idx(bool spliced, bool primary) noexcept {
+    return (spliced ? 2 : 0) + (primary ? 0 : 1);
 }
 
 struct Region {
@@ -43,9 +56,10 @@ static_assert(sizeof(Region) == 16, "Region must be 16 bytes");
 struct Boundary {
     float          mass_left[kNChannels];   // 16 B
     float          mass_right[kNChannels];  // 16 B
-    std::uint32_t  flux[kNChannels];        // 16 B
+    std::uint32_t  flux_left[kNChannels];   // 16 B
+    std::uint32_t  flux_right[kNChannels];  // 16 B
 };
-static_assert(sizeof(Boundary) == 48, "Boundary must be 48 bytes");
+static_assert(sizeof(Boundary) == 64, "Boundary must be 64 bytes");
 
 class Accumulator {
 public:
@@ -80,7 +94,7 @@ public:
                  const std::int64_t* block_ends,
                  std::size_t n_blocks,
                  bool spliced,
-                 bool strand_pos);
+                 bool primary);
 
     /// Element-wise sum of `other` into this accumulator. Requires identical
     /// boundary positions (asserts at start). Used to merge per-worker

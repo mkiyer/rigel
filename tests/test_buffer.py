@@ -42,7 +42,7 @@ def _exon(ref, start, end, strand=Strand.POS):
 
 _CHUNK_ARRAY_FIELDS = (
     "splice_type",
-    "exon_strand",
+    "align_strand",
     "sj_strand",
     "num_hits",
     "merge_criteria",
@@ -86,7 +86,7 @@ class TestBufferedFragment:
             t_inds=np.array([0, 1], dtype=np.int32),
             ambig_strand=0,
             splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             frag_lengths=np.array([250, 250], dtype=np.int32),
             num_hits=1,
@@ -99,7 +99,7 @@ class TestBufferedFragment:
             t_inds=np.array([0], dtype=np.int32),
             ambig_strand=1,
             splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
@@ -112,7 +112,7 @@ class TestBufferedFragment:
             t_inds=np.array([0], dtype=np.int32),
             ambig_strand=0,
             splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             sj_strand=int(Strand.NONE),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=3,
@@ -125,7 +125,7 @@ class TestBufferedFragment:
             t_inds=np.array([0], dtype=np.int32),
             ambig_strand=0,
             splice_type=int(SpliceType.SPLICED_ANNOT),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
@@ -138,7 +138,7 @@ class TestBufferedFragment:
             t_inds=np.array([0], dtype=np.int32),
             ambig_strand=0,
             splice_type=int(SpliceType.SPLICED_ANNOT),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
@@ -151,7 +151,7 @@ class TestBufferedFragment:
             t_inds=np.array([0], dtype=np.int32),
             ambig_strand=0,
             splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             sj_strand=int(Strand.NEG),
             frag_lengths=np.array([250], dtype=np.int32),
             num_hits=1,
@@ -164,7 +164,7 @@ class TestBufferedFragment:
             t_inds=np.array([10, 20, 30], dtype=np.int32),
             ambig_strand=0,
             splice_type=0,
-            exon_strand=1,
+            align_strand=1,
             sj_strand=0,
             frag_lengths=np.array([100, 100, 100], dtype=np.int32),
             num_hits=1,
@@ -331,7 +331,7 @@ class TestFragmentBufferBasic:
         buf.finalize()
 
         bf = list(buf)[0]
-        assert bf.exon_strand == int(Strand.POS)
+        assert bf.align_strand == int(Strand.POS)
 
     def test_multiple_fragments_different_genes(self, mini_index):
         """Fragments from different genes should be buffered correctly."""

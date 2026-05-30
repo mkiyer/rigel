@@ -227,11 +227,11 @@ struct QnameBatch {
 // ================================================================
 
 struct StrandObservations {
-    // exonic_spliced: (exon_strand, sj_strand) for strand-qualified
+    // exonic_spliced: (align_strand, sj_strand) for strand-qualified
     std::vector<int8_t> exonic_spliced_obs;
     std::vector<int8_t> exonic_spliced_truth;
 
-    // exonic: (exon_strand, gene_strand) for unique-gene unambiguous strand
+    // exonic: (align_strand, gene_strand) for unique-gene unambiguous strand
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
 };
@@ -1517,7 +1517,7 @@ private:
 
             if (is_unique_mapper) {
                 if (result.get_is_strand_qualified()) {
-                    strand_obs.exonic_spliced_obs.push_back(static_cast<int8_t>(result.exon_strand));
+                    strand_obs.exonic_spliced_obs.push_back(static_cast<int8_t>(result.align_strand));
                     strand_obs.exonic_spliced_truth.push_back(static_cast<int8_t>(result.sj_strand));
                     stats.n_strand_trained++;
                 } else if (result.splice_type != SPLICE_SPLICED_ANNOT) {
@@ -1529,15 +1529,15 @@ private:
                 }
 
                 if (result.get_is_same_strand() &&
-                    (result.exon_strand == STRAND_POS ||
-                     result.exon_strand == STRAND_NEG)) {
+                    (result.align_strand == STRAND_POS ||
+                     result.align_strand == STRAND_NEG)) {
                     int32_t t_idx = result.get_first_t_ind();
                     if (t_idx >= 0 &&
                         t_idx < static_cast<int32_t>(ctx.t_strand_arr_.size())) {
                         int32_t t_strand = ctx.t_strand_arr_[t_idx];
                         if (t_strand == STRAND_POS ||
                             t_strand == STRAND_NEG) {
-                            strand_obs.exonic_obs.push_back(static_cast<int8_t>(result.exon_strand));
+                            strand_obs.exonic_obs.push_back(static_cast<int8_t>(result.align_strand));
                             strand_obs.exonic_truth.push_back(static_cast<int8_t>(t_strand));
                         }
                     }
@@ -1554,30 +1554,40 @@ private:
                 }
 
                 // Fractional accumulator deposit: unique-mapper non-chimeric
-                // resolved fragments only. Skip ambiguous strand
-                // (docs/acc_caljointmodel §6).
-                if (ws.acc_set &&
-                    !frag.exons.empty() &&
-                    (result.exon_strand == STRAND_POS ||
-                     result.exon_strand == STRAND_NEG))
-                {
-                    const int32_t ref_id = frag.exons.front().ref_id;
-                    if (ref_id >= 0 &&
-                        static_cast<std::size_t>(ref_id) < ws.acc_set->n_refs())
-                    {
-                        // Promote int32 exon coords → int64 for the
-                        // accumulator deposit ABI.
-                        const std::size_t n_blk = frag.exons.size();
-                        std::vector<int64_t> bs(n_blk), be(n_blk);
-                        for (std::size_t k = 0; k < n_blk; ++k) {
-                            bs[k] = static_cast<int64_t>(frag.exons[k].start);
-                            be[k] = static_cast<int64_t>(frag.exons[k].end);
+                // resolved fragments. The accumulator emits genome strand for
+                // unspliced reads (orient downstream); spliced reads are
+                // oriented at deposit to motif-relative SENSE
+                // (align_strand == sj_strand), which is valid even inside
+                // strand-ambiguous regions (docs/acc_caljointmodel §4 D2/D7).
+                if (ws.acc_set && !frag.exons.empty()) {
+                    const bool spliced = frag.has_introns();
+                    const bool align_ok = (result.align_strand == STRAND_POS ||
+                                           result.align_strand == STRAND_NEG);
+                    const bool motif_ok = (result.sj_strand == STRAND_POS ||
+                                           result.sj_strand == STRAND_NEG);
+                    // Unspliced needs a defined genome strand; spliced also
+                    // needs a defined splice-motif strand to orient sense.
+                    if (align_ok && (!spliced || motif_ok)) {
+                        const int32_t ref_id = frag.exons.front().ref_id;
+                        if (ref_id >= 0 &&
+                            static_cast<std::size_t>(ref_id) < ws.acc_set->n_refs())
+                        {
+                            // Promote int32 exon coords → int64 for the
+                            // accumulator deposit ABI.
+                            const std::size_t n_blk = frag.exons.size();
+                            std::vector<int64_t> bs(n_blk), be(n_blk);
+                            for (std::size_t k = 0; k < n_blk; ++k) {
+                                bs[k] = static_cast<int64_t>(frag.exons[k].start);
+                                be[k] = static_cast<int64_t>(frag.exons[k].end);
+                            }
+                            // primary channel bit: unspliced → genome '+';
+                            // spliced → SENSE (read agrees with splice motif).
+                            const bool primary =
+                                spliced ? (result.align_strand == result.sj_strand)
+                                        : (result.align_strand == STRAND_POS);
+                            ws.acc_set->at(ref_id).deposit(
+                                bs.data(), be.data(), n_blk, spliced, primary);
                         }
-                        const bool spliced = frag.has_introns();
-                        const bool strand_pos =
-                            (result.exon_strand == STRAND_POS);
-                        ws.acc_set->at(ref_id).deposit(
-                            bs.data(), be.data(), n_blk, spliced, strand_pos);
                     }
                 }
             }
@@ -1724,7 +1734,9 @@ private:
                 B_total * kNChannels, 0.0f);
             auto boundary_mass_right = std::make_unique<std::vector<float>>(
                 B_total * kNChannels, 0.0f);
-            auto boundary_flux = std::make_unique<std::vector<uint32_t>>(
+            auto boundary_flux_left = std::make_unique<std::vector<uint32_t>>(
+                B_total * kNChannels, 0u);
+            auto boundary_flux_right = std::make_unique<std::vector<uint32_t>>(
                 B_total * kNChannels, 0u);
 
             for (std::size_t f = 0; f < n_refs; ++f) {
@@ -1747,8 +1759,10 @@ private:
                             bs[i].mass_left[c];
                         (*boundary_mass_right)[(b_off + i) * kNChannels + c] =
                             bs[i].mass_right[c];
-                        (*boundary_flux)[(b_off + i) * kNChannels + c] =
-                            bs[i].flux[c];
+                        (*boundary_flux_left)[(b_off + i) * kNChannels + c] =
+                            bs[i].flux_left[c];
+                        (*boundary_flux_right)[(b_off + i) * kNChannels + c] =
+                            bs[i].flux_right[c];
                     }
                 }
             }
@@ -1777,7 +1791,10 @@ private:
                 vec_to_ndarray(std::move(*boundary_mass_left));
             cal["boundary_mass_right"] =
                 vec_to_ndarray(std::move(*boundary_mass_right));
-            cal["boundary_flux"] = vec_to_ndarray(std::move(*boundary_flux));
+            cal["boundary_flux_left"] =
+                vec_to_ndarray(std::move(*boundary_flux_left));
+            cal["boundary_flux_right"] =
+                vec_to_ndarray(std::move(*boundary_flux_right));
             cal["n_channels"] = static_cast<int>(kNChannels);
             cal["n_refs"] = static_cast<int>(n_refs);
 
@@ -2421,8 +2438,8 @@ NB_MODULE(_bam_impl, m) {
                          self_h,
                          {row_stride, int64_t{1}}).cast();
                  })
-            // boundary flux: shape (N+1, 4), uint32
-            .def_prop_ro("boundaries_flux",
+            // boundary flux_left: shape (N+1, 4), uint32 (per-side)
+            .def_prop_ro("boundaries_flux_left",
                  [](nb::handle self_h) {
                      auto& self = nb::cast<Accumulator&>(self_h);
                      const size_t n = self.n_boundaries();
@@ -2431,7 +2448,22 @@ NB_MODULE(_bam_impl, m) {
                          static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
                                               / sizeof(uint32_t));
                      return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
-                         &base[0].flux[0],
+                         &base[0].flux_left[0],
+                         {n, rigel::accumulator::kNChannels},
+                         self_h,
+                         {row_stride, int64_t{1}}).cast();
+                 })
+            // boundary flux_right: shape (N+1, 4), uint32 (per-side)
+            .def_prop_ro("boundaries_flux_right",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const size_t n = self.n_boundaries();
+                     auto* base = self.boundaries_data();
+                     constexpr int64_t row_stride =
+                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
+                                              / sizeof(uint32_t));
+                     return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
+                         &base[0].flux_right[0],
                          {n, rigel::accumulator::kNChannels},
                          self_h,
                          {row_stride, int64_t{1}}).cast();
@@ -2446,19 +2478,19 @@ NB_MODULE(_bam_impl, m) {
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
                     bool spliced,
-                    bool strand_pos) {
+                    bool primary) {
                      if (starts.shape(0) != ends.shape(0)) {
                          throw std::invalid_argument(
                              "deposit: starts and ends must have same length");
                      }
                      a.deposit(starts.data(), ends.data(),
                                static_cast<size_t>(starts.shape(0)),
-                               spliced, strand_pos);
+                               spliced, primary);
                  },
                  nb::arg("block_starts"),
                  nb::arg("block_ends"),
                  nb::arg("spliced"),
-                 nb::arg("strand_pos"));
+                 nb::arg("primary"));
         m.attr("ACCUMULATOR_N_CHANNELS") =
             static_cast<int>(rigel::accumulator::kNChannels);
         m.def("accumulator_channel_idx",

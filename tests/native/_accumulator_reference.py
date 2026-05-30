@@ -15,7 +15,9 @@ Decisions locked in docs/accumulator/audit_phase1.md:
 - Region storage: uint32 contained counts only. Contained fragment
   increments by exactly +1 regardless of block count.
 - Boundary storage: float32 mass_left/mass_right per channel + uint32
-  flux per channel, both deduplicated per fragment.
+  flux_left/flux_right per channel (per-side). A contiguous crossing
+  credits both sides of its boundary; a spliced intron-skip credits one
+  side of each flanking boundary.
 - **FL histograms are not accumulated.** FL is used downstream by the
   EM scorer (see `rigel.scoring.FragmentScorer` and
   `rigel.frag_length_model.FragmentLengthModel`), not by calibration.
@@ -34,19 +36,18 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
-# Channel encoding: (spliced, strand_pos) -> channel index in 0..3
-# 0: unspl_pos, 1: unspl_neg, 2: spl_pos, 3: spl_neg
-def channel_idx(spliced: bool, strand_pos: bool) -> int:
-    return (2 if spliced else 0) + (0 if strand_pos else 1)
+# Channel encoding: (spliced, primary) -> channel index in 0..3
+# 0: unspl_primary, 1: unspl_!primary, 2: spl_primary, 3: spl_!primary
+# where primary = genome '+' (unspliced) or SENSE (spliced, align==motif).
+def channel_idx(spliced: bool, primary: bool) -> int:
+    return (2 if spliced else 0) + (0 if primary else 1)
 
 
 @dataclass
 class Region:
     """One region on a reference. Channels are uint32 counts."""
 
-    contained: np.ndarray = field(
-        default_factory=lambda: np.zeros(4, dtype=np.uint32)
-    )
+    contained: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.uint32))
 
 
 @dataclass
@@ -56,22 +57,17 @@ class Boundary:
     mass_left[c] = sum of (block_len / L) for blocks lying in the
                    region to the LEFT of this boundary, channel c.
     mass_right[c] = same, for blocks to the RIGHT.
-    flux[c] = count of fragment-junction events that touched this
-              boundary, channel c. Deduplicated: a single fragment
-              increments at most one flux unit per channel per
-              boundary, even if multiple of the fragment's junctions
-              touch the same boundary.
+    flux_left[c] / flux_right[c] = per-side count of fragment-events
+              touching the LEFT / RIGHT side of this boundary, channel c.
+              The left region's slice credits flux_left; the right region's
+              slice credits flux_right. Slices are monotonic so each side is
+              credited at most once per fragment.
     """
 
-    mass_left: np.ndarray = field(
-        default_factory=lambda: np.zeros(4, dtype=np.float32)
-    )
-    mass_right: np.ndarray = field(
-        default_factory=lambda: np.zeros(4, dtype=np.float32)
-    )
-    flux: np.ndarray = field(
-        default_factory=lambda: np.zeros(4, dtype=np.uint32)
-    )
+    mass_left: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
+    mass_right: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
+    flux_left: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.uint32))
+    flux_right: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.uint32))
 
 
 @dataclass
@@ -128,7 +124,7 @@ class Accumulator:
         self,
         blocks: list[tuple[int, int]],
         spliced: bool,
-        strand_pos: bool,
+        primary: bool,
     ) -> None:
         """Deposit one fragment's evidence.
 
@@ -136,11 +132,12 @@ class Accumulator:
                 Sum of (end-start) is L. Soft-clipped bp must already
                 be excluded.
         spliced: single per-fragment splice classification.
-        strand_pos: True for +, False for -.
+        primary: channel-0 selector — genome '+' for unspliced, SENSE
+                 (align_strand == sj_strand) for spliced.
         """
         if not blocks:
             return
-        ch = channel_idx(spliced, strand_pos)
+        ch = channel_idx(spliced, primary)
 
         # 1. Expand each block into per-region slices. A block may
         #    straddle one or more region boundaries (the "fully spans
@@ -178,9 +175,14 @@ class Accumulator:
             self.regions[r].contained[ch] += np.uint32(1)
             return
 
-        # 4. Crossing path. For each consecutive slice pair, deposit on
-        #    the boundary between them per §4.3 of 00_design.md.
-        touched: set[int] = set()
+        # 4. Crossing path. For each consecutive slice pair, deposit on the
+        #    boundary between them per §4.3 of 00_design.md, with PER-SIDE
+        #    flux: the left region's slice credits the LEFT side of b_out
+        #    (matching its mass_left); the right region's slice credits the
+        #    RIGHT side of b_in (matching its mass_right). Contiguous crossing
+        #    (b_out == b_in) credits both sides; a spliced jump credits one
+        #    side of each flanking boundary. Slices are monotonic → each side
+        #    is credited at most once per fragment (no dedup needed).
         for i in range(len(slices) - 1):
             r_left, _, _ = slices[i]
             r_right, _, _ = slices[i + 1]
@@ -191,13 +193,9 @@ class Accumulator:
             b_in = self.left_boundary_of(r_right)
 
             self.boundaries[b_out].mass_left[ch] += np.float32(len_left * inv_L)
+            self.boundaries[b_out].flux_left[ch] += np.uint32(1)
             self.boundaries[b_in].mass_right[ch] += np.float32(len_right * inv_L)
-
-            touched.add(b_out)
-            touched.add(b_in)
-
-        for b in touched:
-            self.boundaries[b].flux[ch] += np.uint32(1)
+            self.boundaries[b_in].flux_right[ch] += np.uint32(1)
 
     # ---- Invariants -------------------------------------------------------
 

@@ -35,7 +35,7 @@ NB_MODULE(_resolve_impl, m) {
         .def_rw("num_hits", &ResolvedFragment::num_hits)
         .def_rw("nm", &ResolvedFragment::nm)
         .def_ro("splice_type", &ResolvedFragment::splice_type)
-        .def_ro("exon_strand", &ResolvedFragment::exon_strand)
+        .def_ro("align_strand", &ResolvedFragment::align_strand)
         .def_ro("sj_strand", &ResolvedFragment::sj_strand)
         .def_ro("ambig_strand", &ResolvedFragment::ambig_strand)
         .def_ro("chimera_type", &ResolvedFragment::chimera_type)
@@ -103,7 +103,7 @@ NB_MODULE(_resolve_impl, m) {
              "Return the ref-name → integer-ID mapping as a Python dict.")
         .def("resolve", &FragmentResolver::resolve,
              nb::arg("exon_ref_ids"), nb::arg("exon_starts"),
-             nb::arg("exon_ends"), nb::arg("exon_strands"),
+             nb::arg("exon_ends"), nb::arg("align_strands"),
              nb::arg("intron_ref_ids"), nb::arg("intron_starts"),
              nb::arg("intron_ends"), nb::arg("intron_strands"),
              nb::arg("genomic_footprint"),

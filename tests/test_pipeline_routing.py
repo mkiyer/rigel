@@ -26,7 +26,7 @@ from rigel.types import Strand
 class _BF:
     t_inds: np.ndarray
     splice_type: int
-    exon_strand: int
+    align_strand: int
     frag_lengths: np.ndarray | None
     exon_bp: np.ndarray
     intron_bp: np.ndarray
@@ -49,7 +49,7 @@ class _Chunk:
 
         # Per-fragment columnar arrays
         self.splice_type = np.array([bf.splice_type for bf in bfs], dtype=np.uint8)
-        self.exon_strand = np.array([bf.exon_strand for bf in bfs], dtype=np.uint8)
+        self.align_strand = np.array([bf.align_strand for bf in bfs], dtype=np.uint8)
         self.fragment_classes = np.array(fragment_classes, dtype=np.uint8)
         self.frag_id = np.array(frag_ids, dtype=np.int64)
         self.read_length = np.array([bf.read_length for bf in bfs], dtype=np.uint16)
@@ -88,7 +88,7 @@ class _Chunk:
             np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
             np.ascontiguousarray(self.exon_bp, dtype=np.uint16),
             np.ascontiguousarray(self.splice_type, dtype=np.uint8),
-            np.ascontiguousarray(self.exon_strand, dtype=np.uint8),
+            np.ascontiguousarray(self.align_strand, dtype=np.uint8),
             np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
             np.ascontiguousarray(self.frag_id, dtype=np.int64),
             np.ascontiguousarray(self.read_length, dtype=np.uint16),
@@ -202,7 +202,7 @@ def test_multimapper_spliced_annot_skips_shadows():
         _BF(
             t_inds=np.array([0], dtype=np.int32),
             splice_type=int(SpliceType.SPLICED_ANNOT),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             frag_lengths=np.array([200], dtype=np.int32),
             exon_bp=np.array([100], dtype=np.int16),
             intron_bp=np.array([0], dtype=np.int16),
@@ -211,7 +211,7 @@ def test_multimapper_spliced_annot_skips_shadows():
         _BF(
             t_inds=np.array([1], dtype=np.int32),
             splice_type=int(SpliceType.SPLICED_ANNOT),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             frag_lengths=np.array([200], dtype=np.int32),
             exon_bp=np.array([100], dtype=np.int16),
             intron_bp=np.array([0], dtype=np.int16),
@@ -259,7 +259,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
         _BF(
             t_inds=np.array([0], dtype=np.int32),
             splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             frag_lengths=np.array([200], dtype=np.int32),
             exon_bp=np.array([90], dtype=np.int16),
             intron_bp=np.array([10], dtype=np.int16),
@@ -268,7 +268,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
         _BF(
             t_inds=np.array([1], dtype=np.int32),
             splice_type=int(SpliceType.UNSPLICED),
-            exon_strand=int(Strand.POS),
+            align_strand=int(Strand.POS),
             frag_lengths=np.array([200], dtype=np.int32),
             exon_bp=np.array([95], dtype=np.int16),
             intron_bp=np.array([5], dtype=np.int16),
@@ -333,7 +333,7 @@ def test_multimapper_gdna_likelihood_normalizes_by_full_nh():
     hit0 = _BF(
         t_inds=np.array([0], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
-        exon_strand=int(Strand.POS),
+        align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
         exon_bp=np.array([90], dtype=np.int16),
         intron_bp=np.array([10], dtype=np.int16),
@@ -343,7 +343,7 @@ def test_multimapper_gdna_likelihood_normalizes_by_full_nh():
     hit1 = _BF(
         t_inds=np.array([1], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
-        exon_strand=int(Strand.POS),
+        align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
         exon_bp=np.array([90], dtype=np.int16),
         intron_bp=np.array([10], dtype=np.int16),
@@ -491,7 +491,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
     bf_a = _BF(
         t_inds=np.array([0], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
-        exon_strand=int(Strand.POS),
+        align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
         exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
@@ -502,7 +502,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
     bf_b = _BF(
         t_inds=np.array([1], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
-        exon_strand=int(Strand.POS),
+        align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
         exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
@@ -560,7 +560,7 @@ def test_nm_penalty_zero_when_disabled():
     bf_nm0 = _BF(
         t_inds=np.array([0], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
-        exon_strand=int(Strand.POS),
+        align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
         exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
@@ -570,7 +570,7 @@ def test_nm_penalty_zero_when_disabled():
     bf_nm5 = _BF(
         t_inds=np.array([0], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
-        exon_strand=int(Strand.POS),
+        align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
         exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),

@@ -69,11 +69,11 @@ void Accumulator::deposit(const std::int64_t* block_starts,
                           const std::int64_t* block_ends,
                           std::size_t n_blocks,
                           bool spliced,
-                          bool strand_pos)
+                          bool primary)
 {
     if (n_blocks == 0 || regions_.empty()) return;
 
-    const int ch = channel_idx(spliced, strand_pos);
+    const int ch = channel_idx(spliced, primary);
     const std::int64_t edge_lo = boundary_positions_.front();
     const std::int64_t edge_hi = boundary_positions_.back();
 
@@ -125,15 +125,19 @@ void Accumulator::deposit(const std::int64_t* block_starts,
     }
 
     // 4. Crossing path: for each consecutive slice pair, deposit on the
-    //    boundary between r_left's right-boundary and r_right's left-
-    //    boundary (these are the same boundary iff adjacent; different
-    //    iff non-adjacent).
+    //    boundary between r_left's right-boundary (b_out) and r_right's
+    //    left-boundary (b_in) — the same boundary iff the regions are
+    //    adjacent (contiguous crossing), different iff non-adjacent (a
+    //    spliced intron-skip).
     //
-    //    Collect touched boundary indices into a small scratch vector
-    //    and dedupe before incrementing flux.
-    std::vector<std::int64_t> touched;
-    touched.reserve(slices.size() * 2);
-
+    //    Flux is PER SIDE: the left region's slice credits the LEFT side of
+    //    b_out (matching its mass_left); the right region's slice credits the
+    //    RIGHT side of b_in (matching its mass_right). A contiguous crossing
+    //    (b_out == b_in) thus credits both sides of its one boundary; a
+    //    spliced jump credits one side of each flanking boundary, leaving the
+    //    intron-facing sides at zero (no false exon-intron flux). Slices are
+    //    monotonic, so each side is credited at most once per fragment — no
+    //    dedup needed.
     for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
         const Slice& a = slices[i];
         const Slice& b = slices[i + 1];
@@ -142,20 +146,13 @@ void Accumulator::deposit(const std::int64_t* block_starts,
         const std::int64_t b_out = a.region_idx + 1;  // right boundary of r_left
         const std::int64_t b_in  = b.region_idx;      // left  boundary of r_right
 
-        boundaries_[static_cast<std::size_t>(b_out)].mass_left[ch] +=
-            static_cast<float>(static_cast<double>(len_left) * inv_L);
-        boundaries_[static_cast<std::size_t>(b_in)].mass_right[ch] +=
-            static_cast<float>(static_cast<double>(len_right) * inv_L);
+        Boundary& bo = boundaries_[static_cast<std::size_t>(b_out)];
+        bo.mass_left[ch] += static_cast<float>(static_cast<double>(len_left) * inv_L);
+        bo.flux_left[ch] += 1u;
 
-        touched.push_back(b_out);
-        touched.push_back(b_in);
-    }
-
-    // Dedupe touched and increment flux.
-    std::sort(touched.begin(), touched.end());
-    touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
-    for (std::int64_t b : touched) {
-        boundaries_[static_cast<std::size_t>(b)].flux[ch] += 1u;
+        Boundary& bi = boundaries_[static_cast<std::size_t>(b_in)];
+        bi.mass_right[ch] += static_cast<float>(static_cast<double>(len_right) * inv_L);
+        bi.flux_right[ch] += 1u;
     }
 }
 
@@ -178,7 +175,8 @@ void Accumulator::merge_from(const Accumulator& other) {
         for (std::size_t c = 0; c < kNChannels; ++c) {
             boundaries_[i].mass_left[c]  += other.boundaries_[i].mass_left[c];
             boundaries_[i].mass_right[c] += other.boundaries_[i].mass_right[c];
-            boundaries_[i].flux[c]       += other.boundaries_[i].flux[c];
+            boundaries_[i].flux_left[c]  += other.boundaries_[i].flux_left[c];
+            boundaries_[i].flux_right[c] += other.boundaries_[i].flux_right[c];
         }
     }
 }

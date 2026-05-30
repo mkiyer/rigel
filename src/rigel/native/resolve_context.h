@@ -62,7 +62,7 @@ public:
     std::vector<int32_t> t_inds;
     int32_t ambig_strand = 0;
     int32_t splice_type = 0;
-    int32_t exon_strand = 0;
+    int32_t align_strand = 0;
     int32_t sj_strand = 0;
     int32_t genomic_footprint = -1;
     int32_t genomic_start = -1;
@@ -97,7 +97,7 @@ public:
     bool get_is_strand_qualified() const {
         return splice_type == SPLICE_SPLICED_ANNOT
             && !ambig_strand
-            && (exon_strand == STRAND_POS || exon_strand == STRAND_NEG)
+            && (align_strand == STRAND_POS || align_strand == STRAND_NEG)
             && (sj_strand == STRAND_POS || sj_strand == STRAND_NEG)
             && chimera_type == CHIMERA_NONE;
     }
@@ -173,7 +173,7 @@ public:
         r.t_inds = std::move(cr.t_inds);
         r.ambig_strand = cr.ambig_strand;
         r.splice_type = cr.splice_type;
-        r.exon_strand = cr.exon_strand;
+        r.align_strand = cr.align_strand;
         r.sj_strand = cr.sj_strand;
         r.genomic_footprint = cr.genomic_footprint;
         r.genomic_start = cr.genomic_start;
@@ -203,7 +203,7 @@ public:
 class FragmentAccumulator {
 public:
     std::vector<uint8_t>  splice_type_;
-    std::vector<uint8_t>  exon_strand_;
+    std::vector<uint8_t>  align_strand_;
     std::vector<uint8_t>  sj_strand_;
     std::vector<uint8_t>  ambig_strand_;
     std::vector<uint16_t> num_hits_;
@@ -230,7 +230,7 @@ public:
     ///                     transcript candidate counts).
     void reserve(int64_t n_fragments, int64_t n_candidates) {
         splice_type_.reserve(n_fragments);
-        exon_strand_.reserve(n_fragments);
+        align_strand_.reserve(n_fragments);
         sj_strand_.reserve(n_fragments);
         ambig_strand_.reserve(n_fragments);
         num_hits_.reserve(n_fragments);
@@ -249,7 +249,7 @@ public:
 
     void append(const ResolvedFragment& r, int64_t frag_id) {
         splice_type_.push_back(static_cast<uint8_t>(r.splice_type));
-        exon_strand_.push_back(static_cast<uint8_t>(r.exon_strand));
+        align_strand_.push_back(static_cast<uint8_t>(r.align_strand));
         sj_strand_.push_back(static_cast<uint8_t>(r.sj_strand));
         ambig_strand_.push_back(static_cast<uint8_t>(r.ambig_strand));
         num_hits_.push_back(static_cast<uint16_t>(r.num_hits));
@@ -293,8 +293,8 @@ public:
         nb::dict result;
         result["splice_type"] = to_bytes(
             splice_type_.data(), splice_type_.size());
-        result["exon_strand"] = to_bytes(
-            exon_strand_.data(), exon_strand_.size());
+        result["align_strand"] = to_bytes(
+            align_strand_.data(), align_strand_.size());
         result["sj_strand"] = to_bytes(
             sj_strand_.data(), sj_strand_.size());
         result["num_hits"] = to_bytes(
@@ -338,7 +338,7 @@ public:
 
         nb::dict result;
         result["splice_type"]       = vec_to_ndarray(std::move(splice_type_));
-        result["exon_strand"]       = vec_to_ndarray(std::move(exon_strand_));
+        result["align_strand"]       = vec_to_ndarray(std::move(align_strand_));
         result["sj_strand"]         = vec_to_ndarray(std::move(sj_strand_));
         result["num_hits"]          = vec_to_ndarray(std::move(num_hits_));
         result["merge_criteria"]    = vec_to_ndarray(std::move(merge_criteria_));
@@ -1031,12 +1031,12 @@ public:
         auto& transcript_t_sets = scratch.transcript_t_sets;
         exon_t_sets.resize(static_cast<size_t>(n_exons));
         transcript_t_sets.resize(static_cast<size_t>(n_exons));
-        cr.exon_strand = STRAND_NONE;
+        cr.align_strand = STRAND_NONE;
         cr.read_length = 0;
 
         for (int bi = 0; bi < n_exons; bi++) {
             const auto& eb = exons[bi];
-            cr.exon_strand |= eb.strand;
+            cr.align_strand |= eb.strand;
             int32_t bstart = eb.start;
             int32_t bend = eb.end;
             cr.read_length += bend - bstart;
@@ -1375,7 +1375,7 @@ public:
         const std::vector<int32_t>& exon_ref_ids,
         const std::vector<int32_t>& exon_starts,
         const std::vector<int32_t>& exon_ends,
-        const std::vector<int32_t>& exon_strands,
+        const std::vector<int32_t>& align_strands,
         const std::vector<int32_t>& intron_ref_ids,
         const std::vector<int32_t>& intron_starts,
         const std::vector<int32_t>& intron_ends,
@@ -1388,7 +1388,7 @@ public:
         std::vector<ExonBlock> exons(n_exons);
         for (int i = 0; i < n_exons; i++) {
             exons[i] = {exon_ref_ids[i], exon_starts[i],
-                        exon_ends[i], exon_strands[i]};
+                        exon_ends[i], align_strands[i]};
         }
         int n_introns = static_cast<int>(intron_ref_ids.size());
         std::vector<IntronBlock> introns(n_introns);
@@ -1421,7 +1421,7 @@ public:
             t_inds_list,
             cr.ambig_strand,
             cr.splice_type,
-            cr.exon_strand,
+            cr.align_strand,
             cr.sj_strand,
             frag_lengths_dict,
             cr.genomic_footprint,
