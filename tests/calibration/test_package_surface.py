@@ -11,6 +11,7 @@ EXPECTED_NAMES = [
     "CalibrationResult",
     "CalibrationSubstrate",
     "SubstrateView",
+    "StrandBalance",
     "CalibrationSubstrateError",
     "CalibrationConvergenceError",
     "calibrate",

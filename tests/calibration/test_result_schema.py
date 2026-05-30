@@ -25,6 +25,7 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         rho_0=1e-3,
         phi=0.2,
         rho_d_bb=0.01,
+        kappa_rna=0.9,
         rho_r_bb=0.01,
         eps_s=1e-3,
         n_iterations=0,
@@ -70,7 +71,14 @@ def test_rejects_length_mismatch():
 
 @pytest.mark.parametrize(
     "field,value",
-    [("rho_0", 0.0), ("phi", -1.0), ("rho_d_bb", 1.5), ("rho_r_bb", 0.0), ("eps_s", 1.0)],
+    [
+        ("rho_0", 0.0),
+        ("phi", -1.0),
+        ("rho_d_bb", 1.5),
+        ("kappa_rna", 0.0),
+        ("rho_r_bb", 0.0),
+        ("eps_s", 1.0),
+    ],
 )
 def test_rejects_bad_hyperparameters(field, value):
     kw = _valid_kwargs()

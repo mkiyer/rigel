@@ -3,10 +3,11 @@
 **Parent plan:** [`../00_implementation_plan.md`](../00_implementation_plan.md) §4 D2, §7 (PR 3).
 **Type:** Python-only (no index rebuild, no C++).
 **Build required:** no.
-**Status:** **REVISED 2026-05-30 after review — now spans a C++ accumulator
-correction + the Python strand model, with one architecture fork open (§0.3).**
-Decisions III.1/2/3/5/6/8 resolved; III.4/III.9 promoted to a prerequisite
-accumulator PR. Nothing is coded until the fork is resolved (pause-and-discuss).
+**Status:** **Implemented on branch `pr3-strand-balance`** (after PR 2.5
+landed). All decisions resolved. Because PR 2.5 made the substrate's spliced
+channels motif-oriented (`n_spliced_sense`/`n_spliced_antisense`), PR 3 needed
+**no fold and no substrate extension** — it fits `ρ_r_bb` directly. See §IV
+execution notes; Parts I–III below are the pre-PR-2.5 plan (T1/T2 obsoleted).
 
 PR 3 builds the **RNA strand-balance model**: the per-library RNA sense mean
 `κ_rna` and its Beta-Binomial overdispersion `ρ_r_bb`. `κ_rna` comes from the
@@ -363,5 +364,50 @@ already emits transcript-relative strand, the fold is purely `ts_class`-based
 
 ## Rollback
 
-Revert the PR. `calibrate()` reverts to placeholder hyperparameters; substrate
-`k_plus_spliced` (if added) is dropped. No on-disk artifacts change.
+Revert the PR. `calibrate()` reverts to placeholder `ρ_r_bb`; `kappa_rna` is
+dropped from `CalibrationResult`. No on-disk artifacts change.
+
+## IV. Execution notes (implemented 2026-05-31)
+
+PR 2.5 simplified PR 3 substantially: the substrate already exposes
+**motif-oriented** `n_spliced_sense` / `n_spliced_antisense` per view, so the
+recovered `_fold_pos_neg_by_transcript_strand` + the `SubstrateView`
+extension (old §I.4, §II.2) were **not needed**. Spliced observations are
+valid in AMBIG regions (motif-defined), so there is **no `ts_class`
+filtering** in the pool.
+
+**What landed.**
+- `calibration/strand_balance.py`: `StrandBalance` dataclass +
+  `fit_strand_balance(substrate, strand_model)`. `κ_rna` = clamped
+  `strand_model.p_r1_sense` (the live `StrandModels.exonic_spliced` MLE).
+  `ρ_r_bb` = method-of-moments overdispersion for a **known mean** (the
+  recovered symmetric estimator generalized off 0.5), pooled over all three
+  views' spliced `(k_sense, n)` observations where `n > 0`. Degenerate cases
+  (κ at a bound, all `n_i = 1`, under-dispersed) floor to `_BB_FLOOR`.
+- `CalibrationResult` gains `kappa_rna` (III.7), validated `0 < κ_rna < 1`.
+- `calibrate()` wires the fit (replacing the placeholder `ρ_r_bb`); the
+  per-locus log line gains `kappa_rna`. gDNA deconvolution stays placeholder
+  (PR 4). `initial_hyperparameters` no longer returns `ρ_r_bb`.
+
+**Decision resolutions.** III.1 `κ_rna` = `StrandModel` (clamped); III.2 fit
+`ρ_r_bb` from spliced (boundary + contained) observations; III.3 terminology
+(no `k_plus`; raw `pos`/`neg` + `sense`/`antisense` from PR 2.5); III.5 ship
+MoM (revisit empirically PR 7); III.6 guard = ≥2 observations (a mathematical
+floor for variance, not a tunable) + count-weighting; III.7 add `kappa_rna`;
+III.8 wired into `calibrate()`.
+
+**Magic-number flag (Q6).** Three spec-derived constants in
+`strand_balance.py`: `_BB_FLOOR = 1e-6` (doc 03 §8 — keeps the BB α/β finite;
+clamps κ and ρ), `_RHO_R_BB_FALLBACK = 0.01` (doc 03 §7 init — mild non-zero
+default when spliced data is too thin to estimate dispersion, so the strand
+channel is not treated as a sharp discriminator), and
+`_MIN_OBS_FOR_OVERDISPERSION = 2` (a variance-existence floor, not a tunable).
+No fitted/heuristic cliff.
+
+### Acceptance gate — results
+
+- `tests/calibration/` → **54 passed** (incl. 7 new `test_strand_balance`).
+- `ruff check` + `ruff format --check` clean.
+- Full suite: **248 `NotImplementedError`** (unchanged mode/count, the
+  `quant_from_buffer` PR 6 boundary), **+8 passing** (674); no new modes.
+- Magic-number budget: 3 spec-derived constants (flagged above), 0 cliffs.

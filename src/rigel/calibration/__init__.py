@@ -20,6 +20,7 @@ from .calibrate import calibrate
 from .errors import CalibrationConvergenceError, CalibrationSubstrateError
 from .priors import assemble_priors
 from .result import CalibrationResult
+from .strand_balance import StrandBalance
 from .substrate import CalibrationSubstrate, SubstrateView
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "CalibrationResult",
     "CalibrationSubstrate",
     "SubstrateView",
+    "StrandBalance",
     "CalibrationSubstrateError",
     "CalibrationConvergenceError",
     "calibrate",
