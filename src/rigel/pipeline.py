@@ -675,11 +675,23 @@ def run_pipeline(
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     _check_region_payload_alignment(region_arrays, calibration_payload)
 
+    # gDNA FL distribution for the calibrator's effective lengths (PR 4b sweep).
+    # INTERIM PLACEHOLDER: the UNSPLICED-category histogram is gDNA + nascent RNA,
+    # an over-broad proxy — NOT the true gDNA FL. PR 4c resurrects the proper
+    # derivation (gDNA-dominated regions/boundaries → mixture-EM that subtracts
+    # residual RNA via the spliced FL → empirical-Bayes shrink toward global).
+    # Only the AMBIG sweep's effective lengths consume this; decodable exposure
+    # and ρ_0 are unaffected. See docs/acc_caljointmodel/prs/PR04c (planned).
+    from .splice import SpliceType
+
+    gdna_fl_pmf = frag_length_models.category_models[SpliceType.UNSPLICED].pmf
+
     try:
         calibration = calibrate(
             payload=calibration_payload,
             region_arrays=region_arrays,
             strand_model=strand_models,
+            gdna_fl_pmf=gdna_fl_pmf,
             config=config.calibration,
         )
     finally:

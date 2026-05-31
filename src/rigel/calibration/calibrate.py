@@ -12,6 +12,13 @@ closed-form exposure posterior (:mod:`rigel.calibration.exposure`). All library
 hyperparameters are **fixed** at their initial values; the M-step and the outer
 loop that iterates to convergence are PR 5.
 
+**PR 4b — AMBIG sweep.** After the exposure posterior, strand-ambiguous regions'
+exposure is re-imputed from decodable neighbours by the boundary↔region sweep
+(:mod:`rigel.calibration.sweep`, D7 leg 2), which uses the gDNA FL-corrected
+effective lengths (:mod:`rigel.calibration.effective_length`). Decodable regions
+and the ρ_0 seed are unchanged — 4a's total-mass / physical-length exposure is
+exact, so the FL correction is needed only inside the sweep's node decomposition.
+
 The single pass uses ``ω = 1``, ``π_g_prior = 0.5``, and ``μ_d = 0`` (no prior
 RNA mass — doc 03 §3.1), so the count log-Bayes-factor is identically 0 and the
 allocation is strand-driven + spliced-deterministic. The count channel is fully
@@ -26,11 +33,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .density import estimate_gdna_density
+from .effective_length import boundary_eff_length, region_eff_length
 from .estep import estep_view
 from .exposure import exposure_posterior
 from .result import CalibrationResult
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
+from .sweep import sweep_ambig_exposure
 
 if TYPE_CHECKING:
     from ..config import CalibrationConfig
@@ -78,6 +87,7 @@ def calibrate(
     payload: "AccumulatorPayload",
     region_arrays: "RegionArrays",
     strand_model: "StrandModels",
+    gdna_fl_pmf: np.ndarray,
     config: "CalibrationConfig",
 ) -> CalibrationResult:
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
@@ -109,8 +119,28 @@ def calibrate(
     right = estep_view(substrate.right, ts_class, **pass_kwargs)
 
     # --- Exposure posterior (G4): D1 aggregation, no ½ ---
+    # Decodable regions + the ρ_0 seed use 4a's total-mass / physical-length
+    # exposure, which is exact (∫ overlap/ℓ dx = L); no FL-correction here.
     exposure = exposure_posterior(
         contained.m_g, left.m_g, right.m_g, rho_0=rho_0, L_eff=L_eff, phi=phi
+    )
+
+    # --- AMBIG boundary↔region sweep (PR 4b, D7 leg 2) ---
+    # Impute strand-ambiguous regions' exposure from decodable neighbours along
+    # the alternating chain. FL-corrected effective lengths (gDNA FL) enter only
+    # here, in the per-node density decomposition; AMBIG rows are overwritten.
+    swept = sweep_ambig_exposure(
+        substrate,
+        region_arrays,
+        alloc_contained=contained,
+        alloc_left=left,
+        alloc_right=right,
+        region_eff_len=region_eff_length(L_eff, gdna_fl_pmf),
+        mu_fl=boundary_eff_length(gdna_fl_pmf),
+        rho_0=rho_0,
+        phi=phi,
+        base_omega=exposure.omega,
+        base_log_omega_var=exposure.log_omega_var,
     )
 
     # One pass: the mass-change diagnostic is the change from the zero-gDNA
@@ -124,8 +154,8 @@ def calibrate(
         mass_d_left=left.m_d,
         mass_g_right=right.m_g,
         mass_d_right=right.m_d,
-        omega=exposure.omega,
-        log_omega_var=exposure.log_omega_var,
+        omega=swept.omega,
+        log_omega_var=swept.log_omega_var,
         rho_0=rho_0,
         phi=phi,
         rho_d_bb=rho_d_bb,

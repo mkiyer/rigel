@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from _synthetic import make_synthetic_payload
+from _synthetic import make_gdna_fl_pmf, make_synthetic_payload
 
 from rigel.calibration import calibrate
 from rigel.calibration.result import CalibrationResult
@@ -21,8 +21,13 @@ from rigel.config import CalibrationConfig
 def _run():
     payload, ra = make_synthetic_payload()
     strand_model = SimpleNamespace(p_r1_sense=0.95)  # κ_rna source
+    # No AMBIG region in the synthetic, so the PR 4b sweep is a no-op here.
     result = calibrate(
-        payload=payload, region_arrays=ra, strand_model=strand_model, config=CalibrationConfig()
+        payload=payload,
+        region_arrays=ra,
+        strand_model=strand_model,
+        gdna_fl_pmf=make_gdna_fl_pmf(),
+        config=CalibrationConfig(),
     )
     return result
 

@@ -71,3 +71,10 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     )
     region_arrays = RegionArrays.from_region_df(region_df, {"chr1": 0})
     return payload, region_arrays
+
+
+def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
+    """A spiked gDNA fragment-length pmf for calibration tests (μ_FL = ``mean``)."""
+    pmf = np.zeros(max_size + 1, dtype=np.float64)
+    pmf[mean] = 1.0
+    return pmf
