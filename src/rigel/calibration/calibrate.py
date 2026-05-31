@@ -4,13 +4,19 @@ Consumes the accumulator payload, the region geometry, and the trained strand
 model and returns a :class:`~rigel.calibration.result.CalibrationResult` with
 the recovered library hyperparameters and per-region deconvoluted mass.
 
-**Placeholder during PR 2.** The body builds the real
-:class:`~rigel.calibration.substrate.CalibrationSubstrate` and returns the
-trivial "iteration-0" result — **no gDNA inferred**: all contained/boundary
-mass attributed to RNA, unit exposure ``ω = 1`` (uniform; there is no data to
-train an exposure on), hyperparameters at their doc 03 §7 initial values. The
-real deconvolution (E-step/exposure → M-step/outer loop) replaces this body in
-PR 2–PR 5; see ``docs/acc_caljointmodel/00_implementation_plan.md``.
+**PR 4a — single E-step pass.** The body seeds the global gDNA density ``ρ_0``
+(:mod:`rigel.calibration.density`), fits the RNA strand-balance model
+(:mod:`rigel.calibration.strand_balance`, PR 3), then runs **one** E-step
+(:mod:`rigel.calibration.estep`) over the three substrate views and the
+closed-form exposure posterior (:mod:`rigel.calibration.exposure`). All library
+hyperparameters are **fixed** at their initial values; the M-step and the outer
+loop that iterates to convergence are PR 5.
+
+The single pass uses ``ω = 1``, ``π_g_prior = 0.5``, and ``μ_d = 0`` (no prior
+RNA mass — doc 03 §3.1), so the count log-Bayes-factor is identically 0 and the
+allocation is strand-driven + spliced-deterministic. The count channel is fully
+built (and unit-tested with a non-zero ``μ_d``); it engages once PR 5's outer
+loop feeds ``M_d`` back. Hence ``n_iterations = 1`` and ``converged = False``.
 """
 
 from __future__ import annotations
@@ -19,6 +25,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .density import estimate_gdna_density
+from .estep import estep_view
+from .exposure import exposure_posterior
 from .result import CalibrationResult
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
@@ -29,35 +38,30 @@ if TYPE_CHECKING:
     from ..strand_model import StrandModels
     from .region_arrays import RegionArrays
 
-# Doc 03 §7 initialization table (iteration-0 values). PR 5's M-step owns these
-# definitively; here they seed the placeholder / the outer-loop warm start.
-# (ρ_r_bb is no longer an init here — it is fit by the strand-balance model.)
+# Doc 03 §7 initialization values (iteration-0). PR 5's M-step owns these
+# definitively; here they seed the single pass / the outer-loop warm start.
+# (ρ_0 is owned by density.py; ρ_r_bb / κ_rna by the strand-balance model.)
 _RHO_D_BB_INIT = 0.01
 _EPS_S_INIT = 1.0e-3
+
+# Uninformative gDNA-mixing prior for the single pass (doc 03 §7). PR 5's outer
+# loop replaces it with the data-driven §5.6 update.
+_PI_G_PRIOR_INIT = 0.5
 
 
 def initial_hyperparameters(
     substrate: CalibrationSubstrate,
     config: "CalibrationConfig",
-) -> tuple[float, float, float, float]:
-    """Doc 03 §7 data-driven initial hyperparameters (rho_0, phi, ρ_d, ε_s).
+) -> tuple[float, float, float]:
+    """Doc 03 §7 data-driven initial hyperparameters ``(φ, ρ_d_bb, ε_s)``.
 
-    ``rho_0`` is the half-and-half density assumption; ``phi`` is the NB moment
-    estimator. Both are floored to stay valid when there is little/no data.
-    Reused as the PR 5 outer-loop warm start. Returns
-    ``(rho_0, phi, rho_d_bb, eps_s)``; ρ_r_bb / κ_rna come from the
-    strand-balance model, not from here.
+    ``φ`` is the NB moment estimator, floored to stay valid with little/no data.
+    Reused as the PR 5 outer-loop warm start. ``ρ_0`` comes from
+    :func:`rigel.calibration.density.estimate_gdna_density`; ``κ_rna`` / ``ρ_r_bb``
+    from the strand-balance model — neither is computed here.
     """
     n_u = substrate.contained.n_unspliced.astype(np.float64)
-    total_L = float(substrate.L_eff.sum())
     total_n = float(n_u.sum())
-
-    if total_L > 0.0:
-        # Half of the unspliced fragments assumed gDNA; floored at "one
-        # fragment over the genome" so rho_0 stays positive with no data.
-        rho_0 = max(0.5 * total_n / total_L, 1.0 / total_L)
-    else:
-        rho_0 = 1.0
 
     if total_n > 0.0 and n_u.size > 1:
         mean = float(n_u.mean())
@@ -66,7 +70,7 @@ def initial_hyperparameters(
         phi = config.phi_floor
     phi = max(phi, config.phi_floor)
 
-    return rho_0, phi, _RHO_D_BB_INIT, _EPS_S_INIT
+    return phi, _RHO_D_BB_INIT, _EPS_S_INIT
 
 
 def calibrate(
@@ -78,34 +82,59 @@ def calibrate(
 ) -> CalibrationResult:
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     r = substrate.n_regions
-    rho_0, phi, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
 
-    # RNA strand-balance model (D2 / PR 3): κ_rna from the StrandModel, ρ_r_bb
-    # fit by method-of-moments over the substrate's motif-oriented spliced
-    # channels. This is the first real (non-placeholder) calibration output.
-    strand = fit_strand_balance(substrate, strand_model)
+    # --- Library hyperparameters (fixed this PR) ---
+    density = estimate_gdna_density(substrate, region_arrays)  # ρ_0 seed (§I.1 / III.2)
+    rho_0 = density.rho_0
+    phi, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
+    strand = fit_strand_balance(substrate, strand_model)  # κ_rna, ρ_r_bb (PR 3)
 
-    # gDNA deconvolution is still a placeholder: no gDNA inferred, all mass →
-    # RNA, exposure uniform at the prior mean 1.0 (PR 4 replaces this).
-    # log_omega_var = 1/(1/phi + M_g_tot) = phi since M_g_tot ≡ 0 (doc 04 §6.4).
-    return CalibrationResult(
-        mass_g_contained=np.zeros(r, dtype=np.float64),
-        mass_d_contained=substrate.contained.mass_unspliced + substrate.contained.mass_spliced,
-        mass_g_left=np.zeros(r, dtype=np.float64),
-        mass_d_left=substrate.left.mass_unspliced + substrate.left.mass_spliced,
-        mass_g_right=np.zeros(r, dtype=np.float64),
-        mass_d_right=substrate.right.mass_unspliced + substrate.right.mass_spliced,
+    # --- Single E-step pass over the three views (ω ≡ 1, μ_d ≡ 0) ---
+    L_eff = substrate.L_eff
+    ts_class = substrate.ts_class
+    pass_kwargs = dict(
         omega=np.ones(r, dtype=np.float64),
-        log_omega_var=np.full(r, phi, dtype=np.float64),
+        rho_0=rho_0,
+        L_eff=L_eff,
+        phi=phi,
+        kappa_rna=strand.kappa_rna,
+        rho_r_bb=strand.rho_r_bb,
+        rho_d_bb=rho_d_bb,
+        eps_s=eps_s,
+        pi_g_prior=np.full(r, _PI_G_PRIOR_INIT, dtype=np.float64),
+        m_d_unspl_prev=np.zeros(r, dtype=np.float64),
+    )
+    contained = estep_view(substrate.contained, ts_class, **pass_kwargs)
+    left = estep_view(substrate.left, ts_class, **pass_kwargs)
+    right = estep_view(substrate.right, ts_class, **pass_kwargs)
+
+    # --- Exposure posterior (G4): D1 aggregation, no ½ ---
+    exposure = exposure_posterior(
+        contained.m_g, left.m_g, right.m_g, rho_0=rho_0, L_eff=L_eff, phi=phi
+    )
+
+    # One pass: the mass-change diagnostic is the change from the zero-gDNA
+    # initialization, max_r |M_g_tot − 0| / (0 + 1) = max_r M_g_tot.
+    mass_change = float(exposure.m_g_tot.max()) if r > 0 else 0.0
+
+    return CalibrationResult(
+        mass_g_contained=contained.m_g,
+        mass_d_contained=contained.m_d,
+        mass_g_left=left.m_g,
+        mass_d_left=left.m_d,
+        mass_g_right=right.m_g,
+        mass_d_right=right.m_d,
+        omega=exposure.omega,
+        log_omega_var=exposure.log_omega_var,
         rho_0=rho_0,
         phi=phi,
         rho_d_bb=rho_d_bb,
         kappa_rna=strand.kappa_rna,
         rho_r_bb=strand.rho_r_bb,
         eps_s=eps_s,
-        n_iterations=0,
-        converged=True,
-        mass_change_history=np.empty(0, dtype=np.float64),
+        n_iterations=1,
+        converged=False,
+        mass_change_history=np.array([mass_change], dtype=np.float64),
         n_regions=r,
         config=config,
     )
