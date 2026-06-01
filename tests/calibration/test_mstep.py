@@ -8,12 +8,10 @@ from rigel.calibration.estep import _PI_CLIP
 from rigel.calibration.mstep import (
     _RHO_D_BB_FALLBACK,
     fit_rho_d_bb,
-    update_eps_s,
     update_exposure_dispersion,
     update_pi_g_prior,
     update_rho_0,
 )
-from rigel.calibration.strand_balance import _BB_FLOOR
 
 
 def test_update_rho_0_closed_form():
@@ -25,15 +23,6 @@ def test_update_rho_0_closed_form():
 def test_update_rho_0_empty_exposure_floor():
     rho_0 = update_rho_0(np.array([0.0]), np.array([0.0]), np.array([100.0]))
     assert rho_0 > 0.0  # 1 / max(ΣL, 1)
-
-
-def test_update_eps_s_beta11():
-    # π_g = 0 everywhere ⇒ no spliced attributed to gDNA ⇒ ε_s = 1/(1+Σn_s).
-    eps = update_eps_s(np.array([0.0, 0.0]), np.array([10.0, 10.0]))
-    np.testing.assert_allclose(eps, 1.0 / 21.0)
-    # π_g = 1 everywhere ⇒ all spliced gDNA-attributed ⇒ ε_s → 1, clipped.
-    eps_hi = update_eps_s(np.array([1.0, 1.0]), np.array([10.0, 10.0]))
-    assert eps_hi == 1.0 - _BB_FLOOR
 
 
 def test_exposure_dispersion_low_variance_is_small():

@@ -1,20 +1,21 @@
 """M-step — fit the library hyperparameters (doc 03 §5).
 
 Each outer iteration, after the E-step soft-allocation and the exposure update,
-the M-step re-estimates the library-wide hyperparameters. ``ρ_0`` and ``ε_s`` are
-closed forms; the **exposure dispersion** (the NB count overdispersion ≡ the
-variance of the per-region gDNA exposure ω) is the proper EM update for the
-Gamma exposure-prior shape, solved from the exposure posteriors
+the M-step re-estimates the library-wide hyperparameters. ``ρ_0`` is a closed
+form; the **exposure dispersion** (the NB count overdispersion ≡ the variance of
+the per-region gDNA exposure ω) is the proper EM update for the Gamma
+exposure-prior shape, solved from the exposure posteriors
 (:func:`update_exposure_dispersion`); ``ρ_d_bb`` is a bounded 1-D minimiser on
 its negative log-likelihood. ``κ_rna`` and ``ρ_r_bb`` are **not** fit here — they
 come from the clean spliced channel (PR 3) and do not change with the EM (PR05
-§III.1); ``κ_d = 0.5`` is biology.
+§III.1); ``κ_d = 0.5`` is biology. (The gDNA splice-artifact rate ``ε_s`` was
+removed in PR 7 — spliced fragments are RNA; artifacts are handled upstream by
+the ``alignable`` splice blacklist.)
 
 Constants (PR05 §II.1, Q6): ``_EXPOSURE_DISPERSION_MAX`` (the exposure-dispersion
-ceiling), ``_EPS_S_PRIOR`` (the Beta(1,1) unit pseudo-count), ``_PI_FLOOR`` (the
-no-divide-by-zero floor in the π_g-prior update). The exposure-dispersion lower
-bound and the BB bounds reuse ``config.exposure_dispersion_floor`` (PR 2) and
-``_BB_FLOOR`` (PR 3).
+ceiling), ``_PI_FLOOR`` (the no-divide-by-zero floor in the π_g-prior update).
+The exposure-dispersion lower bound and the BB bounds reuse
+``config.exposure_dispersion_floor`` (PR 2) and ``_BB_FLOOR`` (PR 3).
 """
 
 from __future__ import annotations
@@ -33,8 +34,6 @@ from .strand_balance import _BB_FLOOR
 # well-conditioned even when the per-region gDNA exposure is extremely
 # heterogeneous. (Was ``_PHI_MAX``; see the no-greek-in-code naming preference.)
 _EXPOSURE_DISPERSION_MAX = 100.0
-# Beta(1,1) unit pseudo-count for the ε_s failsafe (doc 03 §5.5).
-_EPS_S_PRIOR = 1.0
 # No-divide-by-zero floor inside the π_g-prior update (doc 03 §5.6 / §8).
 _PI_FLOOR = 1.0e-9
 # gDNA strand dispersion when too few regions to fit (matches the doc 03 §7 init).
@@ -49,14 +48,6 @@ def update_rho_0(m_g_tot: np.ndarray, omega: np.ndarray, l_eff: np.ndarray) -> f
     if denom <= 0.0:
         return 1.0 / max(float(np.sum(l_eff)), 1.0)
     return total / denom
-
-
-def update_eps_s(pi_g_contained: np.ndarray, n_spliced: np.ndarray) -> float:
-    """ε_s = (1 + Σ π_g·n_s) / (1 + Σ n_s) — Beta(1,1) failsafe (doc 03 §5.5)."""
-    n_s = np.asarray(n_spliced, dtype=np.float64)
-    num = _EPS_S_PRIOR + float(np.sum(pi_g_contained * n_s))
-    den = _EPS_S_PRIOR + float(np.sum(n_s))
-    return min(max(num / den, _BB_FLOOR), 1.0 - _BB_FLOOR)
 
 
 def update_exposure_dispersion(
@@ -155,7 +146,6 @@ def update_pi_g_prior(
 
 __all__ = [
     "update_rho_0",
-    "update_eps_s",
     "update_exposure_dispersion",
     "fit_rho_d_bb",
     "update_pi_g_prior",

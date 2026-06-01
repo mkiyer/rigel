@@ -179,9 +179,13 @@ fixed inputs.
 
 ### 3.6 Total masses (G2 outputs)
 
+Spliced fragments are deterministic RNA (PR 7 — the `eps_s` gDNA-artifact
+carve-out was removed; artifacts are filtered upstream by the splice blacklist,
+§5.5):
+
 ```python
-M_g_cont = M_g_unspl + eps_s * n_spliced
-M_d_cont = M_d_unspl + (1.0 - eps_s) * n_spliced
+M_g_cont = M_g_unspl                    # gDNA: the unspliced split only
+M_d_cont = M_d_unspl + n_spliced        # RNA: unspliced RNA split + all spliced
 ```
 
 Same machinery on the boundary substrate gives `M_g_L, M_d_L, M_g_R, M_d_R` (G3 outputs).
@@ -267,7 +271,18 @@ def neg_log_lik_nb(phi):
 Same approach as §5.3 with `scipy.optimize.minimize_scalar` bounded on
 $(10^{-6}, 10^{2})$. Moment estimator warm start: $\hat{\phi}_{\text{init}} = \max(\widehat{\mathrm{Var}(n)}/\bar{\mu}^2 - 1/\bar{\mu}, 10^{-6})$.
 
-### 5.5 $\epsilon_s$ — closed form (failsafe)
+### 5.5 $\epsilon_s$ — splice-artifact rate (DEFERRED in PR 7)
+
+> **Not implemented (PR 7).** The `eps_s` model below was removed. It trained
+> from *contained* spliced counts (structurally ≈0 — a spliced fragment spans
+> exons across an intron, so it is a *boundary* observation, never contained)
+> and so defaulted to 1, converting genuine junction reads into phantom gDNA and
+> breaking the zero-gDNA case (see
+> `docs/acc_caljointmodel/calibration_zero_gdna_diagnosis.md`). Spliced fragments
+> are now **deterministic RNA** (§3); splice artifacts are handled **upstream**
+> by the `alignable` splice-junction blacklist (which removes artifact-junction
+> reads before they are counted as spliced). The closed form below is kept as the
+> deferred design — re-addable if a non-blacklist artifact model is justified.
 
 The upstream BAM scanner already removes most splice artifacts before
 they reach the substrate. $\epsilon_s$ is a failsafe that quantifies

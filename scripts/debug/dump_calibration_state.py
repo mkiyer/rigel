@@ -5,7 +5,7 @@ Runs the BAM scan and the calibrator, then prints the converged library
 hyperparameters, the per-iteration mass-change trajectory, and a per-region-type
 (intergenic / intron / exon) summary of the deconvoluted gDNA fraction and
 exposure. Use ``-v`` to see the per-iteration M-step trajectory (rho_0, phi,
-rho_d_bb, eps_s, delta) logged by the outer loop.
+rho_d_bb, delta) logged by the outer loop.
 
 Usage:
     python scripts/debug/dump_calibration_state.py --index INDEX_DIR --bam SAMPLE.bam [-v]
@@ -70,7 +70,7 @@ def main() -> None:
     print(f"mass_change      : {np.array2string(result.mass_change_history, precision=4)}")
     print("hyperparameters  :")
     print(f"  rho_0   = {result.rho_0:.6g}     exposure_dispersion = {result.exposure_dispersion:.6g}")
-    print(f"  rho_d_bb= {result.rho_d_bb:.4g}  eps_s = {result.eps_s:.4g}")
+    print(f"  rho_d_bb= {result.rho_d_bb:.4g}")
     print(f"  kappa_rna={result.kappa_rna:.4g}  rho_r_bb={result.rho_r_bb:.4g}  (fixed, PR 3)")
     print(
         f"FL means         : gdna={_mean(fl.gdna_pmf):.1f}  rna={_mean(fl.rna_pmf):.1f}  "

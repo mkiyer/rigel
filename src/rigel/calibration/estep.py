@@ -4,8 +4,8 @@ Runs identically on each of the substrate's three views (contained, left,
 right). It combines a **count** log-Bayes-factor (NB gDNA-only vs gDNA+RNA
 mixture) and a **strand** log-Bayes-factor (Beta-Binomial gDNA vs RNA) into a
 per-region gDNA mixing proportion ``π_g``, then soft-allocates the unspliced
-mass; the spliced mass is deterministic RNA (with the ``ε_s`` gDNA-artifact
-failsafe).
+mass; the spliced mass is deterministic RNA (gDNA splice-artifacts are removed
+upstream by the ``alignable`` splice blacklist, not modelled here; PR 7).
 
 **D1 (power from flux, density from mass).** The log-Bayes-factors are driven by
 the integer **flux** (``n_unspliced``, oriented ``k_sense``); that ``π_g``
@@ -46,8 +46,8 @@ _PI_CLIP = 1.0e-6
 class Allocation:
     """Per-region soft-allocated masses from one E-step view (all float64[R])."""
 
-    m_g: np.ndarray  # gDNA mass: unspliced split + ε_s · spliced
-    m_d: np.ndarray  # RNA mass: unspliced split + (1 − ε_s) · spliced
+    m_g: np.ndarray  # gDNA mass: the unspliced split alone (spliced is RNA, PR 7)
+    m_d: np.ndarray  # RNA mass: unspliced split + all spliced
     m_g_unspl: np.ndarray  # unspliced gDNA mass alone (for the M-step, PR 5)
     m_d_unspl: np.ndarray  # unspliced RNA mass alone (count-channel μ_d + M-step, PR 5)
     pi_g: np.ndarray  # gDNA mixing proportion used
@@ -128,7 +128,6 @@ def estep_view(
     kappa_rna: float,
     rho_r_bb: float,
     rho_d_bb: float,
-    eps_s: float,
     pi_g_prior: np.ndarray,
     m_d_unspl_prev: np.ndarray,
 ) -> Allocation:
@@ -145,12 +144,14 @@ def estep_view(
     pi_g = expit(logit(pi_g_prior) + llr_count + llr_strand)
     pi_g = np.clip(pi_g, _PI_CLIP, 1.0 - _PI_CLIP)
 
-    # π_g (from flux) allocates the fractional mass (density from mass).
+    # π_g (from flux) allocates the fractional unspliced mass (density from mass).
     m_g_unspl = pi_g * view.mass_unspliced
     m_d_unspl = view.mass_unspliced - m_g_unspl
-    m_s = view.mass_spliced
-    m_g = m_g_unspl + eps_s * m_s
-    m_d = m_d_unspl + (1.0 - eps_s) * m_s
+    # Spliced fragments are deterministic RNA (PR 7): no gDNA splice-artifact
+    # carve-out — artifacts are removed upstream by the alignable splice
+    # blacklist. gDNA mass is the unspliced split alone.
+    m_g = m_g_unspl
+    m_d = m_d_unspl + view.mass_spliced
     return Allocation(
         m_g=m_g, m_d=m_d, m_g_unspl=m_g_unspl, m_d_unspl=m_d_unspl, pi_g=pi_g, k_sense=k_sense
     )

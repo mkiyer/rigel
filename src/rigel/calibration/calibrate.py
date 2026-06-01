@@ -34,7 +34,6 @@ from .estep import estep_view
 from .exposure import exposure_posterior
 from .mstep import (
     fit_rho_d_bb,
-    update_eps_s,
     update_exposure_dispersion,
     update_pi_g_prior,
     update_rho_0,
@@ -56,7 +55,6 @@ logger = logging.getLogger(__name__)
 # definitively; here they seed the single pass / the outer-loop warm start.
 # (ρ_0 is owned by density.py; ρ_r_bb / κ_rna by the strand-balance model.)
 _RHO_D_BB_INIT = 0.01
-_EPS_S_INIT = 1.0e-3
 
 # Uninformative gDNA-mixing prior for the single pass (doc 03 §7). PR 5's outer
 # loop replaces it with the data-driven §5.6 update.
@@ -66,8 +64,8 @@ _PI_G_PRIOR_INIT = 0.5
 def initial_hyperparameters(
     substrate: CalibrationSubstrate,
     config: "CalibrationConfig",
-) -> tuple[float, float, float]:
-    """Doc 03 §7 data-driven initial hyperparameters ``(exposure_dispersion, ρ_d_bb, ε_s)``.
+) -> tuple[float, float]:
+    """Doc 03 §7 data-driven initial hyperparameters ``(exposure_dispersion, ρ_d_bb)``.
 
     The ``exposure_dispersion`` seed is the NB moment estimator on the contained
     unspliced counts, floored to stay valid with little/no data — just a warm
@@ -86,7 +84,7 @@ def initial_hyperparameters(
         exposure_dispersion = floor
     exposure_dispersion = max(exposure_dispersion, floor)
 
-    return exposure_dispersion, _RHO_D_BB_INIT, _EPS_S_INIT
+    return exposure_dispersion, _RHO_D_BB_INIT
 
 
 def calibrate(
@@ -104,7 +102,7 @@ def calibrate(
 
     # --- Initial hyperparameters ---
     rho_0 = estimate_gdna_density(substrate, region_arrays).rho_0  # ρ_0 seed (PR 4c §III.2)
-    exposure_dispersion, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
+    exposure_dispersion, rho_d_bb = initial_hyperparameters(substrate, config)
     strand = fit_strand_balance(substrate, strand_model)  # κ_rna, ρ_r_bb fixed (PR 3 / III.1)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
 
@@ -122,7 +120,6 @@ def calibrate(
     m_d_left = np.zeros(r, dtype=np.float64)
     m_d_right = np.zeros(r, dtype=np.float64)
     n_u_cont = substrate.contained.n_unspliced
-    n_spliced_cont = substrate.contained.n_spliced
     m_g_tot_prev: "np.ndarray | None" = None
     mass_changes: list[float] = []
     converged = False
@@ -138,7 +135,6 @@ def calibrate(
             kappa_rna=kappa_rna,
             rho_r_bb=rho_r_bb,
             rho_d_bb=rho_d_bb,
-            eps_s=eps_s,
             pi_g_prior=pi_g_prior,
         )
         # E-step: count channel now live (μ_d from the previous iteration; zero on
@@ -178,9 +174,8 @@ def calibrate(
         omega = swept.omega
         log_omega_var = swept.log_omega_var
 
-        # --- M-step (doc 03 §5): fit ρ_0, ε_s, exposure_dispersion, ρ_d_bb (κ_rna/ρ_r_bb fixed) ---
+        # --- M-step (doc 03 §5): fit ρ_0, exposure_dispersion, ρ_d_bb (κ_rna/ρ_r_bb fixed) ---
         rho_0 = update_rho_0(exposure.m_g_tot, omega, l_phys)
-        eps_s = update_eps_s(contained.pi_g, n_spliced_cont)
         # Exposure dispersion: the proper EM M-step from the (pre-sweep) Gamma
         # exposure posteriors — NOT a count-NB fit. This is what breaks the φ
         # limit cycle (docs/acc_caljointmodel/calibration_oscillation_diagnosis.md).
@@ -207,12 +202,11 @@ def calibrate(
         mass_changes.append(delta)
         m_g_tot_prev = m_g_tot.copy()
         logger.debug(
-            "[CAL iter %d] rho_0=%.4g exp_disp=%.4g rho_d_bb=%.4g eps_s=%.4g delta=%.4g",
+            "[CAL iter %d] rho_0=%.4g exp_disp=%.4g rho_d_bb=%.4g delta=%.4g",
             it,
             rho_0,
             exposure_dispersion,
             rho_d_bb,
-            eps_s,
             delta,
         )
         if it >= 2 and delta < config.mass_rel_tol:
@@ -241,7 +235,6 @@ def calibrate(
         rho_d_bb=rho_d_bb,
         kappa_rna=kappa_rna,
         rho_r_bb=rho_r_bb,
-        eps_s=eps_s,
         n_iterations=n_iter,
         converged=converged,
         mass_change_history=np.array(mass_changes, dtype=np.float64),

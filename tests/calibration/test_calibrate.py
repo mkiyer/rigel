@@ -76,7 +76,6 @@ def test_fitted_hyperparameters_in_range():
     assert 0.0 < result.rho_d_bb < 1.0
     assert result.kappa_rna == 0.95  # fixed from the StrandModel (PR 3)
     assert 0.0 < result.rho_r_bb < 1.0  # fixed from the spliced channel (PR 3)
-    assert 0.0 < result.eps_s < 1.0
 
 
 def test_strand_params_fixed_not_refit():

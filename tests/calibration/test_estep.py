@@ -34,7 +34,6 @@ def _params(r, **overrides):
         kappa_rna=0.95,
         rho_r_bb=0.05,
         rho_d_bb=0.01,
-        eps_s=1.0e-3,
         pi_g_prior=np.full(r, 0.5),
         m_d_unspl_prev=np.zeros(r),
     )
@@ -132,8 +131,9 @@ def test_flux_drives_pi_mass_is_allocated():
 
 
 def test_spliced_mass_routes_to_rna():
-    # Spliced mass is deterministic RNA up to the ε_s gDNA-artifact failsafe.
+    # Spliced mass is deterministic RNA (PR 7: no gDNA splice-artifact carve-out;
+    # artifacts are removed upstream by the alignable splice blacklist).
     view = _view([0], [0], sense=[40], anti=[0])
-    alloc = estep_view(view, np.array([TS_POS], dtype=np.int8), **_params(1, eps_s=1.0e-3))
-    np.testing.assert_allclose(alloc.m_g, [1.0e-3 * 40])
-    np.testing.assert_allclose(alloc.m_d, [(1.0 - 1.0e-3) * 40])
+    alloc = estep_view(view, np.array([TS_POS], dtype=np.int8), **_params(1))
+    np.testing.assert_allclose(alloc.m_g, [0.0])  # no gDNA from spliced
+    np.testing.assert_allclose(alloc.m_d, [40.0])  # all spliced → RNA

@@ -314,7 +314,7 @@ Five global scalars:
 | $\phi$ | NB count dispersion = Gamma exposure prior shape | 1-D Newton on NB log-likelihood gradient (single global scalar; moment estimator warm start) |
 | $\rho_d^{\text{BB}}$ | gDNA strand BB dispersion (mean fixed at 0.5) | 1-D Newton on BB log-likelihood gradient (single global scalar; moment estimator warm start) |
 | $\rho_r^{\text{BB}}$ | RNA strand BB dispersion (mean $\kappa_r^{\text{rna}}$ pre-computed by `StrandModel`) | 1-D Newton on BB log-likelihood gradient (single global scalar; moment estimator warm start) |
-| $\epsilon_s$ | gDNA splice-artifact rate (failsafe; upstream removal already filters most) | Closed form, Beta(1,1) prior + soft-allocated counts |
+| $\epsilon_s$ | gDNA splice-artifact rate | **Deferred (PR 7)** — not modelled; spliced fragments are RNA, artifacts filtered upstream by the `alignable` splice blacklist (see 03_inference §5.5) |
 
 All five M-steps in [`03_inference.md`](03_inference.md) §4.
 

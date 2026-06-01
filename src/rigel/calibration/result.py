@@ -65,7 +65,6 @@ class CalibrationResult:
     rho_d_bb: float  # in (0, 1), gDNA strand BB dispersion (kappa_d = 0.5 fixed)
     kappa_rna: float  # in (0, 1), RNA sense mean (from StrandModel; PR 3)
     rho_r_bb: float  # in (0, 1), RNA strand BB dispersion (fit by PR 3)
-    eps_s: float  # in (0, 1), gDNA splice-artifact rate
 
     # --- convergence diagnostics ---
     n_iterations: int
@@ -99,7 +98,7 @@ class CalibrationResult:
             raise ValueError(
                 f"CalibrationResult.exposure_dispersion must be > 0; got {self.exposure_dispersion}."
             )
-        for name in ("rho_d_bb", "kappa_rna", "rho_r_bb", "eps_s"):
+        for name in ("rho_d_bb", "kappa_rna", "rho_r_bb"):
             value = float(getattr(self, name))
             if not 0.0 < value < 1.0:
                 raise ValueError(f"CalibrationResult.{name} must be in (0, 1); got {value}.")

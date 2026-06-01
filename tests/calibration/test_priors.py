@@ -30,7 +30,6 @@ def _calibration(*, mass_d_cont, mass_d_left, mass_d_right, omega, rho_0=0.01) -
         rho_d_bb=0.01,
         kappa_rna=0.9,
         rho_r_bb=0.01,
-        eps_s=1e-3,
         n_iterations=0,
         converged=True,
         mass_change_history=np.empty(0, dtype=np.float64),

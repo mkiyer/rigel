@@ -25,7 +25,6 @@ from rigel.calibration.exposure import exposure_posterior
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.calibration.mstep import (
     fit_rho_d_bb,
-    update_eps_s,
     update_pi_g_prior,
     update_rho_0,
 )
@@ -179,7 +178,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
     rho_0 = estimate_gdna_density(sub, region_arrays).rho_0
     from rigel.calibration.calibrate import initial_hyperparameters
 
-    phi, rho_d_bb, eps_s = initial_hyperparameters(sub, config)
+    phi, rho_d_bb = initial_hyperparameters(sub, config)
     strand = fit_strand_balance(sub, strand_model)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
 
@@ -189,7 +188,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
 
     print(
         f"# regions={r}  seed-rho_0={rho_0:.6g}  init phi={phi:.4g} rho_d_bb={rho_d_bb:.4g} "
-        f"eps_s={eps_s:.4g}  kappa_rna={kappa_rna:.4g} rho_r_bb={rho_r_bb:.4g}"
+        f"kappa_rna={kappa_rna:.4g} rho_r_bb={rho_r_bb:.4g}"
     )
     print(f"# mu_FL(boundary)={mu_fl:.2f}  phi_floor={config.exposure_dispersion_floor:.3g}")
     # Which regions carry contained unspliced/spliced flux?
@@ -215,7 +214,6 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
             kappa_rna=kappa_rna,
             rho_r_bb=rho_r_bb,
             rho_d_bb=rho_d_bb,
-            eps_s=eps_s,
             pi_g_prior=pi_g_prior,
         )
         cont = estep_view(
@@ -245,7 +243,6 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
 
         # --- M-step (verbatim from calibrate.py) ---
         rho_0_new = update_rho_0(exposure.m_g_tot, omega, l_phys)
-        eps_s_new = update_eps_s(cont.pi_g, ns)
         mu_g_cont = omega * rho_0_new * region_eff_len
         floor = config.exposure_dispersion_floor
         if phi_mode == "nb_omega":
@@ -272,7 +269,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
                 f"iter {it:2d}  phi_in={phi:10.5g}  ->  phi_out={phi_new:10.5g}   "
                 f"rho_0={rho_0_new:.5g}  delta={delta:.4g}"
             )
-            rho_0, eps_s, phi, rho_d_bb = rho_0_new, eps_s_new, phi_new, rho_d_bb_new
+            rho_0, phi, rho_d_bb = rho_0_new, phi_new, rho_d_bb_new
             pi_g_prior = pi_g_prior_new
             m_d_cont, m_d_left, m_d_right = cont.m_d_unspl, left.m_d_unspl, right.m_d_unspl
             m_g_tot_prev = m_g_tot.copy()
@@ -283,8 +280,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
             f"delta={delta:.4g} ====="
         )
         print(
-            f"  M-step OUT: rho_0={rho_0_new:.5g}  phi={phi_new:.5g}  rho_d_bb={rho_d_bb_new:.4g}  "
-            f"eps_s={eps_s_new:.4g}"
+            f"  M-step OUT: rho_0={rho_0_new:.5g}  phi={phi_new:.5g}  rho_d_bb={rho_d_bb_new:.4g}"
         )
         # Per-region table — EVERY region that contributes to fit_phi (n_u>0 OR a
         # nonzero modeled gDNA mean μ_g). μ_tot = μ_g + m_d is the NB mean.
@@ -305,7 +301,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
             nu, mu_g_cont, cont.m_d_unspl, config.exposure_dispersion_floor, contrib, rtype
         )
 
-        rho_0, eps_s, phi, rho_d_bb = rho_0_new, eps_s_new, phi_new, rho_d_bb_new
+        rho_0, phi, rho_d_bb = rho_0_new, phi_new, rho_d_bb_new
         pi_g_prior = pi_g_prior_new
         m_d_cont, m_d_left, m_d_right = cont.m_d_unspl, left.m_d_unspl, right.m_d_unspl
         m_g_tot_prev = m_g_tot.copy()

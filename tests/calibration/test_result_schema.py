@@ -27,7 +27,6 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         rho_d_bb=0.01,
         kappa_rna=0.9,
         rho_r_bb=0.01,
-        eps_s=1e-3,
         n_iterations=0,
         converged=True,
         mass_change_history=np.empty(0, dtype=np.float64),
@@ -77,7 +76,6 @@ def test_rejects_length_mismatch():
         ("rho_d_bb", 1.5),
         ("kappa_rna", 0.0),
         ("rho_r_bb", 0.0),
-        ("eps_s", 1.0),
     ],
 )
 def test_rejects_bad_hyperparameters(field, value):

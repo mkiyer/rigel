@@ -874,7 +874,7 @@ def run_pipeline(
 
     logger.info(
         "calibration: R=%d iters=%d converged=%s rho_0=%.4g exp_disp=%.4g "
-        "rho_d_BB=%.4g kappa_rna=%.4g rho_r_BB=%.4g eps_s=%.4g",
+        "rho_d_BB=%.4g kappa_rna=%.4g rho_r_BB=%.4g",
         calibration.n_regions,
         calibration.n_iterations,
         calibration.converged,
@@ -883,7 +883,6 @@ def run_pipeline(
         calibration.rho_d_bb,
         calibration.kappa_rna,
         calibration.rho_r_bb,
-        calibration.eps_s,
     )
 
     # -- Quantification: calibration prior → per-locus EM --
