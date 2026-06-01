@@ -202,27 +202,37 @@ class Accumulator:
                 self.fl_pool_mass[pool, fl_bin] += 1.0
             return
 
-        # 4. Crossing path. For each consecutive slice pair, deposit on the
-        #    boundary between them per §4.3 of 00_design.md, with PER-SIDE
-        #    flux: the left region's slice credits the LEFT side of b_out
-        #    (matching its mass_left); the right region's slice credits the
-        #    RIGHT side of b_in (matching its mass_right). Contiguous crossing
-        #    (b_out == b_in) credits both sides; a spliced jump credits one
-        #    side of each flanking boundary. Slices are monotonic → each side
-        #    is credited at most once per fragment (no dedup needed).
-        for i in range(len(slices) - 1):
-            r_left, _, _ = slices[i]
-            r_right, _, _ = slices[i + 1]
-            len_left = slices[i][2] - slices[i][1]
-            len_right = slices[i + 1][2] - slices[i + 1][1]
-
-            b_out = self.right_boundary_of(r_left)
-            b_in = self.left_boundary_of(r_right)
-
-            self.boundaries[b_out].mass_left[ch] += np.float32(len_left * inv_L)
-            self.boundaries[b_out].flux_left[ch] += np.uint32(1)
-            self.boundaries[b_in].mass_right[ch] += np.float32(len_right * inv_L)
-            self.boundaries[b_in].flux_right[ch] += np.uint32(1)
+        # 4. Crossing path. Distribute each slice's mass across the boundaries it
+        #    crosses, conserving fragment mass (§4.3 of 00_design.md). A slice
+        #    crosses its LEFT boundary iff it is not the first slice, and its
+        #    RIGHT boundary iff it is not the last. A region the fragment
+        #    *encompasses* — a fully-traversed interior slice that overlaps BOTH
+        #    its boundaries — therefore splits its mass 50/50: half to the RIGHT
+        #    side of its left boundary (mass_right) and half to the LEFT side of
+        #    its right boundary (mass_left). End slices keep full mass on their
+        #    single crossed side. Flux is the integer per-side crossing-event
+        #    count (NOT split): the left region's slice credits flux_left of its
+        #    right boundary; the right region's slice credits flux_right of its
+        #    left boundary. A contiguous crossing credits both sides of its
+        #    shared boundary; a spliced jump credits one side of each flanking
+        #    boundary (intron-facing sides stay zero). Slices are monotonic →
+        #    each side is credited at most once per fragment.
+        n_slices = len(slices)
+        for i, (r, start, end) in enumerate(slices):
+            crosses_left = i > 0
+            crosses_right = i < n_slices - 1
+            n_cross = (1 if crosses_left else 0) + (1 if crosses_right else 0)
+            if n_cross == 0:
+                continue  # defensive: single-region fragments handled above
+            share = (end - start) * inv_L / n_cross
+            if crosses_right:
+                b_out = self.right_boundary_of(r)
+                self.boundaries[b_out].mass_left[ch] += np.float32(share)
+                self.boundaries[b_out].flux_left[ch] += np.uint32(1)
+            if crosses_left:
+                b_in = self.left_boundary_of(r)
+                self.boundaries[b_in].mass_right[ch] += np.float32(share)
+                self.boundaries[b_in].flux_right[ch] += np.uint32(1)
 
         # gDNA FL (crossing): each slice's fractional mass → the BOUNDARY pool of
         # its region-type, at FL bin = min(footprint, max_fl).

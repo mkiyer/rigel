@@ -192,18 +192,20 @@ def test_t4_two_block_non_adjacent_regions_native():
 
 
 def _check_t5(acc):
-    # B1 R0=(0,100); B2 R1=(100,180); B3 R2=(200,320). L=300. Both internal
-    # boundaries are contiguous crossings → both sides credited.
+    # B1 R0=(0,100); B2 R1=(100,180); B3 R2=(200,320). L=300. R1 is the
+    # ENCOMPASSED interior region (crossed at both boundaries) → its slice mass
+    # (80/L) splits 50/50: 40/L to B1.mass_right and 40/L to B2.mass_left. The
+    # end slices (R0, R2) keep full mass. Fragment mass conserves to 1.0.
     acc.deposit(blocks=[(0, 100), (100, 180), (200, 320)], spliced=True, primary=True)
     ch = channel_idx(spliced=True, primary=True)
     L = 300.0
     b1 = acc.boundaries[1]
     b2 = acc.boundaries[2]
     assert b1.mass_left[ch] == pytest.approx(100.0 / L, abs=1e-6)
-    assert b1.mass_right[ch] == pytest.approx(80.0 / L, abs=1e-6)
+    assert b1.mass_right[ch] == pytest.approx(40.0 / L, abs=1e-6)
     assert b1.flux_left[ch] == 1
     assert b1.flux_right[ch] == 1
-    assert b2.mass_left[ch] == pytest.approx(80.0 / L, abs=1e-6)
+    assert b2.mass_left[ch] == pytest.approx(40.0 / L, abs=1e-6)
     assert b2.mass_right[ch] == pytest.approx(120.0 / L, abs=1e-6)
     assert b2.flux_left[ch] == 1
     assert b2.flux_right[ch] == 1
@@ -211,7 +213,7 @@ def _check_t5(acc):
     assert acc.boundaries[3].mass_right.sum() == 0.0
     for r in acc.regions:
         assert r.contained.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.0 + 80.0 / L, abs=1e-6)
+    assert acc.total_mass_deposited() == pytest.approx(1.0, abs=1e-6)
 
 
 def test_t5_three_block_all_adjacent_reference():
@@ -227,22 +229,27 @@ def test_t5_three_block_all_adjacent_native():
 
 
 def _check_t6(acc):
+    # Single block (50,250) over partition [0,100,200,300]: R0=(0,100) gets
+    # 50bp, R1=(100,200) is fully ENCOMPASSED (100bp slice), R2=(200,300) gets
+    # 50bp. L=200. R1's slice mass (100/L) splits 50/50 → 50/L to B1.mass_right
+    # and 50/L to B2.mass_left; the end slices keep full mass. Fragment mass
+    # conserves to 1.0 (was the 1.5 double-count bug, PR 5.5).
     acc.deposit(blocks=[(50, 250)], spliced=False, primary=True)
     ch = channel_idx(spliced=False, primary=True)
     L = 200.0
     b1 = acc.boundaries[1]
     b2 = acc.boundaries[2]
     assert b1.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
-    assert b1.mass_right[ch] == pytest.approx(100.0 / L, abs=1e-6)
+    assert b1.mass_right[ch] == pytest.approx(50.0 / L, abs=1e-6)
     assert b1.flux_left[ch] == 1
     assert b1.flux_right[ch] == 1
-    assert b2.mass_left[ch] == pytest.approx(100.0 / L, abs=1e-6)
+    assert b2.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
     assert b2.mass_right[ch] == pytest.approx(50.0 / L, abs=1e-6)
     assert b2.flux_left[ch] == 1
     assert b2.flux_right[ch] == 1
     for r in acc.regions:
         assert r.contained.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.5, abs=1e-6)
+    assert acc.total_mass_deposited() == pytest.approx(1.0, abs=1e-6)
 
 
 def test_t6_fully_spans_region_reference():
@@ -252,6 +259,36 @@ def test_t6_fully_spans_region_reference():
 @XFAIL_NATIVE
 def test_t6_fully_spans_region_native():
     _check_t6(_both(NativeAccumulator, np.array([0, 100, 200, 300], dtype=np.int64)))
+
+
+# --- T6b: mass conservation for region-spanning fragments (PR 5.5) ----------
+
+
+def _check_t6b(acc):
+    # Every fragment — contained, simple crossing, or spanning whole regions —
+    # deposits total mass exactly 1.0. Partition [0,100,..,500] → 5×100bp
+    # regions; fragments span 1..5 regions (with 0..3 encompassed interiors).
+    frags = [
+        [(10, 50)],  # contained in R0 (M=1)
+        [(50, 150)],  # crosses R0→R1 (M=2, no interior)
+        [(50, 250)],  # spans R0, R1(enc), R2 (M=3, 1 interior)
+        [(50, 450)],  # spans R0..R4 (M=5, 3 interiors)
+        [(150, 350)],  # spans R1, R2(enc), R3 (M=3, 1 interior)
+    ]
+    for blocks in frags:
+        acc.deposit(blocks=blocks, spliced=False, primary=True)
+    assert acc.total_mass_deposited() == pytest.approx(float(len(frags)), abs=1e-5)
+
+
+def test_t6b_spanning_mass_conservation_reference():
+    edges = np.array([0, 100, 200, 300, 400, 500], dtype=np.int64)
+    _check_t6b(_both(Accumulator, edges))
+
+
+@XFAIL_NATIVE
+def test_t6b_spanning_mass_conservation_native():
+    edges = np.array([0, 100, 200, 300, 400, 500], dtype=np.int64)
+    _check_t6b(_both(NativeAccumulator, edges))
 
 
 # --- T7: mass conservation over random contained fragments ------------------

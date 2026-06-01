@@ -67,11 +67,13 @@ shrinks.
 
 ### 2.3 The "fully spans" quirk
 
-When a fragment is longer than its containing region, today's
-accumulator deposits `w/2` into each of that region's left and right
-boundary slots. In the new accumulator this becomes natural: the fragment crosses
-both the region's left and right boundaries, so it is a normal
-two-boundary-event fragment with no special case.
+When a fragment is longer than its containing region, it **encompasses**
+that region — overlapping both its left and right boundaries. The region's
+slice mass splits `w/2` into each side (the RIGHT side of its left boundary
+and the LEFT side of its right boundary), conserving fragment mass. The new
+accumulator handles this with the general per-slice attribution rule (§4.3):
+an interior slice crosses two boundaries, so each side gets half — the
+`n_cross = 2` branch, no bespoke case.
 
 ### 2.4 Why ad-hoc Python boundary derivation must end
 
@@ -189,42 +191,48 @@ A spliced fragment is one whose CIGAR contains an N (or whose
 block-pair gap crosses an annotated junction) **and** stays within
 one region (which can happen for short introns or wide regions).
 
-### 4.3 Crossing: per-junction boundary event
+### 4.3 Crossing: per-slice boundary attribution
 
-For each adjacent block pair $(B_k, B_{k+1})$ in the fragment, there
-is one **implicit-junction event**. Let $R_k = \mathrm{region\_of}(B_k)$
-and $R_{k+1} = \mathrm{region\_of}(B_{k+1})$.
+A fragment not contained in one region is decomposed into per-region
+**slices** $s_1, \ldots, s_M$ (one per region it touches, in genomic order;
+§4.5.4). Each slice deposits its mass onto the boundaries it crosses,
+**conserving the fragment's mass**.
 
 **Boundary side convention (the foundation).** A boundary $B$ separates
-two regions. `B.mass_left` is the mass contributed by blocks lying in
-the region **to the left of** $B$. `B.mass_right` is the mass
-contributed by blocks lying in the region **to the right of** $B$.
-`mass_left` is *not* "the left half of $B$"; it is *the side from
-which the supporting block came*.
+two regions. `B.mass_left` is the mass contributed by the slice in the
+region **to the left of** $B$; `B.mass_right` by the slice **to the right
+of** $B$. `mass_left` is *not* "the left half of $B$"; it is *the side
+from which the supporting slice came*.
 
-**Attribution rule.** For an implicit junction $(B_k, B_{k+1})$:
+**Attribution rule.** Slice $s_i$ (in region $R_i$, length $\ell_i$):
 
-1. Block $B_k$ lies in $R_k$. The boundary $B^\text{out}_k$ that
-   $B_k$ implicitly exits is the **right boundary of $R_k$**. Because
-   $B_k$ is to the *left* of $B^\text{out}_k$, block $B_k$ deposits
-   $\ell_k / L$ into $B^\text{out}_k.\text{mass\_left}$ of channel
-   $(s, \text{splice flag})$.
-2. Block $B_{k+1}$ lies in $R_{k+1}$. The boundary $B^\text{in}_{k+1}$
-   that $B_{k+1}$ implicitly enters is the **left boundary of
-   $R_{k+1}$**. Because $B_{k+1}$ is to the *right* of
-   $B^\text{in}_{k+1}$, block $B_{k+1}$ deposits $\ell_{k+1} / L$ into
-   $B^\text{in}_{k+1}.\text{mass\_right}$ of channel
-   $(s, \text{splice flag})$.
-3. If $R_k$ and $R_{k+1}$ are adjacent regions, then $B^\text{out}_k
-   \equiv B^\text{in}_{k+1}$ — the same `Boundary` object receives
-   $\ell_k/L$ to its `mass_left` and $\ell_{k+1}/L$ to its
-   `mass_right`. No special case in code.
-4. If $R_k$ and $R_{k+1}$ are non-adjacent (the implicit gap spans one
-   or more whole regions), the interior boundaries get **nothing** —
-   there is no observed evidence about them, only inference. This is
-   the **only observed events** principle.
+1. It crosses its **left** boundary iff $i > 1$ (a slice precedes it) and
+   its **right** boundary iff $i < M$ (a slice follows it). Let
+   $n_i = [\,i>1\,] + [\,i<M\,] \in \{1, 2\}$ be its crossing count; its
+   per-crossing mass share is $\ell_i / (L\,n_i)$.
+2. If it crosses right, deposit the share into
+   $(\text{right boundary of } R_i).\text{mass\_left}$ (the slice is to the
+   *left* of that boundary) and increment that boundary's `flux_left` by 1.
+3. If it crosses left, deposit the share into
+   $(\text{left boundary of } R_i).\text{mass\_right}$ (the slice is to the
+   *right* of that boundary) and increment that boundary's `flux_right` by 1.
 
-Mnemonic: block-on-left → `mass_left`; block-on-right → `mass_right`.
+**Encompassed regions split 50/50.** An *interior* slice ($1 < i < M$) — a
+region the fragment fully traverses, overlapping **both** its boundaries —
+has $n_i = 2$, so each of its two boundary sides receives **half** its mass.
+End slices ($i = 1$ or $i = M$) have $n_i = 1$ and deposit full mass on their
+one crossed side. This is what makes per-fragment mass conserve (§6): the sum
+over all slice-sides is $\sum_i \ell_i / L = 1$.
+
+**Adjacent vs. spliced — no special case.** If $R_i, R_{i+1}$ are adjacent,
+$s_i$'s right boundary *is* $s_{i+1}$'s left boundary — the one shared
+boundary receives `mass_left` from $s_i$ and `mass_right` from $s_{i+1}$ (a
+contiguous crossing, both sides credited). If non-adjacent (a spliced
+intron-skip), the interior boundaries between them get **nothing**: a skipped
+region produces no slice, so it is never an $s_i$ — the **only observed
+events** principle. Flux is the integer per-side count (§4.4), never split.
+
+Mnemonic: slice-on-left → `mass_left`; slice-on-right → `mass_right`.
 Never the other way around.
 
 ### 4.4 Flux increment
@@ -278,30 +286,22 @@ Applying the §4.3 rule:
 
 Mass deposited: $150/1050 + 900/1050 = 1.0$. ✓
 
-#### 4.5.2 Three-block, all-adjacent-exon (middle-block contributes twice)
+#### 4.5.2 Three-block, all-adjacent-exon (middle slice splits 50/50)
 
 Three exonic regions $R_1, R_2, R_3$ with shared interior boundaries
 $B_a$ (between $R_1$ and $R_2$) and $B_b$ (between $R_2$ and $R_3$).
-Fragment blocks block-1 in $R_1$ ($\ell_1 = 100$), block-2 in $R_2$
-($\ell_2 = 80$), block-3 in $R_3$ ($\ell_3 = 120$). $L = 300$. Strand
+Fragment slices $s_1$ in $R_1$ ($\ell_1 = 100$), $s_2$ in $R_2$
+($\ell_2 = 80$), $s_3$ in $R_3$ ($\ell_3 = 120$). $L = 300$. Strand
 $+$, both inter-block junctions are spliced.
 
-Junction (block-1, block-2) at $B_a$:
-- block-1 is to the **left** of $B_a$ → $B_a.\text{mass\_left}.\text{spl\_pos} \mathrel{+}= 100/300$; $B_a.\text{flux.spl\_pos} \mathrel{+}= 1$.
-- block-2 is to the **right** of $B_a$ → $B_a.\text{mass\_right}.\text{spl\_pos} \mathrel{+}= 80/300$; $B_a.\text{flux}$ already $+1$ this fragment-event, no additional increment (flux is per-boundary-per-fragment-event, see §4.4).
+- $s_1$ (end slice, $n_1 = 1$): crosses right only → $B_a.\text{mass\_left}.\text{spl\_pos} \mathrel{+}= 100/300$; $B_a.\text{flux\_left.spl\_pos} \mathrel{+}= 1$.
+- $s_2$ ($R_2$ is **encompassed**, $n_2 = 2$): each side gets half → $B_a.\text{mass\_right}.\text{spl\_pos} \mathrel{+}= 40/300$ ($B_a.\text{flux\_right}\mathrel{+}=1$) and $B_b.\text{mass\_left}.\text{spl\_pos} \mathrel{+}= 40/300$ ($B_b.\text{flux\_left}\mathrel{+}=1$).
+- $s_3$ (end slice, $n_3 = 1$): crosses left only → $B_b.\text{mass\_right}.\text{spl\_pos} \mathrel{+}= 120/300$; $B_b.\text{flux\_right.spl\_pos} \mathrel{+}= 1$.
 
-Junction (block-2, block-3) at $B_b$:
-- block-2 is to the **left** of $B_b$ → $B_b.\text{mass\_left}.\text{spl\_pos} \mathrel{+}= 80/300$; $B_b.\text{flux.spl\_pos} \mathrel{+}= 1$.
-- block-3 is to the **right** of $B_b$ → $B_b.\text{mass\_right}.\text{spl\_pos} \mathrel{+}= 120/300$.
-
-Block-2 contributes to two different boundaries (left of $B_a$ would
-be a typo — block-2 is *right* of $B_a$ and *left* of $B_b$). This
-is the middle-block-with-neighbours-on-both-sides case.
-
-Total mass: $(100 + 80 + 80 + 120)/300 = 1.2667$. Total exceeds 1.0
-because the middle block (length 80) contributes to two boundaries
-(`mass_right` of $B_a$ AND `mass_left` of $B_b$). See §6 for the
-per-block-side mass conservation rule.
+Total mass: $(100 + 40 + 40 + 120)/300 = 300/300 = 1.0$. ✓ The middle
+slice's mass ($80/300$) splits 50/50 between its two boundary sides, so the
+fragment conserves mass (§6). Flux is unaffected — each boundary side still
+records one integer crossing event.
 
 #### 4.5.3 Single-region, multi-block (contained spliced fragment)
 
@@ -311,21 +311,23 @@ $\ell_1 = 60$, $\ell_2 = 40$, $L = 100$. Strand $+$, spliced.
 `regions[r].contained_spl_pos += 1`. No boundary touched. No
 per-block accounting. The fragment is one biological observation.
 
-#### 4.5.4 Fully-spans-region
+#### 4.5.4 Fully-spans-region (the encompassing case)
 
-Fragment with one block straddling a small region entirely (rare;
-implies fragment longer than the region). $B_1$ starts in $R_{k-1}$,
-ends in $R_{k+1}$. Decompose into the block's intersections with
-each region: $\ell^{(k-1)}, \ell^{(k)}, \ell^{(k+1)}$. $L = $ sum.
+Fragment with one block straddling a small region $R_k$ entirely
+(implies fragment longer than the region). The block decomposes into
+slices $\ell^{(k-1)}, \ell^{(k)}, \ell^{(k+1)}$ across $R_{k-1}, R_k,
+R_{k+1}$; $L = $ their sum. $R_k$ is **encompassed** — the fragment
+overlaps both its boundaries.
 
-Conceptually there are two boundary-crossings: $R_{k-1} \to R_k$ and
-$R_k \to R_{k+1}$. Treat them with the §4.3 rule applied to virtual
-"block fragments" $(\ell^{(k-1)}, \ell^{(k)}, \ell^{(k+1)})$ as if
-they were three adjacent observed blocks with no inter-block gap.
+Apply the §4.3 per-slice rule: the two end slices ($\ell^{(k-1)},
+\ell^{(k+1)}$) deposit full mass on their single crossed side; the
+interior slice $\ell^{(k)}$ has $n = 2$ and splits 50/50 —
+$\ell^{(k)}/(2L)$ to the RIGHT side of $R_k$'s left boundary and
+$\ell^{(k)}/(2L)$ to the LEFT side of its right boundary. Total mass
+conserves to $1.0$.
 
-This is the only case where the implementation needs to handle a
-single CIGAR-block that straddles a region boundary. It is uncommon
-but needs a documented rule.
+This is the only case where a single CIGAR-block straddles region
+boundaries; it falls out of the per-slice rule with no special case.
 
 ## 5. Reserved
 
@@ -336,40 +338,37 @@ stable.
 
 ## 6. Mass conservation invariants
 
-> **Important.** Mass conservation is **per-block-side**, not
-> per-fragment. Each (block, boundary-side) interaction deposits its
-> share of mass exactly once. A middle block of a K≥3-block fragment
-> contributes to *two* boundaries (mass_right of its left-side
-> boundary AND mass_left of its right-side boundary), so the total
-> mass for that fragment exceeds 1.0. This diverges from legacy and
-> is intentional per the user spec ("block-2 contributes to two
-> different boundaries", §4.5.2).
+> **Per-fragment mass conservation.** Every fragment deposits total mass
+> exactly $1.0$ — across `contained` (single-region fragment) or across the
+> boundary `mass_left`/`mass_right` slots (crossing fragment). A region the
+> fragment **encompasses** (an interior slice, §4.3) splits its slice mass
+> 50/50 between its two boundary sides, so no mass is double-counted. This
+> restores the legacy `w/2` behavior (§2.3) and the
+> $\int \text{overlap}/\ell\,dx = L$ identity the calibration exposure relies on.
 
 Aggregate invariants:
 
-1. **Per-fragment per-block-side mass.** For a fragment with slices
-   $s_1, \ldots, s_M$ across regions (after the §4.5.4 block
-   decomposition), the total mass deposited is
-   $$\frac{1}{L} \left( \ell_{s_1} + \ell_{s_M} + 2 \sum_{i=2}^{M-1} \ell_{s_i} \right)$$
-   - Contained fragment ($M = 1$): total $= 1.0$.
-   - Two-slice fragment (any block decomposition with $M = 2$): total $= 1.0$.
-   - $M \geq 3$ fragment: total $> 1.0$ by $\sum_{i=2}^{M-1} \ell_{s_i} / L$.
+1. **Per-fragment mass = 1.0.** For a fragment with slices $s_1, \ldots, s_M$
+   (after the §4.5.4 block decomposition), each slice $s_i$ deposits
+   $\ell_{s_i}/L$ total, split across the $n_i \in \{1,2\}$ boundary sides it
+   crosses. The sum is
+   $$\frac{1}{L} \sum_{i=1}^{M} \ell_{s_i} \;=\; 1.0$$
+   for every $M$ — contained ($M=1$), simple crossing ($M=2$), and spanning
+   ($M \geq 3$) alike.
 2. **Contained counts.** $\sum_r \mathrm{contained}_r = N_\text{contained}$
    (each contained fragment increments exactly one region by +1).
-3. **Flux totals.** $\sum_b \mathrm{flux}_{b, c} = \sum_\text{crossing fragments in channel $c$}
-   |\text{boundaries touched}|$.
+3. **Flux totals.** $\sum_b (\mathrm{flux\_left} + \mathrm{flux\_right})_{b,c}$
+   counts the (slice, crossed-boundary-side) events in channel $c$. Flux is
+   the **integer** per-side crossing count and is *not* split by the 50/50
+   rule — only mass is. (Power from flux, density from mass.)
 4. **No terminal-boundary deposits in typical references.** Terminal
-   boundaries receive mass only when fragments extend beyond a
-   region partition's edge — should be zero for well-formed
-   reference partitions.
+   boundaries receive mass only when fragments extend beyond a region
+   partition's edge — zero for well-formed reference partitions.
 
-**Implication for calibration v6.** Per-boundary mass is a
-*weighted block-side observation*, not a fragment probability. The
-calibrator must interpret it accordingly (relative signals across
-channels at one boundary remain meaningful; absolute "expected
-fragments per boundary" requires correcting for the middle-block
-double-count, e.g., via flux rather than mass for per-fragment
-counts).
+**Implication for calibration v6.** Per-region mass now conserves, so the
+substrate's $M^{(\text{cont})} + M^{(L)} + M^{(R)}$ is a faithful per-region
+fragment-mass total (D1). Statistical *power* still comes from the integer
+flux; fractional *mass* from these conserved deposits.
 
 ## 7. Public API (native + python)
 

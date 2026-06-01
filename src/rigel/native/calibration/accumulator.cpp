@@ -155,35 +155,41 @@ void Accumulator::deposit(const std::int64_t* block_starts,
         return;
     }
 
-    // 4. Crossing path: for each consecutive slice pair, deposit on the
-    //    boundary between r_left's right-boundary (b_out) and r_right's
-    //    left-boundary (b_in) — the same boundary iff the regions are
-    //    adjacent (contiguous crossing), different iff non-adjacent (a
-    //    spliced intron-skip).
+    // 4. Crossing path: distribute each slice's mass across the boundaries it
+    //    crosses, conserving fragment mass (§4.3 of 00_design.md). A slice
+    //    crosses its LEFT boundary iff it is not the first slice, and its RIGHT
+    //    boundary iff it is not the last. A region the fragment *encompasses* —
+    //    a fully-traversed interior slice overlapping BOTH its boundaries —
+    //    splits its mass 50/50: half to the RIGHT side of its left boundary
+    //    (mass_right) and half to the LEFT side of its right boundary
+    //    (mass_left). End slices keep full mass on their single crossed side.
     //
-    //    Flux is PER SIDE: the left region's slice credits the LEFT side of
-    //    b_out (matching its mass_left); the right region's slice credits the
-    //    RIGHT side of b_in (matching its mass_right). A contiguous crossing
-    //    (b_out == b_in) thus credits both sides of its one boundary; a
-    //    spliced jump credits one side of each flanking boundary, leaving the
-    //    intron-facing sides at zero (no false exon-intron flux). Slices are
-    //    monotonic, so each side is credited at most once per fragment — no
-    //    dedup needed.
-    for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
-        const Slice& a = slices[i];
-        const Slice& b = slices[i + 1];
-        const std::int64_t len_left  = a.end - a.start;
-        const std::int64_t len_right = b.end - b.start;
-        const std::int64_t b_out = a.region_idx + 1;  // right boundary of r_left
-        const std::int64_t b_in  = b.region_idx;      // left  boundary of r_right
-
-        Boundary& bo = boundaries_[static_cast<std::size_t>(b_out)];
-        bo.mass_left[ch] += static_cast<float>(static_cast<double>(len_left) * inv_L);
-        bo.flux_left[ch] += 1u;
-
-        Boundary& bi = boundaries_[static_cast<std::size_t>(b_in)];
-        bi.mass_right[ch] += static_cast<float>(static_cast<double>(len_right) * inv_L);
-        bi.flux_right[ch] += 1u;
+    //    Flux is PER SIDE and integer (NOT split): the left region's slice
+    //    credits flux_left of its right boundary; the right region's slice
+    //    credits flux_right of its left boundary. A contiguous crossing credits
+    //    both sides of its one boundary; a spliced jump credits one side of each
+    //    flanking boundary, leaving the intron-facing sides at zero (no false
+    //    exon-intron flux). Slices are monotonic, so each side is credited at
+    //    most once per fragment.
+    const std::size_t n_sl = slices.size();
+    for (std::size_t i = 0; i < n_sl; ++i) {
+        const Slice& sl = slices[i];
+        const bool crosses_left  = (i > 0);
+        const bool crosses_right = (i + 1 < n_sl);
+        const int n_cross = (crosses_left ? 1 : 0) + (crosses_right ? 1 : 0);
+        if (n_cross == 0) continue;  // defensive; single-region handled above
+        const double share = static_cast<double>(sl.end - sl.start) * inv_L
+                             / static_cast<double>(n_cross);
+        if (crosses_right) {
+            Boundary& bo = boundaries_[static_cast<std::size_t>(sl.region_idx + 1)];
+            bo.mass_left[ch] += static_cast<float>(share);
+            bo.flux_left[ch] += 1u;
+        }
+        if (crosses_left) {
+            Boundary& bi = boundaries_[static_cast<std::size_t>(sl.region_idx)];
+            bi.mass_right[ch] += static_cast<float>(share);
+            bi.flux_right[ch] += 1u;
+        }
     }
 
     // gDNA FL (crossing): each slice's fractional mass → the BOUNDARY-compartment
