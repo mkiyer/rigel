@@ -7,9 +7,9 @@ import numpy as np
 from rigel.calibration.estep import _PI_CLIP
 from rigel.calibration.mstep import (
     _RHO_D_BB_FALLBACK,
-    fit_phi,
     fit_rho_d_bb,
     update_eps_s,
+    update_exposure_dispersion,
     update_pi_g_prior,
     update_rho_0,
 )
@@ -36,24 +36,33 @@ def test_update_eps_s_beta11():
     assert eps_hi == 1.0 - _BB_FLOOR
 
 
-def test_fit_phi_underdispersed_floors():
-    # All counts exactly at the mean (variance 0) → no overdispersion → φ → floor.
-    n_u = np.full(8, 50, dtype=np.int64)
-    mu_g = np.full(8, 50.0)
-    phi = fit_phi(n_u, mu_g, np.zeros(8), phi_floor=1e-8)
-    assert phi < 1e-3
+def test_exposure_dispersion_low_variance_is_small():
+    # Tightly concentrated exposure posteriors (ω≈1, α large) ⇒ small dispersion.
+    omega = np.ones(6)
+    log_omega_var = np.full(6, 1e-3)  # α = 1/log_omega_var = 1000 (very concentrated)
+    disp = update_exposure_dispersion(omega, log_omega_var, floor=1e-8)
+    assert disp < 0.1
 
 
-def test_fit_phi_overdispersed_is_large():
-    # Bimodal counts far from the mean → large overdispersion.
-    n_u = np.array([0, 0, 100, 100], dtype=np.int64)
-    mu_g = np.full(4, 50.0)
-    phi = fit_phi(n_u, mu_g, np.zeros(4), phi_floor=1e-8)
-    assert phi > 0.5
+def test_exposure_dispersion_high_variance_is_large():
+    # Exposure posteriors spread far from 1 ⇒ large dispersion.
+    omega = np.array([0.01, 0.02, 5.0, 8.0])
+    log_omega_var = np.full(4, 1.0)  # α = 1 (diffuse posteriors)
+    disp = update_exposure_dispersion(omega, log_omega_var, floor=1e-8)
+    assert disp > 1.0
 
 
-def test_fit_phi_no_data_returns_floor():
-    assert fit_phi(np.zeros(3, dtype=np.int64), np.zeros(3), np.zeros(3), phi_floor=1e-6) == 1e-6
+def test_exposure_dispersion_clips_to_ceil():
+    # Extreme heterogeneity ⇒ dispersion pinned at the ceiling.
+    omega = np.array([1e-4, 1e-4, 1e4, 1e4])
+    log_omega_var = np.full(4, 1.0)
+    disp = update_exposure_dispersion(omega, log_omega_var, floor=1e-8, ceil=50.0)
+    assert disp == 50.0
+
+
+def test_exposure_dispersion_empty_is_finite():
+    disp = update_exposure_dispersion(np.array([]), np.array([]), floor=1e-8)
+    assert disp > 0.0
 
 
 def test_fit_rho_d_bb_balanced_is_small():

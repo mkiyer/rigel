@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 import rigel.calibration as cal
 
 EXPECTED_NAMES = [
@@ -16,6 +14,7 @@ EXPECTED_NAMES = [
     "CalibrationConvergenceError",
     "calibrate",
     "assemble_priors",
+    "LocusPriors",
 ]
 
 
@@ -30,7 +29,8 @@ def test_error_types():
     assert issubclass(cal.CalibrationConvergenceError, RuntimeError)
 
 
-def test_assemble_priors_still_stubbed():
-    # The locus-prior bridge lands in PR 6; everything else is implemented.
-    with pytest.raises(NotImplementedError):
-        cal.assemble_priors()
+def test_assemble_priors_implemented():
+    # The locus-prior bridge landed in PR 6: assemble_priors is a real callable
+    # and LocusPriors is its dataclass result (behavior tested in test_priors.py).
+    assert callable(cal.assemble_priors)
+    assert hasattr(cal.LocusPriors, "__dataclass_fields__")

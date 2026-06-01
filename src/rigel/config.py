@@ -62,6 +62,11 @@ class EMConfig:
     Ignored when the C++ extension was built without OpenMP.
     """
     rna_call_bias: float = 0.5
+    prior_weight: float = 1.0
+    """Multiplier on the calibration-derived per-locus prior (the κ of
+    ``docs/acc_caljointmodel/prs/PR06_integrate.md`` §I.2). ``1.0`` (default)
+    means the prior carries exactly the deconvolved per-locus gDNA/RNA mass;
+    ``< 1`` down-weights the prior vs the fragment likelihoods, ``> 1`` up-weights."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
@@ -70,6 +75,10 @@ class EMConfig:
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
         if not (0.0 < float(self.rna_call_bias) < 1.0):
             raise ValueError(f"EMConfig.rna_call_bias must be in (0, 1); got {self.rna_call_bias}.")
+        if not (0.0 <= float(self.prior_weight) < float("inf")):
+            raise ValueError(
+                f"EMConfig.prior_weight must be finite and >= 0; got {self.prior_weight}."
+            )
 
 
 # ======================================================================
@@ -230,15 +239,16 @@ class CalibrationConfig:
     #: ``_TOL_MASS``).
     mass_rel_tol: float = 1.0e-4
 
-    #: Numerical floor on the NB dispersion φ (the Newton M-step searches
-    #: ``(phi_floor, 100)``). φ enters only as ``1/φ``; this floor keeps every
-    #: ``1/φ`` channel accurate. Empirically (scripts/debug/phi_floor_exploration.py)
-    #: the NB count channel converges to its Poisson limit accurately down to
-    #: φ≈1e-10 and the Newton gradient to φ≈1e-8, with precision noise taking
-    #: over at φ≤1e-11. 1e-8 is the smallest safe value: ~1000× margin to the
-    #: cliff, <1e-6 relative error in every channel, and below any dispersion
-    #: real data resolves (φ<1e-6 is already Poisson-indistinguishable).
-    phi_floor: float = 1.0e-8
+    #: Numerical floor on the exposure dispersion (the NB count overdispersion ≡
+    #: variance of the per-region gDNA exposure; was ``phi_floor``). The
+    #: dispersion enters elsewhere only as ``1/dispersion``; this floor keeps that
+    #: channel accurate as the dispersion → 0 (the Poisson limit). Empirically
+    #: (scripts/debug/phi_floor_exploration.py) the count channel reaches its
+    #: Poisson limit accurately down to ≈1e-10, with precision noise below ≈1e-11.
+    #: 1e-8 is the smallest safe value: ~1000× margin to that cliff, <1e-6
+    #: relative error in every channel, and below any dispersion real data
+    #: resolves (a value <1e-6 is already Poisson-indistinguishable).
+    exposure_dispersion_floor: float = 1.0e-8
 
     def __post_init__(self) -> None:
         if self.max_outer_iterations < 1:
@@ -250,8 +260,11 @@ class CalibrationConfig:
             raise ValueError(
                 f"CalibrationConfig.mass_rel_tol must be > 0; got {self.mass_rel_tol}."
             )
-        if self.phi_floor <= 0.0:
-            raise ValueError(f"CalibrationConfig.phi_floor must be > 0; got {self.phi_floor}.")
+        if self.exposure_dispersion_floor <= 0.0:
+            raise ValueError(
+                "CalibrationConfig.exposure_dispersion_floor must be > 0; "
+                f"got {self.exposure_dispersion_floor}."
+            )
 
 
 @dataclass(frozen=True)

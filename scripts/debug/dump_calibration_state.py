@@ -69,7 +69,7 @@ def main() -> None:
     print(f"iterations       : {result.n_iterations}  converged={result.converged}")
     print(f"mass_change      : {np.array2string(result.mass_change_history, precision=4)}")
     print("hyperparameters  :")
-    print(f"  rho_0   = {result.rho_0:.6g}     phi   = {result.phi:.6g}")
+    print(f"  rho_0   = {result.rho_0:.6g}     exposure_dispersion = {result.exposure_dispersion:.6g}")
     print(f"  rho_d_bb= {result.rho_d_bb:.4g}  eps_s = {result.eps_s:.4g}")
     print(f"  kappa_rna={result.kappa_rna:.4g}  rho_r_bb={result.rho_r_bb:.4g}  (fixed, PR 3)")
     print(

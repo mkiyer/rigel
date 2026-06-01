@@ -12,10 +12,9 @@ models from unique-mapper fragments, and buffer all resolved fragments into
 a memory-efficient columnar buffer (``FragmentBuffer``).
 
 **Quantification** (``quant_from_buffer``): score buffered fragments,
-construct MultiLoci, calibrate gDNA/RNA contamination, assemble per-locus
-Dirichlet priors, partition the CSR data, and run locus-level native EM.
-(The v6 calibrator + locus-prior consumer are pending — see
-``docs/acc_caljointmodel/``.)
+construct MultiLoci, assemble the per-locus gDNA/RNA split prior from the
+calibration result (``calibration.priors.assemble_priors``), partition the
+CSR data, and run locus-level native EM.
 
 Scoring functions live in ``scoring.py``.  Locus construction and EM
 initialization live in ``locus.py``.  The CSR builder lives in
@@ -44,7 +43,7 @@ from .config import (
     TranscriptGeometry,
 )
 from .estimator import AbundanceEstimator
-from .frag_length_model import FragmentLengthModels
+from .frag_length_model import FragmentLengthModel, FragmentLengthModels
 from .index import TranscriptIndex
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
@@ -56,6 +55,8 @@ from .strand_model import StrandModels
 if TYPE_CHECKING:
     from .annotate import AnnotationTable
     from .calibration import CalibrationResult
+    from .calibration.fl import FLModels
+    from .calibration.region_arrays import RegionArrays
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
@@ -572,11 +573,124 @@ def _populate_em_annotations(
     )
 
 
+def _run_locus_em_partitioned(
+    estimator: AbundanceEstimator,
+    partitions: dict,
+    multi_loci: list,
+    index: TranscriptIndex,
+    alpha_gdna_add: np.ndarray,
+    alpha_rna_add: np.ndarray,
+    gdna_eff_len: np.ndarray,
+    *,
+    em_config: EMConfig,
+    annotations: "AnnotationTable | None" = None,
+    emit_locus_stats: bool = False,
+) -> None:
+    """Run the per-locus batch EM and record lean per-locus results.
+
+    Packs each ``LocusPartition`` into the C++ 9-tuple, runs the whole batch in
+    one ``run_batch_locus_em_partitioned`` call (the solver is OpenMP-parallel
+    internally), and appends a per-locus dict to ``estimator.locus_results`` for
+    ``get_loci_df``. The calibration prior enters as the two per-locus alpha
+    scalars; ``enable_gdna`` is the structural eligibility (any unspliced unit
+    carrying a finite gDNA log-lik — the rule the C++ extractor uses).
+    """
+    if not multi_loci:
+        return
+
+    parts = [partitions[loc.multi_locus_id] for loc in multi_loci]
+    partition_tuples = [
+        (
+            p.offsets,
+            p.t_indices,
+            p.log_liks,
+            p.coverage_weights,
+            p.count_cols,
+            p.is_spliced,
+            p.gdna_log_liks,
+            p.locus_t_indices,
+            p.locus_count_cols,
+        )
+        for p in parts
+    ]
+    locus_t_lists = [loc.transcript_indices for loc in multi_loci]
+    ids = [loc.multi_locus_id for loc in multi_loci]
+    alpha_g = np.ascontiguousarray(alpha_gdna_add[ids], dtype=np.float64)
+    alpha_r = np.ascontiguousarray(alpha_rna_add[ids], dtype=np.float64)
+    g_eff = np.ascontiguousarray(gdna_eff_len[ids], dtype=np.float64)
+    enable_gdna = np.array(
+        [
+            bool(p.is_spliced.size)
+            and bool(np.any((p.is_spliced == 0) & np.isfinite(p.gdna_log_liks)))
+            for p in parts
+        ],
+        dtype=np.uint8,
+    )
+
+    em_result = estimator.run_batch_locus_em_partitioned(
+        partition_tuples,
+        locus_t_lists,
+        alpha_g,
+        index,
+        rna_prior_count=alpha_r,
+        gdna_eff_len=g_eff,
+        enable_gdna=enable_gdna,
+        em_iterations=em_config.iterations,
+        em_convergence_delta=em_config.convergence_delta,
+        emit_locus_stats=emit_locus_stats,
+        emit_assignments=annotations is not None,
+    )
+    total_gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
+    if annotations is not None and len(em_result) > 3:
+        _populate_em_annotations(
+            parts, em_result[3], em_result[4], em_result[5], annotations, index
+        )
+
+    t_to_g = index.t_to_g_arr
+    if "is_synthetic" in index.g_df.columns:
+        is_synth_g = index.g_df["is_synthetic"].to_numpy()
+    else:
+        is_synth_g = np.zeros(len(index.g_df), dtype=bool)
+
+    for i, loc in enumerate(multi_loci):
+        lid = loc.multi_locus_id
+        gene_set = {
+            int(t_to_g[int(t)])
+            for t in loc.transcript_indices
+            if not is_synth_g[int(t_to_g[int(t)])]
+        }
+        estimator.locus_results.append(
+            {
+                "locus_id": lid,
+                "locus_span_bp": loc.gdna_span,
+                "n_transcripts": len(loc.transcript_indices),
+                "n_genes": len(gene_set),
+                "n_em_fragments": len(loc.unit_indices),
+                "rna_total": float(rna_arr[i]),
+                "gdna": float(gdna_arr[i]),
+                "alpha_gdna_add": float(alpha_gdna_add[lid]),
+                "alpha_rna_add": float(alpha_rna_add[lid]),
+                "enable_gdna": int(enable_gdna[i]),
+                "gdna_eff_len_em": float(gdna_eff_len[lid]),
+            }
+        )
+
+    estimator._gdna_em_total = total_gdna_em
+    n_units = sum(len(loc.unit_indices) for loc in multi_loci)
+    logger.info(
+        "[DONE] Per-locus EM: %d loci, %d ambiguous fragments, gDNA EM=%.0f",
+        len(multi_loci),
+        n_units,
+        total_gdna_em,
+    )
+
+
 def quant_from_buffer(
     buffer: FragmentBuffer,
     index: TranscriptIndex,
     strand_models: StrandModels,
-    frag_length_models: FragmentLengthModels,
+    fl_models: "FLModels",
+    region_arrays: "RegionArrays",
     stats: PipelineStats,
     calibration: "CalibrationResult",
     calibration_payload: "object",
@@ -587,18 +701,64 @@ def quant_from_buffer(
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Quantify buffered fragments with locus EM.
+    """Quantify buffered fragments: calibration prior → per-locus EM (PR 6).
 
-    The v5 calibration-consumer wiring was removed in the burn-down; the
-    new locus-prior consumer (and the payload → calibrate → priors → EM
-    wiring) lands in PR 6 — see
-    ``docs/acc_caljointmodel/00_implementation_plan.md``.
+    Scores the buffer (RNA/gDNA FL models built from the calibrated pmfs),
+    builds connected-component loci, turns the per-region ``CalibrationResult``
+    into the per-locus gDNA/RNA split prior (``assemble_priors``), partitions
+    the global CSR, and runs the per-locus EM. Returns the populated
+    ``AbundanceEstimator`` and the (unchanged) ``CalibrationResult``.
     """
-    raise NotImplementedError(
-        "quant_from_buffer is stubbed during the calibration-v6 rebuild. "
-        "The new locus-prior consumer (rigel.calibration.priors.assemble_priors) "
-        "lands in PR 6 — see docs/acc_caljointmodel/00_implementation_plan.md."
+    from .calibration.priors import assemble_priors
+    from .locus import build_multi_loci
+    from .locus_partition import partition_and_free
+
+    em_config = em_config or EMConfig()
+    scoring_cfg = scoring or FragmentScoringConfig()
+
+    # Scorer FL models from the calibrated pmfs (PR 4c FLModels → scoring LUTs).
+    rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
+    gdna_fl = FragmentLengthModel.from_pmf(fl_models.gdna_pmf, fl_models.max_size)
+
+    geometry, estimator = _setup_geometry_and_estimator(index, rna_fl, em_config)
+
+    em_data = _score_fragments(
+        buffer,
+        index,
+        strand_models,
+        rna_fl,
+        gdna_fl,
+        stats,
+        estimator,
+        scoring_cfg,
+        log_every,
+        annotations,
     )
+
+    multi_loci = build_multi_loci(em_data, index)
+    _assign_locus_ids(estimator, multi_loci)
+
+    if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
+        return estimator, calibration
+
+    priors = assemble_priors(
+        calibration, region_arrays, multi_loci, prior_weight=em_config.prior_weight
+    )
+    partitions = partition_and_free(em_data, multi_loci)
+    _run_locus_em_partitioned(
+        estimator,
+        partitions,
+        multi_loci,
+        index,
+        priors.alpha_gdna_add,
+        priors.alpha_rna_add,
+        priors.gdna_eff_len,
+        em_config=em_config,
+        annotations=annotations,
+        emit_locus_stats=emit_locus_stats,
+    )
+    del partitions
+    return estimator, calibration
 
 
 # ---------------------------------------------------------------------------
@@ -703,34 +863,82 @@ def run_pipeline(
         float(np.dot(_bins, fl_models.global_pmf)),
     )
 
-    try:
-        calibration = calibrate(
-            payload=calibration_payload,
-            region_arrays=region_arrays,
-            strand_model=strand_models,
-            gdna_fl_pmf=gdna_fl_pmf,
-            config=config.calibration,
-        )
-    finally:
-        buffer.cleanup()
+    # NOTE: the buffer is NOT freed here — quant_from_buffer scans it below.
+    calibration = calibrate(
+        payload=calibration_payload,
+        region_arrays=region_arrays,
+        strand_model=strand_models,
+        gdna_fl_pmf=gdna_fl_pmf,
+        config=config.calibration,
+    )
 
     logger.info(
-        "calibration: R=%d iters=%d converged=%s rho_0=%.4g phi=%.4g "
+        "calibration: R=%d iters=%d converged=%s rho_0=%.4g exp_disp=%.4g "
         "rho_d_BB=%.4g kappa_rna=%.4g rho_r_BB=%.4g eps_s=%.4g",
         calibration.n_regions,
         calibration.n_iterations,
         calibration.converged,
         calibration.rho_0,
-        calibration.phi,
+        calibration.exposure_dispersion,
         calibration.rho_d_bb,
         calibration.kappa_rna,
         calibration.rho_r_bb,
         calibration.eps_s,
     )
 
-    # payload → calibrate → priors → EM (quant_from_buffer) is rewritten in PR 6;
-    # until then the pipeline stops here, after calibration has produced a result.
-    raise NotImplementedError(
-        "run_pipeline post-calibration wiring (quant_from_buffer) lands in PR 6 — "
-        "see docs/acc_caljointmodel/00_implementation_plan.md."
+    # -- Quantification: calibration prior → per-locus EM --
+    # Annotation table for the optional second BAM pass (opt-in).
+    annotations = None
+    if config.annotated_bam_path is not None:
+        from .annotate import AnnotationTable
+
+        annotations = AnnotationTable.create(
+            capacity=max(
+                buffer.total_fragments + _ANNOTATION_TABLE_PADDING,
+                _ANNOTATION_TABLE_MIN_CAPACITY,
+            )
+        )
+
+    try:
+        estimator, calibration = quant_from_buffer(
+            buffer,
+            index,
+            strand_models,
+            fl_models,
+            region_arrays,
+            stats,
+            calibration,
+            calibration_payload,
+            em_config=config.em,
+            scoring=config.scoring,
+            log_every=scan.log_every,
+            annotations=annotations,
+            emit_locus_stats=config.emit_locus_stats,
+        )
+    finally:
+        buffer.cleanup()
+
+    # -- Second BAM pass: write annotated BAM (opt-in) --
+    if config.annotated_bam_path is not None and annotations is not None:
+        from .annotate import write_annotated_bam
+
+        write_annotated_bam(
+            bam_path,
+            str(config.annotated_bam_path),
+            annotations,
+            index,
+            skip_duplicates=scan.skip_duplicates,
+            include_multimap=scan.include_multimap,
+            sj_strand_tag=scan.sj_strand_tag,
+            locus_id_per_transcript=estimator.locus_id_per_transcript,
+        )
+
+    return PipelineResult(
+        stats=stats,
+        strand_models=strand_models,
+        frag_length_models=frag_length_models,
+        estimator=estimator,
+        pipeline_config=config,
+        calibration=calibration,
+        calibration_payload=calibration_payload,
     )

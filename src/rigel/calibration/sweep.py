@@ -99,7 +99,7 @@ def sweep_ambig_exposure(
     region_eff_len: np.ndarray,
     mu_fl: float,
     rho_0: float,
-    phi: float,
+    exposure_dispersion: float,
     base_omega: np.ndarray,
     base_log_omega_var: np.ndarray,
 ) -> SweepResult:
@@ -107,7 +107,7 @@ def sweep_ambig_exposure(
     ts_class = np.asarray(substrate.ts_class)
     ref_id = np.asarray(region_arrays.ref_id)
     ref_offsets = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    inv_phi = 1.0 / phi
+    inv_dispersion = 1.0 / exposure_dispersion
 
     omega = np.array(base_omega, dtype=np.float64, copy=True)
     log_omega_var = np.array(base_log_omega_var, dtype=np.float64, copy=True)
@@ -163,8 +163,8 @@ def sweep_ambig_exposure(
     alpha_swept = a_reg + from_left_a + from_right_a
     beta_swept = b_reg + from_left_b + from_right_b
     ambig = ts_class == TS_AMBIG
-    alpha_post = inv_phi + alpha_swept[ambig]
-    omega[ambig] = alpha_post / (inv_phi + rho_0 * beta_swept[ambig])
+    alpha_post = inv_dispersion + alpha_swept[ambig]
+    omega[ambig] = alpha_post / (inv_dispersion + rho_0 * beta_swept[ambig])
     log_omega_var[ambig] = 1.0 / alpha_post
     return SweepResult(omega=omega, log_omega_var=log_omega_var, n_ambig=int(ambig.sum()))
 

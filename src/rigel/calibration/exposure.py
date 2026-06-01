@@ -43,13 +43,17 @@ def exposure_posterior(
     *,
     rho_0: float,
     L_eff: np.ndarray,
-    phi: float,
+    exposure_dispersion: float,
 ) -> Exposure:
-    """Closed-form Gamma exposure posterior with D1 side-attribution (no ½)."""
-    inv_phi = 1.0 / phi
+    """Closed-form Gamma exposure posterior with D1 side-attribution (no ½).
+
+    ``exposure_dispersion`` is the variance of the exposure prior
+    ``ω ~ Gamma(s, s)`` with shape/rate ``s = 1/exposure_dispersion`` (was ``φ``).
+    """
+    inv_disp = 1.0 / exposure_dispersion
     m_g_tot = m_g_contained + m_g_left + m_g_right
-    alpha_post = inv_phi + m_g_tot
-    beta_post = inv_phi + rho_0 * np.asarray(L_eff, dtype=np.float64)
+    alpha_post = inv_disp + m_g_tot
+    beta_post = inv_disp + rho_0 * np.asarray(L_eff, dtype=np.float64)
     return Exposure(
         omega=alpha_post / beta_post,
         log_omega_var=1.0 / alpha_post,

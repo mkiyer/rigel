@@ -32,7 +32,13 @@ from .density import estimate_gdna_density
 from .effective_length import boundary_eff_length, region_eff_length
 from .estep import estep_view
 from .exposure import exposure_posterior
-from .mstep import fit_phi, fit_rho_d_bb, update_eps_s, update_pi_g_prior, update_rho_0
+from .mstep import (
+    fit_rho_d_bb,
+    update_eps_s,
+    update_exposure_dispersion,
+    update_pi_g_prior,
+    update_rho_0,
+)
 from .result import CalibrationResult
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
@@ -61,24 +67,26 @@ def initial_hyperparameters(
     substrate: CalibrationSubstrate,
     config: "CalibrationConfig",
 ) -> tuple[float, float, float]:
-    """Doc 03 §7 data-driven initial hyperparameters ``(φ, ρ_d_bb, ε_s)``.
+    """Doc 03 §7 data-driven initial hyperparameters ``(exposure_dispersion, ρ_d_bb, ε_s)``.
 
-    ``φ`` is the NB moment estimator, floored to stay valid with little/no data.
-    Reused as the PR 5 outer-loop warm start. ``ρ_0`` comes from
-    :func:`rigel.calibration.density.estimate_gdna_density`; ``κ_rna`` / ``ρ_r_bb``
-    from the strand-balance model — neither is computed here.
+    The ``exposure_dispersion`` seed is the NB moment estimator on the contained
+    unspliced counts, floored to stay valid with little/no data — just a warm
+    start; the outer-loop EM M-step (:func:`update_exposure_dispersion`) takes
+    over. ``ρ_0`` comes from :func:`rigel.calibration.density.estimate_gdna_density`;
+    ``κ_rna`` / ``ρ_r_bb`` from the strand-balance model — neither is computed here.
     """
     n_u = substrate.contained.n_unspliced.astype(np.float64)
     total_n = float(n_u.sum())
+    floor = config.exposure_dispersion_floor
 
     if total_n > 0.0 and n_u.size > 1:
         mean = float(n_u.mean())
-        phi = float(n_u.var()) / mean**2 - 1.0 / mean if mean > 0.0 else config.phi_floor
+        exposure_dispersion = float(n_u.var()) / mean**2 - 1.0 / mean if mean > 0.0 else floor
     else:
-        phi = config.phi_floor
-    phi = max(phi, config.phi_floor)
+        exposure_dispersion = floor
+    exposure_dispersion = max(exposure_dispersion, floor)
 
-    return phi, _RHO_D_BB_INIT, _EPS_S_INIT
+    return exposure_dispersion, _RHO_D_BB_INIT, _EPS_S_INIT
 
 
 def calibrate(
@@ -96,7 +104,7 @@ def calibrate(
 
     # --- Initial hyperparameters ---
     rho_0 = estimate_gdna_density(substrate, region_arrays).rho_0  # ρ_0 seed (PR 4c §III.2)
-    phi, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
+    exposure_dispersion, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
     strand = fit_strand_balance(substrate, strand_model)  # κ_rna, ρ_r_bb fixed (PR 3 / III.1)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
 
@@ -108,7 +116,7 @@ def calibrate(
 
     # --- Outer EM loop (doc 03 §1) ---
     omega = np.ones(r, dtype=np.float64)
-    log_omega_var = np.full(r, phi, dtype=np.float64)
+    log_omega_var = np.full(r, exposure_dispersion, dtype=np.float64)
     pi_g_prior = np.full(r, _PI_G_PRIOR_INIT, dtype=np.float64)
     m_d_cont = np.zeros(r, dtype=np.float64)
     m_d_left = np.zeros(r, dtype=np.float64)
@@ -126,7 +134,7 @@ def calibrate(
         shared = dict(
             omega=omega,
             rho_0=rho_0,
-            phi=phi,
+            exposure_dispersion=exposure_dispersion,
             kappa_rna=kappa_rna,
             rho_r_bb=rho_r_bb,
             rho_d_bb=rho_d_bb,
@@ -147,7 +155,12 @@ def calibrate(
 
         # Exposure (G4, physical L) + AMBIG sweep (PR 4b).
         exposure = exposure_posterior(
-            contained.m_g, left.m_g, right.m_g, rho_0=rho_0, L_eff=l_phys, phi=phi
+            contained.m_g,
+            left.m_g,
+            right.m_g,
+            rho_0=rho_0,
+            L_eff=l_phys,
+            exposure_dispersion=exposure_dispersion,
         )
         swept = sweep_ambig_exposure(
             substrate,
@@ -158,18 +171,22 @@ def calibrate(
             region_eff_len=region_eff_len,
             mu_fl=mu_fl,
             rho_0=rho_0,
-            phi=phi,
+            exposure_dispersion=exposure_dispersion,
             base_omega=exposure.omega,
             base_log_omega_var=exposure.log_omega_var,
         )
         omega = swept.omega
         log_omega_var = swept.log_omega_var
 
-        # --- M-step (doc 03 §5): fit ρ_0, ε_s, φ, ρ_d_bb (κ_rna/ρ_r_bb fixed) ---
+        # --- M-step (doc 03 §5): fit ρ_0, ε_s, exposure_dispersion, ρ_d_bb (κ_rna/ρ_r_bb fixed) ---
         rho_0 = update_rho_0(exposure.m_g_tot, omega, l_phys)
         eps_s = update_eps_s(contained.pi_g, n_spliced_cont)
-        mu_g_cont = omega * rho_0 * region_eff_len
-        phi = fit_phi(n_u_cont, mu_g_cont, contained.m_d_unspl, phi_floor=config.phi_floor)
+        # Exposure dispersion: the proper EM M-step from the (pre-sweep) Gamma
+        # exposure posteriors — NOT a count-NB fit. This is what breaks the φ
+        # limit cycle (docs/acc_caljointmodel/calibration_oscillation_diagnosis.md).
+        exposure_dispersion = update_exposure_dispersion(
+            exposure.omega, exposure.log_omega_var, floor=config.exposure_dispersion_floor
+        )
         k_plus_g = np.maximum(
             contained.k_sense.astype(np.float64) - kappa_rna * contained.m_d_unspl, 0.0
         )
@@ -190,10 +207,10 @@ def calibrate(
         mass_changes.append(delta)
         m_g_tot_prev = m_g_tot.copy()
         logger.debug(
-            "[CAL iter %d] rho_0=%.4g phi=%.4g rho_d_bb=%.4g eps_s=%.4g delta=%.4g",
+            "[CAL iter %d] rho_0=%.4g exp_disp=%.4g rho_d_bb=%.4g eps_s=%.4g delta=%.4g",
             it,
             rho_0,
-            phi,
+            exposure_dispersion,
             rho_d_bb,
             eps_s,
             delta,
@@ -220,7 +237,7 @@ def calibrate(
         omega=omega,
         log_omega_var=log_omega_var,
         rho_0=rho_0,
-        phi=phi,
+        exposure_dispersion=exposure_dispersion,
         rho_d_bb=rho_d_bb,
         kappa_rna=kappa_rna,
         rho_r_bb=rho_r_bb,

@@ -67,7 +67,7 @@ def _sense_flux(view: "SubstrateView", ts_class: np.ndarray) -> np.ndarray:
 
 
 def _llr_count(
-    n_u: np.ndarray, mu_g: np.ndarray, m_d_prev: np.ndarray, inv_phi: float
+    n_u: np.ndarray, mu_g: np.ndarray, m_d_prev: np.ndarray, inv_dispersion: float
 ) -> np.ndarray:
     """NB log-Bayes-factor: gDNA-only mean μ_g vs mixture μ_g + μ_d (doc 03 §3.1).
 
@@ -79,10 +79,10 @@ def _llr_count(
     if not np.any(live):
         return np.zeros(n_u.shape, dtype=np.float64)
     mu_mix = mu_g + m_d_prev
-    p_g = inv_phi / (inv_phi + mu_g)
-    p_mix = inv_phi / (inv_phi + mu_mix)
-    ll_g = nbinom.logpmf(n_u, inv_phi, p_g)
-    ll_mix = nbinom.logpmf(n_u, inv_phi, p_mix)
+    p_g = inv_dispersion / (inv_dispersion + mu_g)
+    p_mix = inv_dispersion / (inv_dispersion + mu_mix)
+    ll_g = nbinom.logpmf(n_u, inv_dispersion, p_g)
+    ll_mix = nbinom.logpmf(n_u, inv_dispersion, p_mix)
     return np.where(live, ll_g - ll_mix, 0.0)
 
 
@@ -124,7 +124,7 @@ def estep_view(
     omega: np.ndarray,
     rho_0: float,
     L_eff: np.ndarray,
-    phi: float,
+    exposure_dispersion: float,
     kappa_rna: float,
     rho_r_bb: float,
     rho_d_bb: float,
@@ -133,12 +133,12 @@ def estep_view(
     m_d_unspl_prev: np.ndarray,
 ) -> Allocation:
     """Soft-allocate one view's mass into gDNA / RNA (doc 03 §3.3–3.6)."""
-    inv_phi = 1.0 / phi
+    inv_dispersion = 1.0 / exposure_dispersion
     mu_g = omega * rho_0 * L_eff
     n_u = view.n_unspliced  # int64 flux — drives the log-Bayes-factors (D1)
     k_sense = _sense_flux(view, ts_class)
 
-    llr_count = _llr_count(n_u.astype(np.float64), mu_g, m_d_unspl_prev, inv_phi)
+    llr_count = _llr_count(n_u.astype(np.float64), mu_g, m_d_unspl_prev, inv_dispersion)
     llr_strand = _llr_strand(
         k_sense, n_u, ts_class, kappa_rna=kappa_rna, rho_r_bb=rho_r_bb, rho_d_bb=rho_d_bb
     )

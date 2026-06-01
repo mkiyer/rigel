@@ -23,7 +23,7 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         omega=o.copy(),
         log_omega_var=o.copy(),
         rho_0=1e-3,
-        phi=0.2,
+        exposure_dispersion=0.2,
         rho_d_bb=0.01,
         kappa_rna=0.9,
         rho_r_bb=0.01,
@@ -73,7 +73,7 @@ def test_rejects_length_mismatch():
     "field,value",
     [
         ("rho_0", 0.0),
-        ("phi", -1.0),
+        ("exposure_dispersion", -1.0),
         ("rho_d_bb", 1.5),
         ("kappa_rna", 0.0),
         ("rho_r_bb", 0.0),

@@ -61,7 +61,7 @@ class CalibrationResult:
 
     # --- library hyperparameters ---
     rho_0: float  # > 0
-    phi: float  # > 0  (NB dispersion = Gamma exposure prior shape)
+    exposure_dispersion: float  # > 0  (NB count overdispersion ≡ Var of the per-region exposure ω)
     rho_d_bb: float  # in (0, 1), gDNA strand BB dispersion (kappa_d = 0.5 fixed)
     kappa_rna: float  # in (0, 1), RNA sense mean (from StrandModel; PR 3)
     rho_r_bb: float  # in (0, 1), RNA strand BB dispersion (fit by PR 3)
@@ -95,8 +95,10 @@ class CalibrationResult:
 
         if not self.rho_0 > 0.0:
             raise ValueError(f"CalibrationResult.rho_0 must be > 0; got {self.rho_0}.")
-        if not self.phi > 0.0:
-            raise ValueError(f"CalibrationResult.phi must be > 0; got {self.phi}.")
+        if not self.exposure_dispersion > 0.0:
+            raise ValueError(
+                f"CalibrationResult.exposure_dispersion must be > 0; got {self.exposure_dispersion}."
+            )
         for name in ("rho_d_bb", "kappa_rna", "rho_r_bb", "eps_s"):
             value = float(getattr(self, name))
             if not 0.0 < value < 1.0:

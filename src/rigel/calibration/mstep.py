@@ -1,30 +1,38 @@
 """M-step — fit the library hyperparameters (doc 03 §5).
 
 Each outer iteration, after the E-step soft-allocation and the exposure update,
-the M-step re-estimates the library-wide hyperparameters from the soft-allocated
-masses. ``ρ_0`` and ``ε_s`` are closed forms; ``φ`` and ``ρ_d_bb`` are single
-global scalars found by a bounded 1-D minimiser on their negative log-likelihood
-(``scipy.optimize.minimize_scalar``). ``κ_rna`` and ``ρ_r_bb`` are **not** fit
-here — they come from the clean spliced channel (PR 3) and do not change with the
-EM (PR05 §III.1); ``κ_d = 0.5`` is biology.
+the M-step re-estimates the library-wide hyperparameters. ``ρ_0`` and ``ε_s`` are
+closed forms; the **exposure dispersion** (the NB count overdispersion ≡ the
+variance of the per-region gDNA exposure ω) is the proper EM update for the
+Gamma exposure-prior shape, solved from the exposure posteriors
+(:func:`update_exposure_dispersion`); ``ρ_d_bb`` is a bounded 1-D minimiser on
+its negative log-likelihood. ``κ_rna`` and ``ρ_r_bb`` are **not** fit here — they
+come from the clean spliced channel (PR 3) and do not change with the EM (PR05
+§III.1); ``κ_d = 0.5`` is biology.
 
-Constants (PR05 §II.1, Q6): ``_PHI_MAX`` (NB-overdispersion ceiling),
-``_EPS_S_PRIOR`` (the Beta(1,1) unit pseudo-count), ``_PI_FLOOR`` (the
-no-divide-by-zero floor in the π_g-prior update). The φ lower bound and the BB
-bounds reuse ``config.phi_floor`` (PR 2) and ``_BB_FLOOR`` (PR 3).
+Constants (PR05 §II.1, Q6): ``_EXPOSURE_DISPERSION_MAX`` (the exposure-dispersion
+ceiling), ``_EPS_S_PRIOR`` (the Beta(1,1) unit pseudo-count), ``_PI_FLOOR`` (the
+no-divide-by-zero floor in the π_g-prior update). The exposure-dispersion lower
+bound and the BB bounds reuse ``config.exposure_dispersion_floor`` (PR 2) and
+``_BB_FLOOR`` (PR 3).
 """
 
 from __future__ import annotations
 
 import numpy as np
 from scipy.optimize import minimize_scalar
-from scipy.stats import betabinom, nbinom
+from scipy.special import digamma
+from scipy.stats import betabinom
 
 from .estep import _PI_CLIP
 from .strand_balance import _BB_FLOOR
 
-# NB-overdispersion ceiling for the φ minimiser (doc 03 §8 `(1e-6, 1e2)`).
-_PHI_MAX = 100.0
+# Upper bound on the exposure dispersion (the NB count overdispersion ≡ variance
+# of the per-region gDNA exposure ω; doc 03 §8). A numerical ceiling only: the
+# dispersion enters elsewhere as 1/dispersion, so capping it keeps that channel
+# well-conditioned even when the per-region gDNA exposure is extremely
+# heterogeneous. (Was ``_PHI_MAX``; see the no-greek-in-code naming preference.)
+_EXPOSURE_DISPERSION_MAX = 100.0
 # Beta(1,1) unit pseudo-count for the ε_s failsafe (doc 03 §5.5).
 _EPS_S_PRIOR = 1.0
 # No-divide-by-zero floor inside the π_g-prior update (doc 03 §5.6 / §8).
@@ -51,25 +59,61 @@ def update_eps_s(pi_g_contained: np.ndarray, n_spliced: np.ndarray) -> float:
     return min(max(num / den, _BB_FLOOR), 1.0 - _BB_FLOOR)
 
 
-def fit_phi(n_u: np.ndarray, mu_g: np.ndarray, m_d_unspl: np.ndarray, *, phi_floor: float) -> float:
-    """φ via a bounded 1-D minimiser on the NB NLL (doc 03 §5.4).
+def update_exposure_dispersion(
+    omega: np.ndarray,
+    log_omega_var: np.ndarray,
+    *,
+    floor: float,
+    ceil: float = _EXPOSURE_DISPERSION_MAX,
+) -> float:
+    """EM M-step for the exposure dispersion (doc 03 §5.4; oscillation diagnosis).
 
-    Treats the mixture mean μ = μ_g + μ_d as known (plug-in); a single global
-    scalar on ``(phi_floor, _PHI_MAX)``.
+    The "exposure dispersion" is the NB count overdispersion ≡ the variance of
+    the per-region gDNA exposure ``ω`` (``ω ~ Gamma(s, s)`` with shape/rate
+    ``s = 1/dispersion``, so ``E[ω]=1``, ``Var[ω]=dispersion``). The **proper EM
+    M-step** maximises the expected complete-data log-likelihood, whose only
+    dispersion term is the exposure prior ``Σ_r E[log Gamma(ω_r | s, s)]``. Its
+    stationary condition is the standard Gamma-shape MLE::
+
+        log s − ψ(s) = mean_r( E[ω_r] − E[log ω_r] ) − 1
+
+    using the per-region exposure posteriors ``Gamma(α_r, β_r)`` that
+    :func:`exposure_posterior` already produced — recovered here from its outputs
+    (``α_r = 1/log_omega_var_r``, ``β_r = α_r/ω_r``), so ``E[ω_r] = ω_r`` and
+    ``E[log ω_r] = ψ(α_r) − log β_r``. Solved by monotone bisection on ``s`` (the
+    LHS is positive and strictly decreasing); the dispersion is ``1/s`` clipped to
+    ``[floor, ceil]``.
+
+    Unlike the former count-NB fit, this uses **only** the exposure posteriors —
+    never the raw counts — so empty (zero-count) regions cannot drive the
+    count-misfit feedback that produced the period-2 limit cycle (see
+    ``docs/acc_caljointmodel/calibration_oscillation_diagnosis.md``). EM
+    guarantees a monotone increase of the objective, hence convergence.
     """
-    n = np.asarray(n_u, dtype=np.float64)
-    mu = np.maximum(
-        np.asarray(mu_g, dtype=np.float64) + np.asarray(m_d_unspl, dtype=np.float64), 1e-12
-    )
-    if float(n.sum()) <= 0.0:
-        return phi_floor
+    omega = np.asarray(omega, dtype=np.float64)
+    log_omega_var = np.asarray(log_omega_var, dtype=np.float64)
+    if omega.size == 0:
+        return float(np.clip(1.0, floor, ceil))
 
-    def nll(phi: float) -> float:
-        inv = 1.0 / phi
-        return -float(np.sum(nbinom.logpmf(n, inv, inv / (inv + mu))))
+    alpha = 1.0 / log_omega_var  # α_post  (since log_omega_var = 1/α_post)
+    beta = alpha / omega  # β_post  (since ω = α_post/β_post)
+    e_log_omega = digamma(alpha) - np.log(beta)
+    # c ≥ 0 always: x − log x ≥ 1 ⇒ mean(E[ω] − E[log ω]) ≥ 1 (Jensen).
+    c = float(np.mean(omega - e_log_omega)) - 1.0
+    if not np.isfinite(c) or c <= 0.0:
+        return floor  # s → ∞ ⇒ dispersion → 0
 
-    res = minimize_scalar(nll, bounds=(phi_floor, _PHI_MAX), method="bounded")
-    return float(np.clip(res.x, phi_floor, _PHI_MAX))
+    # Solve log s − ψ(s) = c by geometric bisection over s ∈ [1/ceil, 1/floor];
+    # LHS is strictly decreasing, so the bracket also enforces the [floor, ceil] clip.
+    s_lo, s_hi = 1.0 / ceil, 1.0 / floor
+    for _ in range(100):
+        s_mid = (s_lo * s_hi) ** 0.5
+        if np.log(s_mid) - float(digamma(s_mid)) > c:
+            s_lo = s_mid  # LHS too large ⇒ need larger s
+        else:
+            s_hi = s_mid
+    s = (s_lo * s_hi) ** 0.5
+    return float(np.clip(1.0 / s, floor, ceil))
 
 
 def fit_rho_d_bb(k_plus_g: np.ndarray, n_g: np.ndarray) -> float:
@@ -109,4 +153,10 @@ def update_pi_g_prior(
     return np.clip(prior, _PI_CLIP, 1.0 - _PI_CLIP)
 
 
-__all__ = ["update_rho_0", "update_eps_s", "fit_phi", "fit_rho_d_bb", "update_pi_g_prior"]
+__all__ = [
+    "update_rho_0",
+    "update_eps_s",
+    "update_exposure_dispersion",
+    "fit_rho_d_bb",
+    "update_pi_g_prior",
+]

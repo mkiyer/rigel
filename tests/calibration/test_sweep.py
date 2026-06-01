@@ -99,7 +99,7 @@ def _sweep(
     base_omega,
     mu_fl=50.0,
     rho_0=0.1,
-    phi=1.0,
+    exposure_dispersion=1.0,
 ):
     ra = _region_arrays(ts)
     sub = _substrate(ts, left, right)
@@ -114,7 +114,7 @@ def _sweep(
         region_eff_len=np.asarray(region_eff_len, np.float64),
         mu_fl=mu_fl,
         rho_0=rho_0,
-        phi=phi,
+        exposure_dispersion=exposure_dispersion,
         base_omega=np.asarray(base_omega, np.float64),
         base_log_omega_var=base_lov,
     )

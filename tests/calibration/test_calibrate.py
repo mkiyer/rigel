@@ -72,7 +72,7 @@ def test_masses_bounded_and_exposure_positive():
 def test_fitted_hyperparameters_in_range():
     result = _run()
     assert result.rho_0 > 0.0
-    assert result.phi > 0.0
+    assert result.exposure_dispersion > 0.0
     assert 0.0 < result.rho_d_bb < 1.0
     assert result.kappa_rna == 0.95  # fixed from the StrandModel (PR 3)
     assert 0.0 < result.rho_r_bb < 1.0  # fixed from the spliced channel (PR 3)

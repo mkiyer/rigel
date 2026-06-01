@@ -30,7 +30,7 @@ def _params(r, **overrides):
         omega=np.ones(r),
         rho_0=1.0,
         L_eff=np.full(r, 100.0),
-        phi=0.1,
+        exposure_dispersion=0.1,
         kappa_rna=0.95,
         rho_r_bb=0.05,
         rho_d_bb=0.01,
