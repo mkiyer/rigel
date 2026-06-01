@@ -43,6 +43,15 @@ def channel_idx(spliced: bool, primary: bool) -> int:
     return (2 if spliced else 0) + (0 if primary else 1)
 
 
+# gDNA FL pools (PR 4c): 3 region-types {0=intergenic, 1=intronic, 2=exonic}
+# × 2 compartments {0=contained, 1=boundary}. Matches the C++ fl_pool_idx.
+N_FL_POOLS = 6
+
+
+def fl_pool_idx(region_type: int, boundary: bool) -> int:
+    return int(region_type) * 2 + (1 if boundary else 0)
+
+
 @dataclass
 class Region:
     """One region on a reference. Channels are uint32 counts."""
@@ -88,6 +97,10 @@ class Accumulator:
     boundary_positions: np.ndarray  # int64[N+1], strictly increasing
     regions: list[Region] = field(default_factory=list)
     boundaries: list[Boundary] = field(default_factory=list)
+    # gDNA FL pools (PR 4c): enabled iff region_types (len N) + max_fl > 0.
+    region_types: "np.ndarray | None" = None
+    max_fl: int = 0
+    fl_pool_mass: "np.ndarray | None" = None
 
     def __post_init__(self) -> None:
         n = len(self.boundary_positions) - 1
@@ -97,6 +110,12 @@ class Accumulator:
             self.regions = [Region() for _ in range(n)]
         if not self.boundaries:
             self.boundaries = [Boundary() for _ in range(n + 1)]
+        if self.region_types is not None and self.max_fl > 0 and len(self.region_types) == n:
+            self.fl_pool_mass = np.zeros((N_FL_POOLS, self.max_fl + 1), dtype=np.float64)
+        else:
+            self.region_types = None
+            self.max_fl = 0
+            self.fl_pool_mass = None
 
     # ---- Geometry helpers -------------------------------------------------
 
@@ -168,11 +187,19 @@ class Accumulator:
             return
         inv_L = 1.0 / float(L)
 
+        # gDNA FL pooling (PR 4c): bin the UNSPLICED footprint L; CONTAINED for a
+        # single-region fragment, BOUNDARY (fractional per slice) for a crossing.
+        fl_on = (not spliced) and self.fl_pool_mass is not None
+        fl_bin = min(int(L), self.max_fl) if fl_on else 0
+
         # 3. Single-region (all slices in same region) → contained.
         regions_touched = {sl[0] for sl in slices}
         if len(regions_touched) == 1:
             r = slices[0][0]
             self.regions[r].contained[ch] += np.uint32(1)
+            if fl_on:
+                pool = fl_pool_idx(int(self.region_types[r]), boundary=False)
+                self.fl_pool_mass[pool, fl_bin] += 1.0
             return
 
         # 4. Crossing path. For each consecutive slice pair, deposit on the
@@ -196,6 +223,13 @@ class Accumulator:
             self.boundaries[b_out].flux_left[ch] += np.uint32(1)
             self.boundaries[b_in].mass_right[ch] += np.float32(len_right * inv_L)
             self.boundaries[b_in].flux_right[ch] += np.uint32(1)
+
+        # gDNA FL (crossing): each slice's fractional mass → the BOUNDARY pool of
+        # its region-type, at FL bin = min(footprint, max_fl).
+        if fl_on:
+            for r, start, end in slices:
+                pool = fl_pool_idx(int(self.region_types[r]), boundary=True)
+                self.fl_pool_mass[pool, fl_bin] += (end - start) * inv_L
 
     # ---- Invariants -------------------------------------------------------
 

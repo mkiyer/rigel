@@ -374,3 +374,56 @@ def test_native_matches_reference_intron_skip():
         np.testing.assert_array_equal(ref.boundaries[i].flux_right, nat.boundaries[i].flux_right)
     for i in range(len(ref.regions)):
         np.testing.assert_array_equal(ref.regions[i].contained, nat.regions[i].contained)
+
+
+# --- FL pools (PR 4c): gDNA fragment-length histograms -----------------------
+#
+# Partition [0,100,200,400] → regions (0,100), (100,200), (200,400) with
+# region_types [exon=2, intron=1, intergenic=0]. FL pool index = type*2 +
+# (1 if boundary else 0); gDNA pool = intergenic+intronic, both compartments.
+
+
+def _fl_deposits(acc):
+    # contained in region 2 (intergenic): footprint 50 → INTERGENIC_CONTAINED.
+    acc.deposit(blocks=[(210, 260)], spliced=False, primary=True)
+    # crossing region 1→2 (intron→intergenic): footprint 100, 50/50 each side.
+    acc.deposit(blocks=[(150, 250)], spliced=False, primary=True)
+    # spliced fragment → excluded from FL pools entirely.
+    acc.deposit(blocks=[(10, 50), (110, 150)], spliced=True, primary=True)
+
+
+def _check_fl(acc):
+    fl = np.asarray(acc.fl_pool_mass)
+    assert fl.shape == (6, 1001)
+    np.testing.assert_allclose(fl[0, 50], 1.0)  # INTERGENIC_CONTAINED, bin 50
+    np.testing.assert_allclose(fl[1, 100], 0.5)  # INTERGENIC_BOUNDARY, bin 100
+    np.testing.assert_allclose(fl[3, 100], 0.5)  # INTRONIC_BOUNDARY, bin 100
+    np.testing.assert_allclose(fl.sum(), 2.0)  # 2 unspliced frags; spliced excluded
+
+
+def test_fl_pools_reference():
+    edges = partition_three_adjacent_exons()
+    types = np.array([2, 1, 0], dtype=np.uint8)
+    acc = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
+    _fl_deposits(acc)
+    _check_fl(acc)
+
+
+@XFAIL_NATIVE
+def test_fl_pools_native_matches_reference():
+    edges = partition_three_adjacent_exons()
+    types = np.array([2, 1, 0], dtype=np.uint8)
+    ref = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
+    nat = NativeAccumulator(boundary_positions=edges, region_types=types, max_fl=1000)
+    _fl_deposits(ref)
+    _fl_deposits(nat)
+    np.testing.assert_allclose(np.asarray(nat.fl_pool_mass), ref.fl_pool_mass)
+    _check_fl(nat)
+
+
+@XFAIL_NATIVE
+def test_fl_pools_disabled_without_region_types():
+    edges = partition_three_adjacent_exons()
+    nat = NativeAccumulator(boundary_positions=edges)  # no region_types → FL off
+    nat.deposit(blocks=[(210, 260)], spliced=False, primary=True)
+    assert np.asarray(nat.fl_pool_mass).shape == (6, 0)

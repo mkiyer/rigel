@@ -49,6 +49,10 @@ import numpy as np
 
 N_CHANNELS = 4
 
+#: gDNA FL pools (PR 4c): 3 region-types × 2 compartments. Matches the C++
+#: ``rigel::accumulator::kNFlPools``.
+N_FL_POOLS = 6
+
 
 @dataclass(frozen=True, slots=True)
 class AccumulatorPayload:
@@ -62,6 +66,12 @@ class AccumulatorPayload:
     boundary_flux_left: np.ndarray
     boundary_flux_right: np.ndarray
     n_refs: int
+    # gDNA FL pools (PR 4c): library-wide float64[N_FL_POOLS, fl_max_size + 1]
+    # (region-type {intergenic,intronic,exonic} × compartment {contained,
+    # boundary}), or None when FL pooling was disabled. ``fl_max_size`` is the
+    # max FL bin. Consumed by rigel.calibration.fl.
+    fl_pool_mass: "np.ndarray | None" = None
+    fl_max_size: int = 0
 
     @property
     def n_channels(self) -> int:
@@ -132,6 +142,19 @@ class AccumulatorPayload:
                 f"R_total + nonempty refs ({expected_b_total}) != B_obj_total ({b_total})"
             )
 
+        # gDNA FL pools (PR 4c): flat float64 → (N_FL_POOLS, fl_max_size + 1),
+        # or None when FL pooling was disabled.
+        fl_max_size = int(cal.get("fl_max_size", 0) or 0)
+        fl_raw = cal.get("fl_pool_mass")
+        if fl_raw is None or fl_max_size <= 0:
+            fl_pool_mass = None
+            fl_max_size = 0
+        else:
+            n_fl_pools = int(cal.get("n_fl_pools", N_FL_POOLS))
+            fl_pool_mass = np.ascontiguousarray(fl_raw, dtype=np.float64).reshape(
+                n_fl_pools, fl_max_size + 1
+            )
+
         return cls(
             boundaries=boundaries,
             ref_pos_offsets=ref_pos_offsets,
@@ -143,7 +166,9 @@ class AccumulatorPayload:
             boundary_flux_left=boundary_flux_left,
             boundary_flux_right=boundary_flux_right,
             n_refs=n_refs,
+            fl_pool_mass=fl_pool_mass,
+            fl_max_size=fl_max_size,
         )
 
 
-__all__ = ["AccumulatorPayload", "N_CHANNELS"]
+__all__ = ["AccumulatorPayload", "N_CHANNELS", "N_FL_POOLS"]

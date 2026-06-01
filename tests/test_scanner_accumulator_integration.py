@@ -57,9 +57,7 @@ def _scan(result) -> AccumulatorPayload:
         em=EMConfig(seed=SEED),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
-    _, _, _, _, payload = scan_and_buffer(
-        str(result.bam_path), result.index, config.scan
-    )
+    _, _, _, _, payload = scan_and_buffer(str(result.bam_path), result.index, config.scan)
     return payload
 
 
@@ -72,12 +70,13 @@ class TestScannerAccumulatorIntegration:
 
     def test_payload_shape_matches_index_partition(self, oracle):
         index = oracle.index
-        boundaries, ref_pos_offsets = build_region_partition_arrays(index)
+        boundaries, ref_pos_offsets, region_types = build_region_partition_arrays(index)
         payload = _scan(oracle)
 
         np.testing.assert_array_equal(payload.boundaries, boundaries)
         np.testing.assert_array_equal(payload.ref_pos_offsets, ref_pos_offsets)
         assert payload.n_refs == len(index.ref_names)
+        assert region_types.shape == (payload.r_total,)  # one type per region
 
         # Per-ref: a ref with k boundary positions contributes (k-1) regions
         # and k boundary objects; an empty ref contributes (0, 0).
@@ -86,6 +85,21 @@ class TestScannerAccumulatorIntegration:
         expected_boundaries = int(np.sum(np.where(diffs > 0, diffs, 0)))
         assert payload.r_total == expected_regions
         assert payload.b_obj_total == expected_boundaries
+
+    def test_fl_pools_emitted(self, oracle):
+        # PR 4c: the scan emits the gDNA FL pools (set_regions passes region_types
+        # + fl_max_size), so the payload carries a (N_FL_POOLS, fl_max_size+1) grid.
+        from rigel.calibration.fl import gdna_fl_mass
+        from rigel.scan_payload import N_FL_POOLS
+
+        payload = _scan(oracle)
+        assert payload.fl_pool_mass is not None
+        assert payload.fl_max_size > 0
+        assert payload.fl_pool_mass.shape == (N_FL_POOLS, payload.fl_max_size + 1)
+        # gDNA pool aggregation is well-formed (non-negative, right length).
+        gdna = gdna_fl_mass(payload)
+        assert gdna.shape == (payload.fl_max_size + 1,)
+        assert float(gdna.sum()) >= 0.0
 
     def test_at_least_some_mass_deposited(self, oracle):
         payload = _scan(oracle)

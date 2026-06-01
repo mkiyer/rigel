@@ -48,6 +48,20 @@ inline int channel_idx(bool spliced, bool primary) noexcept {
     return (spliced ? 2 : 0) + (primary ? 0 : 1);
 }
 
+// gDNA fragment-length (FL) pools (PR 4c). Each UNSPLICED fragment's FL mass is
+// binned into one of 6 pools = 3 region-types {0=intergenic, 1=intronic,
+// 2=exonic} × 2 compartments {0=contained, 1=boundary-crossing}. The gDNA FL is
+// later aggregated from the intergenic+intronic pools (both compartments); see
+// rigel.calibration.fl. FL pooling is OPTIONAL — an Accumulator built with empty
+// region_types or max_fl <= 0 skips it entirely (existing behaviour unchanged).
+inline constexpr std::size_t kNRegionTypes    = 3;
+inline constexpr std::size_t kNFlCompartments = 2;
+inline constexpr std::size_t kNFlPools        = kNRegionTypes * kNFlCompartments;  // 6
+
+inline std::size_t fl_pool_idx(std::uint8_t region_type, bool boundary) noexcept {
+    return static_cast<std::size_t>(region_type) * kNFlCompartments + (boundary ? 1u : 0u);
+}
+
 struct Region {
     std::uint32_t contained[kNChannels];  // 16 B
 };
@@ -66,7 +80,13 @@ public:
     /// Construct with a sorted, strictly increasing array of boundary
     /// positions. `boundaries` is moved into the accumulator. Length must
     /// be >= 1; n_regions is `boundaries.size() - 1`.
-    explicit Accumulator(std::vector<std::int64_t> boundaries);
+    ///
+    /// FL pooling (PR 4c) is enabled iff `region_types` is non-empty (its
+    /// length must then equal n_regions) AND `max_fl > 0`; otherwise the FL
+    /// pools stay empty and deposit() does no FL binning.
+    explicit Accumulator(std::vector<std::int64_t> boundaries,
+                         std::vector<std::uint8_t> region_types = {},
+                         int max_fl = 0);
 
     std::size_t n_regions()    const noexcept { return regions_.size(); }
     std::size_t n_boundaries() const noexcept { return boundaries_.size(); }
@@ -82,6 +102,13 @@ public:
     Boundary*       boundaries_data()     noexcept { return boundaries_.data(); }
     const Region*   regions_data()   const noexcept { return regions_.data(); }
     const Boundary* boundaries_data()const noexcept { return boundaries_.data(); }
+
+    /// gDNA FL pools (PR 4c). Flat float64, pool-major: pool `p` occupies
+    /// `[p*(max_fl+1), (p+1)*(max_fl+1))`, FL bin `min(footprint, max_fl)`.
+    /// Empty when FL pooling is disabled.
+    const double* fl_pool_data() const noexcept { return fl_pool_mass_.data(); }
+    std::size_t   fl_pool_size() const noexcept { return fl_pool_mass_.size(); }
+    int           max_fl()       const noexcept { return max_fl_; }
 
     /// Region index containing `pos`, or -1 if `pos` is outside
     /// [boundaries.front(), boundaries.back()).
@@ -105,6 +132,9 @@ private:
     std::vector<std::int64_t> boundary_positions_;  // size = n_regions + 1
     std::vector<Region>       regions_;             // size = n_regions
     std::vector<Boundary>     boundaries_;          // size = n_regions + 1
+    std::vector<std::uint8_t> region_types_;        // size = n_regions, or 0 (FL off)
+    int                       max_fl_ = 0;          // FL pooling off iff <= 0
+    std::vector<double>       fl_pool_mass_;         // kNFlPools*(max_fl+1), or 0
 };
 
 // ============================================================================
@@ -128,10 +158,17 @@ private:
 //
 class AccumulatorSet {
 public:
+    /// FL pooling (PR 4c): `region_types` is the flat ref-major per-region
+    /// type array (length R_total = sum of n_regions over refs); it is sliced
+    /// per reference and forwarded to each Accumulator with `max_fl`. Pass
+    /// `region_types == nullptr` / `max_fl == 0` to disable FL pooling.
     AccumulatorSet(const std::int64_t* boundary_positions,
                    std::size_t n_positions,
                    const std::int64_t* ref_pos_offsets,
-                   std::size_t n_refs);
+                   std::size_t n_refs,
+                   const std::uint8_t* region_types = nullptr,
+                   std::size_t n_region_types = 0,
+                   int max_fl = 0);
 
     /// Number of references managed.
     std::size_t n_refs() const noexcept { return accs_.size(); }

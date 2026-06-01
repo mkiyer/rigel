@@ -14,8 +14,9 @@ Public API
   returning a typed DataFrame with one row per region (carrying its
   ``signature``).
 - ``build_region_partition_arrays(index)`` — flatten the partition to the
-  ``(boundary_positions, ref_pos_offsets)`` ABI expected by
-  :py:meth:`rigel.native.BamScanner.set_regions`.
+  ``(boundary_positions, ref_pos_offsets, region_types)`` ABI expected by
+  :py:meth:`rigel.native.BamScanner.set_regions` (``region_types`` carries the
+  per-region coarse type for the gDNA FL pools, PR 4c).
 - ``load_regions(path)`` — read ``regions.feather`` and coerce dtypes.
 - ``validate_against_ref_lengths(region_df, ref_lengths)`` — enforce the
   partition invariants (tiling, ordering, signature range, neighbour-differs).
@@ -39,6 +40,7 @@ from .signature import (
     BIT_INTRON_NEG,
     BIT_INTRON_POS,
     N_SIGNATURES,
+    coarse_type_array,
     pack_signature,
 )
 
@@ -211,7 +213,7 @@ def build_region_partition(
     return _coerce_region_dtypes(pd.DataFrame(rows, columns=REGION_COLUMNS))
 
 
-def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray]:
+def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Flatten the index's region partition into BamScanner.set_regions arrays.
 
     For each reference ``f`` in ``index.ref_names``, the boundary positions
@@ -225,6 +227,10 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray]:
         Concatenated boundary positions, ref-major.
     ref_pos_offsets : int64[n_refs + 1]
         Offsets into ``boundaries``; ``ref_pos_offsets[n_refs] == B_pos_total``.
+    region_types : uint8[R_total]
+        Per-region coarse type (0=intergenic, 1=intron, 2=exon), ref-major in
+        the same region order as the partition — the gDNA FL-pool region axis
+        (PR 4c). Aligns 1:1 with the accumulator's regions.
     """
     region_df = index.region_df
     ref_names = index.ref_names
@@ -235,11 +241,13 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray]:
     }
 
     per_ref_positions: list[np.ndarray] = []
+    per_ref_types: list[np.ndarray] = []
     offsets = np.zeros(n_refs + 1, dtype=np.int64)
     for i, ref in enumerate(ref_names):
         grp = by_ref.get(ref)
         if grp is None or len(grp) == 0:
             per_ref_positions.append(np.empty(0, dtype=np.int64))
+            per_ref_types.append(np.empty(0, dtype=np.uint8))
             offsets[i + 1] = offsets[i]
             continue
         starts = grp["start"].to_numpy(np.int64, copy=False)
@@ -248,12 +256,14 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray]:
         positions[:-1] = starts
         positions[-1] = ends[-1]
         per_ref_positions.append(positions)
+        per_ref_types.append(coarse_type_array(grp["signature"].to_numpy()))
         offsets[i + 1] = offsets[i] + positions.shape[0]
 
     boundaries = (
         np.concatenate(per_ref_positions) if per_ref_positions else np.empty(0, dtype=np.int64)
     )
-    return boundaries, offsets
+    region_types = np.concatenate(per_ref_types) if per_ref_types else np.empty(0, dtype=np.uint8)
+    return boundaries, offsets, region_types
 
 
 # ---------------------------------------------------------------------------

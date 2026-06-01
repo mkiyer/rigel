@@ -979,6 +979,8 @@ public:
     // copy during scan(), then are merged back here.
     std::vector<int64_t> boundary_positions_;
     std::vector<int64_t> ref_pos_offsets_;
+    std::vector<uint8_t> region_types_;   // PR 4c: per-region FL-pool type (R_total)
+    int                  fl_max_size_ = 0;  // PR 4c: FL histogram max bin (0 = off)
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
 
     BamScanner(FragmentResolver& ctx,
@@ -1013,7 +1015,9 @@ public:
     void set_regions(
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_positions,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_pos_offsets,
-        int32_t n_refs)
+        int32_t n_refs,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
+        int fl_max_size)
     {
         if (n_refs < 0) {
             throw std::invalid_argument(
@@ -1035,11 +1039,20 @@ public:
         ref_pos_offsets_.assign(
             ref_pos_offsets.data(),
             ref_pos_offsets.data() + n_off);
+        // PR 4c: per-region FL-pool type (R_total) + FL histogram size. Empty
+        // region_types or fl_max_size <= 0 disables FL pooling.
+        region_types_.assign(
+            region_types.data(),
+            region_types.data() + region_types.shape(0));
+        fl_max_size_ = fl_max_size;
         acc_set_ = std::make_unique<rigel::accumulator::AccumulatorSet>(
             boundary_positions_.data(),
             boundary_positions_.size(),
             ref_pos_offsets_.data(),
-            static_cast<std::size_t>(n_refs));
+            static_cast<std::size_t>(n_refs),
+            region_types_.empty() ? nullptr : region_types_.data(),
+            region_types_.size(),
+            fl_max_size_);
     }
 
     // ----------------------------------------------------------------
@@ -1087,7 +1100,10 @@ public:
                     boundary_positions_.data(),
                     boundary_positions_.size(),
                     ref_pos_offsets_.data(),
-                    static_cast<std::size_t>(acc_set_->n_refs()));
+                    static_cast<std::size_t>(acc_set_->n_refs()),
+                    region_types_.empty() ? nullptr : region_types_.data(),
+                    region_types_.size(),
+                    fl_max_size_);
             }
             worker_states.push_back(std::move(ws));
         }
@@ -1795,6 +1811,34 @@ private:
                 vec_to_ndarray(std::move(*boundary_flux_left));
             cal["boundary_flux_right"] =
                 vec_to_ndarray(std::move(*boundary_flux_right));
+
+            // gDNA FL pools (PR 4c): sum the per-ref pools into a single
+            // library-wide [kNFlPools, fl_max_size + 1] float64 array (flat;
+            // reshaped Python-side). None when FL pooling was disabled.
+            if (fl_max_size_ > 0) {
+                const std::size_t fl_row =
+                    static_cast<std::size_t>(fl_max_size_) + 1;
+                auto fl_pool = std::make_unique<std::vector<double>>(
+                    rigel::accumulator::kNFlPools * fl_row, 0.0);
+                for (std::size_t f = 0; f < n_refs; ++f) {
+                    const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+                    const double* src = a.fl_pool_data();
+                    const std::size_t sz = a.fl_pool_size();
+                    if (sz == fl_pool->size()) {
+                        for (std::size_t i = 0; i < sz; ++i) {
+                            (*fl_pool)[i] += src[i];
+                        }
+                    }
+                }
+                cal["fl_pool_mass"] = vec_to_ndarray(std::move(*fl_pool));
+                cal["fl_max_size"] = static_cast<int>(fl_max_size_);
+            } else {
+                cal["fl_pool_mass"] = nb::none();
+                cal["fl_max_size"] = 0;
+            }
+            cal["n_fl_pools"] =
+                static_cast<int>(rigel::accumulator::kNFlPools);
+
             cal["n_channels"] = static_cast<int>(kNChannels);
             cal["n_refs"] = static_cast<int>(n_refs);
 
@@ -2376,13 +2420,26 @@ NB_MODULE(_bam_impl, m) {
         nb::class_<Accumulator>(m, "Accumulator")
             .def("__init__",
                  [](Accumulator* self,
-                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> positions) {
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> positions,
+                    nb::object region_types,
+                    int max_fl) {
                      std::vector<int64_t> p(
                          positions.data(),
                          positions.data() + positions.shape(0));
-                     new (self) Accumulator(std::move(p));
+                     // PR 4c: optional per-region FL-pool type + FL histogram
+                     // size. None / max_fl <= 0 → FL pooling disabled.
+                     std::vector<uint8_t> types;
+                     if (!region_types.is_none()) {
+                         auto rt = nb::cast<
+                             nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>>(
+                             region_types);
+                         types.assign(rt.data(), rt.data() + rt.shape(0));
+                     }
+                     new (self) Accumulator(std::move(p), std::move(types), max_fl);
                  },
-                 nb::arg("boundary_positions"))
+                 nb::arg("boundary_positions"),
+                 nb::arg("region_types") = nb::none(),
+                 nb::arg("max_fl") = 0)
             .def_prop_ro("n_regions",
                  [](const Accumulator& a) { return a.n_regions(); })
             .def_prop_ro("n_boundaries",
@@ -2467,6 +2524,20 @@ NB_MODULE(_bam_impl, m) {
                          {n, rigel::accumulator::kNChannels},
                          self_h,
                          {row_stride, int64_t{1}}).cast();
+                 })
+            // gDNA FL pools (PR 4c): shape (kNFlPools, max_fl + 1), float64.
+            // Empty shape (kNFlPools, 0) when FL pooling is disabled.
+            .def_prop_ro("fl_pool_mass",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const std::size_t n = self.fl_pool_size();
+                     const std::size_t row =
+                         (n == 0) ? 0
+                                  : (static_cast<std::size_t>(self.max_fl()) + 1);
+                     return nb::ndarray<nb::numpy, const double, nb::ndim<2>>(
+                         self.fl_pool_data(),
+                         {rigel::accumulator::kNFlPools, row},
+                         self_h).cast();
                  })
             .def("region_of_pos",
                  [](const Accumulator& a, int64_t pos) {
@@ -2557,12 +2628,17 @@ NB_MODULE(_bam_impl, m) {
                  [](BamScanner& self,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_positions,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_pos_offsets,
-                     int32_t n_refs) {
-                      self.set_regions(boundary_positions, ref_pos_offsets, n_refs);
+                     int32_t n_refs,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
+                     int fl_max_size) {
+                      self.set_regions(boundary_positions, ref_pos_offsets, n_refs,
+                                       region_types, fl_max_size);
                  },
                  nb::arg("boundary_positions"),
                  nb::arg("ref_pos_offsets"),
                  nb::arg("n_refs"),
+                 nb::arg("region_types"),
+                 nb::arg("fl_max_size"),
                  "Install the fractional-accumulator region partition.\n\n"
                  "boundary_positions : int64[B_pos_total]\n"
                  "    Flat sorted boundary positions for all references.\n"
@@ -2570,7 +2646,12 @@ NB_MODULE(_bam_impl, m) {
                  "    Per-ref offsets into boundary_positions; ref f spans\n"
                  "    boundary_positions[ref_pos_offsets[f]:ref_pos_offsets[f+1]].\n"
                  "n_refs : int\n"
-                 "    Number of references (matches FragmentResolver).\n")
+                 "    Number of references (matches FragmentResolver).\n"
+                 "region_types : uint8[R_total]\n"
+                 "    Per-region FL-pool type (0=intergenic,1=intronic,2=exonic),\n"
+                 "    ref-major. Empty disables gDNA FL pooling (PR 4c).\n"
+                 "fl_max_size : int\n"
+                 "    FL histogram max bin; <= 0 disables gDNA FL pooling.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

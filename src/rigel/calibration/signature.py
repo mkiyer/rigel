@@ -143,6 +143,22 @@ def is_ambiguous_signature(signature: int) -> bool:
     return coarse_strand_from_signature(signature) == int(RegionStrand.AMBIG)
 
 
+def coarse_type_array(signature: np.ndarray) -> np.ndarray:
+    """Map a signature array to its uint8 :class:`RegionType` (exon > intron).
+
+    Returns ``0`` (INTERGENIC) / ``1`` (INTRON) / ``2`` (EXON) per region — the
+    region-type axis of the gDNA FL pools (PR 4c); matches the C++ accumulator's
+    ``fl_pool_idx`` convention.
+    """
+    sig = np.asarray(signature)
+    has_exon = (sig & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
+    has_intron = (sig & (BIT_INTRON_POS | BIT_INTRON_NEG)) != 0
+    out = np.full(sig.shape, int(RegionType.INTERGENIC), dtype=np.uint8)
+    out[has_intron] = int(RegionType.INTRON)
+    out[has_exon] = int(RegionType.EXON)  # exon wins over intron
+    return out
+
+
 def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
     """Map a uint8 signature array to its int8 transcript-strand class.
 
@@ -176,6 +192,7 @@ __all__ = [
     "validate_signature",
     "coarse_type_from_signature",
     "coarse_strand_from_signature",
+    "coarse_type_array",
     "is_ambiguous_signature",
     "transcript_strand_class",
 ]

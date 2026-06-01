@@ -27,8 +27,12 @@ struct Slice {
 
 }  // anonymous namespace
 
-Accumulator::Accumulator(std::vector<std::int64_t> boundaries)
-    : boundary_positions_(std::move(boundaries))
+Accumulator::Accumulator(std::vector<std::int64_t> boundaries,
+                         std::vector<std::uint8_t> region_types,
+                         int max_fl)
+    : boundary_positions_(std::move(boundaries)),
+      region_types_(std::move(region_types)),
+      max_fl_(max_fl)
 {
     // An empty position array is permitted and yields a no-op accumulator
     // (n_regions == 0, n_boundaries == 0). This lets AccumulatorSet allocate
@@ -36,6 +40,8 @@ Accumulator::Accumulator(std::vector<std::int64_t> boundaries)
     if (boundary_positions_.empty()) {
         regions_.clear();
         boundaries_.clear();
+        region_types_.clear();
+        max_fl_ = 0;
         return;
     }
     // Strict monotonicity check.
@@ -51,6 +57,16 @@ Accumulator::Accumulator(std::vector<std::int64_t> boundaries)
     // POD zero-init via value-init in assign above; be explicit for clarity.
     if (n > 0) std::memset(regions_.data(), 0, n * sizeof(Region));
     std::memset(boundaries_.data(), 0, (n + 1) * sizeof(Boundary));
+
+    // FL pooling (PR 4c) is enabled iff a per-region type array of the right
+    // length is supplied AND max_fl > 0; otherwise it is a no-op.
+    if (max_fl_ > 0 && region_types_.size() == n) {
+        fl_pool_mass_.assign(kNFlPools * (static_cast<std::size_t>(max_fl_) + 1), 0.0);
+    } else {
+        region_types_.clear();
+        max_fl_ = 0;
+        fl_pool_mass_.clear();
+    }
 }
 
 std::int64_t Accumulator::region_of_pos(std::int64_t pos) const noexcept {
@@ -113,6 +129,16 @@ void Accumulator::deposit(const std::int64_t* block_starts,
     if (L <= 0) return;
     const double inv_L = 1.0 / static_cast<double>(L);
 
+    // gDNA FL pooling (PR 4c): bin this UNSPLICED fragment's footprint (L) into
+    // the FL pool(s) for the region-type(s) it touches — CONTAINED for a
+    // single-region fragment, BOUNDARY (fractional per side) for a crossing.
+    // Spliced fragments are excluded (their genomic span is not the FL; the RNA
+    // FL is the scanner's SPLICED-ANNOT channel). No-op when FL pooling is off.
+    const bool fl_on = !spliced && !fl_pool_mass_.empty();
+    const std::size_t fl_row = static_cast<std::size_t>(max_fl_) + 1;
+    const std::size_t fl_bin =
+        fl_on ? static_cast<std::size_t>(std::min<std::int64_t>(L, max_fl_)) : 0;
+
     // 3. Single-region (all slices in same region) → contained.
     bool all_same = true;
     const std::int64_t r0 = slices.front().region_idx;
@@ -121,6 +147,11 @@ void Accumulator::deposit(const std::int64_t* block_starts,
     }
     if (all_same) {
         regions_[static_cast<std::size_t>(r0)].contained[ch] += 1u;
+        if (fl_on) {
+            const std::size_t pool = fl_pool_idx(
+                region_types_[static_cast<std::size_t>(r0)], /*boundary=*/false);
+            fl_pool_mass_[pool * fl_row + fl_bin] += 1.0;
+        }
         return;
     }
 
@@ -154,6 +185,17 @@ void Accumulator::deposit(const std::int64_t* block_starts,
         bi.mass_right[ch] += static_cast<float>(static_cast<double>(len_right) * inv_L);
         bi.flux_right[ch] += 1u;
     }
+
+    // gDNA FL (crossing): each slice's fractional mass → the BOUNDARY-compartment
+    // pool of its region-type, at FL bin = min(footprint, max_fl).
+    if (fl_on) {
+        for (const auto& sl : slices) {
+            const std::size_t pool = fl_pool_idx(
+                region_types_[static_cast<std::size_t>(sl.region_idx)], /*boundary=*/true);
+            fl_pool_mass_[pool * fl_row + fl_bin] +=
+                static_cast<double>(sl.end - sl.start) * inv_L;
+        }
+    }
 }
 
 void Accumulator::merge_from(const Accumulator& other) {
@@ -179,6 +221,12 @@ void Accumulator::merge_from(const Accumulator& other) {
             boundaries_[i].flux_right[c] += other.boundaries_[i].flux_right[c];
         }
     }
+    // gDNA FL pools (PR 4c): element-wise sum (identical partition ⇒ same size).
+    if (fl_pool_mass_.size() == other.fl_pool_mass_.size()) {
+        for (std::size_t i = 0; i < fl_pool_mass_.size(); ++i) {
+            fl_pool_mass_[i] += other.fl_pool_mass_[i];
+        }
+    }
 }
 
 // ============================================================================
@@ -188,9 +236,14 @@ void Accumulator::merge_from(const Accumulator& other) {
 AccumulatorSet::AccumulatorSet(const std::int64_t* boundary_positions,
                                std::size_t n_positions,
                                const std::int64_t* ref_pos_offsets,
-                               std::size_t n_refs)
+                               std::size_t n_refs,
+                               const std::uint8_t* region_types,
+                               std::size_t n_region_types,
+                               int max_fl)
 {
+    const bool fl_on = (region_types != nullptr && max_fl > 0);
     accs_.reserve(n_refs);
+    std::size_t region_off = 0;  // cumulative region offset into region_types
     for (std::size_t f = 0; f < n_refs; ++f) {
         const std::int64_t lo = ref_pos_offsets[f];
         const std::int64_t hi = ref_pos_offsets[f + 1];
@@ -201,10 +254,23 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* boundary_positions,
                 "AccumulatorSet: ref_pos_offsets out of range");
         }
         // hi - lo == 0 yields an empty (no-op) Accumulator placeholder for
-        // references with no annotated partition.
+        // references with no annotated partition. n_regions = positions - 1.
         std::vector<std::int64_t> slice(
             boundary_positions + lo, boundary_positions + hi);
-        accs_.emplace_back(std::move(slice));
+        const std::size_t pos_count = static_cast<std::size_t>(hi - lo);
+        const std::size_t n_regions_f = (pos_count >= 1) ? (pos_count - 1) : 0;
+        std::vector<std::uint8_t> types_slice;
+        if (fl_on && n_regions_f > 0) {
+            if (region_off + n_regions_f > n_region_types) {
+                throw std::invalid_argument(
+                    "AccumulatorSet: region_types shorter than total regions");
+            }
+            types_slice.assign(region_types + region_off,
+                               region_types + region_off + n_regions_f);
+        }
+        accs_.emplace_back(std::move(slice), std::move(types_slice),
+                           fl_on ? max_fl : 0);
+        region_off += n_regions_f;
     }
     // Validate one beyond-end offset.
     if (n_refs > 0 &&
@@ -212,6 +278,10 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* boundary_positions,
     {
         throw std::invalid_argument(
             "AccumulatorSet: ref_pos_offsets[n_refs] must equal n_positions");
+    }
+    if (fl_on && region_off != n_region_types) {
+        throw std::invalid_argument(
+            "AccumulatorSet: region_types length != total region count");
     }
     (void)n_positions;  // unused when n_refs == 0
 }

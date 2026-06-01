@@ -112,11 +112,25 @@ class Accumulator:
 
     __slots__ = ("_native", "regions", "boundaries")
 
-    def __init__(self, boundary_positions: np.ndarray) -> None:
+    def __init__(
+        self,
+        boundary_positions: np.ndarray,
+        region_types: np.ndarray | None = None,
+        max_fl: int = 0,
+    ) -> None:
         positions = np.ascontiguousarray(boundary_positions, dtype=np.int64)
-        self._native = _NativeAccumulator(positions)
+        if region_types is None:
+            self._native = _NativeAccumulator(positions)
+        else:
+            rt = np.ascontiguousarray(region_types, dtype=np.uint8)
+            self._native = _NativeAccumulator(positions, rt, int(max_fl))
         self.regions = _RegionList(self)
         self.boundaries = _BoundaryList(self)
+
+    @property
+    def fl_pool_mass(self) -> np.ndarray:
+        """gDNA FL pools (PR 4c): float64[N_FL_POOLS, max_fl + 1] (or (k, 0))."""
+        return np.asarray(self._native.fl_pool_mass)
 
     @property
     def n_regions(self) -> int:

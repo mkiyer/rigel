@@ -303,6 +303,7 @@ def scan_and_buffer(
             scanner,
             index,
             region_df,
+            scan.max_frag_length,
         )
 
     # Streaming chunk callback — receives zero-copy dict from C++
@@ -371,24 +372,28 @@ def _wire_calibration_regions(
     scanner,
     index: TranscriptIndex,
     region_df,
+    max_frag_length: int,
 ) -> None:
     """Install the index's region partition into a native BamScanner.
 
-    Uses :func:`rigel.calibration.regions.build_region_partition_arrays`
-    to flatten the per-reference region partition into the
-    ``(boundary_positions, ref_pos_offsets, n_refs)`` ABI expected by
-    ``BamScanner.set_regions``. The partition is built from
-    ``index.region_df`` and ordered to match ``index.ref_names`` (which
-    in turn matches the resolver's reference-id space).
+    Uses :func:`rigel.calibration.regions.build_region_partition_arrays` to
+    flatten the per-reference region partition into the ``(boundary_positions,
+    ref_pos_offsets, n_refs, region_types, fl_max_size)`` ABI expected by
+    ``BamScanner.set_regions``. The partition is built from ``index.region_df``
+    and ordered to match ``index.ref_names`` (which in turn matches the
+    resolver's reference-id space). ``region_types`` + ``max_frag_length`` enable
+    the gDNA FL pools (PR 4c).
     """
     from .calibration.regions import build_region_partition_arrays
 
-    boundary_positions, ref_pos_offsets = build_region_partition_arrays(index)
+    boundary_positions, ref_pos_offsets, region_types = build_region_partition_arrays(index)
     n_refs = len(index.ref_names)
     scanner.set_regions(
         np.ascontiguousarray(boundary_positions, dtype=np.int64),
         np.ascontiguousarray(ref_pos_offsets, dtype=np.int64),
         n_refs,
+        np.ascontiguousarray(region_types, dtype=np.uint8),
+        int(max_frag_length),
     )
 
 
@@ -675,16 +680,28 @@ def run_pipeline(
     region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     _check_region_payload_alignment(region_arrays, calibration_payload)
 
-    # gDNA FL distribution for the calibrator's effective lengths (PR 4b sweep).
-    # INTERIM PLACEHOLDER: the UNSPLICED-category histogram is gDNA + nascent RNA,
-    # an over-broad proxy — NOT the true gDNA FL. PR 4c resurrects the proper
-    # derivation (gDNA-dominated regions/boundaries → mixture-EM that subtracts
-    # residual RNA via the spliced FL → empirical-Bayes shrink toward global).
-    # Only the AMBIG sweep's effective lengths consume this; decodable exposure
-    # and ρ_0 are unaffected. See docs/acc_caljointmodel/prs/PR04c (planned).
+    # gDNA FL distribution for the calibrator's effective lengths (PR 4c): derive
+    # it from the accumulator's gDNA-dominated FL pools (intergenic + intronic,
+    # both compartments) via smooth empirical-Bayes shrinkage toward the global
+    # FL. The RNA FL (spliced) is built alongside for PR 5's RNA effective length.
+    from .calibration.fl import build_fl_models, gdna_fl_mass
     from .splice import SpliceType
 
-    gdna_fl_pmf = frag_length_models.category_models[SpliceType.UNSPLICED].pmf
+    fl_models = build_fl_models(
+        global_counts=frag_length_models.global_model.counts,
+        rna_counts=frag_length_models.category_models[SpliceType.SPLICED_ANNOT].counts,
+        gdna_counts=gdna_fl_mass(calibration_payload),
+        max_size=frag_length_models.max_size,
+    )
+    gdna_fl_pmf = fl_models.gdna_pmf
+    _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)
+    logger.info(
+        "[CAL] FL models: n_gdna_pool=%.0f gdna_fl_mean=%.1f rna_fl_mean=%.1f global_fl_mean=%.1f",
+        fl_models.n_gdna,
+        float(np.dot(_bins, fl_models.gdna_pmf)),
+        float(np.dot(_bins, fl_models.rna_pmf)),
+        float(np.dot(_bins, fl_models.global_pmf)),
+    )
 
     try:
         calibration = calibrate(
