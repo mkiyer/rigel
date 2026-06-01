@@ -24,7 +24,12 @@ def _alloc(m_g_unspl, pi_g) -> Allocation:
     m_g_unspl = np.asarray(m_g_unspl, dtype=np.float64)
     z = np.zeros_like(m_g_unspl)
     return Allocation(
-        m_g=z.copy(), m_d=z.copy(), m_g_unspl=m_g_unspl, pi_g=np.asarray(pi_g, np.float64)
+        m_g=z.copy(),
+        m_d=z.copy(),
+        m_g_unspl=m_g_unspl,
+        m_d_unspl=z.copy(),
+        pi_g=np.asarray(pi_g, np.float64),
+        k_sense=np.zeros_like(m_g_unspl, dtype=np.int64),
     )
 
 

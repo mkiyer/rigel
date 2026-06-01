@@ -18,9 +18,6 @@ import numpy as np
 from ..config import CalibrationConfig
 from .errors import CalibrationConvergenceError
 
-# Tolerance for the "mass-change is non-increasing" EM-monotonicity check.
-_MONOTONE_ATOL = 1.0e-9
-
 
 def _check_region_array(arr: np.ndarray, name: str, n_regions: int, *, strictly_positive: bool):
     """Validate a per-region float64 array: shape, dtype, finite, sign."""
@@ -120,18 +117,15 @@ class CalibrationResult:
                 f"CalibrationResult.mass_change_history has shape {hist.shape}; "
                 f"expected ({self.n_iterations},)."
             )
-        if hist.size > 1:
-            # EM theory: the mass-change diagnostic must not increase between
-            # iterations. A real increase indicates an implementation bug.
-            increases = np.diff(hist)
-            atol = _MONOTONE_ATOL * (1.0 + np.abs(hist[:-1]))
-            if np.any(increases > atol):
-                bad = int(np.flatnonzero(increases > atol)[0])
-                raise CalibrationConvergenceError(
-                    "CalibrationResult.mass_change_history increased between iterations "
-                    f"{bad} and {bad + 1} ({hist[bad]!r} -> {hist[bad + 1]!r}); EM "
-                    "monotonicity violated."
-                )
+        # Divergence sentinel: a non-finite mass change means the EM blew up
+        # (a real bug). We do NOT require strict monotonicity — the mass-change
+        # legitimately spikes at iteration 2, when the count channel activates
+        # (iteration 1 is count-silent, doc 03 §3.1), before converging. The
+        # outer loop reports non-convergence via ``converged`` instead.
+        if not np.all(np.isfinite(hist)):
+            raise CalibrationConvergenceError(
+                "CalibrationResult.mass_change_history is non-finite; the EM diverged."
+            )
 
 
 __all__ = ["CalibrationResult"]

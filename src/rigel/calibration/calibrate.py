@@ -4,30 +4,26 @@ Consumes the accumulator payload, the region geometry, and the trained strand
 model and returns a :class:`~rigel.calibration.result.CalibrationResult` with
 the recovered library hyperparameters and per-region deconvoluted mass.
 
-**PR 4a — single E-step pass.** The body seeds the global gDNA density ``ρ_0``
-(:mod:`rigel.calibration.density`), fits the RNA strand-balance model
-(:mod:`rigel.calibration.strand_balance`, PR 3), then runs **one** E-step
-(:mod:`rigel.calibration.estep`) over the three substrate views and the
-closed-form exposure posterior (:mod:`rigel.calibration.exposure`). All library
-hyperparameters are **fixed** at their initial values; the M-step and the outer
-loop that iterates to convergence are PR 5.
-
-**PR 4b — AMBIG sweep.** After the exposure posterior, strand-ambiguous regions'
-exposure is re-imputed from decodable neighbours by the boundary↔region sweep
-(:mod:`rigel.calibration.sweep`, D7 leg 2), which uses the gDNA FL-corrected
-effective lengths (:mod:`rigel.calibration.effective_length`). Decodable regions
-and the ρ_0 seed are unchanged — 4a's total-mass / physical-length exposure is
-exact, so the FL correction is needed only inside the sweep's node decomposition.
-
-The single pass uses ``ω = 1``, ``π_g_prior = 0.5``, and ``μ_d = 0`` (no prior
-RNA mass — doc 03 §3.1), so the count log-Bayes-factor is identically 0 and the
-allocation is strand-driven + spliced-deterministic. The count channel is fully
-built (and unit-tested with a non-zero ``μ_d``); it engages once PR 5's outer
-loop feeds ``M_d`` back. Hence ``n_iterations = 1`` and ``converged = False``.
+**PR 5 — the working calibrator (M-step + outer loop, doc 03 §1).** Seeds ``ρ_0``
+(:mod:`rigel.calibration.density`) and the RNA strand model (κ_rna, ρ_r_bb fixed
+from the spliced channel — :mod:`rigel.calibration.strand_balance`, PR 3), then
+iterates: **E-step** (:mod:`rigel.calibration.estep`) over the three views — the
+**count channel is live** (μ_d from the previous iteration; zero on iter 1, so
+iteration 1 reproduces the PR 4a single pass) and uses the **FL-corrected
+per-view gDNA effective length** (contained ``E_f[max(0,L−ℓ)]``, boundary
+``μ_FL``; :mod:`rigel.calibration.effective_length`, PR 4c) — then the **exposure
+posterior** (G4, physical length), the **AMBIG sweep**
+(:mod:`rigel.calibration.sweep`, D7 leg 2), the **M-step**
+(:mod:`rigel.calibration.mstep` — fits ρ_0, ε_s, φ, ρ_d_bb), and the π_g-prior
+update. The loop runs until the max-region relative mass change drops below
+``mass_rel_tol`` (``converged=True``) or ``max_outer_iterations`` is hit. The
+exposure ``ω`` keeps physical length (4a's total-mass form is exact); the
+FL-corrected lengths enter only the per-view count channel and the sweep.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -36,6 +32,7 @@ from .density import estimate_gdna_density
 from .effective_length import boundary_eff_length, region_eff_length
 from .estep import estep_view
 from .exposure import exposure_posterior
+from .mstep import fit_phi, fit_rho_d_bb, update_eps_s, update_pi_g_prior, update_rho_0
 from .result import CalibrationResult
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
@@ -46,6 +43,8 @@ if TYPE_CHECKING:
     from ..scan_payload import AccumulatorPayload
     from ..strand_model import StrandModels
     from .region_arrays import RegionArrays
+
+logger = logging.getLogger(__name__)
 
 # Doc 03 §7 initialization values (iteration-0). PR 5's M-step owns these
 # definitively; here they seed the single pass / the outer-loop warm start.
@@ -92,60 +91,124 @@ def calibrate(
 ) -> CalibrationResult:
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     r = substrate.n_regions
-
-    # --- Library hyperparameters (fixed this PR) ---
-    density = estimate_gdna_density(substrate, region_arrays)  # ρ_0 seed (§I.1 / III.2)
-    rho_0 = density.rho_0
-    phi, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
-    strand = fit_strand_balance(substrate, strand_model)  # κ_rna, ρ_r_bb (PR 3)
-
-    # --- Single E-step pass over the three views (ω ≡ 1, μ_d ≡ 0) ---
-    L_eff = substrate.L_eff
     ts_class = substrate.ts_class
-    pass_kwargs = dict(
-        omega=np.ones(r, dtype=np.float64),
-        rho_0=rho_0,
-        L_eff=L_eff,
-        phi=phi,
-        kappa_rna=strand.kappa_rna,
-        rho_r_bb=strand.rho_r_bb,
-        rho_d_bb=rho_d_bb,
-        eps_s=eps_s,
-        pi_g_prior=np.full(r, _PI_G_PRIOR_INIT, dtype=np.float64),
-        m_d_unspl_prev=np.zeros(r, dtype=np.float64),
-    )
-    contained = estep_view(substrate.contained, ts_class, **pass_kwargs)
-    left = estep_view(substrate.left, ts_class, **pass_kwargs)
-    right = estep_view(substrate.right, ts_class, **pass_kwargs)
+    l_phys = substrate.L_eff  # exposure ω uses physical length (PR 4a, exact)
 
-    # --- Exposure posterior (G4): D1 aggregation, no ½ ---
-    # Decodable regions + the ρ_0 seed use 4a's total-mass / physical-length
-    # exposure, which is exact (∫ overlap/ℓ dx = L); no FL-correction here.
-    exposure = exposure_posterior(
-        contained.m_g, left.m_g, right.m_g, rho_0=rho_0, L_eff=L_eff, phi=phi
-    )
+    # --- Initial hyperparameters ---
+    rho_0 = estimate_gdna_density(substrate, region_arrays).rho_0  # ρ_0 seed (PR 4c §III.2)
+    phi, rho_d_bb, eps_s = initial_hyperparameters(substrate, config)
+    strand = fit_strand_balance(substrate, strand_model)  # κ_rna, ρ_r_bb fixed (PR 3 / III.1)
+    kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
 
-    # --- AMBIG boundary↔region sweep (PR 4b, D7 leg 2) ---
-    # Impute strand-ambiguous regions' exposure from decodable neighbours along
-    # the alternating chain. FL-corrected effective lengths (gDNA FL) enter only
-    # here, in the per-node density decomposition; AMBIG rows are overwritten.
-    swept = sweep_ambig_exposure(
-        substrate,
-        region_arrays,
-        alloc_contained=contained,
-        alloc_left=left,
-        alloc_right=right,
-        region_eff_len=region_eff_length(L_eff, gdna_fl_pmf),
-        mu_fl=boundary_eff_length(gdna_fl_pmf),
-        rho_0=rho_0,
-        phi=phi,
-        base_omega=exposure.omega,
-        base_log_omega_var=exposure.log_omega_var,
-    )
+    # FL-corrected per-view gDNA exposures for the count channel (PR 4c / PR05):
+    # contained = E_f[max(0, L−ℓ)], boundary = μ_FL. (ω above keeps physical L.)
+    region_eff_len = region_eff_length(l_phys, gdna_fl_pmf)
+    mu_fl = boundary_eff_length(gdna_fl_pmf)
+    boundary_eff = np.full(r, mu_fl, dtype=np.float64)
 
-    # One pass: the mass-change diagnostic is the change from the zero-gDNA
-    # initialization, max_r |M_g_tot − 0| / (0 + 1) = max_r M_g_tot.
-    mass_change = float(exposure.m_g_tot.max()) if r > 0 else 0.0
+    # --- Outer EM loop (doc 03 §1) ---
+    omega = np.ones(r, dtype=np.float64)
+    log_omega_var = np.full(r, phi, dtype=np.float64)
+    pi_g_prior = np.full(r, _PI_G_PRIOR_INIT, dtype=np.float64)
+    m_d_cont = np.zeros(r, dtype=np.float64)
+    m_d_left = np.zeros(r, dtype=np.float64)
+    m_d_right = np.zeros(r, dtype=np.float64)
+    n_u_cont = substrate.contained.n_unspliced
+    n_spliced_cont = substrate.contained.n_spliced
+    m_g_tot_prev: "np.ndarray | None" = None
+    mass_changes: list[float] = []
+    converged = False
+    n_iter = 0
+    contained = left = right = None
+
+    for it in range(1, config.max_outer_iterations + 1):
+        n_iter = it
+        shared = dict(
+            omega=omega,
+            rho_0=rho_0,
+            phi=phi,
+            kappa_rna=kappa_rna,
+            rho_r_bb=rho_r_bb,
+            rho_d_bb=rho_d_bb,
+            eps_s=eps_s,
+            pi_g_prior=pi_g_prior,
+        )
+        # E-step: count channel now live (μ_d from the previous iteration; zero on
+        # iter 1). Per-view FL-corrected L_eff (contained vs boundary).
+        contained = estep_view(
+            substrate.contained, ts_class, L_eff=region_eff_len, m_d_unspl_prev=m_d_cont, **shared
+        )
+        left = estep_view(
+            substrate.left, ts_class, L_eff=boundary_eff, m_d_unspl_prev=m_d_left, **shared
+        )
+        right = estep_view(
+            substrate.right, ts_class, L_eff=boundary_eff, m_d_unspl_prev=m_d_right, **shared
+        )
+
+        # Exposure (G4, physical L) + AMBIG sweep (PR 4b).
+        exposure = exposure_posterior(
+            contained.m_g, left.m_g, right.m_g, rho_0=rho_0, L_eff=l_phys, phi=phi
+        )
+        swept = sweep_ambig_exposure(
+            substrate,
+            region_arrays,
+            alloc_contained=contained,
+            alloc_left=left,
+            alloc_right=right,
+            region_eff_len=region_eff_len,
+            mu_fl=mu_fl,
+            rho_0=rho_0,
+            phi=phi,
+            base_omega=exposure.omega,
+            base_log_omega_var=exposure.log_omega_var,
+        )
+        omega = swept.omega
+        log_omega_var = swept.log_omega_var
+
+        # --- M-step (doc 03 §5): fit ρ_0, ε_s, φ, ρ_d_bb (κ_rna/ρ_r_bb fixed) ---
+        rho_0 = update_rho_0(exposure.m_g_tot, omega, l_phys)
+        eps_s = update_eps_s(contained.pi_g, n_spliced_cont)
+        mu_g_cont = omega * rho_0 * region_eff_len
+        phi = fit_phi(n_u_cont, mu_g_cont, contained.m_d_unspl, phi_floor=config.phi_floor)
+        k_plus_g = np.maximum(
+            contained.k_sense.astype(np.float64) - kappa_rna * contained.m_d_unspl, 0.0
+        )
+        rho_d_bb = fit_rho_d_bb(k_plus_g, contained.m_g_unspl)
+        pi_g_prior = update_pi_g_prior(omega, rho_0, region_eff_len, n_u_cont)
+
+        # Carry the unspliced RNA mass into the next iteration's count channel.
+        m_d_cont, m_d_left, m_d_right = contained.m_d_unspl, left.m_d_unspl, right.m_d_unspl
+
+        # --- Convergence (doc 03 §9): max-region relative mass change ---
+        m_g_tot = exposure.m_g_tot
+        if r == 0:
+            delta = 0.0
+        elif m_g_tot_prev is None:
+            delta = float(m_g_tot.max())  # change from the zero-gDNA init
+        else:
+            delta = float(np.max(np.abs(m_g_tot - m_g_tot_prev) / (m_g_tot_prev + 1.0)))
+        mass_changes.append(delta)
+        m_g_tot_prev = m_g_tot.copy()
+        logger.debug(
+            "[CAL iter %d] rho_0=%.4g phi=%.4g rho_d_bb=%.4g eps_s=%.4g delta=%.4g",
+            it,
+            rho_0,
+            phi,
+            rho_d_bb,
+            eps_s,
+            delta,
+        )
+        if it >= 2 and delta < config.mass_rel_tol:
+            converged = True
+            break
+
+    if not converged and r > 0:
+        logger.warning(
+            "[CAL] not converged in %d iterations (last mass change=%.4g > tol=%.4g)",
+            n_iter,
+            mass_changes[-1] if mass_changes else float("nan"),
+            config.mass_rel_tol,
+        )
 
     return CalibrationResult(
         mass_g_contained=contained.m_g,
@@ -154,17 +217,17 @@ def calibrate(
         mass_d_left=left.m_d,
         mass_g_right=right.m_g,
         mass_d_right=right.m_d,
-        omega=swept.omega,
-        log_omega_var=swept.log_omega_var,
+        omega=omega,
+        log_omega_var=log_omega_var,
         rho_0=rho_0,
         phi=phi,
         rho_d_bb=rho_d_bb,
-        kappa_rna=strand.kappa_rna,
-        rho_r_bb=strand.rho_r_bb,
+        kappa_rna=kappa_rna,
+        rho_r_bb=rho_r_bb,
         eps_s=eps_s,
-        n_iterations=1,
-        converged=False,
-        mass_change_history=np.array([mass_change], dtype=np.float64),
+        n_iterations=n_iter,
+        converged=converged,
+        mass_change_history=np.array(mass_changes, dtype=np.float64),
         n_regions=r,
         config=config,
     )

@@ -94,10 +94,21 @@ def test_mass_change_history_non_increasing_ok():
     CalibrationResult(**kw)  # decreasing → fine
 
 
-def test_mass_change_history_increasing_raises():
+def test_mass_change_history_increase_allowed():
+    # Strict monotonicity is NOT required: the mass change legitimately spikes at
+    # iteration 2 when the count channel activates (doc 03 §3.1), before
+    # converging. A finite, non-monotone history must construct fine.
+    kw = _valid_kwargs()
+    kw["n_iterations"] = 3
+    kw["mass_change_history"] = np.array([0.14, 57.3, 8e-5], dtype=np.float64)
+    CalibrationResult(**kw)
+
+
+def test_mass_change_history_non_finite_raises():
+    # The divergence sentinel: a non-finite mass change means the EM blew up.
     kw = _valid_kwargs()
     kw["n_iterations"] = 2
-    kw["mass_change_history"] = np.array([0.1, 0.2], dtype=np.float64)  # increases
+    kw["mass_change_history"] = np.array([0.1, np.inf], dtype=np.float64)
     with pytest.raises(CalibrationConvergenceError):
         CalibrationResult(**kw)
 

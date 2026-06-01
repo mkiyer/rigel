@@ -49,7 +49,9 @@ class Allocation:
     m_g: np.ndarray  # gDNA mass: unspliced split + ε_s · spliced
     m_d: np.ndarray  # RNA mass: unspliced split + (1 − ε_s) · spliced
     m_g_unspl: np.ndarray  # unspliced gDNA mass alone (for the M-step, PR 5)
+    m_d_unspl: np.ndarray  # unspliced RNA mass alone (count-channel μ_d + M-step, PR 5)
     pi_g: np.ndarray  # gDNA mixing proportion used
+    k_sense: np.ndarray  # int64[R] — oriented sense flux (BB-strand M-step, PR 5)
 
 
 def _sense_flux(view: "SubstrateView", ts_class: np.ndarray) -> np.ndarray:
@@ -145,10 +147,13 @@ def estep_view(
 
     # π_g (from flux) allocates the fractional mass (density from mass).
     m_g_unspl = pi_g * view.mass_unspliced
+    m_d_unspl = view.mass_unspliced - m_g_unspl
     m_s = view.mass_spliced
     m_g = m_g_unspl + eps_s * m_s
-    m_d = (view.mass_unspliced - m_g_unspl) + (1.0 - eps_s) * m_s
-    return Allocation(m_g=m_g, m_d=m_d, m_g_unspl=m_g_unspl, pi_g=pi_g)
+    m_d = m_d_unspl + (1.0 - eps_s) * m_s
+    return Allocation(
+        m_g=m_g, m_d=m_d, m_g_unspl=m_g_unspl, m_d_unspl=m_d_unspl, pi_g=pi_g, k_sense=k_sense
+    )
 
 
 __all__ = ["Allocation", "estep_view"]
