@@ -22,6 +22,7 @@ from rigel.calibration.estep import _llr_count, _llr_strand, _sense_flux, estep_
 from rigel.calibration.exposure import exposure_posterior
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.calibration.mstep import (
+    decodable_node_masks,
     fit_rho_d_bb,
     update_exposure_dispersion,
     update_pi_g_prior,
@@ -117,6 +118,7 @@ def _trace(payload, ra, strand_model, gdna_fl_pmf, config, n_iters):
     m_d_c = np.zeros(r)
     m_d_l = np.zeros(r)
     m_d_r = np.zeros(r)
+    dec_region, dec_left_bnd, dec_right_bnd = decodable_node_masks(ts_class, ra.ref_id)
 
     for it in range(1, n_iters + 1):
         shared = dict(omega=omega, rho_0=rho_0, exposure_dispersion=disp, kappa_rna=kappa_rna,
@@ -129,7 +131,7 @@ def _trace(payload, ra, strand_model, gdna_fl_pmf, config, n_iters):
         swept = sweep_ambig_exposure(sub, ra, alloc_contained=cont, alloc_left=left, alloc_right=right,
                                      region_eff_len=region_eff_len, mu_fl=mu_fl, rho_0=rho_0,
                                      exposure_dispersion=disp, base_omega=exp.omega,
-                                     base_log_omega_var=exp.log_omega_var)
+                                     base_log_omega_var=exp.log_omega_var, dec_region=dec_region)
         omega = swept.omega
 
         # E-step channel diagnostics on the contained view
@@ -139,8 +141,11 @@ def _trace(payload, ra, strand_model, gdna_fl_pmf, config, n_iters):
         llr_s = _llr_strand(k_sense, nu, ts_class, kappa_rna=kappa_rna, rho_r_bb=rho_r_bb, rho_d_bb=rho_d_bb)
 
         m_g_tot_total = float(exp.m_g_tot.sum())
-        rho_0 = update_rho_0(exp.m_g_tot, omega, l_phys)
-        disp = update_exposure_dispersion(exp.omega, exp.log_omega_var, floor=config.exposure_dispersion_floor)
+        rho_0 = update_rho_0(cont.m_g, left.m_g, right.m_g, omega, l_phys,
+                             dec_region=dec_region, dec_left_bnd=dec_left_bnd,
+                             dec_right_bnd=dec_right_bnd)
+        disp = update_exposure_dispersion(exp.omega[dec_region], exp.log_omega_var[dec_region],
+                                          floor=config.exposure_dispersion_floor)
         k_plus_g = np.maximum(cont.k_sense.astype(np.float64) - kappa_rna * cont.m_d_unspl, 0.0)
         rho_d_bb = fit_rho_d_bb(k_plus_g, cont.m_g_unspl)
         pi_prior = update_pi_g_prior(omega, rho_0, region_eff_len, nu)

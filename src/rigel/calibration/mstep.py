@@ -26,6 +26,7 @@ from scipy.special import digamma
 from scipy.stats import betabinom
 
 from .estep import _PI_CLIP
+from .signature import TS_AMBIG
 from .strand_balance import _BB_FLOOR
 
 # Upper bound on the exposure dispersion (the NB count overdispersion ≡ variance
@@ -41,13 +42,77 @@ _RHO_D_BB_FALLBACK = 0.01
 _MIN_OBS_FOR_BB = 2
 
 
-def update_rho_0(m_g_tot: np.ndarray, omega: np.ndarray, l_eff: np.ndarray) -> float:
-    """ρ_0 = Σ M_g_tot / Σ(ω·L_eff) (doc 03 §5.1, closed form, physical length)."""
-    denom = float(np.sum(omega * l_eff))
-    total = float(np.sum(m_g_tot))
+def decodable_node_masks(
+    ts_class: np.ndarray, ref_id: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-node decodability masks for the density/dispersion M-steps (PR 8).
+
+    A *region* is decodable iff its transcript-strand class is not AMBIG (NONE /
+    POS / NEG — its gDNA/RNA split is recoverable by the strand channel, or it is
+    intergenic where gDNA is unstranded). An internal *boundary* is decodable iff
+    it joins two same-reference regions and **at least one** of them is decodable:
+    a boundary-crossing fragment can be deconvolved whenever one side carries
+    strand context (the premise of using crossing reads — and the calibration
+    signal of hybrid-capture libraries lives at boundaries, so we keep them).
+
+    Returns ``(decodable_region, decodable_left_boundary, decodable_right_boundary)``
+    as ``bool[R]``, indexed by the region the boundary side is attributed to. A
+    boundary side attributed to region ``r`` is decodable iff ``r`` itself is
+    decodable **or** the same-reference neighbour on the far side is decodable. A
+    decodable region's own boundary sides are therefore always kept (so a library
+    with no AMBIG region is scored identically to before — terminals included);
+    only an AMBIG region's sides depend on its decodable neighbour.
+    """
+    ts = np.asarray(ts_class)
+    ref = np.asarray(ref_id)
+    r = ts.shape[0]
+    dec_region = ts != TS_AMBIG
+    has_internal_left = np.zeros(r, dtype=bool)  # same-ref neighbour to the left
+    has_internal_right = np.zeros(r, dtype=bool)  # same-ref neighbour to the right
+    if r > 1:
+        same = ref[:-1] == ref[1:]  # internal seam between r and r+1
+        has_internal_right[:-1] = same
+        has_internal_left[1:] = same
+    dec_left_bnd = dec_region.copy()
+    dec_left_bnd[1:] |= has_internal_left[1:] & dec_region[:-1]  # far (left) neighbour decodable
+    dec_right_bnd = dec_region.copy()
+    dec_right_bnd[:-1] |= has_internal_right[:-1] & dec_region[1:]  # far (right) neighbour decodable
+    return dec_region, dec_left_bnd, dec_right_bnd
+
+
+def update_rho_0(
+    m_g_contained: np.ndarray,
+    m_g_left: np.ndarray,
+    m_g_right: np.ndarray,
+    omega: np.ndarray,
+    l_eff: np.ndarray,
+    *,
+    dec_region: np.ndarray,
+    dec_left_bnd: np.ndarray,
+    dec_right_bnd: np.ndarray,
+) -> float:
+    """ρ_0 = Σ_decodable M_g / Σ_decodable(ω·L_eff) (doc 03 §5.1; PR 8 decodable-node).
+
+    Only **decodable** nodes contribute. An AMBIG region's *contained* gDNA is
+    withheld (undecodable — no strand split, no crossing), but its *boundary* mass
+    is kept whenever the boundary has a decodable neighbour. A region's exposure
+    capacity ``ω·L_eff`` enters the denominator iff *any* of its nodes is decodable,
+    so boundary mass is never counted in the numerator without matching capacity in
+    the denominator. Physical length ``L_eff`` (consistent with the exposure
+    posterior, doc 03 §4); the fully FL-corrected node form is deferred (PR 8 doc).
+    """
+    num = float(
+        np.sum(
+            np.where(dec_region, m_g_contained, 0.0)
+            + np.where(dec_left_bnd, m_g_left, 0.0)
+            + np.where(dec_right_bnd, m_g_right, 0.0)
+        )
+    )
+    any_decodable = dec_region | dec_left_bnd | dec_right_bnd
+    denom = float(np.sum(np.where(any_decodable, omega * l_eff, 0.0)))
     if denom <= 0.0:
         return 1.0 / max(float(np.sum(l_eff)), 1.0)
-    return total / denom
+    return num / denom
 
 
 def update_exposure_dispersion(
@@ -145,6 +210,7 @@ def update_pi_g_prior(
 
 
 __all__ = [
+    "decodable_node_masks",
     "update_rho_0",
     "update_exposure_dispersion",
     "fit_rho_d_bb",

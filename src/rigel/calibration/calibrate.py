@@ -33,6 +33,7 @@ from .effective_length import boundary_eff_length, region_eff_length
 from .estep import estep_view
 from .exposure import exposure_posterior
 from .mstep import (
+    decodable_node_masks,
     fit_rho_d_bb,
     update_exposure_dispersion,
     update_pi_g_prior,
@@ -112,6 +113,12 @@ def calibrate(
     mu_fl = boundary_eff_length(gdna_fl_pmf)
     boundary_eff = np.full(r, mu_fl, dtype=np.float64)
 
+    # Per-node decodability (PR 8): ρ_0 + exposure dispersion are fit from decodable
+    # nodes only; AMBIG regions are imputed, never used to set the global density.
+    dec_region, dec_left_bnd, dec_right_bnd = decodable_node_masks(
+        ts_class, region_arrays.ref_id
+    )
+
     # --- Outer EM loop (doc 03 §1) ---
     omega = np.ones(r, dtype=np.float64)
     log_omega_var = np.full(r, exposure_dispersion, dtype=np.float64)
@@ -170,17 +177,33 @@ def calibrate(
             exposure_dispersion=exposure_dispersion,
             base_omega=exposure.omega,
             base_log_omega_var=exposure.log_omega_var,
+            dec_region=dec_region,
         )
         omega = swept.omega
         log_omega_var = swept.log_omega_var
 
         # --- M-step (doc 03 §5): fit ρ_0, exposure_dispersion, ρ_d_bb (κ_rna/ρ_r_bb fixed) ---
-        rho_0 = update_rho_0(exposure.m_g_tot, omega, l_phys)
+        # PR 8: ρ_0 and the dispersion are fit from DECODABLE nodes only — an AMBIG
+        # region's undecodable contained gDNA neither sets the global density nor the
+        # dispersion; its decodable boundaries still contribute.
+        rho_0 = update_rho_0(
+            contained.m_g,
+            left.m_g,
+            right.m_g,
+            omega,
+            l_phys,
+            dec_region=dec_region,
+            dec_left_bnd=dec_left_bnd,
+            dec_right_bnd=dec_right_bnd,
+        )
         # Exposure dispersion: the proper EM M-step from the (pre-sweep) Gamma
         # exposure posteriors — NOT a count-NB fit. This is what breaks the φ
         # limit cycle (docs/acc_caljointmodel/calibration_oscillation_diagnosis.md).
+        # Decodable regions only (PR 8): AMBIG pre-sweep ω is imputed-over garbage.
         exposure_dispersion = update_exposure_dispersion(
-            exposure.omega, exposure.log_omega_var, floor=config.exposure_dispersion_floor
+            exposure.omega[dec_region],
+            exposure.log_omega_var[dec_region],
+            floor=config.exposure_dispersion_floor,
         )
         k_plus_g = np.maximum(
             contained.k_sense.astype(np.float64) - kappa_rna * contained.m_d_unspl, 0.0

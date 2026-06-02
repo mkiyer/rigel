@@ -24,6 +24,7 @@ from rigel.calibration.estep import estep_view
 from rigel.calibration.exposure import exposure_posterior
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.calibration.mstep import (
+    decodable_node_masks,
     fit_rho_d_bb,
     update_pi_g_prior,
     update_rho_0,
@@ -181,6 +182,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
     phi, rho_d_bb = initial_hyperparameters(sub, config)
     strand = fit_strand_balance(sub, strand_model)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
+    dec_region, dec_left_bnd, dec_right_bnd = decodable_node_masks(ts_class, region_arrays.ref_id)
 
     region_eff_len = region_eff_length(l_phys, gdna_fl_pmf)
     mu_fl = boundary_eff_length(gdna_fl_pmf)
@@ -238,11 +240,15 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
             exposure_dispersion=phi,
             base_omega=exposure.omega,
             base_log_omega_var=exposure.log_omega_var,
+            dec_region=dec_region,
         )
         omega = swept.omega
 
         # --- M-step (verbatim from calibrate.py) ---
-        rho_0_new = update_rho_0(exposure.m_g_tot, omega, l_phys)
+        rho_0_new = update_rho_0(
+            cont.m_g, left.m_g, right.m_g, omega, l_phys,
+            dec_region=dec_region, dec_left_bnd=dec_left_bnd, dec_right_bnd=dec_right_bnd,
+        )
         mu_g_cont = omega * rho_0_new * region_eff_len
         floor = config.exposure_dispersion_floor
         if phi_mode == "nb_omega":

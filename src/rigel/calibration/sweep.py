@@ -8,16 +8,20 @@ weight. Every node carries a gDNA Gamma pair ``(α, β) = (gDNA count, effective
 length)`` whose ratio estimates the local density ``ρ_0·ω``:
 
 * **region node** ``(M_g_contained, region_eff_len)`` — contained gDNA, FL-corrected
-  contained exposure (:mod:`rigel.calibration.effective_length`).
+  contained exposure (:mod:`rigel.calibration.effective_length`). Only **decodable**
+  regions contribute a node to the chain (PR 8); an AMBIG region's own contained
+  gDNA is undecodable and is withheld so it cannot self-impute.
 * **boundary node** ``(gDNA crossing flux, μ_FL)`` — crossing gDNA, the gДNA FL
   mean (region-independent).
 
 The two passes pool decayed neighbour evidence; the immediately adjacent boundary
 nodes (one decay each) dominate (nearest-neighbour priority). The imputed AMBIG
-``ω`` is the **same** closed-form Gamma posterior used elsewhere, fed the swept
-``(α, β)`` (doc 03 §4). It only overwrites AMBIG-region exposure; decodable
-regions keep their PR 4a exposure. The gDNA **mass** attribution (D1, per side)
-is untouched — the sweep borrows *density*, not mass.
+``ω`` is the **same** closed-form Gamma posterior used elsewhere, fed the
+**neighbour-only** swept ``(α, β)`` (the region's own node is excluded; PR 8, doc
+03 §4). It only overwrites AMBIG-region exposure; decodable regions keep their
+PR 4a exposure. The gDNA **mass** attribution (D1, per side) is untouched — the
+sweep borrows *density*, not mass. With no decodable neighbour evidence the
+posterior collapses to the prior (ω → 1).
 """
 
 from __future__ import annotations
@@ -102,8 +106,15 @@ def sweep_ambig_exposure(
     exposure_dispersion: float,
     base_omega: np.ndarray,
     base_log_omega_var: np.ndarray,
+    dec_region: np.ndarray,
 ) -> SweepResult:
-    """Impute AMBIG-region exposure via the alternating region↔boundary sweep."""
+    """Impute AMBIG-region exposure via the alternating region↔boundary sweep.
+
+    ``dec_region`` (bool[R]) marks strand-decodable regions (PR 8). Only decodable
+    regions contribute their own contained gDNA to the propagated chain, and an
+    AMBIG region is imputed from neighbour evidence **only** — it never uses its
+    own (undecodable) contained node.
+    """
     ts_class = np.asarray(substrate.ts_class)
     ref_id = np.asarray(region_arrays.ref_id)
     ref_offsets = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
@@ -114,9 +125,12 @@ def sweep_ambig_exposure(
     if not np.any(ts_class == TS_AMBIG) or mu_fl <= 0.0:
         return SweepResult(omega=omega, log_omega_var=log_omega_var, n_ambig=0)
 
-    # Region nodes: gDNA contained count + FL-corrected contained exposure.
-    a_reg = np.asarray(alloc_contained.m_g_unspl, dtype=np.float64)
-    b_reg = np.asarray(region_eff_len, dtype=np.float64)
+    # Region nodes: gDNA contained count + FL-corrected contained exposure. Only
+    # DECODABLE regions inject their own node into the chain (PR 8) — an AMBIG
+    # region's own contained gDNA is undecodable "false gDNA" and must not flow.
+    dec = np.asarray(dec_region, dtype=bool)
+    a_reg = np.where(dec, np.asarray(alloc_contained.m_g_unspl, dtype=np.float64), 0.0)
+    b_reg = np.where(dec, np.asarray(region_eff_len, dtype=np.float64), 0.0)
     # Boundary-to-the-right nodes (indexed by left region): crossing gDNA + weight.
     a_bnd, weight = _internal_boundary_nodes(
         ref_id, alloc_left, alloc_right, substrate.left, substrate.right
@@ -160,11 +174,15 @@ def sweep_ambig_exposure(
             run_a += a_reg[r]
             run_b += b_reg[r]
 
-    alpha_swept = a_reg + from_left_a + from_right_a
-    beta_swept = b_reg + from_left_b + from_right_b
+    # Impute AMBIG exposure from NEIGHBOUR evidence only (PR 8): the region's own
+    # (a_reg, b_reg) node is dropped, so a zero-information AMBIG region relies
+    # solely on the sweep + global ρ_0. With no decodable neighbour evidence the
+    # posterior collapses to the prior (ω → 1, the correct neutral fallback).
+    alpha_nbr = from_left_a + from_right_a
+    beta_nbr = from_left_b + from_right_b
     ambig = ts_class == TS_AMBIG
-    alpha_post = inv_dispersion + alpha_swept[ambig]
-    omega[ambig] = alpha_post / (inv_dispersion + rho_0 * beta_swept[ambig])
+    alpha_post = inv_dispersion + alpha_nbr[ambig]
+    omega[ambig] = alpha_post / (inv_dispersion + rho_0 * beta_nbr[ambig])
     log_omega_var[ambig] = 1.0 / alpha_post
     return SweepResult(omega=omega, log_omega_var=log_omega_var, n_ambig=int(ambig.sum()))
 

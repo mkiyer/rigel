@@ -105,6 +105,7 @@ def _sweep(
     sub = _substrate(ts, left, right)
     alloc_contained = _alloc(a_reg, np.full(len(ts), 0.5))
     base_lov = np.full(len(ts), 1.0)
+    dec_region = np.asarray(ts, dtype=np.int8) != TS_AMBIG
     return sweep_ambig_exposure(
         sub,
         ra,
@@ -117,6 +118,7 @@ def _sweep(
         exposure_dispersion=exposure_dispersion,
         base_omega=np.asarray(base_omega, np.float64),
         base_log_omega_var=base_lov,
+        dec_region=dec_region,
     )
 
 
@@ -136,8 +138,27 @@ def test_ambig_inherits_neighbour_density():
     )
     assert res.n_ambig == 1
     np.testing.assert_allclose(res.omega[[0, 2]], [2.0, 2.0])  # decodable rows untouched
-    assert res.omega[1] > 1.0  # imputed up from the ω=1 fallback...
-    assert 1.7 < res.omega[1] < 1.95  # ...toward the neighbours' ω=2
+    # Imputed from NEIGHBOUR evidence only (PR 8 F2): no self-dilution by its own
+    # (undecodable) length, so ω lands in the neighbours' density band (region ω=2,
+    # flanking boundaries slightly denser) — well above the ω=1 fallback.
+    assert 2.0 < res.omega[1] < 3.0
+
+
+def test_ambig_ignores_own_contained_gdna():
+    # PR 8 (F2): an AMBIG region is imputed from NEIGHBOUR evidence only. Its own
+    # contained gDNA — undecodable "false gDNA" — must not change its imputed ω.
+    ts = [TS_POS, TS_AMBIG, TS_POS]
+    common = dict(
+        region_eff_len=[50, 50, 50],
+        left=_view([0, 20, 20]),
+        right=_view([20, 20, 0]),
+        alloc_left=_alloc([0, 0, 0], [0.5, 0.5, 1.0]),
+        alloc_right=_alloc([0, 0, 0], [1.0, 0.5, 0.5]),
+        base_omega=[2.0, 1.0, 2.0],
+    )
+    res_clean = _sweep(ts, a_reg=[10, 0, 10], **common)
+    res_false = _sweep(ts, a_reg=[10, 999, 10], **common)  # R1 huge own (false) gDNA
+    np.testing.assert_allclose(res_false.omega[1], res_clean.omega[1])
 
 
 def test_ambig_falls_back_when_isolated_and_choked():
