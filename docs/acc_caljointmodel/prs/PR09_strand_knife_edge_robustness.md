@@ -1,109 +1,76 @@
-# PR 9 — Strand knife-edge: keep the RNA Beta-Binomial well-conditioned at (near-)perfect stranding
+# PR 9 — Strand Beta-Binomial: posterior-predictive overdispersion (subsumes PR 10)
 
-Second of the 3-PR robustness split (PR8 AMBIG → **PR9 strand knife-edge** → PR10
-spliced double-count). Independent of PR8; either can land first.
+Second of the post-PR07 robustness work. Replaces the RNA strand BB's
+arbitrary-floor overdispersion with a **posterior-predictive** fit driven by
+spliced-read statistical power — removing three magic numbers and folding in PR 10.
 
-## Summary
+## Investigation first: the knife-edge is NOT what fails the nrna_dc cases
 
-At perfect or near-perfect strand specificity the RNA strand Beta-Binomial
-collapses to a razor edge: the sense mean `κ_rna` is pushed to its clamp bound and
-the overdispersion `ρ_r_bb` floors to `1e-6`, giving `BB(α≈1, β≈1e6)`. Then **any**
-read even slightly off the expected strand scores as gDNA. A perfectly stranded
-library is the *easy* case; it should not make the discriminator pathologically
-brittle. This drives RNA→gDNA leakage on the imperfect-`ss` and mixed scenarios.
+We suspected the strand "knife-edge" (`ρ_r_bb` floored to `1e-6` ≡ a Binomial at
+`κ_rna`) caused the 3 remaining `nrna_dc g20` failures. **Disproven empirically:**
+softening the strand BB (dispersion floor, mean floor, both — across the full range
+of candidate values) changes those scenarios' metrics by ≤4 fragments. The reason:
+`π_g = expit(logit(prior) + llr_count + llr_strand)` — the **count channel + prior
+already saturate π_g**, so the strand LLR is irrelevant there. The 3 `nrna_dc`
+failures are count/density/EM issues (a separate investigation), not strand.
 
-## Root cause (confirmed)
+So PR 9 is **not** about fixing those scenarios. It is a *principled-robustness +
+magic-number removal* step (your framing): real datasets with **sparse or zero
+spliced RNA** exist and must degrade gracefully, and the `1e-6` floor is an
+arbitrary constant we can replace with statistical power.
 
-`fit_strand_balance` ([strand_balance.py](../../../src/rigel/calibration/strand_balance.py)):
-- `κ_rna = clamp(p_r1_sense, _BB_FLOOR, 1−_BB_FLOOR)` with `_BB_FLOOR = 1e-6`. A
-  perfectly stranded library has `p_r1_sense ∈ {0,1}` ⇒ `κ_rna` sits **at the bound**.
-- `ρ_r_bb` is method-of-moments; with no strand spread (perfect `ss`) MoM returns
-  ≈0 and is floored to `_BB_FLOOR = 1e-6` — removing the very overdispersion that is
-  supposed to soften the channel.
+## What ρ_r_bb is, and what was wrong
 
-Result on single_exon (ss=1.0): `κ_rna=1e-6, ρ_r_bb=1e-6` →
-`a_r = κ(1−ρ)/ρ ≈ 1`, `b_r = (1−κ)(1−ρ)/ρ ≈ 1e6` → the RNA BB puts essentially all
-mass on a single sense count. In the E-step strand log-Bayes-factor
-([estep.py:89](../../../src/rigel/calibration/estep.py#L89)) a region whose sense
-fraction is off by even one read gets `ll_d → −∞` relative to the symmetric gDNA
-`BB(0.5, ρ_d)` ⇒ scored gDNA.
+`κ_rna` (RNA sense mean) and `ρ_r_bb` (RNA strand BB overdispersion) are a **fixed
+one-time fit** (not EM-trained) — `fit_strand_balance` computes them once and the
+M-step never touches them. Previously:
+- `κ_rna` = `StrandModel.p_r1_sense` (clean per-fragment 2×2), clamped to `[1e-6, 1−1e-6]`;
+- `ρ_r_bb` = method-of-moments over the substrate's per-region spliced pool, floored
+  at `_BB_FLOOR=1e-6`, with a `_RHO_R_BB_FALLBACK=0.01` for `<_MIN_OBS_FOR_OVERDISPERSION=2`.
 
-(Note: the `κ_rna≈0`-vs-`≈1` orientation is the **self-consistent convention**
-established in the PR8 diagnosis — both `κ_rna` and the unspliced `k_sense` live in
-the same R1-orientation frame, so the channel still separates RNA from gDNA. The
-bug here is the *sharpness*, not the orientation. The only orientation action is to
-fix the misleading "both report the correct transcript strand" docstring in
-[strand_model.py](../../../src/rigel/strand_model.py).)
+Three problems: (a) the `1e-6` floor is arbitrary; (b) the MoM pool **double-counts
+boundary spliced reads** (a junction read lands in both flanking views — this was
+PR 10); (c) with 1–2 spliced reads a point-estimate κ feeds a razor-sharp Binomial.
 
-## The fix (principled — reuse the existing measurement-uncertainty floor)
+## The fix: posterior-predictive Beta-Binomial
 
-`StrandModel` already exposes exactly the right quantity but it is **not wired into
-the calibration strand channel** (it is only referenced for a pipeline warning):
+The RNA strand BB's Beta prior **is** the κ_rna posterior `Beta(n_same+1, n_opp+1)`
+from the StrandModel's 2×2 fragment counts (Laplace prior `Beta(1,1)`). So:
 
-> `strand_specificity_ci_epsilon(confidence)` →
-> `ε_CI = 1 − UCL(strand_specificity)`, the one-sided upper credible limit on the
-> minor-orientation rate `1−ss` under a `Beta(k_minor+1, k_major+1)` posterior
-> ([strand_model.py:224](../../../src/rigel/strand_model.py#L224)). Its own
-> docstring says it exists "to avoid runaway strand LLRs when the training set is
-> small or when ss_est saturates to 1.0."
+- `κ_rna = (n_same+1)/(n_obs+2)` — posterior mean (never at 0/1 → no clamp needed);
+- `ρ_r_bb = 1/(n_obs+3)` — the posterior-predictive overdispersion, a pure function
+  of spliced-read count (statistical power).
 
-`ε_CI` is the **statistically justified minimum off-strand rate** consistent with
-the finite spliced sample — not a magic number. Use it to keep the RNA BB off the
-knife edge. Two coupled levers (decide which, or both, in critique):
+The Beta-Binomial collapses to the **Binomial** as `ρ_r_bb → 0` (confirmed:
+`max|BB − Binomial| = 2.5e-6` at `1e-6`), so:
 
-- **Mean floor:** clamp `κ_rna` into `[ε_CI, 1−ε_CI]` instead of
-  `[_BB_FLOOR, 1−_BB_FLOOR]`. At perfect stranding with finite `n`, `ε_CI > 0`
-  pulls `κ_rna` off the hard bound so the BB expects an `ε_CI` minority off-strand.
-- **Dispersion floor:** floor `ρ_r_bb` at the overdispersion implied by `ε_CI`
-  (the minor-rate posterior's spread) rather than `_BB_FLOOR`. This restores the
-  softening the channel is designed to have.
+```
+n_obs = 200,000 → ρ ≈ 0       → Binomial (correct sharp limit, real data)
+n_obs = 200     → ρ ≈ 0.005   → ~Binomial
+n_obs = 5       → ρ ≈ 0.125   → wide (robust)
+n_obs = 0       → Beta(1,1)   → κ=0.5 symmetric → strand channel neutral
+```
 
-Both derive entirely from the spliced sample size — **no new constant** (Q6-clean):
-they replace a fixed `1e-6` floor with the data's own credible interval. As `n → ∞`
-with a truly perfect library, `ε_CI → 0` and we recover the sharp channel; with the
-small spliced sets these toy scenarios have, `ε_CI` is appreciable and the channel
-stays tolerant.
+This **deletes** `_mom_overdispersion`, `_RHO_R_BB_FALLBACK`,
+`_MIN_OBS_FOR_OVERDISPERSION`, and the `_BB_FLOOR` clamp on the RNA params
+(`_BB_FLOOR` stays only for the gDNA `ρ_d_bb` bound, moved to mstep). And because the
+fit now draws from the StrandModel's per-fragment 2×2 — not the substrate pool — the
+boundary double-count disappears: **PR 10 is subsumed.** `fit_strand_balance` no
+longer takes the substrate.
 
-## Alternatives considered
+## Validation
 
-- **A fixed `ρ_r_bb` floor (e.g. 0.01/0.05).** Simple, but a magic number with no
-  principled value (Q6 violation). The `ε_CI` route is strictly better — same
-  effect, derived from data.
-- **Cap the per-region strand LLR at ±C.** Treats the symptom; needs a constant.
-- **Leave `κ_rna` clamp, only fix `ρ_r_bb`.** May be insufficient — a razor BB
-  centred at the bound still rejects the `ε_CI` minority. Prefer the coupled fix.
-
-## Test plan
-
-- The imperfect-`ss` scenarios (`overlapping_antisense` strand sweeps, the `ss<1`
-  arms of the sweeps): RNA no longer leaks to gDNA at `ss∈{0.9,0.65}`.
-- Perfect-`ss` regression: single_exon / non_overlapping still resolve cleanly
-  (the channel must not become *too* soft and admit gDNA as RNA).
-- Unit tests: `fit_strand_balance` returns `κ_rna`, `ρ_r_bb` off the hard bound when
-  `n` is small/perfectly stranded; recovers the sharp values as `n → ∞`.
-- A gDNA-bearing stranded scenario: confirm gDNA is still rejected from RNA (the
-  soften must not blunt real discrimination). Regenerate goldens.
-
-## Interaction with PR8
-
-Complementary. PR8 stops the `ρ₀` runaway (the dominant failure); PR9 hardens the
-strand channel so RNA at imperfect `ss` is not lost to gDNA. Some PR8 scenarios run
-at ss=1.0 and are fixed by PR8 alone; the `nrna_dc g20_n70_s65`-type low-`ss`
-leakage needs PR9. Land order is free.
+- `nrna_dc g20` cases **unchanged** (dense spliced → ρ≈0.005 → ~Binomial → as before;
+  count/EM still dominates them — PR 9 was never going to fix them).
+- single_exon false gDNA **0.69 → 8e-5** (the softer sparse-data BB stops mis-flagging
+  the clean RNA) — a real improvement.
+- 115 calibration units + 21 golden tests pass; ruff clean. Goldens regenerated
+  (global strand-param change, like PR 7): the κ_rna posterior mean shifts per-region
+  splits across ~all scenarios (1–5%); sanity-checked, no garbage.
+- Edge-case behaviour proven by unit tests (sparse → wide, dense → Binomial, n_obs=0
+  → symmetric); a **scenario** pool for zero-RNA / sparse-spliced / zero-gDNA is the
+  next (separate) PR.
 
 ## Rollback
 
-Single revert point: restore the `_BB_FLOOR` clamps in `fit_strand_balance` and
-unwire `ε_CI`.
-
-## Open questions (for critique)
-
-1. Mean floor, dispersion floor, or both? (My read: both — they address the two
-   independent degeneracies; either alone leaves a residual edge.)
-2. `ε_CI` confidence level — `strand_specificity_ci_epsilon` defaults to 0.99.
-   Is 0.99 right here, or should the calibration pick its own? (This *is* a
-   parameter, but a meaningful statistical one — worth an explicit decision.)
-3. Does the double-count (PR10) materially bias `ρ_r_bb` such that PR9 should land
-   after PR10? (My read: PR10 changes the `ρ_r_bb` MoM input but PR9's `ε_CI` floor
-   is computed from the strand-model counts, not the substrate pool, so they're
-   largely orthogonal.)
+Single revert point: restore the MoM `fit_strand_balance` + the three constants.

@@ -180,7 +180,7 @@ def _trace(payload, region_arrays, strand_model, gdna_fl_pmf, config, n_iters, p
     from rigel.calibration.calibrate import initial_hyperparameters
 
     phi, rho_d_bb = initial_hyperparameters(sub, config)
-    strand = fit_strand_balance(sub, strand_model)
+    strand = fit_strand_balance(strand_model)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
     dec_region, dec_left_bnd, dec_right_bnd = decodable_node_masks(ts_class, region_arrays.ref_id)
 

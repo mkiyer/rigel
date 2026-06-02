@@ -104,7 +104,7 @@ def calibrate(
     # --- Initial hyperparameters ---
     rho_0 = estimate_gdna_density(substrate, region_arrays).rho_0  # ρ_0 seed (PR 4c §III.2)
     exposure_dispersion, rho_d_bb = initial_hyperparameters(substrate, config)
-    strand = fit_strand_balance(substrate, strand_model)  # κ_rna, ρ_r_bb fixed (PR 3 / III.1)
+    strand = fit_strand_balance(strand_model)  # κ_rna, ρ_r_bb posterior-predictive (PR 9)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
 
     # FL-corrected per-view gDNA exposures for the count channel (PR 4c / PR05):

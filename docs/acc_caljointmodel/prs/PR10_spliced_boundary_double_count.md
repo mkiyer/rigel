@@ -1,5 +1,13 @@
 # PR 10 — Spliced junction reads are double-counted in the ρ_r_bb pool
 
+> **SUBSUMED BY PR 9 (no separate PR needed).** PR 9 replaced the method-of-moments
+> ρ_r_bb fit (which consumed the double-counted substrate spliced pool) with the
+> posterior-predictive Beta-Binomial drawn from the `StrandModel`'s **2×2 fragment
+> counts** — which are per-fragment from the scanner and never double-counted. With
+> the substrate pool no longer used for the strand fit, the double-count described
+> below cannot occur. This doc is retained as the rationale for *why* the MoM pool
+> was unsafe. No code action remains.
+
 Third of the 3-PR robustness split (PR8 AMBIG → PR9 strand knife-edge → **PR10
 spliced double-count**). Smallest of the three; a correctness fix to the
 overdispersion fit.

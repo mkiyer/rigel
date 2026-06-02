@@ -27,7 +27,6 @@ from scipy.stats import betabinom
 
 from .estep import _PI_CLIP
 from .signature import TS_AMBIG
-from .strand_balance import _BB_FLOOR
 
 # Upper bound on the exposure dispersion (the NB count overdispersion ≡ variance
 # of the per-region gDNA exposure ω; doc 03 §8). A numerical ceiling only: the
@@ -40,6 +39,10 @@ _PI_FLOOR = 1.0e-9
 # gDNA strand dispersion when too few regions to fit (matches the doc 03 §7 init).
 _RHO_D_BB_FALLBACK = 0.01
 _MIN_OBS_FOR_BB = 2
+# Beta-Binomial shape floor keeping the κ_d=0.5 gDNA BB shape params finite and
+# positive at the bounds (doc 03 §8). Used by the ρ_d_bb fit below. (The RNA
+# strand BB no longer needs a floor — PR 9 made it the posterior-predictive.)
+_BB_FLOOR = 1.0e-6
 
 
 def decodable_node_masks(

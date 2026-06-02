@@ -1,4 +1,4 @@
-"""RNA strand-balance fit: κ_rna from StrandModel, ρ_r_bb by method-of-moments."""
+"""RNA strand-balance fit: posterior-predictive Beta-Binomial from the spliced 2x2 (PR 9)."""
 
 from __future__ import annotations
 
@@ -6,129 +6,62 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.strand_balance import (
-    _BB_FLOOR,
-    _RHO_R_BB_FALLBACK,
-    StrandBalance,
-    fit_strand_balance,
-)
-from rigel.calibration.substrate import CalibrationSubstrate, SubstrateView
+from rigel.calibration.strand_balance import StrandBalance, fit_strand_balance
 
 
-def _strand_model(p_r1_sense: float):
-    return SimpleNamespace(p_r1_sense=p_r1_sense)
+def _strand_model(p_r1_sense: float, n_observations: int):
+    """Minimal StrandModels stand-in: the posterior-predictive needs only these two."""
+    return SimpleNamespace(p_r1_sense=p_r1_sense, n_observations=n_observations)
 
 
-def _empty_view(r: int) -> SubstrateView:
-    z = np.zeros(r, dtype=np.int64)
-    zf = np.zeros(r, dtype=np.float64)
-    return SubstrateView(z.copy(), z.copy(), z.copy(), z.copy(), zf.copy(), zf.copy())
-
-
-def _substrate_with_contained_spliced(sense, antisense) -> CalibrationSubstrate:
-    """Build a substrate carrying spliced (sense, antisense) only in the contained view."""
-    sense = np.asarray(sense, dtype=np.int64)
-    antisense = np.asarray(antisense, dtype=np.int64)
-    r = len(sense)
-    z = np.zeros(r, dtype=np.int64)
-    zf = np.zeros(r, dtype=np.float64)
-    contained = SubstrateView(
-        n_unspliced_pos=z.copy(),
-        n_unspliced_neg=z.copy(),
-        n_spliced_sense=sense,
-        n_spliced_antisense=antisense,
-        mass_unspliced=zf.copy(),
-        mass_spliced=zf.copy(),
-    )
-    return CalibrationSubstrate(
-        n_regions=r,
-        L_eff=np.full(r, 100.0),
-        ts_class=z.astype(np.int8),
-        contained=contained,
-        left=_empty_view(r),
-        right=_empty_view(r),
-    )
-
-
-def test_kappa_rna_from_strand_model_clamped():
-    sub = _substrate_with_contained_spliced([8, 16], [2, 4])
-    # Perfectly stranded library (p_r1_sense == 1.0) is clamped into (0, 1).
-    sb = fit_strand_balance(sub, _strand_model(1.0))
-    assert sb.kappa_rna == 1.0 - _BB_FLOOR
-    sb2 = fit_strand_balance(sub, _strand_model(0.8))
-    assert sb2.kappa_rna == 0.8
-
-
-def test_at_mean_data_is_underdispersed_floored():
-    # Every observation sits exactly at κ = 0.8 → residual variance below the
-    # binomial expectation → ρ floored.
-    sub = _substrate_with_contained_spliced([8, 16, 80], [2, 4, 20])
-    sb = fit_strand_balance(sub, _strand_model(0.8))
+def test_posterior_mean_and_overdispersion():
+    # n_obs=10, p_r1_sense=0.8 → n_same=8 → Beta(9, 3): κ=9/12=0.75; ρ=1/(10+3)=1/13.
+    sb = fit_strand_balance(_strand_model(0.8, 10))
+    np.testing.assert_allclose(sb.kappa_rna, 9.0 / 12.0)
+    np.testing.assert_allclose(sb.rho_r_bb, 1.0 / 13.0)
+    assert sb.n_observations == 10
     assert not sb.fallback_used
-    assert sb.n_observations == 3
-    assert sb.rho_r_bb == _BB_FLOOR
 
 
-def test_overdispersed_data_yields_large_rho():
-    # All-sense and all-antisense observations at κ=0.5 → maximal overdispersion.
-    sub = _substrate_with_contained_spliced([10, 0, 10, 0], [0, 10, 0, 10])
-    sb = fit_strand_balance(sub, _strand_model(0.5))
-    assert not sb.fallback_used
-    assert sb.rho_r_bb > 0.5
-    assert sb.n_observations == 4
-    assert sb.n_total_reads == 40
+def test_dense_collapses_toward_binomial():
+    # Abundant spliced reads → overdispersion → 0 (the Binomial limit) and κ → p.
+    sb = fit_strand_balance(_strand_model(0.8, 200_000))
+    assert sb.rho_r_bb < 1e-4
+    np.testing.assert_allclose(sb.kappa_rna, 0.8, atol=1e-4)
 
 
-def test_fallback_no_spliced_observations():
-    sub = _substrate_with_contained_spliced([0, 0], [0, 0])  # no spliced reads
-    sb = fit_strand_balance(sub, _strand_model(0.9))
-    assert sb.fallback_used
-    assert sb.rho_r_bb == _RHO_R_BB_FALLBACK
-    assert sb.kappa_rna == 0.9
-    assert sb.n_observations == 0
+def test_sparse_is_overdispersed():
+    # Few spliced reads → large overdispersion (robust — not a razor-sharp Binomial).
+    sb1 = fit_strand_balance(_strand_model(1.0, 1))  # n_same=1 → Beta(2, 1)
+    sb5 = fit_strand_balance(_strand_model(1.0, 5))
+    np.testing.assert_allclose(sb1.rho_r_bb, 1.0 / 4.0)
+    np.testing.assert_allclose(sb5.rho_r_bb, 1.0 / 8.0)
+    assert sb1.rho_r_bb > sb5.rho_r_bb  # sparser → wider
 
 
-def test_fallback_single_observation():
-    # One observation: overdispersion is not estimable (needs >= 2).
-    sub = _substrate_with_contained_spliced([7], [3])
-    sb = fit_strand_balance(sub, _strand_model(0.7))
-    assert sb.fallback_used
-    assert sb.rho_r_bb == _RHO_R_BB_FALLBACK
-    assert sb.n_observations == 1
+def test_overdispersion_monotone_decreasing_in_power():
+    rhos = [fit_strand_balance(_strand_model(0.7, n)).rho_r_bb for n in (2, 10, 100, 1000)]
+    assert all(a > b for a, b in zip(rhos, rhos[1:]))
 
 
-def test_pools_all_three_views():
-    # Spliced observations in contained + left + right views are all pooled.
-    r = 2
-    z = np.zeros(r, dtype=np.int64)
-    zf = np.zeros(r, dtype=np.float64)
+def test_kappa_never_at_the_bound():
+    # Even a "perfectly stranded" point estimate is pulled off 0/1 by the Beta(1,1) prior.
+    for p in (0.0, 1.0):
+        sb = fit_strand_balance(_strand_model(p, 10))
+        assert 0.0 < sb.kappa_rna < 1.0
+    np.testing.assert_allclose(fit_strand_balance(_strand_model(1.0, 10)).kappa_rna, 11.0 / 12.0)
 
-    def view(sense, anti):
-        return SubstrateView(
-            z.copy(),
-            z.copy(),
-            np.asarray(sense, dtype=np.int64),
-            np.asarray(anti, dtype=np.int64),
-            zf.copy(),
-            zf.copy(),
-        )
 
-    sub = CalibrationSubstrate(
-        n_regions=r,
-        L_eff=np.full(r, 100.0),
-        ts_class=z.astype(np.int8),
-        contained=view([10, 0], [0, 0]),  # 1 obs (region 0)
-        left=view([0, 8], [0, 2]),  # 1 obs (region 1)
-        right=view([5, 0], [5, 0]),  # 1 obs (region 0)
-    )
-    sb = fit_strand_balance(sub, _strand_model(0.5))
-    assert sb.n_observations == 3
-    assert sb.n_total_reads == 10 + 10 + 10
+def test_zero_spliced_is_symmetric_fallback():
+    # No spliced reads → Beta(1,1): κ=0.5 (channel neutral), ρ=1/3, fallback flagged.
+    sb = fit_strand_balance(_strand_model(0.5, 0))
+    np.testing.assert_allclose(sb.kappa_rna, 0.5)
+    np.testing.assert_allclose(sb.rho_r_bb, 1.0 / 3.0)
+    assert sb.fallback_used and sb.n_observations == 0
 
 
 def test_returns_strand_balance_type():
-    sub = _substrate_with_contained_spliced([8, 16], [2, 4])
-    sb = fit_strand_balance(sub, _strand_model(0.8))
+    sb = fit_strand_balance(_strand_model(0.8, 20))
     assert isinstance(sb, StrandBalance)
     assert 0.0 < sb.kappa_rna < 1.0
     assert 0.0 < sb.rho_r_bb < 1.0

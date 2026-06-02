@@ -78,13 +78,13 @@ def main() -> None:
             max_size=fl_scan.max_size,
         )
         cfg_cal = CalibrationConfig()
-        strand = fit_strand_balance(CalibrationSubstrate.from_payload(payload, ra), strand_model)
+        strand = fit_strand_balance(strand_model)
         print("=== strand model (from spliced channel) ===")
         print(f"  strand_specificity = {strand_model.strand_specificity:.4f}  "
               f"n_spliced_obs = {getattr(strand_model, 'n_observations', '?')}")
         print(f"  p_r1_sense = {strand_model.p_r1_sense:.4g}  read1_sense={strand_model.read1_sense}")
         print(f"  fit_strand_balance → kappa_rna={strand.kappa_rna:.4g}  rho_r_bb={strand.rho_r_bb:.4g}  "
-              f"(n_obs={strand.n_observations}, n_reads={strand.n_total_reads}, "
+              f"(n_obs={strand.n_observations}, "
               f"fallback={strand.fallback_used}:{strand.fallback_reason})")
         _trace(payload, ra, strand_model, fl.gdna_pmf, cfg_cal, args.iters)
     finally:
@@ -104,7 +104,7 @@ def _trace(payload, ra, strand_model, gdna_fl_pmf, config, n_iters):
     from rigel.calibration.calibrate import initial_hyperparameters
 
     disp, rho_d_bb = initial_hyperparameters(sub, config)
-    strand = fit_strand_balance(sub, strand_model)
+    strand = fit_strand_balance(strand_model)
     kappa_rna, rho_r_bb = strand.kappa_rna, strand.rho_r_bb
     region_eff_len = region_eff_length(l_phys, gdna_fl_pmf)
     mu_fl = boundary_eff_length(gdna_fl_pmf)

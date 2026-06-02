@@ -23,7 +23,7 @@ from rigel.config import CalibrationConfig
 
 def _run(config=None):
     payload, ra = make_synthetic_payload()
-    strand_model = SimpleNamespace(p_r1_sense=0.95)
+    strand_model = SimpleNamespace(p_r1_sense=0.95, n_observations=40)
     return calibrate(
         payload=payload,
         region_arrays=ra,
@@ -74,19 +74,18 @@ def test_fitted_hyperparameters_in_range():
     assert result.rho_0 > 0.0
     assert result.exposure_dispersion > 0.0
     assert 0.0 < result.rho_d_bb < 1.0
-    assert result.kappa_rna == 0.95  # fixed from the StrandModel (PR 3)
-    assert 0.0 < result.rho_r_bb < 1.0  # fixed from the spliced channel (PR 3)
+    # κ_rna is the posterior mean (n_same+1)/(n_obs+2), pulled off the 0.95 MLE by
+    # the Beta(1,1) prior (PR 9); exact value checked in test_strand_params_fixed_not_refit.
+    assert 0.0 < result.kappa_rna < 1.0
+    assert 0.0 < result.rho_r_bb < 1.0  # posterior-predictive overdispersion 1/(n_obs+3)
 
 
 def test_strand_params_fixed_not_refit():
-    # κ_rna and ρ_r_bb come from PR 3 (spliced) and must equal a one-shot
-    # strand-balance fit — the M-step does not touch them (III.1).
+    # κ_rna and ρ_r_bb are the posterior-predictive strand fit (PR 9) and must
+    # equal a one-shot fit on the same StrandModel — the M-step never touches them.
     from rigel.calibration.strand_balance import fit_strand_balance
-    from rigel.calibration.substrate import CalibrationSubstrate
 
-    payload, ra = make_synthetic_payload()
-    sub = CalibrationSubstrate.from_payload(payload, ra)
-    sb = fit_strand_balance(sub, SimpleNamespace(p_r1_sense=0.95))
+    sb = fit_strand_balance(SimpleNamespace(p_r1_sense=0.95, n_observations=40))
     result = _run()
     assert result.kappa_rna == sb.kappa_rna
     assert result.rho_r_bb == sb.rho_r_bb
