@@ -11,8 +11,4 @@ class CalibrationSubstrateError(ValueError):
     """
 
 
-class CalibrationConvergenceError(RuntimeError):
-    """Raised when the calibration outer loop fails to converge."""
-
-
-__all__ = ["CalibrationSubstrateError", "CalibrationConvergenceError"]
+__all__ = ["CalibrationSubstrateError"]

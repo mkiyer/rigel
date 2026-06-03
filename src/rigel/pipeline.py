@@ -813,18 +813,18 @@ def run_pipeline(
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
-    # NOTE: v6 calibration (rigel.calibration.calibrate) builds its own
-    # finalised FLModels (RNA + gDNA + global) inside CalibrationResult.
-    # We do NOT call ``frag_length_models.build_scoring_models()`` or
-    # ``.finalize(...)`` here — the scanner-trained accumulator is kept
-    # raw and only consulted for index-side geometry.
+    # NOTE: the FL models for calibration + scoring are built below via
+    # build_fl_models() (RNA + gDNA + global, EB-smoothed). We do NOT call
+    # ``frag_length_models.build_scoring_models()`` / ``.finalize(...)`` here —
+    # the scanner-trained accumulator is kept raw and only consulted for its
+    # per-category FL counts.
 
-    # -- Calibration (calibration-v6) --
+    # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator
-    # payload, then hand both (plus the trained strand model) to the
-    # calibrator. The calibrator body is a skeleton during the rebuild
-    # (raises NotImplementedError); PR 2–PR 5 fill it in. See
-    # docs/acc_caljointmodel/00_implementation_plan.md.
+    # payload, then hand both (plus the trained strand model and the gDNA FL pmf)
+    # to the calibrator. Single feed-forward pass: deconvolve each node into
+    # gDNA/RNA and derive ρ_0 + per-node exposure. See
+    # docs/futureprs/acyclic_deconvolution_design.md.
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
 
@@ -873,16 +873,20 @@ def run_pipeline(
     )
 
     logger.info(
-        "calibration: R=%d iters=%d converged=%s rho_0=%.4g exp_disp=%.4g "
-        "rho_d_BB=%.4g kappa_rna=%.4g rho_r_BB=%.4g",
+        "calibration: R=%d rho_0=%.4g kappa_rna=%.3f gDNA_mass=%.0f RNA_mass=%.0f",
         calibration.n_regions,
-        calibration.n_iterations,
-        calibration.converged,
         calibration.rho_0,
-        calibration.exposure_dispersion,
-        calibration.rho_d_bb,
         calibration.kappa_rna,
-        calibration.rho_r_bb,
+        float(
+            calibration.mass_g_contained.sum()
+            + calibration.mass_g_left.sum()
+            + calibration.mass_g_right.sum()
+        ),
+        float(
+            calibration.mass_d_contained.sum()
+            + calibration.mass_d_left.sum()
+            + calibration.mass_d_right.sum()
+        ),
     )
 
     # -- Quantification: calibration prior → per-locus EM --

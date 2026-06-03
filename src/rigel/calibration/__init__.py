@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from ..config import CalibrationConfig
 from .calibrate import calibrate
-from .errors import CalibrationConvergenceError, CalibrationSubstrateError
+from .errors import CalibrationSubstrateError
 from .priors import LocusPriors, assemble_priors
 from .result import CalibrationResult
 from .strand_balance import StrandBalance
@@ -25,7 +25,6 @@ __all__ = [
     "SubstrateView",
     "StrandBalance",
     "CalibrationSubstrateError",
-    "CalibrationConvergenceError",
     "calibrate",
     "assemble_priors",
     "LocusPriors",

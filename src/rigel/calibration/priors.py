@@ -107,16 +107,21 @@ def assemble_priors(
     *,
     prior_weight: float,
 ) -> LocusPriors:
-    """Build the per-locus EM prior from the calibration result (PR 6 §I.2).
+    """Build the per-locus EM prior from the acyclic calibration result.
 
-    Per region ``r``: the deconvolved RNA mass ``D_r = M_d_cont + M_d_left +
-    M_d_right`` (D1, no ½) and the exposure-weighted physical length
-    ``e_r = ω_r · L_phys_r``. These project to loci by overlap share ``φ``; then
-    per locus ``L``::
+    Per region ``r``, sum its three nodes (contained + the two boundary sides) into
+    the deconvolved gDNA mass ``G_r`` and RNA mass ``D_r``, and take the gDNA
+    component's exposure-weighted length ``E_r = gdna_exposure_len[r]``. These project
+    to loci by genomic-overlap share ``φ`` (a region can straddle loci); then per
+    locus ``L``::
 
-        alpha_rna_add[L]  = prior_weight · Σ_r φ_{L,r} · D_r
-        alpha_gdna_add[L] = prior_weight · ρ_0 · Σ_r φ_{L,r} · e_r     (modeled gDNA mass)
-        gdna_eff_len[L]   = max(1, Σ_r φ_{L,r} · e_r)
+        alpha_gdna_add[L] = prior_weight · Σ_r φ_{L,r} · G_r     (deconvolved gDNA)
+        alpha_rna_add[L]  = prior_weight · Σ_r φ_{L,r} · D_r     (deconvolved RNA)
+        gdna_eff_len[L]   = max(1, Σ_r φ_{L,r} · E_r)
+
+    Unlike the old cyclic prior, the gDNA pseudocount is the *observed* deconvolved
+    gDNA — not a modeled ``ρ_0·ω·L`` injected even into empty regions — so a region
+    with no gDNA evidence contributes nothing to ``alpha_gdna_add``.
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
@@ -124,21 +129,21 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    n_loci = len(multi_loci)
+    g_region = calibration.mass_g_contained + calibration.mass_g_left + calibration.mass_g_right
     d_region = calibration.mass_d_contained + calibration.mass_d_left + calibration.mass_d_right
-    e_region = calibration.omega * region_arrays.region_size_bp
 
     proj = _project_regions_to_loci(
-        region_arrays, multi_loci, n_loci, {"d": d_region, "e": e_region}
+        region_arrays,
+        multi_loci,
+        len(multi_loci),
+        {"g": g_region, "d": d_region, "e": calibration.gdna_exposure_len},
     )
-    d_locus = proj["d"]
-    e_locus = proj["e"]
 
     w = float(prior_weight)
     return LocusPriors(
-        alpha_gdna_add=w * float(calibration.rho_0) * e_locus,
-        alpha_rna_add=w * d_locus,
-        gdna_eff_len=np.maximum(e_locus, _GDNA_EFF_LEN_FLOOR),
+        alpha_gdna_add=w * proj["g"],
+        alpha_rna_add=w * proj["d"],
+        gdna_eff_len=np.maximum(proj["e"], _GDNA_EFF_LEN_FLOOR),
     )
 
 

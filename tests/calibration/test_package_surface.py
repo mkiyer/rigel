@@ -11,7 +11,6 @@ EXPECTED_NAMES = [
     "SubstrateView",
     "StrandBalance",
     "CalibrationSubstrateError",
-    "CalibrationConvergenceError",
     "calibrate",
     "assemble_priors",
     "LocusPriors",
@@ -26,7 +25,6 @@ def test_public_names_present():
 
 def test_error_types():
     assert issubclass(cal.CalibrationSubstrateError, ValueError)
-    assert issubclass(cal.CalibrationConvergenceError, RuntimeError)
 
 
 def test_assemble_priors_implemented():

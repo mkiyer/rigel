@@ -1,11 +1,8 @@
-"""calibrate(): the PR 5 outer-loop EM — convergence + structural invariants.
+"""calibrate(): the acyclic single-pass calibrator — schema + structural invariants.
 
-The loop runs E-step (count channel live) → exposure → AMBIG sweep → M-step until
-the mass-change converges. These tests pin the *mechanics* (convergence, mass
-conservation, parameter ranges, monotone diagnostic); converged *biology*
-(paralog rescue, exon→RNA) needs realistic data and is covered by the scenario
-suite (PR 7) — the shared 3-region synthetic is too sparse to fit a sensible RNA
-strand dispersion.
+These pin the *mechanics* (a valid result, mass conservation per node, bounded masses,
+sane exposure, κ_rna provenance, the confidence knob). Converged *biology* (paralog
+rescue, exon→RNA) needs realistic data and is covered by the scenario suite.
 """
 
 from __future__ import annotations
@@ -13,7 +10,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
-
 from _synthetic import make_gdna_fl_pmf, make_synthetic_payload
 
 from rigel.calibration import calibrate
@@ -33,21 +29,14 @@ def _run(config=None):
     )
 
 
-def test_converges_with_monotone_mass_change():
+def test_returns_valid_result():
     result = _run()
     assert isinstance(result, CalibrationResult)
     assert result.n_regions == 3
-    assert result.converged is True
-    assert 2 <= result.n_iterations <= CalibrationConfig().max_outer_iterations
-    hist = result.mass_change_history
-    assert hist.shape == (result.n_iterations,)
-    assert np.all(np.isfinite(hist))
-    # Non-increasing (the result also enforces this) and the last step is below tol.
-    assert np.all(np.diff(hist) <= 1e-9 * (1.0 + np.abs(hist[:-1])))
-    assert hist[-1] < CalibrationConfig().mass_rel_tol
 
 
-def test_mass_conserved_per_view():
+def test_mass_conserved_per_node():
+    # Each node's gDNA + RNA mass equals the node's total accumulator mass.
     result = _run()
     np.testing.assert_allclose(
         result.mass_g_contained + result.mass_d_contained, [15.0, 26.0, 15.0]
@@ -56,7 +45,7 @@ def test_mass_conserved_per_view():
     np.testing.assert_allclose(result.mass_g_right + result.mass_d_right, [2.0, 4.5, 0.0])
 
 
-def test_masses_bounded_and_exposure_positive():
+def test_masses_bounded():
     result = _run()
     for g, tot in (
         (result.mass_g_contained, np.array([15.0, 26.0, 15.0])),
@@ -65,27 +54,32 @@ def test_masses_bounded_and_exposure_positive():
     ):
         assert np.all(g >= -1e-9)
         assert np.all(g <= tot + 1e-9)
-    assert np.all(result.omega > 0.0)
-    assert np.all(result.log_omega_var > 0.0)
 
 
-def test_fitted_hyperparameters_in_range():
+def test_exposure_and_density_sane():
     result = _run()
-    assert result.rho_0 > 0.0
-    assert result.exposure_dispersion > 0.0
-    assert 0.0 < result.rho_d_bb < 1.0
-    # κ_rna is the posterior mean (n_same+1)/(n_obs+2), pulled off the 0.95 MLE by
-    # the Beta(1,1) prior (PR 9); exact value checked in test_strand_params_fixed_not_refit.
-    assert 0.0 < result.kappa_rna < 1.0
-    assert 0.0 < result.rho_r_bb < 1.0  # posterior-predictive overdispersion 1/(n_obs+3)
+    assert np.isfinite(result.rho_0) and result.rho_0 >= 0.0
+    for w in (result.omega_contained, result.omega_left, result.omega_right):
+        assert np.all(np.isfinite(w))
+        assert np.all(w >= 0.0)
+    assert np.all(result.gdna_exposure_len >= 0.0)
+    assert 0.0 <= result.kappa_rna <= 1.0
 
 
-def test_strand_params_fixed_not_refit():
-    # κ_rna and ρ_r_bb are the posterior-predictive strand fit (PR 9) and must
-    # equal a one-shot fit on the same StrandModel — the M-step never touches them.
+def test_kappa_matches_strand_balance():
+    # κ_rna is the posterior-predictive strand fit; the calibrator passes it through.
     from rigel.calibration.strand_balance import fit_strand_balance
 
     sb = fit_strand_balance(SimpleNamespace(p_r1_sense=0.95, n_observations=40))
-    result = _run()
-    assert result.kappa_rna == sb.kappa_rna
-    assert result.rho_r_bb == sb.rho_r_bb
+    assert _run().kappa_rna == sb.kappa_rna
+
+
+def test_confidence_knob_shifts_split_toward_gdna():
+    # A positive confidence (z-quantile) reports a higher gDNA fraction than the mean,
+    # so the total deconvolved gDNA mass cannot decrease.
+    def total_g(r):
+        return float(r.mass_g_contained.sum() + r.mass_g_left.sum() + r.mass_g_right.sum())
+
+    assert total_g(_run(CalibrationConfig(confidence=1.0))) >= total_g(
+        _run(CalibrationConfig(confidence=0.0))
+    ) - 1e-9

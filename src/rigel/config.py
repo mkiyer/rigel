@@ -220,51 +220,31 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for the joint fractional-accumulator + calibration
-    orchestrator (:func:`rigel.calibration.calibrate`).
+    """Configuration for the acyclic calibrator (:func:`rigel.calibration.calibrate`).
 
-    Schema follows ``docs/caljointmodel/04_interface_contract.md`` §3 and
-    ``03_inference.md`` §8. Three control knobs; none is a decision threshold.
-    The D1 boundary side-attribution removed the old ``boundary_split_factor``
-    (the "½ half-split" knob): the accumulator already partitions boundary
-    mass by side, so there is no split fraction to set.
+    Two knobs, both controlling the per-node joint decode; neither is a decision
+    threshold. The old EM-loop knobs (``max_outer_iterations``, ``mass_rel_tol``,
+    ``exposure_dispersion_floor``) are gone: the calibrator is a single feed-forward
+    pass with no loop, no convergence test, and no exposure-dispersion prior.
     """
 
-    #: Hard cap on outer EM iterations. Typical convergence in 3–10
-    #: (doc 03 §8 ``_MAX_OUTER``). Provisional pending the PR 5/7 convergence
-    #: study; it is a backstop, not a tuned value.
-    max_outer_iterations: int = 25
+    #: z-quantile of the per-node gDNA-fraction posterior reported as the point
+    #: estimate (``0`` = posterior mean; ``>0`` leans conservatively toward gDNA,
+    #: ``<0`` toward RNA). The high-value, user-facing calibration knob.
+    confidence: float = 0.0
 
-    #: Relative max-region mass-change termination criterion (doc 03 §8
-    #: ``_TOL_MASS``).
-    mass_rel_tol: float = 1.0e-4
-
-    #: Numerical floor on the exposure dispersion (the NB count overdispersion ≡
-    #: variance of the per-region gDNA exposure; was ``phi_floor``). The
-    #: dispersion enters elsewhere only as ``1/dispersion``; this floor keeps that
-    #: channel accurate as the dispersion → 0 (the Poisson limit). Empirically
-    #: (scripts/debug/phi_floor_exploration.py) the count channel reaches its
-    #: Poisson limit accurately down to ≈1e-10, with precision noise below ≈1e-11.
-    #: 1e-8 is the smallest safe value: ~1000× margin to that cliff, <1e-6
-    #: relative error in every channel, and below any dispersion real data
-    #: resolves (a value <1e-6 is already Poisson-indistinguishable).
-    exposure_dispersion_floor: float = 1.0e-8
+    #: Grid resolution of the joint-decode posterior over the gDNA fraction on
+    #: ``[0, 1]``. Advanced/technical — 200 is ample for a smooth 1-D posterior;
+    #: raising it trades run time for resolution (validate during benchmarking).
+    n_grid: int = 200
 
     def __post_init__(self) -> None:
-        if self.max_outer_iterations < 1:
+        if not float("-inf") < float(self.confidence) < float("inf"):
             raise ValueError(
-                "CalibrationConfig.max_outer_iterations must be >= 1; "
-                f"got {self.max_outer_iterations}."
+                f"CalibrationConfig.confidence must be finite; got {self.confidence}."
             )
-        if self.mass_rel_tol <= 0.0:
-            raise ValueError(
-                f"CalibrationConfig.mass_rel_tol must be > 0; got {self.mass_rel_tol}."
-            )
-        if self.exposure_dispersion_floor <= 0.0:
-            raise ValueError(
-                "CalibrationConfig.exposure_dispersion_floor must be > 0; "
-                f"got {self.exposure_dispersion_floor}."
-            )
+        if self.n_grid < 2:
+            raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")
 
 
 @dataclass(frozen=True)

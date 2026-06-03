@@ -1,12 +1,13 @@
-"""CalibrationResult — the calibration output schema (doc 04 §5).
+"""CalibrationResult — the acyclic calibrator's output schema.
 
-Per-region deconvoluted mass (G2 contained, G3 boundary), the per-region
-exposure posterior (G4), the five fitted library hyperparameters, and
-convergence diagnostics. ``__post_init__`` enforces the *intrinsic*
-invariants — those checkable from the result alone (shapes, non-negativity,
-parameter ranges, monotone mass-change). Mass conservation against the raw
-fragment counts is verified by the calibrator / tests, since it requires the
-substrate (which the result does not carry).
+Per-region deconvolved gDNA / RNA mass across the region's three nodes (contained
+plus the two boundary sides), the per-node exposure ``ω`` stored explicitly for
+QC/diagnostics, the gDNA component's exposure-weighted effective length, and the two
+library scalars (``ρ_0``, ``κ_rna``). The calibrator is a single feed-forward pass,
+so there are **no** convergence diagnostics. ``__post_init__`` enforces the intrinsic
+invariants (shapes, finiteness, sign); mass conservation against the raw fragment
+counts is checked by the calibrator / tests (it needs the substrate, which the result
+does not carry).
 """
 
 from __future__ import annotations
@@ -16,11 +17,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..config import CalibrationConfig
-from .errors import CalibrationConvergenceError
 
 
-def _check_region_array(arr: np.ndarray, name: str, n_regions: int, *, strictly_positive: bool):
-    """Validate a per-region float64 array: shape, dtype, finite, sign."""
+def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
+    """Validate a per-region float64 array: shape, dtype, finite, non-negative."""
     if not isinstance(arr, np.ndarray):
         raise ValueError(f"CalibrationResult.{name} must be a numpy array.")
     if arr.dtype != np.float64:
@@ -31,45 +31,34 @@ def _check_region_array(arr: np.ndarray, name: str, n_regions: int, *, strictly_
         )
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"CalibrationResult.{name} contains non-finite values.")
-    if strictly_positive:
-        if np.any(arr <= 0.0):
-            raise ValueError(f"CalibrationResult.{name} must be strictly positive.")
-    elif np.any(arr < 0.0):
+    if np.any(arr < 0.0):
         raise ValueError(f"CalibrationResult.{name} must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)
 class CalibrationResult:
-    """Per-region deconvoluted mass + exposure posteriors + library hyperparameters.
+    """Per-region deconvolved mass + per-node exposure + library scalars (acyclic)."""
 
-    Each output traces to one of G2–G4.
-    """
-
-    # --- G2: contained-fragment mass (float64[R]) ---
+    # --- deconvolved mass across the region's 3 nodes (float64[R]) ---
     mass_g_contained: np.ndarray
     mass_d_contained: np.ndarray
-
-    # --- G3: boundary mass attributed to each region (float64[R]) ---
-    mass_g_left: np.ndarray
+    mass_g_left: np.ndarray  # right side of the left boundary
     mass_d_left: np.ndarray
-    mass_g_right: np.ndarray
+    mass_g_right: np.ndarray  # left side of the right boundary
     mass_d_right: np.ndarray
 
-    # --- G4: per-region exposure posterior (float64[R]) ---
-    omega: np.ndarray  # E[omega | data]   (Gamma posterior mean)
-    log_omega_var: np.ndarray  # Var(log omega | data)  (delta method)
+    # --- per-node exposure ω, stored explicitly for QC / diagnostics (float64[R]) ---
+    # ω < 1 depleted, = 1 uniform, > 1 enriched; 0 where a node carries no gDNA.
+    omega_contained: np.ndarray
+    omega_left: np.ndarray
+    omega_right: np.ndarray
 
-    # --- library hyperparameters ---
-    rho_0: float  # > 0
-    exposure_dispersion: float  # > 0  (NB count overdispersion ≡ Var of the per-region exposure ω)
-    rho_d_bb: float  # in (0, 1), gDNA strand BB dispersion (kappa_d = 0.5 fixed)
-    kappa_rna: float  # in (0, 1), RNA sense mean (from StrandModel; PR 3)
-    rho_r_bb: float  # in (0, 1), RNA strand BB dispersion (fit by PR 3)
+    # --- gDNA component effective-length contribution: Σ_node ω_node·L_node ---
+    gdna_exposure_len: np.ndarray  # float64[R]
 
-    # --- convergence diagnostics ---
-    n_iterations: int
-    converged: bool
-    mass_change_history: np.ndarray  # float64[n_iterations]
+    # --- library scalars ---
+    rho_0: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
+    kappa_rna: float  # in [0, 1], RNA sense fraction used by the strand clue
 
     # --- provenance ---
     n_regions: int
@@ -87,46 +76,18 @@ class CalibrationResult:
             "mass_d_left",
             "mass_g_right",
             "mass_d_right",
+            "omega_contained",
+            "omega_left",
+            "omega_right",
+            "gdna_exposure_len",
         ):
-            _check_region_array(getattr(self, name), name, n, strictly_positive=False)
-        for name in ("omega", "log_omega_var"):
-            _check_region_array(getattr(self, name), name, n, strictly_positive=True)
+            _check_region_array(getattr(self, name), name, n)
 
-        if not self.rho_0 > 0.0:
-            raise ValueError(f"CalibrationResult.rho_0 must be > 0; got {self.rho_0}.")
-        if not self.exposure_dispersion > 0.0:
-            raise ValueError(
-                f"CalibrationResult.exposure_dispersion must be > 0; got {self.exposure_dispersion}."
-            )
-        for name in ("rho_d_bb", "kappa_rna", "rho_r_bb"):
-            value = float(getattr(self, name))
-            if not 0.0 < value < 1.0:
-                raise ValueError(f"CalibrationResult.{name} must be in (0, 1); got {value}.")
-
-        if self.n_iterations < 0:
-            raise ValueError(
-                f"CalibrationResult.n_iterations must be >= 0; got {self.n_iterations}."
-            )
-        if not isinstance(self.converged, (bool, np.bool_)):
-            raise ValueError("CalibrationResult.converged must be a bool.")
-
-        hist = self.mass_change_history
-        if not isinstance(hist, np.ndarray) or hist.dtype != np.float64:
-            raise ValueError("CalibrationResult.mass_change_history must be a float64 array.")
-        if hist.shape != (self.n_iterations,):
-            raise ValueError(
-                f"CalibrationResult.mass_change_history has shape {hist.shape}; "
-                f"expected ({self.n_iterations},)."
-            )
-        # Divergence sentinel: a non-finite mass change means the EM blew up
-        # (a real bug). We do NOT require strict monotonicity — the mass-change
-        # legitimately spikes at iteration 2, when the count channel activates
-        # (iteration 1 is count-silent, doc 03 §3.1), before converging. The
-        # outer loop reports non-convergence via ``converged`` instead.
-        if not np.all(np.isfinite(hist)):
-            raise CalibrationConvergenceError(
-                "CalibrationResult.mass_change_history is non-finite; the EM diverged."
-            )
+        if not np.isfinite(self.rho_0) or self.rho_0 < 0.0:
+            raise ValueError(f"CalibrationResult.rho_0 must be finite and >= 0; got {self.rho_0}.")
+        kappa = float(self.kappa_rna)
+        if not 0.0 <= kappa <= 1.0:
+            raise ValueError(f"CalibrationResult.kappa_rna must be in [0, 1]; got {kappa}.")
 
 
 __all__ = ["CalibrationResult"]

@@ -32,6 +32,7 @@ class DerivedExposure:
     region_omega: np.ndarray  # float64[R]
     left_omega: np.ndarray  # float64[R]  (right side of each region's left boundary)
     right_omega: np.ndarray  # float64[R]  (left side of each region's right boundary)
+    gdna_exposure_len: np.ndarray  # float64[R]  Σ_node ω_node·L_node (gDNA component eff-len)
 
 
 def _side_exists(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -74,11 +75,20 @@ def derive(
         # ω = local/global; neutral (1) where there is no capacity or no global density.
         return np.where((eff > 0.0) & (rho_0 > 0.0), local_density / max(rho_0, 1e-12), 1.0)
 
+    region_omega = _omega(region_decode.gdna_mass, region_eff_len)
+    left_omega = _omega(left_decode.gdna_mass, left_eff)
+    right_omega = _omega(right_decode.gdna_mass, right_eff)
+    # gDNA component effective-length contribution per region: Σ_node ω_node·L_node.
+    # A non-existent side has left_eff/right_eff = 0, so its ω (=1 neutral) drops out.
+    gdna_exposure_len = (
+        region_omega * region_eff_len + left_omega * left_eff + right_omega * right_eff
+    )
     return DerivedExposure(
         rho_0=rho_0,
-        region_omega=_omega(region_decode.gdna_mass, region_eff_len),
-        left_omega=_omega(left_decode.gdna_mass, left_eff),
-        right_omega=_omega(right_decode.gdna_mass, right_eff),
+        region_omega=region_omega,
+        left_omega=left_omega,
+        right_omega=right_omega,
+        gdna_exposure_len=gdna_exposure_len,
     )
 
 
