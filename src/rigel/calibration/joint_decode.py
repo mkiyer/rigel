@@ -103,62 +103,64 @@ def decode_regions(
     )
 
 
-def decode_boundaries(
-    substrate, region_arrays, node_density, mu_fl, *,
+def decode_sides(
+    substrate, region_arrays, node_density, boundary_side_eff_len, *,
     kappa_rna, strand_overdispersion=0.0, confidence=0.0, n_grid=200,
-) -> JointDecode:
-    """Deconvolve each internal boundary's crossing mass (a node) into gDNA / RNA.
+) -> tuple[JointDecode, JointDecode]:
+    """Deconvolve each boundary **side** as an independent node (R1/decision iii).
 
-    A boundary node ``b`` (between regions ``b`` and ``b+1`` of the same reference) carries the
-    crossing mass/flux from both sides. Strand-decodable only when both sides share a single
-    transcript strand (POS-POS or NEG-NEG); otherwise count-only. Non-boundary rows (a
-    reference's last region) are emitted with zero mass.
+    The deconvolution unit is the boundary-side. Region ``r`` owns the **right** side of its
+    left boundary (``substrate.left[r]``) and the **left** side of its right boundary
+    (``substrate.right[r]``); both lie inside region ``r`` and so use
+    ``boundary_side_eff_len[r] = E_FL[min(ℓ, L_r)]`` (R2/R3). A side is **count-decodable** iff
+    its boundary is (no shared exon) ⇒ ``π_count → 1`` from its own crossing density; otherwise
+    it borrows the swept region density. It is **strand-decodable** iff the boundary's two
+    regions share a single transcript strand. Returns ``(left, right)`` per-region JointDecodes
+    (zero where a side carries no mass — e.g. reference edges).
     """
     ts = np.asarray(region_arrays.ts_class)
     ref_id = np.asarray(region_arrays.ref_id)
     r = ts.shape[0]
-    same = np.zeros(r, dtype=bool)
+    bnd_dec = node_density.boundary_decodable  # boundary (b, b+1) decodable, indexed by left region
+    eff = np.asarray(boundary_side_eff_len, dtype=np.float64)
+    region_density = node_density.density
+
+    def _side(view, same, ts_other, side_bnd_dec):
+        mass = view.mass_unspliced
+        pos = view.n_unspliced_pos.astype(np.float64)
+        neg = view.n_unspliced_neg.astype(np.float64)
+        both_pos = same & (ts == TS_POS) & (ts_other == TS_POS)
+        both_neg = same & (ts == TS_NEG) & (ts_other == TS_NEG)
+        strand_dec = both_pos | both_neg
+        sense = np.where(both_neg, neg, pos)
+        antisense = (pos + neg) - sense
+        with np.errstate(divide="ignore", invalid="ignore"):
+            own = np.where((mass > 0.0) & (eff > 0.0), mass / np.maximum(eff, 1e-12), 0.0)
+        density = np.where(side_bnd_dec, own, region_density)  # decodable → own; else swept
+        return _joint_per_node(
+            mass, view.mass_spliced, sense, antisense, density, pos + neg, eff, strand_dec,
+            kappa_rna=kappa_rna, strand_overdispersion=strand_overdispersion,
+            confidence=confidence, n_grid=n_grid,
+        )
+
+    # LEFT view of r = right side of boundary (r-1, r); neighbour is r-1.
+    left_same = np.zeros(r, dtype=bool)
+    ts_prev = np.zeros(r, dtype=ts.dtype)
+    left_bnd_dec = np.zeros(r, dtype=bool)
+    if r > 1:
+        left_same[1:] = ref_id[1:] == ref_id[:-1]
+        ts_prev[1:] = ts[:-1]
+        left_bnd_dec[1:] = bnd_dec[:-1]
+    left = _side(substrate.left, left_same, ts_prev, left_bnd_dec)
+
+    # RIGHT view of r = left side of boundary (r, r+1); neighbour is r+1.
+    right_same = np.zeros(r, dtype=bool)
     ts_next = np.zeros(r, dtype=ts.dtype)
-    dens_next = np.zeros(r, dtype=np.float64)
-    cev_next = np.zeros(r, dtype=np.float64)
     if r > 1:
-        same[:-1] = ref_id[:-1] == ref_id[1:]
+        right_same[:-1] = ref_id[:-1] == ref_id[1:]
         ts_next[:-1] = ts[1:]
-        dens_next[:-1] = node_density.density[1:]
-        cev_next[:-1] = node_density.count_evidence[1:]
-
-    lft, rgt = substrate.left, substrate.right
-    mass = np.zeros(r)
-    spliced = np.zeros(r)
-    pos = np.zeros(r)
-    neg = np.zeros(r)
-    if r > 1:
-        mass[:-1] = rgt.mass_unspliced[:-1] + lft.mass_unspliced[1:]
-        spliced[:-1] = rgt.mass_spliced[:-1] + lft.mass_spliced[1:]
-        pos[:-1] = rgt.n_unspliced_pos[:-1].astype(np.float64) + lft.n_unspliced_pos[1:].astype(np.float64)
-        neg[:-1] = rgt.n_unspliced_neg[:-1].astype(np.float64) + lft.n_unspliced_neg[1:].astype(np.float64)
-    mass = np.where(same, mass, 0.0)  # non-boundary rows carry no node
-
-    both_pos = same & (ts == TS_POS) & (ts_next == TS_POS)
-    both_neg = same & (ts == TS_NEG) & (ts_next == TS_NEG)
-    strand_dec = both_pos | both_neg
-    sense = np.where(both_neg, neg, pos)
-    antisense = (pos + neg) - sense
-    # A count-decodable boundary's crossings are gDNA-representative *by signature* (no exon
-    # bit shared ⇒ no unspliced mature RNA crosses), so π_count → 1 there (= own crossing
-    # density · μ_FL / M = 1); the strand then carves out any nascent RNA. Non-decodable
-    # boundaries (an exon spans them) instead use the swept neighbour density.
-    with np.errstate(divide="ignore", invalid="ignore"):
-        own_density = np.where(mass > 0.0, mass / mu_fl, 0.0)
-    swept_density = np.where(same, 0.5 * (node_density.density + dens_next), 0.0)
-    density_b = np.where(node_density.boundary_decodable, own_density, swept_density)
-    count_b = pos + neg  # the boundary's own discrete crossing count (statistical power)
-    eff = np.full(r, mu_fl, dtype=np.float64)
-    return _joint_per_node(
-        mass, spliced, sense, antisense, density_b, count_b, eff, strand_dec,
-        kappa_rna=kappa_rna, strand_overdispersion=strand_overdispersion,
-        confidence=confidence, n_grid=n_grid,
-    )
+    right = _side(substrate.right, right_same, ts_next, bnd_dec)
+    return left, right
 
 
-__all__ = ["JointDecode", "decode_regions", "decode_boundaries"]
+__all__ = ["JointDecode", "decode_regions", "decode_sides"]

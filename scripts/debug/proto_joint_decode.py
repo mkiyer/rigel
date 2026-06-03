@@ -18,9 +18,13 @@ import tempfile
 import numpy as np
 
 from rigel.calibration.density_model import node_gdna_density
-from rigel.calibration.effective_length import boundary_eff_length, region_eff_length
+from rigel.calibration.effective_length import (
+    boundary_eff_length,
+    boundary_side_eff_length,
+    region_eff_length,
+)
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
-from rigel.calibration.joint_decode import decode_boundaries, decode_regions
+from rigel.calibration.joint_decode import decode_regions, decode_sides
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.strand_balance import fit_strand_balance
 from rigel.calibration.substrate import CalibrationSubstrate
@@ -56,20 +60,22 @@ def setup(res):
                          gdna_counts=gdna_fl_mass(payload), max_size=flm.max_size)
     region_eff = region_eff_length(ra.region_size_bp, fl.gdna_pmf)
     mu_fl = boundary_eff_length(fl.gdna_pmf)
+    bside = boundary_side_eff_length(fl.gdna_pmf, ra.region_size_bp)  # per-side density length
     nd = node_gdna_density(sub, ra, region_eff, mu_fl)
     kappa = fit_strand_balance(sm).kappa_rna
-    return sub, ra, nd, region_eff, mu_fl, kappa
+    return sub, ra, nd, region_eff, bside, kappa
 
 
-def decode(sub, ra, nd, region_eff, mu_fl, kappa):
+def decode(sub, ra, nd, region_eff, bside, kappa):
     reg = decode_regions(sub, ra, nd, region_eff, kappa_rna=kappa)
-    bnd = decode_boundaries(sub, ra, nd, mu_fl, kappa_rna=kappa)
-    g = float(reg.gdna_mass.sum() + bnd.gdna_mass.sum())
-    r = float(reg.rna_mass.sum() + bnd.rna_mass.sum())
-    finite = np.all(np.isfinite(reg.gdna_mass)) and np.all(np.isfinite(bnd.gdna_mass))
-    print(f"    [regions  g={reg.gdna_mass.sum():6.0f} r={reg.rna_mass.sum():6.0f} | "
-          f"boundaries g={bnd.gdna_mass.sum():6.0f} r={bnd.rna_mass.sum():6.0f}]")
-    return g, r, reg, bnd, finite
+    left, right = decode_sides(sub, ra, nd, bside, kappa_rna=kappa)
+    g = float(reg.gdna_mass.sum() + left.gdna_mass.sum() + right.gdna_mass.sum())
+    r = float(reg.rna_mass.sum() + left.rna_mass.sum() + right.rna_mass.sum())
+    finite = all(np.all(np.isfinite(d.gdna_mass)) for d in (reg, left, right))
+    print(f"    [regions g={reg.gdna_mass.sum():6.0f} r={reg.rna_mass.sum():6.0f} | "
+          f"sides(L+R) g={left.gdna_mass.sum() + right.gdna_mass.sum():6.0f} "
+          f"r={left.rna_mass.sum() + right.rna_mass.sum():6.0f}]")
+    return g, r, reg, (left, right), finite
 
 
 def main():
@@ -87,7 +93,7 @@ def main():
     print(f"  gDNA decoded = {g:7.0f}   expected = {b.n_gdna_expected:.0f}   (high = honest nascent bias)")
     print(f"  RNA  decoded = {r:7.0f}   expected = {rna_exp:.0f}   ({r / rna_exp:.0%})")
     print(f"  mass conservation: decoded {total_decoded:.0f} vs accumulator {total_mass:.0f} "
-          f"(contained+both boundary sides; note boundary double-counts the 2 sides)")
+          f"(contained + left-side + right-side, each node once)")
 
     print("\n=== (2) ZERO gDNA (gene + nascent RNA only) — expect π_g→0 ===")
     res = nrna_dc(tempfile.mkdtemp(prefix="jd2_"), gdna=0, nrna=70)

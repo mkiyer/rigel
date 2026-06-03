@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["fl_mean", "region_eff_length", "boundary_eff_length"]
+__all__ = ["fl_mean", "region_eff_length", "boundary_eff_length", "boundary_side_eff_length"]
 
 
 def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
@@ -65,4 +65,30 @@ def region_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarr
     L = np.asarray(region_len_bp, dtype=np.float64)
     idx = np.clip(np.floor(L).astype(np.int64), 0, n - 1)
     eff = L * cum_f[idx] - cum_lf[idx]
+    return np.maximum(eff, 0.0)
+
+
+def boundary_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray) -> np.ndarray:
+    """Per-side boundary **density** effective length ``E_f[min(ℓ, R_side)]`` (R2/R3, Phase 3.1).
+
+    A crossing fragment of length ``ℓ`` contributes at most ``min(ℓ, R_side)`` bases of mass
+    to the side bounded by its region of length ``R_side`` — so the length the fractional
+    crossing mass is divided by, integrated over the FL pmf, is
+
+        ``E_f[min(ℓ, R)] = Σ_{ℓ≤R} ℓ f(ℓ)  +  R·Σ_{ℓ>R} f(ℓ) = S(R) + R·(1 − F(R))``.
+
+    For ``R ≫ support`` this → ``μ_FL`` (the region never binds); for ``R`` small it → ``R``
+    (every crossing fragment spills past the short side). This is the **density** length —
+    distinct from the region-free **count exposure** ``μ_FL`` (statistical power), which keeps
+    the full FL because long fragments still cross (doc above; review R5).
+    """
+    p = _as_pmf(fl_pmf)
+    n = p.shape[0]
+    ell = np.arange(n, dtype=np.float64)
+    cum_f = np.cumsum(p)  # F(ℓ)
+    cum_lf = np.cumsum(ell * p)  # S(ℓ)
+
+    R = np.asarray(region_side_len_bp, dtype=np.float64)
+    idx = np.clip(np.floor(R).astype(np.int64), 0, n - 1)
+    eff = cum_lf[idx] + R * (1.0 - cum_f[idx])
     return np.maximum(eff, 0.0)
