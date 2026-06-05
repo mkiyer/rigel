@@ -1,0 +1,71 @@
+# Hybrid-capture, strand-specific (ss=0.99), HIGH gDNA (4:1) — the priority scenario.
+#
+# 20 Mb random mini-genome, 130 genes / ~377 transcripts -> ~606 kb exonic (3.03%).
+# gDNA rate 4.0 = 4 gDNA fragments per mRNA fragment (4:1, ~80% gDNA) — the
+# capture-on / strand-specific / high-gDNA case where gDNA piles onto the probed
+# exons and must NOT leak into RNA. Conditions (ss=0.99, nRNA=none):
+#   gdna {none, high4x} x capture {off, on}  -> 4 conditions.
+#   Headline:  gdna_high4x_ss_0.99_nrna_none_capture_on
+#   Controls:  none/on (FP), high4x/off (capture effect), none/off (clean baseline)
+#
+# Usage (generate the suite, then benchmark):
+#   python scripts/sim/simulate_suite.py --config scripts/sim/configs/hyb_capture_20mb_ss99_gdna4x.yaml
+#   python scripts/sim/bench_calibration.py --sim-base <outdir> --run --force
+#
+# n_rna_fragments is sized for a fast-ish build + solid accuracy signal; raise it
+# (e.g. 1_000_000) for a heavier runtime/scale study (the genome/GTF is cached).
+
+suite:
+  outdir: /Users/mkiyer/Downloads/rigel_runs/sim_synthetic_capture/hyb_capture_20mb_ss99_gdna4x
+  genome_length: 20000000
+  n_genes: 130
+  min_isoforms: 1
+  max_isoforms: 5
+  target_transcripts: null
+  antisense_fraction: 0.0
+  seed: 20260605
+  profile: smoke
+  conditions: null
+
+simulation:
+  n_rna_fragments: 300000
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 4
+
+abundance:
+  seed: 20260606
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+gdna:
+  rates: [0.0, 4.0]
+  rate_labels: [none, high4x]
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+strand_specificities: [0.99]
+
+nrna:
+  ratios: [0.0]
+  ratio_labels: [none]
+
+capture:
+  probe_length: 120
+  probe_density: 0.5
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5
