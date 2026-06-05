@@ -878,14 +878,14 @@ def run_pipeline(
         calibration.rho_0,
         calibration.kappa_rna,
         float(
-            calibration.mass_g_contained.sum()
-            + calibration.mass_g_left.sum()
-            + calibration.mass_g_right.sum()
+            calibration.mass_gdna_contained.sum()
+            + calibration.mass_gdna_left.sum()
+            + calibration.mass_gdna_right.sum()
         ),
         float(
-            calibration.mass_d_contained.sum()
-            + calibration.mass_d_left.sum()
-            + calibration.mass_d_right.sum()
+            calibration.mass_rna_contained.sum()
+            + calibration.mass_rna_left.sum()
+            + calibration.mass_rna_right.sum()
         ),
     )
 

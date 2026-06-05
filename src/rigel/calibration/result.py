@@ -40,12 +40,12 @@ class CalibrationResult:
     """Per-region deconvolved mass + per-node exposure + library scalars (acyclic)."""
 
     # --- deconvolved mass across the region's 3 nodes (float64[R]) ---
-    mass_g_contained: np.ndarray
-    mass_d_contained: np.ndarray
-    mass_g_left: np.ndarray  # right side of the left boundary
-    mass_d_left: np.ndarray
-    mass_g_right: np.ndarray  # left side of the right boundary
-    mass_d_right: np.ndarray
+    mass_gdna_contained: np.ndarray
+    mass_rna_contained: np.ndarray
+    mass_gdna_left: np.ndarray  # right side of the left boundary
+    mass_rna_left: np.ndarray
+    mass_gdna_right: np.ndarray  # left side of the right boundary
+    mass_rna_right: np.ndarray
 
     # --- per-node exposure ω, stored explicitly for QC / diagnostics (float64[R]) ---
     # ω < 1 depleted, = 1 uniform, > 1 enriched; 0 where a node carries no gDNA.
@@ -77,12 +77,12 @@ class CalibrationResult:
             raise ValueError(f"CalibrationResult.n_regions must be >= 0; got {n}.")
 
         for name in (
-            "mass_g_contained",
-            "mass_d_contained",
-            "mass_g_left",
-            "mass_d_left",
-            "mass_g_right",
-            "mass_d_right",
+            "mass_gdna_contained",
+            "mass_rna_contained",
+            "mass_gdna_left",
+            "mass_rna_left",
+            "mass_gdna_right",
+            "mass_rna_right",
             "omega_contained",
             "omega_left",
             "omega_right",

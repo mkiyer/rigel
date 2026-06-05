@@ -202,14 +202,14 @@ def assemble_priors(
     length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     geom = np.asarray(calibration.gdna_geom_len, dtype=np.float64)
     g_region = _transport_boundary_flux(
-        calibration.mass_g_contained,
-        calibration.mass_g_left,
-        calibration.mass_g_right,
+        calibration.mass_gdna_contained,
+        calibration.mass_gdna_left,
+        calibration.mass_gdna_right,
         length,
         calibration.gdna_side_len,
         np.asarray(region_arrays.ref_id),
     )
-    d_region = calibration.mass_d_contained + calibration.mass_d_left + calibration.mass_d_right
+    d_region = calibration.mass_rna_contained + calibration.mass_rna_left + calibration.mass_rna_right
     with np.errstate(divide="ignore", invalid="ignore"):
         g2_over_e = np.where(geom > 0.0, g_region**2 / np.maximum(geom, 1e-9), 0.0)
 

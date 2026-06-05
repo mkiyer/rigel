@@ -27,12 +27,12 @@ def _calibration(*, mass_g, mass_d, gdna_geom_len, rho_0=0.01) -> CalibrationRes
     z = np.zeros(n, dtype=np.float64)
     o = np.ones(n, dtype=np.float64)
     return CalibrationResult(
-        mass_g_contained=mg,
-        mass_d_contained=md,
-        mass_g_left=z.copy(),
-        mass_d_left=z.copy(),
-        mass_g_right=z.copy(),
-        mass_d_right=z.copy(),
+        mass_gdna_contained=mg,
+        mass_rna_contained=md,
+        mass_gdna_left=z.copy(),
+        mass_rna_left=z.copy(),
+        mass_gdna_right=z.copy(),
+        mass_rna_right=z.copy(),
         omega_contained=o.copy(),  # not read by assemble_priors
         omega_left=o.copy(),
         omega_right=o.copy(),

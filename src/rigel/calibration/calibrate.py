@@ -135,12 +135,12 @@ def calibrate(
     derived = derive(regions, left, right, region_eff, bside_eff, region_arrays.ref_id)
 
     result = CalibrationResult(
-        mass_g_contained=regions.gdna_mass,
-        mass_d_contained=regions.rna_mass,
-        mass_g_left=left.gdna_mass,
-        mass_d_left=left.rna_mass,
-        mass_g_right=right.gdna_mass,
-        mass_d_right=right.rna_mass,
+        mass_gdna_contained=regions.gdna_mass,
+        mass_rna_contained=regions.rna_mass,
+        mass_gdna_left=left.gdna_mass,
+        mass_rna_left=left.rna_mass,
+        mass_gdna_right=right.gdna_mass,
+        mass_rna_right=right.rna_mass,
         omega_contained=derived.region_omega,
         omega_left=derived.left_omega,
         omega_right=derived.right_omega,

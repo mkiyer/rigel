@@ -39,18 +39,18 @@ def test_mass_conserved_per_node():
     # Each node's gDNA + RNA mass equals the node's total accumulator mass.
     result = _run()
     np.testing.assert_allclose(
-        result.mass_g_contained + result.mass_d_contained, [15.0, 26.0, 15.0]
+        result.mass_gdna_contained + result.mass_rna_contained, [15.0, 26.0, 15.0]
     )
-    np.testing.assert_allclose(result.mass_g_left + result.mass_d_left, [0.0, 3.0, 1.5])
-    np.testing.assert_allclose(result.mass_g_right + result.mass_d_right, [2.0, 4.5, 0.0])
+    np.testing.assert_allclose(result.mass_gdna_left + result.mass_rna_left, [0.0, 3.0, 1.5])
+    np.testing.assert_allclose(result.mass_gdna_right + result.mass_rna_right, [2.0, 4.5, 0.0])
 
 
 def test_masses_bounded():
     result = _run()
     for g, tot in (
-        (result.mass_g_contained, np.array([15.0, 26.0, 15.0])),
-        (result.mass_g_left, np.array([0.0, 3.0, 1.5])),
-        (result.mass_g_right, np.array([2.0, 4.5, 0.0])),
+        (result.mass_gdna_contained, np.array([15.0, 26.0, 15.0])),
+        (result.mass_gdna_left, np.array([0.0, 3.0, 1.5])),
+        (result.mass_gdna_right, np.array([2.0, 4.5, 0.0])),
     ):
         assert np.all(g >= -1e-9)
         assert np.all(g <= tot + 1e-9)
@@ -78,7 +78,7 @@ def test_confidence_knob_shifts_split_toward_gdna():
     # confidence is a posterior quantile: a higher quantile (0.9) reports a higher gDNA
     # fraction than the median (0.5), so the total deconvolved gDNA mass cannot decrease.
     def total_g(r):
-        return float(r.mass_g_contained.sum() + r.mass_g_left.sum() + r.mass_g_right.sum())
+        return float(r.mass_gdna_contained.sum() + r.mass_gdna_left.sum() + r.mass_gdna_right.sum())
 
     assert total_g(_run(CalibrationConfig(confidence=0.9))) >= total_g(
         _run(CalibrationConfig(confidence=0.5))
