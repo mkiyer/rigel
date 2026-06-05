@@ -123,7 +123,7 @@ def deconv_regions(
     n_grid=200,
 ) -> JointDeconv:
     """Deconvolve each region's contained mass (a node) into gDNA / RNA."""
-    ts = np.asarray(region_arrays.ts_class)
+    ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     pos = c.n_unspliced_pos.astype(np.float64)
     neg = c.n_unspliced_neg.astype(np.float64)
@@ -168,7 +168,7 @@ def deconv_sides(
     regions share a single transcript strand. Returns ``(left, right)`` per-region JointDecodes
     (zero where a side carries no mass — e.g. reference edges).
     """
-    ts = np.asarray(region_arrays.ts_class)
+    ts = np.asarray(region_arrays.strand_class)
     ref_id = np.asarray(region_arrays.ref_id)
     r = ts.shape[0]
     boundary_count_observable = (

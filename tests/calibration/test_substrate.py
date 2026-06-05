@@ -27,7 +27,7 @@ def test_contained_reductions():
     sub = CalibrationSubstrate.from_payload(payload, ra)
 
     assert sub.n_regions == 3
-    np.testing.assert_array_equal(sub.ts_class, [TS_POS, TS_NEG, TS_NONE])
+    np.testing.assert_array_equal(sub.strand_class, [TS_POS, TS_NEG, TS_NONE])
     np.testing.assert_array_equal(sub.region_len, [100.0, 100.0, 100.0])
 
     # Unspliced channels are raw genome strand (pos = ch0, neg = ch1).
@@ -90,7 +90,7 @@ def test_flux_is_per_side_not_shared():
 
 def test_ambiguous_region_is_flagged_not_silently_oriented():
     # A region with transcripts on BOTH strands (AMBIG) must be flagged via
-    # ts_class (distinct from TS_NONE) so downstream excludes its unspliced
+    # strand_class (distinct from TS_NONE) so downstream excludes its unspliced
     # strand. Strand-agnostic counts stay valid.
     region_contained = np.array([[5, 8, 0, 0]], dtype=np.uint32)
     payload = AccumulatorPayload(
@@ -118,8 +118,8 @@ def test_ambiguous_region_is_flagged_not_silently_oriented():
     ra = RegionArrays.from_region_df(region_df, {"chr1": 0})
     sub = CalibrationSubstrate.from_payload(payload, ra)
 
-    assert sub.ts_class[0] == TS_AMBIG
-    assert sub.ts_class[0] != TS_NONE
+    assert sub.strand_class[0] == TS_AMBIG
+    assert sub.strand_class[0] != TS_NONE
     assert sub.contained.n_unspliced[0] == 13  # strand-agnostic density stays valid
 
 

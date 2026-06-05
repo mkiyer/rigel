@@ -91,7 +91,7 @@ def calibrate(
     # and under-clean.) Intergenic (NONE, no transcript) is pure gDNA; unstranded (κ_rna = ½)
     # cannot strand-clean, so ρ_0 falls back to the raw count density. Exonic / AMBIG regions are
     # not count-decodable, so their fraction never enters ρ_0.
-    ts = np.asarray(region_arrays.ts_class)
+    ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     n_unspl = (c.n_unspliced_pos + c.n_unspliced_neg).astype(np.float64)
     sense = np.where(ts == TS_NEG, c.n_unspliced_neg, c.n_unspliced_pos).astype(np.float64)
@@ -145,7 +145,7 @@ def calibrate(
         exposure_left=derived.left_exposure,
         exposure_right=derived.right_exposure,
         gdna_geom_len=derived.gdna_geom_len,
-        gdna_side_len=bside_eff,
+        gdna_boundary_len=bside_eff,
         gdna_density_global=derived.gdna_density_global,
         rna_sense_frac=rna_sense_frac,
         n_regions=region_arrays.n_regions,

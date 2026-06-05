@@ -51,7 +51,7 @@ def test_from_region_df_csr_ordering():
     np.testing.assert_array_equal(ra.end, [100, 200, 300, 150, 400])
     np.testing.assert_array_equal(ra.ref_offsets, [0, 3, 5])
     np.testing.assert_array_equal(ra.region_size_bp, [100, 100, 100, 150, 250])
-    np.testing.assert_array_equal(ra.ts_class, [TS_NONE, TS_POS, TS_POS, TS_NONE, TS_NEG])
+    np.testing.assert_array_equal(ra.strand_class, [TS_NONE, TS_POS, TS_POS, TS_NONE, TS_NEG])
     assert ra.n_regions == 5
     assert ra.n_refs == 2
 

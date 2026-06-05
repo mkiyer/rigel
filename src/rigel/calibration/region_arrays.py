@@ -51,7 +51,7 @@ class RegionArrays:
     start: np.ndarray  # int64, (R,)
     end: np.ndarray  # int64, (R,)
     signature: np.ndarray  # uint8, (R,)
-    ts_class: np.ndarray  # int8,  (R,) — TS_NONE/TS_POS/TS_NEG/TS_AMBIG
+    strand_class: np.ndarray  # int8,  (R,) — TS_NONE/TS_POS/TS_NEG/TS_AMBIG
     region_size_bp: np.ndarray  # float64, (R,) — end - start
     ref_offsets: np.ndarray  # int32, (n_refs + 1,)
     order: np.ndarray  # int64, (R,)
@@ -89,7 +89,7 @@ class RegionArrays:
         start = region_df["start"].to_numpy().astype(np.int64, copy=False)[order]
         end = region_df["end"].to_numpy().astype(np.int64, copy=False)[order]
         signature = region_df["signature"].to_numpy().astype(np.uint8, copy=False)[order]
-        ts_class = transcript_strand_class(signature)
+        strand_class = transcript_strand_class(signature)
 
         counts = np.bincount(ref_id, minlength=n_refs).astype(np.int32, copy=False)
         ref_offsets = np.empty(n_refs + 1, dtype=np.int32)
@@ -105,7 +105,7 @@ class RegionArrays:
             start=start,
             end=end,
             signature=signature,
-            ts_class=ts_class,
+            strand_class=strand_class,
             region_size_bp=(end - start).astype(np.float64, copy=False),
             ref_offsets=ref_offsets,
             order=order,

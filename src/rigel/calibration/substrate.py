@@ -21,7 +21,7 @@ The substrate exposes channels **raw** — it does not pre-orient:
   (the scanner oriented them at deposit via the splice motif), valid even in
   AMBIG regions.
 
-``ts_class`` is carried for downstream orientation + AMBIG routing.
+``strand_class`` is carried for downstream orientation + AMBIG routing.
 
 Boundary views use the **per-side** flux (and mass): for region ``r``, the
 *left* view is the right side of ``r``'s left boundary, the *right* view is
@@ -86,7 +86,7 @@ class CalibrationSubstrate:
 
     n_regions: int
     region_len: np.ndarray  # float64[R] — physical region length (bp)
-    ts_class: np.ndarray  # int8[R]    — region transcript-strand class
+    strand_class: np.ndarray  # int8[R]    — region transcript-strand class
     contained: SubstrateView
     left: SubstrateView
     right: SubstrateView
@@ -116,7 +116,7 @@ class CalibrationSubstrate:
         return cls(
             n_regions=region_arrays.n_regions,
             region_len=np.ascontiguousarray(region_arrays.region_size_bp, dtype=np.float64),
-            ts_class=np.ascontiguousarray(region_arrays.ts_class, dtype=np.int8),
+            strand_class=np.ascontiguousarray(region_arrays.strand_class, dtype=np.int8),
             contained=contained,
             left=left,
             right=right,

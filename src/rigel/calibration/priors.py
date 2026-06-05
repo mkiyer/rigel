@@ -208,7 +208,7 @@ def assemble_priors(
         calibration.mass_gdna_left,
         calibration.mass_gdna_right,
         length,
-        calibration.gdna_side_len,
+        calibration.gdna_boundary_len,
         np.asarray(region_arrays.ref_id),
     )
     d_region = (

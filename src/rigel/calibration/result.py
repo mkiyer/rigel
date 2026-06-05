@@ -61,7 +61,7 @@ class CalibrationResult:
     # --- directional boundary effective length 𝓔(L)=E[min(ℓ,L)] per region (geometry) ---
     # The per-region capacity to supply boundary-crossing fragments; consumed by the
     # boundary-flux transport in assemble_priors.
-    gdna_side_len: np.ndarray  # float64[R]
+    gdna_boundary_len: np.ndarray  # float64[R]
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
@@ -87,7 +87,7 @@ class CalibrationResult:
             "exposure_left",
             "exposure_right",
             "gdna_geom_len",
-            "gdna_side_len",
+            "gdna_boundary_len",
         ):
             _check_region_array(getattr(self, name), name, n)
 
