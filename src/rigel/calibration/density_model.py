@@ -46,30 +46,30 @@ class NodeDensity:
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
     gdna_mass: np.ndarray  # float64[R] — density × region_eff_len (count-clue gDNA mass)
     count_evidence: np.ndarray  # float64[R] — μ_g = density·eff_len: expected gDNA count (κ_c)
-    region_decodable: np.ndarray  # bool[R] — count-decodable region (non-exonic)
-    boundary_decodable: np.ndarray  # bool[R] — decodable boundary to the right of region r
-    n_region_dec: int
-    n_boundary_dec: int
+    region_count_observable: np.ndarray  # bool[R] — count-decodable region (non-exonic)
+    boundary_count_observable: np.ndarray  # bool[R] — decodable boundary to the right of region r
+    n_region_count_observable: int
+    n_boundary_count_observable: int
 
 
-def count_decodable_masks(
+def count_observable_masks(
     signature: np.ndarray, ref_id: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Signature-based count-decodability for regions and (right-) boundaries.
 
-    Returns ``(region_decodable, boundary_decodable)``, both ``bool[R]``. ``boundary_decodable[r]``
+    Returns ``(region_count_observable, boundary_count_observable)``, both ``bool[R]``. ``boundary_count_observable[r]``
     describes the internal boundary between region ``r`` and ``r+1`` (defined iff same ref).
     """
     sig = np.asarray(signature).astype(np.int64)
     ref = np.asarray(ref_id)
     r = sig.shape[0]
-    region_dec = (sig & _EXON_BITS) == 0
-    bnd_dec = np.zeros(r, dtype=bool)
+    region_count_observable = (sig & _EXON_BITS) == 0
+    boundary_count_observable = np.zeros(r, dtype=bool)
     if r > 1:
         same = ref[:-1] == ref[1:]
         shared_exon = (sig[:-1] & sig[1:] & _EXON_BITS) != 0
-        bnd_dec[:-1] = same & ~shared_exon
-    return region_dec, bnd_dec
+        boundary_count_observable[:-1] = same & ~shared_exon
+    return region_count_observable, boundary_count_observable
 
 
 def node_gdna_density(
@@ -92,13 +92,13 @@ def node_gdna_density(
     ref_offsets = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     r = sig.shape[0]
-    region_dec, bnd_dec = count_decodable_masks(sig, ref_id)
+    region_count_observable, boundary_count_observable = count_observable_masks(sig, ref_id)
     gf = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
 
     # --- direct observations ---
     # region node: strand-cleaned contained gDNA mass (decodable regions only).
-    a_reg = np.where(region_dec, gf * substrate.contained.mass_unspliced, 0.0)
-    b_reg = np.where(region_dec, region_eff_len, 0.0)
+    a_reg = np.where(region_count_observable, gf * substrate.contained.mass_unspliced, 0.0)
+    b_reg = np.where(region_count_observable, region_eff_len, 0.0)
     # boundary node (indexed by left region r): the unspliced crossing mass/flux at the
     # r/r+1 seam = region r's RIGHT view + region r+1's LEFT view (the two sides).
     same_right = np.zeros(r, dtype=bool)
@@ -113,8 +113,10 @@ def node_gdna_density(
         ) + substrate.left.n_unspliced[1:].astype(np.float64)
     cross_mass = np.where(same_right, cross_mass, 0.0)
     cross_flux = np.where(same_right, cross_flux, 0.0)
-    a_bnd = np.where(bnd_dec, cross_mass, 0.0)  # gDNA crossing mass (decodable boundaries)
-    b_bnd = np.where(bnd_dec, mu_fl, 0.0)
+    a_bnd = np.where(
+        boundary_count_observable, cross_mass, 0.0
+    )  # gDNA crossing mass (decodable boundaries)
+    b_bnd = np.where(boundary_count_observable, mu_fl, 0.0)
     # conduit reliability: a boundary with more crossing traffic propagates density better.
     weight = np.where(same_right, cross_flux / (cross_flux + _TRAFFIC_PSEUDOCOUNT), 0.0)
 
@@ -160,17 +162,17 @@ def node_gdna_density(
     # count-prior precision κ_c = the EXPECTED gDNA count μ_g = density·eff_len (= gdna_mass):
     # the count clue is only as confident as the number of gDNA events it expects to see, so it
     # defers to the strand clue where RNA dominates (imputed-low density ⇒ small μ_g ⇒ weak prior,
-    # Jeffreys floor in joint_decode). At RNA-rich exons μ_g is small and the strand clue governs.
+    # Jeffreys floor in joint_deconv). At RNA-rich exons μ_g is small and the strand clue governs.
     count_evidence = gdna_mass
     return NodeDensity(
         density=density,
         gdna_mass=gdna_mass,
         count_evidence=count_evidence,
-        region_decodable=region_dec,
-        boundary_decodable=bnd_dec,
-        n_region_dec=int(region_dec.sum()),
-        n_boundary_dec=int(bnd_dec.sum()),
+        region_count_observable=region_count_observable,
+        boundary_count_observable=boundary_count_observable,
+        n_region_count_observable=int(region_count_observable.sum()),
+        n_boundary_count_observable=int(boundary_count_observable.sum()),
     )
 
 
-__all__ = ["NodeDensity", "count_decodable_masks", "node_gdna_density"]
+__all__ = ["NodeDensity", "count_observable_masks", "node_gdna_density"]

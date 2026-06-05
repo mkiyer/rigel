@@ -9,7 +9,7 @@ posterior; ``ρ_0`` and the per-node exposure ``ω`` are **derived** from the ag
     substrate
       → strand balance (κ_rna) → strand-clean the count density (closed-form gDNA fraction)
       → node_gdna_density (count clue; density strand-cleaned by κ_rna)
-      → decode_regions / decode_sides (joint count × strand)
+      → deconv_regions / deconv_sides (joint count × strand)
       → derive (ρ_0, ω, eff-len)
 
 The strand clue cleans ``ρ_0`` (a global hyperparameter) and also enters each node's joint
@@ -34,7 +34,7 @@ from .effective_length import (
     boundary_side_eff_length,
     region_eff_length,
 )
-from .joint_decode import decode_regions, decode_sides
+from .joint_deconv import deconv_regions, deconv_sides
 from .result import CalibrationResult
 from .signature import TS_NEG, TS_NONE
 from .strand_balance import fit_strand_balance
@@ -112,7 +112,7 @@ def calibrate(
     )
 
     # Joint per-node deconvolution: count prior × Beta-Binomial strand likelihood.
-    regions = decode_regions(
+    regions = deconv_regions(
         substrate,
         region_arrays,
         node_density,
@@ -121,7 +121,7 @@ def calibrate(
         confidence=config.confidence,
         n_grid=config.n_grid,
     )
-    left, right = decode_sides(
+    left, right = deconv_sides(
         substrate,
         region_arrays,
         node_density,

@@ -10,7 +10,7 @@ gDNA fraction ``π_g``::
   the **strand-cleaned** density ρ_0 (``density_model.gdna_frac``), concentration ``κ_c`` = the
   expected gDNA count ``μ_g = density·eff_len`` (``density_model`` count_evidence). Jeffreys-floored,
   so a node expecting ~no gDNA ⇒ Beta(½,½) and defers entirely to the strand clue.
-- **strand likelihood** (Phase 2, Beta-Binomial): :func:`strand_decode.strand_loglik`. Absent
+- **strand likelihood** (Phase 2, Beta-Binomial): :func:`strand_likelihood.strand_loglik`. Absent
   (flat) for AMBIG / zero-flux nodes ⇒ count-only; degenerate for unstranded (κ_rna = 0.5).
 
 Because ρ_0 is strand-cleaned upstream, the count clue is correct on every node — nascent introns
@@ -33,14 +33,14 @@ from dataclasses import dataclass
 import numpy as np
 
 from .signature import TS_NEG, TS_POS
-from .strand_decode import strand_loglik
+from .strand_likelihood import strand_loglik
 
 _PI_EPS = 1.0e-4
 _JEFFREYS = 0.5  # principled prior floor (Beta(½,½) at zero count evidence), not a tunable
 
 
 @dataclass(frozen=True, slots=True)
-class JointDecode:
+class JointDeconv:
     """Per-node deconvolution result (regions or boundaries; kept separate)."""
 
     gdna_mass: np.ndarray  # float64[K]
@@ -57,13 +57,13 @@ def _joint_per_node(
     density,
     count_evidence,
     eff_len,
-    strand_decodable,
+    strand_observable,
     *,
     rna_sense_frac,
     strand_overdispersion,
     confidence,
     n_grid,
-) -> JointDecode:
+) -> JointDeconv:
     k = mass_unspl.shape[0]
     grid = np.linspace(_PI_EPS, 1.0 - _PI_EPS, n_grid)
     log_grid = np.log(grid)
@@ -89,7 +89,7 @@ def _joint_per_node(
         a_c = kc * pi_count + _JEFFREYS
         b_c = kc * (1.0 - pi_count) + _JEFFREYS
         log_post = (a_c - 1.0) * log_grid + (b_c - 1.0) * log_1mgrid
-        if strand_decodable[i] and (sense[i] + antisense[i]) > 0:
+        if strand_observable[i] and (sense[i] + antisense[i]) > 0:
             log_post = log_post + strand_loglik(
                 grid,
                 sense[i],
@@ -108,10 +108,10 @@ def _joint_per_node(
         pi_var[i] = var
         gdna[i] = frac * m
         rna[i] = (1.0 - frac) * m + float(mass_spliced[i])
-    return JointDecode(gdna_mass=gdna, rna_mass=rna, pi_g=pi_g, pi_g_var=pi_var)
+    return JointDeconv(gdna_mass=gdna, rna_mass=rna, pi_g=pi_g, pi_g_var=pi_var)
 
 
-def decode_regions(
+def deconv_regions(
     substrate,
     region_arrays,
     node_density,
@@ -121,7 +121,7 @@ def decode_regions(
     strand_overdispersion=0.0,
     confidence=0.5,
     n_grid=200,
-) -> JointDecode:
+) -> JointDeconv:
     """Deconvolve each region's contained mass (a node) into gDNA / RNA."""
     ts = np.asarray(region_arrays.ts_class)
     c = substrate.contained
@@ -146,7 +146,7 @@ def decode_regions(
     )
 
 
-def decode_sides(
+def deconv_sides(
     substrate,
     region_arrays,
     node_density,
@@ -156,7 +156,7 @@ def decode_sides(
     strand_overdispersion=0.0,
     confidence=0.5,
     n_grid=200,
-) -> tuple[JointDecode, JointDecode]:
+) -> tuple[JointDeconv, JointDeconv]:
     """Deconvolve each boundary **side** as an independent node (R1/decision iii).
 
     The deconvolution unit is the boundary-side. Region ``r`` owns the **right** side of its
@@ -171,11 +171,13 @@ def decode_sides(
     ts = np.asarray(region_arrays.ts_class)
     ref_id = np.asarray(region_arrays.ref_id)
     r = ts.shape[0]
-    bnd_dec = node_density.boundary_decodable  # boundary (b, b+1) decodable, indexed by left region
+    boundary_count_observable = (
+        node_density.boundary_count_observable
+    )  # boundary (b, b+1) decodable, indexed by left region
     eff = np.asarray(boundary_side_eff_len, dtype=np.float64)
     region_density = node_density.density
 
-    def _side(view, same, ts_other, side_bnd_dec):
+    def _side(view, same, ts_other, side_boundary_count_observable):
         mass = view.mass_unspliced
         pos = view.n_unspliced_pos.astype(np.float64)
         neg = view.n_unspliced_neg.astype(np.float64)
@@ -198,7 +200,9 @@ def decode_sides(
                 gf = np.ones_like(mass)
             gf = np.where(strand_dec, gf, 1.0)
             own = np.where((mass > 0.0) & (eff > 0.0), gf * mass / np.maximum(eff, 1e-12), 0.0)
-        density = np.where(side_bnd_dec, own, region_density)  # decodable → clean own; else swept
+        density = np.where(
+            side_boundary_count_observable, own, region_density
+        )  # decodable → clean own; else swept
         return _joint_per_node(
             mass,
             view.mass_spliced,
@@ -217,12 +221,12 @@ def decode_sides(
     # LEFT view of r = right side of boundary (r-1, r); neighbour is r-1.
     left_same = np.zeros(r, dtype=bool)
     ts_prev = np.zeros(r, dtype=ts.dtype)
-    left_bnd_dec = np.zeros(r, dtype=bool)
+    left_boundary_count_observable = np.zeros(r, dtype=bool)
     if r > 1:
         left_same[1:] = ref_id[1:] == ref_id[:-1]
         ts_prev[1:] = ts[:-1]
-        left_bnd_dec[1:] = bnd_dec[:-1]
-    left = _side(substrate.left, left_same, ts_prev, left_bnd_dec)
+        left_boundary_count_observable[1:] = boundary_count_observable[:-1]
+    left = _side(substrate.left, left_same, ts_prev, left_boundary_count_observable)
 
     # RIGHT view of r = left side of boundary (r, r+1); neighbour is r+1.
     right_same = np.zeros(r, dtype=bool)
@@ -230,8 +234,8 @@ def decode_sides(
     if r > 1:
         right_same[:-1] = ref_id[:-1] == ref_id[1:]
         ts_next[:-1] = ts[1:]
-    right = _side(substrate.right, right_same, ts_next, bnd_dec)
+    right = _side(substrate.right, right_same, ts_next, boundary_count_observable)
     return left, right
 
 
-__all__ = ["JointDecode", "decode_regions", "decode_sides"]
+__all__ = ["JointDeconv", "deconv_regions", "deconv_sides"]

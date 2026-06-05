@@ -1,6 +1,6 @@
 """Strand likelihood — the Beta-Binomial-mixture strand log-likelihood of one node.
 
-Used by the joint deconvolution (:mod:`joint_decode`). A region's unspliced fragments are a
+Used by the joint deconvolution (:mod:`joint_deconv`). A region's unspliced fragments are a
 mix of gDNA (oriented-sense rate ½, unstranded) and RNA (oriented-sense rate ``rna_sense_frac``).
 Given the observed (sense, antisense) split, this returns the strand log-likelihood over a grid
 of candidate gDNA fractions ``π_g``, which the joint decode multiplies into the count prior.

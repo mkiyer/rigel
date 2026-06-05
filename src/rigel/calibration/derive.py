@@ -50,9 +50,9 @@ def _side_exists(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def derive(
-    region_decode,
-    left_decode,
-    right_decode,
+    region_deconv,
+    left_deconv,
+    right_deconv,
     region_eff_len: np.ndarray,
     boundary_side_eff_len: np.ndarray,
     ref_id: np.ndarray,
@@ -66,7 +66,7 @@ def derive(
     right_eff = np.where(right_exists, bside, 0.0)
 
     total_g = float(
-        region_decode.gdna_mass.sum() + left_decode.gdna_mass.sum() + right_decode.gdna_mass.sum()
+        region_deconv.gdna_mass.sum() + left_deconv.gdna_mass.sum() + right_deconv.gdna_mass.sum()
     )
     total_l = float(region_eff_len.sum() + left_eff.sum() + right_eff.sum())
     gdna_density_global = total_g / total_l if total_l > 0.0 else 0.0
@@ -81,9 +81,9 @@ def derive(
             1.0,
         )
 
-    region_exposure = _exposure(region_decode.gdna_mass, region_eff_len)
-    left_exposure = _exposure(left_decode.gdna_mass, left_eff)
-    right_exposure = _exposure(right_decode.gdna_mass, right_eff)
+    region_exposure = _exposure(region_deconv.gdna_mass, region_eff_len)
+    left_exposure = _exposure(left_deconv.gdna_mass, left_eff)
+    right_exposure = _exposure(right_deconv.gdna_mass, right_eff)
     # Option A: the gDNA component's effective length is the GEOMETRIC genomic span of
     # the region's nodes (ω-free). Exposure ω lives only in the deconvolved gDNA mass,
     # never the length — so the eff-len is knowable even where calibration is blind
