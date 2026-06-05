@@ -85,7 +85,7 @@ class CalibrationSubstrate:
     """
 
     n_regions: int
-    L_eff: np.ndarray  # float64[R] — v1: physical region length (bp)
+    region_len: np.ndarray  # float64[R] — physical region length (bp)
     ts_class: np.ndarray  # int8[R]    — region transcript-strand class
     contained: SubstrateView
     left: SubstrateView
@@ -115,7 +115,7 @@ class CalibrationSubstrate:
 
         return cls(
             n_regions=region_arrays.n_regions,
-            L_eff=np.ascontiguousarray(region_arrays.region_size_bp, dtype=np.float64),
+            region_len=np.ascontiguousarray(region_arrays.region_size_bp, dtype=np.float64),
             ts_class=np.ascontiguousarray(region_arrays.ts_class, dtype=np.int8),
             contained=contained,
             left=left,

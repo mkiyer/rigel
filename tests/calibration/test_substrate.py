@@ -28,7 +28,7 @@ def test_contained_reductions():
 
     assert sub.n_regions == 3
     np.testing.assert_array_equal(sub.ts_class, [TS_POS, TS_NEG, TS_NONE])
-    np.testing.assert_array_equal(sub.L_eff, [100.0, 100.0, 100.0])
+    np.testing.assert_array_equal(sub.region_len, [100.0, 100.0, 100.0])
 
     # Unspliced channels are raw genome strand (pos = ch0, neg = ch1).
     np.testing.assert_array_equal(sub.contained.n_unspliced_pos, [10, 1, 7])

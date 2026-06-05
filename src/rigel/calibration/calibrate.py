@@ -7,7 +7,7 @@ two boundary sides) is then deconvolved into gDNA / RNA by the **joint** count �
 posterior; ``ρ_0`` and the per-node exposure ``ω`` are **derived** from the aggregate::
 
     substrate
-      → strand balance (κ_rna) + strand_decode (per-node gDNA fraction)
+      → strand balance (κ_rna) → strand-clean the count density (closed-form gDNA fraction)
       → node_gdna_density (count clue; density strand-cleaned by κ_rna)
       → decode_regions / decode_sides (joint count × strand)
       → derive (ρ_0, ω, eff-len)
