@@ -93,12 +93,12 @@ def node_gdna_density(
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     r = sig.shape[0]
     region_count_observable, boundary_count_observable = count_observable_masks(sig, ref_id)
-    gdna_fraction = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
+    gdna_frac = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
 
     # --- direct observations ---
     # region node: strand-cleaned contained gDNA mass (decodable regions only).
     reg_mass = np.where(
-        region_count_observable, gdna_fraction * substrate.contained.mass_unspliced, 0.0
+        region_count_observable, gdna_frac * substrate.contained.mass_unspliced, 0.0
     )
     reg_len = np.where(region_count_observable, region_eff_len, 0.0)
     # boundary node (indexed by left region r): the unspliced crossing mass/flux at the

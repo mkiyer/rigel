@@ -15,7 +15,7 @@ import numpy as np
 
 
 def strand_loglik(
-    pi_g: np.ndarray,
+    gdna_frac: np.ndarray,
     sense: float,
     antisense: float,
     rna_sense_frac: float,
@@ -34,7 +34,7 @@ def strand_loglik(
         loglik(π_g) = −½ (sense − μ)² / σ²  −  ½ log σ²
     """
     n = float(sense) + float(antisense)
-    p = 0.5 * pi_g + rna_sense_frac * (1.0 - pi_g)
+    p = 0.5 * gdna_frac + rna_sense_frac * (1.0 - gdna_frac)
     mu = n * p
     var = n * p * (1.0 - p) * (1.0 + strand_overdispersion * max(n - 1.0, 0.0))
     var = np.maximum(var, 1.0e-9)

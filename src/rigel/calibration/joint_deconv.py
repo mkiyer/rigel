@@ -35,7 +35,7 @@ import numpy as np
 from .signature import TS_NEG, TS_POS
 from .strand_likelihood import strand_loglik
 
-_PI_EPS = 1.0e-4
+_GRID_EPS = 1.0e-4
 _JEFFREYS = 0.5  # principled prior floor (Beta(½,½) at zero count evidence), not a tunable
 
 
@@ -45,8 +45,8 @@ class JointDeconv:
 
     gdna_mass: np.ndarray  # float64[K]
     rna_mass: np.ndarray  # float64[K]  (= (1−π_g)·M_unspliced + spliced mass)
-    pi_g: np.ndarray  # float64[K] — reported gDNA fraction of the UNSPLICED mass
-    pi_g_var: np.ndarray  # float64[K] — posterior variance
+    gdna_frac: np.ndarray  # float64[K] — reported gDNA fraction of the UNSPLICED mass
+    gdna_frac_var: np.ndarray  # float64[K] — posterior variance
 
 
 def _joint_per_node(
@@ -65,13 +65,13 @@ def _joint_per_node(
     n_grid,
 ) -> JointDeconv:
     k = mass_unspl.shape[0]
-    grid = np.linspace(_PI_EPS, 1.0 - _PI_EPS, n_grid)
+    grid = np.linspace(_GRID_EPS, 1.0 - _GRID_EPS, n_grid)
     log_grid = np.log(grid)
     log_1mgrid = np.log1p(-grid)
     gdna = np.zeros(k)
     rna = np.zeros(k)
-    pi_g = np.zeros(k)
-    pi_var = np.zeros(k)
+    gdna_frac = np.zeros(k)
+    gdna_frac_var = np.zeros(k)
     for i in range(k):
         m = float(mass_unspl[i])
         if m <= 0.0:
@@ -84,10 +84,10 @@ def _joint_per_node(
         # strand where they agree. Strand absent (flat) for AMBIG / zero-flux nodes ⇒ count-only;
         # unstranded (κ_rna = 0.5) ⇒ count-only everywhere. count and strand are conditionally
         # independent given (ρ_0, κ_rna); the node's ~1/N self-contribution to ρ_0 is negligible.
-        pi_count = min(max(density[i] * eff_len[i] / m, 0.0), 1.0)
-        kc = max(float(count_evidence[i]), 0.0)
-        a_c = kc * pi_count + _JEFFREYS
-        b_c = kc * (1.0 - pi_count) + _JEFFREYS
+        count_gdna_frac = min(max(density[i] * eff_len[i] / m, 0.0), 1.0)
+        count_concentration = max(float(count_evidence[i]), 0.0)
+        a_c = count_concentration * count_gdna_frac + _JEFFREYS
+        b_c = count_concentration * (1.0 - count_gdna_frac) + _JEFFREYS
         log_post = (a_c - 1.0) * log_grid + (b_c - 1.0) * log_1mgrid
         if strand_observable[i] and (sense[i] + antisense[i]) > 0:
             log_post = log_post + strand_loglik(
@@ -104,11 +104,13 @@ def _joint_per_node(
         # Report the `confidence`-quantile of the posterior (0.5 = median, neutral; higher =
         # FP-averse, over-calls gDNA). interp on the CDF — exact, no Gaussian approximation.
         frac = float(np.clip(np.interp(confidence, np.cumsum(w), grid), 0.0, 1.0))
-        pi_g[i] = frac
-        pi_var[i] = var
+        gdna_frac[i] = frac
+        gdna_frac_var[i] = var
         gdna[i] = frac * m
         rna[i] = (1.0 - frac) * m + float(mass_spliced[i])
-    return JointDeconv(gdna_mass=gdna, rna_mass=rna, pi_g=pi_g, pi_g_var=pi_var)
+    return JointDeconv(
+        gdna_mass=gdna, rna_mass=rna, gdna_frac=gdna_frac, gdna_frac_var=gdna_frac_var
+    )
 
 
 def deconv_regions(
