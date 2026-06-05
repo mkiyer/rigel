@@ -111,7 +111,7 @@ def _transport_boundary_flux(
 ) -> np.ndarray:
     """Length-bias-free boundary-flux transport of per-region gDNA mass.
 
-    Each internal boundary's pooled gDNA mass is re-attributed to its two sides ∝ ``ω·𝓔``
+    Each internal boundary's pooled gDNA mass is re-attributed to its two sides ∝ ``exposure·𝓔``
     — exposure (density ``g/L``, length-bias-free) × the directional boundary effective
     length ``𝓔(L)=E[min(ℓ,L)]`` (``boundary_capacity``). This moves capture smear off the unexposed
     (e.g. intronic) side and onto the probed side that generated it. Iterates until the
@@ -167,29 +167,31 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the acyclic calibration result.
 
-    Boundary-crossing gDNA is first re-attributed to its origin region by the
-    length-bias-free boundary-flux transport (``ω·𝓔``); the transported per-region gDNA
-    ``G_r`` and RNA ``D_r`` project to loci by genomic-overlap share ``φ``::
+    Boundary-crossing gDNA is first re-attributed to its origin region by the length-bias-free
+    boundary-flux transport (exposure * boundary_capacity); the transported per-region gDNA
+    (``gdna_region``) and RNA (``rna_region``) project to loci by genomic-overlap ``share``::
 
-        gdna_prior_count[L] = prior_weight · Σ_r φ·G_r            (deconvolved gDNA count)
-        rna_prior_count[L]  = prior_weight · Σ_r φ·D_r            (deconvolved RNA count)
-        IPR[L]            = (Σ_r φ·G_r)² / Σ_r φ·(G_r²/E_r)     (concentrated support)
-        gdna_eff_len[L]   = (1−π)·span + π·IPR,  π = G/(G+κ)    (concentration_trust-shrunk support)
+        gdna_prior_count = prior_weight * Σ_r share * gdna_region    (deconvolved gDNA count)
+        rna_prior_count  = prior_weight * Σ_r share * rna_region     (deconvolved RNA count)
+        gdna_support_len = (Σ share*gdna)² / Σ share*(gdna²/geom)    (concentrated support)
+        gdna_eff_len     = (1-trust)*span + trust*gdna_support_len,
+                           trust = gdna_locus / (gdna_locus + shrink_count)
 
-    ``E_r = gdna_geom_len`` is the FL-aware gDNA support of region ``r`` — the bases a gDNA
-    fragment can overlap (contained + both boundary crossings ≈ ``R + L̄``), not the bare
-    region length. The IPR is the effective support of the gDNA over those lengths; its
-    reciprocal makes the gDNA component's per-position rate equal the local gDNA density, so
-    under capture (gDNA piled on exons) the support contracts to the exons and gDNA competes
-    at its true density.
+    ``geom = gdna_geom_len`` is the FL-aware gDNA support of a region — the bases a gDNA fragment
+    can overlap (contained + both boundary crossings, ~ region_len + mean_FL), not the bare region
+    length. The gdna_support_len is the effective support of the gDNA over those lengths; its
+    reciprocal makes the gDNA component's per-position rate equal the local gDNA density, so under
+    capture (gDNA piled on exons) the support contracts to the exons and gDNA competes at its true
+    density.
 
     A *concentrated* support, though, is only trustworthy in proportion to the gDNA **count**
-    backing it — a tiny sparse mass that merely *looks* concentrated would get a tiny eff-len
-    and the EM would amplify it far past the calibration's call. So the eff-len is shrunk from
-    the IPR toward the uniform geometric ``span`` by the per-locus concentration_trust ``π = G/(G+κ)``
-    (``κ = config.gdna_eff_len_shrink ≈ 1/φ``): abundant gDNA → ``π→1`` → trust the
-    concentration; sparse gDNA → ``π→0`` → uniform support. A locus with no deconvolved gDNA
-    falls back to ``span`` (multimap blindness). See
+    backing it — a tiny sparse mass that merely *looks* concentrated would get a tiny eff-len and
+    the EM would amplify it far past the calibration's call. So the eff-len is shrunk from the
+    gdna_support_len toward the uniform geometric ``span`` by the per-locus
+    ``concentration_trust = gdna_locus / (gdna_locus + shrink_count)`` (``shrink_count =
+    config.gdna_eff_len_shrink``, ~ the count overdispersion): abundant gDNA -> trust -> 1 ->
+    trust the concentration; sparse gDNA -> trust -> 0 -> uniform support. A locus with no
+    deconvolved gDNA falls back to ``span`` (multimap blindness). See
     docs/futureprs/phase6_boundary_flux_transport_plan.md.
     """
     if calibration.n_regions != region_arrays.n_regions:
@@ -198,8 +200,8 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # Transport uses the physical region length for its length-bias-free density (ω); the
-    # IPR uses the FL-aware gDNA support E_r = gdna_geom_len (contained + boundary crossings
+    # Transport uses the physical region length for its length-bias-free density (exposure); the
+    # gdna_support_len uses the FL-aware gDNA support E_r = gdna_geom_len (contained + boundary crossings
     # ≈ R + L̄) — the bases a gDNA fragment can actually overlap, not the bare region length.
     length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     gdna_geom_len = np.asarray(calibration.gdna_geom_len, dtype=np.float64)
@@ -235,10 +237,11 @@ def assemble_priors(
         gdna_support_len = np.where(
             support_locus > 0.0, gdna_locus**2 / np.maximum(support_locus, 1e-30), span
         )
-    # Power-shrink the support from the concentrated IPR toward the uniform geometric span,
-    # in proportion to the gDNA count backing the concentration: π = G/(G+κ). Abundant gDNA
-    # (capture) → π→1 → trust the IPR; sparse/spurious gDNA → π→0 → uniform span, so the EM
-    # cannot amplify a tiny concentrated mass past the calibration's call. κ ≈ 1/φ.
+    # Shrink the support from the concentrated gdna_support_len toward the uniform geometric span,
+    # in proportion to the gDNA count backing it: concentration_trust = gdna/(gdna+shrink_count).
+    # Abundant gDNA (capture) -> trust -> 1 -> trust the gdna_support_len; sparse/spurious gDNA ->
+    # trust -> 0 -> uniform span, so the EM cannot amplify a tiny concentrated mass past the
+    # calibration's call. shrink_count ~ the count overdispersion.
     shrink_count = float(calibration.config.gdna_eff_len_shrink)
     if shrink_count > 0.0:
         concentration_trust = np.where(

@@ -1,28 +1,28 @@
-"""Phase 3 — the joint decode: per-node gDNA/RNA deconvolution from count × strand.
+"""Phase 3 — the joint deconvolution: per-node gDNA/RNA deconvolution from count × strand.
 
 Each **node** (every region and every boundary, kept separate) is deconvolved into gDNA / RNA
 mass by combining the two **conditionally-independent** clues as a per-node posterior over the
-gDNA fraction ``π_g``::
+gDNA fraction ``gdna_frac``::
 
-    posterior(π_g) ∝ Beta(π_g ; π_g^count, κ_c)  ·  BB_strand(sense, antisense | π_g)
+    posterior(gdna_frac) ∝ Beta(gdna_frac ; gdna_frac^count, count_concentration)  ·  BB_strand(sense, antisense | gdna_frac)
 
-- **count prior** ``Beta(a_c, b_c)``: mean ``π_g^count = clip(density·eff_len / M, 0, 1)`` from
-  the **strand-cleaned** density ρ_0 (``density_model.gdna_frac``), concentration ``κ_c`` = the
-  expected gDNA count ``μ_g = density·eff_len`` (``density_model`` count_evidence). Jeffreys-floored,
-  so a node expecting ~no gDNA ⇒ Beta(½,½) and defers entirely to the strand clue.
+- **count prior** ``Beta(a_c, b_c)``: mean ``count_gdna_frac = clip(density*eff_len / M, 0, 1)`` from
+  the **strand-cleaned** global density (``density_model.gdna_frac``), concentration
+  ``count_concentration`` = the expected gDNA count ``count_evidence = density*eff_len``.
+  Jeffreys-floored, so a node expecting ~no gDNA gives Beta(1/2, 1/2) and defers to the strand clue.
 - **strand likelihood** (Phase 2, Beta-Binomial): :func:`strand_likelihood.strand_loglik`. Absent
-  (flat) for AMBIG / zero-flux nodes ⇒ count-only; degenerate for unstranded (κ_rna = 0.5).
+  (flat) for AMBIG / zero-flux nodes ⇒ count-only; degenerate for unstranded (rna_sense_frac = 0.5).
 
-Because ρ_0 is strand-cleaned upstream, the count clue is correct on every node — nascent introns
-read as RNA (density ≫ clean ρ_0), silent gDNA genes as gDNA — and the two clues reinforce where
+Because gdna_density_global is strand-cleaned upstream, the count clue is correct on every node — nascent introns
+read as RNA (density ≫ clean gdna_density_global), silent gDNA genes as gDNA — and the two clues reinforce where
 they agree and arbitrate where they disagree (the strand-specificity spectrum: unstranded ⇒
 count-only, increasingly stranded ⇒ increasingly strand-informed). The clues are conditionally
-independent given (ρ_0, κ_rna); a node's ~1/N self-contribution to the global ρ_0 is negligible.
+independent given (gdna_density_global, rna_sense_frac); a node's ~1/N self-contribution to the global gdna_density_global is negligible.
 
 The reported fraction is the posterior quantile selected by ``confidence`` (a probability in
 (0,1); 0.5 = median/neutral; higher ⇒ over-call gDNA, the FP-averse direction). Amounts use the
-conserved **fractional mass** ``M``; precisions use **discrete counts**. gDNA = ``π_g·M``; RNA =
-``(1−π_g)·M`` + the deterministic spliced mass. Regions and boundaries are combined into loci only
+conserved **fractional mass** ``M``; precisions use **discrete counts**. gDNA = ``gdna_frac·M``; RNA =
+``(1−gdna_frac)·M`` + the deterministic spliced mass. Regions and boundaries are combined into loci only
 **after** calibration (``assemble_priors``). Explicit grid posterior (numerically stable).
 """
 
@@ -44,7 +44,7 @@ class JointDeconv:
     """Per-node deconvolution result (regions or boundaries; kept separate)."""
 
     gdna_mass: np.ndarray  # float64[K]
-    rna_mass: np.ndarray  # float64[K]  (= (1−π_g)·M_unspliced + spliced mass)
+    rna_mass: np.ndarray  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     gdna_frac: np.ndarray  # float64[K] — reported gDNA fraction of the UNSPLICED mass
     gdna_frac_var: np.ndarray  # float64[K] — posterior variance
 
@@ -77,13 +77,14 @@ def _joint_per_node(
         if m <= 0.0:
             rna[i] = float(mass_spliced[i])  # only deterministic spliced RNA, if any
             continue
-        # Joint decode: count prior Beta(a_c, b_c) (mean from the strand-cleaned ρ_0 density,
-        # precision = expected gDNA count μ_g) × strand likelihood. ρ_0 is already strand-cleaned
-        # (density_model.gdna_frac), so the count clue is correct on every node — nascent introns
-        # read as RNA (density ≫ clean ρ_0), silent gDNA genes as gDNA — and *reinforces* the
+        # Joint deconvolution: count prior Beta(a_c, b_c) (mean from the strand-cleaned global
+        # density, precision = expected gDNA count count_evidence) x strand likelihood. The global
+        # density is already strand-cleaned (density_model.gdna_frac), so the count clue is correct
+        # on every node — nascent introns read as RNA (density >> clean global density), silent gDNA
+        # genes as gDNA — and *reinforces* the
         # strand where they agree. Strand absent (flat) for AMBIG / zero-flux nodes ⇒ count-only;
-        # unstranded (κ_rna = 0.5) ⇒ count-only everywhere. count and strand are conditionally
-        # independent given (ρ_0, κ_rna); the node's ~1/N self-contribution to ρ_0 is negligible.
+        # unstranded (rna_sense_frac = 0.5) ⇒ count-only everywhere. count and strand are conditionally
+        # independent given (gdna_density_global, rna_sense_frac); the node's ~1/N self-contribution to gdna_density_global is negligible.
         count_gdna_frac = min(max(density[i] * eff_len[i] / m, 0.0), 1.0)
         count_concentration = max(float(count_evidence[i]), 0.0)
         a_c = count_concentration * count_gdna_frac + _JEFFREYS
@@ -131,7 +132,7 @@ def deconv_regions(
     neg = c.n_unspliced_neg.astype(np.float64)
     sense = np.where(ts == TS_NEG, neg, pos)  # orient to transcript sense
     antisense = (pos + neg) - sense
-    strand_dec = (ts == TS_POS) | (ts == TS_NEG)
+    strand_observable = (ts == TS_POS) | (ts == TS_NEG)
     return _joint_per_node(
         c.mass_unspliced,
         c.mass_spliced,
@@ -140,7 +141,7 @@ def deconv_regions(
         node_density.density,
         node_density.count_evidence,
         np.asarray(region_eff_len, dtype=np.float64),
-        strand_dec,
+        strand_observable,
         rna_sense_frac=rna_sense_frac,
         strand_overdispersion=strand_overdispersion,
         confidence=confidence,
@@ -164,9 +165,9 @@ def deconv_sides(
     The deconvolution unit is the boundary-side. Region ``r`` owns the **right** side of its
     left boundary (``substrate.left[r]``) and the **left** side of its right boundary
     (``substrate.right[r]``); both lie inside region ``r`` and so use
-    ``boundary_side_eff_len[r] = E_FL[min(ℓ, L_r)]`` (R2/R3). A side is **count-decodable** iff
-    its boundary is (no shared exon) ⇒ ``π_count → 1`` from its own crossing density; otherwise
-    it borrows the swept region density. It is **strand-decodable** iff the boundary's two
+    ``boundary_side_eff_len[r] = E_FL[min(ℓ, L_r)]`` (R2/R3). A side is **count-observable** iff
+    its boundary is (no shared exon) ⇒ ``count_gdna_frac → 1`` from its own crossing density; otherwise
+    it borrows the swept region density. It is **strand-observable** iff the boundary's two
     regions share a single transcript strand. Returns ``(left, right)`` per-region JointDecodes
     (zero where a side carries no mass — e.g. reference edges).
     """
@@ -175,7 +176,7 @@ def deconv_sides(
     r = ts.shape[0]
     boundary_count_observable = (
         node_density.boundary_count_observable
-    )  # boundary (b, b+1) decodable, indexed by left region
+    )  # boundary (b, b+1) observable, indexed by left region
     eff = np.asarray(boundary_side_eff_len, dtype=np.float64)
     region_density = node_density.density
 
@@ -185,26 +186,31 @@ def deconv_sides(
         neg = view.n_unspliced_neg.astype(np.float64)
         both_pos = same & (ts == TS_POS) & (ts_other == TS_POS)
         both_neg = same & (ts == TS_NEG) & (ts_other == TS_NEG)
-        strand_dec = both_pos | both_neg
+        strand_observable = both_pos | both_neg
         sense = np.where(both_neg, neg, pos)
         antisense = (pos + neg) - sense
         with np.errstate(divide="ignore", invalid="ignore"):
-            # Strand-clean the decodable side's own crossing density (the boundary analogue of
-            # the ρ_0 cleaning): an exon↔intron seam is count-decodable (no SHARED exon), but its
-            # crossing mass is gDNA + nascent read-through. Multiply by the closed-form gDNA
-            # fraction (sense_frac − κ)/(½ − κ) where the side is strand-decodable, so the count
-            # clue sees clean gDNA, not nascent. Unstranded or non-oriented sides keep raw mass.
+            # Strand-clean the observable side's own crossing density (the boundary analogue of
+            # the global-density cleaning): an exon/intron seam is count-observable (no SHARED
+            # exon), but its crossing mass is gDNA + nascent read-through. Multiply by the
+            # closed-form gDNA fraction (sense_frac - rna_sense_frac)/(1/2 - rna_sense_frac) where
+            # the side is strand-observable, so the count clue sees clean gDNA, not nascent.
+            # Unstranded or non-oriented sides keep raw mass.
             n_side = pos + neg
             sense_frac = np.where(n_side > 0.0, sense / np.maximum(n_side, 1e-9), 0.5)
             if abs(0.5 - rna_sense_frac) > 1e-6:
-                gf = np.clip((sense_frac - rna_sense_frac) / (0.5 - rna_sense_frac), 0.0, 1.0)
+                clean_gdna_frac = np.clip(
+                    (sense_frac - rna_sense_frac) / (0.5 - rna_sense_frac), 0.0, 1.0
+                )
             else:
-                gf = np.ones_like(mass)
-            gf = np.where(strand_dec, gf, 1.0)
-            own = np.where((mass > 0.0) & (eff > 0.0), gf * mass / np.maximum(eff, 1e-12), 0.0)
+                clean_gdna_frac = np.ones_like(mass)
+            clean_gdna_frac = np.where(strand_observable, clean_gdna_frac, 1.0)
+            own = np.where(
+                (mass > 0.0) & (eff > 0.0), clean_gdna_frac * mass / np.maximum(eff, 1e-12), 0.0
+            )
         density = np.where(
             side_boundary_count_observable, own, region_density
-        )  # decodable → clean own; else swept
+        )  # observable → clean own; else swept
         return _joint_per_node(
             mass,
             view.mass_spliced,
@@ -213,7 +219,7 @@ def deconv_sides(
             density,
             pos + neg,
             eff,
-            strand_dec,
+            strand_observable,
             rna_sense_frac=rna_sense_frac,
             strand_overdispersion=strand_overdispersion,
             confidence=confidence,

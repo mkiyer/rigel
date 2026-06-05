@@ -1,7 +1,7 @@
 """rigel.calibration.fl — gDNA / RNA fragment-length distributions (PR 4c).
 
 Produces the library-wide FL distributions the calibrator's **effective lengths**
-need (boundary ``μ_FL``, region ``E_f[max(0, L−ℓ)]``): the **gDNA FL** (from
+need (boundary ``fl_mean``, region ``E_f[max(0, L−ℓ)]``): the **gDNA FL** (from
 gDNA-dominated regions/boundaries) and the **RNA FL** (spliced fragments), each
 **smoothly empirical-Bayes-shrunk** toward the global FL.
 
@@ -54,7 +54,7 @@ _GDNA_POOLS = (
 )
 
 #: Dirichlet pseudo-count for the smooth EB shrink toward the global FL. Not a
-#: cliff: ``pool_total ≫ ρ_ess`` → empirical; ``≪`` → the global anchor; ``= 0``
+#: cliff: ``pool_total ≫ prior_ess`` → empirical; ``≪`` → the global anchor; ``= 0``
 #: → global. Revisit the default on real-data pool sizes (PR04c decision 5).
 POOL_EB_PRIOR_ESS: float = 1000.0
 
@@ -101,7 +101,7 @@ def _normalized(v: np.ndarray) -> np.ndarray:
 
 
 def _smooth_eb(counts: np.ndarray, global_pmf: np.ndarray, max_size: int, prior_ess: float):
-    """Smooth EB pmf: ``(counts + ρ_ess·global_pmf) / (total + ρ_ess)``.
+    """Smooth EB pmf: ``(counts + prior_ess·global_pmf) / (total + prior_ess)``.
 
     Continuous in the pool total — no quality threshold (PR04c decision 5).
     Returns ``(pmf, pool_total)``.

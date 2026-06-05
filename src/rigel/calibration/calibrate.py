@@ -1,22 +1,23 @@
 """calibrate() — the acyclic fractional-accumulator calibrator.
 
-A single feed-forward pass: no EM loop, no ``ρ_0 → decode → ρ_0`` feedback. The strand clue
-(``κ_rna``) is fit first and used to **strand-clean** the count density, so the global gDNA
-density ``ρ_0`` is read from clean gDNA, not gDNA + nascent RNA. Each node (every region and the
-two boundary sides) is then deconvolved into gDNA / RNA by the **joint** count × strand
-posterior; ``ρ_0`` and the per-node exposure ``ω`` are **derived** from the aggregate::
+A single feed-forward pass: no EM loop, no density->deconv->density feedback. The strand clue
+(``rna_sense_frac``) is fit first and used to **strand-clean** the count density, so the global
+gDNA density (``gdna_density_global``) is read from clean gDNA, not gDNA + nascent RNA. Each node
+(every region and the two boundary sides) is then deconvolved into gDNA / RNA by the **joint**
+count x strand posterior; the global density and the per-node ``exposure`` are **derived** from
+the aggregate::
 
     substrate
-      → strand balance (κ_rna) → strand-clean the count density (closed-form gDNA fraction)
-      → node_gdna_density (count clue; density strand-cleaned by κ_rna)
-      → deconv_regions / deconv_sides (joint count × strand)
-      → derive (ρ_0, ω, eff-len)
+      -> strand balance (rna_sense_frac) -> strand-clean the count density (closed-form gDNA frac)
+      -> node_gdna_density (count clue; density strand-cleaned by rna_sense_frac)
+      -> deconv_regions / deconv_sides (joint count x strand)
+      -> derive (gdna_density_global, exposure, eff-len)
 
-The strand clue cleans ``ρ_0`` (a global hyperparameter) and also enters each node's joint
-decode; the two are conditionally independent given ``(ρ_0, κ_rna)`` and a node's ~1/N
-self-contribution to ``ρ_0`` is negligible (empirical Bayes). Deriving ``ρ_0`` / ``ω`` from the
-aggregate — rather than looping — is what dissolved the old EM loop's sparse-data collapse. See
-``docs/futureprs/acyclic_deconvolution_design.md``.
+The strand clue cleans the global density (a hyperparameter) and also enters each node's joint
+deconv; the two are conditionally independent given ``(gdna_density_global, rna_sense_frac)`` and a
+node's ~1/N self-contribution to the global density is negligible (empirical Bayes). Deriving the
+global density and ``exposure`` from the aggregate -- not looping -- is what dissolved the old EM
+loop's sparse-data collapse. See ``docs/futureprs/acyclic_deconvolution_design.md``.
 """
 
 from __future__ import annotations
@@ -56,10 +57,10 @@ def calibrate(
     gdna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
 ) -> CalibrationResult:
-    """Deconvolve the library into gDNA / RNA per node, then derive ρ_0 and exposure.
+    """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global and exposure.
 
-    Single feed-forward pass; see the module docstring for the data flow. ``ρ_0`` may
-    be ``0`` (a zero-gDNA library) and per-node ``ω`` may be ``0`` (a pure-RNA node);
+    Single feed-forward pass; see the module docstring for the data flow. ``gdna_density_global`` may
+    be ``0`` (a zero-gDNA library) and per-node ``exposure`` may be ``0`` (a pure-RNA node);
     both are valid, graceful outputs — not failures.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
@@ -70,11 +71,11 @@ def calibrate(
     boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
     fl_mean = boundary_eff_length(gdna_fl_pmf)
 
-    # RNA strand balance first (κ_rna posterior mean from the spliced channel) — the strand
+    # RNA strand balance first (rna_sense_frac posterior mean from the spliced channel) — the strand
     # clue is what cleans the count density, so it must precede Phase 1.
     balance = fit_strand_balance(strand_model)
     if balance.fallback_used:
-        # No spliced reads ⇒ κ_rna degenerates to 0.5 (symmetric), indistinguishable
+        # No spliced reads ⇒ rna_sense_frac degenerates to 0.5 (symmetric), indistinguishable
         # from gDNA. Fail loudly rather than mis-deconvolve (see CalibrationStrandError).
         raise CalibrationStrandError(
             "the library has zero spliced unique-mapper observations; the RNA strand "
@@ -84,13 +85,13 @@ def calibrate(
     rna_sense_frac = float(balance.rna_sense_frac)
 
     # Strand-deconvolved gDNA fraction of each region's contained mass, used to clean the
-    # nascent-RNA bias from the count density (ρ_0). Closed-form (unbiased) MLE from the oriented
-    # sense fraction: π_g = (sense_frac − κ_rna)/(½ − κ_rna), clamped to [0, 1] — gDNA is
-    # symmetric (½), RNA skewed (κ_rna), so a node at the RNA rate reads π_g = 0 (no inflation),
-    # and any symmetric excess reads as gDNA. (The grid posterior MEAN would bias π_g toward ½
-    # and under-clean.) Intergenic (NONE, no transcript) is pure gDNA; unstranded (κ_rna = ½)
-    # cannot strand-clean, so ρ_0 falls back to the raw count density. Exonic / AMBIG regions are
-    # not count-decodable, so their fraction never enters ρ_0.
+    # nascent-RNA bias from the count density (gdna_density_global). Closed-form (unbiased) MLE from the oriented
+    # sense fraction: gdna_frac = (sense_frac − rna_sense_frac)/(½ − rna_sense_frac), clamped to [0, 1] — gDNA is
+    # symmetric (½), RNA skewed (rna_sense_frac), so a node at the RNA rate reads gdna_frac = 0 (no inflation),
+    # and any symmetric excess reads as gDNA. (The grid posterior MEAN would bias gdna_frac toward ½
+    # and under-clean.) Intergenic (NONE, no transcript) is pure gDNA; unstranded (rna_sense_frac = ½)
+    # cannot strand-clean, so gdna_density_global falls back to the raw count density. Exonic / AMBIG regions are
+    # not count-observable, so their fraction never enters gdna_density_global.
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     n_unspl = (c.n_unspliced_pos + c.n_unspliced_neg).astype(np.float64)
@@ -104,8 +105,8 @@ def calibrate(
     gdna_frac = np.where(ts == TS_NONE, 1.0, gdna_frac)  # intergenic = pure gDNA
 
     # Count clue: per-node gDNA density via the region↔boundary sweep, on the strand-cleaned
-    # density (ρ_0 is now clean gDNA, not gDNA+nascent). The count-prior precision is the
-    # expected gDNA count μ_g = density·eff_len (NodeDensity.count_evidence), so the count clue
+    # density (gdna_density_global is now clean gDNA, not gDNA+nascent). The count-prior precision is the
+    # expected gDNA count count_evidence = density·eff_len (NodeDensity.count_evidence), so the count clue
     # defers to strand where RNA dominates.
     node_density = node_gdna_density(
         substrate, region_arrays, region_eff_len, fl_mean, gdna_frac=gdna_frac
@@ -131,7 +132,7 @@ def calibrate(
         n_grid=config.n_grid,
     )
 
-    # Derive ρ_0 and per-node exposure ω (+ the exposure-weighted gDNA length).
+    # Derive gdna_density_global and per-node exposure (+ the exposure-weighted gDNA length).
     derived = derive(regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id)
 
     result = CalibrationResult(

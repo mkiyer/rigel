@@ -47,9 +47,7 @@ class StrandSummary:
         if n_same < 0:
             raise ValueError(f"StrandSummary.n_same must be >= 0; got {self.n_same!r}.")
         if n_opposite < 0:
-            raise ValueError(
-                f"StrandSummary.n_opposite must be >= 0; got {self.n_opposite!r}."
-            )
+            raise ValueError(f"StrandSummary.n_opposite must be >= 0; got {self.n_opposite!r}.")
         if n_same + n_opposite != n_observations:
             raise ValueError(
                 "StrandSummary.n_same + n_opposite must equal n_observations; "

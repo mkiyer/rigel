@@ -1,28 +1,29 @@
 """Phase 1 — the density model ("count clue"): per-node gDNA density from OBSERVED counts.
 
-Acyclic by construction: the gDNA density is read **directly** from count-decodable nodes
+Acyclic by construction: the gDNA density is read **directly** from count-observable nodes
 (where fragments are gDNA by construction) and **swept** to every other node. It never
-consults the global ``ρ_0·ω·L`` — so there is no ``ρ_0 → decode → ρ_0`` feedback loop.
+consults the global ``gdna_density_global * exposure * L`` product, so there is no
+density->deconv->density feedback loop.
 
-Count-decodability is a property of the region **signature** (4-bit exon/intron ± flags):
+Count-observability is a property of the region **signature** (4-bit exon/intron ± flags):
 
-* **region** is decodable ⇔ it has **no exon bit** (intergenic or intron-only). Its
+* **region** is observable ⇔ it has **no exon bit** (intergenic or intron-only). Its
   contained unspliced mass is gDNA (+ nascent RNA — an upper bias the Phase-3 strand clue
   removes); an exonic region's contained mass is contaminated by mature RNA.
-* **boundary** is decodable ⇔ **no exon bit is shared** across its two sides → no single
+* **boundary** is observable ⇔ **no exon bit is shared** across its two sides → no single
   exon-strand continues across it → no *unspliced mature RNA* crosses (a single-exon
   transcript spanning the seam would put unspliced mature RNA there). Its crossing
   unspliced mass is then gDNA(+nascent).
 
 Everything else — exonic regions, exon-spanning boundaries, AMBIG — carries no direct
-gDNA observation and is **imputed by the alternating region↔boundary sweep** (decodable
+gDNA observation and is **imputed by the alternating region↔boundary sweep** (observable
 node → conduct across boundaries → impute → iterate). This sweep is mandatory: in an
 overlapping locus (a single-exon ``+`` transcript over a multi-exon ``−`` one) the only
-decodable nodes can be the two locus-edge boundaries, and the whole interior is filled
+observable nodes can be the two locus-edge boundaries, and the whole interior is filled
 inward from them.
 
 Counts → density via the gDNA FL effective lengths: contained mass ÷ ``region_eff_len``,
-crossing mass ÷ ``μ_FL``. For uniform gDNA at density ``ρ`` both recover ``ρ``.
+crossing mass ÷ ``fl_mean``. For uniform gDNA at a given density both recover that density.
 """
 
 from __future__ import annotations
@@ -45,9 +46,11 @@ class NodeDensity:
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
     gdna_mass: np.ndarray  # float64[R] — density × region_eff_len (count-clue gDNA mass)
-    count_evidence: np.ndarray  # float64[R] — μ_g = density·eff_len: expected gDNA count (κ_c)
-    region_count_observable: np.ndarray  # bool[R] — count-decodable region (non-exonic)
-    boundary_count_observable: np.ndarray  # bool[R] — decodable boundary to the right of region r
+    count_evidence: (
+        np.ndarray
+    )  # float64[R] — density·eff_len: expected gDNA count (count-prior precision)
+    region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
+    boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int
     n_boundary_count_observable: int
 
@@ -55,7 +58,7 @@ class NodeDensity:
 def count_observable_masks(
     signature: np.ndarray, ref_id: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Signature-based count-decodability for regions and (right-) boundaries.
+    """Signature-based count-observability for regions and (right-) boundaries.
 
     Returns ``(region_count_observable, boundary_count_observable)``, both ``bool[R]``. ``boundary_count_observable[r]``
     describes the internal boundary between region ``r`` and ``r+1`` (defined iff same ref).
@@ -83,7 +86,7 @@ def node_gdna_density(
 
     ``gdna_frac`` is the per-region strand-deconvolved gDNA fraction of the contained mass
     (Phase-2 strand clue). Supplying it cleans the nascent-RNA upper bias from the
-    count-decodable nodes **before** ρ_0 is read, so the swept density is clean gDNA, not
+    count-observable nodes **before** gdna_density_global is read, so the swept density is clean gDNA, not
     gDNA+nascent — the empirical-Bayes estimate of the global density hyperparameter. ``None``
     ⇒ all 1.0 (the raw, pre-clean behaviour).
     """
@@ -96,7 +99,7 @@ def node_gdna_density(
     gdna_frac = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
 
     # --- direct observations ---
-    # region node: strand-cleaned contained gDNA mass (decodable regions only).
+    # region node: strand-cleaned contained gDNA mass (observable regions only).
     reg_mass = np.where(
         region_count_observable, gdna_frac * substrate.contained.mass_unspliced, 0.0
     )
@@ -117,13 +120,13 @@ def node_gdna_density(
     cross_flux = np.where(same_right, cross_flux, 0.0)
     bnd_mass = np.where(
         boundary_count_observable, cross_mass, 0.0
-    )  # gDNA crossing mass (decodable boundaries)
+    )  # gDNA crossing mass (observable boundaries)
     bnd_len = np.where(boundary_count_observable, fl_mean, 0.0)
     # conduit reliability: a boundary with more crossing traffic propagates density better.
     weight = np.where(same_right, cross_flux / (cross_flux + _TRAFFIC_PSEUDOCOUNT), 0.0)
 
     # --- alternating region↔boundary sweep (per reference; cf. sweep.py) ---
-    # Two parallel tracks per node: a = gDNA mass, b = effective length.
+    # Two parallel tracks per node: gDNA mass and effective length.
     from_left_mass = np.zeros(r)
     from_left_len = np.zeros(r)
     from_right_mass = np.zeros(r)
@@ -153,18 +156,18 @@ def node_gdna_density(
             run_mass += reg_mass[i]
             run_len += reg_len[i]
 
-    # density = own + swept-neighbour evidence (α = gDNA mass, β = effective length).
+    # density = own + swept-neighbour evidence: swept gDNA mass / swept effective length.
     swept_mass = reg_mass + from_left_mass + from_right_mass
     swept_len = reg_len + from_left_len + from_right_len
-    # global fallback for nodes the sweep never reached (no decodable evidence in the ref).
+    # global fallback for nodes the sweep never reached (no count-observable evidence in the ref).
     total_len = float(reg_len.sum() + bnd_len.sum())
     seed_density = float(reg_mass.sum() + bnd_mass.sum()) / total_len if total_len > 0.0 else 0.0
     density = np.where(swept_len > 0.0, swept_mass / np.maximum(swept_len, 1e-12), seed_density)
     gdna_mass = density * region_eff_len
-    # count-prior precision κ_c = the EXPECTED gDNA count μ_g = density·eff_len (= gdna_mass):
+    # count-prior precision = the expected gDNA count (density·eff_len, which equals gdna_mass):
     # the count clue is only as confident as the number of gDNA events it expects to see, so it
-    # defers to the strand clue where RNA dominates (imputed-low density ⇒ small μ_g ⇒ weak prior,
-    # Jeffreys floor in joint_deconv). At RNA-rich exons μ_g is small and the strand clue governs.
+    # defers to the strand clue where RNA dominates (imputed-low density => small expected count =>
+    # weak prior, Jeffreys floor in joint_deconv). At RNA-rich exons it is small and strand governs.
     count_evidence = gdna_mass
     return NodeDensity(
         density=density,

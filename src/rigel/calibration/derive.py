@@ -1,20 +1,20 @@
-"""Phase 4 — derive the global gDNA density ρ₀ and per-node exposure ω.
+"""Phase 4 — derive the global gDNA density (``gdna_density_global``) + per-node exposure.
 
-A one-shot, feed-forward aggregate of the Phase-3 per-node decode (no loop, no feedback):
+A one-shot, feed-forward aggregate of the Phase-3 per-node deconvolution (no loop, no feedback):
 
-    ρ₀ = Σ_nodes gdna_mass / Σ_nodes L_eff          (the GLOBAL average density, decision A)
-    ω_node = (gdna_mass / L_eff) / ρ₀               (local density ÷ global; decision A/E — pure ratio)
+    gdna_density_global = Σ_nodes gdna_mass / Σ_nodes eff_len   (the GLOBAL average density)
+    exposure            = (gdna_mass / eff_len) / gdna_density_global   (local density / global)
 
-Exposure is the **pure ratio** of a node's local gDNA density to the library average — `ω<1`
+Exposure is the **pure ratio** of a node's local gDNA density to the library average — `exposure<1`
 depleted, `=1` uniform, `>1` enriched (capture) — with **no shrinkage** (decision E: the mass
-is already regularized by Phase 3's count prior; shrinking ω too would double-count).
+is already regularized by Phase 3's count prior; shrinking exposure too would double-count).
 
 Nodes are a region's contained mass (length ``region_eff_len``) and its two boundary **sides**
-(length ``boundary_side_eff_len`` each), per the Phase-3.1 unit. A side enters ρ₀ only where its
+(length ``boundary_side_eff_len`` each), per the Phase-3.1 unit. A side enters gdna_density_global only where its
 boundary exists (same reference); otherwise it carries no exposure capacity.
 
-Graceful across the whole spectrum (decision F): zero gDNA ⇒ ρ₀=0 ⇒ ω:=1 (neutral); a pure-RNA
-node ⇒ ω≈0 (correctly depleted, not a collapse — other nodes carry the locus's gDNA length).
+Graceful across the whole spectrum (decision F): zero gDNA ⇒ gdna_density_global=0 ⇒ exposure:=1 (neutral); a pure-RNA
+node ⇒ exposure≈0 (correctly depleted, not a collapse — other nodes carry the locus's gDNA length).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import numpy as np
 
 @dataclass(frozen=True, slots=True)
 class DerivedExposure:
-    """ρ₀ and the per-node exposure weights (regions + the two boundary sides)."""
+    """gdna_density_global and the per-node exposure weights (regions + the two boundary sides)."""
 
     gdna_density_global: float
     region_exposure: np.ndarray  # float64[R]
@@ -34,7 +34,7 @@ class DerivedExposure:
     right_exposure: np.ndarray  # float64[R]  (left side of each region's right boundary)
     gdna_geom_len: (
         np.ndarray
-    )  # float64[R]  Σ_node L_node (geometric gDNA length, ω-free — Option A)
+    )  # float64[R]  Σ_node L_node (geometric gDNA length, exposure-free — Option A)
 
 
 def _side_exists(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -57,7 +57,7 @@ def derive(
     boundary_side_eff_len: np.ndarray,
     ref_id: np.ndarray,
 ) -> DerivedExposure:
-    """Derive ρ₀ (global density) and per-node exposure ω from the Phase-3 per-node decode."""
+    """Derive gdna_density_global (global density) and per-node exposure from the Phase-3 per-node deconvolution."""
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     bside = np.asarray(boundary_side_eff_len, dtype=np.float64)
     left_exists, right_exists = _side_exists(np.asarray(ref_id))
@@ -74,7 +74,7 @@ def derive(
     def _exposure(gdna_mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
         with np.errstate(divide="ignore", invalid="ignore"):
             local_density = np.where(eff > 0.0, gdna_mass / np.maximum(eff, 1e-12), 0.0)
-        # ω = local/global; neutral (1) where there is no capacity or no global density.
+        # exposure = local/global; neutral (1) where there is no capacity or no global density.
         return np.where(
             (eff > 0.0) & (gdna_density_global > 0.0),
             local_density / max(gdna_density_global, 1e-12),
@@ -85,9 +85,9 @@ def derive(
     left_exposure = _exposure(left_deconv.gdna_mass, left_eff)
     right_exposure = _exposure(right_deconv.gdna_mass, right_eff)
     # Option A: the gDNA component's effective length is the GEOMETRIC genomic span of
-    # the region's nodes (ω-free). Exposure ω lives only in the deconvolved gDNA mass,
+    # the region's nodes (exposure-free). Exposure exposure lives only in the deconvolved gDNA mass,
     # never the length — so the eff-len is knowable even where calibration is blind
-    # (multimap / silent loci, ω=0) and can never collapse to the floor. A non-existent
+    # (multimap / silent loci, exposure=0) and can never collapse to the floor. A non-existent
     # boundary side has left_eff/right_eff = 0 and drops out. See
     # docs/futureprs/phase6_multimap_regression_analysis.md.
     gdna_geom_len = region_eff_len + left_eff + right_eff

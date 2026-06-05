@@ -1,9 +1,9 @@
 """CalibrationResult — the acyclic calibrator's output schema.
 
 Per-region deconvolved gDNA / RNA mass across the region's three nodes (contained
-plus the two boundary sides), the per-node exposure ``ω`` stored explicitly for
+plus the two boundary sides), the per-node exposure ``exposure`` stored explicitly for
 QC/diagnostics, the gDNA component's exposure-weighted effective length, and the two
-library scalars (``ρ_0``, ``κ_rna``). The calibrator is a single feed-forward pass,
+library scalars (``gdna_density_global``, ``rna_sense_frac``). The calibrator is a single feed-forward pass,
 so there are **no** convergence diagnostics. ``__post_init__`` enforces the intrinsic
 invariants (shapes, finiteness, sign); mass conservation against the raw fragment
 counts is checked by the calibrator / tests (it needs the substrate, which the result
@@ -47,14 +47,14 @@ class CalibrationResult:
     mass_gdna_right: np.ndarray  # left side of the right boundary
     mass_rna_right: np.ndarray
 
-    # --- per-node exposure ω, stored explicitly for QC / diagnostics (float64[R]) ---
-    # ω < 1 depleted, = 1 uniform, > 1 enriched; 0 where a node carries no gDNA.
+    # --- per-node exposure, stored explicitly for QC / diagnostics (float64[R]) ---
+    # exposure < 1 depleted, = 1 uniform, > 1 enriched; 0 where a node carries no gDNA.
     exposure_contained: np.ndarray
     exposure_left: np.ndarray
     exposure_right: np.ndarray
 
-    # --- gDNA component geometric effective length: Σ_node L_node (ω-free, Option A) ---
-    # Exposure ω is carried in the deconvolved gDNA mass, NOT here — so this length is
+    # --- gDNA component geometric effective length: Σ_node L_node (exposure-free, Option A) ---
+    # Exposure exposure is carried in the deconvolved gDNA mass, NOT here — so this length is
     # well-defined even where calibration saw no reads, and never collapses.
     gdna_geom_len: np.ndarray  # float64[R]
 

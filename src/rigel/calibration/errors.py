@@ -14,7 +14,7 @@ class CalibrationSubstrateError(ValueError):
 class CalibrationStrandError(ValueError):
     """Raised when the library carries no spliced reads to train the strand model.
 
-    The RNA strand orientation (``κ_rna``) is identifiable only from spliced unique
+    The RNA strand orientation (``rna_sense_frac``) is identifiable only from spliced unique
     mappers — gDNA cannot splice, so spliced reads are the unambiguous-RNA anchor.
     With zero spliced observations the strand clue degenerates to 0.5 (symmetric),
     indistinguishable from gDNA, and the deconvolution cannot separate sense RNA from
