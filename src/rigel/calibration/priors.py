@@ -132,9 +132,11 @@ def _transport_boundary_flux(
     g = contained + left + right
     prev = g
     for _ in range(max_iter):
-        rho0 = g.sum() / ltot if ltot > 0.0 else 0.0
-        omega = np.where(rho0 > 0.0, (g / length) / max(rho0, 1e-12), 1.0)
-        w = omega * e_cap
+        gdna_density_global = g.sum() / ltot if ltot > 0.0 else 0.0
+        exposure = np.where(
+            gdna_density_global > 0.0, (g / length) / max(gdna_density_global, 1e-12), 1.0
+        )
+        w = exposure * e_cap
         pooled = right[:-1] + left[1:]  # boundary (i,i+1) pooled gDNA mass
         denom = w[:-1] + w[1:]
         ok = same & (denom > 0.0)
@@ -209,7 +211,9 @@ def assemble_priors(
         calibration.gdna_side_len,
         np.asarray(region_arrays.ref_id),
     )
-    d_region = calibration.mass_rna_contained + calibration.mass_rna_left + calibration.mass_rna_right
+    d_region = (
+        calibration.mass_rna_contained + calibration.mass_rna_left + calibration.mass_rna_right
+    )
     with np.errstate(divide="ignore", invalid="ignore"):
         g2_over_e = np.where(geom > 0.0, g_region**2 / np.maximum(geom, 1e-9), 0.0)
 

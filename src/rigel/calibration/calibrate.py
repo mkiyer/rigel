@@ -81,7 +81,7 @@ def calibrate(
             "orientation cannot be identified, so gDNA and sense RNA cannot be separated. "
             "A real RNA-seq library always carries spliced reads."
         )
-    kappa_rna = float(balance.kappa_rna)
+    rna_sense_frac = float(balance.rna_sense_frac)
 
     # Strand-deconvolved gDNA fraction of each region's contained mass, used to clean the
     # nascent-RNA bias from the count density (ρ_0). Closed-form (unbiased) MLE from the oriented
@@ -96,11 +96,11 @@ def calibrate(
     n_unspl = (c.n_unspliced_pos + c.n_unspliced_neg).astype(np.float64)
     sense = np.where(ts == TS_NEG, c.n_unspliced_neg, c.n_unspliced_pos).astype(np.float64)
     sense_frac = np.where(n_unspl > 0.0, sense / np.maximum(n_unspl, 1e-9), 0.5)
-    denom = 0.5 - kappa_rna
+    denom = 0.5 - rna_sense_frac
     if abs(denom) < 1.0e-6:  # unstranded — strand cannot clean; keep the raw count density
         gdna_frac = np.ones(region_arrays.n_regions, dtype=np.float64)
     else:
-        gdna_frac = np.clip((sense_frac - kappa_rna) / denom, 0.0, 1.0)
+        gdna_frac = np.clip((sense_frac - rna_sense_frac) / denom, 0.0, 1.0)
     gdna_frac = np.where(ts == TS_NONE, 1.0, gdna_frac)  # intergenic = pure gDNA
 
     # Count clue: per-node gDNA density via the region↔boundary sweep, on the strand-cleaned
@@ -117,7 +117,7 @@ def calibrate(
         region_arrays,
         node_density,
         region_eff,
-        kappa_rna=kappa_rna,
+        rna_sense_frac=rna_sense_frac,
         confidence=config.confidence,
         n_grid=config.n_grid,
     )
@@ -126,7 +126,7 @@ def calibrate(
         region_arrays,
         node_density,
         bside_eff,
-        kappa_rna=kappa_rna,
+        rna_sense_frac=rna_sense_frac,
         confidence=config.confidence,
         n_grid=config.n_grid,
     )
@@ -141,18 +141,21 @@ def calibrate(
         mass_rna_left=left.rna_mass,
         mass_gdna_right=right.gdna_mass,
         mass_rna_right=right.rna_mass,
-        omega_contained=derived.region_omega,
-        omega_left=derived.left_omega,
-        omega_right=derived.right_omega,
+        exposure_contained=derived.region_exposure,
+        exposure_left=derived.left_exposure,
+        exposure_right=derived.right_exposure,
         gdna_geom_len=derived.gdna_geom_len,
         gdna_side_len=bside_eff,
-        rho_0=derived.rho_0,
-        kappa_rna=kappa_rna,
+        gdna_density_global=derived.gdna_density_global,
+        rna_sense_frac=rna_sense_frac,
         n_regions=region_arrays.n_regions,
         config=config,
     )
     logger.debug(
-        "calibration: R=%d rho_0=%.4g kappa_rna=%.3f", result.n_regions, result.rho_0, kappa_rna
+        "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f",
+        result.n_regions,
+        result.gdna_density_global,
+        rna_sense_frac,
     )
     return result
 

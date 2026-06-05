@@ -59,7 +59,7 @@ def _joint_per_node(
     eff_len,
     strand_decodable,
     *,
-    kappa_rna,
+    rna_sense_frac,
     strand_overdispersion,
     confidence,
     n_grid,
@@ -91,7 +91,11 @@ def _joint_per_node(
         log_post = (a_c - 1.0) * log_grid + (b_c - 1.0) * log_1mgrid
         if strand_decodable[i] and (sense[i] + antisense[i]) > 0:
             log_post = log_post + strand_loglik(
-                grid, sense[i], antisense[i], kappa_rna, strand_overdispersion=strand_overdispersion
+                grid,
+                sense[i],
+                antisense[i],
+                rna_sense_frac,
+                strand_overdispersion=strand_overdispersion,
             )
         w = np.exp(log_post - log_post.max())
         w /= w.sum()
@@ -113,7 +117,7 @@ def decode_regions(
     node_density,
     region_eff_len,
     *,
-    kappa_rna,
+    rna_sense_frac,
     strand_overdispersion=0.0,
     confidence=0.5,
     n_grid=200,
@@ -135,7 +139,7 @@ def decode_regions(
         node_density.count_evidence,
         np.asarray(region_eff_len, dtype=np.float64),
         strand_dec,
-        kappa_rna=kappa_rna,
+        rna_sense_frac=rna_sense_frac,
         strand_overdispersion=strand_overdispersion,
         confidence=confidence,
         n_grid=n_grid,
@@ -148,7 +152,7 @@ def decode_sides(
     node_density,
     boundary_side_eff_len,
     *,
-    kappa_rna,
+    rna_sense_frac,
     strand_overdispersion=0.0,
     confidence=0.5,
     n_grid=200,
@@ -188,8 +192,8 @@ def decode_sides(
             # clue sees clean gDNA, not nascent. Unstranded or non-oriented sides keep raw mass.
             n_side = pos + neg
             sense_frac = np.where(n_side > 0.0, sense / np.maximum(n_side, 1e-9), 0.5)
-            if abs(0.5 - kappa_rna) > 1e-6:
-                gf = np.clip((sense_frac - kappa_rna) / (0.5 - kappa_rna), 0.0, 1.0)
+            if abs(0.5 - rna_sense_frac) > 1e-6:
+                gf = np.clip((sense_frac - rna_sense_frac) / (0.5 - rna_sense_frac), 0.0, 1.0)
             else:
                 gf = np.ones_like(mass)
             gf = np.where(strand_dec, gf, 1.0)
@@ -204,7 +208,7 @@ def decode_sides(
             pos + neg,
             eff,
             strand_dec,
-            kappa_rna=kappa_rna,
+            rna_sense_frac=rna_sense_frac,
             strand_overdispersion=strand_overdispersion,
             confidence=confidence,
             n_grid=n_grid,

@@ -58,12 +58,12 @@ def test_masses_bounded():
 
 def test_exposure_and_density_sane():
     result = _run()
-    assert np.isfinite(result.rho_0) and result.rho_0 >= 0.0
-    for w in (result.omega_contained, result.omega_left, result.omega_right):
+    assert np.isfinite(result.gdna_density_global) and result.gdna_density_global >= 0.0
+    for w in (result.exposure_contained, result.exposure_left, result.exposure_right):
         assert np.all(np.isfinite(w))
         assert np.all(w >= 0.0)
     assert np.all(result.gdna_geom_len >= 0.0)
-    assert 0.0 <= result.kappa_rna <= 1.0
+    assert 0.0 <= result.rna_sense_frac <= 1.0
 
 
 def test_kappa_matches_strand_balance():
@@ -71,7 +71,7 @@ def test_kappa_matches_strand_balance():
     from rigel.calibration.strand_balance import fit_strand_balance
 
     sb = fit_strand_balance(SimpleNamespace(p_r1_sense=0.95, n_observations=40))
-    assert _run().kappa_rna == sb.kappa_rna
+    assert _run().rna_sense_frac == sb.rna_sense_frac
 
 
 def test_confidence_knob_shifts_split_toward_gdna():
@@ -80,6 +80,7 @@ def test_confidence_knob_shifts_split_toward_gdna():
     def total_g(r):
         return float(r.mass_gdna_contained.sum() + r.mass_gdna_left.sum() + r.mass_gdna_right.sum())
 
-    assert total_g(_run(CalibrationConfig(confidence=0.9))) >= total_g(
-        _run(CalibrationConfig(confidence=0.5))
-    ) - 1e-9
+    assert (
+        total_g(_run(CalibrationConfig(confidence=0.9)))
+        >= total_g(_run(CalibrationConfig(confidence=0.5))) - 1e-9
+    )

@@ -19,13 +19,13 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         mass_rna_left=z.copy(),
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
-        omega_contained=o.copy(),
-        omega_left=o.copy(),
-        omega_right=o.copy(),
+        exposure_contained=o.copy(),
+        exposure_left=o.copy(),
+        exposure_right=o.copy(),
         gdna_geom_len=o.copy(),
         gdna_side_len=o.copy(),
-        rho_0=1e-3,
-        kappa_rna=0.9,
+        gdna_density_global=1e-3,
+        rna_sense_frac=0.9,
         n_regions=n_regions,
         config=CalibrationConfig(),
     )
@@ -38,11 +38,11 @@ def test_valid_result_constructs():
 def test_zero_gdna_library_constructs():
     # Graceful zero-gDNA (decision F): ρ₀ = 0 and ω = 0 everywhere must be valid.
     kw = _valid_kwargs()
-    kw["rho_0"] = 0.0
+    kw["gdna_density_global"] = 0.0
     for k in (
-        "omega_contained",
-        "omega_left",
-        "omega_right",
+        "exposure_contained",
+        "exposure_left",
+        "exposure_right",
         "gdna_geom_len",
         "mass_gdna_contained",
         "mass_gdna_left",
@@ -55,7 +55,7 @@ def test_zero_gdna_library_constructs():
 def test_enriched_exposure_constructs():
     # ω > 1 (capture enrichment) is valid — no upper bound on exposure.
     kw = _valid_kwargs()
-    kw["omega_contained"] = np.array([5.0, 12.0], dtype=np.float64)
+    kw["exposure_contained"] = np.array([5.0, 12.0], dtype=np.float64)
     CalibrationResult(**kw)
 
 
@@ -63,7 +63,7 @@ def test_enriched_exposure_constructs():
     "field,value",
     [
         ("mass_gdna_contained", np.array([-1.0, 0.0])),  # negative mass
-        ("omega_contained", np.array([-0.1, 1.0])),  # negative exposure
+        ("exposure_contained", np.array([-0.1, 1.0])),  # negative exposure
         ("gdna_geom_len", np.array([1.0, -1.0])),  # negative length
     ],
 )
@@ -76,7 +76,7 @@ def test_rejects_negative_region_arrays(field, value):
 
 def test_rejects_non_finite_array():
     kw = _valid_kwargs()
-    kw["omega_contained"] = np.array([np.inf, 1.0])
+    kw["exposure_contained"] = np.array([np.inf, 1.0])
     with pytest.raises(ValueError):
         CalibrationResult(**kw)
 
@@ -98,10 +98,10 @@ def test_rejects_length_mismatch():
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("rho_0", -1.0),
-        ("rho_0", np.inf),
-        ("kappa_rna", 1.5),
-        ("kappa_rna", -0.1),
+        ("gdna_density_global", -1.0),
+        ("gdna_density_global", np.inf),
+        ("rna_sense_frac", 1.5),
+        ("rna_sense_frac", -0.1),
     ],
 )
 def test_rejects_bad_scalars(field, value):

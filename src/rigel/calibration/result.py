@@ -49,9 +49,9 @@ class CalibrationResult:
 
     # --- per-node exposure ω, stored explicitly for QC / diagnostics (float64[R]) ---
     # ω < 1 depleted, = 1 uniform, > 1 enriched; 0 where a node carries no gDNA.
-    omega_contained: np.ndarray
-    omega_left: np.ndarray
-    omega_right: np.ndarray
+    exposure_contained: np.ndarray
+    exposure_left: np.ndarray
+    exposure_right: np.ndarray
 
     # --- gDNA component geometric effective length: Σ_node L_node (ω-free, Option A) ---
     # Exposure ω is carried in the deconvolved gDNA mass, NOT here — so this length is
@@ -64,8 +64,8 @@ class CalibrationResult:
     gdna_side_len: np.ndarray  # float64[R]
 
     # --- library scalars ---
-    rho_0: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
-    kappa_rna: float  # in [0, 1], RNA sense fraction used by the strand clue
+    gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
+    rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
 
     # --- provenance ---
     n_regions: int
@@ -83,19 +83,23 @@ class CalibrationResult:
             "mass_rna_left",
             "mass_gdna_right",
             "mass_rna_right",
-            "omega_contained",
-            "omega_left",
-            "omega_right",
+            "exposure_contained",
+            "exposure_left",
+            "exposure_right",
             "gdna_geom_len",
             "gdna_side_len",
         ):
             _check_region_array(getattr(self, name), name, n)
 
-        if not np.isfinite(self.rho_0) or self.rho_0 < 0.0:
-            raise ValueError(f"CalibrationResult.rho_0 must be finite and >= 0; got {self.rho_0}.")
-        kappa = float(self.kappa_rna)
-        if not 0.0 <= kappa <= 1.0:
-            raise ValueError(f"CalibrationResult.kappa_rna must be in [0, 1]; got {kappa}.")
+        if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
+            raise ValueError(
+                f"CalibrationResult.gdna_density_global must be finite and >= 0; got {self.gdna_density_global}."
+            )
+        sense_frac = float(self.rna_sense_frac)
+        if not 0.0 <= sense_frac <= 1.0:
+            raise ValueError(
+                f"CalibrationResult.rna_sense_frac must be in [0, 1]; got {sense_frac}."
+            )
 
 
 __all__ = ["CalibrationResult"]

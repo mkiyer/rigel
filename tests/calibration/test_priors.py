@@ -12,11 +12,11 @@ from rigel.config import CalibrationConfig
 from rigel.locus import Locus, MultiLocus
 
 
-def _calibration(*, mass_g, mass_d, gdna_geom_len, rho_0=0.01) -> CalibrationResult:
+def _calibration(*, mass_g, mass_d, gdna_geom_len, gdna_density_global=0.01) -> CalibrationResult:
     """Build a result with all mass in the contained node (left/right = 0).
 
     ``mass_g`` / ``mass_d`` are the per-region deconvolved gDNA / RNA mass;
-    ``gdna_geom_len`` is the gDNA component's exposure-weighted length. ``rho_0``
+    ``gdna_geom_len`` is the gDNA component's exposure-weighted length. ``gdna_density_global``
     is a required field but is **not** read by ``assemble_priors`` (it is already
     baked into the deconvolved mass).
     """
@@ -33,13 +33,13 @@ def _calibration(*, mass_g, mass_d, gdna_geom_len, rho_0=0.01) -> CalibrationRes
         mass_rna_left=z.copy(),
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
-        omega_contained=o.copy(),  # not read by assemble_priors
-        omega_left=o.copy(),
-        omega_right=o.copy(),
+        exposure_contained=o.copy(),  # not read by assemble_priors
+        exposure_left=o.copy(),
+        exposure_right=o.copy(),
         gdna_geom_len=el,
         gdna_side_len=el,
-        rho_0=rho_0,
-        kappa_rna=0.9,
+        gdna_density_global=gdna_density_global,
+        rna_sense_frac=0.9,
         n_regions=n,
         config=CalibrationConfig(),
     )

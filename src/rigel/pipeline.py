@@ -873,10 +873,10 @@ def run_pipeline(
     )
 
     logger.info(
-        "calibration: R=%d rho_0=%.4g kappa_rna=%.3f gDNA_mass=%.0f RNA_mass=%.0f",
+        "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f gDNA_mass=%.0f RNA_mass=%.0f",
         calibration.n_regions,
-        calibration.rho_0,
-        calibration.kappa_rna,
+        calibration.gdna_density_global,
+        calibration.rna_sense_frac,
         float(
             calibration.mass_gdna_contained.sum()
             + calibration.mass_gdna_left.sum()

@@ -1,7 +1,7 @@
 """Strand likelihood — the Beta-Binomial-mixture strand log-likelihood of one node.
 
 Used by the joint deconvolution (:mod:`joint_decode`). A region's unspliced fragments are a
-mix of gDNA (oriented-sense rate ½, unstranded) and RNA (oriented-sense rate ``kappa_rna``).
+mix of gDNA (oriented-sense rate ½, unstranded) and RNA (oriented-sense rate ``rna_sense_frac``).
 Given the observed (sense, antisense) split, this returns the strand log-likelihood over a grid
 of candidate gDNA fractions ``π_g``, which the joint decode multiplies into the count prior.
 
@@ -18,7 +18,7 @@ def strand_loglik(
     pi_g: np.ndarray,
     sense: float,
     antisense: float,
-    kappa_rna: float,
+    rna_sense_frac: float,
     *,
     strand_overdispersion: float = 0.0,
 ) -> np.ndarray:
@@ -34,7 +34,7 @@ def strand_loglik(
         loglik(π_g) = −½ (sense − μ)² / σ²  −  ½ log σ²
     """
     n = float(sense) + float(antisense)
-    p = 0.5 * pi_g + kappa_rna * (1.0 - pi_g)
+    p = 0.5 * pi_g + rna_sense_frac * (1.0 - pi_g)
     mu = n * p
     var = n * p * (1.0 - p) * (1.0 + strand_overdispersion * max(n - 1.0, 0.0))
     var = np.maximum(var, 1.0e-9)

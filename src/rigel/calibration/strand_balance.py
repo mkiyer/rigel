@@ -39,8 +39,8 @@ if TYPE_CHECKING:
 class StrandBalance:
     """Fitted RNA strand model: posterior-mean κ_rna + Beta-Binomial overdispersion ρ_r_bb."""
 
-    kappa_rna: float  # RNA sense mean (posterior mean), in (0, 1)
-    rho_r_bb: float  # RNA strand BB overdispersion = 1 / (n_obs + 3), in (0, 1)
+    rna_sense_frac: float  # RNA sense mean (posterior mean), in (0, 1)
+    rna_strand_overdispersion: float  # RNA strand BB overdispersion = 1 / (n_obs + 3), in (0, 1)
     n_observations: int  # spliced strand observations (fragments) backing the posterior
     fallback_used: bool  # True when there are no spliced observations (κ_rna → 0.5)
     fallback_reason: str
@@ -61,11 +61,13 @@ def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
     n_opp = n_obs - n_same
     a = n_same + 1.0  # κ_rna posterior Beta(a, b) — Laplace prior Beta(1, 1)
     b = n_opp + 1.0
-    kappa_rna = a / (a + b)  # posterior mean = (n_same + 1) / (n_obs + 2)
-    rho_r_bb = 1.0 / (a + b + 1.0)  # BB overdispersion of Beta(a, b) = 1 / (n_obs + 3)
+    rna_sense_frac = a / (a + b)  # posterior mean = (n_same + 1) / (n_obs + 2)
+    rna_strand_overdispersion = 1.0 / (
+        a + b + 1.0
+    )  # BB overdispersion of Beta(a, b) = 1 / (n_obs + 3)
     return StrandBalance(
-        kappa_rna=kappa_rna,
-        rho_r_bb=rho_r_bb,
+        rna_sense_frac=rna_sense_frac,
+        rna_strand_overdispersion=rna_strand_overdispersion,
         n_observations=int(round(n_obs)),
         fallback_used=(n_obs == 0.0),
         fallback_reason="no spliced observations" if n_obs == 0.0 else "",

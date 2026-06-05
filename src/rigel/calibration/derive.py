@@ -28,10 +28,10 @@ import numpy as np
 class DerivedExposure:
     """ρ₀ and the per-node exposure weights (regions + the two boundary sides)."""
 
-    rho_0: float
-    region_omega: np.ndarray  # float64[R]
-    left_omega: np.ndarray  # float64[R]  (right side of each region's left boundary)
-    right_omega: np.ndarray  # float64[R]  (left side of each region's right boundary)
+    gdna_density_global: float
+    region_exposure: np.ndarray  # float64[R]
+    left_exposure: np.ndarray  # float64[R]  (right side of each region's left boundary)
+    right_exposure: np.ndarray  # float64[R]  (left side of each region's right boundary)
     gdna_geom_len: (
         np.ndarray
     )  # float64[R]  Σ_node L_node (geometric gDNA length, ω-free — Option A)
@@ -69,17 +69,21 @@ def derive(
         region_decode.gdna_mass.sum() + left_decode.gdna_mass.sum() + right_decode.gdna_mass.sum()
     )
     total_l = float(region_eff_len.sum() + left_eff.sum() + right_eff.sum())
-    rho_0 = total_g / total_l if total_l > 0.0 else 0.0
+    gdna_density_global = total_g / total_l if total_l > 0.0 else 0.0
 
-    def _omega(gdna_mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
+    def _exposure(gdna_mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
         with np.errstate(divide="ignore", invalid="ignore"):
             local_density = np.where(eff > 0.0, gdna_mass / np.maximum(eff, 1e-12), 0.0)
         # ω = local/global; neutral (1) where there is no capacity or no global density.
-        return np.where((eff > 0.0) & (rho_0 > 0.0), local_density / max(rho_0, 1e-12), 1.0)
+        return np.where(
+            (eff > 0.0) & (gdna_density_global > 0.0),
+            local_density / max(gdna_density_global, 1e-12),
+            1.0,
+        )
 
-    region_omega = _omega(region_decode.gdna_mass, region_eff_len)
-    left_omega = _omega(left_decode.gdna_mass, left_eff)
-    right_omega = _omega(right_decode.gdna_mass, right_eff)
+    region_exposure = _exposure(region_decode.gdna_mass, region_eff_len)
+    left_exposure = _exposure(left_decode.gdna_mass, left_eff)
+    right_exposure = _exposure(right_decode.gdna_mass, right_eff)
     # Option A: the gDNA component's effective length is the GEOMETRIC genomic span of
     # the region's nodes (ω-free). Exposure ω lives only in the deconvolved gDNA mass,
     # never the length — so the eff-len is knowable even where calibration is blind
@@ -88,10 +92,10 @@ def derive(
     # docs/futureprs/phase6_multimap_regression_analysis.md.
     gdna_geom_len = region_eff_len + left_eff + right_eff
     return DerivedExposure(
-        rho_0=rho_0,
-        region_omega=region_omega,
-        left_omega=left_omega,
-        right_omega=right_omega,
+        gdna_density_global=gdna_density_global,
+        region_exposure=region_exposure,
+        left_exposure=left_exposure,
+        right_exposure=right_exposure,
         gdna_geom_len=gdna_geom_len,
     )
 
