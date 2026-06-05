@@ -544,27 +544,46 @@ class TestMissingAndInvalidTags:
         return sorted_bam, result.index
 
     def test_no_strand_tags_zero_spliced_observations(self, tmp_path):
-        """No XS/ts tags → zero exonic_spliced observations."""
-        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
-        from rigel.pipeline import run_pipeline
+        """No XS/ts tags → zero exonic_spliced observations (scanner level).
+
+        Asserts the scanner behaviour directly via ``scan_and_buffer``: the full
+        pipeline would now raise ``CalibrationStrandError`` on this library (no
+        spliced strand anchor) — see ``test_calibration_requires_spliced_reads``.
+        """
+        from rigel.config import BamScanConfig
+        from rigel.pipeline import scan_and_buffer
 
         bam_path, index = self._build_scenario_without_xs(tmp_path)
-        config = PipelineConfig(
-            em=EMConfig(seed=42),
-            scan=BamScanConfig(sj_strand_tag="XS"),
+        _, strand_models, _, _, _ = scan_and_buffer(
+            bam_path, index, BamScanConfig(sj_strand_tag="XS")
         )
-        pr = run_pipeline(bam_path, index, config=config)
 
-        sm = pr.strand_models.exonic_spliced
+        sm = strand_models.exonic_spliced
         assert sm.n_observations == 0, (
             "Without strand tags, exonic_spliced should have 0 observations"
         )
 
-    def test_sj_mode_none_ignores_tags(self, tmp_path):
-        """sj_strand_tag='none' → ignore all strand tags."""
-        from rigel.sim import Scenario, ReadSimConfig
+    def test_calibration_requires_spliced_reads(self, tmp_path):
+        """Zero spliced strand observations → CalibrationStrandError (new contract).
+
+        gDNA cannot splice, so spliced reads are the only unambiguous-RNA anchor for
+        the strand orientation; without them the deconvolution cannot separate sense
+        RNA from gDNA and must fail loudly rather than silently mis-split.
+        """
+        from rigel.calibration.errors import CalibrationStrandError
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
+
+        bam_path, index = self._build_scenario_without_xs(tmp_path)
+        config = PipelineConfig(em=EMConfig(seed=42), scan=BamScanConfig(sj_strand_tag="XS"))
+        with pytest.raises(CalibrationStrandError):
+            run_pipeline(bam_path, index, config=config)
+
+    def test_sj_mode_none_ignores_tags(self, tmp_path):
+        """sj_strand_tag='none' → ignore all strand tags (scanner level)."""
+        from rigel.sim import Scenario, ReadSimConfig
+        from rigel.config import BamScanConfig
+        from rigel.pipeline import scan_and_buffer
 
         scenario = Scenario(
             "mode_none_test",
@@ -588,23 +607,21 @@ class TestMissingAndInvalidTags:
             read_length=100, strand_specificity=0.95, seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
-        config = PipelineConfig(
-            em=EMConfig(seed=42),
-            scan=BamScanConfig(sj_strand_tag="none"),
+        _, strand_models, _, _, _ = scan_and_buffer(
+            str(result.bam_path), result.index, BamScanConfig(sj_strand_tag="none")
         )
-        pr = run_pipeline(result.bam_path, result.index, config=config)
 
-        sm = pr.strand_models.exonic_spliced
+        sm = strand_models.exonic_spliced
         assert sm.n_observations == 0, (
             "With sj_strand_tag='none', exonic_spliced should have 0 "
             "observations even if tags exist"
         )
 
     def test_invalid_xs_value_treated_as_none(self, tmp_path):
-        """XS tag with value '.' or '*' → STRAND_NONE (not crash)."""
+        """XS tag with value '.' or '*' → STRAND_NONE (scanner level, not crash)."""
         from rigel.sim import Scenario, ReadSimConfig
-        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
-        from rigel.pipeline import run_pipeline
+        from rigel.config import BamScanConfig
+        from rigel.pipeline import scan_and_buffer
 
         scenario = Scenario(
             "invalid_xs_test",
@@ -643,13 +660,11 @@ class TestMissingAndInvalidTags:
         sorted_bam = str(tmp_path / "invalid_xs_sorted.bam")
         pysam.sort("-n", "-o", sorted_bam, modified_bam)
 
-        config = PipelineConfig(
-            em=EMConfig(seed=42),
-            scan=BamScanConfig(sj_strand_tag="XS"),
+        # Invalid values produce STRAND_NONE (no crash); scanner-level check.
+        _, strand_models, _, _, _ = scan_and_buffer(
+            sorted_bam, result.index, BamScanConfig(sj_strand_tag="XS")
         )
-        # Should not raise — invalid values produce STRAND_NONE
-        pr = run_pipeline(sorted_bam, result.index, config=config)
-        sm = pr.strand_models.exonic_spliced
+        sm = strand_models.exonic_spliced
         assert sm.n_observations == 0
 
 

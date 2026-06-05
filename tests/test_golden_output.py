@@ -292,13 +292,17 @@ class TestSingleGene:
     """Baseline: one gene, no ambiguity — pure deterministic routing."""
 
     def test_single_exon_clean(self, tmp_path, update_golden):
+        # A single-exon transcript (t1) decoded against a realistic library: the
+        # neighbouring gene is multi-exon so the strand model trains on its spliced
+        # reads (calibration requires spliced reads — a pure single-exon library is a
+        # toy and raises CalibrationStrandError).
         sc = Scenario("golden_1e", genome_length=5000, seed=SEED,
                       work_dir=tmp_path / "golden_1e")
         sc.add_gene("g1", "+", [
             {"t_id": "t1", "exons": [(500, 1200)], "abundance": 100},
         ])
         sc.add_gene("g_h", "-", [
-            {"t_id": "t_h", "exons": [(3000, 3500)], "abundance": 30},
+            {"t_id": "t_h", "exons": [(3000, 3300), (3700, 4000)], "abundance": 30},
         ])
         result = sc.build_oracle(n_fragments=N_FRAGS, sim_config=_SIM_SS100)
         _run_golden_test("single_exon_clean", result, result.index, update_golden)
@@ -405,7 +409,12 @@ class TestAntisense:
         sc.cleanup()
 
     def test_antisense_contained(self, tmp_path, update_golden):
-        """Antisense gene fully contained within sense gene's exon."""
+        """Antisense gene fully contained within sense gene's exon.
+
+        Both overlap transcripts are single-exon; a separate multi-exon gene
+        (g_train) supplies the spliced reads the strand model needs to train (a
+        pure single-exon library raises CalibrationStrandError).
+        """
         sc = Scenario("golden_as_cont", genome_length=8000, seed=SEED,
                       work_dir=tmp_path / "golden_as_cont")
         sc.add_gene("g_sense", "+", [
@@ -413,6 +422,9 @@ class TestAntisense:
         ])
         sc.add_gene("g_anti", "-", [
             {"t_id": "t_anti", "exons": [(700, 1500)], "abundance": 30},
+        ])
+        sc.add_gene("g_train", "+", [
+            {"t_id": "t_train", "exons": [(4000, 4300), (4700, 5000)], "abundance": 40},
         ])
         result = sc.build_oracle(n_fragments=N_FRAGS, sim_config=_SIM_SS90)
         _run_golden_test("antisense_contained_ss90", result, result.index, update_golden)

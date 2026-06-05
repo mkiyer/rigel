@@ -53,8 +53,15 @@ class CalibrationResult:
     omega_left: np.ndarray
     omega_right: np.ndarray
 
-    # --- gDNA component effective-length contribution: Σ_node ω_node·L_node ---
-    gdna_exposure_len: np.ndarray  # float64[R]
+    # --- gDNA component geometric effective length: Σ_node L_node (ω-free, Option A) ---
+    # Exposure ω is carried in the deconvolved gDNA mass, NOT here — so this length is
+    # well-defined even where calibration saw no reads, and never collapses.
+    gdna_geom_len: np.ndarray  # float64[R]
+
+    # --- directional boundary effective length 𝓔(L)=E[min(ℓ,L)] per region (geometry) ---
+    # The per-region capacity to supply boundary-crossing fragments; consumed by the
+    # boundary-flux transport in assemble_priors.
+    gdna_side_len: np.ndarray  # float64[R]
 
     # --- library scalars ---
     rho_0: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
@@ -79,7 +86,8 @@ class CalibrationResult:
             "omega_contained",
             "omega_left",
             "omega_right",
-            "gdna_exposure_len",
+            "gdna_geom_len",
+            "gdna_side_len",
         ):
             _check_region_array(getattr(self, name), name, n)
 

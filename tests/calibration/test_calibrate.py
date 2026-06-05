@@ -62,7 +62,7 @@ def test_exposure_and_density_sane():
     for w in (result.omega_contained, result.omega_left, result.omega_right):
         assert np.all(np.isfinite(w))
         assert np.all(w >= 0.0)
-    assert np.all(result.gdna_exposure_len >= 0.0)
+    assert np.all(result.gdna_geom_len >= 0.0)
     assert 0.0 <= result.kappa_rna <= 1.0
 
 
@@ -75,11 +75,11 @@ def test_kappa_matches_strand_balance():
 
 
 def test_confidence_knob_shifts_split_toward_gdna():
-    # A positive confidence (z-quantile) reports a higher gDNA fraction than the mean,
-    # so the total deconvolved gDNA mass cannot decrease.
+    # confidence is a posterior quantile: a higher quantile (0.9) reports a higher gDNA
+    # fraction than the median (0.5), so the total deconvolved gDNA mass cannot decrease.
     def total_g(r):
         return float(r.mass_g_contained.sum() + r.mass_g_left.sum() + r.mass_g_right.sum())
 
-    assert total_g(_run(CalibrationConfig(confidence=1.0))) >= total_g(
-        _run(CalibrationConfig(confidence=0.0))
+    assert total_g(_run(CalibrationConfig(confidence=0.9))) >= total_g(
+        _run(CalibrationConfig(confidence=0.5))
     ) - 1e-9

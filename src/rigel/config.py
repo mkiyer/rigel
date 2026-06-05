@@ -222,29 +222,50 @@ class BamScanConfig:
 class CalibrationConfig:
     """Configuration for the acyclic calibrator (:func:`rigel.calibration.calibrate`).
 
-    Two knobs, both controlling the per-node joint decode; neither is a decision
-    threshold. The old EM-loop knobs (``max_outer_iterations``, ``mass_rel_tol``,
-    ``exposure_dispersion_floor``) are gone: the calibrator is a single feed-forward
-    pass with no loop, no convergence test, and no exposure-dispersion prior.
+    The calibrator is a single feed-forward pass (no EM loop, no convergence test).
+    The per-node decode is the **joint** count × strand posterior (see ``joint_decode``):
+    the strand clue cleans the global gDNA density ρ_0, then each node's gDNA fraction is the
+    posterior quantile under a count prior × Beta-Binomial strand likelihood. The old EM-loop
+    knobs are gone.
     """
 
-    #: z-quantile of the per-node gDNA-fraction posterior reported as the point
-    #: estimate (``0`` = posterior mean; ``>0`` leans conservatively toward gDNA,
-    #: ``<0`` toward RNA). The high-value, user-facing calibration knob.
-    confidence: float = 0.0
+    #: Posterior **quantile** of the per-node gDNA fraction reported as the point estimate —
+    #: the high-value, user-facing knob, expressed as a probability in ``(0, 1)``:
+    #:   ``0.5`` = posterior median (neutral, unbiased);
+    #:   ``>0.5`` = conservative / FP-averse — e.g. at ``0.95`` the gDNA call is the 95th
+    #:     percentile of the posterior, i.e. we are 95% confident the true gDNA fraction is at
+    #:     most the reported value, so gDNA over-calls (siphons) RNA rather than leaking INTO it;
+    #:   ``<0.5`` = liberal, leans toward RNA.
+    #: Raising it trades a small loss of true RNA for stronger protection against gDNA→RNA
+    #: false positives — the diagnostically safe direction at high contamination.
+    confidence: float = 0.5
 
-    #: Grid resolution of the joint-decode posterior over the gDNA fraction on
-    #: ``[0, 1]``. Advanced/technical — 200 is ample for a smooth 1-D posterior;
-    #: raising it trades run time for resolution (validate during benchmarking).
+    #: Grid resolution of the decode posterior over the gDNA fraction on ``[0, 1]``.
+    #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
 
+    #: Power threshold κ for shrinking the per-locus gDNA effective length toward the
+    #: uniform geometric span (``assemble_priors``). The gDNA support contracts to where
+    #: the gDNA sits (IPR) only in proportion to the gDNA *count* backing it:
+    #: ``π = G/(G+κ)``, ``eff_len = (1−π)·span + π·IPR``. A locus needs ≳κ gDNA fragments
+    #: to trust an apparent concentration; sparse/spurious gDNA defaults to uniform support,
+    #: which stops the EM from amplifying a tiny concentrated mass. κ ≈ 1/φ (the count
+    #: overdispersion). ``0`` disables shrinkage (pure IPR).
+    gdna_eff_len_shrink: float = 10.0
+
     def __post_init__(self) -> None:
-        if not float("-inf") < float(self.confidence) < float("inf"):
+        if not 0.0 < float(self.confidence) < 1.0:
             raise ValueError(
-                f"CalibrationConfig.confidence must be finite; got {self.confidence}."
+                f"CalibrationConfig.confidence is a posterior quantile in (0, 1); "
+                f"got {self.confidence}."
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")
+        if not (0.0 <= float(self.gdna_eff_len_shrink) < float("inf")):
+            raise ValueError(
+                f"CalibrationConfig.gdna_eff_len_shrink must be >= 0 and finite; "
+                f"got {self.gdna_eff_len_shrink}."
+            )
 
 
 @dataclass(frozen=True)

@@ -45,7 +45,7 @@ class NodeDensity:
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
     gdna_mass: np.ndarray  # float64[R] — density × region_eff_len (count-clue gDNA mass)
-    count_evidence: np.ndarray  # float64[R] — swept DISCRETE gDNA-rep flux (count-prior precision)
+    count_evidence: np.ndarray  # float64[R] — μ_g = density·eff_len: expected gDNA count (κ_c)
     region_decodable: np.ndarray  # bool[R] — count-decodable region (non-exonic)
     boundary_decodable: np.ndarray  # bool[R] — decodable boundary to the right of region r
     n_region_dec: int
@@ -77,18 +77,27 @@ def node_gdna_density(
     region_arrays,
     region_eff_len: np.ndarray,
     mu_fl: float,
+    gdna_frac: np.ndarray | None = None,
 ) -> NodeDensity:
-    """Per-region gDNA density from the count clue + the region↔boundary density sweep."""
+    """Per-region gDNA density from the count clue + the region↔boundary density sweep.
+
+    ``gdna_frac`` is the per-region strand-deconvolved gDNA fraction of the contained mass
+    (Phase-2 strand clue). Supplying it cleans the nascent-RNA upper bias from the
+    count-decodable nodes **before** ρ_0 is read, so the swept density is clean gDNA, not
+    gDNA+nascent — the empirical-Bayes estimate of the global density hyperparameter. ``None``
+    ⇒ all 1.0 (the raw, pre-clean behaviour).
+    """
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
     ref_offsets = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     r = sig.shape[0]
     region_dec, bnd_dec = count_decodable_masks(sig, ref_id)
+    gf = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
 
     # --- direct observations ---
-    # region node: contained gDNA-representative mass (decodable regions only).
-    a_reg = np.where(region_dec, substrate.contained.mass_unspliced, 0.0)
+    # region node: strand-cleaned contained gDNA mass (decodable regions only).
+    a_reg = np.where(region_dec, gf * substrate.contained.mass_unspliced, 0.0)
     b_reg = np.where(region_dec, region_eff_len, 0.0)
     # boundary node (indexed by left region r): the unspliced crossing mass/flux at the
     # r/r+1 seam = region r's RIGHT view + region r+1's LEFT view (the two sides).
@@ -108,59 +117,51 @@ def node_gdna_density(
     b_bnd = np.where(bnd_dec, mu_fl, 0.0)
     # conduit reliability: a boundary with more crossing traffic propagates density better.
     weight = np.where(same_right, cross_flux / (cross_flux + _TRAFFIC_PSEUDOCOUNT), 0.0)
-    # DISCRETE gDNA-rep flux (statistical power; swept alongside the fractional mass so the
-    # count prior's precision is a fragment count, never the fractional mass — review §3).
-    c_reg = np.where(region_dec, substrate.contained.n_unspliced.astype(np.float64), 0.0)
-    c_bnd = np.where(bnd_dec, cross_flux, 0.0)
 
     # --- alternating region↔boundary sweep (per reference; cf. sweep.py) ---
-    # Three parallel tracks per node: a = gDNA mass, b = effective length, c = DISCRETE flux.
+    # Two parallel tracks per node: a = gDNA mass, b = effective length.
     fl_a = np.zeros(r)
     fl_b = np.zeros(r)
-    fl_c = np.zeros(r)
     fr_a = np.zeros(r)
     fr_b = np.zeros(r)
-    fr_c = np.zeros(r)
     for f in range(ref_offsets.shape[0] - 1):
         s, e = int(ref_offsets[f]), int(ref_offsets[f + 1])
         if e <= s:
             continue
-        run_a = run_b = run_c = 0.0  # forward: left-side evidence, decayed per boundary
+        run_a = run_b = 0.0  # forward: left-side evidence, decayed per boundary
         for i in range(s, e):
             if i > s:
                 w = weight[i - 1]
                 run_a = w * (run_a + a_bnd[i - 1])
                 run_b = w * (run_b + b_bnd[i - 1])
-                run_c = w * (run_c + c_bnd[i - 1])
             fl_a[i] = run_a
             fl_b[i] = run_b
-            fl_c[i] = run_c
             run_a += a_reg[i]
             run_b += b_reg[i]
-            run_c += c_reg[i]
-        run_a = run_b = run_c = 0.0  # reverse
+        run_a = run_b = 0.0  # reverse
         for i in range(e - 1, s - 1, -1):
             if i < e - 1:
                 w = weight[i]
                 run_a = w * (run_a + a_bnd[i])
                 run_b = w * (run_b + b_bnd[i])
-                run_c = w * (run_c + c_bnd[i])
             fr_a[i] = run_a
             fr_b[i] = run_b
-            fr_c[i] = run_c
             run_a += a_reg[i]
             run_b += b_reg[i]
-            run_c += c_reg[i]
 
     # density = own + swept-neighbour evidence (α = gDNA mass, β = effective length).
     alpha = a_reg + fl_a + fr_a
     beta = b_reg + fl_b + fr_b
-    count_evidence = c_reg + fl_c + fr_c  # discrete fragment count behind the density
     # global fallback for nodes the sweep never reached (no decodable evidence in the ref).
     tot_b = float(b_reg.sum() + b_bnd.sum())
     seed_density = float(a_reg.sum() + a_bnd.sum()) / tot_b if tot_b > 0.0 else 0.0
     density = np.where(beta > 0.0, alpha / np.maximum(beta, 1e-12), seed_density)
     gdna_mass = density * region_eff_len
+    # count-prior precision κ_c = the EXPECTED gDNA count μ_g = density·eff_len (= gdna_mass):
+    # the count clue is only as confident as the number of gDNA events it expects to see, so it
+    # defers to the strand clue where RNA dominates (imputed-low density ⇒ small μ_g ⇒ weak prior,
+    # Jeffreys floor in joint_decode). At RNA-rich exons μ_g is small and the strand clue governs.
+    count_evidence = gdna_mass
     return NodeDensity(
         density=density,
         gdna_mass=gdna_mass,

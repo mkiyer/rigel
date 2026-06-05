@@ -22,7 +22,8 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         omega_contained=o.copy(),
         omega_left=o.copy(),
         omega_right=o.copy(),
-        gdna_exposure_len=o.copy(),
+        gdna_geom_len=o.copy(),
+        gdna_side_len=o.copy(),
         rho_0=1e-3,
         kappa_rna=0.9,
         n_regions=n_regions,
@@ -42,7 +43,7 @@ def test_zero_gdna_library_constructs():
         "omega_contained",
         "omega_left",
         "omega_right",
-        "gdna_exposure_len",
+        "gdna_geom_len",
         "mass_g_contained",
         "mass_g_left",
         "mass_g_right",
@@ -63,7 +64,7 @@ def test_enriched_exposure_constructs():
     [
         ("mass_g_contained", np.array([-1.0, 0.0])),  # negative mass
         ("omega_contained", np.array([-0.1, 1.0])),  # negative exposure
-        ("gdna_exposure_len", np.array([1.0, -1.0])),  # negative length
+        ("gdna_geom_len", np.array([1.0, -1.0])),  # negative length
     ],
 )
 def test_rejects_negative_region_arrays(field, value):

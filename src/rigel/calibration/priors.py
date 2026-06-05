@@ -100,6 +100,62 @@ def _project_regions_to_loci(
     return out
 
 
+def _transport_boundary_flux(
+    contained: np.ndarray,
+    left: np.ndarray,
+    right: np.ndarray,
+    length: np.ndarray,
+    e_cap: np.ndarray,
+    ref_id: np.ndarray,
+    max_iter: int = 8,
+) -> np.ndarray:
+    """Length-bias-free boundary-flux transport of per-region gDNA mass.
+
+    Each internal boundary's pooled gDNA mass is re-attributed to its two sides ∝ ``ω·𝓔``
+    — exposure (density ``g/L``, length-bias-free) × the directional boundary effective
+    length ``𝓔(L)=E[min(ℓ,L)]`` (``e_cap``). This moves capture smear off the unexposed
+    (e.g. intronic) side and onto the probed side that generated it. Iterates until the
+    total mass moved is sub-count (< 1 fragment-equivalent), capped at ``max_iter``; total
+    mass is conserved (ref-edge / cross-ref sides stay in place). See
+    docs/futureprs/phase6_boundary_flux_transport_plan.md.
+    """
+    contained = np.asarray(contained, dtype=np.float64)
+    left = np.asarray(left, dtype=np.float64)
+    right = np.asarray(right, dtype=np.float64)
+    length = np.maximum(np.asarray(length, dtype=np.float64), 1e-9)
+    e_cap = np.asarray(e_cap, dtype=np.float64)
+    r = contained.shape[0]
+    if r <= 1:
+        return contained + left + right
+    same = np.asarray(ref_id)[:-1] == np.asarray(ref_id)[1:]  # boundary (i,i+1) internal
+    ltot = float(length.sum())
+    g = contained + left + right
+    prev = g
+    for _ in range(max_iter):
+        rho0 = g.sum() / ltot if ltot > 0.0 else 0.0
+        omega = np.where(rho0 > 0.0, (g / length) / max(rho0, 1e-12), 1.0)
+        w = omega * e_cap
+        pooled = right[:-1] + left[1:]  # boundary (i,i+1) pooled gDNA mass
+        denom = w[:-1] + w[1:]
+        ok = same & (denom > 0.0)
+        share_l = np.where(ok, pooled * w[:-1] / np.maximum(denom, 1e-12), 0.0)
+        share_r = np.where(ok, pooled * w[1:] / np.maximum(denom, 1e-12), 0.0)
+        out = contained.copy()
+        out[:-1] += share_l  # → left region of the boundary
+        out[1:] += share_r  # → right region of the boundary
+        keep_left = np.ones(r, dtype=bool)
+        keep_left[1:] = ~ok  # keep sides whose boundary was not transported
+        keep_right = np.ones(r, dtype=bool)
+        keep_right[:-1] = ~ok
+        out = out + np.where(keep_left, left, 0.0) + np.where(keep_right, right, 0.0)
+        moved = float(np.abs(out - prev).sum())
+        prev = out
+        g = out
+        if moved < 1.0:  # sub-count: no further observable change
+            break
+    return g
+
+
 def assemble_priors(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
@@ -109,19 +165,30 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the acyclic calibration result.
 
-    Per region ``r``, sum its three nodes (contained + the two boundary sides) into
-    the deconvolved gDNA mass ``G_r`` and RNA mass ``D_r``, and take the gDNA
-    component's exposure-weighted length ``E_r = gdna_exposure_len[r]``. These project
-    to loci by genomic-overlap share ``φ`` (a region can straddle loci); then per
-    locus ``L``::
+    Boundary-crossing gDNA is first re-attributed to its origin region by the
+    length-bias-free boundary-flux transport (``ω·𝓔``); the transported per-region gDNA
+    ``G_r`` and RNA ``D_r`` project to loci by genomic-overlap share ``φ``::
 
-        alpha_gdna_add[L] = prior_weight · Σ_r φ_{L,r} · G_r     (deconvolved gDNA)
-        alpha_rna_add[L]  = prior_weight · Σ_r φ_{L,r} · D_r     (deconvolved RNA)
-        gdna_eff_len[L]   = max(1, Σ_r φ_{L,r} · E_r)
+        alpha_gdna_add[L] = prior_weight · Σ_r φ·G_r            (deconvolved gDNA count)
+        alpha_rna_add[L]  = prior_weight · Σ_r φ·D_r            (deconvolved RNA count)
+        IPR[L]            = (Σ_r φ·G_r)² / Σ_r φ·(G_r²/E_r)     (concentrated support)
+        gdna_eff_len[L]   = (1−π)·span + π·IPR,  π = G/(G+κ)    (power-shrunk support)
 
-    Unlike the old cyclic prior, the gDNA pseudocount is the *observed* deconvolved
-    gDNA — not a modeled ``ρ_0·ω·L`` injected even into empty regions — so a region
-    with no gDNA evidence contributes nothing to ``alpha_gdna_add``.
+    ``E_r = gdna_geom_len`` is the FL-aware gDNA support of region ``r`` — the bases a gDNA
+    fragment can overlap (contained + both boundary crossings ≈ ``R + L̄``), not the bare
+    region length. The IPR is the effective support of the gDNA over those lengths; its
+    reciprocal makes the gDNA component's per-position rate equal the local gDNA density, so
+    under capture (gDNA piled on exons) the support contracts to the exons and gDNA competes
+    at its true density.
+
+    A *concentrated* support, though, is only trustworthy in proportion to the gDNA **count**
+    backing it — a tiny sparse mass that merely *looks* concentrated would get a tiny eff-len
+    and the EM would amplify it far past the calibration's call. So the eff-len is shrunk from
+    the IPR toward the uniform geometric ``span`` by the per-locus power ``π = G/(G+κ)``
+    (``κ = config.gdna_eff_len_shrink ≈ 1/φ``): abundant gDNA → ``π→1`` → trust the
+    concentration; sparse gDNA → ``π→0`` → uniform support. A locus with no deconvolved gDNA
+    falls back to ``span`` (multimap blindness). See
+    docs/futureprs/phase6_boundary_flux_transport_plan.md.
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
@@ -129,21 +196,48 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    g_region = calibration.mass_g_contained + calibration.mass_g_left + calibration.mass_g_right
+    # Transport uses the physical region length for its length-bias-free density (ω); the
+    # IPR uses the FL-aware gDNA support E_r = gdna_geom_len (contained + boundary crossings
+    # ≈ R + L̄) — the bases a gDNA fragment can actually overlap, not the bare region length.
+    length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    geom = np.asarray(calibration.gdna_geom_len, dtype=np.float64)
+    g_region = _transport_boundary_flux(
+        calibration.mass_g_contained,
+        calibration.mass_g_left,
+        calibration.mass_g_right,
+        length,
+        calibration.gdna_side_len,
+        np.asarray(region_arrays.ref_id),
+    )
     d_region = calibration.mass_d_contained + calibration.mass_d_left + calibration.mass_d_right
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g2_over_e = np.where(geom > 0.0, g_region**2 / np.maximum(geom, 1e-9), 0.0)
 
     proj = _project_regions_to_loci(
         region_arrays,
         multi_loci,
         len(multi_loci),
-        {"g": g_region, "d": d_region, "e": calibration.gdna_exposure_len},
+        {"g": g_region, "d": d_region, "s": g2_over_e, "span": geom},
     )
+    big_g, s_g, span = proj["g"], proj["s"], proj["span"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ipr = np.where(s_g > 0.0, big_g**2 / np.maximum(s_g, 1e-30), span)
+    # Power-shrink the support from the concentrated IPR toward the uniform geometric span,
+    # in proportion to the gDNA count backing the concentration: π = G/(G+κ). Abundant gDNA
+    # (capture) → π→1 → trust the IPR; sparse/spurious gDNA → π→0 → uniform span, so the EM
+    # cannot amplify a tiny concentrated mass past the calibration's call. κ ≈ 1/φ.
+    kappa = float(calibration.config.gdna_eff_len_shrink)
+    if kappa > 0.0:
+        power = np.where(big_g > 0.0, big_g / (big_g + kappa), 0.0)
+        eff_len = (1.0 - power) * span + power * ipr
+    else:
+        eff_len = ipr
 
     w = float(prior_weight)
     return LocusPriors(
-        alpha_gdna_add=w * proj["g"],
+        alpha_gdna_add=w * big_g,
         alpha_rna_add=w * proj["d"],
-        gdna_eff_len=np.maximum(proj["e"], _GDNA_EFF_LEN_FLOOR),
+        gdna_eff_len=np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR),
     )
 
 

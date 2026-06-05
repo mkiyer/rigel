@@ -43,7 +43,7 @@ class TestIsoformCollapse:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=BamScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="auto"),
                 ),
             )
             bench = run_benchmark(result, pr, scenario_name="iso_1_1")
@@ -77,7 +77,7 @@ class TestIsoformCollapse:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=BamScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="auto"),
                 ),
             )
             bench = run_benchmark(result, pr,
@@ -107,6 +107,12 @@ class TestUnsplicedLowStrand:
         sc.add_gene("g1", "+", [
             {"t_id": "t1", "exons": [(500, 1500)], "abundance": 100},
         ])
+        # Multi-exon gene so the strand model trains: the calibration requires spliced
+        # reads (a pure single-exon library raises CalibrationStrandError), and the
+        # trained κ_rna is what lets the unspliced gene's reads decode as RNA.
+        sc.add_gene("g_train", "+", [
+            {"t_id": "t_train", "exons": [(2500, 2800), (3200, 3500)], "abundance": 60},
+        ])
 
         for ss in [0.65, 0.9, 1.0]:
             result = sc.build_oracle(
@@ -118,7 +124,7 @@ class TestUnsplicedLowStrand:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=BamScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="auto"),
                 ),
             )
             bench = run_benchmark(result, pr, scenario_name=f"ss_{ss}")
@@ -149,7 +155,7 @@ class TestUnsplicedLowStrand:
                 result.bam_path, result.index,
                 config=PipelineConfig(
                     em=EMConfig(seed=PIPELINE_SEED),
-                    scan=BamScanConfig(sj_strand_tag="ts"),
+                    scan=BamScanConfig(sj_strand_tag="auto"),
                 ),
             )
             bench = run_benchmark(result, pr,
