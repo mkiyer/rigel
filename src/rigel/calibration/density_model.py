@@ -76,7 +76,7 @@ def node_gdna_density(
     substrate,
     region_arrays,
     region_eff_len: np.ndarray,
-    mu_fl: float,
+    fl_mean: float,
     gdna_frac: np.ndarray | None = None,
 ) -> NodeDensity:
     """Per-region gDNA density from the count clue + the region↔boundary density sweep.
@@ -93,12 +93,14 @@ def node_gdna_density(
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     r = sig.shape[0]
     region_count_observable, boundary_count_observable = count_observable_masks(sig, ref_id)
-    gf = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
+    gdna_fraction = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
 
     # --- direct observations ---
     # region node: strand-cleaned contained gDNA mass (decodable regions only).
-    a_reg = np.where(region_count_observable, gf * substrate.contained.mass_unspliced, 0.0)
-    b_reg = np.where(region_count_observable, region_eff_len, 0.0)
+    reg_mass = np.where(
+        region_count_observable, gdna_fraction * substrate.contained.mass_unspliced, 0.0
+    )
+    reg_len = np.where(region_count_observable, region_eff_len, 0.0)
     # boundary node (indexed by left region r): the unspliced crossing mass/flux at the
     # r/r+1 seam = region r's RIGHT view + region r+1's LEFT view (the two sides).
     same_right = np.zeros(r, dtype=bool)
@@ -113,51 +115,51 @@ def node_gdna_density(
         ) + substrate.left.n_unspliced[1:].astype(np.float64)
     cross_mass = np.where(same_right, cross_mass, 0.0)
     cross_flux = np.where(same_right, cross_flux, 0.0)
-    a_bnd = np.where(
+    bnd_mass = np.where(
         boundary_count_observable, cross_mass, 0.0
     )  # gDNA crossing mass (decodable boundaries)
-    b_bnd = np.where(boundary_count_observable, mu_fl, 0.0)
+    bnd_len = np.where(boundary_count_observable, fl_mean, 0.0)
     # conduit reliability: a boundary with more crossing traffic propagates density better.
     weight = np.where(same_right, cross_flux / (cross_flux + _TRAFFIC_PSEUDOCOUNT), 0.0)
 
     # --- alternating region↔boundary sweep (per reference; cf. sweep.py) ---
     # Two parallel tracks per node: a = gDNA mass, b = effective length.
-    fl_a = np.zeros(r)
-    fl_b = np.zeros(r)
-    fr_a = np.zeros(r)
-    fr_b = np.zeros(r)
+    from_left_mass = np.zeros(r)
+    from_left_len = np.zeros(r)
+    from_right_mass = np.zeros(r)
+    from_right_len = np.zeros(r)
     for f in range(ref_offsets.shape[0] - 1):
         s, e = int(ref_offsets[f]), int(ref_offsets[f + 1])
         if e <= s:
             continue
-        run_a = run_b = 0.0  # forward: left-side evidence, decayed per boundary
+        run_mass = run_len = 0.0  # forward: left-side evidence, decayed per boundary
         for i in range(s, e):
             if i > s:
                 w = weight[i - 1]
-                run_a = w * (run_a + a_bnd[i - 1])
-                run_b = w * (run_b + b_bnd[i - 1])
-            fl_a[i] = run_a
-            fl_b[i] = run_b
-            run_a += a_reg[i]
-            run_b += b_reg[i]
-        run_a = run_b = 0.0  # reverse
+                run_mass = w * (run_mass + bnd_mass[i - 1])
+                run_len = w * (run_len + bnd_len[i - 1])
+            from_left_mass[i] = run_mass
+            from_left_len[i] = run_len
+            run_mass += reg_mass[i]
+            run_len += reg_len[i]
+        run_mass = run_len = 0.0  # reverse
         for i in range(e - 1, s - 1, -1):
             if i < e - 1:
                 w = weight[i]
-                run_a = w * (run_a + a_bnd[i])
-                run_b = w * (run_b + b_bnd[i])
-            fr_a[i] = run_a
-            fr_b[i] = run_b
-            run_a += a_reg[i]
-            run_b += b_reg[i]
+                run_mass = w * (run_mass + bnd_mass[i])
+                run_len = w * (run_len + bnd_len[i])
+            from_right_mass[i] = run_mass
+            from_right_len[i] = run_len
+            run_mass += reg_mass[i]
+            run_len += reg_len[i]
 
     # density = own + swept-neighbour evidence (α = gDNA mass, β = effective length).
-    alpha = a_reg + fl_a + fr_a
-    beta = b_reg + fl_b + fr_b
+    swept_mass = reg_mass + from_left_mass + from_right_mass
+    swept_len = reg_len + from_left_len + from_right_len
     # global fallback for nodes the sweep never reached (no decodable evidence in the ref).
-    tot_b = float(b_reg.sum() + b_bnd.sum())
-    seed_density = float(a_reg.sum() + a_bnd.sum()) / tot_b if tot_b > 0.0 else 0.0
-    density = np.where(beta > 0.0, alpha / np.maximum(beta, 1e-12), seed_density)
+    total_len = float(reg_len.sum() + bnd_len.sum())
+    seed_density = float(reg_mass.sum() + bnd_mass.sum()) / total_len if total_len > 0.0 else 0.0
+    density = np.where(swept_len > 0.0, swept_mass / np.maximum(swept_len, 1e-12), seed_density)
     gdna_mass = density * region_eff_len
     # count-prior precision κ_c = the EXPECTED gDNA count μ_g = density·eff_len (= gdna_mass):
     # the count clue is only as confident as the number of gDNA events it expects to see, so it

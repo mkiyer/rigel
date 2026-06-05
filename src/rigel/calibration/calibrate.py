@@ -66,9 +66,9 @@ def calibrate(
 
     # gDNA fragment-length effective lengths (PR 4c geometry): the region-contained
     # length, the per-side boundary density length, and the region-free crossing mean.
-    region_eff = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
-    bside_eff = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
-    mu_fl = boundary_eff_length(gdna_fl_pmf)
+    region_eff_len = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
+    boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
+    fl_mean = boundary_eff_length(gdna_fl_pmf)
 
     # RNA strand balance first (κ_rna posterior mean from the spliced channel) — the strand
     # clue is what cleans the count density, so it must precede Phase 1.
@@ -108,7 +108,7 @@ def calibrate(
     # expected gDNA count μ_g = density·eff_len (NodeDensity.count_evidence), so the count clue
     # defers to strand where RNA dominates.
     node_density = node_gdna_density(
-        substrate, region_arrays, region_eff, mu_fl, gdna_frac=gdna_frac
+        substrate, region_arrays, region_eff_len, fl_mean, gdna_frac=gdna_frac
     )
 
     # Joint per-node deconvolution: count prior × Beta-Binomial strand likelihood.
@@ -116,7 +116,7 @@ def calibrate(
         substrate,
         region_arrays,
         node_density,
-        region_eff,
+        region_eff_len,
         rna_sense_frac=rna_sense_frac,
         confidence=config.confidence,
         n_grid=config.n_grid,
@@ -125,14 +125,14 @@ def calibrate(
         substrate,
         region_arrays,
         node_density,
-        bside_eff,
+        boundary_eff_len,
         rna_sense_frac=rna_sense_frac,
         confidence=config.confidence,
         n_grid=config.n_grid,
     )
 
     # Derive ρ_0 and per-node exposure ω (+ the exposure-weighted gDNA length).
-    derived = derive(regions, left, right, region_eff, bside_eff, region_arrays.ref_id)
+    derived = derive(regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id)
 
     result = CalibrationResult(
         mass_gdna_contained=regions.gdna_mass,
@@ -145,7 +145,7 @@ def calibrate(
         exposure_left=derived.left_exposure,
         exposure_right=derived.right_exposure,
         gdna_geom_len=derived.gdna_geom_len,
-        gdna_boundary_len=bside_eff,
+        gdna_boundary_len=boundary_eff_len,
         gdna_density_global=derived.gdna_density_global,
         rna_sense_frac=rna_sense_frac,
         n_regions=region_arrays.n_regions,

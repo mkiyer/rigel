@@ -105,7 +105,7 @@ def _transport_boundary_flux(
     left: np.ndarray,
     right: np.ndarray,
     length: np.ndarray,
-    e_cap: np.ndarray,
+    boundary_capacity: np.ndarray,
     ref_id: np.ndarray,
     max_iter: int = 8,
 ) -> np.ndarray:
@@ -113,7 +113,7 @@ def _transport_boundary_flux(
 
     Each internal boundary's pooled gDNA mass is re-attributed to its two sides ∝ ``ω·𝓔``
     — exposure (density ``g/L``, length-bias-free) × the directional boundary effective
-    length ``𝓔(L)=E[min(ℓ,L)]`` (``e_cap``). This moves capture smear off the unexposed
+    length ``𝓔(L)=E[min(ℓ,L)]`` (``boundary_capacity``). This moves capture smear off the unexposed
     (e.g. intronic) side and onto the probed side that generated it. Iterates until the
     total mass moved is sub-count (< 1 fragment-equivalent), capped at ``max_iter``; total
     mass is conserved (ref-edge / cross-ref sides stay in place). See
@@ -123,20 +123,20 @@ def _transport_boundary_flux(
     left = np.asarray(left, dtype=np.float64)
     right = np.asarray(right, dtype=np.float64)
     length = np.maximum(np.asarray(length, dtype=np.float64), 1e-9)
-    e_cap = np.asarray(e_cap, dtype=np.float64)
+    boundary_capacity = np.asarray(boundary_capacity, dtype=np.float64)
     r = contained.shape[0]
     if r <= 1:
         return contained + left + right
     same = np.asarray(ref_id)[:-1] == np.asarray(ref_id)[1:]  # boundary (i,i+1) internal
-    ltot = float(length.sum())
+    total_len = float(length.sum())
     g = contained + left + right
     prev = g
     for _ in range(max_iter):
-        gdna_density_global = g.sum() / ltot if ltot > 0.0 else 0.0
+        gdna_density_global = g.sum() / total_len if total_len > 0.0 else 0.0
         exposure = np.where(
             gdna_density_global > 0.0, (g / length) / max(gdna_density_global, 1e-12), 1.0
         )
-        w = exposure * e_cap
+        w = exposure * boundary_capacity
         pooled = right[:-1] + left[1:]  # boundary (i,i+1) pooled gDNA mass
         denom = w[:-1] + w[1:]
         ok = same & (denom > 0.0)
@@ -174,7 +174,7 @@ def assemble_priors(
         gdna_prior_count[L] = prior_weight · Σ_r φ·G_r            (deconvolved gDNA count)
         rna_prior_count[L]  = prior_weight · Σ_r φ·D_r            (deconvolved RNA count)
         IPR[L]            = (Σ_r φ·G_r)² / Σ_r φ·(G_r²/E_r)     (concentrated support)
-        gdna_eff_len[L]   = (1−π)·span + π·IPR,  π = G/(G+κ)    (power-shrunk support)
+        gdna_eff_len[L]   = (1−π)·span + π·IPR,  π = G/(G+κ)    (concentration_trust-shrunk support)
 
     ``E_r = gdna_geom_len`` is the FL-aware gDNA support of region ``r`` — the bases a gDNA
     fragment can overlap (contained + both boundary crossings ≈ ``R + L̄``), not the bare
@@ -186,7 +186,7 @@ def assemble_priors(
     A *concentrated* support, though, is only trustworthy in proportion to the gDNA **count**
     backing it — a tiny sparse mass that merely *looks* concentrated would get a tiny eff-len
     and the EM would amplify it far past the calibration's call. So the eff-len is shrunk from
-    the IPR toward the uniform geometric ``span`` by the per-locus power ``π = G/(G+κ)``
+    the IPR toward the uniform geometric ``span`` by the per-locus concentration_trust ``π = G/(G+κ)``
     (``κ = config.gdna_eff_len_shrink ≈ 1/φ``): abundant gDNA → ``π→1`` → trust the
     concentration; sparse gDNA → ``π→0`` → uniform support. A locus with no deconvolved gDNA
     falls back to ``span`` (multimap blindness). See
@@ -202,8 +202,8 @@ def assemble_priors(
     # IPR uses the FL-aware gDNA support E_r = gdna_geom_len (contained + boundary crossings
     # ≈ R + L̄) — the bases a gDNA fragment can actually overlap, not the bare region length.
     length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    geom = np.asarray(calibration.gdna_geom_len, dtype=np.float64)
-    g_region = _transport_boundary_flux(
+    gdna_geom_len = np.asarray(calibration.gdna_geom_len, dtype=np.float64)
+    gdna_region = _transport_boundary_flux(
         calibration.mass_gdna_contained,
         calibration.mass_gdna_left,
         calibration.mass_gdna_right,
@@ -211,36 +211,47 @@ def assemble_priors(
         calibration.gdna_boundary_len,
         np.asarray(region_arrays.ref_id),
     )
-    d_region = (
+    rna_region = (
         calibration.mass_rna_contained + calibration.mass_rna_left + calibration.mass_rna_right
     )
     with np.errstate(divide="ignore", invalid="ignore"):
-        g2_over_e = np.where(geom > 0.0, g_region**2 / np.maximum(geom, 1e-9), 0.0)
+        gdna_sq_over_len = np.where(
+            gdna_geom_len > 0.0, gdna_region**2 / np.maximum(gdna_geom_len, 1e-9), 0.0
+        )
 
     proj = _project_regions_to_loci(
         region_arrays,
         multi_loci,
         len(multi_loci),
-        {"g": g_region, "d": d_region, "s": g2_over_e, "span": geom},
+        {
+            "gdna": gdna_region,
+            "rna": rna_region,
+            "support": gdna_sq_over_len,
+            "span": gdna_geom_len,
+        },
     )
-    big_g, s_g, span = proj["g"], proj["s"], proj["span"]
+    gdna_locus, support_locus, span = proj["gdna"], proj["support"], proj["span"]
     with np.errstate(divide="ignore", invalid="ignore"):
-        ipr = np.where(s_g > 0.0, big_g**2 / np.maximum(s_g, 1e-30), span)
+        gdna_support_len = np.where(
+            support_locus > 0.0, gdna_locus**2 / np.maximum(support_locus, 1e-30), span
+        )
     # Power-shrink the support from the concentrated IPR toward the uniform geometric span,
     # in proportion to the gDNA count backing the concentration: π = G/(G+κ). Abundant gDNA
     # (capture) → π→1 → trust the IPR; sparse/spurious gDNA → π→0 → uniform span, so the EM
     # cannot amplify a tiny concentrated mass past the calibration's call. κ ≈ 1/φ.
-    kappa = float(calibration.config.gdna_eff_len_shrink)
-    if kappa > 0.0:
-        power = np.where(big_g > 0.0, big_g / (big_g + kappa), 0.0)
-        eff_len = (1.0 - power) * span + power * ipr
+    shrink_count = float(calibration.config.gdna_eff_len_shrink)
+    if shrink_count > 0.0:
+        concentration_trust = np.where(
+            gdna_locus > 0.0, gdna_locus / (gdna_locus + shrink_count), 0.0
+        )
+        eff_len = (1.0 - concentration_trust) * span + concentration_trust * gdna_support_len
     else:
-        eff_len = ipr
+        eff_len = gdna_support_len
 
     w = float(prior_weight)
     return LocusPriors(
-        gdna_prior_count=w * big_g,
-        rna_prior_count=w * proj["d"],
+        gdna_prior_count=w * gdna_locus,
+        rna_prior_count=w * proj["rna"],
         gdna_eff_len=np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR),
     )
 
