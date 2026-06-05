@@ -83,8 +83,8 @@ def test_single_locus_sums_region_nodes():
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])], prior_weight=1.0)
-    np.testing.assert_allclose(priors.alpha_rna_add, [12.0])
-    np.testing.assert_allclose(priors.alpha_gdna_add, [4.5])
+    np.testing.assert_allclose(priors.rna_prior_count, [12.0])
+    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
     # IPR uses the FL-aware support gdna_geom_len = [100, 200, 150]; here the gDNA density
     # g/geom = 0.01 is uniform, so IPR = geometric span = Σ gdna_geom_len = 450, and the
     # power-shrinkage leaves it there (IPR == span).
@@ -97,8 +97,8 @@ def test_prior_weight_scales_alphas_not_eff_len():
     ml = [_ml(0, [(0, 0, 100)])]
     base = assemble_priors(cal, ra, ml, prior_weight=1.0)
     doubled = assemble_priors(cal, ra, ml, prior_weight=2.0)
-    np.testing.assert_allclose(doubled.alpha_rna_add, 2.0 * base.alpha_rna_add)
-    np.testing.assert_allclose(doubled.alpha_gdna_add, 2.0 * base.alpha_gdna_add)
+    np.testing.assert_allclose(doubled.rna_prior_count, 2.0 * base.rna_prior_count)
+    np.testing.assert_allclose(doubled.gdna_prior_count, 2.0 * base.gdna_prior_count)
     # gdna_eff_len is a geometric quantity — NOT scaled by prior_weight.
     np.testing.assert_allclose(doubled.gdna_eff_len, base.gdna_eff_len)
     np.testing.assert_allclose(base.gdna_eff_len, [100.0])
@@ -112,8 +112,8 @@ def test_region_split_between_two_loci():
     priors = assemble_priors(
         cal, ra, [_ml(0, [(0, 0, 50)]), _ml(1, [(0, 50, 100)])], prior_weight=1.0
     )
-    np.testing.assert_allclose(priors.alpha_rna_add, [5.0, 5.0])
-    np.testing.assert_allclose(priors.alpha_gdna_add, [2.5, 2.5])
+    np.testing.assert_allclose(priors.rna_prior_count, [5.0, 5.0])
+    np.testing.assert_allclose(priors.gdna_prior_count, [2.5, 2.5])
     np.testing.assert_allclose(priors.gdna_eff_len, [50.0, 50.0])
 
 
@@ -124,8 +124,8 @@ def test_evidence_free_region_gives_zero_gdna_prior():
     cal = _calibration(mass_g=[0.0], mass_d=[0.0], gdna_geom_len=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])], prior_weight=1.0)
-    np.testing.assert_allclose(priors.alpha_rna_add, [0.0])
-    np.testing.assert_allclose(priors.alpha_gdna_add, [0.0])
+    np.testing.assert_allclose(priors.rna_prior_count, [0.0])
+    np.testing.assert_allclose(priors.gdna_prior_count, [0.0])
     np.testing.assert_allclose(priors.gdna_eff_len, [100.0])  # geometric-span fallback
 
 
@@ -153,8 +153,8 @@ def test_intergenic_region_dropped():
     )
     ra = _regions([0, 200], [100, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])], prior_weight=1.0)
-    np.testing.assert_allclose(priors.alpha_rna_add, [5.0])  # the intergenic 99 is gone
-    np.testing.assert_allclose(priors.alpha_gdna_add, [1.0])
+    np.testing.assert_allclose(priors.rna_prior_count, [5.0])  # the intergenic 99 is gone
+    np.testing.assert_allclose(priors.gdna_prior_count, [1.0])
     np.testing.assert_allclose(priors.gdna_eff_len, [100.0])
 
 
@@ -162,8 +162,8 @@ def test_empty_multiloci_returns_empty():
     cal = _calibration(mass_g=[1.0], mass_d=[1.0], gdna_geom_len=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [], prior_weight=1.0)
-    assert priors.alpha_rna_add.shape == (0,)
-    assert priors.alpha_gdna_add.shape == (0,)
+    assert priors.rna_prior_count.shape == (0,)
+    assert priors.gdna_prior_count.shape == (0,)
     assert priors.gdna_eff_len.shape == (0,)
 
 

@@ -1,8 +1,8 @@
 """assemble_priors — bridge from CalibrationResult to the per-locus EM prior (PR 6).
 
 Turns the calibration's per-region deconvolved mass + exposure into the **two
-per-locus Dirichlet scalars** the locus EM consumes — ``alpha_rna_add`` and
-``alpha_gdna_add`` — plus the per-locus gDNA-component effective length.
+per-locus Dirichlet scalars** the locus EM consumes — ``rna_prior_count`` and
+``gdna_prior_count`` — plus the per-locus gDNA-component effective length.
 
 The prior's only job is to split each locus's unspliced fragments between gDNA
 and RNA; it does **not** attribute RNA mass to individual transcripts (that is
@@ -32,8 +32,8 @@ _GDNA_EFF_LEN_FLOOR = 1.0
 class LocusPriors:
     """Per-locus EM prior scalars (float64[n_loci], indexed by ``multi_locus_id``)."""
 
-    alpha_gdna_add: np.ndarray  # gDNA-component Dirichlet pseudocount
-    alpha_rna_add: np.ndarray  # RNA-group Dirichlet pseudocount (the EM splits it by evidence)
+    gdna_prior_count: np.ndarray  # gDNA-component Dirichlet pseudocount
+    rna_prior_count: np.ndarray  # RNA-group Dirichlet pseudocount (the EM splits it by evidence)
     gdna_eff_len: np.ndarray  # exposure-weighted physical length of the gDNA component
 
 
@@ -171,8 +171,8 @@ def assemble_priors(
     length-bias-free boundary-flux transport (``ω·𝓔``); the transported per-region gDNA
     ``G_r`` and RNA ``D_r`` project to loci by genomic-overlap share ``φ``::
 
-        alpha_gdna_add[L] = prior_weight · Σ_r φ·G_r            (deconvolved gDNA count)
-        alpha_rna_add[L]  = prior_weight · Σ_r φ·D_r            (deconvolved RNA count)
+        gdna_prior_count[L] = prior_weight · Σ_r φ·G_r            (deconvolved gDNA count)
+        rna_prior_count[L]  = prior_weight · Σ_r φ·D_r            (deconvolved RNA count)
         IPR[L]            = (Σ_r φ·G_r)² / Σ_r φ·(G_r²/E_r)     (concentrated support)
         gdna_eff_len[L]   = (1−π)·span + π·IPR,  π = G/(G+κ)    (power-shrunk support)
 
@@ -239,8 +239,8 @@ def assemble_priors(
 
     w = float(prior_weight)
     return LocusPriors(
-        alpha_gdna_add=w * big_g,
-        alpha_rna_add=w * proj["d"],
+        gdna_prior_count=w * big_g,
+        rna_prior_count=w * proj["d"],
         gdna_eff_len=np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR),
     )
 

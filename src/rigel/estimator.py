@@ -839,8 +839,8 @@ class AbundanceEstimator:
             "gdna",
             "total",
             "gdna_rate",
-            "alpha_gdna_add",
-            "alpha_rna_add",
+            "gdna_prior_count",
+            "rna_prior_count",
             "enable_gdna",
             "n_regions_touched",
             "multi_locus_region_mass",
@@ -898,8 +898,8 @@ class AbundanceEstimator:
             gdna = float(r["gdna"])
             total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
-            alpha_gdna_add = float(r.get("alpha_gdna_add", 0.0))
-            alpha_rna_add = float(r.get("alpha_rna_add", 0.0))
+            gdna_prior_count = float(r.get("gdna_prior_count", 0.0))
+            rna_prior_count = float(r.get("rna_prior_count", 0.0))
             enable_gdna = int(r.get("enable_gdna", 0))
             n_regions_touched = int(r.get("n_regions_touched", 0))
             multi_locus_region_mass = float(r.get("multi_locus_region_mass", 0.0))
@@ -926,8 +926,8 @@ class AbundanceEstimator:
                     "gdna": gdna,
                     "total": total,
                     "gdna_rate": rate,
-                    "alpha_gdna_add": alpha_gdna_add,
-                    "alpha_rna_add": alpha_rna_add,
+                    "gdna_prior_count": gdna_prior_count,
+                    "rna_prior_count": rna_prior_count,
                     "enable_gdna": enable_gdna,
                     "n_regions_touched": n_regions_touched,
                     "multi_locus_region_mass": multi_locus_region_mass,

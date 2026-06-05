@@ -578,8 +578,8 @@ def _run_locus_em_partitioned(
     partitions: dict,
     multi_loci: list,
     index: TranscriptIndex,
-    alpha_gdna_add: np.ndarray,
-    alpha_rna_add: np.ndarray,
+    gdna_prior_count: np.ndarray,
+    rna_prior_count: np.ndarray,
     gdna_eff_len: np.ndarray,
     *,
     em_config: EMConfig,
@@ -615,8 +615,8 @@ def _run_locus_em_partitioned(
     ]
     locus_t_lists = [loc.transcript_indices for loc in multi_loci]
     ids = [loc.multi_locus_id for loc in multi_loci]
-    alpha_g = np.ascontiguousarray(alpha_gdna_add[ids], dtype=np.float64)
-    alpha_r = np.ascontiguousarray(alpha_rna_add[ids], dtype=np.float64)
+    gdna_prior = np.ascontiguousarray(gdna_prior_count[ids], dtype=np.float64)
+    rna_prior = np.ascontiguousarray(rna_prior_count[ids], dtype=np.float64)
     g_eff = np.ascontiguousarray(gdna_eff_len[ids], dtype=np.float64)
     enable_gdna = np.array(
         [
@@ -630,9 +630,9 @@ def _run_locus_em_partitioned(
     em_result = estimator.run_batch_locus_em_partitioned(
         partition_tuples,
         locus_t_lists,
-        alpha_g,
+        gdna_prior,
         index,
-        rna_prior_count=alpha_r,
+        rna_prior_count=rna_prior,
         gdna_eff_len=g_eff,
         enable_gdna=enable_gdna,
         em_iterations=em_config.iterations,
@@ -668,8 +668,8 @@ def _run_locus_em_partitioned(
                 "n_em_fragments": len(loc.unit_indices),
                 "rna_total": float(rna_arr[i]),
                 "gdna": float(gdna_arr[i]),
-                "alpha_gdna_add": float(alpha_gdna_add[lid]),
-                "alpha_rna_add": float(alpha_rna_add[lid]),
+                "gdna_prior_count": float(gdna_prior_count[lid]),
+                "rna_prior_count": float(rna_prior_count[lid]),
                 "enable_gdna": int(enable_gdna[i]),
                 "gdna_eff_len_em": float(gdna_eff_len[lid]),
             }
@@ -750,8 +750,8 @@ def quant_from_buffer(
         partitions,
         multi_loci,
         index,
-        priors.alpha_gdna_add,
-        priors.alpha_rna_add,
+        priors.gdna_prior_count,
+        priors.rna_prior_count,
         priors.gdna_eff_len,
         em_config=em_config,
         annotations=annotations,

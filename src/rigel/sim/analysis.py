@@ -686,7 +686,7 @@ def analyze_locus_gdna(sim_base: Path, conditions: list[str]) -> str:
         if not loci.empty:
             top = loci.nlargest(20, "gdna")
             cols = ["locus_id", "n_transcripts", "locus_span_bp",
-                    "count_unambig", "mrna", "nrna", "gdna", "gdna_rate", "alpha_gdna_add"]
+                    "count_unambig", "mrna", "nrna", "gdna", "gdna_rate", "gdna_prior_count"]
             avail_cols = [c for c in cols if c in top.columns]
             lines.append(f"\n  {top[avail_cols].to_string(index=False)}")
 
