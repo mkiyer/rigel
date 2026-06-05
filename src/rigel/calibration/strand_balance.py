@@ -1,29 +1,26 @@
-"""RNA strand-balance model (D2): rna_sense_frac (mean) + rna_strand_overdispersion (overdispersion).
+"""RNA strand-balance model: rna_sense_frac (used by the decode) + rna_strand_overdispersion (QC).
 
-The E-step's strand log-Bayes-factor (PR 4) compares an observed sense count
-against an RNA Beta-Binomial ``BB(n, rna_sense_frac, rna_strand_overdispersion)`` and a gDNA
-``BB(n, 0.5, gdna_strand_overdispersion)``. This module supplies the RNA parameters from the
-**posterior-predictive** of the library sense rate (PR 9).
+Fit from the **posterior-predictive** of the library sense rate over annotated spliced unique
+mappers — an uncontaminated, per-fragment measure of strand specificity (the 2x2 contingency
+carried by the live ``StrandModel``). The sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)``:
 
-``rna_sense_frac`` and ``rna_strand_overdispersion`` are a single object: the rna_sense_frac **posterior**
-``Beta(n_same + 1, n_opp + 1)`` over annotated spliced unique mappers (an
-uncontaminated, per-fragment measure of library strand specificity — the 2×2
-contingency carried by the live ``StrandModel``). The RNA strand BB is the
-posterior-predictive ``BB(n, n_same + 1, n_opp + 1)``, so:
+* ``rna_sense_frac`` = the posterior **mean** ``(n_same + 1) / (n_obs + 2)``. This is the live
+  output: it strand-cleans the count density and parameterises the per-node strand likelihood
+  (``strand_likelihood.strand_loglik``). With **zero** spliced reads ``Beta(1, 1)`` gives
+  ``rna_sense_frac = 0.5`` (symmetric) and ``calibrate`` raises ``CalibrationStrandError`` —
+  a real RNA-seq library always carries spliced reads.
+* ``rna_strand_overdispersion`` = the posterior-predictive **overdispersion** ``1 / (n_obs + 3)``,
+  a pure function of the spliced-read count, i.e. a **diagnostic of the strand model's
+  statistical power**. It is deliberately **NOT fed into the decode**: the joint deconvolution
+  uses the Binomial strand limit (``strand_overdispersion = 0``), with thin-count over-confidence
+  already guarded by the count prior and the FP-averse ``confidence`` quantile. Wiring the
+  Beta-Binomial widening into the decode was measured to be negligible (rel <= 1e-3) and — because
+  it softens the strand clue — to slightly *worsen* the silent-gene false-positive rate, so it is
+  kept out by design and retained only for QC.
 
-* ``rna_sense_frac`` = the posterior **mean** ``(n_same + 1) / (n_obs + 2)``;
-* ``rna_strand_overdispersion`` = the posterior-predictive **overdispersion** ``1 / (n_obs + 3)`` —
-  a pure function of the spliced-read count (statistical power).
-
-The strand discriminator then degrades gracefully with the *evidence* rather than
-via an arbitrary floor: with abundant spliced reads ``rna_strand_overdispersion → 0`` and the BB
-collapses to the **Binomial** (the correct sharp limit); with few reads
-``rna_strand_overdispersion`` grows so a single off-strand read no longer scores as gDNA; with **zero**
-spliced reads ``Beta(1, 1)`` gives ``rna_sense_frac = 0.5`` (symmetric), so balanced gDNA
-still routes to gDNA and the channel adds no spurious pull. No method-of-moments
-fit, no overdispersion floor, no minimum-observation fallback (PR 9 replaced all
-three — and, by dropping the per-region substrate pool, removed the boundary
-double-count that biased the old MoM).
+(PR 9 replaced the old method-of-moments fit / overdispersion floor / minimum-observation
+fallback, and by dropping the per-region substrate pool removed the boundary double-count that
+biased the old MoM.)
 """
 
 from __future__ import annotations
@@ -37,10 +34,10 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class StrandBalance:
-    """Fitted RNA strand model: posterior-mean rna_sense_frac + Beta-Binomial overdispersion rna_strand_overdispersion."""
+    """Fitted RNA strand model: posterior-mean rna_sense_frac (live) + rna_strand_overdispersion (QC)."""
 
-    rna_sense_frac: float  # RNA sense mean (posterior mean), in (0, 1)
-    rna_strand_overdispersion: float  # RNA strand BB overdispersion = 1 / (n_obs + 3), in (0, 1)
+    rna_sense_frac: float  # RNA sense mean (posterior mean), in (0, 1) — used by the decode
+    rna_strand_overdispersion: float  # 1/(n_obs+3); QC strand-power diagnostic, not in the decode
     n_observations: int  # spliced strand observations (fragments) backing the posterior
     fallback_used: bool  # True when there are no spliced observations (rna_sense_frac → 0.5)
     fallback_reason: str
