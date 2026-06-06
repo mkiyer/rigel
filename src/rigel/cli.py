@@ -584,6 +584,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("assignment_mode", "em.assignment_mode"),
     _ParamSpec("assignment_min_posterior", "em.assignment_min_posterior"),
     _ParamSpec("em_mode", "em.mode"),
+    _ParamSpec("gdna_llr_bias", "em.gdna_llr_bias"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
@@ -1150,6 +1151,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Convergence threshold for EM parameter updates (default: 1e-6).",
+    )
+    adv.add_argument(
+        "--gdna-llr-bias",
+        dest="gdna_llr_bias",
+        type=float,
+        default=None,
+        help="gDNA false-positive-aversion: log-odds (LLR) bias added to the gDNA "
+        "component in the locus EM (default 0.0 = neutral). Positive favors gDNA "
+        "(trades the gDNA->RNA leak for RNA->gDNA siphon); units are nats of "
+        "log-odds, e.g. 2.2 ~ require 9:1 RNA evidence before calling a fragment RNA.",
     )
     adv.add_argument(
         "--overhang-alpha",
