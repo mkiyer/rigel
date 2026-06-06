@@ -464,3 +464,46 @@ def test_fl_pools_disabled_without_region_types():
     nat = NativeAccumulator(boundary_positions=edges)  # no region_types → FL off
     nat.deposit(blocks=[(210, 260)], spliced=False, primary=True)
     assert np.asarray(nat.fl_pool_mass).shape == (6, 0)
+
+
+# --- FL footprint = SPAN, not covered length (regression) --------------------
+#
+# A fragment whose blocks have an inter-block GAP (paired mates with insert >
+# read1+read2 covered bases) must bin its FL at the genomic SPAN
+# (max end − min start), NOT the covered length (Σ block lengths). Both blocks
+# (210,260) and (310,360) lie in region 2 (intergenic [200,400)): covered =
+# 50+50 = 100, span = 360−210 = 150. Pre-fix the pool binned at the covered
+# length, collapsing long gDNA fragments to a spike at ~2×read_length and
+# leaking typical-length gDNA to RNA in the scorer (which queries the pmf at the
+# genomic footprint = span). The gap case was previously untested.
+
+
+def _fl_gap_deposit(acc):
+    acc.deposit(blocks=[(210, 260), (310, 360)], spliced=False, primary=True)
+
+
+def _check_fl_gap(acc):
+    fl = np.asarray(acc.fl_pool_mass)
+    np.testing.assert_allclose(fl[0, 150], 1.0)  # INTERGENIC_CONTAINED at SPAN 150
+    assert fl[0, 100] == 0.0  # NOT the covered length 100 (the pre-fix bug bin)
+    np.testing.assert_allclose(fl.sum(), 1.0)
+
+
+def test_fl_footprint_is_span_reference():
+    edges = partition_three_adjacent_exons()
+    types = np.array([2, 1, 0], dtype=np.uint8)
+    acc = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
+    _fl_gap_deposit(acc)
+    _check_fl_gap(acc)
+
+
+@XFAIL_NATIVE
+def test_fl_footprint_is_span_native():
+    edges = partition_three_adjacent_exons()
+    types = np.array([2, 1, 0], dtype=np.uint8)
+    ref = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
+    nat = NativeAccumulator(boundary_positions=edges, region_types=types, max_fl=1000)
+    _fl_gap_deposit(ref)
+    _fl_gap_deposit(nat)
+    np.testing.assert_allclose(np.asarray(nat.fl_pool_mass), ref.fl_pool_mass)
+    _check_fl_gap(nat)

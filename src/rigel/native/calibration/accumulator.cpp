@@ -134,10 +134,27 @@ void Accumulator::deposit(const std::int64_t* block_starts,
     // single-region fragment, BOUNDARY (fractional per side) for a crossing.
     // Spliced fragments are excluded (their genomic span is not the FL; the RNA
     // FL is the scanner's SPLICED-ANNOT channel). No-op when FL pooling is off.
+    // FL bin = the fragment's genomic SPAN (template footprint), NOT the covered
+    // length L (= Σ slice lengths). For paired mates with an inter-mate gap
+    // (insert > read1+read2 covered bases) the covered length saturates at the
+    // read-length sum, collapsing the gDNA FL distribution to a spike at 2×readlen.
+    // The scorer queries the gDNA FL pmf at the genomic footprint (span = last
+    // block end − first block start; see ResolvedFragment::genomic_footprint), so
+    // the pool MUST bin at the same span or every long gDNA fragment lands in the
+    // pmf floor and scores as RNA. L stays the mass-conservation denominator below.
     const bool fl_on = !spliced && !fl_pool_mass_.empty();
     const std::size_t fl_row = static_cast<std::size_t>(max_fl_) + 1;
+    std::int64_t fl_span = 0;
+    if (fl_on) {
+        std::int64_t lo = block_starts[0], hi = block_ends[0];
+        for (std::size_t b = 1; b < n_blocks; ++b) {
+            if (block_starts[b] < lo) lo = block_starts[b];
+            if (block_ends[b]   > hi) hi = block_ends[b];
+        }
+        fl_span = hi - lo;
+    }
     const std::size_t fl_bin =
-        fl_on ? static_cast<std::size_t>(std::min<std::int64_t>(L, max_fl_)) : 0;
+        fl_on ? static_cast<std::size_t>(std::min<std::int64_t>(fl_span, max_fl_)) : 0;
 
     // 3. Single-region (all slices in same region) → contained.
     bool all_same = true;

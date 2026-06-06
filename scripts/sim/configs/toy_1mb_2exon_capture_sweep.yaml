@@ -1,0 +1,82 @@
+# Toy: 1 Mb, 10 genes (each two 1 kb exons + 20 kb intron, span 22 kb), 4:1 gDNA,
+# strand-specific (ss=0.99), with a HYBRID-CAPTURE ENERGY SWEEP: none -> weak ->
+# strong -> perfect. The deliberately trivial scenario for deriving + making
+# contractual the IPR / exposure-weighted gDNA effective length
+# (docs/futureprs/exposure_efflen_reimplementation_plan.md).
+#
+# The reference is built EXACTLY (not by the random generator) and reused via
+# --skip-existing. Workflow:
+#   python scripts/sim/build_toy_2exon_reference.py --outdir <outdir>
+#   python scripts/sim/simulate_suite.py --config scripts/sim/configs/toy_1mb_2exon_capture_sweep.yaml --skip-existing
+#   python scripts/sim/bench_calibration.py --sim-base <outdir> --run --force
+#
+# Conditions (ss=0.99, gdna=high4x, nrna=none): capture {none, weak, strong, perfect}.
+#   none    = no probes (uniform): eff-len should be ~ full gDNA support (~span).
+#   weak    = off_target_weight 1, binding_per_base 2   (mild enrichment).
+#   strong  = off_target_weight 1, binding_per_base 20  (strong enrichment).
+#   perfect = off_target_weight 0, binding_per_base 20  (ALL mass on probes, zero
+#             off-target): eff-len should contract to ~ the probed exon footprint.
+
+suite:
+  outdir: /Users/mkiyer/Downloads/rigel_runs/sim_synthetic_capture/toy_1mb_2exon
+  genome_length: 1000000
+  n_genes: 10
+  min_isoforms: 1
+  max_isoforms: 1
+  target_transcripts: null
+  antisense_fraction: 0.0
+  seed: 20260605
+  profile: smoke
+  conditions: null
+  skip_existing: true
+
+simulation:
+  n_rna_fragments: 100000
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 4
+
+abundance:
+  seed: 20260606
+  min: 100.0
+  max: 100.0          # uniform: every gene equally expressed (clean toy)
+  frac_expressed: 1.0
+
+gdna:
+  rates: [4.0]
+  rate_labels: [high4x]
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+strand_specificities: [0.99]
+
+nrna:
+  ratios: [0.0]
+  ratio_labels: [none]
+
+capture:
+  probe_length: 200
+  probe_density: 1.0   # tile each 1 kb exon fully (~5 x 200 bp probes)
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  configs:
+    - label: none
+      enabled: false
+    - label: weak
+      fraction: 1.0
+      off_target_weight: 1.0
+      binding_per_base: 2.0
+    - label: strong
+      fraction: 1.0
+      off_target_weight: 1.0
+      binding_per_base: 20.0
+    - label: perfect
+      fraction: 1.0
+      off_target_weight: 0.0
+      binding_per_base: 20.0

@@ -187,10 +187,18 @@ class Accumulator:
             return
         inv_L = 1.0 / float(L)
 
-        # gDNA FL pooling (PR 4c): bin the UNSPLICED footprint L; CONTAINED for a
-        # single-region fragment, BOUNDARY (fractional per slice) for a crossing.
+        # gDNA FL pooling (PR 4c): bin at the fragment's genomic SPAN (template
+        # footprint = max block end − min block start), NOT the covered length L
+        # (= Σ slice lengths). For paired mates with an inter-mate gap the covered
+        # length saturates at the read-length sum, collapsing the gDNA FL pmf to a
+        # spike at 2×readlen; the scorer queries the pmf at the genomic footprint
+        # (span), so the pool must bin at the span. L stays the mass denominator.
         fl_on = (not spliced) and self.fl_pool_mass is not None
-        fl_bin = min(int(L), self.max_fl) if fl_on else 0
+        if fl_on:
+            fl_span = max(int(be) for _, be in blocks) - min(int(bs) for bs, _ in blocks)
+            fl_bin = min(int(fl_span), self.max_fl)
+        else:
+            fl_bin = 0
 
         # 3. Single-region (all slices in same region) → contained.
         regions_touched = {sl[0] for sl in slices}
