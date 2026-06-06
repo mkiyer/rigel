@@ -74,13 +74,13 @@ def test_kappa_matches_strand_balance():
     assert _run().rna_sense_frac == sb.rna_sense_frac
 
 
-def test_gdna_strand_confidence_z_shifts_split_toward_gdna():
-    # gdna_strand_confidence_z places a gDNA-favoring prior on each node's fraction: a positive
-    # z (FP-averse) cannot decrease the total deconvolved gDNA mass vs the neutral default (z=0).
+def test_gdna_strand_llr_bias_shifts_split_toward_gdna():
+    # gdna_strand_llr_bias tilts each node's gDNA-fraction posterior by λ·logit(f): a positive λ
+    # (FP-averse) cannot decrease the total deconvolved gDNA mass vs the neutral default (λ=0).
     def total_g(r):
         return float(r.mass_gdna_contained.sum() + r.mass_gdna_left.sum() + r.mass_gdna_right.sum())
 
     assert (
-        total_g(_run(CalibrationConfig(gdna_strand_confidence_z=2.0)))
-        >= total_g(_run(CalibrationConfig(gdna_strand_confidence_z=0.0))) - 1e-9
+        total_g(_run(CalibrationConfig(gdna_strand_llr_bias=2.0)))
+        >= total_g(_run(CalibrationConfig(gdna_strand_llr_bias=0.0))) - 1e-9
     )

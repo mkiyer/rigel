@@ -76,10 +76,10 @@ class EMConfig:
     the odds factor ``exp(gdna_llr_bias)``: it trades the FP-deleterious gDNA→RNA
     *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
     say "only call a fragment RNA when it is sufficiently more likely RNA than
-    gDNA." Unlike ``prior_weight`` it shifts the ratio; and where
-    ``gdna_strand_confidence_z`` biases the *calibration* strand deconvolution, this
-    reaches the *EM* assignment directly (the two are decoupled). Units: nats of
-    log-odds (e.g. ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence to call RNA)."""
+    gDNA." Unlike ``prior_weight`` it shifts the ratio; and where the calibration
+    ``gdna_strand_llr_bias`` tilts the *strand deconvolution* (same nats-of-log-odds
+    concept), this reaches the *EM* assignment directly (the two are decoupled).
+    Units: nats of log-odds (e.g. ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence)."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
@@ -241,34 +241,34 @@ class CalibrationConfig:
     The per-node decode is the **joint** count × strand posterior (see ``joint_deconv``):
     the strand clue cleans the global gDNA density ρ_0, then each node's gDNA fraction is the
     posterior median under a count prior × Beta-Binomial strand likelihood, optionally shifted
-    toward gDNA by the FP-aversion prior ``gdna_strand_confidence_z``. The old EM-loop knobs are
+    toward gDNA by the FP-aversion ``gdna_strand_llr_bias`` log-odds tilt. The old EM-loop knobs are
     gone.
     """
 
-    #: **Strand-deconvolution gDNA confidence**, as a one-sided z-score (σ units). The
-    #: false-positive-aversion dial for the per-node gDNA/RNA strand call: it places a
-    #: gDNA-favoring prior on each node's gDNA fraction whose a-priori mean is ``Φ(z)`` (the
-    #: standard-normal CDF), i.e. "a priori, believe this node is ``Φ(z)`` gDNA before reading its
-    #: strand balance." Reaches the deconvolution posterior (unlike a quantile, which only reports
-    #: a point on the *unchanged* posterior and so cannot siphon a confidently-RNA node):
-    #:   ``0.0`` = neutral (Φ = 0.5, flat prior; the posterior median, unbiased — the default);
-    #:   ``> 0`` = FP-averse — call strand-balanced evidence gDNA rather than a gDNA+RNA mix,
-    #:     trading the gDNA→RNA leak for the RNA→gDNA siphon. ``z = 2`` ≈ 98% prior gDNA (2% error
-    #:     rate), ``z = 3`` ≈ 99.9%; ``z → ∞`` siphons **all** unspliced mass into gDNA (the prior
-    #:     overwhelms any finite strand evidence). ``< 0`` leans toward RNA (higher sensitivity).
-    #: Decoupled from the EM ``gdna_llr_bias`` so calibration and EM FP-aversion can be tuned
-    #: independently.
-    gdna_strand_confidence_z: float = 0.0
+    #: **Strand-deconvolution gDNA LLR bias** — the false-positive-aversion dial for the per-node
+    #: gDNA/RNA *strand* call, the calibration-stage twin of the EM ``gdna_llr_bias``. A log-odds
+    #: (LLR) bias in **nats** that shifts each node's deconvolved gDNA fraction in log-odds:
+    #: ``gdna_frac ← σ(λ + logit(gdna_frac))``.
+    #:   ``0.0`` = neutral (no shift; the unbiased posterior median — the default);
+    #:   ``> 0`` = FP-averse — shift strand-balanced evidence toward gDNA rather than a gDNA+RNA
+    #:     mix, trading the gDNA→RNA leak for the RNA→gDNA siphon. ``λ → +∞`` siphons **all**
+    #:     unspliced mass into gDNA (even a confident-RNA node — a property a quantile cannot
+    #:     deliver). ``< 0`` leans toward RNA (higher sensitivity), symmetric.
+    #: Same concept + units (nats of log-odds) as ``gdna_llr_bias``, applied to the calibration
+    #: strand deconvolution rather than the EM assignment. The shift is on the point estimate, so
+    #: the nats are count-independent (portable). The two knobs are decoupled — a given λ is NOT
+    #: numerically identical between the stages (per-fragment EM component vs per-node fraction).
+    gdna_strand_llr_bias: float = 0.0
 
     #: Grid resolution of the decode posterior over the gDNA fraction on ``[0, 1]``.
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
 
     def __post_init__(self) -> None:
-        if not math.isfinite(float(self.gdna_strand_confidence_z)):
+        if not math.isfinite(float(self.gdna_strand_llr_bias)):
             raise ValueError(
-                f"CalibrationConfig.gdna_strand_confidence_z must be finite; "
-                f"got {self.gdna_strand_confidence_z}."
+                f"CalibrationConfig.gdna_strand_llr_bias must be finite; "
+                f"got {self.gdna_strand_llr_bias}."
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")

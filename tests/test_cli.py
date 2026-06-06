@@ -321,14 +321,14 @@ class TestConfigRoundTrip:
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
         assert cfg.em.gdna_llr_bias == pytest.approx(2.2)
 
-    def test_gdna_strand_confidence_z_flows_to_config(self):
-        """``--gdna-strand-confidence-z`` reaches ``CalibrationConfig``."""
+    def test_gdna_strand_llr_bias_flows_to_config(self):
+        """``--gdna-strand-llr-bias`` reaches ``CalibrationConfig``."""
         from rigel.cli import _build_pipeline_config
 
-        args = _parse_quant("--gdna-strand-confidence-z", "2.0")
+        args = _parse_quant("--gdna-strand-llr-bias", "2.0")
         _resolve_quant_args(args, _build_quant_defaults())
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.calibration.gdna_strand_confidence_z == pytest.approx(2.0)
+        assert cfg.calibration.gdna_strand_llr_bias == pytest.approx(2.0)
 
     def test_scan_performance_flags_flow_to_config(self):
         """The renamed scan performance flags reach ``BamScanConfig``."""
