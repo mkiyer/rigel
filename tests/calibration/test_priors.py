@@ -85,9 +85,9 @@ def test_single_locus_sums_region_nodes():
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])], prior_weight=1.0)
     np.testing.assert_allclose(priors.rna_prior_count, [12.0])
     np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
-    # IPR uses the FL-aware support gdna_geom_len = [100, 200, 150]; here the gDNA density
-    # g/geom = 0.01 is uniform, so IPR = geometric span = Σ gdna_geom_len = 450, and the
-    # power-shrinkage leaves it there (IPR == span).
+    # gdna_eff_len is the Laplace-smoothed IPR over the FL-aware support gdna_geom_len =
+    # [100, 200, 150]; here the gDNA density g/geom = 0.01 is uniform, so the IPR equals the
+    # geometric span Σ gdna_geom_len = 450 (uniform mass → full span; the smoothing is exact).
     np.testing.assert_allclose(priors.gdna_eff_len, [450.0])
 
 
@@ -119,8 +119,8 @@ def test_region_split_between_two_loci():
 
 def test_evidence_free_region_gives_zero_gdna_prior():
     # Acyclic: no observed gDNA ⇒ zero gDNA pseudocount (no ρ_0·ω·L hallucination).
-    # With no gDNA mass the power π = G/(G+κ) = 0, so the eff-len falls back to the
-    # uniform geometric span (gdna_geom_len = 100) — never a tiny, over-attractive length.
+    # With no gDNA mass (G=0) the Laplace-smoothed IPR is (0+1)²/(1/span) = span exactly, so
+    # the eff-len is the uniform geometric span (gdna_geom_len = 100) — never a tiny length.
     cal = _calibration(mass_g=[0.0], mass_d=[0.0], gdna_geom_len=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])], prior_weight=1.0)
@@ -131,9 +131,9 @@ def test_evidence_free_region_gives_zero_gdna_prior():
 
 def test_eff_len_shrinks_toward_span_for_sparse_gdna():
     # gDNA concentrated on region 0 (region 1 empty): IPR = 100 (region-0 support),
-    # geometric span = 200. The power-shrinkage π = G/(G+κ) pulls the eff-len from the
-    # concentrated IPR toward the uniform span in proportion to the gDNA count: a sparse
-    # mass sits near the span, an abundant mass near the IPR. This is what stops the EM
+    # geometric span = 200. The Laplace one-fragment uniform-per-base prior pulls the eff-len
+    # from the concentrated IPR toward the uniform span in proportion to the gDNA count: a
+    # sparse mass sits near the span, an abundant mass near the IPR. This is what stops the EM
     # from amplifying a tiny concentrated gDNA mass past the calibration's call.
     ra = _regions([0, 100], [100, 200])
     ml = [_ml(0, [(0, 0, 200)])]

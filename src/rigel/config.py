@@ -244,15 +244,6 @@ class CalibrationConfig:
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
 
-    #: Power threshold κ for shrinking the per-locus gDNA effective length toward the
-    #: uniform geometric span (``assemble_priors``). The gDNA support contracts to where
-    #: the gDNA sits (IPR) only in proportion to the gDNA *count* backing it:
-    #: ``π = G/(G+κ)``, ``eff_len = (1−π)·span + π·IPR``. A locus needs ≳κ gDNA fragments
-    #: to trust an apparent concentration; sparse/spurious gDNA defaults to uniform support,
-    #: which stops the EM from amplifying a tiny concentrated mass. κ ≈ 1/φ (the count
-    #: overdispersion). ``0`` disables shrinkage (pure IPR).
-    gdna_eff_len_shrink: float = 10.0
-
     def __post_init__(self) -> None:
         if not 0.0 < float(self.confidence) < 1.0:
             raise ValueError(
@@ -261,11 +252,6 @@ class CalibrationConfig:
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")
-        if not (0.0 <= float(self.gdna_eff_len_shrink) < float("inf")):
-            raise ValueError(
-                f"CalibrationConfig.gdna_eff_len_shrink must be >= 0 and finite; "
-                f"got {self.gdna_eff_len_shrink}."
-            )
 
 
 @dataclass(frozen=True)

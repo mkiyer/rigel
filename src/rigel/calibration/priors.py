@@ -173,25 +173,24 @@ def assemble_priors(
 
         gdna_prior_count = prior_weight * Σ_r share * gdna_region    (deconvolved gDNA count)
         rna_prior_count  = prior_weight * Σ_r share * rna_region     (deconvolved RNA count)
-        gdna_support_len = (Σ share*gdna)² / Σ share*(gdna²/geom)    (concentrated support)
-        gdna_eff_len     = (1-trust)*span + trust*gdna_support_len,
-                           trust = gdna_locus / (gdna_locus + shrink_count)
+        gdna_eff_len     = (G+1)² / [ Σ share*(gdna²/geom) + (2G+1)/span ],  G = Σ share*gdna
+                           (capped at span)
 
     ``geom = gdna_geom_len`` is the FL-aware gDNA support of a region — the bases a gDNA fragment
     can overlap (contained + both boundary crossings, ~ region_len + mean_FL), not the bare region
-    length. The gdna_support_len is the effective support of the gDNA over those lengths; its
-    reciprocal makes the gDNA component's per-position rate equal the local gDNA density, so under
-    capture (gDNA piled on exons) the support contracts to the exons and gDNA competes at its true
-    density.
+    length. ``gdna_eff_len`` is the **inverse participation ratio** of the per-region gDNA mass
+    (its reciprocal makes the gDNA component's per-position rate equal the local gDNA density, so
+    under capture the support contracts to the exons and gDNA competes at its true density),
+    **Laplace-smoothed** by one fragment-equivalent of uniform per-base prior mass: adding
+    ``c_r = L_r/span`` to each ``gdna_region`` and forming ``(G+1)²/Σ(g̃²/L)`` gives the closed
+    form above, since ``Σ 2·g·c/L = 2G/span`` and ``Σ c²/L = 1/span``.
 
-    A *concentrated* support, though, is only trustworthy in proportion to the gDNA **count**
-    backing it — a tiny sparse mass that merely *looks* concentrated would get a tiny eff-len and
-    the EM would amplify it far past the calibration's call. So the eff-len is shrunk from the
-    gdna_support_len toward the uniform geometric ``span`` by the per-locus
-    ``concentration_trust = gdna_locus / (gdna_locus + shrink_count)`` (``shrink_count =
-    config.gdna_eff_len_shrink``, ~ the count overdispersion): abundant gDNA -> trust -> 1 ->
-    trust the concentration; sparse gDNA -> trust -> 0 -> uniform support. A locus with no
-    deconvolved gDNA falls back to ``span`` (multimap blindness). See
+    The add-one is the canonical Laplace prior — there is **no tunable shrinkage constant**. It
+    shrinks the IPR toward the uniform geometric ``span`` exactly in proportion to the gDNA
+    evidence: a tiny sparse-but-concentrated mass stays ≈ ``span`` (the uniform prior dominates),
+    so the EM cannot amplify it past the calibration's call; abundant gDNA (capture, G ≫ 1)
+    recovers the empirical concentration; a locus with no deconvolved gDNA gives ``span`` exactly
+    (G=0, the multimap-blind null — no special case). See
     docs/futureprs/phase6_boundary_flux_transport_plan.md.
     """
     if calibration.n_regions != region_arrays.n_regions:
@@ -233,23 +232,25 @@ def assemble_priors(
         },
     )
     gdna_locus, support_locus, span = proj["gdna"], proj["support"], proj["span"]
+    # gDNA effective length = the inverse participation ratio of the per-region gDNA
+    # mass, Laplace-smoothed by one fragment-equivalent of uniform (per-base) prior
+    # mass. Add c_r = L_r/span pseudo-mass (total 1, spread per base) to each
+    # region's mass g_r and form the IPR (G̃)² / Σ(g̃²/L) with G̃ = G + 1. In the
+    # projected quantities this is closed-form, since Σ(2·g·c/L) = 2G/span and
+    # Σ(c²/L) = 1/span:
+    #     eff_len = (G + 1)² / [ Σ(g²/L) + (2G + 1)/span ],   G = Σ g  (= gdna_locus)
+    # The add-one is the canonical Laplace prior — there is NO tunable shrinkage
+    # constant. It shrinks the support toward the uniform span exactly in
+    # proportion to the gDNA evidence: G = 0 → span (uniform; the multimap-blind
+    # null, no special case); a tiny sparse-but-concentrated mass → still ≈ span
+    # (the +1 uniform prior dominates), so the EM cannot amplify it past the
+    # calibration's call; abundant gDNA (capture, G ≫ 1) → the empirical
+    # concentration (the IPR). Capped at span: the gDNA cannot be more spread than
+    # the locus's uniform length.
     with np.errstate(divide="ignore", invalid="ignore"):
-        gdna_support_len = np.where(
-            support_locus > 0.0, gdna_locus**2 / np.maximum(support_locus, 1e-30), span
-        )
-    # Shrink the support from the concentrated gdna_support_len toward the uniform geometric span,
-    # in proportion to the gDNA count backing it: concentration_trust = gdna/(gdna+shrink_count).
-    # Abundant gDNA (capture) -> trust -> 1 -> trust the gdna_support_len; sparse/spurious gDNA ->
-    # trust -> 0 -> uniform span, so the EM cannot amplify a tiny concentrated mass past the
-    # calibration's call. shrink_count ~ the count overdispersion.
-    shrink_count = float(calibration.config.gdna_eff_len_shrink)
-    if shrink_count > 0.0:
-        concentration_trust = np.where(
-            gdna_locus > 0.0, gdna_locus / (gdna_locus + shrink_count), 0.0
-        )
-        eff_len = (1.0 - concentration_trust) * span + concentration_trust * gdna_support_len
-    else:
-        eff_len = gdna_support_len
+        safe_span = np.maximum(span, 1e-9)
+        smoothed_support = support_locus + (2.0 * gdna_locus + 1.0) / safe_span
+        eff_len = np.minimum((gdna_locus + 1.0) ** 2 / smoothed_support, span)
 
     w = float(prior_weight)
     return LocusPriors(
