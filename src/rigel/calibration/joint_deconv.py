@@ -21,7 +21,7 @@ independent given (gdna_density_global, rna_sense_frac); a node's ~1/N self-cont
 
 The reported fraction is the posterior **median**, then shifted in LOG-ODDS by the FP-aversion
 bias ``gdna_strand_llr_bias``: ``gdna_frac ← σ(λ + logit(median))`` — the calibration-stage twin of
-the EM ``gdna_llr_bias`` and its exact analog: a flat per-node gDNA log-odds shift in nats, ``0`` =
+the EM ``gdna_em_llr_bias`` and its exact analog: a flat per-node gDNA log-odds shift in nats, ``0`` =
 neutral, ``>0`` ⇒ gDNA, ``<0`` ⇒ RNA, ``λ→+∞`` siphons all unspliced mass into gDNA. It is applied
 to the point estimate (count-independent, so the nats are portable) rather than as a tilt on the
 posterior (which a high-count node would drown out) or a quantile (which only moves a point on the
@@ -110,7 +110,7 @@ def _joint_per_node(
         # Unbiased posterior median (interp on the CDF — exact, no Gaussian approximation).
         frac = float(np.clip(np.interp(0.5, np.cumsum(w), grid), 0.0, 1.0))
         # gDNA FP-aversion LLR bias: shift the reported gDNA fraction's LOG-ODDS by λ nats —
-        # frac ← σ(λ + logit(frac)) — the calibration-stage twin of the EM gdna_llr_bias, and its
+        # frac ← σ(λ + logit(frac)) — the calibration-stage twin of the EM gdna_em_llr_bias, and its
         # exact analog: a flat per-node log-odds shift toward gDNA, independent of the node's
         # fragment count (a *tilt on the posterior* would instead be drowned out by high-count
         # nodes, so its nats would not be portable). λ=0 ⇒ unbiased median (neutral default);

@@ -31,7 +31,7 @@ def _partition(
     )
 
 
-def _estimator(n_t: int, *, mode: str = "vbem", gdna_llr_bias: float = 0.0) -> AbundanceEstimator:
+def _estimator(n_t: int, *, mode: str = "vbem", gdna_em_llr_bias: float = 0.0) -> AbundanceEstimator:
     est = AbundanceEstimator(
         num_transcripts=n_t,
         em_config=EMConfig(
@@ -40,7 +40,7 @@ def _estimator(n_t: int, *, mode: str = "vbem", gdna_llr_bias: float = 0.0) -> A
             convergence_delta=1e-9,
             assignment_mode="fractional",
             seed=0,
-            gdna_llr_bias=gdna_llr_bias,
+            gdna_em_llr_bias=gdna_em_llr_bias,
         ),
     )
     est._t_eff_len = np.ones(n_t, dtype=np.float64)
@@ -107,7 +107,7 @@ def test_gdna_effective_length_downweights_gdna_component():
     assert gdna_long[0] < gdna_short[0]
 
 
-def test_gdna_llr_bias_favors_gdna_assignment():
+def test_gdna_em_llr_bias_favors_gdna_assignment():
     # An ambiguous fragment (transcript and gDNA equally likely, equal eff-lens):
     # neutral (bias=0) splits ~evenly; a positive gDNA LLR bias shifts mass toward
     # gDNA (the FP-aversion knob — fewer gDNA->RNA leaks, more RNA->gDNA siphons);
@@ -122,9 +122,9 @@ def test_gdna_llr_bias_favors_gdna_assignment():
         gdna_eff_len=np.array([1.0], dtype=np.float64),
         enable_gdna=np.array([1], dtype=np.uint8),
     )
-    _t, _r, gdna_neg = _estimator(1, gdna_llr_bias=-2.0).run_batch_locus_em_partitioned(**kw)
-    _t, _r, gdna_neutral = _estimator(1, gdna_llr_bias=0.0).run_batch_locus_em_partitioned(**kw)
-    _t, _r, gdna_pos = _estimator(1, gdna_llr_bias=2.0).run_batch_locus_em_partitioned(**kw)
+    _t, _r, gdna_neg = _estimator(1, gdna_em_llr_bias=-2.0).run_batch_locus_em_partitioned(**kw)
+    _t, _r, gdna_neutral = _estimator(1, gdna_em_llr_bias=0.0).run_batch_locus_em_partitioned(**kw)
+    _t, _r, gdna_pos = _estimator(1, gdna_em_llr_bias=2.0).run_batch_locus_em_partitioned(**kw)
 
     assert gdna_neg[0] < gdna_neutral[0] < gdna_pos[0]
     # neutral splits an exactly-tied 1-transcript-vs-gDNA fragment ~50/50

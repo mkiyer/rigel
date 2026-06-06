@@ -3,7 +3,7 @@
 Stresses the per-node joint deconvolution across Beta-Binomial overdispersion levels to be certain
 the log-odds bias siphons unspliced mass into gDNA monotonically, is neutral at 0, and siphons
 *everything* at the extreme (λ→+∞ ⇒ all unspliced → gDNA, even a confidently-RNA node; λ→−∞ ⇒ all
-RNA). The calibration-stage twin of the EM ``gdna_llr_bias``: ``log_post += λ·logit(gdna_frac)``.
+RNA). The calibration-stage twin of the EM ``gdna_em_llr_bias``: ``log_post += λ·logit(gdna_frac)``.
 """
 
 from __future__ import annotations

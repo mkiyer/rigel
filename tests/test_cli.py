@@ -312,14 +312,14 @@ class TestConfigRoundTrip:
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
         assert cfg.scan.read_name_batch_size == 256
 
-    def test_gdna_llr_bias_flows_to_config(self):
-        """``--gdna-llr-bias`` reaches ``EMConfig``."""
+    def test_gdna_em_llr_bias_flows_to_config(self):
+        """``--gdna-em-llr-bias`` reaches ``EMConfig``."""
         from rigel.cli import _build_pipeline_config
 
-        args = _parse_quant("--gdna-llr-bias", "2.2")
+        args = _parse_quant("--gdna-em-llr-bias", "2.2")
         _resolve_quant_args(args, _build_quant_defaults())
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.em.gdna_llr_bias == pytest.approx(2.2)
+        assert cfg.em.gdna_em_llr_bias == pytest.approx(2.2)
 
     def test_gdna_strand_llr_bias_flows_to_config(self):
         """``--gdna-strand-llr-bias`` reaches ``CalibrationConfig``."""

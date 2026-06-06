@@ -69,11 +69,11 @@ class EMConfig:
     Scales gDNA and RNA pseudocounts equally, so it changes the prior's *strength*
     but not the gDNA-vs-RNA ratio — it does not shift the leak/siphon balance."""
 
-    gdna_llr_bias: float = 0.0
+    gdna_em_llr_bias: float = 0.0
     """Global gDNA false-positive-aversion dial — a pure log-odds (LLR) bias added
     to the gDNA component's per-fragment weight in the locus EM (``0.0`` = neutral,
     the default). A **positive** value favors gDNA at every unspliced fragment by
-    the odds factor ``exp(gdna_llr_bias)``: it trades the FP-deleterious gDNA→RNA
+    the odds factor ``exp(gdna_em_llr_bias)``: it trades the FP-deleterious gDNA→RNA
     *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
     say "only call a fragment RNA when it is sufficiently more likely RNA than
     gDNA." Unlike ``prior_weight`` it shifts the ratio; and where the calibration
@@ -90,9 +90,9 @@ class EMConfig:
             raise ValueError(
                 f"EMConfig.prior_weight must be finite and >= 0; got {self.prior_weight}."
             )
-        if not math.isfinite(float(self.gdna_llr_bias)):
+        if not math.isfinite(float(self.gdna_em_llr_bias)):
             raise ValueError(
-                f"EMConfig.gdna_llr_bias must be finite; got {self.gdna_llr_bias}."
+                f"EMConfig.gdna_em_llr_bias must be finite; got {self.gdna_em_llr_bias}."
             )
 
 
@@ -246,7 +246,7 @@ class CalibrationConfig:
     """
 
     #: **Strand-deconvolution gDNA LLR bias** — the false-positive-aversion dial for the per-node
-    #: gDNA/RNA *strand* call, the calibration-stage twin of the EM ``gdna_llr_bias``. A log-odds
+    #: gDNA/RNA *strand* call, the calibration-stage twin of the EM ``gdna_em_llr_bias``. A log-odds
     #: (LLR) bias in **nats** that shifts each node's deconvolved gDNA fraction in log-odds:
     #: ``gdna_frac ← σ(λ + logit(gdna_frac))``.
     #:   ``0.0`` = neutral (no shift; the unbiased posterior median — the default);
@@ -254,7 +254,7 @@ class CalibrationConfig:
     #:     mix, trading the gDNA→RNA leak for the RNA→gDNA siphon. ``λ → +∞`` siphons **all**
     #:     unspliced mass into gDNA (even a confident-RNA node — a property a quantile cannot
     #:     deliver). ``< 0`` leans toward RNA (higher sensitivity), symmetric.
-    #: Same concept + units (nats of log-odds) as ``gdna_llr_bias``, applied to the calibration
+    #: Same concept + units (nats of log-odds) as ``gdna_em_llr_bias``, applied to the calibration
     #: strand deconvolution rather than the EM assignment. The shift is on the point estimate, so
     #: the nats are count-independent (portable). The two knobs are decoupled — a given λ is NOT
     #: numerically identical between the stages (per-fragment EM component vs per-node fraction).
