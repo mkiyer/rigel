@@ -61,7 +61,6 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
-    rna_call_bias: float = 0.5
     prior_weight: float = 1.0
     """Multiplier on the calibration-derived per-locus prior (the κ of
     ``docs/acc_caljointmodel/prs/PR06_integrate.md`` §I.2). ``1.0`` (default)
@@ -73,8 +72,6 @@ class EMConfig:
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
-        if not (0.0 < float(self.rna_call_bias) < 1.0):
-            raise ValueError(f"EMConfig.rna_call_bias must be in (0, 1); got {self.rna_call_bias}.")
         if not (0.0 <= float(self.prior_weight) < float("inf")):
             raise ValueError(
                 f"EMConfig.prior_weight must be finite and >= 0; got {self.prior_weight}."

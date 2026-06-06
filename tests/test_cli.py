@@ -92,10 +92,6 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.scan_buffer_size is None
 
-    def test_rna_call_bias_default_none(self):
-        args = _parse_quant()
-        assert args.rna_call_bias is None
-
 
 # ---------------------------------------------------------------------------
 # Boolean optional action
@@ -160,13 +156,11 @@ class TestResolveQuant:
             textwrap.dedent("""\
             quant:
               em_iterations: 500
-              rna_call_bias: 0.25
         """)
         )
         args = _parse_quant("--config", str(cfg))
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.em_iterations == 500
-        assert args.rna_call_bias == pytest.approx(0.25)
 
     def test_cli_overrides_yaml(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
@@ -308,15 +302,6 @@ class TestConfigRoundTrip:
             assert key in spec_dests or key in cli_only, (
                 f"Default key {key!r} not in _PARAM_SPECS or cli_only"
             )
-
-    def test_rna_call_bias_flows_to_config(self):
-        """``--rna-call-bias`` reaches ``EMConfig``."""
-        from rigel.cli import _build_pipeline_config
-
-        args = _parse_quant("--rna-call-bias", "0.25")
-        _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.em.rna_call_bias == pytest.approx(0.25)
 
     def test_scan_read_name_batch_size_flows_to_config(self):
         """``--scan-read-name-batch-size`` reaches ``BamScanConfig``."""

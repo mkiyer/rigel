@@ -584,7 +584,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("assignment_mode", "em.assignment_mode"),
     _ParamSpec("assignment_min_posterior", "em.assignment_min_posterior"),
     _ParamSpec("em_mode", "em.mode"),
-    _ParamSpec("rna_call_bias", "em.rna_call_bias"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
     _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
@@ -1151,16 +1150,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Convergence threshold for EM parameter updates (default: 1e-6).",
-    )
-    adv.add_argument(
-        "--rna-call-bias",
-        dest="rna_call_bias",
-        type=float,
-        default=None,
-        help="Operational sensitivity/specificity dial for the unspliced "
-        "gDNA-vs-RNA prior split. Range (0, 1). Default 0.5 is unbiased; "
-        "values below 0.5 favor gDNA assignment and values above 0.5 "
-        "favor RNA assignment.",
     )
     adv.add_argument(
         "--overhang-alpha",
