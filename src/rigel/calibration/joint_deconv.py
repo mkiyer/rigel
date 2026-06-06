@@ -19,8 +19,11 @@ they agree and arbitrate where they disagree (the strand-specificity spectrum: u
 count-only, increasingly stranded ⇒ increasingly strand-informed). The clues are conditionally
 independent given (gdna_density_global, rna_sense_frac); a node's ~1/N self-contribution to the global gdna_density_global is negligible.
 
-The reported fraction is the posterior quantile selected by ``confidence`` (a probability in
-(0,1); 0.5 = median/neutral; higher ⇒ over-call gDNA, the FP-averse direction). Amounts use the
+The reported fraction is the posterior **median**, after an optional gDNA-favoring FP-aversion
+prior ``Beta(1+λ, 1)`` (``log_post += λ·log gdna_frac``) whose strength ``λ`` comes from the
+``gdna_strand_confidence_z`` z-score (0 = neutral/flat; λ→∞ ⇒ siphon all unspliced mass into gDNA,
+overwhelming any finite strand evidence — unlike a quantile, which only reports a point on the
+*unchanged* posterior). Amounts use the
 conserved **fractional mass** ``M``; precisions use **discrete counts**. gDNA = ``gdna_frac·M``; RNA =
 ``(1−gdna_frac)·M`` + the deterministic spliced mass. Regions and boundaries are combined into loci only
 **after** calibration (``assemble_priors``). Explicit grid posterior (numerically stable).
@@ -28,6 +31,7 @@ conserved **fractional mass** ``M``; precisions use **discrete counts**. gDNA = 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -37,6 +41,21 @@ from .strand_likelihood import strand_loglik
 
 _GRID_EPS = 1.0e-4
 _JEFFREYS = 0.5  # principled prior floor (Beta(½,½) at zero count evidence), not a tunable
+
+
+def strand_confidence_z_to_lambda(z: float) -> float:
+    """Map the strand-deconvolution gDNA confidence z-score to the prior pseudocount ``λ``.
+
+    The FP-aversion prior on a node's gDNA fraction is ``Beta(1+λ, 1)`` with a-priori mean
+    ``Φ(z)`` (the standard-normal CDF), so ``λ = (2·Φ(z) − 1)/(1 − Φ(z))``: ``z=0 ⇒ Φ=0.5 ⇒ λ=0``
+    (flat, neutral); ``z>0 ⇒ λ>0`` (favor gDNA); ``z→∞ ⇒ λ→∞`` (all gDNA); ``z<0 ⇒ λ∈(−1,0)``
+    (lean RNA). It is a strictly increasing function of ``z`` (more confidence ⇒ more gDNA).
+    """
+    if z == 0.0:
+        return 0.0
+    phi = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    phi = min(max(phi, 1e-12), 1.0 - 1e-12)  # keep λ finite at both extremes
+    return (2.0 * phi - 1.0) / (1.0 - phi)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +80,7 @@ def _joint_per_node(
     *,
     rna_sense_frac,
     strand_overdispersion,
-    confidence,
+    gdna_strand_lambda,
     n_grid,
 ) -> JointDeconv:
     k = mass_unspl.shape[0]
@@ -98,13 +117,19 @@ def _joint_per_node(
                 rna_sense_frac,
                 strand_overdispersion=strand_overdispersion,
             )
+        # gDNA FP-aversion prior Beta(1+λ, 1): log_post += λ·log(gdna_frac) pulls the fraction
+        # toward gDNA (λ from gdna_strand_confidence_z; 0 = neutral/flat). It competes with the
+        # strand likelihood on the same log scale, so λ→∞ siphons even a confident-RNA node into
+        # gDNA, while λ=0 leaves the unbiased posterior.
+        if gdna_strand_lambda != 0.0:
+            log_post = log_post + gdna_strand_lambda * log_grid
         w = np.exp(log_post - log_post.max())
         w /= w.sum()
         mean = float(np.dot(grid, w))
         var = float(np.dot((grid - mean) ** 2, w))
-        # Report the `confidence`-quantile of the posterior (0.5 = median, neutral; higher =
-        # FP-averse, over-calls gDNA). interp on the CDF — exact, no Gaussian approximation.
-        frac = float(np.clip(np.interp(confidence, np.cumsum(w), grid), 0.0, 1.0))
+        # Report the posterior MEDIAN of the (FP-aversion-shifted) posterior. interp on the
+        # CDF — exact, no Gaussian approximation. λ=0 ⇒ the unbiased median (neutral default).
+        frac = float(np.clip(np.interp(0.5, np.cumsum(w), grid), 0.0, 1.0))
         gdna_frac[i] = frac
         gdna_frac_var[i] = var
         gdna[i] = frac * m
@@ -122,7 +147,7 @@ def deconv_regions(
     *,
     rna_sense_frac,
     strand_overdispersion=0.0,
-    confidence=0.5,
+    gdna_strand_confidence_z=0.0,
     n_grid=200,
 ) -> JointDeconv:
     """Deconvolve each region's contained mass (a node) into gDNA / RNA."""
@@ -144,7 +169,7 @@ def deconv_regions(
         strand_observable,
         rna_sense_frac=rna_sense_frac,
         strand_overdispersion=strand_overdispersion,
-        confidence=confidence,
+        gdna_strand_lambda=strand_confidence_z_to_lambda(gdna_strand_confidence_z),
         n_grid=n_grid,
     )
 
@@ -157,7 +182,7 @@ def deconv_sides(
     *,
     rna_sense_frac,
     strand_overdispersion=0.0,
-    confidence=0.5,
+    gdna_strand_confidence_z=0.0,
     n_grid=200,
 ) -> tuple[JointDeconv, JointDeconv]:
     """Deconvolve each boundary **side** as an independent node (R1/decision iii).
@@ -174,6 +199,7 @@ def deconv_sides(
     ts = np.asarray(region_arrays.strand_class)
     ref_id = np.asarray(region_arrays.ref_id)
     r = ts.shape[0]
+    gdna_strand_lambda = strand_confidence_z_to_lambda(gdna_strand_confidence_z)
     boundary_count_observable = (
         node_density.boundary_count_observable
     )  # boundary (b, b+1) observable, indexed by left region
@@ -222,7 +248,7 @@ def deconv_sides(
             strand_observable,
             rna_sense_frac=rna_sense_frac,
             strand_overdispersion=strand_overdispersion,
-            confidence=confidence,
+            gdna_strand_lambda=gdna_strand_lambda,
             n_grid=n_grid,
         )
 

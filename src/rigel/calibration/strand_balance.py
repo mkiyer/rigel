@@ -13,7 +13,7 @@ carried by the live ``StrandModel``). The sense-rate posterior is ``Beta(n_same 
   a pure function of the spliced-read count, i.e. a **diagnostic of the strand model's
   statistical power**. It is deliberately **NOT fed into the decode**: the joint deconvolution
   uses the Binomial strand limit (``strand_overdispersion = 0``), with thin-count over-confidence
-  already guarded by the count prior and the FP-averse ``confidence`` quantile. Wiring the
+  already guarded by the count prior and the FP-averse ``gdna_strand_confidence_z`` prior. Wiring the
   Beta-Binomial widening into the decode was measured to be negligible (rel <= 1e-3) and — because
   it softens the strand clue — to slightly *worsen* the silent-gene false-positive rate, so it is
   kept out by design and retained only for QC.

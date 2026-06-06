@@ -600,7 +600,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
-    # -- CalibrationConfig: (Phase A burndown — no sweepable knobs yet) --
+    # -- CalibrationConfig --
+    _ParamSpec("gdna_strand_confidence_z", "calibration.gdna_strand_confidence_z"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1161,6 +1162,16 @@ def build_parser() -> argparse.ArgumentParser:
         "component in the locus EM (default 0.0 = neutral). Positive favors gDNA "
         "(trades the gDNA->RNA leak for RNA->gDNA siphon); units are nats of "
         "log-odds, e.g. 2.2 ~ require 9:1 RNA evidence before calling a fragment RNA.",
+    )
+    adv.add_argument(
+        "--gdna-strand-confidence-z",
+        dest="gdna_strand_confidence_z",
+        type=float,
+        default=None,
+        help="gDNA false-positive-aversion for the CALIBRATION strand deconvolution, as a "
+        "one-sided z-score (default 0.0 = neutral). Places a gDNA-favoring prior with a-priori "
+        "mean Phi(z) on each node's gDNA fraction: z=2 ~ 98%% prior gDNA, z=3 ~ 99.9%%, z->inf "
+        "siphons all unspliced mass into gDNA. Decoupled from --gdna-llr-bias (the EM knob).",
     )
     adv.add_argument(
         "--overhang-alpha",

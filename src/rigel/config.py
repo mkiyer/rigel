@@ -76,8 +76,9 @@ class EMConfig:
     the odds factor ``exp(gdna_llr_bias)``: it trades the FP-deleterious gDNA→RNA
     *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
     say "only call a fragment RNA when it is sufficiently more likely RNA than
-    gDNA." Unlike ``prior_weight`` it shifts the ratio; unlike the calibration
-    ``confidence`` quantile it reaches the EM assignment directly. Units: nats of
+    gDNA." Unlike ``prior_weight`` it shifts the ratio; and where
+    ``gdna_strand_confidence_z`` biases the *calibration* strand deconvolution, this
+    reaches the *EM* assignment directly (the two are decoupled). Units: nats of
     log-odds (e.g. ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence to call RNA)."""
 
     def __post_init__(self):
@@ -239,30 +240,35 @@ class CalibrationConfig:
     The calibrator is a single feed-forward pass (no EM loop, no convergence test).
     The per-node decode is the **joint** count × strand posterior (see ``joint_deconv``):
     the strand clue cleans the global gDNA density ρ_0, then each node's gDNA fraction is the
-    posterior quantile under a count prior × Beta-Binomial strand likelihood. The old EM-loop
-    knobs are gone.
+    posterior median under a count prior × Beta-Binomial strand likelihood, optionally shifted
+    toward gDNA by the FP-aversion prior ``gdna_strand_confidence_z``. The old EM-loop knobs are
+    gone.
     """
 
-    #: Posterior **quantile** of the per-node gDNA fraction reported as the point estimate —
-    #: the high-value, user-facing knob, expressed as a probability in ``(0, 1)``:
-    #:   ``0.5`` = posterior median (neutral, unbiased);
-    #:   ``>0.5`` = conservative / FP-averse — e.g. at ``0.95`` the gDNA call is the 95th
-    #:     percentile of the posterior, i.e. we are 95% confident the true gDNA fraction is at
-    #:     most the reported value, so gDNA over-calls (siphons) RNA rather than leaking INTO it;
-    #:   ``<0.5`` = liberal, leans toward RNA.
-    #: Raising it trades a small loss of true RNA for stronger protection against gDNA→RNA
-    #: false positives — the diagnostically safe direction at high contamination.
-    confidence: float = 0.5
+    #: **Strand-deconvolution gDNA confidence**, as a one-sided z-score (σ units). The
+    #: false-positive-aversion dial for the per-node gDNA/RNA strand call: it places a
+    #: gDNA-favoring prior on each node's gDNA fraction whose a-priori mean is ``Φ(z)`` (the
+    #: standard-normal CDF), i.e. "a priori, believe this node is ``Φ(z)`` gDNA before reading its
+    #: strand balance." Reaches the deconvolution posterior (unlike a quantile, which only reports
+    #: a point on the *unchanged* posterior and so cannot siphon a confidently-RNA node):
+    #:   ``0.0`` = neutral (Φ = 0.5, flat prior; the posterior median, unbiased — the default);
+    #:   ``> 0`` = FP-averse — call strand-balanced evidence gDNA rather than a gDNA+RNA mix,
+    #:     trading the gDNA→RNA leak for the RNA→gDNA siphon. ``z = 2`` ≈ 98% prior gDNA (2% error
+    #:     rate), ``z = 3`` ≈ 99.9%; ``z → ∞`` siphons **all** unspliced mass into gDNA (the prior
+    #:     overwhelms any finite strand evidence). ``< 0`` leans toward RNA (higher sensitivity).
+    #: Decoupled from the EM ``gdna_llr_bias`` so calibration and EM FP-aversion can be tuned
+    #: independently.
+    gdna_strand_confidence_z: float = 0.0
 
     #: Grid resolution of the decode posterior over the gDNA fraction on ``[0, 1]``.
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
 
     def __post_init__(self) -> None:
-        if not 0.0 < float(self.confidence) < 1.0:
+        if not math.isfinite(float(self.gdna_strand_confidence_z)):
             raise ValueError(
-                f"CalibrationConfig.confidence is a posterior quantile in (0, 1); "
-                f"got {self.confidence}."
+                f"CalibrationConfig.gdna_strand_confidence_z must be finite; "
+                f"got {self.gdna_strand_confidence_z}."
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")

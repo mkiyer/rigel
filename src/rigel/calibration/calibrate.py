@@ -119,7 +119,7 @@ def calibrate(
         node_density,
         region_eff_len,
         rna_sense_frac=rna_sense_frac,
-        confidence=config.confidence,
+        gdna_strand_confidence_z=config.gdna_strand_confidence_z,
         n_grid=config.n_grid,
     )
     left, right = deconv_sides(
@@ -128,7 +128,7 @@ def calibrate(
         node_density,
         boundary_eff_len,
         rna_sense_frac=rna_sense_frac,
-        confidence=config.confidence,
+        gdna_strand_confidence_z=config.gdna_strand_confidence_z,
         n_grid=config.n_grid,
     )
 
