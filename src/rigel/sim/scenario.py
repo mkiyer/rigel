@@ -421,9 +421,9 @@ class Scenario:
     ) -> ScenarioResult:
         """Execute the simulation pipeline using oracle (perfect) alignments.
 
-        Bypasses FASTQ generation and external alignment (minimap2/samtools).
-        Instead uses :class:`OracleBamSimulator` to produce a name-sorted
-        BAM with CIGAR strings derived from known transcript structure.
+        Bypasses FASTQ generation and external alignment (minimap2/samtools):
+        :class:`whole_genome.WholeGenomeSimulator` writes the name-sorted oracle
+        BAM directly (CIGAR strings derived from known transcript structure).
 
         Pipeline:
         1. Write genome FASTA + index.

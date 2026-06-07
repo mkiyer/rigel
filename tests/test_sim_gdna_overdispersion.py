@@ -10,9 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.sim.annotation import GeneBuilder
-from rigel.sim.genome import MutableGenome
-from rigel.sim.reads import GDNAConfig, ReadSimulator
+from rigel.sim.reads import GDNAConfig
 
 
 def test_overdispersion_converts_to_beta_concentration():
@@ -29,34 +27,6 @@ def test_overdispersion_converts_to_beta_concentration():
 def test_overdispersion_out_of_range_rejected(bad):
     with pytest.raises(ValueError):
         GDNAConfig(gdna_strand_overdispersion=bad)
-
-
-@pytest.mark.parametrize("od", [0.05, 0.2])
-def test_simulator_region_rates_have_target_overdispersion(od):
-    """Per-region +strand rate ~ Beta(kappa/2, kappa/2) has variance ¼·od (intra-class corr)."""
-    g = MutableGenome(200_000, seed=3, name="chr1")
-    builder = GeneBuilder(g)
-    # several genes → enough exon-derived region boundaries for a stable variance estimate
-    for i in range(20):
-        s = 1000 + i * 8000
-        builder.add_gene(
-            f"g{i}",
-            "+",
-            [
-                {
-                    "t_id": f"t{i}",
-                    "exons": [(s, s + 1500), (s + 3000, s + 4500)],
-                    "abundance": 50.0,
-                },
-            ],
-        )
-    transcripts = builder.get_transcripts()
-    sim = ReadSimulator(g, transcripts, gdna_config=GDNAConfig(gdna_strand_overdispersion=od))
-    rates = sim._region_p_plus
-    assert rates is not None and len(rates) > 30
-    # Beta(a, a) with a = kappa/2 has mean ½ and variance ¼/(2a+1) = ¼·od.
-    assert float(np.mean(rates)) == pytest.approx(0.5, abs=0.05)
-    assert float(np.var(rates)) == pytest.approx(0.25 * od, rel=0.30)
 
 
 @pytest.mark.parametrize("od", [0.05, 0.2])
