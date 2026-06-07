@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from .manifest import condition_manifest_map, load_manifest
-from .truth import parse_origin
+from .read_name import parse_origin
 
 logging.basicConfig(
     level=logging.INFO,

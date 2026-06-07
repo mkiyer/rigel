@@ -39,7 +39,7 @@ from .manifest import (
 )
 from .reads import GDNAConfig, ReadSimulator, ReadSimConfig
 from .scenario import Scenario, ScenarioResult
-from .truth import Origin, parse_origin
+from .read_name import Origin, parse_origin
 
 __all__ = [
     "BenchmarkResult",
