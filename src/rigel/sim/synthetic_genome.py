@@ -29,6 +29,8 @@ from pathlib import Path
 import numpy as np
 import pysam
 
+from .splice_motif import splice_donor_acceptor
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -116,19 +118,11 @@ def inject_splice_sites(seq_array: np.ndarray, transcripts: list[TranscriptDef])
             if intron_end - intron_start < 4:
                 continue
 
-            if tx.strand == "+":
-                # GT at donor, AG at acceptor
-                seq_array[intron_start] = ord("G")
-                seq_array[intron_start + 1] = ord("T")
-                seq_array[intron_end - 2] = ord("A")
-                seq_array[intron_end - 1] = ord("G")
-            else:
-                # For - strand transcripts: CT...AC in genomic coords
-                # (reverse complement of GT-AG)
-                seq_array[intron_start] = ord("C")
-                seq_array[intron_start + 1] = ord("T")
-                seq_array[intron_end - 2] = ord("A")
-                seq_array[intron_end - 1] = ord("C")
+            donor, acceptor = splice_donor_acceptor(tx.strand)
+            seq_array[intron_start] = ord(donor[0])
+            seq_array[intron_start + 1] = ord(donor[1])
+            seq_array[intron_end - 2] = ord(acceptor[0])
+            seq_array[intron_end - 1] = ord(acceptor[1])
 
 
 # ── Gene/transcript structure generation ──────────────────────────────────

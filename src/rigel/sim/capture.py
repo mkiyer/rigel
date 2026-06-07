@@ -26,6 +26,7 @@ import numpy as np
 from ..transcript import Transcript
 from ..types import Strand
 from .bam import transcript_to_genomic_blocks
+from .intervals import merge_intervals, project_genomic_blocks_to_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -392,10 +393,10 @@ class CaptureSampler:
             transcript = self.transcripts[t_idx]
             if strand != Strand.NONE and transcript.strand != strand:
                 continue
-            projected = _project_genomic_blocks_to_transcript(transcript, blocks)
+            projected = project_genomic_blocks_to_transcript(transcript, blocks)
             if projected is None:
                 continue
-            for start, end in _merge_intervals(projected):
+            for start, end in merge_intervals(projected):
                 self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0, probe_group))
             self._add_nrna_blocks(t_idx, blocks, split_scale, probe_group)
 
@@ -638,59 +639,8 @@ def _clip_interval(
     return WeightedInterval(start, end, float(scale), int(probe_group))
 
 
-def _merge_intervals(intervals: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
-    ordered = sorted(intervals)
-    if not ordered:
-        return []
-    merged = [ordered[0]]
-    for start, end in ordered[1:]:
-        last_start, last_end = merged[-1]
-        if start <= last_end:
-            merged[-1] = (last_start, max(last_end, end))
-        else:
-            merged.append((start, end))
-    return merged
-
-
-def _project_genomic_blocks_to_transcript(
-    transcript: Transcript,
-    blocks: Sequence[tuple[int, int]],
-) -> list[tuple[int, int]] | None:
-    projected: list[tuple[int, int]] = []
-    for start, end in blocks:
-        block_intervals = _project_genomic_block_to_transcript(transcript, start, end)
-        if block_intervals is None:
-            return None
-        projected.extend(block_intervals)
-    return projected
-
-
-def _project_genomic_block_to_transcript(
-    transcript: Transcript,
-    block_start: int,
-    block_end: int,
-) -> list[tuple[int, int]] | None:
-    tx_len = int(transcript.length or transcript.compute_length())
-    consumed = 0
-    projected: list[tuple[int, int]] = []
-    mapped_bp = 0
-
-    for exon in transcript.exons:
-        exon_len = exon.end - exon.start
-        overlap_start = max(block_start, exon.start)
-        overlap_end = min(block_end, exon.end)
-        if overlap_start < overlap_end:
-            tx_start = consumed + (overlap_start - exon.start)
-            tx_end = consumed + (overlap_end - exon.start)
-            if transcript.strand == Strand.NEG:
-                tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
-            projected.append((tx_start, tx_end))
-            mapped_bp += overlap_end - overlap_start
-        consumed += exon_len
-
-    if mapped_bp != block_end - block_start:
-        return None
-    return sorted(projected)
+# Interval helpers (merge_intervals / project_genomic_block(s)_to_transcript) live in
+# rigel.sim.intervals — shared with suite.py's capture-probe design.
 
 
 def _genomic_block_to_premrna_interval(

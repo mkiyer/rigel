@@ -27,6 +27,7 @@ import yaml
 
 from rigel.sim.capture import CaptureConfig, CaptureScenario
 from rigel.sim.bam import transcript_to_genomic_blocks
+from rigel.sim.intervals import merge_intervals, project_genomic_block_to_transcript
 from rigel.sim.synthetic_genome import (
     ANTISENSE_OVERLAP_FRAC,
     GENOME_LENGTH,
@@ -406,27 +407,13 @@ def design_capture_probe_intervals(
     return intervals
 
 
-def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    ordered = sorted(intervals)
-    if not ordered:
-        return []
-    merged = [ordered[0]]
-    for start, end in ordered[1:]:
-        last_start, last_end = merged[-1]
-        if start <= last_end:
-            merged[-1] = (last_start, max(last_end, end))
-        else:
-            merged.append((start, end))
-    return merged
-
-
 def _subtract_masked_intervals(
     transcript_length: int,
     masked_intervals: list[tuple[int, int]],
 ) -> list[tuple[int, int]]:
     open_intervals: list[tuple[int, int]] = []
     cursor = 0
-    for start, end in _merge_intervals(masked_intervals):
+    for start, end in merge_intervals(masked_intervals):
         start = max(0, min(int(transcript_length), int(start)))
         end = max(0, min(int(transcript_length), int(end)))
         if end <= start:
@@ -439,34 +426,6 @@ def _subtract_masked_intervals(
     return open_intervals
 
 
-def _project_genomic_block_to_transcript(
-    transcript: Transcript,
-    block_start: int,
-    block_end: int,
-) -> list[tuple[int, int]] | None:
-    tx_len = int(transcript.length or transcript.compute_length())
-    consumed = 0
-    projected: list[tuple[int, int]] = []
-    mapped_bp = 0
-
-    for exon in transcript.exons:
-        exon_len = exon.end - exon.start
-        overlap_start = max(block_start, exon.start)
-        overlap_end = min(block_end, exon.end)
-        if overlap_start < overlap_end:
-            tx_start = consumed + (overlap_start - exon.start)
-            tx_end = consumed + (overlap_end - exon.start)
-            if transcript.strand == Strand.NEG:
-                tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
-            projected.append((tx_start, tx_end))
-            mapped_bp += overlap_end - overlap_start
-        consumed += exon_len
-
-    if mapped_bp != block_end - block_start:
-        return None
-    return sorted(projected)
-
-
 def _project_genomic_probe_to_transcript(
     transcript: Transcript,
     probe: DesignedGenomicProbe,
@@ -475,7 +434,7 @@ def _project_genomic_probe_to_transcript(
         return []
     projected: list[tuple[int, int]] = []
     for start, end in probe.blocks:
-        intervals = _project_genomic_block_to_transcript(transcript, start, end)
+        intervals = project_genomic_block_to_transcript(transcript, start, end)
         if intervals is None:
             return []
         projected.extend(intervals)
@@ -489,7 +448,7 @@ def _masked_probe_intervals(
     masked: list[tuple[int, int]] = []
     for probe in existing_probes:
         masked.extend(_project_genomic_probe_to_transcript(transcript, probe))
-    return _merge_intervals(masked)
+    return merge_intervals(masked)
 
 
 def design_capture_probe_intervals_in_open_regions(

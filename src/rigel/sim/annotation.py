@@ -16,6 +16,7 @@ from ..transcript import Transcript
 from ..types import Interval, Strand
 
 from .genome import MutableGenome
+from .splice_motif import splice_donor_acceptor
 
 logger = logging.getLogger(__name__)
 
@@ -181,14 +182,9 @@ class GeneBuilder:
                 f"Intron ({intron_start},{intron_end}) too short for "
                 f"splice motifs (length {intron_len} < 4)"
             )
-        if strand == Strand.POS:
-            self.genome.edit(intron_start, "GT")
-            self.genome.edit(intron_end - 2, "AG")
-        elif strand == Strand.NEG:
-            self.genome.edit(intron_start, "CT")
-            self.genome.edit(intron_end - 2, "AC")
-        else:
-            raise ValueError(f"Cannot inject splice motifs for strand {strand}")
+        donor, acceptor = splice_donor_acceptor(strand)
+        self.genome.edit(intron_start, donor)
+        self.genome.edit(intron_end - 2, acceptor)
 
     # -- Output ---------------------------------------------------------------
 
