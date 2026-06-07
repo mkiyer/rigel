@@ -72,8 +72,7 @@ import shutil
 import sys
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field, replace
-from itertools import product
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -105,11 +104,9 @@ from rigel.sim.capture import CaptureConfig, CaptureScenario, CaptureSampler
 from rigel.sim.genome import reverse_complement
 from rigel.sim.sampling import truncated_normal_frag_lengths
 from rigel.sim.manifest import (
-    condition_dir_name,
     gdna_label_for_rate,
     write_manifest as write_manifest_file,
 )
-from rigel.sim.truth import write_post_capture_truth
 
 logger = logging.getLogger(__name__)
 
@@ -1993,7 +1990,6 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
 
     Returns list of condition dicts (for manifest).
     """
-    import copy
     outdir = Path(cfg.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -2063,174 +2059,29 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     nrna_pairs = _build_nrna_pairs(cfg, has_file_nrna)
     capture_scenarios, include_capture_in_names = _capture_grid(cfg)
 
-    total_conditions = (
-        len(nrna_pairs)
-        * len(gdna_pairs)
-        * len(gdna_od_pairs)
-        * len(cfg.strand_specificities)
-        * len(capture_scenarios)
+    from .orchestrator import run_condition_grid  # local import avoids an import cycle
+
+    conditions = run_condition_grid(
+        outdir=outdir,
+        genome_path=genome_path,
+        transcripts=transcripts,
+        base_abundances=base_abundances,
+        sim=sim,
+        gdna=cfg.gdna,
+        nrna=cfg.nrna,
+        gdna_pairs=gdna_pairs,
+        gdna_od_pairs=gdna_od_pairs,
+        strand_specificities=cfg.strand_specificities,
+        nrna_pairs=nrna_pairs,
+        capture_scenarios=capture_scenarios,
+        include_capture_in_names=include_capture_in_names,
+        base_seed=sim.sim_seed,
+        oracle_bam=cfg.oracle_bam,
+        skip_existing=True,
     )
-    cond_num = 0
-    conditions: list[dict] = []
 
-    for nrna_label, nrna_mode, nrna_value, nrna_index in nrna_pairs:
-        # Deep-copy transcripts for this nRNA configuration
-        cond_transcripts = copy.deepcopy(transcripts)
-
-        # Restore base abundances
-        for t, (base_mrna, base_nrna) in zip(
-            cond_transcripts, base_abundances,
-        ):
-            t.abundance = base_mrna
-            t.nrna_abundance = base_nrna
-
-        # Apply nRNA spike-in (skipped when file provided nRNA)
-        nrna_ratio: float | None = None
-        nrna_ratio_range: tuple[float, float] | None = None
-        if nrna_mode == "additive_ratio":
-            nrna_ratio = float(nrna_value or 0.0)
-            apply_nrna_ratio(cond_transcripts, nrna_ratio)
-        elif nrna_mode == "random_fraction":
-            nrna_ratio_range = tuple(nrna_value)  # type: ignore[arg-type]
-            nrna_ratio = apply_random_nrna_fraction(
-                cond_transcripts,
-                nrna_ratio_range,
-                eligible_fraction=cfg.nrna.eligible_fraction,
-                seed=cfg.nrna.seed + nrna_index,
-            )
-
-        # Write truth abundances for this nRNA configuration
-        molecular_truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
-        write_truth_abundances(cond_transcripts, outdir / molecular_truth_name)
-
-        for gdna_label, gdna_rate in gdna_pairs:
-            for (gdna_od_label, gdna_od), strand_spec in product(
-                gdna_od_pairs, cfg.strand_specificities
-            ):
-                for capture_scenario in capture_scenarios:
-                    capture_label = (
-                        capture_scenario.label if include_capture_in_names else None
-                    )
-                    capture_enabled = bool(capture_scenario.config.probes)
-
-                    cond_num += 1
-                    if nrna_mode in {"additive_ratio", "random_fraction"}:
-                        n_mrna = sim.n_rna_fragments
-                        n_nrna = round(n_mrna * float(nrna_ratio or 0.0))
-                        n_rna = n_mrna + n_nrna
-                        n_gdna = round(gdna_rate * n_mrna)
-                        explicit_mrna = n_mrna
-                        explicit_nrna = n_nrna
-                    else:
-                        n_mrna = None
-                        n_nrna = None
-                        n_rna = sim.n_rna_fragments
-                        n_gdna = round(gdna_rate * n_rna)
-                        explicit_mrna = None
-                        explicit_nrna = None
-
-                    cond_name = condition_dir_name(
-                        gdna_label, strand_spec, nrna_label, capture_label,
-                        gdna_strand_overdispersion=gdna_od,
-                    )
-                    cond_dir = outdir / cond_name
-                    truth_abundances_name = f"{cond_name}/truth_abundances.tsv"
-                    truth_fl_name = f"{cond_name}/truth_fragment_lengths.tsv"
-                    truth_summary_name = f"{cond_name}/truth_summary.json"
-
-                    print(
-                        f"\n[{cond_num}/{total_conditions}] {cond_name}: "
-                        f"RNA={n_rna:,} gDNA={n_gdna:,} SS={strand_spec:.2f} "
-                        f"nRNA={nrna_label} capture={capture_scenario.label}",
-                        flush=True,
-                    )
-
-                    cond_entry: dict = {
-                        "name": cond_name,
-                        "gdna_label": gdna_label,
-                        "gdna_rate": gdna_rate,
-                        "gdna_strand_overdispersion": gdna_od,
-                        "gdna_strand_overdispersion_label": gdna_od_label,
-                        "strand_specificity": strand_spec,
-                        "nrna_label": nrna_label,
-                        "nrna_mode": nrna_mode,
-                        "nrna_ratio": nrna_ratio,
-                        "nrna_ratio_range": nrna_ratio_range,
-                        "nrna_eligible_fraction": (
-                            cfg.nrna.eligible_fraction
-                            if nrna_mode == "random_fraction" else None
-                        ),
-                        "capture_label": capture_scenario.label,
-                        "capture_enabled": capture_enabled,
-                        "capture_config": capture_scenario.config,
-                        "n_mrna": n_mrna,
-                        "n_nrna": n_nrna,
-                        "n_rna": n_rna,
-                        "n_gdna": n_gdna,
-                        "n_total": n_rna + n_gdna,
-                        "truth_kind": "post_capture_empirical",
-                        "pre_capture_abundances": molecular_truth_name,
-                        "post_capture_abundances": truth_abundances_name,
-                        "post_capture_fragment_lengths": truth_fl_name,
-                        "molecular_truth_abundances": molecular_truth_name,
-                        "truth_abundances": truth_abundances_name,
-                        "truth_fragment_lengths": truth_fl_name,
-                        "truth_summary": truth_summary_name,
-                        "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
-                        "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
-                    }
-
-                    # Check if already done
-                    if (cond_dir / "sim_R1.fq.gz").exists():
-                        print("  Output exists, skipping", flush=True)
-                        cond_entry["oracle_bam"] = (
-                            f"{cond_name}/sim_oracle.bam" if cfg.oracle_bam
-                            else None
-                        )
-                    else:
-                        print("  Simulating...", end="", flush=True)
-                        t0 = time.monotonic()
-                        simulator = WholeGenomeSimulator(
-                            genome_path, cond_transcripts, sim,
-                            replace(cfg.gdna, strand_overdispersion=gdna_od),
-                            strand_specificity=strand_spec,
-                            capture_config=capture_scenario.config,
-                        )
-                        _, _, bam_path = simulator.simulate_and_write(
-                            cond_dir, n_rna, n_gdna,
-                            oracle_bam=cfg.oracle_bam, prefix="sim",
-                            n_mrna=explicit_mrna,
-                            n_nrna=explicit_nrna,
-                            n_workers=sim.n_workers,
-                        )
-                        simulator.close()
-                        cond_entry["oracle_bam"] = (
-                            f"{cond_name}/sim_oracle.bam" if bam_path
-                            else None
-                        )
-                        print(f" done ({time.monotonic() - t0:.1f}s)", flush=True)
-
-                    bam_source = cond_dir / "sim_oracle.bam"
-                    truth_summary = write_post_capture_truth(
-                        cond_transcripts,
-                        outdir / truth_abundances_name,
-                        outdir / truth_fl_name,
-                        outdir / truth_summary_name,
-                        bam_path=bam_source if bam_source.exists() else None,
-                        fastq_path=cond_dir / "sim_R1.fq.gz",
-                        condition=cond_name,
-                        molecular_truth=molecular_truth_name,
-                        gdna_strand_overdispersion=gdna_od,
-                    )
-                    origin_counts = truth_summary["origin_counts"]
-                    cond_entry["n_mrna_observed"] = int(origin_counts.get("mrna", 0))
-                    cond_entry["n_nrna_observed"] = int(origin_counts.get("nrna", 0))
-                    cond_entry["n_gdna_observed"] = int(origin_counts.get("gdna", 0))
-
-                    conditions.append(cond_entry)
     # 4. Write manifest
     write_manifest(outdir, cfg, conditions)
-
     return conditions
 
 
