@@ -164,7 +164,11 @@ class TestParalogMultimapping:
         sc = self._make_scenario(tmp_path, 100, 100,
                                   name_suffix=f"_g{gdna}_n{nrna}_s{int(ss*100)}")
         try:
-            bench = build_and_run(sc, gdna_abundance=gdna,
+            # n_fragments=3000 (6× default), matching test_gdna_sweep above: at heavy gDNA
+            # (abundance 100) on identical paralogs the mRNA pool is tiny and mostly multimapped,
+            # so the default 500 leaves too few *unique spliced* reads for the strand model to be
+            # identifiable — a knife-edge the engine consolidation (one WGS engine) exposed.
+            bench = build_and_run(sc, n_fragments=3000, gdna_abundance=gdna,
                                   nrna_abundance=nrna, strand_specificity=ss,
                                   include_multimap=True,
                                   scenario_name=f"paralogs_stress_{gdna}_{nrna}_{int(ss*100)}")

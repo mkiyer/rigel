@@ -1363,7 +1363,7 @@ class WholeGenomeSimulator:
             tags = self._nh1_tags
             if len(r2_blocks) > 1 or len(r1_blocks) > 1:
                 xs_strand = "-" if t.strand == Strand.NEG else "+"
-                tags = [("NH", 1), ("XS", xs_strand)]
+                tags = [("NH", 1), ("XS", xs_strand, "A")]  # type 'A' (char), per SAM convention
 
             r1_flag = BASE_R1_FLAG
             r2_flag = BASE_R2_FLAG
@@ -1620,6 +1620,48 @@ class WholeGenomeSimulator:
                 ref_idx, fl, count, r1_buf, r2_buf, bam_fh, n_offset=n_written,
             )
         return n_written
+
+    # -- Abundance-weighted pool splits (single-condition / Scenario use) ----
+
+    def _rna_eff_weights(self) -> tuple[float, float]:
+        """``(mrna_weight, nrna_weight)`` = abundance × capture-effective-length at the mean RNA
+        fragment length — the basis for splitting an RNA pool into mature vs nascent."""
+        mean_frag = int(self.sim_params.frag_mean)
+        n = len(self.transcripts)
+        mrna_eff = self.capture.partition_array("mrna", range(n), self._t_lengths, mean_frag)
+        nrna_eff = self.capture.partition_array("nrna", range(n), self._premrna_lengths, mean_frag)
+        return (
+            float(np.sum(self._mrna_abund * mrna_eff)),
+            float(np.sum(self._nrna_abund * nrna_eff)),
+        )
+
+    def rna_split(self, n_rna: int) -> tuple[int, int]:
+        """Split ``n_rna`` RNA fragments into ``(n_mrna, n_nrna)`` by abundance × effective length."""
+        mrna_w, nrna_w = self._rna_eff_weights()
+        total = mrna_w + nrna_w
+        if total <= 0:
+            return 0, 0
+        n_nrna = int(round(n_rna * nrna_w / total))
+        return max(0, n_rna - n_nrna), n_nrna
+
+    def pool_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int, int]:
+        """Split ``n_total`` fragments 3-way into ``(n_mrna, n_nrna, n_gdna)`` by abundance ×
+        effective length, with gDNA weighted by ``gdna_abundance × genome effective length``
+        (summed over the annotated references). The abundance-weighted equivalent of the old
+        ``ReadSimulator._compute_pool_split``."""
+        mrna_w, nrna_w = self._rna_eff_weights()
+        gdna_mean_frag = int(self.gdna_config.frag_mean)
+        genome_eff = sum(
+            self.capture.partition("gdna", ref, length, gdna_mean_frag)
+            for ref, length in zip(self._gdna_refs, self._gdna_ref_lengths)
+        )
+        gdna_w = float(gdna_abundance) * genome_eff
+        total = mrna_w + nrna_w + gdna_w
+        if total <= 0:
+            return 0, 0, 0
+        n_nrna = int(round(n_total * nrna_w / total))
+        n_gdna = int(round(n_total * gdna_w / total))
+        return max(0, n_total - n_nrna - n_gdna), n_nrna, n_gdna
 
     # -- Main entry point ---------------------------------------------------
 

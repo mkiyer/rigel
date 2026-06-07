@@ -35,8 +35,8 @@ from ..types import Strand
 from .annotation import GeneBuilder
 from .capture import CaptureConfig
 from .genome import MutableGenome
-from .oracle_bam import OracleBamSimulator
-from .reads import GDNAConfig, ReadSimulator, ReadSimConfig
+from .reads import GDNAConfig, ReadSimConfig
+from .whole_genome import GDNASimConfig, SimulationParams, WholeGenomeSimulator
 from .truth import (
     count_mrna_by_transcript_from_bam,
     count_mrna_by_transcript_from_fastq,
@@ -47,6 +47,38 @@ from .truth import (
 logger = logging.getLogger(__name__)
 
 __all__ = ["Scenario", "ScenarioResult"]
+
+
+def _to_sim_params(sim_config: ReadSimConfig, n_rna: int) -> SimulationParams:
+    """Translate a Scenario ``ReadSimConfig`` into the engine's ``SimulationParams``.
+
+    (Strand specificity is passed separately to ``WholeGenomeSimulator``; ``n_workers`` is 1 —
+    scenarios are tiny single-condition runs.)"""
+    return SimulationParams(
+        n_rna_fragments=n_rna,
+        sim_seed=sim_config.seed,
+        frag_mean=sim_config.frag_mean,
+        frag_std=sim_config.frag_std,
+        frag_min=sim_config.frag_min,
+        frag_max=sim_config.frag_max,
+        read_length=sim_config.read_length,
+        error_rate=sim_config.error_rate,
+        n_workers=1,
+    )
+
+
+def _to_gdna_sim(gdna_config: GDNAConfig | None) -> GDNASimConfig:
+    """Translate a Scenario ``GDNAConfig`` into the engine's ``GDNASimConfig`` (fragment-length +
+    strand overdispersion; the gDNA *count* is derived separately via the pool split)."""
+    if gdna_config is None:
+        return GDNASimConfig()
+    return GDNASimConfig(
+        frag_mean=gdna_config.frag_mean,
+        frag_std=gdna_config.frag_std,
+        frag_min=gdna_config.frag_min,
+        frag_max=gdna_config.frag_max,
+        strand_overdispersion=float(getattr(gdna_config, "gdna_strand_overdispersion", 0.0) or 0.0),
+    )
 
 
 @dataclass
@@ -333,18 +365,24 @@ class Scenario:
                 if t.abundance and t.abundance > 0:
                     t.nrna_abundance = nrna_abundance
 
-        # 3. Simulate reads
+        # 3. Simulate reads (one engine: WholeGenomeSimulator, FASTQ mode)
         if sim_config is None:
             sim_config = ReadSimConfig(seed=self.seed)
-        # Clamp frag_max to genome/transcript length
-        sim = ReadSimulator(
-            self.genome, transcripts,
-            config=sim_config,
-            gdna_config=effective_gdna,
+        sim = WholeGenomeSimulator(
+            fasta_path, transcripts,
+            _to_sim_params(sim_config, n_fragments),
+            _to_gdna_sim(effective_gdna),
+            strand_specificity=sim_config.strand_specificity,
             capture_config=effective_capture,
         )
+        gdna_abundance = effective_gdna.abundance if effective_gdna else 0.0
+        n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)
         logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
-        r1_path, r2_path = sim.write_fastq(wdir, n_fragments)
+        r1_path, r2_path, _ = sim.simulate_and_write(
+            wdir, n_mrna + n_nrna, n_gdna,
+            n_mrna=n_mrna, n_nrna=n_nrna, oracle_bam=False, prefix=self.name,
+        )
+        sim.close()
 
         # 4. Align with minimap2 → SAM → name-sorted BAM
         logger.info(f"[{self.name}] Aligning with minimap2...")
@@ -438,29 +476,37 @@ class Scenario:
                 if t.abundance and t.abundance > 0:
                     t.nrna_abundance = nrna_abundance
 
-        # 3. Oracle BAM (perfect alignments, no FASTQ or alignment step)
+        # 3. Oracle BAM (perfect alignments) — one engine: WholeGenomeSimulator (oracle_bam=True).
         if sim_config is None:
             sim_config = ReadSimConfig(seed=self.seed)
-        oracle = OracleBamSimulator(
-            self.genome, transcripts,
-            config=sim_config,
-            gdna_config=effective_gdna,
-            capture_config=effective_capture,
-            ref_name=self.ref_name,
-        )
-        bam_path = wdir / f"{self.name}_oracle.bam"
-
-        # Fixed-RNA mode (b): compute explicit pool split
-        pool_split = None
+        gdna_abundance = effective_gdna.abundance if effective_gdna else 0.0
         if n_rna_fragments is not None:
+            # Fixed-RNA mode (b): explicit RNA total, gDNA added on top.
             n_rna = n_rna_fragments
             n_gdna = (int(round(n_rna * gdna_fraction))
                       if gdna_fraction and effective_gdna else 0)
-            n_mrna, n_nrna = oracle._sim.compute_rna_split(n_rna)
-            pool_split = (n_mrna, n_nrna, n_gdna)
-
-        oracle.write_bam(bam_path, n_fragments, name_sorted=True,
-                         pool_split=pool_split)
+            sim = WholeGenomeSimulator(
+                fasta_path, transcripts, _to_sim_params(sim_config, n_rna),
+                _to_gdna_sim(effective_gdna),
+                strand_specificity=sim_config.strand_specificity,
+                capture_config=effective_capture,
+            )
+            n_mrna, n_nrna = sim.rna_split(n_rna)
+        else:
+            # Fixed-total mode (a): abundance-weighted 3-way split.
+            sim = WholeGenomeSimulator(
+                fasta_path, transcripts, _to_sim_params(sim_config, n_fragments),
+                _to_gdna_sim(effective_gdna),
+                strand_specificity=sim_config.strand_specificity,
+                capture_config=effective_capture,
+            )
+            n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)
+        _, _, bam_path = sim.simulate_and_write(
+            wdir, n_mrna + n_nrna, n_gdna,
+            n_mrna=n_mrna, n_nrna=n_nrna, oracle_bam=True, prefix=self.name,
+        )
+        sim.close()
+        n_simulated_total = n_mrna + n_nrna + n_gdna
 
         # 4. Build TranscriptIndex
         index_dir = wdir / "index"
@@ -477,7 +523,7 @@ class Scenario:
             genome=self.genome,
             fastq_r1=None,
             fastq_r2=None,
-            n_simulated=sum(pool_split) if pool_split else n_fragments,
+            n_simulated=n_simulated_total,
             gdna_config=effective_gdna,
             is_oracle=True,
         )
