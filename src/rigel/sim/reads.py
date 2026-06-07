@@ -52,6 +52,7 @@ from ..types import Strand
 from ..transcript import Transcript
 from .capture import CaptureConfig, CaptureSampler
 from .genome import MutableGenome, reverse_complement
+from .sampling import truncated_normal_frag_lengths
 
 logger = logging.getLogger(__name__)
 
@@ -196,10 +197,6 @@ class ReadSimulator:
         gDNA contamination config. ``None`` disables gDNA simulation.
     """
 
-    # Oversampling ratio to reduce rejection-sampling iterations
-    _OVERSAMPLE_RATIO = 1.5
-    _OVERSAMPLE_EXTRA = 10
-
     def __init__(
         self,
         genome: MutableGenome,
@@ -322,44 +319,20 @@ class ReadSimulator:
     # -- Fragment-length sampling ---------------------------------------------
 
     def _sample_frag_lengths(self, n: int) -> np.ndarray:
-        """Sample *n* fragment lengths from a truncated normal."""
+        """Sample *n* RNA fragment lengths from a truncated normal."""
         cfg = self.config
-        return self._sample_frag_lengths_trunc_normal(
-            n, cfg.frag_mean, cfg.frag_std, cfg.frag_min, cfg.frag_max,
+        return truncated_normal_frag_lengths(
+            self._rng, n, cfg.frag_mean, cfg.frag_std, cfg.frag_min, cfg.frag_max
         )
 
     def _sample_gdna_frag_lengths(self, n: int) -> np.ndarray:
-        """Sample *n* gDNA fragment lengths from a truncated normal."""
+        """Sample *n* gDNA fragment lengths from a truncated normal (capped at genome length)."""
         gc = self.gdna_config
         assert gc is not None
         frag_max = min(gc.frag_max, len(self.genome))
-        return self._sample_frag_lengths_trunc_normal(
-            n, gc.frag_mean, gc.frag_std, gc.frag_min, frag_max,
+        return truncated_normal_frag_lengths(
+            self._rng, n, gc.frag_mean, gc.frag_std, gc.frag_min, frag_max
         )
-
-    def _sample_frag_lengths_trunc_normal(
-        self,
-        n: int,
-        mean: float,
-        std: float,
-        frag_min: int,
-        frag_max: int,
-    ) -> np.ndarray:
-        """Sample *n* fragment lengths from a truncated normal distribution."""
-        rng = self._rng
-        result = np.empty(n, dtype=int)
-        filled = 0
-
-        while filled < n:
-            needed = n - filled
-            sample_size = int(needed * self._OVERSAMPLE_RATIO) + self._OVERSAMPLE_EXTRA
-            raw = rng.normal(mean, std, sample_size).astype(int)
-            valid = raw[(raw >= frag_min) & (raw <= frag_max)]
-            nkeep = min(len(valid), needed)
-            result[filled : filled + nkeep] = valid[:nkeep]
-            filled += nkeep
-
-        return result
 
     # -- Transcript probability -----------------------------------------------
 

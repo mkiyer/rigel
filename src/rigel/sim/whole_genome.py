@@ -103,6 +103,7 @@ from rigel.sim.bam import (
 )
 from rigel.sim.capture import CaptureConfig, CaptureScenario, CaptureSampler
 from rigel.sim.genome import reverse_complement
+from rigel.sim.sampling import truncated_normal_frag_lengths
 from rigel.sim.manifest import (
     condition_dir_name,
     gdna_label_for_rate,
@@ -913,9 +914,6 @@ class WholeGenomeSimulator:
        fragments, write FASTQ.gz + BAM simultaneously.
     """
 
-    _OVERSAMPLE_RATIO = 1.5
-    _OVERSAMPLE_EXTRA = 10
-
     def __init__(
         self,
         fasta_path: str | Path,
@@ -1069,28 +1067,10 @@ class WholeGenomeSimulator:
 
     # -- Fragment length sampling -------------------------------------------
 
-    def _sample_frag_lengths(
-        self, n: int, mean: float, std: float,
-        frag_min: int, frag_max: int,
-    ) -> np.ndarray:
-        """Sample *n* fragment lengths from a truncated normal."""
-        rng = self._rng
-        result = np.empty(n, dtype=int)
-        filled = 0
-        while filled < n:
-            needed = n - filled
-            size = int(needed * self._OVERSAMPLE_RATIO) + self._OVERSAMPLE_EXTRA
-            raw = rng.normal(mean, std, size).astype(int)
-            valid = raw[(raw >= frag_min) & (raw <= frag_max)]
-            nkeep = min(len(valid), needed)
-            result[filled : filled + nkeep] = valid[:nkeep]
-            filled += nkeep
-        return result
-
     def _sample_rna_frag_lengths(self, n: int) -> np.ndarray:
         p = self.sim_params
-        return self._sample_frag_lengths(
-            n, p.frag_mean, p.frag_std, p.frag_min, self._frag_max,
+        return truncated_normal_frag_lengths(
+            self._rng, n, p.frag_mean, p.frag_std, p.frag_min, self._frag_max
         )
 
     def _init_gdna_strand_regions(self, overdispersion: float) -> None:
@@ -1118,8 +1098,8 @@ class WholeGenomeSimulator:
 
     def _sample_gdna_frag_lengths(self, n: int) -> np.ndarray:
         g = self.gdna_config
-        return self._sample_frag_lengths(
-            n, g.frag_mean, g.frag_std, g.frag_min, g.frag_max,
+        return truncated_normal_frag_lengths(
+            self._rng, n, g.frag_mean, g.frag_std, g.frag_min, g.frag_max
         )
 
     # -- Error introduction -------------------------------------------------
