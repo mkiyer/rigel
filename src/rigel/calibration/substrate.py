@@ -3,8 +3,8 @@
 The substrate is the only object that knows the 4-channel encoding and the
 payload topology. It reduces the raw payload into the per-region sufficient
 statistics the inference consumes (doc 01 §1, doc 03 §2), exposing **three
-parallel per-region views** — *contained*, *left*, *right* — so the E-step
-(PR 4) runs the identical code three times.
+parallel per-region views** — *contained*, *left*, *right* — so the joint
+deconvolution applies the identical code to all three views (single pass, no EM loop).
 
 Channel encoding (``ch = (spliced?2:0) + (primary?0:1)``)::
 
@@ -14,9 +14,9 @@ Channel encoding (``ch = (spliced?2:0) + (primary?0:1)``)::
 The substrate exposes channels **raw** — it does not pre-orient:
 
 * **Unspliced** counts are genome strand (``pos``/``neg``). They are oriented
-  to transcript sense **downstream** (the E-step, using the region strand +
+  to transcript sense **downstream** (the deconvolution, using the region strand +
   the library mode). Strand-ambiguous (AMBIG) regions have no valid unspliced
-  orientation and are handled by density/sweep (D7).
+  orientation and are handled by the count-clue density imputation (D7).
 * **Spliced** counts are already transcript-relative ``sense``/``antisense``
   (the scanner oriented them at deposit via the splice motif), valid even in
   AMBIG regions.

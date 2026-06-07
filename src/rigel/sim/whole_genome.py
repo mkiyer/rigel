@@ -72,7 +72,8 @@ import shutil
 import sys
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -263,6 +264,14 @@ class GDNASimConfig:
     frag_std: float = 100.0
     frag_min: int = 100
     frag_max: int = 1000
+    #: gDNA strand intra-class correlation in [0, 1) — region-to-region overdispersion of the
+    #: sense/antisense split around ½. 0 ⇒ exact 50/50 (Binomial). See GDNAConfig in reads.py.
+    #: This is the *per-condition* value the simulator reads; the suite sweep axis is below.
+    strand_overdispersion: float = 0.0
+    #: Suite sweep axis over gDNA strand overdispersion (one condition per value). ``None`` ⇒ a
+    #: single condition at ``strand_overdispersion`` (backward-compatible: no name change).
+    strand_overdispersions: list[float] | None = None
+    strand_overdispersion_labels: list[str] | None = None
 
 
 @dataclass
@@ -469,6 +478,10 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     gd.frag_std = float(gd_raw.get("frag_std", 100.0))
     gd.frag_min = int(gd_raw.get("frag_min", 100))
     gd.frag_max = int(gd_raw.get("frag_max", 1000))
+    gd.strand_overdispersion = float(gd_raw.get("strand_overdispersion", 0.0))
+    _ods = gd_raw.get("strand_overdispersions", None)
+    gd.strand_overdispersions = [float(o) for o in _ods] if _ods is not None else None
+    gd.strand_overdispersion_labels = gd_raw.get("strand_overdispersion_labels", None)
 
     # Hybrid capture
     cap_raw = raw.get("capture", {}) or {}
@@ -978,6 +991,14 @@ class WholeGenomeSimulator:
             logger.info("Pre-loading %d chromosomes for gDNA...", len(self._gdna_refs))
             self._genome.preload(self._gdna_refs)
 
+        # gDNA strand overdispersion: per-ref exon-derived regions each with a shared +strand
+        # rate ~ Beta(a, a), so a region's gDNA strand split is Beta-Binomial(½, overdispersion)
+        # — matching the calibrator's seed-region partition. 0 ⇒ uniform 50/50 (no regions built).
+        self._gdna_strand_regions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        gdna_od = float(getattr(self.gdna_config, "strand_overdispersion", 0.0) or 0.0)
+        if gdna_od > 0.0 and self._gdna_refs:
+            self._init_gdna_strand_regions(gdna_od)
+
         # BAM header and reference mapping (built once, reused)
         self._ref_names = list(self.fasta.references)
         self._ref_lengths = [self.fasta.get_reference_length(r) for r in self._ref_names]
@@ -1071,6 +1092,29 @@ class WholeGenomeSimulator:
         return self._sample_frag_lengths(
             n, p.frag_mean, p.frag_std, p.frag_min, self._frag_max,
         )
+
+    def _init_gdna_strand_regions(self, overdispersion: float) -> None:
+        """Build per-gDNA-ref exon-derived regions, each with a shared +strand rate ~ Beta(a, a).
+
+        ``Beta(a, a)`` has intra-class correlation ``1/(2a + 1)``, so ``a = ½(1 − od)/od`` gives a
+        region-to-region strand overdispersion of ``od``. All gDNA fragments in a region share its
+        rate, so the per-region sense/antisense count is Beta-Binomial(½, od) — the distribution
+        the calibrator's gDNA strand model fits.
+        """
+        alpha = 0.5 * (1.0 - overdispersion) / overdispersion
+        exons_by_ref: dict[str, set[int]] = defaultdict(set)
+        for t in self.transcripts:
+            if t.ref is None:
+                continue
+            for e in t.exons:
+                exons_by_ref[t.ref].add(int(e.start))
+                exons_by_ref[t.ref].add(int(e.end))
+        for ref, length in zip(self._gdna_refs, self._gdna_ref_lengths):
+            bounds = {b for b in exons_by_ref.get(ref, set()) if 0 < b < length}
+            boundaries = np.array([0, *sorted(bounds), int(length)], dtype=np.int64)
+            n_regions = max(len(boundaries) - 1, 1)
+            p_plus = self._rng.beta(alpha, alpha, size=n_regions)
+            self._gdna_strand_regions[ref] = (boundaries, p_plus)
 
     def _sample_gdna_frag_lengths(self, n: int) -> np.ndarray:
         g = self.gdna_config
@@ -1499,7 +1543,17 @@ class WholeGenomeSimulator:
         quals = self._get_quals(read_len)
 
         starts = self.capture.sample_starts("gdna", ref, chrom_len, fl, count, rng)
-        chrom_strands = rng.integers(0, 2, size=count)
+        # Strand: uniform 50/50, or — with overdispersion — by the fragment's exon-derived region's
+        # shared Beta(a, a) +strand rate (0 = +/forward, 1 = −/reverse, matching the qname encoding).
+        strand_regions = self._gdna_strand_regions.get(ref)
+        if strand_regions is None:
+            chrom_strands = rng.integers(0, 2, size=count)
+        else:
+            boundaries, p_plus = strand_regions
+            reg_idx = np.clip(
+                np.searchsorted(boundaries, starts, side="right") - 1, 0, len(p_plus) - 1
+            )
+            chrom_strands = (rng.random(count) >= p_plus[reg_idx]).astype(int)
 
         r2_seqs, r1_seqs = _batch_extract_reads(chrom_bytes, starts, fl, read_len)
 
@@ -2006,12 +2060,33 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         label = gdna_label_for_rate(rate, cfg.gdna.rate_labels, i)
         gdna_pairs.append((label, rate))
 
+    # gDNA strand-overdispersion sweep axis (one condition per value). None ⇒ a single value
+    # (= strand_overdispersion), which keeps condition names unchanged when it is 0.
+    _od_values = (
+        cfg.gdna.strand_overdispersions
+        if cfg.gdna.strand_overdispersions is not None
+        else [cfg.gdna.strand_overdispersion]
+    )
+    _od_labels = cfg.gdna.strand_overdispersion_labels
+    gdna_od_pairs: list[tuple[str, float]] = []
+    for i, od in enumerate(_od_values):
+        od = float(od)
+        if not (0.0 <= od < 1.0):
+            raise ValueError(f"gdna strand_overdispersion must be in [0, 1); got {od}")
+        label = (
+            _od_labels[i]
+            if _od_labels is not None and i < len(_od_labels)
+            else ("od00" if od == 0.0 else f"od{od:g}".replace(".", "p"))
+        )
+        gdna_od_pairs.append((label, od))
+
     nrna_pairs = _build_nrna_pairs(cfg, has_file_nrna)
     capture_scenarios, include_capture_in_names = _capture_grid(cfg)
 
     total_conditions = (
         len(nrna_pairs)
         * len(gdna_pairs)
+        * len(gdna_od_pairs)
         * len(cfg.strand_specificities)
         * len(capture_scenarios)
     )
@@ -2049,7 +2124,9 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         write_truth_abundances(cond_transcripts, outdir / molecular_truth_name)
 
         for gdna_label, gdna_rate in gdna_pairs:
-            for strand_spec in cfg.strand_specificities:
+            for (gdna_od_label, gdna_od), strand_spec in product(
+                gdna_od_pairs, cfg.strand_specificities
+            ):
                 for capture_scenario in capture_scenarios:
                     capture_label = (
                         capture_scenario.label if include_capture_in_names else None
@@ -2074,6 +2151,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
 
                     cond_name = condition_dir_name(
                         gdna_label, strand_spec, nrna_label, capture_label,
+                        gdna_strand_overdispersion=gdna_od,
                     )
                     cond_dir = outdir / cond_name
                     truth_abundances_name = f"{cond_name}/truth_abundances.tsv"
@@ -2091,6 +2169,8 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
                         "name": cond_name,
                         "gdna_label": gdna_label,
                         "gdna_rate": gdna_rate,
+                        "gdna_strand_overdispersion": gdna_od,
+                        "gdna_strand_overdispersion_label": gdna_od_label,
                         "strand_specificity": strand_spec,
                         "nrna_label": nrna_label,
                         "nrna_mode": nrna_mode,
@@ -2131,7 +2211,8 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
                         print("  Simulating...", end="", flush=True)
                         t0 = time.monotonic()
                         simulator = WholeGenomeSimulator(
-                            genome_path, cond_transcripts, sim, cfg.gdna,
+                            genome_path, cond_transcripts, sim,
+                            replace(cfg.gdna, strand_overdispersion=gdna_od),
                             strand_specificity=strand_spec,
                             capture_config=capture_scenario.config,
                         )
@@ -2159,6 +2240,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
                         fastq_path=cond_dir / "sim_R1.fq.gz",
                         condition=cond_name,
                         molecular_truth=molecular_truth_name,
+                        gdna_strand_overdispersion=gdna_od,
                     )
                     origin_counts = truth_summary["origin_counts"]
                     cond_entry["n_mrna_observed"] = int(origin_counts.get("mrna", 0))

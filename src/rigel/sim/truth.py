@@ -369,6 +369,7 @@ def write_post_capture_truth(
     fastq_path: Path | None = None,
     condition: str | None = None,
     molecular_truth: str | None = None,
+    gdna_strand_overdispersion: float | None = None,
 ) -> dict[str, object]:
     """Write condition-local empirical truth tables after simulation.
 
@@ -388,6 +389,7 @@ def write_post_capture_truth(
     json_summary = {
         "condition": condition,
         "truth_kind": "post_capture_empirical",
+        "gdna_strand_overdispersion_true": gdna_strand_overdispersion,
         "pre_capture_abundances": molecular_truth,
         "post_capture_abundances": str(abundance_path),
         "post_capture_fragment_lengths": str(fl_path),

@@ -127,18 +127,25 @@ class GDNAConfig:
         Minimum gDNA fragment length.
     frag_max : int
         Maximum gDNA fragment length.
+    gdna_strand_overdispersion : float or None
+        **Preferred knob** for gDNA strand overdispersion — the intra-class correlation of
+        the per-region sense/antisense split in ``[0, 1)``, in the *same units* the
+        calibrator fits (``gdna_strand_overdispersion``). ``0`` ⇒ exact Binomial 50/50;
+        larger ⇒ more region-to-region strand skew. Converted internally to the
+        ``strand_kappa`` Beta concentration via ``strand_kappa = (1 − od)/od`` (since the
+        per-region rate is ``Beta(kappa/2, kappa/2)`` with intra-class correlation
+        ``1/(kappa + 1)``). When set, it overrides ``strand_kappa``.
     strand_kappa : float or None
-        Beta concentration parameter controlling strand ratio
-        overdispersion across genomic regions.  The genome is
-        partitioned into non-overlapping regions derived from
-        transcript exon boundaries (the same partition used by the
-        calibration algorithm).  Each region draws an independent
-        +strand probability from ``Beta(kappa/2, kappa/2)``; all
-        gDNA fragments within a region share that bias.
+        Internal Beta concentration controlling strand-ratio overdispersion across genomic
+        regions. The genome is partitioned into non-overlapping regions derived from
+        transcript exon boundaries (the same partition the calibrator uses); each region
+        draws an independent +strand probability from ``Beta(kappa/2, kappa/2)`` and all
+        gDNA fragments within a region share it. Prefer ``gdna_strand_overdispersion``
+        (clear units); ``strand_kappa`` is the legacy/low-level form.
 
         * ``None`` or ``<= 0`` → no overdispersion (exact 50/50).
         * Large values (e.g. 1000) → nearly symmetric.
-        * Small values (e.g. 5) → high region-to-region variation.
+        * Small values (e.g. 4) → high region-to-region variation.
     """
 
     abundance: float = 10.0
@@ -147,6 +154,20 @@ class GDNAConfig:
     frag_min: int = 100
     frag_max: int = 1000
     strand_kappa: float | None = None
+    gdna_strand_overdispersion: float | None = None
+
+    def __post_init__(self) -> None:
+        # The clear-units knob (intra-class correlation) overrides the Beta concentration.
+        if self.gdna_strand_overdispersion is not None:
+            od = float(self.gdna_strand_overdispersion)
+            if not (0.0 <= od < 1.0):
+                raise ValueError(
+                    "GDNAConfig.gdna_strand_overdispersion must be in [0, 1); "
+                    f"got {self.gdna_strand_overdispersion!r}."
+                )
+            # intra-class correlation od = 1/(kappa + 1)  ⇒  kappa = (1 - od)/od;
+            # od == 0 ⇒ Binomial (no region partition).
+            self.strand_kappa = None if od == 0.0 else (1.0 - od) / od
 
 
 class ReadSimulator:

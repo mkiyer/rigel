@@ -11,16 +11,23 @@ carried by the live ``StrandModel``). The sense-rate posterior is ``Beta(n_same 
   a real RNA-seq library always carries spliced reads.
 * ``rna_strand_overdispersion`` = the posterior-predictive **overdispersion** ``1 / (n_obs + 3)``,
   a pure function of the spliced-read count, i.e. a **diagnostic of the strand model's
-  statistical power**. It is deliberately **NOT fed into the decode**: the joint deconvolution
-  uses the Binomial strand limit (``strand_overdispersion = 0``), with thin-count over-confidence
-  already guarded by the count prior and the FP-averse ``gdna_strand_llr_bias`` tilt. Wiring the
-  Beta-Binomial widening into the decode was measured to be negligible (rel <= 1e-3) and — because
-  it softens the strand clue — to slightly *worsen* the silent-gene false-positive rate, so it is
-  kept out by design and retained only for QC.
+  statistical power**. It is **QC-only and NOT fed into the decode** — it is a *thin-count
+  statistical-power* quantity, distinct from the biological between-region RNA strand
+  overdispersion the decode actually uses.
+
+**Do not confuse this QC quantity with the decode's RNA strand overdispersion.** The decode's RNA
+Beta-Binomial overdispersion is a separate, *biological*, between-boundary quantity fitted from
+boundary-side spliced counts in :mod:`gdna_strand` (``fit_rna_strand_from_substrate``) and applied
+symmetrically with the gDNA overdispersion in :mod:`strand_likelihood` (see docs/em_strand/05). The
+PR-9-era claim that "the decode uses the Binomial strand limit" is **superseded**: that earlier
+measurement (negligible / slightly worse silent-gene FP) concerned wiring *this 1/(n_obs+3)
+posterior-predictive widening* into the decode while gDNA was also Binomial — a different quantity
+in a different regime. ``rna_sense_frac`` (the mean) is still the only field of this class the
+decode reads.
 
 (PR 9 replaced the old method-of-moments fit / overdispersion floor / minimum-observation
-fallback, and by dropping the per-region substrate pool removed the boundary double-count that
-biased the old MoM.)
+fallback for *this* quantity, and by dropping the per-region substrate pool removed the boundary
+double-count that biased the old MoM.)
 """
 
 from __future__ import annotations

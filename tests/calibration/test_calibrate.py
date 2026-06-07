@@ -56,6 +56,18 @@ def test_masses_bounded():
         assert np.all(g <= tot + 1e-9)
 
 
+def test_gdna_strand_overdispersion_populated():
+    # The fitted gDNA strand overdispersion is surfaced on the result and in range [0, 1).
+    result = _run()
+    assert 0.0 <= result.gdna_strand_overdispersion < 1.0
+
+
+def test_rna_strand_overdispersion_populated():
+    # The fitted RNA strand overdispersion is surfaced and clamped to the Beta(2,2) ceiling (0.2).
+    result = _run()
+    assert 0.0 <= result.rna_strand_overdispersion <= 0.2
+
+
 def test_exposure_and_density_sane():
     result = _run()
     assert np.isfinite(result.gdna_density_global) and result.gdna_density_global >= 0.0

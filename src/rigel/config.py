@@ -264,6 +264,32 @@ class CalibrationConfig:
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
 
+    #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
+    #: ``Beta(a, a)``; this is that symmetric shape ``a`` (= α = β). The fitted overdispersion is
+    #: shrunk toward ``od₀ = 1/(2·a + 1)`` for sparse/low-signal libraries (the conservative,
+    #: FP-safe "floor"). ``a = 3`` ⇒ ``od₀ ≈ 0.143`` (very overdispersed — good for sparse data);
+    #: ``a = 2`` ⇒ ``od = 0.2`` is the **most overdispersion allowed** (the fit is capped there),
+    #: so values below 2 are rejected; larger ``a`` ⇒ less overdispersion.
+    gdna_strand_prior_alpha_beta: float = 3.0
+
+    #: Strength of the overdispersion prior, in effective seed-node units (advanced). The prior is
+    #: worth this many seed nodes; libraries with far more informative seed nodes follow the fit,
+    #: sparse ones shrink toward the prior. Replaces the old hard min-seed-node / significance
+    #: gates with continuous shrinkage.
+    gdna_strand_prior_weight: float = 30.0
+
+    #: **RNA strand-overdispersion prior** (advanced). The exact twin of
+    #: ``gdna_strand_prior_alpha_beta`` for the *RNA* strand Beta-Binomial (fitted from boundary-side
+    #: spliced counts). Kept at the **same default as gDNA** so that under sparse data both
+    #: components collapse to the same distribution — that symmetry is what keeps an unstranded node
+    #: uninformative (a gDNA-only overdispersion biases the deconvolution toward RNA). Same ``a ≥ 2``
+    #: rule (``Beta(2,2)``, od=0.2, is the most overdispersion allowed).
+    rna_strand_prior_alpha_beta: float = 3.0
+
+    #: Strength of the RNA overdispersion prior, in effective seed-node units (advanced). Twin of
+    #: ``gdna_strand_prior_weight``; same default.
+    rna_strand_prior_weight: float = 30.0
+
     def __post_init__(self) -> None:
         if not math.isfinite(float(self.gdna_strand_llr_bias)):
             raise ValueError(
@@ -272,6 +298,28 @@ class CalibrationConfig:
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")
+        if self.gdna_strand_prior_alpha_beta < 2.0:
+            raise ValueError(
+                "CalibrationConfig.gdna_strand_prior_alpha_beta must be >= 2.0 "
+                "(Beta(2,2) is the most overdispersion allowed, od=0.2); "
+                f"got {self.gdna_strand_prior_alpha_beta}."
+            )
+        if self.gdna_strand_prior_weight < 0.0:
+            raise ValueError(
+                "CalibrationConfig.gdna_strand_prior_weight must be >= 0; "
+                f"got {self.gdna_strand_prior_weight}."
+            )
+        if self.rna_strand_prior_alpha_beta < 2.0:
+            raise ValueError(
+                "CalibrationConfig.rna_strand_prior_alpha_beta must be >= 2.0 "
+                "(Beta(2,2) is the most overdispersion allowed, od=0.2); "
+                f"got {self.rna_strand_prior_alpha_beta}."
+            )
+        if self.rna_strand_prior_weight < 0.0:
+            raise ValueError(
+                "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
+                f"got {self.rna_strand_prior_weight}."
+            )
 
 
 @dataclass(frozen=True)

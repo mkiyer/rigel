@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models mRNA, nascent RNA (nRNA), and genomic DNA contamination (gDNA). It uses a single-pass C++ BAM scanner, a per-region **calibration** stage that deconvolves the library into gDNA vs RNA, and a locus-level EM solver. Python package name is `rigel-rnaseq` on PyPI; the import and CLI are `rigel`.
 
-> **Active rebuild (calibration-v6).** The calibration stage is being rebuilt as a series of PRs. The theory lives in `docs/caljointmodel/` (`01_generative_model.md`, `03_inference.md`, `04_interface_contract.md`); the PR plan + per-PR design docs in `docs/acc_caljointmodel/`; the fractional-accumulator spec in `docs/accumulator/`. The post-calibration consumer (`quant_from_buffer` + `calibration.priors.assemble_priors`) is wired in PR 6 — until then `run_pipeline` stops after `calibrate()`.
+> **Calibration (acyclic, calibration-v6).** The calibration stage is an **acyclic single-pass** count×strand deconvolution (no iterative EM/M-step — the old `density.py`/`estep.py`/`exposure.py`/`sweep.py`/`mstep.py` modules were removed in the acyclic redesign). Theory: `docs/caljointmodel/` (`01_generative_model.md`, `03_inference.md`, `04_interface_contract.md`); fractional-accumulator spec in `docs/accumulator/`; the gDNA strand-overdispersion line of work in `docs/em_strand/`. The full pipeline (scan → calibrate → **quant**) runs end-to-end: `quant_from_buffer` + `calibration.priors.assemble_priors` are wired in `run_pipeline`.
 
 ## Build & Development
 
@@ -84,20 +84,19 @@ ruff format src/ tests/
 
 **Calibration package (`calibration/`):**
 
-- `calibrate.py` — the calibration-v6 outer-loop orchestrator
+- `calibrate.py` — the **acyclic single-pass** calibrator orchestrator (RNA strand balance → count-clue density → gDNA strand overdispersion → joint count×strand deconvolution → derive)
 - `substrate.py` — `CalibrationSubstrate`: payload → per-region 3-view (contained / left / right) sufficient statistics
 - `region_arrays.py` / `regions.py` — region geometry (`RegionArrays`, build partition from `index.region_df`)
-- `signature.py` — region 4-bit strand/type signature + `ts_class` (POS/NEG/NONE/AMBIG)
-- `density.py` — `ρ_0` gDNA density seed
-- `estep.py` — per-region E-step (gDNA-vs-RNA soft allocation via NB count + Beta-Binomial strand log-Bayes-factors)
-- `exposure.py` — per-region exposure posterior (Gamma); D1 boundary side-attribution
-- `sweep.py` — AMBIG-region exposure imputation (boundary↔region alternating sweep, D7)
-- `mstep.py` — M-step hyperparameter fits (`ρ_0`, `ε_s` closed-form; `φ`, `ρ_d_bb` bounded 1-D)
-- `strand_balance.py` / `strand_summary.py` — `κ_rna` / `ρ_r_bb` from the spliced channel + `StrandModel`
+- `signature.py` — region 4-bit strand/type signature + `strand_class` (POS/NEG/NONE/AMBIG)
+- `density_model.py` — count clue: per-region/boundary gDNA **density** via the region↔boundary sweep + count-observability masks (`region_count_observable` / `boundary_count_observable`); strand-cleaned by the strand *mean*
+- `strand_balance.py` / `strand_summary.py` — **RNA** strand *mean*: `rna_sense_frac` (used by the decode). `StrandBalance.rna_strand_overdispersion` here is a QC-only thin-count power diagnostic (`1/(n_obs+3)`), distinct from the decode's RNA overdispersion (see `gdna_strand.py`)
+- `gdna_strand.py` — **both** strand Beta-Binomial overdispersions (shared component-agnostic MoM core): `gdna_strand_overdispersion` (mean ½, fit from count-observable seed regions + boundary sides) and `rna_strand_overdispersion` (mean κ, fit from boundary-side spliced counts). Both applied symmetrically in `strand_likelihood` with the same default prior, so unstranded data is uninformative (see `docs/em_strand/05`)
+- `joint_deconv.py` — per-node joint count×strand deconvolution into gDNA/RNA (`strand_loglik` two-component variance); also exposes `boundary_side_seeds` for the gDNA strand fit
+- `derive.py` — `gdna_density_global` + per-node exposure (+ exposure-weighted gDNA length) from the deconvolved masses
 - `effective_length.py` — FL-marginal effective lengths (region / boundary)
 - `fl.py` — gDNA / RNA / global fragment-length pmfs (empirical-Bayes smoothed)
 - `result.py` — `CalibrationResult` schema + intrinsic invariants
-- `priors.py` — `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior (PR 6)
+- `priors.py` — `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior
 - `errors.py` — calibration exceptions
 
 ### C++ Extensions (`src/rigel/native/`)

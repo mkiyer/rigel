@@ -65,7 +65,8 @@ def _joint_per_node(
     strand_observable,
     *,
     rna_sense_frac,
-    strand_overdispersion,
+    gdna_strand_overdispersion,
+    rna_strand_overdispersion,
     gdna_strand_llr_bias,
     n_grid,
 ) -> JointDeconv:
@@ -101,7 +102,8 @@ def _joint_per_node(
                 sense[i],
                 antisense[i],
                 rna_sense_frac,
-                strand_overdispersion=strand_overdispersion,
+                gdna_strand_overdispersion=gdna_strand_overdispersion,
+                rna_strand_overdispersion=rna_strand_overdispersion,
             )
         w = np.exp(log_post - log_post.max())
         w /= w.sum()
@@ -134,7 +136,8 @@ def deconv_regions(
     region_eff_len,
     *,
     rna_sense_frac,
-    strand_overdispersion=0.0,
+    gdna_strand_overdispersion=0.0,
+    rna_strand_overdispersion=0.0,
     gdna_strand_llr_bias=0.0,
     n_grid=200,
 ) -> JointDeconv:
@@ -156,9 +159,96 @@ def deconv_regions(
         np.asarray(region_eff_len, dtype=np.float64),
         strand_observable,
         rna_sense_frac=rna_sense_frac,
-        strand_overdispersion=strand_overdispersion,
+        gdna_strand_overdispersion=gdna_strand_overdispersion,
+        rna_strand_overdispersion=rna_strand_overdispersion,
         gdna_strand_llr_bias=gdna_strand_llr_bias,
         n_grid=n_grid,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _SideQuantities:
+    """Per-region boundary-side quantities shared by the deconvolution and the strand-fit seeds."""
+
+    sense: np.ndarray
+    antisense: np.ndarray
+    n_side: np.ndarray  # pos + neg (count evidence)
+    mass: np.ndarray
+    mass_spliced: np.ndarray
+    density: np.ndarray  # count-prior density: clean own crossing density, else swept region
+    gdna_weight: np.ndarray  # strand-cleaned own gDNA fraction (mean-based; overdispersion-free)
+    strand_observable: np.ndarray
+    count_observable: np.ndarray
+
+
+def _left_right_neighbors(ts, ref_id, boundary_count_observable):
+    """Per-region neighbour strand class + same-ref + boundary count-observability for both sides.
+
+    Region ``r``'s LEFT side is the right side of boundary ``(r−1, r)`` (neighbour ``r−1``); its
+    RIGHT side is the left side of boundary ``(r, r+1)`` (neighbour ``r+1``). ``boundary_count_observable[r]``
+    describes boundary ``(r, r+1)``. Returns
+    ``(left_same, ts_prev, left_observable, right_same, ts_next, right_observable)``.
+    """
+    r = ts.shape[0]
+    left_same = np.zeros(r, dtype=bool)
+    ts_prev = np.zeros(r, dtype=ts.dtype)
+    left_observable = np.zeros(r, dtype=bool)
+    right_same = np.zeros(r, dtype=bool)
+    ts_next = np.zeros(r, dtype=ts.dtype)
+    if r > 1:
+        left_same[1:] = ref_id[1:] == ref_id[:-1]
+        ts_prev[1:] = ts[:-1]
+        left_observable[1:] = boundary_count_observable[:-1]
+        right_same[:-1] = ref_id[:-1] == ref_id[1:]
+        ts_next[:-1] = ts[1:]
+    return left_same, ts_prev, left_observable, right_same, ts_next, boundary_count_observable
+
+
+def _compute_side(
+    view, same, ts_self, ts_other, side_count_observable, eff, region_density, rna_sense_frac
+) -> _SideQuantities:
+    """Per-side sense split, strand-cleaned gDNA weight, and count-prior density.
+
+    A side is **strand-observable** iff its boundary's two regions share a single transcript
+    strand (so 'sense' is defined). Its own crossing mass is gDNA + nascent read-through; the
+    closed-form strand-cleaned gDNA fraction ``(sense_frac − rna_sense_frac)/(½ − rna_sense_frac)``
+    (mean-based, **overdispersion-free**) serves as both the count-prior density cleaner and the
+    strand-fit seed weight. A side is **count-observable** iff its boundary has no shared exon
+    (exon–intron / exon–intergenic seam) — those borrow their own clean crossing density; others
+    borrow the swept region density.
+    """
+    mass = view.mass_unspliced
+    pos = view.n_unspliced_pos.astype(np.float64)
+    neg = view.n_unspliced_neg.astype(np.float64)
+    both_pos = same & (ts_self == TS_POS) & (ts_other == TS_POS)
+    both_neg = same & (ts_self == TS_NEG) & (ts_other == TS_NEG)
+    strand_observable = both_pos | both_neg
+    sense = np.where(both_neg, neg, pos)
+    n_side = pos + neg
+    antisense = n_side - sense
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sense_frac = np.where(n_side > 0.0, sense / np.maximum(n_side, 1e-9), 0.5)
+        if abs(0.5 - rna_sense_frac) > 1e-6:
+            clean_gdna_frac = np.clip(
+                (sense_frac - rna_sense_frac) / (0.5 - rna_sense_frac), 0.0, 1.0
+            )
+        else:
+            clean_gdna_frac = np.ones_like(mass)
+        clean_gdna_frac = np.where(strand_observable, clean_gdna_frac, 1.0)
+        own = np.where(
+            (mass > 0.0) & (eff > 0.0), clean_gdna_frac * mass / np.maximum(eff, 1e-12), 0.0
+        )
+    density = np.where(side_count_observable, own, region_density)
+    return _SideQuantities(
+        sense=sense,
+        antisense=antisense,
+        n_side=n_side,
+        mass=mass,
+        mass_spliced=view.mass_spliced,
+        density=density,
+        gdna_weight=clean_gdna_frac,
+        strand_observable=strand_observable,
+        count_observable=np.asarray(side_count_observable, dtype=bool),
     )
 
 
@@ -169,7 +259,8 @@ def deconv_sides(
     boundary_side_eff_len,
     *,
     rna_sense_frac,
-    strand_overdispersion=0.0,
+    gdna_strand_overdispersion=0.0,
+    rna_strand_overdispersion=0.0,
     gdna_strand_llr_bias=0.0,
     n_grid=200,
 ) -> tuple[JointDeconv, JointDeconv]:
@@ -186,77 +277,67 @@ def deconv_sides(
     """
     ts = np.asarray(region_arrays.strand_class)
     ref_id = np.asarray(region_arrays.ref_id)
-    r = ts.shape[0]
-    boundary_count_observable = (
-        node_density.boundary_count_observable
-    )  # boundary (b, b+1) observable, indexed by left region
     eff = np.asarray(boundary_side_eff_len, dtype=np.float64)
     region_density = node_density.density
+    l_same, ts_prev, l_obs, r_same, ts_next, r_obs = _left_right_neighbors(
+        ts, ref_id, node_density.boundary_count_observable
+    )
 
-    def _side(view, same, ts_other, side_boundary_count_observable):
-        mass = view.mass_unspliced
-        pos = view.n_unspliced_pos.astype(np.float64)
-        neg = view.n_unspliced_neg.astype(np.float64)
-        both_pos = same & (ts == TS_POS) & (ts_other == TS_POS)
-        both_neg = same & (ts == TS_NEG) & (ts_other == TS_NEG)
-        strand_observable = both_pos | both_neg
-        sense = np.where(both_neg, neg, pos)
-        antisense = (pos + neg) - sense
-        with np.errstate(divide="ignore", invalid="ignore"):
-            # Strand-clean the observable side's own crossing density (the boundary analogue of
-            # the global-density cleaning): an exon/intron seam is count-observable (no SHARED
-            # exon), but its crossing mass is gDNA + nascent read-through. Multiply by the
-            # closed-form gDNA fraction (sense_frac - rna_sense_frac)/(1/2 - rna_sense_frac) where
-            # the side is strand-observable, so the count clue sees clean gDNA, not nascent.
-            # Unstranded or non-oriented sides keep raw mass.
-            n_side = pos + neg
-            sense_frac = np.where(n_side > 0.0, sense / np.maximum(n_side, 1e-9), 0.5)
-            if abs(0.5 - rna_sense_frac) > 1e-6:
-                clean_gdna_frac = np.clip(
-                    (sense_frac - rna_sense_frac) / (0.5 - rna_sense_frac), 0.0, 1.0
-                )
-            else:
-                clean_gdna_frac = np.ones_like(mass)
-            clean_gdna_frac = np.where(strand_observable, clean_gdna_frac, 1.0)
-            own = np.where(
-                (mass > 0.0) & (eff > 0.0), clean_gdna_frac * mass / np.maximum(eff, 1e-12), 0.0
-            )
-        density = np.where(
-            side_boundary_count_observable, own, region_density
-        )  # observable → clean own; else swept
+    def _deconv(view, same, ts_other, side_obs):
+        sq = _compute_side(view, same, ts, ts_other, side_obs, eff, region_density, rna_sense_frac)
         return _joint_per_node(
-            mass,
-            view.mass_spliced,
-            sense,
-            antisense,
-            density,
-            pos + neg,
+            sq.mass,
+            sq.mass_spliced,
+            sq.sense,
+            sq.antisense,
+            sq.density,
+            sq.n_side,
             eff,
-            strand_observable,
+            sq.strand_observable,
             rna_sense_frac=rna_sense_frac,
-            strand_overdispersion=strand_overdispersion,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
             gdna_strand_llr_bias=gdna_strand_llr_bias,
             n_grid=n_grid,
         )
 
-    # LEFT view of r = right side of boundary (r-1, r); neighbour is r-1.
-    left_same = np.zeros(r, dtype=bool)
-    ts_prev = np.zeros(r, dtype=ts.dtype)
-    left_boundary_count_observable = np.zeros(r, dtype=bool)
-    if r > 1:
-        left_same[1:] = ref_id[1:] == ref_id[:-1]
-        ts_prev[1:] = ts[:-1]
-        left_boundary_count_observable[1:] = boundary_count_observable[:-1]
-    left = _side(substrate.left, left_same, ts_prev, left_boundary_count_observable)
-
-    # RIGHT view of r = left side of boundary (r, r+1); neighbour is r+1.
-    right_same = np.zeros(r, dtype=bool)
-    ts_next = np.zeros(r, dtype=ts.dtype)
-    if r > 1:
-        right_same[:-1] = ref_id[:-1] == ref_id[1:]
-        ts_next[:-1] = ts[1:]
-    right = _side(substrate.right, right_same, ts_next, boundary_count_observable)
+    left = _deconv(substrate.left, l_same, ts_prev, l_obs)
+    right = _deconv(substrate.right, r_same, ts_next, r_obs)
     return left, right
 
 
-__all__ = ["JointDeconv", "deconv_regions", "deconv_sides"]
+def boundary_side_seeds(
+    substrate, region_arrays, node_density, boundary_side_eff_len, *, rna_sense_frac
+):
+    """``(sense, total, gdna_weight)`` seed arrays from count- & strand-observable boundary sides.
+
+    The exon–intron / exon–intergenic seam seeds for the gDNA strand-overdispersion fit
+    (:mod:`gdna_strand`), complementing the contained-region seeds (needed under hybrid capture,
+    which depletes off-target intergenic/intronic gDNA). The weight is the strand-cleaned own
+    gDNA fraction — the same overdispersion-free quantity the contained-region seeds use.
+    """
+    ts = np.asarray(region_arrays.strand_class)
+    ref_id = np.asarray(region_arrays.ref_id)
+    eff = np.asarray(boundary_side_eff_len, dtype=np.float64)
+    region_density = node_density.density
+    l_same, ts_prev, l_obs, r_same, ts_next, r_obs = _left_right_neighbors(
+        ts, ref_id, node_density.boundary_count_observable
+    )
+    sides = (
+        _compute_side(
+            substrate.left, l_same, ts, ts_prev, l_obs, eff, region_density, rna_sense_frac
+        ),
+        _compute_side(
+            substrate.right, r_same, ts, ts_next, r_obs, eff, region_density, rna_sense_frac
+        ),
+    )
+    senses, totals, weights = [], [], []
+    for sq in sides:
+        seed = sq.count_observable & sq.strand_observable & (sq.n_side > 0.0)
+        senses.append(sq.sense[seed])
+        totals.append(sq.n_side[seed])
+        weights.append(sq.gdna_weight[seed])
+    return np.concatenate(senses), np.concatenate(totals), np.concatenate(weights)
+
+
+__all__ = ["JointDeconv", "deconv_regions", "deconv_sides", "boundary_side_seeds"]

@@ -85,7 +85,7 @@ def derive(
     left_exposure = _exposure(left_deconv.gdna_mass, left_eff)
     right_exposure = _exposure(right_deconv.gdna_mass, right_eff)
     # Option A: the gDNA component's effective length is the GEOMETRIC genomic span of
-    # the region's nodes (exposure-free). Exposure exposure lives only in the deconvolved gDNA mass,
+    # the region's nodes (exposure-free). Exposure lives only in the deconvolved gDNA mass,
     # never the length — so the eff-len is knowable even where calibration is blind
     # (multimap / silent loci, exposure=0) and can never collapse to the floor. A non-existent
     # boundary side has left_eff/right_eff = 0 and drops out. See

@@ -14,7 +14,10 @@ import pytest
 from rigel.calibration.joint_deconv import _joint_per_node
 
 
-def _gdna_frac(llr, sense, antisense, *, overdispersion=0.0, rna_sense_frac=0.99, mass=100.0):
+def _gdna_frac(
+    llr, sense, antisense, *, overdispersion=0.0, rna_overdispersion=0.0,
+    rna_sense_frac=0.99, mass=100.0,
+):
     """gDNA fraction of one strand-observable node, count prior flat (count_evidence=0) so the
     strand clue + the LLR tilt drive the call. Higher λ ⇒ more FP-averse (more gDNA)."""
     r = _joint_per_node(
@@ -27,7 +30,8 @@ def _gdna_frac(llr, sense, antisense, *, overdispersion=0.0, rna_sense_frac=0.99
         eff_len=np.array([1.0]),
         strand_observable=np.array([True]),
         rna_sense_frac=rna_sense_frac,
-        strand_overdispersion=overdispersion,
+        gdna_strand_overdispersion=overdispersion,
+        rna_strand_overdispersion=rna_overdispersion,
         gdna_strand_llr_bias=llr,
         n_grid=400,
     )

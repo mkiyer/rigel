@@ -281,8 +281,21 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Fragment length: full histograms + summary statistics per category
     fl_dict = flm.to_dict()
 
-    # Calibration section — Phase A burndown: no v5 summary dict.
-    cal_dict = None
+    # Calibration section — minimal library-scalar observability (the v5 per-region dict stays
+    # burned down). Surfacing gdna_strand_overdispersion here is required so it is never again
+    # silently 0 (see docs/em_strand/03).
+    cal = getattr(result, "calibration", None)
+    cal_dict = (
+        None
+        if cal is None
+        else {
+            "gdna_density_global": round(float(cal.gdna_density_global), 8),
+            "rna_sense_frac": round(float(cal.rna_sense_frac), 6),
+            "gdna_strand_overdispersion": round(float(cal.gdna_strand_overdispersion), 6),
+            "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),
+            "n_regions": int(cal.n_regions),
+        }
+    )
     prior_policy = None
 
     # Command section — record CLI arguments
@@ -356,9 +369,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "em_exposure": {
             "transcript_factor": _df_series_summary(quant_df, "em_exposure_factor"),
             "gdna_factor": _locus_series_summary("gdna_exposure_factor"),
-            "gdna_eff_len_adjustment_ratio": _locus_series_summary(
-                "gdna_eff_len_adjustment_ratio"
-            ),
+            "gdna_eff_len_adjustment_ratio": _locus_series_summary("gdna_eff_len_adjustment_ratio"),
         },
         "fragment_length": fl_dict,
         "quantification": {

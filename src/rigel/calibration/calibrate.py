@@ -35,6 +35,11 @@ from .effective_length import (
     boundary_side_eff_length,
     region_eff_length,
 )
+from .gdna_strand import (
+    fit_gdna_strand_from_substrate,
+    fit_rna_strand_from_substrate,
+    overdispersion_for_beta,
+)
 from .joint_deconv import deconv_regions, deconv_sides
 from .result import CalibrationResult
 from .signature import TS_NEG, TS_NONE
@@ -112,6 +117,36 @@ def calibrate(
         substrate, region_arrays, region_eff_len, fl_mean, gdna_frac=gdna_frac
     )
 
+    # gDNA strand Beta-Binomial overdispersion: fitted from the count-observable seed regions
+    # (intergenic + intronic), using the count-clue gDNA weight (overdispersion-free, since the
+    # density is cleaned by the strand MEAN ½, not the dispersion) to break the circularity.
+    # gDNA is unstranded (mean ½) but overdispersed in real libraries; this is what keeps a
+    # noise-skewed pure-gDNA node reading as gDNA rather than mis-called RNA. The RNA strand is
+    # given a symmetric overdispersion just below (no longer Binomial). See docs/em_strand/03+05.
+    gdna_strand = fit_gdna_strand_from_substrate(
+        substrate,
+        region_arrays,
+        node_density,
+        boundary_eff_len,
+        rna_sense_frac=rna_sense_frac,
+        prior_overdispersion=overdispersion_for_beta(config.gdna_strand_prior_alpha_beta),
+        prior_weight=config.gdna_strand_prior_weight,
+    )
+    gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
+
+    # RNA strand Beta-Binomial overdispersion: fitted from boundary-side SPLICED counts (spliced ⇒
+    # pure RNA, so node mean = κ and the whole node is RNA). Symmetric with the gDNA fit and shrunk
+    # toward the *same* default prior, so under sparse data both components collapse to one
+    # distribution and an unstranded node (κ = ½) is uninformative — the symmetry an earlier
+    # gDNA-only overdispersion broke. See docs/em_strand/05 + gdna_strand.py.
+    rna_strand = fit_rna_strand_from_substrate(
+        substrate,
+        rna_sense_frac=rna_sense_frac,
+        prior_overdispersion=overdispersion_for_beta(config.rna_strand_prior_alpha_beta),
+        prior_weight=config.rna_strand_prior_weight,
+    )
+    rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
+
     # Joint per-node deconvolution: count prior × Beta-Binomial strand likelihood.
     regions = deconv_regions(
         substrate,
@@ -119,6 +154,8 @@ def calibrate(
         node_density,
         region_eff_len,
         rna_sense_frac=rna_sense_frac,
+        gdna_strand_overdispersion=gdna_strand_overdispersion,
+        rna_strand_overdispersion=rna_strand_overdispersion,
         gdna_strand_llr_bias=config.gdna_strand_llr_bias,
         n_grid=config.n_grid,
     )
@@ -128,6 +165,8 @@ def calibrate(
         node_density,
         boundary_eff_len,
         rna_sense_frac=rna_sense_frac,
+        gdna_strand_overdispersion=gdna_strand_overdispersion,
+        rna_strand_overdispersion=rna_strand_overdispersion,
         gdna_strand_llr_bias=config.gdna_strand_llr_bias,
         n_grid=config.n_grid,
     )
@@ -149,13 +188,38 @@ def calibrate(
         gdna_boundary_len=boundary_eff_len,
         gdna_density_global=derived.gdna_density_global,
         rna_sense_frac=rna_sense_frac,
+        gdna_strand_overdispersion=gdna_strand_overdispersion,
+        rna_strand_overdispersion=rna_strand_overdispersion,
         n_regions=region_arrays.n_regions,
         config=config,
     )
+    # Diagnostic: the boundary-spliced sense fraction should agree with the StrandModel κ (the
+    # decode mean). A large gap flags a strand-model / accumulator mismatch (we do NOT refit the
+    # mean from boundary spliced — κ stays the StrandModel posterior; this is QC only).
+    spl_sense = float(
+        np.sum(substrate.left.n_spliced_sense) + np.sum(substrate.right.n_spliced_sense)
+    )
+    spl_total = spl_sense + float(
+        np.sum(substrate.left.n_spliced_antisense) + np.sum(substrate.right.n_spliced_antisense)
+    )
+    boundary_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     logger.debug(
-        "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f",
+        "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
+        "gdna_strand_overdispersion=%.4g (%d seed nodes, %d frags%s) "
+        "rna_strand_overdispersion=%.4g (%d seed sides, %d frags%s) "
+        "[boundary-spliced sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.gdna_density_global,
+        rna_sense_frac,
+        gdna_strand_overdispersion,
+        gdna_strand.n_seed_nodes,
+        gdna_strand.n_seed_fragments,
+        ", FALLBACK" if gdna_strand.fallback_used else "",
+        rna_strand_overdispersion,
+        rna_strand.n_seed_nodes,
+        rna_strand.n_seed_fragments,
+        ", FALLBACK" if rna_strand.fallback_used else "",
+        boundary_sense_frac,
         rna_sense_frac,
     )
     return result

@@ -18,7 +18,8 @@ import hashlib
 import logging
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -178,6 +179,8 @@ def _load_suite_config(path: Path) -> dict[str, object]:
     put("gdna", "frag_std", "gdna_frag_std")
     put("gdna", "frag_min", "gdna_frag_min")
     put("gdna", "frag_max", "gdna_frag_max")
+    put("gdna", "strand_overdispersions", "gdna_strand_overdispersions")
+    put("gdna", "strand_overdispersion_labels", "gdna_strand_overdispersion_labels")
 
     put(None, "strand_specificities")
     put("nrna", "ratios", "nrna_ratios")
@@ -763,6 +766,10 @@ def main():
     parser.add_argument("--gdna-frag-std", type=float, default=100.0)
     parser.add_argument("--gdna-frag-min", type=int, default=100)
     parser.add_argument("--gdna-frag-max", type=int, default=1000)
+    parser.add_argument("--gdna-strand-overdispersions", type=str, default=None,
+                        help="Comma-separated gDNA strand overdispersion sweep values in [0, 1).")
+    parser.add_argument("--gdna-strand-overdispersion-labels", type=str, default=None,
+                        help="Comma-separated labels for --gdna-strand-overdispersions.")
     parser.add_argument("--strand-specificities", type=str, default=None)
     parser.add_argument(
         "--capture-fraction", type=float, default=0.0,
@@ -875,6 +882,30 @@ def main():
     )
     if len(gdna_labels) != len(gdna_rates):
         raise ValueError("gDNA labels must have the same length as gDNA rates")
+
+    # gDNA strand-overdispersion sweep axis (one condition per value). Default: a single value
+    # of 0 (no overdispersion) — keeps condition names unchanged for suites that do not sweep it.
+    gdna_ods = (
+        _as_float_list(args.gdna_strand_overdispersions)
+        if args.gdna_strand_overdispersions is not None
+        else [0.0]
+    )
+    gdna_od_labels = (
+        _as_label_list(args.gdna_strand_overdispersion_labels)
+        if args.gdna_strand_overdispersion_labels is not None
+        else None
+    )
+    gdna_od_pairs: list[tuple[str, float]] = []
+    for i, od in enumerate(gdna_ods):
+        if not (0.0 <= od < 1.0):
+            raise ValueError(f"gDNA strand_overdispersion must be in [0, 1); got {od}")
+        od_label = (
+            gdna_od_labels[i]
+            if gdna_od_labels is not None and i < len(gdna_od_labels)
+            else ("od00" if od == 0.0 else f"od{od:g}".replace(".", "p"))
+        )
+        gdna_od_pairs.append((od_label, od))
+
     selected_conditions = set(args.conditions or [])
     capture_specs, include_capture_in_names = _suite_capture_specs(args)
     abundance_config = AbundanceConfig(
@@ -1127,9 +1158,11 @@ def main():
             strand_spec,
             nrna_label,
             capture_scenario.label if include_capture_in_names else None,
+            gdna_strand_overdispersion=gdna_od,
         )
         for nrna_label in nrna_labels
         for gdna_label in gdna_labels
+        for _od_label, gdna_od in gdna_od_pairs
         for strand_spec in strand_specs
         for capture_scenario in capture_scenarios
     ]
@@ -1153,7 +1186,9 @@ def main():
 
         for i, gdna_rate in enumerate(gdna_rates):
             gdna_label = gdna_labels[i]
-            for strand_spec in strand_specs:
+            for (gdna_od_label, gdna_od), strand_spec in product(
+                gdna_od_pairs, strand_specs
+            ):
                 for capture_scenario in capture_scenarios:
                     n_mrna = n_rna
                     n_nrna = round(n_mrna * nrna_ratio)
@@ -1165,6 +1200,7 @@ def main():
 
                     cond_name = condition_dir_name(
                         gdna_label, strand_spec, nrna_label, capture_label,
+                        gdna_strand_overdispersion=gdna_od,
                     )
                     if selected_conditions and cond_name not in selected_conditions:
                         continue
@@ -1188,6 +1224,8 @@ def main():
                         "name": cond_name,
                         "gdna_label": gdna_label,
                         "gdna_rate": gdna_rate,
+                        "gdna_strand_overdispersion": gdna_od,
+                        "gdna_strand_overdispersion_label": gdna_od_label,
                         "strand_specificity": strand_spec,
                         "nrna_label": nrna_label,
                         "nrna_mode": "additive_ratio",
@@ -1235,7 +1273,8 @@ def main():
                         cond_sim = copy.deepcopy(cfg.simulation)
                         cond_sim.sim_seed = condition_seed
                         simulator = WholeGenomeSimulator(
-                            fasta_path, cond_transcripts, cond_sim, cfg.gdna,
+                            fasta_path, cond_transcripts, cond_sim,
+                            replace(cfg.gdna, strand_overdispersion=gdna_od),
                             strand_specificity=strand_spec,
                             capture_config=capture_scenario.config,
                         )
@@ -1263,6 +1302,7 @@ def main():
                         fastq_path=cond_dir / "sim_R1.fq.gz",
                         condition=cond_name,
                         molecular_truth=molecular_truth_name,
+                        gdna_strand_overdispersion=gdna_od,
                     )
                     origin_counts = truth_summary["origin_counts"]
                     cond_entry["n_mrna_observed"] = int(origin_counts.get("mrna", 0))

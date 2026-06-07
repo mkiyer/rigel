@@ -54,7 +54,7 @@ class CalibrationResult:
     exposure_right: np.ndarray
 
     # --- gDNA component geometric effective length: Σ_node L_node (exposure-free, Option A) ---
-    # Exposure exposure is carried in the deconvolved gDNA mass, NOT here — so this length is
+    # Exposure is carried in the deconvolved gDNA mass, NOT here — so this length is
     # well-defined even where calibration saw no reads, and never collapses.
     gdna_geom_len: np.ndarray  # float64[R]
 
@@ -66,6 +66,8 @@ class CalibrationResult:
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
+    gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
+    rna_strand_overdispersion: float  # in [0, 1), fitted RNA strand Beta-Binomial dispersion
 
     # --- provenance ---
     n_regions: int
@@ -99,6 +101,18 @@ class CalibrationResult:
         if not 0.0 <= sense_frac <= 1.0:
             raise ValueError(
                 f"CalibrationResult.rna_sense_frac must be in [0, 1]; got {sense_frac}."
+            )
+        overdispersion = float(self.gdna_strand_overdispersion)
+        if not 0.0 <= overdispersion < 1.0:
+            raise ValueError(
+                "CalibrationResult.gdna_strand_overdispersion must be in [0, 1); "
+                f"got {overdispersion}."
+            )
+        rna_overdispersion = float(self.rna_strand_overdispersion)
+        if not 0.0 <= rna_overdispersion < 1.0:
+            raise ValueError(
+                "CalibrationResult.rna_strand_overdispersion must be in [0, 1); "
+                f"got {rna_overdispersion}."
             )
 
 

@@ -80,7 +80,7 @@ def boundary_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray)
     For ``R ≫ support`` this → ``fl_mean`` (the region never binds); for ``R`` small it → ``R``
     (every crossing fragment spills past the short side). This is the **density** length —
     distinct from the region-free **count exposure** ``fl_mean`` (statistical power), which keeps
-    the full FL because long fragments still cross (doc above; review R5).
+    the full FL because long fragments still cross.
     """
     p = _as_pmf(fl_pmf)
     n = p.shape[0]

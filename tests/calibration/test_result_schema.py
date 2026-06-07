@@ -26,6 +26,8 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         gdna_boundary_len=o.copy(),
         gdna_density_global=1e-3,
         rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
         n_regions=n_regions,
         config=CalibrationConfig(),
     )

@@ -35,8 +35,8 @@ import numpy as np
 from .signature import BIT_EXON_NEG, BIT_EXON_POS
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
-# Unit pseudo-fragment for the boundary conduit weight (weakly-informative; matches the
-# sweep.py convention — a boundary with little crossing traffic conducts density weakly).
+# Unit pseudo-fragment for the boundary conduit weight (weakly-informative — a boundary with
+# little crossing traffic conducts density weakly).
 _TRAFFIC_PSEUDOCOUNT = 1.0
 
 
@@ -125,7 +125,7 @@ def node_gdna_density(
     # conduit reliability: a boundary with more crossing traffic propagates density better.
     weight = np.where(same_right, cross_flux / (cross_flux + _TRAFFIC_PSEUDOCOUNT), 0.0)
 
-    # --- alternating region↔boundary sweep (per reference; cf. sweep.py) ---
+    # --- alternating region↔boundary density sweep (per reference) ---
     # Two parallel tracks per node: gDNA mass and effective length.
     from_left_mass = np.zeros(r)
     from_left_len = np.zeros(r)

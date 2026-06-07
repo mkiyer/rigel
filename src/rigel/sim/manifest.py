@@ -21,9 +21,17 @@ def condition_dir_name(
     strand_specificity: float,
     nrna_label: str,
     capture_label: str | None = None,
+    gdna_strand_overdispersion: float = 0.0,
 ) -> str:
-    """Return the standard synthetic-suite condition directory name."""
-    name = f"gdna_{gdna_label}_ss_{strand_specificity:.2f}_nrna_{nrna_label}"
+    """Return the standard synthetic-suite condition directory name.
+
+    A ``_od_<value>`` slug is inserted only when ``gdna_strand_overdispersion > 0``, so suites
+    that do not sweep overdispersion keep their existing condition names.
+    """
+    name = f"gdna_{gdna_label}"
+    if gdna_strand_overdispersion > 0.0:
+        name = f"{name}_od_{gdna_strand_overdispersion:g}".replace(".", "p")
+    name = f"{name}_ss_{strand_specificity:.2f}_nrna_{nrna_label}"
     if capture_label is not None:
         name = f"{name}_capture_{capture_label}"
     return name
