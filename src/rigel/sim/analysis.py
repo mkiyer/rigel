@@ -371,12 +371,13 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
     lines.append("  CALIBRATION ACCURACY ANALYSIS")
     lines.append(hr)
 
-    # Table: condition → calibration metrics
+    # Table: condition → acyclic-calibrator scalars (one global gDNA density + strand model;
+    # the old per-region-type ρ_ig/ρ_in/ρ_ex density family was removed in the acyclic redesign).
     lines.append(f"\n{'Condition':<35} {'gDNA_frac':>9} {'SS':>5} "
-                 f"{'ρ_ig':>10} {'ρ_in':>10} {'ρ_ex':>10} "
+                 f"{'dens_glob':>10} {'rna_sense':>9} {'od_gdna':>8} {'od_rna':>8} "
                  f"{'FL_rna':>7} {'FL_gdna':>8} "
                  f"{'n_loci':>6} {'gdna_rate':>10} {'gdna_true':>10}")
-    lines.append("─" * 130)
+    lines.append("─" * 140)
 
     cal_rows = []
     for cond in conditions:
@@ -396,29 +397,17 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
         if not summary:
             continue
 
-        cal = summary.get("calibration", {})
-        region_calibration = cal.get("region_calibration", {}) or {}
-        density_priors = cal.get("density_evidence", {}).get("priors", {}) or {}
-        fl = cal.get("fl_models", {})
+        cal = summary.get("calibration", {}) or {}
+        density_global = _as_float(cal.get("gdna_density_global"), 0.0)
+        rna_sense_frac = _as_float(cal.get("rna_sense_frac"), float("nan"))
+        od_gdna = _as_float(cal.get("gdna_strand_overdispersion"), float("nan"))
+        od_rna = _as_float(cal.get("rna_strand_overdispersion"), float("nan"))
 
-        def _prior_mean(name: str) -> float:
-            prior = density_priors.get(name) or {}
-            try:
-                return float(prior.get("mean_density", 0.0))
-            except (TypeError, ValueError):
-                return 0.0
-
-        rho_off = region_calibration.get("rho_off")
-        if rho_off is not None:
-            rho_ig = float(rho_off)
-            rho_in = float(rho_off)
-        else:
-            rho_ig = _prior_mean("INTERGENIC")
-            rho_in = _prior_mean("INTRON")
-        rho_ex = 0.0  # v4: EXON-INTRON density family removed
-        fl_rna = fl.get("rna_fl_mean", 0)
-        fl_gdna = fl.get("gdna_fl_mean", 0)
-        n_loci = cal.get("n_multi_loci", 0)
+        fl = summary.get("fragment_length", {}) or {}
+        fl_rna = _as_float(_nested(fl, "rna", "summary", "mean", default=0.0), 0.0)
+        fl_gdna = _as_float(_nested(fl, "gdna", "summary", "mean", default=0.0), 0.0)
+        quant_out = summary.get("quantification", {}) or {}
+        n_loci = int(quant_out.get("n_loci", 0) or 0)
 
         # Compute true gDNA rate
         gdna_frac = info["gdna_frac"]
@@ -430,20 +419,20 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
         truth_rna_fl_mean = _truth_fl_mean(truth_summary, "mrna", true_rna_fl_mean)
         truth_gdna_fl_mean = _truth_fl_mean(truth_summary, "gdna", true_gdna_fl_mean)
 
-        # Estimated gDNA rate from quantification output
-        quant_out = summary.get("quantification", {})
         gdna_rate_est = quant_out.get("gdna_fraction", 0)
 
         lines.append(
             f"{cond:<35} {gdna_frac:>9.2f} {info['strand_specificity']:>5.2f} "
-            f"{rho_ig:>10.6f} {rho_in:>10.6f} {rho_ex:>10.6f} "
+            f"{density_global:>10.6f} {rna_sense_frac:>9.3f} {od_gdna:>8.3f} {od_rna:>8.3f} "
             f"{fl_rna:>7.1f} {fl_gdna:>8.1f} "
             f"{n_loci:>6} {gdna_rate_est:>10.4f} {gdna_rate_true:>10.4f}"
         )
 
         cal_rows.append({
             **info,
-            "rho_ig": rho_ig, "rho_in": rho_in, "rho_ex": rho_ex,
+            "density_global": density_global,
+            "rna_sense_frac": rna_sense_frac,
+            "od_gdna": od_gdna, "od_rna": od_rna,
             "fl_rna": fl_rna, "fl_gdna": fl_gdna,
             "n_loci": n_loci,
             "gdna_rate_est": gdna_rate_est,
@@ -456,20 +445,6 @@ def analyze_calibration(sim_base: Path, conditions: list[str], truth: pd.DataFra
             "gdna_total": quant_out.get("gdna_total", 0),
             "mrna_total": quant_out.get("mrna_total", 0),
         })
-
-    # ── Density ratio consistency ──
-    lines.append(f"\n\n{'─' * 100}")
-    lines.append("  DENSITY RATIO CONSISTENCY")
-    lines.append(f"{'─' * 100}")
-    lines.append("  gDNA density should be uniform across intergenic/intron/exon regions.")
-    lines.append("  Ratios close to 1.0 indicate consistent calibration.\n")
-    lines.append(f"  {'Condition':<35} {'ρ_in/ρ_ig':>10} {'ρ_ex/ρ_ig':>10} {'ρ_ex/ρ_in':>10}")
-    for row in cal_rows:
-        if row["rho_ig"] > 0:
-            r_in_ig = row["rho_in"] / row["rho_ig"]
-            r_ex_ig = row["rho_ex"] / row["rho_ig"]
-            r_ex_in = row["rho_ex"] / row["rho_in"] if row["rho_in"] > 0 else float("nan")
-            lines.append(f"  {row['condition']:<35} {r_in_ig:>10.3f} {r_ex_ig:>10.3f} {r_ex_in:>10.3f}")
 
     # ── gDNA FL distribution ──
     lines.append(f"\n\n{'─' * 100}")
@@ -1162,7 +1137,8 @@ def _collect_condition_metrics(
         cal = summary.get("calibration", {}) if summary else {}
         region = cal.get("region_calibration", {}) if isinstance(cal, dict) else {}
         diagnostics = cal.get("diagnostics", {}) if isinstance(cal, dict) else {}
-        fl_models = cal.get("fl_models", {}) if isinstance(cal, dict) else {}
+        # Estimated FL models moved to the top-level "fragment_length" block (acyclic schema).
+        fl_models = summary.get("fragment_length", {}) if summary else {}
         background = cal.get("background_model", {}) if isinstance(cal, dict) else {}
         boundary_local = cal.get("boundary_local", {}) if isinstance(cal, dict) else {}
         boundary_sweep = cal.get("boundary_sweep", {}) if isinstance(cal, dict) else {}
@@ -1241,8 +1217,8 @@ def _collect_condition_metrics(
             - _safe_div(true_gdna, true_total),
             "truth_rna_fl_mean": truth_rna_fl_mean,
             "truth_gdna_fl_mean": truth_gdna_fl_mean,
-            "est_rna_fl_mean": _as_float(fl_models.get("rna_fl_mean")),
-            "est_gdna_fl_mean": _as_float(fl_models.get("gdna_fl_mean")),
+            "est_rna_fl_mean": _as_float(_nested(fl_models, "rna", "summary", "mean")),
+            "est_gdna_fl_mean": _as_float(_nested(fl_models, "gdna", "summary", "mean")),
             "calibration_n_observed": _as_float(diagnostics.get("n_observed")),
             "calibration_n_excluded_multimap": _as_float(
                 diagnostics.get("n_excluded_multimap")

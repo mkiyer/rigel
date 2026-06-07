@@ -39,22 +39,19 @@ def _write_summary(sim_base, condition: str, *, rho_ex: float = 0.0985):
     out_dir.mkdir(parents=True)
     _ = rho_ex  # v4: EXON-INTRON family removed; kept as kwarg for callers.
     summary = {
+        # Acyclic-calibrator schema: one global gDNA density + strand-model scalars.
         "calibration": {
-            "density_evidence": {
-                "confidence": 0.95,
-                "n_regions": 0,
-                "rho_ref": 0.1003,
-                "rho_ref_source": "ALL",
-                "priors": {
-                    "INTERGENIC": {"family": "INTERGENIC", "mean_density": 0.1000},
-                    "INTRON": {"family": "INTRON", "mean_density": 0.1005},
-                    "ALL": {"family": "ALL", "mean_density": 0.1003},
-                },
-            },
-            "fl_models": {"rna_fl_mean": 257.0, "gdna_fl_mean": 351.7},
-            "n_multi_loci": 51,
+            "gdna_density_global": 0.1003,
+            "rna_sense_frac": 0.99,
+            "gdna_strand_overdispersion": 0.1,
+            "rna_strand_overdispersion": 0.1,
+            "n_regions": 51,
         },
-        "quantification": {"gdna_fraction": 0.0913},
+        "fragment_length": {
+            "rna": {"summary": {"mean": 257.0}},
+            "gdna": {"summary": {"mean": 351.7}},
+        },
+        "quantification": {"gdna_fraction": 0.0913, "n_loci": 51},
     }
     (out_dir / "summary.json").write_text(json.dumps(summary))
     return out_dir
