@@ -29,6 +29,18 @@ def test_overdispersion_out_of_range_rejected(bad):
         GDNAConfig(gdna_strand_overdispersion=bad)
 
 
+def test_scenario_gdna_config_both_knobs_reach_the_engine():
+    """Scenario's GDNAConfig → engine GDNASimConfig: both the clear overdispersion knob and the
+    legacy strand_kappa flow through (kappa=9 ⇒ od=0.1), so locus_sweep's strand_kappa still works
+    after the single-engine consolidation."""
+    from rigel.sim.scenario import _to_gdna_sim
+
+    assert _to_gdna_sim(GDNAConfig(gdna_strand_overdispersion=0.2)).strand_overdispersion == pytest.approx(0.2)
+    assert _to_gdna_sim(GDNAConfig(strand_kappa=9.0)).strand_overdispersion == pytest.approx(0.1)
+    assert _to_gdna_sim(GDNAConfig()).strand_overdispersion == 0.0
+    assert _to_gdna_sim(None).strand_overdispersion == 0.0
+
+
 @pytest.mark.parametrize("od", [0.05, 0.2])
 def test_whole_genome_gdna_strand_regions_overdispersion(od):
     """WholeGenomeSimulator (the suite simulator) builds per-ref strand regions at target od."""

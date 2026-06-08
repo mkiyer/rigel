@@ -133,14 +133,25 @@ suite-output diff gate.
   same-seed-for-all-conditions latent bug** (now distinct per-condition seeds; the manifest gains a
   unified schema incl. `seed`). The seed helpers moved to `orchestrator.py` (suite re-exports for
   tests).
-- **P5 — capture subpackage (T2).** Split `capture.py` → `capture/{config,sampler}.py`; move probe
-  design `suite.py:375–537` → `capture/design.py`. `capture/__init__.py` re-exports; `test_sim_capture.py`
-  imports may need path updates (acceptable — internal test).
-- **P6 — engine module split.** Move `WholeGenomeSimulator` out of the 2343-line `whole_genome.py`
-  into `wgs_engine.py`; `whole_genome.py` becomes the thin config-parse + CLI frontend.
-- **P7 — analysis staleness (S1).** Delete dead `analyze_calibration`/`main`/`evaluate_suite.py`
-  path (confirm nothing live calls them); relocate the live confusion/parse helpers next to
-  `bench_calibration.py`. (Verify against the calibration-benchmark skill's documented routing.)
+- **P5 — capture subpackage (T2). DONE.** `capture/` is now a subpackage: `config.py`
+  (CaptureConfig/CaptureScenario), `sampler.py` (CaptureSampler + probe loading), `design.py`
+  (probe design, **moved out of suite.py**); `__init__.py` re-exports. suite.py −250 lines.
+- **P6 — engine module split. DONE.** 3-way: `wgs_config.py` (config dataclasses), `wgs_engine.py`
+  (WholeGenomeSimulator + machinery), `whole_genome.py` (913-line frontend: parsing/abundance/
+  run_simulation/CLI) that re-exports both for back-compat. One-way layering, no cycle.
+- **P7 — analysis staleness (S1). DONE (CC4, different resolution).** The old `evaluate_suite`
+  harness was **updated** to the acyclic `summary.json` schema (user choice) rather than deleted;
+  `bench_calibration.py` remains the canonical evaluator.
+- **D3 — moot.** The gDNA strand-region partition was duplicated only between `reads.ReadSimulator`
+  and WGS; `ReadSimulator` was deleted (CC3), leaving a single copy in `wgs_engine`. No dedup needed.
+- **D4 — assessed → keep two-level config (no forced unification).** `ReadSimConfig`/`GDNAConfig`
+  (Scenario's single-condition surface) and `SimulationParams`/`GDNASimConfig` (engine/suite, with
+  counts/rates/sweep axes) are *legitimately different abstraction levels*, bridged by the clean
+  `scenario._to_sim_params`/`_to_gdna_sim` adapter; the only literal overlap is four frag-length
+  scalar names, and forcing one shape would saddle Scenario with suite-only fields. Fixed the one
+  real gap: the adapter now resolves **both** gDNA strand knobs (clear `gdna_strand_overdispersion`
+  *and* legacy `strand_kappa` via `od = 1/(kappa+1)`), so locus_sweep's `strand_kappa` still
+  reaches the engine after the single-engine consolidation.
 
 ## 5. Risk & verification
 

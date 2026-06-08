@@ -67,6 +67,23 @@ def _to_sim_params(sim_config: ReadSimConfig, n_rna: int) -> SimulationParams:
     )
 
 
+def _gdna_overdispersion(gdna_config: GDNAConfig) -> float:
+    """Resolve a single gDNA strand overdispersion from either knob on ``GDNAConfig``.
+
+    ``gdna_strand_overdispersion`` (clear units) wins; otherwise convert the legacy
+    ``strand_kappa`` Beta concentration via ``od = 1/(kappa + 1)`` (the inverse of GDNAConfig's
+    own ``kappa = (1 − od)/od``), so the engine sees the same Beta(kappa/2, kappa/2) per-region
+    rate the old engine did. ``0`` when neither is set.
+    """
+    od = gdna_config.gdna_strand_overdispersion
+    if od is not None:
+        return float(od)
+    kappa = gdna_config.strand_kappa
+    if kappa is not None and kappa > 0.0:
+        return 1.0 / (float(kappa) + 1.0)
+    return 0.0
+
+
 def _to_gdna_sim(gdna_config: GDNAConfig | None) -> GDNASimConfig:
     """Translate a Scenario ``GDNAConfig`` into the engine's ``GDNASimConfig`` (fragment-length +
     strand overdispersion; the gDNA *count* is derived separately via the pool split)."""
@@ -77,7 +94,7 @@ def _to_gdna_sim(gdna_config: GDNAConfig | None) -> GDNASimConfig:
         frag_std=gdna_config.frag_std,
         frag_min=gdna_config.frag_min,
         frag_max=gdna_config.frag_max,
-        strand_overdispersion=float(getattr(gdna_config, "gdna_strand_overdispersion", 0.0) or 0.0),
+        strand_overdispersion=_gdna_overdispersion(gdna_config),
     )
 
 
