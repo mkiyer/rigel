@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from rigel.sim.capture import CaptureConfig, CaptureSampler
+from rigel.sim.capture.design import design_capture_probe_intervals, write_random_capture_probes
 from rigel.sim.annotation import GeneBuilder
 from rigel.sim.genome import MutableGenome
 from rigel.sim.whole_genome import (
@@ -20,8 +21,6 @@ from rigel.sim.suite import (
     _suite_capture_specs,
     capture_paired_condition_seed,
     capture_probe_group_key,
-    design_capture_probe_intervals,
-    write_random_capture_probes,
 )
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand

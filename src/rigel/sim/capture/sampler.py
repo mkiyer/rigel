@@ -1,15 +1,9 @@
-"""Hybrid-capture probe weighting for simulators.
+"""Hybrid-capture runtime sampler + probe loading.
 
-The model here is deliberately simple and fast.  A fragment start has weight
-
-    off_target_weight + binding_per_base * best_probe_overlap
-
-where ``best_probe_overlap`` is the largest scaled overlap with any single
-probe.  Overlapping or duplicate probes therefore do not stack capture strength:
-a fragment binds at most one probe.  The same sparse representation is used for
-mRNA, pre-mRNA, and gDNA sampling, so transcript choice and within-template
-fragment starts are both capture-aware without building chromosome-sized
-probability arrays.
+``CaptureSampler`` builds a sparse probe representation (per transcript / pre-mRNA / gDNA) and
+answers capture-aware effective lengths, fragment-start sampling, and per-fragment weights. The
+model is described in :mod:`capture.config`. Probe *design* (generating synthetic panels) lives in
+:mod:`capture.design`.
 """
 
 from __future__ import annotations
@@ -17,71 +11,21 @@ from __future__ import annotations
 import gzip
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
-from ..transcript import Transcript
-from ..types import Strand
-from .bam import transcript_to_genomic_blocks
-from .intervals import merge_intervals, project_genomic_blocks_to_transcript
+from ...transcript import Transcript
+from ...types import Strand
+from ..bam import transcript_to_genomic_blocks
+from ..intervals import merge_intervals, project_genomic_blocks_to_transcript
+from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "CaptureConfig",
-    "CaptureScenario",
-    "CaptureSampler",
-    "WeightedInterval",
-]
-
-
-@dataclass
-class CaptureConfig:
-    """Hybrid-capture simulation configuration.
-
-    Parameters
-    ----------
-    probes : str or None
-        Probe file path.  Transcript-coordinate TSV and BED12 are supported.
-        When unset, capture weighting is disabled and simulation remains
-        uniform within each template.
-    probe_format : {"auto", "transcript", "bed12"}
-        Probe file format.  ``"auto"`` detects a BED12-looking row or a
-        transcript-coordinate TSV/header.
-    off_target_weight : float
-        Baseline weight for every legal fragment start.  A positive value
-        keeps off-target fragments possible.
-    binding_per_base : float
-        Additional weight per base of the best overlapping probe.  For example, with
-        ``off_target_weight=1`` and ``binding_per_base=10``, a full 120 bp
-        probe overlap has weight 1201 relative to weight 1 off target.
-        Overlapping probes do not stack; the best single scaled overlap is used.
-    gdna_split_penalty : float
-        Multiplier applied to projected genomic/pre-mRNA blocks when a probe
-        is split across exon-exon junctions.  Mature RNA sees the contiguous
-        transcript probe; unspliced molecules and gDNA only see separated
-        genomic blocks and therefore get less binding weight.
-    min_overlap : int
-        Minimum overlap, in bases, required before a probe contributes weight.
-    """
-
-    probes: str | None = None
-    probe_format: str = "auto"
-    off_target_weight: float = 1.0
-    binding_per_base: float = 10.0
-    gdna_split_penalty: float = 0.2
-    min_overlap: int = 1
-
-
-@dataclass
-class CaptureScenario:
-    """One labeled hybrid-capture setting in a simulation condition grid."""
-
-    label: str = "default"
-    config: CaptureConfig = field(default_factory=CaptureConfig)
+__all__ = ["CaptureSampler", "WeightedInterval"]
 
 
 @dataclass(frozen=True, slots=True)
