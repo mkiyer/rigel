@@ -1,0 +1,69 @@
+# Hybrid-capture random mini-genome suite + gDNA strand-overdispersion axis.
+#
+# Same 500 kb / 10-gene suite as hybrid_capture_500kb.yaml, with the gDNA strand
+# overdispersion sweep added: od00 (rigid 50/50, reproduces the original baseline
+# conditions exactly) + od14 (intra-class correlation 1/7, the calibration prior level —
+# the overdispersion stress test). Conditions: gdna{none,high} × od{od00,od14} ×
+# ss{0.99,0.50} × capture{off,on} × nrna{none} = 16.
+#
+# Usage (production run, overrides outdir):
+#   python scripts/sim/simulate_suite.py \
+#     --config scripts/sim/configs/hybrid_capture_500kb_od.yaml \
+#     --outdir /Users/mkiyer/Downloads/rigel_runs/sim_synthetic_capture/hyb_capture_500kb_od
+
+suite:
+  outdir: /tmp/rigel_sim/hybrid_capture_500kb_od
+  genome_length: 500000
+  n_genes: 10
+  min_isoforms: 1
+  max_isoforms: 5
+  target_transcripts: null
+  antisense_fraction: 0.0
+  seed: 20260523
+  profile: smoke
+  conditions: null
+
+simulation:
+  n_rna_fragments: 100000
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 50
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 1
+
+abundance:
+  seed: 20260524
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+gdna:
+  rates: [0.0, 1.0]
+  rate_labels: [none, high]
+  frag_mean: 150
+  frag_std: 50
+  frag_min: 50
+  frag_max: 300
+  strand_overdispersions: [0.0, 0.14]
+  strand_overdispersion_labels: [od00, od14]
+
+strand_specificities: [0.99, 0.50]
+
+nrna:
+  ratios: [0.0]
+  ratio_labels: [none]
+
+capture:
+  probe_length: 120
+  probe_density: 0.5
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5
