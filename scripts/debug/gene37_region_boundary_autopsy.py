@@ -120,11 +120,14 @@ def main():
     # ---- ORACLE truth: classify each window fragment as contained-in-region or crossing-boundary.
     ws, we = ra.start[win], ra.end[win]
     bpos = ws[1:]  # boundary positions = shared region edges (contiguous)
-    true_cont_g = np.zeros(len(win)); true_cont_r = np.zeros(len(win))
+    true_cont_g = np.zeros(len(win))
+    true_cont_r = np.zeros(len(win))
     fl_cont_g = [[] for _ in win]
-    cross_g = np.zeros(max(1, len(win) - 1)); cross_r = np.zeros(max(1, len(win) - 1))
+    cross_g = np.zeros(max(1, len(win) - 1))
+    cross_r = np.zeros(max(1, len(win) - 1))
     # FL hypothesis per exon: contained vs crossing among gDNA fragments OVERLAPPING the region
-    ov_g_contained = np.zeros(len(win)); ov_g_crossing = np.zeros(len(win))
+    ov_g_contained = np.zeros(len(win))
+    ov_g_crossing = np.zeros(len(win))
     with pysam.AlignmentFile(str(args.bam), "rb") as b:
         for r in b:
             if r.is_read2 or r.is_secondary or r.is_supplementary or r.reference_name != args.ref:
@@ -141,7 +144,9 @@ def main():
             j = np.searchsorted(we, s, side="right")
             if 0 <= j < len(win) and ws[j] <= s and e <= we[j]:
                 if is_g:
-                    true_cont_g[j] += 1; fl_cont_g[j].append(fl); ov_g_contained[j] += 1
+                    true_cont_g[j] += 1
+                    fl_cont_g[j].append(fl)
+                    ov_g_contained[j] += 1
                 else:
                     true_cont_r[j] += 1
             # crossing boundaries (a fragment may straddle one of the internal edges)
@@ -176,7 +181,7 @@ def main():
               f"{cgf_count:>8.2f} {clean_gf[i]:>9.2f} {cgf:>6.2f} {tgf:>7.2f} | {tg:>8.0f} {tr:>8.0f} {flg:>5.0f}")
 
     # ---------------- BOUNDARY TABLE ----------------
-    print(f"\n=== BOUNDARIES (between consecutive regions) ===")
+    print("\n=== BOUNDARIES (between consecutive regions) ===")
     print(f"{'L→R reg':>9} {'L→R type':>14} {'obs':>3} | {'cross_mass':>10} {'cross_gdna':>10} "
           f"{'conduit_w':>9} | {'true_cross_g':>12} {'true_cross_r':>12}")
     for k in range(len(win) - 1):
@@ -190,14 +195,14 @@ def main():
               f"{cross_mass:>10.0f} {cross_gd:>10.0f} {w:>9.3f} | {cross_g[k]:>12.0f} {cross_r[k]:>12.0f}")
 
     # ---------------- TRANSPORT ----------------
-    print(f"\n=== BOUNDARY TRANSPORT — per-region gDNA mass before → after _transport_boundary_flux ===")
+    print("\n=== BOUNDARY TRANSPORT — per-region gDNA mass before → after _transport_boundary_flux ===")
     print(f"{'reg':>4} {'type':>6} | {'gdna_before':>11} {'gdna_after':>10} {'Δ':>8} | {'true_total_g(cont)':>18}")
     for k, i in enumerate(win):
         print(f"{i:>4} {rtype(i,k):>6} | {g_before[i]:>11.0f} {g_after[i]:>10.0f} "
               f"{g_after[i]-g_before[i]:>+8.0f} | {true_cont_g[k]:>18.0f}")
 
     # ---------------- FL HYPOTHESIS ----------------
-    print(f"\n=== FL HYPOTHESIS (exon regions): are SHORT gDNA fragments contained (invisible)? ===")
+    print("\n=== FL HYPOTHESIS (exon regions): are SHORT gDNA fragments contained (invisible)? ===")
     print(f"  gDNA FL pmf mean={float(np.dot(np.arange(gdna_pmf.size), gdna_pmf)):.0f}")
     print(f"{'reg':>4} {'exon_bp':>7} {'reg_span':>8} | {'g_contained':>11} {'g_crossing':>10} {'%contained':>10} {'FL_contained':>12}")
     for k, i in enumerate(win):
