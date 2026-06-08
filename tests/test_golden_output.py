@@ -179,10 +179,10 @@ def _golden_exists(scenario_name):
 
 # Columns to compare with bit-exact precision
 _TRANSCRIPT_NUMERIC_COLS = [
-    "effective_length", "em_effective_length", "em_exposure_factor",
+    "effective_length", "em_effective_length",
     "count", "count_unambig", "count_em", "count_spliced",
     "nrna_parent_count",
-    "tpm", "tpm_total_rna", "tpm_em_exposure", "tpm_total_rna_em_exposure",
+    "tpm", "tpm_total_rna",
     "posterior_mean",
 ]
 

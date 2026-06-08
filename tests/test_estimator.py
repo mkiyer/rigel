@@ -575,7 +575,6 @@ class TestCountsOutput:
             "gene_name",
             "effective_length",
             "em_effective_length",
-            "em_exposure_factor",
             "locus_id",
             "nrna_id",
             "is_basic",
@@ -588,8 +587,6 @@ class TestCountsOutput:
             "nrna_parent_count",
             "tpm",
             "tpm_total_rna",
-            "tpm_em_exposure",
-            "tpm_total_rna_em_exposure",
             "posterior_mean",
         ]
         assert list(df.columns) == expected_cols
@@ -608,7 +605,6 @@ class TestCountsOutput:
         df = rc.get_counts_df(index)
         assert df.loc[0, "effective_length"] == pytest.approx(100.0)
         assert df.loc[0, "em_effective_length"] == pytest.approx(50.0)
-        assert df.loc[0, "em_exposure_factor"] == pytest.approx(0.5)
 
     def test_get_gene_counts_df_columns(self):
         index = _make_index()

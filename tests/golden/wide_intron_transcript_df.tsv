@@ -1,3 +1,3 @@
-transcript_id	gene_id	gene_name	effective_length	em_effective_length	em_exposure_factor	locus_id	nrna_id	is_basic	is_mane	is_nrna	count	count_unambig	count_em	count_spliced	nrna_parent_count	tpm	tpm_total_rna	tpm_em_exposure	tpm_total_rna_em_exposure	posterior_mean
-t1	g1	g1	401.2171299774607	401.2171299774607	1.0	0	RIGEL_NRNA_golden_wide_intron_1_500_20300	True	False	False	687.9999081705884	331.0	356.99990817058836	331.0	6.739365002725057e-300	623428.371357496	623428.371357496	623428.371357496	623428.371357496	0.9999997427747632
-t_h	g_h	g_h	301.2171299774607	301.2171299774607	1.0	1	.	True	False	True	311.99642208301765	0.0	311.99642208301765	0.0	0.0	376571.6286425041	376571.6286425041	376571.6286425041	376571.6286425041	0.9999885323200441
+transcript_id	gene_id	gene_name	effective_length	em_effective_length	locus_id	nrna_id	is_basic	is_mane	is_nrna	count	count_unambig	count_em	count_spliced	nrna_parent_count	tpm	tpm_total_rna	posterior_mean
+t1	g1	g1	401.2171299774607	401.2171299774607	0	RIGEL_NRNA_golden_wide_intron_1_500_20300	True	False	False	687.9999081705884	331.0	356.99990817058836	331.0	6.739365002725057e-300	623428.371357496	623428.371357496	0.9999997427747632
+t_h	g_h	g_h	301.2171299774607	301.2171299774607	1	.	True	False	True	311.99642208301765	0.0	311.99642208301765	0.0	0.0	376571.6286425041	376571.6286425041	0.9999885323200441

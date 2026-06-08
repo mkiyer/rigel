@@ -1,6 +1,6 @@
 """gDNA fragment-length effective lengths (PR 4b §I.1).
 
-The gDNA count exposure of a region or boundary — the genomic measure of fragment
+The gDNA count effective length of a region or boundary — the genomic measure of fragment
 start-positions that produce the event — is a **pure geometric function of a
 fragment-length (FL) pmf**, identical for any species; only the FL distribution
 differs (the PR04b fairness note). Calibration applies these with the **gDNA** FL
@@ -8,16 +8,16 @@ because gDNA is the density-modelled component (`gdna_density_global`); RNA is t
 residual mass (doc 01 §9), so it consumes no modelled length.
 
 * **Region** of physical length ``L`` — a fragment is *contained* iff it fits, so
-  the exposure is the FL-corrected ``E_f[max(0, L − ℓ)] = Σ_{ℓ≤L} (L − ℓ) f(ℓ)``.
+  the effective length is the FL-corrected ``E_f[max(0, L − ℓ)] = Σ_{ℓ≤L} (L − ℓ) f(ℓ)``.
   Region size limits which fragments fit (a contained fragment is shorter than
   the region); `→ L` for `L ≫ fl_mean`, small for `L ≲ fl_mean`.
 * **Boundary** — a fragment *crosses* a point iff its start lies in the ``ℓ`` bp
   upstream, **independent of region sizes** (a longer fragment simply spills onto
-  further regions and still crosses), so the exposure is just ``fl_mean = Σ_ℓ ℓ
+  further regions and still crosses), so the effective length is just ``fl_mean = Σ_ℓ ℓ
   f(ℓ)`` — the mean gDNA fragment length.
 
 Region size constrains only the fractional *mass* the accumulator splits per side
-(overlap in bases) — a separate quantity from this count exposure; the molecule is
+(overlap in bases) — a separate quantity from this count effective length; the molecule is
 still drawn from the unconstrained gDNA FL.
 """
 
@@ -38,7 +38,7 @@ def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
 
 
 def fl_mean(fl_pmf: np.ndarray) -> float:
-    """``fl_mean = Σ_ℓ ℓ·f(ℓ)`` — the gDNA boundary crossing exposure (region-free)."""
+    """``fl_mean = Σ_ℓ ℓ·f(ℓ)`` — the gDNA boundary crossing effective length (region-free)."""
     p = _as_pmf(fl_pmf)
     ell = np.arange(p.shape[0], dtype=np.float64)
     return float(np.dot(ell, p))
@@ -79,8 +79,8 @@ def boundary_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray)
 
     For ``R ≫ support`` this → ``fl_mean`` (the region never binds); for ``R`` small it → ``R``
     (every crossing fragment spills past the short side). This is the **density** length —
-    distinct from the region-free **count exposure** ``fl_mean`` (statistical power), which keeps
-    the full FL because long fragments still cross.
+    distinct from the region-free **count effective length** ``fl_mean`` (statistical power), which
+    keeps the full FL because long fragments still cross.
     """
     p = _as_pmf(fl_pmf)
     n = p.shape[0]

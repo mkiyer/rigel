@@ -187,25 +187,17 @@ class AbundanceEstimator:
             )
             if geometry.effective_lengths_em is None:
                 self._t_eff_len_em = self._t_eff_len_output
-                self._t_exposure_factor = np.ones(num_transcripts, dtype=np.float64)
             else:
                 self._t_eff_len_em = np.maximum(
                     np.asarray(geometry.effective_lengths_em, dtype=np.float64),
                     1.0,
                 )
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    self._t_exposure_factor = np.where(
-                        self._t_eff_len_output > 0.0,
-                        self._t_eff_len_em / self._t_eff_len_output,
-                        1.0,
-                    )
         else:
             self._t_to_g = None
             self._transcript_spans = None
             self._exonic_lengths = None
             self._t_eff_len_output = np.ones(num_transcripts, dtype=np.float64)
             self._t_eff_len_em = self._t_eff_len_output
-            self._t_exposure_factor = np.ones(num_transcripts, dtype=np.float64)
 
         self.unambig_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         self.em_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
@@ -248,31 +240,11 @@ class AbundanceEstimator:
         arr = np.maximum(np.asarray(value, dtype=np.float64), 1.0)
         self._t_eff_len_output = arr
         self._t_eff_len_em = arr
-        self._t_exposure_factor = np.ones(arr.shape, dtype=np.float64)
 
     @property
     def em_effective_lengths(self) -> np.ndarray:
         """Per-transcript EM effective lengths (read-only)."""
         return self._t_eff_len_em
-
-    def set_em_effective_lengths(
-        self,
-        effective_lengths: np.ndarray,
-        exposure_factor: np.ndarray,
-    ) -> None:
-        """Install transcript EM effective lengths and exposure diagnostics."""
-        em_eff = np.maximum(np.asarray(effective_lengths, dtype=np.float64), 1.0)
-        exposure = np.asarray(exposure_factor, dtype=np.float64)
-        if em_eff.shape != self._t_eff_len_output.shape:
-            raise ValueError("EM effective lengths do not match transcript count.")
-        if exposure.shape != self._t_eff_len_output.shape:
-            raise ValueError("EM exposure factors do not match transcript count.")
-        if not np.all(np.isfinite(em_eff)) or not np.all(np.isfinite(exposure)):
-            raise ValueError("EM effective lengths and exposure factors must be finite.")
-        if np.any(exposure <= 0.0):
-            raise ValueError("EM exposure factors must be positive.")
-        self._t_eff_len_em = em_eff
-        self._t_exposure_factor = exposure
 
     @property
     def gdna_em_count(self) -> float:
@@ -531,11 +503,8 @@ class AbundanceEstimator:
         #     nrna_quant TPM column.
         eff = self._t_eff_len_output
         em_eff = self._t_eff_len_em
-        em_exposure_factor = self._t_exposure_factor
         tpm = _tpm(count, eff)
         tpm_total_rna = _tpm(count, eff, denom_counts=t_total)
-        tpm_em_exposure = _tpm(count, em_eff)
-        tpm_total_rna_em_exposure = _tpm(count, em_eff, denom_counts=t_total)
 
         # nrna_id: lookup nrna_t_index → transcript ID. The column is
         # guaranteed by the index schema (see TranscriptIndex.load).
@@ -562,7 +531,6 @@ class AbundanceEstimator:
                 "gene_name": index.t_df["g_name"].values,
                 "effective_length": eff,
                 "em_effective_length": em_eff,
-                "em_exposure_factor": em_exposure_factor,
                 "locus_id": self.locus_id_per_transcript,
                 "nrna_id": nrna_id,
                 "is_basic": index.t_df["is_basic"].values,
@@ -575,8 +543,6 @@ class AbundanceEstimator:
                 "nrna_parent_count": nrna_parent_count,
                 "tpm": tpm,
                 "tpm_total_rna": tpm_total_rna,
-                "tpm_em_exposure": tpm_em_exposure,
-                "tpm_total_rna_em_exposure": tpm_total_rna_em_exposure,
                 "posterior_mean": pmean,
             }
         )
@@ -717,7 +683,6 @@ class AbundanceEstimator:
                     "nrna_id",
                     "effective_length",
                     "em_effective_length",
-                    "em_exposure_factor",
                     "locus_id",
                     "is_synthetic",
                     "n_contributing_transcripts",
@@ -725,7 +690,6 @@ class AbundanceEstimator:
                     "n_mrna",
                     "mrna_count",
                     "tpm",
-                    "tpm_em_exposure",
                 ]
             )
 
@@ -746,7 +710,6 @@ class AbundanceEstimator:
         counts = t_total[idx]
         eff = self._t_eff_len_output[idx]
         em_eff = self._t_eff_len_em[idx]
-        em_exposure_factor = self._t_exposure_factor[idx]
         n_contrib = t_df["nrna_n_contributors"].values[idx]
         n_mrna_children = n_mrna_per_parent[idx]
         mrna_children_count = children_count_per_parent[idx]
@@ -759,7 +722,6 @@ class AbundanceEstimator:
         counts = counts[has_children]
         eff = eff[has_children]
         em_eff = em_eff[has_children]
-        em_exposure_factor = em_exposure_factor[has_children]
         n_contrib = n_contrib[has_children]
         n_mrna_children = n_mrna_children[has_children]
         mrna_children_count = mrna_children_count[has_children]
@@ -771,18 +733,12 @@ class AbundanceEstimator:
         rpk = counts / np.maximum(eff, 1.0)
         total_rpk = float((t_total / np.maximum(self._t_eff_len_output, 1.0)).sum())
         tpm = (rpk / total_rpk * 1e6) if total_rpk > 0 else np.zeros_like(rpk)
-        rpk_em = counts / np.maximum(em_eff, 1.0)
-        total_rpk_em = float((t_total / np.maximum(self._t_eff_len_em, 1.0)).sum())
-        tpm_em_exposure = (
-            (rpk_em / total_rpk_em * 1e6) if total_rpk_em > 0 else np.zeros_like(rpk_em)
-        )
 
         df = pd.DataFrame(
             {
                 "nrna_id": t_df["t_id"].values[idx],
                 "effective_length": eff,
                 "em_effective_length": em_eff,
-                "em_exposure_factor": em_exposure_factor,
                 "locus_id": self.locus_id_per_transcript[idx],
                 "is_synthetic": is_synthetic[idx],
                 "n_contributing_transcripts": n_contrib,
@@ -790,7 +746,6 @@ class AbundanceEstimator:
                 "n_mrna": n_mrna_children,
                 "mrna_count": mrna_children_count,
                 "tpm": tpm,
-                "tpm_em_exposure": tpm_em_exposure,
             }
         )
         df = df.sort_values("nrna_id").reset_index(drop=True)
