@@ -4,20 +4,21 @@ A single feed-forward pass: no EM loop, no density->deconv->density feedback. Th
 (``rna_sense_frac``) is fit first and used to **strand-clean** the count density, so the global
 gDNA density (``gdna_density_global``) is read from clean gDNA, not gDNA + nascent RNA. Each node
 (every region and the two boundary sides) is then deconvolved into gDNA / RNA by the **joint**
-count x strand posterior; the global density and the per-node ``exposure`` are **derived** from
+count x strand posterior; the global density and the geometric gDNA length are **derived** from
 the aggregate::
 
     substrate
       -> strand balance (rna_sense_frac) -> strand-clean the count density (closed-form gDNA frac)
       -> node_gdna_density (count clue; density strand-cleaned by rna_sense_frac)
       -> deconv_regions / deconv_sides (joint count x strand)
-      -> derive (gdna_density_global, exposure, eff-len)
+      -> derive (gdna_density_global, gdna_geom_len)
 
 The strand clue cleans the global density (a hyperparameter) and also enters each node's joint
 deconv; the two are conditionally independent given ``(gdna_density_global, rna_sense_frac)`` and a
 node's ~1/N self-contribution to the global density is negligible (empirical Bayes). Deriving the
-global density and ``exposure`` from the aggregate -- not looping -- is what dissolved the old EM
-loop's sparse-data collapse. See ``docs/futureprs/acyclic_deconvolution_design.md``.
+global density from the aggregate -- not looping -- is what dissolved the old EM loop's sparse-data
+collapse. The per-region gDNA length contraction under capture is the IPR of the deconvolved gDNA
+mass, applied later in ``priors.assemble_priors``.
 """
 
 from __future__ import annotations
@@ -62,11 +63,11 @@ def calibrate(
     gdna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
 ) -> CalibrationResult:
-    """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global and exposure.
+    """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
-    Single feed-forward pass; see the module docstring for the data flow. ``gdna_density_global`` may
-    be ``0`` (a zero-gDNA library) and per-node ``exposure`` may be ``0`` (a pure-RNA node);
-    both are valid, graceful outputs — not failures.
+    Single feed-forward pass; see the module docstring for the data flow. ``gdna_density_global``
+    may be ``0`` (a zero-gDNA library) and a node's deconvolved gDNA mass may be ``0`` (a pure-RNA
+    node); both are valid, graceful outputs — not failures.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
 
@@ -171,7 +172,7 @@ def calibrate(
         n_grid=config.n_grid,
     )
 
-    # Derive gdna_density_global and per-node exposure (+ the exposure-weighted gDNA length).
+    # Derive gdna_density_global (QC scalar) and the geometric gDNA length.
     derived = derive(regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id)
 
     result = CalibrationResult(
@@ -181,9 +182,6 @@ def calibrate(
         mass_rna_left=left.rna_mass,
         mass_gdna_right=right.gdna_mass,
         mass_rna_right=right.rna_mass,
-        exposure_contained=derived.region_exposure,
-        exposure_left=derived.left_exposure,
-        exposure_right=derived.right_exposure,
         gdna_geom_len=derived.gdna_geom_len,
         gdna_boundary_len=boundary_eff_len,
         gdna_density_global=derived.gdna_density_global,

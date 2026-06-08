@@ -363,13 +363,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "prior_policy": prior_policy,
         "gdna_eff_len": {
             "em": _locus_series_summary("gdna_eff_len_em"),
-            "unweighted": _locus_series_summary("gdna_eff_len_unweighted"),
             "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
-        },
-        "em_exposure": {
-            "transcript_factor": _df_series_summary(quant_df, "em_exposure_factor"),
-            "gdna_factor": _locus_series_summary("gdna_exposure_factor"),
-            "gdna_eff_len_adjustment_ratio": _locus_series_summary("gdna_eff_len_adjustment_ratio"),
         },
         "fragment_length": fl_dict,
         "quantification": {

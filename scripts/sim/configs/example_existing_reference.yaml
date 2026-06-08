@@ -1,0 +1,103 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Rigel simulator — EXISTING-REFERENCE config (self-documented template)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Simulate RNA-seq reads from a reference you already have (FASTA + GTF), sweeping
+# a grid of conditions (gDNA rate × gDNA strand-overdispersion × nRNA × strand ×
+# capture). Use this when you have a real genome/annotation; for a *generated*
+# random mini-genome instead, see `example_suite.yaml`.
+#
+# Run:
+#   python scripts/sim/simulate_reads.py --config scripts/sim/configs/example_existing_reference.yaml
+# CLI flags override YAML: --genome --gtf --outdir --n-rna -j/--n-workers --no-oracle --verbose
+#
+# Every condition in the grid becomes one output dir:
+#   <outdir>/gdna_<lbl>[_od_<od>]_ss_<val>_nrna_<lbl>[_capture_<lbl>]/
+#     sim_R1.fq.gz  sim_R2.fq.gz  [sim_oracle.bam]  truth_*.tsv/json
+#   plus <outdir>/manifest.json (the machine-readable condition index).
+
+# ── Inputs ──────────────────────────────────────────────────────────────────
+genome: /path/to/genome.fa                 # indexed FASTA (run `samtools faidx` first)
+gtf: /path/to/annotation.gtf               # may be gzipped
+outdir: /scratch/$USER/rigel_sim/example
+transcript_filter: all                     # all | basic | mane | ccds
+                                           #   basic ≈ ~100k transcripts (faster, realistic)
+
+# ── Read simulation ─────────────────────────────────────────────────────────
+simulation:
+  n_rna_fragments: 1000000   # mature-RNA depth; nRNA and gDNA are ADDED on top of this
+  sim_seed: 42               # base RNG seed (per-condition seeds derive from it deterministically)
+  frag_mean: 250             # RNA fragment-length: truncated-normal mean (bp)
+  frag_std: 50               #   ... std
+  frag_min: 80               #   ... lower truncation
+  frag_max: 800              #   ... upper truncation
+  read_length: 150           # paired-end read length
+  error_rate: 0.0            # per-base substitution rate (0.0 = perfect reads)
+  n_workers: 4               # fork-based shards for read generation
+
+# ── Abundance model ─────────────────────────────────────────────────────────
+abundance:
+  mode: random               # random | file
+  seed: 42
+  # mode: random — per transcript: expressed ~ Bernoulli(frac_expressed), then
+  #   total_RNA ~ LogUniform(min, max). nRNA starts at 0 (set by the nrna sweep below).
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+  # mode: file — load abundances instead of sampling (auto-detected format):
+  #   salmon quant.sf (Name, TPM) | kallisto abundance.tsv (target_id, tpm)
+  #   sim TSV (transcript_id, mrna_abundance [, nrna_abundance]).
+  #   When the file supplies nrna_abundance, the nRNA sweep below is skipped.
+  # file: /path/to/quant.sf
+
+# ── gDNA contamination ──────────────────────────────────────────────────────
+# One condition per rate: n_gdna = round(rate × n_rna_fragments).
+gdna:
+  rates:       [0.0,  0.25,   1.0]         # multiples of the RNA depth
+  rate_labels: [none, gdna25, gdna100]     # path-safe labels (one per rate); omit to auto-name
+  frag_mean: 350             # gDNA fragment-length distribution (typically longer than RNA)
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+  # OPTIONAL extra sweep axis — gDNA strand overdispersion (intra-region sense/antisense
+  # skew around ½): 0.0 = exact 50/50 (Binomial); 0.14 ≈ 1/7 (the calibration prior level).
+  # Each value becomes its own condition (slug `_od_<value>`, never shown for od00).
+  # strand_overdispersions: [0.0, 0.14]
+  # strand_overdispersion_labels: [od00, od14]
+
+# ── Strand specificity ──────────────────────────────────────────────────────
+# Sense-fraction of RNA fragments: 0.99 ≈ stranded protocol, 0.50 = unstranded.
+strand_specificities: [0.99, 0.50]
+
+# ── Nascent RNA (additive spike-in) ─────────────────────────────────────────
+# Adds nRNA on top of mature RNA. Single-exon transcripts always get nRNA = 0.
+# Ignored when the abundance file already supplies nrna_abundance.
+nrna:
+  mode: additive_ratio       # additive_ratio | random_fraction
+  # additive_ratio — every expressed multi-exon transcript: nRNA = mRNA × ratio.
+  ratios: [0.0]              # one condition per ratio (0.0 = no nascent RNA)
+  ratio_labels: [none]
+  # random_fraction — spike a random subset instead (uncomment + switch mode):
+  # ratio_ranges: [[0.0, 0.0], [0.1, 1.0]]   # per-condition (min,max) for the per-tx draw
+  # ratio_labels: [none, mixed]
+  # eligible_fraction: 1.0    # fraction of expressed multi-exon tx eligible to be spiked
+  # seed: 42
+
+# ── Hybrid capture ──────────────────────────────────────────────────────────
+# Each `configs` entry is another grid axis; capture labels are paired (share the
+# abundance draw + per-condition seed, so only the capture weighting differs).
+# A fragment-start weight is off_target_weight + binding_per_base × best_probe_overlap.
+capture:
+  probe_format: auto         # auto | transcript (TSV: transcript_id start end, 0-based) | bed12
+  off_target_weight: 1.0     # baseline weight for every legal fragment start
+  binding_per_base: 10.0     # extra weight per overlapping probe base
+  gdna_split_penalty: 0.2    # multiplier for probes split by introns when projected to gDNA/pre-mRNA
+  min_overlap: 1             # min fragment/probe overlap (bp) to add capture weight
+  configs:
+    - {label: off, enabled: false}                 # capture-off arm
+    - {label: on,  probes: /path/to/panel.tsv}     # capture-on arm (provide a probe panel)
+    # - {label: bedpanel, probes: /path/panel.bed, probe_format: bed12, binding_per_base: 15.0}
+
+# ── Output ──────────────────────────────────────────────────────────────────
+oracle_bam: true             # also write a perfect name-sorted oracle BAM per condition
+verbose: true

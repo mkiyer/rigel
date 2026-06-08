@@ -4,7 +4,7 @@ The gDNA count exposure of a region or boundary — the genomic measure of fragm
 start-positions that produce the event — is a **pure geometric function of a
 fragment-length (FL) pmf**, identical for any species; only the FL distribution
 differs (the PR04b fairness note). Calibration applies these with the **gDNA** FL
-because gDNA is the density × exposure component (`gdna_density_global`, `exposure`); RNA is the observed
+because gDNA is the density-modelled component (`gdna_density_global`); RNA is the observed
 residual mass (doc 01 §9), so it consumes no modelled length.
 
 * **Region** of physical length ``L`` — a fragment is *contained* iff it fits, so

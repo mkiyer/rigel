@@ -116,8 +116,8 @@ python scripts/sim/simulate_suite.py \
 
 # Config-driven (CLI flags override the config)
 python scripts/sim/simulate_suite.py \
-  --config scripts/sim/configs/hybrid_capture_500kb.yaml \
-  --outdir /scratch/$USER/rigel_sim/hybrid_capture_500kb
+  --config scripts/sim/configs/gdna_benchmark_5mb.yaml \
+  --outdir /scratch/$USER/rigel_sim/gdna_benchmark_5mb
 ```
 
 ### Output layout
@@ -177,7 +177,7 @@ condition, so the suite can stress the gDNA strand model.
 When you already have a reference + annotation, simulate a condition grid from it via a YAML config:
 
 ```bash
-python scripts/sim/simulate_reads.py --config scripts/sim/configs/sim_example.yaml
+python scripts/sim/simulate_reads.py --config scripts/sim/configs/example_existing_reference.yaml
 ```
 
 ```yaml
@@ -283,8 +283,11 @@ Supported probe formats (existing-reference workflow): `transcript` (TSV `transc
 0-based half-open transcript coords), `bed12` (genomic BED12, projected onto transcript/pre-mRNA/
 gDNA spaces), `auto` (detect).
 
-Checked-in suite configs: `scripts/sim/configs/hybrid_capture_500kb.yaml` (500 kb, 10 genes),
-`hybrid_capture_500kb_od.yaml` (+ the overdispersion axis), `hybrid_capture_5mb.yaml` (5 Mb).
+Checked-in configs: `scripts/sim/configs/example_suite.yaml` (self-documented suite template,
+every knob commented), `gdna_benchmark_5mb.yaml` (the 5 Mb / 100-gene gDNA-vs-RNA benchmark),
+and `toy_1mb_2exon_capture_sweep.yaml` (exact-geometry effective-length study; paired with
+`scripts/sim/build_toy_2exon_reference.py`). For the existing-reference workflow see
+`example_existing_reference.yaml`.
 
 ---
 
@@ -311,7 +314,7 @@ The canonical evaluator builds the index, runs `rigel quant` on each condition's
 reports pool-level + per-fragment gDNA-vs-RNA classification accuracy against truth:
 
 ```bash
-SUITE=/scratch/$USER/rigel_sim/hybrid_capture_500kb
+SUITE=/scratch/$USER/rigel_sim/gdna_benchmark_5mb
 python scripts/sim/bench_calibration.py --sim-base "$SUITE" --run --force
 # → $SUITE/bench_calibration_metrics.tsv + bench_calibration_report.txt
 ```

@@ -2,7 +2,7 @@
 
 Acyclic by construction: the gDNA density is read **directly** from count-observable nodes
 (where fragments are gDNA by construction) and **swept** to every other node. It never
-consults the global ``gdna_density_global * exposure * L`` product, so there is no
+consults a global ``gdna_density_global * L`` product, so there is no
 density->deconv->density feedback loop.
 
 Count-observability is a property of the region **signature** (4-bit exon/intron ± flags):

@@ -1,0 +1,79 @@
+# ════════════════════════════════════════════════════════════════════════
+# gDNA-vs-RNA deconvolution benchmark suite — 5 Mb random mini-genome.
+#
+# Purpose: pure gDNA-vs-RNA stress test (ZERO nascent RNA) ahead of release.
+#
+# Reference (generated once, shared by every condition):
+#   ~5 Mb genome, ~100 genes, 1-10 exons/gene, 1-5 isoforms/gene
+#   (isoforms differ in splicing; single-exon genes -> 1 isoform).
+#
+# Condition grid = 5 gDNA levels x 2 strand-specificities x 2 capture = 20 runs:
+#   gDNA:   0%, 25%, 100% (1:1), 400% (4:1), 1000% (10:1)  on 1,000,000 RNA reads
+#   strand: unstranded (ss=0.50) and stranded (ss=0.99)
+#   capture: hybrid-capture off and on
+#   nRNA:   none (0.0)  -- deliberately zero for this benchmark
+#
+# Usage:
+#   python scripts/sim/simulate_suite.py \
+#     --config scripts/sim/configs/gdna_benchmark_5mb.yaml
+#
+# Override the outdir for production runs:
+#   python scripts/sim/simulate_suite.py \
+#     --config scripts/sim/configs/gdna_benchmark_5mb.yaml \
+#     --outdir /scratch/$USER/rigel_sim/gdna_benchmark_5mb
+# ════════════════════════════════════════════════════════════════════════
+
+suite:
+  outdir: /Users/mkiyer/Downloads/rigel_runs/gdna_benchmark_5mb
+  genome_length: 5000000      # ~5 Mb
+  n_genes: 100                # ~100 genes
+  min_isoforms: 1
+  max_isoforms: 5             # 1-5 isoforms/gene
+  target_transcripts: null    # null => uniform isoform count in [min, max]
+  antisense_fraction: 0.0     # clean gDNA-vs-RNA test: no antisense overlaps
+  seed: 20260608
+  profile: smoke              # nRNA = none only (overridden by nrna: below anyway)
+
+simulation:
+  n_rna_fragments: 1000000    # 1,000,000 mature RNA fragments per condition
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 12
+
+abundance:
+  seed: 20260609
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+# gDNA contamination as a multiple of the 1,000,000 RNA reads.
+gdna:
+  rates:       [0.0,  0.25,   1.0,     4.0,     10.0]
+  rate_labels: [none, gdna25, gdna100, gdna400, gdna1000]
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+strand_specificities: [0.99, 0.50]   # stranded + unstranded
+
+nrna:
+  ratios: [0.0]            # ZERO nascent RNA for this benchmark
+  ratio_labels: [none]
+
+capture:
+  probe_length: 120
+  probe_density: 0.5
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5         # design probes for 50% of eligible transcripts

@@ -536,6 +536,11 @@ def _populate_em_annotations(
     frag_ids = np.concatenate([p.frag_ids for p in batch_parts])
     frag_class = np.concatenate([p.frag_class for p in batch_parts])
     splice_type_arr = np.concatenate([p.splice_type for p in batch_parts])
+    # True per-fragment locus-subproblem id (so in-locus gDNA winners keep their
+    # locus in the ZL tag, instead of collapsing to -1 via the winning transcript).
+    locus_ids = np.concatenate(
+        [np.full(p.frag_ids.shape[0], p.locus_id, dtype=np.int32) for p in batch_parts]
+    )
 
     n = len(frag_ids)
     best_tid = np.asarray(out_winner_tid, dtype=np.int32)
@@ -570,6 +575,7 @@ def _populate_em_annotations(
         frag_classes=frag_class.view(np.int8),
         n_candidates=n_cand,
         splice_types=splice_type_arr,
+        locus_ids=locus_ids,
     )
 
 
@@ -742,7 +748,7 @@ def quant_from_buffer(
         return estimator, calibration
 
     priors = assemble_priors(
-        calibration, region_arrays, multi_loci, prior_weight=em_config.prior_weight
+        calibration, region_arrays, multi_loci
     )
     partitions = partition_and_free(em_data, multi_loci)
     _run_locus_em_partitioned(

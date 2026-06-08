@@ -104,7 +104,6 @@ def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
 
     report = analyze_postfix_acceptance(tmp_path, [condition], assignment_rows)
 
-    assert "rho_ex/rho_ig" in report
     assert "nRNA in nrna_none" in report
     assert "gDNA->RNA leak" in report
     assert "FAIL" not in report

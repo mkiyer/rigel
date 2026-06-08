@@ -61,14 +61,6 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
-    prior_weight: float = 1.0
-    """Multiplier on the calibration-derived per-locus prior (the κ of
-    ``docs/acc_caljointmodel/prs/PR06_integrate.md`` §I.2). ``1.0`` (default)
-    means the prior carries exactly the deconvolved per-locus gDNA/RNA mass;
-    ``< 1`` down-weights the prior vs the fragment likelihoods, ``> 1`` up-weights.
-    Scales gDNA and RNA pseudocounts equally, so it changes the prior's *strength*
-    but not the gDNA-vs-RNA ratio — it does not shift the leak/siphon balance."""
-
     gdna_em_llr_bias: float = 0.0
     """Global gDNA false-positive-aversion dial — a pure log-odds (LLR) bias added
     to the gDNA component's per-fragment weight in the locus EM (``0.0`` = neutral,
@@ -76,20 +68,16 @@ class EMConfig:
     the odds factor ``exp(gdna_em_llr_bias)``: it trades the FP-deleterious gDNA→RNA
     *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
     say "only call a fragment RNA when it is sufficiently more likely RNA than
-    gDNA." Unlike ``prior_weight`` it shifts the ratio; and where the calibration
-    ``gdna_strand_llr_bias`` tilts the *strand deconvolution* (same nats-of-log-odds
-    concept), this reaches the *EM* assignment directly (the two are decoupled).
-    Units: nats of log-odds (e.g. ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence)."""
+    gDNA." Where the calibration ``gdna_strand_llr_bias`` tilts the *strand
+    deconvolution* (same nats-of-log-odds concept), this reaches the *EM* assignment
+    directly (the two are decoupled). Units: nats of log-odds (e.g. ``log(9) ≈ 2.20``
+    requires ~9:1 RNA evidence)."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
-        if not (0.0 <= float(self.prior_weight) < float("inf")):
-            raise ValueError(
-                f"EMConfig.prior_weight must be finite and >= 0; got {self.prior_weight}."
-            )
         if not math.isfinite(float(self.gdna_em_llr_bias)):
             raise ValueError(
                 f"EMConfig.gdna_em_llr_bias must be finite; got {self.gdna_em_llr_bias}."

@@ -283,8 +283,14 @@ class AnnotationTable:
         frag_classes: np.ndarray,
         n_candidates: np.ndarray,
         splice_types: np.ndarray,
+        locus_ids: np.ndarray | None = None,
     ) -> None:
-        """Append multiple annotation rows in batch."""
+        """Append multiple annotation rows in batch.
+
+        ``locus_ids`` is the true per-fragment locus-subproblem id (from the EM
+        partition). When omitted, ``locus_id`` stays at its -1 default and is
+        filled later from the winning transcript by :func:`write_annotated_bam`.
+        """
         n = len(frag_ids)
         if n == 0:
             return
@@ -304,6 +310,8 @@ class AnnotationTable:
         self.frag_class[start:end] = frag_classes
         self.n_candidates[start:end] = n_candidates
         self.splice_type[start:end] = splice_types
+        if locus_ids is not None:
+            self.locus_id[start:end] = locus_ids
 
         self.frag_id_to_row.update(
             zip(frag_ids.tolist(), range(start, end))
@@ -427,15 +435,20 @@ def write_annotated_bam(
     # Slice annotation arrays to populated size
     n = annotations.size
 
-    # Populate locus_id from best_tid → locus_id_per_transcript
+    # Locus id (ZL): prefer the true per-fragment locus subproblem stamped during
+    # the EM scatter (which correctly carries in-locus gDNA winners), and only fall
+    # back to the winning transcript's locus for rows still unset (-1) — e.g. the
+    # deterministic unambiguous-mRNA path that bypasses the EM partition. True
+    # intergenic gDNA (never in any locus) stays -1.
     if locus_id_per_transcript is not None:
         best_tid = annotations.best_tid[:n]
-        valid = best_tid >= 0
-        annotations.locus_id[:n] = np.where(
-            valid,
+        from_tid = np.where(
+            best_tid >= 0,
             locus_id_per_transcript[np.clip(best_tid, 0, None)],
             -1,
         )
+        current = annotations.locus_id[:n]
+        annotations.locus_id[:n] = np.where(current >= 0, current, from_tid)
 
     t_ids = list(index.t_df["t_id"].values)
     g_ids = list(index.g_df["g_id"].values)

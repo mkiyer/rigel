@@ -334,8 +334,7 @@ calibration: R=200k iters=6  rho_0=0.0012 phi=0.23 rho_d_BB=0.018 rho_r_BB=0.005
 
 Per-iteration `logger.debug` with mass-change diagnostic.
 
-No flag histograms. No fit_status enums. Rich diagnostics live in
-`scripts/debug/dump_calibration_state.py`.
+No flag histograms. No fit_status enums.
 
 ## 11. Backward compatibility
 

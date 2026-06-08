@@ -49,7 +49,7 @@ Usage
 -----
 ::
 
-    python scripts/sim/simulate_reads.py --config scripts/sim/configs/sim_example.yaml
+    python scripts/sim/simulate_reads.py --config scripts/sim/configs/example_existing_reference.yaml
 
 Output
 ------

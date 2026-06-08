@@ -1,0 +1,98 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Rigel simulator — SUITE config (self-documented template)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Generate a RANDOM synthetic mini-genome (genome + GTF + optional capture probes)
+# AND simulate a grid of conditions on it: gDNA rate × gDNA strand-overdispersion ×
+# nRNA × strand-specificity × capture. This is the workhorse for controlled
+# benchmarks with known ground truth. To simulate from a reference you already
+# have (FASTA + GTF), use `example_existing_reference.yaml` instead.
+#
+# Run:
+#   python scripts/sim/simulate_suite.py --config scripts/sim/configs/example_suite.yaml
+# Explicit CLI flags override the matching config value, e.g.:
+#   ... --outdir /scratch/$USER/rigel_sim/mysuite -j 8 --reference-only
+#
+# Outputs:
+#   <outdir>/reference/{genome.fa[.fai], genes.gtf, capture_probes_*.tsv|.bed}
+#   <outdir>/gdna_<lbl>[_od_<od>]_ss_<val>_nrna_<lbl>[_capture_<lbl>]/
+#       sim_R1.fq.gz  sim_R2.fq.gz  sim_oracle.bam  truth_*.tsv/json
+#   <outdir>/manifest.json   (machine-readable condition index)
+
+# ── Reference generation (random mini-genome) ───────────────────────────────
+suite:
+  outdir: /scratch/$USER/rigel_sim/example_suite
+  genome_length: 5000000     # bp (single synthetic chromosome)
+  n_genes: 100               # approximate primary gene count
+  min_isoforms: 1            # isoforms/gene drawn uniformly in [min, max] when ...
+  max_isoforms: 5            # ... target_transcripts is null
+  target_transcripts: null   # null ⇒ uniform [min,max]; an int ⇒ exponential-ish, scaled to that total
+  antisense_fraction: 0.0    # fraction of genes given an antisense overlapping partner (0..1)
+  seed: 20260608             # master seed (reference + per-condition seeds derive from it)
+  profile: smoke             # default nRNA axis: smoke = [none]; full = [none,low,med,high].
+                             #   Overridden by the explicit `nrna:` block below.
+  # conditions: [gdna_none_ss_0.99_nrna_none]   # optional: only generate these named dirs
+  # reference_only: false    # write just reference/ (genome+GTF+probes) and stop
+  # skip_existing: false     # skip conditions whose outputs already exist
+
+# ── Read simulation ─────────────────────────────────────────────────────────
+simulation:
+  n_rna_fragments: 1000000   # mature-RNA depth per condition; nRNA + gDNA added on top
+  frag_mean: 250             # RNA fragment-length truncated-normal: mean (bp)
+  frag_std: 50               #   ... std
+  frag_min: 80               #   ... lower truncation
+  frag_max: 800              #   ... upper truncation
+  read_length: 150
+  error_rate: 0.0            # per-base substitution rate (0.0 = perfect)
+  n_workers: 4               # fork-based read-generation shards
+
+# ── Abundance model (log-uniform random) ────────────────────────────────────
+abundance:
+  seed: 20260609
+  min: 1.0                   # per expressed transcript: total_RNA ~ LogUniform(min, max)
+  max: 10000.0
+  frac_expressed: 0.5        # fraction of transcripts expressed (Bernoulli)
+
+# ── gDNA contamination ──────────────────────────────────────────────────────
+# One condition per rate: n_gdna = round(rate × n_rna_fragments).
+# Defaults if omitted: rates [0,0.1,0.5,1,2], labels [none,low,med,equal,high].
+gdna:
+  rates:       [0.0,  0.25,   1.0]
+  rate_labels: [none, gdna25, gdna100]   # path-safe labels (one per rate)
+  frag_mean: 350             # gDNA fragment-length (typically longer than RNA)
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+  # OPTIONAL extra axis — gDNA strand overdispersion (sense/antisense skew around ½):
+  # 0.0 = Binomial 50/50; 0.14 ≈ 1/7 (calibration prior level). Each value → its own
+  # condition (slug `_od_<value>`, never shown for od00).
+  # strand_overdispersions: [0.0, 0.14]
+  # strand_overdispersion_labels: [od00, od14]
+
+# ── Strand specificity ──────────────────────────────────────────────────────
+strand_specificities: [0.99, 0.50]   # 0.99 ≈ stranded, 0.50 = unstranded
+
+# ── Nascent RNA (additive spike-in) ─────────────────────────────────────────
+# nRNA = mRNA × ratio for expressed multi-exon transcripts (single-exon ⇒ 0).
+# One condition per ratio. Overrides the profile's nRNA axis.
+nrna:
+  ratios: [0.0]              # 0.0 = no nascent RNA
+  ratio_labels: [none]
+
+# ── Hybrid capture ──────────────────────────────────────────────────────────
+# Probes are DESIGNED from the synthetic transcriptome (no panel file needed).
+# Each `configs` entry is another grid axis; capture arms are paired (share the
+# abundance draw + per-condition seed → only the weighting differs).
+# Fragment-start weight = off_target_weight + binding_per_base × best_probe_overlap.
+capture:
+  probe_length: 120          # designed probe length (transcript coords)
+  probe_density: 0.5         # fraction of the max non-overlapping probe tiling to emit (0..1)
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2    # multiplier for probes split by introns (gDNA/pre-mRNA projection)
+  min_overlap: 1
+  configs:
+    - {label: off, enabled: false}        # capture-off arm
+    - {label: on,  fraction: 0.5}         # capture-on arm: design probes for 50% of eligible tx
+    # Provide your own panel instead of designing one:
+    # - {label: panel, probes: /path/to/panel.bed, probe_format: bed12}

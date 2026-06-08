@@ -1,13 +1,12 @@
 """CalibrationResult — the acyclic calibrator's output schema.
 
 Per-region deconvolved gDNA / RNA mass across the region's three nodes (contained
-plus the two boundary sides), the per-node exposure ``exposure`` stored explicitly for
-QC/diagnostics, the gDNA component's exposure-weighted effective length, and the two
-library scalars (``gdna_density_global``, ``rna_sense_frac``). The calibrator is a single feed-forward pass,
-so there are **no** convergence diagnostics. ``__post_init__`` enforces the intrinsic
-invariants (shapes, finiteness, sign); mass conservation against the raw fragment
-counts is checked by the calibrator / tests (it needs the substrate, which the result
-does not carry).
+plus the two boundary sides), the gDNA component's geometric effective length, and the
+two library scalars (``gdna_density_global``, ``rna_sense_frac``). The calibrator is a
+single feed-forward pass, so there are **no** convergence diagnostics. ``__post_init__``
+enforces the intrinsic invariants (shapes, finiteness, sign); mass conservation against the
+raw fragment counts is checked by the calibrator / tests (it needs the substrate, which the
+result does not carry).
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
 
 @dataclass(frozen=True, slots=True)
 class CalibrationResult:
-    """Per-region deconvolved mass + per-node exposure + library scalars (acyclic)."""
+    """Per-region deconvolved mass + geometric gDNA length + library scalars (acyclic)."""
 
     # --- deconvolved mass across the region's 3 nodes (float64[R]) ---
     mass_gdna_contained: np.ndarray
@@ -47,15 +46,10 @@ class CalibrationResult:
     mass_gdna_right: np.ndarray  # left side of the right boundary
     mass_rna_right: np.ndarray
 
-    # --- per-node exposure, stored explicitly for QC / diagnostics (float64[R]) ---
-    # exposure < 1 depleted, = 1 uniform, > 1 enriched; 0 where a node carries no gDNA.
-    exposure_contained: np.ndarray
-    exposure_left: np.ndarray
-    exposure_right: np.ndarray
-
-    # --- gDNA component geometric effective length: Σ_node L_node (exposure-free, Option A) ---
-    # Exposure is carried in the deconvolved gDNA mass, NOT here — so this length is
-    # well-defined even where calibration saw no reads, and never collapses.
+    # --- gDNA component geometric effective length: Σ_node L_node (capture-independent) ---
+    # The per-region contraction under capture is the IPR of the deconvolved gDNA *mass*,
+    # applied downstream in assemble_priors; this length stays geometric, so it is
+    # well-defined even where calibration saw no reads and never collapses.
     gdna_geom_len: np.ndarray  # float64[R]
 
     # --- directional boundary effective length 𝓔(L)=E[min(ℓ,L)] per region (geometry) ---
@@ -85,9 +79,6 @@ class CalibrationResult:
             "mass_rna_left",
             "mass_gdna_right",
             "mass_rna_right",
-            "exposure_contained",
-            "exposure_left",
-            "exposure_right",
             "gdna_geom_len",
             "gdna_boundary_len",
         ):

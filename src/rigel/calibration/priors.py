@@ -1,8 +1,8 @@
 """assemble_priors — bridge from CalibrationResult to the per-locus EM prior (PR 6).
 
-Turns the calibration's per-region deconvolved mass + exposure into the **two
+Turns the calibration's per-region deconvolved mass + geometric length into the **two
 per-locus Dirichlet scalars** the locus EM consumes — ``rna_prior_count`` and
-``gdna_prior_count`` — plus the per-locus gDNA-component effective length.
+``gdna_prior_count`` — plus the per-locus gDNA-component effective length (the IPR).
 
 The prior's only job is to split each locus's unspliced fragments between gDNA
 and RNA; it does **not** attribute RNA mass to individual transcripts (that is
@@ -34,7 +34,7 @@ class LocusPriors:
 
     gdna_prior_count: np.ndarray  # gDNA-component Dirichlet pseudocount
     rna_prior_count: np.ndarray  # RNA-group Dirichlet pseudocount (the EM splits it by evidence)
-    gdna_eff_len: np.ndarray  # exposure-weighted physical length of the gDNA component
+    gdna_eff_len: np.ndarray  # IPR-contracted effective length of the gDNA component
 
 
 def _project_regions_to_loci(
@@ -111,10 +111,11 @@ def _transport_boundary_flux(
 ) -> np.ndarray:
     """Length-bias-free boundary-flux transport of per-region gDNA mass.
 
-    Each internal boundary's pooled gDNA mass is re-attributed to its two sides ∝ ``exposure·𝓔``
-    — exposure (density ``g/L``, length-bias-free) × the directional boundary effective
-    length ``𝓔(L)=E[min(ℓ,L)]`` (``boundary_capacity``). This moves capture smear off the unexposed
-    (e.g. intronic) side and onto the probed side that generated it. Iterates until the
+    Each internal boundary's pooled gDNA mass is re-attributed to its two sides ∝ ``density_ratio·𝓔``
+    — the local gDNA density ratio (``g/L`` over the library average, length-bias-free) × the
+    directional boundary effective length ``𝓔(L)=E[min(ℓ,L)]`` (``boundary_capacity``). This moves
+    capture smear off the depleted (e.g. intronic) side and onto the probed side that generated it.
+    Iterates until the
     total mass moved is sub-count (< 1 fragment-equivalent), capped at ``max_iter``; total
     mass is conserved (ref-edge / cross-ref sides stay in place). See
     docs/futureprs/phase6_boundary_flux_transport_plan.md.
@@ -133,10 +134,10 @@ def _transport_boundary_flux(
     prev = g
     for _ in range(max_iter):
         gdna_density_global = g.sum() / total_len if total_len > 0.0 else 0.0
-        exposure = np.where(
+        density_ratio = np.where(
             gdna_density_global > 0.0, (g / length) / max(gdna_density_global, 1e-12), 1.0
         )
-        w = exposure * boundary_capacity
+        w = density_ratio * boundary_capacity
         pooled = right[:-1] + left[1:]  # boundary (i,i+1) pooled gDNA mass
         denom = w[:-1] + w[1:]
         ok = same & (denom > 0.0)
@@ -162,17 +163,15 @@ def assemble_priors(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
     multi_loci: "list[MultiLocus]",
-    *,
-    prior_weight: float,
 ) -> LocusPriors:
     """Build the per-locus EM prior from the acyclic calibration result.
 
     Boundary-crossing gDNA is first re-attributed to its origin region by the length-bias-free
-    boundary-flux transport (exposure * boundary_capacity); the transported per-region gDNA
+    boundary-flux transport (density_ratio * boundary_capacity); the transported per-region gDNA
     (``gdna_region``) and RNA (``rna_region``) project to loci by genomic-overlap ``share``::
 
-        gdna_prior_count = prior_weight * Σ_r share * gdna_region    (deconvolved gDNA count)
-        rna_prior_count  = prior_weight * Σ_r share * rna_region     (deconvolved RNA count)
+        gdna_prior_count = Σ_r share * gdna_region    (deconvolved gDNA count)
+        rna_prior_count  = Σ_r share * rna_region     (deconvolved RNA count)
         gdna_eff_len     = (G+1)² / [ Σ share*(gdna²/geom) + (2G+1)/span ],  G = Σ share*gdna
                            (capped at span)
 
@@ -199,7 +198,7 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # Transport uses the physical region length for its length-bias-free density (exposure); the
+    # Transport uses the physical region length for its length-bias-free density ratio; the
     # gdna_support_len uses the FL-aware gDNA support E_r = gdna_geom_len (contained + boundary crossings
     # ≈ R + L̄) — the bases a gDNA fragment can actually overlap, not the bare region length.
     length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
@@ -252,10 +251,9 @@ def assemble_priors(
         smoothed_support = support_locus + (2.0 * gdna_locus + 1.0) / safe_span
         eff_len = np.minimum((gdna_locus + 1.0) ** 2 / smoothed_support, span)
 
-    w = float(prior_weight)
     return LocusPriors(
-        gdna_prior_count=w * gdna_locus,
-        rna_prior_count=w * proj["rna"],
+        gdna_prior_count=gdna_locus,
+        rna_prior_count=proj["rna"],
         gdna_eff_len=np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR),
     )
 

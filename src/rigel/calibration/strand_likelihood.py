@@ -58,7 +58,7 @@ def strand_loglik(
     ``g² + (1−g)²`` scaling depends on ``gdna_frac``) — an unstranded node is uninformative. Each
     component's excess variance uses its own mean ``μ_c(1−μ_c)``, consistent with the moment fit in
     :mod:`gdna_strand`; the normal-moment vs exact-mixture discrepancy is small and ~constant in
-    ``N`` (see ``scripts/debug/strand_ll_study.py``).
+    ``N``.
     """
     n = float(sense) + float(antisense)
     p = 0.5 * gdna_frac + rna_sense_frac * (1.0 - gdna_frac)

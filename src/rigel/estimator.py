@@ -848,9 +848,6 @@ class AbundanceEstimator:
             "partial_coverage_region_mass",
             "gdna_eff_len_em",
             "gdna_eff_len_per_bp",
-            "gdna_eff_len_unweighted",
-            "gdna_exposure_factor",
-            "gdna_eff_len_adjustment_ratio",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -907,11 +904,6 @@ class AbundanceEstimator:
             partial_coverage_region_mass = float(r.get("partial_coverage_region_mass", 0.0))
             gdna_eff_len_em = float(r.get("gdna_eff_len_em", r.get("gdna_eff_len", 1.0)))
             gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
-            gdna_eff_len_unweighted = float(r.get("gdna_eff_len_unweighted", gdna_eff_len_em))
-            gdna_exposure_factor = float(r.get("gdna_exposure_factor", 1.0))
-            gdna_eff_len_adjustment_ratio = float(
-                r.get("gdna_eff_len_adjustment_ratio", gdna_exposure_factor)
-            )
             rows.append(
                 {
                     "locus_id": lid,
@@ -935,9 +927,6 @@ class AbundanceEstimator:
                     "partial_coverage_region_mass": partial_coverage_region_mass,
                     "gdna_eff_len_em": gdna_eff_len_em,
                     "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
-                    "gdna_eff_len_unweighted": gdna_eff_len_unweighted,
-                    "gdna_exposure_factor": gdna_exposure_factor,
-                    "gdna_eff_len_adjustment_ratio": gdna_eff_len_adjustment_ratio,
                 }
             )
         return pd.DataFrame(rows, columns=cols)
